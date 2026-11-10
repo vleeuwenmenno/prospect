@@ -8,5 +8,6 @@
   <ItemGroup Condition="'$(AssemblyName)' == 'prospect'">
     <Content Include="$(MSBuildThisFileDirectory)../assets/fonts/**/*" LinkBase="assets/fonts" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="$(MSBuildThisFileDirectory)../assets/branding/**/*" LinkBase="assets/branding" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(MSBuildThisFileDirectory)../assets/shaders/**/*" LinkBase="assets/shaders" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -50,19 +50,31 @@ internal sealed unsafe class UiPlatform : IDisposable
         platform.Platform_SetClipboardTextFn = (nint)(delegate* unmanaged[Cdecl]<nint, byte*, void>)&SetClipboard;
 
         _onKey = OnKey;
-        _onChar = (_, codepoint) => ImGui.GetIO().AddInputCharacter(codepoint);
+        _onChar = (_, codepoint) =>
+        {
+            if (!_devices.Muted)
+                ImGui.GetIO().AddInputCharacter(codepoint);
+        };
         _onMouseButton = (_, button, action, _) =>
         {
-            if ((int)button < 5)
+            if ((int)button < 5 && !_devices.Muted)
                 ImGui.GetIO().AddMouseButtonEvent((int)button, action == GlfwButtonAction.Press);
         };
-        _onCursorPos = (_, position) => ImGui.GetIO().AddMousePosEvent((float)position.X, (float)position.Y);
+        _onCursorPos = (_, position) =>
+        {
+            if (!PointerCaptured && !_devices.Muted)
+                ImGui.GetIO().AddMousePosEvent((float)position.X, (float)position.Y);
+        };
         _onCursorEnter = (_, entered) =>
         {
             if (!entered)
                 ImGui.GetIO().AddMousePosEvent(-float.MaxValue, -float.MaxValue);
         };
-        _onScroll = (_, offset) => ImGui.GetIO().AddMouseWheelEvent((float)offset.X, (float)offset.Y);
+        _onScroll = (_, offset) =>
+        {
+            if (!_devices.Muted)
+                ImGui.GetIO().AddMouseWheelEvent((float)offset.X, (float)offset.Y);
+        };
         _onFocus = (_, focus) => ImGui.GetIO().AddFocusEvent(focus == GlfwFocusEvent.GainFocus);
 
         window.OnKey += _onKey;
@@ -72,6 +84,25 @@ internal sealed unsafe class UiPlatform : IDisposable
         window.OnCursorEnter += _onCursorEnter;
         window.OnScroll += _onScroll;
         window.OnFocus += _onFocus;
+    }
+
+    /// <summary>
+    /// True while the pointer is steering the ship instead of pointing at the interface. The interface then sees
+    /// no pointer at all, so nothing under the hidden cursor reacts.
+    /// </summary>
+    public bool PointerCaptured { get; private set; }
+
+    /// <summary>Hands the pointer to flight (hidden, unbounded, raw motion) or back to the interface.</summary>
+    public void SetPointerCaptured(bool captured)
+    {
+        if (captured == PointerCaptured)
+            return;
+        PointerCaptured = captured;
+        _window.SetInputMode(GlfwInputMode.Cursor, (int)(captured ? GlfwCursorMode.Disabled : GlfwCursorMode.Normal));
+        if (Glfw.RawMotionSupported())
+            _window.SetInputMode(GlfwInputMode.RawMouseMotion, captured ? 1 : 0);
+        if (captured)
+            ImGui.GetIO().AddMousePosEvent(-float.MaxValue, -float.MaxValue);
     }
 
     /// <summary>Updates ImGui's per-frame inputs. Call after window events have been polled.</summary>
@@ -110,9 +141,9 @@ internal sealed unsafe class UiPlatform : IDisposable
         _clipboardWindow = null;
     }
 
-    private static void OnKey(GlfwWindow window, GlfwKey key, int scancode, GlfwKeyAction action, GlfwModifier mods)
+    private void OnKey(GlfwWindow window, GlfwKey key, int scancode, GlfwKeyAction action, GlfwModifier mods)
     {
-        if (action == GlfwKeyAction.Repeat)
+        if (action == GlfwKeyAction.Repeat || _devices.Muted)
             return;
 
         var io = ImGui.GetIO();

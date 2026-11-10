@@ -17,6 +17,10 @@ internal sealed class ClientSettings
     public int WindowWidth { get; set; } = 1600;
     public int WindowHeight { get; set; } = 900;
     public float UiScale { get; set; } = 1.0f;
+
+    /// <summary>Pointer sensitivity for steering, as a multiplier of the default.</summary>
+    public float MouseSensitivity { get; set; } = 1.0f;
+    public bool InvertPitch { get; set; }
     public string PlayerName { get; set; } = "Prospector";
     public string LastHost { get; set; } = "127.0.0.1";
     public int LastPort { get; set; } = ProtocolInfo.DefaultPort;
@@ -66,6 +70,7 @@ internal sealed class ClientSettings
         WindowWidth = Math.Clamp(WindowWidth, 960, 16384);
         WindowHeight = Math.Clamp(WindowHeight, 540, 16384);
         UiScale = float.IsFinite(UiScale) ? Math.Clamp(UiScale, 0.75f, 2.0f) : 1.0f;
+        MouseSensitivity = float.IsFinite(MouseSensitivity) ? Math.Clamp(MouseSensitivity, 0.25f, 3.0f) : 1.0f;
         PlayerName = PlayerNames.Sanitize(PlayerName);
         LastHost = string.IsNullOrWhiteSpace(LastHost) ? "127.0.0.1" : LastHost.Trim();
         LastPort = LastPort is > 0 and <= ushort.MaxValue ? LastPort : ProtocolInfo.DefaultPort;

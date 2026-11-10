@@ -13,10 +13,18 @@ internal sealed partial class ScreenHost
     private static readonly int[] FrameCapValues = [0, 60, 120, 144, 240];
     private static readonly string[] UiScaleLabels = ["75%", "100%", "125%", "150%", "200%"];
     private static readonly float[] UiScaleValues = [0.75f, 1f, 1.25f, 1.5f, 2f];
-    private static readonly string[] ActionLabels = ["Menu / back", "Performance overlay", "Fullscreen", "Screenshot"];
+    private static readonly string[] SensitivityLabels = ["50%", "75%", "100%", "125%", "150%", "200%"];
+    private static readonly float[] SensitivityValues = [0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f];
+    private static readonly string[] AxisLabels = ["Strafe left / right", "Down / up", "Back / forward", "Pitch", "Yaw", "Roll"];
+    private static readonly string[] ActionLabels =
+    [
+        "Menu / back", "Performance overlay", "Fullscreen", "Screenshot", "Boost", "Dampeners on / off",
+        "Command view", "Galaxy map", "Halt (cancel order)", "Follow pod (command view)",
+    ];
 
     private readonly ImInputString _settingsName = new(ProtocolInfo.MaxNameBytes);
     private readonly string[] _bindingText = new string[(int)InputAction.Count];
+    private readonly string[] _axisText = new string[(int)InputAxis.Count];
 
     private void InitializeSettings()
     {
@@ -26,6 +34,14 @@ internal sealed partial class ScreenHost
             foreach (var binding in _app.Actions.Bindings((InputAction)i))
                 names.Add(binding.DisplayName);
             _bindingText[i] = names.Count > 0 ? string.Join("  /  ", names) : "Unbound";
+        }
+
+        for (var i = 0; i < _axisText.Length; i++)
+        {
+            var names = new List<string>();
+            foreach (var binding in _app.Actions.Bindings((InputAxis)i))
+                names.Add(binding.DisplayName);
+            _axisText[i] = names.Count > 0 ? string.Join("  /  ", names) : "Unbound";
         }
     }
 
@@ -49,7 +65,7 @@ internal sealed partial class ScreenHost
         var settings = _app.Settings;
         const float rowWidth = 520;
         var min = new float2(Kit.Px(96), _ui.DisplaySize.Y * 0.08f + Slide(fade));
-        var size = new float2(Kit.Px(rowWidth + Theme.Space6 * 2), Kit.Px(742));
+        var size = new float2(Kit.Px(rowWidth + Theme.Space6 * 2 + 14), Math.Min(Kit.Px(1240), _ui.DisplaySize.Y * 0.84f));
         BeginPanel("##settingspanel"u8, min, size);
 
         Kit.Caption("CONFIGURATION"u8, Theme.Accent);
@@ -91,6 +107,23 @@ internal sealed partial class ScreenHost
         }
 
         Kit.Space(Theme.Space5);
+        Kit.Caption("STEERING"u8);
+        Kit.Space(Theme.Space2);
+        var sensitivityIndex = 2;
+        for (var i = 0; i < SensitivityValues.Length; i++)
+        {
+            if (MathF.Abs(SensitivityValues[i] - settings.MouseSensitivity) < 0.01f)
+                sensitivityIndex = i;
+        }
+
+        if (Kit.Choice("Pointer sensitivity"u8, SensitivityLabels, ref sensitivityIndex, rowWidth))
+            settings.MouseSensitivity = SensitivityValues[sensitivityIndex];
+
+        var invert = settings.InvertPitch;
+        if (Kit.Toggle("Invert pitch"u8, ref invert, rowWidth))
+            settings.InvertPitch = invert;
+
+        Kit.Space(Theme.Space5);
         Kit.Caption("PROFILE"u8);
         Kit.Space(Theme.Space2);
         Kit.TextField("CALLSIGN"u8, "##callsign"u8, _settingsName, 300);
@@ -98,6 +131,9 @@ internal sealed partial class ScreenHost
         Kit.Space(Theme.Space5);
         Kit.Caption("CONTROLS"u8);
         Kit.Space(Theme.Space2);
+        BindingRow("Steer", "Pointer", rowWidth);
+        for (var i = 0; i < AxisLabels.Length; i++)
+            BindingRow(AxisLabels[i], _axisText[i], rowWidth);
         for (var i = 0; i < ActionLabels.Length; i++)
             BindingRow(ActionLabels[i], _bindingText[i], rowWidth);
         Kit.Space(Theme.Space3);

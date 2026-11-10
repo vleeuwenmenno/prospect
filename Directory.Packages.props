@@ -10,6 +10,7 @@
     <PackageVersion Include="Ahwoo.BRUTAL.Vulkan" Version="2026.10.3" />
     <PackageVersion Include="Ahwoo.BRUTAL.Vulkan.Abstractions" Version="2026.10.3" />
     <PackageVersion Include="Ahwoo.BRUTAL.Vulkan.Vma" Version="2026.10.3" />
+    <PackageVersion Include="Ahwoo.BRUTAL.ShaderC" Version="2026.10.3" />
     <PackageVersion Include="Ahwoo.BRUTAL.ImGui" Version="2026.10.3" />
     <PackageVersion Include="Ahwoo.BRUTAL.ImGui.Backends" Version="2026.10.3" />
     <PackageVersion Include="Ahwoo.BRUTAL.ImGui.FreeType" Version="2026.10.3" />

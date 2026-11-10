@@ -72,10 +72,16 @@ internal sealed class UiContext : IDisposable
 
     public float2 DisplaySize => ImGui.GetIO().DisplaySize;
 
+    /// <summary>True while the pointer is over an interface element that takes it, so the world must not react.</summary>
+    public bool PointerOverInterface => ImGui.GetIO().WantCaptureMouse;
+
     /// <summary>True while a text field has keyboard focus, so game key bindings must not fire.</summary>
     public bool WantsTextInput => ImGui.GetIO().WantTextInput;
 
     public void SetUserScale(float scale) => _userScale = scale;
+
+    /// <summary>Hands the pointer to flight controls or back to the interface.</summary>
+    public void SetPointerCaptured(bool captured) => _platform.SetPointerCaptured(captured);
 
     /// <summary>Makes a texture drawable by UI image calls.</summary>
     public ImTextureRef Register(Texture2D texture) =>

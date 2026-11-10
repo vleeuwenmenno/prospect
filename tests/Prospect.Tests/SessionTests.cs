@@ -5,9 +5,17 @@ using Prospect.Engine.Net;
 using Prospect.Game.Client;
 using Prospect.Game.Protocol;
 using Prospect.Game.Server;
+using Prospect.Game.World;
 using Xunit;
 
 namespace Prospect.Tests;
+
+internal static class TestSetup
+{
+    /// <summary>Sessions log through the shared categories, so logging is set up before any test runs.</summary>
+    [System.Runtime.CompilerServices.ModuleInitializer]
+    public static void Initialize() => Logs.Initialize(LogLevel.Warning);
+}
 
 public sealed class ProtocolTests
 {
@@ -50,15 +58,13 @@ public sealed class ProtocolTests
 /// <summary>Runs real servers and clients on their own threads, over the in-process link and over UDP.</summary>
 public sealed class SessionTests
 {
-    static SessionTests()
-    {
-        Logs.Initialize(LogLevel.Warning);
-    }
+    private static readonly GameContent Content = GameContent.Load();
+
 
     [Fact]
     public void LocalGameReachesActiveAndKeepsClocksInStep()
     {
-        using var session = GameSession.StartLocal(new ServerConfig { Name = "Test world", MaxPlayers = 1 }, "Tester");
+        using var session = GameSession.StartLocal(new ServerConfig { Name = "Test world", MaxPlayers = 1 }, Content, "Tester");
 
         var snapshot = WaitFor(session, s => s.State == SessionState.Active && s.RoundTripMs >= 0);
         Assert.Equal("Test world", snapshot.ServerName);
@@ -77,7 +83,7 @@ public sealed class SessionTests
     [Fact]
     public void LeavingEndsTheSessionAndFreesTheSlot()
     {
-        using var session = GameSession.StartLocal(new ServerConfig { MaxPlayers = 1 }, "Tester");
+        using var session = GameSession.StartLocal(new ServerConfig { MaxPlayers = 1 }, Content, "Tester");
         WaitFor(session, s => s.State == SessionState.Active);
 
         session.Client.RequestLeave();
@@ -91,11 +97,11 @@ public sealed class SessionTests
     public void RemoteClientsJoinOverUdpAndAFullServerTurnsTheExtraOneAway()
     {
         var port = (ushort)(41000 + Environment.ProcessId % 2000);
-        using var server = new ServerHost(new ServerConfig { Name = "UDP world", MaxPlayers = 2 }, RakNetTransport.Listen(port, 8));
+        using var server = new ServerHost(new ServerConfig { Name = "UDP world", MaxPlayers = 2 }, Content, RakNetTransport.Listen(port, 8));
         server.Start();
 
-        using var first = GameSession.Join("127.0.0.1", port, "One");
-        using var second = GameSession.Join("127.0.0.1", port, "Two");
+        using var first = GameSession.Join("127.0.0.1", port, Content, "One");
+        using var second = GameSession.Join("127.0.0.1", port, Content, "Two");
         var a = WaitFor(first, s => s.State == SessionState.Active && s.RoundTripMs >= 0);
         var b = WaitFor(second, s => s.State == SessionState.Active && s.PlayerCount == 2);
         Assert.Equal("UDP world", a.ServerName);
@@ -103,14 +109,14 @@ public sealed class SessionTests
         Assert.False(first.IsLocal);
         Assert.Equal(2, server.Status.PlayerCount);
 
-        using var third = GameSession.Join("127.0.0.1", port, "Three");
+        using var third = GameSession.Join("127.0.0.1", port, Content, "Three");
         var refused = WaitFor(third, s => s.State == SessionState.Ended);
         Assert.Equal(SessionEndReason.ServerFull, refused.EndReason);
 
         // A slot frees up when a player leaves, and the next client gets it.
         first.Client.RequestLeave();
         WaitUntil(() => server.Status.PlayerCount == 1);
-        using var fourth = GameSession.Join("127.0.0.1", port, "Four");
+        using var fourth = GameSession.Join("127.0.0.1", port, Content, "Four");
         WaitFor(fourth, s => s.State == SessionState.Active);
         Assert.Null(server.Fault);
     }
@@ -119,9 +125,9 @@ public sealed class SessionTests
     public void ClientLearnsWhenTheServerShutsDown()
     {
         var port = (ushort)(43000 + Environment.ProcessId % 2000);
-        var server = new ServerHost(new ServerConfig { MaxPlayers = 2 }, RakNetTransport.Listen(port, 8));
+        var server = new ServerHost(new ServerConfig { MaxPlayers = 2 }, Content, RakNetTransport.Listen(port, 8));
         server.Start();
-        using var client = GameSession.Join("127.0.0.1", port, "One");
+        using var client = GameSession.Join("127.0.0.1", port, Content, "One");
         WaitFor(client, s => s.State == SessionState.Active);
 
         server.Dispose();
@@ -134,7 +140,7 @@ public sealed class SessionTests
     public void GarbageFromAClientDoesNotHurtTheServer()
     {
         using var link = new LoopbackLink();
-        using var server = new ServerHost(new ServerConfig { MaxPlayers = 4 }, link.Server);
+        using var server = new ServerHost(new ServerConfig { MaxPlayers = 4 }, Content, link.Server);
         server.Start();
 
         var collector = new Collector();

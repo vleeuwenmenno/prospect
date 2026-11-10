@@ -23,8 +23,10 @@ internal sealed partial class ScreenHost
                 DrawSessionEnded(snapshot, fade);
                 break;
             default:
-                DrawHud(snapshot);
-                if (BackPressed())
+                if (snapshot.OwnHull < 0 || snapshot.Galaxy is null)
+                    break;
+                DrawWorldInterface(snapshot);
+                if (!_mapOpen && BackPressed())
                     _sessionMenuOpen = !_sessionMenuOpen;
                 if (_sessionMenuOpen)
                     DrawSessionMenu();
@@ -90,34 +92,6 @@ internal sealed partial class ScreenHost
             _app.LeaveSession();
 
         EndPanel();
-        EndRoot();
-    }
-
-    /// <summary>The always-visible session readout in the corner while in space.</summary>
-    private void DrawHud(SessionSnapshot snapshot)
-    {
-        BeginRoot("##hud"u8, ImGuiWindowFlags.NoInputs | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoFocusOnAppearing);
-        var draw = ImGui.GetWindowDrawList();
-        var min = new float2(Kit.Px(Theme.Space5), Kit.Px(Theme.Space5));
-        var size = new float2(Kit.Px(340), Kit.Px(74));
-        Kit.PanelFrame(draw, min, min + size);
-
-        var text = min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3));
-        draw.AddCircleFilled(text + new float2(Kit.Px(4), Kit.Px(9)), Kit.Px(4), Kit.Color(Theme.Good), 16);
-        Kit.Text(draw, _ui.SansMedium, Theme.FontBody, text + new float2(Kit.Px(16), 0), Theme.Text, snapshot.ServerName);
-        Kit.Text(
-            draw,
-            _ui.Mono,
-            Theme.FontCaption,
-            text + new float2(0, Kit.Px(30)),
-            Theme.TextDim,
-            snapshot.RoundTripMs < 0
-                ? Kit.F($"TICK {snapshot.ServerTick}   PLAYERS {snapshot.PlayerCount}   RTT --")
-                : Kit.F($"TICK {snapshot.ServerTick}   PLAYERS {snapshot.PlayerCount}   RTT {snapshot.RoundTripMs:0.0} MS")
-        );
-
-        if (!_sessionMenuOpen)
-            Kit.KeyHint(draw, new float2(Kit.Px(Theme.Space5), _ui.DisplaySize.Y - Kit.Px(56)), _app.Devices.PadConnected ? "START"u8 : "ESC"u8, "Menu"u8);
         EndRoot();
     }
 

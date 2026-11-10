@@ -1,0 +1,20 @@
+{
+  "sectorSize": 20000,
+  "starClasses": [
+    { "name": "Red dwarf", "color": [1.0, 0.45, 0.3], "weight": 5 },
+    { "name": "Orange star", "color": [1.0, 0.68, 0.42], "weight": 3 },
+    { "name": "Yellow star", "color": [1.0, 0.93, 0.78], "weight": 2.5 },
+    { "name": "White star", "color": [0.92, 0.95, 1.0], "weight": 1.2 },
+    { "name": "Blue giant", "color": [0.62, 0.76, 1.0], "weight": 0.5 }
+  ],
+  "nameSyllables": [
+    "Ve", "Kor", "Tal", "Ash", "Mer", "Dru", "Ix", "Sol", "Har", "Ny", "Bel", "Cas", "Oro", "Zan", "Th", "Ael",
+    "Mor", "Pra", "Lun", "Sig", "Var", "Ke", "Ond", "Rhe", "Ty", "Ulm", "Gan", "Fen", "Yar", "Qua"
+  ],
+  "asteroids": {
+    "emptySectorChance": 0.35,
+    "maxPerSector": 48,
+    "minRadius": 14,
+    "maxRadius": 260
+  }
+}

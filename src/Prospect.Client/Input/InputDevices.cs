@@ -32,7 +32,7 @@ internal sealed unsafe class InputDevices
         window.OnKey += (_, key, _, action, _) =>
         {
             var index = (int)key;
-            if ((uint)index >= KeyCount || action == GlfwKeyAction.Repeat)
+            if (Muted || (uint)index >= KeyCount || action == GlfwKeyAction.Repeat)
                 return;
             var down = action == GlfwKeyAction.Press;
             if (down && !_keys[index])
@@ -42,7 +42,7 @@ internal sealed unsafe class InputDevices
         window.OnMouseButton += (_, button, action, _) =>
         {
             var index = (int)button;
-            if ((uint)index >= MouseButtonCount)
+            if (Muted || (uint)index >= MouseButtonCount)
                 return;
             var down = action == GlfwButtonAction.Press;
             if (down && !_mouse[index])
@@ -51,13 +51,15 @@ internal sealed unsafe class InputDevices
         };
         window.OnCursorPos += (_, position) =>
         {
+            if (Muted)
+                return;
             if (_hasCursor)
                 MouseDelta += new float2((float)(position.X - _lastCursor.X), (float)(position.Y - _lastCursor.Y));
             _lastCursor = position;
             _hasCursor = true;
             MousePosition = new float2((float)position.X, (float)position.Y);
         };
-        window.OnScroll += (_, offset) => Scroll += (float)offset.Y;
+        window.OnScroll += (_, offset) => Scroll += Muted ? 0f : (float)offset.Y;
         window.OnFocus += (_, focus) =>
         {
             // Keys released while another window had focus never send a release; drop everything held.
@@ -67,6 +69,12 @@ internal sealed unsafe class InputDevices
             Array.Clear(_mouse);
         };
     }
+
+    /// <summary>
+    /// When set, every device is ignored. Scripted runs (benchmark, timed screenshot) set it so that whoever is
+    /// using the machine cannot steer them, and so they never take the pointer.
+    /// </summary>
+    public bool Muted { get; set; }
 
     public float2 MousePosition { get; private set; }
     public float2 MouseDelta { get; private set; }
@@ -88,6 +96,16 @@ internal sealed unsafe class InputDevices
 
     /// <summary>A stick axis in -1..1 with the deadzone removed, or a trigger in 0..1.</summary>
     public float PadAxis(GlfwGamepadAxis axis) => _padAxes[(int)axis];
+
+    /// <summary>
+    /// Forgets the last pointer position, so the jump the pointer makes when it is captured or released does not
+    /// register as movement.
+    /// </summary>
+    public void ResetPointer()
+    {
+        _hasCursor = false;
+        MouseDelta = default;
+    }
 
     /// <summary>Clears per-frame edges and deltas. Call before polling window events.</summary>
     public void BeginFrame()
@@ -118,7 +136,7 @@ internal sealed unsafe class InputDevices
                 PadName = _padId >= 0 ? Glfw.GetGamepadName(_padId) ?? "Gamepad" : "";
         }
 
-        if (_padId < 0 || !Glfw.GetGamepadState(_padId, out var state))
+        if (Muted || _padId < 0 || !Glfw.GetGamepadState(_padId, out var state))
         {
             Array.Clear(_pad);
             Array.Clear(_padAxes);

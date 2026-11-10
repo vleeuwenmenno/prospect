@@ -10,6 +10,7 @@
     <PackageReference Include="Ahwoo.BRUTAL.Vulkan" />
     <PackageReference Include="Ahwoo.BRUTAL.Vulkan.Abstractions" />
     <PackageReference Include="Ahwoo.BRUTAL.Vulkan.Vma" />
+    <PackageReference Include="Ahwoo.BRUTAL.ShaderC" />
     <PackageReference Include="Ahwoo.BRUTAL.ImGui" />
     <PackageReference Include="Ahwoo.BRUTAL.ImGui.Backends" />
     <PackageReference Include="Ahwoo.BRUTAL.ImGui.FreeType" />

@@ -1,0 +1,371 @@
+using System.Numerics;
+using Prospect.Engine.Net;
+using Prospect.Game.Protocol;
+using Prospect.Game.World;
+
+namespace Prospect.Game.Client;
+
+/// <summary>A hull as the render thread should draw it this tick, with last tick's pose for interpolation.</summary>
+public struct HullView
+{
+    public uint Id;
+    public uint Owner;
+    public bool IsOwn;
+    public Double3 Position;
+    public Double3 PreviousPosition;
+    public Quaternion Orientation;
+    public Quaternion PreviousOrientation;
+    public Vector3 Velocity;
+    public float Heat;
+    public bool BoostLocked;
+    public HullOrder Order;
+}
+
+/// <summary>
+/// The client's picture of the world. The player's own hull is predicted: inputs are applied immediately with the
+/// same flight code the server runs, and each server snapshot corrects the result by replaying the inputs the
+/// server has not seen yet. Other hulls are drawn slightly in the past, interpolated between snapshots.
+/// </summary>
+internal sealed class ClientWorld
+{
+    public const int MaxViews = 64;
+    private const int PendingCapacity = 256;
+    private const int SamplesPerHull = 8;
+    private const int RemoteExpiryTicks = 120;
+
+    /// <summary>How far in the past remote hulls are drawn, in ticks; covers the gap between their updates.</summary>
+    private const double InterpolationDelayTicks = 6;
+    private const float MaxExtrapolationSeconds = 0.25f;
+
+    /// <summary>A correction larger than this is a teleport, not an error to smooth.</summary>
+    private const float SnapDistance = 60f;
+    private const float MaxLookBacklog = 0.6f;
+
+    private struct Pending
+    {
+        public InputRecord Record;
+
+        /// <summary>The order in force when this tick was predicted.</summary>
+        public HullOrder Order;
+    }
+
+    private struct Sample
+    {
+        public long Tick;
+        public HullState State;
+        public HullOrder Order;
+    }
+
+    private struct Remote
+    {
+        public bool Used;
+        public uint Id;
+        public uint Owner;
+        public long LastSeenTick;
+        public int Newest;
+        public int Count;
+    }
+
+    private readonly FlightParams _flight;
+    private readonly Pending[] _pending = new Pending[PendingCapacity];
+    private readonly Remote[] _remotes = new Remote[MaxViews];
+    private readonly Sample[] _samples = new Sample[MaxViews * SamplesPerHull];
+    private readonly HullView[] _lastViews = new HullView[MaxViews];
+    private readonly byte[] _sendBuffer = new byte[256];
+    private int _lastViewCount;
+
+    private uint _ownHullId;
+    private bool _hasOwnState;
+    private HullState _predicted;
+    private Vector3 _correction;
+    private uint _nextSequence = 1;
+    private uint _ackedSequence;
+    private HullOrder _order;
+    private HullOrder _orderDefinition;
+    private ushort _orderId;
+    private bool _dampeners = true;
+    private float _lookPitch;
+    private float _lookYaw;
+
+    public ClientWorld(FlightParams flight)
+    {
+        _flight = flight;
+    }
+
+    public bool Dampeners => _dampeners;
+
+    public void SetOwnHull(uint id) => _ownHullId = id;
+
+    /// <summary>Predicts one tick of the player's hull and sends the input to the server.</summary>
+    public void Tick(PlayerInputBridge bridge, ITransport transport)
+    {
+        var controls = bridge.Consume(out var hasOrder, out var order);
+        _correction *= 0.86f;
+        if (!_hasOwnState)
+            return;
+
+        if (controls.ToggleDampeners)
+            _dampeners = !_dampeners;
+
+        if (hasOrder)
+            SetOrder(order);
+
+        // Pointer movement asks for an angle; spend as much of it this tick as the hull can turn.
+        _lookPitch = Math.Clamp(_lookPitch + controls.LookPitch, -MaxLookBacklog, MaxLookBacklog);
+        _lookYaw = Math.Clamp(_lookYaw + controls.LookYaw, -MaxLookBacklog, MaxLookBacklog);
+        var pitchStep = _flight.TurnRate.X * HullSim.Dt;
+        var yawStep = _flight.TurnRate.Y * HullSim.Dt;
+        var lookPitch = Math.Clamp(_lookPitch / pitchStep, -1f, 1f);
+        var lookYaw = Math.Clamp(_lookYaw / yawStep, -1f, 1f);
+        _lookPitch -= lookPitch * pitchStep;
+        _lookYaw -= lookYaw * yawStep;
+
+        var input = new FlightInput
+        {
+            Strafe = FlightInput.Quantize(controls.Strafe),
+            Vertical = FlightInput.Quantize(controls.Vertical),
+            Forward = FlightInput.Quantize(controls.Forward),
+            Pitch = FlightInput.Quantize(controls.Pitch + lookPitch),
+            Yaw = FlightInput.Quantize(controls.Yaw + lookYaw),
+            Roll = FlightInput.Quantize(controls.Roll),
+            Boost = controls.Boost,
+            Dampeners = _dampeners,
+        };
+
+        // Taking the controls ends a standing order.
+        if (_order.Kind != OrderKind.None && input.HasManualInput)
+            SetOrder(default);
+
+        ref var slot = ref _pending[_nextSequence % PendingCapacity];
+        slot.Record = new InputRecord
+        {
+            Sequence = _nextSequence,
+            Input = input,
+            OrderId = _orderId,
+        };
+        slot.Order = _order;
+        _nextSequence++;
+
+        HullSim.Step(ref _predicted, ref _order, input, _flight);
+        Send(transport);
+    }
+
+    /// <summary>Applies a world snapshot from the server.</summary>
+    public void OnSnapshot(ref NetReader reader, long clientTick)
+    {
+        if (!SnapshotHeader.TryRead(ref reader, out var header))
+            return;
+
+        for (var i = 0; i < header.HullCount; i++)
+        {
+            if (!HullRecord.TryRead(ref reader, out var record))
+                return;
+
+            if (record.Id == header.OwnHull)
+            {
+                _ownHullId = record.Id;
+                Reconcile(record.State, header.AckedInput);
+            }
+            else
+            {
+                StoreRemote(record, header.ServerTick, clientTick);
+            }
+        }
+    }
+
+    /// <summary>Writes this tick's hull views. Returns how many were written and which one is the player's.</summary>
+    public int BuildViews(HullView[] views, double serverTick, long clientTick, out int ownIndex)
+    {
+        var count = 0;
+        ownIndex = -1;
+
+        if (_hasOwnState)
+        {
+            ownIndex = count;
+            views[count++] = new HullView
+            {
+                Id = _ownHullId,
+                IsOwn = true,
+                Position = _predicted.Position + _correction,
+                Orientation = _predicted.Orientation,
+                Velocity = _predicted.Velocity,
+                Heat = _predicted.Heat,
+                BoostLocked = _predicted.BoostLocked,
+                Order = _order,
+            };
+        }
+
+        var renderTick = serverTick - InterpolationDelayTicks;
+        for (var r = 0; r < _remotes.Length && count < views.Length; r++)
+        {
+            ref var remote = ref _remotes[r];
+            if (!remote.Used)
+                continue;
+            if (clientTick - remote.LastSeenTick > RemoteExpiryTicks)
+            {
+                remote.Used = false;
+                continue;
+            }
+
+            views[count++] = Interpolate(r, ref remote, renderTick);
+        }
+
+        // Pair each view with where it was last tick so the render thread can interpolate between the two.
+        for (var i = 0; i < count; i++)
+        {
+            ref var view = ref views[i];
+            view.PreviousPosition = view.Position;
+            view.PreviousOrientation = view.Orientation;
+            for (var j = 0; j < _lastViewCount; j++)
+            {
+                if (_lastViews[j].Id != view.Id)
+                    continue;
+                view.PreviousPosition = _lastViews[j].Position;
+                view.PreviousOrientation = _lastViews[j].Orientation;
+                break;
+            }
+        }
+
+        Array.Copy(views, _lastViews, count);
+        _lastViewCount = count;
+        return count;
+    }
+
+    private void SetOrder(in HullOrder order)
+    {
+        _order = order;
+        _orderDefinition = order;
+        _orderId++;
+    }
+
+    private void Send(ITransport transport)
+    {
+        Span<InputRecord> records = stackalloc InputRecord[InputMessage.MaxRecords];
+        var available = (int)Math.Min(_nextSequence - 1 - _ackedSequence, InputMessage.MaxRecords);
+        var count = Math.Max(available, 1);
+        for (var i = 0; i < count; i++)
+            records[i] = _pending[(_nextSequence - (uint)(count - i)) % PendingCapacity].Record;
+
+        var writer = new NetWriter(_sendBuffer);
+        InputMessage.Write(ref writer, records[..count], _orderId, _orderDefinition);
+        transport.Send(0, NetChannel.Unreliable, writer.Written);
+    }
+
+    private void Reconcile(in HullState authoritative, uint acked)
+    {
+        if (!_hasOwnState)
+        {
+            _hasOwnState = true;
+            _predicted = authoritative;
+            _ackedSequence = acked;
+            return;
+        }
+
+        // Snapshots can arrive out of order; only a newer acknowledgement carries newer truth.
+        if (acked <= _ackedSequence && acked != 0)
+            return;
+        _ackedSequence = acked;
+
+        // Start from what the server computed and re-apply every input it has not simulated yet.
+        var state = authoritative;
+        var first = Math.Max(acked + 1, _nextSequence > PendingCapacity ? _nextSequence - PendingCapacity + 1 : 1);
+        for (var sequence = first; sequence < _nextSequence; sequence++)
+        {
+            ref var slot = ref _pending[sequence % PendingCapacity];
+            var order = slot.Order;
+            HullSim.Step(ref state, ref order, slot.Record.Input, _flight);
+        }
+
+        // Keep the drawn position continuous: whatever the correction moved is bled off over the next ticks.
+        var error = _predicted.Position.RelativeTo(state.Position);
+        _correction = error.Length() > SnapDistance ? Vector3.Zero : _correction + error;
+        _predicted = state;
+    }
+
+    private void StoreRemote(in HullRecord record, long serverTick, long clientTick)
+    {
+        var slot = -1;
+        for (var i = 0; i < _remotes.Length; i++)
+        {
+            if (_remotes[i].Used && _remotes[i].Id == record.Id)
+            {
+                slot = i;
+                break;
+            }
+
+            if (slot < 0 && !_remotes[i].Used)
+                slot = i;
+        }
+
+        if (slot < 0)
+            return;
+
+        ref var remote = ref _remotes[slot];
+        if (!remote.Used || remote.Id != record.Id)
+            remote = new Remote { Used = true, Id = record.Id, Newest = -1 };
+
+        remote.Owner = record.Owner;
+        remote.LastSeenTick = clientTick;
+        if (remote.Count > 0 && _samples[slot * SamplesPerHull + remote.Newest].Tick >= serverTick)
+            return;
+
+        remote.Newest = (remote.Newest + 1) % SamplesPerHull;
+        remote.Count = Math.Min(remote.Count + 1, SamplesPerHull);
+        _samples[slot * SamplesPerHull + remote.Newest] = new Sample
+        {
+            Tick = serverTick,
+            State = record.State,
+            Order = record.Order,
+        };
+    }
+
+    private HullView Interpolate(int slot, ref Remote remote, double renderTick)
+    {
+        var samples = _samples.AsSpan(slot * SamplesPerHull, SamplesPerHull);
+        ref var newest = ref samples[remote.Newest];
+        var view = new HullView
+        {
+            Id = remote.Id,
+            Owner = remote.Owner,
+            Position = newest.State.Position,
+            Orientation = newest.State.Orientation,
+            Velocity = newest.State.Velocity,
+            Heat = newest.State.Heat,
+            BoostLocked = newest.State.BoostLocked,
+            Order = newest.Order,
+        };
+
+        if (renderTick >= newest.Tick)
+        {
+            // Ahead of the newest sample: coast on its velocity for a moment rather than freeze.
+            var seconds = Math.Min((float)(renderTick - newest.Tick) * HullSim.Dt, MaxExtrapolationSeconds);
+            view.Position = newest.State.Position + newest.State.Velocity * seconds;
+            return view;
+        }
+
+        // Walk back from the newest sample to the pair that brackets the render time.
+        var later = remote.Newest;
+        for (var i = 1; i < remote.Count; i++)
+        {
+            var earlier = (remote.Newest - i + SamplesPerHull) % SamplesPerHull;
+            ref var a = ref samples[earlier];
+            ref var b = ref samples[later];
+            if (renderTick >= a.Tick)
+            {
+                var t = (float)((renderTick - a.Tick) / Math.Max(1, b.Tick - a.Tick));
+                view.Position = Double3.Lerp(a.State.Position, b.State.Position, t);
+                view.Orientation = Quaternion.Slerp(a.State.Orientation, b.State.Orientation, t);
+                view.Velocity = Vector3.Lerp(a.State.Velocity, b.State.Velocity, t);
+                return view;
+            }
+
+            later = earlier;
+        }
+
+        // Older than everything buffered: show the oldest sample.
+        ref var oldest = ref samples[later];
+        view.Position = oldest.State.Position;
+        view.Orientation = oldest.State.Orientation;
+        return view;
+    }
+}

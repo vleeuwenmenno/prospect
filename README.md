@@ -11,16 +11,42 @@ There is one simulation and one code path.
 
 ## Status
 
-Milestone 1 of 8, **Skeleton**, is complete:
+Milestone 1 (skeleton) is complete. On top of it, the first slice of the world is in:
 
-- Window, Vulkan 1.3 device and swapchain, validation layers in debug builds
-- Fixed 60 Hz simulation on its own threads, separated from rendering by lock-free snapshots
-- Job graph on BRUTAL's job runners
-- Keyboard, mouse and gamepad input with data-driven bindings
-- In-house interface skin on Dear ImGui: splash, main menu, join, settings, credits, session HUD, performance overlay
-- Client and server sessions over an in-process link (local game) or UDP (dedicated server)
+- **Sectors.** The galaxy is a grid of 20 km cells generated from the server's seed: name, star, asteroid fields.
+  Nothing is stored or sent, and nothing stops at a sector's edge. The client keeps the sectors around the camera
+  generated on worker threads.
+- **Flight.** A command pod with inertial flight: thrust on all three axes, pitch, yaw and roll, dampeners, and a
+  boost that heats up and locks out. The server is authoritative; the client predicts its own hull with the same
+  flight code and reconciles against snapshots; other players' hulls are interpolated.
+- **Command view.** One key pulls the camera back from the pod into a free orbiting view over the same space, with
+  a move order that the pod's autopilot carries out.
+- **Galaxy map.** Sectors by layer, with their stars and asteroid counts, and set-course by right-click.
+- **Renderer.** Floating-point scene target and tone mapping, camera-relative rendering from double-precision
+  positions, a star field and sky, instanced hull and asteroid meshes with two levels of detail.
 
-There is no gameplay yet: starting a game puts you in an empty scene connected to a running server.
+Not there yet: collisions (hulls pass through rocks), mining, more than one hull per player, gates and jumps,
+saving. Asteroids are drawn from a shared set of shapes until mining gives each one its own body.
+
+## Controls
+
+| | Keyboard and mouse | Gamepad |
+| --- | --- | --- |
+| Forward / back, strafe | `W` `S`, `A` `D` | Left stick |
+| Up / down | `Space`, `Left Ctrl` | Right / left trigger |
+| Pitch and yaw | Mouse, or arrow keys | Right stick |
+| Roll | `Q` `E` | Bumpers |
+| Boost | `Left Shift` | Left stick click |
+| Dampeners on / off | `Z` | `X` |
+| Command view | `N` | `Back` |
+| Galaxy map | `M` | `Y` |
+| Halt (cancel order) | `H` | `B` |
+| Menu or back | `Esc` | `Start` |
+
+In the command view: right-click orders a move to that point, right-drag orbits, the wheel zooms, `W` `A` `S` `D`
+pan, `Space` and `Left Ctrl` raise and lower the command plane, `F` follows the pod again. `F3` shows the
+performance overlay, `F11` toggles fullscreen, `F12` takes a screenshot. Bindings live in
+`content/input/bindings.json`; hull and galaxy figures in `content/ships` and `content/galaxy`.
 
 ## Requirements
 
@@ -44,20 +70,17 @@ make help                                  # every target
 
 `prospect --help` and `prospect-server --help` list the command-line options.
 
-Keys: `Esc` menu or back, `F3` performance overlay, `F11` fullscreen, `F12` screenshot. Menus work with the
-keyboard, the mouse and a gamepad. Bindings live in `content/input/bindings.json`.
-
 ## Layout
 
 | Path | Contents |
 | --- | --- |
 | `src/Prospect.Engine` | Fixed-step loop, job graph, thread hand-off, transports (in-process and RakNet), atomic files |
-| `src/Prospect.Game` | The simulation shared by client and server: protocol, server host, client session |
+| `src/Prospect.Game` | The simulation shared by client and server: galaxy, flight model, hull storage, protocol, server host, client prediction |
 | `src/Prospect.Server` | Headless dedicated server |
-| `src/Prospect.Client` | Window, Vulkan renderer, input, interface |
+| `src/Prospect.Client` | Window, Vulkan renderer, cameras, input, interface |
 | `tests/Prospect.Tests` | Unit and integration tests, including real client and server sessions over UDP |
 | `content/` | Game data, loaded at run time |
-| `assets/` | Fonts and branding |
+| `assets/` | Fonts, branding and GLSL shaders (compiled at startup) |
 
 ## Threads
 

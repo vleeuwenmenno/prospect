@@ -3,6 +3,23 @@
     "Pause": ["Key:Escape", "Pad:Start"],
     "TogglePerformance": ["Key:F3"],
     "ToggleFullscreen": ["Key:F11"],
-    "Screenshot": ["Key:F12"]
+    "Screenshot": ["Key:F12"],
+    "Boost": ["Key:LeftShift", "Pad:LeftThumb"],
+    "ToggleDampeners": ["Key:Z", "Pad:X"],
+    "ToggleCommand": ["Key:N", "Pad:Back"],
+    "ToggleMap": ["Key:M", "Pad:Y"],
+    "Halt": ["Key:H", "Pad:B"],
+    "Follow": ["Key:F", "Pad:RightThumb"]
+  },
+  "axes": {
+    "Strafe": [{ "negative": "Key:A", "positive": "Key:D" }, { "axis": "Pad:LeftX" }],
+    "Vertical": [
+      { "negative": "Key:LeftControl", "positive": "Key:Space" },
+      { "negativeAxis": "Pad:LeftTrigger", "positiveAxis": "Pad:RightTrigger" }
+    ],
+    "Forward": [{ "negative": "Key:S", "positive": "Key:W" }, { "axis": "Pad:LeftY", "invert": true }],
+    "Pitch": [{ "negative": "Key:Down", "positive": "Key:Up" }, { "axis": "Pad:RightY", "invert": true }],
+    "Yaw": [{ "negative": "Key:Left", "positive": "Key:Right" }, { "axis": "Pad:RightX" }],
+    "Roll": [{ "negative": "Key:Q", "positive": "Key:E" }, { "negative": "Pad:LeftBumper", "positive": "Pad:RightBumper" }]
   }
 }

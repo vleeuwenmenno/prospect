@@ -4,6 +4,7 @@ using Prospect.Engine.Net;
 using Prospect.Engine.Threading;
 using Prospect.Engine.Time;
 using Prospect.Game.Protocol;
+using Prospect.Game.World;
 
 namespace Prospect.Game.Client;
 
@@ -59,6 +60,18 @@ public sealed class SessionSnapshot
     /// <summary>Stopwatch timestamp at which this snapshot was published, the base for render interpolation.</summary>
     public long PublishedAt;
 
+    /// <summary>The server's galaxy, once known. Sector contents are generated from it on demand.</summary>
+    public Galaxy? Galaxy;
+
+    /// <summary>The hulls to draw this tick; only the first <see cref="HullCount"/> entries are meaningful.</summary>
+    public readonly HullView[] Hulls = new HullView[ClientWorld.MaxViews];
+    public int HullCount;
+
+    /// <summary>Index of the player's own hull in <see cref="Hulls"/>, or -1 before it exists.</summary>
+    public int OwnHull = -1;
+    public bool Dampeners;
+    public FlightParams Flight;
+
     public TickStats Loop;
 }
 
@@ -72,6 +85,9 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     private const int ConnectTimeoutTicks = TickLoop.SimulationHz * 10;
 
     private readonly ITransport _transport;
+    private readonly GameContent _content;
+    private readonly ClientWorld _world;
+    private Galaxy? _galaxy;
     private readonly string _playerName;
     private readonly TickLoop _loop;
     private readonly SnapshotExchange<SessionSnapshot> _snapshots = new(() => new SessionSnapshot());
@@ -91,9 +107,11 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
 
     private volatile bool _leaveRequested;
 
-    public ClientSession(ITransport transport, string playerName)
+    public ClientSession(ITransport transport, GameContent content, string playerName)
     {
         _transport = transport;
+        _content = content;
+        _world = new ClientWorld(content.Pod.Flight);
         _playerName = PlayerNames.Sanitize(playerName);
         _loop = new TickLoop("ClientSim", TickLoop.SimulationHz, this);
     }
@@ -105,6 +123,9 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
 
     /// <summary>The latest published snapshot. Call from the render thread only.</summary>
     public SessionSnapshot AcquireSnapshot() => _snapshots.Acquire(out _);
+
+    /// <summary>Where the input thread delivers the player's controls and orders.</summary>
+    public PlayerInputBridge Input { get; } = new();
 
     /// <summary>Asks the session to leave the server. Safe from any thread; takes effect on the next tick.</summary>
     public void RequestLeave() => _leaveRequested = true;
@@ -130,6 +151,9 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                 End(SessionEndReason.ConnectFailed);
             else if (_state == SessionState.Active && tick % PingIntervalTicks == 0)
                 SendPing();
+
+            if (_state == SessionState.Active)
+                _world.Tick(Input, _transport);
         }
 
         var snapshot = _snapshots.WriteBuffer;
@@ -141,9 +165,16 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         snapshot.GalaxySeed = _galaxySeed;
         snapshot.PlayerCount = _playerCount;
         snapshot.ClientTick = tick;
-        snapshot.ServerTick = _state == SessionState.Active
-            ? _syncServerTick + (now - _syncTimestamp) * TickLoop.SimulationHz / Stopwatch.Frequency
+        var serverTick = _state == SessionState.Active
+            ? _syncServerTick + (now - _syncTimestamp) * (double)TickLoop.SimulationHz / Stopwatch.Frequency
             : 0;
+        snapshot.ServerTick = (long)serverTick;
+        snapshot.Galaxy = _galaxy;
+        snapshot.HullCount = _state == SessionState.Active ? _world.BuildViews(snapshot.Hulls, serverTick, tick, out snapshot.OwnHull) : 0;
+        if (snapshot.HullCount == 0)
+            snapshot.OwnHull = -1;
+        snapshot.Dampeners = _world.Dampeners;
+        snapshot.Flight = _content.Pod.Flight;
         snapshot.RoundTripMs = _roundTripMs;
         snapshot.PublishedAt = now;
         snapshot.Loop = _loop.Stats;
@@ -199,6 +230,8 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                 _playerId = welcome.PlayerId;
                 _serverName = welcome.ServerName;
                 _galaxySeed = welcome.GalaxySeed;
+                _galaxy = _content.Galaxy.WithSeed(welcome.GalaxySeed);
+                _world.SetOwnHull(welcome.HullId);
                 _playerCount = 1;
                 _syncServerTick = welcome.ServerTick;
                 _syncTimestamp = Stopwatch.GetTimestamp();
@@ -215,6 +248,10 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                         _ => SessionEndReason.Refused,
                     }
                 );
+                break;
+
+            case MessageId.Snapshot when _state == SessionState.Active:
+                _world.OnSnapshot(ref reader, _loop.Stats.Tick);
                 break;
 
             case MessageId.Pong when _state == SessionState.Active && PongMessage.TryRead(ref reader, out var pong):

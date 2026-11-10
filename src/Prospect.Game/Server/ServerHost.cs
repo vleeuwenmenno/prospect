@@ -2,6 +2,7 @@ using Prospect.Engine.Diagnostics;
 using Prospect.Engine.Net;
 using Prospect.Engine.Time;
 using Prospect.Game.Protocol;
+using Prospect.Game.World;
 
 namespace Prospect.Game.Server;
 
@@ -24,6 +25,21 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
     /// <summary>A connection that has not said hello within this many ticks is dropped.</summary>
     private const int HandshakeTimeoutTicks = TickLoop.SimulationHz * 5;
 
+    /// <summary>Inputs a client may have waiting; more than this means it is running ahead and the oldest are dropped.</summary>
+    private const int InputQueueSize = 16;
+
+    /// <summary>
+    /// Inputs a client may have simulated in one server tick. One per tick on average, with room to absorb a late
+    /// packet followed by a burst; a client sending faster than real time gains nothing.
+    /// </summary>
+    private const int MaxInputCredit = 4;
+
+    /// <summary>After this many ticks without input the server flies the hull itself until input resumes.</summary>
+    private const int InputStarvedTicks = 15;
+
+    /// <summary>Other players' hulls are sent every this many ticks; a client's own hull goes every tick.</summary>
+    private const int RemoteHullInterval = 3;
+
     private enum ConnectionState : byte
     {
         Free,
@@ -31,34 +47,75 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         Active,
     }
 
-    private struct Connection
+    private sealed class Connection
     {
         public ConnectionState State;
-        public ITransport Transport;
+        public ITransport Transport = null!;
         public int Peer;
         public uint PlayerId;
-        public string Name;
+        public string Name = "";
         public long ConnectedTick;
+
+        public HullHandle Hull;
+        public readonly InputRecord[] Inputs = new InputRecord[InputQueueSize];
+        public int InputHead;
+        public int InputCount;
+        public uint LastQueuedSequence;
+        public uint LastSimulatedSequence;
+        public int InputCredit;
+        public int StarvedTicks;
+        public FlightInput LastInput;
+
+        /// <summary>The newest order definition the client has sent, and the counter value it belongs to.</summary>
+        public ushort OrderId;
+        public HullOrder Order;
+
+        public void Reset()
+        {
+            State = ConnectionState.Free;
+            Transport = null!;
+            Name = "";
+            Hull = default;
+            InputHead = InputCount = 0;
+            LastQueuedSequence = LastSimulatedSequence = 0;
+            InputCredit = StarvedTicks = 0;
+            LastInput = new FlightInput { Dampeners = true };
+            OrderId = 0;
+            Order = default;
+        }
     }
 
     private readonly ServerConfig _config;
     private readonly ITransport[] _transports;
     private readonly Connection[] _connections;
     private readonly TickLoop _loop;
-    private readonly byte[] _sendBuffer = new byte[1024];
+    private readonly byte[] _sendBuffer = new byte[64 * 1024];
+    private readonly HullStore _hulls = new();
+    private readonly FlightParams _podFlight;
 
     private long _tick;
     private uint _nextPlayerId = 1;
     private int _playerCount;
 
-    public ServerHost(ServerConfig config, params ITransport[] transports)
+    public ServerHost(ServerConfig config, GameContent content, params ITransport[] transports)
     {
         _config = config;
         _transports = transports;
+        _podFlight = content.Pod.Flight;
+        Galaxy = content.Galaxy.WithSeed(config.GalaxySeed);
+
         // Room for every player plus connections that are still shaking hands or about to be refused as full.
         _connections = new Connection[config.MaxPlayers + 8];
+        for (var i = 0; i < _connections.Length; i++)
+        {
+            _connections[i] = new Connection();
+            _connections[i].Reset();
+        }
+
         _loop = new TickLoop("Server", TickLoop.SimulationHz, this);
     }
+
+    public Galaxy Galaxy { get; }
 
     public ServerStatus Status => new(Volatile.Read(ref _tick), Volatile.Read(ref _playerCount), _loop.Stats);
 
@@ -69,12 +126,13 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
 
     public void Start() => _loop.Start();
 
-    /// <summary>Stops the tick thread and closes every transport.</summary>
+    /// <summary>Stops the tick thread, closes every transport and frees the world.</summary>
     public void Dispose()
     {
         _loop.Stop();
         foreach (var transport in _transports)
             transport.Dispose();
+        _hulls.Dispose();
     }
 
     void ITickHandler.OnStart()
@@ -88,11 +146,18 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         foreach (var transport in _transports)
             transport.Poll(this);
 
-        for (var i = 0; i < _connections.Length; i++)
+        foreach (var connection in _connections)
         {
-            ref var connection = ref _connections[i];
             if (connection.State == ConnectionState.AwaitingHello && tick - connection.ConnectedTick > HandshakeTimeoutTicks)
-                Refuse(ref connection, RejectReason.BadHandshake);
+                Refuse(connection, RejectReason.BadHandshake);
+            else if (connection.State == ConnectionState.Active)
+                SimulatePlayer(connection);
+        }
+
+        foreach (var connection in _connections)
+        {
+            if (connection.State == ConnectionState.Active)
+                SendSnapshot(connection, tick);
         }
 
         Volatile.Write(ref _tick, tick + 1);
@@ -100,12 +165,11 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
 
     void ITickHandler.OnStop()
     {
-        for (var i = 0; i < _connections.Length; i++)
+        foreach (var connection in _connections)
         {
-            ref var connection = ref _connections[i];
             if (connection.State != ConnectionState.Free)
                 connection.Transport.Disconnect(connection.Peer);
-            connection = default;
+            connection.Reset();
         }
 
         Volatile.Write(ref _playerCount, 0);
@@ -114,20 +178,15 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
 
     void ITransportHandler.OnConnected(ITransport transport, int peer)
     {
-        for (var i = 0; i < _connections.Length; i++)
+        foreach (var connection in _connections)
         {
-            ref var connection = ref _connections[i];
             if (connection.State != ConnectionState.Free)
                 continue;
 
-            connection = new Connection
-            {
-                State = ConnectionState.AwaitingHello,
-                Transport = transport,
-                Peer = peer,
-                Name = "",
-                ConnectedTick = _tick,
-            };
+            connection.State = ConnectionState.AwaitingHello;
+            connection.Transport = transport;
+            connection.Peer = peer;
+            connection.ConnectedTick = _tick;
             return;
         }
 
@@ -136,36 +195,35 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
 
     void ITransportHandler.OnDisconnected(ITransport transport, int peer, DisconnectReason reason)
     {
-        var index = Find(transport, peer);
-        if (index < 0)
+        var connection = Find(transport, peer);
+        if (connection is null)
             return;
 
-        ref var connection = ref _connections[index];
         if (connection.State == ConnectionState.Active)
         {
+            _hulls.Destroy(connection.Hull);
             Volatile.Write(ref _playerCount, _playerCount - 1);
             Logs.Sim.Info($"{connection.Name} (player {connection.PlayerId}) left: {reason}");
         }
 
-        connection = default;
+        connection.Reset();
     }
 
     void ITransportHandler.OnMessage(ITransport transport, int peer, NetChannel channel, ReadOnlySpan<byte> payload)
     {
-        var index = Find(transport, peer);
-        if (index < 0 || payload.IsEmpty)
+        var connection = Find(transport, peer);
+        if (connection is null || payload.IsEmpty)
             return;
 
-        ref var connection = ref _connections[index];
         var reader = new NetReader(payload[1..]);
         var id = (MessageId)payload[0];
 
         if (connection.State == ConnectionState.AwaitingHello)
         {
             if (id == MessageId.Hello && channel == NetChannel.Reliable && HelloMessage.TryRead(ref reader, out var hello))
-                Admit(ref connection, hello);
+                Admit(connection, hello);
             else
-                Refuse(ref connection, RejectReason.BadHandshake);
+                Refuse(connection, RejectReason.BadHandshake);
             return;
         }
 
@@ -184,20 +242,135 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
                     transport.Send(peer, NetChannel.Unreliable, writer.Written);
                     break;
                 }
+            case MessageId.Input:
+                ReceiveInput(connection, ref reader);
+                break;
         }
     }
 
-    private void Admit(ref Connection connection, in HelloMessage hello)
+    private void ReceiveInput(Connection connection, ref NetReader reader)
+    {
+        Span<InputRecord> records = stackalloc InputRecord[InputMessage.MaxRecords];
+        if (!InputMessage.TryRead(ref reader, records, out var count, out var orderId, out var order))
+            return;
+
+        connection.OrderId = orderId;
+        connection.Order = order;
+
+        // Packets repeat recent inputs; queue only the ones not seen before, oldest first.
+        for (var i = 0; i < count; i++)
+        {
+            ref var record = ref records[i];
+            if (record.Sequence <= connection.LastQueuedSequence)
+                continue;
+
+            if (connection.InputCount == InputQueueSize)
+            {
+                connection.InputHead = (connection.InputHead + 1) % InputQueueSize;
+                connection.InputCount--;
+            }
+
+            connection.Inputs[(connection.InputHead + connection.InputCount) % InputQueueSize] = record;
+            connection.InputCount++;
+            connection.LastQueuedSequence = record.Sequence;
+        }
+    }
+
+    /// <summary>
+    /// Advances a player's hull by the inputs that have arrived. The hull steps once per client input, so the
+    /// server reproduces the client's prediction exactly; a credit limit keeps that from outrunning real time.
+    /// </summary>
+    private void SimulatePlayer(Connection connection)
+    {
+        if (!_hulls.IsAlive(connection.Hull))
+            return;
+
+        var index = connection.Hull.Index;
+        ref var state = ref _hulls.State(index);
+        ref var info = ref _hulls.Info(index);
+        connection.InputCredit = Math.Min(connection.InputCredit + 1, MaxInputCredit);
+
+        var simulated = false;
+        while (connection.InputCount > 0 && connection.InputCredit > 0)
+        {
+            var record = connection.Inputs[connection.InputHead];
+            connection.InputHead = (connection.InputHead + 1) % InputQueueSize;
+            connection.InputCount--;
+            connection.InputCredit--;
+
+            if (record.OrderId != info.OrderId && record.OrderId == connection.OrderId)
+            {
+                info.Order = connection.Order;
+                info.OrderId = record.OrderId;
+            }
+
+            HullSim.Step(ref state, ref info.Order, record.Input, _podFlight);
+            connection.LastSimulatedSequence = record.Sequence;
+            connection.LastInput = record.Input;
+            simulated = true;
+        }
+
+        if (simulated)
+        {
+            connection.StarvedTicks = 0;
+            return;
+        }
+
+        // The client has gone quiet. Keep the hull safe: carry on with its order, or brake to a stop.
+        if (++connection.StarvedTicks > InputStarvedTicks)
+            HullSim.Step(ref state, ref info.Order, new FlightInput { Dampeners = true }, _podFlight);
+    }
+
+    private void SendSnapshot(Connection connection, long tick)
+    {
+        var includeRemote = (tick + connection.PlayerId) % RemoteHullInterval == 0;
+        var writer = new NetWriter(_sendBuffer);
+        var header = new SnapshotHeader
+        {
+            ServerTick = tick,
+            AckedInput = connection.LastSimulatedSequence,
+            OwnHull = connection.Hull.Packed,
+        };
+
+        // The count is not known until the hulls are written; reserve the header and fill it in afterwards.
+        header.Write(ref writer);
+        var count = 0;
+        for (var i = 0; i < _hulls.Slots && count < byte.MaxValue; i++)
+        {
+            if (!_hulls.IsAliveAt(i) || (!includeRemote && i != connection.Hull.Index))
+                continue;
+            if (writer.Length + HullRecord.MaxWireSize > _sendBuffer.Length)
+                break;
+
+            ref var info = ref _hulls.Info(i);
+            new HullRecord
+            {
+                Id = _hulls.HandleAt(i).Packed,
+                Owner = info.Owner,
+                State = _hulls.State(i),
+                Order = info.Order,
+            }.Write(ref writer);
+            count++;
+        }
+
+        var length = writer.Length;
+        header.HullCount = (byte)count;
+        var rewrite = new NetWriter(_sendBuffer);
+        header.Write(ref rewrite);
+        connection.Transport.Send(connection.Peer, NetChannel.Unreliable, _sendBuffer.AsSpan(0, length));
+    }
+
+    private void Admit(Connection connection, in HelloMessage hello)
     {
         if (hello.ProtocolVersion != ProtocolInfo.Version)
         {
-            Refuse(ref connection, RejectReason.VersionMismatch);
+            Refuse(connection, RejectReason.VersionMismatch);
             return;
         }
 
         if (_playerCount >= _config.MaxPlayers)
         {
-            Refuse(ref connection, RejectReason.ServerFull);
+            Refuse(connection, RejectReason.ServerFull);
             return;
         }
 
@@ -206,6 +379,11 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         connection.Name = hello.PlayerName;
         Volatile.Write(ref _playerCount, _playerCount + 1);
 
+        // Arrivals line up beside the spawn point so they never start inside one another.
+        var slot = _hulls.Count;
+        var offset = new Double3((slot + 1) / 2 * 40.0 * (slot % 2 == 0 ? 1 : -1), 0, 0);
+        connection.Hull = _hulls.Create(connection.PlayerId, HullState.At(Galaxy.SpawnPoint + offset));
+
         var welcome = new WelcomeMessage
         {
             PlayerId = connection.PlayerId,
@@ -213,6 +391,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
             ServerTick = _tick,
             GalaxySeed = _config.GalaxySeed,
             ServerName = _config.Name,
+            HullId = connection.Hull.Packed,
         };
         var writer = new NetWriter(_sendBuffer);
         welcome.Write(ref writer);
@@ -221,7 +400,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         Logs.Sim.Info($"{connection.Name} joined as player {connection.PlayerId} via {connection.Transport.Description}");
     }
 
-    private void Refuse(ref Connection connection, RejectReason reason)
+    private void Refuse(Connection connection, RejectReason reason)
     {
         var writer = new NetWriter(_sendBuffer);
         writer.WriteByte((byte)MessageId.Reject);
@@ -229,18 +408,17 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         connection.Transport.Send(connection.Peer, NetChannel.Reliable, writer.Written);
         connection.Transport.Disconnect(connection.Peer);
         Logs.Sim.Info($"Refused a connection on {connection.Transport.Description}: {reason}");
-        connection = default;
+        connection.Reset();
     }
 
-    private int Find(ITransport transport, int peer)
+    private Connection? Find(ITransport transport, int peer)
     {
-        for (var i = 0; i < _connections.Length; i++)
+        foreach (var connection in _connections)
         {
-            ref var connection = ref _connections[i];
             if (connection.State != ConnectionState.Free && connection.Peer == peer && ReferenceEquals(connection.Transport, transport))
-                return i;
+                return connection;
         }
 
-        return -1;
+        return null;
     }
 }

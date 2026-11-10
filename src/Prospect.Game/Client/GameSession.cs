@@ -1,5 +1,6 @@
 using Prospect.Engine.Net;
 using Prospect.Game.Server;
+using Prospect.Game.World;
 
 namespace Prospect.Game.Client;
 
@@ -35,21 +36,21 @@ public sealed class GameSession : IDisposable
     public Exception? Fault => Client.Fault ?? _server?.Fault;
 
     /// <summary>Starts a server in this process and joins it without touching the network.</summary>
-    public static GameSession StartLocal(ServerConfig config, string playerName)
+    public static GameSession StartLocal(ServerConfig config, GameContent content, string playerName)
     {
         var link = new LoopbackLink();
-        var server = new ServerHost(config, link.Server);
-        var client = new ClientSession(link.Client, playerName);
+        var server = new ServerHost(config, content, link.Server);
+        var client = new ClientSession(link.Client, content, playerName);
         server.Start();
         client.Start();
         return new GameSession(client, server, link, config.Name);
     }
 
     /// <summary>Starts connecting to a server over the network.</summary>
-    public static GameSession Join(string host, ushort port, string playerName)
+    public static GameSession Join(string host, ushort port, GameContent content, string playerName)
     {
         var transport = RakNetTransport.Connect(host, port);
-        var client = new ClientSession(transport, playerName);
+        var client = new ClientSession(transport, content, playerName);
         client.Start();
         return new GameSession(client, null, null, $"{host}:{port}");
     }

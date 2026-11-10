@@ -4,6 +4,7 @@ using Prospect.Engine.Net;
 using Prospect.Engine.Time;
 using Prospect.Game.Protocol;
 using Prospect.Game.Server;
+using Prospect.Game.World;
 
 namespace Prospect.Server;
 
@@ -64,11 +65,13 @@ internal static class Program
         PreciseSleep.EnableHighResolutionTimer();
 
         RakNetTransport transport;
+        GameContent content;
         try
         {
+            content = GameContent.Load();
             transport = RakNetTransport.Listen(port, maxPlayers + 8);
         }
-        catch (IOException e)
+        catch (Exception e) when (e is IOException or InvalidDataException or System.Text.Json.JsonException or KeyNotFoundException)
         {
             Logs.App.Error(e.Message);
             return 1;
@@ -95,7 +98,7 @@ internal static class Program
             MaxPlayers = maxPlayers,
             GalaxySeed = seed,
         };
-        using var server = new ServerHost(config, transport);
+        using var server = new ServerHost(config, content, transport);
         server.Start();
         Logs.App.Info("Press Ctrl+C to stop");
 

@@ -13,6 +13,7 @@ internal static class Program
         prospect [options]
           --start <screen>        Open on: menu, join, settings, credits, or local (start a local game)
           --join <host[:port]>    Connect to a server straight after the splash
+          --open <view>           With --start local or --join: open the command view or the map once in space
           --size <W>x<H>          Start windowed at this size
           --validation            Enable Vulkan validation layers (default in debug builds)
           --no-validation         Disable Vulkan validation layers
@@ -75,6 +76,9 @@ internal static class Program
                         options.JoinHost = target;
                         break;
                     }
+                case "--open" when hasValue && args[i + 1] is "command" or "map":
+                    options.OpenView = args[++i];
+                    break;
                 case "--size" when hasValue:
                     {
                         var parts = args[++i].Split('x');

@@ -114,11 +114,14 @@ internal sealed unsafe class FrameRenderer : IDisposable
         _needsRecreate = false;
     }
 
+    /// <summary>Which of the frames in flight is being recorded; selects per-frame GPU buffers.</summary>
+    public int FrameIndex => _frameIndex;
+
     /// <summary>
-    /// Starts a frame and opens the render pass on the swapchain image. Returns false when no image could be
-    /// acquired, in which case the frame is skipped and the swapchain flagged for rebuild.
+    /// Starts a frame and its command buffer. Returns false when no swapchain image could be acquired, in which
+    /// case the frame is skipped and the swapchain flagged for rebuild.
     /// </summary>
-    public bool Begin(in float4 clearColor, out CommandBuffer commands)
+    public bool Begin(out CommandBuffer commands)
     {
         ref var frame = ref _frames[_frameIndex];
         commands = frame.Commands;
@@ -152,20 +155,24 @@ internal sealed unsafe class FrameRenderer : IDisposable
         device.ResetCommandPool(frame.Pool, VkCommandPoolResetFlags.None);
 
         commands.Begin(VkCommandBufferUsageFlags.OneTimeSubmitBit);
+        return true;
+    }
 
+    /// <summary>Opens the render pass on the swapchain image; everything drawn after this goes to the screen.</summary>
+    public void BeginPresentPass(in float4 clearColor)
+    {
         var clear = new VkClearValue { Color = new VkClearColorValue { Float32 = clearColor } };
-        commands.BeginRenderPass(
+        _frames[_frameIndex].Commands.BeginRenderPass(
             new VkRenderPassBeginInfo
             {
                 RenderPass = _swapchain.RenderPass,
-                Framebuffer = _swapchain.Framebuffer(imageIndex),
+                Framebuffer = _swapchain.Framebuffer(_imageIndex),
                 RenderArea = new VkRect2D(_swapchain.Extent),
                 ClearValueCount = 1,
                 ClearValues = &clear,
             },
             VkSubpassContents.Inline
         );
-        return true;
     }
 
     /// <summary>Closes the render pass, submits the frame and presents it.</summary>

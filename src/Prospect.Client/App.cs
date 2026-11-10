@@ -10,12 +10,14 @@ using Prospect.Client.Render;
 using Prospect.Client.Screens;
 using Prospect.Client.Settings;
 using Prospect.Client.Ui;
+using Prospect.Client.World;
 using Prospect.Engine.Diagnostics;
 using Prospect.Engine.IO;
 using Prospect.Engine.Jobs;
 using Prospect.Engine.Time;
 using Prospect.Game.Client;
 using Prospect.Game.Server;
+using Prospect.Game.World;
 using IJob = Brutal.Concurrency.Jobs.IJob;
 
 namespace Prospect.Client;
@@ -28,6 +30,8 @@ internal sealed class AppOptions
     public bool StartLocalGame { get; set; }
     public string? JoinHost { get; set; }
     public ushort JoinPort { get; set; }
+    /// <summary>Open the command view or the map once in space; for scripted screenshots.</summary>
+    public string? OpenView { get; set; }
     public float BenchSeconds { get; set; }
     public string? CapturePath { get; set; }
     public float CaptureAfter { get; set; } = 1.5f;
@@ -51,6 +55,9 @@ internal sealed class App : IDisposable
     private readonly FrameRenderer _renderer;
     private readonly UiContext _ui;
     private readonly ScreenHost _screens;
+    private readonly SceneRenderer _scene;
+    private long _lastFrameTimestamp;
+    private bool _viewOpened;
     private readonly ScreenshotJob _screenshotJob = new();
     private int2 _framebufferSize;
     private int2 _windowedSize;
@@ -58,6 +65,7 @@ internal sealed class App : IDisposable
     private bool _quit;
     private bool _vsync;
 
+    private bool _pointerCaptured;
     private float _sinceSplash = -1f;
     private bool _captureRequested;
     private Benchmark? _benchmark;
@@ -68,11 +76,35 @@ internal sealed class App : IDisposable
         Settings = ClientSettings.Load();
         Jobs = new JobSystem(Math.Clamp(Environment.ProcessorCount - 3, 1, 16), "Job");
 
-        // Decode the logo and parse the bindings on workers while the window and the GPU come up on this thread.
+        Content = GameContent.Load();
+
+        // Decode the logo, parse the bindings, compile the shaders and build the meshes on workers while the
+        // window and the GPU come up on this thread.
         var logoJob = new DecodeImageJob(AppPaths.Asset("branding", "brutal-logo-white.png"));
         var bindingsJob = new LoadBindingsJob(AppPaths.Content("input", "bindings.json"));
         Jobs.Schedule(logoJob, 4);
         Jobs.Schedule(bindingsJob);
+
+        var shaderJobs = new List<ShaderJob>();
+        foreach (var file in Directory.GetFiles(AppPaths.Asset("shaders")))
+        {
+            if (Path.GetExtension(file) is ".vert" or ".frag")
+                shaderJobs.Add(new ShaderJob(Path.GetFileName(file)));
+        }
+
+        var meshJobs = new MeshJob[WorldView.MeshCount];
+        meshJobs[WorldView.HullMesh] = new MeshJob(() => MeshBuilder.Hull(Content.Pod));
+        for (var shape = 0; shape < Galaxy.AsteroidShapes; shape++)
+        {
+            var seed = shape + 1;
+            meshJobs[WorldView.AsteroidMeshBase + shape] = new MeshJob(() => MeshBuilder.Asteroid(seed, 4));
+            meshJobs[WorldView.AsteroidLodMeshBase + shape] = new MeshJob(() => MeshBuilder.Asteroid(seed, 2));
+        }
+
+        foreach (var job in shaderJobs)
+            Jobs.Schedule(job, 6);
+        foreach (var job in meshJobs)
+            Jobs.Schedule(job, 3);
         Jobs.Pump();
 
         if (!Glfw.Init())
@@ -93,7 +125,7 @@ internal sealed class App : IDisposable
         _framebufferSize = _window.FramebufferSize;
         _swapchain = new Swapchain(_gpu, _framebufferSize, _vsync);
         _renderer = new FrameRenderer(_gpu, _swapchain);
-        Devices = new InputDevices(_window);
+        Devices = new InputDevices(_window) { Muted = options.BenchSeconds > 0 || options.CapturePath is not null };
         _ui = new UiContext(_window, Devices, _gpu, _swapchain, Settings.UiScale);
         GpuLabel = _gpu.DeviceName.ToUpperInvariant();
 
@@ -102,12 +134,23 @@ internal sealed class App : IDisposable
         BrutalLogo = Texture2D.FromRgba(_gpu, logoJob.Width, logoJob.Height, logoJob.Pixels);
         BrutalLogoRef = _ui.Register(BrutalLogo);
 
+        var shaders = new Dictionary<string, byte[]>();
+        foreach (var job in shaderJobs)
+            shaders[job.FileName] = job.Result!;
+        var meshes = new MeshData[meshJobs.Length];
+        for (var i = 0; i < meshes.Length; i++)
+            meshes[i] = meshJobs[i].Result!;
+        _scene = new SceneRenderer(_gpu, _swapchain, shaders, meshes);
+        World = new WorldView(Devices, Actions, Settings, Jobs, _scene, Content.Pod, meshes[WorldView.HullMesh].BoundingRadius);
+
         _screens = new ScreenHost(this, _ui);
         if (options.BenchSeconds > 0)
             _benchmark = new Benchmark(options.BenchSeconds);
     }
 
     public ClientSettings Settings { get; }
+    public GameContent Content { get; }
+    public WorldView World { get; }
     public JobSystem Jobs { get; }
     public InputDevices Devices { get; }
     public ActionMap Actions { get; }
@@ -124,7 +167,7 @@ internal sealed class App : IDisposable
     public void StartLocalGame()
     {
         LeaveSession();
-        Session = GameSession.StartLocal(new ServerConfig { Name = "Local game", MaxPlayers = 1 }, Settings.PlayerName);
+        Session = GameSession.StartLocal(new ServerConfig { Name = "Local game", MaxPlayers = 1 }, Content, Settings.PlayerName);
         _screens.Show(Screen.Session);
     }
 
@@ -133,7 +176,7 @@ internal sealed class App : IDisposable
         LeaveSession();
         try
         {
-            Session = GameSession.Join(host, port, Settings.PlayerName);
+            Session = GameSession.Join(host, port, Content, Settings.PlayerName);
         }
         catch (IOException e)
         {
@@ -220,6 +263,7 @@ internal sealed class App : IDisposable
             if (framebuffer != _framebufferSize || _renderer.NeedsRecreate || _swapchainDirty)
             {
                 _renderer.Recreate(framebuffer, _vsync);
+                _scene.Resize(_swapchain.Extent);
                 _framebufferSize = framebuffer;
                 _swapchainDirty = false;
                 if (!_window.IsFullscreen)
@@ -234,11 +278,37 @@ internal sealed class App : IDisposable
                 LeaveSession();
             }
 
-            _ui.NewFrame();
-            _screens.Draw(Session?.Client.AcquireSnapshot());
+            var dt = _lastFrameTimestamp == 0 ? 1f / 60f : Math.Min((float)Stopwatch.GetElapsedTime(_lastFrameTimestamp, frameStart).TotalSeconds, 0.1f);
+            _lastFrameTimestamp = frameStart;
 
-            if (_renderer.Begin(ClearColor, out var commands))
+            // The world is drawn whenever the session has put the player's hull in space.
+            var snapshot = Session?.Client.AcquireSnapshot();
+            var inSpace = snapshot is { State: SessionState.Active, OwnHull: >= 0, Galaxy: not null };
+            var worldInput = inSpace && _screens.WorldInputEnabled && _window.IsFocused;
+            var capture = worldInput && World.Mode == ViewMode.Pilot && !Devices.Muted;
+            if (capture != _pointerCaptured)
             {
+                _pointerCaptured = capture;
+                _ui.SetPointerCaptured(capture);
+                Devices.ResetPointer();
+            }
+
+            if (inSpace)
+            {
+                var viewport = new float2(_swapchain.Extent.Width, _swapchain.Extent.Height);
+                World.Update(snapshot!, Session!.Client.Input, dt, worldInput, viewport, _ui.PointerOverInterface);
+            }
+
+            _ui.NewFrame();
+            _screens.Draw(snapshot);
+
+            if (_renderer.Begin(out var commands))
+            {
+                if (inSpace)
+                    World.Draw(commands, _renderer.FrameIndex, snapshot!, _ui.Time);
+                _renderer.BeginPresentPass(ClearColor);
+                if (inSpace)
+                    _scene.Present(commands, World.ExposureValue);
                 _ui.Render(commands);
                 _renderer.End();
             }
@@ -272,6 +342,7 @@ internal sealed class App : IDisposable
         Jobs.CompleteAll();
         _gpu.Device.WaitIdle();
         BrutalLogo.Dispose();
+        _scene.Dispose();
         _ui.Dispose();
         _renderer.Dispose();
         _swapchain.Dispose();
@@ -330,6 +401,15 @@ internal sealed class App : IDisposable
             return;
         _sinceSplash += Stats.LastFrameMs / 1000f;
 
+        if (_options.OpenView is { } view && !_viewOpened && Session is not null && _sinceSplash > 0.6f)
+        {
+            _viewOpened = true;
+            if (view == "command")
+                World.SetMode(ViewMode.Command);
+            else
+                _screens.OpenMap();
+        }
+
         if (_options.CapturePath is { } path)
         {
             if (!_captureRequested && _sinceSplash >= _options.CaptureAfter)
@@ -371,6 +451,21 @@ internal sealed class App : IDisposable
             Height = image.Height;
             Pixels = image.AsSpan().ToArray();
         }
+    }
+
+    private sealed class ShaderJob(string fileName) : IJob
+    {
+        public string FileName => fileName;
+        public byte[]? Result { get; private set; }
+
+        public void Run() => Result = ShaderCompiler.Compile(fileName);
+    }
+
+    private sealed class MeshJob(Func<MeshData> build) : IJob
+    {
+        public MeshData? Result { get; private set; }
+
+        public void Run() => Result = build();
     }
 
     private sealed class LoadBindingsJob(string path) : IJob
