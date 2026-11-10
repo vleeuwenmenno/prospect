@@ -28,6 +28,10 @@ public struct HullView
     public bool BoostLocked;
     public HullOrder Order;
 
+    /// <summary>Where the hull is in a faster-than-light jump, and how long it has been in that stage.</summary>
+    public JumpPhase Jump;
+    public float JumpTimer;
+
     /// <summary>Stored energy in megajoules, and how fast it is changing in megawatts.</summary>
     public float Energy;
     public float EnergyRate;
@@ -50,6 +54,7 @@ internal sealed class ClientWorld
     /// <summary>How far in the past remote hulls are drawn, in ticks; covers the gap between their updates.</summary>
     private const double InterpolationDelayTicks = 6;
     private const float MaxExtrapolationSeconds = 0.25f;
+    private const float JumpGap = 3000f;
 
     /// <summary>A correction larger than this is a teleport, not an error to smooth.</summary>
     private const float SnapDistance = 60f;
@@ -284,6 +289,8 @@ internal sealed class ClientWorld
                 Heat = _predicted.Heat,
                 BoostLocked = _predicted.BoostLocked,
                 Order = _order,
+                Jump = _predicted.Jump,
+                JumpTimer = _predicted.JumpTimer,
                 Energy = _predicted.Energy,
                 EnergyRate = _energyRate,
                 Shield = _predicted.Shield,
@@ -457,6 +464,8 @@ internal sealed class ClientWorld
             Heat = newest.State.Heat,
             BoostLocked = newest.State.BoostLocked,
             Order = newest.Order,
+            Jump = newest.State.Jump,
+            JumpTimer = newest.State.JumpTimer,
             Energy = newest.State.Energy,
             Shield = newest.State.Shield,
             Hull = newest.State.Hull,
@@ -480,6 +489,11 @@ internal sealed class ClientWorld
             if (renderTick >= a.Tick)
             {
                 var t = (float)((renderTick - a.Tick) / Math.Max(1, b.Tick - a.Tick));
+
+                // A jump moves a hull further in one step than it could ever fly: show it at one end or the
+                // other, never somewhere along the line between.
+                if (b.State.Position.RelativeTo(a.State.Position).LengthSquared() > JumpGap * JumpGap)
+                    t = t < 0.5f ? 0f : 1f;
                 view.Position = Double3.Lerp(a.State.Position, b.State.Position, t);
                 view.Orientation = Quaternion.Slerp(a.State.Orientation, b.State.Orientation, t);
                 view.Velocity = Vector3.Lerp(a.State.Velocity, b.State.Velocity, t);

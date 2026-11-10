@@ -114,8 +114,73 @@ public static class HullSim
                 order.Kind = OrderKind.None;
         }
 
+        if (Jump(ref state, ref order, ref input, flight))
+            return false;
+
         FlightModel.Step(ref state, input, flight, Dt);
         return rocks is not null && Collide(ref state, flight, ref body, rocks, tick, impulses);
+    }
+
+    /// <summary>
+    /// Runs a faster-than-light jump: the drive spools while the hull brakes, the hull is gone for the length of
+    /// the tunnel, and then it is at its destination. Returns true while the hull is in the tunnel, when it
+    /// neither flies nor collides. A hull without a drive drops the order.
+    /// </summary>
+    private static bool Jump(ref HullState state, ref HullOrder order, ref FlightInput input, in FlightParams flight)
+    {
+        if (order.Kind == OrderKind.Jump && state.Jump == JumpPhase.None)
+        {
+            if (flight.Ftl == FtlKind.None)
+            {
+                order.Kind = OrderKind.None;
+            }
+            else
+            {
+                state.Jump = JumpPhase.Spool;
+                state.JumpTimer = 0;
+            }
+        }
+        else if (order.Kind != OrderKind.Jump && state.Jump == JumpPhase.Spool)
+        {
+            // The order was withdrawn before the drive finished charging.
+            state.Jump = JumpPhase.None;
+        }
+
+        switch (state.Jump)
+        {
+            case JumpPhase.Spool:
+                input = new FlightInput { Dampeners = true };
+                state.JumpTimer += Dt;
+                if (state.JumpTimer < flight.FtlSpoolSeconds)
+                    return false;
+
+                state.Position = order.Target;
+                state.Velocity = System.Numerics.Vector3.Zero;
+                state.AngularVelocity = System.Numerics.Vector3.Zero;
+                state.Jump = JumpPhase.Tunnel;
+                state.JumpTimer = 0;
+                return true;
+
+            case JumpPhase.Tunnel:
+                state.JumpTimer += Dt;
+                if (state.JumpTimer >= flight.FtlTunnelSeconds)
+                {
+                    state.Jump = JumpPhase.Arrive;
+                    state.JumpTimer = 0;
+                    order.Kind = OrderKind.None;
+                }
+
+                return true;
+
+            case JumpPhase.Arrive:
+                state.JumpTimer += Dt;
+                if (state.JumpTimer >= flight.FtlArriveSeconds)
+                    state.Jump = JumpPhase.None;
+                return false;
+
+            default:
+                return false;
+        }
     }
 
     /// <summary>Steps a hull with nothing to run into.</summary>

@@ -11,6 +11,7 @@
     { "at": [-1, 0, 0], "type": "microthruster" },
     { "at": [0, 1, 0], "type": "microgyro" },
     { "at": [0, -1, 0], "type": "microgenerator" },
-    { "at": [0, 1, 1], "type": "microbattery" }
+    { "at": [0, 1, 1], "type": "microbattery" },
+    { "at": [0, -1, 1], "type": "riftdrive" }
   ]
 }

@@ -10,7 +10,10 @@
     "shieldRechargeDelaySeconds": 4,
     "collisionSafeSpeed": 5,
     "collisionDamagePerTonneSpeedSquared": 0.02,
-    "collisionBounce": 0.3
+    "collisionBounce": 0.3,
+    "ftlSpoolSeconds": 2.0,
+    "ftlTunnelSeconds": 1.0,
+    "ftlArriveSeconds": 0.8
   },
   "blocks": {
     "hull": { "name": "Hull plating", "mass": 2.0, "hull": 400 },
@@ -23,6 +26,9 @@
     "shield": { "name": "Shield emitter", "mass": 2.5, "hull": 120, "shield": 1500, "shieldRecharge": 75, "powerDraw": 1.5 },
     "cargo": { "name": "Cargo hold", "mass": 1.0, "hull": 150, "cargo": 0.8 },
     "quarters": { "name": "Crew quarters", "mass": 1.5, "hull": 150, "crew": 2 },
+    "hyperdrive": { "name": "Hyperspace drive", "mass": 3.0, "hull": 180, "powerDraw": 0.4, "ftl": "hyperspace" },
+    "wormholedrive": { "name": "Wormhole generator", "mass": 4.0, "hull": 160, "powerDraw": 0.5, "ftl": "wormhole" },
+    "riftdrive": { "name": "Rift cutter", "mass": 0.3, "hull": 30, "powerDraw": 0.05, "ftl": "rift" },
     "microcore": { "name": "Drone core", "mass": 0.4, "hull": 60, "powerDraw": 0.05, "core": true },
     "microgenerator": { "name": "Drone generator", "mass": 0.5, "hull": 40, "powerOutput": 1.2 },
     "microbattery": { "name": "Drone battery", "mass": 0.3, "hull": 30, "energyStorage": 8 },

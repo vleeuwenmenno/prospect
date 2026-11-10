@@ -49,7 +49,7 @@ public enum RejectReason : byte
 public static class ProtocolInfo
 {
     /// <summary>Bumped whenever the wire format changes. Client and server must match exactly.</summary>
-    public const uint Version = 7;
+    public const uint Version = 8;
 
     public const ushort DefaultPort = 27420;
     public const int MaxNameBytes = 48;

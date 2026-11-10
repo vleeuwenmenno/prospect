@@ -429,6 +429,16 @@ internal sealed class App : IDisposable
                 _screens.OpenShipInfo();
             else if (view == "galaxy")
                 _screens.OpenGalaxyOverview();
+            else if (view.StartsWith("jump", StringComparison.Ordinal))
+            {
+                World.FtlPreview = view switch
+                {
+                    "jump-wormhole" => FtlKind.Wormhole,
+                    "jump-rift" => FtlKind.Rift,
+                    _ => FtlKind.None,
+                };
+                Session.Client.Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = World.Galaxy!.CenterOf(new SectorCoord(12, 0, -7)) });
+            }
             else
                 _screens.OpenMap();
         }

@@ -36,7 +36,7 @@ public static class InputMessage
 
         writer.WriteUInt16(orderId);
         writer.WriteByte((byte)order.Kind);
-        if (order.Kind == OrderKind.MoveTo)
+        if (order.Kind != OrderKind.None)
             WorldWire.WritePosition(ref writer, order.Target);
     }
 
@@ -57,10 +57,10 @@ public static class InputMessage
 
         orderId = reader.ReadUInt16();
         var kind = reader.ReadByte();
-        if (kind > (byte)OrderKind.MoveTo)
+        if (kind > (byte)OrderKind.Jump)
             return false;
         order.Kind = (OrderKind)kind;
-        if (order.Kind == OrderKind.MoveTo && !WorldWire.TryReadPosition(ref reader, out order.Target))
+        if (order.Kind != OrderKind.None && !WorldWire.TryReadPosition(ref reader, out order.Target))
             return false;
         return reader.IsValid;
     }
@@ -86,7 +86,7 @@ public static class FleetOrdersMessage
         {
             writer.WriteUInt32(order.Hull);
             writer.WriteByte((byte)order.Order.Kind);
-            if (order.Order.Kind == OrderKind.MoveTo)
+            if (order.Order.Kind != OrderKind.None)
                 WorldWire.WritePosition(ref writer, order.Order.Target);
         }
     }
@@ -101,10 +101,10 @@ public static class FleetOrdersMessage
         {
             orders[i].Hull = reader.ReadUInt32();
             var kind = reader.ReadByte();
-            if (kind > (byte)OrderKind.MoveTo)
+            if (kind > (byte)OrderKind.Jump)
                 return false;
             orders[i].Order = new HullOrder { Kind = (OrderKind)kind };
-            if (kind == (byte)OrderKind.MoveTo && !WorldWire.TryReadPosition(ref reader, out orders[i].Order.Target))
+            if (kind != (byte)OrderKind.None && !WorldWire.TryReadPosition(ref reader, out orders[i].Order.Target))
                 return false;
         }
 
@@ -156,7 +156,7 @@ public static class RockDeltasMessage
 /// <summary>A hull as it appears in a snapshot.</summary>
 public struct HullRecord
 {
-    public const int MaxWireSize = 4 + 4 + 1 + 8 + 24 + 12 + 16 + 12 + 4 + 1 + 16 + 24;
+    public const int MaxWireSize = 4 + 4 + 1 + 8 + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 16 + 24;
 
     public uint Id;
     public uint Owner;
@@ -181,12 +181,13 @@ public struct HullRecord
         writer.WriteSingle(State.Orientation.W);
         WorldWire.WriteVector(ref writer, State.AngularVelocity);
         writer.WriteSingle(State.Heat);
-        writer.WriteByte((byte)((State.BoostLocked ? 1 : 0) | (Order.Kind == OrderKind.MoveTo ? 2 : 0)));
+        writer.WriteByte((byte)((State.BoostLocked ? 1 : 0) | (byte)Order.Kind << 1 | (byte)State.Jump << 3));
+        writer.WriteSingle(State.JumpTimer);
         writer.WriteSingle(State.Energy);
         writer.WriteSingle(State.Shield);
         writer.WriteSingle(State.Hull);
         writer.WriteSingle(State.ShieldCooldown);
-        if (Order.Kind == OrderKind.MoveTo)
+        if (Order.Kind != OrderKind.None)
             WorldWire.WritePosition(ref writer, Order.Target);
     }
 
@@ -207,14 +208,19 @@ public struct HullRecord
         record.State.Heat = Math.Clamp(reader.ReadSingle(), 0f, 1f);
         var flags = reader.ReadByte();
         record.State.BoostLocked = (flags & 1) != 0;
+        record.State.Jump = (JumpPhase)(flags >> 3 & 3);
+        record.State.JumpTimer = reader.ReadSingle();
+        ok &= float.IsFinite(record.State.JumpTimer);
         record.State.Energy = reader.ReadSingle();
         record.State.Shield = reader.ReadSingle();
         record.State.Hull = reader.ReadSingle();
         record.State.ShieldCooldown = reader.ReadSingle();
         ok &= float.IsFinite(record.State.Energy) && float.IsFinite(record.State.Shield) && float.IsFinite(record.State.Hull) && float.IsFinite(record.State.ShieldCooldown);
-        if ((flags & 2) != 0)
+        var kind = flags >> 1 & 3;
+        ok &= kind <= (int)OrderKind.Jump;
+        if (kind != 0 && ok)
         {
-            record.Order.Kind = OrderKind.MoveTo;
+            record.Order.Kind = (OrderKind)kind;
             ok &= WorldWire.TryReadPosition(ref reader, out record.Order.Target);
         }
 

@@ -389,6 +389,82 @@ public sealed class PowerAndDamageTests
     }
 }
 
+public sealed class JumpTests
+{
+    private static readonly GameContent Content = GameContent.Load();
+
+    [Fact]
+    public void EveryDriveKindIsFittedToSomeHull()
+    {
+        var kinds = Content.Designs.Select(d => d.Stats.Ftl).ToHashSet();
+        Assert.Contains(FtlKind.Hyperspace, kinds);
+        Assert.Contains(FtlKind.Wormhole, kinds);
+        Assert.Contains(FtlKind.Rift, kinds);
+    }
+
+    [Fact]
+    public void AJumpSpoolsTunnelsAndArrivesAnyDistanceAway()
+    {
+        var flight = Content.Pod.Flight;
+        var galaxy = Content.Galaxy;
+        var destination = galaxy.CenterOf(new SectorCoord(100, 2, -37));
+        var state = HullState.Spawn(Double3.Zero, flight);
+        state.Velocity = new Vector3(0, 0, -30);
+        var order = new HullOrder { Kind = OrderKind.Jump, Target = destination };
+
+        var phases = new List<JumpPhase>();
+        var ticks = 0;
+        while ((order.Kind != OrderKind.None || state.Jump != JumpPhase.None) && ticks++ < 600)
+        {
+            HullSim.Step(ref state, ref order, default, flight);
+            if (phases.Count == 0 || phases[^1] != state.Jump)
+                phases.Add(state.Jump);
+
+            // Until the drive has finished charging the hull is still where it was.
+            if (state.Jump == JumpPhase.Spool)
+                Assert.True(state.Position.RelativeTo(Double3.Zero).Length() < 100f);
+        }
+
+        Assert.Equal([JumpPhase.Spool, JumpPhase.Tunnel, JumpPhase.Arrive, JumpPhase.None], phases);
+        Assert.True(destination.RelativeTo(state.Position).Length() < 1f);
+        Assert.Equal(new SectorCoord(100, 2, -37), galaxy.SectorOf(state.Position));
+        Assert.Equal(Vector3.Zero, state.Velocity);
+        var seconds = flight.FtlSpoolSeconds + flight.FtlTunnelSeconds + flight.FtlArriveSeconds;
+        Assert.InRange(ticks, (int)(seconds * 60) - 3, (int)(seconds * 60) + 3);
+    }
+
+    [Fact]
+    public void WithdrawingTheOrderWhileSpoolingCancelsTheJump()
+    {
+        var flight = Content.Pod.Flight;
+        var state = HullState.Spawn(Double3.Zero, flight);
+        var order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(1e6, 0, 0) };
+        for (var i = 0; i < 30; i++)
+            HullSim.Step(ref state, ref order, default, flight);
+        Assert.Equal(JumpPhase.Spool, state.Jump);
+
+        order = default;
+        HullSim.Step(ref state, ref order, default, flight);
+        Assert.Equal(JumpPhase.None, state.Jump);
+        Assert.True(state.Position.RelativeTo(Double3.Zero).Length() < 1f);
+    }
+
+    [Fact]
+    public void AHullThatHasLostItsDriveCannotJump()
+    {
+        var pod = Content.Pod;
+        var drive = Array.FindIndex(pod.Types, t => t.Ftl != FtlKind.None);
+        pod.Evaluate(pod.FullMask & ~(1UL << drive), out var flight, out var stats);
+        Assert.Equal(FtlKind.None, stats.Ftl);
+
+        var state = HullState.Spawn(Double3.Zero, flight);
+        var order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(1e6, 0, 0) };
+        HullSim.Step(ref state, ref order, default, flight);
+        Assert.Equal(OrderKind.None, order.Kind);
+        Assert.Equal(JumpPhase.None, state.Jump);
+    }
+}
+
 public sealed class HullStoreTests
 {
     [Fact]
@@ -488,6 +564,49 @@ public sealed class FlightSessionTests
         Assert.True(after.Position.RelativeTo(before.Position).Length() > 20f);
         Assert.True(after.Position.RelativeTo(own.Position).Length() < 0.5f);
         Assert.Null(server.Fault);
+    }
+
+    [Fact]
+    public void ThePilotAndAFleetHullJumpToADistantSectorAndTheClientFollows()
+    {
+        using var session = GameSession.StartLocal(new ServerConfig { MaxPlayers = 1 }, Content, "Pilot");
+        var pod = WaitForOwnHull(session);
+        var galaxy = session.Client.AcquireSnapshot().Galaxy!;
+        var far = new SectorCoord(64, 0, -20);
+
+        HullView[] Fleet()
+        {
+            var snapshot = session.Client.AcquireSnapshot();
+            return snapshot.Hulls.Take(snapshot.HullCount).Where(h => h.Owner == snapshot.PlayerId && !h.IsOwn).ToArray();
+        }
+
+        var deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 10;
+        while (Fleet().Length == 0 && Stopwatch.GetTimestamp() < deadline)
+            Thread.Sleep(20);
+        var vessel = Fleet()[0];
+
+        // The flown hull's jump is predicted by the client; the fleet hull's is carried out by the server.
+        session.Client.Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = galaxy.CenterOf(far) });
+        session.Client.Input.IssueFleetOrder(vessel.Id, new HullOrder { Kind = OrderKind.Jump, Target = galaxy.CenterOf(far) + new Vector3(60, 0, 0) });
+
+        var spooling = WaitFor(session, hull => hull.Jump == JumpPhase.Spool, 3);
+        Assert.Equal(new SectorCoord(0, 0, 0), galaxy.SectorOf(spooling.Position));
+
+        var arrived = WaitFor(session, hull => hull.Jump == JumpPhase.None && galaxy.SectorOf(hull.Position) == far, 10);
+        Assert.Equal(pod.Id, arrived.Id);
+        Assert.Equal(OrderKind.None, arrived.Order.Kind);
+
+        // Prediction and server agree on where it came out.
+        Thread.Sleep(600);
+        var settled = OwnHull(session);
+        Assert.True(settled.Position.RelativeTo(arrived.Position).Length() < 30f);
+        Assert.Equal(far, galaxy.SectorOf(settled.Position));
+
+        deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 10;
+        while (galaxy.SectorOf(Fleet().First(h => h.Id == vessel.Id).Position) != far && Stopwatch.GetTimestamp() < deadline)
+            Thread.Sleep(50);
+        Assert.Equal(far, galaxy.SectorOf(Fleet().First(h => h.Id == vessel.Id).Position));
+        Assert.Null(session.Fault);
     }
 
     [Fact]

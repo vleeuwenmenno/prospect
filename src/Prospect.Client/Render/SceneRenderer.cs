@@ -23,6 +23,18 @@ internal struct FrameConstants
     public float4 Drift;
     public float4 Grid;
     public float4 GridPlane;
+
+    /// <summary>The viewer's own jump: drive kind, phase, progress through the phase.</summary>
+    public float4 Ftl;
+}
+
+/// <summary>The mark of a jump seen from outside: where, how big, and which drive at which stage.</summary>
+internal struct FtlMark
+{
+    public float4 PositionSize;
+
+    /// <summary>Drive kind, phase, progress through the phase, and a per-hull seed.</summary>
+    public float4 Params;
 }
 
 /// <summary>One drawn mesh: a camera-relative 3x4 transform and a colour. Alpha 0 is rock, 1 is hull plating.</summary>
@@ -58,6 +70,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
     public const int MaxInstances = 16384;
     private const int StarCount = 7000;
     private const int DustCount = 1400;
+    public const int MaxFtlMarks = 64;
     private const VkFormat ColorFormat = VkFormat.R16G16B16A16SFloat;
     private const VkFormat DepthFormat = VkFormat.D32SFloat;
 
@@ -73,6 +86,9 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private readonly VkPipeline _meshPipeline;
     private readonly VkPipeline _gridPipeline;
     private readonly VkPipeline _tonemapPipeline;
+    private readonly VkPipeline _ftlMarkPipeline;
+    private readonly VkPipeline _ftlScreenPipeline;
+    private readonly GpuBuffer[] _ftlBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
     private readonly VkSampler _sampler;
     private readonly VkDescriptorSet _sceneSet;
     private readonly VkDescriptorSet[] _frameSets = new VkDescriptorSet[FrameRenderer.FramesInFlight];
@@ -115,6 +131,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         {
             _frameBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.UniformBufferBit, sizeof(FrameConstants));
             _instanceBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshInstance) * MaxInstances);
+            _ftlBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(FtlMark) * MaxFtlMarks);
         }
 
         // Descriptors: set 0 of scene shaders is the frame constants; set 0 of the tone mapper is the scene image.
@@ -217,8 +234,29 @@ internal sealed unsafe class SceneRenderer : IDisposable
         _gridPipeline = ScenePipeline(Module(shaders, "grid.vert"), Module(shaders, "grid.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthRead, Presets.BlendState.BlendColorAlpha);
         _tonemapPipeline = Pipeline(Module(shaders, "fullscreen.vert"), Module(shaders, "tonemap.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthOff, Presets.BlendState.BlendNone, _tonemapPipelineLayout, swapchain.RenderPass);
 
+        // The pilot's jump effect lays itself over the scene: its colour is added, and its alpha hides what is
+        // behind it once the hull is in the tunnel.
+        var overlayAttachment = new VkPipelineColorBlendAttachmentState
+        {
+            BlendEnable = true,
+            SrcColorBlendFactor = VkBlendFactor.One,
+            DstColorBlendFactor = VkBlendFactor.OneMinusSrcAlpha,
+            ColorBlendOp = VkBlendOp.Add,
+            SrcAlphaBlendFactor = VkBlendFactor.One,
+            DstAlphaBlendFactor = VkBlendFactor.OneMinusSrcAlpha,
+            AlphaBlendOp = VkBlendOp.Add,
+            ColorWriteMask = VkColorComponentFlags.RBit | VkColorComponentFlags.GBit | VkColorComponentFlags.BBit | VkColorComponentFlags.ABit,
+        };
+        var overlayBlend = new VkPipelineColorBlendStateCreateInfo { AttachmentCount = 1, Attachments = &overlayAttachment };
+        var markInput = new VertexInput(1, 2).AddBindingWithAttributes<FtlMark>(0, 0, VkVertexInputRate.Instance);
+        _ftlMarkPipeline = ScenePipeline(Module(shaders, "ftl_mark.vert"), Module(shaders, "ftl_mark.frag"), markInput, Presets.Rasterization.Fill.CullNone, &depthRead, Presets.BlendState.BlendAdditive);
+        _ftlScreenPipeline = ScenePipeline(Module(shaders, "fullscreen.vert"), Module(shaders, "ftl_screen.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthOff, &overlayBlend);
+
         CreateTargets(swapchain.Extent);
     }
+
+    /// <summary>The jump-mark memory for this frame; say how many were filled when calling <see cref="Render"/>.</summary>
+    public Span<FtlMark> FtlMarks(int frameIndex) => new((void*)_ftlBuffers[frameIndex].Mapped, MaxFtlMarks);
 
     /// <summary>Recreates the render targets after the window changed size. The device must be idle.</summary>
     public void Resize(VkExtent2D extent)
@@ -233,7 +271,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
     public Span<MeshInstance> Instances(int frameIndex) => new((void*)_instanceBuffers[frameIndex].Mapped, MaxInstances);
 
     /// <summary>Records the scene into the floating-point target. Call before the present pass is opened.</summary>
-    public void Render(CommandBuffer commands, int frameIndex, in FrameConstants constants, ReadOnlySpan<DrawBatch> batches, bool drawGrid)
+    public void Render(CommandBuffer commands, int frameIndex, in FrameConstants constants, ReadOnlySpan<DrawBatch> batches, bool drawGrid, int ftlMarks)
     {
         *(FrameConstants*)_frameBuffers[frameIndex].Mapped = constants;
 
@@ -302,6 +340,20 @@ internal sealed unsafe class SceneRenderer : IDisposable
             commands.Draw(6, 1, 0, 0);
         }
 
+        if (ftlMarks > 0)
+        {
+            var marks = _ftlBuffers[frameIndex].Buffer;
+            commands.BindPipeline(VkPipelineBindPoint.Graphics, _ftlMarkPipeline);
+            commands.BindVertexBuffers(0, new ReadOnlySpan<VkBuffer>(in marks), new ReadOnlySpan<ByteSize64>(in zero));
+            commands.Draw(6, ftlMarks, 0, 0);
+        }
+
+        if (constants.Ftl.Y > 0.5f)
+        {
+            commands.BindPipeline(VkPipelineBindPoint.Graphics, _ftlScreenPipeline);
+            commands.Draw(3, 1, 0, 0);
+        }
+
         commands.EndRendering();
         Transition(commands, _colorImage, VkImageAspectFlags.ColorBit, VkImageLayout.ColorAttachmentOptimal, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.FragmentShaderBit);
     }
@@ -323,7 +375,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         device.WaitIdle();
         DestroyTargets();
         device.DestroySampler(_sampler, null);
-        foreach (var pipeline in (ReadOnlySpan<VkPipeline>)[_backgroundPipeline, _starPipeline, _dustPipeline, _meshPipeline, _gridPipeline, _tonemapPipeline])
+        foreach (var pipeline in (ReadOnlySpan<VkPipeline>)[_backgroundPipeline, _starPipeline, _dustPipeline, _meshPipeline, _gridPipeline, _tonemapPipeline, _ftlMarkPipeline, _ftlScreenPipeline])
             device.DestroyPipeline(pipeline, null);
         device.DestroyPipelineLayout(_scenePipelineLayout, null);
         device.DestroyPipelineLayout(_tonemapPipelineLayout, null);
@@ -334,6 +386,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         {
             _frameBuffers[i].Destroy(_gpu);
             _instanceBuffers[i].Destroy(_gpu);
+            _ftlBuffers[i].Destroy(_gpu);
         }
 
         var (stars, vertices, indices) = (_starBuffer, _vertexBuffer, _indexBuffer);

@@ -3,6 +3,21 @@ using System.Text.Json;
 
 namespace Prospect.Game.World;
 
+/// <summary>The faster-than-light drives. Each crosses any distance; they differ in how the jump looks.</summary>
+public enum FtlKind : byte
+{
+    None = 0,
+
+    /// <summary>The stars stretch into lines and the hull is gone.</summary>
+    Hyperspace = 1,
+
+    /// <summary>A round gate opens ahead and the hull flies through it.</summary>
+    Wormhole = 2,
+
+    /// <summary>A tear opens in space and swallows the hull.</summary>
+    Rift = 3,
+}
+
 /// <summary>A kind of block a hull can be built from, loaded from <c>content/blocks</c>.</summary>
 public sealed class BlockType
 {
@@ -21,6 +36,9 @@ public sealed class BlockType
 
     /// <summary>True for the block a hull cannot exist without; losing it destroys the hull.</summary>
     public bool Core { get; init; }
+
+    /// <summary>The faster-than-light drive this block provides, if any.</summary>
+    public FtlKind Ftl { get; init; }
 
     /// <summary>Kilonewton-metres of turning effort.</summary>
     public float Torque { get; init; }
@@ -53,6 +71,9 @@ public sealed class FlightRules
     public required float CollisionSafeSpeed { get; init; }
     public required float CollisionDamagePerTonneSpeedSquared { get; init; }
     public required float CollisionBounce { get; init; }
+    public required float FtlSpoolSeconds { get; init; }
+    public required float FtlTunnelSeconds { get; init; }
+    public required float FtlArriveSeconds { get; init; }
 }
 
 public sealed class BlockCatalog
@@ -88,6 +109,9 @@ public sealed class BlockCatalog
             CollisionSafeSpeed = r.GetProperty("collisionSafeSpeed"u8).GetSingle(),
             CollisionDamagePerTonneSpeedSquared = r.GetProperty("collisionDamagePerTonneSpeedSquared"u8).GetSingle(),
             CollisionBounce = r.GetProperty("collisionBounce"u8).GetSingle(),
+            FtlSpoolSeconds = r.GetProperty("ftlSpoolSeconds"u8).GetSingle(),
+            FtlTunnelSeconds = r.GetProperty("ftlTunnelSeconds"u8).GetSingle(),
+            FtlArriveSeconds = r.GetProperty("ftlArriveSeconds"u8).GetSingle(),
         };
 
         static float Number(JsonElement block, ReadOnlySpan<byte> name) =>
@@ -106,6 +130,15 @@ public sealed class BlockCatalog
                 Thrust = Number(block, "thrust"u8),
                 ForwardOnly = block.TryGetProperty("forwardOnly"u8, out var forwardOnly) && forwardOnly.GetBoolean(),
                 Core = block.TryGetProperty("core"u8, out var core) && core.GetBoolean(),
+                Ftl = block.TryGetProperty("ftl"u8, out var ftl)
+                    ? ftl.GetString() switch
+                    {
+                        "hyperspace" => FtlKind.Hyperspace,
+                        "wormhole" => FtlKind.Wormhole,
+                        "rift" => FtlKind.Rift,
+                        var other => throw new InvalidDataException($"{path}: unknown ftl drive \"{other}\""),
+                    }
+                    : FtlKind.None,
                 Torque = Number(block, "torque"u8),
                 PowerOutput = Number(block, "powerOutput"u8),
                 PowerDraw = Number(block, "powerDraw"u8),
@@ -152,6 +185,9 @@ public struct HullStats
     public float PowerRequired;
     public float PowerGenerated;
     public float EnergyStorage;
+
+    /// <summary>The hull's faster-than-light drive, or none.</summary>
+    public FtlKind Ftl;
 }
 
 /// <summary>What kind of thing a hull is. It decides how the hull is shown and, later, what it can do.</summary>
@@ -294,6 +330,7 @@ public sealed class HullDesign
         float generated = 0, idlePower = 0, thrustPower = 0, shieldPower = 0, storage = 0, cargo = 0;
         var crew = 0;
         var blocks = 0;
+        var ftl = FtlKind.None;
 
         for (var i = 0; i < Cells.Length; i++)
         {
@@ -317,6 +354,8 @@ public sealed class HullDesign
             storage += type.EnergyStorage;
             cargo += type.Cargo;
             crew += type.Crew;
+            if (ftl == FtlKind.None)
+                ftl = type.Ftl;
 
             if (type.ForwardOnly)
                 engineThrust += type.Thrust;
@@ -370,6 +409,10 @@ public sealed class HullDesign
             CollisionSafeSpeed = rules.CollisionSafeSpeed,
             CollisionDamagePerTonneSpeedSquared = rules.CollisionDamagePerTonneSpeedSquared,
             CollisionBounce = rules.CollisionBounce,
+            Ftl = ftl,
+            FtlSpoolSeconds = rules.FtlSpoolSeconds,
+            FtlTunnelSeconds = rules.FtlTunnelSeconds,
+            FtlArriveSeconds = rules.FtlArriveSeconds,
         };
 
         stats = new HullStats
@@ -392,6 +435,7 @@ public sealed class HullDesign
             PowerRequired = flight.PowerRequired,
             PowerGenerated = generated,
             EnergyStorage = storage,
+            Ftl = ftl,
         };
     }
 }

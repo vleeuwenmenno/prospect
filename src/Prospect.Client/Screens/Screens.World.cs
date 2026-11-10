@@ -218,6 +218,28 @@ internal sealed partial class ScreenHost
             snapshot.Dampeners ? "DAMPENERS ON"u8 : "DAMPENERS OFF"u8
         );
 
+        if (own.Jump is JumpPhase.Spool or JumpPhase.Tunnel)
+        {
+            // The jump drive charging: which drive, how far along, and how to stop it.
+            var drive = flight.Ftl switch
+            {
+                FtlKind.Hyperspace => "HYPERSPACE DRIVE"u8,
+                FtlKind.Wormhole => "WORMHOLE GENERATOR"u8,
+                _ => "RIFT CUTTER"u8,
+            };
+            var spooling = own.Jump == JumpPhase.Spool;
+            var driveSize = Kit.Measure(_ui.SansMedium, Theme.FontSmall, drive);
+            var at = new float2(display.X * 0.5f, display.Y * 0.5f + Kit.Px(86));
+            Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, at - new float2(driveSize.X * 0.5f, 0), Theme.Info, drive);
+            var gauge = new float2(Kit.Px(260), Kit.Px(5));
+            var gaugeMin = at + new float2(-gauge.X * 0.5f, Kit.Px(24));
+            draw.AddRectFilled(gaugeMin, gaugeMin + gauge, Kit.Color(Theme.Void, 0.8f));
+            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * (spooling ? Math.Clamp(own.JumpTimer / flight.FtlSpoolSeconds, 0f, 1f) : 1f), gauge.Y), Kit.Color(Theme.Info));
+            var note = spooling ? "SPOOLING  -  THRUST TO CANCEL"u8 : "IN TRANSIT"u8;
+            var noteSize = Kit.Measure(_ui.Mono, Theme.FontCaption, note);
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, at + new float2(-noteSize.X * 0.5f, Kit.Px(36)), Theme.TextDim, note);
+        }
+
         if (own.Order.Kind == OrderKind.MoveTo)
         {
             var distance = own.Order.Target.RelativeTo(world.OwnPosition).Length();
@@ -438,7 +460,11 @@ internal sealed partial class ScreenHost
                     }
             );
 
-            if (hull.Order.Kind == OrderKind.MoveTo)
+            if (hull.Order.Kind == OrderKind.Jump || hull.Jump != JumpPhase.None)
+            {
+                Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(19)), Theme.Info, "JUMPING"u8);
+            }
+            else if (hull.Order.Kind == OrderKind.MoveTo)
             {
                 var distance = hull.Order.Target.RelativeTo(world.HullPosition(hull)).Length();
                 Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(19)), Theme.Accent, distance >= 1000f ? Kit.F($"MOVING   {distance / 1000f:0.00} KM") : Kit.F($"MOVING   {distance:0} M"));
@@ -632,7 +658,7 @@ internal sealed partial class ScreenHost
 
         var stats = _sheetStats;
         var line = Kit.Px(21);
-        var size = new float2(Kit.Px(400), Kit.Px(Theme.Space5 * 2 + 46) + line * 23);
+        var size = new float2(Kit.Px(400), Kit.Px(Theme.Space5 * 2 + 46) + line * 24);
         var inset = besideFleetList ? Kit.Px(300 + Theme.Space5 * 2) : Kit.Px(Theme.Space5);
         var min = new float2(_ui.DisplaySize.X - size.X - inset, (_ui.DisplaySize.Y - size.Y) * 0.5f);
         Kit.PanelFrame(draw, min, min + size);
@@ -679,6 +705,17 @@ internal sealed partial class ScreenHost
         Row("Generated energy"u8, Kit.F($"{stats.PowerGenerated:0.00} MW"));
         Row("Energy margin"u8, Kit.F($"{margin:+0.00;-0.00} MW"), margin < 0 ? Theme.Bad : Theme.Good);
         Row("Storable energy"u8, Kit.F($"{stats.EnergyStorage:0} MJ"));
+        Row(
+            "FTL drive"u8,
+            stats.Ftl switch
+            {
+                FtlKind.Hyperspace => "Hyperspace"u8,
+                FtlKind.Wormhole => "Wormhole"u8,
+                FtlKind.Rift => "Rift"u8,
+                _ => "None"u8,
+            },
+            stats.Ftl == FtlKind.None ? Theme.TextMute : Theme.Info
+        );
     }
 
     private static void DrawTargetMarker(ImDrawListPtr draw, float2 center, uint rgb)
@@ -956,7 +993,7 @@ internal sealed partial class ScreenHost
 
         // A standing order's destination.
         var order = world.Own.Order;
-        if (order.Kind == OrderKind.MoveTo && galaxy.SectorOf(order.Target).Y == _mapLayer)
+        if (order.Kind != OrderKind.None && galaxy.SectorOf(order.Target).Y == _mapLayer)
         {
             var destination = ToScreen((float)(order.Target.X / size), (float)(order.Target.Z / size));
             draw.AddLine(ToScreen(player.X, player.Y), destination, Kit.Color(Theme.Accent, 0.5f));
@@ -973,8 +1010,14 @@ internal sealed partial class ScreenHost
             var corner = new float2(Math.Max(cell * 0.5f, 7f), Math.Max(cell * 0.5f, 7f));
             Brackets(draw, at - corner, at + corner, Math.Clamp(cell * 0.3f, 3f, Kit.Px(10)), Kit.Color(Theme.Text, 0.85f));
             Kit.Text(draw, _ui.Mono, Theme.FontCaption, mouse + new float2(Kit.Px(18), -Kit.Px(6)), Theme.Text, Kit.F($"{hover.X} : {hover.Z}"));
+            // Right-click jumps the selection there; with Shift held it flies there under its own engines.
             if (ImGui.IsMouseClicked(ImGuiMouseButton.Right) && _app.Session is { } session)
-                world.OrderMove(session.Client.Input, galaxy.CenterOf(hover));
+            {
+                if (io.KeyShift)
+                    world.OrderMove(session.Client.Input, galaxy.CenterOf(hover));
+                else
+                    world.OrderJump(session.Client.Input, galaxy.CenterOf(hover));
+            }
         }
 
         // Title, layer and scale.
@@ -991,7 +1034,8 @@ internal sealed partial class ScreenHost
         hint.X += Kit.KeyHint(draw, hint, "WASD"u8, "Pan"u8);
         hint.X += Kit.KeyHint(draw, hint, "WHEEL"u8, "Zoom"u8);
         hint.X += Kit.KeyHint(draw, hint, "LMB / DRAG"u8, "Select ships"u8);
-        hint.X += Kit.KeyHint(draw, hint, "RMB"u8, "Send selection"u8);
+        hint.X += Kit.KeyHint(draw, hint, "RMB"u8, "Jump there"u8);
+        hint.X += Kit.KeyHint(draw, hint, "SHIFT + RMB"u8, "Fly there"u8);
         hint.X += Kit.KeyHint(draw, hint, "PGUP / PGDN"u8, "Layer"u8);
         hint.X += Kit.KeyHint(draw, hint, "SPACE"u8, "Centre on me"u8);
         Kit.KeyHint(draw, hint, "M / ESC"u8, "Close"u8);
@@ -1059,7 +1103,7 @@ internal sealed partial class ScreenHost
             y += line;
         }
 
-        Kit.Text(draw, _ui.Sans, Theme.FontCaption, text + new float2(0, y + Kit.Px(4)), Theme.TextMute, "Right-click sends the selected ships here"u8);
+        Kit.Text(draw, _ui.Sans, Theme.FontCaption, text + new float2(0, y + Kit.Px(4)), Theme.TextMute, "Right-click jumps here; Shift flies"u8);
     }
 
     /// <summary>Grid lines every <paramref name="every"/> sectors, drawn on sector boundaries.</summary>

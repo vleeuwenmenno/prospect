@@ -30,6 +30,11 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   and a heavy ship shoves a boulder aside. A pushed asteroid drifts and settles. The server tells clients only
   when an asteroid is hit; its motion from then on is a formula, and new players are sent the displaced ones. The server is authoritative; the client predicts its own hull with the same
   flight code and reconciles against snapshots; other players' hulls are interpolated.
+- **Faster-than-light.** A drive is a block. There are three kinds, each with its own look: hyperspace (the stars
+  stretch into lines), wormhole (a turning gate) and rift (a tear in space). A jump is a standing order: the drive
+  spools for two seconds while the hull brakes, the hull is gone for one, and it comes out at its destination, any
+  distance away. Taking the controls during the spool cancels it. The client generates the destination while the
+  drive spools.
 - **Resources.** Asteroids carry iron, copper, nickel, titanium, silver or gold, or are bare rock; a sector has a
   main ore, and the rarer ones grow more common toward the core. Nothing can be mined yet.
 - **Fleet.** Each player starts with the command pod and two mining vessels. Hulls nobody is flying are flown by
@@ -45,7 +50,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 - **Renderer.** Floating-point scene target and tone mapping, camera-relative rendering from double-precision
   positions, a star field and sky, instanced hull and asteroid meshes with two levels of detail.
 
-Not there yet: mining, taking control of ships owned by other players (permissions), gates and jumps,
+Not there yet: mining, taking control of ships owned by other players (permissions), jump range and cost, gates,
 saving. Asteroids come in a shared set of shapes until mining gives each one its own body. Designs are limited to 64
 blocks for now, because block state is sent as one bit per block.
 

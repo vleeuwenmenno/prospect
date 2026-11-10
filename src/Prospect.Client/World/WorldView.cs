@@ -37,7 +37,9 @@ internal sealed class WorldView
 
     private const int RingXZ = 2;
     private const int RingY = 1;
-    private const int SlotCount = (RingXZ * 2 + 1) * (RingXZ * 2 + 1) * (RingY * 2 + 1);
+    // Enough for the block around the camera plus the heart of a jump's destination, generated ahead of arrival.
+    private const int SlotCount = (RingXZ * 2 + 1) * (RingXZ * 2 + 1) * (RingY * 2 + 1) + 27;
+    private const float JumpGap = 3000f;
     private const float NearPlane = 0.25f;
     private const float PilotFov = 62f * MathF.PI / 180f;
     private const float CommandFov = 48f * MathF.PI / 180f;
@@ -98,6 +100,7 @@ internal sealed class WorldView
     private readonly RockRef[] _selectedRocks = new RockRef[MaxSelection];
     private int _selectedRockCount;
     private SessionSnapshot? _snapshot;
+    private bool _jumpOrders;
     private uint _followId;
     private Double3 _focusFrom;
     private float _focusBlend = 1f;
@@ -113,6 +116,7 @@ internal sealed class WorldView
 
     private Galaxy? _galaxy;
     private SectorCoord _streamCenter;
+    private SectorCoord _streamAhead;
     private bool _streamDirty = true;
     private SectorCoord _currentCoord = new(int.MinValue, 0, 0);
 
@@ -168,6 +172,12 @@ internal sealed class WorldView
 
     /// <summary>The hulls selected in the command view, by id.</summary>
     public ReadOnlySpan<uint> Selection => _selected.AsSpan(0, _selectedCount);
+
+    /// <summary>
+    /// When set, the pilot's own jump is drawn with this drive's effect whatever drive the hull has. For looking
+    /// at each effect from the command line.
+    /// </summary>
+    public FtlKind FtlPreview { get; set; }
 
     /// <summary>In the pilot view: the hull under the reticle, or zero.</summary>
     public uint HoveredHull { get; private set; }
@@ -256,7 +266,10 @@ internal sealed class WorldView
         ref var own = ref snapshot.Hulls[snapshot.OwnHull];
         var alpha = TickAlpha(snapshot);
         Own = own;
-        OwnPosition = Double3.Lerp(own.PreviousPosition, own.Position, alpha);
+
+        // A jump moves the hull further in one tick than it could fly; there is nothing in between to show.
+        var jumped = own.Position.RelativeTo(own.PreviousPosition).LengthSquared() > JumpGap * JumpGap;
+        OwnPosition = jumped ? own.Position : Double3.Lerp(own.PreviousPosition, own.Position, alpha);
         OwnOrientation = Quaternion.Slerp(own.PreviousOrientation, own.Orientation, alpha);
 
         if (own.Id != _ownId)
@@ -344,13 +357,39 @@ internal sealed class WorldView
         var aspect = _viewport.X / _viewport.Y;
         var candidateCount = 0;
         Array.Clear(_meshCounts);
+        var marks = _scene.FtlMarks(frameIndex);
+        var markCount = 0;
 
         // Hulls.
         for (var i = 0; i < snapshot.HullCount && candidateCount < _candidates.Length; i++)
         {
             ref var hull = ref snapshot.Hulls[i];
-            var position = Double3.Lerp(hull.PreviousPosition, hull.Position, alpha).RelativeTo(camera);
             var design = _designs[Math.Min(hull.Design, _designs.Length - 1)];
+            var leap = hull.Position.RelativeTo(hull.PreviousPosition).LengthSquared() > JumpGap * JumpGap;
+            var position = (leap ? hull.Position : Double3.Lerp(hull.PreviousPosition, hull.Position, alpha)).RelativeTo(camera);
+
+            // A jumping hull shows its drive's mark: ahead of it while the drive spools, on it as it arrives.
+            if (hull.Jump != JumpPhase.None && markCount < marks.Length)
+            {
+                var flight = design.Flight;
+                var duration = hull.Jump switch
+                {
+                    JumpPhase.Spool => flight.FtlSpoolSeconds,
+                    JumpPhase.Tunnel => flight.FtlTunnelSeconds,
+                    _ => flight.FtlArriveSeconds,
+                };
+                var ahead = hull.Jump == JumpPhase.Spool ? Vector3.Transform(-Vector3.UnitZ, hull.Orientation) * (flight.Radius * 2.4f) : Vector3.Zero;
+                var at = position + ahead;
+                marks[markCount++] = new FtlMark
+                {
+                    PositionSize = new float4(at.X, at.Y, at.Z, flight.Radius * (flight.Ftl == FtlKind.Hyperspace ? 7f : 4.5f)),
+                    Params = new float4((float)flight.Ftl, (float)hull.Jump, Math.Clamp(hull.JumpTimer / duration, 0f, 1f), (hull.Id & 0xFF) / 255f),
+                };
+            }
+
+            // In the tunnel the hull is nowhere.
+            if (hull.Jump == JumpPhase.Tunnel)
+                continue;
             if (!Visible(position, design.Flight.Radius, aspect, out _))
                 continue;
             var orientation = Quaternion.Slerp(hull.PreviousOrientation, hull.Orientation, alpha);
@@ -432,7 +471,21 @@ internal sealed class WorldView
             GridPlane = new float4((float)(_commandFocus.Y - camera.Y), (float)sectorSize, _commandBlend, Exposure),
         };
 
-        _scene.Render(commands, frameIndex, constants, _batches.AsSpan(0, batchCount), _commandBlend > 0.01f);
+        // The player's own jump is seen from the inside, in the pilot view.
+        if (Own.Jump != JumpPhase.None && _commandBlend < 0.5f)
+        {
+            var flight = _designs[Math.Min(Own.Design, _designs.Length - 1)].Flight;
+            var duration = Own.Jump switch
+            {
+                JumpPhase.Spool => flight.FtlSpoolSeconds,
+                JumpPhase.Tunnel => flight.FtlTunnelSeconds,
+                _ => flight.FtlArriveSeconds,
+            };
+            var kind = FtlPreview != FtlKind.None ? FtlPreview : flight.Ftl;
+            constants.Ftl = new float4((float)kind, (float)Own.Jump, Math.Clamp(Own.JumpTimer / duration, 0f, 1f), 0);
+        }
+
+        _scene.Render(commands, frameIndex, constants, _batches.AsSpan(0, batchCount), _commandBlend > 0.01f, markCount);
     }
 
     public float ExposureValue => Exposure;
@@ -610,6 +663,31 @@ internal sealed class WorldView
             OrderSelection(bridge, target, true);
     }
 
+    /// <summary>
+    /// Sends the selected hulls (or the hull being flown) to a point in another sector by jump drive. A hull with
+    /// no drive, or one already in that sector, flies there instead.
+    /// </summary>
+    public void OrderJump(PlayerInputBridge bridge, Double3 target)
+    {
+        if (_selectedCount == 0)
+        {
+            bridge.IssueOrder(new HullOrder { Kind = JumpOrFly(Own, target), Target = target });
+            return;
+        }
+
+        _jumpOrders = true;
+        OrderSelection(bridge, target, true);
+        _jumpOrders = false;
+    }
+
+    private OrderKind JumpOrFly(in HullView hull, Double3 target)
+    {
+        var design = _designs[Math.Min(hull.Design, _designs.Length - 1)];
+        design.Evaluate(hull.Blocks, out var flight, out _);
+        var sameSector = _galaxy is not null && _galaxy.SectorOf(HullPosition(hull)) == _galaxy.SectorOf(target);
+        return flight.Ftl != FtlKind.None && !sameSector ? OrderKind.Jump : OrderKind.MoveTo;
+    }
+
     /// <summary>Selects every hull the player owns.</summary>
     public void SelectAllOwned()
     {
@@ -675,7 +753,8 @@ internal sealed class WorldView
             if (move)
             {
                 var offset = new Vector3((i % columns - (columns - 1) * 0.5f) * FormationSpacing, 0, (i / columns - (rows - 1) * 0.5f) * FormationSpacing);
-                order = new HullOrder { Kind = OrderKind.MoveTo, Target = target + offset };
+                var kind = _jumpOrders && TryGetHull(_selected[i], out var hull) ? JumpOrFly(hull, target) : OrderKind.MoveTo;
+                order = new HullOrder { Kind = kind, Target = target + offset };
             }
 
             // The hull being flown takes its orders through the input stream; the rest go to the server directly.
@@ -1095,6 +1174,15 @@ internal sealed class WorldView
             _streamDirty = true;
         }
 
+        // While a jump is being prepared, the heart of the destination is generated too, so that it is already
+        // there when the hull comes out.
+        var ahead = Own.Order.Kind == OrderKind.Jump ? galaxy.SectorOf(Own.Order.Target) : center;
+        if (ahead != _streamAhead)
+        {
+            _streamAhead = ahead;
+            _streamDirty = true;
+        }
+
         if (!_streamDirty)
             return;
 
@@ -1136,6 +1224,9 @@ internal sealed class WorldView
                     _jobs.Schedule(free, 2);
                 }
     }
+
+    private bool NearAhead(SectorCoord coord) =>
+        Math.Abs(coord.X - _streamAhead.X) <= 1 && Math.Abs(coord.Y - _streamAhead.Y) <= 1 && Math.Abs(coord.Z - _streamAhead.Z) <= 1;
 
     private static bool InRing(SectorCoord coord, SectorCoord center) =>
         Math.Abs(coord.X - center.X) <= RingXZ && Math.Abs(coord.Y - center.Y) <= RingY && Math.Abs(coord.Z - center.Z) <= RingXZ;

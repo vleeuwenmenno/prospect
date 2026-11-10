@@ -117,8 +117,29 @@ public struct FlightParams
     public float CollisionDamagePerTonneSpeedSquared;
     public float CollisionBounce;
 
+    /// <summary>The hull's faster-than-light drive, and how long each stage of a jump takes.</summary>
+    public FtlKind Ftl;
+    public float FtlSpoolSeconds;
+    public float FtlTunnelSeconds;
+    public float FtlArriveSeconds;
+
     /// <summary>Megawatts needed with everything running at once, without boost.</summary>
     public readonly float PowerRequired => IdlePower + ThrustPower + ShieldPower;
+}
+
+/// <summary>The stages of a faster-than-light jump.</summary>
+public enum JumpPhase : byte
+{
+    None = 0,
+
+    /// <summary>The drive is charging; the hull brakes to rest. Taking the controls cancels the jump.</summary>
+    Spool = 1,
+
+    /// <summary>The hull has left; it is nowhere until it arrives.</summary>
+    Tunnel = 2,
+
+    /// <summary>The hull has just come out at its destination.</summary>
+    Arrive = 3,
 }
 
 /// <summary>The moving state of one hull.</summary>
@@ -144,6 +165,10 @@ public struct HullState
 
     /// <summary>Seconds until the shield may start recharging.</summary>
     public float ShieldCooldown;
+
+    /// <summary>Where the hull is in a faster-than-light jump, and how long it has been in that stage.</summary>
+    public JumpPhase Jump;
+    public float JumpTimer;
 
     /// <summary>A hull at rest with full hull points, shield and battery.</summary>
     public static HullState Spawn(Double3 position, in FlightParams p) =>
@@ -248,6 +273,9 @@ public enum OrderKind : byte
 
     /// <summary>Fly to a point and hold there.</summary>
     MoveTo = 1,
+
+    /// <summary>Jump faster than light to a point, however far, and hold there.</summary>
+    Jump = 2,
 }
 
 /// <summary>A standing order for a hull: what it should be doing without a pilot's hands on it.</summary>
