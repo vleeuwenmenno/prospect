@@ -25,6 +25,7 @@ Use the Makefile, not raw `dotnet` commands.
 
 | Command | Use |
 | --- | --- |
+| `make setup` | First run on a machine: system packages for the OS (Vulkan; MoltenVK on macOS), the .NET SDK into `~/.dotnet`, restore. `make doctor` checks the toolchain and GPU. |
 | `make check` | Formatting, warnings-as-errors build and all tests. Must pass before work is called done. Takes about a minute. |
 | `make bench` | Release benchmark. Fails under 144 fps or on any managed allocation in the frame loop. Run it after touching anything that executes every frame or every tick. |
 | `make run ARGS="..."` | The client. `make server` is the dedicated server. |

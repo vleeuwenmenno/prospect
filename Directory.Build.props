@@ -20,4 +20,10 @@
     <Version>0.1.0</Version>
     <Product>PROSPECT</Product>
   </PropertyGroup>
+  <!-- Apple Silicon builds natively: BRUTAL ships osx-arm64 libraries and Vulkan comes from MoltenVK. -->
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('OSX')) And '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'Arm64'">
+    <RuntimeIdentifiers>$(RuntimeIdentifiers);osx-arm64</RuntimeIdentifiers>
+    <Platforms>arm64</Platforms>
+    <PlatformTarget>arm64</PlatformTarget>
+  </PropertyGroup>
 </Project>

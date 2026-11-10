@@ -63,7 +63,9 @@ else
   UNAME_S  := $(shell uname -s)
   ARCH     := $(shell uname -m | sed -e 's/aarch64/arm64/' -e 's/amd64/x86_64/')
   ifeq ($(UNAME_S),Darwin)
-    PLATFORM := darwin
+    PLATFORM    := darwin
+    BREW        := $(shell command -v brew 2>/dev/null)
+    BREW_PREFIX := $(if $(BREW),$(shell $(BREW) --prefix))
   else ifeq ($(UNAME_S),Linux)
     PLATFORM := linux
     DISTRO   := $(shell . /etc/os-release 2>/dev/null && echo $$ID)
@@ -74,15 +76,15 @@ else
 endif
 HOST := $(PLATFORM)-$(ARCH)
 
-# The game builds for x64 only (Directory.Build.props). Linux and Windows x64 run everything; Apple Silicon runs an x64
-# SDK under Rosetta so building, formatting and most tests work, but there are no macOS native libraries (GLFW, Vulkan,
-# RakNet), so the client, the server and the networking tests cannot run.
-SUPPORTED := linux-x86_64 windows-x86_64
+# BRUTAL ships native libraries for these; Apple Silicon builds for arm64 (Directory.Build.props) and gets Vulkan from
+# MoltenVK. Elsewhere building, formatting and the tests without networking work, but the game cannot start.
+SUPPORTED := linux-x86_64 windows-x86_64 darwin-arm64
 
 SUDO := $(if $(filter 0,$(shell id -u 2>/dev/null)),,sudo)
 
 # System packages per Linux package manager: curl for the installers, ICU for the SDK, the Vulkan loader, vulkaninfo
-# and the validation layers.
+# and the validation layers. macOS gets the loader, MoltenVK, vulkaninfo and the validation layers from Homebrew.
+BREW_PKGS       := vulkan-loader molten-vk vulkan-tools vulkan-validationlayers
 PKGS_apt-get    := curl ca-certificates libicu-dev libvulkan1 vulkan-tools vulkan-validationlayers
 PKGS_dnf        := curl ca-certificates libicu vulkan-loader vulkan-tools vulkan-validation-layers
 PKGS_pacman     := curl ca-certificates icu vulkan-icd-loader vulkan-tools vulkan-validation-layers
@@ -98,15 +100,8 @@ INSTALL_zypper  := $(SUDO) zypper --non-interactive install
 
 DOTNET_CHANNEL := $(shell sed -nE 's/.*"version" *: *"([0-9]+\.[0-9]+)\..*/\1/p' global.json)
 
-ifeq ($(HOST),darwin-arm64)
-  DOTNET_ARCH    := x64
-  DOTNET_HOME    ?= $(HOME)/.dotnet/x64
-  # An arm64 SDK on the PATH would build but could not load the x64 assemblies, so only x64 installs count.
-  DOTNET_SEARCH  := $(DOTNET_HOME)/dotnet /usr/local/share/dotnet/x64/dotnet
-else
-  DOTNET_HOME    ?= $(HOME)/.dotnet
-  DOTNET_SEARCH  := $(DOTNET_HOME)/dotnet $$(command -v dotnet)
-endif
+DOTNET_HOME    ?= $(HOME)/.dotnet
+DOTNET_SEARCH  := $(DOTNET_HOME)/dotnet $$(command -v dotnet)
 
 # The first dotnet that has an SDK matching global.json, unless DOTNET is set.
 ifeq ($(origin DOTNET),undefined)
@@ -122,6 +117,12 @@ export DOTNET_NOLOGO := 1
 # ---------------------------------------------------------------------------------------------------------------------
 # Vulkan validation layers fetched by `make tools` (for machines without a system-wide install).
 # ---------------------------------------------------------------------------------------------------------------------
+
+# Homebrew's validation layer manifest names its library without a path, and dlopen does not search Homebrew's lib/.
+# Set per command: macOS strips DYLD_* variables before they reach the recipe shell.
+ifneq ($(BREW_PREFIX),)
+  RUN_ENV := DYLD_FALLBACK_LIBRARY_PATH=$(BREW_PREFIX)/lib:/usr/local/lib:/usr/lib
+endif
 
 VVL := $(TOOLS)/vvl
 ifneq ($(wildcard $(VVL)/usr/lib/libVkLayer_khronos_validation.so),)
@@ -146,7 +147,7 @@ setup: setup-system setup-dotnet ## Install everything needed to build and run (
 	@$(MAKE) --no-print-directory restore
 	@printf '\n%s\n' "$(GREEN)$(BOLD)Ready.$(RESET) Try $(CYAN)make run$(RESET), or $(CYAN)make doctor$(RESET) to check the setup."
 
-setup-system: ## Install system packages for this OS (Linux: Vulkan loader and layers; macOS: Rosetta)
+setup-system: ## Install system packages for this OS (Vulkan loader and layers; MoltenVK on macOS)
 	$(call step,System packages for $(HOST))
 ifeq ($(PLATFORM),linux)
   ifeq ($(PKG),)
@@ -159,9 +160,12 @@ ifeq ($(PLATFORM),linux)
   endif
 else ifeq ($(PLATFORM),darwin)
 	@xcode-select -p >/dev/null 2>&1 && $(call ok,Xcode command line tools) || xcode-select --install
-  ifeq ($(ARCH),arm64)
-	@if arch -x86_64 /usr/bin/true 2>/dev/null; then $(call ok,Rosetta); \
-	 else $(call note,Installing Rosetta for the x64 .NET SDK); $(SUDO) softwareupdate --install-rosetta --agree-to-license; fi
+  ifeq ($(BREW),)
+	@$(call fail,Homebrew not found: install it from https://brew.sh and run make setup again) && exit 1
+  else
+	@$(call note,brew: $(BREW_PKGS))
+	$(Q)$(BREW) install --quiet $(BREW_PKGS)
+	@$(call ok,Vulkan (MoltenVK) installed)
   endif
 else ifeq ($(PLATFORM),windows)
 	@$(call ok,Nothing to install: Vulkan ships with the GPU driver)
@@ -170,7 +174,7 @@ else
 endif
 ifeq ($(filter $(HOST),$(SUPPORTED)),)
 	@$(call warn,$(HOST) is not a runtime target: build / fmt and the tests without networking work.)
-	@$(call note,The game and the server need the native libraries for Linux or Windows x64.)
+	@$(call note,The game and the server run on Linux x64 / Windows x64 / Apple Silicon.)
 endif
 
 setup-dotnet: ## Install the .NET SDK named in global.json (FORCE=1 to reinstall)
@@ -184,8 +188,7 @@ else
 	 else \
 	   mkdir -p "$(TOOLS)" && \
 	   curl -fsSL https://dot.net/v1/dotnet-install.sh -o "$(TOOLS)/dotnet-install.sh" && \
-	   bash "$(TOOLS)/dotnet-install.sh" --channel $(DOTNET_CHANNEL) --install-dir "$(DOTNET_HOME)" --no-path \
-	     $(if $(DOTNET_ARCH),--architecture $(DOTNET_ARCH)) && \
+	   bash "$(TOOLS)/dotnet-install.sh" --channel $(DOTNET_CHANNEL) --install-dir "$(DOTNET_HOME)" --no-path && \
 	   $(call ok,$$("$(DOTNET_HOME)/dotnet" --version) installed in $(DOTNET_HOME)) && \
 	   $(call note,The Makefile finds it there. For your shell and IDE add to your profile:) && \
 	   $(call note,  export DOTNET_ROOT=$(DOTNET_HOME) PATH=$(DOTNET_HOME):\$$PATH); \
@@ -200,20 +203,29 @@ restore: need-dotnet ## Restore NuGet packages
 doctor: ## Check the toolchain, GPU driver and validation layers
 	$(call step,Environment)
 	@$(call ok,Platform $(HOST)$(if $(DISTRO), ($(DISTRO))))
-	@$(if $(filter $(HOST),$(SUPPORTED)),$(call ok,Runtime target),$(call warn,Not a runtime target: the game runs on Linux or Windows x64))
+	@$(if $(filter $(HOST),$(SUPPORTED)),$(call ok,Runtime target),$(call warn,Not a runtime target: the game runs on Linux x64 / Windows x64 / Apple Silicon))
 	@$(call ok,$(shell $(MAKE) --version | head -1))
 	@if [ -n "$(DOTNET)" ]; then $(call ok,.NET SDK $$("$(DOTNET)" --version) at $(DOTNET)); \
 	 else $(call fail,No .NET $(DOTNET_CHANNEL) SDK found); $(call note,Run: make setup-dotnet); exit 1; fi
-ifeq ($(PLATFORM),linux)
+ifneq ($(filter linux darwin,$(PLATFORM)),)
+  ifeq ($(PLATFORM),linux)
 	@if ldconfig -p 2>/dev/null | grep -q 'libvulkan.so.1'; then $(call ok,Vulkan loader); \
 	 else $(call fail,Vulkan loader (libvulkan.so.1) missing); $(call note,Run: make setup-system); fi
+  else
+	@if [ -e "$(BREW_PREFIX)/lib/libvulkan.1.dylib" ]; then $(call ok,Vulkan loader); \
+	 else $(call fail,Vulkan loader (libvulkan.1.dylib) missing); $(call note,Run: make setup-system); fi
+	@if [ -e "$(BREW_PREFIX)/lib/libMoltenVK.dylib" ]; then $(call ok,MoltenVK); \
+	 else $(call fail,MoltenVK missing); $(call note,Run: make setup-system); fi
+  endif
 	@if command -v vulkaninfo >/dev/null 2>&1; then \
 	   gpu=$$(vulkaninfo --summary 2>/dev/null | sed -nE 's/^[[:space:]]*deviceName[[:space:]]*= //p' | head -1); \
 	   api=$$(vulkaninfo --summary 2>/dev/null | sed -nE 's/^[[:space:]]*apiVersion[[:space:]]*= ([0-9.]+).*/\1/p' | head -1); \
 	   if [ -n "$$gpu" ]; then $(call ok,GPU $$gpu (Vulkan $$api)); else $(call fail,No Vulkan device: check the GPU driver); fi; \
 	 else $(call warn,vulkaninfo not installed; cannot check the GPU); fi
-	@if [ -n "$$VK_ADD_LAYER_PATH" ] || ls /usr/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json \
-	     /usr/local/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json >/dev/null 2>&1; then \
+	@found=$$VK_ADD_LAYER_PATH; \
+	 for d in /usr /usr/local $(BREW_PREFIX); do \
+	   [ -e "$$d/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json" ] && found=1; done; \
+	 if [ -n "$$found" ]; then \
 	   $(call ok,Vulkan validation layers); \
 	 else $(call warn,No Vulkan validation layers (optional; debug builds run unvalidated)); $(call note,Run: make setup-system or make tools); fi
 endif
@@ -239,25 +251,25 @@ run: need-dotnet ## Run the game client (ARGS="--start local")
 	$(call step,Building the client ($(CONFIG)))
 	$(Q)"$(DOTNET)" build $(CLIENT) -c $(CONFIG) $(QUIET)
 	$(call step,Running prospect $(ARGS))
-	$(Q)"$(DOTNET)" $(BIN)/Prospect.Client/$(config)/prospect.dll $(ARGS)
+	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/$(config)/prospect.dll $(ARGS)
 
 server: need-dotnet ## Run the headless dedicated server (ARGS="--port 27420")
 	$(call step,Building the server ($(CONFIG)))
 	$(Q)"$(DOTNET)" build $(SERVER) -c $(CONFIG) $(QUIET)
 	$(call step,Running prospect-server $(ARGS))
-	$(Q)"$(DOTNET)" $(BIN)/Prospect.Server/$(config)/prospect-server.dll $(ARGS)
+	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Server/$(config)/prospect-server.dll $(ARGS)
 
 test: need-dotnet ## Run the unit tests
 	$(call step,Building the tests ($(CONFIG)))
 	$(Q)"$(DOTNET)" build $(TESTS) -c $(CONFIG) $(QUIET)
 	$(call step,Running the tests)
-	$(Q)"$(DOTNET)" $(BIN)/Prospect.Tests/$(config)/Prospect.Tests.dll
+	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Tests/$(config)/Prospect.Tests.dll
 
 bench: need-dotnet ## Release benchmark: frame rate and per-frame allocation (fails below target)
 	$(call step,Building the client (Release))
 	$(Q)"$(DOTNET)" build $(CLIENT) -c Release $(QUIET)
 	$(call step,Benchmarking an empty scene at 1920x1080)
-	$(Q)"$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 10 --size 1920x1080
+	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 10 --size 1920x1080
 
 ##@ Quality
 
@@ -272,7 +284,7 @@ check: need-dotnet ## Formatting, warnings-as-errors build and tests; must be cl
 	$(call step,Building $(SOLUTION) ($(CONFIG)))
 	$(Q)"$(DOTNET)" build $(SOLUTION) -c $(CONFIG) $(QUIET)
 	$(call step,Running the tests)
-	$(Q)"$(DOTNET)" $(BIN)/Prospect.Tests/$(config)/Prospect.Tests.dll
+	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Tests/$(config)/Prospect.Tests.dll
 	@printf '\n%s\n' "$(GREEN)$(BOLD)All checks passed.$(RESET)"
 
 clean: ## Remove build output

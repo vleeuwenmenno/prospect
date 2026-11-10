@@ -131,7 +131,10 @@ internal static class Program
         }
         catch (Exception e)
         {
+            // The console logger writes from a background queue that the exit can cut off, so a fatal error also
+            // goes straight to stderr.
             Logs.App.Error($"Fatal: {e}");
+            Console.Error.WriteLine($"Fatal: {e}");
             return 1;
         }
     }

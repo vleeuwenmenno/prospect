@@ -4,7 +4,7 @@
 
 A multiplayer space sandbox: you command from a pod, mine asteroids, build hulls and run a fleet across star
 systems. C# on .NET 10, built on the [BRUTAL](https://github.com/ahwootech/BRUTAL) framework (Vulkan, GLFW,
-Dear ImGui, RakNet). Windows x64 and Linux x64.
+Dear ImGui, RakNet). Windows x64, Linux x64 and Apple Silicon macOS.
 
 Singleplayer is a server running inside the game process; multiplayer is the same server as a separate binary.
 There is one simulation and one code path.
@@ -115,8 +115,8 @@ galaxy rules in `content/galaxy`.
   `global.json` into `~/.dotnet` without root, and restores packages. `make doctor` checks the result.
 - Vulkan validation layers are optional for debug builds. Without root, `make tools` fetches them into `.tools/` on
   x86-64 Linux. Without them a debug build logs a warning and runs unvalidated.
-- macOS (Apple Silicon) is for development only: `make setup` installs the x64 SDK under Rosetta, so `make build`,
-  `make fmt` and the tests without networking work. The game and server need Linux or Windows x64 natives.
+- Apple Silicon Macs build for arm64 and render through MoltenVK; `make setup` installs it, the Vulkan loader and the
+  validation layers with Homebrew.
 
 ## Running
 
