@@ -109,15 +109,19 @@ galaxy rules in `content/galaxy`.
 
 ## Requirements
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download)
-- A GPU and driver with Vulkan 1.3
-- `make`
-- Optional: Vulkan validation layers for debug builds. Install the Vulkan SDK, or on x86-64 Linux run `make tools`
-  to fetch them into `.tools/`. Without them a debug build logs a warning and runs unvalidated.
+- `make`, and a GPU and driver with Vulkan 1.3
+- Everything else comes from `make setup`: it detects the OS, installs the system packages (Linux: the Vulkan loader,
+  `vulkaninfo` and validation layers through apt-get, dnf, pacman or zypper), installs the .NET SDK named in
+  `global.json` into `~/.dotnet` without root, and restores packages. `make doctor` checks the result.
+- Vulkan validation layers are optional for debug builds. Without root, `make tools` fetches them into `.tools/` on
+  x86-64 Linux. Without them a debug build logs a warning and runs unvalidated.
+- macOS (Apple Silicon) is for development only: `make setup` installs the x64 SDK under Rosetta, so `make build`,
+  `make fmt` and the tests without networking work. The game and server need Linux or Windows x64 natives.
 
 ## Running
 
 ```sh
+make setup                                 # first time: SDK, system packages, restore
 make run                                   # the game
 make run ARGS="--start local"              # straight into a local game
 make server                                # headless dedicated server on UDP 27420
