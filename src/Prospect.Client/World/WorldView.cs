@@ -139,7 +139,12 @@ internal sealed class WorldView
     private Vector3 _up = Vector3.UnitY;
     private Vector3 _forward = -Vector3.UnitZ;
     private float _tanHalfFov = MathF.Tan(PilotFov / 2);
+    // The render target in pixels, for the GPU and level of detail.
     private float2 _viewport = new(1, 1);
+
+    // The window in interface units (the pointer's and ImGui's space). Equals the viewport except on high-density
+    // displays that report window sizes in points, such as Retina screens.
+    private float2 _screen = new(1, 1);
 
     public WorldView(InputDevices devices, ActionMap actions, ClientSettings settings, JobSystem jobs, SceneRenderer scene, HullDesign[] designs)
     {
@@ -246,9 +251,18 @@ internal sealed class WorldView
     /// Advances the camera, reads the player's controls and keeps the surrounding sectors generated. Call once per
     /// frame while a session is active. <paramref name="inputEnabled"/> is false while a menu or the map has focus.
     /// </summary>
-    public void Update(SessionSnapshot snapshot, PlayerInputBridge bridge, float dt, bool inputEnabled, float2 viewport, bool pointerOverUi)
+    public void Update(
+        SessionSnapshot snapshot,
+        PlayerInputBridge bridge,
+        float dt,
+        bool inputEnabled,
+        float2 viewport,
+        float2 screen,
+        bool pointerOverUi
+    )
     {
         _viewport = viewport;
+        _screen = screen;
         _snapshot = snapshot;
         var galaxy = snapshot.Galaxy!;
         if (!ReferenceEquals(galaxy, _galaxy))
@@ -490,7 +504,7 @@ internal sealed class WorldView
 
     public float ExposureValue => Exposure;
 
-    /// <summary>Projects a world position to window pixels. Returns false when it is behind the camera.</summary>
+    /// <summary>Projects a world position to window coordinates. Returns false when it is behind the camera.</summary>
     public bool Project(Double3 world, out float2 screen)
     {
         var relative = world.RelativeTo(CameraPosition);
@@ -501,19 +515,19 @@ internal sealed class WorldView
             return false;
         }
 
-        var aspect = _viewport.X / _viewport.Y;
+        var aspect = _screen.X / _screen.Y;
         var x = Vector3.Dot(relative, _right) / (depth * _tanHalfFov * aspect);
         var y = -Vector3.Dot(relative, _up) / (depth * _tanHalfFov);
-        screen = new float2((x * 0.5f + 0.5f) * _viewport.X, (y * 0.5f + 0.5f) * _viewport.Y);
+        screen = new float2((x * 0.5f + 0.5f) * _screen.X, (y * 0.5f + 0.5f) * _screen.Y);
         return true;
     }
 
     /// <summary>The point on the command plane under a window position, if the view ray meets the plane.</summary>
     public bool GroundPoint(float2 pointer, out Double3 point)
     {
-        var aspect = _viewport.X / _viewport.Y;
-        var nx = pointer.X / _viewport.X * 2f - 1f;
-        var ny = pointer.Y / _viewport.Y * 2f - 1f;
+        var aspect = _screen.X / _screen.Y;
+        var nx = pointer.X / _screen.X * 2f - 1f;
+        var ny = pointer.Y / _screen.Y * 2f - 1f;
         var direction = Vector3.Normalize(_forward + _right * (nx * _tanHalfFov * aspect) - _up * (ny * _tanHalfFov));
 
         var height = (float)(_commandFocus.Y - CameraPosition.Y);
@@ -540,7 +554,7 @@ internal sealed class WorldView
     /// </summary>
     private void UpdateTargeting(SessionSnapshot snapshot, PlayerInputBridge bridge)
     {
-        var center = _viewport * 0.5f;
+        var center = _screen * 0.5f;
         var best = 0u;
         var bestDistance = float.MaxValue;
         for (var i = 0; i < snapshot.HullCount; i++)
@@ -922,14 +936,16 @@ internal sealed class WorldView
         return 0;
     }
 
-    /// <summary>Projects a sphere: its centre in window pixels, its radius in pixels and its distance along the view.</summary>
+    /// <summary>
+    /// Projects a sphere: its centre in window coordinates, its radius in the same units and its distance along the view.
+    /// </summary>
     public bool ProjectDisc(Double3 world, float radius, out float2 screen, out float pixels, out float depth)
     {
         depth = Vector3.Dot(world.RelativeTo(CameraPosition), _forward);
         pixels = 0;
         if (!Project(world, out screen))
             return false;
-        pixels = radius / (depth * _tanHalfFov) * _viewport.Y * 0.5f;
+        pixels = radius / (depth * _tanHalfFov) * _screen.Y * 0.5f;
         return true;
     }
 

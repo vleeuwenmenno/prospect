@@ -310,8 +310,11 @@ internal sealed class App : IDisposable
 
             if (inSpace)
             {
+                // Pixels for the GPU; the window size is the pointer's and the interface's space (points on Retina).
                 var viewport = new float2(_swapchain.Extent.Width, _swapchain.Extent.Height);
-                World.Update(snapshot!, Session!.Client.Input, dt, worldInput, viewport, _ui.PointerOverInterface);
+                var windowSize = _window.Size;
+                var screen = windowSize.X > 0 && windowSize.Y > 0 ? new float2(windowSize.X, windowSize.Y) : viewport;
+                World.Update(snapshot!, Session!.Client.Input, dt, worldInput, viewport, screen, _ui.PointerOverInterface);
             }
 
             _ui.NewFrame();

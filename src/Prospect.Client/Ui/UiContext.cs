@@ -61,7 +61,10 @@ internal sealed class UiContext : IDisposable
     public ImFontPtr SansBold { get; }
     public ImFontPtr Mono { get; }
 
-    /// <summary>Pixels per design unit: the monitor's content scale times the player's UI scale setting.</summary>
+    /// <summary>
+    /// Window units per design unit: the monitor's content scale times the player's UI scale setting. Where the window is
+    /// measured in points rather than pixels (macOS, Wayland), the framebuffer scale already covers the content scale.
+    /// </summary>
     public float Scale { get; private set; } = 1f;
 
     /// <summary>Seconds since the previous frame, clamped so a hitch cannot make animations jump.</summary>
@@ -89,10 +92,12 @@ internal sealed class UiContext : IDisposable
 
     public void NewFrame()
     {
-        Scale = Math.Max(1f, _window.ContentScale.X) * _userScale;
+        _platform.NewFrame();
+
+        var framebufferScale = Math.Max(1f, ImGui.GetIO().DisplayFramebufferScale.X);
+        Scale = Math.Max(1f, _window.ContentScale.X / framebufferScale) * _userScale;
         ImGui.GetStyle().FontScaleMain = Scale;
 
-        _platform.NewFrame();
         _renderer.NewFrame();
         ImGui.NewFrame();
         ImString.SharedStorage.Reset();
