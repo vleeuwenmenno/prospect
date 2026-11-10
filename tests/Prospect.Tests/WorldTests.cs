@@ -241,12 +241,11 @@ public sealed class PowerAndDamageTests
     }
 
     [Fact]
-    public void DamageHitsTheShieldFirstAndTheShieldRechargesAfterADelay()
+    public void TheShieldRechargesAfterADelay()
     {
         var state = HullState.Spawn(Double3.Zero, Pod);
-        Assert.False(FlightModel.Damage(ref state, Pod, 400));
-        Assert.Equal(Pod.ShieldCapacity - 400, state.Shield);
-        Assert.Equal(Pod.HullPoints, state.Hull);
+        state.Shield = Pod.ShieldCapacity - 400;
+        state.ShieldCooldown = Pod.ShieldDelay;
 
         for (var i = 0; i < 60 * 2; i++)
             FlightModel.Step(ref state, default, Pod, HullSim.Dt);
@@ -255,31 +254,77 @@ public sealed class PowerAndDamageTests
         for (var i = 0; i < 60 * 20; i++)
             FlightModel.Step(ref state, default, Pod, HullSim.Dt);
         Assert.Equal(Pod.ShieldCapacity, state.Shield);
-
-        Assert.False(FlightModel.Damage(ref state, Pod, Pod.ShieldCapacity + 100));
-        Assert.Equal(0f, state.Shield);
-        Assert.Equal(Pod.HullPoints - 100, state.Hull);
-        Assert.True(FlightModel.Damage(ref state, Pod, Pod.HullPoints));
     }
 
-    [Fact]
-    public void HittingAnAsteroidBouncesTheHullOffAndDamagesIt()
+    /// <summary>Flies a pod at an asteroid from one side until it hits or the ticks run out.</summary>
+    private static bool Crash(Vector3 from, Vector3 velocity, in FlightParams flight, out HullState state, out ulong alive, out float[] hp, RockImpulses? impulses = null)
     {
         var galaxy = Content.Galaxy.WithSeed(11);
         var rocks = new RockField(galaxy);
         var rock = rocks.Sector(default).Asteroids[0];
         var rockCenter = galaxy.CenterOf(default) + rock.LocalPosition;
 
-        // Approach the rock along +X at a speed that hurts but does not kill.
-        var state = HullState.Spawn(rockCenter + new Vector3(-(rock.Radius + 60f), 0, 0), Pod);
-        state.Velocity = new Vector3(40, 0, 0);
-        var order = default(HullOrder);
-        for (var i = 0; i < 180; i++)
-            HullSim.Step(ref state, ref order, default, Pod, rocks);
+        var design = Content.Pod;
+        hp = new float[HullDesign.MaxBlocks];
+        for (var i = 0; i < design.Types.Length; i++)
+            hp[i] = design.Types[i].Hull;
+        var body = new HullBody { Design = design, Alive = design.FullMask, BlockHp = hp };
 
+        state = HullState.Spawn(rockCenter + Vector3.Normalize(from) * (rock.Radius + 60f), flight);
+        state.Velocity = velocity;
+        var order = default(HullOrder);
+        var destroyed = false;
+        for (var tick = 0; tick < 300 && !destroyed; tick++)
+        {
+            destroyed = HullSim.Step(ref state, ref order, default, flight, ref body, rocks, tick, impulses);
+            if (Vector3.Dot(state.Velocity, velocity) < 0)
+                break;
+        }
+
+        alive = body.Alive;
+        return destroyed;
+    }
+
+    [Fact]
+    public void AGentleBumpBouncesTheHullAndOnlyCostsShield()
+    {
+        var destroyed = Crash(new Vector3(-1, 0, 0), new Vector3(40, 0, 0), Pod, out var state, out var alive, out _);
+
+        Assert.False(destroyed);
         Assert.True(state.Velocity.X < 0, "the hull should have bounced back");
-        Assert.True(state.Shield < Pod.ShieldCapacity);
-        Assert.True(rockCenter.RelativeTo(state.Position).Length() >= rock.Radius * 0.88f + Pod.Radius - 0.01f);
+        Assert.InRange(state.Shield, 1f, Pod.ShieldCapacity - 1f);
+        Assert.Equal(Content.Pod.FullMask, alive);
+        Assert.Equal(Pod.HullPoints, state.Hull);
+    }
+
+    [Fact]
+    public void AHardImpactDestroysTheBlocksThatHitAndTheHullFliesOnWhatIsLeft()
+    {
+        var destroyed = Crash(new Vector3(-1, 0, 0), new Vector3(170, 0, 0), Pod, out var state, out var alive, out var hp);
+
+        // Hitting side-on costs the blocks on that side; the core in the middle survives.
+        Assert.False(destroyed);
+        Assert.NotEqual(Content.Pod.FullMask, alive);
+        Assert.Equal(Content.Pod.CoreMask, alive & Content.Pod.CoreMask);
+        Assert.Equal(0f, state.Shield);
+        Assert.Equal(hp.Sum(), state.Hull, 1);
+        Assert.True(state.Hull < Pod.HullPoints);
+
+        Content.Pod.Evaluate(alive, out var flight, out var stats);
+        Assert.True(flight.Mass < Pod.Mass);
+        Assert.True(stats.Blocks < Content.Pod.Cells.Length);
+
+        // Damage grows with the square of the speed over the safe limit: a faster hit takes more with it.
+        Crash(new Vector3(-1, 0, 0), new Vector3(95, 0, 0), Pod, out var slower, out _, out _);
+        Assert.True(slower.Hull > state.Hull);
+    }
+
+    [Fact]
+    public void LosingTheCoreDestroysTheHull()
+    {
+        // Belly-first at speed: the core sits in the bottom layer and takes the hit.
+        Assert.True(Crash(new Vector3(0, 1, 0), new Vector3(0, -300, 0), Pod, out _, out var alive, out _));
+        Assert.NotEqual(Content.Pod.CoreMask, alive & Content.Pod.CoreMask);
     }
 
     [Fact]
@@ -288,27 +333,23 @@ public sealed class PowerAndDamageTests
         var galaxy = Content.Galaxy.WithSeed(11);
         var rocks = new RockField(galaxy);
         var rock = rocks.Sector(default).Asteroids[0];
-        var rockCenter = galaxy.CenterOf(default) + rock.LocalPosition;
         var rockMass = rocks.Mass(rock.Radius);
 
-        // A hull as heavy as the rock itself, and tough enough to survive the bump.
+        // A hull as heavy as the rock itself, with damage switched off to look at the momentum alone.
         var heavy = Pod;
         heavy.Mass = rockMass;
-        heavy.HullPoints = float.MaxValue;
-        var state = HullState.Spawn(rockCenter + new Vector3(-(rock.Radius + 40f), 0, 0), heavy);
-        state.Velocity = new Vector3(20, 0, 0);
-        var order = default(HullOrder);
+        heavy.Inertia = Pod.Inertia * (rockMass / Pod.Mass);
+        heavy.CollisionDamagePerTonneSpeedSquared = 0;
         var impulses = new RockImpulses();
-        for (var tick = 0; tick < 240 && impulses.Count == 0; tick++)
-            HullSim.Step(ref state, ref order, default, heavy, rocks, tick, impulses);
+        Crash(new Vector3(-1, 0, 0), new Vector3(20, 0, 0), heavy, out var state, out _, out _, impulses);
 
-        Assert.Equal(1, impulses.Count);
+        Assert.True(impulses.Count >= 1);
         var delta = impulses.Items[0];
         Assert.Equal(new RockRef(default, 0), delta.Rock);
 
-        // Equal masses share the impulse: the rock leaves at about the speed the hull loses.
-        Assert.InRange(delta.Velocity.X, 10f, 14f);
-        Assert.True(state.Velocity.X < 10f);
+        // Equal masses share the impulse: the rock leaves with a good part of the speed the hull loses.
+        Assert.InRange(delta.Velocity.X, 6f, 14f);
+        Assert.True(state.Velocity.X < 14f);
 
         // The drift dies away, and the rock ends up a finite distance from where it started.
         rocks.Set(delta);
@@ -316,34 +357,35 @@ public sealed class PowerAndDamageTests
         Assert.True(velocity.Length() < 1e-3f);
         Assert.Equal(delta.Velocity.X / galaxy.DriftDecay, offset.X, 1);
 
-        // A pod hitting the same rock, undisturbed, barely moves it.
-        rocks = new RockField(galaxy);
+        // A pod hitting the same rock barely moves it.
         var light = new RockImpulses();
-        var pod = HullState.Spawn(rockCenter + new Vector3(0, rock.Radius + 40f, 0), Pod);
-        pod.Velocity = new Vector3(0, -20, 0);
-        for (var tick = 0; tick < 240 && light.Count == 0; tick++)
-            HullSim.Step(ref pod, ref order, default, Pod, rocks, tick, light);
-        Assert.Equal(1, light.Count);
+        Crash(new Vector3(0, 1, 0), new Vector3(0, -20, 0), Pod, out _, out _, out _, light);
+        Assert.True(light.Count >= 1);
         Assert.True(light.Items[0].Velocity.Length() < 0.1f);
     }
 
     [Fact]
-    public void AFatalImpactRebuildsThePodAtTheSpawnPoint()
+    public void TheCollisionSurfaceIsTheSurfaceOfTheMesh()
     {
-        var galaxy = Content.Galaxy.WithSeed(11);
-        var rocks = new RockField(galaxy);
-        var rock = rocks.Sector(default).Asteroids[0];
-        var rockCenter = galaxy.CenterOf(default) + rock.LocalPosition;
+        // Every shape reaches its nominal radius somewhere and never exceeds it by more than sampling error.
+        for (var shape = 0; shape < Galaxy.AsteroidShapes; shape++)
+        {
+            var largest = 0f;
+            var smallest = float.MaxValue;
+            for (var i = 0; i < 2000; i++)
+            {
+                var direction = Vector3.Normalize(new Vector3(MathF.Sin(i * 1.7f), MathF.Cos(i * 0.9f), MathF.Sin(i * 0.37f + 1f)));
+                var point = AsteroidShape.Point(shape, direction);
+                largest = Math.Max(largest, point.Length());
+                smallest = Math.Min(smallest, point.Length());
 
-        var state = HullState.Spawn(rockCenter + new Vector3(-(rock.Radius + 60f), 0, 0), Pod);
-        state.Velocity = new Vector3(300, 0, 0);
-        var order = new HullOrder { Kind = OrderKind.None };
-        for (var i = 0; i < 60; i++)
-            HullSim.Step(ref state, ref order, default, Pod, rocks);
+                // The distance to the surface along the point's own direction is the point's distance.
+                Assert.Equal(point.Length(), AsteroidShape.RadiusAlong(shape, Vector3.Normalize(point)), 3);
+            }
 
-        Assert.Equal(Pod.HullPoints, state.Hull);
-        Assert.Equal(Pod.ShieldCapacity, state.Shield);
-        Assert.True(Galaxy.SpawnPoint.RelativeTo(state.Position).Length() < 1f);
+            Assert.InRange(largest, 0.9f, 1.03f);
+            Assert.True(smallest > 0.25f);
+        }
     }
 }
 
@@ -352,18 +394,22 @@ public sealed class HullStoreTests
     [Fact]
     public void HandlesGoStaleWhenTheirHullIsDestroyedAndSlotsAreReused()
     {
+        var pod = GameContent.Load().Pod;
         using var store = new HullStore(2);
-        var a = store.Create(1, 0, HullState.Spawn(new Double3(1, 0, 0), default));
-        var b = store.Create(2, 0, HullState.Spawn(new Double3(2, 0, 0), default));
-        var c = store.Create(3, 0, HullState.Spawn(new Double3(3, 0, 0), default));
+        var a = store.Create(1, 0, pod, new Double3(1, 0, 0));
+        var b = store.Create(2, 0, pod, new Double3(2, 0, 0));
+        var c = store.Create(3, 0, pod, new Double3(3, 0, 0));
         Assert.Equal(3, store.Count);
         Assert.Equal(2.0, store.State(b.Index).Position.X);
+        Assert.Equal(pod.FullMask, store.Info(b.Index).Blocks);
+        Assert.Equal(pod.Flight.HullPoints, store.BlockHp(b.Index).ToArray().Sum(), 1);
+        Assert.Equal(pod.Flight.Mass, store.Flight(c.Index).Mass);
 
         store.Destroy(b);
         Assert.False(store.IsAlive(b));
         Assert.True(store.IsAlive(a) && store.IsAlive(c));
 
-        var d = store.Create(4, 0, HullState.Spawn(new Double3(4, 0, 0), default));
+        var d = store.Create(4, 0, pod, new Double3(4, 0, 0));
         Assert.Equal(b.Index, d.Index);
         Assert.NotEqual(b.Generation, d.Generation);
         Assert.False(store.IsAlive(b));
@@ -488,6 +534,49 @@ public sealed class FlightSessionTests
         while (!DroneGone() && Stopwatch.GetTimestamp() < deadline)
             Thread.Sleep(50);
         Assert.True(DroneGone());
+        Assert.Null(session.Fault);
+    }
+
+    [Fact]
+    public void RammingAnAsteroidCostsBlocksAndInTheEndTheHullLeavingThePlayerInADrone()
+    {
+        using var session = GameSession.StartLocal(new ServerConfig { MaxPlayers = 1 }, Content, "Pilot");
+        var pod = WaitForOwnHull(session);
+        Assert.Equal(Content.Pod.FullMask, pod.Blocks);
+
+        // Point the pod at the nearest asteroid and hold full boost. It rams the rock, bounces, and rams again.
+        var content = new SectorContent();
+        session.Client.AcquireSnapshot().Galaxy!.Generate(default, content);
+        var nearest = content.Asteroids.Take(content.AsteroidCount).OrderBy(a => a.LocalPosition.Length()).First();
+        var aim = Vector3.Normalize(nearest.LocalPosition - pod.Position.RelativeTo(Double3.Zero));
+        session.Client.Input.Submit(new PlayerControls { Forward = 1, Boost = true, Aim = aim, Align = true });
+
+        // First it loses blocks, and the client is told and flies on what is left.
+        var damaged = WaitFor(session, hull => hull.Blocks != Content.Pod.FullMask || hull.Design == Content.DroneDesign, 60);
+        if (damaged.Design != Content.DroneDesign)
+        {
+            Assert.Equal(pod.Id, damaged.Id);
+            Assert.True(session.Client.AcquireSnapshot().Flight.Mass < Content.Pod.Flight.Mass);
+        }
+
+        // Keep steering back at the rock. In the end the core goes, the pod is gone, and the player is in a
+        // drone where it died.
+        var deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 100;
+        var drone = OwnHull(session);
+        while (drone.Design != Content.DroneDesign && Stopwatch.GetTimestamp() < deadline)
+        {
+            var toRock = nearest.LocalPosition - drone.Position.RelativeTo(Double3.Zero);
+            session.Client.Input.Submit(new PlayerControls { Forward = 1, Boost = true, Aim = Vector3.Normalize(toRock), Align = true });
+            Thread.Sleep(100);
+            drone = OwnHull(session);
+        }
+
+        session.Client.Input.Submit(default);
+        Assert.Equal(Content.DroneDesign, drone.Design);
+        Assert.NotEqual(pod.Id, drone.Id);
+        Assert.Equal(Content.Designs[Content.DroneDesign].FullMask, drone.Blocks);
+        var snapshot = session.Client.AcquireSnapshot();
+        Assert.DoesNotContain(snapshot.Hulls.Take(snapshot.HullCount), h => h.Id == pod.Id && !h.IsOwn && h.Design == Content.PodDesign);
         Assert.Null(session.Fault);
     }
 

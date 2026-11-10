@@ -86,6 +86,9 @@ public struct FlightParams
     /// <summary>Mass in tonnes.</summary>
     public float Mass;
 
+    /// <summary>Moments of inertia about the hull's own axes, in tonne square metres.</summary>
+    public Vector3 Inertia;
+
     /// <summary>Radius of the sphere around the centre of mass that contains the hull, in metres.</summary>
     public float Radius;
     public float HullPoints;
@@ -111,7 +114,7 @@ public struct FlightParams
 
     /// <summary>Impacts slower than this do no damage, in m/s.</summary>
     public float CollisionSafeSpeed;
-    public float CollisionDamagePerTonneSpeed;
+    public float CollisionDamagePerTonneSpeedSquared;
     public float CollisionBounce;
 
     /// <summary>Megawatts needed with everything running at once, without boost.</summary>
@@ -236,16 +239,6 @@ public static class FlightModel
 
         state.Velocity = Vector3.Transform(velocity, state.Orientation);
         state.Position += state.Velocity * dt;
-    }
-
-    /// <summary>Takes damage on the shield first and the hull after. Returns true if the hull was destroyed.</summary>
-    public static bool Damage(ref HullState state, in FlightParams p, float amount)
-    {
-        state.ShieldCooldown = p.ShieldDelay;
-        var absorbed = Math.Min(state.Shield, amount);
-        state.Shield -= absorbed;
-        state.Hull -= amount - absorbed;
-        return state.Hull <= 0f;
     }
 }
 

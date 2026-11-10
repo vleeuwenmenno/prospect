@@ -21,11 +21,17 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   shield points and the power budget are all computed from them and shown on the ship's data sheet.
 - **Flight.** A command pod with inertial flight: thrust on all three axes, roll, dampeners, and a boost that heats
   up and locks out. Thrust, boost and shield recharge draw power; the generator refills the battery with the
-  surplus. Running into an asteroid bounces the hull and damages shield, then hull.
+  surplus.
+- **Collisions and damage.** Hulls collide block by block against each asteroid's real surface. An impact
+  bounces and turns the hull; damage grows with the square of the speed over a safe limit and lands on the blocks
+  that touched, after the shield. A block at zero is gone, and the hull flies on what is left. Losing the core
+  destroys the hull; its pilot gets out in a drone.
 - **Asteroids with mass.** An impact pushes hull and asteroid by their share of the momentum, so a pod bounces off
   and a heavy ship shoves a boulder aside. A pushed asteroid drifts and settles. The server tells clients only
   when an asteroid is hit; its motion from then on is a formula, and new players are sent the displaced ones. The server is authoritative; the client predicts its own hull with the same
   flight code and reconciles against snapshots; other players' hulls are interpolated.
+- **Resources.** Asteroids carry iron, copper, nickel, titanium, silver or gold, or are bare rock; a sector has a
+  main ore, and the rarer ones grow more common toward the core. Nothing can be mined yet.
 - **Fleet.** Each player starts with the command pod and two mining vessels. Hulls nobody is flying are flown by
   the server under their standing orders.
 - **Command view.** One key pulls the camera back from the pod into a free orbiting view over the same space.
@@ -40,7 +46,8 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   positions, a star field and sky, instanced hull and asteroid meshes with two levels of detail.
 
 Not there yet: mining, taking control of ships owned by other players (permissions), gates and jumps,
-saving. Asteroids are drawn from a shared set of shapes and collide as spheres until mining gives each one its own body.
+saving. Asteroids come in a shared set of shapes until mining gives each one its own body. Designs are limited to 64
+blocks for now, because block state is sent as one bit per block.
 
 ## Controls
 
@@ -57,7 +64,7 @@ saving. Asteroids are drawn from a shared set of shapes and collide as spheres u
 | Galaxy map | `M` | `Y` |
 | Halt (cancel order) | `H` or `Backspace` | `B` |
 | Ship data sheet | `I` | D-pad up |
-| Target the ship under the reticle | Middle mouse button | |
+| Target the ship under the reticle, or the asteroid if there is no ship | Middle mouse button | |
 | Take control of the target, or leave in a drone | `T` | D-pad down |
 | Menu or back | `Esc` | `Start` |
 

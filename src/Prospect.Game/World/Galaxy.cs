@@ -16,6 +16,20 @@ public sealed class StarClass
     public required float Weight { get; init; }
 }
 
+/// <summary>Something that can be dug out of an asteroid.</summary>
+public sealed class Resource
+{
+    public required string Id { get; init; }
+    public required string Name { get; init; }
+    public required Vector3 Color { get; init; }
+
+    /// <summary>How common the resource is, relative to the others.</summary>
+    public required float Weight { get; init; }
+
+    /// <summary>How much more common it becomes toward the galaxy's core: 0 is the same everywhere.</summary>
+    public required float CoreBias { get; init; }
+}
+
 /// <summary>What the galaxy map shows for a sector. Cheap to compute, so the map can cover thousands of them.</summary>
 public struct SectorSummary
 {
@@ -25,6 +39,9 @@ public struct SectorSummary
     /// <summary>Unit vector from the sector toward its star, the direction light comes from.</summary>
     public Vector3 SunDirection;
     public int AsteroidCount;
+
+    /// <summary>The resource most of the sector's ore-bearing asteroids carry, or -1 if it has no asteroids.</summary>
+    public int Vein;
 }
 
 public struct Asteroid
@@ -36,6 +53,12 @@ public struct Asteroid
 
     /// <summary>Which of the shared rock shapes this one uses.</summary>
     public int Shape;
+
+    /// <summary>Index of the resource the asteroid carries, or -1 for bare rock.</summary>
+    public int Resource;
+
+    /// <summary>How rich the asteroid is in its resource, from 0 to 1.</summary>
+    public float Grade;
 }
 
 /// <summary>
@@ -129,10 +152,16 @@ public sealed class Galaxy
         float maxRadius,
         float density,
         float driftDecay,
-        GalaxyShape shape
+        GalaxyShape shape,
+        Resource[] resources,
+        float barrenShare,
+        float veinShare
     )
     {
         Shape = shape;
+        Resources = resources;
+        _barrenShare = barrenShare;
+        _veinShare = veinShare;
         AsteroidDensity = density;
         DriftDecay = driftDecay;
         Seed = seed;
@@ -149,6 +178,12 @@ public sealed class Galaxy
 
     public ulong Seed { get; }
 
+    /// <summary>Everything asteroids can carry, in the order their indices refer to.</summary>
+    public Resource[] Resources { get; }
+
+    private readonly float _barrenShare;
+    private readonly float _veinShare;
+
     /// <summary>The spiral the galaxy's matter follows: where sectors are rich and where they are empty.</summary>
     public GalaxyShape Shape { get; }
 
@@ -163,7 +198,7 @@ public sealed class Galaxy
 
     /// <summary>The same galaxy rules under a different seed.</summary>
     public Galaxy WithSeed(ulong seed) =>
-        new(seed, SectorSize, StarClasses, _syllables, _emptyChance, _maxAsteroids, _minRadius, _maxRadius, AsteroidDensity, DriftDecay, Shape);
+        new(seed, SectorSize, StarClasses, _syllables, _emptyChance, _maxAsteroids, _minRadius, _maxRadius, AsteroidDensity, DriftDecay, Shape, Resources, _barrenShare, _veinShare);
 
     /// <summary>Edge length of a sector cell in metres.</summary>
     public double SectorSize { get; }
@@ -195,6 +230,22 @@ public sealed class Galaxy
         foreach (var syllable in root.GetProperty("nameSyllables"u8).EnumerateArray())
             syllables.Add(syllable.GetString()!);
 
+        var resources = new List<Resource>();
+        foreach (var resource in root.GetProperty("resources"u8).EnumerateArray())
+        {
+            var tint = resource.GetProperty("color"u8);
+            resources.Add(
+                new Resource
+                {
+                    Id = resource.GetProperty("id"u8).GetString()!,
+                    Name = resource.GetProperty("name"u8).GetString()!,
+                    Color = new Vector3(tint[0].GetSingle(), tint[1].GetSingle(), tint[2].GetSingle()),
+                    Weight = resource.GetProperty("weight"u8).GetSingle(),
+                    CoreBias = resource.GetProperty("coreBias"u8).GetSingle(),
+                }
+            );
+        }
+
         var asteroids = root.GetProperty("asteroids"u8);
         if (stars.Count == 0 || syllables.Count == 0)
             throw new InvalidDataException($"{path}: needs at least one star class and one name syllable");
@@ -210,7 +261,10 @@ public sealed class Galaxy
             asteroids.GetProperty("maxRadius"u8).GetSingle(),
             asteroids.GetProperty("densityTonnesPerCubicMetre"u8).GetSingle(),
             MathF.Log(2f) / asteroids.GetProperty("driftHalfLifeSeconds"u8).GetSingle(),
-            GalaxyShape.Read(root.GetProperty("shape"u8))
+            GalaxyShape.Read(root.GetProperty("shape"u8)),
+            [.. resources],
+            asteroids.GetProperty("barrenShare"u8).GetSingle(),
+            asteroids.GetProperty("veinShare"u8).GetSingle()
         );
     }
 
@@ -259,8 +313,13 @@ public sealed class Galaxy
                 ? 1 + (int)(richness * (_maxAsteroids - 1))
                 : 0;
 
+        // A sector's ore mostly comes from one vein; which one depends on what is common this far from the core.
+        var veinRandom = new SectorRandom(Seed, coord, 4);
+        var vein = count > 0 ? PickResource(ref veinRandom, coord) : -1;
+
         return new SectorSummary
         {
+            Vein = vein,
             Coord = coord,
             StarClass = starClass,
             SunDirection = sun,
@@ -308,8 +367,44 @@ public sealed class Galaxy
                 Radius = radius,
                 Rotation = Quaternion.Normalize(new Quaternion(random.NextSigned(), random.NextSigned(), random.NextSigned(), random.NextSigned() + 0.01f)),
                 Shape = random.NextInt(AsteroidShapes),
+                Resource = -1,
             };
         }
+
+        // What each rock is made of, from its own stream so that composition never disturbs placement.
+        var ore = new SectorRandom(Seed, coord, 5);
+        for (var i = 0; i < count; i++)
+        {
+            var roll = ore.NextSingle();
+            var other = PickResource(ref ore, coord);
+            var grade = 0.15f + 0.85f * MathF.Pow(ore.NextSingle(), 1.8f);
+            if (roll < _barrenShare)
+                continue;
+            content.Asteroids[i].Resource = roll < _barrenShare + _veinShare ? content.Summary.Vein : other;
+            content.Asteroids[i].Grade = grade;
+        }
+    }
+
+    /// <summary>Picks a resource by weight; resources with a core bias grow more likely toward the core.</summary>
+    private int PickResource(ref SectorRandom random, SectorCoord coord)
+    {
+        var dx = (coord.X - Shape.Center.X) / Shape.Radius;
+        var dz = (coord.Z - Shape.Center.Z) / Shape.Radius;
+        var nearCore = Math.Clamp(1f - MathF.Sqrt(dx * dx + dz * dz), 0f, 1f);
+
+        var total = 0f;
+        foreach (var resource in Resources)
+            total += resource.Weight * (1f + resource.CoreBias * nearCore);
+
+        var pick = random.NextSingle() * total;
+        for (var i = 0; i < Resources.Length - 1; i++)
+        {
+            pick -= Resources[i].Weight * (1f + Resources[i].CoreBias * nearCore);
+            if (pick < 0)
+                return i;
+        }
+
+        return Resources.Length - 1;
     }
 }
 

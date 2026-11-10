@@ -164,8 +164,8 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
             if (!_hulls.IsAliveAt(i))
                 continue;
             ref var info = ref _hulls.Info(i);
-            if (!info.Piloted)
-                HullSim.Step(ref _hulls.State(i), ref info.Order, hold, _content.Designs[info.Design].Flight, _rocks, _tick, _impulses);
+            if (!info.Piloted && StepHull(i, hold))
+                _hulls.Destroy(_hulls.HandleAt(i));
         }
 
         // Asteroids that were hit this tick take their new motion, and every client is told.
@@ -337,13 +337,12 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
                 return;
 
             var from = _hulls.State(current.Index);
-            var flight = _content.Designs[drone].Flight;
-            var state = HullState.Spawn(from.Position, flight);
-            var clearance = _content.Designs[currentInfo.Design].Flight.Radius + flight.Radius + 4f;
-            state.Position = from.Position + System.Numerics.Vector3.Transform(System.Numerics.Vector3.UnitY, from.Orientation) * clearance;
-            state.Orientation = from.Orientation;
-            state.Velocity = from.Velocity;
-            next = _hulls.Create(connection.PlayerId, drone, state);
+            var clearance = _content.Designs[currentInfo.Design].Flight.Radius + _content.Designs[drone].Flight.Radius + 4f;
+            var above = from.Position + System.Numerics.Vector3.Transform(System.Numerics.Vector3.UnitY, from.Orientation) * clearance;
+            next = _hulls.Create(connection.PlayerId, drone, _content.Designs[drone], above);
+            ref var launched = ref _hulls.State(next.Index);
+            launched.Orientation = from.Orientation;
+            launched.Velocity = from.Velocity;
 
             // Creating a hull may have moved the storage; look the old one up again.
             currentInfo = ref _hulls.Info(current.Index);
@@ -398,9 +397,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
             return;
 
         var index = connection.Hull.Index;
-        ref var state = ref _hulls.State(index);
         ref var info = ref _hulls.Info(index);
-        var flight = _content.Designs[info.Design].Flight;
         connection.InputCredit = Math.Min(connection.InputCredit + 1, MaxInputCredit);
 
         var simulated = false;
@@ -417,10 +414,15 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
                 info.OrderId = record.OrderId;
             }
 
-            HullSim.Step(ref state, ref info.Order, record.Input, flight, _rocks, _tick, _impulses);
+            var destroyed = StepHull(index, record.Input);
             connection.LastSimulatedSequence = record.Sequence;
             connection.LastInput = record.Input;
             simulated = true;
+            if (destroyed)
+            {
+                LoseHull(connection);
+                return;
+            }
         }
 
         if (simulated)
@@ -430,8 +432,63 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         }
 
         // The client has gone quiet. Keep the hull safe: carry on with its order, or brake to a stop.
-        if (++connection.StarvedTicks > InputStarvedTicks)
-            HullSim.Step(ref state, ref info.Order, new FlightInput { Dampeners = true }, flight, _rocks, _tick, _impulses);
+        if (++connection.StarvedTicks > InputStarvedTicks && StepHull(index, new FlightInput { Dampeners = true }))
+            LoseHull(connection);
+    }
+
+    /// <summary>
+    /// Advances one hull a tick, colliding it block by block. When it loses blocks its flight figures are worked
+    /// out again from what is left. Returns true if the hull was destroyed.
+    /// </summary>
+    private bool StepHull(int index, in FlightInput input)
+    {
+        ref var info = ref _hulls.Info(index);
+        var design = _content.Designs[info.Design];
+        var body = new HullBody
+        {
+            Design = design,
+            Alive = info.Blocks,
+            BlockHp = _hulls.BlockHp(index),
+        };
+        ref var state = ref _hulls.State(index);
+        var destroyed = HullSim.Step(ref state, ref info.Order, input, _hulls.Flight(index), ref body, _rocks, _tick, _impulses);
+        if (body.Alive != info.Blocks)
+        {
+            info.Blocks = body.Alive;
+            design.Evaluate(body.Alive, out _hulls.Flight(index), out _);
+            ref var flight = ref _hulls.Flight(index);
+            state.Shield = Math.Min(state.Shield, flight.ShieldCapacity);
+            state.Energy = Math.Min(state.Energy, flight.EnergyStorage);
+        }
+
+        return destroyed;
+    }
+
+    /// <summary>
+    /// The hull a player was flying has been destroyed. They get out in a drone where it died; if it was a drone
+    /// that died, a new one is sent from the spawn point.
+    /// </summary>
+    private void LoseHull(Connection connection)
+    {
+        var lost = connection.Hull;
+        var wasDrone = _hulls.Info(lost.Index).Design == _content.DroneDesign;
+        var state = _hulls.State(lost.Index);
+        _hulls.Destroy(lost);
+
+        var drone = (byte)_content.DroneDesign;
+        connection.Hull = _hulls.Create(connection.PlayerId, drone, _content.Designs[drone], wasDrone ? Galaxy.SpawnPoint : state.Position);
+        ref var info = ref _hulls.Info(connection.Hull.Index);
+        info.Piloted = true;
+        info.OrderId = connection.OrderId;
+        if (!wasDrone)
+        {
+            ref var escaped = ref _hulls.State(connection.Hull.Index);
+            escaped.Orientation = state.Orientation;
+            escaped.Velocity = state.Velocity * 0.5f;
+        }
+
+        connection.InputHead = connection.InputCount = 0;
+        Logs.Sim.Info($"{connection.Name} lost a hull and is in a drone");
     }
 
     private void SendRockDeltas(Connection connection, ReadOnlySpan<RockDelta> deltas)
@@ -473,6 +530,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
                 Id = _hulls.HandleAt(i).Packed,
                 Owner = info.Owner,
                 Design = info.Design,
+                Blocks = info.Blocks,
                 State = _hulls.State(i),
                 Order = info.Order,
             }.Write(ref writer);
@@ -510,14 +568,14 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         var lane = (int)(connection.PlayerId - 1);
         var origin = Galaxy.SpawnPoint + new Double3((lane + 1) / 2 * 160.0 * (lane % 2 == 0 ? 1 : -1), 0, 0);
         var pod = (byte)_content.PodDesign;
-        connection.Hull = _hulls.Create(connection.PlayerId, pod, HullState.Spawn(origin, _content.Designs[pod].Flight));
+        connection.Hull = _hulls.Create(connection.PlayerId, pod, _content.Designs[pod], origin);
         _hulls.Info(connection.Hull.Index).Piloted = true;
         for (var i = 0; i < _content.StartingFleet.Length; i++)
         {
             var design = (byte)_content.StartingFleet[i];
             var side = (i / 2 + 1) * 45.0 * (i % 2 == 0 ? 1 : -1);
             var position = origin + new Double3(side, 0, 40.0 + 20.0 * (i / 2));
-            _hulls.Create(connection.PlayerId, design, HullState.Spawn(position, _content.Designs[design].Flight));
+            _hulls.Create(connection.PlayerId, design, _content.Designs[design], position);
         }
 
         var welcome = new WelcomeMessage

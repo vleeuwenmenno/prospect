@@ -1,5 +1,6 @@
 {
   "name": "Command Pod",
+  "class": "ship",
   "blockSize": 1.0,
   "color": [0.34, 0.37, 0.42],
   "blocks": [

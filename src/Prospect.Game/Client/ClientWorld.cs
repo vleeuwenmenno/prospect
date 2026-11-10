@@ -14,6 +14,9 @@ public struct HullView
     /// <summary>Index of the hull's design.</summary>
     public byte Design;
 
+    /// <summary>One bit per block of the design; a cleared bit is a destroyed block.</summary>
+    public ulong Blocks;
+
     /// <summary>True for the hull the player is flying.</summary>
     public bool IsOwn;
     public Double3 Position;
@@ -75,6 +78,7 @@ internal sealed class ClientWorld
         public uint Id;
         public uint Owner;
         public byte Design;
+        public ulong Blocks;
         public long LastSeenTick;
         public int Newest;
         public int Count;
@@ -83,6 +87,7 @@ internal sealed class ClientWorld
     private readonly GameContent _content;
     private FlightParams _flight;
     private byte _ownDesign;
+    private ulong _ownBlocks;
     private uint _playerId;
     private readonly Pending[] _pending = new Pending[PendingCapacity];
     private readonly Remote[] _remotes = new Remote[MaxViews];
@@ -114,6 +119,8 @@ internal sealed class ClientWorld
     }
 
     public void SetPlayer(uint playerId) => _playerId = playerId;
+
+    private HullDesign OwnDesign => _content.Designs[_ownDesign];
 
     public bool Dampeners => _dampeners;
 
@@ -197,7 +204,8 @@ internal sealed class ClientWorld
         _nextSequence++;
 
         var energyBefore = _predicted.Energy;
-        HullSim.Step(ref _predicted, ref _order, input, _flight, _rocks, _serverTick);
+        var body = new HullBody { Design = OwnDesign, Alive = _ownBlocks };
+        HullSim.Step(ref _predicted, ref _order, input, _flight, ref body, _rocks, _serverTick);
         _energyRate += ((_predicted.Energy - energyBefore) / HullSim.Dt - _energyRate) * 0.2f;
         Send(transport);
     }
@@ -217,6 +225,13 @@ internal sealed class ClientWorld
             {
                 if (record.Id != _ownHullId || !_hasOwnState)
                     SwitchHull(record);
+                if (record.Blocks != _ownBlocks)
+                {
+                    // The hull has lost blocks: it flies on what is left.
+                    _ownBlocks = record.Blocks;
+                    OwnDesign.Evaluate(_ownBlocks, out _flight, out _);
+                }
+
                 Reconcile(record.State, header.AckedInput);
             }
             else
@@ -261,6 +276,7 @@ internal sealed class ClientWorld
                 Id = _ownHullId,
                 Owner = _playerId,
                 Design = _ownDesign,
+                Blocks = _ownBlocks,
                 IsOwn = true,
                 Position = _predicted.Position + _correction,
                 Orientation = _predicted.Orientation,
@@ -318,8 +334,9 @@ internal sealed class ClientWorld
     private void SwitchHull(in HullRecord record)
     {
         _ownHullId = record.Id;
-        _ownDesign = record.Design;
-        _flight = _content.Designs[Math.Min(record.Design, _content.Designs.Length - 1)].Flight;
+        _ownDesign = (byte)Math.Min(record.Design, _content.Designs.Length - 1);
+        _ownBlocks = record.Blocks;
+        OwnDesign.Evaluate(_ownBlocks, out _flight, out _);
         _hasOwnState = false;
         _correction = Vector3.Zero;
         _ackedSequence = _nextSequence - 1;
@@ -375,7 +392,8 @@ internal sealed class ClientWorld
         {
             ref var slot = ref _pending[sequence % PendingCapacity];
             var order = slot.Order;
-            HullSim.Step(ref state, ref order, slot.Record.Input, _flight, _rocks, _serverTick);
+            var body = new HullBody { Design = OwnDesign, Alive = _ownBlocks };
+            HullSim.Step(ref state, ref order, slot.Record.Input, _flight, ref body, _rocks, _serverTick);
         }
 
         // Keep the drawn position continuous: whatever the correction moved is bled off over the next ticks.
@@ -408,6 +426,7 @@ internal sealed class ClientWorld
 
         remote.Owner = record.Owner;
         remote.Design = record.Design;
+        remote.Blocks = record.Blocks;
         remote.LastSeenTick = clientTick;
         if (remote.Count > 0 && _samples[slot * SamplesPerHull + remote.Newest].Tick >= serverTick)
             return;
@@ -431,6 +450,7 @@ internal sealed class ClientWorld
             Id = remote.Id,
             Owner = remote.Owner,
             Design = remote.Design,
+            Blocks = remote.Blocks,
             Position = newest.State.Position,
             Orientation = newest.State.Orientation,
             Velocity = newest.State.Velocity,

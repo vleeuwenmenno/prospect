@@ -64,31 +64,17 @@ internal static class MeshBuilder
     }
 
     /// <summary>
-    /// A rock of unit size: a sphere pushed in and out by layered noise. <paramref name="subdivisions"/> sets the
-    /// level of detail; the same seed gives the same shape at every level.
+    /// A rock of unit size, sampled from the shared shape function the simulation collides against.
+    /// <paramref name="subdivisions"/> sets the level of detail.
     /// </summary>
-    public static MeshData Asteroid(int seed, int subdivisions)
+    public static MeshData Asteroid(int shape, int subdivisions)
     {
         var mesh = Icosphere(subdivisions);
-        var offset = new Vector3(seed * 12.9898f % 97f, seed * 78.233f % 89f, seed * 37.719f % 83f);
-        var squash = new Vector3(1f + 0.35f * MathF.Sin(seed * 1.7f), 1f + 0.3f * MathF.Sin(seed * 2.9f + 1f), 1f + 0.35f * MathF.Sin(seed * 4.1f + 2f));
-
         var positions = new Vector3[mesh.Vertices.Count];
-        var largest = 0f;
         for (var i = 0; i < positions.Length; i++)
-        {
-            var direction = ToVector(mesh.Vertices[i].Position);
-            var broad = Noise.Fractal(direction * 1.3f + offset, 4);
-            var ridges = 1f - MathF.Abs(Noise.Fractal(direction * 3.1f + offset * 1.7f, 3) * 2f - 1f);
-            var radius = 0.62f + 0.42f * broad + 0.1f * ridges * ridges;
-            positions[i] = direction * squash * radius;
-            largest = Math.Max(largest, positions[i].Length());
-        }
+            positions[i] = AsteroidShape.Point(shape, ToVector(mesh.Vertices[i].Position));
 
-        // Normalise so the rock just fits a unit sphere; instances scale it to their radius.
         var normals = new Vector3[positions.Length];
-        for (var i = 0; i < positions.Length; i++)
-            positions[i] /= largest;
         for (var i = 0; i < mesh.Indices.Count; i += 3)
         {
             var (a, b, c) = ((int)mesh.Indices[i], (int)mesh.Indices[i + 1], (int)mesh.Indices[i + 2]);
@@ -101,6 +87,27 @@ internal static class MeshBuilder
         for (var i = 0; i < positions.Length; i++)
             mesh.Vertices[i] = new MeshVertex { Position = ToFloat3(positions[i]), Normal = ToFloat3(Vector3.Normalize(normals[i])) };
         mesh.BoundingRadius = 1f;
+        return mesh;
+    }
+
+    /// <summary>A unit cube centred on the origin: one block, for hulls drawn block by block.</summary>
+    public static MeshData Cube()
+    {
+        var mesh = new MeshData();
+        foreach (var (nx, ny, nz) in FaceNormals)
+        {
+            var normal = new Vector3(nx, ny, nz);
+            var u = nx != 0 ? new Vector3(0, 1, 0) : ny != 0 ? new Vector3(0, 0, 1) : new Vector3(1, 0, 0);
+            var v = Vector3.Cross(normal, u);
+            var center = normal * 0.5f;
+            var first = (uint)mesh.Vertices.Count;
+            AddVertex(mesh, center - u * 0.5f - v * 0.5f, normal);
+            AddVertex(mesh, center + u * 0.5f - v * 0.5f, normal);
+            AddVertex(mesh, center + u * 0.5f + v * 0.5f, normal);
+            AddVertex(mesh, center - u * 0.5f + v * 0.5f, normal);
+            mesh.Indices.AddRange([first, first + 1, first + 2, first, first + 2, first + 3]);
+        }
+
         return mesh;
     }
 
@@ -165,46 +172,4 @@ internal static class MeshBuilder
     private static float3 ToFloat3(Vector3 v) => new(v.X, v.Y, v.Z);
 
     private static Vector3 ToVector(float3 v) => new(v.X, v.Y, v.Z);
-}
-
-/// <summary>Value noise for shaping rocks.</summary>
-internal static class Noise
-{
-    public static float Fractal(Vector3 p, int octaves)
-    {
-        var sum = 0f;
-        var amplitude = 0.5f;
-        var total = 0f;
-        for (var i = 0; i < octaves; i++)
-        {
-            sum += amplitude * Value(p);
-            total += amplitude;
-            p = p * 2.07f + new Vector3(13.1f, 7.7f, 29.3f);
-            amplitude *= 0.5f;
-        }
-
-        return sum / total;
-    }
-
-    private static float Value(Vector3 p)
-    {
-        var cell = new Vector3(MathF.Floor(p.X), MathF.Floor(p.Y), MathF.Floor(p.Z));
-        var f = p - cell;
-        f = f * f * (new Vector3(3f) - 2f * f);
-        var (x, y, z) = ((int)cell.X, (int)cell.Y, (int)cell.Z);
-
-        float Lerp(float a, float b, float t) => a + (b - a) * t;
-        return Lerp(
-            Lerp(Lerp(Hash(x, y, z), Hash(x + 1, y, z), f.X), Lerp(Hash(x, y + 1, z), Hash(x + 1, y + 1, z), f.X), f.Y),
-            Lerp(Lerp(Hash(x, y, z + 1), Hash(x + 1, y, z + 1), f.X), Lerp(Hash(x, y + 1, z + 1), Hash(x + 1, y + 1, z + 1), f.X), f.Y),
-            f.Z
-        );
-    }
-
-    private static float Hash(int x, int y, int z)
-    {
-        var h = (uint)(x * 374761393 + y * 668265263 + z * 1274126177);
-        h = (h ^ h >> 13) * 1274126177;
-        return ((h ^ h >> 16) & 0xFFFFFF) / (float)0x1000000;
-    }
 }

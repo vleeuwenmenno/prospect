@@ -1,3 +1,4 @@
+using System.Numerics;
 using Prospect.Engine.IO;
 using Prospect.Engine.Time;
 
@@ -69,6 +70,21 @@ public sealed class GameContent
     }
 }
 
+/// <summary>What a hull is made of right now: its design and which of the design's blocks it still has.</summary>
+public ref struct HullBody
+{
+    public HullDesign Design;
+
+    /// <summary>One bit per block of the design; a cleared bit is a destroyed block.</summary>
+    public ulong Alive;
+
+    /// <summary>
+    /// Remaining hull points per block. Only the server has these; a predicting client passes none and leaves
+    /// block damage to the server.
+    /// </summary>
+    public Span<float> BlockHp;
+}
+
 /// <summary>One simulation step of a hull under its pilot or its standing order.</summary>
 public static class HullSim
 {
@@ -76,13 +92,15 @@ public static class HullSim
 
     /// <summary>
     /// Advances a hull one tick. With an order in force the autopilot flies and the pilot's input is ignored; the
-    /// order clears itself on arrival. The server and the predicting client both call exactly this.
+    /// order clears itself on arrival. The server and the predicting client both call exactly this. Returns true
+    /// if a collision destroyed the hull.
     /// </summary>
-    public static void Step(
+    public static bool Step(
         ref HullState state,
         ref HullOrder order,
         in FlightInput pilot,
         in FlightParams flight,
+        ref HullBody body,
         RockField? rocks = null,
         double tick = 0,
         RockImpulses? impulses = null
@@ -97,26 +115,36 @@ public static class HullSim
         }
 
         FlightModel.Step(ref state, input, flight, Dt);
-        if (rocks is not null && Collide(ref state, flight, rocks, tick, impulses))
-        {
-            // Destroyed: the pod is rebuilt at the arrival point, and whatever it was doing is forgotten.
-            state = HullState.Spawn(Galaxy.SpawnPoint, flight);
-            order = default;
-        }
+        return rocks is not null && Collide(ref state, flight, ref body, rocks, tick, impulses);
+    }
+
+    /// <summary>Steps a hull with nothing to run into.</summary>
+    public static void Step(ref HullState state, ref HullOrder order, in FlightInput pilot, in FlightParams flight)
+    {
+        var body = default(HullBody);
+        Step(ref state, ref order, pilot, flight, ref body);
     }
 
     /// <summary>
-    /// Resolves the hull running into asteroids. Hull and rock are spheres with mass: the impact pushes each by
-    /// its share, so a pod bounces off a mountain and a mountain-sized ship shoves a boulder aside. Impact
-    /// damage goes to the hull. Returns true if it destroyed the hull. Changes to the asteroids' motion are
-    /// written to <paramref name="impulses"/> when given; a predicting client passes none and waits to be told.
+    /// Resolves the hull running into asteroids, block by block against each asteroid's real surface. The impact
+    /// pushes hull and asteroid apart by their share of the momentum and turns the hull if it lands off-centre.
+    /// Damage grows with the square of the closing speed and lands on the blocks that touched, after the shield.
+    /// Returns true if the hull was destroyed. Changes to the asteroids' motion are written to
+    /// <paramref name="impulses"/> when given; a predicting client passes none and waits to be told.
     /// </summary>
-    private static bool Collide(ref HullState state, in FlightParams flight, RockField rocks, double tick, RockImpulses? impulses)
+    private static bool Collide(ref HullState state, in FlightParams flight, ref HullBody body, RockField rocks, double tick, RockImpulses? impulses)
     {
         var galaxy = rocks.Galaxy;
+        var design = body.Design;
+        var half = design.BlockSize * 0.5f;
         var reach = new Double3(flight.Radius, flight.Radius, flight.Radius);
         var low = galaxy.SectorOf(state.Position - reach);
         var high = galaxy.SectorOf(state.Position + reach);
+
+        // A hull spans at most two sectors along an axis. Anything else means its position is not a number,
+        // and walking that range would never end.
+        if (high.X - low.X is < 0 or > 1 || high.Y - low.Y is < 0 or > 1 || high.Z - low.Z is < 0 or > 1)
+            return false;
 
         // Asteroids are generated wholly inside their sector, so only the sectors the hull itself touches matter.
         for (var x = low.X; x <= high.X; x++)
@@ -130,30 +158,69 @@ public static class HullSim
                     for (var i = 0; i < content.AsteroidCount; i++)
                     {
                         ref var rock = ref content.Asteroids[i];
-                        var rockOffset = System.Numerics.Vector3.Zero;
-                        var rockVelocity = System.Numerics.Vector3.Zero;
+                        var rockOffset = Vector3.Zero;
+                        var rockVelocity = Vector3.Zero;
                         if (moved is not null && moved[i] > 0)
                             rocks.DeltaAt(moved[i] - 1).Evaluate(tick, galaxy.DriftDecay, out rockOffset, out rockVelocity);
 
-                        var offset = local - (rock.LocalPosition + rockOffset);
-                        var contact = rock.Radius * RockField.SolidFraction + flight.Radius;
-                        var distanceSquared = offset.LengthSquared();
-                        if (distanceSquared >= contact * contact)
+                        // Broad phase: the hull's sphere against the sphere the asteroid fits in.
+                        var toHull = local - (rock.LocalPosition + rockOffset);
+                        var bound = rock.Radius + flight.Radius;
+                        if (toHull.LengthSquared() >= bound * bound)
                             continue;
 
-                        var distance = MathF.Sqrt(distanceSquared);
-                        var normal = distance > 1e-3f ? offset / distance : System.Numerics.Vector3.UnitY;
-                        state.Position += normal * (contact - distance);
-                        local += normal * (contact - distance);
+                        // Narrow phase: every remaining block against the asteroid's surface in the block's direction.
+                        var toRockFrame = Quaternion.Conjugate(rock.Rotation);
+                        var deepest = 0f;
+                        var normalSum = Vector3.Zero;
+                        var armSum = Vector3.Zero;
+                        var touching = 0UL;
+                        var touchCount = 0;
+                        for (var b = 0; b < design.BlockOffsets.Length; b++)
+                        {
+                            if ((body.Alive & 1UL << b) == 0)
+                                continue;
+                            var arm = Vector3.Transform(design.BlockOffsets[b], state.Orientation);
+                            var fromRock = toHull + arm;
+                            var distance = fromRock.Length();
+                            if (distance >= rock.Radius + half || distance < 1e-3f)
+                                continue;
 
-                        var closing = -System.Numerics.Vector3.Dot(state.Velocity - rockVelocity, normal);
+                            var direction = fromRock / distance;
+                            var surface = rock.Radius * AsteroidShape.RadiusAlong(rock.Shape, Vector3.Transform(direction, toRockFrame));
+                            var depth = surface + half - distance;
+                            if (depth <= 0)
+                                continue;
+
+                            deepest = Math.Max(deepest, depth);
+                            normalSum += direction;
+                            armSum += arm;
+                            touching |= 1UL << b;
+                            touchCount++;
+                        }
+
+                        if (touchCount == 0)
+                            continue;
+
+                        var normal = normalSum.LengthSquared() > 1e-6f ? Vector3.Normalize(normalSum) : Vector3.UnitY;
+                        var contact = armSum / touchCount;
+                        state.Position += normal * deepest;
+                        local += normal * deepest;
+
+                        // Closing speed at the point of contact, including the hull's spin.
+                        var toHullFrame = Quaternion.Conjugate(state.Orientation);
+                        var spin = Vector3.Transform(state.AngularVelocity, state.Orientation);
+                        var closing = -Vector3.Dot(state.Velocity + Vector3.Cross(spin, contact) - rockVelocity, normal);
                         if (closing <= 0)
                             continue;
 
-                        // Two bodies, one impulse along the line between their centres, shared by inverse mass.
+                        // One impulse along the contact normal, shared by inverse mass, with the hull free to turn.
                         var rockMass = rocks.Mass(rock.Radius);
-                        var impulse = closing * (1f + flight.CollisionBounce) / (1f / flight.Mass + 1f / rockMass);
+                        var lever = Vector3.Cross(Vector3.Transform(contact, toHullFrame), Vector3.Transform(normal, toHullFrame));
+                        var turning = Vector3.Dot(lever / flight.Inertia, lever);
+                        var impulse = closing * (1f + flight.CollisionBounce) / (1f / flight.Mass + 1f / rockMass + turning);
                         state.Velocity += normal * (impulse / flight.Mass);
+                        state.AngularVelocity += lever * impulse / flight.Inertia;
                         if (impulses is not null && impulses.Count < impulses.Items.Length)
                         {
                             impulses.Items[impulses.Count++] = new RockDelta
@@ -165,12 +232,50 @@ public static class HullSim
                             };
                         }
 
-                        var damage = (closing - flight.CollisionSafeSpeed) * flight.Mass * flight.CollisionDamagePerTonneSpeed;
-                        if (damage > 0 && FlightModel.Damage(ref state, flight, damage))
+                        var excess = closing - flight.CollisionSafeSpeed;
+                        if (excess > 0 && Damage(ref state, flight, ref body, touching, touchCount, excess * excess * flight.Mass * flight.CollisionDamagePerTonneSpeedSquared))
                             return true;
                     }
                 }
 
         return false;
+    }
+
+    /// <summary>
+    /// Applies impact damage: the shield takes what it can, the rest is split between the blocks that touched.
+    /// A block at zero is gone. Returns true if the hull is destroyed: its core is gone or nothing is left.
+    /// </summary>
+    private static bool Damage(ref HullState state, in FlightParams flight, ref HullBody body, ulong touching, int touchCount, float amount)
+    {
+        state.ShieldCooldown = flight.ShieldDelay;
+        var absorbed = Math.Min(state.Shield, amount);
+        state.Shield -= absorbed;
+        var remaining = amount - absorbed;
+        if (remaining <= 0)
+            return false;
+
+        if (body.BlockHp.IsEmpty)
+        {
+            // Predicting: the server decides which blocks are lost; show the hull total falling meanwhile.
+            state.Hull = Math.Max(0f, state.Hull - remaining);
+            return false;
+        }
+
+        var share = remaining / touchCount;
+        var total = 0f;
+        for (var b = 0; b < body.Design.BlockOffsets.Length; b++)
+        {
+            if ((touching & 1UL << b) != 0)
+            {
+                body.BlockHp[b] = Math.Max(0f, body.BlockHp[b] - share);
+                if (body.BlockHp[b] <= 0)
+                    body.Alive &= ~(1UL << b);
+            }
+
+            total += body.BlockHp[b];
+        }
+
+        state.Hull = total;
+        return total <= 0 || (body.Alive & body.Design.CoreMask) != body.Design.CoreMask;
     }
 }

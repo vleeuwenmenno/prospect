@@ -43,6 +43,7 @@ internal sealed class WorldView
     private const float CommandFov = 48f * MathF.PI / 180f;
     private const float MinCommandDistance = 25f;
     private const float MaxCommandDistance = 90000f;
+    private const float FocusSeconds = 0.55f;
     private const float LookRadiansPerPixel = 0.0021f;
     private const float LookRadiansPerSecond = 1.9f;
     private const float DustCell = 360f;
@@ -86,6 +87,7 @@ internal sealed class WorldView
     private readonly int _asteroidMeshBase;
     private readonly int _asteroidLodMeshBase;
     private readonly int _meshCount;
+    private readonly int _cubeMesh;
     private readonly SectorSlot[] _slots = new SectorSlot[SlotCount];
     private readonly Candidate[] _candidates = new Candidate[SceneRenderer.MaxInstances];
     private readonly int[] _meshCounts;
@@ -97,6 +99,9 @@ internal sealed class WorldView
     private int _selectedRockCount;
     private SessionSnapshot? _snapshot;
     private uint _followId;
+    private Double3 _focusFrom;
+    private float _focusBlend = 1f;
+    private Double3 _focusTarget;
     private float _chaseZoom = 1f;
     private uint _ownId;
     private float _deniedAt = -10f;
@@ -143,6 +148,7 @@ internal sealed class WorldView
         _asteroidMeshBase = AsteroidMesh(designs.Length, 0, false);
         _asteroidLodMeshBase = AsteroidMesh(designs.Length, 0, true);
         _meshCount = MeshCount(designs.Length);
+        _cubeMesh = CubeMesh(designs.Length);
         _meshCounts = new int[_meshCount];
         _meshOffsets = new int[_meshCount];
         _batches = new DrawBatch[_meshCount];
@@ -151,7 +157,10 @@ internal sealed class WorldView
     }
 
     /// <summary>Meshes are numbered: one per hull design, then the asteroid shapes, then their coarse versions.</summary>
-    public static int MeshCount(int designs) => designs + Galaxy.AsteroidShapes * 2;
+    public static int MeshCount(int designs) => designs + Galaxy.AsteroidShapes * 2 + 1;
+
+    /// <summary>The single-block mesh, used to draw hulls that have lost blocks.</summary>
+    public static int CubeMesh(int designs) => designs + Galaxy.AsteroidShapes * 2;
 
     public static int AsteroidMesh(int designs, int shape, bool coarse) => designs + (coarse ? Galaxy.AsteroidShapes : 0) + shape;
 
@@ -165,6 +174,10 @@ internal sealed class WorldView
 
     /// <summary>In the pilot view: the hull the player has targeted, or zero.</summary>
     public uint TargetHull { get; private set; }
+
+    /// <summary>In the pilot view: the asteroid under the reticle and the targeted asteroid, if any.</summary>
+    public RockRef? HoveredRock { get; private set; }
+    public RockRef? TargetRock { get; private set; }
 
     /// <summary>True for a moment after the player tried to take control of a hull that is not theirs.</summary>
     public bool ControlDenied => _time - _deniedAt < 2.5f;
@@ -213,6 +226,7 @@ internal sealed class WorldView
             _commandDistance = 150f;
             _commandFocus = OwnPosition;
             _followId = Own.Id;
+            _focusBlend = 1f;
             if (_selectedCount == 0)
                 Select(Own.Id, false);
         }
@@ -252,7 +266,7 @@ internal sealed class WorldView
             _chaseInitialised = false;
             TargetHull = 0;
             if (_followId != 0)
-                _followId = own.Id;
+                FocusOn(own.Id);
         }
 
         var coord = galaxy.SectorOf(OwnPosition);
@@ -340,7 +354,18 @@ internal sealed class WorldView
             if (!Visible(position, design.Flight.Radius, aspect, out _))
                 continue;
             var orientation = Quaternion.Slerp(hull.PreviousOrientation, hull.Orientation, alpha);
-            Add(ref candidateCount, Math.Min(hull.Design, _designs.Length - 1), position, orientation, 1f, design.Color, 1f);
+            if (hull.Blocks == design.FullMask)
+            {
+                Add(ref candidateCount, Math.Min(hull.Design, _designs.Length - 1), position, orientation, 1f, design.Color, 1f);
+                continue;
+            }
+
+            // A hull that has lost blocks is drawn from the ones it still has, each as its own cube.
+            for (var b = 0; b < design.BlockOffsets.Length && candidateCount < _candidates.Length; b++)
+            {
+                if ((hull.Blocks & 1UL << b) != 0)
+                    Add(ref candidateCount, _cubeMesh, position + Vector3.Transform(design.BlockOffsets[b], orientation), orientation, design.BlockSize, design.Color, 1f);
+            }
         }
 
         // Rocks in the sectors around the camera.
@@ -360,8 +385,12 @@ internal sealed class WorldView
 
                 // Full detail only where it can be seen; distant rocks use the coarse mesh.
                 var mesh = (pixels > 90f ? _asteroidMeshBase : _asteroidLodMeshBase) + rock.Shape;
+                // Bare rock is grey; ore shows through in its own colour, more strongly the richer the rock.
                 var shade = 0.2f + 0.05f * (rock.Shape % 4);
-                Add(ref candidateCount, mesh, position, rock.Rotation, rock.Radius, new Vector3(shade, shade * 0.95f, shade * 0.88f), 0f);
+                var tint = new Vector3(shade, shade * 0.95f, shade * 0.88f);
+                if (rock.Resource >= 0)
+                    tint = Vector3.Lerp(tint, galaxy.Resources[rock.Resource].Color * 0.55f, 0.25f + 0.5f * rock.Grade);
+                Add(ref candidateCount, mesh, position, rock.Rotation, rock.Radius, tint, 0f);
             }
         }
 
@@ -480,15 +509,47 @@ internal sealed class WorldView
         HoveredHull = best;
         if (TargetHull != 0 && !TryGetHull(TargetHull, out _))
             TargetHull = 0;
+
+        // With no ship under the reticle, the nearest asteroid on the view line can be targeted instead.
+        HoveredRock = null;
+        if (best == 0)
+        {
+            var nearest = float.MaxValue;
+            foreach (var slot in _slots)
+            {
+                if (slot.State != SectorSlot.Ready || !ReferenceEquals(slot.Galaxy, _galaxy))
+                    continue;
+                for (var i = 0; i < slot.Content.AsteroidCount; i++)
+                {
+                    var rock = new RockRef(slot.Coord, i);
+                    if (!TryGetRock(rock, out var position, out var rockRadius) || !ProjectDisc(position, rockRadius, out var screen, out var pixels, out var depth))
+                        continue;
+                    var offset = screen - center;
+                    var reach = Math.Max(pixels, 12f);
+                    if (offset.X * offset.X + offset.Y * offset.Y > reach * reach || depth >= nearest)
+                        continue;
+                    HoveredRock = rock;
+                    nearest = depth;
+                }
+            }
+        }
+
+        if (TargetRock is { } held && !TryGetRock(held, out _, out _))
+            TargetRock = null;
         if (_devices.MousePressed(GlfwMouseButton.Middle))
+        {
             TargetHull = best;
+            TargetRock = best == 0 ? HoveredRock : null;
+        }
 
         if (!_actions.Pressed(_devices, InputAction.SwitchHull, true))
             return;
 
         if (TargetHull == 0)
         {
-            bridge.RequestControl(0);
+            // An asteroid is not something to climb into; only leave in a drone when nothing at all is targeted.
+            if (TargetRock is null)
+                bridge.RequestControl(0);
         }
         else if (TryGetHull(TargetHull, out var target) && target.Owner == snapshot.PlayerId)
         {
@@ -524,6 +585,31 @@ internal sealed class WorldView
             _selected[_selectedCount++] = id;
     }
 
+    public void ClearSelection()
+    {
+        _selectedCount = 0;
+        _selectedRockCount = 0;
+    }
+
+    /// <summary>Adds a hull to the selection if it is not in it already.</summary>
+    public void AddToSelection(uint id)
+    {
+        _selectedRockCount = 0;
+        if (!IsSelected(id) && _selectedCount < MaxSelection)
+            _selected[_selectedCount++] = id;
+    }
+
+    /// <summary>
+    /// Sends the selected hulls to a point in formation, or the hull being flown if nothing is selected.
+    /// </summary>
+    public void OrderMove(PlayerInputBridge bridge, Double3 target)
+    {
+        if (_selectedCount == 0)
+            bridge.IssueOrder(new HullOrder { Kind = OrderKind.MoveTo, Target = target });
+        else
+            OrderSelection(bridge, target, true);
+    }
+
     /// <summary>Selects every hull the player owns.</summary>
     public void SelectAllOwned()
     {
@@ -537,8 +623,24 @@ internal sealed class WorldView
         }
     }
 
-    /// <summary>Makes the command camera follow a hull.</summary>
-    public void FocusOn(uint id) => _followId = id;
+    /// <summary>Makes the command camera glide to a hull and then follow it.</summary>
+    public void FocusOn(uint id)
+    {
+        if (_followId == id && _focusBlend >= 1f)
+            return;
+        _followId = id;
+        _focusFrom = _commandFocus;
+        _focusBlend = 0f;
+    }
+
+    /// <summary>Makes the command camera glide to a point and stay there.</summary>
+    private void FocusOnPoint(Double3 point)
+    {
+        _followId = 0;
+        _focusFrom = _commandFocus;
+        _focusTarget = point;
+        _focusBlend = 0f;
+    }
 
     /// <summary>Finds a hull in this frame's snapshot by id.</summary>
     public bool TryGetHull(uint id, out HullView hull)
@@ -705,6 +807,25 @@ internal sealed class WorldView
         return false;
     }
 
+    /// <summary>What an asteroid carries: the resource index (or -1 for bare rock) and its grade.</summary>
+    public bool TryGetRockOre(RockRef rock, out int resource, out float grade)
+    {
+        foreach (var slot in _slots)
+        {
+            if (slot.State != SectorSlot.Ready || slot.Coord != rock.Sector || !ReferenceEquals(slot.Galaxy, _galaxy))
+                continue;
+            if ((uint)rock.Index >= (uint)slot.Content.AsteroidCount)
+                break;
+            resource = slot.Content.Asteroids[rock.Index].Resource;
+            grade = slot.Content.Asteroids[rock.Index].Grade;
+            return true;
+        }
+
+        resource = -1;
+        grade = 0;
+        return false;
+    }
+
     /// <summary>How fast an asteroid is drifting this frame, in m/s.</summary>
     public float RockDrift(RockRef rock)
     {
@@ -789,12 +910,11 @@ internal sealed class WorldView
             if (_selectedCount == 0 && _selectedRockCount > 0 && TryGetRock(_selectedRocks[0], out var rockPosition, out _))
             {
                 // An asteroid is somewhere to look at, not something to follow.
-                _commandFocus = rockPosition;
-                _followId = 0;
+                FocusOnPoint(rockPosition);
             }
             else
             {
-                _followId = _selectedCount > 0 ? _selected[0] : Own.Id;
+                FocusOn(_selectedCount > 0 ? _selected[0] : Own.Id);
             }
         }
         if (control && _devices.KeyPressed(GlfwKey.A))
@@ -830,6 +950,7 @@ internal sealed class WorldView
             {
                 _commandFocus += Vector3.UnitY * (-_devices.MouseDelta.Y * _commandDistance * 0.0018f);
                 _followId = 0;
+                _focusBlend = 1f;
             }
 
             if (!_devices.MouseDown(GlfwMouseButton.Left))
@@ -888,6 +1009,7 @@ internal sealed class WorldView
             var step = _commandDistance * 1.1f * dt;
             _commandFocus += (flatRight * strafe + flatForward * forward + Vector3.UnitY * vertical * 0.7f) * step;
             _followId = 0;
+            _focusBlend = 1f;
         }
     }
 
@@ -931,9 +1053,23 @@ internal sealed class WorldView
         if (_followId != 0)
         {
             if (TryGetHull(_followId, out var followed))
-                _commandFocus = HullPosition(followed);
+            {
+                // Glide to a newly focused hull rather than cut to it; once there, stay locked on.
+                _focusBlend = Math.Min(1f, _focusBlend + dt / FocusSeconds);
+                var eased = _focusBlend * _focusBlend * (3f - 2f * _focusBlend);
+                _commandFocus = Double3.Lerp(_focusFrom, HullPosition(followed), eased);
+            }
             else
+            {
                 _followId = 0;
+            }
+        }
+        else if (_focusBlend < 1f)
+        {
+            // Gliding to a fixed point, such as a selected asteroid.
+            _focusBlend = Math.Min(1f, _focusBlend + dt / FocusSeconds);
+            var eased = _focusBlend * _focusBlend * (3f - 2f * _focusBlend);
+            _commandFocus = Double3.Lerp(_focusFrom, _focusTarget, eased);
         }
         var commandOrientation = Quaternion.CreateFromYawPitchRoll(_commandYaw, _commandPitch, 0);
         var commandPosition = _commandFocus + Vector3.Transform(new Vector3(0, 0, _commandDistance), commandOrientation);

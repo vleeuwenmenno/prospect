@@ -25,9 +25,19 @@ internal sealed partial class ScreenHost
             default:
                 if (snapshot.OwnHull < 0 || snapshot.Galaxy is null)
                     break;
+                var mapWasOpen = _mapOpen;
                 DrawWorldInterface(snapshot);
-                if (!_mapOpen && BackPressed())
-                    _sessionMenuOpen = !_sessionMenuOpen;
+                // Escape backs out one level at a time: the map closes itself, the command view returns to the
+                // pilot view, and only from the pilot view does it open the menu.
+                if (!mapWasOpen && !_mapOpen && BackPressed())
+                {
+                    if (_sessionMenuOpen)
+                        _sessionMenuOpen = false;
+                    else if (_app.World.Mode == World.ViewMode.Command)
+                        _app.World.SetMode(World.ViewMode.Pilot);
+                    else
+                        _sessionMenuOpen = true;
+                }
                 if (_sessionMenuOpen)
                     DrawSessionMenu();
                 break;

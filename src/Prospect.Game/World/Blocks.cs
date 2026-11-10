@@ -19,6 +19,9 @@ public sealed class BlockType
     /// <summary>True for main engines, whose thrust only acts forward.</summary>
     public bool ForwardOnly { get; init; }
 
+    /// <summary>True for the block a hull cannot exist without; losing it destroys the hull.</summary>
+    public bool Core { get; init; }
+
     /// <summary>Kilonewton-metres of turning effort.</summary>
     public float Torque { get; init; }
 
@@ -48,7 +51,7 @@ public sealed class FlightRules
     public required float CoolSeconds { get; init; }
     public required float ShieldRechargeDelaySeconds { get; init; }
     public required float CollisionSafeSpeed { get; init; }
-    public required float CollisionDamagePerTonneSpeed { get; init; }
+    public required float CollisionDamagePerTonneSpeedSquared { get; init; }
     public required float CollisionBounce { get; init; }
 }
 
@@ -83,7 +86,7 @@ public sealed class BlockCatalog
             CoolSeconds = r.GetProperty("coolSeconds"u8).GetSingle(),
             ShieldRechargeDelaySeconds = r.GetProperty("shieldRechargeDelaySeconds"u8).GetSingle(),
             CollisionSafeSpeed = r.GetProperty("collisionSafeSpeed"u8).GetSingle(),
-            CollisionDamagePerTonneSpeed = r.GetProperty("collisionDamagePerTonneSpeed"u8).GetSingle(),
+            CollisionDamagePerTonneSpeedSquared = r.GetProperty("collisionDamagePerTonneSpeedSquared"u8).GetSingle(),
             CollisionBounce = r.GetProperty("collisionBounce"u8).GetSingle(),
         };
 
@@ -102,6 +105,7 @@ public sealed class BlockCatalog
                 Hull = block.GetProperty("hull"u8).GetSingle(),
                 Thrust = Number(block, "thrust"u8),
                 ForwardOnly = block.TryGetProperty("forwardOnly"u8, out var forwardOnly) && forwardOnly.GetBoolean(),
+                Core = block.TryGetProperty("core"u8, out var core) && core.GetBoolean(),
                 Torque = Number(block, "torque"u8),
                 PowerOutput = Number(block, "powerOutput"u8),
                 PowerDraw = Number(block, "powerDraw"u8),
@@ -150,6 +154,19 @@ public struct HullStats
     public float EnergyStorage;
 }
 
+/// <summary>What kind of thing a hull is. It decides how the hull is shown and, later, what it can do.</summary>
+public enum HullClass : byte
+{
+    /// <summary>A ship: flies between sectors under a pilot or an order.</summary>
+    Ship,
+
+    /// <summary>A small craft: a drone or fighter, short-ranged and fragile.</summary>
+    Fighter,
+
+    /// <summary>A station: built to stay where it is.</summary>
+    Station,
+}
+
 /// <summary>A hull design loaded from <c>content/ships</c>: its blocks, and everything that follows from them.</summary>
 public sealed class HullDesign
 {
@@ -163,6 +180,7 @@ public sealed class HullDesign
     }
 
     public string Name { get; }
+    public HullClass Class { get; private init; }
     public float BlockSize { get; }
 
     /// <summary>Grid cells occupied by a block, and the type of block in each.</summary>
@@ -170,10 +188,26 @@ public sealed class HullDesign
     public BlockType[] Types { get; }
     public Vector3 Color { get; }
 
-    /// <summary>The centre of mass in grid units; the hull turns about this point and meshes are centred on it.</summary>
+    /// <summary>The most blocks a design may have, set by how block state is sent: one bit per block.</summary>
+    public const int MaxBlocks = 64;
+
+    /// <summary>The centre of mass of the intact hull in grid units; the hull turns about this point.</summary>
     public Vector3 CenterOfMass { get; private set; }
+
+    /// <summary>Each block's centre relative to the centre of mass, in metres, in the hull's own frame.</summary>
+    public Vector3[] BlockOffsets { get; private set; } = [];
+
+    /// <summary>One bit per block, all set: the intact hull.</summary>
+    public ulong FullMask { get; private set; }
+
+    /// <summary>The bits of the blocks whose loss destroys the hull.</summary>
+    public ulong CoreMask { get; private set; }
+
+    /// <summary>The intact hull's data sheet and flight figures.</summary>
     public HullStats Stats { get; private set; }
     public FlightParams Flight { get; private set; }
+
+    private FlightRules _rules = null!;
 
     public static HullDesign Load(string path, BlockCatalog catalog)
     {
@@ -199,32 +233,80 @@ public sealed class HullDesign
             [.. cells],
             [.. types],
             new Vector3(color[0].GetSingle(), color[1].GetSingle(), color[2].GetSingle())
-        );
-        design.Derive(catalog.Rules, path);
+        )
+        {
+            Class = root.GetProperty("class"u8).GetString() switch
+            {
+                "ship" => HullClass.Ship,
+                "fighter" => HullClass.Fighter,
+                "station" => HullClass.Station,
+                var other => throw new InvalidDataException($"{path}: unknown class \"{other}\""),
+            },
+        };
+        if (cells.Count > MaxBlocks)
+            throw new InvalidDataException($"{path}: {cells.Count} blocks; a design may have at most {MaxBlocks}");
+
+        design.Initialize(catalog.Rules, path);
         return design;
     }
 
-    /// <summary>
-    /// Works out how the hull flies from what it is made of: mass and moments of inertia from where the blocks
-    /// sit, acceleration from thrust over mass, turning from gyro torque over inertia, and the power budget.
-    /// </summary>
-    private void Derive(FlightRules rules, string path)
+    private void Initialize(FlightRules rules, string path)
     {
-        var size = BlockSize;
+        _rules = rules;
         var mass = 0f;
         var weighted = Vector3.Zero;
+        for (var i = 0; i < Cells.Length; i++)
+        {
+            mass += Types[i].Mass;
+            weighted += new Vector3(Cells[i].X, Cells[i].Y, Cells[i].Z) * Types[i].Mass;
+            if (Types[i].Core)
+                CoreMask |= 1UL << i;
+        }
+
+        CenterOfMass = weighted / mass;
+        FullMask = Cells.Length == 64 ? ulong.MaxValue : (1UL << Cells.Length) - 1;
+        BlockOffsets = new Vector3[Cells.Length];
+        for (var i = 0; i < Cells.Length; i++)
+            BlockOffsets[i] = (new Vector3(Cells[i].X, Cells[i].Y, Cells[i].Z) - CenterOfMass) * BlockSize;
+
+        Evaluate(FullMask, out var flight, out var stats);
+        Flight = flight;
+        Stats = stats;
+        if (flight.Acceleration.X <= 0 || flight.TurnRate.X <= 0 || flight.PowerGenerated <= 0 || CoreMask == 0)
+            throw new InvalidDataException($"{path}: a hull needs a core, a thruster, a gyro and a generator to fly");
+    }
+
+    /// <summary>
+    /// Works out how the hull flies from the blocks it still has: mass and moments of inertia from where they
+    /// sit, acceleration from thrust over mass, turning from gyro torque over inertia, and the power budget.
+    /// A hull that has lost blocks is lighter and may have lost thrust, power or shields with them.
+    /// </summary>
+    public void Evaluate(ulong alive, out FlightParams flight, out HullStats stats)
+    {
+        var rules = _rules;
+        var size = BlockSize;
+        var mass = 0f;
         var min = new Vector3(float.MaxValue);
         var max = new Vector3(float.MinValue);
+        var inertia = Vector3.Zero;
+        var radius = 0f;
         float hull = 0, shield = 0, recharge = 0, engineThrust = 0, thrusterThrust = 0, torque = 0;
         float generated = 0, idlePower = 0, thrustPower = 0, shieldPower = 0, storage = 0, cargo = 0;
         var crew = 0;
+        var blocks = 0;
 
         for (var i = 0; i < Cells.Length; i++)
         {
+            // The collision sphere stays that of the intact hull; what is left still turns about the same point.
+            var r = BlockOffsets[i];
+            radius = Math.Max(radius, r.Length() + size * 0.87f);
+            if ((alive & 1UL << i) == 0)
+                continue;
+
             var type = Types[i];
             var cell = new Vector3(Cells[i].X, Cells[i].Y, Cells[i].Z);
+            blocks++;
             mass += type.Mass;
-            weighted += cell * type.Mass;
             min = Vector3.Min(min, cell);
             max = Vector3.Max(max, cell);
             hull += type.Hull;
@@ -247,32 +329,21 @@ public sealed class HullDesign
                 shieldPower += type.PowerDraw;
             else
                 idlePower += type.PowerDraw;
+
+            // Each block is a solid cube turning about the hull's centre of mass.
+            var own = type.Mass * size * size / 6f;
+            inertia += new Vector3(type.Mass * (r.Y * r.Y + r.Z * r.Z) + own, type.Mass * (r.X * r.X + r.Z * r.Z) + own, type.Mass * (r.X * r.X + r.Y * r.Y) + own);
         }
 
-        if (thrusterThrust <= 0 || torque <= 0 || generated <= 0)
-            throw new InvalidDataException($"{path}: a hull needs at least one thruster, one gyro and one generator to fly");
-
-        CenterOfMass = weighted / mass;
-
-        // Moments of inertia about the centre of mass, each block a solid cube.
-        var inertia = Vector3.Zero;
-        var radius = 0f;
-        for (var i = 0; i < Cells.Length; i++)
-        {
-            var r = (new Vector3(Cells[i].X, Cells[i].Y, Cells[i].Z) - CenterOfMass) * size;
-            var m = Types[i].Mass;
-            var own = m * size * size / 6f;
-            inertia += new Vector3(m * (r.Y * r.Y + r.Z * r.Z) + own, m * (r.X * r.X + r.Z * r.Z) + own, m * (r.X * r.X + r.Y * r.Y) + own);
-            radius = Math.Max(radius, r.Length() + size * 0.87f);
-        }
-
+        mass = Math.Max(mass, 0.01f);
+        inertia = Vector3.Max(inertia, new Vector3(0.001f));
         var lateral = thrusterThrust / mass;
         var forward = (engineThrust + thrusterThrust) / mass;
         var turnAcceleration = new Vector3(torque) / inertia;
         var turnRate = new Vector3(MathF.Sqrt(turnAcceleration.X), MathF.Sqrt(turnAcceleration.Y), MathF.Sqrt(turnAcceleration.Z)) * rules.TurnRatePerRootAcceleration;
         var maxSpeed = rules.SpeedPerRootAcceleration * MathF.Sqrt(forward);
 
-        Flight = new FlightParams
+        flight = new FlightParams
         {
             Acceleration = new Vector3(lateral, lateral, forward),
             ReverseAcceleration = lateral,
@@ -284,6 +355,7 @@ public sealed class HullDesign
             HeatRate = 1f / rules.BoostHeatSeconds,
             CoolRate = 1f / rules.CoolSeconds,
             Mass = mass,
+            Inertia = inertia,
             Radius = radius,
             HullPoints = hull,
             ShieldCapacity = shield,
@@ -296,19 +368,19 @@ public sealed class HullDesign
             BoostPowerMultiplier = rules.BoostPowerMultiplier,
             EnergyStorage = storage,
             CollisionSafeSpeed = rules.CollisionSafeSpeed,
-            CollisionDamagePerTonneSpeed = rules.CollisionDamagePerTonneSpeed,
+            CollisionDamagePerTonneSpeedSquared = rules.CollisionDamagePerTonneSpeedSquared,
             CollisionBounce = rules.CollisionBounce,
         };
 
-        Stats = new HullStats
+        stats = new HullStats
         {
             HullPoints = hull,
             ShieldCapacity = shield,
             ShieldRecharge = recharge,
             Mass = mass,
-            Volume = Cells.Length * size * size * size,
-            Size = (max - min + Vector3.One) * size,
-            Blocks = Cells.Length,
+            Volume = blocks * size * size * size,
+            Size = blocks > 0 ? (max - min + Vector3.One) * size : Vector3.Zero,
+            Blocks = blocks,
             CargoHold = cargo,
             Crew = crew,
             Acceleration = forward,
@@ -317,7 +389,7 @@ public sealed class HullDesign
             MaxSpeed = maxSpeed,
             BoostMaxSpeed = maxSpeed * rules.BoostSpeedMultiplier,
             TurnRate = turnRate,
-            PowerRequired = Flight.PowerRequired,
+            PowerRequired = flight.PowerRequired,
             PowerGenerated = generated,
             EnergyStorage = storage,
         };

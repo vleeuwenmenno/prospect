@@ -18,7 +18,17 @@
     "Ve", "Kor", "Tal", "Ash", "Mer", "Dru", "Ix", "Sol", "Har", "Ny", "Bel", "Cas", "Oro", "Zan", "Th", "Ael",
     "Mor", "Pra", "Lun", "Sig", "Var", "Ke", "Ond", "Rhe", "Ty", "Ulm", "Gan", "Fen", "Yar", "Qua"
   ],
+  "resources": [
+    { "id": "iron", "name": "Iron", "color": [0.62, 0.36, 0.26], "weight": 10, "coreBias": 0.0 },
+    { "id": "copper", "name": "Copper", "color": [0.78, 0.47, 0.25], "weight": 6, "coreBias": 0.2 },
+    { "id": "nickel", "name": "Nickel", "color": [0.55, 0.6, 0.52], "weight": 5, "coreBias": 0.4 },
+    { "id": "titanium", "name": "Titanium", "color": [0.52, 0.6, 0.72], "weight": 3, "coreBias": 1.5 },
+    { "id": "silver", "name": "Silver", "color": [0.8, 0.82, 0.86], "weight": 1.5, "coreBias": 2.5 },
+    { "id": "gold", "name": "Gold", "color": [0.92, 0.74, 0.28], "weight": 0.8, "coreBias": 4.0 }
+  ],
   "asteroids": {
+    "barrenShare": 0.45,
+    "veinShare": 0.4,
     "emptySectorChance": 0.35,
     "maxPerSector": 48,
     "minRadius": 14,

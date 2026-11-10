@@ -24,8 +24,14 @@ internal sealed partial class ScreenHost
     private Galaxy? _mapGalaxy;
     private bool _mapOpen;
     private bool _shipInfoOpen;
+    private HullDesign? _sheetDesign;
+    private ulong _sheetBlocks;
+    private HullStats _sheetStats;
     private float _mapTime;
     private float2 _mapCenter;
+    private float2 _mapBoxStart;
+    private bool _mapBoxing;
+    private bool _mapBoxMoved;
     private float _mapCell = 44f;
     private readonly HashSet<SectorCoord> _discovered = [];
     private readonly SectorCoord[] _discoveredFrom = new SectorCoord[256];
@@ -91,7 +97,7 @@ internal sealed partial class ScreenHost
             var shown = world.Own;
             if (world.Mode == ViewMode.Command && world.Selection.Length > 0 && world.TryGetHull(world.Selection[0], out var picked))
                 shown = picked;
-            DrawShipInfo(draw, _app.Content.Designs[Math.Min(shown.Design, _app.Content.Designs.Length - 1)], world.Mode == ViewMode.Command);
+            DrawShipInfo(draw, _app.Content.Designs[Math.Min(shown.Design, _app.Content.Designs.Length - 1)], shown.Blocks, world.Mode == ViewMode.Command);
         }
         if (!_mapOpen)
         {
@@ -264,8 +270,15 @@ internal sealed partial class ScreenHost
                 draw.AddCircleFilled(foot, Kit.Px(2.5f), Kit.Color(Theme.Info, 0.7f), 8);
             }
 
-            var s = Kit.Px(7);
-            Span<float2> diamond = [screen + new float2(0, -s), screen + new float2(s, 0), screen + new float2(0, s), screen + new float2(-s, 0)];
+            // The marker's shape says what class of hull it is: diamond ship, small triangle fighter, square station.
+            var design = designs[Math.Min(hull.Design, designs.Length - 1)];
+            var s = Kit.Px(design.Class == HullClass.Fighter ? 5 : 7);
+            Span<float2> diamond = design.Class switch
+            {
+                HullClass.Fighter => [screen + new float2(0, -s), screen + new float2(s, s), screen + new float2(-s, s), screen + new float2(-s, s)],
+                HullClass.Station => [screen + new float2(-s, -s), screen + new float2(s, -s), screen + new float2(s, s), screen + new float2(-s, s)],
+                _ => [screen + new float2(0, -s), screen + new float2(s, 0), screen + new float2(0, s), screen + new float2(-s, 0)],
+            };
             if (selected)
             {
                 draw.AddConvexPolyFilled(diamond, Kit.Color(color));
@@ -278,7 +291,6 @@ internal sealed partial class ScreenHost
             }
 
             var label = screen + new float2(Kit.Px(24), -Kit.Px(14));
-            var design = designs[Math.Min(hull.Design, designs.Length - 1)];
             if (mine)
                 Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, label, selected ? Theme.Text : color, Kit.F($"{design.Name} {(hull.Id & 0xFFFF) + 1}"));
             else
@@ -304,7 +316,7 @@ internal sealed partial class ScreenHost
 
             var label = rockScreen + new float2(ring + Kit.Px(12), -Kit.Px(14));
             var mass = world.Galaxy!.AsteroidDensity * 4.18879f * MathF.Pow(radius * RockField.SolidFraction, 3);
-            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, label, Theme.Text, "ASTEROID"u8);
+            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, label, Theme.Text, RockTitle(world, rock));
             Kit.Text(
                 draw,
                 _ui.Mono,
@@ -411,8 +423,20 @@ internal sealed partial class ScreenHost
             var design = designs[Math.Min(hull.Design, designs.Length - 1)];
             var text = rowMin + new float2(Kit.Px(Theme.Space3), Kit.Px(4));
             Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, text, selected ? Theme.Text : Theme.TextDim, Kit.F($"{design.Name} {(hull.Id & 0xFFFF) + 1}"));
-            if (hull.IsOwn)
-                Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, text + new float2(rowSize.X - Kit.Px(70), Kit.Px(2)), Theme.Accent, "YOU"u8);
+            Kit.Text(
+                draw,
+                _ui.SansMedium,
+                Theme.FontCaption,
+                text + new float2(rowSize.X - Kit.Px(70), Kit.Px(2)),
+                hull.IsOwn ? Theme.Accent : Theme.TextMute,
+                hull.IsOwn ? "YOU"u8
+                    : design.Class switch
+                    {
+                        HullClass.Fighter => "FIGHTER"u8,
+                        HullClass.Station => "STATION"u8,
+                        _ => "SHIP"u8,
+                    }
+            );
 
             if (hull.Order.Kind == OrderKind.MoveTo)
             {
@@ -493,6 +517,33 @@ internal sealed partial class ScreenHost
             Kit.Text(draw, _ui.Sans, Theme.FontCaption, gaugeMin + new float2(0, Kit.Px(10)), Theme.TextMute, mine ? "T takes control"u8 : "Not yours: cannot take control"u8);
         }
 
+        // Asteroids: a ring on the one under the reticle, a readout for the targeted one.
+        if (world.HoveredRock is { } hoverRock && world.HoveredRock != world.TargetRock && world.TryGetRock(hoverRock, out var hoverPosition, out var hoverRadius) && world.ProjectDisc(hoverPosition, hoverRadius, out var hoverScreen, out var hoverPixels, out _))
+            draw.AddCircle(hoverScreen, Math.Max(hoverPixels * 1.05f, Kit.Px(12)), Kit.Color(Theme.Text, 0.6f), 48, Kit.Px(1.2f));
+
+        if (world.TargetRock is { } targetRock && world.TryGetRock(targetRock, out var rockPosition, out var rockRadius))
+        {
+            if (world.ProjectDisc(rockPosition, rockRadius, out var rockScreen, out var rockPixels, out _))
+            {
+                var ring = Math.Max(rockPixels * 1.08f, Kit.Px(14));
+                draw.AddCircle(rockScreen, ring, Kit.Color(Theme.Info), 56, Kit.Px(1.5f));
+                Brackets(draw, rockScreen - new float2(ring + 5, ring + 5), rockScreen + new float2(ring + 5, ring + 5), Kit.Px(9), Kit.Color(Theme.Info));
+            }
+
+            var size = new float2(Kit.Px(340), Kit.Px(92));
+            var min = new float2((display.X - size.X) * 0.5f, Kit.Px(Theme.Space5));
+            Kit.PanelFrame(draw, min, min + size);
+            var text = min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3));
+            var mass = world.Galaxy!.AsteroidDensity * 4.18879f * MathF.Pow(rockRadius * RockField.SolidFraction, 3);
+            var range = rockPosition.RelativeTo(world.OwnPosition).Length();
+            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, text, Theme.Info, "TARGET"u8);
+            Kit.Text(draw, _ui.SansMedium, Theme.FontBody, text + new float2(0, Kit.Px(16)), Theme.Text, RockTitle(world, targetRock));
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(44)), Theme.TextDim, mass >= 1e6f ? Kit.F($"DIAMETER {rockRadius * 2:0} M   {mass / 1e6f:0.00} MT") : Kit.F($"DIAMETER {rockRadius * 2:0} M   {mass / 1e3f:0.0} KT"));
+            var rangeText = range >= 1000f ? Kit.F($"{range / 1000f:0.00} KM") : Kit.F($"{range:0} M");
+            var rangeSize = Kit.Measure(_ui.Mono, Theme.FontCaption, rangeText);
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(min.X + size.X - rangeSize.X - Kit.Px(Theme.Space4), text.Y + Kit.Px(20)), Theme.TextDim, rangeText);
+        }
+
         if (world.ControlDenied)
         {
             var notice = "That hull is not yours to fly"u8;
@@ -500,6 +551,12 @@ internal sealed partial class ScreenHost
             Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, new float2((display.X - noticeSize.X) * 0.5f, display.Y * 0.5f + Kit.Px(60)), Theme.Bad, notice);
         }
     }
+
+    /// <summary>What to call an asteroid in a readout.</summary>
+    private static ReadOnlySpan<byte> RockTitle(WorldView world, RockRef rock) =>
+        world.TryGetRockOre(rock, out var resource, out var grade) && resource >= 0
+            ? Kit.F($"{world.Galaxy!.Resources[resource].Name} asteroid   {grade * 100:0}% grade")
+            : "Bare rock asteroid"u8;
 
     /// <summary>A labelled gauge: caption on the left, reading on the right, bar underneath.</summary>
     private void StatusBar(ImDrawListPtr draw, float2 min, float width, ImString label, float fraction, uint rgb, ImString reading)
@@ -523,7 +580,7 @@ internal sealed partial class ScreenHost
 
         var galaxy = world.Galaxy!;
         var line = Kit.Px(21);
-        var size = new float2(Kit.Px(400), Kit.Px(Theme.Space5 * 2 + 46) + line * 7);
+        var size = new float2(Kit.Px(400), Kit.Px(Theme.Space5 * 2 + 46) + line * 9);
         var min = new float2(_ui.DisplaySize.X - size.X - Kit.Px(300 + Theme.Space5 * 2), (_ui.DisplaySize.Y - size.Y) * 0.5f);
         Kit.PanelFrame(draw, min, min + size);
 
@@ -544,6 +601,16 @@ internal sealed partial class ScreenHost
 
         var mass = galaxy.AsteroidDensity * 4.18879f * MathF.Pow(radius * RockField.SolidFraction, 3);
         var range = position.RelativeTo(world.OwnPosition).Length();
+        if (world.TryGetRockOre(rock, out var resource, out var grade) && resource >= 0)
+        {
+            Row("Resource"u8, galaxy.Resources[resource].Name);
+            Row("Grade"u8, Kit.F($"{grade * 100:0} %"));
+        }
+        else
+        {
+            Row("Resource"u8, "None (bare rock)"u8);
+        }
+
         Row("Sector"u8, Kit.F($"{rock.Sector.X} {rock.Sector.Y} {rock.Sector.Z}"));
         Row("Catalogue number"u8, Kit.F($"{rock.Index + 1}"));
         Row("Diameter"u8, Kit.F($"{radius * 2:0} m"));
@@ -553,9 +620,17 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>The hull's data sheet: every figure follows from the blocks it is built from.</summary>
-    private void DrawShipInfo(ImDrawListPtr draw, HullDesign design, bool besideFleetList)
+    private void DrawShipInfo(ImDrawListPtr draw, HullDesign design, ulong blocks, bool besideFleetList)
     {
-        var stats = design.Stats;
+        // The sheet is cached per hull state; it only needs working out again when the hull loses blocks.
+        if (!ReferenceEquals(design, _sheetDesign) || blocks != _sheetBlocks)
+        {
+            _sheetDesign = design;
+            _sheetBlocks = blocks;
+            design.Evaluate(blocks, out _, out _sheetStats);
+        }
+
+        var stats = _sheetStats;
         var line = Kit.Px(21);
         var size = new float2(Kit.Px(400), Kit.Px(Theme.Space5 * 2 + 46) + line * 23);
         var inset = besideFleetList ? Kit.Px(300 + Theme.Space5 * 2) : Kit.Px(Theme.Space5);
@@ -583,7 +658,7 @@ internal sealed partial class ScreenHost
         Row("Mass"u8, Kit.F($"{stats.Mass:0.0} t"));
         Row("Volume"u8, Kit.F($"{stats.Volume:0} m³"));
         Row("W x H x L"u8, Kit.F($"{stats.Size.X:0} x {stats.Size.Y:0} x {stats.Size.Z:0} m"));
-        Row("Blocks"u8, Kit.F($"{stats.Blocks}"));
+        Row("Blocks"u8, stats.Blocks == design.Cells.Length ? Kit.F($"{stats.Blocks}") : Kit.F($"{stats.Blocks} of {design.Cells.Length}"), stats.Blocks == design.Cells.Length ? Theme.Text : Theme.Bad);
         Row("Cargo hold"u8, Kit.F($"{stats.CargoHold:0.0} m³"));
         Row("Crew"u8, Kit.F($"{stats.Crew}"));
         y += line * 0.5f;
@@ -646,8 +721,13 @@ internal sealed partial class ScreenHost
         var middle = display * 0.5f;
         var mouse = io.MousePos;
 
-        // Input. Zooming keeps the sector under the pointer where it is.
-        if (ImGui.IsMouseDragging(ImGuiMouseButton.Left))
+        // Input. W A S D, the arrow keys and middle-drag pan; zooming keeps the sector under the pointer in place.
+        var devices = _app.Devices;
+        var actions = _app.Actions;
+        var panX = Math.Clamp(actions.Axis(devices, InputAxis.Strafe, true) + actions.Axis(devices, InputAxis.Yaw, true), -1f, 1f);
+        var panY = Math.Clamp(actions.Axis(devices, InputAxis.Forward, true) + actions.Axis(devices, InputAxis.Pitch, true), -1f, 1f);
+        _mapCenter += new float2(panX, -panY) * (display.Y * 0.9f / _mapCell * _ui.DeltaTime);
+        if (devices.MouseDown(Brutal.GlfwApi.GlfwMouseButton.Middle))
             _mapCenter -= io.MouseDelta / _mapCell;
         if (io.MouseWheel != 0)
         {
@@ -664,6 +744,27 @@ internal sealed partial class ScreenHost
         {
             _mapCenter = player;
             _mapLayer = here.Y;
+        }
+
+        // Left button: click picks one of the player's hulls, drag draws a selection box around several.
+        if (devices.MousePressed(Brutal.GlfwApi.GlfwMouseButton.Left))
+        {
+            _mapBoxing = true;
+            _mapBoxMoved = false;
+            _mapBoxStart = mouse;
+        }
+
+        var boxReleased = false;
+        if (_mapBoxing)
+        {
+            var moved = mouse - _mapBoxStart;
+            if (MathF.Abs(moved.X) + MathF.Abs(moved.Y) > 5f)
+                _mapBoxMoved = true;
+            if (!devices.MouseDown(Brutal.GlfwApi.GlfwMouseButton.Left))
+            {
+                _mapBoxing = false;
+                boxReleased = true;
+            }
         }
 
         if (BackPressed())
@@ -793,17 +894,49 @@ internal sealed partial class ScreenHost
                 }
         }
 
-        // The player's hulls, and the hull being flown as an arrow along its heading.
+        // The player's hulls on this layer. Releasing the left button selects among them: the nearest to a click,
+        // or all inside a dragged box.
+        var boxMin = new float2(Math.Min(_mapBoxStart.X, mouse.X), Math.Min(_mapBoxStart.Y, mouse.Y));
+        var boxMax = new float2(Math.Max(_mapBoxStart.X, mouse.X), Math.Max(_mapBoxStart.Y, mouse.Y));
+        var additive = io.KeyShift || io.KeyCtrl;
+        if (boxReleased && !additive)
+            world.ClearSelection();
+        var clicked = 0u;
+        var clickedDistance = Kit.Px(14) * Kit.Px(14);
+        for (var i = 0; i < snapshot.HullCount; i++)
+        {
+            ref var hull = ref snapshot.Hulls[i];
+            var position = world.HullPosition(hull);
+            if (hull.Owner != snapshot.PlayerId || galaxy.SectorOf(position).Y != _mapLayer)
+                continue;
+
+            var at = ToScreen((float)(position.X / size), (float)(position.Z / size));
+            if (boxReleased && _mapBoxMoved && at.X >= boxMin.X && at.X <= boxMax.X && at.Y >= boxMin.Y && at.Y <= boxMax.Y)
+                world.AddToSelection(hull.Id);
+            var offset = at - mouse;
+            if (boxReleased && !_mapBoxMoved && offset.X * offset.X + offset.Y * offset.Y < clickedDistance)
+            {
+                clicked = hull.Id;
+                clickedDistance = offset.X * offset.X + offset.Y * offset.Y;
+            }
+
+            if (world.IsSelected(hull.Id))
+                draw.AddCircle(at, Kit.Px(9), Kit.Color(Theme.Text), 20, Kit.Px(1.5f));
+            if (!hull.IsOwn)
+                draw.AddCircleFilled(at, Kit.Px(3), Kit.Color(Theme.Accent, 0.9f), 10);
+        }
+
+        if (clicked != 0)
+            world.Select(clicked, additive);
+        if (_mapBoxing && _mapBoxMoved)
+        {
+            draw.AddRectFilled(boxMin, boxMax, Kit.Color(Theme.Accent, 0.08f));
+            draw.AddRect(boxMin, boxMax, Kit.Color(Theme.Accent, 0.9f));
+        }
+
+        // The hull being flown, as an arrow along its heading.
         if (_mapLayer == here.Y)
         {
-            for (var i = 0; i < snapshot.HullCount; i++)
-            {
-                ref var hull = ref snapshot.Hulls[i];
-                if (hull.Owner != snapshot.PlayerId || hull.IsOwn)
-                    continue;
-                var at = ToScreen((float)(hull.Position.X / size), (float)(hull.Position.Z / size));
-                draw.AddCircleFilled(at, Kit.Px(3), Kit.Color(Theme.Accent, 0.9f), 10);
-            }
 
             var marker = ToScreen(player.X, player.Y);
             var heading = Vector3.Transform(-Vector3.UnitZ, world.OwnOrientation);
@@ -840,8 +973,8 @@ internal sealed partial class ScreenHost
             var corner = new float2(Math.Max(cell * 0.5f, 7f), Math.Max(cell * 0.5f, 7f));
             Brackets(draw, at - corner, at + corner, Math.Clamp(cell * 0.3f, 3f, Kit.Px(10)), Kit.Color(Theme.Text, 0.85f));
             Kit.Text(draw, _ui.Mono, Theme.FontCaption, mouse + new float2(Kit.Px(18), -Kit.Px(6)), Theme.Text, Kit.F($"{hover.X} : {hover.Z}"));
-            if (ImGui.IsMouseClicked(ImGuiMouseButton.Right))
-                _app.Session?.Client.Input.IssueOrder(new HullOrder { Kind = OrderKind.MoveTo, Target = galaxy.CenterOf(hover) });
+            if (ImGui.IsMouseClicked(ImGuiMouseButton.Right) && _app.Session is { } session)
+                world.OrderMove(session.Client.Input, galaxy.CenterOf(hover));
         }
 
         // Title, layer and scale.
@@ -849,17 +982,18 @@ internal sealed partial class ScreenHost
         Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(margin, Kit.Px(140)), Theme.Accent, "NAVIGATION"u8);
         Kit.Text(draw, _ui.SansBold, Theme.FontHeading, new float2(margin, Kit.Px(158)), Theme.Text, "Galaxy Map"u8);
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(margin, Kit.Px(198)), Theme.TextDim, Kit.F($"LAYER {_mapLayer:+0;-0;0}   {display.X / cell:0} SECTORS ACROSS   {size / 1000:0} KM EACH"));
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(margin, Kit.Px(218)), Theme.TextMute, Kit.F($"{_discovered.Count} SECTORS DISCOVERED"));
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(margin, Kit.Px(218)), Theme.TextMute, Kit.F($"{_discovered.Count} SECTORS DISCOVERED   {world.Selection.Length} SHIPS SELECTED"));
 
         if (pointerOnMap)
             DrawMapHoverPanel(draw, snapshot, world, galaxy, hover, here);
 
         var hint = new float2(margin, display.Y - Kit.Px(56));
-        hint.X += Kit.KeyHint(draw, hint, "DRAG"u8, "Pan"u8);
+        hint.X += Kit.KeyHint(draw, hint, "WASD"u8, "Pan"u8);
         hint.X += Kit.KeyHint(draw, hint, "WHEEL"u8, "Zoom"u8);
+        hint.X += Kit.KeyHint(draw, hint, "LMB / DRAG"u8, "Select ships"u8);
+        hint.X += Kit.KeyHint(draw, hint, "RMB"u8, "Send selection"u8);
         hint.X += Kit.KeyHint(draw, hint, "PGUP / PGDN"u8, "Layer"u8);
         hint.X += Kit.KeyHint(draw, hint, "SPACE"u8, "Centre on me"u8);
-        hint.X += Kit.KeyHint(draw, hint, "RMB"u8, "Set course"u8);
         Kit.KeyHint(draw, hint, "M / ESC"u8, "Close"u8);
         EndRoot();
         Kit.Fade = 1f;
@@ -870,7 +1004,7 @@ internal sealed partial class ScreenHost
     {
         var display = _ui.DisplaySize;
         var known = _discovered.Contains(hover);
-        var panelSize = new float2(Kit.Px(340), Kit.Px(known ? 216 : 150));
+        var panelSize = new float2(Kit.Px(340), Kit.Px(known ? 238 : 150));
         var panelMin = new float2(display.X - panelSize.X - Kit.Px(96), Kit.Px(140));
         Kit.PanelFrame(draw, panelMin, panelMin + panelSize);
         var text = panelMin + new float2(Kit.Px(Theme.Space5), Kit.Px(Theme.Space4));
@@ -910,6 +1044,12 @@ internal sealed partial class ScreenHost
             y += line;
             Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, y), Theme.TextDim, summary.AsteroidCount > 0 ? Kit.F($"ASTEROIDS     {summary.AsteroidCount}") : "ASTEROIDS     none"u8);
             y += line;
+            if (summary.Vein >= 0)
+            {
+                Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, y), Theme.TextDim, Kit.F($"MAIN ORE      {galaxy.Resources[summary.Vein].Name}"));
+                y += line;
+            }
+
             Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, y), ships > 0 ? Theme.Accent : Theme.TextDim, Kit.F($"YOUR SHIPS    {ships}"));
             y += line;
         }
@@ -919,7 +1059,7 @@ internal sealed partial class ScreenHost
             y += line;
         }
 
-        Kit.Text(draw, _ui.Sans, Theme.FontCaption, text + new float2(0, y + Kit.Px(4)), Theme.TextMute, "Right-click to set course"u8);
+        Kit.Text(draw, _ui.Sans, Theme.FontCaption, text + new float2(0, y + Kit.Px(4)), Theme.TextMute, "Right-click sends the selected ships here"u8);
     }
 
     /// <summary>Grid lines every <paramref name="every"/> sectors, drawn on sector boundaries.</summary>

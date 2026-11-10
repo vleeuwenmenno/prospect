@@ -103,13 +103,14 @@ internal sealed class App : IDisposable
 
         for (var shape = 0; shape < Galaxy.AsteroidShapes; shape++)
         {
-            var seed = shape + 1;
-            meshJobs[WorldView.AsteroidMesh(designCount, shape, false)] = new MeshJob(() => MeshBuilder.Asteroid(seed, 4));
-            meshJobs[WorldView.AsteroidMesh(designCount, shape, true)] = new MeshJob(() => MeshBuilder.Asteroid(seed, 2));
+            var index = shape;
+            meshJobs[WorldView.AsteroidMesh(designCount, shape, false)] = new MeshJob(() => MeshBuilder.Asteroid(index, 4));
+            meshJobs[WorldView.AsteroidMesh(designCount, shape, true)] = new MeshJob(() => MeshBuilder.Asteroid(index, 2));
         }
 
         var galaxyJob = new GalaxyImageJob(Content.Galaxy.Shape);
         Jobs.Schedule(galaxyJob, 20);
+        meshJobs[WorldView.CubeMesh(designCount)] = new MeshJob(MeshBuilder.Cube);
         foreach (var job in shaderJobs)
             Jobs.Schedule(job, 6);
         foreach (var job in meshJobs)

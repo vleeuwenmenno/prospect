@@ -1,5 +1,6 @@
 {
   "name": "Prospector",
+  "class": "ship",
   "blockSize": 1.0,
   "color": [0.45, 0.36, 0.2],
   "blocks": [

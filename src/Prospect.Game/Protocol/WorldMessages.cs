@@ -156,11 +156,14 @@ public static class RockDeltasMessage
 /// <summary>A hull as it appears in a snapshot.</summary>
 public struct HullRecord
 {
-    public const int MaxWireSize = 4 + 4 + 1 + 24 + 12 + 16 + 12 + 4 + 1 + 16 + 24;
+    public const int MaxWireSize = 4 + 4 + 1 + 8 + 24 + 12 + 16 + 12 + 4 + 1 + 16 + 24;
 
     public uint Id;
     public uint Owner;
     public byte Design;
+
+    /// <summary>One bit per block of the design; a cleared bit is a destroyed block.</summary>
+    public ulong Blocks;
     public HullState State;
     public HullOrder Order;
 
@@ -169,6 +172,7 @@ public struct HullRecord
         writer.WriteUInt32(Id);
         writer.WriteUInt32(Owner);
         writer.WriteByte(Design);
+        writer.WriteUInt64(Blocks);
         WorldWire.WritePosition(ref writer, State.Position);
         WorldWire.WriteVector(ref writer, State.Velocity);
         writer.WriteSingle(State.Orientation.X);
@@ -192,6 +196,7 @@ public struct HullRecord
         record.Id = reader.ReadUInt32();
         record.Owner = reader.ReadUInt32();
         record.Design = reader.ReadByte();
+        record.Blocks = reader.ReadUInt64();
         var ok = WorldWire.TryReadPosition(ref reader, out record.State.Position);
         ok &= WorldWire.TryReadVector(ref reader, out record.State.Velocity);
         var q = new Quaternion(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());

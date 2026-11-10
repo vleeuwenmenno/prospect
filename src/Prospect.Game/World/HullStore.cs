@@ -25,6 +25,9 @@ public struct HullInfo
 
     /// <summary>True while a player flies the hull directly; the rest are flown by the server under their orders.</summary>
     public bool Piloted;
+
+    /// <summary>One bit per block of the design; a cleared bit is a destroyed block.</summary>
+    public ulong Blocks;
     public HullOrder Order;
 
     /// <summary>The owner's order counter at the time <see cref="Order"/> was set.</summary>
@@ -41,6 +44,8 @@ public sealed unsafe class HullStore : IDisposable
 
     private HullState* _states;
     private HullInfo* _infos;
+    private FlightParams* _flights;
+    private float* _blockHp;
     private int _capacity;
     private int _highWater;
     private int _count;
@@ -56,7 +61,28 @@ public sealed unsafe class HullStore : IDisposable
     /// <summary>One past the highest slot ever used; iterate 0..Slots and skip slots that are not alive.</summary>
     public int Slots => _highWater;
 
-    public HullHandle Create(uint owner, byte design, in HullState state)
+    /// <summary>
+    /// Creates an intact hull of a design at a position, at rest, with full shield and battery.
+    /// </summary>
+    public HullHandle Create(uint owner, byte designIndex, HullDesign design, Double3 position)
+    {
+        var handle = Create(owner, designIndex, HullState.Spawn(position, design.Flight));
+        _flights[handle.Index] = design.Flight;
+        _infos[handle.Index].Blocks = design.FullMask;
+        var hp = BlockHp(handle.Index);
+        hp.Clear();
+        for (var i = 0; i < design.Types.Length; i++)
+            hp[i] = design.Types[i].Hull;
+        return handle;
+    }
+
+    /// <summary>The hull's current flight figures, which fall as it loses blocks.</summary>
+    public ref FlightParams Flight(int index) => ref _flights[index];
+
+    /// <summary>Remaining hull points of each of the hull's blocks.</summary>
+    public Span<float> BlockHp(int index) => new(_blockHp + index * HullDesign.MaxBlocks, HullDesign.MaxBlocks);
+
+    private HullHandle Create(uint owner, byte design, in HullState state)
     {
         var index = -1;
         for (var i = 0; i < _highWater; i++)
@@ -116,14 +142,20 @@ public sealed unsafe class HullStore : IDisposable
     {
         NativeMemory.Free(_states);
         NativeMemory.Free(_infos);
+        NativeMemory.Free(_flights);
+        NativeMemory.Free(_blockHp);
         _states = null;
         _infos = null;
+        _flights = null;
+        _blockHp = null;
     }
 
     private void Resize(int capacity)
     {
         _states = (HullState*)NativeMemory.Realloc(_states, (nuint)(capacity * sizeof(HullState)));
         _infos = (HullInfo*)NativeMemory.Realloc(_infos, (nuint)(capacity * sizeof(HullInfo)));
+        _flights = (FlightParams*)NativeMemory.Realloc(_flights, (nuint)(capacity * sizeof(FlightParams)));
+        _blockHp = (float*)NativeMemory.Realloc(_blockHp, (nuint)(capacity * HullDesign.MaxBlocks * sizeof(float)));
         new Span<HullInfo>(_infos + _capacity, capacity - _capacity).Clear();
         _capacity = capacity;
     }
