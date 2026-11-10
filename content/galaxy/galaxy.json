@@ -1,5 +1,12 @@
 {
   "sectorSize": 20000,
+  "shape": {
+    "radiusSectors": 400,
+    "centerSector": [-150, 0, 100],
+    "arms": 4,
+    "winding": 4.5,
+    "thicknessSectors": 6
+  },
   "starClasses": [
     { "name": "Red dwarf", "color": [1.0, 0.45, 0.3], "weight": 5 },
     { "name": "Orange star", "color": [1.0, 0.68, 0.42], "weight": 3 },

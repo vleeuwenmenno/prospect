@@ -31,7 +31,11 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 - **Command view.** One key pulls the camera back from the pod into a free orbiting view over the same space.
   Click or drag a box to select hulls, right-click to send them somewhere in formation; a fleet list on the right
   selects and focuses too.
-- **Galaxy map.** Sectors by layer, with their stars and asteroid counts, and set-course by right-click.
+- **Galaxy.** A spiral disc 800 sectors across. Asteroid fields follow its arms and core; between the arms and
+  outside the disc space is nearly empty.
+- **Galaxy map.** Every grid cell is a sector. Zoomed out it shows the whole galaxy; closer, the sector grid; closest,
+  each sector's star, asteroids and name. A sector's contents are shown only after one of your ships has been
+  within a sector of it. Right-click sets course.
 - **Renderer.** Floating-point scene target and tone mapping, camera-relative rendering from double-precision
   positions, a star field and sky, instanced hull and asteroid meshes with two levels of detail.
 

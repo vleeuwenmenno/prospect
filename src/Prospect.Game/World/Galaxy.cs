@@ -38,6 +38,62 @@ public struct Asteroid
     public int Shape;
 }
 
+/// <summary>
+/// The shape of the galaxy: a spiral disc. It is a pure function of sector coordinates, used both to decide how
+/// much rock a sector holds and to paint the galaxy behind the map, so the two always agree.
+/// </summary>
+public sealed class GalaxyShape
+{
+    /// <summary>Radius of the disc in sectors.</summary>
+    public required float Radius { get; init; }
+
+    /// <summary>The sector at the galaxy's core. The home sector is out in the disc, not at the centre.</summary>
+    public required Vector3 Center { get; init; }
+    public required int Arms { get; init; }
+    public required float Winding { get; init; }
+
+    /// <summary>How many layers above and below the plane the disc reaches before it thins out.</summary>
+    public required float Thickness { get; init; }
+
+    public static GalaxyShape Read(System.Text.Json.JsonElement shape)
+    {
+        var center = shape.GetProperty("centerSector"u8);
+        return new GalaxyShape
+        {
+            Radius = shape.GetProperty("radiusSectors"u8).GetSingle(),
+            Center = new Vector3(center[0].GetSingle(), center[1].GetSingle(), center[2].GetSingle()),
+            Arms = shape.GetProperty("arms"u8).GetInt32(),
+            Winding = shape.GetProperty("winding"u8).GetSingle(),
+            Thickness = shape.GetProperty("thicknessSectors"u8).GetSingle(),
+        };
+    }
+
+    /// <summary>How much matter there is at a point of the galactic plane, from 0 (void) to about 1 (core, arm).</summary>
+    public float Density(float sectorX, float sectorZ)
+    {
+        var dx = (sectorX - Center.X) / Radius;
+        var dz = (sectorZ - Center.Z) / Radius;
+        var r = MathF.Sqrt(dx * dx + dz * dz);
+        if (r > 1.25f)
+            return 0f;
+
+        var core = MathF.Exp(-(r * r) / (0.11f * 0.11f));
+        var disc = MathF.Exp(-r * 3.0f);
+        var phase = MathF.Atan2(dz, dx) * Arms - MathF.Log(r + 0.04f) * Winding;
+        var arm = 0.5f + 0.5f * MathF.Cos(phase);
+        arm *= arm * arm;
+        var edge = 1f - Math.Clamp((r - 0.85f) / 0.3f, 0f, 1f);
+        return Math.Clamp((core * 1.2f + disc * (0.22f + 1.5f * arm)) * edge, 0f, 1f);
+    }
+
+    /// <summary>How the disc thins with distance from its plane, from 1 on the plane toward 0.</summary>
+    public float LayerFalloff(int sectorY)
+    {
+        var d = (sectorY - Center.Y) / Thickness;
+        return MathF.Exp(-d * d);
+    }
+}
+
 /// <summary>The generated contents of one sector.</summary>
 public sealed class SectorContent
 {
@@ -62,8 +118,21 @@ public sealed class Galaxy
     private readonly float _maxRadius;
     private readonly float _totalWeight;
 
-    private Galaxy(ulong seed, double sectorSize, StarClass[] starClasses, string[] syllables, float emptyChance, int maxAsteroids, float minRadius, float maxRadius, float density, float driftDecay)
+    private Galaxy(
+        ulong seed,
+        double sectorSize,
+        StarClass[] starClasses,
+        string[] syllables,
+        float emptyChance,
+        int maxAsteroids,
+        float minRadius,
+        float maxRadius,
+        float density,
+        float driftDecay,
+        GalaxyShape shape
+    )
     {
+        Shape = shape;
         AsteroidDensity = density;
         DriftDecay = driftDecay;
         Seed = seed;
@@ -80,6 +149,9 @@ public sealed class Galaxy
 
     public ulong Seed { get; }
 
+    /// <summary>The spiral the galaxy's matter follows: where sectors are rich and where they are empty.</summary>
+    public GalaxyShape Shape { get; }
+
     /// <summary>Tonnes per cubic metre of rock.</summary>
     public float AsteroidDensity { get; }
 
@@ -91,7 +163,7 @@ public sealed class Galaxy
 
     /// <summary>The same galaxy rules under a different seed.</summary>
     public Galaxy WithSeed(ulong seed) =>
-        new(seed, SectorSize, StarClasses, _syllables, _emptyChance, _maxAsteroids, _minRadius, _maxRadius, AsteroidDensity, DriftDecay);
+        new(seed, SectorSize, StarClasses, _syllables, _emptyChance, _maxAsteroids, _minRadius, _maxRadius, AsteroidDensity, DriftDecay, Shape);
 
     /// <summary>Edge length of a sector cell in metres.</summary>
     public double SectorSize { get; }
@@ -137,7 +209,8 @@ public sealed class Galaxy
             asteroids.GetProperty("minRadius"u8).GetSingle(),
             asteroids.GetProperty("maxRadius"u8).GetSingle(),
             asteroids.GetProperty("densityTonnesPerCubicMetre"u8).GetSingle(),
-            MathF.Log(2f) / asteroids.GetProperty("driftHalfLifeSeconds"u8).GetSingle()
+            MathF.Log(2f) / asteroids.GetProperty("driftHalfLifeSeconds"u8).GetSingle(),
+            GalaxyShape.Read(root.GetProperty("shape"u8))
         );
     }
 
@@ -175,12 +248,16 @@ public sealed class Galaxy
 
         var sun = Vector3.Normalize(new Vector3(random.NextSigned(), random.NextSigned() * 0.6f + 0.25f, random.NextSigned()) + new Vector3(0, 0, 0.001f));
 
-        // The home sector always has a field to work; elsewhere some sectors are empty space.
+        // Rock follows the galaxy's spiral: dense in the arms and the core, thin between them, almost none
+        // outside the disc. The home sector always has a field to work.
+        var density = Shape.Density(coord.X, coord.Z) * Shape.LayerFalloff(coord.Y);
+        var occupied = random.NextSingle() < 0.02f + (1f - _emptyChance) * Math.Min(1f, density * 1.6f);
+        var richness = MathF.Pow(random.NextSingle(), 1.6f) * (0.25f + 0.75f * Math.Min(1f, density * 1.3f));
         var count = isHome
             ? Math.Max(_maxAsteroids * 2 / 3, 1)
-            : random.NextSingle() < _emptyChance
-                ? 0
-                : 1 + (int)(MathF.Pow(random.NextSingle(), 1.6f) * (_maxAsteroids - 1));
+            : occupied
+                ? 1 + (int)(richness * (_maxAsteroids - 1))
+                : 0;
 
         return new SectorSummary
         {

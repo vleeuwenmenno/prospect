@@ -12,8 +12,11 @@ namespace Prospect.Client.Screens;
 internal sealed partial class ScreenHost
 {
     private const int MapCacheSize = 1 << 14;
-    private const float MapMinCell = 72f;
-    private const float MapMaxCell = 220f;
+    private const float MapMinCell = 1.4f;
+    private const float MapMaxCell = 190f;
+
+    /// <summary>Cells at least this many pixels wide are drawn sector by sector; smaller ones are sampled.</summary>
+    private const float MapSectorDetailCell = 20f;
 
     private readonly SectorSummary[] _mapCache = new SectorSummary[MapCacheSize];
     private readonly bool[] _mapCacheValid = new bool[MapCacheSize];
@@ -22,8 +25,11 @@ internal sealed partial class ScreenHost
     private bool _mapOpen;
     private bool _shipInfoOpen;
     private float _mapTime;
-    private float2 _mapPan;
-    private float _mapCell = 128f;
+    private float2 _mapCenter;
+    private float _mapCell = 44f;
+    private readonly HashSet<SectorCoord> _discovered = [];
+    private readonly SectorCoord[] _discoveredFrom = new SectorCoord[256];
+    private Galaxy? _discoveredGalaxy;
     private int _mapLayer;
     private SectorCoord _mapHover;
     private string _mapHoverName = "";
@@ -34,11 +40,20 @@ internal sealed partial class ScreenHost
 
     public void OpenShipInfo() => _shipInfoOpen = true;
 
+    /// <summary>Opens the map zoomed all the way out, centred on the galaxy's core.</summary>
+    public void OpenGalaxyOverview()
+    {
+        OpenMap();
+        var shape = _app.World.Galaxy!.Shape;
+        _mapCenter = new float2(shape.Center.X, shape.Center.Z);
+        _mapCell = Math.Max(MapMinCell, _ui.DisplaySize.Y / (shape.Radius * 2.5f));
+    }
+
     public void OpenMap()
     {
         _mapOpen = true;
         _mapTime = 0;
-        _mapPan = float2.Zero;
+        _mapCenter = new float2((float)(_app.World.OwnPosition.X / _app.World.Galaxy!.SectorSize), (float)(_app.World.OwnPosition.Z / _app.World.Galaxy!.SectorSize));
         _mapLayer = _app.World.Sector.Coord.Y;
     }
 
@@ -46,6 +61,7 @@ internal sealed partial class ScreenHost
     private void DrawWorldInterface(SessionSnapshot snapshot)
     {
         var world = _app.World;
+        UpdateDiscovery(snapshot, world);
         if (!_sessionMenuOpen && _app.Actions.Pressed(_app.Devices, InputAction.ToggleMap, !_ui.WantsTextInput))
         {
             if (_mapOpen)
@@ -91,7 +107,7 @@ internal sealed partial class ScreenHost
         if (!_mapOpen && world.CommandBlend > 0.5f)
             DrawFleetList(snapshot, world, world.CommandBlend);
         if (_mapOpen)
-            DrawMap(world);
+            DrawMap(snapshot, world);
     }
 
     private void DrawSectorPanel(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world)
@@ -602,10 +618,12 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
-    /// The galaxy map: one horizontal layer of sectors at a time, each drawn from the galaxy's seed. Drag to pan,
-    /// wheel to zoom, Page Up and Page Down to change layer, right-click a sector to fly there.
+    /// The galaxy map. Every grid cell is a sector. Far out it shows the whole galaxy; closer in, the grid and the
+    /// individual sectors appear; closest, their stars, asteroid fields and names. What a sector holds is only
+    /// shown once one of the player's hulls has been near it. Drag to pan, wheel to zoom at the pointer, Page Up
+    /// and Page Down to change layer, Space to centre on the player, right-click a sector to fly there.
     /// </summary>
-    private void DrawMap(WorldView world)
+    private void DrawMap(SessionSnapshot snapshot, WorldView world)
     {
         var galaxy = world.Galaxy!;
         if (!ReferenceEquals(galaxy, _mapGalaxy))
@@ -617,105 +635,177 @@ internal sealed partial class ScreenHost
         _mapTime += _ui.DeltaTime;
         var fade = Kit.EaseOut(_mapTime / Theme.ScreenEnter);
         Kit.Fade = fade;
-        DrawDim(0.93f * fade);
         BeginRoot("##map"u8);
         var draw = ImGui.GetWindowDrawList();
         var display = _ui.DisplaySize;
         var io = ImGui.GetIO();
+        var shape = galaxy.Shape;
         var here = world.Sector.Coord;
+        var size = galaxy.SectorSize;
+        var player = new float2((float)(world.OwnPosition.X / size), (float)(world.OwnPosition.Z / size));
+        var middle = display * 0.5f;
+        var mouse = io.MousePos;
 
-        // Input: pan, zoom, layer, close.
+        // Input. Zooming keeps the sector under the pointer where it is.
         if (ImGui.IsMouseDragging(ImGuiMouseButton.Left))
-            _mapPan += io.MouseDelta;
+            _mapCenter -= io.MouseDelta / _mapCell;
         if (io.MouseWheel != 0)
-            _mapCell = Math.Clamp(_mapCell * MathF.Pow(1.12f, io.MouseWheel), MapMinCell, MapMaxCell);
+        {
+            var under = _mapCenter + (mouse - middle) / _mapCell;
+            _mapCell = Math.Clamp(_mapCell * MathF.Pow(1.18f, io.MouseWheel), MapMinCell, MapMaxCell);
+            _mapCenter = under - (mouse - middle) / _mapCell;
+        }
+
         if (ImGui.IsKeyPressed(ImGuiKey.PageUp))
             _mapLayer++;
         if (ImGui.IsKeyPressed(ImGuiKey.PageDown))
             _mapLayer--;
+        if (ImGui.IsKeyPressed(ImGuiKey.Space, false))
+        {
+            _mapCenter = player;
+            _mapLayer = here.Y;
+        }
+
         if (BackPressed())
             _mapOpen = false;
 
-        var cell = Kit.Px(_mapCell);
-        var origin = display * 0.5f + _mapPan;
-        var maxRocks = (float)galaxy.MaxAsteroidsPerSector;
-        var mouse = io.MousePos;
-        _mapHasHover = false;
+        var cell = _mapCell;
+        var center = _mapCenter;
+        float2 ToScreen(float sectorX, float sectorZ) => middle + new float2((sectorX - center.X) * cell, (sectorZ - center.Y) * cell);
 
-        // The map is an island in the middle of the screen: sectors fade out toward its edge instead of
-        // filling an ultrawide display from side to side.
-        var islandY = display.Y * 0.42f;
-        var islandX = Math.Min(display.X * 0.46f, islandY * 1.7f);
-        var showNames = _mapCell >= 96f;
+        // Backdrop: black, the galaxy, and a field of far stars that slides more slowly than the map.
+        draw.AddRectFilled(float2.Zero, display, Kit.Color(0x020305));
+        var reach = shape.Radius * Render.GalaxyImage.Extent;
+        var galaxyAlpha = Math.Clamp(1.1f - cell / 60f, 0.22f, 1f) * shape.LayerFalloff(_mapLayer);
+        draw.AddImage(
+            _app.GalaxyImageRef,
+            ToScreen(shape.Center.X - reach, shape.Center.Z - reach),
+            ToScreen(shape.Center.X + reach, shape.Center.Z + reach),
+            float2.Zero,
+            float2.One,
+            Kit.Color(0xFFFFFF, galaxyAlpha)
+        );
 
-        // Screen x runs with sector X, screen y with sector Z, so "up" on the map is -Z, the way hulls face.
-        var firstX = here.X + (int)MathF.Floor((display.X * 0.5f - islandX - origin.X) / cell + 0.5f);
-        var lastX = here.X + (int)MathF.Floor((display.X * 0.5f + islandX - origin.X) / cell + 0.5f);
-        var firstZ = here.Z + (int)MathF.Floor((display.Y * 0.5f - islandY - origin.Y) / cell + 0.5f);
-        var lastZ = here.Z + (int)MathF.Floor((display.Y * 0.5f + islandY - origin.Y) / cell + 0.5f);
-
-        for (var z = firstZ; z <= lastZ; z++)
-            for (var x = firstX; x <= lastX; x++)
+        const float tile = 150f;
+        var slide = center * (cell * 0.3f);
+        var firstTileX = (int)MathF.Floor(slide.X / tile);
+        var firstTileY = (int)MathF.Floor(slide.Y / tile);
+        for (var ty = firstTileY; (ty - firstTileY) * tile < display.Y + tile; ty++)
+            for (var tx = firstTileX; (tx - firstTileX) * tile < display.X + tile; tx++)
             {
-                var center = origin + new float2((x - here.X) * cell, (z - here.Z) * cell);
-                var fromMiddle = new float2((center.X - display.X * 0.5f) / islandX, (center.Y - display.Y * 0.5f) / islandY);
-                var edge = 1f - Math.Clamp((MathF.Sqrt(fromMiddle.X * fromMiddle.X + fromMiddle.Y * fromMiddle.Y) - 0.62f) / 0.38f, 0f, 1f);
-                if (edge <= 0.01f)
-                    continue;
-
-                var coord = new SectorCoord(x, _mapLayer, z);
-                ref var summary = ref MapSummary(galaxy, coord);
-                var half = cell * 0.5f;
-                var min = center - new float2(half, half);
-                var max = center + new float2(half, half);
-                var hovered = mouse.X >= min.X && mouse.X < max.X && mouse.Y >= min.Y && mouse.Y < max.Y;
-
-                // A small tick at each cell corner marks the grid without ruling lines across the whole map.
-                var tick = Kit.Px(4);
-                var tickColor = Kit.Color(Theme.LineStrong, 0.55f * edge);
-                draw.AddLine(min - new float2(tick, 0), min + new float2(tick, 0), tickColor);
-                draw.AddLine(min - new float2(0, tick), min + new float2(0, tick), tickColor);
-
-                if (hovered)
+                var hash = (uint)(tx * 73856093 ^ ty * 19349663);
+                for (var n = 0; n < 2; n++)
                 {
-                    draw.AddRectFilled(min + new float2(3, 3), max - new float2(3, 3), Kit.Color(Theme.PanelRaised, 0.8f));
-                    draw.AddRect(min + new float2(3, 3), max - new float2(3, 3), Kit.Color(Theme.LineStrong));
-                    if (!_mapHasHover || _mapHover != coord)
-                        _mapHoverName = galaxy.NameOf(coord);
-                    _mapHover = coord;
-                    _mapHasHover = true;
-                }
-
-                // The star: a soft halo and a core in the star's colour, larger for hotter classes.
-                var star = galaxy.StarClasses[summary.StarClass];
-                var starColor = StarColor(star.Color);
-                var starRadius = Kit.Px(3.2f + 0.9f * summary.StarClass);
-                var starCenter = center - new float2(0, showNames ? cell * 0.1f : 0);
-                draw.AddCircleFilled(starCenter, starRadius * 2.6f, Kit.Color(starColor, 0.12f * edge), 24);
-                draw.AddCircleFilled(starCenter, starRadius, Kit.Color(starColor, edge), 20);
-
-                // Asteroids: an arc around the star, longer the richer the sector. Empty sectors have none.
-                if (summary.AsteroidCount > 0)
-                {
-                    var sweep = MathF.Tau * Math.Clamp(summary.AsteroidCount / maxRocks, 0.08f, 1f);
-                    draw.PathArcTo(starCenter, starRadius * 2.6f + Kit.Px(4), -MathF.PI / 2, -MathF.PI / 2 + sweep, 32);
-                    draw.PathStroke(Kit.Color(Theme.Info, 0.75f * edge), ImDrawFlags.None, Kit.Px(1.5f));
-                }
-
-                if (showNames)
-                {
-                    ref var name = ref MapName(galaxy, coord);
-                    var nameSize = Kit.Measure(_ui.Sans, Theme.FontCaption, name);
-                    Kit.Text(draw, _ui.Sans, Theme.FontCaption, new float2(center.X - nameSize.X * 0.5f, center.Y + cell * 0.2f), hovered ? Theme.Text : Theme.TextDim, name, edge);
+                    hash = (hash ^ hash >> 15) * 2246822519u + 0x9E3779B9u;
+                    var position = new float2((tx + (hash & 0xFFFF) / 65535f) * tile - slide.X, (ty + (hash >> 16) / 65535f) * tile - slide.Y);
+                    var glint = 0.15f + 0.45f * ((hash >> 8 & 0xFF) / 255f);
+                    draw.AddRectFilled(position, position + new float2(1.5f, 1.5f), Kit.Color(0xC8D6F0, glint));
                 }
             }
 
-        // The player's sector and heading.
+        // Grid. Sector lines fade in as the cells grow; every tenth and hundredth line is always the stronger.
+        var left = center.X - middle.X / cell;
+        var top = center.Y - middle.Y / cell;
+        var right = center.X + middle.X / cell;
+        var bottom = center.Y + middle.Y / cell;
+        DrawMapGrid(draw, display, left, top, right, bottom, 1, Math.Clamp((cell - 9f) / 26f, 0f, 1f) * 0.2f, ToScreen(0, 0), cell);
+        DrawMapGrid(draw, display, left, top, right, bottom, 10, Math.Clamp((cell * 10f - 30f) / 120f, 0f, 1f) * 0.34f, ToScreen(0, 0), cell);
+        DrawMapGrid(draw, display, left, top, right, bottom, 100, Math.Clamp((cell * 100f - 30f) / 200f, 0f, 1f) * 0.4f, ToScreen(0, 0), cell);
+
+        var layerFalloff = shape.LayerFalloff(_mapLayer);
+        var maxRocks = (float)galaxy.MaxAsteroidsPerSector;
+        if (cell >= MapSectorDetailCell)
+        {
+            // Close enough that every sector on screen can be drawn for what it is.
+            var firstX = (int)MathF.Floor(left + 0.5f);
+            var lastX = (int)MathF.Floor(right + 0.5f);
+            var firstZ = (int)MathF.Floor(top + 0.5f);
+            var lastZ = (int)MathF.Floor(bottom + 0.5f);
+            for (var z = firstZ; z <= lastZ; z++)
+                for (var x = firstX; x <= lastX; x++)
+                {
+                    var coord = new SectorCoord(x, _mapLayer, z);
+                    ref var summary = ref MapSummary(galaxy, coord);
+                    if (summary.AsteroidCount == 0)
+                        continue;
+
+                    var known = _discovered.Contains(coord);
+                    var richness = summary.AsteroidCount / maxRocks;
+
+                    // Uncharted space shows only its stronger signals, and only once the cells are large enough.
+                    if (!known && (richness < 0.3f || (cell < 34f && richness < 0.55f)))
+                        continue;
+                    var position = ToScreen(x, z);
+                    var star = StarColor(galaxy.StarClasses[summary.StarClass].Color);
+
+                    // Something is there whether or not it has been visited; what it is shows only once discovered.
+                    var tint = known ? star : Kit.Mix(star, 0x66727F, 0.75f);
+                    var glow = Math.Min(cell * (0.12f + 0.5f * richness * richness), 52f);
+                    if (known)
+                    {
+                        draw.AddCircleFilled(position, glow, Kit.Color(tint, 0.08f), 16);
+                        draw.AddCircleFilled(position, glow * 0.5f, Kit.Color(tint, 0.16f), 12);
+                        draw.AddCircleFilled(position, Math.Max(1.5f, glow * 0.16f), Kit.Color(tint, 0.95f), 8);
+                    }
+                    else
+                    {
+                        draw.AddCircleFilled(position, glow, Kit.Color(tint, 0.06f), 16);
+                        draw.AddCircleFilled(position, Math.Max(1.2f, glow * 0.12f), Kit.Color(tint, 0.4f), 8);
+                    }
+
+                    if (!known || cell < 64f)
+                        continue;
+
+                    var sweep = MathF.Tau * Math.Clamp(richness, 0.08f, 1f);
+                    draw.PathArcTo(position, cell * 0.2f, -MathF.PI / 2, -MathF.PI / 2 + sweep, 28);
+                    draw.PathStroke(Kit.Color(Theme.Info, 0.75f), ImDrawFlags.None, 1.5f);
+                    if (cell >= 118f)
+                    {
+                        ref var name = ref MapName(galaxy, coord);
+                        var nameSize = Kit.Measure(_ui.Sans, Theme.FontCaption, name);
+                        Kit.Text(draw, _ui.Sans, Theme.FontCaption, new float2(position.X - nameSize.X * 0.5f, position.Y + cell * 0.27f), Theme.TextDim, name);
+                    }
+                }
+        }
+        else if (cell >= 2.5f)
+        {
+            // Too many sectors on screen to draw each: sample the galaxy's density instead, so the map still
+            // glitters where the rock is.
+            var step = (int)MathF.Ceiling(MapSectorDetailCell / cell);
+            var firstX = (int)MathF.Floor(left / step) * step;
+            var firstZ = (int)MathF.Floor(top / step) * step;
+            for (var z = firstZ; z <= bottom; z += step)
+                for (var x = firstX; x <= right; x += step)
+                {
+                    var density = shape.Density(x, z) * layerFalloff;
+                    var hash = (uint)(x * 73856093 ^ z * 19349663 ^ _mapLayer * 83492791);
+                    hash = (hash ^ hash >> 15) * 2246822519u;
+                    var chance = (hash >> 8 & 0xFFFF) / 65535f;
+                    if (chance > density * 0.8f)
+                        continue;
+
+                    var jitter = new float2(((hash & 0xFF) / 255f - 0.5f) * step, ((hash >> 24) / 255f - 0.5f) * step);
+                    var position = ToScreen(x + jitter.X, z + jitter.Y);
+                    var tint = Kit.Mix(0xFFD9A0, 0x9FC4FF, (hash >> 12 & 0xFF) / 255f);
+                    var glow = step * cell * (0.25f + 0.5f * density);
+                    draw.AddCircleFilled(position, glow, Kit.Color(tint, 0.08f), 10);
+                    draw.AddCircleFilled(position, Math.Max(1f, glow * 0.22f), Kit.Color(tint, 0.6f), 6);
+                }
+        }
+
+        // The player's hulls, and the hull being flown as an arrow along its heading.
         if (_mapLayer == here.Y)
         {
-            var local = world.OwnPosition - galaxy.CenterOf(here);
-            var marker = origin + new float2((float)(local.X / galaxy.SectorSize) * cell, (float)(local.Z / galaxy.SectorSize) * cell);
-            Brackets(draw, origin - new float2(cell * 0.5f - 3, cell * 0.5f - 3), origin + new float2(cell * 0.5f - 3, cell * 0.5f - 3), Kit.Px(12), Kit.Color(Theme.Accent));
+            for (var i = 0; i < snapshot.HullCount; i++)
+            {
+                ref var hull = ref snapshot.Hulls[i];
+                if (hull.Owner != snapshot.PlayerId || hull.IsOwn)
+                    continue;
+                var at = ToScreen((float)(hull.Position.X / size), (float)(hull.Position.Z / size));
+                draw.AddCircleFilled(at, Kit.Px(3), Kit.Color(Theme.Accent, 0.9f), 10);
+            }
+
+            var marker = ToScreen(player.X, player.Y);
             var heading = Vector3.Transform(-Vector3.UnitZ, world.OwnOrientation);
             var flat = new float2(heading.X, heading.Z);
             var length = MathF.Sqrt(flat.X * flat.X + flat.Y * flat.Y);
@@ -723,61 +813,165 @@ internal sealed partial class ScreenHost
             var side = new float2(-flat.Y, flat.X);
             var s = Kit.Px(8);
             draw.AddTriangleFilled(marker + flat * s * 1.4f, marker - flat * s * 0.7f + side * s * 0.8f, marker - flat * s * 0.7f - side * s * 0.8f, Kit.Color(Theme.Accent));
+            if (cell >= MapSectorDetailCell)
+            {
+                var corner = new float2(cell * 0.5f - 2, cell * 0.5f - 2);
+                var home = ToScreen(here.X, here.Z);
+                Brackets(draw, home - corner, home + corner, Math.Min(Kit.Px(10), cell * 0.3f), Kit.Color(Theme.Accent));
+            }
         }
 
         // A standing order's destination.
         var order = world.Own.Order;
         if (order.Kind == OrderKind.MoveTo && galaxy.SectorOf(order.Target).Y == _mapLayer)
         {
-            var local = order.Target - galaxy.CenterOf(here);
-            var marker = origin + new float2((float)(local.X / galaxy.SectorSize) * cell, (float)(local.Z / galaxy.SectorSize) * cell);
-            DrawTargetMarker(draw, marker, Theme.Accent);
+            var destination = ToScreen((float)(order.Target.X / size), (float)(order.Target.Z / size));
+            draw.AddLine(ToScreen(player.X, player.Y), destination, Kit.Color(Theme.Accent, 0.5f));
+            DrawTargetMarker(draw, destination, Theme.Accent);
         }
 
-        if (_mapHasHover && ImGui.IsMouseClicked(ImGuiMouseButton.Right))
-            _app.Session?.Client.Input.IssueOrder(new HullOrder { Kind = OrderKind.MoveTo, Target = galaxy.CenterOf(_mapHover) });
-
-        // Title, layer and the hovered sector's details.
-        var left = Kit.Px(96);
-        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(left, Kit.Px(140)), Theme.Accent, "NAVIGATION"u8);
-        Kit.Text(draw, _ui.SansBold, Theme.FontHeading, new float2(left, Kit.Px(158)), Theme.Text, "Galaxy Map"u8);
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(left, Kit.Px(198)), Theme.TextDim, Kit.F($"LAYER {_mapLayer:+0;-0;0}   {galaxy.SectorSize / 1000:0} KM PER SECTOR"));
-
-        if (_mapHasHover)
+        // The sector under the pointer.
+        var hovered = _mapCenter + (mouse - middle) / cell;
+        var hover = new SectorCoord((int)MathF.Floor(hovered.X + 0.5f), _mapLayer, (int)MathF.Floor(hovered.Y + 0.5f));
+        var pointerOnMap = mouse.X >= 0 && mouse.Y >= 0 && mouse.X < display.X && mouse.Y < display.Y;
+        if (pointerOnMap)
         {
-            var panelSize = new float2(Kit.Px(340), Kit.Px(196));
-            var panelMin = new float2(display.X - panelSize.X - Kit.Px(96), Kit.Px(140));
-            Kit.PanelFrame(draw, panelMin, panelMin + panelSize);
-            ref var hover = ref MapSummary(galaxy, _mapHover);
-            var star = galaxy.StarClasses[hover.StarClass];
-            var text = panelMin + new float2(Kit.Px(Theme.Space5), Kit.Px(Theme.Space4));
-            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, text, Theme.Accent, _mapHover == here ? "YOU ARE HERE"u8 : "SECTOR"u8);
-            Kit.Text(draw, _ui.SansBold, Theme.FontHeading, text + new float2(0, Kit.Px(18)), Theme.Text, _mapHoverName);
-            Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(62)), Theme.TextDim, Kit.F($"COORDINATES   {_mapHover.X} {_mapHover.Y} {_mapHover.Z}"));
-            Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(82)), Theme.TextDim, Kit.F($"STAR          {star.Name}"));
-            Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(102)), Theme.TextDim, Kit.F($"ASTEROIDS     {hover.AsteroidCount}"));
-            var range = galaxy.CenterOf(_mapHover).RelativeTo(world.OwnPosition).Length() / 1000f;
-            Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(122)), Theme.TextDim, Kit.F($"DISTANCE      {range:0.0} KM"));
-            Kit.Text(draw, _ui.Sans, Theme.FontCaption, text + new float2(0, Kit.Px(150)), Theme.TextMute, "Right-click to set course"u8);
+            var at = ToScreen(hover.X, hover.Z);
+            var corner = new float2(Math.Max(cell * 0.5f, 7f), Math.Max(cell * 0.5f, 7f));
+            Brackets(draw, at - corner, at + corner, Math.Clamp(cell * 0.3f, 3f, Kit.Px(10)), Kit.Color(Theme.Text, 0.85f));
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, mouse + new float2(Kit.Px(18), -Kit.Px(6)), Theme.Text, Kit.F($"{hover.X} : {hover.Z}"));
+            if (ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+                _app.Session?.Client.Input.IssueOrder(new HullOrder { Kind = OrderKind.MoveTo, Target = galaxy.CenterOf(hover) });
         }
 
-        var hint = new float2(left, display.Y - Kit.Px(56));
-        var legend = new float2(left, Kit.Px(236));
-        draw.AddCircleFilled(legend + new float2(Kit.Px(5), Kit.Px(7)), Kit.Px(4), Kit.Color(Theme.Text), 16);
-        Kit.Text(draw, _ui.Sans, Theme.FontCaption, legend + new float2(Kit.Px(20), 0), Theme.TextMute, "Star, coloured by class"u8);
-        draw.PathArcTo(legend + new float2(Kit.Px(5), Kit.Px(29)), Kit.Px(6), -MathF.PI / 2, MathF.PI, 20);
-        draw.PathStroke(Kit.Color(Theme.Info), ImDrawFlags.None, Kit.Px(1.5f));
-        Kit.Text(draw, _ui.Sans, Theme.FontCaption, legend + new float2(Kit.Px(20), Kit.Px(22)), Theme.TextMute, "Asteroids: a longer arc means more rock"u8);
-        draw.AddTriangleFilled(legend + new float2(Kit.Px(5), Kit.Px(45)), legend + new float2(Kit.Px(1), Kit.Px(56)), legend + new float2(Kit.Px(9), Kit.Px(56)), Kit.Color(Theme.Accent));
-        Kit.Text(draw, _ui.Sans, Theme.FontCaption, legend + new float2(Kit.Px(20), Kit.Px(44)), Theme.TextMute, "You, and the way you are facing"u8);
+        // Title, layer and scale.
+        var margin = Kit.Px(96);
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(margin, Kit.Px(140)), Theme.Accent, "NAVIGATION"u8);
+        Kit.Text(draw, _ui.SansBold, Theme.FontHeading, new float2(margin, Kit.Px(158)), Theme.Text, "Galaxy Map"u8);
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(margin, Kit.Px(198)), Theme.TextDim, Kit.F($"LAYER {_mapLayer:+0;-0;0}   {display.X / cell:0} SECTORS ACROSS   {size / 1000:0} KM EACH"));
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(margin, Kit.Px(218)), Theme.TextMute, Kit.F($"{_discovered.Count} SECTORS DISCOVERED"));
 
+        if (pointerOnMap)
+            DrawMapHoverPanel(draw, snapshot, world, galaxy, hover, here);
+
+        var hint = new float2(margin, display.Y - Kit.Px(56));
         hint.X += Kit.KeyHint(draw, hint, "DRAG"u8, "Pan"u8);
         hint.X += Kit.KeyHint(draw, hint, "WHEEL"u8, "Zoom"u8);
         hint.X += Kit.KeyHint(draw, hint, "PGUP / PGDN"u8, "Layer"u8);
+        hint.X += Kit.KeyHint(draw, hint, "SPACE"u8, "Centre on me"u8);
         hint.X += Kit.KeyHint(draw, hint, "RMB"u8, "Set course"u8);
         Kit.KeyHint(draw, hint, "M / ESC"u8, "Close"u8);
         EndRoot();
         Kit.Fade = 1f;
+    }
+
+    /// <summary>What is known about the sector under the pointer.</summary>
+    private void DrawMapHoverPanel(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, Galaxy galaxy, SectorCoord hover, SectorCoord here)
+    {
+        var display = _ui.DisplaySize;
+        var known = _discovered.Contains(hover);
+        var panelSize = new float2(Kit.Px(340), Kit.Px(known ? 216 : 150));
+        var panelMin = new float2(display.X - panelSize.X - Kit.Px(96), Kit.Px(140));
+        Kit.PanelFrame(draw, panelMin, panelMin + panelSize);
+        var text = panelMin + new float2(Kit.Px(Theme.Space5), Kit.Px(Theme.Space4));
+        var line = Kit.Px(20);
+
+        if (!_mapHasHover || _mapHover != hover)
+        {
+            _mapHover = hover;
+            _mapHasHover = true;
+            _mapHoverName = known ? galaxy.NameOf(hover) : "Unexplored";
+        }
+        else if (known && _mapHoverName == "Unexplored")
+        {
+            _mapHoverName = galaxy.NameOf(hover);
+        }
+
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, text, hover == here ? Theme.Accent : known ? Theme.Info : Theme.TextMute, hover == here ? "YOU ARE HERE"u8 : known ? "DISCOVERED"u8 : "UNEXPLORED"u8);
+        Kit.Text(draw, _ui.SansBold, Theme.FontHeading, text + new float2(0, Kit.Px(18)), known ? Theme.Text : Theme.TextDim, _mapHoverName);
+        var y = Kit.Px(62);
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, y), Theme.TextDim, Kit.F($"COORDINATES   {hover.X} : {hover.Z}   LAYER {hover.Y:+0;-0;0}"));
+        y += line;
+        var range = galaxy.CenterOf(hover).RelativeTo(world.OwnPosition).Length() / 1000f;
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, y), Theme.TextDim, Kit.F($"DISTANCE      {range:0.0} KM"));
+        y += line;
+
+        if (known)
+        {
+            ref var summary = ref MapSummary(galaxy, hover);
+            var ships = 0;
+            for (var i = 0; i < snapshot.HullCount; i++)
+            {
+                if (snapshot.Hulls[i].Owner == snapshot.PlayerId && galaxy.SectorOf(world.HullPosition(snapshot.Hulls[i])) == hover)
+                    ships++;
+            }
+
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, y), Theme.TextDim, Kit.F($"STAR          {galaxy.StarClasses[summary.StarClass].Name}"));
+            y += line;
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, y), Theme.TextDim, summary.AsteroidCount > 0 ? Kit.F($"ASTEROIDS     {summary.AsteroidCount}") : "ASTEROIDS     none"u8);
+            y += line;
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, y), ships > 0 ? Theme.Accent : Theme.TextDim, Kit.F($"YOUR SHIPS    {ships}"));
+            y += line;
+        }
+        else
+        {
+            Kit.Text(draw, _ui.Sans, Theme.FontCaption, text + new float2(0, y), Theme.TextMute, "Send a ship within one sector to chart it."u8);
+            y += line;
+        }
+
+        Kit.Text(draw, _ui.Sans, Theme.FontCaption, text + new float2(0, y + Kit.Px(4)), Theme.TextMute, "Right-click to set course"u8);
+    }
+
+    /// <summary>Grid lines every <paramref name="every"/> sectors, drawn on sector boundaries.</summary>
+    private static void DrawMapGrid(ImDrawListPtr draw, float2 display, float left, float top, float right, float bottom, int every, float alpha, float2 origin, float cell)
+    {
+        if (alpha <= 0.01f)
+            return;
+
+        // Boundaries sit half a sector from the sector centres; stronger lines fall on multiples of the spacing.
+        var color = Kit.Color(0x8FB4C8, alpha);
+        for (var x = MathF.Ceiling((left - 0.5f) / every) * every; x - 0.5f <= right; x += every)
+        {
+            var sx = MathF.Round(origin.X + (x - 0.5f) * cell);
+            draw.AddLine(new float2(sx, 0), new float2(sx, display.Y), color);
+        }
+
+        for (var z = MathF.Ceiling((top - 0.5f) / every) * every; z - 0.5f <= bottom; z += every)
+        {
+            var sy = MathF.Round(origin.Y + (z - 0.5f) * cell);
+            draw.AddLine(new float2(0, sy), new float2(display.X, sy), color);
+        }
+    }
+
+    /// <summary>
+    /// Charts the sectors around the player's hulls: a hull's sensors reach the sectors next to the one it is in.
+    /// </summary>
+    private void UpdateDiscovery(SessionSnapshot snapshot, WorldView world)
+    {
+        var galaxy = world.Galaxy!;
+        if (!ReferenceEquals(galaxy, _discoveredGalaxy))
+        {
+            _discoveredGalaxy = galaxy;
+            _discovered.Clear();
+            Array.Fill(_discoveredFrom, new SectorCoord(int.MinValue, 0, 0));
+        }
+
+        for (var i = 0; i < snapshot.HullCount; i++)
+        {
+            ref var hull = ref snapshot.Hulls[i];
+            if (hull.Owner != snapshot.PlayerId)
+                continue;
+            var coord = galaxy.SectorOf(hull.Position);
+            var slot = (int)(hull.Id & 0xFFFF) % _discoveredFrom.Length;
+            if (_discoveredFrom[slot] == coord)
+                continue;
+
+            _discoveredFrom[slot] = coord;
+            for (var dx = -1; dx <= 1; dx++)
+                for (var dy = -1; dy <= 1; dy++)
+                    for (var dz = -1; dz <= 1; dz++)
+                        _discovered.Add(coord.Offset(dx, dy, dz));
+        }
     }
 
     private ref SectorSummary MapSummary(Galaxy galaxy, SectorCoord coord)

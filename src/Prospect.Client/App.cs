@@ -56,6 +56,7 @@ internal sealed class App : IDisposable
     private readonly UiContext _ui;
     private readonly ScreenHost _screens;
     private readonly SceneRenderer _scene;
+    private readonly Texture2D _galaxyImage;
     private long _lastFrameTimestamp;
     private bool _viewOpened;
     private readonly ScreenshotJob _screenshotJob = new();
@@ -107,6 +108,8 @@ internal sealed class App : IDisposable
             meshJobs[WorldView.AsteroidMesh(designCount, shape, true)] = new MeshJob(() => MeshBuilder.Asteroid(seed, 2));
         }
 
+        var galaxyJob = new GalaxyImageJob(Content.Galaxy.Shape);
+        Jobs.Schedule(galaxyJob, 20);
         foreach (var job in shaderJobs)
             Jobs.Schedule(job, 6);
         foreach (var job in meshJobs)
@@ -139,6 +142,8 @@ internal sealed class App : IDisposable
         Actions = bindingsJob.Result!;
         BrutalLogo = Texture2D.FromRgba(_gpu, logoJob.Width, logoJob.Height, logoJob.Pixels);
         BrutalLogoRef = _ui.Register(BrutalLogo);
+        _galaxyImage = Texture2D.FromRgba(_gpu, GalaxyImage.Size, GalaxyImage.Size, galaxyJob.Pixels);
+        GalaxyImageRef = _ui.Register(_galaxyImage);
 
         var shaders = new Dictionary<string, byte[]>();
         foreach (var job in shaderJobs)
@@ -163,6 +168,9 @@ internal sealed class App : IDisposable
     public FrameStats Stats { get; } = new();
     public Texture2D BrutalLogo { get; }
     public ImTextureRef BrutalLogoRef { get; }
+
+    /// <summary>The galaxy seen from above, the backdrop of the galaxy map.</summary>
+    public ImTextureRef GalaxyImageRef { get; }
     public string GpuLabel { get; }
     public GameSession? Session { get; private set; }
     public bool ShowPerformance { get; private set; }
@@ -348,6 +356,7 @@ internal sealed class App : IDisposable
         Jobs.CompleteAll();
         _gpu.Device.WaitIdle();
         BrutalLogo.Dispose();
+        _galaxyImage.Dispose();
         _scene.Dispose();
         _ui.Dispose();
         _renderer.Dispose();
@@ -417,6 +426,8 @@ internal sealed class App : IDisposable
             }
             else if (view == "info")
                 _screens.OpenShipInfo();
+            else if (view == "galaxy")
+                _screens.OpenGalaxyOverview();
             else
                 _screens.OpenMap();
         }
@@ -462,6 +473,13 @@ internal sealed class App : IDisposable
             Height = image.Height;
             Pixels = image.AsSpan().ToArray();
         }
+    }
+
+    private sealed class GalaxyImageJob(GalaxyShape shape) : IJob
+    {
+        public byte[] Pixels { get; private set; } = [];
+
+        public void Run() => Pixels = GalaxyImage.Generate(shape);
     }
 
     private sealed class ShaderJob(string fileName) : IJob
