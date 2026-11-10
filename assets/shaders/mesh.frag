@@ -60,5 +60,15 @@ void main()
     vec3 lit = albedo * (frame.sunColor.rgb * diffuse + vec3(0.012, 0.016, 0.026) * fill)
         + frame.sunColor.rgb * specular * diffuse
         + vec3(0.02, 0.03, 0.05) * rim;
+    // In the command view, a bright line marks where the command plane cuts through the surface.
+    if (frame.gridPlane.z > 0.01)
+    {
+        float toPlane = abs(worldPosition.y - frame.gridPlane.x);
+        float width = max(fwidth(worldPosition.y) * 1.6, 0.03);
+        float cut = 1.0 - smoothstep(width, width * 2.0, toPlane);
+        float below = worldPosition.y < frame.gridPlane.x ? 0.55 : 1.0;
+        lit = mix(lit * mix(1.0, below, frame.gridPlane.z), vec3(1.0, 0.69, 0.13) * 1.8, cut * frame.gridPlane.z);
+    }
+
     outColor = vec4(lit, 1.0);
 }

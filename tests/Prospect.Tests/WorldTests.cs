@@ -266,8 +266,8 @@ public sealed class PowerAndDamageTests
     public void HittingAnAsteroidBouncesTheHullOffAndDamagesIt()
     {
         var galaxy = Content.Galaxy.WithSeed(11);
-        var rocks = new SectorCache(galaxy);
-        var rock = rocks.Get(default).Asteroids[0];
+        var rocks = new RockField(galaxy);
+        var rock = rocks.Sector(default).Asteroids[0];
         var rockCenter = galaxy.CenterOf(default) + rock.LocalPosition;
 
         // Approach the rock along +X at a speed that hurts but does not kill.
@@ -283,11 +283,56 @@ public sealed class PowerAndDamageTests
     }
 
     [Fact]
+    public void AHeavyHullShovesAnAsteroidWhichThenDriftsToRest()
+    {
+        var galaxy = Content.Galaxy.WithSeed(11);
+        var rocks = new RockField(galaxy);
+        var rock = rocks.Sector(default).Asteroids[0];
+        var rockCenter = galaxy.CenterOf(default) + rock.LocalPosition;
+        var rockMass = rocks.Mass(rock.Radius);
+
+        // A hull as heavy as the rock itself, and tough enough to survive the bump.
+        var heavy = Pod;
+        heavy.Mass = rockMass;
+        heavy.HullPoints = float.MaxValue;
+        var state = HullState.Spawn(rockCenter + new Vector3(-(rock.Radius + 40f), 0, 0), heavy);
+        state.Velocity = new Vector3(20, 0, 0);
+        var order = default(HullOrder);
+        var impulses = new RockImpulses();
+        for (var tick = 0; tick < 240 && impulses.Count == 0; tick++)
+            HullSim.Step(ref state, ref order, default, heavy, rocks, tick, impulses);
+
+        Assert.Equal(1, impulses.Count);
+        var delta = impulses.Items[0];
+        Assert.Equal(new RockRef(default, 0), delta.Rock);
+
+        // Equal masses share the impulse: the rock leaves at about the speed the hull loses.
+        Assert.InRange(delta.Velocity.X, 10f, 14f);
+        Assert.True(state.Velocity.X < 10f);
+
+        // The drift dies away, and the rock ends up a finite distance from where it started.
+        rocks.Set(delta);
+        rocks.Displacement(delta.Rock, delta.StartTick + 60 * 600, out var offset, out var velocity);
+        Assert.True(velocity.Length() < 1e-3f);
+        Assert.Equal(delta.Velocity.X / galaxy.DriftDecay, offset.X, 1);
+
+        // A pod hitting the same rock, undisturbed, barely moves it.
+        rocks = new RockField(galaxy);
+        var light = new RockImpulses();
+        var pod = HullState.Spawn(rockCenter + new Vector3(0, rock.Radius + 40f, 0), Pod);
+        pod.Velocity = new Vector3(0, -20, 0);
+        for (var tick = 0; tick < 240 && light.Count == 0; tick++)
+            HullSim.Step(ref pod, ref order, default, Pod, rocks, tick, light);
+        Assert.Equal(1, light.Count);
+        Assert.True(light.Items[0].Velocity.Length() < 0.1f);
+    }
+
+    [Fact]
     public void AFatalImpactRebuildsThePodAtTheSpawnPoint()
     {
         var galaxy = Content.Galaxy.WithSeed(11);
-        var rocks = new SectorCache(galaxy);
-        var rock = rocks.Get(default).Asteroids[0];
+        var rocks = new RockField(galaxy);
+        var rock = rocks.Sector(default).Asteroids[0];
         var rockCenter = galaxy.CenterOf(default) + rock.LocalPosition;
 
         var state = HullState.Spawn(rockCenter + new Vector3(-(rock.Radius + 60f), 0, 0), Pod);
@@ -396,6 +441,38 @@ public sealed class FlightSessionTests
         var own = OwnHull(pilot);
         Assert.True(after.Position.RelativeTo(before.Position).Length() > 20f);
         Assert.True(after.Position.RelativeTo(own.Position).Length() < 0.5f);
+        Assert.Null(server.Fault);
+    }
+
+    [Fact]
+    public void AnAsteroidHitOnTheServerIsReportedToClientsIncludingLateJoiners()
+    {
+        var port = (ushort)(49000 + Environment.ProcessId % 2000);
+        using var server = new ServerHost(new ServerConfig { MaxPlayers = 2 }, Content, Prospect.Engine.Net.RakNetTransport.Listen(port, 8));
+        server.Start();
+        using var pilot = GameSession.Join("127.0.0.1", port, Content, "Pilot");
+        WaitForOwnHull(pilot);
+
+        // Send the pod straight at the nearest asteroid's centre; it cannot get there without hitting it.
+        var content = new SectorContent();
+        server.Galaxy.Generate(default, content);
+        var nearest = content.Asteroids.Take(content.AsteroidCount).OrderBy(a => a.LocalPosition.Length()).First();
+        pilot.Client.Input.IssueOrder(new HullOrder { Kind = OrderKind.MoveTo, Target = server.Galaxy.CenterOf(default) + nearest.LocalPosition });
+
+        var deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 60;
+        while (pilot.Client.AcquireSnapshot().RockCount == 0 && Stopwatch.GetTimestamp() < deadline)
+            Thread.Sleep(50);
+        var seen = pilot.Client.AcquireSnapshot();
+        Assert.True(seen.RockCount > 0, "the client was never told the asteroid moved");
+        Assert.Equal(default, seen.Rocks[0].Rock.Sector);
+
+        // Someone joining afterwards learns about the displaced asteroid too.
+        using var late = GameSession.Join("127.0.0.1", port, Content, "Late");
+        WaitForOwnHull(late);
+        deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 10;
+        while (late.Client.AcquireSnapshot().RockCount == 0 && Stopwatch.GetTimestamp() < deadline)
+            Thread.Sleep(50);
+        Assert.True(late.Client.AcquireSnapshot().RockCount > 0);
         Assert.Null(server.Fault);
     }
 

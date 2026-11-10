@@ -56,6 +56,10 @@ internal sealed class WorldView
         public const int Ready = 2;
 
         public readonly SectorContent Content = new();
+
+        /// <summary>Per asteroid, how far it has been pushed from its generated position, as of this frame.</summary>
+        public Vector3[] Offsets = [];
+        public bool Displaced;
         public Galaxy? Galaxy;
         public SectorCoord Coord;
         public volatile int State;
@@ -89,6 +93,8 @@ internal sealed class WorldView
     private readonly DrawBatch[] _batches;
     private readonly uint[] _selected = new uint[MaxSelection];
     private int _selectedCount;
+    private readonly RockRef[] _selectedRocks = new RockRef[MaxSelection];
+    private int _selectedRockCount;
     private SessionSnapshot? _snapshot;
     private uint _followId;
     private float _chaseDistance = 11f;
@@ -150,6 +156,9 @@ internal sealed class WorldView
 
     /// <summary>The hulls selected in the command view, by id.</summary>
     public ReadOnlySpan<uint> Selection => _selected.AsSpan(0, _selectedCount);
+
+    /// <summary>The asteroids selected in the command view.</summary>
+    public ReadOnlySpan<RockRef> SelectedRocks => _selectedRocks.AsSpan(0, _selectedRockCount);
 
     /// <summary>True while a selection box is being dragged; its corners are in window pixels.</summary>
     public bool BoxSelecting => _leftDragging && _leftMoved && !_leftSlidesPlane;
@@ -213,6 +222,8 @@ internal sealed class WorldView
             _chaseInitialised = false;
             _currentCoord = new SectorCoord(int.MinValue, 0, 0);
         }
+
+        ApplyRockDeltas(snapshot);
 
         // Where the hull is right now, between the last two simulation ticks.
         ref var own = ref snapshot.Hulls[snapshot.OwnHull];
@@ -318,7 +329,7 @@ internal sealed class WorldView
             for (var i = 0; i < content.AsteroidCount && candidateCount < _candidates.Length; i++)
             {
                 ref var rock = ref content.Asteroids[i];
-                var position = center + rock.LocalPosition;
+                var position = center + rock.LocalPosition + (slot.Displaced ? slot.Offsets[i] : Vector3.Zero);
                 if (!Visible(position, rock.Radius, aspect, out var pixels) || pixels < 0.6f)
                     continue;
 
@@ -424,6 +435,7 @@ internal sealed class WorldView
     /// <summary>Selects a hull, replacing the selection or adding to it. Adding a selected hull removes it.</summary>
     public void Select(uint id, bool additive)
     {
+        _selectedRockCount = 0;
         if (!additive)
         {
             _selected[0] = id;
@@ -443,6 +455,7 @@ internal sealed class WorldView
     {
         var snapshot = _snapshot;
         _selectedCount = 0;
+        _selectedRockCount = 0;
         for (var i = 0; snapshot is not null && i < snapshot.HullCount && _selectedCount < MaxSelection; i++)
         {
             if (snapshot.Hulls[i].Owner == snapshot.PlayerId)
@@ -515,9 +528,45 @@ internal sealed class WorldView
         }
 
         if (best != 0)
+        {
             Select(best, additive);
-        else if (!additive)
-            _selectedCount = 0;
+            return;
+        }
+
+        // No hull under the pointer: pick the nearest asteroid whose disc the pointer is on.
+        var found = false;
+        var picked = default(RockRef);
+        var nearest = float.MaxValue;
+        foreach (var slot in _slots)
+        {
+            if (slot.State != SectorSlot.Ready || !ReferenceEquals(slot.Galaxy, _galaxy))
+                continue;
+            for (var i = 0; i < slot.Content.AsteroidCount; i++)
+            {
+                var rock = new RockRef(slot.Coord, i);
+                if (!TryGetRock(rock, out var position, out var radius) || !ProjectDisc(position, radius, out var screen, out var pixels, out var depth))
+                    continue;
+                var offset = screen - pointer;
+                var reach = Math.Max(pixels, 9f);
+                if (offset.X * offset.X + offset.Y * offset.Y > reach * reach || depth >= nearest)
+                    continue;
+                found = true;
+                picked = rock;
+                nearest = depth;
+            }
+        }
+
+        if (!additive)
+            _selectedRockCount = 0;
+        _selectedCount = 0;
+        if (!found)
+            return;
+
+        var existing = _selectedRocks.AsSpan(0, _selectedRockCount).IndexOf(picked);
+        if (existing >= 0)
+            _selectedRocks[existing] = _selectedRocks[--_selectedRockCount];
+        else if (_selectedRockCount < MaxSelection)
+            _selectedRocks[_selectedRockCount++] = picked;
     }
 
     private void SelectBox(SessionSnapshot snapshot, float2 a, float2 b, bool additive)
@@ -535,10 +584,122 @@ internal sealed class WorldView
             if (screen.X >= min.X && screen.X <= max.X && screen.Y >= min.Y && screen.Y <= max.Y)
                 _selected[_selectedCount++] = hull.Id;
         }
+
+        // A box always prefers the player's hulls; only a box with none in it selects the asteroids inside.
+        if (!additive)
+            _selectedRockCount = 0;
+        if (_selectedCount > 0)
+        {
+            _selectedRockCount = 0;
+            return;
+        }
+
+        foreach (var slot in _slots)
+        {
+            if (slot.State != SectorSlot.Ready || !ReferenceEquals(slot.Galaxy, _galaxy))
+                continue;
+            for (var i = 0; i < slot.Content.AsteroidCount && _selectedRockCount < MaxSelection; i++)
+            {
+                var rock = new RockRef(slot.Coord, i);
+                if (_selectedRocks.AsSpan(0, _selectedRockCount).Contains(rock))
+                    continue;
+                if (!TryGetRock(rock, out var position, out var radius) || !ProjectDisc(position, radius, out var screen, out _, out _))
+                    continue;
+                if (screen.X >= min.X && screen.X <= max.X && screen.Y >= min.Y && screen.Y <= max.Y)
+                    _selectedRocks[_selectedRockCount++] = rock;
+            }
+        }
+    }
+
+    /// <summary>Where an asteroid is this frame, and its radius. False if its sector is not loaded.</summary>
+    public bool TryGetRock(RockRef rock, out Double3 position, out float radius)
+    {
+        foreach (var slot in _slots)
+        {
+            if (slot.State != SectorSlot.Ready || slot.Coord != rock.Sector || !ReferenceEquals(slot.Galaxy, _galaxy))
+                continue;
+            if ((uint)rock.Index >= (uint)slot.Content.AsteroidCount)
+                break;
+            ref var asteroid = ref slot.Content.Asteroids[rock.Index];
+            position = _galaxy!.CenterOf(slot.Coord) + asteroid.LocalPosition + (slot.Displaced ? slot.Offsets[rock.Index] : Vector3.Zero);
+            radius = asteroid.Radius;
+            return true;
+        }
+
+        position = default;
+        radius = 0;
+        return false;
+    }
+
+    /// <summary>How fast an asteroid is drifting this frame, in m/s.</summary>
+    public float RockDrift(RockRef rock)
+    {
+        var snapshot = _snapshot;
+        if (snapshot is null || _galaxy is null)
+            return 0;
+        for (var i = 0; i < snapshot.RockCount; i++)
+        {
+            if (snapshot.Rocks[i].Rock != rock)
+                continue;
+            snapshot.Rocks[i].Evaluate(snapshot.ServerTickPrecise + TickAlpha(snapshot), _galaxy.DriftDecay, out _, out var velocity);
+            return velocity.Length();
+        }
+
+        return 0;
+    }
+
+    /// <summary>Projects a sphere: its centre in window pixels, its radius in pixels and its distance along the view.</summary>
+    public bool ProjectDisc(Double3 world, float radius, out float2 screen, out float pixels, out float depth)
+    {
+        depth = Vector3.Dot(world.RelativeTo(CameraPosition), _forward);
+        pixels = 0;
+        if (!Project(world, out screen))
+            return false;
+        pixels = radius / (depth * _tanHalfFov) * _viewport.Y * 0.5f;
+        return true;
+    }
+
+    /// <summary>Brings every loaded sector's asteroid offsets up to date with the motion records in the snapshot.</summary>
+    private void ApplyRockDeltas(SessionSnapshot snapshot)
+    {
+        foreach (var slot in _slots)
+        {
+            if (!slot.Displaced)
+                continue;
+            Array.Clear(slot.Offsets);
+            slot.Displaced = false;
+        }
+
+        if (_galaxy is null)
+            return;
+        var tick = snapshot.ServerTickPrecise + TickAlpha(snapshot);
+        for (var i = 0; i < snapshot.RockCount; i++)
+        {
+            ref var delta = ref snapshot.Rocks[i];
+            foreach (var slot in _slots)
+            {
+                if (slot.State != SectorSlot.Ready || slot.Coord != delta.Rock.Sector || !ReferenceEquals(slot.Galaxy, _galaxy))
+                    continue;
+                if ((uint)delta.Rock.Index < (uint)slot.Offsets.Length)
+                {
+                    delta.Evaluate(tick, _galaxy.DriftDecay, out slot.Offsets[delta.Rock.Index], out _);
+                    slot.Displaced = true;
+                }
+
+                break;
+            }
+        }
     }
 
     private void UpdateCommandControls(SessionSnapshot snapshot, PlayerInputBridge bridge, float dt, bool pointerOverUi)
     {
+        // Asteroids whose sector has streamed out drop out of the selection.
+        for (var i = _selectedRockCount - 1; i >= 0; i--)
+        {
+            if (!TryGetRock(_selectedRocks[i], out _, out _))
+                _selectedRocks[i] = _selectedRocks[--_selectedRockCount];
+        }
+
         // Hulls that no longer exist drop out of the selection.
         for (var i = _selectedCount - 1; i >= 0; i--)
         {
@@ -550,7 +711,18 @@ internal sealed class WorldView
         var control = _devices.KeyDown(GlfwKey.LeftControl) || _devices.KeyDown(GlfwKey.RightControl);
 
         if (_actions.Pressed(_devices, InputAction.Follow, true))
-            _followId = _selectedCount > 0 ? _selected[0] : Own.Id;
+        {
+            if (_selectedCount == 0 && _selectedRockCount > 0 && TryGetRock(_selectedRocks[0], out var rockPosition, out _))
+            {
+                // An asteroid is somewhere to look at, not something to follow.
+                _commandFocus = rockPosition;
+                _followId = 0;
+            }
+            else
+            {
+                _followId = _selectedCount > 0 ? _selected[0] : Own.Id;
+            }
+        }
         if (control && _devices.KeyPressed(GlfwKey.A))
             SelectAllOwned();
 

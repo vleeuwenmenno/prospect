@@ -72,6 +72,13 @@ public sealed class SessionSnapshot
     public bool Dampeners;
     public FlightParams Flight;
 
+    /// <summary>The server tick as a fraction, for evaluating motion that is a function of time.</summary>
+    public double ServerTickPrecise;
+
+    /// <summary>Asteroids that have been pushed from their generated positions; the first <see cref="RockCount"/> are meaningful.</summary>
+    public readonly RockDelta[] Rocks = new RockDelta[512];
+    public int RockCount;
+
     public TickStats Loop;
 }
 
@@ -153,7 +160,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                 SendPing();
 
             if (_state == SessionState.Active)
-                _world.Tick(Input, _transport);
+                _world.Tick(Input, _transport, EstimateServerTick(Stopwatch.GetTimestamp()));
         }
 
         var snapshot = _snapshots.WriteBuffer;
@@ -165,10 +172,10 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         snapshot.GalaxySeed = _galaxySeed;
         snapshot.PlayerCount = _playerCount;
         snapshot.ClientTick = tick;
-        var serverTick = _state == SessionState.Active
-            ? _syncServerTick + (now - _syncTimestamp) * (double)TickLoop.SimulationHz / Stopwatch.Frequency
-            : 0;
+        var serverTick = _state == SessionState.Active ? EstimateServerTick(now) : 0;
         snapshot.ServerTick = (long)serverTick;
+        snapshot.ServerTickPrecise = serverTick;
+        snapshot.RockCount = _state == SessionState.Active ? _world.CopyRockDeltas(snapshot.Rocks) : 0;
         snapshot.Galaxy = _galaxy;
         snapshot.HullCount = _state == SessionState.Active ? _world.BuildViews(snapshot.Hulls, serverTick, tick, out snapshot.OwnHull) : 0;
         if (snapshot.HullCount == 0)
@@ -180,6 +187,9 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         snapshot.Loop = _loop.Stats;
         _snapshots.Publish();
     }
+
+    private double EstimateServerTick(long now) =>
+        _syncServerTick + (now - _syncTimestamp) * (double)TickLoop.SimulationHz / Stopwatch.Frequency;
 
     void ITickHandler.OnStop()
     {
@@ -250,6 +260,10 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                         _ => SessionEndReason.Refused,
                     }
                 );
+                break;
+
+            case MessageId.RockDeltas when _state == SessionState.Active && channel == NetChannel.Reliable:
+                _world.OnRockDeltas(ref reader);
                 break;
 
             case MessageId.Snapshot when _state == SessionState.Active:

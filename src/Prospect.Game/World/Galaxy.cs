@@ -62,8 +62,10 @@ public sealed class Galaxy
     private readonly float _maxRadius;
     private readonly float _totalWeight;
 
-    private Galaxy(ulong seed, double sectorSize, StarClass[] starClasses, string[] syllables, float emptyChance, int maxAsteroids, float minRadius, float maxRadius)
+    private Galaxy(ulong seed, double sectorSize, StarClass[] starClasses, string[] syllables, float emptyChance, int maxAsteroids, float minRadius, float maxRadius, float density, float driftDecay)
     {
+        AsteroidDensity = density;
+        DriftDecay = driftDecay;
         Seed = seed;
         SectorSize = sectorSize;
         StarClasses = starClasses;
@@ -78,9 +80,18 @@ public sealed class Galaxy
 
     public ulong Seed { get; }
 
+    /// <summary>Tonnes per cubic metre of rock.</summary>
+    public float AsteroidDensity { get; }
+
+    /// <summary>
+    /// How quickly a pushed asteroid loses its drift, as an exponential rate per second. Real rock would coast for
+    /// ever; fields would slowly empty themselves, so a disturbed asteroid settles instead.
+    /// </summary>
+    public float DriftDecay { get; }
+
     /// <summary>The same galaxy rules under a different seed.</summary>
     public Galaxy WithSeed(ulong seed) =>
-        new(seed, SectorSize, StarClasses, _syllables, _emptyChance, _maxAsteroids, _minRadius, _maxRadius);
+        new(seed, SectorSize, StarClasses, _syllables, _emptyChance, _maxAsteroids, _minRadius, _maxRadius, AsteroidDensity, DriftDecay);
 
     /// <summary>Edge length of a sector cell in metres.</summary>
     public double SectorSize { get; }
@@ -124,7 +135,9 @@ public sealed class Galaxy
             asteroids.GetProperty("emptySectorChance"u8).GetSingle(),
             asteroids.GetProperty("maxPerSector"u8).GetInt32(),
             asteroids.GetProperty("minRadius"u8).GetSingle(),
-            asteroids.GetProperty("maxRadius"u8).GetSingle()
+            asteroids.GetProperty("maxRadius"u8).GetSingle(),
+            asteroids.GetProperty("densityTonnesPerCubicMetre"u8).GetSingle(),
+            MathF.Log(2f) / asteroids.GetProperty("driftHalfLifeSeconds"u8).GetSingle()
         );
     }
 

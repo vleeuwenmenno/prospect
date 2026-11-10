@@ -112,6 +112,47 @@ public static class FleetOrdersMessage
     }
 }
 
+/// <summary>Server to client, reliable: asteroid motion records. See <see cref="RockDelta"/>.</summary>
+public static class RockDeltasMessage
+{
+    public const int MaxDeltas = 32;
+    public const int WireSize = 2 + MaxDeltas * 46;
+
+    public static void Write(ref NetWriter writer, scoped ReadOnlySpan<RockDelta> deltas)
+    {
+        writer.WriteByte((byte)MessageId.RockDeltas);
+        writer.WriteByte((byte)deltas.Length);
+        foreach (var delta in deltas)
+        {
+            writer.WriteInt32(delta.Rock.Sector.X);
+            writer.WriteInt32(delta.Rock.Sector.Y);
+            writer.WriteInt32(delta.Rock.Sector.Z);
+            writer.WriteUInt16((ushort)delta.Rock.Index);
+            WorldWire.WriteVector(ref writer, delta.Offset);
+            WorldWire.WriteVector(ref writer, delta.Velocity);
+            writer.WriteInt64(delta.StartTick);
+        }
+    }
+
+    public static bool TryRead(ref NetReader reader, scoped Span<RockDelta> deltas, out int count)
+    {
+        count = reader.ReadByte();
+        if (count > MaxDeltas)
+            return false;
+
+        for (var i = 0; i < count; i++)
+        {
+            var sector = new SectorCoord(reader.ReadInt32(), reader.ReadInt32(), reader.ReadInt32());
+            deltas[i].Rock = new RockRef(sector, reader.ReadUInt16());
+            if (!WorldWire.TryReadVector(ref reader, out deltas[i].Offset) || !WorldWire.TryReadVector(ref reader, out deltas[i].Velocity))
+                return false;
+            deltas[i].StartTick = reader.ReadInt64();
+        }
+
+        return reader.IsValid;
+    }
+}
+
 /// <summary>A hull as it appears in a snapshot.</summary>
 public struct HullRecord
 {

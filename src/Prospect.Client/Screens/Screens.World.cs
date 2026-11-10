@@ -62,7 +62,16 @@ internal sealed partial class ScreenHost
         DrawSectorPanel(draw, snapshot, world);
         if (_shipInfoOpen && !_mapOpen)
         {
-            // In the command view the sheet describes the first selected hull; otherwise the one being flown.
+            // In the command view the sheet describes the first selected thing; otherwise the hull being flown.
+            if (world.Mode == ViewMode.Command && world.Selection.Length == 0 && world.SelectedRocks.Length > 0)
+            {
+                DrawRockInfo(draw, world, world.SelectedRocks[0]);
+                EndRoot();
+                if (world.CommandBlend > 0.5f)
+                    DrawFleetList(snapshot, world, world.CommandBlend);
+                return;
+            }
+
             var shown = world.Own;
             if (world.Mode == ViewMode.Command && world.Selection.Length > 0 && world.TryGetHull(world.Selection[0], out var picked))
                 shown = picked;
@@ -263,6 +272,32 @@ internal sealed partial class ScreenHost
             }
         }
 
+        // Selected asteroids: a ring at their outline with what they are.
+        foreach (var rock in world.SelectedRocks)
+        {
+            if (!world.TryGetRock(rock, out var rockPosition, out var radius) || !world.ProjectDisc(rockPosition, radius, out var rockScreen, out var pixels, out _))
+                continue;
+            var ring = Math.Max(pixels * 1.08f, Kit.Px(10));
+            draw.AddCircle(rockScreen, ring, Kit.Color(Theme.Text, 0.9f), 48, Kit.Px(1.5f));
+            var reach = new float2(ring + Kit.Px(5), ring + Kit.Px(5));
+            Brackets(draw, rockScreen - reach, rockScreen + reach, Kit.Px(8), Kit.Color(Theme.Info));
+
+            var label = rockScreen + new float2(ring + Kit.Px(12), -Kit.Px(14));
+            var mass = world.Galaxy!.AsteroidDensity * 4.18879f * MathF.Pow(radius * RockField.SolidFraction, 3);
+            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, label, Theme.Text, "ASTEROID"u8);
+            Kit.Text(
+                draw,
+                _ui.Mono,
+                Theme.FontCaption,
+                label + new float2(0, Kit.Px(15)),
+                Theme.TextDim,
+                mass >= 1e6f ? Kit.F($"R {radius:0} M   {mass / 1e6f:0.00} MT") : Kit.F($"R {radius:0} M   {mass / 1e3f:0.0} KT")
+            );
+            var drift = world.RockDrift(rock);
+            if (drift > 0.005f)
+                Kit.Text(draw, _ui.Mono, Theme.FontCaption, label + new float2(0, Kit.Px(30)), Theme.Accent, Kit.F($"DRIFTING {drift:0.00} M/S"));
+        }
+
         var pointer = _app.Devices.MousePosition;
         if (world.BoxSelecting)
         {
@@ -285,8 +320,8 @@ internal sealed partial class ScreenHost
         var top = new float2(display.X * 0.5f, Kit.Px(Theme.Space5));
         Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, top - new float2(titleSize.X * 0.5f, 0), Theme.Accent, title);
         var status = world.CommandFollowing
-            ? Kit.F($"{world.Selection.Length} SELECTED   FOLLOWING   RANGE {world.CommandDistance / 1000f:0.00} KM")
-            : Kit.F($"{world.Selection.Length} SELECTED   FREE CAMERA   RANGE {world.CommandDistance / 1000f:0.00} KM");
+            ? Kit.F($"{world.Selection.Length + world.SelectedRocks.Length} SELECTED   FOLLOWING   RANGE {world.CommandDistance / 1000f:0.00} KM")
+            : Kit.F($"{world.Selection.Length + world.SelectedRocks.Length} SELECTED   FREE CAMERA   RANGE {world.CommandDistance / 1000f:0.00} KM");
         var statusSize = Kit.Measure(_ui.Mono, Theme.FontCaption, status);
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, top + new float2(-statusSize.X * 0.5f, Kit.Px(22)), Theme.TextDim, status);
 
@@ -397,6 +432,43 @@ internal sealed partial class ScreenHost
         draw.AddRectFilled(barMin, barMax, Kit.Color(Theme.Void, 0.75f));
         draw.AddRectFilled(barMin, new float2(barMin.X + width * Math.Clamp(fraction, 0f, 1f), barMax.Y), Kit.Color(rgb));
         draw.AddRect(barMin - new float2(1, 1), barMax + new float2(1, 1), Kit.Color(Theme.LineStrong));
+    }
+
+    /// <summary>An asteroid's data sheet.</summary>
+    private void DrawRockInfo(ImDrawListPtr draw, WorldView world, RockRef rock)
+    {
+        if (!world.TryGetRock(rock, out var position, out var radius))
+            return;
+
+        var galaxy = world.Galaxy!;
+        var line = Kit.Px(21);
+        var size = new float2(Kit.Px(400), Kit.Px(Theme.Space5 * 2 + 46) + line * 7);
+        var min = new float2(_ui.DisplaySize.X - size.X - Kit.Px(300 + Theme.Space5 * 2), (_ui.DisplaySize.Y - size.Y) * 0.5f);
+        Kit.PanelFrame(draw, min, min + size);
+
+        var left = min.X + Kit.Px(Theme.Space5);
+        var right = min.X + size.X - Kit.Px(Theme.Space5);
+        var y = min.Y + Kit.Px(Theme.Space5);
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(left, y), Theme.Info, "SURVEY"u8);
+        Kit.Text(draw, _ui.SansBold, Theme.FontHeading, new float2(left, y + Kit.Px(16)), Theme.Text, "Asteroid"u8);
+        y += Kit.Px(60);
+
+        void Row(ImString label, ImString value)
+        {
+            Kit.Text(draw, _ui.Sans, Theme.FontSmall, new float2(left, y), Theme.TextDim, label);
+            var valueSize = Kit.Measure(_ui.Mono, Theme.FontSmall, value);
+            Kit.Text(draw, _ui.Mono, Theme.FontSmall, new float2(right - valueSize.X, y), Theme.Text, value);
+            y += line;
+        }
+
+        var mass = galaxy.AsteroidDensity * 4.18879f * MathF.Pow(radius * RockField.SolidFraction, 3);
+        var range = position.RelativeTo(world.OwnPosition).Length();
+        Row("Sector"u8, Kit.F($"{rock.Sector.X} {rock.Sector.Y} {rock.Sector.Z}"));
+        Row("Catalogue number"u8, Kit.F($"{rock.Index + 1}"));
+        Row("Diameter"u8, Kit.F($"{radius * 2:0} m"));
+        Row("Mass"u8, mass >= 1e6f ? Kit.F($"{mass / 1e6f:0.00} Mt") : Kit.F($"{mass / 1e3f:0.0} kt"));
+        Row("Drift"u8, Kit.F($"{world.RockDrift(rock):0.00} m/s"));
+        Row("Distance from pod"u8, range >= 1000f ? Kit.F($"{range / 1000f:0.00} km") : Kit.F($"{range:0} m"));
     }
 
     /// <summary>The hull's data sheet: every figure follows from the blocks it is built from.</summary>

@@ -101,7 +101,8 @@ internal sealed class ClientWorld
     private HullOrder _orderDefinition;
     private ushort _orderId;
     private bool _dampeners = true;
-    private SectorCache? _rocks;
+    private RockField? _rocks;
+    private double _serverTick;
     private float _energyRate;
 
     public ClientWorld(GameContent content)
@@ -117,11 +118,12 @@ internal sealed class ClientWorld
     public void SetOwnHull(uint id) => _ownHullId = id;
 
     /// <summary>Gives the world the server's galaxy, whose asteroids the prediction collides with.</summary>
-    public void SetGalaxy(Galaxy galaxy) => _rocks = new SectorCache(galaxy);
+    public void SetGalaxy(Galaxy galaxy) => _rocks = new RockField(galaxy);
 
     /// <summary>Predicts one tick of the player's hull and sends the input to the server.</summary>
-    public void Tick(PlayerInputBridge bridge, ITransport transport)
+    public void Tick(PlayerInputBridge bridge, ITransport transport, double serverTick)
     {
+        _serverTick = serverTick;
         var controls = bridge.Consume(out var hasOrder, out var order);
         _correction *= 0.86f;
 
@@ -182,7 +184,7 @@ internal sealed class ClientWorld
         _nextSequence++;
 
         var energyBefore = _predicted.Energy;
-        HullSim.Step(ref _predicted, ref _order, input, _flight, _rocks);
+        HullSim.Step(ref _predicted, ref _order, input, _flight, _rocks, _serverTick);
         _energyRate += ((_predicted.Energy - energyBefore) / HullSim.Dt - _energyRate) * 0.2f;
         Send(transport);
     }
@@ -208,6 +210,27 @@ internal sealed class ClientWorld
                 StoreRemote(record, header.ServerTick, clientTick);
             }
         }
+    }
+
+    /// <summary>Applies asteroid motion records from the server.</summary>
+    public void OnRockDeltas(ref NetReader reader)
+    {
+        Span<RockDelta> deltas = stackalloc RockDelta[RockDeltasMessage.MaxDeltas];
+        if (_rocks is null || !RockDeltasMessage.TryRead(ref reader, deltas, out var count))
+            return;
+        for (var i = 0; i < count; i++)
+            _rocks.Set(deltas[i]);
+    }
+
+    /// <summary>Copies the known asteroid motion records for the render thread. Returns how many were written.</summary>
+    public int CopyRockDeltas(RockDelta[] destination)
+    {
+        if (_rocks is null)
+            return 0;
+        var deltas = _rocks.Deltas;
+        var count = Math.Min(deltas.Length, destination.Length);
+        deltas[..count].CopyTo(destination);
+        return count;
     }
 
     /// <summary>Writes this tick's hull views. Returns how many were written and which one is the player's.</summary>
@@ -316,7 +339,7 @@ internal sealed class ClientWorld
         {
             ref var slot = ref _pending[sequence % PendingCapacity];
             var order = slot.Order;
-            HullSim.Step(ref state, ref order, slot.Record.Input, _flight, _rocks);
+            HullSim.Step(ref state, ref order, slot.Record.Input, _flight, _rocks, _serverTick);
         }
 
         // Keep the drawn position continuous: whatever the correction moved is bled off over the next ticks.

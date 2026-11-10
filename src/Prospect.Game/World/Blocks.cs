@@ -320,29 +320,3 @@ public sealed class HullDesign
         };
     }
 }
-
-/// <summary>
-/// Generated sector contents kept for the simulation's collision checks. A sector is generated the first time it
-/// is asked for and kept until its slot is needed for another. Used from one thread.
-/// </summary>
-public sealed class SectorCache(Galaxy galaxy)
-{
-    private const int Slots = 64;
-    private readonly SectorContent[] _content = new SectorContent[Slots];
-    private readonly bool[] _valid = new bool[Slots];
-
-    public Galaxy Galaxy => galaxy;
-
-    public SectorContent Get(SectorCoord coord)
-    {
-        var index = (int)((uint)(coord.X * 73856093 ^ coord.Y * 19349663 ^ coord.Z * 83492791) % Slots);
-        var content = _content[index] ??= new SectorContent();
-        if (!_valid[index] || content.Summary.Coord != coord)
-        {
-            galaxy.Generate(coord, content);
-            _valid[index] = true;
-        }
-
-        return content;
-    }
-}

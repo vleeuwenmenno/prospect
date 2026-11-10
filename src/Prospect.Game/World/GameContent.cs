@@ -73,7 +73,15 @@ public static class HullSim
     /// Advances a hull one tick. With an order in force the autopilot flies and the pilot's input is ignored; the
     /// order clears itself on arrival. The server and the predicting client both call exactly this.
     /// </summary>
-    public static void Step(ref HullState state, ref HullOrder order, in FlightInput pilot, in FlightParams flight, SectorCache? rocks = null)
+    public static void Step(
+        ref HullState state,
+        ref HullOrder order,
+        in FlightInput pilot,
+        in FlightParams flight,
+        RockField? rocks = null,
+        double tick = 0,
+        RockImpulses? impulses = null
+    )
     {
         var input = pilot;
         if (order.Kind == OrderKind.MoveTo)
@@ -84,7 +92,7 @@ public static class HullSim
         }
 
         FlightModel.Step(ref state, input, flight, Dt);
-        if (rocks is not null && Collide(ref state, flight, rocks))
+        if (rocks is not null && Collide(ref state, flight, rocks, tick, impulses))
         {
             // Destroyed: the pod is rebuilt at the arrival point, and whatever it was doing is forgotten.
             state = HullState.Spawn(Galaxy.SpawnPoint, flight);
@@ -92,33 +100,38 @@ public static class HullSim
         }
     }
 
-    /// <summary>The share of an asteroid's nominal radius that is solid all the way round.</summary>
-    private const float RockSolidFraction = 0.88f;
-
     /// <summary>
-    /// Pushes the hull out of any asteroid it has run into, bounces it and applies impact damage. Hull and rock
-    /// are both treated as spheres. Returns true if the impact destroyed the hull.
+    /// Resolves the hull running into asteroids. Hull and rock are spheres with mass: the impact pushes each by
+    /// its share, so a pod bounces off a mountain and a mountain-sized ship shoves a boulder aside. Impact
+    /// damage goes to the hull. Returns true if it destroyed the hull. Changes to the asteroids' motion are
+    /// written to <paramref name="impulses"/> when given; a predicting client passes none and waits to be told.
     /// </summary>
-    private static bool Collide(ref HullState state, in FlightParams flight, SectorCache rocks)
+    private static bool Collide(ref HullState state, in FlightParams flight, RockField rocks, double tick, RockImpulses? impulses)
     {
         var galaxy = rocks.Galaxy;
         var reach = new Double3(flight.Radius, flight.Radius, flight.Radius);
         var low = galaxy.SectorOf(state.Position - reach);
         var high = galaxy.SectorOf(state.Position + reach);
 
-        // Every asteroid lies wholly inside its sector, so only the sectors the hull itself touches matter.
+        // Asteroids are generated wholly inside their sector, so only the sectors the hull itself touches matter.
         for (var x = low.X; x <= high.X; x++)
             for (var y = low.Y; y <= high.Y; y++)
                 for (var z = low.Z; z <= high.Z; z++)
                 {
                     var coord = new SectorCoord(x, y, z);
-                    var content = rocks.Get(coord);
+                    var content = rocks.Sector(coord);
+                    var moved = rocks.MovedIn(coord);
                     var local = state.Position.RelativeTo(galaxy.CenterOf(coord));
                     for (var i = 0; i < content.AsteroidCount; i++)
                     {
                         ref var rock = ref content.Asteroids[i];
-                        var offset = local - rock.LocalPosition;
-                        var contact = rock.Radius * RockSolidFraction + flight.Radius;
+                        var rockOffset = System.Numerics.Vector3.Zero;
+                        var rockVelocity = System.Numerics.Vector3.Zero;
+                        if (moved is not null && moved[i] > 0)
+                            rocks.DeltaAt(moved[i] - 1).Evaluate(tick, galaxy.DriftDecay, out rockOffset, out rockVelocity);
+
+                        var offset = local - (rock.LocalPosition + rockOffset);
+                        var contact = rock.Radius * RockField.SolidFraction + flight.Radius;
                         var distanceSquared = offset.LengthSquared();
                         if (distanceSquared >= contact * contact)
                             continue;
@@ -128,11 +141,25 @@ public static class HullSim
                         state.Position += normal * (contact - distance);
                         local += normal * (contact - distance);
 
-                        var closing = -System.Numerics.Vector3.Dot(state.Velocity, normal);
+                        var closing = -System.Numerics.Vector3.Dot(state.Velocity - rockVelocity, normal);
                         if (closing <= 0)
                             continue;
 
-                        state.Velocity += normal * (closing * (1f + flight.CollisionBounce));
+                        // Two bodies, one impulse along the line between their centres, shared by inverse mass.
+                        var rockMass = rocks.Mass(rock.Radius);
+                        var impulse = closing * (1f + flight.CollisionBounce) / (1f / flight.Mass + 1f / rockMass);
+                        state.Velocity += normal * (impulse / flight.Mass);
+                        if (impulses is not null && impulses.Count < impulses.Items.Length)
+                        {
+                            impulses.Items[impulses.Count++] = new RockDelta
+                            {
+                                Rock = new RockRef(coord, i),
+                                Offset = rockOffset,
+                                Velocity = rockVelocity - normal * (impulse / rockMass),
+                                StartTick = (long)tick,
+                            };
+                        }
+
                         var damage = (closing - flight.CollisionSafeSpeed) * flight.Mass * flight.CollisionDamagePerTonneSpeed;
                         if (damage > 0 && FlightModel.Damage(ref state, flight, damage))
                             return true;

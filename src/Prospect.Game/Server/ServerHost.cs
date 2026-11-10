@@ -92,7 +92,8 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
     private readonly byte[] _sendBuffer = new byte[64 * 1024];
     private readonly HullStore _hulls = new();
     private readonly GameContent _content;
-    private readonly SectorCache _rocks;
+    private readonly RockField _rocks;
+    private readonly RockImpulses _impulses = new();
 
     private long _tick;
     private uint _nextPlayerId = 1;
@@ -104,7 +105,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         _transports = transports;
         _content = content;
         Galaxy = content.Galaxy.WithSeed(config.GalaxySeed);
-        _rocks = new SectorCache(Galaxy);
+        _rocks = new RockField(Galaxy);
 
         // Room for every player plus connections that are still shaking hands or about to be refused as full.
         _connections = new Connection[config.MaxPlayers + 8];
@@ -164,7 +165,22 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
                 continue;
             ref var info = ref _hulls.Info(i);
             if (!info.Piloted)
-                HullSim.Step(ref _hulls.State(i), ref info.Order, hold, _content.Designs[info.Design].Flight, _rocks);
+                HullSim.Step(ref _hulls.State(i), ref info.Order, hold, _content.Designs[info.Design].Flight, _rocks, _tick, _impulses);
+        }
+
+        // Asteroids that were hit this tick take their new motion, and every client is told.
+        if (_impulses.Count > 0)
+        {
+            var hit = _impulses.Items.AsSpan(0, _impulses.Count);
+            foreach (ref readonly var delta in hit)
+                _rocks.Set(delta);
+            foreach (var connection in _connections)
+            {
+                if (connection.State == ConnectionState.Active)
+                    SendRockDeltas(connection, hit);
+            }
+
+            _impulses.Count = 0;
         }
 
         foreach (var connection in _connections)
@@ -345,7 +361,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
                 info.OrderId = record.OrderId;
             }
 
-            HullSim.Step(ref state, ref info.Order, record.Input, flight, _rocks);
+            HullSim.Step(ref state, ref info.Order, record.Input, flight, _rocks, _tick, _impulses);
             connection.LastSimulatedSequence = record.Sequence;
             connection.LastInput = record.Input;
             simulated = true;
@@ -359,7 +375,19 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
 
         // The client has gone quiet. Keep the hull safe: carry on with its order, or brake to a stop.
         if (++connection.StarvedTicks > InputStarvedTicks)
-            HullSim.Step(ref state, ref info.Order, new FlightInput { Dampeners = true }, flight, _rocks);
+            HullSim.Step(ref state, ref info.Order, new FlightInput { Dampeners = true }, flight, _rocks, _tick, _impulses);
+    }
+
+    private void SendRockDeltas(Connection connection, ReadOnlySpan<RockDelta> deltas)
+    {
+        while (!deltas.IsEmpty)
+        {
+            var chunk = deltas[..Math.Min(deltas.Length, RockDeltasMessage.MaxDeltas)];
+            var writer = new NetWriter(_sendBuffer);
+            RockDeltasMessage.Write(ref writer, chunk);
+            connection.Transport.Send(connection.Peer, NetChannel.Reliable, writer.Written);
+            deltas = deltas[chunk.Length..];
+        }
     }
 
     private void SendSnapshot(Connection connection, long tick)
@@ -448,6 +476,10 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         var writer = new NetWriter(_sendBuffer);
         welcome.Write(ref writer);
         connection.Transport.Send(connection.Peer, NetChannel.Reliable, writer.Written);
+
+        // The newcomer generates the galaxy from the seed like everyone else; what it cannot know is which
+        // asteroids have been knocked about since.
+        SendRockDeltas(connection, _rocks.Deltas);
 
         Logs.Sim.Info($"{connection.Name} joined as player {connection.PlayerId} via {connection.Transport.Description}");
     }

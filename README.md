@@ -21,7 +21,10 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   shield points and the power budget are all computed from them and shown on the ship's data sheet.
 - **Flight.** A command pod with inertial flight: thrust on all three axes, roll, dampeners, and a boost that heats
   up and locks out. Thrust, boost and shield recharge draw power; the generator refills the battery with the
-  surplus. Running into an asteroid bounces the hull and damages shield, then hull. The server is authoritative; the client predicts its own hull with the same
+  surplus. Running into an asteroid bounces the hull and damages shield, then hull.
+- **Asteroids with mass.** An impact pushes hull and asteroid by their share of the momentum, so a pod bounces off
+  and a heavy ship shoves a boulder aside. A pushed asteroid drifts and settles. The server tells clients only
+  when an asteroid is hit; its motion from then on is a formula, and new players are sent the displaced ones. The server is authoritative; the client predicts its own hull with the same
   flight code and reconciles against snapshots; other players' hulls are interpolated.
 - **Fleet.** Each player starts with the command pod and two mining vessels. Hulls nobody is flying are flown by
   the server under their standing orders.
@@ -62,8 +65,8 @@ Command view:
 
 | | |
 | --- | --- |
-| Select a hull | Left-click it, or its row in the fleet list |
-| Select several | Drag a box; `Ctrl` + drag adds to the selection; `Shift` + click adds or removes one; `Ctrl` + `A` selects all |
+| Select a hull or an asteroid | Left-click it; hulls also by their row in the fleet list |
+| Select several | Drag a box (your hulls first; asteroids if the box holds no hull); `Ctrl` + drag adds to the selection; `Shift` + click adds or removes one; `Ctrl` + `A` selects all |
 | Move the selection | Right-click the destination |
 | Rotate the view | Right-drag |
 | Zoom | Mouse wheel |
@@ -71,6 +74,10 @@ Command view:
 | Lower / raise the plane | `Q` / `E`, or `Shift` + left-drag |
 | Focus the camera on the selection | `Space` or `F`; double-click a row in the fleet list |
 | Halt the selection | `H` or `Backspace` |
+
+Where the command plane cuts through an asteroid or a hull, the cut is drawn as a bright line and the part below
+the plane is dimmed, so it is clear what sits on the plane. `I` shows the data sheet of the first selected hull or
+asteroid.
 
 `F3` shows the
 performance overlay, `F11` toggles fullscreen, `F12` takes a screenshot. Bindings live in
