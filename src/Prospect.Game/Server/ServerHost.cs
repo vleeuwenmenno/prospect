@@ -91,7 +91,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
     private readonly TickLoop _loop;
     private readonly byte[] _sendBuffer = new byte[64 * 1024];
     private readonly HullStore _hulls = new();
-    private readonly FlightParams _podFlight;
+    private readonly GameContent _content;
     private readonly SectorCache _rocks;
 
     private long _tick;
@@ -102,7 +102,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
     {
         _config = config;
         _transports = transports;
-        _podFlight = content.Pod.Flight;
+        _content = content;
         Galaxy = content.Galaxy.WithSeed(config.GalaxySeed);
         _rocks = new SectorCache(Galaxy);
 
@@ -156,6 +156,17 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
                 SimulatePlayer(connection);
         }
 
+        // Hulls nobody is flying carry out their standing orders, or hold position.
+        var hold = new FlightInput { Dampeners = true };
+        for (var i = 0; i < _hulls.Slots; i++)
+        {
+            if (!_hulls.IsAliveAt(i))
+                continue;
+            ref var info = ref _hulls.Info(i);
+            if (!info.Piloted)
+                HullSim.Step(ref _hulls.State(i), ref info.Order, hold, _content.Designs[info.Design].Flight, _rocks);
+        }
+
         foreach (var connection in _connections)
         {
             if (connection.State == ConnectionState.Active)
@@ -203,7 +214,12 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
 
         if (connection.State == ConnectionState.Active)
         {
-            _hulls.Destroy(connection.Hull);
+            for (var i = 0; i < _hulls.Slots; i++)
+            {
+                if (_hulls.IsAliveAt(i) && _hulls.Info(i).Owner == connection.PlayerId)
+                    _hulls.Destroy(_hulls.HandleAt(i));
+            }
+
             Volatile.Write(ref _playerCount, _playerCount - 1);
             Logs.Sim.Info($"{connection.Name} (player {connection.PlayerId}) left: {reason}");
         }
@@ -247,6 +263,9 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
             case MessageId.Input:
                 ReceiveInput(connection, ref reader);
                 break;
+            case MessageId.FleetOrders when channel == NetChannel.Reliable:
+                ReceiveFleetOrders(connection, ref reader);
+                break;
         }
     }
 
@@ -278,6 +297,25 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         }
     }
 
+    private void ReceiveFleetOrders(Connection connection, ref NetReader reader)
+    {
+        Span<FleetOrder> orders = stackalloc FleetOrder[FleetOrdersMessage.MaxOrders];
+        if (!FleetOrdersMessage.TryRead(ref reader, orders, out var count))
+            return;
+
+        // A client may only order hulls it owns, and never the one it is flying: that hull's orders travel with
+        // its inputs so prediction and authority stay in step.
+        for (var i = 0; i < count; i++)
+        {
+            var handle = new HullHandle((int)(orders[i].Hull & 0xFFFF), (int)(orders[i].Hull >> 16));
+            if (!_hulls.IsAlive(handle))
+                continue;
+            ref var info = ref _hulls.Info(handle.Index);
+            if (info.Owner == connection.PlayerId && !info.Piloted)
+                info.Order = orders[i].Order;
+        }
+    }
+
     /// <summary>
     /// Advances a player's hull by the inputs that have arrived. The hull steps once per client input, so the
     /// server reproduces the client's prediction exactly; a credit limit keeps that from outrunning real time.
@@ -290,6 +328,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         var index = connection.Hull.Index;
         ref var state = ref _hulls.State(index);
         ref var info = ref _hulls.Info(index);
+        var flight = _content.Designs[info.Design].Flight;
         connection.InputCredit = Math.Min(connection.InputCredit + 1, MaxInputCredit);
 
         var simulated = false;
@@ -306,7 +345,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
                 info.OrderId = record.OrderId;
             }
 
-            HullSim.Step(ref state, ref info.Order, record.Input, _podFlight, _rocks);
+            HullSim.Step(ref state, ref info.Order, record.Input, flight, _rocks);
             connection.LastSimulatedSequence = record.Sequence;
             connection.LastInput = record.Input;
             simulated = true;
@@ -320,7 +359,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
 
         // The client has gone quiet. Keep the hull safe: carry on with its order, or brake to a stop.
         if (++connection.StarvedTicks > InputStarvedTicks)
-            HullSim.Step(ref state, ref info.Order, new FlightInput { Dampeners = true }, _podFlight, _rocks);
+            HullSim.Step(ref state, ref info.Order, new FlightInput { Dampeners = true }, flight, _rocks);
     }
 
     private void SendSnapshot(Connection connection, long tick)
@@ -349,6 +388,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
             {
                 Id = _hulls.HandleAt(i).Packed,
                 Owner = info.Owner,
+                Design = info.Design,
                 State = _hulls.State(i),
                 Order = info.Order,
             }.Write(ref writer);
@@ -381,10 +421,20 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         connection.Name = hello.PlayerName;
         Volatile.Write(ref _playerCount, _playerCount + 1);
 
-        // Arrivals line up beside the spawn point so they never start inside one another.
-        var slot = _hulls.Count;
-        var offset = new Double3((slot + 1) / 2 * 40.0 * (slot % 2 == 0 ? 1 : -1), 0, 0);
-        connection.Hull = _hulls.Create(connection.PlayerId, HullState.Spawn(Galaxy.SpawnPoint + offset, _podFlight));
+        // Each player's group arrives in its own lane beside the spawn point, the pod in front and the rest of
+        // the starting fleet fanned out behind it, so nothing starts inside anything else.
+        var lane = (int)(connection.PlayerId - 1);
+        var origin = Galaxy.SpawnPoint + new Double3((lane + 1) / 2 * 160.0 * (lane % 2 == 0 ? 1 : -1), 0, 0);
+        var pod = (byte)_content.PodDesign;
+        connection.Hull = _hulls.Create(connection.PlayerId, pod, HullState.Spawn(origin, _content.Designs[pod].Flight));
+        _hulls.Info(connection.Hull.Index).Piloted = true;
+        for (var i = 0; i < _content.StartingFleet.Length; i++)
+        {
+            var design = (byte)_content.StartingFleet[i];
+            var side = (i / 2 + 1) * 45.0 * (i % 2 == 0 ? 1 : -1);
+            var position = origin + new Double3(side, 0, 40.0 + 20.0 * (i / 2));
+            _hulls.Create(connection.PlayerId, design, HullState.Spawn(position, _content.Designs[design].Flight));
+        }
 
         var welcome = new WelcomeMessage
         {

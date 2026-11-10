@@ -19,6 +19,12 @@ public struct HullInfo
 
     /// <summary>The player who owns the hull.</summary>
     public uint Owner;
+
+    /// <summary>Which design the hull is built to.</summary>
+    public byte Design;
+
+    /// <summary>True while a player flies the hull directly; the rest are flown by the server under their orders.</summary>
+    public bool Piloted;
     public HullOrder Order;
 
     /// <summary>The owner's order counter at the time <see cref="Order"/> was set.</summary>
@@ -50,7 +56,7 @@ public sealed unsafe class HullStore : IDisposable
     /// <summary>One past the highest slot ever used; iterate 0..Slots and skip slots that are not alive.</summary>
     public int Slots => _highWater;
 
-    public HullHandle Create(uint owner, in HullState state)
+    public HullHandle Create(uint owner, byte design, in HullState state)
     {
         var index = -1;
         for (var i = 0; i < _highWater; i++)
@@ -80,6 +86,7 @@ public sealed unsafe class HullStore : IDisposable
             Generation = generation,
             Alive = true,
             Owner = owner,
+            Design = design,
         };
         _states[index] = state;
         _count++;

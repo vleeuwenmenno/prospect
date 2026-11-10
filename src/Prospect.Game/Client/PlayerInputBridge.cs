@@ -1,4 +1,5 @@
 using System.Numerics;
+using Prospect.Game.Protocol;
 using Prospect.Game.World;
 
 namespace Prospect.Game.Client;
@@ -35,6 +36,8 @@ public sealed class PlayerInputBridge
     private PlayerControls _controls;
     private bool _hasOrder;
     private HullOrder _order;
+    private readonly FleetOrder[] _fleetOrders = new FleetOrder[FleetOrdersMessage.MaxOrders];
+    private int _fleetOrderCount;
 
     /// <summary>Called by the input thread once per frame.</summary>
     public void Submit(in PlayerControls frame)
@@ -54,6 +57,38 @@ public sealed class PlayerInputBridge
         {
             _order = order;
             _hasOrder = true;
+        }
+    }
+
+    /// <summary>
+    /// Orders a hull the player owns but is not flying. A newer order for the same hull replaces a queued one.
+    /// </summary>
+    public void IssueFleetOrder(uint hull, in HullOrder order)
+    {
+        lock (_lock)
+        {
+            for (var i = 0; i < _fleetOrderCount; i++)
+            {
+                if (_fleetOrders[i].Hull != hull)
+                    continue;
+                _fleetOrders[i].Order = order;
+                return;
+            }
+
+            if (_fleetOrderCount < _fleetOrders.Length)
+                _fleetOrders[_fleetOrderCount++] = new FleetOrder { Hull = hull, Order = order };
+        }
+    }
+
+    /// <summary>Called by the simulation once per tick: takes the queued fleet orders.</summary>
+    public int ConsumeFleetOrders(Span<FleetOrder> destination)
+    {
+        lock (_lock)
+        {
+            var count = _fleetOrderCount;
+            _fleetOrders.AsSpan(0, count).CopyTo(destination);
+            _fleetOrderCount = 0;
+            return count;
         }
     }
 

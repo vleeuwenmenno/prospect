@@ -66,13 +66,60 @@ public static class InputMessage
     }
 }
 
+/// <summary>An order for one hull, as the command view issues it.</summary>
+public struct FleetOrder
+{
+    public uint Hull;
+    public HullOrder Order;
+}
+
+/// <summary>Client to server, reliable: orders for hulls the player owns. The server checks ownership.</summary>
+public static class FleetOrdersMessage
+{
+    public const int MaxOrders = 64;
+
+    public static void Write(ref NetWriter writer, scoped ReadOnlySpan<FleetOrder> orders)
+    {
+        writer.WriteByte((byte)MessageId.FleetOrders);
+        writer.WriteByte((byte)orders.Length);
+        foreach (var order in orders)
+        {
+            writer.WriteUInt32(order.Hull);
+            writer.WriteByte((byte)order.Order.Kind);
+            if (order.Order.Kind == OrderKind.MoveTo)
+                WorldWire.WritePosition(ref writer, order.Order.Target);
+        }
+    }
+
+    public static bool TryRead(ref NetReader reader, scoped Span<FleetOrder> orders, out int count)
+    {
+        count = reader.ReadByte();
+        if (count > MaxOrders)
+            return false;
+
+        for (var i = 0; i < count; i++)
+        {
+            orders[i].Hull = reader.ReadUInt32();
+            var kind = reader.ReadByte();
+            if (kind > (byte)OrderKind.MoveTo)
+                return false;
+            orders[i].Order = new HullOrder { Kind = (OrderKind)kind };
+            if (kind == (byte)OrderKind.MoveTo && !WorldWire.TryReadPosition(ref reader, out orders[i].Order.Target))
+                return false;
+        }
+
+        return reader.IsValid;
+    }
+}
+
 /// <summary>A hull as it appears in a snapshot.</summary>
 public struct HullRecord
 {
-    public const int MaxWireSize = 4 + 4 + 24 + 12 + 16 + 12 + 4 + 1 + 16 + 24;
+    public const int MaxWireSize = 4 + 4 + 1 + 24 + 12 + 16 + 12 + 4 + 1 + 16 + 24;
 
     public uint Id;
     public uint Owner;
+    public byte Design;
     public HullState State;
     public HullOrder Order;
 
@@ -80,6 +127,7 @@ public struct HullRecord
     {
         writer.WriteUInt32(Id);
         writer.WriteUInt32(Owner);
+        writer.WriteByte(Design);
         WorldWire.WritePosition(ref writer, State.Position);
         WorldWire.WriteVector(ref writer, State.Velocity);
         writer.WriteSingle(State.Orientation.X);
@@ -102,6 +150,7 @@ public struct HullRecord
         record = default;
         record.Id = reader.ReadUInt32();
         record.Owner = reader.ReadUInt32();
+        record.Design = reader.ReadByte();
         var ok = WorldWire.TryReadPosition(ref reader, out record.State.Position);
         ok &= WorldWire.TryReadVector(ref reader, out record.State.Velocity);
         var q = new Quaternion(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());

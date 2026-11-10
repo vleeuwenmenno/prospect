@@ -10,6 +10,11 @@ public struct HullView
 {
     public uint Id;
     public uint Owner;
+
+    /// <summary>Index of the hull's design.</summary>
+    public byte Design;
+
+    /// <summary>True for the hull the player is flying.</summary>
     public bool IsOwn;
     public Double3 Position;
     public Double3 PreviousPosition;
@@ -69,17 +74,21 @@ internal sealed class ClientWorld
         public bool Used;
         public uint Id;
         public uint Owner;
+        public byte Design;
         public long LastSeenTick;
         public int Newest;
         public int Count;
     }
 
     private readonly FlightParams _flight;
+    private readonly byte _podDesign;
+    private uint _playerId;
     private readonly Pending[] _pending = new Pending[PendingCapacity];
     private readonly Remote[] _remotes = new Remote[MaxViews];
     private readonly Sample[] _samples = new Sample[MaxViews * SamplesPerHull];
     private readonly HullView[] _lastViews = new HullView[MaxViews];
     private readonly byte[] _sendBuffer = new byte[256];
+    private readonly byte[] _fleetBuffer = new byte[2 + FleetOrdersMessage.MaxOrders * 29];
     private int _lastViewCount;
 
     private uint _ownHullId;
@@ -95,10 +104,13 @@ internal sealed class ClientWorld
     private SectorCache? _rocks;
     private float _energyRate;
 
-    public ClientWorld(FlightParams flight)
+    public ClientWorld(GameContent content)
     {
-        _flight = flight;
+        _flight = content.Pod.Flight;
+        _podDesign = (byte)content.PodDesign;
     }
+
+    public void SetPlayer(uint playerId) => _playerId = playerId;
 
     public bool Dampeners => _dampeners;
 
@@ -112,6 +124,16 @@ internal sealed class ClientWorld
     {
         var controls = bridge.Consume(out var hasOrder, out var order);
         _correction *= 0.86f;
+
+        Span<FleetOrder> fleetOrders = stackalloc FleetOrder[FleetOrdersMessage.MaxOrders];
+        var fleetOrderCount = bridge.ConsumeFleetOrders(fleetOrders);
+        if (fleetOrderCount > 0)
+        {
+            var writer = new NetWriter(_fleetBuffer);
+            FleetOrdersMessage.Write(ref writer, fleetOrders[..fleetOrderCount]);
+            transport.Send(0, NetChannel.Reliable, writer.Written);
+        }
+
         if (!_hasOwnState)
             return;
 
@@ -200,6 +222,8 @@ internal sealed class ClientWorld
             views[count++] = new HullView
             {
                 Id = _ownHullId,
+                Owner = _playerId,
+                Design = _podDesign,
                 IsOwn = true,
                 Position = _predicted.Position + _correction,
                 Orientation = _predicted.Orientation,
@@ -324,6 +348,7 @@ internal sealed class ClientWorld
             remote = new Remote { Used = true, Id = record.Id, Newest = -1 };
 
         remote.Owner = record.Owner;
+        remote.Design = record.Design;
         remote.LastSeenTick = clientTick;
         if (remote.Count > 0 && _samples[slot * SamplesPerHull + remote.Newest].Tick >= serverTick)
             return;
@@ -346,6 +371,7 @@ internal sealed class ClientWorld
         {
             Id = remote.Id,
             Owner = remote.Owner,
+            Design = remote.Design,
             Position = newest.State.Position,
             Orientation = newest.State.Orientation,
             Velocity = newest.State.Velocity,

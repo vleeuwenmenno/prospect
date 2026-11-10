@@ -25,6 +25,9 @@ public enum MessageId : byte
 
     /// <summary>Server to client: the state of the hulls around the client.</summary>
     Snapshot = 7,
+
+    /// <summary>Client to server, reliable: standing orders for hulls the player owns but is not flying.</summary>
+    FleetOrders = 8,
 }
 
 public enum RejectReason : byte
@@ -37,7 +40,7 @@ public enum RejectReason : byte
 public static class ProtocolInfo
 {
     /// <summary>Bumped whenever the wire format changes. Client and server must match exactly.</summary>
-    public const uint Version = 3;
+    public const uint Version = 4;
 
     public const ushort DefaultPort = 27420;
     public const int MaxNameBytes = 48;

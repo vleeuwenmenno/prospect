@@ -111,7 +111,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     {
         _transport = transport;
         _content = content;
-        _world = new ClientWorld(content.Pod.Flight);
+        _world = new ClientWorld(content);
         _playerName = PlayerNames.Sanitize(playerName);
         _loop = new TickLoop("ClientSim", TickLoop.SimulationHz, this);
     }
@@ -232,6 +232,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                 _galaxySeed = welcome.GalaxySeed;
                 _galaxy = _content.Galaxy.WithSeed(welcome.GalaxySeed);
                 _world.SetGalaxy(_galaxy);
+                _world.SetPlayer(welcome.PlayerId);
                 _world.SetOwnHull(welcome.HullId);
                 _playerCount = 1;
                 _syncServerTick = welcome.ServerTick;

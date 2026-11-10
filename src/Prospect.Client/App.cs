@@ -92,13 +92,19 @@ internal sealed class App : IDisposable
                 shaderJobs.Add(new ShaderJob(Path.GetFileName(file)));
         }
 
-        var meshJobs = new MeshJob[WorldView.MeshCount];
-        meshJobs[WorldView.HullMesh] = new MeshJob(() => MeshBuilder.Hull(Content.Pod));
+        var designCount = Content.Designs.Length;
+        var meshJobs = new MeshJob[WorldView.MeshCount(designCount)];
+        for (var i = 0; i < designCount; i++)
+        {
+            var design = Content.Designs[i];
+            meshJobs[i] = new MeshJob(() => MeshBuilder.Hull(design));
+        }
+
         for (var shape = 0; shape < Galaxy.AsteroidShapes; shape++)
         {
             var seed = shape + 1;
-            meshJobs[WorldView.AsteroidMeshBase + shape] = new MeshJob(() => MeshBuilder.Asteroid(seed, 4));
-            meshJobs[WorldView.AsteroidLodMeshBase + shape] = new MeshJob(() => MeshBuilder.Asteroid(seed, 2));
+            meshJobs[WorldView.AsteroidMesh(designCount, shape, false)] = new MeshJob(() => MeshBuilder.Asteroid(seed, 4));
+            meshJobs[WorldView.AsteroidMesh(designCount, shape, true)] = new MeshJob(() => MeshBuilder.Asteroid(seed, 2));
         }
 
         foreach (var job in shaderJobs)
@@ -141,7 +147,7 @@ internal sealed class App : IDisposable
         for (var i = 0; i < meshes.Length; i++)
             meshes[i] = meshJobs[i].Result!;
         _scene = new SceneRenderer(_gpu, _swapchain, shaders, meshes);
-        World = new WorldView(Devices, Actions, Settings, Jobs, _scene, Content.Pod, meshes[WorldView.HullMesh].BoundingRadius);
+        World = new WorldView(Devices, Actions, Settings, Jobs, _scene, Content.Designs);
 
         _screens = new ScreenHost(this, _ui);
         if (options.BenchSeconds > 0)
@@ -405,7 +411,10 @@ internal sealed class App : IDisposable
         {
             _viewOpened = true;
             if (view == "command")
+            {
                 World.SetMode(ViewMode.Command);
+                World.SelectAllOwned();
+            }
             else if (view == "info")
                 _screens.OpenShipInfo();
             else

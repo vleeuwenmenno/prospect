@@ -6,12 +6,23 @@ namespace Prospect.Game.World;
 /// <summary>The data both the server and the client need to run the simulation, loaded from <c>content/</c>.</summary>
 public sealed class GameContent
 {
-    private GameContent(Galaxy galaxy, BlockCatalog blocks, HullDesign pod)
+    private GameContent(Galaxy galaxy, BlockCatalog blocks, HullDesign[] designs, int pod, int[] startingFleet)
     {
         Galaxy = galaxy;
         Blocks = blocks;
-        Pod = pod;
+        Designs = designs;
+        PodDesign = pod;
+        StartingFleet = startingFleet;
     }
+
+    /// <summary>Every hull design, indexed by the design number hulls carry on the wire.</summary>
+    public HullDesign[] Designs { get; }
+
+    /// <summary>Index of the command pod's design.</summary>
+    public int PodDesign { get; }
+
+    /// <summary>Designs of the hulls a new player is given besides the pod.</summary>
+    public int[] StartingFleet { get; }
 
     public BlockCatalog Blocks { get; }
 
@@ -19,15 +30,36 @@ public sealed class GameContent
     public Galaxy Galaxy { get; }
 
     /// <summary>The command pod every player starts in.</summary>
-    public HullDesign Pod { get; }
+    public HullDesign Pod => Designs[PodDesign];
 
     public static GameContent Load()
     {
         var blocks = BlockCatalog.Load(AppPaths.Content("blocks", "blocks.json"));
+        using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(AppPaths.Content("ships", "fleet.json")));
+        var root = document.RootElement;
+        var ids = new List<string>();
+        var designs = new List<HullDesign>();
+        foreach (var id in root.GetProperty("designs"u8).EnumerateArray())
+        {
+            ids.Add(id.GetString()!);
+            designs.Add(HullDesign.Load(AppPaths.Content("ships", ids[^1] + ".json"), blocks));
+        }
+
+        int Index(string id) =>
+            ids.IndexOf(id) is >= 0 and var index ? index : throw new InvalidDataException($"fleet.json: unknown design \"{id}\"");
+
+        var fleet = new List<int>();
+        foreach (var id in root.GetProperty("startingFleet"u8).EnumerateArray())
+            fleet.Add(Index(id.GetString()!));
+        if (designs.Count is 0 or > byte.MaxValue)
+            throw new InvalidDataException("fleet.json: needs between 1 and 255 designs");
+
         return new GameContent(
             Galaxy.Load(AppPaths.Content("galaxy", "galaxy.json")),
             blocks,
-            HullDesign.Load(AppPaths.Content("ships", "command_pod.json"), blocks)
+            [.. designs],
+            Index(root.GetProperty("pod"u8).GetString()!),
+            [.. fleet]
         );
     }
 }

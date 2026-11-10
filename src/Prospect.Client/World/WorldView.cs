@@ -31,10 +31,9 @@ internal enum ViewMode
 /// </summary>
 internal sealed class WorldView
 {
-    public const int HullMesh = 0;
-    public const int AsteroidMeshBase = 1;
-    public const int AsteroidLodMeshBase = AsteroidMeshBase + Galaxy.AsteroidShapes;
-    public const int MeshCount = AsteroidLodMeshBase + Galaxy.AsteroidShapes;
+    public const int MaxSelection = 64;
+    private const float FormationSpacing = 45f;
+    private const float ClickRadiusPixels = 22f;
 
     private const int RingXZ = 2;
     private const int RingY = 1;
@@ -79,13 +78,24 @@ internal sealed class WorldView
     private readonly ClientSettings _settings;
     private readonly JobSystem _jobs;
     private readonly SceneRenderer _scene;
-    private readonly Vector3 _hullColor;
-    private readonly float _hullRadius;
+    private readonly HullDesign[] _designs;
+    private readonly int _asteroidMeshBase;
+    private readonly int _asteroidLodMeshBase;
+    private readonly int _meshCount;
     private readonly SectorSlot[] _slots = new SectorSlot[SlotCount];
     private readonly Candidate[] _candidates = new Candidate[SceneRenderer.MaxInstances];
-    private readonly int[] _meshCounts = new int[MeshCount];
-    private readonly int[] _meshOffsets = new int[MeshCount];
-    private readonly DrawBatch[] _batches = new DrawBatch[MeshCount];
+    private readonly int[] _meshCounts;
+    private readonly int[] _meshOffsets;
+    private readonly DrawBatch[] _batches;
+    private readonly uint[] _selected = new uint[MaxSelection];
+    private int _selectedCount;
+    private SessionSnapshot? _snapshot;
+    private uint _followId;
+    private float _chaseDistance = 11f;
+    private float2 _leftDragStart;
+    private bool _leftDragging;
+    private bool _leftMoved;
+    private bool _leftSlidesPlane;
 
     private Galaxy? _galaxy;
     private SectorCoord _streamCenter;
@@ -104,7 +114,6 @@ internal sealed class WorldView
     private float _commandPitch = -0.9f;
     private float _commandDistance = 240f;
     private Double3 _commandFocus;
-    private bool _commandFollow = true;
     private float2 _rightDragStart;
     private bool _rightDragging;
     private bool _rightMoved;
@@ -114,20 +123,38 @@ internal sealed class WorldView
     private float _tanHalfFov = MathF.Tan(PilotFov / 2);
     private float2 _viewport = new(1, 1);
 
-    public WorldView(InputDevices devices, ActionMap actions, ClientSettings settings, JobSystem jobs, SceneRenderer scene, HullDesign pod, float hullRadius)
+    public WorldView(InputDevices devices, ActionMap actions, ClientSettings settings, JobSystem jobs, SceneRenderer scene, HullDesign[] designs)
     {
         _devices = devices;
         _actions = actions;
         _settings = settings;
         _jobs = jobs;
         _scene = scene;
-        _hullColor = pod.Color;
-        _hullRadius = hullRadius;
+        _designs = designs;
+        _asteroidMeshBase = AsteroidMesh(designs.Length, 0, false);
+        _asteroidLodMeshBase = AsteroidMesh(designs.Length, 0, true);
+        _meshCount = MeshCount(designs.Length);
+        _meshCounts = new int[_meshCount];
+        _meshOffsets = new int[_meshCount];
+        _batches = new DrawBatch[_meshCount];
         for (var i = 0; i < _slots.Length; i++)
             _slots[i] = new SectorSlot();
     }
 
+    /// <summary>Meshes are numbered: one per hull design, then the asteroid shapes, then their coarse versions.</summary>
+    public static int MeshCount(int designs) => designs + Galaxy.AsteroidShapes * 2;
+
+    public static int AsteroidMesh(int designs, int shape, bool coarse) => designs + (coarse ? Galaxy.AsteroidShapes : 0) + shape;
+
     public ViewMode Mode { get; private set; }
+
+    /// <summary>The hulls selected in the command view, by id.</summary>
+    public ReadOnlySpan<uint> Selection => _selected.AsSpan(0, _selectedCount);
+
+    /// <summary>True while a selection box is being dragged; its corners are in window pixels.</summary>
+    public bool BoxSelecting => _leftDragging && _leftMoved && !_leftSlidesPlane;
+    public float2 BoxStart => _leftDragStart;
+    public float2 BoxEnd => _devices.MousePosition;
 
     /// <summary>How far the camera has moved from the pilot view (0) to the command view (1).</summary>
     public float CommandBlend => _commandBlend;
@@ -148,7 +175,7 @@ internal sealed class WorldView
     public Galaxy? Galaxy => _galaxy;
     public Double3 CommandFocus => _commandFocus;
     public float CommandDistance => _commandDistance;
-    public bool CommandFollowing => _commandFollow;
+    public bool CommandFollowing => _followId != 0;
 
     public void SetMode(ViewMode mode)
     {
@@ -164,7 +191,9 @@ internal sealed class WorldView
             _commandPitch = -0.85f;
             _commandDistance = 150f;
             _commandFocus = OwnPosition;
-            _commandFollow = true;
+            _followId = Own.Id;
+            if (_selectedCount == 0)
+                Select(Own.Id, false);
         }
     }
 
@@ -175,6 +204,7 @@ internal sealed class WorldView
     public void Update(SessionSnapshot snapshot, PlayerInputBridge bridge, float dt, bool inputEnabled, float2 viewport, bool pointerOverUi)
     {
         _viewport = viewport;
+        _snapshot = snapshot;
         var galaxy = snapshot.Galaxy!;
         if (!ReferenceEquals(galaxy, _galaxy))
         {
@@ -208,7 +238,12 @@ internal sealed class WorldView
         {
             controls.ToggleDampeners = _actions.Pressed(_devices, InputAction.ToggleDampeners, true);
             if (_actions.Pressed(_devices, InputAction.Halt, true))
-                bridge.IssueOrder(default);
+            {
+                if (Mode == ViewMode.Pilot)
+                    bridge.IssueOrder(default);
+                else
+                    OrderSelection(bridge, default, false);
+            }
         }
 
         if (inputEnabled && Mode == ViewMode.Pilot)
@@ -230,6 +265,8 @@ internal sealed class WorldView
             // Holding the free-look button looks around without committing the hull to anything; letting go
             // returns the view to the nose. Otherwise the hull swings onto the view whenever it is under thrust.
             var freeLook = _devices.MouseDown(GlfwMouseButton.Right);
+            if (freeLook && _devices.Scroll != 0)
+                _chaseDistance = Math.Clamp(_chaseDistance * MathF.Pow(0.88f, _devices.Scroll), 6f, 90f);
             if (_freeLook && !freeLook)
                 _lookDirection = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
             _freeLook = freeLook;
@@ -240,7 +277,7 @@ internal sealed class WorldView
         }
         else if (inputEnabled)
         {
-            UpdateCommandControls(bridge, dt, pointerOverUi);
+            UpdateCommandControls(snapshot, bridge, dt, pointerOverUi);
         }
 
         bridge.Submit(controls);
@@ -263,10 +300,11 @@ internal sealed class WorldView
         {
             ref var hull = ref snapshot.Hulls[i];
             var position = Double3.Lerp(hull.PreviousPosition, hull.Position, alpha).RelativeTo(camera);
-            if (!Visible(position, _hullRadius, aspect, out _))
+            var design = _designs[Math.Min(hull.Design, _designs.Length - 1)];
+            if (!Visible(position, design.Flight.Radius, aspect, out _))
                 continue;
             var orientation = Quaternion.Slerp(hull.PreviousOrientation, hull.Orientation, alpha);
-            Add(ref candidateCount, HullMesh, position, orientation, 1f, _hullColor, 1f);
+            Add(ref candidateCount, Math.Min(hull.Design, _designs.Length - 1), position, orientation, 1f, design.Color, 1f);
         }
 
         // Rocks in the sectors around the camera.
@@ -285,7 +323,7 @@ internal sealed class WorldView
                     continue;
 
                 // Full detail only where it can be seen; distant rocks use the coarse mesh.
-                var mesh = (pixels > 90f ? AsteroidMeshBase : AsteroidLodMeshBase) + rock.Shape;
+                var mesh = (pixels > 90f ? _asteroidMeshBase : _asteroidLodMeshBase) + rock.Shape;
                 var shade = 0.2f + 0.05f * (rock.Shape % 4);
                 Add(ref candidateCount, mesh, position, rock.Rotation, rock.Radius, new Vector3(shade, shade * 0.95f, shade * 0.88f), 0f);
             }
@@ -294,7 +332,7 @@ internal sealed class WorldView
         // Group instances by mesh so each mesh is one draw call.
         var batchCount = 0;
         var offset = 0;
-        for (var mesh = 0; mesh < MeshCount; mesh++)
+        for (var mesh = 0; mesh < _meshCount; mesh++)
         {
             _meshOffsets[mesh] = offset;
             if (_meshCounts[mesh] > 0)
@@ -378,15 +416,179 @@ internal sealed class WorldView
         return Math.Clamp((float)(elapsed * TickLoop.SimulationHz / (double)Stopwatch.Frequency), 0f, 1f);
     }
 
-    private void UpdateCommandControls(PlayerInputBridge bridge, float dt, bool pointerOverUi)
+    /// <summary>Where a hull is drawn this frame.</summary>
+    public Double3 HullPosition(in HullView hull) => hull.IsOwn ? OwnPosition : hull.Position;
+
+    public bool IsSelected(uint id) => _selected.AsSpan(0, _selectedCount).Contains(id);
+
+    /// <summary>Selects a hull, replacing the selection or adding to it. Adding a selected hull removes it.</summary>
+    public void Select(uint id, bool additive)
     {
+        if (!additive)
+        {
+            _selected[0] = id;
+            _selectedCount = 1;
+            return;
+        }
+
+        var index = _selected.AsSpan(0, _selectedCount).IndexOf(id);
+        if (index >= 0)
+            _selected[index] = _selected[--_selectedCount];
+        else if (_selectedCount < MaxSelection)
+            _selected[_selectedCount++] = id;
+    }
+
+    /// <summary>Selects every hull the player owns.</summary>
+    public void SelectAllOwned()
+    {
+        var snapshot = _snapshot;
+        _selectedCount = 0;
+        for (var i = 0; snapshot is not null && i < snapshot.HullCount && _selectedCount < MaxSelection; i++)
+        {
+            if (snapshot.Hulls[i].Owner == snapshot.PlayerId)
+                _selected[_selectedCount++] = snapshot.Hulls[i].Id;
+        }
+    }
+
+    /// <summary>Makes the command camera follow a hull.</summary>
+    public void FocusOn(uint id) => _followId = id;
+
+    /// <summary>Finds a hull in this frame's snapshot by id.</summary>
+    public bool TryGetHull(uint id, out HullView hull)
+    {
+        var snapshot = _snapshot;
+        if (snapshot is not null)
+        {
+            for (var i = 0; i < snapshot.HullCount; i++)
+            {
+                if (snapshot.Hulls[i].Id != id)
+                    continue;
+                hull = snapshot.Hulls[i];
+                return true;
+            }
+        }
+
+        hull = default;
+        return false;
+    }
+
+    /// <summary>
+    /// Orders every selected hull. A move sends them to the point in formation: a block of rows centred on it, so
+    /// several hulls sent to one place do not try to occupy the same spot.
+    /// </summary>
+    private void OrderSelection(PlayerInputBridge bridge, Double3 target, bool move)
+    {
+        var columns = (int)MathF.Ceiling(MathF.Sqrt(_selectedCount));
+        var rows = (_selectedCount + columns - 1) / Math.Max(columns, 1);
+        for (var i = 0; i < _selectedCount; i++)
+        {
+            var order = default(HullOrder);
+            if (move)
+            {
+                var offset = new Vector3((i % columns - (columns - 1) * 0.5f) * FormationSpacing, 0, (i / columns - (rows - 1) * 0.5f) * FormationSpacing);
+                order = new HullOrder { Kind = OrderKind.MoveTo, Target = target + offset };
+            }
+
+            // The hull being flown takes its orders through the input stream; the rest go to the server directly.
+            if (_selected[i] == Own.Id)
+                bridge.IssueOrder(order);
+            else
+                bridge.IssueFleetOrder(_selected[i], order);
+        }
+    }
+
+    private void SelectAt(SessionSnapshot snapshot, float2 pointer, bool additive)
+    {
+        var best = 0u;
+        var bestDistance = ClickRadiusPixels * ClickRadiusPixels;
+        for (var i = 0; i < snapshot.HullCount; i++)
+        {
+            ref var hull = ref snapshot.Hulls[i];
+            if (hull.Owner != snapshot.PlayerId || !Project(HullPosition(hull), out var screen))
+                continue;
+            var offset = screen - pointer;
+            var distance = offset.X * offset.X + offset.Y * offset.Y;
+            if (distance >= bestDistance)
+                continue;
+            best = hull.Id;
+            bestDistance = distance;
+        }
+
+        if (best != 0)
+            Select(best, additive);
+        else if (!additive)
+            _selectedCount = 0;
+    }
+
+    private void SelectBox(SessionSnapshot snapshot, float2 a, float2 b, bool additive)
+    {
+        var min = new float2(Math.Min(a.X, b.X), Math.Min(a.Y, b.Y));
+        var max = new float2(Math.Max(a.X, b.X), Math.Max(a.Y, b.Y));
+        if (!additive)
+            _selectedCount = 0;
+
+        for (var i = 0; i < snapshot.HullCount && _selectedCount < MaxSelection; i++)
+        {
+            ref var hull = ref snapshot.Hulls[i];
+            if (hull.Owner != snapshot.PlayerId || IsSelected(hull.Id) || !Project(HullPosition(hull), out var screen))
+                continue;
+            if (screen.X >= min.X && screen.X <= max.X && screen.Y >= min.Y && screen.Y <= max.Y)
+                _selected[_selectedCount++] = hull.Id;
+        }
+    }
+
+    private void UpdateCommandControls(SessionSnapshot snapshot, PlayerInputBridge bridge, float dt, bool pointerOverUi)
+    {
+        // Hulls that no longer exist drop out of the selection.
+        for (var i = _selectedCount - 1; i >= 0; i--)
+        {
+            if (!TryGetHull(_selected[i], out _))
+                _selected[i] = _selected[--_selectedCount];
+        }
+
+        var shift = _devices.KeyDown(GlfwKey.LeftShift) || _devices.KeyDown(GlfwKey.RightShift);
+        var control = _devices.KeyDown(GlfwKey.LeftControl) || _devices.KeyDown(GlfwKey.RightControl);
+
         if (_actions.Pressed(_devices, InputAction.Follow, true))
-            _commandFollow = true;
+            _followId = _selectedCount > 0 ? _selected[0] : Own.Id;
+        if (control && _devices.KeyPressed(GlfwKey.A))
+            SelectAllOwned();
 
         if (!pointerOverUi && _devices.Scroll != 0)
             _commandDistance = Math.Clamp(_commandDistance * MathF.Pow(0.86f, _devices.Scroll), MinCommandDistance, MaxCommandDistance);
 
-        // Right button: drag to orbit, click to order a move to the point under the pointer.
+        // Left button: click picks a hull, drag draws a selection box, Shift and drag slides the plane up and down.
+        if (_devices.MousePressed(GlfwMouseButton.Left) && !pointerOverUi)
+        {
+            _leftDragging = true;
+            _leftMoved = false;
+            _leftSlidesPlane = shift;
+            _leftDragStart = _devices.MousePosition;
+        }
+
+        if (_leftDragging)
+        {
+            var moved = _devices.MousePosition - _leftDragStart;
+            if (MathF.Abs(moved.X) + MathF.Abs(moved.Y) > 5f)
+                _leftMoved = true;
+
+            if (_leftSlidesPlane && _leftMoved)
+            {
+                _commandFocus += Vector3.UnitY * (-_devices.MouseDelta.Y * _commandDistance * 0.0018f);
+                _followId = 0;
+            }
+
+            if (!_devices.MouseDown(GlfwMouseButton.Left))
+            {
+                _leftDragging = false;
+                if (_leftMoved && !_leftSlidesPlane)
+                    SelectBox(snapshot, _leftDragStart, _devices.MousePosition, control);
+                else if (!_leftMoved)
+                    SelectAt(snapshot, _devices.MousePosition, shift || control);
+            }
+        }
+
+        // Right button: drag to rotate the view, click to send the selection to the point under the pointer.
         if (_devices.MousePressed(GlfwMouseButton.Right) && !pointerOverUi)
         {
             _rightDragging = true;
@@ -408,16 +610,15 @@ internal sealed class WorldView
             if (!_devices.MouseDown(GlfwMouseButton.Right))
             {
                 _rightDragging = false;
-                if (!_rightMoved && GroundPoint(_devices.MousePosition, out var target))
-                    bridge.IssueOrder(new HullOrder { Kind = OrderKind.MoveTo, Target = target });
+                if (!_rightMoved && _selectedCount > 0 && GroundPoint(_devices.MousePosition, out var target))
+                    OrderSelection(bridge, target, true);
             }
         }
 
-        // Keys and sticks pan the focus across the plane, turn the view and raise or lower the plane.
-        var strafe = _actions.Axis(_devices, InputAxis.Strafe, true);
-        var forward = _actions.Axis(_devices, InputAxis.Forward, true);
-        var vertical = _actions.Axis(_devices, InputAxis.Vertical, true);
-        _commandYaw -= _actions.Axis(_devices, InputAxis.Roll, true) * 1.7f * dt;
+        // W A S D and the arrow keys pan across the plane; Q and E lower and raise it.
+        var strafe = Math.Clamp(_actions.Axis(_devices, InputAxis.Strafe, true) + _actions.Axis(_devices, InputAxis.Yaw, true), -1f, 1f);
+        var forward = Math.Clamp(_actions.Axis(_devices, InputAxis.Forward, true) + _actions.Axis(_devices, InputAxis.Pitch, true), -1f, 1f);
+        var vertical = _actions.Axis(_devices, InputAxis.Roll, true);
 
         if (_devices.MouseDown(GlfwMouseButton.Middle) && !pointerOverUi)
         {
@@ -432,7 +633,7 @@ internal sealed class WorldView
             var flatRight = new Vector3(cos, 0, -sin);
             var step = _commandDistance * 1.1f * dt;
             _commandFocus += (flatRight * strafe + flatForward * forward + Vector3.UnitY * vertical * 0.7f) * step;
-            _commandFollow = false;
+            _followId = 0;
         }
     }
 
@@ -470,10 +671,15 @@ internal sealed class WorldView
 
         var speed = Own.Velocity.Length();
         var pullBack = 1f + Math.Min(speed / 720f, 1f) * 0.25f;
-        var chasePosition = OwnPosition + chaseUp * 2.6f - _cameraDirection * (11f * pullBack);
+        var chasePosition = OwnPosition + chaseUp * (_chaseDistance * 0.24f) - _cameraDirection * (_chaseDistance * pullBack);
 
-        if (_commandFollow)
-            _commandFocus = OwnPosition;
+        if (_followId != 0)
+        {
+            if (TryGetHull(_followId, out var followed))
+                _commandFocus = HullPosition(followed);
+            else
+                _followId = 0;
+        }
         var commandOrientation = Quaternion.CreateFromYawPitchRoll(_commandYaw, _commandPitch, 0);
         var commandPosition = _commandFocus + Vector3.Transform(new Vector3(0, 0, _commandDistance), commandOrientation);
 

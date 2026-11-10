@@ -308,9 +308,9 @@ public sealed class HullStoreTests
     public void HandlesGoStaleWhenTheirHullIsDestroyedAndSlotsAreReused()
     {
         using var store = new HullStore(2);
-        var a = store.Create(1, HullState.Spawn(new Double3(1, 0, 0), default));
-        var b = store.Create(2, HullState.Spawn(new Double3(2, 0, 0), default));
-        var c = store.Create(3, HullState.Spawn(new Double3(3, 0, 0), default));
+        var a = store.Create(1, 0, HullState.Spawn(new Double3(1, 0, 0), default));
+        var b = store.Create(2, 0, HullState.Spawn(new Double3(2, 0, 0), default));
+        var c = store.Create(3, 0, HullState.Spawn(new Double3(3, 0, 0), default));
         Assert.Equal(3, store.Count);
         Assert.Equal(2.0, store.State(b.Index).Position.X);
 
@@ -318,7 +318,7 @@ public sealed class HullStoreTests
         Assert.False(store.IsAlive(b));
         Assert.True(store.IsAlive(a) && store.IsAlive(c));
 
-        var d = store.Create(4, HullState.Spawn(new Double3(4, 0, 0), default));
+        var d = store.Create(4, 0, HullState.Spawn(new Double3(4, 0, 0), default));
         Assert.Equal(b.Index, d.Index);
         Assert.NotEqual(b.Generation, d.Generation);
         Assert.False(store.IsAlive(b));
@@ -399,12 +399,59 @@ public sealed class FlightSessionTests
         Assert.Null(server.Fault);
     }
 
+    [Fact]
+    public void FleetHullsFollowOrdersFromTheirOwnerAndIgnoreEveryoneElse()
+    {
+        var port = (ushort)(47000 + Environment.ProcessId % 2000);
+        using var server = new ServerHost(new ServerConfig { MaxPlayers = 2 }, Content, Prospect.Engine.Net.RakNetTransport.Listen(port, 8));
+        server.Start();
+        using var owner = GameSession.Join("127.0.0.1", port, Content, "Owner");
+        using var rival = GameSession.Join("127.0.0.1", port, Content, "Rival");
+        WaitForOwnHull(owner);
+        WaitForOwnHull(rival);
+
+        // Each player starts with the pod and the starting fleet.
+        HullView[] Fleet(GameSession session)
+        {
+            var snapshot = session.Client.AcquireSnapshot();
+            return snapshot.Hulls.Take(snapshot.HullCount).Where(h => h.Owner == snapshot.PlayerId && !h.IsOwn).ToArray();
+        }
+
+        var deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 10;
+        while (Fleet(owner).Length < Content.StartingFleet.Length && Stopwatch.GetTimestamp() < deadline)
+            Thread.Sleep(20);
+        var vessel = Fleet(owner)[0];
+        Assert.Equal(Content.StartingFleet.Length, Fleet(owner).Length);
+        Assert.NotEqual(Content.PodDesign, vessel.Design);
+
+        // The rival's order for a hull it does not own changes nothing.
+        var target = vessel.Position + new Vector3(0, 60, -300);
+        rival.Client.Input.IssueFleetOrder(vessel.Id, new HullOrder { Kind = OrderKind.MoveTo, Target = target });
+        Thread.Sleep(700);
+        var unmoved = Fleet(owner).First(h => h.Id == vessel.Id);
+        Assert.Equal(OrderKind.None, unmoved.Order.Kind);
+        Assert.True(unmoved.Position.RelativeTo(vessel.Position).Length() < 0.5f);
+
+        // The owner's order is carried out by the server, with nobody flying the hull.
+        owner.Client.Input.IssueFleetOrder(vessel.Id, new HullOrder { Kind = OrderKind.MoveTo, Target = target });
+        deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 40;
+        HullView moved;
+        do
+        {
+            Thread.Sleep(50);
+            moved = Fleet(owner).First(h => h.Id == vessel.Id);
+        } while ((moved.Order.Kind != OrderKind.None || target.RelativeTo(moved.Position).Length() > 5f) && Stopwatch.GetTimestamp() < deadline);
+
+        Assert.True(target.RelativeTo(moved.Position).Length() < 5f);
+        Assert.Null(server.Fault);
+    }
+
     private static HullView FindOther(GameSession session)
     {
         var snapshot = session.Client.AcquireSnapshot();
         for (var i = 0; i < snapshot.HullCount; i++)
         {
-            if (!snapshot.Hulls[i].IsOwn)
+            if (snapshot.Hulls[i].Owner != snapshot.PlayerId && snapshot.Hulls[i].Design == Content.PodDesign)
                 return snapshot.Hulls[i];
         }
 

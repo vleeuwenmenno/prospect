@@ -6,10 +6,10 @@
     "Screenshot": ["Key:F12"],
     "Boost": ["Key:LeftShift", "Pad:LeftThumb"],
     "ToggleDampeners": ["Key:Z", "Pad:X"],
-    "ToggleCommand": ["Key:N", "Pad:Back"],
+    "ToggleCommand": ["Key:N", "Key:F9", "Pad:Back"],
     "ToggleMap": ["Key:M", "Pad:Y"],
-    "Halt": ["Key:H", "Pad:B"],
-    "Follow": ["Key:F", "Pad:RightThumb"],
+    "Halt": ["Key:H", "Key:Backspace", "Pad:B"],
+    "Follow": ["Key:Space", "Key:F", "Pad:RightThumb"],
     "ShipInfo": ["Key:I", "Pad:DpadUp"]
   },
   "axes": {

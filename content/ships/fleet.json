@@ -1,0 +1,5 @@
+{
+  "designs": ["command_pod", "mining_vessel"],
+  "pod": "command_pod",
+  "startingFleet": ["mining_vessel", "mining_vessel"]
+}

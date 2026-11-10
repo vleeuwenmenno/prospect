@@ -19,7 +19,7 @@ internal sealed partial class ScreenHost
     private static readonly string[] ActionLabels =
     [
         "Menu / back", "Performance overlay", "Fullscreen", "Screenshot", "Boost", "Dampeners on / off",
-        "Command view", "Galaxy map", "Halt (cancel order)", "Follow pod (command view)", "Ship data sheet",
+        "Command view", "Galaxy map", "Halt (cancel order)", "Focus on selection (command view)", "Ship data sheet",
     ];
 
     private readonly ImInputString _settingsName = new(ProtocolInfo.MaxNameBytes);

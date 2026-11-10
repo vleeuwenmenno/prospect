@@ -61,7 +61,13 @@ internal sealed partial class ScreenHost
         var draw = ImGui.GetWindowDrawList();
         DrawSectorPanel(draw, snapshot, world);
         if (_shipInfoOpen && !_mapOpen)
-            DrawShipInfo(draw);
+        {
+            // In the command view the sheet describes the first selected hull; otherwise the one being flown.
+            var shown = world.Own;
+            if (world.Mode == ViewMode.Command && world.Selection.Length > 0 && world.TryGetHull(world.Selection[0], out var picked))
+                shown = picked;
+            DrawShipInfo(draw, _app.Content.Designs[Math.Min(shown.Design, _app.Content.Designs.Length - 1)], world.Mode == ViewMode.Command);
+        }
         if (!_mapOpen)
         {
             var pilot = 1f - world.CommandBlend;
@@ -73,6 +79,8 @@ internal sealed partial class ScreenHost
 
         EndRoot();
 
+        if (!_mapOpen && world.CommandBlend > 0.5f)
+            DrawFleetList(snapshot, world, world.CommandBlend);
         if (_mapOpen)
             DrawMap(world);
     }
@@ -199,20 +207,25 @@ internal sealed partial class ScreenHost
         Kit.Fade = previousFade;
     }
 
-    /// <summary>Markers and readouts for the command view: hulls, their orders and the point under the pointer.</summary>
+    /// <summary>Markers and readouts for the command view: hulls, selection, orders and the point under the pointer.</summary>
     private void DrawCommandOverlay(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, float alpha)
     {
         var previousFade = Kit.Fade;
         Kit.Fade = alpha;
         var display = _ui.DisplaySize;
         var planeHeight = world.CommandFocus.Y;
+        var designs = _app.Content.Designs;
 
         for (var i = 0; i < snapshot.HullCount; i++)
         {
             ref var hull = ref snapshot.Hulls[i];
-            var position = hull.IsOwn ? world.OwnPosition : hull.Position;
+            var position = world.HullPosition(hull);
             if (!world.Project(position, out var screen))
                 continue;
+
+            var mine = hull.Owner == snapshot.PlayerId;
+            var selected = mine && world.IsSelected(hull.Id);
+            var color = mine ? Theme.Accent : Theme.Info;
 
             // A stalk down to the command plane shows how far above or below it the hull is.
             var onPlane = new Double3(position.X, planeHeight, position.Z);
@@ -222,33 +235,48 @@ internal sealed partial class ScreenHost
                 draw.AddCircleFilled(foot, Kit.Px(2.5f), Kit.Color(Theme.Info, 0.7f), 8);
             }
 
-            var color = hull.IsOwn ? Theme.Accent : Theme.Info;
-            var s = Kit.Px(hull.IsOwn ? 9 : 7);
+            var s = Kit.Px(7);
             Span<float2> diamond = [screen + new float2(0, -s), screen + new float2(s, 0), screen + new float2(0, s), screen + new float2(-s, 0)];
-            draw.AddPolyline(diamond, Kit.Color(color), ImDrawFlags.Closed, Kit.Px(1.5f));
-
-            var label = screen + new float2(s + Kit.Px(8), -Kit.Px(14));
-            if (hull.IsOwn)
-                Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, label, color, "COMMAND POD"u8);
+            if (selected)
+            {
+                draw.AddConvexPolyFilled(diamond, Kit.Color(color));
+                var reach = new float2(Kit.Px(17), Kit.Px(17));
+                Brackets(draw, screen - reach, screen + reach, Kit.Px(7), Kit.Color(Theme.Text));
+            }
             else
-                Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, label, color, Kit.F($"PLAYER {hull.Owner}"));
+            {
+                draw.AddPolyline(diamond, Kit.Color(color, mine ? 1f : 0.8f), ImDrawFlags.Closed, Kit.Px(1.5f));
+            }
+
+            var label = screen + new float2(Kit.Px(24), -Kit.Px(14));
+            var design = designs[Math.Min(hull.Design, designs.Length - 1)];
+            if (mine)
+                Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, label, selected ? Theme.Text : color, Kit.F($"{design.Name} {(hull.Id & 0xFFFF) + 1}"));
+            else
+                Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, label, color, Kit.F($"PLAYER {hull.Owner}  {design.Name}"));
             Kit.Text(draw, _ui.Mono, Theme.FontCaption, label + new float2(0, Kit.Px(15)), Theme.TextDim, Kit.F($"{hull.Velocity.Length():0} M/S"));
 
-            if (hull.Order.Kind == OrderKind.MoveTo && world.Project(hull.Order.Target, out var target))
+            if (mine && hull.Order.Kind == OrderKind.MoveTo && world.Project(hull.Order.Target, out var target))
             {
-                draw.AddLine(screen, target, Kit.Color(color, 0.55f), Kit.Px(1.5f));
+                draw.AddLine(screen, target, Kit.Color(color, selected ? 0.7f : 0.3f), Kit.Px(1.5f));
                 DrawTargetMarker(draw, target, color);
-                var distance = hull.Order.Target.RelativeTo(position).Length();
-                Kit.Text(draw, _ui.Mono, Theme.FontCaption, target + new float2(Kit.Px(14), -Kit.Px(6)), color, distance >= 1000f ? Kit.F($"{distance / 1000f:0.00} KM") : Kit.F($"{distance:0} M"));
             }
         }
 
-        // The point a move order would go to.
         var pointer = _app.Devices.MousePosition;
-        if (WorldInputEnabled && world.GroundPoint(pointer, out var ground) && world.Project(ground, out var groundScreen))
+        if (world.BoxSelecting)
         {
+            // The selection box being dragged.
+            var min = new float2(Math.Min(world.BoxStart.X, world.BoxEnd.X), Math.Min(world.BoxStart.Y, world.BoxEnd.Y));
+            var max = new float2(Math.Max(world.BoxStart.X, world.BoxEnd.X), Math.Max(world.BoxStart.Y, world.BoxEnd.Y));
+            draw.AddRectFilled(min, max, Kit.Color(Theme.Accent, 0.08f));
+            draw.AddRect(min, max, Kit.Color(Theme.Accent, 0.9f));
+        }
+        else if (WorldInputEnabled && !_ui.PointerOverInterface && world.GroundPoint(pointer, out var ground) && world.Project(ground, out var groundScreen))
+        {
+            // The point a move order would go to.
             draw.AddCircle(groundScreen, Kit.Px(7), Kit.Color(Theme.Text, 0.7f), 20, Kit.Px(1.2f));
-            var range = ground.RelativeTo(world.OwnPosition).Length();
+            var range = ground.RelativeTo(world.CommandFocus).Length();
             Kit.Text(draw, _ui.Mono, Theme.FontCaption, groundScreen + new float2(Kit.Px(14), Kit.Px(8)), Theme.TextDim, range >= 1000f ? Kit.F($"{range / 1000f:0.00} KM") : Kit.F($"{range:0} M"));
         }
 
@@ -257,21 +285,104 @@ internal sealed partial class ScreenHost
         var top = new float2(display.X * 0.5f, Kit.Px(Theme.Space5));
         Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, top - new float2(titleSize.X * 0.5f, 0), Theme.Accent, title);
         var status = world.CommandFollowing
-            ? Kit.F($"FOLLOWING POD   RANGE {world.CommandDistance / 1000f:0.00} KM")
-            : Kit.F($"FREE CAMERA   RANGE {world.CommandDistance / 1000f:0.00} KM");
+            ? Kit.F($"{world.Selection.Length} SELECTED   FOLLOWING   RANGE {world.CommandDistance / 1000f:0.00} KM")
+            : Kit.F($"{world.Selection.Length} SELECTED   FREE CAMERA   RANGE {world.CommandDistance / 1000f:0.00} KM");
         var statusSize = Kit.Measure(_ui.Mono, Theme.FontCaption, status);
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, top + new float2(-statusSize.X * 0.5f, Kit.Px(22)), Theme.TextDim, status);
 
         var hint = new float2(Kit.Px(Theme.Space5), display.Y - Kit.Px(56));
-        hint.X += Kit.KeyHint(draw, hint, "RMB"u8, "Move here"u8);
-        hint.X += Kit.KeyHint(draw, hint, "RMB DRAG"u8, "Orbit"u8);
+        hint.X += Kit.KeyHint(draw, hint, "LMB / DRAG"u8, "Select"u8);
+        hint.X += Kit.KeyHint(draw, hint, "RMB"u8, "Move"u8);
+        hint.X += Kit.KeyHint(draw, hint, "RMB DRAG"u8, "Rotate"u8);
         hint.X += Kit.KeyHint(draw, hint, "WHEEL"u8, "Zoom"u8);
         hint.X += Kit.KeyHint(draw, hint, "WASD"u8, "Pan"u8);
-        hint.X += Kit.KeyHint(draw, hint, "SPACE / CTRL"u8, "Plane"u8);
-        hint.X += Kit.KeyHint(draw, hint, "F"u8, "Follow"u8);
+        hint.X += Kit.KeyHint(draw, hint, "Q / E"u8, "Plane"u8);
+        hint.X += Kit.KeyHint(draw, hint, "SPACE"u8, "Focus"u8);
         hint.X += Kit.KeyHint(draw, hint, "H"u8, "Halt"u8);
         Kit.KeyHint(draw, hint, "N"u8, "Pilot"u8);
         Kit.Fade = previousFade;
+    }
+
+    /// <summary>
+    /// The list of the player's hulls at the right edge of the command view. Click a row to select the hull,
+    /// Shift-click to add it, double-click to send the camera to it.
+    /// </summary>
+    private void DrawFleetList(SessionSnapshot snapshot, WorldView world, float alpha)
+    {
+        var owned = 0;
+        for (var i = 0; i < snapshot.HullCount; i++)
+        {
+            if (snapshot.Hulls[i].Owner == snapshot.PlayerId)
+                owned++;
+        }
+
+        var rowHeight = Kit.Px(44);
+        var size = new float2(Kit.Px(300), Kit.Px(54) + rowHeight * owned);
+        var min = new float2(_ui.DisplaySize.X - size.X - Kit.Px(Theme.Space5), Kit.Px(264));
+        ImGui.SetNextWindowPos(min);
+        ImGui.SetNextWindowSize(size);
+        ImGui.Begin("##fleet"u8, RootFlags | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoFocusOnAppearing);
+        Kit.Fade = alpha;
+        var draw = ImGui.GetWindowDrawList();
+        Kit.PanelFrame(draw, min, min + size);
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3)), Theme.Accent, "FLEET"u8);
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, min + new float2(Kit.Px(Theme.Space4 + 52), Kit.Px(Theme.Space3)), Theme.TextMute, Kit.F($"{owned} HULLS"));
+
+        var designs = _app.Content.Designs;
+        var shift = ImGui.GetIO().KeyShift || ImGui.GetIO().KeyCtrl;
+        var y = min.Y + Kit.Px(42);
+        for (var i = 0; i < snapshot.HullCount; i++)
+        {
+            ref var hull = ref snapshot.Hulls[i];
+            if (hull.Owner != snapshot.PlayerId)
+                continue;
+
+            var rowMin = new float2(min.X + Kit.Px(6), y);
+            var rowSize = new float2(size.X - Kit.Px(12), rowHeight - Kit.Px(4));
+            ImGui.SetCursorScreenPos(rowMin);
+            ImGui.PushID((int)hull.Id);
+            if (ImGui.InvisibleButton("##hull"u8, rowSize))
+                world.Select(hull.Id, shift);
+            if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                world.FocusOn(hull.Id);
+            var hot = Kit.Animate(ImGui.GetItemID(), ImGui.IsItemHovered() ? 1f : 0f);
+            ImGui.PopID();
+
+            var selected = world.IsSelected(hull.Id);
+            draw.AddRectFilled(rowMin, rowMin + rowSize, Kit.Color(Theme.PanelRaised, selected ? 0.95f : 0.5f * hot));
+            if (selected)
+                draw.AddRectFilled(rowMin, rowMin + new float2(Kit.Px(3), rowSize.Y), Kit.Color(Theme.Accent));
+
+            var design = designs[Math.Min(hull.Design, designs.Length - 1)];
+            var text = rowMin + new float2(Kit.Px(Theme.Space3), Kit.Px(4));
+            Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, text, selected ? Theme.Text : Theme.TextDim, Kit.F($"{design.Name} {(hull.Id & 0xFFFF) + 1}"));
+            if (hull.IsOwn)
+                Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, text + new float2(rowSize.X - Kit.Px(70), Kit.Px(2)), Theme.Accent, "YOU"u8);
+
+            if (hull.Order.Kind == OrderKind.MoveTo)
+            {
+                var distance = hull.Order.Target.RelativeTo(world.HullPosition(hull)).Length();
+                Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(19)), Theme.Accent, distance >= 1000f ? Kit.F($"MOVING   {distance / 1000f:0.00} KM") : Kit.F($"MOVING   {distance:0} M"));
+            }
+            else
+            {
+                Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(19)), Theme.TextMute, Kit.F($"HOLDING   {hull.Velocity.Length():0} M/S"));
+            }
+
+            // Hull and shield at a glance.
+            var flight = design.Flight;
+            var gaugeMin = rowMin + new float2(rowSize.X - Kit.Px(70), Kit.Px(24));
+            var gauge = new float2(Kit.Px(58), Kit.Px(3));
+            draw.AddRectFilled(gaugeMin, gaugeMin + gauge, Kit.Color(Theme.Void));
+            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * Math.Clamp(hull.Shield / flight.ShieldCapacity, 0f, 1f), gauge.Y), Kit.Color(Theme.Info));
+            gaugeMin.Y += Kit.Px(6);
+            draw.AddRectFilled(gaugeMin, gaugeMin + gauge, Kit.Color(Theme.Void));
+            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * Math.Clamp(hull.Hull / flight.HullPoints, 0f, 1f), gauge.Y), Kit.Color(Theme.Good));
+            y += rowHeight;
+        }
+
+        Kit.Fade = 1f;
+        ImGui.End();
     }
 
     /// <summary>A labelled gauge: caption on the left, reading on the right, bar underneath.</summary>
@@ -289,13 +400,13 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>The hull's data sheet: every figure follows from the blocks it is built from.</summary>
-    private void DrawShipInfo(ImDrawListPtr draw)
+    private void DrawShipInfo(ImDrawListPtr draw, HullDesign design, bool besideFleetList)
     {
-        var design = _app.Content.Pod;
         var stats = design.Stats;
         var line = Kit.Px(21);
         var size = new float2(Kit.Px(400), Kit.Px(Theme.Space5 * 2 + 46) + line * 23);
-        var min = new float2(_ui.DisplaySize.X - size.X - Kit.Px(Theme.Space5), (_ui.DisplaySize.Y - size.Y) * 0.5f);
+        var inset = besideFleetList ? Kit.Px(300 + Theme.Space5 * 2) : Kit.Px(Theme.Space5);
+        var min = new float2(_ui.DisplaySize.X - size.X - inset, (_ui.DisplaySize.Y - size.Y) * 0.5f);
         Kit.PanelFrame(draw, min, min + size);
 
         var left = min.X + Kit.Px(Theme.Space5);

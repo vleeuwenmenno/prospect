@@ -23,13 +23,16 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   up and locks out. Thrust, boost and shield recharge draw power; the generator refills the battery with the
   surplus. Running into an asteroid bounces the hull and damages shield, then hull. The server is authoritative; the client predicts its own hull with the same
   flight code and reconciles against snapshots; other players' hulls are interpolated.
-- **Command view.** One key pulls the camera back from the pod into a free orbiting view over the same space, with
-  a move order that the pod's autopilot carries out.
+- **Fleet.** Each player starts with the command pod and two mining vessels. Hulls nobody is flying are flown by
+  the server under their standing orders.
+- **Command view.** One key pulls the camera back from the pod into a free orbiting view over the same space.
+  Click or drag a box to select hulls, right-click to send them somewhere in formation; a fleet list on the right
+  selects and focuses too.
 - **Galaxy map.** Sectors by layer, with their stars and asteroid counts, and set-course by right-click.
 - **Renderer.** Floating-point scene target and tone mapping, camera-relative rendering from double-precision
   positions, a star field and sky, instanced hull and asteroid meshes with two levels of detail.
 
-Not there yet: mining, more than one hull per player, gates and jumps,
+Not there yet: mining, taking direct control of another hull, gates and jumps,
 saving. Asteroids are drawn from a shared set of shapes and collide as spheres until mining gives each one its own body.
 
 ## Controls
@@ -43,9 +46,9 @@ saving. Asteroids are drawn from a shared set of shapes and collide as spheres u
 | Roll | `Q` `E` | Bumpers |
 | Boost | `Left Shift` | Left stick click |
 | Dampeners on / off | `Z` | `X` |
-| Command view | `N` | `Back` |
+| Command view | `N` or `F9` | `Back` |
 | Galaxy map | `M` | `Y` |
-| Halt (cancel order) | `H` | `B` |
+| Halt (cancel order) | `H` or `Backspace` | `B` |
 | Ship data sheet | `I` | D-pad up |
 | Menu or back | `Esc` | `Start` |
 
@@ -53,8 +56,23 @@ The pointer turns the view, not the hull. The hull swings its nose onto the view
 thrust, so looking around while coasting costs nothing; hold the right mouse button to look around under thrust
 without turning.
 
-In the command view: right-click orders a move to that point, right-drag orbits, the wheel zooms, `W` `A` `S` `D`
-pan, `Space` and `Left Ctrl` raise and lower the command plane, `F` follows the pod again. `F3` shows the
+In the pilot view, hold the right mouse button and turn the wheel to move the camera closer or further.
+
+Command view:
+
+| | |
+| --- | --- |
+| Select a hull | Left-click it, or its row in the fleet list |
+| Select several | Drag a box; `Ctrl` + drag adds to the selection; `Shift` + click adds or removes one; `Ctrl` + `A` selects all |
+| Move the selection | Right-click the destination |
+| Rotate the view | Right-drag |
+| Zoom | Mouse wheel |
+| Pan | `W` `A` `S` `D`, arrow keys, or middle-drag |
+| Lower / raise the plane | `Q` / `E`, or `Shift` + left-drag |
+| Focus the camera on the selection | `Space` or `F`; double-click a row in the fleet list |
+| Halt the selection | `H` or `Backspace` |
+
+`F3` shows the
 performance overlay, `F11` toggles fullscreen, `F12` takes a screenshot. Bindings live in
 `content/input/bindings.json`; block types and flight rules in `content/blocks`, hull designs in `content/ships`,
 galaxy rules in `content/galaxy`.
