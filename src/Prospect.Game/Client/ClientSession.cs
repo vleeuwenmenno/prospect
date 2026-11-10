@@ -72,6 +72,9 @@ public sealed class SessionSnapshot
     public bool Dampeners;
     public FlightParams Flight;
 
+    /// <summary>The largest recent gap between the client's prediction and the server's answer, in metres.</summary>
+    public float PredictionError;
+
     /// <summary>The server tick as a fraction, for evaluating motion that is a function of time.</summary>
     public double ServerTickPrecise;
 
@@ -181,6 +184,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         if (snapshot.HullCount == 0)
             snapshot.OwnHull = -1;
         snapshot.Dampeners = _world.Dampeners;
+        snapshot.PredictionError = _world.PredictionError;
         snapshot.Flight = _world.Flight;
         snapshot.RoundTripMs = _roundTripMs;
         snapshot.PublishedAt = now;

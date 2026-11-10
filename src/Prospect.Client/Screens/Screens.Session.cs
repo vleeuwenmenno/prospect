@@ -140,7 +140,7 @@ internal sealed partial class ScreenHost
     {
         var draw = ImGui.GetForegroundDrawList();
         var stats = _app.Stats;
-        var size = new float2(Kit.Px(330), Kit.Px(snapshot is null ? 154 : 220));
+        var size = new float2(Kit.Px(330), Kit.Px(snapshot is null ? 154 : 238));
         var min = new float2(_ui.DisplaySize.X - size.X - Kit.Px(Theme.Space5), Kit.Px(Theme.Space5));
         Kit.PanelFrame(draw, min, min + size);
 
@@ -186,5 +186,7 @@ internal sealed partial class ScreenHost
             Kit.Text(draw, _ui.Mono, Theme.FontCaption, cursor, Theme.TextDim, Kit.F($"SERVER REMOTE   RTT {snapshot.RoundTripMs:0.0} MS"));
         cursor.Y += line;
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, cursor, Theme.TextMute, Kit.F($"TICK   CLIENT {snapshot.ClientTick}   SERVER {snapshot.ServerTick}"));
+        cursor.Y += line;
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, cursor, snapshot.PredictionError > 0.05f ? Theme.Bad : Theme.TextMute, Kit.F($"PREDICT  OFF BY {snapshot.PredictionError:0.000} M"));
     }
 }

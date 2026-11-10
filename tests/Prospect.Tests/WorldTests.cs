@@ -568,6 +568,28 @@ public sealed class FlightSessionTests
     }
 
     [Fact]
+    public void PredictionAgreesWithTheServerWhileManoeuvringInALocalGame()
+    {
+        using var session = GameSession.StartLocal(new ServerConfig { MaxPlayers = 1 }, Content, "Pilot");
+        WaitForOwnHull(session);
+
+        // Thrust, strafe, climb, roll and keep swinging the nose around for a few seconds.
+        var worst = 0f;
+        var start = Stopwatch.GetTimestamp();
+        while (Stopwatch.GetElapsedTime(start).TotalSeconds < 5)
+        {
+            var t = (float)Stopwatch.GetElapsedTime(start).TotalSeconds;
+            var aim = Vector3.Normalize(new Vector3(MathF.Sin(t * 1.3f), 0.4f * MathF.Cos(t * 0.9f), -MathF.Cos(t * 1.3f)));
+            session.Client.Input.Submit(new PlayerControls { Forward = 1, Strafe = MathF.Sin(t * 2f), Vertical = 0.5f, Roll = MathF.Cos(t), Aim = aim, Align = true, Boost = t > 2 });
+            worst = Math.Max(worst, session.Client.AcquireSnapshot().PredictionError);
+            Thread.Sleep(5);
+        }
+
+        // With no network between them the two run the same inputs through the same code: no correction at all.
+        Assert.True(worst < 0.01f, $"prediction was off by up to {worst:0.000} m");
+    }
+
+    [Fact]
     public void MoveOrderFliesTheHullThereAndManualInputCancelsIt()
     {
         using var session = GameSession.StartLocal(new ServerConfig { MaxPlayers = 1 }, Content, "Pilot");

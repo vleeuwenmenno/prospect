@@ -100,6 +100,7 @@ internal sealed class WorldView
     private readonly RockRef[] _selectedRocks = new RockRef[MaxSelection];
     private int _selectedRockCount;
     private SessionSnapshot? _snapshot;
+    private float _frameAlpha;
     private bool _jumpOrders;
     private uint _followId;
     private Double3 _focusFrom;
@@ -279,6 +280,7 @@ internal sealed class WorldView
         // Where the hull is right now, between the last two simulation ticks.
         ref var own = ref snapshot.Hulls[snapshot.OwnHull];
         var alpha = TickAlpha(snapshot);
+        _frameAlpha = alpha;
         Own = own;
 
         // A jump moves the hull further in one tick than it could fly; there is nothing in between to show.
@@ -366,7 +368,9 @@ internal sealed class WorldView
     public void Draw(CommandBuffer commands, int frameIndex, SessionSnapshot snapshot, float time)
     {
         var galaxy = _galaxy!;
-        var alpha = TickAlpha(snapshot);
+        // The same moment the camera was placed at. Asking the clock again here would put hulls a fraction of a
+        // frame ahead of the camera, which at speed shows as the flown hull shivering against the view.
+        var alpha = _frameAlpha;
         var camera = CameraPosition;
         var aspect = _viewport.X / _viewport.Y;
         var candidateCount = 0;

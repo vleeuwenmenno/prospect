@@ -129,6 +129,12 @@ internal sealed class ClientWorld
 
     public bool Dampeners => _dampeners;
 
+    /// <summary>
+    /// How far the server's answer has recently been from what the client predicted, in metres: the largest
+    /// recent correction, fading over about a second. Zero when prediction and authority agree.
+    /// </summary>
+    public float PredictionError { get; private set; }
+
     /// <summary>The flight figures of the hull the player is flying.</summary>
     public FlightParams Flight => _flight;
 
@@ -405,6 +411,7 @@ internal sealed class ClientWorld
 
         // Keep the drawn position continuous: whatever the correction moved is bled off over the next ticks.
         var error = _predicted.Position.RelativeTo(state.Position);
+        PredictionError = Math.Max(PredictionError * 0.98f, error.Length());
         _correction = error.Length() > SnapDistance ? Vector3.Zero : _correction + error;
         _predicted = state;
     }
