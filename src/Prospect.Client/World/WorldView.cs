@@ -386,18 +386,12 @@ internal sealed class WorldView
             if (hull.Jump != JumpPhase.None && markCount < marks.Length)
             {
                 var flight = design.Flight;
-                var duration = hull.Jump switch
-                {
-                    JumpPhase.Spool => flight.FtlSpoolSeconds,
-                    JumpPhase.Tunnel => flight.FtlTunnelSeconds,
-                    _ => flight.FtlArriveSeconds,
-                };
-                var ahead = hull.Jump == JumpPhase.Spool ? Vector3.Transform(-Vector3.UnitZ, hull.Orientation) * (flight.Radius * 2.4f) : Vector3.Zero;
+                var ahead = hull.Jump is JumpPhase.Align or JumpPhase.Charge ? Vector3.Transform(-Vector3.UnitZ, hull.Orientation) * (flight.Radius * 2.4f) : Vector3.Zero;
                 var at = position + ahead;
                 marks[markCount++] = new FtlMark
                 {
                     PositionSize = new float4(at.X, at.Y, at.Z, flight.Radius * (flight.Ftl == FtlKind.Hyperspace ? 7f : 4.5f)),
-                    Params = new float4((float)flight.Ftl, (float)hull.Jump, Math.Clamp(hull.JumpTimer / duration, 0f, 1f), (hull.Id & 0xFF) / 255f),
+                    Params = new float4((float)flight.Ftl, EffectStage(hull.Jump), JumpProgress(hull, flight), (hull.Id & 0xFF) / 255f),
                 };
             }
 
@@ -489,14 +483,8 @@ internal sealed class WorldView
         if (Own.Jump != JumpPhase.None && _commandBlend < 0.5f)
         {
             var flight = _designs[Math.Min(Own.Design, _designs.Length - 1)].Flight;
-            var duration = Own.Jump switch
-            {
-                JumpPhase.Spool => flight.FtlSpoolSeconds,
-                JumpPhase.Tunnel => flight.FtlTunnelSeconds,
-                _ => flight.FtlArriveSeconds,
-            };
             var kind = FtlPreview != FtlKind.None ? FtlPreview : flight.Ftl;
-            constants.Ftl = new float4((float)kind, (float)Own.Jump, Math.Clamp(Own.JumpTimer / duration, 0f, 1f), 0);
+            constants.Ftl = new float4((float)kind, EffectStage(Own.Jump), JumpProgress(Own, flight), 0);
         }
 
         _scene.Render(commands, frameIndex, constants, _batches.AsSpan(0, batchCount), _commandBlend > 0.01f, markCount);
@@ -628,6 +616,30 @@ internal sealed class WorldView
             _deniedAt = _time;
         }
     }
+
+    /// <summary>The stage number the jump shaders use: 1 drive working, 2 in the tunnel, 3 arriving.</summary>
+    private static float EffectStage(JumpPhase phase) =>
+        phase switch
+        {
+            JumpPhase.Align or JumpPhase.Charge => 1f,
+            JumpPhase.Tunnel => 2f,
+            JumpPhase.Arrive => 3f,
+            _ => 0f,
+        };
+
+    /// <summary>How far a hull is through the current stage of its jump, from 0 to 1.</summary>
+    public static float JumpProgress(in HullView hull, in FlightParams flight) =>
+        Math.Clamp(
+            hull.Jump switch
+            {
+                JumpPhase.Charge => hull.JumpTimer / Math.Max(flight.FtlEnergy, 0.001f),
+                JumpPhase.Tunnel => hull.JumpTimer / flight.FtlTunnelSeconds,
+                JumpPhase.Arrive => hull.JumpTimer / flight.FtlArriveSeconds,
+                _ => 0f,
+            },
+            0f,
+            1f
+        );
 
     /// <summary>Where a hull is drawn this frame.</summary>
     public Double3 HullPosition(in HullView hull) => hull.IsOwn ? OwnPosition : hull.Position;

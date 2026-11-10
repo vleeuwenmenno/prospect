@@ -119,7 +119,13 @@ public struct FlightParams
 
     /// <summary>The hull's faster-than-light drive, and how long each stage of a jump takes.</summary>
     public FtlKind Ftl;
-    public float FtlSpoolSeconds;
+
+    /// <summary>Megawatts the drive draws while charging, and megajoules it must take in before it can fire.</summary>
+    public float FtlPower;
+    public float FtlEnergy;
+
+    /// <summary>Cosine of the largest angle between nose and destination at which the drive will charge.</summary>
+    public float FtlAlignCosine;
     public float FtlTunnelSeconds;
     public float FtlArriveSeconds;
 
@@ -132,14 +138,17 @@ public enum JumpPhase : byte
 {
     None = 0,
 
-    /// <summary>The drive is charging; the hull brakes to rest. Taking the controls cancels the jump.</summary>
-    Spool = 1,
+    /// <summary>The hull is braking and turning its nose toward the destination.</summary>
+    Align = 1,
+
+    /// <summary>The drive is taking in power. Taking the controls cancels the jump and wastes the charge.</summary>
+    Charge = 2,
 
     /// <summary>The hull has left; it is nowhere until it arrives.</summary>
-    Tunnel = 2,
+    Tunnel = 3,
 
     /// <summary>The hull has just come out at its destination.</summary>
-    Arrive = 3,
+    Arrive = 4,
 }
 
 /// <summary>The moving state of one hull.</summary>
@@ -166,7 +175,10 @@ public struct HullState
     /// <summary>Seconds until the shield may start recharging.</summary>
     public float ShieldCooldown;
 
-    /// <summary>Where the hull is in a faster-than-light jump, and how long it has been in that stage.</summary>
+    /// <summary>
+    /// Where the hull is in a faster-than-light jump. The timer counts seconds in the stage, except while
+    /// charging, when it counts the megajoules the drive has taken in so far.
+    /// </summary>
     public JumpPhase Jump;
     public float JumpTimer;
 

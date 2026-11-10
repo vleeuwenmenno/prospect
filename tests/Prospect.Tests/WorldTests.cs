@@ -403,7 +403,7 @@ public sealed class JumpTests
     }
 
     [Fact]
-    public void AJumpSpoolsTunnelsAndArrivesAnyDistanceAway()
+    public void AJumpAlignsChargesTunnelsAndArrivesAnyDistanceAway()
     {
         var flight = Content.Pod.Flight;
         var galaxy = Content.Galaxy;
@@ -413,39 +413,84 @@ public sealed class JumpTests
         var order = new HullOrder { Kind = OrderKind.Jump, Target = destination };
 
         var phases = new List<JumpPhase>();
+        var chargeTicks = 0;
         var ticks = 0;
-        while ((order.Kind != OrderKind.None || state.Jump != JumpPhase.None) && ticks++ < 600)
+        while ((order.Kind != OrderKind.None || state.Jump != JumpPhase.None) && ticks++ < 60 * 60)
         {
             HullSim.Step(ref state, ref order, default, flight);
             if (phases.Count == 0 || phases[^1] != state.Jump)
                 phases.Add(state.Jump);
 
-            // Until the drive has finished charging the hull is still where it was.
-            if (state.Jump == JumpPhase.Spool)
+            // Until the drive fires the hull is still where it was.
+            if (state.Jump is JumpPhase.Align or JumpPhase.Charge)
                 Assert.True(state.Position.RelativeTo(Double3.Zero).Length() < 100f);
+
+            // It only charges once its nose is on the destination, and it stays there.
+            if (state.Jump == JumpPhase.Charge)
+            {
+                chargeTicks++;
+                var toward = Vector3.Normalize(destination.RelativeTo(state.Position));
+                Assert.True(Vector3.Dot(state.Forward, toward) > 0.99f);
+            }
         }
 
-        Assert.Equal([JumpPhase.Spool, JumpPhase.Tunnel, JumpPhase.Arrive, JumpPhase.None], phases);
+        Assert.Equal([JumpPhase.Align, JumpPhase.Charge, JumpPhase.Tunnel, JumpPhase.Arrive, JumpPhase.None], phases);
         Assert.True(destination.RelativeTo(state.Position).Length() < 1f);
         Assert.Equal(new SectorCoord(100, 2, -37), galaxy.SectorOf(state.Position));
-        Assert.Equal(Vector3.Zero, state.Velocity);
-        var seconds = flight.FtlSpoolSeconds + flight.FtlTunnelSeconds + flight.FtlArriveSeconds;
-        Assert.InRange(ticks, (int)(seconds * 60) - 3, (int)(seconds * 60) + 3);
+        Assert.True(state.Velocity.Length() < 0.01f);
+
+        // Charging takes the jump's energy at the drive's power, here with a full battery behind it.
+        Assert.InRange(chargeTicks * HullSim.Dt, flight.FtlEnergy / flight.FtlPower - 0.1f, flight.FtlEnergy / flight.FtlPower + 0.1f);
+        Assert.True(flight.FtlEnergy / flight.FtlPower > 5f, "the charge should be slow enough to watch");
     }
 
     [Fact]
-    public void WithdrawingTheOrderWhileSpoolingCancelsTheJump()
+    public void ChargingDrawsFromTheBatteryAndAFlatBatteryOnlySlowsItDown()
+    {
+        var flight = Content.Pod.Flight;
+        var order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -1e6) };
+
+        float SecondsToFire(float startingEnergy, out float energyAtFire)
+        {
+            var state = HullState.Spawn(Double3.Zero, flight);
+            state.Energy = startingEnergy;
+            var jump = order;
+            var ticks = 0;
+            energyAtFire = 0;
+            while (state.Jump != JumpPhase.Tunnel && ticks++ < 60 * 300)
+            {
+                energyAtFire = state.Energy;
+                HullSim.Step(ref state, ref jump, default, flight);
+            }
+
+            return ticks * HullSim.Dt;
+        }
+
+        var full = SecondsToFire(flight.EnergyStorage, out var left);
+        Assert.True(left < flight.EnergyStorage - 5f, "charging should have drained the battery");
+
+        // With nothing stored the drive lives off the generator's surplus: slower, but it gets there.
+        var flat = SecondsToFire(0, out _);
+        var surplus = flight.PowerGenerated - flight.IdlePower;
+        Assert.True(flat > full * 1.2f);
+        Assert.InRange(flat, flight.FtlEnergy / surplus * 0.9f, flight.FtlEnergy / surplus * 1.15f);
+    }
+
+    [Fact]
+    public void WithdrawingTheOrderBeforeTheDriveFiresCancelsTheJumpAndLosesTheCharge()
     {
         var flight = Content.Pod.Flight;
         var state = HullState.Spawn(Double3.Zero, flight);
-        var order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(1e6, 0, 0) };
-        for (var i = 0; i < 30; i++)
+        var order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -1e6) };
+        for (var i = 0; i < 120; i++)
             HullSim.Step(ref state, ref order, default, flight);
-        Assert.Equal(JumpPhase.Spool, state.Jump);
+        Assert.Equal(JumpPhase.Charge, state.Jump);
+        Assert.True(state.JumpTimer > 1f);
 
         order = default;
         HullSim.Step(ref state, ref order, default, flight);
         Assert.Equal(JumpPhase.None, state.Jump);
+        Assert.Equal(0f, state.JumpTimer);
         Assert.True(state.Position.RelativeTo(Double3.Zero).Length() < 1f);
     }
 
@@ -589,10 +634,10 @@ public sealed class FlightSessionTests
         session.Client.Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = galaxy.CenterOf(far) });
         session.Client.Input.IssueFleetOrder(vessel.Id, new HullOrder { Kind = OrderKind.Jump, Target = galaxy.CenterOf(far) + new Vector3(60, 0, 0) });
 
-        var spooling = WaitFor(session, hull => hull.Jump == JumpPhase.Spool, 3);
+        var spooling = WaitFor(session, hull => hull.Jump == JumpPhase.Charge, 8);
         Assert.Equal(new SectorCoord(0, 0, 0), galaxy.SectorOf(spooling.Position));
 
-        var arrived = WaitFor(session, hull => hull.Jump == JumpPhase.None && galaxy.SectorOf(hull.Position) == far, 10);
+        var arrived = WaitFor(session, hull => hull.Jump == JumpPhase.None && galaxy.SectorOf(hull.Position) == far, 30);
         Assert.Equal(pod.Id, arrived.Id);
         Assert.Equal(OrderKind.None, arrived.Order.Kind);
 
@@ -602,7 +647,7 @@ public sealed class FlightSessionTests
         Assert.True(settled.Position.RelativeTo(arrived.Position).Length() < 30f);
         Assert.Equal(far, galaxy.SectorOf(settled.Position));
 
-        deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 10;
+        deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 40;
         while (galaxy.SectorOf(Fleet().First(h => h.Id == vessel.Id).Position) != far && Stopwatch.GetTimestamp() < deadline)
             Thread.Sleep(50);
         Assert.Equal(far, galaxy.SectorOf(Fleet().First(h => h.Id == vessel.Id).Position));

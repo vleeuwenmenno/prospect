@@ -218,24 +218,29 @@ internal sealed partial class ScreenHost
             snapshot.Dampeners ? "DAMPENERS ON"u8 : "DAMPENERS OFF"u8
         );
 
-        if (own.Jump is JumpPhase.Spool or JumpPhase.Tunnel)
+        if (own.Jump is JumpPhase.Align or JumpPhase.Charge or JumpPhase.Tunnel)
         {
-            // The jump drive charging: which drive, how far along, and how to stop it.
+            // The jump drive at work: which drive, what it is doing, how much charge it has, and how to stop it.
             var drive = flight.Ftl switch
             {
                 FtlKind.Hyperspace => "HYPERSPACE DRIVE"u8,
                 FtlKind.Wormhole => "WORMHOLE GENERATOR"u8,
                 _ => "RIFT CUTTER"u8,
             };
-            var spooling = own.Jump == JumpPhase.Spool;
             var driveSize = Kit.Measure(_ui.SansMedium, Theme.FontSmall, drive);
             var at = new float2(display.X * 0.5f, display.Y * 0.5f + Kit.Px(86));
             Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, at - new float2(driveSize.X * 0.5f, 0), Theme.Info, drive);
             var gauge = new float2(Kit.Px(260), Kit.Px(5));
             var gaugeMin = at + new float2(-gauge.X * 0.5f, Kit.Px(24));
+            var charge = own.Jump == JumpPhase.Charge ? WorldView.JumpProgress(own, flight) : own.Jump == JumpPhase.Tunnel ? 1f : 0f;
             draw.AddRectFilled(gaugeMin, gaugeMin + gauge, Kit.Color(Theme.Void, 0.8f));
-            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * (spooling ? Math.Clamp(own.JumpTimer / flight.FtlSpoolSeconds, 0f, 1f) : 1f), gauge.Y), Kit.Color(Theme.Info));
-            var note = spooling ? "SPOOLING  -  THRUST TO CANCEL"u8 : "IN TRANSIT"u8;
+            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * charge, gauge.Y), Kit.Color(Theme.Info));
+            var note = own.Jump switch
+            {
+                JumpPhase.Align => "ALIGNING TO DESTINATION  -  THRUST TO CANCEL"u8,
+                JumpPhase.Charge => Kit.F($"CHARGING  {own.JumpTimer:0} / {flight.FtlEnergy:0} MJ  -  THRUST TO CANCEL"),
+                _ => "IN TRANSIT"u8,
+            };
             var noteSize = Kit.Measure(_ui.Mono, Theme.FontCaption, note);
             Kit.Text(draw, _ui.Mono, Theme.FontCaption, at + new float2(-noteSize.X * 0.5f, Kit.Px(36)), Theme.TextDim, note);
         }
@@ -658,7 +663,7 @@ internal sealed partial class ScreenHost
 
         var stats = _sheetStats;
         var line = Kit.Px(21);
-        var size = new float2(Kit.Px(400), Kit.Px(Theme.Space5 * 2 + 46) + line * 24);
+        var size = new float2(Kit.Px(400), Kit.Px(Theme.Space5 * 2 + 46) + line * 25);
         var inset = besideFleetList ? Kit.Px(300 + Theme.Space5 * 2) : Kit.Px(Theme.Space5);
         var min = new float2(_ui.DisplaySize.X - size.X - inset, (_ui.DisplaySize.Y - size.Y) * 0.5f);
         Kit.PanelFrame(draw, min, min + size);
@@ -716,6 +721,8 @@ internal sealed partial class ScreenHost
             },
             stats.Ftl == FtlKind.None ? Theme.TextMute : Theme.Info
         );
+        if (stats.Ftl != FtlKind.None)
+            Row("Jump charge"u8, Kit.F($"{stats.FtlEnergy:0} MJ at {stats.FtlPower:0.0} MW"));
     }
 
     private static void DrawTargetMarker(ImDrawListPtr draw, float2 center, uint rgb)

@@ -122,44 +122,76 @@ public static class HullSim
     }
 
     /// <summary>
-    /// Runs a faster-than-light jump: the drive spools while the hull brakes, the hull is gone for the length of
-    /// the tunnel, and then it is at its destination. Returns true while the hull is in the tunnel, when it
-    /// neither flies nor collides. A hull without a drive drops the order.
+    /// Runs a faster-than-light jump. The hull brakes and turns its nose to the destination; the drive then
+    /// charges from the hull's power, as fast as the drive can take it and the battery and generator can give
+    /// it; once charged the hull is gone for the length of the tunnel, and then it is at its destination.
+    /// Returns true while the hull is in the tunnel, when it neither flies nor collides. A hull without a drive
+    /// drops the order.
     /// </summary>
     private static bool Jump(ref HullState state, ref HullOrder order, ref FlightInput input, in FlightParams flight)
     {
         if (order.Kind == OrderKind.Jump && state.Jump == JumpPhase.None)
         {
-            if (flight.Ftl == FtlKind.None)
+            if (flight.Ftl == FtlKind.None || flight.FtlPower <= 0)
             {
                 order.Kind = OrderKind.None;
             }
             else
             {
-                state.Jump = JumpPhase.Spool;
+                state.Jump = JumpPhase.Align;
                 state.JumpTimer = 0;
             }
         }
-        else if (order.Kind != OrderKind.Jump && state.Jump == JumpPhase.Spool)
+        else if (order.Kind != OrderKind.Jump && state.Jump is JumpPhase.Align or JumpPhase.Charge)
         {
-            // The order was withdrawn before the drive finished charging.
+            // The order was withdrawn before the drive fired; whatever it had taken in is lost.
             state.Jump = JumpPhase.None;
+            state.JumpTimer = 0;
         }
 
         switch (state.Jump)
         {
-            case JumpPhase.Spool:
-                input = new FlightInput { Dampeners = true };
-                state.JumpTimer += Dt;
-                if (state.JumpTimer < flight.FtlSpoolSeconds)
-                    return false;
+            case JumpPhase.Align:
+            case JumpPhase.Charge:
+                {
+                    // Hold still and keep the nose on the destination for as long as the drive is working.
+                    input = new FlightInput { Dampeners = true };
+                    var toTarget = order.Target.RelativeTo(state.Position);
+                    var distance = toTarget.Length();
+                    var aligned = true;
+                    if (distance > 1f)
+                    {
+                        var direction = toTarget / distance;
+                        var local = System.Numerics.Vector3.Transform(direction, System.Numerics.Quaternion.Conjugate(state.Orientation));
+                        input.Yaw = FlightInput.Quantize(MathF.Atan2(local.X, -local.Z) * 2.5f);
+                        input.Pitch = FlightInput.Quantize(MathF.Atan2(local.Y, MathF.Sqrt(local.X * local.X + local.Z * local.Z)) * 2.5f);
+                        aligned = -local.Z >= flight.FtlAlignCosine;
+                    }
 
-                state.Position = order.Target;
-                state.Velocity = System.Numerics.Vector3.Zero;
-                state.AngularVelocity = System.Numerics.Vector3.Zero;
-                state.Jump = JumpPhase.Tunnel;
-                state.JumpTimer = 0;
-                return true;
+                    if (state.Jump == JumpPhase.Align)
+                    {
+                        state.JumpTimer += Dt;
+                        if (!aligned)
+                            return false;
+                        state.Jump = JumpPhase.Charge;
+                        state.JumpTimer = 0;
+                    }
+
+                    // The drive takes what the battery holds, up to its own limit. With the battery flat that is
+                    // whatever the generator puts back each tick, so a starved hull charges slowly but still charges.
+                    var taken = Math.Min(flight.FtlPower * Dt, state.Energy);
+                    state.Energy -= taken;
+                    state.JumpTimer += taken;
+                    if (state.JumpTimer < flight.FtlEnergy)
+                        return false;
+
+                    state.Position = order.Target;
+                    state.Velocity = System.Numerics.Vector3.Zero;
+                    state.AngularVelocity = System.Numerics.Vector3.Zero;
+                    state.Jump = JumpPhase.Tunnel;
+                    state.JumpTimer = 0;
+                    return true;
+                }
 
             case JumpPhase.Tunnel:
                 state.JumpTimer += Dt;

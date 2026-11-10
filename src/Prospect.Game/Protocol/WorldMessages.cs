@@ -208,7 +208,7 @@ public struct HullRecord
         record.State.Heat = Math.Clamp(reader.ReadSingle(), 0f, 1f);
         var flags = reader.ReadByte();
         record.State.BoostLocked = (flags & 1) != 0;
-        record.State.Jump = (JumpPhase)(flags >> 3 & 3);
+        record.State.Jump = (JumpPhase)Math.Min(flags >> 3 & 7, (int)JumpPhase.Arrive);
         record.State.JumpTimer = reader.ReadSingle();
         ok &= float.IsFinite(record.State.JumpTimer);
         record.State.Energy = reader.ReadSingle();

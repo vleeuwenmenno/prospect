@@ -40,6 +40,9 @@ public sealed class BlockType
     /// <summary>The faster-than-light drive this block provides, if any.</summary>
     public FtlKind Ftl { get; init; }
 
+    /// <summary>Megawatts the drive can take while charging for a jump.</summary>
+    public float FtlPower { get; init; }
+
     /// <summary>Kilonewton-metres of turning effort.</summary>
     public float Torque { get; init; }
 
@@ -71,7 +74,11 @@ public sealed class FlightRules
     public required float CollisionSafeSpeed { get; init; }
     public required float CollisionDamagePerTonneSpeedSquared { get; init; }
     public required float CollisionBounce { get; init; }
-    public required float FtlSpoolSeconds { get; init; }
+    /// <summary>Megajoules a jump takes per tonne of hull; the drive charges this much before it fires.</summary>
+    public required float FtlEnergyPerTonne { get; init; }
+
+    /// <summary>How closely the hull must point at its destination before the drive will charge, in degrees.</summary>
+    public required float FtlAlignDegrees { get; init; }
     public required float FtlTunnelSeconds { get; init; }
     public required float FtlArriveSeconds { get; init; }
 }
@@ -109,7 +116,8 @@ public sealed class BlockCatalog
             CollisionSafeSpeed = r.GetProperty("collisionSafeSpeed"u8).GetSingle(),
             CollisionDamagePerTonneSpeedSquared = r.GetProperty("collisionDamagePerTonneSpeedSquared"u8).GetSingle(),
             CollisionBounce = r.GetProperty("collisionBounce"u8).GetSingle(),
-            FtlSpoolSeconds = r.GetProperty("ftlSpoolSeconds"u8).GetSingle(),
+            FtlEnergyPerTonne = r.GetProperty("ftlEnergyPerTonne"u8).GetSingle(),
+            FtlAlignDegrees = r.GetProperty("ftlAlignDegrees"u8).GetSingle(),
             FtlTunnelSeconds = r.GetProperty("ftlTunnelSeconds"u8).GetSingle(),
             FtlArriveSeconds = r.GetProperty("ftlArriveSeconds"u8).GetSingle(),
         };
@@ -139,6 +147,7 @@ public sealed class BlockCatalog
                         var other => throw new InvalidDataException($"{path}: unknown ftl drive \"{other}\""),
                     }
                     : FtlKind.None,
+                FtlPower = Number(block, "ftlPower"u8),
                 Torque = Number(block, "torque"u8),
                 PowerOutput = Number(block, "powerOutput"u8),
                 PowerDraw = Number(block, "powerDraw"u8),
@@ -188,6 +197,10 @@ public struct HullStats
 
     /// <summary>The hull's faster-than-light drive, or none.</summary>
     public FtlKind Ftl;
+
+    /// <summary>Megajoules one jump takes, and megawatts the drive draws while charging.</summary>
+    public float FtlEnergy;
+    public float FtlPower;
 }
 
 /// <summary>What kind of thing a hull is. It decides how the hull is shown and, later, what it can do.</summary>
@@ -331,6 +344,7 @@ public sealed class HullDesign
         var crew = 0;
         var blocks = 0;
         var ftl = FtlKind.None;
+        var ftlPower = 0f;
 
         for (var i = 0; i < Cells.Length; i++)
         {
@@ -356,6 +370,8 @@ public sealed class HullDesign
             crew += type.Crew;
             if (ftl == FtlKind.None)
                 ftl = type.Ftl;
+            if (type.Ftl == ftl)
+                ftlPower += type.FtlPower;
 
             if (type.ForwardOnly)
                 engineThrust += type.Thrust;
@@ -410,7 +426,9 @@ public sealed class HullDesign
             CollisionDamagePerTonneSpeedSquared = rules.CollisionDamagePerTonneSpeedSquared,
             CollisionBounce = rules.CollisionBounce,
             Ftl = ftl,
-            FtlSpoolSeconds = rules.FtlSpoolSeconds,
+            FtlPower = ftlPower,
+            FtlEnergy = rules.FtlEnergyPerTonne * mass,
+            FtlAlignCosine = MathF.Cos(rules.FtlAlignDegrees * MathF.PI / 180f),
             FtlTunnelSeconds = rules.FtlTunnelSeconds,
             FtlArriveSeconds = rules.FtlArriveSeconds,
         };
@@ -436,6 +454,8 @@ public sealed class HullDesign
             PowerGenerated = generated,
             EnergyStorage = storage,
             Ftl = ftl,
+            FtlEnergy = rules.FtlEnergyPerTonne * mass,
+            FtlPower = ftlPower,
         };
     }
 }
