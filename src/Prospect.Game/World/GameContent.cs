@@ -6,8 +6,9 @@ namespace Prospect.Game.World;
 /// <summary>The data both the server and the client need to run the simulation, loaded from <c>content/</c>.</summary>
 public sealed class GameContent
 {
-    private GameContent(Galaxy galaxy, BlockCatalog blocks, HullDesign[] designs, int pod, int[] startingFleet)
+    private GameContent(Galaxy galaxy, BlockCatalog blocks, HullDesign[] designs, int pod, int drone, int[] startingFleet)
     {
+        DroneDesign = drone;
         Galaxy = galaxy;
         Blocks = blocks;
         Designs = designs;
@@ -20,6 +21,9 @@ public sealed class GameContent
 
     /// <summary>Index of the command pod's design.</summary>
     public int PodDesign { get; }
+
+    /// <summary>Index of the design of the small craft a player flies after leaving a hull.</summary>
+    public int DroneDesign { get; }
 
     /// <summary>Designs of the hulls a new player is given besides the pod.</summary>
     public int[] StartingFleet { get; }
@@ -59,6 +63,7 @@ public sealed class GameContent
             blocks,
             [.. designs],
             Index(root.GetProperty("pod"u8).GetString()!),
+            Index(root.GetProperty("drone"u8).GetString()!),
             [.. fleet]
         );
     }

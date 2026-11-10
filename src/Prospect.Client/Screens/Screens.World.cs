@@ -145,6 +145,8 @@ internal sealed partial class ScreenHost
             draw.AddLine(prograde - new float2(0, r * 2), prograde - new float2(0, r), color, Kit.Px(1.5f));
         }
 
+        DrawTargeting(draw, snapshot, world);
+
         // The view line: where the hull will point once it is under thrust.
         var middle = display * 0.5f;
         var reticle = Kit.Color(world.FreeLook ? Theme.Info : Theme.Accent, 0.8f);
@@ -211,6 +213,8 @@ internal sealed partial class ScreenHost
         hint.X += Kit.KeyHint(draw, hint, pad ? "X"u8 : "Z"u8, "Dampeners"u8);
         hint.X += Kit.KeyHint(draw, hint, pad ? "L3"u8 : "SHIFT"u8, "Boost"u8);
         hint.X += Kit.KeyHint(draw, hint, "RMB"u8, "Free look"u8);
+        hint.X += Kit.KeyHint(draw, hint, "MMB"u8, "Target"u8);
+        hint.X += Kit.KeyHint(draw, hint, pad ? "D-DOWN"u8 : "T"u8, world.TargetHull != 0 ? "Take control"u8 : "Drone"u8);
         hint.X += Kit.KeyHint(draw, hint, pad ? "D-UP"u8 : "I"u8, "Ship data"u8);
         Kit.KeyHint(draw, hint, pad ? "START"u8 : "ESC"u8, "Menu"u8);
         Kit.Fade = previousFade;
@@ -418,6 +422,67 @@ internal sealed partial class ScreenHost
 
         Kit.Fade = 1f;
         ImGui.End();
+    }
+
+    /// <summary>Pilot view: the hull under the reticle, the targeted hull and its readout.</summary>
+    private void DrawTargeting(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world)
+    {
+        var designs = _app.Content.Designs;
+        var display = _ui.DisplaySize;
+
+        if (world.HoveredHull != 0 && world.HoveredHull != world.TargetHull && world.TryGetHull(world.HoveredHull, out var hovered))
+        {
+            var design = designs[Math.Min(hovered.Design, designs.Length - 1)];
+            if (world.ProjectDisc(hovered.Position, design.Flight.Radius, out var screen, out var pixels, out _))
+            {
+                var reach = Math.Max(pixels * 1.3f, Kit.Px(16));
+                Brackets(draw, screen - new float2(reach, reach), screen + new float2(reach, reach), Kit.Px(8), Kit.Color(Theme.Text, 0.85f));
+                var mine = hovered.Owner == snapshot.PlayerId;
+                Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, screen + new float2(reach + Kit.Px(8), -Kit.Px(7)), mine ? Theme.Accent : Theme.Info, mine ? Kit.F($"{design.Name} {(hovered.Id & 0xFFFF) + 1}") : Kit.F($"PLAYER {hovered.Owner}  {design.Name}"));
+            }
+        }
+
+        if (world.TargetHull != 0 && world.TryGetHull(world.TargetHull, out var target))
+        {
+            var design = designs[Math.Min(target.Design, designs.Length - 1)];
+            var mine = target.Owner == snapshot.PlayerId;
+            var color = mine ? Theme.Accent : Theme.Info;
+            if (world.ProjectDisc(target.Position, design.Flight.Radius, out var screen, out var pixels, out _))
+            {
+                var reach = Math.Max(pixels * 1.3f, Kit.Px(18));
+                Brackets(draw, screen - new float2(reach, reach), screen + new float2(reach, reach), Kit.Px(10), Kit.Color(color));
+                draw.AddCircle(screen, reach * 1.25f, Kit.Color(color, 0.5f), 40, Kit.Px(1.2f));
+            }
+
+            // The target's readout, top centre.
+            var size = new float2(Kit.Px(340), Kit.Px(104));
+            var min = new float2((display.X - size.X) * 0.5f, Kit.Px(Theme.Space5));
+            Kit.PanelFrame(draw, min, min + size);
+            var text = min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3));
+            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, text, color, mine ? "TARGET  -  YOURS"u8 : "TARGET"u8);
+            Kit.Text(draw, _ui.SansMedium, Theme.FontBody, text + new float2(0, Kit.Px(16)), Theme.Text, mine ? Kit.F($"{design.Name} {(target.Id & 0xFFFF) + 1}") : Kit.F($"Player {target.Owner}  {design.Name}"));
+            var range = target.Position.RelativeTo(world.OwnPosition).Length();
+            var rangeText = range >= 1000f ? Kit.F($"{range / 1000f:0.00} KM") : Kit.F($"{range:0} M");
+            var rangeSize = Kit.Measure(_ui.Mono, Theme.FontCaption, rangeText);
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(min.X + size.X - rangeSize.X - Kit.Px(Theme.Space4), text.Y + Kit.Px(20)), Theme.TextDim, rangeText);
+
+            var flight = design.Flight;
+            var gauge = new float2(size.X - Kit.Px(Theme.Space4 * 2), Kit.Px(5));
+            var gaugeMin = text + new float2(0, Kit.Px(48));
+            draw.AddRectFilled(gaugeMin, gaugeMin + gauge, Kit.Color(Theme.Void));
+            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * Math.Clamp(target.Shield / flight.ShieldCapacity, 0f, 1f), gauge.Y), Kit.Color(Theme.Info));
+            gaugeMin.Y += Kit.Px(10);
+            draw.AddRectFilled(gaugeMin, gaugeMin + gauge, Kit.Color(Theme.Void));
+            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * Math.Clamp(target.Hull / flight.HullPoints, 0f, 1f), gauge.Y), Kit.Color(Theme.Good));
+            Kit.Text(draw, _ui.Sans, Theme.FontCaption, gaugeMin + new float2(0, Kit.Px(10)), Theme.TextMute, mine ? "T takes control"u8 : "Not yours: cannot take control"u8);
+        }
+
+        if (world.ControlDenied)
+        {
+            var notice = "That hull is not yours to fly"u8;
+            var noticeSize = Kit.Measure(_ui.SansMedium, Theme.FontSmall, notice);
+            Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, new float2((display.X - noticeSize.X) * 0.5f, display.Y * 0.5f + Kit.Px(60)), Theme.Bad, notice);
+        }
     }
 
     /// <summary>A labelled gauge: caption on the left, reading on the right, bar underneath.</summary>

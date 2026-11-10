@@ -18,6 +18,7 @@ internal enum InputAction
     Halt,
     Follow,
     ShipInfo,
+    SwitchHull,
     Count,
 }
 

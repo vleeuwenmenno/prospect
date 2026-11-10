@@ -1,0 +1,15 @@
+{
+  "name": "Drone",
+  "blockSize": 0.5,
+  "color": [0.2, 0.42, 0.46],
+  "blocks": [
+    { "at": [0, 0, 0], "type": "microcore" },
+    { "at": [0, 0, -1], "type": "microshield" },
+    { "at": [0, 0, 1], "type": "microengine" },
+    { "at": [1, 0, 0], "type": "microthruster" },
+    { "at": [-1, 0, 0], "type": "microthruster" },
+    { "at": [0, 1, 0], "type": "microgyro" },
+    { "at": [0, -1, 0], "type": "microgenerator" },
+    { "at": [0, 1, 1], "type": "microbattery" }
+  ]
+}

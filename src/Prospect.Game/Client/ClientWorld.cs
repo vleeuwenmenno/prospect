@@ -80,8 +80,9 @@ internal sealed class ClientWorld
         public int Count;
     }
 
-    private readonly FlightParams _flight;
-    private readonly byte _podDesign;
+    private readonly GameContent _content;
+    private FlightParams _flight;
+    private byte _ownDesign;
     private uint _playerId;
     private readonly Pending[] _pending = new Pending[PendingCapacity];
     private readonly Remote[] _remotes = new Remote[MaxViews];
@@ -107,13 +108,17 @@ internal sealed class ClientWorld
 
     public ClientWorld(GameContent content)
     {
+        _content = content;
         _flight = content.Pod.Flight;
-        _podDesign = (byte)content.PodDesign;
+        _ownDesign = (byte)content.PodDesign;
     }
 
     public void SetPlayer(uint playerId) => _playerId = playerId;
 
     public bool Dampeners => _dampeners;
+
+    /// <summary>The flight figures of the hull the player is flying.</summary>
+    public FlightParams Flight => _flight;
 
     public void SetOwnHull(uint id) => _ownHullId = id;
 
@@ -129,6 +134,14 @@ internal sealed class ClientWorld
 
         Span<FleetOrder> fleetOrders = stackalloc FleetOrder[FleetOrdersMessage.MaxOrders];
         var fleetOrderCount = bridge.ConsumeFleetOrders(fleetOrders);
+        if (bridge.ConsumeControlRequest(out var controlHull))
+        {
+            var writer = new NetWriter(_fleetBuffer);
+            writer.WriteByte((byte)MessageId.Control);
+            writer.WriteUInt32(controlHull);
+            transport.Send(0, NetChannel.Reliable, writer.Written);
+        }
+
         if (fleetOrderCount > 0)
         {
             var writer = new NetWriter(_fleetBuffer);
@@ -202,7 +215,8 @@ internal sealed class ClientWorld
 
             if (record.Id == header.OwnHull)
             {
-                _ownHullId = record.Id;
+                if (record.Id != _ownHullId || !_hasOwnState)
+                    SwitchHull(record);
                 Reconcile(record.State, header.AckedInput);
             }
             else
@@ -246,7 +260,7 @@ internal sealed class ClientWorld
             {
                 Id = _ownHullId,
                 Owner = _playerId,
-                Design = _podDesign,
+                Design = _ownDesign,
                 IsOwn = true,
                 Position = _predicted.Position + _correction,
                 Orientation = _predicted.Orientation,
@@ -297,6 +311,28 @@ internal sealed class ClientWorld
         return count;
     }
 
+    /// <summary>
+    /// The server has put the player in a different hull: start predicting that one. Inputs already sent were
+    /// for the old hull, so they are not replayed onto the new one.
+    /// </summary>
+    private void SwitchHull(in HullRecord record)
+    {
+        _ownHullId = record.Id;
+        _ownDesign = record.Design;
+        _flight = _content.Designs[Math.Min(record.Design, _content.Designs.Length - 1)].Flight;
+        _hasOwnState = false;
+        _correction = Vector3.Zero;
+        _ackedSequence = _nextSequence - 1;
+        SetOrder(default);
+
+        // The hull was being drawn as someone else's until now.
+        for (var i = 0; i < _remotes.Length; i++)
+        {
+            if (_remotes[i].Used && _remotes[i].Id == record.Id)
+                _remotes[i].Used = false;
+        }
+    }
+
     private void SetOrder(in HullOrder order)
     {
         _order = order;
@@ -323,7 +359,7 @@ internal sealed class ClientWorld
         {
             _hasOwnState = true;
             _predicted = authoritative;
-            _ackedSequence = acked;
+            _ackedSequence = Math.Max(acked, _ackedSequence);
             return;
         }
 

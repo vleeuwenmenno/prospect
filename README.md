@@ -35,7 +35,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 - **Renderer.** Floating-point scene target and tone mapping, camera-relative rendering from double-precision
   positions, a star field and sky, instanced hull and asteroid meshes with two levels of detail.
 
-Not there yet: mining, taking direct control of another hull, gates and jumps,
+Not there yet: mining, taking control of ships owned by other players (permissions), gates and jumps,
 saving. Asteroids are drawn from a shared set of shapes and collide as spheres until mining gives each one its own body.
 
 ## Controls
@@ -53,11 +53,18 @@ saving. Asteroids are drawn from a shared set of shapes and collide as spheres u
 | Galaxy map | `M` | `Y` |
 | Halt (cancel order) | `H` or `Backspace` | `B` |
 | Ship data sheet | `I` | D-pad up |
+| Target the ship under the reticle | Middle mouse button | |
+| Take control of the target, or leave in a drone | `T` | D-pad down |
 | Menu or back | `Esc` | `Start` |
 
 The pointer turns the view, not the hull. The hull swings its nose onto the view line whenever it is under
 thrust, so looking around while coasting costs nothing; hold the right mouse button to look around under thrust
 without turning.
+
+A ship near the reticle is bracketed; the middle mouse button targets it and shows its shield and hull. With one
+of your own ships targeted, `T` puts you at its controls and the ship you left is flown by the server. With nothing
+targeted, `T` leaves your ship in a drone: a tiny craft with little hull and shield that is removed when you take
+a ship again. In the command view `T` takes control of the first selected ship.
 
 In the pilot view, hold the right mouse button and turn the wheel to move the camera closer or further.
 

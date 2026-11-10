@@ -38,6 +38,8 @@ public sealed class PlayerInputBridge
     private HullOrder _order;
     private readonly FleetOrder[] _fleetOrders = new FleetOrder[FleetOrdersMessage.MaxOrders];
     private int _fleetOrderCount;
+    private bool _hasControlRequest;
+    private uint _controlRequest;
 
     /// <summary>Called by the input thread once per frame.</summary>
     public void Submit(in PlayerControls frame)
@@ -77,6 +79,30 @@ public sealed class PlayerInputBridge
 
             if (_fleetOrderCount < _fleetOrders.Length)
                 _fleetOrders[_fleetOrderCount++] = new FleetOrder { Hull = hull, Order = order };
+        }
+    }
+
+    /// <summary>
+    /// Asks to take direct control of a hull the player owns. Zero asks to leave the current hull in a drone.
+    /// </summary>
+    public void RequestControl(uint hull)
+    {
+        lock (_lock)
+        {
+            _controlRequest = hull;
+            _hasControlRequest = true;
+        }
+    }
+
+    /// <summary>Called by the simulation once per tick: takes a pending control request.</summary>
+    public bool ConsumeControlRequest(out uint hull)
+    {
+        lock (_lock)
+        {
+            hull = _controlRequest;
+            var pending = _hasControlRequest;
+            _hasControlRequest = false;
+            return pending;
         }
     }
 

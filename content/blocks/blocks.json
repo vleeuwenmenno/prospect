@@ -17,11 +17,18 @@
     "core": { "name": "Computer core", "mass": 3.0, "hull": 300, "powerDraw": 0.2 },
     "generator": { "name": "Generator", "mass": 4.0, "hull": 200, "powerOutput": 6.0 },
     "battery": { "name": "Battery", "mass": 3.0, "hull": 150, "energyStorage": 60 },
-    "engine": { "name": "Engine", "mass": 3.5, "hull": 200, "thrust": 340, "powerDraw": 2.5 },
+    "engine": { "name": "Engine", "mass": 3.5, "hull": 200, "thrust": 340, "powerDraw": 2.5, "forwardOnly": true },
     "thruster": { "name": "Thruster", "mass": 1.5, "hull": 150, "thrust": 220, "powerDraw": 0.8 },
     "gyro": { "name": "Gyro", "mass": 2.0, "hull": 150, "torque": 520, "powerDraw": 0.5 },
     "shield": { "name": "Shield emitter", "mass": 2.5, "hull": 120, "shield": 1500, "shieldRecharge": 75, "powerDraw": 1.5 },
     "cargo": { "name": "Cargo hold", "mass": 1.0, "hull": 150, "cargo": 0.8 },
-    "quarters": { "name": "Crew quarters", "mass": 1.5, "hull": 150, "crew": 2 }
+    "quarters": { "name": "Crew quarters", "mass": 1.5, "hull": 150, "crew": 2 },
+    "microcore": { "name": "Drone core", "mass": 0.4, "hull": 60, "powerDraw": 0.05 },
+    "microgenerator": { "name": "Drone generator", "mass": 0.5, "hull": 40, "powerOutput": 1.2 },
+    "microbattery": { "name": "Drone battery", "mass": 0.3, "hull": 30, "energyStorage": 8 },
+    "microengine": { "name": "Drone engine", "mass": 0.3, "hull": 30, "thrust": 30, "powerDraw": 0.3, "forwardOnly": true },
+    "microthruster": { "name": "Drone thruster", "mass": 0.2, "hull": 30, "thrust": 14, "powerDraw": 0.15 },
+    "microgyro": { "name": "Drone gyro", "mass": 0.3, "hull": 30, "torque": 1.2, "powerDraw": 0.05 },
+    "microshield": { "name": "Drone shield", "mass": 0.3, "hull": 30, "shield": 120, "shieldRecharge": 10, "powerDraw": 0.2 }
   }
 }

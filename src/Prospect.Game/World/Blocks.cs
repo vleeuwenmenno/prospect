@@ -16,6 +16,9 @@ public sealed class BlockType
     /// <summary>Kilonewtons. Engines push forward only; thrusters push in every direction.</summary>
     public float Thrust { get; init; }
 
+    /// <summary>True for main engines, whose thrust only acts forward.</summary>
+    public bool ForwardOnly { get; init; }
+
     /// <summary>Kilonewton-metres of turning effort.</summary>
     public float Torque { get; init; }
 
@@ -98,6 +101,7 @@ public sealed class BlockCatalog
                 Mass = block.GetProperty("mass"u8).GetSingle(),
                 Hull = block.GetProperty("hull"u8).GetSingle(),
                 Thrust = Number(block, "thrust"u8),
+                ForwardOnly = block.TryGetProperty("forwardOnly"u8, out var forwardOnly) && forwardOnly.GetBoolean(),
                 Torque = Number(block, "torque"u8),
                 PowerOutput = Number(block, "powerOutput"u8),
                 PowerDraw = Number(block, "powerDraw"u8),
@@ -232,8 +236,7 @@ public sealed class HullDesign
             cargo += type.Cargo;
             crew += type.Crew;
 
-            // An engine is a thrust block that only pushes forward; the catalogue tells them apart by id.
-            if (type.Id == "engine")
+            if (type.ForwardOnly)
                 engineThrust += type.Thrust;
             else
                 thrusterThrust += type.Thrust;

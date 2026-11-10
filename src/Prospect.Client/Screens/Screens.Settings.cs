@@ -19,7 +19,7 @@ internal sealed partial class ScreenHost
     private static readonly string[] ActionLabels =
     [
         "Menu / back", "Performance overlay", "Fullscreen", "Screenshot", "Boost", "Dampeners on / off",
-        "Command view", "Galaxy map", "Halt (cancel order)", "Focus on selection (command view)", "Ship data sheet",
+        "Command view", "Galaxy map", "Halt (cancel order)", "Focus on selection (command view)", "Ship data sheet", "Take control of target / leave in drone",
     ];
 
     private readonly ImInputString _settingsName = new(ProtocolInfo.MaxNameBytes);
@@ -133,6 +133,7 @@ internal sealed partial class ScreenHost
         Kit.Space(Theme.Space2);
         BindingRow("Look around", "Pointer", rowWidth);
         BindingRow("Free look (hold)", "Mouse Right", rowWidth);
+        BindingRow("Target the ship under the reticle", "Mouse Middle", rowWidth);
         for (var i = 0; i < AxisLabels.Length; i++)
             BindingRow(AxisLabels[i], _axisText[i], rowWidth);
         for (var i = 0; i < ActionLabels.Length; i++)

@@ -445,6 +445,53 @@ public sealed class FlightSessionTests
     }
 
     [Fact]
+    public void ThePlayerCanLeaveInADroneFlyItAndTakeAHullBack()
+    {
+        using var session = GameSession.StartLocal(new ServerConfig { MaxPlayers = 1 }, Content, "Pilot");
+        var pod = WaitForOwnHull(session);
+        Assert.Equal(Content.PodDesign, pod.Design);
+
+        // Leaving the pod puts the player in a drone beside it; the pod stays, flown by the server.
+        session.Client.Input.RequestControl(0);
+        var drone = WaitFor(session, hull => hull.Design == Content.DroneDesign, 5);
+        Assert.NotEqual(pod.Id, drone.Id);
+        Assert.Equal(Content.Designs[Content.DroneDesign].Flight.HullPoints, drone.Hull);
+        Assert.True(drone.Position.RelativeTo(pod.Position).Length() < 20f);
+        Assert.True(Content.Designs[Content.DroneDesign].Stats.HullPoints < Content.Pod.Stats.HullPoints / 4);
+
+        // The drone flies under the player's hand, predicted with its own flight figures.
+        session.Client.Input.Submit(new PlayerControls { Forward = 1 });
+        Thread.Sleep(1000);
+        session.Client.Input.Submit(default);
+        Thread.Sleep(2500);
+        var flown = OwnHull(session);
+        Assert.Equal(drone.Id, flown.Id);
+        Assert.True(flown.Position.RelativeTo(drone.Position).Length() > 3f);
+        Thread.Sleep(300);
+        Assert.True(OwnHull(session).Position.RelativeTo(flown.Position).Length() < 0.05f);
+
+        // Asking again while already in a drone does nothing.
+        session.Client.Input.RequestControl(0);
+        Thread.Sleep(300);
+        Assert.Equal(drone.Id, OwnHull(session).Id);
+
+        // Taking the pod back removes the drone.
+        session.Client.Input.RequestControl(pod.Id);
+        WaitFor(session, hull => hull.Id == pod.Id, 5);
+        var deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 6;
+        bool DroneGone()
+        {
+            var snapshot = session.Client.AcquireSnapshot();
+            return !snapshot.Hulls.Take(snapshot.HullCount).Any(h => h.Design == Content.DroneDesign);
+        }
+
+        while (!DroneGone() && Stopwatch.GetTimestamp() < deadline)
+            Thread.Sleep(50);
+        Assert.True(DroneGone());
+        Assert.Null(session.Fault);
+    }
+
+    [Fact]
     public void AnAsteroidHitOnTheServerIsReportedToClientsIncludingLateJoiners()
     {
         var port = (ushort)(49000 + Environment.ProcessId % 2000);
@@ -501,10 +548,13 @@ public sealed class FlightSessionTests
         Assert.Equal(Content.StartingFleet.Length, Fleet(owner).Length);
         Assert.NotEqual(Content.PodDesign, vessel.Design);
 
-        // The rival's order for a hull it does not own changes nothing.
+        // The rival's order for a hull it does not own changes nothing, and it cannot take the hull over.
         var target = vessel.Position + new Vector3(0, 60, -300);
+        var rivalHull = OwnHull(rival).Id;
         rival.Client.Input.IssueFleetOrder(vessel.Id, new HullOrder { Kind = OrderKind.MoveTo, Target = target });
+        rival.Client.Input.RequestControl(vessel.Id);
         Thread.Sleep(700);
+        Assert.Equal(rivalHull, OwnHull(rival).Id);
         var unmoved = Fleet(owner).First(h => h.Id == vessel.Id);
         Assert.Equal(OrderKind.None, unmoved.Order.Kind);
         Assert.True(unmoved.Position.RelativeTo(vessel.Position).Length() < 0.5f);

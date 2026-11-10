@@ -97,7 +97,10 @@ internal sealed class WorldView
     private int _selectedRockCount;
     private SessionSnapshot? _snapshot;
     private uint _followId;
-    private float _chaseDistance = 11f;
+    private float _chaseZoom = 1f;
+    private uint _ownId;
+    private float _deniedAt = -10f;
+    private float _time;
     private float2 _leftDragStart;
     private bool _leftDragging;
     private bool _leftMoved;
@@ -156,6 +159,15 @@ internal sealed class WorldView
 
     /// <summary>The hulls selected in the command view, by id.</summary>
     public ReadOnlySpan<uint> Selection => _selected.AsSpan(0, _selectedCount);
+
+    /// <summary>In the pilot view: the hull under the reticle, or zero.</summary>
+    public uint HoveredHull { get; private set; }
+
+    /// <summary>In the pilot view: the hull the player has targeted, or zero.</summary>
+    public uint TargetHull { get; private set; }
+
+    /// <summary>True for a moment after the player tried to take control of a hull that is not theirs.</summary>
+    public bool ControlDenied => _time - _deniedAt < 2.5f;
 
     /// <summary>The asteroids selected in the command view.</summary>
     public ReadOnlySpan<RockRef> SelectedRocks => _selectedRocks.AsSpan(0, _selectedRockCount);
@@ -224,6 +236,7 @@ internal sealed class WorldView
         }
 
         ApplyRockDeltas(snapshot);
+        _time += dt;
 
         // Where the hull is right now, between the last two simulation ticks.
         ref var own = ref snapshot.Hulls[snapshot.OwnHull];
@@ -231,6 +244,16 @@ internal sealed class WorldView
         Own = own;
         OwnPosition = Double3.Lerp(own.PreviousPosition, own.Position, alpha);
         OwnOrientation = Quaternion.Slerp(own.PreviousOrientation, own.Orientation, alpha);
+
+        if (own.Id != _ownId)
+        {
+            // The player is in a different hull: put the camera behind it and forget the old target.
+            _ownId = own.Id;
+            _chaseInitialised = false;
+            TargetHull = 0;
+            if (_followId != 0)
+                _followId = own.Id;
+        }
 
         var coord = galaxy.SectorOf(OwnPosition);
         if (coord != _currentCoord)
@@ -277,10 +300,12 @@ internal sealed class WorldView
             // returns the view to the nose. Otherwise the hull swings onto the view whenever it is under thrust.
             var freeLook = _devices.MouseDown(GlfwMouseButton.Right);
             if (freeLook && _devices.Scroll != 0)
-                _chaseDistance = Math.Clamp(_chaseDistance * MathF.Pow(0.88f, _devices.Scroll), 6f, 90f);
+                _chaseZoom = Math.Clamp(_chaseZoom * MathF.Pow(0.88f, _devices.Scroll), 0.5f, 8f);
             if (_freeLook && !freeLook)
                 _lookDirection = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
             _freeLook = freeLook;
+
+            UpdateTargeting(snapshot, bridge);
 
             var thrusting = controls.Strafe != 0 || controls.Vertical != 0 || controls.Forward != 0;
             controls.Aim = _lookDirection;
@@ -425,6 +450,55 @@ internal sealed class WorldView
     {
         var elapsed = Stopwatch.GetTimestamp() - snapshot.PublishedAt;
         return Math.Clamp((float)(elapsed * TickLoop.SimulationHz / (double)Stopwatch.Frequency), 0f, 1f);
+    }
+
+    /// <summary>
+    /// Pilot view: finds the hull under the reticle, targets it on the middle button, and on the switch key either
+    /// takes control of the target or, with no target, leaves the hull in a drone.
+    /// </summary>
+    private void UpdateTargeting(SessionSnapshot snapshot, PlayerInputBridge bridge)
+    {
+        var center = _viewport * 0.5f;
+        var best = 0u;
+        var bestDistance = float.MaxValue;
+        for (var i = 0; i < snapshot.HullCount; i++)
+        {
+            ref var hull = ref snapshot.Hulls[i];
+            if (hull.IsOwn)
+                continue;
+            var radius = _designs[Math.Min(hull.Design, _designs.Length - 1)].Flight.Radius;
+            if (!ProjectDisc(hull.Position, radius, out var screen, out var pixels, out _))
+                continue;
+            var offset = screen - center;
+            var distance = MathF.Sqrt(offset.X * offset.X + offset.Y * offset.Y);
+            if (distance > Math.Max(pixels * 1.5f, 46f) || distance >= bestDistance)
+                continue;
+            best = hull.Id;
+            bestDistance = distance;
+        }
+
+        HoveredHull = best;
+        if (TargetHull != 0 && !TryGetHull(TargetHull, out _))
+            TargetHull = 0;
+        if (_devices.MousePressed(GlfwMouseButton.Middle))
+            TargetHull = best;
+
+        if (!_actions.Pressed(_devices, InputAction.SwitchHull, true))
+            return;
+
+        if (TargetHull == 0)
+        {
+            bridge.RequestControl(0);
+        }
+        else if (TryGetHull(TargetHull, out var target) && target.Owner == snapshot.PlayerId)
+        {
+            bridge.RequestControl(TargetHull);
+            TargetHull = 0;
+        }
+        else
+        {
+            _deniedAt = _time;
+        }
     }
 
     /// <summary>Where a hull is drawn this frame.</summary>
@@ -726,6 +800,14 @@ internal sealed class WorldView
         if (control && _devices.KeyPressed(GlfwKey.A))
             SelectAllOwned();
 
+        // Taking control of the selected hull drops straight into its pilot view.
+        if (_actions.Pressed(_devices, InputAction.SwitchHull, true) && _selectedCount > 0)
+        {
+            if (_selected[0] != Own.Id)
+                bridge.RequestControl(_selected[0]);
+            SetMode(ViewMode.Pilot);
+        }
+
         if (!pointerOverUi && _devices.Scroll != 0)
             _commandDistance = Math.Clamp(_commandDistance * MathF.Pow(0.86f, _devices.Scroll), MinCommandDistance, MaxCommandDistance);
 
@@ -843,7 +925,8 @@ internal sealed class WorldView
 
         var speed = Own.Velocity.Length();
         var pullBack = 1f + Math.Min(speed / 720f, 1f) * 0.25f;
-        var chasePosition = OwnPosition + chaseUp * (_chaseDistance * 0.24f) - _cameraDirection * (_chaseDistance * pullBack);
+        var chaseDistance = Math.Max(3f, _designs[Math.Min(Own.Design, _designs.Length - 1)].Flight.Radius * 3.3f) * _chaseZoom;
+        var chasePosition = OwnPosition + chaseUp * (chaseDistance * 0.24f) - _cameraDirection * (chaseDistance * pullBack);
 
         if (_followId != 0)
         {

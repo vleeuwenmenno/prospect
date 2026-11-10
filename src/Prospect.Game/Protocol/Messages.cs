@@ -31,6 +31,12 @@ public enum MessageId : byte
 
     /// <summary>Server to client, reliable: asteroids whose motion changed, or all displaced ones on joining.</summary>
     RockDeltas = 9,
+
+    /// <summary>
+    /// Client to server, reliable: take direct control of a hull the player owns, or of a new drone when the hull
+    /// id is zero.
+    /// </summary>
+    Control = 10,
 }
 
 public enum RejectReason : byte
@@ -43,7 +49,7 @@ public enum RejectReason : byte
 public static class ProtocolInfo
 {
     /// <summary>Bumped whenever the wire format changes. Client and server must match exactly.</summary>
-    public const uint Version = 5;
+    public const uint Version = 6;
 
     public const ushort DefaultPort = 27420;
     public const int MaxNameBytes = 48;

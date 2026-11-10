@@ -279,6 +279,9 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
             case MessageId.Input:
                 ReceiveInput(connection, ref reader);
                 break;
+            case MessageId.Control when channel == NetChannel.Reliable:
+                TakeControl(connection, reader.ReadUInt32());
+                break;
             case MessageId.FleetOrders when channel == NetChannel.Reliable:
                 ReceiveFleetOrders(connection, ref reader);
                 break;
@@ -311,6 +314,59 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
             connection.InputCount++;
             connection.LastQueuedSequence = record.Sequence;
         }
+    }
+
+    /// <summary>
+    /// Moves a player into another hull they own, or, for hull id zero, out of their hull into a new drone beside
+    /// it. The hull left behind is flown by the server from then on; a drone left behind is removed.
+    /// </summary>
+    private void TakeControl(Connection connection, uint hullId)
+    {
+        if (!_hulls.IsAlive(connection.Hull))
+            return;
+
+        var drone = (byte)_content.DroneDesign;
+        var current = connection.Hull;
+        ref var currentInfo = ref _hulls.Info(current.Index);
+        HullHandle next;
+
+        if (hullId == 0)
+        {
+            // Already in a drone: there is nothing smaller to step out into.
+            if (currentInfo.Design == drone)
+                return;
+
+            var from = _hulls.State(current.Index);
+            var flight = _content.Designs[drone].Flight;
+            var state = HullState.Spawn(from.Position, flight);
+            var clearance = _content.Designs[currentInfo.Design].Flight.Radius + flight.Radius + 4f;
+            state.Position = from.Position + System.Numerics.Vector3.Transform(System.Numerics.Vector3.UnitY, from.Orientation) * clearance;
+            state.Orientation = from.Orientation;
+            state.Velocity = from.Velocity;
+            next = _hulls.Create(connection.PlayerId, drone, state);
+
+            // Creating a hull may have moved the storage; look the old one up again.
+            currentInfo = ref _hulls.Info(current.Index);
+        }
+        else
+        {
+            next = new HullHandle((int)(hullId & 0xFFFF), (int)(hullId >> 16));
+            if (next == current || !_hulls.IsAlive(next) || _hulls.Info(next.Index).Owner != connection.PlayerId)
+                return;
+        }
+
+        if (currentInfo.Design == drone)
+            _hulls.Destroy(current);
+        else
+            currentInfo.Piloted = false;
+
+        // The pilot's hands replace whatever the hull was ordered to do.
+        ref var info = ref _hulls.Info(next.Index);
+        info.Piloted = true;
+        info.Order = default;
+        info.OrderId = connection.OrderId;
+        connection.Hull = next;
+        connection.InputHead = connection.InputCount = 0;
     }
 
     private void ReceiveFleetOrders(Connection connection, ref NetReader reader)

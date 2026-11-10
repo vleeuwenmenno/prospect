@@ -181,7 +181,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         if (snapshot.HullCount == 0)
             snapshot.OwnHull = -1;
         snapshot.Dampeners = _world.Dampeners;
-        snapshot.Flight = _content.Pod.Flight;
+        snapshot.Flight = _world.Flight;
         snapshot.RoundTripMs = _roundTripMs;
         snapshot.PublishedAt = now;
         snapshot.Loop = _loop.Stats;
