@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Ahwoo.BRUTAL.Concurrency" />
+    <PackageReference Include="Ahwoo.BRUTAL.Logging" />
+    <PackageReference Include="Ahwoo.BRUTAL.RakNet" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Prospect.Tests" />
+  </ItemGroup>
+</Project>

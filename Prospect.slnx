@@ -1,0 +1,14 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+  </Configurations>
+  <Folder Name="/src/">
+    <Project Path="src/Prospect.Engine/Prospect.Engine.csproj" />
+    <Project Path="src/Prospect.Game/Prospect.Game.csproj" />
+    <Project Path="src/Prospect.Server/Prospect.Server.csproj" />
+    <Project Path="src/Prospect.Client/Prospect.Client.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Prospect.Tests/Prospect.Tests.csproj" />
+  </Folder>
+</Solution>

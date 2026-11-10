@@ -1,0 +1,8 @@
+{
+  "actions": {
+    "Pause": ["Key:Escape", "Pad:Start"],
+    "TogglePerformance": ["Key:F3"],
+    "ToggleFullscreen": ["Key:F11"],
+    "Screenshot": ["Key:F12"]
+  }
+}

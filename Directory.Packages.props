@@ -1,0 +1,23 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="Ahwoo.BRUTAL.Strings" Version="2026.10.2" />
+    <PackageVersion Include="Ahwoo.BRUTAL.Concurrency" Version="2026.10.2" />
+    <PackageVersion Include="Ahwoo.BRUTAL.Logging" Version="2026.10.3" />
+    <PackageVersion Include="Ahwoo.BRUTAL.Glfw" Version="2026.10.5" />
+    <PackageVersion Include="Ahwoo.BRUTAL.Vulkan" Version="2026.10.3" />
+    <PackageVersion Include="Ahwoo.BRUTAL.Vulkan.Abstractions" Version="2026.10.3" />
+    <PackageVersion Include="Ahwoo.BRUTAL.Vulkan.Vma" Version="2026.10.3" />
+    <PackageVersion Include="Ahwoo.BRUTAL.ImGui" Version="2026.10.3" />
+    <PackageVersion Include="Ahwoo.BRUTAL.ImGui.Backends" Version="2026.10.3" />
+    <PackageVersion Include="Ahwoo.BRUTAL.ImGui.FreeType" Version="2026.10.3" />
+    <PackageVersion Include="Ahwoo.BRUTAL.Stb" Version="2026.10.3" />
+    <PackageVersion Include="Ahwoo.BRUTAL.RakNet" Version="2026.10.3" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageVersion Include="xunit.v3" Version="3.1.0" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+  </ItemGroup>
+</Project>

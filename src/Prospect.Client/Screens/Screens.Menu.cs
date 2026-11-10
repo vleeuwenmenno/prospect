@@ -1,0 +1,206 @@
+using Brutal.ImGuiApi;
+using Brutal.Numerics;
+using Prospect.Client.Input;
+using Prospect.Client.Ui;
+using Prospect.Game.Protocol;
+
+namespace Prospect.Client.Screens;
+
+internal sealed partial class ScreenHost
+{
+    /// <summary>Seconds the framework logo stays fully visible before the menu may appear.</summary>
+    private const float SplashHold = 2.4f;
+    private const float SplashFade = 0.4f;
+    private const float SplashSkippableAfter = 1.2f;
+
+    private readonly ImInputString _joinName = new(ProtocolInfo.MaxNameBytes);
+    private readonly ImInputString _joinHost = new(128);
+    private readonly ImInputString _joinPort = new(8);
+    private string _joinError = "";
+    private float _splashEnd = SplashFade + SplashHold;
+
+    private void InitializeJoin()
+    {
+        _joinName.SetValue(_app.Settings.PlayerName);
+        _joinHost.SetValue(_app.Settings.LastHost);
+        _joinPort.SetValue(_app.Settings.LastPort.ToString());
+    }
+
+    /// <summary>The BRUTAL logo on black, shown before anything else as its licence requires.</summary>
+    private void DrawSplash()
+    {
+        var draw = ImGui.GetBackgroundDrawList();
+        var size = _ui.DisplaySize;
+        draw.AddRectFilled(float2.Zero, size, Kit.Opaque(0x000000));
+
+        var skip =
+            _screenTime > SplashSkippableAfter
+            && (_app.Actions.Pressed(_app.Devices, InputAction.Pause, true)
+                || ImGui.IsKeyPressed(ImGuiKey.Enter, false)
+                || ImGui.IsKeyPressed(ImGuiKey.Space, false)
+                || ImGui.IsKeyPressed(ImGuiKey.GamepadFaceDown, false)
+                || ImGui.IsMouseClicked(ImGuiMouseButton.Left));
+        if (skip && _screenTime < _splashEnd)
+            _splashEnd = _screenTime;
+
+        var alpha = Math.Min(Kit.EaseOut(_screenTime / SplashFade), 1f - Kit.EaseOut((_screenTime - _splashEnd) / SplashFade));
+        var logo = _app.BrutalLogo;
+        var width = Math.Min(Kit.Px(440), size.X * 0.5f);
+        var height = width * logo.Height / logo.Width;
+        var min = new float2((size.X - width) * 0.5f, (size.Y - height) * 0.5f);
+        draw.AddImage(_app.BrutalLogoRef, min, min + new float2(width, height), float2.Zero, float2.One, Kit.Opaque(0xFFFFFF, alpha));
+
+        if (_screenTime >= _splashEnd + SplashFade)
+            _app.SplashFinished();
+    }
+
+    private void DrawMainMenu(float fade)
+    {
+        BeginRoot("##menu"u8);
+        var draw = ImGui.GetWindowDrawList();
+        var size = _ui.DisplaySize;
+        var left = Kit.Px(96);
+        var y = size.Y * 0.2f + Slide(fade);
+
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(left + Kit.Px(4), y), Theme.Accent, "COMMAND POD  /  FLEET OPERATIONS"u8);
+        y += Kit.Px(18);
+        var title = Kit.Text(draw, _ui.SansBold, Theme.FontTitle, new float2(left, y), Theme.Text, "PROSPECT"u8);
+        y += title.Y + Kit.Px(2);
+        draw.AddRectFilled(new float2(left + Kit.Px(4), y), new float2(left + Kit.Px(4) + title.X * 0.5f, y + Kit.Px(2)), Kit.Color(Theme.Accent));
+        y += Kit.Px(Theme.Space4);
+        Kit.Text(draw, _ui.Sans, Theme.FontBody, new float2(left + Kit.Px(4), y), Theme.TextDim, "Cut the rock. Haul the ore. Build the fleet."u8);
+
+        ImGui.SetCursorScreenPos(new float2(left, y + Kit.Px(Theme.Space7 + 8)));
+        ImGui.BeginGroup();
+        if (Kit.MenuItem("New Game"u8, 360))
+            _app.StartLocalGame();
+        if (Kit.MenuItem("Join Server"u8, 360))
+            Show(Screen.Join);
+        if (Kit.MenuItem("Settings"u8, 360))
+            OpenSettings(Screen.MainMenu);
+        if (Kit.MenuItem("Credits"u8, 360))
+            Show(Screen.Credits);
+        if (Kit.MenuItem("Quit"u8, 360))
+            _app.Quit();
+        ImGui.EndGroup();
+
+        var version = Kit.Measure(_ui.Mono, Theme.FontCaption, App.VersionLabel);
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(size.X - version.X - Kit.Px(96), size.Y - Kit.Px(50)), Theme.TextMute, App.VersionLabel);
+        DrawHints(back: false);
+        EndRoot();
+    }
+
+    private void DrawJoin(float fade)
+    {
+        BeginRoot("##join"u8);
+        var min = new float2(Kit.Px(96), _ui.DisplaySize.Y * 0.2f + Slide(fade));
+        BeginPanel("##joinpanel"u8, min, new float2(Kit.Px(520), Kit.Px(428)));
+
+        Kit.Caption("MULTIPLAYER"u8, Theme.Accent);
+        Kit.Space(Theme.Space1);
+        Kit.Heading("Join Server"u8);
+        Kit.Space(Theme.Space5);
+
+        var submit = Kit.TextField("CALLSIGN"u8, "##name"u8, _joinName, 456);
+        Kit.Space(Theme.Space4);
+        submit |= Kit.TextField("ADDRESS"u8, "##host"u8, _joinHost, 456);
+        Kit.Space(Theme.Space4);
+        submit |= Kit.TextField("PORT"u8, "##port"u8, _joinPort, 140, ImGuiInputTextFlags.CharsDecimal);
+        Kit.Space(Theme.Space3);
+
+        // Reserve the error line so the buttons do not move when it appears.
+        Kit.Label(_ui.Sans, Theme.FontSmall, Theme.Bad, _joinError.Length > 0 ? _joinError : " ");
+        Kit.Space(Theme.Space3);
+
+        if (Kit.Button("Connect"u8, ButtonKind.Primary, 180) || submit)
+            TryJoin();
+        ImGui.SameLine(0, Kit.Px(Theme.Space3));
+        if (Kit.Button("Back"u8, ButtonKind.Secondary, 120) || BackPressed())
+            Show(Screen.MainMenu);
+
+        EndPanel();
+        DrawHints(back: true);
+        EndRoot();
+    }
+
+    private void TryJoin()
+    {
+        var host = _joinHost.ToString().Trim();
+        if (host.Length == 0)
+        {
+            _joinError = "Enter the server's address.";
+            return;
+        }
+
+        if (!ushort.TryParse(_joinPort.ToString(), out var port) || port == 0)
+        {
+            _joinError = "The port must be a number from 1 to 65535.";
+            return;
+        }
+
+        _joinError = "";
+        var settings = _app.Settings;
+        settings.PlayerName = PlayerNames.Sanitize(_joinName.ToString());
+        settings.LastHost = host;
+        settings.LastPort = port;
+        settings.Save();
+        _joinName.SetValue(settings.PlayerName);
+
+        if (!_app.JoinGame(host, port, out var error))
+            _joinError = error;
+    }
+
+    private void DrawCredits(float fade)
+    {
+        BeginRoot("##credits"u8);
+        var min = new float2(Kit.Px(96), _ui.DisplaySize.Y * 0.12f + Slide(fade));
+        var size = new float2(Kit.Px(680), Kit.Px(628));
+        BeginPanel("##creditspanel"u8, min, size);
+
+        Kit.Caption("CREDITS"u8, Theme.Accent);
+        Kit.Space(Theme.Space1);
+        Kit.Heading("PROSPECT"u8);
+        Kit.Space(Theme.Space2);
+        Kit.Body("A space sandbox about mining, building and commanding a fleet."u8);
+        Kit.Space(Theme.Space5);
+
+        Kit.Caption("BUILT WITH"u8);
+        Kit.Space(Theme.Space3);
+        var logo = _app.BrutalLogo;
+        var logoWidth = Kit.Px(220);
+        ImGui.Image(_app.BrutalLogoRef, new float2(logoWidth, logoWidth * logo.Height / logo.Width));
+        Kit.Space(Theme.Space3);
+        Kit.Body("BRUTAL game development framework is Copyright (c) 2024 Ahwoo Limited."u8, Theme.Text);
+        Kit.Space(Theme.Space1);
+        Kit.Body("Used under the BRUTAL License v1.0.  www.ahwoo.com/brutal"u8);
+        Kit.Space(Theme.Space5);
+
+        Kit.Caption("THIRD-PARTY SOFTWARE"u8);
+        Kit.Space(Theme.Space2);
+        Kit.Body("Dear ImGui  -  Omar Cornut and contributors  -  MIT"u8);
+        Kit.Body("GLFW  -  Marcus Geelnard, Camilla Lowy  -  zlib"u8);
+        Kit.Body("RakNet  -  Oculus VR, LLC  -  BSD"u8);
+        Kit.Body("Vulkan Memory Allocator  -  Advanced Micro Devices  -  MIT"u8);
+        Kit.Body("FreeType  -  The FreeType Project  -  FTL"u8);
+        Kit.Body("stb  -  Sean Barrett  -  MIT / public domain"u8);
+        Kit.Space(Theme.Space5);
+
+        Kit.Caption("TYPEFACES"u8);
+        Kit.Space(Theme.Space2);
+        Kit.Body("Space Grotesk  -  Florian Karsten  -  SIL Open Font License 1.1"u8);
+        Kit.Body("JetBrains Mono  -  JetBrains  -  SIL Open Font License 1.1"u8);
+        Kit.Space(Theme.Space5);
+        Kit.Label(_ui.Sans, Theme.FontSmall, Theme.TextMute, "Full licence texts are in the LICENSES folder beside the game."u8);
+        Kit.Space(Theme.Space5);
+
+        if (Kit.Button("Back"u8, ButtonKind.Secondary, 120) || BackPressed())
+            Show(Screen.MainMenu);
+
+        EndPanel();
+        DrawHints(back: true);
+        EndRoot();
+    }
+
+    /// <summary>True when the player asked to go back (Escape or the pad's Start button).</summary>
+    private bool BackPressed() => _screenTime > 0.1f && _app.Actions.Pressed(_app.Devices, InputAction.Pause, true);
+}

@@ -1,0 +1,12 @@
+<Project>
+  <!-- Files every distributed binary carries next to it: game data, runtime assets and the framework notice. -->
+  <ItemGroup>
+    <Content Include="$(MSBuildThisFileDirectory)../content/**/*" LinkBase="content" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(MSBuildThisFileDirectory)../NOTICE.txt" Link="NOTICE.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(MSBuildThisFileDirectory)../LICENSES/**/*" LinkBase="LICENSES" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(AssemblyName)' == 'prospect'">
+    <Content Include="$(MSBuildThisFileDirectory)../assets/fonts/**/*" LinkBase="assets/fonts" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(MSBuildThisFileDirectory)../assets/branding/**/*" LinkBase="assets/branding" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
