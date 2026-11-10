@@ -1,20 +1,19 @@
 {
   "name": "Command Pod",
   "blockSize": 1.0,
-  "blocks": [
-    [0, 0, 0], [0, 0, -1], [0, 0, 1], [0, 0, -2],
-    [1, 0, 0], [-1, 0, 0], [1, 0, 1], [-1, 0, 1],
-    [0, 1, 0], [0, 1, 1], [2, 0, 1], [-2, 0, 1]
-  ],
   "color": [0.34, 0.37, 0.42],
-  "flight": {
-    "acceleration": { "strafe": 16, "vertical": 16, "forward": 28 },
-    "boostMultiplier": 2.4,
-    "maxSpeed": 320,
-    "boostMaxSpeed": 720,
-    "turnRateDegrees": { "pitch": 80, "yaw": 80, "roll": 130 },
-    "turnAccelerationDegrees": 420,
-    "boostHeatSeconds": 6,
-    "coolSeconds": 9
-  }
+  "blocks": [
+    { "at": [0, 0, 0], "type": "core" },
+    { "at": [0, 0, -1], "type": "hull" },
+    { "at": [0, 0, -2], "type": "hull" },
+    { "at": [0, 0, 1], "type": "engine" },
+    { "at": [1, 0, 0], "type": "thruster" },
+    { "at": [-1, 0, 0], "type": "thruster" },
+    { "at": [1, 0, 1], "type": "generator" },
+    { "at": [-1, 0, 1], "type": "battery" },
+    { "at": [0, 1, 0], "type": "quarters" },
+    { "at": [0, 1, 1], "type": "gyro" },
+    { "at": [2, 0, 1], "type": "shield" },
+    { "at": [-2, 0, 1], "type": "cargo" }
+  ]
 }

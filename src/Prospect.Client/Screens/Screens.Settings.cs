@@ -15,11 +15,11 @@ internal sealed partial class ScreenHost
     private static readonly float[] UiScaleValues = [0.75f, 1f, 1.25f, 1.5f, 2f];
     private static readonly string[] SensitivityLabels = ["50%", "75%", "100%", "125%", "150%", "200%"];
     private static readonly float[] SensitivityValues = [0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f];
-    private static readonly string[] AxisLabels = ["Strafe left / right", "Down / up", "Back / forward", "Pitch", "Yaw", "Roll"];
+    private static readonly string[] AxisLabels = ["Strafe left / right", "Down / up", "Back / forward", "Look down / up", "Look left / right", "Roll"];
     private static readonly string[] ActionLabels =
     [
         "Menu / back", "Performance overlay", "Fullscreen", "Screenshot", "Boost", "Dampeners on / off",
-        "Command view", "Galaxy map", "Halt (cancel order)", "Follow pod (command view)",
+        "Command view", "Galaxy map", "Halt (cancel order)", "Follow pod (command view)", "Ship data sheet",
     ];
 
     private readonly ImInputString _settingsName = new(ProtocolInfo.MaxNameBytes);
@@ -131,7 +131,8 @@ internal sealed partial class ScreenHost
         Kit.Space(Theme.Space5);
         Kit.Caption("CONTROLS"u8);
         Kit.Space(Theme.Space2);
-        BindingRow("Steer", "Pointer", rowWidth);
+        BindingRow("Look around", "Pointer", rowWidth);
+        BindingRow("Free look (hold)", "Mouse Right", rowWidth);
         for (var i = 0; i < AxisLabels.Length; i++)
             BindingRow(AxisLabels[i], _axisText[i], rowWidth);
         for (var i = 0; i < ActionLabels.Length; i++)

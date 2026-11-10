@@ -12,16 +12,18 @@ namespace Prospect.Client.Screens;
 internal sealed partial class ScreenHost
 {
     private const int MapCacheSize = 1 << 14;
-    private const float MapMinCell = 38f;
-    private const float MapMaxCell = 120f;
+    private const float MapMinCell = 72f;
+    private const float MapMaxCell = 220f;
 
     private readonly SectorSummary[] _mapCache = new SectorSummary[MapCacheSize];
     private readonly bool[] _mapCacheValid = new bool[MapCacheSize];
+    private readonly string?[] _mapNames = new string?[MapCacheSize];
     private Galaxy? _mapGalaxy;
     private bool _mapOpen;
+    private bool _shipInfoOpen;
     private float _mapTime;
     private float2 _mapPan;
-    private float _mapCell = 64f;
+    private float _mapCell = 128f;
     private int _mapLayer;
     private SectorCoord _mapHover;
     private string _mapHoverName = "";
@@ -29,6 +31,8 @@ internal sealed partial class ScreenHost
 
     /// <summary>True while the player is in space with nothing open over it, so input belongs to the world.</summary>
     public bool WorldInputEnabled => _screen == Screen.Session && !_sessionMenuOpen && !_mapOpen;
+
+    public void OpenShipInfo() => _shipInfoOpen = true;
 
     public void OpenMap()
     {
@@ -50,9 +54,14 @@ internal sealed partial class ScreenHost
                 OpenMap();
         }
 
+        if (WorldInputEnabled && _app.Actions.Pressed(_app.Devices, InputAction.ShipInfo, true))
+            _shipInfoOpen = !_shipInfoOpen;
+
         BeginRoot("##world"u8, ImGuiWindowFlags.NoInputs | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoFocusOnAppearing);
         var draw = ImGui.GetWindowDrawList();
         DrawSectorPanel(draw, snapshot, world);
+        if (_shipInfoOpen && !_mapOpen)
+            DrawShipInfo(draw);
         if (!_mapOpen)
         {
             var pilot = 1f - world.CommandBlend;
@@ -119,23 +128,54 @@ internal sealed partial class ScreenHost
             draw.AddLine(prograde - new float2(0, r * 2), prograde - new float2(0, r), color, Kit.Px(1.5f));
         }
 
-        // Speed and heat, bottom centre.
-        var center = new float2(display.X * 0.5f, display.Y - Kit.Px(118));
+        // The view line: where the hull will point once it is under thrust.
+        var middle = display * 0.5f;
+        var reticle = Kit.Color(world.FreeLook ? Theme.Info : Theme.Accent, 0.8f);
+        draw.AddLine(middle - new float2(Kit.Px(14), 0), middle - new float2(Kit.Px(5), 0), reticle, Kit.Px(1.5f));
+        draw.AddLine(middle + new float2(Kit.Px(5), 0), middle + new float2(Kit.Px(14), 0), reticle, Kit.Px(1.5f));
+        draw.AddLine(middle + new float2(0, Kit.Px(5)), middle + new float2(0, Kit.Px(14)), reticle, Kit.Px(1.5f));
+        if (world.FreeLook)
+        {
+            var free = Kit.Measure(_ui.SansMedium, Theme.FontCaption, "FREE LOOK"u8);
+            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, middle + new float2(-free.X * 0.5f, Kit.Px(22)), Theme.Info, "FREE LOOK"u8);
+        }
+
+        // Speed in the middle; what keeps the hull alive on the left, what drives it on the right.
+        var flight = snapshot.Flight;
+        var center = new float2(display.X * 0.5f, display.Y - Kit.Px(132));
         var speedSize = Kit.Measure(_ui.Mono, 44f, Kit.F($"{speed:0}"));
         Kit.Text(draw, _ui.Mono, 44f, center - new float2(speedSize.X * 0.5f, 0), Theme.Text, Kit.F($"{speed:0}"));
         var unit = Kit.Measure(_ui.SansMedium, Theme.FontCaption, "M/S"u8);
         Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, center + new float2(-unit.X * 0.5f, Kit.Px(52)), Theme.TextMute, "M/S"u8);
 
-        var barSize = new float2(Kit.Px(220), Kit.Px(6));
-        var barMin = center + new float2(-barSize.X * 0.5f, Kit.Px(76));
-        var heatColor = own.BoostLocked ? Theme.Bad : own.Heat > 0.7f ? Theme.Accent : Theme.Info;
-        draw.AddRectFilled(barMin, barMin + barSize, Kit.Color(Theme.Void, 0.7f));
-        draw.AddRectFilled(barMin, barMin + new float2(barSize.X * own.Heat, barSize.Y), Kit.Color(heatColor));
-        draw.AddRect(barMin - new float2(1, 1), barMin + barSize + new float2(1, 1), Kit.Color(Theme.LineStrong));
-        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, barMin + new float2(-Kit.Px(56), -Kit.Px(4)), own.BoostLocked ? Theme.Bad : Theme.TextMute, own.BoostLocked ? "COOLING"u8 : "BOOST"u8);
-
-        var dampeners = snapshot.Dampeners;
-        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, barMin + new float2(barSize.X + Kit.Px(14), -Kit.Px(4)), dampeners ? Theme.Good : Theme.Accent, dampeners ? "DAMPENERS ON"u8 : "DAMPENERS OFF"u8);
+        var barWidth = Kit.Px(300);
+        var gap = Kit.Px(96);
+        var row = Kit.Px(34);
+        var leftMin = center + new float2(-gap - barWidth, Kit.Px(4));
+        var rightMin = center + new float2(gap, Kit.Px(4));
+        var hullFraction = own.Hull / flight.HullPoints;
+        StatusBar(draw, leftMin, barWidth, "SHIELD"u8, own.Shield / flight.ShieldCapacity, Theme.Info, Kit.F($"{own.Shield:0} / {flight.ShieldCapacity:0}"));
+        StatusBar(draw, leftMin + new float2(0, row), barWidth, "HULL"u8, hullFraction, hullFraction < 0.3f ? Theme.Bad : Theme.Good, Kit.F($"{own.Hull:0} / {flight.HullPoints:0}"));
+        StatusBar(
+            draw,
+            rightMin,
+            barWidth,
+            "ENERGY"u8,
+            own.Energy / flight.EnergyStorage,
+            own.Energy < flight.EnergyStorage * 0.15f ? Theme.Bad : Theme.Accent,
+            MathF.Abs(own.EnergyRate) < 0.05f
+                ? Kit.F($"{own.Energy:0} / {flight.EnergyStorage:0} MJ")
+                : Kit.F($"{own.Energy:0} / {flight.EnergyStorage:0} MJ   {own.EnergyRate:+0.0;-0.0} MW")
+        );
+        StatusBar(
+            draw,
+            rightMin + new float2(0, row),
+            barWidth,
+            own.BoostLocked ? "BOOST COOLING"u8 : "BOOST HEAT"u8,
+            own.Heat,
+            own.BoostLocked ? Theme.Bad : own.Heat > 0.7f ? Theme.Accent : Theme.TextDim,
+            snapshot.Dampeners ? "DAMPENERS ON"u8 : "DAMPENERS OFF"u8
+        );
 
         if (own.Order.Kind == OrderKind.MoveTo)
         {
@@ -153,6 +193,8 @@ internal sealed partial class ScreenHost
         hint.X += Kit.KeyHint(draw, hint, pad ? "Y"u8 : "M"u8, "Map"u8);
         hint.X += Kit.KeyHint(draw, hint, pad ? "X"u8 : "Z"u8, "Dampeners"u8);
         hint.X += Kit.KeyHint(draw, hint, pad ? "L3"u8 : "SHIFT"u8, "Boost"u8);
+        hint.X += Kit.KeyHint(draw, hint, "RMB"u8, "Free look"u8);
+        hint.X += Kit.KeyHint(draw, hint, pad ? "D-UP"u8 : "I"u8, "Ship data"u8);
         Kit.KeyHint(draw, hint, pad ? "START"u8 : "ESC"u8, "Menu"u8);
         Kit.Fade = previousFade;
     }
@@ -232,6 +274,74 @@ internal sealed partial class ScreenHost
         Kit.Fade = previousFade;
     }
 
+    /// <summary>A labelled gauge: caption on the left, reading on the right, bar underneath.</summary>
+    private void StatusBar(ImDrawListPtr draw, float2 min, float width, ImString label, float fraction, uint rgb, ImString reading)
+    {
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, min, Theme.TextDim, label);
+        var readingSize = Kit.Measure(_ui.Mono, Theme.FontCaption, reading);
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, min + new float2(width - readingSize.X, 0), Theme.Text, reading);
+
+        var barMin = min + new float2(0, Kit.Px(18));
+        var barMax = barMin + new float2(width, Kit.Px(7));
+        draw.AddRectFilled(barMin, barMax, Kit.Color(Theme.Void, 0.75f));
+        draw.AddRectFilled(barMin, new float2(barMin.X + width * Math.Clamp(fraction, 0f, 1f), barMax.Y), Kit.Color(rgb));
+        draw.AddRect(barMin - new float2(1, 1), barMax + new float2(1, 1), Kit.Color(Theme.LineStrong));
+    }
+
+    /// <summary>The hull's data sheet: every figure follows from the blocks it is built from.</summary>
+    private void DrawShipInfo(ImDrawListPtr draw)
+    {
+        var design = _app.Content.Pod;
+        var stats = design.Stats;
+        var line = Kit.Px(21);
+        var size = new float2(Kit.Px(400), Kit.Px(Theme.Space5 * 2 + 46) + line * 23);
+        var min = new float2(_ui.DisplaySize.X - size.X - Kit.Px(Theme.Space5), (_ui.DisplaySize.Y - size.Y) * 0.5f);
+        Kit.PanelFrame(draw, min, min + size);
+
+        var left = min.X + Kit.Px(Theme.Space5);
+        var right = min.X + size.X - Kit.Px(Theme.Space5);
+        var y = min.Y + Kit.Px(Theme.Space5);
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(left, y), Theme.Accent, "SHIP DATA"u8);
+        Kit.Text(draw, _ui.SansBold, Theme.FontHeading, new float2(left, y + Kit.Px(16)), Theme.Text, design.Name);
+        y += Kit.Px(60);
+
+        void Row(ImString label, ImString value, uint rgb = Theme.Text)
+        {
+            Kit.Text(draw, _ui.Sans, Theme.FontSmall, new float2(left, y), Theme.TextDim, label);
+            var valueSize = Kit.Measure(_ui.Mono, Theme.FontSmall, value);
+            Kit.Text(draw, _ui.Mono, Theme.FontSmall, new float2(right - valueSize.X, y), rgb, value);
+            y += line;
+        }
+
+        Row("Hull"u8, Kit.F($"{stats.HullPoints:0} hp"));
+        Row("Shield"u8, Kit.F($"{stats.ShieldCapacity:0} hp"));
+        Row("Shield recharge"u8, Kit.F($"{stats.ShieldRecharge:0} hp/s"));
+        Row("Mass"u8, Kit.F($"{stats.Mass:0.0} t"));
+        Row("Volume"u8, Kit.F($"{stats.Volume:0} m³"));
+        Row("W x H x L"u8, Kit.F($"{stats.Size.X:0} x {stats.Size.Y:0} x {stats.Size.Z:0} m"));
+        Row("Blocks"u8, Kit.F($"{stats.Blocks}"));
+        Row("Cargo hold"u8, Kit.F($"{stats.CargoHold:0.0} m³"));
+        Row("Crew"u8, Kit.F($"{stats.Crew}"));
+        y += line * 0.5f;
+
+        Row("Acceleration"u8, Kit.F($"{stats.Acceleration:0.0} m/s²"));
+        Row("Deceleration"u8, Kit.F($"{stats.Deceleration:0.0} m/s²"));
+        Row("Sideways and vertical"u8, Kit.F($"{stats.LateralAcceleration:0.0} m/s²"));
+        Row("Max velocity"u8, Kit.F($"{stats.MaxSpeed:0} m/s"));
+        Row("Max velocity, boost"u8, Kit.F($"{stats.BoostMaxSpeed:0} m/s"));
+        Row("Yaw (left / right)"u8, Kit.F($"{stats.TurnRate.Y:0.00} rad/s"));
+        Row("Pitch (up / down)"u8, Kit.F($"{stats.TurnRate.X:0.00} rad/s"));
+        Row("Roll"u8, Kit.F($"{stats.TurnRate.Z:0.00} rad/s"));
+        y += line * 0.5f;
+
+        // The margin between what the generators make and what everything running at once would draw.
+        var margin = stats.PowerGenerated - stats.PowerRequired;
+        Row("Req. energy"u8, Kit.F($"{stats.PowerRequired:0.00} MW"));
+        Row("Generated energy"u8, Kit.F($"{stats.PowerGenerated:0.00} MW"));
+        Row("Energy margin"u8, Kit.F($"{margin:+0.00;-0.00} MW"), margin < 0 ? Theme.Bad : Theme.Good);
+        Row("Storable energy"u8, Kit.F($"{stats.EnergyStorage:0} MJ"));
+    }
+
     private static void DrawTargetMarker(ImDrawListPtr draw, float2 center, uint rgb)
     {
         var r = Kit.Px(8);
@@ -259,7 +369,7 @@ internal sealed partial class ScreenHost
         _mapTime += _ui.DeltaTime;
         var fade = Kit.EaseOut(_mapTime / Theme.ScreenEnter);
         Kit.Fade = fade;
-        DrawDim(0.86f * fade);
+        DrawDim(0.93f * fade);
         BeginRoot("##map"u8);
         var draw = ImGui.GetWindowDrawList();
         var display = _ui.DisplaySize;
@@ -284,40 +394,71 @@ internal sealed partial class ScreenHost
         var mouse = io.MousePos;
         _mapHasHover = false;
 
+        // The map is an island in the middle of the screen: sectors fade out toward its edge instead of
+        // filling an ultrawide display from side to side.
+        var islandY = display.Y * 0.42f;
+        var islandX = Math.Min(display.X * 0.46f, islandY * 1.7f);
+        var showNames = _mapCell >= 96f;
+
         // Screen x runs with sector X, screen y with sector Z, so "up" on the map is -Z, the way hulls face.
-        var firstX = here.X + (int)MathF.Floor((0 - origin.X) / cell + 0.5f);
-        var lastX = here.X + (int)MathF.Floor((display.X - origin.X) / cell + 0.5f);
-        var firstZ = here.Z + (int)MathF.Floor((0 - origin.Y) / cell + 0.5f);
-        var lastZ = here.Z + (int)MathF.Floor((display.Y - origin.Y) / cell + 0.5f);
+        var firstX = here.X + (int)MathF.Floor((display.X * 0.5f - islandX - origin.X) / cell + 0.5f);
+        var lastX = here.X + (int)MathF.Floor((display.X * 0.5f + islandX - origin.X) / cell + 0.5f);
+        var firstZ = here.Z + (int)MathF.Floor((display.Y * 0.5f - islandY - origin.Y) / cell + 0.5f);
+        var lastZ = here.Z + (int)MathF.Floor((display.Y * 0.5f + islandY - origin.Y) / cell + 0.5f);
 
         for (var z = firstZ; z <= lastZ; z++)
             for (var x = firstX; x <= lastX; x++)
             {
+                var center = origin + new float2((x - here.X) * cell, (z - here.Z) * cell);
+                var fromMiddle = new float2((center.X - display.X * 0.5f) / islandX, (center.Y - display.Y * 0.5f) / islandY);
+                var edge = 1f - Math.Clamp((MathF.Sqrt(fromMiddle.X * fromMiddle.X + fromMiddle.Y * fromMiddle.Y) - 0.62f) / 0.38f, 0f, 1f);
+                if (edge <= 0.01f)
+                    continue;
+
                 var coord = new SectorCoord(x, _mapLayer, z);
                 ref var summary = ref MapSummary(galaxy, coord);
-                var center = origin + new float2((x - here.X) * cell, (z - here.Z) * cell);
-                var min = center - new float2(cell * 0.5f, cell * 0.5f);
-                var max = center + new float2(cell * 0.5f, cell * 0.5f);
+                var half = cell * 0.5f;
+                var min = center - new float2(half, half);
+                var max = center + new float2(half, half);
                 var hovered = mouse.X >= min.X && mouse.X < max.X && mouse.Y >= min.Y && mouse.Y < max.Y;
 
-                draw.AddRect(min, max, Kit.Color(Theme.Line, 0.5f));
-                var richness = summary.AsteroidCount / maxRocks;
-                if (summary.AsteroidCount > 0)
-                {
-                    var inset = cell * 0.5f * (0.34f + 0.3f * richness);
-                    draw.AddRect(center - new float2(inset, inset), center + new float2(inset, inset), Kit.Color(Theme.Info, 0.18f + 0.5f * richness));
-                }
-
-                var star = galaxy.StarClasses[summary.StarClass];
-                draw.AddCircleFilled(center, cell * (0.06f + 0.012f * summary.StarClass), Kit.Color(StarColor(star.Color)), 16);
+                // A small tick at each cell corner marks the grid without ruling lines across the whole map.
+                var tick = Kit.Px(4);
+                var tickColor = Kit.Color(Theme.LineStrong, 0.55f * edge);
+                draw.AddLine(min - new float2(tick, 0), min + new float2(tick, 0), tickColor);
+                draw.AddLine(min - new float2(0, tick), min + new float2(0, tick), tickColor);
 
                 if (hovered)
                 {
-                    draw.AddRect(min, max, Kit.Color(Theme.Text, 0.9f), 0, default, Kit.Px(1.5f));
+                    draw.AddRectFilled(min + new float2(3, 3), max - new float2(3, 3), Kit.Color(Theme.PanelRaised, 0.8f));
+                    draw.AddRect(min + new float2(3, 3), max - new float2(3, 3), Kit.Color(Theme.LineStrong));
                     if (!_mapHasHover || _mapHover != coord)
                         _mapHoverName = galaxy.NameOf(coord);
                     _mapHover = coord;
                     _mapHasHover = true;
+                }
+
+                // The star: a soft halo and a core in the star's colour, larger for hotter classes.
+                var star = galaxy.StarClasses[summary.StarClass];
+                var starColor = StarColor(star.Color);
+                var starRadius = Kit.Px(3.2f + 0.9f * summary.StarClass);
+                var starCenter = center - new float2(0, showNames ? cell * 0.1f : 0);
+                draw.AddCircleFilled(starCenter, starRadius * 2.6f, Kit.Color(starColor, 0.12f * edge), 24);
+                draw.AddCircleFilled(starCenter, starRadius, Kit.Color(starColor, edge), 20);
+
+                // Asteroids: an arc around the star, longer the richer the sector. Empty sectors have none.
+                if (summary.AsteroidCount > 0)
+                {
+                    var sweep = MathF.Tau * Math.Clamp(summary.AsteroidCount / maxRocks, 0.08f, 1f);
+                    draw.PathArcTo(starCenter, starRadius * 2.6f + Kit.Px(4), -MathF.PI / 2, -MathF.PI / 2 + sweep, 32);
+                    draw.PathStroke(Kit.Color(Theme.Info, 0.75f * edge), ImDrawFlags.None, Kit.Px(1.5f));
+                }
+
+                if (showNames)
+                {
+                    ref var name = ref MapName(galaxy, coord);
+                    var nameSize = Kit.Measure(_ui.Sans, Theme.FontCaption, name);
+                    Kit.Text(draw, _ui.Sans, Theme.FontCaption, new float2(center.X - nameSize.X * 0.5f, center.Y + cell * 0.2f), hovered ? Theme.Text : Theme.TextDim, name, edge);
                 }
             }
 
@@ -326,7 +467,7 @@ internal sealed partial class ScreenHost
         {
             var local = world.OwnPosition - galaxy.CenterOf(here);
             var marker = origin + new float2((float)(local.X / galaxy.SectorSize) * cell, (float)(local.Z / galaxy.SectorSize) * cell);
-            draw.AddRect(origin - new float2(cell * 0.5f, cell * 0.5f), origin + new float2(cell * 0.5f, cell * 0.5f), Kit.Color(Theme.Accent), 0, default, Kit.Px(2));
+            Brackets(draw, origin - new float2(cell * 0.5f - 3, cell * 0.5f - 3), origin + new float2(cell * 0.5f - 3, cell * 0.5f - 3), Kit.Px(12), Kit.Color(Theme.Accent));
             var heading = Vector3.Transform(-Vector3.UnitZ, world.OwnOrientation);
             var flat = new float2(heading.X, heading.Z);
             var length = MathF.Sqrt(flat.X * flat.X + flat.Y * flat.Y);
@@ -373,6 +514,15 @@ internal sealed partial class ScreenHost
         }
 
         var hint = new float2(left, display.Y - Kit.Px(56));
+        var legend = new float2(left, Kit.Px(236));
+        draw.AddCircleFilled(legend + new float2(Kit.Px(5), Kit.Px(7)), Kit.Px(4), Kit.Color(Theme.Text), 16);
+        Kit.Text(draw, _ui.Sans, Theme.FontCaption, legend + new float2(Kit.Px(20), 0), Theme.TextMute, "Star, coloured by class"u8);
+        draw.PathArcTo(legend + new float2(Kit.Px(5), Kit.Px(29)), Kit.Px(6), -MathF.PI / 2, MathF.PI, 20);
+        draw.PathStroke(Kit.Color(Theme.Info), ImDrawFlags.None, Kit.Px(1.5f));
+        Kit.Text(draw, _ui.Sans, Theme.FontCaption, legend + new float2(Kit.Px(20), Kit.Px(22)), Theme.TextMute, "Asteroids: a longer arc means more rock"u8);
+        draw.AddTriangleFilled(legend + new float2(Kit.Px(5), Kit.Px(45)), legend + new float2(Kit.Px(1), Kit.Px(56)), legend + new float2(Kit.Px(9), Kit.Px(56)), Kit.Color(Theme.Accent));
+        Kit.Text(draw, _ui.Sans, Theme.FontCaption, legend + new float2(Kit.Px(20), Kit.Px(44)), Theme.TextMute, "You, and the way you are facing"u8);
+
         hint.X += Kit.KeyHint(draw, hint, "DRAG"u8, "Pan"u8);
         hint.X += Kit.KeyHint(draw, hint, "WHEEL"u8, "Zoom"u8);
         hint.X += Kit.KeyHint(draw, hint, "PGUP / PGDN"u8, "Layer"u8);
@@ -389,9 +539,33 @@ internal sealed partial class ScreenHost
         {
             _mapCache[index] = galaxy.Summarize(coord);
             _mapCacheValid[index] = true;
+            _mapNames[index] = null;
         }
 
         return ref _mapCache[index];
+    }
+
+    /// <summary>A sector's name for the map, made the first time the sector is shown with labels.</summary>
+    private ref string MapName(Galaxy galaxy, SectorCoord coord)
+    {
+        MapSummary(galaxy, coord);
+        var index = (int)((uint)(coord.X * 73856093 ^ coord.Y * 19349663 ^ coord.Z * 83492791) % MapCacheSize);
+        _mapNames[index] ??= galaxy.NameOf(coord);
+        return ref _mapNames[index]!;
+    }
+
+    /// <summary>Corner brackets around a rectangle.</summary>
+    private static void Brackets(ImDrawListPtr draw, float2 min, float2 max, float length, ImColor8 color)
+    {
+        var t = Kit.Px(2);
+        draw.AddLine(min, min + new float2(length, 0), color, t);
+        draw.AddLine(min, min + new float2(0, length), color, t);
+        draw.AddLine(new float2(max.X, min.Y), new float2(max.X - length, min.Y), color, t);
+        draw.AddLine(new float2(max.X, min.Y), new float2(max.X, min.Y + length), color, t);
+        draw.AddLine(new float2(min.X, max.Y), new float2(min.X + length, max.Y), color, t);
+        draw.AddLine(new float2(min.X, max.Y), new float2(min.X, max.Y - length), color, t);
+        draw.AddLine(max, max - new float2(length, 0), color, t);
+        draw.AddLine(max, max - new float2(0, length), color, t);
     }
 
     /// <summary>A star's light colour as an interface colour.</summary>

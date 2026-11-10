@@ -1,3 +1,4 @@
+using System.Numerics;
 using Prospect.Game.World;
 
 namespace Prospect.Game.Client;
@@ -10,14 +11,14 @@ public struct PlayerControls
     public float Vertical;
     public float Forward;
 
-    /// <summary>Rate axes in -1..1 from keys and sticks: nose up, turn right, roll right.</summary>
-    public float Pitch;
-    public float Yaw;
+    /// <summary>Roll rate in -1..1, positive rolling right.</summary>
     public float Roll;
 
-    /// <summary>Turn requested by pointer movement since the last tick, in radians: nose up and turn right.</summary>
-    public float LookPitch;
-    public float LookYaw;
+    /// <summary>The direction the player is looking, as a unit vector in the world.</summary>
+    public Vector3 Aim;
+
+    /// <summary>When set, the hull turns its nose toward <see cref="Aim"/>; otherwise it holds its heading.</summary>
+    public bool Align;
 
     public bool Boost;
     public bool ToggleDampeners;
@@ -25,7 +26,7 @@ public struct PlayerControls
 
 /// <summary>
 /// Carries the player's intent from the input thread to the client simulation. Held values replace each other;
-/// one-shot values (pointer movement, toggles, orders) accumulate until the simulation takes them, so nothing
+/// one-shot values (toggles, orders) accumulate until the simulation takes them, so nothing
 /// that happens between two ticks is lost.
 /// </summary>
 public sealed class PlayerInputBridge
@@ -40,12 +41,8 @@ public sealed class PlayerInputBridge
     {
         lock (_lock)
         {
-            var lookPitch = _controls.LookPitch + frame.LookPitch;
-            var lookYaw = _controls.LookYaw + frame.LookYaw;
             var toggle = _controls.ToggleDampeners ^ frame.ToggleDampeners;
             _controls = frame;
-            _controls.LookPitch = lookPitch;
-            _controls.LookYaw = lookYaw;
             _controls.ToggleDampeners = toggle;
         }
     }
@@ -66,8 +63,6 @@ public sealed class PlayerInputBridge
         lock (_lock)
         {
             var result = _controls;
-            _controls.LookPitch = 0;
-            _controls.LookYaw = 0;
             _controls.ToggleDampeners = false;
             hasOrder = _hasOrder;
             order = _order;

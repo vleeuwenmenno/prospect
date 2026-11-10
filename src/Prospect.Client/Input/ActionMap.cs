@@ -17,6 +17,7 @@ internal enum InputAction
     ToggleMap,
     Halt,
     Follow,
+    ShipInfo,
     Count,
 }
 

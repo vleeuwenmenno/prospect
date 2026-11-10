@@ -18,6 +18,8 @@ public readonly record struct Double3(double X, double Y, double Z)
 
     public static Double3 operator +(Double3 a, Vector3 b) => new(a.X + b.X, a.Y + b.Y, a.Z + b.Z);
 
+    public static Double3 operator -(Double3 a, Vector3 b) => new(a.X - b.X, a.Y - b.Y, a.Z - b.Z);
+
     public static Double3 operator *(Double3 a, double scale) => new(a.X * scale, a.Y * scale, a.Z * scale);
 
     public static Double3 Lerp(Double3 a, Double3 b, double t) => a + (b - a) * t;

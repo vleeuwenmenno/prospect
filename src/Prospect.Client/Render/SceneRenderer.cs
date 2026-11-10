@@ -196,12 +196,13 @@ internal sealed unsafe class SceneRenderer : IDisposable
             DepthCompareOp = VkCompareOp.Greater,
         };
         var depthRead = new VkPipelineDepthStencilStateCreateInfo { DepthTestEnable = true, DepthCompareOp = VkCompareOp.GreaterOrEqual };
-        // The projection flips Y for Vulkan, which also flips the winding seen by the rasteriser.
+        // Meshes wind counter-clockwise seen from outside, and the projection keeps the image upright, so that is
+        // also how front faces appear on screen.
         var cullBack = new VkPipelineRasterizationStateCreateInfo
         {
             PolygonMode = VkPolygonMode.Fill,
             CullMode = VkCullModeFlags.BackBit,
-            FrontFace = VkFrontFace.Clockwise,
+            FrontFace = VkFrontFace.CounterClockwise,
             LineWidth = 1f,
         };
 

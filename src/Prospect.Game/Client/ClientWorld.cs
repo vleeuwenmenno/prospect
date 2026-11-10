@@ -19,6 +19,12 @@ public struct HullView
     public float Heat;
     public bool BoostLocked;
     public HullOrder Order;
+
+    /// <summary>Stored energy in megajoules, and how fast it is changing in megawatts.</summary>
+    public float Energy;
+    public float EnergyRate;
+    public float Shield;
+    public float Hull;
 }
 
 /// <summary>
@@ -39,7 +45,9 @@ internal sealed class ClientWorld
 
     /// <summary>A correction larger than this is a teleport, not an error to smooth.</summary>
     private const float SnapDistance = 60f;
-    private const float MaxLookBacklog = 0.6f;
+
+    /// <summary>How hard the hull turns toward where the player looks: turn rate in rad/s per radian of error.</summary>
+    private const float AlignGain = 6f;
 
     private struct Pending
     {
@@ -84,8 +92,8 @@ internal sealed class ClientWorld
     private HullOrder _orderDefinition;
     private ushort _orderId;
     private bool _dampeners = true;
-    private float _lookPitch;
-    private float _lookYaw;
+    private SectorCache? _rocks;
+    private float _energyRate;
 
     public ClientWorld(FlightParams flight)
     {
@@ -95,6 +103,9 @@ internal sealed class ClientWorld
     public bool Dampeners => _dampeners;
 
     public void SetOwnHull(uint id) => _ownHullId = id;
+
+    /// <summary>Gives the world the server's galaxy, whose asteroids the prediction collides with.</summary>
+    public void SetGalaxy(Galaxy galaxy) => _rocks = new SectorCache(galaxy);
 
     /// <summary>Predicts one tick of the player's hull and sends the input to the server.</summary>
     public void Tick(PlayerInputBridge bridge, ITransport transport)
@@ -110,30 +121,32 @@ internal sealed class ClientWorld
         if (hasOrder)
             SetOrder(order);
 
-        // Pointer movement asks for an angle; spend as much of it this tick as the hull can turn.
-        _lookPitch = Math.Clamp(_lookPitch + controls.LookPitch, -MaxLookBacklog, MaxLookBacklog);
-        _lookYaw = Math.Clamp(_lookYaw + controls.LookYaw, -MaxLookBacklog, MaxLookBacklog);
-        var pitchStep = _flight.TurnRate.X * HullSim.Dt;
-        var yawStep = _flight.TurnRate.Y * HullSim.Dt;
-        var lookPitch = Math.Clamp(_lookPitch / pitchStep, -1f, 1f);
-        var lookYaw = Math.Clamp(_lookYaw / yawStep, -1f, 1f);
-        _lookPitch -= lookPitch * pitchStep;
-        _lookYaw -= lookYaw * yawStep;
+        // Turn the nose toward where the player is looking, if they asked for that.
+        var pitch = 0f;
+        var yaw = 0f;
+        if (controls.Align && controls.Aim.LengthSquared() > 0.5f)
+        {
+            var local = Vector3.Transform(controls.Aim, Quaternion.Conjugate(_predicted.Orientation));
+            var yawError = MathF.Atan2(local.X, -local.Z);
+            var pitchError = MathF.Atan2(local.Y, MathF.Sqrt(local.X * local.X + local.Z * local.Z));
+            yaw = Math.Clamp(yawError * AlignGain / _flight.TurnRate.Y, -1f, 1f);
+            pitch = Math.Clamp(pitchError * AlignGain / _flight.TurnRate.X, -1f, 1f);
+        }
 
         var input = new FlightInput
         {
             Strafe = FlightInput.Quantize(controls.Strafe),
             Vertical = FlightInput.Quantize(controls.Vertical),
             Forward = FlightInput.Quantize(controls.Forward),
-            Pitch = FlightInput.Quantize(controls.Pitch + lookPitch),
-            Yaw = FlightInput.Quantize(controls.Yaw + lookYaw),
+            Pitch = FlightInput.Quantize(pitch),
+            Yaw = FlightInput.Quantize(yaw),
             Roll = FlightInput.Quantize(controls.Roll),
             Boost = controls.Boost,
             Dampeners = _dampeners,
         };
 
         // Taking the controls ends a standing order.
-        if (_order.Kind != OrderKind.None && input.HasManualInput)
+        if (_order.Kind != OrderKind.None && (input.Strafe != 0 || input.Vertical != 0 || input.Forward != 0 || input.Roll != 0))
             SetOrder(default);
 
         ref var slot = ref _pending[_nextSequence % PendingCapacity];
@@ -146,7 +159,9 @@ internal sealed class ClientWorld
         slot.Order = _order;
         _nextSequence++;
 
-        HullSim.Step(ref _predicted, ref _order, input, _flight);
+        var energyBefore = _predicted.Energy;
+        HullSim.Step(ref _predicted, ref _order, input, _flight, _rocks);
+        _energyRate += ((_predicted.Energy - energyBefore) / HullSim.Dt - _energyRate) * 0.2f;
         Send(transport);
     }
 
@@ -192,6 +207,10 @@ internal sealed class ClientWorld
                 Heat = _predicted.Heat,
                 BoostLocked = _predicted.BoostLocked,
                 Order = _order,
+                Energy = _predicted.Energy,
+                EnergyRate = _energyRate,
+                Shield = _predicted.Shield,
+                Hull = _predicted.Hull,
             };
         }
 
@@ -273,7 +292,7 @@ internal sealed class ClientWorld
         {
             ref var slot = ref _pending[sequence % PendingCapacity];
             var order = slot.Order;
-            HullSim.Step(ref state, ref order, slot.Record.Input, _flight);
+            HullSim.Step(ref state, ref order, slot.Record.Input, _flight, _rocks);
         }
 
         // Keep the drawn position continuous: whatever the correction moved is bled off over the next ticks.
@@ -333,6 +352,9 @@ internal sealed class ClientWorld
             Heat = newest.State.Heat,
             BoostLocked = newest.State.BoostLocked,
             Order = newest.Order,
+            Energy = newest.State.Energy,
+            Shield = newest.State.Shield,
+            Hull = newest.State.Hull,
         };
 
         if (renderTick >= newest.Tick)

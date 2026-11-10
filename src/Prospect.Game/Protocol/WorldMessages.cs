@@ -69,7 +69,7 @@ public static class InputMessage
 /// <summary>A hull as it appears in a snapshot.</summary>
 public struct HullRecord
 {
-    public const int MaxWireSize = 4 + 4 + 24 + 12 + 16 + 12 + 1 + 1 + 24;
+    public const int MaxWireSize = 4 + 4 + 24 + 12 + 16 + 12 + 4 + 1 + 16 + 24;
 
     public uint Id;
     public uint Owner;
@@ -87,8 +87,12 @@ public struct HullRecord
         writer.WriteSingle(State.Orientation.Z);
         writer.WriteSingle(State.Orientation.W);
         WorldWire.WriteVector(ref writer, State.AngularVelocity);
-        writer.WriteByte((byte)(State.Heat * 255f + 0.5f));
+        writer.WriteSingle(State.Heat);
         writer.WriteByte((byte)((State.BoostLocked ? 1 : 0) | (Order.Kind == OrderKind.MoveTo ? 2 : 0)));
+        writer.WriteSingle(State.Energy);
+        writer.WriteSingle(State.Shield);
+        writer.WriteSingle(State.Hull);
+        writer.WriteSingle(State.ShieldCooldown);
         if (Order.Kind == OrderKind.MoveTo)
             WorldWire.WritePosition(ref writer, Order.Target);
     }
@@ -105,9 +109,14 @@ public struct HullRecord
         ok &= float.IsFinite(lengthSquared) && lengthSquared > 0.5f && lengthSquared < 2f;
         record.State.Orientation = ok ? Quaternion.Normalize(q) : Quaternion.Identity;
         ok &= WorldWire.TryReadVector(ref reader, out record.State.AngularVelocity);
-        record.State.Heat = reader.ReadByte() / 255f;
+        record.State.Heat = Math.Clamp(reader.ReadSingle(), 0f, 1f);
         var flags = reader.ReadByte();
         record.State.BoostLocked = (flags & 1) != 0;
+        record.State.Energy = reader.ReadSingle();
+        record.State.Shield = reader.ReadSingle();
+        record.State.Hull = reader.ReadSingle();
+        record.State.ShieldCooldown = reader.ReadSingle();
+        ok &= float.IsFinite(record.State.Energy) && float.IsFinite(record.State.Shield) && float.IsFinite(record.State.Hull) && float.IsFinite(record.State.ShieldCooldown);
         if ((flags & 2) != 0)
         {
             record.Order.Kind = OrderKind.MoveTo;

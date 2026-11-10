@@ -231,6 +231,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                 _serverName = welcome.ServerName;
                 _galaxySeed = welcome.GalaxySeed;
                 _galaxy = _content.Galaxy.WithSeed(welcome.GalaxySeed);
+                _world.SetGalaxy(_galaxy);
                 _world.SetOwnHull(welcome.HullId);
                 _playerCount = 1;
                 _syncServerTick = welcome.ServerTick;

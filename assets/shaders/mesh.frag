@@ -34,8 +34,11 @@ void main()
     if (color.a < 0.5)
     {
         // Rock: mottled, with the facets of the mesh showing through for a rough, broken surface.
+        // The screen-space derivative gives the facet's normal up to its sign; the smooth normal settles the sign.
         vec3 facet = normalize(cross(dFdx(worldPosition), dFdy(worldPosition)));
-        n = normalize(mix(n, facet, 0.55));
+        if (dot(facet, n) < 0.0)
+            facet = -facet;
+        n = normalize(mix(n, facet, 0.4));
         float mottling = noise(localPosition * 9.0) * 0.6 + noise(localPosition * 31.0) * 0.4;
         albedo *= 0.55 + 0.75 * mottling;
     }

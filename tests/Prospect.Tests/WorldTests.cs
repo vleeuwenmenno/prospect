@@ -90,7 +90,7 @@ public sealed class FlightTests
     [Fact]
     public void ControlsMoveTheHullTheWayThePilotExpects()
     {
-        var start = HullState.At(Double3.Zero);
+        var start = HullState.Spawn(Double3.Zero, Pod);
 
         var forward = Fly(start, new FlightInput { Forward = 127 }, 60);
         Assert.True(forward.Position.Z < -5 && Math.Abs(forward.Position.X) < 1e-3);
@@ -115,7 +115,7 @@ public sealed class FlightTests
     [Fact]
     public void VelocityPersistsUntilDampenersBleedItOff()
     {
-        var moving = Fly(HullState.At(Double3.Zero), new FlightInput { Forward = 127 }, 120);
+        var moving = Fly(HullState.Spawn(Double3.Zero, Pod), new FlightInput { Forward = 127 }, 120);
         var speed = moving.Velocity.Length();
         Assert.True(speed > 40);
 
@@ -129,8 +129,8 @@ public sealed class FlightTests
     [Fact]
     public void BoostIsFasterHeatsUpAndLocksOutWhenOverheated()
     {
-        var plain = Fly(HullState.At(Double3.Zero), new FlightInput { Forward = 127 }, 120);
-        var boosted = Fly(HullState.At(Double3.Zero), new FlightInput { Forward = 127, Boost = true }, 120);
+        var plain = Fly(HullState.Spawn(Double3.Zero, Pod), new FlightInput { Forward = 127 }, 120);
+        var boosted = Fly(HullState.Spawn(Double3.Zero, Pod), new FlightInput { Forward = 127, Boost = true }, 120);
         Assert.True(boosted.Velocity.Length() > plain.Velocity.Length() * 1.5f);
         Assert.True(boosted.Heat > 0.2f);
 
@@ -151,7 +151,7 @@ public sealed class FlightTests
     [Fact]
     public void AutopilotReachesItsTargetAndStops()
     {
-        var state = HullState.At(Double3.Zero);
+        var state = HullState.Spawn(Double3.Zero, Pod);
         var order = new HullOrder { Kind = OrderKind.MoveTo, Target = new Double3(900, 250, -1800) };
 
         var ticks = 0;
@@ -165,15 +165,152 @@ public sealed class FlightTests
     }
 }
 
+public sealed class HullDesignTests
+{
+    private static readonly GameContent Content = GameContent.Load();
+
+    [Fact]
+    public void StatsFollowFromTheBlocks()
+    {
+        var pod = Content.Pod;
+        var stats = pod.Stats;
+        var mass = 0f;
+        var hull = 0f;
+        foreach (var type in pod.Types)
+        {
+            mass += type.Mass;
+            hull += type.Hull;
+        }
+
+        Assert.Equal(pod.Cells.Length, stats.Blocks);
+        Assert.Equal(mass, stats.Mass, 3);
+        Assert.Equal(hull, stats.HullPoints, 3);
+        Assert.Equal(new Vector3(5, 2, 4), stats.Size);
+
+        // Main engines only push forward, so the pod accelerates harder than it brakes or strafes.
+        var thrusters = Content.Blocks.Get("thruster").Thrust * 2;
+        var engine = Content.Blocks.Get("engine").Thrust;
+        Assert.Equal(thrusters / mass, stats.Deceleration, 3);
+        Assert.Equal((thrusters + engine) / mass, stats.Acceleration, 3);
+        Assert.True(stats.Acceleration > stats.Deceleration);
+
+        // Rolling turns the least mass about the shortest lever, so it is the quickest axis.
+        Assert.True(stats.TurnRate.Z > stats.TurnRate.Y);
+        Assert.Equal(pod.Flight.MaxSpeed, stats.MaxSpeed);
+        Assert.True(stats.PowerGenerated > 0 && stats.EnergyStorage > 0 && stats.ShieldCapacity > 0);
+    }
+}
+
+public sealed class PowerAndDamageTests
+{
+    private static readonly GameContent Content = GameContent.Load();
+    private static readonly FlightParams Pod = Content.Pod.Flight;
+
+    [Fact]
+    public void BoostDrainsTheBatteryAndTheGeneratorRefillsIt()
+    {
+        var state = HullState.Spawn(Double3.Zero, Pod);
+        var boost = new FlightInput { Forward = 127, Boost = true };
+        for (var i = 0; i < 120; i++)
+            FlightModel.Step(ref state, boost, Pod, HullSim.Dt);
+        var drained = state.Energy;
+        Assert.True(drained < Pod.EnergyStorage * 0.8f);
+
+        // Coasting, the surplus of generation over idle draw goes back into the battery at exactly that rate.
+        for (var i = 0; i < 60; i++)
+            FlightModel.Step(ref state, default, Pod, HullSim.Dt);
+        Assert.Equal(drained + (Pod.PowerGenerated - Pod.IdlePower), state.Energy, 1);
+
+        for (var i = 0; i < 60 * 60; i++)
+            FlightModel.Step(ref state, default, Pod, HullSim.Dt);
+        Assert.Equal(Pod.EnergyStorage, state.Energy);
+    }
+
+    [Fact]
+    public void AFlatBatteryStopsBoostAndLimitsThrustToWhatTheGeneratorFeeds()
+    {
+        var state = HullState.Spawn(Double3.Zero, Pod);
+        state.Energy = 0;
+        var before = state;
+        FlightModel.Step(ref state, new FlightInput { Forward = 127, Boost = true }, Pod, HullSim.Dt);
+
+        Assert.Equal(0f, state.Heat);
+        var gained = state.Velocity.Length() / HullSim.Dt;
+        Assert.True(gained <= Pod.Acceleration.Z + 0.01f);
+        Assert.Equal(before.Shield, state.Shield);
+    }
+
+    [Fact]
+    public void DamageHitsTheShieldFirstAndTheShieldRechargesAfterADelay()
+    {
+        var state = HullState.Spawn(Double3.Zero, Pod);
+        Assert.False(FlightModel.Damage(ref state, Pod, 400));
+        Assert.Equal(Pod.ShieldCapacity - 400, state.Shield);
+        Assert.Equal(Pod.HullPoints, state.Hull);
+
+        for (var i = 0; i < 60 * 2; i++)
+            FlightModel.Step(ref state, default, Pod, HullSim.Dt);
+        Assert.Equal(Pod.ShieldCapacity - 400, state.Shield);
+
+        for (var i = 0; i < 60 * 20; i++)
+            FlightModel.Step(ref state, default, Pod, HullSim.Dt);
+        Assert.Equal(Pod.ShieldCapacity, state.Shield);
+
+        Assert.False(FlightModel.Damage(ref state, Pod, Pod.ShieldCapacity + 100));
+        Assert.Equal(0f, state.Shield);
+        Assert.Equal(Pod.HullPoints - 100, state.Hull);
+        Assert.True(FlightModel.Damage(ref state, Pod, Pod.HullPoints));
+    }
+
+    [Fact]
+    public void HittingAnAsteroidBouncesTheHullOffAndDamagesIt()
+    {
+        var galaxy = Content.Galaxy.WithSeed(11);
+        var rocks = new SectorCache(galaxy);
+        var rock = rocks.Get(default).Asteroids[0];
+        var rockCenter = galaxy.CenterOf(default) + rock.LocalPosition;
+
+        // Approach the rock along +X at a speed that hurts but does not kill.
+        var state = HullState.Spawn(rockCenter + new Vector3(-(rock.Radius + 60f), 0, 0), Pod);
+        state.Velocity = new Vector3(40, 0, 0);
+        var order = default(HullOrder);
+        for (var i = 0; i < 180; i++)
+            HullSim.Step(ref state, ref order, default, Pod, rocks);
+
+        Assert.True(state.Velocity.X < 0, "the hull should have bounced back");
+        Assert.True(state.Shield < Pod.ShieldCapacity);
+        Assert.True(rockCenter.RelativeTo(state.Position).Length() >= rock.Radius * 0.88f + Pod.Radius - 0.01f);
+    }
+
+    [Fact]
+    public void AFatalImpactRebuildsThePodAtTheSpawnPoint()
+    {
+        var galaxy = Content.Galaxy.WithSeed(11);
+        var rocks = new SectorCache(galaxy);
+        var rock = rocks.Get(default).Asteroids[0];
+        var rockCenter = galaxy.CenterOf(default) + rock.LocalPosition;
+
+        var state = HullState.Spawn(rockCenter + new Vector3(-(rock.Radius + 60f), 0, 0), Pod);
+        state.Velocity = new Vector3(300, 0, 0);
+        var order = new HullOrder { Kind = OrderKind.None };
+        for (var i = 0; i < 60; i++)
+            HullSim.Step(ref state, ref order, default, Pod, rocks);
+
+        Assert.Equal(Pod.HullPoints, state.Hull);
+        Assert.Equal(Pod.ShieldCapacity, state.Shield);
+        Assert.True(Galaxy.SpawnPoint.RelativeTo(state.Position).Length() < 1f);
+    }
+}
+
 public sealed class HullStoreTests
 {
     [Fact]
     public void HandlesGoStaleWhenTheirHullIsDestroyedAndSlotsAreReused()
     {
         using var store = new HullStore(2);
-        var a = store.Create(1, HullState.At(new Double3(1, 0, 0)));
-        var b = store.Create(2, HullState.At(new Double3(2, 0, 0)));
-        var c = store.Create(3, HullState.At(new Double3(3, 0, 0)));
+        var a = store.Create(1, HullState.Spawn(new Double3(1, 0, 0), default));
+        var b = store.Create(2, HullState.Spawn(new Double3(2, 0, 0), default));
+        var c = store.Create(3, HullState.Spawn(new Double3(3, 0, 0), default));
         Assert.Equal(3, store.Count);
         Assert.Equal(2.0, store.State(b.Index).Position.X);
 
@@ -181,7 +318,7 @@ public sealed class HullStoreTests
         Assert.False(store.IsAlive(b));
         Assert.True(store.IsAlive(a) && store.IsAlive(c));
 
-        var d = store.Create(4, HullState.At(new Double3(4, 0, 0)));
+        var d = store.Create(4, HullState.Spawn(new Double3(4, 0, 0), default));
         Assert.Equal(b.Index, d.Index);
         Assert.NotEqual(b.Generation, d.Generation);
         Assert.False(store.IsAlive(b));
@@ -201,7 +338,7 @@ public sealed class FlightSessionTests
         using var session = GameSession.StartLocal(new ServerConfig { MaxPlayers = 1 }, Content, "Pilot");
         var start = WaitForOwnHull(session);
 
-        session.Client.Input.Submit(new PlayerControls { Forward = 1, Strafe = 0.5f, Yaw = 0.4f, Boost = true });
+        session.Client.Input.Submit(new PlayerControls { Forward = 1, Strafe = 0.5f, Aim = Vector3.Normalize(new Vector3(0.6f, 0.2f, -1f)), Align = true, Boost = true });
         Thread.Sleep(1500);
         var flying = OwnHull(session);
         Assert.True(flying.Position.RelativeTo(start.Position).Length() > 30f);

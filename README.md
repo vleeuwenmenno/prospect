@@ -16,8 +16,12 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 - **Sectors.** The galaxy is a grid of 20 km cells generated from the server's seed: name, star, asteroid fields.
   Nothing is stored or sent, and nothing stops at a sector's edge. The client keeps the sectors around the camera
   generated on worker threads.
-- **Flight.** A command pod with inertial flight: thrust on all three axes, pitch, yaw and roll, dampeners, and a
-  boost that heats up and locks out. The server is authoritative; the client predicts its own hull with the same
+- **Hulls from blocks.** A hull is a list of typed blocks (engine, thruster, gyro, generator, battery, shield
+  emitter, cargo, quarters, plating). Mass, moments of inertia, acceleration, turn rates, top speed, hull and
+  shield points and the power budget are all computed from them and shown on the ship's data sheet.
+- **Flight.** A command pod with inertial flight: thrust on all three axes, roll, dampeners, and a boost that heats
+  up and locks out. Thrust, boost and shield recharge draw power; the generator refills the battery with the
+  surplus. Running into an asteroid bounces the hull and damages shield, then hull. The server is authoritative; the client predicts its own hull with the same
   flight code and reconciles against snapshots; other players' hulls are interpolated.
 - **Command view.** One key pulls the camera back from the pod into a free orbiting view over the same space, with
   a move order that the pod's autopilot carries out.
@@ -25,8 +29,8 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 - **Renderer.** Floating-point scene target and tone mapping, camera-relative rendering from double-precision
   positions, a star field and sky, instanced hull and asteroid meshes with two levels of detail.
 
-Not there yet: collisions (hulls pass through rocks), mining, more than one hull per player, gates and jumps,
-saving. Asteroids are drawn from a shared set of shapes until mining gives each one its own body.
+Not there yet: mining, more than one hull per player, gates and jumps,
+saving. Asteroids are drawn from a shared set of shapes and collide as spheres until mining gives each one its own body.
 
 ## Controls
 
@@ -34,19 +38,26 @@ saving. Asteroids are drawn from a shared set of shapes until mining gives each 
 | --- | --- | --- |
 | Forward / back, strafe | `W` `S`, `A` `D` | Left stick |
 | Up / down | `Space`, `Left Ctrl` | Right / left trigger |
-| Pitch and yaw | Mouse, or arrow keys | Right stick |
+| Look around | Mouse, or arrow keys | Right stick |
+| Free look (hull holds its heading) | Hold right mouse button | |
 | Roll | `Q` `E` | Bumpers |
 | Boost | `Left Shift` | Left stick click |
 | Dampeners on / off | `Z` | `X` |
 | Command view | `N` | `Back` |
 | Galaxy map | `M` | `Y` |
 | Halt (cancel order) | `H` | `B` |
+| Ship data sheet | `I` | D-pad up |
 | Menu or back | `Esc` | `Start` |
+
+The pointer turns the view, not the hull. The hull swings its nose onto the view line whenever it is under
+thrust, so looking around while coasting costs nothing; hold the right mouse button to look around under thrust
+without turning.
 
 In the command view: right-click orders a move to that point, right-drag orbits, the wheel zooms, `W` `A` `S` `D`
 pan, `Space` and `Left Ctrl` raise and lower the command plane, `F` follows the pod again. `F3` shows the
 performance overlay, `F11` toggles fullscreen, `F12` takes a screenshot. Bindings live in
-`content/input/bindings.json`; hull and galaxy figures in `content/ships` and `content/galaxy`.
+`content/input/bindings.json`; block types and flight rules in `content/blocks`, hull designs in `content/ships`,
+galaxy rules in `content/galaxy`.
 
 ## Requirements
 

@@ -92,6 +92,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
     private readonly byte[] _sendBuffer = new byte[64 * 1024];
     private readonly HullStore _hulls = new();
     private readonly FlightParams _podFlight;
+    private readonly SectorCache _rocks;
 
     private long _tick;
     private uint _nextPlayerId = 1;
@@ -103,6 +104,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         _transports = transports;
         _podFlight = content.Pod.Flight;
         Galaxy = content.Galaxy.WithSeed(config.GalaxySeed);
+        _rocks = new SectorCache(Galaxy);
 
         // Room for every player plus connections that are still shaking hands or about to be refused as full.
         _connections = new Connection[config.MaxPlayers + 8];
@@ -304,7 +306,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
                 info.OrderId = record.OrderId;
             }
 
-            HullSim.Step(ref state, ref info.Order, record.Input, _podFlight);
+            HullSim.Step(ref state, ref info.Order, record.Input, _podFlight, _rocks);
             connection.LastSimulatedSequence = record.Sequence;
             connection.LastInput = record.Input;
             simulated = true;
@@ -318,7 +320,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
 
         // The client has gone quiet. Keep the hull safe: carry on with its order, or brake to a stop.
         if (++connection.StarvedTicks > InputStarvedTicks)
-            HullSim.Step(ref state, ref info.Order, new FlightInput { Dampeners = true }, _podFlight);
+            HullSim.Step(ref state, ref info.Order, new FlightInput { Dampeners = true }, _podFlight, _rocks);
     }
 
     private void SendSnapshot(Connection connection, long tick)
@@ -382,7 +384,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         // Arrivals line up beside the spawn point so they never start inside one another.
         var slot = _hulls.Count;
         var offset = new Double3((slot + 1) / 2 * 40.0 * (slot % 2 == 0 ? 1 : -1), 0, 0);
-        connection.Hull = _hulls.Create(connection.PlayerId, HullState.At(Galaxy.SpawnPoint + offset));
+        connection.Hull = _hulls.Create(connection.PlayerId, HullState.Spawn(Galaxy.SpawnPoint + offset, _podFlight));
 
         var welcome = new WelcomeMessage
         {

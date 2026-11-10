@@ -406,6 +406,8 @@ internal sealed class App : IDisposable
             _viewOpened = true;
             if (view == "command")
                 World.SetMode(ViewMode.Command);
+            else if (view == "info")
+                _screens.OpenShipInfo();
             else
                 _screens.OpenMap();
         }

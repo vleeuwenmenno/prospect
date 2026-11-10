@@ -45,6 +45,7 @@ internal sealed class WorldView
     private const float MinCommandDistance = 25f;
     private const float MaxCommandDistance = 90000f;
     private const float LookRadiansPerPixel = 0.0021f;
+    private const float LookRadiansPerSecond = 1.9f;
     private const float DustCell = 360f;
     private const float Exposure = 1.0f;
 
@@ -94,6 +95,10 @@ internal sealed class WorldView
     // Camera.
     private Quaternion _chaseOrientation = Quaternion.Identity;
     private bool _chaseInitialised;
+    private Vector3 _lookDirection = -Vector3.UnitZ;
+    private Vector3 _cameraDirection = -Vector3.UnitZ;
+    private Vector3 _chaseRight = Vector3.UnitX;
+    private bool _freeLook;
     private float _commandBlend;
     private float _commandYaw;
     private float _commandPitch = -0.9f;
@@ -134,6 +139,9 @@ internal sealed class WorldView
     public Double3 OwnPosition { get; private set; }
     public Quaternion OwnOrientation { get; private set; } = Quaternion.Identity;
 
+    /// <summary>True while the player holds the free-look button.</summary>
+    public bool FreeLook => _freeLook && Mode == ViewMode.Pilot;
+
     /// <summary>The sector the player's hull is in.</summary>
     public SectorSummary Sector { get; private set; }
     public string SectorName { get; private set; } = "";
@@ -147,6 +155,7 @@ internal sealed class WorldView
         if (mode == Mode)
             return;
         Mode = mode;
+        _lookDirection = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
         if (mode == ViewMode.Command)
         {
             // Start above and behind the hull, looking the way it faces, so the view pulls back rather than cuts.
@@ -207,14 +216,27 @@ internal sealed class WorldView
             controls.Strafe = _actions.Axis(_devices, InputAxis.Strafe, keyboard);
             controls.Vertical = _actions.Axis(_devices, InputAxis.Vertical, keyboard);
             controls.Forward = _actions.Axis(_devices, InputAxis.Forward, keyboard);
-            controls.Pitch = _actions.Axis(_devices, InputAxis.Pitch, keyboard) * (_settings.InvertPitch ? -1f : 1f);
-            controls.Yaw = _actions.Axis(_devices, InputAxis.Yaw, keyboard);
             controls.Roll = _actions.Axis(_devices, InputAxis.Roll, keyboard);
             controls.Boost = _actions.Held(_devices, InputAction.Boost, keyboard);
 
-            var look = _devices.MouseDelta * (LookRadiansPerPixel * _settings.MouseSensitivity);
-            controls.LookYaw = look.X;
-            controls.LookPitch = -look.Y * (_settings.InvertPitch ? -1f : 1f);
+            // Pointer, arrow keys and right stick turn the view, not the hull.
+            var invert = _settings.InvertPitch ? -1f : 1f;
+            var pointer = _devices.MouseDelta * (LookRadiansPerPixel * _settings.MouseSensitivity);
+            var yaw = pointer.X + _actions.Axis(_devices, InputAxis.Yaw, keyboard) * LookRadiansPerSecond * dt;
+            var pitch = (-pointer.Y + _actions.Axis(_devices, InputAxis.Pitch, keyboard) * LookRadiansPerSecond * dt) * invert;
+            _lookDirection = Vector3.Transform(_lookDirection, Quaternion.CreateFromAxisAngle(_up, -yaw));
+            _lookDirection = Vector3.Normalize(Vector3.Transform(_lookDirection, Quaternion.CreateFromAxisAngle(_right, pitch)));
+
+            // Holding the free-look button looks around without committing the hull to anything; letting go
+            // returns the view to the nose. Otherwise the hull swings onto the view whenever it is under thrust.
+            var freeLook = _devices.MouseDown(GlfwMouseButton.Right);
+            if (_freeLook && !freeLook)
+                _lookDirection = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
+            _freeLook = freeLook;
+
+            var thrusting = controls.Strafe != 0 || controls.Vertical != 0 || controls.Forward != 0;
+            controls.Aim = _lookDirection;
+            controls.Align = thrusting && !freeLook;
         }
         else if (inputEnabled)
         {
@@ -420,17 +442,35 @@ internal sealed class WorldView
         _commandBlend += Math.Clamp(target - _commandBlend, -dt / 0.45f, dt / 0.45f);
         var t = _commandBlend * _commandBlend * (3f - 2f * _commandBlend);
 
-        // Chase: behind and above the hull, turning a little late so the hull visibly leads the camera.
+        // Chase: the camera looks where the player looks and sits behind the hull along that line. Its up follows
+        // the hull's, so rolling the hull rolls the view. The hull turns onto this line when it is under thrust.
         if (!_chaseInitialised)
         {
             _chaseOrientation = OwnOrientation;
+            _lookDirection = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
+            _cameraDirection = _lookDirection;
             _chaseInitialised = true;
         }
 
         _chaseOrientation = Quaternion.Slerp(_chaseOrientation, OwnOrientation, 1f - MathF.Exp(-11f * dt));
+        _cameraDirection = Vector3.Normalize(Vector3.Lerp(_cameraDirection, _lookDirection, 1f - MathF.Exp(-22f * dt)));
+        var hullUp = Vector3.Transform(Vector3.UnitY, _chaseOrientation);
+        var side = Vector3.Cross(_cameraDirection, hullUp);
+        if (side.LengthSquared() > 0.01f)
+            _chaseRight = Vector3.Normalize(side);
+        var chaseUp = Vector3.Normalize(Vector3.Cross(_chaseRight, _cameraDirection));
+        var chaseOrientation = Quaternion.CreateFromRotationMatrix(
+            new Matrix4x4(
+                _chaseRight.X, _chaseRight.Y, _chaseRight.Z, 0,
+                chaseUp.X, chaseUp.Y, chaseUp.Z, 0,
+                -_cameraDirection.X, -_cameraDirection.Y, -_cameraDirection.Z, 0,
+                0, 0, 0, 1
+            )
+        );
+
         var speed = Own.Velocity.Length();
         var pullBack = 1f + Math.Min(speed / 720f, 1f) * 0.25f;
-        var chasePosition = OwnPosition + Vector3.Transform(new Vector3(0, 2.6f, 11f * pullBack), _chaseOrientation);
+        var chasePosition = OwnPosition + chaseUp * 2.6f - _cameraDirection * (11f * pullBack);
 
         if (_commandFollow)
             _commandFocus = OwnPosition;
@@ -438,7 +478,7 @@ internal sealed class WorldView
         var commandPosition = _commandFocus + Vector3.Transform(new Vector3(0, 0, _commandDistance), commandOrientation);
 
         CameraPosition = Double3.Lerp(chasePosition, commandPosition, t);
-        var orientation = Quaternion.Slerp(_chaseOrientation, commandOrientation, t);
+        var orientation = Quaternion.Slerp(chaseOrientation, commandOrientation, t);
         _right = Vector3.Transform(Vector3.UnitX, orientation);
         _up = Vector3.Transform(Vector3.UnitY, orientation);
         _forward = Vector3.Transform(-Vector3.UnitZ, orientation);

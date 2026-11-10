@@ -58,11 +58,17 @@ public struct FlightInput
     private static sbyte Sanitize(byte raw) => Math.Max((sbyte)raw, (sbyte)-127);
 }
 
-/// <summary>How a hull flies. Derived from the hull's design.</summary>
+/// <summary>
+/// Everything the simulation needs to know about a hull design, worked out from its blocks: how it accelerates and
+/// turns, what it can take, and its power budget.
+/// </summary>
 public struct FlightParams
 {
     /// <summary>Thrust acceleration along the hull's right, up and forward axes, in m/s².</summary>
     public Vector3 Acceleration;
+
+    /// <summary>Acceleration available for braking and reversing, in m/s²; main engines only push forward.</summary>
+    public float ReverseAcceleration;
     public float BoostMultiplier;
     public float MaxSpeed;
     public float BoostMaxSpeed;
@@ -70,12 +76,46 @@ public struct FlightParams
     /// <summary>Maximum pitch, yaw and roll rates in rad/s.</summary>
     public Vector3 TurnRate;
 
-    /// <summary>How quickly the hull reaches a commanded turn rate, in rad/s².</summary>
-    public float TurnAcceleration;
+    /// <summary>How quickly the hull reaches a commanded pitch, yaw and roll rate, in rad/s².</summary>
+    public Vector3 TurnAcceleration;
 
     /// <summary>Heat gained per second of boost; the hull overheats at 1.</summary>
     public float HeatRate;
     public float CoolRate;
+
+    /// <summary>Mass in tonnes.</summary>
+    public float Mass;
+
+    /// <summary>Radius of the sphere around the centre of mass that contains the hull, in metres.</summary>
+    public float Radius;
+    public float HullPoints;
+    public float ShieldCapacity;
+
+    /// <summary>Shield points restored per second while recharging.</summary>
+    public float ShieldRecharge;
+
+    /// <summary>Seconds after taking damage before the shield starts to recharge.</summary>
+    public float ShieldDelay;
+
+    /// <summary>Generator output in megawatts.</summary>
+    public float PowerGenerated;
+
+    /// <summary>Megawatts drawn all the time, by thrusters at full thrust, and by shields while recharging.</summary>
+    public float IdlePower;
+    public float ThrustPower;
+    public float ShieldPower;
+    public float BoostPowerMultiplier;
+
+    /// <summary>Battery capacity in megajoules.</summary>
+    public float EnergyStorage;
+
+    /// <summary>Impacts slower than this do no damage, in m/s.</summary>
+    public float CollisionSafeSpeed;
+    public float CollisionDamagePerTonneSpeed;
+    public float CollisionBounce;
+
+    /// <summary>Megawatts needed with everything running at once, without boost.</summary>
+    public readonly float PowerRequired => IdlePower + ThrustPower + ShieldPower;
 }
 
 /// <summary>The moving state of one hull.</summary>
@@ -94,7 +134,24 @@ public struct HullState
     /// <summary>Set when the hull overheated; boost stays off until it has cooled most of the way down.</summary>
     public bool BoostLocked;
 
-    public static HullState At(Double3 position) => new() { Position = position, Orientation = Quaternion.Identity };
+    /// <summary>Stored energy in megajoules.</summary>
+    public float Energy;
+    public float Shield;
+    public float Hull;
+
+    /// <summary>Seconds until the shield may start recharging.</summary>
+    public float ShieldCooldown;
+
+    /// <summary>A hull at rest with full hull points, shield and battery.</summary>
+    public static HullState Spawn(Double3 position, in FlightParams p) =>
+        new()
+        {
+            Position = position,
+            Orientation = Quaternion.Identity,
+            Energy = p.EnergyStorage,
+            Shield = p.ShieldCapacity,
+            Hull = p.HullPoints,
+        };
 
     /// <summary>The hull's nose direction. Hulls face along their own -Z axis.</summary>
     public readonly Vector3 Forward => Vector3.Transform(-Vector3.UnitZ, Orientation);
@@ -102,8 +159,9 @@ public struct HullState
 
 /// <summary>
 /// The rigid-body flight model. Space is frictionless: velocity persists until thrust changes it. Dampeners are
-/// the hull's computer firing thrusters against any drift the pilot is not commanding. This one function is the
-/// whole of flight; the server runs it for authority and the client runs it to predict.
+/// the hull's computer firing thrusters against any drift the pilot is not commanding. Thrust, boost and shield
+/// recharge all draw power; the generator refills the battery with whatever is left over. This one function is
+/// the whole of flight; the server runs it for authority and the client runs it to predict.
 /// </summary>
 public static class FlightModel
 {
@@ -115,8 +173,7 @@ public static class FlightModel
         // Rotation: the commanded rate is approached at a limited angular acceleration.
         var target = new Vector3(input.Pitch * p.TurnRate.X, -input.Yaw * p.TurnRate.Y, -input.Roll * p.TurnRate.Z) * AxisScale;
         var maxDelta = p.TurnAcceleration * dt;
-        var delta = target - state.AngularVelocity;
-        state.AngularVelocity += Vector3.Clamp(delta, new Vector3(-maxDelta), new Vector3(maxDelta));
+        state.AngularVelocity += Vector3.Clamp(target - state.AngularVelocity, -maxDelta, maxDelta);
 
         var angle = state.AngularVelocity.Length() * dt;
         if (angle > 1e-7f)
@@ -125,41 +182,70 @@ public static class FlightModel
             state.Orientation = Quaternion.Normalize(state.Orientation * spin);
         }
 
-        // Boost and heat.
+        // Boost and heat. Boost needs charge in the battery as well as a cool drive.
         var thrust = new Vector3(input.Strafe, input.Vertical, -input.Forward) * AxisScale;
-        var boosting = input.Boost && !state.BoostLocked && thrust != Vector3.Zero;
+        var boosting = input.Boost && !state.BoostLocked && state.Energy > 0f && thrust != Vector3.Zero;
         state.Heat = Math.Clamp(state.Heat + (boosting ? p.HeatRate : -p.CoolRate) * dt, 0f, 1f);
         if (state.Heat >= 1f)
             state.BoostLocked = true;
         else if (state.BoostLocked && state.Heat <= BoostUnlockHeat)
             state.BoostLocked = false;
 
-        // Translation, in the hull's frame so each axis uses its own thrusters.
+        // Power: what the hull wants this tick against what the generator makes. The battery covers a shortfall
+        // and takes the surplus; with the battery flat, thrust is cut back to what the generator alone can feed.
+        state.ShieldCooldown = Math.Max(0f, state.ShieldCooldown - dt);
+        var thrustUse = Math.Max(MathF.Abs(thrust.X), Math.Max(MathF.Abs(thrust.Y), MathF.Abs(thrust.Z)));
+        var thrustDemand = p.ThrustPower * thrustUse * (boosting ? p.BoostPowerMultiplier : 1f);
+        var recharging = state.Shield < p.ShieldCapacity && state.ShieldCooldown <= 0f && state.Energy > 0f;
+        var demand = p.IdlePower + thrustDemand + (recharging ? p.ShieldPower : 0f);
+        state.Energy = Math.Clamp(state.Energy + (p.PowerGenerated - demand) * dt, 0f, p.EnergyStorage);
+
+        var thrustScale = 1f;
+        if (state.Energy <= 0f && demand > p.PowerGenerated)
+        {
+            recharging = false;
+            thrustScale = thrustDemand > 0f ? Math.Clamp((p.PowerGenerated - p.IdlePower) / thrustDemand, 0f, 1f) : 1f;
+        }
+
+        if (recharging)
+            state.Shield = Math.Min(p.ShieldCapacity, state.Shield + p.ShieldRecharge * dt);
+
+        // Translation, in the hull's frame so each axis uses its own thrusters. Forward is -Z; only the main
+        // engines push that way, so braking and reversing are weaker than accelerating.
         var toLocal = Quaternion.Conjugate(state.Orientation);
         var velocity = Vector3.Transform(state.Velocity, toLocal);
-        var acceleration = p.Acceleration * (boosting ? p.BoostMultiplier : 1f);
 
         if (input.Dampeners)
         {
-            var brake = p.Acceleration * dt;
             if (thrust.X == 0)
-                velocity.X -= Math.Clamp(velocity.X, -brake.X, brake.X);
+                velocity.X -= Math.Clamp(velocity.X, -p.Acceleration.X * dt, p.Acceleration.X * dt);
             if (thrust.Y == 0)
-                velocity.Y -= Math.Clamp(velocity.Y, -brake.Y, brake.Y);
+                velocity.Y -= Math.Clamp(velocity.Y, -p.Acceleration.Y * dt, p.Acceleration.Y * dt);
             if (thrust.Z == 0)
-                velocity.Z -= Math.Clamp(velocity.Z, -brake.Z, brake.Z);
+                velocity.Z -= Math.Clamp(velocity.Z, -p.Acceleration.Z * dt, p.ReverseAcceleration * dt);
         }
 
-        velocity += thrust * acceleration * dt;
+        var acceleration = new Vector3(p.Acceleration.X, p.Acceleration.Y, thrust.Z < 0 ? p.Acceleration.Z : p.ReverseAcceleration);
+        velocity += thrust * acceleration * ((boosting ? p.BoostMultiplier : 1f) * thrustScale * dt);
 
         // Above the hull's rated speed the drive sheds the excess rather than cutting it instantly.
         var limit = boosting ? p.BoostMaxSpeed : p.MaxSpeed;
         var speed = velocity.Length();
         if (speed > limit)
-            velocity *= Math.Max(limit, speed - p.Acceleration.Z * 2f * dt) / speed;
+            velocity *= Math.Max(limit, speed - p.ReverseAcceleration * 2f * dt) / speed;
 
         state.Velocity = Vector3.Transform(velocity, state.Orientation);
         state.Position += state.Velocity * dt;
+    }
+
+    /// <summary>Takes damage on the shield first and the hull after. Returns true if the hull was destroyed.</summary>
+    public static bool Damage(ref HullState state, in FlightParams p, float amount)
+    {
+        state.ShieldCooldown = p.ShieldDelay;
+        var absorbed = Math.Min(state.Shield, amount);
+        state.Shield -= absorbed;
+        state.Hull -= amount - absorbed;
+        return state.Hull <= 0f;
     }
 }
 
@@ -199,16 +285,15 @@ public static class Autopilot
             return input;
 
         // Aim for the fastest speed from which the weakest thrusters can still stop in the distance left.
-        var weakest = Math.Min(p.Acceleration.X, Math.Min(p.Acceleration.Y, p.Acceleration.Z));
+        var weakest = Math.Min(p.Acceleration.X, Math.Min(p.Acceleration.Y, p.ReverseAcceleration));
         var direction = toTarget / Math.Max(distance, 1e-3f);
         var desired = direction * Math.Min(p.MaxSpeed, MathF.Sqrt(2f * weakest * distance) * 0.8f);
 
         var toLocal = Quaternion.Conjugate(state.Orientation);
         var error = Vector3.Transform(desired - state.Velocity, toLocal);
-        var perTick = p.Acceleration * dt;
-        input.Strafe = FlightInput.Quantize(error.X / perTick.X);
-        input.Vertical = FlightInput.Quantize(error.Y / perTick.Y);
-        input.Forward = FlightInput.Quantize(-error.Z / perTick.Z);
+        input.Strafe = FlightInput.Quantize(error.X / (p.Acceleration.X * dt));
+        input.Vertical = FlightInput.Quantize(error.Y / (p.Acceleration.Y * dt));
+        input.Forward = FlightInput.Quantize(-error.Z / ((error.Z < 0 ? p.Acceleration.Z : p.ReverseAcceleration) * dt));
 
         // Point the nose along the route while there is still some way to go.
         if (distance > 25f)
@@ -221,62 +306,5 @@ public static class Autopilot
         }
 
         return input;
-    }
-}
-
-/// <summary>A hull design loaded from <c>content/ships</c>: its blocks and the flight figures that follow.</summary>
-public sealed class HullDesign
-{
-    public required string Name { get; init; }
-    public required float BlockSize { get; init; }
-
-    /// <summary>Grid cells occupied by a block.</summary>
-    public required (int X, int Y, int Z)[] Blocks { get; init; }
-    public required Vector3 Color { get; init; }
-    public required FlightParams Flight { get; init; }
-
-    public static HullDesign Load(string path)
-    {
-        using var document = JsonDocument.Parse(File.ReadAllBytes(path));
-        var root = document.RootElement;
-
-        var blocks = new List<(int, int, int)>();
-        foreach (var block in root.GetProperty("blocks"u8).EnumerateArray())
-            blocks.Add((block[0].GetInt32(), block[1].GetInt32(), block[2].GetInt32()));
-        if (blocks.Count == 0)
-            throw new InvalidDataException($"{path}: a hull needs at least one block");
-
-        var flight = root.GetProperty("flight"u8);
-        var acceleration = flight.GetProperty("acceleration"u8);
-        var turn = flight.GetProperty("turnRateDegrees"u8);
-        var color = root.GetProperty("color"u8);
-        const float radians = MathF.PI / 180f;
-
-        return new HullDesign
-        {
-            Name = root.GetProperty("name"u8).GetString()!,
-            BlockSize = root.GetProperty("blockSize"u8).GetSingle(),
-            Blocks = [.. blocks],
-            Color = new Vector3(color[0].GetSingle(), color[1].GetSingle(), color[2].GetSingle()),
-            Flight = new FlightParams
-            {
-                Acceleration = new Vector3(
-                    acceleration.GetProperty("strafe"u8).GetSingle(),
-                    acceleration.GetProperty("vertical"u8).GetSingle(),
-                    acceleration.GetProperty("forward"u8).GetSingle()
-                ),
-                BoostMultiplier = flight.GetProperty("boostMultiplier"u8).GetSingle(),
-                MaxSpeed = flight.GetProperty("maxSpeed"u8).GetSingle(),
-                BoostMaxSpeed = flight.GetProperty("boostMaxSpeed"u8).GetSingle(),
-                TurnRate = new Vector3(
-                    turn.GetProperty("pitch"u8).GetSingle(),
-                    turn.GetProperty("yaw"u8).GetSingle(),
-                    turn.GetProperty("roll"u8).GetSingle()
-                ) * radians,
-                TurnAcceleration = flight.GetProperty("turnAccelerationDegrees"u8).GetSingle() * radians,
-                HeatRate = 1f / flight.GetProperty("boostHeatSeconds"u8).GetSingle(),
-                CoolRate = 1f / flight.GetProperty("coolSeconds"u8).GetSingle(),
-            },
-        };
     }
 }

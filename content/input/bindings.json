@@ -9,7 +9,8 @@
     "ToggleCommand": ["Key:N", "Pad:Back"],
     "ToggleMap": ["Key:M", "Pad:Y"],
     "Halt": ["Key:H", "Pad:B"],
-    "Follow": ["Key:F", "Pad:RightThumb"]
+    "Follow": ["Key:F", "Pad:RightThumb"],
+    "ShipInfo": ["Key:I", "Pad:DpadUp"]
   },
   "axes": {
     "Strafe": [{ "negative": "Key:A", "positive": "Key:D" }, { "axis": "Pad:LeftX" }],

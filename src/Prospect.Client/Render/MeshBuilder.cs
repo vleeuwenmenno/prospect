@@ -33,15 +33,12 @@ internal static class MeshBuilder
     /// </summary>
     public static MeshData Hull(HullDesign design)
     {
-        var occupied = new HashSet<(int, int, int)>(design.Blocks);
-        var center = Vector3.Zero;
-        foreach (var (x, y, z) in design.Blocks)
-            center += new Vector3(x, y, z);
-        center /= design.Blocks.Length;
+        var occupied = new HashSet<(int, int, int)>(design.Cells);
+        var center = design.CenterOfMass;
 
         var mesh = new MeshData();
         var half = 0.5f;
-        foreach (var (x, y, z) in design.Blocks)
+        foreach (var (x, y, z) in design.Cells)
         {
             var blockCenter = new Vector3(x, y, z) - center;
             foreach (var (nx, ny, nz) in FaceNormals)
