@@ -198,6 +198,12 @@ public sealed class WorldSettingCatalog
     /// <summary>The most options a choice may have.</summary>
     public const int MaxOptions = 16;
 
+    /// <summary>
+    /// The one name in a file of values that is not a world setting: a dedicated server reads its own name,
+    /// visibility and password from the object under it. No setting may have it as its id.
+    /// </summary>
+    public const string ReservedId = "server";
+
     /// <summary>The most bytes a world's settings take on the wire: a count, then an id and a value for each.</summary>
     public const int MaxWireSize = 1 + WorldSettings.Capacity * (1 + MaxIdLength + 4);
 
@@ -300,6 +306,10 @@ public sealed class WorldSettingCatalog
 
         foreach (var entry in document.RootElement.EnumerateObject())
         {
+            // A server keeps its own name, visibility and password in the same file, under this one name.
+            if (entry.Name.Equals(ReservedId, StringComparison.OrdinalIgnoreCase))
+                continue;
+
             var definition = Find(entry.Name);
             if (definition is null)
             {
@@ -406,6 +416,8 @@ public sealed class WorldSettingCatalog
             throw new InvalidDataException($"{where}: the id \"{id}\" must be 1 to {MaxIdLength} letters and digits");
 
         where = $"{source}: setting \"{id}\"";
+        if (id.Equals(ReservedId, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException($"{where}: that name is taken by the server's own section of a settings file");
         foreach (var other in earlier)
         {
             if (other.Id.Equals(id, StringComparison.OrdinalIgnoreCase))

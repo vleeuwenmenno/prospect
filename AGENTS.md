@@ -11,6 +11,7 @@ to work.
 - `docs/direction.md`: what the game is, what is decided, what is still open, networking goals.
 - `docs/blocks-at-scale.md`: the plan for ships of thousands of blocks: data, network, collision, drawing, stages.
 - `docs/listing-server.md`: the listing server: its HTTP contract for the game side, configuration, deployment.
+- `docs/hosting.md`: visibility, hosting a local game, the password handshake, the game's side of the listing server.
 - `docs/releasing.md`: release tags, the workflow, the container images and how to run them.
 - An item under "Open" is not decided. Ask; do not guess and build.
 - When a decision is made in conversation, move it from "Open" to "Decided" in the same change.
@@ -62,6 +63,14 @@ Always wrap long test runs in `timeout`; a session test that waits on the simula
 ## When you change something
 
 - **Wire format:** bump `ProtocolInfo.Version` in `Protocol/Messages.cs`, and update `MaxWireSize` constants.
+- **The handshake or the password:** the scheme is written down in `Passwords` and `docs/hosting.md`; change
+  both, bump `ProtocolInfo.Version`, and keep `HostingTests` passing. Keep the first field of `Hello` and of
+  `Reject` where they are, so two versions can still tell each other they differ. A proof is checked once per
+  connection, and never while the address is locked out.
+- **Anything that talks to the listing server:** it goes through `ListingHttp` (time-out, size limit, no
+  redirects) and runs off the tick and the frame loop. Nothing the service sends is trusted. `ListingTests` runs
+  the real service in-process, so a change to the contract on either side must pass there; `Prospect.Tests`
+  therefore builds `Prospect.Listing` and needs the ASP.NET Core runtime.
 - **Shaders:** files in `assets/shaders/` are compiled at startup. Check them first with
   `glslc -I assets/shaders assets/shaders/<file> -o /dev/null`. `frame.glsl` must match `FrameConstants` field for
   field.
@@ -98,6 +107,9 @@ The client opens a real window on the developer's desktop, and they are usually 
   looks along the nose, `150` nearly back). Use it to check that an effect follows the hull, not the view.
 - Captures time themselves by the wall clock and present without vsync, so they also run while the display is
   asleep.
+- `--host unlisted|public` hosts the local game for others and opens UDP 27420 on the developer's machine; add
+  `--host-port <n>` to stay clear of a server running there, and `--listing off` unless the capture is about
+  the list. `--bench` is always a private game.
 - `--sector x,y,z` starts the local game in that sector instead of the home sector; it works with `--capture`
   and `--bench`. With the default seed: `-40,0,-29` is the densest sector near home (3,663 asteroids), `8,0,-8`
   is very rich with five resources, `6,0,-26` has an asteroid 2.3 km across 2.2 km from the arrival point.
@@ -140,6 +152,8 @@ The client opens a real window on the developer's desktop, and they are usually 
 - A hull knocked back by a hit is not checked against a third hull until the next tick, so the two can overlap
   for one tick.
 - A player's hulls are removed when they disconnect.
+- Networking is IPv4 only (BRUTAL's RakNet binding), there is no NAT traversal, and game traffic is not
+  encrypted: a password protects itself, nothing else.
 
 ## Who does the work
 

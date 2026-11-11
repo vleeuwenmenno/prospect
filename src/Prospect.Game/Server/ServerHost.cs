@@ -1,6 +1,9 @@
+using System.Diagnostics;
+using System.Security.Cryptography;
 using Prospect.Engine.Diagnostics;
 using Prospect.Engine.Net;
 using Prospect.Engine.Time;
+using Prospect.Game.Lobby;
 using Prospect.Game.Protocol;
 using Prospect.Game.World;
 
@@ -8,8 +11,32 @@ namespace Prospect.Game.Server;
 
 public sealed class ServerConfig
 {
-    public string Name { get; init; } = "PROSPECT server";
+    /// <summary>
+    /// The name the host chose, shown to players and on the list. It must pass
+    /// <see cref="ServerNames.TryNormalize"/>: 1 to 48 characters once cleaned, as the listing server demands.
+    /// </summary>
+    public string Name { get; init; } = ServerNames.Default;
+
+    /// <summary>Player slots, the host of a local game included.</summary>
     public int MaxPlayers { get; init; } = 16;
+
+    /// <summary>
+    /// Who can find and join the game. Private opens no network listener at all; unlisted and public listen on
+    /// UDP <see cref="Port"/>; only public announces itself to <see cref="Listing"/>.
+    /// </summary>
+    public ServerVisibility Visibility { get; init; } = ServerVisibility.Private;
+
+    /// <summary>
+    /// The password a player joining over the network must know, or null for none. It never travels: see
+    /// <see cref="Passwords"/>. The host's own client, on the in-process link, is not asked for it.
+    /// </summary>
+    public string? Password { get; init; }
+
+    /// <summary>The UDP port an unlisted or public game listens on.</summary>
+    public ushort Port { get; init; } = ProtocolInfo.DefaultPort;
+
+    /// <summary>The listing server a public game announces itself to, or null to announce nowhere.</summary>
+    public ListingConfig? Listing { get; init; }
     public ulong GalaxySeed { get; init; } = 0x50524F5350454354;
 
     /// <summary>
@@ -53,6 +80,9 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
     {
         Free,
         AwaitingHello,
+
+        /// <summary>The hello was good and the server has a password: a challenge is out and the proof is awaited.</summary>
+        AwaitingProof,
         Active,
     }
 
@@ -64,6 +94,12 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         public uint PlayerId;
         public string Name = "";
         public long ConnectedTick;
+
+        /// <summary>The random bytes this connection was challenged with; meaningful only while a proof is awaited.</summary>
+        public readonly byte[] Challenge = new byte[Passwords.ChallengeSize];
+
+        /// <summary>The address the connection comes from, as wrong passwords are counted by.</summary>
+        public ulong Origin;
 
         public HullHandle Hull;
         public readonly InputRecord[] Inputs = new InputRecord[InputQueueSize];
@@ -84,6 +120,8 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
             State = ConnectionState.Free;
             Transport = null!;
             Name = "";
+            Origin = 0;
+            Array.Clear(Challenge);
             Hull = default;
             InputHead = InputCount = 0;
             LastQueuedSequence = LastSimulatedSequence = 0;
@@ -104,15 +142,65 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
     private readonly GameContent _content;
     private readonly RockField _rocks;
     private readonly RockImpulses _impulses = new();
+    private readonly string _name;
+
+    // The password as the handshake uses it: the key derived from it under this run's salt. Null without one.
+    private readonly byte[] _salt = new byte[Passwords.SaltSize];
+    private readonly byte[]? _passwordKey;
+    private readonly AttemptLimiter _attempts = new();
+    private readonly ListingAnnouncer? _announcer;
 
     private long _tick;
     private uint _nextPlayerId = 1;
     private int _playerCount;
 
+    /// <summary>
+    /// Sets up a server. <paramref name="transports"/> are the links the caller brings: the in-process one of a
+    /// local game, or one a test made. An unlisted or public server opens its own UDP listener on top of them.
+    /// Throws <see cref="InvalidDataException"/> for a name or password that cannot be used, and
+    /// <see cref="IOException"/> when the UDP port cannot be opened.
+    /// </summary>
     public ServerHost(ServerConfig config, GameContent content, params ITransport[] transports)
     {
         _config = config;
+        try
+        {
+            if (!ServerNames.TryNormalize(config.Name, out _name))
+                throw new InvalidDataException($"A server's name must be 1 to {ServerNames.MaxLength} characters.");
+            if (config.Password is not null && !Passwords.IsUsable(config.Password))
+                throw new InvalidDataException($"A server's password must be 1 to {Passwords.MaxChars} characters, without control characters.");
+            if (config.MaxPlayers is < 1 or > ushort.MaxValue)
+                throw new InvalidDataException($"A server has 1 to {ushort.MaxValue} player slots.");
+
+            if (config.Password is not null)
+            {
+                RandomNumberGenerator.Fill(_salt);
+                _passwordKey = new byte[Passwords.KeySize];
+                Passwords.DeriveKey(config.Password, _salt, _passwordKey);
+            }
+
+            // A private game is the host alone: no socket is opened, so there is nothing to connect to.
+            if (config.Visibility != ServerVisibility.Private)
+                transports = [.. transports, RakNetTransport.Listen(config.Port, config.MaxPlayers + 8)];
+        }
+        catch
+        {
+            _hulls.Dispose();
+            throw;
+        }
+
         _transports = transports;
+        if (config.Visibility == ServerVisibility.Public && config.Listing is { } listing)
+        {
+            _announcer = new ListingAnnouncer(
+                listing,
+                _name,
+                config.Port,
+                config.MaxPlayers,
+                _passwordKey is not null,
+                () => Volatile.Read(ref _playerCount)
+            );
+        }
 
         // From here on the server only knows the content as its own world's settings make it.
         _content = content.WithSettings(config.Settings ?? content.SettingCatalog.Defaults);
@@ -146,21 +234,49 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
 
     public bool IsRunning => _loop.IsRunning;
 
-    public void Start() => _loop.Start();
+    /// <summary>The server's name as players see it.</summary>
+    public string Name => _name;
 
-    /// <summary>Stops the tick thread, closes every transport and frees the world.</summary>
+    /// <summary>Who can find and join this server.</summary>
+    public ServerVisibility Visibility => _config.Visibility;
+
+    /// <summary>Where a public server stands with the listing server; off for any other. Safe from any thread.</summary>
+    public AnnounceState Announce => _announcer?.State ?? AnnounceState.Off;
+
+    public void Start()
+    {
+        _loop.Start();
+        _announcer?.Start();
+    }
+
+    /// <summary>
+    /// Stops the tick thread, closes every transport and frees the world. A public server also takes itself
+    /// off the list, which may take a few seconds when the listing server is slow.
+    /// </summary>
     public void Dispose()
     {
+        // The removal runs on its own while the simulation and the sockets shut down.
+        _announcer?.BeginStop();
         _loop.Stop();
         foreach (var transport in _transports)
             transport.Dispose();
         _hulls.Dispose();
+        _announcer?.Dispose();
     }
 
     void ITickHandler.OnStart()
     {
         foreach (var transport in _transports)
-            Logs.Sim.Info($"Server '{_config.Name}' up on {transport.Description}, {_config.MaxPlayers} player slots");
+            Logs.Sim.Info($"Server '{_name}' up on {transport.Description}, {_config.MaxPlayers} player slots");
+        Logs.Sim.Info(
+            _config.Visibility switch
+            {
+                ServerVisibility.Private => "Private: nobody can join",
+                ServerVisibility.Unlisted => $"Unlisted: joined by address, {(_passwordKey is null ? "no password" : "with a password")}",
+                _ when _announcer is null => $"Public, but there is no listing server to announce to; {(_passwordKey is null ? "no password" : "with a password")}",
+                _ => $"Public: announcing to {_config.Listing!.Url.Host}, {(_passwordKey is null ? "no password" : "with a password")}",
+            }
+        );
 
         // Whoever reads the log should be able to tell how this world differs from a plain one.
         var catalog = _content.SettingCatalog;
@@ -197,7 +313,8 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
 
         foreach (var connection in _connections)
         {
-            if (connection.State == ConnectionState.AwaitingHello && tick - connection.ConnectedTick > HandshakeTimeoutTicks)
+            var shakingHands = connection.State is ConnectionState.AwaitingHello or ConnectionState.AwaitingProof;
+            if (shakingHands && tick - connection.ConnectedTick > HandshakeTimeoutTicks)
                 Refuse(connection, RejectReason.BadHandshake);
             else if (connection.State == ConnectionState.Active)
                 SimulatePlayer(connection);
@@ -246,7 +363,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         }
 
         Volatile.Write(ref _playerCount, 0);
-        Logs.Sim.Info($"Server '{_config.Name}' stopped at tick {_tick}");
+        Logs.Sim.Info($"Server '{_name}' stopped at tick {_tick}");
     }
 
     void ITransportHandler.OnConnected(ITransport transport, int peer)
@@ -299,7 +416,17 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         if (connection.State == ConnectionState.AwaitingHello)
         {
             if (id == MessageId.Hello && channel == NetChannel.Reliable && HelloMessage.TryRead(ref reader, out var hello))
-                Admit(connection, hello);
+                Greet(connection, hello);
+            else
+                Refuse(connection, RejectReason.BadHandshake);
+            return;
+        }
+
+        if (connection.State == ConnectionState.AwaitingProof)
+        {
+            Span<byte> proof = stackalloc byte[Passwords.ProofSize];
+            if (id == MessageId.Proof && channel == NetChannel.Reliable && ProofMessage.TryRead(ref reader, proof))
+                CheckProof(connection, proof);
             else
                 Refuse(connection, RejectReason.BadHandshake);
             return;
@@ -603,7 +730,11 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         connection.Transport.Send(connection.Peer, NetChannel.Unreliable, _sendBuffer.AsSpan(0, length));
     }
 
-    private void Admit(Connection connection, in HelloMessage hello)
+    /// <summary>
+    /// Answers a hello. Without a password, or on the in-process link of the host's own client, the player is
+    /// let in. Otherwise the answer is a challenge, unless the address has sent too many wrong passwords.
+    /// </summary>
+    private void Greet(Connection connection, in HelloMessage hello)
     {
         if (hello.ProtocolVersion != ProtocolInfo.Version)
         {
@@ -617,9 +748,67 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
             return;
         }
 
+        connection.Name = hello.PlayerName;
+        if (_passwordKey is null || connection.Transport.IsInProcess)
+        {
+            Admit(connection);
+            return;
+        }
+
+        connection.Origin = connection.Transport.GetPeerOrigin(connection.Peer);
+        var wait = _attempts.SecondsBlocked(connection.Origin, Stopwatch.GetTimestamp());
+        if (wait > 0)
+        {
+            Refuse(connection, RejectReason.TooManyAttempts, wait);
+            return;
+        }
+
+        // Fresh random bytes for this connection alone: a proof overheard on another one answers a different challenge.
+        RandomNumberGenerator.Fill(connection.Challenge);
+        connection.State = ConnectionState.AwaitingProof;
+        var writer = new NetWriter(_sendBuffer);
+        ChallengeMessage.Write(ref writer, _salt, connection.Challenge);
+        connection.Transport.Send(connection.Peer, NetChannel.Reliable, writer.Written);
+    }
+
+    /// <summary>
+    /// Judges the proof a challenged connection sent. A connection gets one try: right lets the player in, wrong
+    /// is counted against the address and the connection is closed.
+    /// </summary>
+    private void CheckProof(Connection connection, ReadOnlySpan<byte> proof)
+    {
+        // Asked again here: several connections from one address may have been challenged before the first failed.
+        var now = Stopwatch.GetTimestamp();
+        var wait = _attempts.SecondsBlocked(connection.Origin, now);
+        if (wait > 0)
+        {
+            Refuse(connection, RejectReason.TooManyAttempts, wait);
+            return;
+        }
+
+        if (!Passwords.Verify(_passwordKey, _salt, connection.Challenge, proof))
+        {
+            _attempts.RecordFailure(connection.Origin, now);
+            Refuse(connection, RejectReason.WrongPassword);
+            return;
+        }
+
+        // The slot may have gone to someone else while this player was proving themselves.
+        if (_playerCount >= _config.MaxPlayers)
+        {
+            Refuse(connection, RejectReason.ServerFull);
+            return;
+        }
+
+        Admit(connection);
+    }
+
+    /// <summary>Lets a player in: gives them their fleet and tells them about the world.</summary>
+    private void Admit(Connection connection)
+    {
+        Array.Clear(connection.Challenge);
         connection.State = ConnectionState.Active;
         connection.PlayerId = _nextPlayerId++;
-        connection.Name = hello.PlayerName;
         Volatile.Write(ref _playerCount, _playerCount + 1);
 
         // Each player's group arrives in its own lane beside the spawn point, the pod in front and the rest of
@@ -643,9 +832,12 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
             TickRate = TickLoop.SimulationHz,
             ServerTick = _tick,
             GalaxySeed = _config.GalaxySeed,
-            ServerName = _config.Name,
+            ServerName = _name,
             HullId = connection.Hull.Packed,
             Settings = _content.Settings,
+            Visibility = _config.Visibility,
+            PasswordProtected = _passwordKey is not null,
+            MaxPlayers = (ushort)_config.MaxPlayers,
         };
         var writer = new NetWriter(_sendBuffer);
         welcome.Write(ref writer, _content.SettingCatalog);
@@ -658,11 +850,10 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         Logs.Sim.Info($"{connection.Name} joined as player {connection.PlayerId} via {connection.Transport.Description}");
     }
 
-    private void Refuse(Connection connection, RejectReason reason)
+    private void Refuse(Connection connection, RejectReason reason, int retryAfterSeconds = 0)
     {
         var writer = new NetWriter(_sendBuffer);
-        writer.WriteByte((byte)MessageId.Reject);
-        writer.WriteByte((byte)reason);
+        new RejectMessage { Reason = reason, RetryAfterSeconds = (ushort)Math.Clamp(retryAfterSeconds, 0, ushort.MaxValue) }.Write(ref writer);
         connection.Transport.Send(connection.Peer, NetChannel.Reliable, writer.Written);
         connection.Transport.Disconnect(connection.Peer);
         Logs.Sim.Info($"Refused a connection on {connection.Transport.Description}: {reason}");

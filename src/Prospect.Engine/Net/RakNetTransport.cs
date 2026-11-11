@@ -33,6 +33,14 @@ public sealed unsafe class RakNetTransport : ITransport
 
     public int MaxPayloadSize => MaxPayload;
 
+    public bool IsInProcess => false;
+
+    /// <summary>
+    /// False: BRUTAL's RakNet binding only carries IPv4 addresses, so this transport neither listens on nor
+    /// connects to IPv6.
+    /// </summary>
+    public static bool SupportsIpv6 => false;
+
     /// <summary>Starts listening for clients on a UDP port.</summary>
     public static RakNetTransport Listen(ushort port, int maxPeers)
     {
@@ -140,6 +148,16 @@ public sealed unsafe class RakNetTransport : ITransport
         if ((uint)peer >= (uint)_peers.Length || !_peers[peer].Active)
             return -1;
         return _rak.GetAveragePing(new AddressOrGUID(_peers[peer].Guid));
+    }
+
+    public ulong GetPeerOrigin(int peer)
+    {
+        if ((uint)peer >= (uint)_peers.Length || !_peers[peer].Active)
+            return 0;
+
+        // The binding only knows IPv4: the four address bytes, under a marker bit so no address reads as zero.
+        ref readonly var bytes = ref _peers[peer].Address.Address.Addr4.SinAddr.SUn.SUnB;
+        return 1UL << 32 | (ulong)bytes.SB1 << 24 | (ulong)bytes.SB2 << 16 | (ulong)bytes.SB3 << 8 | bytes.SB4;
     }
 
     public void Dispose()

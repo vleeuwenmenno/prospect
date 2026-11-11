@@ -57,6 +57,8 @@ public sealed class LoopbackLink : IDisposable
 
         public int MaxPayloadSize => _outgoing.MaxMessageSize;
 
+        public bool IsInProcess => true;
+
         public void Poll(ITransportHandler handler)
         {
             while (!_closed && _incoming.TryRead(_scratch, out var tag, out var length))
@@ -97,6 +99,8 @@ public sealed class LoopbackLink : IDisposable
         }
 
         public int GetRoundTripMs(int peer) => 0;
+
+        public ulong GetPeerOrigin(int peer) => 0;
 
         public void Dispose() => Disconnect(0);
     }

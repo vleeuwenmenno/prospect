@@ -48,9 +48,20 @@ GitHub Container Registry, under the repository owner (lower-case). Each is tagg
 docker run -d -p 27420:27420/udp ghcr.io/<owner>/prospect-server:latest --name "My server"
 ```
 
-- Game port: UDP `27420`. Change it with `--port` and publish the same port.
-- Everything after the image name is the server's command line (`--help` lists it): `--name`, `--max-players`,
-  `--seed`, `--settings`, `--set id=value`.
+- Game port: UDP `27420`. Change it with `--port` and publish the same port on the host: a public server tells
+  the list the port it listens on.
+- Everything after the image name is the server's command line (`--help` lists it): `--name`, `--visibility`,
+  `--port`, `--max-players`, `--password`, `--listing`, `--seed`, `--settings`, `--set id=value`.
+- Unlisted by default: joined by address. `--visibility public` announces it to the listing server
+  (`https://mvl.sh`; `--listing <url>` for another, `--listing off` for none).
+- The password goes in the `PROSPECT_PASSWORD` environment variable, not on the command line:
+
+```sh
+docker run -d -p 27420:27420/udp -e PROSPECT_PASSWORD='open sesame' \
+  ghcr.io/<owner>/prospect-server:latest --name "My server" --visibility public
+```
+
+- The password protects itself, not the traffic: game packets are not encrypted. See [hosting.md](hosting.md).
 - World settings from a file: mount it read-only and point `--settings` at it. The container runs as an
   unprivileged user, so the file must be world-readable.
 
@@ -59,6 +70,8 @@ docker run -d -p 27420:27420/udp -v ./settings.json:/config/settings.json:ro \
   ghcr.io/<owner>/prospect-server:latest --settings /config/settings.json --set <id>=<value>
 ```
 
+- The file can also hold the server's name, visibility, port, player slots, password and listing address under
+  `"server"`; see [hosting.md](hosting.md). A world-readable file is no place for a password: use the variable.
 - The server writes no files. Nothing needs a volume.
 - Ids and ranges for settings: `content/rules/settings.json`.
 

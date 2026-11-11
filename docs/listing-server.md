@@ -5,7 +5,7 @@ for the list. Ours runs at `mvl.sh`, behind a reverse proxy that terminates TLS.
 
 - Code: `src/Prospect.Listing` (ASP.NET Core, no database). Tests: `tests/Prospect.Listing.Tests`.
 - The list lives in memory. After a restart it is whole again within 90 seconds, from heartbeats.
-- Not connected to the game yet: the game server and the client will use the contract below.
+- The game's side (announcer, server browser) is in `src/Prospect.Game/Lobby`; see [hosting.md](hosting.md).
 
 ## Contract, version 1
 
