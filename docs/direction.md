@@ -31,6 +31,12 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
   rift). No range limit yet; limits come later from modules, power and mass.
 - **Resources.** Asteroids carry ore: iron, copper, nickel, titanium, silver, gold. More kinds later.
 
+## Decided: world settings
+
+- **A world has settings:** switches and multipliers, chosen when a new game or a server is set up.
+- **The server owns them.** A client is told on joining and plays by them.
+- **First ones:** how hard collisions hit, and what shields do against a collision. Many more follow.
+
 ## Decided: building
 
 - **Big builds that stay smooth.** A ship has thousands of blocks; a station can reach about 150,000. 20 ships

@@ -45,7 +45,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   drive charges.
 - **Resources.** Asteroids carry iron, copper, nickel, titanium, silver or gold, or are bare rock; a sector has a
   main ore, and the rarer ones grow more common toward the core. Nothing can be mined yet.
-- **Fleet.** Each player starts with the command pod and two mining vessels. Hulls nobody is flying are flown by
+- **Fleet.** Each player starts with the command pod (hyperspace drive), a mining vessel (wormhole) and a survey vessel (rift). Hulls nobody is flying are flown by
   the server under their standing orders.
 - **Command view.** One key pulls the camera back from the pod into a free orbiting view over the same space.
   Click or drag a box to select hulls, right-click to send them somewhere in formation; a fleet list on the right
