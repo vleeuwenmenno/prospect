@@ -164,6 +164,8 @@ public sealed class BlockCatalog
             FtlTunnelSeconds = r.GetProperty("ftlTunnelSeconds"u8).GetSingle(),
             FtlArriveSeconds = r.GetProperty("ftlArriveSeconds"u8).GetSingle(),
         };
+        if (!float.IsFinite(rules.FtlCalculateSeconds) || rules.FtlCalculateSeconds < 0)
+            throw new InvalidDataException($"{path}: ftlCalculateSeconds must be finite and nonnegative");
 
         static float Number(JsonElement block, ReadOnlySpan<byte> name) =>
             block.TryGetProperty(name, out var value) ? value.GetSingle() : 0f;

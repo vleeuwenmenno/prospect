@@ -10,6 +10,81 @@ namespace Prospect.Tests;
 /// <summary>Manual real-session ticks exercise the authoritative and predicted jump gates without windows.</summary>
 public sealed class JumpCalculationSessionTests
 {
+    [Theory]
+    [InlineData(3)]
+    [InlineData(8)]
+    public void PendingInputsPreserveCalculationAcrossReconciliationAndRetargetOnce(int lead)
+    {
+        var content = GameContent.Load();
+        using var link = new LoopbackLink();
+        using var server = new ServerHost(new ServerConfig { MaxPlayers = 1 }, content, link.Server);
+        using var client = new ClientSession(link.Client, content, "Pilot");
+        long tick = 0;
+        void Step()
+        {
+            ((ITickHandler)server).Tick(tick++);
+            ((ITickHandler)client).Tick(0);
+        }
+        HullView Own()
+        {
+            var view = client.AcquireSnapshot();
+            return view.Hulls[view.OwnHull];
+        }
+        for (var i = 0; i < 10; i++) Step();
+        var target = Own().Position + new System.Numerics.Vector3(0, 0, -1e6f);
+        var replacement = target + new System.Numerics.Vector3(0, 0, -1000);
+        client.Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = target });
+        // The server's input credit keeps these extra inputs pending through later snapshots.
+        for (var i = 0; i < lead; i++) ((ITickHandler)client).Tick(0);
+        var previous = 0f;
+        var resets = 0;
+        var arrived = false;
+        for (var i = 0; i < 1300; i++)
+        {
+            if (i == 300)
+                client.Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = replacement });
+            Step();
+            var own = Own();
+            if (own.Jump == JumpPhase.Charge)
+            {
+                if (own.JumpCalculation + 0.0001f < previous)
+                {
+                    resets++;
+                    Assert.InRange(i, 300, 300 + lead);
+                }
+                previous = own.JumpCalculation;
+                if (i == 299) Assert.InRange(previous, 4.9f, 5.2f);
+                if (i == 600) Assert.InRange(previous, 4.9f, 5.2f);
+            }
+            if (own.Jump == JumpPhase.Tunnel)
+            {
+                Assert.True(i > 1000);
+                Assert.True(own.Position.RelativeTo(replacement).Length() < 1);
+                arrived = true;
+                break;
+            }
+        }
+        Assert.True(arrived);
+        Assert.Equal(1, resets);
+    }
+
+    [Theory]
+    [InlineData("-1")]
+    [InlineData("1e100")]
+    public void InvalidCalculationDurationFailsAtContentLoad(string number)
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            var source = Path.Combine(AppContext.BaseDirectory, "content", "blocks", "blocks.json");
+            var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(source))!;
+            json["rules"]!["ftlCalculateSeconds"] = System.Text.Json.Nodes.JsonNode.Parse(number);
+            File.WriteAllText(path, json.ToJsonString());
+            Assert.Contains("ftlCalculateSeconds", Assert.Throws<InvalidDataException>(() => BlockCatalog.Load(path)).Message);
+        }
+        finally { File.Delete(path); }
+    }
+
     [Fact]
     public void AuthoritativeSlowChargeWaitsForEnergyAfterCalculationFinishes()
     {
