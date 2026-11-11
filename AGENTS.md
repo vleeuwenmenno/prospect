@@ -124,8 +124,8 @@ The client opens a real window on the developer's desktop, and they are usually 
   `--host-port <n>` to stay clear of a server running there, and `--listing off` unless the capture is about
   the list. `--bench` is always a private game.
 - `--sector x,y,z` starts the local game in that sector instead of the home sector; it works with `--capture`
-  and `--bench`. With the default seed: `-40,0,-29` is the densest sector near home (3,663 asteroids), `8,0,-8`
-  is very rich with five resources, `6,0,-26` has an asteroid 2.3 km across 2.2 km from the arrival point.
+  and `--bench`. With the default seed: `-40,0,-29` is the densest sector near home (4,096 asteroids, the per-sector cap), `8,0,-8`
+  is very rich with five resources, `-14,0,-2` (1,377 asteroids) has an asteroid 5.7 km across 1.1 km from the arrival point.
 - The window size is whatever the tiling compositor gives it; check with `magick identify` before cropping.
 - Debug builds run with validation layers when `.tools/` exists. Any validation message is a bug.
 - What cannot be checked this way and needs the developer: how flight feels, mouse and keyboard interaction,

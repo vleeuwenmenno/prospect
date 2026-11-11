@@ -610,7 +610,8 @@ public sealed class GalaxyTests
             }
         }
 
-        Assert.True(checkedRocks > 1000);
+        // Rocks sit about twice as far apart as they once did, so a probe meets fewer: 903 in this sample.
+        Assert.True(checkedRocks > 500, $"checked {checkedRocks}");
 
         // It is an index, not a list: a probe is handed a small part of the sector.
         Assert.True(returned / probes < content.AsteroidCount / 8, $"{returned / probes} of {content.AsteroidCount} asteroids per probe");
