@@ -416,8 +416,9 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
-    /// Players, Social and Chat at the top right. They answer the pointer only while it is shown (the release key
-    /// held, or a surface open); a captured pointer is not seen by the interface at all, so they are drawn dimmed.
+    /// Players, Social and Chat at the top right. They answer the pointer only while it is shown (the command view,
+    /// the release key held, or a surface open); a captured pointer is not seen by the interface at all, so they
+    /// are drawn dimmed.
     /// </summary>
     private void DrawQuickBar(SessionSnapshot snapshot)
     {

@@ -40,6 +40,8 @@ bridge, so tests use the same calls.
   still work, as with Controls. Mouse bindings use this frame's interface ownership; a click in the same poll
   as a capture change is consumed instead of becoming a shortcut or world action.
 - Escape closes chat, then the panel, then the data sheet. Each open surface shows the cursor.
+- Only the pilot view hides the cursor. The command view and the map show it without `Shift`, so the quick
+  buttons are clickable there; in the pilot view `Shift` shows it.
 - A refusal is noticed by `SocialState.RefusalCount` (client-only, not on the wire), so the same reason twice
   is still new. Rate-limited requests get no reply and so show nothing.
 - Invite is offered to connected players who are not in your party and not your inviter, while you are solo or

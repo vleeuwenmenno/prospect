@@ -87,7 +87,10 @@ public sealed class ControlsTests
             Assert.Contains(help.Rows, r => r.Matches("RightY") && r.Binding.Contains("inverted"));
             Assert.Contains(help.Rows, r => r.Action == "Boost" && r.Binding == "Pad A (Cross)");
             Assert.Equal(2, map.Bindings(InputAction.ReleasePointer).Length);
-            Assert.Contains(help.Rows, r => r.Category == "Command" && r.Action == "Select / box select" && r.Binding.StartsWith("Hold LeftAlt or RightAlt:"));
+            Assert.Contains(help.Rows, r => r.Category == "Pilot" && r.Action.StartsWith("Show cursor") && r.Binding.StartsWith("Hold LeftAlt or RightAlt"));
+            Assert.Contains(help.Rows, r => r.Category == "Pilot" && r.Action.StartsWith("Turn the camera") && r.Binding.Contains("right drag"));
+            // The command view needs no key held to use the mouse.
+            Assert.DoesNotContain(help.Rows, r => r.Category == "Command" && r.Binding.Contains("Hold"));
             Assert.Contains(help.Rows, r => r.Matches("mouse") && r.Matches("pilot"));
             Assert.DoesNotContain(help.Rows, r => r.Matches("no-such-control"));
         }
@@ -95,6 +98,59 @@ public sealed class ControlsTests
         {
             File.Delete(path);
         }
+    }
+
+    private static ActionMap Defaults() => ActionMap.Load(Path.Combine(AppContext.BaseDirectory, "content", "input", "bindings.json"));
+
+    [Theory]
+    [InlineData(GlfwKey.LeftShift)]
+    [InlineData(GlfwKey.RightShift)]
+    public void ShiftShowsTheCursorAndNeitherBoostsNorMovesVertically(GlfwKey key)
+    {
+        var map = Defaults();
+        var devices = new InputDevices();
+        devices.OnKey(key, GlfwKeyAction.Press);
+        Assert.True(map.Held(devices, InputAction.ReleasePointer, true));
+        Assert.False(map.Held(devices, InputAction.Boost, true));
+        Assert.Equal(0f, map.Axis(devices, InputAxis.Vertical, true));
+        Assert.Contains(new ControlsCatalog(map).Rows, r => r.Category == "Pilot" && r.Action.StartsWith("Show cursor")
+            && r.Binding.StartsWith("Hold LeftShift or RightShift"));
+    }
+
+    [Fact]
+    public void SpaceBoostsWithoutVerticalThrustAndRAndFMoveUpAndDownWithoutBoost()
+    {
+        var map = Defaults();
+        var devices = new InputDevices();
+        devices.OnKey(GlfwKey.Space, GlfwKeyAction.Press);
+        Assert.True(map.Held(devices, InputAction.Boost, true));
+        Assert.Equal(0f, map.Axis(devices, InputAxis.Vertical, true));
+        Assert.False(map.Held(devices, InputAction.ReleasePointer, true));
+        devices.OnKey(GlfwKey.Space, GlfwKeyAction.Release);
+
+        devices.BeginFrame();
+        devices.OnKey(GlfwKey.R, GlfwKeyAction.Press);
+        Assert.Equal(1f, map.Axis(devices, InputAxis.Vertical, true));
+        Assert.False(map.Held(devices, InputAction.Boost, true));
+        devices.OnKey(GlfwKey.R, GlfwKeyAction.Release);
+
+        devices.BeginFrame();
+        devices.OnKey(GlfwKey.F, GlfwKeyAction.Press);
+        Assert.Equal(-1f, map.Axis(devices, InputAxis.Vertical, true));
+        Assert.False(map.Held(devices, InputAction.Boost, true));
+        // F and Space also focus the camera, which only the command view reads.
+        Assert.True(map.Pressed(devices, InputAction.Follow, true));
+        Assert.Contains(new ControlsCatalog(map).Rows, r => r.Category == "Command" && r.Action.StartsWith("Focus on selection"));
+
+        // Left Ctrl is free for the command view's selection modifiers.
+        devices.BeginFrame();
+        devices.OnKey(GlfwKey.F, GlfwKeyAction.Release);
+        devices.OnKey(GlfwKey.LeftControl, GlfwKeyAction.Press);
+        Assert.Equal(0f, map.Axis(devices, InputAxis.Vertical, true));
+
+        // The gamepad keeps its bindings.
+        Assert.Contains(map.Bindings(InputAction.Boost).ToArray(), b => b.DisplayName.StartsWith("Pad "));
+        Assert.Contains(map.Bindings(InputAxis.Vertical).ToArray(), b => b.DisplayName.Contains("Trigger"));
     }
 
     [Theory]

@@ -1,12 +1,12 @@
 {
   "actions": {
     "ToggleControls": ["Key:F1"],
-    "ReleasePointer": ["Key:LeftAlt", "Key:RightAlt"],
+    "ReleasePointer": ["Key:LeftShift", "Key:RightShift"],
     "Pause": ["Key:Escape", "Pad:Start"],
     "TogglePerformance": ["Key:F3"],
     "ToggleFullscreen": ["Key:F11"],
     "Screenshot": ["Key:F12"],
-    "Boost": ["Key:LeftShift", "Pad:LeftThumb"],
+    "Boost": ["Key:Space", "Pad:LeftThumb"],
     "ToggleDampeners": ["Key:Z", "Pad:X"],
     "ToggleCommand": ["Key:N", "Key:F9", "Pad:Back"],
     "ToggleMap": ["Key:M", "Pad:Y"],
@@ -21,7 +21,7 @@
   "axes": {
     "Strafe": [{ "negative": "Key:A", "positive": "Key:D" }, { "axis": "Pad:LeftX" }],
     "Vertical": [
-      { "negative": "Key:LeftControl", "positive": "Key:Space" },
+      { "negative": "Key:F", "positive": "Key:R" },
       { "negativeAxis": "Pad:LeftTrigger", "positiveAxis": "Pad:RightTrigger" }
     ],
     "Forward": [{ "negative": "Key:S", "positive": "Key:W" }, { "axis": "Pad:LeftY", "invert": true }],

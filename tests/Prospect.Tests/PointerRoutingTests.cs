@@ -54,28 +54,28 @@ public sealed class PointerRoutingTests
     }
 
     [Fact]
-    public void AltShowsThePointerKeepsKeyboardFlightAndAHeldClickNeverReachesTheWorld()
+    public void ShiftShowsThePointerKeepsKeyboardFlightAndAHeldClickNeverReachesTheWorld()
     {
         var devices = new InputDevices();
         var actions = Bindings();
         var router = new PointerRouter(devices, actions, new Capture());
         router.Update(Pilot());
 
-        devices.OnKey(GlfwKey.LeftAlt, GlfwKeyAction.Press);
+        devices.OnKey(GlfwKey.LeftShift, GlfwKeyAction.Press);
         devices.OnKey(GlfwKey.W, GlfwKeyAction.Press);
         router.Update(Pilot());
         Assert.False(router.Captured);
 
-        // Clicking a quick button while Alt shows the pointer: the world sees no click, the keyboard still flies.
+        // Clicking a quick button while Shift shows the pointer: the world sees no click, the keyboard still flies.
         devices.OnMouseButton(GlfwMouseButton.Left, GlfwButtonAction.Press);
         router.BeginWorldMouse(worldInput: true);
         Assert.False(devices.MousePressed(GlfwMouseButton.Left));
         Assert.Equal(1f, actions.Axis(devices, InputAxis.Forward, true));
         router.EndWorldMouse();
 
-        // Alt is let go with the button still down: hidden again at once, and the held button stays masked.
+        // Shift is let go with the button still down: hidden again at once, and the held button stays masked.
         devices.BeginFrame();
-        devices.OnKey(GlfwKey.LeftAlt, GlfwKeyAction.Release);
+        devices.OnKey(GlfwKey.LeftShift, GlfwKeyAction.Release);
         router.Update(Pilot());
         Assert.True(router.Captured);
         router.BeginWorldMouse(worldInput: true);
@@ -93,11 +93,11 @@ public sealed class PointerRoutingTests
     }
 
     [Fact]
-    public void RightAltIsAlsoBoundAndARemappedReleaseKeyIsHonoured()
+    public void RightShiftIsAlsoBoundAndARemappedReleaseKeyIsHonoured()
     {
         var devices = new InputDevices();
         var router = new PointerRouter(devices, Bindings(), new Capture());
-        devices.OnKey(GlfwKey.RightAlt, GlfwKeyAction.Press);
+        devices.OnKey(GlfwKey.RightShift, GlfwKeyAction.Press);
         router.Update(Pilot());
         Assert.False(router.Captured);
 
@@ -122,87 +122,67 @@ public sealed class PointerRoutingTests
         new() { InSpace = true, Focused = focused, SurfaceOpen = surfaceOpen, CommandView = true };
 
     [Fact]
-    public void CommandViewHidesThePointerAndGivesTheWorldNoMouseUntilAltShowsIt()
+    public void CommandViewShowsThePointerAndGivesTheWorldTheMouseWithoutShift()
     {
         var devices = new InputDevices();
         var actions = Bindings();
         var capture = new Capture();
         var router = new PointerRouter(devices, actions, capture);
         router.Update(Command());
-        Assert.True(router.Captured);
+        Assert.False(router.Captured);
 
-        // Hidden: no click, drag, wheel or motion reaches the world, but the keyboard still pans.
+        // Shown: clicks, the wheel and motion reach the world, and the keyboard still pans.
         devices.OnMouseButton(GlfwMouseButton.Left, GlfwButtonAction.Press);
+        devices.OnScroll(2);
         devices.OnKey(GlfwKey.D, GlfwKeyAction.Press);
         router.BeginWorldMouse(worldInput: true);
-        Assert.False(devices.MousePressed(GlfwMouseButton.Left));
-        Assert.Equal(0f, devices.Scroll);
-        Assert.Equal(default, devices.MouseDelta);
+        Assert.True(devices.MousePressed(GlfwMouseButton.Left));
+        Assert.Equal(2f, devices.Scroll);
         Assert.Equal(1f, actions.Axis(devices, InputAxis.Strafe, true));
         router.EndWorldMouse();
 
-        // Alt shows the pointer where the platform puts it, and the world may now select there. The press made
-        // while it was hidden stays masked until it is let go.
-        devices.BeginFrame();
-        devices.OnKey(GlfwKey.LeftAlt, GlfwKeyAction.Press);
-        router.Update(Command());
-        Assert.False(router.Captured);
-        devices.PlacePointer(new Brutal.Numerics.float2(300, 200));
-        router.BeginWorldMouse(worldInput: true);
-        Assert.False(devices.MouseDown(GlfwMouseButton.Left));
-        router.EndWorldMouse();
-
+        // Over the fleet list or a quick button the same click is the interface's, not the world's.
         devices.BeginFrame();
         devices.OnMouseButton(GlfwMouseButton.Left, GlfwButtonAction.Release);
         devices.OnMouseButton(GlfwMouseButton.Left, GlfwButtonAction.Press);
-        router.Update(Command());
-        router.BeginWorldMouse(worldInput: true);
-        Assert.True(devices.MousePressed(GlfwMouseButton.Left));
-        Assert.Equal(new Brutal.Numerics.float2(300, 200), devices.MousePosition);
-        Assert.Equal(default, devices.MouseDelta);
-        router.EndWorldMouse();
-
-        // Over the fleet list or a quick button the same click is the interface's, not the world's.
         capture.PointerOverInterface = true;
         router.Update(Command());
         router.BeginWorldMouse(worldInput: true);
         Assert.False(devices.MousePressed(GlfwMouseButton.Left));
         router.EndWorldMouse();
-        Assert.Equal([true, false], capture.Calls);
+        // Never captured at all, so never released either.
+        Assert.Empty(capture.Calls);
     }
 
     [Fact]
-    public void LettingGoOfAltMidDragEndsTheDragUntilTheButtonIsReleased()
+    public void ShiftPressedOrReleasedMidDragInTheCommandViewKeepsTheDrag()
     {
         var devices = new InputDevices();
-        var router = new PointerRouter(devices, Bindings(), new Capture());
-        devices.OnKey(GlfwKey.LeftAlt, GlfwKeyAction.Press);
+        var capture = new Capture();
+        var router = new PointerRouter(devices, Bindings(), capture);
         router.Update(Command());
         devices.OnMouseButton(GlfwMouseButton.Right, GlfwButtonAction.Press);
         router.BeginWorldMouse(worldInput: true);
         Assert.True(devices.MouseDown(GlfwMouseButton.Right));
         router.EndWorldMouse();
 
-        // Alt goes up with the camera drag still held: hidden, and the world loses the button.
-        devices.BeginFrame();
-        devices.OnKey(GlfwKey.LeftAlt, GlfwKeyAction.Release);
-        router.Update(Command());
-        Assert.True(router.Captured);
-        router.BeginWorldMouse(worldInput: true);
-        Assert.False(devices.MouseDown(GlfwMouseButton.Right));
-        router.EndWorldMouse();
+        foreach (var action in new[] { GlfwKeyAction.Press, GlfwKeyAction.Release })
+        {
+            devices.BeginFrame();
+            devices.OnKey(GlfwKey.LeftShift, action);
+            router.Update(Command());
+            Assert.False(router.Captured);
+            router.BeginWorldMouse(worldInput: true);
+            Assert.True(devices.MouseDown(GlfwMouseButton.Right));
+            router.EndWorldMouse();
+        }
 
-        // Alt again with the same press still held: the drag does not come back.
-        devices.BeginFrame();
-        devices.OnKey(GlfwKey.LeftAlt, GlfwKeyAction.Press);
-        router.Update(Command());
-        router.BeginWorldMouse(worldInput: true);
-        Assert.False(devices.MouseDown(GlfwMouseButton.Right));
-        router.EndWorldMouse();
+        // Never captured at all, so never released either.
+        Assert.Empty(capture.Calls);
     }
 
     [Fact]
-    public void SwitchingFromPilotToCommandKeepsThePointerHiddenAndMasksAHeldFreeLook()
+    public void SwitchingFromPilotToCommandShowsThePointerAndMasksAHeldFreeLook()
     {
         var devices = new InputDevices();
         var capture = new Capture();
@@ -213,22 +193,63 @@ public sealed class PointerRoutingTests
         Assert.True(devices.MouseDown(GlfwMouseButton.Right));
         router.EndWorldMouse();
 
+        // The view changed inside the world's update; the frame loop refreshes capture straight after.
+        router.RefreshCapture(Command());
+        Assert.False(router.Captured);
         devices.BeginFrame();
         router.Update(Command());
+        router.BeginWorldMouse(worldInput: true);
+        Assert.False(devices.MouseDown(GlfwMouseButton.Right));
+        router.EndWorldMouse();
+
+        // A fresh press after letting go is the command view's.
+        devices.BeginFrame();
+        devices.OnMouseButton(GlfwMouseButton.Right, GlfwButtonAction.Release);
+        devices.OnMouseButton(GlfwMouseButton.Right, GlfwButtonAction.Press);
+        router.Update(Command());
+        router.BeginWorldMouse(worldInput: true);
+        Assert.True(devices.MouseDown(GlfwMouseButton.Right));
+        router.EndWorldMouse();
+
+        // Back to the pilot view: captured again.
+        router.RefreshCapture(Pilot());
         Assert.True(router.Captured);
-        router.BeginWorldMouse(worldInput: true);
-        Assert.False(devices.MouseDown(GlfwMouseButton.Right));
-        router.EndWorldMouse();
+        Assert.Equal([true, false, true], capture.Calls);
+    }
+
+    [Fact]
+    public void ShiftRightDragInThePilotViewGivesOnlyTheCameraItsMotion()
+    {
+        var devices = new InputDevices();
+        var actions = Bindings();
+        var capture = new Capture();
+        var router = new PointerRouter(devices, actions, capture);
+        router.Update(Pilot());
+        devices.BeginFrame();
+        devices.OnKey(GlfwKey.LeftShift, GlfwKeyAction.Press);
+        router.Update(Pilot());
+        Assert.False(router.Captured);
 
         devices.BeginFrame();
-        devices.OnKey(GlfwKey.RightAlt, GlfwKeyAction.Press);
-        router.Update(Command());
+        devices.OnCursorPos(new Brutal.Numerics.double2(100, 100));
+        devices.OnMouseButton(GlfwMouseButton.Right, GlfwButtonAction.Press);
+        devices.OnCursorPos(new Brutal.Numerics.double2(130, 90));
+        router.Update(Pilot());
         router.BeginWorldMouse(worldInput: true);
+        Assert.True(devices.CameraDrag);
+        Assert.Equal(new Brutal.Numerics.float2(30, -10), devices.CameraDelta);
+        // Buttons, the steering motion and bound actions stay masked.
         Assert.False(devices.MouseDown(GlfwMouseButton.Right));
+        Assert.Equal(default, devices.MouseDelta);
         router.EndWorldMouse();
+        Assert.False(devices.CameraDrag);
 
-        // Captured once, shown once for Alt: no release and recapture on the switch itself.
-        Assert.Equal([true, false], capture.Calls);
+        // With world input off (a shortcut consumed the frame) nothing turns.
+        devices.BeginFrame();
+        router.Update(Pilot());
+        router.BeginWorldMouse(worldInput: false);
+        Assert.False(devices.CameraDrag);
+        router.EndWorldMouse();
     }
 
     [Fact]
@@ -236,18 +257,18 @@ public sealed class PointerRoutingTests
     {
         var devices = new InputDevices();
         var router = new PointerRouter(devices, Bindings(), new Capture());
-        router.Update(Command());
+        router.Update(Pilot());
         Assert.True(router.Captured);
 
-        // Chat or a panel open over the command view: shown, and the world sees no click even with Alt.
-        devices.OnKey(GlfwKey.LeftAlt, GlfwKeyAction.Press);
+        // Chat or a panel open over the command view: shown, and the world sees no click even with Shift.
+        devices.OnKey(GlfwKey.LeftShift, GlfwKeyAction.Press);
         router.Update(Command(surfaceOpen: true));
         Assert.False(router.Captured);
         devices.OnMouseButton(GlfwMouseButton.Left, GlfwButtonAction.Press);
         router.BeginWorldMouse(worldInput: false);
         Assert.False(devices.MousePressed(GlfwMouseButton.Left));
         router.EndWorldMouse();
-        devices.OnKey(GlfwKey.LeftAlt, GlfwKeyAction.Release);
+        devices.OnKey(GlfwKey.LeftShift, GlfwKeyAction.Release);
 
         router.Update(Pilot());
         Assert.True(router.Captured);

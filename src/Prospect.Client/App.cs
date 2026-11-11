@@ -596,6 +596,10 @@ internal sealed class App : IDisposable
                 _pointer.BeginWorldMouse(worldInput);
                 World.Update(snapshot!, Session!.Client.Input, dt, worldInput, viewport, screen, _pointer.PointerOverInterface);
                 _pointer.EndWorldMouse();
+                // The command key and taking control change the view inside the update; the pointer follows in
+                // the same frame, quarantining whatever that poll still held.
+                pointerFrame.CommandView = World.Mode == ViewMode.Command;
+                _pointer.RefreshCapture(pointerFrame);
             }
 
             _screens.Draw(snapshot);

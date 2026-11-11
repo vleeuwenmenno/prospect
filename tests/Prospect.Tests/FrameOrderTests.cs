@@ -154,6 +154,8 @@ public sealed class FrameOrderTests : IDisposable
         _router.BeginWorldMouse(worldInput);
         _world.Update(_snapshot, Bridge, 1f / 60f, worldInput, Screen, Screen, _router.PointerOverInterface);
         _router.EndWorldMouse();
+        pointerFrame.CommandView = _world.Mode == ViewMode.Command;
+        _router.RefreshCapture(pointerFrame);
 
         // The quick buttons, drawn after the world as ScreenHost draws them.
         ImGui.SetNextWindowPos(ButtonMin);
@@ -166,21 +168,35 @@ public sealed class FrameOrderTests : IDisposable
         ImGui.Render();
     }
 
-    /// <summary>The command view, Alt held, the pointer resting on empty space and the own hull selected.</summary>
-    private void CommandViewWithAlt()
+    /// <summary>The command view without Shift, the pointer shown and resting on empty space, the own hull selected.</summary>
+    private void CommandView()
     {
         _world.SetMode(ViewMode.Command);
-        Frame(() => Key(GlfwKey.LeftAlt, true));
+        Frame();
         Frame(() => Move(EmptySpace));
         Frame();
         Assert.False(_router.Captured);
         Assert.Equal(1, _world.Selection.Length);
     }
 
+    /// <summary>The pilot view with Shift held, so the pointer is shown, resting on empty space.</summary>
+    private void PilotWithShift()
+    {
+        Frame(() => Key(GlfwKey.LeftShift, true));
+        Frame(() => Move(EmptySpace));
+        Frame();
+        Assert.Equal(ViewMode.Pilot, _world.Mode);
+        Assert.False(_router.Captured);
+    }
+
+    private Vector3 Nose => Vector3.Transform(-Vector3.UnitZ, _world.OwnOrientation);
+
+    private PlayerControls Sent() => Bridge.Consume(out _, out _);
+
     [Fact]
     public void AMoveOntoAQuickButtonAndAClickInOnePollAreTheButtonsNotTheWorlds()
     {
-        CommandViewWithAlt();
+        CommandView();
         Frame(() =>
         {
             Move(OverButton);
@@ -224,14 +240,15 @@ public sealed class FrameOrderTests : IDisposable
                 return pressed;
             }
 
-            _world.SetMode(ViewMode.Command);
+            // Shift and a click in one poll from the captured pilot view: the click belongs to neither owner.
             Frame(() =>
             {
-                Key(GlfwKey.LeftAlt, true);
+                Key(GlfwKey.LeftShift, true);
                 Move(EmptySpace);
                 Click();
             }, Shortcut);
             Assert.Equal(0, shortcuts);
+            _world.SetMode(ViewMode.Command);
             Frame();
 
             Frame(() =>
@@ -271,7 +288,7 @@ public sealed class FrameOrderTests : IDisposable
     [Fact]
     public void WheelAndMiddleDragOverAQuickButtonLeaveTheCommandCameraAlone()
     {
-        CommandViewWithAlt();
+        CommandView();
         var distance = _world.CommandDistance;
         Frame(() =>
         {
@@ -293,63 +310,65 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     [Fact]
-    public void AltAndAClickInOnePollReachNeitherTheHiddenInterfaceNorTheWorld()
+    public void ShiftAndAClickInOnePollReachNeitherTheHiddenInterfaceNorTheWorld()
     {
-        _world.SetMode(ViewMode.Command);
         Frame(() => Move(OverButton));
         Frame();
         Assert.True(_router.Captured);
-        Assert.Equal(1, _world.Selection.Length);
 
         // Hidden: a click over where the button is reaches nothing.
         Frame(() => Click());
         Frame();
         Assert.Equal(0, _buttonClicks);
 
-        // Alt and the click in the same poll: the click was made while the pointer was hidden.
+        // Shift and a right press in the same poll: made while the pointer was hidden, so neither the button nor
+        // the camera drag gets it, even while it stays held and moves.
         Frame(() =>
         {
-            Key(GlfwKey.LeftAlt, true);
-            Move(EmptySpace);
+            Key(GlfwKey.LeftShift, true);
             Click();
+            Button(GlfwMouseButton.Right, true);
         });
-        Frame();
-        Frame();
+        Frame(() => Move(OverButton + new float2(-80, 30)));
+        Frame(() => Move(EmptySpace));
         Assert.False(_router.Captured);
-        Assert.Equal(1, _world.Selection.Length);
+        Assert.False(_world.FreeLook);
         Assert.Equal(0, _buttonClicks);
+        Frame(() => Button(GlfwMouseButton.Right, false));
 
-        // Nothing is stuck: the next click is the world's.
+        // Nothing is stuck: the next click on the button is the interface's.
+        Frame(() => Move(OverButton));
         Frame(() => Click());
-        Assert.Equal(0, _world.Selection.Length);
+        Frame();
+        Assert.Equal(1, _buttonClicks);
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void AltReleaseAndAClickInOnePollPressNoButton(bool releaseInSamePoll)
+    public void ShiftReleaseAndAClickInOnePollPressNoButton(bool releaseInSamePoll)
     {
-        CommandViewWithAlt();
+        PilotWithShift();
         Frame(() => Move(OverButton));
         Frame(() =>
         {
             Button(GlfwMouseButton.Left, true);
             if (releaseInSamePoll)
                 Button(GlfwMouseButton.Left, false);
-            Key(GlfwKey.LeftAlt, false);
+            Key(GlfwKey.LeftShift, false);
         });
         Frame(() => Button(GlfwMouseButton.Left, false));
         Frame();
         Frame();
         Assert.True(_router.Captured);
         Assert.Equal(0, _buttonClicks);
-        Assert.Equal(1, _world.Selection.Length);
+        Assert.False(_world.FreeLook);
     }
 
     [Fact]
     public void CapturingCancelsMouseInputWithoutDiscardingQueuedKeyboardAndText()
     {
-        CommandViewWithAlt();
+        PilotWithShift();
         Frame(() => Move(OverButton));
         var io = ImGui.GetIO();
         Frame(() =>
@@ -359,7 +378,7 @@ public sealed class FrameOrderTests : IDisposable
             io.AddInputCharacter('x');
             Wheel(3);
             Button(GlfwMouseButton.Left, false);
-            Key(GlfwKey.LeftAlt, false);
+            Key(GlfwKey.LeftShift, false);
         }, shortcut: () =>
         {
             // Text is available during the frame, then ImGui clears it at EndFrame.
@@ -379,14 +398,14 @@ public sealed class FrameOrderTests : IDisposable
     [Fact]
     public void CapturingCancelsAnActiveMousePressBeforeItsLaterRelease()
     {
-        CommandViewWithAlt();
+        PilotWithShift();
         Frame(() => Move(OverButton));
         Frame(() => Button(GlfwMouseButton.Left, true));
         Assert.True(ImGui.IsAnyItemActive());
-        Frame(() => Key(GlfwKey.LeftAlt, false));
+        Frame(() => Key(GlfwKey.LeftShift, false));
         Assert.False(ImGui.IsAnyItemActive());
         Frame(() => Button(GlfwMouseButton.Left, false));
-        Frame(() => Key(GlfwKey.LeftAlt, true));
+        Frame(() => Key(GlfwKey.LeftShift, true));
         Frame();
         Assert.Equal(0, _buttonClicks);
         Frame(() => Click());
@@ -414,24 +433,155 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     [Fact]
-    public void SwitchingToPilotWithAltDoesNotTurnTheViewWithTheSwitchFramesMotion()
+    public void TheCommandKeyShowsThePointerInItsOwnFrameAndThePilotViewTakesItBack()
     {
-        CommandViewWithAlt();
+        Frame(() => Move(EmptySpace));
+        Assert.True(_router.Captured);
+
+        // N without Shift: shown in the same frame, no release and recapture in between.
+        Frame(() => Key(GlfwKey.N, true));
+        Assert.Equal(ViewMode.Command, _world.Mode);
+        Assert.False(_router.Captured);
+        Frame(() => Key(GlfwKey.N, false));
+        Frame(() => Move(EmptySpace));
+        Assert.False(_router.Captured);
+
+        // The following frames are the world's: wheel zoom, middle-drag pan, a click on empty space.
+        var distance = _world.CommandDistance;
+        Frame(() => Wheel(2));
+        Assert.NotEqual(distance, _world.CommandDistance);
+        Frame(() => Button(GlfwMouseButton.Middle, true));
+        Frame(() => Move(EmptySpace + new float2(40, -40)));
+        Frame(() => Button(GlfwMouseButton.Middle, false));
+        Assert.False(_world.CommandFollowing);
+        Assert.Equal(1, _world.Selection.Length);
+        Frame(() => Click());
+        Assert.Equal(0, _world.Selection.Length);
+
+        // Shift in the command view changes nothing: the pointer stays shown either way.
+        Frame(() => Key(GlfwKey.LeftShift, true));
+        Assert.False(_router.Captured);
+        Frame(() => Key(GlfwKey.LeftShift, false));
+        Assert.False(_router.Captured);
+
+        // Back to the pilot view: captured again in the same frame.
+        Frame(() => Key(GlfwKey.N, true));
+        Assert.Equal(ViewMode.Pilot, _world.Mode);
+        Assert.True(_router.Captured);
+        Frame(() => Key(GlfwKey.N, false));
+
+        // With Shift held, returning to the pilot view leaves the pointer shown.
+        Frame(() => Key(GlfwKey.N, true));
+        Frame(() => Key(GlfwKey.N, false));
+        Frame(() => Key(GlfwKey.LeftShift, true));
+        Frame(() => Key(GlfwKey.N, true));
+        Assert.Equal(ViewMode.Pilot, _world.Mode);
+        Assert.False(_router.Captured);
+    }
+
+    [Fact]
+    public void ShiftPressedOrReleasedDuringACommandDragDoesNotEndIt()
+    {
+        CommandView();
+        Frame(() => Button(GlfwMouseButton.Middle, true));
+        Frame(() =>
+        {
+            Key(GlfwKey.LeftShift, true);
+            Move(EmptySpace + new float2(20, -20));
+        });
+        Frame(() =>
+        {
+            Key(GlfwKey.LeftShift, false);
+            Move(EmptySpace + new float2(40, -40));
+        });
+        // The pan reached the world through both Shift changes and broke the follow on the own hull.
+        Assert.False(_world.CommandFollowing);
+        Frame(() => Button(GlfwMouseButton.Middle, false));
+    }
+
+    [Fact]
+    public void ShiftKeepsItsCommandViewMeaningsWithoutCapturingThePointer()
+    {
+        CommandView();
+        var focus = _world.CommandFocus;
+
+        // Shift + left drag slides the plane, with the pointer shown throughout.
+        Frame(() => Key(GlfwKey.LeftShift, true));
+        Frame(() => Button(GlfwMouseButton.Left, true));
+        Frame(() => Move(EmptySpace + new float2(0, -120)));
+        Assert.False(_router.Captured);
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        Frame(() => Key(GlfwKey.LeftShift, false));
+        Assert.NotEqual(focus.Y, _world.CommandFocus.Y);
+        Assert.False(_router.Captured);
+    }
+
+    [Fact]
+    public void PilotSpaceBoostsAndRAndFMoveVerticallyWithoutCommandFocus()
+    {
+        Frame();
+        Bridge.Consume(out _, out _);
+        Frame(() => Key(GlfwKey.Space, true));
+        var sent = Sent();
+        Assert.True(sent.Boost);
+        Assert.Equal(0f, sent.Vertical);
+        Frame(() => Key(GlfwKey.Space, false));
+
+        Frame(() => Key(GlfwKey.R, true));
+        sent = Sent();
+        Assert.Equal(1f, sent.Vertical);
+        Assert.False(sent.Boost);
+        Frame(() => Key(GlfwKey.R, false));
+
+        var following = _world.CommandFollowing;
+        Frame(() => Key(GlfwKey.F, true));
+        sent = Sent();
+        Assert.Equal(-1f, sent.Vertical);
+        Assert.False(sent.Boost);
+        Assert.Equal(ViewMode.Pilot, _world.Mode);
+        Assert.Equal(following, _world.CommandFollowing);
+        Assert.True(_router.Captured);
+    }
+
+    [Fact]
+    public void AClickHeldThroughTheCommandKeyNeverBecomesACommandAction()
+    {
+        Frame(() => Move(EmptySpace));
+        Frame(() => Button(GlfwMouseButton.Left, true));
+        Frame(() => Key(GlfwKey.N, true));
+        Assert.Equal(ViewMode.Command, _world.Mode);
+        Assert.Equal(1, _world.Selection.Length);
+
+        // Dragged and released in the command view: no box, no click that clears the selection.
+        Frame(() => Move(EmptySpace + new float2(200, -150)));
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        Frame();
+        Assert.Equal(1, _world.Selection.Length);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SwitchingToPilotDoesNotTurnTheViewWithTheSwitchFramesMotion(bool alt)
+    {
+        CommandView();
+        if (alt)
+            Frame(() => Key(GlfwKey.LeftShift, true));
         Frame(() =>
         {
             Key(GlfwKey.N, true);
             Move(EmptySpace + new float2(300, 0));
         });
         Assert.Equal(ViewMode.Pilot, _world.Mode);
-        var aim = Bridge.Consume(out _, out _).Aim;
-        var nose = Vector3.Transform(-Vector3.UnitZ, _world.OwnOrientation);
-        Assert.True(Vector3.Distance(aim, nose) < 1e-4f, $"aim {aim} nose {nose}");
+        Assert.Equal(!alt, _router.Captured);
+        var aim = Sent().Aim;
+        Assert.True(Vector3.Distance(aim, Nose) < 1e-4f, $"aim {aim} nose {Nose}");
     }
 
     [Fact]
     public void TakingControlFromCommandEndsTheFramesCommandMouse()
     {
-        CommandViewWithAlt();
+        CommandView();
         var distance = _world.CommandDistance;
         Frame(() =>
         {
@@ -440,6 +590,84 @@ public sealed class FrameOrderTests : IDisposable
         });
         Assert.Equal(ViewMode.Pilot, _world.Mode);
         Assert.Equal(distance, _world.CommandDistance);
+        Assert.True(_router.Captured);
+    }
+
+    [Fact]
+    public void ShiftAndARightDragOverTheWorldTurnTheCameraButNotTheHull()
+    {
+        PilotWithShift();
+        Frame(() => Key(GlfwKey.W, true));
+        Assert.True(Vector3.Distance(Sent().Aim, Nose) < 1e-4f);
+
+        // Without the right button, the shown pointer turns nothing.
+        Frame(() => Move(EmptySpace + new float2(150, 0)));
+        Assert.True(Vector3.Distance(Sent().Aim, Nose) < 1e-4f);
+
+        // Right press over the world, then drag: free look. The camera turns; under thrust the hull is not
+        // told to align with it, and nothing is clicked or targeted.
+        Frame(() => Button(GlfwMouseButton.Right, true));
+        Frame(() => Move(EmptySpace + new float2(400, 40)));
+        var sent = Sent();
+        Assert.True(_world.FreeLook);
+        Assert.False(_router.Captured);
+        Assert.True(sent.Forward > 0);
+        Assert.False(sent.Align);
+        Assert.True(Vector3.Distance(sent.Aim, Nose) > 0.05f, $"aim {sent.Aim} nose {Nose}");
+        Assert.Equal(0u, _world.TargetHull);
+        Assert.Equal(0, _buttonClicks);
+
+        // Over the quick buttons mid-drag the drag stays the camera's and presses nothing.
+        Frame(() => Move(OverButton));
+        Assert.True(_world.FreeLook);
+
+        // Letting go returns the view to the nose, as free look does.
+        Frame(() => Button(GlfwMouseButton.Right, false));
+        Frame();
+        Assert.False(_world.FreeLook);
+        Assert.True(Vector3.Distance(Sent().Aim, Nose) < 1e-4f);
+        Assert.Equal(0, _buttonClicks);
+    }
+
+    [Fact]
+    public void ARightDragBegunOnTheInterfaceNeverTurnsTheCamera()
+    {
+        PilotWithShift();
+        Frame(() => Move(OverButton));
+        Frame(() => Button(GlfwMouseButton.Right, true));
+        Frame(() => Move(EmptySpace));
+        Frame(() => Move(EmptySpace + new float2(300, 0)));
+        Assert.False(_world.FreeLook);
+        Assert.True(Vector3.Distance(Sent().Aim, Nose) < 1e-4f);
+        Frame(() => Button(GlfwMouseButton.Right, false));
+        Assert.Equal(0, _buttonClicks);
+    }
+
+    [Fact]
+    public void LettingGoOfShiftEndsTheCameraDragAndTheHeldButtonStaysMasked()
+    {
+        PilotWithShift();
+        Frame(() => Button(GlfwMouseButton.Right, true));
+        Frame(() => Move(EmptySpace + new float2(200, 0)));
+        Assert.True(_world.FreeLook);
+
+        // Shift up with the button held: captured again, the drag ends and the held button is not free look.
+        Frame(() => Key(GlfwKey.LeftShift, false));
+        Assert.True(_router.Captured);
+        Frame();
+        Assert.False(_world.FreeLook);
+
+        // Shift again with the same press still held: the drag does not come back.
+        Frame(() => Key(GlfwKey.LeftShift, true));
+        Frame(() => Move(EmptySpace + new float2(300, 0)));
+        Assert.False(_world.FreeLook);
+        Frame(() => Button(GlfwMouseButton.Right, false));
+
+        // A fresh press is a drag again.
+        Frame(() => Button(GlfwMouseButton.Right, true));
+        Frame(() => Move(EmptySpace + new float2(100, 0)));
+        Assert.True(_world.FreeLook);
+        Frame(() => Button(GlfwMouseButton.Right, false));
     }
 
     [Theory]

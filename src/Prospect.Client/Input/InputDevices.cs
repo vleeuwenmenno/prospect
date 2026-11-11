@@ -134,6 +134,26 @@ internal sealed unsafe class InputDevices
                     _mouseBlocked[i] |= _mouse[i];
         }
     }
+
+    /// <summary>
+    /// Set by the pointer router while the pilot's camera drag holds (the release key shows the pointer and the
+    /// right button went down over the world). Only <see cref="CameraDelta"/> and <see cref="CameraScroll"/> read
+    /// through <see cref="SuppressMouse"/> for it; buttons and bound actions stay masked.
+    /// </summary>
+    public bool CameraDrag { get; set; }
+
+    /// <summary>Mouse motion for the pilot camera: <see cref="MouseDelta"/>, or the motion of a camera drag.</summary>
+    public float2 CameraDelta => CameraDrag ? _mouseDelta : MouseDelta;
+
+    /// <summary>The wheel for the pilot camera: <see cref="Scroll"/>, or the wheel during a camera drag.</summary>
+    public float CameraScroll => CameraDrag ? _scroll : Scroll;
+
+    /// <summary>True while the button is physically down, whatever masks the world's read of it.</summary>
+    public bool RawMouseDown(GlfwMouseButton button) => _mouse[(int)button];
+
+    /// <summary>True when the button went down since the last poll and no change of owner has masked that press.</summary>
+    public bool FreshPress(GlfwMouseButton button) => _mousePressed[(int)button] && !_mouseBlocked[(int)button];
+
     public bool PadConnected => _padId >= 0;
     public string PadName { get; private set; } = "";
 

@@ -1,3 +1,5 @@
+using Brutal.GlfwApi;
+
 namespace Prospect.Client.Input;
 
 /// <summary>The interface as the pointer router sees it: <c>UiContext</c> in the game, a headless context in tests.</summary>
@@ -29,35 +31,36 @@ internal struct PointerFrame
     public bool SurfaceOpen;
 
     /// <summary>
-    /// The command view. Its pointer is hidden like the pilot's; holding the release key shows it and gives it to
-    /// selecting, boxing, ordering and the camera gestures.
+    /// The command view. Its pointer is always shown and the world uses it for selecting, boxing, ordering and the
+    /// camera gestures, except over the interface.
     /// </summary>
     public bool CommandView;
 }
 
 /// <summary>
 /// Decides, once per frame, whether the pointer is hidden and captured or shown, and what the world may read of the
-/// mouse. The pointer is shown only while something that is used with it is open, while the hold-to-release key
-/// (Alt by default) is held, or while the window does not have focus; never because world input happens to be
-/// blocked for a frame (a shortcut that opened something, interface keyboard ownership lingering for one frame
-/// after a window closed). Those frames used to release the pointer and capture it again, which shows the system
-/// cursor and moves it.
+/// mouse. The pointer is hidden and captured only in the pilot view, with focus, nothing open and the
+/// hold-to-release key (Shift by default) up. The command view and every open surface show it; never does a frame in
+/// which world input is merely blocked (a shortcut that opened something, interface keyboard ownership lingering for
+/// one frame after a window closed). Those frames used to release the pointer and capture it again, which shows the
+/// system cursor and moves it.
 /// <list type="bullet">
 /// <item>Pilot view: the hidden pointer steers. With the release key the pointer is shown and the world gets no
 /// mouse at all, so it can only point at the interface.</item>
-/// <item>Command view: the hidden pointer does nothing; the keyboard still pans, focuses, selects all and halts.
-/// With the release key the pointer is shown and selects, boxes, orders and turns the camera, except over the
-/// interface.</item>
+/// <item>Command view: the pointer is shown and selects, boxes, orders and turns the camera, except over the
+/// interface. The release key changes nothing there, so pressing or letting go of it never ends a drag.</item>
 /// <item>Anything open: the pointer is shown and the world gets no mouse.</item>
 /// </list>
 /// While captured the interface gets no presses and no position (see <c>UiPointerInput</c>), so nothing hidden can
 /// be hovered or clicked. A button held through any change of owner stays masked for the world until it is let go.
 /// <para>
 /// Order matters. Window events are polled before anything here runs, so a single poll can hold a move onto a
-/// button and a whole click, or the Alt press and the click it was meant for. <see cref="Update"/> therefore
+/// button and a whole click, or the release key's press and the click it was meant for. <see cref="Update"/> therefore
 /// decides capture first, quarantines the poll's mouse if the owner changed, and only then starts the interface
 /// frame, so the interface's idea of what is under the pointer is this frame's, not the last one's, before the
-/// world reads a single button.
+/// world reads a single button. The view can also change inside the world's update (the command key, taking
+/// control); the frame loop calls <see cref="RefreshCapture"/> again after it, so the pointer follows in the same
+/// frame.
 /// </para>
 /// </summary>
 internal sealed class PointerRouter(InputDevices devices, ActionMap actions, IInterfacePointer ui)
@@ -65,10 +68,11 @@ internal sealed class PointerRouter(InputDevices devices, ActionMap actions, IIn
     /// <summary>True while the pointer is hidden and steers the view.</summary>
     public bool Captured { get; private set; }
 
-    /// <summary>True while the hold-to-release key (Alt by default) is down this frame.</summary>
+    /// <summary>True while the hold-to-release key (Shift by default) is down this frame.</summary>
     public bool ReleaseHeld { get; private set; }
 
     private bool _commandView;
+    private bool _cameraDrag;
 
     /// <summary>
     /// True when this frame's pointer belongs to the interface: over one of its windows, or holding a press it
@@ -92,7 +96,7 @@ internal sealed class PointerRouter(InputDevices devices, ActionMap actions, IIn
     {
         ReleaseHeld = actions.Held(devices, InputAction.ReleasePointer, true);
         _commandView = frame.CommandView;
-        Apply(frame.InSpace && frame.Focused && !devices.Muted && !frame.SurfaceOpen && !ReleaseHeld);
+        Apply(frame.InSpace && frame.Focused && !devices.Muted && !frame.SurfaceOpen && !frame.CommandView && !ReleaseHeld);
         PointerOverInterface = !Captured && ui.PointerOverInterface;
     }
 
@@ -108,14 +112,22 @@ internal sealed class PointerRouter(InputDevices devices, ActionMap actions, IIn
 
     /// <summary>
     /// Starts the world's read of the mouse. Mouse buttons, motion and wheel are masked when world input is off,
-    /// when the pointer is over the interface, in the pilot view while the release key is held, and in the
-    /// command view unless it is held. A button held through any of those stays masked for the world until it is
+    /// when the pointer is over the interface, and in the pilot view while the release key is held. A button held through any of those stays masked for the world until it is
     /// let go, so a click on the interface never becomes a world action and a drag ends when its owner changes.
+    /// <para>
+    /// One exception in the pilot view: with the release key held, a right press that begins over the world (not
+    /// in the same poll as the key, which the quarantine drops) turns the camera as free look does, until the
+    /// button or the key is let go. Only the camera's motion and wheel see it; every button stays masked.
+    /// </para>
     /// </summary>
     public void BeginWorldMouse(bool worldInput)
     {
         devices.ReadingWorldMouse = true;
-        var worldOwnsPointer = _commandView ? ReleaseHeld : !ReleaseHeld;
+        var released = !_commandView && ReleaseHeld && worldInput && !Captured;
+        _cameraDrag = released && devices.RawMouseDown(GlfwMouseButton.Right)
+            && (_cameraDrag || (!PointerOverInterface && devices.FreshPress(GlfwMouseButton.Right)));
+        devices.CameraDrag = _cameraDrag;
+        var worldOwnsPointer = _commandView || !ReleaseHeld;
         devices.SuppressMouse = !worldInput || PointerOverInterface || !worldOwnsPointer;
     }
 
@@ -123,6 +135,7 @@ internal sealed class PointerRouter(InputDevices devices, ActionMap actions, IIn
     public void EndWorldMouse()
     {
         devices.SuppressMouse = false;
+        devices.CameraDrag = false;
         devices.ReadingWorldMouse = false;
     }
 

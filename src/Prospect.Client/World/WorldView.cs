@@ -313,7 +313,10 @@ internal sealed class WorldView
             return;
         // The router chose mouse permissions for the old mode; consume the switch frame and any held drag.
         if (_devices.ReadingWorldMouse)
+        {
             _devices.SuppressMouse = true;
+            _devices.CameraDrag = false;
+        }
         _leftDragging = _rightDragging = false;
         Mode = mode;
         _lookDirection = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
@@ -424,7 +427,7 @@ internal sealed class WorldView
 
             // Pointer, arrow keys and right stick turn the view, not the hull.
             var invert = _settings.InvertPitch ? -1f : 1f;
-            var pointer = _devices.MouseDelta * (LookRadiansPerPixel * _settings.MouseSensitivity);
+            var pointer = _devices.CameraDelta * (LookRadiansPerPixel * _settings.MouseSensitivity);
             var yaw = pointer.X + _actions.Axis(_devices, InputAxis.Yaw, keyboard) * LookRadiansPerSecond * dt;
             var pitch = (-pointer.Y + _actions.Axis(_devices, InputAxis.Pitch, keyboard) * LookRadiansPerSecond * dt) * invert;
             _lookDirection = Vector3.Transform(_lookDirection, Quaternion.CreateFromAxisAngle(_up, -yaw));
@@ -432,9 +435,10 @@ internal sealed class WorldView
 
             // Holding the free-look button looks around without committing the hull to anything; letting go
             // returns the view to the nose. Otherwise the hull swings onto the view whenever it is under thrust.
-            var freeLook = _devices.MouseDown(GlfwMouseButton.Right);
-            if (freeLook && _devices.Scroll != 0)
-                _chaseZoom = Math.Clamp(_chaseZoom * MathF.Pow(0.88f, _devices.Scroll), 0.5f, 8f);
+            // A camera drag with the pointer shown (release key held) is free look too.
+            var freeLook = _devices.MouseDown(GlfwMouseButton.Right) || _devices.CameraDrag;
+            if (freeLook && _devices.CameraScroll != 0)
+                _chaseZoom = Math.Clamp(_chaseZoom * MathF.Pow(0.88f, _devices.CameraScroll), 0.5f, 8f);
             if (_freeLook && !freeLook)
                 _lookDirection = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
             _freeLook = freeLook;

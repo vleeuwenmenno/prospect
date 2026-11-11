@@ -19,7 +19,8 @@ Chat, the player roster and parties work end to end: the server decides, the cli
 - **Party list** at the top left: each other member's name, ship, shield, hull and sector. In a short window
   or at a large interface scale it shrinks to one-line rows with a count of the rest. Recent chat lines show
   at the bottom left for a few seconds while chat is closed.
-- **Quick buttons** at the top right open the three. Hold `Alt` to show the cursor and click them.
+- **Quick buttons** at the top right open the three. Click them; in the pilot view hold `Shift` first to show the
+  cursor.
 
 Central Discord accounts and persistent friends have an optional listing-service backend; client integration is still pending (see [accounts](docs/accounts.md)).
 Not there yet in the game: account sign-in, persistent friends, factions and alliances. Names and player ids last only for the session, and
@@ -130,13 +131,16 @@ are refused by the live loader until stage 2 adds storage, wire support, collisi
 
 `F1` opens searchable Controls from pilot, command or map view. Search current bindings by action, key,
 button or category. `F1`, `Esc` or Close returns to the previous view; the session keeps running.
-In space the cursor is hidden unless `Alt` is held or something is open.
+The cursor is hidden only in the pilot view. The command view, the map and every menu show it.
 
-- **Pilot view:** the hidden cursor steers the view. Hold either `Alt` to show it: mouse flight and targeting
-  stop, keyboard flight still works, and the quick buttons can be clicked.
-- **Command view:** the hidden cursor does nothing; keys still pan, raise and lower the plane, focus, select
-  all, halt and take control. Hold either `Alt` to show it and use the mouse in the world: select, box-select,
-  order, rotate, pan and zoom. Letting go of `Alt` ends a drag.
+- **Pilot view:** the hidden cursor steers the view. Hold either `Shift` to show it: mouse flight and targeting
+  stop, keyboard flight still works, and the quick buttons can be clicked. With `Shift` held, a right drag that
+  starts over space turns the camera, as free look does; letting go of the button or of `Shift` returns the view to
+  the nose. Press `Shift` before the right button: a click in the same instant as `Shift` is dropped.
+- **Command view:** the cursor is shown as soon as it opens (`N`), and the mouse works in the world: select,
+  box-select, order, rotate, pan and zoom. `Shift` there only adds to a selection or moves the plane; it never
+  hides the cursor or ends a drag. Back in the pilot view the cursor is hidden again unless `Shift` is held or
+  something is open.
 - **Menus, data sheet, map, Controls, Players, Social, Chat:** the cursor shows until they close, and the world
   gets no mouse.
 
@@ -148,11 +152,12 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | | Keyboard and mouse | Gamepad |
 | --- | --- | --- |
 | Forward / back, strafe | `W` `S`, `A` `D` | Left stick |
-| Up / down | `Space`, `Left Ctrl` | Right / left trigger |
+| Up / down | `R`, `F` | Right / left trigger |
 | Look around | Mouse, or arrow keys | Right stick |
 | Free look (hull holds its heading) | Hold right mouse button | |
 | Roll | `Q` `E` | Bumpers |
-| Boost | `Left Shift` | Left stick click |
+| Boost | `Space` | Left stick click |
+| Show the cursor (pilot view) | Hold `Shift`; with it, right-drag over space turns the camera | |
 | Dampeners on / off | `Z` | `X` |
 | Command view | `N` or `F9` | `Back` |
 | Galaxy map | `M` | `Y` |
@@ -182,7 +187,7 @@ a ship again. In the command view `T` takes control of the first selected ship.
 
 In the pilot view, hold the right mouse button and turn the wheel to move the camera closer or further.
 
-Command view (mouse controls while `Alt` is held):
+Command view (the cursor is always shown):
 
 | | |
 | --- | --- |
@@ -193,7 +198,7 @@ Command view (mouse controls while `Alt` is held):
 | Zoom | Mouse wheel |
 | Pan | `W` `A` `S` `D`, arrow keys, or middle-drag |
 | Lower / raise the plane | `Q` / `E`, or `Shift` + left-drag |
-| Focus the camera on the selection | `Space` or `F`; with `Alt`, double-click a row in the fleet list |
+| Focus the camera on the selection | `Space` or `F`, or double-click a row in the fleet list |
 | Halt the selection | `H` or `Backspace` |
 
 Galaxy map:

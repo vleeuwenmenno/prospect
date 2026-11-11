@@ -32,7 +32,8 @@ internal sealed class ControlsCatalog
             var category = (InputAction)i switch
             {
                 InputAction.Boost or InputAction.ToggleDampeners or InputAction.SwitchHull => "Pilot",
-                InputAction.Halt or InputAction.Follow => "Pilot / command",
+                InputAction.Halt => "Pilot / command",
+                InputAction.Follow => "Command",
                 InputAction.TogglePlayers or InputAction.ToggleSocial or InputAction.ToggleChat => "Social",
                 _ => "General",
             };
@@ -45,7 +46,7 @@ internal sealed class ControlsCatalog
                 names.Add(binding.DisplayName);
             rows.Add(new Row("Flight axes / command / map", AxisLabels[i], names.Count == 0 ? "Unbound" : string.Join(" / ", names)));
         }
-        // The command view's mouse works only while the show-cursor key is held; say which key that is now.
+        // In the pilot view the show-cursor key frees the mouse; say which key that is now.
         var release = new List<string>();
         foreach (var binding in map.Bindings(InputAction.ReleasePointer))
             release.Add(binding.DisplayName);
@@ -54,20 +55,21 @@ internal sealed class ControlsCatalog
             new("Pilot", "Steer view", "Mouse movement"),
             new("Pilot", "Free look / camera distance", "Hold right mouse button / hold right + wheel"),
             new("Pilot", "Target under reticle", "Middle mouse button"),
-            new("Pilot", "Show cursor (mouse leaves flight)", $"Hold {hold}"),
-            new("Command", "Show cursor and use the mouse", $"Hold {hold}; without it the cursor is hidden and only keys work"),
-            new("Command", "Select / box select", $"Hold {hold}: left mouse button / left drag; Shift or Ctrl adds"),
+            new("Pilot", "Show cursor (mouse leaves flight)", $"Hold {hold}; keyboard flight still works"),
+            new("Pilot", "Turn the camera with the cursor shown", $"Hold {hold}, then right drag over space (press {hold} first)"),
+            new("Command", "Cursor", "Always shown; the mouse works in the world except over panels and buttons"),
+            new("Command", "Select / box select", "Left mouse button / left drag; Shift or Ctrl adds"),
             new("Command", "Select all owned ships", "Ctrl + A"),
-            new("Command", "Move selection / rotate view", $"Hold {hold}: right click / right drag"),
-            new("Command", "Pan / zoom", $"Strafe + Yaw and Forward + Pitch axes; hold {hold}: middle drag / mouse wheel"),
-            new("Command", "Raise / lower plane", $"Roll axis; hold {hold}: Shift + left drag"),
-            new("Command", "Focus fleet ship", $"Hold {hold}: double-click fleet row"),
+            new("Command", "Move selection / rotate view", "Right click / right drag"),
+            new("Command", "Pan / zoom", "Strafe + Yaw and Forward + Pitch axes; middle drag / mouse wheel"),
+            new("Command", "Raise / lower plane", "Roll axis; Shift + left drag"),
+            new("Command", "Focus fleet ship", "Double-click fleet row"),
             new("Map", "Select / box select", "Left mouse button / left drag; Shift or Ctrl adds"),
             new("Map", "Pan / zoom", "Middle drag / mouse wheel; Strafe + Yaw and Forward + Pitch axes"),
             new("Map", "Move or jump course menu", "Right click sector"),
             new("Map", "Change layer / centre on own ship", "PageUp / PageDown / Space"),
             new("Social", "Send chat line / close chat", "Enter in the chat field / Escape"),
-            new("Social", "Quick buttons (players, party, chat)", $"Hold {hold}, then click"),
+            new("Social", "Quick buttons (players, party, chat)", $"Click; in the pilot view hold {hold} first"),
         ]);
         Rows = rows.ToArray();
     }

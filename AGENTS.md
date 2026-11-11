@@ -81,8 +81,9 @@ Always wrap long test runs in `timeout`; a session test that waits on the simula
   field.
 - **The pointer, the mouse or the order of a client frame:** `PointerRouter` decides capture, quarantines a
   poll's mouse when the owner changes, then starts the interface frame and reads ownership, all before the world
-  reads input; `UiPointerInput` is what Dear ImGui is told. `FrameOrderTests` runs that frame headless: real
-  devices, router, `WorldView` and a Dear ImGui context, events fed as a poll delivers them. Dear ImGui has one
+  reads input, and checks capture again after the world's update, since the command key and taking control
+  change the view there; `UiPointerInput` is what Dear ImGui is told. Only the pilot view captures the pointer.
+  `FrameOrderTests` runs that frame headless: real devices, router, `WorldView` and a Dear ImGui context, events fed as a poll delivers them. Dear ImGui has one
   global context, so keep every test that uses it in that class.
 - **A new per-tick system:** add a unit test in `tests/Prospect.Tests/WorldTests.cs` and, if it crosses the
   network, a session test that runs a real server and client.
