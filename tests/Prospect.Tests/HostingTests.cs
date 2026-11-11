@@ -146,6 +146,81 @@ public sealed class HostingProtocolTests
         Assert.NotEqual(key, proof);
     }
 
+    [Fact]
+    public void TheKeyAndTheProofAreWhatTheSchemeSaysToTheLastByte()
+    {
+        // Nothing here comes from the game but the two results being checked. The scheme is written out again
+        // with the framework's own primitives, and its results are also given as they were worked out by another
+        // implementation altogether (Python's hashlib and hmac). Fewer rounds, another hash, a proof without
+        // its label or its version, or with its fields in another order: each of them fails here.
+        const string password = "correct horse ☄";
+        const uint version = 12;
+        var salt = Enumerable.Range(0, 16).Select(i => (byte)i).ToArray();
+        var challenge = Enumerable.Range(100, 32).Select(i => (byte)i).ToArray();
+
+        var expectedKey = System.Security.Cryptography.Rfc2898DeriveBytes.Pbkdf2(
+            Encoding.UTF8.GetBytes(password),
+            salt,
+            200_000,
+            System.Security.Cryptography.HashAlgorithmName.SHA256,
+            32
+        );
+        Assert.Equal("a44a5f992ee5777a386167bc92e7d3dce3627f4b4383b6572ff22fa66a0a496a", Convert.ToHexStringLower(expectedKey));
+
+        byte[] message = [.. "PROSPECT password proof v1"u8, 12, 0, 0, 0, .. salt, .. challenge];
+        var expectedProof = System.Security.Cryptography.HMACSHA256.HashData(expectedKey, message);
+        Assert.Equal("9360633c40c56d1784e1f727dd4dca013cdb24a1f312fcef236928f9f7e29679", Convert.ToHexStringLower(expectedProof));
+
+        var key = new byte[Passwords.KeySize];
+        var proof = new byte[Passwords.ProofSize];
+        Passwords.DeriveKey(password, salt, key);
+        Assert.Equal(expectedKey, key);
+        Passwords.ComputeProof(key, salt, challenge, proof, version);
+        Assert.Equal(expectedProof, proof);
+
+        // What a client and a server of this build exchange is the same thing with this build's version in it.
+        byte[] current = [.. "PROSPECT password proof v1"u8, .. BitConverter.GetBytes(ProtocolInfo.Version), .. salt, .. challenge];
+        Assert.True(BitConverter.IsLittleEndian);
+        Passwords.ComputeProof(key, salt, challenge, proof);
+        Assert.Equal(System.Security.Cryptography.HMACSHA256.HashData(expectedKey, current), proof);
+        Assert.True(Passwords.Verify(key, salt, challenge, proof));
+    }
+
+    [Fact]
+    public void ASettingsFileCanChangeTheLimitsOnPendingConnections()
+    {
+        var file = ServerFile.Parse(
+            """
+            { "server": { "limits": { "pendingPerAddress": 2, "pendingTotal": 12, "connectionBurst": 6, "connectionsPerSecond": 0.5, "handshakeSeconds": 8, "extra": 1 } } }
+            """u8.ToArray(),
+            "test"
+        );
+        Assert.Equal(
+            new ConnectionLimits
+            {
+                PendingPerAddress = 2,
+                PendingTotal = 12,
+                ConnectionBurst = 6,
+                ConnectionsPerSecond = 0.5,
+                HandshakeSeconds = 8,
+            },
+            file.Limits
+        );
+
+        // What a file leaves out keeps its default, and a file without the section says nothing.
+        var partly = ServerFile.Parse("""{ "server": { "limits": { "pendingTotal": 64 } } }"""u8.ToArray(), "test");
+        Assert.Equal(ConnectionLimits.Default with { PendingTotal = 64 }, partly.Limits);
+        Assert.Null(ServerFile.Parse("""{ "server": { "name": "x" } }"""u8.ToArray(), "test").Limits);
+
+        // Values a server could not run with are refused when the file is read, and by the server itself.
+        Assert.Throws<InvalidDataException>(() => ServerFile.Parse("""{ "server": { "limits": [] } }"""u8.ToArray(), "test"));
+        Assert.Throws<InvalidDataException>(() => ServerFile.Parse("""{ "server": { "limits": { "pendingTotal": 0 } } }"""u8.ToArray(), "test"));
+        Assert.Throws<InvalidDataException>(() => ServerFile.Parse("""{ "server": { "limits": { "pendingPerAddress": 40 } } }"""u8.ToArray(), "test"));
+        Assert.Throws<InvalidDataException>(() => ServerFile.Parse("""{ "server": { "limits": { "connectionsPerSecond": 0 } } }"""u8.ToArray(), "test"));
+        Assert.Throws<InvalidDataException>(() => ServerFile.Parse("""{ "server": { "limits": { "handshakeSeconds": "5" } } }"""u8.ToArray(), "test"));
+        Assert.Throws<InvalidDataException>(() => new ServerHost(new ServerConfig { Limits = new ConnectionLimits { HandshakeSeconds = 0 } }, GameContent.Load()));
+    }
+
     [Theory]
     [InlineData("a", true)]
     [InlineData("correct horse battery staple", true)]

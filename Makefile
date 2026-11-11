@@ -50,6 +50,11 @@ ifeq ($(NO_COLOR)$(filter dumb,$(TERM)),)
   RESET  := $(ESC)[0m
 endif
 
+# The arguments as the launch line shows them. With a password among them none are shown: the line stays in
+# the terminal's scroll-back and in any log the launch is captured to, and make cannot tell where a quoted value
+# ends. The run lines below start with @ whatever V is, for the same reason. Prefer PROSPECT_PASSWORD.
+SHOWN_ARGS = $(if $(findstring --password,$(ARGS)),(arguments not shown: they hold a password),$(ARGS))
+
 # Recipe helpers. `step` is a whole recipe line; `ok`, `warn`, `fail` and `note` are shell snippets.
 step = @printf '%s\n' "$(BLUE)==>$(RESET) $(BOLD)$(1)$(RESET)"
 ok   = printf '  %s %s\n' "$(GREEN)✓$(RESET)" "$(1)"
@@ -258,14 +263,14 @@ build: need-dotnet ## Build everything (CONFIG=Debug|Release)
 run: need-dotnet ## Run the game client (ARGS="--start local")
 	$(call step,Building the client ($(CONFIG)))
 	$(Q)"$(DOTNET)" build $(CLIENT) -c $(CONFIG) $(QUIET)
-	$(call step,Running prospect $(ARGS))
-	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/$(config)/prospect.dll $(ARGS)
+	$(call step,Running prospect $(SHOWN_ARGS))
+	@$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/$(config)/prospect.dll $(ARGS)
 
 server: need-dotnet ## Run the headless dedicated server (ARGS="--port 27420")
 	$(call step,Building the server ($(CONFIG)))
 	$(Q)"$(DOTNET)" build $(SERVER) -c $(CONFIG) $(QUIET)
-	$(call step,Running prospect-server $(ARGS))
-	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Server/$(config)/prospect-server.dll $(ARGS)
+	$(call step,Running prospect-server $(SHOWN_ARGS))
+	@$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Server/$(config)/prospect-server.dll $(ARGS)
 
 listing: need-dotnet ## Run the listing server on 127.0.0.1:8080 (LISTING_PORT), private addresses allowed
 	$(call step,Building the listing server ($(CONFIG)))

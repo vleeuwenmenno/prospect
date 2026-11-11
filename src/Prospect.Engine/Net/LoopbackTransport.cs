@@ -59,10 +59,19 @@ public sealed class LoopbackLink : IDisposable
 
         public bool IsInProcess => true;
 
-        public void Poll(ITransportHandler handler)
+        public bool Poll(ITransportHandler handler, ReceiveBudget budget)
         {
-            while (!_closed && _incoming.TryRead(_scratch, out var tag, out var length))
+            var packets = 0;
+            var bytes = 0L;
+            while (!_closed)
             {
+                if (packets >= budget.Packets || bytes >= budget.Bytes)
+                    return false;
+                if (!_incoming.TryRead(_scratch, out var tag, out var length))
+                    break;
+
+                packets++;
+                bytes += length;
                 switch (tag)
                 {
                     case TagConnect:
@@ -84,6 +93,8 @@ public sealed class LoopbackLink : IDisposable
                         break;
                 }
             }
+
+            return true;
         }
 
         public bool Send(int peer, NetChannel channel, ReadOnlySpan<byte> payload) =>

@@ -41,8 +41,8 @@ public enum SessionEndReason : byte
     WrongPassword,
 
     /// <summary>
-    /// Too many wrong passwords came from this address. <see cref="SessionSnapshot.RetryAfterSeconds"/> says
-    /// how long the server wants this address to wait.
+    /// Too many wrong passwords came from this address, or too many connections in a short time.
+    /// <see cref="SessionSnapshot.RetryAfterSeconds"/> says how long the server wants this address to wait.
     /// </summary>
     TooManyAttempts,
 }
@@ -133,7 +133,8 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     private readonly ClientWorld _world;
     private Galaxy? _galaxy;
     private readonly string _playerName;
-    private readonly string? _password;
+    // Held only until it has been used to answer the server's challenge, or the session ends without one.
+    private string? _password;
     private bool _challenged;
     private readonly TickLoop _loop;
     private readonly SnapshotExchange<SessionSnapshot> _snapshots;
@@ -162,7 +163,10 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     /// <param name="playerName">The player's callsign.</param>
     /// <param name="password">
     /// The server's password, if the player gave one. It is only ever used to answer the server's challenge
-    /// (<see cref="Passwords"/>) and never sent. One that no server could have counts as none.
+    /// (<see cref="Passwords"/>) and never sent. One that no server could have counts as none. The session
+    /// lets go of it as soon as it has answered, been let in or ended. That is all a managed string allows:
+    /// it cannot be overwritten, so the text stays in memory until the collector frees it, and whoever handed
+    /// it over may still hold it.
     /// </param>
     public ClientSession(ITransport transport, GameContent content, string playerName, string? password = null)
     {
@@ -297,6 +301,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
             case MessageId.Welcome
                 when _state == SessionState.Handshaking && WelcomeMessage.TryRead(ref reader, _loaded.SettingCatalog, out var welcome):
                 _state = SessionState.Active;
+                _password = null;
                 _playerId = welcome.PlayerId;
                 _serverName = welcome.ServerName;
                 _galaxySeed = welcome.GalaxySeed;
@@ -380,12 +385,6 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
             return;
         }
 
-        if (_password is null)
-        {
-            End(SessionEndReason.PasswordRequired);
-            return;
-        }
-
         // One answer per session. Deriving the key is slow on purpose, and a server that keeps asking must not
         // be able to keep this thread busy with it, or collect proofs for challenges of its choosing.
         if (_challenged)
@@ -394,10 +393,18 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
             return;
         }
 
+        if (_password is null)
+        {
+            End(SessionEndReason.PasswordRequired);
+            return;
+        }
+
+        // The password has done its work once the key is derived from it: the session lets go of it here.
         _challenged = true;
         Span<byte> key = stackalloc byte[Passwords.KeySize];
         Span<byte> proof = stackalloc byte[Passwords.ProofSize];
         Passwords.DeriveKey(_password, salt, key);
+        _password = null;
         Passwords.ComputeProof(key, salt, challenge, proof);
         System.Security.Cryptography.CryptographicOperations.ZeroMemory(key);
 
@@ -419,6 +426,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         _transport.Disconnect(0);
         _state = SessionState.Ended;
         _endReason = reason;
+        _password = null;
         Logs.Net.Info($"Session ended: {reason}");
     }
 }

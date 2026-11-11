@@ -16,6 +16,12 @@ namespace Prospect.Game.Server;
 /// <param name="Listing">The listing server's address, or <c>off</c>.</param>
 public sealed record ServerFile(string? Name, ServerVisibility? Visibility, ushort? Port, int? MaxPlayers, string? Password, string? Listing)
 {
+    /// <summary>
+    /// The limits on pending connections, from the object under <c>"limits"</c>: the defaults with what the
+    /// file changes. Null when the file has no such object.
+    /// </summary>
+    public ConnectionLimits? Limits { get; init; }
+
     /// <summary>The name of the object in a settings file that holds these, which no world setting may be called.</summary>
     public const string Key = WorldSettingCatalog.ReservedId;
 
@@ -85,6 +91,9 @@ public sealed record ServerFile(string? Name, ServerVisibility? Visibility, usho
                     case "listing":
                         result = result with { Listing = Text(value, source, "listing") };
                         break;
+                    case "limits":
+                        result = result with { Limits = ReadLimits(value, source, warn) };
+                        break;
                     default:
                         warn?.Invoke($"{source}: unknown server setting \"{entry.Name}\" ignored");
                         break;
@@ -94,6 +103,56 @@ public sealed record ServerFile(string? Name, ServerVisibility? Visibility, usho
             return result;
         }
     }
+
+    private static ConnectionLimits ReadLimits(JsonElement limits, string source, Action<string>? warn)
+    {
+        if (limits.ValueKind != JsonValueKind.Object)
+            throw new InvalidDataException($"{source}: {Key}.limits must be an object");
+
+        var result = ConnectionLimits.Default;
+        foreach (var entry in limits.EnumerateObject())
+        {
+            var value = entry.Value;
+            switch (entry.Name)
+            {
+                case "pendingPerAddress":
+                    result = result with { PendingPerAddress = Whole(value, source, "limits.pendingPerAddress", 1, 1024) };
+                    break;
+                case "pendingTotal":
+                    result = result with { PendingTotal = Whole(value, source, "limits.pendingTotal", 1, 1024) };
+                    break;
+                case "connectionBurst":
+                    result = result with { ConnectionBurst = Whole(value, source, "limits.connectionBurst", 1, 10_000) };
+                    break;
+                case "connectionsPerSecond":
+                    result = result with { ConnectionsPerSecond = Number(value, source, "limits.connectionsPerSecond") };
+                    break;
+                case "handshakeSeconds":
+                    result = result with { HandshakeSeconds = Number(value, source, "limits.handshakeSeconds") };
+                    break;
+                default:
+                    warn?.Invoke($"{source}: unknown server setting \"limits.{entry.Name}\" ignored");
+                    break;
+            }
+        }
+
+        // The ranges, and the one rule between two of them, are the server's own: it says them in its words.
+        try
+        {
+            result.Validate();
+        }
+        catch (InvalidDataException e)
+        {
+            throw new InvalidDataException($"{source}: {Key}.{e.Message}", e);
+        }
+
+        return result;
+    }
+
+    private static double Number(JsonElement value, string source, string name) =>
+        value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var number) && double.IsFinite(number)
+            ? number
+            : throw new InvalidDataException($"{source}: {Key}.{name} must be a number");
 
     private static string Text(JsonElement value, string source, string name) =>
         value.ValueKind == JsonValueKind.String ? value.GetString()! : throw new InvalidDataException($"{source}: {Key}.{name} must be a piece of text");

@@ -58,7 +58,10 @@ public enum RejectReason : byte
     /// <summary>The proof did not match: the password is wrong.</summary>
     WrongPassword = 4,
 
-    /// <summary>Too many wrong passwords came from this address; the message says how long to wait.</summary>
+    /// <summary>
+    /// Too many wrong passwords came from this address, or it is opening connections faster than the server
+    /// takes them, or the server has too many connections waiting to be let in; the message says how long to wait.
+    /// </summary>
     TooManyAttempts = 5,
 }
 
@@ -136,12 +139,27 @@ public struct HelloMessage
         writer.WriteString(PlayerName);
     }
 
-    public static bool TryRead(ref NetReader reader, out HelloMessage message)
+    /// <summary>
+    /// Reads the first field of a hello, the protocol version, and nothing else. A server reads a hello in two
+    /// steps so that a connection it is going to refuse anyway costs it no memory: the name is read, with
+    /// <see cref="TryReadName"/>, only once everything that can be checked without it has passed.
+    /// </summary>
+    public static bool TryReadVersion(ref NetReader reader, out uint version)
     {
-        Span<char> name = stackalloc char[ProtocolInfo.MaxNameBytes];
-        message.ProtocolVersion = reader.ReadUInt32();
-        var length = reader.ReadString(name, ProtocolInfo.MaxNameBytes);
-        message.PlayerName = reader.IsValid ? PlayerNames.Sanitize(name[..length]) : "";
+        version = reader.ReadUInt32();
+        return reader.IsValid;
+    }
+
+    /// <summary>
+    /// Reads the rest of a hello after <see cref="TryReadVersion"/>: the player's name, cleaned as
+    /// <see cref="PlayerNames.Sanitize(ReadOnlySpan{char}, Span{char})"/> cleans it, into <paramref name="name"/>,
+    /// which must hold <see cref="ProtocolInfo.MaxNameChars"/> characters. Allocates nothing.
+    /// </summary>
+    public static bool TryReadName(ref NetReader reader, Span<char> name, out int length)
+    {
+        Span<char> raw = stackalloc char[ProtocolInfo.MaxNameBytes];
+        var read = reader.ReadString(raw, ProtocolInfo.MaxNameBytes);
+        length = reader.IsValid ? PlayerNames.Sanitize(raw[..read], name) : 0;
         return reader.IsValid;
     }
 }
@@ -341,6 +359,17 @@ public static class PlayerNames
     public static string Sanitize(ReadOnlySpan<char> raw)
     {
         Span<char> clean = stackalloc char[ProtocolInfo.MaxNameChars];
+        return clean[..Sanitize(raw, clean)].ToString();
+    }
+
+    /// <summary>
+    /// The same, into <paramref name="clean"/>, which must hold <see cref="ProtocolInfo.MaxNameChars"/>
+    /// characters; returns how many were written. Allocates nothing, so a server can clean a name it has not yet
+    /// decided to keep.
+    /// </summary>
+    public static int Sanitize(ReadOnlySpan<char> raw, Span<char> clean)
+    {
+        clean = clean[..ProtocolInfo.MaxNameChars];
         var count = 0;
         foreach (var c in raw.Trim())
         {
@@ -350,7 +379,19 @@ public static class PlayerNames
                 clean[count++] = c;
         }
 
-        var result = clean[..count].Trim();
-        return result.IsEmpty ? "Prospector" : result.ToString();
+        // Cutting can leave a space at the end, and removing characters one at the start.
+        var kept = clean[..count];
+        var start = count - kept.TrimStart().Length;
+        var length = kept.Trim().Length;
+        if (length == 0)
+        {
+            Unnamed.CopyTo(clean);
+            return Unnamed.Length;
+        }
+
+        kept.Slice(start, length).CopyTo(clean);
+        return length;
     }
+
+    private const string Unnamed = "Prospector";
 }

@@ -26,7 +26,7 @@ internal static class Program
           --listing <url|off>     The listing server a public server announces to (default: content/net/listing.json)
           --seed <n>              Galaxy seed
           --settings <file>       A JSON object of world setting ids and values. An object under "server" may hold
-                                  name, visibility, port, maxPlayers, password and listing
+                                  name, visibility, port, maxPlayers, password, listing and limits
           --set <id>=<value>      One world setting, after the file; repeat for more
                                   (the ids and ranges are in content/rules/settings.json)
           --verbose               Log debug messages
@@ -101,7 +101,6 @@ internal static class Program
         PreciseSleep.EnableHighResolutionTimer();
 
         ServerHost server;
-        ServerConfig config;
         try
         {
             var content = GameContent.Load();
@@ -123,7 +122,10 @@ internal static class Program
             if (visibility == ServerVisibility.Public && listingConfig is null)
                 Logs.App.Warning("The server is public but the listing server is turned off: it will not show in any server browser");
 
-            config = new ServerConfig
+            // The configuration, the settings file and the password do not outlive this block: the server keeps
+            // a key derived from the password and nothing else of it. The arguments and the environment the
+            // process was started with still hold it; that is the operating system's copy, not this program's.
+            var config = new ServerConfig
             {
                 Name = name ?? file.Name ?? ServerNames.Default,
                 MaxPlayers = maxPlayers ?? file.MaxPlayers ?? 16,
@@ -131,9 +133,11 @@ internal static class Program
                 Settings = settings,
                 Visibility = visibility.Value,
                 Password = password,
+                Limits = file.Limits ?? ConnectionLimits.Default,
                 Port = port ?? file.Port ?? ProtocolInfo.DefaultPort,
                 Listing = listingConfig,
             };
+            password = null;
             server = new ServerHost(config, content);
         }
         catch (Exception e) when (e is IOException or InvalidDataException or System.Text.Json.JsonException or KeyNotFoundException or UnauthorizedAccessException)
@@ -180,7 +184,7 @@ internal static class Program
                 {
                     lastReport = status.Tick;
                     Logs.App.Info(
-                        $"tick {status.Tick}, {status.PlayerCount}/{config.MaxPlayers} players, "
+                        $"tick {status.Tick}, {status.PlayerCount}/{server.MaxPlayers} players, "
                             + $"{status.Loop.AverageMs:F2} ms avg, {status.Loop.MaxMs:F2} ms max, {status.Loop.Overruns} overruns"
                     );
                 }

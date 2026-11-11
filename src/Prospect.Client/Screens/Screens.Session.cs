@@ -117,7 +117,7 @@ internal sealed partial class ScreenHost
                 SessionEndReason.Refused => "The server refused the connection"u8,
                 SessionEndReason.PasswordRequired => "This server needs a password"u8,
                 SessionEndReason.WrongPassword => "Wrong password"u8,
-                SessionEndReason.TooManyAttempts => "Too many wrong passwords"u8,
+                SessionEndReason.TooManyAttempts => "Too many attempts"u8,
                 _ => "Session closed"u8,
             }
         );

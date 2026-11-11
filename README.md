@@ -94,6 +94,11 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 - **Passwords.** An unlisted or public game can have one. It is never sent: the server challenges, the client
   answers with a keyed hash, and wrong tries are slowed down per address. It protects the password, not the
   traffic: game packets are not encrypted.
+- **Connection limits.** A connection that is not a player yet never holds a player's slot. One address can
+  keep only a few waiting and open only so many; network input is read within a budget each tick. One address
+  cannot keep others from connecting, and no flood holds up a tick. Many addresses can still keep newcomers
+  out, and a server without a password lets anyone in until it is full: see
+  [docs/hosting.md](docs/hosting.md#connection-limits).
 - **Listing server.** A small HTTP service (and its container image) that keeps the list of public games. A
   public server announces itself to it, refreshes every 30 seconds and removes itself on shutdown; the client
   fetches and checks the list. Ours is `https://mvl.sh`, the default in `content/net/listing.json`. See
@@ -223,10 +228,10 @@ make server ARGS="--settings my-world.json"                                     
 
 ```sh
 make run ARGS="--host unlisted --host-name 'Ceres Station'"                # host a local game, joined by address
-make run ARGS="--host public --host-players 8 --password 'open sesame'"    # on the list, with a password
-make run ARGS="--join 203.0.113.7 --password 'open sesame'"                # join by address
+PROSPECT_PASSWORD='open sesame' make run ARGS="--host public --host-players 8"  # on the list, with a password
+PROSPECT_PASSWORD='open sesame' make run ARGS="--join 203.0.113.7"         # join by address
 make server ARGS="--name 'Ceres Station' --visibility public"              # a dedicated public server
-PROSPECT_PASSWORD='open sesame' make server ARGS="--visibility public"     # its password, not on the command line
+PROSPECT_PASSWORD='open sesame' make server ARGS="--visibility public"     # with a password
 make run ARGS="--host public --listing http://127.0.0.1:8080"              # against `make listing` on this machine
 ```
 
@@ -235,16 +240,18 @@ make run ARGS="--host public --listing http://127.0.0.1:8080"              # aga
 - The host of a local game is never asked for its password. Everyone else is.
 - A name is 1 to 48 characters. A password is 1 to 64.
 - The password is never sent and a captured answer opens nothing. Game traffic itself is not encrypted.
+- Give the password in `PROSPECT_PASSWORD`, on the client and on the server: arguments show in process lists.
+  `--password <text>` still works; `make run` and `make server` then print none of the arguments.
 - `--listing <url>` picks another listing server; `--listing off` turns it off. HTTPS only, except on this machine.
-- A server's settings file can hold `name`, `visibility`, `port`, `maxPlayers`, `password` and `listing` under
-  `"server"`. An argument wins over `PROSPECT_PASSWORD`, which wins over the file.
+- A server's settings file can hold `name`, `visibility`, `port`, `maxPlayers`, `password`, `listing` and
+  `limits` under `"server"`. An argument wins over `PROSPECT_PASSWORD`, which wins over the file.
 - In a game, the sector panel shows the server's name, its visibility and the player slots. The `Esc` menu shows
   them too, and for a public game you host, whether the listing server has it right now.
 - In the client: New Game sets the hosting, Join Server lists public games and joins by address. A join that ends
   with "password required" or "wrong password" asks for the password on the spot; after too many wrong ones it
   counts down the server's wait before the next try.
 
-How the password and the list work: [docs/hosting.md](docs/hosting.md).
+How the password, the connection limits and the list work: [docs/hosting.md](docs/hosting.md).
 
 ## Requirements
 

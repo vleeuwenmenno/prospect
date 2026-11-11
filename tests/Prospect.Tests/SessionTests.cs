@@ -13,9 +13,47 @@ namespace Prospect.Tests;
 
 internal static class TestSetup
 {
-    /// <summary>Sessions log through the shared categories, so logging is set up before any test runs.</summary>
+    /// <summary>
+    /// Sessions log through the shared categories, so logging is set up before any test runs. The console shows
+    /// warnings and worse. Everything from information up is also written, as a running game writes it, to a
+    /// counter: a test can then see how much was logged, and what logging a line costs is really spent.
+    /// </summary>
     [System.Runtime.CompilerServices.ModuleInitializer]
-    public static void Initialize() => Logs.Initialize(LogLevel.Warning);
+    public static void Initialize() =>
+        Logs.Initialize(
+            LogLevel.Information,
+            builder =>
+            {
+                builder.AddFilter<Microsoft.Extensions.Logging.Console.ConsoleLoggerProvider>(null, LogLevel.Warning);
+                builder.AddProvider(new CountingLogs());
+            }
+        );
+}
+
+/// <summary>Counts the lines the game logs on each thread, and keeps none of them.</summary>
+internal sealed class CountingLogs : ILoggerProvider, ILogger
+{
+    [ThreadStatic]
+    private static long _onThisThread;
+
+    /// <summary>Lines logged so far by the thread that asks.</summary>
+    public static long OnThisThread => _onThisThread;
+
+    public ILogger CreateLogger(string categoryName) => this;
+
+    public void Dispose() { }
+
+    public IDisposable? BeginScope<TState>(TState state)
+        where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Information;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+        // Formatted as a real log would, so the cost of a line is the cost it has in a running game.
+        _ = formatter(state, exception);
+        _onThisThread++;
+    }
 }
 
 public sealed class ProtocolTests

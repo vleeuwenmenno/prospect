@@ -67,6 +67,10 @@ Always wrap long test runs in `timeout`; a session test that waits on the simula
   both, bump `ProtocolInfo.Version`, and keep `HostingTests` passing. Keep the first field of `Hello` and of
   `Reject` where they are, so two versions can still tell each other they differ. A proof is checked once per
   connection, and never while the address is locked out.
+- **What a server does before a player is let in:** the limits are in `ConnectionLimits` and
+  `docs/hosting.md`; change both. Nothing may be read, allocated or logged for a connection before the limits
+  are checked, and a refusal never allocates. `ConnectionLimitTests` runs a server by hand (`ScriptedServer`:
+  the test plays the network and moves the clock), so a change must pass there without any waiting.
 - **Anything that talks to the listing server:** it goes through `ListingHttp` (time-out, size limit, no
   redirects) and runs off the tick and the frame loop. Nothing the service sends is trusted. `ListingTests` runs
   the real service in-process, so a change to the contract on either side must pass there; `Prospect.Tests`
@@ -172,6 +176,9 @@ The client opens a real window on the developer's desktop, and they are usually 
 - A player's hulls are removed when they disconnect.
 - Networking is IPv4 only (BRUTAL's RakNet binding), there is no NAT traversal, and game traffic is not
   encrypted: a password protects itself, nothing else.
+- A server holds one address to 8 pending connections and to 20 new ones plus 1 a second. Many addresses, or
+  forged ones, can still fill the 32 pending slots and RakNet's own connection table, which the game cannot
+  see into. Network input over the tick's budget is read a tick late, not dropped.
 
 ## Who does the work
 
