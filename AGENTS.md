@@ -168,6 +168,15 @@ This adds to the roles in the global instructions (scouting, second opinions); i
 | Medium to hard | `claude-opus-5-5` | high (medium for the smaller end) | A new screen or HUD element, a gameplay feature that follows an existing pattern (a new order, a map feature, a new block type with its stats), shader effects, multi-file refactors that do not change threading or the wire format. |
 | Tough and core | `claude-fable-5-2` | high (xhigh when hard to reverse) | Networking: protocol, prediction, reconciliation, snapshots, interest management. Engine core: threading, the job graph, lock-free hand-off, unmanaged memory. Renderer core: Vulkan resources, frame flow, synchronisation. Simulation determinism. Architecture decisions and anything where a mistake is a desync, a crash or corrupted memory. |
 
+Codex `gpt-6-astra` may take work from any tier that is not graphics or interface, and should when Claude is
+short on limits:
+
+- **Yes:** simulation, networking, the server, the listing server, generation, content, tools, CI, tests.
+- **Never:** shaders, rendering, screens, HUD, anything judged by looking at it.
+- **Effort:** `reasoningEffort` medium for the easy and medium tiers, high for tough and core.
+- **Its second opinion comes from Claude** (Opus at high), not from Codex: the reviewer is never the same model
+  family as the author.
+
 How to apply it:
 
 - Decide the tier from what can go wrong, not from how long the task is. A long list of JSON edits is easy; a
