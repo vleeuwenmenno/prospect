@@ -155,6 +155,7 @@ internal sealed class WorldView
     private Vector3 _cameraDirection = -Vector3.UnitZ;
     private Vector3 _chaseRight = Vector3.UnitX;
     private bool _freeLook;
+    private JumpChord _jumpChord;
     private float _commandBlend;
     private float _commandYaw;
     private float _commandPitch = -0.9f;
@@ -402,6 +403,7 @@ internal sealed class WorldView
             _jumpSunBlend = 1f;
             _commandCycle.Reset();
             _pilotCycle.Reset();
+            _jumpChord.Clear();
             _pickHulls = new PickHull[snapshot.Hulls.Length];
             _pickHits = new PickHit[SlotCount * galaxy.MaxAsteroidsPerSector + snapshot.Hulls.Length];
             _streamDirty = true;
@@ -435,6 +437,7 @@ internal sealed class WorldView
             _chaseInitialised = false;
             TargetHull = 0;
             NavTarget = null;
+            _jumpChord.Clear();
             if (_followId != 0)
                 FocusOn(own.Id);
         }
@@ -448,6 +451,13 @@ internal sealed class WorldView
         }
 
         UpdateNav();
+        // Read whether or not the world has the controls: a menu over them is not the pilot letting go.
+        var forwardPressed = _jumpChord.Observe(
+            _actions.Axis(_devices, InputAxis.Forward, true) > 0f,
+            _actions.Held(_devices, InputAction.Boost, true),
+            Own,
+            snapshot.ClientTick
+        );
 
         if (!inputEnabled || _devices.SuppressMouse)
             _leftDragging = _rightDragging = false;
@@ -461,6 +471,7 @@ internal sealed class WorldView
             controls.ToggleDampeners = _actions.Pressed(_devices, InputAction.ToggleDampeners, true);
             if (_actions.Pressed(_devices, InputAction.Halt, true))
             {
+                _jumpChord.Clear();
                 if (Mode == ViewMode.Pilot)
                     bridge.IssueOrder(default);
                 else
@@ -496,20 +507,34 @@ internal sealed class WorldView
 
             UpdateTargeting(snapshot, bridge);
 
-            var thrusting = controls.Strafe != 0 || controls.Vertical != 0 || controls.Forward != 0;
-            controls.Aim = _lookDirection;
-            controls.Align = thrusting && !freeLook;
-
-            // A plotted jump starts when the pilot boosts with the nose on it. Off it, boost is boost.
-            if (NavAimed && Own.Jump == JumpPhase.None && Own.Order.Kind != OrderKind.Jump && _actions.Pressed(_devices, InputAction.Boost, keyboard))
+            // A plotted jump starts when the pilot boosts with the nose on it, or pushes forward while boosting: the
+            // two in either order are one start. Off it, boost is boost.
+            var boostPressed = _actions.Pressed(_devices, InputAction.Boost, keyboard);
+            if (NavAimed && Own.Jump == JumpPhase.None && Own.Order.Kind != OrderKind.Jump && (boostPressed || (forwardPressed && controls.Boost)))
             {
                 bridge.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = NavTarget!.Value });
                 controls.Boost = false;
+                _jumpChord.Start(snapshot.ClientTick);
             }
-            else if (NavTarget is not null && Own.Jump == JumpPhase.None && _actions.Pressed(_devices, InputAction.Boost, keyboard))
+            else if (NavTarget is not null && Own.Jump == JumpPhase.None && boostPressed)
             {
                 NavRefusedAt = _time;
             }
+
+            // Forward thrust held from the start of the jump is not the pilot taking the controls, so it is not sent.
+            // Any other manual input is, and the simulation cancels the jump on it as before.
+            if (_jumpChord.Active)
+            {
+                if (FlightInput.Quantize(controls.Strafe) != 0 || FlightInput.Quantize(controls.Vertical) != 0
+                    || FlightInput.Quantize(controls.Roll) != 0 || FlightInput.Quantize(controls.Forward) < 0)
+                    _jumpChord.Clear();
+                else
+                    controls.Forward = 0f;
+            }
+
+            var thrusting = controls.Strafe != 0 || controls.Vertical != 0 || controls.Forward != 0;
+            controls.Aim = _lookDirection;
+            controls.Align = thrusting && !freeLook;
         }
         else if (inputEnabled)
         {

@@ -249,7 +249,9 @@ Map orders go to exactly the selected ships. Opening the map with nothing select
 After **Clear**, **Move here** and **Jump here** are greyed out and nothing is ordered. Jumps also require a
 working drive and a destination outside the current sector; ineligible ships keep their orders.
 The ship you fly gets a plotted course instead: a NAV marker, or an arrow at the edge of the view, shows the way.
-Turn its nose onto the marker and press boost (`Space`) to start the jump. Off the marker, boost works as usual
+Turn its nose onto the marker and press boost (`Space`) to start the jump. Forward (`W`) and boost pressed together,
+in either order, start it too, and forward held from that start does not cancel it; once both are let go, any
+thrust does. Off the marker, boost works as usual
 and the HUD says to aim first. A card beside the marker names the destination and its distance. A strip above
 the pilot console says what to do: `OFF COURSE` with the boost key to press once aimed, `COURSE ALIGNED` with
 what the drive will need, then calculation and charge as two gauges filling together, and that thrust cancels.

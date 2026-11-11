@@ -38,6 +38,8 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
   crisp, ragged window with lensing. With both, the hull visibly flies in through one opening and out of another.
 - **The pilot starts their own jump.** The map only plots it: a NAV marker in the pilot view, aim at it, boost to
   start. The hull then brakes and holds its nose on it while the drive calculates and charges; thrust cancels.
+- **Forward and boost together also start it.** Either order, from the bindings. Forward held from that start is
+  part of it and does not cancel. Once forward and boost are both let go, fresh thrust cancels again.
   Ships flown by the server still jump straight from an order.
 - **The jump has one prompt, off the middle of the view.** A strip above the pilot console says the state and
   the one action, with keys from the bindings. Aimed is "course aligned", never "ready": calculation and
