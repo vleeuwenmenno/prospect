@@ -432,6 +432,8 @@ internal sealed class App : IDisposable
                 _screens.OpenShipInfo();
             else if (view == "galaxy")
                 _screens.OpenGalaxyOverview();
+            else if (view == "map-menu")
+                _screens.OpenMapMenuNear(3, 2);
             else if (view.StartsWith("jump", StringComparison.Ordinal))
             {
                 World.FtlPreview = view switch

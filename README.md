@@ -46,7 +46,8 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   outside the disc space is nearly empty.
 - **Galaxy map.** Every grid cell is a sector. Zoomed out it shows the whole galaxy; closer, the sector grid; closest,
   each sector's star, asteroids and name. A sector's contents are shown only after one of your ships has been
-  within a sector of it. Right-click sets course.
+  within a sector of it. Right-click a sector to choose how to get there: move under engines, or jump with the
+  faster-than-light drive (only ships that have a working drive jump).
 - **Renderer.** Floating-point scene target and tone mapping, camera-relative rendering from double-precision
   positions, a star field and sky, instanced hull and asteroid meshes with two levels of detail.
 
@@ -97,6 +98,19 @@ Command view:
 | Lower / raise the plane | `Q` / `E`, or `Shift` + left-drag |
 | Focus the camera on the selection | `Space` or `F`; double-click a row in the fleet list |
 | Halt the selection | `H` or `Backspace` |
+
+Galaxy map:
+
+| | |
+| --- | --- |
+| Select ships | Left-click a ship, or drag a box; `Shift` or `Ctrl` adds to the selection |
+| Set course | Right-click a sector, then pick **Move here** or **Jump here** in the menu |
+| Close the menu | Left-click elsewhere, or `Esc` (a second `Esc` closes the map) |
+| Pan / zoom | `W` `A` `S` `D`, arrow keys or middle-drag / mouse wheel |
+| Change layer, centre on your ship | `Page Up` / `Page Down`, `Space` |
+
+Orders go to the selected ships, or to the ship you fly if none is selected. **Jump here** is greyed out when none of
+them has a working jump drive, or all are already in that sector; ships without a drive stay where they are.
 
 Where the command plane cuts through an asteroid or a hull, the cut is drawn as a bright line and the part below
 the plane is dimmed, so it is clear what sits on the plane. `I` shows the data sheet of the first selected hull or
