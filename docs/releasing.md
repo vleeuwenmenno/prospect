@@ -98,3 +98,9 @@ docker run -d -p 127.0.0.1:8080:8080 -e Listing__TrustedProxies=172.16.0.0/12 gh
 make server-image     # prospect-server
 make listing-image    # prospect-listing
 ```
+
+## Optional central accounts
+
+Accounts are disabled by default. Enabling them requires Discord credentials and a durable writable /data volume.
+The image owns /data as APP_UID; bind mounts must grant that user write access.
+SQLite native assets ship for amd64 and arm64. Account configuration, callback registration, backups and logging rules: [accounts.md](accounts.md).

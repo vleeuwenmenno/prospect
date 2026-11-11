@@ -48,6 +48,12 @@ public sealed class ListingOptions
     /// <summary>List requests one address may make per minute.</summary>
     public int ListsPerMinute { get; set; } = 60;
 
+    /// <summary>Sign-in and callback requests per address per minute.</summary>
+    public int AuthPerMinute { get; set; } = 20;
+
+    /// <summary>Authenticated account requests per address per minute.</summary>
+    public int AccountPerMinute { get; set; } = 120;
+
     /// <summary>
     /// Requests per second the whole service accepts, from all addresses together: a burst of this many, then this
     /// many per second. A request refused by its own address's limit does not use any of it.
@@ -104,6 +110,8 @@ public sealed class ListingOptions
         Require(MaxConnections, 1, 1_000_000, nameof(MaxConnections));
         Require(RequestHeadersTimeoutSeconds, 1, 600, nameof(RequestHeadersTimeoutSeconds));
         Require(PostsPerMinute, 1, 1_000_000, nameof(PostsPerMinute));
+        Require(AuthPerMinute, 1, 1_000_000, nameof(AuthPerMinute));
+        Require(AccountPerMinute, 1, 1_000_000, nameof(AccountPerMinute));
         Require(ListsPerMinute, 1, 1_000_000, nameof(ListsPerMinute));
         Require(GlobalRequestsPerSecond, 1, 1_000_000, nameof(GlobalRequestsPerSecond));
         Require(RateLimitAddresses, 1, 1_000_000, nameof(RateLimitAddresses));

@@ -180,3 +180,9 @@ Getting step 2 wrong is the one dangerous mistake:
   everyone's heartbeats; entries survive 90 seconds of that. Blocking such a flood belongs in front of the service.
 - **An address owns its ports.** Anyone at a server's address (the same NAT) could list a port the server is not
   using, and can replace its entry once it expires.
+
+## Optional central accounts
+
+Discord accounts and persistent friends share this service, disabled by default.
+Their API, limits, SQLite volume and deployment configuration are in [accounts.md](accounts.md).
+Listings remain temporary in memory; account data needs durable writable storage.

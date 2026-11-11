@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Net.Http.Headers;
+using Prospect.Listing.Accounts;
 
 namespace Prospect.Listing;
 
@@ -28,6 +29,15 @@ public static class ListingApp
 
         var options = builder.Configuration.GetSection(ListingOptions.Section).Get<ListingOptions>() ?? new ListingOptions();
         options.Validate();
+        var accounts = builder.Configuration.GetSection("Accounts").Get<AccountsOptions>() ?? new AccountsOptions();
+        accounts.Validate();
+        builder.Services.AddSingleton(accounts);
+        builder.Services.AddSingleton<AccountStore>();
+        builder.Services.TryAddSingleton<DiscordEndpoints>();
+        builder.Services.AddSingleton<DiscordClient>();
+        builder.Services.AddSingleton<SigninAttempts>();
+        if (accounts.Enabled) builder.Services.AddHostedService(p => p.GetRequiredService<SigninAttempts>());
+        builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 
         builder.Services.AddSingleton(options);
         builder.Services.TryAddSingleton(TimeProvider.System);
@@ -97,6 +107,7 @@ public static class ListingApp
         app.MapPost("/v1/servers", Announce).WithMetadata(new LimitedBy(RequestKind.Post));
         app.MapDelete("/v1/servers/{id}", Remove).WithMetadata(new LimitedBy(RequestKind.Post));
         app.MapGet("/v1/servers", List).WithMetadata(new LimitedBy(RequestKind.List));
+        AccountRoutes.Map(app);
         app.MapGet("/healthz", () => Results.Text("ok"));
         return app;
     }
@@ -212,6 +223,11 @@ public static class ListingApp
             return next(context);
         }
 
+        if (limitedBy.Kind is RequestKind.Auth or RequestKind.Account)
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            context.Response.Headers["Referrer-Policy"] = "no-referrer";
+        }
         var address = ClientAddress(context);
         if (IsTrustedProxy(address, options))
         {
@@ -377,5 +393,5 @@ public static class ListingApp
     private sealed record ErrorResponse(string Error);
 
     // Endpoint metadata: which per-address allowance the endpoint draws on.
-    private sealed record LimitedBy(RequestKind Kind);
+    internal sealed record LimitedBy(RequestKind Kind);
 }

@@ -3,12 +3,14 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>prospect-listing</AssemblyName>
     <RootNamespace>Prospect.Listing</RootNamespace>
-    <!-- The listing server is plain managed code with no native libraries, so its image can run on any architecture. -->
+    <!-- SQLite supplies native runtime assets for both supported container architectures. -->
     <PlatformTarget>AnyCPU</PlatformTarget>
     <!-- A small web service: the server collector would reserve far more memory than the list ever needs. -->
     <ServerGarbageCollector>false</ServerGarbageCollector>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
     <InternalsVisibleTo Include="Prospect.Listing.Tests" />
   </ItemGroup>
 </Project>

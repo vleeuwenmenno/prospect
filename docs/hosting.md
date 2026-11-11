@@ -224,3 +224,9 @@ The browser screen:
 - A flood from many addresses, or with forged addresses, can keep newcomers out; see
   [Connection limits](#connection-limits).
 - Game traffic is not encrypted or signed.
+
+## Optional central accounts
+
+The optional [account backend](accounts.md) stores Discord accounts and friends beside the listing service.
+Client integration is pending. Guest joins and party/chat remain independent of that service.
+The current game handshake does not attest an account; roster names are not verified identities.

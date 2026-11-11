@@ -2,8 +2,7 @@
 #   docker build -f docker/listing.Dockerfile -t prospect-listing .
 # Configure with environment variables (Listing__TrustedProxies=..., see docs/listing-server.md).
 
-# The build runs on the builder's own CPU for every target: the service has no native code, so the published files
-# are the same on amd64 and arm64 and nothing needs emulating.
+# Build managed code on the builder CPU; portable publish includes SQLite native assets for amd64 and arm64.
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 # Project files first, so the restore layer is reused while only code changes.
@@ -18,7 +17,9 @@ WORKDIR /app
 COPY --from=build /app ./
 ENV ASPNETCORE_HTTP_PORTS=8080 \
     DOTNET_NOLOGO=1
-# The image's built-in unprivileged user; the service needs no root and writes no files.
+# Optional accounts persist SQLite and its WAL in a volume owned by the runtime user.
+RUN mkdir /data && chown $APP_UID:$APP_UID /data
+VOLUME /data
 USER $APP_UID
 EXPOSE 8080
 # The runtime image has no curl or wget: the service's own binary asks it for /healthz.

@@ -8,6 +8,10 @@ public enum RequestKind
 
     /// <summary>List requests (<see cref="ListingOptions.ListsPerMinute"/>).</summary>
     List,
+    /// <summary>Native sign-in and Discord callbacks.</summary>
+    Auth,
+    /// <summary>Account and friends operations.</summary>
+    Account,
 }
 
 /// <summary>What the limiter decided about one request.</summary>
@@ -28,7 +32,7 @@ public readonly record struct LimitDecision(bool Allowed, bool Global, TimeSpan 
 /// <para>
 /// Per-address state lives in a fixed number of slots reserved at start, so memory and the cost of housekeeping depend
 /// on <see cref="ListingOptions.RateLimitAddresses"/>, never on how many addresses are seen. A slot is freed only once
-/// both its buckets have refilled completely, when its state is the same as a new address's: dropping it lets no one
+/// all its buckets have refilled completely, when its state is the same as a new address's: dropping it lets no one
 /// escape a limit. When every slot is in use, a new address is limited by one of a few shared overflow buckets chosen by
 /// hash, while every address that already holds a slot keeps being limited exactly as before. An address that later
 /// gets a slot of its own starts from its overflow bucket's state, so the move never grants a fresh burst.
@@ -46,6 +50,8 @@ public sealed class RequestLimiter
     private readonly Cell post;
     private readonly Cell list;
     private readonly Cell global;
+    private readonly Cell auth;
+    private readonly Cell account;
     private readonly long sweepSpacing;
     private readonly Dictionary<string, int> slotOf;
     private readonly Slot[] slots;
@@ -62,6 +68,8 @@ public sealed class RequestLimiter
         var frequency = time.TimestampFrequency;
         post = Cell.Of(options.PostsPerMinute, 60 * frequency);
         list = Cell.Of(options.ListsPerMinute, 60 * frequency);
+        auth = Cell.Of(options.AuthPerMinute, 60 * frequency);
+        account = Cell.Of(options.AccountPerMinute, 60 * frequency);
         global = Cell.Of(options.GlobalRequestsPerSecond, frequency);
 
         // A full sweep walks every slot, so it runs at most once a second, and only when a new address finds no slot.
@@ -112,7 +120,7 @@ public sealed class RequestLimiter
     /// </summary>
     public LimitDecision TryAcquire(string group, RequestKind kind)
     {
-        var cell = kind == RequestKind.Post ? post : list;
+        var cell = kind switch { RequestKind.Post => post, RequestKind.List => list, RequestKind.Auth => auth, _ => account };
         lock (gate)
         {
             // Read inside the lock, so requests are judged in the order their times were taken.
@@ -123,7 +131,7 @@ public sealed class RequestLimiter
             }
 
             ref var slot = ref Find(group, now);
-            ref var tat = ref kind == RequestKind.Post ? ref slot.Post : ref slot.List;
+            ref var tat = ref kind == RequestKind.Post ? ref slot.Post : ref kind == RequestKind.List ? ref slot.List : ref kind == RequestKind.Auth ? ref slot.Auth : ref slot.Account;
             if (!cell.Admits(tat, now, out var wait))
             {
                 return new LimitDecision(false, false, ToTimeSpan(wait));
@@ -158,7 +166,7 @@ public sealed class RequestLimiter
         // The address may have been spending from its overflow bucket until now. Its own slot starts from that
         // bucket's state, not from a full allowance, or moving out of overflow would hand it a second burst.
         index = free[--freeCount];
-        slots[index] = new Slot { Group = group, Post = shared.Post, List = shared.List };
+        slots[index] = new Slot { Group = group, Post = shared.Post, List = shared.List, Auth = shared.Auth, Account = shared.Account };
         slotOf.Add(group, index);
         return ref slots[index];
     }
@@ -169,7 +177,7 @@ public sealed class RequestLimiter
         for (var i = 0; i < slots.Length; i++)
         {
             ref var slot = ref slots[i];
-            if (slot.Group is { } group && slot.Post <= now && slot.List <= now)
+            if (slot.Group is { } group && slot.Post <= now && slot.List <= now && slot.Auth <= now && slot.Account <= now)
             {
                 slotOf.Remove(group);
                 slot = Slot.Fresh;
@@ -184,11 +192,13 @@ public sealed class RequestLimiter
     /// <summary>One address group's state: when each of its buckets is next back to empty use ("theoretical arrival time").</summary>
     private struct Slot
     {
-        public static readonly Slot Fresh = new() { Post = long.MinValue, List = long.MinValue };
+        public static readonly Slot Fresh = new() { Post = long.MinValue, List = long.MinValue, Auth = long.MinValue, Account = long.MinValue };
 
         public string? Group;
         public long Post;
         public long List;
+        public long Auth;
+        public long Account;
     }
 
     /// <summary>One bucket's shape: the interval between requests at the sustained rate, and how far ahead a burst may run.</summary>

@@ -21,7 +21,8 @@ Chat, the player roster and parties work end to end: the server decides, the cli
   at the bottom left for a few seconds while chat is closed.
 - **Quick buttons** at the top right open the three. Hold `Alt` to show the cursor and click them.
 
-Not there yet: friends, accounts, factions and alliances. Names and player ids last only for the session, and
+Central Discord accounts and persistent friends have an optional listing-service backend; client integration is still pending (see [accounts](docs/accounts.md)).
+Not there yet in the game: account sign-in, persistent friends, factions and alliances. Names and player ids last only for the session, and
 presence covers only the server you are on.
 
 Stage 1 of blocks at scale exists in tooling and tests: versioned boxes, content limits and size rules,
