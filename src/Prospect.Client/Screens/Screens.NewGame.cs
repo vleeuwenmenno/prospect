@@ -2,6 +2,7 @@ using Brutal.ImGuiApi;
 using Brutal.Numerics;
 using Prospect.Client.Ui;
 using Prospect.Game.Client;
+using Prospect.Game.Protocol;
 using Prospect.Game.World;
 
 namespace Prospect.Client.Screens;
@@ -13,8 +14,18 @@ internal sealed partial class ScreenHost
     /// <summary>Room left of each setting for the bar that marks a changed one.</summary>
     private const float MarkerGutter = 14;
 
+    private static readonly string[] VisibilityOptions = ["Private", "Unlisted", "Public"];
+
     /// <summary>The settings being chosen on the New game screen; handed to the app on Start or Back.</summary>
     private WorldSettings _newGame;
+
+    /// <summary>How the game is hosted, as chosen on the New game screen; the text fields hold the rest until Start or Back.</summary>
+    private HostingOptions _hosting = new();
+    private readonly ImInputString _hostName = new(ServerNames.MaxBytes + 1);
+    private readonly ImInputString _hostPassword = new(PasswordBytes);
+    private readonly ImInputString _hostPort = new(8);
+    private bool _hostPasswordShown;
+    private string _newGameError = "";
 
     /// <summary>The option names of each choice setting, by the setting's index, for the choice widget.</summary>
     private string[][] _settingOptions = [];
@@ -36,10 +47,113 @@ internal sealed partial class ScreenHost
             _settingOptions[definition.Index] = [.. definition.Options];
     }
 
-    public void OpenNewGame()
+    /// <summary>Opens the New game screen with the next game's settings, and the reason the last start failed if it did.</summary>
+    public void OpenNewGame(string error = "")
     {
         _newGame = _app.NewGameSettings;
+        _hosting = _app.NewGameHosting.Clone();
+        var name = _hosting.Name;
+        if (name.Length == 0 && !ServerNames.TryNormalize($"{_app.Settings.PlayerName}'s game", out name))
+            name = "";
+        _hostName.SetValue(name);
+        _hostPassword.SetValue(_hosting.Password);
+        _hostPort.SetValue(_hosting.Port.ToString());
+        _hostPasswordShown = false;
+        _newGameError = error;
         Show(Screen.NewGame);
+    }
+
+    /// <summary>
+    /// Reads the hosting fields into <see cref="_hosting"/>. False, with a sentence in <see cref="_newGameError"/>,
+    /// when the port is not a port; the name and the password are checked by the game when it starts.
+    /// </summary>
+    private bool ReadHostingFields()
+    {
+        _hosting.Name = _hostName.ToString().Trim();
+        _hosting.Password = _hostPassword.ToString();
+        if (ushort.TryParse(_hostPort.ToString(), out var port) && port > 0)
+        {
+            _hosting.Port = port;
+            return true;
+        }
+
+        if (_hosting.Visibility == ServerVisibility.Private)
+            return true;
+        _newGameError = "The port must be a number from 1 to 65535.";
+        return false;
+    }
+
+    private void StartNewGame()
+    {
+        _newGameError = "";
+        if (!ReadHostingFields())
+            return;
+        if (!_app.StartLocalGame(_newGame, _hosting, out var error))
+            _newGameError = error;
+    }
+
+    /// <summary>The hosting section of the New game screen: who can join, and when others can, how.</summary>
+    private void DrawHostingEditor()
+    {
+        Kit.Caption("HOSTING"u8);
+        Kit.Space(Theme.Space2);
+        var visibility = (int)_hosting.Visibility;
+        if (Kit.Choice("Who can join"u8, VisibilityOptions, ref visibility, WorldRowWidth))
+        {
+            _hosting.Visibility = (ServerVisibility)visibility;
+            _newGameError = "";
+        }
+
+        Kit.Space(Theme.Space1);
+        ImGui.Indent(Kit.Px(Theme.Space3));
+        switch (_hosting.Visibility)
+        {
+            case ServerVisibility.Private:
+                Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, "Only you. Nothing is opened on the network and nobody else can join."u8, WorldRowWidth - 24);
+                break;
+            case ServerVisibility.Unlisted:
+                Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextDim, "Others join with your address and the port below. It is not shown in the server browser."u8, WorldRowWidth - 24);
+                break;
+            default:
+                if (_app.Listing is { } listing)
+                    Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextDim, Kit.F($"Shown in the server browser on {listing.Url.Host}. Others join from there, or with your address and the port below."), WorldRowWidth - 24);
+                else
+                    Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.Bad, "The server list is turned off, so this game is not listed. Others can still join with your address and the port below."u8, WorldRowWidth - 24);
+                break;
+        }
+
+        if (_hosting.Visibility != ServerVisibility.Private)
+        {
+            Kit.Space(Theme.Space1);
+            Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.Accent, "The port must be reachable from outside: forward it on your router if you have one. The game does not do that for you."u8, WorldRowWidth - 24);
+        }
+
+        ImGui.Unindent(Kit.Px(Theme.Space3));
+
+        if (_hosting.Visibility != ServerVisibility.Private)
+        {
+            Kit.Space(Theme.Space4);
+            Kit.TextField("GAME NAME"u8, "##hostname"u8, _hostName, WorldRowWidth);
+            Kit.Space(Theme.Space3);
+            Kit.PasswordField("PASSWORD (OPTIONAL)"u8, "##hostpassword"u8, _hostPassword, ref _hostPasswordShown, WorldRowWidth - 70);
+            Kit.Space(Theme.Space1);
+            Kit.Label(_ui.Sans, Theme.FontSmall, Theme.TextMute, Kit.F($"Up to {Passwords.MaxChars} characters. Leave it empty for none. You are never asked for it yourself."));
+            Kit.Space(Theme.Space3);
+            var slots = (float)Math.Clamp(_hosting.MaxPlayers, 2, 64);
+            if (Kit.Slider("Player slots"u8, ref slots, 2, 64, 1, Kit.F($"{(int)slots}"), WorldRowWidth))
+                _hosting.MaxPlayers = (int)slots;
+            _hosting.MaxPlayers = (int)slots;
+            Kit.Space(Theme.Space1);
+            ImGui.Indent(Kit.Px(Theme.Space3));
+            Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, "Players at once, you included."u8, WorldRowWidth - 24);
+            ImGui.Unindent(Kit.Px(Theme.Space3));
+            Kit.Space(Theme.Space3);
+            Kit.TextField("PORT (UDP)"u8, "##hostport"u8, _hostPort, 140, ImGuiInputTextFlags.CharsDecimal);
+        }
+
+        Kit.Space(Theme.Space5);
+        Kit.Caption("WORLD"u8);
+        Kit.Space(Theme.Space2);
     }
 
     private void DrawNewGame(float fade)
@@ -50,18 +164,35 @@ internal sealed partial class ScreenHost
         var size = new float2(Kit.Px(WorldRowWidth + Theme.Space6 * 2 + 30), Math.Min(Kit.Px(1100), _ui.DisplaySize.Y * 0.92f - Kit.Px(72)));
         BeginPanel("##newgamepanel"u8, min, size);
 
-        Kit.Caption("LOCAL GAME"u8, Theme.Accent);
-        Kit.Space(Theme.Space1);
-        Kit.Heading("New Game"u8);
-        Kit.Space(Theme.Space2);
-        Kit.Body("World settings. The server keeps them for as long as the game runs."u8);
-        Kit.Space(Theme.Space4);
+        if (Compact)
+        {
+            Kit.Caption("LOCAL GAME  /  NEW GAME"u8, Theme.Accent);
+            Kit.Space(Theme.Space3);
+        }
+        else
+        {
+            Kit.Caption("LOCAL GAME"u8, Theme.Accent);
+            Kit.Space(Theme.Space1);
+            Kit.Heading("New Game"u8);
+            Kit.Space(Theme.Space2);
+            Kit.Body("Who can join, and the world's settings. The server keeps them for as long as the game runs."u8);
+            Kit.Space(Theme.Space4);
+        }
 
         // The list scrolls on its own so the actions below it stay in view however short the window is.
-        var footer = Kit.Px(Theme.ControlHeight + Theme.Space4);
+        var errorHeight = 0f;
+        if (_newGameError.Length > 0)
+        {
+            ImGui.PushFont(_ui.Sans, Theme.FontSmall);
+            errorHeight = ImGui.CalcTextSize(_newGameError, false, Kit.Px(WorldRowWidth)).Y + Kit.Px(Theme.Space2);
+            ImGui.PopFont();
+        }
+
+        var footer = Kit.Px(Theme.ControlHeight + Theme.Space4) + errorHeight;
         var listHeight = Math.Max(Kit.Px(80), ImGui.GetContentRegionAvail().Y - footer);
         ImGui.BeginChild("##newgamelist"u8, new float2(0, listHeight), ImGuiChildFlags.NavFlattened, ImGuiWindowFlags.NoBackground);
         ImGui.Indent(Kit.Px(MarkerGutter));
+        DrawHostingEditor();
         var changed = 0;
         foreach (var definition in catalog.Definitions)
         {
@@ -74,12 +205,22 @@ internal sealed partial class ScreenHost
         ImGui.EndChild();
 
         Kit.Space(Theme.Space4);
+        if (_newGameError.Length > 0)
+        {
+            // A failed start stays on this screen with the reason, so the player can change what is wrong.
+            Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.Bad, _newGameError, WorldRowWidth);
+            Kit.Space(Theme.Space2);
+        }
+
         if (Kit.Button("Start"u8, ButtonKind.Primary, 160))
-            _app.StartLocalGame(_newGame);
+            StartNewGame();
         ImGui.SameLine(0, Kit.Px(Theme.Space3));
         if (Kit.Button("Back"u8, ButtonKind.Secondary, 120) || BackPressed())
         {
             _app.NewGameSettings = _newGame;
+            ReadHostingFields();
+            _newGameError = "";
+            _app.NewGameHosting = _hosting.Clone();
             Show(Screen.MainMenu);
         }
 
