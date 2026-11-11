@@ -148,6 +148,12 @@ public static class HullSim
     private const int MaxStrides = 32;
 
     /// <summary>
+    /// How much further than the hull's own radius the search for nearby asteroids reaches, in metres: more than
+    /// any contact pushes a hull back out in one tick.
+    /// </summary>
+    private const float ContactPad = 32f;
+
+    /// <summary>
     /// Advances a hull one tick. With an order in force the autopilot flies and the pilot's input is ignored; the
     /// order clears itself on arrival. The server and the predicting client both call exactly this. Returns true
     /// if a collision destroyed the hull. With <paramref name="hulls"/> given the hull also runs into the hulls
@@ -296,8 +302,6 @@ public static class HullSim
     private static bool Collide(ref HullState state, in FlightParams flight, ref HullBody body, RockField rocks, double tick, RockImpulses? impulses)
     {
         var galaxy = rocks.Galaxy;
-        var design = body.Design;
-        var half = design.BlockSize * 0.5f;
         var reach = new Double3(flight.Radius, flight.Radius, flight.Radius);
         var low = galaxy.SectorOf(state.Position - reach);
         var high = galaxy.SectorOf(state.Position + reach);
@@ -314,84 +318,132 @@ public static class HullSim
                 {
                     var coord = new SectorCoord(x, y, z);
                     var content = rocks.Sector(coord);
+                    if (content.AsteroidCount == 0)
+                        continue;
+
                     var moved = rocks.MovedIn(coord);
                     var local = state.Position.RelativeTo(galaxy.CenterOf(coord));
-                    for (var i = 0; i < content.AsteroidCount; i++)
+
+                    // The asteroids still where the seed put them, found through the sector's index rather than
+                    // by looking at every rock of a field of thousands. A contact pushes the hull back out, so
+                    // the search reaches a little further than the hull does now.
+                    var near = content.Rocks.Near(local, flight.Radius + ContactPad);
+                    while (near.Next(out var i))
                     {
-                        ref var rock = ref content.Asteroids[i];
-                        var rockOffset = Vector3.Zero;
-                        var rockVelocity = Vector3.Zero;
-                        if (moved is not null && moved[i] > 0)
-                            rocks.DeltaAt(moved[i] - 1).Evaluate(tick, galaxy.DriftDecay, out rockOffset, out rockVelocity);
-
-                        // Broad phase: the hull's sphere against the sphere the asteroid fits in.
-                        var toHull = local - (rock.LocalPosition + rockOffset);
-                        var bound = rock.Radius + flight.Radius;
-                        if (toHull.LengthSquared() >= bound * bound)
+                        if (moved is not null && moved.Entries[i] > 0)
                             continue;
+                        if (Strike(ref state, flight, ref body, rocks, new RockRef(coord, i), content.Asteroids[i], default, default, tick, impulses, ref local))
+                            return true;
+                    }
 
-                        // Narrow phase: every remaining block against the asteroid's surface in the block's direction.
-                        var toRockFrame = Quaternion.Conjugate(rock.Rotation);
-                        var deepest = 0f;
-                        var normalSum = Vector3.Zero;
-                        var armSum = Vector3.Zero;
-                        var touching = 0UL;
-                        var touchCount = 0;
-                        for (var b = 0; b < design.BlockOffsets.Length; b++)
-                        {
-                            if ((body.Alive & 1UL << b) == 0)
-                                continue;
-                            var arm = Vector3.Transform(design.BlockOffsets[b], state.Orientation);
-                            var fromRock = toHull + arm;
-                            var distance = fromRock.Length();
-                            if (distance >= rock.Radius + half || distance < 1e-3f)
-                                continue;
+                    if (moved is null)
+                        continue;
 
-                            var direction = fromRock / distance;
-                            var surface = rock.Radius * AsteroidShape.RadiusAlong(rock.Shape, Vector3.Transform(direction, toRockFrame));
-                            var depth = surface + half - distance;
-                            if (depth <= 0)
-                                continue;
-
-                            deepest = Math.Max(deepest, depth);
-                            normalSum += direction;
-                            armSum += arm;
-                            touching |= 1UL << b;
-                            touchCount++;
-                        }
-
-                        if (touchCount == 0)
+                    // The asteroids that have been pushed are not where the index has them. There are few, and
+                    // most are ruled out by how far each could ever have drifted, without working out where it is.
+                    for (var m = 0; m < moved.Count; m++)
+                    {
+                        var i = moved.Indices[m];
+                        if (i >= content.AsteroidCount)
                             continue;
-
-                        var normal = normalSum.LengthSquared() > 1e-6f ? Vector3.Normalize(normalSum) : Vector3.UnitY;
-                        var contact = armSum / touchCount;
-                        state.Position += normal * deepest;
-                        local += normal * deepest;
-
-                        // One impulse along the contact normal; the asteroid takes its share without turning.
-                        var rockMass = rocks.Mass(rock.Radius);
-                        var impulse = Bounce(ref state, flight, contact, normal, rockVelocity, 1f / rockMass, 0f, out var closing);
-                        if (impulse <= 0)
+                        var entry = moved.Entries[i] - 1;
+                        ref readonly var rock = ref content.Asteroids[i];
+                        var bound = rock.Radius + flight.Radius + ContactPad + rocks.ReachAt(entry);
+                        if ((local - rock.LocalPosition).LengthSquared() >= bound * bound)
                             continue;
-
-                        if (impulses is not null && impulses.Count < impulses.Items.Length)
-                        {
-                            impulses.Items[impulses.Count++] = new RockDelta
-                            {
-                                Rock = new RockRef(coord, i),
-                                Offset = rockOffset,
-                                Velocity = rockVelocity - normal * (impulse / rockMass),
-                                StartTick = (long)tick,
-                            };
-                        }
-
-                        var damage = ImpactDamage(closing, flight.Mass, flight);
-                        if (damage > 0 && Damage(ref state, flight, ref body, touching, touchCount, damage))
+                        rocks.DeltaAt(entry).Evaluate(tick, galaxy.DriftDecay, out var rockOffset, out var rockVelocity);
+                        if (Strike(ref state, flight, ref body, rocks, new RockRef(coord, i), rock, rockOffset, rockVelocity, tick, impulses, ref local))
                             return true;
                     }
                 }
 
         return false;
+    }
+
+    /// <summary>
+    /// Resolves the hull against one asteroid. <paramref name="local"/> is the hull's position relative to the
+    /// asteroid's sector and moves with the hull when the contact pushes it out. Returns true if the hull was
+    /// destroyed.
+    /// </summary>
+    private static bool Strike(
+        ref HullState state,
+        in FlightParams flight,
+        ref HullBody body,
+        RockField rocks,
+        RockRef name,
+        in Asteroid rock,
+        Vector3 rockOffset,
+        Vector3 rockVelocity,
+        double tick,
+        RockImpulses? impulses,
+        ref Vector3 local
+    )
+    {
+        // Broad phase: the hull's sphere against the sphere the asteroid fits in.
+        var toHull = local - (rock.LocalPosition + rockOffset);
+        var bound = rock.Radius + flight.Radius;
+        if (toHull.LengthSquared() >= bound * bound)
+            return false;
+
+        // Narrow phase: every remaining block against the asteroid's surface in the block's direction.
+        var design = body.Design;
+        var half = design.BlockSize * 0.5f;
+        var toRockFrame = Quaternion.Conjugate(rock.Rotation);
+        var deepest = 0f;
+        var normalSum = Vector3.Zero;
+        var armSum = Vector3.Zero;
+        var touching = 0UL;
+        var touchCount = 0;
+        for (var b = 0; b < design.BlockOffsets.Length; b++)
+        {
+            if ((body.Alive & 1UL << b) == 0)
+                continue;
+            var arm = Vector3.Transform(design.BlockOffsets[b], state.Orientation);
+            var fromRock = toHull + arm;
+            var distance = fromRock.Length();
+            if (distance >= rock.Radius + half || distance < 1e-3f)
+                continue;
+
+            var direction = fromRock / distance;
+            var surface = rock.Radius * AsteroidShape.RadiusAlong(rock.Shape, Vector3.Transform(direction, toRockFrame));
+            var depth = surface + half - distance;
+            if (depth <= 0)
+                continue;
+
+            deepest = Math.Max(deepest, depth);
+            normalSum += direction;
+            armSum += arm;
+            touching |= 1UL << b;
+            touchCount++;
+        }
+
+        if (touchCount == 0)
+            return false;
+
+        var normal = normalSum.LengthSquared() > 1e-6f ? Vector3.Normalize(normalSum) : Vector3.UnitY;
+        var contact = armSum / touchCount;
+        state.Position += normal * deepest;
+        local += normal * deepest;
+
+        // One impulse along the contact normal; the asteroid takes its share without turning.
+        var rockMass = rocks.Mass(rock.Radius);
+        var impulse = Bounce(ref state, flight, contact, normal, rockVelocity, 1f / rockMass, 0f, out var closing);
+        if (impulse <= 0)
+            return false;
+
+        if (impulses is not null && impulses.Count < impulses.Items.Length)
+        {
+            impulses.Items[impulses.Count++] = new RockDelta
+            {
+                Rock = name,
+                Offset = rockOffset,
+                Velocity = rockVelocity - normal * (impulse / rockMass),
+                StartTick = (long)tick,
+            };
+        }
+
+        var damage = ImpactDamage(closing, flight.Mass, flight);
+        return damage > 0 && Damage(ref state, flight, ref body, touching, touchCount, damage);
     }
 
     /// <summary>

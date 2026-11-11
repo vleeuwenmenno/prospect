@@ -28,6 +28,66 @@ public sealed class Resource
 
     /// <summary>How much more common it becomes toward the galaxy's core: 0 is the same everywhere.</summary>
     public required float CoreBias { get; init; }
+
+    /// <summary>The chance, from 0 to 1, that a sector far from the core has the resource at all.</summary>
+    public required float Presence { get; init; }
+}
+
+/// <summary>A word for how much ore a sector carries, and the richness at which it starts to apply.</summary>
+public sealed class RichnessLevel
+{
+    public required string Name { get; init; }
+    public required float From { get; init; }
+}
+
+/// <summary>One share per resource, in the order of <see cref="Galaxy.Resources"/>.</summary>
+[System.Runtime.CompilerServices.InlineArray(Galaxy.MaxResources)]
+public struct ResourceShares
+{
+    private float _first;
+}
+
+/// <summary>
+/// What kind of place a sector is, decided by the seed: how much ore its asteroids carry and which resources can
+/// occur there at all. Cheap to compute, so the map can show it for any sector without generating the sector.
+/// </summary>
+public struct SectorCharacter
+{
+    /// <summary>How much ore the sector carries, from 0 (none) to 1. Neighbouring sectors have related values.</summary>
+    public float Richness;
+
+    /// <summary>Index into <see cref="Galaxy.RichnessLevels"/>. Level 0 is barren: no ore at all.</summary>
+    public int Level;
+
+    /// <summary>One bit per resource that can occur in the sector. A resource whose bit is clear is never found there.</summary>
+    public uint Resources;
+
+    /// <summary>Of the ore in the sector, the part each present resource makes up. They add up to one.</summary>
+    public ResourceShares Shares;
+
+    /// <summary>The resource with the largest share, or -1 if the sector has none.</summary>
+    public int Main;
+
+    public readonly bool Has(int resource) => (Resources & 1u << resource) != 0;
+
+    public readonly int ResourceCount => System.Numerics.BitOperations.PopCount(Resources);
+
+    /// <summary>Picks one of the sector's resources by its share, from a value in [0, 1). Returns -1 if it has none.</summary>
+    public readonly int Pick(float roll)
+    {
+        var last = -1;
+        for (var i = 0; i < Galaxy.MaxResources; i++)
+        {
+            if (!Has(i))
+                continue;
+            last = i;
+            roll -= Shares[i];
+            if (roll < 0)
+                return i;
+        }
+
+        return last;
+    }
 }
 
 /// <summary>What the galaxy map shows for a sector. Cheap to compute, so the map can cover thousands of them.</summary>
@@ -38,10 +98,16 @@ public struct SectorSummary
 
     /// <summary>Unit vector from the sector toward its star, the direction light comes from.</summary>
     public Vector3 SunDirection;
-    public int AsteroidCount;
 
-    /// <summary>The resource most of the sector's ore-bearing asteroids carry, or -1 if it has no asteroids.</summary>
-    public int Vein;
+    /// <summary>How much matter the galaxy's shape puts here, from 0 (void) to about 1 (core, arm).</summary>
+    public float Density;
+
+    /// <summary>How rich the sector is and which resources occur in it.</summary>
+    public SectorCharacter Character;
+
+    /// <summary>Written by the asteroid field module: how many asteroids the sector has, in how many fields.</summary>
+    public int AsteroidCount;
+    public int FieldCount;
 }
 
 public struct Asteroid
@@ -100,10 +166,12 @@ public sealed class GalaxyShape
         if (r > 1.25f)
             return 0f;
 
-        var core = MathF.Exp(-(r * r) / (0.11f * 0.11f));
-        var disc = MathF.Exp(-r * 3.0f);
-        var phase = MathF.Atan2(dz, dx) * Arms - MathF.Log(r + 0.04f) * Winding;
-        var arm = 0.5f + 0.5f * MathF.Cos(phase);
+        // DetMath, not MathF: whether a sector has rock at all hangs on this value, and it must come out the same
+        // on every machine.
+        var core = DetMath.Exp(-(r * r) / (0.11f * 0.11f));
+        var disc = DetMath.Exp(-r * 3.0f);
+        var phase = DetMath.Atan2(dz, dx) * Arms - DetMath.Log(r + 0.04f) * Winding;
+        var arm = 0.5f + 0.5f * DetMath.Cos(phase);
         arm *= arm * arm;
         var edge = 1f - Math.Clamp((r - 0.85f) / 0.3f, 0f, 1f);
         return Math.Clamp((core * 1.2f + disc * (0.22f + 1.5f * arm)) * edge, 0f, 1f);
@@ -113,106 +181,167 @@ public sealed class GalaxyShape
     public float LayerFalloff(int sectorY)
     {
         var d = (sectorY - Center.Y) / Thickness;
-        return MathF.Exp(-d * d);
+        return DetMath.Exp(-d * d);
+    }
+
+    /// <summary>How close a sector is to the core, from 1 at the core to 0 at the rim and beyond.</summary>
+    public float CoreProximity(SectorCoord coord)
+    {
+        var dx = (coord.X - Center.X) / Radius;
+        var dz = (coord.Z - Center.Z) / Radius;
+        return Math.Clamp(1f - MathF.Sqrt(dx * dx + dz * dz), 0f, 1f);
     }
 }
 
-/// <summary>The generated contents of one sector.</summary>
+/// <summary>The generated contents of one sector. Reused from sector to sector; its buffers only ever grow.</summary>
 public sealed class SectorContent
 {
     public SectorSummary Summary;
+
+    /// <summary>
+    /// The sector's asteroids, largest first; the first <see cref="AsteroidCount"/> are meaningful. An asteroid's
+    /// place in this list is its name: see <see cref="RockRef"/>.
+    /// </summary>
     public Asteroid[] Asteroids = [];
     public int AsteroidCount;
+
+    /// <summary>Finds the asteroids near a point.</summary>
+    public readonly RockIndex Rocks = new();
+
+    /// <summary>A sphere around every asteroid of the sector, relative to the sector's centre.</summary>
+    public Vector3 BoundsCenter;
+    public float BoundsRadius;
+
+    /// <summary>Working space for the asteroid field module.</summary>
+    internal ulong[] SortKeys = [];
+
+    /// <summary>When a <see cref="RockField"/> last handed this sector out, for choosing which to drop.</summary>
+    internal long LastUsed;
+
+    internal void Reserve(int asteroids)
+    {
+        if (Asteroids.Length >= asteroids)
+            return;
+        var size = 64;
+        while (size < asteroids)
+            size *= 2;
+        Asteroids = new Asteroid[size];
+        SortKeys = new ulong[size];
+    }
 }
 
 /// <summary>
-/// The galaxy as a function of its seed: every sector's name, star and rocks are computed from the seed and the
-/// sector's coordinate, identically on the server and on every client, so none of it is ever stored or sent.
+/// The galaxy as a function of its seed: every sector's name, star, character and contents are computed from the
+/// seed and the sector's coordinate, identically on the server and on every client, so none of it is ever stored
+/// or sent. A sector is filled by a list of modules, each making one kind of thing from its own random stream.
 /// Generation is pure and thread-safe.
 /// </summary>
 public sealed class Galaxy
 {
     public const int AsteroidShapes = 12;
 
-    private readonly string[] _syllables;
-    private readonly float _emptyChance;
-    private readonly int _maxAsteroids;
-    private readonly float _minRadius;
-    private readonly float _maxRadius;
-    private readonly float _fieldSpreadMin;
-    private readonly float _fieldSpreadMax;
-    private readonly float _totalWeight;
+    /// <summary>The most resources the content may define: a sector's resources travel as one bit each.</summary>
+    public const int MaxResources = 16;
 
-    private Galaxy(
-        ulong seed,
-        double sectorSize,
-        StarClass[] starClasses,
-        string[] syllables,
-        float emptyChance,
-        int maxAsteroids,
-        float minRadius,
-        float maxRadius,
-        float density,
-        float driftDecay,
-        GalaxyShape shape,
-        Resource[] resources,
-        float barrenShare,
-        float veinShare,
-        float fieldSpreadMin,
-        float fieldSpreadMax
-    )
-    {
-        _fieldSpreadMin = fieldSpreadMin;
-        _fieldSpreadMax = fieldSpreadMax;
-        Shape = shape;
-        Resources = resources;
-        _barrenShare = barrenShare;
-        _veinShare = veinShare;
-        AsteroidDensity = density;
-        DriftDecay = driftDecay;
-        Seed = seed;
-        SectorSize = sectorSize;
-        StarClasses = starClasses;
-        _syllables = syllables;
-        _emptyChance = emptyChance;
-        _maxAsteroids = maxAsteroids;
-        _minRadius = minRadius;
-        _maxRadius = maxRadius;
-        foreach (var star in starClasses)
-            _totalWeight += star.Weight;
-    }
+    private const uint StarStream = 1;
+    private const uint NameStream = 3;
+    private static readonly ulong CharacterStream = SectorRandom.Key("sector-character");
+    private static readonly ulong RegionStream = SectorRandom.Key("richness-region");
 
-    public ulong Seed { get; }
+    private string[] _syllables = [];
+    private float _totalStarWeight;
+    private SectorModule[] _modules = [];
+
+    // How a sector's character is drawn. See content/galaxy/galaxy.json, "sectorCharacter".
+    private float _regionSectors;
+    private float _regionShare;
+    private float _contrast;
+    private float _shapeFloor;
+    private float _shapeGain;
+    private float _everyResourceChance;
+    private float _shareEvenness;
+    private float _homeMinRichness;
+    private uint _homeResources;
+
+    private Galaxy() { }
+
+    public ulong Seed { get; private set; }
 
     /// <summary>Everything asteroids can carry, in the order their indices refer to.</summary>
-    public Resource[] Resources { get; }
+    public Resource[] Resources { get; private set; } = [];
 
-    private readonly float _barrenShare;
-    private readonly float _veinShare;
+    /// <summary>The words for a sector's richness, poorest first. The first is barren: no ore at all.</summary>
+    public RichnessLevel[] RichnessLevels { get; private set; } = [];
 
     /// <summary>The spiral the galaxy's matter follows: where sectors are rich and where they are empty.</summary>
-    public GalaxyShape Shape { get; }
+    public GalaxyShape Shape { get; private set; } = null!;
+
+    /// <summary>What fills a sector, in the order the content lists them.</summary>
+    public ReadOnlySpan<SectorModule> Modules => _modules;
 
     /// <summary>Tonnes per cubic metre of rock.</summary>
-    public float AsteroidDensity { get; }
+    public float AsteroidDensity { get; private set; }
 
     /// <summary>
     /// How quickly a pushed asteroid loses its drift, as an exponential rate per second. Real rock would coast for
     /// ever; fields would slowly empty themselves, so a disturbed asteroid settles instead.
     /// </summary>
-    public float DriftDecay { get; }
-
-    /// <summary>The same galaxy rules under a different seed.</summary>
-    public Galaxy WithSeed(ulong seed) =>
-        new(seed, SectorSize, StarClasses, _syllables, _emptyChance, _maxAsteroids, _minRadius, _maxRadius, AsteroidDensity, DriftDecay, Shape, Resources, _barrenShare, _veinShare, _fieldSpreadMin, _fieldSpreadMax);
+    public float DriftDecay { get; private set; }
 
     /// <summary>Edge length of a sector cell in metres.</summary>
-    public double SectorSize { get; }
-    public StarClass[] StarClasses { get; }
-    public int MaxAsteroidsPerSector => _maxAsteroids;
+    public double SectorSize { get; private set; }
+    public StarClass[] StarClasses { get; private set; } = [];
 
-    /// <summary>Where new players appear: the middle of the home sector.</summary>
-    public static Double3 SpawnPoint => Double3.Zero;
+    /// <summary>The most asteroids any sector can hold.</summary>
+    public int MaxAsteroidsPerSector { get; private set; }
+
+    /// <summary>The module that makes the asteroid fields, or null in a galaxy without one.</summary>
+    public AsteroidFieldsModule? AsteroidFields { get; private set; }
+
+    /// <summary>The asteroid count at which a sector shows at full strength on the map.</summary>
+    public float MapFullSignalAsteroids { get; private set; }
+
+    /// <summary>The same galaxy rules under a different seed.</summary>
+    public Galaxy WithSeed(ulong seed)
+    {
+        var copy = (Galaxy)MemberwiseClone();
+        copy.Seed = seed;
+        return copy;
+    }
+
+    /// <summary>The same galaxy filled by a different list of modules.</summary>
+    public Galaxy WithModules(params SectorModule[] modules)
+    {
+        var copy = (Galaxy)MemberwiseClone();
+        copy.SetModules(modules);
+        return copy;
+    }
+
+    private void SetModules(SectorModule[] modules)
+    {
+        for (var i = 0; i < modules.Length; i++)
+            for (var j = 0; j < i; j++)
+            {
+                // The id keys a module's random stream; two modules sharing one would draw the same numbers.
+                if (modules[i].Id == modules[j].Id)
+                    throw new InvalidDataException($"Two sector modules share the id '{modules[i].Id}'");
+            }
+
+        _modules = modules;
+        MaxAsteroidsPerSector = 0;
+        AsteroidFields = null;
+        foreach (var module in modules)
+        {
+            if (module is not AsteroidFieldsModule fields)
+                continue;
+
+            // One list of asteroids per sector: a second field module would write over the first.
+            if (AsteroidFields is not null)
+                throw new InvalidDataException("A galaxy takes one asteroid field module");
+            AsteroidFields = fields;
+            MaxAsteroidsPerSector = fields.MaxPerSector;
+        }
+    }
 
     public static Galaxy Load(string path, ulong seed = 0)
     {
@@ -248,32 +377,73 @@ public sealed class Galaxy
                     Color = new Vector3(tint[0].GetSingle(), tint[1].GetSingle(), tint[2].GetSingle()),
                     Weight = resource.GetProperty("weight"u8).GetSingle(),
                     CoreBias = resource.GetProperty("coreBias"u8).GetSingle(),
+                    Presence = resource.GetProperty("presence"u8).GetSingle(),
                 }
             );
         }
 
-        var asteroids = root.GetProperty("asteroids"u8);
         if (stars.Count == 0 || syllables.Count == 0)
             throw new InvalidDataException($"{path}: needs at least one star class and one name syllable");
+        if (resources.Count > MaxResources)
+            throw new InvalidDataException($"{path}: at most {MaxResources} resources");
 
-        return new Galaxy(
-            seed,
-            root.GetProperty("sectorSize"u8).GetDouble(),
-            [.. stars],
-            [.. syllables],
-            asteroids.GetProperty("emptySectorChance"u8).GetSingle(),
-            asteroids.GetProperty("maxPerSector"u8).GetInt32(),
-            asteroids.GetProperty("minRadius"u8).GetSingle(),
-            asteroids.GetProperty("maxRadius"u8).GetSingle(),
-            asteroids.GetProperty("densityTonnesPerCubicMetre"u8).GetSingle(),
-            MathF.Log(2f) / asteroids.GetProperty("driftHalfLifeSeconds"u8).GetSingle(),
-            GalaxyShape.Read(root.GetProperty("shape"u8)),
-            [.. resources],
-            asteroids.GetProperty("barrenShare"u8).GetSingle(),
-            asteroids.GetProperty("veinShare"u8).GetSingle(),
-            asteroids.GetProperty("fieldSpreadMin"u8).GetSingle(),
-            asteroids.GetProperty("fieldSpreadMax"u8).GetSingle()
-        );
+        var sectorSize = root.GetProperty("sectorSize"u8).GetDouble();
+        if (sectorSize > RockIndex.MaxSectorSize)
+            throw new InvalidDataException($"{path}: sectors can be at most {RockIndex.MaxSectorSize:0} m across");
+
+        var character = root.GetProperty("sectorCharacter"u8);
+        var levels = new List<RichnessLevel>();
+        foreach (var level in character.GetProperty("levels"u8).EnumerateArray())
+            levels.Add(new RichnessLevel { Name = level.GetProperty("name"u8).GetString()!, From = level.GetProperty("from"u8).GetSingle() });
+        if (levels.Count < 2 || levels[0].From != 0f)
+            throw new InvalidDataException($"{path}: richness levels need a first level from 0 and at least one above it");
+        for (var i = 1; i < levels.Count; i++)
+        {
+            if (levels[i].From <= levels[i - 1].From)
+                throw new InvalidDataException($"{path}: richness levels must rise");
+        }
+
+        var home = character.GetProperty("home"u8);
+        var homeResources = 0u;
+        foreach (var id in home.GetProperty("resources"u8).EnumerateArray())
+        {
+            var index = resources.FindIndex(r => r.Id == id.GetString());
+            if (index < 0)
+                throw new InvalidDataException($"{path}: the home sector names an unknown resource '{id.GetString()}'");
+            homeResources |= 1u << index;
+        }
+
+        var asteroids = root.GetProperty("asteroids"u8);
+        var galaxy = new Galaxy
+        {
+            Seed = seed,
+            SectorSize = sectorSize,
+            StarClasses = [.. stars],
+            _syllables = [.. syllables],
+            Resources = [.. resources],
+            RichnessLevels = [.. levels],
+            Shape = GalaxyShape.Read(root.GetProperty("shape"u8)),
+            AsteroidDensity = asteroids.GetProperty("densityTonnesPerCubicMetre"u8).GetSingle(),
+            DriftDecay = MathF.Log(2f) / asteroids.GetProperty("driftHalfLifeSeconds"u8).GetSingle(),
+            MapFullSignalAsteroids = root.GetProperty("map"u8).GetProperty("fullSignalAsteroids"u8).GetSingle(),
+            _regionSectors = character.GetProperty("regionSectors"u8).GetSingle(),
+            _regionShare = character.GetProperty("regionShare"u8).GetSingle(),
+            _contrast = character.GetProperty("contrast"u8).GetSingle(),
+            _shapeFloor = character.GetProperty("shapeFloor"u8).GetSingle(),
+            _shapeGain = character.GetProperty("shapeGain"u8).GetSingle(),
+            _everyResourceChance = character.GetProperty("everyResourceChance"u8).GetSingle(),
+            _shareEvenness = character.GetProperty("shareEvenness"u8).GetSingle(),
+            _homeMinRichness = home.GetProperty("minRichness"u8).GetSingle(),
+            _homeResources = homeResources,
+        };
+        foreach (var star in stars)
+            galaxy._totalStarWeight += star.Weight;
+
+        var modules = new List<SectorModule>();
+        foreach (var module in root.GetProperty("sectorModules"u8).EnumerateArray())
+            modules.Add(SectorModule.Read(module, path));
+        galaxy.SetModules([.. modules]);
+        return galaxy;
     }
 
     public SectorCoord SectorOf(Double3 position) =>
@@ -288,18 +458,20 @@ public sealed class Galaxy
     /// <summary>The sector's name, for display. Allocates a string; ask only for sectors that are shown by name.</summary>
     public string NameOf(SectorCoord coord)
     {
-        var random = new SectorRandom(Seed, coord, 3);
+        var random = new SectorRandom(Seed, coord, NameStream);
         var first = _syllables[random.NextInt(_syllables.Length)];
         var second = _syllables[random.NextInt(_syllables.Length)].ToLowerInvariant();
         return $"{first}{second} {random.NextInt(900) + 100}";
     }
 
+    /// <summary>
+    /// What the map and the sector panel need to know about a sector: its star, its character and each module's
+    /// headline figures. Cheap: nothing in the sector is generated.
+    /// </summary>
     public SectorSummary Summarize(SectorCoord coord)
     {
-        var random = new SectorRandom(Seed, coord, 1);
-        var isHome = coord == default;
-
-        var pick = random.NextSingle() * _totalWeight;
+        var random = new SectorRandom(Seed, coord, StarStream);
+        var pick = random.NextSingle() * _totalStarWeight;
         var starClass = 0;
         for (; starClass < StarClasses.Length - 1; starClass++)
         {
@@ -310,111 +482,130 @@ public sealed class Galaxy
 
         var sun = Vector3.Normalize(new Vector3(random.NextSigned(), random.NextSigned() * 0.6f + 0.25f, random.NextSigned()) + new Vector3(0, 0, 0.001f));
 
-        // Rock follows the galaxy's spiral: dense in the arms and the core, thin between them, almost none
-        // outside the disc. The home sector always has a field to work.
+        // Matter follows the galaxy's spiral: dense in the arms and the core, thin between them, almost none
+        // outside the disc.
         var density = Shape.Density(coord.X, coord.Z) * Shape.LayerFalloff(coord.Y);
-        var occupied = random.NextSingle() < 0.02f + (1f - _emptyChance) * Math.Min(1f, density * 1.6f);
-        var richness = MathF.Pow(random.NextSingle(), 1.6f) * (0.25f + 0.75f * Math.Min(1f, density * 1.3f));
-        var count = isHome
-            ? Math.Max(_maxAsteroids * 2 / 3, 1)
-            : occupied
-                ? 1 + (int)(richness * (_maxAsteroids - 1))
-                : 0;
-
-        // A sector's ore mostly comes from one vein; which one depends on what is common this far from the core.
-        var veinRandom = new SectorRandom(Seed, coord, 4);
-        var vein = count > 0 ? PickResource(ref veinRandom, coord) : -1;
-
-        return new SectorSummary
+        var summary = new SectorSummary
         {
-            Vein = vein,
             Coord = coord,
             StarClass = starClass,
             SunDirection = sun,
-            AsteroidCount = count,
+            Density = density,
+            Character = Characterize(coord, density),
         };
+
+        var sector = new SectorContext(this, coord, density);
+        foreach (var module in _modules)
+            module.Summarize(sector, ref summary);
+        return summary;
     }
 
-    /// <summary>Generates a sector's contents into <paramref name="content"/>, reusing its arrays.</summary>
+    /// <summary>Generates a sector's contents into <paramref name="content"/>, reusing its buffers.</summary>
     public void Generate(SectorCoord coord, SectorContent content)
     {
         content.Summary = Summarize(coord);
-        var count = content.Summary.AsteroidCount;
-        if (content.Asteroids.Length < _maxAsteroids)
-            content.Asteroids = new Asteroid[_maxAsteroids];
-        content.AsteroidCount = count;
-        if (count == 0)
-            return;
+        content.AsteroidCount = 0;
+        content.BoundsCenter = default;
+        content.BoundsRadius = 0;
+        content.Rocks.Reset(0, SectorSize);
 
-        var random = new SectorRandom(Seed, coord, 2);
-        var half = (float)(SectorSize * 0.5);
+        var sector = new SectorContext(this, coord, content.Summary.Density);
+        foreach (var module in _modules)
+            module.Generate(sector, content);
+    }
+
+    /// <summary>The word for a richness value.</summary>
+    public int RichnessLevelOf(float richness)
+    {
+        var level = 0;
+        while (level + 1 < RichnessLevels.Length && richness >= RichnessLevels[level + 1].From)
+            level++;
+        return level;
+    }
+
+    /// <summary>
+    /// Draws a sector's character. Richness is part region, part the sector's own luck, scaled down where the
+    /// galaxy is thin; each resource is then present or absent by its own chance, which grows toward the core for
+    /// those with a core bias. A sector that comes out barren, or with no resource at all, carries no ore.
+    /// </summary>
+    private SectorCharacter Characterize(SectorCoord coord, float density)
+    {
+        var random = new SectorRandom(Seed, coord, CharacterStream);
         var isHome = coord == default;
 
-        // Rocks gather in a few loose fields rather than filling the cell evenly.
-        Span<Vector3> fields = stackalloc Vector3[1 + random.NextInt(3)];
-        for (var i = 0; i < fields.Length; i++)
-            fields[i] = new Vector3(random.NextSigned(), random.NextSigned() * 0.35f, random.NextSigned()) * half * 0.7f;
+        var raw = _regionShare * Region(coord) + (1f - _regionShare) * random.NextSingle();
+        var richness = Math.Clamp((raw - 0.5f) * _contrast + 0.5f, 0f, 1f);
+        richness *= _shapeFloor + (1f - _shapeFloor) * Math.Min(1f, density * _shapeGain);
         if (isHome)
-            fields[0] = new Vector3(0, -40, -1400);
+            richness = Math.Max(richness, _homeMinRichness);
 
-        for (var i = 0; i < count; i++)
-        {
-            var field = fields[i % fields.Length];
-            var radius = _minRadius + (_maxRadius - _minRadius) * MathF.Pow(random.NextSingle(), 3.2f);
-            // A field is as wide as the content says, in metres, however large the sector around it is.
-            var spread = _fieldSpreadMin + (_fieldSpreadMax - _fieldSpreadMin) * random.NextSingle();
-            var offset = new Vector3(random.NextSigned(), random.NextSigned() * 0.45f, random.NextSigned()) * spread;
-            var position = Vector3.Clamp(field + offset, new Vector3(-half + radius), new Vector3(half - radius));
-
-            // Keep the arrival point of the home sector clear.
-            if (isHome && position.Length() < radius + 150f)
-                position += Vector3.Normalize(position + new Vector3(0, 0, -1)) * (radius + 150f);
-
-            content.Asteroids[i] = new Asteroid
-            {
-                LocalPosition = position,
-                Radius = radius,
-                Rotation = Quaternion.Normalize(new Quaternion(random.NextSigned(), random.NextSigned(), random.NextSigned(), random.NextSigned() + 0.01f)),
-                Shape = random.NextInt(AsteroidShapes),
-                Resource = -1,
-            };
-        }
-
-        // What each rock is made of, from its own stream so that composition never disturbs placement.
-        var ore = new SectorRandom(Seed, coord, 5);
-        for (var i = 0; i < count; i++)
-        {
-            var roll = ore.NextSingle();
-            var other = PickResource(ref ore, coord);
-            var grade = 0.15f + 0.85f * MathF.Pow(ore.NextSingle(), 1.8f);
-            if (roll < _barrenShare)
-                continue;
-            content.Asteroids[i].Resource = roll < _barrenShare + _veinShare ? content.Summary.Vein : other;
-            content.Asteroids[i].Grade = grade;
-        }
-    }
-
-    /// <summary>Picks a resource by weight; resources with a core bias grow more likely toward the core.</summary>
-    private int PickResource(ref SectorRandom random, SectorCoord coord)
-    {
-        var dx = (coord.X - Shape.Center.X) / Shape.Radius;
-        var dz = (coord.Z - Shape.Center.Z) / Shape.Radius;
-        var nearCore = Math.Clamp(1f - MathF.Sqrt(dx * dx + dz * dz), 0f, 1f);
-
+        var character = new SectorCharacter { Main = -1 };
+        var nearCore = Shape.CoreProximity(coord);
+        var every = random.NextSingle() < _everyResourceChance;
         var total = 0f;
-        foreach (var resource in Resources)
-            total += resource.Weight * (1f + resource.CoreBias * nearCore);
-
-        var pick = random.NextSingle() * total;
-        for (var i = 0; i < Resources.Length - 1; i++)
+        var largest = 0f;
+        for (var i = 0; i < Resources.Length; i++)
         {
-            pick -= Resources[i].Weight * (1f + Resources[i].CoreBias * nearCore);
-            if (pick < 0)
-                return i;
+            // Both rolls are always drawn, so that one resource's chance never shifts the numbers of the next.
+            var roll = random.NextSingle();
+            var spread = random.NextSingle();
+            var common = 1f + Resources[i].CoreBias * nearCore;
+            var present = every || roll < Resources[i].Presence * common || (isHome && (_homeResources & 1u << i) != 0);
+            if (!present)
+                continue;
+
+            var share = Resources[i].Weight * common * (_shareEvenness + (1f - _shareEvenness) * spread * spread);
+            character.Resources |= 1u << i;
+            character.Shares[i] = share;
+            total += share;
+            if (share > largest)
+            {
+                largest = share;
+                character.Main = i;
+            }
         }
 
-        return Resources.Length - 1;
+        character.Level = RichnessLevelOf(richness);
+        if (character.Level == 0 || character.Resources == 0 || total <= 0f)
+            return new SectorCharacter { Main = -1 };
+
+        for (var i = 0; i < Resources.Length; i++)
+            character.Shares[i] /= total;
+        character.Richness = richness;
+        return character;
     }
+
+    /// <summary>
+    /// Smooth noise over sector coordinates, from 0 to 1: the regions of rich and poor space. Random values sit
+    /// on a lattice <c>regionSectors</c> apart and are blended between, so neighbouring sectors get nearly the
+    /// same value. Plain arithmetic only: it must come out the same on every machine.
+    /// </summary>
+    private float Region(SectorCoord coord)
+    {
+        var x = coord.X / _regionSectors + 0.37f;
+        var y = coord.Y / _regionSectors + 0.11f;
+        var z = coord.Z / _regionSectors + 0.71f;
+        var cellX = MathF.Floor(x);
+        var cellY = MathF.Floor(y);
+        var cellZ = MathF.Floor(z);
+        var fx = Smooth(x - cellX);
+        var fy = Smooth(y - cellY);
+        var fz = Smooth(z - cellZ);
+        var (ix, iy, iz) = ((int)cellX, (int)cellY, (int)cellZ);
+
+        var near = Blend(Blend(Lattice(ix, iy, iz), Lattice(ix + 1, iy, iz), fx), Blend(Lattice(ix, iy + 1, iz), Lattice(ix + 1, iy + 1, iz), fx), fy);
+        var far = Blend(
+            Blend(Lattice(ix, iy, iz + 1), Lattice(ix + 1, iy, iz + 1), fx),
+            Blend(Lattice(ix, iy + 1, iz + 1), Lattice(ix + 1, iy + 1, iz + 1), fx),
+            fy
+        );
+        return Blend(near, far, fz);
+
+        static float Smooth(float t) => t * t * (3f - 2f * t);
+        static float Blend(float a, float b, float t) => a + (b - a) * t;
+    }
+
+    private float Lattice(int x, int y, int z) => new SectorRandom(Seed, new SectorCoord(x, y, z), RegionStream).NextSingle();
 }
 
 /// <summary>A small deterministic random stream keyed by galaxy seed, sector and purpose.</summary>
@@ -422,13 +613,25 @@ public struct SectorRandom
 {
     private ulong _state;
 
-    public SectorRandom(ulong seed, SectorCoord coord, uint stream)
+    public SectorRandom(ulong seed, SectorCoord coord, ulong stream)
     {
         _state = seed;
         _state = Mix(_state ^ (uint)coord.X);
         _state = Mix(_state ^ (uint)coord.Y);
         _state = Mix(_state ^ (uint)coord.Z);
         _state = Mix(_state ^ stream);
+    }
+
+    /// <summary>
+    /// A stream number from a name, the same on every machine and in every build. Streams named differently are
+    /// unrelated, so whatever draws from one never changes what another produces.
+    /// </summary>
+    public static ulong Key(string name)
+    {
+        var hash = 0xCBF29CE484222325;
+        foreach (var c in name)
+            hash = (hash ^ c) * 0x100000001B3;
+        return Mix(hash);
     }
 
     public ulong NextUInt64()

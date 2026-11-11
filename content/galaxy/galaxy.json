@@ -19,23 +19,68 @@
     "Mor", "Pra", "Lun", "Sig", "Var", "Ke", "Ond", "Rhe", "Ty", "Ulm", "Gan", "Fen", "Yar", "Qua"
   ],
   "resources": [
-    { "id": "iron", "name": "Iron", "color": [0.62, 0.36, 0.26], "weight": 10, "coreBias": 0.0 },
-    { "id": "copper", "name": "Copper", "color": [0.78, 0.47, 0.25], "weight": 6, "coreBias": 0.2 },
-    { "id": "nickel", "name": "Nickel", "color": [0.55, 0.6, 0.52], "weight": 5, "coreBias": 0.4 },
-    { "id": "titanium", "name": "Titanium", "color": [0.52, 0.6, 0.72], "weight": 3, "coreBias": 1.5 },
-    { "id": "silver", "name": "Silver", "color": [0.8, 0.82, 0.86], "weight": 1.5, "coreBias": 2.5 },
-    { "id": "gold", "name": "Gold", "color": [0.92, 0.74, 0.28], "weight": 0.8, "coreBias": 4.0 }
+    { "id": "iron", "name": "Iron", "color": [0.62, 0.36, 0.26], "weight": 10, "coreBias": 0.0, "presence": 0.8 },
+    { "id": "copper", "name": "Copper", "color": [0.78, 0.47, 0.25], "weight": 6, "coreBias": 0.2, "presence": 0.6 },
+    { "id": "nickel", "name": "Nickel", "color": [0.55, 0.6, 0.52], "weight": 5, "coreBias": 0.4, "presence": 0.5 },
+    { "id": "titanium", "name": "Titanium", "color": [0.52, 0.6, 0.72], "weight": 3, "coreBias": 1.5, "presence": 0.3 },
+    { "id": "silver", "name": "Silver", "color": [0.8, 0.82, 0.86], "weight": 1.5, "coreBias": 2.5, "presence": 0.18 },
+    { "id": "gold", "name": "Gold", "color": [0.92, 0.74, 0.28], "weight": 0.8, "coreBias": 4.0, "presence": 0.1 }
   ],
+  "sectorCharacter": {
+    "regionSectors": 6,
+    "regionShare": 0.7,
+    "contrast": 2.0,
+    "shapeFloor": 0.6,
+    "shapeGain": 2.0,
+    "everyResourceChance": 0.04,
+    "shareEvenness": 0.2,
+    "levels": [
+      { "name": "Barren", "from": 0 },
+      { "name": "Poor", "from": 0.14 },
+      { "name": "Moderate", "from": 0.34 },
+      { "name": "Rich", "from": 0.56 },
+      { "name": "Very rich", "from": 0.8 }
+    ],
+    "home": { "minRichness": 0.6, "resources": ["iron", "copper"] }
+  },
   "asteroids": {
-    "barrenShare": 0.45,
-    "veinShare": 0.4,
-    "emptySectorChance": 0.35,
-    "maxPerSector": 48,
-    "minRadius": 14,
-    "maxRadius": 260,
-    "fieldSpreadMin": 600,
-    "fieldSpreadMax": 2200,
     "densityTonnesPerCubicMetre": 2.6,
     "driftHalfLifeSeconds": 6
+  },
+  "sectorModules": [
+    {
+      "id": "asteroid-fields",
+      "type": "asteroidFields",
+      "maxPerSector": 4096,
+      "emptySectorChance": 0.35,
+      "voidFieldChance": 0.02,
+      "densityGain": 1.6,
+      "sparseFill": 0.3,
+      "fieldsPerSector": [1, 3],
+      "fieldCenters": { "reach": 0.7, "flatten": 0.35 },
+      "arrivalClearance": 400,
+      "spacing": 1.3,
+      "placementAttempts": 10,
+      "largestShareOfField": 0.35,
+      "kinds": [
+        { "name": "Scatter", "weight": 6, "asteroids": [12, 110], "length": [1500, 4000], "width": [1200, 3000], "height": [400, 1000] },
+        { "name": "Cluster", "weight": 3, "asteroids": [140, 560], "length": [1200, 2600], "width": [900, 2000], "height": [350, 800] },
+        { "name": "Belt", "weight": 0.8, "asteroids": [700, 2200], "length": [6000, 12000], "width": [800, 1700], "height": [250, 600] },
+        { "name": "Great field", "weight": 0.25, "asteroids": [1200, 3200], "length": [5000, 9000], "width": [4000, 7500], "height": [900, 2200] }
+      ],
+      "sizes": [
+        { "name": "Pebble", "weight": 52, "radius": [3, 12] },
+        { "name": "Boulder", "weight": 30, "radius": [12, 45] },
+        { "name": "Medium", "weight": 13, "radius": [45, 160] },
+        { "name": "Large", "weight": 2.4, "radius": [160, 500] },
+        { "name": "Huge", "weight": 0.2, "radius": [500, 1400] },
+        { "name": "Giant", "weight": 0.04, "radius": [1400, 3000] }
+      ],
+      "ore": { "share": [0.1, 0.85], "grade": [0.1, 1.0], "gradeFromRichness": 0.5 },
+      "home": { "asteroids": 480, "length": 2400, "width": 1700, "height": 650, "offset": [0, -40, -1400] }
+    }
+  ],
+  "map": {
+    "fullSignalAsteroids": 700
   }
 }

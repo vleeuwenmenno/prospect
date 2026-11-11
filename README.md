@@ -13,9 +13,18 @@ There is one simulation and one code path.
 
 Milestone 1 (skeleton) is complete. On top of it, the first slice of the world is in:
 
-- **Sectors.** The galaxy is a grid of 40 km cells generated from the server's seed: name, star, asteroid fields.
-  Nothing is stored or sent, and nothing stops at a sector's edge. The client keeps the sectors around the camera
-  generated on worker threads.
+- **Sectors.** The galaxy is a grid of 40 km cells generated from the server's seed: name, star, character and
+  contents. Nothing is stored or sent, and nothing stops at a sector's edge. The client keeps the sectors around
+  the camera generated on worker threads.
+- **World generation.** A sector is filled by a list of modules named in `content/galaxy/galaxy.json`, each
+  drawing from its own random stream, so adding or retuning one never changes what another makes. Asteroid fields
+  are the only module so far. The same seed gives the same world to the last bit on every machine.
+- **Sector character.** Every sector has a richness, from barren to very rich, and a set of resources that can
+  occur there. Rich and poor space come in regions. Some sectors have every resource, some none, most a few; the
+  sector panel and the map (for a discovered sector) show both.
+- **Asteroid fields.** A sector has no field, a thin scatter, a cluster or a dense belt: up to 4,096 asteroids.
+  Sizes run from pebbles 6 m across to giants 6 km across; most are tiny and a giant is rare. The middle of every
+  sector, where ships arrive, is kept clear.
 - **Hulls from blocks.** A hull is a list of typed blocks (engine, thruster, gyro, generator, battery, shield
   emitter, cargo, quarters, plating). Mass, moments of inertia, acceleration, turn rates, top speed, hull and
   shield points and the power budget are all computed from them and shown on the ship's data sheet.
@@ -51,8 +60,9 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   server owns them and tells each client on joining; the client predicts by the server's figures, and the data
   sheet and the readouts show the numbers in force. The New game screen sets them for a local game; in a game,
   the menu's World Settings shows the ones in force. See [World settings](#world-settings).
-- **Resources.** Asteroids carry iron, copper, nickel, titanium, silver or gold, or are bare rock; a sector has a
-  main ore, and the rarer ones grow more common toward the core. Nothing can be mined yet.
+- **Resources.** Asteroids carry iron, copper, nickel, titanium, silver or gold, or are bare rock. Which of them
+  a sector has, and in what shares, is part of its character; the rarer ones grow more common toward the core, and
+  a richer sector has ore in more of its rocks and at a better grade. Nothing can be mined yet.
 - **Fleet.** Each player starts with the command pod (hyperspace drive), a mining vessel (wormhole) and a survey vessel (rift). Hulls nobody is flying are flown by
   the server under their standing orders.
 - **Command view.** One key pulls the camera back from the pod into a free orbiting view over the same space.
@@ -65,13 +75,16 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   within a sector of it. Right-click a sector to choose how to get there: move under engines, or jump with the
   faster-than-light drive (only ships that have a working drive jump).
 - **Renderer.** Floating-point scene target and tone mapping, camera-relative rendering from double-precision
-  positions, a star field and sky, instanced hull and asteroid meshes with two levels of detail.
+  positions, a star field and sky, instanced hull and asteroid meshes. Asteroids have five levels of detail, from
+  a speck in the distance to a giant seen from its surface.
+
 - **Listing server.** A small HTTP service (and its container image) that public game servers announce themselves
   to and clients fetch the list of games from. The game server and the client do not use it yet. See
   [docs/listing-server.md](docs/listing-server.md).
 
 Not there yet: the server browser and announcing to the listing server, mining, taking control of ships owned by other players (permissions), jump range and cost, gates,
-saving. Asteroids come in a shared set of shapes until mining gives each one its own body. Designs are limited to 64
+saving. Stations and gas fields are not generated yet; asteroids do not crack into pieces, and ore shows only as
+a tint. Asteroids come in a shared set of shapes until mining gives each one its own body. Designs are limited to 64
 blocks for now, because block state is sent as one bit per block.
 
 ## Controls

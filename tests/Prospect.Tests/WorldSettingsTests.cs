@@ -24,7 +24,9 @@ public sealed class WorldSettingEffectTests
     {
         var galaxy = world.Galaxy.WithSeed(11);
         var rocks = new RockField(galaxy);
-        var rock = rocks.Sector(default).Asteroids[0];
+        // Fields are dense: pick a rock of ordinary size with nothing else on the way in.
+        var side = -Vector3.UnitX;
+        var rock = rocks.Sector(default).Asteroids[PowerAndDamageTests.ClearRock(galaxy, default, 80f, 260f, side).Index];
         var design = world.Pod;
         var flight = design.Flight;
         var hp = new float[HullDesign.MaxBlocks];
@@ -37,7 +39,7 @@ public sealed class WorldSettingEffectTests
             BlockHp = hp,
         };
 
-        var state = HullState.Spawn(galaxy.CenterOf(default) + rock.LocalPosition - Vector3.UnitX * (rock.Radius + 60f), flight);
+        var state = HullState.Spawn(galaxy.CenterOf(default) + rock.LocalPosition + side * (PowerAndDamageTests.SurfaceToward(rock, side) + 60f), flight);
         state.Velocity = new Vector3(speed, 0, 0);
         var order = default(HullOrder);
         for (var tick = 0; tick < 300; tick++)

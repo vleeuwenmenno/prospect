@@ -14,7 +14,8 @@ internal static class Program
           --start <screen>        Open on: menu, join, settings, newgame, credits, or local (start a local game)
           --join <host[:port]>    Connect to a server straight after the splash
           --set <id>=<value>      A world setting for local games started in this run; repeat for more (ids and ranges: content/rules/settings.json)
-          --open <view>           With --start local or --join: open the command view, the map or the ship data sheet (command, map, map-menu, galaxy, info), start a jump (jump, jump-wormhole, jump-rift), or show the world settings in force (world-settings)
+          --open <view>           With --start local or --join: open the command view, the map or the ship data sheet (command, map, map-menu, map-hover, galaxy, info), start a jump (jump, jump-wormhole, jump-rift), or show the world settings in force (world-settings)
+          --sector <x>,<y>,<z>    With --start local or --bench: start in this sector instead of the home sector
           --size <W>x<H>          Start windowed at this size
           --validation            Enable Vulkan validation layers (default in debug builds)
           --no-validation         Disable Vulkan validation layers
@@ -86,9 +87,17 @@ internal static class Program
                 case "--set" when hasValue:
                     options.WorldSettingArgs.Add(args[++i]);
                     break;
-                case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "world-settings":
+                case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "map-hover" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "world-settings":
                     options.OpenView = args[++i];
                     break;
+                case "--sector" when hasValue:
+                    {
+                        var parts = args[++i].Split(',');
+                        if (parts.Length != 3 || !int.TryParse(parts[0], out var x) || !int.TryParse(parts[1], out var y) || !int.TryParse(parts[2], out var z))
+                            return Fail($"Invalid sector: {args[i]} (expected x,y,z)");
+                        options.SpawnSector = new Prospect.Game.World.SectorCoord(x, y, z);
+                        break;
+                    }
                 case "--size" when hasValue:
                     {
                         var parts = args[++i].Split('x');

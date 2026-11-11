@@ -45,6 +45,9 @@ internal sealed class AppOptions
 
     /// <summary>In the pilot view, holds the camera this many degrees to the side of the hull's nose; for captures.</summary>
     public float? LookDegrees { get; set; }
+
+    /// <summary>The sector a local game starts in; for scripted screenshots and benchmarks of a particular sector.</summary>
+    public SectorCoord SpawnSector { get; set; }
     public int2? WindowSize { get; set; }
 }
 
@@ -117,8 +120,11 @@ internal sealed class App : IDisposable
         for (var shape = 0; shape < Galaxy.AsteroidShapes; shape++)
         {
             var index = shape;
-            meshJobs[WorldView.AsteroidMesh(designCount, shape, false)] = new MeshJob(() => MeshBuilder.Asteroid(index, 4));
-            meshJobs[WorldView.AsteroidMesh(designCount, shape, true)] = new MeshJob(() => MeshBuilder.Asteroid(index, 2));
+            for (var detail = 0; detail < WorldView.AsteroidDetail.Length; detail++)
+            {
+                var subdivisions = WorldView.AsteroidDetail[detail];
+                meshJobs[WorldView.AsteroidMesh(designCount, shape, detail)] = new MeshJob(() => MeshBuilder.Asteroid(index, subdivisions));
+            }
         }
 
         var galaxyJob = new GalaxyImageJob(Content.Galaxy.Shape);
@@ -215,6 +221,7 @@ internal sealed class App : IDisposable
             Name = "Local game",
             MaxPlayers = 1,
             Settings = NewGameSettings,
+            SpawnSector = _options.SpawnSector,
         };
         Session = GameSession.StartLocal(config, Content, Settings.PlayerName);
         _screens.Show(Screen.Session);
@@ -376,7 +383,7 @@ internal sealed class App : IDisposable
                 StartScreenshotEncode(shot);
 
             Stats.EndFrame();
-            Automate();
+            Automate(dt);
 
             if (!_vsync && Settings.FrameCap > 0 && _benchmark is null)
                 PreciseSleep.Until(frameStart + Stopwatch.Frequency / Settings.FrameCap);
@@ -451,7 +458,7 @@ internal sealed class App : IDisposable
     }
 
     /// <summary>Drives the scripted runs: a timed screenshot (<c>--capture</c>) and the benchmark (<c>--bench</c>).</summary>
-    private void Automate()
+    private void Automate(float dt)
     {
         if (_sinceSplash < 0)
             return;
@@ -474,6 +481,8 @@ internal sealed class App : IDisposable
                 _screens.OpenGalaxyOverview();
             else if (view == "map-menu")
                 _screens.OpenMapMenuNear(3, 2);
+            else if (view == "map-hover")
+                _screens.OpenMapHover();
             else if (view.StartsWith("jump", StringComparison.Ordinal))
             {
                 World.FtlPreview = view switch

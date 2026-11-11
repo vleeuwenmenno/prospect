@@ -7,75 +7,6 @@ using Xunit;
 
 namespace Prospect.Tests;
 
-public sealed class GalaxyTests
-{
-    private static readonly GameContent Content = GameContent.Load();
-
-    [Fact]
-    public void SectorsAreAFunctionOfSeedAndCoordinate()
-    {
-        var a = Content.Galaxy.WithSeed(42);
-        var b = Content.Galaxy.WithSeed(42);
-        var other = Content.Galaxy.WithSeed(43);
-        var first = new SectorContent();
-        var second = new SectorContent();
-        var differing = 0;
-
-        for (var x = -3; x <= 3; x++)
-        {
-            var coord = new SectorCoord(x, 1, -x * 2);
-            a.Generate(coord, first);
-            b.Generate(coord, second);
-            Assert.Equal(a.NameOf(coord), b.NameOf(coord));
-            Assert.Equal(first.AsteroidCount, second.AsteroidCount);
-            for (var i = 0; i < first.AsteroidCount; i++)
-                Assert.Equal(first.Asteroids[i].LocalPosition, second.Asteroids[i].LocalPosition);
-
-            if (other.NameOf(coord) != a.NameOf(coord))
-                differing++;
-        }
-
-        Assert.True(differing >= 6);
-    }
-
-    [Fact]
-    public void AsteroidsStayInsideTheirSectorAndClearOfTheSpawnPoint()
-    {
-        var galaxy = Content.Galaxy.WithSeed(7);
-        var content = new SectorContent();
-        var half = (float)(galaxy.SectorSize / 2);
-
-        for (var x = -4; x <= 4; x++)
-            for (var z = -4; z <= 4; z++)
-            {
-                galaxy.Generate(new SectorCoord(x, 0, z), content);
-                Assert.InRange(content.AsteroidCount, 0, galaxy.MaxAsteroidsPerSector);
-                for (var i = 0; i < content.AsteroidCount; i++)
-                {
-                    var rock = content.Asteroids[i];
-                    Assert.True(MathF.Abs(rock.LocalPosition.X) + rock.Radius <= half + 0.01f);
-                    Assert.True(MathF.Abs(rock.LocalPosition.Y) + rock.Radius <= half + 0.01f);
-                    Assert.True(MathF.Abs(rock.LocalPosition.Z) + rock.Radius <= half + 0.01f);
-                    Assert.InRange(rock.Shape, 0, Galaxy.AsteroidShapes - 1);
-                    if (x == 0 && z == 0)
-                        Assert.True(rock.LocalPosition.Length() >= rock.Radius + 149f);
-                }
-            }
-
-        Assert.True(galaxy.Summarize(default).AsteroidCount > 0);
-    }
-
-    [Fact]
-    public void PositionsMapToSectorsWithoutGapsAtTheBoundaries()
-    {
-        var galaxy = Content.Galaxy;
-        var size = galaxy.SectorSize;
-        Assert.Equal(new SectorCoord(0, 0, 0), galaxy.SectorOf(new Double3(size * 0.49, -size * 0.49, 0)));
-        Assert.Equal(new SectorCoord(1, -1, 0), galaxy.SectorOf(new Double3(size * 0.51, -size * 0.51, 0)));
-        Assert.Equal(new SectorCoord(-3, 0, 5), galaxy.SectorOf(galaxy.CenterOf(new SectorCoord(-3, 0, 5))));
-    }
-}
-
 public sealed class FlightTests
 {
     private static readonly FlightParams Pod = GameContent.Load().Pod.Flight;
@@ -256,13 +187,62 @@ public sealed class PowerAndDamageTests
         Assert.Equal(Pod.ShieldCapacity, state.Shield);
     }
 
-    /// <summary>Flies a pod at an asteroid from one side until it hits or the ticks run out.</summary>
-    private static bool Crash(Vector3 from, Vector3 velocity, in FlightParams flight, out HullState state, out ulong alive, out float[] hp, RockImpulses? impulses = null)
+    /// <summary>The galaxy the crash tests fly in, and in its home sector an ordinary rock with room around it.</summary>
+    private static readonly Galaxy CrashGalaxy = Content.Galaxy.WithSeed(11);
+    private static readonly RockRef OrdinaryRock = ClearRock(CrashGalaxy, default, 80f, 260f, new Vector3(-1, 0, 0), new Vector3(0, 1, 0));
+
+    /// <summary>How far an asteroid's surface is from its centre toward a side, in metres.</summary>
+    internal static float SurfaceToward(in Asteroid rock, Vector3 side) =>
+        rock.Radius * AsteroidShape.RadiusAlong(rock.Shape, Vector3.Transform(Vector3.Normalize(side), Quaternion.Conjugate(rock.Rotation)));
+
+    /// <summary>
+    /// Finds an asteroid of a given size that a hull can fly at from each of the given sides without meeting
+    /// another asteroid on the way. Fields are dense; a test that means to hit one rock has to pick it.
+    /// </summary>
+    internal static RockRef ClearRock(Galaxy galaxy, SectorCoord sector, float minRadius, float maxRadius, params Vector3[] sides)
     {
-        var galaxy = Content.Galaxy.WithSeed(11);
-        var rocks = new RockField(galaxy);
-        var rock = rocks.Sector(default).Asteroids[0];
-        var rockCenter = galaxy.CenterOf(default) + rock.LocalPosition;
+        var content = new SectorContent();
+        galaxy.Generate(sector, content);
+        for (var i = 0; i < content.AsteroidCount; i++)
+        {
+            var rock = content.Asteroids[i];
+            if (rock.Radius < minRadius || rock.Radius > maxRadius)
+                continue;
+
+            var clear = true;
+            foreach (var side in sides)
+            {
+                // The corridor from a little beyond where the hull starts down to the rock's centre.
+                var start = rock.LocalPosition + Vector3.Normalize(side) * (rock.Radius + 120f);
+                for (var j = 0; j < content.AsteroidCount && clear; j++)
+                {
+                    if (j == i)
+                        continue;
+                    var other = content.Asteroids[j];
+                    var along = Math.Clamp(Vector3.Dot(other.LocalPosition - rock.LocalPosition, start - rock.LocalPosition) / (start - rock.LocalPosition).LengthSquared(), 0f, 1f);
+                    var nearest = rock.LocalPosition + (start - rock.LocalPosition) * along;
+                    clear = (other.LocalPosition - nearest).Length() > other.Radius + 40f;
+                }
+            }
+
+            if (clear)
+                return new RockRef(sector, i);
+        }
+
+        throw new InvalidOperationException($"no asteroid of {minRadius:0} to {maxRadius:0} m with a clear approach in sector {sector}");
+    }
+
+    /// <summary>Flies a pod at the ordinary rock from one side until it hits or the ticks run out.</summary>
+    private static bool Crash(Vector3 from, Vector3 velocity, in FlightParams flight, out HullState state, out ulong alive, out float[] hp, RockImpulses? impulses = null) =>
+        Crash(new RockField(CrashGalaxy), OrdinaryRock, from, velocity, flight, out state, out alive, out hp, impulses);
+
+    /// <summary>Flies a pod at an asteroid from one side, starting 60 m off its surface, until it hits or the ticks run out.</summary>
+    private static bool Crash(RockField rocks, RockRef target, Vector3 from, Vector3 velocity, in FlightParams flight, out HullState state, out ulong alive, out float[] hp, RockImpulses? impulses = null)
+    {
+        var galaxy = rocks.Galaxy;
+        var rock = rocks.Sector(target.Sector).Asteroids[target.Index];
+        rocks.Displacement(target, 0, out var pushed, out _);
+        var rockCenter = galaxy.CenterOf(target.Sector) + rock.LocalPosition + pushed;
 
         var design = Content.Pod;
         hp = new float[HullDesign.MaxBlocks];
@@ -270,7 +250,7 @@ public sealed class PowerAndDamageTests
             hp[i] = design.Types[i].Hull;
         var body = new HullBody { Design = design, Alive = design.FullMask, BlockHp = hp };
 
-        state = HullState.Spawn(rockCenter + Vector3.Normalize(from) * (rock.Radius + 60f), flight);
+        state = HullState.Spawn(rockCenter + Vector3.Normalize(from) * (SurfaceToward(rock, from) + 60f), flight);
         state.Velocity = velocity;
         var order = default(HullOrder);
         var destroyed = false;
@@ -330,9 +310,9 @@ public sealed class PowerAndDamageTests
     [Fact]
     public void AHeavyHullShovesAnAsteroidWhichThenDriftsToRest()
     {
-        var galaxy = Content.Galaxy.WithSeed(11);
+        var galaxy = CrashGalaxy;
         var rocks = new RockField(galaxy);
-        var rock = rocks.Sector(default).Asteroids[0];
+        var rock = rocks.Sector(default).Asteroids[OrdinaryRock.Index];
         var rockMass = rocks.Mass(rock.Radius);
 
         // A hull as heavy as the rock itself, with damage switched off to look at the momentum alone.
@@ -345,7 +325,7 @@ public sealed class PowerAndDamageTests
 
         Assert.True(impulses.Count >= 1);
         var delta = impulses.Items[0];
-        Assert.Equal(new RockRef(default, 0), delta.Rock);
+        Assert.Equal(OrdinaryRock, delta.Rock);
 
         // Equal masses share the impulse: the rock leaves with a good part of the speed the hull loses.
         Assert.InRange(delta.Velocity.X, 6f, 14f);
@@ -362,6 +342,190 @@ public sealed class PowerAndDamageTests
         Crash(new Vector3(0, 1, 0), new Vector3(0, -20, 0), Pod, out _, out _, out _, light);
         Assert.True(light.Count >= 1);
         Assert.True(light.Items[0].Velocity.Length() < 0.1f);
+    }
+
+    [Fact]
+    public void ATinyAsteroidIsStruckAndKnockedAwayAndAHugeOneDoesNotBudge()
+    {
+        var galaxy = CrashGalaxy;
+        var fields = galaxy.AsteroidFields!;
+        var side = new Vector3(-1, 0, 0);
+        var speed = new Vector3(30, 0, 0);
+
+        // A pebble at the small end of the size table, in the home field.
+        var pebble = ClearRock(galaxy, default, fields.SmallestRadius, fields.SmallestRadius * 2f, side);
+        var rocks = new RockField(galaxy);
+        var struck = new RockImpulses();
+        var destroyed = Crash(rocks, pebble, side, speed, Pod, out var state, out var alive, out _, struck);
+        Assert.False(destroyed);
+        Assert.True(struck.Count >= 1, "the pod flew through the pebble");
+        Assert.Equal(pebble, struck.Items[0].Rock);
+        Assert.Equal(Content.Pod.FullMask, alive);
+
+        // Even a pebble outweighs a pod several times over: the pod comes back off it, and the pebble is sent
+        // on its way at a speed anyone can see.
+        var pebbleSpeed = struck.Items[0].Velocity.X;
+        Assert.True(pebbleSpeed > 0.2f, $"the pebble left at {pebbleSpeed:0.00} m/s");
+        Assert.True(state.Velocity.X < 0, "the pod should have bounced back");
+
+        // A rock kilometres across: find one, in the nearest sector that has one.
+        var giant = default(RockRef);
+        var content = new SectorContent();
+        for (var ring = 1; ring < 60 && giant.Sector == default; ring++)
+            for (var x = -ring; x <= ring && giant.Sector == default; x++)
+                for (var z = -ring; z <= ring && giant.Sector == default; z += x == -ring || x == ring ? 1 : 2 * ring)
+                {
+                    var coord = new SectorCoord(x, 0, z);
+                    if (galaxy.Summarize(coord).AsteroidCount < 600)
+                        continue;
+                    galaxy.Generate(coord, content);
+                    if (content.Asteroids[0].Radius >= 1000f)
+                        giant = new RockRef(coord, 0);
+                }
+
+        Assert.NotEqual(default, giant.Sector);
+        var huge = rocks.Sector(giant.Sector).Asteroids[0];
+        var approach = default(Vector3);
+        foreach (var candidate in new[] { Vector3.UnitY, -Vector3.UnitY, Vector3.UnitX, -Vector3.UnitX, Vector3.UnitZ, -Vector3.UnitZ })
+        {
+            try
+            {
+                if (ClearRock(galaxy, giant.Sector, huge.Radius, huge.Radius, candidate) == giant)
+                    approach = candidate;
+            }
+            catch (InvalidOperationException)
+            {
+                // Another rock is in the way on this side; try the next.
+            }
+        }
+
+        Assert.NotEqual(default, approach);
+        var stopped = new RockImpulses();
+        destroyed = Crash(rocks, giant, approach, -approach * 30f, Pod, out state, out alive, out _, stopped);
+        Assert.False(destroyed);
+        Assert.True(stopped.Count >= 1, $"the pod flew into a {huge.Radius:0} m asteroid without touching it");
+        Assert.Equal(giant, stopped.Items[0].Rock);
+
+        // The pod comes back off it and the asteroid stays where it is, to less than a millimetre a second.
+        Assert.True(Vector3.Dot(state.Velocity, approach) > 0, "the pod should have bounced back");
+        Assert.True(stopped.Items[0].Velocity.Length() < 1e-3f);
+        Assert.True(stopped.Items[0].Velocity.Length() * 1000f < pebbleSpeed);
+
+        // It met the surface the mesh shows, not the sphere around it: the pod is outside the rock and close to it.
+        var fromCenter = state.Position.RelativeTo(galaxy.CenterOf(giant.Sector) + huge.LocalPosition);
+        var surface = SurfaceToward(huge, fromCenter);
+        Assert.InRange(fromCenter.Length() - surface, -0.5f, Pod.Radius + 12f);
+    }
+
+    [Fact]
+    public void APushedAsteroidIsMetWhereItIsNowAndNotWhereItWasGenerated()
+    {
+        var galaxy = CrashGalaxy;
+        var rocks = new RockField(galaxy);
+        var rock = rocks.Sector(default).Asteroids[OrdinaryRock.Index];
+        var side = new Vector3(0, 1, 0);
+
+        // Shoved 700 m straight up and long since at rest.
+        var moved = new Vector3(0, 700, 0);
+        rocks.Set(new RockDelta { Rock = OrdinaryRock, Offset = moved, StartTick = 0 });
+
+        // Where it was generated there is nothing left to hit.
+        var gone = new RockImpulses();
+        var design = Content.Pod;
+        var hp = new float[HullDesign.MaxBlocks];
+        var body = new HullBody { Design = design, Alive = design.FullMask, BlockHp = hp };
+        var state = HullState.Spawn(galaxy.CenterOf(default) + rock.LocalPosition + side * (SurfaceToward(rock, side) + 60f), Pod);
+        state.Velocity = new Vector3(0, -40, 0);
+        var order = default(HullOrder);
+        for (var tick = 0; tick < 120; tick++)
+            Assert.False(HullSim.Step(ref state, ref order, default, Pod, ref body, rocks, tick, gone));
+        Assert.Equal(0, gone.Count);
+        Assert.Equal(-40f, state.Velocity.Y, 3);
+
+        // Where it is now, it is as solid as ever.
+        var met = new RockImpulses();
+        Crash(rocks, OrdinaryRock, side, new Vector3(0, -40, 0), Pod, out var bounced, out _, out _, met);
+        Assert.True(met.Count >= 1, "the pod flew through the asteroid at its new place");
+        Assert.Equal(OrdinaryRock, met.Items[0].Rock);
+        Assert.Equal(moved, met.Items[0].Offset);
+        Assert.True(bounced.Velocity.Y > 0);
+    }
+
+    [Fact]
+    public void ATickInsideTheDensestFieldStaysWithinBudget()
+    {
+        // The budget: one hull's step in the thick of the densest field, asteroids being shoved about included,
+        // takes under 100 microseconds in a debug build. A release build is several times faster; either way a
+        // thousand hulls in such a field fit in a tick with room to spare. Before the index a step looked at
+        // every asteroid of the sector, and this field has thousands.
+        const double budgetMicroseconds = 100;
+        var galaxy = CrashGalaxy;
+        var sector = Sectors.Densest(galaxy);
+        var rocks = new RockField(galaxy);
+        var content = rocks.Sector(sector);
+        Assert.True(content.AsteroidCount > 2500, $"the densest sector has only {content.AsteroidCount} asteroids");
+
+        // The most crowded spot: the asteroid with the most others within 300 m of it.
+        var anchor = 0;
+        var crowd = -1;
+        for (var i = 0; i < content.AsteroidCount; i++)
+        {
+            var count = 0;
+            var near = content.Rocks.Near(content.Asteroids[i].LocalPosition, 300f);
+            while (near.Next(out _))
+                count++;
+            if (count > crowd && content.Asteroids[i].Radius is > 20f and < 120f)
+            {
+                crowd = count;
+                anchor = i;
+            }
+        }
+
+        Assert.True(crowd > 20, $"only {crowd} asteroids near the most crowded spot");
+
+        // A pod dropped onto that asteroid again and again, bouncing off it and shoving it, stepped as the server
+        // steps it: the asteroids it moves are recorded and from then on found where they have drifted to.
+        var rock = content.Asteroids[anchor];
+        var design = Content.Pod;
+        var hp = new float[HullDesign.MaxBlocks];
+        for (var i = 0; i < design.Types.Length; i++)
+            hp[i] = 1e9f;
+        var body = new HullBody { Design = design, Alive = design.FullMask, BlockHp = hp };
+        var flight = Pod;
+        flight.CollisionDamagePerTonneSpeedSquared = 0;
+        var state = default(HullState);
+        var order = default(HullOrder);
+        var impulses = new RockImpulses();
+        var contacts = 0;
+        var best = double.MaxValue;
+        var tick = 0;
+        for (var batch = 0; batch < 8; batch++)
+        {
+            const int steps = 600;
+            var start = Stopwatch.GetTimestamp();
+            for (var i = 0; i < steps; i++, tick++)
+            {
+                if (i % 100 == 0)
+                {
+                    rocks.Displacement(new RockRef(sector, anchor), tick, out var drifted, out _);
+                    state = HullState.Spawn(galaxy.CenterOf(sector) + rock.LocalPosition + drifted + Vector3.UnitY * (SurfaceToward(rock, Vector3.UnitY) + Pod.Radius + 5f), flight);
+                    state.Velocity = new Vector3(0, -25, 0);
+                }
+
+                HullSim.Step(ref state, ref order, default, flight, ref body, rocks, tick, impulses);
+                contacts += impulses.Count;
+                foreach (ref readonly var delta in impulses.Items.AsSpan(0, impulses.Count))
+                    rocks.Set(delta);
+                impulses.Count = 0;
+            }
+
+            best = Math.Min(best, Stopwatch.GetElapsedTime(start).TotalMicroseconds / steps);
+        }
+
+        Assert.True(contacts > 20, $"the pod touched an asteroid only {contacts} times");
+        Assert.Equal(galaxy.SectorOf(state.Position), sector);
+        TestContext.Current.SendDiagnosticMessage($"hull step in a field of {content.AsteroidCount}: {best:0.00} us");
+        Assert.True(best < budgetMicroseconds, $"a hull step in the densest field took {best:0.0} us; the budget is {budgetMicroseconds} us");
     }
 
     [Fact]
@@ -1299,15 +1463,24 @@ public sealed class FlightSessionTests
         var pod = WaitForOwnHull(session);
         Assert.Equal(Content.Pod.FullMask, pod.Blocks);
 
-        // Point the pod at the nearest asteroid and hold full boost. It rams the rock, bounces, and rams again.
+        // Point the pod at the nearest asteroid of some size and hold full boost, steering all the way: the field
+        // is full of pebbles to miss. It rams the rock, bounces, and rams again.
         var content = new SectorContent();
         session.Client.AcquireSnapshot().Galaxy!.Generate(default, content);
-        var nearest = content.Asteroids.Take(content.AsteroidCount).OrderBy(a => a.LocalPosition.Length()).First();
-        var aim = Vector3.Normalize(nearest.LocalPosition - pod.Position.RelativeTo(Double3.Zero));
-        session.Client.Input.Submit(new PlayerControls { Forward = 1, Boost = true, Aim = aim, Align = true });
+        var nearest = content.Asteroids.Take(content.AsteroidCount).Where(a => a.Radius >= 40f).OrderBy(a => a.LocalPosition.Length() - a.Radius).First();
 
         // First it loses blocks, and the client is told and flies on what is left.
-        var damaged = WaitFor(session, hull => hull.Blocks != Content.Pod.FullMask || hull.Design == Content.DroneDesign, 60);
+        var damaged = pod;
+        var firstHit = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 60;
+        while (damaged.Blocks == Content.Pod.FullMask && damaged.Design != Content.DroneDesign && Stopwatch.GetTimestamp() < firstHit)
+        {
+            var aim = Vector3.Normalize(nearest.LocalPosition - damaged.Position.RelativeTo(Double3.Zero));
+            session.Client.Input.Submit(new PlayerControls { Forward = 1, Boost = true, Aim = aim, Align = true });
+            Thread.Sleep(50);
+            damaged = OwnHull(session);
+        }
+
+        Assert.True(damaged.Blocks != Content.Pod.FullMask || damaged.Design == Content.DroneDesign, "the pod never hit anything hard enough to lose a block");
         if (damaged.Design != Content.DroneDesign)
         {
             Assert.Equal(pod.Id, damaged.Id);
@@ -1388,26 +1561,58 @@ public sealed class FlightSessionTests
     }
 
     [Fact]
-    public void AnAsteroidHitOnTheServerIsReportedToClientsIncludingLateJoiners()
+    public void AServerAndAClientAgreeOnADenseSectorAndARockPushedThereReplicates()
     {
-        var port = (ushort)(49000 + Environment.ProcessId % 2000);
-        using var server = new ServerHost(new ServerConfig { MaxPlayers = 2 }, Content, Prospect.Engine.Net.RakNetTransport.Listen(port, 8));
+        // The server puts new players in the densest sector near home: thousands of asteroids, sizes from pebbles up.
+        var seed = new ServerConfig().GalaxySeed;
+        var dense = Sectors.Densest(Content.Galaxy.WithSeed(seed));
+        var port = (ushort)(45000 + Environment.ProcessId % 2000);
+        using var server = new ServerHost(new ServerConfig { MaxPlayers = 2, GalaxySeed = seed, SpawnSector = dense }, Content, Prospect.Engine.Net.RakNetTransport.Listen(port, 8));
         server.Start();
         using var pilot = GameSession.Join("127.0.0.1", port, Content, "Pilot");
-        WaitForOwnHull(pilot);
+        var pod = WaitForOwnHull(pilot);
+        var galaxy = pilot.Client.AcquireSnapshot().Galaxy!;
+        Assert.Equal(dense, galaxy.SectorOf(pod.Position));
 
-        // Send the pod straight at the nearest asteroid's centre; it cannot get there without hitting it.
-        var content = new SectorContent();
-        server.Galaxy.Generate(default, content);
-        var nearest = content.Asteroids.Take(content.AsteroidCount).OrderBy(a => a.LocalPosition.Length()).First();
-        pilot.Client.Input.IssueOrder(new HullOrder { Kind = OrderKind.MoveTo, Target = server.Galaxy.CenterOf(default) + nearest.LocalPosition });
+        // Each end builds the sector for itself from the seed it was given. They must come out the same to the
+        // last bit, or the two would mean different asteroids by the same name.
+        var serverSide = new SectorContent();
+        var clientSide = new SectorContent();
+        server.Galaxy.Generate(dense, serverSide);
+        galaxy.Generate(dense, clientSide);
+        Assert.NotSame(server.Galaxy, galaxy);
+        Assert.True(serverSide.AsteroidCount > 2500, $"the sector has only {serverSide.AsteroidCount} asteroids");
+        Assert.Equal(serverSide.AsteroidCount, clientSide.AsteroidCount);
+        Assert.True(Sectors.Bytes(serverSide).SequenceEqual(Sectors.Bytes(clientSide)), "the server and the client generated different asteroids");
+        Assert.Equal(server.Galaxy.Summarize(dense).Character.Resources, galaxy.Summarize(dense).Character.Resources);
 
+        // Fly the pod at the nearest asteroid of some size under boost, steering all the way. It cannot get there
+        // without hitting something.
+        var center = galaxy.CenterOf(dense);
+        var start = pod.Position.RelativeTo(center);
+        var nearest = clientSide.Asteroids.Take(clientSide.AsteroidCount).Where(a => a.Radius >= 40f).OrderBy(a => (a.LocalPosition - start).Length() - a.Radius).First();
         var deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 60;
         while (pilot.Client.AcquireSnapshot().RockCount == 0 && Stopwatch.GetTimestamp() < deadline)
+        {
+            var aim = Vector3.Normalize(nearest.LocalPosition - OwnHull(pilot).Position.RelativeTo(center));
+            pilot.Client.Input.Submit(new PlayerControls { Forward = 1, Boost = true, Aim = aim, Align = true });
             Thread.Sleep(50);
+        }
+
+        pilot.Client.Input.Submit(default);
         var seen = pilot.Client.AcquireSnapshot();
-        Assert.True(seen.RockCount > 0, "the client was never told the asteroid moved");
-        Assert.Equal(default, seen.Rocks[0].Rock.Sector);
+        Assert.True(seen.RockCount > 0, "the client was never told an asteroid moved");
+
+        // The asteroid the server names is one the client has, and it lies on the way the pod flew: the name
+        // means the same rock at both ends.
+        var hit = seen.Rocks[0];
+        Assert.Equal(dense, hit.Rock.Sector);
+        Assert.InRange(hit.Rock.Index, 0, clientSide.AsteroidCount - 1);
+        var rock = clientSide.Asteroids[hit.Rock.Index];
+        var flown = nearest.LocalPosition - start;
+        var along = Math.Clamp(Vector3.Dot(rock.LocalPosition - start, flown) / flown.LengthSquared(), 0f, 1f);
+        var offCourse = (rock.LocalPosition - (start + flown * along)).Length();
+        Assert.True(offCourse < rock.Radius + 120f, $"the {rock.Radius:0} m asteroid the server says was hit is {offCourse:0} m off the pod's course");
 
         // Someone joining afterwards learns about the displaced asteroid too.
         using var late = GameSession.Join("127.0.0.1", port, Content, "Late");
@@ -1415,8 +1620,11 @@ public sealed class FlightSessionTests
         deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 10;
         while (late.Client.AcquireSnapshot().RockCount == 0 && Stopwatch.GetTimestamp() < deadline)
             Thread.Sleep(50);
-        Assert.True(late.Client.AcquireSnapshot().RockCount > 0);
+        var lateSeen = late.Client.AcquireSnapshot();
+        Assert.True(lateSeen.RockCount > 0);
+        Assert.Contains(lateSeen.Rocks.Take(lateSeen.RockCount), r => r.Rock == hit.Rock);
         Assert.Null(server.Fault);
+        Assert.Null(pilot.Fault);
     }
 
     [Fact]

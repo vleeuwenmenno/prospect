@@ -40,6 +40,7 @@ internal sealed partial class ScreenHost
     private SectorCoord _mapHover;
     private string _mapHoverName = "";
     private bool _mapHasHover;
+    private bool _mapHoverPinned;
     private bool _mapMenuOpen;
     private SectorCoord _mapMenuSector;
     private string _mapMenuName = "";
@@ -61,9 +62,20 @@ internal sealed partial class ScreenHost
         _mapCell = Math.Max(MapMinCell, _ui.DisplaySize.Y / (shape.Radius * 2.5f));
     }
 
+    /// <summary>
+    /// Opens the map with the pointer taken to be on the player's own sector, so that the panel describing the
+    /// hovered sector shows. Used by the scripted <c>--open map-hover</c> view, where the real pointer is muted.
+    /// </summary>
+    public void OpenMapHover()
+    {
+        OpenMap();
+        _mapHoverPinned = true;
+    }
+
     public void OpenMap()
     {
         _mapOpen = true;
+        _mapHoverPinned = false;
         _mapMenuOpen = false;
         _mapTime = 0;
         _mapCenter = new float2((float)(_app.World.OwnPosition.X / _app.World.Galaxy!.SectorSize), (float)(_app.World.OwnPosition.Z / _app.World.Galaxy!.SectorSize));
@@ -134,12 +146,19 @@ internal sealed partial class ScreenHost
 
     private void DrawSectorPanel(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world)
     {
+        // The panel grows by what there is to say about the sector's ore; a sector without asteroids has none.
+        // Under the map it stays short: the map's own heading sits below it, and the map describes sectors itself.
         var min = new float2(Kit.Px(Theme.Space5), Kit.Px(Theme.Space5));
-        var size = new float2(Kit.Px(360), Kit.Px(96));
+        var inner = Kit.Px(360) - Kit.Px(Theme.Space4) * 2;
+        var hasRock = world.Sector.AsteroidCount > 0 && !_mapOpen;
+        var characterHeight = hasRock ? SectorCharacterHeight(world.Galaxy!, world.Sector.Character, inner) + Kit.Px(Theme.Space2) : 0f;
+        var size = new float2(Kit.Px(360), Kit.Px(96) + characterHeight);
         Kit.PanelFrame(draw, min, min + size);
 
         var star = world.Galaxy!.StarClasses[world.Sector.StarClass];
         var text = min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3));
+        if (hasRock)
+            DrawSectorCharacter(draw, text + new float2(0, Kit.Px(74)), inner, world.Galaxy!, world.Sector.Character);
         draw.AddCircleFilled(text + new float2(Kit.Px(5), Kit.Px(10)), Kit.Px(5), Kit.Color(StarColor(star.Color)), 20);
         Kit.Text(draw, _ui.SansMedium, Theme.FontBody, text + new float2(Kit.Px(18), 0), Theme.Text, world.SectorName);
 
@@ -599,6 +618,74 @@ internal sealed partial class ScreenHost
         }
     }
 
+    private const float CharacterLine = 20f;
+
+    /// <summary>Width of the label column the map's readouts share: fourteen characters of the caption font.</summary>
+    private float CharacterLabel => Kit.Measure(_ui.Mono, Theme.FontCaption, "RESOURCES     "u8).X;
+
+    /// <summary>How tall <see cref="DrawSectorCharacter"/> draws for a sector, in screen pixels.</summary>
+    private float SectorCharacterHeight(Galaxy galaxy, in SectorCharacter character, float width) =>
+        Kit.Px(CharacterLine) * (1 + ResourceLines(default, default, width, galaxy, character, false));
+
+    /// <summary>
+    /// A sector's character in words: how rich it is, and each resource that occurs there with its share of the
+    /// sector's ore.
+    /// </summary>
+    private void DrawSectorCharacter(ImDrawListPtr draw, float2 at, float width, Galaxy galaxy, in SectorCharacter character)
+    {
+        // From barren (muted) through the ordinary levels to the richest (accent).
+        var top = galaxy.RichnessLevels.Length - 1;
+        var levelColor = character.Level == 0 ? Theme.TextMute : Kit.Mix(Theme.Text, Theme.Accent, top > 1 ? (character.Level - 1f) / (top - 1f) : 1f);
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, at, Theme.TextDim, "RICHNESS"u8);
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, at + new float2(CharacterLabel, 0), levelColor, galaxy.RichnessLevels[character.Level].Name);
+        ResourceLines(draw, at + new float2(0, Kit.Px(CharacterLine)), width, galaxy, character, true);
+    }
+
+    /// <summary>
+    /// Lays the sector's resources out as a run of entries, a dot in the resource's colour, its name and its share,
+    /// wrapping at <paramref name="width"/>. Returns the number of lines; draws only when asked to.
+    /// </summary>
+    private int ResourceLines(ImDrawListPtr draw, float2 at, float width, Galaxy galaxy, in SectorCharacter character, bool paint)
+    {
+        var label = CharacterLabel;
+        if (paint)
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, at, Theme.TextDim, "RESOURCES"u8);
+        if (character.Resources == 0)
+        {
+            if (paint)
+                Kit.Text(draw, _ui.Mono, Theme.FontCaption, at + new float2(label, 0), Theme.TextMute, "none"u8);
+            return 1;
+        }
+
+        var lines = 1;
+        var x = label;
+        var dot = Kit.Px(11);
+        var gap = Kit.Px(Theme.Space3);
+        for (var i = 0; i < galaxy.Resources.Length; i++)
+        {
+            if (!character.Has(i))
+                continue;
+            var entry = Kit.F($"{galaxy.Resources[i].Name} {character.Shares[i] * 100f:0}%");
+            var entryWidth = dot + Kit.Measure(_ui.Mono, Theme.FontCaption, entry).X;
+            if (x > label && x + entryWidth > width)
+            {
+                x = label;
+                lines++;
+            }
+
+            if (paint)
+            {
+                var line = at + new float2(x, Kit.Px(CharacterLine) * (lines - 1));
+                draw.AddCircleFilled(line + new float2(Kit.Px(3), Kit.Px(7)), Kit.Px(3), Kit.Color(StarColor(galaxy.Resources[i].Color)), 12);
+                Kit.Text(draw, _ui.Mono, Theme.FontCaption, line + new float2(dot, 0), i == character.Main ? Theme.Text : Theme.TextDim, entry);
+            }
+
+            x += entryWidth + gap;
+        }
+
+        return lines;
+    }
+
     /// <summary>What to call an asteroid in a readout.</summary>
     private static ReadOnlySpan<byte> RockTitle(WorldView world, RockRef rock) =>
         world.TryGetRockOre(rock, out var resource, out var grade) && resource >= 0
@@ -627,7 +714,7 @@ internal sealed partial class ScreenHost
 
         var galaxy = world.Galaxy!;
         var line = Kit.Px(21);
-        var size = new float2(Kit.Px(400), Kit.Px(Theme.Space5 * 2 + 46) + line * 9);
+        var size = new float2(Kit.Px(400), Kit.Px(Theme.Space5 * 2 + 46) + line * 10);
         var min = new float2(_ui.DisplaySize.X - size.X - Kit.Px(300 + Theme.Space5 * 2), (_ui.DisplaySize.Y - size.Y) * 0.5f);
         Kit.PanelFrame(draw, min, min + size);
 
@@ -660,7 +747,9 @@ internal sealed partial class ScreenHost
 
         Row("Sector"u8, Kit.F($"{rock.Sector.X} {rock.Sector.Y} {rock.Sector.Z}"));
         Row("Catalogue number"u8, Kit.F($"{rock.Index + 1}"));
-        Row("Diameter"u8, Kit.F($"{radius * 2:0} m"));
+        if (galaxy.AsteroidFields is { } fields)
+            Row("Size"u8, fields.SizeName(radius));
+        Row("Diameter"u8, radius >= 500f ? Kit.F($"{radius * 2 / 1000f:0.00} km") : Kit.F($"{radius * 2:0} m"));
         Row("Mass"u8, mass >= 1e6f ? Kit.F($"{mass / 1e6f:0.00} Mt") : Kit.F($"{mass / 1e3f:0.0} kt"));
         Row("Drift"u8, Kit.F($"{world.RockDrift(rock):0.00} m/s"));
         Row("Distance from pod"u8, range >= 1000f ? Kit.F($"{range / 1000f:0.00} km") : Kit.F($"{range:0} m"));
@@ -779,7 +868,7 @@ internal sealed partial class ScreenHost
         var size = galaxy.SectorSize;
         var player = new float2((float)(world.OwnPosition.X / size), (float)(world.OwnPosition.Z / size));
         var middle = display * 0.5f;
-        var mouse = io.MousePos;
+        var mouse = _mapHoverPinned ? middle : io.MousePos;
         var devices = _app.Devices;
 
         // The course menu, while open, holds the map still and takes the clicks that land on it.
@@ -873,7 +962,7 @@ internal sealed partial class ScreenHost
         DrawMapGrid(draw, display, left, top, right, bottom, 100, Math.Clamp((cell * 100f - 30f) / 200f, 0f, 1f) * 0.4f, ToScreen(0, 0), cell);
 
         var layerFalloff = shape.LayerFalloff(_mapLayer);
-        var maxRocks = (float)galaxy.MaxAsteroidsPerSector;
+        var fullSignal = galaxy.MapFullSignalAsteroids;
         if (cell >= MapSectorDetailCell)
         {
             // Close enough that every sector on screen can be drawn for what it is.
@@ -890,17 +979,17 @@ internal sealed partial class ScreenHost
                         continue;
 
                     var known = _discovered.Contains(coord);
-                    var richness = summary.AsteroidCount / maxRocks;
+                    var signal = Math.Min(1f, summary.AsteroidCount / fullSignal);
 
                     // Uncharted space shows only its stronger signals, and only once the cells are large enough.
-                    if (!known && (richness < 0.3f || (cell < 34f && richness < 0.55f)))
+                    if (!known && (signal < 0.3f || (cell < 34f && signal < 0.55f)))
                         continue;
                     var position = ToScreen(x, z);
                     var star = StarColor(galaxy.StarClasses[summary.StarClass].Color);
 
                     // Something is there whether or not it has been visited; what it is shows only once discovered.
                     var tint = known ? star : Kit.Mix(star, 0x66727F, 0.75f);
-                    var glow = Math.Min(cell * (0.12f + 0.5f * richness * richness), 52f);
+                    var glow = Math.Min(cell * (0.12f + 0.5f * signal * signal), 52f);
                     if (known)
                     {
                         draw.AddCircleFilled(position, glow, Kit.Color(tint, 0.08f), 16);
@@ -916,7 +1005,7 @@ internal sealed partial class ScreenHost
                     if (!known || cell < 64f)
                         continue;
 
-                    var sweep = MathF.Tau * Math.Clamp(richness, 0.08f, 1f);
+                    var sweep = MathF.Tau * Math.Clamp(signal, 0.08f, 1f);
                     draw.PathArcTo(position, cell * 0.2f, -MathF.PI / 2, -MathF.PI / 2 + sweep, 28);
                     draw.PathStroke(Kit.Color(Theme.Info, 0.75f), ImDrawFlags.None, 1.5f);
                     if (cell >= 118f)
@@ -1231,7 +1320,11 @@ internal sealed partial class ScreenHost
     {
         var display = _ui.DisplaySize;
         var known = _discovered.Contains(hover);
-        var panelSize = new float2(Kit.Px(340), Kit.Px(known ? 238 : 150));
+        // What a discovered sector with asteroids holds takes a few more lines: its richness and its resources.
+        var inner = Kit.Px(340) - Kit.Px(Theme.Space5) * 2;
+        var hasRock = known && MapSummary(galaxy, hover).AsteroidCount > 0;
+        var characterHeight = hasRock ? SectorCharacterHeight(galaxy, MapSummary(galaxy, hover).Character, inner) : 0f;
+        var panelSize = new float2(Kit.Px(340), Kit.Px(known ? 218 : 150) + characterHeight);
         var panelMin = new float2(display.X - panelSize.X - Kit.Px(96), Kit.Px(140));
         Kit.PanelFrame(draw, panelMin, panelMin + panelSize);
         var text = panelMin + new float2(Kit.Px(Theme.Space5), Kit.Px(Theme.Space4));
@@ -1269,12 +1362,19 @@ internal sealed partial class ScreenHost
 
             Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, y), Theme.TextDim, Kit.F($"STAR          {galaxy.StarClasses[summary.StarClass].Name}"));
             y += line;
-            Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, y), Theme.TextDim, summary.AsteroidCount > 0 ? Kit.F($"ASTEROIDS     {summary.AsteroidCount}") : "ASTEROIDS     none"u8);
+            Kit.Text(
+                draw,
+                _ui.Mono,
+                Theme.FontCaption,
+                text + new float2(0, y),
+                Theme.TextDim,
+                summary.AsteroidCount > 0 ? Kit.F($"ASTEROIDS     {summary.AsteroidCount} IN {summary.FieldCount} {(summary.FieldCount == 1 ? "FIELD" : "FIELDS")}") : "ASTEROIDS     none"u8
+            );
             y += line;
-            if (summary.Vein >= 0)
+            if (hasRock)
             {
-                Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, y), Theme.TextDim, Kit.F($"MAIN ORE      {galaxy.Resources[summary.Vein].Name}"));
-                y += line;
+                DrawSectorCharacter(draw, text + new float2(0, y), inner, galaxy, summary.Character);
+                y += characterHeight;
             }
 
             Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, y), ships > 0 ? Theme.Accent : Theme.TextDim, Kit.F($"YOUR SHIPS    {ships}"));
