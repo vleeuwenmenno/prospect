@@ -1,6 +1,7 @@
 #version 450
 #include "frame.glsl"
 #include "ftl.glsl"
+#include "ftl_own.glsl"
 
 // Set 0 is the frame constants, for the camera and the jumps in view; set 1 the scene and, on frames with a lens,
 // the scene as it was before anything solid was drawn (the sky) and before any hull was (the sky and asteroids).
@@ -11,8 +12,6 @@ layout(set = 1, binding = 2) uniform sampler2D rocks;
 layout(set = 1, binding = 3) uniform sampler2D sceneDepth;
 layout(set = 1, binding = 4) uniform sampler2D rocksDepth;
 
-const float Far = 1e30;
-
 // Bit of bentBy for the pilot's own opening; bits 0 to 3 are frame.openings.
 const int OwnBit = 16;
 
@@ -20,20 +19,6 @@ const int OwnBit = 16;
 float viewDepth(float depth)
 {
     return depth > 0.0 ? frame.viewProjection[3][2] / depth : Far;
-}
-
-// How far along the view's forward axis a point t along the view ray v is.
-float rayDepth(vec3 v, float t)
-{
-    return t * dot(v, frame.cameraForward.xyz);
-}
-
-// Where a view ray first comes to a sphere: the near side of it, or where the ray passes closest when it misses.
-float sphereRay(vec3 v, vec3 c, float r)
-{
-    float b = dot(c, v);
-    float h = r * r - (dot(c, c) - b * b);
-    return h > 0.0 ? b - sqrt(h) : b;
 }
 
 // Where a view ray crosses the plane through c across axis, along the view; Far where it does not.
@@ -298,15 +283,11 @@ vec3 riftThroat(vec3 v, float travel, float seed, float time, float pixelAngle)
     return color + vec3(0.12, 0.03, 0.005) * ends;
 }
 
-// The pilot's own rift or wormhole, worked out from where its openings are in the world. Returns how much of the
-// pixel is the real scene; the rest is the throat. While the drive works there is one opening, ahead: the real world
-// on the near side, the throat beyond. After the drive has fired there is the one the hull comes out of: the throat
-// on the near side, the destination beyond. Which side a pixel shows follows from which side of the opening the
-// camera is on and what its ray passes through, so the camera can fly through an opening and the view changes with
-// it, never in one frame. The camera goes wherever the pilot has it looking, so it may pass beside an opening rather
-// than through it: the side it is on is eased (frame.ftlUp.w), and there the view dissolves to the far side.
-// A wormhole's opening is a sphere; inside the sphere the far side is a half of the view. A rift's is a flat
-// window across the axis with a torn outline.
+// The pilot's own rift or wormhole, worked out from where its openings are in the world by ftlOwnRay. Returns how
+// much of the pixel is the real scene; the rest is the throat. The camera goes wherever the pilot has it looking, so
+// it may pass beside an opening rather than through it: the side it is on is eased (frame.ftlUp.w), and there the
+// view dissolves to the far side. The pilot's own hull is shown as it is: its mesh pass has already left out what
+// of it this pass would hide, with the same function.
 float ownPassage(int kind, vec3 v, vec2 pos, float pixelAngle, float depth, bool ownHull, inout vec2 bend, inout int bentBy, inout vec3 glow)
 {
     bool entry = int(frame.ftl.y + 0.5) == 1;
@@ -314,89 +295,43 @@ float ownPassage(int kind, vec3 v, vec2 pos, float pixelAngle, float depth, bool
     float open = entry ? frame.ftlShape.y : frame.ftlShape.z;
     vec3 axis = frame.ftlAxis.xyz;
     vec3 up = frame.ftlUp.xyz;
-    float seed = frame.ftl.w + (entry ? 0.0 : 0.37);
     vec3 c = mouth.xyz;
     float r = mouth.w;
-    // How far the camera has gone past the opening, 0 (on the near side) to 1.
     float past = frame.ftlUp.w;
-    float edge = -1e4;
-    float far;
-    vec2 lens = vec2(0.0);
-    float line = 1.0;
-    // Where this pixel's ray meets the opening, along the view; Far where it does not.
-    float at = Far;
+    FtlOwnRay ray = ftlOwnRay(v, pixelAngle);
+    float edge = ray.edge;
 
+    // Something solid nearer than where this pixel's ray meets the opening hides it.
+    bool inFront = depth < ray.at;
+    float real = ftlOwnReal(ray, depth);
+    if (ownHull)
+        return 1.0;
+
+    // Past the opening the view bends around it.
+    vec2 lens = vec2(0.0);
     if (kind == 3)
     {
-        float facing = dot(v, axis);
-        float t = abs(facing) > 1e-5 ? dot(c, axis) / facing : -1.0;
-        if (r > 0.0 && t > 0.0)
+        if (ray.at < Far)
         {
-            at = rayDepth(v, t);
-            vec3 hit = v * t - c;
+            // Worked out in the window's plane and projected back.
             vec3 side = cross(up, axis);
-            vec2 extent = ftlRiftExtent(open) * r;
-            vec2 e = vec2(dot(hit, side), dot(hit, up)) / extent;
-            float re = length(e);
-            vec2 dir = e / max(re, 1e-6);
-            float perPixel = t * pixelAngle / max(abs(facing), 0.08);
-            edge = (ftlRiftOutline(atan(e.y, e.x), seed) - re) * length(dir * extent) / perPixel;
-            // Past the window the view bends around it, worked out in the window's plane and projected back.
-            vec2 shift = deflect(e, RiftEinstein * ftlEase(open / 0.45), 3.4) * extent;
+            vec2 shift = deflect(ray.across, RiftEinstein * ftlEase(open / 0.45), 3.4) * ray.extent;
             vec2 bent;
-            if (project(c + hit + side * shift.x + up * shift.y, bent))
+            if (project(c + ray.hit + side * shift.x + up * shift.y, bent))
                 lens = (bent - pos) * (1.0 - clamp(edge + 0.5, 0.0, 1.0));
         }
-        float through = clamp(edge + 0.5, 0.0, 1.0);
-        far = mix(through, 1.0 - through, past);
     }
     else
     {
         float d = length(c);
-        if (r <= 0.0)
+        vec2 centre;
+        if (r > 0.0 && d > r && project(c, centre))
         {
-            far = past;
-        }
-        else if (d > r)
-        {
-            // The rim fades as the camera reaches the sphere, where it would become a line straight across the view.
-            line = smoothstep(r, r * 1.4, d);
-            float t = sphereRay(v, c, r);
-            at = t > 0.0 ? rayDepth(v, t) : Far;
-            float rim = asin(r / d);
-            edge = (rim - acos(clamp(dot(v, c / d), -1.0, 1.0))) / pixelAngle;
-            float hit = clamp(edge + 0.5, 0.0, 1.0);
-            far = mix(hit, 1.0 - hit, past);
-            vec2 centre;
-            if (project(c, centre))
-            {
-                // The lens bends the view around the sphere as it appears; it gives way as the sphere fills the view.
-                float size = tan(rim) / frame.lens.x;
-                lens = deflect(pos - centre, size * 1.3, size * 4.0) * (1.0 - smoothstep(1.0, 2.5, size)) * (1.0 - hit);
-            }
-        }
-        else
-        {
-            // Inside, the far side is a half of the view. Just inside the surface it is the half facing the centre
-            // (or away from it, once past), as it is just outside; deep inside it is the half ahead along the axis.
-            // The camera can come in anywhere on the surface without the boundary jumping.
-            vec3 toward = d > 1e-4 ? c / d : axis;
-            float w = smoothstep(0.5 * r, r, d);
-            vec3 n = axis * (1.0 - w) + toward * ((1.0 - 2.0 * past) * w);
-            n = dot(n, n) > 1e-6 ? normalize(n) : axis;
-            edge = asin(clamp(dot(v, n), -1.0, 1.0)) / pixelAngle;
-            far = clamp(edge + 0.5, 0.0, 1.0);
-            line = 0.0;
+            // The lens bends the view around the sphere as it appears; it gives way as the sphere fills the view.
+            float size = tan(asin(r / d)) / frame.lens.x;
+            lens = deflect(pos - centre, size * 1.3, size * 4.0) * (1.0 - smoothstep(1.0, 2.5, size)) * (1.0 - clamp(edge + 0.5, 0.0, 1.0));
         }
     }
-
-    // Something solid nearer than where this pixel's ray meets the opening hides it.
-    bool inFront = depth < at;
-    if (inFront)
-        far = past;
-    float real = entry ? 1.0 - far : far;
-    if (ownHull)
-        return 1.0;
 
     // The real world is bent where it is seen past the opening from the real side.
     float realSide = entry ? 1.0 - past : past;
@@ -409,7 +344,7 @@ float ownPassage(int kind, vec3 v, vec2 pos, float pixelAngle, float depth, bool
     {
         // The burning edge, with the throat side of it glowing where it was torn.
         vec3 burn = mix(riftBurn(-edge) * step(0.0, -edge), riftBurn(edge) * step(0.0, edge), realSide);
-        glow += kind == 3 ? riftLine(edge) + burn : wormholeLine(edge) * line;
+        glow += kind == 3 ? riftLine(edge) + burn : wormholeLine(edge) * ray.line;
     }
     return real;
 }

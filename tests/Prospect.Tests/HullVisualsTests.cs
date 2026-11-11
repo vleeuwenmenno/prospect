@@ -600,4 +600,41 @@ public sealed class HullVisualsTests
             Assert.Equal(short_.Stretch, shape.Stretch, 3);
         }
     }
+
+    [Theory]
+    [InlineData(20.0)]
+    [InlineData(33554432.0)]
+    [InlineData(134217728.0)]
+    [InlineData(1099511627776.0)]
+    public void TheLastSecondsOfAnyTransitStayExact(double tunnel)
+    {
+        // The simulation keeps the elapsed seconds in double; the drawing takes the seconds left from them, so the
+        // last second and the arrival are the same for a transit of any supported length as for the shortest.
+        var flight = Content.Designs[DesignWith(FtlKind.Rift)].Flight;
+        var basis = flight.FtlTunnelSeconds;
+        foreach (var left in (ReadOnlySpan<double>)[2.5, 1.2, 0.4, 0.2])
+        {
+            var hull = new HullView { Jump = JumpPhase.Tunnel, JumpTunnelSeconds = (float)tunnel, JumpTunnelElapsed = (float)tunnel - left };
+            var clock = HullVisuals.TransitClock(hull, flight);
+            Assert.Equal(left, clock.Left, 4);
+            var shape = HullVisuals.Passage(JumpPhase.Tunnel, WorldView.JumpProgress(hull, flight), flight, HullVisuals.TunnelSeconds(hull, flight), clock.Left);
+            var short_ = HullVisuals.Passage(JumpPhase.Tunnel, (float)((basis - left) / basis), flight);
+            Assert.True(float.IsFinite(shape.Offset) && float.IsFinite(shape.Open));
+            Assert.Equal(short_.Visible, shape.Visible);
+            // At 2^40 s a double still holds the elapsed seconds to a quarter of a millisecond.
+            Assert.True(MathF.Abs(short_.Offset - shape.Offset) < 0.05f, $"{left} s left: {shape.Offset}, {short_.Offset} for a short transit");
+            Assert.True(MathF.Abs(short_.Open - shape.Open) < 1e-3f);
+            var light = HullVisuals.Hyperspace(JumpPhase.Tunnel, 0f, flight, HullVisuals.TunnelSeconds(hull, flight), clock.Left);
+            var shortLight = HullVisuals.Hyperspace(JumpPhase.Tunnel, (float)((basis - left) / basis), flight);
+            Assert.True(MathF.Abs(shortLight.Offset - light.Offset) < 0.05f, $"{left} s left: {light.Offset}, {shortLight.Offset} for a short transit");
+            Assert.Equal(shortLight.Visible, light.Visible);
+        }
+
+        // Through the arrival the transit's length no longer matters at all.
+        var arriving = new HullView { Jump = JumpPhase.Arrive, JumpTimer = 0.5f, JumpTunnelSeconds = (float)tunnel };
+        var arrival = HullVisuals.TransitClock(arriving, flight);
+        Assert.Equal(-0.5f, arrival.Left);
+        Assert.Equal(HullVisuals.Passage(JumpPhase.Arrive, 0.5f / flight.FtlArriveSeconds, flight).Offset,
+            HullVisuals.Passage(JumpPhase.Arrive, 0.5f / flight.FtlArriveSeconds, flight, (float)tunnel, arrival.Left).Offset, 3);
+    }
 }

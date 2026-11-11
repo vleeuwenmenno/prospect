@@ -8,9 +8,11 @@ namespace Prospect.Game.World;
 /// away. Both are in world axes; a zero <paramref name="CutNormal"/> cuts nothing. <paramref name="Faces"/> holds, per
 /// block, the faces drawn in <see cref="HullDesign.ExteriorFaces"/> order; null draws all six, a block as its own cube.
 /// Only faces turned to the camera are drawn, and nothing caps a cut, so only those faces can be picked.
+/// <paramref name="Aperture"/>, for the pilot's own hull inside its own rift or wormhole, leaves out the points its
+/// mesh pass leaves out, counting a point as drawn where more than half of it shows.
 /// </summary>
 public readonly record struct PickHull(uint Id, Double3 Position, Quaternion Rotation, Vector3[] Blocks, float BlockSize, ulong Mask, float Radius,
-    float Stretch = 1, Vector3 CutPoint = default, Vector3 CutNormal = default, byte[]? Faces = null);
+    float Stretch = 1, Vector3 CutPoint = default, Vector3 CutNormal = default, byte[]? Faces = null, FtlAperture Aperture = default);
 
 /// <summary>A loaded sector and its current displacement offsets, borrowed without copying.</summary>
 public readonly record struct PickSector(SectorCoord Id, Double3 Center, Asteroid[] Rocks, int Count, Vector3[]? Offsets, Vector3 BoundsCenter = default, float BoundsRadius = 0);
@@ -70,12 +72,13 @@ public static class TargetPicking
             var start = rayDepth > 0 ? nearPlane / rayDepth : float.PositiveInfinity;
             var nearest = float.PositiveInfinity;
             var padded = float.PositiveInfinity;
+            var shown = new Shown(hull.Aperture, hull.Rotation, 1f / pixelsPerTangent);
             for (var b = 0; b < hull.Blocks.Length; b++)
             {
                 if ((hull.Mask & (1UL << b)) == 0) continue;
                 var block = hull.Blocks[b];
                 block.Z *= stretch;
-                nearest = Faces(block - origin, direction, half, hull.Faces?[b] ?? AllFaces, cut, cutAt, start, nearest);
+                nearest = Faces(block - origin, direction, half, hull.Faces?[b] ?? AllFaces, cut, cutAt, start, nearest, shown);
             }
             // The pointer is on no drawn face, so the grab is measured to their edges.
             for (var b = 0; b < hull.Blocks.Length && !float.IsFinite(nearest) && rayDepth > 0; b++)
@@ -83,7 +86,7 @@ public static class TargetPicking
                 if ((hull.Mask & (1UL << b)) == 0) continue;
                 var block = hull.Blocks[b];
                 block.Z *= stretch;
-                if (NearFaces(direction / rayDepth, view, pixelsPerTangent, block - origin, half, hull.Faces?[b] ?? AllFaces, cut, cutAt, nearPlane))
+                if (NearFaces(direction / rayDepth, view, pixelsPerTangent, block - origin, half, hull.Faces?[b] ?? AllFaces, cut, cutAt, nearPlane, shown))
                     padded = Math.Min(padded, Math.Max(0, Vector3.Dot(block - origin, direction)));
             }
             if (!float.IsFinite(nearest)) nearest = padded;
@@ -129,6 +132,12 @@ public static class TargetPicking
     }
 
     private const int AllFaces = 0x3F;
+
+    /// <summary>Whether a point of a hull, from the camera in the hull's own axes, is shown by its aperture.</summary>
+    private readonly struct Shown(FtlAperture aperture, Quaternion rotation, float pixelAngle)
+    {
+        public bool At(Vector3 local) => !aperture.Active || aperture.HullShows(Vector3.Transform(local, rotation), pixelAngle) > 0.5f;
+    }
     private static readonly Vector3[] Axes = [Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ];
 
     /// <summary>
@@ -136,7 +145,7 @@ public static class TargetPicking
     /// from the camera, that the ray meets from <paramref name="start"/> on, on the drawn side of the cut. A face is
     /// only met from its outside, which is the side it is drawn from.
     /// </summary>
-    private static float Faces(Vector3 block, Vector3 ray, Vector3 half, int faces, Vector3 cut, float cutAt, float start, float nearest)
+    private static float Faces(Vector3 block, Vector3 ray, Vector3 half, int faces, Vector3 cut, float cutAt, float start, float nearest, in Shown shown)
     {
         for (var side = 0; side < 6; side++)
         {
@@ -148,7 +157,7 @@ public static class TargetPicking
             var offset = ray * t - block;
             var u = (axis + 1) % 3;
             var v = (axis + 2) % 3;
-            if (MathF.Abs(offset[u]) <= half[u] && MathF.Abs(offset[v]) <= half[v] && Vector3.Dot(ray * t, cut) <= cutAt)
+            if (MathF.Abs(offset[u]) <= half[u] && MathF.Abs(offset[v]) <= half[v] && Vector3.Dot(ray * t, cut) <= cutAt && shown.At(ray * t))
                 nearest = t;
         }
         return nearest;
@@ -160,7 +169,7 @@ public static class TargetPicking
     /// corners need not be the box's.
     /// </summary>
     private static bool NearFaces(Vector3 pointer, Vector3 forward, float focal, Vector3 block, Vector3 half, int faces,
-        Vector3 cut, float cutAt, float nearPlane)
+        Vector3 cut, float cutAt, float nearPlane, in Shown shown)
     {
         var squared = GrabPixels * GrabPixels / (focal * focal);
         // A quad clipped by two planes keeps at most six corners.
@@ -191,10 +200,25 @@ public static class TargetPicking
                 var edge = b - a;
                 var length = edge.LengthSquared();
                 var t = length == 0 ? 0 : Math.Clamp(Vector3.Dot(pointer - a, edge) / length, 0, 1);
-                if (Vector3.DistanceSquared(pointer, a + edge * t) <= squared) return true;
+                // The nearest point of the edge as drawn, in its plane: an aperture may hide it there.
+                var along = Math.Clamp(Along(a + edge * t, face[i], next), 0, 1);
+                if (Vector3.DistanceSquared(pointer, a + edge * t) <= squared && shown.At(Vector3.Lerp(face[i], next, along))) return true;
             }
         }
         return false;
+    }
+
+    /// <summary>
+    /// Where along the edge from <paramref name="from"/> to <paramref name="to"/>, as a share of it, the ray from the
+    /// camera through <paramref name="on"/> meets it: perspective makes this differ from the share on the screen.
+    /// </summary>
+    private static float Along(Vector3 on, Vector3 from, Vector3 to)
+    {
+        // from + (to - from) s lies on the ray when its cross product with the ray is zero.
+        var edge = Vector3.Cross(to - from, on);
+        var start = Vector3.Cross(from, on);
+        var squared = edge.LengthSquared();
+        return squared < 1e-20f ? 0 : -Vector3.Dot(start, edge) / squared;
     }
 
     /// <summary>Clips a convex polygon to the side where <c>dot(p, normal) &gt;= at</c>; returns the corners kept.</summary>

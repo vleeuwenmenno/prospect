@@ -1,5 +1,7 @@
 // Shared by the jump effects. The world-space mark, the stars and the composite pass all read a jump's stage
 // through these functions, so the opening the lens bends the view around is the same one that is drawn.
+#ifndef FTL_GLSL
+#define FTL_GLSL
 
 const float FtlTau = 6.2831853;
 
@@ -114,3 +116,4 @@ vec4 ftlTube(vec3 v, vec3 axis, vec3 up)
     float around = atan(dot(v, up), dot(v, side)) / FtlTau + 0.5;
     return vec4(around, log(tan(theta * 0.5)), theta, sqrt(1.0 - c * c));
 }
+#endif

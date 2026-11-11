@@ -1,5 +1,6 @@
 #version 450
 #include "frame.glsl"
+#include "hull_clip.glsl"
 
 layout(location = 0) in vec3 worldNormal;
 layout(location = 1) in vec3 worldPosition;
@@ -33,21 +34,9 @@ float noise(vec3 x)
 
 void main()
 {
-    if (CutHulls && cut >= 0)
-    {
-        vec4 plane = frame.clips[cut * 2];
-        vec3 hidden = frame.clips[cut * 2 + 1].xyz;
-        float side = dot(worldPosition - plane.xyz, hidden);
-        if (side > 0.0)
-        {
-            // A cut with a window keeps what the camera, on the shown side, sees through the window: where the ray
-            // to this point crosses the plane inside it. The camera is at the origin.
-            float camera = -dot(plane.xyz, hidden);
-            bool seen = plane.w > 0.0 && camera < 0.0 && length(worldPosition * (camera / (camera - side)) - plane.xyz) < plane.w;
-            if (!seen)
-                discard;
-        }
-    }
+    // Cut before anything is stored, so the scene, its depth and the lenses that read them never see what is gone.
+    if (CutHulls && hullCut(cut, color.a > 1.5, worldPosition))
+        discard;
 
     vec3 n = normalize(worldNormal);
     vec3 view = normalize(-worldPosition);

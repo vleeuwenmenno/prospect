@@ -41,6 +41,12 @@ public struct HullView
     /// <summary>Total transit seconds, latched at alignment and retained through arrival.</summary>
     public float JumpTunnelSeconds;
 
+    /// <summary>
+    /// Seconds in the transit so far, exactly as the simulation keeps them: a long transit's last seconds stay
+    /// distinct in double where single precision would round them away.
+    /// </summary>
+    public double JumpTunnelElapsed;
+
     /// <summary>Stored energy in megajoules, and how fast it is changing in megawatts.</summary>
     public float Energy;
     public float EnergyRate;
@@ -389,6 +395,7 @@ internal sealed class ClientWorld : IDisposable
                 JumpTimer = _predicted.JumpTimer,
                 JumpCalculation = _predicted.JumpCalculation,
                 JumpTunnelSeconds = _predicted.JumpTunnelSeconds,
+                JumpTunnelElapsed = _predicted.JumpTunnelElapsed,
                 Energy = _predicted.Energy,
                 EnergyRate = _energyRate,
                 Shield = _predicted.Shield,
@@ -657,6 +664,7 @@ internal sealed class ClientWorld : IDisposable
             JumpTimer = newest.State.JumpTimer,
             JumpCalculation = newest.State.JumpCalculation,
             JumpTunnelSeconds = newest.State.JumpTunnelSeconds,
+            JumpTunnelElapsed = newest.State.JumpTunnelElapsed,
             Energy = newest.State.Energy,
             Shield = newest.State.Shield,
             Hull = newest.State.Hull,

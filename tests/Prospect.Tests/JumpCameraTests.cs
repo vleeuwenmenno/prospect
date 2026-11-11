@@ -311,23 +311,11 @@ public sealed class JumpCameraTests : IDisposable
         Assert.NotNull(_world.NavTarget);
         Assert.Equal(JumpPhase.None, snapshot.Hulls[snapshot.OwnHull].Jump);
     }
-    /// <summary>
-    /// Whether <c>mesh.frag</c> keeps a point of a hull cut by a plane, all relative to the camera: on the shown side,
-    /// or on the hidden side but seen through the plane's window from the shown side.
-    /// </summary>
-    private static bool Kept(Vector3 at, Vector3 point, Vector3 hidden, float window)
-    {
-        var side = Vector3.Dot(at - point, hidden);
-        if (hidden == Vector3.Zero || side <= 0f)
-            return true;
-        var camera = -Vector3.Dot(point, hidden);
-        return window > 0f && camera < 0f && (at * (camera / (camera - side)) - point).Length() < window;
-    }
-
     [Fact]
     public void AHullsMaterialSaysWhatItIsAndWhichOpeningCutsIt()
     {
-        // As mesh.vert reads it back: the kind below four, and one more than the clip slot in steps of four.
+        // As mesh.vert reads it back: the kind below four, and one more than the clip slot in steps of four. The
+        // pilot's own hull inside its jump takes no slot: its opening comes from the frame's own jump.
         for (var clip = -1; clip < HullVisuals.MaxPassages; clip++)
         {
             foreach (var own in (ReadOnlySpan<bool>)[false, true])
@@ -340,6 +328,15 @@ public sealed class JumpCameraTests : IDisposable
         }
     }
 
+    /// <summary>Where each block of the pilot's own hull is drawn, relative to the camera.</summary>
+    private IEnumerable<Vector3> OwnBlocks(SessionSnapshot snapshot)
+    {
+        var design = snapshot.Content.Designs[snapshot.Hulls[snapshot.OwnHull].Design];
+        var hull = _world.OwnDrawnPosition.RelativeTo(_world.CameraPosition);
+        foreach (var offset in design.BlockOffsets)
+            yield return hull + Vector3.Transform(offset, _world.OwnOrientation);
+    }
+
     [Theory]
     [InlineData(FtlKind.Rift, 0f)]
     [InlineData(FtlKind.Rift, 90f)]
@@ -349,18 +346,19 @@ public sealed class JumpCameraTests : IDisposable
     [InlineData(FtlKind.Wormhole, 180f)]
     public void ThePilotsOwnHullGoesIntoItsOpeningNoseFirstWhereverTheCameraIs(FtlKind drawnAs, float lookDegrees)
     {
-        // The pilot's own hull, drawn from inside its jump, against the opening the composite shows: from the world's
-        // side, what is through the opening is hidden, nose first in and stern last out; from the throat's side, what
-        // is still in the world shows only through the window. Looking from behind, beside and ahead of the hull.
+        // The pilot's own hull, drawn from inside its jump, against the opening the frame constants give the GPU:
+        // from the world's side, nothing of it in the throat shows, so it goes in nose first and comes out stern
+        // last; as the camera's side eases into the throat, what is in the throat comes in with it. Looking from
+        // behind, beside and ahead of the hull.
         _world.FtlPreview = drawnAs;
         _world.LookDegrees = lookDegrees;
         var target = _client.AcquireSnapshot().Galaxy!.CenterOf(new SectorCoord(12, 0, -7));
         _client.Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = target });
 
         var started = false;
-        var entryCut = 0;
-        var exitCut = 0;
-        var throatSeen = 0;
+        var straddled = 0;
+        var cutFromWorld = 0;
+        var seenInThroat = 0;
         for (var frame = 0; frame < TickLoop.SimulationHz * 120; frame++)
         {
             var snapshot = Frame(false);
@@ -371,70 +369,142 @@ public sealed class JumpCameraTests : IDisposable
             if (own.Jump == JumpPhase.None)
                 continue;
 
-            var exit = own.Jump is JumpPhase.Tunnel or JumpPhase.Arrive;
+            // What the mesh pass is given is the opening the view has, where the view has it.
+            var aperture = _world.OwnAperture;
+            Assert.True(aperture.Active);
             var (centre, axis, radius) = _world.OwnOpening;
-            var (point, hidden, window) = _world.OwnCut;
-            if (radius <= 0.001f * _world.OwnFlight.Radius)
-                continue;
+            var mouth = aperture.Mouth;
+            Assert.True((new Vector3(mouth.X, mouth.Y, mouth.Z) - centre.RelativeTo(_world.CameraPosition)).Length() < 1e-3f);
+            Assert.Equal(radius, mouth.W);
+            Assert.Equal(_world.JumpThrough, aperture.Past);
 
-            // The cut is the opening's own plane, fixed in the world whichever way the camera looks.
+            var exit = own.Jump is JumpPhase.Tunnel or JumpPhase.Arrive;
             var throat = exit ? -axis : axis;
-            var past = _world.JumpThrough >= 0.5f;
-            var inThroat = exit ? !past : past;
-            Assert.Equal(centre, point);
-            Assert.Equal(inThroat ? -throat : throat, hidden);
-            Assert.Equal(inThroat ? radius : 0f, window);
-
-            // Where each block is drawn, relative to the camera, and which side of the opening it is on.
-            var camera = _world.CameraPosition;
-            var design = snapshot.Content.Designs[own.Design];
-            var hull = _world.OwnDrawnPosition.RelativeTo(camera);
-            var cut = point.RelativeTo(camera);
+            var inThroat = exit ? 1f - aperture.Past : aperture.Past;
+            var cut = centre.RelativeTo(_world.CameraPosition);
             var through = 0;
-            var outside = 0;
-            var throatKept = 0;
-            var worldKept = 0;
-            foreach (var offset in design.BlockOffsets)
+            var throatShown = 0;
+            var outsideShown = 0;
+            foreach (var at in OwnBlocks(snapshot))
             {
-                var at = hull + Vector3.Transform(offset, _world.OwnOrientation);
-                var inThroatSide = Vector3.Dot(at - cut, throat) > 0f;
-                var kept = Kept(at, cut, hidden, window);
-                if (inThroatSide)
+                var shows = aperture.HullShows(at, _world.PixelAngle);
+                Assert.InRange(shows, 0f, 1f);
+                if (Vector3.Dot(at - cut, throat) > 0f)
                 {
+                    // Never more of it than the camera is in the throat.
+                    Assert.True(shows <= inThroat + 1e-5f, $"{own.Jump}: a block in the throat shows {shows}, camera {inThroat} in");
                     through++;
-                    throatKept += kept ? 1 : 0;
+                    throatShown += shows > 0.5f ? 1 : 0;
                 }
                 else
                 {
-                    outside++;
-                    worldKept += kept ? 1 : 0;
+                    outsideShown += shows > 0.5f ? 1 : 0;
                 }
             }
 
-            if (inThroat)
+            // From the world, partway through: nothing through the opening shows (asserted above), and what does
+            // show is the part still out of it, where the opening does not cover it.
+            if (inThroat < 0.01f && through > 0)
             {
-                // Inside, the throat's side is all there; the world's side shows at most through the window.
-                Assert.Equal(through, throatKept);
-                throatSeen += through > 0 ? 1 : 0;
-                continue;
+                straddled++;
+                cutFromWorld += outsideShown > 0 ? 1 : 0;
             }
-
-            // From the world, nothing in the throat is drawn and everything outside it is.
-            Assert.Equal(0, throatKept);
-            Assert.Equal(outside, worldKept);
-            if (through > 0 && outside > 0)
-            {
-                if (exit)
-                    exitCut++;
-                else
-                    entryCut++;
-            }
+            if (inThroat > 0.99f && throatShown > 0)
+                seenInThroat++;
         }
 
         Assert.True(started);
-        // The hull is seen part way through its opening from the world's side, cut there, from every side of it.
-        Assert.True(entryCut + exitCut > 0, $"{drawnAs} at {lookDegrees}: never seen cut part way through ({entryCut} in, {exitCut} out)");
-        Assert.True(throatSeen > 0, $"{drawnAs} at {lookDegrees}: never seen from inside the throat");
+        Assert.True(straddled > 0, $"{drawnAs} at {lookDegrees}: never part way through with the camera on the world's side");
+        // A rift seen from behind or beside shows the stern while the nose is gone. A wormhole's sphere covers the
+        // stern too once it is inside it, and from ahead a rift's window covers the whole hull behind it.
+        if (drawnAs == FtlKind.Rift && lookDegrees < 135f)
+            Assert.True(cutFromWorld > 0, $"{drawnAs} at {lookDegrees}: never seen cut, stern out and nose gone");
+        Assert.True(seenInThroat > 0, $"{drawnAs} at {lookDegrees}: never seen from inside the throat");
+    }
+
+    [Fact]
+    public void TheCommandViewPicksThePilotsOwnHullAsItIsStillDrawnFromInside()
+    {
+        // Partway into a rift, seen from beside, the command key pulls the view out; for a few frames the hull is
+        // still drawn from inside its jump. What of it is through the opening is not drawn, and is not picked.
+        _world.FtlPreview = FtlKind.Rift;
+        _world.LookDegrees = 90f;
+        var target = _client.AcquireSnapshot().Galaxy!.CenterOf(new SectorCoord(12, 0, -7));
+        _client.Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = target });
+
+        SessionSnapshot? snapshot = null;
+        for (var frame = 0; frame < TickLoop.SimulationHz * 60; frame++)
+        {
+            snapshot = Frame(false);
+            var (centre, axis, _) = _world.OwnOpening;
+            var cut = centre.RelativeTo(_world.CameraPosition);
+            var deepest = float.MinValue;
+            foreach (var at in OwnBlocks(snapshot))
+                deepest = Math.Max(deepest, Vector3.Dot(at - cut, axis));
+            // Well into it: the nose a block and a half through, the stern still out, the camera on the world's side.
+            if (_world.Own.Jump == JumpPhase.Charge && deepest > 1.5f * snapshot.Content.Designs[_world.Own.Design].BlockSize && _world.JumpThrough < 0.01f)
+                break;
+        }
+
+        _world.SetMode(ViewMode.Command);
+        snapshot = Frame(false);
+        Assert.True(_world.OwnAperture.Active, "the hull is no longer drawn from inside");
+
+        var aperture = _world.OwnAperture;
+        var nose = Vector3.Zero;
+        var stern = Vector3.Zero;
+        var noseShows = 1f;
+        var sternShows = 0f;
+        foreach (var at in OwnBlocks(snapshot))
+        {
+            var shows = aperture.HullShows(at, _world.PixelAngle);
+            var along = Vector3.Dot(at, _world.OwnOpening.Axis);
+            if (nose == Vector3.Zero || along > Vector3.Dot(nose, _world.OwnOpening.Axis))
+                (nose, noseShows) = (at, shows);
+            if (stern == Vector3.Zero || along < Vector3.Dot(stern, _world.OwnOpening.Axis))
+                (stern, sternShows) = (at, shows);
+        }
+
+        Assert.True(noseShows < 0.5f && sternShows > 0.5f, $"nose shows {noseShows}, stern {sternShows}");
+        Assert.True(_world.Project(_world.CameraPosition + nose, out var noseAt));
+        Assert.True(_world.Project(_world.CameraPosition + stern, out var sternAt));
+        Assert.NotEqual(_world.Own.Id, _world.HullAt(noseAt));
+        Assert.Equal(_world.Own.Id, _world.HullAt(sternAt));
+    }
+
+    [Theory]
+    [InlineData(FtlKind.Rift)]
+    [InlineData(FtlKind.Wormhole)]
+    public void ZoomingDuringTheChargeMovesOnlyTheCamera(FtlKind drawnAs)
+    {
+        // Two views of the same jump, one zoomed in and out as the hull moves into its opening: the hull's path and
+        // its opening are the same in both, frame by frame; only the cameras differ.
+        var devices = new InputDevices();
+        var zoomed = new WorldView(devices, _actions, new ClientSettings(), _jobs, null!, _client.AcquireSnapshot().Content.Designs);
+        _world.FtlPreview = zoomed.FtlPreview = drawnAs;
+        var target = _client.AcquireSnapshot().Galaxy!.CenterOf(new SectorCoord(12, 0, -7));
+        _client.Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = target });
+
+        var compared = 0;
+        for (var frame = 0; frame < TickLoop.SimulationHz * 60; frame++)
+        {
+            var snapshot = Frame(false);
+            devices.BeginFrame();
+            ref readonly var own = ref snapshot.Hulls[snapshot.OwnHull];
+            var moving = own.Jump == JumpPhase.Charge && WorldView.JumpProgress(own, _world.OwnFlight) > 0.6f;
+            if (moving)
+                devices.OnScroll(frame % 20 < 10 ? -1f : 2f);
+            zoomed.Update(snapshot, _client.Input, Dt, true, Screen, Screen, false);
+            if (own.Jump is not (JumpPhase.Align or JumpPhase.Charge))
+                continue;
+
+            Assert.True((_world.OwnDrawnPosition.RelativeTo(zoomed.OwnDrawnPosition)).Length() < 0.05f, $"{own.Jump}: drawn {(_world.OwnDrawnPosition.RelativeTo(zoomed.OwnDrawnPosition)).Length()} m apart");
+            Assert.True((_world.OwnOpening.Centre.RelativeTo(zoomed.OwnOpening.Centre)).Length() < 0.05f);
+            Assert.Equal(_world.OwnOpening.Radius, zoomed.OwnOpening.Radius, 2);
+            compared += moving ? 1 : 0;
+        }
+
+        Assert.True(compared > 30, $"compared {compared} frames while moving");
     }
 
     [Theory]
@@ -489,5 +559,55 @@ public sealed class JumpCameraTests : IDisposable
         Assert.True(started);
         Assert.True(waited > TickLoop.SimulationHz * 5, $"waited {waited} frames");
         Assert.True(moved);
+    }
+
+    [Theory]
+    [InlineData(FtlKind.Rift)]
+    [InlineData(FtlKind.Wormhole)]
+    [InlineData(FtlKind.Hyperspace)]
+    public void TheLongestSupportedTransitEndsAsTheShortestFromInside(FtlKind drawnAs)
+    {
+        // Two views that first see the pilot's own jump in transit, as after joining late: one told it lasts the
+        // longest the simulation supports, 2^40 seconds, the other 20. Through the transit's last seconds and the
+        // arrival, both draw the hull and its opening the same, and nothing becomes NaN.
+        var target = _client.AcquireSnapshot().Galaxy!.CenterOf(new SectorCoord(12, 0, -7));
+        _client.Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = target });
+        SessionSnapshot snapshot;
+        do
+            snapshot = Frame(false);
+        while (snapshot.Hulls[snapshot.OwnHull].Jump != JumpPhase.Tunnel);
+
+        var designs = snapshot.Content.Designs;
+        var longest = new WorldView(new InputDevices(), _actions, new ClientSettings(), _jobs, null!, designs) { FtlPreview = drawnAs };
+        var shortest = new WorldView(new InputDevices(), _actions, new ClientSettings(), _jobs, null!, designs) { FtlPreview = drawnAs };
+        const double Supported = 1099511627776.0;
+        ref var own = ref snapshot.Hulls[snapshot.OwnHull];
+        var saved = own;
+        try
+        {
+            for (var left = 3.5; left > -1.4; left -= 0.05)
+            {
+                foreach (var (view, tunnel) in (ReadOnlySpan<(WorldView, double)>)[(longest, Supported), (shortest, 20.0)])
+                {
+                    own.Jump = left > 0 ? JumpPhase.Tunnel : JumpPhase.Arrive;
+                    own.JumpTunnelSeconds = (float)tunnel;
+                    own.JumpTunnelElapsed = left > 0 ? (float)tunnel - left : 0;
+                    own.JumpTimer = left > 0 ? (float)own.JumpTunnelElapsed : (float)-left;
+                    view.Update(snapshot, _client.Input, Dt, false, Screen, Screen, false);
+                }
+
+                var drawn = longest.OwnDrawnPosition.RelativeTo(longest.OwnPosition);
+                Assert.True(float.IsFinite(drawn.X) && float.IsFinite(drawn.Y) && float.IsFinite(drawn.Z), $"{left} s left: drawn {drawn}");
+                Assert.True((drawn - shortest.OwnDrawnPosition.RelativeTo(shortest.OwnPosition)).Length() < 0.01f, $"{left} s left");
+                Assert.True(longest.OwnOpening.Centre.RelativeTo(shortest.OwnOpening.Centre).Length() < 0.01f, $"{left} s left");
+                // The two views read the tick's clock a moment apart, which moves things by a hair.
+                Assert.True(MathF.Abs(shortest.OwnOpening.Radius - longest.OwnOpening.Radius) < 0.01f, $"{left} s left");
+                Assert.True(MathF.Abs(shortest.JumpThrough - longest.JumpThrough) < 0.01f, $"{left} s left");
+            }
+        }
+        finally
+        {
+            own = saved;
+        }
     }
 }

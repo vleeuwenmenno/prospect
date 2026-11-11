@@ -94,13 +94,11 @@ internal struct FtlClips
 
     /// <summary>
     /// Fills slot <paramref name="index"/>: a point on the cutting plane relative to the camera, and the plane's
-    /// normal toward the side that is hidden. A zero normal cuts nothing. With a <paramref name="window"/> radius,
-    /// the hidden side is still drawn where the camera, on the shown side, sees it through that circle around the
-    /// point.
+    /// normal toward the side that is hidden. A zero normal cuts nothing.
     /// </summary>
-    public void Set(int index, Vector3 point, Vector3 hidden, float window = 0f)
+    public void Set(int index, Vector3 point, Vector3 hidden)
     {
-        this[index * 2] = new float4(point.X, point.Y, point.Z, window);
+        this[index * 2] = new float4(point.X, point.Y, point.Z, 0);
         this[index * 2 + 1] = new float4(hidden.X, hidden.Y, hidden.Z, 0);
     }
 }
