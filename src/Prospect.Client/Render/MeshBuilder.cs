@@ -69,24 +69,27 @@ internal static class MeshBuilder
     /// </summary>
     public static MeshData Asteroid(int shape, int subdivisions)
     {
-        var mesh = Icosphere(subdivisions);
-        var positions = new Vector3[mesh.Vertices.Count];
+        var sphere = Spheres[subdivisions].Value;
+        var positions = new Vector3[sphere.Points.Length];
         for (var i = 0; i < positions.Length; i++)
-            positions[i] = AsteroidShape.Point(shape, ToVector(mesh.Vertices[i].Position));
+            positions[i] = AsteroidShape.Point(shape, sphere.Points[i]);
 
         var normals = new Vector3[positions.Length];
-        for (var i = 0; i < mesh.Indices.Count; i += 3)
+        var indices = sphere.Indices;
+        for (var i = 0; i < indices.Length; i += 3)
         {
-            var (a, b, c) = ((int)mesh.Indices[i], (int)mesh.Indices[i + 1], (int)mesh.Indices[i + 2]);
+            var (a, b, c) = ((int)indices[i], (int)indices[i + 1], (int)indices[i + 2]);
             var face = Vector3.Cross(positions[b] - positions[a], positions[c] - positions[a]);
             normals[a] += face;
             normals[b] += face;
             normals[c] += face;
         }
 
+        var mesh = new MeshData { BoundingRadius = 1f };
+        mesh.Vertices.Capacity = positions.Length;
         for (var i = 0; i < positions.Length; i++)
-            mesh.Vertices[i] = new MeshVertex { Position = ToFloat3(positions[i]), Normal = ToFloat3(Vector3.Normalize(normals[i])) };
-        mesh.BoundingRadius = 1f;
+            mesh.Vertices.Add(new MeshVertex { Position = ToFloat3(positions[i]), Normal = ToFloat3(Vector3.Normalize(normals[i])) });
+        mesh.Indices.AddRange(indices);
         return mesh;
     }
 
@@ -111,7 +114,28 @@ internal static class MeshBuilder
         return mesh;
     }
 
-    private static MeshData Icosphere(int subdivisions)
+    /// <summary>The most an asteroid mesh is subdivided.</summary>
+    private const int MaxSubdivisions = 6;
+
+    /// <summary>
+    /// The unit sphere at each level of subdivision. Every asteroid shape of a level is the same sphere pushed in
+    /// and out, so the sphere is built once and shared by the jobs that mesh the shapes.
+    /// </summary>
+    private static readonly Lazy<(Vector3[] Points, uint[] Indices)>[] Spheres = CreateSpheres();
+
+    private static Lazy<(Vector3[] Points, uint[] Indices)>[] CreateSpheres()
+    {
+        var spheres = new Lazy<(Vector3[], uint[])>[MaxSubdivisions + 1];
+        for (var i = 0; i < spheres.Length; i++)
+        {
+            var subdivisions = i;
+            spheres[i] = new Lazy<(Vector3[], uint[])>(() => Icosphere(subdivisions), LazyThreadSafetyMode.ExecutionAndPublication);
+        }
+
+        return spheres;
+    }
+
+    private static (Vector3[] Points, uint[] Indices) Icosphere(int subdivisions)
     {
         var t = (1f + MathF.Sqrt(5f)) / 2f;
         var points = new List<Vector3>
@@ -156,11 +180,7 @@ internal static class MeshBuilder
             indices = next;
         }
 
-        var mesh = new MeshData();
-        foreach (var point in points)
-            AddVertex(mesh, point, point);
-        mesh.Indices.AddRange(indices);
-        return mesh;
+        return ([.. points], [.. indices]);
     }
 
     private static void AddVertex(MeshData mesh, Vector3 position, Vector3 normal)
@@ -170,6 +190,4 @@ internal static class MeshBuilder
     }
 
     private static float3 ToFloat3(Vector3 v) => new(v.X, v.Y, v.Z);
-
-    private static Vector3 ToVector(float3 v) => new(v.X, v.Y, v.Z);
 }

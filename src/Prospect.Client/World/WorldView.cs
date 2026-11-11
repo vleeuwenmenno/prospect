@@ -51,6 +51,21 @@ internal sealed class WorldView
     private const float DustCell = 360f;
     private const float Exposure = 1.0f;
 
+    /// <summary>An asteroid smaller than this on screen, in pixels of radius, is not drawn and cannot be picked.</summary>
+    private const float RockMinPixels = 0.6f;
+
+    // Which asteroid mesh to draw. By size on screen: the everyday mesh above RockNormalPixels of radius, a coarse
+    // one below it and a speck below RockSpeckPixels. The two finest are for large asteroids seen from close by,
+    // where the everyday mesh's facets would be tens of metres across and a ship would visibly touch down beside
+    // the surface it collides with: an asteroid of at least the given radius switches to them once it stands
+    // that tall in the view (1 is filling it).
+    private const float RockNormalPixels = 90f;
+    private const float RockSpeckPixels = 8f;
+    private const float RockCloseRadius = 250f;
+    private const float RockCloseNearness = 0.25f;
+    private const float RockFineRadius = 1000f;
+    private const float RockFineNearness = 0.35f;
+
     // Where a rift's or wormhole's opening sits, in hull radii: how far ahead of the nose it opens while the drive
     // works, how far beyond an arriving hull it closes, and its radius when fully open. The lens bends the view out
     // to LensReach opening radii, and the mark that allows it must cover that much, or the bending would stop at a
@@ -79,6 +94,8 @@ internal sealed class WorldView
         public void Run()
         {
             Galaxy!.Generate(Coord, Content);
+            if (Offsets.Length < Content.AsteroidCount)
+                Offsets = new Vector3[Content.Asteroids.Length];
             State = Ready;
         }
     }
@@ -96,7 +113,6 @@ internal sealed class WorldView
     private readonly SceneRenderer _scene;
     private readonly HullDesign[] _designs;
     private readonly int _asteroidMeshBase;
-    private readonly int _asteroidLodMeshBase;
     private readonly int _meshCount;
     private readonly int _cubeMesh;
     private readonly SectorSlot[] _slots = new SectorSlot[SlotCount];
@@ -163,8 +179,7 @@ internal sealed class WorldView
         _jobs = jobs;
         _scene = scene;
         _designs = designs;
-        _asteroidMeshBase = AsteroidMesh(designs.Length, 0, false);
-        _asteroidLodMeshBase = AsteroidMesh(designs.Length, 0, true);
+        _asteroidMeshBase = AsteroidMesh(designs.Length, 0, 0);
         _meshCount = MeshCount(designs.Length);
         _cubeMesh = CubeMesh(designs.Length);
         _meshCounts = new int[_meshCount];
@@ -174,13 +189,25 @@ internal sealed class WorldView
             _slots[i] = new SectorSlot();
     }
 
-    /// <summary>Meshes are numbered: one per hull design, then the asteroid shapes, then their coarse versions.</summary>
-    public static int MeshCount(int designs) => designs + Galaxy.AsteroidShapes * 2 + 1;
+    /// <summary>
+    /// How finely each level of asteroid detail is meshed, finest first, in icosphere subdivisions: 81,920
+    /// triangles for a giant seen from its surface down to 80 for a speck.
+    /// </summary>
+    public static ReadOnlySpan<int> AsteroidDetail => [6, 5, 4, 2, 1];
+
+    private const int DetailFine = 0;
+    private const int DetailClose = 1;
+    private const int DetailNormal = 2;
+    private const int DetailCoarse = 3;
+    private const int DetailSpeck = 4;
+
+    /// <summary>Meshes are numbered: one per hull design, then the asteroid shapes at each level of detail, then the block.</summary>
+    public static int MeshCount(int designs) => designs + Galaxy.AsteroidShapes * AsteroidDetail.Length + 1;
 
     /// <summary>The single-block mesh, used to draw hulls that have lost blocks.</summary>
-    public static int CubeMesh(int designs) => designs + Galaxy.AsteroidShapes * 2;
+    public static int CubeMesh(int designs) => designs + Galaxy.AsteroidShapes * AsteroidDetail.Length;
 
-    public static int AsteroidMesh(int designs, int shape, bool coarse) => designs + (coarse ? Galaxy.AsteroidShapes : 0) + shape;
+    public static int AsteroidMesh(int designs, int shape, int detail) => designs + detail * Galaxy.AsteroidShapes + shape;
 
     public ViewMode Mode { get; private set; }
 
@@ -418,30 +445,19 @@ internal sealed class WorldView
             }
         }
 
-        // Rocks in the sectors around the camera.
+        // Rocks in the sectors around the camera: the camera's own sector first, so that if the instance buffer
+        // ever fills it is the far rocks that go missing.
+        var cameraSector = galaxy.SectorOf(camera);
         foreach (var slot in _slots)
         {
-            if (slot.State != SectorSlot.Ready || !ReferenceEquals(slot.Galaxy, galaxy))
-                continue;
+            if (slot.State == SectorSlot.Ready && ReferenceEquals(slot.Galaxy, galaxy) && slot.Coord == cameraSector)
+                AddRocks(slot, galaxy, camera, aspect, ref candidateCount);
+        }
 
-            var center = galaxy.CenterOf(slot.Coord).RelativeTo(camera);
-            var content = slot.Content;
-            for (var i = 0; i < content.AsteroidCount && candidateCount < _candidates.Length; i++)
-            {
-                ref var rock = ref content.Asteroids[i];
-                var position = center + rock.LocalPosition + (slot.Displaced ? slot.Offsets[i] : Vector3.Zero);
-                if (!Visible(position, rock.Radius, aspect, out var pixels) || pixels < 0.6f)
-                    continue;
-
-                // Full detail only where it can be seen; distant rocks use the coarse mesh.
-                var mesh = (pixels > 90f ? _asteroidMeshBase : _asteroidLodMeshBase) + rock.Shape;
-                // Bare rock is grey; ore shows through in its own colour, more strongly the richer the rock.
-                var shade = 0.2f + 0.05f * (rock.Shape % 4);
-                var tint = new Vector3(shade, shade * 0.95f, shade * 0.88f);
-                if (rock.Resource >= 0)
-                    tint = Vector3.Lerp(tint, galaxy.Resources[rock.Resource].Color * 0.55f, 0.25f + 0.5f * rock.Grade);
-                Add(ref candidateCount, mesh, position, rock.Rotation, rock.Radius, tint, 0f);
-            }
+        foreach (var slot in _slots)
+        {
+            if (slot.State == SectorSlot.Ready && ReferenceEquals(slot.Galaxy, galaxy) && slot.Coord != cameraSector)
+                AddRocks(slot, galaxy, camera, aspect, ref candidateCount);
         }
 
         // Group instances by mesh so each mesh is one draw call.
@@ -495,6 +511,141 @@ internal sealed class WorldView
     }
 
     public float ExposureValue => Exposure;
+
+    /// <summary>Adds one sector's visible asteroids to the frame's instances.</summary>
+    private void AddRocks(SectorSlot slot, Galaxy galaxy, Double3 camera, float aspect, ref int candidateCount)
+    {
+        var content = slot.Content;
+        if (content.AsteroidCount == 0 || !SectorInView(slot, camera, aspect, _viewport.Y, out var center, out var smallest))
+            return;
+
+        for (var i = 0; i < content.AsteroidCount && candidateCount < _candidates.Length; i++)
+        {
+            ref var rock = ref content.Asteroids[i];
+
+            // Largest first: once one is too small to see from here, so are all that follow.
+            if (rock.Radius < smallest)
+                break;
+            var position = center + rock.LocalPosition + (slot.Displaced ? slot.Offsets[i] : Vector3.Zero);
+            if (!Visible(position, rock.Radius, aspect, out var pixels) || pixels < RockMinPixels)
+                continue;
+
+            // How much of the view the asteroid takes up, from 0 to 1 at its surface.
+            var nearness = pixels * _tanHalfFov * 2f / _viewport.Y;
+            var detail =
+                rock.Radius >= RockFineRadius && nearness > RockFineNearness ? DetailFine
+                : rock.Radius >= RockCloseRadius && nearness > RockCloseNearness ? DetailClose
+                : pixels > RockNormalPixels ? DetailNormal
+                : pixels > RockSpeckPixels ? DetailCoarse
+                : DetailSpeck;
+
+            // Bare rock is grey; ore shows through in its own colour, more strongly the richer the rock.
+            var shade = 0.2f + 0.05f * (rock.Shape % 4);
+            var tint = new Vector3(shade, shade * 0.95f, shade * 0.88f);
+            if (rock.Resource >= 0)
+                tint = Vector3.Lerp(tint, galaxy.Resources[rock.Resource].Color * 0.55f, 0.25f + 0.5f * rock.Grade);
+            Add(ref candidateCount, _asteroidMeshBase + detail * Galaxy.AsteroidShapes + rock.Shape, position, rock.Rotation, rock.Radius, tint, 0f);
+        }
+    }
+
+    /// <summary>
+    /// Whether any of a sector's asteroids can be in view, where the sector's centre is relative to the camera,
+    /// and the radius below which its asteroids are under <see cref="RockMinPixels"/> on a view
+    /// <paramref name="height"/> pixels tall. A sector's asteroids are sorted largest first, so a loop over them
+    /// can stop at the first one smaller than that: a distant field costs its few large rocks, not its thousands.
+    /// </summary>
+    private bool SectorInView(SectorSlot slot, Double3 camera, float aspect, float height, out Vector3 center, out float smallest)
+    {
+        center = _galaxy!.CenterOf(slot.Coord).RelativeTo(camera);
+        smallest = 0f;
+
+        // An asteroid that has been pushed may have left the sphere its sector was generated in.
+        if (slot.Displaced)
+            return true;
+
+        var bounds = center + slot.Content.BoundsCenter;
+        if (!Visible(bounds, slot.Content.BoundsRadius, aspect, out _))
+            return false;
+        var nearest = Math.Max(0f, bounds.Length() - slot.Content.BoundsRadius);
+        smallest = RockMinPixels * nearest * _tanHalfFov / (height * 0.5f);
+        return true;
+    }
+
+    /// <summary>
+    /// Finds the nearest asteroid whose disc covers a window position, taking a disc smaller than
+    /// <paramref name="minReach"/> pixels for that size so that small rocks can still be hit.
+    /// </summary>
+    private bool PickRock(float2 pointer, float minReach, out RockRef picked)
+    {
+        picked = default;
+        var found = false;
+        var nearest = float.MaxValue;
+        var aspect = _screen.X / _screen.Y;
+
+        // The view line through the pointer. A sector whose asteroids all lie well off that line is skipped whole.
+        var nx = pointer.X / _screen.X * 2f - 1f;
+        var ny = pointer.Y / _screen.Y * 2f - 1f;
+        var line = Vector3.Normalize(_forward + _right * (nx * _tanHalfFov * aspect) - _up * (ny * _tanHalfFov));
+        var slack = minReach * _tanHalfFov / (_screen.Y * 0.5f);
+
+        foreach (var slot in _slots)
+        {
+            var content = slot.Content;
+            if (slot.State != SectorSlot.Ready || !ReferenceEquals(slot.Galaxy, _galaxy) || content.AsteroidCount == 0)
+                continue;
+            if (!SectorInView(slot, CameraPosition, aspect, _screen.Y, out var center, out var smallest))
+                continue;
+
+            if (!slot.Displaced)
+            {
+                var bounds = center + content.BoundsCenter;
+                var along = Vector3.Dot(bounds, line);
+                var off = MathF.Sqrt(Math.Max(0f, bounds.LengthSquared() - along * along));
+                if (off > content.BoundsRadius + (Math.Max(along, 0f) + content.BoundsRadius) * slack * 1.5f)
+                    continue;
+            }
+
+            for (var i = 0; i < content.AsteroidCount; i++)
+            {
+                ref var rock = ref content.Asteroids[i];
+                if (rock.Radius < smallest)
+                    break;
+                if (!RockOnScreen(slot, center, i, out var screen, out var pixels, out var depth) || pixels < RockMinPixels)
+                    continue;
+                var offset = screen - pointer;
+                var reach = Math.Max(pixels, minReach);
+                if (offset.X * offset.X + offset.Y * offset.Y > reach * reach || depth >= nearest)
+                    continue;
+                found = true;
+                picked = new RockRef(slot.Coord, i);
+                nearest = depth;
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// Projects one asteroid of a loaded sector: its centre in window coordinates, its radius there and its
+    /// distance along the view. <paramref name="center"/> is the sector's centre relative to the camera.
+    /// </summary>
+    private bool RockOnScreen(SectorSlot slot, Vector3 center, int index, out float2 screen, out float pixels, out float depth)
+    {
+        ref var rock = ref slot.Content.Asteroids[index];
+        var position = center + rock.LocalPosition + (slot.Displaced ? slot.Offsets[index] : Vector3.Zero);
+        depth = Vector3.Dot(position, _forward);
+        if (depth < NearPlane)
+        {
+            screen = default;
+            pixels = 0;
+            return false;
+        }
+
+        var scale = _screen.Y * 0.5f / (depth * _tanHalfFov);
+        screen = new float2(_screen.X * 0.5f + Vector3.Dot(position, _right) * scale, _screen.Y * 0.5f - Vector3.Dot(position, _up) * scale);
+        pixels = rock.Radius * scale;
+        return true;
+    }
 
     /// <summary>Projects a world position to window coordinates. Returns false when it is behind the camera.</summary>
     public bool Project(Double3 world, out float2 screen)
@@ -570,28 +721,7 @@ internal sealed class WorldView
             TargetHull = 0;
 
         // With no ship under the reticle, the nearest asteroid on the view line can be targeted instead.
-        HoveredRock = null;
-        if (best == 0)
-        {
-            var nearest = float.MaxValue;
-            foreach (var slot in _slots)
-            {
-                if (slot.State != SectorSlot.Ready || !ReferenceEquals(slot.Galaxy, _galaxy))
-                    continue;
-                for (var i = 0; i < slot.Content.AsteroidCount; i++)
-                {
-                    var rock = new RockRef(slot.Coord, i);
-                    if (!TryGetRock(rock, out var position, out var rockRadius) || !ProjectDisc(position, rockRadius, out var screen, out var pixels, out var depth))
-                        continue;
-                    var offset = screen - center;
-                    var reach = Math.Max(pixels, 12f);
-                    if (offset.X * offset.X + offset.Y * offset.Y > reach * reach || depth >= nearest)
-                        continue;
-                    HoveredRock = rock;
-                    nearest = depth;
-                }
-            }
-        }
+        HoveredRock = best == 0 && PickRock(center, 12f, out var hovered) ? hovered : null;
 
         if (TargetRock is { } held && !TryGetRock(held, out _, out _))
             TargetRock = null;
@@ -931,27 +1061,7 @@ internal sealed class WorldView
         }
 
         // No hull under the pointer: pick the nearest asteroid whose disc the pointer is on.
-        var found = false;
-        var picked = default(RockRef);
-        var nearest = float.MaxValue;
-        foreach (var slot in _slots)
-        {
-            if (slot.State != SectorSlot.Ready || !ReferenceEquals(slot.Galaxy, _galaxy))
-                continue;
-            for (var i = 0; i < slot.Content.AsteroidCount; i++)
-            {
-                var rock = new RockRef(slot.Coord, i);
-                if (!TryGetRock(rock, out var position, out var radius) || !ProjectDisc(position, radius, out var screen, out var pixels, out var depth))
-                    continue;
-                var offset = screen - pointer;
-                var reach = Math.Max(pixels, 9f);
-                if (offset.X * offset.X + offset.Y * offset.Y > reach * reach || depth >= nearest)
-                    continue;
-                found = true;
-                picked = rock;
-                nearest = depth;
-            }
-        }
+        var found = PickRock(pointer, 9f, out var picked);
 
         if (!additive)
             _selectedRockCount = 0;
@@ -991,18 +1101,22 @@ internal sealed class WorldView
             return;
         }
 
+        // Largest first within each sector, and only those large enough to be drawn.
+        var aspect = _screen.X / _screen.Y;
         foreach (var slot in _slots)
         {
-            if (slot.State != SectorSlot.Ready || !ReferenceEquals(slot.Galaxy, _galaxy))
+            if (slot.State != SectorSlot.Ready || !ReferenceEquals(slot.Galaxy, _galaxy) || slot.Content.AsteroidCount == 0)
+                continue;
+            if (!SectorInView(slot, CameraPosition, aspect, _screen.Y, out var center, out var smallest))
                 continue;
             for (var i = 0; i < slot.Content.AsteroidCount && _selectedRockCount < MaxSelection; i++)
             {
+                if (slot.Content.Asteroids[i].Radius < smallest)
+                    break;
+                if (!RockOnScreen(slot, center, i, out var screen, out var pixels, out _) || pixels < RockMinPixels)
+                    continue;
                 var rock = new RockRef(slot.Coord, i);
-                if (_selectedRocks.AsSpan(0, _selectedRockCount).Contains(rock))
-                    continue;
-                if (!TryGetRock(rock, out var position, out var radius) || !ProjectDisc(position, radius, out var screen, out _, out _))
-                    continue;
-                if (screen.X >= min.X && screen.X <= max.X && screen.Y >= min.Y && screen.Y <= max.Y)
+                if (screen.X >= min.X && screen.X <= max.X && screen.Y >= min.Y && screen.Y <= max.Y && !_selectedRocks.AsSpan(0, _selectedRockCount).Contains(rock))
                     _selectedRocks[_selectedRockCount++] = rock;
             }
         }
@@ -1360,6 +1474,13 @@ internal sealed class WorldView
                         // Every spare slot is still generating; try again next frame.
                         _streamDirty = true;
                         continue;
+                    }
+
+                    // The slot's push offsets belong to the sector it held; the next one starts with none.
+                    if (free.Displaced)
+                    {
+                        Array.Clear(free.Offsets);
+                        free.Displaced = false;
                     }
 
                     free.Galaxy = galaxy;

@@ -11,5 +11,6 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="../../content/**/*" LinkBase="content" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="fixtures/**/*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

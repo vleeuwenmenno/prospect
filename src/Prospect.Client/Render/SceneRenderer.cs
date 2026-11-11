@@ -116,7 +116,11 @@ internal struct DrawBatch
 /// </summary>
 internal sealed unsafe class SceneRenderer : IDisposable
 {
-    public const int MaxInstances = 16384;
+    /// <summary>
+    /// The most hulls, blocks and asteroids drawn in one frame. A sector can hold thousands of asteroids, but most
+    /// of those in view are too far to draw, so this is several dense sectors on screen at once.
+    /// </summary>
+    public const int MaxInstances = 32768;
     private const int StarCount = 7000;
     private const int DustCount = 1400;
     public const int MaxFtlMarks = 64;

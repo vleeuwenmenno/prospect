@@ -11,6 +11,9 @@ public sealed class ServerConfig
     public string Name { get; init; } = "PROSPECT server";
     public int MaxPlayers { get; init; } = 16;
     public ulong GalaxySeed { get; init; } = 0x50524F5350454354;
+
+    /// <summary>The sector new players arrive in the middle of. The home sector unless a server is set up otherwise.</summary>
+    public SectorCoord SpawnSector { get; init; }
 }
 
 /// <summary>A point-in-time view of the server, readable from any thread.</summary>
@@ -121,6 +124,9 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
     }
 
     public Galaxy Galaxy { get; }
+
+    /// <summary>Where new players appear: the middle of the spawn sector, which every sector's asteroids keep clear.</summary>
+    private Double3 SpawnPoint => Galaxy.CenterOf(_config.SpawnSector);
 
     public ServerStatus Status => new(Volatile.Read(ref _tick), Volatile.Read(ref _playerCount), _loop.Stats);
 
@@ -495,7 +501,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         _hulls.Destroy(lost);
 
         var drone = (byte)_content.DroneDesign;
-        connection.Hull = _hulls.Create(connection.PlayerId, drone, _content.Designs[drone], wasDrone ? Galaxy.SpawnPoint : state.Position);
+        connection.Hull = _hulls.Create(connection.PlayerId, drone, _content.Designs[drone], wasDrone ? SpawnPoint : state.Position);
         ref var info = ref _hulls.Info(connection.Hull.Index);
         info.Piloted = true;
         info.OrderId = connection.OrderId;
@@ -592,7 +598,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         // Each player's group arrives in its own lane beside the spawn point, the pod in front and the rest of
         // the starting fleet fanned out behind it, so nothing starts inside anything else.
         var lane = (int)(connection.PlayerId - 1);
-        var origin = Galaxy.SpawnPoint + new Double3((lane + 1) / 2 * 160.0 * (lane % 2 == 0 ? 1 : -1), 0, 0);
+        var origin = SpawnPoint + new Double3((lane + 1) / 2 * 160.0 * (lane % 2 == 0 ? 1 : -1), 0, 0);
         var pod = (byte)_content.PodDesign;
         connection.Hull = _hulls.Create(connection.PlayerId, pod, _content.Designs[pod], origin);
         _hulls.Info(connection.Hull.Index).Piloted = true;

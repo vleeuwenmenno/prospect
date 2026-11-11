@@ -27,7 +27,7 @@ Use the Makefile, not raw `dotnet` commands.
 | Command | Use |
 | --- | --- |
 | `make setup` | First run on a machine: system packages for the OS (Vulkan; MoltenVK on macOS), the .NET SDK into `~/.dotnet`, restore. `make doctor` checks the toolchain and GPU. |
-| `make check` | Formatting, warnings-as-errors build and all tests. Must pass before work is called done. Takes about a minute. |
+| `make check` | Formatting, warnings-as-errors build and all tests. Must pass before work is called done. Takes about two minutes. |
 | `make bench` | Release benchmark. Fails under 144 fps or on any managed allocation in the frame loop. Run it after touching anything that executes every frame or every tick. |
 | `make run ARGS="..."` | The client. `make server` is the dedicated server. |
 | `make fmt` | Format. `make check` only verifies. |
@@ -63,6 +63,14 @@ Always wrap long test runs in `timeout`; a session test that waits on the simula
   field.
 - **A new per-tick system:** add a unit test in `tests/Prospect.Tests/WorldTests.cs` and, if it crosses the
   network, a session test that runs a real server and client.
+- **A new sector module** (stations, gas fields): derive from `SectorModule` in `Prospect.Game/World`, name its
+  type in `SectorModule.Read`, and list it under `sectorModules` in `content/galaxy/galaxy.json` with its own
+  `id`. Draw only from `Stream(sector, purpose)`. Give `SectorSummary` and `SectorContent` the fields it fills.
+- **World generation:** it must come out the same to the last bit on every machine. Plain arithmetic in a fixed
+  order and `DetMath`; no `MathF.Exp`, `Pow`, `Sin` or `Vector3.Length` where a discrete choice hangs on the
+  result. If what a seed generates changes, bump `ProtocolInfo.Version` and record the new hash in
+  `GalaxyTests.GenerationMatchesTheRecordedGalaxyOnEveryMachine`. Retuning `galaxy.json` needs neither: that test
+  runs on a frozen copy in `tests/Prospect.Tests/fixtures`.
 - **A new hull design:** add it to `content/ships/fleet.json`. Stats are derived from blocks; do not add stat
   fields to the design file.
 - **README:** keep the Status and Controls sections true. Say what is not there.
@@ -74,8 +82,11 @@ The client opens a real window on the developer's desktop, and they are usually 
 - Only launch it with `--capture <file.png>` or `--bench <seconds>`. Both mute every input device, so the window
   cannot grab the pointer or react to their typing. Never start it any other way from an agent session.
 - `make run ARGS="--start local --open <view> --capture /path/shot.png --capture-after 2.5"` saves a screenshot
-  and exits. Views: `command`, `map`, `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`. Screens without a
-  session: `--start menu|join|settings|credits`.
+  and exits. Views: `command`, `map`, `map-hover` (the map with the pointer on your own sector), `galaxy`,
+  `info`, `jump`, `jump-wormhole`, `jump-rift`. Screens without a session: `--start menu|join|settings|credits`.
+- `--sector x,y,z` starts the local game in that sector instead of the home sector; it works with `--capture`
+  and `--bench`. With the default seed: `-40,0,-29` is the densest sector near home (3,663 asteroids), `8,0,-8`
+  is very rich with five resources, `6,0,-26` has an asteroid 2.3 km across 2.2 km from the arrival point.
 - The window size is whatever the tiling compositor gives it; check with `magick identify` before cropping.
 - Debug builds run with validation layers when `.tools/` exists. Any validation message is a bug.
 - What cannot be checked this way and needs the developer: how flight feels, mouse and keyboard interaction,
@@ -102,6 +113,12 @@ The client opens a real window on the developer's desktop, and they are usually 
 - Asteroids do not collide with each other.
 - Hull against hull contact tests every hull against every other each tick, bounding spheres first. It needs a
   spatial index before there are thousands of hulls.
+- A sector holds at most 4,096 asteroids (`maxPerSector`; the wire format allows 65,535). An asteroid is named by
+  its index in its sector's generated list, so that list can never change for a given seed and build.
+- The client draws at most 32,768 instances a frame and shows at most 512 pushed asteroids out of place.
+- A pushed asteroid still belongs to the sector it was generated in. One that drifts across the sector's edge is
+  not hit by a hull that is wholly in the next sector.
+- A hull touching an asteroid tests every block against the surface, about 1 microsecond per block per tick.
 - The client predicts contact only with hulls near its own, and flies only its own fleet's hulls forward exactly;
   another player's hull is assumed to keep its velocity until the next snapshot.
 - The client replays one step of the fleet per input. When the server simulates several of a player's inputs in
