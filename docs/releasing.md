@@ -11,7 +11,10 @@ Pushing a git tag builds container images and publishes them. The tag name picks
 | `vX.Y.Z` | both |
 
 - `X.Y.Z` is three numbers. A suffix is allowed: `v1.2.3-rc.1`. Any other tag name fails the workflow.
-- A suffix marks a pre-release: it gets its version tag but never moves `latest`.
+- Stable `1.2.3` publishes image tags `1`, `1.2`, `1.2.3` and `latest`.
+- A suffix marks a pre-release: `1.2.3-rc.1` publishes its exact version and `latest-unstable`, leaving stable tags unchanged.
+- Stable releases leave `latest-unstable` unchanged. Aliases move only for the images selected by the git tag.
+- During alpha testing, use `latest-unstable` or a pinned pre-release; `latest` is created by the first stable release.
 
 ```sh
 git tag server-v0.1.0 && git push origin server-v0.1.0   # game server only
@@ -32,7 +35,7 @@ File: `.github/workflows/release.yml`.
 
 ## Where the images end up
 
-GitHub Container Registry, under the repository owner (lower-case). Each is tagged `X.Y.Z` and `latest`.
+GitHub Container Registry, under the repository owner (lower-case), with the version and aliases described above.
 
 | Image | Platforms |
 | --- | --- |

@@ -42,7 +42,7 @@ jobs:
             list-) matrix="[$listing]" ;;
             *) matrix="[$server,$listing]" ;;
           esac
-          # A pre-release such as 1.2.3-rc.1 never moves the latest tag.
+          # Pre-releases update latest-unstable, leaving stable aliases untouched.
           if [[ "$version" == *-* ]]; then latest=false; else latest=true; fi
           {
             echo "matrix={\"include\":$matrix}"
@@ -94,8 +94,11 @@ jobs:
           images: ghcr.io/${{ steps.owner.outputs.owner }}/${{ matrix.image }}
           flavor: latest=false
           tags: |
-            type=raw,value=${{ needs.plan.outputs.version }}
+            type=raw,value=${{ needs.plan.outputs.version }},priority=1000
+            type=semver,pattern={{major}},value=${{ needs.plan.outputs.version }},enable=${{ needs.plan.outputs.latest }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.plan.outputs.version }},enable=${{ needs.plan.outputs.latest }}
             type=raw,value=latest,enable=${{ needs.plan.outputs.latest }}
+            type=raw,value=latest-unstable,enable=${{ needs.plan.outputs.latest == 'false' }}
           labels: |
             org.opencontainers.image.version=${{ needs.plan.outputs.version }}
             org.opencontainers.image.revision=${{ github.sha }}
