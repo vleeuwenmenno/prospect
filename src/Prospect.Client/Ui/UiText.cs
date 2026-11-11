@@ -35,6 +35,14 @@ internal ref struct UiText
         _used += Encoding.UTF8.GetBytes(value, Arena.AsSpan(_used));
     }
 
+    /// <summary>Appends UTF-16 text, such as a name held inline in a snapshot, as UTF-8.</summary>
+    public readonly void AppendFormatted(ReadOnlySpan<char> utf16)
+    {
+        if (Encoding.UTF8.GetMaxByteCount(utf16.Length) > Arena.Length - _used)
+            return;
+        _used += Encoding.UTF8.GetBytes(utf16, Arena.AsSpan(_used));
+    }
+
     public readonly void AppendFormatted(ReadOnlySpan<byte> utf8)
     {
         if (utf8.Length > Arena.Length - _used)

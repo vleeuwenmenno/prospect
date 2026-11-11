@@ -11,9 +11,18 @@ or that local game opened to other players. There is one simulation and one code
 
 ## Status
 
-Chat, the player roster and parties work through the protocol, authoritative server, client snapshots and
-input bridge. The chat window, party list and invite menu are not there yet. Headless scripts exercise them.
-Names and identity last only for the session; there is no saving or faction system in this feature.
+Chat, the player roster and parties work end to end: the server decides, the client shows them.
+
+- **Players** (`Tab` or `P`): everyone on this server, with Invite, and a pending invitation with Accept and
+  Decline. **Social** (`O`): your party, with Remove for the leader and Leave Party.
+- **Chat** (`Enter`): everyone or party channel, the last 64 lines, typed lines checked before sending.
+- **Party list** at the top left: each other member's name, ship, shield, hull and sector. In a short window
+  or at a large interface scale it shrinks to one-line rows with a count of the rest. Recent chat lines show
+  at the bottom left for a few seconds while chat is closed.
+- **Quick buttons** at the top right open the three. Hold `Alt` to show the cursor and click them.
+
+Not there yet: friends, accounts, factions and alliances. Names and player ids last only for the session, and
+presence covers only the server you are on.
 
 Stage 1 of blocks at scale exists in tooling and tests: versioned boxes, content limits and size rules,
 solid-box evaluation and running sums, with seeded 4,096-block and 150,000-block fixtures.
@@ -120,8 +129,16 @@ are refused by the live loader until stage 2 adds storage, wire support, collisi
 
 `F1` opens searchable Controls from pilot, command or map view. Search current bindings by action, key,
 button or category. `F1`, `Esc` or Close returns to the previous view; the session keeps running.
-Hold either `Alt` to show the cursor. Mouse flight, targeting and command gestures are suppressed while held;
-keyboard flight still works. Every menu and data sheet keeps the cursor visible until closed.
+In space the cursor is hidden unless `Alt` is held or something is open.
+
+- **Pilot view:** the hidden cursor steers the view. Hold either `Alt` to show it: mouse flight and targeting
+  stop, keyboard flight still works, and the quick buttons can be clicked.
+- **Command view:** the hidden cursor does nothing; keys still pan, raise and lower the plane, focus, select
+  all, halt and take control. Hold either `Alt` to show it and use the mouse in the world: select, box-select,
+  order, rotate, pan and zoom. Letting go of `Alt` ends a drag.
+- **Menus, data sheet, map, Controls, Players, Social, Chat:** the cursor shows until they close, and the world
+  gets no mouse.
+
 Gameplay has no bottom-left keybind strip. Bindings come from `content/input/bindings.json`.
 
 Click again at the same place to step through overlapping targets, then wrap to the first.
@@ -143,6 +160,9 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Target the ship under the reticle, or the asteroid if there is no ship | Middle mouse button | |
 | Take control of the target, or leave in a drone | `T` | D-pad down |
 | Menu or back | `Esc` | `Start` |
+| Players on this server | `Tab` or `P` | |
+| Party (Social) | `O` | |
+| Chat: open, send, close | `Enter`; `Enter` sends, `Esc` closes | |
 
 On menu screens the arrow keys or the D-pad move between rows, left and right change the focused setting, and
 `Enter` or `A` selects. The mouse works too: click a row's arrows, or drag a slider. In the server browser, the
@@ -161,7 +181,7 @@ a ship again. In the command view `T` takes control of the first selected ship.
 
 In the pilot view, hold the right mouse button and turn the wheel to move the camera closer or further.
 
-Command view:
+Command view (mouse controls while `Alt` is held):
 
 | | |
 | --- | --- |
@@ -172,7 +192,7 @@ Command view:
 | Zoom | Mouse wheel |
 | Pan | `W` `A` `S` `D`, arrow keys, or middle-drag |
 | Lower / raise the plane | `Q` / `E`, or `Shift` + left-drag |
-| Focus the camera on the selection | `Space` or `F`; double-click a row in the fleet list |
+| Focus the camera on the selection | `Space` or `F`; with `Alt`, double-click a row in the fleet list |
 | Halt the selection | `H` or `Backspace` |
 
 Galaxy map:
@@ -277,8 +297,9 @@ This path creates no window. Other hosting and world options are not applied by 
 
 - `--player <name>` chooses the script's callsign (default Prospector).
 - `--say <text>` sends one everyone-chat line after joining.
-- `--invite <name>` invites the first connected matching name other than yourself.
+- `--invite <name>` invites the first connected matching name other than yourself. Repeat it for more names; they go out one a second, in order.
 - `--accept-invites` accepts incoming invitations; `--party-say <text>` sends one line after a party forms.
+  With `--capture` instead of `--social-run`, the capturing client accepts too.
 - Script exit prints roster, chat and party counts plus the last refusal. `--verbose` enables chat metadata logs.
   Routine `make run` output hides arguments containing `--say`, `--party-say` or `--password`, even with `V=1`;
   `make -n`, `make --trace` and process listings can still expose them.

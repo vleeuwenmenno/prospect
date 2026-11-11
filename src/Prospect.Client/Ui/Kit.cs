@@ -558,6 +558,23 @@ internal static class Kit
         draw.PathStroke(Color(Theme.Accent), ImDrawFlags.None, Px(2));
     }
 
+    /// <summary>
+    /// Scopes the widget ids that follow to a full 64-bit identity, such as an invitation's, so a press that began
+    /// on one card cannot complete on a replacement drawn in the same place. Pair with <see cref="PopId"/>.
+    /// </summary>
+    public static void PushId(ulong identity)
+    {
+        ImGui.PushID(unchecked((int)(identity >> 32)));
+        ImGui.PushID(unchecked((int)identity));
+    }
+
+    /// <summary>Ends a scope begun with <see cref="PushId"/>.</summary>
+    public static void PopId()
+    {
+        ImGui.PopID();
+        ImGui.PopID();
+    }
+
     /// <summary>True when the last item is under the mouse or holds keyboard or gamepad focus.</summary>
     public static bool IsHot() => ImGui.IsItemHovered() || (ImGui.IsItemFocused() && ImGui.GetIO().NavVisible);
 

@@ -13,7 +13,10 @@
     "Halt": ["Key:H", "Key:Backspace", "Pad:B"],
     "Follow": ["Key:Space", "Key:F", "Pad:RightThumb"],
     "ShipInfo": ["Key:I", "Pad:DpadUp"],
-    "SwitchHull": ["Key:T", "Pad:DpadDown"]
+    "SwitchHull": ["Key:T", "Pad:DpadDown"],
+    "TogglePlayers": ["Key:Tab", "Key:P"],
+    "ToggleSocial": ["Key:O"],
+    "ToggleChat": ["Key:Enter", "Key:KpEnter"]
   },
   "axes": {
     "Strafe": [{ "negative": "Key:A", "positive": "Key:D" }, { "axis": "Pad:LeftX" }],

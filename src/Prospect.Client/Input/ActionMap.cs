@@ -21,6 +21,9 @@ internal enum InputAction
     SwitchHull,
     ToggleControls,
     ReleasePointer,
+    TogglePlayers,
+    ToggleSocial,
+    ToggleChat,
     Count,
 }
 

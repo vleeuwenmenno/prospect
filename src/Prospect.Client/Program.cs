@@ -23,7 +23,8 @@ internal static class Program
                                   Arguments show in process lists; PROSPECT_PASSWORD in the environment works too
           --listing <url|off>     The listing server for public games and the server browser (default: content/net/listing.json)
           --set <id>=<value>      A world setting for local games started in this run; repeat for more (ids and ranges: content/rules/settings.json)
-          --open <view>           With --start local or --join: open the command view, the map or the ship data sheet (command, map, map-menu, map-hover, galaxy, info), start a jump (jump, jump-wormhole, jump-rift), or show Controls (controls), the in-game menu (menu) or the world settings in force (world-settings)
+          --open <view>           With --start local or --join: open the command view, the map or the ship data sheet (command, map, map-menu, map-hover, galaxy, info), start a jump (jump, jump-wormhole, jump-rift), or show Controls (controls), the in-game menu (menu), the world settings in force (world-settings), the player list (players), the party
+                                  panel (social), chat (chat) or the world with only the always-shown party and chat (hud)
           --browser-sample <s>    The server browser shows a fixed sample instead of asking the listing server, for captures:
                                   ready, loading, failed, empty, off, or password (the sample with the password prompt open)
           --sector <x>,<y>,<z>    With --start local or --bench: start in this sector instead of the home sector
@@ -43,8 +44,8 @@ internal static class Program
           --player <name>         Player name for the headless script
           --say <text>            Send one everyone-chat line after admission (with --social-run)
           --party-say <text>      Send one party-chat line after forming a party (with --social-run)
-          --invite <name>         Invite the first matching roster name once (with --social-run)
-          --accept-invites        Accept invitations automatically (with --social-run)
+          --invite <name>         Invite the first matching roster name once (with --social-run); repeat for more
+          --accept-invites        Accept invitations automatically (with --social-run, or with --capture)
           --verbose               Log debug messages
           --help                  Show this text
         """;
@@ -134,7 +135,7 @@ internal static class Program
                 case "--set" when hasValue:
                     options.WorldSettingArgs.Add(args[++i]);
                     break;
-                case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "map-hover" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "world-settings" or "menu" or "controls":
+                case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "map-hover" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "world-settings" or "menu" or "controls" or "players" or "social" or "chat" or "hud":
                     options.OpenView = args[++i];
                     break;
                 case "--browser-sample" when hasValue:
@@ -209,9 +210,9 @@ internal static class Program
                 case "--party-say" when hasValue:
                     socialScript.PartySay = args[++i]; break;
                 case "--invite" when hasValue:
-                    socialScript.Invite = args[++i]; break;
+                    socialScript.Invite.Add(args[++i]); break;
                 case "--accept-invites":
-                    socialScript.Accept = true; break;
+                    socialScript.Accept = true; options.AcceptInvites = true; break;
                 case "--target":
                     options.TargetNearest = true;
                     break;

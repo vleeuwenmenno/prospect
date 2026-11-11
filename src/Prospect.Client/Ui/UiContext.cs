@@ -12,7 +12,7 @@ using Prospect.Engine.IO;
 namespace Prospect.Client.Ui;
 
 /// <summary>Owns Dear ImGui: its context, the platform and Vulkan layers, the game's fonts and the base style.</summary>
-internal sealed class UiContext : IDisposable
+internal sealed class UiContext : IDisposable, IInterfacePointer
 {
     private readonly ImGuiContextPtr _context;
     private readonly UiPlatform _platform;

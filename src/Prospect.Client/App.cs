@@ -74,6 +74,9 @@ internal sealed class AppOptions
     /// <summary>Target the nearest other hull once in space; for captures of the target's markers.</summary>
     public bool TargetNearest { get; set; }
 
+    /// <summary>With <c>--capture</c>: accept party invitations as they arrive; for captures of the party interface.</summary>
+    public bool AcceptInvites { get; set; }
+
     /// <summary>The sector a local game starts in; for scripted screenshots and benchmarks of a particular sector.</summary>
     public SectorCoord SpawnSector { get; set; }
     public int2? WindowSize { get; set; }
@@ -135,7 +138,8 @@ internal sealed class App : IDisposable
     private bool _quit;
     private bool _vsync;
 
-    private bool _pointerCaptured;
+    private readonly PointerRouter _pointer;
+    private ulong _acceptedInvitation;
     private float _sinceSplash = -1f;
     private long _splashFinishedAt;
     private bool _captureRequested;
@@ -231,6 +235,7 @@ internal sealed class App : IDisposable
 
         Jobs.CompleteAll();
         Actions = bindingsJob.Result!;
+        _pointer = new PointerRouter(Devices, Actions, _ui);
         BrutalLogo = Texture2D.FromRgba(_gpu, logoJob.Width, logoJob.Height, logoJob.Pixels);
         BrutalLogoRef = _ui.Register(BrutalLogo);
         _galaxyImage = Texture2D.FromRgba(_gpu, GalaxyImage.Size, GalaxyImage.Size, galaxyJob.Pixels);
@@ -292,6 +297,9 @@ internal sealed class App : IDisposable
     public string GpuLabel { get; }
     public GameSession? Session { get; private set; }
     public bool ShowPerformance { get; private set; }
+
+    /// <summary>True while the pointer is hidden and steers the view; the interface then cannot be pointed at.</summary>
+    public bool PointerCaptured => _pointer.Captured;
 
     /// <summary>Process exit code: non-zero when a benchmark missed its targets.</summary>
     public int ExitCode { get; private set; }
@@ -555,20 +563,29 @@ internal sealed class App : IDisposable
             // The world is drawn whenever the session has put the player's hull in space.
             var snapshot = Session?.Client.AcquireSnapshot();
             var inSpace = snapshot is { State: SessionState.Active, OwnHull: >= 0, Galaxy: not null };
-            _screens.HandleControlsShortcut(inSpace && _window.IsFocused);
-            var worldInput = inSpace && _screens.WorldInputEnabled && _window.IsFocused && !_screens.ControlsHandled && !_ui.WantsKeyboardInput;
+            var focused = _window.IsFocused;
+
+            // Whether the pointer is shown depends on what is open, the release key and focus; a frame in which
+            // world input is merely blocked keeps it hidden. The router also starts the interface frame, so the
+            // shortcuts and world below use this frame's pointer ownership. See PointerRouter.
+            var pointerFrame = new PointerFrame
+            {
+                InSpace = inSpace,
+                Focused = focused,
+                SurfaceOpen = !_screens.WorldInputEnabled,
+                CommandView = World.Mode == ViewMode.Command,
+            };
+            _pointer.Update(pointerFrame);
+            _screens.HandleControlsShortcut(inSpace && focused);
+            _screens.HandleSocialShortcuts(inSpace && focused);
+            // A shortcut can open or close a surface after NewFrame; its cursor change belongs to this frame.
+            pointerFrame.SurfaceOpen = !_screens.WorldInputEnabled;
+            _pointer.RefreshCapture(pointerFrame);
+            var worldInput = inSpace && _screens.WorldInputEnabled && focused && !_screens.ControlsHandled && !_screens.SocialHandled && !_ui.WantsKeyboardInput;
             // Opening or closing an interface consumes its frame, including any simultaneous mouse click.
             worldInput &= !Actions.Pressed(Devices, InputAction.Pause, true)
                 && !Actions.Pressed(Devices, InputAction.ToggleMap, true)
                 && !Actions.Pressed(Devices, InputAction.ShipInfo, true);
-            var releasePointer = Actions.Held(Devices, InputAction.ReleasePointer, true);
-            var capture = worldInput && World.Mode == ViewMode.Pilot && !Devices.Muted && !releasePointer;
-            if (capture != _pointerCaptured)
-            {
-                _pointerCaptured = capture;
-                _ui.SetPointerCaptured(capture);
-                Devices.ResetPointer();
-            }
 
             if (inSpace)
             {
@@ -576,22 +593,15 @@ internal sealed class App : IDisposable
                 var viewport = new float2(_swapchain.Extent.Width, _swapchain.Extent.Height);
                 var windowSize = _window.Size;
                 var screen = windowSize.X > 0 && windowSize.Y > 0 ? new float2(windowSize.X, windowSize.Y) : viewport;
-                Devices.ReadingWorldMouse = true;
-                Devices.SuppressMouse = !worldInput || releasePointer || _ui.PointerOverInterface;
-                World.Update(snapshot!, Session!.Client.Input, dt, worldInput, viewport, screen, _ui.PointerOverInterface);
-                Devices.SuppressMouse = false;
-                Devices.ReadingWorldMouse = false;
+                _pointer.BeginWorldMouse(worldInput);
+                World.Update(snapshot!, Session!.Client.Input, dt, worldInput, viewport, screen, _pointer.PointerOverInterface);
+                _pointer.EndWorldMouse();
             }
 
-            _ui.NewFrame();
             _screens.Draw(snapshot);
             // A menu opened during drawing releases the pointer before this frame is presented.
-            if (_pointerCaptured && !_screens.WorldInputEnabled)
-            {
-                _pointerCaptured = false;
-                _ui.SetPointerCaptured(false);
-                Devices.ResetPointer();
-            }
+            if (!_screens.WorldInputEnabled)
+                _pointer.SurfaceOpened();
 
             if (_renderer.Begin(out var commands))
             {
@@ -612,7 +622,7 @@ internal sealed class App : IDisposable
                 StartScreenshotEncode(shot);
 
             Stats.EndFrame();
-            Automate(dt);
+            Automate(snapshot);
 
             if (!_vsync && Settings.FrameCap > 0 && _benchmark is null)
                 PreciseSleep.Until(frameStart + Stopwatch.Frequency / Settings.FrameCap);
@@ -688,7 +698,7 @@ internal sealed class App : IDisposable
     }
 
     /// <summary>Drives the scripted runs: a timed screenshot (<c>--capture</c>) and the benchmark (<c>--bench</c>).</summary>
-    private void Automate(float dt)
+    private void Automate(SessionSnapshot? snapshot)
     {
         if (_sinceSplash < 0)
             return;
@@ -711,6 +721,17 @@ internal sealed class App : IDisposable
                 _screens.RequestWorldSettings();
             else if (view == "menu")
                 _screens.OpenSessionMenu();
+            else if (view == "players")
+                _screens.OpenSocial(false);
+            else if (view == "social")
+                _screens.OpenSocial(true);
+            else if (view == "chat")
+                _screens.OpenChat();
+            else if (view == "hud")
+            {
+                // The world with only what is always shown: the party list, the passive chat lines and the
+                // quick buttons, here shown as they look while the pointer is out.
+            }
             else if (view == "galaxy")
                 _screens.OpenGalaxyOverview();
             else if (view == "map-menu")
@@ -745,13 +766,22 @@ internal sealed class App : IDisposable
         if (_options.TargetNearest && Session is not null && _sinceSplash > 0.6f && World.TargetHull == 0)
             World.TargetNearestHull();
 
+        // Scripted captures of the party interface answer an invitation the way a click on Accept does: with the
+        // identity of the invitation shown in this frame's snapshot.
+        if (_options.AcceptInvites && Session is not null && snapshot is { State: SessionState.Active } && snapshot.Social.Invitation.Player != 0
+            && snapshot.Social.Invitation.InvitationId != _acceptedInvitation)
+        {
+            _acceptedInvitation = snapshot.Social.Invitation.InvitationId;
+            Session.Client.Input.AcceptInvitation(_acceptedInvitation);
+        }
+
         if (_options.CapturePath is { } path)
         {
             var count = _options.CaptureCount;
             var due = _options.CaptureAfter + _capturesTaken * _options.CaptureEvery;
             if (_capturesTaken < count && _sinceSplash >= due && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
             {
-                ShowPerformance |= Session is not null && _options.OpenView != "controls";
+                ShowPerformance |= Session is not null && _options.OpenView is not ("controls" or "players" or "social" or "chat" or "hud");
                 var file = Path.GetFullPath(path);
                 if (count > 1)
                 {

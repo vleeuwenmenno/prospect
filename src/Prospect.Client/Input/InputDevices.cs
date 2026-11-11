@@ -34,17 +34,8 @@ internal sealed unsafe class InputDevices
     {
         window.OnKey += (_, key, _, action, _) => OnKey(key, action);
         window.OnMouseButton += (_, button, action, _) => OnMouseButton(button, action);
-        window.OnCursorPos += (_, position) =>
-        {
-            if (Muted)
-                return;
-            if (_hasCursor)
-                MouseDelta += new float2((float)(position.X - _lastCursor.X), (float)(position.Y - _lastCursor.Y));
-            _lastCursor = position;
-            _hasCursor = true;
-            MousePosition = new float2((float)position.X, (float)position.Y);
-        };
-        window.OnScroll += (_, offset) => Scroll += Muted ? 0f : (float)offset.Y;
+        window.OnCursorPos += (_, position) => OnCursorPos(position);
+        window.OnScroll += (_, offset) => OnScroll((float)offset.Y);
         window.OnFocus += (_, focus) =>
         {
             // Keys released while another window had focus never send a release; drop everything held.
@@ -75,10 +66,44 @@ internal sealed unsafe class InputDevices
             return;
         var down = action == GlfwButtonAction.Press;
         if (down && !_mouse[index])
+        {
+            // A new press starts unmasked; a mask belongs to one press and ends with it.
             _mousePressed[index] = true;
+            _mouseBlocked[index] = false;
+        }
+
         _mouse[index] = down;
         if (!down)
             _mouseBlocked[index] = false;
+    }
+
+    internal void OnCursorPos(double2 position)
+    {
+        if (Muted)
+            return;
+        if (_hasCursor)
+            MouseDelta += new float2((float)(position.X - _lastCursor.X), (float)(position.Y - _lastCursor.Y));
+        _lastCursor = position;
+        _hasCursor = true;
+        MousePosition = new float2((float)position.X, (float)position.Y);
+    }
+
+    internal void OnScroll(float offset) => Scroll += Muted ? 0f : offset;
+
+    /// <summary>
+    /// Takes this frame's mouse from the world when the pointer changes owner: every button that is down or went
+    /// down since the last poll stays masked for the world until it is released, and the wheel and motion of the
+    /// poll are dropped. Events in one poll arrive before the change is decided, so they cannot be given to the
+    /// right owner; dropping them is the one safe answer.
+    /// </summary>
+    public void QuarantineMouse()
+    {
+        for (var i = 0; i < MouseButtonCount; i++)
+            _mouseBlocked[i] |= _mouse[i] || _mousePressed[i];
+        // Interface shortcuts also read these edges, before the world's temporary mask is enabled.
+        Array.Clear(_mousePressed);
+        _scroll = 0;
+        ResetPointer();
     }
 
     /// <summary>
@@ -126,6 +151,19 @@ internal sealed unsafe class InputDevices
 
     /// <summary>A stick axis in -1..1 with the deadzone removed, or a trigger in 0..1.</summary>
     public float PadAxis(GlfwGamepadAxis axis) => _padAxes[(int)axis];
+
+    /// <summary>
+    /// Sets where the pointer is, without motion, when it is shown again: the platform may put it back where it
+    /// was before it was hidden without sending a motion event, and the world must not act on a stale position.
+    /// </summary>
+    public void PlacePointer(float2 position)
+    {
+        if (Muted)
+            return;
+        MousePosition = position;
+        _hasCursor = false;
+        _mouseDelta = default;
+    }
 
     /// <summary>
     /// Forgets the last pointer position, so the jump the pointer makes when it is captured or released does not

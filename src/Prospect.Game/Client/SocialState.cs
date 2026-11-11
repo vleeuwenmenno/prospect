@@ -26,6 +26,16 @@ public sealed class SocialState
     public SocialMessage Invitation;
     /// <summary>Most recent server refusal.</summary>
     public SocialRefusal LastRefusal;
+    /// <summary>
+    /// Refusals received this session, so an interface can tell a new refusal from the retained one, including
+    /// the same reason twice. Kept by the client; nothing on the wire.
+    /// </summary>
+    public int RefusalCount;
+    /// <summary>
+    /// Chat lines received this session, so an interface can tell how many old lines left the front of the
+    /// 64-line log. Kept by the client; nothing on the wire.
+    /// </summary>
+    public long ChatTotal;
 
     internal void Apply(in SocialMessage m)
     {
@@ -42,6 +52,7 @@ public sealed class SocialState
             case SocialKind.Line:
                 if (ChatCount == Chat.Length) { Array.Copy(Chat, 1, Chat, 0, Chat.Length - 1); ChatCount--; }
                 Chat[ChatCount++] = m;
+                ChatTotal++;
                 break;
             case SocialKind.PartyBegin:
                 _pendingLeader = m.Leader; _pendingCount = 0; _expectedCount = m.Value;
@@ -60,7 +71,7 @@ public sealed class SocialState
                 break;
             case SocialKind.Invitation: Invitation = m; break;
             case SocialKind.Refused:
-                if (m.Value <= (byte)SocialRefusal.StaleInvitation) LastRefusal = (SocialRefusal)m.Value;
+                if (m.Value <= (byte)SocialRefusal.StaleInvitation) { LastRefusal = (SocialRefusal)m.Value; RefusalCount++; }
                 break;
         }
     }
@@ -80,5 +91,6 @@ public sealed class SocialState
         destination.RosterCount = RosterCount; destination.ChatCount = ChatCount;
         destination.PartyCount = PartyCount; destination.Leader = Leader;
         destination.Invitation = Invitation; destination.LastRefusal = LastRefusal;
+        destination.RefusalCount = RefusalCount; destination.ChatTotal = ChatTotal;
     }
 }

@@ -79,6 +79,11 @@ Always wrap long test runs in `timeout`; a session test that waits on the simula
 - **Shaders:** files in `assets/shaders/` are compiled at startup. Check them first with
   `glslc -I assets/shaders assets/shaders/<file> -o /dev/null`. `frame.glsl` must match `FrameConstants` field for
   field.
+- **The pointer, the mouse or the order of a client frame:** `PointerRouter` decides capture, quarantines a
+  poll's mouse when the owner changes, then starts the interface frame and reads ownership, all before the world
+  reads input; `UiPointerInput` is what Dear ImGui is told. `FrameOrderTests` runs that frame headless: real
+  devices, router, `WorldView` and a Dear ImGui context, events fed as a poll delivers them. Dear ImGui has one
+  global context, so keep every test that uses it in that class.
 - **A new per-tick system:** add a unit test in `tests/Prospect.Tests/WorldTests.cs` and, if it crosses the
   network, a session test that runs a real server and client.
 - **A new sector module** (stations, gas fields): derive from `SectorModule` in `Prospect.Game/World`, name its
@@ -102,7 +107,9 @@ The client opens a real window on the developer's desktop, and they are usually 
 - Only launch it with `--capture <file.png>` or `--bench <seconds>`. Both mute every input device, so the window
   cannot grab the pointer or react to their typing. Never start it any other way from an agent session.
 - `make run ARGS="--start local --open <view> --capture /path/shot.png --capture-after 2.5"` saves a screenshot
-  and exits. Views: `command`, `map`, `map-hover` (the map with the pointer on your own sector), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`. Screens
+  and exits. Views: `command`, `map`, `map-hover` (the map with the pointer on your own sector), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,
+  `players`, `social`, `chat`, `hud` (the world with the party list and recent chat only). The social views and
+  `hud` leave the performance overlay off. Screens
   without a session: `--start menu|join|settings|newgame|credits`; `--set id=value` shows on `newgame`, and so
   does `--host public --host-name ... --password ...` (with `--start newgame` it fills the hosting section
   instead of starting a game; the password shows masked). `--open menu` opens the in-game menu, which says
@@ -121,6 +128,11 @@ The client opens a real window on the developer's desktop, and they are usually 
   prints the own hull's jump stage and progress. The pod charges for about 7.5 s after a jump order, then 3 s of
   tunnel and 1.5 s of arrival, so `--open jump --capture-after 6 --capture-count 28 --capture-every 0.3` covers
   a whole jump.
+- Social data for a capture: run a dedicated server with `--listing off`, join it with the capturing client,
+  and run headless clients against it (`--social-run 40 --join ... --player <name>` with `--invite <name>`
+  (repeatable), `--accept-invites`, `--say`, `--party-say`). `--accept-invites` on the capturing client makes it
+  accept, so the party list fills. Point `XDG_CONFIG_HOME` at a scratch copy of the settings: a capture saves
+  them on exit.
 - `--look <degrees>` holds the pilot camera that far to the right of the hull's nose, as free look would (`0`
   looks along the nose, `150` nearly back). Use it to check that an effect follows the hull, not the view.
 - `--target` targets the nearest other hull once in space (in a local game the Prospector, about 120 degrees to

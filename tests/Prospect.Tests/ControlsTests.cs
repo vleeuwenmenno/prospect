@@ -87,8 +87,53 @@ public sealed class ControlsTests
             Assert.Contains(help.Rows, r => r.Matches("RightY") && r.Binding.Contains("inverted"));
             Assert.Contains(help.Rows, r => r.Action == "Boost" && r.Binding == "Pad A (Cross)");
             Assert.Equal(2, map.Bindings(InputAction.ReleasePointer).Length);
+            Assert.Contains(help.Rows, r => r.Category == "Command" && r.Action == "Select / box select" && r.Binding.StartsWith("Hold LeftAlt or RightAlt:"));
             Assert.Contains(help.Rows, r => r.Matches("mouse") && r.Matches("pilot"));
             Assert.DoesNotContain(help.Rows, r => r.Matches("no-such-control"));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("TogglePlayers", GlfwKey.Tab)]
+    [InlineData("TogglePlayers", GlfwKey.P)]
+    [InlineData("ToggleSocial", GlfwKey.O)]
+    [InlineData("ToggleChat", GlfwKey.Enter)]
+    public void SocialShortcutsAreBoundButLeaveKeysToAChatLineBeingTyped(string name, GlfwKey key)
+    {
+        var action = Enum.Parse<InputAction>(name);
+        var map = ActionMap.Load(Path.Combine(AppContext.BaseDirectory, "content", "input", "bindings.json"));
+        var devices = new InputDevices();
+        devices.OnKey(key, GlfwKeyAction.Press);
+        Assert.True(map.InterfaceShortcutPressed(devices, action, false, false));
+        Assert.False(map.InterfaceShortcutPressed(devices, action, true, false));
+        var help = new ControlsCatalog(map);
+        Assert.Contains(help.Rows, r => r.Category == "Social" && r.Matches(key.ToString()) && r.Action == ControlsCatalog.ActionLabels[(int)action]);
+    }
+
+    [Fact]
+    public void RemappedPlayerMenuKeyIsTheOneThatOpensItAndTheOneShown()
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path, """{"actions":{"TogglePlayers":["Key:F6"],"ToggleChat":["Mouse:Middle"]},"axes":{}}""");
+            var map = ActionMap.Load(path);
+            var devices = new InputDevices();
+            devices.OnKey(GlfwKey.Tab, GlfwKeyAction.Press);
+            Assert.False(map.InterfaceShortcutPressed(devices, InputAction.TogglePlayers, false, false));
+            devices.OnKey(GlfwKey.F6, GlfwKeyAction.Press);
+            // A function key still works from a focused chat field, as F1 does.
+            Assert.True(map.InterfaceShortcutPressed(devices, InputAction.TogglePlayers, true, false));
+            devices.OnMouseButton(GlfwMouseButton.Middle, GlfwButtonAction.Press);
+            Assert.True(map.InterfaceShortcutPressed(devices, InputAction.ToggleChat, false, false));
+            Assert.False(map.InterfaceShortcutPressed(devices, InputAction.ToggleChat, false, true));
+            var help = new ControlsCatalog(map);
+            Assert.Contains(help.Rows, r => r.Action == "Players on this server" && r.Binding == "F6");
+            Assert.Contains(help.Rows, r => r.Action == "Party (social)" && r.Binding == "Unbound");
         }
         finally
         {

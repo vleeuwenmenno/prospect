@@ -28,6 +28,41 @@ both parties. The creator leads; on leaving, the lowest remaining player id lead
 the old leader are cancelled on membership changes that remove someone. A solo invitation creates no party
 until accepted. On session end, roster entries are disconnected and party/invitation state clears.
 
+## Interface
+
+`Screens.Social.cs` draws it; `SocialView` (no drawing) holds the reading of the state and the route to the
+bridge, so tests use the same calls.
+
+### Input and actions
+
+- Players (`Tab`/`P`), Social (`O`) and Chat (`Enter`) are actions in `content/input/bindings.json`. They are
+  consumed before flight reads input. A focused text field keeps letter keys, Enter and Tab; F-keys and Escape
+  still work, as with Controls. Mouse bindings use this frame's interface ownership; a click in the same poll
+  as a capture change is consumed instead of becoming a shortcut or world action.
+- Escape closes chat, then the panel, then the data sheet. Each open surface shows the cursor.
+- A refusal is noticed by `SocialState.RefusalCount` (client-only, not on the wire), so the same reason twice
+  is still new. Rate-limited requests get no reply and so show nothing.
+- Invite is offered to connected players who are not in your party and not your inviter, while you are solo or
+  lead a party with room. The snapshot does not say who is in another party; the server refuses that.
+
+### Party and chat display
+
+- A party member whose status is over two seconds old shows as out of contact.
+- The party list never disappears while in a party. Short of room above the flight readouts, the sector panel
+  drops its server and ore lines; still short, members become one-line rows (name, shield, hull), leader
+  first, at least one, with the rest counted in the caption.
+- Chat follows new lines while scrolled to the end. Scrolled back, it keeps the reader's place as old lines
+  leave the 64-line log (`SocialState.ChatTotal`, client-only), until the lines being read are dropped.
+
+### Interaction safety
+
+- Accept and Decline sit in an id scope of the invitation's full 64-bit identity (`Kit.PushId`), so a press
+  that began on one card cannot complete on a replacement drawn in the same place.
+- Opening chat closes the player panel and the panel closes chat, and chat's buttons take the pointer only, so
+  Enter (open chat, send) can never press a button that keyboard navigation left focused.
+- Names and chat text go only to draw calls (`Kit.ClippedText`, draw-list text), never into labels, ids or
+  format strings. Nothing on these paths allocates after startup.
+
 ## Send
 
 Call `ClientSession.Input` (`PlayerInputBridge`). These methods enqueue bounded intent and return `bool`:

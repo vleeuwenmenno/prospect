@@ -57,13 +57,13 @@ internal sealed unsafe class UiPlatform : IDisposable
         };
         _onMouseButton = (_, button, action, _) =>
         {
-            if ((int)button < 5 && !_devices.Muted)
-                ImGui.GetIO().AddMouseButtonEvent((int)button, action == GlfwButtonAction.Press);
+            if (!_devices.Muted)
+                UiPointerInput.Button(ImGui.GetIO(), (int)button, action == GlfwButtonAction.Press, PointerCaptured);
         };
         _onCursorPos = (_, position) =>
         {
-            if (!PointerCaptured && !_devices.Muted)
-                ImGui.GetIO().AddMousePosEvent((float)position.X, (float)position.Y);
+            if (!_devices.Muted)
+                UiPointerInput.Position(ImGui.GetIO(), new float2((float)position.X, (float)position.Y), PointerCaptured);
         };
         _onCursorEnter = (_, entered) =>
         {
@@ -73,7 +73,7 @@ internal sealed unsafe class UiPlatform : IDisposable
         _onScroll = (_, offset) =>
         {
             if (!_devices.Muted)
-                ImGui.GetIO().AddMouseWheelEvent((float)offset.X, (float)offset.Y);
+                UiPointerInput.Wheel(ImGui.GetIO(), new float2((float)offset.X, (float)offset.Y), PointerCaptured);
         };
         _onFocus = (_, focus) => ImGui.GetIO().AddFocusEvent(focus == GlfwFocusEvent.GainFocus);
 
@@ -88,7 +88,7 @@ internal sealed unsafe class UiPlatform : IDisposable
 
     /// <summary>
     /// True while the pointer is steering the ship instead of pointing at the interface. The interface then sees
-    /// no pointer at all, so nothing under the hidden cursor reacts.
+    /// no pointer, no presses and no wheel at all, so nothing under the hidden cursor hovers or activates.
     /// </summary>
     public bool PointerCaptured { get; private set; }
 
@@ -102,12 +102,18 @@ internal sealed unsafe class UiPlatform : IDisposable
         if (Glfw.RawMotionSupported())
             _window.SetInputMode(GlfwInputMode.RawMouseMotion, captured ? 1 : 0);
         if (captured)
-            ImGui.GetIO().AddMousePosEvent(-float.MaxValue, -float.MaxValue);
+        {
+            // Take the pointer away from the interface and end any press or drag it had started, so a slider
+            // grabbed while the pointer was shown does not keep following the steering motion.
+            UiPointerInput.Captured(ImGui.GetIO(), true, default);
+        }
         else if (!_devices.Muted)
         {
             // GLFW restores the visible cursor; ImGui must see it even before the next motion event.
             Glfw.PInvoke.GetCursorPos(_window, out var x, out var y);
-            ImGui.GetIO().AddMousePosEvent((float)x, (float)y);
+            var cursor = new float2((float)x, (float)y);
+            UiPointerInput.Captured(ImGui.GetIO(), false, cursor);
+            _devices.PlacePointer(cursor);
         }
     }
 

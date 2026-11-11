@@ -58,7 +58,7 @@ internal sealed partial class ScreenHost
     private float _indicatorAngle;
 
     /// <summary>True while the player is in space with nothing open over it, so input belongs to the world.</summary>
-    public bool WorldInputEnabled => _screen == Screen.Session && !_sessionMenuOpen && !_mapOpen && !_shipInfoOpen && !_controlsOpen;
+    public bool WorldInputEnabled => _screen == Screen.Session && !_sessionMenuOpen && !_mapOpen && !_shipInfoOpen && !_controlsOpen && !_socialOpen && !_chatOpen;
 
     public void OpenShipInfo() => _shipInfoOpen = true;
 
@@ -96,7 +96,7 @@ internal sealed partial class ScreenHost
     {
         var world = _app.World;
         UpdateDiscovery(snapshot, world);
-        if (!_sessionMenuOpen && _app.Actions.Pressed(_app.Devices, InputAction.ToggleMap, !_ui.WantsTextInput))
+        if (!_sessionMenuOpen && !SocialSurfaceOpen && _app.Actions.Pressed(_app.Devices, InputAction.ToggleMap, !_ui.WantsTextInput))
         {
             if (_mapOpen)
                 _mapOpen = false;
@@ -104,7 +104,7 @@ internal sealed partial class ScreenHost
                 OpenMap();
         }
 
-        if (!_sessionMenuOpen && !_mapOpen && _app.Actions.Pressed(_app.Devices, InputAction.ShipInfo, !_ui.WantsTextInput))
+        if (!_sessionMenuOpen && !_mapOpen && !SocialSurfaceOpen && _app.Actions.Pressed(_app.Devices, InputAction.ShipInfo, !_ui.WantsTextInput))
             _shipInfoOpen = !_shipInfoOpen;
 
         // Everything shown over the world goes on ImGui's background layer, which is drawn beneath every window.
@@ -121,7 +121,18 @@ internal sealed partial class ScreenHost
                 DrawCommandOverlay(draw, snapshot, world, world.CommandBlend);
             if (pilot > 0.01f)
                 DrawTargetReadout(draw, snapshot, world, pilot);
-            DrawSectorPanel(draw, snapshot, world);
+            // The party list must keep at least one member on screen above the flight readouts. When the full
+            // sector panel leaves no room for the whole list, the panel drops its ore and server lines (they
+            // are on the map and in the menu), and if that is still not enough the list turns into one-line rows.
+            var limit = pilot > 0.01f ? ReadoutsTop : _ui.DisplaySize.Y - Kit.Px(Theme.Space5);
+            var party = PartyHudCardsHeight(snapshot);
+            var gap = Kit.Px(Theme.Space3);
+            var compactSector = party > 0 && Kit.Px(Theme.Space5) + SectorPanelHeight(world, false) + gap + party > limit;
+            var cards = !compactSector || Kit.Px(Theme.Space5) + SectorPanelHeight(world, true) + gap + party <= limit;
+            var sectorBottom = DrawSectorPanel(draw, snapshot, world, compactSector);
+            var partyBottom = DrawPartyHud(draw, snapshot, world, sectorBottom, limit, cards);
+            if (!_chatOpen)
+                DrawChatFeed(draw, snapshot, partyBottom);
             if (_shipInfoOpen)
                 DrawSheet(draw, snapshot, world);
             if (world.CommandBlend > 0.5f)
@@ -151,19 +162,42 @@ internal sealed partial class ScreenHost
         DrawShipInfo(draw, snapshot.Content.Designs[Math.Min(shown.Design, snapshot.Content.Designs.Length - 1)], shown.Blocks, world.Mode == ViewMode.Command);
     }
 
-    private void DrawSectorPanel(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world)
+    /// <summary>The sector panel's height: full, or compact with only the name and one line of figures.</summary>
+    private float SectorPanelHeight(WorldView world, bool compact)
+    {
+        if (compact)
+            return Kit.Px(64);
+        var hasRock = world.Sector.AsteroidCount > 0 && !_mapOpen;
+        var inner = Kit.Px(360) - Kit.Px(Theme.Space4) * 2;
+        return Kit.Px(116) + (hasRock ? SectorCharacterHeight(world.Galaxy!, world.Sector.Character, inner) + Kit.Px(Theme.Space2) : 0f);
+    }
+
+    /// <summary>
+    /// Draws the sector panel at the top left and returns where it ends, for what goes under it. Compact, it keeps
+    /// the name, the coordinates, the rocks and the players, and leaves out the server line and the ore.
+    /// </summary>
+    private float DrawSectorPanel(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, bool compact = false)
     {
         // The panel grows by what there is to say about the sector's ore; a sector without asteroids has none.
         // Under the map it stays short: the map's own heading sits below it, and the map describes sectors itself.
         var min = new float2(Kit.Px(Theme.Space5), Kit.Px(Theme.Space5));
         var inner = Kit.Px(360) - Kit.Px(Theme.Space4) * 2;
         var hasRock = world.Sector.AsteroidCount > 0 && !_mapOpen;
-        var characterHeight = hasRock ? SectorCharacterHeight(world.Galaxy!, world.Sector.Character, inner) + Kit.Px(Theme.Space2) : 0f;
-        var size = new float2(Kit.Px(360), Kit.Px(116) + characterHeight);
+        var size = new float2(Kit.Px(360), SectorPanelHeight(world, compact));
         Kit.PanelFrame(draw, min, min + size);
 
         var star = world.Galaxy!.StarClasses[world.Sector.StarClass];
         var text = min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3));
+        if (compact)
+        {
+            draw.AddCircleFilled(text + new float2(Kit.Px(5), Kit.Px(10)), Kit.Px(5), Kit.Color(StarColor(star.Color)), 20);
+            Kit.Text(draw, _ui.SansMedium, Theme.FontBody, text + new float2(Kit.Px(18), 0), Theme.Text, world.SectorName);
+            var at = world.Sector.Coord;
+            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(28)), Theme.TextDim,
+                Kit.F($"SECTOR {at.X} {at.Y} {at.Z}   {world.Sector.AsteroidCount} ROCKS   PLAYERS {snapshot.PlayerCount}/{snapshot.MaxPlayers}"), inner);
+            return min.Y + size.Y;
+        }
+
         if (hasRock)
             DrawSectorCharacter(draw, text + new float2(0, Kit.Px(94)), inner, world.Galaxy!, world.Sector.Character);
         draw.AddCircleFilled(text + new float2(Kit.Px(5), Kit.Px(10)), Kit.Px(5), Kit.Color(StarColor(star.Color)), 20);
@@ -196,6 +230,7 @@ internal sealed partial class ScreenHost
                 ? Kit.F($"PLAYERS {snapshot.PlayerCount}/{snapshot.MaxPlayers}")
                 : Kit.F($"PLAYERS {snapshot.PlayerCount}/{snapshot.MaxPlayers}   RTT {snapshot.RoundTripMs:0} MS")
         );
+        return min.Y + size.Y;
     }
 
     /// <summary>The pilot's instruments: speed, boost heat, dampeners, where the hull is going.</summary>
@@ -462,7 +497,9 @@ internal sealed partial class ScreenHost
 
         var rowHeight = Kit.Px(44);
         var size = new float2(Kit.Px(300), Kit.Px(54) + rowHeight * owned);
-        var min = new float2(_ui.DisplaySize.X - size.X - Kit.Px(Theme.Space5), Kit.Px(264));
+        // Under the quick buttons, and under the performance overlay when it is shown.
+        var top = QuickBarBottom + Kit.Px(Theme.Space3) + (_app.ShowPerformance ? Kit.Px(PerformanceHeight + Theme.Space2) : 0f);
+        var min = new float2(_ui.DisplaySize.X - size.X - Kit.Px(Theme.Space5), top);
         ImGui.SetNextWindowPos(min);
         ImGui.SetNextWindowSize(size);
         ImGui.Begin("##fleet"u8, RootFlags | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoFocusOnAppearing);

@@ -12,6 +12,9 @@ internal sealed partial class ScreenHost
 {
     private bool _sessionMenuOpen;
 
+    /// <summary>Height of the performance overlay in a session, in design pixels.</summary>
+    private const float PerformanceHeight = 238f;
+
     /// <summary>The password typed on the session-ended panel, to join the same server again with it.</summary>
     private readonly ImInputString _rejoinPassword = new(PasswordBytes);
     private bool _rejoinPasswordShown;
@@ -47,12 +50,32 @@ internal sealed partial class ScreenHost
                 if (_controlsHandled)
                     break;
                 var mapWasOpen = _mapOpen;
+                TrackSocial(snapshot);
                 DrawWorldInterface(snapshot);
+                // The social surfaces and the quick buttons that open them, over the world but under the map and
+                // the menu, which close them first.
+                if (!_mapOpen && !_sessionMenuOpen)
+                {
+                    if (_socialOpen)
+                        DrawSocialPanel(snapshot);
+                    if (_chatOpen)
+                        DrawChat(snapshot);
+                    DrawQuickBar(snapshot);
+                }
+                else
+                {
+                    _quickBarShown = false;
+                }
+
                 // Escape backs out one level at a time: the map closes itself, the command view returns to the
                 // pilot view, and only from the pilot view does it open the menu.
                 if (!mapWasOpen && !_mapOpen && BackPressed())
                 {
-                    if (_shipInfoOpen)
+                    if (_chatOpen)
+                        _chatOpen = false;
+                    else if (_socialOpen)
+                        _socialOpen = false;
+                    else if (_shipInfoOpen)
                         _shipInfoOpen = false;
                     else if (_worldSettingsOpen)
                         _worldSettingsOpen = false;
@@ -282,8 +305,10 @@ internal sealed partial class ScreenHost
     {
         var draw = ImGui.GetForegroundDrawList();
         var stats = _app.Stats;
-        var size = new float2(Kit.Px(330), Kit.Px(snapshot is null ? 154 : 238));
-        var min = new float2(_ui.DisplaySize.X - size.X - Kit.Px(Theme.Space5), Kit.Px(Theme.Space5));
+        var size = new float2(Kit.Px(330), Kit.Px(snapshot is null ? 154 : PerformanceHeight));
+        // Under the quick buttons when they are shown, so both stay readable.
+        var top = _quickBarShown && _screen == Screen.Session ? QuickBarBottom + Kit.Px(Theme.Space2) : Kit.Px(Theme.Space5);
+        var min = new float2(_ui.DisplaySize.X - size.X - Kit.Px(Theme.Space5), top);
         Kit.PanelFrame(draw, min, min + size);
 
         var line = Kit.Px(18);

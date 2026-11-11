@@ -311,6 +311,10 @@ internal sealed class WorldView
         _commandCycle.Reset();
         if (mode == Mode)
             return;
+        // The router chose mouse permissions for the old mode; consume the switch frame and any held drag.
+        if (_devices.ReadingWorldMouse)
+            _devices.SuppressMouse = true;
+        _leftDragging = _rightDragging = false;
         Mode = mode;
         _lookDirection = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
         if (mode == ViewMode.Command)
@@ -443,10 +447,19 @@ internal sealed class WorldView
         }
         else if (inputEnabled)
         {
-            _commandCycle.Observe(new Vector2(_devices.MousePosition.X, _devices.MousePosition.Y));
-            var count = PickTargets(snapshot, _devices.MousePosition, false);
-            HoveredHull = count == 0 ? 0 : _pickHits[0].Hull;
-            HoveredRock = count == 0 ? null : _pickHits[0].Rock;
+            // A hidden pointer hovers nothing: only a pointer the world may use marks what is under it.
+            if (_devices.SuppressMouse)
+            {
+                HoveredHull = 0;
+                HoveredRock = null;
+            }
+            else
+            {
+                _commandCycle.Observe(new Vector2(_devices.MousePosition.X, _devices.MousePosition.Y));
+                var count = PickTargets(snapshot, _devices.MousePosition, false);
+                HoveredHull = count == 0 ? 0 : _pickHits[0].Hull;
+                HoveredRock = count == 0 ? null : _pickHits[0].Rock;
+            }
             UpdateCommandControls(snapshot, bridge, dt, pointerOverUi);
         }
 

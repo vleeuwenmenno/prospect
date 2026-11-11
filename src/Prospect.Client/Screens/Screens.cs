@@ -43,6 +43,7 @@ internal sealed partial class ScreenHost
         InitializeSettings();
         InitializeControls();
         InitializeNewGame();
+        InitializeSocial();
     }
 
     public Screen Current => _screen;
@@ -54,6 +55,7 @@ internal sealed partial class ScreenHost
         if (screen == Screen.MainMenu)
         {
             _controlsOpen = _mapOpen = _shipInfoOpen = _sessionMenuOpen = false;
+            ResetSocial();
         }
         _screen = screen;
         _screenTime = 0;

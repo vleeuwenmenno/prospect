@@ -17,5 +17,9 @@
     <PackageReference Include="Ahwoo.BRUTAL.Stb" />
     <PackageReference Include="Ahwoo.BRUTAL.Strings" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- The tests drive the real input routing, interface and world view headless: no window, no GPU. -->
+    <InternalsVisibleTo Include="Prospect.Tests" />
+  </ItemGroup>
   <Import Project="../Distribution.targets" />
 </Project>
