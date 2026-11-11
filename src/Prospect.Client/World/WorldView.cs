@@ -33,7 +33,12 @@ internal sealed class WorldView
 {
     public const int MaxSelection = 64;
     private const float FormationSpacing = 45f;
-    private const float ClickRadiusPixels = 22f;
+    private PickHull[] _pickHulls = [];
+    private readonly PickSector[] _pickSectors = new PickSector[SlotCount];
+    private PickHit[] _pickHits = [];
+    private PickCycle _pilotCycle;
+    private PickCycle _commandCycle;
+    private Vector2 _pilotPointer;
 
     private const int RingXZ = 2;
     private const int RingY = 1;
@@ -344,6 +349,8 @@ internal sealed class WorldView
         if (!ReferenceEquals(galaxy, _galaxy))
         {
             _galaxy = galaxy;
+            _pickHulls = new PickHull[snapshot.Hulls.Length];
+            _pickHits = new PickHit[SlotCount * galaxy.MaxAsteroidsPerSector + snapshot.Hulls.Length];
             _streamDirty = true;
             _chaseInitialised = false;
             _currentCoord = new SectorCoord(int.MinValue, 0, 0);
@@ -431,6 +438,10 @@ internal sealed class WorldView
         }
         else if (inputEnabled)
         {
+            _commandCycle.Observe(new Vector2(_devices.MousePosition.X, _devices.MousePosition.Y));
+            var count = PickTargets(snapshot, _devices.MousePosition, false);
+            HoveredHull = count == 0 ? 0 : _pickHits[0].Hull;
+            HoveredRock = count == 0 ? null : _pickHits[0].Rock;
             UpdateCommandControls(snapshot, bridge, dt, pointerOverUi);
         }
 
@@ -650,63 +661,33 @@ internal sealed class WorldView
         return true;
     }
 
-    /// <summary>
-    /// Finds the nearest asteroid whose disc covers a window position, taking a disc smaller than
-    /// <paramref name="minReach"/> pixels for that size so that small rocks can still be hit.
-    /// </summary>
-    private bool PickRock(float2 pointer, float minReach, out RockRef picked)
+    /// <summary>Builds borrowed candidate views and uses the same ordered picker for every interaction.</summary>
+    private int PickTargets(SessionSnapshot snapshot, float2 pointer, bool pilot)
     {
-        picked = default;
-        var found = false;
-        var nearest = float.MaxValue;
-        var aspect = _screen.X / _screen.Y;
-
-        // The view line through the pointer. A sector whose asteroids all lie well off that line is skipped whole.
-        var nx = pointer.X / _screen.X * 2f - 1f;
-        var ny = pointer.Y / _screen.Y * 2f - 1f;
-        var line = Vector3.Normalize(_forward + _right * (nx * _tanHalfFov * aspect) - _up * (ny * _tanHalfFov));
-        var slack = minReach * _tanHalfFov / (_screen.Y * 0.5f);
-
+        var hullCount = 0;
+        for (var i = 0; i < snapshot.HullCount; i++)
+        {
+            ref var hull = ref snapshot.Hulls[i];
+            if ((pilot && hull.IsOwn) || (!pilot && hull.Owner != snapshot.PlayerId) || hull.Jump == JumpPhase.Tunnel)
+                continue;
+            var design = _designs[Math.Min(hull.Design, _designs.Length - 1)];
+            _pickHulls[hullCount++] = new PickHull(hull.Id, HullPosition(hull),
+                Quaternion.Slerp(hull.PreviousOrientation, hull.Orientation, _frameAlpha),
+                design.BlockOffsets, design.BlockSize, hull.Blocks, design.Flight.Radius);
+        }
+        var sectorCount = 0;
         foreach (var slot in _slots)
         {
-            var content = slot.Content;
-            if (slot.State != SectorSlot.Ready || !ReferenceEquals(slot.Galaxy, _galaxy) || content.AsteroidCount == 0)
-                continue;
-            if (!SectorInView(slot, CameraPosition, aspect, _screen.Y, out var center, out var smallest))
-                continue;
-
-            if (!slot.Displaced)
-            {
-                var bounds = center + content.BoundsCenter;
-                var along = Vector3.Dot(bounds, line);
-                var off = MathF.Sqrt(Math.Max(0f, bounds.LengthSquared() - along * along));
-                if (off > content.BoundsRadius + (Math.Max(along, 0f) + content.BoundsRadius) * slack * 1.5f)
-                    continue;
-            }
-
-            for (var i = 0; i < content.AsteroidCount; i++)
-            {
-                ref var rock = ref content.Asteroids[i];
-                if (rock.Radius < smallest)
-                    break;
-                if (!RockOnScreen(slot, center, i, out var screen, out var pixels, out var depth) || pixels < RockMinPixels)
-                    continue;
-                var offset = screen - pointer;
-                var reach = Math.Max(pixels, minReach);
-                if (offset.X * offset.X + offset.Y * offset.Y > reach * reach)
-                    continue;
-                var position = center + rock.LocalPosition + (slot.Displaced ? slot.Offsets[i] : Vector3.Zero);
-                if (pixels >= minReach && !RockPicking.Hit(line, position, rock, out depth))
-                    continue;
-                if (depth >= nearest)
-                    continue;
-                found = true;
-                picked = new RockRef(slot.Coord, i);
-                nearest = depth;
-            }
+            if (slot.State != SectorSlot.Ready || !ReferenceEquals(slot.Galaxy, _galaxy)) continue;
+            _pickSectors[sectorCount++] = new PickSector(slot.Coord, _galaxy!.CenterOf(slot.Coord),
+                slot.Content.Asteroids, slot.Content.AsteroidCount, slot.Displaced ? slot.Offsets : null,
+                slot.Content.BoundsCenter, slot.Content.BoundsRadius);
         }
-
-        return found;
+        var nx = pointer.X / _screen.X * 2 - 1;
+        var ny = pointer.Y / _screen.Y * 2 - 1;
+        var ray = Vector3.Normalize(_forward + _right * (nx * _tanHalfFov * _screen.X / _screen.Y) - _up * (ny * _tanHalfFov));
+        return TargetPicking.Pick(ray, CameraPosition, _forward, _screen.Y / (2 * _tanHalfFov),
+            _pickHulls.AsSpan(0, hullCount), _pickSectors.AsSpan(0, sectorCount), _pickHits, RockMinPixels);
     }
 
     /// <summary>
@@ -792,37 +773,20 @@ internal sealed class WorldView
     private void UpdateTargeting(SessionSnapshot snapshot, PlayerInputBridge bridge)
     {
         var center = _screen * 0.5f;
-        var best = 0u;
-        var bestDistance = float.MaxValue;
-        for (var i = 0; i < snapshot.HullCount; i++)
-        {
-            ref var hull = ref snapshot.Hulls[i];
-            if (hull.IsOwn)
-                continue;
-            var radius = _designs[Math.Min(hull.Design, _designs.Length - 1)].Flight.Radius;
-            if (!ProjectDisc(hull.Position, radius, out var screen, out var pixels, out _))
-                continue;
-            var offset = screen - center;
-            var distance = MathF.Sqrt(offset.X * offset.X + offset.Y * offset.Y);
-            if (distance > Math.Max(pixels * 1.5f, 46f) || distance >= bestDistance)
-                continue;
-            best = hull.Id;
-            bestDistance = distance;
-        }
-
-        HoveredHull = best;
-        if (TargetHull != 0 && !TryGetHull(TargetHull, out _))
-            TargetHull = 0;
-
-        // With no ship under the reticle, the nearest asteroid on the view line can be targeted instead.
-        HoveredRock = best == 0 && PickRock(center, 12f, out var hovered) ? hovered : null;
-
-        if (TargetRock is { } held && !TryGetRock(held, out _, out _))
-            TargetRock = null;
+        var count = PickTargets(snapshot, center, true);
+        var hovered = count == 0 ? default : _pickHits[0];
+        HoveredHull = hovered.Hull;
+        HoveredRock = hovered.Rock;
+        if (TargetHull != 0 && !TryGetHull(TargetHull, out _)) TargetHull = 0;
+        if (TargetRock is { } held && !TryGetRock(held, out _, out _)) TargetRock = null;
+        // Pilot input moves the view while the reticle stays fixed in the middle of the window.
+        _pilotPointer += new Vector2(_devices.MouseDelta.X, _devices.MouseDelta.Y);
+        _pilotCycle.Observe(_pilotPointer);
         if (_devices.MousePressed(GlfwMouseButton.Middle))
         {
-            TargetHull = best;
-            TargetRock = best == 0 ? HoveredRock : null;
+            var hit = _pilotCycle.Click(_pickHits.AsSpan(0, count), _pilotPointer, TargetHull, TargetRock);
+            TargetHull = hit.Hull;
+            TargetRock = hit.Rock;
         }
 
         if (!_actions.Pressed(_devices, InputAction.SwitchHull, true))
@@ -1381,29 +1345,16 @@ internal sealed class WorldView
 
     private void SelectAt(SessionSnapshot snapshot, float2 pointer, bool additive)
     {
-        var best = 0u;
-        var bestDistance = ClickRadiusPixels * ClickRadiusPixels;
-        for (var i = 0; i < snapshot.HullCount; i++)
+        var count = PickTargets(snapshot, pointer, false);
+        var hit = _commandCycle.Click(_pickHits.AsSpan(0, count), new Vector2(pointer.X, pointer.Y),
+            _selectedCount == 1 ? _selected[0] : 0, _selectedRockCount == 1 ? _selectedRocks[0] : null);
+        if (hit.Hull != 0)
         {
-            ref var hull = ref snapshot.Hulls[i];
-            if (hull.Owner != snapshot.PlayerId || !Project(HullPosition(hull), out var screen))
-                continue;
-            var offset = screen - pointer;
-            var distance = offset.X * offset.X + offset.Y * offset.Y;
-            if (distance >= bestDistance)
-                continue;
-            best = hull.Id;
-            bestDistance = distance;
-        }
-
-        if (best != 0)
-        {
-            Select(best, additive);
+            Select(hit.Hull, additive);
             return;
         }
-
-        // No hull under the pointer: pick the nearest asteroid whose disc the pointer is on.
-        var found = PickRock(pointer, 9f, out var picked);
+        var found = hit.Rock.HasValue;
+        var picked = hit.Rock.GetValueOrDefault();
 
         if (!additive)
             _selectedRockCount = 0;

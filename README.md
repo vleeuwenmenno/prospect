@@ -109,6 +109,9 @@ are refused by the live loader until stage 2 adds storage, wire support, collisi
 
 ## Controls
 
+Click again at the same place to step through overlapping targets, then wrap to the first.
+This works with middle mouse in pilot view and left-click in command view; moving more than four pixels resets it.
+
 | | Keyboard and mouse | Gamepad |
 | --- | --- | --- |
 | Forward / back, strafe | `W` `S`, `A` `D` | Left stick |
