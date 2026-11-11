@@ -13,6 +13,6 @@ layout(set = 0, binding = 0) uniform Frame
     vec4 drift;        // xyz: camera velocity in m/s, w: speed
     vec4 grid;         // x, y: camera x and z modulo one kilometre; z, w: camera x and z modulo one sector
     vec4 gridPlane;    // x: plane height relative to the camera, y: sector size, z: opacity, w: exposure
-    vec4 ftl;          // the viewer's own jump. x: drive kind (1 hyperspace, 2 wormhole, 3 rift), y: phase
-                       // (1 spool, 2 tunnel, 3 arrive), z: progress through the phase 0..1
+    vec4 ftl;          // the viewer's own jump. x: drive kind (1 hyperspace, 2 wormhole, 3 rift), y: stage
+                       // (1 drive working, 2 in transit, 3 arriving), z: progress through the stage 0..1
 } frame;

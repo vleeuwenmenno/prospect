@@ -51,6 +51,15 @@ internal sealed class WorldView
     private const float DustCell = 360f;
     private const float Exposure = 1.0f;
 
+    // Where a rift's or wormhole's opening sits, in hull radii: how far ahead of the nose it opens while the drive
+    // works, how far beyond an arriving hull it closes, and its radius when fully open. The lens bends the view out
+    // to LensReach opening radii, and the mark that allows it must cover that much, or the bending would stop at a
+    // hard edge.
+    private const float OpeningAhead = 5f;
+    private const float OpeningBehind = 2f;
+    private const float OpeningRadius = 1.4f;
+    private const float LensReach = 4.4f;
+
     /// <summary>A sector's generated contents and the job that fills them.</summary>
     private sealed class SectorSlot : IJob
     {
@@ -373,6 +382,7 @@ internal sealed class WorldView
         Array.Clear(_meshCounts);
         var marks = _scene.FtlMarks(frameIndex);
         var markCount = 0;
+        var composite = new CompositeConstants { Setup = new float4(Exposure, aspect, time, 0) };
 
         // Hulls.
         for (var i = 0; i < snapshot.HullCount && candidateCount < _candidates.Length; i++)
@@ -382,18 +392,8 @@ internal sealed class WorldView
             var leap = hull.Position.RelativeTo(hull.PreviousPosition).LengthSquared() > JumpGap * JumpGap;
             var position = (leap ? hull.Position : Double3.Lerp(hull.PreviousPosition, hull.Position, alpha)).RelativeTo(camera);
 
-            // A jumping hull shows its drive's mark: ahead of it while the drive spools, on it as it arrives.
-            if (hull.Jump != JumpPhase.None && markCount < marks.Length)
-            {
-                var flight = design.Flight;
-                var ahead = hull.Jump is JumpPhase.Align or JumpPhase.Charge ? Vector3.Transform(-Vector3.UnitZ, hull.Orientation) * (flight.Radius * 2.4f) : Vector3.Zero;
-                var at = position + ahead;
-                marks[markCount++] = new FtlMark
-                {
-                    PositionSize = new float4(at.X, at.Y, at.Z, flight.Radius * (flight.Ftl == FtlKind.Hyperspace ? 7f : 4.5f)),
-                    Params = new float4((float)flight.Ftl, EffectStage(hull.Jump), JumpProgress(hull, flight), (hull.Id & 0xFF) / 255f),
-                };
-            }
+            if (hull.Jump != JumpPhase.None)
+                AddJump(hull, design.Flight, position, aspect, marks, ref markCount, ref composite);
 
             // In the tunnel the hull is nowhere.
             if (hull.Jump == JumpPhase.Tunnel)
@@ -485,9 +485,10 @@ internal sealed class WorldView
             var flight = _designs[Math.Min(Own.Design, _designs.Length - 1)].Flight;
             var kind = FtlPreview != FtlKind.None ? FtlPreview : flight.Ftl;
             constants.Ftl = new float4((float)kind, EffectStage(Own.Jump), JumpProgress(Own, flight), 0);
+            composite.Own = constants.Ftl;
         }
 
-        _scene.Render(commands, frameIndex, constants, _batches.AsSpan(0, batchCount), _commandBlend > 0.01f, markCount);
+        _scene.Render(commands, frameIndex, constants, composite, _batches.AsSpan(0, batchCount), _commandBlend > 0.01f, markCount);
     }
 
     public float ExposureValue => Exposure;
@@ -615,6 +616,81 @@ internal sealed class WorldView
         {
             _deniedAt = _time;
         }
+    }
+
+    /// <summary>
+    /// Adds what a jumping hull shows: a mark in the world and, for a rift or a wormhole, a lens for the composite
+    /// pass to bend the view around and draw the opening in.
+    /// </summary>
+    private void AddJump(in HullView hull, in FlightParams flight, Vector3 position, float aspect, Span<FtlMark> marks, ref int markCount, ref CompositeConstants composite)
+    {
+        var stage = EffectStage(hull.Jump);
+        var progress = JumpProgress(hull, flight);
+        var kind = hull.IsOwn && FtlPreview != FtlKind.None ? FtlPreview : flight.Ftl;
+        var seed = (hull.Id & 0xFF) / 255f;
+        var forward = Vector3.Transform(-Vector3.UnitZ, hull.Orientation);
+        // Beyond an arriving hull as seen from here, so the hull is always in front of what it came out of.
+        var away = position.LengthSquared() > 1e-4f ? Vector3.Normalize(position) : forward;
+        var working = hull.Jump is JumpPhase.Align or JumpPhase.Charge;
+
+        if (kind == FtlKind.Hyperspace)
+        {
+            var at = working ? position + forward * (flight.Radius * 3f) : position + away * (flight.Radius * 1.5f);
+            AddMark(marks, ref markCount, at, flight.Radius * (working ? 4f : 2.5f), kind, stage, progress, seed);
+            return;
+        }
+
+        var lensCount = (int)composite.Setup.W;
+        var opening = flight.Radius * OpeningRadius;
+        if (hull.IsOwn && _commandBlend < 0.5f && !working)
+        {
+            // The pilot goes through their own opening. From the transit on it is drawn over the view rather than in
+            // the world, with one progress over the transit and the arrival together so the passage never stops.
+            if (!ProjectRelative(position + forward * (flight.Radius * OpeningAhead), opening, aspect, out var ahead, out var size))
+                (ahead, size) = (default, 0.3f);
+            var tunnel = flight.FtlTunnelSeconds;
+            var through = hull.Jump == JumpPhase.Tunnel ? progress * tunnel : tunnel + progress * flight.FtlArriveSeconds;
+            var slot = Math.Min(lensCount, CompositeConstants.MaxLenses - 1);
+            composite.SetLens(slot, ahead, size, (float)kind + 4f * 2f + 16f, through / (tunnel + flight.FtlArriveSeconds), seed);
+            composite.Setup.W = slot + 1;
+            return;
+        }
+
+        var centre = working ? position + forward * (flight.Radius * OpeningAhead) : position + away * (flight.Radius * OpeningBehind);
+        AddMark(marks, ref markCount, centre, opening * LensReach, kind, stage, progress, seed);
+        if (!ProjectRelative(centre, opening, aspect, out var ndc, out var radius) || radius < 0.002f)
+            return;
+        var reach = radius * LensReach;
+        if (MathF.Abs(ndc.X) * aspect - reach > aspect || MathF.Abs(ndc.Y) - reach > 1f)
+            return;
+        // The pilot's own opening always gets a lens; other hulls take the slots that are left.
+        if (lensCount >= CompositeConstants.MaxLenses && !hull.IsOwn)
+            return;
+        var index = Math.Min(lensCount, CompositeConstants.MaxLenses - 1);
+        composite.SetLens(index, ndc, radius, (float)kind + 4f * stage, progress, seed);
+        composite.Setup.W = index + 1;
+    }
+
+    private static void AddMark(Span<FtlMark> marks, ref int count, Vector3 at, float size, FtlKind kind, float stage, float progress, float seed)
+    {
+        if (count < marks.Length)
+            marks[count++] = new FtlMark { PositionSize = new float4(at.X, at.Y, at.Z, size), Params = new float4((float)kind, stage, progress, seed) };
+    }
+
+    /// <summary>Projects a camera-relative point, and a radius around it, to NDC and half screen heights.</summary>
+    private bool ProjectRelative(Vector3 relative, float worldRadius, float aspect, out float2 ndc, out float radius)
+    {
+        var depth = Vector3.Dot(relative, _forward);
+        if (depth < NearPlane)
+        {
+            (ndc, radius) = (default, 0f);
+            return false;
+        }
+
+        var scale = 1f / (depth * _tanHalfFov);
+        ndc = new float2(Vector3.Dot(relative, _right) * scale / aspect, -Vector3.Dot(relative, _up) * scale);
+        radius = worldRadius * scale;
+        return true;
     }
 
     /// <summary>The stage number the jump shaders use: 1 drive working, 2 in the tunnel, 3 arriving.</summary>

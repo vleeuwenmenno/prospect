@@ -66,5 +66,6 @@ void main()
     float glow = pow(max(toSun, 0.0), 1400.0) * 0.9 + pow(max(toSun, 0.0), 90.0) * 0.03;
     color += frame.sunColor.rgb * (disc * 40.0 + glow);
 
-    outColor = vec4(color, 1.0);
+    // The scene's alpha is the jump lens mask (see SceneRenderer); the sky starts it at zero.
+    outColor = vec4(color, 0.0);
 }

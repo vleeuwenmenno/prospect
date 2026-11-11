@@ -70,5 +70,6 @@ void main()
         lit = mix(lit * mix(1.0, below, frame.gridPlane.z), vec3(1.0, 0.69, 0.13) * 1.8, cut * frame.gridPlane.z);
     }
 
-    outColor = vec4(lit, 1.0);
+    // Zero alpha: a solid surface clears the jump lens mask, so a hull in front of an opening stays sharp.
+    outColor = vec4(lit, 0.0);
 }
