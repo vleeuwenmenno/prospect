@@ -173,6 +173,11 @@ After that:
 - What PvP rules a server can set: everywhere, by sector, or by consent.
 - Saving: how often, and what a crash may lose.
 
+## Open: shields
+
+- In the pilot's own hyperspace transit the tunnel covers the part of their own shield that lies over open sky;
+  the part over the hull stays. Built that way so the tunnel never covers the hull. Not yet approved: review it.
+
 ## Open: servers and players
 
 - Faction rights beyond inviting and removing: who may fly, order, build or scrap what.
