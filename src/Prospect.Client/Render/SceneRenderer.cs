@@ -28,6 +28,55 @@ internal struct FrameConstants
     public float4 Ftl;
 }
 
+/// <summary>
+/// The tone mapper's push constants: exposure, and the openings of jumps in view that it bends the scene around and
+/// draws. Matches <c>tonemap.frag</c>. 128 bytes, the push constant space every device guarantees.
+/// </summary>
+internal struct CompositeConstants
+{
+    public const int MaxLenses = 4;
+
+    /// <summary>Exposure, aspect ratio, time in seconds, number of lenses.</summary>
+    public float4 Setup;
+
+    /// <summary>The pilot's own jump: drive kind, stage, progress through the stage.</summary>
+    public float4 Own;
+
+    // Per lens: centre in NDC, radius when fully open in half screen heights, and a code (drive kind + 4 * stage,
+    // + 16 for the pilot's own passage). Progress and seed go two lenses to a vector in Extra.
+    public float4 Lens0;
+    public float4 Lens1;
+    public float4 Lens2;
+    public float4 Lens3;
+    public float4 Extra0;
+    public float4 Extra1;
+
+    /// <summary>Fills lens slot <paramref name="index"/>, 0 to <see cref="MaxLenses"/> - 1.</summary>
+    public void SetLens(int index, float2 centre, float radius, float code, float progress, float seed)
+    {
+        var lens = new float4(centre.X, centre.Y, radius, code);
+        switch (index)
+        {
+            case 0:
+                Lens0 = lens;
+                (Extra0.X, Extra0.Y) = (progress, seed);
+                break;
+            case 1:
+                Lens1 = lens;
+                (Extra0.Z, Extra0.W) = (progress, seed);
+                break;
+            case 2:
+                Lens2 = lens;
+                (Extra1.X, Extra1.Y) = (progress, seed);
+                break;
+            default:
+                Lens3 = lens;
+                (Extra1.Z, Extra1.W) = (progress, seed);
+                break;
+        }
+    }
+}
+
 /// <summary>The mark of a jump seen from outside: where, how big, and which drive at which stage.</summary>
 internal struct FtlMark
 {
@@ -87,7 +136,6 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private readonly VkPipeline _gridPipeline;
     private readonly VkPipeline _tonemapPipeline;
     private readonly VkPipeline _ftlMarkPipeline;
-    private readonly VkPipeline _ftlScreenPipeline;
     private readonly GpuBuffer[] _ftlBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
     private readonly VkSampler _sampler;
     private readonly VkDescriptorSet _sceneSet;
@@ -106,6 +154,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private VmaAllocation _depthAllocation;
     private VkImageView _depthView;
     private VkExtent2D _extent;
+    private CompositeConstants _composite;
 
     public SceneRenderer(GraphicsDevice gpu, Swapchain swapchain, IReadOnlyDictionary<string, byte[]> shaders, IReadOnlyList<MeshData> meshes)
     {
@@ -172,7 +221,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         _scenePipelineLayout = device.CreatePipelineLayout([_frameLayout.Handle], [], null);
         _tonemapPipelineLayout = device.CreatePipelineLayout(
             [_sceneLayout.Handle],
-            [new VkPushConstantRange { StageFlags = VkShaderStageFlags.FragmentBit, Offset = (ByteSize32)0, Size = (ByteSize32)sizeof(float) }],
+            [new VkPushConstantRange { StageFlags = VkShaderStageFlags.FragmentBit, Offset = (ByteSize32)0, Size = (ByteSize32)sizeof(CompositeConstants) }],
             null
         );
 
@@ -223,34 +272,49 @@ internal sealed unsafe class SceneRenderer : IDisposable
             LineWidth = 1f,
         };
 
+        // The scene's alpha channel is a mask for the jump lenses, not coverage. The sky and solid surfaces write
+        // zero, light added on top leaves alpha alone, and a rift's or wormhole's mark writes one where the
+        // composite pass may bend the view. The presets' additive blend scales by destination alpha, so these
+        // passes use their own blend states.
+        const VkColorComponentFlags rgb = VkColorComponentFlags.RBit | VkColorComponentFlags.GBit | VkColorComponentFlags.BBit;
+        var additiveAttachment = new VkPipelineColorBlendAttachmentState
+        {
+            BlendEnable = true,
+            SrcColorBlendFactor = VkBlendFactor.One,
+            DstColorBlendFactor = VkBlendFactor.One,
+            ColorBlendOp = VkBlendOp.Add,
+            SrcAlphaBlendFactor = VkBlendFactor.Zero,
+            DstAlphaBlendFactor = VkBlendFactor.One,
+            AlphaBlendOp = VkBlendOp.Add,
+            ColorWriteMask = rgb,
+        };
+        var additive = new VkPipelineColorBlendStateCreateInfo { AttachmentCount = 1, Attachments = &additiveAttachment };
+        var translucentAttachment = additiveAttachment with
+        {
+            SrcColorBlendFactor = VkBlendFactor.SrcAlpha,
+            DstColorBlendFactor = VkBlendFactor.OneMinusSrcAlpha,
+        };
+        var translucent = new VkPipelineColorBlendStateCreateInfo { AttachmentCount = 1, Attachments = &translucentAttachment };
+        var markAttachment = additiveAttachment with
+        {
+            SrcAlphaBlendFactor = VkBlendFactor.One,
+            ColorWriteMask = rgb | VkColorComponentFlags.ABit,
+        };
+        var markBlend = new VkPipelineColorBlendStateCreateInfo { AttachmentCount = 1, Attachments = &markAttachment };
+
         var noInput = new VertexInput(0, 0);
         var starInput = new VertexInput(1, 2).AddBindingWithAttributes<StarInstance>(0, 0, VkVertexInputRate.Instance);
         var meshInput = VertexInput.For<MeshVertex, MeshInstance>();
 
         _backgroundPipeline = ScenePipeline(Module(shaders, "fullscreen.vert"), Module(shaders, "background.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthOff, Presets.BlendState.BlendNone);
-        _starPipeline = ScenePipeline(Module(shaders, "stars.vert"), Module(shaders, "stars.frag"), starInput, Presets.Rasterization.Fill.CullNone, &depthOff, Presets.BlendState.BlendAdditive);
-        _dustPipeline = ScenePipeline(Module(shaders, "dust.vert"), Module(shaders, "dust.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthRead, Presets.BlendState.BlendAdditive);
+        _starPipeline = ScenePipeline(Module(shaders, "stars.vert"), Module(shaders, "stars.frag"), starInput, Presets.Rasterization.Fill.CullNone, &depthOff, &additive);
+        _dustPipeline = ScenePipeline(Module(shaders, "dust.vert"), Module(shaders, "dust.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthRead, &additive);
         _meshPipeline = ScenePipeline(Module(shaders, "mesh.vert"), Module(shaders, "mesh.frag"), meshInput, &cullBack, &depthWrite, Presets.BlendState.BlendNone);
-        _gridPipeline = ScenePipeline(Module(shaders, "grid.vert"), Module(shaders, "grid.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthRead, Presets.BlendState.BlendColorAlpha);
+        _gridPipeline = ScenePipeline(Module(shaders, "grid.vert"), Module(shaders, "grid.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthRead, &translucent);
         _tonemapPipeline = Pipeline(Module(shaders, "fullscreen.vert"), Module(shaders, "tonemap.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthOff, Presets.BlendState.BlendNone, _tonemapPipelineLayout, swapchain.RenderPass);
 
-        // The pilot's jump effect lays itself over the scene: its colour is added, and its alpha hides what is
-        // behind it once the hull is in the tunnel.
-        var overlayAttachment = new VkPipelineColorBlendAttachmentState
-        {
-            BlendEnable = true,
-            SrcColorBlendFactor = VkBlendFactor.One,
-            DstColorBlendFactor = VkBlendFactor.OneMinusSrcAlpha,
-            ColorBlendOp = VkBlendOp.Add,
-            SrcAlphaBlendFactor = VkBlendFactor.One,
-            DstAlphaBlendFactor = VkBlendFactor.OneMinusSrcAlpha,
-            AlphaBlendOp = VkBlendOp.Add,
-            ColorWriteMask = VkColorComponentFlags.RBit | VkColorComponentFlags.GBit | VkColorComponentFlags.BBit | VkColorComponentFlags.ABit,
-        };
-        var overlayBlend = new VkPipelineColorBlendStateCreateInfo { AttachmentCount = 1, Attachments = &overlayAttachment };
         var markInput = new VertexInput(1, 2).AddBindingWithAttributes<FtlMark>(0, 0, VkVertexInputRate.Instance);
-        _ftlMarkPipeline = ScenePipeline(Module(shaders, "ftl_mark.vert"), Module(shaders, "ftl_mark.frag"), markInput, Presets.Rasterization.Fill.CullNone, &depthRead, Presets.BlendState.BlendAdditive);
-        _ftlScreenPipeline = ScenePipeline(Module(shaders, "fullscreen.vert"), Module(shaders, "ftl_screen.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthOff, &overlayBlend);
+        _ftlMarkPipeline = ScenePipeline(Module(shaders, "ftl_mark.vert"), Module(shaders, "ftl_mark.frag"), markInput, Presets.Rasterization.Fill.CullNone, &depthRead, &markBlend);
 
         CreateTargets(swapchain.Extent);
     }
@@ -271,8 +335,9 @@ internal sealed unsafe class SceneRenderer : IDisposable
     public Span<MeshInstance> Instances(int frameIndex) => new((void*)_instanceBuffers[frameIndex].Mapped, MaxInstances);
 
     /// <summary>Records the scene into the floating-point target. Call before the present pass is opened.</summary>
-    public void Render(CommandBuffer commands, int frameIndex, in FrameConstants constants, ReadOnlySpan<DrawBatch> batches, bool drawGrid, int ftlMarks)
+    public void Render(CommandBuffer commands, int frameIndex, in FrameConstants constants, in CompositeConstants composite, ReadOnlySpan<DrawBatch> batches, bool drawGrid, int ftlMarks)
     {
+        _composite = composite;
         *(FrameConstants*)_frameBuffers[frameIndex].Mapped = constants;
 
         Transition(commands, _colorImage, VkImageAspectFlags.ColorBit, VkImageLayout.Undefined, VkImageLayout.ColorAttachmentOptimal, VkAccessFlags.ColorAttachmentWriteBit, VkPipelineStageFlags.ColorAttachmentOutputBit);
@@ -348,24 +413,23 @@ internal sealed unsafe class SceneRenderer : IDisposable
             commands.Draw(6, ftlMarks, 0, 0);
         }
 
-        if (constants.Ftl.Y > 0.5f)
-        {
-            commands.BindPipeline(VkPipelineBindPoint.Graphics, _ftlScreenPipeline);
-            commands.Draw(3, 1, 0, 0);
-        }
-
         commands.EndRendering();
         Transition(commands, _colorImage, VkImageAspectFlags.ColorBit, VkImageLayout.ColorAttachmentOptimal, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.FragmentShaderBit);
     }
 
-    /// <summary>Draws the tone-mapped scene to the screen. Call inside the present pass, before the interface.</summary>
+    /// <summary>
+    /// Draws the tone-mapped scene to the screen, bent by the jump lenses given to the last <see cref="Render"/>.
+    /// Call inside the present pass, before the interface.
+    /// </summary>
     public void Present(CommandBuffer commands, float exposure)
     {
         SetViewport(commands, _extent);
+        var push = _composite;
+        push.Setup.X = exposure;
         var set = _sceneSet;
         commands.BindPipeline(VkPipelineBindPoint.Graphics, _tonemapPipeline);
         commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _tonemapPipelineLayout, 0, new ReadOnlySpan<VkDescriptorSet>(in set), []);
-        commands.PushConstants(_tonemapPipelineLayout, VkShaderStageFlags.FragmentBit, 0, new ReadOnlySpan<byte>(&exposure, sizeof(float)));
+        commands.PushConstants(_tonemapPipelineLayout, VkShaderStageFlags.FragmentBit, 0, new ReadOnlySpan<byte>(&push, sizeof(CompositeConstants)));
         commands.Draw(3, 1, 0, 0);
     }
 
@@ -375,7 +439,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         device.WaitIdle();
         DestroyTargets();
         device.DestroySampler(_sampler, null);
-        foreach (var pipeline in (ReadOnlySpan<VkPipeline>)[_backgroundPipeline, _starPipeline, _dustPipeline, _meshPipeline, _gridPipeline, _tonemapPipeline, _ftlMarkPipeline, _ftlScreenPipeline])
+        foreach (var pipeline in (ReadOnlySpan<VkPipeline>)[_backgroundPipeline, _starPipeline, _dustPipeline, _meshPipeline, _gridPipeline, _tonemapPipeline, _ftlMarkPipeline])
             device.DestroyPipeline(pipeline, null);
         device.DestroyPipelineLayout(_scenePipelineLayout, null);
         device.DestroyPipelineLayout(_tonemapPipelineLayout, null);
