@@ -26,5 +26,6 @@ layout(set = 0, binding = 0) uniform Frame
                        // radius fully open in metres; xyz the axis it faces (the hull's nose); xyz up across it; x
                        // drive kind (2 wormhole, 3 rift), y how far open 0..1, z seed
     vec4 clips[64];    // per followed jump (passage slot), two vectors: xyz a camera-relative point on the plane its
-                       // opening cuts its own hull at, and xyz the plane's normal toward the hidden side (zero: none)
+                       // opening cuts its own hull at, w the radius of a window in it through which the hidden side
+                       // is still seen (0: none); and xyz the plane's normal toward the hidden side (zero: none)
 } frame;

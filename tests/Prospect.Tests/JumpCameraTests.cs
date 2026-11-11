@@ -311,4 +311,129 @@ public sealed class JumpCameraTests : IDisposable
         Assert.NotNull(_world.NavTarget);
         Assert.Equal(JumpPhase.None, snapshot.Hulls[snapshot.OwnHull].Jump);
     }
+    /// <summary>
+    /// Whether <c>mesh.frag</c> keeps a point of a hull cut by a plane, all relative to the camera: on the shown side,
+    /// or on the hidden side but seen through the plane's window from the shown side.
+    /// </summary>
+    private static bool Kept(Vector3 at, Vector3 point, Vector3 hidden, float window)
+    {
+        var side = Vector3.Dot(at - point, hidden);
+        if (hidden == Vector3.Zero || side <= 0f)
+            return true;
+        var camera = -Vector3.Dot(point, hidden);
+        return window > 0f && camera < 0f && (at * (camera / (camera - side)) - point).Length() < window;
+    }
+
+    [Fact]
+    public void AHullsMaterialSaysWhatItIsAndWhichOpeningCutsIt()
+    {
+        // As mesh.vert reads it back: the kind below four, and one more than the clip slot in steps of four.
+        for (var clip = -1; clip < HullVisuals.MaxPassages; clip++)
+        {
+            foreach (var own in (ReadOnlySpan<bool>)[false, true])
+            {
+                var material = WorldView.Material(own, clip);
+                var slot = (int)((material + 0.5f) * 0.25f);
+                Assert.Equal(clip, slot - 1);
+                Assert.Equal(own ? 2f : 1f, material - 4f * slot);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(FtlKind.Rift, 0f)]
+    [InlineData(FtlKind.Rift, 90f)]
+    [InlineData(FtlKind.Rift, 180f)]
+    [InlineData(FtlKind.Wormhole, 0f)]
+    [InlineData(FtlKind.Wormhole, 90f)]
+    [InlineData(FtlKind.Wormhole, 180f)]
+    public void ThePilotsOwnHullGoesIntoItsOpeningNoseFirstWhereverTheCameraIs(FtlKind drawnAs, float lookDegrees)
+    {
+        // The pilot's own hull, drawn from inside its jump, against the opening the composite shows: from the world's
+        // side, what is through the opening is hidden, nose first in and stern last out; from the throat's side, what
+        // is still in the world shows only through the window. Looking from behind, beside and ahead of the hull.
+        _world.FtlPreview = drawnAs;
+        _world.LookDegrees = lookDegrees;
+        var target = _client.AcquireSnapshot().Galaxy!.CenterOf(new SectorCoord(12, 0, -7));
+        _client.Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = target });
+
+        var started = false;
+        var entryCut = 0;
+        var exitCut = 0;
+        var throatSeen = 0;
+        for (var frame = 0; frame < TickLoop.SimulationHz * 120; frame++)
+        {
+            var snapshot = Frame(false);
+            ref readonly var own = ref snapshot.Hulls[snapshot.OwnHull];
+            started |= own.Jump != JumpPhase.None;
+            if (started && own.Jump == JumpPhase.None)
+                break;
+            if (own.Jump == JumpPhase.None)
+                continue;
+
+            var exit = own.Jump is JumpPhase.Tunnel or JumpPhase.Arrive;
+            var (centre, axis, radius) = _world.OwnOpening;
+            var (point, hidden, window) = _world.OwnCut;
+            if (radius <= 0.001f * _world.OwnFlight.Radius)
+                continue;
+
+            // The cut is the opening's own plane, fixed in the world whichever way the camera looks.
+            var throat = exit ? -axis : axis;
+            var past = _world.JumpThrough >= 0.5f;
+            var inThroat = exit ? !past : past;
+            Assert.Equal(centre, point);
+            Assert.Equal(inThroat ? -throat : throat, hidden);
+            Assert.Equal(inThroat ? radius : 0f, window);
+
+            // Where each block is drawn, relative to the camera, and which side of the opening it is on.
+            var camera = _world.CameraPosition;
+            var design = snapshot.Content.Designs[own.Design];
+            var hull = _world.OwnDrawnPosition.RelativeTo(camera);
+            var cut = point.RelativeTo(camera);
+            var through = 0;
+            var outside = 0;
+            var throatKept = 0;
+            var worldKept = 0;
+            foreach (var offset in design.BlockOffsets)
+            {
+                var at = hull + Vector3.Transform(offset, _world.OwnOrientation);
+                var inThroatSide = Vector3.Dot(at - cut, throat) > 0f;
+                var kept = Kept(at, cut, hidden, window);
+                if (inThroatSide)
+                {
+                    through++;
+                    throatKept += kept ? 1 : 0;
+                }
+                else
+                {
+                    outside++;
+                    worldKept += kept ? 1 : 0;
+                }
+            }
+
+            if (inThroat)
+            {
+                // Inside, the throat's side is all there; the world's side shows at most through the window.
+                Assert.Equal(through, throatKept);
+                throatSeen += through > 0 ? 1 : 0;
+                continue;
+            }
+
+            // From the world, nothing in the throat is drawn and everything outside it is.
+            Assert.Equal(0, throatKept);
+            Assert.Equal(outside, worldKept);
+            if (through > 0 && outside > 0)
+            {
+                if (exit)
+                    exitCut++;
+                else
+                    entryCut++;
+            }
+        }
+
+        Assert.True(started);
+        // The hull is seen part way through its opening from the world's side, cut there, from every side of it.
+        Assert.True(entryCut + exitCut > 0, $"{drawnAs} at {lookDegrees}: never seen cut part way through ({entryCut} in, {exitCut} out)");
+        Assert.True(throatSeen > 0, $"{drawnAs} at {lookDegrees}: never seen from inside the throat");
+    }
 }

@@ -110,6 +110,18 @@ internal sealed class HullVisuals
     /// <summary>This frame's hulls, in the snapshot's order.</summary>
     public ReadOnlySpan<HullVisual> Hulls => _hulls.AsSpan(0, _count);
 
+    /// <summary>A passage slot no jump is followed through this frame, whose clipping plane is free, or -1.</summary>
+    public int FreePassage()
+    {
+        for (var i = 0; i < _passages.Length; i++)
+        {
+            if (_passages[i].Id == 0)
+                return i;
+        }
+
+        return -1;
+    }
+
     /// <summary>Forgets a departed session's hulls and passages without discarding reusable storage.</summary>
     public void Clear()
     {

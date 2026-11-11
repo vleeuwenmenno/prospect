@@ -182,6 +182,9 @@ internal sealed class WorldView
     // Where every hull is drawn this frame, with the jumps of hulls seen from outside; worked out in the update.
     private readonly HullVisuals _visuals = new();
     private bool _ownInside = true;
+    private Double3 _ownCutPoint;
+    private Vector3 _ownCutHidden;
+    private float _ownCutWindow;
 
     /// <summary>Where every hull is drawn this frame; for tests.</summary>
     internal HullVisuals Visuals => _visuals;
@@ -327,6 +330,17 @@ internal sealed class WorldView
 
     /// <summary>How far the camera is past the opening of the pilot's own rift or wormhole that it is passing now.</summary>
     internal float JumpThrough => _jumpThrough;
+
+    /// <summary>
+    /// Where the opening of the pilot's own rift or wormhole cuts their hull, seen from inside the jump: a point on
+    /// the plane of the opening, the plane's normal toward the side that is hidden, and the radius of the window in
+    /// that plane through which the hidden side is still seen (0: none). A zero normal cuts nothing.
+    /// </summary>
+    internal (Double3 Point, Vector3 Hidden, float Window) OwnCut => (_ownCutPoint, _ownCutHidden, _ownCutWindow);
+
+    /// <summary>The opening of the pilot's own jump now: the entry while the drive works, the exit after.</summary>
+    internal (Double3 Centre, Vector3 Axis, float Radius) OwnOpening =>
+        _jumpStage >= 2f ? (_jumpExit, _jumpAxis, _jumpExitRadius) : (_jumpEntry, _jumpAxis, _jumpEntryRadius);
 
     /// <summary>Where the player's hull is drawn: where the simulation has it, moved along its own jump.</summary>
     public Double3 OwnDrawnPosition => OwnPosition + _jumpAxis * _jumpOffset;
@@ -569,6 +583,7 @@ internal sealed class WorldView
         UpdateCamera(dt);
         // Which side of the opening the camera is on, from where the camera is this frame.
         UpdateThrough(dt);
+        UpdateOwnCut();
         UpdateStream();
     }
 
@@ -588,6 +603,10 @@ internal sealed class WorldView
         var composite = new CompositeConstants { Setup = new float4(Exposure, aspect, time, 0) };
         var openings = new FtlOpenings();
         var clips = new FtlClips();
+        // The pilot's own opening cuts their hull through a passage slot no other hull follows this frame.
+        var ownClip = _ownCutHidden == Vector3.Zero ? -1 : _visuals.FreePassage();
+        if (ownClip >= 0)
+            clips.Set(ownClip, _ownCutPoint.RelativeTo(camera), _ownCutHidden, _ownCutWindow);
 
         // Hulls, where the update has them drawn this frame.
         var visuals = _visuals.Hulls;
@@ -609,7 +628,7 @@ internal sealed class WorldView
             if (!visual.Visible || !Visible(position, design.Flight.Radius * stretch, aspect, out _))
                 continue;
             // The material says what the mesh is and, above it in steps of four, which opening cuts it.
-            var material = visual.Inside ? 2f : 1f + 4f * (visual.Clip + 1);
+            var material = Material(visual.Inside, visual.Inside ? ownClip : visual.Clip);
             if (visual.Intact)
             {
                 Add(ref candidateCount, Math.Min(hull.Design, _designs.Length - 1), position, orientation, 1f, design.Color, material, stretch);
@@ -1132,6 +1151,34 @@ internal sealed class WorldView
     }
 
     /// <summary>
+    /// Cuts the pilot's own hull at its opening to agree with what the composite shows around it. With the camera on
+    /// the world's side, the part of the hull in the throat (through the entry, or not yet out of the exit) is hidden
+    /// as every other hull's is, so the hull goes in nose first and comes out the same way, its stern last, from
+    /// wherever the camera looks. With the camera on the throat's side, the part in the world is seen only through
+    /// the opening, so it is hidden where it is not behind the window. The plane is the opening's own, fixed in the
+    /// world; the camera only decides which side of it is hidden.
+    /// </summary>
+    private void UpdateOwnCut()
+    {
+        _ownCutHidden = Vector3.Zero;
+        _ownCutWindow = 0f;
+        if (!_ownInside || _jumpKind is not (FtlKind.Wormhole or FtlKind.Rift) || _jumpStage < 1f)
+            return;
+        var exit = _jumpStage >= 2f;
+        var window = exit ? _jumpExitRadius : _jumpEntryRadius;
+        if ((exit ? _jumpExitOpen : _jumpEntryOpen) <= 0.001f)
+            return;
+        // Past the entry the camera is in the throat; past the exit it is back out in the world.
+        var past = _jumpThrough >= 0.5f;
+        var inThroat = exit ? !past : past;
+        _ownCutPoint = exit ? _jumpExit : _jumpEntry;
+        // The throat is past the entry and before the exit.
+        var throat = exit ? -_jumpAxis : _jumpAxis;
+        _ownCutHidden = inThroat ? -throat : throat;
+        _ownCutWindow = inThroat ? window : 0f;
+    }
+
+    /// <summary>
     /// Hyperspace: the stars stretch into lines from where they are late in the charge, the tunnel forms over them
     /// as the drive fires, and at the far end it thins out again over the destination's stars, which pull back to
     /// points. The tunnel's lines accelerate away from the nose and slow down again before it opens.
@@ -1252,6 +1299,12 @@ internal sealed class WorldView
     }
 
     private static float Smooth(float x) => HullVisuals.Smooth(x);
+
+    /// <summary>
+    /// A hull mesh's material as <c>mesh.vert</c> reads it: 1 for a hull, 2 for the pilot's own, plus four times one
+    /// more than the passage slot whose clipping plane cuts it (-1: none).
+    /// </summary>
+    internal static float Material(bool own, int clip) => (own ? 2f : 1f) + 4f * (clip + 1);
 
     /// <summary>Half the size of a hyperspace mark in hull radii where its point and streak are drawn.</summary>
     internal const float MarkReach = 2.5f;
