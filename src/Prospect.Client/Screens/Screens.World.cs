@@ -57,6 +57,7 @@ internal sealed partial class ScreenHost
     /// Where this frame's left column ends, measured before drawing the markers that must avoid it.
     /// </summary>
     private float _columnBottom;
+    private HudRect _chatFeedBounds;
 
     /// <summary>True while the player is in space with nothing open over it, so input belongs to the world.</summary>
     public bool WorldInputEnabled => _screen == Screen.Session && !_sessionMenuOpen && !_mapOpen && !_shipInfoOpen && !_controlsOpen && !_socialOpen && !_chatOpen;
@@ -118,8 +119,8 @@ internal sealed partial class ScreenHost
 
         // Everything shown over the world goes on ImGui's background layer, which is drawn beneath every window.
         // Menus, the world settings, the map and the fleet list are windows, so they always cover it, and a menu's
-        // dim, drawn on the same layer afterwards, dims it too. Within the layer, what is drawn later is on top:
-        // markers that move with the world first, then the panels and sheets they must never cover.
+        // dim, drawn on the same layer afterwards, dims it too. The passive chat feed is drawn first to measure its
+        // bounds; world markers avoid those bounds, then the remaining panels and sheets cover the world layer.
         var draw = ImGui.GetBackgroundDrawList();
         if (!_mapOpen)
         {
@@ -137,6 +138,8 @@ internal sealed partial class ScreenHost
             var sectorBottom = Kit.Px(Theme.Space5) + SectorPanelHeight(world, compactSector);
             _columnBottom = HudLayout.PartyRows(sectorBottom, limit, cards, snapshot.Social.Invitation.Player != 0,
                 snapshot.Social.PartyCount >= 2 ? OtherMembers(snapshot) : 0, Kit.Scale).Bottom;
+            // Draw the passive feed first so markers can avoid its actual wrapped lines in this same frame.
+            _chatFeedBounds = _chatOpen ? default : DrawChatFeed(draw, snapshot, _columnBottom);
             if (pilot > 0.01f)
                 DrawFlightReadouts(draw, snapshot, world, pilot);
             if (world.CommandBlend > 0.01f)
@@ -144,9 +147,7 @@ internal sealed partial class ScreenHost
             if (pilot > 0.01f)
                 DrawTargetReadout(draw, snapshot, world, pilot);
             DrawSectorPanel(draw, snapshot, world, compactSector);
-            var partyBottom = DrawPartyHud(draw, snapshot, world, sectorBottom, limit, cards);
-            if (!_chatOpen)
-                DrawChatFeed(draw, snapshot, partyBottom);
+            DrawPartyHud(draw, snapshot, world, sectorBottom, limit, cards);
             if (_shipInfoOpen)
                 DrawSheet(draw, snapshot, world);
             if (world.CommandBlend > 0.5f)
@@ -288,7 +289,7 @@ internal sealed partial class ScreenHost
         }
 
         // One clear room for every marker that moves with the world: the target's and the plotted jump's.
-        var room = new HudCueRoom(display, Kit.Scale, _columnBottom, world.TargetHull != 0 || world.TargetRock is not null, _jumpPrompt != JumpPrompt.None);
+        var room = new HudCueRoom(display, Kit.Scale, _columnBottom, world.TargetHull != 0 || world.TargetRock is not null, _jumpPrompt != JumpPrompt.None, _chatFeedBounds);
         DrawTargetMarkers(draw, snapshot, world, room);
         DrawNavTarget(draw, world, room, _jumpPrompt);
 
@@ -1132,6 +1133,20 @@ internal sealed partial class ScreenHost
             draw.AddRect(boxMin, boxMax, Kit.Color(Theme.Accent, 0.9f));
         }
 
+        // The plotted jump: a dotted route underneath the hull's arrow, visible before its order starts.
+        if (world.NavTarget is { } nav)
+        {
+            var navSector = galaxy.SectorOf(nav);
+            var end = ToScreen((float)(nav.X / size), (float)(nav.Z / size));
+            if (MapRoute.Shows(here.Y, navSector.Y, _mapLayer, out var line))
+            {
+                if (line)
+                    MapRoute.Dotted(draw, ToScreen(player.X, player.Y), end, new HudRect(0f, 0f, display.X, display.Y), Kit.Px(MapRoute.Dash), Kit.Px(MapRoute.Space), Kit.Color(Theme.Info, 0.8f), Kit.Px(1.5f));
+                DrawTargetMarker(draw, end, Theme.Info);
+                Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, end + new float2(Kit.Px(18), -Kit.Px(7)), Theme.Info, "NAV"u8);
+            }
+        }
+
         // The hull being flown, as an arrow along its heading.
         if (_mapLayer == here.Y)
         {
@@ -1149,21 +1164,6 @@ internal sealed partial class ScreenHost
                 var corner = new float2(cell * 0.5f - 2, cell * 0.5f - 2);
                 var home = ToScreen(here.X, here.Z);
                 Brackets(draw, home - corner, home + corner, Math.Min(Kit.Px(10), cell * 0.3f), Kit.Color(Theme.Accent));
-            }
-        }
-
-        // The plotted jump: a dotted route from the hull being flown to the NAV point, drawn from the moment it is
-        // plotted until it is cleared, replaced or reached, whatever the hull's order or the selection.
-        if (world.NavTarget is { } nav)
-        {
-            var navSector = galaxy.SectorOf(nav);
-            var end = ToScreen((float)(nav.X / size), (float)(nav.Z / size));
-            if (MapRoute.Shows(here.Y, navSector.Y, _mapLayer, out var line))
-            {
-                if (line)
-                    MapRoute.Dotted(draw, ToScreen(player.X, player.Y), end, new HudRect(0f, 0f, display.X, display.Y), Kit.Px(MapRoute.Dash), Kit.Px(MapRoute.Space), Kit.Color(Theme.Info, 0.8f), Kit.Px(1.5f));
-                DrawTargetMarker(draw, end, Theme.Info);
-                Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, end + new float2(Kit.Px(18), -Kit.Px(7)), Theme.Info, "NAV"u8);
             }
         }
 

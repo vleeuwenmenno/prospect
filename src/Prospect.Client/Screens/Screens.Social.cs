@@ -384,13 +384,13 @@ internal sealed partial class ScreenHost
 
     /// <summary>
     /// The last few chat lines at the bottom left while chat is closed, fading out after a few seconds. Drawn on
-    /// the background layer: nothing here takes the pointer.
+    /// the background layer: nothing here takes the pointer. Returns the bounds to reserve for this frame's markers.
     /// </summary>
-    private void DrawChatFeed(ImDrawListPtr draw, SessionSnapshot snapshot, float top)
+    private HudRect DrawChatFeed(ImDrawListPtr draw, SessionSnapshot snapshot, float top)
     {
         var social = snapshot.Social;
         if (social.ChatCount == 0)
-            return;
+            return default;
 
         var display = _ui.DisplaySize;
         var x = Kit.Px(Theme.Space5);
@@ -406,12 +406,13 @@ internal sealed partial class ScreenHost
         ImGui.PushFont(_ui.Sans, Theme.FontSmall);
         var fontSize = ImGui.GetFontSize();
         var y = bottom;
+        var feedTop = bottom;
         var shown = 0;
         for (var i = social.ChatCount - 1; i >= 0 && shown < 5; i--)
         {
             ref var line = ref social.Chat[i];
             var age = SocialView.SecondsSince(line.Tick, snapshot.ServerTick);
-            if (age > ChatFeedSeconds)
+            if (age >= ChatFeedSeconds)
                 break;
 
             var length = ComposeChatLine(social, line, out var head);
@@ -428,10 +429,12 @@ internal sealed partial class ScreenHost
             var at = min + new float2(Kit.Px(6), Kit.Px(2));
             draw.AddText(_ui.Sans, fontSize, at, Kit.Color(Theme.Text, alpha), bytes, width - Kit.Px(Theme.Space3));
             draw.AddText(_ui.Sans, fontSize, at, Kit.Color(LineColor(snapshot, line), alpha), _chatLine.AsSpan(0, head), width - Kit.Px(Theme.Space3));
+            feedTop = y;
             shown++;
         }
 
         ImGui.PopFont();
+        return shown > 0 ? new HudRect(x, feedTop, x + width, bottom) : default;
     }
 
     /// <summary>

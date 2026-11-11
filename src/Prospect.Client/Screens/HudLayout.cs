@@ -14,6 +14,9 @@ internal readonly record struct HudRect(float Left, float Top, float Right, floa
     public bool Spans(float left, float right) => left < Right && right > Left;
 
     public bool Contains(float2 point) => point.X >= Left && point.X <= Right && point.Y >= Top && point.Y <= Bottom;
+
+    /// <summary>True when the rectangles share an area.</summary>
+    public bool Overlaps(in HudRect other) => Spans(other.Left, other.Right) && Top < other.Bottom && Bottom > other.Top;
 }
 
 /// <summary>What the jump strip above the pilot console says, from the most to the least urgent.</summary>
@@ -198,7 +201,8 @@ internal static class HudLayout
         var clear = Px(NavMarkerClear, scale);
         var covers = marker.X > min.X - clear && marker.X < min.X + size.X + clear && marker.Y > min.Y - clear && marker.Y < min.Y + size.Y + clear;
         // The tie from the marker to the card never crosses a panel, the strip or the console.
-        return !covers && !room.Crosses(marker, NavTieAnchor(marker, min, size));
+        return !covers && !room.Chat.Overlaps(new HudRect(min.X, min.Y, min.X + size.X, min.Y + size.Y))
+            && !room.Crosses(marker, NavTieAnchor(marker, min, size));
     }
 
     /// <summary>Where the tie meets the card: the middle of its side nearer the marker.</summary>
@@ -251,7 +255,7 @@ internal static class HudLayout
 
 /// <summary>
 /// Where the target's and the plotted jump's markers may sit over the pilot view: inside the screen's margins,
-/// under the quick buttons, above the pilot console, and clear of the left column, the target readout and the jump
+/// under the quick buttons, above the pilot console, and clear of the left column, recent chat, target readout and jump
 /// strip while each is drawn. Built once a frame and handed to every marker, so the target's arrow, the NAV marker
 /// and the NAV card's tie all keep the same clearances. Rectangles are the pieces themselves; each test grows them
 /// by the room it needs.
@@ -261,10 +265,11 @@ internal readonly struct HudCueRoom
     /// <summary>The area markers live in: inside the margins, under the quick buttons, above the console.</summary>
     public readonly HudRect Screen;
 
-    /// <summary>The left column, the target readout and the jump strip; an empty rectangle when not drawn.</summary>
+    /// <summary>The left column, target readout, jump strip and recent chat; empty when not drawn.</summary>
     public readonly HudRect Column;
     public readonly HudRect Readout;
     public readonly HudRect Strip;
+    public readonly HudRect Chat;
 
     /// <summary>A cue's reach round its point, and the gap kept between a cue and a piece, in pixels.</summary>
     public readonly float Reach;
@@ -276,7 +281,7 @@ internal readonly struct HudCueRoom
     /// </summary>
     public readonly float2 Start;
 
-    public HudCueRoom(float2 display, float scale, float columnBottom, bool targetShown, bool strip)
+    public HudCueRoom(float2 display, float scale, float columnBottom, bool targetShown, bool strip, HudRect chat = default)
     {
         float Px(float design) => MathF.Round(design * scale);
 
@@ -287,6 +292,7 @@ internal readonly struct HudCueRoom
         var half = Px(HudLayout.TargetReadoutWidth) * 0.5f;
         Readout = targetShown ? new HudRect(display.X * 0.5f - half, 0f, display.X * 0.5f + half, Px(HudLayout.Margin + HudLayout.TargetReadoutHeight)) : default;
         Strip = strip ? HudLayout.Strip(display, scale) : default;
+        Chat = chat;
 
         // Straight down from the middle of the view to the first piece under it, straight up to the first over it.
         var pad = Gap + Reach;
@@ -315,14 +321,14 @@ internal readonly struct HudCueRoom
     {
         if (point.X < Screen.Left + pad || point.X > Screen.Right - pad || point.Y < Screen.Top + pad || point.Y > Screen.Bottom - pad)
             return false;
-        return !Inside(Column, point, pad) && !Inside(Readout, point, pad) && !Inside(Strip, point, pad);
+        return !Inside(Column, point, pad) && !Inside(Readout, point, pad) && !Inside(Strip, point, pad) && !Inside(Chat, point, pad);
     }
 
     /// <summary>The largest marker half-size that fits at a point; negative when the point is obstructed.</summary>
     public float Space(float2 point)
     {
         var space = Math.Min(Math.Min(point.X - Screen.Left, Screen.Right - point.X), Math.Min(point.Y - Screen.Top, Screen.Bottom - point.Y));
-        return Math.Min(space, Math.Min(Outside(Column, point), Math.Min(Outside(Readout, point), Outside(Strip, point))));
+        return Math.Min(space, Math.Min(Math.Min(Outside(Column, point), Outside(Readout, point)), Math.Min(Outside(Strip, point), Outside(Chat, point))));
     }
 
     private static float Outside(in HudRect box, float2 point) => box.Right <= box.Left ? float.PositiveInfinity
@@ -347,6 +353,7 @@ internal readonly struct HudCueRoom
         t = Math.Min(t, Entry(Column, pad, from, direction));
         t = Math.Min(t, Entry(Readout, pad, from, direction));
         t = Math.Min(t, Entry(Strip, pad, from, direction));
+        t = Math.Min(t, Entry(Chat, pad, from, direction));
         return from + direction * Math.Max(float.IsFinite(t) ? t : 0f, 0f);
     }
 
@@ -354,7 +361,7 @@ internal readonly struct HudCueRoom
     public bool Crosses(float2 from, float2 to)
     {
         var along = to - from;
-        return Entry(Column, 0f, from, along) < 1f || Entry(Readout, 0f, from, along) < 1f || Entry(Strip, 0f, from, along) < 1f;
+        return Entry(Column, 0f, from, along) < 1f || Entry(Readout, 0f, from, along) < 1f || Entry(Strip, 0f, from, along) < 1f || Entry(Chat, 0f, from, along) < 1f;
     }
 
     private static bool Inside(in HudRect box, float2 point, float pad) =>

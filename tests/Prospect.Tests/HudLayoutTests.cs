@@ -437,6 +437,49 @@ public sealed class HudLayoutTests
     }
 
     [Fact]
+    public void RecentChatMovesTargetAndNavCuesClearUntilTheFeedDisappears()
+    {
+        var display = new float2(1920, 1080);
+        var empty = new HudCueRoom(display, 1f, 140f, true, false);
+        var chat = new HudRect(24f, 850f, 464f, 970f);
+        var room = new HudCueRoom(display, 1f, 140f, true, false, chat);
+        var point = new float2(200, 900);
+        Assert.True(empty.Clear(point, TargetCue.MinimumReach(false, 1f)));
+        Assert.False(room.Clear(point, room.Reach));
+        Assert.True(room.Space(point) < 0f);
+
+        var cue = new TargetCue();
+        cue.Step(empty, true, true, point, default, true, 1f, 1f / 60f);
+        cue.Step(room, false, true, point, default, true, 1f, 1f / 60f);
+        Assert.True(cue.Out);
+        Assert.True(room.Clear(cue.At, ArrowRing(1f)));
+        var toward = point - room.Start;
+        var direction = toward / MathF.Sqrt(toward.X * toward.X + toward.Y * toward.Y);
+        Assert.True(room.Clear(room.Edge(room.Start, direction), room.Reach));
+        Assert.True(room.Crosses(new float2(200, 800), new float2(200, 980)));
+
+        for (var frame = 0; frame < 30; frame++)
+            cue.Step(empty, false, true, point, default, true, 1f, 1f / 60f);
+        Assert.False(cue.Out);
+        Assert.Equal(point, cue.At);
+    }
+
+    [Fact]
+    public void TheNavCardCannotCoverChatEvenWhenItsTieMissesTheFeed()
+    {
+        var display = new float2(1920, 1080);
+        var empty = new HudCueRoom(display, 1f, 140f, false, false);
+        var marker = new float2(700, 700);
+        var size = new float2(250, HudLayout.NavCardHeight);
+        var free = HudLayout.NavFree(display, 1f, false);
+        Assert.True(HudLayout.PlaceNavCard(marker, size, free, empty, 1f, out var min));
+        var chat = new HudRect(min.X + size.X * 0.5f, min.Y, min.X + size.X, min.Y + size.Y);
+        var room = new HudCueRoom(display, 1f, 140f, false, false, chat);
+        Assert.False(room.Crosses(marker, HudLayout.NavTieAnchor(marker, min, size)));
+        Assert.False(HudLayout.PlaceNavCard(marker, size, free, room, 1f, out _));
+    }
+
+    [Fact]
     public void TheNavCardIsDroppedWhenItsTieWouldCrossTheLeftColumn()
     {
         var display = new float2(1280, 720);
