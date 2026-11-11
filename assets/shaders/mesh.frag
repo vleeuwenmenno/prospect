@@ -5,7 +5,13 @@ layout(location = 0) in vec3 worldNormal;
 layout(location = 1) in vec3 worldPosition;
 layout(location = 2) in vec3 localPosition;
 layout(location = 3) in vec4 color;
+layout(location = 4) flat in int cut;
 layout(location = 0) out vec4 outColor;
+
+// On for the hull pipeline: a hull going through a jump's opening is cut away where it is past it, before anything
+// is stored, so the scene, its depth and the lenses that read them never see the part that is gone. Off for
+// asteroids, which keep their early depth test.
+layout(constant_id = 0) const bool CutHulls = false;
 
 float hash(vec3 p)
 {
@@ -27,6 +33,9 @@ float noise(vec3 x)
 
 void main()
 {
+    if (CutHulls && cut >= 0 && dot(worldPosition - frame.clips[cut * 2].xyz, frame.clips[cut * 2 + 1].xyz) > 0.0)
+        discard;
+
     vec3 n = normalize(worldNormal);
     vec3 view = normalize(-worldPosition);
     vec3 albedo = color.rgb;

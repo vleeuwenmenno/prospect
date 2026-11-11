@@ -35,12 +35,12 @@ public sealed class ObserverPassageTests
     {
         var flight = Flight(drive);
         var radius = flight.Radius;
-        var previous = WorldView.Passage(JumpPhase.Align, 0f, flight);
+        var previous = HullVisuals.Passage(JumpPhase.Align, 0f, flight);
         Assert.Equal(0f, previous.Offset);
         Assert.True(previous.Visible && previous.Clip > 0f);
         for (var i = 0; i <= 100; i++)
         {
-            var shape = WorldView.Passage(JumpPhase.Charge, i / 100f, flight);
+            var shape = HullVisuals.Passage(JumpPhase.Charge, i / 100f, flight);
             // The opening stays where it opened; the hull only moves forward, toward it and through it.
             Assert.Equal(previous.Mouth, shape.Mouth);
             Assert.True(shape.Offset >= previous.Offset);
@@ -66,14 +66,14 @@ public sealed class ObserverPassageTests
         var flight = Flight(drive);
         var radius = flight.Radius;
         var first = true;
-        var previous = WorldView.Passage(JumpPhase.Tunnel, 0f, flight);
+        var previous = HullVisuals.Passage(JumpPhase.Tunnel, 0f, flight);
         Assert.False(previous.Visible);
         Assert.True(previous.Clip < 0f);
         foreach (var phase in new[] { JumpPhase.Tunnel, JumpPhase.Arrive })
         {
             for (var i = 0; i <= 100; i++)
             {
-                var shape = WorldView.Passage(phase, i / 100f, flight);
+                var shape = HullVisuals.Passage(phase, i / 100f, flight);
                 Assert.True(shape.Mouth < 0f, "the opening is behind the hull");
                 Assert.True(shape.Offset >= previous.Offset);
                 if (shape.Visible && first)
@@ -103,7 +103,7 @@ public sealed class ObserverPassageTests
         var hull = new HullView { Jump = JumpPhase.Charge, JumpTimer = flight.FtlEnergy, JumpCalculation = flight.FtlCalculateSeconds * 0.5f };
         Assert.Equal(1f, WorldView.ChargeFraction(hull, flight));
         Assert.Equal(0.5f, WorldView.JumpProgress(hull, flight), 3);
-        var shape = WorldView.Passage(hull.Jump, WorldView.JumpProgress(hull, flight), flight);
+        var shape = HullVisuals.Passage(hull.Jump, WorldView.JumpProgress(hull, flight), flight);
         Assert.True(shape.Visible && shape.Offset == 0f);
 
         // The other way round, the same.
@@ -171,7 +171,7 @@ public sealed class ObserverPassageTests
                 // What the watcher draws follows the server's stage: forward through the charge, then out of the far
                 // opening; it never steps backward within a stage.
                 var progress = WorldView.JumpProgress(seen, flight);
-                var shape = WorldView.Passage(seen.Jump, progress, flight);
+                var shape = HullVisuals.Passage(seen.Jump, progress, flight);
                 if (seen.Jump == lastPhase)
                     Assert.True(shape.Offset >= lastOffset - 1e-3f, $"{seen.Jump}: {shape.Offset} after {lastOffset}");
                 lastOffset = shape.Offset;

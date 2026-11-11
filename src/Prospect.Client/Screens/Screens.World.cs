@@ -340,7 +340,7 @@ internal sealed partial class ScreenHost
         for (var i = 0; i < snapshot.HullCount; i++)
         {
             ref var hull = ref snapshot.Hulls[i];
-            var position = world.HullPosition(hull);
+            var position = world.DrawnPosition(hull);
             if (!world.Project(position, out var screen))
                 continue;
 
@@ -558,7 +558,7 @@ internal sealed partial class ScreenHost
         if (world.HoveredHull != 0 && world.HoveredHull != world.TargetHull && world.TryGetHull(world.HoveredHull, out var hovered))
         {
             var design = designs[Math.Min(hovered.Design, designs.Length - 1)];
-            if (world.ProjectDisc(hovered.Position, design.Flight.Radius, out var screen, out var pixels, out _))
+            if (world.ProjectDisc(world.DrawnPosition(hovered), design.Flight.Radius, out var screen, out var pixels, out _))
             {
                 var reach = Math.Max(pixels * 1.3f, Kit.Px(16));
                 Brackets(draw, screen - new float2(reach, reach), screen + new float2(reach, reach), Kit.Px(8), Kit.Color(Theme.Text, 0.85f));
@@ -573,7 +573,7 @@ internal sealed partial class ScreenHost
         if (world.TargetHull != 0 && world.TryGetHull(world.TargetHull, out var target))
         {
             var design = designs[Math.Min(target.Design, designs.Length - 1)];
-            DrawTargetIndicator(draw, world, target.Position, design.Flight.Radius, target.Owner == snapshot.PlayerId ? Theme.Accent : Theme.Info, false);
+            DrawTargetIndicator(draw, world, world.DrawnPosition(target), design.Flight.Radius, target.Owner == snapshot.PlayerId ? Theme.Accent : Theme.Info, false);
         }
         else if (world.TargetRock is { } targetRock && world.TryGetRock(targetRock, out var rockPosition, out var rockRadius))
         {

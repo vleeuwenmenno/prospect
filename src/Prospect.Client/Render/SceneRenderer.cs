@@ -56,6 +56,9 @@ internal struct FrameConstants
     /// command view.
     /// </summary>
     public FtlOpenings Openings;
+
+    /// <summary>Per followed jump, the plane its opening cuts its own hull at; see <see cref="FtlClips"/>.</summary>
+    public FtlClips Clips;
 }
 
 /// <summary>Four vectors per opening for <see cref="FrameConstants.Openings"/>; matches <c>frame.glsl</c>.</summary>
@@ -67,17 +70,36 @@ internal struct FtlOpenings
     /// <summary>
     /// Fills opening <paramref name="index"/>, 0 to <see cref="CompositeConstants.MaxLenses"/> - 1: where it is
     /// relative to the camera and its radius when fully open in metres, the axis it faces along (the hull's nose)
-    /// and up across it, the drive kind, how far it is open from 0 to 1, and a per-hull seed. A hull going through
-    /// it is hidden past it (<paramref name="clip"/> 1) or before it (-1), within a cylinder along the axis of the
-    /// given radius and length; 0 hides nothing.
+    /// and up across it, the drive kind, how far it is open from 0 to 1, and a per-hull seed.
     /// </summary>
-    public void Set(int index, Vector3 centre, float radius, Vector3 axis, Vector3 up, FtlKind kind, float open, float seed, float clip, float clipRadius, float clipLength)
+    public void Set(int index, Vector3 centre, float radius, Vector3 axis, Vector3 up, FtlKind kind, float open, float seed)
     {
         var at = index * 4;
         this[at] = new float4(centre.X, centre.Y, centre.Z, radius);
-        this[at + 1] = new float4(axis.X, axis.Y, axis.Z, clipRadius);
-        this[at + 2] = new float4(up.X, up.Y, up.Z, clipLength);
-        this[at + 3] = new float4((float)kind, open, seed, clip);
+        this[at + 1] = new float4(axis.X, axis.Y, axis.Z, 0);
+        this[at + 2] = new float4(up.X, up.Y, up.Z, 0);
+        this[at + 3] = new float4((float)kind, open, seed, 0);
+    }
+}
+
+/// <summary>
+/// Two vectors per followed jump for <see cref="FrameConstants.Clips"/>, by passage slot; matches <c>frame.glsl</c>.
+/// A hull going through a rift or a wormhole is cut where it is past the opening, in the mesh pass, so neither the
+/// scene nor its depth ever hold the part that is gone, and nothing else is cut with it.
+/// </summary>
+[InlineArray(Prospect.Client.World.HullVisuals.MaxPassages * 2)]
+internal struct FtlClips
+{
+    private float4 _element;
+
+    /// <summary>
+    /// Fills slot <paramref name="index"/>: a point on the cutting plane relative to the camera, and the plane's
+    /// normal toward the side that is hidden. A zero normal cuts nothing.
+    /// </summary>
+    public void Set(int index, Vector3 point, Vector3 hidden)
+    {
+        this[index * 2] = new float4(point.X, point.Y, point.Z, 0);
+        this[index * 2 + 1] = new float4(hidden.X, hidden.Y, hidden.Z, 0);
     }
 }
 
@@ -106,7 +128,10 @@ internal struct FtlMark
     public float4 Axis;
 }
 
-/// <summary>One drawn mesh: a camera-relative 3x4 transform and a colour. Alpha 0 is rock, 1 is hull plating.</summary>
+/// <summary>
+/// One drawn mesh: a camera-relative 3x4 transform and a colour. Alpha 0 is rock, 1 is hull plating, 2 the pilot's
+/// own hull; a hull cut by a jump's opening adds four times its passage slot plus one.
+/// </summary>
 internal struct MeshInstance
 {
     public float4 Row0;
@@ -157,6 +182,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private readonly VkPipeline _starPipeline;
     private readonly VkPipeline _dustPipeline;
     private readonly VkPipeline _meshPipeline;
+    private readonly VkPipeline _hullPipeline;
     private readonly VkPipeline _gridPipeline;
     private readonly VkPipeline _tonemapPipeline;
     private readonly VkPipeline _ftlMarkPipeline;
@@ -374,6 +400,12 @@ internal sealed unsafe class SceneRenderer : IDisposable
         _starPipeline = ScenePipeline(Module(shaders, "stars.vert"), Module(shaders, "stars.frag"), starInput, Presets.Rasterization.Fill.CullNone, &depthOff, &additive);
         _dustPipeline = ScenePipeline(Module(shaders, "dust.vert"), Module(shaders, "dust.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthRead, &additive);
         _meshPipeline = ScenePipeline(Module(shaders, "mesh.vert"), Module(shaders, "mesh.frag"), meshInput, &cullBack, &depthWrite, Presets.BlendState.BlendNone);
+        // Hulls are drawn with the cut of a jump's opening switched on. Asteroids are not, so the discard it needs
+        // never costs them their early depth test.
+        var cutHulls = 1u;
+        var cutEntry = new VkSpecializationMapEntry { ConstantID = 0, Offset = (ByteSize32)0, Size = new ByteSize64(sizeof(uint)) };
+        var cutInfo = new VkSpecializationInfo { MapEntryCount = 1, MapEntries = &cutEntry, DataSize = new ByteSize64(sizeof(uint)), Data = &cutHulls };
+        _hullPipeline = ScenePipeline(Module(shaders, "mesh.vert"), Module(shaders, "mesh.frag"), meshInput, &cullBack, &depthWrite, Presets.BlendState.BlendNone, &cutInfo);
         _gridPipeline = ScenePipeline(Module(shaders, "grid.vert"), Module(shaders, "grid.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthRead, &translucent);
         _tonemapPipeline = Pipeline(Module(shaders, "fullscreen.vert"), Module(shaders, "tonemap.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthOff, Presets.BlendState.BlendNone, _tonemapPipelineLayout, swapchain.RenderPass);
 
@@ -481,10 +513,10 @@ internal sealed unsafe class SceneRenderer : IDisposable
 
         if (lensing)
             KeepScene(commands, _skyImage, false, ref color, ref depth);
-        DrawMeshes(commands, frameIndex, rocks);
+        DrawMeshes(commands, frameIndex, rocks, _meshPipeline);
         if (lensing)
             KeepScene(commands, _rocksImage, true, ref color, ref depth);
-        DrawMeshes(commands, frameIndex, hulls);
+        DrawMeshes(commands, frameIndex, hulls, _hullPipeline);
 
         commands.BindPipeline(VkPipelineBindPoint.Graphics, _dustPipeline);
         commands.Draw(6, DustCount, 0, 0);
@@ -520,14 +552,14 @@ internal sealed unsafe class SceneRenderer : IDisposable
         _fallbackReady = true;
     }
 
-    private void DrawMeshes(CommandBuffer commands, int frameIndex, ReadOnlySpan<DrawBatch> batches)
+    private void DrawMeshes(CommandBuffer commands, int frameIndex, ReadOnlySpan<DrawBatch> batches, VkPipeline pipeline)
     {
         if (batches.IsEmpty)
             return;
         var zero = new ByteSize64(0);
         Span<VkBuffer> buffers = [_vertexBuffer.Buffer, _instanceBuffers[frameIndex].Buffer];
         Span<ByteSize64> offsets = [zero, zero];
-        commands.BindPipeline(VkPipelineBindPoint.Graphics, _meshPipeline);
+        commands.BindPipeline(VkPipelineBindPoint.Graphics, pipeline);
         commands.BindVertexBuffers(0, buffers, offsets);
         commands.BindIndexBuffer(_indexBuffer.Buffer, zero, VkIndexType.UInt32);
         foreach (var batch in batches)
@@ -619,7 +651,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         DestroyTargets();
         device.DestroySampler(_sampler, null);
         device.DestroySampler(_pointSampler, null);
-        foreach (var pipeline in (ReadOnlySpan<VkPipeline>)[_backgroundPipeline, _starPipeline, _dustPipeline, _meshPipeline, _gridPipeline, _tonemapPipeline, _ftlMarkPipeline])
+        foreach (var pipeline in (ReadOnlySpan<VkPipeline>)[_backgroundPipeline, _starPipeline, _dustPipeline, _meshPipeline, _hullPipeline, _gridPipeline, _tonemapPipeline, _ftlMarkPipeline])
             device.DestroyPipeline(pipeline, null);
         device.DestroyPipelineLayout(_scenePipelineLayout, null);
         device.DestroyPipelineLayout(_tonemapPipelineLayout, null);
@@ -648,8 +680,9 @@ internal sealed unsafe class SceneRenderer : IDisposable
         VertexInput input,
         VkPipelineRasterizationStateCreateInfo* rasterization,
         VkPipelineDepthStencilStateCreateInfo* depth,
-        VkPipelineColorBlendStateCreateInfo* blend
-    ) => Pipeline(vertex, fragment, input, rasterization, depth, blend, _scenePipelineLayout, VkRenderPass.NullHandle);
+        VkPipelineColorBlendStateCreateInfo* blend,
+        VkSpecializationInfo* fragmentConstants = null
+    ) => Pipeline(vertex, fragment, input, rasterization, depth, blend, _scenePipelineLayout, VkRenderPass.NullHandle, fragmentConstants);
 
     private VkPipeline Pipeline(
         VkShaderModule vertex,
@@ -659,11 +692,14 @@ internal sealed unsafe class SceneRenderer : IDisposable
         VkPipelineDepthStencilStateCreateInfo* depth,
         VkPipelineColorBlendStateCreateInfo* blend,
         VkPipelineLayout layout,
-        VkRenderPass renderPass
+        VkRenderPass renderPass,
+        VkSpecializationInfo* fragmentConstants = null
     )
     {
         // The stages object owns both modules and destroys them once the pipeline exists.
-        using var stages = new ShaderStages(_gpu.Device, [Presets.ShaderStage.Vertex(vertex), Presets.ShaderStage.Fragment(fragment)], null);
+        var fragmentStage = Presets.ShaderStage.Fragment(fragment);
+        fragmentStage.SpecializationInfo = fragmentConstants;
+        using var stages = new ShaderStages(_gpu.Device, [Presets.ShaderStage.Vertex(vertex), fragmentStage], null);
 
         var viewportState = new VkPipelineViewportStateCreateInfo { ViewportCount = 1, ScissorCount = 1 };
         var dynamicStates = stackalloc VkDynamicState[] { VkDynamicState.Viewport, VkDynamicState.Scissor };

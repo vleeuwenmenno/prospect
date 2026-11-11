@@ -13,6 +13,9 @@ layout(set = 1, binding = 4) uniform sampler2D rocksDepth;
 
 const float Far = 1e30;
 
+// Bit of bentBy for the pilot's own opening; bits 0 to 3 are frame.openings.
+const int OwnBit = 16;
+
 // How far along the view's forward axis what a depth value holds is; the sky is infinitely far.
 float viewDepth(float depth)
 {
@@ -31,6 +34,21 @@ float sphereRay(vec3 v, vec3 c, float r)
     float b = dot(c, v);
     float h = r * r - (dot(c, c) - b * b);
     return h > 0.0 ? b - sqrt(h) : b;
+}
+
+// Where a view ray crosses the plane through c across axis, along the view; Far where it does not.
+float planeDepth(vec3 v, vec3 c, vec3 axis)
+{
+    float facing = dot(v, axis);
+    float t = abs(facing) > 1e-5 ? dot(c, axis) / facing : -1.0;
+    return t > 0.0 ? rayDepth(v, t) : Far;
+}
+
+// Where a view ray comes to a sphere, as sphereRay has it, along the view; Far where that is behind the camera.
+float sphereDepth(vec3 v, vec3 c, float r)
+{
+    float t = sphereRay(v, c, r);
+    return t > 0.0 ? rayDepth(v, t) : Far;
 }
 
 // Matches CompositeConstants in SceneRenderer.cs.
@@ -146,8 +164,9 @@ bool project(vec3 p, out vec2 at)
 // outline, the same seen from either side; a wormhole a sphere. Where this pixel's ray meets the opening is compared
 // with the depth of what is there: a hull or rock in front of the opening, at this pixel, is neither bent nor
 // covered by it. Each opening is tested on its own, so where two overlap one never lets the other through a rock.
-// Bending notes in bendDepth how far away the nearest opening that bent this pixel is.
-void opening(int index, vec3 v, vec2 pos, float pixelAngle, float time, float depth, inout vec2 bend, inout float bendDepth, inout vec4 cover, inout vec3 glow)
+// Bending sets this opening's bit in bentBy, so a bent lookup can tell where each opening that bent it lies along
+// the rays it reads.
+void opening(int index, vec3 v, vec2 pos, float pixelAngle, float time, float depth, inout vec2 bend, inout int bentBy, inout vec4 cover, inout vec3 glow)
 {
     vec4 place = frame.openings[index * 4];
     vec3 axis = frame.openings[index * 4 + 1].xyz;
@@ -184,7 +203,7 @@ void opening(int index, vec3 v, vec2 pos, float pixelAngle, float time, float de
         if (project(c + hit + side * shift.x + up * shift.y, bent))
         {
             bend += (bent - pos) * (1.0 - inside);
-            bendDepth = min(bendDepth, at);
+            bentBy |= 1 << index;
         }
         // The far side is laid on the window and shifts with the view through it, so it reads as deep, not
         // painted on.
@@ -211,7 +230,7 @@ void opening(int index, vec3 v, vec2 pos, float pixelAngle, float time, float de
         {
             float size = tan(rim) / frame.lens.x;
             bend += deflect(pos - centre, size * 1.3, size * 4.0) * (1.0 - inside);
-            bendDepth = min(bendDepth, at);
+            bentBy |= 1 << index;
         }
         // Across the sphere as seen from here, with the hull's own up, so the far sky does not roll with the
         // camera; it shifts as the sphere is seen from another side.
@@ -280,7 +299,7 @@ vec3 riftThroat(vec3 v, float travel, float seed, float time, float pixelAngle)
 // than through it: the side it is on is eased (frame.ftlUp.w), and there the view dissolves to the far side.
 // A wormhole's opening is a sphere; inside the sphere the far side is a half of the view. A rift's is a flat
 // window across the axis with a torn outline.
-float ownPassage(int kind, vec3 v, vec2 pos, float pixelAngle, float depth, bool ownHull, inout vec2 bend, inout float bendDepth, inout vec3 glow)
+float ownPassage(int kind, vec3 v, vec2 pos, float pixelAngle, float depth, bool ownHull, inout vec2 bend, inout int bentBy, inout vec3 glow)
 {
     bool entry = int(frame.ftl.y + 0.5) == 1;
     vec4 mouth = entry ? frame.ftlEntry : frame.ftlExit;
@@ -376,7 +395,7 @@ float ownPassage(int kind, vec3 v, vec2 pos, float pixelAngle, float depth, bool
     if (!inFront && lens != vec2(0.0))
     {
         bend += lens * realSide;
-        bendDepth = min(bendDepth, at);
+        bentBy |= OwnBit;
     }
     if (r > 0.0 && !inFront)
     {
@@ -415,6 +434,27 @@ vec3 hyperspaceTunnel(vec3 v, float travel, float pixelAngle)
     return vec3(0.002, 0.006, 0.02) + vec3(0.4, 0.6, 1.0) * 0.0075 / (theta + 0.05) + vec3(0.65, 0.82, 1.0) * streaks * 1.8;
 }
 
+// Where, along the view, a ray first meets an opening that bent the lookup it belongs to: each opening worked out
+// the way it was when it bent the view, so a bent lookup is judged by the openings along the ray it reads.
+float mouthDepth(int bentBy, vec3 v)
+{
+    float nearest = Far;
+    for (int i = 0; i < 4; i++)
+    {
+        if ((bentBy & (1 << i)) == 0)
+            continue;
+        vec4 place = frame.openings[i * 4];
+        vec4 params = frame.openings[i * 4 + 3];
+        nearest = min(nearest, int(params.x + 0.5) == 3 ? planeDepth(v, place.xyz, frame.openings[i * 4 + 1].xyz) : sphereDepth(v, place.xyz, place.w * params.y));
+    }
+    if ((bentBy & OwnBit) != 0)
+    {
+        vec4 mouth = int(frame.ftl.y + 0.5) == 1 ? frame.ftlEntry : frame.ftlExit;
+        nearest = min(nearest, int(frame.ftl.x + 0.5) == 3 ? planeDepth(v, mouth.xyz, frame.ftlAxis.xyz) : sphereDepth(v, mouth.xyz, mouth.w));
+    }
+    return nearest;
+}
+
 void main()
 {
     float aspect = push.setup.y;
@@ -427,9 +467,7 @@ void main()
     // The scene's alpha says what is there: 0 sky, 0.25 an asteroid, 0.375 a hull, 0.5 the pilot's own hull. Read
     // exactly, never filtered.
     ivec2 texel = ivec2(gl_FragCoord.xy);
-    float what = texelFetch(scene, texel, 0).a;
-    bool ownHull = what > 0.44;
-    bool hull = what > 0.3 && !ownHull;
+    bool ownHull = texelFetch(scene, texel, 0).a > 0.44;
 
     int ownKind = int(frame.ftl.x + 0.5);
     int ownStage = int(frame.ftl.y + 0.5);
@@ -439,37 +477,16 @@ void main()
     float depth = lensing ? viewDepth(texelFetch(sceneDepth, texel, 0).r) : Far;
     vec3 v = viewRay(ndc);
 
-    // A hull flying into another hull's opening is gone past it, and one coming out of one is not there yet: where
-    // a hull is inside the space an opening hides, what is behind it shows, with its depth.
-    bool hidden = false;
-    if (hull)
-    {
-        vec3 p = v * (depth / dot(v, frame.cameraForward.xyz));
-        for (int i = 0; i < 4; i++)
-        {
-            if (i >= count)
-                break;
-            vec4 clipAxis = frame.openings[i * 4 + 1];
-            float clip = frame.openings[i * 4 + 3].w;
-            vec3 from = p - frame.openings[i * 4].xyz;
-            float along = dot(from, clipAxis.xyz);
-            float across = length(from - clipAxis.xyz * along);
-            hidden = hidden || (clip * along > 0.0 && across < clipAxis.w && abs(along) < frame.openings[i * 4 + 2].w);
-        }
-        if (hidden)
-            depth = viewDepth(texelFetch(rocksDepth, texel, 0).r);
-    }
-
     // Openings of other hulls, and of the pilot's own when seen from the command view.
     vec2 bend = vec2(0.0);
-    float bendDepth = Far;
+    int bentBy = 0;
     vec4 cover = vec4(0.0);
     vec3 glow = vec3(0.0);
     for (int i = 0; i < 4; i++)
     {
         if (i >= count)
             break;
-        opening(i, v, pos, pixelAngle, time, depth, bend, bendDepth, cover, glow);
+        opening(i, v, pos, pixelAngle, time, depth, bend, bentBy, cover, glow);
     }
 
     // The pilot's own jump, from the inside.
@@ -477,7 +494,7 @@ void main()
     vec3 throat = vec3(0.0);
     if (ownPassageOn)
     {
-        real = ownPassage(ownKind, v, pos, pixelAngle, depth, ownHull, bend, bendDepth, glow);
+        real = ownPassage(ownKind, v, pos, pixelAngle, depth, ownHull, bend, bentBy, glow);
         if (real < 1.0)
             throat = ownKind == 3 ? riftThroat(v, frame.ftlAxis.w, frame.ftl.w, time, pixelAngle) : wormholeThroat(v, frame.ftlAxis.w, frame.ftl.w, time, pixelAngle);
     }
@@ -485,28 +502,34 @@ void main()
     vec3 hdr;
     if (bend == vec2(0.0))
     {
-        hdr = hidden ? texelFetch(rocks, texel, 0).rgb : texelFetch(scene, texel, 0).rgb;
+        hdr = texelFetch(scene, texel, 0).rgb;
     }
     else
     {
         // A bent lookup can leave the screen. Mirroring it back keeps a field of stars a field of stars, where
         // clamping would smear the edge pixels into streaks.
         vec2 lookup = 1.0 - abs(1.0 - abs((pos + bend) / vec2(aspect, 1.0) * 0.5 + 0.5));
-        // A lens only images what is behind its opening. Where the bent ray lands on something nearer than the
+        // A lens only images what is behind its opening. Where the bent ray lands on something nearer than an
         // opening that bent it (the hull that opened it, seen from behind, or a rock in front), or on the pilot's
         // own hull, which no jump bends, what it would see there is hidden, and the scene as it was before hulls
         // were drawn stands in; where an asteroid in that is also in front, the sky. Falling back to the unbent
         // view instead would leave a hard-edged, magnified outline of the thing in front around it. All four texels
-        // the filtered lookup blends are checked, or the edge of what is in front would bleed in.
+        // the filtered lookup blends are checked, each against where the openings lie along its own ray: the ray
+        // through this pixel meets a tilted opening at another depth, and would let a rock in front through.
         vec4 landedWhat = textureGather(scene, lookup, 3);
         vec4 landedDepth = textureGather(sceneDepth, lookup, 0);
         vec4 rocksAt = textureGather(rocksDepth, lookup, 0);
+        vec2 size = vec2(textureSize(scene, 0));
+        vec2 corner = floor(lookup * size - 0.5);
         bool sceneClear = true;
         bool rocksClear = true;
         for (int i = 0; i < 4; i++)
         {
-            sceneClear = sceneClear && landedWhat[i] < 0.44 && viewDepth(landedDepth[i]) >= bendDepth;
-            rocksClear = rocksClear && viewDepth(rocksAt[i]) >= bendDepth;
+            // The gather's order: (0, 1), (1, 1), (1, 0), (0, 0) from the corner, clamped as the sampler clamps.
+            vec2 gathered = clamp(corner + vec2(i == 1 || i == 2 ? 1.0 : 0.0, i < 2 ? 1.0 : 0.0), vec2(0.0), size - 1.0);
+            float mouth = mouthDepth(bentBy, viewRay((gathered + 0.5) / size * 2.0 - 1.0));
+            sceneClear = sceneClear && landedWhat[i] < 0.44 && viewDepth(landedDepth[i]) >= mouth;
+            rocksClear = rocksClear && viewDepth(rocksAt[i]) >= mouth;
         }
         hdr = sceneClear ? texture(scene, lookup).rgb : rocksClear ? texture(rocks, lookup).rgb : texture(sky, lookup).rgb;
     }

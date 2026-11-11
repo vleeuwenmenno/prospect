@@ -23,7 +23,8 @@ layout(set = 0, binding = 0) uniform Frame
     vec4 ftlShape;     // x: how far hyperspace stretches the stars, y: how far the entry is open, z: the exit,
                        // w: how much of the tunnel's or throat's light falls on the pilot's hull
     vec4 openings[16]; // rifts and wormholes seen from outside, four vectors each: xyz camera-relative centre and w
-                       // radius fully open in metres; xyz the axis it faces (the hull's nose) and w the radius of the
-                       // space it hides a hull in; xyz up across it and w that space's length; x drive kind
-                       // (2 wormhole, 3 rift), y how far open 0..1, z seed, w which side it hides (1 past, -1 before)
+                       // radius fully open in metres; xyz the axis it faces (the hull's nose); xyz up across it; x
+                       // drive kind (2 wormhole, 3 rift), y how far open 0..1, z seed
+    vec4 clips[64];    // per followed jump (passage slot), two vectors: xyz a camera-relative point on the plane its
+                       // opening cuts its own hull at, and xyz the plane's normal toward the hidden side (zero: none)
 } frame;

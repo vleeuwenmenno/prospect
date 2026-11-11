@@ -44,7 +44,7 @@ internal sealed class WorldView
     private const int RingY = 1;
     // Enough for the block around the camera plus the heart of a jump's destination, generated ahead of arrival.
     private const int SlotCount = (RingXZ * 2 + 1) * (RingXZ * 2 + 1) * (RingY * 2 + 1) + 27;
-    private const float JumpGap = 3000f;
+    private const float JumpGap = HullVisuals.JumpGap;
     private const float NearPlane = 0.25f;
     private const float PilotFov = 62f * MathF.PI / 180f;
     private const float CommandFov = 48f * MathF.PI / 180f;
@@ -71,29 +71,11 @@ internal sealed class WorldView
     private const float RockFineRadius = 1000f;
     private const float RockFineNearness = 0.35f;
 
-    // Where a rift's or wormhole's opening sits, in hull radii: how far ahead of the nose it opens while the drive
-    // works, how far behind an arriving hull it closes, and its radius when fully open. The lens bends the view out
-    // to about LensReach opening radii, so an opening that far off the view still gets drawn.
-    private const float OpeningAhead = 5f;
-    private const float OpeningBehind = 2f;
-    private const float OpeningRadius = 1.4f;
+    // Where a rift's or wormhole's opening sits, in hull radii (see HullVisuals). The lens bends the view out to about
+    // LensReach opening radii, so an opening that far off the view still gets drawn.
+    private const float OpeningAhead = HullVisuals.OpeningAhead;
+    private const float OpeningRadius = HullVisuals.OpeningRadius;
     private const float LensReach = 4.4f;
-
-    /// <summary>Where another hull's rift or wormhole is drawn this frame, and how its hull is moved along it.</summary>
-    private struct PassageState
-    {
-        public uint Id;
-        public bool Seen;
-        public Double3 Mouth;
-        public Vector3 Axis;
-        public Vector3 Up;
-        public FtlKind Kind;
-        public float Radius;
-        public float Seed;
-        public float Offset;
-        public float Open;
-        public float Clip;
-    }
 
     /// <summary>A sector's generated contents and the job that fills them.</summary>
     private sealed class SectorSlot : IJob
@@ -196,9 +178,12 @@ internal sealed class WorldView
     private Vector3 _jumpUp = Vector3.UnitY;
     private float _jumpOffset;
     private float _jumpThrough;
-    // Jumps of other hulls being drawn from outside, by hull id (0 for a free slot), and the time of the last draw.
-    private readonly PassageState[] _passages = new PassageState[32];
-    private float _passageTime;
+    // Where every hull is drawn this frame, with the jumps of hulls seen from outside; worked out in the update.
+    private readonly HullVisuals _visuals = new();
+    private bool _ownInside = true;
+
+    /// <summary>Where every hull is drawn this frame; for tests.</summary>
+    internal HullVisuals Visuals => _visuals;
     private bool _jumpThroughExit;
     private float _jumpTravel;
     private float _jumpCover;
@@ -430,6 +415,11 @@ internal sealed class WorldView
         OwnPosition = jumped ? own.Position : Double3.Lerp(own.PreviousPosition, own.Position, alpha);
         OwnOrientation = Quaternion.Slerp(own.PreviousOrientation, own.Orientation, alpha);
 
+        // Every hull's place this frame, once, for the drawing, the picking and the markers alike. The pilot sees
+        // their own jump from inside until the command view has mostly taken over.
+        _ownInside = _commandBlend < 0.5f;
+        _visuals.Update(snapshot.Hulls.AsSpan(0, snapshot.HullCount), _designs, alpha, dt, _ownInside, FtlPreview);
+
         if (own.Id != _ownId)
         {
             // The player is in a different hull: put the camera behind it and forget the old target and course.
@@ -564,46 +554,47 @@ internal sealed class WorldView
         var markCount = 0;
         var composite = new CompositeConstants { Setup = new float4(Exposure, aspect, time, 0) };
         var openings = new FtlOpenings();
-        var passageDt = Math.Clamp(time - _passageTime, 0f, 0.1f);
-        _passageTime = time;
+        var clips = new FtlClips();
 
-        // Hulls.
-        for (var i = 0; i < snapshot.HullCount && candidateCount < _candidates.Length; i++)
+        // Hulls, where the update has them drawn this frame.
+        var visuals = _visuals.Hulls;
+        for (var i = 0; i < Math.Min(snapshot.HullCount, visuals.Length) && candidateCount < _candidates.Length; i++)
         {
             ref var hull = ref snapshot.Hulls[i];
+            ref readonly var visual = ref visuals[i];
             var design = _designs[Math.Min(hull.Design, _designs.Length - 1)];
-            var leap = hull.Position.RelativeTo(hull.PreviousPosition).LengthSquared() > JumpGap * JumpGap;
-            var position = (leap ? hull.Position : Double3.Lerp(hull.PreviousPosition, hull.Position, alpha)).RelativeTo(camera);
-            // The pilot's own hull is drawn where the jump has carried it, and seen from the inside of its own jump.
-            var inside = hull.IsOwn && _commandBlend < 0.5f;
-            if (hull.IsOwn)
-                position += _jumpAxis * _jumpOffset;
-            var orientation = Quaternion.Slerp(hull.PreviousOrientation, hull.Orientation, alpha);
+            var position = DrawnPosition(visual).RelativeTo(camera);
+            var orientation = visual.Orientation;
 
-            // Seen from outside, a jumping hull is drawn where its passage has carried it, or not at all while it
-            // is between the openings. Its own pilot rides through the tunnel with it.
-            if (inside && hull.Jump != JumpPhase.None)
+            // The pilot's own hull is seen from the inside of its own jump; every other jump is seen from outside,
+            // and a hull between a jump's ends is not drawn at all.
+            if (visual.Inside && hull.Jump != JumpPhase.None)
                 AddOwnJumpMarks(design.Flight, position, marks, ref markCount);
-            else if (!inside && !AddJump(hull, design.Flight, ref position, orientation, camera, aspect, passageDt, marks, ref markCount, ref composite, ref openings))
+            else if (!visual.Inside)
+                AddHyperspaceMarks(hull, visual, design.Flight, camera, marks, ref markCount);
+            var stretch = visual.Stretch;
+            if (!visual.Visible || !Visible(position, design.Flight.Radius * stretch, aspect, out _))
                 continue;
-            var material = inside ? 2f : 1f;
-            if (!Visible(position, design.Flight.Radius, aspect, out _))
-                continue;
+            // The material says what the mesh is and, above it in steps of four, which opening cuts it.
+            var material = visual.Inside ? 2f : 1f + 4f * (visual.Clip + 1);
             if (hull.Blocks == design.FullMask)
             {
-                Add(ref candidateCount, Math.Min(hull.Design, _designs.Length - 1), position, orientation, 1f, design.Color, material);
+                Add(ref candidateCount, Math.Min(hull.Design, _designs.Length - 1), position, orientation, 1f, design.Color, material, stretch);
                 continue;
             }
 
             // A hull that has lost blocks is drawn from the ones it still has, each as its own cube.
             for (var b = 0; b < design.BlockOffsets.Length && candidateCount < _candidates.Length; b++)
             {
-                if ((hull.Blocks & 1UL << b) != 0)
-                    Add(ref candidateCount, _cubeMesh, position + Vector3.Transform(design.BlockOffsets[b], orientation), orientation, design.BlockSize, design.Color, material);
+                if ((hull.Blocks & 1UL << b) == 0)
+                    continue;
+                var block = design.BlockOffsets[b];
+                block.Z *= stretch;
+                Add(ref candidateCount, _cubeMesh, position + Vector3.Transform(block, orientation), orientation, design.BlockSize, design.Color, material, stretch);
             }
         }
 
-        EndPassages(camera, aspect, passageDt, ref composite, ref openings);
+        AddOpenings(camera, aspect, marks, ref markCount, ref composite, ref openings, ref clips);
 
         // Rocks in the sectors around the camera: the camera's own sector first, so that if the instance buffer
         // ever fills it is the far rocks that go missing.
@@ -676,10 +667,11 @@ internal sealed class WorldView
             Grid = new float4(Wrap(camera.X, 1000), Wrap(camera.Z, 1000), Wrap(camera.X, sectorSize), Wrap(camera.Z, sectorSize)),
             GridPlane = new float4((float)(_commandFocus.Y - camera.Y), (float)sectorSize, _commandBlend, Exposure),
             Openings = openings,
+            Clips = clips,
         };
 
         // The player's own jump is seen from the inside, in the pilot view.
-        if (_jumpStage > 0f && _commandBlend < 0.5f)
+        if (_jumpStage > 0f && _ownInside)
         {
             var flight = _designs[Math.Min(Own.Design, _designs.Length - 1)].Flight;
             var entry = _jumpEntry.RelativeTo(camera);
@@ -762,17 +754,19 @@ internal sealed class WorldView
     private int PickTargets(SessionSnapshot snapshot, float2 pointer, bool pilot)
     {
         var hullCount = 0;
-        for (var i = 0; i < snapshot.HullCount; i++)
+        var visuals = _visuals.Hulls;
+        for (var i = 0; i < Math.Min(snapshot.HullCount, visuals.Length); i++)
         {
             ref var hull = ref snapshot.Hulls[i];
-            if ((pilot && hull.IsOwn) || (!pilot && hull.Owner != snapshot.PlayerId) || hull.Jump == JumpPhase.Tunnel)
+            ref readonly var visual = ref visuals[i];
+            // Only what is drawn can be picked: not a hull between a jump's openings, nor the part past an opening.
+            // shortcut: a hull drawn out by hyperspace is picked by its blocks unstretched, for the fraction of a
+            // second it lunges or streaks; stretch the pick boxes if that ever matters.
+            if ((pilot && hull.IsOwn) || (!pilot && hull.Owner != snapshot.PlayerId) || !visual.Visible || visual.PickBlocks == 0)
                 continue;
             var design = _designs[Math.Min(hull.Design, _designs.Length - 1)];
-            var position = TargetPicking.HullPosition(hull.PreviousPosition, hull.Position, _frameAlpha, JumpGap);
-            if (hull.IsOwn) position += _jumpAxis * _jumpOffset;
-            _pickHulls[hullCount++] = new PickHull(hull.Id, position,
-                Quaternion.Slerp(hull.PreviousOrientation, hull.Orientation, _frameAlpha),
-                design.BlockOffsets, design.BlockSize, hull.Blocks, design.Flight.Radius);
+            _pickHulls[hullCount++] = new PickHull(hull.Id, DrawnPosition(visual), visual.Orientation,
+                design.BlockOffsets, design.BlockSize, visual.PickBlocks, design.Flight.Radius);
         }
         var sectorCount = 0;
         foreach (var slot in _slots)
@@ -909,114 +903,49 @@ internal sealed class WorldView
     }
 
     /// <summary>
-    /// Adds what a jumping hull shows from outside: hyperspace's light in the world, or for a rift or a wormhole the
-    /// openings it flies into and comes out of, which the composite pass bends the view around and draws, with the
-    /// hull moved along its passage. Everything is placed from the hull's own position, orientation, stage and
-    /// progress, so every observer sees the same jump in the same place, each from where they are, and one who joins
-    /// mid-jump sees it as it is. A hull whose jump ends while its opening is open (a cancel) backs out and the
-    /// opening closes, rather than either vanishing in a frame. Returns whether the hull itself is drawn.
+    /// Adds the light of another hull's hyperspace jump, or of the pilot's own seen from the command view: gathering
+    /// ahead of the nose while the drive works, where the hull lunges into it, and at the far end, where the hull
+    /// streaks in and settles. The light left behind when a drive fires is added with the openings.
     /// </summary>
-    private bool AddJump(
-        in HullView hull,
-        in FlightParams flight,
-        ref Vector3 position,
-        Quaternion orientation,
-        Double3 camera,
-        float aspect,
-        float dt,
-        Span<FtlMark> marks,
-        ref int markCount,
-        ref CompositeConstants composite,
-        ref FtlOpenings openings
-    )
+    private void AddHyperspaceMarks(in HullView hull, in HullVisuals.HullVisual visual, in FlightParams flight, Double3 camera, Span<FtlMark> marks, ref int markCount)
     {
         var kind = hull.IsOwn && FtlPreview != FtlKind.None ? FtlPreview : flight.Ftl;
-        var seed = (hull.Id & 0xFF) / 255f;
-        var forward = Vector3.Transform(-Vector3.UnitZ, orientation);
-        if (hull.Jump != JumpPhase.None && kind == FtlKind.Hyperspace)
-        {
-            var stage = EffectStage(hull.Jump);
-            var working = stage == 1f;
-            var at = position + forward * (flight.Radius * (working ? 3f : -1.5f));
-            AddMark(marks, ref markCount, at, flight.Radius * (working ? 4f : 2.5f), kind, stage, JumpProgress(hull, flight), seed, forward);
-            return hull.Jump != JumpPhase.Tunnel;
-        }
-
-        var index = PassageSlot(hull.Id, hull.Jump != JumpPhase.None && kind is FtlKind.Rift or FtlKind.Wormhole);
-        if (index < 0)
-            return hull.Jump != JumpPhase.Tunnel;
-        ref var slot = ref _passages[index];
-        var visible = true;
-        if (hull.Jump != JumpPhase.None)
-        {
-            var passage = Passage(hull.Jump, JumpProgress(hull, flight), flight);
-            slot.Mouth = camera + position + forward * passage.Mouth;
-            slot.Axis = forward;
-            slot.Up = Vector3.Transform(Vector3.UnitY, orientation);
-            slot.Kind = kind;
-            slot.Radius = flight.Radius;
-            slot.Seed = seed;
-            slot.Offset = passage.Offset;
-            slot.Open = passage.Open;
-            slot.Clip = passage.Clip;
-            visible = passage.Visible;
-        }
-        else
-        {
-            slot.Offset *= MathF.Exp(-5f * dt);
-            slot.Open *= MathF.Exp(-4f * dt);
-        }
-
-        slot.Seen = true;
-        position += slot.Axis * slot.Offset;
-        AddOpening(slot, camera, aspect, ref composite, ref openings);
-        return visible;
-    }
-
-    /// <summary>The slot that follows a hull's passage, a free one for a new passage, or -1.</summary>
-    private int PassageSlot(uint id, bool start)
-    {
-        var free = -1;
-        for (var i = 0; i < _passages.Length; i++)
-        {
-            if (_passages[i].Id == id)
-                return i;
-            if (free < 0 && _passages[i].Id == 0)
-                free = i;
-        }
-
-        if (!start || free < 0)
-            return -1;
-        _passages[free] = new PassageState { Id = id };
-        return free;
+        if (hull.Jump == JumpPhase.None || kind != FtlKind.Hyperspace)
+            return;
+        var forward = Vector3.Transform(-Vector3.UnitZ, visual.Orientation);
+        var stage = EffectStage(hull.Jump);
+        var working = stage == 1f;
+        var at = visual.Anchor.RelativeTo(camera) + forward * (flight.Radius * (working ? HullVisuals.HyperspaceLight : -1.5f));
+        AddMark(marks, ref markCount, at, flight.Radius * (working ? 4f : 2.5f), kind, stage, JumpProgress(hull, flight), (hull.Id & 0xFF) / 255f, forward);
     }
 
     /// <summary>
-    /// Closes the openings of hulls that are no longer in the snapshot, and frees the slots of passages that have
-    /// eased to nothing.
+    /// Hands the composite pass the openings of the rifts and wormholes seen from outside, and the mesh pass the
+    /// plane each one cuts its own hull at; adds the light hyperspace leaves behind where a drive has fired.
     /// </summary>
-    private void EndPassages(Double3 camera, float aspect, float dt, ref CompositeConstants composite, ref FtlOpenings openings)
+    private void AddOpenings(Double3 camera, float aspect, Span<FtlMark> marks, ref int markCount, ref CompositeConstants composite, ref FtlOpenings openings, ref FtlClips clips)
     {
-        for (var i = 0; i < _passages.Length; i++)
+        var passages = _visuals.Passages;
+        for (var i = 0; i < passages.Length; i++)
         {
-            ref var slot = ref _passages[i];
+            ref readonly var slot = ref passages[i];
             if (slot.Id == 0)
                 continue;
-            if (!slot.Seen)
+            if (slot.Kind == FtlKind.Hyperspace)
             {
-                slot.Offset *= MathF.Exp(-5f * dt);
-                slot.Open *= MathF.Exp(-4f * dt);
-                AddOpening(slot, camera, aspect, ref composite, ref openings);
+                if (slot.Flash > 0f)
+                    AddMark(marks, ref markCount, slot.Mouth.RelativeTo(camera), slot.Radius * 4f, FtlKind.Hyperspace, 3f, slot.Flash, slot.Seed, slot.Axis);
+                continue;
             }
 
-            if (slot.Open < 0.01f && MathF.Abs(slot.Offset) < 0.01f)
-                slot.Id = 0;
-            slot.Seen = false;
+            if (slot.Clip != 0f)
+                clips.Set(i, slot.Mouth.RelativeTo(camera), slot.Axis * slot.Clip);
+            AddOpening(slot, camera, aspect, ref composite, ref openings);
         }
     }
 
     /// <summary>Hands a passage's opening to the composite pass, if it is open and could be in view.</summary>
-    private void AddOpening(in PassageState slot, Double3 camera, float aspect, ref CompositeConstants composite, ref FtlOpenings openings)
+    private void AddOpening(in HullVisuals.PassageState slot, Double3 camera, float aspect, ref CompositeConstants composite, ref FtlOpenings openings)
     {
         if (slot.Open <= 0.001f)
             return;
@@ -1032,44 +961,8 @@ internal sealed class WorldView
         if (count >= CompositeConstants.MaxLenses && slot.Id != Own.Id)
             return;
         var index = Math.Min(count, CompositeConstants.MaxLenses - 1);
-        openings.Set(index, centre, opening, slot.Axis, slot.Up, slot.Kind, slot.Open, slot.Seed, slot.Clip, slot.Radius * 1.2f, slot.Radius * 3f);
+        openings.Set(index, centre, opening, slot.Axis, slot.Up, slot.Kind, slot.Open, slot.Seed);
         composite.Setup.W = index + 1;
-    }
-
-    /// <summary>A hull's passage through a rift or wormhole, as an observer draws it. See <see cref="Passage"/>.</summary>
-    internal readonly record struct PassageShape(float Offset, float Mouth, float Open, float Clip, bool Visible);
-
-    /// <summary>
-    /// How a hull's jump through a rift or a wormhole is drawn from outside, from its replicated stage and
-    /// progress alone. Late in the drive's work the hull accelerates along its nose into the opening ahead, which is
-    /// hidden past (clip 1) and closes behind it before the drive fires; at the far end the opening grows behind
-    /// where the hull will be, and over the last second of the transit and the arrival the hull comes out of it
-    /// (hidden before it, clip -1) and slows to where the server has it. Offset is along the nose from the hull's
-    /// position, Mouth where the opening is along it, in metres; Visible is false while it is between the openings.
-    /// </summary>
-    internal static PassageShape Passage(JumpPhase phase, float progress, in FlightParams flight)
-    {
-        var radius = flight.Radius;
-        var ahead = radius * OpeningAhead;
-        if (phase is JumpPhase.Align or JumpPhase.Charge)
-        {
-            var start = phase == JumpPhase.Charge ? progress : 0f;
-            var through = ahead + radius * 2.2f;
-            var move = Math.Clamp((start - 0.6f) / 0.4f, 0f, 1f);
-            var offset = through / MathF.Pow(0.925f, 2.2f) * MathF.Pow(move, 2.2f);
-            var open = (0.05f + 0.95f * Smooth(start)) * (1f - Smooth((offset - ahead - radius) / (radius * 2f)));
-            return new PassageShape(offset, ahead, open, 1f, offset < ahead + radius * 1.5f);
-        }
-
-        var tunnel = Math.Max(flight.FtlTunnelSeconds, 0.1f);
-        var arrive = Math.Max(flight.FtlArriveSeconds, 0.1f);
-        var since = phase == JumpPhase.Tunnel ? progress * tunnel : tunnel + progress * arrive;
-        const float Lead = 1f;
-        var lead = Math.Min(Lead, tunnel);
-        var u = Math.Clamp((since - (tunnel - lead)) / (lead + arrive), 0f, 1f);
-        var behind = radius * (OpeningBehind + 2f);
-        var exit = phase == JumpPhase.Tunnel ? Smooth(progress) : 1f - Smooth(progress);
-        return new PassageShape(-behind * (1f - u) * (1f - u), -radius * OpeningBehind, exit, -1f, u > 0f);
     }
 
     /// <summary>
@@ -1326,11 +1219,7 @@ internal sealed class WorldView
         );
     }
 
-    private static float Smooth(float x)
-    {
-        x = Math.Clamp(x, 0f, 1f);
-        return x * x * (3f - 2f * x);
-    }
+    private static float Smooth(float x) => HullVisuals.Smooth(x);
 
     private static void AddMark(Span<FtlMark> marks, ref int count, Vector3 at, float size, FtlKind kind, float stage, float progress, float seed, Vector3 axis)
     {
@@ -1398,8 +1287,30 @@ internal sealed class WorldView
         : flight.FtlCalculateSeconds > 0f ? Math.Clamp(hull.JumpCalculation / flight.FtlCalculateSeconds, 0f, 1f)
         : 1f;
 
-    /// <summary>Where a hull is drawn this frame.</summary>
+    /// <summary>
+    /// Where the simulation has a hull this frame, for the map, orders and ranges. A jump can draw it elsewhere; see
+    /// <see cref="DrawnPosition(in HullView)"/>.
+    /// </summary>
     public Double3 HullPosition(in HullView hull) => hull.IsOwn ? OwnPosition : hull.Position;
+
+    /// <summary>
+    /// Where a hull is drawn in the world this frame, for markers that sit on it: moved along a jump the way the
+    /// scene draws it. A hull not in this frame's snapshot is where the simulation has it.
+    /// </summary>
+    public Double3 DrawnPosition(in HullView hull)
+    {
+        var visuals = _visuals.Hulls;
+        var snapshot = _snapshot;
+        for (var i = 0; snapshot is not null && i < Math.Min(snapshot.HullCount, visuals.Length); i++)
+        {
+            if (snapshot.Hulls[i].Id == hull.Id)
+                return DrawnPosition(visuals[i]);
+        }
+
+        return HullPosition(hull);
+    }
+
+    private Double3 DrawnPosition(in HullVisuals.HullVisual visual) => visual.Inside ? visual.Position + _jumpAxis * _jumpOffset : visual.Position;
 
     public bool IsSelected(uint id) => _selected.AsSpan(0, _selectedCount).Contains(id);
 
@@ -1665,7 +1576,7 @@ internal sealed class WorldView
         for (var i = 0; i < snapshot.HullCount && _selectedCount < MaxSelection; i++)
         {
             ref var hull = ref snapshot.Hulls[i];
-            if (hull.Owner != snapshot.PlayerId || IsSelected(hull.Id) || !Project(HullPosition(hull), out var screen))
+            if (hull.Owner != snapshot.PlayerId || IsSelected(hull.Id) || !Project(DrawnPosition(hull), out var screen))
                 continue;
             if (screen.X >= min.X && screen.X <= max.X && screen.Y >= min.Y && screen.Y <= max.Y)
                 _selected[_selectedCount++] = hull.Id;
@@ -2094,18 +2005,20 @@ internal sealed class WorldView
         return true;
     }
 
-    private void Add(ref int count, int mesh, Vector3 position, Quaternion rotation, float scale, Vector3 color, float material)
+    /// <summary>Adds one mesh instance; <paramref name="stretch"/> draws it out along its local z, the hull's nose.</summary>
+    private void Add(ref int count, int mesh, Vector3 position, Quaternion rotation, float scale, Vector3 color, float material, float stretch = 1f)
     {
         var m = Matrix4x4.CreateFromQuaternion(rotation);
+        var along = scale * stretch;
         _candidates[count++] = new Candidate
         {
             Mesh = mesh,
             Instance = new MeshInstance
             {
                 // System.Numerics matrices transform row vectors, so the rotation's columns are its rows here.
-                Row0 = new float4(m.M11 * scale, m.M21 * scale, m.M31 * scale, position.X),
-                Row1 = new float4(m.M12 * scale, m.M22 * scale, m.M32 * scale, position.Y),
-                Row2 = new float4(m.M13 * scale, m.M23 * scale, m.M33 * scale, position.Z),
+                Row0 = new float4(m.M11 * scale, m.M21 * scale, m.M31 * along, position.X),
+                Row1 = new float4(m.M12 * scale, m.M22 * scale, m.M32 * along, position.Y),
+                Row2 = new float4(m.M13 * scale, m.M23 * scale, m.M33 * along, position.Z),
                 Tint = new float4(color.X, color.Y, color.Z, material),
             },
         };
