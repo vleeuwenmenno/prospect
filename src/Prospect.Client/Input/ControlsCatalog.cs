@@ -53,7 +53,8 @@ internal sealed class ControlsCatalog
         var hold = release.Count == 0 ? "the show-cursor key (unbound)" : string.Join(" or ", release);
         rows.AddRange([
             new("Pilot", "Steer view", "Mouse movement"),
-            new("Pilot", "Free look / camera distance", "Hold right mouse button / hold right + wheel"),
+            new("Pilot", "Free look", "Hold right mouse button"),
+            new("Pilot", "Zoom camera", "Mouse wheel"),
             new("Pilot", "Target under reticle", "Middle mouse button"),
             new("Pilot", "Show cursor (mouse leaves flight)", $"Hold {hold}; keyboard flight still works"),
             new("Pilot", "Turn the camera with the cursor shown", $"Hold {hold}, then right drag over space (press {hold} first)"),

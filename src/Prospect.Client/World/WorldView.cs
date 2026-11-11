@@ -437,7 +437,7 @@ internal sealed class WorldView
             // returns the view to the nose. Otherwise the hull swings onto the view whenever it is under thrust.
             // A camera drag with the pointer shown (release key held) is free look too.
             var freeLook = _devices.MouseDown(GlfwMouseButton.Right) || _devices.CameraDrag;
-            if (freeLook && _devices.CameraScroll != 0)
+            if (_devices.CameraScroll != 0)
                 _chaseZoom = Math.Clamp(_chaseZoom * MathF.Pow(0.88f, _devices.CameraScroll), 0.5f, 8f);
             if (_freeLook && !freeLook)
                 _lookDirection = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);

@@ -161,6 +161,7 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Up / down | `R`, `F` | Right / left trigger |
 | Look around | Mouse, or arrow keys | Right stick |
 | Free look (hull holds its heading) | Hold right mouse button | |
+| Zoom camera | Mouse wheel | |
 | Roll | `Q` `E` | Bumpers |
 | Boost | `Space` | Left stick click |
 | Show the cursor (pilot view) | Hold `Shift`; with it, right-drag over space turns the camera | |
@@ -190,8 +191,6 @@ the bracket as the target comes into view. With one
 of your own ships targeted, `T` puts you at its controls and the ship you left is flown by the server. With nothing
 targeted, `T` leaves your ship in a drone: a tiny craft with little hull and shield that is removed when you take
 a ship again. In the command view `T` takes control of the first selected ship.
-
-In the pilot view, hold the right mouse button and turn the wheel to move the camera closer or further.
 
 Command view (the cursor is always shown):
 
