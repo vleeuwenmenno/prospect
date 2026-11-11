@@ -60,6 +60,10 @@ void main()
     vec3 lit = albedo * (frame.sunColor.rgb * diffuse + vec3(0.012, 0.016, 0.026) * fill)
         + frame.sunColor.rgb * specular * diffuse
         + vec3(0.02, 0.03, 0.05) * rim;
+    // Inside a hyperspace tunnel or a throat its light falls on the hull riding through it: blue, or a rift's orange.
+    vec3 passage = frame.ftl.x > 2.5 ? vec3(0.16, 0.06, 0.015) : vec3(0.05, 0.08, 0.14);
+    lit += albedo * passage * frame.ftlShape.w * (0.6 + 0.4 * fill);
+
     // In the command view, a bright line marks where the command plane cuts through the surface.
     if (frame.gridPlane.z > 0.01)
     {
@@ -70,6 +74,7 @@ void main()
         lit = mix(lit * mix(1.0, below, frame.gridPlane.z), vec3(1.0, 0.69, 0.13) * 1.8, cut * frame.gridPlane.z);
     }
 
-    // Zero alpha: a solid surface clears the jump lens mask, so a hull in front of an opening stays sharp.
-    outColor = vec4(lit, 0.0);
+    // A solid surface clears the jump lens mask, so a hull in front of an opening stays sharp, and leaves a mark
+    // of what it is in the fraction: 0.25 any surface, 0.5 the pilot's own hull, which their jump never covers.
+    outColor = vec4(lit, color.a > 1.5 ? 0.5 : 0.25);
 }

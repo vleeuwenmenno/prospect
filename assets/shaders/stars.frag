@@ -11,5 +11,6 @@ void main()
     // sprite's round falloff at its ends and across it.
     float along = max(abs(corner.x) * stretch - (stretch - 1.0), 0.0);
     float falloff = exp(-(along * along + corner.y * corner.y) * 5.0);
-    outColor = vec4(color * falloff, 0.0);
+    // A long line spreads the star's light along it: it dims, so a sky of lines stays a sky and not a white wall.
+    outColor = vec4(color * falloff / (1.0 + 0.05 * (stretch - 1.0)), 0.0);
 }

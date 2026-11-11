@@ -80,6 +80,14 @@ The client opens a real window on the developer's desktop, and they are usually 
 - `make run ARGS="--start local --open <view> --capture /path/shot.png --capture-after 2.5"` saves a screenshot
   and exits. Views: `command`, `map`, `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`. Screens
   without a session: `--start menu|join|settings|newgame|credits`; `--set id=value` shows on `newgame`.
+- A sequence: add `--capture-count <n> --capture-every <sec>` for numbered stills (`shot-00.png`, ...); each one
+  prints the own hull's jump stage and progress. The pod charges for about 7.5 s after a jump order, then 3 s of
+  tunnel and 1.5 s of arrival, so `--open jump --capture-after 6 --capture-count 28 --capture-every 0.3` covers
+  a whole jump.
+- `--look <degrees>` holds the pilot camera that far to the right of the hull's nose, as free look would (`0`
+  looks along the nose, `150` nearly back). Use it to check that an effect follows the hull, not the view.
+- Captures time themselves by the wall clock and present without vsync, so they also run while the display is
+  asleep.
 - The window size is whatever the tiling compositor gives it; check with `magick identify` before cropping.
 - Debug builds run with validation layers when `.tools/` exists. Any validation message is a bug.
 - What cannot be checked this way and needs the developer: how flight feels, mouse and keyboard interaction,

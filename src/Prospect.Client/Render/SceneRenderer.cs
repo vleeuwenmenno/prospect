@@ -24,13 +24,32 @@ internal struct FrameConstants
     public float4 Grid;
     public float4 GridPlane;
 
-    /// <summary>The viewer's own jump: drive kind, phase, progress through the phase.</summary>
+    /// <summary>The viewer's own jump: drive kind, stage, progress through the stage, seed.</summary>
     public float4 Ftl;
+
+    /// <summary>The jump's axis (the hull's nose) in world space, and how far the tunnel has streamed past.</summary>
+    public float4 FtlAxis;
+
+    /// <summary>Up across the axis, for the rift's window and the tunnel's coordinates; hyperspace tunnel cover.</summary>
+    public float4 FtlUp;
+
+    /// <summary>The opening the hull flies into: camera-relative centre and radius in metres (0 for none).</summary>
+    public float4 FtlEntry;
+
+    /// <summary>The opening the hull comes out of: camera-relative centre and radius in metres (0 for none).</summary>
+    public float4 FtlExit;
+
+    /// <summary>
+    /// How far hyperspace stretches the stars; how far the entry and the exit are open, 0 to 1; how much of the
+    /// tunnel's or throat's light falls on the pilot's hull.
+    /// </summary>
+    public float4 FtlShape;
 }
 
 /// <summary>
 /// The tone mapper's push constants: exposure, and the openings of jumps in view that it bends the scene around and
-/// draws. Matches <c>tonemap.frag</c>. 128 bytes, the push constant space every device guarantees.
+/// draws. Matches <c>tonemap.frag</c>. Within 128 bytes, the push constant space every device guarantees. The pilot's
+/// own jump is read from the frame constants, which the tone mapper also binds.
 /// </summary>
 internal struct CompositeConstants
 {
@@ -38,9 +57,6 @@ internal struct CompositeConstants
 
     /// <summary>Exposure, aspect ratio, time in seconds, number of lenses.</summary>
     public float4 Setup;
-
-    /// <summary>The pilot's own jump: drive kind, stage, progress through the stage.</summary>
-    public float4 Own;
 
     // Per lens: centre in NDC, radius when fully open in half screen heights, and a code (drive kind + 4 * stage,
     // + 16 for the pilot's own passage). Progress and seed go two lenses to a vector in Extra.
@@ -155,6 +171,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private VkImageView _depthView;
     private VkExtent2D _extent;
     private CompositeConstants _composite;
+    private int _frameIndex;
 
     public SceneRenderer(GraphicsDevice gpu, Swapchain swapchain, IReadOnlyDictionary<string, byte[]> shaders, IReadOnlyList<MeshData> meshes)
     {
@@ -183,7 +200,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
             _ftlBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(FtlMark) * MaxFtlMarks);
         }
 
-        // Descriptors: set 0 of scene shaders is the frame constants; set 0 of the tone mapper is the scene image.
+        // Descriptors: set 0 of every shader is the frame constants; set 1 of the tone mapper is the scene image.
         Span<VkDescriptorPoolSize> poolSizes =
         [
             new VkDescriptorPoolSize { Type = VkDescriptorType.UniformBuffer, DescriptorCount = FrameRenderer.FramesInFlight },
@@ -220,7 +237,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
 
         _scenePipelineLayout = device.CreatePipelineLayout([_frameLayout.Handle], [], null);
         _tonemapPipelineLayout = device.CreatePipelineLayout(
-            [_sceneLayout.Handle],
+            [_frameLayout.Handle, _sceneLayout.Handle],
             [new VkPushConstantRange { StageFlags = VkShaderStageFlags.FragmentBit, Offset = (ByteSize32)0, Size = (ByteSize32)sizeof(CompositeConstants) }],
             null
         );
@@ -272,9 +289,10 @@ internal sealed unsafe class SceneRenderer : IDisposable
             LineWidth = 1f,
         };
 
-        // The scene's alpha channel is a mask for the jump lenses, not coverage. The sky and solid surfaces write
-        // zero, light added on top leaves alpha alone, and a rift's or wormhole's mark writes one where the
-        // composite pass may bend the view. The presets' additive blend scales by destination alpha, so these
+        // The scene's alpha channel is a mask for the jump lenses, not coverage. Its fraction says what is there:
+        // 0 sky, 0.25 a solid surface, 0.5 the pilot's own hull. Light added on top leaves alpha alone, and each
+        // rift's or wormhole's mark adds one where it is in front of what is there, so the composite pass may bend
+        // the view and draw the opening. The presets' additive blend scales by destination alpha, so these
         // passes use their own blend states.
         const VkColorComponentFlags rgb = VkColorComponentFlags.RBit | VkColorComponentFlags.GBit | VkColorComponentFlags.BBit;
         var additiveAttachment = new VkPipelineColorBlendAttachmentState
@@ -338,6 +356,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
     public void Render(CommandBuffer commands, int frameIndex, in FrameConstants constants, in CompositeConstants composite, ReadOnlySpan<DrawBatch> batches, bool drawGrid, int ftlMarks)
     {
         _composite = composite;
+        _frameIndex = frameIndex;
         *(FrameConstants*)_frameBuffers[frameIndex].Mapped = constants;
 
         Transition(commands, _colorImage, VkImageAspectFlags.ColorBit, VkImageLayout.Undefined, VkImageLayout.ColorAttachmentOptimal, VkAccessFlags.ColorAttachmentWriteBit, VkPipelineStageFlags.ColorAttachmentOutputBit);
@@ -426,9 +445,9 @@ internal sealed unsafe class SceneRenderer : IDisposable
         SetViewport(commands, _extent);
         var push = _composite;
         push.Setup.X = exposure;
-        var set = _sceneSet;
+        Span<VkDescriptorSet> sets = [_frameSets[_frameIndex], _sceneSet];
         commands.BindPipeline(VkPipelineBindPoint.Graphics, _tonemapPipeline);
-        commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _tonemapPipelineLayout, 0, new ReadOnlySpan<VkDescriptorSet>(in set), []);
+        commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _tonemapPipelineLayout, 0, sets, []);
         commands.PushConstants(_tonemapPipelineLayout, VkShaderStageFlags.FragmentBit, 0, new ReadOnlySpan<byte>(&push, sizeof(CompositeConstants)));
         commands.Draw(3, 1, 0, 0);
     }

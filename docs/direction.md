@@ -29,6 +29,10 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
 - **The world advances only while someone is connected.** With nobody online it pauses.
 - **Travel.** Sublight inside a sector, faster-than-light between them. Three drive kinds (hyperspace, wormhole,
   rift). No range limit yet; limits come later from modules, power and mass.
+- **Jump looks.** Physical, not an overlay: effects sit in the world around the hull, laid out around its nose,
+  never the view. No cuts, no full-screen flash; each stage eases into the next. Only hyperspace fills the view
+  (Star Wars lines and tunnel). Wormhole: a sphere with gravitational lensing, subtle colour. Rift: an orange,
+  crisp, ragged window with lensing. With both, the hull visibly flies in through one opening and out of another.
 - **Resources.** Asteroids carry ore: iron, copper, nickel, titanium, silver, gold. More kinds later.
 
 ## Decided: servers
