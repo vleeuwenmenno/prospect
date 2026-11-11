@@ -7,8 +7,10 @@
     <Project Path="src/Prospect.Game/Prospect.Game.csproj" />
     <Project Path="src/Prospect.Server/Prospect.Server.csproj" />
     <Project Path="src/Prospect.Client/Prospect.Client.csproj" />
+    <Project Path="src/Prospect.Listing/Prospect.Listing.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Prospect.Tests/Prospect.Tests.csproj" />
+    <Project Path="tests/Prospect.Listing.Tests/Prospect.Listing.Tests.csproj" />
   </Folder>
 </Solution>

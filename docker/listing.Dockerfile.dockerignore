@@ -1,0 +1,9 @@
+# Only what the listing server's build needs goes into the build context.
+*
+!global.json
+!Directory.Build.props
+!Directory.Packages.props
+!.editorconfig
+!src/Prospect.Listing/
+src/Prospect.Listing/bin/
+src/Prospect.Listing/obj/
