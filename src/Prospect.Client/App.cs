@@ -277,6 +277,8 @@ internal sealed class App : IDisposable
         }
         else if (_options.StartScreen == Screen.Settings)
             _screens.OpenSettings(Screen.MainMenu);
+        else if (_options.StartScreen == Screen.NewGame)
+            _screens.OpenNewGame();
         else
             _screens.Show(_options.StartScreen);
     }
@@ -455,6 +457,8 @@ internal sealed class App : IDisposable
             }
             else if (view == "info")
                 _screens.OpenShipInfo();
+            else if (view == "world-settings")
+                _screens.RequestWorldSettings();
             else if (view == "galaxy")
                 _screens.OpenGalaxyOverview();
             else if (view == "map-menu")

@@ -11,10 +11,10 @@ internal static class Program
 {
     private const string Usage = """
         prospect [options]
-          --start <screen>        Open on: menu, join, settings, credits, or local (start a local game)
+          --start <screen>        Open on: menu, join, settings, newgame, credits, or local (start a local game)
           --join <host[:port]>    Connect to a server straight after the splash
           --set <id>=<value>      A world setting for local games started in this run; repeat for more (ids and ranges: content/rules/settings.json)
-          --open <view>           With --start local or --join: open the command view, the map or the ship data sheet (command, map, map-menu, galaxy, info), or start a jump (jump, jump-wormhole, jump-rift)
+          --open <view>           With --start local or --join: open the command view, the map or the ship data sheet (command, map, map-menu, galaxy, info), start a jump (jump, jump-wormhole, jump-rift), or show the world settings in force (world-settings)
           --size <W>x<H>          Start windowed at this size
           --validation            Enable Vulkan validation layers (default in debug builds)
           --no-validation         Disable Vulkan validation layers
@@ -50,6 +50,9 @@ internal static class Program
                         case "settings":
                             options.StartScreen = Screen.Settings;
                             break;
+                        case "newgame":
+                            options.StartScreen = Screen.NewGame;
+                            break;
                         case "credits":
                             options.StartScreen = Screen.Credits;
                             break;
@@ -80,7 +83,7 @@ internal static class Program
                 case "--set" when hasValue:
                     options.WorldSettingArgs.Add(args[++i]);
                     break;
-                case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift":
+                case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "world-settings":
                     options.OpenView = args[++i];
                     break;
                 case "--size" when hasValue:

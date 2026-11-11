@@ -73,7 +73,7 @@ internal sealed partial class ScreenHost
         ImGui.SetCursorScreenPos(new float2(left, y + Kit.Px(Theme.Space7 + 8)));
         ImGui.BeginGroup();
         if (Kit.MenuItem("New Game"u8, 360))
-            _app.StartLocalGame();
+            OpenNewGame();
         if (Kit.MenuItem("Join Server"u8, 360))
             Show(Screen.Join);
         if (Kit.MenuItem("Settings"u8, 360))

@@ -76,8 +76,8 @@ The client opens a real window on the developer's desktop, and they are usually 
 - Only launch it with `--capture <file.png>` or `--bench <seconds>`. Both mute every input device, so the window
   cannot grab the pointer or react to their typing. Never start it any other way from an agent session.
 - `make run ARGS="--start local --open <view> --capture /path/shot.png --capture-after 2.5"` saves a screenshot
-  and exits. Views: `command`, `map`, `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`. Screens without a
-  session: `--start menu|join|settings|credits`.
+  and exits. Views: `command`, `map`, `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`. Screens
+  without a session: `--start menu|join|settings|newgame|credits`; `--set id=value` shows on `newgame`.
 - The window size is whatever the tiling compositor gives it; check with `magick identify` before cropping.
 - Debug builds run with validation layers when `.tools/` exists. Any validation message is a bug.
 - What cannot be checked this way and needs the developer: how flight feels, mouse and keyboard interaction,

@@ -11,6 +11,7 @@ internal enum Screen
     MainMenu,
     Join,
     Settings,
+    NewGame,
     Credits,
     Session,
 }
@@ -40,6 +41,7 @@ internal sealed partial class ScreenHost
         _ui = ui;
         InitializeJoin();
         InitializeSettings();
+        InitializeNewGame();
     }
 
     public Screen Current => _screen;
@@ -81,6 +83,10 @@ internal sealed partial class ScreenHost
                 else
                     DrawBackdrop();
                 DrawSettings(fade);
+                break;
+            case Screen.NewGame:
+                DrawBackdrop();
+                DrawNewGame(fade);
                 break;
             case Screen.Credits:
                 DrawBackdrop();

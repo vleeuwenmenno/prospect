@@ -31,15 +31,21 @@ internal sealed partial class ScreenHost
                 // pilot view, and only from the pilot view does it open the menu.
                 if (!mapWasOpen && !_mapOpen && BackPressed())
                 {
-                    if (_sessionMenuOpen)
+                    if (_worldSettingsOpen)
+                        _worldSettingsOpen = false;
+                    else if (_sessionMenuOpen)
                         _sessionMenuOpen = false;
                     else if (_app.World.Mode == World.ViewMode.Command)
                         _app.World.SetMode(World.ViewMode.Pilot);
                     else
                         _sessionMenuOpen = true;
                 }
-                if (_sessionMenuOpen)
-                    DrawSessionMenu();
+                if (_worldSettingsRequested)
+                    OpenWorldSettings(snapshot);
+                if (_sessionMenuOpen && _worldSettingsOpen)
+                    DrawWorldSettings(snapshot);
+                else if (_sessionMenuOpen)
+                    DrawSessionMenu(snapshot);
                 break;
         }
     }
@@ -105,11 +111,11 @@ internal sealed partial class ScreenHost
         EndRoot();
     }
 
-    private void DrawSessionMenu()
+    private void DrawSessionMenu(SessionSnapshot snapshot)
     {
         DrawDim(0.6f);
         BeginRoot("##sessionmenu"u8);
-        var size = new float2(Kit.Px(424), Kit.Px(330));
+        var size = new float2(Kit.Px(424), Kit.Px(376));
         var min = (_ui.DisplaySize - size) * 0.5f;
         BeginPanel("##sessionmenupanel"u8, min, size);
 
@@ -120,6 +126,8 @@ internal sealed partial class ScreenHost
 
         if (Kit.MenuItem("Resume"u8, 360))
             _sessionMenuOpen = false;
+        if (Kit.MenuItem("World Settings"u8, 360))
+            OpenWorldSettings(snapshot);
         if (Kit.MenuItem("Settings"u8, 360))
             OpenSettings(Screen.Session);
         if (Kit.MenuItem("Leave Session"u8, 360))

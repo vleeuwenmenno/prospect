@@ -46,7 +46,8 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 - **World settings.** A world has settings, chosen when a server or a local game starts: collision damage,
   shields against collisions (full, weak, none), shield recharge, jump charge speed and hull strength. The
   server owns them and tells each client on joining; the client predicts by the server's figures, and the data
-  sheet and the readouts show the numbers in force. See [World settings](#world-settings).
+  sheet and the readouts show the numbers in force. The New game screen sets them for a local game; in a game,
+  the menu's World Settings shows the ones in force. See [World settings](#world-settings).
 - **Resources.** Asteroids carry iron, copper, nickel, titanium, silver or gold, or are bare rock; a sector has a
   main ore, and the rarer ones grow more common toward the core. Nothing can be mined yet.
 - **Fleet.** Each player starts with the command pod (hyperspace drive), a mining vessel (wormhole) and a survey vessel (rift). Hulls nobody is flying are flown by
@@ -63,7 +64,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 - **Renderer.** Floating-point scene target and tone mapping, camera-relative rendering from double-precision
   positions, a star field and sky, instanced hull and asteroid meshes with two levels of detail.
 
-Not there yet: a New game screen to choose world settings (they are set on the command line for now), mining, taking control of ships owned by other players (permissions), jump range and cost, gates,
+Not there yet: mining, taking control of ships owned by other players (permissions), jump range and cost, gates,
 saving. Asteroids come in a shared set of shapes until mining gives each one its own body. Designs are limited to 64
 blocks for now, because block state is sent as one bit per block.
 
@@ -85,6 +86,9 @@ blocks for now, because block state is sent as one bit per block.
 | Target the ship under the reticle, or the asteroid if there is no ship | Middle mouse button | |
 | Take control of the target, or leave in a drone | `T` | D-pad down |
 | Menu or back | `Esc` | `Start` |
+
+On menu screens the arrow keys or the D-pad move between rows, left and right change the focused setting, and
+`Enter` or `A` selects. The mouse works too: click a row's arrows, or drag a slider.
 
 The pointer turns the view, not the hull. The hull swings its nose onto the view line whenever it is under
 thrust, so looking around while coasting costs nothing; hold the right mouse button to look around under thrust
@@ -150,6 +154,7 @@ How to set them:
 
 ```sh
 make run ARGS="--start local --set collisionShields=None --set hullStrength=2"    # a local game
+make run ARGS="--start newgame --set hullStrength=2"                             # the New game screen, preset
 make server ARGS="--set collisionDamage=0.5 --set jumpChargeSpeed=2"              # a server
 make server ARGS="--settings my-world.json"                                       # a server, from a file
 ```
@@ -160,7 +165,11 @@ make server ARGS="--settings my-world.json"                                     
   of the wrong kind, or a file that is not valid JSON, stops the start with a message that says what is wrong.
 - A server logs every setting that is not at its default when it starts.
 - A client that joins plays by the server's settings; its own `--set` only applies to local games.
-- There is no New game screen yet: the menu's local game starts with the defaults, plus any `--set`.
+- In the client, New Game opens a screen with every setting, starting from the defaults plus any `--set`.
+  Changed ones are marked and can be reset one at a time or all at once. Choices are kept until the game exits;
+  there are no saved presets.
+- In a game, `Esc` then World Settings shows the settings in force, read-only. On someone else's server these
+  are the server's.
 
 ## Requirements
 

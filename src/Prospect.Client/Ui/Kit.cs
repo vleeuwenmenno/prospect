@@ -328,6 +328,101 @@ internal static class Kit
         return index != before;
     }
 
+    /// <summary>
+    /// A number picked on a track between a minimum and a maximum, in steps, with its value shown as text. Drag on
+    /// the track with the mouse, or focus the row and press left and right. Returns true when the value changed.
+    /// </summary>
+    public static bool Slider(ImString label, ref float value, float minimum, float maximum, float step, ImString valueText, float width)
+    {
+        var draw = ImGui.GetWindowDrawList();
+        var position = ImGui.GetCursorScreenPos();
+        var size = new float2(Px(width), Px(Theme.ControlHeight));
+        var trackArea = Px(210);
+        var valueWidth = Px(72);
+        var before = value;
+        if (step <= 0)
+            step = (maximum - minimum) / 20f;
+
+        // As with a choice, the row is the navigation target and left/right move the value while it is focused.
+        ImGui.InvisibleButton(label, new float2(size.X - trackArea - valueWidth, size.Y));
+        var id = (uint)ImGui.GetItemID();
+        var focused = ImGui.IsItemFocused() && ImGui.GetIO().NavVisible;
+        if (focused)
+        {
+            if (ImGui.IsKeyPressed(ImGuiKey.LeftArrow) || ImGui.IsKeyPressed(ImGuiKey.GamepadDpadLeft))
+                value -= step;
+            if (ImGui.IsKeyPressed(ImGuiKey.RightArrow) || ImGui.IsKeyPressed(ImGuiKey.GamepadDpadRight))
+                value += step;
+        }
+
+        var rowHot = ImGui.IsItemHovered() || focused;
+
+        // The track takes the mouse only, so keyboard navigation does not stop on it as a second item.
+        ImGui.PushID(label);
+        ImGui.SameLine(0, valueWidth);
+        ImGui.PushItemFlag(ImGuiItemFlags.NoNav, true);
+        ImGui.InvisibleButton("track"u8, new float2(trackArea, size.Y));
+        ImGui.PopItemFlag();
+        var trackHot = ImGui.IsItemHovered();
+        var dragging = ImGui.IsItemActive();
+        ImGui.PopID();
+
+        var trackMin = position + new float2(size.X - trackArea + Px(Theme.Space3), size.Y * 0.5f);
+        var trackLength = trackArea - Px(Theme.Space3 * 2);
+        if (dragging && trackLength > 0)
+        {
+            var t = Math.Clamp((ImGui.GetMousePos().X - trackMin.X) / trackLength, 0f, 1f);
+            value = minimum + MathF.Round(t * (maximum - minimum) / step) * step;
+        }
+
+        value = Math.Clamp(value, minimum, maximum);
+
+        var hot = Animate(id, rowHot || trackHot || dragging ? 1f : 0f);
+        RowBackground(draw, position, size, hot);
+        var textHeight = Measure(_ui.Sans, Theme.FontBody, label).Y;
+        Text(draw, _ui.Sans, Theme.FontBody, position + new float2(Px(Theme.Space3), (size.Y - textHeight) * 0.5f), Mix(Theme.TextDim, Theme.Text, hot), label);
+
+        var valueSize = Measure(_ui.Mono, Theme.FontSmall, valueText);
+        var valueMin = position + new float2(size.X - trackArea - valueWidth, 0);
+        Text(draw, _ui.Mono, Theme.FontSmall, valueMin + new float2(valueWidth - valueSize.X, (size.Y - valueSize.Y) * 0.5f), Theme.Text, valueText);
+
+        var fill = maximum > minimum ? (value - minimum) / (maximum - minimum) : 0f;
+        var thickness = Px(2);
+        draw.AddRectFilled(trackMin - new float2(0, thickness * 0.5f), trackMin + new float2(trackLength, thickness * 0.5f), Color(Theme.LineStrong));
+        draw.AddRectFilled(trackMin - new float2(0, thickness * 0.5f), trackMin + new float2(trackLength * fill, thickness * 0.5f), Color(Mix(Theme.TextDim, Theme.Accent, hot)));
+        var knob = new float2(Px(8), Px(16));
+        var knobMin = trackMin + new float2(trackLength * fill - knob.X * 0.5f, -knob.Y * 0.5f);
+        draw.AddRectFilled(knobMin, knobMin + knob, Color(Mix(Theme.Text, Theme.Accent, hot)));
+        return value != before;
+    }
+
+    /// <summary>A small text-only button, for secondary actions beside other content. Returns true when pressed.</summary>
+    public static bool LinkButton(ImString label)
+    {
+        var draw = ImGui.GetWindowDrawList();
+        var position = ImGui.GetCursorScreenPos();
+        var textSize = Measure(_ui.SansMedium, Theme.FontCaption, label);
+        var pad = new float2(Px(Theme.Space2), Px(Theme.Space1));
+        var pressed = ImGui.InvisibleButton(label, textSize + pad * 2);
+        var t = Animate(ImGui.GetItemID(), IsHot() ? 1f : 0f);
+        if (t > 0.01f)
+            draw.AddRect(position, position + textSize + pad * 2, Color(Theme.Accent, t));
+        Text(draw, _ui.SansMedium, Theme.FontCaption, position + pad, Mix(Theme.TextDim, Theme.Accent, t), label);
+        return pressed;
+    }
+
+    /// <summary>Lays out text wrapped to a width in the current window and advances the cursor past it.</summary>
+    public static void Paragraph(ImFontPtr font, float size, uint rgb, ImString text, float width)
+    {
+        var position = ImGui.GetCursorScreenPos();
+        var wrap = Px(width);
+        ImGui.PushFont(font, size);
+        var measured = ImGui.CalcTextSize(text, false, wrap);
+        ImGui.GetWindowDrawList().AddText(font, ImGui.GetFontSize(), new float2(MathF.Round(position.X), MathF.Round(position.Y)), Color(rgb), text, wrap);
+        ImGui.PopFont();
+        ImGui.Dummy(new float2(wrap, measured.Y));
+    }
+
     /// <summary>A key cap followed by what the key does, for the hint bar at the bottom of a screen.</summary>
     public static float KeyHint(ImDrawListPtr draw, float2 position, ImString key, ImString text)
     {

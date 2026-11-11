@@ -89,6 +89,15 @@ internal sealed partial class ScreenHost
         BeginRoot("##world"u8, ImGuiWindowFlags.NoInputs | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoFocusOnAppearing);
         var draw = ImGui.GetWindowDrawList();
         DrawSectorPanel(draw, snapshot, world);
+
+        // The world settings panel is tall enough to reach the readouts, and a root window opened later is drawn
+        // beneath the ones already open, so the readouts step aside while it is shown.
+        if (_sessionMenuOpen && _worldSettingsOpen)
+        {
+            EndRoot();
+            return;
+        }
+
         if (_shipInfoOpen && !_mapOpen)
         {
             // In the command view the sheet describes the first selected thing; otherwise the hull being flown.
