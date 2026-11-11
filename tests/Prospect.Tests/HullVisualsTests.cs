@@ -517,4 +517,87 @@ public sealed class HullVisualsTests
             jobs.CompleteAll();
         }
     }
+
+    [Fact]
+    public void AHullsTransitIsItsOwnLatchedDurationOrTheDrivesBaseOne()
+    {
+        var flight = Content.Designs[DesignWith(FtlKind.Rift)].Flight;
+        Assert.Equal(flight.FtlTunnelSeconds, HullVisuals.TunnelSeconds(new HullView(), flight));
+        Assert.Equal(25f, HullVisuals.TunnelSeconds(new HullView { JumpTunnelSeconds = 25f }, flight));
+        Assert.Equal(flight.FtlTunnelSeconds, HullVisuals.TunnelSeconds(new HullView { JumpTunnelSeconds = float.NaN }, flight));
+        Assert.Equal(0.5f, WorldView.JumpProgress(new HullView { Jump = JumpPhase.Tunnel, JumpTimer = 20f, JumpTunnelSeconds = 40f }, flight));
+    }
+
+    [Theory]
+    [InlineData(FtlKind.Rift, 12f)]
+    [InlineData(FtlKind.Rift, 600f)]
+    [InlineData(FtlKind.Wormhole, 12f)]
+    [InlineData(FtlKind.Wormhole, 600f)]
+    public void ALongTransitWaitsBetweenTheOpeningsAndComesOutAsAShortOne(FtlKind drive, float tunnel)
+    {
+        // However far the jump, the far opening opens and the hull comes out of it over the same last seconds as
+        // the drive's shortest transit, and the arrival is the same; before that nothing shows at the far end.
+        var flight = Content.Designs[DesignWith(drive)].Flight;
+        var basis = flight.FtlTunnelSeconds;
+        Assert.True(tunnel > basis);
+        for (var since = 0f; since < tunnel; since += tunnel / 400f)
+        {
+            var shape = HullVisuals.Passage(JumpPhase.Tunnel, since / tunnel, flight, tunnel);
+            var left = tunnel - since;
+            if (left > basis)
+            {
+                Assert.False(shape.Visible, $"seen {left} s before the end");
+                Assert.Equal(0f, shape.Open);
+                continue;
+            }
+
+            var short_ = HullVisuals.Passage(JumpPhase.Tunnel, (basis - left) / basis, flight);
+            Assert.Equal(short_.Visible, shape.Visible);
+            Assert.Equal(short_.Open, shape.Open, 3);
+            Assert.Equal(short_.Offset, shape.Offset, 2);
+            Assert.Equal(short_.Mouth, shape.Mouth, 3);
+        }
+
+        for (var progress = 0f; progress <= 1f; progress += 0.05f)
+        {
+            var short_ = HullVisuals.Passage(JumpPhase.Arrive, progress, flight);
+            var shape = HullVisuals.Passage(JumpPhase.Arrive, progress, flight, tunnel);
+            Assert.Equal(short_.Visible, shape.Visible);
+            Assert.Equal(short_.Open, shape.Open, 3);
+            Assert.Equal(short_.Offset, shape.Offset, 2);
+        }
+    }
+
+    [Theory]
+    [InlineData(12f)]
+    [InlineData(600f)]
+    public void ALongHyperspaceTransitStreaksInOverTheSameLastMoment(float tunnel)
+    {
+        var flight = Content.Designs[DesignWith(FtlKind.Hyperspace)].Flight;
+        var basis = flight.FtlTunnelSeconds;
+        for (var since = 0f; since < tunnel; since += tunnel / 400f)
+        {
+            var shape = HullVisuals.Hyperspace(JumpPhase.Tunnel, since / tunnel, flight, tunnel);
+            var left = tunnel - since;
+            if (left > basis)
+            {
+                Assert.False(shape.Visible, $"seen {left} s before the end");
+                continue;
+            }
+
+            var short_ = HullVisuals.Hyperspace(JumpPhase.Tunnel, (basis - left) / basis, flight);
+            Assert.Equal(short_.Visible, shape.Visible);
+            Assert.Equal(short_.Offset, shape.Offset, 2);
+            Assert.Equal(short_.Stretch, shape.Stretch, 3);
+        }
+
+        for (var progress = 0f; progress <= 1f; progress += 0.05f)
+        {
+            var short_ = HullVisuals.Hyperspace(JumpPhase.Arrive, progress, flight);
+            var shape = HullVisuals.Hyperspace(JumpPhase.Arrive, progress, flight, tunnel);
+            Assert.Equal(short_.Visible, shape.Visible);
+            Assert.Equal(short_.Offset, shape.Offset, 2);
+            Assert.Equal(short_.Stretch, shape.Stretch, 3);
+        }
+    }
 }

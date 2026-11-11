@@ -436,4 +436,58 @@ public sealed class JumpCameraTests : IDisposable
         Assert.True(entryCut + exitCut > 0, $"{drawnAs} at {lookDegrees}: never seen cut part way through ({entryCut} in, {exitCut} out)");
         Assert.True(throatSeen > 0, $"{drawnAs} at {lookDegrees}: never seen from inside the throat");
     }
+
+    [Theory]
+    [InlineData(FtlKind.Rift)]
+    [InlineData(FtlKind.Wormhole)]
+    public void ALongTransitWaitsInTheThroatAndComesOutOverTheLastSeconds(FtlKind drawnAs)
+    {
+        // A jump many sectors away takes far longer than the drive's base transit. The pilot's view waits in the
+        // throat, the far opening barely begun, and comes out over the base transit's last seconds as for a short
+        // jump, ending where the server put the hull.
+        _world.FtlPreview = drawnAs;
+        var target = _client.AcquireSnapshot().Galaxy!.CenterOf(new SectorCoord(12, 0, -7));
+        _client.Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = target });
+
+        var flight = _world.OwnFlight;
+        var basis = flight.FtlTunnelSeconds;
+        var full = flight.Radius * HullVisuals.OpeningRadius;
+        float? waiting = null;
+        var waited = 0;
+        var moved = false;
+        var started = false;
+        for (var frame = 0; frame < TickLoop.SimulationHz * 120; frame++)
+        {
+            var snapshot = Frame(false);
+            ref readonly var own = ref snapshot.Hulls[snapshot.OwnHull];
+            started |= own.Jump != JumpPhase.None;
+            if (started && own.Jump == JumpPhase.None)
+            {
+                Assert.True(own.Position.RelativeTo(target).Length() < 1f);
+                break;
+            }
+
+            if (own.Jump != JumpPhase.Tunnel)
+                continue;
+            Assert.True(own.JumpTunnelSeconds > basis + 5f, $"transit {own.JumpTunnelSeconds} s");
+            var offset = Vector3.Dot(_world.OwnDrawnPosition.RelativeTo(_world.OwnPosition), _world.OwnOpening.Axis);
+            var left = own.JumpTunnelSeconds - own.JumpTimer;
+            if (left > basis + 0.1f)
+            {
+                // Waiting: the hull holds where the way out starts, the far opening only begun.
+                waiting ??= offset;
+                Assert.Equal(waiting.Value, offset, 2);
+                Assert.True(_world.OwnOpening.Radius < full * 0.06f, $"far opening {_world.OwnOpening.Radius} with {left} s left");
+                waited++;
+            }
+            else if (waiting is { } start && MathF.Abs(offset - start) > 1f)
+            {
+                moved = true;
+            }
+        }
+
+        Assert.True(started);
+        Assert.True(waited > TickLoop.SimulationHz * 5, $"waited {waited} frames");
+        Assert.True(moved);
+    }
 }

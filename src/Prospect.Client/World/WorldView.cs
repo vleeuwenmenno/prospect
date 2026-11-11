@@ -1071,7 +1071,7 @@ internal sealed class WorldView
         var progress = SmoothJumpProgress(own, flight);
         _jumpKind = kind;
         _jumpStage = stage;
-        var tunnel = Math.Max(flight.FtlTunnelSeconds, 0.1f);
+        var tunnel = Math.Max(HullVisuals.TunnelSeconds(own, flight), 0.1f);
         var total = tunnel + Math.Max(flight.FtlArriveSeconds, 0.1f);
         // Seconds since the drive fired, through the tunnel and the arrival.
         var since = stage switch
@@ -1252,7 +1252,13 @@ internal sealed class WorldView
         {
             // From the moment the drive fires, over the tunnel and the arrival: the hull comes from far behind where
             // it arrives, and slows to a stop there. The far opening is placed so the camera passes through its
-            // middle just before the tunnel ends.
+            // middle just before the tunnel ends. A transit longer than the drive's base one waits in the throat
+            // first: what follows takes the base transit's length before the end, however far the jump.
+            var opening = Math.Clamp(flight.FtlTunnelSeconds, 0.1f, tunnel);
+            var wait = tunnel - opening;
+            since = Math.Max(0f, since - wait);
+            tunnel = opening;
+            total -= wait;
             const float Approach = 20f;
             var span = full * Approach;
             var t = since / total;
@@ -1289,7 +1295,7 @@ internal sealed class WorldView
                     (hull.JumpTimer + flight.FtlPower * tick) / Math.Max(flight.FtlEnergy, 0.001f),
                     flight.FtlCalculateSeconds > 0f ? (hull.JumpCalculation + tick) / flight.FtlCalculateSeconds : 1f
                 ),
-                JumpPhase.Tunnel => (hull.JumpTimer + tick) / flight.FtlTunnelSeconds,
+                JumpPhase.Tunnel => (hull.JumpTimer + tick) / HullVisuals.TunnelSeconds(hull, flight),
                 JumpPhase.Arrive => (hull.JumpTimer + tick) / flight.FtlArriveSeconds,
                 _ => 0f,
             },
@@ -1376,7 +1382,7 @@ internal sealed class WorldView
             hull.Jump switch
             {
                 JumpPhase.Charge => Math.Min(ChargeFraction(hull, flight), CalculationFraction(hull, flight)),
-                JumpPhase.Tunnel => hull.JumpTimer / flight.FtlTunnelSeconds,
+                JumpPhase.Tunnel => hull.JumpTimer / HullVisuals.TunnelSeconds(hull, flight),
                 JumpPhase.Arrive => hull.JumpTimer / flight.FtlArriveSeconds,
                 _ => 0f,
             },

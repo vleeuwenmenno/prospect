@@ -173,6 +173,7 @@ internal sealed class HullVisuals
         var jumping = hull.Jump != JumpPhase.None && kind != FtlKind.None;
         var forward = Vector3.Transform(-Vector3.UnitZ, visual.Orientation);
         var progress = jumping ? WorldView.JumpProgress(hull, flight) : 0f;
+        var tunnel = TunnelSeconds(hull, flight);
         var index = PassageSlot(hull.Id, jumping);
         if (index < 0)
         {
@@ -180,7 +181,7 @@ internal sealed class HullVisuals
             // anything to ease out of a cancel.
             if (kind == FtlKind.Hyperspace && jumping)
             {
-                var light = Hyperspace(hull.Jump, progress, flight);
+                var light = Hyperspace(hull.Jump, progress, flight, tunnel);
                 visual.Position += forward * light.Offset;
                 visual.Stretch = light.Stretch;
                 visual.Visible = light.Visible;
@@ -205,7 +206,7 @@ internal sealed class HullVisuals
             slot.Seed = (hull.Id & 0xFF) / 255f;
             if (kind == FtlKind.Hyperspace)
             {
-                var light = Hyperspace(hull.Jump, progress, flight);
+                var light = Hyperspace(hull.Jump, progress, flight, tunnel);
                 slot.Offset = light.Offset;
                 slot.Stretch = light.Stretch;
                 slot.Open = 0f;
@@ -219,13 +220,13 @@ internal sealed class HullVisuals
                 else if (slot.Flash >= 0f)
                 {
                     // Only a drive seen working leaves its light behind; one first seen in transit has none here.
-                    var since = hull.Jump == JumpPhase.Tunnel ? progress * flight.FtlTunnelSeconds : flight.FtlTunnelSeconds + progress * flight.FtlArriveSeconds;
+                    var since = hull.Jump == JumpPhase.Tunnel ? progress * tunnel : tunnel + progress * flight.FtlArriveSeconds;
                     slot.Flash = since < DepartureFlashSeconds ? Math.Max(since / DepartureFlashSeconds, 1e-4f) : -1f;
                 }
             }
             else
             {
-                var passage = Passage(hull.Jump, progress, flight);
+                var passage = Passage(hull.Jump, progress, flight, tunnel);
                 slot.Mouth = visual.Anchor + forward * passage.Mouth;
                 slot.Offset = passage.Offset;
                 slot.Open = passage.Open;
@@ -349,8 +350,10 @@ internal sealed class HullVisuals
     /// where the hull will be, and over the last second of the transit and the arrival the hull comes out of it
     /// (hidden before it, clip -1) and slows to where the server has it. Offset is along the nose from the hull's
     /// position, Mouth where the opening is along it, in metres; Visible is false while it is between the openings.
+    /// <paramref name="tunnelSeconds"/> is the hull's own transit, or 0 for the drive's base one. A longer transit
+    /// only waits longer between the openings: the far one opens over the base transit's length before the end.
     /// </summary>
-    internal static PassageShape Passage(JumpPhase phase, float progress, in FlightParams flight)
+    internal static PassageShape Passage(JumpPhase phase, float progress, in FlightParams flight, float tunnelSeconds = 0f)
     {
         var radius = flight.Radius;
         var ahead = radius * OpeningAhead;
@@ -364,14 +367,15 @@ internal sealed class HullVisuals
             return new PassageShape(offset, ahead, open, 1f, offset < ahead + radius * 1.5f);
         }
 
-        var tunnel = Math.Max(flight.FtlTunnelSeconds, 0.1f);
+        var tunnel = Math.Max(tunnelSeconds > 0f ? tunnelSeconds : flight.FtlTunnelSeconds, 0.1f);
+        var opening = Math.Clamp(flight.FtlTunnelSeconds, 0.1f, tunnel);
         var arrive = Math.Max(flight.FtlArriveSeconds, 0.1f);
         var since = phase == JumpPhase.Tunnel ? progress * tunnel : tunnel + progress * arrive;
         const float Lead = 1f;
         var lead = Math.Min(Lead, tunnel);
         var u = Math.Clamp((since - (tunnel - lead)) / (lead + arrive), 0f, 1f);
         var behind = radius * (OpeningBehind + 2f);
-        var exit = phase == JumpPhase.Tunnel ? Smooth(progress) : 1f - Smooth(progress);
+        var exit = phase == JumpPhase.Tunnel ? Smooth((since - (tunnel - opening)) / opening) : 1f - Smooth(progress);
         return new PassageShape(-behind * (1f - u) * (1f - u), -radius * OpeningBehind, exit, -1f, u > 0f);
     }
 
@@ -384,8 +388,9 @@ internal sealed class HullVisuals
     /// as it goes, and is gone when the drive fires. At the far end, just before the transit is over, it streaks in
     /// from behind where it stops, drawn out, and settles there as the arrival flashes. Offset is along the nose
     /// from where the simulation has the hull, in metres; Stretch how many times its length it is drawn.
+    /// <paramref name="tunnelSeconds"/> is the hull's own transit, or 0 for the drive's base one.
     /// </summary>
-    internal static HyperspaceShape Hyperspace(JumpPhase phase, float progress, in FlightParams flight)
+    internal static HyperspaceShape Hyperspace(JumpPhase phase, float progress, in FlightParams flight, float tunnelSeconds = 0f)
     {
         var radius = flight.Radius;
         if (phase is JumpPhase.Align or JumpPhase.Charge)
@@ -395,7 +400,7 @@ internal sealed class HullVisuals
             return new HyperspaceShape(radius * HyperspaceLight * move * move * move, 1f + HyperspaceStretch * move * move, true);
         }
 
-        var tunnel = Math.Max(flight.FtlTunnelSeconds, 0.1f);
+        var tunnel = Math.Max(tunnelSeconds > 0f ? tunnelSeconds : flight.FtlTunnelSeconds, 0.1f);
         var arrive = Math.Max(flight.FtlArriveSeconds, 0.1f);
         var since = phase == JumpPhase.Tunnel ? progress * tunnel : tunnel + progress * arrive;
         var lead = Math.Min(HyperspaceLead, tunnel);
@@ -403,6 +408,13 @@ internal sealed class HullVisuals
         var rest = 1f - u;
         return new HyperspaceShape(-radius * HyperspaceApproach * rest * rest * rest, 1f + HyperspaceStretch * rest * rest, u > 0f);
     }
+
+    /// <summary>
+    /// How long a hull's transit lasts: the duration its jump latched, which grows with the distance, or the drive's
+    /// base transit for a hull that has none.
+    /// </summary>
+    internal static float TunnelSeconds(in HullView hull, in FlightParams flight) =>
+        hull.JumpTunnelSeconds > 0f && float.IsFinite(hull.JumpTunnelSeconds) ? hull.JumpTunnelSeconds : flight.FtlTunnelSeconds;
 
     internal static float Smooth(float x)
     {
