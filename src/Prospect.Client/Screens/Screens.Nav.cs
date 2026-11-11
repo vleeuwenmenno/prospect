@@ -21,6 +21,7 @@ internal sealed partial class ScreenHost
 
     // The plotted destination's name, made once per destination: naming a sector allocates.
     private SectorCoord _navCoord;
+    private Galaxy? _navGalaxy;
     private string _navName = "";
 
     /// <summary>The strip's state for the hull being flown.</summary>
@@ -40,9 +41,10 @@ internal sealed partial class ScreenHost
     private string NavName(WorldView world, Double3 nav)
     {
         var coord = world.Galaxy!.SectorOf(nav);
-        if (_navName.Length == 0 || coord != _navCoord)
+        if (_navName.Length == 0 || coord != _navCoord || !ReferenceEquals(_navGalaxy, world.Galaxy))
         {
             _navCoord = coord;
+            _navGalaxy = world.Galaxy;
             _navName = world.Galaxy!.NameOf(coord);
         }
 
