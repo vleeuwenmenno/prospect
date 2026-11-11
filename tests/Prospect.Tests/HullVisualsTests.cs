@@ -284,6 +284,18 @@ public sealed class HullVisualsTests
         // The part past the opening is not, though the block is kept.
         var cut = Vector3.Normalize((centre + new Double3(0, 0, (opening - half) * 0.5f)).RelativeTo(camera));
         Assert.Equal(0, TargetPicking.Pick(cut, camera, cut, 1e6f, [hull], [], picks));
+
+        // Seen nose on from past the opening, the kept slabs show nothing: each face towards the camera is past the
+        // opening, the others face away, and nothing is drawn across the cut. The intact hull is one mesh.
+        Assert.Same(Content.Designs[design].ExteriorFaces, hull.Faces);
+        var ahead = centre + new Double3(0, 0, -2000);
+        var into = Vector3.Normalize(centre.RelativeTo(ahead));
+        Assert.Equal(0, TargetPicking.Pick(into, ahead, into, 1e6f, [hull], [], picks));
+
+        // Missing a block, it is drawn a cube per block, with every face of each.
+        var damaged = Hull(1, design, JumpPhase.Charge, 0.5f) with { Blocks = Content.Designs[design].FullMask & ~1UL };
+        Update(visuals, [damaged]);
+        Assert.Null(visuals.Pick(1, visuals.Hulls[0], visuals.Hulls[0].Position, Content.Designs[design]).Faces);
     }
 
     [Fact]

@@ -88,6 +88,12 @@ internal sealed class HullVisuals
 
         /// <summary>The blocks that can be picked: those it has, less those wholly past its opening.</summary>
         public ulong PickBlocks;
+
+        /// <summary>
+        /// Whether the hull has every block and is drawn as its design's one mesh, which leaves out the faces between
+        /// blocks; otherwise each block it has is drawn as its own cube.
+        /// </summary>
+        public bool Intact;
         public bool Visible;
 
         /// <summary>The pilot's own hull seen from inside its jump, which <see cref="WorldView"/> moves itself.</summary>
@@ -138,6 +144,7 @@ internal sealed class HullVisuals
                 Stretch = 1f,
                 Clip = -1,
                 PickBlocks = hull.Blocks,
+                Intact = hull.Blocks == design.FullMask,
                 Visible = true,
                 Inside = hull.IsOwn && ownInside,
             };
@@ -254,13 +261,14 @@ internal sealed class HullVisuals
     }
 
     /// <summary>
-    /// A hull as picking sees it, drawn at <paramref name="position"/>: its pickable blocks, drawn out and cut at its
-    /// opening exactly as the mesh pass draws it, so what can be picked is what is on screen.
+    /// A hull as picking sees it, drawn at <paramref name="position"/>: its pickable blocks with the faces the mesh
+    /// pass draws of them, drawn out and cut at its opening exactly as that pass draws it, so what can be picked is
+    /// what is on screen.
     /// </summary>
     public PickHull Pick(uint id, in HullVisual visual, Double3 position, HullDesign design)
     {
         var hull = new PickHull(id, position, visual.Orientation, design.BlockOffsets, design.BlockSize, visual.PickBlocks,
-            design.Flight.Radius, visual.Stretch);
+            design.Flight.Radius, visual.Stretch, Faces: visual.Intact ? design.ExteriorFaces : null);
         if (visual.Clip < 0)
             return hull;
         ref readonly var slot = ref _passages[visual.Clip];

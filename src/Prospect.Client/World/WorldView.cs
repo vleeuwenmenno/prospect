@@ -585,7 +585,7 @@ internal sealed class WorldView
                 continue;
             // The material says what the mesh is and, above it in steps of four, which opening cuts it.
             var material = visual.Inside ? 2f : 1f + 4f * (visual.Clip + 1);
-            if (hull.Blocks == design.FullMask)
+            if (visual.Intact)
             {
                 Add(ref candidateCount, Math.Min(hull.Design, _designs.Length - 1), position, orientation, 1f, design.Color, material, stretch);
                 continue;

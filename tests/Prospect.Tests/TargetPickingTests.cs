@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Numerics;
+using Brutal.Numerics;
+using Prospect.Client.Render;
 using Prospect.Game.World;
 using Xunit;
 
@@ -228,64 +230,185 @@ public sealed class TargetPickingTests
             Assert.InRange(hits[0].Distance, 99.49f, 99.51f);
     }
 
-    [Theory]
-    [InlineData(0.1f, 0, 0f)]
-    [InlineData(0.25f, 1, 0.25f)]
-    public void OnlyTheDrawnPartBeyondTheNearPlaneIsPicked(float z, int expected, float distance)
+    [Fact]
+    public void ACubeCutOpenTowardsTheCameraShowsNothingToPick()
     {
-        // A 0.2 m block from z - 0.1 to z + 0.1, with the near plane at 0.25 m: what is nearer is not drawn.
-        var hull = new PickHull(1, new Double3(0, 0, z), Quaternion.Identity, [Vector3.Zero], 0.2f, 1, 0.18f);
+        // The front face is past the cut and discarded, the others face away and are culled, and nothing caps the
+        // cut: from here the block draws nothing, so nothing is picked, not even within the grab of its middle.
+        var hull = new PickHull(1, new Double3(0, 0, 10), Quaternion.Identity, [Vector3.Zero], 1, 1, 0.87f,
+            CutPoint: new Vector3(0, 0, 0.1f), CutNormal: -Vector3.UnitZ);
         var hits = new PickHit[1];
-        Assert.Equal(expected, TargetPicking.Pick(Vector3.UnitZ, default, Vector3.UnitZ, 1000, [hull], [], hits));
+        Assert.Equal(0, TargetPicking.Pick(Vector3.UnitZ, default, Vector3.UnitZ, 1000, [hull], [], hits));
+        // Uncut, its front face is there.
+        Assert.Equal(1, TargetPicking.Pick(Vector3.UnitZ, default, Vector3.UnitZ, 1000, [hull with { CutNormal = default }], [], hits));
+        Assert.InRange(hits[0].Distance, 9.4999f, 9.5001f);
+    }
+
+    [Theory]
+    [InlineData(0f, 0.25f, 0, 0f)]
+    [InlineData(0.2f, 0.3f, 1, 0.31623f)]
+    [InlineData(0.2f, 0.2f, 0, 0f)]
+    public void OnlyFacesDrawnBeyondTheNearPlaneArePicked(float x, float aim, int expected, float distance)
+    {
+        // A 0.2 m block from z = 0.15 to 0.35 with the near plane at 0.25 m. Straight ahead its front face is nearer
+        // than the near plane and every other face is turned away, so nothing is drawn. Off to the side its -x face,
+        // at x = x - 0.1, is drawn from 0.25 m on: the ray meeting it there picks it, the one meeting it nearer misses.
+        var hull = new PickHull(1, new Double3(x, 0, 0.25f), Quaternion.Identity, [Vector3.Zero], 0.2f, 1, 0.18f);
+        var ray = x == 0 ? Vector3.UnitZ : Vector3.Normalize(new Vector3(x - 0.1f, 0, aim));
+        var hits = new PickHit[1];
+        Assert.Equal(expected, TargetPicking.Pick(ray, default, Vector3.UnitZ, 1000, [hull], [], hits));
         if (expected == 1)
             Assert.InRange(hits[0].Distance, distance - 1e-4f, distance + 1e-4f);
     }
 
     [Fact]
-    public void ACutDrawnOutBlockAcrossTheNearPlaneMatchesASampledSilhouette()
+    public void AnIntactHullCutOpenShowsNoFaceBetweenItsBlocksButACubePerBlockDoes()
     {
-        // Rotated blocks drawn out along z, with a tilted cut through them and the near plane through them too, so
-        // the silhouette has corners on neither the box's corners nor its edges. Each pick is checked against the
-        // solid sampled on a grid: inside the grab by more than the grid's error is a hit, outside by more a miss.
-        const float Focal = 50f;
-        const float NearPlane = 4f;
-        const int Grid = 40;
-        var random = new Random(17);
+        // Two blocks one behind the other; the cut takes the front face of the nearer one. The intact hull's mesh
+        // has no face between them, so through the opening there is nothing; drawn block by block, the farther
+        // cube's own front face is there.
+        byte front = 0x3F & ~(1 << 4);
+        byte back = 0x3F & ~(1 << 5);
+        var cubes = new PickHull(1, new Double3(0, 0, 10), Quaternion.Identity, [new Vector3(0, 0, -0.5f), new Vector3(0, 0, 0.5f)], 1, 3, 1.2f,
+            CutPoint: new Vector3(0, 0, -0.1f), CutNormal: -Vector3.UnitZ);
         var hits = new PickHit[1];
-        var grab = TargetPicking.GrabPixels / Focal;
-        int hitsSeen = 0, missesSeen = 0;
-        for (var c = 0; c < 300; c++)
+        Assert.Equal(0, TargetPicking.Pick(Vector3.UnitZ, default, Vector3.UnitZ, 1000, [cubes with { Faces = [front, back] }], [], hits));
+        Assert.Equal(1, TargetPicking.Pick(Vector3.UnitZ, default, Vector3.UnitZ, 1000, [cubes], [], hits));
+        Assert.InRange(hits[0].Distance, 9.9999f, 10.0001f);
+    }
+
+    [Fact]
+    public void ExteriorFacesAreTheFacesTheHullMeshHas()
+    {
+        foreach (var design in GameContent.Load().Designs)
         {
+            var mesh = MeshBuilder.Hull(design);
+            var faces = new byte[design.BlockOffsets.Length];
+            for (var q = 0; q < mesh.Vertices.Count; q += 4)
+            {
+                var middle = Vector3.Zero;
+                for (var k = 0; k < 4; k++)
+                    middle += Point(mesh.Vertices[q + k].Position) * 0.25f;
+                var normal = Point(mesh.Vertices[q].Normal);
+                var axis = normal.X != 0 ? 0 : normal.Y != 0 ? 1 : 2;
+                var block = Array.FindIndex(design.BlockOffsets, b => Vector3.Distance(b, middle - normal * design.BlockSize * 0.5f) < 1e-4f);
+                Assert.True(block >= 0);
+                faces[block] |= (byte)(1 << (2 * axis + (normal[axis] < 0 ? 1 : 0)));
+            }
+            Assert.Equal(faces, design.ExteriorFaces);
+        }
+    }
+
+    private static Vector3 Point(float3 v) => new(v.X, v.Y, v.Z);
+
+    [Fact]
+    public void PicksMatchTheDrawnTrianglesOfCutDrawnOutHullsAcrossTheNearPlane()
+    {
+        // Lone cubes, intact hulls and hulls missing a block, rotated, drawn out along z, with a tilted cut through
+        // them and the near plane through them too. The truth is the triangles the renderer draws: a triangle turned
+        // away from the camera is culled, a point past the cut or nearer than the near plane is discarded, and
+        // nothing fills either. A ray meeting a drawn point must pick the hull at that distance; otherwise the nearest
+        // drawn point, sampled on each triangle, decides the grab, except within the sampling's error of its edge.
+        const float Focal = 200f;
+        const int Samples = 48;
+        var designs = GameContent.Load().Designs;
+        var random = new Random(17);
+        var picks = new PickHit[1];
+        var grab = TargetPicking.GrabPixels / Focal;
+        var cube = MeshBuilder.Cube();
+        int exact = 0, padded = 0, missed = 0;
+        var triangles = new List<(Vector3 A, Vector3 B, Vector3 C)>();
+        for (var c = 0; c < 600; c++)
+        {
+            var kind = c % 3;
+            var design = designs[c / 3 % designs.Length];
             var axis = Vector3.Normalize(new Vector3(random.NextSingle() - 0.5f, random.NextSingle() - 0.5f, random.NextSingle() - 0.5f));
             var rotation = Quaternion.CreateFromAxisAngle(axis, random.NextSingle() * 6.28f);
             var stretch = 1f + random.NextSingle();
-            var center = new Vector3(random.NextSingle() - 0.5f, random.NextSingle() - 0.5f, NearPlane + random.NextSingle() - 0.5f);
+            var size = kind == 0 ? 0.5f : design.Flight.Radius;
+            // The camera is outside the hull, and the near plane goes through it.
+            var depth = 4f + 2f * size;
+            var near = depth - (0.2f + 0.7f * random.NextSingle()) * size;
+            var center = new Vector3((random.NextSingle() - 0.5f) * size, (random.NextSingle() - 0.5f) * size, depth);
             var normal = Vector3.Normalize(new Vector3(random.NextSingle() - 0.5f, random.NextSingle() - 0.5f, random.NextSingle() - 0.5f));
-            var cutPoint = new Vector3(random.NextSingle() - 0.5f, random.NextSingle() - 0.5f, random.NextSingle() - 0.5f) * 0.4f;
-            var hull = new PickHull(1, new Double3(center.X, center.Y, center.Z), rotation, [Vector3.Zero], 1, 1, 0.87f, stretch, cutPoint, normal);
-            var pointer = new Vector3(center.X / center.Z + (random.NextSingle() - 0.5f) * 1.2f, center.Y / center.Z + (random.NextSingle() - 0.5f) * 1.2f, 1);
+            var cutPoint = new Vector3(random.NextSingle() - 0.5f, random.NextSingle() - 0.5f, random.NextSingle() - 0.5f) * size * 0.8f;
+            var mask = kind == 2 ? design.FullMask & ~(1UL << random.Next(design.BlockOffsets.Length)) : design.FullMask;
+            var hull = kind == 0
+                ? new PickHull(1, new Double3(center.X, center.Y, center.Z), rotation, [Vector3.Zero], 1, 1, 0.87f, stretch, cutPoint, normal)
+                : new PickHull(1, new Double3(center.X, center.Y, center.Z), rotation, design.BlockOffsets, design.BlockSize, mask,
+                    design.Flight.Radius, stretch, cutPoint, normal, kind == 1 ? design.ExteriorFaces : null);
 
+            // The triangles as the mesh pass places them: one hull mesh, or a cube per block it has.
+            triangles.Clear();
+            if (kind == 1)
+                Add(MeshBuilder.Hull(design), Vector3.Zero, 1);
+            else
+                for (var b = 0; b < hull.Blocks.Length; b++)
+                    if ((mask & 1UL << b) != 0)
+                        Add(cube, hull.Blocks[b] with { Z = hull.Blocks[b].Z * stretch }, hull.BlockSize);
+
+            var spread = 1.6f * size / depth;
+            var pointer = new Vector3(center.X / depth + (random.NextSingle() - 0.5f) * spread, center.Y / depth + (random.NextSingle() - 0.5f) * spread, 1);
+            var ray = Vector3.Normalize(pointer);
+            var hit = float.PositiveInfinity;
             var nearest = float.PositiveInfinity;
-            for (var i = 0; i < Grid; i++)
-                for (var j = 0; j < Grid; j++)
-                    for (var k = 0; k < Grid; k++)
+            var error = 0f;
+            foreach (var (a, b, t) in triangles)
+            {
+                var facing = Vector3.Cross(b - a, t - a);
+                if (Vector3.Dot(facing, a) >= 0) continue;
+                // Where the ray meets the triangle's plane, if inside it.
+                var along = Vector3.Dot(facing, a) / Vector3.Dot(facing, ray);
+                var p = ray * along;
+                if (along > 0 && Drawn(p) && Vector3.Dot(Vector3.Cross(b - a, p - a), facing) >= 0
+                    && Vector3.Dot(Vector3.Cross(t - b, p - b), facing) >= 0 && Vector3.Dot(Vector3.Cross(a - t, p - t), facing) >= 0)
+                    hit = Math.Min(hit, along);
+                var longest = Math.Max(Vector3.Distance(a, b), Math.Max(Vector3.Distance(b, t), Vector3.Distance(t, a)));
+                for (var i = 0; i <= Samples; i++)
+                    for (var j = 0; i + j <= Samples; j++)
                     {
-                        var local = new Vector3(i, j, k) / (Grid - 1) - new Vector3(0.5f);
-                        local.Z *= stretch;
-                        var p = center + Vector3.Transform(local, rotation);
-                        if (p.Z < NearPlane || Vector3.Dot(p - center - cutPoint, normal) > 0) continue;
-                        nearest = Math.Min(nearest, Vector2.Distance(new Vector2(p.X, p.Y) / p.Z, new Vector2(pointer.X, pointer.Y)));
+                        var s = a + (b - a) * i / Samples + (t - a) * j / Samples;
+                        if (!Drawn(s)) continue;
+                        var seen = Vector2.Distance(new Vector2(s.X, s.Y) / s.Z, new Vector2(pointer.X, pointer.Y));
+                        if (seen < nearest) (nearest, error) = (seen, longest / Samples / near * 1.5f);
                     }
-            // A grid point is at most half a diagonal from the solid's nearest point; seen no nearer than the near plane.
-            var error = MathF.Sqrt(3) * 0.5f * stretch / (Grid - 1) / NearPlane * 1.5f;
-            // A sliver the grid misses altogether, or a pointer at the grab's edge, is not decided by sampling.
+            }
+
+            var count = TargetPicking.Pick(ray, default, Vector3.UnitZ, Focal, [hull], [], picks, nearPlane: near);
+            if (float.IsFinite(hit))
+            {
+                Assert.True(count == 1 && MathF.Abs(picks[0].Distance - hit) < 1e-3f, $"case {c}: drawn at {hit}, picked {count} at {picks[0].Distance}");
+                exact++;
+                continue;
+            }
+            // A sliver the samples miss altogether, or a pointer at the grab's edge, is not decided by sampling.
             if (!float.IsFinite(nearest) || MathF.Abs(nearest - grab) < error) continue;
             var expected = nearest < grab ? 1 : 0;
-            Assert.True(expected == TargetPicking.Pick(Vector3.Normalize(pointer), default, Vector3.UnitZ, Focal, [hull], [], hits, nearPlane: NearPlane), $"case {c}: nearest {nearest}, grab {grab}, error {error}");
-            hitsSeen += expected;
-            missesSeen += 1 - expected;
+            Assert.True(expected == count, $"case {c} ({kind}): nearest {nearest}, grab {grab}, error {error}");
+            padded += expected;
+            missed += 1 - expected;
+
+            bool Drawn(Vector3 p) => p.Z >= near && Vector3.Dot(p - center - cutPoint, normal) <= 0;
+            void Add(MeshData mesh, Vector3 offset, float scale)
+            {
+                for (var i = 0; i < mesh.Indices.Count; i += 3)
+                {
+                    // The mesh winds counter-clockwise seen from outside, which is the side it is drawn from.
+                    var (p0, p1, p2) = (Vertex(0), Vertex(1), Vertex(2));
+                    Assert.True(Vector3.Dot(Vector3.Cross(p1 - p0, p2 - p0), Point(mesh.Vertices[(int)mesh.Indices[i]].Normal)) > 0);
+                    triangles.Add((Place(p0), Place(p1), Place(p2)));
+                    Vector3 Vertex(int k) => Point(mesh.Vertices[(int)mesh.Indices[i + k]].Position);
+                    Vector3 Place(Vector3 v)
+                    {
+                        v *= scale;
+                        v.Z *= stretch;
+                        return center + Vector3.Transform(v + offset, rotation);
+                    }
+                }
+            }
         }
-        Assert.True(hitsSeen > 50 && missesSeen > 50, $"{hitsSeen} hits, {missesSeen} misses");
+        Console.WriteLine($"DRAWN TRIANGLES: {exact} exact, {padded} padded, {missed} missed");
+        Assert.True(exact > 40 && padded > 40 && missed > 40, $"{exact} exact, {padded} padded, {missed} missed");
     }
 
     [Fact]
@@ -300,6 +423,31 @@ public sealed class TargetPickingTests
         Assert.Equal(1, hits[0].Rock!.Value.Index);
         Assert.Equal(0, hits[1].Rock!.Value.Index);
         Assert.InRange(MathF.Abs(hits[1].Distance - expected), 0, 0.002f);
+    }
+
+    [Fact]
+    public void TwoHundredFiftySixCutHullsOnTheRayTakeUnderFiveMillisecondsAndAllocateNothing()
+    {
+        // Intact hulls, cut and drawn out, every one inside the broad test: half on the ray, met face by face, and
+        // half just beside it, where every drawn face of every block is clipped and measured for the grab.
+        var design = GameContent.Load().Designs[2];
+        var radius = design.Flight.Radius;
+        var hulls = new PickHull[256];
+        for (var i = 0; i < hulls.Length; i++)
+            hulls[i] = new PickHull((uint)i + 1, new Double3(i % 2 == 0 ? 0 : radius * 0.9f, 0, 30 + i), Quaternion.CreateFromAxisAngle(Vector3.UnitY, i),
+                design.BlockOffsets, design.BlockSize, design.FullMask, radius, 1.5f, new Vector3(0, 0, 0.3f), Vector3.Normalize(new Vector3(1, 0, -1)), design.ExteriorFaces);
+        var hits = new PickHit[hulls.Length];
+        for (var i = 0; i < 20; i++) TargetPicking.Pick(Vector3.UnitZ, default, Vector3.UnitZ, 1000, hulls, [], hits);
+        var start = Stopwatch.GetTimestamp();
+        var allocated = GC.GetAllocatedBytesForCurrentThread();
+        var count = 0;
+        for (var i = 0; i < 100; i++) count = TargetPicking.Pick(Vector3.UnitZ, default, Vector3.UnitZ, 1000, hulls, [], hits);
+        allocated = GC.GetAllocatedBytesForCurrentThread() - allocated;
+        var milliseconds = Stopwatch.GetElapsedTime(start).TotalMilliseconds / 100;
+        Console.WriteLine($"PICK 256 HULLS: {milliseconds:F3} ms per pick; {count} hits; {allocated} bytes; budget 5 ms");
+        Assert.InRange(count, 128, 256);
+        Assert.Equal(0, allocated);
+        Assert.True(milliseconds < 5, $"256 hulls: {milliseconds:F3} ms per pick; budget 5 ms");
     }
 
     [Fact]

@@ -5,10 +5,12 @@ namespace Prospect.Game.World;
 /// <summary>
 /// A hull's visible blocks at the interpolated frame position, shaped as drawn: <paramref name="Stretch"/> draws it out
 /// along its local z (1 is not at all), and the part where <c>dot(p - Position - CutPoint, CutNormal) &gt; 0</c> is cut
-/// away. Both are in world axes; a zero <paramref name="CutNormal"/> cuts nothing.
+/// away. Both are in world axes; a zero <paramref name="CutNormal"/> cuts nothing. <paramref name="Faces"/> holds, per
+/// block, the faces drawn in <see cref="HullDesign.ExteriorFaces"/> order; null draws all six, a block as its own cube.
+/// Only faces turned to the camera are drawn, and nothing caps a cut, so only those faces can be picked.
 /// </summary>
 public readonly record struct PickHull(uint Id, Double3 Position, Quaternion Rotation, Vector3[] Blocks, float BlockSize, ulong Mask, float Radius,
-    float Stretch = 1, Vector3 CutPoint = default, Vector3 CutNormal = default);
+    float Stretch = 1, Vector3 CutPoint = default, Vector3 CutNormal = default, byte[]? Faces = null);
 
 /// <summary>A loaded sector and its current displacement offsets, borrowed without copying.</summary>
 public readonly record struct PickSector(SectorCoord Id, Double3 Center, Asteroid[] Rocks, int Count, Vector3[]? Offsets, Vector3 BoundsCenter = default, float BoundsRadius = 0);
@@ -53,13 +55,15 @@ public static class TargetPicking
             // Drawing out along z never moves a point further from the centre than the stretch times its distance.
             var radius = hull.Radius * stretch;
             if (!Sphere(ray, center, radius + (Math.Max(0, depth) + radius) * GrabPixels / pixelsPerTangent, out _)) continue;
+            // Everything is worked out in the hull's own axes, from the camera. Rotation keeps lengths, so distances
+            // along the local ray stay world metres.
             var inverse = Quaternion.Conjugate(hull.Rotation);
-            // Rotation keeps lengths, so distances along the local ray stay world metres.
             var origin = Vector3.Transform(-center, inverse);
             var direction = Vector3.Transform(ray, inverse);
+            var view = Vector3.Transform(forward, inverse);
             var cut = Vector3.Transform(hull.CutNormal, inverse);
-            var cutAt = Vector3.Dot(Vector3.Transform(hull.CutPoint, inverse), cut);
-            var cutWorld = Vector3.Dot(center + hull.CutPoint, hull.CutNormal);
+            // A point q from the camera is drawn where dot(q, cut) <= cutAt.
+            var cutAt = Vector3.Dot(Vector3.Transform(hull.CutPoint, inverse) - origin, cut);
             var half = new Vector3(hull.BlockSize * 0.5f, hull.BlockSize * 0.5f, hull.BlockSize * 0.5f * stretch);
             // Nothing nearer than the near plane is drawn, so a ray only starts to hit there.
             var rayDepth = Vector3.Dot(ray, forward);
@@ -71,14 +75,16 @@ public static class TargetPicking
                 if ((hull.Mask & (1UL << b)) == 0) continue;
                 var block = hull.Blocks[b];
                 block.Z *= stretch;
-                if (Box(origin - block, direction, half, cut, cutAt - Vector3.Dot(block, cut), start, out var t))
-                {
-                    nearest = Math.Min(nearest, t);
-                    continue;
-                }
-                var world = center + Vector3.Transform(block, hull.Rotation);
-                if (NearBlock(ray, forward, pixelsPerTangent, world, hull.Rotation, half, hull.CutNormal, cutWorld, nearPlane))
-                    padded = Math.Min(padded, Math.Max(0, Vector3.Dot(world, ray)));
+                nearest = Faces(block - origin, direction, half, hull.Faces?[b] ?? AllFaces, cut, cutAt, start, nearest);
+            }
+            // The pointer is on no drawn face, so the grab is measured to their edges.
+            for (var b = 0; b < hull.Blocks.Length && !float.IsFinite(nearest) && rayDepth > 0; b++)
+            {
+                if ((hull.Mask & (1UL << b)) == 0) continue;
+                var block = hull.Blocks[b];
+                block.Z *= stretch;
+                if (NearFaces(direction / rayDepth, view, pixelsPerTangent, block - origin, half, hull.Faces?[b] ?? AllFaces, cut, cutAt, nearPlane))
+                    padded = Math.Min(padded, Math.Max(0, Vector3.Dot(block - origin, direction)));
             }
             if (!float.IsFinite(nearest)) nearest = padded;
             if (float.IsFinite(nearest)) hits[count++] = new(hull.Id, null, nearest);
@@ -122,37 +128,61 @@ public static class TargetPicking
         return (point / depth - ray / rayDepth).LengthSquared() <= GrabPixels * GrabPixels / (focal * focal);
     }
 
+    private const int AllFaces = 0x3F;
+    private static readonly Vector3[] Axes = [Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ];
+
     /// <summary>
-    /// Whether the pointer is within the grab of a block's silhouette: the box, less what is past the cut plane
-    /// (<c>dot(p, cut) &gt; cutAt</c>) and nearer than the near plane. Every corner of that solid lies on a face of
-    /// the box, so each face is clipped by both planes and the edges of what is left are its silhouette's edges.
+    /// The nearest of <paramref name="nearest"/> and the drawn faces of a block, centred at <paramref name="block"/>
+    /// from the camera, that the ray meets from <paramref name="start"/> on, on the drawn side of the cut. A face is
+    /// only met from its outside, which is the side it is drawn from.
     /// </summary>
-    private static bool NearBlock(Vector3 ray, Vector3 forward, float focal, Vector3 center, Quaternion rotation, Vector3 half,
+    private static float Faces(Vector3 block, Vector3 ray, Vector3 half, int faces, Vector3 cut, float cutAt, float start, float nearest)
+    {
+        for (var side = 0; side < 6; side++)
+        {
+            var axis = side >> 1;
+            var sign = (side & 1) == 0 ? 1f : -1f;
+            if ((faces & 1 << side) == 0 || ray[axis] * sign >= 0) continue;
+            var t = (block[axis] + sign * half[axis]) / ray[axis];
+            if (t < start || t >= nearest) continue;
+            var offset = ray * t - block;
+            var u = (axis + 1) % 3;
+            var v = (axis + 2) % 3;
+            if (MathF.Abs(offset[u]) <= half[u] && MathF.Abs(offset[v]) <= half[v] && Vector3.Dot(ray * t, cut) <= cutAt)
+                nearest = t;
+        }
+        return nearest;
+    }
+
+    /// <summary>
+    /// Whether the pointer is within the grab of a block's drawn faces turned to the camera, each less what is past
+    /// the cut and nearer than the near plane. Both planes can cut a face, so each is clipped as a polygon and its
+    /// corners need not be the box's.
+    /// </summary>
+    private static bool NearFaces(Vector3 pointer, Vector3 forward, float focal, Vector3 block, Vector3 half, int faces,
         Vector3 cut, float cutAt, float nearPlane)
     {
-        var rayDepth = Vector3.Dot(ray, forward);
-        if (rayDepth <= 0) return false;
-        var pointer = ray / rayDepth;
         var squared = GrabPixels * GrabPixels / (focal * focal);
-        Span<Vector3> axes = stackalloc Vector3[] { Vector3.Transform(Vector3.UnitX, rotation) * half.X,
-            Vector3.Transform(Vector3.UnitY, rotation) * half.Y, Vector3.Transform(Vector3.UnitZ, rotation) * half.Z };
         // A quad clipped by two planes keeps at most six corners.
         Span<Vector3> face = stackalloc Vector3[8];
         Span<Vector3> clipped = stackalloc Vector3[8];
         for (var side = 0; side < 6; side++)
         {
-            var normal = axes[side >> 1] * ((side & 1) == 0 ? -1 : 1);
-            var u = axes[((side >> 1) + 1) % 3];
-            var v = axes[((side >> 1) + 2) % 3];
-            var middle = center + normal;
+            var axis = side >> 1;
+            var sign = (side & 1) == 0 ? 1f : -1f;
+            var plane = block[axis] + sign * half[axis];
+            // The camera must be outside the face's plane to see it; the renderer culls it otherwise.
+            if ((faces & 1 << side) == 0 || plane * sign >= 0) continue;
+            var middle = block + Axes[axis] * (sign * half[axis]);
+            var u = Axes[(axis + 1) % 3] * half[(axis + 1) % 3];
+            var v = Axes[(axis + 2) % 3] * half[(axis + 2) % 3];
             face[0] = middle - u - v;
             face[1] = middle + u - v;
             face[2] = middle + u + v;
             face[3] = middle - u + v;
             var count = Keep(face[..4], clipped, forward, nearPlane);
             count = Keep(clipped[..count], face, -cut, -cutAt);
-            // The exact box test already missed, so the pointer is outside this convex silhouette and its nearest
-            // point is on an edge of the solid; edges inside the silhouette are never nearer.
+            // The pointer is on no drawn face, so its nearest point on one is on the edge of what is left of it.
             for (var i = 0; i < count; i++)
             {
                 var a = face[i] / Math.Max(nearPlane, Vector3.Dot(face[i], forward));
@@ -192,34 +222,6 @@ public static class TargetPicking
         if (square < 0 || along + MathF.Sqrt(square) < 0) return false;
         distance = Math.Max(0, along - MathF.Sqrt(square));
         return true;
-    }
-
-    /// <summary>
-    /// The first point along the ray, from <paramref name="near"/> on, inside the box and on the shown side of
-    /// <c>dot(p, cut) &lt;= cutAt</c>.
-    /// </summary>
-    private static bool Box(Vector3 origin, Vector3 ray, Vector3 half, Vector3 cut, float cutAt, float near, out float distance)
-    {
-        var far = float.PositiveInfinity;
-        for (var axis = 0; axis < 3; axis++)
-        {
-            if (MathF.Abs(ray[axis]) < 1e-8f)
-            {
-                if (MathF.Abs(origin[axis]) > half[axis]) { distance = 0; return false; }
-                continue;
-            }
-            var a = (-half[axis] - origin[axis]) / ray[axis];
-            var b = (half[axis] - origin[axis]) / ray[axis];
-            near = Math.Max(near, Math.Min(a, b));
-            far = Math.Min(far, Math.Max(a, b));
-        }
-        var past = Vector3.Dot(origin, cut) - cutAt;
-        var rate = Vector3.Dot(ray, cut);
-        if (rate > 0) far = Math.Min(far, -past / rate);
-        else if (rate < 0) near = Math.Max(near, -past / rate);
-        else if (past > 0) { distance = 0; return false; }
-        distance = near;
-        return far >= near;
     }
 }
 

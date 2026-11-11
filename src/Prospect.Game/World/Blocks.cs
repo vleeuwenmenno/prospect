@@ -295,6 +295,12 @@ public sealed class HullDesign
     /// <summary>One bit per block, all set: the intact hull.</summary>
     public ulong FullMask { get; private set; }
 
+    /// <summary>
+    /// For each block, the faces the intact hull's mesh has: those with no block beside them. Face bit
+    /// <c>2 * axis + (negative ? 1 : 0)</c>, so +x, -x, +y, -y, +z, -z, the order <c>MeshBuilder.Hull</c> walks them.
+    /// </summary>
+    public byte[] ExteriorFaces { get; private set; } = [];
+
     /// <summary>The bits of the blocks whose loss destroys the hull.</summary>
     public ulong CoreMask { get; private set; }
 
@@ -386,6 +392,19 @@ public sealed class HullDesign
         BlockOffsets = new Vector3[Cells.Length];
         for (var i = 0; i < Cells.Length; i++)
             BlockOffsets[i] = (new Vector3(Cells[i].X, Cells[i].Y, Cells[i].Z) - CenterOfMass) * BlockSize;
+        ExteriorFaces = new byte[Cells.Length];
+        for (var i = 0; i < Cells.Length; i++)
+        {
+            var faces = 0x3F;
+            foreach (var other in Cells)
+            {
+                var (x, y, z) = (other.X - Cells[i].X, other.Y - Cells[i].Y, other.Z - Cells[i].Z);
+                if (Math.Abs(x) + Math.Abs(y) + Math.Abs(z) == 1)
+                    faces &= ~(1 << (2 * (x != 0 ? 0 : y != 0 ? 1 : 2) + (x + y + z < 0 ? 1 : 0)));
+            }
+
+            ExteriorFaces[i] = (byte)faces;
+        }
 
         Evaluate(FullMask, out var flight, out var stats);
         Flight = flight;
