@@ -818,29 +818,38 @@ public static class HullSim
     /// <summary>
     /// Applies impact damage: the shield takes what it can, the rest is split between the blocks that touched.
     /// What the shield pays for each point it takes is the world's choice, and so is whether it stands in the
-    /// way of a collision at all. A block at zero is gone. Returns true if the hull is destroyed: its core is
-    /// gone or nothing is left.
+    /// way of a collision at all. A shield that pays out everything it had breaks and goes offline; an offline
+    /// shield takes nothing, whatever charge it is building back. Every hit, absorbed or not, restarts the
+    /// recharge delay. A block at zero is gone. Returns true if the hull is destroyed: its core is gone or
+    /// nothing is left.
     /// </summary>
     internal static bool Damage(ref HullState state, in FlightParams flight, ref HullBody body, ulong touching, int touchCount, float amount)
     {
         state.ShieldCooldown = flight.ShieldDelay;
         var remaining = amount;
         var cost = flight.CollisionShieldCost;
-        if (cost > 0)
+        if (cost > 0 && flight.ShieldCapacity > 0 && !state.ShieldOffline)
         {
             // What the shield can still take at that price. A shield that cannot take it all goes to exactly
             // zero, not to whatever the division left over.
             var holds = state.Shield / cost;
+            float absorbed;
             if (holds > amount)
             {
-                state.Shield -= amount * cost;
+                absorbed = amount * cost;
+                state.Shield -= absorbed;
                 remaining = 0;
             }
             else
             {
+                absorbed = state.Shield;
                 state.Shield = 0;
+                state.ShieldOffline = true;
                 remaining = amount - holds;
             }
+
+            if (absorbed > 0)
+                RecordShieldHit(ref state, flight, body.Design, touching, absorbed);
         }
 
         if (remaining <= 0)
@@ -869,5 +878,48 @@ public static class HullSim
 
         state.Hull = total;
         return total <= 0 || (body.Alive & body.Design.CoreMask) != body.Design.CoreMask;
+    }
+
+    /// <summary>
+    /// Records an absorbed impact for the shield's ripple, at the middle of the blocks that touched. Impacts in
+    /// the same tick are one event: their strengths add up and the harder one says where.
+    /// </summary>
+    private static void RecordShieldHit(ref HullState state, in FlightParams flight, HullDesign? design, ulong touching, float absorbed)
+    {
+        var point = Vector3.Zero;
+        var count = 0;
+        if (design is not null)
+        {
+            var offsets = design.BlockOffsets;
+            for (var bits = touching & design.FullMask; bits != 0; bits &= bits - 1)
+            {
+                point += offsets[BitOperations.TrailingZeroCount(bits)];
+                count++;
+            }
+        }
+
+        if (count > 0)
+            point /= count;
+        var scale = flight.Radius > 0 ? 127f / flight.Radius : 0f;
+        point = Vector3.Clamp(point * scale, new Vector3(-127f), new Vector3(127f));
+
+        // Four hits of a quarter of the shield each show at full strength; any absorbed hit shows at all.
+        var strength = (int)MathF.Ceiling(Math.Min(1f, absorbed / flight.ShieldCapacity * 4f) * 255f);
+        strength = Math.Clamp(strength, 1, 255);
+        ref var hit = ref state.ShieldHit;
+        var sameTick = hit.Strength > 0 && hit.AgeTicks == 0;
+        if (sameTick && strength <= hit.Strength)
+        {
+            hit.Strength = (byte)Math.Min(255, hit.Strength + strength);
+            return;
+        }
+
+        if (!sameTick)
+            hit.Serial++;
+        hit.Strength = (byte)Math.Min(255, strength + (sameTick ? hit.Strength : 0));
+        hit.X = (sbyte)MathF.Round(point.X);
+        hit.Y = (sbyte)MathF.Round(point.Y);
+        hit.Z = (sbyte)MathF.Round(point.Z);
+        hit.AgeTicks = 0;
     }
 }

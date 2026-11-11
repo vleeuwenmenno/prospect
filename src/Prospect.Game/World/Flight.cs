@@ -100,6 +100,14 @@ public struct FlightParams
     /// <summary>Seconds after taking damage before the shield starts to recharge.</summary>
     public float ShieldDelay;
 
+    /// <summary>
+    /// Share of <see cref="ShieldCapacity"/> a broken shield must charge back to before it is online again.
+    /// </summary>
+    public float ShieldRestartFraction;
+
+    /// <summary>Megawatts a broken shield draws while it charges back to its restart threshold.</summary>
+    public float ShieldRestartPower;
+
     /// <summary>Generator output in megawatts.</summary>
     public float PowerGenerated;
 
@@ -167,6 +175,34 @@ public enum JumpPhase : byte
     Arrive = 4,
 }
 
+/// <summary>
+/// The newest impact a hull's shield absorbed, for drawing its ripple. Simulation state like the rest of the hull:
+/// the server and the predicting client write it with the same code, and snapshots carry it as it is stored, so
+/// every viewer agrees on where and how long ago the shield was hit. Impacts in one tick are one event.
+/// </summary>
+public struct ShieldHit
+{
+    /// <summary>Ticks after which a hit is too old to show; the age stops counting there.</summary>
+    public const byte MaxAgeTicks = 120;
+
+    /// <summary>Counts absorbing ticks, wrapping, so a viewer can tell a new hit from one it has seen.</summary>
+    public byte Serial;
+
+    /// <summary>How hard the hit was, 1 to 255 as a share of the shield's capacity; 0 means no hit.</summary>
+    public byte Strength;
+
+    /// <summary>Where it landed: the hull-local point, divided by the hull's radius, times 127.</summary>
+    public sbyte X;
+    public sbyte Y;
+    public sbyte Z;
+
+    /// <summary>Ticks since the hit, up to <see cref="MaxAgeTicks"/>.</summary>
+    public byte AgeTicks;
+
+    /// <summary>The hull-local point the hit landed at, in metres.</summary>
+    public readonly Vector3 Point(float radius) => new Vector3(X, Y, Z) * (radius / 127f);
+}
+
 /// <summary>The moving state of one hull.</summary>
 public struct HullState
 {
@@ -196,6 +232,15 @@ public struct HullState
 
     /// <summary>Seconds until the shield may start recharging.</summary>
     public float ShieldCooldown;
+
+    /// <summary>
+    /// Set when the shield broke. It takes no hits until it has charged back to its restart threshold, which
+    /// draws more power than an online shield's top-up; any charge it holds meanwhile is not protection.
+    /// </summary>
+    public bool ShieldOffline;
+
+    /// <summary>The newest impact the shield absorbed.</summary>
+    public ShieldHit ShieldHit;
 
     /// <summary>
     /// Where the hull is in a faster-than-light jump. The timer counts seconds in the stage, except while
@@ -271,11 +316,16 @@ public static class FlightModel
 
         // Power: what the hull wants this tick against what the generator makes. The battery covers a shortfall
         // and takes the surplus; with the battery flat, thrust is cut back to what the generator alone can feed.
+        // A broken shield charges at its usual rate but draws its restart power until it is back online.
         state.ShieldCooldown = Math.Max(0f, state.ShieldCooldown - dt);
+        if (state.ShieldHit.AgeTicks < ShieldHit.MaxAgeTicks)
+            state.ShieldHit.AgeTicks++;
+        if (p.ShieldCapacity <= 0f)
+            state.ShieldOffline = false;
         var thrustUse = Math.Max(MathF.Abs(thrust.X), Math.Max(MathF.Abs(thrust.Y), MathF.Abs(thrust.Z)));
         var thrustDemand = p.ThrustPower * thrustUse * (boosting ? p.BoostPowerMultiplier : 1f);
         var recharging = state.Shield < p.ShieldCapacity && state.ShieldCooldown <= 0f && state.Energy > 0f;
-        var demand = p.IdlePower + thrustDemand + (recharging ? p.ShieldPower : 0f);
+        var demand = p.IdlePower + thrustDemand + (recharging ? state.ShieldOffline ? p.ShieldRestartPower : p.ShieldPower : 0f);
         state.Energy = Math.Clamp(state.Energy + (p.PowerGenerated - demand) * dt, 0f, p.EnergyStorage);
         state.Boosting = boosting && state.Energy > 0f;
 
@@ -288,6 +338,10 @@ public static class FlightModel
 
         if (recharging)
             state.Shield = Math.Min(p.ShieldCapacity, state.Shield + p.ShieldRecharge * dt);
+
+        // Outside the recharge so that a shield whose capacity shrank under its charge still comes back.
+        if (state.ShieldOffline && state.ShieldCooldown <= 0f && state.Shield >= p.ShieldCapacity * p.ShieldRestartFraction)
+            state.ShieldOffline = false;
 
         // Translation, in the hull's frame so each axis uses its own thrusters. Forward is -Z; only the main
         // engines push that way, so braking and reversing are weaker than accelerating.

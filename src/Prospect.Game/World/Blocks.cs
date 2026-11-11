@@ -81,6 +81,15 @@ public sealed record FlightRules
     public required float BoostHeatSeconds { get; init; }
     public required float CoolSeconds { get; init; }
     public required float ShieldRechargeDelaySeconds { get; init; }
+
+    /// <summary>
+    /// Share of its capacity a broken shield must charge back to before it comes online again, above 0 and at
+    /// most 1. Below it the shield takes no hits, so it cannot flicker on and off at one point of charge.
+    /// </summary>
+    public float ShieldRestartFraction { get; init; } = 0.25f;
+
+    /// <summary>How many times its normal recharge power a broken shield draws while it charges back, 1 to 10.</summary>
+    public float ShieldRestartPowerMultiplier { get; init; } = 2f;
     public required float CollisionSafeSpeed { get; init; }
     public required float CollisionDamagePerTonneSpeedSquared { get; init; }
     public required float CollisionBounce { get; init; }
@@ -170,6 +179,8 @@ public sealed class BlockCatalog
             BoostHeatSeconds = r.GetProperty("boostHeatSeconds"u8).GetSingle(),
             CoolSeconds = r.GetProperty("coolSeconds"u8).GetSingle(),
             ShieldRechargeDelaySeconds = r.GetProperty("shieldRechargeDelaySeconds"u8).GetSingle(),
+            ShieldRestartFraction = r.GetProperty("shieldRestartFraction"u8).GetSingle(),
+            ShieldRestartPowerMultiplier = r.GetProperty("shieldRestartPowerMultiplier"u8).GetSingle(),
             CollisionSafeSpeed = r.GetProperty("collisionSafeSpeed"u8).GetSingle(),
             CollisionDamagePerTonneSpeedSquared = r.GetProperty("collisionDamagePerTonneSpeedSquared"u8).GetSingle(),
             CollisionBounce = r.GetProperty("collisionBounce"u8).GetSingle(),
@@ -182,6 +193,12 @@ public sealed class BlockCatalog
             FtlArrivalReach = r.GetProperty("ftlArrivalReach"u8).GetSingle(),
             FtlArrivalPulseMass = r.GetProperty("ftlArrivalPulseMass"u8).GetSingle(),
         };
+        if (!float.IsFinite(rules.ShieldRechargeDelaySeconds) || rules.ShieldRechargeDelaySeconds < 0)
+            throw new InvalidDataException($"{path}: shieldRechargeDelaySeconds must be finite and nonnegative");
+        if (!(rules.ShieldRestartFraction > 0 && rules.ShieldRestartFraction <= 1))
+            throw new InvalidDataException($"{path}: shieldRestartFraction must be above 0 and at most 1");
+        if (!(rules.ShieldRestartPowerMultiplier >= 1 && rules.ShieldRestartPowerMultiplier <= 10))
+            throw new InvalidDataException($"{path}: shieldRestartPowerMultiplier must be from 1 to 10");
         if (!float.IsFinite(rules.FtlCalculateSeconds) || rules.FtlCalculateSeconds < 0)
             throw new InvalidDataException($"{path}: ftlCalculateSeconds must be finite and nonnegative");
 
@@ -539,6 +556,8 @@ public sealed class HullDesign
             IdlePower = idlePower,
             ThrustPower = thrustPower,
             ShieldPower = shieldPower,
+            ShieldRestartFraction = rules.ShieldRestartFraction,
+            ShieldRestartPower = shieldPower * rules.ShieldRestartPowerMultiplier,
             BoostPowerMultiplier = rules.BoostPowerMultiplier,
             EnergyStorage = storage,
             BoostEnergyFloor = rules.BoostEnergyFloor * storage,

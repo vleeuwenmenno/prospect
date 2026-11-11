@@ -73,6 +73,13 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   against block with each other. An impact bounces and turns the hull; damage grows with the square of the speed
   over a safe limit and lands on the blocks that touched, after the shield. A block at zero is gone, and the hull
   flies on what is left. Losing the core destroys the hull; its pilot gets out in a drone.
+- **Shields break and restart.** A shield that pays out everything it had breaks and goes offline. Offline it
+  takes no hits, even with charge in it: every hit lands on the blocks. After the usual 4 s without a hit it
+  charges back at its normal rate on twice its normal power, and comes online only at 25% of its capacity
+  (`shieldRestartFraction` and `shieldRestartPowerMultiplier` in `content/blocks/blocks.json`). Online it tops up
+  as before. The console says `OFFLINE` in red and dims the charge being rebuilt; target and fleet gauges dim too,
+  and the party list shows a broken shield as empty. Snapshots carry the offline state and the newest absorbed hit
+  (where, how hard, how long ago), so every client agrees on both.
 - **Ramming.** Two hulls that meet share the impulse by mass and inertia and both take the same damage, which
   goes by the pair's reduced mass: about the lighter hull's when the other is far heavier. A drone bounces off a
   freighter and a freighter shoves a drone aside. Below the safe speed hulls only nudge each other and can rest

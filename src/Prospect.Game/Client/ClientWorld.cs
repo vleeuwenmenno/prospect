@@ -52,6 +52,18 @@ public struct HullView
     public float EnergyRate;
     public float Shield;
     public float Hull;
+
+    /// <summary>True while the shield is broken and charging back: it is not drawn and takes no hits.</summary>
+    public bool ShieldOffline;
+
+    /// <summary>The newest hit the shield absorbed, as the simulation stores it.</summary>
+    public ShieldHit ShieldHit;
+
+    /// <summary>
+    /// Seconds from that hit to the moment this view shows. A remote hull is drawn in the past, so a hit the
+    /// server has already reported can still be ahead of it, and this is negative until the drawn hull gets there.
+    /// </summary>
+    public float ShieldHitAge;
 }
 
 /// <summary>
@@ -400,6 +412,9 @@ internal sealed class ClientWorld : IDisposable
                 EnergyRate = _energyRate,
                 Shield = _predicted.Shield,
                 Hull = _predicted.Hull,
+                ShieldOffline = _predicted.ShieldOffline,
+                ShieldHit = _predicted.ShieldHit,
+                ShieldHitAge = _predicted.ShieldHit.AgeTicks * HullSim.Dt,
             };
         }
 
@@ -668,6 +683,9 @@ internal sealed class ClientWorld : IDisposable
             Energy = newest.State.Energy,
             Shield = newest.State.Shield,
             Hull = newest.State.Hull,
+            ShieldOffline = newest.State.ShieldOffline,
+            ShieldHit = newest.State.ShieldHit,
+            ShieldHitAge = (float)(newest.State.ShieldHit.AgeTicks + (renderTick - newest.Tick)) * HullSim.Dt,
         };
 
         if (renderTick >= newest.Tick)

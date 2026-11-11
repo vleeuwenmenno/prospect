@@ -190,7 +190,8 @@ public sealed partial class ServerHost
                     Leader = leader,
                     Tick = _tick,
                     Value = _hulls.Info(index).Design,
-                    Shield = flight.ShieldCapacity > 0 ? Math.Clamp(state.Shield / flight.ShieldCapacity, 0, 1) : 0,
+                    // A broken shield building its charge back protects nothing yet, so it shows as down.
+                    Shield = flight.ShieldCapacity > 0 && !state.ShieldOffline ? Math.Clamp(state.Shield / flight.ShieldCapacity, 0, 1) : 0,
                     Hull = flight.HullPoints > 0 ? Math.Clamp(state.Hull / flight.HullPoints, 0, 1) : 0,
                     X = sector.X,
                     Y = sector.Y,

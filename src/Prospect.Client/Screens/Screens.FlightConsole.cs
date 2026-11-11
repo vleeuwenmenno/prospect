@@ -50,13 +50,18 @@ internal sealed partial class ScreenHost
         _trailEnergy = FlightConsole.Trail(_trailEnergy, energy, dt);
 
         // Left: what keeps the hull alive.
+        // A broken shield says so: the bar still shows the charge it is building back, dimmed, because that charge
+        // takes no hits until the simulation brings the shield online again.
         var hasShield = flight.ShieldCapacity > 0f;
-        ConsoleRow(draw, layout, layout.LeftX, layout.Top, ConsoleIcon.Shield, "SHIELD"u8, hasShield ? Theme.Info : Theme.LineStrong, out var track);
-        if (hasShield)
+        var offline = hasShield && own.ShieldOffline;
+        ConsoleRow(draw, layout, layout.LeftX, layout.Top, ConsoleIcon.Shield, "SHIELD"u8, offline ? Theme.Bad : hasShield ? Theme.Info : Theme.LineStrong, out var track);
+        if (offline)
+            ConsoleReading(draw, layout, layout.LeftX, layout.Top, "OFFLINE"u8, _ui.SansMedium, Theme.Bad, track);
+        else if (hasShield)
             ConsoleReading(draw, layout, layout.LeftX, layout.Top, Points(own.Shield, flight.ShieldCapacity), _ui.Mono, Theme.Text, track);
         else
             ConsoleReading(draw, layout, layout.LeftX, layout.Top, "NONE"u8, _ui.SansMedium, Theme.TextMute, track);
-        ConsoleSegments(draw, track, shield, _trailShield, Theme.Info, false);
+        ConsoleSegments(draw, track, shield, _trailShield, offline ? Theme.LineStrong : Theme.Info, false);
 
         var hullColor = hull < 0.3f ? Theme.Bad : Theme.Good;
         ConsoleRow(draw, layout, layout.LeftX, second, ConsoleIcon.Hull, "HULL"u8, hullColor, out track);
@@ -486,7 +491,8 @@ internal static class FlightConsole
     /// <summary>
     /// The battery's net rate as a signed share of the most this hull can move: negative against its heaviest
     /// net draw (boosted thrust, shield recharge and the jump drive all at once, less generation), positive
-    /// against its largest surplus (generation less what is always drawn). Zero while steady.
+    /// against its largest surplus (generation less what is always drawn). Zero while steady. A broken shield
+    /// charging back draws its restart power, the larger of its two draws, so that is what the scale allows for.
     /// </summary>
     public static float Flow(float rate, in FlightParams flight)
     {
@@ -495,7 +501,7 @@ internal static class FlightConsole
 
         if (rate < 0f)
         {
-            var draw = flight.IdlePower + flight.ThrustPower * flight.BoostPowerMultiplier + flight.ShieldPower + flight.FtlPower - flight.PowerGenerated;
+            var draw = flight.IdlePower + flight.ThrustPower * flight.BoostPowerMultiplier + Math.Max(flight.ShieldPower, flight.ShieldRestartPower) + flight.FtlPower - flight.PowerGenerated;
             return draw > SteadyRate ? -Math.Min(-rate / draw, 1f) : -1f;
         }
 

@@ -122,6 +122,8 @@ public sealed class BoxHullSums
             IdlePower = idlePower,
             ThrustPower = thrustPower,
             ShieldPower = shieldPower,
+            ShieldRestartFraction = rules.ShieldRestartFraction,
+            ShieldRestartPower = shieldPower * rules.ShieldRestartPowerMultiplier,
             BoostPowerMultiplier = rules.BoostPowerMultiplier,
             EnergyStorage = storage,
             CollisionSafeSpeed = rules.CollisionSafeSpeed,

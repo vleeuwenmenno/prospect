@@ -111,7 +111,7 @@ public sealed class ProtocolTests
             State = new HullState { Orientation = Quaternion.Identity, Jump = JumpPhase.Charge, JumpCalculation = calculation },
             Order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -1e6) }
         }.Write(ref writer);
-        Assert.Equal(146, HullRecord.MaxWireSize);
+        Assert.Equal(152, HullRecord.MaxWireSize);
         Assert.Equal(HullRecord.MaxWireSize, writer.Length);
         var reader = new NetReader(writer.Written);
         Assert.Equal(valid, HullRecord.TryRead(ref reader, out var copy));
@@ -121,7 +121,55 @@ public sealed class ProtocolTests
             reader = new NetReader(writer.Written[..length]);
             Assert.False(HullRecord.TryRead(ref reader, out _));
         }
-        Assert.Equal(18u, ProtocolInfo.Version);
+        Assert.Equal(19u, ProtocolInfo.Version);
+    }
+
+    [Theory]
+    [InlineData((byte)0, 10f, 0f, true)]
+    [InlineData(ShieldHit.MaxAgeTicks, 10f, 0f, true)]
+    [InlineData((byte)(ShieldHit.MaxAgeTicks + 1), 10f, 0f, false)]
+    [InlineData((byte)255, 10f, 0f, false)]
+    [InlineData((byte)3, -1f, 0f, false)]
+    [InlineData((byte)3, float.NaN, 0f, false)]
+    [InlineData((byte)3, 10f, -0.5f, false)]
+    public void ShieldStateTravelsWithTheHullAndBadValuesAreRefused(byte age, float shield, float cooldown, bool valid)
+    {
+        Span<byte> buffer = stackalloc byte[HullRecord.MaxWireSize];
+        var writer = new NetWriter(buffer);
+        var hit = new ShieldHit { Serial = 251, Strength = 77, X = -128, Y = 127, Z = -3, AgeTicks = age };
+        new HullRecord
+        {
+            State = new HullState
+            {
+                Orientation = Quaternion.Identity,
+                Jump = JumpPhase.Arrive,
+                Boosting = true,
+                Shield = shield,
+                ShieldCooldown = cooldown,
+                ShieldOffline = true,
+                ShieldHit = hit,
+            },
+            Order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(5, 6, 7) },
+        }.Write(ref writer);
+        var reader = new NetReader(writer.Written);
+        Assert.Equal(valid, HullRecord.TryRead(ref reader, out var copy));
+        if (!valid)
+            return;
+
+        // The offline flag shares a byte with the order, the jump stage and boost; none of them may bleed.
+        Assert.True(copy.State.ShieldOffline);
+        Assert.True(copy.State.Boosting);
+        Assert.Equal(JumpPhase.Arrive, copy.State.Jump);
+        Assert.Equal(OrderKind.Jump, copy.Order.Kind);
+        Assert.Equal(new Double3(5, 6, 7), copy.Order.Target);
+        Assert.Equal(hit, copy.State.ShieldHit);
+        Assert.Equal(shield, copy.State.Shield);
+
+        writer = new NetWriter(buffer);
+        new HullRecord { State = new HullState { Orientation = Quaternion.Identity, Shield = shield } }.Write(ref writer);
+        reader = new NetReader(writer.Written);
+        Assert.True(HullRecord.TryRead(ref reader, out copy));
+        Assert.False(copy.State.ShieldOffline);
     }
 
     [Fact]

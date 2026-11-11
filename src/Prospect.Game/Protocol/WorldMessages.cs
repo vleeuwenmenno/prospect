@@ -159,7 +159,11 @@ public static class RockDeltasMessage
 /// <summary>A hull as it appears in a snapshot.</summary>
 public struct HullRecord
 {
-    public const int MaxWireSize = 4 + 4 + 1 + 8 + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 4 + 4 + 8 + 16 + 24;
+    /// <summary>
+    /// Id, owner, design, blocks, position, velocity, orientation, spin, heat, flags, the jump's four figures,
+    /// energy, shield, hull and shield delay, the shield's newest hit and the order's target.
+    /// </summary>
+    public const int MaxWireSize = 4 + 4 + 1 + 8 + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 4 + 4 + 8 + 16 + 6 + 24;
 
     public uint Id;
     public uint Owner;
@@ -184,7 +188,7 @@ public struct HullRecord
         writer.WriteSingle(State.Orientation.W);
         WorldWire.WriteVector(ref writer, State.AngularVelocity);
         writer.WriteSingle(State.Heat);
-        writer.WriteByte((byte)((State.BoostLocked ? 1 : 0) | (byte)Order.Kind << 1 | (byte)State.Jump << 3 | (State.Boosting ? 1 << 6 : 0)));
+        writer.WriteByte((byte)((State.BoostLocked ? 1 : 0) | (byte)Order.Kind << 1 | (byte)State.Jump << 3 | (State.Boosting ? 1 << 6 : 0) | (State.ShieldOffline ? 1 << 7 : 0)));
         writer.WriteSingle(State.JumpTimer);
         writer.WriteSingle(State.JumpCalculation);
         writer.WriteSingle(State.JumpTunnelSeconds);
@@ -193,6 +197,12 @@ public struct HullRecord
         writer.WriteSingle(State.Shield);
         writer.WriteSingle(State.Hull);
         writer.WriteSingle(State.ShieldCooldown);
+        writer.WriteByte(State.ShieldHit.Serial);
+        writer.WriteByte(State.ShieldHit.Strength);
+        writer.WriteByte((byte)State.ShieldHit.X);
+        writer.WriteByte((byte)State.ShieldHit.Y);
+        writer.WriteByte((byte)State.ShieldHit.Z);
+        writer.WriteByte(State.ShieldHit.AgeTicks);
         if (Order.Kind != OrderKind.None)
             WorldWire.WritePosition(ref writer, Order.Target);
     }
@@ -215,6 +225,7 @@ public struct HullRecord
         var flags = reader.ReadByte();
         record.State.BoostLocked = (flags & 1) != 0;
         record.State.Boosting = (flags & 1 << 6) != 0;
+        record.State.ShieldOffline = (flags & 1 << 7) != 0;
         record.State.Jump = (JumpPhase)Math.Min(flags >> 3 & 7, (int)JumpPhase.Arrive);
         record.State.JumpTimer = reader.ReadSingle();
         ok &= float.IsFinite(record.State.JumpTimer);
@@ -233,6 +244,14 @@ public struct HullRecord
         record.State.Hull = reader.ReadSingle();
         record.State.ShieldCooldown = reader.ReadSingle();
         ok &= float.IsFinite(record.State.Energy) && float.IsFinite(record.State.Shield) && float.IsFinite(record.State.Hull) && float.IsFinite(record.State.ShieldCooldown);
+        ok &= record.State.Shield >= 0 && record.State.ShieldCooldown >= 0;
+        record.State.ShieldHit.Serial = reader.ReadByte();
+        record.State.ShieldHit.Strength = reader.ReadByte();
+        record.State.ShieldHit.X = (sbyte)reader.ReadByte();
+        record.State.ShieldHit.Y = (sbyte)reader.ReadByte();
+        record.State.ShieldHit.Z = (sbyte)reader.ReadByte();
+        record.State.ShieldHit.AgeTicks = reader.ReadByte();
+        ok &= record.State.ShieldHit.AgeTicks <= ShieldHit.MaxAgeTicks;
         var kind = flags >> 1 & 3;
         ok &= kind <= (int)OrderKind.Jump;
         if (kind != 0 && ok)

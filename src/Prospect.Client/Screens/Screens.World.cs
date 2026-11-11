@@ -528,7 +528,7 @@ internal sealed partial class ScreenHost
             var gaugeMin = rowMin + new float2(rowSize.X - Kit.Px(70), Kit.Px(24));
             var gauge = new float2(Kit.Px(58), Kit.Px(3));
             draw.AddRectFilled(gaugeMin, gaugeMin + gauge, Kit.Color(Theme.Void));
-            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * Math.Clamp(hull.Shield / flight.ShieldCapacity, 0f, 1f), gauge.Y), Kit.Color(Theme.Info));
+            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * Math.Clamp(hull.Shield / flight.ShieldCapacity, 0f, 1f), gauge.Y), Kit.Color(hull.ShieldOffline ? Theme.LineStrong : Theme.Info));
             gaugeMin.Y += Kit.Px(6);
             draw.AddRectFilled(gaugeMin, gaugeMin + gauge, Kit.Color(Theme.Void));
             draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * Math.Clamp(hull.Hull / flight.HullPoints, 0f, 1f), gauge.Y), Kit.Color(Theme.Good));
@@ -662,7 +662,7 @@ internal sealed partial class ScreenHost
             var gauge = new float2(size.X - Kit.Px(Theme.Space4 * 2), Kit.Px(5));
             var gaugeMin = text + new float2(0, Kit.Px(48));
             draw.AddRectFilled(gaugeMin, gaugeMin + gauge, Kit.Color(Theme.Void));
-            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * Math.Clamp(target.Shield / flight.ShieldCapacity, 0f, 1f), gauge.Y), Kit.Color(Theme.Info));
+            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * Math.Clamp(target.Shield / flight.ShieldCapacity, 0f, 1f), gauge.Y), Kit.Color(target.ShieldOffline ? Theme.LineStrong : Theme.Info));
             gaugeMin.Y += Kit.Px(10);
             draw.AddRectFilled(gaugeMin, gaugeMin + gauge, Kit.Color(Theme.Void));
             draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * Math.Clamp(target.Hull / flight.HullPoints, 0f, 1f), gauge.Y), Kit.Color(Theme.Good));

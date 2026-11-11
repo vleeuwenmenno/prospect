@@ -2059,3 +2059,341 @@ public sealed class SocialWorldTests
         Assert.InRange(rules.ChatBytes, 1, 768);
     }
 }
+
+/// <summary>
+/// The shield's state machine: a shield that pays out all it had breaks, takes no hits while it charges back to
+/// its restart threshold on extra power, and then tops up as before. The same code runs on the server and in
+/// prediction, so these run it directly.
+/// </summary>
+public sealed class ShieldStateTests
+{
+    private static readonly GameContent Content = GameContent.Load();
+    private static readonly HullDesign PodDesign = Content.Pod;
+    private static readonly FlightParams Pod = PodDesign.Flight;
+    private static readonly int Emitter = Array.FindIndex(PodDesign.Types, t => t.Shield > 0);
+
+    private static float[] FullHp()
+    {
+        var hp = new float[HullDesign.MaxBlocks];
+        for (var i = 0; i < PodDesign.Types.Length; i++)
+            hp[i] = PodDesign.Types[i].Hull;
+        return hp;
+    }
+
+    private static bool Hit(ref HullState state, in FlightParams flight, ref HullBody body, int block, float amount) =>
+        HullSim.Damage(ref state, flight, ref body, 1UL << block, 1, amount);
+
+    [Fact]
+    public void TheRestartRulesComeFromTheContent()
+    {
+        Assert.Equal(0.25f, Content.Rules.ShieldRestartFraction);
+        Assert.Equal(2f, Content.Rules.ShieldRestartPowerMultiplier);
+        Assert.Equal(Pod.ShieldPower * 2f, Pod.ShieldRestartPower);
+        Assert.Equal(0.25f, Pod.ShieldRestartFraction);
+    }
+
+    [Fact]
+    public void ABreakingHitTakesTheShieldOfflineAndOnlyTheExcessReachesTheBlocks()
+    {
+        var hp = FullHp();
+        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = hp };
+        var state = HullState.Spawn(Double3.Zero, Pod);
+        state.Shield = 100f;
+
+        Assert.False(Hit(ref state, Pod, ref body, 1, 130f));
+        Assert.Equal(0f, state.Shield);
+        Assert.True(state.ShieldOffline);
+        Assert.Equal(Pod.HullPoints - 30f, state.Hull, 3);
+        Assert.Equal(Pod.ShieldDelay, state.ShieldCooldown);
+        Assert.Equal(1, state.ShieldHit.Serial);
+        Assert.Equal(0, state.ShieldHit.AgeTicks);
+        Assert.True(state.ShieldHit.Strength > 0);
+    }
+
+    [Fact]
+    public void AnOfflineShieldTakesNoHitsWhateverChargeItIsBuildingBack()
+    {
+        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = FullHp() };
+        var state = HullState.Spawn(Double3.Zero, Pod);
+        state.Shield = Pod.ShieldCapacity * 0.2f;
+        state.ShieldOffline = true;
+        state.ShieldCooldown = 0f;
+        var hit = state.ShieldHit;
+
+        Hit(ref state, Pod, ref body, 1, 50f);
+
+        Assert.Equal(Pod.ShieldCapacity * 0.2f, state.Shield);
+        Assert.True(state.ShieldOffline);
+        Assert.Equal(Pod.HullPoints - 50f, state.Hull, 3);
+        Assert.Equal(Pod.ShieldDelay, state.ShieldCooldown);
+        Assert.Equal(hit, state.ShieldHit);
+    }
+
+    [Fact]
+    public void ABrokenShieldWaitsOutTheDelayThenChargesOnRestartPowerToItsThreshold()
+    {
+        var state = HullState.Spawn(Double3.Zero, Pod);
+        state.Shield = 0f;
+        state.ShieldOffline = true;
+        state.ShieldCooldown = Pod.ShieldDelay;
+        state.Energy = Pod.EnergyStorage * 0.5f;
+
+        // Through the delay nothing charges; the battery gains what the generator makes over the idle draw.
+        var delayTicks = (int)MathF.Round(Pod.ShieldDelay / HullSim.Dt);
+        for (var i = 0; i < delayTicks; i++)
+            FlightModel.Step(ref state, default, Pod, HullSim.Dt);
+        Assert.Equal(0f, state.Shield);
+        Assert.True(state.ShieldOffline);
+
+        // Charging back costs the restart draw, twice the online top-up.
+        state.Energy = Pod.EnergyStorage * 0.5f;
+        var before = state.Energy;
+        FlightModel.Step(ref state, default, Pod, HullSim.Dt);
+        Assert.Equal((Pod.PowerGenerated - Pod.IdlePower - Pod.ShieldRestartPower) * HullSim.Dt, state.Energy - before, 4);
+        Assert.True(state.Shield > 0f && state.ShieldOffline, "one tick of charge must not bring the shield back");
+
+        // It stays offline right up to the threshold and comes online on reaching it.
+        var threshold = Pod.ShieldCapacity * Pod.ShieldRestartFraction;
+        var ticks = 1;
+        while (state.ShieldOffline && ticks < 60 * 60)
+        {
+            Assert.True(state.Shield < threshold);
+            FlightModel.Step(ref state, default, Pod, HullSim.Dt);
+            ticks++;
+        }
+
+        Assert.False(state.ShieldOffline);
+        Assert.InRange(state.Shield, threshold, threshold + Pod.ShieldRecharge * HullSim.Dt);
+        Assert.InRange(ticks * HullSim.Dt, threshold / Pod.ShieldRecharge - HullSim.Dt, threshold / Pod.ShieldRecharge + 2 * HullSim.Dt);
+
+        // Online, the top-up draws the ordinary shield power again.
+        state.Energy = Pod.EnergyStorage * 0.5f;
+        before = state.Energy;
+        FlightModel.Step(ref state, default, Pod, HullSim.Dt);
+        Assert.Equal((Pod.PowerGenerated - Pod.IdlePower - Pod.ShieldPower) * HullSim.Dt, state.Energy - before, 4);
+    }
+
+    [Fact]
+    public void WithoutPowerABrokenShieldGainsNothingAndTheBatteryNeverGoesNegative()
+    {
+        var starved = Pod;
+        starved.PowerGenerated = starved.IdlePower + starved.ShieldPower;
+        var state = HullState.Spawn(Double3.Zero, starved);
+        state.Shield = 0f;
+        state.ShieldOffline = true;
+        state.Energy = 0f;
+
+        // The generator would cover an online top-up but not the restart draw: the flat battery gives nothing.
+        for (var i = 0; i < 60 * 30; i++)
+        {
+            FlightModel.Step(ref state, default, starved, HullSim.Dt);
+            Assert.True(state.Energy >= 0f);
+        }
+
+        Assert.Equal(0f, state.Shield);
+        Assert.True(state.ShieldOffline);
+
+        // A ship with no generator and an empty battery stays down as well.
+        var dead = starved;
+        dead.PowerGenerated = 0f;
+        FlightModel.Step(ref state, default, dead, HullSim.Dt);
+        Assert.Equal(0f, state.Shield);
+    }
+
+    [Fact]
+    public void AShieldJustBackOnlineIsNotKnockedOffAgainByOnePoint()
+    {
+        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = FullHp() };
+        var state = HullState.Spawn(Double3.Zero, Pod);
+        state.Shield = 1f;
+        state.ShieldOffline = true;
+        state.ShieldCooldown = 0f;
+
+        // One point of charge is not the threshold: still offline, and the hit goes to the hull.
+        FlightModel.Step(ref state, default, Pod, HullSim.Dt);
+        Assert.True(state.ShieldOffline);
+        Hit(ref state, Pod, ref body, 1, 1f);
+        Assert.True(state.ShieldOffline);
+        Assert.Equal(Pod.HullPoints - 1f, state.Hull, 3);
+
+        // At the threshold it is online, and a small hit is taken by the shield without breaking it.
+        state.Shield = Pod.ShieldCapacity * Pod.ShieldRestartFraction;
+        state.ShieldCooldown = 0f;
+        FlightModel.Step(ref state, default, Pod, HullSim.Dt);
+        Assert.False(state.ShieldOffline);
+        var hull = state.Hull;
+        Hit(ref state, Pod, ref body, 1, 1f);
+        Assert.False(state.ShieldOffline);
+        Assert.Equal(hull, state.Hull);
+    }
+
+    [Fact]
+    public void LosingEmittersCapacityShrinksOrVanishesWithoutAnImaginaryHit()
+    {
+        // Capacity shrinks under a broken shield's charge: it comes back once the delay is over, even though
+        // a full shield never recharges.
+        var smaller = Pod;
+        smaller.ShieldCapacity = 100f;
+        var state = HullState.Spawn(Double3.Zero, Pod);
+        state.Shield = 100f;
+        state.ShieldOffline = true;
+        state.ShieldCooldown = 0f;
+        var hit = state.ShieldHit;
+        FlightModel.Step(ref state, default, smaller, HullSim.Dt);
+        Assert.False(state.ShieldOffline);
+        Assert.Equal(hit.Serial, state.ShieldHit.Serial);
+        Assert.Equal(hit.Strength, state.ShieldHit.Strength);
+
+        // No emitter left: there is no shield to be offline, and nothing is recorded as a hit.
+        var none = Pod;
+        none.ShieldCapacity = 0f;
+        none.ShieldRecharge = 0f;
+        state.ShieldOffline = true;
+        state.Shield = 0f;
+        FlightModel.Step(ref state, default, none, HullSim.Dt);
+        Assert.False(state.ShieldOffline);
+        Assert.Equal(0f, state.Shield);
+        Assert.Equal(hit.Serial, state.ShieldHit.Serial);
+
+        // A hull without a shield takes every hit on its blocks and records none.
+        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = FullHp() };
+        Hit(ref state, none, ref body, 1, 10f);
+        Assert.Equal(hit.Serial, state.ShieldHit.Serial);
+        Assert.False(state.ShieldOffline);
+    }
+
+    [Fact]
+    public void AHitThatDestroysTheLastEmitterCollapsesTheShieldOnce()
+    {
+        var hp = FullHp();
+        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = hp };
+        var state = HullState.Spawn(Double3.Zero, Pod);
+        state.Shield = 10f;
+
+        // The shield breaks on the hit and the emitter is shot away by what it could not hold.
+        Hit(ref state, Pod, ref body, Emitter, 10f + PodDesign.Types[Emitter].Hull + 1f);
+        Assert.Equal(0UL, body.Alive & 1UL << Emitter);
+        Assert.True(state.ShieldOffline);
+        Assert.Equal(1, state.ShieldHit.Serial);
+
+        PodDesign.Evaluate(body.Alive, out var left, out _);
+        Assert.Equal(0f, left.ShieldCapacity);
+        FlightModel.Step(ref state, default, left, HullSim.Dt);
+        Assert.False(state.ShieldOffline);
+        Assert.Equal(1, state.ShieldHit.Serial);
+    }
+
+    [Fact]
+    public void HitsInOneTickAreOneEventAndTheHarderOneSaysWhere()
+    {
+        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = FullHp() };
+        var state = HullState.Spawn(Double3.Zero, Pod);
+
+        Hit(ref state, Pod, ref body, 1, 10f);
+        var first = state.ShieldHit;
+        Hit(ref state, Pod, ref body, Emitter, 200f);
+        var both = state.ShieldHit;
+        Assert.Equal(first.Serial, both.Serial);
+        Assert.True(both.Strength > first.Strength);
+        var expected = PodDesign.BlockOffsets[Emitter] * (127f / Pod.Radius);
+        Assert.Equal(expected.X, both.X, 1f);
+        Assert.Equal(expected.Z, both.Z, 1f);
+
+        // A weaker hit in the same tick adds strength but does not move it.
+        Hit(ref state, Pod, ref body, 1, 1f);
+        Assert.Equal(both.X, state.ShieldHit.X);
+        Assert.Equal(both.Serial, state.ShieldHit.Serial);
+
+        // The next tick's hit is a new event, and the age counts up to its cap and stops.
+        FlightModel.Step(ref state, default, Pod, HullSim.Dt);
+        Assert.Equal(1, state.ShieldHit.AgeTicks);
+        Hit(ref state, Pod, ref body, 1, 10f);
+        Assert.Equal((byte)(both.Serial + 1), state.ShieldHit.Serial);
+        for (var i = 0; i < 400; i++)
+            FlightModel.Step(ref state, default, Pod, HullSim.Dt);
+        Assert.Equal(ShieldHit.MaxAgeTicks, state.ShieldHit.AgeTicks);
+    }
+
+    [Fact]
+    public void CollisionsThatPassTheShieldNeverBreakIt()
+    {
+        var through = Pod;
+        through.CollisionShieldCost = 0f;
+        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = FullHp() };
+        var state = HullState.Spawn(Double3.Zero, through);
+        Hit(ref state, through, ref body, 1, 50f);
+        Assert.Equal(Pod.ShieldCapacity, state.Shield);
+        Assert.False(state.ShieldOffline);
+        Assert.Equal(0, state.ShieldHit.Strength);
+    }
+
+    [Fact]
+    public void APredictingClientBreaksTheShieldExactlyAsTheServerDoes()
+    {
+        var server = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = FullHp() };
+        var client = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask };
+        var a = HullState.Spawn(Double3.Zero, Pod);
+        a.Shield = 40f;
+        var b = a;
+        Hit(ref a, Pod, ref server, 1, 70f);
+        Hit(ref b, Pod, ref client, 1, 70f);
+        Assert.Equal(a.Shield, b.Shield);
+        Assert.Equal(a.ShieldOffline, b.ShieldOffline);
+        Assert.Equal(a.ShieldHit, b.ShieldHit);
+        for (var i = 0; i < 600; i++)
+        {
+            FlightModel.Step(ref a, default, Pod, HullSim.Dt);
+            FlightModel.Step(ref b, default, Pod, HullSim.Dt);
+        }
+
+        Assert.Equal(a.Shield, b.Shield);
+        Assert.Equal(a.ShieldOffline, b.ShieldOffline);
+    }
+
+    [Theory]
+    [InlineData(5f)]
+    [InlineData(1000f)]
+    public void ALongStepStaysWithinTheShieldsLimits(float dt)
+    {
+        var state = HullState.Spawn(Double3.Zero, Pod);
+        state.Shield = 0f;
+        state.ShieldOffline = true;
+        state.Energy = Pod.EnergyStorage;
+        FlightModel.Step(ref state, default, Pod, dt);
+        FlightModel.Step(ref state, default, Pod, dt);
+        Assert.InRange(state.Shield, 0f, Pod.ShieldCapacity);
+        Assert.InRange(state.Energy, 0f, Pod.EnergyStorage);
+        Assert.False(state.ShieldOffline);
+    }
+
+    [Theory]
+    [InlineData(0f)]
+    [InlineData(-0.1f)]
+    [InlineData(1.5f)]
+    public void ContentRejectsARestartThresholdOutsideItsRange(float fraction) =>
+        Assert.Throws<InvalidDataException>(() => LoadWith("\"shieldRestartFraction\": 0.25", $"\"shieldRestartFraction\": {Json(fraction)}"));
+
+    [Theory]
+    [InlineData(0.5f)]
+    [InlineData(11f)]
+    public void ContentRejectsARestartPowerOutsideItsRange(float multiplier) =>
+        Assert.Throws<InvalidDataException>(() => LoadWith("\"shieldRestartPowerMultiplier\": 2", $"\"shieldRestartPowerMultiplier\": {Json(multiplier)}"));
+
+    private static string Json(float value) => value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private static void LoadWith(string from, string to)
+    {
+        var source = File.ReadAllText(Prospect.Engine.IO.AppPaths.Content("blocks", "blocks.json"));
+        Assert.Contains(from, source);
+        var path = Path.Combine(Path.GetTempPath(), $"prospect-blocks-{Guid.NewGuid():N}.json");
+        File.WriteAllText(path, source.Replace(from, to));
+        try
+        {
+            BlockCatalog.Load(path);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+}

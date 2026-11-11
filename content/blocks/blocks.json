@@ -10,6 +10,8 @@
     "boostHeatSeconds": 6,
     "coolSeconds": 9,
     "shieldRechargeDelaySeconds": 4,
+    "shieldRestartFraction": 0.25,
+    "shieldRestartPowerMultiplier": 2,
     "collisionSafeSpeed": 5,
     "collisionDamagePerTonneSpeedSquared": 0.02,
     "collisionBounce": 0.3,

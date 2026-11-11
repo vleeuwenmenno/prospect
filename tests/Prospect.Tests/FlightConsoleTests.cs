@@ -87,6 +87,7 @@ public sealed class FlightConsoleTests
         IdlePower = 0.7f,
         ThrustPower = 4.1f,
         ShieldPower = 1.5f,
+        ShieldRestartPower = 3f,
         BoostPowerMultiplier = 4f,
         FtlPower = 2f,
     };
@@ -95,7 +96,8 @@ public sealed class FlightConsoleTests
     public void TheFlowStripMeasuresNetRateAgainstWhatThisHullCanDrawOrGain()
     {
         var pod = Pod();
-        var peakDraw = 0.7f + 4.1f * 4f + 1.5f + 2f - 6f;
+        // The shield's part is its restart draw, twice its 1.5 MW top-up, the most it can ever ask for.
+        var peakDraw = 0.7f + 4.1f * 4f + 1.5f * 2f + 2f - 6f;
         var peakGain = 6f - 0.7f;
 
         Assert.Equal(0f, FlightConsole.Flow(0f, pod));

@@ -16,6 +16,8 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
 - **Ships are their blocks.** Mass, thrust, turning, power, shield and hull all come from the blocks. Damage is
   per block; a lost block is lost.
 - **Two views of the same space.** Pilot view to fly one ship; command (RTS) view to select and order many.
+- **Shields break.** A shield emptied by a hit goes offline, takes no hits, and only comes back after a delay,
+  charging to a threshold on extra power. No instant reactivation from one point of charge.
 - **You are not your ship.** You can leave a ship in a drone and take control of any ship you own.
 
 ## Decided: the world
