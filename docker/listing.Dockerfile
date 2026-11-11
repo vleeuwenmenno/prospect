@@ -2,14 +2,16 @@
 #   docker build -f docker/listing.Dockerfile -t prospect-listing .
 # Configure with environment variables (Listing__TrustedProxies=..., see docs/listing-server.md).
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+# The build runs on the builder's own CPU for every target: the service has no native code, so the published files
+# are the same on amd64 and arm64 and nothing needs emulating.
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 # Project files first, so the restore layer is reused while only code changes.
 COPY global.json Directory.Build.props Directory.Packages.props .editorconfig ./
 COPY src/Prospect.Listing/Prospect.Listing.csproj src/Prospect.Listing/
 RUN dotnet restore src/Prospect.Listing/Prospect.Listing.csproj
 COPY src/Prospect.Listing/ src/Prospect.Listing/
-RUN dotnet publish src/Prospect.Listing/Prospect.Listing.csproj -c Release --no-restore -o /app
+RUN dotnet publish src/Prospect.Listing/Prospect.Listing.csproj -c Release --no-restore -p:PlatformTarget=AnyCPU -o /app
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app

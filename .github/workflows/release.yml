@@ -1,0 +1,122 @@
+# Publishes container images when a release tag is pushed. See docs/releasing.md.
+#   server-v1.2.3  the game server image only
+#   list-v1.2.3    the listing server image only
+#   v1.2.3         both
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+      - "server-v*"
+      - "list-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  # Turns the tag name into the list of images to publish and the version to tag them with.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      version: ${{ steps.plan.outputs.version }}
+      latest: ${{ steps.plan.outputs.latest }}
+    steps:
+      - id: plan
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          pattern='^(server-|list-)?v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?)$'
+          if [[ ! "$TAG" =~ $pattern ]]; then
+            echo "::error::Tag '$TAG' is not server-vX.Y.Z, list-vX.Y.Z or vX.Y.Z (a -suffix such as -rc.1 is allowed)."
+            exit 1
+          fi
+          prefix="${BASH_REMATCH[1]}"
+          version="${BASH_REMATCH[2]}"
+          server='{"name":"server","image":"prospect-server","file":"docker/server.Dockerfile","platforms":"linux/amd64"}'
+          listing='{"name":"listing","image":"prospect-listing","file":"docker/listing.Dockerfile","platforms":"linux/amd64,linux/arm64"}'
+          case "$prefix" in
+            server-) matrix="[$server]" ;;
+            list-) matrix="[$listing]" ;;
+            *) matrix="[$server,$listing]" ;;
+          esac
+          # A pre-release such as 1.2.3-rc.1 never moves the latest tag.
+          if [[ "$version" == *-* ]]; then latest=false; else latest=true; fi
+          {
+            echo "matrix={\"include\":$matrix}"
+            echo "version=$version"
+            echo "latest=$latest"
+          } >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # A broken tag must not publish: build and test the part being released first.
+      - name: Test the game server
+        if: matrix.name == 'server'
+        run: |
+          set -euo pipefail
+          dotnet build src/Prospect.Server -c Release --nologo -v q
+          dotnet build tests/Prospect.Tests -c Release --nologo -v q
+          dotnet artifacts/bin/Prospect.Tests/release/Prospect.Tests.dll
+
+      - name: Test the listing server
+        if: matrix.name == 'listing'
+        run: |
+          set -euo pipefail
+          dotnet build tests/Prospect.Listing.Tests -c Release --nologo -v q
+          dotnet artifacts/bin/Prospect.Listing.Tests/release/Prospect.Listing.Tests.dll
+
+      - id: owner
+        name: Lower-case the registry owner
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: echo "owner=${OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ steps.owner.outputs.owner }}/${{ matrix.image }}
+          flavor: latest=false
+          tags: |
+            type=raw,value=${{ needs.plan.outputs.version }}
+            type=raw,value=latest,enable=${{ needs.plan.outputs.latest }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.plan.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - uses: docker/setup-qemu-action@v3
+        if: contains(matrix.platforms, 'arm64')
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          platforms: ${{ matrix.platforms }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

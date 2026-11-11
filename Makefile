@@ -19,6 +19,7 @@ TESTS    := tests/Prospect.Tests
 LTESTS   := tests/Prospect.Listing.Tests
 LISTING_PORT  ?= 8080
 LISTING_IMAGE ?= prospect-listing
+SERVER_IMAGE  ?= prospect-server
 BIN      := artifacts/bin
 TOOLS    := $(CURDIR)/.tools
 # Build output folders are lower-case configuration names: artifacts/bin/<project>/<config>/.
@@ -277,6 +278,11 @@ listing-image: ## Build the listing server's container image (LISTING_IMAGE=pros
 	$(call step,Building container image $(LISTING_IMAGE))
 	$(Q)docker build -f docker/listing.Dockerfile -t $(LISTING_IMAGE) .
 	@$(call ok,Image $(LISTING_IMAGE) built)
+
+server-image: ## Build the dedicated server's container image (SERVER_IMAGE=prospect-server)
+	$(call step,Building container image $(SERVER_IMAGE))
+	$(Q)docker build -f docker/server.Dockerfile -t $(SERVER_IMAGE) .
+	@$(call ok,Image $(SERVER_IMAGE) built)
 
 test: need-dotnet ## Run the unit tests
 	$(call step,Building the tests ($(CONFIG)))
