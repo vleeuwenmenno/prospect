@@ -1,5 +1,6 @@
 using System.Numerics;
 using Prospect.Client.World;
+using Prospect.Game.Client;
 using Prospect.Game.World;
 using Xunit;
 
@@ -14,6 +15,23 @@ public sealed class ArrivalPulseTests
     private static readonly GameContent Content = GameContent.Load();
 
     private static FlightParams Hull(float mass, float radius) => new() { Mass = mass, Radius = radius };
+
+    [Theory]
+    [InlineData(600f)]
+    [InlineData(33554432f)]
+    [InlineData(1099511627776f)]
+    public void ArrivalLightWaitsForTheLastBaseTransitWindow(float duration)
+    {
+        var flight = Content.Pod.Flight;
+        var hull = new HullView { Jump = JumpPhase.Tunnel, JumpTunnelSeconds = duration, JumpTunnelElapsed = (double)duration - 120, JumpTimer = duration - 120 };
+        Assert.Equal(0f, WorldView.HyperspaceMarkProgress(hull, flight));
+        hull.JumpTunnelElapsed = (double)duration - 1;
+        hull.JumpTimer = (float)hull.JumpTunnelElapsed;
+        Assert.Equal(1f - 1f / flight.FtlTunnelSeconds, WorldView.HyperspaceMarkProgress(hull, flight), 5);
+        hull.Jump = JumpPhase.Arrive;
+        hull.JumpTimer = flight.FtlArriveSeconds * 0.5f;
+        Assert.Equal(0.5f, WorldView.HyperspaceMarkProgress(hull, flight), 5);
+    }
 
     [Fact]
     public void ArrivalLightStaysBehindTheAnchorInWorldSpace()

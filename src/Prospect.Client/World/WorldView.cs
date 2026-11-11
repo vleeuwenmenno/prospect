@@ -401,11 +401,7 @@ internal sealed class WorldView
             // Each admitted session creates its own galaxy, even when its seed and hull IDs match the last one.
             _visuals.Clear();
             _ownId = 0;
-            _jumpOffset = _jumpThrough = _jumpTravel = _jumpCover = _jumpStretch = _jumpLight = _jumpStage = 0f;
-            _jumpEntryRadius = _jumpExitRadius = _jumpEntryOpen = _jumpExitOpen = 0f;
-            _jumpExitPlaced = _jumpThroughExit = _jumpChaseLatched = false;
-            _jumpKind = FtlKind.None;
-            _jumpSunBlend = 1f;
+            ResetOwnJump();
             _commandCycle.Reset();
             _pilotCycle.Reset();
             _jumpChord.Clear();
@@ -440,6 +436,9 @@ internal sealed class WorldView
             // The player is in a different hull: put the camera behind it and forget the old target and course.
             _ownId = own.Id;
             _chaseInitialised = false;
+            ResetOwnJump();
+            _jumpAxis = Vector3.Normalize(Vector3.Transform(-Vector3.UnitZ, OwnOrientation));
+            _jumpUp = Vector3.Transform(Vector3.UnitY, OwnOrientation);
             TargetHull = 0;
             NavTarget = null;
             _jumpChord.Clear();
@@ -987,7 +986,7 @@ internal sealed class WorldView
         var working = stage == 1f;
         var at = HyperspaceMarkPosition(visual.Anchor, forward, flight.Radius, working).RelativeTo(camera);
         var reach = working ? 0f : ArrivalReach(flight, _snapshot!.Content.Rules);
-        AddMark(marks, ref markCount, at, flight.Radius * (working ? 4f : reach), kind, stage, JumpProgress(hull, flight), (hull.Id & 0xFF) / 255f, forward, reach);
+        AddMark(marks, ref markCount, at, flight.Radius * (working ? 4f : reach), kind, stage, HyperspaceMarkProgress(hull, flight), (hull.Id & 0xFF) / 255f, forward, reach);
     }
 
     /// <summary>
@@ -1048,12 +1047,29 @@ internal sealed class WorldView
         var working = stage == 1f;
         var at = HyperspaceMarkPosition(OwnPosition, _jumpAxis, flight.Radius, working).RelativeTo(camera);
         var reach = working ? 0f : ArrivalReach(flight, _snapshot!.Content.Rules);
-        AddMark(marks, ref markCount, at, flight.Radius * (working ? 4f : reach), FtlKind.Hyperspace, stage, JumpProgress(Own, flight), (Own.Id & 0xFF) / 255f, _jumpAxis, reach);
+        AddMark(marks, ref markCount, at, flight.Radius * (working ? 4f : reach), FtlKind.Hyperspace, stage, HyperspaceMarkProgress(Own, flight), (Own.Id & 0xFF) / 255f, _jumpAxis, reach);
     }
+
+    /// <summary>The arrival light keeps its short approach window even when transit lasts much longer.</summary>
+    internal static float HyperspaceMarkProgress(in HullView hull, in FlightParams flight) =>
+        hull.Jump == JumpPhase.Tunnel
+            ? Math.Clamp(1f - HullVisuals.TransitClock(hull, flight).Left / Math.Max(flight.FtlTunnelSeconds, 0.1f), 0f, 1f)
+            : JumpProgress(hull, flight);
 
     /// <summary>The world-space light origin, shared by pilot and observer views.</summary>
     internal static Double3 HyperspaceMarkPosition(Double3 anchor, Vector3 axis, float radius, bool working) =>
         anchor + axis * (radius * (working ? HullVisuals.HyperspaceLight : -1.5f));
+
+    /// <summary>A session or controlled-hull change cannot inherit another hull's passage.</summary>
+    private void ResetOwnJump()
+    {
+        _jumpOffset = _jumpThrough = _jumpTravel = _jumpCover = _jumpStretch = _jumpLight = _jumpStage = _jumpChase = 0f;
+        _jumpEntryRadius = _jumpExitRadius = _jumpEntryOpen = _jumpExitOpen = 0f;
+        _jumpEntry = _jumpExit = default;
+        _jumpExitPlaced = _jumpThroughExit = _jumpChaseLatched = false;
+        _jumpKind = FtlKind.None;
+        _jumpSunBlend = 1f;
+    }
 
     /// <summary>
     /// Works out how the pilot's own jump is drawn this frame. Everything here eases from one stage into the next,
