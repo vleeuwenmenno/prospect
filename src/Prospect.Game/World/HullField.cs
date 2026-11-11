@@ -76,6 +76,30 @@ public sealed class HullField(HullStore hulls, HullDesign[] designs, bool author
     internal bool HasStepped(int index) => hulls.Info(index).Round == _round;
 
     /// <summary>
+    /// Marks a hull that will not step in this round, such as one whose pilot's input has not arrived: it has
+    /// had its tick and stays where it is, whatever its velocity says. Call it before any hull steps, so the
+    /// others meet it there and not a tick's flight ahead.
+    /// </summary>
+    public void Hold(int index)
+    {
+        ref var info = ref hulls.Info(index);
+        info.Round = _round;
+        Moved(ref info, Vector3.Zero);
+    }
+
+    /// <summary>Adds to how far a hull has come in this round, starting the count over if it is from an earlier one.</summary>
+    private void Moved(ref HullInfo info, Vector3 by)
+    {
+        if (info.FlownRound != _round)
+        {
+            info.FlownRound = _round;
+            info.Flown = Vector3.Zero;
+        }
+
+        info.Flown += by;
+    }
+
+    /// <summary>
     /// The slots of the hulls the last <see cref="Step"/> destroyed by running the stepped hull into them. They are
     /// still in the store; removing them is up to the caller.
     /// </summary>
@@ -111,8 +135,7 @@ public sealed class HullField(HullStore hulls, HullDesign[] designs, bool author
         Refit(index, body.Alive);
 
         // What the hulls that step after this one need to know of it: that it has flown, and how far.
-        var flown = own.Position.RelativeTo(from);
-        info.Flown = IsFirstStep ? flown : info.Flown + flown;
+        Moved(ref info, own.Position.RelativeTo(from));
         info.Round = _round;
 
         _collecting = false;
@@ -127,7 +150,7 @@ public sealed class HullField(HullStore hulls, HullDesign[] designs, bool author
             ref var state = ref hulls.State(impulse.Hull);
             ref var struckInfo = ref hulls.Info(impulse.Hull);
             struckInfo.ContactTick = (long)tick;
-            struckInfo.Flown += impulse.Shift;
+            Moved(ref struckInfo, impulse.Shift);
             state.Position += impulse.Shift;
             state.Velocity += impulse.Velocity;
             state.AngularVelocity += impulse.AngularVelocity;

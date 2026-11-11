@@ -105,6 +105,8 @@ The client opens a real window on the developer's desktop, and they are usually 
   another player's hull is assumed to keep its velocity until the next snapshot.
 - The client replays one step of the fleet per input. When the server simulates several of a player's inputs in
   one tick, contact between their hull and a fleet hull is mispredicted until the next snapshot.
+- A hull knocked back by a hit is not checked against a third hull until the next tick, so the two can overlap
+  for one tick.
 - A player's hulls are removed when they disconnect.
 
 ## Who does the work

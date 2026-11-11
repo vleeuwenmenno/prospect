@@ -153,6 +153,15 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
 
         // From here every hull steps for this tick: the piloted ones first, by the inputs that arrived, then the rest.
         _field.BeginRound();
+
+        // A hull whose pilot's input has not arrived stays where it is this tick, though its velocity says
+        // otherwise. The others must know before they step, or they would meet it a tick's flight ahead.
+        foreach (var connection in _connections)
+        {
+            if (connection.State == ConnectionState.Active && connection.InputCount == 0 && connection.StarvedTicks < InputStarvedTicks && _hulls.IsAlive(connection.Hull))
+                _field.Hold(connection.Hull.Index);
+        }
+
         foreach (var connection in _connections)
         {
             if (connection.State == ConnectionState.AwaitingHello && tick - connection.ConnectedTick > HandshakeTimeoutTicks)

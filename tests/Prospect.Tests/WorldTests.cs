@@ -761,6 +761,52 @@ public sealed class HullCollisionTests : IDisposable
     }
 
     [Fact]
+    public void AHullWhosePilotSentNothingIsMetWhereItStands()
+    {
+        // The leading vessel has the same velocity on record, but its pilot's input has not arrived and it does
+        // not move. The one behind, with less room than it covers in a tick, must not fly into it.
+        var design = Content.Designs[Vessel];
+        var velocity = new Vector3(0, 0, -design.Flight.MaxSpeed);
+        var room = design.Flight.MaxSpeed * HullSim.Dt * 0.25f;
+        var length = design.BlockOffsets.Max(o => o.Z) - design.BlockOffsets.Min(o => o.Z);
+        var trailing = Add(Vessel, new Double3(0, 0, length + design.BlockSize + room), velocity);
+        var leading = Add(Vessel, Double3.Zero, velocity);
+
+        for (var i = 0; i < 5; i++)
+        {
+            _field.BeginRound();
+            _field.Hold(leading);
+            _field.Step(trailing, default);
+            Assert.True(Gap(leading, trailing) > design.BlockSize * 0.95f, $"the hulls are {Gap(leading, trailing)} m apart on tick {i}");
+        }
+
+        Assert.Equal(Double3.Zero, _hulls.State(leading).Position);
+    }
+
+    [Fact]
+    public void HowFarAHullCameInARoundCountsWhatStruckItBeforeItStepped()
+    {
+        // The drone is in the lower slot: it steps first and strikes the pod, which has yet to fly its tick.
+        var drone = Add(Content.DroneDesign, new Double3(101, 0, 0.5), new Vector3(-400, 0, 0));
+        var pod = Add(Content.PodDesign, Double3.Zero);
+        _hulls.Flight(pod).CollisionDamagePerTonneSpeedSquared = 0;
+        _hulls.Flight(drone).CollisionDamagePerTonneSpeedSquared = 0;
+
+        var struck = false;
+        for (var i = 0; i < 60; i++)
+        {
+            var droneFrom = _hulls.State(drone).Position;
+            var podFrom = _hulls.State(pod).Position;
+            Tick();
+            struck |= _hulls.State(pod).Velocity != Vector3.Zero;
+            Assert.True((_hulls.Info(drone).Flown - _hulls.State(drone).Position.RelativeTo(droneFrom)).Length() < 1e-3f, $"the drone's record is off on tick {i}");
+            Assert.True((_hulls.Info(pod).Flown - _hulls.State(pod).Position.RelativeTo(podFrom)).Length() < 1e-3f, $"the pod's record is off on tick {i}");
+        }
+
+        Assert.True(struck);
+    }
+
+    [Fact]
     public void AHullInTheTunnelIsNotThereAndOneJustArrivedDoesNoHarm()
     {
         var vessel = Add(Vessel, Double3.Zero);

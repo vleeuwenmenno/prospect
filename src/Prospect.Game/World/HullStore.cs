@@ -42,8 +42,14 @@ public struct HullInfo
     /// <summary>The round of the <see cref="HullField"/> in which the hull last stepped; zero if it never has.</summary>
     public long Round;
 
-    /// <summary>How far the hull has come in that round, after whatever it ran into.</summary>
+    /// <summary>
+    /// How far the hull has come in the round <see cref="FlownRound"/>, by its own flight and by what struck it,
+    /// whichever came first.
+    /// </summary>
     public System.Numerics.Vector3 Flown;
+
+    /// <summary>The round of the <see cref="HullField"/> that <see cref="Flown"/> was measured in.</summary>
+    public long FlownRound;
 }
 
 /// <summary>

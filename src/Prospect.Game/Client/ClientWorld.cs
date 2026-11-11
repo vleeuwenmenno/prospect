@@ -502,10 +502,16 @@ internal sealed class ClientWorld : IDisposable
             return;
 
         ref var remote = ref _remotes[slot];
-        var design = (byte)Math.Min(record.Design, _content.Designs.Length - 1);
         var known = remote.Used && remote.Id == record.Id;
         if (!known)
             remote = new Remote { Used = true, Id = record.Id, Newest = -1 };
+
+        // A record that arrives late says nothing new, about where the hull is or about what it has left.
+        remote.LastSeenTick = clientTick;
+        if (remote.Count > 0 && _samples[slot * SamplesPerHull + remote.Newest].Tick >= serverTick)
+            return;
+
+        var design = (byte)Math.Min(record.Design, _content.Designs.Length - 1);
 
         // What the hull weighs in a collision follows from the blocks it has left.
         if (!known || remote.Design != design || remote.Blocks != record.Blocks)
@@ -514,10 +520,6 @@ internal sealed class ClientWorld : IDisposable
         remote.Owner = record.Owner;
         remote.Design = design;
         remote.Blocks = record.Blocks;
-        remote.LastSeenTick = clientTick;
-        if (remote.Count > 0 && _samples[slot * SamplesPerHull + remote.Newest].Tick >= serverTick)
-            return;
-
         remote.Newest = (remote.Newest + 1) % SamplesPerHull;
         remote.Count = Math.Min(remote.Count + 1, SamplesPerHull);
         _samples[slot * SamplesPerHull + remote.Newest] = new Sample
