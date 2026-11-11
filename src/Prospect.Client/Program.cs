@@ -13,6 +13,7 @@ internal static class Program
         prospect [options]
           --start <screen>        Open on: menu, join, settings, credits, or local (start a local game)
           --join <host[:port]>    Connect to a server straight after the splash
+          --set <id>=<value>      A world setting for local games started in this run; repeat for more (ids and ranges: content/rules/settings.json)
           --open <view>           With --start local or --join: open the command view, the map or the ship data sheet (command, map, map-menu, galaxy, info), or start a jump (jump, jump-wormhole, jump-rift)
           --size <W>x<H>          Start windowed at this size
           --validation            Enable Vulkan validation layers (default in debug builds)
@@ -76,6 +77,9 @@ internal static class Program
                         options.JoinHost = target;
                         break;
                     }
+                case "--set" when hasValue:
+                    options.WorldSettingArgs.Add(args[++i]);
+                    break;
                 case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift":
                     options.OpenView = args[++i];
                     break;
@@ -128,6 +132,13 @@ internal static class Program
             using var app = new App(options);
             app.Run();
             return app.ExitCode;
+        }
+        catch (InvalidDataException e)
+        {
+            // Content or a world setting given with --set that cannot be used: the message says which and why.
+            Logs.App.Error(e.Message);
+            Console.Error.WriteLine(e.Message);
+            return 1;
         }
         catch (Exception e)
         {

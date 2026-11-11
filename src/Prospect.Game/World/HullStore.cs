@@ -90,7 +90,7 @@ public sealed unsafe class HullStore : IDisposable
         var hp = BlockHp(handle.Index);
         hp.Clear();
         for (var i = 0; i < design.Types.Length; i++)
-            hp[i] = design.Types[i].Hull;
+            hp[i] = design.BlockHitPoints(i);
         return handle;
     }
 

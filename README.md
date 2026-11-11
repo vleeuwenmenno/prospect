@@ -43,6 +43,10 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   in transit for three seconds, and it comes out at its destination, any distance away. Taking the controls
   before the drive fires cancels the jump and loses the charge. The client generates the destination while the
   drive charges.
+- **World settings.** A world has settings, chosen when a server or a local game starts: collision damage,
+  shields against collisions (full, weak, none), shield recharge, jump charge speed and hull strength. The
+  server owns them and tells each client on joining; the client predicts by the server's figures, and the data
+  sheet and the readouts show the numbers in force. See [World settings](#world-settings).
 - **Resources.** Asteroids carry iron, copper, nickel, titanium, silver or gold, or are bare rock; a sector has a
   main ore, and the rarer ones grow more common toward the core. Nothing can be mined yet.
 - **Fleet.** Each player starts with the command pod (hyperspace drive), a mining vessel (wormhole) and a survey vessel (rift). Hulls nobody is flying are flown by
@@ -59,7 +63,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 - **Renderer.** Floating-point scene target and tone mapping, camera-relative rendering from double-precision
   positions, a star field and sky, instanced hull and asteroid meshes with two levels of detail.
 
-Not there yet: mining, taking control of ships owned by other players (permissions), jump range and cost, gates,
+Not there yet: a New game screen to choose world settings (they are set on the command line for now), mining, taking control of ships owned by other players (permissions), jump range and cost, gates,
 saving. Asteroids come in a shared set of shapes until mining gives each one its own body. Designs are limited to 64
 blocks for now, because block state is sent as one bit per block.
 
@@ -127,7 +131,36 @@ asteroid.
 `F3` shows the
 performance overlay, `F11` toggles fullscreen, `F12` takes a screenshot. Bindings live in
 `content/input/bindings.json`; block types and flight rules in `content/blocks`, hull designs in `content/ships`,
-galaxy rules in `content/galaxy`.
+galaxy rules in `content/galaxy`, world settings in `content/rules`.
+
+## World settings
+
+Settings are fixed for the life of a server or a local game. Defaults and ranges live in
+`content/rules/settings.json`.
+
+| Id | Values | Default | What it does |
+| --- | --- | --- | --- |
+| `collisionDamage` | 0 to 4 | 1 | Multiplies collision damage. At 0 collisions push but never damage. |
+| `collisionShields` | `Full`, `Weak`, `None` | `Full` | `Full`: the shield absorbs a collision. `Weak`: it absorbs it but drains four times as fast. `None`: collisions pass the shield and hit the blocks. |
+| `shieldRecharge` | 0.25 to 4 | 1 | Multiplies how fast shields recharge. |
+| `jumpChargeSpeed` | 0.25 to 4 | 1 | Multiplies how fast a jump drive charges. A jump takes the same energy. |
+| `hullStrength` | 0.25 to 4 | 1 | Multiplies every block's hit points. |
+
+How to set them:
+
+```sh
+make run ARGS="--start local --set collisionShields=None --set hullStrength=2"    # a local game
+make server ARGS="--set collisionDamage=0.5 --set jumpChargeSpeed=2"              # a server
+make server ARGS="--settings my-world.json"                                       # a server, from a file
+```
+
+- `--set <id>=<value>` can be repeated; the last one for an id wins. On a server it is applied after the file.
+- The file is one JSON object: `{ "collisionDamage": 0.5, "collisionShields": "Weak" }`.
+- An unknown id is ignored with a warning. A value out of range is brought into range with a warning. A value
+  of the wrong kind, or a file that is not valid JSON, stops the start with a message that says what is wrong.
+- A server logs every setting that is not at its default when it starts.
+- A client that joins plays by the server's settings; its own `--set` only applies to local games.
+- There is no New game screen yet: the menu's local game starts with the defaults, plus any `--set`.
 
 ## Requirements
 
@@ -147,6 +180,7 @@ make setup                                 # first time: SDK, system packages, r
 make run                                   # the game
 make run ARGS="--start local"              # straight into a local game
 make server                                # headless dedicated server on UDP 27420
+make server ARGS="--set hullStrength=2"    # the same, in a world with its own settings
 make run ARGS="--join 127.0.0.1"           # join it
 make check                                 # formatting, warnings-as-errors build, tests
 make bench                                 # release benchmark; fails under 144 fps or on any per-frame allocation

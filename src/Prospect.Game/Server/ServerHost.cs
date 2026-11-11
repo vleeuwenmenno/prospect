@@ -11,6 +11,12 @@ public sealed class ServerConfig
     public string Name { get; init; } = "PROSPECT server";
     public int MaxPlayers { get; init; } = 16;
     public ulong GalaxySeed { get; init; } = 0x50524F5350454354;
+
+    /// <summary>
+    /// The world's settings, fixed for as long as the server runs; null for the defaults in the content. Build
+    /// them with the content's <see cref="GameContent.SettingCatalog"/>.
+    /// </summary>
+    public WorldSettings? Settings { get; init; }
 }
 
 /// <summary>A point-in-time view of the server, readable from any thread.</summary>
@@ -104,10 +110,12 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
     {
         _config = config;
         _transports = transports;
-        _content = content;
-        Galaxy = content.Galaxy.WithSeed(config.GalaxySeed);
+
+        // From here on the server only knows the content as its own world's settings make it.
+        _content = content.WithSettings(config.Settings ?? content.SettingCatalog.Defaults);
+        Galaxy = _content.Galaxy.WithSeed(config.GalaxySeed);
         _rocks = new RockField(Galaxy);
-        _field = new HullField(_hulls, content.Designs);
+        _field = new HullField(_hulls, _content.Designs);
 
         // Room for every player plus connections that are still shaking hands or about to be refused as full.
         _connections = new Connection[config.MaxPlayers + 8];
@@ -121,6 +129,9 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
     }
 
     public Galaxy Galaxy { get; }
+
+    /// <summary>The content as this server's world plays by it: its settings and the figures that follow from them.</summary>
+    public GameContent Content => _content;
 
     public ServerStatus Status => new(Volatile.Read(ref _tick), Volatile.Read(ref _playerCount), _loop.Stats);
 
@@ -144,6 +155,22 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
     {
         foreach (var transport in _transports)
             Logs.Sim.Info($"Server '{_config.Name}' up on {transport.Description}, {_config.MaxPlayers} player slots");
+
+        // Whoever reads the log should be able to tell how this world differs from a plain one.
+        var catalog = _content.SettingCatalog;
+        var settings = _content.Settings;
+        var changed = 0;
+        foreach (var setting in catalog.Definitions)
+        {
+            var value = settings.Get(setting);
+            if (value == setting.Default)
+                continue;
+            changed++;
+            Logs.Sim.Info($"World setting {setting.Name} ({setting.Id}): {setting.Format(value)}, default {setting.Format(setting.Default)}");
+        }
+
+        if (changed == 0)
+            Logs.Sim.Info("World settings: all at their defaults");
     }
 
     void ITickHandler.Tick(long tick)
@@ -612,9 +639,10 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
             GalaxySeed = _config.GalaxySeed,
             ServerName = _config.Name,
             HullId = connection.Hull.Packed,
+            Settings = _content.Settings,
         };
         var writer = new NetWriter(_sendBuffer);
-        welcome.Write(ref writer);
+        welcome.Write(ref writer, _content.SettingCatalog);
         connection.Transport.Send(connection.Peer, NetChannel.Reliable, writer.Written);
 
         // The newcomer generates the galaxy from the seed like everyone else; what it cannot know is which

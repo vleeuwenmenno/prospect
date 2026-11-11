@@ -60,8 +60,12 @@ public sealed class BlockType
     public int Crew { get; init; }
 }
 
-/// <summary>Constants that turn a hull's raw figures into how it flies. Data, so they can be tuned without code.</summary>
-public sealed class FlightRules
+/// <summary>
+/// Constants that turn a hull's raw figures into how it flies. Data, so they can be tuned without code. The
+/// figures in <c>content/blocks</c> are the same for every world; <see cref="Under"/> gives the rules of one
+/// world, with its settings applied.
+/// </summary>
+public sealed record FlightRules
 {
     public required float SpeedPerRootAcceleration { get; init; }
     public required float TurnRatePerRootAcceleration { get; init; }
@@ -81,6 +85,31 @@ public sealed class FlightRules
     public required float FtlAlignDegrees { get; init; }
     public required float FtlTunnelSeconds { get; init; }
     public required float FtlArriveSeconds { get; init; }
+
+    /// <summary>
+    /// Shield points a collision takes for each point of damage the shield absorbs. Zero means the shield does
+    /// not stand in the way of a collision at all: the damage goes to the blocks and the shield is left alone.
+    /// </summary>
+    public float CollisionShieldCost { get; init; } = 1f;
+
+    /// <summary>What a world's settings multiply block hit points, shield recharge and jump drive power by.</summary>
+    public float HullStrength { get; init; } = 1f;
+    public float ShieldRechargeMultiplier { get; init; } = 1f;
+    public float FtlChargeMultiplier { get; init; } = 1f;
+
+    /// <summary>
+    /// These rules as one world plays by them. This is the one place a world setting takes effect: to add a
+    /// setting, list it in <c>content/rules/settings.json</c> and apply its number here.
+    /// </summary>
+    public FlightRules Under(WorldSettingCatalog catalog, in WorldSettings settings) =>
+        this with
+        {
+            CollisionDamagePerTonneSpeedSquared = CollisionDamagePerTonneSpeedSquared * catalog.Number(settings, "collisionDamage"),
+            CollisionShieldCost = catalog.Number(settings, "collisionShields"),
+            ShieldRechargeMultiplier = catalog.Number(settings, "shieldRecharge"),
+            FtlChargeMultiplier = catalog.Number(settings, "jumpChargeSpeed"),
+            HullStrength = catalog.Number(settings, "hullStrength"),
+        };
 }
 
 public sealed class BlockCatalog
@@ -93,6 +122,7 @@ public sealed class BlockCatalog
         Rules = rules;
     }
 
+    /// <summary>The rules as the content files give them, before any world's settings.</summary>
     public FlightRules Rules { get; }
 
     public BlockType Get(string id) =>
@@ -258,7 +288,8 @@ public sealed class HullDesign
 
     private FlightRules _rules = null!;
 
-    public static HullDesign Load(string path, BlockCatalog catalog)
+    /// <summary>Loads a design and works out its figures under a world's rules.</summary>
+    public static HullDesign Load(string path, BlockCatalog catalog, FlightRules rules)
     {
         using var document = JsonDocument.Parse(File.ReadAllBytes(path));
         var root = document.RootElement;
@@ -295,9 +326,27 @@ public sealed class HullDesign
         if (cells.Count > MaxBlocks)
             throw new InvalidDataException($"{path}: {cells.Count} blocks; a design may have at most {MaxBlocks}");
 
-        design.Initialize(catalog.Rules, path);
+        design.Initialize(rules, path);
         return design;
     }
+
+    /// <summary>
+    /// The same design in a world with other rules: the same blocks in the same places, with the figures that
+    /// follow from them worked out again. The original is left as it was, so two worlds in one process, or a
+    /// server and a client that disagree, each keep their own.
+    /// </summary>
+    public HullDesign WithRules(FlightRules rules)
+    {
+        var design = (HullDesign)MemberwiseClone();
+        design._rules = rules;
+        design.Evaluate(FullMask, out var flight, out var stats);
+        design.Flight = flight;
+        design.Stats = stats;
+        return design;
+    }
+
+    /// <summary>The hit points a block of this design has when intact, in the world the design was evaluated for.</summary>
+    public float BlockHitPoints(int block) => Types[block].Hull * _rules.HullStrength;
 
     private void Initialize(FlightRules rules, string path)
     {
@@ -360,7 +409,7 @@ public sealed class HullDesign
             mass += type.Mass;
             min = Vector3.Min(min, cell);
             max = Vector3.Max(max, cell);
-            hull += type.Hull;
+            hull += type.Hull * rules.HullStrength;
             shield += type.Shield;
             recharge += type.ShieldRecharge;
             torque += type.Torque;
@@ -392,6 +441,10 @@ public sealed class HullDesign
 
         mass = Math.Max(mass, 0.01f);
         inertia = Vector3.Max(inertia, new Vector3(0.001f));
+        recharge *= rules.ShieldRechargeMultiplier;
+
+        // A drive that takes power faster charges sooner; what a jump costs in all is the same.
+        ftlPower *= rules.FtlChargeMultiplier;
         var lateral = thrusterThrust / mass;
         var forward = (engineThrust + thrusterThrust) / mass;
         var turnAcceleration = new Vector3(torque) / inertia;
@@ -425,6 +478,7 @@ public sealed class HullDesign
             CollisionSafeSpeed = rules.CollisionSafeSpeed,
             CollisionDamagePerTonneSpeedSquared = rules.CollisionDamagePerTonneSpeedSquared,
             CollisionBounce = rules.CollisionBounce,
+            CollisionShieldCost = rules.CollisionShieldCost,
             Ftl = ftl,
             FtlPower = ftlPower,
             FtlEnergy = rules.FtlEnergyPerTonne * mass,

@@ -121,7 +121,7 @@ internal sealed class ClientWorld : IDisposable
         public FlightParams Flight;
     }
 
-    private readonly GameContent _content;
+    private GameContent _content;
     private FlightParams _flight;
     private byte _ownDesign;
     private ulong _ownBlocks;
@@ -134,7 +134,7 @@ internal sealed class ClientWorld : IDisposable
     // The predicted world: the player's hull in slot 0 and the hulls near it after that, in the server's order.
     // Rebuilt from each snapshot and stepped once per input.
     private readonly HullStore _near = new(MaxViews + 1);
-    private readonly HullField _field;
+    private HullField _field;
     private int _ticksSinceSnapshot;
     private readonly byte[] _sendBuffer = new byte[256];
     private readonly byte[] _fleetBuffer = new byte[2 + FleetOrdersMessage.MaxOrders * 29];
@@ -164,6 +164,18 @@ internal sealed class ClientWorld : IDisposable
     }
 
     public void Dispose() => _near.Dispose();
+
+    /// <summary>
+    /// Gives the world the content as the server's settings make it. The prediction has to run on the server's
+    /// figures, or every collision, shield and jump charge it shows would be corrected a moment later. Call it
+    /// when the server has welcomed the client, before any snapshot is applied.
+    /// </summary>
+    public void SetContent(GameContent content)
+    {
+        _content = content;
+        _field = new HullField(_near, content.Designs, authoritative: false);
+        OwnDesign.Evaluate(_hasOwnState ? _ownBlocks : OwnDesign.FullMask, out _flight, out _);
+    }
 
     public void SetPlayer(uint playerId) => _playerId = playerId;
 

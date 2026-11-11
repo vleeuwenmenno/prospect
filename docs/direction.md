@@ -35,7 +35,9 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
 
 - **A world has settings:** switches and multipliers, chosen when a new game or a server is set up.
 - **The server owns them.** A client is told on joining and plays by them.
-- **First ones:** how hard collisions hit, and what shields do against a collision. Many more follow.
+- **First ones:** collision damage, shields against collisions (full, weak, none), shield recharge, jump charge
+  speed, hull strength. Many more follow.
+- **Fixed for the life of a world.** Set when a server or a local game starts, not while it runs.
 
 ## Decided: building
 

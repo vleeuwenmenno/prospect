@@ -1,0 +1,56 @@
+{
+  "settings": [
+    {
+      "id": "collisionDamage",
+      "name": "Collision damage",
+      "description": "How hard a collision hits. At 0 collisions push but never damage.",
+      "kind": "multiplier",
+      "default": 1,
+      "minimum": 0,
+      "maximum": 4,
+      "step": 0.25
+    },
+    {
+      "id": "collisionShields",
+      "name": "Shields against collisions",
+      "description": "Full: the shield absorbs a collision. Weak: it absorbs it but drains four times as fast. None: collisions pass the shield and hit the blocks.",
+      "kind": "choice",
+      "default": "Full",
+      "options": [
+        { "name": "Full", "value": 1 },
+        { "name": "Weak", "value": 4 },
+        { "name": "None", "value": 0 }
+      ]
+    },
+    {
+      "id": "shieldRecharge",
+      "name": "Shield recharge",
+      "description": "How fast shields recharge.",
+      "kind": "multiplier",
+      "default": 1,
+      "minimum": 0.25,
+      "maximum": 4,
+      "step": 0.25
+    },
+    {
+      "id": "jumpChargeSpeed",
+      "name": "Jump charge speed",
+      "description": "How fast a jump drive charges. The energy a jump takes stays the same.",
+      "kind": "multiplier",
+      "default": 1,
+      "minimum": 0.25,
+      "maximum": 4,
+      "step": 0.25
+    },
+    {
+      "id": "hullStrength",
+      "name": "Hull strength",
+      "description": "How many hit points every block has.",
+      "kind": "multiplier",
+      "default": 1,
+      "minimum": 0.25,
+      "maximum": 4,
+      "step": 0.25
+    }
+  ]
+}

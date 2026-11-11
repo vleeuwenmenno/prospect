@@ -1,4 +1,5 @@
 using Prospect.Engine.Net;
+using Prospect.Game.World;
 
 namespace Prospect.Game.Protocol;
 
@@ -49,7 +50,7 @@ public enum RejectReason : byte
 public static class ProtocolInfo
 {
     /// <summary>Bumped whenever the wire format changes. Client and server must match exactly.</summary>
-    public const uint Version = 9;
+    public const uint Version = 10;
 
     public const ushort DefaultPort = 27420;
     public const int MaxNameBytes = 48;
@@ -89,7 +90,14 @@ public struct WelcomeMessage
     /// <summary>The hull the player controls.</summary>
     public uint HullId;
 
-    public readonly void Write(ref NetWriter writer)
+    /// <summary>The settings of the server's world, which the client plays by from here on.</summary>
+    public WorldSettings Settings;
+
+    /// <summary>The most bytes a welcome takes: the fixed fields, the server's name and the world's settings.</summary>
+    public const int MaxWireSize = 1 + 4 + 4 + 2 + 8 + 8 + 1 + ProtocolInfo.MaxNameBytes + WorldSettingCatalog.MaxWireSize;
+
+    /// <summary>Writes the message. The settings go out by id, as <paramref name="catalog"/> names them.</summary>
+    public readonly void Write(ref NetWriter writer, WorldSettingCatalog catalog)
     {
         writer.WriteByte((byte)MessageId.Welcome);
         writer.WriteUInt32(HullId);
@@ -98,9 +106,14 @@ public struct WelcomeMessage
         writer.WriteInt64(ServerTick);
         writer.WriteUInt64(GalaxySeed);
         writer.WriteString(ServerName);
+        catalog.Write(ref writer, Settings);
     }
 
-    public static bool TryRead(ref NetReader reader, out WelcomeMessage message)
+    /// <summary>
+    /// Reads the message. The settings are matched by id against <paramref name="catalog"/> and brought into
+    /// range, so whatever the server sent they are settings this game can play by.
+    /// </summary>
+    public static bool TryRead(ref NetReader reader, WorldSettingCatalog catalog, out WelcomeMessage message)
     {
         Span<char> name = stackalloc char[ProtocolInfo.MaxNameBytes];
         message.HullId = reader.ReadUInt32();
@@ -110,6 +123,7 @@ public struct WelcomeMessage
         message.GalaxySeed = reader.ReadUInt64();
         var length = reader.ReadString(name, ProtocolInfo.MaxNameBytes);
         message.ServerName = reader.IsValid ? PlayerNames.Sanitize(name[..length]) : "";
+        message.Settings = catalog.Read(ref reader);
         return reader.IsValid;
     }
 }

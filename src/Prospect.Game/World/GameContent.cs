@@ -7,18 +7,46 @@ namespace Prospect.Game.World;
 /// <summary>The data both the server and the client need to run the simulation, loaded from <c>content/</c>.</summary>
 public sealed class GameContent
 {
-    private GameContent(Galaxy galaxy, BlockCatalog blocks, HullDesign[] designs, int pod, int drone, int[] startingFleet)
+    private GameContent(
+        Galaxy galaxy,
+        BlockCatalog blocks,
+        WorldSettingCatalog settingCatalog,
+        in WorldSettings settings,
+        FlightRules rules,
+        HullDesign[] designs,
+        int pod,
+        int drone,
+        int[] startingFleet
+    )
     {
         DroneDesign = drone;
         Galaxy = galaxy;
         Blocks = blocks;
+        SettingCatalog = settingCatalog;
+        Settings = settings;
+        Rules = rules;
         Designs = designs;
         PodDesign = pod;
         StartingFleet = startingFleet;
     }
 
-    /// <summary>Every hull design, indexed by the design number hulls carry on the wire.</summary>
+    /// <summary>
+    /// Every hull design, indexed by the design number hulls carry on the wire, with its figures worked out
+    /// under <see cref="Settings"/>.
+    /// </summary>
     public HullDesign[] Designs { get; }
+
+    /// <summary>Every setting a world can have: what it is called, its range and its default.</summary>
+    public WorldSettingCatalog SettingCatalog { get; }
+
+    /// <summary>
+    /// The world settings this content is evaluated under. Loaded content has the defaults; a server and each
+    /// client that joins it get their own with <see cref="WithSettings"/>.
+    /// </summary>
+    public WorldSettings Settings { get; }
+
+    /// <summary>The flight rules with <see cref="Settings"/> applied.</summary>
+    public FlightRules Rules { get; }
 
     /// <summary>Index of the command pod's design.</summary>
     public int PodDesign { get; }
@@ -37,9 +65,32 @@ public sealed class GameContent
     /// <summary>The command pod every player starts in.</summary>
     public HullDesign Pod => Designs[PodDesign];
 
+    /// <summary>
+    /// This content as a world with the given settings plays by it: the same blocks, designs and galaxy rules,
+    /// with every figure that a setting touches worked out again. Nothing here is changed, so one process can
+    /// hold several worlds: a server and its client in a local game, or one server after another. The settings
+    /// are brought into range first, wherever they came from.
+    /// </summary>
+    public GameContent WithSettings(in WorldSettings settings)
+    {
+        var clean = SettingCatalog.Sanitize(settings);
+        if (clean == Settings)
+            return this;
+
+        // Always from the rules as the files give them, so settings never stack on earlier settings.
+        var rules = Blocks.Rules.Under(SettingCatalog, clean);
+        var designs = new HullDesign[Designs.Length];
+        for (var i = 0; i < designs.Length; i++)
+            designs[i] = Designs[i].WithRules(rules);
+        return new GameContent(Galaxy, Blocks, SettingCatalog, clean, rules, designs, PodDesign, DroneDesign, StartingFleet);
+    }
+
     public static GameContent Load()
     {
         var blocks = BlockCatalog.Load(AppPaths.Content("blocks", "blocks.json"));
+        var settingCatalog = WorldSettingCatalog.Load(AppPaths.Content("rules", "settings.json"));
+        var settings = settingCatalog.Defaults;
+        var rules = blocks.Rules.Under(settingCatalog, settings);
         using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(AppPaths.Content("ships", "fleet.json")));
         var root = document.RootElement;
         var ids = new List<string>();
@@ -47,7 +98,7 @@ public sealed class GameContent
         foreach (var id in root.GetProperty("designs"u8).EnumerateArray())
         {
             ids.Add(id.GetString()!);
-            designs.Add(HullDesign.Load(AppPaths.Content("ships", ids[^1] + ".json"), blocks));
+            designs.Add(HullDesign.Load(AppPaths.Content("ships", ids[^1] + ".json"), blocks, rules));
         }
 
         int Index(string id) =>
@@ -62,6 +113,9 @@ public sealed class GameContent
         return new GameContent(
             Galaxy.Load(AppPaths.Content("galaxy", "galaxy.json")),
             blocks,
+            settingCatalog,
+            settings,
+            rules,
             [.. designs],
             Index(root.GetProperty("pod"u8).GetString()!),
             Index(root.GetProperty("drone"u8).GetString()!),
@@ -653,14 +707,32 @@ public static class HullSim
 
     /// <summary>
     /// Applies impact damage: the shield takes what it can, the rest is split between the blocks that touched.
-    /// A block at zero is gone. Returns true if the hull is destroyed: its core is gone or nothing is left.
+    /// What the shield pays for each point it takes is the world's choice, and so is whether it stands in the
+    /// way of a collision at all. A block at zero is gone. Returns true if the hull is destroyed: its core is
+    /// gone or nothing is left.
     /// </summary>
     internal static bool Damage(ref HullState state, in FlightParams flight, ref HullBody body, ulong touching, int touchCount, float amount)
     {
         state.ShieldCooldown = flight.ShieldDelay;
-        var absorbed = Math.Min(state.Shield, amount);
-        state.Shield -= absorbed;
-        var remaining = amount - absorbed;
+        var remaining = amount;
+        var cost = flight.CollisionShieldCost;
+        if (cost > 0)
+        {
+            // What the shield can still take at that price. A shield that cannot take it all goes to exactly
+            // zero, not to whatever the division left over.
+            var holds = state.Shield / cost;
+            if (holds > amount)
+            {
+                state.Shield -= amount * cost;
+                remaining = 0;
+            }
+            else
+            {
+                state.Shield = 0;
+                remaining = amount - holds;
+            }
+        }
+
         if (remaining <= 0)
             return false;
 
