@@ -1,12 +1,14 @@
 using System.Numerics;
 using Brutal.GlfwApi;
 using Brutal.ImGuiApi;
+using Brutal.ImGuiApi.FreeType;
 using Brutal.Numerics;
 using Prospect.Client.Input;
 using Prospect.Client.Screens;
 using Prospect.Client.Settings;
 using Prospect.Client.Ui;
 using Prospect.Client.World;
+using Prospect.Engine.IO;
 using Prospect.Engine.Jobs;
 using Prospect.Engine.Net;
 using Prospect.Engine.Time;
@@ -137,6 +139,36 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     private PlayerInputBridge Bridge => _client.Input;
+
+    [Theory]
+    [InlineData(1280f, 720f, 1f)]
+    [InlineData(1655f, 688f, 1f)]
+    [InlineData(1280f, 720f, 2f)]
+    [InlineData(1655f, 688f, 2f)]
+    public void TheConsoleKeepsEveryHullPointDigitWithTheShippedFont(float width, float height, float scale)
+    {
+        var fonts = ImGui.GetIO().Fonts;
+        fonts.SetFontLoader(ImGuiFreeType.GetFontLoader());
+        var mono = fonts.AddFontFromFileTTF(AppPaths.Asset("fonts", "JetBrainsMono-Regular.ttf"), Theme.FontBody);
+        var sans = fonts.AddFontFromFileTTF(AppPaths.Asset("fonts", "SpaceGrotesk-Medium.ttf"), Theme.FontBody);
+        ImGui.GetStyle().FontScaleMain = scale;
+        _ui.NewFrame();
+        try
+        {
+            // The shipped Prospector with hullStrength=4 has 23,120 HP. Use the game's font loader and active
+            // scale: measuring the font outside ImGui gives different advances and can overstate its width.
+            var layout = FlightConsole.Layout(new float2(width, height), scale);
+            var available = layout.Compact
+                ? layout.GroupWidth - MathF.Round((FlightConsole.Slant + 2 * FlightConsole.Pad + FlightConsole.ColumnGap) * scale)
+                    - Kit.Measure(sans, Theme.FontSmall, "HULL"u8).X
+                : MathF.Round(FlightConsole.ReadingColumn * scale);
+            Assert.InRange(Kit.Measure(mono, Theme.FontSmall, "23120 / 23120"u8).X, 1f, available);
+        }
+        finally
+        {
+            ImGui.Render();
+        }
+    }
 
     // One GLFW event each, delivered to both listeners exactly as the window callbacks do.
     private void Move(float2 to)
