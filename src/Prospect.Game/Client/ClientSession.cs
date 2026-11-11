@@ -33,6 +33,18 @@ public enum SessionEndReason : byte
     ServerFull,
     VersionMismatch,
     Refused,
+
+    /// <summary>The server has a password and none was given. Join again with one.</summary>
+    PasswordRequired,
+
+    /// <summary>The password given is not the server's.</summary>
+    WrongPassword,
+
+    /// <summary>
+    /// Too many wrong passwords came from this address. <see cref="SessionSnapshot.RetryAfterSeconds"/> says
+    /// how long the server wants this address to wait.
+    /// </summary>
+    TooManyAttempts,
 }
 
 /// <summary>
@@ -47,6 +59,18 @@ public sealed class SessionSnapshot(GameContent content)
     public string ServerName = "";
     public ulong GalaxySeed;
     public int PlayerCount;
+
+    /// <summary>Player slots on the server, once it has said so.</summary>
+    public int MaxPlayers;
+
+    /// <summary>Whether the game is public, unlisted or private, as the server says.</summary>
+    public ServerVisibility Visibility;
+
+    /// <summary>True when joining the server over the network takes a password.</summary>
+    public bool PasswordProtected;
+
+    /// <summary>With <see cref="SessionEndReason.TooManyAttempts"/>: seconds to wait before trying a password again.</summary>
+    public int RetryAfterSeconds;
 
     /// <summary>Client simulation tick that produced this snapshot.</summary>
     public long ClientTick;
@@ -109,6 +133,8 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     private readonly ClientWorld _world;
     private Galaxy? _galaxy;
     private readonly string _playerName;
+    private readonly string? _password;
+    private bool _challenged;
     private readonly TickLoop _loop;
     private readonly SnapshotExchange<SessionSnapshot> _snapshots;
     private readonly byte[] _sendBuffer = new byte[1024];
@@ -119,6 +145,10 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     private string _serverName = "";
     private ulong _galaxySeed;
     private int _playerCount;
+    private int _maxPlayers;
+    private ServerVisibility _visibility;
+    private bool _passwordProtected;
+    private int _retryAfterSeconds;
     private float _roundTripMs = -1;
 
     // Clock sync: the server tick reported by the last pong and the local time at which it was (estimated) current.
@@ -127,8 +157,16 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
 
     private volatile bool _leaveRequested;
 
-    public ClientSession(ITransport transport, GameContent content, string playerName)
+    /// <param name="transport">The link to the server.</param>
+    /// <param name="content">The game's content as the files have it.</param>
+    /// <param name="playerName">The player's callsign.</param>
+    /// <param name="password">
+    /// The server's password, if the player gave one. It is only ever used to answer the server's challenge
+    /// (<see cref="Passwords"/>) and never sent. One that no server could have counts as none.
+    /// </param>
+    public ClientSession(ITransport transport, GameContent content, string playerName, string? password = null)
     {
+        _password = password is not null && Passwords.IsUsable(password) ? password : null;
         _transport = transport;
         _loaded = content;
         _content = content;
@@ -187,6 +225,10 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         snapshot.ServerName = _serverName;
         snapshot.GalaxySeed = _galaxySeed;
         snapshot.PlayerCount = _playerCount;
+        snapshot.MaxPlayers = _maxPlayers;
+        snapshot.Visibility = _visibility;
+        snapshot.PasswordProtected = _passwordProtected;
+        snapshot.RetryAfterSeconds = _retryAfterSeconds;
         snapshot.ClientTick = tick;
         var serverTick = _state == SessionState.Active ? EstimateServerTick(now) : 0;
         snapshot.ServerTick = (long)serverTick;
@@ -258,6 +300,9 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                 _playerId = welcome.PlayerId;
                 _serverName = welcome.ServerName;
                 _galaxySeed = welcome.GalaxySeed;
+                _visibility = welcome.Visibility;
+                _passwordProtected = welcome.PasswordProtected;
+                _maxPlayers = welcome.MaxPlayers;
 
                 // The server's world, not this machine's files, says how hard things hit: predict by its settings.
                 _content = _loaded.WithSettings(welcome.Settings);
@@ -273,16 +318,26 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                 SendPing();
                 break;
 
-            case MessageId.Reject when _state == SessionState.Handshaking:
-                End(
-                    (RejectReason)reader.ReadByte() switch
-                    {
-                        RejectReason.VersionMismatch => SessionEndReason.VersionMismatch,
-                        RejectReason.ServerFull => SessionEndReason.ServerFull,
-                        _ => SessionEndReason.Refused,
-                    }
-                );
+            case MessageId.Challenge when _state == SessionState.Handshaking && channel == NetChannel.Reliable:
+                AnswerChallenge(ref reader);
                 break;
+
+            case MessageId.Reject when _state == SessionState.Handshaking:
+                {
+                    RejectMessage.TryRead(ref reader, out var reject);
+                    _retryAfterSeconds = reject.Reason == RejectReason.TooManyAttempts ? reject.RetryAfterSeconds : 0;
+                    End(
+                        reject.Reason switch
+                        {
+                            RejectReason.VersionMismatch => SessionEndReason.VersionMismatch,
+                            RejectReason.ServerFull => SessionEndReason.ServerFull,
+                            RejectReason.WrongPassword => SessionEndReason.WrongPassword,
+                            RejectReason.TooManyAttempts => SessionEndReason.TooManyAttempts,
+                            _ => SessionEndReason.Refused,
+                        }
+                    );
+                    break;
+                }
 
             case MessageId.RockDeltas when _state == SessionState.Active && channel == NetChannel.Reliable:
                 _world.OnRockDeltas(ref reader);
@@ -309,6 +364,46 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                     break;
                 }
         }
+    }
+
+    /// <summary>
+    /// The server has a password and sent its salt and a challenge. With a password in hand the session proves
+    /// it knows it; without one it ends, saying a password is needed, so the player can be asked and join again.
+    /// </summary>
+    private void AnswerChallenge(ref NetReader reader)
+    {
+        Span<byte> salt = stackalloc byte[Passwords.SaltSize];
+        Span<byte> challenge = stackalloc byte[Passwords.ChallengeSize];
+        if (!ChallengeMessage.TryRead(ref reader, salt, challenge))
+        {
+            End(SessionEndReason.Refused);
+            return;
+        }
+
+        if (_password is null)
+        {
+            End(SessionEndReason.PasswordRequired);
+            return;
+        }
+
+        // One answer per session. Deriving the key is slow on purpose, and a server that keeps asking must not
+        // be able to keep this thread busy with it, or collect proofs for challenges of its choosing.
+        if (_challenged)
+        {
+            End(SessionEndReason.Refused);
+            return;
+        }
+
+        _challenged = true;
+        Span<byte> key = stackalloc byte[Passwords.KeySize];
+        Span<byte> proof = stackalloc byte[Passwords.ProofSize];
+        Passwords.DeriveKey(_password, salt, key);
+        Passwords.ComputeProof(key, salt, challenge, proof);
+        System.Security.Cryptography.CryptographicOperations.ZeroMemory(key);
+
+        var writer = new NetWriter(_sendBuffer);
+        ProofMessage.Write(ref writer, proof);
+        _transport.Send(0, NetChannel.Reliable, writer.Written);
     }
 
     private void SendPing()

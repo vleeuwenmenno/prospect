@@ -16,6 +16,8 @@ using Prospect.Engine.IO;
 using Prospect.Engine.Jobs;
 using Prospect.Engine.Time;
 using Prospect.Game.Client;
+using Prospect.Game.Lobby;
+using Prospect.Game.Protocol;
 using Prospect.Game.Server;
 using Prospect.Game.World;
 using IJob = Brutal.Concurrency.Jobs.IJob;
@@ -33,6 +35,15 @@ internal sealed class AppOptions
 
     /// <summary>World settings for local games, each as <c>id=value</c>, in the order they were given.</summary>
     public List<string> WorldSettingArgs { get; } = [];
+
+    /// <summary>How local games started in this run are hosted, as <c>--host</c> and its companions set it.</summary>
+    public HostingOptions Hosting { get; } = new();
+
+    /// <summary>The password for <c>--join</c>, or for the game <c>--host</c> starts; null for none.</summary>
+    public string? Password { get; set; }
+
+    /// <summary>The listing server's address, <c>off</c>, or null for the content's default.</summary>
+    public string? Listing { get; set; }
     /// <summary>Open the command view or the map once in space; for scripted screenshots.</summary>
     public string? OpenView { get; set; }
     public float BenchSeconds { get; set; }
@@ -49,6 +60,34 @@ internal sealed class AppOptions
     /// <summary>The sector a local game starts in; for scripted screenshots and benchmarks of a particular sector.</summary>
     public SectorCoord SpawnSector { get; set; }
     public int2? WindowSize { get; set; }
+}
+
+/// <summary>
+/// How a local game is hosted: for the host alone, or with a UDP listener so other players can join it. A screen
+/// that lets the player choose reads and writes <see cref="App.NewGameHosting"/>, beside the world settings.
+/// </summary>
+internal sealed class HostingOptions
+{
+    /// <summary>Private: nobody can join. Unlisted: joined by address. Public: also shown in the server browser.</summary>
+    public ServerVisibility Visibility { get; set; } = ServerVisibility.Private;
+
+    /// <summary>
+    /// The game's name, 1 to 48 characters (<see cref="ServerNames"/>). Empty for the default: "Local game" for
+    /// a private one, the player's callsign and "game" for one that others can join.
+    /// </summary>
+    public string Name { get; set; } = "";
+
+    /// <summary>The password others must know to join, or empty for none. Not used by a private game.</summary>
+    public string Password { get; set; } = "";
+
+    /// <summary>Player slots, the host included. A private game always has one.</summary>
+    public int MaxPlayers { get; set; } = 8;
+
+    /// <summary>The UDP port an unlisted or public game listens on.</summary>
+    public ushort Port { get; set; } = ProtocolInfo.DefaultPort;
+
+    /// <summary>A copy, so a screen can edit one without changing the game's until the player confirms.</summary>
+    public HostingOptions Clone() => (HostingOptions)MemberwiseClone();
 }
 
 /// <summary>
@@ -94,6 +133,13 @@ internal sealed class App : IDisposable
 
         Content = GameContent.Load();
         NewGameSettings = Content.SettingCatalog.Build(null, options.WorldSettingArgs, message => Logs.App.Warning(message));
+        NewGameHosting = options.Hosting.Clone();
+        if (options.Password is not null && options.JoinHost is null)
+            NewGameHosting.Password = options.Password;
+
+        // Nothing is fetched until a screen asks: making the browser opens no connection.
+        Listing = ListingConfig.Resolve(options.Listing);
+        Browser = new ServerBrowser(Listing);
 
         // Decode the logo, parse the bindings, compile the shaders and build the meshes on workers while the
         // window and the GPU come up on this thread.
@@ -191,6 +237,23 @@ internal sealed class App : IDisposable
     /// <see cref="GameContent.SettingCatalog"/>.
     /// </summary>
     public WorldSettings NewGameSettings { get; set; }
+
+    /// <summary>
+    /// How the next local game is hosted: private unless <c>--host</c> said otherwise. A screen that lets the
+    /// player host a game reads and writes this, or passes its own to
+    /// <see cref="StartLocalGame(in WorldSettings, HostingOptions, out string)"/>.
+    /// </summary>
+    public HostingOptions NewGameHosting { get; set; }
+
+    /// <summary>The listing server in use, or null when it is turned off.</summary>
+    public ListingConfig? Listing { get; }
+
+    /// <summary>
+    /// The list of public games for a server browser. <see cref="ServerBrowser.Refresh"/> starts a fetch and
+    /// returns at once; <see cref="ServerBrowser.State"/> and <see cref="ServerBrowser.List"/> are read every
+    /// frame without waiting. Join an entry with <see cref="JoinGame(ListedGame, string?, out string)"/>.
+    /// </summary>
+    public ServerBrowser Browser { get; }
     public WorldView World { get; }
     public JobSystem Jobs { get; }
     public InputDevices Devices { get; }
@@ -208,33 +271,57 @@ internal sealed class App : IDisposable
     /// <summary>Process exit code: non-zero when a benchmark missed its targets.</summary>
     public int ExitCode { get; private set; }
 
-    /// <summary>Starts a local game with <see cref="NewGameSettings"/>.</summary>
+    /// <summary>Starts a local game with <see cref="NewGameSettings"/>, hosted as <see cref="NewGameHosting"/> says.</summary>
     public void StartLocalGame() => StartLocalGame(NewGameSettings);
 
-    /// <summary>Starts a local game in a world with the given settings, which also become the next game's.</summary>
+    /// <summary>
+    /// Starts a local game in a world with the given settings, which also become the next game's, hosted as
+    /// <see cref="NewGameHosting"/> says. A game that cannot be hosted is logged and not started.
+    /// </summary>
     public void StartLocalGame(in WorldSettings settings)
+    {
+        if (!StartLocalGame(settings, NewGameHosting, out var error))
+        {
+            Logs.App.Error(error);
+            Console.Error.WriteLine(error);
+        }
+    }
+
+    /// <summary>
+    /// Starts a local game in a world with the given settings, hosted as <paramref name="hosting"/> says; both
+    /// also become the next game's. A private game is the host alone. An unlisted or public one is the same
+    /// game with a UDP listener, which other players join by address; a public one also announces itself to
+    /// the listing server. Returns false with a sentence for the player when the name or the password cannot
+    /// be used or the port cannot be opened; the session that was running has been left either way.
+    /// </summary>
+    public bool StartLocalGame(in WorldSettings settings, HostingOptions hosting, out string error)
     {
         LeaveSession();
         NewGameSettings = Content.SettingCatalog.Sanitize(settings);
+        NewGameHosting = hosting.Clone();
+
+        var hosted = hosting.Visibility != ServerVisibility.Private;
+        var name = hosting.Name.Trim().Length > 0 ? hosting.Name : hosted ? $"{Settings.PlayerName}'s game" : "Local game";
+        if (hosting.Visibility == ServerVisibility.Public && Listing is null)
+            Logs.App.Warning("The game is public but the listing server is turned off: it will not show in any server browser");
+
         var config = new ServerConfig
         {
-            Name = "Local game",
-            MaxPlayers = 1,
+            Name = name,
+            MaxPlayers = hosted ? Math.Clamp(hosting.MaxPlayers, 1, 256) : 1,
             Settings = NewGameSettings,
             SpawnSector = _options.SpawnSector,
+            Visibility = hosting.Visibility,
+            Password = hosted && hosting.Password.Length > 0 ? hosting.Password : null,
+            Port = hosting.Port,
+            Listing = Listing,
         };
-        Session = GameSession.StartLocal(config, Content, Settings.PlayerName);
-        _screens.Show(Screen.Session);
-    }
 
-    public bool JoinGame(string host, ushort port, out string error)
-    {
-        LeaveSession();
         try
         {
-            Session = GameSession.Join(host, port, Content, Settings.PlayerName);
+            Session = GameSession.StartLocal(config, Content, Settings.PlayerName);
         }
-        catch (IOException e)
+        catch (Exception e) when (e is IOException or InvalidDataException)
         {
             error = e.Message;
             return false;
@@ -243,6 +330,90 @@ internal sealed class App : IDisposable
         error = "";
         _screens.Show(Screen.Session);
         return true;
+    }
+
+    /// <summary>Joins a server by address, without a password.</summary>
+    public bool JoinGame(string host, ushort port, out string error) => JoinGame(host, port, null, out error);
+
+    /// <summary>
+    /// Joins a server by address. <paramref name="password"/> is null or empty for none. A server that has a
+    /// password and is not given one ends the session with <see cref="SessionEndReason.PasswordRequired"/>; a
+    /// wrong one ends it with <see cref="SessionEndReason.WrongPassword"/>, and too many wrong ones with
+    /// <see cref="SessionEndReason.TooManyAttempts"/>. A screen that sees one of these asks the player and
+    /// calls <see cref="RejoinWithPassword"/>.
+    /// </summary>
+    public bool JoinGame(string host, ushort port, string? password, out string error)
+    {
+        LeaveSession();
+        if (!CheckPassword(ref password, out error))
+            return false;
+
+        try
+        {
+            Session = GameSession.Join(host, port, Content, Settings.PlayerName, password);
+        }
+        catch (IOException e)
+        {
+            error = e.Message;
+            return false;
+        }
+
+        _screens.Show(Screen.Session);
+        return true;
+    }
+
+    /// <summary>
+    /// Joins a game the player picked in the server browser, with a password when the entry says it needs one.
+    /// Nothing is sent to a listed game before this.
+    /// </summary>
+    public bool JoinGame(ListedGame game, string? password, out string error)
+    {
+        LeaveSession();
+        if (!CheckPassword(ref password, out error))
+            return false;
+
+        try
+        {
+            Session = GameSession.Join(game, Content, Settings.PlayerName, password);
+        }
+        catch (IOException e)
+        {
+            error = e.Message;
+            return false;
+        }
+
+        _screens.Show(Screen.Session);
+        return true;
+    }
+
+    /// <summary>
+    /// Joins the server of the current remote session again, this time with a password: for the moment that
+    /// session has ended because the server wants one or the one given was wrong.
+    /// </summary>
+    public bool RejoinWithPassword(string password, out string error)
+    {
+        if (Session is not { RemoteHost: { } host, RemotePort: var port })
+        {
+            error = "There is no server to join again.";
+            return false;
+        }
+
+        return JoinGame(host, port, password, out error);
+    }
+
+    private static bool CheckPassword(ref string? password, out string error)
+    {
+        error = "";
+        if (string.IsNullOrEmpty(password))
+        {
+            password = null;
+            return true;
+        }
+
+        if (Passwords.IsUsable(password))
+            return true;
+        error = $"A password is 1 to {Passwords.MaxChars} characters.";
+        return false;
     }
 
     public void LeaveSession()
@@ -282,11 +453,21 @@ internal sealed class App : IDisposable
     {
         _sinceSplash = 0;
         _splashFinishedAt = Stopwatch.GetTimestamp();
-        if (_options.StartLocalGame || _benchmark is not null)
+        if (_benchmark is not null)
+        {
+            // The benchmark measures the game alone: never a listener, never the listing server.
+            NewGameHosting = new HostingOptions();
             StartLocalGame();
+        }
+        else if (_options.StartLocalGame)
+        {
+            StartLocalGame();
+            if (Session is null)
+                _screens.Show(Screen.MainMenu);
+        }
         else if (_options.JoinHost is { } host)
         {
-            if (!JoinGame(host, _options.JoinPort, out var error))
+            if (!JoinGame(host, _options.JoinPort, _options.Password, out var error))
             {
                 Logs.App.Error(error);
                 _screens.Show(Screen.Join);
@@ -401,6 +582,7 @@ internal sealed class App : IDisposable
     public void Dispose()
     {
         Session?.Dispose();
+        Browser.Dispose();
         Jobs.CompleteAll();
         _gpu.Device.WaitIdle();
         BrutalLogo.Dispose();

@@ -87,6 +87,9 @@ internal sealed partial class ScreenHost
                 SessionEndReason.ServerFull => "The server is full"u8,
                 SessionEndReason.VersionMismatch => "Game versions do not match"u8,
                 SessionEndReason.Refused => "The server refused the connection"u8,
+                SessionEndReason.PasswordRequired => "This server needs a password"u8,
+                SessionEndReason.WrongPassword => "Wrong password"u8,
+                SessionEndReason.TooManyAttempts => "Too many wrong passwords"u8,
                 _ => "Session closed"u8,
             }
         );
@@ -100,6 +103,9 @@ internal sealed partial class ScreenHost
                 SessionEndReason.ServerFull => "Every player slot is taken. Try again later."u8,
                 SessionEndReason.VersionMismatch => "Update the game so it matches the server's version."u8,
                 SessionEndReason.Refused => "The server did not accept this client."u8,
+                SessionEndReason.PasswordRequired => "Join again with the password its host gave you."u8,
+                SessionEndReason.WrongPassword => "That is not this server's password."u8,
+                SessionEndReason.TooManyAttempts => "The server is making this address wait before the next try."u8,
                 _ => "You have left the session."u8,
             }
         );

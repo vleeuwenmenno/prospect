@@ -5,6 +5,7 @@ using Prospect.Client.Input;
 using Prospect.Client.Ui;
 using Prospect.Client.World;
 using Prospect.Game.Client;
+using Prospect.Game.Protocol;
 using Prospect.Game.World;
 
 namespace Prospect.Client.Screens;
@@ -152,27 +153,42 @@ internal sealed partial class ScreenHost
         var inner = Kit.Px(360) - Kit.Px(Theme.Space4) * 2;
         var hasRock = world.Sector.AsteroidCount > 0 && !_mapOpen;
         var characterHeight = hasRock ? SectorCharacterHeight(world.Galaxy!, world.Sector.Character, inner) + Kit.Px(Theme.Space2) : 0f;
-        var size = new float2(Kit.Px(360), Kit.Px(96) + characterHeight);
+        var size = new float2(Kit.Px(360), Kit.Px(116) + characterHeight);
         Kit.PanelFrame(draw, min, min + size);
 
         var star = world.Galaxy!.StarClasses[world.Sector.StarClass];
         var text = min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3));
         if (hasRock)
-            DrawSectorCharacter(draw, text + new float2(0, Kit.Px(74)), inner, world.Galaxy!, world.Sector.Character);
+            DrawSectorCharacter(draw, text + new float2(0, Kit.Px(94)), inner, world.Galaxy!, world.Sector.Character);
         draw.AddCircleFilled(text + new float2(Kit.Px(5), Kit.Px(10)), Kit.Px(5), Kit.Color(StarColor(star.Color)), 20);
         Kit.Text(draw, _ui.SansMedium, Theme.FontBody, text + new float2(Kit.Px(18), 0), Theme.Text, world.SectorName);
 
         var coord = world.Sector.Coord;
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(30)), Theme.TextDim, Kit.F($"SECTOR {coord.X} {coord.Y} {coord.Z}   {world.Sector.AsteroidCount} ROCKS"));
+
+        // The server: its name on a line of its own, cut off at the panel's edge since a host may choose a long
+        // one, then who can join it and how full it is.
+        draw.PushClipRect(text, new float2(text.X + inner, min.Y + size.Y), true);
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(50)), Theme.TextDim, Kit.F($"{snapshot.ServerName}"));
+        draw.PopClipRect();
+
+        var visibility = snapshot.Visibility switch
+        {
+            ServerVisibility.Public => snapshot.PasswordProtected ? "PUBLIC, PASSWORD"u8 : "PUBLIC"u8,
+            ServerVisibility.Unlisted => snapshot.PasswordProtected ? "UNLISTED, PASSWORD"u8 : "UNLISTED"u8,
+            _ => "PRIVATE"u8,
+        };
+        var status = text + new float2(0, Kit.Px(70));
+        var width = Kit.Text(draw, _ui.Mono, Theme.FontCaption, status, snapshot.Visibility == ServerVisibility.Private ? Theme.TextMute : Theme.Accent, visibility).X;
         Kit.Text(
             draw,
             _ui.Mono,
             Theme.FontCaption,
-            text + new float2(0, Kit.Px(50)),
+            status + new float2(width + Kit.Px(Theme.Space3), 0),
             Theme.TextMute,
             snapshot.RoundTripMs < 0
-                ? Kit.F($"{snapshot.ServerName}   PLAYERS {snapshot.PlayerCount}")
-                : Kit.F($"{snapshot.ServerName}   PLAYERS {snapshot.PlayerCount}   RTT {snapshot.RoundTripMs:0} MS")
+                ? Kit.F($"PLAYERS {snapshot.PlayerCount}/{snapshot.MaxPlayers}")
+                : Kit.F($"PLAYERS {snapshot.PlayerCount}/{snapshot.MaxPlayers}   RTT {snapshot.RoundTripMs:0} MS")
         );
     }
 
@@ -1136,12 +1152,12 @@ internal sealed partial class ScreenHost
             Brackets(draw, at - corner, at + corner, Math.Clamp(cell * 0.3f, 3f, Kit.Px(10)), Kit.Color(Theme.Accent));
         }
 
-        // Title, layer and scale.
+        // Title, layer and scale, clear of the sector panel above them.
         var margin = Kit.Px(96);
-        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(margin, Kit.Px(140)), Theme.Accent, "NAVIGATION"u8);
-        Kit.Text(draw, _ui.SansBold, Theme.FontHeading, new float2(margin, Kit.Px(158)), Theme.Text, "Galaxy Map"u8);
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(margin, Kit.Px(198)), Theme.TextDim, Kit.F($"LAYER {_mapLayer:+0;-0;0}   {display.X / cell:0} SECTORS ACROSS   {size / 1000:0} KM EACH"));
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(margin, Kit.Px(218)), Theme.TextMute, Kit.F($"{_discovered.Count} SECTORS DISCOVERED   {world.Selection.Length} SHIPS SELECTED"));
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(margin, Kit.Px(160)), Theme.Accent, "NAVIGATION"u8);
+        Kit.Text(draw, _ui.SansBold, Theme.FontHeading, new float2(margin, Kit.Px(178)), Theme.Text, "Galaxy Map"u8);
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(margin, Kit.Px(218)), Theme.TextDim, Kit.F($"LAYER {_mapLayer:+0;-0;0}   {display.X / cell:0} SECTORS ACROSS   {size / 1000:0} KM EACH"));
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(margin, Kit.Px(238)), Theme.TextMute, Kit.F($"{_discovered.Count} SECTORS DISCOVERED   {world.Selection.Length} SHIPS SELECTED"));
 
         if (pointerOnMap)
             DrawMapHoverPanel(draw, snapshot, world, galaxy, hover, here);

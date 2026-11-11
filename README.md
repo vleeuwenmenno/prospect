@@ -6,8 +6,8 @@ A multiplayer space sandbox: you command from a pod, mine asteroids, build hulls
 systems. C# on .NET 10, built on the [BRUTAL](https://github.com/ahwootech/BRUTAL) framework (Vulkan, GLFW,
 Dear ImGui, RakNet). Windows x64, Linux x64 and Apple Silicon macOS.
 
-Singleplayer is a server running inside the game process; multiplayer is the same server as a separate binary.
-There is one simulation and one code path.
+Singleplayer is a server running inside the game process; multiplayer is the same server as a separate binary,
+or that local game opened to other players. There is one simulation and one code path.
 
 ## Status
 
@@ -78,13 +78,23 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   positions, a star field and sky, instanced hull and asteroid meshes. Asteroids have five levels of detail, from
   a speck in the distance to a giant seen from its surface.
 
-- **Listing server.** A small HTTP service (and its container image) that public game servers announce themselves
-  to and clients fetch the list of games from. The game server and the client do not use it yet. See
+- **Hosting.** A game is private (the host alone, no network listener), unlisted (joined by address) or public
+  (also on the list). A local game can be hosted for others: the same in-process server, listening on UDP as
+  well. A server has a name its host chooses. From the command line for now; see
+  [Hosting and joining](#hosting-and-joining) and [docs/hosting.md](docs/hosting.md).
+- **Passwords.** An unlisted or public game can have one. It is never sent: the server challenges, the client
+  answers with a keyed hash, and wrong tries are slowed down per address. It protects the password, not the
+  traffic: game packets are not encrypted.
+- **Listing server.** A small HTTP service (and its container image) that keeps the list of public games. A
+  public server announces itself to it, refreshes every 30 seconds and removes itself on shutdown; the client
+  fetches and checks the list. Ours is `https://mvl.sh`, the default in `content/net/listing.json`. See
   [docs/listing-server.md](docs/listing-server.md).
 - **Releases.** Pushing a tag (`server-v…`, `list-v…` or `v…`) publishes the game server and listing server container
   images to GitHub Container Registry. See [docs/releasing.md](docs/releasing.md).
 
-Not there yet: the server browser and announcing to the listing server, mining, taking control of ships owned by other players (permissions), jump range and cost, gates,
+Not there yet: the server browser screen and the hosting screen (both work underneath and from the command
+line; the join screen still takes an address only and cannot ask for a password), NAT traversal (a host needs
+a UDP port others can reach), encryption of game traffic, IPv6, mining, taking control of ships owned by other players (permissions), jump range and cost, gates,
 saving. Stations and gas fields are not generated yet; asteroids do not crack into pieces, and ore shows only as
 a tint. Asteroids come in a shared set of shapes until mining gives each one its own body. Designs are limited to 64
 blocks for now, because block state is sent as one bit per block.
@@ -156,7 +166,7 @@ asteroid.
 `F3` shows the
 performance overlay, `F11` toggles fullscreen, `F12` takes a screenshot. Bindings live in
 `content/input/bindings.json`; block types and flight rules in `content/blocks`, hull designs in `content/ships`,
-galaxy rules in `content/galaxy`, world settings in `content/rules`.
+galaxy rules in `content/galaxy`, world settings in `content/rules`, the listing server's address in `content/net`.
 
 ## World settings
 
@@ -192,6 +202,36 @@ make server ARGS="--settings my-world.json"                                     
 - In a game, `Esc` then World Settings shows the settings in force, read-only. On someone else's server these
   are the server's.
 
+## Hosting and joining
+
+| Visibility | Listens on UDP | On the list | Who can join |
+| --- | --- | --- | --- |
+| `private` | no | no | Nobody: the host alone. A local game's default. |
+| `unlisted` | yes | no | Anyone with the address. A dedicated server's default. |
+| `public` | yes | yes | Anyone: it is announced to the listing server. |
+
+```sh
+make run ARGS="--host unlisted --host-name 'Ceres Station'"                # host a local game, joined by address
+make run ARGS="--host public --host-players 8 --password 'open sesame'"    # on the list, with a password
+make run ARGS="--join 203.0.113.7 --password 'open sesame'"                # join by address
+make server ARGS="--name 'Ceres Station' --visibility public"              # a dedicated public server
+PROSPECT_PASSWORD='open sesame' make server ARGS="--visibility public"     # its password, not on the command line
+make run ARGS="--host public --listing http://127.0.0.1:8080"              # against `make listing` on this machine
+```
+
+- **A host needs a UDP port others can reach** (default 27420; `--host-port`, or `--port` on a server): a public
+  address or a forwarded port. There is no NAT traversal, and the list does not check that a game is reachable.
+- The host of a local game is never asked for its password. Everyone else is.
+- A name is 1 to 48 characters. A password is 1 to 64.
+- The password is never sent and a captured answer opens nothing. Game traffic itself is not encrypted.
+- `--listing <url>` picks another listing server; `--listing off` turns it off. HTTPS only, except on this machine.
+- A server's settings file can hold `name`, `visibility`, `port`, `maxPlayers`, `password` and `listing` under
+  `"server"`. An argument wins over `PROSPECT_PASSWORD`, which wins over the file.
+- In a game, the sector panel shows the server's name, its visibility and the player slots.
+- Not there yet: a screen to host from, the server browser, and a password prompt on the join screen.
+
+How the password and the list work: [docs/hosting.md](docs/hosting.md).
+
 ## Requirements
 
 - `make`, and a GPU and driver with Vulkan 1.3
@@ -212,6 +252,7 @@ make run ARGS="--start local"              # straight into a local game
 make server                                # headless dedicated server on UDP 27420
 make server ARGS="--set hullStrength=2"    # the same, in a world with its own settings
 make run ARGS="--join 127.0.0.1"           # join it
+make run ARGS="--host unlisted"            # a local game others can join by address
 make check                                 # formatting, warnings-as-errors build, tests
 make bench                                 # release benchmark; fails under 144 fps or on any per-frame allocation
 make listing                               # the listing server on http://127.0.0.1:8080
@@ -227,11 +268,11 @@ make help                                  # every target
 | Path | Contents |
 | --- | --- |
 | `src/Prospect.Engine` | Fixed-step loop, job graph, thread hand-off, transports (in-process and RakNet), atomic files |
-| `src/Prospect.Game` | The simulation shared by client and server: galaxy, flight model, hull storage, protocol, server host, client prediction |
+| `src/Prospect.Game` | The simulation shared by client and server: galaxy, flight model, hull storage, protocol, server host, client prediction, and the game's side of the listing server (announcer, server browser) |
 | `src/Prospect.Server` | Headless dedicated server |
 | `src/Prospect.Client` | Window, Vulkan renderer, cameras, input, interface |
 | `src/Prospect.Listing` | Listing server: the HTTP list of public games (ASP.NET Core) |
-| `tests/Prospect.Tests` | Unit and integration tests, including real client and server sessions over UDP |
+| `tests/Prospect.Tests` | Unit and integration tests, including real client and server sessions over UDP and the real listing server in-process |
 | `tests/Prospect.Listing.Tests` | The listing server run in-process and driven over HTTP |
 | `docker/` | Container images |
 | `content/` | Game data, loaded at run time |
@@ -245,6 +286,7 @@ make help                                  # every target
 | ClientSim | The client's 60 Hz simulation and its connection to the server. Publishes a snapshot every tick. |
 | Server | The authoritative 60 Hz simulation (in a local game, or in `prospect-server`). |
 | Job workers | Work scheduled on the job graph. |
+| Thread pool | Requests to the listing server: a public server's announcements and the server browser's fetch. Never the simulation or the frame loop. |
 
 ## Licences
 

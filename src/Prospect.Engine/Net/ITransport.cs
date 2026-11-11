@@ -45,6 +45,12 @@ public interface ITransport : IDisposable
     /// <summary>The largest payload <see cref="Send"/> accepts.</summary>
     int MaxPayloadSize { get; }
 
+    /// <summary>
+    /// True when the other end is in this process: the link between a local game's server and its own client.
+    /// Nothing from outside the process can arrive on such a transport.
+    /// </summary>
+    bool IsInProcess { get; }
+
     /// <summary>Delivers pending connection events and messages to the handler.</summary>
     void Poll(ITransportHandler handler);
 
@@ -56,4 +62,10 @@ public interface ITransport : IDisposable
 
     /// <summary>Smoothed round-trip time to the peer in milliseconds, or -1 if unknown.</summary>
     int GetRoundTripMs(int peer);
+
+    /// <summary>
+    /// A number that is the same for every connection from one network address and differs between addresses, so
+    /// limits can be counted per address. Zero when the peer is in this process or its address is not known.
+    /// </summary>
+    ulong GetPeerOrigin(int peer);
 }
