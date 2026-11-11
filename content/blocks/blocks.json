@@ -6,6 +6,7 @@
     "boostThrustMultiplier": 2.4,
     "boostSpeedMultiplier": 2.25,
     "boostPowerMultiplier": 4,
+    "boostEnergyFloor": 0.05,
     "boostHeatSeconds": 6,
     "coolSeconds": 9,
     "shieldRechargeDelaySeconds": 4,

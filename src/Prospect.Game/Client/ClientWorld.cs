@@ -26,6 +26,9 @@ public struct HullView
     public Vector3 Velocity;
     public float Heat;
     public bool BoostLocked;
+
+    /// <summary>True while the hull's boost is running.</summary>
+    public bool Boosting;
     public HullOrder Order;
 
     /// <summary>Where the hull is in a faster-than-light jump, and how long it has been in that stage.</summary>
@@ -371,6 +374,7 @@ internal sealed class ClientWorld : IDisposable
                 Velocity = _predicted.Velocity,
                 Heat = _predicted.Heat,
                 BoostLocked = _predicted.BoostLocked,
+                Boosting = _predicted.Boosting,
                 Order = _order,
                 Jump = _predicted.Jump,
                 JumpTimer = _predicted.JumpTimer,
@@ -634,6 +638,7 @@ internal sealed class ClientWorld : IDisposable
             Velocity = newest.State.Velocity,
             Heat = newest.State.Heat,
             BoostLocked = newest.State.BoostLocked,
+            Boosting = newest.State.Boosting,
             Order = newest.Order,
             Jump = newest.State.Jump,
             JumpTimer = newest.State.JumpTimer,

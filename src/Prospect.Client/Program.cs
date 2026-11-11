@@ -36,6 +36,9 @@ internal static class Program
           --capture-count <n>     Take n numbered screenshots instead of one (file-00.png, file-01.png, ...)
           --capture-every <sec>   Time between numbered screenshots (default 0.25)
           --look <degrees>        Pilot view: hold the camera this many degrees to the right of the hull's nose
+          --look-to <degrees>     With --look and --capture: turn the camera from --look to this angle, evenly
+                                  over the time the captures take
+          --target                Pilot view: target the nearest other hull once in space
           --verbose               Log debug messages
           --help                  Show this text
         """;
@@ -185,6 +188,13 @@ internal static class Program
                 case "--look" when hasValue && float.TryParse(args[i + 1], out var look):
                     options.LookDegrees = look;
                     i++;
+                    break;
+                case "--look-to" when hasValue && float.TryParse(args[i + 1], out var lookTo):
+                    options.LookToDegrees = lookTo;
+                    i++;
+                    break;
+                case "--target":
+                    options.TargetNearest = true;
                     break;
                 case "--verbose":
                     verbose = true;

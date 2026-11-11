@@ -60,6 +60,15 @@ internal sealed class AppOptions
     /// <summary>In the pilot view, holds the camera this many degrees to the side of the hull's nose; for captures.</summary>
     public float? LookDegrees { get; set; }
 
+    /// <summary>
+    /// With <see cref="LookDegrees"/>, the angle the camera turns to, evenly over the time the captures take; for
+    /// capturing how a marker moves as the view turns.
+    /// </summary>
+    public float? LookToDegrees { get; set; }
+
+    /// <summary>Target the nearest other hull once in space; for captures of the target's markers.</summary>
+    public bool TargetNearest { get; set; }
+
     /// <summary>The sector a local game starts in; for scripted screenshots and benchmarks of a particular sector.</summary>
     public SectorCoord SpawnSector { get; set; }
     public int2? WindowSize { get; set; }
@@ -691,7 +700,18 @@ internal sealed class App : IDisposable
         }
 
         if (_options.LookDegrees is { } look && Session is not null)
+        {
+            if (_options.LookToDegrees is { } lookTo)
+            {
+                var span = Math.Max(_options.CaptureEvery * (_options.CaptureCount - 1), 1e-3f);
+                look += (lookTo - look) * Math.Clamp((_sinceSplash - _options.CaptureAfter) / span, 0f, 1f);
+            }
+
             World.LookDegrees = look;
+        }
+
+        if (_options.TargetNearest && Session is not null && _sinceSplash > 0.6f && World.TargetHull == 0)
+            World.TargetNearestHull();
 
         if (_options.CapturePath is { } path)
         {

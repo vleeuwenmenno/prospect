@@ -181,7 +181,7 @@ public struct HullRecord
         writer.WriteSingle(State.Orientation.W);
         WorldWire.WriteVector(ref writer, State.AngularVelocity);
         writer.WriteSingle(State.Heat);
-        writer.WriteByte((byte)((State.BoostLocked ? 1 : 0) | (byte)Order.Kind << 1 | (byte)State.Jump << 3));
+        writer.WriteByte((byte)((State.BoostLocked ? 1 : 0) | (byte)Order.Kind << 1 | (byte)State.Jump << 3 | (State.Boosting ? 1 << 6 : 0)));
         writer.WriteSingle(State.JumpTimer);
         writer.WriteSingle(State.Energy);
         writer.WriteSingle(State.Shield);
@@ -208,6 +208,7 @@ public struct HullRecord
         record.State.Heat = Math.Clamp(reader.ReadSingle(), 0f, 1f);
         var flags = reader.ReadByte();
         record.State.BoostLocked = (flags & 1) != 0;
+        record.State.Boosting = (flags & 1 << 6) != 0;
         record.State.Jump = (JumpPhase)Math.Min(flags >> 3 & 7, (int)JumpPhase.Arrive);
         record.State.JumpTimer = reader.ReadSingle();
         ok &= float.IsFinite(record.State.JumpTimer);

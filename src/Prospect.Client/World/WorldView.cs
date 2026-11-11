@@ -744,6 +744,16 @@ internal sealed class WorldView
         return true;
     }
 
+    /// <summary>
+    /// A world position relative to the camera, in metres along the camera's right, up and forward axes. Unlike
+    /// <see cref="Project"/> it has an answer behind the camera too.
+    /// </summary>
+    public Vector3 ToView(Double3 world)
+    {
+        var relative = world.RelativeTo(CameraPosition);
+        return new Vector3(Vector3.Dot(relative, _right), Vector3.Dot(relative, _up), Vector3.Dot(relative, _forward));
+    }
+
     /// <summary>The point on the command plane under a window position, if the view ray meets the plane.</summary>
     public bool GroundPoint(float2 pointer, out Double3 point)
     {
@@ -1296,6 +1306,25 @@ internal sealed class WorldView
         _focusFrom = _commandFocus;
         _focusTarget = point;
         _focusBlend = 0f;
+    }
+
+    /// <summary>Targets the hull nearest the player's other than their own, as the middle button would.</summary>
+    public void TargetNearestHull()
+    {
+        var snapshot = _snapshot;
+        if (snapshot is null)
+            return;
+        var best = float.MaxValue;
+        for (var i = 0; i < snapshot.HullCount; i++)
+        {
+            ref var hull = ref snapshot.Hulls[i];
+            var distance = hull.Position.RelativeTo(OwnPosition).LengthSquared();
+            if (hull.IsOwn || distance >= best)
+                continue;
+            best = distance;
+            TargetHull = hull.Id;
+            TargetRock = null;
+        }
     }
 
     /// <summary>Finds a hull in this frame's snapshot by id.</summary>

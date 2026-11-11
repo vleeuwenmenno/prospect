@@ -112,6 +112,12 @@ public struct FlightParams
     /// <summary>Battery capacity in megajoules.</summary>
     public float EnergyStorage;
 
+    /// <summary>
+    /// Megajoules the battery must hold before boost will engage. Boost that is already running carries on below
+    /// it until the battery is empty, so a hull does not flicker in and out of boost at the threshold.
+    /// </summary>
+    public float BoostEnergyFloor;
+
     /// <summary>Impacts slower than this do no damage, in m/s.</summary>
     public float CollisionSafeSpeed;
     public float CollisionDamagePerTonneSpeedSquared;
@@ -173,6 +179,12 @@ public struct HullState
     /// <summary>Set when the hull overheated; boost stays off until it has cooled most of the way down.</summary>
     public bool BoostLocked;
 
+    /// <summary>
+    /// True while boost ran on the last tick. Boost that is running holds on until the battery is empty; boost
+    /// that is not needs the battery above <see cref="FlightParams.BoostEnergyFloor"/> to start.
+    /// </summary>
+    public bool Boosting;
+
     /// <summary>Stored energy in megajoules.</summary>
     public float Energy;
     public float Shield;
@@ -228,9 +240,15 @@ public static class FlightModel
             state.Orientation = Quaternion.Normalize(state.Orientation * spin);
         }
 
-        // Boost and heat. Boost needs charge in the battery as well as a cool drive.
+        // Boost and heat. Boost needs a cool drive and charge in the battery: to start, the battery must be above
+        // its floor; once running, boost holds on until the battery is empty, then stays off until the battery is
+        // back above the floor. A hull without a battery never boosts.
         var thrust = new Vector3(input.Strafe, input.Vertical, -input.Forward) * AxisScale;
-        var boosting = input.Boost && !state.BoostLocked && state.Energy > 0f && thrust != Vector3.Zero;
+        var boosting = input.Boost
+            && !state.BoostLocked
+            && thrust != Vector3.Zero
+            && state.Energy > 0f
+            && (state.Boosting || state.Energy >= p.BoostEnergyFloor);
         state.Heat = Math.Clamp(state.Heat + (boosting ? p.HeatRate : -p.CoolRate) * dt, 0f, 1f);
         if (state.Heat >= 1f)
             state.BoostLocked = true;
@@ -245,6 +263,7 @@ public static class FlightModel
         var recharging = state.Shield < p.ShieldCapacity && state.ShieldCooldown <= 0f && state.Energy > 0f;
         var demand = p.IdlePower + thrustDemand + (recharging ? p.ShieldPower : 0f);
         state.Energy = Math.Clamp(state.Energy + (p.PowerGenerated - demand) * dt, 0f, p.EnergyStorage);
+        state.Boosting = boosting && state.Energy > 0f;
 
         var thrustScale = 1f;
         if (state.Energy <= 0f && demand > p.PowerGenerated)

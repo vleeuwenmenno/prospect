@@ -65,9 +65,14 @@ public sealed class FlightTests
         Assert.True(boosted.Velocity.Length() > plain.Velocity.Length() * 1.5f);
         Assert.True(boosted.Heat > 0.2f);
 
+        // The pod's battery runs dry before its drive overheats, so keep it charged: this is about heat.
         var overheated = boosted;
         for (var i = 0; i < 600 && !overheated.BoostLocked; i++)
+        {
+            overheated.Energy = Pod.EnergyStorage;
             overheated = Fly(overheated, new FlightInput { Forward = 127, Boost = true }, 1);
+        }
+
         Assert.True(overheated.BoostLocked);
 
         // Locked out, holding boost no longer helps: the hull sheds speed back toward its rated maximum.
@@ -169,6 +174,96 @@ public sealed class PowerAndDamageTests
         var gained = state.Velocity.Length() / HullSim.Dt;
         Assert.True(gained <= Pod.Acceleration.Z + 0.01f);
         Assert.Equal(before.Shield, state.Shield);
+    }
+
+    [Fact]
+    public void TheEnergyFloorComesFromTheRulesAndScalesWithTheBattery()
+    {
+        Assert.Equal(0.05f, Content.Blocks.Rules.BoostEnergyFloor);
+        Assert.Equal(Pod.EnergyStorage * 0.05f, Pod.BoostEnergyFloor, 3);
+    }
+
+    [Fact]
+    public void BoostWillNotEngageWithTheBatteryBelowItsFloor()
+    {
+        var boost = new FlightInput { Forward = 127, Boost = true };
+        var low = HullState.Spawn(Double3.Zero, Pod);
+        low.Energy = Pod.BoostEnergyFloor * 0.9f;
+        FlightModel.Step(ref low, boost, Pod, HullSim.Dt);
+        Assert.False(low.Boosting);
+        Assert.Equal(0f, low.Heat);
+
+        var enough = HullState.Spawn(Double3.Zero, Pod);
+        enough.Energy = Pod.BoostEnergyFloor * 1.1f;
+        FlightModel.Step(ref enough, boost, Pod, HullSim.Dt);
+        Assert.True(enough.Boosting);
+        Assert.True(enough.Heat > 0f);
+    }
+
+    [Fact]
+    public void RunningBoostCarriesOnBelowTheFloorAndCutsOutWhenTheBatteryIsEmpty()
+    {
+        var state = HullState.Spawn(Double3.Zero, Pod);
+        var boost = new FlightInput { Forward = 127, Boost = true };
+        var belowFloorWhileBoosting = false;
+        var ticks = 0;
+        while (state.Energy > 0f && ticks++ < 60 * 30)
+        {
+            FlightModel.Step(ref state, boost, Pod, HullSim.Dt);
+            belowFloorWhileBoosting |= state.Boosting && state.Energy < Pod.BoostEnergyFloor;
+        }
+
+        // The pod empties its battery before its drive overheats: it is the energy that stops the boost here.
+        Assert.True(belowFloorWhileBoosting);
+        Assert.Equal(0f, state.Energy);
+        Assert.False(state.Boosting);
+        Assert.False(state.BoostLocked);
+
+        // Still holding boost, the hull flies on under plain thrust: no faster than its rated speed allows.
+        var speed = state.Velocity.Length();
+        FlightModel.Step(ref state, boost, Pod, HullSim.Dt);
+        Assert.False(state.Boosting);
+        Assert.True(state.Velocity.Length() <= speed);
+    }
+
+    [Fact]
+    public void HoldingBoostOnAnEmptyBatteryWaitsForTheFloorInsteadOfFlickering()
+    {
+        var state = HullState.Spawn(Double3.Zero, Pod);
+        state.Energy = 0f;
+        var boost = new FlightInput { Forward = 127, Boost = true };
+        var engaged = 0;
+        for (var i = 0; i < 60 * 20; i++)
+        {
+            var before = state;
+            FlightModel.Step(ref state, boost, Pod, HullSim.Dt);
+            if (!before.Boosting && state.Boosting)
+            {
+                // Boost starts again only from a battery that had climbed back above the floor.
+                Assert.True(before.Energy >= Pod.BoostEnergyFloor);
+                engaged++;
+            }
+        }
+
+        // Each start spends the margin above the floor and then waits for the generator to refill it: a few
+        // bursts in twenty seconds, not one every other tick.
+        Assert.InRange(engaged, 1, 20);
+    }
+
+    [Fact]
+    public void AHullWithoutABatteryNeverBoostsButStillFlies()
+    {
+        var flight = Pod;
+        flight.EnergyStorage = 0f;
+        flight.BoostEnergyFloor = 0f;
+        var state = HullState.Spawn(Double3.Zero, flight);
+        for (var i = 0; i < 120; i++)
+            FlightModel.Step(ref state, new FlightInput { Forward = 127, Boost = true }, flight, HullSim.Dt);
+
+        Assert.False(state.Boosting);
+        Assert.Equal(0f, state.Heat);
+        Assert.Equal(0f, state.Energy);
+        Assert.True(state.Velocity.Length() > 1f);
     }
 
     [Fact]
@@ -1320,6 +1415,38 @@ public sealed class FlightSessionTests
 
         // With no network between them the two run the same inputs through the same code: no correction at all.
         Assert.True(worst < 0.01f, $"prediction was off by up to {worst:0.000} m");
+    }
+
+    [Fact]
+    public void PredictionAgreesWithTheServerWhileBoostingThroughAnEmptyBattery()
+    {
+        using var session = GameSession.StartLocal(new ServerConfig { MaxPlayers = 1 }, Content, "Pilot");
+        WaitForOwnHull(session);
+
+        // Boost with the nose swinging until the battery runs dry, and keep holding it: boost cuts out at empty
+        // and comes back only once the battery has climbed over its floor, on both sides alike.
+        var worst = 0f;
+        var cutOut = false;
+        var start = Stopwatch.GetTimestamp();
+        while (Stopwatch.GetElapsedTime(start).TotalSeconds < 9)
+        {
+            var t = (float)Stopwatch.GetElapsedTime(start).TotalSeconds;
+            var aim = Vector3.Normalize(new Vector3(0.5f * MathF.Sin(t * 0.8f), 0.2f * MathF.Cos(t * 0.6f), -1f));
+            session.Client.Input.Submit(new PlayerControls { Forward = 1, Strafe = 0.3f * MathF.Sin(t), Aim = aim, Align = true, Boost = true });
+            var snapshot = session.Client.AcquireSnapshot();
+            worst = Math.Max(worst, snapshot.PredictionError);
+            if (snapshot.OwnHull >= 0)
+            {
+                var own = snapshot.Hulls[snapshot.OwnHull];
+                cutOut |= own.Energy < snapshot.Flight.BoostEnergyFloor && !own.Boosting && !own.BoostLocked;
+            }
+
+            Thread.Sleep(5);
+        }
+
+        Assert.True(cutOut, "the battery never ran down far enough to stop the boost");
+        Assert.True(worst < 0.01f, $"prediction was off by up to {worst:0.000} m");
+        Assert.Null(session.Fault);
     }
 
     [Fact]

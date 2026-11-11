@@ -34,7 +34,9 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   shield points and the power budget are all computed from them and shown on the ship's data sheet.
 - **Flight.** A command pod with inertial flight: thrust on all three axes, roll, dampeners, and a boost that heats
   up and locks out. Thrust, boost and shield recharge draw power; the generator refills the battery with the
-  surplus.
+  surplus. Boost needs the battery above 5% to start (`boostEnergyFloor` in `content/blocks/blocks.json`), runs
+  until the battery is empty, then waits for the battery to pass 5% again; a hull without a battery cannot
+  boost. The energy bar marks the 5%, and the boost readout says whether boost is cooling or out of energy.
 - **Collisions and damage.** Hulls collide block by block against each asteroid's real surface, and block
   against block with each other. An impact bounces and turns the hull; damage grows with the square of the speed
   over a safe limit and lands on the blocks that touched, after the shield. A block at zero is gone, and the hull
@@ -132,7 +134,9 @@ The pointer turns the view, not the hull. The hull swings its nose onto the view
 thrust, so looking around while coasting costs nothing; hold the right mouse button to look around under thrust
 without turning.
 
-A ship near the reticle is bracketed; the middle mouse button targets it and shows its shield and hull. With one
+A ship near the reticle is bracketed; the middle mouse button targets it and shows its shield and hull. A target
+out of view, or behind you, shows as an arrow near the screen's edge pointing the way to turn; it slides back into
+the bracket as the target comes into view. With one
 of your own ships targeted, `T` puts you at its controls and the ship you left is flown by the server. With nothing
 targeted, `T` leaves your ship in a drone: a tiny craft with little hull and shield that is removed when you take
 a ship again. In the command view `T` takes control of the first selected ship.
