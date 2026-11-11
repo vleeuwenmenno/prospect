@@ -62,7 +62,7 @@ public readonly record struct ServerStatus(long Tick, int PlayerCount, TickStats
 /// The authoritative simulation. The dedicated server binary and a singleplayer game both run this class on its
 /// own thread; the only difference is which transports it is given. Everything in here executes on the tick thread.
 /// </summary>
-public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
+public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDisposable
 {
     /// <summary>
     /// Messages one player may have handled in one tick, and their bytes. A client sends an input and now and
@@ -130,6 +130,10 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         public ITransport Transport = null!;
         public int Peer;
         public uint PlayerId;
+        public uint Party, Inviter;
+        public long InviteUntil, SocialAt;
+        public double SocialCredit;
+        public bool SocialFailed;
         public string Name = "";
 
         /// <summary>The name a hello gave, cleaned, kept here without allocating until the player is let in.</summary>
@@ -169,6 +173,10 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
 
         public void Reset()
         {
+            Party = Inviter = 0;
+            InviteUntil = SocialAt = 0;
+            SocialCredit = 0;
+            SocialFailed = false;
             State = ConnectionState.Free;
             Transport = null!;
             Name = "";
@@ -430,6 +438,13 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
             }
             else if (connection.State == ConnectionState.Active)
             {
+                if (connection.SocialFailed)
+                {
+                    connection.Transport.Disconnect(connection.Peer);
+                    RemovePlayer(connection);
+                    connection.Reset();
+                    continue;
+                }
                 connection.FloodStrikes = connection.OverAllowance ? connection.FloodStrikes + FloodStrikesPerTick : Math.Max(connection.FloodStrikes - 1, 0);
                 connection.TickMessages = connection.TickBytes = 0;
                 connection.OverAllowance = false;
@@ -496,6 +511,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
                 SendSnapshot(connection, tick);
         }
 
+        TickSocial(tick);
         Volatile.Write(ref _tick, tick + 1);
     }
 
@@ -637,6 +653,9 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         var reader = new NetReader(payload[1..]);
         switch ((MessageId)payload[0])
         {
+            case MessageId.Social when channel == NetChannel.Reliable:
+                ReceiveSocial(connection, ref reader);
+                break;
             case MessageId.Ping when PingMessage.TryRead(ref reader, out var ping):
                 {
                     var pong = new PongMessage
@@ -1067,6 +1086,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         // The newcomer generates the galaxy from the seed like everyone else; what it cannot know is which
         // asteroids have been knocked about since.
         SendRockDeltas(connection, _rocks.Deltas);
+        JoinSocial(connection);
 
         Logs.Sim.Info($"{connection.Name} joined as player {connection.PlayerId} via {connection.Transport.Description}");
     }
@@ -1149,6 +1169,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
     /// <summary>Takes a player's hulls out of the world and frees their player slot.</summary>
     private void RemovePlayer(Connection connection)
     {
+        LeaveSocial(connection);
         for (var i = 0; i < _hulls.Slots; i++)
         {
             if (_hulls.IsAliveAt(i) && _hulls.Info(i).Owner == connection.PlayerId)

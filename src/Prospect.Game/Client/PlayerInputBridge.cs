@@ -33,6 +33,48 @@ public struct PlayerControls
 public sealed class PlayerInputBridge
 {
     private readonly Lock _lock = new();
+    private readonly SocialMessage[] _social = new SocialMessage[16];
+    private int _socialHead, _socialCount;
+
+    /// <summary>Queues chat without allocating; false means text is too long or the intent queue is full.</summary>
+    public bool SendChat(ChatChannel channel, ReadOnlySpan<char> text)
+    {
+        var message = new SocialMessage { Kind = SocialKind.Chat, Value = (byte)channel };
+        return message.SetText(text) && QueueSocial(message);
+    }
+
+    /// <summary>Invites a player by their session id.</summary>
+    public bool Invite(uint player) => QueueSocial(new SocialMessage { Kind = SocialKind.Invite, Player = player });
+    /// <summary>Accepts the current invitation.</summary>
+    public bool AcceptInvitation() => QueueSocial(new SocialMessage { Kind = SocialKind.Accept });
+    /// <summary>Declines the current invitation.</summary>
+    public bool DeclineInvitation() => QueueSocial(new SocialMessage { Kind = SocialKind.Decline });
+    /// <summary>Leaves the current party.</summary>
+    public bool LeaveParty() => QueueSocial(new SocialMessage { Kind = SocialKind.Leave });
+    /// <summary>Asks the leader to remove a party member.</summary>
+    public bool RemoveMember(uint player) => QueueSocial(new SocialMessage { Kind = SocialKind.Remove, Player = player });
+    private bool QueueSocial(in SocialMessage message)
+    {
+        lock (_lock)
+        {
+            if (_socialCount == _social.Length) return false;
+            _social[(_socialHead + _socialCount++) % _social.Length] = message;
+            return true;
+        }
+    }
+    internal bool ConsumeSocial(out SocialMessage message)
+    {
+        lock (_lock)
+        {
+            message = default;
+            if (_socialCount == 0) return false;
+            message = _social[_socialHead];
+            _socialHead = (_socialHead + 1) % _social.Length;
+            _socialCount--;
+            return true;
+        }
+    }
+
     private PlayerControls _controls;
     private bool _hasOrder;
     private HullOrder _order;

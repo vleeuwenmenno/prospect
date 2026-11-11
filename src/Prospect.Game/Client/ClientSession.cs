@@ -53,6 +53,9 @@ public enum SessionEndReason : byte
 /// </summary>
 public sealed class SessionSnapshot(GameContent content)
 {
+    /// <summary>Roster, recent chat, party status, invitation and refusal for the interface.</summary>
+    public readonly SocialState Social = new();
+
     public SessionState State;
     public SessionEndReason EndReason;
     public uint PlayerId;
@@ -125,6 +128,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     private const int PingIntervalTicks = TickLoop.SimulationHz / 2;
     private const int ConnectTimeoutTicks = TickLoop.SimulationHz * 10;
 
+    private readonly SocialState _social = new();
     private readonly ITransport _transport;
 
     // The content as loaded, and as the server's settings make it once the server has sent them.
@@ -218,11 +222,25 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                 SendPing();
 
             if (_state == SessionState.Active)
-                _world.Tick(Input, _transport, EstimateServerTick(Stopwatch.GetTimestamp()));
+            {
+                while (Input.ConsumeSocial(out var message))
+                {
+                    var writer = new NetWriter(_sendBuffer);
+                    message.Write(ref writer);
+                    if (!_transport.Send(0, NetChannel.Reliable, writer.Written))
+                    {
+                        End(SessionEndReason.ConnectionLost);
+                        break;
+                    }
+                }
+                if (_state == SessionState.Active)
+                    _world.Tick(Input, _transport, EstimateServerTick(Stopwatch.GetTimestamp()));
+            }
         }
 
         var snapshot = _snapshots.WriteBuffer;
         var now = Stopwatch.GetTimestamp();
+        _social.CopyTo(snapshot.Social);
         snapshot.State = _state;
         snapshot.EndReason = _endReason;
         snapshot.PlayerId = _playerId;
@@ -308,6 +326,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                 _visibility = welcome.Visibility;
                 _passwordProtected = welcome.PasswordProtected;
                 _maxPlayers = welcome.MaxPlayers;
+                _social.Roster = new SocialMessage[_maxPlayers + 32];
 
                 // The server's world, not this machine's files, says how hard things hit: predict by its settings.
                 _content = _loaded.WithSettings(welcome.Settings);
@@ -343,6 +362,12 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                     );
                     break;
                 }
+
+            case MessageId.Social when _state == SessionState.Active && channel == NetChannel.Reliable:
+                if (SocialMessage.TryRead(ref reader, out var social)
+                    && (social.Kind != SocialKind.Member || (social.Value < _content.Designs.Length && social.Shield is >= 0 and <= 1 && social.Hull is >= 0 and <= 1)))
+                    _social.Apply(social);
+                break;
 
             case MessageId.RockDeltas when _state == SessionState.Active && channel == NetChannel.Reliable:
                 _world.OnRockDeltas(ref reader);
@@ -425,6 +450,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     {
         _transport.Disconnect(0);
         _state = SessionState.Ended;
+        _social.Disconnect();
         _endReason = reason;
         _password = null;
         Logs.Net.Info($"Session ended: {reason}");

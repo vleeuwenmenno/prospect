@@ -11,6 +11,10 @@ or that local game opened to other players. There is one simulation and one code
 
 ## Status
 
+Chat, the player roster and parties work through the protocol, authoritative server, client snapshots and
+input bridge. The chat window, party list and invite menu are not there yet. Headless scripts exercise them.
+Names and identity last only for the session; there is no saving or faction system in this feature.
+
 Stage 1 of blocks at scale exists in tooling and tests: versioned boxes, content limits and size rules,
 solid-box evaluation and running sums, with seeded 4,096-block and 150,000-block fixtures.
 See [docs/blocks-at-scale.md](docs/blocks-at-scale.md) for measurements and the remaining stages.
@@ -252,6 +256,29 @@ make run ARGS="--host public --listing http://127.0.0.1:8080"              # aga
   counts down the server's wait before the next try.
 
 How the password, the connection limits and the list work: [docs/hosting.md](docs/hosting.md).
+
+## Headless social scripts
+
+Use `--social-run <seconds>` with `--join <host[:port]>`, or without `--join` for a private local game.
+This path creates no window. Other hosting and world options are not applied by the headless script.
+
+- `--player <name>` chooses the script's callsign (default Prospector).
+- `--say <text>` sends one everyone-chat line after joining.
+- `--invite <name>` invites the first connected matching name other than yourself.
+- `--accept-invites` accepts incoming invitations; `--party-say <text>` sends one line after a party forms.
+- Script exit prints roster, chat and party counts plus the last refusal. `--verbose` enables chat metadata logs.
+
+Limits come from `content/net/social.json`: 256 UTF-16 units and 768 UTF-8 bytes per chat line,
+four social requests at once, replenishing one per second, eight members per party, 30-second invitations,
+and four party updates per second. Requests beyond the rate limit are dropped before parsing or replying.
+The same allowance covers malformed requests and party operations. Control and Unicode formatting characters
+are removed, whitespace is trimmed, and empty lines are refused. Chat text is never logged; accepted chat
+metadata is Debug, invitation and membership changes are Information.
+
+The roster retains connected players and up to 32 spare slots for recent departures. The chat log holds 64
+lines. Names are looked up by stable session player id. Party members use content design indices for ship names;
+departed members leave the party and remain marked disconnected in the roster while retained.
+See [docs/social-interface.md](docs/social-interface.md) for the interface contract and wire sizes.
 
 ## Requirements
 

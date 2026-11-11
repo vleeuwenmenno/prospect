@@ -62,6 +62,7 @@ Always wrap long test runs in `timeout`; a session test that waits on the simula
 
 ## When you change something
 
+- **Social messages:** validate new kinds after admission and the receive/rate budgets; publish through `SessionSnapshot.Social` and send intent through `PlayerInputBridge`.
 - **Wire format:** bump `ProtocolInfo.Version` in `Protocol/Messages.cs`, and update `MaxWireSize` constants.
 - **The handshake or the password:** the scheme is written down in `Passwords` and `docs/hosting.md`; change
   both, bump `ProtocolInfo.Version`, and keep `HostingTests` passing. Keep the first field of `Hello` and of

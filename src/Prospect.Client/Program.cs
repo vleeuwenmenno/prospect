@@ -39,6 +39,12 @@ internal static class Program
           --look-to <degrees>     With --look and --capture: turn the camera from --look to this angle, evenly
                                   over the time the captures take
           --target                Pilot view: target the nearest other hull once in space
+          --social-run <seconds>  Run a headless client script, then exit; uses --join or a private local game
+          --player <name>         Player name for the headless script
+          --say <text>            Send one everyone-chat line after admission (with --social-run)
+          --party-say <text>      Send one party-chat line after forming a party (with --social-run)
+          --invite <name>         Invite the first matching roster name once (with --social-run)
+          --accept-invites        Accept invitations automatically (with --social-run)
           --verbose               Log debug messages
           --help                  Show this text
         """;
@@ -50,6 +56,7 @@ internal static class Program
         options.Validation = true;
 #endif
         var verbose = false;
+        var socialScript = new SocialScript();
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -193,6 +200,18 @@ internal static class Program
                     options.LookToDegrees = lookTo;
                     i++;
                     break;
+                case "--social-run" when hasValue && int.TryParse(args[i + 1], out var seconds) && seconds is > 0 and <= 3600:
+                    socialScript.Seconds = seconds; i++; break;
+                case "--player" when hasValue:
+                    socialScript.Name = args[++i]; break;
+                case "--say" when hasValue:
+                    socialScript.Say = args[++i]; break;
+                case "--party-say" when hasValue:
+                    socialScript.PartySay = args[++i]; break;
+                case "--invite" when hasValue:
+                    socialScript.Invite = args[++i]; break;
+                case "--accept-invites":
+                    socialScript.Accept = true; break;
                 case "--target":
                     options.TargetNearest = true;
                     break;
@@ -229,6 +248,7 @@ internal static class Program
 
         try
         {
+            if (socialScript.Seconds > 0) return socialScript.Run(options);
             using var app = new App(options);
             app.Run();
             return app.ExitCode;
