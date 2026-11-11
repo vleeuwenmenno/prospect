@@ -1,5 +1,6 @@
 using Brutal.ImGuiApi;
 using Brutal.Numerics;
+using Prospect.Client.Ui;
 using Prospect.Client.World;
 using Prospect.Game.Client;
 
@@ -13,6 +14,14 @@ namespace Prospect.Client.Screens;
 /// blocked areas are this frame's layout, so a window that has only now appeared, or has just grown, is respected
 /// before Dear ImGui has seen it once. A gesture keeps its owner until its button is let go: a drag begun on a
 /// window never becomes a map drag, and a map drag that crosses a window stays the map's.
+/// <para>
+/// Dear ImGui picks the hovered window when the frame starts, from where every window was last frame. On the frame a
+/// window appears or grows under the pointer it still names the map, so the map's surface would take the press (its
+/// active item) and the window's own buttons, drawn later, could not see it. For a point this frame blocks, the map
+/// therefore gives that stale hover up before its surface is submitted, and each window drawn over the map calls
+/// <see cref="Claim"/> after its <c>Begin</c>, when its rectangle is this frame's, to take it. Dear ImGui then
+/// completes the click on the window's button as on any other frame.
+/// </para>
 /// </summary>
 internal sealed class MapPointer
 {
@@ -20,6 +29,8 @@ internal sealed class MapPointer
     private readonly float2[] _blockedMin = new float2[MaxBlocked];
     private readonly float2[] _blockedMax = new float2[MaxBlocked];
     private int _blockedCount;
+    private float2 _mouse;
+    private bool _handedOver;
 
     /// <summary>True while the pointer is on the map itself, not on a window over it or a blocked area.</summary>
     public bool Hovered { get; private set; }
@@ -85,10 +96,21 @@ internal sealed class MapPointer
 
         var io = ImGui.GetIO();
         var mouse = io.MousePos;
+        var blocked = IsBlocked(mouse);
+        _blockedCount = 0;
+        _mouse = mouse;
+
+        // Dear ImGui still names the map for a point a window covers only from this frame: give it up, so the
+        // surface below cannot take the press and the window can claim it.
+        var context = ImGui.GetCurrentContext();
+        var hovered = context.HoveredWindow;
+        _handedOver = blocked && !hovered.IsNull() && hovered.ID == ImGui.Internal.GetCurrentWindow().ID;
+        if (_handedOver)
+            context.HoveredWindow = default;
+
         ImGui.SetCursorScreenPos(float2.Zero);
         ImGui.InvisibleButton("##mapcanvas"u8, new float2(Math.Max(display.X, 1f), Math.Max(display.Y, 1f)), ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight | ImGuiButtonFlags.MouseButtonMiddle);
-        Hovered = ImGui.IsItemHovered() && !IsBlocked(mouse);
-        _blockedCount = 0;
+        Hovered = ImGui.IsItemHovered() && !blocked;
 
         Pressed = Hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left);
         if (Pressed)
@@ -119,6 +141,25 @@ internal sealed class MapPointer
 
         RightClicked = Hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Right);
         Wheel = Hovered ? io.MouseWheel : 0f;
+    }
+
+    /// <summary>
+    /// Call right after a window drawn over the map begins (a child window too). If the map gave up a stale hover
+    /// this frame and the pointer is inside this window's rectangle as laid out this frame, the window becomes the
+    /// hovered one, unless a window above it already is.
+    /// </summary>
+    public void Claim()
+    {
+        if (!_handedOver)
+            return;
+        var window = ImGui.Internal.GetCurrentWindow();
+        var rect = window.OuterRectClipped;
+        if (_mouse.X < rect.Min.X || _mouse.Y < rect.Min.Y || _mouse.X >= rect.Max.X || _mouse.Y >= rect.Max.Y)
+            return;
+        var context = ImGui.GetCurrentContext();
+        var hovered = context.HoveredWindow;
+        if (hovered.IsNull() || ImGui.Internal.IsWindowAbove(window, hovered))
+            context.HoveredWindow = window;
     }
 
     private bool IsBlocked(float2 point)
@@ -217,21 +258,23 @@ internal static class MapUnitList
         return count;
     }
 
-    /// <summary>Opens the list's window. Pair with <see cref="End"/>.</summary>
-    public static void Begin(in MapUnitLayout layout)
+    /// <summary>Opens the list's window over the map. Pair with <see cref="End"/>.</summary>
+    public static void Begin(in MapUnitLayout layout, MapPointer map)
     {
         ImGui.SetNextWindowPos(layout.Min);
         ImGui.SetNextWindowSize(layout.Size);
         ImGui.Begin("##mapunits"u8, Flags);
         if (ImGui.IsWindowAppearing())
             ImGui.Internal.BringWindowToDisplayFront(ImGui.Internal.GetCurrentWindow());
+        map.Claim();
     }
 
     /// <summary>Opens the scrolling area for the rows. Pair with <see cref="EndRows"/>.</summary>
-    public static void BeginRows(in MapUnitLayout layout)
+    public static void BeginRows(in MapUnitLayout layout, MapPointer map)
     {
         ImGui.SetCursorScreenPos(layout.RowsMin);
         ImGui.BeginChild("##mapunitrows"u8, layout.RowsSize, ImGuiChildFlags.None, ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoNav);
+        map.Claim();
     }
 
     public static void EndRows() => ImGui.EndChild();
@@ -252,4 +295,75 @@ internal static class MapUnitList
             world.Select(hull, true);
         return pressed;
     }
+}
+
+/// <summary>
+/// The interactive part of the map's course menu: where it opens, where it is while it drops in, its window and
+/// its rows. The look and what a row orders are <c>ScreenHost</c>'s; this part has no fonts, so the frame order
+/// tests run it as it is. The map blocks exactly <see cref="Shown"/>, the rectangle the window is drawn at.
+/// </summary>
+internal static class MapCourseMenu
+{
+    // Unscaled pixels.
+    public const float HeaderHeight = 84f;
+    public const float RowHeight = 48f;
+    private const float Width = 300f;
+    private const float Gap = 6f;
+    private const float Drop = 6f;
+    private const float AppearSeconds = 0.12f;
+
+    // Unlike the full-window surfaces this one may come to the front: a window created with
+    // NoBringToFrontOnFocus is placed behind every other, which would put it under the map.
+    private const ImGuiWindowFlags Flags = (ScreenHost.RootFlags & ~ImGuiWindowFlags.NoBringToFrontOnFocus) | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoFocusOnAppearing;
+
+    /// <summary>The menu's size: a header and two rows.</summary>
+    public static float2 Size(float scale) => new(MathF.Round(Width * scale), MathF.Round(HeaderHeight * scale) + MathF.Round(RowHeight * scale) * 2 + MathF.Round(Theme.Space2 * scale));
+
+    /// <summary>Below and right of <paramref name="at"/>, flipped to the other side where that would leave the screen.</summary>
+    public static float2 Place(float2 at, float2 size, float2 display, float scale)
+    {
+        var margin = MathF.Round(Theme.Space2 * scale);
+        var gap = MathF.Round(Gap * scale);
+        var min = at + new float2(gap, gap);
+        if (min.X + size.X > display.X - margin)
+            min.X = at.X - size.X - gap;
+        if (min.Y + size.Y > display.Y - margin)
+            min.Y = at.Y - size.Y - gap;
+        min.X = Math.Clamp(min.X, margin, Math.Max(margin, display.X - size.X - margin));
+        min.Y = Math.Clamp(min.Y, margin, Math.Max(margin, display.Y - size.Y - margin));
+        return min;
+    }
+
+    /// <summary>How far the menu has dropped in, 0 to 1, <paramref name="time"/> seconds after it opened.</summary>
+    public static float Appear(float time) => Kit.EaseOut(time / AppearSeconds);
+
+    /// <summary>Where the menu placed at <paramref name="min"/> is drawn while it drops in.</summary>
+    public static float2 Shown(float2 min, float time, float scale) => min + new float2(0, (Appear(time) - 1f) * MathF.Round(Drop * scale));
+
+    /// <summary>The top left of row <paramref name="row"/> of the menu drawn at <paramref name="min"/>.</summary>
+    public static float2 RowMin(float2 min, int row, float scale) =>
+        new(min.X + MathF.Round(6 * scale), min.Y + MathF.Round(HeaderHeight * scale) + MathF.Round(Theme.Space1 * scale) + row * MathF.Round(RowHeight * scale));
+
+    /// <summary>The size of a row of a menu of <paramref name="size"/>.</summary>
+    public static float2 RowSize(float2 size, float scale) => new(size.X - MathF.Round(12 * scale), MathF.Round(RowHeight * scale) - MathF.Round(4 * scale));
+
+    /// <summary>Opens the menu's window over the map, drawn at <paramref name="min"/>. Pair with <see cref="End"/>.</summary>
+    public static void Begin(float2 min, float2 size, MapPointer map)
+    {
+        ImGui.SetNextWindowPos(min);
+        ImGui.SetNextWindowSize(size);
+        ImGui.Begin("##mapmenu"u8, Flags);
+        if (ImGui.IsWindowAppearing())
+            ImGui.Internal.BringWindowToDisplayFront(ImGui.Internal.GetCurrentWindow());
+        map.Claim();
+    }
+
+    /// <summary>One row's button. A disabled row still takes the click, so the menu stays open.</summary>
+    public static bool Item(ImString label, float2 rowMin, float2 rowSize)
+    {
+        ImGui.SetCursorScreenPos(rowMin);
+        return ImGui.InvisibleButton(label, rowSize);
+    }
+
+    public static void End() => ImGui.End();
 }

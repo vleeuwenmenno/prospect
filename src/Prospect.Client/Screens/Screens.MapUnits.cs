@@ -31,7 +31,7 @@ internal sealed partial class ScreenHost
     /// </summary>
     private void DrawMapUnits(SessionSnapshot snapshot, WorldView world, Galaxy galaxy, in MapUnitLayout layout, float fade)
     {
-        MapUnitList.Begin(layout);
+        MapUnitList.Begin(layout, _mapPointer);
         Kit.Fade = fade;
         var draw = ImGui.GetWindowDrawList();
         var min = layout.Min;
@@ -63,7 +63,7 @@ internal sealed partial class ScreenHost
         var divider = min.Y + layout.Header - 0.5f;
         draw.AddLine(new float2(min.X + Kit.Px(6), divider), new float2(min.X + size.X - Kit.Px(6), divider), Kit.Color(Theme.Line));
 
-        MapUnitList.BeginRows(layout);
+        MapUnitList.BeginRows(layout, _mapPointer);
         var rows = ImGui.GetWindowDrawList();
         var designs = snapshot.Content.Designs;
         for (var i = 0; i < _mapUnitCount; i++)

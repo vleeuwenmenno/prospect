@@ -80,11 +80,20 @@ public sealed class FrameOrderTests : IDisposable
     private readonly MapPointer _map = new();
     private readonly uint[] _units = new uint[64];
     private int _unitCount;
+    private int _mapRowLimit = int.MaxValue;
     private int _mapPresses;
     private int _mapReleases;
     private int _mapRightClicks;
     private float _mapWheel;
     private float2 _mapPan;
+
+    // The course menu as the map opens it on a right click, and what its rows ordered.
+    private static readonly float2 MenuSize = MapCourseMenu.Size(1f);
+    private bool _menuOpen;
+    private float2 _menuMin;
+    private float _menuTime;
+    private Double3 _menuTarget;
+    private int _menuMoves;
 
     public FrameOrderTests()
     {
@@ -218,7 +227,7 @@ public sealed class FrameOrderTests : IDisposable
     private PlayerControls Sent() => Bridge.Consume(out _, out _);
 
     // The map's layout at this test's screen, unscaled, under a sector panel ending where the game's does.
-    private MapUnitLayout Units => MapUnitList.Layout(Screen, 1f, _unitCount, 140f, Screen.X - 436f);
+    private MapUnitLayout Units => MapUnitList.Layout(Screen, 1f, Math.Min(_unitCount, _mapRowLimit), 140f, Screen.X - 436f);
 
     private static readonly float2 MapSpot = new(820, 420);
 
@@ -228,21 +237,53 @@ public sealed class FrameOrderTests : IDisposable
         _unitCount = MapUnitList.Collect(_snapshot, _units);
         var units = Units;
         _map.Block(units.Min, units.Size);
+        if (_menuOpen)
+        {
+            _menuTime += 1f / 60f;
+            _map.Block(MenuShown, MenuSize);
+        }
+
         _map.Begin(Screen);
         _mapPresses += _map.Pressed ? 1 : 0;
         _mapReleases += _map.BoxReleased ? 1 : 0;
         _mapRightClicks += _map.RightClicked ? 1 : 0;
         _mapWheel += _map.Wheel;
         _mapPan += _map.Pan;
+        if (_map.RightClicked)
+        {
+            _menuMin = MapCourseMenu.Place(ImGui.GetIO().MousePos, MenuSize, Screen, 1f);
+            _menuTime = 0;
+            _menuOpen = true;
+        }
+
         ImGui.End();
 
-        MapUnitList.Begin(units);
-        MapUnitList.BeginRows(units);
-        for (var i = 0; i < _unitCount; i++)
+        MapUnitList.Begin(units, _map);
+        MapUnitList.BeginRows(units, _map);
+        for (var i = 0; i < Math.Min(_unitCount, _mapRowLimit); i++)
             MapUnitList.Row(_world, _units[i], units.Row);
         MapUnitList.EndRows();
         MapUnitList.End();
+
+        if (!_menuOpen)
+            return;
+        var shown = MenuShown;
+        var rowSize = MapCourseMenu.RowSize(MenuSize, 1f);
+        MapCourseMenu.Begin(shown, MenuSize, _map);
+        if (MapCourseMenu.Item("Move here"u8, MapCourseMenu.RowMin(shown, 0, 1f), rowSize))
+        {
+            _world.OrderMoveSelected(Bridge, _menuTarget);
+            _menuMoves++;
+            _menuOpen = false;
+        }
+
+        MapCourseMenu.Item("Jump here"u8, MapCourseMenu.RowMin(shown, 1, 1f), rowSize);
+        MapCourseMenu.End();
     }
+
+    private float2 MenuShown => MapCourseMenu.Shown(_menuMin, _menuTime, 1f);
+
+    private float2 MenuRowCenter(int row) => MapCourseMenu.RowMin(MenuShown, row, 1f) + MapCourseMenu.RowSize(MenuSize, 1f) * 0.5f;
 
     /// <summary>Opens the map as a surface over the world, the pointer resting on the map.</summary>
     private void OpenMap()
@@ -264,6 +305,242 @@ public sealed class FrameOrderTests : IDisposable
     {
         var units = Units;
         return units.RowsMin + new float2(units.Size.X * 0.5f, units.Row * (row + 0.5f));
+    }
+
+    [Fact]
+    public void AClickInNewlyGrownUnitRowsSelectsTheHullWithoutReachingTheMap()
+    {
+        _mapRowLimit = 1;
+        OpenMap();
+        _world.ClearSelection();
+        Frame(() =>
+        {
+            _mapRowLimit = 3;
+            Move(RowCenter(2));
+            Click();
+        });
+        Frame();
+        Frame();
+        Assert.Equal(0, _mapPresses);
+        Assert.Equal(0, _mapReleases);
+        Assert.Single(_world.Selection.ToArray());
+        Assert.True(_world.IsSelected(_units[2]));
+    }
+
+    [Fact]
+    public void APressAndReleaseInSeparatePollsOnANewlyGrownRowSelectsItsHull()
+    {
+        _mapRowLimit = 1;
+        OpenMap();
+        _world.ClearSelection();
+
+        // The list grows to two rows in the poll that moves onto the second and presses; the release comes later.
+        Frame(() =>
+        {
+            _mapRowLimit = 2;
+            Move(RowCenter(1));
+            Button(GlfwMouseButton.Left, true);
+        });
+        Frame();
+        Assert.Empty(_world.Selection.ToArray());
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        Frame();
+        Assert.Single(_world.Selection.ToArray());
+        Assert.True(_world.IsSelected(_units[1]));
+        Assert.Equal(0, _mapPresses);
+        Assert.Equal(0, _mapReleases);
+        Assert.Equal(default, _mapPan);
+    }
+
+    [Fact]
+    public void AMapPressHeldWhileTheListGrowsUnderItStaysTheMapsAndPressesNoRow()
+    {
+        _mapRowLimit = 1;
+        OpenMap();
+        _world.ClearSelection();
+
+        // Pressed on the map where the third row will be; the list grows under the held button, which is let go there.
+        Frame(() =>
+        {
+            Move(RowCenter(2));
+            Button(GlfwMouseButton.Left, true);
+        });
+        Assert.Equal(1, _mapPresses);
+        Frame(() =>
+        {
+            _mapRowLimit = 3;
+            Move(RowCenter(2) + new float2(0, 2));
+        });
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        Frame();
+        Assert.Equal(1, _mapPresses);
+        Assert.Equal(1, _mapReleases);
+        Assert.Empty(_world.Selection.ToArray());
+    }
+
+    [Fact]
+    public void AClickInThePollThatOpensTheMapReachesNeitherTheMapNorARow()
+    {
+        CommandView();
+        var own = _world.Own.Id;
+        _unitCount = MapUnitList.Collect(_snapshot, _units);
+        var row = Array.IndexOf(_units, own, 0, _unitCount);
+
+        // The map opens as a shortcut does, after the interface frame began: nothing of it was on screen.
+        Frame(() =>
+        {
+            Move(RowCenter(row));
+            Click();
+        }, () =>
+        {
+            _surfaceOpen = true;
+            _mapShown = true;
+            _map.Reset();
+            return true;
+        });
+        Frame();
+        Frame();
+        Assert.Equal(0, _mapPresses);
+        Assert.Equal(0, _mapReleases);
+        Assert.Equal([own], _world.Selection.ToArray());
+
+        // The first click after the list is shown is the row's.
+        Frame(() => Click());
+        Frame();
+        Assert.Empty(_world.Selection.ToArray());
+        Assert.Equal(0, _mapPresses);
+    }
+
+    [Fact]
+    public void ACourseMenuOpenedAndClickedInOnePollOrdersTheSelectionWithoutAMapClick()
+    {
+        Span<FleetOrder> fleet = stackalloc FleetOrder[FleetOrdersMessage.MaxOrders];
+        OpenMap();
+        _world.SelectAllOwned();
+        _menuTarget = _world.OwnPosition + new Vector3(800, 0, 0);
+        Bridge.Consume(out _, out _);
+        Bridge.ConsumeFleetOrders(fleet);
+
+        // A right click on the map and a click on the menu it opens, in one poll.
+        var menu = MapCourseMenu.Place(MapSpot, MenuSize, Screen, 1f);
+        var move = MapCourseMenu.RowMin(menu, 0, 1f) + MapCourseMenu.RowSize(MenuSize, 1f) * 0.5f;
+        Frame(() =>
+        {
+            Click(GlfwMouseButton.Right);
+            Move(move);
+            Click();
+        });
+        for (var i = 0; i < 4; i++)
+            Frame();
+
+        Assert.Equal(1, _mapRightClicks);
+        Assert.Equal(1, _menuMoves);
+        Assert.False(_menuOpen);
+        Assert.Equal(0, _mapPresses);
+        Assert.Equal(0, _mapReleases);
+        Assert.Equal(default, _mapPan);
+        Bridge.Consume(out var hasOrder, out var order);
+        Assert.True(hasOrder);
+        Assert.Equal(OrderKind.MoveTo, order.Kind);
+        Assert.Equal(2, Bridge.ConsumeFleetOrders(fleet));
+    }
+
+    [Fact]
+    public void ACourseMenuMovedByARightClickTakesTheNextClickAtItsNewPlace()
+    {
+        OpenMap();
+        _world.SelectAllOwned();
+        _menuTarget = _world.OwnPosition + new Vector3(800, 0, 0);
+        Frame(() => Click(GlfwMouseButton.Right));
+        Frame();
+        Frame();
+        Assert.True(_menuOpen);
+        var first = _menuMin;
+
+        // Moved by a right click elsewhere on the map, then clicked at its new place, all in one poll.
+        var elsewhere = new float2(700, 200);
+        var moved = MapCourseMenu.Place(elsewhere, MenuSize, Screen, 1f);
+        Assert.NotEqual(first, moved);
+        var move = MapCourseMenu.RowMin(moved, 0, 1f) + MapCourseMenu.RowSize(MenuSize, 1f) * 0.5f;
+        Frame(() =>
+        {
+            Move(elsewhere);
+            Click(GlfwMouseButton.Right);
+            Move(move);
+            Click();
+        });
+        for (var i = 0; i < 4; i++)
+            Frame();
+
+        Assert.Equal(moved, _menuMin);
+        Assert.Equal(2, _mapRightClicks);
+        Assert.Equal(1, _menuMoves);
+        Assert.Equal(0, _mapPresses);
+        Assert.Equal(0, _mapReleases);
+    }
+
+    [Fact]
+    public void UnitRowsChangedWhileTheCourseMenuIsOpenDecideWhatItOrders()
+    {
+        Span<FleetOrder> fleet = stackalloc FleetOrder[FleetOrdersMessage.MaxOrders];
+        OpenMap();
+        _world.SelectAllOwned();
+        _menuTarget = _world.OwnPosition + new Vector3(800, 0, 0);
+        Bridge.Consume(out _, out _);
+        Bridge.ConsumeFleetOrders(fleet);
+        Frame(() => Click(GlfwMouseButton.Right));
+        Frame();
+        Frame();
+        Assert.True(_menuOpen);
+
+        // One fleet hull taken out in the list; the menu stays open.
+        var own = _world.Own.Id;
+        var dropped = Array.FindIndex(_units, 0, _unitCount, id => id != own);
+        var kept = Array.FindLastIndex(_units, _unitCount - 1, _unitCount, id => id != own);
+        Frame(() =>
+        {
+            Move(RowCenter(dropped));
+            Click();
+        });
+        Frame();
+        Assert.True(_menuOpen);
+        Assert.Equal(2, _world.Selection.Length);
+
+        // Move here, pressed and let go in separate polls: the hull being flown and the one fleet hull left.
+        Frame(() =>
+        {
+            Move(MenuRowCenter(0));
+            Button(GlfwMouseButton.Left, true);
+        });
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        Frame();
+        Assert.Equal(1, _menuMoves);
+        Bridge.Consume(out var hasOrder, out _);
+        Assert.True(hasOrder);
+        Assert.Equal(1, Bridge.ConsumeFleetOrders(fleet));
+        Assert.Equal(_units[kept], fleet[0].Hull);
+
+        // Cleared with the menu open again: Move here orders nothing at all.
+        _world.ClearSelection();
+        Frame(() =>
+        {
+            Move(MapSpot);
+            Click(GlfwMouseButton.Right);
+        });
+        Frame();
+        Frame();
+        Frame(() =>
+        {
+            Move(MenuRowCenter(0));
+            Click();
+        });
+        Frame();
+        Assert.Equal(2, _menuMoves);
+        Bridge.Consume(out hasOrder, out _);
+        Assert.False(hasOrder);
+        Assert.Equal(0, Bridge.ConsumeFleetOrders(fleet));
+        Assert.Equal(0, _mapPresses);
+        Assert.Equal(0, _mapReleases);
     }
 
     [Fact]

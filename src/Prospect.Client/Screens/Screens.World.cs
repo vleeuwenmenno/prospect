@@ -1089,7 +1089,11 @@ internal sealed partial class ScreenHost
         var units = LayoutMapUnits(snapshot, world);
         _mapPointer.Block(units.Min, units.Size);
         if (_mapMenuOpen)
-            _mapPointer.Block(_mapMenuMin, _mapMenuSize);
+        {
+            _mapMenuTime += _ui.DeltaTime;
+            _mapPointer.Block(MapCourseMenu.Shown(_mapMenuMin, _mapMenuTime, Kit.Scale), _mapMenuSize);
+        }
+
         _mapPointer.Begin(display);
         var pointer = _mapPointer;
         var draw = ImGui.GetWindowDrawList();
@@ -1405,19 +1409,8 @@ internal sealed partial class ScreenHost
     /// <summary>Opens the course menu for a sector at a screen point, kept fully on screen.</summary>
     private void OpenMapMenu(Galaxy galaxy, SectorCoord sector, float2 at)
     {
-        var display = _ui.DisplaySize;
-        var margin = Kit.Px(Theme.Space2);
-        var gap = Kit.Px(6);
-        _mapMenuSize = new float2(Kit.Px(300), Kit.Px(MapMenuHeader) + Kit.Px(MapMenuRow) * 2 + Kit.Px(Theme.Space2));
-
-        // Below and right of the pointer; flipped to the other side where that would leave the screen.
-        var min = at + new float2(gap, gap);
-        if (min.X + _mapMenuSize.X > display.X - margin)
-            min.X = at.X - _mapMenuSize.X - gap;
-        if (min.Y + _mapMenuSize.Y > display.Y - margin)
-            min.Y = at.Y - _mapMenuSize.Y - gap;
-        min.X = Math.Clamp(min.X, margin, Math.Max(margin, display.X - _mapMenuSize.X - margin));
-        min.Y = Math.Clamp(min.Y, margin, Math.Max(margin, display.Y - _mapMenuSize.Y - margin));
+        _mapMenuSize = MapCourseMenu.Size(Kit.Scale);
+        var min = MapCourseMenu.Place(at, _mapMenuSize, _ui.DisplaySize, Kit.Scale);
 
         if (!_mapMenuOpen || _mapMenuSector != sector)
             _mapMenuTime = 0;
@@ -1447,9 +1440,6 @@ internal sealed partial class ScreenHost
     private const float MapHoverWidth = 340f;
     private const float MapHoverRight = 96f;
 
-    private const float MapMenuHeader = 84f;
-    private const float MapMenuRow = 48f;
-
     /// <summary>
     /// The course menu: where the sector is, then the two ways to get there, for exactly the hulls selected in the
     /// unit list. Moving needs a selection; jumping also needs a selected ship with a working drive that is not
@@ -1457,16 +1447,11 @@ internal sealed partial class ScreenHost
     /// </summary>
     private void DrawMapMenu(WorldView world, Galaxy galaxy, float fade)
     {
-        _mapMenuTime += _ui.DeltaTime;
-        var appear = Kit.EaseOut(_mapMenuTime / 0.12f);
-        var min = _mapMenuMin + new float2(0, (1f - appear) * -Kit.Px(6));
+        // Where the map blocked it this frame.
+        var appear = MapCourseMenu.Appear(_mapMenuTime);
+        var min = MapCourseMenu.Shown(_mapMenuMin, _mapMenuTime, Kit.Scale);
         var size = _mapMenuSize;
-        ImGui.SetNextWindowPos(min);
-        ImGui.SetNextWindowSize(size);
-        // Unlike the full-window surfaces this one may come to the front: a window created with
-        // NoBringToFrontOnFocus is placed behind every other, which would put it under the map.
-        ImGui.Begin("##mapmenu"u8, (RootFlags & ~ImGuiWindowFlags.NoBringToFrontOnFocus) | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoFocusOnAppearing);
-        RaiseIfAppearing();
+        MapCourseMenu.Begin(min, size, _mapPointer);
         Kit.Fade = fade * appear;
         var draw = ImGui.GetWindowDrawList();
         Kit.PanelFrame(draw, min, min + size);
@@ -1482,23 +1467,21 @@ internal sealed partial class ScreenHost
         Kit.Text(draw, _ui.SansMedium, Theme.FontBody, text + new float2(0, Kit.Px(20)), known ? Theme.Text : Theme.TextDim, _mapMenuName);
         var range = target.RelativeTo(world.OwnPosition).Length() / 1000f;
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(46)), Theme.TextDim, Kit.F($"DISTANCE   {range:0.0} KM"));
-        var divider = min.Y + Kit.Px(MapMenuHeader) - 0.5f;
+        var divider = min.Y + Kit.Px(MapCourseMenu.HeaderHeight) - 0.5f;
         draw.AddLine(new float2(min.X + Kit.Px(6), divider), new float2(min.X + size.X - Kit.Px(6), divider), Kit.Color(Theme.Line));
 
         world.CountJumpReady(target, out var ships, out var ready, out var inSector);
         var none = ships == 0;
-        var rowMin = new float2(min.X + Kit.Px(6), min.Y + Kit.Px(MapMenuHeader) + Kit.Px(Theme.Space1));
-        var rowSize = new float2(size.X - Kit.Px(12), Kit.Px(MapMenuRow) - Kit.Px(4));
+        var rowSize = MapCourseMenu.RowSize(size, Kit.Scale);
         var session = _app.Session;
 
         var moveCount = ships == 1 ? "1 ship"u8 : Kit.F($"{ships} ships");
-        if (MapMenuItem(draw, rowMin, rowSize, "Move here"u8, none ? "NO SHIPS SELECTED"u8 : "UNDER OWN ENGINES"u8, moveCount, !none) && session is not null)
+        if (MapMenuItem(draw, MapCourseMenu.RowMin(min, 0, Kit.Scale), rowSize, "Move here"u8, none ? "NO SHIPS SELECTED"u8 : "UNDER OWN ENGINES"u8, moveCount, !none) && session is not null)
         {
             world.OrderMoveSelected(session.Client.Input, target);
             _mapMenuOpen = false;
         }
 
-        rowMin.Y += Kit.Px(MapMenuRow);
         var canJump = ready > 0;
         // The ship being flown is only given the course; its pilot starts the jump.
         var plotOnly = world.JumpPlotsOwnOnly;
@@ -1506,13 +1489,13 @@ internal sealed partial class ScreenHost
             : plotOnly ? Kit.F($"SET NAV TARGET, THEN AIM AND {world.BoostKeyName}")
             : "FASTER THAN LIGHT"u8;
         var jumpCount = ships == 1 ? Kit.F($"{ready} of 1 ship") : Kit.F($"{ready} of {ships} ships");
-        if (MapMenuItem(draw, rowMin, rowSize, plotOnly ? "Plot jump"u8 : "Jump here"u8, reason, jumpCount, canJump) && session is not null)
+        if (MapMenuItem(draw, MapCourseMenu.RowMin(min, 1, Kit.Scale), rowSize, plotOnly ? "Plot jump"u8 : "Jump here"u8, reason, jumpCount, canJump) && session is not null)
         {
             world.OrderJump(session.Client.Input, target);
             _mapMenuOpen = false;
         }
 
-        ImGui.End();
+        MapCourseMenu.End();
     }
 
     /// <summary>
@@ -1521,8 +1504,7 @@ internal sealed partial class ScreenHost
     /// </summary>
     private bool MapMenuItem(ImDrawListPtr draw, float2 rowMin, float2 rowSize, ImString label, ImString detail, ImString count, bool enabled)
     {
-        ImGui.SetCursorScreenPos(rowMin);
-        var pressed = ImGui.InvisibleButton(label, rowSize);
+        var pressed = MapCourseMenu.Item(label, rowMin, rowSize);
         var hot = Kit.Animate(ImGui.GetItemID(), enabled && ImGui.IsItemHovered() ? 1f : 0f);
         if (hot > 0.01f)
         {
