@@ -145,6 +145,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     {
         _loop.Stop();
         _transport.Dispose();
+        _world.Dispose();
     }
 
     void ITickHandler.OnStart() => Logs.Net.Info($"Session starting on {_transport.Description}");

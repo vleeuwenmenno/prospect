@@ -90,10 +90,14 @@ public static class HullSim
 {
     public const float Dt = (float)TickLoop.SimulationDt;
 
+    /// <summary>The most places along one tick's flight at which a hull is tested against another.</summary>
+    private const int MaxStrides = 32;
+
     /// <summary>
     /// Advances a hull one tick. With an order in force the autopilot flies and the pilot's input is ignored; the
     /// order clears itself on arrival. The server and the predicting client both call exactly this. Returns true
-    /// if a collision destroyed the hull.
+    /// if a collision destroyed the hull. With <paramref name="hulls"/> given the hull also runs into the hulls
+    /// stored there.
     /// </summary>
     public static bool Step(
         ref HullState state,
@@ -103,7 +107,8 @@ public static class HullSim
         ref HullBody body,
         RockField? rocks = null,
         double tick = 0,
-        RockImpulses? impulses = null
+        RockImpulses? impulses = null,
+        HullField? hulls = null
     )
     {
         var input = pilot;
@@ -118,7 +123,12 @@ public static class HullSim
             return false;
 
         FlightModel.Step(ref state, input, flight, Dt);
-        return rocks is not null && Collide(ref state, flight, ref body, rocks, tick, impulses);
+
+        // How far the hull came this tick, for finding what it would otherwise have flown straight through.
+        var travel = state.Velocity * Dt;
+        if (rocks is not null && Collide(ref state, flight, ref body, rocks, tick, impulses))
+            return true;
+        return hulls is not null && Collide(ref state, flight, ref body, hulls, travel);
     }
 
     /// <summary>
@@ -304,20 +314,12 @@ public static class HullSim
                         state.Position += normal * deepest;
                         local += normal * deepest;
 
-                        // Closing speed at the point of contact, including the hull's spin.
-                        var toHullFrame = Quaternion.Conjugate(state.Orientation);
-                        var spin = Vector3.Transform(state.AngularVelocity, state.Orientation);
-                        var closing = -Vector3.Dot(state.Velocity + Vector3.Cross(spin, contact) - rockVelocity, normal);
-                        if (closing <= 0)
+                        // One impulse along the contact normal; the asteroid takes its share without turning.
+                        var rockMass = rocks.Mass(rock.Radius);
+                        var impulse = Bounce(ref state, flight, contact, normal, rockVelocity, 1f / rockMass, 0f, out var closing);
+                        if (impulse <= 0)
                             continue;
 
-                        // One impulse along the contact normal, shared by inverse mass, with the hull free to turn.
-                        var rockMass = rocks.Mass(rock.Radius);
-                        var lever = Vector3.Cross(Vector3.Transform(contact, toHullFrame), Vector3.Transform(normal, toHullFrame));
-                        var turning = Vector3.Dot(lever / flight.Inertia, lever);
-                        var impulse = closing * (1f + flight.CollisionBounce) / (1f / flight.Mass + 1f / rockMass + turning);
-                        state.Velocity += normal * (impulse / flight.Mass);
-                        state.AngularVelocity += lever * impulse / flight.Inertia;
                         if (impulses is not null && impulses.Count < impulses.Items.Length)
                         {
                             impulses.Items[impulses.Count++] = new RockDelta
@@ -329,8 +331,8 @@ public static class HullSim
                             };
                         }
 
-                        var excess = closing - flight.CollisionSafeSpeed;
-                        if (excess > 0 && Damage(ref state, flight, ref body, touching, touchCount, excess * excess * flight.Mass * flight.CollisionDamagePerTonneSpeedSquared))
+                        var damage = ImpactDamage(closing, flight.Mass, flight);
+                        if (damage > 0 && Damage(ref state, flight, ref body, touching, touchCount, damage))
                             return true;
                     }
                 }
@@ -339,10 +341,295 @@ public static class HullSim
     }
 
     /// <summary>
+    /// Resolves the hull running into other hulls, block against block, each block the same ball the asteroid
+    /// contact takes it for. The rules are those of an asteroid impact: one impulse shared by mass and inertia,
+    /// the hull pushed back out, and damage on the blocks that touched. The other hull's share of the impulse and
+    /// its damage are written to <paramref name="field"/> when it collects them; a predicting client's does not,
+    /// and waits to be told. Returns true if the hull was destroyed.
+    /// </summary>
+    private static bool Collide(ref HullState state, in FlightParams flight, ref HullBody body, HullField field, Vector3 travel)
+    {
+        var store = field.Hulls;
+        var design = body.Design;
+        var half = design.BlockSize * 0.5f;
+        var travelLength = travel.Length();
+        Span<Vector3> arms = stackalloc Vector3[HullDesign.MaxBlocks];
+
+        for (var j = 0; j < store.Slots; j++)
+        {
+            if (j == field.Self || !store.IsAliveAt(j))
+                continue;
+
+            // With nowhere left to write the other hull's share, the rest wait for the next step rather than
+            // take an impulse nobody answers.
+            if (field.IsFull)
+                break;
+
+            // A hull in the tunnel is not here, whatever its position says.
+            ref var other = ref store.State(j);
+            if (other.Jump == JumpPhase.Tunnel)
+                continue;
+
+            // Broad phase: the two spheres, with room for the distance flown this tick. Written so that a
+            // position that is not a number fails it.
+            ref var otherFlight = ref store.Flight(j);
+            var apart = state.Position.RelativeTo(other.Position);
+            var bound = flight.Radius + otherFlight.Radius + travelLength;
+            if (!(apart.LengthSquared() < bound * bound))
+                continue;
+
+            ref var otherInfo = ref store.Info(j);
+            var otherDesign = field.Designs[otherInfo.Design];
+            var theirs = otherInfo.Blocks & otherDesign.FullMask;
+            var otherHalf = otherDesign.BlockSize * 0.5f;
+            var mine = body.Alive & design.FullMask;
+
+            // The narrow phase runs in the other hull's frame, where its blocks are where its design puts them.
+            var toOtherFrame = Quaternion.Conjugate(other.Orientation);
+            for (var bits = mine; bits != 0; bits &= bits - 1)
+            {
+                var b = BitOperations.TrailingZeroCount(bits);
+                arms[b] = Vector3.Transform(Vector3.Transform(design.BlockOffsets[b], state.Orientation), toOtherFrame);
+            }
+
+            // A fast hull covers more than a block in a tick. Walk the path it flew in strides too short to
+            // step over a block, and stop at the first place it strikes.
+            var stride = (half + otherHalf) * 0.5f;
+            var strides = travelLength > stride ? Math.Min(MaxStrides, (int)MathF.Ceiling(travelLength / stride)) : 1;
+            var pushed = Vector3.Zero;
+            for (var k = 1; k <= strides; k++)
+            {
+                var back = travel * (1f - (float)k / strides);
+                var centre = apart - back + pushed;
+                var centreInFrame = Vector3.Transform(centre, toOtherFrame);
+                if (!Touch(arms, mine, centreInFrame, half, otherDesign, theirs, otherHalf, otherFlight.Radius, out var touch))
+                    continue;
+
+                // Where the blocks' own directions mostly cancel the hulls are inside each other, and the way
+                // out is along the line between their centres.
+                var normal =
+                    touch.NormalSum.LengthSquared() > 0.01f * touch.Pairs * touch.Pairs ? Vector3.Normalize(Vector3.Transform(touch.NormalSum, other.Orientation))
+                    : centre.LengthSquared() > 1e-6f ? Vector3.Normalize(centre)
+                    : Vector3.UnitY;
+                var clearance = Clearance(arms, centreInFrame, Vector3.Transform(normal, toOtherFrame), otherDesign, half + otherHalf, touch);
+                pushed += normal * clearance;
+                centre += normal * clearance;
+
+                // The point of contact as each hull sees it, and how freely the other gives way there.
+                var otherArm = Vector3.Transform(touch.PointSum / touch.Pairs, other.Orientation);
+                var otherSpin = Vector3.Transform(other.AngularVelocity, other.Orientation);
+                var otherLever = Lever(other.Orientation, otherArm, normal);
+                var otherInverseMass = 1f / otherFlight.Mass + Vector3.Dot(otherLever / otherFlight.Inertia, otherLever);
+
+                // Hulls that only lean on each other do not bounce: at rest they would never settle.
+                var impulse = Bounce(
+                    ref state,
+                    flight,
+                    otherArm - centre,
+                    normal,
+                    other.Velocity + Vector3.Cross(otherSpin, otherArm),
+                    otherInverseMass,
+                    flight.CollisionSafeSpeed,
+                    out var closing
+                );
+                if (impulse <= 0)
+                    continue;
+
+                // It struck here: the rest of this tick's flight is lost.
+                pushed -= back;
+                travel -= back;
+                travelLength = travel.Length();
+
+                // The mass that had to be stopped is the pair's reduced mass: all of a light hull that hits a
+                // far heavier one, half of each when they match. Both take the same damage from it, so a drone
+                // cannot wreck a freighter by flying into it. A hull just out of a jump does no harm and takes
+                // none: nobody could have avoided where it came out.
+                var harmless = state.Jump == JumpPhase.Arrive || other.Jump == JumpPhase.Arrive;
+                var involved = flight.Mass * otherFlight.Mass / (flight.Mass + otherFlight.Mass);
+                field.Add(
+                    new HullImpulse
+                    {
+                        Hull = j,
+                        Velocity = -normal * (impulse / otherFlight.Mass),
+                        AngularVelocity = -otherLever * impulse / otherFlight.Inertia,
+                        Touching = touch.Theirs,
+                        Damage = harmless ? 0f : ImpactDamage(closing, involved, otherFlight),
+                    }
+                );
+
+                var damage = harmless ? 0f : ImpactDamage(closing, involved, flight);
+                if (damage > 0 && Damage(ref state, flight, ref body, touch.Mine, BitOperations.PopCount(touch.Mine), damage))
+                {
+                    state.Position += pushed;
+                    return true;
+                }
+
+                break;
+            }
+
+            state.Position += pushed;
+        }
+
+        return false;
+    }
+
+    /// <summary>What the blocks of two hulls have to say about a contact between them, in the other hull's frame.</summary>
+    private struct BlockTouch
+    {
+        /// <summary>The sum of the directions from the other hull's blocks to this hull's, one per touching pair.</summary>
+        public Vector3 NormalSum;
+
+        /// <summary>The sum of the points where the pairs meet.</summary>
+        public Vector3 PointSum;
+
+        /// <summary>The blocks of this hull and of the other that touch, one bit per block.</summary>
+        public ulong Mine;
+        public ulong Theirs;
+        public int Pairs;
+    }
+
+    /// <summary>
+    /// Finds the pairs of blocks of two hulls that are into each other. <paramref name="arms"/> are this hull's
+    /// blocks from its centre and <paramref name="centre"/> is that centre, both in the other hull's frame.
+    /// </summary>
+    private static bool Touch(
+        ReadOnlySpan<Vector3> arms,
+        ulong mine,
+        Vector3 centre,
+        float half,
+        HullDesign other,
+        ulong theirs,
+        float otherHalf,
+        float otherRadius,
+        out BlockTouch touch
+    )
+    {
+        touch = default;
+        var offsets = other.BlockOffsets;
+        var reach = half + otherHalf;
+        var bound = otherRadius + half;
+        for (var bits = mine; bits != 0; bits &= bits - 1)
+        {
+            // A block outside the other hull's sphere touches none of its blocks.
+            var a = BitOperations.TrailingZeroCount(bits);
+            var block = centre + arms[a];
+            if (block.LengthSquared() >= bound * bound)
+                continue;
+
+            for (var rest = theirs; rest != 0; rest &= rest - 1)
+            {
+                var b = BitOperations.TrailingZeroCount(rest);
+                var between = block - offsets[b];
+                var squared = between.LengthSquared();
+                if (squared >= reach * reach)
+                    continue;
+
+                // Two blocks in the same place have no direction to part in; they still count as touching.
+                var distance = MathF.Sqrt(squared);
+                var depth = reach - distance;
+                var point = offsets[b];
+                if (distance > 1e-3f)
+                {
+                    var direction = between / distance;
+                    touch.NormalSum += direction;
+                    point += direction * (otherHalf - depth * 0.5f);
+                }
+
+                touch.PointSum += point;
+                touch.Mine |= 1UL << a;
+                touch.Theirs |= 1UL << b;
+                touch.Pairs++;
+            }
+        }
+
+        return touch.Pairs > 0;
+    }
+
+    /// <summary>
+    /// How far the hull has to move along <paramref name="normal"/> for none of the touching pairs of blocks to
+    /// be into each other any more. Everything is in the other hull's frame.
+    /// </summary>
+    private static float Clearance(ReadOnlySpan<Vector3> arms, Vector3 centre, Vector3 normal, HullDesign other, float reach, in BlockTouch touch)
+    {
+        var offsets = other.BlockOffsets;
+        var clearance = 0f;
+        for (var bits = touch.Mine; bits != 0; bits &= bits - 1)
+        {
+            var block = centre + arms[BitOperations.TrailingZeroCount(bits)];
+            for (var rest = touch.Theirs; rest != 0; rest &= rest - 1)
+            {
+                var between = block - offsets[BitOperations.TrailingZeroCount(rest)];
+                var inside = reach * reach - between.LengthSquared();
+                if (inside <= 0)
+                    continue;
+
+                // The distance along the normal at which this pair is exactly their two radii apart.
+                var along = Vector3.Dot(between, normal);
+                clearance = Math.Max(clearance, MathF.Sqrt(along * along + inside) - along);
+            }
+        }
+
+        return clearance;
+    }
+
+    /// <summary>
+    /// One impulse along the contact normal between the hull and what it touched, shared by inverse mass with the
+    /// hull free to turn. <paramref name="contact"/> is the point of contact from the hull's centre,
+    /// <paramref name="otherVelocity"/> the other body's velocity there and <paramref name="otherInverseMass"/>
+    /// how freely it gives way. A contact slower than <paramref name="restSpeed"/> does not bounce. Returns the
+    /// impulse in tonne metres per second, or zero when the two are not closing.
+    /// </summary>
+    private static float Bounce(
+        ref HullState state,
+        in FlightParams flight,
+        Vector3 contact,
+        Vector3 normal,
+        Vector3 otherVelocity,
+        float otherInverseMass,
+        float restSpeed,
+        out float closing
+    )
+    {
+        // Closing speed at the point of contact, including the hull's spin.
+        var spin = Vector3.Transform(state.AngularVelocity, state.Orientation);
+        closing = -Vector3.Dot(state.Velocity + Vector3.Cross(spin, contact) - otherVelocity, normal);
+        if (closing <= 0)
+            return 0f;
+
+        var lever = Lever(state.Orientation, contact, normal);
+        var turning = Vector3.Dot(lever / flight.Inertia, lever);
+        var bounce = closing > restSpeed ? flight.CollisionBounce : 0f;
+        var impulse = closing * (1f + bounce) / (1f / flight.Mass + otherInverseMass + turning);
+        state.Velocity += normal * (impulse / flight.Mass);
+        state.AngularVelocity += lever * impulse / flight.Inertia;
+        return impulse;
+    }
+
+    /// <summary>
+    /// The turning effect on a hull, about its own axes, of a unit push along <paramref name="normal"/> at
+    /// <paramref name="arm"/> from its centre.
+    /// </summary>
+    private static Vector3 Lever(Quaternion orientation, Vector3 arm, Vector3 normal)
+    {
+        var toHullFrame = Quaternion.Conjugate(orientation);
+        return Vector3.Cross(Vector3.Transform(arm, toHullFrame), Vector3.Transform(normal, toHullFrame));
+    }
+
+    /// <summary>
+    /// The damage of an impact: none up to the safe speed, then growing with the square of the speed over it,
+    /// for each tonne that had to be stopped.
+    /// </summary>
+    private static float ImpactDamage(float closing, float mass, in FlightParams flight)
+    {
+        var excess = closing - flight.CollisionSafeSpeed;
+        return excess > 0 ? excess * excess * mass * flight.CollisionDamagePerTonneSpeedSquared : 0f;
+    }
+
+    /// <summary>
     /// Applies impact damage: the shield takes what it can, the rest is split between the blocks that touched.
     /// A block at zero is gone. Returns true if the hull is destroyed: its core is gone or nothing is left.
     /// </summary>
-    private static bool Damage(ref HullState state, in FlightParams flight, ref HullBody body, ulong touching, int touchCount, float amount)
+    internal static bool Damage(ref HullState state, in FlightParams flight, ref HullBody body, ulong touching, int touchCount, float amount)
     {
         state.ShieldCooldown = flight.ShieldDelay;
         var absorbed = Math.Min(state.Shield, amount);
