@@ -16,6 +16,7 @@
     <PackageVersion Include="Ahwoo.BRUTAL.ImGui.FreeType" Version="2026.10.3" />
     <PackageVersion Include="Ahwoo.BRUTAL.Stb" Version="2026.10.3" />
     <PackageVersion Include="Ahwoo.BRUTAL.RakNet" Version="2026.10.3" />
+    <PackageVersion Include="System.CommandLine" Version="2.0.15" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="10.0.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageVersion Include="xunit.v3" Version="3.1.0" />

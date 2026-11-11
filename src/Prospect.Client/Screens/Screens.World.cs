@@ -58,7 +58,7 @@ internal sealed partial class ScreenHost
     private float _indicatorAngle;
 
     /// <summary>True while the player is in space with nothing open over it, so input belongs to the world.</summary>
-    public bool WorldInputEnabled => _screen == Screen.Session && !_sessionMenuOpen && !_mapOpen;
+    public bool WorldInputEnabled => _screen == Screen.Session && !_sessionMenuOpen && !_mapOpen && !_shipInfoOpen && !_controlsOpen;
 
     public void OpenShipInfo() => _shipInfoOpen = true;
 
@@ -104,7 +104,7 @@ internal sealed partial class ScreenHost
                 OpenMap();
         }
 
-        if (WorldInputEnabled && _app.Actions.Pressed(_app.Devices, InputAction.ShipInfo, true))
+        if (!_sessionMenuOpen && !_mapOpen && _app.Actions.Pressed(_app.Devices, InputAction.ShipInfo, !_ui.WantsTextInput))
             _shipInfoOpen = !_shipInfoOpen;
 
         // Everything shown over the world goes on ImGui's background layer, which is drawn beneath every window.
@@ -326,17 +326,6 @@ internal sealed partial class ScreenHost
                 DrawTargetMarker(draw, target, Theme.Accent);
         }
 
-        var hint = new float2(Kit.Px(Theme.Space5), display.Y - Kit.Px(56));
-        var pad = _app.Devices.PadConnected;
-        hint.X += Kit.KeyHint(draw, hint, pad ? "BACK"u8 : "N"u8, "Command"u8);
-        hint.X += Kit.KeyHint(draw, hint, pad ? "Y"u8 : "M"u8, "Map"u8);
-        hint.X += Kit.KeyHint(draw, hint, pad ? "X"u8 : "Z"u8, "Dampeners"u8);
-        hint.X += Kit.KeyHint(draw, hint, pad ? "L3"u8 : "SHIFT"u8, "Boost"u8);
-        hint.X += Kit.KeyHint(draw, hint, "RMB"u8, "Free look"u8);
-        hint.X += Kit.KeyHint(draw, hint, "MMB"u8, "Target"u8);
-        hint.X += Kit.KeyHint(draw, hint, pad ? "D-DOWN"u8 : "T"u8, world.TargetHull != 0 ? "Take control"u8 : "Drone"u8);
-        hint.X += Kit.KeyHint(draw, hint, pad ? "D-UP"u8 : "I"u8, "Ship data"u8);
-        Kit.KeyHint(draw, hint, pad ? "START"u8 : "ESC"u8, "Menu"u8);
         Kit.Fade = previousFade;
     }
 
@@ -455,16 +444,6 @@ internal sealed partial class ScreenHost
         var statusSize = Kit.Measure(_ui.Mono, Theme.FontCaption, status);
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, top + new float2(-statusSize.X * 0.5f, Kit.Px(22)), Theme.TextDim, status);
 
-        var hint = new float2(Kit.Px(Theme.Space5), display.Y - Kit.Px(56));
-        hint.X += Kit.KeyHint(draw, hint, "LMB / DRAG"u8, "Select"u8);
-        hint.X += Kit.KeyHint(draw, hint, "RMB"u8, "Move"u8);
-        hint.X += Kit.KeyHint(draw, hint, "RMB DRAG"u8, "Rotate"u8);
-        hint.X += Kit.KeyHint(draw, hint, "WHEEL"u8, "Zoom"u8);
-        hint.X += Kit.KeyHint(draw, hint, "WASD"u8, "Pan"u8);
-        hint.X += Kit.KeyHint(draw, hint, "Q / E"u8, "Plane"u8);
-        hint.X += Kit.KeyHint(draw, hint, "SPACE"u8, "Focus"u8);
-        hint.X += Kit.KeyHint(draw, hint, "H"u8, "Halt"u8);
-        Kit.KeyHint(draw, hint, "N"u8, "Pilot"u8);
         Kit.Fade = previousFade;
     }
 
@@ -1295,14 +1274,6 @@ internal sealed partial class ScreenHost
         if (pointerOnMap)
             DrawMapHoverPanel(draw, snapshot, world, galaxy, hover, here);
 
-        var hint = new float2(margin, display.Y - Kit.Px(56));
-        hint.X += Kit.KeyHint(draw, hint, "WASD"u8, "Pan"u8);
-        hint.X += Kit.KeyHint(draw, hint, "WHEEL"u8, "Zoom"u8);
-        hint.X += Kit.KeyHint(draw, hint, "LMB / DRAG"u8, "Select ships"u8);
-        hint.X += Kit.KeyHint(draw, hint, "RMB"u8, "Move or jump"u8);
-        hint.X += Kit.KeyHint(draw, hint, "PGUP / PGDN"u8, "Layer"u8);
-        hint.X += Kit.KeyHint(draw, hint, "SPACE"u8, "Centre on me"u8);
-        Kit.KeyHint(draw, hint, "M / ESC"u8, "Close"u8);
         EndRoot();
 
         if (_mapMenuOpen)

@@ -11,6 +11,10 @@ or that local game opened to other players. There is one simulation and one code
 
 ## Status
 
+Chat, the player roster and parties work through the protocol, authoritative server, client snapshots and
+input bridge. The chat window, party list and invite menu are not there yet. Headless scripts exercise them.
+Names and identity last only for the session; there is no saving or faction system in this feature.
+
 Stage 1 of blocks at scale exists in tooling and tests: versioned boxes, content limits and size rules,
 solid-box evaluation and running sums, with seeded 4,096-block and 150,000-block fixtures.
 See [docs/blocks-at-scale.md](docs/blocks-at-scale.md) for measurements and the remaining stages.
@@ -113,6 +117,15 @@ unit-sized blocks for now, because block state is sent as one bit per block. Siz
 are refused by the live loader until stage 2 adds storage, wire support, collision and drawing.
 
 ## Controls
+
+`F1` opens searchable Controls from pilot, command or map view. Search current bindings by action, key,
+button or category. `F1`, `Esc` or Close returns to the previous view; the session keeps running.
+Hold either `Alt` to show the cursor. Mouse flight, targeting and command gestures are suppressed while held;
+keyboard flight still works. Every menu and data sheet keeps the cursor visible until closed.
+Gameplay has no bottom-left keybind strip. Bindings come from `content/input/bindings.json`.
+
+Click again at the same place to step through overlapping targets, then wrap to the first.
+This works with middle mouse in pilot view and left-click in command view; moving more than four pixels resets it.
 
 | | Keyboard and mouse | Gamepad |
 | --- | --- | --- |
@@ -220,6 +233,10 @@ make server ARGS="--settings my-world.json"                                     
 
 ## Hosting and joining
 
+Dedicated server options and defaults: `make server ARGS="--help"`.
+CLI options override the settings file. Password precedence is CLI, then nonempty `PROSPECT_PASSWORD`, then file.
+An empty CLI password clears it.
+
 | Visibility | Listens on UDP | On the list | Who can join |
 | --- | --- | --- | --- |
 | `private` | no | no | Nobody: the host alone. A local game's default. |
@@ -252,6 +269,31 @@ make run ARGS="--host public --listing http://127.0.0.1:8080"              # aga
   counts down the server's wait before the next try.
 
 How the password, the connection limits and the list work: [docs/hosting.md](docs/hosting.md).
+
+## Headless social scripts
+
+Use `--social-run <seconds>` with `--join <host[:port]>`, or without `--join` for a private local game.
+This path creates no window. Other hosting and world options are not applied by the headless script.
+
+- `--player <name>` chooses the script's callsign (default Prospector).
+- `--say <text>` sends one everyone-chat line after joining.
+- `--invite <name>` invites the first connected matching name other than yourself.
+- `--accept-invites` accepts incoming invitations; `--party-say <text>` sends one line after a party forms.
+- Script exit prints roster, chat and party counts plus the last refusal. `--verbose` enables chat metadata logs.
+  Routine `make run` output hides arguments containing `--say`, `--party-say` or `--password`, even with `V=1`;
+  `make -n`, `make --trace` and process listings can still expose them.
+
+Limits come from `content/net/social.json`: 256 UTF-16 units and 768 UTF-8 bytes per chat line,
+four social requests at once, replenishing one per second, eight members per party, 30-second invitations,
+and four party updates per second. Requests beyond the rate limit are dropped before parsing or replying.
+The same allowance covers malformed requests and party operations. Control and Unicode formatting characters
+are removed, whitespace is trimmed, and empty lines are refused. Chat text is never logged; accepted chat
+metadata is Debug, invitation and membership changes are Information.
+
+The roster retains connected players and up to 32 spare slots for recent departures. The chat log holds 64
+lines. Names are looked up by stable session player id. Party members use content design indices for ship names;
+departed members leave the party and remain marked disconnected in the roster while retained.
+See [docs/social-interface.md](docs/social-interface.md) for the interface contract and wire sizes.
 
 ## Requirements
 

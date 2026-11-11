@@ -62,12 +62,13 @@ public readonly record struct ServerStatus(long Tick, int PlayerCount, TickStats
 /// The authoritative simulation. The dedicated server binary and a singleplayer game both run this class on its
 /// own thread; the only difference is which transports it is given. Everything in here executes on the tick thread.
 /// </summary>
-public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
+public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDisposable
 {
     /// <summary>
     /// Messages one player may have handled in one tick, and their bytes. A client sends an input and now and
     /// then a probe or an order: two or three small messages a tick, a handful after a hitch. What a player
-    /// sends beyond this in one tick is dropped unread.
+    /// sends beyond the unreliable allowance is dropped unread. Reliable traffic has a separate allowance
+    /// of the same size; exceeding it disconnects rather than silently dropping commands.
     /// </summary>
     internal const int PlayerMessagesPerTick = 32;
 
@@ -130,6 +131,11 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         public ITransport Transport = null!;
         public int Peer;
         public uint PlayerId;
+        public uint Party, Inviter;
+        public ulong InvitationId;
+        public long InviteUntil, SocialAt;
+        public double SocialCredit;
+        public bool SocialFailed;
         public string Name = "";
 
         /// <summary>The name a hello gave, cleaned, kept here without allocating until the player is let in.</summary>
@@ -142,6 +148,8 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         /// <summary>Messages and bytes this player has sent in the current tick, and whether that was too many.</summary>
         public int TickMessages;
         public int TickBytes;
+        public int ReliableMessages;
+        public int ReliableBytes;
         public bool OverAllowance;
         public int FloodStrikes;
 
@@ -169,12 +177,18 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
 
         public void Reset()
         {
+            Party = Inviter = 0;
+            InvitationId = 0;
+            InviteUntil = SocialAt = 0;
+            SocialCredit = 0;
+            SocialFailed = false;
             State = ConnectionState.Free;
             Transport = null!;
             Name = "";
             NameLength = 0;
             Deadline = 0;
             TickMessages = TickBytes = 0;
+            ReliableMessages = ReliableBytes = 0;
             OverAllowance = false;
             FloodStrikes = 0;
             Origin = 0;
@@ -250,17 +264,18 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
     /// </summary>
     public ServerHost(ServerConfig config, GameContent content, params ITransport[] transports)
     {
-        _maxPlayers = config.MaxPlayers;
-        _visibility = config.Visibility;
-        _galaxySeed = config.GalaxySeed;
-        _spawnSector = config.SpawnSector;
-        _listingHost = config.Listing?.Url.Host;
-        _limits = config.Limits;
-        _clock = config.Clock;
-        _handshakeTime = (long)(_limits.HandshakeSeconds * _clock.TimestampFrequency);
-        _attempts = new AttemptLimiter(_clock.TimestampFrequency);
+        ITransport? listener = null;
         try
         {
+            _maxPlayers = config.MaxPlayers;
+            _visibility = config.Visibility;
+            _galaxySeed = config.GalaxySeed;
+            _spawnSector = config.SpawnSector;
+            _listingHost = config.Listing?.Url.Host;
+            _limits = config.Limits;
+            _clock = config.Clock;
+            _handshakeTime = (long)(_limits.HandshakeSeconds * _clock.TimestampFrequency);
+            _attempts = new AttemptLimiter(_clock.TimestampFrequency);
             _limits.Validate();
             if (!ServerNames.TryNormalize(config.Name, out _name))
                 throw new InvalidDataException($"A server's name must be 1 to {ServerNames.MaxLength} characters.");
@@ -280,48 +295,58 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
             // listener has room for every player and every pending connection, and a few that are refused in
             // the moment they arrive.
             if (config.Visibility != ServerVisibility.Private)
-                transports = [.. transports, RakNetTransport.Listen(config.Port, config.MaxPlayers + _limits.PendingTotal + 8, HalfOpenSlots)];
+            {
+                listener = RakNetTransport.Listen(config.Port, config.MaxPlayers + _limits.PendingTotal + 8, HalfOpenSlots);
+                transports = [.. transports, listener];
+            }
+
+            _transports = transports;
+            _throttle = new ConnectionThrottle(_limits.ConnectionBurst, _limits.ConnectionsPerSecond, _clock.TimestampFrequency);
+            if (config.Visibility == ServerVisibility.Public && config.Listing is { } listing)
+            {
+                _announcer = new ListingAnnouncer(
+                    listing,
+                    _name,
+                    config.Port,
+                    config.MaxPlayers,
+                    _passwordKey is not null,
+                    () => Volatile.Read(ref _playerCount)
+                );
+            }
+
+            // From here on the server only knows the content as its own world's settings make it.
+            _content = content.WithSettings(config.Settings ?? content.SettingCatalog.Defaults);
+            Galaxy = _content.Galaxy.WithSeed(config.GalaxySeed);
+            _rocks = new RockField(Galaxy);
+            _field = new HullField(_hulls, _content.Designs);
+
+            // A slot for every player, and apart from those one for every connection that may be pending: however
+            // many stand at the door, there is a slot for whoever is let in. The in-process links are not counted
+            // among the pending, so each has a slot of its own.
+            var inProcess = 0;
+            foreach (var transport in transports)
+                inProcess += transport.IsInProcess ? 1 : 0;
+            _connections = new Connection[config.MaxPlayers + _limits.PendingTotal + inProcess];
+            for (var i = 0; i < _connections.Length; i++)
+            {
+                _connections[i] = new Connection();
+                _connections[i].Reset();
+            }
+
+            _loop = new TickLoop("Server", TickLoop.SimulationHz, this);
         }
         catch
         {
-            _hulls.Dispose();
+            if (_passwordKey is not null)
+                CryptographicOperations.ZeroMemory(_passwordKey);
+            try { listener?.Dispose(); }
+            finally
+            {
+                try { _announcer?.Dispose(); }
+                finally { _hulls.Dispose(); }
+            }
             throw;
         }
-
-        _transports = transports;
-        _throttle = new ConnectionThrottle(_limits.ConnectionBurst, _limits.ConnectionsPerSecond, _clock.TimestampFrequency);
-        if (config.Visibility == ServerVisibility.Public && config.Listing is { } listing)
-        {
-            _announcer = new ListingAnnouncer(
-                listing,
-                _name,
-                config.Port,
-                config.MaxPlayers,
-                _passwordKey is not null,
-                () => Volatile.Read(ref _playerCount)
-            );
-        }
-
-        // From here on the server only knows the content as its own world's settings make it.
-        _content = content.WithSettings(config.Settings ?? content.SettingCatalog.Defaults);
-        Galaxy = _content.Galaxy.WithSeed(config.GalaxySeed);
-        _rocks = new RockField(Galaxy);
-        _field = new HullField(_hulls, _content.Designs);
-
-        // A slot for every player, and apart from those one for every connection that may be pending: however
-        // many stand at the door, there is a slot for whoever is let in. The in-process links are not counted
-        // among the pending, so each has a slot of its own.
-        var inProcess = 0;
-        foreach (var transport in transports)
-            inProcess += transport.IsInProcess ? 1 : 0;
-        _connections = new Connection[config.MaxPlayers + _limits.PendingTotal + inProcess];
-        for (var i = 0; i < _connections.Length; i++)
-        {
-            _connections[i] = new Connection();
-            _connections[i].Reset();
-        }
-
-        _loop = new TickLoop("Server", TickLoop.SimulationHz, this);
     }
 
     public Galaxy Galaxy { get; }
@@ -369,19 +394,22 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
     /// </summary>
     public void Dispose()
     {
-        // The removal runs on its own while the simulation and the sockets shut down.
-        _announcer?.BeginStop();
         _loop.Stop();
-        foreach (var transport in _transports)
-            transport.Dispose();
-        _hulls.Dispose();
-        _announcer?.Dispose();
-
-        // The tick thread has stopped: nothing reads the key or a challenge any more.
+        // Clear secrets before any external cleanup can throw.
         if (_passwordKey is not null)
             CryptographicOperations.ZeroMemory(_passwordKey);
         foreach (var connection in _connections)
             CryptographicOperations.ZeroMemory(connection.Challenge);
+        Exception? failure = null;
+        foreach (var transport in _transports)
+        {
+            try { transport.Dispose(); }
+            catch (Exception error) { failure ??= error; }
+        }
+        try { _announcer?.Dispose(); }
+        finally { _hulls.Dispose(); }
+        if (failure is not null)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
     }
 
     void ITickHandler.OnStart()
@@ -430,8 +458,16 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
             }
             else if (connection.State == ConnectionState.Active)
             {
+                if (connection.SocialFailed)
+                {
+                    connection.Transport.Disconnect(connection.Peer);
+                    RemovePlayer(connection);
+                    connection.Reset();
+                    continue;
+                }
                 connection.FloodStrikes = connection.OverAllowance ? connection.FloodStrikes + FloodStrikesPerTick : Math.Max(connection.FloodStrikes - 1, 0);
                 connection.TickMessages = connection.TickBytes = 0;
+                connection.ReliableMessages = connection.ReliableBytes = 0;
                 connection.OverAllowance = false;
                 if (connection.FloodStrikes >= FloodStrikeLimit)
                     RemoveFlooder(connection);
@@ -496,6 +532,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
                 SendSnapshot(connection, tick);
         }
 
+        TickSocial(tick);
         Volatile.Write(ref _tick, tick + 1);
     }
 
@@ -618,16 +655,29 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
             return;
         }
 
-        // A player gets so much read in a tick. The rest is dropped here, unread: the tick spends nothing on it,
-        // and a player who keeps it up is removed. The host's own client is not counted.
+        // Reliable commands have their own allowance so a hitch in input cannot consume it. They execute in
+        // arrival order; an overflow closes the connection rather than silently losing a one-shot command.
         if (!transport.IsInProcess)
         {
-            connection.TickMessages++;
-            connection.TickBytes += payload.Length;
-            if (connection.TickMessages > PlayerMessagesPerTick || connection.TickBytes > PlayerBytesPerTick)
+            if (channel == NetChannel.Reliable)
             {
-                connection.OverAllowance = true;
-                return;
+                connection.ReliableMessages++;
+                connection.ReliableBytes += payload.Length;
+                if (connection.ReliableMessages > PlayerMessagesPerTick || connection.ReliableBytes > PlayerBytesPerTick)
+                {
+                    RemoveFlooder(connection);
+                    return;
+                }
+            }
+            else
+            {
+                connection.TickMessages++;
+                connection.TickBytes += payload.Length;
+                if (connection.TickMessages > PlayerMessagesPerTick || connection.TickBytes > PlayerBytesPerTick)
+                {
+                    connection.OverAllowance = true;
+                    return;
+                }
             }
         }
 
@@ -637,6 +687,9 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         var reader = new NetReader(payload[1..]);
         switch ((MessageId)payload[0])
         {
+            case MessageId.Social when channel == NetChannel.Reliable:
+                ReceiveSocial(connection, ref reader);
+                break;
             case MessageId.Ping when PingMessage.TryRead(ref reader, out var ping):
                 {
                     var pong = new PongMessage
@@ -654,7 +707,9 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
                 ReceiveInput(connection, ref reader);
                 break;
             case MessageId.Control when channel == NetChannel.Reliable:
-                TakeControl(connection, reader.ReadUInt32());
+                var hullId = reader.ReadUInt32();
+                if (reader.IsValid)
+                    TakeControl(connection, hullId);
                 break;
             case MessageId.FleetOrders when channel == NetChannel.Reliable:
                 ReceiveFleetOrders(connection, ref reader);
@@ -1067,6 +1122,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         // The newcomer generates the galaxy from the seed like everyone else; what it cannot know is which
         // asteroids have been knocked about since.
         SendRockDeltas(connection, _rocks.Deltas);
+        JoinSocial(connection);
 
         Logs.Sim.Info($"{connection.Name} joined as player {connection.PlayerId} via {connection.Transport.Description}");
     }
@@ -1149,6 +1205,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
     /// <summary>Takes a player's hulls out of the world and frees their player slot.</summary>
     private void RemovePlayer(Connection connection)
     {
+        LeaveSocial(connection);
         for (var i = 0; i < _hulls.Slots; i++)
         {
             if (_hulls.IsAliveAt(i) && _hulls.Info(i).Owner == connection.PlayerId)

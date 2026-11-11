@@ -103,6 +103,12 @@ internal sealed unsafe class UiPlatform : IDisposable
             _window.SetInputMode(GlfwInputMode.RawMouseMotion, captured ? 1 : 0);
         if (captured)
             ImGui.GetIO().AddMousePosEvent(-float.MaxValue, -float.MaxValue);
+        else if (!_devices.Muted)
+        {
+            // GLFW restores the visible cursor; ImGui must see it even before the next motion event.
+            Glfw.PInvoke.GetCursorPos(_window, out var x, out var y);
+            ImGui.GetIO().AddMousePosEvent((float)x, (float)y);
+        }
     }
 
     /// <summary>Updates ImGui's per-frame inputs. Call after window events have been polled.</summary>

@@ -78,6 +78,9 @@ internal sealed class UiContext : IDisposable
     /// <summary>True while the pointer is over an interface element that takes it, so the world must not react.</summary>
     public bool PointerOverInterface => ImGui.GetIO().WantCaptureMouse;
 
+    /// <summary>True while interface navigation or typing owns the keyboard.</summary>
+    public bool WantsKeyboardInput => ImGui.GetIO().WantCaptureKeyboard;
+
     /// <summary>True while a text field has keyboard focus, so game key bindings must not fire.</summary>
     public bool WantsTextInput => ImGui.GetIO().WantTextInput;
 

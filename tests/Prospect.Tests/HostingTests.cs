@@ -733,12 +733,11 @@ public sealed class HostingTests
         Assert.False(host.PasswordProtected);
         Assert.Equal(AnnounceState.Off, session.LocalAnnounce);
 
-        // Nothing holds the UDP port: a socket that refuses to share it can bind it.
-        using (var probe = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
-        {
-            probe.ExclusiveAddressUse = true;
-            probe.Bind(new System.Net.IPEndPoint(System.Net.IPAddress.Any, port));
-        }
+        // Nothing holds the UDP port: a socket that refuses to share it can bind it. Keep it bound so an
+        // ephemeral client socket cannot claim the port while the outsider waits for its unanswered connection.
+        using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        probe.ExclusiveAddressUse = true;
+        probe.Bind(new System.Net.IPEndPoint(System.Net.IPAddress.Any, port));
 
         // And a client that tries gets no answer.
         using var outsider = GameSession.Join("127.0.0.1", port, Content, "Outsider");

@@ -15,12 +15,8 @@ internal sealed partial class ScreenHost
     private static readonly float[] UiScaleValues = [0.75f, 1f, 1.25f, 1.5f, 2f];
     private static readonly string[] SensitivityLabels = ["50%", "75%", "100%", "125%", "150%", "200%"];
     private static readonly float[] SensitivityValues = [0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f];
-    private static readonly string[] AxisLabels = ["Strafe left / right", "Down / up", "Back / forward", "Look down / up", "Look left / right", "Roll"];
-    private static readonly string[] ActionLabels =
-    [
-        "Menu / back", "Performance overlay", "Fullscreen", "Screenshot", "Boost", "Dampeners on / off",
-        "Command view", "Galaxy map", "Halt (cancel order)", "Focus on selection (command view)", "Ship data sheet", "Take control of target / leave in drone",
-    ];
+    private static readonly string[] AxisLabels = ControlsCatalog.AxisLabels;
+    private static readonly string[] ActionLabels = ControlsCatalog.ActionLabels;
 
     private readonly ImInputString _settingsName = new(ProtocolInfo.MaxNameBytes);
     private readonly string[] _bindingText = new string[(int)InputAction.Count];

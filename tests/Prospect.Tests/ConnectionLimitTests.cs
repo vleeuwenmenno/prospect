@@ -672,6 +672,15 @@ public sealed class FloodOverUdpTests
         return null;
     }
 
+    private static string RequireSecondAddress()
+    {
+        var address = SecondAddress();
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CI")))
+            Assert.NotNull(address);
+        Assert.SkipWhen(address is null, "Requires an active non-loopback IPv4 address (mandatory in CI).");
+        return address!;
+    }
+
     /// <summary>Opens connections on a few threads for as long as it lives, each sending junk or nothing, and never a hello.</summary>
     private sealed class Flood : IDisposable
     {
@@ -804,17 +813,25 @@ public sealed class FloodOverUdpTests
         using var server = new ServerHost(new ServerConfig { MaxPlayers = 8, Visibility = ServerVisibility.Unlisted, Port = port, Password = Password }, Content);
         server.Start();
 
-        // All from the loopback address, all at once. The listener starts one connection per address every
-        // 100 ms; the clients that are told to wait ask again by themselves.
+        // Non-loopback exercises RakNet's address cooldown; exact retry timing is tested with ConnectRetry.
+        var address = RequireSecondAddress();
         var sessions = new List<GameSession>();
         try
         {
             for (var i = 0; i < 6; i++)
-                sessions.Add(GameSession.Join("127.0.0.1", port, Content, $"Player {i}", Password));
+                sessions.Add(GameSession.Join(address, port, Content, $"Player {i}", Password));
             foreach (var session in sessions)
                 TestNet.WaitFor(session, s => s.State == SessionState.Active);
             Assert.Equal(6, server.Status.PlayerCount);
             Assert.Null(server.Fault);
+            // Record real retries without requiring a particular OS scheduling order for the assertion.
+            var retries = 0;
+            foreach (var session in sessions)
+            {
+                var transport = typeof(ClientSession).GetField("_transport", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(session.Client);
+                retries += ((ConnectRetry)typeof(RakNetTransport).GetField("_retry", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(transport)!).Count;
+            }
+            Console.WriteLine($"Six non-loopback joins to {address}: {retries} RakNet cooldown retries.");
         }
         finally
         {
@@ -824,11 +841,9 @@ public sealed class FloodOverUdpTests
     }
 
     [Fact]
-    public void AFloodFromOneAddressLeavesAPlayerPlayingTheServerOnTimeAndTheDoorOpenToAnotherAddress()
+    public void AFloodLeavesAnExistingPlayerPlayingAndTheServerOnTime()
     {
-        // The flood comes from this machine's other address when it has one, so the players, on the loopback
-        // address, are somebody else to the server. Without one the flood shares their address, and the part
-        // about a newcomer does not apply: an address that floods is rightly refused, whoever uses it.
+        // Existing players must keep playing even when the flood shares their address.
         var second = SecondAddress();
         var port = TestNet.Port(23);
         using var server = new ServerHost(new ServerConfig { MaxPlayers = 4, Visibility = ServerVisibility.Unlisted, Port = port, Password = Password }, Content);
@@ -839,43 +854,45 @@ public sealed class FloodOverUdpTests
 
         var started = Stopwatch.GetTimestamp();
         var ticksAtStart = server.Status.Tick;
-        GameSession? newcomer = null;
-        try
+        using (var flood = new Flood(second ?? "127.0.0.1", port, threads: 6))
         {
-            using (var flood = new Flood(second ?? "127.0.0.1", port, threads: 6))
+            // Through three seconds of it the player's view of the server keeps moving, tick after tick.
+            var last = player.Client.AcquireSnapshot().ServerTick;
+            for (var i = 0; i < 6; i++)
             {
-                // Through three seconds of it the player's view of the server keeps moving, tick after tick.
-                var last = player.Client.AcquireSnapshot().ServerTick;
-                for (var i = 0; i < 6; i++)
-                {
-                    Thread.Sleep(500);
-                    var snapshot = player.Client.AcquireSnapshot();
-                    Assert.Equal(SessionState.Active, snapshot.State);
-                    Assert.True(snapshot.ServerTick > last + 15, $"the player's server tick went from {last} to {snapshot.ServerTick} in half a second");
-                    Assert.InRange(snapshot.RoundTripMs, 0, 250);
-                    last = snapshot.ServerTick;
-
-                    // In the middle of it someone from another address joins.
-                    if (i == 2 && second is not null)
-                        newcomer = GameSession.Join("127.0.0.1", port, Content, "Newcomer", Password);
-                }
-
-                Assert.True(flood.Opened > 5, $"the flood opened {flood.Opened} connections");
-                if (newcomer is not null)
-                    TestNet.WaitFor(newcomer, s => s.State == SessionState.Active);
+                Thread.Sleep(500);
+                var snapshot = player.Client.AcquireSnapshot();
+                Assert.Equal(SessionState.Active, snapshot.State);
+                Assert.True(snapshot.ServerTick > last + 15, $"the player's server tick went from {last} to {snapshot.ServerTick} in half a second");
+                Assert.InRange(snapshot.RoundTripMs, 0, 250);
+                last = snapshot.ServerTick;
             }
 
-            // The simulation kept its pace, and nobody was let in who should not have been.
-            var seconds = Stopwatch.GetElapsedTime(started).TotalSeconds;
-            var ticks = server.Status.Tick - ticksAtStart;
-            Assert.True(ticks > seconds * 50, $"{ticks} ticks in {seconds:F1} s");
-            Assert.Equal(newcomer is null ? 1 : 2, server.Status.PlayerCount);
-            Assert.True(server.IsRunning);
-            Assert.Null(server.Fault);
+            Assert.True(flood.Opened > 5, $"the flood opened {flood.Opened} connections");
         }
-        finally
-        {
-            newcomer?.Dispose();
-        }
+
+        // The simulation kept its pace, and nobody was let in who should not have been.
+        var seconds = Stopwatch.GetElapsedTime(started).TotalSeconds;
+        var ticks = server.Status.Tick - ticksAtStart;
+        Assert.True(ticks > seconds * 50, $"{ticks} ticks in {seconds:F1} s");
+        Assert.Equal(1, server.Status.PlayerCount);
+        Assert.True(server.IsRunning);
+        Assert.Null(server.Fault);
     }
+
+    [Fact]
+    public void AFloodFromAnotherAddressStillAllowsANewcomer()
+    {
+        var address = RequireSecondAddress();
+        var port = TestNet.Port(25);
+        using var server = new ServerHost(new ServerConfig { MaxPlayers = 4, Visibility = ServerVisibility.Unlisted, Port = port, Password = Password }, Content);
+        server.Start();
+        using var flood = new Flood(address, port, threads: 6);
+        TestNet.WaitUntil(() => flood.Opened > 5, "flood connections before newcomer");
+        using var newcomer = GameSession.Join("127.0.0.1", port, Content, "Newcomer", Password);
+        TestNet.WaitFor(newcomer, s => s.State == SessionState.Active);
+        Assert.Null(server.Fault);
+        Assert.Equal(1, server.Status.PlayerCount);
+    }
+
 }

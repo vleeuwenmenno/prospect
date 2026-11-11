@@ -152,7 +152,11 @@ Reading the network, every tick:
 2. Each listener is read up to a budget: 1,024 packets and 256 KiB, plus 32 packets and 8 KiB per player slot.
 3. What is still waiting stays queued, in order, for the next tick. Nothing is dropped by the budget.
 4. A legitimate player's packets behind a burst are read a tick later. The simulation runs on time either way.
-5. One player gets 32 messages and 8 KiB read per tick. More is dropped unread; half a second of it removes the player.
+5. Each player gets separate unreliable and reliable allowances of 32 messages and 8 KiB per tick.
+   Excess unreliable input is dropped; half a second of it removes the player.
+   Reliable messages execute in arrival order, even after an input burst. Exceeding either reliable allowance
+   disconnects immediately: one-shot commands are never silently dropped while the player stays connected.
+   The listener's total budget is unchanged; packets beyond it wait in transport order for the next tick.
 
 Refusals are counted, not logged one by one: one line in the log every 5 seconds says how many and why.
 Refusing a connection allocates nothing.

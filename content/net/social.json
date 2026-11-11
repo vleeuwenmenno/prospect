@@ -1,0 +1,9 @@
+{
+  "chatChars": 256,
+  "chatBytes": 768,
+  "burst": 4,
+  "perSecond": 1,
+  "partySize": 8,
+  "inviteSeconds": 30,
+  "statusHz": 4
+}

@@ -16,9 +16,11 @@ public sealed class GameContent
         HullDesign[] designs,
         int pod,
         int drone,
-        int[] startingFleet
+        int[] startingFleet,
+        SocialRules social
     )
     {
+        Social = social;
         DroneDesign = drone;
         Galaxy = galaxy;
         Blocks = blocks;
@@ -35,6 +37,9 @@ public sealed class GameContent
     /// under <see cref="Settings"/>.
     /// </summary>
     public HullDesign[] Designs { get; }
+
+    /// <summary>Social limits for this world.</summary>
+    public SocialRules Social { get; }
 
     /// <summary>Every setting a world can have: what it is called, its range and its default.</summary>
     public WorldSettingCatalog SettingCatalog { get; }
@@ -82,7 +87,7 @@ public sealed class GameContent
         var designs = new HullDesign[Designs.Length];
         for (var i = 0; i < designs.Length; i++)
             designs[i] = Designs[i].WithRules(rules);
-        return new GameContent(Galaxy, Blocks, SettingCatalog, clean, rules, designs, PodDesign, DroneDesign, StartingFleet);
+        return new GameContent(Galaxy, Blocks, SettingCatalog, clean, rules, designs, PodDesign, DroneDesign, StartingFleet, Social);
     }
 
     public static GameContent Load()
@@ -119,7 +124,8 @@ public sealed class GameContent
             [.. designs],
             Index(root.GetProperty("pod"u8).GetString()!),
             Index(root.GetProperty("drone"u8).GetString()!),
-            [.. fleet]
+            [.. fleet],
+            SocialRules.Load()
         );
     }
 }

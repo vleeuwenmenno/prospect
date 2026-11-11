@@ -50,10 +50,11 @@ ifeq ($(NO_COLOR)$(filter dumb,$(TERM)),)
   RESET  := $(ESC)[0m
 endif
 
-# The arguments as the launch line shows them. With a password among them none are shown: the line stays in
-# the terminal's scroll-back and in any log the launch is captured to, and make cannot tell where a quoted value
-# ends. The run lines below start with @ whatever V is, for the same reason. Prefer PROSPECT_PASSWORD.
-SHOWN_ARGS = $(if $(findstring --password,$(ARGS)),(arguments not shown: they hold a password),$(ARGS))
+# Suppress the whole launch argument list when it contains private text: quoted value boundaries cannot
+# safely be recovered here. Run recipes remain silent even with V=1. Prefer PROSPECT_PASSWORD for passwords.
+# As with any recipe, make -n and make --trace can still expose the actual command.
+PRIVATE_ARGS = $(or $(findstring --password,$(ARGS)),$(findstring --say,$(ARGS)),$(findstring --party-say,$(ARGS)))
+SHOWN_ARGS = $(if $(PRIVATE_ARGS),(arguments not shown: they contain private text),$(ARGS))
 
 # Recipe helpers. `step` is a whole recipe line; `ok`, `warn`, `fail` and `note` are shell snippets.
 step = @printf '%s\n' "$(BLUE)==>$(RESET) $(BOLD)$(1)$(RESET)"

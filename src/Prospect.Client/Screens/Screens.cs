@@ -41,6 +41,7 @@ internal sealed partial class ScreenHost
         _ui = ui;
         InitializeJoin();
         InitializeSettings();
+        InitializeControls();
         InitializeNewGame();
     }
 
@@ -50,6 +51,10 @@ internal sealed partial class ScreenHost
     {
         if (_screen == Screen.Settings && screen != Screen.Settings)
             LeaveSettings();
+        if (screen == Screen.MainMenu)
+        {
+            _controlsOpen = _mapOpen = _shipInfoOpen = _sessionMenuOpen = false;
+        }
         _screen = screen;
         _screenTime = 0;
         if (screen == Screen.Join)

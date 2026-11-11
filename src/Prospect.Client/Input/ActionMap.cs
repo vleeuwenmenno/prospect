@@ -19,6 +19,8 @@ internal enum InputAction
     Follow,
     ShipInfo,
     SwitchHull,
+    ToggleControls,
+    ReleasePointer,
     Count,
 }
 
@@ -44,7 +46,9 @@ internal struct AxisBinding
     public int PadPositiveAxis;
     public bool Invert;
 
-    public readonly string DisplayName =>
+    public readonly string DisplayName => Invert ? $"{SourceName} (inverted)" : SourceName;
+
+    private readonly string SourceName =>
         PadAxis >= 0 ? $"Pad {(GlfwGamepadAxis)PadAxis}"
         : PadNegativeAxis >= 0 ? $"Pad {(GlfwGamepadAxis)PadNegativeAxis} - {(GlfwGamepadAxis)PadPositiveAxis}"
         : $"{Negative?.DisplayName} - {Positive?.DisplayName}";
@@ -66,7 +70,14 @@ internal readonly record struct InputBinding(InputBinding.Source Device, int Cod
         {
             Source.Key => ((GlfwKey)Code).ToString(),
             Source.MouseButton => $"Mouse {(GlfwMouseButton)Code}",
-            _ => $"Pad {(GlfwGamepadButton)Code}",
+            _ => Code switch
+            {
+                0 => "Pad A (Cross)",
+                1 => "Pad B (Circle)",
+                2 => "Pad X (Square)",
+                3 => "Pad Y (Triangle)",
+                _ => $"Pad {(GlfwGamepadButton)Code}",
+            },
         };
 }
 
@@ -135,18 +146,35 @@ internal sealed class ActionMap
     {
         foreach (var binding in _bindings[(int)action])
         {
-            var pressed = binding.Device switch
-            {
-                InputBinding.Source.Key => keyboardAvailable && devices.KeyPressed((GlfwKey)binding.Code),
-                InputBinding.Source.MouseButton => devices.MousePressed((GlfwMouseButton)binding.Code),
-                _ => devices.PadPressed((GlfwGamepadButton)binding.Code),
-            };
-            if (pressed)
+            if (Pressed(devices, binding, keyboardAvailable))
                 return true;
         }
 
         return false;
     }
+
+    /// <summary>Checks a menu shortcut without stealing text entry or clicks owned by the interface.</summary>
+    public bool InterfaceShortcutPressed(InputDevices devices, InputAction action, bool typing, bool pointerOverInterface)
+    {
+        foreach (var binding in _bindings[(int)action])
+        {
+            if (binding.Device == InputBinding.Source.MouseButton && pointerOverInterface)
+                continue;
+            if (binding.Device == InputBinding.Source.Key && typing
+                && (GlfwKey)binding.Code is not (GlfwKey.Escape or >= GlfwKey.F1 and <= GlfwKey.F25))
+                continue;
+            if (Pressed(devices, binding, true))
+                return true;
+        }
+        return false;
+    }
+
+    private static bool Pressed(InputDevices devices, InputBinding binding, bool keyboardAvailable) => binding.Device switch
+    {
+        InputBinding.Source.Key => keyboardAvailable && devices.KeyPressed((GlfwKey)binding.Code),
+        InputBinding.Source.MouseButton => devices.MousePressed((GlfwMouseButton)binding.Code),
+        _ => devices.PadPressed((GlfwGamepadButton)binding.Code),
+    };
 
     public static ActionMap Load(string path)
     {

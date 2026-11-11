@@ -4,13 +4,18 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/Prospect.Server/Prospect.Server.csproj" />
     <ProjectReference Include="../../src/Prospect.Game/Prospect.Game.csproj" />
     <!-- The real listing server, run in the test process, so the game's side of the contract is tested against it. -->
     <ProjectReference Include="../../src/Prospect.Listing/Prospect.Listing.csproj" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Ahwoo.BRUTAL.Glfw" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../src/Prospect.Client/Input/*.cs" LinkBase="ClientInput" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="../../content/**/*" LinkBase="content" CopyToOutputDirectory="PreserveNewest" />

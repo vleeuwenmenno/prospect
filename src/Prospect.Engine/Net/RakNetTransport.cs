@@ -9,13 +9,6 @@ public sealed unsafe class RakNetTransport : ITransport
     private const int HeaderSize = 2;
     private const int MaxPayload = 1 << 20;
 
-    /// <summary>
-    /// Times a client asks again when the server says its address connected a moment ago. A listener lets one
-    /// address start a connection only every 100 ms, so players behind one router who join together are told to
-    /// come back; a few tries a fraction of a second apart get them all in.
-    /// </summary>
-    private const int MaxConnectRetries = 8;
-
     private struct Peer
     {
         public bool Active;
@@ -32,8 +25,7 @@ public sealed unsafe class RakNetTransport : ITransport
     // A client's server, kept to ask again after being told to wait; and when to ask, zero for not at all.
     private readonly byte[]? _hostUtf8;
     private readonly ushort _hostPort;
-    private long _retryAt;
-    private int _retries;
+    private ConnectRetry _retry;
 
     private RakNetTransport(RakPeerInstance rak, int maxPeers, bool isServer, string description, byte[]? hostUtf8 = null, ushort hostPort = 0)
     {
@@ -125,9 +117,8 @@ public sealed unsafe class RakNetTransport : ITransport
 
     public bool Poll(ITransportHandler handler, ReceiveBudget budget)
     {
-        if (_retryAt != 0 && Stopwatch.GetTimestamp() >= _retryAt)
+        if (_retry.TakeDue(Stopwatch.GetTimestamp()))
         {
-            _retryAt = 0;
             if (_rak.Connect(_hostUtf8, _hostPort, default, null) != ConnectionAttemptResult.ConnectionAttemptStarted)
                 handler.OnDisconnected(this, 0, DisconnectReason.ConnectFailed);
         }
@@ -227,6 +218,7 @@ public sealed unsafe class RakNetTransport : ITransport
             case DefaultMessageIDTypes.NewIncomingConnection when _isServer:
             case DefaultMessageIDTypes.ConnectionRequestAccepted when !_isServer:
                 {
+                    _retry.Cancel();
                     var peer = Allocate(packet->Guid, packet->SystemAddress);
                     if (peer < 0)
                         _rak.CloseConnection(new AddressOrGUID(packet->Guid), true);
@@ -241,26 +233,21 @@ public sealed unsafe class RakNetTransport : ITransport
                 Drop(handler, packet->Guid, DisconnectReason.ConnectionLost);
                 break;
             case DefaultMessageIDTypes.NoFreeIncomingConnections when !_isServer:
+                _retry.Cancel();
                 handler.OnDisconnected(this, 0, DisconnectReason.ServerFull);
                 break;
             case DefaultMessageIDTypes.IpRecentlyConnected when !_isServer:
                 // Someone at this address connected within the last 100 ms. Ask again shortly, a little later
                 // each time and never at the same moment as a neighbour who was told the same.
-                if (_retries < MaxConnectRetries)
-                {
-                    _retries++;
-                    _retryAt = Stopwatch.GetTimestamp() + Stopwatch.Frequency * (120 + 40 * _retries + Random.Shared.Next(120)) / 1000;
-                }
-                else
-                {
+                if (!_retry.Schedule(Stopwatch.GetTimestamp(), Stopwatch.Frequency, Random.Shared.Next(120)))
                     handler.OnDisconnected(this, 0, DisconnectReason.ConnectFailed);
-                }
 
                 break;
             case DefaultMessageIDTypes.ConnectionAttemptFailed when !_isServer:
             case DefaultMessageIDTypes.ConnectionBanned when !_isServer:
             case DefaultMessageIDTypes.InvalidPassword when !_isServer:
             case DefaultMessageIDTypes.IncompatibleProtocolVersion when !_isServer:
+                _retry.Cancel();
                 handler.OnDisconnected(this, 0, DisconnectReason.ConnectFailed);
                 break;
             case DefaultMessageIDTypes.UserPacketEnum when packet->Length >= HeaderSize:

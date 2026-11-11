@@ -555,8 +555,14 @@ internal sealed class App : IDisposable
             // The world is drawn whenever the session has put the player's hull in space.
             var snapshot = Session?.Client.AcquireSnapshot();
             var inSpace = snapshot is { State: SessionState.Active, OwnHull: >= 0, Galaxy: not null };
-            var worldInput = inSpace && _screens.WorldInputEnabled && _window.IsFocused;
-            var capture = worldInput && World.Mode == ViewMode.Pilot && !Devices.Muted;
+            _screens.HandleControlsShortcut(inSpace && _window.IsFocused);
+            var worldInput = inSpace && _screens.WorldInputEnabled && _window.IsFocused && !_screens.ControlsHandled && !_ui.WantsKeyboardInput;
+            // Opening or closing an interface consumes its frame, including any simultaneous mouse click.
+            worldInput &= !Actions.Pressed(Devices, InputAction.Pause, true)
+                && !Actions.Pressed(Devices, InputAction.ToggleMap, true)
+                && !Actions.Pressed(Devices, InputAction.ShipInfo, true);
+            var releasePointer = Actions.Held(Devices, InputAction.ReleasePointer, true);
+            var capture = worldInput && World.Mode == ViewMode.Pilot && !Devices.Muted && !releasePointer;
             if (capture != _pointerCaptured)
             {
                 _pointerCaptured = capture;
@@ -570,11 +576,22 @@ internal sealed class App : IDisposable
                 var viewport = new float2(_swapchain.Extent.Width, _swapchain.Extent.Height);
                 var windowSize = _window.Size;
                 var screen = windowSize.X > 0 && windowSize.Y > 0 ? new float2(windowSize.X, windowSize.Y) : viewport;
+                Devices.ReadingWorldMouse = true;
+                Devices.SuppressMouse = !worldInput || releasePointer || _ui.PointerOverInterface;
                 World.Update(snapshot!, Session!.Client.Input, dt, worldInput, viewport, screen, _ui.PointerOverInterface);
+                Devices.SuppressMouse = false;
+                Devices.ReadingWorldMouse = false;
             }
 
             _ui.NewFrame();
             _screens.Draw(snapshot);
+            // A menu opened during drawing releases the pointer before this frame is presented.
+            if (_pointerCaptured && !_screens.WorldInputEnabled)
+            {
+                _pointerCaptured = false;
+                _ui.SetPointerCaptured(false);
+                Devices.ResetPointer();
+            }
 
             if (_renderer.Begin(out var commands))
             {
@@ -686,6 +703,8 @@ internal sealed class App : IDisposable
                 World.SetMode(ViewMode.Command);
                 World.SelectAllOwned();
             }
+            else if (view == "controls")
+                _screens.OpenControls();
             else if (view == "info")
                 _screens.OpenShipInfo();
             else if (view == "world-settings")
@@ -732,7 +751,7 @@ internal sealed class App : IDisposable
             var due = _options.CaptureAfter + _capturesTaken * _options.CaptureEvery;
             if (_capturesTaken < count && _sinceSplash >= due && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
             {
-                ShowPerformance |= Session is not null;
+                ShowPerformance |= Session is not null && _options.OpenView != "controls";
                 var file = Path.GetFullPath(path);
                 if (count > 1)
                 {

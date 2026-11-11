@@ -5,6 +5,8 @@
     <RootNamespace>Prospect.Server</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="System.CommandLine" />
+    <InternalsVisibleTo Include="Prospect.Tests" />
     <ProjectReference Include="../Prospect.Game/Prospect.Game.csproj" />
   </ItemGroup>
   <Import Project="../Distribution.targets" />

@@ -23,7 +23,7 @@ internal static class Program
                                   Arguments show in process lists; PROSPECT_PASSWORD in the environment works too
           --listing <url|off>     The listing server for public games and the server browser (default: content/net/listing.json)
           --set <id>=<value>      A world setting for local games started in this run; repeat for more (ids and ranges: content/rules/settings.json)
-          --open <view>           With --start local or --join: open the command view, the map or the ship data sheet (command, map, map-menu, map-hover, galaxy, info), start a jump (jump, jump-wormhole, jump-rift), or show the in-game menu (menu) or the world settings in force (world-settings)
+          --open <view>           With --start local or --join: open the command view, the map or the ship data sheet (command, map, map-menu, map-hover, galaxy, info), start a jump (jump, jump-wormhole, jump-rift), or show Controls (controls), the in-game menu (menu) or the world settings in force (world-settings)
           --browser-sample <s>    The server browser shows a fixed sample instead of asking the listing server, for captures:
                                   ready, loading, failed, empty, off, or password (the sample with the password prompt open)
           --sector <x>,<y>,<z>    With --start local or --bench: start in this sector instead of the home sector
@@ -39,6 +39,12 @@ internal static class Program
           --look-to <degrees>     With --look and --capture: turn the camera from --look to this angle, evenly
                                   over the time the captures take
           --target                Pilot view: target the nearest other hull once in space
+          --social-run <seconds>  Run a headless client script, then exit; uses --join or a private local game
+          --player <name>         Player name for the headless script
+          --say <text>            Send one everyone-chat line after admission (with --social-run)
+          --party-say <text>      Send one party-chat line after forming a party (with --social-run)
+          --invite <name>         Invite the first matching roster name once (with --social-run)
+          --accept-invites        Accept invitations automatically (with --social-run)
           --verbose               Log debug messages
           --help                  Show this text
         """;
@@ -50,6 +56,7 @@ internal static class Program
         options.Validation = true;
 #endif
         var verbose = false;
+        var socialScript = new SocialScript();
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -127,7 +134,7 @@ internal static class Program
                 case "--set" when hasValue:
                     options.WorldSettingArgs.Add(args[++i]);
                     break;
-                case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "map-hover" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "world-settings" or "menu":
+                case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "map-hover" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "world-settings" or "menu" or "controls":
                     options.OpenView = args[++i];
                     break;
                 case "--browser-sample" when hasValue:
@@ -193,6 +200,18 @@ internal static class Program
                     options.LookToDegrees = lookTo;
                     i++;
                     break;
+                case "--social-run" when hasValue && int.TryParse(args[i + 1], out var seconds) && seconds is > 0 and <= 3600:
+                    socialScript.Seconds = seconds; i++; break;
+                case "--player" when hasValue:
+                    socialScript.Name = args[++i]; break;
+                case "--say" when hasValue:
+                    socialScript.Say = args[++i]; break;
+                case "--party-say" when hasValue:
+                    socialScript.PartySay = args[++i]; break;
+                case "--invite" when hasValue:
+                    socialScript.Invite = args[++i]; break;
+                case "--accept-invites":
+                    socialScript.Accept = true; break;
                 case "--target":
                     options.TargetNearest = true;
                     break;
@@ -229,6 +248,7 @@ internal static class Program
 
         try
         {
+            if (socialScript.Seconds > 0) return socialScript.Run(options);
             using var app = new App(options);
             app.Run();
             return app.ExitCode;

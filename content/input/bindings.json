@@ -1,5 +1,7 @@
 {
   "actions": {
+    "ToggleControls": ["Key:F1"],
+    "ReleasePointer": ["Key:LeftAlt", "Key:RightAlt"],
     "Pause": ["Key:Escape", "Pad:Start"],
     "TogglePerformance": ["Key:F3"],
     "ToggleFullscreen": ["Key:F11"],

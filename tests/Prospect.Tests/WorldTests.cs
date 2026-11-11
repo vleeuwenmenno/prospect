@@ -1854,3 +1854,16 @@ public sealed class FlightSessionTests
         throw new TimeoutException("The hull did not reach the expected state");
     }
 }
+
+public sealed class SocialWorldTests
+{
+    [Fact]
+    public void SocialLimitsFitTheSimulationAndWireStorage()
+    {
+        var rules = GameContent.Load().Social;
+        Assert.InRange(rules.PartySize, 2, 16);
+        Assert.Equal(0, Prospect.Engine.Time.TickLoop.SimulationHz % rules.StatusHz);
+        Assert.InRange(rules.ChatChars, 1, 256);
+        Assert.InRange(rules.ChatBytes, 1, 768);
+    }
+}

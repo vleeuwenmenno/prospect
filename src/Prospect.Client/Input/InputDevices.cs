@@ -19,6 +19,7 @@ internal sealed unsafe class InputDevices
     private readonly bool[] _keys = new bool[KeyCount];
     private readonly bool[] _keysPressed = new bool[KeyCount];
     private readonly bool[] _mouse = new bool[MouseButtonCount];
+    private readonly bool[] _mouseBlocked = new bool[MouseButtonCount];
     private readonly bool[] _mousePressed = new bool[MouseButtonCount];
     private readonly bool[] _pad = new bool[PadButtonCount];
     private readonly bool[] _padPressed = new bool[PadButtonCount];
@@ -27,28 +28,12 @@ internal sealed unsafe class InputDevices
     private bool _hasCursor;
     private int _padId = -1;
 
-    public InputDevices(GlfwWindow window)
+    internal InputDevices() { }
+
+    public InputDevices(GlfwWindow window) : this()
     {
-        window.OnKey += (_, key, _, action, _) =>
-        {
-            var index = (int)key;
-            if (Muted || (uint)index >= KeyCount || action == GlfwKeyAction.Repeat)
-                return;
-            var down = action == GlfwKeyAction.Press;
-            if (down && !_keys[index])
-                _keysPressed[index] = true;
-            _keys[index] = down;
-        };
-        window.OnMouseButton += (_, button, action, _) =>
-        {
-            var index = (int)button;
-            if (Muted || (uint)index >= MouseButtonCount)
-                return;
-            var down = action == GlfwButtonAction.Press;
-            if (down && !_mouse[index])
-                _mousePressed[index] = true;
-            _mouse[index] = down;
-        };
+        window.OnKey += (_, key, _, action, _) => OnKey(key, action);
+        window.OnMouseButton += (_, button, action, _) => OnMouseButton(button, action);
         window.OnCursorPos += (_, position) =>
         {
             if (Muted)
@@ -67,7 +52,33 @@ internal sealed unsafe class InputDevices
                 return;
             Array.Clear(_keys);
             Array.Clear(_mouse);
+            Array.Clear(_mouseBlocked);
+            ResetPointer();
         };
+    }
+
+    internal void OnKey(GlfwKey key, GlfwKeyAction action)
+    {
+        var index = (int)key;
+        if (Muted || (uint)index >= KeyCount || action == GlfwKeyAction.Repeat)
+            return;
+        var down = action == GlfwKeyAction.Press;
+        if (down && !_keys[index])
+            _keysPressed[index] = true;
+        _keys[index] = down;
+    }
+
+    internal void OnMouseButton(GlfwMouseButton button, GlfwButtonAction action)
+    {
+        var index = (int)button;
+        if (Muted || (uint)index >= MouseButtonCount)
+            return;
+        var down = action == GlfwButtonAction.Press;
+        if (down && !_mouse[index])
+            _mousePressed[index] = true;
+        _mouse[index] = down;
+        if (!down)
+            _mouseBlocked[index] = false;
     }
 
     /// <summary>
@@ -77,8 +88,27 @@ internal sealed unsafe class InputDevices
     public bool Muted { get; set; }
 
     public float2 MousePosition { get; private set; }
-    public float2 MouseDelta { get; private set; }
-    public float Scroll { get; private set; }
+    private float2 _mouseDelta;
+    public float2 MouseDelta { get => SuppressMouse ? default : _mouseDelta; private set => _mouseDelta = value; }
+    private float _scroll;
+    public float Scroll { get => SuppressMouse ? 0 : _scroll; private set => _scroll = value; }
+
+    /// <summary>Temporarily masks mouse input while the world updates behind interface interaction.</summary>
+    public bool ReadingWorldMouse { get; set; }
+
+    private bool _suppressMouse;
+    /// <summary>Masks mouse motion and buttons for gameplay; held UI clicks stay blocked until released.</summary>
+    public bool SuppressMouse
+    {
+        get => _suppressMouse;
+        set
+        {
+            _suppressMouse = value;
+            if (value)
+                for (var i = 0; i < MouseButtonCount; i++)
+                    _mouseBlocked[i] |= _mouse[i];
+        }
+    }
     public bool PadConnected => _padId >= 0;
     public string PadName { get; private set; } = "";
 
@@ -86,9 +116,9 @@ internal sealed unsafe class InputDevices
 
     public bool KeyPressed(GlfwKey key) => _keysPressed[(int)key];
 
-    public bool MouseDown(GlfwMouseButton button) => _mouse[(int)button];
+    public bool MouseDown(GlfwMouseButton button) => !SuppressMouse && (!ReadingWorldMouse || !_mouseBlocked[(int)button]) && _mouse[(int)button];
 
-    public bool MousePressed(GlfwMouseButton button) => _mousePressed[(int)button];
+    public bool MousePressed(GlfwMouseButton button) => !SuppressMouse && (!ReadingWorldMouse || !_mouseBlocked[(int)button]) && _mousePressed[(int)button];
 
     public bool PadDown(GlfwGamepadButton button) => _pad[(int)button];
 

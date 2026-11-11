@@ -78,6 +78,9 @@ public static class FleetOrdersMessage
 {
     public const int MaxOrders = 64;
 
+    /// <summary>Message id, count, and 64 hull ids with orders and three double coordinates.</summary>
+    public const int MaxWireSize = 2 + MaxOrders * (4 + 1 + 24);
+
     public static void Write(ref NetWriter writer, scoped ReadOnlySpan<FleetOrder> orders)
     {
         writer.WriteByte((byte)MessageId.FleetOrders);
