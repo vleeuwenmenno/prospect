@@ -323,6 +323,71 @@ public sealed class HudLayoutTests
     }
 
     [Fact]
+    public void AStripAppearingUnderTheTargetMovesItsCueClearInThatFrame()
+    {
+        var display = new float2(1655, 688);
+        var before = new HudCueRoom(display, 2f, 280f, true, false);
+        var after = new HudCueRoom(display, 2f, 280f, true, true);
+        var point = new float2(827.5f, 426f);
+        var cue = new TargetCue();
+        cue.Step(before, true, true, point, new float2(0, 1), true, 2f, 1f / 60f);
+        Assert.False(cue.Out);
+        cue.Step(after, false, true, point, new float2(0, 1), true, 2f, 1f / 60f);
+        Assert.True(cue.Out);
+        Assert.True(after.Clear(cue.At, ArrowRing(2f)), $"cue {cue.At}");
+    }
+
+    [Fact]
+    public void AColumnGrowingUnderTheTargetMovesItsCueClearInThatFrame()
+    {
+        var display = new float2(1920, 1080);
+        var before = new HudCueRoom(display, 1f, 140f, true, false);
+        var after = new HudCueRoom(display, 1f, 650f, true, false);
+        var point = new float2(250, 500);
+        var cue = new TargetCue();
+        cue.Step(before, true, true, point, new float2(-1, 0), true, 1f, 1f / 60f);
+        Assert.False(cue.Out);
+        cue.Step(after, false, true, point, new float2(-1, 0), true, 1f, 1f / 60f);
+        Assert.True(cue.Out);
+        Assert.True(after.Clear(cue.At, ArrowRing(1f)), $"cue {cue.At}");
+    }
+
+    [Theory]
+    [InlineData(false, 0f, 355f)]
+    [InlineData(false, 60f, 340f)]
+    [InlineData(true, 60f, 340f)]
+    public void TheWholeTargetMarkerMustFitBeforeItCanStayAnchored(bool rock, float pixels, float y)
+    {
+        var room = new HudCueRoom(new float2(1655, 688), 2f, 280f, true, true);
+        var point = new float2(827.5f, y);
+        Assert.True(room.Clear(point, room.Reach));
+        var reach = TargetCue.OnTargetReach(pixels, rock, 2f);
+        Assert.False(room.Clear(point, reach));
+        var cue = new TargetCue();
+        cue.Step(room, true, true, point, new float2(0, 1), true, 2f, 1f / 60f, reach);
+        Assert.True(cue.Out);
+        Assert.True(room.Clear(cue.At, ArrowRing(2f)));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void CurrentPartyRowsReserveTheirActualBottom(bool cards, bool invitation)
+    {
+        var empty = HudLayout.PartyRows(140f, 700f, cards, invitation, 0, 1f);
+        var rows = HudLayout.PartyRows(140f, 700f, cards, invitation, 7, 1f);
+        Assert.Equal(empty.Bottom + 18f, rows.Top);
+        Assert.InRange(rows.Count, 1, 7);
+        Assert.Equal(rows.Top + rows.Step * rows.Count, rows.Bottom);
+        Assert.True(rows.Bottom <= 700f);
+        Assert.True(rows.Bottom > empty.Bottom);
+        var room = new HudCueRoom(new float2(1920, 1080), 1f, rows.Bottom, false, false);
+        Assert.False(room.Clear(new float2(250, rows.Bottom - 10f), room.Reach));
+    }
+
+    [Fact]
     public void TheNavCardIsDroppedWhenItsTieWouldCrossTheLeftColumn()
     {
         var display = new float2(1280, 720);

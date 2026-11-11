@@ -270,6 +270,8 @@ internal sealed partial class ScreenHost
         var width = HudLayout.ColumnWidth(_ui.DisplaySize, Kit.Scale);
         var y = top + Kit.Px(Theme.Space3);
         var pad = Kit.Px(Theme.Space3);
+        var rows = HudLayout.PartyRows(top, limit, cards, social.Invitation.Player != 0,
+            social.PartyCount >= 2 ? OtherMembers(snapshot) : 0, Kit.Scale);
 
         if (social.Invitation.Player != 0)
         {
@@ -297,19 +299,16 @@ internal sealed partial class ScreenHost
             return y;
 
         var others = OtherMembers(snapshot);
-        var captionHeight = Kit.Px(18);
         var rowHeight = Kit.Px(24);
-        var step = (cards ? Kit.Px(58) : rowHeight) + Kit.Px(Theme.Space1);
-        // At least one member is always shown; the rest that do not fit are counted in the caption.
-        var fit = Math.Max(1, (int)((limit - y - captionHeight) / step));
-        var shownMax = Math.Min(others, fit);
+        var step = rows.Step;
+        var shownMax = rows.Count;
         var hidden = others - shownMax;
         var size = _app.Content.Social.PartySize;
         var caption = hidden > 0
             ? Kit.F($"PARTY   {social.PartyCount}/{size}   +{hidden} MORE   {_socialKey} FOR ALL")
             : Kit.F($"PARTY   {social.PartyCount}/{size}");
         Kit.ClippedText(draw, _ui.SansMedium, Theme.FontCaption, new float2(x, y), Theme.Accent, caption, width);
-        y += captionHeight;
+        y = rows.Top;
 
         var shown = 0;
         var designs = snapshot.Content.Designs;

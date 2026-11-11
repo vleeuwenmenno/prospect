@@ -1,4 +1,5 @@
 using Brutal.Numerics;
+using Prospect.Client.Ui;
 using Prospect.Game.World;
 
 namespace Prospect.Client.Screens;
@@ -140,6 +141,20 @@ internal static class HudLayout
 
     /// <summary>The left column's right edge: the sector panel's and the party list's.</summary>
     public static float ColumnRight(float2 display, float scale) => Px(Margin, scale) + ColumnWidth(display, scale);
+
+    /// <summary>The party rows and their bottom edge, shared by drawing and this frame's marker reservations.</summary>
+    public static (float Top, float Step, int Count, float Bottom) PartyRows(float top, float limit, bool cards, bool invitation, int others, float scale)
+    {
+        var y = top + Px(Theme.Space3, scale);
+        if (invitation)
+            y += Px(cards ? 52f : 24f, scale) + Px(Theme.Space2, scale);
+        var step = Px(cards ? 58f : 24f, scale) + Px(Theme.Space1, scale);
+        if (others <= 0)
+            return (y, step, 0, y);
+        y += Px(18f, scale);
+        var count = Math.Min(others, Math.Max(1, (int)((limit - y) / step)));
+        return (y, step, count, y + count * step);
+    }
 
     /// <summary>The recent chat lines' width: as asked, but never into the middle.</summary>
     public static float ChatWidth(float2 display, float scale, float left, float width) => Math.Min(width, MiddleLeft(display, scale) - left);
@@ -392,10 +407,11 @@ internal struct TargetCue
     /// direction is too close to straight behind to mean anything. Returns the eased morph; <see cref="At"/> is
     /// where to draw.
     /// </summary>
-    public float Step(in HudCueRoom room, bool fresh, bool inFront, float2 screen, float2 across, bool settled, float scale, float dt)
+    public float Step(in HudCueRoom room, bool fresh, bool inFront, float2 screen, float2 across, bool settled, float scale, float dt, float targetReach = 0f)
     {
-        var clear = inFront && room.Clear(screen, room.Pad(true));
-        var deep = inFront && room.Clear(screen, room.Pad(true) + MathF.Round(Hysteresis * scale));
+        var reach = Math.Max(room.Reach, targetReach);
+        var clear = inFront && room.Clear(screen, reach);
+        var deep = inFront && room.Clear(screen, reach + MathF.Round(Hysteresis * scale));
 
         // The way to turn: toward the target's point while it is in front, so the arrow points at a target under a
         // panel and agrees with the bracket where one becomes the other; across the view while it is behind.
@@ -437,8 +453,23 @@ internal struct TargetCue
         if (fresh && Out)
             From = border;
         At = Out ? From + (border - From) * morph : screen + (border - screen) * morph;
+        // A panel may appear under the old point, or the animation may cross an occupied corner. Both endpoints
+        // are checked against this frame's layout; skip the obstructed animation rather than draw under it.
+        var extent = Out ? room.Reach : room.Reach + (reach - room.Reach) * (1f - morph);
+        if (!room.Clear(At, extent))
+        {
+            At = Out ? border : screen;
+            From = At;
+            Morph = Out ? 1f : 0f;
+            morph = Morph;
+        }
         return morph;
     }
+
+    /// <summary>The full on-target marker's bounds, including its ring, brackets and stroke.</summary>
+    public static float OnTargetReach(float pixels, bool rock, float scale) =>
+        (rock ? Math.Max(pixels * 1.08f, MathF.Round(14f * scale)) + MathF.Round(5f * scale)
+            : Math.Max(pixels * 1.3f, MathF.Round(18f * scale)) * 1.25f) + MathF.Round(scale);
 
     /// <summary>
     /// The bracket's size at a morph: its size on the target, shrinking to <paramref name="arrow"/>. Off its target

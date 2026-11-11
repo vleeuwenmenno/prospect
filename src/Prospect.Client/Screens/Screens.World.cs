@@ -54,8 +54,7 @@ internal sealed partial class ScreenHost
     private TargetCue _targetCue;
 
     /// <summary>
-    /// Where the left column (sector panel and party list) ended when last drawn. The markers are drawn before the
-    /// panels that cover them, so they keep clear of the column as it was a frame ago.
+    /// Where this frame's left column ends, measured before drawing the markers that must avoid it.
     /// </summary>
     private float _columnBottom;
 
@@ -126,12 +125,6 @@ internal sealed partial class ScreenHost
         {
             var pilot = 1f - world.CommandBlend;
             _jumpPrompt = pilot > 0.01f ? PromptFor(world) : JumpPrompt.None;
-            if (pilot > 0.01f)
-                DrawFlightReadouts(draw, snapshot, world, pilot);
-            if (world.CommandBlend > 0.01f)
-                DrawCommandOverlay(draw, snapshot, world, world.CommandBlend);
-            if (pilot > 0.01f)
-                DrawTargetReadout(draw, snapshot, world, pilot);
             // The party list must keep at least one member on screen above the flight readouts, and above the
             // jump strip while it is drawn and shares the list's width. When the full sector panel leaves no room
             // for the whole list, the panel drops its ore and server lines (they are on the map and in the menu),
@@ -141,9 +134,17 @@ internal sealed partial class ScreenHost
             var gap = Kit.Px(Theme.Space3);
             var compactSector = party > 0 && Kit.Px(Theme.Space5) + SectorPanelHeight(world, false) + gap + party > limit;
             var cards = !compactSector || Kit.Px(Theme.Space5) + SectorPanelHeight(world, true) + gap + party <= limit;
-            var sectorBottom = DrawSectorPanel(draw, snapshot, world, compactSector);
+            var sectorBottom = Kit.Px(Theme.Space5) + SectorPanelHeight(world, compactSector);
+            _columnBottom = HudLayout.PartyRows(sectorBottom, limit, cards, snapshot.Social.Invitation.Player != 0,
+                snapshot.Social.PartyCount >= 2 ? OtherMembers(snapshot) : 0, Kit.Scale).Bottom;
+            if (pilot > 0.01f)
+                DrawFlightReadouts(draw, snapshot, world, pilot);
+            if (world.CommandBlend > 0.01f)
+                DrawCommandOverlay(draw, snapshot, world, world.CommandBlend);
+            if (pilot > 0.01f)
+                DrawTargetReadout(draw, snapshot, world, pilot);
+            DrawSectorPanel(draw, snapshot, world, compactSector);
             var partyBottom = DrawPartyHud(draw, snapshot, world, sectorBottom, limit, cards);
-            _columnBottom = partyBottom;
             if (!_chatOpen)
                 DrawChatFeed(draw, snapshot, partyBottom);
             if (_shipInfoOpen)
@@ -592,7 +593,8 @@ internal sealed partial class ScreenHost
         var fresh = world.TargetHull != _indicatorHull || world.TargetRock != _indicatorRock;
         _indicatorHull = world.TargetHull;
         _indicatorRock = world.TargetRock;
-        var morph = _targetCue.Step(room, fresh, inFront, screen, across, settled, Kit.Scale, _ui.DeltaTime);
+        var targetReach = TargetCue.OnTargetReach(inFront ? pixels : 0f, rock, Kit.Scale);
+        var morph = _targetCue.Step(room, fresh, inFront, screen, across, settled, Kit.Scale, _ui.DeltaTime, targetReach);
         var at = _targetCue.At;
         var anchored = !_targetCue.Out;
 
