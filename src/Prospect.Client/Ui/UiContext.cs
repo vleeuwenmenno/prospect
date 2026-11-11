@@ -78,6 +78,9 @@ internal sealed class UiContext : IDisposable, IInterfacePointer
     /// <summary>True while the pointer is over an interface element that takes it, so the world must not react.</summary>
     public bool PointerOverInterface => ImGui.GetIO().WantCaptureMouse;
 
+    /// <summary>Tests a press position without waiting for ImGui's queued mouse events.</summary>
+    public bool PointerOverWindow(float2 position) => UiPointerInput.OverWindow(position);
+
     /// <summary>True while interface navigation or typing owns the keyboard.</summary>
     public bool WantsKeyboardInput => ImGui.GetIO().WantCaptureKeyboard;
 

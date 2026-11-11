@@ -1,4 +1,5 @@
 using Brutal.GlfwApi;
+using Brutal.Numerics;
 
 namespace Prospect.Client.Input;
 
@@ -13,6 +14,9 @@ internal interface IInterfacePointer
 
     /// <summary>True while the pointer is over the interface, or a press the interface began is held.</summary>
     bool PointerOverInterface { get; }
+
+    /// <summary>True when an input-taking window covers the given press position, independent of queued mouse input.</summary>
+    bool PointerOverWindow(float2 position);
 }
 
 /// <summary>What the frame loop knows, before the world reads input, about who should own the pointer.</summary>
@@ -40,13 +44,12 @@ internal struct PointerFrame
 /// <summary>
 /// Decides, once per frame, whether the pointer is hidden and captured or shown, and what the world may read of the
 /// mouse. The pointer is hidden and captured only in the pilot view, with focus, nothing open and the
-/// hold-to-release key (Shift by default) up. The command view and every open surface show it; never does a frame in
-/// which world input is merely blocked (a shortcut that opened something, interface keyboard ownership lingering for
-/// one frame after a window closed). Those frames used to release the pointer and capture it again, which shows the
-/// system cursor and moves it.
+/// hold-to-release key (Shift by default) up. The command view and every open surface show it. Temporarily blocked
+/// world input does not release capture; doing that used to flash the cursor after shortcuts or lingering interface
+/// keyboard ownership.
 /// <list type="bullet">
-/// <item>Pilot view: the hidden pointer steers. With the release key the pointer is shown and the world gets no
-/// mouse at all, so it can only point at the interface.</item>
+/// <item>Pilot view: the hidden pointer steers. With the release key the pointer is shown; only a right drag begun
+/// over the world may turn the camera, while other mouse controls remain masked.</item>
 /// <item>Command view: the pointer is shown and selects, boxes, orders and turns the camera, except over the
 /// interface. The release key changes nothing there, so pressing or letting go of it never ends a drag.</item>
 /// <item>Anything open: the pointer is shown and the world gets no mouse.</item>
@@ -112,8 +115,8 @@ internal sealed class PointerRouter(InputDevices devices, ActionMap actions, IIn
 
     /// <summary>
     /// Starts the world's read of the mouse. Mouse buttons, motion and wheel are masked when world input is off,
-    /// when the pointer is over the interface, and in the pilot view while the release key is held. A button held through any of those stays masked for the world until it is
-    /// let go, so a click on the interface never becomes a world action and a drag ends when its owner changes.
+    /// when the pointer is over the interface, and in the pilot view while the release key is held. A button held
+    /// through any of those stays masked until it is let go, so an interface click never becomes a world action.
     /// <para>
     /// One exception in the pilot view: with the release key held, a right press that begins over the world (not
     /// in the same poll as the key, which the quarantine drops) turns the camera as free look does, until the
@@ -124,8 +127,9 @@ internal sealed class PointerRouter(InputDevices devices, ActionMap actions, IIn
     {
         devices.ReadingWorldMouse = true;
         var released = !_commandView && ReleaseHeld && worldInput && !Captured;
-        _cameraDrag = released && devices.RawMouseDown(GlfwMouseButton.Right)
-            && (_cameraDrag || (!PointerOverInterface && devices.FreshPress(GlfwMouseButton.Right)));
+        // A release and re-press in one poll starts a new gesture, even if the old drag was ours.
+        _cameraDrag = released && devices.RawMouseDown(GlfwMouseButton.Right) && !PointerOverInterface
+            && (devices.FreshPress(GlfwMouseButton.Right) ? !ui.PointerOverWindow(devices.RightPressPosition) : _cameraDrag);
         devices.CameraDrag = _cameraDrag;
         var worldOwnsPointer = _commandView || !ReleaseHeld;
         devices.SuppressMouse = !worldInput || PointerOverInterface || !worldOwnsPointer;

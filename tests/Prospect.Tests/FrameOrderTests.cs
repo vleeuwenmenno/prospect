@@ -56,6 +56,7 @@ public sealed class FrameOrderTests : IDisposable
         }
 
         public bool PointerOverInterface => ImGui.GetIO().WantCaptureMouse;
+        public bool PointerOverWindow(float2 position) => UiPointerInput.OverWindow(position);
     }
 
     private readonly ImGuiContextPtr _context;
@@ -641,6 +642,89 @@ public sealed class FrameOrderTests : IDisposable
         Assert.True(Vector3.Distance(Sent().Aim, Nose) < 1e-4f);
         Frame(() => Button(GlfwMouseButton.Right, false));
         Assert.Equal(0, _buttonClicks);
+    }
+
+    [Fact]
+    public void ANewRightPressOnTheInterfaceCannotInheritACameraDrag()
+    {
+        PilotWithShift();
+        Frame(() => Button(GlfwMouseButton.Right, true));
+        Frame(() => Move(EmptySpace + new float2(200, 0)));
+        Assert.True(_world.FreeLook);
+        Frame(() => Move(OverButton));
+
+        // Both edges arrive in one poll: the new UI press must not continue the old world drag.
+        Frame(() =>
+        {
+            Button(GlfwMouseButton.Right, false);
+            Button(GlfwMouseButton.Right, true);
+        });
+        Frame(() => Move(EmptySpace));
+        Frame(() => Move(EmptySpace + new float2(300, 0)));
+        Assert.False(_world.FreeLook);
+        Assert.True(Vector3.Distance(Sent().Aim, Nose) < 1e-4f);
+        Assert.Equal(0, _buttonClicks);
+
+        Frame(() => Button(GlfwMouseButton.Right, false));
+        Frame(() => Button(GlfwMouseButton.Right, true));
+        Frame(() => Move(EmptySpace + new float2(400, 0)));
+        Assert.True(_world.FreeLook);
+    }
+
+    [Fact]
+    public void ReleaseMoveOntoUiAndPressInOnePollNeverStartsAnotherCameraDrag()
+    {
+        PilotWithShift();
+        Frame(() => Button(GlfwMouseButton.Right, true));
+        Frame(() => Move(EmptySpace + new float2(100, 0)));
+        Assert.True(_world.FreeLook);
+        Frame(() =>
+        {
+            Button(GlfwMouseButton.Right, false);
+            Move(OverButton);
+            Button(GlfwMouseButton.Right, true);
+        });
+        Assert.False(_world.FreeLook);
+        Assert.True(Vector3.Distance(Sent().Aim, Nose) < 1e-4f);
+        Frame(() => Move(OverButton + new float2(20, 0)));
+        Frame(() => Move(EmptySpace));
+        Assert.False(_world.FreeLook);
+    }
+
+    [Fact]
+    public void AUiPressFollowedByMotionInTheSamePollKeepsItsStartingPosition()
+    {
+        PilotWithShift();
+        Frame(() => Button(GlfwMouseButton.Right, true));
+        Frame(() => Move(EmptySpace + new float2(100, 0)));
+        Frame(() =>
+        {
+            Button(GlfwMouseButton.Right, false);
+            Move(OverButton);
+            Button(GlfwMouseButton.Right, true);
+            Move(EmptySpace + new float2(200, 0));
+        });
+        Assert.False(_world.FreeLook);
+        Assert.True(Vector3.Distance(Sent().Aim, Nose) < 1e-4f);
+        Frame(() => Move(EmptySpace + new float2(300, 0)));
+        Assert.False(_world.FreeLook);
+    }
+
+    [Fact]
+    public void ANewRightPressOverSpaceCanStartAnotherCameraDragInTheSamePoll()
+    {
+        PilotWithShift();
+        Frame(() => Button(GlfwMouseButton.Right, true));
+        Frame(() => Move(EmptySpace + new float2(100, 0)));
+        Assert.True(_world.FreeLook);
+        Frame(() =>
+        {
+            Button(GlfwMouseButton.Right, false);
+            Button(GlfwMouseButton.Right, true);
+        });
+        Frame(() => Move(EmptySpace + new float2(200, 0)));
+        Assert.True(_world.FreeLook);
+        Assert.True(Vector3.Distance(Sent().Aim, Nose) > 0.05f);
     }
 
     [Fact]

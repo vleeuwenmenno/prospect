@@ -16,6 +16,7 @@ public sealed class PointerRoutingTests
         public void SetPointerCaptured(bool captured) => Calls.Add(captured);
         public void NewFrame() { }
         public bool PointerOverInterface { get; set; }
+        public bool PointerOverWindow(Brutal.Numerics.float2 position) => PointerOverInterface;
     }
 
     private static ActionMap Bindings() => ActionMap.Load(Path.Combine(AppContext.BaseDirectory, "content", "input", "bindings.json"));

@@ -70,6 +70,8 @@ internal sealed unsafe class InputDevices
             // A new press starts unmasked; a mask belongs to one press and ends with it.
             _mousePressed[index] = true;
             _mouseBlocked[index] = false;
+            if (button == GlfwMouseButton.Right)
+                RightPressPosition = MousePosition;
         }
 
         _mouse[index] = down;
@@ -150,6 +152,9 @@ internal sealed unsafe class InputDevices
 
     /// <summary>True while the button is physically down, whatever masks the world's read of it.</summary>
     public bool RawMouseDown(GlfwMouseButton button) => _mouse[(int)button];
+
+    /// <summary>Where the latest right press began, before any later motion in the same poll.</summary>
+    public float2 RightPressPosition { get; private set; }
 
     /// <summary>True when the button went down since the last poll and no change of owner has masked that press.</summary>
     public bool FreshPress(GlfwMouseButton button) => _mousePressed[(int)button] && !_mouseBlocked[(int)button];

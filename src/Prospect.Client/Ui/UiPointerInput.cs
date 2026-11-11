@@ -15,6 +15,13 @@ internal static class UiPointerInput
     /// <summary>The position ImGui reads as "no pointer".</summary>
     public static readonly float2 Absent = new(-float.MaxValue, -float.MaxValue);
 
+    /// <summary>Uses ImGui's window hit test at the actual press position, which may precede its queued cursor.</summary>
+    public static bool OverWindow(float2 position)
+    {
+        ImGui.Internal.FindHoveredWindowEx(position, false, out var window, out _);
+        return !window.IsNull();
+    }
+
     public static void Position(ImGuiIOPtr io, float2 position, bool captured)
     {
         if (!captured)
