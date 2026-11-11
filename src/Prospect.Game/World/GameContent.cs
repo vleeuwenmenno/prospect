@@ -197,15 +197,30 @@ public static class HullSim
         return hulls is not null && Collide(ref state, flight, ref body, hulls, travel);
     }
 
+    /// <summary>Replaces an order, discarding unfinished jump work when its destination or kind changes.</summary>
+    public static void SetOrder(ref HullState state, ref HullOrder current, in HullOrder next)
+    {
+        if ((current.Kind != next.Kind || !current.Target.Equals(next.Target)) && state.Jump is JumpPhase.Align or JumpPhase.Charge)
+        {
+            state.Jump = JumpPhase.None;
+            state.JumpTimer = 0;
+            state.JumpCalculation = 0;
+        }
+        current = next;
+    }
+
     /// <summary>
     /// Runs a faster-than-light jump. The hull brakes and turns its nose to the destination; the drive then
     /// charges from the hull's power, as fast as the drive can take it and the battery and generator can give
-    /// it; once charged the hull is gone for the length of the tunnel, and then it is at its destination.
+    /// it. Calculation runs concurrently; once both finish the hull is gone for the length of the tunnel,
+    /// and then it is at its destination.
     /// Returns true while the hull is in the tunnel, when it neither flies nor collides. A hull without a drive
     /// drops the order.
     /// </summary>
     private static bool Jump(ref HullState state, ref HullOrder order, ref FlightInput input, in FlightParams flight)
     {
+        if (state.Jump is JumpPhase.Align or JumpPhase.Charge && (flight.Ftl == FtlKind.None || flight.FtlPower <= 0))
+            order.Kind = OrderKind.None;
         if (order.Kind == OrderKind.Jump && state.Jump == JumpPhase.None)
         {
             if (flight.Ftl == FtlKind.None || flight.FtlPower <= 0)
@@ -216,6 +231,7 @@ public static class HullSim
             {
                 state.Jump = JumpPhase.Align;
                 state.JumpTimer = 0;
+                state.JumpCalculation = 0;
             }
         }
         else if (order.Kind != OrderKind.Jump && state.Jump is JumpPhase.Align or JumpPhase.Charge)
@@ -223,6 +239,7 @@ public static class HullSim
             // The order was withdrawn before the drive fired; whatever it had taken in is lost.
             state.Jump = JumpPhase.None;
             state.JumpTimer = 0;
+            state.JumpCalculation = 0;
         }
 
         switch (state.Jump)
@@ -255,10 +272,11 @@ public static class HullSim
 
                     // The drive takes what the battery holds, up to its own limit. With the battery flat that is
                     // whatever the generator puts back each tick, so a starved hull charges slowly but still charges.
-                    var taken = Math.Min(flight.FtlPower * Dt, state.Energy);
+                    state.JumpCalculation = Math.Min(flight.FtlCalculateSeconds, state.JumpCalculation + Dt);
+                    var taken = Math.Min(Math.Min(flight.FtlPower * Dt, state.Energy), Math.Max(0f, flight.FtlEnergy - state.JumpTimer));
                     state.Energy -= taken;
                     state.JumpTimer += taken;
-                    if (state.JumpTimer < flight.FtlEnergy)
+                    if (state.JumpTimer < flight.FtlEnergy || state.JumpCalculation < flight.FtlCalculateSeconds)
                         return false;
 
                     state.Position = order.Target;

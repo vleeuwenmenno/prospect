@@ -272,7 +272,9 @@ public sealed class WorldSettingEffectTests
             Assert.Equal(plain.Mass, flight.Mass);
 
             var seconds = SecondsCharging(flight, out var energy);
-            Assert.InRange(seconds, normal / factor - 0.1f, normal / factor + 0.1f);
+            Assert.Equal(plain.FtlCalculateSeconds, flight.FtlCalculateSeconds);
+            var expected = Math.Max(flight.FtlCalculateSeconds, flight.FtlEnergy / flight.FtlPower);
+            Assert.InRange(seconds, expected - 0.1f, expected + 0.1f);
 
             // The drive fires when it has taken in the jump's energy: the most it held before that is just short of it.
             Assert.InRange(energy, flight.FtlEnergy - flight.FtlPower * HullSim.Dt - 0.01f, flight.FtlEnergy);
@@ -720,8 +722,7 @@ public sealed class WorldSettingSessionTests
         Assert.Equal(catalog.Defaults, Content.Settings);
         Assert.Equal(1f, Content.Pod.Flight.CollisionShieldCost);
 
-        // A jump is predicted by the client. The drive charges four times as fast as the client's files say;
-        // predicting by those, the client would still be charging when the server had long since moved the hull.
+        // Charging uses the server multiplier; calculation still sets the minimum jump duration.
         var galaxy = snapshot.Galaxy!;
         var far = new SectorCoord(40, 0, -12);
         session.Client.Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = galaxy.CenterOf(far) });
@@ -735,9 +736,9 @@ public sealed class WorldSettingSessionTests
         }
 
         var seconds = (float)Stopwatch.GetElapsedTime(charging).TotalSeconds;
-        var expected = world.Pod.Flight.FtlEnergy / world.Pod.Flight.FtlPower;
+        var expected = Math.Max(world.Pod.Flight.FtlCalculateSeconds, world.Pod.Flight.FtlEnergy / world.Pod.Flight.FtlPower);
         Assert.InRange(seconds, expected - 0.5f, expected + 0.5f);
-        Assert.True(expected * 3 < Content.Pod.Flight.FtlEnergy / Content.Pod.Flight.FtlPower);
+        Assert.Equal(Content.Pod.Flight.FtlCalculateSeconds, world.Pod.Flight.FtlCalculateSeconds);
 
         var arrived = WaitFor(session, hull => hull.Jump == JumpPhase.None && galaxy.SectorOf(hull.Position) == far, 20);
         Assert.Equal(pod.Id, arrived.Id);

@@ -89,6 +89,8 @@ public sealed record FlightRules
 
     /// <summary>How closely the hull must point at its destination before the drive will charge, in degrees.</summary>
     public required float FtlAlignDegrees { get; init; }
+    /// <summary>Seconds of calculation required alongside charging after alignment.</summary>
+    public required float FtlCalculateSeconds { get; init; }
     public required float FtlTunnelSeconds { get; init; }
     public required float FtlArriveSeconds { get; init; }
 
@@ -158,6 +160,7 @@ public sealed class BlockCatalog
             CollisionBounce = r.GetProperty("collisionBounce"u8).GetSingle(),
             FtlEnergyPerTonne = r.GetProperty("ftlEnergyPerTonne"u8).GetSingle(),
             FtlAlignDegrees = r.GetProperty("ftlAlignDegrees"u8).GetSingle(),
+            FtlCalculateSeconds = r.GetProperty("ftlCalculateSeconds"u8).GetSingle(),
             FtlTunnelSeconds = r.GetProperty("ftlTunnelSeconds"u8).GetSingle(),
             FtlArriveSeconds = r.GetProperty("ftlArriveSeconds"u8).GetSingle(),
         };
@@ -499,6 +502,7 @@ public sealed class HullDesign
             FtlPower = ftlPower,
             FtlEnergy = rules.FtlEnergyPerTonne * mass,
             FtlAlignCosine = MathF.Cos(rules.FtlAlignDegrees * MathF.PI / 180f),
+            FtlCalculateSeconds = rules.FtlCalculateSeconds,
             FtlTunnelSeconds = rules.FtlTunnelSeconds,
             FtlArriveSeconds = rules.FtlArriveSeconds,
         };

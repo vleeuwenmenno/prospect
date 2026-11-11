@@ -132,6 +132,7 @@ public sealed class BoxHullSums
             FtlPower = ftlPower,
             FtlEnergy = rules.FtlEnergyPerTonne * mass,
             FtlAlignCosine = MathF.Cos(rules.FtlAlignDegrees * MathF.PI / 180f),
+            FtlCalculateSeconds = rules.FtlCalculateSeconds,
             FtlTunnelSeconds = rules.FtlTunnelSeconds,
             FtlArriveSeconds = rules.FtlArriveSeconds,
         };

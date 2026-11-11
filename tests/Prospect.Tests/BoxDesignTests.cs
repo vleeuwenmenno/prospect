@@ -169,6 +169,11 @@ public sealed class BoxDesignTests
         Assert.Equal(plain.HullPoints * 2, changed.HullPoints);
         Assert.Equal(plain.ShieldRecharge * 3, changed.ShieldRecharge);
         Assert.Equal(plain.FtlPower * 4, changed.FtlPower);
+        Assert.Equal(12f, plain.FtlCalculateSeconds);
+        Assert.Equal(GameContent.Load().Pod.Flight.FtlCalculateSeconds, plain.FtlCalculateSeconds);
+        Assert.Equal(plain.FtlCalculateSeconds, changed.FtlCalculateSeconds);
+        sums.Evaluate(Catalog.Rules with { FtlCalculateSeconds = 0 }, out var instant, out _);
+        Assert.Equal(0, instant.FtlCalculateSeconds);
         Assert.Equal(plain.Inertia, changed.Inertia);
     }
 

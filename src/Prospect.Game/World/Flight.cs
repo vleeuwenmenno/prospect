@@ -138,6 +138,8 @@ public struct FlightParams
 
     /// <summary>Cosine of the largest angle between nose and destination at which the drive will charge.</summary>
     public float FtlAlignCosine;
+    /// <summary>Seconds of calculation required alongside charging after alignment.</summary>
+    public float FtlCalculateSeconds;
     public float FtlTunnelSeconds;
     public float FtlArriveSeconds;
 
@@ -199,6 +201,9 @@ public struct HullState
     /// </summary>
     public JumpPhase Jump;
     public float JumpTimer;
+
+    /// <summary>Completed calculation seconds, saturated at the configured duration.</summary>
+    public float JumpCalculation;
 
     /// <summary>A hull at rest with full hull points, shield and battery.</summary>
     public static HullState Spawn(Double3 position, in FlightParams p) =>

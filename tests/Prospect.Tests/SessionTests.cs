@@ -58,6 +58,34 @@ internal sealed class CountingLogs : ILoggerProvider, ILogger
 
 public sealed class ProtocolTests
 {
+    [Theory]
+    [InlineData(3f, true)]
+    [InlineData(-1f, false)]
+    [InlineData(float.NaN, false)]
+    [InlineData(float.PositiveInfinity, false)]
+    [InlineData(float.NegativeInfinity, false)]
+    public void CalculationWireValueIsBoundedAndRecordSizeIsExact(float calculation, bool valid)
+    {
+        Span<byte> buffer = stackalloc byte[HullRecord.MaxWireSize];
+        var writer = new NetWriter(buffer);
+        new HullRecord
+        {
+            State = new HullState { Orientation = Quaternion.Identity, Jump = JumpPhase.Charge, JumpCalculation = calculation },
+            Order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -1e6) }
+        }.Write(ref writer);
+        Assert.Equal(134, HullRecord.MaxWireSize);
+        Assert.Equal(HullRecord.MaxWireSize, writer.Length);
+        var reader = new NetReader(writer.Written);
+        Assert.Equal(valid, HullRecord.TryRead(ref reader, out var copy));
+        if (valid) Assert.Equal(calculation, copy.State.JumpCalculation);
+        for (var length = 0; length < writer.Length; length++)
+        {
+            reader = new NetReader(writer.Written[..length]);
+            Assert.False(HullRecord.TryRead(ref reader, out _));
+        }
+        Assert.Equal(17u, ProtocolInfo.Version);
+    }
+
     [Fact]
     public void WelcomeRoundTrips()
     {

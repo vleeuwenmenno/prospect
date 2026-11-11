@@ -159,7 +159,7 @@ public static class RockDeltasMessage
 /// <summary>A hull as it appears in a snapshot.</summary>
 public struct HullRecord
 {
-    public const int MaxWireSize = 4 + 4 + 1 + 8 + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 16 + 24;
+    public const int MaxWireSize = 4 + 4 + 1 + 8 + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 4 + 16 + 24;
 
     public uint Id;
     public uint Owner;
@@ -186,6 +186,7 @@ public struct HullRecord
         writer.WriteSingle(State.Heat);
         writer.WriteByte((byte)((State.BoostLocked ? 1 : 0) | (byte)Order.Kind << 1 | (byte)State.Jump << 3 | (State.Boosting ? 1 << 6 : 0)));
         writer.WriteSingle(State.JumpTimer);
+        writer.WriteSingle(State.JumpCalculation);
         writer.WriteSingle(State.Energy);
         writer.WriteSingle(State.Shield);
         writer.WriteSingle(State.Hull);
@@ -215,6 +216,8 @@ public struct HullRecord
         record.State.Jump = (JumpPhase)Math.Min(flags >> 3 & 7, (int)JumpPhase.Arrive);
         record.State.JumpTimer = reader.ReadSingle();
         ok &= float.IsFinite(record.State.JumpTimer);
+        record.State.JumpCalculation = reader.ReadSingle();
+        ok &= float.IsFinite(record.State.JumpCalculation) && record.State.JumpCalculation >= 0;
         record.State.Energy = reader.ReadSingle();
         record.State.Shield = reader.ReadSingle();
         record.State.Hull = reader.ReadSingle();

@@ -1221,6 +1221,115 @@ public sealed class JumpTests
 {
     private static readonly GameContent Content = GameContent.Load();
 
+    [Theory]
+    [InlineData(0f, 1f)]
+    [InlineData(2f, 1f)]
+    [InlineData(1f, 2f)]
+    public void CalculationAndChargeRunConcurrentlyAndDebitOnlyRequiredEnergy(float calculation, float chargeSeconds)
+    {
+        var flight = Content.Pod.Flight;
+        flight.FtlCalculateSeconds = calculation;
+        flight.FtlPower = 7f;
+        flight.FtlEnergy = chargeSeconds * flight.FtlPower;
+        flight.PowerGenerated = flight.IdlePower = 0;
+        var state = HullState.Spawn(Double3.Zero, flight);
+        var initialEnergy = state.Energy;
+        var order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -1e6) };
+        var ticks = 0;
+        while (state.Jump != JumpPhase.Tunnel && ticks++ < 300)
+        {
+            HullSim.Step(ref state, ref order, default, flight);
+            if (state.Jump == JumpPhase.Charge)
+            {
+                Assert.InRange(state.JumpTimer, 0, flight.FtlEnergy);
+                Assert.InRange(state.JumpCalculation, 0, calculation);
+                if (ticks * HullSim.Dt < Math.Min(calculation, chargeSeconds))
+                    Assert.InRange(state.JumpCalculation, ticks * HullSim.Dt - 0.0001f, ticks * HullSim.Dt + 0.0001f);
+            }
+        }
+        Assert.Equal(JumpPhase.Tunnel, state.Jump);
+        Assert.Equal(calculation, state.JumpCalculation);
+        Assert.InRange(ticks * HullSim.Dt, Math.Max(calculation, chargeSeconds) - HullSim.Dt, Math.Max(calculation, chargeSeconds) + 2 * HullSim.Dt);
+        Assert.InRange(initialEnergy - state.Energy, flight.FtlEnergy - 0.002f, flight.FtlEnergy + 0.002f);
+    }
+
+    [Fact]
+    public void EmptyBatteryDoesNotDelayCalculationAndCompletedChargeAllowsRegeneration()
+    {
+        var flight = Content.Pod.Flight;
+        flight.FtlCalculateSeconds = 1;
+        flight.FtlEnergy = 4;
+        flight.FtlPower = 100;
+        flight.PowerGenerated = 1;
+        flight.IdlePower = 0;
+        var state = HullState.Spawn(Double3.Zero, flight);
+        state.Energy = 0;
+        var order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -1e6) };
+        for (var i = 0; i < 120; i++) HullSim.Step(ref state, ref order, default, flight);
+        Assert.Equal(JumpPhase.Charge, state.Jump);
+        Assert.Equal(1, state.JumpCalculation);
+        Assert.InRange(state.JumpTimer, 1.9f, 2.1f);
+        for (var i = 0; i < 125 && state.Jump != JumpPhase.Tunnel; i++) HullSim.Step(ref state, ref order, default, flight);
+        Assert.Equal(JumpPhase.Tunnel, state.Jump);
+
+        flight.FtlCalculateSeconds = 12;
+        flight.EnergyStorage = 100;
+        state = HullState.Spawn(Double3.Zero, flight);
+        state.Energy = 20;
+        for (var i = 0; i < 300; i++) HullSim.Step(ref state, ref order, default, flight);
+        Assert.Equal(JumpPhase.Charge, state.Jump);
+        Assert.Equal(flight.FtlEnergy, state.JumpTimer);
+        var energy = state.Energy;
+        for (var i = 0; i < 60; i++) HullSim.Step(ref state, ref order, default, flight);
+        Assert.InRange(state.Energy - energy, 0.999f, 1.001f);
+    }
+
+    [Fact]
+    public void AlignmentReplacementCancellationAndDriveLossDiscardCalculation()
+    {
+        var flight = Content.Pod.Flight;
+        var state = HullState.Spawn(Double3.Zero, flight);
+        var order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(1e6, 0, 0) };
+        HullSim.Step(ref state, ref order, default, flight);
+        Assert.Equal(JumpPhase.Align, state.Jump);
+        Assert.Equal(0, state.JumpCalculation);
+        order.Target = new Double3(0, 0, -1e6);
+        for (var i = 0; i < 120; i++) HullSim.Step(ref state, ref order, default, flight);
+        Assert.True(state.JumpCalculation > 1);
+        var energy = state.Energy;
+        HullSim.SetOrder(ref state, ref order, new HullOrder { Kind = OrderKind.Jump, Target = new Double3(-1e6, 0, 0) });
+        Assert.Equal(0, state.JumpCalculation);
+        Assert.Equal(0, state.JumpTimer);
+        Assert.Equal(energy, state.Energy);
+        order.Target = new Double3(0, 0, -1e6);
+        for (var i = 0; i < 120; i++) HullSim.Step(ref state, ref order, default, flight);
+        flight.Ftl = FtlKind.None;
+        HullSim.Step(ref state, ref order, default, flight);
+        Assert.Equal(OrderKind.None, order.Kind);
+        Assert.Equal(JumpPhase.None, state.Jump);
+        Assert.Equal(0, state.JumpCalculation);
+        flight = Content.Pod.Flight;
+        order.Kind = OrderKind.Jump;
+        HullSim.Step(ref state, ref order, default, flight);
+        Assert.InRange(state.JumpCalculation, 0, HullSim.Dt);
+        order = default;
+        HullSim.Step(ref state, ref order, default, flight);
+        Assert.Equal(0, state.JumpCalculation);
+    }
+
+    [Fact]
+    public void ChargingTickAllocatesNothingAfterWarmup()
+    {
+        var flight = Content.Pod.Flight;
+        flight.FtlCalculateSeconds = float.MaxValue;
+        var state = HullState.Spawn(Double3.Zero, flight);
+        var order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -1e6) };
+        for (var i = 0; i < 2000; i++) HullSim.Step(ref state, ref order, default, flight);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 2000; i++) HullSim.Step(ref state, ref order, default, flight);
+        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
+    }
+
     [Fact]
     public void EveryDriveKindIsFittedToSomeHull()
     {
@@ -1268,7 +1377,7 @@ public sealed class JumpTests
         Assert.True(state.Velocity.Length() < 0.01f);
 
         // Charging takes the jump's energy at the drive's power, here with a full battery behind it.
-        Assert.InRange(chargeTicks * HullSim.Dt, flight.FtlEnergy / flight.FtlPower - 0.1f, flight.FtlEnergy / flight.FtlPower + 0.1f);
+        Assert.InRange(chargeTicks * HullSim.Dt, Math.Max(flight.FtlCalculateSeconds, flight.FtlEnergy / flight.FtlPower) - 0.1f, Math.Max(flight.FtlCalculateSeconds, flight.FtlEnergy / flight.FtlPower) + 0.1f);
         Assert.True(flight.FtlEnergy / flight.FtlPower > 5f, "the charge should be slow enough to watch");
     }
 
@@ -1276,18 +1385,20 @@ public sealed class JumpTests
     public void ChargingDrawsFromTheBatteryAndAFlatBatteryOnlySlowsItDown()
     {
         var flight = Content.Pod.Flight;
+        // Keep generation low enough that a flat battery outlasts the calculation gate.
+        flight.PowerGenerated = flight.IdlePower + flight.FtlPower / 4f;
         var order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -1e6) };
 
-        float SecondsToFire(float startingEnergy, out float energyAtFire)
+        float SecondsToFire(float startingEnergy, out float lowestEnergy)
         {
             var state = HullState.Spawn(Double3.Zero, flight);
             state.Energy = startingEnergy;
             var jump = order;
             var ticks = 0;
-            energyAtFire = 0;
+            lowestEnergy = startingEnergy;
             while (state.Jump != JumpPhase.Tunnel && ticks++ < 60 * 300)
             {
-                energyAtFire = state.Energy;
+                lowestEnergy = Math.Min(lowestEnergy, state.Energy);
                 HullSim.Step(ref state, ref jump, default, flight);
             }
 

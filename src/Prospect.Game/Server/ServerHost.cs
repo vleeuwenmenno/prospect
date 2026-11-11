@@ -812,7 +812,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 continue;
             ref var info = ref _hulls.Info(handle.Index);
             if (info.Owner == connection.PlayerId && !info.Piloted)
-                info.Order = orders[i].Order;
+                HullSim.SetOrder(ref _hulls.State(handle.Index), ref info.Order, orders[i].Order);
         }
     }
 
@@ -840,7 +840,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             ref var info = ref _hulls.Info(index);
             if (record.OrderId != info.OrderId && record.OrderId == connection.OrderId)
             {
-                info.Order = connection.Order;
+                HullSim.SetOrder(ref _hulls.State(index), ref info.Order, connection.Order);
                 info.OrderId = record.OrderId;
             }
 

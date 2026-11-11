@@ -35,6 +35,9 @@ public struct HullView
     public JumpPhase Jump;
     public float JumpTimer;
 
+    /// <summary>Completed calculation seconds, saturated at the configured duration.</summary>
+    public float JumpCalculation;
+
     /// <summary>Stored energy in megajoules, and how fast it is changing in megawatts.</summary>
     public float Energy;
     public float EnergyRate;
@@ -332,7 +335,7 @@ internal sealed class ClientWorld : IDisposable
             OwnDesign.Evaluate(_ownBlocks, out _flight, out _);
         }
 
-        Reconcile(own.State, header.AckedInput, header.ServerTick);
+        Reconcile(own.State, own.Order, header.AckedInput, header.ServerTick);
     }
 
     /// <summary>Applies asteroid motion records from the server.</summary>
@@ -381,6 +384,7 @@ internal sealed class ClientWorld : IDisposable
                 Order = _order,
                 Jump = _predicted.Jump,
                 JumpTimer = _predicted.JumpTimer,
+                JumpCalculation = _predicted.JumpCalculation,
                 Energy = _predicted.Energy,
                 EnergyRate = _energyRate,
                 Shield = _predicted.Shield,
@@ -467,7 +471,7 @@ internal sealed class ClientWorld : IDisposable
         transport.Send(0, NetChannel.Unreliable, writer.Written);
     }
 
-    private void Reconcile(in HullState authoritative, uint acked, long snapshotTick)
+    private void Reconcile(in HullState authoritative, in HullOrder authoritativeOrder, uint acked, long snapshotTick)
     {
         if (!_hasOwnState)
         {
@@ -475,6 +479,7 @@ internal sealed class ClientWorld : IDisposable
             _predicted = authoritative;
             _ackedSequence = Math.Max(acked, _ackedSequence);
             BuildNear(authoritative, snapshotTick);
+            _near.Info(0).Order = authoritativeOrder;
             return;
         }
 
@@ -485,6 +490,7 @@ internal sealed class ClientWorld : IDisposable
         // Start from what the server computed, for the player's hull and for the hulls near it, and re-apply
         // every input it has not simulated yet.
         BuildNear(authoritative, snapshotTick);
+        _near.Info(0).Order = authoritativeOrder;
         var first = Math.Max(_ackedSequence + 1, _nextSequence > PendingCapacity ? _nextSequence - PendingCapacity + 1 : 1);
         for (var sequence = first; sequence < _nextSequence; sequence++)
         {
@@ -615,7 +621,7 @@ internal sealed class ClientWorld : IDisposable
     private void StepNear(ref HullOrder order, in FlightInput input)
     {
         _field.BeginRound();
-        _near.Info(0).Order = order;
+        HullSim.SetOrder(ref _near.State(0), ref _near.Info(0).Order, order);
         _field.Step(0, input, _rocks, _serverTick);
         order = _near.Info(0).Order;
 
@@ -645,6 +651,7 @@ internal sealed class ClientWorld : IDisposable
             Order = newest.Order,
             Jump = newest.State.Jump,
             JumpTimer = newest.State.JumpTimer,
+            JumpCalculation = newest.State.JumpCalculation,
             Energy = newest.State.Energy,
             Shield = newest.State.Shield,
             Hull = newest.State.Hull,
