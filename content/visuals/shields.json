@@ -1,0 +1,14 @@
+{
+  "collapseSeconds": 0.7,
+  "fadeInSeconds": 1.0,
+  "rippleSeconds": 1.2,
+  "rippleSpeed": 9.0,
+  "rippleWidth": 1.1,
+  "unstableBelow": 0.3,
+  "unstableFull": 0.08,
+  "calmColor": [0.16, 0.34, 0.42],
+  "strainedColor": [0.30, 0.42, 0.62],
+  "collapseColor": [0.9, 0.18, 0.1],
+  "rimGlow": 0.16,
+  "refractionPixels": 2.2
+}

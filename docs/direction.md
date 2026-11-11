@@ -177,6 +177,8 @@ After that:
 
 - In the pilot's own hyperspace transit the tunnel covers the part of their own shield that lies over open sky;
   the part over the hull stays. Built that way so the tunnel never covers the hull. Not yet approved: review it.
+- Proposed fix, in the tone mapper (not built): the own shield marks its pixels 0.4375 already; there, tunnel the
+  copy taken before the shields and add back what the shields added. Needs that copy bound to the tone mapper.
 
 ## Open: servers and players
 

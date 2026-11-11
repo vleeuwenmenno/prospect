@@ -196,6 +196,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private readonly DescriptorSetLayoutEx _shieldLayout;
     private readonly VkPipelineLayout _shieldPipelineLayout;
     private readonly VkPipeline _shieldPipeline;
+    private readonly VkPipeline _shieldMaskPipeline;
+    private ShieldLookConstants _shieldLook;
     private readonly VkDescriptorSet _shieldSet;
     private readonly GpuBuffer[] _shieldVertexBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
     private readonly GpuBuffer[] _shieldInstanceBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
@@ -359,7 +361,11 @@ internal sealed unsafe class SceneRenderer : IDisposable
             },
         ];
         _shieldLayout = device.CreateDescriptorSetLayout(new DescriptorSetLayoutEx.CreateInfo { Bindings = shieldBindings }, null);
-        _shieldPipelineLayout = device.CreatePipelineLayout([_frameLayout.Handle, _shieldLayout.Handle], [], null);
+        _shieldPipelineLayout = device.CreatePipelineLayout(
+            [_frameLayout.Handle, _shieldLayout.Handle],
+            [new VkPushConstantRange { StageFlags = VkShaderStageFlags.FragmentBit, Offset = (ByteSize32)0, Size = (ByteSize32)sizeof(ShieldLookConstants) }],
+            null
+        );
         _tonemapPipelineLayout = device.CreatePipelineLayout(
             [_frameLayout.Handle, _sceneLayout.Handle],
             [new VkPushConstantRange { StageFlags = VkShaderStageFlags.FragmentBit, Offset = (ByteSize32)0, Size = (ByteSize32)sizeof(CompositeConstants) }],
@@ -455,23 +461,33 @@ internal sealed unsafe class SceneRenderer : IDisposable
         _gridPipeline = ScenePipeline(Module(shaders, "grid.vert"), Module(shaders, "grid.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthRead, &translucent);
         _tonemapPipeline = Pipeline(Module(shaders, "fullscreen.vert"), Module(shaders, "tonemap.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthOff, Presets.BlendState.BlendNone, _tonemapPipelineLayout, swapchain.RenderPass);
 
-        // A shield is translucent but stands in front of what it covers: it writes depth, so the jump lenses and
-        // everything drawn after it treat it as a solid thing in front. Its light and its bend are added. Its alpha,
-        // the lens mask, is raised to a hull's and never lowered, so the pilot's own hull under it keeps its mark.
+        // Shields are drawn last, in two passes whose results do not depend on the order of the shells. The first adds
+        // each shell's light and bend, tested against the scene's depth but writing none, so overlapping shells all
+        // add up. The second writes only depth and the lens mask, raised by maximum: the jump lenses then treat a
+        // shield as a solid thing in front, and the pilot's own hull under it keeps its higher mark.
         var shieldAttachment = new VkPipelineColorBlendAttachmentState
         {
             BlendEnable = true,
             SrcColorBlendFactor = VkBlendFactor.One,
             DstColorBlendFactor = VkBlendFactor.One,
             ColorBlendOp = VkBlendOp.Add,
+            SrcAlphaBlendFactor = VkBlendFactor.Zero,
+            DstAlphaBlendFactor = VkBlendFactor.One,
+            AlphaBlendOp = VkBlendOp.Add,
+            ColorWriteMask = rgb,
+        };
+        var shieldBlend = new VkPipelineColorBlendStateCreateInfo { AttachmentCount = 1, Attachments = &shieldAttachment };
+        var maskAttachment = shieldAttachment with
+        {
             SrcAlphaBlendFactor = VkBlendFactor.One,
             DstAlphaBlendFactor = VkBlendFactor.One,
             AlphaBlendOp = VkBlendOp.Max,
-            ColorWriteMask = rgb | VkColorComponentFlags.ABit,
+            ColorWriteMask = VkColorComponentFlags.ABit,
         };
-        var shieldBlend = new VkPipelineColorBlendStateCreateInfo { AttachmentCount = 1, Attachments = &shieldAttachment };
+        var maskBlend = new VkPipelineColorBlendStateCreateInfo { AttachmentCount = 1, Attachments = &maskAttachment };
         var shieldInput = VertexInput.For<MeshVertex, ShieldInstance>();
-        _shieldPipeline = Pipeline(Module(shaders, "shield.vert"), Module(shaders, "shield.frag"), shieldInput, &cullBack, &depthWrite, &shieldBlend, _shieldPipelineLayout, VkRenderPass.NullHandle);
+        _shieldPipeline = Pipeline(Module(shaders, "shield.vert"), Module(shaders, "shield.frag"), shieldInput, &cullBack, &depthRead, &shieldBlend, _shieldPipelineLayout, VkRenderPass.NullHandle);
+        _shieldMaskPipeline = Pipeline(Module(shaders, "shield.vert"), Module(shaders, "shield.frag"), shieldInput, &cullBack, &depthWrite, &maskBlend, _shieldPipelineLayout, VkRenderPass.NullHandle);
 
         var markInput = new VertexInput(1, 3).AddBindingWithAttributes<FtlMark>(0, 0, VkVertexInputRate.Instance);
         _ftlMarkPipeline = ScenePipeline(Module(shaders, "ftl_mark.vert"), Module(shaders, "ftl_mark.frag"), markInput, Presets.Rasterization.Fill.CullNone, &depthRead, &additive);
@@ -502,7 +518,11 @@ internal sealed unsafe class SceneRenderer : IDisposable
     /// How many of <see cref="ShieldDraws"/> the next <see cref="Render"/> draws, after the hulls. Applies to that
     /// one frame only.
     /// </summary>
-    public void QueueShields(int count) => _shieldCount = Math.Clamp(count, 0, _shieldDraws.Length);
+    public void QueueShields(int count, in ShieldLookConstants look)
+    {
+        _shieldCount = Math.Clamp(count, 0, _shieldDraws.Length);
+        _shieldLook = look;
+    }
 
     /// <summary>The instance memory for this frame. Fill it, then describe it to <see cref="Render"/> as batches.</summary>
     public Span<MeshInstance> Instances(int frameIndex) => new((void*)_instanceBuffers[frameIndex].Mapped, MaxInstances);
@@ -595,7 +615,6 @@ internal sealed unsafe class SceneRenderer : IDisposable
         if (lensing)
             KeepScene(commands, _rocksImage, true, ref color, ref depth);
         DrawMeshes(commands, frameIndex, hulls, _hullPipeline);
-        DrawShields(commands, frameIndex, ref color, ref depth);
 
         commands.BindPipeline(VkPipelineBindPoint.Graphics, _dustPipeline);
         commands.Draw(6, DustCount, 0, 0);
@@ -613,6 +632,10 @@ internal sealed unsafe class SceneRenderer : IDisposable
             commands.BindVertexBuffers(0, new ReadOnlySpan<VkBuffer>(in marks), new ReadOnlySpan<ByteSize64>(in zero));
             commands.Draw(6, ftlMarks, 0, 0);
         }
+
+        // Last, so the dust, the command grid and the jump marks are in what the shields bend and stay seen
+        // through their transparent margins.
+        DrawShields(commands, frameIndex, ref color, ref depth);
 
         commands.EndRendering();
         Transition(commands, _colorImage, VkImageAspectFlags.ColorBit, VkImageLayout.ColorAttachmentOptimal, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.FragmentShaderBit);
@@ -649,7 +672,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
     }
 
     /// <summary>
-    /// Draws this frame's shields over the hulls. What is behind them is copied first, so each can bend it.
+    /// Draws this frame's shields over everything else in the scene. What is behind them is copied once first, so
+    /// each can bend it; where two overlap, both bend that one copy, an approximation that holds for faint shells.
     /// </summary>
     private void DrawShields(CommandBuffer commands, int frameIndex, ref VkRenderingAttachmentInfo color, ref VkRenderingAttachmentInfo depth)
     {
@@ -663,11 +687,16 @@ internal sealed unsafe class SceneRenderer : IDisposable
         Span<VkBuffer> buffers = [_shieldVertexBuffers[frameIndex].Buffer, _shieldInstanceBuffers[frameIndex].Buffer];
         Span<ByteSize64> offsets = [zero, zero];
         Span<VkDescriptorSet> sets = [_frameSets[frameIndex], _shieldSet];
-        commands.BindPipeline(VkPipelineBindPoint.Graphics, _shieldPipeline);
+        var look = _shieldLook;
         commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _shieldPipelineLayout, 0, sets, []);
+        commands.PushConstants(_shieldPipelineLayout, VkShaderStageFlags.FragmentBit, 0, new ReadOnlySpan<byte>(&look, sizeof(ShieldLookConstants)));
         commands.BindVertexBuffers(0, buffers, offsets);
-        for (var i = 0; i < count; i++)
-            commands.Draw(_shieldDraws[i].VertexCount, 1, _shieldDraws[i].FirstVertex, i);
+        foreach (var pipeline in (ReadOnlySpan<VkPipeline>)[_shieldPipeline, _shieldMaskPipeline])
+        {
+            commands.BindPipeline(VkPipelineBindPoint.Graphics, pipeline);
+            for (var i = 0; i < count; i++)
+                commands.Draw(_shieldDraws[i].VertexCount, 1, _shieldDraws[i].FirstVertex, i);
+        }
     }
 
     /// <summary>
@@ -804,6 +833,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         foreach (var pipeline in (ReadOnlySpan<VkPipeline>)[_backgroundPipeline, _starPipeline, _dustPipeline, _meshPipeline, _hullPipeline, _gridPipeline, _tonemapPipeline, _ftlMarkPipeline])
             device.DestroyPipeline(pipeline, null);
         device.DestroyPipeline(_shieldPipeline, null);
+        device.DestroyPipeline(_shieldMaskPipeline, null);
         device.DestroyPipelineLayout(_shieldPipelineLayout, null);
         _shieldLayout.Dispose();
         device.DestroyPipelineLayout(_scenePipelineLayout, null);

@@ -84,8 +84,11 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   blocks it still has, so it fits any design and any damage. It shimmers and bends what is behind it by a few
   pixels, most at its rim. An absorbed hit spreads a ripple from where it landed, on the pilot's own hull and on
   everyone else's, aged from when the server says it happened (a hit long over is never shown on joining). Near
-  breaking it tints stronger with slow waves; a break collapses it red and it is gone until the simulation brings
-  it back online, when it fades in. Not checked on a GPU yet: how it looks, its cost per frame, Vulkan validation.
+  breaking it tints stronger with slow waves; a break, or the loss of the last emitter, collapses it red and it is
+  gone until the simulation brings it back online, when it fades in. Collapses and fade-ins are timed from when
+  the server says the change happened: a remote one waits for the hull as drawn, an old one is not replayed.
+  Durations, colours, ripple speed and width, the wavering threshold and the bend are in
+  `content/visuals/shields.json`. Not checked on a GPU yet: how it looks, its cost per frame, Vulkan validation.
 - **Ramming.** Two hulls that meet share the impulse by mass and inertia and both take the same damage, which
   goes by the pair's reduced mass: about the lighter hull's when the other is far heavier. A drone bounces off a
   freighter and a freighter shoves a drone aside. Below the safe speed hulls only nudge each other and can rest

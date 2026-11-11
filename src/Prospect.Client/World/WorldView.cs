@@ -182,7 +182,7 @@ internal sealed class WorldView
     // Where every hull is drawn this frame, with the jumps of hulls seen from outside; worked out in the update.
     private readonly HullVisuals _visuals = new();
     // Every shielded hull's shield as drawn: client side only, from the replicated shield state.
-    private readonly ShieldVisuals _shields = new();
+    private readonly ShieldVisuals _shields = new(ShieldLook.Load());
     private bool _ownInside = true;
 
     /// <summary>Where every hull is drawn this frame; for tests.</summary>
@@ -728,7 +728,7 @@ internal sealed class WorldView
 
         // The lenses need the sky kept apart while a rift or a wormhole is in view, from outside or the pilot's own.
         var lensing = composite.Setup.W > 0f || (constants.Ftl.Y > 0f && constants.Ftl.X > (float)FtlKind.Hyperspace);
-        _scene.QueueShields(_shields.Draws.Length);
+        _scene.QueueShields(_shields.Draws.Length, _shields.Look.Constants);
         _scene.Render(commands, frameIndex, constants, composite, _batches.AsSpan(0, rockBatches), _batches.AsSpan(rockBatches, batchCount - rockBatches), _commandBlend > 0.01f, markCount, lensing);
     }
 

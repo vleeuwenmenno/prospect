@@ -211,13 +211,14 @@ public sealed class ShieldVisualsTests
     private static readonly GameContent Content = GameContent.Load();
     private static readonly HullDesign Pod = Content.Pod;
     private static readonly int Emitter = Array.FindIndex(Pod.Types, t => t.Shield > 0);
+    private static readonly ShieldLook Look = ShieldLook.Load();
 
-    private readonly ShieldVisuals _shields = new();
+    private readonly ShieldVisuals _shields = new(Look);
     private readonly ShieldDraw[] _draws = new ShieldDraw[ShieldVisuals.MaxShields];
     private readonly ShieldInstance[] _instances = new ShieldInstance[ShieldVisuals.MaxShields];
     private readonly MeshVertex[] _vertices = new MeshVertex[ShieldVisuals.MaxVertices];
 
-    private static HullView Hull(uint id, float shield = 1500f, bool offline = false, ulong? blocks = null) =>
+    private static HullView Hull(uint id, float shield = 1500f, bool offline = false, ulong? blocks = null, float changeAge = 0f) =>
         new()
         {
             Id = id,
@@ -226,6 +227,7 @@ public sealed class ShieldVisualsTests
             Orientation = Quaternion.Identity,
             Shield = shield,
             ShieldOffline = offline,
+            ShieldChangeAge = changeAge,
         };
 
     /// <summary>Runs one frame and returns the drawn shell of the hull, if any.</summary>
@@ -272,7 +274,7 @@ public sealed class ShieldVisualsTests
         Assert.Equal(new Vector3(1, 2, 3), new Vector3(drawn.Row0.W, drawn.Row1.W, drawn.Row2.W));
 
         // The emitter is gone: no shield, no shell, and nothing pretends to shut down.
-        var bare = new ShieldVisuals();
+        var bare = new ShieldVisuals(Look);
         bare.Update([Hull(2, 0f, blocks: Pod.FullMask & ~(1UL << Emitter))], Content.Designs, Dt);
         bare.Begin(_draws);
         bare.Add(2, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices);
@@ -296,13 +298,13 @@ public sealed class ShieldVisualsTests
             Assert.True(frames < 200);
         }
 
-        Assert.InRange(frames * Dt, ShieldVisuals.CollapseSeconds - 2 * Dt, ShieldVisuals.CollapseSeconds + 2 * Dt);
+        Assert.InRange(frames * Dt, Look.CollapseSeconds - 2 * Dt, Look.CollapseSeconds + 2 * Dt);
         for (var i = 0; i < 120; i++)
             Assert.Null(Frame(Hull(1, 300f, offline: true)));
 
         // Back online: it fades in over a second, from nearly nothing.
-        var first = Frame(Hull(1, 380f))!.Value;
-        Assert.InRange(first.Params.X, 0f, 2 * Dt / ShieldVisuals.FadeInSeconds);
+        var first = Frame(Hull(1, 380f, changeAge: Dt))!.Value;
+        Assert.InRange(first.Params.X, 0f, 2 * Dt / Look.FadeInSeconds);
         ShieldInstance last = first;
         for (var i = 0; i < 80; i++)
         {
@@ -353,7 +355,7 @@ public sealed class ShieldVisualsTests
         var slot = drawn.Strengths.X > 0 ? drawn.Ripple0 : drawn.Strengths.Y > 0 ? drawn.Ripple1 : drawn.Strengths.Z > 0 ? drawn.Ripple2 : drawn.Ripple3;
         Assert.Equal(radius, slot.X, 3);
         Assert.InRange(slot.W, -0.05f, 0f);
-        for (var i = 0; i < (int)(ShieldVisuals.RippleSeconds / Dt) + 5; i++)
+        for (var i = 0; i < (int)(Look.RippleSeconds / Dt) + 5; i++)
             drawn = Frame(fresh)!.Value;
         Assert.Equal(0f, drawn.Strengths.X + drawn.Strengths.Y + drawn.Strengths.Z + drawn.Strengths.W);
     }
@@ -447,6 +449,137 @@ public sealed class ShieldVisualsTests
         }
 
         return count;
+    }
+
+    [Fact]
+    public void ABreakAheadOfTheDrawnMomentWaitsForIt()
+    {
+        Frame(Hull(1));
+
+        // The newest snapshot says the shield broke a tenth of a second after the moment this remote hull is drawn.
+        var waits = 0;
+        var wait = -0.1f;
+        ShieldInstance drawn;
+        while ((drawn = Frame(Hull(1, 0f, offline: true, changeAge: wait))!.Value).Params.Z == 0f)
+        {
+            Assert.Equal(1f, drawn.Params.X);
+            wait += Dt;
+            waits++;
+            Assert.True(waits < 20);
+        }
+
+        Assert.InRange(waits, 5, 7);
+        Assert.InRange(drawn.Params.Z, 1e-4f, 2 * Dt / Look.CollapseSeconds);
+    }
+
+    [Fact]
+    public void AnOldChangeIsDrawnAsItsEndAndOneMidWayStartsMidWay()
+    {
+        // A packet gap: by the time the break is heard of, its collapse is long over.
+        Frame(Hull(1));
+        Assert.Null(Frame(Hull(1, 0f, offline: true, changeAge: 1.9f)));
+
+        // The same snapshot again changes nothing.
+        Assert.Null(Frame(Hull(1, 0f, offline: true, changeAge: 1.9f)));
+
+        // Half-way through a collapse when first heard of.
+        Frame(Hull(2));
+        var half = Look.CollapseSeconds * 0.5f;
+        var drawn = Frame(Hull(1, 0f, offline: true, changeAge: 1.9f), Hull(2, 0f, offline: true, changeAge: half));
+        Assert.Equal(0.5f, _instances[0].Params.Z, 2);
+
+        // A restart heard of late shows fully on; one heard of half-way fades on from half-way.
+        Frame(Hull(1, 0f, offline: true, changeAge: 1.9f), Hull(2, 0f, offline: true, changeAge: 1.9f));
+        Frame(Hull(1, 400f, changeAge: 1.9f), Hull(2, 400f, changeAge: Look.FadeInSeconds * 0.5f));
+        Assert.Equal(1f, _instances[0].Params.X);
+        Assert.Equal(0.5f, _instances[1].Params.X, 2);
+    }
+
+    [Fact]
+    public void LosingTheLastEmitterIsTimedLikeABreak()
+    {
+        Frame(Hull(1));
+        var lost = Pod.FullMask & ~(1UL << Emitter);
+        Assert.Equal(0f, Frame(Hull(1, 0f, blocks: lost, changeAge: -0.05f))!.Value.Params.Z);
+        for (var i = 0; i < 3; i++)
+            Frame(Hull(1, 0f, blocks: lost, changeAge: -0.05f + (i + 1) * Dt));
+        Assert.True(Frame(Hull(1, 0f, blocks: lost, changeAge: 4 * Dt))!.Value.Params.Z > 0f);
+
+        // Heard of too late to show, nothing collapses.
+        Frame(Hull(2));
+        Frame(Hull(2, 0f, blocks: lost, changeAge: 1.9f));
+        Assert.Equal(0, _shields.Draws.Length);
+    }
+
+    [Fact]
+    public void ARestartAheadOfTheDrawnMomentWaitsAndACorrectedBreakFadesBack()
+    {
+        Frame(Hull(1, 0f, offline: true));
+        for (var i = 0; i < 3; i++)
+            Assert.Null(Frame(Hull(1, 400f, changeAge: -0.1f + i * Dt)));
+        for (var i = 0; i < 6; i++)
+            Frame(Hull(1, 400f, changeAge: -0.05f + i * Dt));
+        Assert.True(Frame(Hull(1, 400f, changeAge: 0.2f))!.Value.Params.X > 0f);
+
+        // The prediction broke the shield, then the server said it held, with its last change long ago: the
+        // collapse gives way to a fade back in, not a snap.
+        var own = new ShieldVisuals(Look);
+        own.Update([Hull(3)], Content.Designs, Dt);
+        own.Update([Hull(3, 0f, offline: true)], Content.Designs, Dt);
+        own.Update([Hull(3, 1500f, changeAge: 1.9f)], Content.Designs, Dt);
+        own.Update([Hull(3, 1500f, changeAge: 1.9f)], Content.Designs, Dt);
+        own.Begin(_draws);
+        own.Add(3, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices);
+        Assert.Equal(1, own.Draws.Length);
+        Assert.InRange(_instances[0].Params.X, 1e-4f, 2 * Dt / Look.FadeInSeconds);
+        Assert.Equal(0f, _instances[0].Params.Z);
+    }
+
+    [Fact]
+    public void AChangeTakenBackBeforeTheDrawnMomentReachesItNeverShows()
+    {
+        Frame(Hull(1));
+        Frame(Hull(1, 0f, offline: true, changeAge: -0.2f));
+        for (var i = 0; i < 30; i++)
+        {
+            var drawn = Frame(Hull(1, 1500f, changeAge: 1.9f))!.Value;
+            Assert.Equal(1f, drawn.Params.X);
+            Assert.Equal(0f, drawn.Params.Z);
+        }
+    }
+
+    [Fact]
+    public void EffectsEndBeforeTheSimulationStopsCountingTheirAge()
+    {
+        // A remote hull is drawn six ticks in the past; an event at the saturated age must still read as over.
+        var oldest = ShieldHit.MaxAgeTicks * HullSim.Dt - 6 * HullSim.Dt;
+        Assert.True(ShieldLook.MaxEffectSeconds < oldest - 0.25f);
+        Assert.True(Look.CollapseSeconds <= ShieldLook.MaxEffectSeconds);
+        Assert.True(Look.FadeInSeconds <= ShieldLook.MaxEffectSeconds);
+        Assert.True(Look.RippleSeconds <= ShieldLook.MaxEffectSeconds);
+    }
+
+    [Theory]
+    [InlineData("\"collapseSeconds\": 0.7", "\"collapseSeconds\": 1.6")]
+    [InlineData("\"rippleSeconds\": 1.2", "\"rippleSeconds\": 0")]
+    [InlineData("\"unstableFull\": 0.08", "\"unstableFull\": 0.5")]
+    [InlineData("\"calmColor\": [0.16, 0.34, 0.42]", "\"calmColor\": [0.16, 0.34]")]
+    [InlineData("\"refractionPixels\": 2.2", "\"refractionPixels\": 9")]
+    [InlineData("\"rippleWidth\": 1.1", "\"rippleWidth\": -1")]
+    public void TheLookRefusesValuesOutOfRange(string from, string to)
+    {
+        var source = File.ReadAllText(AppPaths.Content("visuals", "shields.json"));
+        Assert.Contains(from, source);
+        var path = Path.Combine(Path.GetTempPath(), $"prospect-shields-{Guid.NewGuid():N}.json");
+        File.WriteAllText(path, source.Replace(from, to));
+        try
+        {
+            Assert.Throws<InvalidDataException>(() => ShieldLook.Load(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 }
 

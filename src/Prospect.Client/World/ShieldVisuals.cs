@@ -59,17 +59,13 @@ internal sealed class ShieldVisuals
     /// </summary>
     public const int MaxVertices = MaxShields * 2304;
 
-    /// <summary>How long a ripple spreads before it is gone, in seconds.</summary>
-    public const float RippleSeconds = 1.2f;
+    private readonly ShieldLook _look;
 
-    /// <summary>How long a broken shield's red collapse lasts, and a returning shield takes to fade in.</summary>
-    public const float CollapseSeconds = 0.7f;
-    public const float FadeInSeconds = 1f;
+    /// <summary>Shields that look as <paramref name="look"/> says.</summary>
+    public ShieldVisuals(ShieldLook look) => _look = look;
 
-    // The shield's charge, as a share of its capacity, below which it starts to look unstable, and at which it is
-    // as unstable as it gets.
-    private const float UnstableAbove = 0.3f;
-    private const float UnstableFull = 0.08f;
+    /// <summary>How shields look; the renderer passes it on to the shader.</summary>
+    public ShieldLook Look => _look;
 
     private struct Shell
     {
@@ -95,8 +91,17 @@ internal sealed class ShieldVisuals
         public long Frame;
         public int Shell;
         public byte Serial;
+        /// <summary>Whether the shield is up as drawn now: its last change the drawn moment has reached.</summary>
         public bool Shown;
         public float Fade;
+
+        /// <summary>
+        /// A change the snapshots report that the drawn moment has not reached yet: a remote hull is drawn a little
+        /// in the past. It applies once <see cref="PendingWait"/> seconds have passed.
+        /// </summary>
+        public bool Pending;
+        public bool PendingShown;
+        public float PendingWait;
 
         /// <summary>How far the collapse has gone, 0 to 1; below 0 for none.</summary>
         public float Collapse;
@@ -162,16 +167,10 @@ internal sealed class ShieldVisuals
             var shown = capacity > 0f && !hull.ShieldOffline;
             var radius = designs[design].Flight.Radius;
 
-            Advance(ref shield.Ripple0, dt);
-            Advance(ref shield.Ripple1, dt);
-            Advance(ref shield.Ripple2, dt);
-            Advance(ref shield.Ripple3, dt);
-            if (shield.Collapse >= 0f)
-            {
-                shield.Collapse += dt / CollapseSeconds;
-                if (shield.Collapse >= 1f)
-                    shield.Collapse = -1f;
-            }
+            Advance(ref shield.Ripple0, dt, _look.RippleSeconds);
+            Advance(ref shield.Ripple1, dt, _look.RippleSeconds);
+            Advance(ref shield.Ripple2, dt, _look.RippleSeconds);
+            Advance(ref shield.Ripple3, dt, _look.RippleSeconds);
 
             if (!known)
             {
@@ -180,36 +179,34 @@ internal sealed class ShieldVisuals
                 shield.Fade = shown ? 1f : 0f;
                 shield.Collapse = -1f;
                 shield.Serial = hull.ShieldHit.Serial;
-                if (hull.ShieldHit.Strength > 0 && hull.ShieldHitAge < RippleSeconds)
+                if (hull.ShieldHit.Strength > 0 && hull.ShieldHitAge < _look.RippleSeconds)
                     Start(ref shield, hull.ShieldHit, hull.ShieldHitAge, radius);
             }
             else
             {
+                // What was already running moves on to now; changes found below are placed at their own age.
+                if (shield.Collapse >= 0f)
+                {
+                    shield.Collapse += dt / _look.CollapseSeconds;
+                    if (shield.Collapse >= 1f)
+                        shield.Collapse = -1f;
+                }
+
+                if (shield.Shown)
+                    shield.Fade = Math.Min(1f, shield.Fade + dt / _look.FadeInSeconds);
+
                 if (hull.ShieldHit.Serial != shield.Serial)
                 {
                     shield.Serial = hull.ShieldHit.Serial;
-                    if (hull.ShieldHit.Strength > 0 && hull.ShieldHitAge < RippleSeconds)
+                    if (hull.ShieldHit.Strength > 0 && hull.ShieldHitAge < _look.RippleSeconds)
                         Start(ref shield, hull.ShieldHit, hull.ShieldHitAge, radius);
                 }
 
-                if (shield.Shown && !shown)
-                {
-                    shield.Collapse = 0f;
-                    shield.Fade = 0f;
-                }
-                else if (!shield.Shown && shown)
-                {
-                    shield.Fade = 0f;
-                    shield.Collapse = -1f;
-                }
-
-                shield.Shown = shown;
-                if (shown)
-                    shield.Fade = Math.Min(1f, shield.Fade + dt / FadeInSeconds);
+                Follow(ref shield, shown, hull.ShieldChangeAge, dt);
             }
 
             var fraction = capacity > 0f ? Math.Clamp(hull.Shield / capacity, 0f, 1f) : 0f;
-            shield.Unstable = shown ? 1f - SmoothStep(UnstableFull, UnstableAbove, fraction) : 0f;
+            shield.Unstable = shield.Shown ? 1f - SmoothStep(_look.UnstableFull, _look.UnstableBelow, fraction) : 0f;
         }
 
     }
@@ -334,6 +331,63 @@ internal sealed class ShieldVisuals
         return -1;
     }
 
+    /// <summary>
+    /// Follows the shield to <paramref name="shown"/>, the state the newest snapshot (or the prediction) has, whose
+    /// last change was <paramref name="age"/> seconds before the drawn moment. A change still ahead of the drawn
+    /// moment waits; one already over shows its end without its animation; one in between starts part-way.
+    /// </summary>
+    private void Follow(ref HullShield shield, bool shown, float age, float dt)
+    {
+        if (shield.Pending)
+        {
+            shield.PendingWait -= dt;
+            if (shown != shield.PendingShown)
+            {
+                // The change was taken back before it was drawn (a prediction corrected, say): it never happened.
+                shield.Pending = false;
+            }
+            else if (shield.PendingWait <= 0f)
+            {
+                shield.Pending = false;
+                Apply(ref shield, shown, -shield.PendingWait);
+                return;
+            }
+        }
+
+        if (shown == (shield.Pending ? shield.PendingShown : shield.Shown))
+            return;
+        if (age < 0f)
+        {
+            shield.Pending = true;
+            shield.PendingShown = shown;
+            shield.PendingWait = -age;
+            return;
+        }
+
+        Apply(ref shield, shown, age);
+    }
+
+    /// <summary>Draws a change that happened <paramref name="age"/> seconds ago.</summary>
+    private void Apply(ref HullShield shield, bool shown, float age)
+    {
+        if (shown == shield.Shown)
+            return;
+        if (!shown)
+        {
+            shield.Shown = false;
+            shield.Fade = 0f;
+            shield.Collapse = age < _look.CollapseSeconds ? age / _look.CollapseSeconds : -1f;
+            return;
+        }
+
+        // A shield back before its collapse was over is a corrected prediction, or a change too quick to see:
+        // it fades in from nothing rather than snapping on, however old the change says it is.
+        var collapsing = shield.Collapse >= 0f;
+        shield.Shown = true;
+        shield.Collapse = -1f;
+        shield.Fade = age < _look.FadeInSeconds ? age / _look.FadeInSeconds : collapsing ? 0f : 1f;
+    }
+
     /// <summary>Puts a new ripple in the place of the oldest, or of one that is over.</summary>
     private static void Start(ref HullShield shield, in ShieldHit hit, float age, float radius)
     {
@@ -354,16 +408,16 @@ internal sealed class ShieldVisuals
 
     private static bool Older(in Ripple a, in Ripple b) => a.Strength <= 0f ? b.Strength > 0f : b.Strength > 0f && a.Age > b.Age;
 
-    private static void Advance(ref Ripple ripple, float dt)
+    private static void Advance(ref Ripple ripple, float dt, float life)
     {
         if (ripple.Strength <= 0f)
             return;
         ripple.Age += dt;
-        if (ripple.Age >= RippleSeconds)
+        if (ripple.Age >= life)
             ripple = default;
     }
 
-    private static float4 Packed(in Ripple ripple) => new(ripple.Point.X, ripple.Point.Y, ripple.Point.Z, ripple.Strength > 0f ? ripple.Age : RippleSeconds);
+    private float4 Packed(in Ripple ripple) => new(ripple.Point.X, ripple.Point.Y, ripple.Point.Z, ripple.Strength > 0f ? ripple.Age : _look.RippleSeconds);
 
     private static float SmoothStep(float from, float to, float x)
     {

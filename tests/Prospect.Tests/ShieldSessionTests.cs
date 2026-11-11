@@ -101,6 +101,10 @@ public sealed class ShieldSessionTests
         Assert.True(Find(observer, own.Id, out var seen));
         Assert.True(seen.ShieldOffline);
         Assert.Equal(serial, seen.ShieldHit.Serial);
+
+        // The observer times the break from the server's own count, against the past moment it draws.
+        Assert.InRange(seen.ShieldChangeAge, -0.2f, 0.3f);
+        Assert.InRange(Own(pilot).ShieldChangeAge, 0f, 0.3f);
         Assert.Equal(own.ShieldHit.X, seen.ShieldHit.X);
 
         // Someone joining two seconds later is told the shield is down, but the hit is too old to show.
@@ -120,11 +124,15 @@ public sealed class ShieldSessionTests
                 {
                     restarted = i;
                     Assert.True(now.Shield >= threshold, $"online at {now.Shield} of {threshold}");
+                    Assert.InRange(now.ShieldChangeAge, 0f, 0.1f);
                 }
                 else if (Find(late, own.Id, out var lateView))
                 {
                     if (!lateSaw)
+                    {
                         Assert.True(lateView.ShieldHitAge > 1.5f, $"a late joiner sees a hit {lateView.ShieldHitAge} s old");
+                        Assert.True(lateView.ShieldChangeAge > Prospect.Client.World.ShieldLook.MaxEffectSeconds, $"a late joiner sees a break {lateView.ShieldChangeAge} s old");
+                    }
                     lateSaw = true;
                     Assert.True(lateView.ShieldOffline);
                 }
