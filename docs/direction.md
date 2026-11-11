@@ -51,11 +51,31 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
 - **Parties.** Party members show at the top left: name, ship, shield and hull of the ship they fly.
 - **Factions have ranks.** An owner, members, and ranks in between that may invite and remove.
 - **Tab opens the player menu.** Its first tab lists the faction's members.
-- **A player is recognised by a key file on their machine,** made automatically, no login. For now: something
-  more solid and portable may replace it later.
 
 Factions are not saved yet: they are gone when a server restarts. They must be written to disk once saving
 exists.
+
+## Decided: accounts and friends
+
+- **Persistent accounts use Discord sign-in.** Discord handles credentials and account recovery; PROSPECT
+  does not run an email/password system or require SMTP. Accounts are not implemented yet.
+- **Friends persist across reconnects and game restarts.** They belong to a stable account, not a game's
+  temporary player id or a display name.
+- **Request only Discord identity.** No email, server membership, messages or Discord friends access is needed.
+- **Guest and local play remain available.** A persistent friends list requires signing in.
+
+## Decided: first account release
+
+- **Accounts live alongside the listing service**, with a durable SQLite volume. Public game listings remain
+  temporary and in memory. Existing deployments work with accounts disabled.
+- **Sign-in returns through the game's loopback listener.** The browser returns a one-use code to
+  `127.0.0.1`; the game exchanges it with its private verifier over HTTPS. There is no polling login link.
+- **Use Discord's display name, not its username handle**, cleaned for the interface, with a generated pilot
+  name when none is present. Discord ids stay inside the account service.
+- **Friends are added by PROSPECT friend code first.** Requests and accepted friendships survive restarts.
+  Same-server friend markers and adding friends from the player roster come in a later protocol change.
+- **Account tokens stay in the client process.** Signing in again restores the same account and friends.
+  Game servers never receive the account-service token or a Discord token.
 
 ## Decided: world generation
 
