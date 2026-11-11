@@ -84,7 +84,7 @@ internal sealed partial class ScreenHost
     {
         BeginRoot("##credits"u8);
         var min = new float2(Kit.Px(96), _ui.DisplaySize.Y * 0.12f + Slide(fade));
-        var size = new float2(Kit.Px(680), Kit.Px(648));
+        var size = new float2(Kit.Px(680), Kit.Px(628));
         BeginPanel("##creditspanel"u8, min, size);
 
         Kit.Caption("CREDITS"u8, Theme.Accent);
@@ -113,7 +113,7 @@ internal sealed partial class ScreenHost
         Kit.Body("Vulkan Memory Allocator  -  Advanced Micro Devices  -  MIT"u8);
         Kit.Body("FreeType  -  The FreeType Project  -  FTL"u8);
         Kit.Body("stb  -  Sean Barrett  -  MIT / public domain"u8);
-        Kit.Space(Theme.Space5);
+        Kit.Space(Theme.Space2);
 
         Kit.Caption("TYPEFACES"u8);
         Kit.Space(Theme.Space2);
