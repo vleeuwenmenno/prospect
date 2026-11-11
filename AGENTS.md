@@ -9,6 +9,7 @@ Read `docs/*.md` before designing or building a feature. They say where the game
 to work.
 
 - `docs/direction.md`: what the game is, what is decided, what is still open, networking goals.
+- `docs/blocks-at-scale.md`: the plan for ships of thousands of blocks: data, network, collision, drawing, stages.
 - An item under "Open" is not decided. Ask; do not guess and build.
 - When a decision is made in conversation, move it from "Open" to "Decided" in the same change.
 

@@ -33,9 +33,10 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
 
 ## Decided: building
 
-- **Big builds.** A ship has thousands of blocks; a station can reach about 150,000.
-- **Big builds stay smooth.** 20 ships and 10 stations of that size on screen at once must not hurt the frame
-  rate or the tick.
+- **Big builds that stay smooth.** A ship has thousands of blocks; a station can reach about 150,000. 20 ships
+  and 10 stations of that size on screen at once must not hurt the frame rate or the tick.
+- **A block is a box on the grid.** Any whole size, so a long wall is one block, not hundreds. A box that takes
+  enough damage breaks as a whole; it does not chip into pieces.
 - **Building is free for now.** Later it costs materials.
 - **Build anywhere out of combat:** only when the ship has taken no damage for 30 seconds.
 - **A ship generator comes later.** Pick a style, move sliders, shuffle a seed, preview, build. For players who
@@ -89,5 +90,4 @@ After that:
 
 ## Open: building
 
-- Block model: one block per grid cell, or boxes of any whole size snapped to the grid.
 - Whether building later moves to shipyards only.
