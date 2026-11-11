@@ -5,7 +5,8 @@ The listing server's own contract is in [listing-server.md](listing-server.md).
 
 - Code: `src/Prospect.Game/Server/ServerHost.cs` (visibility, handshake), `src/Prospect.Game/Protocol/Passwords.cs`,
   `src/Prospect.Game/Lobby` (announcer, server browser).
-- No screens yet: hosting and the browser work from the command line and are ready for a screen to call.
+- Screens: New Game (hosting), Join Server (browser, direct connect, password prompt), the session-ended panel
+  (password prompt) and the in-game menu (listed or not). All in `src/Prospect.Client/Screens`.
 
 ## Visibility
 
@@ -28,6 +29,12 @@ A hosted local game is the same server a local game always runs, with a UDP list
 - **The host needs a UDP port that others can reach** (default 27420): a public address, or a port forwarded
   on the router. There is no NAT traversal.
 - The listing server does not check that a listed game can be reached.
+
+In the client: New Game, then "Who can join". Unlisted and Public show the name, password, player slots and port.
+A start that fails (port busy, a name or password that cannot be used) stays on the screen with the reason. In the
+game, the `Esc` menu says whether a public game is listed right now.
+
+The same from the command line:
 
 ```sh
 make run ARGS="--host unlisted --host-name 'Ceres Station'"                 # joined by address
@@ -109,13 +116,22 @@ A public server (dedicated, or a hosted local game):
 5. Announces over IPv4 only: the list shows the address the announcement came from, and the game's transport
    is IPv4.
 
-The server browser (`ServerBrowser`):
+The server browser (`ServerBrowser`, shown by Join Server):
 
 - Fetches the list for the game's own protocol version, off the render thread.
 - Trusts nothing: at most 200 entries, names cleaned, lengths checked again.
 - An address must be a literal IPv4 address in its normal form. Host names, IPv6 and odd spellings are dropped.
 - Private and loopback addresses are dropped unless the listing server itself is on this machine.
 - Nothing is sent to a listed game until the player picks it.
+
+The browser screen:
+
+- A name is drawn as text only, clipped to its column with "...". It is never a widget label, an id or a format
+  string; a row's id is its index in the list. `##`, `###` and `%` show as typed.
+- A character the interface font lacks shows as `?`, the font's fallback glyph, with that glyph's width.
+- The list is sorted once per fetch: games with room first, then the busiest, then by name.
+- Nothing marks any game as official.
+- With the listing server turned off, the screen says so and shows only direct connect.
 
 ## Known limits
 

@@ -15,7 +15,7 @@ internal static class Program
           --join <host[:port]>    Connect to a server straight after the splash
           --host <visibility>     Start a local game others can join: unlisted (by address) or public (also in the
                                   server browser); private is the host alone, as --start local. Needs a UDP port
-                                  that others can reach
+                                  that others can reach. With --start newgame, fills in the New Game screen instead
           --host-name <text>      With --host: the game's name, 1 to 48 characters
           --host-players <n>      With --host: player slots, the host included (default 8)
           --host-port <n>         With --host: the UDP port to listen on (default 27420)
@@ -23,7 +23,9 @@ internal static class Program
                                   Arguments show in process lists; PROSPECT_PASSWORD in the environment works too
           --listing <url|off>     The listing server for public games and the server browser (default: content/net/listing.json)
           --set <id>=<value>      A world setting for local games started in this run; repeat for more (ids and ranges: content/rules/settings.json)
-          --open <view>           With --start local or --join: open the command view, the map or the ship data sheet (command, map, map-menu, map-hover, galaxy, info), start a jump (jump, jump-wormhole, jump-rift), or show the world settings in force (world-settings)
+          --open <view>           With --start local or --join: open the command view, the map or the ship data sheet (command, map, map-menu, map-hover, galaxy, info), start a jump (jump, jump-wormhole, jump-rift), or show the in-game menu (menu) or the world settings in force (world-settings)
+          --browser-sample <s>    The server browser shows a fixed sample instead of asking the listing server, for captures:
+                                  ready, loading, failed, empty, off, or password (the sample with the password prompt open)
           --sector <x>,<y>,<z>    With --start local or --bench: start in this sector instead of the home sector
           --size <W>x<H>          Start windowed at this size
           --validation            Enable Vulkan validation layers (default in debug builds)
@@ -122,8 +124,22 @@ internal static class Program
                 case "--set" when hasValue:
                     options.WorldSettingArgs.Add(args[++i]);
                     break;
-                case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "map-hover" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "world-settings":
+                case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "map-hover" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "world-settings" or "menu":
                     options.OpenView = args[++i];
+                    break;
+                case "--browser-sample" when hasValue:
+                    options.BrowserSample = args[++i] switch
+                    {
+                        "ready" => BrowserSample.Ready,
+                        "loading" => BrowserSample.Loading,
+                        "failed" => BrowserSample.Failed,
+                        "empty" => BrowserSample.Empty,
+                        "off" => BrowserSample.Off,
+                        "password" => BrowserSample.Password,
+                        _ => BrowserSample.None,
+                    };
+                    if (options.BrowserSample == BrowserSample.None)
+                        return Fail($"Unknown browser sample: {args[i]}");
                     break;
                 case "--sector" when hasValue:
                     {
@@ -180,6 +196,10 @@ internal static class Program
                     return Fail($"Unknown or incomplete option: {args[i]}");
             }
         }
+
+        // The New Game screen shows the hosting --host asked for and lets the player start it from there.
+        if (options.StartScreen == Screen.NewGame)
+            options.StartLocalGame = false;
 
         // The password may come from the environment instead, where a process list does not show it.
         if (options.Password is null && Environment.GetEnvironmentVariable("PROSPECT_PASSWORD") is { Length: > 0 } fromEnvironment)

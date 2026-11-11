@@ -97,8 +97,21 @@ The client opens a real window on the developer's desktop, and they are usually 
 - Only launch it with `--capture <file.png>` or `--bench <seconds>`. Both mute every input device, so the window
   cannot grab the pointer or react to their typing. Never start it any other way from an agent session.
 - `make run ARGS="--start local --open <view> --capture /path/shot.png --capture-after 2.5"` saves a screenshot
-  and exits. Views: `command`, `map`, `map-hover` (the map with the pointer on your own sector), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`. Screens
-  without a session: `--start menu|join|settings|newgame|credits`; `--set id=value` shows on `newgame`.
+  and exits. Views: `command`, `map`, `map-hover` (the map with the pointer on your own sector), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`. Screens
+  without a session: `--start menu|join|settings|newgame|credits`; `--set id=value` shows on `newgame`, and so
+  does `--host public --host-name ... --password ...` (with `--start newgame` it fills the hosting section
+  instead of starting a game; the password shows masked). `--open menu` opens the in-game menu, which says
+  whether a hosted public game is listed.
+- The server browser without the network: `--start join --browser-sample <state>`, with `ready` (a fixed list:
+  a name with `##`, `###` and `%`, a 48-character name, one in a script the font lacks, a password, a full game
+  and one entry the browser drops), `loading`, `failed`, `empty`, `off` or `password` (the list with the
+  password prompt open). The list goes through `ServerBrowser.Parse`; its addresses are documentation ranges.
+- The password prompt after a join: run a dedicated server with a password
+  (`PROSPECT_PASSWORD=... make server ARGS="--port 27441 --listing off"`), then
+  `--join 127.0.0.1:27441 --capture ...` ("password required"), the same with a wrong `PROSPECT_PASSWORD`
+  ("wrong password"), and four or more wrong ones within a few seconds for the countdown.
+- A short window: point `XDG_CONFIG_HOME` at a copy of the settings with `"UiScale": 2`; every layout must still
+  hold.
 - A sequence: add `--capture-count <n> --capture-every <sec>` for numbered stills (`shot-00.png`, ...); each one
   prints the own hull's jump stage and progress. The pod charges for about 7.5 s after a jump order, then 3 s of
   tunnel and 1.5 s of arrival, so `--open jump --capture-after 6 --capture-count 28 --capture-every 0.3` covers

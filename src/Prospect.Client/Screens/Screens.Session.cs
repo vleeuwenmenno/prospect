@@ -3,12 +3,26 @@ using Brutal.Numerics;
 using Prospect.Client.Input;
 using Prospect.Client.Ui;
 using Prospect.Game.Client;
+using Prospect.Game.Lobby;
+using Prospect.Game.Protocol;
 
 namespace Prospect.Client.Screens;
 
 internal sealed partial class ScreenHost
 {
     private bool _sessionMenuOpen;
+
+    /// <summary>The password typed on the session-ended panel, to join the same server again with it.</summary>
+    private readonly ImInputString _rejoinPassword = new(PasswordBytes);
+    private bool _rejoinPasswordShown;
+    private bool _rejoinFocus;
+    private string _rejoinError = "";
+
+    /// <summary>The session the ended panel was last set up for, so its countdown and focus start once per session.</summary>
+    private GameSession? _endedSession;
+
+    /// <summary>Interface time at which a server that counted too many wrong passwords takes the next one.</summary>
+    private float _retryAt;
 
     private void DrawSession(SessionSnapshot snapshot, float fade)
     {
@@ -71,15 +85,29 @@ internal sealed partial class ScreenHost
 
     private void DrawSessionEnded(SessionSnapshot snapshot, float fade)
     {
+        var reason = snapshot.EndReason;
+        var asksPassword =
+            (reason is SessionEndReason.PasswordRequired or SessionEndReason.WrongPassword or SessionEndReason.TooManyAttempts)
+            && _app.Session is { RemoteHost: not null };
+        if (!ReferenceEquals(_endedSession, _app.Session))
+        {
+            _endedSession = _app.Session;
+            _rejoinPassword.Clear();
+            _rejoinPasswordShown = false;
+            _rejoinError = "";
+            _retryAt = _ui.Time + (reason == SessionEndReason.TooManyAttempts ? snapshot.RetryAfterSeconds : 0);
+            _rejoinFocus = asksPassword;
+        }
+
         BeginRoot("##ended"u8);
-        var size = new float2(Kit.Px(560), Kit.Px(260));
+        var size = new float2(Kit.Px(560), Math.Min(Kit.Px(asksPassword ? 352 : 260), _ui.DisplaySize.Y - Kit.Px(24)));
         var min = (_ui.DisplaySize - size) * 0.5f + new float2(0, Slide(fade));
         BeginPanel("##endedpanel"u8, min, size);
 
         Kit.Caption("SESSION ENDED"u8, Theme.Bad);
         Kit.Space(Theme.Space1);
         Kit.Heading(
-            snapshot.EndReason switch
+            reason switch
             {
                 SessionEndReason.ConnectFailed => "No answer from the server"u8,
                 SessionEndReason.ConnectionLost => "Connection lost"u8,
@@ -95,7 +123,7 @@ internal sealed partial class ScreenHost
         );
         Kit.Space(Theme.Space3);
         Kit.Body(
-            snapshot.EndReason switch
+            reason switch
             {
                 SessionEndReason.ConnectFailed => "Check the address and port, and that the server is running."u8,
                 SessionEndReason.ConnectionLost => "The server stopped responding. Your network may have dropped."u8,
@@ -103,32 +131,73 @@ internal sealed partial class ScreenHost
                 SessionEndReason.ServerFull => "Every player slot is taken. Try again later."u8,
                 SessionEndReason.VersionMismatch => "Update the game so it matches the server's version."u8,
                 SessionEndReason.Refused => "The server did not accept this client."u8,
-                SessionEndReason.PasswordRequired => "Join again with the password its host gave you."u8,
-                SessionEndReason.WrongPassword => "That is not this server's password."u8,
-                SessionEndReason.TooManyAttempts => "The server is making this address wait before the next try."u8,
+                SessionEndReason.PasswordRequired => "Enter the password its host gave you."u8,
+                SessionEndReason.WrongPassword => "That is not this server's password. Try again."u8,
+                SessionEndReason.TooManyAttempts => "The server makes this address wait before the next try."u8,
                 _ => "You have left the session."u8,
             }
         );
-        Kit.Space(Theme.Space6);
-        if (Kit.Button("Back to Menu"u8, ButtonKind.Primary, 200) || BackPressed())
+        Kit.Space(asksPassword ? Theme.Space4 : Theme.Space6);
+
+        var leave = false;
+        if (asksPassword)
+        {
+            var wait = (int)MathF.Ceiling(_retryAt - _ui.Time);
+            if (_rejoinFocus)
+            {
+                ImGui.SetKeyboardFocusHere();
+                _rejoinFocus = false;
+            }
+
+            var submit = Kit.PasswordField("PASSWORD"u8, "##rejoinpassword"u8, _rejoinPassword, ref _rejoinPasswordShown, 420);
+            Kit.Space(Theme.Space2);
+            if (wait > 0)
+                Kit.Label(_ui.Sans, Theme.FontSmall, Theme.Accent, Kit.F($"You can try again in {wait} s."));
+            else
+                Kit.Label(_ui.Sans, Theme.FontSmall, Theme.Bad, _rejoinError.Length > 0 ? _rejoinError : " ");
+            Kit.Space(Theme.Space3);
+
+            var ready = wait <= 0 && !_rejoinPassword.IsEmpty;
+            if (Kit.Button("Join"u8, ButtonKind.Primary, 160, ready) || (submit && ready))
+            {
+                var password = _rejoinPassword.ToString();
+                _rejoinPassword.Clear();
+                if (!_app.RejoinWithPassword(password, out var error))
+                    _rejoinError = error;
+            }
+
+            ImGui.SameLine(0, Kit.Px(Theme.Space3));
+            leave = Kit.Button("Back to Menu"u8, ButtonKind.Secondary, 200);
+        }
+        else
+        {
+            leave = Kit.Button("Back to Menu"u8, ButtonKind.Primary, 200);
+        }
+
+        if (leave || BackPressed())
             _app.LeaveSession();
 
         EndPanel();
         EndRoot();
     }
 
+    /// <summary>Opens the in-game menu.</summary>
+    public void OpenSessionMenu() => _sessionMenuOpen = true;
+
     private void DrawSessionMenu(SessionSnapshot snapshot)
     {
         DrawDim(0.6f);
         BeginRoot("##sessionmenu"u8);
-        var size = new float2(Kit.Px(424), Kit.Px(376));
+        var size = new float2(Kit.Px(424), Math.Min(Kit.Px(452), _ui.DisplaySize.Y - Kit.Px(24)));
         var min = (_ui.DisplaySize - size) * 0.5f;
         BeginPanel("##sessionmenupanel"u8, min, size);
 
         Kit.Caption(_app.Session is { IsLocal: true } ? "LOCAL GAME"u8 : "MULTIPLAYER"u8, Theme.Accent);
         Kit.Space(Theme.Space1);
         Kit.Heading("Menu"u8);
-        Kit.Space(Theme.Space4);
+        Kit.Space(Theme.Space2);
+        DrawGameStatus(snapshot);
+        Kit.Space(Theme.Space3);
 
         if (Kit.MenuItem("Resume"u8, 360))
             _sessionMenuOpen = false;
@@ -147,6 +216,56 @@ internal sealed partial class ScreenHost
 
         EndPanel();
         EndRoot();
+    }
+
+    /// <summary>
+    /// The game's name, who can join it, and for a public game this process hosts whether the listing server has
+    /// it right now, so a host can see that listing failed. The name comes from the server and is drawn as text.
+    /// </summary>
+    private void DrawGameStatus(SessionSnapshot snapshot)
+    {
+        var draw = ImGui.GetWindowDrawList();
+        var width = ImGui.GetContentRegionAvail().X;
+        var at = ImGui.GetCursorScreenPos();
+        var lineHeight = Kit.Measure(_ui.Sans, Theme.FontBody, "Ag"u8).Y;
+        Kit.ClippedText(draw, _ui.Sans, Theme.FontBody, at, Theme.Text, snapshot.ServerName, width);
+        ImGui.Dummy(new float2(width, lineHeight));
+        Kit.Space(Theme.Space1);
+
+        var visibility = snapshot.Visibility switch
+        {
+            ServerVisibility.Public => "PUBLIC"u8,
+            ServerVisibility.Unlisted => "UNLISTED"u8,
+            _ => "PRIVATE"u8,
+        };
+        var players = snapshot.MaxPlayers > 0 ? Kit.F($"{visibility}   {snapshot.PlayerCount}/{snapshot.MaxPlayers} PLAYERS") : Kit.F($"{visibility}   {snapshot.PlayerCount} PLAYERS");
+        Kit.Label(_ui.Mono, Theme.FontCaption, Theme.TextDim, players);
+        if (snapshot.PasswordProtected)
+        {
+            var lockAt = ImGui.GetItemRectMax();
+            Kit.Lock(draw, new float2(lockAt.X + Kit.Px(14), (ImGui.GetItemRectMin().Y + lockAt.Y) * 0.5f), Theme.TextDim);
+        }
+
+        if (_app.Session is not { IsLocal: true } session || snapshot.Visibility != ServerVisibility.Public)
+            return;
+
+        Kit.Space(Theme.Space1);
+        var host = _app.Listing?.Url.Host ?? "";
+        switch (session.LocalAnnounce)
+        {
+            case AnnounceState.Listed:
+                Kit.Label(_ui.Sans, Theme.FontSmall, Theme.Good, Kit.F($"Listed on {host}."));
+                break;
+            case AnnounceState.Announcing:
+                Kit.Label(_ui.Sans, Theme.FontSmall, Theme.TextDim, Kit.F($"Announcing to {host}..."));
+                break;
+            case AnnounceState.Retrying:
+                Kit.Label(_ui.Sans, Theme.FontSmall, Theme.Bad, Kit.F($"Not listed: {host} did not take it. Trying again."));
+                break;
+            default:
+                Kit.Label(_ui.Sans, Theme.FontSmall, Theme.Bad, "Not listed: the server list is turned off."u8);
+                break;
+        }
     }
 
     /// <summary>The performance overlay: frame pacing, simulation load and allocation, drawn over any screen.</summary>

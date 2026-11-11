@@ -80,8 +80,11 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 
 - **Hosting.** A game is private (the host alone, no network listener), unlisted (joined by address) or public
   (also on the list). A local game can be hosted for others: the same in-process server, listening on UDP as
-  well. A server has a name its host chooses. From the command line for now; see
-  [Hosting and joining](#hosting-and-joining) and [docs/hosting.md](docs/hosting.md).
+  well. A server has a name its host chooses. The New Game screen sets who can join, the name, a password, the
+  player slots and the port; see [Hosting and joining](#hosting-and-joining) and [docs/hosting.md](docs/hosting.md).
+- **Server browser.** Join Server opens on the list of public games: name, players, a lock for a password, version.
+  Refresh, loading, failed and empty states; entries the game dropped as invalid are counted. Joining a game with a
+  password asks for it first. Direct connect (address, port, optional password) sits beside the list.
 - **Passwords.** An unlisted or public game can have one. It is never sent: the server challenges, the client
   answers with a keyed hash, and wrong tries are slowed down per address. It protects the password, not the
   traffic: game packets are not encrypted.
@@ -92,9 +95,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 - **Releases.** Pushing a tag (`server-v…`, `list-v…` or `v…`) publishes the game server and listing server container
   images to GitHub Container Registry. See [docs/releasing.md](docs/releasing.md).
 
-Not there yet: the server browser screen and the hosting screen (both work underneath and from the command
-line; the join screen still takes an address only and cannot ask for a password), NAT traversal (a host needs
-a UDP port others can reach), encryption of game traffic, IPv6, mining, taking control of ships owned by other players (permissions), jump range and cost, gates,
+Not there yet: NAT traversal or automatic port forwarding (a host needs a UDP port others can reach), encryption of game traffic, IPv6, mining, taking control of ships owned by other players (permissions), jump range and cost, gates,
 saving. Stations and gas fields are not generated yet; asteroids do not crack into pieces, and ore shows only as
 a tint. Asteroids come in a shared set of shapes until mining gives each one its own body. Designs are limited to 64
 blocks for now, because block state is sent as one bit per block.
@@ -119,7 +120,8 @@ blocks for now, because block state is sent as one bit per block.
 | Menu or back | `Esc` | `Start` |
 
 On menu screens the arrow keys or the D-pad move between rows, left and right change the focused setting, and
-`Enter` or `A` selects. The mouse works too: click a row's arrows, or drag a slider.
+`Enter` or `A` selects. The mouse works too: click a row's arrows, or drag a slider. In the server browser, the
+row with focus is the one picked: `Enter` or a double-click joins it.
 
 The pointer turns the view, not the hull. The hull swings its nose onto the view line whenever it is under
 thrust, so looking around while coasting costs nothing; hold the right mouse button to look around under thrust
@@ -227,8 +229,11 @@ make run ARGS="--host public --listing http://127.0.0.1:8080"              # aga
 - `--listing <url>` picks another listing server; `--listing off` turns it off. HTTPS only, except on this machine.
 - A server's settings file can hold `name`, `visibility`, `port`, `maxPlayers`, `password` and `listing` under
   `"server"`. An argument wins over `PROSPECT_PASSWORD`, which wins over the file.
-- In a game, the sector panel shows the server's name, its visibility and the player slots.
-- Not there yet: a screen to host from, the server browser, and a password prompt on the join screen.
+- In a game, the sector panel shows the server's name, its visibility and the player slots. The `Esc` menu shows
+  them too, and for a public game you host, whether the listing server has it right now.
+- In the client: New Game sets the hosting, Join Server lists public games and joins by address. A join that ends
+  with "password required" or "wrong password" asks for the password on the spot; after too many wrong ones it
+  counts down the server's wait before the next try.
 
 How the password and the list work: [docs/hosting.md](docs/hosting.md).
 

@@ -197,21 +197,34 @@ internal static class Kit
         return pressed;
     }
 
-    /// <summary>A chamfered push button. A width of zero sizes it to its label.</summary>
-    public static bool Button(ImString label, ButtonKind kind = ButtonKind.Secondary, float width = 0f)
+    /// <summary>
+    /// A chamfered push button. A width of zero sizes it to its label. A disabled button is drawn muted and
+    /// cannot be pressed or focused.
+    /// </summary>
+    public static bool Button(ImString label, ButtonKind kind = ButtonKind.Secondary, float width = 0f, bool enabled = true)
     {
         var draw = ImGui.GetWindowDrawList();
         var position = ImGui.GetCursorScreenPos();
         var textSize = Measure(_ui.SansMedium, Theme.FontBody, label);
         var size = new float2(width > 0 ? Px(width) : textSize.X + Px(Theme.Space5 * 2), Px(Theme.ControlHeight));
+        if (!enabled)
+            ImGui.BeginDisabled();
         var pressed = ImGui.InvisibleButton(label, size);
-        var t = Animate(ImGui.GetItemID(), IsHot() ? 1f : 0f);
+        var t = Animate(ImGui.GetItemID(), enabled && IsHot() ? 1f : 0f);
         var held = ImGui.IsItemActive();
+        if (!enabled)
+            ImGui.EndDisabled();
 
         var max = position + size;
         var chamfer = Px(Theme.Chamfer);
         uint textColor;
-        if (kind == ButtonKind.Primary)
+        if (!enabled)
+        {
+            ChamferFill(draw, position, max, Color(Theme.Panel), chamfer);
+            ChamferOutline(draw, position, max, Color(Theme.Line), chamfer);
+            textColor = Theme.TextMute;
+        }
+        else if (kind == ButtonKind.Primary)
         {
             ChamferFill(draw, position, max, Color(held ? Theme.Accent : Mix(Theme.Accent, Theme.AccentBright, t)), chamfer);
             textColor = Theme.AccentInk;
@@ -244,6 +257,107 @@ internal static class Kit
         if (ImGui.IsItemActive())
             ImGui.GetWindowDrawList().AddRect(ImGui.GetItemRectMin(), ImGui.GetItemRectMax(), Color(Theme.Accent));
         return submitted;
+    }
+
+    /// <summary>
+    /// A text field for a password: masked unless the player shows it with the SHOW link beside it. Returns true
+    /// when Enter is pressed in it. <paramref name="shown"/> is the screen's own, so each field remembers its state.
+    /// </summary>
+    public static bool PasswordField(ImString caption, ImString id, ImInputString value, ref bool shown, float width)
+    {
+        var flags = ImGuiInputTextFlags.NoUndoRedo | (shown ? default : ImGuiInputTextFlags.Password);
+        var submitted = TextField(caption, id, value, width, flags);
+        var fieldMax = ImGui.GetItemRectMax();
+        var fieldMin = ImGui.GetItemRectMin();
+        ImGui.SameLine(0, Px(Theme.Space2));
+        var linkHeight = Measure(_ui.SansMedium, Theme.FontCaption, "SHOW"u8).Y + Px(Theme.Space1 * 2);
+        ImGui.SetCursorScreenPos(new float2(ImGui.GetCursorScreenPos().X, fieldMin.Y + (fieldMax.Y - fieldMin.Y - linkHeight) * 0.5f));
+        ImGui.PushID(id);
+        if (LinkButton(shown ? "HIDE"u8 : "SHOW"u8))
+            shown = !shown;
+        ImGui.PopID();
+        ImGui.SetCursorScreenPos(new float2(fieldMin.X, fieldMax.Y));
+        ImGui.Dummy(float2.Zero);
+        return submitted;
+    }
+
+    /// <summary>
+    /// Draws untrusted text, such as a server's name from the list, cut to a width with "..." when it does not
+    /// fit. The text only ever goes to a draw call: never into a widget label, an id or a format string, so
+    /// <c>##</c> and <c>%</c> in it are shown as they are. A character the font lacks is drawn as the font's
+    /// fallback glyph, with that glyph's width, so the layout holds. Returns the width drawn.
+    /// </summary>
+    public static float ClippedText(ImDrawListPtr draw, ImFontPtr font, float size, float2 position, uint rgb, string text, float maxWidth)
+    {
+        // A name is at most 96 UTF-16 units; anything longer is cut before it is measured.
+        var chars = text.AsSpan(0, Math.Min(text.Length, 128));
+        Span<byte> utf8 = stackalloc byte[128 * 3];
+        var length = System.Text.Encoding.UTF8.GetBytes(chars, utf8);
+        return ClippedText(draw, font, size, position, rgb, (ReadOnlySpan<byte>)utf8[..length], maxWidth);
+    }
+
+    /// <summary>As <see cref="ClippedText(ImDrawListPtr, ImFontPtr, float, float2, uint, string, float)"/>, for UTF-8 text such as <see cref="F"/> makes.</summary>
+    public static float ClippedText(ImDrawListPtr draw, ImFontPtr font, float size, float2 position, uint rgb, ReadOnlySpan<byte> bytes, float maxWidth)
+    {
+        if (bytes.Length > 512)
+            bytes = bytes[..512];
+        position = new float2(MathF.Round(position.X), MathF.Round(position.Y));
+
+        ImGui.PushFont(font, size);
+        var full = ImGui.CalcTextSize(bytes).X;
+        float drawn;
+        if (full <= maxWidth)
+        {
+            draw.AddText(position, Color(rgb), bytes);
+            drawn = full;
+        }
+        else
+        {
+            // The longest prefix, cut between characters, that leaves room for the dots: a binary search over
+            // the offsets where characters start.
+            Span<int> starts = stackalloc int[bytes.Length + 1];
+            var count = 0;
+            for (var i = 0; i < bytes.Length; i++)
+            {
+                if ((bytes[i] & 0xC0) != 0x80)
+                    starts[count++] = i;
+            }
+
+            starts[count] = bytes.Length;
+            var room = maxWidth - ImGui.CalcTextSize("..."u8).X;
+            int low = 0, high = count;
+            while (low < high)
+            {
+                var middle = (low + high + 1) / 2;
+                if (ImGui.CalcTextSize(bytes[..starts[middle]]).X <= room)
+                    low = middle;
+                else
+                    high = middle - 1;
+            }
+
+            low = starts[low];
+            var prefix = bytes[..low];
+            var prefixWidth = ImGui.CalcTextSize(prefix).X;
+            draw.PushClipRect(position - new float2(0, size), position + new float2(maxWidth, size * 3), true);
+            draw.AddText(position, Color(rgb), prefix);
+            draw.AddText(position + new float2(prefixWidth, 0), Color(rgb), "..."u8);
+            draw.PopClipRect();
+            drawn = maxWidth;
+        }
+
+        ImGui.PopFont();
+        return drawn;
+    }
+
+    /// <summary>A small padlock drawn from shapes, so it never depends on a glyph in the font.</summary>
+    public static void Lock(ImDrawListPtr draw, float2 center, uint rgb)
+    {
+        var body = new float2(Px(10), Px(8));
+        var bodyMin = center + new float2(-body.X * 0.5f, -Px(1));
+        draw.AddRectFilled(bodyMin, bodyMin + body, Color(rgb));
+        var radius = Px(3.5f);
+        draw.PathArcTo(new float2(center.X, bodyMin.Y), radius, MathF.PI, MathF.PI * 2f, 12);
+        draw.PathStroke(Color(rgb), ImDrawFlags.None, Px(1.6f));
     }
 
     /// <summary>An on/off switch with its label on the left. Returns true when toggled.</summary>

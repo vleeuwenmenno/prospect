@@ -44,6 +44,9 @@ internal sealed class AppOptions
 
     /// <summary>The listing server's address, <c>off</c>, or null for the content's default.</summary>
     public string? Listing { get; set; }
+    /// <summary>What the server browser shows instead of the listing server's answer; for scripted screenshots.</summary>
+    public BrowserSample BrowserSample { get; set; }
+
     /// <summary>Open the command view or the map once in space; for scripted screenshots.</summary>
     public string? OpenView { get; set; }
     public float BenchSeconds { get; set; }
@@ -223,6 +226,8 @@ internal sealed class App : IDisposable
         World = new WorldView(Devices, Actions, Settings, Jobs, _scene, Content.Designs);
 
         _screens = new ScreenHost(this, _ui);
+        if (options.BrowserSample != BrowserSample.None)
+            _screens.UseBrowserSample(options.BrowserSample);
         if (options.BenchSeconds > 0)
             _benchmark = new Benchmark(options.BenchSeconds);
     }
@@ -461,9 +466,13 @@ internal sealed class App : IDisposable
         }
         else if (_options.StartLocalGame)
         {
-            StartLocalGame();
-            if (Session is null)
-                _screens.Show(Screen.MainMenu);
+            // A game that cannot be hosted (port busy, a name or password that cannot be used) opens the New
+            // Game screen with the reason, where the player can change what is wrong.
+            if (!StartLocalGame(NewGameSettings, NewGameHosting, out var error))
+            {
+                Logs.App.Error(error);
+                _screens.OpenNewGame(error);
+            }
         }
         else if (_options.JoinHost is { } host)
         {
@@ -659,6 +668,8 @@ internal sealed class App : IDisposable
                 _screens.OpenShipInfo();
             else if (view == "world-settings")
                 _screens.RequestWorldSettings();
+            else if (view == "menu")
+                _screens.OpenSessionMenu();
             else if (view == "galaxy")
                 _screens.OpenGalaxyOverview();
             else if (view == "map-menu")

@@ -52,6 +52,8 @@ internal sealed partial class ScreenHost
             LeaveSettings();
         _screen = screen;
         _screenTime = 0;
+        if (screen == Screen.Join)
+            EnterJoin();
     }
 
     public void Draw(SessionSnapshot? snapshot)
@@ -111,6 +113,9 @@ internal sealed partial class ScreenHost
     }
 
     private static void EndRoot() => ImGui.End();
+
+    /// <summary>True when the window is too short for a screen's full title block; screens then keep one caption line.</summary>
+    private bool Compact => _ui.DisplaySize.Y < Kit.Px(520);
 
     /// <summary>The slide-in offset for content of the current screen.</summary>
     private static float Slide(float fade) => (1f - fade) * Kit.Px(16);

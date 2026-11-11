@@ -2,7 +2,6 @@ using Brutal.ImGuiApi;
 using Brutal.Numerics;
 using Prospect.Client.Input;
 using Prospect.Client.Ui;
-using Prospect.Game.Protocol;
 
 namespace Prospect.Client.Screens;
 
@@ -13,18 +12,7 @@ internal sealed partial class ScreenHost
     private const float SplashFade = 0.4f;
     private const float SplashSkippableAfter = 1.2f;
 
-    private readonly ImInputString _joinName = new(ProtocolInfo.MaxNameBytes);
-    private readonly ImInputString _joinHost = new(128);
-    private readonly ImInputString _joinPort = new(8);
-    private string _joinError = "";
     private float _splashEnd = SplashFade + SplashHold;
-
-    private void InitializeJoin()
-    {
-        _joinName.SetValue(_app.Settings.PlayerName);
-        _joinHost.SetValue(_app.Settings.LastHost);
-        _joinPort.SetValue(_app.Settings.LastPort.ToString());
-    }
 
     /// <summary>The BRUTAL logo on black, shown before anything else as its licence requires.</summary>
     private void DrawSplash()
@@ -88,66 +76,6 @@ internal sealed partial class ScreenHost
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(size.X - version.X - Kit.Px(96), size.Y - Kit.Px(50)), Theme.TextMute, App.VersionLabel);
         DrawHints(back: false);
         EndRoot();
-    }
-
-    private void DrawJoin(float fade)
-    {
-        BeginRoot("##join"u8);
-        var min = new float2(Kit.Px(96), _ui.DisplaySize.Y * 0.2f + Slide(fade));
-        BeginPanel("##joinpanel"u8, min, new float2(Kit.Px(520), Kit.Px(428)));
-
-        Kit.Caption("MULTIPLAYER"u8, Theme.Accent);
-        Kit.Space(Theme.Space1);
-        Kit.Heading("Join Server"u8);
-        Kit.Space(Theme.Space5);
-
-        var submit = Kit.TextField("CALLSIGN"u8, "##name"u8, _joinName, 456);
-        Kit.Space(Theme.Space4);
-        submit |= Kit.TextField("ADDRESS"u8, "##host"u8, _joinHost, 456);
-        Kit.Space(Theme.Space4);
-        submit |= Kit.TextField("PORT"u8, "##port"u8, _joinPort, 140, ImGuiInputTextFlags.CharsDecimal);
-        Kit.Space(Theme.Space3);
-
-        // Reserve the error line so the buttons do not move when it appears.
-        Kit.Label(_ui.Sans, Theme.FontSmall, Theme.Bad, _joinError.Length > 0 ? _joinError : " ");
-        Kit.Space(Theme.Space3);
-
-        if (Kit.Button("Connect"u8, ButtonKind.Primary, 180) || submit)
-            TryJoin();
-        ImGui.SameLine(0, Kit.Px(Theme.Space3));
-        if (Kit.Button("Back"u8, ButtonKind.Secondary, 120) || BackPressed())
-            Show(Screen.MainMenu);
-
-        EndPanel();
-        DrawHints(back: true);
-        EndRoot();
-    }
-
-    private void TryJoin()
-    {
-        var host = _joinHost.ToString().Trim();
-        if (host.Length == 0)
-        {
-            _joinError = "Enter the server's address.";
-            return;
-        }
-
-        if (!ushort.TryParse(_joinPort.ToString(), out var port) || port == 0)
-        {
-            _joinError = "The port must be a number from 1 to 65535.";
-            return;
-        }
-
-        _joinError = "";
-        var settings = _app.Settings;
-        settings.PlayerName = PlayerNames.Sanitize(_joinName.ToString());
-        settings.LastHost = host;
-        settings.LastPort = port;
-        settings.Save();
-        _joinName.SetValue(settings.PlayerName);
-
-        if (!_app.JoinGame(host, port, out var error))
-            _joinError = error;
     }
 
     private void DrawCredits(float fade)
