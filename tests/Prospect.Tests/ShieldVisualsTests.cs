@@ -427,3 +427,31 @@ public sealed class ShieldVisualsTests
         return count;
     }
 }
+
+/// <summary>
+/// The seams between the shield's C# side and its shaders, which no test runs on a GPU: the shell decodes its hull's
+/// material exactly as the hull's mesh does and asks the shared cut, and its instance fills the attribute
+/// locations its vertex shader reads.
+/// </summary>
+public sealed class ShieldShaderSeamTests
+{
+    private static string Shader(string name) => File.ReadAllText(AppPaths.Asset(Path.Combine("shaders", name)));
+
+    [Fact]
+    public void TheShellIsCutAsItsHullIsAndItsInstanceMatchesItsShader()
+    {
+        var mesh = Shader("mesh.vert");
+        var shield = Shader("shield.vert");
+        Assert.Contains("int slot = int((tint.a + 0.5) * 0.25);", mesh);
+        Assert.Contains("int slot = int((params.w + 0.5) * 0.25);", shield);
+        Assert.Contains("cut = slot - 1;", mesh);
+        Assert.Contains("cut = slot - 1;", shield);
+        Assert.Contains("#include \"hull_clip.glsl\"", Shader("shield.frag"));
+        Assert.Contains("if (hullCut(cut, own != 0, worldPosition))", Shader("shield.frag"));
+
+        // Two vertex attributes, then one location per four floats of the instance.
+        var locations = System.Runtime.CompilerServices.Unsafe.SizeOf<ShieldInstance>() / 16;
+        Assert.Equal(9, locations);
+        Assert.Contains($"layout(location = {2 + locations - 1}) in vec4 strengths;", shield);
+    }
+}
