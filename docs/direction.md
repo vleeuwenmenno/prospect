@@ -34,7 +34,7 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
 ## Decided: servers
 
 - **A game is public, unlisted or private.** Public shows in the server browser. Unlisted is joined by address
-  only. Either can have a password.
+  only. Either can have a password. Private is the host alone: nobody can join.
 - **A server has a name** its host chooses.
 - **A listing server keeps the list.** Games advertise themselves to it; the join menu opens on a server
   browser fed by it. Ours will run at `mvl.sh`, and clients use that by default.
@@ -47,6 +47,11 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
 - **Parties.** Party members show at the top left: name, ship, shield and hull of the ship they fly.
 - **Factions have ranks.** An owner, members, and ranks in between that may invite and remove.
 - **Tab opens the player menu.** Its first tab lists the faction's members.
+- **A player is recognised by a key file on their machine,** made automatically, no login. For now: something
+  more solid and portable may replace it later.
+
+Factions are not saved yet: they are gone when a server restarts. They must be written to disk once saving
+exists.
 
 ## Decided: world generation
 
@@ -126,9 +131,6 @@ After that:
 
 ## Open: servers and players
 
-- What "private" means for a game: nobody else can join, or invited players only.
-- How a player is recognised when they come back, so a faction knows its members: a key file on their
-  machine, or accounts.
 - Faction rights beyond inviting and removing: who may fly, order, build or scrap what.
 
 ## Open: building
