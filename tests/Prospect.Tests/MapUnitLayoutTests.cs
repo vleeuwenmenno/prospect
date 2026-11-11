@@ -17,7 +17,7 @@ public sealed class MapUnitLayoutTests
     {
         var display = new float2(width, height);
         var sectorBottom = MathF.Round(24f * scale) + MathF.Round(116f * scale);
-        var hoverCard = MapUnitList.HoverCardLeft(width, scale, 340f, 96f);
+        var hoverCard = MapUnitList.HoverCardLeft(width, scale, 340f, MapUnitList.HoverRight);
         var layout = MapUnitList.Layout(display, scale, rows, sectorBottom, hoverCard);
 
         Assert.Equal(shortHeading, layout.ShortHeading);
@@ -28,8 +28,12 @@ public sealed class MapUnitLayoutTests
         Assert.True(layout.Min.X + layout.Size.X + MathF.Round(8f * scale) <= hoverCard);
         Assert.True(hoverCard + MathF.Round(340f * scale) <= display.X);
         Assert.True(layout.Min.Y + layout.Size.Y <= display.Y);
-        var above = layout.ShortHeading ? sectorBottom + MathF.Round(36f * scale) : MathF.Round(256f * scale);
+        var above = layout.ShortHeading ? sectorBottom + MathF.Round(36f * scale) : MapUnitList.HeadingTop(sectorBottom, scale) + MathF.Round(MapUnitList.HeadingHeight * scale);
         Assert.True(layout.Min.Y >= above);
+
+        // One column: the list is no wider than the sector panel above it and starts on its edge.
+        Assert.Equal(MathF.Round(24f * scale), layout.Min.X);
+        Assert.True(layout.Size.X <= HudLayout.ColumnWidth(display, scale));
 
         // Three rows always show whole; more scroll.
         Assert.True((int)(layout.RowsSize.Y / layout.Row) >= Math.Min(rows, 3));

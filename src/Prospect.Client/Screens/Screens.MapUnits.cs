@@ -21,7 +21,7 @@ internal sealed partial class ScreenHost
             _mapUnits = new uint[snapshot.Hulls.Length];
         _mapUnitCount = MapUnitList.Collect(snapshot, _mapUnits);
         var display = _ui.DisplaySize;
-        return MapUnitList.Layout(display, Kit.Scale, _mapUnitCount, Kit.Px(Theme.Space5) + SectorPanelHeight(world, false), MapUnitList.HoverCardLeft(display.X, Kit.Scale, MapHoverWidth, MapHoverRight));
+        return MapUnitList.Layout(display, Kit.Scale, _mapUnitCount, Kit.Px(Theme.Space5) + SectorPanelHeight(world, false), MapUnitList.HoverCardLeft(display.X, Kit.Scale, MapHoverWidth, MapUnitList.HoverRight));
     }
 
     /// <summary>

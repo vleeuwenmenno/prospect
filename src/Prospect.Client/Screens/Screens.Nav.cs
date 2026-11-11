@@ -81,50 +81,65 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
-    /// The jump plotted on the map: a marker on its direction, or an arrow at the edge of the view pointing the way
-    /// to turn. While the pilot still has to act on it, a card beside the marker names the destination and its
-    /// distance; once the drive is at work the card folds back to the marker's label, to keep the view clear.
-    /// The marker turns green once the nose is on it.
+    /// The jump plotted on the map: a marker on its direction while that is clear of the panels, or an arrow at the
+    /// edge of the clear room pointing the way to turn while it is behind or under a panel, the strip or the console.
+    /// While the pilot still has to act on it, a card beside the marker names the destination and its distance;
+    /// once the drive is at work the card folds back to the marker's label, to keep the view clear. The marker
+    /// turns green once the nose is on it.
     /// </summary>
-    private void DrawNavTarget(ImDrawListPtr draw, WorldView world, JumpPrompt prompt)
+    private void DrawNavTarget(ImDrawListPtr draw, WorldView world, in HudCueRoom room, JumpPrompt prompt)
     {
         if (world.NavTarget is not { } nav)
             return;
         var color = world.NavAimed ? Theme.Good : Theme.Info;
-        var display = _ui.DisplaySize;
-        var middle = display * 0.5f;
-        var margin = Kit.Px(40);
-        if (world.Project(nav, out var screen) && screen.X > margin && screen.X < display.X - margin && screen.Y > margin && screen.Y < display.Y - margin)
+        var inFront = world.Project(nav, out var screen);
+        if (inFront && room.Clear(screen, room.Pad(true)))
         {
             DrawTargetMarker(draw, screen, color);
             var asks = prompt is JumpPrompt.OffCourse or JumpPrompt.Refused or JumpPrompt.Aligned;
-            if (!asks || !DrawNavCard(draw, world, nav, screen, color, prompt == JumpPrompt.Aligned))
-                Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, screen + new float2(Kit.Px(18), -Kit.Px(7)), color, "NAV"u8);
+            if (!asks || !DrawNavCard(draw, world, room, nav, screen, color, prompt == JumpPrompt.Aligned))
+                NavLabel(draw, room, screen, 1f, color);
             return;
         }
 
-        // Off the view: an arrow on an ellipse inside the edges, the way the destination lies across the view. The
-        // ellipse stays above the jump strip, which is always drawn while a jump is plotted.
+        // Obstructed: an arrow at the edge of the clear room, toward the marker's point while it is in front, the
+        // way across the view while it is behind, with its label beside it.
         var view = world.ToView(nav);
-        var across = new float2(view.X, -view.Y);
-        var length = MathF.Sqrt(across.X * across.X + across.Y * across.Y);
-        across = length > 1e-4f ? across / length : new float2(0, 1);
-        var size = Kit.Px(12);
-        var below = HudLayout.Strip(display, Kit.Scale).Top - Kit.Px(HudLayout.Gap) - size - middle.Y;
-        var semi = new float2(Math.Max(middle.X - Kit.Px(76), Kit.Px(40)), Math.Max(Math.Min(middle.Y - Kit.Px(160), below), Kit.Px(24)));
-        var scale = 1f / MathF.Sqrt(across.X * across.X / (semi.X * semi.X) + across.Y * across.Y / (semi.Y * semi.Y));
-        var tip = middle + across * scale;
+        var toward = inFront ? screen - room.Start : new float2(view.X, -view.Y);
+        var length = MathF.Sqrt(toward.X * toward.X + toward.Y * toward.Y);
+        var across = length > 1e-4f ? toward / length : new float2(0, 1);
+        var at = room.Edge(room.Start, across);
+        var size = Kit.Px(11);
         var side = new float2(-across.Y, across.X);
-        var back = tip - across * (size * 1.6f);
-        draw.AddTriangleFilled(tip, back + side * size * 0.8f, back - side * size * 0.8f, Kit.Color(color));
-        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, back - across * Kit.Px(14) - new float2(Kit.Px(12), Kit.Px(7)), color, "NAV"u8);
+        var tip = at + across * size;
+        var back = at - across * (size * 0.45f);
+        draw.AddTriangleFilled(tip, back + side * (size * 0.8f), back - side * (size * 0.8f), Kit.Color(color));
+        NavLabel(draw, room, at, across.X > 0f ? -1f : 1f, color);
+    }
+
+    /// <summary>
+    /// The marker's "NAV" beside it, on the side asked for (1 for the right) where that is clear of the panels, else
+    /// on the other side, else left out.
+    /// </summary>
+    private void NavLabel(ImDrawListPtr draw, in HudCueRoom room, float2 at, float side, uint color)
+    {
+        var offset = Kit.Px(HudLayout.CueLabel);
+        if (!room.Clear(at + new float2(offset * side, 0), room.Pad(true)))
+        {
+            side = -side;
+            if (!room.Clear(at + new float2(offset * side, 0), room.Pad(true)))
+                return;
+        }
+
+        var size = Kit.Measure(_ui.SansMedium, Theme.FontCaption, "NAV"u8);
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, at + new float2(offset * side - size.X * 0.5f, -size.Y * 0.5f), color, "NAV"u8);
     }
 
     /// <summary>
     /// The NAV card, tied to the marker by a thin line: the destination's name and how far it is. False, with
     /// nothing drawn, when it has no room clear of the panels and of the marker.
     /// </summary>
-    private bool DrawNavCard(ImDrawListPtr draw, WorldView world, Double3 nav, float2 marker, uint color, bool lit)
+    private bool DrawNavCard(ImDrawListPtr draw, WorldView world, in HudCueRoom room, Double3 nav, float2 marker, uint color, bool lit)
     {
         var name = NavName(world, nav);
         var coord = _navCoord;
@@ -138,12 +153,12 @@ internal sealed partial class ScreenHost
         // Rounded up, so a line measured to a fraction of a pixel is never cut by the rounding.
         var size = new float2(MathF.Ceiling(width), Kit.Px(HudLayout.NavCardHeight));
         var free = HudLayout.NavFree(_ui.DisplaySize, Kit.Scale, world.TargetHull != 0 || world.TargetRock is not null);
-        if (!HudLayout.PlaceNavCard(marker, size, free, Kit.Scale, out var min))
+        if (!HudLayout.PlaceNavCard(marker, size, free, room, Kit.Scale, out var min))
             return false;
 
         // The tie: from the marker's ring to the middle of the card's near side.
         var max = min + size;
-        var anchor = new float2(min.X > marker.X ? min.X : max.X, min.Y + size.Y * 0.5f);
+        var anchor = HudLayout.NavTieAnchor(marker, min, size);
         var toward = anchor - marker;
         var reach = MathF.Sqrt(toward.X * toward.X + toward.Y * toward.Y);
         if (reach > Kit.Px(HudLayout.NavMarkerClear))

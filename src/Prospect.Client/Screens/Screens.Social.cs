@@ -267,7 +267,7 @@ internal sealed partial class ScreenHost
         var social = snapshot.Social;
         var me = snapshot.PlayerId;
         var x = Kit.Px(Theme.Space5);
-        var width = Kit.Px(HudLayout.ColumnWidth);
+        var width = HudLayout.ColumnWidth(_ui.DisplaySize, Kit.Scale);
         var y = top + Kit.Px(Theme.Space3);
         var pad = Kit.Px(Theme.Space3);
 
@@ -336,7 +336,8 @@ internal sealed partial class ScreenHost
                 // One line: a leader mark, the name, then shield over hull at the right.
                 var max = min + new float2(width, rowHeight);
                 Hud.Plate(draw, min, max, tone);
-                var barWidth = Kit.Px(110);
+                // The bars give way first in a narrowed column, so the name keeps its room.
+                var barWidth = Math.Min(Kit.Px(110), MathF.Round(width * 0.3f));
                 var nameAt = min + new float2(pad, (rowHeight - Kit.Measure(_ui.SansMedium, Theme.FontSmall, "Ag"u8).Y) * 0.5f);
                 Kit.ClippedText(draw, _ui.SansMedium, Theme.FontSmall, nameAt, stale ? Theme.Bad : Theme.Text, nameText, width - barWidth - pad * 3);
                 var gaugeAt = new float2(max.X - pad - barWidth, min.Y + rowHeight * 0.5f - Kit.Px(4));
@@ -394,10 +395,10 @@ internal sealed partial class ScreenHost
 
         var display = _ui.DisplaySize;
         var x = Kit.Px(Theme.Space5);
-        var width = Math.Min(Kit.Px(440), display.X - Kit.Px(48));
-        // Beside the flight readouts at the bottom when there is room, its bracket included; above them when not,
-        // narrowed to stay beside the jump strip where that leaves a readable line.
-        var readoutsLeft = FlightConsole.Layout(display, Kit.Scale).LeftX - Kit.Px(HudLayout.BracketOut);
+        var width = HudLayout.ChatWidth(display, Kit.Scale, x, Math.Min(Kit.Px(440), display.X - Kit.Px(48)));
+        // Never into the middle of the view. Beside the flight readouts at the bottom when there is room; above them
+        // when not, narrowed to stay beside the jump strip where that leaves a readable line.
+        var readoutsLeft = FlightConsole.Layout(display, Kit.Scale).LeftX;
         var beside = x + width + Kit.Px(Theme.Space3) < readoutsLeft;
         if (!beside)
             width = HudLayout.FeedWidth(display, Kit.Scale, x, width, Kit.Px(300));
@@ -461,7 +462,7 @@ internal sealed partial class ScreenHost
         var w0 = QuickButtonWidth("PLAYERS"u8, _playersKey);
         var w1 = QuickButtonWidth("SOCIAL"u8, _socialKey);
         var w2 = QuickButtonWidth("CHAT"u8, _chatKey);
-        if (_ui.DisplaySize.X - Kit.Px(Theme.Space5) - (w0 + w1 + w2 + gap * 2) < HudLayout.ColumnRight(Kit.Scale) + Kit.Px(HudLayout.Gap))
+        if (_ui.DisplaySize.X - Kit.Px(Theme.Space5) - (w0 + w1 + w2 + gap * 2) < HudLayout.ColumnRight(_ui.DisplaySize, Kit.Scale) + Kit.Px(HudLayout.Gap))
         {
             keys = false;
             w0 = QuickButtonWidth("PLAYERS"u8, default);
@@ -515,11 +516,11 @@ internal sealed partial class ScreenHost
         var hot = Kit.Animate(ImGui.GetItemID(), ImGui.IsItemHovered() ? 1f : 0f);
         var lit = Math.Max(hot, active ? 1f : 0f);
         var max = position + size;
-        // The heads-up glass, with the hairline turning amber as the pointer comes onto it; the open surface's
-        // button keeps an amber underline.
+        // The heads-up panel, raised and its border turning amber as the pointer comes onto it; the open
+        // surface's button keeps an amber underline.
         var chamfer = Kit.Px(Theme.Chamfer * 0.7f);
-        Kit.ChamferFill(draw, position, max, Kit.Color(Kit.Mix(Theme.Void, Theme.PanelRaised, lit), Hud.GlassAlpha + 0.2f * lit), chamfer);
-        Kit.ChamferOutline(draw, position, max, Kit.Color(Kit.Mix(Theme.LineStrong, Theme.Accent, lit), 0.7f + 0.3f * lit), chamfer);
+        Kit.ChamferFill(draw, position, max, Kit.Color(Kit.Mix(Theme.Panel, Theme.PanelRaised, lit), Hud.FillAlpha), chamfer);
+        Kit.ChamferOutline(draw, position, max, Kit.Color(Kit.Mix(Theme.Line, Theme.Accent, lit * 0.8f)), chamfer);
         if (active)
             draw.AddRectFilled(new float2(position.X, max.Y - Kit.Px(2)), new float2(max.X - chamfer, max.Y), Kit.Color(Theme.Accent));
 

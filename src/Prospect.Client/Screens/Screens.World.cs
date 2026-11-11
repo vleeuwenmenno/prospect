@@ -51,9 +51,13 @@ internal sealed partial class ScreenHost
     // how far the bracket has turned into the border arrow (0 to 1), and the arrow's direction in radians.
     private uint _indicatorHull;
     private RockRef? _indicatorRock;
-    private bool _indicatorOut;
-    private float _indicatorMorph;
-    private float _indicatorAngle;
+    private TargetCue _targetCue;
+
+    /// <summary>
+    /// Where the left column (sector panel and party list) ended when last drawn. The markers are drawn before the
+    /// panels that cover them, so they keep clear of the column as it was a frame ago.
+    /// </summary>
+    private float _columnBottom;
 
     /// <summary>True while the player is in space with nothing open over it, so input belongs to the world.</summary>
     public bool WorldInputEnabled => _screen == Screen.Session && !_sessionMenuOpen && !_mapOpen && !_shipInfoOpen && !_controlsOpen && !_socialOpen && !_chatOpen;
@@ -132,13 +136,14 @@ internal sealed partial class ScreenHost
             // jump strip while it is drawn and shares the list's width. When the full sector panel leaves no room
             // for the whole list, the panel drops its ore and server lines (they are on the map and in the menu),
             // and if that is still not enough the list turns into one-line rows.
-            var limit = pilot > 0.01f ? ReservedTop(Kit.Px(HudLayout.Margin), HudLayout.ColumnRight(Kit.Scale)) : _ui.DisplaySize.Y - Kit.Px(Theme.Space5);
+            var limit = pilot > 0.01f ? ReservedTop(Kit.Px(HudLayout.Margin), HudLayout.ColumnRight(_ui.DisplaySize, Kit.Scale)) : _ui.DisplaySize.Y - Kit.Px(Theme.Space5);
             var party = PartyHudCardsHeight(snapshot);
             var gap = Kit.Px(Theme.Space3);
             var compactSector = party > 0 && Kit.Px(Theme.Space5) + SectorPanelHeight(world, false) + gap + party > limit;
             var cards = !compactSector || Kit.Px(Theme.Space5) + SectorPanelHeight(world, true) + gap + party <= limit;
             var sectorBottom = DrawSectorPanel(draw, snapshot, world, compactSector);
             var partyBottom = DrawPartyHud(draw, snapshot, world, sectorBottom, limit, cards);
+            _columnBottom = partyBottom;
             if (!_chatOpen)
                 DrawChatFeed(draw, snapshot, partyBottom);
             if (_shipInfoOpen)
@@ -176,7 +181,7 @@ internal sealed partial class ScreenHost
         if (compact)
             return Kit.Px(64);
         var hasRock = world.Sector.AsteroidCount > 0 && !_mapOpen;
-        var inner = Kit.Px(HudLayout.ColumnWidth) - Kit.Px(Theme.Space4) * 2;
+        var inner = HudLayout.ColumnWidth(_ui.DisplaySize, Kit.Scale) - Kit.Px(Theme.Space4) * 2;
         return Kit.Px(116) + (hasRock ? SectorCharacterHeight(world.Galaxy!, world.Sector.Character, inner) + Kit.Px(Theme.Space2) : 0f);
     }
 
@@ -189,10 +194,13 @@ internal sealed partial class ScreenHost
         // The panel grows by what there is to say about the sector's ore; a sector without asteroids has none.
         // Under the map it stays short: the map's own heading sits below it, and the map describes sectors itself.
         var min = new float2(Kit.Px(Theme.Space5), Kit.Px(Theme.Space5));
-        var inner = Kit.Px(HudLayout.ColumnWidth) - Kit.Px(Theme.Space4) * 2;
+        var width = HudLayout.ColumnWidth(_ui.DisplaySize, Kit.Scale);
+        var inner = width - Kit.Px(Theme.Space4) * 2;
         var hasRock = world.Sector.AsteroidCount > 0 && !_mapOpen;
-        var size = new float2(Kit.Px(HudLayout.ColumnWidth), SectorPanelHeight(world, compact));
-        Hud.Plate(draw, min, min + size, Theme.Info);
+        var size = new float2(width, SectorPanelHeight(world, compact));
+        Hud.Plate(draw, min, min + size, Theme.Accent);
+        // Narrowed to keep the middle of the view clear, the panel cuts what does not fit rather than spill into it.
+        draw.PushClipRect(min, min + size, true);
         // A rule under the name, and in the full panel one over the sector's character, so the panel reads as
         // three groups: where, which server, what is here.
         var rule = Kit.Color(Theme.Line, 0.9f);
@@ -207,20 +215,21 @@ internal sealed partial class ScreenHost
         if (compact)
         {
             draw.AddCircleFilled(text + new float2(Kit.Px(5), Kit.Px(10)), Kit.Px(5), Kit.Color(StarColor(star.Color)), 20);
-            Kit.Text(draw, _ui.SansMedium, Theme.FontBody, text + new float2(Kit.Px(18), 0), Theme.Text, world.SectorName);
+            Kit.ClippedText(draw, _ui.SansMedium, Theme.FontBody, text + new float2(Kit.Px(18), 0), Theme.Text, world.SectorName, inner - Kit.Px(18));
             var at = world.Sector.Coord;
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(28)), Theme.TextDim,
                 Kit.F($"SECTOR {at.X} {at.Y} {at.Z}   {world.Sector.AsteroidCount} ROCKS   PLAYERS {snapshot.PlayerCount}/{snapshot.MaxPlayers}"), inner);
+            draw.PopClipRect();
             return min.Y + size.Y;
         }
 
         if (hasRock)
             DrawSectorCharacter(draw, text + new float2(0, Kit.Px(94)), inner, world.Galaxy!, world.Sector.Character);
         draw.AddCircleFilled(text + new float2(Kit.Px(5), Kit.Px(10)), Kit.Px(5), Kit.Color(StarColor(star.Color)), 20);
-        Kit.Text(draw, _ui.SansMedium, Theme.FontBody, text + new float2(Kit.Px(18), 0), Theme.Text, world.SectorName);
+        Kit.ClippedText(draw, _ui.SansMedium, Theme.FontBody, text + new float2(Kit.Px(18), 0), Theme.Text, world.SectorName, inner - Kit.Px(18));
 
         var coord = world.Sector.Coord;
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(30)), Theme.TextDim, Kit.F($"SECTOR {coord.X} {coord.Y} {coord.Z}   {world.Sector.AsteroidCount} ROCKS"));
+        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(30)), Theme.TextDim, Kit.F($"SECTOR {coord.X} {coord.Y} {coord.Z}   {world.Sector.AsteroidCount} ROCKS"), inner);
 
         // The server: its name on a line of its own, cut off at the panel's edge since a host may choose a long
         // one, then who can join it and how full it is.
@@ -235,17 +244,19 @@ internal sealed partial class ScreenHost
             _ => "PRIVATE"u8,
         };
         var status = text + new float2(0, Kit.Px(70));
-        var width = Kit.Text(draw, _ui.Mono, Theme.FontCaption, status, snapshot.Visibility == ServerVisibility.Private ? Theme.TextMute : Theme.Accent, visibility).X;
-        Kit.Text(
+        var shown = Kit.Text(draw, _ui.Mono, Theme.FontCaption, status, snapshot.Visibility == ServerVisibility.Private ? Theme.TextMute : Theme.Accent, visibility).X + Kit.Px(Theme.Space3);
+        Kit.ClippedText(
             draw,
             _ui.Mono,
             Theme.FontCaption,
-            status + new float2(width + Kit.Px(Theme.Space3), 0),
+            status + new float2(shown, 0),
             Theme.TextMute,
             snapshot.RoundTripMs < 0
                 ? Kit.F($"PLAYERS {snapshot.PlayerCount}/{snapshot.MaxPlayers}")
-                : Kit.F($"PLAYERS {snapshot.PlayerCount}/{snapshot.MaxPlayers}   RTT {snapshot.RoundTripMs:0} MS")
+                : Kit.F($"PLAYERS {snapshot.PlayerCount}/{snapshot.MaxPlayers}   RTT {snapshot.RoundTripMs:0} MS"),
+            inner - shown
         );
+        draw.PopClipRect();
         return min.Y + size.Y;
     }
 
@@ -275,8 +286,10 @@ internal sealed partial class ScreenHost
             draw.AddLine(prograde - new float2(0, r * 2), prograde - new float2(0, r), color, Kit.Px(1.5f));
         }
 
-        DrawTargetMarkers(draw, snapshot, world);
-        DrawNavTarget(draw, world, _jumpPrompt);
+        // One clear room for every marker that moves with the world: the target's and the plotted jump's.
+        var room = new HudCueRoom(display, Kit.Scale, _columnBottom, world.TargetHull != 0 || world.TargetRock is not null, _jumpPrompt != JumpPrompt.None);
+        DrawTargetMarkers(draw, snapshot, world, room);
+        DrawNavTarget(draw, world, room, _jumpPrompt);
 
         // The view line: where the hull will point once it is under thrust.
         var middle = display * 0.5f;
@@ -527,7 +540,7 @@ internal sealed partial class ScreenHost
     /// Pilot view markers that move with the world: brackets on the hull or asteroid under the reticle, and the
     /// marker on the target, which turns into an arrow at the screen's border while the target is out of view.
     /// </summary>
-    private void DrawTargetMarkers(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world)
+    private void DrawTargetMarkers(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, in HudCueRoom room)
     {
         var designs = snapshot.Content.Designs;
         if (world.HoveredHull != 0 && world.HoveredHull != world.TargetHull && world.TryGetHull(world.HoveredHull, out var hovered) && world.IsDrawn(hovered))
@@ -548,11 +561,11 @@ internal sealed partial class ScreenHost
         if (world.TargetHull != 0 && world.TryGetHull(world.TargetHull, out var target) && world.IsDrawn(target))
         {
             var design = designs[Math.Min(target.Design, designs.Length - 1)];
-            DrawTargetIndicator(draw, world, world.DrawnPosition(target), design.Flight.Radius, target.Owner == snapshot.PlayerId ? Theme.Accent : Theme.Info, false);
+            DrawTargetIndicator(draw, world, room, world.DrawnPosition(target), design.Flight.Radius, target.Owner == snapshot.PlayerId ? Theme.Accent : Theme.Info, false);
         }
         else if (world.TargetRock is { } targetRock && world.TryGetRock(targetRock, out var rockPosition, out var rockRadius))
         {
-            DrawTargetIndicator(draw, world, rockPosition, rockRadius, Theme.Info, true);
+            DrawTargetIndicator(draw, world, room, rockPosition, rockRadius, Theme.Info, true);
         }
         else
         {
@@ -562,68 +575,26 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
-    /// The target's marker. In view it is the bracket; out of view, or behind, it is an arrow on an ellipse inside
-    /// the screen, on the side the camera must turn toward. Crossing between the two, the bracket shrinks into
-    /// the arrow at the border and the arrow grows back into the bracket as it travels in to the target.
+    /// The target's marker. While its point is clear of the panels it is the bracket on the target; behind, or
+    /// under a panel, the strip or the console, it is an arrow at the edge of the clear room, on the side the camera
+    /// must turn toward. Crossing between the two, the bracket shrinks into the arrow and slides to the edge, and the
+    /// arrow grows back into the bracket as it travels in to the target. See <see cref="TargetCue"/>.
     /// </summary>
-    private void DrawTargetIndicator(ImDrawListPtr draw, WorldView world, Double3 position, float radius, uint rgb, bool rock)
+    private void DrawTargetIndicator(ImDrawListPtr draw, WorldView world, in HudCueRoom room, Double3 position, float radius, uint rgb, bool rock)
     {
-        var display = _ui.DisplaySize;
-        var center = display * 0.5f;
-
-        // The ellipse the arrow runs on: clear of the side edges, of the target readout at the top and of the
-        // speed and status readouts at the bottom, and, being an ellipse, of the corner panels.
-        var semiX = Math.Max(display.X * 0.5f - Kit.Px(76), Kit.Px(40));
-        var semiY = Math.Max(display.Y * 0.5f - Kit.Px(Theme.Space5 + 104 + 52), Kit.Px(40));
-
-        // The way to turn is the target's direction across the view. A target in front projects along the same
-        // line from the centre, so the bracket and the arrow agree where the one becomes the other.
         var view = world.ToView(position);
         var across = new float2(view.X, -view.Y);
         var acrossLength = MathF.Sqrt(across.X * across.X + across.Y * across.Y);
         var inFront = world.ProjectDisc(position, radius, out var screen, out var pixels, out _);
-        var fromCenter = screen - center;
-        var ellipse = inFront ? fromCenter.X * fromCenter.X / (semiX * semiX) + fromCenter.Y * fromCenter.Y / (semiY * semiY) : float.MaxValue;
 
         // Close to straight behind, the direction across the view is noise: keep the side already shown.
-        var settled = !(view.Z < 0f && acrossLength < -view.Z * 0.1f) && acrossLength > 1e-4f;
-        var angle = settled ? MathF.Atan2(across.Y, across.X) : _indicatorAngle;
-
-        // A new target starts in whichever form fits, with no animation from the last one.
+        var settled = !(view.Z < 0f && acrossLength < -view.Z * 0.1f);
         var fresh = world.TargetHull != _indicatorHull || world.TargetRock != _indicatorRock;
-        if (fresh)
-        {
-            _indicatorHull = world.TargetHull;
-            _indicatorRock = world.TargetRock;
-            _indicatorOut = ellipse > 1f;
-            _indicatorMorph = _indicatorOut ? 1f : 0f;
-            _indicatorAngle = settled ? angle : -MathF.PI * 0.5f;
-        }
-
-        // Out once the target crosses the ellipse; back in only once it is well inside, so it cannot flicker.
-        _indicatorOut = _indicatorOut ? ellipse > 0.9f : ellipse > 1f;
-        var dt = _ui.DeltaTime;
-        _indicatorMorph = Math.Clamp(_indicatorMorph + (_indicatorOut ? dt : -dt) / 0.3f, 0f, 1f);
-
-        // While the bracket shows, the arrow's angle follows the target exactly; while the arrow shows, it slides
-        // round the ellipse to a new direction rather than jumping there.
-        if (!_indicatorOut || _indicatorMorph <= 0f)
-        {
-            _indicatorAngle = angle;
-        }
-        else
-        {
-            var turn = angle - _indicatorAngle;
-            turn -= MathF.Round(turn / MathF.Tau) * MathF.Tau;
-            _indicatorAngle += turn * (1f - MathF.Exp(-14f * dt));
-        }
-
-        var direction = new float2(MathF.Cos(_indicatorAngle), MathF.Sin(_indicatorAngle));
-        var onEllipse = 1f / MathF.Sqrt(direction.X * direction.X / (semiX * semiX) + direction.Y * direction.Y / (semiY * semiY));
-        var border = center + direction * onEllipse;
-        var morph = _indicatorMorph * _indicatorMorph * (3f - 2f * _indicatorMorph);
-        var at = inFront && ellipse <= 1f ? screen : border;
-        at += (border - at) * morph;
+        _indicatorHull = world.TargetHull;
+        _indicatorRock = world.TargetRock;
+        var morph = _targetCue.Step(room, fresh, inFront, screen, across, settled, Kit.Scale, _ui.DeltaTime);
+        var at = _targetCue.At;
+        var anchored = !_targetCue.Out;
 
         if (morph < 1f)
         {
@@ -632,16 +603,14 @@ internal sealed partial class ScreenHost
             var color = Kit.Color(rgb, shown);
             if (rock)
             {
-                var ring = Math.Max(inFront ? pixels * 1.08f : 0f, Kit.Px(14));
-                ring += (Kit.Px(10) - ring) * morph;
+                var ring = TargetCue.Size(Math.Max(inFront ? pixels * 1.08f : 0f, Kit.Px(14)), Kit.Px(10), room.Reach - Kit.Px(5), anchored, morph);
                 draw.AddCircle(at, ring, color, 56, Kit.Px(1.5f));
                 var reach = ring + Kit.Px(5);
                 Brackets(draw, at - new float2(reach, reach), at + new float2(reach, reach), Kit.Px(9), color);
             }
             else
             {
-                var reach = Math.Max(inFront ? pixels * 1.3f : 0f, Kit.Px(18));
-                reach += (Kit.Px(12) - reach) * morph;
+                var reach = TargetCue.Size(Math.Max(inFront ? pixels * 1.3f : 0f, Kit.Px(18)), Kit.Px(12), MathF.Floor(room.Reach / 1.25f), anchored, morph);
                 Brackets(draw, at - new float2(reach, reach), at + new float2(reach, reach), Kit.Px(10), color);
                 draw.AddCircle(at, reach * 1.25f, Kit.Color(rgb, 0.5f * shown), 40, Kit.Px(1.2f));
             }
@@ -650,6 +619,7 @@ internal sealed partial class ScreenHost
         if (morph > 0f)
         {
             // The arrow: a solid head pointing the way to turn, with a faint ring round the point it turns about.
+            var direction = new float2(MathF.Cos(_targetCue.Angle), MathF.Sin(_targetCue.Angle));
             var side = new float2(-direction.Y, direction.X);
             var size = Kit.Px(11);
             var tip = at + direction * size;
@@ -672,7 +642,7 @@ internal sealed partial class ScreenHost
             var design = designs[Math.Min(target.Design, designs.Length - 1)];
             var mine = target.Owner == snapshot.PlayerId;
             var color = mine ? Theme.Accent : Theme.Info;
-            var size = new float2(Kit.Px(340), Kit.Px(104));
+            var size = new float2(Kit.Px(HudLayout.TargetReadoutWidth), Kit.Px(HudLayout.TargetReadoutHeight));
             var min = new float2((display.X - size.X) * 0.5f, Kit.Px(Theme.Space5));
             Kit.PanelFrame(draw, min, min + size);
             var text = min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3));
@@ -695,7 +665,7 @@ internal sealed partial class ScreenHost
         }
         else if (world.TargetRock is { } targetRock && world.TryGetRock(targetRock, out var rockPosition, out var rockRadius))
         {
-            var size = new float2(Kit.Px(340), Kit.Px(92));
+            var size = new float2(Kit.Px(HudLayout.TargetReadoutWidth), Kit.Px(92));
             var min = new float2((display.X - size.X) * 0.5f, Kit.Px(Theme.Space5));
             Kit.PanelFrame(draw, min, min + size);
             var text = min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3));
@@ -1180,6 +1150,21 @@ internal sealed partial class ScreenHost
             }
         }
 
+        // The plotted jump: a dotted route from the hull being flown to the NAV point, drawn from the moment it is
+        // plotted until it is cleared, replaced or reached, whatever the hull's order or the selection.
+        if (world.NavTarget is { } nav)
+        {
+            var navSector = galaxy.SectorOf(nav);
+            var end = ToScreen((float)(nav.X / size), (float)(nav.Z / size));
+            if (MapRoute.Shows(here.Y, navSector.Y, _mapLayer, out var line))
+            {
+                if (line)
+                    MapRoute.Dotted(draw, ToScreen(player.X, player.Y), end, new HudRect(0f, 0f, display.X, display.Y), Kit.Px(MapRoute.Dash), Kit.Px(MapRoute.Space), Kit.Color(Theme.Info, 0.8f), Kit.Px(1.5f));
+                DrawTargetMarker(draw, end, Theme.Info);
+                Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, end + new float2(Kit.Px(18), -Kit.Px(7)), Theme.Info, "NAV"u8);
+            }
+        }
+
         // A standing order's destination.
         var order = world.Own.Order;
         if (order.Kind != OrderKind.None && galaxy.SectorOf(order.Target).Y == _mapLayer)
@@ -1221,16 +1206,18 @@ internal sealed partial class ScreenHost
         // the layer and scale stay, on one line under the sector panel.
         if (units.ShortHeading)
         {
-            var line = new float2(units.Min.X, units.Min.Y - Kit.Px(28));
-            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, line, Theme.TextDim, Kit.F($"LAYER {_mapLayer:+0;-0;0}   {display.X / cell:0} SECTORS ACROSS   {size / 1000:0} KM EACH"), units.Size.X);
+            var line = new float2(units.Min.X + Kit.Px(Theme.Space4), units.Min.Y - Kit.Px(28));
+            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, line, Theme.TextDim, Kit.F($"LAYER {_mapLayer:+0;-0;0}   {display.X / cell:0} SECTORS ACROSS   {size / 1000:0} KM EACH"), units.Size.X - Kit.Px(Theme.Space4) * 2);
         }
         else
         {
-            var margin = Kit.Px(96);
-            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(margin, Kit.Px(160)), Theme.Accent, "NAVIGATION"u8);
-            Kit.Text(draw, _ui.SansBold, Theme.FontHeading, new float2(margin, Kit.Px(178)), Theme.Text, "Galaxy Map"u8);
-            Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(margin, Kit.Px(218)), Theme.TextDim, Kit.F($"LAYER {_mapLayer:+0;-0;0}   {display.X / cell:0} SECTORS ACROSS   {size / 1000:0} KM EACH"));
-            Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(margin, Kit.Px(238)), Theme.TextMute, Kit.F($"{_discovered.Count} SECTORS DISCOVERED   {world.Selection.Length} SHIPS SELECTED"));
+            // In the column the sector panel and the unit list share, its text on their text's edge.
+            var at = new float2(Kit.Px(HudLayout.Margin + Theme.Space4), MapUnitList.HeadingTop(Kit.Px(Theme.Space5) + SectorPanelHeight(world, false), Kit.Scale));
+            var width = units.Size.X - Kit.Px(Theme.Space4) * 2;
+            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, at, Theme.Accent, "NAVIGATION"u8);
+            Kit.Text(draw, _ui.SansBold, Theme.FontHeading, at + new float2(0, Kit.Px(16)), Theme.Text, "Galaxy Map"u8);
+            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(0, Kit.Px(50)), Theme.TextDim, Kit.F($"LAYER {_mapLayer:+0;-0;0}   {display.X / cell:0} SECTORS ACROSS   {size / 1000:0} KM EACH"), width);
+            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(0, Kit.Px(68)), Theme.TextMute, Kit.F($"{_discovered.Count} SECTORS DISCOVERED   {world.Selection.Length} SHIPS SELECTED"), width);
         }
 
         if (pointerOnMap)
@@ -1302,9 +1289,8 @@ internal sealed partial class ScreenHost
         OpenMapMenu(galaxy, sector, _ui.DisplaySize * 0.5f + (new float2(sector.X, sector.Z) - player) * _mapCell);
     }
 
-    /// <summary>The hover card's width and its distance from the right edge, in unscaled pixels.</summary>
+    /// <summary>The hover card's width, in unscaled pixels.</summary>
     private const float MapHoverWidth = 340f;
-    private const float MapHoverRight = 96f;
 
     /// <summary>
     /// The course menu: where the sector is, then the two ways to get there, for exactly the hulls selected in the
@@ -1392,14 +1378,16 @@ internal sealed partial class ScreenHost
         var display = _ui.DisplaySize;
         var known = _discovered.Contains(hover);
         // What a discovered sector with asteroids holds takes a few more lines: its richness and its resources.
-        var inner = Kit.Px(MapHoverWidth) - Kit.Px(Theme.Space5) * 2;
+        var inner = Kit.Px(MapHoverWidth) - Kit.Px(Theme.Space4) * 2;
         var hasRock = known && MapSummary(galaxy, hover).AsteroidCount > 0;
         var characterHeight = hasRock ? SectorCharacterHeight(galaxy, MapSummary(galaxy, hover).Character, inner) : 0f;
-        var panelSize = new float2(Kit.Px(MapHoverWidth), Kit.Px(known ? 218 : 150) + characterHeight);
-        var panelMin = new float2(MapUnitList.HoverCardLeft(display.X, Kit.Scale, MapHoverWidth, MapHoverRight), Kit.Px(140));
-        Kit.PanelFrame(draw, panelMin, panelMin + panelSize);
-        var text = panelMin + new float2(Kit.Px(Theme.Space5), Kit.Px(Theme.Space4));
+        // Its height follows its lines: the caption and name, two lines of place, three more for a discovered
+        // sector or one hint for an unexplored one, the sector's character, and the closing hint.
         var line = Kit.Px(20);
+        var panelSize = new float2(Kit.Px(MapHoverWidth), Kit.Px(Theme.Space4 * 2 + 62 + 4 + 16) + line * (known ? 5 : 3) + characterHeight);
+        var panelMin = new float2(MapUnitList.HoverCardLeft(display.X, Kit.Scale, MapHoverWidth, MapUnitList.HoverRight), Kit.Px(MapUnitList.HoverTop));
+        Kit.PanelFrame(draw, panelMin, panelMin + panelSize);
+        var text = panelMin + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space4));
 
         if (!_mapHasHover || _mapHover != hover)
         {

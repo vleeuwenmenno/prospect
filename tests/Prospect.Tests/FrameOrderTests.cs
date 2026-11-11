@@ -222,15 +222,36 @@ public sealed class FrameOrderTests : IDisposable
             // without them, as the bar drops them when they would not fit.
             float Button(ReadOnlySpan<byte> label, ReadOnlySpan<byte> key) =>
                 Kit.Measure(sans, Theme.FontCaption, label).X + Px(Theme.Space3) * 2 + (key.IsEmpty ? 0f : Chip(key) + Px(Theme.Space2));
-            var clear = HudLayout.ColumnRight(scale) + Px(HudLayout.Gap);
+            var clear = HudLayout.ColumnRight(new float2(width, height), scale) + Px(HudLayout.Gap);
             var keyed = Button("PLAYERS"u8, "TAB"u8) + Button("SOCIAL"u8, "O"u8) + Button("CHAT"u8, "ENTER"u8) + Px(Theme.Space2) * 2;
             var bare = Button("PLAYERS"u8, default) + Button("SOCIAL"u8, default) + Button("CHAT"u8, default) + Px(Theme.Space2) * 2;
             if (scale == 1f)
                 Assert.True(width - Px(Theme.Space5) - keyed >= clear, $"keyed {keyed}");
             Assert.True(width - Px(Theme.Space5) - bare >= clear, $"bare {bare}");
 
-            // The dampeners' state fits across the hexagon's lower part, inside its pointed sides.
-            Assert.InRange(Kit.Measure(sans, Theme.FontCaption, "DAMPENERS OFF"u8).X, 1f, Px(FlightConsole.Center) - Px(FlightConsole.HexPoint) * 2);
+            // The boost heat row holds the dampeners beside its heat or its warning: stacked in the reading column
+            // with room, and in a compact row at the end of the bar's line, leaving the bar most of the row.
+            var console = FlightConsole.Layout(new float2(width, height), scale);
+            var dampeners = Kit.Measure(sans, Theme.FontCaption, "DAMPENERS OFF"u8).X;
+            var warning = Math.Max(Kit.Measure(sans, Theme.FontSmall, "NO ENERGY"u8).X, Kit.Measure(sans, Theme.FontSmall, "OVERHEAT"u8).X);
+            if (!console.Compact)
+            {
+                Assert.InRange(dampeners, 1f, Px(FlightConsole.ReadingColumn));
+                Assert.InRange(warning, 1f, Px(FlightConsole.ReadingColumn));
+            }
+            else
+            {
+                var inner = console.GroupWidth - Px(FlightConsole.Slant) - Px(FlightConsole.Pad) * 2;
+                var label = Kit.Measure(sans, Theme.FontSmall, "BOOST HEAT"u8).X;
+                Assert.InRange(label + Px(FlightConsole.ColumnGap) + warning, 1f, inner);
+                Assert.True(inner - dampeners - Px(FlightConsole.ColumnGap) >= inner * 0.4f, $"bar {inner - dampeners} of {inner}");
+            }
+
+            // The NAV label beside a cue keeps within the cue's height and clear of its arrow head.
+            var nav = Kit.Measure(sans, Theme.FontCaption, "NAV"u8);
+            Assert.InRange(nav.Y * 0.5f, 1f, Px(HudLayout.CueReach));
+            Assert.InRange(nav.X * 0.5f, 1f, Px(HudLayout.CueReach));
+            Assert.True(Px(HudLayout.CueLabel) - nav.X * 0.5f > Px(11) * 0.8f);
         }
         finally
         {
@@ -361,7 +382,7 @@ public sealed class FrameOrderTests : IDisposable
     private PlayerControls Sent() => Bridge.Consume(out _, out _);
 
     // The map's layout at this test's screen, unscaled, under a sector panel ending where the game's does.
-    private MapUnitLayout Units => MapUnitList.Layout(Screen, 1f, Math.Min(_unitCount, _mapRowLimit), 140f, Screen.X - 436f);
+    private MapUnitLayout Units => MapUnitList.Layout(Screen, 1f, Math.Min(_unitCount, _mapRowLimit), 140f, MapUnitList.HoverCardLeft(Screen.X, 1f, 340f, MapUnitList.HoverRight));
 
     private static readonly float2 MapSpot = new(820, 420);
 

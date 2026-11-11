@@ -4,36 +4,40 @@ using Brutal.Numerics;
 namespace Prospect.Client.Ui;
 
 /// <summary>
-/// The shapes the heads-up display is drawn with, so every piece of it speaks one angular language: dark glass,
-/// a hairline, and one lit edge in the colour of what the piece is saying. Glow is a single soft stroke under that
-/// edge and nowhere else, so the edges that matter stand out and the rest stay quiet.
+/// The shapes the heads-up display is drawn with, in the look of the map's unit list: muted dark blue-grey panels,
+/// a thin quiet border, and one small tick in the colour of what the piece is saying. Nothing glows; a piece that
+/// wants the eye now has its border drawn in its colour, and its words say why.
 /// </summary>
 internal static class Hud
 {
-    /// <summary>The glass under every heads-up piece.</summary>
-    public const float GlassAlpha = 0.72f;
+    /// <summary>How opaque the panel fill under every heads-up piece is.</summary>
+    public const float FillAlpha = 0.9f;
+
+    /// <summary>The tick along a panel's top edge from its left corner, in unscaled pixels.</summary>
+    public const float TickWidth = 28f;
+    public const float TickHeight = 2f;
+
+    /// <summary>A border: quiet, or in <paramref name="tone"/> for a piece that wants the eye now.</summary>
+    public static uint Border(uint tone, bool lit) => Kit.Mix(Theme.Line, tone, lit ? 0.7f : 0.25f);
 
     /// <summary>
-    /// A panel in the kit's chamfered shape, with its left edge lit in <paramref name="tone"/>. A
-    /// <paramref name="lit"/> panel adds the soft stroke under that edge, for one that wants the eye now.
+    /// A panel in the kit's chamfered shape with a small tick in <paramref name="tone"/> at its top left. A
+    /// <paramref name="lit"/> panel draws its border in that colour too.
     /// </summary>
     public static void Plate(ImDrawListPtr draw, float2 min, float2 max, uint tone, bool lit = false)
     {
         var chamfer = Kit.Px(Theme.Chamfer);
-        Kit.ChamferFill(draw, min, max, Kit.Color(Theme.Void, GlassAlpha), chamfer);
-        Kit.ChamferOutline(draw, min, max, Kit.Color(Theme.LineStrong, 0.55f), chamfer);
-        var top = new float2(min.X + Kit.Px(1), min.Y);
-        var bottom = new float2(min.X + Kit.Px(1), max.Y - chamfer);
-        if (lit)
-            draw.AddLine(top, bottom, Kit.Color(tone, 0.16f), Kit.Px(5));
-        draw.AddLine(top, bottom, Kit.Color(tone, 0.95f), Kit.Px(2));
+        Kit.ChamferFill(draw, min, max, Kit.Color(Theme.Panel, FillAlpha), chamfer);
+        Kit.ChamferOutline(draw, min, max, Kit.Color(Border(tone, lit)), chamfer);
+        draw.AddRectFilled(min, min + new float2(Kit.Px(TickWidth), Kit.Px(TickHeight)), Kit.Color(tone));
     }
 
     /// <summary>
-    /// A band whose two ends come to a point <paramref name="point"/> deep: the jump strip, the NAV card and, at
-    /// its own proportions, the speed readout's hexagon. Its outline is lit in <paramref name="tone"/>.
+    /// A band whose two ends come to a point <paramref name="point"/> deep: the jump strip and, at its own
+    /// proportions, the speed readout's hexagon. Its border takes <paramref name="tone"/> quietly, or plainly when
+    /// <paramref name="lit"/>.
     /// </summary>
-    public static void Pointed(ImDrawListPtr draw, float2 min, float2 max, float point, uint tone, float toneAlpha, bool glow)
+    public static void Pointed(ImDrawListPtr draw, float2 min, float2 max, float point, uint tone, float toneAlpha, bool lit)
     {
         Span<float2> points = stackalloc float2[6];
         var middle = (min.Y + max.Y) * 0.5f;
@@ -43,10 +47,8 @@ internal static class Hud
         points[3] = new float2(max.X, middle);
         points[4] = new float2(max.X - point, max.Y);
         points[5] = new float2(min.X + point, max.Y);
-        draw.AddConvexPolyFilled(points, Kit.Color(Theme.Void, GlassAlpha));
-        if (glow)
-            draw.AddPolyline(points, Kit.Color(tone, 0.14f), ImDrawFlags.Closed, Kit.Px(4));
-        draw.AddPolyline(points, Kit.Color(tone, toneAlpha), ImDrawFlags.Closed, 1f);
+        draw.AddConvexPolyFilled(points, Kit.Color(Theme.Panel, FillAlpha));
+        draw.AddPolyline(points, Kit.Color(Border(tone, lit), toneAlpha), ImDrawFlags.Closed, 1f);
     }
 
     /// <summary>The width <see cref="KeyChip"/> takes for a key's name.</summary>
@@ -66,8 +68,8 @@ internal static class Hud
         var height = MathF.Round(text.Y + Kit.Px(4));
         var min = new float2(left, MathF.Round(middle - height * 0.5f));
         var max = min + new float2(width, height);
-        draw.AddRectFilled(min, max, Kit.Color(rgb, 0.12f));
-        draw.AddRect(min, max, Kit.Color(rgb, 0.8f));
+        draw.AddRectFilled(min, max, Kit.Color(Theme.PanelRaised));
+        draw.AddRect(min, max, Kit.Color(Kit.Mix(Theme.Line, rgb, 0.5f)));
         Kit.Text(draw, font, size, new float2(min.X + Kit.Px(Theme.Space2), min.Y + Kit.Px(2)), rgb, key);
         return width;
     }

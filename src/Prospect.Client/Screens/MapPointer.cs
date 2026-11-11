@@ -194,14 +194,23 @@ internal static class MapUnitList
     public const float FullRowHeight = 44f;
     public const float CompactRowHeight = 28f;
 
-    // Unscaled pixels, matching the map's own heading and the sector panel above it.
-    private const float Margin = 24f;
-    private const float Width = 320f;
+    // Unscaled pixels, matching the map's own heading and the sector panel above it: one left column, one gap.
+    private const float Margin = HudLayout.Margin;
     private const float MinWidth = 240f;
-    private const float FullHeadingBottom = 256f;
     private const float ShortHeadingLine = 20f;
     private const float Gap = 8f;
     private const float PadBelowRows = 6f;
+
+    /// <summary>The map's full heading under the sector panel: the gap above it and its height, in unscaled pixels.</summary>
+    public const float HeadingGap = 16f;
+    public const float HeadingHeight = 84f;
+
+    /// <summary>The hover card's top and its distance from the right edge: tucked into the top right corner.</summary>
+    public const float HoverTop = HudLayout.Margin;
+    public const float HoverRight = HudLayout.Margin;
+
+    /// <summary>Where the map's full heading starts, under the sector panel.</summary>
+    public static float HeadingTop(float sectorPanelBottom, float scale) => sectorPanelBottom + MathF.Round(HeadingGap * scale);
 
     // Like every surface: no title bar, no move, never raised by a click (so the course menu stays above it), and
     // the wheel scrolls only the rows.
@@ -231,7 +240,7 @@ internal static class MapUnitList
         var bottom = display.Y - Px(Margin);
         var shown = Math.Max(rows, 1);
 
-        var top = Px(FullHeadingBottom) + Px(Gap);
+        var top = HeadingTop(sectorPanelBottom, scale) + Px(HeadingHeight) + Px(Gap);
         var shortHeading = bottom - top - header - pad < Math.Min(shown, 3) * compact;
         if (shortHeading)
             top = sectorPanelBottom + Px(Gap) + Px(ShortHeadingLine) + Px(Gap);
@@ -240,7 +249,7 @@ internal static class MapUnitList
         var compactRows = room < Math.Min(shown, 4) * full;
         var row = compactRows ? compact : full;
         var rowsHeight = Math.Max(row, Math.Min(shown * row, room));
-        var width = Math.Min(Math.Min(Px(Width), Math.Max(Px(MinWidth), rightLimit - Px(Gap) - Px(Margin))), display.X - Px(Margin) * 2);
+        var width = Math.Min(Math.Min(HudLayout.ColumnWidth(display, scale), Math.Max(Px(MinWidth), rightLimit - Px(Gap) - Px(Margin))), display.X - Px(Margin) * 2);
         return new MapUnitLayout(new float2(Px(Margin), top), new float2(width, header + rowsHeight + pad), header, row, pad, compactRows, shortHeading);
     }
 
@@ -366,4 +375,85 @@ internal static class MapCourseMenu
     }
 
     public static void End() => ImGui.End();
+}
+
+/// <summary>
+/// The plotted jump's route on the map: a dotted line from the hull being flown to the NAV point, apart from
+/// drawing so its rules can be tested. Sizes are in unscaled pixels.
+/// </summary>
+internal static class MapRoute
+{
+    /// <summary>A dash and the space after it.</summary>
+    public const float Dash = 6f;
+    public const float Space = 5f;
+
+    /// <summary>The most dashes drawn, whatever the zoom: a clipped line across the whole screen needs far fewer.</summary>
+    public const int MaxDashes = 1024;
+
+    /// <summary>
+    /// Whether the map shows the NAV point on the layer it is looking at, and with <paramref name="line"/> the
+    /// route to it: only when the hull and the point are both on that layer, as the map is flat per layer.
+    /// </summary>
+    public static bool Shows(int ownLayer, int navLayer, int mapLayer, out bool line)
+    {
+        line = ownLayer == mapLayer && navLayer == mapLayer;
+        return navLayer == mapLayer;
+    }
+
+    /// <summary>
+    /// Cuts the line from <paramref name="from"/> to <paramref name="to"/> to <paramref name="clip"/>. False when
+    /// none of it is inside.
+    /// </summary>
+    public static bool Clip(ref float2 from, ref float2 to, in HudRect clip)
+    {
+        var along = to - from;
+        var enter = 0f;
+        var leave = 1f;
+        if (!Edge(-along.X, from.X - clip.Left, ref enter, ref leave) || !Edge(along.X, clip.Right - from.X, ref enter, ref leave)
+            || !Edge(-along.Y, from.Y - clip.Top, ref enter, ref leave) || !Edge(along.Y, clip.Bottom - from.Y, ref enter, ref leave))
+            return false;
+        var start = from;
+        from = start + along * enter;
+        to = start + along * leave;
+        return true;
+    }
+
+    /// <summary>The dashes of the clipped line, at most <see cref="MaxDashes"/>; nothing when it lies off the screen.</summary>
+    public static int Dashes(float2 from, float2 to, in HudRect clip, float dash, float space)
+    {
+        if (!Clip(ref from, ref to, clip) || dash <= 0f)
+            return 0;
+        var along = to - from;
+        var length = MathF.Sqrt(along.X * along.X + along.Y * along.Y);
+        return Math.Min(MaxDashes, (int)MathF.Ceiling(length / (dash + space)));
+    }
+
+    /// <summary>Draws the route dotted, cut to <paramref name="clip"/>.</summary>
+    public static void Dotted(ImDrawListPtr draw, float2 from, float2 to, in HudRect clip, float dash, float space, ImColor8 color, float thickness)
+    {
+        var count = Dashes(from, to, clip, dash, space);
+        if (count == 0)
+            return;
+        Clip(ref from, ref to, clip);
+        var along = to - from;
+        var length = MathF.Sqrt(along.X * along.X + along.Y * along.Y);
+        var unit = along / length;
+        for (var i = 0; i < count; i++)
+        {
+            var start = i * (dash + space);
+            draw.AddLine(from + unit * start, from + unit * Math.Min(start + dash, length), color, thickness);
+        }
+    }
+
+    private static bool Edge(float p, float q, ref float enter, ref float leave)
+    {
+        if (MathF.Abs(p) < 1e-6f)
+            return q >= 0f;
+        var t = q / p;
+        if (p < 0f)
+            enter = Math.Max(enter, t);
+        else
+            leave = Math.Min(leave, t);
+        return enter <= leave;
+    }
 }

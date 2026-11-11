@@ -18,8 +18,8 @@ internal sealed partial class ScreenHost
 
     /// <summary>
     /// The pilot console at the bottom centre: shield and hull on the left, energy and boost heat on the right,
-    /// speed and the dampeners in a hexagon between them, each group closed by a bracket and linked to it. Each bar
-    /// is a row of slanted segments in a slanted frame. Every reading has a word or a number beside its colour, so
+    /// speed in a hexagon between them, and the dampeners beside the boost heat. Each bar is a row of slanted
+    /// segments in a slanted frame. Every reading has a word or a number beside its colour, so
     /// nothing is told by colour alone.
     /// </summary>
     private void DrawFlightConsole(ImDrawListPtr draw, SessionSnapshot snapshot, in HullView own, float speed)
@@ -78,55 +78,56 @@ internal sealed partial class ScreenHost
         var noEnergy = !own.Boosting && (own.Energy <= 0f || own.Energy < flight.BoostEnergyFloor);
         var heatColor = own.BoostLocked || noEnergy ? Theme.Bad : FlightConsole.HeatColor(heat);
         ConsoleRow(draw, layout, layout.RightX, second, ConsoleIcon.Heat, own.Boosting ? "BOOSTING"u8 : "BOOST HEAT"u8, heatColor, out track, own.Boosting);
-        if (own.BoostLocked)
-            ConsoleReading(draw, layout, layout.RightX, second, "OVERHEAT"u8, _ui.SansMedium, Theme.Bad, track);
-        else if (noEnergy)
-            ConsoleReading(draw, layout, layout.RightX, second, "NO ENERGY"u8, _ui.SansMedium, Theme.Bad, track);
-        else
-            ConsoleReading(draw, layout, layout.RightX, second, Kit.F($"{heat * 100f:0} %"), _ui.Mono, heatColor, track);
+        DrawHeatReadings(draw, layout, second, own.BoostLocked ? "OVERHEAT"u8 : noEnergy ? "NO ENERGY"u8 : Kit.F($"{heat * 100f:0} %"), own.BoostLocked || noEnergy, heatColor, snapshot.Dampeners, ref track);
         ConsoleSegments(draw, track, heat, heat, own.BoostLocked ? Theme.Bad : heatColor, !own.BoostLocked);
 
         // While locked, the mark is where the drive has cooled enough to boost again.
         if (own.BoostLocked)
             ConsoleMarker(draw, track, FlightModel.BoostUnlockHeat, 0.7f);
 
-        // Centre: speed, its unit, and whether the dampeners hold the hull still, in a hexagon. Its outline is
-        // amber while the dampeners are off, the one centre state that wants the pilot's attention.
+        // Centre: speed and its unit in a hexagon with a quiet outline; the dampeners are said in the heat row.
         var cx = layout.CenterX;
         var top = layout.Top;
-        var height = layout.Height;
-        var middle = top + height * 0.5f;
         var reach = Kit.Px(FlightConsole.Center * 0.5f);
-        var hexTone = snapshot.Dampeners ? Theme.Info : Theme.Accent;
-        Hud.Pointed(draw, new float2(cx - reach, top), new float2(cx + reach, top + height), Kit.Px(FlightConsole.HexPoint), hexTone, snapshot.Dampeners ? 0.5f : 0.9f, !snapshot.Dampeners);
-
-        // Each group is closed at its outer end by a bracket in the colour of its most urgent reading, and joined
-        // to the hexagon by a short link: one console, three parts.
-        var leftTone = hull < 0.3f ? Theme.Bad : Theme.Info;
-        var rightTone = own.BoostLocked || noEnergy || energy < 0.15f ? Theme.Bad : Theme.Info;
-        ConsoleBracket(draw, layout.LeftX, top, top + height, -1f, leftTone);
-        ConsoleBracket(draw, layout.Right, top, top + height, 1f, rightTone);
-        var link = Kit.Color(Theme.LineStrong, 0.9f);
-        var slant = Kit.Px(FlightConsole.Slant);
-        draw.AddLine(new float2(layout.LeftX + layout.GroupWidth - slant * 0.5f, middle), new float2(cx - reach - Kit.Px(3), middle), link, 1f);
-        draw.AddLine(new float2(cx + reach + Kit.Px(3), middle), new float2(layout.RightX + slant * 0.5f, middle), link, 1f);
+        Hud.Pointed(draw, new float2(cx - reach, top), new float2(cx + reach, top + layout.Height), Kit.Px(FlightConsole.HexPoint), Theme.LineStrong, 0.9f, false);
 
         var shown = float.IsFinite(speed) ? speed : 0f;
         var speedText = Kit.F($"{shown:0}");
         var speedSize = Kit.Measure(_ui.Mono, FlightConsole.SpeedFont, speedText);
-        Kit.Text(draw, _ui.Mono, FlightConsole.SpeedFont, new float2(cx - speedSize.X * 0.5f, top - Kit.Px(7)), Theme.Text, speedText);
+        Kit.Text(draw, _ui.Mono, FlightConsole.SpeedFont, new float2(cx - speedSize.X * 0.5f, top + Kit.Px(FlightConsole.SpeedTop)), Theme.Text, speedText);
         var unit = Kit.Measure(_ui.SansMedium, Theme.FontCaption, "M/S"u8);
-        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(cx - unit.X * 0.5f, top + Kit.Px(36)), Theme.TextMute, "M/S"u8);
-        var dampeners = snapshot.Dampeners ? "DAMPENERS ON"u8 : "DAMPENERS OFF"u8;
-        var dampenersSize = Kit.Measure(_ui.SansMedium, Theme.FontCaption, dampeners);
-        Kit.Text(
-            draw,
-            _ui.SansMedium,
-            Theme.FontCaption,
-            new float2(cx - dampenersSize.X * 0.5f, top + Kit.Px(56)),
-            snapshot.Dampeners ? Theme.TextDim : Theme.Accent,
-            dampeners
-        );
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(cx - unit.X * 0.5f, top + Kit.Px(FlightConsole.UnitTop)), Theme.TextMute, "M/S"u8);
+    }
+
+    /// <summary>
+    /// The boost heat row's readings: the heat, or why boost cannot run, and whether the dampeners hold the hull
+    /// still. With room, the two stack in the reading column; in a compact row the dampeners go at the right of
+    /// the bar's line and the bar gives up the width. Off is amber, the one dampener state that wants attention.
+    /// </summary>
+    private void DrawHeatReadings(ImDrawListPtr draw, in FlightConsoleLayout layout, float y, ReadOnlySpan<byte> reading, bool warning, uint color, bool dampeners, ref ConsoleTrack track)
+    {
+        var x = layout.RightX;
+        var right = x + layout.GroupWidth - Kit.Px(FlightConsole.Slant * 0.5f + FlightConsole.Pad);
+        var font = warning ? _ui.SansMedium : _ui.Mono;
+        var readingColor = warning ? Theme.Bad : color;
+        var state = dampeners ? "DAMPENERS ON"u8 : "DAMPENERS OFF"u8;
+        var stateColor = dampeners ? Theme.TextMute : Theme.Accent;
+        var stateSize = Kit.Measure(_ui.SansMedium, Theme.FontCaption, state);
+        var readingSize = Kit.Measure(font, Theme.FontSmall, reading);
+        draw.PushClipRect(new float2(x, y), new float2(x + layout.GroupWidth, y + layout.Row), true);
+        if (!layout.Compact)
+        {
+            Kit.Text(draw, font, Theme.FontSmall, new float2(right - readingSize.X, y + Kit.Px(4)), readingColor, reading);
+            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(right - stateSize.X, y + Kit.Px(20)), stateColor, state);
+        }
+        else
+        {
+            Kit.Text(draw, font, Theme.FontSmall, new float2(Math.Max(right - readingSize.X, track.LabelEnd + Kit.Px(FlightConsole.ColumnGap)), y + Kit.Px(3)), readingColor, reading);
+            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(right - stateSize.X, track.Top + (track.Bottom - track.Top - stateSize.Y) * 0.5f), stateColor, state);
+            track = track with { Right = Math.Max(track.Left, right - stateSize.X - Kit.Px(FlightConsole.ColumnGap)) };
+        }
+
+        draw.PopClipRect();
     }
 
     /// <summary>
@@ -196,22 +197,6 @@ internal sealed partial class ScreenHost
         draw.AddRectFilled(new float2(middle - Kit.Px(0.5f), stripTop - Kit.Px(2)), new float2(middle + Kit.Px(1), stripBottom + Kit.Px(2)), Kit.Color(Theme.TextDim, 0.9f));
     }
 
-    /// <summary>
-    /// The bracket at a group's outer end: a chevron pointing away from the console, clear of the slanted rows,
-    /// <see cref="HudLayout.BracketOut"/> beyond them at its point. <paramref name="side"/> is -1 for the left end.
-    /// </summary>
-    private static void ConsoleBracket(ImDrawListPtr draw, float edge, float top, float bottom, float side, uint rgb)
-    {
-        Span<float2> points = stackalloc float2[3];
-        var rise = Kit.Px(HudLayout.BracketRise);
-        var near = edge + side * Kit.Px(2);
-        points[0] = new float2(near, top - rise);
-        points[1] = new float2(edge + side * Kit.Px(HudLayout.BracketOut), (top + bottom) * 0.5f);
-        points[2] = new float2(near, bottom + rise);
-        draw.AddPolyline(points, Kit.Color(rgb, 0.18f), ImDrawFlags.None, Kit.Px(4));
-        draw.AddPolyline(points, Kit.Color(rgb, 0.9f), ImDrawFlags.None, Kit.Px(1.5f));
-    }
-
     /// <summary>Shield or hull points out of the most the hull holds, in thousands once they no longer fit.</summary>
     private static ReadOnlySpan<byte> Points(float value, float capacity)
     {
@@ -253,10 +238,10 @@ internal sealed partial class ScreenHost
         var p1 = new float2(x + w, y);
         var p2 = new float2(x + w - s, y + h);
         var p3 = new float2(x, y + h);
-        draw.AddQuadFilled(p0, p1, p2, p3, Kit.Color(Theme.Void, 0.62f));
-        draw.AddQuad(p0, p1, p2, p3, Kit.Color(rgb, lit ? 0.22f : 0.1f), Kit.Px(3));
-        draw.AddQuad(p0, p1, p2, p3, Kit.Color(rgb, lit ? 0.85f : 0.45f), 1f);
-        draw.AddLine(p3, p0, Kit.Color(rgb, 0.95f), Kit.Px(2));
+        // The heads-up panel look: muted fill, a quiet border, and the reading's colour only on the leading edge.
+        draw.AddQuadFilled(p0, p1, p2, p3, Kit.Color(Theme.Panel, Hud.FillAlpha));
+        draw.AddQuad(p0, p1, p2, p3, Kit.Color(Hud.Border(rgb, lit)), 1f);
+        draw.AddLine(p3, p0, Kit.Color(rgb, 0.85f), Kit.Px(2));
 
         var pad = Kit.Px(FlightConsole.Pad);
         var inner = x + s * 0.5f + pad;
@@ -306,22 +291,6 @@ internal sealed partial class ScreenHost
         if (width <= 0f)
             return;
 
-        // A faint wash under the lit part, the console's only glow.
-        var lead = Math.Min((int)(fraction * count), count - 1);
-        var litEnd = track.Left + lead * (width + gap) + width * Math.Clamp(fraction * count - lead, 0f, 1f);
-        if (fraction > 0f)
-        {
-            var glow = Kit.Px(2);
-            var glowColor = Kit.Color(rgb, 0.14f);
-            draw.AddQuadFilled(
-                new float2(track.Left - glow + skew, track.Top - glow),
-                new float2(litEnd + glow + skew, track.Top - glow),
-                new float2(litEnd + glow, track.Bottom + glow),
-                new float2(track.Left - glow, track.Bottom + glow),
-                glowColor
-            );
-        }
-
         var off = Kit.Color(Theme.Line, 0.85f);
         var lost = Kit.Color(Kit.Mix(rgb, Theme.Text, 0.45f), 0.5f);
         for (var i = 0; i < count; i++)
@@ -329,7 +298,8 @@ internal sealed partial class ScreenHost
             var x = track.Left + i * (width + gap);
             var lit = Math.Clamp(fraction * count - i, 0f, 1f);
             var trailed = Math.Clamp(trail * count - i, 0f, 1f);
-            var color = heat ? Kit.Color(FlightConsole.HeatColor((i + 0.5f) / count)) : Kit.Color(rgb);
+            // The hues stay, a shade towards the panel so the bars read without shouting.
+            var color = Kit.Color(Kit.Mix(heat ? FlightConsole.HeatColor((i + 0.5f) / count) : rgb, Theme.Panel, FlightConsole.Mute));
             if (lit > 0f)
                 SegmentPart(draw, x, x + width * lit, track.Top, track.Bottom, skew, color);
             if (trailed > lit)
@@ -469,11 +439,18 @@ internal static class FlightConsole
     public const int Segments = 10;
     public const float SpeedFont = 48f;
 
+    /// <summary>Where the speed and its unit sit from the hexagon's top, centred in its height together.</summary>
+    public const float SpeedTop = 4f;
+    public const float UnitTop = 48f;
+
     /// <summary>Net megawatts below which the battery reads as steady.</summary>
     public const float SteadyRate = 0.05f;
 
     /// <summary>How fast a bar's trail of lost charge catches up, as an exponential rate per second.</summary>
     public const float TrailRate = 3f;
+
+    /// <summary>How far a bar's colour is taken towards the panel, so the hues read without shouting.</summary>
+    public const float Mute = 0.18f;
 
     /// <summary>Orange for charge leaving the battery, green for charge coming in.</summary>
     public const uint DrawColor = 0xFF7A2E;

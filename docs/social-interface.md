@@ -55,7 +55,10 @@ bridge, so tests use the same calls.
   short, members become one-line rows (name, shield, hull), leader first, at least one, with the rest counted
   in the caption.
 - Recent chat lines stay beside the jump strip where a 300-pixel line remains, else above it while it is drawn.
-- `HudLayout` holds every clearance: the left column, the console and its brackets, the strip, the NAV card.
+- The left column (sector panel, party list) and the recent chat stop short of the middle of the view; at a
+  large interface scale the column narrows and cuts what does not fit.
+- `HudLayout` holds every clearance: the left column, the console, the strip, the NAV card. `HudCueRoom` is
+  the room the target and NAV markers share; a marker whose point is under a piece becomes an arrow there.
 - The quick buttons drop their key labels when the row would cover the sector panel.
 - Chat follows new lines while scrolled to the end. Scrolled back, it keeps the reader's place as old lines
   leave the 64-line log (`SocialState.ChatTotal`, client-only), until the lines being read are dropped.

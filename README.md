@@ -18,7 +18,8 @@ Chat, the player roster and parties work end to end: the server decides, the cli
 - **Chat** (`Enter`): everyone or party channel, the last 64 lines, typed lines checked before sending.
 - **Party list** at the top left: each other member's name, ship, shield, hull and sector. In a short window
   or at a large interface scale it shrinks to one-line rows with a count of the rest. Recent chat lines show
-  at the bottom left for a few seconds while chat is closed.
+  at the bottom left for a few seconds while chat is closed. The left column narrows at a large interface scale
+  so the middle of the view stays clear.
 - **Quick buttons** at the top right open the three, each with its key from the bindings. Click them; in the
   pilot view hold `Shift` first to show the cursor. Where the row would cover the sector panel (a narrow window
   or a large interface scale), the keys are left off the buttons; F1 still lists them.
@@ -59,11 +60,11 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   surplus. Boost needs the battery above 5% to start (`boostEnergyFloor` in `content/blocks/blocks.json`), runs
   until the battery is empty, then waits for the battery to pass 5% again; a hull without a battery cannot
   boost. The pilot console at the bottom shows shield and hull on the left, energy and boost heat on the right
-  and speed in a hexagon between them, as slanted segmented bars. The energy bar marks the 5%, a strip under it
-  shows the battery's live net draw or recharge, and the heat bar turns from cyan to red and says when boost is
-  overheated (with the mark where it unlocks) or out of energy. A bracket closes each side: red when hull is
-  below 30%, or boost is locked out or the battery is low; the hexagon turns amber with the dampeners off.
-  Heads-up panels share one look: dark glass, a hairline, and one lit edge in the colour of their state.
+  and speed with its unit in a hexagon between them, as slanted segmented bars. The energy bar marks the 5%, a
+  strip under it shows the battery's live net draw or recharge, and the heat bar turns from cyan to red and says
+  when boost is overheated (with the mark where it unlocks) or out of energy. The boost heat row also says
+  whether the dampeners are on; off is amber. Heads-up panels share the unit list's look: a muted dark panel, a
+  thin quiet border and a small tick in the colour of their state. Nothing glows.
 - **Collisions and damage.** Hulls collide block by block against each asteroid's real surface, and block
   against block with each other. An impact bounces and turns the hull; damage grows with the square of the speed
   over a safe limit and lands on the blocks that touched, after the shield. A block at zero is gone, and the hull
@@ -119,7 +120,9 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   each sector's star, asteroids and name. A sector's contents are shown only after one of your ships has been
   within a sector of it. Right-click a sector to choose how to get there: move under engines, or jump with the
   faster-than-light drive (only ships that have a working drive jump). A unit list on the left shows every ship you
-  own, which are selected, its sector and what it is doing; click a row to add or remove that ship.
+  own, which are selected, its sector and what it is doing; click a row to add or remove that ship. A plotted
+  jump shows as a dotted route from the ship you fly to its NAV point, on the layer both are on, until the jump
+  is made, replaced or cleared. The card for the sector under the pointer sits in the top right corner.
 - **Renderer.** Floating-point scene target and tone mapping, camera-relative rendering from double-precision
   positions, a star field and sky, instanced hull and asteroid meshes. Asteroids have five levels of detail, from
   a speck in the distance to a giant seen from its surface.
@@ -205,8 +208,9 @@ thrust, so looking around while coasting costs nothing; hold the right mouse but
 without turning.
 
 A ship near the reticle is bracketed; the middle mouse button targets it and shows its shield and hull. A target
-out of view, or behind you, shows as an arrow near the screen's edge pointing the way to turn; it slides back into
-the bracket as the target comes into view. With one
+out of view, behind you, or under a panel, the jump strip or the console, shows as an arrow at the edge of the clear
+part of the view pointing the way to turn; it slides back into the bracket as the target comes into view. The
+plotted jump's NAV marker does the same. With one
 of your own ships targeted, `T` puts you at its controls and the ship you left is flown by the server. With nothing
 targeted, `T` leaves your ship in a drone: a tiny craft with little hull and shield that is removed when you take
 a ship again. In the command view `T` takes control of the first selected ship.
