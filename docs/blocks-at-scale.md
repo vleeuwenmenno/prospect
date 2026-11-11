@@ -1,6 +1,6 @@
 # Blocks at scale
 
-How ships of thousands of blocks and stations of 150,000 stay fast. Plan only: nothing here is built yet.
+How ships of thousands of blocks and stations of 150,000 stay fast. Stage 1 is built and tested; stages 2–5 remain planned.
 
 The goal and the block model are in `direction.md` under "Decided: building".
 
@@ -20,6 +20,68 @@ The goal and the block model are in `direction.md` under "Decided: building".
   with the block's size. A big engine need not be many small engines.
 - **A stat with no rule grows with the cells the block fills.**
 - **Materials come later** and will change mass and hull points on top of this. The rule format must leave room.
+
+## Decided: format and limits
+
+- Version 2 adds `"version": 2` and optional `"size": [x, y, z]` per block. Omitted size is `[1, 1, 1]`.
+  Unversioned version 1 files still load. `at` names the centre of the minimum occupied cell.
+- The block id is its zero-based file index. Validation never reorders that array.
+- `content/blocks/blocks.json` owns the limits: 64 cells per box side, 4,096 cells across a design,
+  150,000 blocks. Walls are at least one cell thick. Coordinates and exclusive upper edges stay within
+  `[-4096, 4096]`, and each occupied axis span is at most 4,096.
+- A 64-cell wall avoids thousands of small blocks; a 4,096-cell span leaves room for stations while bounding
+  coordinates. The count meets the station target. These are content limits, not wire encodings.
+- Boxes cannot overlap; touching faces are allowed. At least one core is required, matching existing rules.
+  A median spatial tree validates overlap without expanding boxes into cells or scanning all pairs.
+
+## Decided: size rule notation
+
+- Each block type may have `"sizeRules": { "powerOutput": { "volumeExponent": 1.25 } }`.
+  The result is `base * cells^volumeExponent`. Missing rules mean exponent 1; 0 is constant,
+  values below 1 grow slower, values above 1 grow faster. Accepted exponents are 0 through 2.
+- All twelve numeric BlockType stats support rules. Core, forward-only and drive kind remain categories.
+  Crew rounds down per block. One-cell blocks return the original number directly, under every exponent.
+- Content examples: constant core power draw, generator power exponent 1.25, crew exponent 0.5.
+  Materials will multiply the scaled result separately; the rule object leaves room for that extension.
+
+## Stage 1 evaluation
+
+- `BoxDesign` owns an immutable block array. `BoxHullSums` accepts a design and optional survivor set,
+  then returns `FlightParams`, `HullStats` and the survivors' centre. World multipliers apply at evaluation.
+- Inertia uses solid rectangular boxes and the parallel-axis theorem about the intact centre.
+  Damage changes mass, bounds and inertia, but never moves the pivot. The first surviving drive in file
+  order selects the kind; only drives of that kind supply jump power.
+- Running sums use doubles in a fixed-order binary tree. Losing a block clears its leaf and updates only
+  ancestors: O(log n), no allocation. Reading figures is O(1). A fresh evaluation uses the same tree order.
+- The 4,096-loss test compares every output field at checkpoints, including the empty hull: zero difference.
+  The independent unit-cell inertia reference allows relative error `1e-6` after conversion to float;
+  centre error is below `1e-12` grid cells. Legacy live figures remain bit-for-bit unchanged.
+- This is a tooling implementation, separate from the live 64-bit path. Its full sum tree is memory-heavy;
+  stage 2 must budget that cost before adopting it for many hulls. No production-scale memory claim yet.
+
+## Stage 1 measurements
+
+Debug build, Linux x64, .NET 10.0.13, seed 1234, measured during `make check`.
+Times include generation, validation with spatial-tree construction, and sum construction plus evaluation.
+Allocation is current-thread managed bytes, not process peak RSS; retained sums exclude headers and shared design.
+
+| Fixture | Generate | Validate | Evaluate | Allocated | Retained sums |
+| --- | --- | --- | --- | --- | --- |
+| 4,096 boxes | 0.22 ms | 58.58 ms | 8.29 ms | 3,785,000 B | 2,031,616 B |
+| 150,000 boxes | 5.85 ms | 3,501.16 ms | 263.38 ms | 194,223,720 B | 130,023,424 B |
+
+- `BoxDesignTests.Generate` uses integer LCG arithmetic and nonoverlapping slots, with mixed-size plating,
+  engines, generators, shields, cargo, quarters and one core. No large fixture files are stored.
+- Each fixture asserts a 15-second combined tooling budget and less than 256 MiB allocated.
+  These budgets are not tick or frame budgets. Cross-machine timings have not been measured.
+
+## Stage 2 handoff
+
+- Keep file-order block ids and the fixed original pivot; replace the live alive mask and hit-point storage.
+- Send versioned box designs and block losses; update the wire version only when that protocol changes.
+- Implement box collision and drawing before admitting sized boxes or more than 64 blocks into the live loader.
+- Reuse the seeded fixtures and reference tests. The validation tree is temporary, not the future capped
+  collision tree. Budget per-hull sum memory and cross-platform size-rule evaluation before production use.
 
 ## Decided: network
 
@@ -77,4 +139,3 @@ Each stage leaves the game running, with `make check` and `make bench` passing.
 
 - The slowest machine the full-load scene must run on. Working target until tested there: a MacBook Air M4
   at 60 frames per second.
-- Limits on a build: the largest box, the largest ship or station across, the thinnest wall.
