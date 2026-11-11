@@ -68,7 +68,7 @@ The settings file may hold the server's own values under `"server"`, beside the 
     "port": 27420,
     "maxPlayers": 16,
     "password": "open sesame",
-    "listing": "https://mvl.sh",
+    "listing": "https://prospect.mvl.sh",
     "limits": { "pendingPerAddress": 8, "pendingTotal": 32 }
   }
 }
@@ -183,7 +183,7 @@ A host who needs more than this needs a firewall or a provider that filters floo
 
 ## The listing server, from the game's side
 
-- The default address is in `content/net/listing.json` (`https://mvl.sh`). `--listing <url>` replaces it,
+- The default address is in `content/net/listing.json` (`https://prospect.mvl.sh`). `--listing <url>` replaces it,
   `--listing off` turns it off, on the client and on the server.
 - HTTPS is required. Plain HTTP is accepted only for this machine (`make listing`).
 - Every request has a time-out and a size limit. Redirects are not followed.

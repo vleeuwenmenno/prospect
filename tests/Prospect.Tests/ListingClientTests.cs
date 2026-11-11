@@ -15,14 +15,14 @@ namespace Prospect.Tests;
 public sealed class ListingConfigTests
 {
     [Theory]
-    [InlineData("https://mvl.sh", "https://mvl.sh/")]
-    [InlineData("https://mvl.sh/", "https://mvl.sh/")]
+    [InlineData("https://prospect.mvl.sh", "https://prospect.mvl.sh/")]
+    [InlineData("https://prospect.mvl.sh/", "https://prospect.mvl.sh/")]
     [InlineData("https://example.org/prospect", "https://example.org/prospect/")]
     [InlineData("https://example.org:8443/a/b/", "https://example.org:8443/a/b/")]
     [InlineData("http://127.0.0.1:8080", "http://127.0.0.1:8080/")]
     [InlineData("http://localhost:8080", "http://localhost:8080/")]
     [InlineData("http://[::1]:8080", "http://[::1]:8080/")]
-    [InlineData("  https://mvl.sh  ", "https://mvl.sh/")]
+    [InlineData("  https://prospect.mvl.sh  ", "https://prospect.mvl.sh/")]
     public void AnHttpsAddressOrPlainHttpOnThisMachineIsAccepted(string url, string expected)
     {
         Assert.True(ListingConfig.TryCreate(url, out var config, out var error), error);
@@ -31,16 +31,16 @@ public sealed class ListingConfigTests
     }
 
     [Theory]
-    [InlineData("http://mvl.sh")]
+    [InlineData("http://prospect.mvl.sh")]
     [InlineData("http://192.168.1.10:8080")]
     [InlineData("http://203.0.113.7")]
-    [InlineData("ftp://mvl.sh")]
+    [InlineData("ftp://prospect.mvl.sh")]
     [InlineData("file:///etc/passwd")]
-    [InlineData("mvl.sh")]
+    [InlineData("prospect.mvl.sh")]
     [InlineData("/v1/servers")]
-    [InlineData("https://user:secret@mvl.sh")]
-    [InlineData("https://mvl.sh/?next=1")]
-    [InlineData("https://mvl.sh/#x")]
+    [InlineData("https://user:secret@prospect.mvl.sh")]
+    [InlineData("https://prospect.mvl.sh/?next=1")]
+    [InlineData("https://prospect.mvl.sh/#x")]
     [InlineData("")]
     [InlineData(null)]
     public void AnythingElseIsRefused(string? url)
@@ -55,7 +55,7 @@ public sealed class ListingConfigTests
     {
         var standard = ListingConfig.Resolve(null);
         Assert.NotNull(standard);
-        Assert.Equal("https://mvl.sh/", standard.Url.AbsoluteUri);
+        Assert.Equal("https://prospect.mvl.sh/", standard.Url.AbsoluteUri);
         Assert.Equal(30, standard.RefreshSeconds);
         Assert.False(standard.IsLocal);
 

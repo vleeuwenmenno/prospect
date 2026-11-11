@@ -46,7 +46,7 @@ public sealed record ListingConfig
         config = null;
         if (string.IsNullOrWhiteSpace(url) || url.Length > 512 || !Uri.TryCreate(url.Trim(), UriKind.Absolute, out var parsed))
         {
-            error = "The listing address must be a full address such as https://mvl.sh.";
+            error = "The listing address must be a full address such as https://prospect.mvl.sh.";
             return false;
         }
 

@@ -105,7 +105,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   [docs/hosting.md](docs/hosting.md#connection-limits).
 - **Listing server.** A small HTTP service (and its container image) that keeps the list of public games. A
   public server announces itself to it, refreshes every 30 seconds and removes itself on shutdown; the client
-  fetches and checks the list. Ours is `https://mvl.sh`, the default in `content/net/listing.json`. See
+  fetches and checks the list. Ours is `https://prospect.mvl.sh`, the default in `content/net/listing.json`. See
   [docs/listing-server.md](docs/listing-server.md).
 - **Releases.** Pushing a tag (`server-v…`, `list-v…` or `v…`) publishes the game server and listing server container
   images to GitHub Container Registry. See [docs/releasing.md](docs/releasing.md).

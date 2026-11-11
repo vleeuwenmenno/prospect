@@ -59,7 +59,18 @@ public sealed class ListingHost : IAsyncDisposable
     /// Starts the service with test defaults (private addresses allowed, since the tests connect over loopback) and
     /// <paramref name="settings"/> on top, keyed without the <c>Listing:</c> prefix.
     /// </summary>
-    public static async Task<ListingHost> StartAsync(params (string Key, string Value)[] settings)
+    public static Task<ListingHost> StartAsync(params (string Key, string Value)[] settings) =>
+        StartOnAsync("http://127.0.0.1:0", settings);
+
+    /// <summary>Starts the real service on IPv6 loopback to exercise IPv6 proxy peers.</summary>
+    public static Task<ListingHost> StartIpv6Async(params (string Key, string Value)[] settings) =>
+        StartOnAsync("http://[::1]:0", settings);
+
+    /// <summary>Connects over IPv4 to a dual-stack listener, producing a mapped IPv4 socket peer.</summary>
+    public static Task<ListingHost> StartMappedAsync(params (string Key, string Value)[] settings) =>
+        StartOnAsync("http://[::]:0", settings);
+
+    private static async Task<ListingHost> StartOnAsync(string url, (string Key, string Value)[] settings)
     {
         var values = new Dictionary<string, string?>
         {
@@ -79,12 +90,17 @@ public sealed class ListingHost : IAsyncDisposable
         {
             builder.Configuration.AddInMemoryCollection(values);
             builder.Services.AddSingleton<TimeProvider>(clock);
-            builder.WebHost.UseUrls("http://127.0.0.1:0");
+            builder.WebHost.UseUrls(url);
         });
         await app.StartAsync(Cancel);
         var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!
             .Addresses.First();
-        var client = new HttpClient { BaseAddress = new Uri(address), Timeout = TimeSpan.FromSeconds(30) };
+        if (url == "http://[::]:0")
+        {
+            address = new UriBuilder(address) { Host = "127.0.0.1" }.Uri.ToString();
+        }
+
+        var client = new HttpClient(new HttpClientHandler { UseProxy = false }) { BaseAddress = new Uri(address), Timeout = TimeSpan.FromSeconds(30) };
         return new ListingHost(app, client, clock);
     }
 

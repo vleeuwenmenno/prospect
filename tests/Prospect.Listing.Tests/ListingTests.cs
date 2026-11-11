@@ -561,6 +561,52 @@ public sealed class LimitTests
 
 public sealed class ForwardedAddressTests
 {
+    [Theory]
+    [InlineData("fd53:26b5:89f8::", true)]
+    [InlineData("fd53:26b5:89f8:0:ffff:ffff:ffff:ffff", true)]
+    [InlineData("fd53:26b5:89f7:ffff:ffff:ffff:ffff:ffff", false)]
+    [InlineData("fd53:26b5:89f8:1::", false)]
+    public async Task Ipv6ForwardingWalkStopsAtTheConfiguredBoundary(string hop, bool trusted)
+    {
+        await using var host = await StartIpv6Async(
+            ("TrustedProxies", "::1/128, fd53:26b5:89f8::/64"), ("AllowPrivateAddresses", "false"));
+        using var response = await host.AnnounceAsync(Body(), forwardedFor: $"{Routable.V4}, {hop}");
+        Assert.Equal(trusted ? HttpStatusCode.Created : HttpStatusCode.Forbidden, response.StatusCode);
+        var (_, list) = await host.GetListAsync(forwardedFor: Routable.V4);
+        if (trusted)
+        {
+            Assert.Equal(Routable.V4, Assert.Single(list.Servers).Address);
+        }
+        else
+        {
+            Assert.Empty(list.Servers);
+        }
+    }
+
+    [Fact]
+    public async Task UntrustedIpv6PeerCannotSpoofAForwardedAddress()
+    {
+        await using var host = await StartIpv6Async(
+            ("TrustedProxies", "fd53:26b5:89f8::/64"), ("AllowPrivateAddresses", "false"));
+        using var response = await host.AnnounceAsync(Body(), forwardedFor: Routable.V4);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        var (_, list) = await host.GetListAsync();
+        Assert.Empty(list.Servers);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("unknown")]
+    [InlineData("\"unterminated, fd53:26b5:89f8::1")]
+    [InlineData("fd53:26b5:89f8::1")]
+    public async Task Ipv6ProxyWithoutAClientAddressIsRefused(string? header)
+    {
+        await using var host = await StartIpv6Async(("TrustedProxies", "::1/128, fd53:26b5:89f8::/64"));
+        using var response = await host.AnnounceAsync(Body(), forwardedFor: header);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, host.Limiter.TrackedCount);
+    }
+
     [Fact]
     public async Task HeaderFromADirectClientIsIgnored()
     {

@@ -85,6 +85,7 @@ public static class ListingApp
         // not run at all. Then the address is always the one the request connected from.
         if (options.TrustedNetworks.Count > 0)
         {
+            app.Use(NormalizeForwardedAddresses);
             app.UseForwardedHeaders(ForwardedOptions(options));
         }
 
@@ -157,6 +158,45 @@ public static class ListingApp
         return forwarded;
     }
 
+    private static Task NormalizeForwardedAddresses(HttpContext context, RequestDelegate next)
+    {
+        // A mapped peer must never reach IPNetwork.Contains against an IPv6 network, including inside the
+        // framework's trust walk. Normalizing the connection alone would leave forwarded hops vulnerable.
+        if (context.Connection.RemoteIpAddress is { IsIPv4MappedToIPv6: true } peer)
+        {
+            context.Connection.RemoteIpAddress = peer.MapToIPv4();
+        }
+
+        const string header = "X-Forwarded-For";
+        var values = context.Request.Headers.GetCommaSeparatedValues(header);
+        var changed = false;
+        for (var i = 0; i < values.Length; i++)
+        {
+            // Use the same value and endpoint parsers as ForwardedHeadersMiddleware. An invalid value stays
+            // one stopping point: rejoining its dequoted text could turn a quoted comma into extra trusted hops.
+            if (!IPEndPoint.TryParse(values[i], out var endpoint))
+            {
+                values[i] = "unknown";
+                continue;
+            }
+
+            if (endpoint.Address.IsIPv4MappedToIPv6)
+            {
+                endpoint.Address = endpoint.Address.MapToIPv4();
+                changed = true;
+            }
+
+            values[i] = endpoint.ToString();
+        }
+
+        if (changed)
+        {
+            context.Request.Headers.SetCommaSeparatedValues(header, values);
+        }
+
+        return next(context);
+    }
+
     // Runs ahead of every rate-limited endpoint, before any per-address state is touched.
     //
     // A request that still resolves to a trusted proxy after the trust walk is refused: the proxy sent no forwarding
@@ -173,7 +213,7 @@ public static class ListingApp
         }
 
         var address = ClientAddress(context);
-        if (IsTrustedProxy(address, context.Connection.RemoteIpAddress, options))
+        if (IsTrustedProxy(address, options))
         {
             return WriteError(context.Response, 400, "The proxy did not say which address this request came from.");
         }
@@ -192,11 +232,11 @@ public static class ListingApp
             decision.Global ? "The service is busy. Try again shortly." : "Too many requests from this address.");
     }
 
-    private static bool IsTrustedProxy(IPAddress normalized, IPAddress? raw, ListingOptions options)
+    private static bool IsTrustedProxy(IPAddress normalized, ListingOptions options)
     {
         foreach (var network in options.TrustedNetworks)
         {
-            if (network.Contains(normalized) || (raw is not null && network.Contains(raw)))
+            if (network.Contains(normalized))
             {
                 return true;
             }

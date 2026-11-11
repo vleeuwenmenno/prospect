@@ -53,7 +53,7 @@ docker run -d -p 27420:27420/udp ghcr.io/<owner>/prospect-server:latest --name "
 - Everything after the image name is the server's command line (`--help` lists it): `--name`, `--visibility`,
   `--port`, `--max-players`, `--password`, `--listing`, `--seed`, `--settings`, `--set id=value`.
 - Unlisted by default: joined by address. `--visibility public` announces it to the listing server
-  (`https://mvl.sh`; `--listing <url>` for another, `--listing off` for none).
+  (`https://prospect.mvl.sh`; `--listing <url>` for another, `--listing off` for none).
 - The password goes in the `PROSPECT_PASSWORD` environment variable, not on the command line:
 
 ```sh

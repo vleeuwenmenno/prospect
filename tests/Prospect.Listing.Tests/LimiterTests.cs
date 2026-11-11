@@ -161,6 +161,7 @@ public sealed class RequestLimiterTests
     }
 
     [Theory]
+    [InlineData("::ffff:0.0.0.0/96", "0.0.0.0", 0)]
     [InlineData("::ffff:10.1.2.3/128", "10.1.2.3", 32)]
     [InlineData("::ffff:10.1.0.0/112", "10.1.0.0", 16)]
     [InlineData("::ffff:10.1.2.3", "10.1.2.3", 32)]
@@ -172,6 +173,37 @@ public sealed class RequestLimiterTests
         Assert.Equal(System.Net.IPAddress.Parse(address), network.BaseAddress);
         Assert.Equal(prefix, network.PrefixLength);
         Assert.True(network.Contains(System.Net.IPAddress.Parse(address)));
+    }
+
+    [Theory]
+    [InlineData("fd53:26b5:89f8::/64", "fd53:26b5:89f8::", "fd53:26b5:89f8:0:ffff:ffff:ffff:ffff", "fd53:26b5:89f7:ffff:ffff:ffff:ffff:ffff", "fd53:26b5:89f8:1::")]
+    [InlineData("fc00::/7", "fc00::", "fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", "fbff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", "fe00::")]
+    [InlineData("2000::/3", "2000::", "3fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", "1fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", "4000::")]
+    [InlineData("::1/128", "::1", "::1", "::", "::2")]
+    [InlineData("::fffc:0:0/95", "::fffc:0:0", "::fffd:ffff:ffff", "::fffb:ffff:ffff", "::fffe:0:0")]
+    [InlineData("::fffe:0:0/96", "::fffe:0:0", "::fffe:ffff:ffff", "::fffd:ffff:ffff", "::1:0:0:0")]
+    public void OrdinaryIpv6ProxyNetworksKeepTheirExactBoundaries(
+        string configured, string first, string last, string before, string after)
+    {
+        var options = new ListingOptions { TrustedProxies = configured };
+        options.Validate();
+        var network = Assert.Single(options.TrustedNetworks);
+        Assert.Equal(System.Net.IPNetwork.Parse(configured), network);
+        Assert.True(network.Contains(System.Net.IPAddress.Parse(first)));
+        Assert.True(network.Contains(System.Net.IPAddress.Parse(last)));
+        Assert.False(network.Contains(System.Net.IPAddress.Parse(before)));
+        Assert.False(network.Contains(System.Net.IPAddress.Parse(after)));
+    }
+
+    [Theory]
+    [InlineData("::/0")]
+    [InlineData("::/64")]
+    [InlineData("::/80")]
+    [InlineData("::fffe:0:0/95")]
+    public void NetworksOverlappingMappedIpv4AndOtherIpv6AreRejected(string configured)
+    {
+        var options = new ListingOptions { TrustedProxies = configured };
+        Assert.Contains("mixes IPv4-mapped", Assert.Throws<InvalidOperationException>(options.Validate).Message);
     }
 
     [Fact]

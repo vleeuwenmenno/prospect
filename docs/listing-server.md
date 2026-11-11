@@ -1,7 +1,7 @@
 # Listing server
 
 A small HTTP service that keeps the list of public games. Game servers announce themselves to it; clients ask it
-for the list. Ours runs at `mvl.sh`, behind a reverse proxy that terminates TLS.
+for the list. Ours runs at `prospect.mvl.sh`, behind a reverse proxy that terminates TLS.
 
 - Code: `src/Prospect.Listing` (ASP.NET Core, no database). Tests: `tests/Prospect.Listing.Tests`.
 - The list lives in memory. After a restart it is whole again within 90 seconds, from heartbeats.

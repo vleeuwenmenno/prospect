@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Net;
 
 namespace Prospect.Listing;
@@ -121,6 +122,16 @@ public sealed class ListingOptions
 
     private static readonly IPAddress MappedIpv4Start = IPAddress.Parse("::ffff:0.0.0.0");
 
+    private static bool OverlapsMappedIpv4(IPNetwork network)
+    {
+        // Contains takes an IPv4 comparison path for mapped probes on .NET 10, even against an IPv6 network.
+        // Compare the actual prefix bits instead; /0 needs its own mask because a 128-bit shift wraps to zero.
+        var mask = network.PrefixLength == 0 ? UInt128.Zero : UInt128.MaxValue << (128 - network.PrefixLength);
+        var start = BinaryPrimitives.ReadUInt128BigEndian(MappedIpv4Start.GetAddressBytes());
+        var address = BinaryPrimitives.ReadUInt128BigEndian(network.BaseAddress.GetAddressBytes());
+        return network.PrefixLength < 96 && address == (start & mask);
+    }
+
     private static IPNetwork[] ParseNetworks(string list)
     {
         var parts = list.Split([',', ' ', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -142,7 +153,7 @@ public sealed class ListingOptions
                 {
                     networks[i] = new IPNetwork(network.BaseAddress.MapToIPv4(), network.PrefixLength - 96);
                 }
-                else if (network.BaseAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 && network.Contains(MappedIpv4Start))
+                else if (network.BaseAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 && OverlapsMappedIpv4(network))
                 {
                     // Wider than the mapped range: it reads as covering IPv4 proxies and never would.
                     throw new InvalidOperationException($"{Section}:{nameof(TrustedProxies)} has '{part}', which mixes IPv4-mapped and other IPv6 addresses; write the IPv4 network and the IPv6 network separately.");

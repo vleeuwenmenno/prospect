@@ -41,7 +41,7 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
   only. Either can have a password. Private is the host alone: nobody can join.
 - **A server has a name** its host chooses.
 - **A listing server keeps the list.** Games advertise themselves to it; the join menu opens on a server
-  browser fed by it. Ours will run at `mvl.sh`, and clients use that by default.
+  browser fed by it. Ours will run at `prospect.mvl.sh`, and clients use that by default.
 - **Releases build two containers:** the game server and the listing server. A version tag says which one, or
   both.
 
