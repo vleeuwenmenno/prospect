@@ -1222,6 +1222,87 @@ public sealed class JumpTests
     private static readonly GameContent Content = GameContent.Load();
 
     [Theory]
+    [InlineData(0d)]
+    [InlineData(0.01d)]
+    [InlineData(40000d)]
+    [InlineData(160000d)]
+    public void DistanceChangesOnlyTransitAndAllDrivesUseIt(double distance)
+    {
+        foreach (var kind in new[] { FtlKind.Hyperspace, FtlKind.Wormhole, FtlKind.Rift })
+        {
+            var flight = Content.Pod.Flight;
+            flight.Ftl = kind;
+            var origin = new Double3(1e12, -1e12, 1e12);
+            var target = origin + new Double3(0, 0, -distance);
+            var state = HullState.Spawn(origin, flight);
+            var order = new HullOrder { Kind = OrderKind.Jump, Target = target };
+            var expected = HullSim.JumpTravelSeconds(origin, target, flight);
+            var preparation = 0;
+            while (state.Jump != JumpPhase.Tunnel && preparation++ < 1000)
+                HullSim.Step(ref state, ref order, default, flight);
+            Assert.InRange(preparation, 719, 721);
+            Assert.Equal(expected, state.JumpTunnelSeconds);
+            Assert.Equal(target, state.Position);
+            var ticks = 0;
+            while (state.Jump == JumpPhase.Tunnel && ticks++ < 1000)
+                HullSim.Step(ref state, ref order, default, flight);
+            Assert.Equal((int)Math.Ceiling(expected / (double)HullSim.Dt), ticks);
+            Assert.Equal(JumpPhase.Arrive, state.Jump);
+            Assert.Equal(expected, state.JumpTunnelSeconds);
+            var arrival = 0;
+            while (state.Jump == JumpPhase.Arrive && arrival++ < 1000)
+                HullSim.Step(ref state, ref order, default, flight);
+            Assert.InRange(arrival * HullSim.Dt, flight.FtlArriveSeconds, flight.FtlArriveSeconds + 2 * HullSim.Dt);
+            Assert.Equal(0, state.JumpTunnelSeconds);
+        }
+    }
+
+    [Fact]
+    public void TravelUsesDoublePrecisionThreeDimensionalDistanceAndRejectsOverflow()
+    {
+        var flight = Content.Pod.Flight;
+        var origin = new Double3(1e12, -1e12, 1e12);
+        Assert.Equal(3.325f, HullSim.JumpTravelSeconds(origin, origin + new Double3(3000, 4000, -12000), flight));
+        Assert.True(float.IsFinite(HullSim.JumpTravelSeconds(new Double3(-9e12, -9e12, -9e12), new Double3(9e12, 9e12, 9e12), flight)));
+        Assert.True(float.IsNaN(HullSim.JumpTravelSeconds(new Double3(-double.MaxValue, 0, 0), new Double3(double.MaxValue, 0, 0), flight)));
+        flight.FtlSpeed = 0;
+        Assert.Equal(4, HullSim.JumpTravelSeconds(default, new Double3(0, 0, -40000), flight));
+        flight.FtlSpeed = float.Epsilon;
+        var state = HullState.Spawn(default, flight);
+        var order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -40000) };
+        HullSim.Step(ref state, ref order, default, flight);
+        Assert.Equal(OrderKind.None, order.Kind);
+        Assert.Equal(JumpPhase.None, state.Jump);
+    }
+
+    [Fact]
+    public void RetargetResetsDurationButIdenticalOrderPreservesItAndLongTransitAdvancesWithoutAllocation()
+    {
+        var flight = Content.Pod.Flight;
+        var state = HullState.Spawn(default, flight);
+        var order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -40000) };
+        HullSim.Step(ref state, ref order, default, flight);
+        Assert.Equal(4, state.JumpTunnelSeconds);
+        HullSim.SetOrder(ref state, ref order, order);
+        Assert.Equal(4, state.JumpTunnelSeconds);
+        HullSim.SetOrder(ref state, ref order, new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -80000) });
+        Assert.Equal(0, state.JumpTunnelSeconds);
+        HullSim.Step(ref state, ref order, default, flight);
+        Assert.Equal(5, state.JumpTunnelSeconds);
+        HullSim.SetOrder(ref state, ref order, default);
+        Assert.Equal(0, state.JumpTunnelSeconds);
+        state.Jump = JumpPhase.Tunnel;
+        state.JumpTunnelSeconds = 1000000000;
+        state.JumpTunnelElapsed = 999999999;
+        state.JumpTimer = (float)state.JumpTunnelElapsed;
+        for (var i = 0; i < 10; i++) HullSim.Step(ref state, ref order, default, flight);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 51; i++) HullSim.Step(ref state, ref order, default, flight);
+        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
+        Assert.Equal(JumpPhase.Arrive, state.Jump);
+    }
+
+    [Theory]
     [InlineData(0f, 1f)]
     [InlineData(2f, 1f)]
     [InlineData(1f, 2f)]
@@ -1344,7 +1425,7 @@ public sealed class JumpTests
     {
         var flight = Content.Pod.Flight;
         var galaxy = Content.Galaxy;
-        var destination = galaxy.CenterOf(new SectorCoord(100, 2, -37));
+        var destination = galaxy.CenterOf(new SectorCoord(1, 0, -1));
         var state = HullState.Spawn(Double3.Zero, flight);
         state.Velocity = new Vector3(0, 0, -30);
         var order = new HullOrder { Kind = OrderKind.Jump, Target = destination };
@@ -1373,7 +1454,7 @@ public sealed class JumpTests
 
         Assert.Equal([JumpPhase.Align, JumpPhase.Charge, JumpPhase.Tunnel, JumpPhase.Arrive, JumpPhase.None], phases);
         Assert.True(destination.RelativeTo(state.Position).Length() < 1f);
-        Assert.Equal(new SectorCoord(100, 2, -37), galaxy.SectorOf(state.Position));
+        Assert.Equal(new SectorCoord(1, 0, -1), galaxy.SectorOf(state.Position));
         Assert.True(state.Velocity.Length() < 0.01f);
 
         // Charging takes the jump's energy at the drive's power, here with a full battery behind it.
@@ -1605,12 +1686,12 @@ public sealed class FlightSessionTests
     }
 
     [Fact]
-    public void ThePilotAndAFleetHullJumpToADistantSectorAndTheClientFollows()
+    public void ThePilotAndAFleetHullJumpToAnotherSectorAndTheClientFollows()
     {
         using var session = GameSession.StartLocal(new ServerConfig { MaxPlayers = 1 }, Content, "Pilot");
         var pod = WaitForOwnHull(session);
         var galaxy = session.Client.AcquireSnapshot().Galaxy!;
-        var far = new SectorCoord(64, 0, -20);
+        var far = new SectorCoord(1, 0, -1);
 
         HullView[] Fleet()
         {

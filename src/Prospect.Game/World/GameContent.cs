@@ -197,6 +197,23 @@ public static class HullSim
         return hulls is not null && Collide(ref state, flight, ref body, hulls, travel);
     }
 
+    /// <summary>Numerical duration ceiling: double elapsed time retains sub-tick precision up to this value.</summary>
+    public const float MaxJumpTravelSeconds = 1099511627776f;
+
+    /// <summary>Base transit plus Euclidean world distance over speed; NaN means numerically unsupported.</summary>
+    public static float JumpTravelSeconds(Double3 departure, Double3 target, in FlightParams flight)
+    {
+        var speed = flight.FtlSpeed == 0 ? 40000f : flight.FtlSpeed;
+        var delta = target - departure;
+        var scale = Math.Max(Math.Abs(delta.X), Math.Max(Math.Abs(delta.Y), Math.Abs(delta.Z)));
+        if (!double.IsFinite(scale) || !float.IsFinite(speed) || speed <= 0 ||
+            !float.IsFinite(flight.FtlTunnelSeconds) || flight.FtlTunnelSeconds < 0)
+            return float.NaN;
+        var unit = scale > 0 ? new Double3(delta.X / scale, delta.Y / scale, delta.Z / scale) : Double3.Zero;
+        var seconds = flight.FtlTunnelSeconds + scale / speed * unit.Length;
+        return double.IsFinite(seconds) && seconds <= MaxJumpTravelSeconds ? (float)seconds : float.NaN;
+    }
+
     /// <summary>Replaces an order, discarding unfinished jump work when its destination or kind changes.</summary>
     public static void SetOrder(ref HullState state, ref HullOrder current, in HullOrder next)
     {
@@ -205,6 +222,8 @@ public static class HullSim
             state.Jump = JumpPhase.None;
             state.JumpTimer = 0;
             state.JumpCalculation = 0;
+            state.JumpTunnelSeconds = 0;
+            state.JumpTunnelElapsed = 0;
         }
         current = next;
     }
@@ -229,9 +248,17 @@ public static class HullSim
             }
             else
             {
+                var duration = JumpTravelSeconds(state.Position, order.Target, flight);
+                if (!float.IsFinite(duration))
+                {
+                    order = default;
+                    return false;
+                }
                 state.Jump = JumpPhase.Align;
                 state.JumpTimer = 0;
                 state.JumpCalculation = 0;
+                state.JumpTunnelElapsed = 0;
+                state.JumpTunnelSeconds = duration;
             }
         }
         else if (order.Kind != OrderKind.Jump && state.Jump is JumpPhase.Align or JumpPhase.Charge)
@@ -240,6 +267,8 @@ public static class HullSim
             state.Jump = JumpPhase.None;
             state.JumpTimer = 0;
             state.JumpCalculation = 0;
+            state.JumpTunnelSeconds = 0;
+            state.JumpTunnelElapsed = 0;
         }
 
         switch (state.Jump)
@@ -288,8 +317,9 @@ public static class HullSim
                 }
 
             case JumpPhase.Tunnel:
-                state.JumpTimer += Dt;
-                if (state.JumpTimer >= flight.FtlTunnelSeconds)
+                state.JumpTunnelElapsed += Dt;
+                state.JumpTimer = (float)state.JumpTunnelElapsed;
+                if (state.JumpTunnelElapsed >= state.JumpTunnelSeconds)
                 {
                     state.Jump = JumpPhase.Arrive;
                     state.JumpTimer = 0;
@@ -301,7 +331,11 @@ public static class HullSim
             case JumpPhase.Arrive:
                 state.JumpTimer += Dt;
                 if (state.JumpTimer >= flight.FtlArriveSeconds)
+                {
                     state.Jump = JumpPhase.None;
+                    state.JumpTunnelSeconds = 0;
+                    state.JumpTunnelElapsed = 0;
+                }
                 return false;
 
             default:

@@ -100,7 +100,8 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   turns its nose to the destination, then calculates for 12 seconds while charging from the hull's power.
   Both must finish; jump charge speed affects charging only. A bigger ship needs more energy, and a weak or
   drained battery charges slower. Once ready, the hull is
-  in transit for three seconds, and it comes out at its destination, any distance away. Taking the controls
+  in transit for three seconds plus one second per 40 km of straight-line distance.
+  Base time and speed are content tuning; preparation and arrival are unchanged, with no distance energy cost or gameplay range limit. Taking the controls
   before the drive fires cancels the jump and loses the charge. The client generates the destination while the
   drive charges.
 - **World settings.** A world has settings, chosen when a server or a local game starts: collision damage,

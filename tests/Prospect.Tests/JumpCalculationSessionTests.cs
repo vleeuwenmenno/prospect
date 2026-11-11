@@ -66,6 +66,17 @@ public sealed class JumpCalculationSessionTests
         }
         Assert.True(arrived);
         Assert.Equal(1, resets);
+        var duration = Own().JumpTunnelSeconds;
+        Assert.InRange(duration, 28.02f, 28.03f);
+        for (var i = 0; i < (int)((duration - 0.25f) / HullSim.Dt); i++)
+        {
+            Step();
+            Assert.Equal(JumpPhase.Tunnel, Own().Jump);
+            Assert.Equal(duration, Own().JumpTunnelSeconds);
+        }
+        for (var i = 0; i < 40 && Own().Jump == JumpPhase.Tunnel; i++) Step();
+        Assert.Equal(JumpPhase.Arrive, Own().Jump);
+        Assert.Equal(duration, Own().JumpTunnelSeconds);
     }
 
     [Theory]
@@ -81,6 +92,24 @@ public sealed class JumpCalculationSessionTests
             json["rules"]!["ftlCalculateSeconds"] = System.Text.Json.Nodes.JsonNode.Parse(number);
             File.WriteAllText(path, json.ToJsonString());
             Assert.Contains("ftlCalculateSeconds", Assert.Throws<InvalidDataException>(() => BlockCatalog.Load(path)).Message);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("1e100")]
+    public void InvalidSpeedFailsAtContentLoad(string number)
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            var source = Path.Combine(AppContext.BaseDirectory, "content", "blocks", "blocks.json");
+            var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(source))!;
+            json["rules"]!["ftlSpeed"] = System.Text.Json.Nodes.JsonNode.Parse(number);
+            File.WriteAllText(path, json.ToJsonString());
+            Assert.Contains("ftlSpeed", Assert.Throws<InvalidDataException>(() => BlockCatalog.Load(path)).Message);
         }
         finally { File.Delete(path); }
     }
@@ -129,7 +158,8 @@ public sealed class JumpCalculationSessionTests
         var content = GameContent.Load();
         using var link = new LoopbackLink();
         using var observerLink = new LoopbackLink();
-        using var server = new ServerHost(new ServerConfig { MaxPlayers = 2 }, content, link.Server, observerLink.Server);
+        using var lateLink = new LoopbackLink();
+        using var server = new ServerHost(new ServerConfig { MaxPlayers = 3 }, content, link.Server, observerLink.Server, lateLink.Server);
         using var client = new ClientSession(link.Client, content, "Pilot");
         using var observer = new ClientSession(observerLink.Client, content, "Observer");
         long tick = 0;
@@ -188,6 +218,20 @@ public sealed class JumpCalculationSessionTests
         Assert.Equal(JumpPhase.Tunnel, Own().Jump);
         Assert.Equal(12, Own().JumpCalculation);
         Assert.Equal(12, Seen(observer, own.Id).JumpCalculation);
+        Assert.InRange(Own().JumpTunnelSeconds, 28.02f, 28.03f);
+        Assert.Equal(Own().JumpTunnelSeconds, Seen(observer, own.Id).JumpTunnelSeconds);
+        Assert.Equal(28, Seen(client, fleet.Id).JumpTunnelSeconds);
+        Assert.Equal(28, Seen(observer, fleet.Id).JumpTunnelSeconds);
+        using var late = new ClientSession(lateLink.Client, content, "Late");
+        for (var i = 0; i < 30; i++)
+        {
+            Step(1);
+            ((ITickHandler)late).Tick(0);
+        }
+        Assert.Equal(JumpPhase.Tunnel, Seen(late, own.Id).Jump);
+        Assert.Equal(Own().JumpTunnelSeconds, Seen(late, own.Id).JumpTunnelSeconds);
+        Assert.Equal(28, Seen(late, fleet.Id).JumpTunnelSeconds);
+
         Assert.True(Own().Position.RelativeTo(replacement.Target).Length() < 1);
     }
 }

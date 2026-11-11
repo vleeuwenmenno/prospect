@@ -724,7 +724,8 @@ public sealed class WorldSettingSessionTests
 
         // Charging uses the server multiplier; calculation still sets the minimum jump duration.
         var galaxy = snapshot.Galaxy!;
-        var far = new SectorCoord(40, 0, -12);
+        // Keep this settings test nearby; long-distance transit is covered by manual session ticks.
+        var far = new SectorCoord(1, 0, -1);
         session.Client.Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = galaxy.CenterOf(far) });
         WaitFor(session, hull => hull.Jump == JumpPhase.Charge, 8);
         var charging = Stopwatch.GetTimestamp();

@@ -28,7 +28,9 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
 - **A lost ship is gone.** It is rebuilt at a shipyard from its blueprint, for resources and time.
 - **The world advances only while someone is connected.** With nobody online it pauses.
 - **Travel.** Sublight inside a sector, faster-than-light between them. Three drive kinds (hyperspace, wormhole,
-  rift). No range limit yet; limits come later from modules, power and mass.
+  rift). Transit takes base time plus straight-line distance divided by content speed: initially 3 s plus 1 s per 40 km.
+  Preparation and arrival stay unchanged. No distance energy cost or gameplay range limit is added.
+  Durations beyond 2^40 seconds are rejected to keep elapsed time precise; this is a numerical bound, not drive range.
 - **Jump looks.** Physical, not an overlay: effects sit in the world around the hull, laid out around its nose,
   never the view. No cuts, no full-screen flash; each stage eases into the next. Only hyperspace fills the view
   (Star Wars lines and tunnel). Wormhole: a sphere with gravitational lensing, subtle colour. Rift: an orange,

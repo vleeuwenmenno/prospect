@@ -17,6 +17,7 @@
     "ftlAlignDegrees": 3,
     "ftlCalculateSeconds": 12.0,
     "ftlTunnelSeconds": 3.0,
+    "ftlSpeed": 40000.0,
     "ftlArriveSeconds": 1.5
   },
   "blocks": {

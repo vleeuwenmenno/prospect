@@ -134,6 +134,7 @@ public sealed class BoxHullSums
             FtlAlignCosine = MathF.Cos(rules.FtlAlignDegrees * MathF.PI / 180f),
             FtlCalculateSeconds = rules.FtlCalculateSeconds,
             FtlTunnelSeconds = rules.FtlTunnelSeconds,
+            FtlSpeed = rules.FtlSpeed,
             FtlArriveSeconds = rules.FtlArriveSeconds,
         };
 

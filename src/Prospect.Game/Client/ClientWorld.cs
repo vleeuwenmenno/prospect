@@ -38,6 +38,9 @@ public struct HullView
     /// <summary>Completed calculation seconds, saturated at the configured duration.</summary>
     public float JumpCalculation;
 
+    /// <summary>Total transit seconds, latched at alignment and retained through arrival.</summary>
+    public float JumpTunnelSeconds;
+
     /// <summary>Stored energy in megajoules, and how fast it is changing in megawatts.</summary>
     public float Energy;
     public float EnergyRate;
@@ -385,6 +388,7 @@ internal sealed class ClientWorld : IDisposable
                 Jump = _predicted.Jump,
                 JumpTimer = _predicted.JumpTimer,
                 JumpCalculation = _predicted.JumpCalculation,
+                JumpTunnelSeconds = _predicted.JumpTunnelSeconds,
                 Energy = _predicted.Energy,
                 EnergyRate = _energyRate,
                 Shield = _predicted.Shield,
@@ -652,6 +656,7 @@ internal sealed class ClientWorld : IDisposable
             Jump = newest.State.Jump,
             JumpTimer = newest.State.JumpTimer,
             JumpCalculation = newest.State.JumpCalculation,
+            JumpTunnelSeconds = newest.State.JumpTunnelSeconds,
             Energy = newest.State.Energy,
             Shield = newest.State.Shield,
             Hull = newest.State.Hull,

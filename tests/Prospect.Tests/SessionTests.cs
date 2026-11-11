@@ -59,6 +59,41 @@ internal sealed class CountingLogs : ILoggerProvider, ILogger
 public sealed class ProtocolTests
 {
     [Theory]
+    [InlineData(7f, 2d, true)]
+    [InlineData(-1f, 0d, false)]
+    [InlineData(float.NaN, 0d, false)]
+    [InlineData(float.PositiveInfinity, 0d, false)]
+    [InlineData(float.MaxValue, 0d, false)]
+    [InlineData(7f, -1d, false)]
+    [InlineData(7f, double.NaN, false)]
+    [InlineData(7f, double.PositiveInfinity, false)]
+    [InlineData(7f, 8d, false)]
+    public void TransitWireBounds(float duration, double elapsed, bool valid)
+    {
+        Span<byte> buffer = stackalloc byte[HullRecord.MaxWireSize];
+        var writer = new NetWriter(buffer);
+        new HullRecord
+        {
+            State = new HullState
+            {
+                Orientation = Quaternion.Identity,
+                Jump = JumpPhase.Tunnel,
+                JumpTunnelSeconds = duration,
+                JumpTunnelElapsed = elapsed,
+                JumpTimer = (float)elapsed
+            }
+        }.Write(ref writer);
+        var reader = new NetReader(writer.Written);
+        Assert.Equal(valid, HullRecord.TryRead(ref reader, out var copy));
+        if (valid)
+        {
+            Assert.Equal(duration, copy.State.JumpTunnelSeconds);
+            Assert.Equal(elapsed, copy.State.JumpTunnelElapsed);
+        }
+        Assert.True(18 + byte.MaxValue * HullRecord.MaxWireSize < 65536);
+    }
+
+    [Theory]
     [InlineData(3f, true)]
     [InlineData(-1f, false)]
     [InlineData(float.NaN, false)]
@@ -73,7 +108,7 @@ public sealed class ProtocolTests
             State = new HullState { Orientation = Quaternion.Identity, Jump = JumpPhase.Charge, JumpCalculation = calculation },
             Order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -1e6) }
         }.Write(ref writer);
-        Assert.Equal(134, HullRecord.MaxWireSize);
+        Assert.Equal(146, HullRecord.MaxWireSize);
         Assert.Equal(HullRecord.MaxWireSize, writer.Length);
         var reader = new NetReader(writer.Written);
         Assert.Equal(valid, HullRecord.TryRead(ref reader, out var copy));
@@ -83,7 +118,7 @@ public sealed class ProtocolTests
             reader = new NetReader(writer.Written[..length]);
             Assert.False(HullRecord.TryRead(ref reader, out _));
         }
-        Assert.Equal(17u, ProtocolInfo.Version);
+        Assert.Equal(18u, ProtocolInfo.Version);
     }
 
     [Fact]

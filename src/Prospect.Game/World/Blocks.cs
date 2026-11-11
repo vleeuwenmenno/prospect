@@ -91,6 +91,8 @@ public sealed record FlightRules
     public required float FtlAlignDegrees { get; init; }
     /// <summary>Seconds of calculation required alongside charging after alignment.</summary>
     public required float FtlCalculateSeconds { get; init; }
+    /// <summary>Transit speed in metres per second.</summary>
+    public float FtlSpeed { get; init; } = 40000f;
     public required float FtlTunnelSeconds { get; init; }
     public required float FtlArriveSeconds { get; init; }
 
@@ -161,11 +163,17 @@ public sealed class BlockCatalog
             FtlEnergyPerTonne = r.GetProperty("ftlEnergyPerTonne"u8).GetSingle(),
             FtlAlignDegrees = r.GetProperty("ftlAlignDegrees"u8).GetSingle(),
             FtlCalculateSeconds = r.GetProperty("ftlCalculateSeconds"u8).GetSingle(),
+            FtlSpeed = r.GetProperty("ftlSpeed"u8).GetSingle(),
             FtlTunnelSeconds = r.GetProperty("ftlTunnelSeconds"u8).GetSingle(),
             FtlArriveSeconds = r.GetProperty("ftlArriveSeconds"u8).GetSingle(),
         };
         if (!float.IsFinite(rules.FtlCalculateSeconds) || rules.FtlCalculateSeconds < 0)
             throw new InvalidDataException($"{path}: ftlCalculateSeconds must be finite and nonnegative");
+
+        if (!float.IsFinite(rules.FtlSpeed) || rules.FtlSpeed <= 0)
+            throw new InvalidDataException($"{path}: ftlSpeed must be finite and positive");
+        if (!float.IsFinite(rules.FtlTunnelSeconds) || rules.FtlTunnelSeconds < 0 || rules.FtlTunnelSeconds > HullSim.MaxJumpTravelSeconds)
+            throw new InvalidDataException($"{path}: ftlTunnelSeconds is outside the supported duration");
 
         static float Number(JsonElement block, ReadOnlySpan<byte> name) =>
             block.TryGetProperty(name, out var value) ? value.GetSingle() : 0f;
@@ -525,6 +533,7 @@ public sealed class HullDesign
             FtlAlignCosine = MathF.Cos(rules.FtlAlignDegrees * MathF.PI / 180f),
             FtlCalculateSeconds = rules.FtlCalculateSeconds,
             FtlTunnelSeconds = rules.FtlTunnelSeconds,
+            FtlSpeed = rules.FtlSpeed,
             FtlArriveSeconds = rules.FtlArriveSeconds,
         };
 

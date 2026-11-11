@@ -141,6 +141,8 @@ public struct FlightParams
     /// <summary>Seconds of calculation required alongside charging after alignment.</summary>
     public float FtlCalculateSeconds;
     public float FtlTunnelSeconds;
+    /// <summary>Transit metres per second; zero in legacy constructed parameters uses 40000.</summary>
+    public float FtlSpeed;
     public float FtlArriveSeconds;
 
     /// <summary>Megawatts needed with everything running at once, without boost.</summary>
@@ -204,6 +206,12 @@ public struct HullState
 
     /// <summary>Completed calculation seconds, saturated at the configured duration.</summary>
     public float JumpCalculation;
+
+    /// <summary>Total transit seconds, latched at alignment and retained through arrival.</summary>
+    public float JumpTunnelSeconds;
+
+    /// <summary>Precise transit elapsed seconds; replicated so long trips and replay keep advancing.</summary>
+    public double JumpTunnelElapsed;
 
     /// <summary>A hull at rest with full hull points, shield and battery.</summary>
     public static HullState Spawn(Double3 position, in FlightParams p) =>

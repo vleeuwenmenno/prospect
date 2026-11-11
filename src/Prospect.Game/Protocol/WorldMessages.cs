@@ -159,7 +159,7 @@ public static class RockDeltasMessage
 /// <summary>A hull as it appears in a snapshot.</summary>
 public struct HullRecord
 {
-    public const int MaxWireSize = 4 + 4 + 1 + 8 + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 4 + 16 + 24;
+    public const int MaxWireSize = 4 + 4 + 1 + 8 + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 4 + 4 + 8 + 16 + 24;
 
     public uint Id;
     public uint Owner;
@@ -187,6 +187,8 @@ public struct HullRecord
         writer.WriteByte((byte)((State.BoostLocked ? 1 : 0) | (byte)Order.Kind << 1 | (byte)State.Jump << 3 | (State.Boosting ? 1 << 6 : 0)));
         writer.WriteSingle(State.JumpTimer);
         writer.WriteSingle(State.JumpCalculation);
+        writer.WriteSingle(State.JumpTunnelSeconds);
+        writer.WriteDouble(State.JumpTunnelElapsed);
         writer.WriteSingle(State.Energy);
         writer.WriteSingle(State.Shield);
         writer.WriteSingle(State.Hull);
@@ -218,6 +220,14 @@ public struct HullRecord
         ok &= float.IsFinite(record.State.JumpTimer);
         record.State.JumpCalculation = reader.ReadSingle();
         ok &= float.IsFinite(record.State.JumpCalculation) && record.State.JumpCalculation >= 0;
+        record.State.JumpTunnelSeconds = reader.ReadSingle();
+        record.State.JumpTunnelElapsed = reader.ReadDouble();
+        ok &= float.IsFinite(record.State.JumpTunnelSeconds) && record.State.JumpTunnelSeconds >= 0
+            && record.State.JumpTunnelSeconds <= HullSim.MaxJumpTravelSeconds;
+        ok &= double.IsFinite(record.State.JumpTunnelElapsed) && record.State.JumpTunnelElapsed >= 0
+            && record.State.JumpTunnelElapsed <= record.State.JumpTunnelSeconds + (double)HullSim.Dt;
+        if (record.State.Jump is JumpPhase.Align or JumpPhase.Charge or JumpPhase.None)
+            ok &= record.State.JumpTunnelElapsed == 0;
         record.State.Energy = reader.ReadSingle();
         record.State.Shield = reader.ReadSingle();
         record.State.Hull = reader.ReadSingle();

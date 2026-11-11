@@ -29,6 +29,22 @@ public sealed class BoxDesignTests
         return boxes;
     }
 
+    [Fact]
+    public void TransitSpeedSurvivesRulesAndBothHullEvaluators()
+    {
+        var content = GameContent.Load();
+        var rules = Catalog.Rules with { FtlSpeed = 12345 };
+        var changed = content.Pod.WithRules(rules);
+        changed.Evaluate(changed.FullMask, out var flight, out _);
+        Assert.Equal(12345, flight.FtlSpeed);
+        Assert.Equal(12345, changed.Flight.FtlSpeed);
+        new BoxHullSums(Design(Box("core"), Box("hyperdrive", 2))).Evaluate(rules, out var box, out _);
+        Assert.Equal(12345, box.FtlSpeed);
+        var settings = content.SettingCatalog.Build(null, ["jumpChargeSpeed=2"]);
+        Assert.Equal(12345, rules.Under(content.SettingCatalog, settings).FtlSpeed);
+        Assert.Equal(40000, content.WithSettings(settings).Pod.Flight.FtlSpeed);
+    }
+
     [Theory]
     [InlineData(4096)]
     [InlineData(150000)]
