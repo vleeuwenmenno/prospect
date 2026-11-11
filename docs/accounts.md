@@ -1,7 +1,6 @@
 # Central accounts and friends
 
-Phase A is an optional backend beside the listing service.
-Client sign-in and friends UI integration are still pending.
+Phase A is an optional backend beside the listing service, and the game's sign-in and friends screens.
 Guest/local multiplayer, party and chat keep their existing session identities.
 An ordinary guest roster name is not a verified account identity.
 Recovery depends on Discord; there is no email/password recovery or account linking.
@@ -76,6 +75,54 @@ Pending requests expire after 30 days; accepted friendships remain until removed
 Canonical unordered pairs use ordinal lower-case hex order and SQLite BINARY collation.
 Unique constraints and immediate transactions prevent duplicate/crossed relationships and cap races.
 No global presence, game tickets or game protocol changes are included.
+
+## Game client
+
+`AccountClient` (`Prospect.Game/Lobby`) is the game's side; the interface only reads its `View`.
+
+- **Where:** Friends in the main menu, and the Friends tab of the in-game Social panel. Both draw the same parts.
+- **One per game.** `App` owns it, so joining and leaving games keeps the sign-in.
+- **Service:** the configured listing address (`content/net/listing.json`, `--listing`). `off` means no accounts.
+- **Token:** in memory only. Never written to disk, logged, shown, or sent to a game server.
+
+Sign-in, in order:
+
+1. The player presses Sign in with Discord. Nothing signs in by itself.
+2. `LoopbackReceiver` binds 127.0.0.1 on an ephemeral port before the attempt is created.
+3. The browser opens `{listing}/v1/accounts/signin/{attempt}`, built locally from a checked attempt.
+   `BrowserLauncher` uses the system opener (`xdg-open`, `open`, ShellExecute) with one argument.
+4. The receiver answers one valid `GET /prospect/signin`, then the port closes. It then redeems the code.
+
+The receiver:
+
+- Checks method, path, `Host: 127.0.0.1:{port}`, each query field once, the attempt, and a canonical code or a
+  known error. Anything else gets 400 and changes nothing.
+- Reads at most 4 KiB of head, gives a connection 3 s, serves 4 connections at once and closes more unread.
+- Returns a fixed page: no-store, no-referrer, a CSP with no external sources, nothing from the request.
+- Closes on success, on Cancel, after the attempt's 10 minutes, and when the game closes.
+  An abandoned attempt keeps its service slot until it expires.
+
+Requests:
+
+- One operation at a time; a second is refused, never queued.
+- 503 is retried at most three times, 0.25 to 5 s apart (Retry-After when given). Nothing else is retried.
+- 401 signs out. 429 and 503 show a notice and keep the sign-in.
+- After any change the lists are read again, so they show what the service decided.
+- Sign out, Cancel and closing advance a generation; an answer from an older one changes nothing.
+- Sign out forgets the token at once, then asks the service to end the session.
+- Replies are strict: duplicate names, wrong types, bad ids or times, or over 400 entries a list refuse the
+  whole reply. Names are cleaned of control and format characters and cut to 24 UTF-16 units.
+
+Interface:
+
+- Notices are fixed sentences; service text is never shown.
+- Names go only to draw calls. Remove asks for a second press.
+- The code field takes hex only. Enter sends from the field; the button takes the pointer only.
+- Captures: `--account-sample signed-out|waiting|signed-in|friends|failed|off`, with `--capture` or `--bench`
+  only. `--start account` opens the screen; `--open friends` opens the tab.
+
+Not in the game yet: online presence, same-server friend markers, adding from the player list.
+The game does not revoke the session when it quits; the session expires at the service after 24 hours.
 
 ## Configuration
 

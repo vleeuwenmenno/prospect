@@ -22,9 +22,15 @@ Chat, the player roster and parties work end to end: the server decides, the cli
 - **Quick buttons** at the top right open the three. Click them; in the pilot view hold `Shift` first to show the
   cursor.
 
-Central Discord accounts and persistent friends have an optional listing-service backend; client integration is still pending (see [accounts](docs/accounts.md)).
-Not there yet in the game: account sign-in, persistent friends, factions and alliances. Names and player ids last only for the session, and
-presence covers only the server you are on.
+- **Friends** (main menu, or the Friends tab in Social): sign in with Discord in your browser, then add
+  friends by their 16-character friend code, answer requests and remove friends. The list belongs to your
+  account and lasts across games and restarts; signing in again restores it. Signing in is optional: guest and
+  local play are unchanged. It needs the account service beside the listing server
+  ([accounts](docs/accounts.md)); with `--listing off` there are no accounts.
+
+Not there yet: whether a friend is online or on your server, adding a friend from the player list, factions and
+alliances. The sign-in lasts while the game runs; after a restart, sign in again. Names and player ids in a game
+last only for the session, and presence covers only the server you are on.
 
 Stage 1 of blocks at scale exists in tooling and tests: versioned boxes, content limits and size rules,
 solid-box evaluation and running sums, with seeded 4,096-block and 150,000-block fixtures.

@@ -76,6 +76,10 @@ Always wrap long test runs in `timeout`; a session test that waits on the simula
   redirects) and runs off the tick and the frame loop. Nothing the service sends is trusted. `ListingTests` runs
   the real service in-process, so a change to the contract on either side must pass there; `Prospect.Tests`
   therefore builds `Prospect.Listing` and needs the ASP.NET Core runtime.
+- **Accounts and friends:** `AccountClient` owns the token in memory only; the interface reads its immutable
+  `View`. The sign-in comes back through `LoopbackReceiver` on 127.0.0.1, never a polled link. Contract and rules
+  in `docs/accounts.md`. `AccountClientTests` signs in through the real service and a fake Discord, browser
+  steps included; a change on either side must pass there.
 - **Shaders:** files in `assets/shaders/` are compiled at startup. Check them first with
   `glslc -I assets/shaders assets/shaders/<file> -o /dev/null`. `frame.glsl` must match `FrameConstants` field for
   field.
@@ -109,12 +113,15 @@ The client opens a real window on the developer's desktop, and they are usually 
   cannot grab the pointer or react to their typing. Never start it any other way from an agent session.
 - `make run ARGS="--start local --open <view> --capture /path/shot.png --capture-after 2.5"` saves a screenshot
   and exits. Views: `command`, `map`, `map-hover` (the map with the pointer on your own sector), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,
-  `players`, `social`, `chat`, `hud` (the world with the party list and recent chat only). The social views and
+  `players`, `social`, `friends`, `chat`, `hud` (the world with the party list and recent chat only). The social views and
   `hud` leave the performance overlay off. Screens
-  without a session: `--start menu|join|settings|newgame|credits`; `--set id=value` shows on `newgame`, and so
+  without a session: `--start menu|join|settings|newgame|credits|account`; `--set id=value` shows on `newgame`, and so
   does `--host public --host-name ... --password ...` (with `--start newgame` it fills the hosting section
   instead of starting a game; the password shows masked). `--open menu` opens the in-game menu, which says
   whether a hosted public game is listed.
+- Accounts without the network or a browser: `--account-sample <state>` (`signed-out`, `waiting`, `signed-in`,
+  `friends` with full lists of hostile names, `failed`, `off`), with `--start account` for the Friends screen or
+  `--open friends` in a game. Only with `--capture` or `--bench`; a scripted run never opens a browser.
 - The server browser without the network: `--start join --browser-sample <state>`, with `ready` (a fixed list:
   a name with `##`, `###` and `%`, a 48-character name, one in a script the font lacks, a password, a full game
   and one entry the browser drops), `loading`, `failed`, `empty`, `off` or `password` (the list with the

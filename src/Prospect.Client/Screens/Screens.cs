@@ -14,6 +14,9 @@ internal enum Screen
     NewGame,
     Credits,
     Session,
+
+    /// <summary>The account and friends, from the main menu.</summary>
+    Account,
 }
 
 /// <summary>
@@ -61,6 +64,8 @@ internal sealed partial class ScreenHost
         _screenTime = 0;
         if (screen == Screen.Join)
             EnterJoin();
+        if (screen == Screen.Account)
+            EnterAccount();
     }
 
     public void Draw(SessionSnapshot? snapshot)
@@ -100,6 +105,10 @@ internal sealed partial class ScreenHost
             case Screen.Credits:
                 DrawBackdrop();
                 DrawCredits(fade);
+                break;
+            case Screen.Account:
+                DrawBackdrop();
+                DrawAccountScreen(fade);
                 break;
             case Screen.Session when snapshot is not null:
                 DrawSession(snapshot, fade);

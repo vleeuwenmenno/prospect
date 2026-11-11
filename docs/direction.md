@@ -58,7 +58,7 @@ exists.
 ## Decided: accounts and friends
 
 - **Persistent accounts use Discord sign-in.** Discord handles credentials and account recovery; PROSPECT
-  does not run an email/password system or require SMTP. The service backend exists; client sign-in is pending.
+  does not run an email/password system or require SMTP. Sign-in and the friends list are in the game.
 - **Friends persist across reconnects and game restarts.** They belong to a stable account, not a game's
   temporary player id or a display name.
 - **Request only Discord identity.** No email, server membership, messages or Discord friends access is needed.

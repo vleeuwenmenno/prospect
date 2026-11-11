@@ -6,6 +6,7 @@ using Brutal.StbApi;
 using Brutal.VulkanApi;
 using Prospect.Client.Diagnostics;
 using Prospect.Client.Input;
+using Prospect.Client.Platform;
 using Prospect.Client.Render;
 using Prospect.Client.Screens;
 using Prospect.Client.Settings;
@@ -51,6 +52,9 @@ internal sealed class AppOptions
     public string? Listing { get; set; }
     /// <summary>What the server browser shows instead of the listing server's answer; for scripted screenshots.</summary>
     public BrowserSample BrowserSample { get; set; }
+
+    /// <summary>A fixed account view instead of the account service (<c>--account-sample</c>); captures and benchmarks only.</summary>
+    public string? AccountSample { get; set; }
 
     /// <summary>Open the command view or the map once in space; for scripted screenshots.</summary>
     public string? OpenView { get; set; }
@@ -168,6 +172,13 @@ internal sealed class App : IDisposable
         Listing = ListingConfig.Resolve(options.Listing);
         Browser = new ServerBrowser(Listing);
 
+        // One account for the life of the game, so joining and leaving games keeps the sign-in. A scripted run
+        // never opens a browser; nothing is asked of the service until the player signs in.
+        var scripted = options.BenchSeconds > 0 || options.CapturePath is not null;
+        Accounts = options.AccountSample is { } accountSample
+            ? ScreenHost.AccountSample(accountSample)
+            : new AccountClient(Listing, scripted ? static _ => false : BrowserLauncher.Open);
+
         // Decode the logo, parse the bindings, compile the shaders and build the meshes on workers while the
         // window and the GPU come up on this thread.
         var logoJob = new DecodeImageJob(AppPaths.Asset("branding", "brutal-logo-white.png"));
@@ -284,6 +295,12 @@ internal sealed class App : IDisposable
     /// frame without waiting. Join an entry with <see cref="JoinGame(ListedGame, string?, out string)"/>.
     /// </summary>
     public ServerBrowser Browser { get; }
+
+    /// <summary>
+    /// The player's account and friends at the account service. Lives as long as the game; its token stays in
+    /// memory and never reaches a game server. Read <see cref="AccountClient.View"/> every frame without waiting.
+    /// </summary>
+    public AccountClient Accounts { get; }
     public WorldView World { get; }
     public JobSystem Jobs { get; }
     public InputDevices Devices { get; }
@@ -645,6 +662,7 @@ internal sealed class App : IDisposable
     {
         Session?.Dispose();
         Browser.Dispose();
+        Accounts.Dispose();
         Jobs.CompleteAll();
         _gpu.Device.WaitIdle();
         BrutalLogo.Dispose();
@@ -729,6 +747,8 @@ internal sealed class App : IDisposable
                 _screens.OpenSocial(false);
             else if (view == "social")
                 _screens.OpenSocial(true);
+            else if (view == "friends")
+                _screens.OpenFriends();
             else if (view == "chat")
                 _screens.OpenChat();
             else if (view == "hud")
@@ -785,7 +805,7 @@ internal sealed class App : IDisposable
             var due = _options.CaptureAfter + _capturesTaken * _options.CaptureEvery;
             if (_capturesTaken < count && _sinceSplash >= due && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
             {
-                ShowPerformance |= Session is not null && _options.OpenView is not ("controls" or "players" or "social" or "chat" or "hud");
+                ShowPerformance |= Session is not null && _options.OpenView is not ("controls" or "players" or "social" or "friends" or "chat" or "hud");
                 var file = Path.GetFullPath(path);
                 if (count > 1)
                 {

@@ -12,5 +12,7 @@
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
     <InternalsVisibleTo Include="Prospect.Listing.Tests" />
+    <!-- The game's account tests replace the fixed Discord endpoints with a fake provider, as these tests do. -->
+    <InternalsVisibleTo Include="Prospect.Tests" />
   </ItemGroup>
 </Project>

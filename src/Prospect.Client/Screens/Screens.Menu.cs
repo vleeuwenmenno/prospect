@@ -64,6 +64,8 @@ internal sealed partial class ScreenHost
             OpenNewGame();
         if (Kit.MenuItem("Join Server"u8, 360))
             Show(Screen.Join);
+        if (Kit.MenuItem("Friends"u8, 360))
+            Show(Screen.Account);
         if (Kit.MenuItem("Settings"u8, 360))
             OpenSettings(Screen.MainMenu);
         if (Kit.MenuItem("Credits"u8, 360))

@@ -34,6 +34,9 @@ internal sealed partial class ScreenHost
 
     private bool _socialOpen;
     private bool _socialParty;
+
+    /// <summary>The Friends tab is open in the panel; it shows the account, which is not this server's.</summary>
+    private bool _socialFriends;
     private bool _chatOpen;
     private bool _chatFocus;
     private bool _socialHandled;
@@ -84,6 +87,15 @@ internal sealed partial class ScreenHost
         _chatOpen = _chatFocus = false;
         _socialOpen = true;
         _socialParty = party;
+        _socialFriends = false;
+    }
+
+    /// <summary>Opens the panel on the Friends tab.</summary>
+    public void OpenFriends()
+    {
+        OpenSocial(false);
+        _socialFriends = true;
+        EnterAccount();
     }
 
     /// <summary>Opens chat with its text field focused.</summary>
@@ -152,7 +164,7 @@ internal sealed partial class ScreenHost
 
     private void ToggleSocial(bool party)
     {
-        if (_socialOpen && _socialParty == party)
+        if (_socialOpen && !_socialFriends && _socialParty == party)
             _socialOpen = false;
         else
             OpenSocial(party);
@@ -449,10 +461,10 @@ internal sealed partial class ScreenHost
         var previousFade = Kit.Fade;
         Kit.Fade = _app.PointerCaptured ? 0.6f : 1f;
         ImGui.SetCursorScreenPos(min);
-        if (QuickButton("##players"u8, "PLAYERS"u8, _playersKey, w0, _socialOpen && !_socialParty, social.Invitation.Player != 0))
+        if (QuickButton("##players"u8, "PLAYERS"u8, _playersKey, w0, _socialOpen && !_socialParty && !_socialFriends, social.Invitation.Player != 0))
             ToggleSocial(false);
         ImGui.SameLine(0, gap);
-        if (QuickButton("##social"u8, "SOCIAL"u8, _socialKey, w1, _socialOpen && _socialParty, false))
+        if (QuickButton("##social"u8, "SOCIAL"u8, _socialKey, w1, _socialOpen && _socialParty && !_socialFriends, false))
             ToggleSocial(true);
         ImGui.SameLine(0, gap);
         if (QuickButton("##chat"u8, "CHAT"u8, _chatKey, w2, _chatOpen, unread && !_chatOpen))
@@ -523,7 +535,7 @@ internal sealed partial class ScreenHost
 
         var social = snapshot.Social;
         var width = ImGui.GetContentRegionAvail().X;
-        Kit.Caption("THIS SERVER"u8, Theme.Accent);
+        Kit.Caption(_socialFriends ? "ACCOUNT  /  ANY SERVER"u8 : "THIS SERVER"u8, Theme.Accent);
         Kit.Space(Theme.Space1);
         var online = 0;
         for (var i = 0; i < social.RosterCount; i++)
@@ -533,11 +545,19 @@ internal sealed partial class ScreenHost
         }
 
         var tabsAt = ImGui.GetCursorScreenPos();
-        if (TabButton("##tabplayers"u8, Kit.F($"Players {online}"), !_socialParty))
-            _socialParty = false;
+        if (TabButton("##tabplayers"u8, Kit.F($"Players {online}"), !_socialParty && !_socialFriends))
+            _socialParty = _socialFriends = false;
         ImGui.SameLine(0, Kit.Px(Theme.Space5));
-        if (TabButton("##tabparty"u8, social.PartyCount > 0 ? Kit.F($"Party {social.PartyCount}/{_app.Content.Social.PartySize}") : "Party"u8, _socialParty))
+        if (TabButton("##tabparty"u8, social.PartyCount > 0 ? Kit.F($"Party {social.PartyCount}/{_app.Content.Social.PartySize}") : "Party"u8, _socialParty && !_socialFriends))
+        {
             _socialParty = true;
+            _socialFriends = false;
+        }
+
+        ImGui.SameLine(0, Kit.Px(Theme.Space5));
+        var incoming = _app.Accounts.View.Incoming.Length;
+        if (TabButton("##tabfriends"u8, incoming > 0 ? Kit.F($"Friends +{incoming}") : "Friends"u8, _socialFriends) && !_socialFriends)
+            OpenFriends();
         var closeWidth = Kit.Measure(_ui.SansMedium, Theme.FontCaption, "CLOSE"u8).X + Kit.Px(Theme.Space2 * 2);
         var afterTabs = ImGui.GetCursorScreenPos();
         ImGui.SetCursorScreenPos(new float2(tabsAt.X + width - closeWidth, tabsAt.Y + Kit.Px(4)));
@@ -550,14 +570,19 @@ internal sealed partial class ScreenHost
         var rowsHeight = Math.Max(Kit.Px(60), ImGui.GetContentRegionAvail().Y - footer);
         ImGui.BeginChild("##socialrows"u8, new float2(width, rowsHeight), ImGuiChildFlags.NavFlattened, ImGuiWindowFlags.NoBackground);
         var rowWidth = ImGui.GetContentRegionAvail().X - Kit.Px(Theme.Space2);
-        if (_socialParty)
+        if (_socialFriends)
+            DrawAccountBody(rowWidth, false);
+        else if (_socialParty)
             DrawPartyRows(snapshot, rowWidth);
         else
             DrawPlayerRows(snapshot, rowWidth);
         ImGui.EndChild();
 
         Kit.Space(Theme.Space2);
-        DrawNoticeLine(width);
+        if (_socialFriends)
+            DrawAccountNotice(width);
+        else
+            DrawNoticeLine(width);
         ImGui.EndChild();
         ImGui.End();
     }
@@ -601,7 +626,7 @@ internal sealed partial class ScreenHost
         }
 
         Kit.Space(Theme.Space3);
-        Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, "Players on this server only. Names last for this session; there are no friends or factions yet."u8, width / Kit.Scale);
+        Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, "Players on this server only. Names last for this session. Friends, by account, are on the Friends tab; there are no factions yet."u8, width / Kit.Scale);
     }
 
     private void DrawPlayerRow(SessionSnapshot snapshot, in SocialMessage entry, float width)
