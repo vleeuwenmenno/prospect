@@ -693,7 +693,12 @@ internal sealed class WorldView
                     continue;
                 var offset = screen - pointer;
                 var reach = Math.Max(pixels, minReach);
-                if (offset.X * offset.X + offset.Y * offset.Y > reach * reach || depth >= nearest)
+                if (offset.X * offset.X + offset.Y * offset.Y > reach * reach)
+                    continue;
+                var position = center + rock.LocalPosition + (slot.Displaced ? slot.Offsets[i] : Vector3.Zero);
+                if (pixels >= minReach && !RockPicking.Hit(line, position, rock, out depth))
+                    continue;
+                if (depth >= nearest)
                     continue;
                 found = true;
                 picked = new RockRef(slot.Coord, i);
