@@ -767,14 +767,11 @@ internal sealed class WorldView
         {
             ref var hull = ref snapshot.Hulls[i];
             ref readonly var visual = ref visuals[i];
-            // Only what is drawn can be picked: not a hull between a jump's openings, nor the part past an opening.
-            // shortcut: a hull drawn out by hyperspace is picked by its blocks unstretched, for the fraction of a
-            // second it lunges or streaks; stretch the pick boxes if that ever matters.
+            // Only what is drawn can be picked: not a hull between a jump's openings, nor the part past an opening,
+            // and a hull drawn out by hyperspace is picked drawn out.
             if ((pilot && hull.IsOwn) || (!pilot && hull.Owner != snapshot.PlayerId) || !visual.Visible || visual.PickBlocks == 0)
                 continue;
-            var design = _designs[Math.Min(hull.Design, _designs.Length - 1)];
-            _pickHulls[hullCount++] = new PickHull(hull.Id, DrawnPosition(visual), visual.Orientation,
-                design.BlockOffsets, design.BlockSize, visual.PickBlocks, design.Flight.Radius);
+            _pickHulls[hullCount++] = _visuals.Pick(hull.Id, visual, DrawnPosition(visual), _designs[Math.Min(hull.Design, _designs.Length - 1)]);
         }
         var sectorCount = 0;
         foreach (var slot in _slots)

@@ -86,7 +86,7 @@ internal sealed class HullVisuals
         /// <summary>The passage whose opening cuts the hull where it is past it, or -1.</summary>
         public int Clip;
 
-        /// <summary>The blocks that can be picked: those it has, less those whose centres are past its opening.</summary>
+        /// <summary>The blocks that can be picked: those it has, less those wholly past its opening.</summary>
         public ulong PickBlocks;
         public bool Visible;
 
@@ -230,19 +230,41 @@ internal sealed class HullVisuals
         }
     }
 
-    /// <summary>The blocks whose centres are on the shown side of the opening that cuts the hull.</summary>
+    /// <summary>
+    /// The blocks with any part on the shown side of the opening that cuts the hull, drawn out as it is drawn. Picking
+    /// cuts what is past the opening away from each of them exactly; see <see cref="Pick"/>.
+    /// </summary>
     private static ulong Uncut(HullDesign design, in HullVisual visual, in PassageState slot)
     {
-        var from = visual.Position.RelativeTo(slot.Mouth);
-        var hidden = slot.Axis * slot.Clip;
+        var inverse = Quaternion.Conjugate(visual.Orientation);
+        var hidden = Vector3.Transform(slot.Axis * slot.Clip, inverse);
+        var from = Vector3.Transform(visual.Position.RelativeTo(slot.Mouth), inverse);
+        // How far a block's box reaches towards the shown side from its centre.
+        var reach = design.BlockSize * 0.5f * (MathF.Abs(hidden.X) + MathF.Abs(hidden.Y) + MathF.Abs(hidden.Z) * visual.Stretch);
         var mask = 0UL;
         for (var b = 0; b < design.BlockOffsets.Length; b++)
         {
-            if (Vector3.Dot(from + Vector3.Transform(design.BlockOffsets[b], visual.Orientation), hidden) <= 0f)
+            var block = design.BlockOffsets[b];
+            block.Z *= visual.Stretch;
+            if (Vector3.Dot(from + block, hidden) - reach <= 0f)
                 mask |= 1UL << b;
         }
 
         return mask;
+    }
+
+    /// <summary>
+    /// A hull as picking sees it, drawn at <paramref name="position"/>: its pickable blocks, drawn out and cut at its
+    /// opening exactly as the mesh pass draws it, so what can be picked is what is on screen.
+    /// </summary>
+    public PickHull Pick(uint id, in HullVisual visual, Double3 position, HullDesign design)
+    {
+        var hull = new PickHull(id, position, visual.Orientation, design.BlockOffsets, design.BlockSize, visual.PickBlocks,
+            design.Flight.Radius, visual.Stretch);
+        if (visual.Clip < 0)
+            return hull;
+        ref readonly var slot = ref _passages[visual.Clip];
+        return hull with { CutPoint = slot.Mouth.RelativeTo(position), CutNormal = slot.Axis * slot.Clip };
     }
 
     /// <summary>Eases a passage whose hull is no longer jumping, or no longer there, back to nothing.</summary>

@@ -216,24 +216,123 @@ public sealed class HullVisualsTests
         Assert.Equal(full, beside.PickBlocks);
         Assert.True(beside.Visible);
 
-        // Each block can be picked exactly when its centre is on the shown side of the plane the mesh pass cuts at.
+        // A block stays pickable while any of it is on the shown side of the plane the mesh pass cuts at.
         var slot = visuals.Passages[jumping.Clip];
         var blocks = Content.Designs[design].BlockOffsets;
+        var half = Content.Designs[design].BlockSize * 0.5f;
         var camera = jumping.Position + new Double3(2000, 0, 0);
         var picks = new PickHit[4];
+        var hull = visuals.Pick(1, jumping, jumping.Position, Content.Designs[design]);
         for (var b = 0; b < blocks.Length; b++)
         {
             var centre = jumping.Position + Vector3.Transform(blocks[b], jumping.Orientation);
-            var shown = Vector3.Dot(centre.RelativeTo(slot.Mouth), slot.Axis * slot.Clip) <= 0f;
-            Assert.Equal(shown, (jumping.PickBlocks & 1UL << b) != 0);
+            var past = Vector3.Dot(centre.RelativeTo(slot.Mouth), slot.Axis * slot.Clip);
+            Assert.Equal(past - half <= 0f, (jumping.PickBlocks & 1UL << b) != 0);
 
-            // Picked through the same picker the world uses, with nothing in the way: a cut block is not a target.
+            // Picked through the same picker the world uses, with nothing in the way: the cut part of a block is
+            // not a target, even when the rest of it is. Seen from the side, the blocks along the ray through its
+            // centre are as far along the axis as this one, cut or shown alike.
             var ray = Vector3.Normalize(centre.RelativeTo(camera));
-            var hull = new PickHull(1, jumping.Position, jumping.Orientation, blocks, Content.Designs[design].BlockSize, jumping.PickBlocks, flight.Radius);
-            var hits = TargetPicking.Pick(ray, camera, ray, 1e6f, [hull], [], picks);
-            // Seen from the side, the blocks along the ray are as far along the axis as this one, cut or shown alike.
-            Assert.Equal(shown ? 1 : 0, hits);
+            Assert.Equal(past <= 0f ? 1 : 0, TargetPicking.Pick(ray, camera, ray, 1e6f, [hull], [], picks));
         }
+    }
+
+    [Theory]
+    [InlineData(FtlKind.Rift)]
+    [InlineData(FtlKind.Wormhole)]
+    public void AHullWithEveryBlockCentrePastItsOpeningIsPickedByWhatIsStillShown(FtlKind drive)
+    {
+        var design = DesignWith(drive);
+        var blocks = Content.Designs[design].BlockOffsets;
+        var half = Content.Designs[design].BlockSize * 0.5f;
+        var visuals = new HullVisuals();
+
+        // Find a frame where the hull is still drawn and every block's centre is past the opening, but not all of
+        // every block: the aft blocks still show their back slabs.
+        HullVisuals.HullVisual visual = default;
+        var found = false;
+        for (var progress = 0.6f; progress < 1f && !found; progress += 0.0005f)
+        {
+            Update(visuals, [Hull(1, design, JumpPhase.Charge, progress)]);
+            visual = visuals.Hulls[0];
+            if (!visual.Visible || visual.Clip < 0)
+                continue;
+            var slot = visuals.Passages[visual.Clip];
+            var centres = true;
+            foreach (var block in blocks)
+                centres &= Vector3.Dot((visual.Position + block).RelativeTo(slot.Mouth), slot.Axis * slot.Clip) > 0f;
+            found = centres && visual.PickBlocks != 0;
+        }
+
+        Assert.True(found, "the hull is never drawn with every block centre past its opening");
+        var mouth = visuals.Passages[visual.Clip].Mouth;
+        var hull = visuals.Pick(1, visual, visual.Position, Content.Designs[design]);
+
+        // The hull faces -z and goes in nose first, so the aft block shows from the opening back to its aft face.
+        var aft = 0;
+        for (var b = 1; b < blocks.Length; b++)
+            aft = blocks[b].Z > blocks[aft].Z ? b : aft;
+        var centre = visual.Position + blocks[aft];
+        var opening = (float)(mouth.Z - centre.Z);
+        Assert.InRange(opening, 0f, half);
+        var camera = centre + new Double3(2000, 0, 0);
+        var picks = new PickHit[1];
+        var shown = Vector3.Normalize((centre + new Double3(0, 0, (opening + half) * 0.5f)).RelativeTo(camera));
+        Assert.Equal(1, TargetPicking.Pick(shown, camera, shown, 1e6f, [hull], [], picks));
+        Assert.InRange(picks[0].Distance, 2000f - half - 0.01f, 2000f - half + 0.01f);
+
+        // The part past the opening is not, though the block is kept.
+        var cut = Vector3.Normalize((centre + new Double3(0, 0, (opening - half) * 0.5f)).RelativeTo(camera));
+        Assert.Equal(0, TargetPicking.Pick(cut, camera, cut, 1e6f, [hull], [], picks));
+    }
+
+    [Fact]
+    public void AHullDrawnOutByHyperspaceIsPickedAsFarAsItIsDrawn()
+    {
+        var design = DesignWith(FtlKind.Hyperspace);
+        var blocks = Content.Designs[design].BlockOffsets;
+        var half = Content.Designs[design].BlockSize * 0.5f;
+        var visuals = new HullVisuals();
+        Update(visuals, [Hull(1, design, JumpPhase.Charge, 0.99f)]);
+        var visual = visuals.Hulls[0];
+        Assert.True(visual.Visible && visual.Stretch > 4f, $"stretch {visual.Stretch}");
+        var hull = visuals.Pick(1, visual, visual.Position, Content.Designs[design]);
+        var plain = hull with { Stretch = 1f };
+
+        // The block furthest along the nose (-z), drawn out the way the mesh pass draws it.
+        var nose = 0;
+        for (var b = 1; b < blocks.Length; b++)
+            nose = blocks[b].Z < blocks[nose].Z ? b : nose;
+        var tip = blocks[nose] with { Z = (blocks[nose].Z - half) * visual.Stretch };
+        var plainTip = blocks[nose].Z - half;
+
+        // Seen side on, a point inside the drawn-out nose but well ahead of the blocks unstretched is the hull.
+        var inside = visual.Position + (tip with { Z = tip.Z + half });
+        Assert.True(inside.Z < visual.Position.Z + plainTip - 1f, $"{inside.Z} against {visual.Position.Z + plainTip}");
+        var camera = inside + new Double3(2000, 0, 0);
+        var ray = Vector3.Normalize(inside.RelativeTo(camera));
+        var picks = new PickHit[1];
+        Assert.Equal(1, TargetPicking.Pick(ray, camera, ray, 1e6f, [hull], [], picks));
+        Assert.Equal(0, TargetPicking.Pick(ray, camera, ray, 1e6f, [plain], [], picks));
+
+        // Just past the drawn-out tip, within the twelve-pixel grab, it is still the hull; unstretched it is not.
+        const float Focal = 1000f;
+        const float Distance = 200f;
+        var grab = TargetPicking.GrabPixels / Focal * Distance;
+        var near = visual.Position + (tip with { Z = tip.Z - grab * 0.5f });
+        Assert.True(near.Z < visual.Position.Z + plainTip - grab * 2f);
+        camera = near + new Double3(Distance, 0, 0);
+        var forward = -Vector3.UnitX;
+        ray = Vector3.Normalize(near.RelativeTo(camera));
+        PickHull[] hulls = [hull];
+        Assert.Equal(1, TargetPicking.Pick(ray, camera, forward, Focal, hulls, [], picks));
+        Assert.Equal(0, TargetPicking.Pick(ray, camera, forward, Focal, [plain], [], picks));
+
+        // The grab around the drawn-out silhouette allocates nothing.
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 10; i++)
+            TargetPicking.Pick(ray, camera, forward, Focal, hulls, [], picks);
+        Assert.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
     }
 
     [Fact]

@@ -210,6 +210,84 @@ public sealed class TargetPickingTests
         Assert.Equal(0, TargetPicking.Pick(ray, default, Vector3.UnitZ, 1000, [hull], [], hits));
     }
 
+    [Theory]
+    [InlineData(-0.3f, 1)]
+    [InlineData(-0.095f, 1)]
+    [InlineData(-0.08f, 0)]
+    [InlineData(0.3f, 0)]
+    public void ACutBlockIsPickedOnlyWhereItIsShownAndAroundThat(float x, int expected)
+    {
+        // A one-metre block whose centre is 0.1 m past the cut: the slab from x = -0.5 to -0.1 is drawn. The grab
+        // reaches 12 pixels, 0.012 m at 100 m here, past the cut's edge, which is no edge of the box.
+        var hull = new PickHull(1, new Double3(0, 0, 100), Quaternion.Identity, [Vector3.Zero], 1, 1, 1,
+            CutPoint: new Vector3(-0.1f, 0, 0), CutNormal: Vector3.UnitX);
+        var ray = Vector3.Normalize(new Vector3(x, 0, 100));
+        var hits = new PickHit[1];
+        Assert.Equal(expected, TargetPicking.Pick(ray, default, Vector3.UnitZ, 1e5f, [hull], [], hits));
+        if (x < -0.1f)
+            Assert.InRange(hits[0].Distance, 99.49f, 99.51f);
+    }
+
+    [Theory]
+    [InlineData(0.1f, 0, 0f)]
+    [InlineData(0.25f, 1, 0.25f)]
+    public void OnlyTheDrawnPartBeyondTheNearPlaneIsPicked(float z, int expected, float distance)
+    {
+        // A 0.2 m block from z - 0.1 to z + 0.1, with the near plane at 0.25 m: what is nearer is not drawn.
+        var hull = new PickHull(1, new Double3(0, 0, z), Quaternion.Identity, [Vector3.Zero], 0.2f, 1, 0.18f);
+        var hits = new PickHit[1];
+        Assert.Equal(expected, TargetPicking.Pick(Vector3.UnitZ, default, Vector3.UnitZ, 1000, [hull], [], hits));
+        if (expected == 1)
+            Assert.InRange(hits[0].Distance, distance - 1e-4f, distance + 1e-4f);
+    }
+
+    [Fact]
+    public void ACutDrawnOutBlockAcrossTheNearPlaneMatchesASampledSilhouette()
+    {
+        // Rotated blocks drawn out along z, with a tilted cut through them and the near plane through them too, so
+        // the silhouette has corners on neither the box's corners nor its edges. Each pick is checked against the
+        // solid sampled on a grid: inside the grab by more than the grid's error is a hit, outside by more a miss.
+        const float Focal = 50f;
+        const float NearPlane = 4f;
+        const int Grid = 40;
+        var random = new Random(17);
+        var hits = new PickHit[1];
+        var grab = TargetPicking.GrabPixels / Focal;
+        int hitsSeen = 0, missesSeen = 0;
+        for (var c = 0; c < 300; c++)
+        {
+            var axis = Vector3.Normalize(new Vector3(random.NextSingle() - 0.5f, random.NextSingle() - 0.5f, random.NextSingle() - 0.5f));
+            var rotation = Quaternion.CreateFromAxisAngle(axis, random.NextSingle() * 6.28f);
+            var stretch = 1f + random.NextSingle();
+            var center = new Vector3(random.NextSingle() - 0.5f, random.NextSingle() - 0.5f, NearPlane + random.NextSingle() - 0.5f);
+            var normal = Vector3.Normalize(new Vector3(random.NextSingle() - 0.5f, random.NextSingle() - 0.5f, random.NextSingle() - 0.5f));
+            var cutPoint = new Vector3(random.NextSingle() - 0.5f, random.NextSingle() - 0.5f, random.NextSingle() - 0.5f) * 0.4f;
+            var hull = new PickHull(1, new Double3(center.X, center.Y, center.Z), rotation, [Vector3.Zero], 1, 1, 0.87f, stretch, cutPoint, normal);
+            var pointer = new Vector3(center.X / center.Z + (random.NextSingle() - 0.5f) * 1.2f, center.Y / center.Z + (random.NextSingle() - 0.5f) * 1.2f, 1);
+
+            var nearest = float.PositiveInfinity;
+            for (var i = 0; i < Grid; i++)
+                for (var j = 0; j < Grid; j++)
+                    for (var k = 0; k < Grid; k++)
+                    {
+                        var local = new Vector3(i, j, k) / (Grid - 1) - new Vector3(0.5f);
+                        local.Z *= stretch;
+                        var p = center + Vector3.Transform(local, rotation);
+                        if (p.Z < NearPlane || Vector3.Dot(p - center - cutPoint, normal) > 0) continue;
+                        nearest = Math.Min(nearest, Vector2.Distance(new Vector2(p.X, p.Y) / p.Z, new Vector2(pointer.X, pointer.Y)));
+                    }
+            // A grid point is at most half a diagonal from the solid's nearest point; seen no nearer than the near plane.
+            var error = MathF.Sqrt(3) * 0.5f * stretch / (Grid - 1) / NearPlane * 1.5f;
+            // A sliver the grid misses altogether, or a pointer at the grab's edge, is not decided by sampling.
+            if (!float.IsFinite(nearest) || MathF.Abs(nearest - grab) < error) continue;
+            var expected = nearest < grab ? 1 : 0;
+            Assert.True(expected == TargetPicking.Pick(Vector3.Normalize(pointer), default, Vector3.UnitZ, Focal, [hull], [], hits, nearPlane: NearPlane), $"case {c}: nearest {nearest}, grab {grab}, error {error}");
+            hitsSeen += expected;
+            missesSeen += 1 - expected;
+        }
+        Assert.True(hitsSeen > 50 && missesSeen > 50, $"{hitsSeen} hits, {missesSeen} misses");
+    }
+
     [Fact]
     public void CameraInsideRockPicksForwardExitAndOrdersBySurfaceDistance()
     {

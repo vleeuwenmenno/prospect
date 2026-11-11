@@ -85,7 +85,9 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   around it; the hull flies into it, cut off where it is through, and out of the one it arrives through.
   Another hull's hyperspace jump shows as light gathering ahead of its nose that it lunges into, drawn out, and
   that fades where it left; at the far end it streaks in from behind and settles. Markers and targeting follow
-  a jumping hull where it is drawn, and a hull between the ends of its jump cannot be targeted. The pilot plots a jump on the map
+  a jumping hull where it is drawn, and targeting takes its shape as drawn: what is cut off at an opening cannot be
+  targeted, what still shows can, and a drawn-out hull can along its whole length. A hull between the ends of its
+  jump cannot be targeted. The pilot plots a jump on the map
   (**Plot jump**), which shows a NAV marker in the pilot view; aimed at it, the boost key starts the jump. Ships
   flown by the server jump as soon as they are ordered. A started jump is a standing order: the hull brakes and
   turns its nose to the destination, then calculates for 12 seconds while charging from the hull's power.
