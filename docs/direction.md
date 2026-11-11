@@ -31,6 +31,23 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
   rift). No range limit yet; limits come later from modules, power and mass.
 - **Resources.** Asteroids carry ore: iron, copper, nickel, titanium, silver, gold. More kinds later.
 
+## Decided: servers
+
+- **A game is public, unlisted or private.** Public shows in the server browser. Unlisted is joined by address
+  only. Either can have a password.
+- **A server has a name** its host chooses.
+- **A listing server keeps the list.** Games advertise themselves to it; the join menu opens on a server
+  browser fed by it. Ours will run at `mvl.sh`, and clients use that by default.
+- **Releases build two containers:** the game server and the listing server. A version tag says which one, or
+  both.
+
+## Decided: players together
+
+- **Chat** in game.
+- **Parties.** Party members show at the top left: name, ship, shield and hull of the ship they fly.
+- **Factions have ranks.** An owner, members, and ranks in between that may invite and remove.
+- **Tab opens the player menu.** Its first tab lists the faction's members.
+
 ## Decided: world generation
 
 - **One seed makes the whole world.** Same seed, same world, on the server and on every client.
@@ -104,9 +121,15 @@ After that:
 ## Open
 
 - Whether players can make deals with AI factions (alliance, trade pact, war), or AI factions only react.
-- What rank and rights exist inside a player faction: who may fly, order, build or scrap what.
 - What PvP rules a server can set: everywhere, by sector, or by consent.
 - Saving: how often, and what a crash may lose.
+
+## Open: servers and players
+
+- What "private" means for a game: nobody else can join, or invited players only.
+- How a player is recognised when they come back, so a faction knows its members: a key file on their
+  machine, or accounts.
+- Faction rights beyond inviting and removing: who may fly, order, build or scrap what.
 
 ## Open: building
 
