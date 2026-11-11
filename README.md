@@ -37,8 +37,11 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   when an asteroid is hit; its motion from then on is a formula, and new players are sent the displaced ones. The server is authoritative; the client predicts its own hull with the same
   flight code and reconciles against snapshots; other players' hulls are interpolated.
 - **Faster-than-light.** A drive is a block. There are three kinds, each with its own look: hyperspace (the stars
-  stretch into lines), wormhole (a sphere that bends the stars around it) and rift (an orange window torn into
-  space). A jump is a standing order: the hull brakes and turns its nose to the destination, the drive charges
+  stretch into lines that stream back from the hull's nose and become a tunnel), wormhole (a sphere that bends
+  the stars around it) and rift (an orange window torn into space). With a wormhole or a rift the pilot sees their
+  hull fly into the opening, rides through the throat behind it and comes out of a second opening that closes
+  behind them. Every effect is laid out around the hull's nose, so looking around during a jump shows it from the
+  side or from behind. A jump is a standing order: the hull brakes and turns its nose to the destination, the drive charges
   from the hull's power (a bigger ship needs more energy, a weak or drained battery charges slower), the hull is
   in transit for three seconds, and it comes out at its destination, any distance away. Taking the controls
   before the drive fires cancels the jump and loses the charge. The client generates the destination while the

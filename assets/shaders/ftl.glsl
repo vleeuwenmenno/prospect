@@ -91,20 +91,40 @@ float ftlRiftOutline(float angle, float seed)
         + pow(crack, 7.0) * 0.8;
 }
 
-// How far the hyperspace drive stretches the stars for its pilot, as a fraction of each star's distance from the
-// middle of the view. Lines grow out of the stars late in the charge, stay long through the tunnel and pull back to
-// points as the hull arrives. Takes the frame's ftl vector: kind, stage, progress.
-float ftlStretch(vec4 ftl)
+// Value noise that wraps every period cells along x, for patterns laid around the jump axis without a seam.
+float ftlNoiseAround(vec2 p, float period)
 {
-    if (int(ftl.x + 0.5) != 1)
-        return 0.0;
-    int stage = int(ftl.y + 0.5);
-    float s = 0.0;
-    if (stage == 1)
-        s = ftlEase((ftl.z - 0.55) / 0.45);
-    else if (stage == 2)
-        s = 1.0;
-    else if (stage == 3)
-        s = 1.0 - ftlEase(ftl.z / 0.8);
-    return 1.3 * s * s;
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float x0 = mod(i.x, period);
+    float x1 = mod(i.x + 1.0, period);
+    return mix(mix(ftlHash2(vec2(x0, i.y)), ftlHash2(vec2(x1, i.y)), f.x), mix(ftlHash2(vec2(x0, i.y + 1.0)), ftlHash2(vec2(x1, i.y + 1.0)), f.x), f.y);
+}
+
+float ftlFbmAround(vec2 p, float period)
+{
+    float sum = 0.0;
+    float amplitude = 0.5;
+    for (int i = 0; i < 4; i++)
+    {
+        sum += amplitude * ftlNoiseAround(p, period);
+        p = vec2(p.x * 2.0, p.y * 2.0 + 13.1);
+        period *= 2.0;
+        amplitude *= 0.5;
+    }
+    return sum;
+}
+
+// A view direction in coordinates around the jump axis, the way the walls of a tunnel along it are laid out.
+// x: around the axis, 0 to 1. y: along it, the log of the tangent of half the angle from the nose, which runs from
+// minus infinity at the nose to infinity straight behind and moves evenly as things stream past. z: the angle from
+// the nose in radians. w: its sine, how much of the view one step around is.
+vec4 ftlTube(vec3 v, vec3 axis, vec3 up)
+{
+    vec3 side = cross(up, axis);
+    float c = clamp(dot(v, axis), -0.99999, 0.99999);
+    float theta = acos(c);
+    float around = atan(dot(v, up), dot(v, side)) / FtlTau + 0.5;
+    return vec4(around, log(tan(theta * 0.5)), theta, sqrt(1.0 - c * c));
 }

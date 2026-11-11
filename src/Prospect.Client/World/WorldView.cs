@@ -148,6 +148,35 @@ internal sealed class WorldView
     private Vector3 _up = Vector3.UnitY;
     private Vector3 _forward = -Vector3.UnitZ;
     private float _tanHalfFov = MathF.Tan(PilotFov / 2);
+    // The pilot's own jump as drawn: client-side only, worked out each frame from the simulation's stage and
+    // progress. The axis is the hull's nose while the drive works, held once the hull is through. The hull is drawn
+    // ahead of (or behind) where the simulation has it by the offset, along the axis, so it can be seen flying into
+    // the opening and out of the far one; the camera follows it and slides onto the axis behind it so it passes
+    // through the openings too. Travel is how far the walls of the tunnel or the throat have streamed past.
+    private Vector3 _jumpAxis = -Vector3.UnitZ;
+    private Vector3 _jumpUp = Vector3.UnitY;
+    private float _jumpOffset;
+    private float _jumpCameraBlend;
+    private float _jumpTravel;
+    private float _jumpCover;
+    private float _jumpStretch;
+    private Double3 _jumpEntry;
+    private float _jumpEntryRadius;
+    private float _jumpEntryOpen;
+    private Double3 _jumpExit;
+    private float _jumpExitRadius;
+    private float _jumpExitOpen;
+    private bool _jumpExitPlaced;
+    private float _jumpChase;
+    private float _jumpLight;
+    private FtlKind _jumpKind;
+    private float _jumpStage;
+    // The origin's star, held while the drive works, and how far the light has turned to the destination's star.
+    // The simulation moves the hull in one tick; the light on it turns while the tunnel or the throat hides the sky.
+    private Vector3 _jumpFromSun = Vector3.UnitY;
+    private Vector3 _jumpFromSunColor;
+    private float _jumpSunBlend = 1f;
+
     // The render target in pixels, for the GPU and level of detail.
     private float2 _viewport = new(1, 1);
 
@@ -192,6 +221,15 @@ internal sealed class WorldView
     /// at each effect from the command line.
     /// </summary>
     public FtlKind FtlPreview { get; set; }
+
+    /// <summary>
+    /// When set, the pilot view holds the camera this many degrees to the right of the hull's nose, as free look
+    /// would. For captures, which cannot hold a mouse button.
+    /// </summary>
+    public float? LookDegrees { get; set; }
+
+    /// <summary>The flight figures of the hull the player is flying.</summary>
+    public FlightParams OwnFlight => _designs[Math.Min(Own.Design, _designs.Length - 1)].Flight;
 
     /// <summary>In the pilot view: the hull under the reticle, or zero.</summary>
     public uint HoveredHull { get; private set; }
@@ -367,7 +405,15 @@ internal sealed class WorldView
             UpdateCommandControls(snapshot, bridge, dt, pointerOverUi);
         }
 
+        if (LookDegrees is { } look && Mode == ViewMode.Pilot)
+        {
+            var nose = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
+            var hullUp = Vector3.Transform(Vector3.UnitY, OwnOrientation);
+            _lookDirection = Vector3.Transform(nose, Quaternion.CreateFromAxisAngle(hullUp, -look * MathF.PI / 180f));
+        }
+
         bridge.Submit(controls);
+        UpdateJump(dt);
         UpdateCamera(dt);
         UpdateStream();
     }
@@ -394,19 +440,29 @@ internal sealed class WorldView
             var design = _designs[Math.Min(hull.Design, _designs.Length - 1)];
             var leap = hull.Position.RelativeTo(hull.PreviousPosition).LengthSquared() > JumpGap * JumpGap;
             var position = (leap ? hull.Position : Double3.Lerp(hull.PreviousPosition, hull.Position, alpha)).RelativeTo(camera);
+            // The pilot's own hull is drawn where the jump has carried it, and seen from the inside of its own jump.
+            var inside = hull.IsOwn && _commandBlend < 0.5f;
+            if (hull.IsOwn)
+                position += _jumpAxis * _jumpOffset;
 
             if (hull.Jump != JumpPhase.None)
-                AddJump(hull, design.Flight, position, aspect, marks, ref markCount, ref composite);
+            {
+                if (inside)
+                    AddOwnJumpMarks(design.Flight, position, camera, marks, ref markCount);
+                else
+                    AddJump(hull, design.Flight, position, aspect, marks, ref markCount, ref composite);
+            }
 
-            // In the tunnel the hull is nowhere.
-            if (hull.Jump == JumpPhase.Tunnel)
+            // In the tunnel the hull is nowhere, except to its own pilot, who rides through it.
+            if (hull.Jump == JumpPhase.Tunnel && !inside)
                 continue;
+            var material = hull.IsOwn ? 2f : 1f;
             if (!Visible(position, design.Flight.Radius, aspect, out _))
                 continue;
             var orientation = Quaternion.Slerp(hull.PreviousOrientation, hull.Orientation, alpha);
             if (hull.Blocks == design.FullMask)
             {
-                Add(ref candidateCount, Math.Min(hull.Design, _designs.Length - 1), position, orientation, 1f, design.Color, 1f);
+                Add(ref candidateCount, Math.Min(hull.Design, _designs.Length - 1), position, orientation, 1f, design.Color, material);
                 continue;
             }
 
@@ -414,7 +470,7 @@ internal sealed class WorldView
             for (var b = 0; b < design.BlockOffsets.Length && candidateCount < _candidates.Length; b++)
             {
                 if ((hull.Blocks & 1UL << b) != 0)
-                    Add(ref candidateCount, _cubeMesh, position + Vector3.Transform(design.BlockOffsets[b], orientation), orientation, design.BlockSize, design.Color, 1f);
+                    Add(ref candidateCount, _cubeMesh, position + Vector3.Transform(design.BlockOffsets[b], orientation), orientation, design.BlockSize, design.Color, material);
             }
         }
 
@@ -461,6 +517,14 @@ internal sealed class WorldView
 
         var f = 1f / _tanHalfFov;
         var sunColor = galaxy.StarClasses[Sector.StarClass].Color * 1.7f;
+        var sunDirection = Sector.SunDirection;
+        if (_jumpSunBlend < 1f)
+        {
+            sunColor = Vector3.Lerp(_jumpFromSunColor * 1.7f, sunColor, _jumpSunBlend);
+            var turned = Vector3.Lerp(_jumpFromSun, sunDirection, _jumpSunBlend);
+            if (turned.LengthSquared() > 1e-4f)
+                sunDirection = Vector3.Normalize(turned);
+        }
         var velocity = Own.Velocity * (1f - _commandBlend);
         var sectorSize = galaxy.SectorSize;
         var constants = new FrameConstants
@@ -474,7 +538,7 @@ internal sealed class WorldView
             CameraUp = new float4(_up.X, _up.Y, _up.Z, 0),
             CameraForward = new float4(_forward.X, _forward.Y, _forward.Z, 0),
             Lens = new float4(_tanHalfFov, aspect, _viewport.X, _viewport.Y),
-            SunDirection = new float4(Sector.SunDirection.X, Sector.SunDirection.Y, Sector.SunDirection.Z, 0),
+            SunDirection = new float4(sunDirection.X, sunDirection.Y, sunDirection.Z, 0),
             SunColor = new float4(sunColor.X, sunColor.Y, sunColor.Z, 0),
             Dust = new float4(Wrap(camera.X, DustCell), Wrap(camera.Y, DustCell), Wrap(camera.Z, DustCell), time),
             Drift = new float4(velocity.X, velocity.Y, velocity.Z, velocity.Length()),
@@ -483,12 +547,17 @@ internal sealed class WorldView
         };
 
         // The player's own jump is seen from the inside, in the pilot view.
-        if (Own.Jump != JumpPhase.None && _commandBlend < 0.5f)
+        if (_jumpStage > 0f && _commandBlend < 0.5f)
         {
             var flight = _designs[Math.Min(Own.Design, _designs.Length - 1)].Flight;
-            var kind = FtlPreview != FtlKind.None ? FtlPreview : flight.Ftl;
-            constants.Ftl = new float4((float)kind, EffectStage(Own.Jump), JumpProgress(Own, flight), 0);
-            composite.Own = constants.Ftl;
+            var entry = _jumpEntry.RelativeTo(camera);
+            var exit = _jumpExit.RelativeTo(camera);
+            constants.Ftl = new float4((float)_jumpKind, _jumpStage, JumpProgress(Own, flight), (Own.Id & 0xFF) / 255f);
+            constants.FtlAxis = new float4(_jumpAxis.X, _jumpAxis.Y, _jumpAxis.Z, _jumpTravel);
+            constants.FtlUp = new float4(_jumpUp.X, _jumpUp.Y, _jumpUp.Z, _jumpCover);
+            constants.FtlEntry = new float4(entry.X, entry.Y, entry.Z, _jumpEntryRadius);
+            constants.FtlExit = new float4(exit.X, exit.Y, exit.Z, _jumpExitRadius);
+            constants.FtlShape = new float4(_jumpStretch, _jumpEntryOpen, _jumpExitOpen, _jumpLight);
         }
 
         _scene.Render(commands, frameIndex, constants, composite, _batches.AsSpan(0, batchCount), _commandBlend > 0.01f, markCount);
@@ -672,6 +741,235 @@ internal sealed class WorldView
         var index = Math.Min(lensCount, CompositeConstants.MaxLenses - 1);
         composite.SetLens(index, ndc, radius, (float)kind + 4f * stage, progress, seed);
         composite.Setup.W = index + 1;
+    }
+
+    /// <summary>
+    /// The marks of the pilot's own rift or wormhole, seen from the inside: the opening ahead while the drive works,
+    /// the one it comes out of after. They only clear the way for the composite pass where nothing solid is in front
+    /// of the opening; the shapes themselves are worked out there from the frame constants. Hyperspace keeps its
+    /// light at the nose.
+    /// </summary>
+    private void AddOwnJumpMarks(in FlightParams flight, Vector3 position, Double3 camera, Span<FtlMark> marks, ref int markCount)
+    {
+        var kind = FtlPreview != FtlKind.None ? FtlPreview : flight.Ftl;
+        var stage = EffectStage(Own.Jump);
+        var progress = JumpProgress(Own, flight);
+        var seed = (Own.Id & 0xFF) / 255f;
+        if (kind == FtlKind.Hyperspace)
+        {
+            var working = stage == 1f;
+            var at = position + _jumpAxis * (flight.Radius * (working ? 3f : 1.5f));
+            AddMark(marks, ref markCount, at, flight.Radius * (working ? 4f : 2.5f), kind, stage, progress, seed);
+            return;
+        }
+
+        var (centre, radius) = stage == 1f ? (_jumpEntry, _jumpEntryRadius) : (_jumpExit, _jumpExitRadius);
+        if (radius > 0f)
+            AddMark(marks, ref markCount, centre.RelativeTo(camera), radius * LensReach, kind, stage, progress, seed);
+    }
+
+    /// <summary>
+    /// Works out how the pilot's own jump is drawn this frame. Everything here eases from one stage into the next,
+    /// so nothing in the view changes in a single frame: the world is hidden behind the tunnel or the throat at the
+    /// moment the simulation moves the hull, and comes back from behind it.
+    /// </summary>
+    private void UpdateJump(float dt)
+    {
+        var own = Own;
+        if (own.Jump == JumpPhase.None)
+        {
+            // A finished jump has already eased everything to rest. A cancelled one has not: the hull and the camera
+            // back out of the opening and it closes, rather than everything snapping back in one frame.
+            var fade = MathF.Exp(-5f * dt);
+            var close = MathF.Exp(-2f * dt);
+            _jumpOffset *= fade;
+            _jumpCameraBlend *= fade;
+            _jumpCover *= fade;
+            _jumpStretch *= fade;
+            _jumpLight *= fade;
+            _jumpEntryRadius *= close;
+            _jumpEntryOpen *= close;
+            _jumpExitRadius *= close;
+            _jumpExitOpen *= close;
+            _jumpExitPlaced = false;
+            _jumpSunBlend = 1f;
+            var left = Math.Max(Math.Max(Math.Abs(_jumpOffset), _jumpCameraBlend), Math.Max(Math.Max(_jumpCover, _jumpStretch), Math.Max(_jumpEntryOpen, _jumpExitOpen)));
+            if (left < 0.001f)
+            {
+                _jumpOffset = _jumpCameraBlend = _jumpTravel = _jumpCover = _jumpStretch = _jumpLight = 0f;
+                _jumpEntryRadius = _jumpExitRadius = _jumpEntryOpen = _jumpExitOpen = 0f;
+                _jumpStage = 0f;
+            }
+
+            return;
+        }
+
+        var flight = OwnFlight;
+        var kind = FtlPreview != FtlKind.None ? FtlPreview : flight.Ftl;
+        var stage = EffectStage(own.Jump);
+        var progress = SmoothJumpProgress(own, flight);
+        _jumpKind = kind;
+        _jumpStage = stage;
+        var tunnel = Math.Max(flight.FtlTunnelSeconds, 0.1f);
+        var total = tunnel + Math.Max(flight.FtlArriveSeconds, 0.1f);
+        // Seconds since the drive fired, through the tunnel and the arrival.
+        var since = stage switch
+        {
+            2f => progress * tunnel,
+            3f => tunnel + progress * (total - tunnel),
+            _ => 0f,
+        };
+
+        // The axis follows the nose until the hull has come out; turning after arrival must not swing the effect.
+        if (stage < 3f)
+        {
+            _jumpAxis = Vector3.Normalize(Vector3.Transform(-Vector3.UnitZ, OwnOrientation));
+            var up = Vector3.Transform(Vector3.UnitY, OwnOrientation);
+            _jumpUp = Vector3.Normalize(up - _jumpAxis * Vector3.Dot(up, _jumpAxis));
+        }
+
+        if (stage == 1f)
+        {
+            _jumpFromSun = Sector.SunDirection;
+            _jumpFromSunColor = _galaxy!.StarClasses[Sector.StarClass].Color;
+        }
+
+        _jumpSunBlend = Smooth(since / 1.2f);
+
+        // Seen from the command view the jump is drawn from outside, where the hull stays where it is.
+        var inside = 1f - Smooth(_commandBlend / 0.5f);
+        if (kind == FtlKind.Hyperspace)
+            UpdateHyperspace(dt, stage, progress, since, tunnel);
+        else
+            UpdatePassage(dt, own, flight, stage, progress, since, tunnel, total);
+        _jumpOffset *= inside;
+        _jumpCameraBlend *= inside;
+    }
+
+    /// <summary>
+    /// Hyperspace: the stars stretch into lines from where they are late in the charge, the tunnel forms over them
+    /// as the drive fires, and at the far end it thins out again over the destination's stars, which pull back to
+    /// points. The tunnel's lines accelerate away from the nose and slow down again before it opens.
+    /// </summary>
+    private void UpdateHyperspace(float dt, float stage, float progress, float since, float tunnel)
+    {
+        const float MaxStretch = 1.4f;
+        const float TopSpeed = 2.6f;
+        _jumpOffset = 0f;
+        _jumpCameraBlend = 0f;
+        _jumpEntryRadius = _jumpExitRadius = 0f;
+        float speed;
+        if (stage == 1f)
+        {
+            var build = Smooth((progress - 0.55f) / 0.45f);
+            _jumpStretch = MaxStretch * build * build;
+            _jumpCover = Smooth((progress - 0.7f) / 0.3f);
+            var rush = Smooth((progress - 0.7f) / 0.3f);
+            speed = TopSpeed * 0.45f * rush * rush;
+        }
+        else
+        {
+            _jumpStretch = MaxStretch * (1f - Smooth((since - (tunnel - 0.35f)) / 1.6f));
+            _jumpCover = 1f - Smooth((since - (tunnel - 0.7f)) / 1.2f);
+            var slow = Smooth((since - (tunnel - 1.1f)) / 1.6f);
+            speed = TopSpeed * (0.45f + 0.55f * Smooth(since / 0.6f)) * (1f - slow);
+        }
+
+        _jumpTravel += speed * dt;
+        _jumpLight = _jumpCover;
+    }
+
+    /// <summary>
+    /// Rift and wormhole: the opening grows ahead of the nose through the charge. Late in the charge the hull
+    /// accelerates into it and the camera follows through; inside is the throat, which hides the moment the
+    /// simulation moves the hull. In the tunnel the opening at the far end grows ahead, the hull and the camera come
+    /// out of it, and it closes behind them while the hull slows to where it has arrived.
+    /// </summary>
+    private void UpdatePassage(float dt, in HullView own, in FlightParams flight, float stage, float progress, float since, float tunnel, float total)
+    {
+        var radius = flight.Radius;
+        var full = radius * OpeningRadius;
+        var ahead = radius * OpeningAhead;
+        _jumpCover = 0f;
+        _jumpStretch = 0f;
+        float speed;
+        if (stage == 1f)
+        {
+            // How far the camera sits behind the hull, fixed for the jump so the openings can be placed for it.
+            _jumpChase = Math.Max(3f, radius * 3.3f) * _chaseZoom;
+            _jumpExitPlaced = false;
+            _jumpExitRadius = 0f;
+            _jumpExitOpen = 0f;
+
+            // The hull starts to move at 60% of the charge and accelerates, so the camera has passed the far side of
+            // the opening (and it has closed behind) by 97%, before the drive fires.
+            var through = ahead + _jumpChase + full * 2.2f;
+            var move = Math.Clamp((progress - 0.6f) / 0.4f, 0f, 1f);
+            _jumpOffset = through / MathF.Pow(0.925f, 2.2f) * MathF.Pow(move, 2.2f);
+            _jumpCameraBlend = Smooth((progress - 0.2f) / 0.35f);
+
+            var open = Smooth(progress / 0.8f) * 0.95f + 0.05f;
+            var behind = (_jumpOffset - _jumpChase - ahead - full) / full;
+            var close = Smooth(behind);
+            _jumpEntry = OwnPosition + _jumpAxis * ahead;
+            _jumpEntryOpen = open * (1f - close);
+            _jumpEntryRadius = full * _jumpEntryOpen;
+            var rush = Smooth((progress - 0.62f) / 0.33f);
+            speed = 1.4f * rush * rush;
+            _jumpLight = Smooth((progress - 0.75f) / 0.2f);
+        }
+        else
+        {
+            // From the moment the drive fires, over the tunnel and the arrival: the hull comes from far behind where
+            // it arrives, and slows to a stop there. The far opening is placed so the camera passes through its
+            // middle just before the tunnel ends.
+            const float Approach = 20f;
+            var span = full * Approach;
+            var t = since / total;
+            _jumpOffset = -span * (1f - t) * (1f - t);
+            var cross = Math.Max(0.1f, (tunnel - 0.25f) / total);
+            if (!_jumpExitPlaced)
+            {
+                _jumpExitPlaced = true;
+                _jumpEntryRadius = 0f;
+                _jumpEntryOpen = 0f;
+                _jumpExit = own.Position + _jumpAxis * (-span * (1f - cross) * (1f - cross) - _jumpChase);
+            }
+
+            _jumpCameraBlend = stage == 2f ? 1f : 1f - Smooth(progress / 0.7f);
+            _jumpExitOpen = stage == 2f ? Smooth((since - 0.3f) / 1.6f) * 0.95f + 0.05f : 1f - Smooth(progress);
+            _jumpExitRadius = full * _jumpExitOpen;
+            speed = 1.4f * (1f - Smooth((since - (tunnel - 0.6f)) / 1.0f));
+            _jumpLight = 1f - Smooth((since - (tunnel - 0.6f)) / 0.9f);
+        }
+
+        _jumpTravel += speed * dt;
+    }
+
+    /// <summary>
+    /// Like <see cref="JumpProgress"/>, but carried forward between simulation ticks so motion drawn from it does not
+    /// step at the tick rate.
+    /// </summary>
+    private float SmoothJumpProgress(in HullView hull, in FlightParams flight)
+    {
+        var tick = _frameAlpha / TickLoop.SimulationHz;
+        return Math.Clamp(
+            hull.Jump switch
+            {
+                JumpPhase.Charge => (hull.JumpTimer + flight.FtlPower * tick) / Math.Max(flight.FtlEnergy, 0.001f),
+                JumpPhase.Tunnel => (hull.JumpTimer + tick) / flight.FtlTunnelSeconds,
+                JumpPhase.Arrive => (hull.JumpTimer + tick) / flight.FtlArriveSeconds,
+                _ => 0f,
+            },
+            0f,
+            1f
+        );
+    }
+
+    private static float Smooth(float x)
+    {
+        x = Math.Clamp(x, 0f, 1f);
+        return x * x * (3f - 2f * x);
     }
 
     private static void AddMark(Span<FtlMark> marks, ref int count, Vector3 at, float size, FtlKind kind, float stage, float progress, float seed)
@@ -1271,7 +1569,10 @@ internal sealed class WorldView
         var speed = Own.Velocity.Length();
         var pullBack = 1f + Math.Min(speed / 720f, 1f) * 0.25f;
         var chaseDistance = Math.Max(3f, _designs[Math.Min(Own.Design, _designs.Length - 1)].Flight.Radius * 3.3f) * _chaseZoom;
-        var chasePosition = OwnPosition + chaseUp * (chaseDistance * 0.24f) - _cameraDirection * (chaseDistance * pullBack);
+        var hull = OwnPosition + _jumpAxis * _jumpOffset;
+        var chasePosition = hull + chaseUp * (chaseDistance * 0.24f) - _cameraDirection * (chaseDistance * pullBack);
+        if (_jumpCameraBlend > 0f)
+            chasePosition = Double3.Lerp(chasePosition, hull - _jumpAxis * (chaseDistance * pullBack), _jumpCameraBlend);
 
         if (_followId != 0)
         {

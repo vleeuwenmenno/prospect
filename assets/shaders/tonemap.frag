@@ -1,13 +1,14 @@
 #version 450
+#include "frame.glsl"
 #include "ftl.glsl"
 
-layout(set = 0, binding = 0) uniform sampler2D scene;
+// Set 0 is the frame constants, for the pilot's own jump and the camera; set 1 the scene.
+layout(set = 1, binding = 0) uniform sampler2D scene;
 
-// Matches CompositeConstants in SceneRenderer.cs: 128 bytes, the push constant space every device guarantees.
+// Matches CompositeConstants in SceneRenderer.cs: within 128 bytes, the push constant space every device guarantees.
 layout(push_constant) uniform Push
 {
     vec4 setup;    // x: exposure, y: aspect ratio, z: time in seconds, w: number of lenses
-    vec4 own;      // the pilot's own jump: x drive kind, y stage, z progress through the stage
     vec4 lens[4];  // per opening: xy centre in NDC, z fully open radius in half screen heights, w code (see below)
     vec4 extra[2]; // per opening: progress through the stage and seed, two openings to a vector
 } push;
@@ -108,7 +109,7 @@ vec3 wormholeLine(float edge)
     return vec3(0.9, 1.2, 1.7) * exp(-abs(edge) / 0.8) * 1.2;
 }
 
-// An opening someone else's drive, or the pilot's own while it charges, has torn in the world.
+// An opening another hull's drive has torn in the world, or the pilot's own seen from the command view.
 void opening(int kind, int stage, vec2 d, vec2 centre, float radius, float progress, float seed, float time, float pixel, float mask,
              inout vec2 bend, inout vec4 cover, inout vec3 glow)
 {
@@ -140,91 +141,191 @@ void opening(int kind, int stage, vec2 d, vec2 centre, float radius, float progr
     }
 }
 
-// The pilot going through their own rift or wormhole, over the transit and the arrival together. The opening they
-// went into rushes out past the edges of the view; after a moment on the far side the destination opens in the
-// middle and grows until it is all there is. Nothing in front of it, so no mask.
-void passage(int kind, vec2 pos, vec2 centre, float radius, float progress, float seed, float time, float pixel,
-             inout vec2 bend, inout vec4 cover, inout vec3 glow)
+// The view direction through a point of the screen, in world space.
+vec3 viewRay(vec2 at)
 {
-    // The entry slides to the middle of the view as it rushes out, wherever the nose was pointing; the exit opens
-    // in the middle.
-    float rush = ftlEase(progress / 0.12);
-    float entry = radius * mix(1.0, 16.0, rush * rush);
-    centre *= 1.0 - rush;
-    vec2 d = pos - centre;
-    float reveal = ftlEase((progress - 0.28) / 0.6);
-    float exit = (kind == 3 ? 6.0 : 3.2) * pow(reveal, 1.5);
+    return normalize(frame.cameraForward.xyz + frame.cameraRight.xyz * (at.x * frame.lens.x * frame.lens.y) - frame.cameraUp.xyz * (at.y * frame.lens.x));
+}
 
-    float entryEdge;
-    float exitEdge = -1e4;
-    float bulge = 0.0;
+// Where a camera-relative point lands, in half screen heights from the middle of the view. False when behind.
+bool project(vec3 p, out vec2 at)
+{
+    float depth = dot(p, frame.cameraForward.xyz);
+    at = vec2(dot(p, frame.cameraRight.xyz), -dot(p, frame.cameraUp.xyz)) / (max(depth, 1e-4) * frame.lens.x);
+    return depth > 1e-3;
+}
+
+// Stars on the walls of a throat: hard points about a pixel wide wherever they are, faded out where the walls crowd
+// toward the ends of the axis so they never shimmer. Square cells: count around, count / tau per unit along.
+float throatStars(vec4 tube, vec2 wall, float count, float pixelAngle)
+{
+    vec2 grid = vec2(wall.x * count, wall.y * count / FtlTau);
+    vec2 cell = floor(grid);
+    vec2 key = vec2(mod(cell.x, count), cell.y);
+    vec2 offset = vec2(ftlHash2(key + 7.1), ftlHash2(key + 3.7)) * 0.6 + 0.2;
+    float h = ftlHash2(key);
+    float pixelCells = pixelAngle / (FtlTau / count * max(tube.w, 1e-3));
+    float size = pixelCells * (0.7 + 0.9 * h);
+    float visible = 1.0 - smoothstep(0.12, 0.3, pixelCells);
+    return step(0.9, h) * smoothstep(size, 0.0, length(fract(grid) - offset)) * visible;
+}
+
+// Inside a wormhole: a tube of dark sky along the jump axis with faint gas and hard stars on its walls, streaming
+// past as the hull goes through. Quiet colour; the ends glow faintly with the light of the mouths.
+vec3 wormholeThroat(vec3 v, float travel, float seed, float time, float pixelAngle)
+{
+    vec4 tube = ftlTube(v, frame.ftlAxis.xyz, frame.ftlUp.xyz);
+    vec2 wall = vec2(tube.x + time * 0.004, tube.y - travel);
+    float detail = smoothstep(0.04, 0.3, tube.w);
+    float gas = ftlFbmAround(vec2(wall.x * 10.0, wall.y * 1.6 + seed * 31.0), 10.0);
+    float veil = ftlFbmAround(vec2(wall.x * 20.0, wall.y * 3.1 + 5.0 + seed * 17.0), 20.0);
+    vec3 color = vec3(0.001, 0.002, 0.006)
+        + (vec3(0.008, 0.02, 0.04) * smoothstep(0.45, 0.85, gas) + vec3(0.02, 0.008, 0.035) * smoothstep(0.6, 0.9, veil)) * detail;
+    color += vec3(1.0, 1.15, 1.5) * throatStars(tube, wall, 96.0, pixelAngle) * 1.6;
+    float ends = exp(-tube.z * 4.0) + 0.5 * exp(-(FtlTau * 0.5 - tube.z) * 4.0);
+    return color + vec3(0.03, 0.06, 0.12) * ends;
+}
+
+// Inside a rift: the same tube, dark red with orange gas and dense hard stars, a place that is clearly not here.
+vec3 riftThroat(vec3 v, float travel, float seed, float time, float pixelAngle)
+{
+    vec4 tube = ftlTube(v, frame.ftlAxis.xyz, frame.ftlUp.xyz);
+    vec2 wall = vec2(tube.x, tube.y - travel);
+    float detail = smoothstep(0.04, 0.3, tube.w);
+    float warp = ftlFbmAround(vec2(wall.x * 8.0, wall.y * 1.2 + seed * 17.0 + time * 0.02), 8.0);
+    float cloud = ftlFbmAround(vec2(wall.x * 16.0, wall.y * 2.4 + warp * 2.0 - time * 0.03), 16.0);
+    vec3 color = vec3(0.012, 0.003, 0.002)
+        + (vec3(0.2, 0.045, 0.008) * smoothstep(0.45, 0.85, cloud) + vec3(1.0, 0.35, 0.06) * pow(smoothstep(0.7, 0.94, cloud), 3.0)) * detail;
+    color += mix(vec3(1.6, 1.1, 0.7), vec3(1.4, 1.4, 1.5), 0.5) * throatStars(tube, wall, 128.0, pixelAngle) * 2.2;
+    float ends = exp(-tube.z * 4.0) + 0.5 * exp(-(FtlTau * 0.5 - tube.z) * 4.0);
+    return color + vec3(0.12, 0.03, 0.005) * ends;
+}
+
+// The pilot's own rift or wormhole, worked out from where its openings are in the world. Returns how much of the
+// pixel is the real scene; the rest is the throat. While the drive works there is one opening, ahead: the real world
+// on the near side, the throat beyond. After the drive has fired there is the one the hull comes out of: the throat
+// on the near side, the destination beyond. Which side a pixel shows follows from where the camera is and what its
+// ray passes through, so the camera can fly through an opening and the view changes with it, never in one frame.
+// A wormhole's opening is a sphere; inside the sphere the far side is the half of the view ahead. A rift's is a flat
+// window across the axis with a torn outline.
+float ownPassage(int kind, vec3 v, vec2 pos, float pixelAngle, bool solid, bool marked, bool ownHull, inout vec2 bend, inout vec3 glow)
+{
+    bool entry = int(frame.ftl.y + 0.5) == 1;
+    vec4 mouth = entry ? frame.ftlEntry : frame.ftlExit;
+    float open = entry ? frame.ftlShape.y : frame.ftlShape.z;
+    vec3 axis = frame.ftlAxis.xyz;
+    vec3 up = frame.ftlUp.xyz;
+    float seed = frame.ftl.w + (entry ? 0.0 : 0.37);
+    vec3 c = mouth.xyz;
+    float r = mouth.w;
+    // The camera is behind the opening when its centre lies ahead along the axis.
+    bool behind = dot(c, axis) > 0.0;
+    float edge = -1e4;
+    float far;
+    vec2 lens = vec2(0.0);
+    float line = 1.0;
+
     if (kind == 3)
     {
-        vec2 extent = ftlRiftExtent(1.0) * entry;
-        vec2 e;
-        entryEdge = riftEdge(d, extent, seed, pixel, e);
-        bend += deflect(e, RiftEinstein, 3.4) * extent * (1.0 - clamp(entryEdge + 0.5, 0.0, 1.0));
-        if (exit > 0.0)
+        float facing = dot(v, axis);
+        float t = abs(facing) > 1e-5 ? dot(c, axis) / facing : -1.0;
+        if (r > 0.0 && t > 0.0)
         {
-            vec2 x;
-            exitEdge = riftEdge(pos, vec2(0.72, 1.0) * exit, seed + 0.37, pixel, x);
-            bulge = length(x);
+            vec3 hit = v * t - c;
+            vec3 side = cross(up, axis);
+            vec2 extent = ftlRiftExtent(open) * r;
+            vec2 e = vec2(dot(hit, side), dot(hit, up)) / extent;
+            float re = length(e);
+            vec2 dir = e / max(re, 1e-6);
+            float perPixel = t * pixelAngle / max(abs(facing), 0.08);
+            edge = (ftlRiftOutline(atan(e.y, e.x), seed) - re) * length(dir * extent) / perPixel;
+            // Past the window the view bends around it, worked out in the window's plane and projected back.
+            vec2 shift = deflect(e, RiftEinstein * ftlEase(open / 0.45), 3.4) * extent;
+            vec2 bent;
+            if (project(c + hit + side * shift.x + up * shift.y, bent))
+                lens = (bent - pos) * (1.0 - clamp(edge + 0.5, 0.0, 1.0));
         }
+        float through = clamp(edge + 0.5, 0.0, 1.0);
+        far = behind ? through : 1.0 - through;
     }
     else
     {
-        entryEdge = (entry - length(d)) / pixel;
-        bend += deflect(d, entry * 1.3, entry * 4.0) * (1.0 - clamp(entryEdge + 0.5, 0.0, 1.0));
-        if (exit > 0.0)
+        float d = length(c);
+        if (r <= 0.0)
         {
-            exitEdge = (exit - length(pos)) / pixel;
-            bulge = length(pos) / exit;
+            far = behind ? 0.0 : 1.0;
+        }
+        else if (d > r)
+        {
+            // The rim fades as the camera reaches the sphere, where it would become a line straight across the view.
+            line = smoothstep(r, r * 1.4, d);
+            float rim = asin(r / d);
+            edge = (rim - acos(clamp(dot(v, c / d), -1.0, 1.0))) / pixelAngle;
+            float hit = clamp(edge + 0.5, 0.0, 1.0);
+            far = behind ? hit : 1.0 - hit;
+            vec2 centre;
+            if (project(c, centre))
+            {
+                // The lens bends the view around the sphere as it appears; it gives way as the sphere fills the view.
+                float size = tan(rim) / frame.lens.x;
+                lens = deflect(pos - centre, size * 1.3, size * 4.0) * (1.0 - smoothstep(1.0, 2.5, size)) * (1.0 - hit);
+            }
+        }
+        else
+        {
+            edge = asin(clamp(dot(v, axis), -1.0, 1.0)) / pixelAngle;
+            far = clamp(edge + 0.5, 0.0, 1.0);
+            line = 0.0;
         }
     }
 
-    float inEntry = clamp(entryEdge + 0.5, 0.0, 1.0);
-    float inExit = clamp(exitEdge + 0.5, 0.0, 1.0);
+    // Something solid in front of the opening hides it: its pixel did not get the opening's mark. Close to the
+    // opening the mark is clipped by the near plane, and nothing solid can be that close anyway.
+    bool inFront = solid && !marked && length(c) > r * 1.5 + 0.5;
+    if (inFront)
+        far = behind ? 0.0 : 1.0;
+    float real = entry ? 1.0 - far : far;
+    if (ownHull)
+        return 1.0;
 
-    // Through the exit the destination is squeezed toward the edge, the way the sky crowds the rim of a lens.
-    bend += pos * 0.45 * bulge * bulge * inExit;
-
-    // Inside the wormhole the far sky closes in slowly, its stars drifting outward past the pilot.
-    float zoom = radius * mix(1.0, 2.5, rush) * (1.0 + 1.5 * progress);
-    vec3 far = kind == 3
-        ? riftInside((pos - centre * 0.5) / radius, seed, time, pixel, radius) + riftBurn(-exitEdge)
-        : wormholeInside(d / zoom, centre * 1.5, seed, time, pixel, zoom);
-    cover = mix(cover, vec4(far, 1.0), inEntry * (1.0 - inExit));
-    vec3 line = kind == 3 ? riftLine(entryEdge) + riftLine(exitEdge) * inEntry : wormholeLine(entryEdge) + wormholeLine(exitEdge) * inEntry;
-    glow += line;
+    // The real world is bent where it is seen past the opening from the real side.
+    if (entry == behind && !inFront)
+        bend += lens;
+    if (r > 0.0 && !inFront)
+    {
+        // The burning edge, with the throat side of it glowing where it was torn.
+        float throatSide = entry == behind ? edge : -edge;
+        glow += kind == 3 ? riftLine(edge) + riftBurn(throatSide) * step(0.0, throatSide) : wormholeLine(edge) * line;
+    }
+    return real;
 }
 
-// Hyperspace in transit: lines of light racing out of the point ahead on a deep blue, the only effect allowed to
-// fill the view. A flash as the drive fires covers the cut.
-vec3 hyperspace(vec3 scene, vec2 pos, float progress, float time, float pixel)
+// The hyperspace tunnel around the pilot: lines of light racing back from the point ahead of the nose on a deep
+// blue, the only effect allowed to fill the view. Laid out around the jump axis, so it is the same wherever the
+// pilot looks: lines stream past to the side and converge behind. Travel moves the lines; it speeds up and slows
+// down with the jump.
+vec3 hyperspaceTunnel(vec3 v, float travel, float pixelAngle)
 {
-    float r = max(length(pos), 1e-4);
-    float angle = atan(pos.y, pos.x);
-    float depth = 0.35 / r;
+    vec4 tube = ftlTube(v, frame.ftlAxis.xyz, frame.ftlUp.xyz);
     float streaks = 0.0;
     for (int layer = 0; layer < 2; layer++)
     {
         float count = layer == 0 ? 150.0 : 233.0;
-        float lanes = angle / FtlTau * count + float(layer) * 0.5;
+        float lanes = tube.x * count + float(layer) * 0.5;
         float lane = floor(lanes);
         float seed = ftlHash(mod(lane, count) + float(layer) * 311.0);
-        float across = abs(fract(lanes) - 0.5) * FtlTau / count * r / pixel;
-        float line = 1.0 - smoothstep(0.4, 0.4 + 0.8 + 1.2 * r, across);
-        float travel = fract(depth * (0.5 + seed) + time * (0.35 + 0.35 * seed) + seed * 7.0);
-        float run = smoothstep(0.0, 0.04, travel) * (1.0 - smoothstep(0.12, 0.45, travel));
+        float across = abs(fract(lanes) - 0.5) * FtlTau / count * tube.w / pixelAngle;
+        float line = 1.0 - smoothstep(0.4, 1.2 + 2.0 * tube.w, across);
+        // The head of each line leads, away from the nose; its tail fades back toward it.
+        float f = fract(travel * (0.7 + 0.6 * seed) - tube.y * (0.5 + seed) + seed * 7.0);
+        float run = smoothstep(0.0, 0.04, f) * (1.0 - smoothstep(0.12, 0.45, f));
         streaks += line * run * step(0.3, seed) * (0.3 + 2.5 * pow(fract(seed * 13.7), 3.0));
     }
 
-    // Near the vanishing point the lanes crowd into noise; let them come out of a calm, dark centre instead.
-    streaks *= smoothstep(0.12, 0.6, r);
-    vec3 tunnel = vec3(0.002, 0.006, 0.02) + vec3(0.4, 0.6, 1.0) * 0.012 / (r + 0.08) + vec3(0.65, 0.82, 1.0) * streaks * 1.8;
-    float cover = ftlEase(progress / 0.05) * (1.0 - ftlEase((progress - 0.82) / 0.18));
-    float flash = 1.0 - ftlEase(progress / 0.12);
-    return mix(scene, tunnel, cover) + vec3(1.0, 1.05, 1.15) * flash * flash * 3.0;
+    // Near the points ahead and behind the lanes crowd into noise; let them come out of a calm, dark centre instead.
+    float theta = tube.z;
+    streaks *= smoothstep(0.1, 0.5, theta) * (1.0 - smoothstep(FtlTau * 0.5 - 0.5, FtlTau * 0.5 - 0.1, theta));
+    return vec3(0.002, 0.006, 0.02) + vec3(0.4, 0.6, 1.0) * 0.0075 / (theta + 0.05) + vec3(0.65, 0.82, 1.0) * streaks * 1.8;
 }
 
 void main()
@@ -233,10 +334,21 @@ void main()
     float time = push.setup.z;
     int count = int(push.setup.w + 0.5);
     float pixel = 2.0 / float(textureSize(scene, 0).y);
+    float pixelAngle = pixel * frame.lens.x;
     vec2 pos = ndc * vec2(aspect, 1.0);
-    float mask = smoothstep(0.55, 0.95, texture(scene, ndc * 0.5 + 0.5).a);
 
-    // Lenses: the code is drive kind + 4 * stage, + 16 for the pilot's own passage.
+    // The scene's alpha: one per opening mark in front of what is there, plus what is there in the fraction (0 sky,
+    // 0.25 a solid surface, 0.5 the pilot's own hull). Read exactly, never filtered.
+    float alpha = texelFetch(scene, ivec2(gl_FragCoord.xy), 0).a;
+    float marks = floor(alpha + 0.05);
+    float what = alpha - marks;
+    bool marked = marks > 0.5;
+    bool solid = what > 0.15;
+    bool ownHull = what > 0.4;
+    float mask = marked ? 1.0 : 0.0;
+
+    // Openings of other hulls, and of the pilot's own when seen from the command view. The code is drive kind +
+    // 4 * stage.
     vec2 bend = vec2(0.0);
     vec4 cover = vec4(0.0);
     vec3 glow = vec3(0.0);
@@ -249,24 +361,41 @@ void main()
         float progress = (i & 1) == 0 ? extra.x : extra.z;
         float seed = (i & 1) == 0 ? extra.y : extra.w;
         int code = int(lens.w + 0.5);
-        int kind = code & 3;
-        int stage = (code >> 2) & 3;
         vec2 centre = lens.xy * vec2(aspect, 1.0);
-        vec2 d = pos - centre;
-        if ((code & 16) != 0)
-            passage(kind, pos, centre, lens.z, progress, seed, time, pixel, bend, cover, glow);
-        else if (mask > 0.0)
-            opening(kind, stage, d, centre, lens.z, progress, seed, time, pixel, mask, bend, cover, glow);
+        if (mask > 0.0)
+            opening(code & 3, (code >> 2) & 3, pos - centre, centre, lens.z, progress, seed, time, pixel, mask, bend, cover, glow);
+    }
+
+    // The pilot's own jump, from the inside.
+    int ownKind = int(frame.ftl.x + 0.5);
+    int ownStage = int(frame.ftl.y + 0.5);
+    vec3 v = viewRay(ndc);
+    float real = 1.0;
+    vec3 throat = vec3(0.0);
+    if (ownStage > 0 && (ownKind == 2 || ownKind == 3))
+    {
+        real = ownPassage(ownKind, v, pos, pixelAngle, solid, marked, ownHull, bend, glow);
+        if (real < 1.0)
+            throat = ownKind == 3 ? riftThroat(v, frame.ftlAxis.w, frame.ftl.w, time, pixelAngle) : wormholeThroat(v, frame.ftlAxis.w, frame.ftl.w, time, pixelAngle);
     }
 
     // A bent lookup can leave the screen. Mirroring it back keeps a field of stars a field of stars, where clamping
     // would smear the edge pixels into streaks.
     vec2 lookup = 1.0 - abs(1.0 - abs((pos + bend) / vec2(aspect, 1.0) * 0.5 + 0.5));
+    // A lens only images what is behind it. Where the bent ray lands on something solid in front of every opening,
+    // such as the pilot's own hull, the view is not bent.
+    float landed = texelFetch(scene, ivec2(lookup * vec2(textureSize(scene, 0))), 0).a;
+    float landedOn = landed - floor(landed + 0.05);
+    if (landedOn > 0.4 || (landedOn > 0.15 && landed < 0.95))
+        lookup = ndc * 0.5 + 0.5;
     vec3 hdr = texture(scene, lookup).rgb;
-    hdr = mix(hdr, cover.rgb, cover.a) + glow;
+    hdr = mix(hdr, cover.rgb, cover.a);
+    hdr = mix(throat, hdr, real) + glow;
 
-    if (int(push.own.x + 0.5) == 1 && int(push.own.y + 0.5) == 2)
-        hdr = hyperspace(hdr, pos, push.own.z, time, pixel);
+    // Hyperspace covers everything but the pilot's own hull, which rides through it.
+    float tunnel = ownKind == 1 && !ownHull ? frame.ftlUp.w : 0.0;
+    if (tunnel > 0.0)
+        hdr = mix(hdr, hyperspaceTunnel(v, frame.ftlAxis.w, pixelAngle), tunnel);
 
     vec3 mapped = filmic(hdr * push.setup.x);
     float vignette = 1.0 - 0.22 * pow(length(ndc) * 0.75, 2.5);

@@ -35,6 +35,13 @@ internal sealed class AppOptions
     public float BenchSeconds { get; set; }
     public string? CapturePath { get; set; }
     public float CaptureAfter { get; set; } = 1.5f;
+
+    /// <summary>With more than one capture, the screenshots are numbered and taken this many seconds apart.</summary>
+    public int CaptureCount { get; set; } = 1;
+    public float CaptureEvery { get; set; } = 0.25f;
+
+    /// <summary>In the pilot view, holds the camera this many degrees to the side of the hull's nose; for captures.</summary>
+    public float? LookDegrees { get; set; }
     public int2? WindowSize { get; set; }
 }
 
@@ -68,7 +75,9 @@ internal sealed class App : IDisposable
 
     private bool _pointerCaptured;
     private float _sinceSplash = -1f;
+    private long _splashFinishedAt;
     private bool _captureRequested;
+    private int _capturesTaken;
     private Benchmark? _benchmark;
 
     public App(AppOptions options)
@@ -123,7 +132,8 @@ internal sealed class App : IDisposable
             throw new InvalidOperationException($"Failed to initialize GLFW: {code}, {message}");
         }
 
-        _vsync = options.BenchSeconds > 0 ? false : Settings.VSync;
+        // Scripted runs present without waiting for the display, so they also run while it is asleep.
+        _vsync = options.BenchSeconds > 0 || options.CapturePath is not null ? false : Settings.VSync;
         _windowedSize = options.WindowSize ?? new int2(Settings.WindowWidth, Settings.WindowHeight);
         Glfw.WindowHint(GlfwWindowHint.ClientApi, Glfw.Constants.GLFW_NO_API);
         _window = Glfw.CreateWindow(new GlfwWindow.CreateInfo { Title = "PROSPECT", Size = _windowedSize });
@@ -240,6 +250,7 @@ internal sealed class App : IDisposable
     public void SplashFinished()
     {
         _sinceSplash = 0;
+        _splashFinishedAt = Stopwatch.GetTimestamp();
         if (_options.StartLocalGame || _benchmark is not null)
             StartLocalGame();
         else if (_options.JoinHost is { } host)
@@ -418,7 +429,8 @@ internal sealed class App : IDisposable
     {
         if (_sinceSplash < 0)
             return;
-        _sinceSplash += Stats.LastFrameMs / 1000f;
+        // Wall-clock time, so scripted captures line up with the simulation whatever the frame pacing.
+        _sinceSplash = (float)Stopwatch.GetElapsedTime(_splashFinishedAt).TotalSeconds;
 
         if (_options.OpenView is { } view && !_viewOpened && Session is not null && _sinceSplash > 0.6f)
         {
@@ -448,15 +460,28 @@ internal sealed class App : IDisposable
                 _screens.OpenMap();
         }
 
+        if (_options.LookDegrees is { } look && Session is not null)
+            World.LookDegrees = look;
+
         if (_options.CapturePath is { } path)
         {
-            if (!_captureRequested && _sinceSplash >= _options.CaptureAfter)
+            var count = _options.CaptureCount;
+            var due = _options.CaptureAfter + _capturesTaken * _options.CaptureEvery;
+            if (_capturesTaken < count && _sinceSplash >= due && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
             {
-                _captureRequested = true;
                 ShowPerformance |= Session is not null;
-                RequestScreenshot(Path.GetFullPath(path));
+                var file = Path.GetFullPath(path);
+                if (count > 1)
+                {
+                    file = Path.Combine(Path.GetDirectoryName(file)!, $"{Path.GetFileNameWithoutExtension(file)}-{_capturesTaken:D2}{Path.GetExtension(file)}");
+                    Console.WriteLine($"capture {_capturesTaken:D2} at {_sinceSplash:F2}s: {World.Own.Jump} {WorldView.JumpProgress(World.Own, World.OwnFlight):F3}");
+                }
+
+                _capturesTaken++;
+                _captureRequested = true;
+                RequestScreenshot(file);
             }
-            else if (_captureRequested && _sinceSplash >= _options.CaptureAfter + 0.25f && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
+            else if (_captureRequested && _capturesTaken >= count && _sinceSplash >= due - _options.CaptureEvery + 0.25f && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
             {
                 _quit = true;
             }
