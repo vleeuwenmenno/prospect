@@ -234,7 +234,7 @@ public sealed class TokenTests
         await using var host = await StartAsync(("TrustedProxies", "127.0.0.1"));
         var reply = await host.ListAsync(Body(), forwardedFor: "203.0.113.10");
 
-        using var response = await host.RemoveAsync(reply.Id, reply.Token);
+        using var response = await host.RemoveAsync(reply.Id, reply.Token, forwardedFor: "198.51.100.20");
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
     }
 }
@@ -519,32 +519,43 @@ public sealed class LimitTests
         // 100 addresses, three ports each: at most two per address may list, and only 50 in all.
         var posts = Enumerable.Range(0, 300).Select(async i =>
         {
-            using var response = await host.AnnounceAsync(Body(port: 1 + (i % 3)), forwardedFor: $"203.0.113.{i / 3}");
-            return response.StatusCode == HttpStatusCode.Created
+            var address = $"203.0.113.{i / 3}";
+            var port = 1 + (i % 3);
+            using var response = await host.AnnounceAsync(Body(port: port), forwardedFor: address);
+            var reply = response.StatusCode == HttpStatusCode.Created
                 ? await response.Content.ReadFromJsonAsync<AnnounceReply>(Cancel)
                 : null;
+            return (Reply: reply, Address: address, Port: port);
         });
-        var created = (await Task.WhenAll(posts)).Where(r => r is not null).Select(r => r!).ToList();
+        var created = (await Task.WhenAll(posts)).Where(r => r.Reply is not null).ToList();
 
         Assert.Equal(50, created.Count);
         Assert.Equal(50, host.Store.Count);
         Assert.True(host.Store.IsConsistent());
-        Assert.Equal(50, created.Select(r => r.Id).Distinct().Count());
+        Assert.Equal(50, created.Select(r => r.Reply!.Id).Distinct().Count());
 
-        // Remove half while the rest refresh, all at once.
-        var mixed = created.Select(async (reply, i) =>
+        // Remove half while the other half refresh under a new name, all at once.
+        var mixed = created.Select(async (entry, i) =>
         {
+            var reply = entry.Reply!;
             if (i % 2 == 0)
             {
-                using var removed = await host.RemoveAsync(reply.Id, reply.Token);
+                using var removed = await host.RemoveAsync(reply.Id, reply.Token, forwardedFor: entry.Address);
                 return removed.StatusCode == HttpStatusCode.NoContent;
             }
 
-            return true;
+            using var refreshed = await host.AnnounceAsync(
+                Body(name: "Refreshed", port: entry.Port, token: reply.Token), forwardedFor: entry.Address);
+            return refreshed.StatusCode == HttpStatusCode.OK
+                && (await refreshed.Content.ReadFromJsonAsync<AnnounceReply>(Cancel))!.Id == reply.Id;
         });
         Assert.All(await Task.WhenAll(mixed), Assert.True);
         Assert.Equal(25, host.Store.Count);
         Assert.True(host.Store.IsConsistent());
+
+        var (_, list) = await host.GetListAsync(forwardedFor: "198.51.100.1");
+        Assert.Equal(25, list.Servers.Count);
+        Assert.All(list.Servers, s => Assert.Equal("Refreshed", s.Name));
     }
 }
 
@@ -576,7 +587,7 @@ public sealed class ForwardedAddressTests
         await using var host = await StartAsync(("TrustedProxies", "127.0.0.0/8"));
         await host.ListAsync(Body(), forwardedFor: "203.0.113.50");
 
-        var (_, list) = await host.GetListAsync();
+        var (_, list) = await host.GetListAsync(forwardedFor: "198.51.100.1");
         Assert.Equal("203.0.113.50", Assert.Single(list.Servers).Address);
     }
 
@@ -587,21 +598,61 @@ public sealed class ForwardedAddressTests
         await using var host = await StartAsync(("TrustedProxies", "127.0.0.1"));
         await host.ListAsync(Body(), forwardedFor: "198.51.100.66, 203.0.113.50");
 
-        var (_, list) = await host.GetListAsync();
+        var (_, list) = await host.GetListAsync(forwardedFor: "198.51.100.1");
         Assert.Equal("203.0.113.50", Assert.Single(list.Servers).Address);
     }
 
+    // Each header leaves the trust walk on a trusted proxy: nothing to read, nothing readable, an unmatched quote a
+    // client sent in front of the proxy's own entry (which makes the whole value unreadable), or a chain made only of
+    // trusted proxies. Private addresses are allowed here, so only the proxy rule can refuse them.
     [Theory]
+    [InlineData(null)]
+    [InlineData("")]
     [InlineData("unknown")]
     [InlineData("not an address")]
-    [InlineData("")]
-    public async Task UnreadableHeaderFromATrustedProxyLeavesTheProxysAddress(string header)
+    [InlineData("\"198.51.100.66, 203.0.113.50")]
+    [InlineData("\"unterminated, 10.1.2.3")]
+    [InlineData("10.1.2.3")]
+    [InlineData("10.1.2.3, 10.1.9.9")]
+    [InlineData("garbage, 10.1.2.3")]
+    public async Task RequestThatResolvesToATrustedProxyIsRefused(string? header)
+    {
+        await using var host = await StartAsync(("TrustedProxies", "127.0.0.1, 10.1.0.0/16"));
+        var listed = await host.ListAsync(Body(port: 1), forwardedFor: "203.0.113.50");
+
+        using (var announce = await host.AnnounceAsync(Body(port: 2), forwardedFor: header))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, announce.StatusCode);
+            Assert.Contains("proxy", await announce.Content.ReadAsStringAsync(Cancel));
+        }
+
+        using (var refresh = await host.AnnounceAsync(Body(port: 1, token: listed.Token), forwardedFor: header))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, refresh.StatusCode);
+        }
+
+        using (var remove = await host.RemoveAsync(listed.Id, listed.Token, forwardedFor: header))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, remove.StatusCode);
+        }
+
+        using (var list = await host.RequestListAsync(forwardedFor: header))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, list.StatusCode);
+        }
+
+        // Nothing changed, and only the one real client holds rate-limit state.
+        var (_, servers) = await host.GetListAsync(forwardedFor: "203.0.113.50");
+        Assert.Equal("203.0.113.50", Assert.Single(servers.Servers).Address);
+        Assert.Equal(1, host.Limiter.TrackedCount);
+    }
+
+    [Fact]
+    public async Task HealthCheckIsAnsweredForTheProxyItself()
     {
         await using var host = await StartAsync(("TrustedProxies", "127.0.0.1"));
-        await host.ListAsync(Body(), forwardedFor: header);
-
-        var (_, list) = await host.GetListAsync();
-        Assert.Equal("127.0.0.1", Assert.Single(list.Servers).Address);
+        using var response = await host.Client.GetAsync("/healthz", Cancel);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]
@@ -610,7 +661,7 @@ public sealed class ForwardedAddressTests
         await using var host = await StartAsync(("TrustedProxies", "127.0.0.1, 10.1.0.0/16"));
         await host.ListAsync(Body(), forwardedFor: "203.0.113.50, 10.1.2.3");
 
-        var (_, list) = await host.GetListAsync();
+        var (_, list) = await host.GetListAsync(forwardedFor: "198.51.100.1");
         Assert.Equal("203.0.113.50", Assert.Single(list.Servers).Address);
     }
 
@@ -621,7 +672,7 @@ public sealed class ForwardedAddressTests
         await host.ListAsync(Body(port: 1), forwardedFor: "2001:DB8:0:0::7");
         await host.ListAsync(Body(port: 2), forwardedFor: "::ffff:203.0.113.9");
 
-        var (_, list) = await host.GetListAsync();
+        var (_, list) = await host.GetListAsync(forwardedFor: "198.51.100.1");
         Assert.Equal(["2001:db8::7", "203.0.113.9"], list.Servers.Select(s => s.Address).Order(StringComparer.Ordinal));
     }
 
@@ -631,7 +682,7 @@ public sealed class ForwardedAddressTests
         await using var host = await StartAsync(
             ("TrustedProxies", "127.0.0.1"), ("AllowPrivateAddresses", "false"), ("PostsPerMinute", "1"));
 
-        using (var publicClient = await host.AnnounceAsync(Body(), forwardedFor: "203.0.113.1"))
+        using (var publicClient = await host.AnnounceAsync(Body(), forwardedFor: Routable.V4))
         {
             Assert.Equal(HttpStatusCode.Created, publicClient.StatusCode);
         }
@@ -641,8 +692,25 @@ public sealed class ForwardedAddressTests
             Assert.Equal(HttpStatusCode.Forbidden, privateClient.StatusCode);
         }
 
-        using var again = await host.AnnounceAsync(Body(port: 2), forwardedFor: "203.0.113.1");
+        using (var documentation = await host.AnnounceAsync(Body(), forwardedFor: "203.0.113.1"))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, documentation.StatusCode);
+        }
+
+        using var again = await host.AnnounceAsync(Body(port: 2), forwardedFor: Routable.V4);
         Assert.Equal(HttpStatusCode.TooManyRequests, again.StatusCode);
+    }
+
+    [Fact]
+    public async Task RoutableIpv6IsListedAndNat64IsRefused()
+    {
+        await using var host = await StartAsync(("TrustedProxies", "127.0.0.1"), ("AllowPrivateAddresses", "false"));
+        await host.ListAsync(Body(), forwardedFor: Routable.V6);
+
+        using var nat64 = await host.AnnounceAsync(Body(), forwardedFor: "64:ff9b::808:808");
+        Assert.Equal(HttpStatusCode.Forbidden, nat64.StatusCode);
+        var (_, list) = await host.GetListAsync(forwardedFor: Routable.V4);
+        Assert.Equal(Routable.V6, Assert.Single(list.Servers).Address);
     }
 }
 
@@ -656,25 +724,141 @@ public sealed class AddressRuleTests
     public void NormalizeGivesOneForm(string input, string expected) =>
         Assert.Equal(expected, AddressRules.Normalize(IPAddress.Parse(input)).ToString());
 
+    // Every block of the IANA special-purpose registries the rule refuses: its first and last address are refused,
+    // and its neighbours on either side are allowed (unless a neighbour is itself in a refused block or off the end).
     [Theory]
-    [InlineData("10.1.2.3", false)]
-    [InlineData("172.16.0.1", false)]
-    [InlineData("172.32.0.1", true)]
-    [InlineData("192.168.1.1", false)]
-    [InlineData("100.64.0.1", false)]
-    [InlineData("127.0.0.1", false)]
-    [InlineData("169.254.1.1", false)]
+    // IPv4 special-purpose registry.
     [InlineData("0.0.0.0", false)]
-    [InlineData("224.0.0.1", false)]
-    [InlineData("8.8.8.8", true)]
+    [InlineData("0.255.255.255", false)]
+    [InlineData("1.0.0.0", true)]
+    [InlineData("9.255.255.255", true)]
+    [InlineData("10.0.0.0", false)]
+    [InlineData("10.255.255.255", false)]
+    [InlineData("11.0.0.0", true)]
+    [InlineData("100.63.255.255", true)]
+    [InlineData("100.64.0.0", false)]
+    [InlineData("100.127.255.255", false)]
+    [InlineData("100.128.0.0", true)]
+    [InlineData("126.255.255.255", true)]
+    [InlineData("127.0.0.0", false)]
+    [InlineData("127.255.255.255", false)]
+    [InlineData("128.0.0.0", true)]
+    [InlineData("169.253.255.255", true)]
+    [InlineData("169.254.0.0", false)]
+    [InlineData("169.254.255.255", false)]
+    [InlineData("169.255.0.0", true)]
+    [InlineData("172.15.255.255", true)]
+    [InlineData("172.16.0.0", false)]
+    [InlineData("172.31.255.255", false)]
+    [InlineData("172.32.0.0", true)]
+    [InlineData("191.255.255.255", true)]
+    [InlineData("192.0.0.0", false)]
+    [InlineData("192.0.0.9", false)]
+    [InlineData("192.0.0.255", false)]
+    [InlineData("192.0.1.0", true)]
+    [InlineData("192.0.1.255", true)]
+    [InlineData("192.0.2.0", false)]
+    [InlineData("192.0.2.255", false)]
+    [InlineData("192.0.3.0", true)]
+    [InlineData("192.31.195.255", true)]
+    [InlineData("192.31.196.0", false)]
+    [InlineData("192.31.196.255", false)]
+    [InlineData("192.31.197.0", true)]
+    [InlineData("192.52.192.255", true)]
+    [InlineData("192.52.193.0", false)]
+    [InlineData("192.52.193.255", false)]
+    [InlineData("192.52.194.0", true)]
+    [InlineData("192.88.98.255", true)]
+    [InlineData("192.88.99.0", false)]
+    [InlineData("192.88.99.255", false)]
+    [InlineData("192.88.100.0", true)]
+    [InlineData("192.167.255.255", true)]
+    [InlineData("192.168.0.0", false)]
+    [InlineData("192.168.255.255", false)]
+    [InlineData("192.169.0.0", true)]
+    [InlineData("192.175.47.255", true)]
+    [InlineData("192.175.48.0", false)]
+    [InlineData("192.175.48.255", false)]
+    [InlineData("192.175.49.0", true)]
+    [InlineData("198.17.255.255", true)]
+    [InlineData("198.18.0.0", false)]
+    [InlineData("198.19.255.255", false)]
+    [InlineData("198.20.0.0", true)]
+    [InlineData("198.51.99.255", true)]
+    [InlineData("198.51.100.0", false)]
+    [InlineData("198.51.100.255", false)]
+    [InlineData("198.51.101.0", true)]
+    [InlineData("203.0.112.255", true)]
+    [InlineData("203.0.113.0", false)]
+    [InlineData("203.0.113.255", false)]
+    [InlineData("203.0.114.0", true)]
+    [InlineData("223.255.255.255", true)]
+    [InlineData("224.0.0.0", false)]
+    [InlineData("239.255.255.255", false)]
+    [InlineData("240.0.0.0", false)]
+    [InlineData("255.255.255.255", false)]
+    // IPv4 seen through IPv6 is judged as IPv4.
     [InlineData("::ffff:10.0.0.1", false)]
+    [InlineData("::ffff:192.0.2.1", false)]
     [InlineData("::ffff:8.8.8.8", true)]
+    // IPv6: only global unicast, 2000::/3.
+    [InlineData("::", false)]
     [InlineData("::1", false)]
-    [InlineData("fe80::1", false)]
+    [InlineData("::8.8.8.8", false)]
+    [InlineData("1fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", false)]
+    [InlineData("2000::", true)]
+    [InlineData("3fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", true)]
+    [InlineData("4000::", false)]
+    [InlineData("fc00::1", false)]
     [InlineData("fd00::1", false)]
+    [InlineData("fe80::1", false)]
+    [InlineData("fec0::1", false)]
     [InlineData("ff02::1", false)]
+    // Discard, and the NAT64 translation prefixes, with a public and a private IPv4 address inside.
+    [InlineData("100::", false)]
+    [InlineData("100::ffff:ffff:ffff:ffff", false)]
+    [InlineData("64:ff9b::", false)]
+    [InlineData("64:ff9b::808:808", false)]
+    [InlineData("64:ff9b::a00:1", false)]
+    [InlineData("64:ff9b::ffff:ffff", false)]
+    [InlineData("64:ff9b:1::", false)]
+    [InlineData("64:ff9b:1:ffff:ffff:ffff:ffff:ffff", false)]
+    [InlineData("64:ff9b:1::808:808", false)]
+    // 2001::/23, IETF protocol assignments: Teredo (2001::/32), benchmarking (2001:2::/48), AMT, AS112, ORCHID.
+    [InlineData("2000:ffff:ffff:ffff:ffff:ffff:ffff:ffff", true)]
+    [InlineData("2001::", false)]
+    [InlineData("2001:0:4136:e378:8000:63bf:3fff:fdd2", false)]
+    [InlineData("2001:2::", false)]
+    [InlineData("2001:2:0:ffff:ffff:ffff:ffff:ffff", false)]
+    [InlineData("2001:1ff:ffff:ffff:ffff:ffff:ffff:ffff", false)]
+    [InlineData("2001:200::", true)]
+    // 2001:db8::/32 documentation.
+    [InlineData("2001:db7:ffff:ffff:ffff:ffff:ffff:ffff", true)]
+    [InlineData("2001:db8::", false)]
+    [InlineData("2001:db8:ffff:ffff:ffff:ffff:ffff:ffff", false)]
+    [InlineData("2001:db9::", true)]
+    // 2002::/16 6to4, refused even when the embedded IPv4 address is public.
+    [InlineData("2001:ffff:ffff:ffff:ffff:ffff:ffff:ffff", true)]
+    [InlineData("2002::", false)]
+    [InlineData("2002:808:808::1", false)]
+    [InlineData("2002:ffff:ffff:ffff:ffff:ffff:ffff:ffff", false)]
+    [InlineData("2003::", true)]
+    // 2620:4f:8000::/48 AS112 direct delegation.
+    [InlineData("2620:4f:7fff:ffff:ffff:ffff:ffff:ffff", true)]
+    [InlineData("2620:4f:8000::", false)]
+    [InlineData("2620:4f:8000:ffff:ffff:ffff:ffff:ffff", false)]
+    [InlineData("2620:4f:8001::", true)]
+    // 3fff::/20 documentation.
+    [InlineData("3ffe:ffff:ffff:ffff:ffff:ffff:ffff:ffff", true)]
+    [InlineData("3fff::", false)]
+    [InlineData("3fff:fff:ffff:ffff:ffff:ffff:ffff:ffff", false)]
+    [InlineData("3fff:1000::", true)]
+    // Ordinary routable addresses.
+    [InlineData("8.8.8.8", true)]
+    [InlineData(Routable.V4, true)]
+    [InlineData(Routable.V6, true)]
     [InlineData("2a00:1450::1", true)]
-    public void PublicAddressesAreRecognised(string input, bool expected) =>
+    public void OnlyAddressesAGameServerCanHaveOnTheInternetArePublic(string input, bool expected) =>
         Assert.Equal(expected, AddressRules.IsPublic(IPAddress.Parse(input)));
 
     [Fact]

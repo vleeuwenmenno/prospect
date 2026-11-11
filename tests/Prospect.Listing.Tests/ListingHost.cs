@@ -10,13 +10,19 @@ using Xunit;
 
 namespace Prospect.Listing.Tests;
 
-/// <summary>A clock the tests move by hand, so expiry is tested without waiting.</summary>
+/// <summary>A clock the tests move by hand, so expiry and rate-limit refills are tested without waiting.</summary>
 public sealed class ManualClock : TimeProvider
 {
     private long ticks = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
 
     /// <inheritdoc />
     public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref ticks), TimeSpan.Zero);
+
+    /// <inheritdoc />
+    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+    /// <inheritdoc />
+    public override long GetTimestamp() => Interlocked.Read(ref ticks);
 
     /// <summary>Moves the clock forward.</summary>
     public void Advance(TimeSpan by) => Interlocked.Add(ref ticks, by.Ticks);
@@ -43,6 +49,9 @@ public sealed class ListingHost : IAsyncDisposable
     /// <summary>The service's store, to check its invariants directly.</summary>
     public ListingStore Store => app.Services.GetRequiredService<ListingStore>();
 
+    /// <summary>The service's rate limiter, to check how much state it holds.</summary>
+    public RequestLimiter Limiter => app.Services.GetRequiredService<RequestLimiter>();
+
     /// <summary>The cancellation token of the running test.</summary>
     public static CancellationToken Cancel => TestContext.Current.CancellationToken;
 
@@ -57,6 +66,8 @@ public sealed class ListingHost : IAsyncDisposable
             ["Logging:LogLevel:Default"] = "Warning",
             ["Listing:AllowPrivateAddresses"] = "true",
             ["Listing:SweepIntervalMilliseconds"] = "60000",
+            // The service-wide limit is far above what any test sends, except in the tests of that limit.
+            ["Listing:GlobalRequestsPerSecond"] = "1000000",
         };
         foreach (var (key, value) in settings)
         {
@@ -103,12 +114,16 @@ public sealed class ListingHost : IAsyncDisposable
     public Task<HttpResponseMessage> AnnounceAsync(object body, string? forwardedFor = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/v1/servers") { Content = JsonContent.Create(body) };
+        Forward(request, forwardedFor);
+        return Client.SendAsync(request, Cancel);
+    }
+
+    private static void Forward(HttpRequestMessage request, string? forwardedFor)
+    {
         if (forwardedFor is not null)
         {
             request.Headers.TryAddWithoutValidation("X-Forwarded-For", forwardedFor);
         }
-
-        return Client.SendAsync(request, Cancel);
     }
 
     /// <summary>Posts a raw body with the given content type.</summary>
@@ -127,18 +142,27 @@ public sealed class ListingHost : IAsyncDisposable
         return (await response.Content.ReadFromJsonAsync<AnnounceReply>(Cancel))!;
     }
 
-    /// <summary>Removes an entry with a token.</summary>
-    public Task<HttpResponseMessage> RemoveAsync(string id, string token)
+    /// <summary>Removes an entry with a token, optionally as if forwarded by a proxy for <paramref name="forwardedFor"/>.</summary>
+    public Task<HttpResponseMessage> RemoveAsync(string id, string token, string? forwardedFor = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Delete, "/v1/servers/" + Uri.EscapeDataString(id));
         request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + token);
+        Forward(request, forwardedFor);
+        return Client.SendAsync(request, Cancel);
+    }
+
+    /// <summary>Asks for the list, optionally as if forwarded by a proxy for <paramref name="forwardedFor"/>.</summary>
+    public Task<HttpResponseMessage> RequestListAsync(uint protocol = 10, string? forwardedFor = null)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, $"/v1/servers?protocol={protocol}");
+        Forward(request, forwardedFor);
         return Client.SendAsync(request, Cancel);
     }
 
     /// <summary>The list for one protocol, as raw JSON and parsed.</summary>
-    public async Task<(string Json, ListReply Reply)> GetListAsync(uint protocol = 10)
+    public async Task<(string Json, ListReply Reply)> GetListAsync(uint protocol = 10, string? forwardedFor = null)
     {
-        using var response = await Client.GetAsync($"/v1/servers?protocol={protocol}", Cancel);
+        using var response = await RequestListAsync(protocol, forwardedFor);
         Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
         var json = await response.Content.ReadAsStringAsync(Cancel);
         return (json, System.Text.Json.JsonSerializer.Deserialize<ListReply>(json, Web)!);
@@ -153,6 +177,20 @@ public sealed class ListingHost : IAsyncDisposable
         await app.StopAsync(CancellationToken.None);
         await app.DisposeAsync();
     }
+}
+
+/// <summary>
+/// Addresses that count as public. The documentation ranges (203.0.113.0/24, 2001:db8::/32) are refused as not public,
+/// so tests of the public-address rule use addresses from real allocations. They are only text: no test sends
+/// anything to them.
+/// </summary>
+public static class Routable
+{
+    /// <summary>A routable IPv4 address.</summary>
+    public const string V4 = "8.8.4.4";
+
+    /// <summary>A routable IPv6 address, in normal form.</summary>
+    public const string V6 = "2a00:1450:4001::1";
 }
 
 /// <summary>The answer to an announcement.</summary>

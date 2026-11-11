@@ -11,7 +11,18 @@ internal static class Program
             return await HealthCheck();
         }
 
-        var app = ListingApp.Build(args);
+        WebApplication app;
+        try
+        {
+            app = ListingApp.Build(args);
+        }
+        catch (InvalidOperationException exception)
+        {
+            // A refused configuration is the deployer's to fix: one plain line and a failing exit code, not a crash.
+            await Console.Error.WriteLineAsync("prospect-listing: not starting. " + exception.Message);
+            return 2;
+        }
+
         await app.RunAsync();
         return 0;
     }

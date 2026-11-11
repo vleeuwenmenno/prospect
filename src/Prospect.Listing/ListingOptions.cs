@@ -29,7 +29,10 @@ public sealed class ListingOptions
     /// <summary>Largest request body accepted, in bytes. An announcement is well under 1 KB.</summary>
     public int MaxBodyBytes { get; set; } = 4096;
 
-    /// <summary>Largest total size of a request's headers and request line, in bytes.</summary>
+    /// <summary>
+    /// Largest request line, and separately largest total size of the request's headers, in bytes. Kestrel checks the
+    /// two apart, so a request may carry up to twice this in all.
+    /// </summary>
     public int MaxHeaderBytes { get; set; } = 8192;
 
     /// <summary>Open connections the server accepts at once.</summary>
@@ -45,6 +48,21 @@ public sealed class ListingOptions
     public int ListsPerMinute { get; set; } = 60;
 
     /// <summary>
+    /// Requests per second the whole service accepts, from all addresses together: a burst of this many, then this
+    /// many per second. A request refused by its own address's limit does not use any of it.
+    /// </summary>
+    public int GlobalRequestsPerSecond { get; set; } = 200;
+
+    /// <summary>
+    /// Addresses (or IPv6 prefixes) that get rate-limit state of their own. The memory is reserved at start and never
+    /// grows. Past it, a new address shares one of the <see cref="RateLimitOverflowBuckets"/> until a slot frees up.
+    /// </summary>
+    public int RateLimitAddresses { get; set; } = 16384;
+
+    /// <summary>Shared buckets for addresses that arrive while every slot of <see cref="RateLimitAddresses"/> is taken.</summary>
+    public int RateLimitOverflowBuckets { get; set; } = 64;
+
+    /// <summary>
     /// IPv6 addresses sharing this many leading bits count as one address for the limits. One home or server usually
     /// gets a whole /64, so limiting single IPv6 addresses would limit nothing.
     /// </summary>
@@ -52,7 +70,8 @@ public sealed class ListingOptions
 
     /// <summary>
     /// Proxies whose <c>X-Forwarded-For</c> header is believed: addresses or networks (<c>10.0.0.0/8</c>), separated by
-    /// commas. Empty trusts none, and every request's address is the one it connected from.
+    /// commas. Empty trusts none, and every request's address is the one it connected from. A request that still
+    /// resolves to one of these after the header is read is refused: a trusted proxy is never a client.
     /// </summary>
     public string TrustedProxies { get; set; } = "";
 
@@ -79,6 +98,9 @@ public sealed class ListingOptions
         Require(RequestHeadersTimeoutSeconds, 1, 600, nameof(RequestHeadersTimeoutSeconds));
         Require(PostsPerMinute, 1, 1_000_000, nameof(PostsPerMinute));
         Require(ListsPerMinute, 1, 1_000_000, nameof(ListsPerMinute));
+        Require(GlobalRequestsPerSecond, 1, 1_000_000, nameof(GlobalRequestsPerSecond));
+        Require(RateLimitAddresses, 1, 1_000_000, nameof(RateLimitAddresses));
+        Require(RateLimitOverflowBuckets, 1, 65_536, nameof(RateLimitOverflowBuckets));
         Require(Ipv6PrefixLength, 16, 128, nameof(Ipv6PrefixLength));
         TrustedNetworks = ParseNetworks(TrustedProxies);
     }

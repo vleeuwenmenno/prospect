@@ -1,9 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
-using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.HttpOverrides;
-using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Net.Http.Headers;
 
@@ -12,9 +10,6 @@ namespace Prospect.Listing;
 /// <summary>Builds the listing server: configuration, limits, the proxy rule and the version 1 endpoints.</summary>
 public static class ListingApp
 {
-    private const string PostPolicy = "post";
-    private const string ListPolicy = "list";
-
     private static readonly JsonSerializerOptions ResponseJson = new(JsonSerializerDefaults.Web);
 
     /// <summary>
@@ -29,6 +24,7 @@ public static class ListingApp
             ContentRootPath = AppContext.BaseDirectory,
         });
         configure?.Invoke(builder);
+        RefuseFrameworkAddressRewriting(builder.Configuration);
 
         var options = builder.Configuration.GetSection(ListingOptions.Section).Get<ListingOptions>() ?? new ListingOptions();
         options.Validate();
@@ -36,6 +32,7 @@ public static class ListingApp
         builder.Services.AddSingleton(options);
         builder.Services.TryAddSingleton(TimeProvider.System);
         builder.Services.AddSingleton<ListingStore>();
+        builder.Services.AddSingleton<RequestLimiter>();
         builder.Services.AddHostedService<ExpirySweeper>();
 
         builder.WebHost.ConfigureKestrel(kestrel =>
@@ -49,35 +46,21 @@ public static class ListingApp
             kestrel.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(options.RequestHeadersTimeoutSeconds);
         });
 
-        builder.Services.AddRateLimiter(limiter =>
-        {
-            limiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-            limiter.OnRejected = (context, cancel) =>
-            {
-                if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
-                {
-                    context.HttpContext.Response.Headers.RetryAfter =
-                        ((int)Math.Ceiling(retryAfter.TotalSeconds)).ToString(CultureInfo.InvariantCulture);
-                }
-
-                return new ValueTask(WriteError(context.HttpContext.Response, 429, "Too many requests from this address."));
-            };
-            limiter.AddPolicy(PostPolicy, context => PerAddress(context, options, options.PostsPerMinute));
-            limiter.AddPolicy(ListPolicy, context => PerAddress(context, options, options.ListsPerMinute));
-        });
-
         var app = builder.Build();
 
         // Proxy trust decides every address the service sees, so the log says at start which proxies it believes.
         var log = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Prospect.Listing");
         log.LogInformation(
             "Listing server: entries live {Ttl} s, at most {Max} ({PerAddress} per address); "
-            + "trusted proxies: {Proxies}; private addresses {Private}",
+            + "trusted proxies: {Proxies}; private addresses {Private}; "
+            + "{Global} requests/s in all, rate-limit state for {Slots} addresses",
             options.EntryTtlSeconds,
             options.MaxEntries,
             options.MaxEntriesPerAddress,
             options.TrustedNetworks.Count == 0 ? "none" : string.Join(", ", options.TrustedNetworks),
-            options.AllowPrivateAddresses ? "allowed" : "refused");
+            options.AllowPrivateAddresses ? "allowed" : "refused",
+            options.GlobalRequestsPerSecond,
+            options.RateLimitAddresses);
 
         // Whatever goes wrong, a caller sees one fixed sentence: never a stack trace, never what it sent.
         app.UseExceptionHandler(new ExceptionHandlerOptions
@@ -91,11 +74,14 @@ public static class ListingApp
             app.UseForwardedHeaders(ForwardedOptions(options));
         }
 
-        app.UseRateLimiter();
+        // Routing runs before the gate so the gate knows which allowance the request draws on.
+        app.UseRouting();
+        var limiter = app.Services.GetRequiredService<RequestLimiter>();
+        app.Use((context, next) => Gate(context, next, options, limiter));
 
-        app.MapPost("/v1/servers", Announce).RequireRateLimiting(PostPolicy);
-        app.MapDelete("/v1/servers/{id}", Remove).RequireRateLimiting(PostPolicy);
-        app.MapGet("/v1/servers", List).RequireRateLimiting(ListPolicy);
+        app.MapPost("/v1/servers", Announce).WithMetadata(new LimitedBy(RequestKind.Post));
+        app.MapDelete("/v1/servers/{id}", Remove).WithMetadata(new LimitedBy(RequestKind.Post));
+        app.MapGet("/v1/servers", List).WithMetadata(new LimitedBy(RequestKind.List));
         app.MapGet("/healthz", () => Results.Text("ok"));
         return app;
     }
@@ -103,6 +89,38 @@ public static class ListingApp
     /// <summary>The address the request comes from, after the trusted-proxy rule, in its one normal form.</summary>
     public static IPAddress ClientAddress(HttpContext context) =>
         AddressRules.Normalize(context.Connection.RemoteIpAddress ?? IPAddress.IPv6None);
+
+    /// <summary>
+    /// The configuration key that makes the framework install its own forwarded-headers middleware
+    /// (<c>ASPNETCORE_FORWARDEDHEADERS_ENABLED</c>, or <c>ForwardedHeaders_Enabled</c> from any configuration source).
+    /// </summary>
+    public const string FrameworkForwardedHeadersKey = "ForwardedHeaders_Enabled";
+
+    // ASP.NET Core has two switches that run code ahead of this service's own pipeline. ForwardedHeaders_Enabled adds a
+    // forwarded-headers middleware that believes X-Forwarded-For from any peer, so every address would already be
+    // rewritten before TrustedProxies is consulted. Hosting startup assemblies can add any middleware at all. Neither
+    // has a safe use here, so either one stops the service at start, naming the key. (The slim builder registers no
+    // IIS integration, the third framework path that reads forwarding headers.)
+    private static void RefuseFrameworkAddressRewriting(IConfiguration configuration)
+    {
+        var forwarded = configuration[FrameworkForwardedHeadersKey];
+        if (!string.IsNullOrEmpty(forwarded) && !forwarded.Equals("false", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"{FrameworkForwardedHeadersKey} (ASPNETCORE_FORWARDEDHEADERS_ENABLED) is '{forwarded}'. It makes the "
+                + "framework believe X-Forwarded-For from anyone and bypasses Listing:TrustedProxies. Unset it; set "
+                + "Listing__TrustedProxies to the proxy's address instead.");
+        }
+
+        var startups = configuration[WebHostDefaults.HostingStartupAssembliesKey];
+        if (!string.IsNullOrWhiteSpace(startups))
+        {
+            throw new InvalidOperationException(
+                $"{WebHostDefaults.HostingStartupAssembliesKey} (ASPNETCORE_HOSTINGSTARTUPASSEMBLIES) is set. Hosting "
+                + "startup assemblies can run middleware ahead of the listing server's own, including middleware that "
+                + "rewrites client addresses. Unset it.");
+        }
+    }
 
     // The built-in middleware does the trust walk: starting from the connection, each hop is replaced by the address
     // left of it in X-Forwarded-For only while the current hop is a trusted proxy, so entries a client wrote into the
@@ -125,18 +143,53 @@ public static class ListingApp
         return forwarded;
     }
 
-    private static RateLimitPartition<string> PerAddress(HttpContext context, ListingOptions options, int perMinute) =>
-        // A bucket of a minute's allowance, refilled a sixth at a time: a burst up to the limit, then the limit per
-        // minute on average. The token bucket also tells the caller when to retry.
-        RateLimitPartition.GetTokenBucketLimiter(
-            AddressRules.GroupKey(ClientAddress(context), options.Ipv6PrefixLength),
-            _ => new TokenBucketRateLimiterOptions
+    // Runs ahead of every rate-limited endpoint, before any per-address state is touched.
+    //
+    // A request that still resolves to a trusted proxy after the trust walk is refused: the proxy sent no forwarding
+    // header, or one the middleware could not read (an unmatched quote a client put in front of the proxy's own entry
+    // makes the whole value unreadable), or a chain made only of trusted proxies. Accepting it would list a server at
+    // the proxy's address, and rate-limit it in the proxy's shared bucket instead of its own, so a client could step
+    // out of its own limit by sending a malformed header. A trusted proxy is never a client.
+    private static Task Gate(HttpContext context, RequestDelegate next, ListingOptions options, RequestLimiter limiter)
+    {
+        var limitedBy = context.GetEndpoint()?.Metadata.GetMetadata<LimitedBy>();
+        if (limitedBy is null)
+        {
+            return next(context);
+        }
+
+        var address = ClientAddress(context);
+        if (IsTrustedProxy(address, context.Connection.RemoteIpAddress, options))
+        {
+            return WriteError(context.Response, 400, "The proxy did not say which address this request came from.");
+        }
+
+        var decision = limiter.TryAcquire(AddressRules.GroupKey(address, options.Ipv6PrefixLength), limitedBy.Kind);
+        if (decision.Allowed)
+        {
+            return next(context);
+        }
+
+        context.Response.Headers.RetryAfter =
+            Math.Max(1, (int)Math.Ceiling(decision.RetryAfter.TotalSeconds)).ToString(CultureInfo.InvariantCulture);
+        return WriteError(
+            context.Response,
+            429,
+            decision.Global ? "The service is busy. Try again shortly." : "Too many requests from this address.");
+    }
+
+    private static bool IsTrustedProxy(IPAddress normalized, IPAddress? raw, ListingOptions options)
+    {
+        foreach (var network in options.TrustedNetworks)
+        {
+            if (network.Contains(normalized) || (raw is not null && network.Contains(raw)))
             {
-                TokenLimit = perMinute,
-                TokensPerPeriod = Math.Max(1, (perMinute + 5) / 6),
-                ReplenishmentPeriod = TimeSpan.FromSeconds(10),
-                QueueLimit = 0,
-            });
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static async Task<IResult> Announce(
         HttpContext context, ListingStore store, ListingOptions options, ILoggerFactory logs)
@@ -268,4 +321,7 @@ public static class ListingApp
     private sealed record ListResponse(List<ListedServer> Servers);
 
     private sealed record ErrorResponse(string Error);
+
+    // Endpoint metadata: which per-address allowance the endpoint draws on.
+    private sealed record LimitedBy(RequestKind Kind);
 }

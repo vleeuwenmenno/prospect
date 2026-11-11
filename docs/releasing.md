@@ -65,10 +65,13 @@ docker run -d -p 27420:27420/udp -v ./settings.json:/config/settings.json:ro \
 ## Run the listing server
 
 ```sh
-docker run -d -p 8080:8080 -e Listing__TrustedProxies=172.16.0.0/12 ghcr.io/<owner>/prospect-listing:latest
+docker run -d -p 127.0.0.1:8080:8080 -e Listing__TrustedProxies=172.16.0.0/12 ghcr.io/<owner>/prospect-listing:latest
 ```
 
-- HTTP on port `8080`. Health check: `GET /healthz`.
+- HTTP on port `8080`, published on `127.0.0.1` only: the proxy on the same host is the one thing that may reach it.
+  Published on every interface, a direct client would arrive from the Docker bridge, a trusted address, and could
+  write its own `X-Forwarded-For`.
+- Health check: `GET /healthz`.
 - Settings are environment variables `Listing__<Key>`.
 - Behind a reverse proxy, set `Listing__TrustedProxies`. Keys and proxy notes: [listing-server.md](listing-server.md).
 
