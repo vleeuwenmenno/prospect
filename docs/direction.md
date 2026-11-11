@@ -31,6 +31,16 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
   rift). No range limit yet; limits come later from modules, power and mass.
 - **Resources.** Asteroids carry ore: iron, copper, nickel, titanium, silver, gold. More kinds later.
 
+## Decided: building
+
+- **Big builds.** A ship has thousands of blocks; a station can reach about 150,000.
+- **Big builds stay smooth.** 20 ships and 10 stations of that size on screen at once must not hurt the frame
+  rate or the tick.
+- **Building is free for now.** Later it costs materials.
+- **Build anywhere out of combat:** only when the ship has taken no damage for 30 seconds.
+- **A ship generator comes later.** Pick a style, move sliders, shuffle a seed, preview, build. For players who
+  do not want to place blocks.
+
 ## Decided: networking
 
 - **1 to 128 players in one world on one server.**
@@ -58,11 +68,17 @@ Limits that go first: ship designs capped at 64 blocks, full-state snapshots, hu
 
 ## Planned, in order
 
-1. The entity store and the entity kinds: ships, stations, fighters, asteroids, gas fields.
-2. Interest management and delta snapshots.
-3. Mining and the loop it feeds: mine, haul, refine, sell, build. Shipyards.
-4. Factions: strategic model first, then their ships and stations in occupied sectors.
-5. Ship building in game.
+Next:
+
+1. Blocks at scale: no 64-block cap, a design is sent once per ship, damage is sent as changes.
+2. The entity store and the entity kinds: ships, stations, fighters, asteroids, gas fields.
+3. Interest management and delta snapshots.
+
+After that:
+
+1. The ship editor (B), then the ship generator.
+2. Mining and the loop it feeds: mine, haul, refine, sell, build. Shipyards.
+3. Factions: strategic model first, then their ships and stations in occupied sectors.
 
 ## Open
 
@@ -70,3 +86,8 @@ Limits that go first: ship designs capped at 64 blocks, full-state snapshots, hu
 - What rank and rights exist inside a player faction: who may fly, order, build or scrap what.
 - What PvP rules a server can set: everywhere, by sector, or by consent.
 - Saving: how often, and what a crash may lose.
+
+## Open: building
+
+- Block model: one block per grid cell, or boxes of any whole size snapped to the grid.
+- Whether building later moves to shipyards only.

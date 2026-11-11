@@ -38,10 +38,11 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   flight code and reconciles against snapshots; other players' hulls are interpolated.
 - **Faster-than-light.** A drive is a block. There are three kinds, each with its own look: hyperspace (the stars
   stretch into lines), wormhole (a sphere that bends the stars around it) and rift (an orange window torn into
-  space). A jump is a standing order: the drive
-  spools for two seconds while the hull brakes, the hull is gone for one, and it comes out at its destination, any
-  distance away. Taking the controls during the spool cancels it. The client generates the destination while the
-  drive spools.
+  space). A jump is a standing order: the hull brakes and turns its nose to the destination, the drive charges
+  from the hull's power (a bigger ship needs more energy, a weak or drained battery charges slower), the hull is
+  in transit for three seconds, and it comes out at its destination, any distance away. Taking the controls
+  before the drive fires cancels the jump and loses the charge. The client generates the destination while the
+  drive charges.
 - **Resources.** Asteroids carry iron, copper, nickel, titanium, silver or gold, or are bare rock; a sector has a
   main ore, and the rarer ones grow more common toward the core. Nothing can be mined yet.
 - **Fleet.** Each player starts with the command pod and two mining vessels. Hulls nobody is flying are flown by
