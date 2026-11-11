@@ -103,6 +103,8 @@ The client opens a real window on the developer's desktop, and they are usually 
   spatial index before there are thousands of hulls.
 - The client predicts contact only with hulls near its own, and flies only its own fleet's hulls forward exactly;
   another player's hull is assumed to keep its velocity until the next snapshot.
+- The client replays one step of the fleet per input. When the server simulates several of a player's inputs in
+  one tick, contact between their hull and a fleet hull is mispredicted until the next snapshot.
 - A player's hulls are removed when they disconnect.
 
 ## Who does the work

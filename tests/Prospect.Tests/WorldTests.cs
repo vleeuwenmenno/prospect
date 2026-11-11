@@ -411,6 +411,7 @@ public sealed class HullCollisionTests : IDisposable
     /// <summary>Steps every hull once, in slot order, and removes the ones that were destroyed.</summary>
     private void Tick(FlightInput input = default)
     {
+        _field.BeginRound();
         for (var i = 0; i < _hulls.Slots; i++)
         {
             if (!_hulls.IsAliveAt(i))
@@ -713,14 +714,50 @@ public sealed class HullCollisionTests : IDisposable
         _hulls.Flight(pod).CollisionDamagePerTonneSpeedSquared = 0;
         _hulls.Flight(drone).CollisionDamagePerTonneSpeedSquared = 0;
 
+        var closest = float.MaxValue;
         for (var i = 0; i < 60; i++)
         {
             Tick();
-            Assert.True(_hulls.State(drone).Position.X > 0.5, $"the drone got through to x = {_hulls.State(drone).Position.X}");
+            closest = Math.Min(closest, Gap(drone, pod));
         }
 
-        Assert.True(_hulls.State(drone).Velocity.X > 0, "the drone should have bounced back");
+        // It never got inside the pod, let alone through it: it was turned aside, and the pod thrown back.
+        Assert.True(closest > 0.74f, $"the hulls were {closest} m apart at the closest");
+        Assert.True(_hulls.State(drone).Velocity.X > -200f, $"the drone kept {_hulls.State(drone).Velocity}");
         Assert.True(_hulls.State(pod).Velocity.X < -10f);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void HullsCoastingNoseToTailCloserThanATicksFlightDoNotDisturbEachOther(bool trailingStepsFirst)
+    {
+        // Two vessels one behind the other at the same speed, with less room between them than they cover in
+        // a tick. Whichever steps first has moved a tick on while the other has not, and they never meet.
+        var design = Content.Designs[Vessel];
+        var velocity = new Vector3(0, 0, -design.Flight.MaxSpeed);
+        var room = design.Flight.MaxSpeed * HullSim.Dt * 0.25f;
+        var length = design.BlockOffsets.Max(o => o.Z) - design.BlockOffsets.Min(o => o.Z);
+        var behind = new Double3(0, 0, length + design.BlockSize + room);
+        var trailing = trailingStepsFirst ? Add(Vessel, behind, velocity) : -1;
+        var leading = Add(Vessel, Double3.Zero, velocity);
+        if (!trailingStepsFirst)
+            trailing = Add(Vessel, behind, velocity);
+        Assert.InRange(Gap(leading, trailing) - design.BlockSize, room * 0.5f, room * 1.5f);
+
+        for (var i = 0; i < 300; i++)
+        {
+            Tick();
+            var spacing = _hulls.State(trailing).Position.RelativeTo(_hulls.State(leading).Position);
+            Assert.True((spacing - behind.RelativeTo(Double3.Zero)).Length() < 1e-3f, $"the hulls are {spacing} apart on tick {i}");
+            Assert.True((_hulls.State(leading).Velocity - velocity).Length() < 1e-3f, $"the leading hull flies at {_hulls.State(leading).Velocity} on tick {i}");
+            Assert.True((_hulls.State(trailing).Velocity - velocity).Length() < 1e-3f, $"the trailing hull flies at {_hulls.State(trailing).Velocity} on tick {i}");
+        }
+
+        Assert.Equal(Vector3.Zero, _hulls.State(leading).AngularVelocity + _hulls.State(trailing).AngularVelocity);
+        Assert.Equal(design.Flight.ShieldCapacity, _hulls.State(leading).Shield);
+        Assert.Equal(design.Flight.ShieldCapacity, _hulls.State(trailing).Shield);
+        Assert.Equal(0, DamagedBlocks(leading) + DamagedBlocks(trailing));
     }
 
     [Fact]
@@ -838,8 +875,10 @@ public sealed class HullCollisionTests : IDisposable
         var (pod, vessel) = Start(50);
         for (var i = 0; i < 30; i++)
         {
+            _field.BeginRound();
             _field.Step(pod, thrust);
             _field.Step(vessel, hold);
+            predicted.BeginRound();
             predicted.Step(pod, thrust);
             predicted.Step(vessel, hold);
             foreach (var hull in new[] { pod, vessel })

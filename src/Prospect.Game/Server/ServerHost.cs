@@ -151,6 +151,8 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         foreach (var transport in _transports)
             transport.Poll(this);
 
+        // From here every hull steps for this tick: the piloted ones first, by the inputs that arrived, then the rest.
+        _field.BeginRound();
         foreach (var connection in _connections)
         {
             if (connection.State == ConnectionState.AwaitingHello && tick - connection.ConnectedTick > HandshakeTimeoutTicks)

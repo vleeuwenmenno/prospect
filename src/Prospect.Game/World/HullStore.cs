@@ -38,6 +38,12 @@ public struct HullInfo
     /// about is not where anyone would expect it, so the server tells of it at once.
     /// </summary>
     public long ContactTick;
+
+    /// <summary>The round of the <see cref="HullField"/> in which the hull last stepped; zero if it never has.</summary>
+    public long Round;
+
+    /// <summary>How far the hull has come in that round, after whatever it ran into.</summary>
+    public System.Numerics.Vector3 Flown;
 }
 
 /// <summary>

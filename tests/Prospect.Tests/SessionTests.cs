@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Numerics;
 using Microsoft.Extensions.Logging;
 using Prospect.Engine.Diagnostics;
 using Prospect.Engine.Net;
@@ -52,6 +53,124 @@ public sealed class ProtocolTests
     public void NamesAreSanitized(string raw, string expected)
     {
         Assert.Equal(expected, PlayerNames.Sanitize(raw));
+    }
+}
+
+/// <summary>The client's predicted world, fed the snapshots a server would send it.</summary>
+public sealed class ClientPredictionTests : IDisposable
+{
+    private static readonly GameContent Content = GameContent.Load();
+    private const uint Player = 1;
+    private const uint OwnHull = 1 << 16;
+
+    private readonly ClientWorld _world = new(Content);
+    private readonly LoopbackLink _link = new();
+    private readonly PlayerInputBridge _input = new();
+    private readonly HullView[] _views = new HullView[ClientWorld.MaxViews];
+    private readonly byte[] _buffer = new byte[1024];
+    private long _serverTick = 100;
+
+    public ClientPredictionTests()
+    {
+        _world.SetPlayer(Player);
+        _world.SetOwnHull(OwnHull);
+    }
+
+    public void Dispose()
+    {
+        _world.Dispose();
+        _link.Dispose();
+    }
+
+    private static HullRecord Hull(uint id, uint owner, int design, Double3 position, Vector3 velocity = default)
+    {
+        var state = HullState.Spawn(position, Content.Designs[design].Flight);
+        state.Velocity = velocity;
+        return new HullRecord
+        {
+            Id = id,
+            Owner = owner,
+            Design = (byte)design,
+            Blocks = Content.Designs[design].FullMask,
+            State = state,
+        };
+    }
+
+    /// <summary>Delivers a snapshot the server took at a tick. The first hull is the player's.</summary>
+    private void Snapshot(long tick, uint acked, params HullRecord[] hulls)
+    {
+        var writer = new NetWriter(_buffer);
+        new SnapshotHeader
+        {
+            ServerTick = tick,
+            AckedInput = acked,
+            OwnHull = hulls[0].Id,
+            HullCount = (byte)hulls.Length,
+        }.Write(ref writer);
+        foreach (var hull in hulls)
+            hull.Write(ref writer);
+
+        var reader = new NetReader(writer.Written[1..]);
+        _world.OnSnapshot(ref reader, _serverTick);
+    }
+
+    /// <summary>Runs one client tick with nobody at the controls, which sends one input.</summary>
+    private void Tick() => _world.Tick(_input, _link.Client, ++_serverTick);
+
+    /// <summary>The player's hull as the client now predicts it.</summary>
+    private HullView Own()
+    {
+        _world.BuildViews(_views, _serverTick, _serverTick, out var own);
+        return _views[own];
+    }
+
+    [Fact]
+    public void AnotherPlayersHullCrossingThePlayersBetweenTwoTicksStrikesItInThePrediction()
+    {
+        // A drone belonging to someone else, coming down on the pod at 400 m/s: more than six metres a tick,
+        // so it is above the pod at one tick and below it at the next, and at neither is it touching.
+        var pod = Content.Pod.Flight;
+        var drone = Hull(OwnHull + 1, Player + 1, Content.DroneDesign, new Double3(0, 3.3, 0), new Vector3(0, -400, 0));
+        Snapshot(_serverTick, 0, Hull(OwnHull, Player, Content.PodDesign, Double3.Zero), drone);
+        Assert.Equal(pod.ShieldCapacity, Own().Shield);
+
+        Tick();
+
+        // The server has yet to say a word about it, and the pod has already been knocked down and hurt.
+        Assert.True(Own().Velocity.Y < -1f, $"the pod moves at {Own().Velocity}");
+        Assert.True(Own().Shield < pod.ShieldCapacity, "the pod's shield should have taken the blow");
+    }
+
+    [Fact]
+    public void ANewerSnapshotCorrectsThePredictionWithoutANewAcknowledgementAndALateOneDoesNot()
+    {
+        var pod = Content.Pod.Flight;
+        var rest = Hull(OwnHull, Player, Content.PodDesign, Double3.Zero);
+        Snapshot(_serverTick, 0, rest);
+        for (var i = 0; i < 3; i++)
+            Tick();
+        Snapshot(_serverTick, 3, rest);
+        Assert.Equal(Vector3.Zero, Own().Velocity);
+
+        // Something ran into the pod on the server. No input of the player's had a part in it, so the
+        // acknowledgement stands where it was; the tick is what makes this the newer truth.
+        var struck = rest;
+        struck.State.Velocity = new Vector3(12, 0, 0);
+        struck.State.Shield = pod.ShieldCapacity * 0.5f;
+        Snapshot(_serverTick + 1, 3, struck);
+        Assert.Equal(struck.State.Velocity, Own().Velocity);
+        Assert.Equal(struck.State.Shield, Own().Shield);
+
+        // The snapshot from before the blow turns up late. It is older, whatever it acknowledges.
+        Snapshot(_serverTick, 3, rest);
+        Assert.Equal(struck.State.Velocity, Own().Velocity);
+        Assert.Equal(struck.State.Shield, Own().Shield);
+
+        // So does the very same one again.
+        var twice = struck;
+        twice.State.Velocity = new Vector3(-30, 0, 0);
+        Snapshot(_serverTick + 1, 3, twice);
+        Assert.Equal(struck.State.Velocity, Own().Velocity);
     }
 }
 

@@ -11,6 +11,13 @@ internal struct HullImpulse
     /// <summary>The struck hull's slot in the store.</summary>
     public int Hull;
 
+    /// <summary>
+    /// How far to move it, to where it was when it was struck. A hull that has flown its tick goes back along
+    /// its path. One that has not flown yet goes on by what the flight up to the impact, at the velocity it had
+    /// then, adds to the tick it will fly at its new one.
+    /// </summary>
+    public Vector3 Shift;
+
     /// <summary>The change to its velocity, and to its angular velocity about its own axes.</summary>
     public Vector3 Velocity;
     public Vector3 AngularVelocity;
@@ -37,6 +44,7 @@ public sealed class HullField(HullStore hulls, HullDesign[] designs, bool author
     private int _impulseCount;
     private int _lostCount;
     private bool _collecting;
+    private long _round;
 
     public HullStore Hulls => hulls;
 
@@ -48,6 +56,24 @@ public sealed class HullField(HullStore hulls, HullDesign[] designs, bool author
 
     /// <summary>True when a stepping hull must stop striking others because their share can no longer be recorded.</summary>
     internal bool IsFull => _collecting && _impulseCount == _impulses.Length;
+
+    /// <summary>
+    /// True while a hull takes its first step of the round. The hulls around it fly during that same tick, so it
+    /// is their path relative to each other that is searched for a contact. In a further step of the same round
+    /// the others have had their tick, and stand still.
+    /// </summary>
+    internal bool IsFirstStep { get; private set; }
+
+    /// <summary>
+    /// Starts a round: one tick of the simulation, in which every hull is expected to step once. Hulls step one
+    /// after another, so halfway through a round some have flown this tick and some have not; the round is how a
+    /// stepping hull tells them apart, and meets each of them where the end of the tick will find it. A field
+    /// whose rounds are never started steps each hull against the others exactly where they stand.
+    /// </summary>
+    public void BeginRound() => _round++;
+
+    /// <summary>True if the hull in a slot has stepped in this round, so its position is already the tick's end.</summary>
+    internal bool HasStepped(int index) => hulls.Info(index).Round == _round;
 
     /// <summary>
     /// The slots of the hulls the last <see cref="Step"/> destroyed by running the stepped hull into them. They are
@@ -77,9 +103,17 @@ public sealed class HullField(HullStore hulls, HullDesign[] designs, bool author
         Self = index;
 
         ref var info = ref hulls.Info(index);
+        ref var own = ref hulls.State(index);
+        var from = own.Position;
+        IsFirstStep = info.Round != _round;
         var body = Body(index);
-        var destroyed = HullSim.Step(ref hulls.State(index), ref info.Order, input, hulls.Flight(index), ref body, rocks, tick, impulses, this);
+        var destroyed = HullSim.Step(ref own, ref info.Order, input, hulls.Flight(index), ref body, rocks, tick, impulses, this);
         Refit(index, body.Alive);
+
+        // What the hulls that step after this one need to know of it: that it has flown, and how far.
+        var flown = own.Position.RelativeTo(from);
+        info.Flown = IsFirstStep ? flown : info.Flown + flown;
+        info.Round = _round;
 
         _collecting = false;
         Self = -1;
@@ -91,7 +125,10 @@ public sealed class HullField(HullStore hulls, HullDesign[] designs, bool author
         {
             ref var impulse = ref _impulses[i];
             ref var state = ref hulls.State(impulse.Hull);
-            hulls.Info(impulse.Hull).ContactTick = (long)tick;
+            ref var struckInfo = ref hulls.Info(impulse.Hull);
+            struckInfo.ContactTick = (long)tick;
+            struckInfo.Flown += impulse.Shift;
+            state.Position += impulse.Shift;
             state.Velocity += impulse.Velocity;
             state.AngularVelocity += impulse.AngularVelocity;
             if (impulse.Damage <= 0)

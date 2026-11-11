@@ -352,7 +352,6 @@ public static class HullSim
         var store = field.Hulls;
         var design = body.Design;
         var half = design.BlockSize * 0.5f;
-        var travelLength = travel.Length();
         Span<Vector3> arms = stackalloc Vector3[HullDesign.MaxBlocks];
 
         for (var j = 0; j < store.Slots; j++)
@@ -370,11 +369,26 @@ public static class HullSim
             if (other.Jump == JumpPhase.Tunnel)
                 continue;
 
+            // Hulls step one after another, and two of them must be compared at the same moment whichever goes
+            // first. This hull is at the end of its tick. One that has stepped this round is at the end of its
+            // own, and how far it came is on record. One that has not is met where its tick will end, as near
+            // as its velocity tells.
+            var stepped = field.HasStepped(j);
+            var otherTravel = stepped ? store.Info(j).Flown : other.Velocity * Dt;
+            var apart = state.Position.RelativeTo(other.Position);
+            if (!stepped)
+                apart -= otherTravel;
+
+            // Both flew during the tick, so the path to search is the one between them: two hulls that keep
+            // station have none, however fast they go. In a further step of the same round the other has
+            // had its tick and stands where it ended.
+            var path = field.IsFirstStep ? travel - otherTravel : travel;
+            var pathLength = path.Length();
+
             // Broad phase: the two spheres, with room for the distance flown this tick. Written so that a
             // position that is not a number fails it.
             ref var otherFlight = ref store.Flight(j);
-            var apart = state.Position.RelativeTo(other.Position);
-            var bound = flight.Radius + otherFlight.Radius + travelLength;
+            var bound = flight.Radius + otherFlight.Radius + pathLength;
             if (!(apart.LengthSquared() < bound * bound))
                 continue;
 
@@ -392,14 +406,15 @@ public static class HullSim
                 arms[b] = Vector3.Transform(Vector3.Transform(design.BlockOffsets[b], state.Orientation), toOtherFrame);
             }
 
-            // A fast hull covers more than a block in a tick. Walk the path it flew in strides too short to
-            // step over a block, and stop at the first place it strikes.
+            // A fast hull covers more than a block in a tick. Walk the path in strides too short to step over
+            // a block, and stop at the first place it strikes.
             var stride = (half + otherHalf) * 0.5f;
-            var strides = travelLength > stride ? Math.Min(MaxStrides, (int)MathF.Ceiling(travelLength / stride)) : 1;
+            var strides = pathLength > stride ? Math.Min(MaxStrides, (int)MathF.Ceiling(pathLength / stride)) : 1;
             var pushed = Vector3.Zero;
             for (var k = 1; k <= strides; k++)
             {
-                var back = travel * (1f - (float)k / strides);
+                var remaining = 1f - (float)k / strides;
+                var back = path * remaining;
                 var centre = apart - back + pushed;
                 var centreInFrame = Vector3.Transform(centre, toOtherFrame);
                 if (!Touch(arms, mine, centreInFrame, half, otherDesign, theirs, otherHalf, otherFlight.Radius, out var touch))
@@ -436,9 +451,9 @@ public static class HullSim
                     continue;
 
                 // It struck here: the rest of this tick's flight is lost.
-                pushed -= back;
-                travel -= back;
-                travelLength = travel.Length();
+                var lost = travel * remaining;
+                pushed -= lost;
+                travel -= lost;
 
                 // The mass that had to be stopped is the pair's reduced mass: all of a light hull that hits a
                 // far heavier one, half of each when they match. Both take the same damage from it, so a drone
@@ -446,10 +461,21 @@ public static class HullSim
                 // none: nobody could have avoided where it came out.
                 var harmless = state.Jump == JumpPhase.Arrive || other.Jump == JumpPhase.Arrive;
                 var involved = flight.Mass * otherFlight.Mass / (flight.Mass + otherFlight.Mass);
+
+                // The other hull is put where it was when they met. One that has flown its tick loses the
+                // rest of it too, unless this is a further step and it stood still throughout. One that has
+                // yet to fly will fly all of its tick at the velocity the impact leaves it with: up to the
+                // impact it had the one it came with, and that difference is made up now, so it leaves from
+                // where it was struck and not from a tick's flight short of there.
+                var shift =
+                    !stepped ? normal * (impulse / otherFlight.Mass * Dt * (field.IsFirstStep ? 1f - remaining : 1f))
+                    : field.IsFirstStep ? -otherTravel * remaining
+                    : Vector3.Zero;
                 field.Add(
                     new HullImpulse
                     {
                         Hull = j,
+                        Shift = shift,
                         Velocity = -normal * (impulse / otherFlight.Mass),
                         AngularVelocity = -otherLever * impulse / otherFlight.Inertia,
                         Touching = touch.Theirs,

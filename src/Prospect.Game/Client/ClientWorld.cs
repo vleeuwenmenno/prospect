@@ -82,6 +82,15 @@ internal sealed class ClientWorld : IDisposable
     /// <summary>How hard the hull turns toward where the player looks: turn rate in rad/s per radian of error.</summary>
     private const float AlignGain = 6f;
 
+    /// <summary>What the server flies a hull with when nobody does: it brakes, and follows its order if it has one.</summary>
+    private static readonly FlightInput Hold = new() { Dampeners = true };
+
+    /// <summary>
+    /// What another player's hull is taken to be doing. Nothing is known of its pilot's hands, so it is given
+    /// none: no thrust, no braking and no order, which leaves it the velocity it was last seen with.
+    /// </summary>
+    private static readonly FlightInput Coast = new();
+
     private struct Pending
     {
         public InputRecord Record;
@@ -137,6 +146,7 @@ internal sealed class ClientWorld : IDisposable
     private Vector3 _correction;
     private uint _nextSequence = 1;
     private uint _ackedSequence;
+    private long _snapshotTick = long.MinValue;
     private HullOrder _order;
     private HullOrder _orderDefinition;
     private ushort _orderId;
@@ -288,6 +298,12 @@ internal sealed class ClientWorld : IDisposable
         // The player's hull goes last, so its inputs are replayed against the other hulls as this snapshot has them.
         if (!hasOwn)
             return;
+
+        // Snapshots can arrive out of order, and it is the server's tick that says which is newer. The
+        // acknowledged input cannot: a hull that is struck changes without the server simulating any input.
+        if (header.ServerTick <= _snapshotTick)
+            return;
+        _snapshotTick = header.ServerTick;
 
         if (own.Id != _ownHullId || !_hasOwnState)
             SwitchHull(own);
@@ -443,15 +459,14 @@ internal sealed class ClientWorld : IDisposable
             return;
         }
 
-        // Snapshots can arrive out of order; only a newer acknowledgement carries newer truth.
-        if (acked <= _ackedSequence && acked != 0)
-            return;
-        _ackedSequence = acked;
+        // The acknowledgement only says which inputs are in this state already. It never goes back: after a
+        // change of hull it stands ahead of the server's, at the last input that was meant for the old hull.
+        _ackedSequence = Math.Max(acked, _ackedSequence);
 
         // Start from what the server computed, for the player's hull and for the hulls near it, and re-apply
         // every input it has not simulated yet.
         BuildNear(authoritative, snapshotTick);
-        var first = Math.Max(acked + 1, _nextSequence > PendingCapacity ? _nextSequence - PendingCapacity + 1 : 1);
+        var first = Math.Max(_ackedSequence + 1, _nextSequence > PendingCapacity ? _nextSequence - PendingCapacity + 1 : 1);
         for (var sequence = first; sequence < _nextSequence; sequence++)
         {
             ref var slot = ref _pending[sequence % PendingCapacity];
@@ -547,7 +562,6 @@ internal sealed class ClientWorld : IDisposable
             order[at] = r;
         }
 
-        var hold = new FlightInput { Dampeners = true };
         for (var i = 0; i < count; i++)
         {
             ref var remote = ref _remotes[order[i]];
@@ -555,43 +569,39 @@ internal sealed class ClientWorld : IDisposable
             var index = _near.Create(remote.Owner, remote.Design, _content.Designs[remote.Design], sample.State.Position).Index;
             ref var info = ref _near.Info(index);
             ref var state = ref _near.State(index);
+            var mine = remote.Owner == _playerId;
             info.Blocks = remote.Blocks;
-            info.Order = sample.Order;
+            info.Order = mine ? sample.Order : default;
             state = sample.State;
             _near.Flight(index) = remote.Flight;
 
             // The player's other hulls are flown by the server, and how is known: fly them the same way up to
             // now. Somebody else's hull may have a pilot; all that can be said of it is that it keeps going.
+            // Nothing is run into on the way: what the hull met before the snapshot's tick the server has
+            // settled, and told of.
             for (var age = snapshotTick - sample.Tick; age > 0; age--)
-            {
-                if (remote.Owner == _playerId)
-                    HullSim.Step(ref state, ref info.Order, hold, remote.Flight);
-                else
-                    state.Position += state.Velocity * HullSim.Dt;
-            }
+                HullSim.Step(ref state, ref info.Order, mine ? Hold : Coast, remote.Flight);
         }
     }
 
     /// <summary>
     /// Advances the predicted world one tick the way the server advances the real one: the player's hull under
-    /// the given input, then the player's other hulls under their orders. Hulls that are struck recoil here as
-    /// they will on the server, so the next input meets them where they will be.
+    /// the given input, then the player's other hulls under their orders, and other players' hulls as they
+    /// were going. All of them step through the field, so a hull that crosses another within the tick strikes
+    /// it. Hulls that are struck recoil here as they will on the server, so the next input meets them where
+    /// they will be.
     /// </summary>
     private void StepNear(ref HullOrder order, in FlightInput input)
     {
+        _field.BeginRound();
         _near.Info(0).Order = order;
         _field.Step(0, input, _rocks, _serverTick);
         order = _near.Info(0).Order;
 
-        var hold = new FlightInput { Dampeners = true };
         for (var i = 1; i < _near.Slots; i++)
         {
-            if (!_near.IsAliveAt(i))
-                continue;
-            if (_near.Info(i).Owner == _playerId)
-                _field.Step(i, hold, _rocks, _serverTick);
-            else
-                _near.State(i).Position += _near.State(i).Velocity * HullSim.Dt;
+            if (_near.IsAliveAt(i))
+                _field.Step(i, _near.Info(i).Owner == _playerId ? Hold : Coast, _rocks, _serverTick);
         }
     }
 
