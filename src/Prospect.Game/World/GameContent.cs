@@ -177,6 +177,9 @@ public static class HullSim
         HullField? hulls = null
     )
     {
+        // Impact age follows simulation time even when transit skips flight and power updates.
+        if (state.ShieldHit.AgeTicks < ShieldHit.MaxAgeTicks)
+            state.ShieldHit.AgeTicks++;
         var input = pilot;
         if (order.Kind == OrderKind.MoveTo)
         {
@@ -882,7 +885,7 @@ public static class HullSim
 
     /// <summary>
     /// Records an absorbed impact for the shield's ripple, at the middle of the blocks that touched. Impacts in
-    /// the same tick are one event: their strengths add up and the harder one says where.
+    /// the same tick are one event: the strongest individual impact supplies both strength and position.
     /// </summary>
     private static void RecordShieldHit(ref HullState state, in FlightParams flight, HullDesign? design, ulong touching, float absorbed)
     {
@@ -909,14 +912,11 @@ public static class HullSim
         ref var hit = ref state.ShieldHit;
         var sameTick = hit.Strength > 0 && hit.AgeTicks == 0;
         if (sameTick && strength <= hit.Strength)
-        {
-            hit.Strength = (byte)Math.Min(255, hit.Strength + strength);
             return;
-        }
 
         if (!sameTick)
             hit.Serial++;
-        hit.Strength = (byte)Math.Min(255, strength + (sameTick ? hit.Strength : 0));
+        hit.Strength = (byte)strength;
         hit.X = (sbyte)MathF.Round(point.X);
         hit.Y = (sbyte)MathF.Round(point.Y);
         hit.Z = (sbyte)MathF.Round(point.Z);

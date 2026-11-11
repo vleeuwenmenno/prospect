@@ -318,8 +318,6 @@ public static class FlightModel
         // and takes the surplus; with the battery flat, thrust is cut back to what the generator alone can feed.
         // A broken shield charges at its usual rate but draws its restart power until it is back online.
         state.ShieldCooldown = Math.Max(0f, state.ShieldCooldown - dt);
-        if (state.ShieldHit.AgeTicks < ShieldHit.MaxAgeTicks)
-            state.ShieldHit.AgeTicks++;
         if (p.ShieldCapacity <= 0f)
             state.ShieldOffline = false;
         var thrustUse = Math.Max(MathF.Abs(thrust.X), Math.Max(MathF.Abs(thrust.Y), MathF.Abs(thrust.Z)));

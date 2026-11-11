@@ -2299,19 +2299,58 @@ public sealed class ShieldStateTests
         Assert.Equal(expected.X, both.X, 1f);
         Assert.Equal(expected.Z, both.Z, 1f);
 
-        // A weaker hit in the same tick adds strength but does not move it.
+        // A weaker hit in the same tick cannot replace the strongest impact.
         Hit(ref state, Pod, ref body, 1, 1f);
         Assert.Equal(both.X, state.ShieldHit.X);
         Assert.Equal(both.Serial, state.ShieldHit.Serial);
+        Assert.Equal(both.Strength, state.ShieldHit.Strength);
 
         // The next tick's hit is a new event, and the age counts up to its cap and stops.
-        FlightModel.Step(ref state, default, Pod, HullSim.Dt);
+        HullOrder order = default;
+        HullSim.Step(ref state, ref order, default, Pod, ref body);
         Assert.Equal(1, state.ShieldHit.AgeTicks);
         Hit(ref state, Pod, ref body, 1, 10f);
         Assert.Equal((byte)(both.Serial + 1), state.ShieldHit.Serial);
         for (var i = 0; i < 400; i++)
-            FlightModel.Step(ref state, default, Pod, HullSim.Dt);
+            HullSim.Step(ref state, ref order, default, Pod, ref body);
         Assert.Equal(ShieldHit.MaxAgeTicks, state.ShieldHit.AgeTicks);
+    }
+
+    [Fact]
+    public void TheStrongestThirdContactSuppliesTheRipplePoint()
+    {
+        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = FullHp() };
+        var state = HullState.Spawn(Double3.Zero, Pod);
+        Hit(ref state, Pod, ref body, 0, 100f);
+        Hit(ref state, Pod, ref body, 1, 100f);
+        Hit(ref state, Pod, ref body, Emitter, 150f);
+        var expected = PodDesign.BlockOffsets[Emitter] * (127f / Pod.Radius);
+        Assert.Equal(expected.X, state.ShieldHit.X, 1f);
+        Assert.Equal(expected.Y, state.ShieldHit.Y, 1f);
+        Assert.Equal(expected.Z, state.ShieldHit.Z, 1f);
+        Assert.Equal(102, state.ShieldHit.Strength);
+        Assert.Equal(1, state.ShieldHit.Serial);
+    }
+
+    [Fact]
+    public void AnImpactAgesOncePerTickThroughoutTransitWithoutAdvancingRecharge()
+    {
+        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = FullHp() };
+        var state = HullState.Spawn(Double3.Zero, Pod);
+        Hit(ref state, Pod, ref body, 1, 100f);
+        var cooldown = state.ShieldCooldown;
+        var shield = state.Shield;
+        state.Jump = JumpPhase.Tunnel;
+        state.JumpTunnelSeconds = 600f;
+        var order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(40000, 0, 0) };
+        for (var tick = 1; tick <= ShieldHit.MaxAgeTicks + 10; tick++)
+        {
+            HullSim.Step(ref state, ref order, default, Pod, ref body);
+            Assert.Equal(Math.Min(tick, ShieldHit.MaxAgeTicks), state.ShieldHit.AgeTicks);
+        }
+        Assert.Equal(JumpPhase.Tunnel, state.Jump);
+        Assert.Equal(cooldown, state.ShieldCooldown);
+        Assert.Equal(shield, state.Shield);
     }
 
     [Fact]

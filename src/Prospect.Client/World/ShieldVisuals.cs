@@ -138,6 +138,18 @@ internal sealed class ShieldVisuals
             Array.Clear(_shells);
         }
 
+        // Free departed IDs before newcomers need their slots; the previous snapshot may have filled the table.
+        for (var i = 0; i < _hulls.Length; i++)
+        {
+            if (!_hulls[i].Used)
+                continue;
+            var present = false;
+            for (var j = 0; j < hulls.Length && j < MaxShields; j++)
+                present |= hulls[j].Id == _hulls[i].Id;
+            if (!present)
+                _hulls[i] = default;
+        }
+
         for (var i = 0; i < hulls.Length && i < MaxShields; i++)
         {
             ref readonly var hull = ref hulls[i];
@@ -200,12 +212,6 @@ internal sealed class ShieldVisuals
             shield.Unstable = shown ? 1f - SmoothStep(UnstableFull, UnstableAbove, fraction) : 0f;
         }
 
-        // A hull gone from the snapshot is forgotten; if it comes back it is seen afresh.
-        for (var i = 0; i < _hulls.Length; i++)
-        {
-            if (_hulls[i].Used && _hulls[i].Frame != _frame)
-                _hulls[i] = default;
-        }
     }
 
     /// <summary>Starts this frame's shells; <see cref="Add"/> describes each one in <paramref name="draws"/>.</summary>

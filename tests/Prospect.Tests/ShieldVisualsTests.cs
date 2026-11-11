@@ -241,6 +241,28 @@ public sealed class ShieldVisualsTests
     [Fact]
     public void TheShellsFitEveryHullASnapshotCanShow() => Assert.Equal(ClientWorld.MaxViews, ShieldVisuals.MaxShields);
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    [InlineData(64)]
+    public void ReplacingHullsInAFullSnapshotKeepsEverySurvivingAndNewShield(int replaced)
+    {
+        var hulls = new HullView[ShieldVisuals.MaxShields];
+        for (var i = 0; i < hulls.Length; i++)
+            hulls[i] = Hull((uint)i + 1);
+        Frame(hulls);
+        for (var i = hulls.Length - replaced; i < hulls.Length; i++)
+            hulls[i] = Hull((uint)(i + hulls.Length + 1));
+        Frame(hulls);
+        Assert.Equal(hulls.Length, _shields.Draws.Length);
+        foreach (var hull in hulls)
+        {
+            _shields.Begin(_draws);
+            _shields.Add(hull.Id, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices);
+            Assert.Equal(1, _shields.Draws.Length);
+        }
+    }
+
     [Fact]
     public void AShieldOnlineAtFirstSightGlowsAtOnceAndAHullWithoutOneHasNoShell()
     {
