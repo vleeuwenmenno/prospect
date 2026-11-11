@@ -14,6 +14,13 @@ The goal and the block model are in `direction.md` under "Decided: building".
 - **A hull keeps turning around its original centre** when it loses blocks. Its mass and inertia do change.
 - **Slopes come with the editor.** The design format carries a version so shapes can be added.
 
+## Decided: how size changes a block
+
+- **Each block type has its own rule,** in content: how thrust, power, shield, hull points, cargo and mass grow
+  with the block's size. A big engine need not be many small engines.
+- **A stat with no rule grows with the cells the block fills.**
+- **Materials come later** and will change mass and hull points on top of this. The rule format must leave room.
+
 ## Decided: network
 
 - **A design is sent once per client,** found by a hash of its content. Hull records carry a short design id.
@@ -68,6 +75,6 @@ Each stage leaves the game running, with `make check` and `make bench` passing.
 
 ## Open
 
-- How a block's size scales its stats: by the number of grid cells it fills, or by rules per block type.
-- The slowest machine the full-load scene must run on, and at what frame rate.
+- The slowest machine the full-load scene must run on. Working target until tested there: a MacBook Air M4
+  at 60 frames per second.
 - Limits on a build: the largest box, the largest ship or station across, the thinnest wall.
