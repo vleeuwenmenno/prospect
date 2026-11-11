@@ -40,6 +40,12 @@ internal sealed partial class ScreenHost
     private SectorCoord _mapHover;
     private string _mapHoverName = "";
     private bool _mapHasHover;
+    private bool _mapMenuOpen;
+    private SectorCoord _mapMenuSector;
+    private string _mapMenuName = "";
+    private float2 _mapMenuMin;
+    private float2 _mapMenuSize;
+    private float _mapMenuTime;
 
     /// <summary>True while the player is in space with nothing open over it, so input belongs to the world.</summary>
     public bool WorldInputEnabled => _screen == Screen.Session && !_sessionMenuOpen && !_mapOpen;
@@ -58,6 +64,7 @@ internal sealed partial class ScreenHost
     public void OpenMap()
     {
         _mapOpen = true;
+        _mapMenuOpen = false;
         _mapTime = 0;
         _mapCenter = new float2((float)(_app.World.OwnPosition.X / _app.World.Galaxy!.SectorSize), (float)(_app.World.OwnPosition.Z / _app.World.Galaxy!.SectorSize));
         _mapLayer = _app.World.Sector.Coord.Y;
@@ -740,7 +747,7 @@ internal sealed partial class ScreenHost
     /// The galaxy map. Every grid cell is a sector. Far out it shows the whole galaxy; closer in, the grid and the
     /// individual sectors appear; closest, their stars, asteroid fields and names. What a sector holds is only
     /// shown once one of the player's hulls has been near it. Drag to pan, wheel to zoom at the pointer, Page Up
-    /// and Page Down to change layer, Space to centre on the player, right-click a sector to fly there.
+    /// and Page Down to change layer, Space to centre on the player, right-click a sector for the course menu.
     /// </summary>
     private void DrawMap(SessionSnapshot snapshot, WorldView world)
     {
@@ -764,38 +771,31 @@ internal sealed partial class ScreenHost
         var player = new float2((float)(world.OwnPosition.X / size), (float)(world.OwnPosition.Z / size));
         var middle = display * 0.5f;
         var mouse = io.MousePos;
+        var devices = _app.Devices;
+
+        // The course menu, while open, holds the map still and takes the clicks that land on it.
+        var menuOpen = _mapMenuOpen;
+        var overMenu = menuOpen && mouse.X >= _mapMenuMin.X && mouse.Y >= _mapMenuMin.Y && mouse.X < _mapMenuMin.X + _mapMenuSize.X && mouse.Y < _mapMenuMin.Y + _mapMenuSize.Y;
 
         // Input. W A S D, the arrow keys and middle-drag pan; zooming keeps the sector under the pointer in place.
-        var devices = _app.Devices;
-        var actions = _app.Actions;
-        var panX = Math.Clamp(actions.Axis(devices, InputAxis.Strafe, true) + actions.Axis(devices, InputAxis.Yaw, true), -1f, 1f);
-        var panY = Math.Clamp(actions.Axis(devices, InputAxis.Forward, true) + actions.Axis(devices, InputAxis.Pitch, true), -1f, 1f);
-        _mapCenter += new float2(panX, -panY) * (display.Y * 0.9f / _mapCell * _ui.DeltaTime);
-        if (devices.MouseDown(Brutal.GlfwApi.GlfwMouseButton.Middle))
-            _mapCenter -= io.MouseDelta / _mapCell;
-        if (io.MouseWheel != 0)
-        {
-            var under = _mapCenter + (mouse - middle) / _mapCell;
-            _mapCell = Math.Clamp(_mapCell * MathF.Pow(1.18f, io.MouseWheel), MapMinCell, MapMaxCell);
-            _mapCenter = under - (mouse - middle) / _mapCell;
-        }
+        if (!menuOpen)
+            PanMap(io, middle, mouse, here, player);
 
-        if (ImGui.IsKeyPressed(ImGuiKey.PageUp))
-            _mapLayer++;
-        if (ImGui.IsKeyPressed(ImGuiKey.PageDown))
-            _mapLayer--;
-        if (ImGui.IsKeyPressed(ImGuiKey.Space, false))
-        {
-            _mapCenter = player;
-            _mapLayer = here.Y;
-        }
-
-        // Left button: click picks one of the player's hulls, drag draws a selection box around several.
+        // Left button: click picks one of the player's hulls, drag draws a selection box around several. With the
+        // menu open a click elsewhere only closes it, and a click on it belongs to its items.
         if (devices.MousePressed(Brutal.GlfwApi.GlfwMouseButton.Left))
         {
-            _mapBoxing = true;
-            _mapBoxMoved = false;
-            _mapBoxStart = mouse;
+            if (menuOpen)
+            {
+                if (!overMenu)
+                    _mapMenuOpen = false;
+            }
+            else
+            {
+                _mapBoxing = true;
+                _mapBoxMoved = false;
+                _mapBoxStart = mouse;
+            }
         }
 
         var boxReleased = false;
@@ -811,8 +811,14 @@ internal sealed partial class ScreenHost
             }
         }
 
+        // Escape closes the menu first and the map only after that.
         if (BackPressed())
-            _mapOpen = false;
+        {
+            if (_mapMenuOpen)
+                _mapMenuOpen = false;
+            else
+                _mapOpen = false;
+        }
 
         var cell = _mapCell;
         var center = _mapCenter;
@@ -1010,21 +1016,26 @@ internal sealed partial class ScreenHost
         // The sector under the pointer.
         var hovered = _mapCenter + (mouse - middle) / cell;
         var hover = new SectorCoord((int)MathF.Floor(hovered.X + 0.5f), _mapLayer, (int)MathF.Floor(hovered.Y + 0.5f));
-        var pointerOnMap = mouse.X >= 0 && mouse.Y >= 0 && mouse.X < display.X && mouse.Y < display.Y;
+        var pointerOnMap = !overMenu && mouse.X >= 0 && mouse.Y >= 0 && mouse.X < display.X && mouse.Y < display.Y;
         if (pointerOnMap)
         {
             var at = ToScreen(hover.X, hover.Z);
             var corner = new float2(Math.Max(cell * 0.5f, 7f), Math.Max(cell * 0.5f, 7f));
             Brackets(draw, at - corner, at + corner, Math.Clamp(cell * 0.3f, 3f, Kit.Px(10)), Kit.Color(Theme.Text, 0.85f));
-            Kit.Text(draw, _ui.Mono, Theme.FontCaption, mouse + new float2(Kit.Px(18), -Kit.Px(6)), Theme.Text, Kit.F($"{hover.X} : {hover.Z}"));
-            // Right-click jumps the selection there; with Shift held it flies there under its own engines.
-            if (ImGui.IsMouseClicked(ImGuiMouseButton.Right) && _app.Session is { } session)
-            {
-                if (io.KeyShift)
-                    world.OrderMove(session.Client.Input, galaxy.CenterOf(hover));
-                else
-                    world.OrderJump(session.Client.Input, galaxy.CenterOf(hover));
-            }
+            if (!_mapMenuOpen)
+                Kit.Text(draw, _ui.Mono, Theme.FontCaption, mouse + new float2(Kit.Px(18), -Kit.Px(6)), Theme.Text, Kit.F($"{hover.X} : {hover.Z}"));
+
+            // Right-click opens the course menu on the sector, or moves it there if it is already open.
+            if (ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+                OpenMapMenu(galaxy, hover, mouse);
+        }
+
+        // The sector the course menu is for.
+        if (_mapMenuOpen && _mapMenuSector.Y == _mapLayer)
+        {
+            var at = ToScreen(_mapMenuSector.X, _mapMenuSector.Z);
+            var corner = new float2(Math.Max(cell * 0.5f, 7f), Math.Max(cell * 0.5f, 7f));
+            Brackets(draw, at - corner, at + corner, Math.Clamp(cell * 0.3f, 3f, Kit.Px(10)), Kit.Color(Theme.Accent));
         }
 
         // Title, layer and scale.
@@ -1041,13 +1052,169 @@ internal sealed partial class ScreenHost
         hint.X += Kit.KeyHint(draw, hint, "WASD"u8, "Pan"u8);
         hint.X += Kit.KeyHint(draw, hint, "WHEEL"u8, "Zoom"u8);
         hint.X += Kit.KeyHint(draw, hint, "LMB / DRAG"u8, "Select ships"u8);
-        hint.X += Kit.KeyHint(draw, hint, "RMB"u8, "Jump there"u8);
-        hint.X += Kit.KeyHint(draw, hint, "SHIFT + RMB"u8, "Fly there"u8);
+        hint.X += Kit.KeyHint(draw, hint, "RMB"u8, "Move or jump"u8);
         hint.X += Kit.KeyHint(draw, hint, "PGUP / PGDN"u8, "Layer"u8);
         hint.X += Kit.KeyHint(draw, hint, "SPACE"u8, "Centre on me"u8);
         Kit.KeyHint(draw, hint, "M / ESC"u8, "Close"u8);
         EndRoot();
+
+        if (_mapMenuOpen)
+            DrawMapMenu(world, galaxy, fade);
         Kit.Fade = 1f;
+    }
+
+    /// <summary>Pans, zooms and changes layer from the keyboard, middle drag and wheel.</summary>
+    private void PanMap(ImGuiIOPtr io, float2 middle, float2 mouse, SectorCoord here, float2 player)
+    {
+        var devices = _app.Devices;
+        var actions = _app.Actions;
+        var display = _ui.DisplaySize;
+        var panX = Math.Clamp(actions.Axis(devices, InputAxis.Strafe, true) + actions.Axis(devices, InputAxis.Yaw, true), -1f, 1f);
+        var panY = Math.Clamp(actions.Axis(devices, InputAxis.Forward, true) + actions.Axis(devices, InputAxis.Pitch, true), -1f, 1f);
+        _mapCenter += new float2(panX, -panY) * (display.Y * 0.9f / _mapCell * _ui.DeltaTime);
+        if (devices.MouseDown(Brutal.GlfwApi.GlfwMouseButton.Middle))
+            _mapCenter -= io.MouseDelta / _mapCell;
+        if (io.MouseWheel != 0)
+        {
+            var under = _mapCenter + (mouse - middle) / _mapCell;
+            _mapCell = Math.Clamp(_mapCell * MathF.Pow(1.18f, io.MouseWheel), MapMinCell, MapMaxCell);
+            _mapCenter = under - (mouse - middle) / _mapCell;
+        }
+
+        if (ImGui.IsKeyPressed(ImGuiKey.PageUp))
+            _mapLayer++;
+        if (ImGui.IsKeyPressed(ImGuiKey.PageDown))
+            _mapLayer--;
+        if (ImGui.IsKeyPressed(ImGuiKey.Space, false))
+        {
+            _mapCenter = player;
+            _mapLayer = here.Y;
+        }
+    }
+
+    /// <summary>Opens the course menu for a sector at a screen point, kept fully on screen.</summary>
+    private void OpenMapMenu(Galaxy galaxy, SectorCoord sector, float2 at)
+    {
+        var display = _ui.DisplaySize;
+        var margin = Kit.Px(Theme.Space2);
+        var gap = Kit.Px(6);
+        _mapMenuSize = new float2(Kit.Px(300), Kit.Px(MapMenuHeader) + Kit.Px(MapMenuRow) * 2 + Kit.Px(Theme.Space2));
+
+        // Below and right of the pointer; flipped to the other side where that would leave the screen.
+        var min = at + new float2(gap, gap);
+        if (min.X + _mapMenuSize.X > display.X - margin)
+            min.X = at.X - _mapMenuSize.X - gap;
+        if (min.Y + _mapMenuSize.Y > display.Y - margin)
+            min.Y = at.Y - _mapMenuSize.Y - gap;
+        min.X = Math.Clamp(min.X, margin, Math.Max(margin, display.X - _mapMenuSize.X - margin));
+        min.Y = Math.Clamp(min.Y, margin, Math.Max(margin, display.Y - _mapMenuSize.Y - margin));
+
+        if (!_mapMenuOpen || _mapMenuSector != sector)
+            _mapMenuTime = 0;
+
+        // The name is looked up once here, not every frame the menu is drawn.
+        _mapMenuName = _discovered.Contains(sector) ? MapName(galaxy, sector) : "Unexplored";
+        _mapMenuMin = min;
+        _mapMenuSector = sector;
+        _mapMenuOpen = true;
+    }
+
+    /// <summary>
+    /// Opens the map with the course menu on a sector offset from the player's, at that sector's place on screen.
+    /// Used by the scripted <c>--open map-menu</c> view.
+    /// </summary>
+    public void OpenMapMenuNear(int dx, int dz)
+    {
+        OpenMap();
+        var world = _app.World;
+        var galaxy = world.Galaxy!;
+        var sector = world.Sector.Coord.Offset(dx, 0, dz);
+        var player = new float2((float)(world.OwnPosition.X / galaxy.SectorSize), (float)(world.OwnPosition.Z / galaxy.SectorSize));
+        OpenMapMenu(galaxy, sector, _ui.DisplaySize * 0.5f + (new float2(sector.X, sector.Z) - player) * _mapCell);
+    }
+
+    private const float MapMenuHeader = 84f;
+    private const float MapMenuRow = 48f;
+
+    /// <summary>
+    /// The course menu: where the sector is, then the two ways to get there. Moving is always possible; jumping
+    /// only for the ships with a working drive that are not already in that sector.
+    /// </summary>
+    private void DrawMapMenu(WorldView world, Galaxy galaxy, float fade)
+    {
+        _mapMenuTime += _ui.DeltaTime;
+        var appear = Kit.EaseOut(_mapMenuTime / 0.12f);
+        var min = _mapMenuMin + new float2(0, (1f - appear) * -Kit.Px(6));
+        var size = _mapMenuSize;
+        ImGui.SetNextWindowPos(min);
+        ImGui.SetNextWindowSize(size);
+        // Unlike the full-window surfaces this one may come to the front: a window created with
+        // NoBringToFrontOnFocus is placed behind every other, which would put it under the map.
+        ImGui.Begin("##mapmenu"u8, (RootFlags & ~ImGuiWindowFlags.NoBringToFrontOnFocus) | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoFocusOnAppearing);
+        Kit.Fade = fade * appear;
+        var draw = ImGui.GetWindowDrawList();
+        Kit.PanelFrame(draw, min, min + size);
+
+        var sector = _mapMenuSector;
+        var target = galaxy.CenterOf(sector);
+        var known = _discovered.Contains(sector);
+        var text = min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3));
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, text, Theme.Accent, "SET COURSE"u8);
+        var coords = Kit.F($"{sector.X} : {sector.Z}   LAYER {sector.Y:+0;-0;0}");
+        var coordsWidth = Kit.Measure(_ui.Mono, Theme.FontCaption, coords).X;
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(min.X + size.X - Kit.Px(Theme.Space4) - coordsWidth, text.Y), Theme.TextMute, coords);
+        Kit.Text(draw, _ui.SansMedium, Theme.FontBody, text + new float2(0, Kit.Px(20)), known ? Theme.Text : Theme.TextDim, _mapMenuName);
+        var range = target.RelativeTo(world.OwnPosition).Length() / 1000f;
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(46)), Theme.TextDim, Kit.F($"DISTANCE   {range:0.0} KM"));
+        var divider = min.Y + Kit.Px(MapMenuHeader) - 0.5f;
+        draw.AddLine(new float2(min.X + Kit.Px(6), divider), new float2(min.X + size.X - Kit.Px(6), divider), Kit.Color(Theme.Line));
+
+        world.CountJumpReady(target, out var ships, out var ready, out var inSector);
+        var rowMin = new float2(min.X + Kit.Px(6), min.Y + Kit.Px(MapMenuHeader) + Kit.Px(Theme.Space1));
+        var rowSize = new float2(size.X - Kit.Px(12), Kit.Px(MapMenuRow) - Kit.Px(4));
+        var session = _app.Session;
+
+        var moveCount = ships == 1 ? "1 ship"u8 : Kit.F($"{ships} ships");
+        if (MapMenuItem(draw, rowMin, rowSize, "Move here"u8, "UNDER OWN ENGINES"u8, moveCount, true) && session is not null)
+        {
+            world.OrderMove(session.Client.Input, target);
+            _mapMenuOpen = false;
+        }
+
+        rowMin.Y += Kit.Px(MapMenuRow);
+        var canJump = ready > 0;
+        var reason = canJump ? "FASTER THAN LIGHT"u8 : inSector == ships ? "ALREADY IN THIS SECTOR"u8 : "NO WORKING JUMP DRIVE"u8;
+        var jumpCount = ships == 1 ? Kit.F($"{ready} of 1 ship") : Kit.F($"{ready} of {ships} ships");
+        if (MapMenuItem(draw, rowMin, rowSize, "Jump here"u8, reason, jumpCount, canJump) && session is not null)
+        {
+            world.OrderJump(session.Client.Input, target);
+            _mapMenuOpen = false;
+        }
+
+        ImGui.End();
+    }
+
+    /// <summary>
+    /// One row of the course menu: a label with a short line under it and a count at the right. A disabled row is
+    /// drawn muted, does not light up and cannot be chosen, though it still takes the click so the menu stays open.
+    /// </summary>
+    private bool MapMenuItem(ImDrawListPtr draw, float2 rowMin, float2 rowSize, ImString label, ImString detail, ImString count, bool enabled)
+    {
+        ImGui.SetCursorScreenPos(rowMin);
+        var pressed = ImGui.InvisibleButton(label, rowSize);
+        var hot = Kit.Animate(ImGui.GetItemID(), enabled && ImGui.IsItemHovered() ? 1f : 0f);
+        if (hot > 0.01f)
+        {
+            draw.AddRectFilled(rowMin, rowMin + new float2(rowSize.X * (0.35f + 0.65f * hot), rowSize.Y), Kit.Color(Theme.PanelRaised, 0.9f * hot));
+            draw.AddRectFilled(rowMin, rowMin + new float2(Kit.Px(3), rowSize.Y), Kit.Color(Theme.Accent, hot));
+        }
+
+        var text = rowMin + new float2(Kit.Px(Theme.Space3) + Kit.Px(6) * hot, Kit.Px(5));
+        Kit.Text(draw, _ui.SansMedium, Theme.FontBody, text, enabled ? Kit.Mix(Theme.TextDim, Theme.Text, 0.55f + 0.45f * hot) : Theme.TextMute, label, enabled ? 1f : 0.7f);
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(22)), enabled ? Theme.TextMute : Theme.Bad, detail, enabled ? 1f : 0.75f);
+        var countWidth = Kit.Measure(_ui.Mono, Theme.FontCaption, count).X;
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(rowMin.X + rowSize.X - Kit.Px(Theme.Space3) - countWidth, rowMin.Y + Kit.Px(8)), enabled ? Kit.Mix(Theme.TextDim, Theme.Accent, hot) : Theme.TextMute, count, enabled ? 1f : 0.7f);
+        return pressed && enabled;
     }
 
     /// <summary>What is known about the sector under the pointer.</summary>
@@ -1110,7 +1277,7 @@ internal sealed partial class ScreenHost
             y += line;
         }
 
-        Kit.Text(draw, _ui.Sans, Theme.FontCaption, text + new float2(0, y + Kit.Px(4)), Theme.TextMute, "Right-click jumps here; Shift flies"u8);
+        Kit.Text(draw, _ui.Sans, Theme.FontCaption, text + new float2(0, y + Kit.Px(4)), Theme.TextMute, "Right-click to move or jump here"u8);
     }
 
     /// <summary>Grid lines every <paramref name="every"/> sectors, drawn on sector boundaries.</summary>

@@ -101,7 +101,6 @@ internal sealed class WorldView
     private int _selectedRockCount;
     private SessionSnapshot? _snapshot;
     private float _frameAlpha;
-    private bool _jumpOrders;
     private uint _followId;
     private Double3 _focusFrom;
     private float _focusBlend = 1f;
@@ -319,7 +318,7 @@ internal sealed class WorldView
                 if (Mode == ViewMode.Pilot)
                     bridge.IssueOrder(default);
                 else
-                    OrderSelection(bridge, default, false);
+                    OrderSelection(bridge, default, false, false);
             }
         }
 
@@ -690,33 +689,68 @@ internal sealed class WorldView
         if (_selectedCount == 0)
             bridge.IssueOrder(new HullOrder { Kind = OrderKind.MoveTo, Target = target });
         else
-            OrderSelection(bridge, target, true);
+            OrderSelection(bridge, target, true, false);
     }
 
     /// <summary>
-    /// Sends the selected hulls (or the hull being flown) to a point in another sector by jump drive. A hull with
-    /// no drive, or one already in that sector, flies there instead.
+    /// Sends the selected hulls (or the hull being flown) to a point in another sector by jump drive. Only hulls
+    /// that can jump there (see <see cref="CanJumpTo"/>) are ordered; the rest keep their current orders.
     /// </summary>
     public void OrderJump(PlayerInputBridge bridge, Double3 target)
     {
         if (_selectedCount == 0)
         {
-            bridge.IssueOrder(new HullOrder { Kind = JumpOrFly(Own, target), Target = target });
+            if (CanJumpTo(Own, target))
+                bridge.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = target });
             return;
         }
 
-        _jumpOrders = true;
-        OrderSelection(bridge, target, true);
-        _jumpOrders = false;
+        OrderSelection(bridge, target, true, true);
     }
 
-    private OrderKind JumpOrFly(in HullView hull, Double3 target)
+    /// <summary>
+    /// Counts the hulls an order would apply to (the selection, or the hull being flown if nothing is selected):
+    /// how many there are, how many can jump to <paramref name="target"/>, and how many are already in its sector.
+    /// </summary>
+    public void CountJumpReady(Double3 target, out int ships, out int ready, out int inSector)
+    {
+        ships = 0;
+        ready = 0;
+        inSector = 0;
+        if (_selectedCount == 0)
+        {
+            Count(Own, target, ref ships, ref ready, ref inSector);
+            return;
+        }
+
+        for (var i = 0; i < _selectedCount; i++)
+        {
+            if (TryGetHull(_selected[i], out var hull))
+                Count(hull, target, ref ships, ref ready, ref inSector);
+        }
+    }
+
+    private void Count(in HullView hull, Double3 target, ref int ships, ref int ready, ref int inSector)
+    {
+        ships++;
+        if (InSectorOf(hull, target))
+            inSector++;
+        else if (HasJumpDrive(hull))
+            ready++;
+    }
+
+    /// <summary>True when a hull has a working jump drive and is not already in the target's sector.</summary>
+    public bool CanJumpTo(in HullView hull, Double3 target) => HasJumpDrive(hull) && !InSectorOf(hull, target);
+
+    /// <summary>True when the hull still has a working faster-than-light drive; losing the drive block loses it.</summary>
+    private bool HasJumpDrive(in HullView hull)
     {
         var design = _designs[Math.Min(hull.Design, _designs.Length - 1)];
         design.Evaluate(hull.Blocks, out var flight, out _);
-        var sameSector = _galaxy is not null && _galaxy.SectorOf(HullPosition(hull)) == _galaxy.SectorOf(target);
-        return flight.Ftl != FtlKind.None && !sameSector ? OrderKind.Jump : OrderKind.MoveTo;
+        return flight.Ftl != FtlKind.None;
     }
+
+    private bool InSectorOf(in HullView hull, Double3 target) => _galaxy is not null && _galaxy.SectorOf(HullPosition(hull)) == _galaxy.SectorOf(target);
 
     /// <summary>Selects every hull the player owns.</summary>
     public void SelectAllOwned()
@@ -771,9 +805,10 @@ internal sealed class WorldView
 
     /// <summary>
     /// Orders every selected hull. A move sends them to the point in formation: a block of rows centred on it, so
-    /// several hulls sent to one place do not try to occupy the same spot.
+    /// several hulls sent to one place do not try to occupy the same spot. A jump orders only the hulls that can
+    /// jump there and leaves the others alone.
     /// </summary>
-    private void OrderSelection(PlayerInputBridge bridge, Double3 target, bool move)
+    private void OrderSelection(PlayerInputBridge bridge, Double3 target, bool move, bool jump)
     {
         var columns = (int)MathF.Ceiling(MathF.Sqrt(_selectedCount));
         var rows = (_selectedCount + columns - 1) / Math.Max(columns, 1);
@@ -783,8 +818,9 @@ internal sealed class WorldView
             if (move)
             {
                 var offset = new Vector3((i % columns - (columns - 1) * 0.5f) * FormationSpacing, 0, (i / columns - (rows - 1) * 0.5f) * FormationSpacing);
-                var kind = _jumpOrders && TryGetHull(_selected[i], out var hull) ? JumpOrFly(hull, target) : OrderKind.MoveTo;
-                order = new HullOrder { Kind = kind, Target = target + offset };
+                if (jump && (!TryGetHull(_selected[i], out var hull) || !CanJumpTo(hull, target)))
+                    continue;
+                order = new HullOrder { Kind = jump ? OrderKind.Jump : OrderKind.MoveTo, Target = target + offset };
             }
 
             // The hull being flown takes its orders through the input stream; the rest go to the server directly.
@@ -1097,7 +1133,7 @@ internal sealed class WorldView
             {
                 _rightDragging = false;
                 if (!_rightMoved && _selectedCount > 0 && GroundPoint(_devices.MousePosition, out var target))
-                    OrderSelection(bridge, target, true);
+                    OrderSelection(bridge, target, true, false);
             }
         }
 
