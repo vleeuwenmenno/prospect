@@ -25,6 +25,18 @@ public enum DisconnectReason : byte
     ServerFull,
 }
 
+/// <summary>
+/// How much one <see cref="ITransport.Poll"/> may take in: a number of packets and a number of bytes. Whatever is
+/// still waiting when either runs out stays queued, in order, for the next poll. Nothing is dropped by it.
+/// </summary>
+/// <param name="Packets">Packets and connection events taken off the queue, whether or not they turn out to be for anyone.</param>
+/// <param name="Bytes">Bytes of those packets.</param>
+public readonly record struct ReceiveBudget(int Packets, int Bytes)
+{
+    /// <summary>No limit: the poll returns only when nothing is waiting.</summary>
+    public static ReceiveBudget Unlimited => new(int.MaxValue, int.MaxValue);
+}
+
 /// <summary>Receives what a transport produced during <see cref="ITransport.Poll"/>.</summary>
 public interface ITransportHandler
 {
@@ -51,8 +63,12 @@ public interface ITransport : IDisposable
     /// </summary>
     bool IsInProcess { get; }
 
-    /// <summary>Delivers pending connection events and messages to the handler.</summary>
-    void Poll(ITransportHandler handler);
+    /// <summary>
+    /// Delivers pending connection events and messages to the handler, oldest first, until nothing is waiting or
+    /// <paramref name="budget"/> is used up. Returns false when the budget ran out before the queue was seen
+    /// empty: the rest is delivered by later polls.
+    /// </summary>
+    bool Poll(ITransportHandler handler, ReceiveBudget budget);
 
     /// <summary>Queues a message. Returns false if the peer is gone or the transport cannot take it.</summary>
     bool Send(int peer, NetChannel channel, ReadOnlySpan<byte> payload);
@@ -68,4 +84,11 @@ public interface ITransport : IDisposable
     /// limits can be counted per address. Zero when the peer is in this process or its address is not known.
     /// </summary>
     ulong GetPeerOrigin(int peer);
+}
+
+/// <summary>Shorthands for <see cref="ITransport"/>.</summary>
+public static class TransportExtensions
+{
+    /// <summary>Delivers everything that is waiting. For the ends that trust what they are connected to.</summary>
+    public static void Poll(this ITransport transport, ITransportHandler handler) => transport.Poll(handler, ReceiveBudget.Unlimited);
 }

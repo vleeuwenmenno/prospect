@@ -39,7 +39,12 @@ internal sealed class AppOptions
     /// <summary>How local games started in this run are hosted, as <c>--host</c> and its companions set it.</summary>
     public HostingOptions Hosting { get; } = new();
 
-    /// <summary>The password for <c>--join</c>, or for the game <c>--host</c> starts; null for none.</summary>
+    /// <summary>
+    /// The password for <c>--join</c>, or for the game <c>--host</c> starts; null for none. The application
+    /// takes it from here when it starts and sets this to null: the launch options are not where it is kept.
+    /// The command line or the environment it came from still holds it, and so does the text itself until the
+    /// collector frees it; neither can be cleared from here.
+    /// </summary>
     public string? Password { get; set; }
 
     /// <summary>The listing server's address, <c>off</c>, or null for the content's default.</summary>
@@ -134,8 +139,14 @@ internal sealed class App : IDisposable
         Content = GameContent.Load();
         NewGameSettings = Content.SettingCatalog.Build(null, options.WorldSettingArgs, message => Logs.App.Warning(message));
         NewGameHosting = options.Hosting.Clone();
-        if (options.Password is not null && options.JoinHost is null)
-            NewGameHosting.Password = options.Password;
+        if (options.JoinHost is null)
+        {
+            // A host's password becomes the next game's, where a hosting screen can change it; a joiner's is
+            // handed to the one session it is for, in SplashFinished.
+            if (options.Password is not null)
+                NewGameHosting.Password = options.Password;
+            options.Password = null;
+        }
 
         // Nothing is fetched until a screen asks: making the browser opens no connection.
         Listing = ListingConfig.Resolve(options.Listing);
@@ -467,7 +478,9 @@ internal sealed class App : IDisposable
         }
         else if (_options.JoinHost is { } host)
         {
-            if (!JoinGame(host, _options.JoinPort, _options.Password, out var error))
+            var password = _options.Password;
+            _options.Password = null;
+            if (!JoinGame(host, _options.JoinPort, password, out var error))
             {
                 Logs.App.Error(error);
                 _screens.Show(Screen.Join);

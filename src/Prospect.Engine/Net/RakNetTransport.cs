@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Brutal.RakNetApi;
 
 namespace Prospect.Engine.Net;
@@ -7,6 +8,13 @@ public sealed unsafe class RakNetTransport : ITransport
 {
     private const int HeaderSize = 2;
     private const int MaxPayload = 1 << 20;
+
+    /// <summary>
+    /// Times a client asks again when the server says its address connected a moment ago. A listener lets one
+    /// address start a connection only every 100 ms, so players behind one router who join together are told to
+    /// come back; a few tries a fraction of a second apart get them all in.
+    /// </summary>
+    private const int MaxConnectRetries = 8;
 
     private struct Peer
     {
@@ -21,11 +29,19 @@ public sealed unsafe class RakNetTransport : ITransport
     private byte[] _scratch = new byte[2048];
     private bool _disposed;
 
-    private RakNetTransport(RakPeerInstance rak, int maxPeers, bool isServer, string description)
+    // A client's server, kept to ask again after being told to wait; and when to ask, zero for not at all.
+    private readonly byte[]? _hostUtf8;
+    private readonly ushort _hostPort;
+    private long _retryAt;
+    private int _retries;
+
+    private RakNetTransport(RakPeerInstance rak, int maxPeers, bool isServer, string description, byte[]? hostUtf8 = null, ushort hostPort = 0)
     {
         _rak = rak;
         _peers = new Peer[maxPeers];
         _isServer = isServer;
+        _hostUtf8 = hostUtf8;
+        _hostPort = hostPort;
         Description = description;
     }
 
@@ -41,19 +57,32 @@ public sealed unsafe class RakNetTransport : ITransport
     /// </summary>
     public static bool SupportsIpv6 => false;
 
-    /// <summary>Starts listening for clients on a UDP port.</summary>
-    public static RakNetTransport Listen(ushort port, int maxPeers)
+    /// <summary>
+    /// Starts listening for clients on a UDP port. <paramref name="maxPeers"/> is how many connections the
+    /// caller will hold open at once.
+    ///
+    /// <paramref name="halfOpenSlots"/> is room on top of that for connections RakNet itself is holding: it
+    /// gives a slot to anyone who sends the opening datagram of its handshake, before this class or its caller
+    /// hears of it, and keeps the slot for up to ten seconds if nothing follows; a connection being closed
+    /// keeps its slot until the other end has acknowledged. With every slot taken RakNet turns newcomers away.
+    /// It starts at most one connection per address every 100 ms (the loopback address excepted), so one address
+    /// can hold about a hundred such slots and no more; an attacker who sends from many addresses, or forges
+    /// them, is not held back by that.
+    /// </summary>
+    public static RakNetTransport Listen(ushort port, int maxPeers, int halfOpenSlots = 0)
     {
+        var slots = Math.Min(maxPeers + Math.Max(halfOpenSlots, 0), ushort.MaxValue);
         var rak = RakNetLibrary.CreateInstance();
         var socket = new SocketDescriptor(port);
-        var result = rak.Startup((uint)maxPeers, new Span<SocketDescriptor>(ref socket));
+        var result = rak.Startup((uint)slots, new Span<SocketDescriptor>(ref socket));
         if (result != StartupResult.RaknetStarted)
         {
             rak.Dispose();
             throw new IOException($"Cannot listen on UDP port {port}: {result}");
         }
 
-        rak.SetMaximumIncomingConnections((ushort)maxPeers);
+        rak.SetMaximumIncomingConnections((ushort)slots);
+        rak.SetLimitIPConnectionFrequency(true);
         rak.SetOccasionalPing(true);
         return new RakNetTransport(rak, maxPeers, true, $"udp listen :{port}");
     }
@@ -84,7 +113,7 @@ public sealed unsafe class RakNetTransport : ITransport
             throw new IOException($"Cannot connect to {host}:{port}: {attempt}");
         }
 
-        return new RakNetTransport(rak, 1, false, $"udp {host}:{port}");
+        return new RakNetTransport(rak, 1, false, $"udp {host}:{port}", hostUtf8, port);
     }
 
     /// <summary>
@@ -94,10 +123,30 @@ public sealed unsafe class RakNetTransport : ITransport
     public void SimulateConditions(float packetLoss, int extraLatencyMs, int latencyVarianceMs) =>
         _rak.ApplyNetworkSimulator(packetLoss, (ushort)extraLatencyMs, (ushort)latencyVarianceMs);
 
-    public void Poll(ITransportHandler handler)
+    public bool Poll(ITransportHandler handler, ReceiveBudget budget)
     {
-        for (var packet = _rak.Receive(); packet != null; packet = _rak.Receive())
+        if (_retryAt != 0 && Stopwatch.GetTimestamp() >= _retryAt)
         {
+            _retryAt = 0;
+            if (_rak.Connect(_hostUtf8, _hostPort, default, null) != ConnectionAttemptResult.ConnectionAttemptStarted)
+                handler.OnDisconnected(this, 0, DisconnectReason.ConnectFailed);
+        }
+
+        // Everything taken off RakNet's queue counts, also what turns out to be for nobody: the limit is on the
+        // work one poll can be made to do, and a packet that is thrown away was still looked at.
+        var packets = 0;
+        var bytes = 0L;
+        while (true)
+        {
+            if (packets >= budget.Packets || bytes >= budget.Bytes)
+                return false;
+
+            var packet = _rak.Receive();
+            if (packet == null)
+                return true;
+
+            packets++;
+            bytes += packet->Length;
             try
             {
                 if (packet->Length > 0)
@@ -193,6 +242,20 @@ public sealed unsafe class RakNetTransport : ITransport
                 break;
             case DefaultMessageIDTypes.NoFreeIncomingConnections when !_isServer:
                 handler.OnDisconnected(this, 0, DisconnectReason.ServerFull);
+                break;
+            case DefaultMessageIDTypes.IpRecentlyConnected when !_isServer:
+                // Someone at this address connected within the last 100 ms. Ask again shortly, a little later
+                // each time and never at the same moment as a neighbour who was told the same.
+                if (_retries < MaxConnectRetries)
+                {
+                    _retries++;
+                    _retryAt = Stopwatch.GetTimestamp() + Stopwatch.Frequency * (120 + 40 * _retries + Random.Shared.Next(120)) / 1000;
+                }
+                else
+                {
+                    handler.OnDisconnected(this, 0, DisconnectReason.ConnectFailed);
+                }
+
                 break;
             case DefaultMessageIDTypes.ConnectionAttemptFailed when !_isServer:
             case DefaultMessageIDTypes.ConnectionBanned when !_isServer:

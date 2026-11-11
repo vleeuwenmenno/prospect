@@ -259,6 +259,9 @@ internal sealed class FakeAnswer
     /// <summary>Claim this many bytes in Content-Length, whatever the body is.</summary>
     public long? ClaimedLength;
 
+    /// <summary>A Location header, as a redirect carries.</summary>
+    public string? Location;
+
     public static FakeAnswer Json(int status, string body) => new() { Status = status, Body = body };
 
     public static FakeAnswer Listed(string id = "entry-1", string token = "token-1") =>
@@ -368,7 +371,8 @@ internal sealed class FakeListing : IDisposable
                 }
 
                 var body = Encoding.UTF8.GetBytes(answer.Body);
-                var head = $"HTTP/1.1 {answer.Status} X\r\nContent-Type: application/json\r\nContent-Length: {answer.ClaimedLength ?? body.Length}\r\nConnection: close\r\n\r\n";
+                var location = answer.Location is null ? "" : $"Location: {answer.Location}\r\n";
+                var head = $"HTTP/1.1 {answer.Status} X\r\nContent-Type: application/json\r\n{location}Content-Length: {answer.ClaimedLength ?? body.Length}\r\nConnection: close\r\n\r\n";
                 await stream.WriteAsync(Encoding.ASCII.GetBytes(head), _stop.Token);
                 await stream.WriteAsync(body, _stop.Token);
             }

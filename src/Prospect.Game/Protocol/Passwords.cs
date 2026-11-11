@@ -73,11 +73,18 @@ public static class Passwords
     }
 
     /// <summary>Computes the proof for one challenge into <paramref name="proof"/> (<see cref="ProofSize"/> bytes).</summary>
-    public static void ComputeProof(ReadOnlySpan<byte> key, ReadOnlySpan<byte> salt, ReadOnlySpan<byte> challenge, Span<byte> proof)
+    public static void ComputeProof(ReadOnlySpan<byte> key, ReadOnlySpan<byte> salt, ReadOnlySpan<byte> challenge, Span<byte> proof) =>
+        ComputeProof(key, salt, challenge, proof, ProtocolInfo.Version);
+
+    /// <summary>
+    /// The proof as a build of protocol <paramref name="version"/> computes it. The game only ever asks for its
+    /// own version; this is here so a test can hold the scheme to bytes worked out elsewhere.
+    /// </summary>
+    internal static void ComputeProof(ReadOnlySpan<byte> key, ReadOnlySpan<byte> salt, ReadOnlySpan<byte> challenge, Span<byte> proof, uint version)
     {
         Span<byte> message = stackalloc byte[Label.Length + 4 + SaltSize + ChallengeSize];
         Label.CopyTo(message);
-        BinaryPrimitives.WriteUInt32LittleEndian(message[Label.Length..], ProtocolInfo.Version);
+        BinaryPrimitives.WriteUInt32LittleEndian(message[Label.Length..], version);
         salt[..SaltSize].CopyTo(message[(Label.Length + 4)..]);
         challenge[..ChallengeSize].CopyTo(message[(Label.Length + 4 + SaltSize)..]);
         HMACSHA256.HashData(key[..KeySize], message, proof[..ProofSize]);

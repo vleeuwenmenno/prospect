@@ -487,6 +487,60 @@ public sealed class ListingTests
     }
 
     [Fact]
+    public async Task ARedirectIsNotFollowedWhereverItPointsAndWhateverItsKind()
+    {
+        // Where the redirects point: a listing server that works, and would answer everything it is asked.
+        const string list = """{"servers":[{"name":"Elsewhere","address":"127.0.0.1","port":27420,"players":0,"maxPlayers":4,"password":false,"version":"0.1.0"}]}""";
+        using var destination = new FakeListing((request, _) => request.Method == "GET" ? FakeAnswer.Json(200, list) : FakeAnswer.Listed());
+
+        // The listing server the game is set up with answers every request by sending it there.
+        var status = 302;
+        using var redirecting = new FakeListing((request, _) => new FakeAnswer { Status = status, Location = destination.Url + request.Path });
+
+        // The destination does answer: asked directly, it gives its list. So if it stays unasked below, that is
+        // because the redirect was not followed, not because there was nothing to follow it to.
+        using (var direct = new ListingHttp(TestNet.Listing(destination.Url)))
+            Assert.True((await direct.SendAsync(HttpMethod.Get, "v1/servers", default, null, 4096, CancellationToken.None)).Is(200));
+        Assert.Single(destination.Requests);
+
+        // Every kind of redirect, for a request without a body and for one with a body and a token: the answer
+        // is handed back as the redirect it is, and neither the body nor the token travels on.
+        using (var http = new ListingHttp(TestNet.Listing(redirecting.Url)))
+        {
+            foreach (var kind in new[] { 301, 302, 303, 307, 308 })
+            {
+                status = kind;
+                var get = await http.SendAsync(HttpMethod.Get, "v1/servers", default, null, 4096, CancellationToken.None);
+                Assert.True(get.Is(kind), $"a GET answered {kind} came back as {get.Outcome} {get.Status}");
+                var post = await http.SendAsync(HttpMethod.Post, "v1/servers", "{}"u8.ToArray(), "secret-token", 4096, CancellationToken.None);
+                Assert.True(post.Is(kind), $"a POST answered {kind} came back as {post.Outcome} {post.Status}");
+            }
+        }
+
+        Assert.Equal(10, redirecting.Requests.Count);
+
+        // The browser shows a failure and none of the destination's games.
+        status = 302;
+        using (var browser = new ServerBrowser(TestNet.Listing(redirecting.Url)))
+        {
+            Assert.True(browser.Refresh());
+            TestNet.WaitUntil(() => browser.State == BrowserState.Failed, "the fetch failing");
+            Assert.Empty(browser.List.Games);
+        }
+
+        // A public server is not listed, there or anywhere, and keeps asking the server it was set up with.
+        using (var announcer = Announcer(TestNet.Listing(redirecting.Url, retry: 0.02, maxRetry: 0.05)))
+        {
+            announcer.Start();
+            TestNet.WaitUntil(() => redirecting.Count("POST") >= 5 + 3, "the announcement being tried again");
+            Assert.NotEqual(AnnounceState.Listed, announcer.State);
+        }
+
+        // Through all of it the destination heard nothing but the one request the test made itself.
+        Assert.Single(destination.Requests);
+    }
+
+    [Fact]
     public void FailuresBackOffInsteadOfHammering()
     {
         // Every connection is dropped without an answer. First retry after 0.1 s, doubling, at most 0.4 s apart.

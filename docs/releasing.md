@@ -70,8 +70,9 @@ docker run -d -p 27420:27420/udp -v ./settings.json:/config/settings.json:ro \
   ghcr.io/<owner>/prospect-server:latest --settings /config/settings.json --set <id>=<value>
 ```
 
-- The file can also hold the server's name, visibility, port, player slots, password and listing address under
-  `"server"`; see [hosting.md](hosting.md). A world-readable file is no place for a password: use the variable.
+- The file can also hold the server's name, visibility, port, player slots, password, listing address and
+  connection limits under `"server"`; see [hosting.md](hosting.md). A world-readable file is no place for a
+  password: use the variable.
 - The server writes no files. Nothing needs a volume.
 - Ids and ranges for settings: `content/rules/settings.json`.
 

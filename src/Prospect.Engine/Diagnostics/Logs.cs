@@ -6,7 +6,11 @@ namespace Prospect.Engine.Diagnostics;
 /// <summary>Log categories shared by the client and the server, on top of BRUTAL's logging.</summary>
 public static class Logs
 {
-    public static void Initialize(LogLevel minimumLevel)
+    /// <summary>
+    /// Sets up logging to the console from <paramref name="minimumLevel"/> up. <paramref name="configure"/>
+    /// can add to that: the tests use it to count what is logged without printing it.
+    /// </summary>
+    public static void Initialize(LogLevel minimumLevel, Action<ILoggingBuilder>? configure = null)
     {
         LogSystem.Initialize(builder =>
         {
@@ -16,6 +20,7 @@ public static class Logs
                 options.SingleLine = true;
                 options.TimestampFormat = "HH:mm:ss.fff ";
             });
+            configure?.Invoke(builder);
         });
 
         App = LogCategory.Make("App");
