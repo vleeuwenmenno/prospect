@@ -1266,7 +1266,7 @@ public sealed class JumpTests
         Assert.True(float.IsFinite(HullSim.JumpTravelSeconds(new Double3(-9e12, -9e12, -9e12), new Double3(9e12, 9e12, 9e12), flight)));
         Assert.True(float.IsNaN(HullSim.JumpTravelSeconds(new Double3(-double.MaxValue, 0, 0), new Double3(double.MaxValue, 0, 0), flight)));
         flight.FtlSpeed = 0;
-        Assert.Equal(4, HullSim.JumpTravelSeconds(default, new Double3(0, 0, -40000), flight));
+        Assert.True(float.IsNaN(HullSim.JumpTravelSeconds(default, new Double3(0, 0, -40000), flight)));
         flight.FtlSpeed = float.Epsilon;
         var state = HullState.Spawn(default, flight);
         var order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -40000) };

@@ -141,7 +141,7 @@ public struct FlightParams
     /// <summary>Seconds of calculation required alongside charging after alignment.</summary>
     public float FtlCalculateSeconds;
     public float FtlTunnelSeconds;
-    /// <summary>Transit metres per second; zero in legacy constructed parameters uses 40000.</summary>
+    /// <summary>Positive transit speed in metres per second, supplied by content.</summary>
     public float FtlSpeed;
     public float FtlArriveSeconds;
 

@@ -59,16 +59,19 @@ internal sealed class CountingLogs : ILoggerProvider, ILogger
 public sealed class ProtocolTests
 {
     [Theory]
-    [InlineData(7f, 2d, true)]
-    [InlineData(-1f, 0d, false)]
-    [InlineData(float.NaN, 0d, false)]
-    [InlineData(float.PositiveInfinity, 0d, false)]
-    [InlineData(float.MaxValue, 0d, false)]
-    [InlineData(7f, -1d, false)]
-    [InlineData(7f, double.NaN, false)]
-    [InlineData(7f, double.PositiveInfinity, false)]
-    [InlineData(7f, 8d, false)]
-    public void TransitWireBounds(float duration, double elapsed, bool valid)
+    [InlineData(7f, 2d, true, JumpPhase.Tunnel)]
+    [InlineData(-1f, 0d, false, JumpPhase.Tunnel)]
+    [InlineData(float.NaN, 0d, false, JumpPhase.Tunnel)]
+    [InlineData(float.PositiveInfinity, 0d, false, JumpPhase.Tunnel)]
+    [InlineData(float.MaxValue, 0d, false, JumpPhase.Tunnel)]
+    [InlineData(7f, -1d, false, JumpPhase.Tunnel)]
+    [InlineData(7f, double.NaN, false, JumpPhase.Tunnel)]
+    [InlineData(7f, double.PositiveInfinity, false, JumpPhase.Tunnel)]
+    [InlineData(7f, 8d, false, JumpPhase.Tunnel)]
+    [InlineData(7f, 1d, false, JumpPhase.None)]
+    [InlineData(7f, 1d, false, JumpPhase.Align)]
+    [InlineData(7f, 1d, false, JumpPhase.Charge)]
+    public void TransitWireBounds(float duration, double elapsed, bool valid, JumpPhase phase)
     {
         Span<byte> buffer = stackalloc byte[HullRecord.MaxWireSize];
         var writer = new NetWriter(buffer);
@@ -77,7 +80,7 @@ public sealed class ProtocolTests
             State = new HullState
             {
                 Orientation = Quaternion.Identity,
-                Jump = JumpPhase.Tunnel,
+                Jump = phase,
                 JumpTunnelSeconds = duration,
                 JumpTunnelElapsed = elapsed,
                 JumpTimer = (float)elapsed

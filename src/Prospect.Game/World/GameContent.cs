@@ -203,7 +203,7 @@ public static class HullSim
     /// <summary>Base transit plus Euclidean world distance over speed; NaN means numerically unsupported.</summary>
     public static float JumpTravelSeconds(Double3 departure, Double3 target, in FlightParams flight)
     {
-        var speed = flight.FtlSpeed == 0 ? 40000f : flight.FtlSpeed;
+        var speed = flight.FtlSpeed;
         var delta = target - departure;
         var scale = Math.Max(Math.Abs(delta.X), Math.Max(Math.Abs(delta.Y), Math.Abs(delta.Z)));
         if (!double.IsFinite(scale) || !float.IsFinite(speed) || speed <= 0 ||
