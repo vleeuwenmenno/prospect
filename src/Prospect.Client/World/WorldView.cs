@@ -94,7 +94,8 @@ internal sealed class WorldView
     private readonly ClientSettings _settings;
     private readonly JobSystem _jobs;
     private readonly SceneRenderer _scene;
-    private readonly HullDesign[] _designs;
+    // The designs as the session's world evaluates them; the meshes built from them are the same in every world.
+    private HullDesign[] _designs;
     private readonly int _asteroidMeshBase;
     private readonly int _asteroidLodMeshBase;
     private readonly int _meshCount;
@@ -273,6 +274,7 @@ internal sealed class WorldView
         _viewport = viewport;
         _screen = screen;
         _snapshot = snapshot;
+        _designs = snapshot.Content.Designs;
         var galaxy = snapshot.Galaxy!;
         if (!ReferenceEquals(galaxy, _galaxy))
         {

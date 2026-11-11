@@ -39,7 +39,7 @@ public enum SessionEndReason : byte
 /// What the render thread knows about the session: a copy published by the client simulation each tick. The render
 /// thread reads these and never touches simulation state.
 /// </summary>
-public sealed class SessionSnapshot
+public sealed class SessionSnapshot(GameContent content)
 {
     public SessionState State;
     public SessionEndReason EndReason;
@@ -62,6 +62,13 @@ public sealed class SessionSnapshot
 
     /// <summary>The server's galaxy, once known. Sector contents are generated from it on demand.</summary>
     public Galaxy? Galaxy;
+
+    /// <summary>
+    /// The game's content as the server's world plays by it, once the server has said what its settings are;
+    /// until then, as the files have it. Hull figures shown to the player come from here, so a data sheet reads
+    /// what the simulation uses. It never changes after loading and is safe to read from any thread.
+    /// </summary>
+    public GameContent Content = content;
 
     /// <summary>The hulls to draw this tick; only the first <see cref="HullCount"/> entries are meaningful.</summary>
     public readonly HullView[] Hulls = new HullView[ClientWorld.MaxViews];
@@ -95,12 +102,15 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     private const int ConnectTimeoutTicks = TickLoop.SimulationHz * 10;
 
     private readonly ITransport _transport;
-    private readonly GameContent _content;
+
+    // The content as loaded, and as the server's settings make it once the server has sent them.
+    private readonly GameContent _loaded;
+    private GameContent _content;
     private readonly ClientWorld _world;
     private Galaxy? _galaxy;
     private readonly string _playerName;
     private readonly TickLoop _loop;
-    private readonly SnapshotExchange<SessionSnapshot> _snapshots = new(() => new SessionSnapshot());
+    private readonly SnapshotExchange<SessionSnapshot> _snapshots;
     private readonly byte[] _sendBuffer = new byte[1024];
 
     private SessionState _state = SessionState.Connecting;
@@ -120,7 +130,9 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     public ClientSession(ITransport transport, GameContent content, string playerName)
     {
         _transport = transport;
+        _loaded = content;
         _content = content;
+        _snapshots = new SnapshotExchange<SessionSnapshot>(() => new SessionSnapshot(content));
         _world = new ClientWorld(content);
         _playerName = PlayerNames.Sanitize(playerName);
         _loop = new TickLoop("ClientSim", TickLoop.SimulationHz, this);
@@ -181,6 +193,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         snapshot.ServerTickPrecise = serverTick;
         snapshot.RockCount = _state == SessionState.Active ? _world.CopyRockDeltas(snapshot.Rocks) : 0;
         snapshot.Galaxy = _galaxy;
+        snapshot.Content = _content;
         snapshot.HullCount = _state == SessionState.Active ? _world.BuildViews(snapshot.Hulls, serverTick, tick, out snapshot.OwnHull) : 0;
         if (snapshot.HullCount == 0)
             snapshot.OwnHull = -1;
@@ -240,11 +253,15 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         switch ((MessageId)payload[0])
         {
             case MessageId.Welcome
-                when _state == SessionState.Handshaking && WelcomeMessage.TryRead(ref reader, out var welcome):
+                when _state == SessionState.Handshaking && WelcomeMessage.TryRead(ref reader, _loaded.SettingCatalog, out var welcome):
                 _state = SessionState.Active;
                 _playerId = welcome.PlayerId;
                 _serverName = welcome.ServerName;
                 _galaxySeed = welcome.GalaxySeed;
+
+                // The server's world, not this machine's files, says how hard things hit: predict by its settings.
+                _content = _loaded.WithSettings(welcome.Settings);
+                _world.SetContent(_content);
                 _galaxy = _content.Galaxy.WithSeed(welcome.GalaxySeed);
                 _world.SetGalaxy(_galaxy);
                 _world.SetPlayer(welcome.PlayerId);

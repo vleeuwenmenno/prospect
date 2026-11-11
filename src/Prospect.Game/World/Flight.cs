@@ -117,6 +117,12 @@ public struct FlightParams
     public float CollisionDamagePerTonneSpeedSquared;
     public float CollisionBounce;
 
+    /// <summary>
+    /// Shield points a collision takes for each point of damage the shield absorbs; zero when collisions pass
+    /// the shield and hit the blocks.
+    /// </summary>
+    public float CollisionShieldCost;
+
     /// <summary>The hull's faster-than-light drive, and how long each stage of a jump takes.</summary>
     public FtlKind Ftl;
 

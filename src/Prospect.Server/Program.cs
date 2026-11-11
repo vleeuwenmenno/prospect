@@ -17,6 +17,9 @@ internal static class Program
           --name <text>       Server name shown to players
           --max-players <n>   Player slots (default 16)
           --seed <n>          Galaxy seed
+          --settings <file>   World settings: a JSON object of setting ids and values
+          --set <id>=<value>  One world setting, after the file; repeat for more
+                              (the ids and ranges are in content/rules/settings.json)
           --verbose           Log debug messages
           --help              Show this text
         """;
@@ -28,6 +31,8 @@ internal static class Program
         var maxPlayers = 16;
         var seed = new ServerConfig().GalaxySeed;
         var verbose = false;
+        string? settingsFile = null;
+        var assignments = new List<string>();
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -49,6 +54,12 @@ internal static class Program
                     seed = value;
                     i++;
                     break;
+                case "--settings" when hasValue:
+                    settingsFile = args[++i];
+                    break;
+                case "--set" when hasValue:
+                    assignments.Add(args[++i]);
+                    break;
                 case "--verbose":
                     verbose = true;
                     break;
@@ -66,14 +77,19 @@ internal static class Program
 
         RakNetTransport transport;
         GameContent content;
+        WorldSettings settings;
         try
         {
             content = GameContent.Load();
+            settings = content.SettingCatalog.Build(settingsFile, assignments, message => Logs.App.Warning(message));
             transport = RakNetTransport.Listen(port, maxPlayers + 8);
         }
         catch (Exception e) when (e is IOException or InvalidDataException or System.Text.Json.JsonException or KeyNotFoundException)
         {
+            // The console logger writes from a background queue that the exit can cut off, so what stopped the
+            // start also goes straight to stderr.
             Logs.App.Error(e.Message);
+            Console.Error.WriteLine(e.Message);
             return 1;
         }
 
@@ -97,6 +113,7 @@ internal static class Program
             Name = name,
             MaxPlayers = maxPlayers,
             GalaxySeed = seed,
+            Settings = settings,
         };
         using var server = new ServerHost(config, content, transport);
         server.Start();

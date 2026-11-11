@@ -30,6 +30,9 @@ internal sealed class AppOptions
     public bool StartLocalGame { get; set; }
     public string? JoinHost { get; set; }
     public ushort JoinPort { get; set; }
+
+    /// <summary>World settings for local games, each as <c>id=value</c>, in the order they were given.</summary>
+    public List<string> WorldSettingArgs { get; } = [];
     /// <summary>Open the command view or the map once in space; for scripted screenshots.</summary>
     public string? OpenView { get; set; }
     public float BenchSeconds { get; set; }
@@ -78,6 +81,7 @@ internal sealed class App : IDisposable
         Jobs = new JobSystem(Math.Clamp(Environment.ProcessorCount - 3, 1, 16), "Job");
 
         Content = GameContent.Load();
+        NewGameSettings = Content.SettingCatalog.Build(null, options.WorldSettingArgs, message => Logs.App.Warning(message));
 
         // Decode the logo, parse the bindings, compile the shaders and build the meshes on workers while the
         // window and the GPU come up on this thread.
@@ -164,6 +168,14 @@ internal sealed class App : IDisposable
 
     public ClientSettings Settings { get; }
     public GameContent Content { get; }
+
+    /// <summary>
+    /// The world settings the next local game starts with: the content's defaults with whatever <c>--set</c>
+    /// changed. A screen that lets the player choose them reads and writes this, or passes its own to
+    /// <see cref="StartLocalGame(in WorldSettings)"/>. What each setting is called and may be set to is in
+    /// <see cref="GameContent.SettingCatalog"/>.
+    /// </summary>
+    public WorldSettings NewGameSettings { get; set; }
     public WorldView World { get; }
     public JobSystem Jobs { get; }
     public InputDevices Devices { get; }
@@ -181,10 +193,21 @@ internal sealed class App : IDisposable
     /// <summary>Process exit code: non-zero when a benchmark missed its targets.</summary>
     public int ExitCode { get; private set; }
 
-    public void StartLocalGame()
+    /// <summary>Starts a local game with <see cref="NewGameSettings"/>.</summary>
+    public void StartLocalGame() => StartLocalGame(NewGameSettings);
+
+    /// <summary>Starts a local game in a world with the given settings, which also become the next game's.</summary>
+    public void StartLocalGame(in WorldSettings settings)
     {
         LeaveSession();
-        Session = GameSession.StartLocal(new ServerConfig { Name = "Local game", MaxPlayers = 1 }, Content, Settings.PlayerName);
+        NewGameSettings = Content.SettingCatalog.Sanitize(settings);
+        var config = new ServerConfig
+        {
+            Name = "Local game",
+            MaxPlayers = 1,
+            Settings = NewGameSettings,
+        };
+        Session = GameSession.StartLocal(config, Content, Settings.PlayerName);
         _screens.Show(Screen.Session);
     }
 

@@ -65,6 +65,8 @@ Always wrap long test runs in `timeout`; a session test that waits on the simula
   network, a session test that runs a real server and client.
 - **A new hull design:** add it to `content/ships/fleet.json`. Stats are derived from blocks; do not add stat
   fields to the design file.
+- **A new world setting:** one entry in `content/rules/settings.json`, its number applied in `FlightRules.Under`,
+  a unit test in `WorldSettingsTests.cs`, a row in the README table. Read a setting nowhere else.
 - **README:** keep the Status and Controls sections true. Say what is not there.
 
 ## Checking the client without a person at the screen

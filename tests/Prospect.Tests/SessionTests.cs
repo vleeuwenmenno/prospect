@@ -23,7 +23,12 @@ public sealed class ProtocolTests
     [Fact]
     public void WelcomeRoundTrips()
     {
-        Span<byte> buffer = stackalloc byte[256];
+        var catalog = GameContent.Load().SettingCatalog;
+        var settings = catalog.Defaults;
+        catalog.Assign(ref settings, "collisionDamage=2.5");
+        catalog.Assign(ref settings, "collisionShields=None");
+
+        Span<byte> buffer = stackalloc byte[WelcomeMessage.MaxWireSize];
         var writer = new NetWriter(buffer);
         new WelcomeMessage
         {
@@ -32,16 +37,19 @@ public sealed class ProtocolTests
             ServerTick = 123456789012,
             GalaxySeed = 0xDEADBEEFCAFEF00D,
             ServerName = "Ceres Station",
-        }.Write(ref writer);
+            Settings = settings,
+        }.Write(ref writer, catalog);
 
         Assert.Equal((byte)MessageId.Welcome, writer.Written[0]);
         var reader = new NetReader(writer.Written[1..]);
-        Assert.True(WelcomeMessage.TryRead(ref reader, out var welcome));
+        Assert.True(WelcomeMessage.TryRead(ref reader, catalog, out var welcome));
         Assert.Equal(42u, welcome.PlayerId);
         Assert.Equal(60, welcome.TickRate);
         Assert.Equal(123456789012, welcome.ServerTick);
         Assert.Equal(0xDEADBEEFCAFEF00D, welcome.GalaxySeed);
         Assert.Equal("Ceres Station", welcome.ServerName);
+        Assert.Equal(settings, welcome.Settings);
+        Assert.NotEqual(catalog.Defaults, welcome.Settings);
     }
 
     [Theory]

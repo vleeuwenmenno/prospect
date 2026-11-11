@@ -104,7 +104,7 @@ internal sealed partial class ScreenHost
             var shown = world.Own;
             if (world.Mode == ViewMode.Command && world.Selection.Length > 0 && world.TryGetHull(world.Selection[0], out var picked))
                 shown = picked;
-            DrawShipInfo(draw, _app.Content.Designs[Math.Min(shown.Design, _app.Content.Designs.Length - 1)], shown.Blocks, world.Mode == ViewMode.Command);
+            DrawShipInfo(draw, snapshot.Content.Designs[Math.Min(shown.Design, snapshot.Content.Designs.Length - 1)], shown.Blocks, world.Mode == ViewMode.Command);
         }
         if (!_mapOpen)
         {
@@ -283,7 +283,7 @@ internal sealed partial class ScreenHost
         Kit.Fade = alpha;
         var display = _ui.DisplaySize;
         var planeHeight = world.CommandFocus.Y;
-        var designs = _app.Content.Designs;
+        var designs = snapshot.Content.Designs;
 
         for (var i = 0; i < snapshot.HullCount; i++)
         {
@@ -429,7 +429,7 @@ internal sealed partial class ScreenHost
         Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3)), Theme.Accent, "FLEET"u8);
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, min + new float2(Kit.Px(Theme.Space4 + 52), Kit.Px(Theme.Space3)), Theme.TextMute, Kit.F($"{owned} HULLS"));
 
-        var designs = _app.Content.Designs;
+        var designs = snapshot.Content.Designs;
         var shift = ImGui.GetIO().KeyShift || ImGui.GetIO().KeyCtrl;
         var y = min.Y + Kit.Px(42);
         for (var i = 0; i < snapshot.HullCount; i++)
@@ -505,7 +505,7 @@ internal sealed partial class ScreenHost
     /// <summary>Pilot view: the hull under the reticle, the targeted hull and its readout.</summary>
     private void DrawTargeting(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world)
     {
-        var designs = _app.Content.Designs;
+        var designs = snapshot.Content.Designs;
         var display = _ui.DisplaySize;
 
         if (world.HoveredHull != 0 && world.HoveredHull != world.TargetHull && world.TryGetHull(world.HoveredHull, out var hovered))
