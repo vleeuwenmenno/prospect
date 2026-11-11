@@ -91,6 +91,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
     private readonly TickLoop _loop;
     private readonly byte[] _sendBuffer = new byte[64 * 1024];
     private readonly HullStore _hulls = new();
+    private readonly HullField _field;
     private readonly GameContent _content;
     private readonly RockField _rocks;
     private readonly RockImpulses _impulses = new();
@@ -106,6 +107,7 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
         _content = content;
         Galaxy = content.Galaxy.WithSeed(config.GalaxySeed);
         _rocks = new RockField(Galaxy);
+        _field = new HullField(_hulls, content.Designs);
 
         // Room for every player plus connections that are still shaking hands or about to be refused as full.
         _connections = new Connection[config.MaxPlayers + 8];
@@ -157,14 +159,12 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
                 SimulatePlayer(connection);
         }
 
-        // Hulls nobody is flying carry out their standing orders, or hold position.
+        // Hulls nobody is flying carry out their standing orders, or hold position. A step can destroy other
+        // hulls and put their pilots in new ones, so nothing read here is kept across it.
         var hold = new FlightInput { Dampeners = true };
         for (var i = 0; i < _hulls.Slots; i++)
         {
-            if (!_hulls.IsAliveAt(i))
-                continue;
-            ref var info = ref _hulls.Info(i);
-            if (!info.Piloted && StepHull(i, hold))
+            if (_hulls.IsAliveAt(i) && !_hulls.Info(i).Piloted && StepHull(i, hold))
                 _hulls.Destroy(_hulls.HandleAt(i));
         }
 
@@ -397,7 +397,6 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
             return;
 
         var index = connection.Hull.Index;
-        ref var info = ref _hulls.Info(index);
         connection.InputCredit = Math.Min(connection.InputCredit + 1, MaxInputCredit);
 
         var simulated = false;
@@ -408,6 +407,8 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
             connection.InputCount--;
             connection.InputCredit--;
 
+            // Looked up for each input: the step before may have created a hull and moved the storage.
+            ref var info = ref _hulls.Info(index);
             if (record.OrderId != info.OrderId && record.OrderId == connection.OrderId)
             {
                 info.Order = connection.Order;
@@ -437,31 +438,38 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
     }
 
     /// <summary>
-    /// Advances one hull a tick, colliding it block by block. When it loses blocks its flight figures are worked
-    /// out again from what is left. Returns true if the hull was destroyed.
+    /// Advances one hull a tick, colliding it block by block with asteroids and with the other hulls. The hulls
+    /// it destroys by running into them are removed here, their pilots put in drones. Returns true if the hull
+    /// itself was destroyed, which is left to the caller. Creating a drone can move the hull storage: hold no
+    /// reference into it across this call.
     /// </summary>
     private bool StepHull(int index, in FlightInput input)
     {
-        ref var info = ref _hulls.Info(index);
-        var design = _content.Designs[info.Design];
-        var body = new HullBody
+        var destroyed = _field.Step(index, input, _rocks, _tick, _impulses);
+        var lost = _field.Lost;
+        for (var i = 0; i < lost.Length; i++)
         {
-            Design = design,
-            Alive = info.Blocks,
-            BlockHp = _hulls.BlockHp(index),
-        };
-        ref var state = ref _hulls.State(index);
-        var destroyed = HullSim.Step(ref state, ref info.Order, input, _hulls.Flight(index), ref body, _rocks, _tick, _impulses);
-        if (body.Alive != info.Blocks)
-        {
-            info.Blocks = body.Alive;
-            design.Evaluate(body.Alive, out _hulls.Flight(index), out _);
-            ref var flight = ref _hulls.Flight(index);
-            state.Shield = Math.Min(state.Shield, flight.ShieldCapacity);
-            state.Energy = Math.Min(state.Energy, flight.EnergyStorage);
+            var handle = _hulls.HandleAt(lost[i]);
+            var pilot = PilotOf(handle);
+            if (pilot is not null)
+                LoseHull(pilot);
+            else
+                _hulls.Destroy(handle);
         }
 
         return destroyed;
+    }
+
+    /// <summary>The connection flying a hull, or null if the server flies it.</summary>
+    private Connection? PilotOf(HullHandle handle)
+    {
+        foreach (var connection in _connections)
+        {
+            if (connection.State == ConnectionState.Active && connection.Hull == handle)
+                return connection;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -514,12 +522,19 @@ public sealed class ServerHost : ITickHandler, ITransportHandler, IDisposable
             OwnHull = connection.Hull.Packed,
         };
 
+        // While the player's hull is knocking against others, those go out every tick as well: the client
+        // predicts the contact, and can only do it against hulls that are where the server has them.
+        var recent = tick - RemoteHullInterval;
+        var inContact = _hulls.IsAlive(connection.Hull) && _hulls.Info(connection.Hull.Index).ContactTick > recent;
+
         // The count is not known until the hulls are written; reserve the header and fill it in afterwards.
         header.Write(ref writer);
         var count = 0;
         for (var i = 0; i < _hulls.Slots && count < byte.MaxValue; i++)
         {
-            if (!_hulls.IsAliveAt(i) || (!includeRemote && i != connection.Hull.Index))
+            if (!_hulls.IsAliveAt(i))
+                continue;
+            if (!includeRemote && i != connection.Hull.Index && !(inContact && _hulls.Info(i).ContactTick > recent))
                 continue;
             if (writer.Length + HullRecord.MaxWireSize > _sendBuffer.Length)
                 break;

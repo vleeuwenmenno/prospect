@@ -22,10 +22,16 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 - **Flight.** A command pod with inertial flight: thrust on all three axes, roll, dampeners, and a boost that heats
   up and locks out. Thrust, boost and shield recharge draw power; the generator refills the battery with the
   surplus.
-- **Collisions and damage.** Hulls collide block by block against each asteroid's real surface. An impact
-  bounces and turns the hull; damage grows with the square of the speed over a safe limit and lands on the blocks
-  that touched, after the shield. A block at zero is gone, and the hull flies on what is left. Losing the core
-  destroys the hull; its pilot gets out in a drone.
+- **Collisions and damage.** Hulls collide block by block against each asteroid's real surface, and block
+  against block with each other. An impact bounces and turns the hull; damage grows with the square of the speed
+  over a safe limit and lands on the blocks that touched, after the shield. A block at zero is gone, and the hull
+  flies on what is left. Losing the core destroys the hull; its pilot gets out in a drone.
+- **Ramming.** Two hulls that meet share the impulse by mass and inertia and both take the same damage, which
+  goes by the pair's reduced mass: about the lighter hull's when the other is far heavier. A drone bounces off a
+  freighter and a freighter shoves a drone aside. Below the safe speed hulls only nudge each other and can rest
+  in contact. A hull in a jump tunnel is not there to be hit, and
+  one that has just come out does no damage and takes none. The client predicts the contact by stepping its own
+  hull and the hulls near it with the server's code.
 - **Asteroids with mass.** An impact pushes hull and asteroid by their share of the momentum, so a pod bounces off
   and a heavy ship shoves a boulder aside. A pushed asteroid drifts and settles. The server tells clients only
   when an asteroid is hit; its motion from then on is a formula, and new players are sent the displaced ones. The server is authoritative; the client predicts its own hull with the same

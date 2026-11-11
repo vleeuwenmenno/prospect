@@ -98,7 +98,11 @@ The client opens a real window on the developer's desktop, and they are usually 
   replication first.
 - Snapshots are full state, not delta-compressed, and there is no interest management yet.
 - Sector discovery is kept by the client for the session; nothing is saved.
-- Hulls do not collide with each other, and asteroids do not collide with each other.
+- Asteroids do not collide with each other.
+- Hull against hull contact tests every hull against every other each tick, bounding spheres first. It needs a
+  spatial index before there are thousands of hulls.
+- The client predicts contact only with hulls near its own, and flies only its own fleet's hulls forward exactly;
+  another player's hull is assumed to keep its velocity until the next snapshot.
 - A player's hulls are removed when they disconnect.
 
 ## Who does the work

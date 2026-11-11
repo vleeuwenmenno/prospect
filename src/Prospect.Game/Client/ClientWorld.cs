@@ -42,18 +42,38 @@ public struct HullView
 /// <summary>
 /// The client's picture of the world. The player's own hull is predicted: inputs are applied immediately with the
 /// same flight code the server runs, and each server snapshot corrects the result by replaying the inputs the
-/// server has not seen yet. Other hulls are drawn slightly in the past, interpolated between snapshots.
+/// server has not seen yet. Other hulls are drawn slightly in the past, interpolated between snapshots. The
+/// prediction runs into them all the same: it steps a copy of the hulls near the player's, brought up to the
+/// present, with the code the server steps them with.
 /// </summary>
-internal sealed class ClientWorld
+internal sealed class ClientWorld : IDisposable
 {
     public const int MaxViews = 64;
     private const int PendingCapacity = 256;
-    private const int SamplesPerHull = 8;
+
+    /// <summary>
+    /// Samples kept per remote hull. A hull in contact with the player's is sent every tick, so this has to
+    /// reach back past the interpolation delay at one sample a tick, with room for late packets.
+    /// </summary>
+    private const int SamplesPerHull = 16;
     private const int RemoteExpiryTicks = 120;
 
     /// <summary>How far in the past remote hulls are drawn, in ticks; covers the gap between their updates.</summary>
     private const double InterpolationDelayTicks = 6;
     private const float MaxExtrapolationSeconds = 0.25f;
+
+    /// <summary>
+    /// A hull not heard of for this many ticks, four of the server's updates, is no longer something to run into:
+    /// it has most likely been destroyed, and the server decides either way.
+    /// </summary>
+    private const int NearStaleTicks = 12;
+
+    /// <summary>
+    /// A hull is near enough to predict against if the two could meet within this many seconds at the speeds
+    /// they have, with <see cref="NearMargin"/> metres to spare. It covers the inputs the server has yet to answer.
+    /// </summary>
+    private const float NearSeconds = 0.5f;
+    private const float NearMargin = 20f;
     private const float JumpGap = 3000f;
 
     /// <summary>A correction larger than this is a teleport, not an error to smooth.</summary>
@@ -87,6 +107,9 @@ internal sealed class ClientWorld
         public long LastSeenTick;
         public int Newest;
         public int Count;
+
+        /// <summary>The hull's flight figures with the blocks it has left: its mass, inertia and reach in a collision.</summary>
+        public FlightParams Flight;
     }
 
     private readonly GameContent _content;
@@ -98,6 +121,12 @@ internal sealed class ClientWorld
     private readonly Remote[] _remotes = new Remote[MaxViews];
     private readonly Sample[] _samples = new Sample[MaxViews * SamplesPerHull];
     private readonly HullView[] _lastViews = new HullView[MaxViews];
+
+    // The predicted world: the player's hull in slot 0 and the hulls near it after that, in the server's order.
+    // Rebuilt from each snapshot and stepped once per input.
+    private readonly HullStore _near = new(MaxViews + 1);
+    private readonly HullField _field;
+    private int _ticksSinceSnapshot;
     private readonly byte[] _sendBuffer = new byte[256];
     private readonly byte[] _fleetBuffer = new byte[2 + FleetOrdersMessage.MaxOrders * 29];
     private int _lastViewCount;
@@ -121,7 +150,10 @@ internal sealed class ClientWorld
         _content = content;
         _flight = content.Pod.Flight;
         _ownDesign = (byte)content.PodDesign;
+        _field = new HullField(_near, content.Designs, authoritative: false);
     }
+
+    public void Dispose() => _near.Dispose();
 
     public void SetPlayer(uint playerId) => _playerId = playerId;
 
@@ -214,9 +246,17 @@ internal sealed class ClientWorld
         slot.Order = _order;
         _nextSequence++;
 
+        // With the server silent the hulls nearby are guesses growing old: stop running into them.
+        if (++_ticksSinceSnapshot > NearStaleTicks)
+        {
+            for (var i = 1; i < _near.Slots; i++)
+                _near.Destroy(_near.HandleAt(i));
+        }
+
         var energyBefore = _predicted.Energy;
-        var body = new HullBody { Design = OwnDesign, Alive = _ownBlocks };
-        HullSim.Step(ref _predicted, ref _order, input, _flight, ref body, _rocks, _serverTick);
+        _near.State(0) = _predicted;
+        StepNear(ref _order, input);
+        _predicted = _near.State(0);
         _energyRate += ((_predicted.Energy - energyBefore) / HullSim.Dt - _energyRate) * 0.2f;
         Send(transport);
     }
@@ -227,29 +267,38 @@ internal sealed class ClientWorld
         if (!SnapshotHeader.TryRead(ref reader, out var header))
             return;
 
+        var own = default(HullRecord);
+        var hasOwn = false;
         for (var i = 0; i < header.HullCount; i++)
         {
             if (!HullRecord.TryRead(ref reader, out var record))
-                return;
+                break;
 
             if (record.Id == header.OwnHull)
             {
-                if (record.Id != _ownHullId || !_hasOwnState)
-                    SwitchHull(record);
-                if (record.Blocks != _ownBlocks)
-                {
-                    // The hull has lost blocks: it flies on what is left.
-                    _ownBlocks = record.Blocks;
-                    OwnDesign.Evaluate(_ownBlocks, out _flight, out _);
-                }
-
-                Reconcile(record.State, header.AckedInput);
+                own = record;
+                hasOwn = true;
             }
             else
             {
                 StoreRemote(record, header.ServerTick, clientTick);
             }
         }
+
+        // The player's hull goes last, so its inputs are replayed against the other hulls as this snapshot has them.
+        if (!hasOwn)
+            return;
+
+        if (own.Id != _ownHullId || !_hasOwnState)
+            SwitchHull(own);
+        if (own.Blocks != _ownBlocks)
+        {
+            // The hull has lost blocks: it flies on what is left.
+            _ownBlocks = own.Blocks;
+            OwnDesign.Evaluate(_ownBlocks, out _flight, out _);
+        }
+
+        Reconcile(own.State, header.AckedInput, header.ServerTick);
     }
 
     /// <summary>Applies asteroid motion records from the server.</summary>
@@ -383,13 +432,14 @@ internal sealed class ClientWorld
         transport.Send(0, NetChannel.Unreliable, writer.Written);
     }
 
-    private void Reconcile(in HullState authoritative, uint acked)
+    private void Reconcile(in HullState authoritative, uint acked, long snapshotTick)
     {
         if (!_hasOwnState)
         {
             _hasOwnState = true;
             _predicted = authoritative;
             _ackedSequence = Math.Max(acked, _ackedSequence);
+            BuildNear(authoritative, snapshotTick);
             return;
         }
 
@@ -398,16 +448,18 @@ internal sealed class ClientWorld
             return;
         _ackedSequence = acked;
 
-        // Start from what the server computed and re-apply every input it has not simulated yet.
-        var state = authoritative;
+        // Start from what the server computed, for the player's hull and for the hulls near it, and re-apply
+        // every input it has not simulated yet.
+        BuildNear(authoritative, snapshotTick);
         var first = Math.Max(acked + 1, _nextSequence > PendingCapacity ? _nextSequence - PendingCapacity + 1 : 1);
         for (var sequence = first; sequence < _nextSequence; sequence++)
         {
             ref var slot = ref _pending[sequence % PendingCapacity];
             var order = slot.Order;
-            var body = new HullBody { Design = OwnDesign, Alive = _ownBlocks };
-            HullSim.Step(ref state, ref order, slot.Record.Input, _flight, ref body, _rocks, _serverTick);
+            StepNear(ref order, slot.Record.Input);
         }
+
+        var state = _near.State(0);
 
         // Keep the drawn position continuous: whatever the correction moved is bled off over the next ticks.
         var error = _predicted.Position.RelativeTo(state.Position);
@@ -435,11 +487,17 @@ internal sealed class ClientWorld
             return;
 
         ref var remote = ref _remotes[slot];
-        if (!remote.Used || remote.Id != record.Id)
+        var design = (byte)Math.Min(record.Design, _content.Designs.Length - 1);
+        var known = remote.Used && remote.Id == record.Id;
+        if (!known)
             remote = new Remote { Used = true, Id = record.Id, Newest = -1 };
 
+        // What the hull weighs in a collision follows from the blocks it has left.
+        if (!known || remote.Design != design || remote.Blocks != record.Blocks)
+            _content.Designs[design].Evaluate(record.Blocks, out remote.Flight, out _);
+
         remote.Owner = record.Owner;
-        remote.Design = record.Design;
+        remote.Design = design;
         remote.Blocks = record.Blocks;
         remote.LastSeenTick = clientTick;
         if (remote.Count > 0 && _samples[slot * SamplesPerHull + remote.Newest].Tick >= serverTick)
@@ -453,6 +511,88 @@ internal sealed class ClientWorld
             State = record.State,
             Order = record.Order,
         };
+    }
+
+    /// <summary>
+    /// Rebuilds the predicted world from a snapshot: the player's hull as the server has it, and each hull near
+    /// enough to meet it soon, brought forward from when it was last heard of to the snapshot's tick.
+    /// </summary>
+    private void BuildNear(in HullState own, long snapshotTick)
+    {
+        _ticksSinceSnapshot = 0;
+        _near.Clear();
+        _near.Create(_playerId, _ownDesign, OwnDesign, own.Position);
+        _near.State(0) = own;
+        _near.Info(0).Blocks = _ownBlocks;
+        _near.Flight(0) = _flight;
+
+        // The server steps the hulls nobody flies in slot order, and the order decides who gives way when two
+        // of them touch: keep it.
+        Span<int> order = stackalloc int[MaxViews];
+        var count = 0;
+        for (var r = 0; r < _remotes.Length; r++)
+        {
+            ref var remote = ref _remotes[r];
+            if (!remote.Used || remote.Count == 0)
+                continue;
+
+            ref var sample = ref _samples[r * SamplesPerHull + remote.Newest];
+            var reach = _flight.Radius + remote.Flight.Radius + (own.Velocity.Length() + sample.State.Velocity.Length()) * NearSeconds + NearMargin;
+            if (snapshotTick - sample.Tick > NearStaleTicks || !(sample.State.Position.RelativeTo(own.Position).LengthSquared() < reach * reach))
+                continue;
+
+            var at = count++;
+            for (; at > 0 && (_remotes[order[at - 1]].Id & 0xFFFF) > (remote.Id & 0xFFFF); at--)
+                order[at] = order[at - 1];
+            order[at] = r;
+        }
+
+        var hold = new FlightInput { Dampeners = true };
+        for (var i = 0; i < count; i++)
+        {
+            ref var remote = ref _remotes[order[i]];
+            ref var sample = ref _samples[order[i] * SamplesPerHull + remote.Newest];
+            var index = _near.Create(remote.Owner, remote.Design, _content.Designs[remote.Design], sample.State.Position).Index;
+            ref var info = ref _near.Info(index);
+            ref var state = ref _near.State(index);
+            info.Blocks = remote.Blocks;
+            info.Order = sample.Order;
+            state = sample.State;
+            _near.Flight(index) = remote.Flight;
+
+            // The player's other hulls are flown by the server, and how is known: fly them the same way up to
+            // now. Somebody else's hull may have a pilot; all that can be said of it is that it keeps going.
+            for (var age = snapshotTick - sample.Tick; age > 0; age--)
+            {
+                if (remote.Owner == _playerId)
+                    HullSim.Step(ref state, ref info.Order, hold, remote.Flight);
+                else
+                    state.Position += state.Velocity * HullSim.Dt;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Advances the predicted world one tick the way the server advances the real one: the player's hull under
+    /// the given input, then the player's other hulls under their orders. Hulls that are struck recoil here as
+    /// they will on the server, so the next input meets them where they will be.
+    /// </summary>
+    private void StepNear(ref HullOrder order, in FlightInput input)
+    {
+        _near.Info(0).Order = order;
+        _field.Step(0, input, _rocks, _serverTick);
+        order = _near.Info(0).Order;
+
+        var hold = new FlightInput { Dampeners = true };
+        for (var i = 1; i < _near.Slots; i++)
+        {
+            if (!_near.IsAliveAt(i))
+                continue;
+            if (_near.Info(i).Owner == _playerId)
+                _field.Step(i, hold, _rocks, _serverTick);
+            else
+                _near.State(i).Position += _near.State(i).Velocity * HullSim.Dt;
+        }
     }
 
     private HullView Interpolate(int slot, ref Remote remote, double renderTick)

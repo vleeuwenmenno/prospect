@@ -32,6 +32,12 @@ public struct HullInfo
 
     /// <summary>The owner's order counter at the time <see cref="Order"/> was set.</summary>
     public ushort OrderId;
+
+    /// <summary>
+    /// The tick in which the hull last struck another hull or was struck by one. A hull that was just knocked
+    /// about is not where anyone would expect it, so the server tells of it at once.
+    /// </summary>
+    public long ContactTick;
 }
 
 /// <summary>
@@ -113,10 +119,20 @@ public sealed unsafe class HullStore : IDisposable
             Alive = true,
             Owner = owner,
             Design = design,
+            ContactTick = long.MinValue,
         };
         _states[index] = state;
         _count++;
         return new HullHandle(index, generation);
+    }
+
+    /// <summary>Removes every hull and keeps the memory, for a store that is filled afresh each time it is used.</summary>
+    public void Clear()
+    {
+        for (var i = 0; i < _highWater; i++)
+            _infos[i].Alive = false;
+        _highWater = 0;
+        _count = 0;
     }
 
     public void Destroy(HullHandle handle)
