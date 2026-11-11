@@ -593,10 +593,10 @@ internal sealed partial class ScreenHost
         var fresh = world.TargetHull != _indicatorHull || world.TargetRock != _indicatorRock;
         _indicatorHull = world.TargetHull;
         _indicatorRock = world.TargetRock;
-        var targetReach = TargetCue.OnTargetReach(inFront ? pixels : 0f, rock, Kit.Scale);
-        var morph = _targetCue.Step(room, fresh, inFront, screen, across, settled, Kit.Scale, _ui.DeltaTime, targetReach);
+        var morph = _targetCue.Step(room, fresh, inFront, screen, across, settled, Kit.Scale, _ui.DeltaTime, rock);
         var at = _targetCue.At;
         var anchored = !_targetCue.Out;
+        var space = Math.Max(0f, room.Space(at) - Kit.Px(1));
 
         if (morph < 1f)
         {
@@ -605,14 +605,14 @@ internal sealed partial class ScreenHost
             var color = Kit.Color(rgb, shown);
             if (rock)
             {
-                var ring = TargetCue.Size(Math.Max(inFront ? pixels * 1.08f : 0f, Kit.Px(14)), Kit.Px(10), room.Reach - Kit.Px(5), anchored, morph);
+                var ring = TargetCue.Size(Math.Max(inFront ? pixels * 1.08f : 0f, Kit.Px(14)), Kit.Px(10), room.Reach - Kit.Px(5), anchored, morph, space - Kit.Px(5));
                 draw.AddCircle(at, ring, color, 56, Kit.Px(1.5f));
                 var reach = ring + Kit.Px(5);
                 Brackets(draw, at - new float2(reach, reach), at + new float2(reach, reach), Kit.Px(9), color);
             }
             else
             {
-                var reach = TargetCue.Size(Math.Max(inFront ? pixels * 1.3f : 0f, Kit.Px(18)), Kit.Px(12), MathF.Floor(room.Reach / 1.25f), anchored, morph);
+                var reach = TargetCue.Size(Math.Max(inFront ? pixels * 1.3f : 0f, Kit.Px(18)), Kit.Px(12), MathF.Floor(room.Reach / 1.25f), anchored, morph, space / 1.25f);
                 Brackets(draw, at - new float2(reach, reach), at + new float2(reach, reach), Kit.Px(10), color);
                 draw.AddCircle(at, reach * 1.25f, Kit.Color(rgb, 0.5f * shown), 40, Kit.Px(1.2f));
             }

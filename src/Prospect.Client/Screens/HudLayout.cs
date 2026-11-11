@@ -318,6 +318,16 @@ internal readonly struct HudCueRoom
         return !Inside(Column, point, pad) && !Inside(Readout, point, pad) && !Inside(Strip, point, pad);
     }
 
+    /// <summary>The largest marker half-size that fits at a point; negative when the point is obstructed.</summary>
+    public float Space(float2 point)
+    {
+        var space = Math.Min(Math.Min(point.X - Screen.Left, Screen.Right - point.X), Math.Min(point.Y - Screen.Top, Screen.Bottom - point.Y));
+        return Math.Min(space, Math.Min(Outside(Column, point), Math.Min(Outside(Readout, point), Outside(Strip, point))));
+    }
+
+    private static float Outside(in HudRect box, float2 point) => box.Right <= box.Left ? float.PositiveInfinity
+        : Math.Max(Math.Max(box.Left - point.X, point.X - box.Right), Math.Max(box.Top - point.Y, point.Y - box.Bottom));
+
     /// <summary>
     /// The last point clear for a cue on the way from <paramref name="from"/> along <paramref name="direction"/>
     /// (a unit vector): where the arrow for a target that way sits.
@@ -407,9 +417,10 @@ internal struct TargetCue
     /// direction is too close to straight behind to mean anything. Returns the eased morph; <see cref="At"/> is
     /// where to draw.
     /// </summary>
-    public float Step(in HudCueRoom room, bool fresh, bool inFront, float2 screen, float2 across, bool settled, float scale, float dt, float targetReach = 0f)
+    public float Step(in HudCueRoom room, bool fresh, bool inFront, float2 screen, float2 across, bool settled, float scale, float dt, bool rock = false)
     {
-        var reach = Math.Max(room.Reach, targetReach);
+        // A close target keeps a smaller marker on its centre; its projected size must not send it to an edge.
+        var reach = Math.Max(room.Reach, MinimumReach(rock, scale));
         var clear = inFront && room.Clear(screen, reach);
         var deep = inFront && room.Clear(screen, reach + MathF.Round(Hysteresis * scale));
 
@@ -466,18 +477,18 @@ internal struct TargetCue
         return morph;
     }
 
-    /// <summary>The full on-target marker's bounds, including its ring, brackets and stroke.</summary>
-    public static float OnTargetReach(float pixels, bool rock, float scale) =>
-        (rock ? Math.Max(pixels * 1.08f, MathF.Round(14f * scale)) + MathF.Round(5f * scale)
-            : Math.Max(pixels * 1.3f, MathF.Round(18f * scale)) * 1.25f) + MathF.Round(scale);
+    /// <summary>The smallest on-target marker's bounds, including its ring, brackets and stroke.</summary>
+    public static float MinimumReach(bool rock, float scale) =>
+        (rock ? MathF.Round(14f * scale) + MathF.Round(5f * scale)
+            : MathF.Round(18f * scale) * 1.25f) + MathF.Round(scale);
 
     /// <summary>
     /// The bracket's size at a morph: its size on the target, shrinking to <paramref name="arrow"/>. Off its target
-    /// it starts no larger than <paramref name="cap"/>, so it never reaches past the cue's room.
+    /// it starts no larger than <paramref name="cap"/>. Its final size fits the space at the drawn point.
     /// </summary>
-    public static float Size(float onTarget, float arrow, float cap, bool anchored, float morph)
+    public static float Size(float onTarget, float arrow, float cap, bool anchored, float morph, float available = float.PositiveInfinity)
     {
         var start = anchored ? onTarget : Math.Min(onTarget, cap);
-        return start + (arrow - start) * morph;
+        return Math.Min(start + (arrow - start) * morph, Math.Max(0f, available));
     }
 }

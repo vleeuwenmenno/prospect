@@ -353,20 +353,69 @@ public sealed class HudLayoutTests
     }
 
     [Theory]
-    [InlineData(false, 0f, 355f)]
-    [InlineData(false, 60f, 340f)]
-    [InlineData(true, 60f, 340f)]
-    public void TheWholeTargetMarkerMustFitBeforeItCanStayAnchored(bool rock, float pixels, float y)
+    [InlineData(1655f, 688f, 2f, 8f, 60f, false, false)]
+    [InlineData(1655f, 688f, 2f, 8f, 150f, false, true)]
+    [InlineData(1920f, 1080f, 1f, 100f, 220f, true, true)]
+    public void CloseTargetsStayMarkedAtTheirCentre(float width, float height, float scale, float radius, float distance, bool rock, bool strip)
+    {
+        var room = new HudCueRoom(new float2(width, height), scale, 280f, true, strip);
+        var pixels = radius / distance * height * 0.5f / MathF.Tan(31f * MathF.PI / 180f);
+        var cue = new TargetCue();
+        for (var frame = 0; frame < 30; frame++)
+        {
+            var point = new float2(width * 0.5f + (frame % 3 - 1), height * 0.5f);
+            var morph = cue.Step(room, frame == 0, true, point, default, true, scale, 1f / 60f, rock);
+            Assert.False(cue.Out);
+            Assert.Equal(point, cue.At);
+            var space = room.Space(cue.At) - Px(1f, scale);
+            var extent = rock
+                ? TargetCue.Size(Math.Max(pixels * 1.08f, Px(14f, scale)), Px(10f, scale), room.Reach - Px(5f, scale), true, morph, space - Px(5f, scale)) + Px(5f, scale)
+                : TargetCue.Size(Math.Max(pixels * 1.3f, Px(18f, scale)), Px(12f, scale), MathF.Floor(room.Reach / 1.25f), true, morph, space / 1.25f) * 1.25f;
+            Assert.True(room.Clear(cue.At, extent + Px(1f, scale)));
+            Assert.True(extent >= TargetCue.MinimumReach(rock, scale) - Px(1f, scale));
+        }
+    }
+
+    [Theory]
+    [InlineData(false, 355f)]
+    [InlineData(true, 360f)]
+    public void TheSmallestTargetMarkerMustFitBeforeItCanStayAnchored(bool rock, float y)
     {
         var room = new HudCueRoom(new float2(1655, 688), 2f, 280f, true, true);
         var point = new float2(827.5f, y);
         Assert.True(room.Clear(point, room.Reach));
-        var reach = TargetCue.OnTargetReach(pixels, rock, 2f);
+        var reach = TargetCue.MinimumReach(rock, 2f);
         Assert.False(room.Clear(point, reach));
         var cue = new TargetCue();
-        cue.Step(room, true, true, point, new float2(0, 1), true, 2f, 1f / 60f, reach);
+        cue.Step(room, true, true, point, new float2(0, 1), true, 2f, 1f / 60f, rock);
         Assert.True(cue.Out);
         Assert.True(room.Clear(cue.At, ArrowRing(2f)));
+    }
+
+    [Theory]
+    [MemberData(nameof(Screens))]
+    public void AvailableMarkerSpaceStopsAtTheFirstPanelOrScreenEdge(float width, float height, float scale)
+    {
+        foreach (var strip in new[] { false, true })
+        {
+            var room = new HudCueRoom(new float2(width, height), scale, height * 0.55f, true, strip);
+            for (var x = -20f; x < width + 20f; x += 17f)
+            {
+                for (var y = -20f; y < height + 20f; y += 19f)
+                {
+                    var point = new float2(x, y);
+                    var space = room.Space(point);
+                    if (space < 0f)
+                    {
+                        Assert.False(room.Clear(point, 0f));
+                        continue;
+                    }
+
+                    Assert.True(room.Clear(point, space));
+                    Assert.False(room.Clear(point, space + 0.01f));
+                }
+            }
+        }
     }
 
     [Theory]
