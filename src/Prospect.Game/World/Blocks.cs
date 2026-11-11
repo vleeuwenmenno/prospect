@@ -21,6 +21,9 @@ public enum FtlKind : byte
 /// <summary>A kind of block a hull can be built from, loaded from <c>content/blocks</c>.</summary>
 public sealed class BlockType
 {
+    /// <summary>Per-stat volume exponents; omitted stats grow linearly with volume.</summary>
+    public IReadOnlyDictionary<string, double> SizeRules { get; init; } = new Dictionary<string, double>();
+
     public required string Id { get; init; }
     public required string Name { get; init; }
 
@@ -125,6 +128,9 @@ public sealed class BlockCatalog
     /// <summary>The rules as the content files give them, before any world's settings.</summary>
     public FlightRules Rules { get; }
 
+    /// <summary>Content limits for versioned box designs.</summary>
+    public DesignLimits Limits { get; private init; } = null!;
+
     public BlockType Get(string id) =>
         _types.TryGetValue(id, out var type) ? type : throw new InvalidDataException($"Unknown block type \"{id}\"");
 
@@ -161,6 +167,7 @@ public sealed class BlockCatalog
             var block = entry.Value;
             types[entry.Name] = new BlockType
             {
+                SizeRules = BoxDesign.ReadSizeRules(block, path + ": " + entry.Name),
                 Id = entry.Name,
                 Name = block.GetProperty("name"u8).GetString()!,
                 Mass = block.GetProperty("mass"u8).GetSingle(),
@@ -189,7 +196,7 @@ public sealed class BlockCatalog
             };
         }
 
-        return new BlockCatalog(types, rules);
+        return new BlockCatalog(types, rules) { Limits = DesignLimits.Read(root.GetProperty("limits"u8), path) };
     }
 }
 
@@ -293,6 +300,10 @@ public sealed class HullDesign
     {
         using var document = JsonDocument.Parse(File.ReadAllBytes(path));
         var root = document.RootElement;
+
+        var boxes = BoxDesign.Parse(root, catalog, path);
+        if (boxes.Blocks.Length > MaxBlocks || boxes.Blocks.ToArray().Any(b => b.Size != new GridSize(1, 1, 1)))
+            throw new InvalidDataException($"{path}: sized boxes or more than 64 blocks need blocks-at-scale stage 2 (storage, wire, collision and drawing)");
 
         var cells = new List<(int, int, int)>();
         var types = new List<BlockType>();

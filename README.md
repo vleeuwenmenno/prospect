@@ -11,6 +11,10 @@ or that local game opened to other players. There is one simulation and one code
 
 ## Status
 
+Stage 1 of blocks at scale exists in tooling and tests: versioned boxes, content limits and size rules,
+solid-box evaluation and running sums, with seeded 4,096-block and 150,000-block fixtures.
+See [docs/blocks-at-scale.md](docs/blocks-at-scale.md) for measurements and the remaining stages.
+
 Milestone 1 (skeleton) is complete. On top of it, the first slice of the world is in:
 
 - **Sectors.** The galaxy is a grid of 40 km cells generated from the server's seed: name, star, character and
@@ -97,7 +101,8 @@ line; the join screen still takes an address only and cannot ask for a password)
 a UDP port others can reach), encryption of game traffic, IPv6, mining, taking control of ships owned by other players (permissions), jump range and cost, gates,
 saving. Stations and gas fields are not generated yet; asteroids do not crack into pieces, and ore shows only as
 a tint. Asteroids come in a shared set of shapes until mining gives each one its own body. Designs are limited to 64
-blocks for now, because block state is sent as one bit per block.
+unit-sized blocks for now, because block state is sent as one bit per block. Sized boxes and larger designs
+are refused by the live loader until stage 2 adds storage, wire support, collision and drawing.
 
 ## Controls
 
