@@ -31,6 +31,16 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
   rift). No range limit yet; limits come later from modules, power and mass.
 - **Resources.** Asteroids carry ore: iron, copper, nickel, titanium, silver, gold. More kinds later.
 
+## Decided: world generation
+
+- **One seed makes the whole world.** Same seed, same world, on the server and on every client.
+- **Sectors are filled by modules.** Each module makes one kind of thing: asteroid fields first, stations and gas
+  fields later. Adding a module does not change what the others make.
+- **Every sector has a character:** how rich it is and which resources can occur there. Some have every
+  resource, some have none, some never have a given one.
+- **Asteroids come in all sizes.** Many tiny ones, a few huge ones, in dense fields.
+- **An asteroid with ore looks slightly different** from bare rock: noticeable, not loud.
+
 ## Decided: world settings
 
 - **A world has settings:** switches and multipliers, chosen when a new game or a server is set up.
@@ -83,9 +93,11 @@ Next:
 
 After that:
 
-1. The ship editor (B), then the ship generator.
-2. Mining and the loop it feeds: mine, haul, refine, sell, build. Shipyards.
-3. Factions: strategic model first, then their ships and stations in occupied sectors.
+1. Asteroid looks: more complex shapes, generated textures, dust where a ship bumps one.
+2. Asteroids that crack into pieces, for the ones with a rich core.
+3. The ship editor (B), then the ship generator.
+4. Mining and the loop it feeds: mine, haul, refine, sell, build. Shipyards.
+5. Factions: strategic model first, then their ships and stations in occupied sectors.
 
 ## Open
 
