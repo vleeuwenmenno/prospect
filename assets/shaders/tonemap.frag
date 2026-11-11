@@ -202,8 +202,12 @@ void opening(int index, vec3 v, vec2 pos, float pixelAngle, float time, float de
         vec2 bent;
         if (project(c + hit + side * shift.x + up * shift.y, bent))
         {
-            bend += (bent - pos) * (1.0 - inside);
-            bentBy |= 1 << index;
+            vec2 contribution = (bent - pos) * (1.0 - inside);
+            if (contribution != vec2(0.0))
+            {
+                bend += contribution;
+                bentBy |= 1 << index;
+            }
         }
         // The far side is laid on the window and shifts with the view through it, so it reads as deep, not
         // painted on.
@@ -229,8 +233,12 @@ void opening(int index, vec3 v, vec2 pos, float pixelAngle, float time, float de
         if (project(c, centre))
         {
             float size = tan(rim) / frame.lens.x;
-            bend += deflect(pos - centre, size * 1.3, size * 4.0) * (1.0 - inside);
-            bentBy |= 1 << index;
+            vec2 contribution = deflect(pos - centre, size * 1.3, size * 4.0) * (1.0 - inside);
+            if (contribution != vec2(0.0))
+            {
+                bend += contribution;
+                bentBy |= 1 << index;
+            }
         }
         // Across the sphere as seen from here, with the hull's own up, so the far sky does not roll with the
         // camera; it shifts as the sphere is seen from another side.
@@ -392,7 +400,7 @@ float ownPassage(int kind, vec3 v, vec2 pos, float pixelAngle, float depth, bool
 
     // The real world is bent where it is seen past the opening from the real side.
     float realSide = entry ? 1.0 - past : past;
-    if (!inFront && lens != vec2(0.0))
+    if (!inFront && lens * realSide != vec2(0.0))
     {
         bend += lens * realSide;
         bentBy |= OwnBit;
@@ -434,25 +442,30 @@ vec3 hyperspaceTunnel(vec3 v, float travel, float pixelAngle)
     return vec3(0.002, 0.006, 0.02) + vec3(0.4, 0.6, 1.0) * 0.0075 / (theta + 0.05) + vec3(0.65, 0.82, 1.0) * streaks * 1.8;
 }
 
-// Where, along the view, a ray first meets an opening that bent the lookup it belongs to: each opening worked out
-// the way it was when it bent the view, so a bent lookup is judged by the openings along the ray it reads.
+// A sampled surface must be behind every opening that displaced its lookup, so the farthest valid depth is the
+// threshold. A plane parallel to the sampled ray or behind the camera imposes no threshold on that ray. Sphere
+// misses retain sphereRay's closest-approach depth, which defines the sphere's surrounding lens field.
 float mouthDepth(int bentBy, vec3 v)
 {
-    float nearest = Far;
+    float farthest = 0.0;
     for (int i = 0; i < 4; i++)
     {
         if ((bentBy & (1 << i)) == 0)
             continue;
         vec4 place = frame.openings[i * 4];
         vec4 params = frame.openings[i * 4 + 3];
-        nearest = min(nearest, int(params.x + 0.5) == 3 ? planeDepth(v, place.xyz, frame.openings[i * 4 + 1].xyz) : sphereDepth(v, place.xyz, place.w * params.y));
+        float at = int(params.x + 0.5) == 3 ? planeDepth(v, place.xyz, frame.openings[i * 4 + 1].xyz) : sphereDepth(v, place.xyz, place.w * params.y);
+        if (at > 0.0 && at < Far)
+            farthest = max(farthest, at);
     }
     if ((bentBy & OwnBit) != 0)
     {
         vec4 mouth = int(frame.ftl.y + 0.5) == 1 ? frame.ftlEntry : frame.ftlExit;
-        nearest = min(nearest, int(frame.ftl.x + 0.5) == 3 ? planeDepth(v, mouth.xyz, frame.ftlAxis.xyz) : sphereDepth(v, mouth.xyz, mouth.w));
+        float at = int(frame.ftl.x + 0.5) == 3 ? planeDepth(v, mouth.xyz, frame.ftlAxis.xyz) : sphereDepth(v, mouth.xyz, mouth.w);
+        if (at > 0.0 && at < Far)
+            farthest = max(farthest, at);
     }
-    return nearest;
+    return farthest;
 }
 
 void main()

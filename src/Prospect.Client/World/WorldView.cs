@@ -392,6 +392,14 @@ internal sealed class WorldView
         if (!ReferenceEquals(galaxy, _galaxy))
         {
             _galaxy = galaxy;
+            // Each admitted session creates its own galaxy, even when its seed and hull IDs match the last one.
+            _visuals.Clear();
+            _ownId = 0;
+            _jumpOffset = _jumpThrough = _jumpTravel = _jumpCover = _jumpStretch = _jumpLight = _jumpStage = 0f;
+            _jumpEntryRadius = _jumpExitRadius = _jumpEntryOpen = _jumpExitOpen = 0f;
+            _jumpExitPlaced = _jumpThroughExit = false;
+            _jumpKind = FtlKind.None;
+            _jumpSunBlend = 1f;
             _commandCycle.Reset();
             _pilotCycle.Reset();
             _pickHulls = new PickHull[snapshot.Hulls.Length];
@@ -1293,6 +1301,17 @@ internal sealed class WorldView
     /// </summary>
     public Double3 HullPosition(in HullView hull) => hull.IsOwn ? OwnPosition : hull.Position;
 
+    /// <summary>Whether the hull is present in the world view; strategic maps retain hulls while they are in transit.</summary>
+    public bool IsDrawn(in HullView hull)
+    {
+        var visuals = _visuals.Hulls;
+        var snapshot = _snapshot;
+        for (var i = 0; snapshot is not null && i < Math.Min(snapshot.HullCount, visuals.Length); i++)
+            if (snapshot.Hulls[i].Id == hull.Id)
+                return visuals[i].Visible;
+        return false;
+    }
+
     /// <summary>
     /// Where a hull is drawn in the world this frame, for markers that sit on it: moved along a jump the way the
     /// scene draws it. A hull not in this frame's snapshot is where the simulation has it.
@@ -1576,7 +1595,7 @@ internal sealed class WorldView
         for (var i = 0; i < snapshot.HullCount && _selectedCount < MaxSelection; i++)
         {
             ref var hull = ref snapshot.Hulls[i];
-            if (hull.Owner != snapshot.PlayerId || IsSelected(hull.Id) || !Project(DrawnPosition(hull), out var screen))
+            if (hull.Owner != snapshot.PlayerId || IsSelected(hull.Id) || !IsDrawn(hull) || !Project(DrawnPosition(hull), out var screen))
                 continue;
             if (screen.X >= min.X && screen.X <= max.X && screen.Y >= min.Y && screen.Y <= max.Y)
                 _selected[_selectedCount++] = hull.Id;

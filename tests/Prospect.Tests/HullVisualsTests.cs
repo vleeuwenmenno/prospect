@@ -70,6 +70,57 @@ public sealed class HullVisualsTests
         return count;
     }
 
+    [Fact]
+    public void ANewSessionWithReusedHullIdsStartsWithoutOldPassages()
+    {
+        var design = DesignWith(FtlKind.Rift);
+        var devices = new InputDevices();
+        var actions = ActionMap.Load(Path.Combine(AppContext.BaseDirectory, "content", "input", "bindings.json"));
+        using var jobs = new JobSystem(1, "TestJob");
+        var world = new WorldView(devices, actions, new ClientSettings(), jobs, null!, Content.Designs);
+        var screen = new float2(1280, 720);
+        SessionSnapshot Session(JumpPhase phase)
+        {
+            // ClientSession creates a fresh galaxy on every Welcome, even for the same seed.
+            var snapshot = new SessionSnapshot(Content)
+            {
+                Galaxy = Content.Galaxy.WithSeed(17),
+                State = SessionState.Active,
+                PlayerId = 1,
+                OwnHull = 0,
+                HullCount = 2,
+                Flight = Content.Designs[design].Flight,
+            };
+            snapshot.Hulls[0] = Hull(1, design, phase, 0.8f);
+            snapshot.Hulls[0].IsOwn = true;
+            snapshot.Hulls[0].Owner = 1;
+            snapshot.Hulls[1] = Hull(2, design, phase, 0.8f, new Double3(100, 0, 0));
+            return snapshot;
+        }
+
+        try
+        {
+            var old = Session(JumpPhase.Charge);
+            world.Update(old, new PlayerInputBridge(), Dt, false, screen, screen, false);
+            Assert.True(Followed(world.Visuals) > 0);
+            Assert.True(world.OwnDrawnPosition.RelativeTo(world.OwnPosition).Length() > 1f);
+
+            var current = Session(JumpPhase.None);
+            world.Update(current, new PlayerInputBridge(), Dt, false, screen, screen, false);
+            Assert.Equal(0, Followed(world.Visuals));
+            Assert.Equal(world.OwnPosition, world.OwnDrawnPosition);
+            for (var i = 0; i < current.HullCount; i++)
+            {
+                Assert.Equal(current.Hulls[i].Position, world.DrawnPosition(current.Hulls[i]));
+                Assert.Equal(-1, world.Visuals.Hulls[i].Clip);
+            }
+        }
+        finally
+        {
+            jobs.CompleteAll();
+        }
+    }
+
     [Theory]
     [InlineData(FtlKind.Rift)]
     [InlineData(FtlKind.Wormhole)]

@@ -244,6 +244,40 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal(1, _world.Selection.Length);
     }
 
+    [Theory]
+    [InlineData(FtlKind.Rift)]
+    [InlineData(FtlKind.Wormhole)]
+    [InlineData(FtlKind.Hyperspace)]
+    public void HiddenTransitHullsHaveNoWorldMarkerOrBoxSelectionButRemainOnTheMap(FtlKind drive)
+    {
+        CommandView();
+        for (var i = 0; i < 60; i++)
+            Frame();
+        _world.FtlPreview = drive;
+        ref var own = ref _snapshot.Hulls[_snapshot.OwnHull];
+        own.Jump = JumpPhase.Tunnel;
+        own.JumpTimer = _snapshot.Flight.FtlTunnelSeconds * 0.5f;
+        Frame();
+        Assert.False(_world.IsDrawn(own));
+        Assert.True(_world.Project(_world.DrawnPosition(own), out var at));
+        var start = at - new float2(20, 20);
+        var end = at + new float2(20, 20);
+        Frame(() => { Move(start); Button(GlfwMouseButton.Left, true); });
+        Frame(() => Move(end));
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        Assert.DoesNotContain(own.Id, _world.Selection.ToArray());
+
+        var count = MapUnitList.Collect(_snapshot, _units);
+        Assert.Contains(own.Id, _units.AsSpan(0, count).ToArray());
+        _world.Select(own.Id, false);
+        Assert.True(_world.IsSelected(own.Id));
+
+        own.Jump = JumpPhase.Arrive;
+        own.JumpTimer = _snapshot.Flight.FtlArriveSeconds * 0.8f;
+        Frame();
+        Assert.True(_world.IsDrawn(own));
+    }
+
     /// <summary>The pilot view with Shift held, so the pointer is shown, resting on empty space.</summary>
     private void PilotWithShift()
     {

@@ -340,6 +340,8 @@ internal sealed partial class ScreenHost
         for (var i = 0; i < snapshot.HullCount; i++)
         {
             ref var hull = ref snapshot.Hulls[i];
+            if (!world.IsDrawn(hull))
+                continue;
             var position = world.DrawnPosition(hull);
             if (!world.Project(position, out var screen))
                 continue;
@@ -555,7 +557,7 @@ internal sealed partial class ScreenHost
     private void DrawTargetMarkers(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world)
     {
         var designs = snapshot.Content.Designs;
-        if (world.HoveredHull != 0 && world.HoveredHull != world.TargetHull && world.TryGetHull(world.HoveredHull, out var hovered))
+        if (world.HoveredHull != 0 && world.HoveredHull != world.TargetHull && world.TryGetHull(world.HoveredHull, out var hovered) && world.IsDrawn(hovered))
         {
             var design = designs[Math.Min(hovered.Design, designs.Length - 1)];
             if (world.ProjectDisc(world.DrawnPosition(hovered), design.Flight.Radius, out var screen, out var pixels, out _))
@@ -570,7 +572,7 @@ internal sealed partial class ScreenHost
         if (world.HoveredRock is { } hoverRock && world.HoveredRock != world.TargetRock && world.TryGetRock(hoverRock, out var hoverPosition, out var hoverRadius) && world.ProjectDisc(hoverPosition, hoverRadius, out var hoverScreen, out var hoverPixels, out _))
             draw.AddCircle(hoverScreen, Math.Max(hoverPixels * 1.05f, Kit.Px(12)), Kit.Color(Theme.Text, 0.6f), 48, Kit.Px(1.2f));
 
-        if (world.TargetHull != 0 && world.TryGetHull(world.TargetHull, out var target))
+        if (world.TargetHull != 0 && world.TryGetHull(world.TargetHull, out var target) && world.IsDrawn(target))
         {
             var design = designs[Math.Min(target.Design, designs.Length - 1)];
             DrawTargetIndicator(draw, world, world.DrawnPosition(target), design.Flight.Radius, target.Owner == snapshot.PlayerId ? Theme.Accent : Theme.Info, false);

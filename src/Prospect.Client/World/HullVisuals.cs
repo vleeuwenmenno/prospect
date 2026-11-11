@@ -104,6 +104,13 @@ internal sealed class HullVisuals
     /// <summary>This frame's hulls, in the snapshot's order.</summary>
     public ReadOnlySpan<HullVisual> Hulls => _hulls.AsSpan(0, _count);
 
+    /// <summary>Forgets a departed session's hulls and passages without discarding reusable storage.</summary>
+    public void Clear()
+    {
+        Array.Clear(_passages);
+        _count = 0;
+    }
+
     /// <summary>
     /// Works out every hull's place this frame. <paramref name="alpha"/> is how far the frame is between the last two
     /// ticks; <paramref name="ownInside"/> whether the pilot sees their own hull's jump from inside, where it is not
