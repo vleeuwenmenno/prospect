@@ -80,6 +80,12 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   as before. The console says `OFFLINE` in red and dims the charge being rebuilt; target and fleet gauges dim too,
   and the party list shows a broken shield as empty. Snapshots carry the offline state and the newest absorbed hit
   (where, how hard, how long ago), so every client agrees on both.
+- **Shield looks.** Every hull with a shield shows a faint, muted cyan shell a margin off its blocks, built from the
+  blocks it still has, so it fits any design and any damage. It shimmers and bends what is behind it by a few
+  pixels, most at its rim. An absorbed hit spreads a ripple from where it landed, on the pilot's own hull and on
+  everyone else's, aged from when the server says it happened (a hit long over is never shown on joining). Near
+  breaking it tints stronger with slow waves; a break collapses it red and it is gone until the simulation brings
+  it back online, when it fades in. Not checked on a GPU yet: how it looks, its cost per frame, Vulkan validation.
 - **Ramming.** Two hulls that meet share the impulse by mass and inertia and both take the same damage, which
   goes by the pair's reduced mass: about the lighter hull's when the other is far heavier. A drone bounces off a
   freighter and a freighter shoves a drone aside. Below the safe speed hulls only nudge each other and can rest

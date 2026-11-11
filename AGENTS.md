@@ -187,6 +187,9 @@ The client opens a real window on the developer's desktop, and they are usually 
 - Snapshots are full state, not delta-compressed, and there is no interest management yet.
 - Sector discovery is kept by the client for the session; nothing is saved.
 - Asteroids do not collide with each other.
+- A shield's ripple shows the newest hit a snapshot reports; hits between two snapshots of a remote hull (three
+  ticks) show as the last of them, and impacts in one tick are one event. A client keeps four ripples per hull.
+- Shields copy the scene's colour and depth once a frame whenever one is drawn, to bend what is behind them.
 - Hull against hull contact tests every hull against every other each tick, bounding spheres first. It needs a
   spatial index before there are thousands of hulls.
 - A sector holds at most 4,096 asteroids (`maxPerSector`; the wire format allows 65,535). An asteroid is named by

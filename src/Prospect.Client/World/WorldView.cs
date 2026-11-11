@@ -181,6 +181,8 @@ internal sealed class WorldView
     private float _jumpThrough;
     // Where every hull is drawn this frame, with the jumps of hulls seen from outside; worked out in the update.
     private readonly HullVisuals _visuals = new();
+    // Every shielded hull's shield as drawn: client side only, from the replicated shield state.
+    private readonly ShieldVisuals _shields = new();
     private bool _ownInside = true;
 
     /// <summary>Where every hull is drawn this frame; for tests.</summary>
@@ -407,6 +409,7 @@ internal sealed class WorldView
             _galaxy = galaxy;
             // Each admitted session creates its own galaxy, even when its seed and hull IDs match the last one.
             _visuals.Clear();
+            _shields.Clear();
             _ownId = 0;
             ResetOwnJump();
             _commandCycle.Reset();
@@ -437,6 +440,7 @@ internal sealed class WorldView
         // their own jump from inside until the command view has mostly taken over.
         _ownInside = _commandBlend < 0.5f;
         _visuals.Update(snapshot.Hulls.AsSpan(0, snapshot.HullCount), _designs, alpha, dt, _ownInside, FtlPreview);
+        _shields.Update(snapshot.Hulls.AsSpan(0, snapshot.HullCount), _designs, dt);
 
         if (own.Id != _ownId)
         {
@@ -599,6 +603,9 @@ internal sealed class WorldView
         var composite = new CompositeConstants { Setup = new float4(Exposure, aspect, time, 0) };
         var openings = new FtlOpenings();
         var clips = new FtlClips();
+        var shieldInstances = _scene.ShieldInstances(frameIndex);
+        var shieldVertices = _scene.ShieldVertices(frameIndex);
+        _shields.Begin(_scene.ShieldDraws);
 
         // Hulls, where the update has them drawn this frame.
         var visuals = _visuals.Hulls;
@@ -622,6 +629,8 @@ internal sealed class WorldView
             // The material says what the mesh is and, above it in steps of four, which opening cuts it.
             // The pilot's own hull inside its jump takes no slot: its opening is cut from the frame's own jump.
             var material = Material(visual.Inside, visual.Inside ? -1 : visual.Clip);
+            // The shield goes where the hull goes, drawn out and cut with it by the same material.
+            _shields.Add(hull.Id, position, orientation, stretch, material, shieldInstances, shieldVertices);
             if (visual.Intact)
             {
                 Add(ref candidateCount, Math.Min(hull.Design, _designs.Length - 1), position, orientation, 1f, design.Color, material, stretch);
@@ -719,6 +728,7 @@ internal sealed class WorldView
 
         // The lenses need the sky kept apart while a rift or a wormhole is in view, from outside or the pilot's own.
         var lensing = composite.Setup.W > 0f || (constants.Ftl.Y > 0f && constants.Ftl.X > (float)FtlKind.Hyperspace);
+        _scene.QueueShields(_shields.Draws.Length);
         _scene.Render(commands, frameIndex, constants, composite, _batches.AsSpan(0, rockBatches), _batches.AsSpan(rockBatches, batchCount - rockBatches), _commandBlend > 0.01f, markCount, lensing);
     }
 
