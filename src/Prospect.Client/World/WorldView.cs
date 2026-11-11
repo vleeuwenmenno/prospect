@@ -413,6 +413,14 @@ internal sealed class WorldView
             var hullUp = Vector3.Transform(Vector3.UnitY, OwnOrientation);
             _lookDirection = Vector3.Transform(nose, Quaternion.CreateFromAxisAngle(hullUp, -look * MathF.PI / 180f));
         }
+        else if (Mode == ViewMode.Pilot && !_freeLook && Own.Jump != JumpPhase.None)
+        {
+            // A jump happens ahead of the nose: the drive opens there and the hull flies into it. The view swings
+            // onto the nose as the hull turns to its destination, and stays unless the pilot holds free look.
+            var nose = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
+            var eased = Vector3.Lerp(_lookDirection, nose, 1f - MathF.Exp(-3f * dt));
+            _lookDirection = eased.LengthSquared() > 1e-4f ? Vector3.Normalize(eased) : _right;
+        }
 
         bridge.Submit(controls);
         UpdateJump(dt);
