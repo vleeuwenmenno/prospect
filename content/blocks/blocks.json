@@ -18,7 +18,9 @@
     "ftlCalculateSeconds": 12.0,
     "ftlTunnelSeconds": 3.0,
     "ftlSpeed": 40000.0,
-    "ftlArriveSeconds": 1.5
+    "ftlArriveSeconds": 1.5,
+    "ftlArrivalReach": 6.0,
+    "ftlArrivalPulseMass": 100.0
   },
   "blocks": {
     "hull": { "name": "Hull plating", "mass": 2.0, "hull": 400 },

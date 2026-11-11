@@ -97,6 +97,19 @@ public sealed record FlightRules
     public required float FtlArriveSeconds { get; init; }
 
     /// <summary>
+    /// How far, in hull radii, the pulse of a hyperspace arrival reaches for the heaviest hull: lighter ones reach
+    /// less, down to the arrival mark's own <see cref="MinArrivalReach"/>. Only how the arrival looks.
+    /// </summary>
+    public required float FtlArrivalReach { get; init; }
+
+    /// <summary>The mass in tonnes whose arrival pulse reaches halfway to <see cref="FtlArrivalReach"/>.</summary>
+    public required float FtlArrivalPulseMass { get; init; }
+
+    /// <summary>The bounds <see cref="FtlArrivalReach"/> must lie in, in hull radii.</summary>
+    public const float MinArrivalReach = 2.5f;
+    public const float MaxArrivalReach = 16f;
+
+    /// <summary>
     /// Shield points a collision takes for each point of damage the shield absorbs. Zero means the shield does
     /// not stand in the way of a collision at all: the damage goes to the blocks and the shield is left alone.
     /// </summary>
@@ -166,12 +179,18 @@ public sealed class BlockCatalog
             FtlSpeed = r.GetProperty("ftlSpeed"u8).GetSingle(),
             FtlTunnelSeconds = r.GetProperty("ftlTunnelSeconds"u8).GetSingle(),
             FtlArriveSeconds = r.GetProperty("ftlArriveSeconds"u8).GetSingle(),
+            FtlArrivalReach = r.GetProperty("ftlArrivalReach"u8).GetSingle(),
+            FtlArrivalPulseMass = r.GetProperty("ftlArrivalPulseMass"u8).GetSingle(),
         };
         if (!float.IsFinite(rules.FtlCalculateSeconds) || rules.FtlCalculateSeconds < 0)
             throw new InvalidDataException($"{path}: ftlCalculateSeconds must be finite and nonnegative");
 
         if (!float.IsFinite(rules.FtlSpeed) || rules.FtlSpeed <= 0)
             throw new InvalidDataException($"{path}: ftlSpeed must be finite and positive");
+        if (!(rules.FtlArrivalReach >= FlightRules.MinArrivalReach && rules.FtlArrivalReach <= FlightRules.MaxArrivalReach))
+            throw new InvalidDataException($"{path}: ftlArrivalReach must be from {FlightRules.MinArrivalReach} to {FlightRules.MaxArrivalReach} hull radii");
+        if (!float.IsFinite(rules.FtlArrivalPulseMass) || rules.FtlArrivalPulseMass <= 0)
+            throw new InvalidDataException($"{path}: ftlArrivalPulseMass must be finite and positive");
         if (!float.IsFinite(rules.FtlTunnelSeconds) || rules.FtlTunnelSeconds < 0 || rules.FtlTunnelSeconds > HullSim.MaxJumpTravelSeconds)
             throw new InvalidDataException($"{path}: ftlTunnelSeconds is outside the supported duration");
 
