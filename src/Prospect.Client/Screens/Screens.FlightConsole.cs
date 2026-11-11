@@ -18,8 +18,9 @@ internal sealed partial class ScreenHost
 
     /// <summary>
     /// The pilot console at the bottom centre: shield and hull on the left, energy and boost heat on the right,
-    /// speed and the dampeners between them. Each bar is a row of slanted segments in a slanted frame. Every
-    /// reading has a word or a number beside its colour, so nothing is told by colour alone.
+    /// speed and the dampeners in a hexagon between them, each group closed by a bracket and linked to it. Each bar
+    /// is a row of slanted segments in a slanted frame. Every reading has a word or a number beside its colour, so
+    /// nothing is told by colour alone.
     /// </summary>
     private void DrawFlightConsole(ImDrawListPtr draw, SessionSnapshot snapshot, in HullView own, float speed)
     {
@@ -89,17 +90,26 @@ internal sealed partial class ScreenHost
         if (own.BoostLocked)
             ConsoleMarker(draw, track, FlightModel.BoostUnlockHeat, 0.7f);
 
-        // Centre: speed, its unit, and whether the dampeners hold the hull still.
+        // Centre: speed, its unit, and whether the dampeners hold the hull still, in a hexagon. Its outline is
+        // amber while the dampeners are off, the one centre state that wants the pilot's attention.
         var cx = layout.CenterX;
         var top = layout.Top;
         var height = layout.Height;
+        var middle = top + height * 0.5f;
         var reach = Kit.Px(FlightConsole.Center * 0.5f);
-        var bracket = Kit.Color(Theme.LineStrong);
-        var bend = Kit.Px(6);
-        draw.AddLine(new float2(cx - reach + bend, top + Kit.Px(2)), new float2(cx - reach, top + height * 0.5f), bracket, Kit.Px(1.5f));
-        draw.AddLine(new float2(cx - reach, top + height * 0.5f), new float2(cx - reach + bend, top + height - Kit.Px(2)), bracket, Kit.Px(1.5f));
-        draw.AddLine(new float2(cx + reach - bend, top + Kit.Px(2)), new float2(cx + reach, top + height * 0.5f), bracket, Kit.Px(1.5f));
-        draw.AddLine(new float2(cx + reach, top + height * 0.5f), new float2(cx + reach - bend, top + height - Kit.Px(2)), bracket, Kit.Px(1.5f));
+        var hexTone = snapshot.Dampeners ? Theme.Info : Theme.Accent;
+        Hud.Pointed(draw, new float2(cx - reach, top), new float2(cx + reach, top + height), Kit.Px(FlightConsole.HexPoint), hexTone, snapshot.Dampeners ? 0.5f : 0.9f, !snapshot.Dampeners);
+
+        // Each group is closed at its outer end by a bracket in the colour of its most urgent reading, and joined
+        // to the hexagon by a short link: one console, three parts.
+        var leftTone = hull < 0.3f ? Theme.Bad : Theme.Info;
+        var rightTone = own.BoostLocked || noEnergy || energy < 0.15f ? Theme.Bad : Theme.Info;
+        ConsoleBracket(draw, layout.LeftX, top, top + height, -1f, leftTone);
+        ConsoleBracket(draw, layout.Right, top, top + height, 1f, rightTone);
+        var link = Kit.Color(Theme.LineStrong, 0.9f);
+        var slant = Kit.Px(FlightConsole.Slant);
+        draw.AddLine(new float2(layout.LeftX + layout.GroupWidth - slant * 0.5f, middle), new float2(cx - reach - Kit.Px(3), middle), link, 1f);
+        draw.AddLine(new float2(cx + reach + Kit.Px(3), middle), new float2(layout.RightX + slant * 0.5f, middle), link, 1f);
 
         var shown = float.IsFinite(speed) ? speed : 0f;
         var speedText = Kit.F($"{shown:0}");
@@ -184,6 +194,22 @@ internal sealed partial class ScreenHost
         else if (flowFraction > 0f)
             draw.AddRectFilled(new float2(middle, stripTop), new float2(middle + half * flowFraction, stripBottom), Kit.Color(FlightConsole.ChargeColor));
         draw.AddRectFilled(new float2(middle - Kit.Px(0.5f), stripTop - Kit.Px(2)), new float2(middle + Kit.Px(1), stripBottom + Kit.Px(2)), Kit.Color(Theme.TextDim, 0.9f));
+    }
+
+    /// <summary>
+    /// The bracket at a group's outer end: a chevron pointing away from the console, clear of the slanted rows,
+    /// <see cref="HudLayout.BracketOut"/> beyond them at its point. <paramref name="side"/> is -1 for the left end.
+    /// </summary>
+    private static void ConsoleBracket(ImDrawListPtr draw, float edge, float top, float bottom, float side, uint rgb)
+    {
+        Span<float2> points = stackalloc float2[3];
+        var rise = Kit.Px(HudLayout.BracketRise);
+        var near = edge + side * Kit.Px(2);
+        points[0] = new float2(near, top - rise);
+        points[1] = new float2(edge + side * Kit.Px(HudLayout.BracketOut), (top + bottom) * 0.5f);
+        points[2] = new float2(near, bottom + rise);
+        draw.AddPolyline(points, Kit.Color(rgb, 0.18f), ImDrawFlags.None, Kit.Px(4));
+        draw.AddPolyline(points, Kit.Color(rgb, 0.9f), ImDrawFlags.None, Kit.Px(1.5f));
     }
 
     /// <summary>Shield or hull points out of the most the hull holds, in thousands once they no longer fit.</summary>
@@ -420,6 +446,9 @@ internal static class FlightConsole
     /// <summary>The speed readout between the two groups, and the space either side of it.</summary>
     public const float Center = 120f;
     public const float CenterGap = 10f;
+
+    /// <summary>How far the speed hexagon's side points reach out past its top and bottom edges.</summary>
+    public const float HexPoint = 12f;
 
     /// <summary>The widest a group grows; wider screens leave the space to the world.</summary>
     public const float GroupMax = 430f;

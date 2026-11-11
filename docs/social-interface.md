@@ -50,9 +50,13 @@ bridge, so tests use the same calls.
 ### Party and chat display
 
 - A party member whose status is over two seconds old shows as out of contact.
-- The party list never disappears while in a party. Short of room above the flight readouts, the sector panel
-  drops its server and ore lines; still short, members become one-line rows (name, shield, hull), leader
-  first, at least one, with the rest counted in the caption.
+- The party list never disappears while in a party. Short of room above the flight readouts (and above the jump
+  strip while it is drawn and shares the list's width), the sector panel drops its server and ore lines; still
+  short, members become one-line rows (name, shield, hull), leader first, at least one, with the rest counted
+  in the caption.
+- Recent chat lines stay beside the jump strip where a 300-pixel line remains, else above it while it is drawn.
+- `HudLayout` holds every clearance: the left column, the console and its brackets, the strip, the NAV card.
+- The quick buttons drop their key labels when the row would cover the sector panel.
 - Chat follows new lines while scrolled to the end. Scrolled back, it keeps the reader's place as old lines
   leave the 64-line log (`SocialState.ChatTotal`, client-only), until the lines being read are dropped.
 

@@ -21,7 +21,7 @@ namespace Prospect.Client.Screens;
 internal sealed partial class ScreenHost
 {
     /// <summary>Height of the quick buttons at the top right, in design pixels.</summary>
-    private const float QuickBarHeight = 32f;
+    private const float QuickBarHeight = HudLayout.QuickBarHeight;
 
     /// <summary>Seconds a chat line stays in the recent lines shown while chat is closed.</summary>
     private const float ChatFeedSeconds = 12f;
@@ -230,8 +230,12 @@ internal sealed partial class ScreenHost
     // Always shown: party list, recent chat, quick buttons
     // ---------------------------------------------------------------------------------------------------------------
 
-    /// <summary>Where the pilot console at the bottom centre begins; nothing on the left may reach below it.</summary>
-    private float ReadoutsTop => FlightConsole.Layout(_ui.DisplaySize, Kit.Scale).Top;
+    /// <summary>
+    /// The lowest a column from <paramref name="left"/> to <paramref name="right"/> may reach over the pilot
+    /// console and, while it is drawn, the jump strip.
+    /// </summary>
+    private float ReservedTop(float left, float right) =>
+        HudLayout.ReservedTop(_ui.DisplaySize, Kit.Scale, left, right, _jumpPrompt != JumpPrompt.None);
 
     /// <summary>
     /// The height the party list takes as full cards: the invitation, the caption and one card per other member.
@@ -263,7 +267,7 @@ internal sealed partial class ScreenHost
         var social = snapshot.Social;
         var me = snapshot.PlayerId;
         var x = Kit.Px(Theme.Space5);
-        var width = Kit.Px(360);
+        var width = Kit.Px(HudLayout.ColumnWidth);
         var y = top + Kit.Px(Theme.Space3);
         var pad = Kit.Px(Theme.Space3);
 
@@ -273,8 +277,8 @@ internal sealed partial class ScreenHost
             var name = SocialView.Name(social, social.Invitation.Player);
             var height = cards ? Kit.Px(52) : Kit.Px(24);
             var min = new float2(x, y);
-            Kit.ChamferFill(draw, min, min + new float2(width, height), Kit.Color(Theme.Panel, 0.92f), Kit.Px(Theme.Chamfer));
-            Kit.ChamferOutline(draw, min, min + new float2(width, height), Kit.Color(Theme.Accent), Kit.Px(Theme.Chamfer));
+            // An invitation waits for an answer: the one party piece lit in amber, the colour that means act here.
+            Hud.Plate(draw, min, min + new float2(width, height), Theme.Accent, true);
             if (cards)
             {
                 Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, min + new float2(pad, Kit.Px(8)), Theme.Accent, Kit.F($"PARTY INVITATION   {seconds} S"));
@@ -324,14 +328,14 @@ internal sealed partial class ScreenHost
             var age = SocialView.SecondsSince(member.Tick, snapshot.ServerTick);
             var stale = age > PartyStaleSeconds;
             var min = new float2(x, y);
+            // The lit edge: red out of contact, amber for the leader, cyan for everyone else.
+            var tone = stale ? Theme.Bad : leader ? Theme.Accent : Theme.Info;
 
             if (!cards)
             {
                 // One line: a leader mark, the name, then shield over hull at the right.
                 var max = min + new float2(width, rowHeight);
-                Kit.ChamferFill(draw, min, max, Kit.Color(Theme.Panel, 0.86f), Kit.Px(Theme.Chamfer * 0.6f));
-                if (leader)
-                    draw.AddRectFilled(min, new float2(min.X + Kit.Px(3), max.Y), Kit.Color(Theme.Accent));
+                Hud.Plate(draw, min, max, tone);
                 var barWidth = Kit.Px(110);
                 var nameAt = min + new float2(pad, (rowHeight - Kit.Measure(_ui.SansMedium, Theme.FontSmall, "Ag"u8).Y) * 0.5f);
                 Kit.ClippedText(draw, _ui.SansMedium, Theme.FontSmall, nameAt, stale ? Theme.Bad : Theme.Text, nameText, width - barWidth - pad * 3);
@@ -343,8 +347,7 @@ internal sealed partial class ScreenHost
             }
 
             var cardMax = min + new float2(width, Kit.Px(58));
-            Kit.ChamferFill(draw, min, cardMax, Kit.Color(Theme.Panel, 0.86f), Kit.Px(Theme.Chamfer));
-            Kit.ChamferOutline(draw, min, cardMax, Kit.Color(Theme.Line), Kit.Px(Theme.Chamfer));
+            Hud.Plate(draw, min, cardMax, tone);
 
             var text = min + new float2(pad, Kit.Px(7));
             var tagWidth = leader ? Kit.Measure(_ui.SansMedium, Theme.FontCaption, "LEADER"u8).X : 0f;
@@ -390,11 +393,15 @@ internal sealed partial class ScreenHost
             return;
 
         var display = _ui.DisplaySize;
-        var width = Math.Min(Kit.Px(440), display.X - Kit.Px(48));
         var x = Kit.Px(Theme.Space5);
-        // Under the flight readouts at the bottom centre when there is room beside them, above them when not.
-        var readoutsLeft = FlightConsole.Layout(display, Kit.Scale).LeftX;
-        var bottom = x + width + Kit.Px(Theme.Space3) < readoutsLeft ? display.Y - Kit.Px(Theme.Space5) : ReadoutsTop - Kit.Px(Theme.Space3);
+        var width = Math.Min(Kit.Px(440), display.X - Kit.Px(48));
+        // Beside the flight readouts at the bottom when there is room, its bracket included; above them when not,
+        // narrowed to stay beside the jump strip where that leaves a readable line.
+        var readoutsLeft = FlightConsole.Layout(display, Kit.Scale).LeftX - Kit.Px(HudLayout.BracketOut);
+        var beside = x + width + Kit.Px(Theme.Space3) < readoutsLeft;
+        if (!beside)
+            width = HudLayout.FeedWidth(display, Kit.Scale, x, width, Kit.Px(300));
+        var bottom = beside ? display.Y - Kit.Px(Theme.Space5) : ReservedTop(x, x + width) - Kit.Px(Theme.Space3);
 
         ImGui.PushFont(_ui.Sans, Theme.FontSmall);
         var fontSize = ImGui.GetFontSize();
@@ -447,10 +454,21 @@ internal sealed partial class ScreenHost
             }
         }
 
+        // With their keys while the row clears the sector panel; on a narrow or scaled screen the keys go, which
+        // the controls list (F1) still names, so the buttons never cover the panel.
         var gap = Kit.Px(Theme.Space2);
+        var keys = true;
         var w0 = QuickButtonWidth("PLAYERS"u8, _playersKey);
         var w1 = QuickButtonWidth("SOCIAL"u8, _socialKey);
         var w2 = QuickButtonWidth("CHAT"u8, _chatKey);
+        if (_ui.DisplaySize.X - Kit.Px(Theme.Space5) - (w0 + w1 + w2 + gap * 2) < HudLayout.ColumnRight(Kit.Scale) + Kit.Px(HudLayout.Gap))
+        {
+            keys = false;
+            w0 = QuickButtonWidth("PLAYERS"u8, default);
+            w1 = QuickButtonWidth("SOCIAL"u8, default);
+            w2 = QuickButtonWidth("CHAT"u8, default);
+        }
+
         var size = new float2(w0 + w1 + w2 + gap * 2, Kit.Px(QuickBarHeight));
         var min = new float2(_ui.DisplaySize.X - Kit.Px(Theme.Space5) - size.X, Kit.Px(Theme.Space5));
         ImGui.SetNextWindowPos(min);
@@ -461,13 +479,13 @@ internal sealed partial class ScreenHost
         var previousFade = Kit.Fade;
         Kit.Fade = _app.PointerCaptured ? 0.6f : 1f;
         ImGui.SetCursorScreenPos(min);
-        if (QuickButton("##players"u8, "PLAYERS"u8, _playersKey, w0, _socialOpen && !_socialParty && !_socialFriends, social.Invitation.Player != 0))
+        if (QuickButton("##players"u8, "PLAYERS"u8, keys ? _playersKey : default, w0, _socialOpen && !_socialParty && !_socialFriends, social.Invitation.Player != 0))
             ToggleSocial(false);
         ImGui.SameLine(0, gap);
-        if (QuickButton("##social"u8, "SOCIAL"u8, _socialKey, w1, _socialOpen && _socialParty && !_socialFriends, false))
+        if (QuickButton("##social"u8, "SOCIAL"u8, keys ? _socialKey : default, w1, _socialOpen && _socialParty && !_socialFriends, false))
             ToggleSocial(true);
         ImGui.SameLine(0, gap);
-        if (QuickButton("##chat"u8, "CHAT"u8, _chatKey, w2, _chatOpen, unread && !_chatOpen))
+        if (QuickButton("##chat"u8, "CHAT"u8, keys ? _chatKey : default, w2, _chatOpen, unread && !_chatOpen))
         {
             if (_chatOpen)
                 _chatOpen = false;
@@ -484,7 +502,7 @@ internal sealed partial class ScreenHost
     {
         var width = Kit.Measure(_ui.SansMedium, Theme.FontCaption, label).X + Kit.Px(Theme.Space3) * 2;
         if (key.Length > 0)
-            width += Kit.Measure(_ui.Mono, Theme.FontCaption, key).X + Kit.Px(Theme.Space2);
+            width += Hud.KeyChipWidth(_ui.Mono, Theme.FontCaption, key) + Kit.Px(Theme.Space2);
         return width;
     }
 
@@ -497,17 +515,18 @@ internal sealed partial class ScreenHost
         var hot = Kit.Animate(ImGui.GetItemID(), ImGui.IsItemHovered() ? 1f : 0f);
         var lit = Math.Max(hot, active ? 1f : 0f);
         var max = position + size;
+        // The heads-up glass, with the hairline turning amber as the pointer comes onto it; the open surface's
+        // button keeps an amber underline.
         var chamfer = Kit.Px(Theme.Chamfer * 0.7f);
-        Kit.ChamferFill(draw, position, max, Kit.Color(Kit.Mix(Theme.Panel, Theme.PanelRaised, lit), 0.92f), chamfer);
-        Kit.ChamferOutline(draw, position, max, Kit.Color(Kit.Mix(Theme.Line, Theme.Accent, lit)), chamfer);
+        Kit.ChamferFill(draw, position, max, Kit.Color(Kit.Mix(Theme.Void, Theme.PanelRaised, lit), Hud.GlassAlpha + 0.2f * lit), chamfer);
+        Kit.ChamferOutline(draw, position, max, Kit.Color(Kit.Mix(Theme.LineStrong, Theme.Accent, lit), 0.7f + 0.3f * lit), chamfer);
         if (active)
             draw.AddRectFilled(new float2(position.X, max.Y - Kit.Px(2)), new float2(max.X - chamfer, max.Y), Kit.Color(Theme.Accent));
 
         var labelSize = Kit.Measure(_ui.SansMedium, Theme.FontCaption, label);
         var text = position + new float2(Kit.Px(Theme.Space3), (size.Y - labelSize.Y) * 0.5f);
         Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, text, Kit.Mix(Theme.TextDim, Theme.Text, lit), label);
-        if (key.Length > 0)
-            Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(labelSize.X + Kit.Px(Theme.Space2), 0), Theme.TextMute, key);
+        Hud.KeyChip(draw, _ui.Mono, Theme.FontCaption, text.X + labelSize.X + Kit.Px(Theme.Space2), position.Y + size.Y * 0.5f, Theme.TextMute, key);
         if (badge)
             draw.AddCircleFilled(new float2(max.X - Kit.Px(7), position.Y + Kit.Px(7)), Kit.Px(3.5f), Kit.Color(Theme.Accent), 12);
         return pressed;

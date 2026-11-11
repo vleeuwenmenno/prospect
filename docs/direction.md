@@ -36,6 +36,9 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
 - **The pilot starts their own jump.** The map only plots it: a NAV marker in the pilot view, aim at it, boost to
   start. The hull then brakes and holds its nose on it while the drive calculates and charges; thrust cancels.
   Ships flown by the server still jump straight from an order.
+- **The jump has one prompt, off the middle of the view.** A strip above the pilot console says the state and
+  the one action, with keys from the bindings. Aimed is "course aligned", never "ready": calculation and
+  charge follow the boost press and run together. No hold-to-jump.
 - **The view stays the pilot's during a jump.** Free to look anywhere through charge, transit, arrival and a
   cancel; the jump never turns the camera. Other players see each jump where it happens, from where they are.
 - **Resources.** Asteroids carry ore: iron, copper, nickel, titanium, silver, gold. More kinds later.

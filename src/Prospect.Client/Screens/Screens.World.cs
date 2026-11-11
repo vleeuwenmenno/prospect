@@ -121,16 +121,18 @@ internal sealed partial class ScreenHost
         if (!_mapOpen)
         {
             var pilot = 1f - world.CommandBlend;
+            _jumpPrompt = pilot > 0.01f ? PromptFor(world) : JumpPrompt.None;
             if (pilot > 0.01f)
                 DrawFlightReadouts(draw, snapshot, world, pilot);
             if (world.CommandBlend > 0.01f)
                 DrawCommandOverlay(draw, snapshot, world, world.CommandBlend);
             if (pilot > 0.01f)
                 DrawTargetReadout(draw, snapshot, world, pilot);
-            // The party list must keep at least one member on screen above the flight readouts. When the full
-            // sector panel leaves no room for the whole list, the panel drops its ore and server lines (they
-            // are on the map and in the menu), and if that is still not enough the list turns into one-line rows.
-            var limit = pilot > 0.01f ? ReadoutsTop : _ui.DisplaySize.Y - Kit.Px(Theme.Space5);
+            // The party list must keep at least one member on screen above the flight readouts, and above the
+            // jump strip while it is drawn and shares the list's width. When the full sector panel leaves no room
+            // for the whole list, the panel drops its ore and server lines (they are on the map and in the menu),
+            // and if that is still not enough the list turns into one-line rows.
+            var limit = pilot > 0.01f ? ReservedTop(Kit.Px(HudLayout.Margin), HudLayout.ColumnRight(Kit.Scale)) : _ui.DisplaySize.Y - Kit.Px(Theme.Space5);
             var party = PartyHudCardsHeight(snapshot);
             var gap = Kit.Px(Theme.Space3);
             var compactSector = party > 0 && Kit.Px(Theme.Space5) + SectorPanelHeight(world, false) + gap + party > limit;
@@ -174,7 +176,7 @@ internal sealed partial class ScreenHost
         if (compact)
             return Kit.Px(64);
         var hasRock = world.Sector.AsteroidCount > 0 && !_mapOpen;
-        var inner = Kit.Px(360) - Kit.Px(Theme.Space4) * 2;
+        var inner = Kit.Px(HudLayout.ColumnWidth) - Kit.Px(Theme.Space4) * 2;
         return Kit.Px(116) + (hasRock ? SectorCharacterHeight(world.Galaxy!, world.Sector.Character, inner) + Kit.Px(Theme.Space2) : 0f);
     }
 
@@ -187,10 +189,18 @@ internal sealed partial class ScreenHost
         // The panel grows by what there is to say about the sector's ore; a sector without asteroids has none.
         // Under the map it stays short: the map's own heading sits below it, and the map describes sectors itself.
         var min = new float2(Kit.Px(Theme.Space5), Kit.Px(Theme.Space5));
-        var inner = Kit.Px(360) - Kit.Px(Theme.Space4) * 2;
+        var inner = Kit.Px(HudLayout.ColumnWidth) - Kit.Px(Theme.Space4) * 2;
         var hasRock = world.Sector.AsteroidCount > 0 && !_mapOpen;
-        var size = new float2(Kit.Px(360), SectorPanelHeight(world, compact));
-        Kit.PanelFrame(draw, min, min + size);
+        var size = new float2(Kit.Px(HudLayout.ColumnWidth), SectorPanelHeight(world, compact));
+        Hud.Plate(draw, min, min + size, Theme.Info);
+        // A rule under the name, and in the full panel one over the sector's character, so the panel reads as
+        // three groups: where, which server, what is here.
+        var rule = Kit.Color(Theme.Line, 0.9f);
+        var ruleLeft = min.X + Kit.Px(Theme.Space4);
+        var ruleRight = min.X + size.X - Kit.Px(Theme.Chamfer);
+        draw.AddLine(new float2(ruleLeft, min.Y + Kit.Px(37)), new float2(ruleRight, min.Y + Kit.Px(37)), rule, 1f);
+        if (!compact && hasRock)
+            draw.AddLine(new float2(ruleLeft, min.Y + Kit.Px(101)), new float2(ruleRight, min.Y + Kit.Px(101)), rule, 1f);
 
         var star = world.Galaxy!.StarClasses[world.Sector.StarClass];
         var text = min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3));
@@ -266,7 +276,7 @@ internal sealed partial class ScreenHost
         }
 
         DrawTargetMarkers(draw, snapshot, world);
-        DrawNavTarget(draw, snapshot, world);
+        DrawNavTarget(draw, world, _jumpPrompt);
 
         // The view line: where the hull will point once it is under thrust.
         var middle = display * 0.5f;
@@ -280,50 +290,13 @@ internal sealed partial class ScreenHost
             Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, middle + new float2(-free.X * 0.5f, Kit.Px(22)), Theme.Info, "FREE LOOK"u8);
         }
 
-        // Speed in the middle; what keeps the hull alive on the left, what drives it on the right.
-        var flight = snapshot.Flight;
+        // Speed in the middle; what keeps the hull alive on the left, what drives it on the right. Above it, the
+        // jump strip: what the drive is doing and what the pilot can do, kept off the middle of the view.
         DrawFlightConsole(draw, snapshot, own, speed);
-        var consoleTop = FlightConsole.Layout(display, Kit.Scale).Top;
+        DrawJumpStrip(draw, snapshot, world, _jumpPrompt);
 
-        if (own.Jump is JumpPhase.Align or JumpPhase.Charge or JumpPhase.Tunnel)
-        {
-            // The jump drive at work: which drive, what it is doing, how much charge it has, and how to stop it.
-            var drive = flight.Ftl switch
-            {
-                FtlKind.Hyperspace => "HYPERSPACE DRIVE"u8,
-                FtlKind.Wormhole => "WORMHOLE GENERATOR"u8,
-                _ => "RIFT CUTTER"u8,
-            };
-            var driveSize = Kit.Measure(_ui.SansMedium, Theme.FontSmall, drive);
-            var at = new float2(display.X * 0.5f, display.Y * 0.5f + Kit.Px(86));
-            Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, at - new float2(driveSize.X * 0.5f, 0), Theme.Info, drive);
-            var gauge = new float2(Kit.Px(260), Kit.Px(5));
-            var gaugeMin = at + new float2(-gauge.X * 0.5f, Kit.Px(24));
-            var charge = own.Jump == JumpPhase.Charge ? WorldView.JumpProgress(own, flight) : own.Jump == JumpPhase.Tunnel ? 1f : 0f;
-            draw.AddRectFilled(gaugeMin, gaugeMin + gauge, Kit.Color(Theme.Void, 0.8f));
-            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * charge, gauge.Y), Kit.Color(Theme.Info));
-            var note = own.Jump switch
-            {
-                JumpPhase.Align => "ALIGNING TO DESTINATION  -  THRUST TO CANCEL"u8,
-                // The drive calculates the jump and charges at once; it fires once both are done.
-                JumpPhase.Charge when WorldView.CalculationFraction(own, flight) < 1f
-                    => Kit.F($"CALCULATING FTL JUMP  {WorldView.CalculationFraction(own, flight) * 100f:0}%  -  {own.JumpTimer:0} / {flight.FtlEnergy:0} MJ  -  THRUST TO CANCEL"),
-                JumpPhase.Charge => Kit.F($"CHARGING  {own.JumpTimer:0} / {flight.FtlEnergy:0} MJ  -  THRUST TO CANCEL"),
-                _ => "IN TRANSIT"u8,
-            };
-            var noteSize = Kit.Measure(_ui.Mono, Theme.FontCaption, note);
-            Kit.Text(draw, _ui.Mono, Theme.FontCaption, at + new float2(-noteSize.X * 0.5f, Kit.Px(36)), Theme.TextDim, note);
-        }
-
-        if (own.Order.Kind == OrderKind.MoveTo)
-        {
-            var distance = own.Order.Target.RelativeTo(world.OwnPosition).Length();
-            var label = distance >= 1000f ? Kit.F($"AUTOPILOT   {distance / 1000f:0.00} KM") : Kit.F($"AUTOPILOT   {distance:0} M");
-            var labelSize = Kit.Measure(_ui.SansMedium, Theme.FontSmall, label);
-            Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, new float2(display.X * 0.5f - labelSize.X * 0.5f, consoleTop - Kit.Px(26)), Theme.Accent, label);
-            if (world.Project(own.Order.Target, out var target))
-                DrawTargetMarker(draw, target, Theme.Accent);
-        }
+        if (own.Order.Kind == OrderKind.MoveTo && world.Project(own.Order.Target, out var target))
+            DrawTargetMarker(draw, target, Theme.Accent);
 
         Kit.Fade = previousFade;
     }
@@ -942,55 +915,6 @@ internal sealed partial class ScreenHost
         );
         if (stats.Ftl != FtlKind.None)
             Row("Jump charge"u8, Kit.F($"{stats.FtlEnergy:0} MJ at {stats.FtlPower:0.0} MW"));
-    }
-
-    /// <summary>
-    /// The jump plotted on the map, in the pilot view: a marker on its direction, or an arrow at the edge of the
-    /// view pointing the way to turn, and what to do next. The marker turns green once the nose is on it.
-    /// </summary>
-    private void DrawNavTarget(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world)
-    {
-        if (world.NavTarget is not { } nav)
-            return;
-        ref readonly var own = ref snapshot.Hulls[snapshot.OwnHull];
-        var color = world.NavAimed ? Theme.Good : Theme.Info;
-        var display = _ui.DisplaySize;
-        var middle = display * 0.5f;
-        var margin = Kit.Px(40);
-        if (world.Project(nav, out var screen) && screen.X > margin && screen.X < display.X - margin && screen.Y > margin && screen.Y < display.Y - margin)
-        {
-            DrawTargetMarker(draw, screen, color);
-            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, screen + new float2(Kit.Px(18), -Kit.Px(7)), color, "NAV"u8);
-        }
-        else
-        {
-            // Off the view: an arrow on an ellipse inside the edges, the way the destination lies across the view.
-            var view = world.ToView(nav);
-            var across = new float2(view.X, -view.Y);
-            var length = MathF.Sqrt(across.X * across.X + across.Y * across.Y);
-            across = length > 1e-4f ? across / length : new float2(0, 1);
-            var semi = new float2(Math.Max(middle.X - Kit.Px(76), Kit.Px(40)), Math.Max(middle.Y - Kit.Px(160), Kit.Px(40)));
-            var scale = 1f / MathF.Sqrt(across.X * across.X / (semi.X * semi.X) + across.Y * across.Y / (semi.Y * semi.Y));
-            var tip = middle + across * scale;
-            var size = Kit.Px(12);
-            var side = new float2(-across.Y, across.X);
-            var back = tip - across * (size * 1.6f);
-            draw.AddTriangleFilled(tip, back + side * size * 0.8f, back - side * size * 0.8f, Kit.Color(color));
-            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, back - across * Kit.Px(14) - new float2(Kit.Px(12), Kit.Px(7)), color, "NAV"u8);
-        }
-
-        if (own.Jump != JumpPhase.None || own.Order.Kind == OrderKind.Jump)
-            return;
-        var refused = world.Time - world.NavRefusedAt < 2.5f;
-        var distance = nav.RelativeTo(world.OwnPosition).Length();
-        var line = world.NavAimed
-            ? Kit.F($"NAV TARGET LOCKED  -  {world.BoostKeyName} TO CALCULATE FTL JUMP")
-            : refused
-                ? Kit.F($"AIM AT THE NAV TARGET, THEN {world.BoostKeyName} TO JUMP")
-                : Kit.F($"NAV TARGET  {distance / 1000f:0} KM  -  AIM AT IT, THEN {world.BoostKeyName}");
-        var lineSize = Kit.Measure(_ui.Mono, Theme.FontCaption, line);
-        var at = new float2(display.X * 0.5f, display.Y * 0.5f + Kit.Px(110));
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, at - new float2(lineSize.X * 0.5f, 0), refused && !world.NavAimed ? Theme.Bad : color, line);
     }
 
     private static void DrawTargetMarker(ImDrawListPtr draw, float2 center, uint rgb)

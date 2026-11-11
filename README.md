@@ -19,8 +19,9 @@ Chat, the player roster and parties work end to end: the server decides, the cli
 - **Party list** at the top left: each other member's name, ship, shield, hull and sector. In a short window
   or at a large interface scale it shrinks to one-line rows with a count of the rest. Recent chat lines show
   at the bottom left for a few seconds while chat is closed.
-- **Quick buttons** at the top right open the three. Click them; in the pilot view hold `Shift` first to show the
-  cursor.
+- **Quick buttons** at the top right open the three, each with its key from the bindings. Click them; in the
+  pilot view hold `Shift` first to show the cursor. Where the row would cover the sector panel (a narrow window
+  or a large interface scale), the keys are left off the buttons; F1 still lists them.
 
 - **Friends** (main menu, or the Friends tab in Social): sign in with Discord in your browser, then add
   friends by their 16-character friend code, answer requests and remove friends. The list belongs to your
@@ -58,9 +59,11 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   surplus. Boost needs the battery above 5% to start (`boostEnergyFloor` in `content/blocks/blocks.json`), runs
   until the battery is empty, then waits for the battery to pass 5% again; a hull without a battery cannot
   boost. The pilot console at the bottom shows shield and hull on the left, energy and boost heat on the right
-  and speed between them, as slanted segmented bars. The energy bar marks the 5%, a strip under it shows the
-  battery's live net draw or recharge, and the heat bar turns from cyan to red and says when boost is
-  overheated (with the mark where it unlocks) or out of energy.
+  and speed in a hexagon between them, as slanted segmented bars. The energy bar marks the 5%, a strip under it
+  shows the battery's live net draw or recharge, and the heat bar turns from cyan to red and says when boost is
+  overheated (with the mark where it unlocks) or out of energy. A bracket closes each side: red when hull is
+  below 30%, or boost is locked out or the battery is low; the hexagon turns amber with the dampeners off.
+  Heads-up panels share one look: dark glass, a hairline, and one lit edge in the colour of their state.
 - **Collisions and damage.** Hulls collide block by block against each asteroid's real surface, and block
   against block with each other. An impact bounces and turns the hull; damage grows with the square of the speed
   over a safe limit and lands on the blocks that touched, after the shield. A block at zero is gone, and the hull
@@ -237,7 +240,11 @@ After **Clear**, **Move here** and **Jump here** are greyed out and nothing is o
 working drive and a destination outside the current sector; ineligible ships keep their orders.
 The ship you fly gets a plotted course instead: a NAV marker, or an arrow at the edge of the view, shows the way.
 Turn its nose onto the marker and press boost (`Space`) to start the jump. Off the marker, boost works as usual
-and the HUD says to aim first. The course clears on arrival. Outside the map, a move with nothing selected
+and the HUD says to aim first. A card beside the marker names the destination and its distance. A strip above
+the pilot console says what to do: `OFF COURSE` with the boost key to press once aimed, `COURSE ALIGNED` with
+what the drive will need, then calculation and charge as two gauges filling together, and that thrust cancels.
+It shows only while a course is plotted, a jump is under way or the ship flies a move order. The course clears
+on arrival. Outside the map, a move with nothing selected
 still goes to the ship you fly.
 
 Where the command plane cuts through an asteroid or a hull, the cut is drawn as a bright line and the part below

@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Text;
 using Brutal.GlfwApi;
 using Brutal.ImGuiApi;
 using Brutal.ImGuiApi.FreeType;
@@ -163,6 +164,73 @@ public sealed class FrameOrderTests : IDisposable
                     - Kit.Measure(sans, Theme.FontSmall, "HULL"u8).X
                 : MathF.Round(FlightConsole.ReadingColumn * scale);
             Assert.InRange(Kit.Measure(mono, Theme.FontSmall, "23120 / 23120"u8).X, 1f, available);
+        }
+        finally
+        {
+            ImGui.Render();
+        }
+    }
+
+    [Theory]
+    [InlineData(1280f, 720f, 1f)]
+    [InlineData(1655f, 688f, 1f)]
+    [InlineData(1920f, 1080f, 1f)]
+    [InlineData(1280f, 720f, 2f)]
+    [InlineData(1655f, 688f, 2f)]
+    public void TheJumpStripAndTheSpeedHexagonHoldTheirWordsWithTheShippedFonts(float width, float height, float scale)
+    {
+        var fonts = ImGui.GetIO().Fonts;
+        fonts.SetFontLoader(ImGuiFreeType.GetFontLoader());
+        var mono = fonts.AddFontFromFileTTF(AppPaths.Asset("fonts", "JetBrainsMono-Regular.ttf"), Theme.FontBody);
+        var sans = fonts.AddFontFromFileTTF(AppPaths.Asset("fonts", "SpaceGrotesk-Medium.ttf"), Theme.FontBody);
+        ImGui.GetStyle().FontScaleMain = scale;
+        _ui.NewFrame();
+        try
+        {
+            float Px(float design) => MathF.Round(design * scale);
+            float Chip(ReadOnlySpan<byte> key) => Kit.Measure(mono, Theme.FontCaption, key).X + Px(Theme.Space2) * 2;
+            var strip = HudLayout.Strip(new float2(width, height), scale);
+            HudLayout.StripColumns(strip, scale, out var statusLeft, out var divider, out var actionLeft, out var actionRight);
+            var room = actionRight - actionLeft;
+
+            // Every state word fits left of the divider.
+            var status = divider - Px(4) - Px(Theme.Space1) - statusLeft;
+            foreach (var prompt in Enum.GetValues<JumpPrompt>())
+            {
+                Assert.InRange(Kit.Measure(sans, Theme.FontSmall, HudLayout.PromptWord(prompt, false)).X, 0f, status);
+                Assert.InRange(Kit.Measure(sans, Theme.FontSmall, HudLayout.PromptWord(prompt, true)).X, 0f, status);
+            }
+
+            // Off course: the instruction and the boost key as the loaded bindings name it, and as a long pad name.
+            var aim = Kit.Measure(sans, Theme.FontCaption, "AIM AT NAV, THEN"u8).X + Px(Theme.Space2);
+            Assert.InRange(aim + Chip("SPACE"u8), 1f, room);
+            Assert.InRange(aim + Chip("PAD Y (TRIANGLE)"u8), 1f, room);
+
+            // Aligned: the key, what it does, and what the drive needs once started, for the largest live drive.
+            var energy = 0f;
+            foreach (var design in GameContent.Load().Designs)
+                energy = Math.Max(energy, design.Flight.FtlEnergy);
+            var cost = Kit.Measure(mono, Theme.FontCaption, Encoding.UTF8.GetBytes($"12 S + {energy:0} MJ")).X;
+            Assert.InRange(Chip("SPACE"u8) + Px(Theme.Space2) + Kit.Measure(sans, Theme.FontCaption, "START JUMP"u8).X + Px(Theme.Space3) + cost, 1f, room);
+
+            // Working: calculation and charge side by side, each label inside its own gauge's width.
+            var column = (room - Px(Theme.Space3)) * 0.5f;
+            Assert.InRange(Kit.Measure(mono, Theme.FontCaption, "CALC 12 S"u8).X, 1f, column);
+            Assert.InRange(Kit.Measure(mono, Theme.FontCaption, Encoding.UTF8.GetBytes($"CHARGED {energy:0} / {energy:0} MJ")).X, 1f, column);
+
+            // The quick buttons clear the sector panel: with their keys at the interface's own scale, and at worst
+            // without them, as the bar drops them when they would not fit.
+            float Button(ReadOnlySpan<byte> label, ReadOnlySpan<byte> key) =>
+                Kit.Measure(sans, Theme.FontCaption, label).X + Px(Theme.Space3) * 2 + (key.IsEmpty ? 0f : Chip(key) + Px(Theme.Space2));
+            var clear = HudLayout.ColumnRight(scale) + Px(HudLayout.Gap);
+            var keyed = Button("PLAYERS"u8, "TAB"u8) + Button("SOCIAL"u8, "O"u8) + Button("CHAT"u8, "ENTER"u8) + Px(Theme.Space2) * 2;
+            var bare = Button("PLAYERS"u8, default) + Button("SOCIAL"u8, default) + Button("CHAT"u8, default) + Px(Theme.Space2) * 2;
+            if (scale == 1f)
+                Assert.True(width - Px(Theme.Space5) - keyed >= clear, $"keyed {keyed}");
+            Assert.True(width - Px(Theme.Space5) - bare >= clear, $"bare {bare}");
+
+            // The dampeners' state fits across the hexagon's lower part, inside its pointed sides.
+            Assert.InRange(Kit.Measure(sans, Theme.FontCaption, "DAMPENERS OFF"u8).X, 1f, Px(FlightConsole.Center) - Px(FlightConsole.HexPoint) * 2);
         }
         finally
         {
