@@ -3,6 +3,7 @@ using Brutal.GlfwApi;
 using Brutal.ImGuiApi;
 using Brutal.Numerics;
 using Prospect.Client.Input;
+using Prospect.Client.Screens;
 using Prospect.Client.Settings;
 using Prospect.Client.Ui;
 using Prospect.Client.World;
@@ -10,6 +11,7 @@ using Prospect.Engine.Jobs;
 using Prospect.Engine.Net;
 using Prospect.Engine.Time;
 using Prospect.Game.Client;
+using Prospect.Game.Protocol;
 using Prospect.Game.Server;
 using Prospect.Game.World;
 using Xunit;
@@ -73,12 +75,26 @@ public sealed class FrameOrderTests : IDisposable
     private long _tick;
     private bool _surfaceOpen;
 
+    // The map with its unit list, drawn instead of the quick buttons while set, and what the map took from it.
+    private bool _mapShown;
+    private readonly MapPointer _map = new();
+    private readonly uint[] _units = new uint[64];
+    private int _unitCount;
+    private int _mapPresses;
+    private int _mapReleases;
+    private int _mapRightClicks;
+    private float _mapWheel;
+    private float2 _mapPan;
+
     public FrameOrderTests()
     {
         _context = ImGui.CreateContext();
         var io = ImGui.GetIO();
         io.IniFilename = null;
         io.BackendFlags |= ImGuiBackendFlags.RendererHasTextures;
+        // The spacing the game's style uses, so rows sit where the layout puts them.
+        ImGui.GetStyle().WindowPadding = float2.Zero;
+        ImGui.GetStyle().ItemSpacing = float2.Zero;
 
         var content = GameContent.Load();
         _client = new ClientSession(_link.Client, content, "Pilot");
@@ -158,6 +174,13 @@ public sealed class FrameOrderTests : IDisposable
         pointerFrame.CommandView = _world.Mode == ViewMode.Command;
         _router.RefreshCapture(pointerFrame);
 
+        if (_mapShown)
+        {
+            DrawMapSurface();
+            ImGui.Render();
+            return;
+        }
+
         // The quick buttons, drawn after the world as ScreenHost draws them.
         ImGui.SetNextWindowPos(ButtonMin);
         ImGui.SetNextWindowSize(ButtonSize);
@@ -193,6 +216,220 @@ public sealed class FrameOrderTests : IDisposable
     private Vector3 Nose => Vector3.Transform(-Vector3.UnitZ, _world.OwnOrientation);
 
     private PlayerControls Sent() => Bridge.Consume(out _, out _);
+
+    // The map's layout at this test's screen, unscaled, under a sector panel ending where the game's does.
+    private MapUnitLayout Units => MapUnitList.Layout(Screen, 1f, _unitCount, 140f, Screen.X - 436f);
+
+    private static readonly float2 MapSpot = new(820, 420);
+
+    /// <summary>The map and its unit list as <c>ScreenHost.DrawMap</c> submits them, without the drawing.</summary>
+    private void DrawMapSurface()
+    {
+        _unitCount = MapUnitList.Collect(_snapshot, _units);
+        var units = Units;
+        _map.Block(units.Min, units.Size);
+        _map.Begin(Screen);
+        _mapPresses += _map.Pressed ? 1 : 0;
+        _mapReleases += _map.BoxReleased ? 1 : 0;
+        _mapRightClicks += _map.RightClicked ? 1 : 0;
+        _mapWheel += _map.Wheel;
+        _mapPan += _map.Pan;
+        ImGui.End();
+
+        MapUnitList.Begin(units);
+        MapUnitList.BeginRows(units);
+        for (var i = 0; i < _unitCount; i++)
+            MapUnitList.Row(_world, _units[i], units.Row);
+        MapUnitList.EndRows();
+        MapUnitList.End();
+    }
+
+    /// <summary>Opens the map as a surface over the world, the pointer resting on the map.</summary>
+    private void OpenMap()
+    {
+        _surfaceOpen = true;
+        _mapShown = true;
+        _map.Reset();
+        Frame(() => Move(MapSpot));
+        Frame();
+        Frame();
+        Assert.False(_router.Captured);
+        Assert.Equal(3, _unitCount);
+        _mapPresses = _mapReleases = _mapRightClicks = 0;
+        _mapWheel = 0;
+        _mapPan = default;
+    }
+
+    private float2 RowCenter(int row)
+    {
+        var units = Units;
+        return units.RowsMin + new float2(units.Size.X * 0.5f, units.Row * (row + 0.5f));
+    }
+
+    [Fact]
+    public void AUnitRowClickAddsOrRemovesThatHullAndLeavesTheOthers()
+    {
+        OpenMap();
+        _world.SelectAllOwned();
+        Assert.Equal(3, _world.Selection.Length);
+        var picked = _units[1];
+
+        // A move onto the row and a click in one poll: the row's, not the map's.
+        Frame(() =>
+        {
+            Move(RowCenter(1));
+            Click();
+        });
+        Frame();
+        Assert.Equal(2, _world.Selection.Length);
+        Assert.False(_world.IsSelected(picked));
+        Assert.True(_world.IsSelected(_units[0]));
+        Assert.True(_world.IsSelected(_units[2]));
+
+        // The rows did not move under the pointer: the same click puts it back.
+        Frame(() => Click());
+        Frame();
+        Assert.Equal(3, _world.Selection.Length);
+        Assert.True(_world.IsSelected(picked));
+
+        // From an empty selection a row adds just its hull.
+        _world.ClearSelection();
+        Frame(() => Click());
+        Frame();
+        Assert.Equal(1, _world.Selection.Length);
+        Assert.True(_world.IsSelected(picked));
+        Assert.Equal(0, _mapPresses);
+        Assert.Equal(0, _mapReleases);
+    }
+
+    [Fact]
+    public void WheelRightClickAndMiddleDragOnTheUnitListNeverReachTheMap()
+    {
+        OpenMap();
+        Frame(() =>
+        {
+            Move(RowCenter(0));
+            Wheel(2);
+        });
+        Frame(() => Click(GlfwMouseButton.Right));
+        Frame();
+        Frame(() => Button(GlfwMouseButton.Middle, true));
+        Frame(() => Move(RowCenter(0) + new float2(200, 0)));
+        Frame(() => Move(MapSpot));
+        Frame(() => Button(GlfwMouseButton.Middle, false));
+        Assert.Equal(0f, _mapWheel);
+        Assert.Equal(0, _mapRightClicks);
+        Assert.Equal(default, _mapPan);
+        Assert.Equal(0, _mapPresses);
+
+        // The same on the map is the map's.
+        Frame(() => Wheel(2));
+        Frame(() => Click(GlfwMouseButton.Right));
+        Frame();
+        Frame(() => Button(GlfwMouseButton.Middle, true));
+        Frame(() => Move(MapSpot + new float2(40, 10)));
+        Frame(() => Button(GlfwMouseButton.Middle, false));
+        Assert.Equal(2f, _mapWheel);
+        Assert.Equal(1, _mapRightClicks);
+        Assert.NotEqual(default, _mapPan);
+    }
+
+    [Fact]
+    public void ADragBegunOnTheUnitListNeverBecomesAMapBoxAndAMapBoxPressesNoRow()
+    {
+        OpenMap();
+        _world.SelectAllOwned();
+
+        // Pressed on a row, let go on the map: no map gesture, and no row click either.
+        Frame(() =>
+        {
+            Move(RowCenter(0));
+            Button(GlfwMouseButton.Left, true);
+        });
+        Frame(() => Move(MapSpot));
+        Frame(() => Move(MapSpot + new float2(60, 60)));
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        Frame();
+        Assert.Equal(0, _mapPresses);
+        Assert.Equal(0, _mapReleases);
+        Assert.Equal(3, _world.Selection.Length);
+
+        // Pressed on the map, dragged across the list and let go on a row: the map's box, and no row click.
+        Frame(() =>
+        {
+            Move(MapSpot);
+            Button(GlfwMouseButton.Left, true);
+        });
+        Frame(() => Move(RowCenter(1) + new float2(30, 0)));
+        Frame(() => Move(RowCenter(1)));
+        Assert.True(_map.Boxing);
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        Frame();
+        Assert.Equal(1, _mapPresses);
+        Assert.Equal(1, _mapReleases);
+        Assert.True(_map.BoxMoved);
+        Assert.Equal(3, _world.Selection.Length);
+    }
+
+    [Fact]
+    public void MapMovesGoToExactlyTheSelectedHullsAndNowhereWhenNoneIsSelected()
+    {
+        Span<FleetOrder> fleet = stackalloc FleetOrder[FleetOrdersMessage.MaxOrders];
+        var target = _world.OwnPosition + new Vector3(800, 0, 0);
+        var own = _world.Own.Id;
+        _unitCount = MapUnitList.Collect(_snapshot, _units);
+        var others = _units.AsSpan(0, _unitCount).ToArray().Where(id => id != own).ToArray();
+        Assert.Equal(2, others.Length);
+        Bridge.Consume(out _, out _);
+        Bridge.ConsumeFleetOrders(fleet);
+
+        // All three, then one fleet hull taken out of the list: the two left are ordered, the third is not.
+        _world.SelectAllOwned();
+        Assert.Equal(3, _world.Selection.Length);
+        foreach (var id in _world.Selection)
+        {
+            Assert.True(_world.TryGetHull(id, out var hull));
+            Assert.Equal(_snapshot.PlayerId, hull.Owner);
+        }
+
+        _world.Select(others[0], true);
+        _world.OrderMoveSelected(Bridge, target);
+        Bridge.Consume(out var hasOrder, out var order);
+        Assert.True(hasOrder);
+        Assert.Equal(OrderKind.MoveTo, order.Kind);
+        Assert.Equal(1, Bridge.ConsumeFleetOrders(fleet));
+        Assert.Equal(others[1], fleet[0].Hull);
+        Assert.Equal(OrderKind.MoveTo, fleet[0].Order.Kind);
+
+        // The hull being flown taken out as well: only the one fleet hull is ordered.
+        _world.Select(own, true);
+        _world.OrderMoveSelected(Bridge, target);
+        Bridge.Consume(out hasOrder, out _);
+        Assert.False(hasOrder);
+        Assert.Equal(1, Bridge.ConsumeFleetOrders(fleet));
+        Assert.Equal(others[1], fleet[0].Hull);
+
+        // Cleared: nothing is ordered, not even the hull being flown.
+        _world.ClearSelection();
+        _world.OrderMoveSelected(Bridge, target);
+        Bridge.Consume(out hasOrder, out _);
+        Assert.False(hasOrder);
+        Assert.Equal(0, Bridge.ConsumeFleetOrders(fleet));
+
+        // A hull that is gone is dropped from the selection, and does not make it fall back to the own hull.
+        _world.Select(0xFFFF_FF00u, false);
+        _world.OrderMoveSelected(Bridge, target);
+        Assert.Equal(0, _world.Selection.Length);
+        Bridge.Consume(out hasOrder, out _);
+        Assert.False(hasOrder);
+        Assert.Equal(0, Bridge.ConsumeFleetOrders(fleet));
+
+        // Outside the map an empty selection still means the hull being flown.
+        _world.OrderMove(Bridge, target);
+        Bridge.Consume(out hasOrder, out order);
+        Assert.True(hasOrder);
+        Assert.Equal(OrderKind.MoveTo, order.Kind);
+    }
 
     [Fact]
     public void AMoveOntoAQuickButtonAndAClickInOnePollAreTheButtonsNotTheWorlds()

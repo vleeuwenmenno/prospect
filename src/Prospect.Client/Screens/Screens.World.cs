@@ -30,9 +30,7 @@ internal sealed partial class ScreenHost
     private HullStats _sheetStats;
     private float _mapTime;
     private float2 _mapCenter;
-    private float2 _mapBoxStart;
-    private bool _mapBoxing;
-    private bool _mapBoxMoved;
+    private readonly MapPointer _mapPointer = new();
     private float _mapCell = 44f;
     private readonly HashSet<SectorCoord> _discovered = [];
     private readonly SectorCoord[] _discoveredFrom = new SectorCoord[256];
@@ -87,6 +85,14 @@ internal sealed partial class ScreenHost
         _mapHoverPinned = false;
         _mapMenuOpen = false;
         _mapTime = 0;
+        _mapPointer.Reset();
+
+        // The map orders exactly the selected hulls. With nothing selected it starts on the hull being flown, as
+        // its orders used to go there; clearing the list afterwards leaves nothing to order.
+        var world = _app.World;
+        world.PruneSelection();
+        if (world.Selection.Length == 0 && world.Own.Id != 0)
+            world.Select(world.Own.Id, false);
         _mapCenter = new float2((float)(_app.World.OwnPosition.X / _app.World.Galaxy!.SectorSize), (float)(_app.World.OwnPosition.Z / _app.World.Galaxy!.SectorSize));
         _mapLayer = _app.World.Sector.Coord.Y;
     }
@@ -260,6 +266,7 @@ internal sealed partial class ScreenHost
         }
 
         DrawTargetMarkers(draw, snapshot, world);
+        DrawNavTarget(draw, snapshot, world);
 
         // The view line: where the hull will point once it is under thrust.
         var middle = display * 0.5f;
@@ -344,6 +351,9 @@ internal sealed partial class ScreenHost
             var note = own.Jump switch
             {
                 JumpPhase.Align => "ALIGNING TO DESTINATION  -  THRUST TO CANCEL"u8,
+                // The drive calculates the jump and charges at once; it fires once both are done.
+                JumpPhase.Charge when WorldView.CalculationFraction(own, flight) < 1f
+                    => Kit.F($"CALCULATING FTL JUMP  {WorldView.CalculationFraction(own, flight) * 100f:0}%  -  {own.JumpTimer:0} / {flight.FtlEnergy:0} MJ  -  THRUST TO CANCEL"),
                 JumpPhase.Charge => Kit.F($"CHARGING  {own.JumpTimer:0} / {flight.FtlEnergy:0} MJ  -  THRUST TO CANCEL"),
                 _ => "IN TRANSIT"u8,
             };
@@ -992,6 +1002,55 @@ internal sealed partial class ScreenHost
             Row("Jump charge"u8, Kit.F($"{stats.FtlEnergy:0} MJ at {stats.FtlPower:0.0} MW"));
     }
 
+    /// <summary>
+    /// The jump plotted on the map, in the pilot view: a marker on its direction, or an arrow at the edge of the
+    /// view pointing the way to turn, and what to do next. The marker turns green once the nose is on it.
+    /// </summary>
+    private void DrawNavTarget(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world)
+    {
+        if (world.NavTarget is not { } nav)
+            return;
+        ref readonly var own = ref snapshot.Hulls[snapshot.OwnHull];
+        var color = world.NavAimed ? Theme.Good : Theme.Info;
+        var display = _ui.DisplaySize;
+        var middle = display * 0.5f;
+        var margin = Kit.Px(40);
+        if (world.Project(nav, out var screen) && screen.X > margin && screen.X < display.X - margin && screen.Y > margin && screen.Y < display.Y - margin)
+        {
+            DrawTargetMarker(draw, screen, color);
+            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, screen + new float2(Kit.Px(18), -Kit.Px(7)), color, "NAV"u8);
+        }
+        else
+        {
+            // Off the view: an arrow on an ellipse inside the edges, the way the destination lies across the view.
+            var view = world.ToView(nav);
+            var across = new float2(view.X, -view.Y);
+            var length = MathF.Sqrt(across.X * across.X + across.Y * across.Y);
+            across = length > 1e-4f ? across / length : new float2(0, 1);
+            var semi = new float2(Math.Max(middle.X - Kit.Px(76), Kit.Px(40)), Math.Max(middle.Y - Kit.Px(160), Kit.Px(40)));
+            var scale = 1f / MathF.Sqrt(across.X * across.X / (semi.X * semi.X) + across.Y * across.Y / (semi.Y * semi.Y));
+            var tip = middle + across * scale;
+            var size = Kit.Px(12);
+            var side = new float2(-across.Y, across.X);
+            var back = tip - across * (size * 1.6f);
+            draw.AddTriangleFilled(tip, back + side * size * 0.8f, back - side * size * 0.8f, Kit.Color(color));
+            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, back - across * Kit.Px(14) - new float2(Kit.Px(12), Kit.Px(7)), color, "NAV"u8);
+        }
+
+        if (own.Jump != JumpPhase.None || own.Order.Kind == OrderKind.Jump)
+            return;
+        var refused = world.Time - world.NavRefusedAt < 2.5f;
+        var distance = nav.RelativeTo(world.OwnPosition).Length();
+        var line = world.NavAimed
+            ? Kit.F($"NAV TARGET LOCKED  -  {world.BoostKeyName} TO CALCULATE FTL JUMP")
+            : refused
+                ? Kit.F($"AIM AT THE NAV TARGET, THEN {world.BoostKeyName} TO JUMP")
+                : Kit.F($"NAV TARGET  {distance / 1000f:0} KM  -  AIM AT IT, THEN {world.BoostKeyName}");
+        var lineSize = Kit.Measure(_ui.Mono, Theme.FontCaption, line);
+        var at = new float2(display.X * 0.5f, display.Y * 0.5f + Kit.Px(110));
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, at - new float2(lineSize.X * 0.5f, 0), refused && !world.NavAimed ? Theme.Bad : color, line);
+    }
+
     private static void DrawTargetMarker(ImDrawListPtr draw, float2 center, uint rgb)
     {
         var r = Kit.Px(8);
@@ -1021,55 +1080,42 @@ internal sealed partial class ScreenHost
         _mapTime += _ui.DeltaTime;
         var fade = Kit.EaseOut(_mapTime / Theme.ScreenEnter);
         Kit.Fade = fade;
-        BeginRoot("##map"u8);
-        var draw = ImGui.GetWindowDrawList();
         var display = _ui.DisplaySize;
         var io = ImGui.GetIO();
+
+        // The unit list's place is decided before any input is read, so the map never takes a press, wheel or
+        // drag that lands on it, even on the frame it first appears.
+        world.PruneSelection();
+        var units = LayoutMapUnits(snapshot, world);
+        _mapPointer.Block(units.Min, units.Size);
+        if (_mapMenuOpen)
+            _mapPointer.Block(_mapMenuMin, _mapMenuSize);
+        _mapPointer.Begin(display);
+        var pointer = _mapPointer;
+        var draw = ImGui.GetWindowDrawList();
         var shape = galaxy.Shape;
         var here = world.Sector.Coord;
         var size = galaxy.SectorSize;
         var player = new float2((float)(world.OwnPosition.X / size), (float)(world.OwnPosition.Z / size));
         var middle = display * 0.5f;
         var mouse = _mapHoverPinned ? middle : io.MousePos;
-        var devices = _app.Devices;
 
         // The course menu, while open, holds the map still and takes the clicks that land on it.
         var menuOpen = _mapMenuOpen;
-        var overMenu = menuOpen && mouse.X >= _mapMenuMin.X && mouse.Y >= _mapMenuMin.Y && mouse.X < _mapMenuMin.X + _mapMenuSize.X && mouse.Y < _mapMenuMin.Y + _mapMenuSize.Y;
 
         // Input. W A S D, the arrow keys and middle-drag pan; zooming keeps the sector under the pointer in place.
         if (!menuOpen)
-            PanMap(io, middle, mouse, here, player);
+            PanMap(pointer, middle, mouse, here, player);
 
         // Left button: click picks one of the player's hulls, drag draws a selection box around several. With the
-        // menu open a click elsewhere only closes it, and a click on it belongs to its items.
-        if (devices.MousePressed(Brutal.GlfwApi.GlfwMouseButton.Left))
+        // menu open a click on the map only closes it; a click on the menu or the unit list is theirs.
+        if (pointer.Pressed && menuOpen)
         {
-            if (menuOpen)
-            {
-                if (!overMenu)
-                    _mapMenuOpen = false;
-            }
-            else
-            {
-                _mapBoxing = true;
-                _mapBoxMoved = false;
-                _mapBoxStart = mouse;
-            }
+            _mapMenuOpen = false;
+            pointer.CancelBox();
         }
 
-        var boxReleased = false;
-        if (_mapBoxing)
-        {
-            var moved = mouse - _mapBoxStart;
-            if (MathF.Abs(moved.X) + MathF.Abs(moved.Y) > 5f)
-                _mapBoxMoved = true;
-            if (!devices.MouseDown(Brutal.GlfwApi.GlfwMouseButton.Left))
-            {
-                _mapBoxing = false;
-                boxReleased = true;
-            }
-        }
+        var boxReleased = pointer.BoxReleased;
 
         // Escape closes the menu first and the map only after that.
         if (BackPressed())
@@ -1206,8 +1252,8 @@ internal sealed partial class ScreenHost
 
         // The player's hulls on this layer. Releasing the left button selects among them: the nearest to a click,
         // or all inside a dragged box.
-        var boxMin = new float2(Math.Min(_mapBoxStart.X, mouse.X), Math.Min(_mapBoxStart.Y, mouse.Y));
-        var boxMax = new float2(Math.Max(_mapBoxStart.X, mouse.X), Math.Max(_mapBoxStart.Y, mouse.Y));
+        var boxMin = new float2(Math.Min(pointer.BoxStart.X, mouse.X), Math.Min(pointer.BoxStart.Y, mouse.Y));
+        var boxMax = new float2(Math.Max(pointer.BoxStart.X, mouse.X), Math.Max(pointer.BoxStart.Y, mouse.Y));
         var additive = io.KeyShift || io.KeyCtrl;
         if (boxReleased && !additive)
             world.ClearSelection();
@@ -1221,10 +1267,10 @@ internal sealed partial class ScreenHost
                 continue;
 
             var at = ToScreen((float)(position.X / size), (float)(position.Z / size));
-            if (boxReleased && _mapBoxMoved && at.X >= boxMin.X && at.X <= boxMax.X && at.Y >= boxMin.Y && at.Y <= boxMax.Y)
+            if (boxReleased && pointer.BoxMoved && at.X >= boxMin.X && at.X <= boxMax.X && at.Y >= boxMin.Y && at.Y <= boxMax.Y)
                 world.AddToSelection(hull.Id);
             var offset = at - mouse;
-            if (boxReleased && !_mapBoxMoved && offset.X * offset.X + offset.Y * offset.Y < clickedDistance)
+            if (boxReleased && !pointer.BoxMoved && offset.X * offset.X + offset.Y * offset.Y < clickedDistance)
             {
                 clicked = hull.Id;
                 clickedDistance = offset.X * offset.X + offset.Y * offset.Y;
@@ -1238,7 +1284,7 @@ internal sealed partial class ScreenHost
 
         if (clicked != 0)
             world.Select(clicked, additive);
-        if (_mapBoxing && _mapBoxMoved)
+        if (pointer.Boxing && pointer.BoxMoved)
         {
             draw.AddRectFilled(boxMin, boxMax, Kit.Color(Theme.Accent, 0.08f));
             draw.AddRect(boxMin, boxMax, Kit.Color(Theme.Accent, 0.9f));
@@ -1276,7 +1322,7 @@ internal sealed partial class ScreenHost
         // The sector under the pointer.
         var hovered = _mapCenter + (mouse - middle) / cell;
         var hover = new SectorCoord((int)MathF.Floor(hovered.X + 0.5f), _mapLayer, (int)MathF.Floor(hovered.Y + 0.5f));
-        var pointerOnMap = !overMenu && mouse.X >= 0 && mouse.Y >= 0 && mouse.X < display.X && mouse.Y < display.Y;
+        var pointerOnMap = _mapHoverPinned || pointer.Hovered;
         if (pointerOnMap)
         {
             var at = ToScreen(hover.X, hover.Z);
@@ -1286,7 +1332,7 @@ internal sealed partial class ScreenHost
                 Kit.Text(draw, _ui.Mono, Theme.FontCaption, mouse + new float2(Kit.Px(18), -Kit.Px(6)), Theme.Text, Kit.F($"{hover.X} : {hover.Z}"));
 
             // Right-click opens the course menu on the sector, or moves it there if it is already open.
-            if (ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+            if (pointer.RightClicked)
                 OpenMapMenu(galaxy, hover, mouse);
         }
 
@@ -1301,25 +1347,35 @@ internal sealed partial class ScreenHost
         // The world interface is beneath the map, so the map shows the sector panel itself.
         DrawSectorPanel(draw, snapshot, world);
 
-        // Title, layer and scale, clear of the sector panel above them.
-        var margin = Kit.Px(96);
-        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(margin, Kit.Px(160)), Theme.Accent, "NAVIGATION"u8);
-        Kit.Text(draw, _ui.SansBold, Theme.FontHeading, new float2(margin, Kit.Px(178)), Theme.Text, "Galaxy Map"u8);
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(margin, Kit.Px(218)), Theme.TextDim, Kit.F($"LAYER {_mapLayer:+0;-0;0}   {display.X / cell:0} SECTORS ACROSS   {size / 1000:0} KM EACH"));
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(margin, Kit.Px(238)), Theme.TextMute, Kit.F($"{_discovered.Count} SECTORS DISCOVERED   {world.Selection.Length} SHIPS SELECTED"));
+        // Title, layer and scale, clear of the sector panel above them. Where the unit list needs the room, only
+        // the layer and scale stay, on one line under the sector panel.
+        if (units.ShortHeading)
+        {
+            var line = new float2(units.Min.X, units.Min.Y - Kit.Px(28));
+            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, line, Theme.TextDim, Kit.F($"LAYER {_mapLayer:+0;-0;0}   {display.X / cell:0} SECTORS ACROSS   {size / 1000:0} KM EACH"), units.Size.X);
+        }
+        else
+        {
+            var margin = Kit.Px(96);
+            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(margin, Kit.Px(160)), Theme.Accent, "NAVIGATION"u8);
+            Kit.Text(draw, _ui.SansBold, Theme.FontHeading, new float2(margin, Kit.Px(178)), Theme.Text, "Galaxy Map"u8);
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(margin, Kit.Px(218)), Theme.TextDim, Kit.F($"LAYER {_mapLayer:+0;-0;0}   {display.X / cell:0} SECTORS ACROSS   {size / 1000:0} KM EACH"));
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(margin, Kit.Px(238)), Theme.TextMute, Kit.F($"{_discovered.Count} SECTORS DISCOVERED   {world.Selection.Length} SHIPS SELECTED"));
+        }
 
         if (pointerOnMap)
             DrawMapHoverPanel(draw, snapshot, world, galaxy, hover, here);
 
         EndRoot();
 
+        DrawMapUnits(snapshot, world, galaxy, units, fade);
         if (_mapMenuOpen)
             DrawMapMenu(world, galaxy, fade);
         Kit.Fade = 1f;
     }
 
-    /// <summary>Pans, zooms and changes layer from the keyboard, middle drag and wheel.</summary>
-    private void PanMap(ImGuiIOPtr io, float2 middle, float2 mouse, SectorCoord here, float2 player)
+    /// <summary>Pans, zooms and changes layer from the keyboard, and from the map's own middle drag and wheel.</summary>
+    private void PanMap(MapPointer pointer, float2 middle, float2 mouse, SectorCoord here, float2 player)
     {
         var devices = _app.Devices;
         var actions = _app.Actions;
@@ -1327,12 +1383,11 @@ internal sealed partial class ScreenHost
         var panX = Math.Clamp(actions.Axis(devices, InputAxis.Strafe, true) + actions.Axis(devices, InputAxis.Yaw, true), -1f, 1f);
         var panY = Math.Clamp(actions.Axis(devices, InputAxis.Forward, true) + actions.Axis(devices, InputAxis.Pitch, true), -1f, 1f);
         _mapCenter += new float2(panX, -panY) * (display.Y * 0.9f / _mapCell * _ui.DeltaTime);
-        if (devices.MouseDown(Brutal.GlfwApi.GlfwMouseButton.Middle))
-            _mapCenter -= io.MouseDelta / _mapCell;
-        if (io.MouseWheel != 0)
+        _mapCenter -= pointer.Pan / _mapCell;
+        if (pointer.Wheel != 0)
         {
             var under = _mapCenter + (mouse - middle) / _mapCell;
-            _mapCell = Math.Clamp(_mapCell * MathF.Pow(1.18f, io.MouseWheel), MapMinCell, MapMaxCell);
+            _mapCell = Math.Clamp(_mapCell * MathF.Pow(1.18f, pointer.Wheel), MapMinCell, MapMaxCell);
             _mapCenter = under - (mouse - middle) / _mapCell;
         }
 
@@ -1388,12 +1443,17 @@ internal sealed partial class ScreenHost
         OpenMapMenu(galaxy, sector, _ui.DisplaySize * 0.5f + (new float2(sector.X, sector.Z) - player) * _mapCell);
     }
 
+    /// <summary>The hover card's width and its distance from the right edge, in unscaled pixels.</summary>
+    private const float MapHoverWidth = 340f;
+    private const float MapHoverRight = 96f;
+
     private const float MapMenuHeader = 84f;
     private const float MapMenuRow = 48f;
 
     /// <summary>
-    /// The course menu: where the sector is, then the two ways to get there. Moving is always possible; jumping
-    /// only for the ships with a working drive that are not already in that sector.
+    /// The course menu: where the sector is, then the two ways to get there, for exactly the hulls selected in the
+    /// unit list. Moving needs a selection; jumping also needs a selected ship with a working drive that is not
+    /// already in that sector. With nothing selected both are off, and nothing is ordered.
     /// </summary>
     private void DrawMapMenu(WorldView world, Galaxy galaxy, float fade)
     {
@@ -1426,22 +1486,27 @@ internal sealed partial class ScreenHost
         draw.AddLine(new float2(min.X + Kit.Px(6), divider), new float2(min.X + size.X - Kit.Px(6), divider), Kit.Color(Theme.Line));
 
         world.CountJumpReady(target, out var ships, out var ready, out var inSector);
+        var none = ships == 0;
         var rowMin = new float2(min.X + Kit.Px(6), min.Y + Kit.Px(MapMenuHeader) + Kit.Px(Theme.Space1));
         var rowSize = new float2(size.X - Kit.Px(12), Kit.Px(MapMenuRow) - Kit.Px(4));
         var session = _app.Session;
 
         var moveCount = ships == 1 ? "1 ship"u8 : Kit.F($"{ships} ships");
-        if (MapMenuItem(draw, rowMin, rowSize, "Move here"u8, "UNDER OWN ENGINES"u8, moveCount, true) && session is not null)
+        if (MapMenuItem(draw, rowMin, rowSize, "Move here"u8, none ? "NO SHIPS SELECTED"u8 : "UNDER OWN ENGINES"u8, moveCount, !none) && session is not null)
         {
-            world.OrderMove(session.Client.Input, target);
+            world.OrderMoveSelected(session.Client.Input, target);
             _mapMenuOpen = false;
         }
 
         rowMin.Y += Kit.Px(MapMenuRow);
         var canJump = ready > 0;
-        var reason = canJump ? "FASTER THAN LIGHT"u8 : inSector == ships ? "ALREADY IN THIS SECTOR"u8 : "NO WORKING JUMP DRIVE"u8;
+        // The ship being flown is only given the course; its pilot starts the jump.
+        var plotOnly = world.JumpPlotsOwnOnly;
+        var reason = !canJump ? ships == 0 ? "NO SHIPS SELECTED"u8 : inSector == ships ? "ALREADY IN THIS SECTOR"u8 : "NO WORKING JUMP DRIVE"u8
+            : plotOnly ? Kit.F($"SET NAV TARGET, THEN AIM AND {world.BoostKeyName}")
+            : "FASTER THAN LIGHT"u8;
         var jumpCount = ships == 1 ? Kit.F($"{ready} of 1 ship") : Kit.F($"{ready} of {ships} ships");
-        if (MapMenuItem(draw, rowMin, rowSize, "Jump here"u8, reason, jumpCount, canJump) && session is not null)
+        if (MapMenuItem(draw, rowMin, rowSize, plotOnly ? "Plot jump"u8 : "Jump here"u8, reason, jumpCount, canJump) && session is not null)
         {
             world.OrderJump(session.Client.Input, target);
             _mapMenuOpen = false;
@@ -1479,11 +1544,11 @@ internal sealed partial class ScreenHost
         var display = _ui.DisplaySize;
         var known = _discovered.Contains(hover);
         // What a discovered sector with asteroids holds takes a few more lines: its richness and its resources.
-        var inner = Kit.Px(340) - Kit.Px(Theme.Space5) * 2;
+        var inner = Kit.Px(MapHoverWidth) - Kit.Px(Theme.Space5) * 2;
         var hasRock = known && MapSummary(galaxy, hover).AsteroidCount > 0;
         var characterHeight = hasRock ? SectorCharacterHeight(galaxy, MapSummary(galaxy, hover).Character, inner) : 0f;
-        var panelSize = new float2(Kit.Px(340), Kit.Px(known ? 218 : 150) + characterHeight);
-        var panelMin = new float2(display.X - panelSize.X - Kit.Px(96), Kit.Px(140));
+        var panelSize = new float2(Kit.Px(MapHoverWidth), Kit.Px(known ? 218 : 150) + characterHeight);
+        var panelMin = new float2(MapUnitList.HoverCardLeft(display.X, Kit.Scale, MapHoverWidth, MapHoverRight), Kit.Px(140));
         Kit.PanelFrame(draw, panelMin, panelMin + panelSize);
         var text = panelMin + new float2(Kit.Px(Theme.Space5), Kit.Px(Theme.Space4));
         var line = Kit.Px(20);

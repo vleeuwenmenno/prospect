@@ -1,8 +1,11 @@
+using System.Numerics;
+using System.Runtime.CompilerServices;
 using Brutal;
 using Brutal.Numerics;
 using Brutal.VulkanApi;
 using Brutal.VulkanApi.Abstractions;
 using Brutal.VulkanApi.Vma;
+using Prospect.Game.World;
 
 namespace Prospect.Client.Render;
 
@@ -30,7 +33,10 @@ internal struct FrameConstants
     /// <summary>The jump's axis (the hull's nose) in world space, and how far the tunnel has streamed past.</summary>
     public float4 FtlAxis;
 
-    /// <summary>Up across the axis, for the rift's window and the tunnel's coordinates; hyperspace tunnel cover.</summary>
+    /// <summary>
+    /// Up across the axis, for the rift's window and the tunnel's coordinates; then hyperspace tunnel cover, or how
+    /// far the camera is past the current rift or wormhole opening.
+    /// </summary>
     public float4 FtlUp;
 
     /// <summary>The opening the hull flies into: camera-relative centre and radius in metres (0 for none).</summary>
@@ -44,53 +50,48 @@ internal struct FrameConstants
     /// tunnel's or throat's light falls on the pilot's hull.
     /// </summary>
     public float4 FtlShape;
+
+    /// <summary>
+    /// The rifts and wormholes of jumps seen from outside, in the world: other hulls', and the pilot's own from the
+    /// command view.
+    /// </summary>
+    public FtlOpenings Openings;
+}
+
+/// <summary>Four vectors per opening for <see cref="FrameConstants.Openings"/>; matches <c>frame.glsl</c>.</summary>
+[InlineArray(CompositeConstants.MaxLenses * 4)]
+internal struct FtlOpenings
+{
+    private float4 _element;
+
+    /// <summary>
+    /// Fills opening <paramref name="index"/>, 0 to <see cref="CompositeConstants.MaxLenses"/> - 1: where it is
+    /// relative to the camera and its radius when fully open in metres, the axis it faces along (the hull's nose)
+    /// and up across it, the drive kind, how far it is open from 0 to 1, and a per-hull seed. A hull going through
+    /// it is hidden past it (<paramref name="clip"/> 1) or before it (-1), within a cylinder along the axis of the
+    /// given radius and length; 0 hides nothing.
+    /// </summary>
+    public void Set(int index, Vector3 centre, float radius, Vector3 axis, Vector3 up, FtlKind kind, float open, float seed, float clip, float clipRadius, float clipLength)
+    {
+        var at = index * 4;
+        this[at] = new float4(centre.X, centre.Y, centre.Z, radius);
+        this[at + 1] = new float4(axis.X, axis.Y, axis.Z, clipRadius);
+        this[at + 2] = new float4(up.X, up.Y, up.Z, clipLength);
+        this[at + 3] = new float4((float)kind, open, seed, clip);
+    }
 }
 
 /// <summary>
-/// The tone mapper's push constants: exposure, and the openings of jumps in view that it bends the scene around and
-/// draws. Matches <c>tonemap.frag</c>. Within 128 bytes, the push constant space every device guarantees. The pilot's
-/// own jump is read from the frame constants, which the tone mapper also binds.
+/// The tone mapper's push constants. The openings it bends the scene around and draws are in the frame constants,
+/// which it also binds, with the pilot's own jump. Matches <c>tonemap.frag</c>.
 /// </summary>
 internal struct CompositeConstants
 {
+    /// <summary>The most openings of jumps seen from outside that are drawn in one frame.</summary>
     public const int MaxLenses = 4;
 
-    /// <summary>Exposure, aspect ratio, time in seconds, number of lenses.</summary>
+    /// <summary>Exposure, aspect ratio, time in seconds, number of openings.</summary>
     public float4 Setup;
-
-    // Per lens: centre in NDC, radius when fully open in half screen heights, and a code (drive kind + 4 * stage,
-    // + 16 for the pilot's own passage). Progress and seed go two lenses to a vector in Extra.
-    public float4 Lens0;
-    public float4 Lens1;
-    public float4 Lens2;
-    public float4 Lens3;
-    public float4 Extra0;
-    public float4 Extra1;
-
-    /// <summary>Fills lens slot <paramref name="index"/>, 0 to <see cref="MaxLenses"/> - 1.</summary>
-    public void SetLens(int index, float2 centre, float radius, float code, float progress, float seed)
-    {
-        var lens = new float4(centre.X, centre.Y, radius, code);
-        switch (index)
-        {
-            case 0:
-                Lens0 = lens;
-                (Extra0.X, Extra0.Y) = (progress, seed);
-                break;
-            case 1:
-                Lens1 = lens;
-                (Extra0.Z, Extra0.W) = (progress, seed);
-                break;
-            case 2:
-                Lens2 = lens;
-                (Extra1.X, Extra1.Y) = (progress, seed);
-                break;
-            default:
-                Lens3 = lens;
-                (Extra1.Z, Extra1.W) = (progress, seed);
-                break;
-        }
-    }
 }
 
 /// <summary>The mark of a jump seen from outside: where, how big, and which drive at which stage.</summary>
@@ -100,6 +101,9 @@ internal struct FtlMark
 
     /// <summary>Drive kind, phase, progress through the phase, and a per-hull seed.</summary>
     public float4 Params;
+
+    /// <summary>The hull's nose in world space, for light that runs along the jump.</summary>
+    public float4 Axis;
 }
 
 /// <summary>One drawn mesh: a camera-relative 3x4 transform and a colour. Alpha 0 is rock, 1 is hull plating.</summary>
@@ -158,6 +162,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private readonly VkPipeline _ftlMarkPipeline;
     private readonly GpuBuffer[] _ftlBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
     private readonly VkSampler _sampler;
+    private readonly VkSampler _pointSampler;
     private readonly VkDescriptorSet _sceneSet;
     private readonly VkDescriptorSet[] _frameSets = new VkDescriptorSet[FrameRenderer.FramesInFlight];
     private readonly GpuBuffer[] _frameBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
@@ -170,6 +175,21 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private VkImage _colorImage;
     private VmaAllocation _colorAllocation;
     private VkImageView _colorView;
+    // On frames with a jump lens, the scene is copied as it was before anything solid was drawn (the sky) and before
+    // any hull was (the sky and the asteroids, with their depth). A lens bends the view toward what is behind its
+    // opening; where something solid in front of the opening hides that, the bent ray reads what was there before it
+    // was drawn, instead of imaging the thing in front. The scene's own depth is kept on those frames too, so the
+    // composite pass can tell, pixel by pixel, what is in front of an opening and what is behind it.
+    private VkImage _skyImage;
+    private VmaAllocation _skyAllocation;
+    private VkImageView _skyView;
+    private VkImage _rocksImage;
+    private VmaAllocation _rocksAllocation;
+    private VkImageView _rocksView;
+    private VkImage _rocksDepthImage;
+    private VmaAllocation _rocksDepthAllocation;
+    private VkImageView _rocksDepthView;
+    private bool _fallbackReady;
     private VkImage _depthImage;
     private VmaAllocation _depthAllocation;
     private VkImageView _depthView;
@@ -204,11 +224,12 @@ internal sealed unsafe class SceneRenderer : IDisposable
             _ftlBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(FtlMark) * MaxFtlMarks);
         }
 
-        // Descriptors: set 0 of every shader is the frame constants; set 1 of the tone mapper is the scene image.
+        // Descriptors: set 0 of every shader is the frame constants; set 1 of the tone mapper is the scene image, the
+        // scene before anything solid and before any hull was drawn, the scene's depth and the depth before hulls.
         Span<VkDescriptorPoolSize> poolSizes =
         [
             new VkDescriptorPoolSize { Type = VkDescriptorType.UniformBuffer, DescriptorCount = FrameRenderer.FramesInFlight },
-            new VkDescriptorPoolSize { Type = VkDescriptorType.CombinedImageSampler, DescriptorCount = 1 },
+            new VkDescriptorPoolSize { Type = VkDescriptorType.CombinedImageSampler, DescriptorCount = 5 },
         ];
         _descriptorPool = device.CreateDescriptorPool(
             new DescriptorPoolEx.CreateInfo { MaxSets = FrameRenderer.FramesInFlight + 1, PoolSizes = poolSizes },
@@ -232,6 +253,34 @@ internal sealed unsafe class SceneRenderer : IDisposable
             new VkDescriptorSetLayoutBinding
             {
                 Binding = 0,
+                DescriptorType = VkDescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                StageFlags = VkShaderStageFlags.FragmentBit,
+            },
+            new VkDescriptorSetLayoutBinding
+            {
+                Binding = 1,
+                DescriptorType = VkDescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                StageFlags = VkShaderStageFlags.FragmentBit,
+            },
+            new VkDescriptorSetLayoutBinding
+            {
+                Binding = 2,
+                DescriptorType = VkDescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                StageFlags = VkShaderStageFlags.FragmentBit,
+            },
+            new VkDescriptorSetLayoutBinding
+            {
+                Binding = 3,
+                DescriptorType = VkDescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                StageFlags = VkShaderStageFlags.FragmentBit,
+            },
+            new VkDescriptorSetLayoutBinding
+            {
+                Binding = 4,
                 DescriptorType = VkDescriptorType.CombinedImageSampler,
                 DescriptorCount = 1,
                 StageFlags = VkShaderStageFlags.FragmentBit,
@@ -272,6 +321,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
 
         _sceneSet = device.AllocateDescriptorSet(_descriptorPool, _sceneLayout);
         _sampler = device.CreateSampler(Presets.Sampler.SamplerLinearClamped, null);
+        _pointSampler = device.CreateSampler(Presets.Sampler.SamplerPointClamped, null);
 
         // Pipelines.
         var depthOff = new VkPipelineDepthStencilStateCreateInfo();
@@ -293,11 +343,9 @@ internal sealed unsafe class SceneRenderer : IDisposable
             LineWidth = 1f,
         };
 
-        // The scene's alpha channel is a mask for the jump lenses, not coverage. Its fraction says what is there:
-        // 0 sky, 0.25 a solid surface, 0.5 the pilot's own hull. Light added on top leaves alpha alone, and each
-        // rift's or wormhole's mark adds one where it is in front of what is there, so the composite pass may bend
-        // the view and draw the opening. The presets' additive blend scales by destination alpha, so these
-        // passes use their own blend states.
+        // The scene's alpha channel says what is there for the jump lenses, not coverage: 0 sky, 0.25 an asteroid,
+        // 0.375 a hull, 0.5 the pilot's own hull. Light added on top leaves alpha alone. The presets' additive blend
+        // scales by destination alpha, so these passes use their own blend states.
         const VkColorComponentFlags rgb = VkColorComponentFlags.RBit | VkColorComponentFlags.GBit | VkColorComponentFlags.BBit;
         var additiveAttachment = new VkPipelineColorBlendAttachmentState
         {
@@ -317,12 +365,6 @@ internal sealed unsafe class SceneRenderer : IDisposable
             DstColorBlendFactor = VkBlendFactor.OneMinusSrcAlpha,
         };
         var translucent = new VkPipelineColorBlendStateCreateInfo { AttachmentCount = 1, Attachments = &translucentAttachment };
-        var markAttachment = additiveAttachment with
-        {
-            SrcAlphaBlendFactor = VkBlendFactor.One,
-            ColorWriteMask = rgb | VkColorComponentFlags.ABit,
-        };
-        var markBlend = new VkPipelineColorBlendStateCreateInfo { AttachmentCount = 1, Attachments = &markAttachment };
 
         var noInput = new VertexInput(0, 0);
         var starInput = new VertexInput(1, 2).AddBindingWithAttributes<StarInstance>(0, 0, VkVertexInputRate.Instance);
@@ -335,8 +377,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
         _gridPipeline = ScenePipeline(Module(shaders, "grid.vert"), Module(shaders, "grid.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthRead, &translucent);
         _tonemapPipeline = Pipeline(Module(shaders, "fullscreen.vert"), Module(shaders, "tonemap.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthOff, Presets.BlendState.BlendNone, _tonemapPipelineLayout, swapchain.RenderPass);
 
-        var markInput = new VertexInput(1, 2).AddBindingWithAttributes<FtlMark>(0, 0, VkVertexInputRate.Instance);
-        _ftlMarkPipeline = ScenePipeline(Module(shaders, "ftl_mark.vert"), Module(shaders, "ftl_mark.frag"), markInput, Presets.Rasterization.Fill.CullNone, &depthRead, &markBlend);
+        var markInput = new VertexInput(1, 3).AddBindingWithAttributes<FtlMark>(0, 0, VkVertexInputRate.Instance);
+        _ftlMarkPipeline = ScenePipeline(Module(shaders, "ftl_mark.vert"), Module(shaders, "ftl_mark.frag"), markInput, Presets.Rasterization.Fill.CullNone, &depthRead, &additive);
 
         CreateTargets(swapchain.Extent);
     }
@@ -356,15 +398,47 @@ internal sealed unsafe class SceneRenderer : IDisposable
     /// <summary>The instance memory for this frame. Fill it, then describe it to <see cref="Render"/> as batches.</summary>
     public Span<MeshInstance> Instances(int frameIndex) => new((void*)_instanceBuffers[frameIndex].Mapped, MaxInstances);
 
-    /// <summary>Records the scene into the floating-point target. Call before the present pass is opened.</summary>
-    public void Render(CommandBuffer commands, int frameIndex, in FrameConstants constants, in CompositeConstants composite, ReadOnlySpan<DrawBatch> batches, bool drawGrid, int ftlMarks)
+    /// <summary>
+    /// Records the scene into the floating-point target: asteroids, then hulls. Call before the present pass is
+    /// opened. With <paramref name="lensing"/> (a rift or wormhole is open this frame) what was there before anything
+    /// solid, and before any hull, is kept for the lenses as well.
+    /// </summary>
+    public void Render(
+        CommandBuffer commands,
+        int frameIndex,
+        in FrameConstants constants,
+        in CompositeConstants composite,
+        ReadOnlySpan<DrawBatch> rocks,
+        ReadOnlySpan<DrawBatch> hulls,
+        bool drawGrid,
+        int ftlMarks,
+        bool lensing
+    )
     {
         _composite = composite;
         _frameIndex = frameIndex;
         *(FrameConstants*)_frameBuffers[frameIndex].Mapped = constants;
 
-        Transition(commands, _colorImage, VkImageAspectFlags.ColorBit, VkImageLayout.Undefined, VkImageLayout.ColorAttachmentOptimal, VkAccessFlags.ColorAttachmentWriteBit, VkPipelineStageFlags.ColorAttachmentOutputBit);
-        Transition(commands, _depthImage, VkImageAspectFlags.DepthBit, VkImageLayout.Undefined, VkImageLayout.DepthAttachmentOptimal, VkAccessFlags.DepthStencilAttachmentWriteBit, VkPipelineStageFlags.EarlyFragmentTestsBit);
+        // The scene's colour and depth are shared by both frame slots: last frame's tone mapper read them, and its
+        // reads must be done before they are written again, whatever is in them now.
+        Barrier(commands, _colorImage, VkImageLayout.Undefined, VkImageLayout.ColorAttachmentOptimal, VkAccessFlags.ShaderReadBit, VkAccessFlags.ColorAttachmentWriteBit, VkPipelineStageFlags.FragmentShaderBit, VkPipelineStageFlags.ColorAttachmentOutputBit);
+        Barrier(
+            commands,
+            _depthImage,
+            VkImageLayout.Undefined,
+            VkImageLayout.DepthAttachmentOptimal,
+            VkAccessFlags.ShaderReadBit,
+            VkAccessFlags.DepthStencilAttachmentReadBit | VkAccessFlags.DepthStencilAttachmentWriteBit,
+            VkPipelineStageFlags.FragmentShaderBit,
+            VkPipelineStageFlags.EarlyFragmentTestsBit | VkPipelineStageFlags.LateFragmentTestsBit,
+            VkImageAspectFlags.DepthBit
+        );
+        if (!lensing && !_fallbackReady)
+        {
+            Transition(commands, _skyImage, VkImageAspectFlags.ColorBit, VkImageLayout.Undefined, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.FragmentShaderBit);
+            Transition(commands, _rocksImage, VkImageAspectFlags.ColorBit, VkImageLayout.Undefined, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.FragmentShaderBit);
+            Transition(commands, _rocksDepthImage, VkImageAspectFlags.DepthBit, VkImageLayout.Undefined, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.FragmentShaderBit);
+        }
 
         var color = new VkRenderingAttachmentInfo
         {
@@ -378,7 +452,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
             ImageView = _depthView,
             ImageLayout = VkImageLayout.DepthAttachmentOptimal,
             LoadOp = VkAttachmentLoadOp.Clear,
-            StoreOp = VkAttachmentStoreOp.DontCare,
+            StoreOp = lensing ? VkAttachmentStoreOp.Store : VkAttachmentStoreOp.DontCare,
             ClearValue = new VkClearValue { DepthStencil = new VkClearDepthStencilValue { Depth = 0f } },
         };
         commands.BeginRendering(
@@ -405,19 +479,12 @@ internal sealed unsafe class SceneRenderer : IDisposable
         commands.BindVertexBuffers(0, new ReadOnlySpan<VkBuffer>(in stars), new ReadOnlySpan<ByteSize64>(in zero));
         commands.Draw(6, StarCount, 0, 0);
 
-        if (!batches.IsEmpty)
-        {
-            Span<VkBuffer> buffers = [_vertexBuffer.Buffer, _instanceBuffers[frameIndex].Buffer];
-            Span<ByteSize64> offsets = [zero, zero];
-            commands.BindPipeline(VkPipelineBindPoint.Graphics, _meshPipeline);
-            commands.BindVertexBuffers(0, buffers, offsets);
-            commands.BindIndexBuffer(_indexBuffer.Buffer, zero, VkIndexType.UInt32);
-            foreach (var batch in batches)
-            {
-                var mesh = _meshes[batch.Mesh];
-                commands.DrawIndexed(mesh.IndexCount, batch.InstanceCount, mesh.FirstIndex, mesh.VertexOffset, batch.FirstInstance);
-            }
-        }
+        if (lensing)
+            KeepScene(commands, _skyImage, false, ref color, ref depth);
+        DrawMeshes(commands, frameIndex, rocks);
+        if (lensing)
+            KeepScene(commands, _rocksImage, true, ref color, ref depth);
+        DrawMeshes(commands, frameIndex, hulls);
 
         commands.BindPipeline(VkPipelineBindPoint.Graphics, _dustPipeline);
         commands.Draw(6, DustCount, 0, 0);
@@ -438,6 +505,95 @@ internal sealed unsafe class SceneRenderer : IDisposable
 
         commands.EndRendering();
         Transition(commands, _colorImage, VkImageAspectFlags.ColorBit, VkImageLayout.ColorAttachmentOptimal, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.FragmentShaderBit);
+        // The tone mapper reads the depth on frames with a lens; on others it is bound but not read.
+        Barrier(
+            commands,
+            _depthImage,
+            VkImageLayout.DepthAttachmentOptimal,
+            VkImageLayout.ShaderReadOnlyOptimal,
+            VkAccessFlags.DepthStencilAttachmentWriteBit,
+            VkAccessFlags.ShaderReadBit,
+            VkPipelineStageFlags.EarlyFragmentTestsBit | VkPipelineStageFlags.LateFragmentTestsBit,
+            VkPipelineStageFlags.FragmentShaderBit,
+            VkImageAspectFlags.DepthBit
+        );
+        _fallbackReady = true;
+    }
+
+    private void DrawMeshes(CommandBuffer commands, int frameIndex, ReadOnlySpan<DrawBatch> batches)
+    {
+        if (batches.IsEmpty)
+            return;
+        var zero = new ByteSize64(0);
+        Span<VkBuffer> buffers = [_vertexBuffer.Buffer, _instanceBuffers[frameIndex].Buffer];
+        Span<ByteSize64> offsets = [zero, zero];
+        commands.BindPipeline(VkPipelineBindPoint.Graphics, _meshPipeline);
+        commands.BindVertexBuffers(0, buffers, offsets);
+        commands.BindIndexBuffer(_indexBuffer.Buffer, zero, VkIndexType.UInt32);
+        foreach (var batch in batches)
+        {
+            var mesh = _meshes[batch.Mesh];
+            commands.DrawIndexed(mesh.IndexCount, batch.InstanceCount, mesh.FirstIndex, mesh.VertexOffset, batch.FirstInstance);
+        }
+    }
+
+    /// <summary>
+    /// Copies the scene as drawn so far into <paramref name="target"/> for the lenses, and its depth too when asked,
+    /// then carries on drawing into it with its colour and depth kept.
+    /// </summary>
+    private void KeepScene(CommandBuffer commands, VkImage target, bool withDepth, ref VkRenderingAttachmentInfo color, ref VkRenderingAttachmentInfo depth)
+    {
+        commands.EndRendering();
+        Barrier(commands, _colorImage, VkImageLayout.ColorAttachmentOptimal, VkImageLayout.TransferSrcOptimal, VkAccessFlags.ColorAttachmentWriteBit, VkAccessFlags.TransferReadBit, VkPipelineStageFlags.ColorAttachmentOutputBit, VkPipelineStageFlags.TransferBit);
+        // These images are shared by both frame slots, so reuse must wait for the previous tone mapper's reads.
+        Barrier(commands, target, _fallbackReady ? VkImageLayout.ShaderReadOnlyOptimal : VkImageLayout.Undefined, VkImageLayout.TransferDstOptimal,
+            _fallbackReady ? VkAccessFlags.ShaderReadBit : VkAccessFlags.None, VkAccessFlags.TransferWriteBit,
+            _fallbackReady ? VkPipelineStageFlags.FragmentShaderBit : VkPipelineStageFlags.TopOfPipeBit, VkPipelineStageFlags.TransferBit);
+        var layers = new VkImageSubresourceLayers { AspectMask = VkImageAspectFlags.ColorBit, LayerCount = 1 };
+        var region = new VkImageCopy
+        {
+            SrcSubresource = layers,
+            DstSubresource = layers,
+            Extent = new VkExtent3D(_extent.Width, _extent.Height, 1),
+        };
+        commands.CopyImage(_colorImage, VkImageLayout.TransferSrcOptimal, target, VkImageLayout.TransferDstOptimal, new ReadOnlySpan<VkImageCopy>(in region));
+        Barrier(commands, _colorImage, VkImageLayout.TransferSrcOptimal, VkImageLayout.ColorAttachmentOptimal, VkAccessFlags.TransferReadBit, VkAccessFlags.ColorAttachmentReadBit | VkAccessFlags.ColorAttachmentWriteBit, VkPipelineStageFlags.TransferBit, VkPipelineStageFlags.ColorAttachmentOutputBit);
+        Barrier(commands, target, VkImageLayout.TransferDstOptimal, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.TransferWriteBit, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.TransferBit, VkPipelineStageFlags.FragmentShaderBit);
+        const VkPipelineStageFlags depthTests = VkPipelineStageFlags.EarlyFragmentTestsBit | VkPipelineStageFlags.LateFragmentTestsBit;
+        const VkAccessFlags depthAccess = VkAccessFlags.DepthStencilAttachmentReadBit | VkAccessFlags.DepthStencilAttachmentWriteBit;
+        if (withDepth)
+        {
+            Barrier(commands, _depthImage, VkImageLayout.DepthAttachmentOptimal, VkImageLayout.TransferSrcOptimal, VkAccessFlags.DepthStencilAttachmentWriteBit, VkAccessFlags.TransferReadBit, depthTests, VkPipelineStageFlags.TransferBit, VkImageAspectFlags.DepthBit);
+            Barrier(commands, _rocksDepthImage, _fallbackReady ? VkImageLayout.ShaderReadOnlyOptimal : VkImageLayout.Undefined, VkImageLayout.TransferDstOptimal,
+                _fallbackReady ? VkAccessFlags.ShaderReadBit : VkAccessFlags.None, VkAccessFlags.TransferWriteBit,
+                _fallbackReady ? VkPipelineStageFlags.FragmentShaderBit : VkPipelineStageFlags.TopOfPipeBit, VkPipelineStageFlags.TransferBit, VkImageAspectFlags.DepthBit);
+            var depthLayers = new VkImageSubresourceLayers { AspectMask = VkImageAspectFlags.DepthBit, LayerCount = 1 };
+            var depthRegion = region with { SrcSubresource = depthLayers, DstSubresource = depthLayers };
+            commands.CopyImage(_depthImage, VkImageLayout.TransferSrcOptimal, _rocksDepthImage, VkImageLayout.TransferDstOptimal, new ReadOnlySpan<VkImageCopy>(in depthRegion));
+            Barrier(commands, _rocksDepthImage, VkImageLayout.TransferDstOptimal, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.TransferWriteBit, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.TransferBit, VkPipelineStageFlags.FragmentShaderBit, VkImageAspectFlags.DepthBit);
+            Barrier(commands, _depthImage, VkImageLayout.TransferSrcOptimal, VkImageLayout.DepthAttachmentOptimal, VkAccessFlags.TransferReadBit, depthAccess, VkPipelineStageFlags.TransferBit, depthTests, VkImageAspectFlags.DepthBit);
+        }
+        else
+        {
+            // The depth written so far is read and written again by the rest of the scene.
+            Barrier(commands, _depthImage, VkImageLayout.DepthAttachmentOptimal, VkImageLayout.DepthAttachmentOptimal, VkAccessFlags.DepthStencilAttachmentWriteBit, depthAccess, depthTests, depthTests, VkImageAspectFlags.DepthBit);
+        }
+
+        color.LoadOp = VkAttachmentLoadOp.Load;
+        depth.LoadOp = VkAttachmentLoadOp.Load;
+        var colorInfo = color;
+        var depthInfo = depth;
+        commands.BeginRendering(
+            new VkRenderingInfo
+            {
+                RenderArea = new VkRect2D(_extent),
+                LayerCount = 1,
+                ColorAttachmentCount = 1,
+                ColorAttachments = &colorInfo,
+                DepthAttachment = &depthInfo,
+            }
+        );
+        SetViewport(commands, _extent);
     }
 
     /// <summary>
@@ -462,6 +618,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         device.WaitIdle();
         DestroyTargets();
         device.DestroySampler(_sampler, null);
+        device.DestroySampler(_pointSampler, null);
         foreach (var pipeline in (ReadOnlySpan<VkPipeline>)[_backgroundPipeline, _starPipeline, _dustPipeline, _meshPipeline, _gridPipeline, _tonemapPipeline, _ftlMarkPipeline])
             device.DestroyPipeline(pipeline, null);
         device.DestroyPipelineLayout(_scenePipelineLayout, null);
@@ -544,8 +701,13 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private void CreateTargets(VkExtent2D extent)
     {
         _extent = extent;
-        (_colorImage, _colorAllocation, _colorView) = CreateTarget(ColorFormat, VkImageUsageFlags.ColorAttachmentBit | VkImageUsageFlags.SampledBit, VkImageAspectFlags.ColorBit);
-        (_depthImage, _depthAllocation, _depthView) = CreateTarget(DepthFormat, VkImageUsageFlags.DepthStencilAttachmentBit, VkImageAspectFlags.DepthBit);
+        _fallbackReady = false;
+        (_colorImage, _colorAllocation, _colorView) = CreateTarget(ColorFormat, VkImageUsageFlags.ColorAttachmentBit | VkImageUsageFlags.SampledBit | VkImageUsageFlags.TransferSrcBit, VkImageAspectFlags.ColorBit);
+        (_depthImage, _depthAllocation, _depthView) = CreateTarget(DepthFormat, VkImageUsageFlags.DepthStencilAttachmentBit | VkImageUsageFlags.SampledBit | VkImageUsageFlags.TransferSrcBit, VkImageAspectFlags.DepthBit);
+
+        (_skyImage, _skyAllocation, _skyView) = CreateTarget(ColorFormat, VkImageUsageFlags.TransferDstBit | VkImageUsageFlags.SampledBit, VkImageAspectFlags.ColorBit);
+        (_rocksImage, _rocksAllocation, _rocksView) = CreateTarget(ColorFormat, VkImageUsageFlags.TransferDstBit | VkImageUsageFlags.SampledBit, VkImageAspectFlags.ColorBit);
+        (_rocksDepthImage, _rocksDepthAllocation, _rocksDepthView) = CreateTarget(DepthFormat, VkImageUsageFlags.TransferDstBit | VkImageUsageFlags.SampledBit, VkImageAspectFlags.DepthBit);
 
         var imageInfo = new VkDescriptorImageInfo
         {
@@ -553,6 +715,11 @@ internal sealed unsafe class SceneRenderer : IDisposable
             ImageView = _colorView,
             ImageLayout = VkImageLayout.ShaderReadOnlyOptimal,
         };
+        var skyInfo = imageInfo with { ImageView = _skyView };
+        var rocksInfo = imageInfo with { ImageView = _rocksView };
+        // Depth is read exactly, never filtered.
+        var depthInfo = imageInfo with { ImageView = _depthView, Sampler = _pointSampler };
+        var rocksDepthInfo = depthInfo with { ImageView = _rocksDepthView };
         _gpu.Device.UpdateDescriptorSets(
             [
                 new VkWriteDescriptorSet
@@ -562,6 +729,38 @@ internal sealed unsafe class SceneRenderer : IDisposable
                     DescriptorCount = 1,
                     DescriptorType = VkDescriptorType.CombinedImageSampler,
                     ImageInfo = &imageInfo,
+                },
+                new VkWriteDescriptorSet
+                {
+                    DstSet = _sceneSet,
+                    DstBinding = 1,
+                    DescriptorCount = 1,
+                    DescriptorType = VkDescriptorType.CombinedImageSampler,
+                    ImageInfo = &skyInfo,
+                },
+                new VkWriteDescriptorSet
+                {
+                    DstSet = _sceneSet,
+                    DstBinding = 2,
+                    DescriptorCount = 1,
+                    DescriptorType = VkDescriptorType.CombinedImageSampler,
+                    ImageInfo = &rocksInfo,
+                },
+                new VkWriteDescriptorSet
+                {
+                    DstSet = _sceneSet,
+                    DstBinding = 3,
+                    DescriptorCount = 1,
+                    DescriptorType = VkDescriptorType.CombinedImageSampler,
+                    ImageInfo = &depthInfo,
+                },
+                new VkWriteDescriptorSet
+                {
+                    DstSet = _sceneSet,
+                    DstBinding = 4,
+                    DescriptorCount = 1,
+                    DescriptorType = VkDescriptorType.CombinedImageSampler,
+                    ImageInfo = &rocksDepthInfo,
                 },
             ],
             []
@@ -611,7 +810,13 @@ internal sealed unsafe class SceneRenderer : IDisposable
     {
         _gpu.Device.DestroyImageView(_colorView, null);
         _gpu.Device.DestroyImageView(_depthView, null);
+        _gpu.Device.DestroyImageView(_skyView, null);
+        _gpu.Device.DestroyImageView(_rocksView, null);
+        _gpu.Device.DestroyImageView(_rocksDepthView, null);
         _gpu.Allocator.DestroyImage(_colorImage, _colorAllocation);
+        _gpu.Allocator.DestroyImage(_skyImage, _skyAllocation);
+        _gpu.Allocator.DestroyImage(_rocksImage, _rocksAllocation);
+        _gpu.Allocator.DestroyImage(_rocksDepthImage, _rocksDepthAllocation);
         _gpu.Allocator.DestroyImage(_depthImage, _depthAllocation);
     }
 
@@ -636,12 +841,35 @@ internal sealed unsafe class SceneRenderer : IDisposable
         VkImageLayout to,
         VkAccessFlags access,
         VkPipelineStageFlags stage
+    ) =>
+        Barrier(
+            commands,
+            image,
+            from,
+            to,
+            from == VkImageLayout.Undefined ? VkAccessFlags.None : VkAccessFlags.ColorAttachmentWriteBit,
+            access,
+            from == VkImageLayout.Undefined ? VkPipelineStageFlags.TopOfPipeBit : VkPipelineStageFlags.ColorAttachmentOutputBit,
+            stage,
+            aspect
+        );
+
+    private static void Barrier(
+        CommandBuffer commands,
+        VkImage image,
+        VkImageLayout from,
+        VkImageLayout to,
+        VkAccessFlags fromAccess,
+        VkAccessFlags toAccess,
+        VkPipelineStageFlags fromStage,
+        VkPipelineStageFlags toStage,
+        VkImageAspectFlags aspect = VkImageAspectFlags.ColorBit
     )
     {
         var barrier = new VkImageMemoryBarrier
         {
-            SrcAccessMask = from == VkImageLayout.Undefined ? VkAccessFlags.None : VkAccessFlags.ColorAttachmentWriteBit,
-            DstAccessMask = access,
+            SrcAccessMask = fromAccess,
+            DstAccessMask = toAccess,
             OldLayout = from,
             NewLayout = to,
             SrcQueueFamilyIndex = VK.QUEUE_FAMILY_IGNORED,
@@ -654,14 +882,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
                 LayerCount = 1,
             },
         };
-        commands.PipelineBarrier(
-            from == VkImageLayout.Undefined ? VkPipelineStageFlags.TopOfPipeBit : VkPipelineStageFlags.ColorAttachmentOutputBit,
-            stage,
-            VkDependencyFlags.None,
-            [],
-            [],
-            new ReadOnlySpan<VkImageMemoryBarrier>(in barrier)
-        );
+        commands.PipelineBarrier(fromStage, toStage, VkDependencyFlags.None, [], [], new ReadOnlySpan<VkImageMemoryBarrier>(in barrier));
     }
 
     /// <summary>The fixed star field: the same sky everywhere in the galaxy, since the stars are far beyond it.</summary>

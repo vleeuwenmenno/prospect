@@ -46,20 +46,6 @@ float ftlEase(float x)
     return x * x * (3.0 - 2.0 * x);
 }
 
-// How far a rift or wormhole is open, from 0 to 1. Stage 1 is the drive working (align and charge), 2 the hull in
-// transit, 3 the hull arriving. It grows through the whole charge so the build-up can be watched, opens at the far
-// end while the hull is in transit, and closes behind it once it is through.
-float ftlOpening(int stage, float progress)
-{
-    if (stage == 1)
-        return mix(0.05, 1.0, ftlEase(progress));
-    if (stage == 2)
-        return ftlEase(progress);
-    if (stage == 3)
-        return 1.0 - ftlEase(progress);
-    return 0.0;
-}
-
 // A rift starts as a crack and is pulled open: first it runs long, then it widens into a window. Half extents in
 // units of the fully open radius.
 vec2 ftlRiftExtent(float open)

@@ -33,6 +33,11 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
   never the view. No cuts, no full-screen flash; each stage eases into the next. Only hyperspace fills the view
   (Star Wars lines and tunnel). Wormhole: a sphere with gravitational lensing, subtle colour. Rift: an orange,
   crisp, ragged window with lensing. With both, the hull visibly flies in through one opening and out of another.
+- **The pilot starts their own jump.** The map only plots it: a NAV marker in the pilot view, aim at it, boost to
+  start. The hull then brakes and holds its nose on it while the drive calculates and charges; thrust cancels.
+  Ships flown by the server still jump straight from an order.
+- **The view stays the pilot's during a jump.** Free to look anywhere through charge, transit, arrival and a
+  cancel; the jump never turns the camera. Other players see each jump where it happens, from where they are.
 - **Resources.** Asteroids carry ore: iron, copper, nickel, titanium, silver, gold. More kinds later.
 
 ## Decided: servers

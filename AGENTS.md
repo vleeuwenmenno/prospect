@@ -136,6 +136,10 @@ The client opens a real window on the developer's desktop, and they are usually 
   prints the own hull's jump stage and progress. The pod charges for about 7.5 s after a jump order, then 3 s of
   tunnel and 1.5 s of arrival, so `--open jump --capture-after 6 --capture-count 28 --capture-every 0.3` covers
   a whole jump.
+- Another player's jump: run a dedicated server with `--listing off`, join it with a capturing client, then join a
+  second client with `--open jump-fleet` (and a late `--capture` to keep it connected): its mining vessel and
+  survey vessel jump 600 m along -x, so the first client sees a wormhole and a rift leave and arrive from the
+  server's snapshots. The second player starts 160 m along -x of the first; `--look` points the watcher at them.
 - Social data for a capture: run a dedicated server with `--listing off`, join it with the capturing client,
   and run headless clients against it (`--social-run 40 --join ... --player <name>` with `--invite <name>`
   (repeatable), `--accept-invites`, `--say`, `--party-say`). `--accept-invites` on the capturing client makes it

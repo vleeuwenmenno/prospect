@@ -76,9 +76,15 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   stretch into lines that stream back from the hull's nose and become a tunnel), wormhole (a sphere that bends
   the stars around it) and rift (an orange window torn into space). With a wormhole or a rift the pilot sees their
   hull fly into the opening, rides through the throat behind it and comes out of a second opening that closes
-  behind them. Every effect is laid out around the hull's nose, so looking around during a jump shows it from the
-  side or from behind. A jump is a standing order: the hull brakes and turns its nose to the destination, the drive charges
-  from the hull's power (a bigger ship needs more energy, a weak or drained battery charges slower), the hull is
+  behind them. Every effect is laid out around the hull's nose, and the view stays the pilot's through the whole
+  jump, so looking around shows it from the side or from behind. Another hull's rift or wormhole sits in the world
+  where that hull opened it, seen in perspective from wherever the viewer is, in front of or behind what is
+  around it; the hull flies into it and out of the one it arrives through. The pilot plots a jump on the map
+  (**Plot jump**), which shows a NAV marker in the pilot view; aimed at it, the boost key starts the jump. Ships
+  flown by the server jump as soon as they are ordered. A started jump is a standing order: the hull brakes and
+  turns its nose to the destination, then calculates for 12 seconds while charging from the hull's power.
+  Both must finish; jump charge speed affects charging only. A bigger ship needs more energy, and a weak or
+  drained battery charges slower. Once ready, the hull is
   in transit for three seconds, and it comes out at its destination, any distance away. Taking the controls
   before the drive fires cancels the jump and loses the charge. The client generates the destination while the
   drive charges.
@@ -100,7 +106,8 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 - **Galaxy map.** Every grid cell is a sector. Zoomed out it shows the whole galaxy; closer, the sector grid; closest,
   each sector's star, asteroids and name. A sector's contents are shown only after one of your ships has been
   within a sector of it. Right-click a sector to choose how to get there: move under engines, or jump with the
-  faster-than-light drive (only ships that have a working drive jump).
+  faster-than-light drive (only ships that have a working drive jump). A unit list on the left shows every ship you
+  own, which are selected, its sector and what it is doing; click a row to add or remove that ship.
 - **Renderer.** Floating-point scene target and tone mapping, camera-relative rendering from double-precision
   positions, a star field and sky, instanced hull and asteroid meshes. Asteroids have five levels of detail, from
   a speck in the distance to a giant seen from its surface.
@@ -211,13 +218,19 @@ Galaxy map:
 | | |
 | --- | --- |
 | Select ships | Left-click a ship, or drag a box; `Shift` or `Ctrl` adds to the selection |
-| Set course | Right-click a sector, then pick **Move here** or **Jump here** in the menu |
+| Add or remove one ship | Click its row in the unit list; **All** and **Clear** change the whole list |
+| Set course | Right-click a sector, then pick **Move here**, or **Plot jump** (the ship you fly) / **Jump here** (selected fleet ships) in the menu |
 | Close the menu | Left-click elsewhere, or `Esc` (a second `Esc` closes the map) |
 | Pan / zoom | `W` `A` `S` `D`, arrow keys or middle-drag / mouse wheel |
 | Change layer, centre on your ship | `Page Up` / `Page Down`, `Space` |
 
-Orders go to the selected ships, or to the ship you fly if none is selected. **Jump here** is greyed out when none of
-them has a working jump drive, or all are already in that sector; ships without a drive stay where they are.
+Map orders go to exactly the selected ships. Opening the map with nothing selected selects the ship you fly.
+After **Clear**, **Move here** and **Jump here** are greyed out and nothing is ordered. Jumps also require a
+working drive and a destination outside the current sector; ineligible ships keep their orders.
+The ship you fly gets a plotted course instead: a NAV marker, or an arrow at the edge of the view, shows the way.
+Turn its nose onto the marker and press boost (`Space`) to start the jump. Off the marker, boost works as usual
+and the HUD says to aim first. The course clears on arrival. Outside the map, a move with nothing selected
+still goes to the ship you fly.
 
 Where the command plane cuts through an asteroid or a hull, the cut is drawn as a bright line and the part below
 the plane is dimmed, so it is clear what sits on the plane. `I` shows the data sheet of the first selected hull or

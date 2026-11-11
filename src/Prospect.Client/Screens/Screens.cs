@@ -25,7 +25,7 @@ internal enum Screen
 /// </summary>
 internal sealed partial class ScreenHost
 {
-    private const ImGuiWindowFlags RootFlags =
+    internal const ImGuiWindowFlags RootFlags =
         ImGuiWindowFlags.NoDecoration
         | ImGuiWindowFlags.NoMove
         | ImGuiWindowFlags.NoSavedSettings

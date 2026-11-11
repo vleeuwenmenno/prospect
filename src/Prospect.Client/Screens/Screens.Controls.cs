@@ -48,7 +48,7 @@ internal sealed partial class ScreenHost
         _controlsOpen = true;
         _controlsSearch.Clear();
         _controlsQuery = "";
-        _mapBoxing = false;
+        _mapPointer.Reset();
     }
 
     private void DrawControls()

@@ -16,9 +16,14 @@ layout(set = 0, binding = 0) uniform Frame
     vec4 ftl;          // the viewer's own jump. x: drive kind (1 hyperspace, 2 wormhole, 3 rift), y: stage
                        // (1 drive working, 2 in transit, 3 arriving), z: progress through the stage 0..1, w: seed
     vec4 ftlAxis;      // xyz: the jump's axis, the hull's nose, in world space; w: how far the tunnel has streamed
-    vec4 ftlUp;        // xyz: up across the axis; w: how much of the view the hyperspace tunnel covers, 0..1
+    vec4 ftlUp;        // xyz: up across the axis; w: hyperspace, how much of the view the tunnel covers, 0..1;
+                       // rift or wormhole, how far the camera is past the current opening, 0..1
     vec4 ftlEntry;     // the opening the hull flies into: xyz camera-relative centre, w radius in metres (0: none)
     vec4 ftlExit;      // the opening the hull comes out of: the same
     vec4 ftlShape;     // x: how far hyperspace stretches the stars, y: how far the entry is open, z: the exit,
                        // w: how much of the tunnel's or throat's light falls on the pilot's hull
+    vec4 openings[16]; // rifts and wormholes seen from outside, four vectors each: xyz camera-relative centre and w
+                       // radius fully open in metres; xyz the axis it faces (the hull's nose) and w the radius of the
+                       // space it hides a hull in; xyz up across it and w that space's length; x drive kind
+                       // (2 wormhole, 3 rift), y how far open 0..1, z seed, w which side it hides (1 past, -1 before)
 } frame;

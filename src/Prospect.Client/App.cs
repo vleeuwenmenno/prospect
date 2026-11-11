@@ -762,6 +762,22 @@ internal sealed class App : IDisposable
                 _screens.OpenMapMenuNear(3, 2);
             else if (view == "map-hover")
                 _screens.OpenMapHover();
+            else if (view == "jump-fleet" && snapshot is { OwnHull: >= 0 })
+            {
+                // The player's other hulls make short jumps side by side to 600 m along -x from the pod, so another
+                // player's client can watch them leave and arrive from the server's snapshots. The second player
+                // to join a server starts 160 m along -x of the first.
+                var from = snapshot.Hulls[snapshot.OwnHull].Position;
+                var lane = 0;
+                for (var i = 0; i < snapshot.HullCount; i++)
+                {
+                    ref var hull = ref snapshot.Hulls[i];
+                    if (hull.IsOwn || hull.Owner != snapshot.PlayerId)
+                        continue;
+                    var target = from + new Double3(-600, 0, -60 + 120 * lane++);
+                    Session.Client.Input.IssueFleetOrder(hull.Id, new HullOrder { Kind = OrderKind.Jump, Target = target });
+                }
+            }
             else if (view.StartsWith("jump", StringComparison.Ordinal))
             {
                 World.FtlPreview = view switch

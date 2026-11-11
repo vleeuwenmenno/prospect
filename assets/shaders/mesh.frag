@@ -75,6 +75,7 @@ void main()
     }
 
     // A solid surface clears the jump lens mask, so a hull in front of an opening stays sharp, and leaves a mark
-    // of what it is in the fraction: 0.25 any surface, 0.5 the pilot's own hull, which their jump never covers.
-    outColor = vec4(lit, color.a > 1.5 ? 0.5 : 0.25);
+    // of what it is in the fraction: 0.25 an asteroid, 0.375 a hull, 0.5 the pilot's own hull, which their jump
+    // never covers.
+    outColor = vec4(lit, color.a > 1.5 ? 0.5 : color.a > 0.5 ? 0.375 : 0.25);
 }
