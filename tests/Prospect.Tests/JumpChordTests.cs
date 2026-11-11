@@ -263,6 +263,22 @@ public sealed class JumpChordTests : IDisposable
         Assert.True(ForwardSpeed > speed + 1f, $"forward speed {speed} then {ForwardSpeed}");
     }
 
+    [Fact]
+    public void HaltWinsOverForwardAndBoostPressedInTheSamePoll()
+    {
+        Plot();
+        Assert.True(_world.NavAimed);
+        _down.Add(Forward);
+        _down.Add(Boost);
+        _down.Add(Halt);
+        for (var i = 0; i < 10; i++)
+        {
+            Step();
+            Assert.NotEqual(OrderKind.Jump, Own.Order.Kind);
+            Assert.Equal(JumpPhase.None, Own.Jump);
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

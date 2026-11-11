@@ -1,3 +1,4 @@
+using System.Numerics;
 using Prospect.Client.World;
 using Prospect.Game.World;
 using Xunit;
@@ -13,6 +14,17 @@ public sealed class ArrivalPulseTests
     private static readonly GameContent Content = GameContent.Load();
 
     private static FlightParams Hull(float mass, float radius) => new() { Mass = mass, Radius = radius };
+
+    [Fact]
+    public void ArrivalLightStaysBehindTheAnchorInWorldSpace()
+    {
+        var anchor = new Double3(1e12, -2e12, 3e12);
+        var axis = Vector3.Normalize(new Vector3(2f, 3f, -4f));
+        var arrival = WorldView.HyperspaceMarkPosition(anchor, axis, 10f, false);
+        Assert.True(Vector3.Distance(-axis * 15f, arrival.RelativeTo(anchor)) < 0.001f);
+        var charge = WorldView.HyperspaceMarkPosition(anchor, axis, 10f, true);
+        Assert.True(Vector3.Distance(axis * (10f * HullVisuals.HyperspaceLight), charge.RelativeTo(anchor)) < 0.001f);
+    }
 
     [Fact]
     public void HeavierHullsReachFurtherUpToTheContentsBound()

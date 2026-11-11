@@ -524,7 +524,7 @@ internal sealed class WorldView
             // A plotted jump starts when the pilot boosts with the nose on it, or pushes forward while boosting: the
             // two in either order are one start. Off it, boost is boost.
             var boostPressed = _actions.Pressed(_devices, InputAction.Boost, keyboard);
-            if (NavAimed && Own.Jump == JumpPhase.None && Own.Order.Kind != OrderKind.Jump && (boostPressed || (forwardPressed && controls.Boost)))
+            if (!_actions.Pressed(_devices, InputAction.Halt, keyboard) && NavAimed && Own.Jump == JumpPhase.None && Own.Order.Kind != OrderKind.Jump && (boostPressed || (forwardPressed && controls.Boost)))
             {
                 bridge.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = NavTarget!.Value });
                 controls.Boost = false;
@@ -621,7 +621,7 @@ internal sealed class WorldView
             // The pilot's own hull is seen from the inside of its own jump; every other jump is seen from outside,
             // and a hull between a jump's ends is not drawn at all.
             if (visual.Inside && hull.Jump != JumpPhase.None)
-                AddOwnJumpMarks(design.Flight, position, marks, ref markCount);
+                AddOwnJumpMarks(design.Flight, camera, marks, ref markCount);
             else if (!visual.Inside)
                 AddHyperspaceMarks(hull, visual, design.Flight, camera, marks, ref markCount);
             var stretch = visual.Stretch;
@@ -964,7 +964,7 @@ internal sealed class WorldView
         var forward = Vector3.Transform(-Vector3.UnitZ, visual.Orientation);
         var stage = EffectStage(hull.Jump);
         var working = stage == 1f;
-        var at = visual.Anchor.RelativeTo(camera) + forward * (flight.Radius * (working ? HullVisuals.HyperspaceLight : -1.5f));
+        var at = HyperspaceMarkPosition(visual.Anchor, forward, flight.Radius, working).RelativeTo(camera);
         var reach = working ? 0f : ArrivalReach(flight, _snapshot!.Content.Rules);
         AddMark(marks, ref markCount, at, flight.Radius * (working ? 4f : reach), kind, stage, JumpProgress(hull, flight), (hull.Id & 0xFF) / 255f, forward, reach);
     }
@@ -1019,16 +1019,20 @@ internal sealed class WorldView
     /// The light of the pilot's own hyperspace jump, at the nose. A rift's or wormhole's openings are worked out in
     /// the composite pass from the frame constants.
     /// </summary>
-    private void AddOwnJumpMarks(in FlightParams flight, Vector3 position, Span<FtlMark> marks, ref int markCount)
+    private void AddOwnJumpMarks(in FlightParams flight, Double3 camera, Span<FtlMark> marks, ref int markCount)
     {
         if ((FtlPreview != FtlKind.None ? FtlPreview : flight.Ftl) != FtlKind.Hyperspace)
             return;
         var stage = EffectStage(Own.Jump);
         var working = stage == 1f;
-        var at = position + _jumpAxis * (flight.Radius * (working ? 3f : 1.5f));
+        var at = HyperspaceMarkPosition(OwnPosition, _jumpAxis, flight.Radius, working).RelativeTo(camera);
         var reach = working ? 0f : ArrivalReach(flight, _snapshot!.Content.Rules);
         AddMark(marks, ref markCount, at, flight.Radius * (working ? 4f : reach), FtlKind.Hyperspace, stage, JumpProgress(Own, flight), (Own.Id & 0xFF) / 255f, _jumpAxis, reach);
     }
+
+    /// <summary>The world-space light origin, shared by pilot and observer views.</summary>
+    internal static Double3 HyperspaceMarkPosition(Double3 anchor, Vector3 axis, float radius, bool working) =>
+        anchor + axis * (radius * (working ? HullVisuals.HyperspaceLight : -1.5f));
 
     /// <summary>
     /// Works out how the pilot's own jump is drawn this frame. Everything here eases from one stage into the next,
