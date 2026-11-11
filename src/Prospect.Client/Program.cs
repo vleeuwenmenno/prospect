@@ -23,7 +23,7 @@ internal static class Program
                                   Arguments show in process lists; PROSPECT_PASSWORD in the environment works too
           --listing <url|off>     The listing server for public games and the server browser (default: content/net/listing.json)
           --set <id>=<value>      A world setting for local games started in this run; repeat for more (ids and ranges: content/rules/settings.json)
-          --open <view>           With --start local or --join: open the command view, the map or the ship data sheet (command, map, map-menu, map-hover, galaxy, info), start a jump (jump, jump-wormhole, jump-rift), or show the world settings in force (world-settings)
+          --open <view>           With --start local or --join: open the command view, the map or the ship data sheet (command, map, map-menu, map-hover, galaxy, info), start a jump (jump, jump-wormhole, jump-rift), or show the world settings in force (world-settings) or the in-game menu (menu)
           --sector <x>,<y>,<z>    With --start local or --bench: start in this sector instead of the home sector
           --size <W>x<H>          Start windowed at this size
           --validation            Enable Vulkan validation layers (default in debug builds)
@@ -34,6 +34,9 @@ internal static class Program
           --capture-count <n>     Take n numbered screenshots instead of one (file-00.png, file-01.png, ...)
           --capture-every <sec>   Time between numbered screenshots (default 0.25)
           --look <degrees>        Pilot view: hold the camera this many degrees to the right of the hull's nose
+          --look-to <degrees>     With --look and --capture: turn the camera from --look to this angle, evenly
+                                  over the time the captures take
+          --target                Pilot view: target the nearest other hull once in space
           --verbose               Log debug messages
           --help                  Show this text
         """;
@@ -122,7 +125,7 @@ internal static class Program
                 case "--set" when hasValue:
                     options.WorldSettingArgs.Add(args[++i]);
                     break;
-                case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "map-hover" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "world-settings":
+                case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "map-hover" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "world-settings" or "menu":
                     options.OpenView = args[++i];
                     break;
                 case "--sector" when hasValue:
@@ -169,6 +172,13 @@ internal static class Program
                 case "--look" when hasValue && float.TryParse(args[i + 1], out var look):
                     options.LookDegrees = look;
                     i++;
+                    break;
+                case "--look-to" when hasValue && float.TryParse(args[i + 1], out var lookTo):
+                    options.LookToDegrees = lookTo;
+                    i++;
+                    break;
+                case "--target":
+                    options.TargetNearest = true;
                     break;
                 case "--verbose":
                     verbose = true;

@@ -72,6 +72,9 @@ public sealed record FlightRules
     public required float BoostThrustMultiplier { get; init; }
     public required float BoostSpeedMultiplier { get; init; }
     public required float BoostPowerMultiplier { get; init; }
+
+    /// <summary>Share of the battery's capacity it must hold before boost will engage, from 0 to 1.</summary>
+    public required float BoostEnergyFloor { get; init; }
     public required float BoostHeatSeconds { get; init; }
     public required float CoolSeconds { get; init; }
     public required float ShieldRechargeDelaySeconds { get; init; }
@@ -140,6 +143,7 @@ public sealed class BlockCatalog
             BoostThrustMultiplier = r.GetProperty("boostThrustMultiplier"u8).GetSingle(),
             BoostSpeedMultiplier = r.GetProperty("boostSpeedMultiplier"u8).GetSingle(),
             BoostPowerMultiplier = r.GetProperty("boostPowerMultiplier"u8).GetSingle(),
+            BoostEnergyFloor = Math.Clamp(r.GetProperty("boostEnergyFloor"u8).GetSingle(), 0f, 1f),
             BoostHeatSeconds = r.GetProperty("boostHeatSeconds"u8).GetSingle(),
             CoolSeconds = r.GetProperty("coolSeconds"u8).GetSingle(),
             ShieldRechargeDelaySeconds = r.GetProperty("shieldRechargeDelaySeconds"u8).GetSingle(),
@@ -475,6 +479,7 @@ public sealed class HullDesign
             ShieldPower = shieldPower,
             BoostPowerMultiplier = rules.BoostPowerMultiplier,
             EnergyStorage = storage,
+            BoostEnergyFloor = rules.BoostEnergyFloor * storage,
             CollisionSafeSpeed = rules.CollisionSafeSpeed,
             CollisionDamagePerTonneSpeedSquared = rules.CollisionDamagePerTonneSpeedSquared,
             CollisionBounce = rules.CollisionBounce,

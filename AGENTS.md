@@ -97,7 +97,7 @@ The client opens a real window on the developer's desktop, and they are usually 
 - Only launch it with `--capture <file.png>` or `--bench <seconds>`. Both mute every input device, so the window
   cannot grab the pointer or react to their typing. Never start it any other way from an agent session.
 - `make run ARGS="--start local --open <view> --capture /path/shot.png --capture-after 2.5"` saves a screenshot
-  and exits. Views: `command`, `map`, `map-hover` (the map with the pointer on your own sector), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`. Screens
+  and exits. Views: `command`, `map`, `map-hover` (the map with the pointer on your own sector), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`. Screens
   without a session: `--start menu|join|settings|newgame|credits`; `--set id=value` shows on `newgame`.
 - A sequence: add `--capture-count <n> --capture-every <sec>` for numbered stills (`shot-00.png`, ...); each one
   prints the own hull's jump stage and progress. The pod charges for about 7.5 s after a jump order, then 3 s of
@@ -105,6 +105,11 @@ The client opens a real window on the developer's desktop, and they are usually 
   a whole jump.
 - `--look <degrees>` holds the pilot camera that far to the right of the hull's nose, as free look would (`0`
   looks along the nose, `150` nearly back). Use it to check that an effect follows the hull, not the view.
+- `--target` targets the nearest other hull once in space (in a local game the Prospector, about 120 degrees to
+  the right of the nose). `--open menu` opens the in-game Esc menu. `--look-to <degrees>` with `--look` turns the
+  camera evenly from one angle to the other over the captures: `--target --look 40 --look-to 130
+  --capture-count 16 --capture-every 0.12` brings the target into view from the right edge, and `--look -90
+  --look-to -30` sweeps it past straight behind.
 - Captures time themselves by the wall clock and present without vsync, so they also run while the display is
   asleep.
 - `--host unlisted|public` hosts the local game for others and opens UDP 27420 on the developer's machine; add

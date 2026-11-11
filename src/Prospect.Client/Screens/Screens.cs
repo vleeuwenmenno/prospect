@@ -108,6 +108,19 @@ internal sealed partial class ScreenHost
         ImGui.SetNextWindowPos(float2.Zero);
         ImGui.SetNextWindowSize(_ui.DisplaySize);
         ImGui.Begin(name, RootFlags | extraFlags);
+        RaiseIfAppearing();
+    }
+
+    /// <summary>
+    /// Puts the window just begun on top of every other if it has only now opened. ImGui puts a new window that
+    /// may not be brought to the front beneath every window that already exists, so a menu opened over the game
+    /// would be drawn under the game's own surfaces. After opening the order holds, so clicks inside a window
+    /// cannot reshuffle anything.
+    /// </summary>
+    private static void RaiseIfAppearing()
+    {
+        if (ImGui.IsWindowAppearing())
+            ImGui.Internal.BringWindowToDisplayFront(ImGui.Internal.GetCurrentWindow());
     }
 
     private static void EndRoot() => ImGui.End();

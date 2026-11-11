@@ -49,10 +49,21 @@ internal sealed partial class ScreenHost
     private float2 _mapMenuSize;
     private float _mapMenuTime;
 
+    // The target marker's state from frame to frame: which target it shows, whether that target is out of view,
+    // how far the bracket has turned into the border arrow (0 to 1), and the arrow's direction in radians.
+    private uint _indicatorHull;
+    private RockRef? _indicatorRock;
+    private bool _indicatorOut;
+    private float _indicatorMorph;
+    private float _indicatorAngle;
+
     /// <summary>True while the player is in space with nothing open over it, so input belongs to the world.</summary>
     public bool WorldInputEnabled => _screen == Screen.Session && !_sessionMenuOpen && !_mapOpen;
 
     public void OpenShipInfo() => _shipInfoOpen = true;
+
+    /// <summary>Opens the in-game menu over the game; for the scripted <c>--open menu</c> view.</summary>
+    public void OpenSessionMenu() => _sessionMenuOpen = true;
 
     /// <summary>Opens the map zoomed all the way out, centred on the galaxy's core.</summary>
     public void OpenGalaxyOverview()
@@ -99,35 +110,11 @@ internal sealed partial class ScreenHost
         if (WorldInputEnabled && _app.Actions.Pressed(_app.Devices, InputAction.ShipInfo, true))
             _shipInfoOpen = !_shipInfoOpen;
 
-        BeginRoot("##world"u8, ImGuiWindowFlags.NoInputs | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoFocusOnAppearing);
-        var draw = ImGui.GetWindowDrawList();
-        DrawSectorPanel(draw, snapshot, world);
-
-        // The world settings panel is tall enough to reach the readouts, and a root window opened later is drawn
-        // beneath the ones already open, so the readouts step aside while it is shown.
-        if (_sessionMenuOpen && _worldSettingsOpen)
-        {
-            EndRoot();
-            return;
-        }
-
-        if (_shipInfoOpen && !_mapOpen)
-        {
-            // In the command view the sheet describes the first selected thing; otherwise the hull being flown.
-            if (world.Mode == ViewMode.Command && world.Selection.Length == 0 && world.SelectedRocks.Length > 0)
-            {
-                DrawRockInfo(draw, world, world.SelectedRocks[0]);
-                EndRoot();
-                if (world.CommandBlend > 0.5f)
-                    DrawFleetList(snapshot, world, world.CommandBlend);
-                return;
-            }
-
-            var shown = world.Own;
-            if (world.Mode == ViewMode.Command && world.Selection.Length > 0 && world.TryGetHull(world.Selection[0], out var picked))
-                shown = picked;
-            DrawShipInfo(draw, snapshot.Content.Designs[Math.Min(shown.Design, snapshot.Content.Designs.Length - 1)], shown.Blocks, world.Mode == ViewMode.Command);
-        }
+        // Everything shown over the world goes on ImGui's background layer, which is drawn beneath every window.
+        // Menus, the world settings, the map and the fleet list are windows, so they always cover it, and a menu's
+        // dim, drawn on the same layer afterwards, dims it too. Within the layer, what is drawn later is on top:
+        // markers that move with the world first, then the panels and sheets they must never cover.
+        var draw = ImGui.GetBackgroundDrawList();
         if (!_mapOpen)
         {
             var pilot = 1f - world.CommandBlend;
@@ -135,14 +122,36 @@ internal sealed partial class ScreenHost
                 DrawFlightReadouts(draw, snapshot, world, pilot);
             if (world.CommandBlend > 0.01f)
                 DrawCommandOverlay(draw, snapshot, world, world.CommandBlend);
+            if (pilot > 0.01f)
+                DrawTargetReadout(draw, snapshot, world, pilot);
+            DrawSectorPanel(draw, snapshot, world);
+            if (_shipInfoOpen)
+                DrawSheet(draw, snapshot, world);
+            if (world.CommandBlend > 0.5f)
+                DrawFleetList(snapshot, world, world.CommandBlend);
+        }
+        else
+        {
+            DrawMap(snapshot, world);
+        }
+    }
+
+    /// <summary>
+    /// The ship data sheet, or in the command view the sheet of the first selected thing: a hull, or an asteroid
+    /// when no hull is selected.
+    /// </summary>
+    private void DrawSheet(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world)
+    {
+        if (world.Mode == ViewMode.Command && world.Selection.Length == 0 && world.SelectedRocks.Length > 0)
+        {
+            DrawRockInfo(draw, world, world.SelectedRocks[0]);
+            return;
         }
 
-        EndRoot();
-
-        if (!_mapOpen && world.CommandBlend > 0.5f)
-            DrawFleetList(snapshot, world, world.CommandBlend);
-        if (_mapOpen)
-            DrawMap(snapshot, world);
+        var shown = world.Own;
+        if (world.Mode == ViewMode.Command && world.Selection.Length > 0 && world.TryGetHull(world.Selection[0], out var picked))
+            shown = picked;
+        DrawShipInfo(draw, snapshot.Content.Designs[Math.Min(shown.Design, snapshot.Content.Designs.Length - 1)], shown.Blocks, world.Mode == ViewMode.Command);
     }
 
     private void DrawSectorPanel(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world)
@@ -218,7 +227,7 @@ internal sealed partial class ScreenHost
             draw.AddLine(prograde - new float2(0, r * 2), prograde - new float2(0, r), color, Kit.Px(1.5f));
         }
 
-        DrawTargeting(draw, snapshot, world);
+        DrawTargetMarkers(draw, snapshot, world);
 
         // The view line: where the hull will point once it is under thrust.
         var middle = display * 0.5f;
@@ -253,19 +262,33 @@ internal sealed partial class ScreenHost
             rightMin,
             barWidth,
             "ENERGY"u8,
-            own.Energy / flight.EnergyStorage,
+            flight.EnergyStorage > 0f ? own.Energy / flight.EnergyStorage : 0f,
             own.Energy < flight.EnergyStorage * 0.15f ? Theme.Bad : Theme.Accent,
             MathF.Abs(own.EnergyRate) < 0.05f
                 ? Kit.F($"{own.Energy:0} / {flight.EnergyStorage:0} MJ")
                 : Kit.F($"{own.Energy:0} / {flight.EnergyStorage:0} MJ   {own.EnergyRate:+0.0;-0.0} MW")
         );
+
+        // The battery's boost floor: below the mark boost will not start, though boost already running carries
+        // on until the battery is empty.
+        if (flight.EnergyStorage > 0f)
+        {
+            var floorX = rightMin.X + barWidth * Math.Clamp(flight.BoostEnergyFloor / flight.EnergyStorage, 0f, 1f);
+            var barTop = rightMin.Y + Kit.Px(18);
+            draw.AddLine(new float2(floorX, barTop - Kit.Px(3)), new float2(floorX, barTop + Kit.Px(10)), Kit.Color(Theme.Text, 0.8f), Kit.Px(1.5f));
+        }
+
+        // Why boost is unavailable, when it is: the drive is cooling down, or the battery is below its floor.
+        var noEnergy = !own.Boosting && (own.Energy <= 0f || own.Energy < flight.BoostEnergyFloor);
         StatusBar(
             draw,
             rightMin + new float2(0, row),
             barWidth,
-            own.BoostLocked ? "BOOST COOLING"u8 : "BOOST HEAT"u8,
+            own.BoostLocked ? "BOOST COOLING"u8
+                : noEnergy ? "BOOST NO ENERGY"u8
+                : "BOOST HEAT"u8,
             own.Heat,
-            own.BoostLocked ? Theme.Bad : own.Heat > 0.7f ? Theme.Accent : Theme.TextDim,
+            own.BoostLocked || noEnergy ? Theme.Bad : own.Heat > 0.7f ? Theme.Accent : Theme.TextDim,
             snapshot.Dampeners ? "DAMPENERS ON"u8 : "DAMPENERS OFF"u8
         );
 
@@ -467,6 +490,7 @@ internal sealed partial class ScreenHost
         ImGui.SetNextWindowPos(min);
         ImGui.SetNextWindowSize(size);
         ImGui.Begin("##fleet"u8, RootFlags | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoFocusOnAppearing);
+        RaiseIfAppearing();
         Kit.Fade = alpha;
         var draw = ImGui.GetWindowDrawList();
         Kit.PanelFrame(draw, min, min + size);
@@ -547,11 +571,13 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>Pilot view: the hull under the reticle, the targeted hull and its readout.</summary>
-    private void DrawTargeting(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world)
+    /// <summary>
+    /// Pilot view markers that move with the world: brackets on the hull or asteroid under the reticle, and the
+    /// marker on the target, which turns into an arrow at the screen's border while the target is out of view.
+    /// </summary>
+    private void DrawTargetMarkers(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world)
     {
         var designs = snapshot.Content.Designs;
-        var display = _ui.DisplaySize;
-
         if (world.HoveredHull != 0 && world.HoveredHull != world.TargetHull && world.TryGetHull(world.HoveredHull, out var hovered))
         {
             var design = designs[Math.Min(hovered.Design, designs.Length - 1)];
@@ -564,19 +590,136 @@ internal sealed partial class ScreenHost
             }
         }
 
+        if (world.HoveredRock is { } hoverRock && world.HoveredRock != world.TargetRock && world.TryGetRock(hoverRock, out var hoverPosition, out var hoverRadius) && world.ProjectDisc(hoverPosition, hoverRadius, out var hoverScreen, out var hoverPixels, out _))
+            draw.AddCircle(hoverScreen, Math.Max(hoverPixels * 1.05f, Kit.Px(12)), Kit.Color(Theme.Text, 0.6f), 48, Kit.Px(1.2f));
+
+        if (world.TargetHull != 0 && world.TryGetHull(world.TargetHull, out var target))
+        {
+            var design = designs[Math.Min(target.Design, designs.Length - 1)];
+            DrawTargetIndicator(draw, world, target.Position, design.Flight.Radius, target.Owner == snapshot.PlayerId ? Theme.Accent : Theme.Info, false);
+        }
+        else if (world.TargetRock is { } targetRock && world.TryGetRock(targetRock, out var rockPosition, out var rockRadius))
+        {
+            DrawTargetIndicator(draw, world, rockPosition, rockRadius, Theme.Info, true);
+        }
+        else
+        {
+            _indicatorHull = 0;
+            _indicatorRock = null;
+        }
+    }
+
+    /// <summary>
+    /// The target's marker. In view it is the bracket; out of view, or behind, it is an arrow on an ellipse inside
+    /// the screen, on the side the camera must turn toward. Crossing between the two, the bracket shrinks into
+    /// the arrow at the border and the arrow grows back into the bracket as it travels in to the target.
+    /// </summary>
+    private void DrawTargetIndicator(ImDrawListPtr draw, WorldView world, Double3 position, float radius, uint rgb, bool rock)
+    {
+        var display = _ui.DisplaySize;
+        var center = display * 0.5f;
+
+        // The ellipse the arrow runs on: clear of the side edges, of the target readout at the top and of the
+        // speed and status readouts at the bottom, and, being an ellipse, of the corner panels.
+        var semiX = Math.Max(display.X * 0.5f - Kit.Px(76), Kit.Px(40));
+        var semiY = Math.Max(display.Y * 0.5f - Kit.Px(Theme.Space5 + 104 + 52), Kit.Px(40));
+
+        // The way to turn is the target's direction across the view. A target in front projects along the same
+        // line from the centre, so the bracket and the arrow agree where the one becomes the other.
+        var view = world.ToView(position);
+        var across = new float2(view.X, -view.Y);
+        var acrossLength = MathF.Sqrt(across.X * across.X + across.Y * across.Y);
+        var inFront = world.ProjectDisc(position, radius, out var screen, out var pixels, out _);
+        var fromCenter = screen - center;
+        var ellipse = inFront ? fromCenter.X * fromCenter.X / (semiX * semiX) + fromCenter.Y * fromCenter.Y / (semiY * semiY) : float.MaxValue;
+
+        // Close to straight behind, the direction across the view is noise: keep the side already shown.
+        var settled = !(view.Z < 0f && acrossLength < -view.Z * 0.1f) && acrossLength > 1e-4f;
+        var angle = settled ? MathF.Atan2(across.Y, across.X) : _indicatorAngle;
+
+        // A new target starts in whichever form fits, with no animation from the last one.
+        var fresh = world.TargetHull != _indicatorHull || world.TargetRock != _indicatorRock;
+        if (fresh)
+        {
+            _indicatorHull = world.TargetHull;
+            _indicatorRock = world.TargetRock;
+            _indicatorOut = ellipse > 1f;
+            _indicatorMorph = _indicatorOut ? 1f : 0f;
+            _indicatorAngle = settled ? angle : -MathF.PI * 0.5f;
+        }
+
+        // Out once the target crosses the ellipse; back in only once it is well inside, so it cannot flicker.
+        _indicatorOut = _indicatorOut ? ellipse > 0.9f : ellipse > 1f;
+        var dt = _ui.DeltaTime;
+        _indicatorMorph = Math.Clamp(_indicatorMorph + (_indicatorOut ? dt : -dt) / 0.3f, 0f, 1f);
+
+        // While the bracket shows, the arrow's angle follows the target exactly; while the arrow shows, it slides
+        // round the ellipse to a new direction rather than jumping there.
+        if (!_indicatorOut || _indicatorMorph <= 0f)
+        {
+            _indicatorAngle = angle;
+        }
+        else
+        {
+            var turn = angle - _indicatorAngle;
+            turn -= MathF.Round(turn / MathF.Tau) * MathF.Tau;
+            _indicatorAngle += turn * (1f - MathF.Exp(-14f * dt));
+        }
+
+        var direction = new float2(MathF.Cos(_indicatorAngle), MathF.Sin(_indicatorAngle));
+        var onEllipse = 1f / MathF.Sqrt(direction.X * direction.X / (semiX * semiX) + direction.Y * direction.Y / (semiY * semiY));
+        var border = center + direction * onEllipse;
+        var morph = _indicatorMorph * _indicatorMorph * (3f - 2f * _indicatorMorph);
+        var at = inFront && ellipse <= 1f ? screen : border;
+        at += (border - at) * morph;
+
+        if (morph < 1f)
+        {
+            // The bracket, as it is in view, shrinking to the arrow's size as the arrow takes over.
+            var shown = 1f - morph;
+            var color = Kit.Color(rgb, shown);
+            if (rock)
+            {
+                var ring = Math.Max(inFront ? pixels * 1.08f : 0f, Kit.Px(14));
+                ring += (Kit.Px(10) - ring) * morph;
+                draw.AddCircle(at, ring, color, 56, Kit.Px(1.5f));
+                var reach = ring + Kit.Px(5);
+                Brackets(draw, at - new float2(reach, reach), at + new float2(reach, reach), Kit.Px(9), color);
+            }
+            else
+            {
+                var reach = Math.Max(inFront ? pixels * 1.3f : 0f, Kit.Px(18));
+                reach += (Kit.Px(12) - reach) * morph;
+                Brackets(draw, at - new float2(reach, reach), at + new float2(reach, reach), Kit.Px(10), color);
+                draw.AddCircle(at, reach * 1.25f, Kit.Color(rgb, 0.5f * shown), 40, Kit.Px(1.2f));
+            }
+        }
+
+        if (morph > 0f)
+        {
+            // The arrow: a solid head pointing the way to turn, with a faint ring round the point it turns about.
+            var side = new float2(-direction.Y, direction.X);
+            var size = Kit.Px(11);
+            var tip = at + direction * size;
+            var back = at - direction * (size * 0.45f);
+            draw.AddTriangleFilled(tip, back + side * (size * 0.8f), back - side * (size * 0.8f), Kit.Color(rgb, morph));
+            draw.AddCircle(at, size * 1.6f, Kit.Color(rgb, 0.4f * morph), 32, Kit.Px(1.2f));
+        }
+    }
+
+    /// <summary>The readout of the targeted hull or asteroid, top centre.</summary>
+    private void DrawTargetReadout(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, float alpha)
+    {
+        var previousFade = Kit.Fade;
+        Kit.Fade = alpha;
+        var designs = snapshot.Content.Designs;
+        var display = _ui.DisplaySize;
+
         if (world.TargetHull != 0 && world.TryGetHull(world.TargetHull, out var target))
         {
             var design = designs[Math.Min(target.Design, designs.Length - 1)];
             var mine = target.Owner == snapshot.PlayerId;
             var color = mine ? Theme.Accent : Theme.Info;
-            if (world.ProjectDisc(target.Position, design.Flight.Radius, out var screen, out var pixels, out _))
-            {
-                var reach = Math.Max(pixels * 1.3f, Kit.Px(18));
-                Brackets(draw, screen - new float2(reach, reach), screen + new float2(reach, reach), Kit.Px(10), Kit.Color(color));
-                draw.AddCircle(screen, reach * 1.25f, Kit.Color(color, 0.5f), 40, Kit.Px(1.2f));
-            }
-
-            // The target's readout, top centre.
             var size = new float2(Kit.Px(340), Kit.Px(104));
             var min = new float2((display.X - size.X) * 0.5f, Kit.Px(Theme.Space5));
             Kit.PanelFrame(draw, min, min + size);
@@ -598,20 +741,8 @@ internal sealed partial class ScreenHost
             draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * Math.Clamp(target.Hull / flight.HullPoints, 0f, 1f), gauge.Y), Kit.Color(Theme.Good));
             Kit.Text(draw, _ui.Sans, Theme.FontCaption, gaugeMin + new float2(0, Kit.Px(10)), Theme.TextMute, mine ? "T takes control"u8 : "Not yours: cannot take control"u8);
         }
-
-        // Asteroids: a ring on the one under the reticle, a readout for the targeted one.
-        if (world.HoveredRock is { } hoverRock && world.HoveredRock != world.TargetRock && world.TryGetRock(hoverRock, out var hoverPosition, out var hoverRadius) && world.ProjectDisc(hoverPosition, hoverRadius, out var hoverScreen, out var hoverPixels, out _))
-            draw.AddCircle(hoverScreen, Math.Max(hoverPixels * 1.05f, Kit.Px(12)), Kit.Color(Theme.Text, 0.6f), 48, Kit.Px(1.2f));
-
-        if (world.TargetRock is { } targetRock && world.TryGetRock(targetRock, out var rockPosition, out var rockRadius))
+        else if (world.TargetRock is { } targetRock && world.TryGetRock(targetRock, out var rockPosition, out var rockRadius))
         {
-            if (world.ProjectDisc(rockPosition, rockRadius, out var rockScreen, out var rockPixels, out _))
-            {
-                var ring = Math.Max(rockPixels * 1.08f, Kit.Px(14));
-                draw.AddCircle(rockScreen, ring, Kit.Color(Theme.Info), 56, Kit.Px(1.5f));
-                Brackets(draw, rockScreen - new float2(ring + 5, ring + 5), rockScreen + new float2(ring + 5, ring + 5), Kit.Px(9), Kit.Color(Theme.Info));
-            }
-
             var size = new float2(Kit.Px(340), Kit.Px(92));
             var min = new float2((display.X - size.X) * 0.5f, Kit.Px(Theme.Space5));
             Kit.PanelFrame(draw, min, min + size);
@@ -632,6 +763,8 @@ internal sealed partial class ScreenHost
             var noticeSize = Kit.Measure(_ui.SansMedium, Theme.FontSmall, notice);
             Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, new float2((display.X - noticeSize.X) * 0.5f, display.Y * 0.5f + Kit.Px(60)), Theme.Bad, notice);
         }
+
+        Kit.Fade = previousFade;
     }
 
     private const float CharacterLine = 20f;
@@ -1152,6 +1285,9 @@ internal sealed partial class ScreenHost
             Brackets(draw, at - corner, at + corner, Math.Clamp(cell * 0.3f, 3f, Kit.Px(10)), Kit.Color(Theme.Accent));
         }
 
+        // The world interface is beneath the map, so the map shows the sector panel itself.
+        DrawSectorPanel(draw, snapshot, world);
+
         // Title, layer and scale, clear of the sector panel above them.
         var margin = Kit.Px(96);
         Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(margin, Kit.Px(160)), Theme.Accent, "NAVIGATION"u8);
@@ -1265,6 +1401,7 @@ internal sealed partial class ScreenHost
         // Unlike the full-window surfaces this one may come to the front: a window created with
         // NoBringToFrontOnFocus is placed behind every other, which would put it under the map.
         ImGui.Begin("##mapmenu"u8, (RootFlags & ~ImGuiWindowFlags.NoBringToFrontOnFocus) | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoFocusOnAppearing);
+        RaiseIfAppearing();
         Kit.Fade = fade * appear;
         var draw = ImGui.GetWindowDrawList();
         Kit.PanelFrame(draw, min, min + size);
