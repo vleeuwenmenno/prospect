@@ -63,8 +63,11 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   faster-than-light drive (only ships that have a working drive jump).
 - **Renderer.** Floating-point scene target and tone mapping, camera-relative rendering from double-precision
   positions, a star field and sky, instanced hull and asteroid meshes with two levels of detail.
+- **Listing server.** A small HTTP service (and its container image) that public game servers announce themselves
+  to and clients fetch the list of games from. The game server and the client do not use it yet. See
+  [docs/listing-server.md](docs/listing-server.md).
 
-Not there yet: mining, taking control of ships owned by other players (permissions), jump range and cost, gates,
+Not there yet: the server browser and announcing to the listing server, mining, taking control of ships owned by other players (permissions), jump range and cost, gates,
 saving. Asteroids come in a shared set of shapes until mining gives each one its own body. Designs are limited to 64
 blocks for now, because block state is sent as one bit per block.
 
@@ -193,6 +196,8 @@ make server ARGS="--set hullStrength=2"    # the same, in a world with its own s
 make run ARGS="--join 127.0.0.1"           # join it
 make check                                 # formatting, warnings-as-errors build, tests
 make bench                                 # release benchmark; fails under 144 fps or on any per-frame allocation
+make listing                               # the listing server on http://127.0.0.1:8080
+make listing-image                         # its container image (docker/listing.Dockerfile)
 make help                                  # every target
 ```
 
@@ -206,7 +211,10 @@ make help                                  # every target
 | `src/Prospect.Game` | The simulation shared by client and server: galaxy, flight model, hull storage, protocol, server host, client prediction |
 | `src/Prospect.Server` | Headless dedicated server |
 | `src/Prospect.Client` | Window, Vulkan renderer, cameras, input, interface |
+| `src/Prospect.Listing` | Listing server: the HTTP list of public games (ASP.NET Core) |
 | `tests/Prospect.Tests` | Unit and integration tests, including real client and server sessions over UDP |
+| `tests/Prospect.Listing.Tests` | The listing server run in-process and driven over HTTP |
+| `docker/` | Container images |
 | `content/` | Game data, loaded at run time |
 | `assets/` | Fonts, branding and GLSL shaders (compiled at startup) |
 

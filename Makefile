@@ -14,7 +14,11 @@ V        ?=
 SOLUTION := Prospect.slnx
 CLIENT   := src/Prospect.Client
 SERVER   := src/Prospect.Server
+LISTING  := src/Prospect.Listing
 TESTS    := tests/Prospect.Tests
+LTESTS   := tests/Prospect.Listing.Tests
+LISTING_PORT  ?= 8080
+LISTING_IMAGE ?= prospect-listing
 BIN      := artifacts/bin
 TOOLS    := $(CURDIR)/.tools
 # Build output folders are lower-case configuration names: artifacts/bin/<project>/<config>/.
@@ -83,11 +87,11 @@ SUPPORTED := linux-x86_64 windows-x86_64 darwin-arm64
 SUDO := $(if $(filter 0,$(shell id -u 2>/dev/null)),,sudo)
 
 # System packages per Linux package manager: curl for the installers, ICU for the SDK, the Vulkan loader, vulkaninfo
-# and the validation layers. macOS gets the loader, MoltenVK, vulkaninfo and the validation layers from Homebrew.
+# and the validation layers. Arch splits ASP.NET Core (the listing server) out of its .NET packages. macOS gets the loader, MoltenVK, vulkaninfo and the validation layers from Homebrew.
 BREW_PKGS       := vulkan-loader molten-vk vulkan-tools vulkan-validationlayers
 PKGS_apt-get    := curl ca-certificates libicu-dev libvulkan1 vulkan-tools vulkan-validationlayers
 PKGS_dnf        := curl ca-certificates libicu vulkan-loader vulkan-tools vulkan-validation-layers
-PKGS_pacman     := curl ca-certificates icu vulkan-icd-loader vulkan-tools vulkan-validation-layers
+PKGS_pacman     := curl ca-certificates icu vulkan-icd-loader vulkan-tools vulkan-validation-layers aspnet-runtime aspnet-targeting-pack
 PKGS_zypper     := curl ca-certificates libicu-devel libvulkan1 vulkan-tools vulkan-validationlayers
 INSTALL_apt-get := $(SUDO) apt-get update -qq && $(SUDO) apt-get install -y
 INSTALL_dnf     := $(SUDO) dnf install -y
@@ -131,7 +135,7 @@ ifneq ($(wildcard $(VVL)/usr/lib/libVkLayer_khronos_validation.so),)
 endif
 
 .PHONY: help setup setup-system setup-dotnet restore doctor tools \
-        build run server test bench fmt check clean need-dotnet
+        build run server listing listing-image test bench fmt check clean need-dotnet
 
 ##@ Getting started
 
@@ -207,6 +211,9 @@ doctor: ## Check the toolchain, GPU driver and validation layers
 	@$(call ok,$(shell $(MAKE) --version | head -1))
 	@if [ -n "$(DOTNET)" ]; then $(call ok,.NET SDK $$("$(DOTNET)" --version) at $(DOTNET)); \
 	 else $(call fail,No .NET $(DOTNET_CHANNEL) SDK found); $(call note,Run: make setup-dotnet); exit 1; fi
+	@if "$(DOTNET)" --list-runtimes | grep -q '^Microsoft.AspNetCore.App $(DOTNET_CHANNEL)'; then $(call ok,ASP.NET Core runtime (listing server)); \
+	 else $(call fail,No ASP.NET Core $(DOTNET_CHANNEL) runtime: the listing server and its tests cannot build or run); \
+	   $(call note,Run: make setup-system (Arch: aspnet-runtime aspnet-targeting-pack)); fi
 ifneq ($(filter linux darwin,$(PLATFORM)),)
   ifeq ($(PLATFORM),linux)
 	@if ldconfig -p 2>/dev/null | grep -q 'libvulkan.so.1'; then $(call ok,Vulkan loader); \
@@ -259,11 +266,26 @@ server: need-dotnet ## Run the headless dedicated server (ARGS="--port 27420")
 	$(call step,Running prospect-server $(ARGS))
 	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Server/$(config)/prospect-server.dll $(ARGS)
 
+listing: need-dotnet ## Run the listing server on 127.0.0.1:8080 (LISTING_PORT), private addresses allowed
+	$(call step,Building the listing server ($(CONFIG)))
+	$(Q)"$(DOTNET)" build $(LISTING) -c $(CONFIG) $(QUIET)
+	$(call step,Running prospect-listing on http://127.0.0.1:$(LISTING_PORT) $(ARGS))
+	$(Q)ASPNETCORE_URLS=http://127.0.0.1:$(LISTING_PORT) Listing__AllowPrivateAddresses=true \
+	  "$(DOTNET)" $(BIN)/Prospect.Listing/$(config)/prospect-listing.dll $(ARGS)
+
+listing-image: ## Build the listing server's container image (LISTING_IMAGE=prospect-listing)
+	$(call step,Building container image $(LISTING_IMAGE))
+	$(Q)docker build -f docker/listing.Dockerfile -t $(LISTING_IMAGE) .
+	@$(call ok,Image $(LISTING_IMAGE) built)
+
 test: need-dotnet ## Run the unit tests
 	$(call step,Building the tests ($(CONFIG)))
 	$(Q)"$(DOTNET)" build $(TESTS) -c $(CONFIG) $(QUIET)
+	$(Q)"$(DOTNET)" build $(LTESTS) -c $(CONFIG) $(QUIET)
 	$(call step,Running the tests)
 	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Tests/$(config)/Prospect.Tests.dll
+	$(call step,Running the listing server tests)
+	$(Q)"$(DOTNET)" $(BIN)/Prospect.Listing.Tests/$(config)/Prospect.Listing.Tests.dll
 
 bench: need-dotnet ## Release benchmark: frame rate and per-frame allocation (fails below target)
 	$(call step,Building the client (Release))
@@ -285,6 +307,8 @@ check: need-dotnet ## Formatting, warnings-as-errors build and tests; must be cl
 	$(Q)"$(DOTNET)" build $(SOLUTION) -c $(CONFIG) $(QUIET)
 	$(call step,Running the tests)
 	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Tests/$(config)/Prospect.Tests.dll
+	$(call step,Running the listing server tests)
+	$(Q)"$(DOTNET)" $(BIN)/Prospect.Listing.Tests/$(config)/Prospect.Listing.Tests.dll
 	@printf '\n%s\n' "$(GREEN)$(BOLD)All checks passed.$(RESET)"
 
 clean: ## Remove build output
