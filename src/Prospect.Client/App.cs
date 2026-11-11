@@ -123,7 +123,9 @@ internal sealed class App : IDisposable
             throw new InvalidOperationException($"Failed to initialize GLFW: {code}, {message}");
         }
 
-        _vsync = options.BenchSeconds > 0 ? false : Settings.VSync;
+        // Scripted runs never wait for the display: with the monitor asleep the compositor stops asking for
+        // frames, and a run that presents in step with it would hang instead of taking its screenshot.
+        _vsync = options.BenchSeconds <= 0 && options.CapturePath is null && Settings.VSync;
         _windowedSize = options.WindowSize ?? new int2(Settings.WindowWidth, Settings.WindowHeight);
         Glfw.WindowHint(GlfwWindowHint.ClientApi, Glfw.Constants.GLFW_NO_API);
         _window = Glfw.CreateWindow(new GlfwWindow.CreateInfo { Title = "PROSPECT", Size = _windowedSize });

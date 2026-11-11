@@ -13,7 +13,7 @@ There is one simulation and one code path.
 
 Milestone 1 (skeleton) is complete. On top of it, the first slice of the world is in:
 
-- **Sectors.** The galaxy is a grid of 20 km cells generated from the server's seed: name, star, asteroid fields.
+- **Sectors.** The galaxy is a grid of 40 km cells generated from the server's seed: name, star, asteroid fields.
   Nothing is stored or sent, and nothing stops at a sector's edge. The client keeps the sectors around the camera
   generated on worker threads.
 - **Hulls from blocks.** A hull is a list of typed blocks (engine, thruster, gyro, generator, battery, shield

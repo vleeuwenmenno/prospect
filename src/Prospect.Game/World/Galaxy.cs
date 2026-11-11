@@ -139,6 +139,8 @@ public sealed class Galaxy
     private readonly int _maxAsteroids;
     private readonly float _minRadius;
     private readonly float _maxRadius;
+    private readonly float _fieldSpreadMin;
+    private readonly float _fieldSpreadMax;
     private readonly float _totalWeight;
 
     private Galaxy(
@@ -155,9 +157,13 @@ public sealed class Galaxy
         GalaxyShape shape,
         Resource[] resources,
         float barrenShare,
-        float veinShare
+        float veinShare,
+        float fieldSpreadMin,
+        float fieldSpreadMax
     )
     {
+        _fieldSpreadMin = fieldSpreadMin;
+        _fieldSpreadMax = fieldSpreadMax;
         Shape = shape;
         Resources = resources;
         _barrenShare = barrenShare;
@@ -198,7 +204,7 @@ public sealed class Galaxy
 
     /// <summary>The same galaxy rules under a different seed.</summary>
     public Galaxy WithSeed(ulong seed) =>
-        new(seed, SectorSize, StarClasses, _syllables, _emptyChance, _maxAsteroids, _minRadius, _maxRadius, AsteroidDensity, DriftDecay, Shape, Resources, _barrenShare, _veinShare);
+        new(seed, SectorSize, StarClasses, _syllables, _emptyChance, _maxAsteroids, _minRadius, _maxRadius, AsteroidDensity, DriftDecay, Shape, Resources, _barrenShare, _veinShare, _fieldSpreadMin, _fieldSpreadMax);
 
     /// <summary>Edge length of a sector cell in metres.</summary>
     public double SectorSize { get; }
@@ -264,7 +270,9 @@ public sealed class Galaxy
             GalaxyShape.Read(root.GetProperty("shape"u8)),
             [.. resources],
             asteroids.GetProperty("barrenShare"u8).GetSingle(),
-            asteroids.GetProperty("veinShare"u8).GetSingle()
+            asteroids.GetProperty("veinShare"u8).GetSingle(),
+            asteroids.GetProperty("fieldSpreadMin"u8).GetSingle(),
+            asteroids.GetProperty("fieldSpreadMax"u8).GetSingle()
         );
     }
 
@@ -353,7 +361,8 @@ public sealed class Galaxy
         {
             var field = fields[i % fields.Length];
             var radius = _minRadius + (_maxRadius - _minRadius) * MathF.Pow(random.NextSingle(), 3.2f);
-            var spread = half * (0.06f + 0.16f * random.NextSingle());
+            // A field is as wide as the content says, in metres, however large the sector around it is.
+            var spread = _fieldSpreadMin + (_fieldSpreadMax - _fieldSpreadMin) * random.NextSingle();
             var offset = new Vector3(random.NextSigned(), random.NextSigned() * 0.45f, random.NextSigned()) * spread;
             var position = Vector3.Clamp(field + offset, new Vector3(-half + radius), new Vector3(half - radius));
 

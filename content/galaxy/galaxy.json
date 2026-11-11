@@ -1,5 +1,5 @@
 {
-  "sectorSize": 20000,
+  "sectorSize": 40000,
   "shape": {
     "radiusSectors": 400,
     "centerSector": [-150, 0, 100],
@@ -33,6 +33,8 @@
     "maxPerSector": 48,
     "minRadius": 14,
     "maxRadius": 260,
+    "fieldSpreadMin": 600,
+    "fieldSpreadMax": 2200,
     "densityTonnesPerCubicMetre": 2.6,
     "driftHalfLifeSeconds": 6
   }
