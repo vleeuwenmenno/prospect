@@ -243,6 +243,13 @@ public struct HullState
     public ShieldHit ShieldHit;
 
     /// <summary>
+    /// Ticks since the shield last changed between shown and gone: it broke, came back online, or lost its last
+    /// emitter. Counts up to <see cref="ShieldHit.MaxAgeTicks"/> and stops, so viewers can time the change
+    /// against the moment they draw, and never take an old change for a new one.
+    /// </summary>
+    public byte ShieldChangeTicks;
+
+    /// <summary>
     /// Where the hull is in a faster-than-light jump. The timer counts seconds in the stage, except while
     /// charging, when it counts the megajoules the drive has taken in so far.
     /// </summary>
@@ -267,6 +274,7 @@ public struct HullState
             Energy = p.EnergyStorage,
             Shield = p.ShieldCapacity,
             Hull = p.HullPoints,
+            ShieldChangeTicks = ShieldHit.MaxAgeTicks,
         };
 
     /// <summary>The hull's nose direction. Hulls face along their own -Z axis.</summary>
@@ -339,7 +347,10 @@ public static class FlightModel
 
         // Outside the recharge so that a shield whose capacity shrank under its charge still comes back.
         if (state.ShieldOffline && state.ShieldCooldown <= 0f && state.Shield >= p.ShieldCapacity * p.ShieldRestartFraction)
+        {
             state.ShieldOffline = false;
+            state.ShieldChangeTicks = 0;
+        }
 
         // Translation, in the hull's frame so each axis uses its own thrusters. Forward is -Z; only the main
         // engines push that way, so braking and reversing are weaker than accelerating.

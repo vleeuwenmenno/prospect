@@ -161,9 +161,10 @@ public struct HullRecord
 {
     /// <summary>
     /// Id, owner, design, blocks, position, velocity, orientation, spin, heat, flags, the jump's four figures,
-    /// energy, shield, hull and shield delay, the shield's newest hit and the order's target.
+    /// energy, shield, hull and shield delay, the shield's newest hit and the age of its last change, and the
+    /// order's target.
     /// </summary>
-    public const int MaxWireSize = 4 + 4 + 1 + 8 + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 4 + 4 + 8 + 16 + 6 + 24;
+    public const int MaxWireSize = 4 + 4 + 1 + 8 + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 4 + 4 + 8 + 16 + 6 + 1 + 24;
 
     public uint Id;
     public uint Owner;
@@ -203,6 +204,7 @@ public struct HullRecord
         writer.WriteByte((byte)State.ShieldHit.Y);
         writer.WriteByte((byte)State.ShieldHit.Z);
         writer.WriteByte(State.ShieldHit.AgeTicks);
+        writer.WriteByte(State.ShieldChangeTicks);
         if (Order.Kind != OrderKind.None)
             WorldWire.WritePosition(ref writer, Order.Target);
     }
@@ -251,7 +253,8 @@ public struct HullRecord
         record.State.ShieldHit.Y = (sbyte)reader.ReadByte();
         record.State.ShieldHit.Z = (sbyte)reader.ReadByte();
         record.State.ShieldHit.AgeTicks = reader.ReadByte();
-        ok &= record.State.ShieldHit.AgeTicks <= ShieldHit.MaxAgeTicks;
+        record.State.ShieldChangeTicks = reader.ReadByte();
+        ok &= record.State.ShieldHit.AgeTicks <= ShieldHit.MaxAgeTicks && record.State.ShieldChangeTicks <= ShieldHit.MaxAgeTicks;
         var kind = flags >> 1 & 3;
         ok &= kind <= (int)OrderKind.Jump;
         if (kind != 0 && ok)

@@ -178,16 +178,21 @@ public sealed class HullField(HullStore hulls, HullDesign[] designs, bool author
     }
 
     /// <summary>Records the blocks a hull has left and, if it lost any, works its flight figures out again.</summary>
-    private void Refit(int index, ulong alive)
+    internal void Refit(int index, ulong alive)
     {
         ref var info = ref hulls.Info(index);
         if (alive == info.Blocks)
             return;
 
         info.Blocks = alive;
+        var hadShield = hulls.Flight(index).ShieldCapacity > 0f;
         designs[info.Design].Evaluate(alive, out hulls.Flight(index), out _);
         ref var flight = ref hulls.Flight(index);
         ref var state = ref hulls.State(index);
+
+        // Losing the last emitter takes an online shield away: a change viewers see, with no hit of its own.
+        if (hadShield && flight.ShieldCapacity <= 0f && !state.ShieldOffline)
+            state.ShieldChangeTicks = 0;
         state.Shield = Math.Min(state.Shield, flight.ShieldCapacity);
         state.Energy = Math.Min(state.Energy, flight.EnergyStorage);
     }

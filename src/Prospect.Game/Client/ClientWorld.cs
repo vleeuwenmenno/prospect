@@ -64,6 +64,12 @@ public struct HullView
     /// server has already reported can still be ahead of it, and this is negative until the drawn hull gets there.
     /// </summary>
     public float ShieldHitAge;
+
+    /// <summary>
+    /// Seconds from the shield's last change (break, restart, last emitter lost) to the moment this view shows;
+    /// negative for a remote hull whose drawn pose has not reached it yet.
+    /// </summary>
+    public float ShieldChangeAge;
 }
 
 /// <summary>
@@ -415,6 +421,7 @@ internal sealed class ClientWorld : IDisposable
                 ShieldOffline = _predicted.ShieldOffline,
                 ShieldHit = _predicted.ShieldHit,
                 ShieldHitAge = _predicted.ShieldHit.AgeTicks * HullSim.Dt,
+                ShieldChangeAge = _predicted.ShieldChangeTicks * HullSim.Dt,
             };
         }
 
@@ -686,6 +693,7 @@ internal sealed class ClientWorld : IDisposable
             ShieldOffline = newest.State.ShieldOffline,
             ShieldHit = newest.State.ShieldHit,
             ShieldHitAge = (float)(newest.State.ShieldHit.AgeTicks + (renderTick - newest.Tick)) * HullSim.Dt,
+            ShieldChangeAge = (float)(newest.State.ShieldChangeTicks + (renderTick - newest.Tick)) * HullSim.Dt,
         };
 
         if (renderTick >= newest.Tick)

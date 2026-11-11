@@ -2436,3 +2436,90 @@ public sealed class ShieldStateTests
         }
     }
 }
+
+/// <summary>
+/// The age of the shield's last change: a break, a restart or the loss of its last emitter starts it, and it counts
+/// once per tick, transit included, up to the same cap as a hit's age. Viewers time collapses and fade-ins by it.
+/// </summary>
+public sealed class ShieldChangeTests
+{
+    private static readonly GameContent Content = GameContent.Load();
+    private static readonly HullDesign PodDesign = Content.Pod;
+    private static readonly FlightParams Pod = PodDesign.Flight;
+    private static readonly int Emitter = Array.FindIndex(PodDesign.Types, t => t.Shield > 0);
+
+    private static HullBody Body()
+    {
+        var hp = new float[HullDesign.MaxBlocks];
+        for (var i = 0; i < PodDesign.Types.Length; i++)
+            hp[i] = PodDesign.Types[i].Hull;
+        return new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = hp };
+    }
+
+    [Fact]
+    public void ANewHullsLastChangeIsLongPast() =>
+        Assert.Equal(ShieldHit.MaxAgeTicks, HullState.Spawn(Double3.Zero, Pod).ShieldChangeTicks);
+
+    [Fact]
+    public void ABreakAndARestartEachStartTheClockWhichCountsThroughTransit()
+    {
+        var body = Body();
+        var state = HullState.Spawn(Double3.Zero, Pod);
+        state.Shield = 10f;
+        HullSim.Damage(ref state, Pod, ref body, 1UL << 1, 1, 50f);
+        Assert.True(state.ShieldOffline);
+        Assert.Equal(0, state.ShieldChangeTicks);
+
+        // A hit on a shield that is already down is not a change.
+        HullOrder order = default;
+        HullSim.Step(ref state, ref order, default, Pod, ref body);
+        HullSim.Damage(ref state, Pod, ref body, 1UL << 1, 1, 5f);
+        Assert.Equal(1, state.ShieldChangeTicks);
+
+        // Through a long transit the clock keeps counting, and stops at its cap.
+        state.Jump = JumpPhase.Tunnel;
+        state.JumpTunnelSeconds = 600f;
+        order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(40000, 0, 0) };
+        for (var tick = 2; tick <= ShieldHit.MaxAgeTicks + 10; tick++)
+        {
+            HullSim.Step(ref state, ref order, default, Pod, ref body);
+            Assert.Equal(Math.Min(tick, ShieldHit.MaxAgeTicks), state.ShieldChangeTicks);
+        }
+
+        // Back in flight with the threshold reached, the restart starts it again.
+        state.Jump = JumpPhase.None;
+        order = default;
+        state.ShieldCooldown = 0f;
+        state.Shield = Pod.ShieldCapacity * Pod.ShieldRestartFraction;
+        HullSim.Step(ref state, ref order, default, Pod, ref body);
+        Assert.False(state.ShieldOffline);
+        Assert.Equal(0, state.ShieldChangeTicks);
+    }
+
+    [Fact]
+    public void LosingTheLastEmitterWhileOnlineIsAChangeWithoutAHit()
+    {
+        var store = new HullStore(4);
+        var hull = store.Create(1, (byte)Content.PodDesign, PodDesign, Double3.Zero);
+        var field = new HullField(store, Content.Designs);
+        ref var state = ref store.State(hull.Index);
+        var hit = state.ShieldHit;
+
+        // Losing any other block changes nothing about the shield.
+        field.Refit(hull.Index, PodDesign.FullMask & ~(1UL << 1));
+        Assert.Equal(ShieldHit.MaxAgeTicks, state.ShieldChangeTicks);
+
+        field.Refit(hull.Index, PodDesign.FullMask & ~(1UL << 1) & ~(1UL << Emitter));
+        Assert.Equal(0, state.ShieldChangeTicks);
+        Assert.Equal(0f, store.Flight(hull.Index).ShieldCapacity);
+        Assert.Equal(hit, state.ShieldHit);
+
+        // An offline shield losing its last emitter shows no change: it was not drawn.
+        var other = store.Create(1, (byte)Content.PodDesign, PodDesign, Double3.Zero);
+        ref var down = ref store.State(other.Index);
+        down.ShieldOffline = true;
+        down.ShieldChangeTicks = 50;
+        field.Refit(other.Index, PodDesign.FullMask & ~(1UL << Emitter));
+        Assert.Equal(50, down.ShieldChangeTicks);
+    }
+}

@@ -177,9 +177,11 @@ public static class HullSim
         HullField? hulls = null
     )
     {
-        // Impact age follows simulation time even when transit skips flight and power updates.
+        // The shield's event clocks follow simulation time even when transit skips flight and power updates.
         if (state.ShieldHit.AgeTicks < ShieldHit.MaxAgeTicks)
             state.ShieldHit.AgeTicks++;
+        if (state.ShieldChangeTicks < ShieldHit.MaxAgeTicks)
+            state.ShieldChangeTicks++;
         var input = pilot;
         if (order.Kind == OrderKind.MoveTo)
         {
@@ -848,6 +850,7 @@ public static class HullSim
                 absorbed = state.Shield;
                 state.Shield = 0;
                 state.ShieldOffline = true;
+                state.ShieldChangeTicks = 0;
                 remaining = amount - holds;
             }
 

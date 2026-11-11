@@ -111,7 +111,7 @@ public sealed class ProtocolTests
             State = new HullState { Orientation = Quaternion.Identity, Jump = JumpPhase.Charge, JumpCalculation = calculation },
             Order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -1e6) }
         }.Write(ref writer);
-        Assert.Equal(152, HullRecord.MaxWireSize);
+        Assert.Equal(153, HullRecord.MaxWireSize);
         Assert.Equal(HullRecord.MaxWireSize, writer.Length);
         var reader = new NetReader(writer.Written);
         Assert.Equal(valid, HullRecord.TryRead(ref reader, out var copy));
@@ -121,7 +121,7 @@ public sealed class ProtocolTests
             reader = new NetReader(writer.Written[..length]);
             Assert.False(HullRecord.TryRead(ref reader, out _));
         }
-        Assert.Equal(19u, ProtocolInfo.Version);
+        Assert.Equal(20u, ProtocolInfo.Version);
     }
 
     [Theory]
@@ -170,6 +170,22 @@ public sealed class ProtocolTests
         reader = new NetReader(writer.Written);
         Assert.True(HullRecord.TryRead(ref reader, out copy));
         Assert.False(copy.State.ShieldOffline);
+    }
+
+    [Theory]
+    [InlineData((byte)0, true)]
+    [InlineData(ShieldHit.MaxAgeTicks, true)]
+    [InlineData((byte)(ShieldHit.MaxAgeTicks + 1), false)]
+    [InlineData((byte)255, false)]
+    public void TheShieldsLastChangeTravelsAndAnImpossibleAgeIsRefused(byte ticks, bool valid)
+    {
+        Span<byte> buffer = stackalloc byte[HullRecord.MaxWireSize];
+        var writer = new NetWriter(buffer);
+        new HullRecord { State = new HullState { Orientation = Quaternion.Identity, ShieldChangeTicks = ticks } }.Write(ref writer);
+        var reader = new NetReader(writer.Written);
+        Assert.Equal(valid, HullRecord.TryRead(ref reader, out var copy));
+        if (valid)
+            Assert.Equal(ticks, copy.State.ShieldChangeTicks);
     }
 
     [Fact]
