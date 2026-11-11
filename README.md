@@ -57,7 +57,10 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   up and locks out. Thrust, boost and shield recharge draw power; the generator refills the battery with the
   surplus. Boost needs the battery above 5% to start (`boostEnergyFloor` in `content/blocks/blocks.json`), runs
   until the battery is empty, then waits for the battery to pass 5% again; a hull without a battery cannot
-  boost. The energy bar marks the 5%, and the boost readout says whether boost is cooling or out of energy.
+  boost. The pilot console at the bottom shows shield and hull on the left, energy and boost heat on the right
+  and speed between them, as slanted segmented bars. The energy bar marks the 5%, a strip under it shows the
+  battery's live net draw or recharge, and the heat bar turns from cyan to red and says when boost is
+  overheated (with the mark where it unlocks) or out of energy.
 - **Collisions and damage.** Hulls collide block by block against each asteroid's real surface, and block
   against block with each other. An impact bounces and turns the hull; damage grows with the square of the speed
   over a safe limit and lands on the blocks that touched, after the shield. A block at zero is gone, and the hull

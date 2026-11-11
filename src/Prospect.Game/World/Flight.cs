@@ -228,7 +228,8 @@ public struct HullState
 /// </summary>
 public static class FlightModel
 {
-    private const float BoostUnlockHeat = 0.35f;
+    /// <summary>Heat an overheated drive must cool to before boost unlocks.</summary>
+    public const float BoostUnlockHeat = 0.35f;
     private const float AxisScale = 1f / 127f;
 
     public static void Step(ref HullState state, in FlightInput input, in FlightParams p, float dt)

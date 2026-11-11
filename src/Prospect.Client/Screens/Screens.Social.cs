@@ -230,8 +230,8 @@ internal sealed partial class ScreenHost
     // Always shown: party list, recent chat, quick buttons
     // ---------------------------------------------------------------------------------------------------------------
 
-    /// <summary>Where the flight readouts at the bottom centre begin; nothing on the left may reach below it.</summary>
-    private float ReadoutsTop => _ui.DisplaySize.Y - Kit.Px(136);
+    /// <summary>Where the pilot console at the bottom centre begins; nothing on the left may reach below it.</summary>
+    private float ReadoutsTop => FlightConsole.Layout(_ui.DisplaySize, Kit.Scale).Top;
 
     /// <summary>
     /// The height the party list takes as full cards: the invitation, the caption and one card per other member.
@@ -393,7 +393,7 @@ internal sealed partial class ScreenHost
         var width = Math.Min(Kit.Px(440), display.X - Kit.Px(48));
         var x = Kit.Px(Theme.Space5);
         // Under the flight readouts at the bottom centre when there is room beside them, above them when not.
-        var readoutsLeft = display.X * 0.5f - Kit.Px(96 + 300);
+        var readoutsLeft = FlightConsole.Layout(display, Kit.Scale).LeftX;
         var bottom = x + width + Kit.Px(Theme.Space3) < readoutsLeft ? display.Y - Kit.Px(Theme.Space5) : ReadoutsTop - Kit.Px(Theme.Space3);
 
         ImGui.PushFont(_ui.Sans, Theme.FontSmall);

@@ -282,54 +282,8 @@ internal sealed partial class ScreenHost
 
         // Speed in the middle; what keeps the hull alive on the left, what drives it on the right.
         var flight = snapshot.Flight;
-        var center = new float2(display.X * 0.5f, display.Y - Kit.Px(132));
-        var speedSize = Kit.Measure(_ui.Mono, 44f, Kit.F($"{speed:0}"));
-        Kit.Text(draw, _ui.Mono, 44f, center - new float2(speedSize.X * 0.5f, 0), Theme.Text, Kit.F($"{speed:0}"));
-        var unit = Kit.Measure(_ui.SansMedium, Theme.FontCaption, "M/S"u8);
-        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, center + new float2(-unit.X * 0.5f, Kit.Px(52)), Theme.TextMute, "M/S"u8);
-
-        var barWidth = Kit.Px(300);
-        var gap = Kit.Px(96);
-        var row = Kit.Px(34);
-        var leftMin = center + new float2(-gap - barWidth, Kit.Px(4));
-        var rightMin = center + new float2(gap, Kit.Px(4));
-        var hullFraction = own.Hull / flight.HullPoints;
-        StatusBar(draw, leftMin, barWidth, "SHIELD"u8, own.Shield / flight.ShieldCapacity, Theme.Info, Kit.F($"{own.Shield:0} / {flight.ShieldCapacity:0}"));
-        StatusBar(draw, leftMin + new float2(0, row), barWidth, "HULL"u8, hullFraction, hullFraction < 0.3f ? Theme.Bad : Theme.Good, Kit.F($"{own.Hull:0} / {flight.HullPoints:0}"));
-        StatusBar(
-            draw,
-            rightMin,
-            barWidth,
-            "ENERGY"u8,
-            flight.EnergyStorage > 0f ? own.Energy / flight.EnergyStorage : 0f,
-            own.Energy < flight.EnergyStorage * 0.15f ? Theme.Bad : Theme.Accent,
-            MathF.Abs(own.EnergyRate) < 0.05f
-                ? Kit.F($"{own.Energy:0} / {flight.EnergyStorage:0} MJ")
-                : Kit.F($"{own.Energy:0} / {flight.EnergyStorage:0} MJ   {own.EnergyRate:+0.0;-0.0} MW")
-        );
-
-        // The battery's boost floor: below the mark boost will not start, though boost already running carries
-        // on until the battery is empty.
-        if (flight.EnergyStorage > 0f)
-        {
-            var floorX = rightMin.X + barWidth * Math.Clamp(flight.BoostEnergyFloor / flight.EnergyStorage, 0f, 1f);
-            var barTop = rightMin.Y + Kit.Px(18);
-            draw.AddLine(new float2(floorX, barTop - Kit.Px(3)), new float2(floorX, barTop + Kit.Px(10)), Kit.Color(Theme.Text, 0.8f), Kit.Px(1.5f));
-        }
-
-        // Why boost is unavailable, when it is: the drive is cooling down, or the battery is below its floor.
-        var noEnergy = !own.Boosting && (own.Energy <= 0f || own.Energy < flight.BoostEnergyFloor);
-        StatusBar(
-            draw,
-            rightMin + new float2(0, row),
-            barWidth,
-            own.BoostLocked ? "BOOST COOLING"u8
-                : noEnergy ? "BOOST NO ENERGY"u8
-                : "BOOST HEAT"u8,
-            own.Heat,
-            own.BoostLocked || noEnergy ? Theme.Bad : own.Heat > 0.7f ? Theme.Accent : Theme.TextDim,
-            snapshot.Dampeners ? "DAMPENERS ON"u8 : "DAMPENERS OFF"u8
-        );
+        DrawFlightConsole(draw, snapshot, own, speed);
+        var consoleTop = FlightConsole.Layout(display, Kit.Scale).Top;
 
         if (own.Jump is JumpPhase.Align or JumpPhase.Charge or JumpPhase.Tunnel)
         {
@@ -366,7 +320,7 @@ internal sealed partial class ScreenHost
             var distance = own.Order.Target.RelativeTo(world.OwnPosition).Length();
             var label = distance >= 1000f ? Kit.F($"AUTOPILOT   {distance / 1000f:0.00} KM") : Kit.F($"AUTOPILOT   {distance:0} M");
             var labelSize = Kit.Measure(_ui.SansMedium, Theme.FontSmall, label);
-            Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, center - new float2(labelSize.X * 0.5f, Kit.Px(34)), Theme.Accent, label);
+            Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, new float2(display.X * 0.5f - labelSize.X * 0.5f, consoleTop - Kit.Px(26)), Theme.Accent, label);
             if (world.Project(own.Order.Target, out var target))
                 DrawTargetMarker(draw, target, Theme.Accent);
         }
@@ -863,20 +817,6 @@ internal sealed partial class ScreenHost
         world.TryGetRockOre(rock, out var resource, out var grade) && resource >= 0
             ? Kit.F($"{world.Galaxy!.Resources[resource].Name} asteroid   {grade * 100:0}% grade")
             : "Bare rock asteroid"u8;
-
-    /// <summary>A labelled gauge: caption on the left, reading on the right, bar underneath.</summary>
-    private void StatusBar(ImDrawListPtr draw, float2 min, float width, ImString label, float fraction, uint rgb, ImString reading)
-    {
-        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, min, Theme.TextDim, label);
-        var readingSize = Kit.Measure(_ui.Mono, Theme.FontCaption, reading);
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, min + new float2(width - readingSize.X, 0), Theme.Text, reading);
-
-        var barMin = min + new float2(0, Kit.Px(18));
-        var barMax = barMin + new float2(width, Kit.Px(7));
-        draw.AddRectFilled(barMin, barMax, Kit.Color(Theme.Void, 0.75f));
-        draw.AddRectFilled(barMin, new float2(barMin.X + width * Math.Clamp(fraction, 0f, 1f), barMax.Y), Kit.Color(rgb));
-        draw.AddRect(barMin - new float2(1, 1), barMax + new float2(1, 1), Kit.Color(Theme.LineStrong));
-    }
 
     /// <summary>An asteroid's data sheet.</summary>
     private void DrawRockInfo(ImDrawListPtr draw, WorldView world, RockRef rock)
