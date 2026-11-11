@@ -36,7 +36,7 @@ internal sealed partial class ScreenHost
 
     /// <summary>
     /// A fixed account for captures (<c>--account-sample</c>), read by the same parser as the service's answers:
-    /// names that look like ImGui ids and format strings, a script the font lacks, a bidirectional override, the
+    /// names that look like ImGui ids and format strings, Japanese, a symbol the fonts lack, a bidirectional override, the
     /// longest name, and in <c>friends</c> full lists (200 friends, 200 requests to you, 50 sent).
     /// </summary>
     internal static AccountClient AccountSample(string kind)

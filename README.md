@@ -31,6 +31,8 @@ Chat, the player roster and parties work end to end: the server decides, the cli
 - **Sign-in for playing with others.** Join Server and hosting an unlisted or public game ask for a Discord
   sign-in first, on the same screen; a private game never does, offline included. Servers do not check the
   account yet: in a game, names and ids are still the session's, not verified accounts.
+- **Text:** names, chat and server names show Latin and Japanese (kana, kanji, CJK punctuation; bundled Noto
+  Sans JP). Other characters the fonts lack show a fallback glyph (`?` in the main font); no emoji.
 
 Not there yet: whether a friend is online or on your server, adding a friend from the player list, factions and
 alliances. The sign-in lasts while the game runs; after a restart, sign in again. Names and player ids in a game

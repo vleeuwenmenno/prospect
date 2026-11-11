@@ -123,7 +123,7 @@ The client opens a real window on the developer's desktop, and they are usually 
   `friends` with full lists of hostile names, `failed`, `off`), with `--start account` for the Friends screen or
   `--open friends` in a game. Only with `--capture` or `--bench`; a scripted run never opens a browser.
 - The server browser without the network: `--start join --browser-sample <state>`, with `ready` (a fixed list:
-  a name with `##`, `###` and `%`, a 48-character name, one in a script the font lacks, a password, a full game
+  a name with `##`, `###` and `%`, a 48-character name, one in Japanese with a symbol the fonts lack, a password, a full game
   and one entry the browser drops), `loading`, `failed`, `empty`, `off` or `password` (the list with the
   password prompt open). The list goes through `ServerBrowser.Parse`; its addresses are documentation ranges.
 - The password prompt after a join: run a dedicated server with a password

@@ -580,7 +580,7 @@ internal sealed partial class ScreenHost
     /// <summary>
     /// The list the sample captures show, in the listing server's own format so it goes through the browser's
     /// real checks. It holds what the screen must survive: a name with ImGui's id markers and format
-    /// characters, a name that fills its 48 characters, one in a script the font lacks, a game with a password,
+    /// characters, a name that fills its 48 characters, one in Japanese with a symbol the fonts lack, a game with a password,
     /// a full one, and an entry the browser must drop. The addresses are from the ranges kept for documentation.
     /// </summary>
     private static byte[] SampleListJson() =>

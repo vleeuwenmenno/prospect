@@ -84,7 +84,7 @@ internal sealed partial class ScreenHost
     {
         BeginRoot("##credits"u8);
         var min = new float2(Kit.Px(96), _ui.DisplaySize.Y * 0.12f + Slide(fade));
-        var size = new float2(Kit.Px(680), Kit.Px(628));
+        var size = new float2(Kit.Px(680), Kit.Px(648));
         BeginPanel("##creditspanel"u8, min, size);
 
         Kit.Caption("CREDITS"u8, Theme.Accent);
@@ -119,6 +119,7 @@ internal sealed partial class ScreenHost
         Kit.Space(Theme.Space2);
         Kit.Body("Space Grotesk  -  Florian Karsten  -  SIL Open Font License 1.1"u8);
         Kit.Body("JetBrains Mono  -  JetBrains  -  SIL Open Font License 1.1"u8);
+        Kit.Body("Noto Sans JP  -  Adobe  -  SIL Open Font License 1.1"u8);
         Kit.Space(Theme.Space5);
         Kit.Label(_ui.Sans, Theme.FontSmall, Theme.TextMute, "Full licence texts are in the LICENSES folder beside the game."u8);
         Kit.Space(Theme.Space5);

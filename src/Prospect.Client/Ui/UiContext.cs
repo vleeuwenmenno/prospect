@@ -7,7 +7,6 @@ using Brutal.VulkanApi;
 using Brutal.VulkanApi.Abstractions;
 using Prospect.Client.Input;
 using Prospect.Client.Render;
-using Prospect.Engine.IO;
 
 namespace Prospect.Client.Ui;
 
@@ -33,10 +32,11 @@ internal sealed class UiContext : IDisposable, IInterfacePointer
 
         var fonts = io.Fonts;
         fonts.SetFontLoader(ImGuiFreeType.GetFontLoader());
-        Sans = fonts.AddFontFromFileTTF(AppPaths.Asset("fonts", "SpaceGrotesk-Regular.ttf"), Theme.FontBody);
-        SansMedium = fonts.AddFontFromFileTTF(AppPaths.Asset("fonts", "SpaceGrotesk-Medium.ttf"), Theme.FontBody);
-        SansBold = fonts.AddFontFromFileTTF(AppPaths.Asset("fonts", "SpaceGrotesk-Bold.ttf"), Theme.FontBody);
-        Mono = fonts.AddFontFromFileTTF(AppPaths.Asset("fonts", "JetBrainsMono-Regular.ttf"), Theme.FontBody);
+        var loaded = UiFonts.Load(fonts);
+        Sans = loaded.Sans;
+        SansMedium = loaded.SansMedium;
+        SansBold = loaded.SansBold;
+        Mono = loaded.Mono;
         io.FontDefault = Sans;
 
         _platform = new UiPlatform(window, devices);

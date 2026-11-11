@@ -210,7 +210,10 @@ The browser screen:
 
 - A name is drawn as text only, clipped to its column with "...". It is never a widget label, an id or a format
   string; a row's id is its index in the list. `##`, `###` and `%` show as typed.
-- A character the interface font lacks shows as `?`, the font's fallback glyph, with that glyph's width.
+- Japanese (kana, kanji, CJK punctuation, full and half width forms) draws with the bundled Noto Sans JP, merged
+  behind every interface font.
+- Any other character the interface font lacks shows as `?`, the font's fallback glyph, with that glyph's width.
+  Emoji are not drawn.
 - The list is sorted once per fetch: games with room first, then the busiest, then by name.
 - Nothing marks any game as official.
 - With the listing server turned off, the screen says so and shows only direct connect.

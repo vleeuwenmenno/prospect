@@ -148,10 +148,8 @@ public sealed class FrameOrderTests : IDisposable
     [InlineData(1655f, 688f, 2f)]
     public void TheConsoleKeepsEveryHullPointDigitWithTheShippedFont(float width, float height, float scale)
     {
-        var fonts = ImGui.GetIO().Fonts;
-        fonts.SetFontLoader(ImGuiFreeType.GetFontLoader());
-        var mono = fonts.AddFontFromFileTTF(AppPaths.Asset("fonts", "JetBrainsMono-Regular.ttf"), Theme.FontBody);
-        var sans = fonts.AddFontFromFileTTF(AppPaths.Asset("fonts", "SpaceGrotesk-Medium.ttf"), Theme.FontBody);
+        var shipped = ShippedFonts();
+        var (mono, sans) = (shipped.Mono, shipped.SansMedium);
         ImGui.GetStyle().FontScaleMain = scale;
         _ui.NewFrame();
         try
@@ -179,10 +177,8 @@ public sealed class FrameOrderTests : IDisposable
     [InlineData(1655f, 688f, 2f)]
     public void TheJumpStripAndTheSpeedHexagonHoldTheirWordsWithTheShippedFonts(float width, float height, float scale)
     {
-        var fonts = ImGui.GetIO().Fonts;
-        fonts.SetFontLoader(ImGuiFreeType.GetFontLoader());
-        var mono = fonts.AddFontFromFileTTF(AppPaths.Asset("fonts", "JetBrainsMono-Regular.ttf"), Theme.FontBody);
-        var sans = fonts.AddFontFromFileTTF(AppPaths.Asset("fonts", "SpaceGrotesk-Medium.ttf"), Theme.FontBody);
+        var shipped = ShippedFonts();
+        var (mono, sans) = (shipped.Mono, shipped.SansMedium);
         ImGui.GetStyle().FontScaleMain = scale;
         _ui.NewFrame();
         try
@@ -257,6 +253,78 @@ public sealed class FrameOrderTests : IDisposable
         {
             ImGui.Render();
         }
+    }
+
+    [Theory]
+    [InlineData(1f)]
+    [InlineData(2f)]
+    public void JapaneseNamesDrawWithRealGlyphsInEveryShippedFont(float scale)
+    {
+        var loaded = ShippedFonts();
+        ImGui.GetStyle().FontScaleMain = scale;
+        _ui.NewFrame();
+        try
+        {
+            var size = MathF.Round(Theme.FontBody * scale);
+            ImFontPtr[] all = [loaded.Sans, loaded.SansMedium, loaded.SansBold, loaded.Mono];
+            for (var i = 0; i < all.Length; i++)
+            {
+                var font = all[i];
+                var baked = font.GetFontBaked(size);
+
+                // Katakana, hiragana, kanji, CJK punctuation and a full width form come from the Japanese face, the
+                // second source; Latin stays with the primary font. ImFontGlyph's first word is the C++ bit field
+                // Colored:1, Visible:1, SourceIdx:4, Codepoint:26.
+                foreach (var c in "メノひらがな東京の宇宙港、。ー・Ａ")
+                {
+                    var glyph = baked.FindGlyphNoFallback(c);
+                    Assert.False(glyph.IsNull(), $"U+{(int)c:X4} is missing");
+                    var bits = glyph.Codepoint;
+                    Assert.Equal((uint)c, bits >> 6);
+                    Assert.Equal(1u, (bits >> 2) & 0xF);
+                    Assert.True(glyph.AdvanceX > size * 0.5f, $"U+{(int)c:X4} advances {glyph.AdvanceX}");
+                    Assert.True((bits & 2) != 0, $"U+{(int)c:X4} draws nothing");
+                }
+                var latin = baked.FindGlyphNoFallback('A');
+                Assert.False(latin.IsNull());
+                Assert.Equal((uint)'A', latin.Codepoint >> 6);
+                Assert.Equal(0u, (latin.Codepoint >> 2) & 0xF);
+
+                // The Japanese face covers Japanese only: Cyrillic, symbols and emoji come from the primary font or not
+                // at all (JetBrains Mono has its own Cyrillic), so anything else still shows the primary's fallback.
+                foreach (var c in new uint[] { 0x0416, 0x2604, 0x26CF, 0x1F600 })
+                {
+                    var other = baked.FindGlyphNoFallback(c);
+                    Assert.True(other.IsNull() || ((other.Codepoint >> 2) & 0xF) == 0, $"U+{c:X4} came from the Japanese face");
+                }
+                // JetBrains Mono has its own U+FFFD, which stays its fallback.
+                Assert.Equal(i == all.Length - 1 ? 0xFFFDu : '?', font.FallbackChar);
+
+                // The regression: the name "メノ" measures as its two full width Japanese glyphs, wider than two
+                // fallback glyphs, on the primary font's line. The FreeType loader fits each source's ascent and descent
+                // to the pixel size, so a Noto Sans JP em is about 0.69 of it.
+                var me = baked.FindGlyphNoFallback('メ').AdvanceX;
+                Assert.Equal(me, baked.FindGlyphNoFallback('ノ').AdvanceX);
+                Assert.InRange(me, size * 0.6f, size * 0.8f);
+                var name = Kit.Measure(font, Theme.FontBody, "メノ"u8);
+                var fallback = Kit.Measure(font, Theme.FontBody, "??"u8);
+                Assert.Equal(2 * me, name.X, 0.01f);
+                Assert.True(name.X > fallback.X, $"メノ {name.X}, fallback {fallback.X}");
+                Assert.Equal(fallback.Y, name.Y);
+            }
+        }
+        finally
+        {
+            ImGui.Render();
+        }
+    }
+
+    /// <summary>The interface fonts, loaded into this test's context as the game loads them.</summary>
+    private static UiFontSet ShippedFonts()
+    {
+        var fonts = ImGui.GetIO().Fonts;
+        fonts.SetFontLoader(ImGuiFreeType.GetFontLoader());
+        return UiFonts.Load(fonts);
     }
 
     // One GLFW event each, delivered to both listeners exactly as the window callbacks do.
