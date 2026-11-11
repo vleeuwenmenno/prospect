@@ -1,0 +1,15 @@
+# Only what the game server's build needs goes into the build context.
+*
+!global.json
+!Directory.Build.props
+!Directory.Packages.props
+!.editorconfig
+!NOTICE.txt
+!LICENSES/
+!content/
+!src/Distribution.targets
+!src/Prospect.Engine/
+!src/Prospect.Game/
+!src/Prospect.Server/
+src/*/bin/
+src/*/obj/

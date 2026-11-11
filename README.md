@@ -81,6 +81,8 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 - **Listing server.** A small HTTP service (and its container image) that public game servers announce themselves
   to and clients fetch the list of games from. The game server and the client do not use it yet. See
   [docs/listing-server.md](docs/listing-server.md).
+- **Releases.** Pushing a tag (`server-v…`, `list-v…` or `v…`) publishes the game server and listing server container
+  images to GitHub Container Registry. See [docs/releasing.md](docs/releasing.md).
 
 Not there yet: the server browser and announcing to the listing server, mining, taking control of ships owned by other players (permissions), jump range and cost, gates,
 saving. Stations and gas fields are not generated yet; asteroids do not crack into pieces, and ore shows only as
@@ -214,6 +216,7 @@ make check                                 # formatting, warnings-as-errors buil
 make bench                                 # release benchmark; fails under 144 fps or on any per-frame allocation
 make listing                               # the listing server on http://127.0.0.1:8080
 make listing-image                         # its container image (docker/listing.Dockerfile)
+make server-image                          # the dedicated server's container image (docker/server.Dockerfile)
 make help                                  # every target
 ```
 

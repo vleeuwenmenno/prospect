@@ -11,6 +11,7 @@ to work.
 - `docs/direction.md`: what the game is, what is decided, what is still open, networking goals.
 - `docs/blocks-at-scale.md`: the plan for ships of thousands of blocks: data, network, collision, drawing, stages.
 - `docs/listing-server.md`: the listing server: its HTTP contract for the game side, configuration, deployment.
+- `docs/releasing.md`: release tags, the workflow, the container images and how to run them.
 - An item under "Open" is not decided. Ask; do not guess and build.
 - When a decision is made in conversation, move it from "Open" to "Decided" in the same change.
 
@@ -32,6 +33,7 @@ Use the Makefile, not raw `dotnet` commands.
 | `make bench` | Release benchmark. Fails under 144 fps or on any managed allocation in the frame loop. Run it after touching anything that executes every frame or every tick. |
 | `make run ARGS="..."` | The client. `make server` is the dedicated server. |
 | `make listing` | The listing server on 127.0.0.1:8080. `make listing-image` builds its container. |
+| `make server-image` | The dedicated server's container image. |
 | `make fmt` | Format. `make check` only verifies. |
 | `make tools` | Fetches Vulkan validation layers into `.tools/` (not installed system-wide on the dev machine). |
 
