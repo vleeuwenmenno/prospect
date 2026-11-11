@@ -147,6 +147,49 @@ public sealed class RequestLimiterTests
     }
 
     [Fact]
+    public void MovingOutOfOverflowDoesNotGrantASecondBurst()
+    {
+        // One slot, one overflow bucket, two posts a minute. "a" holds the slot; "b" spends its two from overflow.
+        var (limiter, clock) = Make(postsPerMinute: 2, addresses: 1, overflow: 1);
+        Assert.True(limiter.TryAcquire("a", RequestKind.Post).Allowed);
+        Assert.Equal(2, Burst(limiter, "b"));
+
+        // Half a minute on, "a" has refilled and its slot goes to "b". Half a minute refills one post, not two.
+        clock.Advance(TimeSpan.FromSeconds(30));
+        Assert.Equal(1, Burst(limiter, "b"));
+        Assert.Equal(1, limiter.TrackedCount);
+    }
+
+    [Theory]
+    [InlineData("::ffff:10.1.2.3/128", "10.1.2.3", 32)]
+    [InlineData("::ffff:10.1.0.0/112", "10.1.0.0", 16)]
+    [InlineData("::ffff:10.1.2.3", "10.1.2.3", 32)]
+    public void MappedProxyNetworksAreKeptAsTheIpv4NetworksTheyMean(string configured, string address, int prefix)
+    {
+        var options = new ListingOptions { TrustedProxies = configured };
+        options.Validate();
+        var network = Assert.Single(options.TrustedNetworks);
+        Assert.Equal(System.Net.IPAddress.Parse(address), network.BaseAddress);
+        Assert.Equal(prefix, network.PrefixLength);
+        Assert.True(network.Contains(System.Net.IPAddress.Parse(address)));
+    }
+
+    [Fact]
+    public void TheDefaultSlotCountCannotAllBeHeldAtTheDefaultRate()
+    {
+        var options = new ListingOptions();
+        options.Validate();
+        Assert.True(options.RateLimitAddresses >= options.SlotsThatCannotAllBeHeld);
+    }
+
+    [Fact]
+    public void AProxyNetworkThatMixesMappedAndOtherIpv6StopsTheService()
+    {
+        var options = new ListingOptions { TrustedProxies = "::ffff:0.0.0.0/64" };
+        Assert.Contains("TrustedProxies", Assert.Throws<InvalidOperationException>(options.Validate).Message);
+    }
+
+    [Fact]
     public void SlotIsFreedOnlyOnceItsBucketsAreFull()
     {
         var (limiter, clock) = Make(postsPerMinute: 2, listsPerMinute: 60, addresses: 1, overflow: 1);

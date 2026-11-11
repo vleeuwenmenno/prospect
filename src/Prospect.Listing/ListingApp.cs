@@ -62,6 +62,20 @@ public static class ListingApp
             options.GlobalRequestsPerSecond,
             options.RateLimitAddresses);
 
+        // A slot stays taken for at most a minute after its address's last request, so the requests the whole
+        // service lets through in a minute bound how many slots can be held at once. With fewer slots than that,
+        // enough addresses working together can hold every slot and push everyone else into the shared buckets.
+        if (options.RateLimitAddresses < options.SlotsThatCannotAllBeHeld)
+        {
+            log.LogWarning(
+                "RateLimitAddresses is {Slots}, below the {Needed} that GlobalRequestsPerSecond {Global} can hold at "
+                + "once: many addresses together can take every slot and starve new ones. Raise RateLimitAddresses, "
+                + "lower GlobalRequestsPerSecond, or limit floods by address prefix at the proxy.",
+                options.RateLimitAddresses,
+                options.SlotsThatCannotAllBeHeld,
+                options.GlobalRequestsPerSecond);
+        }
+
         // Whatever goes wrong, a caller sees one fixed sentence: never a stack trace, never what it sent.
         app.UseExceptionHandler(new ExceptionHandlerOptions
         {

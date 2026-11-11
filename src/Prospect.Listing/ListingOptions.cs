@@ -81,6 +81,12 @@ public sealed class ListingOptions
     /// </summary>
     public bool AllowPrivateAddresses { get; set; }
 
+    /// <summary>
+    /// The fewest rate-limit slots that cannot all be held at once: the burst plus a minute of requests at the
+    /// service-wide rate, a minute being the longest a slot stays taken after its address's last request.
+    /// </summary>
+    public long SlotsThatCannotAllBeHeld => (long)GlobalRequestsPerSecond * 61;
+
     /// <summary>The parsed <see cref="TrustedProxies"/>; filled by <see cref="Validate"/>.</summary>
     public IReadOnlyList<IPNetwork> TrustedNetworks { get; private set; } = [];
 
@@ -113,6 +119,8 @@ public sealed class ListingOptions
         }
     }
 
+    private static readonly IPAddress MappedIpv4Start = IPAddress.Parse("::ffff:0.0.0.0");
+
     private static IPNetwork[] ParseNetworks(string list)
     {
         var parts = list.Split([',', ' ', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -125,6 +133,19 @@ public sealed class ListingOptions
                 if (!IPNetwork.TryParse(part, out networks[i]))
                 {
                     throw new InvalidOperationException($"{Section}:{nameof(TrustedProxies)} has '{part}', which is not a network.");
+                }
+
+                // An IPv4 network written in its IPv6-mapped form would never match a plain IPv4 peer, and the
+                // proxy would then be taken for a client. It is kept as the IPv4 network it means.
+                var network = networks[i];
+                if (network.BaseAddress.IsIPv4MappedToIPv6 && network.PrefixLength >= 96)
+                {
+                    networks[i] = new IPNetwork(network.BaseAddress.MapToIPv4(), network.PrefixLength - 96);
+                }
+                else if (network.BaseAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 && network.Contains(MappedIpv4Start))
+                {
+                    // Wider than the mapped range: it reads as covering IPv4 proxies and never would.
+                    throw new InvalidOperationException($"{Section}:{nameof(TrustedProxies)} has '{part}', which mixes IPv4-mapped and other IPv6 addresses; write the IPv4 network and the IPv6 network separately.");
                 }
             }
             else if (IPAddress.TryParse(part, out var address))

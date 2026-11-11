@@ -30,7 +30,8 @@ public readonly record struct LimitDecision(bool Allowed, bool Global, TimeSpan 
 /// on <see cref="ListingOptions.RateLimitAddresses"/>, never on how many addresses are seen. A slot is freed only once
 /// both its buckets have refilled completely, when its state is the same as a new address's: dropping it lets no one
 /// escape a limit. When every slot is in use, a new address is limited by one of a few shared overflow buckets chosen by
-/// hash, while every address that already holds a slot keeps being limited exactly as before.
+/// hash, while every address that already holds a slot keeps being limited exactly as before. An address that later
+/// gets a slot of its own starts from its overflow bucket's state, so the move never grants a fresh burst.
 /// </para>
 /// <para>
 /// The service-wide bucket is checked before any per-address state is looked at or created, so when it is empty a flood
@@ -111,10 +112,11 @@ public sealed class RequestLimiter
     /// </summary>
     public LimitDecision TryAcquire(string group, RequestKind kind)
     {
-        var now = time.GetTimestamp();
         var cell = kind == RequestKind.Post ? post : list;
         lock (gate)
         {
+            // Read inside the lock, so requests are judged in the order their times were taken.
+            var now = time.GetTimestamp();
             if (!global.Admits(globalTat, now, out var globalWait))
             {
                 return new LimitDecision(false, true, ToTimeSpan(globalWait));
@@ -145,14 +147,18 @@ public sealed class RequestLimiter
             Sweep(now);
         }
 
+        // string.GetHashCode is seeded per process, so which addresses share an overflow bucket cannot be worked out
+        // beforehand. It can still be found by trying, or made irrelevant by filling every bucket.
+        ref var shared = ref overflow[(int)((uint)group.GetHashCode() % (uint)overflow.Length)];
         if (freeCount == 0)
         {
-            // string.GetHashCode is seeded per process, so which addresses share an overflow bucket cannot be chosen.
-            return ref overflow[(int)((uint)group.GetHashCode() % (uint)overflow.Length)];
+            return ref shared;
         }
 
+        // The address may have been spending from its overflow bucket until now. Its own slot starts from that
+        // bucket's state, not from a full allowance, or moving out of overflow would hand it a second burst.
         index = free[--freeCount];
-        slots[index] = Slot.Fresh with { Group = group };
+        slots[index] = new Slot { Group = group, Post = shared.Post, List = shared.List };
         slotOf.Add(group, index);
         return ref slots[index];
     }

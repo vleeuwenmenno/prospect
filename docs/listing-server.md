@@ -132,7 +132,7 @@ Rate-limit memory:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `RateLimitAddresses` | `16384` | Addresses (or IPv6 prefixes) with rate-limit state of their own. Reserved at start; never grows. |
+| `RateLimitAddresses` | `16384` | Addresses (or IPv6 prefixes) with rate-limit state of their own. Reserved at start; never grows. Keep it above `GlobalRequestsPerSecond` × 61, or many addresses together can hold every slot; the service warns at start if it is not. |
 | `RateLimitOverflowBuckets` | `64` | Shared buckets for new addresses while every slot is taken. |
 
 - A slot is freed only once its buckets have refilled completely, so freeing it lets no one escape a limit.
