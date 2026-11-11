@@ -12,10 +12,12 @@ internal static class Program
     private const string Usage = """
         prospect [options]
           --start <screen>        Open on: menu, join, settings, newgame, credits, account (friends), or local (start a local game)
-          --join <host[:port]>    Connect to a server straight after the splash
+          --join <host[:port]>    Join a server after the splash. Joining needs a Discord sign-in, which the game
+                                  never has at launch, so this opens Join Server filled in: sign in, then Connect
           --host <visibility>     Start a local game others can join: unlisted (by address) or public (also in the
                                   server browser); private is the host alone, as --start local. Needs a UDP port
-                                  that others can reach. With --start newgame, fills in the New Game screen instead
+                                  that others can reach, and a Discord sign-in: without one it opens New Game
+                                  filled in. With --start newgame, fills in the New Game screen instead
           --host-name <text>      With --host: the game's name, 1 to 48 characters
           --host-players <n>      With --host: player slots, the host included (default 8)
           --host-port <n>         With --host: the UDP port to listen on (default 27420)

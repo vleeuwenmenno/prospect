@@ -11,6 +11,8 @@ using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Prospect.Client;
+using Prospect.Game.Client;
 using Prospect.Game.Lobby;
 using Prospect.Listing.Accounts;
 using Xunit;
@@ -464,7 +466,9 @@ public sealed class AccountClientTests
             Assert.True(client.SignIn());
             var local = await browser.ConsentAsync(service, await browser.Opened);
             Assert.True(await PortOpen(local.Port));
+            Assert.False(client.HasCurrentSession());
             client.CancelSignIn();
+            Assert.False(client.HasCurrentSession());
             Assert.Equal(AccountState.SignedOut, client.View.State);
             Assert.Equal(AccountNotice.SigninCancelled, client.View.Notice);
             await Until(client, v => !v.Busy, "the cancelled sign-in to end");
@@ -522,7 +526,10 @@ public sealed class AccountClientTests
         Assert.True(a.AddFriend(b.View.FriendCode));
         await Idle(a);
 
+        Assert.True(a.HasCurrentSession());
+        Assert.True(NetworkPlay.Allowed(a, false, out _));
         a.SignOut();
+        Assert.False(a.HasCurrentSession());
         Assert.Equal(AccountState.SignedOut, a.View.State);
         Assert.Equal(AccountNotice.SignedOut, a.View.Notice);
         Assert.Equal("", a.View.Id);
@@ -555,7 +562,8 @@ public sealed class AccountClientTests
     /// </summary>
     private static async Task<(FakeListing Fake, AccountClient Client, FakeBrowser Browser)> FakeSignInAsync(
         Func<FakeRequest, int, FakeAnswer> after,
-        Func<string, Task>? responseReceived = null)
+        Func<string, Task>? responseReceived = null,
+        TimeProvider? time = null)
     {
         var browser = new FakeBrowser();
         var fake = new FakeListing((request, index) => request.Path switch
@@ -564,7 +572,11 @@ public sealed class AccountClientTests
             "/v1/accounts/sessions" => FakeAnswer.Json(201, $$"""{"token":"{{Token}}","expiresIn":86400,"account":{{Account}}}"""),
             _ => after(request, index),
         });
-        var client = new AccountClient(ListingConfig.Parse("{}"u8.ToArray(), "test", fake.Url), browser.Open) { ResponseReceived = responseReceived };
+        var client = new AccountClient(ListingConfig.Parse("{}"u8.ToArray(), "test", fake.Url), browser.Open)
+        {
+            ResponseReceived = responseReceived,
+            Time = time ?? TimeProvider.System,
+        };
         Assert.True(client.SignIn());
         await browser.Opened;
         var port = JsonDocument.Parse(fake.Requests[0].Body).RootElement.GetProperty("port"u8).GetInt32();
@@ -573,6 +585,169 @@ public sealed class AccountClientTests
         Assert.Equal(HttpStatusCode.OK, status);
         await Until(client, v => v.State == AccountState.SignedIn && !v.Busy, "sign-in");
         return (fake, client, browser);
+    }
+
+    /// <summary>A monotonic clock the test moves by hand, in milliseconds.</summary>
+    private sealed class ManualClock : TimeProvider
+    {
+        public long Now = 1000;
+        public override long TimestampFrequency => 1000;
+        public override long GetTimestamp() => Volatile.Read(ref Now);
+    }
+
+    [Fact]
+    public async Task ASessionCountsOnlyOnceTheServiceIssuedItAndOnlyForTheLifetimeItGave()
+    {
+        var clock = new ManualClock();
+        var browser = new FakeBrowser();
+        var during = new List<(AccountState State, bool Session)>();
+        AccountClient? client = null;
+        using var fake = new FakeListing((request, _) => request.Path switch
+        {
+            "/v1/accounts/signin" => FakeAnswer.Json(201, $$"""{"attempt":"{{Attempt}}","expiresIn":600}"""),
+            "/v1/accounts/sessions" => FakeAnswer.Json(201, $$"""{"token":"{{Token}}","expiresIn":86400,"account":{{Account}}}"""),
+            _ => FakeAnswer.Json(200, Lists()),
+        });
+        client = new AccountClient(ListingConfig.Parse("{}"u8.ToArray(), "test", fake.Url), browser.Open)
+        {
+            Time = clock,
+            ResponseReceived = path =>
+            {
+                if (path is "v1/accounts/signin" or "v1/accounts/sessions")
+                    lock (during)
+                        during.Add((client!.View.State, client.HasCurrentSession()));
+                // The redemption takes five seconds; the lifetime still counts from before it was asked.
+                if (path == "v1/accounts/sessions")
+                    Interlocked.Add(ref clock.Now, 5000);
+                return Task.CompletedTask;
+            },
+        };
+        using (browser)
+        using (client)
+        {
+            Assert.False(client.HasCurrentSession());
+            Assert.True(client.SignIn());
+            await browser.Opened;
+            await Until(client, v => v.State == AccountState.Waiting, "waiting");
+            Assert.False(client.HasCurrentSession());
+            var port = JsonDocument.Parse(fake.Requests[0].Body).RootElement.GetProperty("port"u8).GetInt32();
+            var code = AccountClient.Encode(Enumerable.Repeat((byte)3, 32).ToArray());
+            var (status, _, _) = await browser.ReturnAsync(new Uri($"http://127.0.0.1:{port}/prospect/signin?attempt={Attempt}&code={code}"));
+            Assert.Equal(HttpStatusCode.OK, status);
+            await Until(client, v => v.State == AccountState.SignedIn && !v.Busy, "sign-in");
+            lock (during)
+                Assert.Equal([(AccountState.Starting, false), (AccountState.Finishing, false)], during);
+
+            Assert.True(client.HasCurrentSession());
+            Volatile.Write(ref clock.Now, 1000 + 86_400_000 - 1);
+            Assert.True(client.HasCurrentSession());
+            Assert.True(NetworkPlay.Allowed(client, true, out _));
+            await Idle(client);
+
+            // The lifetime is up: the session no longer counts, the account signs out as on a 401, and nothing
+            // that needs the token is sent.
+            Volatile.Write(ref clock.Now, 1000 + 86_400_000);
+            var sent = fake.Requests.Count;
+            Assert.False(NetworkPlay.Allowed(client, false, out var error));
+            Assert.Equal("Sign in with Discord to join a server.", error);
+            Assert.Equal(AccountState.SignedOut, client.View.State);
+            Assert.Equal(AccountNotice.Expired, client.View.Notice);
+            Assert.Equal("", client.View.Id);
+            Assert.False(client.Refresh());
+            Assert.False(client.HasCurrentSession());
+            Assert.Equal(sent, fake.Requests.Count);
+        }
+    }
+
+    [Fact]
+    public async Task ExpiryFoundByAFriendsActionSignsOutWithoutSendingIt()
+    {
+        var clock = new ManualClock();
+        var (fake, client, browser) = await FakeSignInAsync((_, _) => FakeAnswer.Json(200, Lists()), time: clock);
+        using (fake)
+        using (client)
+        using (browser)
+        {
+            var sent = fake.Requests.Count;
+            Volatile.Write(ref clock.Now, 1000 + 86_400_000);
+            Assert.False(client.AddFriend("0123456789ABCDEF"));
+            Assert.Equal(AccountState.SignedOut, client.View.State);
+            Assert.Equal(AccountNotice.Expired, client.View.Notice);
+            Assert.Equal(sent, fake.Requests.Count);
+            // Signing in again is possible straight away.
+            Assert.True(client.SignIn());
+            client.CancelSignIn();
+        }
+    }
+
+    [Fact]
+    public void SamplesAndClientsWithoutAServiceNeverAllowNetworkPlay()
+    {
+        // A capture's signed-in sample shows an account but holds no session.
+        using var sample = AccountClient.Sample(AccountState.SignedIn, Encoding.UTF8.GetBytes(Account), Encoding.UTF8.GetBytes(Lists()), AccountNotice.None, null);
+        Assert.Equal(AccountState.SignedIn, sample.View.State);
+        Assert.False(sample.HasCurrentSession());
+        Assert.False(NetworkPlay.Allowed(sample, false, out var error));
+        Assert.Equal("Sign in with Discord to join a server.", error);
+        Assert.False(NetworkPlay.Allowed(sample, true, out error));
+        Assert.Equal("Sign in with Discord to host for others, or choose Private.", error);
+
+        using var off = new AccountClient(null, static _ => false);
+        Assert.False(off.HasCurrentSession());
+        Assert.False(NetworkPlay.Allowed(off, false, out error));
+        Assert.Contains("--listing off", error);
+        Assert.Contains("Private games still work", error);
+        Assert.False(NetworkPlay.Allowed(off, true, out error));
+        Assert.Contains("--listing off", error);
+
+        using var signedOut = new AccountClient(ListingConfig.Parse("{}"u8.ToArray(), "test", "http://127.0.0.1:9"), static _ => false);
+        Assert.False(signedOut.HasCurrentSession());
+        Assert.False(NetworkPlay.Allowed(signedOut, false, out _));
+    }
+
+    [Fact]
+    public async Task EnteringANetworkGameIsCheckedBeforeTheRunningSessionIsLeft()
+    {
+        var leaves = 0;
+        var opens = 0;
+        void Leave() => leaves++;
+        // The opener fails as a busy port does, so no real session is needed to see whether it ran.
+        GameSession Open()
+        {
+            opens++;
+            throw new IOException("The port is in use.");
+        }
+
+        // Without accounts: a private game goes ahead; a network one leaves the running session alone.
+        using var off = new AccountClient(null, static _ => false);
+        Assert.False(NetworkPlay.TryEnter(off, false, true, Leave, Open, out var session, out var error));
+        Assert.Equal((1, 1, "The port is in use."), (leaves, opens, error));
+        Assert.Null(session);
+        Assert.False(NetworkPlay.TryEnter(off, true, true, Leave, Open, out _, out error));
+        Assert.Equal((1, 1), (leaves, opens));
+        Assert.Contains("--listing off", error);
+        Assert.False(NetworkPlay.TryEnter(off, true, false, Leave, Open, out _, out error));
+        Assert.Equal((1, 1), (leaves, opens));
+
+        using var sample = AccountClient.Sample(AccountState.SignedIn, Encoding.UTF8.GetBytes(Account), default, AccountNotice.None, null);
+        Assert.False(NetworkPlay.TryEnter(sample, true, false, Leave, Open, out _, out _));
+        Assert.Equal((1, 1), (leaves, opens));
+
+        // Signed in, the join is tried; once the session's lifetime is up it is refused again before leaving.
+        var clock = new ManualClock();
+        var (fake, client, browser) = await FakeSignInAsync((_, _) => FakeAnswer.Json(200, Lists()), time: clock);
+        using (fake)
+        using (client)
+        using (browser)
+        {
+            Assert.False(NetworkPlay.TryEnter(client, true, false, Leave, Open, out _, out error));
+            Assert.Equal((2, 2, "The port is in use."), (leaves, opens, error));
+            Volatile.Write(ref clock.Now, 1000 + 86_400_000);
+            Assert.False(NetworkPlay.TryEnter(client, true, true, Leave, Open, out _, out error));
+            Assert.Equal((2, 2), (leaves, opens));
+            Assert.Equal("Sign in with Discord to host for others, or choose Private.", error);
+            Assert.Equal(AccountNotice.Expired, client.View.Notice);
+        }
     }
 
     [Fact]
@@ -729,6 +904,7 @@ public sealed class AccountClientTests
                 await OperationStopped(oldOperation);
                 // This includes both the late list publication and RunAsync's finally block.
                 Assert.Same(replacement, client.View);
+                Assert.False(client.HasCurrentSession());
                 Assert.Same(newOperation, CurrentOperation(client));
             }
             finally

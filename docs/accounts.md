@@ -1,8 +1,9 @@
 # Central accounts and friends
 
 Phase A is an optional backend beside the listing service, and the game's sign-in and friends screens.
-Guest/local multiplayer, party and chat keep their existing session identities.
-An ordinary guest roster name is not a verified account identity.
+Private local play needs no account. The official client asks for a Discord sign-in before it joins a server
+or hosts an unlisted or public game. Game servers do not see or check the account: party, chat and the roster
+keep their session identities, and a roster name is not a verified account identity.
 Recovery depends on Discord; there is no email/password recovery or account linking.
 
 ## Sign-in contract
@@ -121,7 +122,20 @@ Interface:
 - Captures: `--account-sample signed-out|waiting|signed-in|friends|failed|off`, with `--capture` or `--bench`
   only. `--start account` opens the screen; `--open friends` opens the tab.
 
-Not in the game yet: online presence, same-server friend markers, adding from the player list.
+Network play (`NetworkPlay` in `Prospect.Client`):
+
+- Join Server (direct, listed, the password retry, `--join`) and Start for an unlisted or public game need
+  `AccountClient.HasCurrentSession()`: a token the service issued, within its `expiresIn`, measured on a
+  monotonic clock from before the session was asked for. A sample never counts. Private never needs it.
+- The check runs before the running session is left or a socket opens; a refusal changes nothing.
+- The sign-in is offered on the screen that needs it, so the address, the picked game and the hosting choices
+  stay. Signing in does not join or start anything: the player presses Join or Start again.
+- `--join` without a sign-in opens Join Server filled in. `--listing off` says accounts are off; private works.
+- Entry only: signing out or expiring never ends a running game or a hosted server. The service can end a
+  session sooner; the client learns that from its next 401.
+
+Not in the game yet: online presence, same-server friend markers, adding from the player list, account identity
+on game servers.
 The game does not revoke the session when it quits; the session expires at the service after 24 hours.
 
 ## Configuration

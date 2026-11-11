@@ -155,6 +155,48 @@ internal sealed partial class ScreenHost
         EndRoot();
     }
 
+    /// <summary>
+    /// The sign-in that joining a server or hosting for others needs, drawn on the screen that needs it so what
+    /// the player chose there stays put while they sign in: the reason and the button, the wait with Cancel and
+    /// Copy link, or why there are no accounts. Signing in only changes the account; the player then presses Join
+    /// or Start again. Draws nothing when signed in.
+    /// </summary>
+    /// <param name="hosting">True on the New Game screen, false on Join Server.</param>
+    /// <param name="width">The width to lay out in.</param>
+    private void DrawSignInGate(bool hosting, float width)
+    {
+        var view = _app.Accounts.View;
+        var wrap = width / Kit.Scale;
+        switch (view.State)
+        {
+            case AccountState.SignedIn:
+                return;
+            case AccountState.Off:
+                Kit.Label(_ui.SansMedium, Theme.FontBody, Theme.Text, "Accounts are off"u8);
+                Kit.Space(Theme.Space2);
+                Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextDim, hosting
+                    ? "Hosting for others needs a Discord sign-in, and this game was started without the server list and accounts (--listing off). Private games work as usual."u8
+                    : "Joining a server needs a Discord sign-in, and this game was started without the server list and accounts (--listing off). Private games work as usual."u8, wrap);
+                return;
+            case AccountState.SignedOut:
+                Kit.Label(_ui.SansMedium, Theme.FontBody, Theme.Text, "Sign in to play with others"u8);
+                Kit.Space(Theme.Space2);
+                Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextDim, hosting
+                    ? "Hosting a game others can join needs a Discord sign-in; a private game does not. Your browser opens, and PROSPECT asks Discord only for your display name."u8
+                    : "Joining a server needs a Discord sign-in; private games do not. Your browser opens, and PROSPECT asks Discord only for your display name."u8, wrap);
+                Kit.Space(Theme.Space3);
+                if (Kit.Button("Sign in with Discord"u8, ButtonKind.Primary, 240, !view.Busy))
+                    _app.Accounts.SignIn();
+                break;
+            default:
+                DrawAccountCard(view, width);
+                break;
+        }
+
+        Kit.Space(Theme.Space2);
+        DrawAccountNotice(width);
+    }
+
     /// <summary>The account, the code field and the lists in one column, in the current scrolling window.</summary>
     private void DrawAccountBody(float width, bool menu)
     {
@@ -185,13 +227,13 @@ internal sealed partial class ScreenHost
             case AccountState.Off:
                 Kit.Label(_ui.SansMedium, Theme.FontBody, Theme.Text, "Accounts are off"u8);
                 Kit.Space(Theme.Space2);
-                Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextDim, "Accounts and friends live beside the server list, which this game was started without (--listing off). Guest and local play work as usual."u8, wrap);
+                Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextDim, "Accounts and friends live beside the server list, which this game was started without (--listing off). Private games work as usual; joining and hosting for others need accounts."u8, wrap);
                 break;
 
             case AccountState.SignedOut:
                 Kit.Label(_ui.SansMedium, Theme.FontBody, Theme.Text, "Not signed in"u8);
                 Kit.Space(Theme.Space2);
-                Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextDim, "Sign in with Discord to keep a friends list across games and restarts. PROSPECT asks Discord only for your display name; your browser opens for it."u8, wrap);
+                Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextDim, "Sign in with Discord to keep a friends list across games and restarts, and to join or host games with others. PROSPECT asks Discord only for your display name; your browser opens for it."u8, wrap);
                 Kit.Space(Theme.Space3);
                 if (Kit.Button("Sign in with Discord"u8, ButtonKind.Primary, 240, !view.Busy))
                     accounts.SignIn();
@@ -440,7 +482,7 @@ internal sealed partial class ScreenHost
         return notice switch
         {
             AccountNotice.SignedIn => "Signed in."u8,
-            AccountNotice.SignedOut => "Signed out. Guest play is unchanged."u8,
+            AccountNotice.SignedOut => "Signed out. A game you are in keeps running."u8,
             AccountNotice.SigninCancelled => "Sign-in cancelled."u8,
             AccountNotice.SigninDenied => "The sign-in was cancelled in the browser."u8,
             AccountNotice.SigninFailed => "The sign-in did not work. Try again."u8,
@@ -448,7 +490,7 @@ internal sealed partial class ScreenHost
             AccountNotice.BrowserNotOpened => "The browser did not open. Copy the link and open it yourself."u8,
             AccountNotice.PortUnavailable => "The game could not open a local port for the sign-in."u8,
             AccountNotice.Expired => "Your sign-in expired. Sign in again."u8,
-            AccountNotice.Unavailable => "Accounts are unavailable right now. Guest play still works."u8,
+            AccountNotice.Unavailable => "Accounts are unavailable right now. Private games still work."u8,
             AccountNotice.RateLimited => "Too many requests. Wait a moment and try again."u8,
             AccountNotice.Unreachable => "No answer from the account service. Check your connection and try again."u8,
             AccountNotice.BadReply => "The account service sent something unexpected. Try again later."u8,

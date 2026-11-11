@@ -341,12 +341,13 @@ internal sealed class App : IDisposable
     /// Starts a local game in a world with the given settings, hosted as <paramref name="hosting"/> says; both
     /// also become the next game's. A private game is the host alone. An unlisted or public one is the same
     /// game with a UDP listener, which other players join by address; a public one also announces itself to
-    /// the listing server. Returns false with a sentence for the player when the name or the password cannot
-    /// be used or the port cannot be opened; the session that was running has been left either way.
+    /// the listing server. Hosting for others needs a Discord sign-in (<see cref="NetworkPlay"/>): without one
+    /// this returns false and the session that runs is left running. Otherwise it returns false with a sentence
+    /// for the player when the name or the password cannot be used or the port cannot be opened, the session
+    /// that was running having been left.
     /// </summary>
     public bool StartLocalGame(in WorldSettings settings, HostingOptions hosting, out string error)
     {
-        LeaveSession();
         NewGameSettings = Content.SettingCatalog.Sanitize(settings);
         NewGameHosting = hosting.Clone();
 
@@ -367,17 +368,9 @@ internal sealed class App : IDisposable
             Listing = Listing,
         };
 
-        try
-        {
-            Session = GameSession.StartLocal(config, Content, Settings.PlayerName);
-        }
-        catch (Exception e) when (e is IOException or InvalidDataException)
-        {
-            error = e.Message;
+        if (!NetworkPlay.TryEnter(Accounts, hosted, true, LeaveSession, () => GameSession.StartLocal(config, Content, Settings.PlayerName), out var session, out error))
             return false;
-        }
-
-        error = "";
+        Session = session;
         _screens.Show(Screen.Session);
         return true;
     }
@@ -390,48 +383,31 @@ internal sealed class App : IDisposable
     /// password and is not given one ends the session with <see cref="SessionEndReason.PasswordRequired"/>; a
     /// wrong one ends it with <see cref="SessionEndReason.WrongPassword"/>, and too many wrong ones with
     /// <see cref="SessionEndReason.TooManyAttempts"/>. A screen that sees one of these asks the player and
-    /// calls <see cref="RejoinWithPassword"/>.
+    /// calls <see cref="RejoinWithPassword"/>. Joining needs a Discord sign-in (<see cref="NetworkPlay"/>); a
+    /// refused join, or an unusable password, leaves the session that runs as it was.
     /// </summary>
     public bool JoinGame(string host, ushort port, string? password, out string error)
     {
-        LeaveSession();
         if (!CheckPassword(ref password, out error))
             return false;
-
-        try
-        {
-            Session = GameSession.Join(host, port, Content, Settings.PlayerName, password);
-        }
-        catch (IOException e)
-        {
-            error = e.Message;
+        if (!NetworkPlay.TryEnter(Accounts, true, false, LeaveSession, () => GameSession.Join(host, port, Content, Settings.PlayerName, password), out var session, out error))
             return false;
-        }
-
+        Session = session;
         _screens.Show(Screen.Session);
         return true;
     }
 
     /// <summary>
     /// Joins a game the player picked in the server browser, with a password when the entry says it needs one.
-    /// Nothing is sent to a listed game before this.
+    /// Nothing is sent to a listed game before this, and nothing at all without a Discord sign-in.
     /// </summary>
     public bool JoinGame(ListedGame game, string? password, out string error)
     {
-        LeaveSession();
         if (!CheckPassword(ref password, out error))
             return false;
-
-        try
-        {
-            Session = GameSession.Join(game, Content, Settings.PlayerName, password);
-        }
-        catch (IOException e)
-        {
-            error = e.Message;
+        if (!NetworkPlay.TryEnter(Accounts, true, false, LeaveSession, () => GameSession.Join(game, Content, Settings.PlayerName, password), out var session, out error))
             return false;
-        }
-
+        Session = session;
         _screens.Show(Screen.Session);
         return true;
     }
@@ -521,12 +497,14 @@ internal sealed class App : IDisposable
         }
         else if (_options.JoinHost is { } host)
         {
+            // Without a sign-in (and a sign-in never outlives the game) this opens the Join screen with the address
+            // and password filled in, where the player signs in and presses Connect. Nothing joins by itself later.
             var password = _options.Password;
             _options.Password = null;
             if (!JoinGame(host, _options.JoinPort, password, out var error))
             {
                 Logs.App.Error(error);
-                _screens.Show(Screen.Join);
+                _screens.OpenJoin(host, _options.JoinPort, password, error);
             }
         }
         else if (_options.StartScreen == Screen.Settings)

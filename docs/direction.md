@@ -70,7 +70,11 @@ exists.
 - **Friends persist across reconnects and game restarts.** They belong to a stable account, not a game's
   temporary player id or a display name.
 - **Request only Discord identity.** No email, server membership, messages or Discord friends access is needed.
-- **Guest and local play remain available.** A persistent friends list requires signing in.
+- **Private play needs no account.** A private local game works signed out, offline and with `--listing off`.
+- **Playing with others needs a Discord sign-in in the official client.** Join Server and hosting an unlisted or
+  public game ask for it first; so do friends. It is checked when a game is entered, not later.
+- **Game servers do not check accounts yet.** The wire keeps session identities; roster names are not verified.
+  Account-backed identity in a game needs a later protocol change.
 
 ## Decided: first account release
 

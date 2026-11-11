@@ -2,6 +2,7 @@ using Brutal.ImGuiApi;
 using Brutal.Numerics;
 using Prospect.Client.Ui;
 using Prospect.Game.Client;
+using Prospect.Game.Lobby;
 using Prospect.Game.Protocol;
 using Prospect.Game.World;
 
@@ -120,6 +121,14 @@ internal sealed partial class ScreenHost
                 else
                     Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.Bad, "The server list is turned off, so this game is not listed. Others can still join with your address and the port below."u8, WorldRowWidth - 24);
                 break;
+        }
+
+        if (_hosting.Visibility != ServerVisibility.Private && _app.Accounts.View.State != AccountState.SignedIn)
+        {
+            // Hosting for others needs a sign-in; choosing Private again takes the need away. Start says why it
+            // refuses until then, and nothing starts by itself once signed in.
+            Kit.Space(Theme.Space3);
+            DrawSignInGate(true, Kit.Px(WorldRowWidth - 24));
         }
 
         if (_hosting.Visibility != ServerVisibility.Private)

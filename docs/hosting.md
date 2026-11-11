@@ -31,7 +31,8 @@ A hosted local game is the same server a local game always runs, with a UDP list
   on the router. There is no NAT traversal.
 - The listing server does not check that a listed game can be reached.
 
-In the client: New Game, then "Who can join". Unlisted and Public show the name, password, player slots and port.
+In the client: New Game, then "Who can join". Unlisted and Public show the name, password, player slots and port,
+and need a Discord sign-in before Start ([accounts](accounts.md)). Private does not. Join Server needs it too.
 A start that fails (port busy, a name or password that cannot be used) stays on the screen with the reason. In the
 game, the `Esc` menu says whether a public game is listed right now.
 
@@ -228,5 +229,6 @@ The browser screen:
 ## Optional central accounts
 
 The optional [account backend](accounts.md) stores Discord accounts and friends beside the listing service.
-Client integration is pending. Guest joins and party/chat remain independent of that service.
-The current game handshake does not attest an account; roster names are not verified identities.
+The official client asks for a sign-in before joining or hosting unlisted/public; that is client policy only.
+The game handshake does not attest an account; servers admit as before and roster names are not verified.
+Party and chat keep session identities. A dedicated server needs no account service.

@@ -26,9 +26,11 @@ Chat, the player roster and parties work end to end: the server decides, the cli
 
 - **Friends** (main menu, or the Friends tab in Social): sign in with Discord in your browser, then add
   friends by their 16-character friend code, answer requests and remove friends. The list belongs to your
-  account and lasts across games and restarts; signing in again restores it. Signing in is optional: guest and
-  local play are unchanged. It needs the account service beside the listing server
-  ([accounts](docs/accounts.md)); with `--listing off` there are no accounts.
+  account and lasts across games and restarts; signing in again restores it. It needs the account service
+  beside the listing server ([accounts](docs/accounts.md)); with `--listing off` there are no accounts.
+- **Sign-in for playing with others.** Join Server and hosting an unlisted or public game ask for a Discord
+  sign-in first, on the same screen; a private game never does, offline included. Servers do not check the
+  account yet: in a game, names and ids are still the session's, not verified accounts.
 
 Not there yet: whether a friend is online or on your server, adding a friend from the player list, factions and
 alliances. The sign-in lasts while the game runs; after a restart, sign in again. Names and player ids in a game
@@ -328,6 +330,8 @@ make run ARGS="--host public --listing http://127.0.0.1:8080"              # aga
   `limits` under `"server"`. An argument wins over `PROSPECT_PASSWORD`, which wins over the file.
 - In a game, the sector panel shows the server's name, its visibility and the player slots. The `Esc` menu shows
   them too, and for a public game you host, whether the listing server has it right now.
+- Joining and hosting unlisted or public need a Discord sign-in in the client; private does not. `--join` and
+  `--host` without one open Join Server or New Game filled in, to sign in there. A dedicated server needs none.
 - In the client: New Game sets the hosting, Join Server lists public games and joins by address. A join that ends
   with "password required" or "wrong password" asks for the password on the spot; after too many wrong ones it
   counts down the server's wait before the next try.
@@ -379,8 +383,8 @@ make run                                   # the game
 make run ARGS="--start local"              # straight into a local game
 make server                                # headless dedicated server on UDP 27420
 make server ARGS="--set hullStrength=2"    # the same, in a world with its own settings
-make run ARGS="--join 127.0.0.1"           # join it
-make run ARGS="--host unlisted"            # a local game others can join by address
+make run ARGS="--join 127.0.0.1"           # join it, after a Discord sign-in
+make run ARGS="--host unlisted"            # a local game others can join by address (sign-in first)
 make check                                 # formatting, warnings-as-errors build, tests
 make bench                                 # release benchmark; fails under 144 fps or on any per-frame allocation
 make listing                               # the listing server on http://127.0.0.1:8080

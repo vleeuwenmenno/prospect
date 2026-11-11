@@ -47,6 +47,9 @@ public sealed class AccountClient : IDisposable
     private readonly Lock _gate = new();
     private AccountView _view;
     private string? _token;
+
+    /// <summary>When <see cref="_token"/> stops counting as a session, on <see cref="Time"/>'s monotonic clock.</summary>
+    private long _tokenExpires;
     private int _generation;
     private CancellationTokenSource? _operation;
     private bool _disposed;
@@ -81,6 +84,9 @@ public sealed class AccountClient : IDisposable
 
     // This boundary reproduces cancellation after Waiting is published but before the opener is called.
     internal Func<Task>? BeforeBrowserLaunch { get; init; }
+
+    // The monotonic clock a session's lifetime is measured on; tests move it instead of waiting a day.
+    internal TimeProvider Time { get; init; } = TimeProvider.System;
 
     /// <summary>The account service's host name, for display; empty when turned off.</summary>
     public string Host => _config?.Url.Host ?? (_sample ? "sample" : "");
@@ -120,6 +126,20 @@ public sealed class AccountClient : IDisposable
     /// Call only for an explicit request from the player.
     /// </summary>
     public bool SignIn() => Start(static v => v.State == AccountState.SignedOut, SignInAsync, AccountState.Starting);
+
+    /// <summary>
+    /// True only while this client holds a session the service issued, within the lifetime the service gave it,
+    /// measured from before the session was asked for on a monotonic clock. A sample, a sign-in under way and a
+    /// signed-out or turned-off client never have one, whatever <see cref="View"/> says. A session found expired
+    /// here signs out with <see cref="AccountNotice.Expired"/>. Takes the lock: call it for an action, not every
+    /// frame. The service can still end a session sooner (sign-out elsewhere, eviction); that is only learnt from
+    /// the next request it answers with 401.
+    /// </summary>
+    public bool HasCurrentSession()
+    {
+        lock (_gate)
+            return !_sample && !_disposed && _token is not null && !ExpireIfDue();
+    }
 
     /// <summary>Abandons a sign-in under way: the local port closes at once and the player is signed out.</summary>
     public void CancelSignIn()
@@ -246,7 +266,7 @@ public sealed class AccountClient : IDisposable
         CancellationTokenSource cancel;
         lock (_gate)
         {
-            if (_sample || _disposed || _http is null || _operation is not null || !allowed(_view))
+            if (_sample || _disposed || _http is null || _operation is not null || ExpireIfDue() || !allowed(_view))
                 return false;
             cancel = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
             _operation = cancel;
@@ -378,8 +398,10 @@ public sealed class AccountClient : IDisposable
                 w.WriteString("code"u8, result.Code);
                 w.WriteString("verifier"u8, verifier);
             });
+            // The lifetime counts from before the request, so the local clock never outlasts the service's.
+            var asked = Time.GetTimestamp();
             reply = await SendAsync(HttpMethod.Post, "v1/accounts/sessions", redeem, null, MaxSmallBytes, op.Cancel).ConfigureAwait(false);
-            if (!reply.Is(201) || !TryParseSession(reply.Body, out var token, out var id, out var name, out var code))
+            if (!reply.Is(201) || !TryParseSession(reply.Body, out var token, out var lifetime, out var id, out var name, out var code))
             {
                 Commit(op, v => v.SignedOut(reply.Is(201) ? AccountNotice.BadReply : Failure(reply, AccountNotice.SigninFailed)));
                 return;
@@ -390,6 +412,7 @@ public sealed class AccountClient : IDisposable
                 if (op.Generation != _generation || _disposed)
                     return;
                 _token = token;
+                _tokenExpires = asked + lifetime * Time.TimestampFrequency;
                 Publish(_view.WithAccount(id, name, code).With(notice: AccountNotice.SignedIn));
             }
 
@@ -506,6 +529,19 @@ public sealed class AccountClient : IDisposable
             _generation++;
             Publish(_view.SignedOut(AccountNotice.Expired));
         }
+    }
+
+    /// <summary>
+    /// Under the lock: when the session's lifetime has run out, signs out as the service's 401 would and returns
+    /// true. Nothing is sent; the service ends the session by itself at the same time.
+    /// </summary>
+    private bool ExpireIfDue()
+    {
+        if (_token is null || Time.GetTimestamp() < _tokenExpires)
+            return false;
+        Abandon();
+        Publish(_view.SignedOut(AccountNotice.Expired));
+        return true;
     }
 
     /// <summary>Applies a change made by an operation, unless the generation it began in has passed.</summary>
@@ -649,9 +685,10 @@ public sealed class AccountClient : IDisposable
         }
     }
 
-    private static bool TryParseSession(ReadOnlyMemory<byte> json, out string token, out string id, out string name, out string code)
+    private static bool TryParseSession(ReadOnlyMemory<byte> json, out string token, out int lifetime, out string id, out string name, out string code)
     {
         token = id = name = code = "";
+        lifetime = 0;
         try
         {
             using var document = JsonDocument.Parse(json, Strict);
@@ -659,7 +696,7 @@ public sealed class AccountClient : IDisposable
             return root.ValueKind == JsonValueKind.Object
                 && Text(root, "token"u8, 43, out token)
                 && IsCanonicalSecret(token)
-                && Whole(root, "expiresIn"u8, 1, 86400, out _)
+                && Whole(root, "expiresIn"u8, 1, 86400, out lifetime)
                 && root.TryGetProperty("account"u8, out var account)
                 && TryReadAccount(account, out id, out name, out code);
         }

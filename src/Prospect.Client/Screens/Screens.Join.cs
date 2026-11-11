@@ -77,6 +77,20 @@ internal sealed partial class ScreenHost
         _sampleList = sample is BrowserSample.Ready or BrowserSample.Password ? ServerBrowser.Parse(SampleListJson(), allowPrivateAddresses: false) : null;
     }
 
+    /// <summary>
+    /// Opens the Join screen with an address, port and password already filled in and a reason shown, as for a
+    /// <c>--join</c> that could not go ahead (no sign-in yet). The password stays in the field's memory only.
+    /// </summary>
+    public void OpenJoin(string host, ushort port, string? password, string error)
+    {
+        _joinHost.SetValue(host);
+        _joinPort.SetValue(port.ToString());
+        if (password is not null)
+            _joinPassword.SetValue(password);
+        Show(Screen.Join);
+        _joinError = error;
+    }
+
     /// <summary>Called when the Join screen opens: asks for a fresh list, and opens the sample prompt if asked.</summary>
     private void EnterJoin()
     {
@@ -172,6 +186,9 @@ internal sealed partial class ScreenHost
         var listWidth = ImGui.GetContentRegionAvail().X - formWidth - gap;
 
         var join = false;
+        // Joining needs a sign-in: the buttons wait for it, and a press that gets through anyway (Enter, a row)
+        // is refused by the app with the reason.
+        var signedIn = _app.Accounts.View.State == AccountState.SignedIn;
         if (browsing)
         {
             ImGui.BeginChild("##browser"u8, new float2(listWidth, columnHeight), ImGuiChildFlags.NavFlattened, ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
@@ -181,14 +198,14 @@ internal sealed partial class ScreenHost
         }
 
         ImGui.BeginChild("##direct"u8, new float2(browsing ? formWidth : 0, columnHeight), ImGuiChildFlags.NavFlattened, ImGuiWindowFlags.NoBackground);
-        DrawDirectConnect(browsing);
+        DrawDirectConnect(browsing, signedIn);
         ImGui.EndChild();
 
         Kit.Space(Theme.Space3);
         var selected = Selected(list);
         if (browsing)
         {
-            if (Kit.Button("Join"u8, ButtonKind.Primary, 160, selected is not null) && selected is not null)
+            if (Kit.Button("Join"u8, ButtonKind.Primary, 160, selected is not null && signedIn) && selected is not null)
                 join = true;
             ImGui.SameLine(0, Kit.Px(Theme.Space3));
             if (Kit.Button("Refresh"u8, ButtonKind.Secondary, 140, state != BrowserState.Loading) && _browserSample == BrowserSample.None)
@@ -335,9 +352,15 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>Joining by address: callsign, address, port and an optional password.</summary>
-    private void DrawDirectConnect(bool browsing)
+    private void DrawDirectConnect(bool browsing, bool signedIn)
     {
         var field = JoinFormWidth - 64;
+        if (!signedIn)
+        {
+            DrawSignInGate(false, Kit.Px(JoinFormWidth - 20));
+            Kit.Space(Theme.Space5);
+        }
+
         Kit.Caption(browsing ? "DIRECT CONNECT"u8 : "JOIN BY ADDRESS"u8);
         Kit.Space(Theme.Space2);
         if (!browsing)
@@ -358,7 +381,7 @@ internal sealed partial class ScreenHost
         // The error line is reserved so the button does not move when it appears.
         Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.Bad, _joinError.Length > 0 ? _joinError : " ", JoinFormWidth - 20);
         Kit.Space(Theme.Space2);
-        if (Kit.Button("Connect"u8, ButtonKind.Secondary, 160) || submit)
+        if (Kit.Button("Connect"u8, ButtonKind.Secondary, 160, signedIn) || submit)
             TryJoin();
         Kit.Space(Theme.Space3);
     }
@@ -403,6 +426,13 @@ internal sealed partial class ScreenHost
     /// <summary>Joins a listed game, asking for its password first when the list says it has one.</summary>
     private void JoinListed(ListedGame game)
     {
+        // Checked before the password prompt, so nobody types a password that cannot be used yet.
+        if (!NetworkPlay.Allowed(_app.Accounts, false, out var refused))
+        {
+            _joinError = refused;
+            return;
+        }
+
         if (game.Password)
         {
             OpenPasswordPrompt(game);

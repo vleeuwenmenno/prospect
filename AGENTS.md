@@ -157,6 +157,9 @@ The client opens a real window on the developer's desktop, and they are usually 
 - `--host unlisted|public` hosts the local game for others and opens UDP 27420 on the developer's machine; add
   `--host-port <n>` to stay clear of a server running there, and `--listing off` unless the capture is about
   the list. `--bench` is always a private game.
+- Joining (`--join`) and hosting unlisted or public (`--host`) need a real Discord sign-in, which a capture
+  cannot make: such a capture stops on Join Server or New Game with the sign-in shown. `--account-sample
+  signed-in` never counts as one. Private local games are unaffected.
 - `--sector x,y,z` starts the local game in that sector instead of the home sector; it works with `--capture`
   and `--bench`. With the default seed: `-40,0,-29` is the densest sector near home (4,096 asteroids, the per-sector cap), `8,0,-8`
   is very rich with five resources, `-14,0,-2` (1,377 asteroids) has an asteroid 5.7 km across 1.1 km from the arrival point.
