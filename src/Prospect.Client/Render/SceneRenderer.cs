@@ -124,7 +124,10 @@ internal struct FtlMark
     /// <summary>Drive kind, phase, progress through the phase, and a per-hull seed.</summary>
     public float4 Params;
 
-    /// <summary>The hull's nose in world space, for light that runs along the jump.</summary>
+    /// <summary>
+    /// The hull's nose in world space, for light that runs along the jump; w is an arrival's half size in hull radii,
+    /// which grows its pulse, or 0 for every other mark.
+    /// </summary>
     public float4 Axis;
 }
 

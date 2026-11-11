@@ -946,7 +946,8 @@ internal sealed class WorldView
         var stage = EffectStage(hull.Jump);
         var working = stage == 1f;
         var at = visual.Anchor.RelativeTo(camera) + forward * (flight.Radius * (working ? HullVisuals.HyperspaceLight : -1.5f));
-        AddMark(marks, ref markCount, at, flight.Radius * (working ? 4f : 2.5f), kind, stage, JumpProgress(hull, flight), (hull.Id & 0xFF) / 255f, forward);
+        var reach = working ? 0f : ArrivalReach(flight);
+        AddMark(marks, ref markCount, at, flight.Radius * (working ? 4f : reach), kind, stage, JumpProgress(hull, flight), (hull.Id & 0xFF) / 255f, forward, reach);
     }
 
     /// <summary>
@@ -1006,7 +1007,8 @@ internal sealed class WorldView
         var stage = EffectStage(Own.Jump);
         var working = stage == 1f;
         var at = position + _jumpAxis * (flight.Radius * (working ? 3f : 1.5f));
-        AddMark(marks, ref markCount, at, flight.Radius * (working ? 4f : 2.5f), FtlKind.Hyperspace, stage, JumpProgress(Own, flight), (Own.Id & 0xFF) / 255f, _jumpAxis);
+        var reach = working ? 0f : ArrivalReach(flight);
+        AddMark(marks, ref markCount, at, flight.Radius * (working ? 4f : reach), FtlKind.Hyperspace, stage, JumpProgress(Own, flight), (Own.Id & 0xFF) / 255f, _jumpAxis, reach);
     }
 
     /// <summary>
@@ -1251,7 +1253,29 @@ internal sealed class WorldView
 
     private static float Smooth(float x) => HullVisuals.Smooth(x);
 
-    private static void AddMark(Span<FtlMark> marks, ref int count, Vector3 at, float size, FtlKind kind, float stage, float progress, float seed, Vector3 axis)
+    /// <summary>Half the size of a hyperspace mark in hull radii where its point and streak are drawn.</summary>
+    internal const float MarkReach = 2.5f;
+
+    /// <summary>The bound an arrival's pulse approaches, in hull radii, however heavy the hull.</summary>
+    internal const float ArrivalReachLimit = 6f;
+
+    /// <summary>The mass in tonnes whose arrival pulse reaches halfway from <see cref="MarkReach"/> to the limit.</summary>
+    internal const float ArrivalPulseMass = 100f;
+
+    /// <summary>
+    /// How far a hull's hyperspace arrival reaches, in its own radii: the half size of the mark at the arriving end,
+    /// the same for the pilot's own jump and any other hull's. Bigger hulls reach further with their radius, heavier
+    /// ones with their mass, which saturates so no arrival fills more than a bounded part of the sky. The shader
+    /// takes the pulse's brightness from the same number.
+    /// </summary>
+    internal static float ArrivalReach(in FlightParams flight)
+    {
+        var mass = Math.Max(flight.Mass, 0f);
+        return MarkReach + (ArrivalReachLimit - MarkReach) * (mass / (mass + ArrivalPulseMass));
+    }
+
+    /// <summary>Adds a mark; <paramref name="reach"/> is an arrival's half size in hull radii, otherwise 0.</summary>
+    private static void AddMark(Span<FtlMark> marks, ref int count, Vector3 at, float size, FtlKind kind, float stage, float progress, float seed, Vector3 axis, float reach = 0f)
     {
         if (count < marks.Length)
         {
@@ -1259,7 +1283,7 @@ internal sealed class WorldView
             {
                 PositionSize = new float4(at.X, at.Y, at.Z, size),
                 Params = new float4((float)kind, stage, progress, seed),
-                Axis = new float4(axis.X, axis.Y, axis.Z, 0),
+                Axis = new float4(axis.X, axis.Y, axis.Z, reach),
             };
         }
     }

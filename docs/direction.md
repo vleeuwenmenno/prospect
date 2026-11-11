@@ -34,7 +34,8 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
   Durations beyond 2^40 seconds are rejected to keep elapsed time precise; this is a numerical bound, not drive range.
 - **Jump looks.** Physical, not an overlay: effects sit in the world around the hull, laid out around its nose,
   never the view. No cuts, no full-screen flash; each stage eases into the next. Only hyperspace fills the view
-  (Star Wars lines and tunnel). Wormhole: a sphere with gravitational lensing, subtle colour. Rift: an orange,
+  (Star Wars lines and tunnel), lit from ahead and dark behind the vessel, by the jump's axis, not the view; it
+  arrives with a pulse that reaches further and brighter for bigger, heavier hulls, within a bound. Wormhole: a sphere with gravitational lensing, subtle colour. Rift: an orange,
   crisp, ragged window with lensing. With both, the hull visibly flies in through one opening and out of another.
 - **The pilot starts their own jump.** The map only plots it: a NAV marker in the pilot view, aim at it, boost to
   start. The hull then brakes and holds its nose on it while the drive calculates and charges; thrust cancels.

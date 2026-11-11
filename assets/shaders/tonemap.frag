@@ -417,7 +417,8 @@ float ownPassage(int kind, vec3 v, vec2 pos, float pixelAngle, float depth, bool
 // The hyperspace tunnel around the pilot: lines of light racing back from the point ahead of the nose on a deep
 // blue, the only effect allowed to fill the view. Laid out around the jump axis, so it is the same wherever the
 // pilot looks: lines stream past to the side and converge behind. Travel moves the lines; it speeds up and slows
-// down with the jump.
+// down with the jump. It is lit from ahead: bright toward the destination, dimming past the sides to a dark wake
+// behind the vessel where the lines run off, faint but still there.
 vec3 hyperspaceTunnel(vec3 v, float travel, float pixelAngle)
 {
     vec4 tube = ftlTube(v, frame.ftlAxis.xyz, frame.ftlUp.xyz);
@@ -439,7 +440,12 @@ vec3 hyperspaceTunnel(vec3 v, float travel, float pixelAngle)
     // Near the points ahead and behind the lanes crowd into noise; let them come out of a calm, dark centre instead.
     float theta = tube.z;
     streaks *= smoothstep(0.1, 0.5, theta) * (1.0 - smoothstep(FtlTau * 0.5 - 0.5, FtlTau * 0.5 - 0.1, theta));
-    return vec3(0.002, 0.006, 0.02) + vec3(0.4, 0.6, 1.0) * 0.0075 / (theta + 0.05) + vec3(0.65, 0.82, 1.0) * streaks * 1.8;
+
+    // How far ahead this ray looks along the jump, as one smooth curve over the whole sphere: full ahead, most of it
+    // to the side, a fraction straight back. It hangs on the jump's axis in the world, not on the view.
+    float lit = smoothstep(-0.85, 0.35, cos(theta));
+    vec3 deep = vec3(0.002, 0.006, 0.02) * mix(0.4, 1.0, lit);
+    return deep + vec3(0.4, 0.6, 1.0) * 0.0075 / (theta + 0.05) + vec3(0.65, 0.82, 1.0) * streaks * 1.8 * mix(0.25, 1.0, lit);
 }
 
 // A sampled surface must be behind every opening that displaced its lookup, so the farthest valid depth is the
