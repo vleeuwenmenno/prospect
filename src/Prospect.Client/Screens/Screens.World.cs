@@ -119,8 +119,8 @@ internal sealed partial class ScreenHost
 
         // Everything shown over the world goes on ImGui's background layer, which is drawn beneath every window.
         // Menus, the world settings, the map and the fleet list are windows, so they always cover it, and a menu's
-        // dim, drawn on the same layer afterwards, dims it too. The passive chat feed is drawn first to measure its
-        // bounds; world markers avoid those bounds, then the remaining panels and sheets cover the world layer.
+        // dim, drawn on the same layer afterwards, dims it too. Measure the passive chat feed before placing
+        // target and NAV markers, then draw the panels and chat over the remaining world markers.
         var draw = ImGui.GetBackgroundDrawList();
         if (!_mapOpen)
         {
@@ -138,8 +138,8 @@ internal sealed partial class ScreenHost
             var sectorBottom = Kit.Px(Theme.Space5) + SectorPanelHeight(world, compactSector);
             _columnBottom = HudLayout.PartyRows(sectorBottom, limit, cards, snapshot.Social.Invitation.Player != 0,
                 snapshot.Social.PartyCount >= 2 ? OtherMembers(snapshot) : 0, Kit.Scale).Bottom;
-            // Draw the passive feed first so markers can avoid its actual wrapped lines in this same frame.
-            _chatFeedBounds = _chatOpen ? default : DrawChatFeed(draw, snapshot, _columnBottom);
+            // The same layout pass measures and paints the wrapped lines so their reserved bounds cannot drift.
+            _chatFeedBounds = _chatOpen ? default : DrawChatFeed(draw, snapshot, _columnBottom, paint: false);
             if (pilot > 0.01f)
                 DrawFlightReadouts(draw, snapshot, world, pilot);
             if (world.CommandBlend > 0.01f)
@@ -148,6 +148,8 @@ internal sealed partial class ScreenHost
                 DrawTargetReadout(draw, snapshot, world, pilot);
             DrawSectorPanel(draw, snapshot, world, compactSector);
             DrawPartyHud(draw, snapshot, world, sectorBottom, limit, cards);
+            if (!_chatOpen)
+                DrawChatFeed(draw, snapshot, _columnBottom, paint: true);
             if (_shipInfoOpen)
                 DrawSheet(draw, snapshot, world);
             if (world.CommandBlend > 0.5f)

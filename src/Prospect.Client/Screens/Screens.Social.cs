@@ -384,9 +384,9 @@ internal sealed partial class ScreenHost
 
     /// <summary>
     /// The last few chat lines at the bottom left while chat is closed, fading out after a few seconds. Drawn on
-    /// the background layer: nothing here takes the pointer. Returns the bounds to reserve for this frame's markers.
+    /// the background layer: nothing here takes the pointer. The measurement pass reserves the same bounds without painting.
     /// </summary>
-    private HudRect DrawChatFeed(ImDrawListPtr draw, SessionSnapshot snapshot, float top)
+    private HudRect DrawChatFeed(ImDrawListPtr draw, SessionSnapshot snapshot, float top, bool paint)
     {
         var social = snapshot.Social;
         if (social.ChatCount == 0)
@@ -423,12 +423,15 @@ internal sealed partial class ScreenHost
             if (y < top + Kit.Px(Theme.Space3))
                 break;
 
-            var alpha = Math.Clamp((ChatFeedSeconds - age) / 2f, 0f, 1f);
-            var min = new float2(x, y);
-            draw.AddRectFilled(min, min + new float2(width, height + Kit.Px(4)), Kit.Color(Theme.Void, 0.55f * alpha));
-            var at = min + new float2(Kit.Px(6), Kit.Px(2));
-            draw.AddText(_ui.Sans, fontSize, at, Kit.Color(Theme.Text, alpha), bytes, width - Kit.Px(Theme.Space3));
-            draw.AddText(_ui.Sans, fontSize, at, Kit.Color(LineColor(snapshot, line), alpha), _chatLine.AsSpan(0, head), width - Kit.Px(Theme.Space3));
+            if (paint)
+            {
+                var alpha = Math.Clamp((ChatFeedSeconds - age) / 2f, 0f, 1f);
+                var min = new float2(x, y);
+                draw.AddRectFilled(min, min + new float2(width, height + Kit.Px(4)), Kit.Color(Theme.Void, 0.55f * alpha));
+                var at = min + new float2(Kit.Px(6), Kit.Px(2));
+                draw.AddText(_ui.Sans, fontSize, at, Kit.Color(Theme.Text, alpha), bytes, width - Kit.Px(Theme.Space3));
+                draw.AddText(_ui.Sans, fontSize, at, Kit.Color(LineColor(snapshot, line), alpha), _chatLine.AsSpan(0, head), width - Kit.Px(Theme.Space3));
+            }
             feedTop = y;
             shown++;
         }
