@@ -9,7 +9,8 @@ namespace Prospect.Game.World;
 /// the pilot's own hull exactly what its mesh pass does; change both together. Points and centres are relative to
 /// the camera. The default is no opening, which hides nothing.
 /// </summary>
-public readonly struct FtlAperture(Vector4 ftl, Vector4 axis, Vector4 up, Vector4 entry, Vector4 exit, Vector4 shape, Vector3 forward)
+public readonly struct FtlAperture(Vector4 ftl, Vector4 axis, Vector4 up, Vector4 entry, Vector4 exit, Vector4 shape,
+    Vector3 forward, Vector3 right, Vector3 cameraUp, Vector4 lens)
 {
     private const float Far = 1e30f;
     private const float Tau = 6.2831853f;
@@ -25,12 +26,46 @@ public readonly struct FtlAperture(Vector4 ftl, Vector4 axis, Vector4 up, Vector
     /// <summary>How far the camera is on the far side of the opening, 0 to 1, eased.</summary>
     public float Past => up.W;
 
+    /// <summary>The view's lens as the frame has it: tan of half the vertical field, aspect, viewport width, height.</summary>
+    public Vector4 Lens => lens;
+
+    /// <summary>The angle one pixel of the viewport spans, as the mesh pass takes it.</summary>
+    public float PixelAngle => 2f / Math.Max(lens.W, 1f) * lens.X;
+
+    /// <summary>
+    /// The value the mesh pass compares a point's <see cref="HullShows"/> with at a pixel of the viewport, given as
+    /// <c>gl_FragCoord</c> (the pixel's corner plus a half); the pixel is drawn where the point shows more.
+    /// </summary>
+    public static float Pattern(Vector2 fragCoord) =>
+        Fract(52.9829189f * Fract(fragCoord.X * 0.06711056f + fragCoord.Y * 0.00583715f));
+
+    /// <summary>Where a view ray from the camera lands in the viewport, in pixels from its top left corner.</summary>
+    public Vector2 PixelOf(Vector3 ray)
+    {
+        var depth = MathF.Max(Vector3.Dot(ray, forward), 1e-6f);
+        var x = Vector3.Dot(ray, right) / (depth * lens.X * lens.Y);
+        var y = -Vector3.Dot(ray, cameraUp) / (depth * lens.X);
+        return new Vector2((x * 0.5f + 0.5f) * lens.Z, (y * 0.5f + 0.5f) * lens.W);
+    }
+
+    /// <summary>The unit view ray through a point of the viewport, in pixels from its top left corner.</summary>
+    public Vector3 RayThrough(Vector2 pixel)
+    {
+        var x = pixel.X / lens.Z * 2f - 1f;
+        var y = pixel.Y / lens.W * 2f - 1f;
+        return Vector3.Normalize(forward + right * (x * lens.X * lens.Y) - cameraUp * (y * lens.X));
+    }
+
+    /// <summary>Whether the mesh pass draws a point of the pilot's own hull at the viewport pixel holding it.</summary>
+    public bool Drawn(Vector3 p, Vector2 pixel) =>
+        !Active || HullShows(p, PixelAngle) > Pattern(new Vector2(MathF.Floor(pixel.X) + 0.5f, MathF.Floor(pixel.Y) + 0.5f));
+
     /// <summary>The jump's axis, the hull's nose.</summary>
     public Vector3 Axis => new(axis.X, axis.Y, axis.Z);
 
     /// <summary>
     /// How much of a point of the pilot's own hull shows, from 0 to 1; see <c>ftlOwnHullShows</c>. The mesh pass
-    /// keeps that share of its pixels; picking counts a point as shown above one half.
+    /// keeps a pixel where this is above that pixel's <see cref="Pattern"/>.
     /// </summary>
     public float HullShows(Vector3 p, float pixelAngle)
     {
@@ -42,19 +77,28 @@ public readonly struct FtlAperture(Vector4 ftl, Vector4 axis, Vector4 up, Vector
         var past = up.W;
         var distance = p.Length();
         var v = distance > 1e-6f ? p / distance : forward;
-        var real = Real(Ray(v, pixelAngle), RayDepth(v, distance));
+        var window = Window(Ray(v, pixelAngle), RayDepth(v, distance));
+        var worldView = entry ? 1f - past : past;
         var throatSide = Vector3.Dot(p - c, Axis) * (entry ? 1f : -1f);
-        var inThroat = entry ? past : 1f - past;
-        return throatSide > 0f ? (1f - real) * inThroat : real;
+        return throatSide > 0f ? (1f - window) * (1f - worldView) : 1f - window * worldView;
     }
 
-    private readonly record struct OwnRay(float Far, float At);
-
-    private float Real(OwnRay ray, float depth)
+    /// <summary>
+    /// How much of the opening's window lies between the camera and a point, from 0 to 1: the share of the pixel
+    /// whose ray meets the opening, inside its outline, before the point. <c>ftlOwnWindow</c>.
+    /// </summary>
+    public float WindowBefore(Vector3 p, float pixelAngle)
     {
-        var far = depth < ray.At ? up.W : ray.Far;
-        return Entry ? 1f - far : far;
+        if (!Active)
+            return 0f;
+        var distance = p.Length();
+        var v = distance > 1e-6f ? p / distance : forward;
+        return Window(Ray(v, pixelAngle), RayDepth(v, distance));
     }
+
+    private readonly record struct OwnRay(float At, float Edge);
+
+    private static float Window(OwnRay ray, float depth) => depth < ray.At ? 0f : Math.Clamp(ray.Edge + 0.5f, 0f, 1f);
 
     private float RayDepth(Vector3 v, float t) => t * Vector3.Dot(v, forward);
 
@@ -76,11 +120,10 @@ public readonly struct FtlAperture(Vector4 ftl, Vector4 axis, Vector4 up, Vector
         var seed = ftl.W + (entry ? 0f : 0.37f);
         var c = new Vector3(mouth.X, mouth.Y, mouth.Z);
         var r = mouth.W;
-        var past = up.W;
 
+        // ftlOwnRay, for what the hull needs of it: where the ray meets the opening and how far inside its outline.
         var edge = -1e4f;
         var at = Far;
-        float far;
         if (kind == 3)
         {
             var facing = Vector3.Dot(v, axisVector);
@@ -97,45 +140,24 @@ public readonly struct FtlAperture(Vector4 ftl, Vector4 axis, Vector4 up, Vector
                 var perPixel = t * pixelAngle / MathF.Max(MathF.Abs(facing), 0.08f);
                 edge = (RiftOutline(MathF.Atan2(across.Y, across.X), seed) - re) * (dir * extent).Length() / perPixel;
             }
-            var through = Math.Clamp(edge + 0.5f, 0f, 1f);
-            far = Mix(through, 1f - through, past);
         }
         else
         {
             var d = c.Length();
-            if (r <= 0f)
-            {
-                far = past;
-            }
-            else if (d > r)
+            if (r > 0f && d > r)
             {
                 var t = SphereRay(v, c, r);
                 at = t > 0f ? RayDepth(v, t) : Far;
                 var rim = MathF.Asin(r / d);
                 edge = (rim - MathF.Acos(Math.Clamp(Vector3.Dot(v, c / d), -1f, 1f))) / pixelAngle;
-                var hit = Math.Clamp(edge + 0.5f, 0f, 1f);
-                far = Mix(hit, 1f - hit, past);
             }
-            else
-            {
-                var toward = d > 1e-4f ? c / d : axisVector;
-                var w = SmoothStep(0.5f * r, r, d);
-                var n = axisVector * (1f - w) + toward * ((1f - 2f * past) * w);
-                n = n.LengthSquared() > 1e-6f ? Vector3.Normalize(n) : axisVector;
-                edge = MathF.Asin(Math.Clamp(Vector3.Dot(v, n), -1f, 1f)) / pixelAngle;
-                far = Math.Clamp(edge + 0.5f, 0f, 1f);
-            }
+            // Inside the sphere the ray meets no surface in front of it (Far), so no window is in front of anything.
         }
-        return new OwnRay(far, at);
+        return new OwnRay(at, edge);
     }
 
-    private static float Mix(float a, float b, float t) => a + (b - a) * t;
-
-    private static float SmoothStep(float low, float high, float x)
-    {
-        var t = Math.Clamp((x - low) / (high - low), 0f, 1f);
-        return t * t * (3f - 2f * t);
-    }
+    // GLSL's mix, rounded the same way.
+    private static float Mix(float a, float b, float t) => a * (1f - t) + b * t;
 
     private static float Fract(float x) => x - MathF.Floor(x);
 

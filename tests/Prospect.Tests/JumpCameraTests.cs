@@ -56,12 +56,14 @@ public sealed class JumpCameraTests : IDisposable
     }
 
     /// <summary>One simulation tick on both ends and one client frame, the right arrow held or not.</summary>
-    private SessionSnapshot Frame(bool turnRight, bool boost = false)
+    private SessionSnapshot Frame(bool turnRight, bool boost = false, float scroll = 0f)
     {
         ((ITickHandler)_server).Tick(_tick);
         ((ITickHandler)_client).Tick(_tick++);
         var snapshot = _client.AcquireSnapshot();
         _devices.BeginFrame();
+        if (scroll != 0f)
+            _devices.OnScroll(scroll);
         _devices.OnKey(GlfwKey.Right, turnRight ? GlfwKeyAction.Press : GlfwKeyAction.Release);
         // Boost through whatever the bindings file binds it to, as a pilot would press it.
         var boostKey = (GlfwKey)_actions.Bindings(InputAction.Boost)[0].Code;
@@ -328,6 +330,13 @@ public sealed class JumpCameraTests : IDisposable
         }
     }
 
+    /// <summary>Whether the segment from the camera to a point meets a sphere.</summary>
+    private static bool Meets(Vector3 point, Vector3 centre, float radius)
+    {
+        var t = Math.Clamp(Vector3.Dot(centre, point) / point.LengthSquared(), 0f, 1f);
+        return (point * t - centre).Length() <= radius;
+    }
+
     /// <summary>Where each block of the pilot's own hull is drawn, relative to the camera.</summary>
     private IEnumerable<Vector3> OwnBlocks(SessionSnapshot snapshot)
     {
@@ -358,6 +367,7 @@ public sealed class JumpCameraTests : IDisposable
         var started = false;
         var straddled = 0;
         var cutFromWorld = 0;
+        var noseFirst = 0;
         var seenInThroat = 0;
         for (var frame = 0; frame < TickLoop.SimulationHz * 120; frame++)
         {
@@ -385,6 +395,7 @@ public sealed class JumpCameraTests : IDisposable
             var through = 0;
             var throatShown = 0;
             var outsideShown = 0;
+            float noseAlong = float.MinValue, sternAlong = float.MaxValue, noseShows = 0f, sternShows = 0f;
             foreach (var at in OwnBlocks(snapshot))
             {
                 var shows = aperture.HullShows(at, _world.PixelAngle);
@@ -398,12 +409,28 @@ public sealed class JumpCameraTests : IDisposable
                 }
                 else
                 {
+                    // Not yet in (or already out): hidden only as far as the opening's window is in front of it, as a
+                    // rock behind it would be; never cut. Nothing of an opening reaches further than 2.2 radii.
+                    var window = aperture.WindowBefore(at, _world.PixelAngle);
+                    Assert.Equal(1f - window * (1f - inThroat), shows, 5);
+                    if (!Meets(at, cut, radius * 2.2f))
+                        Assert.Equal(1f, shows);
                     outsideShown += shows > 0.5f ? 1 : 0;
                 }
+
+                // Nose first: the block furthest along is the first to go, the one furthest back the last.
+                var along = Vector3.Dot(at, throat);
+                if (along > noseAlong)
+                    (noseAlong, noseShows) = (along, shows);
+                if (along < sternAlong)
+                    (sternAlong, sternShows) = (along, shows);
             }
 
-            // From the world, partway through: nothing through the opening shows (asserted above), and what does
-            // show is the part still out of it, where the opening does not cover it.
+            if (inThroat < 0.01f && noseShows < 0.5f && sternShows > 0.5f)
+                noseFirst++;
+
+            // Partway through with the view on the world's side: nothing through the opening shows (asserted
+            // above), and the part still out of it does.
             if (inThroat < 0.01f && through > 0)
             {
                 straddled++;
@@ -415,10 +442,13 @@ public sealed class JumpCameraTests : IDisposable
 
         Assert.True(started);
         Assert.True(straddled > 0, $"{drawnAs} at {lookDegrees}: never part way through with the camera on the world's side");
-        // A rift seen from behind or beside shows the stern while the nose is gone. A wormhole's sphere covers the
-        // stern too once it is inside it, and from ahead a rift's window covers the whole hull behind it.
+        // Seen from behind or beside, the hull goes in nose first. From ahead, once the camera is beyond the opening
+        // with the view still on the world's side, the window is between it and the whole hull and shows the throat,
+        // as it would over a rock there; a wormhole's sphere is larger than the hull and covers it from its surface on.
+        if (lookDegrees < 135f)
+            Assert.True(noseFirst > 0, $"{drawnAs} at {lookDegrees}: never seen nose gone, stern still there");
         if (drawnAs == FtlKind.Rift && lookDegrees < 135f)
-            Assert.True(cutFromWorld > 0, $"{drawnAs} at {lookDegrees}: never seen cut, stern out and nose gone");
+            Assert.True(cutFromWorld > 0, $"{drawnAs} at {lookDegrees}: never seen cut at the opening");
         Assert.True(seenInThroat > 0, $"{drawnAs} at {lookDegrees}: never seen from inside the throat");
     }
 
@@ -446,30 +476,53 @@ public sealed class JumpCameraTests : IDisposable
                 break;
         }
 
-        _world.SetMode(ViewMode.Command);
-        snapshot = Frame(false);
-        Assert.True(_world.OwnAperture.Active, "the hull is no longer drawn from inside");
-
-        var aperture = _world.OwnAperture;
-        var nose = Vector3.Zero;
-        var stern = Vector3.Zero;
-        var noseShows = 1f;
-        var sternShows = 0f;
-        foreach (var at in OwnBlocks(snapshot))
+        // Where the nose and the stern are on the screen in the frame on display, by what that frame drew of them.
+        (float2 Nose, float2 Stern) Shown(SessionSnapshot shown)
         {
-            var shows = aperture.HullShows(at, _world.PixelAngle);
-            var along = Vector3.Dot(at, _world.OwnOpening.Axis);
-            if (nose == Vector3.Zero || along > Vector3.Dot(nose, _world.OwnOpening.Axis))
-                (nose, noseShows) = (at, shows);
-            if (stern == Vector3.Zero || along < Vector3.Dot(stern, _world.OwnOpening.Axis))
-                (stern, sternShows) = (at, shows);
+            var aperture = _world.OwnAperture;
+            Assert.True(aperture.Active, "the hull is no longer drawn from inside");
+            var axis = _world.OwnOpening.Axis;
+            Vector3 nose = default, stern = default;
+            float noseShows = 1f, sternShows = 0f, noseAlong = float.MinValue, sternAlong = float.MaxValue;
+            foreach (var at in OwnBlocks(shown))
+            {
+                var along = Vector3.Dot(at, axis);
+                if (along > noseAlong)
+                    (nose, noseAlong, noseShows) = (at, along, aperture.HullShows(at, _world.PixelAngle));
+                if (along < sternAlong)
+                    (stern, sternAlong, sternShows) = (at, along, aperture.HullShows(at, _world.PixelAngle));
+            }
+
+            Assert.True(noseShows < 0.5f && sternShows > 0.5f, $"nose shows {noseShows}, stern {sternShows}");
+            Assert.True(_world.Project(_world.CameraPosition + nose, out var noseAt));
+            Assert.True(_world.Project(_world.CameraPosition + stern, out var sternAt));
+            return (noseAt, sternAt);
         }
 
-        Assert.True(noseShows < 0.5f && sternShows > 0.5f, $"nose shows {noseShows}, stern {sternShows}");
-        Assert.True(_world.Project(_world.CameraPosition + nose, out var noseAt));
-        Assert.True(_world.Project(_world.CameraPosition + stern, out var sternAt));
-        Assert.NotEqual(_world.Own.Id, _world.HullAt(noseAt));
-        Assert.Equal(_world.Own.Id, _world.HullAt(sternAt));
+        // One client frame as the window delivers it: the command key and the pointer, then the view's update, which
+        // picks what is under the pointer before it moves anything, against the frame on display.
+        void Poll(bool command, float2 pointer)
+        {
+            ((ITickHandler)_server).Tick(_tick);
+            ((ITickHandler)_client).Tick(_tick++);
+            _devices.BeginFrame();
+            _devices.OnKey((GlfwKey)_actions.Bindings(InputAction.ToggleCommand)[0].Code, command ? GlfwKeyAction.Press : GlfwKeyAction.Release);
+            _devices.OnCursorPos(new double2(pointer.X, pointer.Y));
+            _world.Update(_client.AcquireSnapshot(), _client.Input, Dt, true, Screen, Screen, false);
+        }
+
+        // The command key and the pointer on the nose in the same poll: the view switches, the hull is still drawn
+        // from inside, and the nose, gone through the opening, is not under the pointer.
+        var (noseAt, _) = Shown(snapshot!);
+        Poll(true, noseAt);
+        Assert.Equal(ViewMode.Command, _world.Mode);
+        Assert.NotEqual(_world.Own.Id, _world.HoveredHull);
+
+        // The next poll, on the stern as that frame drew it: it is there, and picked.
+        var (_, sternAt) = Shown(_client.AcquireSnapshot());
+        Poll(false, sternAt);
+        Assert.True(_world.OwnAperture.Active);
+        Assert.Equal(_world.Own.Id, _world.HoveredHull);
     }
 
     [Theory]
@@ -609,5 +662,121 @@ public sealed class JumpCameraTests : IDisposable
         {
             own = saved;
         }
+    }
+
+    /// <summary>How far along its passage the pilot's own hull is drawn from where the simulation has it.</summary>
+    private static float Offset(WorldView view) => Vector3.Dot(view.OwnDrawnPosition.RelativeTo(view.OwnPosition), view.OwnOpening.Axis);
+
+    [Theory]
+    [InlineData(FtlKind.Rift)]
+    [InlineData(FtlKind.Wormhole)]
+    public void ANewDestinationWhileTheHullIsGoingInStartsAFreshPassage(FtlKind drawnAs)
+    {
+        // Late in the charge, partway into the opening, the pilot zooms out and then orders a jump somewhere else.
+        // The server restarts the drive within a tick, so the view never sees the hull without a jump. The hull eases
+        // back out rather than jumping back in one frame, and the new passage is laid out for the camera as it is
+        // now: once the old one has eased away it is the same as a view that only ever saw the new one.
+        _world.FtlPreview = drawnAs;
+        var galaxy = _client.AcquireSnapshot().Galaxy!;
+        _client.Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = galaxy.CenterOf(new SectorCoord(12, 0, -7)) });
+        SessionSnapshot snapshot;
+        do
+            snapshot = Frame(false);
+        while (snapshot.Hulls[snapshot.OwnHull].Jump != JumpPhase.Charge || WorldView.JumpProgress(snapshot.Hulls[snapshot.OwnHull], _world.OwnFlight) < 0.8f);
+        Assert.True(Offset(_world) > _world.OwnFlight.Radius * 2f, $"only {Offset(_world)} m in");
+
+        Frame(false, scroll: -3f);
+        _client.Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = galaxy.CenterOf(new SectorCoord(-9, 0, 11)) });
+        var devices = new InputDevices();
+        var fresh = new WorldView(devices, _actions, new ClientSettings(), _jobs, null!, snapshot.Content.Designs) { FtlPreview = drawnAs };
+        var previous = Offset(_world);
+        var restarted = false;
+        var compared = 0;
+        for (var frame = 0; frame < TickLoop.SimulationHz * 40; frame++)
+        {
+            snapshot = Frame(false);
+            ref readonly var own = ref snapshot.Hulls[snapshot.OwnHull];
+            Assert.NotEqual(JumpPhase.None, own.Jump);
+            if (own.Jump == JumpPhase.Tunnel)
+                break;
+            devices.BeginFrame();
+            if (frame == 0)
+                devices.OnScroll(-3f);
+            fresh.Update(snapshot, _client.Input, Dt, true, Screen, Screen, false);
+
+            // Never more than a step at the speed the hull moves into an opening.
+            var offset = Offset(_world);
+            Assert.True(MathF.Abs(offset - previous) < 1.5f, $"{own.Jump}: jumped from {previous} to {offset} m");
+            previous = offset;
+            restarted |= own.Jump == JumpPhase.Align || own.JumpCalculation < 1f;
+
+            if (restarted && frame > TickLoop.SimulationHz * 3 && own.Jump == JumpPhase.Charge)
+            {
+                Assert.True(MathF.Abs(offset - Offset(fresh)) < 0.05f, $"{offset} m in, a fresh view {Offset(fresh)}");
+                Assert.True(_world.OwnOpening.Centre.RelativeTo(fresh.OwnOpening.Centre).Length() < 0.05f);
+                compared += Offset(fresh) > 0.5f ? 1 : 0;
+            }
+        }
+
+        Assert.True(restarted, "the drive never started over");
+        Assert.True(compared > 10, $"compared {compared} frames of the new passage");
+    }
+
+    [Fact]
+    public void TakingControlOfAnotherHullInTransitDrawsItsOwnPassage()
+    {
+        // The pilot's hull and the fleet jump together; while both are in transit the pilot takes control of a fleet
+        // hull. Its passage is its own from that frame on: the same as a view that only ever saw it, its exit placed
+        // for it and not left where the first hull's was.
+        _world.FtlPreview = FtlKind.Rift;
+        var target = _client.AcquireSnapshot().Galaxy!.CenterOf(new SectorCoord(12, 0, -7));
+        _world.SelectAllOwned();
+        _world.OrderJump(_client.Input, target);
+        _client.Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = target });
+
+        // The fleet hull to switch to, while it is still in this client's view. (Driven tick by tick, the session
+        // stamps snapshots with its loop's own tick, which does not move here, so remote hulls drop out of the view
+        // after a few seconds; the hull the pilot takes over comes back as the player's own.)
+        var snapshot = _client.AcquireSnapshot();
+        uint other = 0;
+        for (var i = 0; i < snapshot.HullCount && other == 0; i++)
+        {
+            if (snapshot.Hulls[i].Owner == snapshot.PlayerId && !snapshot.Hulls[i].IsOwn)
+                other = snapshot.Hulls[i].Id;
+        }
+
+        do
+            snapshot = Frame(false);
+        while (snapshot.Hulls[snapshot.OwnHull].Jump != JumpPhase.Tunnel || snapshot.Hulls[snapshot.OwnHull].JumpTimer < 1f);
+
+        Assert.NotEqual(0u, other);
+        var before = _world.OwnOpening.Centre;
+        _client.Input.RequestControl(other);
+        do
+            snapshot = Frame(false);
+        while (_world.Own.Id != other);
+        // Both hulls were in transit: the one taken over is still in its own.
+        Assert.Equal(JumpPhase.Tunnel, _world.Own.Jump);
+
+        var fresh = new WorldView(new InputDevices(), _actions, new ClientSettings(), _jobs, null!, snapshot.Content.Designs) { FtlPreview = FtlKind.Rift };
+        fresh.Update(snapshot, _client.Input, Dt, false, Screen, Screen, false);
+        var compared = 0;
+        for (var frame = 0; frame < TickLoop.SimulationHz * 60; frame++)
+        {
+            Assert.True(_world.OwnOpening.Centre.RelativeTo(fresh.OwnOpening.Centre).Length() < 0.05f,
+                $"{_world.Own.Jump}: exit {_world.OwnOpening.Centre.RelativeTo(fresh.OwnOpening.Centre).Length()} m from a fresh view's");
+            Assert.True(MathF.Abs(_world.OwnOpening.Radius - fresh.OwnOpening.Radius) < 0.01f);
+            Assert.True(_world.OwnDrawnPosition.RelativeTo(fresh.OwnDrawnPosition).Length() < 0.05f);
+            Assert.True(MathF.Abs(_world.JumpThrough - fresh.JumpThrough) < 0.01f);
+            compared++;
+            snapshot = Frame(false);
+            if (snapshot.Hulls[snapshot.OwnHull].Jump == JumpPhase.None)
+                break;
+            fresh.Update(snapshot, _client.Input, Dt, false, Screen, Screen, false);
+        }
+
+        Assert.True(compared > TickLoop.SimulationHz, $"compared {compared} frames");
+        // The first hull's exit, kept where it was relative to the new hull, would have been somewhere else.
+        Assert.True(before.RelativeTo(fresh.OwnOpening.Centre).Length() > 1f, "the first hull's exit was where the new one's is");
     }
 }

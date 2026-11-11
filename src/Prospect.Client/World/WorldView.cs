@@ -197,6 +197,13 @@ internal sealed class WorldView
     private float _jumpExitOpen;
     private bool _jumpExitPlaced;
     private bool _jumpChaseLatched;
+
+    // The pilot's own jump as last seen, to tell a new attempt from the one before it, and what the previous attempt
+    // had drawn when a new one began, eased out over the new one rather than dropped.
+    private JumpPhase _jumpWas;
+    private Double3 _jumpTarget;
+    private float _jumpCalculated;
+    private float _carryOffset, _carryOpen, _carryStretch, _carryCover;
     private float _jumpChase;
     private float _jumpLight;
     private FtlKind _jumpKind;
@@ -746,15 +753,13 @@ internal sealed class WorldView
         {
             var constants = new FrameConstants();
             FillOwnJump(ref constants, CameraPosition);
+            var lens = new Vector4(_tanHalfFov, _viewport.X / Math.Max(_viewport.Y, 1f), _viewport.X, _viewport.Y);
             return new FtlAperture(Vector(constants.Ftl), Vector(constants.FtlAxis), Vector(constants.FtlUp), Vector(constants.FtlEntry),
-                Vector(constants.FtlExit), Vector(constants.FtlShape), _forward);
+                Vector(constants.FtlExit), Vector(constants.FtlShape), _forward, _right, _up, lens);
 
             static Vector4 Vector(float4 v) => new(v.X, v.Y, v.Z, v.W);
         }
     }
-
-    /// <summary>The hull the command view would pick under a window position, or 0; for tests of picking.</summary>
-    internal uint HullAt(float2 pointer) => _snapshot is { } snapshot && PickTargets(snapshot, pointer, false) > 0 ? _pickHits[0].Hull : 0;
 
     /// <summary>The angle one pixel of the view spans, as the passes that cut the pilot's own hull take it.</summary>
     internal float PixelAngle => 2f / Math.Max(_viewport.Y, 1f) * _tanHalfFov;
@@ -1060,9 +1065,47 @@ internal sealed class WorldView
     internal static Double3 HyperspaceMarkPosition(Double3 anchor, Vector3 axis, float radius, bool working) =>
         anchor + axis * (radius * (working ? HullVisuals.HyperspaceLight : -1.5f));
 
+    /// <summary>
+    /// Notices a new attempt at a jump while the drive works: one from rest or from a previous jump still easing out,
+    /// or an order that changed while the drive worked, which the server restarts within one tick, so the hull is
+    /// never seen with none. A new attempt lays its passage out for the camera as it is now, and what the previous
+    /// one had drawn eases out over it, as after a cancel, instead of vanishing in one frame.
+    /// </summary>
+    private void BeginAttempt(in HullView own, float stage, float dt)
+    {
+        var working = stage == 1f;
+        var fresh = working
+            && (_jumpWas is not (JumpPhase.Align or JumpPhase.Charge)
+                || (_jumpWas == JumpPhase.Charge && own.Jump == JumpPhase.Align)
+                || !own.Order.Target.Equals(_jumpTarget)
+                || own.JumpCalculation + 0.5f < _jumpCalculated);
+        if (fresh)
+        {
+            _jumpChaseLatched = false;
+            _carryOffset = _jumpOffset;
+            _carryOpen = _jumpEntryOpen;
+            _carryStretch = _jumpStretch;
+            _carryCover = _jumpCover;
+        }
+        else
+        {
+            var fade = MathF.Exp(-5f * dt);
+            _carryOffset *= fade;
+            _carryStretch *= fade;
+            _carryCover *= fade;
+            _carryOpen *= MathF.Exp(-2f * dt);
+        }
+
+        _jumpWas = own.Jump;
+        _jumpTarget = own.Order.Target;
+        _jumpCalculated = own.JumpCalculation;
+    }
+
     /// <summary>A session or controlled-hull change cannot inherit another hull's passage.</summary>
     private void ResetOwnJump()
     {
+        _jumpWas = JumpPhase.None;
+        _carryOffset = _carryOpen = _carryStretch = _carryCover = 0f;
         _jumpOffset = _jumpThrough = _jumpTravel = _jumpCover = _jumpStretch = _jumpLight = _jumpStage = _jumpChase = 0f;
         _jumpEntryRadius = _jumpExitRadius = _jumpEntryOpen = _jumpExitOpen = 0f;
         _jumpEntry = _jumpExit = default;
@@ -1095,6 +1138,8 @@ internal sealed class WorldView
             _jumpExitOpen *= close;
             _jumpExitPlaced = false;
             _jumpChaseLatched = false;
+            _jumpWas = JumpPhase.None;
+            _carryOffset = _carryOpen = _carryStretch = _carryCover = 0f;
             _jumpSunBlend = 1f;
             var remaining = Math.Max(Math.Abs(_jumpOffset), Math.Max(Math.Max(_jumpCover, _jumpStretch), Math.Max(_jumpEntryOpen, _jumpExitOpen)));
             if (remaining < 0.001f)
@@ -1113,6 +1158,7 @@ internal sealed class WorldView
         var progress = SmoothJumpProgress(own, flight);
         _jumpKind = kind;
         _jumpStage = stage;
+        BeginAttempt(own, stage, dt);
         // Seconds since the drive fired and until the transit ends, carried forward between ticks like the progress.
         var (since, left) = stage >= 2f ? HullVisuals.TransitClock(own, flight, _frameAlpha / TickLoop.SimulationHz) : (0f, 0f);
 
@@ -1200,8 +1246,8 @@ internal sealed class WorldView
         if (stage == 1f)
         {
             var build = Smooth((progress - 0.55f) / 0.45f);
-            _jumpStretch = MaxStretch * build * build;
-            _jumpCover = Smooth((progress - 0.7f) / 0.3f);
+            _jumpStretch = Math.Max(MaxStretch * build * build, _carryStretch);
+            _jumpCover = Math.Max(Smooth((progress - 0.7f) / 0.3f), _carryCover);
             var rush = Smooth((progress - 0.7f) / 0.3f);
             speed = TopSpeed * 0.45f * rush * rush;
         }
@@ -1249,13 +1295,13 @@ internal sealed class WorldView
             // the opening (and it has closed behind) by 97%, before the drive fires.
             var through = ahead + _jumpChase + full * 2.2f;
             var move = Math.Clamp((progress - 0.6f) / 0.4f, 0f, 1f);
-            _jumpOffset = through / MathF.Pow(0.925f, 2.2f) * MathF.Pow(move, 2.2f);
+            _jumpOffset = Math.Max(through / MathF.Pow(0.925f, 2.2f) * MathF.Pow(move, 2.2f), _carryOffset);
 
             var open = Smooth(progress / 0.8f) * 0.95f + 0.05f;
             var behind = (_jumpOffset - _jumpChase - ahead - full) / full;
             var close = Smooth(behind);
             _jumpEntry = OwnPosition + _jumpAxis * ahead;
-            _jumpEntryOpen = open * (1f - close);
+            _jumpEntryOpen = Math.Max(open * (1f - close), _carryOpen);
             _jumpEntryRadius = full * _jumpEntryOpen;
             var rush = Smooth((progress - 0.62f) / 0.33f);
             speed = 1.4f * rush * rush;

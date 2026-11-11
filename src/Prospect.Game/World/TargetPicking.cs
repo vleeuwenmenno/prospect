@@ -8,8 +8,8 @@ namespace Prospect.Game.World;
 /// away. Both are in world axes; a zero <paramref name="CutNormal"/> cuts nothing. <paramref name="Faces"/> holds, per
 /// block, the faces drawn in <see cref="HullDesign.ExteriorFaces"/> order; null draws all six, a block as its own cube.
 /// Only faces turned to the camera are drawn, and nothing caps a cut, so only those faces can be picked.
-/// <paramref name="Aperture"/>, for the pilot's own hull inside its own rift or wormhole, leaves out the points its
-/// mesh pass leaves out, counting a point as drawn where more than half of it shows.
+/// <paramref name="Aperture"/>, for the pilot's own hull inside its own rift or wormhole, leaves out the samples its
+/// mesh pass leaves out: a point counts at the viewport pixel the ray through it lands in, as that pixel is drawn.
 /// </summary>
 public readonly record struct PickHull(uint Id, Double3 Position, Quaternion Rotation, Vector3[] Blocks, float BlockSize, ulong Mask, float Radius,
     float Stretch = 1, Vector3 CutPoint = default, Vector3 CutNormal = default, byte[]? Faces = null, FtlAperture Aperture = default);
@@ -72,22 +72,36 @@ public static class TargetPicking
             var start = rayDepth > 0 ? nearPlane / rayDepth : float.PositiveInfinity;
             var nearest = float.PositiveInfinity;
             var padded = float.PositiveInfinity;
-            var shown = new Shown(hull.Aperture, hull.Rotation, 1f / pixelsPerTangent);
-            for (var b = 0; b < hull.Blocks.Length; b++)
+            var aperture = hull.Aperture;
+            if (aperture.Active)
             {
-                if ((hull.Mask & (1UL << b)) == 0) continue;
-                var block = hull.Blocks[b];
-                block.Z *= stretch;
-                nearest = Faces(block - origin, direction, half, hull.Faces?[b] ?? AllFaces, cut, cutAt, start, nearest, shown);
+                // The pilot's own hull inside its rift or wormhole is drawn sample by sample: a pixel shows it where
+                // the opening leaves enough of it, and the grab looks for such a pixel near the pointer.
+                var pointer = aperture.PixelOf(ray);
+                nearest = Drawn(hull, origin, inverse, half, stretch, direction, start, cut, cutAt, new Shown(aperture, hull.Rotation, pointer));
+                if (!float.IsFinite(nearest) && rayDepth > 0)
+                    padded = DrawnNear(hull, origin, inverse, half, stretch, cut, cutAt, aperture, pointer,
+                        GrabPixels * aperture.Lens.W / (2f * aperture.Lens.X) / pixelsPerTangent, forward, nearPlane);
             }
-            // The pointer is on no drawn face, so the grab is measured to their edges.
-            for (var b = 0; b < hull.Blocks.Length && !float.IsFinite(nearest) && rayDepth > 0; b++)
+            else
             {
-                if ((hull.Mask & (1UL << b)) == 0) continue;
-                var block = hull.Blocks[b];
-                block.Z *= stretch;
-                if (NearFaces(direction / rayDepth, view, pixelsPerTangent, block - origin, half, hull.Faces?[b] ?? AllFaces, cut, cutAt, nearPlane, shown))
-                    padded = Math.Min(padded, Math.Max(0, Vector3.Dot(block - origin, direction)));
+                var shown = default(Shown);
+                for (var b = 0; b < hull.Blocks.Length; b++)
+                {
+                    if ((hull.Mask & (1UL << b)) == 0) continue;
+                    var block = hull.Blocks[b];
+                    block.Z *= stretch;
+                    nearest = Faces(block - origin, direction, half, hull.Faces?[b] ?? AllFaces, cut, cutAt, start, nearest, shown);
+                }
+                // The pointer is on no drawn face, so the grab is measured to their edges.
+                for (var b = 0; b < hull.Blocks.Length && !float.IsFinite(nearest) && rayDepth > 0; b++)
+                {
+                    if ((hull.Mask & (1UL << b)) == 0) continue;
+                    var block = hull.Blocks[b];
+                    block.Z *= stretch;
+                    if (NearFaces(direction / rayDepth, view, pixelsPerTangent, block - origin, half, hull.Faces?[b] ?? AllFaces, cut, cutAt, nearPlane))
+                        padded = Math.Min(padded, Math.Max(0, Vector3.Dot(block - origin, direction)));
+                }
             }
             if (!float.IsFinite(nearest)) nearest = padded;
             if (float.IsFinite(nearest)) hits[count++] = new(hull.Id, null, nearest);
@@ -133,10 +147,72 @@ public static class TargetPicking
 
     private const int AllFaces = 0x3F;
 
-    /// <summary>Whether a point of a hull, from the camera in the hull's own axes, is shown by its aperture.</summary>
-    private readonly struct Shown(FtlAperture aperture, Quaternion rotation, float pixelAngle)
+    /// <summary>
+    /// Whether a point of a hull, from the camera in the hull's own axes, is drawn at a viewport pixel by its
+    /// aperture. The default has no aperture and draws everything.
+    /// </summary>
+    private readonly struct Shown(FtlAperture aperture, Quaternion rotation, Vector2 pixel)
     {
-        public bool At(Vector3 local) => !aperture.Active || aperture.HullShows(Vector3.Transform(local, rotation), pixelAngle) > 0.5f;
+        public bool At(Vector3 local) => aperture.Drawn(Vector3.Transform(local, rotation), pixel);
+    }
+
+    /// <summary>The nearest drawn sample of a hull along one ray, as <see cref="Faces"/> finds it over every block.</summary>
+    private static float Drawn(in PickHull hull, Vector3 origin, Quaternion inverse, Vector3 half, float stretch, Vector3 direction,
+        float start, Vector3 cut, float cutAt, in Shown shown)
+    {
+        var nearest = float.PositiveInfinity;
+        for (var b = 0; b < hull.Blocks.Length; b++)
+        {
+            if ((hull.Mask & (1UL << b)) == 0) continue;
+            var block = hull.Blocks[b];
+            block.Z *= stretch;
+            nearest = Faces(block - origin, direction, half, hull.Faces?[b] ?? AllFaces, cut, cutAt, start, nearest, shown);
+        }
+        return nearest;
+    }
+
+    /// <summary>The largest grab searched pixel by pixel, in viewport pixels: four times the grab at the most.</summary>
+    private const int RasterReach = 48;
+
+    // Pixel offsets within RasterReach, nearest first, so a search can stop at the first drawn one.
+    private static readonly Vector2[] RasterOffsets = BuildRasterOffsets();
+
+    private static Vector2[] BuildRasterOffsets()
+    {
+        var offsets = new List<Vector2>();
+        for (var y = -RasterReach; y <= RasterReach; y++)
+            for (var x = -RasterReach; x <= RasterReach; x++)
+                if (x * x + y * y <= RasterReach * RasterReach)
+                    offsets.Add(new Vector2(x, y));
+        offsets.Sort((a, b) => a.LengthSquared().CompareTo(b.LengthSquared()));
+        return [.. offsets];
+    }
+
+    /// <summary>
+    /// The grab around the pointer for a hull drawn sample by sample: the nearest viewport pixel within
+    /// <paramref name="reach"/> pixels of the pointer that draws any of the hull's original front faces, and the
+    /// distance along that pixel's ray to the sample. Edges the opening makes inside a face count like a face's own,
+    /// and nothing the opening hides is grabbed. Bounded by <see cref="RasterReach"/>.
+    /// </summary>
+    private static float DrawnNear(in PickHull hull, Vector3 origin, Quaternion inverse, Vector3 half, float stretch,
+        Vector3 cut, float cutAt, in FtlAperture aperture, Vector2 pointer, float reach, Vector3 forward, float nearPlane)
+    {
+        var corner = new Vector2(MathF.Floor(pointer.X), MathF.Floor(pointer.Y));
+        var squared = Math.Min(reach, RasterReach) * Math.Min(reach, RasterReach);
+        foreach (var offset in RasterOffsets)
+        {
+            if (offset.LengthSquared() > squared) break;
+            // The middle of each pixel near the pointer, as the mesh pass samples it.
+            var pixel = corner + offset + new Vector2(0.5f, 0.5f);
+            if ((pixel - pointer).LengthSquared() > squared) continue;
+            var ray = aperture.RayThrough(pixel);
+            var rayDepth = Vector3.Dot(ray, forward);
+            if (rayDepth <= 0) continue;
+            var t = Drawn(hull, origin, inverse, half, stretch, Vector3.Transform(ray, inverse), nearPlane / rayDepth, cut, cutAt,
+                new Shown(aperture, hull.Rotation, pixel));
+            if (float.IsFinite(t)) return t;
+        }
+        return float.PositiveInfinity;
     }
     private static readonly Vector3[] Axes = [Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ];
 
@@ -169,7 +245,7 @@ public static class TargetPicking
     /// corners need not be the box's.
     /// </summary>
     private static bool NearFaces(Vector3 pointer, Vector3 forward, float focal, Vector3 block, Vector3 half, int faces,
-        Vector3 cut, float cutAt, float nearPlane, in Shown shown)
+        Vector3 cut, float cutAt, float nearPlane)
     {
         var squared = GrabPixels * GrabPixels / (focal * focal);
         // A quad clipped by two planes keeps at most six corners.
@@ -200,25 +276,10 @@ public static class TargetPicking
                 var edge = b - a;
                 var length = edge.LengthSquared();
                 var t = length == 0 ? 0 : Math.Clamp(Vector3.Dot(pointer - a, edge) / length, 0, 1);
-                // The nearest point of the edge as drawn, in its plane: an aperture may hide it there.
-                var along = Math.Clamp(Along(a + edge * t, face[i], next), 0, 1);
-                if (Vector3.DistanceSquared(pointer, a + edge * t) <= squared && shown.At(Vector3.Lerp(face[i], next, along))) return true;
+                if (Vector3.DistanceSquared(pointer, a + edge * t) <= squared) return true;
             }
         }
         return false;
-    }
-
-    /// <summary>
-    /// Where along the edge from <paramref name="from"/> to <paramref name="to"/>, as a share of it, the ray from the
-    /// camera through <paramref name="on"/> meets it: perspective makes this differ from the share on the screen.
-    /// </summary>
-    private static float Along(Vector3 on, Vector3 from, Vector3 to)
-    {
-        // from + (to - from) s lies on the ray when its cross product with the ray is zero.
-        var edge = Vector3.Cross(to - from, on);
-        var start = Vector3.Cross(from, on);
-        var squared = edge.LengthSquared();
-        return squared < 1e-20f ? 0 : -Vector3.Dot(start, edge) / squared;
     }
 
     /// <summary>Clips a convex polygon to the side where <c>dot(p, normal) &gt;= at</c>; returns the corners kept.</summary>

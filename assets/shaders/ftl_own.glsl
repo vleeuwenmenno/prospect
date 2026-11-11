@@ -127,11 +127,22 @@ float ftlOwnReal(FtlOwnRay ray, float depth)
     return entry ? 1.0 - far : far;
 }
 
-// How much of a point of the pilot's own hull shows, p relative to the camera. The hull is in the throat past the
-// entry and before the exit. In the world it shows wherever the world does at that point, so from the throat it
-// shows only through the opening. In the throat it shows only as far as the camera is in the throat: from the
-// world nothing past the opening is seen, as for every other hull, so the hull goes in nose first and comes out
-// with its stern last. As the camera's side eases from one to the other, so does this.
+// How much of the opening's window lies between the camera and a surface at view depth `depth` along the ray:
+// none where the ray meets the opening beyond the surface, or misses it.
+float ftlOwnWindow(FtlOwnRay ray, float depth)
+{
+    return depth < ray.at ? 0.0 : clamp(ray.edge + 0.5, 0.0, 1.0);
+}
+
+// How much of a point of the pilot's own hull shows, p relative to the camera. Where the point is follows the hull,
+// not the view: it is in the throat past the entry and before the exit, and in the world otherwise.
+// - In the world, it is there to be seen, as anything in the world is, unless the opening's window is in front of
+//   it while the camera is on the world's side: the window then shows the throat, as it does over a rock behind it.
+//   So a stern not yet in stays in view from every side, beside and in front of the opening, however the view
+//   dissolves; seen through the window from the throat's side, it shows.
+// - In the throat, it shows only as far as the camera is in the throat, and not through the window, which shows the
+//   world from there. From the world nothing past the opening is seen, as for every other hull, so the hull goes in
+//   nose first and comes out with its stern last; as the camera's side eases into the throat, so does this.
 float ftlOwnHullShows(vec3 p, float pixelAngle)
 {
     bool entry = int(frame.ftl.y + 0.5) == 1;
@@ -139,9 +150,9 @@ float ftlOwnHullShows(vec3 p, float pixelAngle)
     float past = frame.ftlUp.w;
     float distance = length(p);
     vec3 v = distance > 1e-6 ? p / distance : frame.cameraForward.xyz;
-    float real = ftlOwnReal(ftlOwnRay(v, pixelAngle), rayDepth(v, distance));
+    float window = ftlOwnWindow(ftlOwnRay(v, pixelAngle), rayDepth(v, distance));
+    float worldView = entry ? 1.0 - past : past;
     float throatSide = dot(p - c, frame.ftlAxis.xyz) * (entry ? 1.0 : -1.0);
-    float inThroat = entry ? past : 1.0 - past;
-    return throatSide > 0.0 ? (1.0 - real) * inThroat : real;
+    return throatSide > 0.0 ? (1.0 - window) * (1.0 - worldView) : 1.0 - window * worldView;
 }
 #endif
