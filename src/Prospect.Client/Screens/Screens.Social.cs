@@ -55,7 +55,7 @@ internal sealed partial class ScreenHost
     private bool _chatOpen;
     private bool _chatFocus;
     private bool _socialHandled;
-    private readonly FloatingWindow[] _panes = [new(), new(), new(), new(), new(), new()];
+    private readonly SocialPanes _panes = new();
     private readonly HudRect[] _paneRects = new HudRect[PaneCount];
     private int _paneRectCount;
     private SocialPane _focusedPane;
@@ -88,7 +88,7 @@ internal sealed partial class ScreenHost
     /// <summary>The workspace is drawn: open in a game, or the Friends screen out of one.</summary>
     private bool Workspace => _socialOpen || _screen == Screen.Account;
 
-    private FloatingWindow Pane(SocialPane pane) => _panes[(int)pane];
+    private FloatingWindow Pane(SocialPane pane) => _panes[pane];
 
     private void InitializeSocial()
     {
@@ -187,32 +187,20 @@ internal sealed partial class ScreenHost
 
     private void ClosePane(SocialPane pane)
     {
-        switch (pane)
+        switch (_panes.Close(pane, _screen == Screen.Account))
         {
-            case SocialPane.Navigator:
-                if (_screen == Screen.Account)
-                    Show(Screen.MainMenu);
-                else
-                    CloseWorkspace();
-                return;
-            case SocialPane.Chat:
-                Pane(pane).Close();
-                _chatOpen = _chatFocus = false;
-                break;
-            case SocialPane.Detail:
-                Pane(pane).Close();
-                _detail.Clear();
-                break;
-            case SocialPane.Friends when _screen == Screen.Account:
-                // Friends is what the Friends screen is: closing it goes back to the menu.
-                Pane(pane).Close();
+            case PaneClose.LeaveFriendsScreen:
                 Show(Screen.MainMenu);
                 return;
-            default:
-                Pane(pane).Close();
-                break;
+            case PaneClose.CloseWorkspace:
+                CloseWorkspace();
+                return;
         }
 
+        if (pane == SocialPane.Chat)
+            _chatOpen = _chatFocus = false;
+        if (pane == SocialPane.Detail)
+            _detail.Clear();
         if (_focusedPane == pane)
             _focusedPane = SocialPane.Navigator;
     }
@@ -231,8 +219,7 @@ internal sealed partial class ScreenHost
 
         if (!_socialOpen)
             return false;
-        var focused = _focusedPane;
-        if (focused != SocialPane.Navigator && Pane(focused).Open && !Pane(focused).Pinned)
+        if (_panes.BackTarget(_focusedPane) is { } focused)
             ClosePane(focused);
         else
             CloseWorkspace();
@@ -253,11 +240,7 @@ internal sealed partial class ScreenHost
         _chatFollowing = true;
         _seenRefusals = -1;
         _noticeUntil = 0;
-        if (_detail.ShowsPlayer)
-        {
-            _detail.Clear();
-            Pane(SocialPane.Detail).Close();
-        }
+        _panes.ResetSession(_detail);
     }
 
     /// <summary>
@@ -408,24 +391,7 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>True when the window is drawn this frame.</summary>
-    private bool PaneShown(SocialPane pane)
-    {
-        if (pane == SocialPane.Navigator)
-            return Workspace;
-        var window = Pane(pane);
-        if (!window.Open)
-            return false;
-        var inGame = _screen == Screen.Session;
-        switch (pane)
-        {
-            case SocialPane.Party or SocialPane.Players or SocialPane.Chat when !inGame:
-                return false;
-            case SocialPane.Detail when !(_detail.ShowsFriend || (inGame && _detail.ShowsPlayer)):
-                return false;
-        }
-
-        return Workspace || window.Pinned || (pane == SocialPane.Chat && _chatOpen);
-    }
+    private bool PaneShown(SocialPane pane) => _panes.Shown(pane, Workspace, _screen == Screen.Session, _chatOpen, _detail);
 
     /// <summary>
     /// What a window may take: everything on a surface the player opened (the workspace, chat while typing, the

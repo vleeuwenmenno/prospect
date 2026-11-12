@@ -1,4 +1,5 @@
 using System.Text;
+using Prospect.Client.Screens;
 using Prospect.Client.Social;
 using Prospect.Engine.Net;
 using Prospect.Engine.Time;
@@ -281,5 +282,68 @@ public sealed class SocialInterfaceTests
         using var signedOut = AccountClient.Sample(AccountState.SignedOut, default, default, AccountNotice.None, null);
         Assert.True(detail.Scrub(signedOut.View, null));
         Assert.False(detail.ShowsFriend);
+    }
+    [Fact]
+    public void ClosingFriendsOnTheFriendsScreenUnpinsItForTheNextGame()
+    {
+        var panes = new SocialPanes();
+        var detail = new SocialDetail();
+        var friends = panes[SocialPane.Friends];
+
+        // Pinned in a game: it stays over the view once the workspace closes.
+        friends.Open = friends.Pinned = true;
+        Assert.True(panes.Shown(SocialPane.Friends, false, true, false, detail));
+
+        // The game ends; the Friends screen from the menu; its X goes back to the menu and takes the window away.
+        panes.ResetSession(detail);
+        Assert.True(friends.Open && friends.Pinned);
+        Assert.Equal(PaneClose.LeaveFriendsScreen, panes.Close(SocialPane.Friends, true));
+        Assert.False(friends.Open);
+        Assert.False(friends.Pinned);
+
+        // A new game, workspace closed: the dismissed window does not come back.
+        panes.ResetSession(detail);
+        Assert.False(panes.Shown(SocialPane.Friends, false, true, false, detail));
+        Assert.False(panes.Shown(SocialPane.Friends, true, true, false, detail));
+    }
+
+    [Fact]
+    public void TheNavigatorAndEscapeCloseTheWorkspaceButNeverAPinnedWindow()
+    {
+        var panes = new SocialPanes();
+        var detail = new SocialDetail();
+        var friends = panes[SocialPane.Friends];
+        var party = panes[SocialPane.Party];
+        friends.Open = friends.Pinned = true;
+        party.Open = true;
+
+        // Escape: the focused window when it is not pinned, else the workspace.
+        Assert.Equal(SocialPane.Party, panes.BackTarget(SocialPane.Party));
+        Assert.Null(panes.BackTarget(SocialPane.Friends));
+        Assert.Null(panes.BackTarget(SocialPane.Navigator));
+
+        // The navigator's close: in a game it closes the workspace, on the Friends screen it leaves it. Neither
+        // touches a window: the pinned one stays on screen in flight, the unpinned one waits for the workspace.
+        Assert.Equal(PaneClose.CloseWorkspace, panes.Close(SocialPane.Navigator, false));
+        Assert.Equal(PaneClose.LeaveFriendsScreen, panes.Close(SocialPane.Navigator, true));
+        Assert.True(friends.Open && friends.Pinned && party.Open);
+        Assert.True(panes.Shown(SocialPane.Friends, false, true, false, detail));
+        Assert.False(panes.Shown(SocialPane.Party, false, true, false, detail));
+        Assert.True(panes.Shown(SocialPane.Party, true, true, false, detail));
+
+        // Pinned windows survive a session's end; an explicit close in a game removes the pin too.
+        panes.ResetSession(detail);
+        Assert.True(panes.Shown(SocialPane.Friends, false, true, false, detail));
+        Assert.Equal(PaneClose.Closed, panes.Close(SocialPane.Friends, false));
+        Assert.False(friends.Open || friends.Pinned);
+
+        // A player's card belongs to its session: the reset closes it, pinned or not.
+        var card = panes[SocialPane.Detail];
+        card.Open = card.Pinned = true;
+        detail.SelectPlayer(new object(), 7);
+        Assert.True(panes.Shown(SocialPane.Detail, false, true, false, detail));
+        panes.ResetSession(detail);
+        Assert.False(detail.ShowsPlayer);
+        Assert.False(card.Open || card.Pinned);
     }
 }
