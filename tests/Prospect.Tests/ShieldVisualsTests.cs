@@ -308,7 +308,7 @@ public sealed class ShieldVisualsTests
         ShieldInstance last = first;
         for (var i = 0; i < 80; i++)
         {
-            var next = Frame(Hull(1, 380f))!.Value;
+            var next = Frame(Hull(1, 380f, changeAge: Dt * (i + 2)))!.Value;
             Assert.True(next.Params.X >= last.Params.X);
             last = next;
         }
@@ -546,6 +546,85 @@ public sealed class ShieldVisualsTests
             Assert.Equal(1f, drawn.Params.X);
             Assert.Equal(0f, drawn.Params.Z);
         }
+    }
+
+    /// <summary>Runs one frame of <paramref name="dt"/> seconds with one hull and returns its shell, if drawn.</summary>
+    private ShieldInstance? Frame(float dt, HullView hull)
+    {
+        _shields.Update([hull], Content.Designs, dt);
+        _shields.Begin(_draws);
+        _shields.Add(hull.Id, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices);
+        return _shields.Draws.Length > 0 ? _instances[0] : null;
+    }
+
+    [Fact]
+    public void AStallPastAPendingBreakTakesTheNewPublishedAgeAndDoesNotReplayIt()
+    {
+        Frame(Hull(1));
+        Assert.Equal(1f, Frame(Dt, Hull(1, 0f, offline: true, changeAge: -0.05f))!.Value.Params.X);
+
+        // A second without frames; the next publication says the break is 0.95 s old, past the 0.7 s collapse.
+        Assert.Null(Frame(1f, Hull(1, 0f, offline: true, changeAge: 0.95f)));
+        Assert.Null(Frame(Dt, Hull(1, 0f, offline: true, changeAge: 0.95f + Dt)));
+    }
+
+    [Fact]
+    public void ARunningCollapseFollowsTheRenderedClockForwardAndBack()
+    {
+        Frame(Hull(1));
+        Frame(Dt, Hull(1, 0f, offline: true, changeAge: 0.1f));
+        var forward = Frame(Dt, Hull(1, 0f, offline: true, changeAge: 0.5f))!.Value;
+        Assert.Equal(0.5f / Look.CollapseSeconds, forward.Params.Z, 3);
+        var back = Frame(Dt, Hull(1, 0f, offline: true, changeAge: 0.2f))!.Value;
+        Assert.Equal(0.2f / Look.CollapseSeconds, back.Params.Z, 3);
+
+        // Corrected back past the break itself: the drawn moment is before it again, so the shield is up.
+        var before = Frame(Dt, Hull(1, 0f, offline: true, changeAge: -0.1f))!.Value;
+        Assert.Equal(1f, before.Params.X);
+        Assert.Equal(0f, before.Params.Z);
+
+        // And a pending break pulled forward starts where the clock says.
+        var pulled = Frame(Dt, Hull(1, 0f, offline: true, changeAge: 0.05f))!.Value;
+        Assert.Equal(0.05f / Look.CollapseSeconds, pulled.Params.Z, 3);
+    }
+
+    [Fact]
+    public void RepeatedPublicationsMoveOnByTheLocalClock()
+    {
+        Frame(Hull(1));
+        var frames = 0;
+        while (Frame(Dt, Hull(1, 0f, offline: true, changeAge: -0.05f))!.Value.Params.Z == 0f)
+        {
+            frames++;
+            Assert.True(frames < 10);
+        }
+
+        Assert.InRange(frames, 2, 4);
+
+        // The same publication again and again: the collapse still runs to its end.
+        for (var i = 0; i < 60 && Frame(Dt, Hull(1, 0f, offline: true, changeAge: -0.05f)) is not null; i++)
+            Assert.True(i < 50);
+    }
+
+    [Fact]
+    public void ARippleIsPutBackOnThePublishedClockAfterAStall()
+    {
+        var hull = Hull(1);
+        Frame(hull);
+        hull.ShieldHit = new ShieldHit { Serial = 1, Strength = 200, X = 50 };
+        hull.ShieldHitAge = -0.05f;
+        var first = Frame(Dt, hull)!.Value;
+        Assert.InRange((first.Strengths.X > 0 ? first.Ripple0 : first.Strengths.Y > 0 ? first.Ripple1 : first.Strengths.Z > 0 ? first.Ripple2 : first.Ripple3).W, -0.05f, -0.04f);
+
+        hull.ShieldHitAge = 0.6f;
+        var drawn = Frame(1f, hull)!.Value;
+        var live = drawn.Strengths.X > 0 ? drawn.Ripple0 : drawn.Strengths.Y > 0 ? drawn.Ripple1 : drawn.Strengths.Z > 0 ? drawn.Ripple2 : drawn.Ripple3;
+        Assert.Equal(0.6f, live.W, 3);
+
+        // Past its life on the published clock, it is gone.
+        hull.ShieldHitAge = Look.RippleSeconds + 0.1f;
+        drawn = Frame(Dt, hull)!.Value;
+        Assert.Equal(0f, drawn.Strengths.X + drawn.Strengths.Y + drawn.Strengths.Z + drawn.Strengths.W);
     }
 
     [Fact]
