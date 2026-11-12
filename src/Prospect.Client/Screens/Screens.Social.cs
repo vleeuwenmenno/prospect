@@ -205,6 +205,7 @@ internal sealed partial class ScreenHost
                 break;
             case SocialPane.Friends when _screen == Screen.Account:
                 // Friends is what the Friends screen is: closing it goes back to the menu.
+                Pane(pane).Close();
                 Show(Screen.MainMenu);
                 return;
             default:
