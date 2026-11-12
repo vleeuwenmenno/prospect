@@ -30,22 +30,54 @@ until accepted. On session end, roster entries are disconnected and party/invita
 
 ## Interface
 
-`Screens.Social.cs` draws it; `SocialView` (no drawing) holds the reading of the state and the route to the
-bridge, so tests use the same calls.
+`Screens.Social.cs` draws it; `SocialView` and `SocialDetail` (no drawing) hold the reading of the state, the
+card's selection and the route to the bridge, so tests use the same calls.
+
+### Navigation bar
+
+- One bar along the top (`TopBar`, `Screens.TopBar.cs`), 28 design pixels. Every heads-up piece starts at
+  `HudLayout.Top`, under it: sector panel, target readout, NAV room, cue room, map heading and hover card.
+- In a game: Play (pilot view), Fleet (command view), Map, Social, Settings. Out of one: Play (main menu),
+  Social (Friends screen), Settings. No tab starts or leaves a game.
+- Right: `AccountView.NameUtf8`, drawn as text only. Signed out it starts the existing sign-in; otherwise it
+  opens Friends, which holds Sign out, Cancel and Copy link.
+- The Social tab's dot means a party invitation or an incoming friend request; Social opens on that window.
+- Over the map the bar's rectangle is a `MapPointer` block and the bar claims the map's stale hover.
+
+### Windows
+
+- `FloatingWindow` is one Dear ImGui window with a title bar it lays out: drag area, pin, close. The drag is
+  the title item's active press; it is applied before `Begin`, so the frame's rectangle is where it is drawn.
+- Windows: navigator, Friends, Party, Players, Chat, card. The navigator is open exactly while the workspace is.
+- A window is clamped under the bar and inside the screen every frame. Place and pin last for the process.
+- Pin keeps a window on screen when the workspace closes. Explicit close (X) unpins it too.
+- Out of a game the workspace is the Friends screen: navigator, Friends and the card. Party, Players and Chat
+  need a game.
 
 ### Input and actions
 
 - Players (`Tab`/`P`), Social (`O`) and Chat (`Enter`) are actions in `content/input/bindings.json`. They are
   consumed before flight reads input. A focused text field keeps letter keys, Enter and Tab; F-keys and Escape
-  still work, as with Controls. Mouse bindings use this frame's interface ownership; a click in the same poll
-  as a capture change is consumed instead of becoming a shortcut or world action.
-- Escape closes chat, then the panel, then the data sheet. Each open surface shows the cursor.
-- Only the pilot view hides the cursor. The command view and the map show it without `Shift`, so the quick
-  buttons are clickable there; in the pilot view `Shift` shows it.
+  still work, as with Controls.
+- What a window may take (`FloatingInput`): Full on a surface the player opened (the workspace, chat while
+  typing, the Friends screen). Pointer only for a pinned window while the pointer is out (`Shift`, command
+  view): no keyboard navigation, so W and Space still fly. Passive (`NoInputs`) while flight has the pointer.
+- Pinned windows are not surfaces: `WorldInputEnabled` ignores them and they never show the cursor.
+- A pinned window shows no text field. Closing the workspace, or ending chat typing outside it, calls
+  `FloatingWindow.ReleaseKeyboard`, so nothing it left focused holds keys into the next frame.
+- Escape: chat typing first, then the focused window if it is not pinned, then the workspace.
 - A refusal is noticed by `SocialState.RefusalCount` (client-only, not on the wire), so the same reason twice
   is still new. Rate-limited requests get no reply and so show nothing.
 - Invite is offered to connected players who are not in your party and not your inviter, while you are solo or
   lead a party with room. The snapshot does not say who is in another party; the server refuses that.
+
+### The card
+
+- `SocialDetail` holds an account by key and the account id that chose it, or a player by session id and the
+  session. It is read from the current lists each frame, so actions go to the identity shown.
+- Gone from the lists or roster: it says so and offers nothing. Sign-out, another account or another session
+  clears it.
+- A session name is never matched to an account. The card claims no presence, game, activity or avatar.
 
 ### Party and chat display
 
@@ -54,23 +86,25 @@ bridge, so tests use the same calls.
   strip while it is drawn and shares the list's width), the sector panel drops its server and ore lines; still
   short, members become one-line rows (name, shield, hull), leader first, at least one, with the rest counted
   in the caption.
-- Recent chat lines stay beside the jump strip where a 300-pixel line remains, else above it while it is drawn.
+- Recent chat lines show while the chat window is not on screen, beside the jump strip where a 300-pixel line
+  remains, else above it while it is drawn.
 - The left column (sector panel, party list) and the recent chat stop short of the middle of the view; at a
   large interface scale the column narrows and cuts what does not fit.
-- `HudLayout` holds every clearance: the left column, the console, the strip, the NAV card. `HudCueRoom` is
-  the room the target and NAV markers share; a marker whose point is under a piece becomes an arrow there.
-- The quick buttons drop their key labels when the row would cover the sector panel.
+- `HudLayout` holds every clearance. `HudCueRoom` is the room the target and NAV markers share; social windows
+  on screen are in it too. A marker whose point is under a piece becomes an arrow there.
 - Chat follows new lines while scrolled to the end. Scrolled back, it keeps the reader's place as old lines
   leave the 64-line log (`SocialState.ChatTotal`, client-only), until the lines being read are dropped.
 
 ### Interaction safety
 
 - Accept and Decline sit in an id scope of the invitation's full 64-bit identity (`Kit.PushId`), so a press
-  that began on one card cannot complete on a replacement drawn in the same place.
-- Opening chat closes the player panel and the panel closes chat, and chat's buttons take the pointer only, so
-  Enter (open chat, send) can never press a button that keyboard navigation left focused.
+  that began on one card cannot complete on a replacement drawn in the same place. Friend actions are scoped
+  to the account key, player actions to the session id.
+- Opening chat cancels a keyboard activation pending in the workspace, and chat's buttons take the pointer
+  only, so Enter (open chat, send) can never press a button that keyboard navigation left focused.
 - Names and chat text go only to draw calls (`Kit.ClippedText`, draw-list text), never into labels, ids or
-  format strings. Nothing on these paths allocates after startup.
+  format strings. The friend search compares against the name as text. Nothing on these paths allocates after
+  startup, except taking the search text when it changes.
 
 ## Send
 

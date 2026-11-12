@@ -13,21 +13,29 @@ or that local game opened to other players. There is one simulation and one code
 
 Chat, the player roster and parties work end to end: the server decides, the client shows them.
 
-- **Players** (`Tab` or `P`): everyone on this server, with Invite, and a pending invitation with Accept and
-  Decline. **Social** (`O`): your party, with Remove for the leader and Leave Party.
+- **Navigation bar** along the top. In a game: Play (pilot view), Fleet (command view), Map, Social and
+  Settings. Out of a game: Play (main menu), Social (Friends) and Settings. At the right, your Discord display
+  name; signed out, Sign in with Discord. An amber dot on Social means a friend request or a party invitation is
+  waiting. No tab starts or leaves a game. In the pilot view hold `Shift` to click it.
+- **Social workspace** (Social, `Tab`/`P`, `O`): a navigator and separate windows for Friends, Party, Players,
+  Chat and a card for one account or player. Drag a window by its title bar, close it with its X. Windows keep
+  their place for as long as the game runs and stay on screen when the window or scale changes.
+- **Pinned windows** stay over the view after Social closes. In flight they take nothing: W, Space and the mouse
+  still fly. Hold `Shift` to drag or click one. `Esc` never closes a pinned window; its X does.
+- **Players** (`Tab` or `P`): everyone on this server and who left this session, with Invite and a pending
+  invitation's Accept and Decline. These are session names, not accounts. **Party** (`O`): your party, Remove
+  for the leader, Leave Party.
 - **Chat** (`Enter`): everyone or party channel, the last 64 lines, typed lines checked before sending.
 - **Party list** at the top left: each other member's name, ship, shield, hull and sector. In a short window
   or at a large interface scale it shrinks to one-line rows with a count of the rest. Recent chat lines show
-  at the bottom left for a few seconds while chat is closed. The left column narrows at a large interface scale
-  so the middle of the view stays clear.
-- **Quick buttons** at the top right open the three, each with its key from the bindings. Click them; in the
-  pilot view hold `Shift` first to show the cursor. Where the row would cover the sector panel (a narrow window
-  or a large interface scale), the keys are left off the buttons; F1 still lists them.
-
-- **Friends** (main menu, or the Friends tab in Social): sign in with Discord in your browser, then add
-  friends by their 16-character friend code, answer requests and remove friends. The list belongs to your
-  account and lasts across games and restarts; signing in again restores it. It needs the account service
+  at the bottom left for a few seconds while the chat window is not on screen. The left column narrows at a
+  large interface scale so the middle of the view stays clear.
+- **Friends** (Social, or the account name in the bar): sign in with Discord in your browser, then add friends
+  by their 16-character friend code, search your lists, answer requests and remove friends. A name opens its
+  card. The list belongs to your account and lasts across games and restarts. It needs the account service
   beside the listing server ([accounts](docs/accounts.md)); with `--listing off` there are no accounts.
+- **Not there:** whether a friend is online or in a game, avatars, direct messages, joining a friend, blocking,
+  voice or video calls, an inventory tab.
 - **Sign-in for playing with others.** Join Server and hosting an unlisted or public game ask for a Discord
   sign-in first, on the same screen; a private game never does, offline included. Servers do not check the
   account yet: in a game, names and ids are still the session's, not verified accounts.
@@ -185,15 +193,15 @@ button or category. `F1`, `Esc` or Close returns to the previous view; the sessi
 The cursor is hidden only in the pilot view. The command view, the map and every menu show it.
 
 - **Pilot view:** the hidden cursor steers the view. Hold either `Shift` to show it: mouse flight and targeting
-  stop, keyboard flight still works, and the quick buttons can be clicked. With `Shift` held, a right drag that
+  stop, keyboard flight still works, and the bar and pinned windows can be clicked. With `Shift` held, a right drag that
   starts over space turns the camera, as free look does; letting go of the button or of `Shift` returns the view to
   the nose. Press `Shift` before the right button: a click in the same instant as `Shift` is dropped.
 - **Command view:** the cursor is shown as soon as it opens (`N`), and the mouse works in the world: select,
   box-select, order, rotate, pan and zoom. `Shift` there only adds to a selection or moves the plane; it never
   hides the cursor or ends a drag. Back in the pilot view the cursor is hidden again unless `Shift` is held or
   something is open.
-- **Menus, data sheet, map, Controls, Players, Social, Chat:** the cursor shows until they close, and the world
-  gets no mouse.
+- **Menus, data sheet, map, Controls, the Social workspace, Chat while typing:** the cursor shows until they
+  close, and the world gets no mouse. Pinned windows do not count: they leave the cursor hidden.
 
 Gameplay has no bottom-left keybind strip. Bindings come from `content/input/bindings.json`.
 
@@ -218,9 +226,10 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Target the ship under the reticle, or the asteroid if there is no ship | Middle mouse button | |
 | Take control of the target, or leave in a drone | `T` | D-pad down |
 | Menu or back | `Esc` | `Start` |
-| Players on this server | `Tab` or `P` | |
-| Party (Social) | `O` | |
+| Social: Players window | `Tab` or `P` | |
+| Social: Party window | `O` | |
 | Chat: open, send, close | `Enter`; `Enter` sends, `Esc` closes | |
+| Close the focused social window, then Social | `Esc` (never a pinned window) | |
 
 On menu screens the arrow keys or the D-pad move between rows, left and right change the focused setting, and
 `Enter` or `A` selects. The mouse works too: click a row's arrows, or drag a slider. In the server browser, the

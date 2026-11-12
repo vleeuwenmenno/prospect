@@ -73,6 +73,15 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
 Factions are not saved yet: they are gone when a server restarts. They must be written to disk once saving
 exists.
 
+## Decided: the interface
+
+- **One navigation bar along the top**: Play, Fleet, Map, Social, Settings in a game; the Discord display name
+  at the right. No inventory tab until there is an inventory.
+- **Social windows are movable and can be pinned.** Pinned means kept on screen in flight, not locked in place.
+  A pinned window never takes flight's keys; the release key (`Shift`) lets the pointer use it.
+- **No calls.** No voice, video or phone controls.
+- **Show only what the services say.** No presence, avatars, activity or join buttons until an API gives them.
+
 ## Decided: accounts and friends
 
 - **Persistent accounts use Discord sign-in.** Discord handles credentials and account recovery; PROSPECT
