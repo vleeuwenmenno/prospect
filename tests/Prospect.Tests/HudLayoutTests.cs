@@ -174,6 +174,13 @@ public sealed class HudLayoutTests
         Assert.Equal(JumpPrompt.OffCourse, HudLayout.Prompt(true, false, false, JumpPhase.None, false, true));
     }
 
+    /// <summary>The arrow's place along a ray that has clear room.</summary>
+    private static float2 Edge(in HudCueRoom room, float2 from, float2 direction)
+    {
+        Assert.True(room.Edge(from, direction, out var at), $"no clear room from {from} along {direction}");
+        return at;
+    }
+
     // The arrow drawn by DrawTargetIndicator and DrawNavTarget: a head 11 px deep, and the target's ring round it.
     private static float ArrowRing(float scale) => Px(11, scale) * 1.6f;
 
@@ -210,13 +217,13 @@ public sealed class HudLayoutTests
                 for (var a = 0; a < 64; a++)
                 {
                     var angle = a * MathF.Tau / 64f;
-                    var edge = room.Edge(room.Start, new float2(MathF.Cos(angle), MathF.Sin(angle)));
+                    var edge = Edge(room, room.Start, new float2(MathF.Cos(angle), MathF.Sin(angle)));
                     Assert.True(Clear(room, edge, ArrowRing(scale)), $"strip {strip} target {target} angle {a}: {edge}");
                 }
 
                 // The strip only pushes the cues up while it is drawn: with it hidden, an arrow straight down sits
                 // over the console instead.
-                var down = room.Edge(room.Start, new float2(0, 1));
+                var down = Edge(room, room.Start, new float2(0, 1));
                 var limit = strip ? HudLayout.Strip(display, scale).Top : HudLayout.ConsoleTop(display, scale);
                 Assert.True(down.Y + ArrowRing(scale) + room.Gap <= limit + 0.5f, $"down {down.Y} limit {limit}");
             }
@@ -310,7 +317,7 @@ public sealed class HudLayoutTests
         // The arrow points at it from above the strip, and the old ellipse's clamped tip (392) is no longer used.
         var toward = projected - room.Start;
         var direction = toward / MathF.Sqrt(toward.X * toward.X + toward.Y * toward.Y);
-        var at = room.Edge(room.Start, direction);
+        var at = Edge(room, room.Start, direction);
         Assert.True(direction.Y > 0.99f);
         Assert.True(Clear(room, at, ArrowRing(scale)));
         Assert.True(at.Y + Px(11, scale) < strip.Top);
@@ -320,7 +327,7 @@ public sealed class HudLayoutTests
         Assert.True(room.Clear(at + new float2(label, 0), room.Pad(true)) || room.Clear(at - new float2(label, 0), room.Pad(true)));
 
         // A NAV point off the bottom of the view gives the same arrow.
-        var off = room.Edge(room.Start, new float2(0, 1));
+        var off = Edge(room, room.Start, new float2(0, 1));
         Assert.Equal(at.Y, off.Y, 0.5f);
     }
 
@@ -457,7 +464,7 @@ public sealed class HudLayoutTests
         Assert.True(room.Clear(cue.At, ArrowRing(1f)));
         var toward = point - room.Start;
         var direction = toward / MathF.Sqrt(toward.X * toward.X + toward.Y * toward.Y);
-        Assert.True(room.Clear(room.Edge(room.Start, direction), room.Reach));
+        Assert.True(room.Clear(Edge(room, room.Start, direction), room.Reach));
         Assert.True(room.Crosses(new float2(200, 800), new float2(200, 980)));
 
         for (var frame = 0; frame < 30; frame++)
@@ -616,7 +623,7 @@ public sealed class HudLayoutTests
         // An arrow toward the panel stops short of it, ring and gap included.
         var start = room.Start;
         var toward = inside - start;
-        var edge = room.Edge(start, toward / MathF.Sqrt(toward.X * toward.X + toward.Y * toward.Y));
+        var edge = Edge(room, start, toward / MathF.Sqrt(toward.X * toward.X + toward.Y * toward.Y));
         Assert.True(edge.X <= panel.Left - room.Reach - room.Gap + 0.5f, $"{edge}");
         Assert.True(room.Crosses(start, inside));
 
@@ -629,5 +636,90 @@ public sealed class HudLayoutTests
         // Counted panels only: an array with room for more is read up to its count.
         var counted = new HudCueRoom(display, 1f, 140f, false, false, default, [default, panel], 1);
         Assert.True(counted.Clear(inside, counted.Reach));
+    }
+    [Theory]
+    [InlineData(1f)]
+    [InlineData(2f)]
+    public void AWindowOverTheMiddleOfTheViewLeavesEveryCueBeyondItInItsDirection(float scale)
+    {
+        // Friends pinned and dragged over the middle of a 1920 x 1080 view: the cues' start is under it.
+        var display = new float2(1920, 1080);
+        var panel = new HudRect(730, 240, 730 + Px(460, scale), 240 + Px(600, scale));
+        foreach (var target in new[] { false, true })
+        {
+            foreach (var strip in new[] { false, true })
+            {
+                var room = new HudCueRoom(display, scale, Px(140, scale), target, strip, default, [panel], 1);
+                Assert.False(room.Clear(room.Start, room.Reach));
+                for (var a = 0; a < 64; a++)
+                {
+                    var angle = a * MathF.Tau / 64f;
+                    var direction = new float2(MathF.Cos(angle), MathF.Sin(angle));
+                    if (!room.Edge(room.Start, direction, out var at))
+                        continue;
+                    // Clear for the arrow and its ring, and for the NAV marker's pad, on the same bearing.
+                    Assert.True(Clear(room, at, ArrowRing(scale)), $"angle {a}: {at}");
+                    Assert.True(room.Clear(at, room.Pad(true)), $"angle {a}: {at}");
+                    var away = at - room.Start;
+                    var length = MathF.Sqrt(away.X * away.X + away.Y * away.Y);
+                    Assert.True((away.X * direction.X + away.Y * direction.Y) / length > 0.9999f, $"angle {a}: {at}");
+                }
+
+                // Toward the free right half and the free left edge there is room, so those cues show.
+                Assert.True(room.Edge(room.Start, new float2(1, 0), out var right) && right.X > panel.Right);
+                Assert.True(room.Edge(room.Start, new float2(-1, 0), out var left) && left.X < panel.Left);
+            }
+        }
+    }
+
+    [Fact]
+    public void TheTargetArrowLeavesACentreCoveringWindowAndIsHiddenWhereNothingIsClear()
+    {
+        var display = new float2(1920, 1080);
+        var panel = new HudRect(730, 240, 1190, 840);
+        var room = new HudCueRoom(display, 1f, 140f, false, false, default, [panel], 1);
+
+        // A target behind and to the right: the arrow sits right of the window, on the bearing, ring clear.
+        var cue = new TargetCue();
+        for (var frame = 0; frame < 40; frame++)
+        {
+            var morph = cue.Step(room, frame == 0, false, default, new float2(1, 0), true, 1f, 1f / 60f);
+            Assert.False(cue.Hidden);
+            Assert.True(Clear(room, cue.At, TargetExtent(room, morph, false, 1f) - 0.01f), $"frame {frame} at {cue.At}");
+        }
+        Assert.True(cue.At.X > panel.Right);
+
+        // A target in front but under the window turns into the same arrow, beyond it.
+        var under = new TargetCue();
+        for (var frame = 0; frame < 40; frame++)
+        {
+            var morph = under.Step(room, frame == 0, true, new float2(1100, 540), default, true, 1f, 1f / 60f);
+            Assert.True(under.Out);
+            Assert.True(Clear(room, under.At, TargetExtent(room, morph, false, 1f) - 0.01f), $"frame {frame} at {under.At}");
+        }
+
+        // A window over the whole view leaves no clear point: nothing is drawn, for the target and the NAV arrow.
+        var full = new HudCueRoom(display, 1f, 140f, false, false, default, [new HudRect(0, 0, 1920, 1080)], 1);
+        for (var a = 0; a < 16; a++)
+            Assert.False(full.Edge(full.Start, new float2(MathF.Cos(a * MathF.Tau / 16f), MathF.Sin(a * MathF.Tau / 16f)), out _));
+        var hidden = new TargetCue();
+        hidden.Step(full, true, true, new float2(960, 540), default, true, 1f, 1f / 60f);
+        Assert.True(hidden.Out);
+        Assert.True(hidden.Hidden);
+
+        // The window moved off again: the arrow returns, clear, with no slide from where it could not be.
+        cue.Step(full, false, false, default, new float2(1, 0), true, 1f, 1f / 60f);
+        Assert.True(cue.Hidden);
+        cue.Step(room, false, false, default, new float2(1, 0), true, 1f, 1f / 60f);
+        Assert.False(cue.Hidden);
+        Assert.True(Clear(room, cue.At, ArrowRing(1f)));
+
+        // A target on a clear point keeps its bracket on it whatever the arrow's side would be.
+        var anchored = new TargetCue();
+        var half = new HudCueRoom(display, 1f, 140f, false, false, default, [new HudRect(960, 0, 1920, 1080)], 1);
+        anchored.Step(half, true, true, new float2(500, 540), new float2(1, 0), true, 1f, 1f / 60f);
+        Assert.False(anchored.Out);
+        Assert.False(anchored.Hidden);
+        Assert.Equal(new float2(500, 540), anchored.At);
     }
 }

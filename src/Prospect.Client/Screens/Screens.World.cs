@@ -606,6 +606,8 @@ internal sealed partial class ScreenHost
         _indicatorHull = world.TargetHull;
         _indicatorRock = world.TargetRock;
         var morph = _targetCue.Step(room, fresh, inFront, screen, across, settled, Kit.Scale, _ui.DeltaTime, rock);
+        if (_targetCue.Hidden)
+            return;
         var at = _targetCue.At;
         var anchored = !_targetCue.Out;
         var space = Math.Max(0f, room.Space(at) - Kit.Px(1));

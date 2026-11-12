@@ -383,28 +383,72 @@ internal readonly struct HudCueRoom
         : Math.Max(Math.Max(box.Left - point.X, point.X - box.Right), Math.Max(box.Top - point.Y, point.Y - box.Bottom));
 
     /// <summary>
-    /// The last point clear for a cue on the way from <paramref name="from"/> along <paramref name="direction"/>
-    /// (a unit vector): where the arrow for a target that way sits.
+    /// Where the arrow for a target along <paramref name="direction"/> (a unit vector) from <paramref name="from"/>
+    /// sits: the far end of the first stretch of that ray that is clear of every piece by a cue's reach and gap,
+    /// inside the screen. Where the ray starts under pieces (a window the player dragged over the middle of the
+    /// view), the stretch begins where it leaves the last of them, so the arrow keeps its direction and sits
+    /// beyond. False when no point of the ray on screen is clear: the cue is then not drawn at all.
     /// </summary>
-    public float2 Edge(float2 from, float2 direction)
+    public bool Edge(float2 from, float2 direction, out float2 at)
     {
         var pad = Gap + Reach;
-        var t = float.PositiveInfinity;
+        var limit = float.PositiveInfinity;
         if (direction.X > 1e-6f)
-            t = (Screen.Right - pad - from.X) / direction.X;
+            limit = (Screen.Right - pad - from.X) / direction.X;
         else if (direction.X < -1e-6f)
-            t = (Screen.Left + pad - from.X) / direction.X;
+            limit = (Screen.Left + pad - from.X) / direction.X;
         if (direction.Y > 1e-6f)
-            t = Math.Min(t, (Screen.Bottom - pad - from.Y) / direction.Y);
+            limit = Math.Min(limit, (Screen.Bottom - pad - from.Y) / direction.Y);
         else if (direction.Y < -1e-6f)
-            t = Math.Min(t, (Screen.Top + pad - from.Y) / direction.Y);
-        t = Math.Min(t, Entry(Column, pad, from, direction));
-        t = Math.Min(t, Entry(Readout, pad, from, direction));
-        t = Math.Min(t, Entry(Strip, pad, from, direction));
-        t = Math.Min(t, Entry(Chat, pad, from, direction));
+            limit = Math.Min(limit, (Screen.Top + pad - from.Y) / direction.Y);
+        limit = Math.Max(float.IsFinite(limit) ? limit : 0f, 0f);
+
+        // Step past every piece the point is under until it is under none; each piece is left at most once.
+        var start = 0f;
+        for (var pass = 0; pass <= PieceCount; pass++)
+        {
+            var point = from + direction * start;
+            var exit = Exit(Column, pad, point, direction);
+            exit = Math.Max(exit, Exit(Readout, pad, point, direction));
+            exit = Math.Max(exit, Exit(Strip, pad, point, direction));
+            exit = Math.Max(exit, Exit(Chat, pad, point, direction));
+            for (var i = 0; i < PanelCount; i++)
+                exit = Math.Max(exit, Exit(Panels![i], pad, point, direction));
+            if (exit <= 0f)
+                break;
+            // A hair past the boundary, so rounding cannot leave the point on the piece's inside.
+            start += exit + 0.01f;
+        }
+
+        at = from + direction * start;
+        if (start > limit + 0.01f || !Clear(at, pad - 0.02f))
+            return false;
+
+        var stretch = from + direction * start;
+        var end = limit - start;
+        end = Math.Min(end, Entry(Column, pad, stretch, direction));
+        end = Math.Min(end, Entry(Readout, pad, stretch, direction));
+        end = Math.Min(end, Entry(Strip, pad, stretch, direction));
+        end = Math.Min(end, Entry(Chat, pad, stretch, direction));
         for (var i = 0; i < PanelCount; i++)
-            t = Math.Min(t, Entry(Panels![i], pad, from, direction));
-        return from + direction * Math.Max(float.IsFinite(t) ? t : 0f, 0f);
+            end = Math.Min(end, Entry(Panels![i], pad, stretch, direction));
+        at = stretch + direction * Math.Max(end, 0f);
+        return true;
+    }
+
+    /// <summary>The pieces a ray can be under: the column, readout, strip, recent chat and every window.</summary>
+    private int PieceCount => 4 + PanelCount;
+
+    /// <summary>How far along <paramref name="along"/> a point under the grown box leaves it; zero when it is not under it.</summary>
+    private static float Exit(in HudRect box, float pad, float2 from, float2 along)
+    {
+        if (!Inside(box, from, pad))
+            return 0f;
+        var near = float.NegativeInfinity;
+        var far = float.PositiveInfinity;
+        Slab(box.Left - pad, box.Right + pad, from.X, along.X, ref near, ref far);
+        Slab(box.Top - pad, box.Bottom + pad, from.Y, along.Y, ref near, ref far);
+        return Math.Max(far, 0f);
     }
 
     /// <summary>True when the straight line from <paramref name="from"/> to <paramref name="to"/> passes over a piece.</summary>
@@ -472,6 +516,12 @@ internal struct TargetCue
     /// <summary>The arrow's direction, in radians on the screen.</summary>
     public float Angle;
 
+    /// <summary>
+    /// True when the arrow has nowhere clear to go on screen this frame (pieces cover every point that way): it is
+    /// not drawn, rather than drawn under a piece.
+    /// </summary>
+    public bool Hidden;
+
     /// <summary>Where the marker was drawn last, and where it slides from while leaving its target.</summary>
     public float2 At;
     public float2 From;
@@ -524,9 +574,25 @@ internal struct TargetCue
             Angle += turn * (1f - MathF.Exp(-14f * dt));
         }
 
-        var border = room.Edge(room.Start, new float2(MathF.Cos(Angle), MathF.Sin(Angle)));
+        var wasHidden = Hidden;
+        Hidden = false;
+        if (!room.Edge(room.Start, new float2(MathF.Cos(Angle), MathF.Sin(Angle)), out var border))
+        {
+            // No clear room that way. On its target the bracket stays there; the arrow is not drawn.
+            if (Out)
+            {
+                Hidden = true;
+                Morph = 1f;
+                return 1f;
+            }
+
+            At = From = screen;
+            Morph = 0f;
+            return 0f;
+        }
+
         var morph = Morph * Morph * (3f - 2f * Morph);
-        if (fresh && Out)
+        if ((fresh && Out) || wasHidden)
             From = border;
         At = Out ? From + (border - From) * morph : screen + (border - screen) * morph;
         // A panel may appear under the old point, or the animation may cross an occupied corner. Both endpoints

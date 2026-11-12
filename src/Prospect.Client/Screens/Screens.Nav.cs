@@ -108,7 +108,9 @@ internal sealed partial class ScreenHost
         var toward = inFront ? screen - room.Start : new float2(view.X, -view.Y);
         var length = MathF.Sqrt(toward.X * toward.X + toward.Y * toward.Y);
         var across = length > 1e-4f ? toward / length : new float2(0, 1);
-        var at = room.Edge(room.Start, across);
+        // With no clear room that way, no arrow: never one drawn under a panel.
+        if (!room.Edge(room.Start, across, out var at))
+            return;
         var size = Kit.Px(11);
         var side = new float2(-across.Y, across.X);
         var tip = at + across * size;
