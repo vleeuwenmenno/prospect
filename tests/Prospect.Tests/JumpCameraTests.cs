@@ -61,6 +61,9 @@ public sealed class JumpCameraTests : IDisposable
         ((ITickHandler)_server).Tick(_tick);
         ((ITickHandler)_client).Tick(_tick++);
         var snapshot = _client.AcquireSnapshot();
+        // These frames follow manual simulation ticks. Both views must render the same completed tick even if
+        // the test runner pauses between their updates, rather than sampling different wall-clock fractions.
+        snapshot.PublishedAt = 0;
         _devices.BeginFrame();
         if (scroll != 0f)
             _devices.OnScroll(scroll);
@@ -765,7 +768,8 @@ public sealed class JumpCameraTests : IDisposable
         {
             Assert.True(_world.OwnOpening.Centre.RelativeTo(fresh.OwnOpening.Centre).Length() < 0.05f,
                 $"{_world.Own.Jump}: exit {_world.OwnOpening.Centre.RelativeTo(fresh.OwnOpening.Centre).Length()} m from a fresh view's");
-            Assert.True(MathF.Abs(_world.OwnOpening.Radius - fresh.OwnOpening.Radius) < 0.01f);
+            Assert.True(MathF.Abs(_world.OwnOpening.Radius - fresh.OwnOpening.Radius) < 0.01f,
+                $"{_world.Own.Jump}: opening radius {_world.OwnOpening.Radius} m, fresh view {fresh.OwnOpening.Radius} m");
             Assert.True(_world.OwnDrawnPosition.RelativeTo(fresh.OwnDrawnPosition).Length() < 0.05f);
             Assert.True(MathF.Abs(_world.JumpThrough - fresh.JumpThrough) < 0.01f);
             compared++;
