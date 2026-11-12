@@ -30,8 +30,8 @@ until accepted. On session end, roster entries are disconnected and party/invita
 
 ## Interface
 
-`Screens.Social.cs` draws it; `SocialView` and `SocialDetail` (no drawing) hold the reading of the state, the
-card's selection and the route to the bridge, so tests use the same calls.
+`Screens.Social.cs` draws it; `SocialView`, `SocialDetail` and `SocialPanes` (no drawing) hold the reading of
+the state, the card's selection, the windows' lifecycle and the route to the bridge, so tests use the same calls.
 
 ### Navigation bar
 
@@ -92,6 +92,10 @@ card's selection and the route to the bridge, so tests use the same calls.
   large interface scale the column narrows and cuts what does not fit.
 - `HudLayout` holds every clearance. `HudCueRoom` is the room the target and NAV markers share; social windows
   on screen are in it too. A marker whose point is under a piece becomes an arrow there.
+- A window over the middle of the view: the arrow goes past it on the same bearing, to the first clear stretch.
+  With no clear point that way, no arrow is drawn.
+- A window is placed once a frame (`FloatingWindow.Prepare`, held drag included). The markers reserve that
+  rectangle and the window is drawn at it.
 - Chat follows new lines while scrolled to the end. Scrolled back, it keeps the reader's place as old lines
   leave the 64-line log (`SocialState.ChatTotal`, client-only), until the lines being read are dropped.
 
