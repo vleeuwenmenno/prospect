@@ -25,7 +25,7 @@ namespace Prospect.Client.Screens;
 /// </summary>
 internal sealed class MapPointer
 {
-    private const int MaxBlocked = 2;
+    private const int MaxBlocked = 3;
     private readonly float2[] _blockedMin = new float2[MaxBlocked];
     private readonly float2[] _blockedMax = new float2[MaxBlocked];
     private int _blockedCount;
@@ -205,8 +205,7 @@ internal static class MapUnitList
     public const float HeadingGap = 16f;
     public const float HeadingHeight = 84f;
 
-    /// <summary>The hover card's top and its distance from the right edge: tucked into the top right corner.</summary>
-    public const float HoverTop = HudLayout.Margin;
+    /// <summary>The hover card's distance from the right edge: tucked into the top right corner, under the bar.</summary>
     public const float HoverRight = HudLayout.Margin;
 
     /// <summary>Where the map's full heading starts, under the sector panel.</summary>

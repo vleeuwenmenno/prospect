@@ -52,30 +52,18 @@ internal sealed partial class ScreenHost
                 var mapWasOpen = _mapOpen;
                 TrackSocial(snapshot);
                 DrawWorldInterface(snapshot);
-                // The social surfaces and the quick buttons that open them, over the world but under the map and
-                // the menu, which close them first.
+                // The social windows over the world but under the map and the menu, which close them first.
                 if (!_mapOpen && !_sessionMenuOpen)
-                {
-                    if (_socialOpen)
-                        DrawSocialPanel(snapshot);
-                    if (_chatOpen)
-                        DrawChat(snapshot);
-                    DrawQuickBar(snapshot);
-                }
-                else
-                {
-                    _quickBarShown = false;
-                }
+                    DrawSocialWindows(snapshot);
+                if (!_sessionMenuOpen)
+                    DrawTopBar(snapshot);
 
-                // Escape backs out one level at a time: the map closes itself, the command view returns to the
-                // pilot view, and only from the pilot view does it open the menu.
-                if (!mapWasOpen && !_mapOpen && BackPressed())
+                // Escape backs out one level at a time: the map closes itself, chat and the social windows close
+                // (never a pinned one), the command view returns to the pilot view, and only from the pilot view
+                // does it open the menu.
+                if (!mapWasOpen && !_mapOpen && BackPressed() && !SocialBack())
                 {
-                    if (_chatOpen)
-                        _chatOpen = false;
-                    else if (_socialOpen)
-                        _socialOpen = false;
-                    else if (_shipInfoOpen)
+                    if (_shipInfoOpen)
                         _shipInfoOpen = false;
                     else if (_worldSettingsOpen)
                         _worldSettingsOpen = false;
@@ -306,8 +294,8 @@ internal sealed partial class ScreenHost
         var draw = ImGui.GetForegroundDrawList();
         var stats = _app.Stats;
         var size = new float2(Kit.Px(330), Kit.Px(snapshot is null ? 154 : PerformanceHeight));
-        // Under the quick buttons when they are shown, so both stay readable.
-        var top = _quickBarShown && _screen == Screen.Session ? QuickBarBottom + Kit.Px(Theme.Space2) : Kit.Px(Theme.Space5);
+        // Under the navigation bar, so both stay readable.
+        var top = HudTop;
         var min = new float2(_ui.DisplaySize.X - size.X - Kit.Px(Theme.Space5), top);
         Kit.PanelFrame(draw, min, min + size);
 

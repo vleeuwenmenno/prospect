@@ -731,8 +731,8 @@ internal sealed class App : IDisposable
                 _screens.OpenChat();
             else if (view == "hud")
             {
-                // The world with only what is always shown: the party list, the passive chat lines and the
-                // quick buttons, here shown as they look while the pointer is out.
+                // The world with only what is always shown: the navigation bar, the party list, the passive chat
+                // lines and any pinned social window.
             }
             else if (view == "galaxy")
                 _screens.OpenGalaxyOverview();

@@ -1,6 +1,7 @@
 using System.Text;
 using Brutal.ImGuiApi;
 using Brutal.Numerics;
+using Prospect.Client.Social;
 using Prospect.Client.Ui;
 using Prospect.Game.Lobby;
 
@@ -33,6 +34,14 @@ internal sealed partial class ScreenHost
     private float _accountNoticeUntil;
     private ulong _confirmRemove;
     private float _confirmUntil;
+
+    /// <summary>The Friends window's search, and its text as last taken, for comparing without allocating.</summary>
+    private readonly ImInputString _friendSearch = new(65);
+    private string _friendQuery = "";
+    private byte[] _friendQueryUtf8 = [];
+
+    /// <summary>The account whose lists the windows last showed, so another sign-in starts clean.</summary>
+    private string _socialAccount = "";
 
     /// <summary>
     /// A fixed account for captures (<c>--account-sample</c>), read by the same parser as the service's answers:
@@ -90,69 +99,129 @@ internal sealed partial class ScreenHost
     /// <summary>Called when a friends view opens: fetches the lists if they are old. Never signs in by itself.</summary>
     private void EnterAccount() => _app.Accounts.RefreshIfStale(FriendsMaxAge);
 
+    /// <summary>
+    /// Friends out of a game: the social workspace over the menu backdrop, with the navigator and the Friends
+    /// window (and the card once an account is chosen). Escape or the navigator's close goes back to the menu.
+    /// </summary>
     private void DrawAccountScreen(float fade)
     {
         BeginRoot("##account"u8);
-        var display = _ui.DisplaySize;
-        var left = Math.Min(Kit.Px(96), display.X * 0.06f);
-        var min = new float2(left, display.Y * 0.08f + Slide(fade));
+        DrawHints(back: true);
+        var back = BackPressed();
+        EndRoot();
+        Pane(SocialPane.Friends).Open = true;
+        DrawSocialWindows(null);
+        if (back && _screen == Screen.Account)
+            Show(Screen.MainMenu);
+    }
+
+    /// <summary>
+    /// The Friends window: the account (name, friend code, Refresh, Sign out) or the way to sign in, adding a friend
+    /// by code, a search through the lists and the lists themselves. A name opens its card.
+    /// </summary>
+    private void DrawFriendsPane()
+    {
         var view = _app.Accounts.View;
-        // Signed out there is one short card to show; signed in, the lists take the room.
-        var signedIn = view.State == AccountState.SignedIn;
-        var size = new float2(
-            Math.Min(Kit.Px(signedIn ? 1080 : 640), display.X - left * 2),
-            Math.Max(Kit.Px(160), Math.Min(Kit.Px(signedIn ? 760 : 460), display.Y * 0.92f - Kit.Px(72)))
-        );
-        BeginPanel("##accountpanel"u8, min, size);
+        var title = view.State == AccountState.SignedIn && view.Listed ? Kit.F($"Friends   {view.Friends.Length}") : "Friends"u8;
+        if (!BeginPane(SocialPane.Friends, "##socialfriends"u8, title, true, out var width, out var input))
+            return;
 
-        if (Compact)
+        DrawAccountNotice(width);
+        Kit.Space(Theme.Space1);
+        DrawAccountCard(view, width);
+        if (view.State != AccountState.SignedIn)
         {
-            Kit.Caption("ACCOUNT  /  FRIENDS"u8, Theme.Accent);
             Kit.Space(Theme.Space3);
+            Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, "Signing in is optional for a private game: its chat and party work the same without it."u8, width / Kit.Scale);
+            EndPane();
+            return;
         }
-        else
+
+        // Text fields only on a surface the player opened: a pinned window in flight never holds the keyboard.
+        if (input == FloatingInput.Full)
+            DrawAddFriend(view, width);
+        if (view.Listed && input == FloatingInput.Full)
         {
-            Kit.Caption("ACCOUNT"u8, Theme.Accent);
-            Kit.Space(Theme.Space1);
-            Kit.Heading("Friends"u8);
             Kit.Space(Theme.Space4);
+            var fieldWidth = Math.Max(80f, width / Kit.Scale - 4);
+            Kit.TextField("SEARCH YOUR LISTS"u8, "##friendsearch"u8, _friendSearch, fieldWidth);
+            UpdateFriendQuery();
         }
 
-        var lineHeight = Kit.Measure(_ui.Sans, Theme.FontSmall, "Ag"u8).Y;
-        var footer = Kit.Px(Theme.ControlHeight + Theme.Space3 * 2) + lineHeight;
-        var height = Math.Max(Kit.Px(80), ImGui.GetContentRegionAvail().Y - footer);
-        var width = ImGui.GetContentRegionAvail().X;
-        var gap = Kit.Px(Theme.Space6);
-        var side = Kit.Px(380);
-        if (width >= side + gap + Kit.Px(360) && view.State == AccountState.SignedIn)
+        DrawFriendLists(view, width, true);
+        EndPane();
+    }
+
+    /// <summary>Takes the search text as a string only when it changes, never per frame.</summary>
+    private void UpdateFriendQuery()
+    {
+        var typed = _friendSearch.ValueSpan;
+        if (typed.SequenceEqual(_friendQueryUtf8))
+            return;
+        _friendQueryUtf8 = typed.ToArray();
+        _friendQuery = Encoding.UTF8.GetString(typed).Trim();
+    }
+
+    /// <summary>True when the search is empty or the name holds it, ignoring case. The name stays plain text.</summary>
+    private bool MatchesQuery(AccountFriend friend) =>
+        _friendQuery.Length == 0 || friend.Name.Contains(_friendQuery, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Forgets what belonged to the last account when it signs out or another signs in: the typed code, the search,
+    /// an armed Remove. The card's own selection is checked by <see cref="SocialDetail"/>.
+    /// </summary>
+    private void ScrubAccount()
+    {
+        var view = _app.Accounts.View;
+        var id = view.State == AccountState.SignedIn ? view.Id : "";
+        if (id == _socialAccount)
+            return;
+        _socialAccount = id;
+        _friendCode.Clear();
+        _friendSearch.Clear();
+        _friendQuery = "";
+        _friendQueryUtf8 = [];
+        _confirmRemove = 0;
+    }
+
+    /// <summary>
+    /// The card for an account: its name, which list it is in and since when, and that list's actions, sent for the
+    /// account shown. Nothing here claims what the service does not say: no presence, game or activity.
+    /// </summary>
+    private void DrawFriendDetail(AccountView view, AccountFriend? friend, FriendRelation relation, float width)
+    {
+        var wrap = width / Kit.Scale;
+        if (friend is null)
         {
-            // Wide: the account and the code field on the left, the lists on the right, each scrolling on its own.
-            ImGui.BeginChild("##accountside"u8, new float2(side, height), ImGuiChildFlags.NavFlattened, ImGuiWindowFlags.NoBackground);
-            DrawAccountCard(view, side - Kit.Px(Theme.Space3));
-            DrawAddFriend(view, side - Kit.Px(Theme.Space3));
-            ImGui.EndChild();
-            ImGui.SameLine(0, gap);
-            var listWidth = width - side - gap;
-            ImGui.BeginChild("##accountlists"u8, new float2(listWidth, height), ImGuiChildFlags.NavFlattened, ImGuiWindowFlags.NoBackground);
-            DrawFriendLists(view, listWidth - Kit.Px(Theme.Space3), false);
-            ImGui.EndChild();
-        }
-        else
-        {
-            ImGui.BeginChild("##accountbody"u8, new float2(width, height), ImGuiChildFlags.NavFlattened, ImGuiWindowFlags.NoBackground);
-            DrawAccountBody(Math.Min(width, Kit.Px(720)) - Kit.Px(Theme.Space3), true);
-            ImGui.EndChild();
+            Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextDim, "This account is no longer in your lists."u8, wrap);
+            return;
         }
 
+        var draw = ImGui.GetWindowDrawList();
+        var at = ImGui.GetCursorScreenPos();
+        var nameHeight = Kit.Measure(_ui.SansBold, Theme.FontHeading, "Ag"u8).Y;
+        Kit.ClippedText(draw, _ui.SansBold, Theme.FontHeading, at, Theme.Text, friend.NameUtf8, width);
+        ImGui.Dummy(new float2(width, nameHeight));
+        Kit.Space(Theme.Space1);
+        Kit.Label(_ui.SansMedium, Theme.FontCaption, relation == FriendRelation.Friends ? Theme.Accent : Theme.TextDim, relation switch
+        {
+            FriendRelation.Incoming => "ASKS TO BE YOUR FRIEND"u8,
+            FriendRelation.Outgoing => "YOUR REQUEST IS WAITING"u8,
+            _ => "FRIEND"u8,
+        });
+        Kit.Space(Theme.Space1);
+        Kit.Label(_ui.Mono, Theme.FontCaption, Theme.TextMute, relation switch
+        {
+            FriendRelation.Incoming => Kit.F($"ASKED {friend.SinceUtf8}"),
+            FriendRelation.Outgoing => Kit.F($"SENT {friend.SinceUtf8}"),
+            _ => Kit.F($"FRIENDS SINCE {friend.SinceUtf8}"),
+        });
+        Kit.Space(Theme.Space3);
+        Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, "A Discord display name on your PROSPECT account. Whether they are online or in a game is not shown."u8, wrap);
+        Kit.Space(Theme.Space4);
+        FriendActions(view, friend, relation, "##card"u8);
         Kit.Space(Theme.Space2);
         DrawAccountNotice(width);
-        Kit.Space(Theme.Space2);
-        if (Kit.Button("Back"u8, ButtonKind.Secondary, 120) || BackPressed())
-            Show(Screen.MainMenu);
-
-        EndPanel();
-        DrawHints(back: true);
-        EndRoot();
     }
 
     /// <summary>
@@ -195,26 +264,6 @@ internal sealed partial class ScreenHost
 
         Kit.Space(Theme.Space2);
         DrawAccountNotice(width);
-    }
-
-    /// <summary>The account, the code field and the lists in one column, in the current scrolling window.</summary>
-    private void DrawAccountBody(float width, bool menu)
-    {
-        var view = _app.Accounts.View;
-        DrawAccountCard(view, width);
-        if (view.State != AccountState.SignedIn)
-        {
-            if (!menu)
-            {
-                Kit.Space(Theme.Space3);
-                Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, "Signing in is optional. This game, its chat and its party work the same without it."u8, width / Kit.Scale);
-            }
-
-            return;
-        }
-
-        DrawAddFriend(view, width);
-        DrawFriendLists(view, width, true);
     }
 
     private void DrawAccountCard(AccountView view, float width)
@@ -347,7 +396,10 @@ internal sealed partial class ScreenHost
             Kit.Space(Theme.Space1);
             ImGui.PushID("in"u8);
             foreach (var friend in view.Incoming)
-                FriendRow(view, friend, width, FriendList.Incoming);
+            {
+                if (MatchesQuery(friend))
+                    FriendRow(view, friend, width, FriendRelation.Incoming);
+            }
             ImGui.PopID();
         }
 
@@ -358,7 +410,10 @@ internal sealed partial class ScreenHost
             Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextDim, "No friends yet. Share your code, or add theirs."u8, width / Kit.Scale);
         ImGui.PushID("friends"u8);
         foreach (var friend in view.Friends)
-            FriendRow(view, friend, width, FriendList.Friends);
+        {
+            if (MatchesQuery(friend))
+                FriendRow(view, friend, width, FriendRelation.Friends);
+        }
         ImGui.PopID();
 
         if (view.Outgoing.Length > 0)
@@ -368,26 +423,24 @@ internal sealed partial class ScreenHost
             Kit.Space(Theme.Space1);
             ImGui.PushID("out"u8);
             foreach (var friend in view.Outgoing)
-                FriendRow(view, friend, width, FriendList.Outgoing);
+            {
+                if (MatchesQuery(friend))
+                    FriendRow(view, friend, width, FriendRelation.Outgoing);
+            }
             ImGui.PopID();
         }
 
         Kit.Space(Theme.Space4);
-        Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, "Friends belong to your account and last across games. Whether a friend is online, or on this server, is not shown yet."u8, width / Kit.Scale);
-    }
-
-    private enum FriendList : byte
-    {
-        Incoming,
-        Friends,
-        Outgoing,
+        Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, _friendQuery.Length > 0
+            ? "Showing names that contain the search. Friends belong to your account and last across games; whether a friend is online, or on this server, is not shown."u8
+            : "Friends belong to your account and last across games. Whether a friend is online, or on this server, is not shown. Select a name for its card."u8, width / Kit.Scale);
     }
 
     /// <summary>
     /// One account in a list: name, date and its actions, scoped to the account's own id, so a press that began
     /// on one row cannot complete on another that takes its place. Rows out of view are skipped.
     /// </summary>
-    private void FriendRow(AccountView view, AccountFriend friend, float width, FriendList list)
+    private void FriendRow(AccountView view, AccountFriend friend, float width, FriendRelation list)
     {
         var size = new float2(width, Kit.Px(AccountRowHeight));
         if (!ImGui.IsRectVisible(size))
@@ -396,34 +449,64 @@ internal sealed partial class ScreenHost
             return;
         }
 
-        var accounts = _app.Accounts;
         var draw = ImGui.GetWindowDrawList();
         var position = ImGui.GetCursorScreenPos();
-        var buttons = list == FriendList.Incoming ? 2 : 1;
+        var buttons = list == FriendRelation.Incoming ? 2 : 1;
         var buttonsWidth = buttons * Kit.Px(AccountButtonWidth) + (buttons - 1) * Kit.Px(Theme.Space2);
         var textWidth = width - buttonsWidth - Kit.Px(Theme.Space3 * 2);
-        Kit.ClippedText(draw, _ui.SansMedium, Theme.FontBody, position + new float2(Kit.Px(Theme.Space3), Kit.Px(3)), Theme.Text, friend.NameUtf8, textWidth);
         ReadOnlySpan<byte> since = list switch
         {
-            FriendList.Incoming => Kit.F($"ASKED {friend.SinceUtf8}"),
-            FriendList.Outgoing => Kit.F($"SENT {friend.SinceUtf8}"),
+            FriendRelation.Incoming => Kit.F($"ASKED {friend.SinceUtf8}"),
+            FriendRelation.Outgoing => Kit.F($"SENT {friend.SinceUtf8}"),
             _ => Kit.F($"FRIENDS SINCE {friend.SinceUtf8}"),
         };
+
+        // The name opens the card; the press is scoped to the account's own key like the buttons beside it.
+        Kit.PushId(friend.Key);
+        ImGui.SetCursorScreenPos(position);
+        if (ImGui.InvisibleButton("##card"u8, new float2(Math.Max(1f, textWidth + Kit.Px(Theme.Space3)), size.Y)))
+        {
+            _detail.SelectFriend(view, friend);
+            OpenPane(SocialPane.Detail);
+        }
+
+        var selected = _detail.FriendKey == friend.Key && PaneShown(SocialPane.Detail);
+        if (selected || ImGui.IsItemHovered())
+            draw.AddRectFilled(position, position + size, Kit.Color(Theme.PanelRaised, selected ? 0.9f : 0.6f));
+        if (selected)
+            draw.AddRectFilled(position, position + new float2(Kit.Px(3), size.Y), Kit.Color(Theme.Accent));
+        Kit.PopId();
+        Kit.ClippedText(draw, _ui.SansMedium, Theme.FontBody, position + new float2(Kit.Px(Theme.Space3), Kit.Px(3)), Theme.Text, friend.NameUtf8, textWidth);
         Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, position + new float2(Kit.Px(Theme.Space3), Kit.Px(25)), Theme.TextMute, since, textWidth);
 
-        Kit.PushId(friend.Key);
         ImGui.SetCursorScreenPos(new float2(position.X + width - buttonsWidth, position.Y + (size.Y - Kit.Px(Theme.ControlHeight)) * 0.5f));
+        FriendActions(view, friend, list, "##row"u8);
+        draw.AddLine(position + new float2(0, size.Y - 0.5f), position + new float2(width, size.Y - 0.5f), Kit.Color(Theme.Line, 0.6f));
+        ImGui.SetCursorScreenPos(position);
+        ImGui.Dummy(size);
+    }
+
+    /// <summary>
+    /// The actions of an account's list, in a row from the cursor: Accept and Decline, Cancel, or Remove with its
+    /// confirming second press. Sent for <paramref name="friend"/>'s id; scoped to its key and to
+    /// <paramref name="scope"/>, so a press begun on a row or card can only complete on the same account there.
+    /// </summary>
+    private void FriendActions(AccountView view, AccountFriend friend, FriendRelation list, ImString scope)
+    {
+        var accounts = _app.Accounts;
+        Kit.PushId(friend.Key);
+        ImGui.PushID(scope);
         var enabled = !view.Busy;
         switch (list)
         {
-            case FriendList.Incoming:
+            case FriendRelation.Incoming:
                 if (Kit.Button("Accept"u8, ButtonKind.Primary, AccountButtonWidth, enabled))
                     accounts.Accept(friend.Id);
                 ImGui.SameLine(0, Kit.Px(Theme.Space2));
                 if (Kit.Button("Decline"u8, ButtonKind.Secondary, AccountButtonWidth, enabled))
                     accounts.Decline(friend.Id);
                 break;
-            case FriendList.Outgoing:
+            case FriendRelation.Outgoing:
                 if (Kit.Button("Cancel"u8, ButtonKind.Secondary, AccountButtonWidth, enabled))
                     accounts.CancelRequest(friend.Id);
                 break;
@@ -447,10 +530,8 @@ internal sealed partial class ScreenHost
                 break;
         }
 
+        ImGui.PopID();
         Kit.PopId();
-        draw.AddLine(position + new float2(0, size.Y - 0.5f), position + new float2(width, size.Y - 0.5f), Kit.Color(Theme.Line, 0.6f));
-        ImGui.SetCursorScreenPos(position);
-        ImGui.Dummy(size);
     }
 
     /// <summary>The latest account notice as a line, for a few seconds after it changes; an empty line otherwise.</summary>

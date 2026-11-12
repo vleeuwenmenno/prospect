@@ -104,7 +104,9 @@ public sealed class HudLayoutTests
                 Assert.True(free.Left >= HudLayout.ColumnRight(display, scale) + Px(HudLayout.Gap, scale));
                 Assert.True(free.Right <= width - Px(HudLayout.Margin, scale));
                 Assert.True(free.Bottom <= strip.Top - Px(HudLayout.Gap, scale));
-                Assert.True(free.Top >= Px(HudLayout.Margin + (target ? HudLayout.TargetReadoutHeight : HudLayout.QuickBarHeight), scale));
+                // Under the navigation bar, and under the target readout when it is shown.
+                Assert.True(free.Top >= HudLayout.Top(scale));
+                Assert.True(free.Top >= room.Readout.Bottom);
 
                 // The narrowest card fits on every checked screen, a target shown or not; the widest at the
                 // interface's own scale. Where one does not fit it folds back to the marker's label.
@@ -551,5 +553,81 @@ public sealed class HudLayoutTests
         var dashes = MapRoute.Dashes(new float2(-1e9f, -1e9f), new float2(1e9f, 1e9f), screen, 6f, 5f);
         Assert.InRange(dashes, 1, (int)MathF.Ceiling(MathF.Sqrt(1280f * 1280f + 720f * 720f) / 11f) + 1);
         Assert.Equal(0, MapRoute.Dashes(new float2(-100, -100), new float2(-10, -50), screen, 6f, 5f));
+    }
+    [Theory]
+    [MemberData(nameof(Screens))]
+    public void EveryPieceUnderTheBarStartsBelowItAndTheBarTakesLittleMoreThanTheOldMargin(float width, float height, float scale)
+    {
+        var display = new float2(width, height);
+        var bar = HudLayout.TopBarBottom(scale);
+        Assert.True(HudLayout.Top(scale) > bar);
+        // The bar and its step cost at most 8 design pixels more than the old top margin.
+        Assert.True(HudLayout.Top(scale) - Px(HudLayout.Margin, scale) <= Px(8, scale));
+        foreach (var target in new[] { false, true })
+        {
+            var room = new HudCueRoom(display, scale, Px(140, scale), target, true);
+            Assert.True(room.Screen.Top >= bar);
+            Assert.True(HudLayout.NavFree(display, scale, target).Top >= bar);
+            if (target)
+                Assert.True(room.Readout.Bottom >= HudLayout.Top(scale) + Px(HudLayout.TargetReadoutHeight, scale));
+        }
+
+        Assert.True(MapUnitList.Layout(display, scale, 3, HudLayout.Top(scale) + Px(116, scale), width).Min.Y > bar);
+    }
+
+    [Theory]
+    [MemberData(nameof(Screens))]
+    public void AFloatingWindowAlwaysKeepsItsTitleBarAndBodyOnScreenUnderTheBar(float width, float height, float scale)
+    {
+        var display = new float2(width, height);
+        var margin = Px(FloatingWindow.Margin, scale);
+        var top = HudLayout.TopBarBottom(scale) + margin;
+        foreach (var design in new[] { new float2(240, 270), new float2(460, 600), new float2(540, 340), new float2(2000, 2000) })
+        {
+            var size = FloatingWindow.Fit(new float2(Px(design.X, scale), Px(design.Y, scale)), display, scale);
+            Assert.True(size.X <= width - margin * 2 && size.Y <= height - top - margin, $"size {size}");
+            foreach (var at in new[] { new float2(-5000, -5000), new float2(5000, 5000), new float2(width * 0.5f, -1), new float2(-1, height) })
+            {
+                var window = new FloatingWindow { Min = at, Placed = true };
+                var rect = window.Rect(new float2(Px(design.X, scale), Px(design.Y, scale)), default, display, scale);
+                Assert.True(rect.Left >= margin && rect.Right <= width - margin, $"{rect}");
+                Assert.True(rect.Top >= top && rect.Bottom <= height - margin, $"{rect}");
+            }
+        }
+
+        // A window placed on a large screen comes back on screen when the window or the scale shrinks.
+        var placed = new FloatingWindow { Min = new float2(1800, 900), Placed = true };
+        var shrunk = placed.Rect(new float2(Px(360, scale), Px(420, scale)), default, display, scale);
+        Assert.True(shrunk.Right <= width - margin && shrunk.Bottom <= height - margin);
+    }
+
+    [Fact]
+    public void MarkersKeepClearOfAPinnedWindowAndTheNavCardNeverCoversOne()
+    {
+        var display = new float2(1920, 1080);
+        var panel = new HudRect(1200, 300, 1560, 640);
+        var empty = new HudCueRoom(display, 1f, 140f, false, false);
+        var room = new HudCueRoom(display, 1f, 140f, false, false, default, [panel], 1);
+        var inside = new float2(1380, 470);
+        Assert.True(empty.Clear(inside, empty.Reach));
+        Assert.False(room.Clear(inside, room.Reach));
+        Assert.True(room.Space(inside) < 0f);
+
+        // An arrow toward the panel stops short of it, ring and gap included.
+        var start = room.Start;
+        var toward = inside - start;
+        var edge = room.Edge(start, toward / MathF.Sqrt(toward.X * toward.X + toward.Y * toward.Y));
+        Assert.True(edge.X <= panel.Left - room.Reach - room.Gap + 0.5f, $"{edge}");
+        Assert.True(room.Crosses(start, inside));
+
+        // The NAV card goes elsewhere or folds rather than over the panel.
+        var size = new float2(Px(HudLayout.NavCardMin, 1f), Px(HudLayout.NavCardHeight, 1f));
+        var free = HudLayout.NavFree(display, 1f, false);
+        if (HudLayout.PlaceNavCard(new float2(1150, 470), size, free, room, 1f, out var min))
+            Assert.False(panel.Overlaps(new HudRect(min.X, min.Y, min.X + size.X, min.Y + size.Y)));
+
+        // Counted panels only: an array with room for more is read up to its count.
+        var counted = new HudCueRoom(display, 1f, 140f, false, false, default, [default, panel], 1);
+        Assert.True(counted.Clear(inside, counted.Reach));
     }
 }

@@ -116,6 +116,9 @@ internal sealed partial class ScreenHost
         }
 
         Kit.Fade = 1f;
+        // The game screen draws its own bar, between the world's windows and its menu.
+        if (_screen is Screen.MainMenu or Screen.Account or Screen.Settings)
+            DrawTopBar(snapshot);
         if (_app.ShowPerformance)
             DrawPerformance(snapshot);
     }

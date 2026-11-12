@@ -69,8 +69,11 @@ internal static class HudLayout
     /// <summary>The space kept between two neighbouring pieces.</summary>
     public const float Gap = 12f;
 
-    /// <summary>Height of the quick buttons at the top right.</summary>
-    public const float QuickBarHeight = 32f;
+    /// <summary>
+    /// Height of the navigation bar along the top edge. Every piece under it starts at <see cref="Top"/>, so nothing
+    /// is ever drawn under the bar.
+    /// </summary>
+    public const float TopBarHeight = 28f;
 
     /// <summary>The target readout at the top centre, at its tallest, and its width.</summary>
     public const float TargetReadoutHeight = 104f;
@@ -108,6 +111,16 @@ internal static class HudLayout
     public const float NavMarkerClear = 16f;
 
     private static float Px(float design, float scale) => MathF.Round(design * scale);
+
+    /// <summary>The bar's bottom edge in pixels.</summary>
+    public static float TopBarBottom(float scale) => Px(TopBarHeight, scale);
+
+    /// <summary>
+    /// Where the pieces under the navigation bar start, one small step below it. The bar and the step together
+    /// cost the view only a few pixels more than the old top margin, so the target readout and the strip still
+    /// leave the middle of a 1655 by 688 screen at twice the scale to the cues.
+    /// </summary>
+    public static float Top(float scale) => Px(TopBarHeight, scale) + Px(Theme.Space1, scale);
 
     /// <summary>The top of the pilot console.</summary>
     public static float ConsoleTop(float2 display, float scale) => FlightConsole.Layout(display, scale).Top;
@@ -174,12 +187,13 @@ internal static class HudLayout
     }
 
     /// <summary>
-    /// Where the NAV card may go: right of the left column, under the quick buttons (or the target readout when a
+    /// Where the NAV card may go: right of the left column, under the navigation bar (and the target readout when a
     /// target is shown), inside the right margin and above the jump strip.
     /// </summary>
     public static HudRect NavFree(float2 display, float scale, bool targetShown)
     {
-        var top = Px(Margin, scale) + Px(targetShown ? TargetReadoutHeight : QuickBarHeight, scale) + Px(Gap, scale);
+        // A small step under the readout, as under the bar: on a short screen at a large scale the card needs it.
+        var top = Top(scale) + (targetShown ? Px(TargetReadoutHeight, scale) + Px(Theme.Space2, scale) : 0f);
         return new HudRect(ColumnRight(display, scale) + Px(Gap, scale), top, display.X - Px(Margin, scale), Strip(display, scale).Top - Px(Gap, scale));
     }
 
@@ -201,7 +215,7 @@ internal static class HudLayout
         var clear = Px(NavMarkerClear, scale);
         var covers = marker.X > min.X - clear && marker.X < min.X + size.X + clear && marker.Y > min.Y - clear && marker.Y < min.Y + size.Y + clear;
         // The tie from the marker to the card never crosses a panel, the strip or the console.
-        return !covers && !room.Chat.Overlaps(new HudRect(min.X, min.Y, min.X + size.X, min.Y + size.Y))
+        return !covers && !room.Covers(new HudRect(min.X, min.Y, min.X + size.X, min.Y + size.Y))
             && !room.Crosses(marker, NavTieAnchor(marker, min, size));
     }
 
@@ -255,14 +269,14 @@ internal static class HudLayout
 
 /// <summary>
 /// Where the target's and the plotted jump's markers may sit over the pilot view: inside the screen's margins,
-/// under the quick buttons, above the pilot console, and clear of the left column, recent chat, target readout and jump
-/// strip while each is drawn. Built once a frame and handed to every marker, so the target's arrow, the NAV marker
+/// under the navigation bar, above the pilot console, and clear of the left column, recent chat, target readout, jump
+/// strip and every window the player pinned over the view while each is drawn. Built once a frame and handed to every marker, so the target's arrow, the NAV marker
 /// and the NAV card's tie all keep the same clearances. Rectangles are the pieces themselves; each test grows them
 /// by the room it needs.
 /// </summary>
 internal readonly struct HudCueRoom
 {
-    /// <summary>The area markers live in: inside the margins, under the quick buttons, above the console.</summary>
+    /// <summary>The area markers live in: inside the margins, under the navigation bar, above the console.</summary>
     public readonly HudRect Screen;
 
     /// <summary>The left column, target readout, jump strip and recent chat; empty when not drawn.</summary>
@@ -270,6 +284,13 @@ internal readonly struct HudCueRoom
     public readonly HudRect Readout;
     public readonly HudRect Strip;
     public readonly HudRect Chat;
+
+    /// <summary>
+    /// Windows the player pinned over the view, the first <see cref="PanelCount"/> of them. The array is the
+    /// caller's and is read only while this frame's markers are placed.
+    /// </summary>
+    public readonly HudRect[]? Panels;
+    public readonly int PanelCount;
 
     /// <summary>A cue's reach round its point, and the gap kept between a cue and a piece, in pixels.</summary>
     public readonly float Reach;
@@ -281,18 +302,20 @@ internal readonly struct HudCueRoom
     /// </summary>
     public readonly float2 Start;
 
-    public HudCueRoom(float2 display, float scale, float columnBottom, bool targetShown, bool strip, HudRect chat = default)
+    public HudCueRoom(float2 display, float scale, float columnBottom, bool targetShown, bool strip, HudRect chat = default, HudRect[]? panels = null, int panelCount = 0)
     {
         float Px(float design) => MathF.Round(design * scale);
 
         Reach = Px(HudLayout.CueReach);
         Gap = Px(HudLayout.Gap);
-        Screen = new HudRect(Px(HudLayout.Margin), Px(HudLayout.Margin + HudLayout.QuickBarHeight), display.X - Px(HudLayout.Margin), HudLayout.ConsoleTop(display, scale));
+        Screen = new HudRect(Px(HudLayout.Margin), HudLayout.Top(scale), display.X - Px(HudLayout.Margin), HudLayout.ConsoleTop(display, scale));
         Column = new HudRect(0f, 0f, HudLayout.ColumnRight(display, scale), columnBottom);
         var half = Px(HudLayout.TargetReadoutWidth) * 0.5f;
-        Readout = targetShown ? new HudRect(display.X * 0.5f - half, 0f, display.X * 0.5f + half, Px(HudLayout.Margin + HudLayout.TargetReadoutHeight)) : default;
+        Readout = targetShown ? new HudRect(display.X * 0.5f - half, 0f, display.X * 0.5f + half, HudLayout.Top(scale) + Px(HudLayout.TargetReadoutHeight)) : default;
         Strip = strip ? HudLayout.Strip(display, scale) : default;
         Chat = chat;
+        Panels = panels;
+        PanelCount = panels is null ? 0 : Math.Clamp(panelCount, 0, panels.Length);
 
         // Straight down from the middle of the view to the first piece under it, straight up to the first over it.
         var pad = Gap + Reach;
@@ -321,14 +344,39 @@ internal readonly struct HudCueRoom
     {
         if (point.X < Screen.Left + pad || point.X > Screen.Right - pad || point.Y < Screen.Top + pad || point.Y > Screen.Bottom - pad)
             return false;
-        return !Inside(Column, point, pad) && !Inside(Readout, point, pad) && !Inside(Strip, point, pad) && !Inside(Chat, point, pad);
+        if (Inside(Column, point, pad) || Inside(Readout, point, pad) || Inside(Strip, point, pad) || Inside(Chat, point, pad))
+            return false;
+        for (var i = 0; i < PanelCount; i++)
+        {
+            if (Inside(Panels![i], point, pad))
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>True when a rectangle shares an area with the recent chat or a pinned window.</summary>
+    public bool Covers(in HudRect rect)
+    {
+        if (Chat.Overlaps(rect))
+            return true;
+        for (var i = 0; i < PanelCount; i++)
+        {
+            if (Panels![i].Overlaps(rect))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>The largest marker half-size that fits at a point; negative when the point is obstructed.</summary>
     public float Space(float2 point)
     {
         var space = Math.Min(Math.Min(point.X - Screen.Left, Screen.Right - point.X), Math.Min(point.Y - Screen.Top, Screen.Bottom - point.Y));
-        return Math.Min(space, Math.Min(Math.Min(Outside(Column, point), Outside(Readout, point)), Math.Min(Outside(Strip, point), Outside(Chat, point))));
+        space = Math.Min(space, Math.Min(Math.Min(Outside(Column, point), Outside(Readout, point)), Math.Min(Outside(Strip, point), Outside(Chat, point))));
+        for (var i = 0; i < PanelCount; i++)
+            space = Math.Min(space, Outside(Panels![i], point));
+        return space;
     }
 
     private static float Outside(in HudRect box, float2 point) => box.Right <= box.Left ? float.PositiveInfinity
@@ -354,6 +402,8 @@ internal readonly struct HudCueRoom
         t = Math.Min(t, Entry(Readout, pad, from, direction));
         t = Math.Min(t, Entry(Strip, pad, from, direction));
         t = Math.Min(t, Entry(Chat, pad, from, direction));
+        for (var i = 0; i < PanelCount; i++)
+            t = Math.Min(t, Entry(Panels![i], pad, from, direction));
         return from + direction * Math.Max(float.IsFinite(t) ? t : 0f, 0f);
     }
 
@@ -361,7 +411,15 @@ internal readonly struct HudCueRoom
     public bool Crosses(float2 from, float2 to)
     {
         var along = to - from;
-        return Entry(Column, 0f, from, along) < 1f || Entry(Readout, 0f, from, along) < 1f || Entry(Strip, 0f, from, along) < 1f || Entry(Chat, 0f, from, along) < 1f;
+        if (Entry(Column, 0f, from, along) < 1f || Entry(Readout, 0f, from, along) < 1f || Entry(Strip, 0f, from, along) < 1f || Entry(Chat, 0f, from, along) < 1f)
+            return true;
+        for (var i = 0; i < PanelCount; i++)
+        {
+            if (Entry(Panels![i], 0f, from, along) < 1f)
+                return true;
+        }
+
+        return false;
     }
 
     private static bool Inside(in HudRect box, float2 point, float pad) =>

@@ -59,7 +59,13 @@ internal sealed partial class ScreenHost
     private float _columnBottom;
     private HudRect _chatFeedBounds;
 
-    /// <summary>True while the player is in space with nothing open over it, so input belongs to the world.</summary>
+    /// <summary>Where the heads-up pieces start: under the navigation bar.</summary>
+    private static float HudTop => HudLayout.Top(Kit.Scale);
+
+    /// <summary>
+    /// True while the player is in space with nothing open over it, so input belongs to the world. Pinned social
+    /// windows are not open surfaces: they never take flight's input.
+    /// </summary>
     public bool WorldInputEnabled => _screen == Screen.Session && !_sessionMenuOpen && !_mapOpen && !_shipInfoOpen && !_controlsOpen && !_socialOpen && !_chatOpen;
 
     public void OpenShipInfo() => _shipInfoOpen = true;
@@ -133,13 +139,16 @@ internal sealed partial class ScreenHost
             var limit = pilot > 0.01f ? ReservedTop(Kit.Px(HudLayout.Margin), HudLayout.ColumnRight(_ui.DisplaySize, Kit.Scale)) : _ui.DisplaySize.Y - Kit.Px(Theme.Space5);
             var party = PartyHudCardsHeight(snapshot);
             var gap = Kit.Px(Theme.Space3);
-            var compactSector = party > 0 && Kit.Px(Theme.Space5) + SectorPanelHeight(world, false) + gap + party > limit;
-            var cards = !compactSector || Kit.Px(Theme.Space5) + SectorPanelHeight(world, true) + gap + party <= limit;
-            var sectorBottom = Kit.Px(Theme.Space5) + SectorPanelHeight(world, compactSector);
+            var compactSector = party > 0 && HudTop + SectorPanelHeight(world, false) + gap + party > limit;
+            var cards = !compactSector || HudTop + SectorPanelHeight(world, true) + gap + party <= limit;
+            var sectorBottom = HudTop + SectorPanelHeight(world, compactSector);
             _columnBottom = HudLayout.PartyRows(sectorBottom, limit, cards, snapshot.Social.Invitation.Player != 0,
                 snapshot.Social.PartyCount >= 2 ? OtherMembers(snapshot) : 0, Kit.Scale).Bottom;
-            // The same layout pass measures and paints the wrapped lines so their reserved bounds cannot drift.
-            _chatFeedBounds = _chatOpen ? default : DrawChatFeed(draw, snapshot, _columnBottom, paint: false);
+            // The same layout pass measures and paints the wrapped lines so their reserved bounds cannot drift. With
+            // the chat window on screen the recent lines are its own.
+            var chatShown = PaneShown(SocialPane.Chat);
+            _chatFeedBounds = chatShown ? default : DrawChatFeed(draw, snapshot, _columnBottom, paint: false);
+            CollectPaneRects();
             if (pilot > 0.01f)
                 DrawFlightReadouts(draw, snapshot, world, pilot);
             if (world.CommandBlend > 0.01f)
@@ -148,7 +157,7 @@ internal sealed partial class ScreenHost
                 DrawTargetReadout(draw, snapshot, world, pilot);
             DrawSectorPanel(draw, snapshot, world, compactSector);
             DrawPartyHud(draw, snapshot, world, sectorBottom, limit, cards);
-            if (!_chatOpen)
+            if (!chatShown)
                 DrawChatFeed(draw, snapshot, _columnBottom, paint: true);
             if (_shipInfoOpen)
                 DrawSheet(draw, snapshot, world);
@@ -197,7 +206,7 @@ internal sealed partial class ScreenHost
     {
         // The panel grows by what there is to say about the sector's ore; a sector without asteroids has none.
         // Under the map it stays short: the map's own heading sits below it, and the map describes sectors itself.
-        var min = new float2(Kit.Px(Theme.Space5), Kit.Px(Theme.Space5));
+        var min = new float2(Kit.Px(Theme.Space5), HudTop);
         var width = HudLayout.ColumnWidth(_ui.DisplaySize, Kit.Scale);
         var inner = width - Kit.Px(Theme.Space4) * 2;
         var hasRock = world.Sector.AsteroidCount > 0 && !_mapOpen;
@@ -291,7 +300,7 @@ internal sealed partial class ScreenHost
         }
 
         // One clear room for every marker that moves with the world: the target's and the plotted jump's.
-        var room = new HudCueRoom(display, Kit.Scale, _columnBottom, world.TargetHull != 0 || world.TargetRock is not null, _jumpPrompt != JumpPrompt.None, _chatFeedBounds);
+        var room = new HudCueRoom(display, Kit.Scale, _columnBottom, world.TargetHull != 0 || world.TargetRock is not null, _jumpPrompt != JumpPrompt.None, _chatFeedBounds, _paneRects, _paneRectCount);
         DrawTargetMarkers(draw, snapshot, world, room);
         DrawNavTarget(draw, world, room, _jumpPrompt);
 
@@ -427,7 +436,7 @@ internal sealed partial class ScreenHost
 
         var title = "COMMAND"u8;
         var titleSize = Kit.Measure(_ui.SansMedium, Theme.FontSmall, title);
-        var top = new float2(display.X * 0.5f, Kit.Px(Theme.Space5));
+        var top = new float2(display.X * 0.5f, HudTop);
         Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, top - new float2(titleSize.X * 0.5f, 0), Theme.Accent, title);
         var status = world.CommandFollowing
             ? Kit.F($"{world.Selection.Length + world.SelectedRocks.Length} SELECTED   FOLLOWING   RANGE {world.CommandDistance / 1000f:0.00} KM")
@@ -453,8 +462,8 @@ internal sealed partial class ScreenHost
 
         var rowHeight = Kit.Px(44);
         var size = new float2(Kit.Px(300), Kit.Px(54) + rowHeight * owned);
-        // Under the quick buttons, and under the performance overlay when it is shown.
-        var top = QuickBarBottom + Kit.Px(Theme.Space3) + (_app.ShowPerformance ? Kit.Px(PerformanceHeight + Theme.Space2) : 0f);
+        // Under the navigation bar, and under the performance overlay when it is shown.
+        var top = HudTop + (_app.ShowPerformance ? Kit.Px(PerformanceHeight + Theme.Space2) : 0f);
         var min = new float2(_ui.DisplaySize.X - size.X - Kit.Px(Theme.Space5), top);
         ImGui.SetNextWindowPos(min);
         ImGui.SetNextWindowSize(size);
@@ -648,7 +657,7 @@ internal sealed partial class ScreenHost
             var mine = target.Owner == snapshot.PlayerId;
             var color = mine ? Theme.Accent : Theme.Info;
             var size = new float2(Kit.Px(HudLayout.TargetReadoutWidth), Kit.Px(HudLayout.TargetReadoutHeight));
-            var min = new float2((display.X - size.X) * 0.5f, Kit.Px(Theme.Space5));
+            var min = new float2((display.X - size.X) * 0.5f, HudTop);
             Kit.PanelFrame(draw, min, min + size);
             var text = min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3));
             Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, text, color, mine ? "TARGET  -  YOURS"u8 : "TARGET"u8);
@@ -671,7 +680,7 @@ internal sealed partial class ScreenHost
         else if (world.TargetRock is { } targetRock && world.TryGetRock(targetRock, out var rockPosition, out var rockRadius))
         {
             var size = new float2(Kit.Px(HudLayout.TargetReadoutWidth), Kit.Px(92));
-            var min = new float2((display.X - size.X) * 0.5f, Kit.Px(Theme.Space5));
+            var min = new float2((display.X - size.X) * 0.5f, HudTop);
             Kit.PanelFrame(draw, min, min + size);
             var text = min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3));
             var mass = world.Galaxy!.AsteroidDensity * 4.18879f * MathF.Pow(rockRadius * RockField.SolidFraction, 3);
@@ -777,7 +786,7 @@ internal sealed partial class ScreenHost
         var galaxy = world.Galaxy!;
         var line = Kit.Px(21);
         var size = new float2(Kit.Px(400), Kit.Px(Theme.Space5 * 2 + 46) + line * 10);
-        var min = new float2(_ui.DisplaySize.X - size.X - Kit.Px(300 + Theme.Space5 * 2), (_ui.DisplaySize.Y - size.Y) * 0.5f);
+        var min = new float2(_ui.DisplaySize.X - size.X - Kit.Px(300 + Theme.Space5 * 2), Math.Max(HudLayout.TopBarBottom(Kit.Scale), (_ui.DisplaySize.Y - size.Y) * 0.5f));
         Kit.PanelFrame(draw, min, min + size);
 
         var left = min.X + Kit.Px(Theme.Space5);
@@ -832,7 +841,7 @@ internal sealed partial class ScreenHost
         var line = Kit.Px(21);
         var size = new float2(Kit.Px(400), Kit.Px(Theme.Space5 * 2 + 46) + line * 25);
         var inset = besideFleetList ? Kit.Px(300 + Theme.Space5 * 2) : Kit.Px(Theme.Space5);
-        var min = new float2(_ui.DisplaySize.X - size.X - inset, (_ui.DisplaySize.Y - size.Y) * 0.5f);
+        var min = new float2(_ui.DisplaySize.X - size.X - inset, Math.Max(HudLayout.TopBarBottom(Kit.Scale), (_ui.DisplaySize.Y - size.Y) * 0.5f));
         Kit.PanelFrame(draw, min, min + size);
 
         var left = min.X + Kit.Px(Theme.Space5);
@@ -929,6 +938,8 @@ internal sealed partial class ScreenHost
         world.PruneSelection();
         var units = LayoutMapUnits(snapshot, world);
         _mapPointer.Block(units.Min, units.Size);
+        // The navigation bar is drawn over the map and is never the map's.
+        _mapPointer.Block(float2.Zero, new float2(display.X, HudLayout.TopBarBottom(Kit.Scale)));
         if (_mapMenuOpen)
         {
             _mapMenuTime += _ui.DeltaTime;
@@ -1216,7 +1227,7 @@ internal sealed partial class ScreenHost
         else
         {
             // In the column the sector panel and the unit list share, its text on their text's edge.
-            var at = new float2(Kit.Px(HudLayout.Margin + Theme.Space4), MapUnitList.HeadingTop(Kit.Px(Theme.Space5) + SectorPanelHeight(world, false), Kit.Scale));
+            var at = new float2(Kit.Px(HudLayout.Margin + Theme.Space4), MapUnitList.HeadingTop(HudTop + SectorPanelHeight(world, false), Kit.Scale));
             var width = units.Size.X - Kit.Px(Theme.Space4) * 2;
             Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, at, Theme.Accent, "NAVIGATION"u8);
             Kit.Text(draw, _ui.SansBold, Theme.FontHeading, at + new float2(0, Kit.Px(16)), Theme.Text, "Galaxy Map"u8);
@@ -1389,7 +1400,7 @@ internal sealed partial class ScreenHost
         // sector or one hint for an unexplored one, the sector's character, and the closing hint.
         var line = Kit.Px(20);
         var panelSize = new float2(Kit.Px(MapHoverWidth), Kit.Px(Theme.Space4 * 2 + 62 + 4 + 16) + line * (known ? 5 : 3) + characterHeight);
-        var panelMin = new float2(MapUnitList.HoverCardLeft(display.X, Kit.Scale, MapHoverWidth, MapUnitList.HoverRight), Kit.Px(MapUnitList.HoverTop));
+        var panelMin = new float2(MapUnitList.HoverCardLeft(display.X, Kit.Scale, MapHoverWidth, MapUnitList.HoverRight), HudTop);
         Kit.PanelFrame(draw, panelMin, panelMin + panelSize);
         var text = panelMin + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space4));
 

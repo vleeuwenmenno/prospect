@@ -60,8 +60,10 @@ internal sealed partial class ScreenHost
         BeginRoot("##settings"u8);
         var settings = _app.Settings;
         const float rowWidth = 520;
-        var min = new float2(Kit.Px(96), _ui.DisplaySize.Y * 0.08f + Slide(fade));
-        var size = new float2(Kit.Px(rowWidth + Theme.Space6 * 2 + 14), Math.Min(Kit.Px(1240), _ui.DisplaySize.Y * 0.84f));
+        // Under the navigation bar at any scale.
+        var top = Math.Max(_ui.DisplaySize.Y * 0.08f, HudTop);
+        var min = new float2(Kit.Px(96), top + Slide(fade));
+        var size = new float2(Kit.Px(rowWidth + Theme.Space6 * 2 + 14), Math.Min(Kit.Px(1240), Math.Min(_ui.DisplaySize.Y * 0.84f, _ui.DisplaySize.Y - top - Kit.Px(Theme.Space3))));
         BeginPanel("##settingspanel"u8, min, size);
 
         Kit.Caption("CONFIGURATION"u8, Theme.Accent);

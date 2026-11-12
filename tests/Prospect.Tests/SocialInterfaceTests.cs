@@ -3,6 +3,7 @@ using Prospect.Client.Social;
 using Prospect.Engine.Net;
 using Prospect.Engine.Time;
 using Prospect.Game.Client;
+using Prospect.Game.Lobby;
 using Prospect.Game.Protocol;
 using Prospect.Game.Server;
 using Prospect.Game.World;
@@ -192,5 +193,93 @@ public sealed class SocialInterfaceTests
         r.Step();
         Assert.Equal(0, r.View(0).Social.PartyCount);
         Assert.Equal(0, r.View(1).Social.PartyCount);
+    }
+    [Fact]
+    public void TheCardInvitesExactlyThePlayerItShowsAndForgetsThemInAnotherSession()
+    {
+        using var r = new Rig(3);
+        var a = r.View(0).PlayerId;
+        var c = r.View(2).PlayerId;
+        var session = new object();
+        var detail = new SocialDetail();
+        detail.SelectPlayer(session, c);
+
+        // The card reads the player again from this frame's roster by session id, and its Invite goes to them.
+        var social = r.View(0).Social;
+        var index = detail.Roster(session, social);
+        Assert.True(index >= 0);
+        var entry = social.Roster[index];
+        Assert.Equal(c, entry.Player);
+        Assert.True(SocialView.CanInvite(social, a, entry, r.Content.Social.PartySize));
+        Assert.True(r.Bridge(0).Invite(entry.Player));
+        r.Step();
+        Assert.Equal(a, r.View(2).Social.Invitation.Player);
+        Assert.Equal(0u, r.View(1).Social.Invitation.Player);
+
+        // An account change leaves a session's player alone; another session forgets them.
+        using var signedOut = AccountClient.Sample(AccountState.SignedOut, default, default, AccountNotice.None, null);
+        Assert.False(detail.Scrub(signedOut.View, session));
+        Assert.True(detail.ShowsPlayer);
+        Assert.Equal(-1, detail.Roster(new object(), social));
+        Assert.True(detail.Scrub(signedOut.View, new object()));
+        Assert.False(detail.ShowsPlayer);
+        Assert.Equal(-1, detail.Roster(session, social));
+
+        // A session id the roster does not hold reads as gone.
+        detail.SelectPlayer(session, 0xFFFF);
+        Assert.Equal(-1, detail.Roster(session, r.View(0).Social));
+    }
+
+    private const string AccountA = """{"id":"0123456789abcdef0123456789abcdef","name":"メノ","friendCode":"0123456789ABCDEF"}""";
+    private const string AccountB = """{"id":"fedcba9876543210fedcba9876543210","name":"Other","friendCode":"FEDCBA9876543210"}""";
+    private const string Ceres = "00000000000000000000000000000001";
+    private const string Vesta = "00000000000000000000000000000002";
+    private const string Asker = "00000000000000000000000000000003";
+
+    private static string Entry(string id, string name) => $$"""{"id":"{{id}}","name":"{{name}}","since":"2026-11-01T10:00:00+00:00"}""";
+
+    private static AccountClient Sample(string account, string friends, string incoming = "") =>
+        AccountClient.Sample(AccountState.SignedIn, Encoding.UTF8.GetBytes(account),
+            Encoding.UTF8.GetBytes($$"""{"friends":[{{friends}}],"incoming":[{{incoming}}],"outgoing":[]}"""), AccountNotice.None, null);
+
+    [Fact]
+    public void TheCardFollowsItsAccountByIdentityAndForgetsItWhenTheSignInChanges()
+    {
+        using var first = Sample(AccountA, Entry(Ceres, "Ceres") + "," + Entry(Vesta, "## %s"), Entry(Asker, "Asker"));
+        var detail = new SocialDetail();
+        var vesta = first.View.Friends[1];
+        detail.SelectFriend(first.View, vesta);
+        Assert.Same(vesta, detail.Friend(first.View, out var relation));
+        Assert.Equal(FriendRelation.Friends, relation);
+
+        // The lists refresh in another order without Ceres: the card still acts on Vesta's id, never a row's.
+        using var refreshed = Sample(AccountA, Entry(Vesta, "## %s"), Entry(Asker, "Asker"));
+        var shown = detail.Friend(refreshed.View, out relation);
+        Assert.NotNull(shown);
+        Assert.Equal(Vesta, shown.Id);
+        Assert.Equal("## %s", shown.Name);
+
+        // An incoming request is found in its own list, with its own actions.
+        detail.SelectFriend(refreshed.View, refreshed.View.Incoming[0]);
+        Assert.Equal(Asker, detail.Friend(refreshed.View, out relation)!.Id);
+        Assert.Equal(FriendRelation.Incoming, relation);
+
+        // Removed elsewhere: the card says so and offers nothing.
+        detail.SelectFriend(refreshed.View, shown);
+        using var removed = Sample(AccountA, Entry(Ceres, "Ceres"));
+        Assert.Null(detail.Friend(removed.View, out _));
+        Assert.False(detail.Scrub(removed.View, null));
+        Assert.True(detail.ShowsFriend);
+
+        // Another account signs in with the same friend: the old card is forgotten, not shown to them.
+        using var other = Sample(AccountB, Entry(Vesta, "## %s"));
+        Assert.Null(detail.Friend(other.View, out _));
+        Assert.True(detail.Scrub(other.View, null));
+        Assert.False(detail.ShowsFriend);
+
+        detail.SelectFriend(refreshed.View, shown);
+        using var signedOut = AccountClient.Sample(AccountState.SignedOut, default, default, AccountNotice.None, null);
+        Assert.True(detail.Scrub(signedOut.View, null));
+        Assert.False(detail.ShowsFriend);
     }
 }

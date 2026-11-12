@@ -90,6 +90,22 @@ public sealed class FrameOrderTests : IDisposable
     private float _mapWheel;
     private float2 _mapPan;
 
+    // A social window drawn after the world with the production helper, as ScreenHost draws a pinned or open one,
+    // and what its title bar did. Full is a surface the player opened; otherwise the pointer decides, as in the game.
+    private FloatingWindow? _floating;
+    private bool _floatingFull;
+    private bool _floatingField;
+    private readonly ImInputString _floatingText = new(64);
+    private int _floatingCloses;
+    private static readonly float2 FloatingSize = new(360, 240);
+    private static readonly float2 FloatingAt = new(400, 200);
+
+    // The navigation bar over the map, its tab and how often that tab was pressed.
+    private bool _barShown;
+    private int _barClicks;
+    private static readonly float2 BarTabMin = new(48, 0);
+    private static readonly float2 BarTabSize = new(80, 28);
+
     // The course menu as the map opens it on a right click, and what its rows ordered.
     private static readonly float2 MenuSize = MapCourseMenu.Size(1f);
     private bool _menuOpen;
@@ -256,6 +272,55 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     [Theory]
+    [InlineData(1280f, 720f, 1f)]
+    [InlineData(1655f, 688f, 1f)]
+    [InlineData(1920f, 1080f, 1f)]
+    [InlineData(1280f, 720f, 2f)]
+    [InlineData(1655f, 688f, 2f)]
+    [InlineData(1920f, 1080f, 2f)]
+    public void TheBarHoldsEveryTabAndTheAccountNameWithTheShippedFonts(float width, float height, float scale)
+    {
+        var shipped = ShippedFonts();
+        ImGui.GetStyle().FontScaleMain = scale;
+        _ui.NewFrame();
+        try
+        {
+            var display = new float2(width, height);
+            var font = shipped.SansMedium;
+            var bar = HudLayout.TopBarBottom(scale);
+            Assert.True(Kit.Measure(font, Theme.FontSmall, "Agメノ"u8).Y <= bar - 2 * scale);
+            Span<float> left = stackalloc float[5];
+            Span<float> tabWidth = stackalloc float[5];
+            Span<float> measured = stackalloc float[5];
+            ReadOnlySpan<string> game = ["PLAY", "FLEET", "MAP", "SOCIAL", "SETTINGS"];
+            foreach (var count in new[] { 5, 3 })
+            {
+                var labels = measured[..count];
+                for (var i = 0; i < count; i++)
+                    labels[i] = Kit.Measure(font, Theme.FontSmall, Encoding.UTF8.GetBytes(count == 5 ? game[i] : game[i == 0 ? 0 : i + 2])).X;
+                // The Japanese name, the longest a name may be, and the sign-in prompt.
+                foreach (var name in new[] { "メノ", "WWWWWWWWWWWWWWWWWWWWWWWW", "SIGN IN WITH DISCORD" })
+                {
+                    var want = Kit.Measure(font, Theme.FontSmall, Encoding.UTF8.GetBytes(name)).X + MathF.Round(Theme.Space3 * scale) * 2;
+                    var layout = TopBar.Layout(display, scale, labels, want, left, tabWidth);
+                    var tabsRight = left[count - 1] + tabWidth[count - 1];
+                    Assert.True(tabsRight <= layout.AccountLeft, $"{name}: tabs end {tabsRight}, account {layout.AccountLeft}");
+                    Assert.True(layout.AccountLeft + layout.AccountWidth <= width);
+                    Assert.True(layout.AccountWidth >= Math.Min(want, MathF.Round(TopBar.AccountMin * scale)), $"{name}: {layout.AccountWidth}");
+                    if (name == "メノ")
+                        Assert.Equal(want, layout.AccountWidth);
+                    for (var i = 0; i < count; i++)
+                        Assert.True(tabWidth[i] > labels[i]);
+                }
+            }
+        }
+        finally
+        {
+            ImGui.Render();
+        }
+    }
+
+    [Theory]
     [InlineData(1f)]
     [InlineData(2f)]
     public void JapaneseNamesDrawWithRealGlyphsInEveryShippedFont(float scale)
@@ -379,6 +444,8 @@ public sealed class FrameOrderTests : IDisposable
             return;
         }
 
+        DrawFloating();
+
         // The quick buttons, drawn after the world as ScreenHost draws them.
         ImGui.SetNextWindowPos(ButtonMin);
         ImGui.SetNextWindowSize(ButtonSize);
@@ -388,6 +455,198 @@ public sealed class FrameOrderTests : IDisposable
             _buttonClicks++;
         ImGui.End();
         ImGui.Render();
+    }
+
+    private FloatingInput FloatingMode => _floatingFull ? FloatingInput.Full : _router.Captured ? FloatingInput.Passive : FloatingInput.Pointer;
+
+    /// <summary>The social window as ScreenHost submits it, without the drawing: title bar, body and an optional field.</summary>
+    private void DrawFloating()
+    {
+        if (_floating is not { } window)
+            return;
+        var input = FloatingMode;
+        var frame = window.Begin("##testwindow"u8, FloatingSize, FloatingAt, Screen, 1f, input, true);
+        if (frame.Close)
+            _floatingCloses++;
+        ImGui.BeginChild("##body"u8, frame.Size - new float2(0, frame.Title), ImGuiChildFlags.None, FloatingWindow.ChildFlags(input));
+        if (_floatingField)
+            ImGui.InputText("##field"u8, _floatingText.Buffer);
+        ImGui.EndChild();
+        FloatingWindow.End();
+    }
+
+    private float2 TitleOf(FloatingWindow window) => window.Min + new float2(60, FloatingWindow.TitleHeight * 0.5f);
+
+    private static float2 PinOf(FloatingWindow window) =>
+        CloseOf(window) - new float2(FloatingWindow.ButtonSize + Theme.Space1, 0);
+
+    private static float2 CloseOf(FloatingWindow window)
+    {
+        var inset = (FloatingWindow.TitleHeight - FloatingWindow.ButtonSize) * 0.5f;
+        return new float2(window.Min.X + FloatingSize.X - inset - FloatingWindow.ButtonSize * 0.5f, window.Min.Y + inset + FloatingWindow.ButtonSize * 0.5f);
+    }
+
+    private float2 FieldOf(FloatingWindow window) => window.Min + new float2(40, FloatingWindow.TitleHeight + 10);
+
+    [Fact]
+    public void APinnedWindowInFlightTakesNothingAndLeavesWAndBoostToTheHull()
+    {
+        ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
+        _floating = new FloatingWindow { Open = true, Pinned = true };
+        Frame();
+        Frame();
+        Assert.True(_router.Captured);
+        Bridge.Consume(out _, out _);
+
+        Frame(() =>
+        {
+            Key(GlfwKey.W, true);
+            Key(GlfwKey.Space, true);
+        });
+        var sent = Sent();
+        Assert.True(sent.Forward > 0);
+        Assert.True(sent.Boost);
+        Assert.False(ImGui.GetIO().WantCaptureKeyboard);
+        Assert.False(ImGui.GetIO().WantCaptureMouse);
+
+        // Shift shows the pointer: the pinned window takes a press on its pin, and only the pointer. W and Space,
+        // held throughout, still reach the hull once the click is done, as keyboard navigation never rests in it.
+        Frame(() => Key(GlfwKey.LeftShift, true));
+        Frame(() => Move(PinOf(_floating)));
+        Frame();
+        Assert.False(_router.Captured);
+        Assert.True(_router.PointerOverInterface);
+        Frame(() => Click());
+        Frame();
+        Assert.False(_floating.Pinned);
+        Assert.Equal(0, _buttonClicks);
+        Bridge.Consume(out _, out _);
+        Frame();
+        sent = Sent();
+        Assert.True(sent.Forward > 0);
+        Assert.True(sent.Boost);
+        Assert.False(ImGui.GetIO().WantCaptureKeyboard);
+    }
+
+    [Fact]
+    public void ADraggedWindowMovesByItsTitleStaysOnScreenAndTakesAClickWhereItNowIs()
+    {
+        _surfaceOpen = true;
+        _floatingFull = true;
+        _floating = new FloatingWindow { Open = true };
+        Frame(() => Move(EmptySpace));
+        Frame();
+        var start = _floating.Min;
+        Assert.Equal(FloatingAt, start);
+
+        var grab = TitleOf(_floating);
+        Frame(() => Move(grab));
+        Frame(() => Button(GlfwMouseButton.Left, true));
+        Frame(() => Move(grab + new float2(120, 60)));
+        Frame(() => Move(grab + new float2(200, 100)));
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        Assert.Equal(start + new float2(200, 100), _floating.Min);
+
+        // The very next poll clicks the close mark where the window now is.
+        Frame(() =>
+        {
+            Move(CloseOf(_floating));
+            Click();
+        });
+        Frame();
+        Assert.Equal(1, _floatingCloses);
+
+        // Dragged far past the top left, the title bar stays on screen and under the navigation bar.
+        grab = TitleOf(_floating);
+        Frame(() => Move(grab));
+        Frame(() => Button(GlfwMouseButton.Left, true));
+        Frame(() => Move(grab - new float2(2000, 2000)));
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        Assert.Equal(new float2(FloatingWindow.Margin, HudLayout.TopBarBottom(1f) + FloatingWindow.Margin), _floating.Min);
+    }
+
+    [Fact]
+    public void AWindowTakesNoClickInThePollItAppearsAndTheNextClickLandsOnIt()
+    {
+        _surfaceOpen = true;
+        _floatingFull = true;
+        var window = new FloatingWindow { Open = true };
+        Frame(() => Move(EmptySpace));
+        Frame(() =>
+        {
+            // The window appears under a pointer that clicks in the same poll: that click was not aimed at it.
+            _floating = window;
+            Move(PinOf(window) + (FloatingAt - window.Min));
+            Click();
+        });
+        Frame();
+        Assert.False(window.Pinned);
+        Frame(() => Click());
+        Frame();
+        Assert.True(window.Pinned);
+        Assert.Equal(0, _buttonClicks);
+    }
+
+    [Fact]
+    public void TypingInAWindowOwnsTheKeysUntilTheWorkspaceLetsGoOfThem()
+    {
+        ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
+        _surfaceOpen = true;
+        _floatingFull = true;
+        _floatingField = true;
+        _floating = new FloatingWindow { Open = true, Pinned = true };
+        Frame(() => Move(EmptySpace));
+        Frame(() => Move(FieldOf(_floating)));
+        Frame(() => Click());
+        Frame();
+        Assert.True(ImGui.GetIO().WantTextInput);
+
+        // The workspace closes; the pinned window stays with its field. Without letting go, the field would keep
+        // every key from the hull.
+        _surfaceOpen = false;
+        _floatingFull = false;
+        Frame();
+        Assert.True(ImGui.GetIO().WantCaptureKeyboard);
+        FloatingWindow.ReleaseKeyboard();
+        Frame();
+        Bridge.Consume(out _, out _);
+        Frame(() => Key(GlfwKey.W, true));
+        Assert.False(ImGui.GetIO().WantCaptureKeyboard);
+        Assert.True(Sent().Forward > 0);
+        Assert.True(_floating.Open && _floating.Pinned);
+    }
+
+    [Fact]
+    public void TheBarOverTheMapTakesItsClicksAndAMapDragAcrossItStaysTheMaps()
+    {
+        _barShown = true;
+        OpenMap();
+        var tab = BarTabMin + BarTabSize * 0.5f;
+        Frame(() => Move(tab));
+        Frame(() => Click());
+        Frame();
+        Assert.Equal(1, _barClicks);
+        Assert.Equal(0, _mapPresses);
+        Assert.Equal(0, _mapReleases);
+
+        // In the poll the pointer comes onto the bar it already belongs to the bar.
+        Frame(() =>
+        {
+            Move(tab + new float2(10, 2));
+            Click();
+        });
+        Frame();
+        Assert.Equal(2, _barClicks);
+        Assert.Equal(0, _mapPresses);
+
+        Frame(() => Move(MapSpot));
+        Frame(() => Button(GlfwMouseButton.Left, true));
+        Frame(() => Move(tab));
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        Frame();
+        Assert.Equal(1, _mapPresses);
+        Assert.Equal(1, _mapReleases);
+        Assert.Equal(2, _barClicks);
     }
 
     /// <summary>The command view without Shift, the pointer shown and resting on empty space, the own hull selected.</summary>
@@ -460,6 +719,8 @@ public sealed class FrameOrderTests : IDisposable
         _unitCount = MapUnitList.Collect(_snapshot, _units);
         var units = Units;
         _map.Block(units.Min, units.Size);
+        if (_barShown)
+            _map.Block(float2.Zero, new float2(Screen.X, HudLayout.TopBarBottom(1f)));
         if (_menuOpen)
         {
             _menuTime += 1f / 60f;
@@ -487,6 +748,14 @@ public sealed class FrameOrderTests : IDisposable
             MapUnitList.Row(_world, _units[i], units.Row);
         MapUnitList.EndRows();
         MapUnitList.End();
+
+        if (_barShown)
+        {
+            TopBar.Begin(Screen, 1f, _map);
+            if (TopBar.Tab("##tab"u8, BarTabMin, BarTabSize))
+                _barClicks++;
+            TopBar.End();
+        }
 
         if (!_menuOpen)
             return;

@@ -6,23 +6,37 @@ using Prospect.Client.Social;
 using Prospect.Client.Ui;
 using Prospect.Client.World;
 using Prospect.Game.Client;
+using Prospect.Game.Lobby;
 using Prospect.Game.Protocol;
 using Prospect.Game.World;
 
 namespace Prospect.Client.Screens;
 
+/// <summary>The windows of the social workspace.</summary>
+internal enum SocialPane : byte
+{
+    /// <summary>The narrow list that opens the others; open exactly while the workspace is.</summary>
+    Navigator,
+    Friends,
+    Party,
+    Players,
+    Chat,
+
+    /// <summary>One account or one player, chosen in Friends, Players or Party.</summary>
+    Detail,
+}
+
 /// <summary>
-/// The social interface over the world: the player list and party panel, chat, the party list at the top left,
-/// the recent chat lines and the quick buttons at the top right. Everything is read from
-/// <see cref="SessionSnapshot.Social"/> and every request goes through <see cref="PlayerInputBridge"/>; the server
-/// decides. Names and chat text from the network only ever go to draw calls, never into widget labels, ids or
-/// format strings.
+/// The social interface: the workspace of movable windows (a navigator, Friends, Party, Players, Chat and a detail
+/// card), the party list at the top left and the recent chat lines. A window can be pinned, which keeps it on
+/// screen when the workspace closes and the player flies on; a pinned window then takes the pointer only while the
+/// pointer is out (release key, command view) and never keyboard navigation, so W and Space still fly the hull.
+/// Session state is read from <see cref="SessionSnapshot.Social"/> and every request goes through
+/// <see cref="PlayerInputBridge"/>; the server decides. Names and chat text from the network only ever go to draw
+/// calls, never into widget labels, ids or format strings.
 /// </summary>
 internal sealed partial class ScreenHost
 {
-    /// <summary>Height of the quick buttons at the top right, in design pixels.</summary>
-    private const float QuickBarHeight = HudLayout.QuickBarHeight;
-
     /// <summary>Seconds a chat line stays in the recent lines shown while chat is closed.</summary>
     private const float ChatFeedSeconds = 12f;
 
@@ -32,15 +46,22 @@ internal sealed partial class ScreenHost
     /// <summary>Seconds a notice (a refusal, a failed send, a request sent) stays readable.</summary>
     private const float NoticeSeconds = 6f;
 
-    private bool _socialOpen;
-    private bool _socialParty;
+    private const int PaneCount = 6;
 
-    /// <summary>The Friends tab is open in the panel; it shows the account, which is not this server's.</summary>
-    private bool _socialFriends;
+    /// <summary>The workspace is open: the navigator and every open window, with the pointer shown.</summary>
+    private bool _socialOpen;
+
+    /// <summary>Chat has the keyboard: opened with its key, it closes again after a line is sent.</summary>
     private bool _chatOpen;
     private bool _chatFocus;
     private bool _socialHandled;
-    private bool _quickBarShown;
+    private readonly FloatingWindow[] _panes = [new(), new(), new(), new(), new(), new()];
+    private readonly HudRect[] _paneRects = new HudRect[PaneCount];
+    private int _paneRectCount;
+    private SocialPane _focusedPane;
+    private SocialPane _raisePane = SocialPane.Navigator;
+    private bool _raisePending;
+    private readonly SocialDetail _detail = new();
     private ChatChannel _chatChannel;
     private ImInputString _chatInput = null!;
     private long _chatSeenTick = long.MinValue;
@@ -64,7 +85,10 @@ internal sealed partial class ScreenHost
 
     private bool SocialSurfaceOpen => _socialOpen || _chatOpen;
 
-    private float QuickBarBottom => Kit.Px(Theme.Space5 + QuickBarHeight);
+    /// <summary>The workspace is drawn: open in a game, or the Friends screen out of one.</summary>
+    private bool Workspace => _socialOpen || _screen == Screen.Account;
+
+    private FloatingWindow Pane(SocialPane pane) => _panes[(int)pane];
 
     private void InitializeSocial()
     {
@@ -81,44 +105,146 @@ internal sealed partial class ScreenHost
         return bindings.Length == 0 ? [] : Encoding.UTF8.GetBytes(bindings[0].DisplayName.ToUpperInvariant());
     }
 
-    /// <summary>Opens the player list, or with <paramref name="party"/> the party panel.</summary>
-    public void OpenSocial(bool party)
-    {
-        _chatOpen = _chatFocus = false;
-        _socialOpen = true;
-        _socialParty = party;
-        _socialFriends = false;
-    }
+    /// <summary>Opens the workspace on the Players window, or with <paramref name="party"/> the Party window.</summary>
+    public void OpenSocial(bool party) => OpenPane(party ? SocialPane.Party : SocialPane.Players);
 
-    /// <summary>Opens the panel on the Friends tab.</summary>
+    /// <summary>Opens the workspace on the Friends window.</summary>
     public void OpenFriends()
     {
-        OpenSocial(false);
-        _socialFriends = true;
+        OpenPane(SocialPane.Friends);
         EnterAccount();
+    }
+
+    /// <summary>Opens the workspace, with <paramref name="pane"/> open and in front.</summary>
+    private void OpenPane(SocialPane pane)
+    {
+        _socialOpen = true;
+        Pane(pane).Open = true;
+        Raise(pane);
+    }
+
+    /// <summary>Opens the workspace as the Social tab does: on what needs an answer, else as it was left.</summary>
+    private void OpenWorkspace(SessionSnapshot? snapshot)
+    {
+        _socialOpen = true;
+        if (snapshot is { Social.Invitation.Player: not 0 })
+            OpenPane(SocialPane.Party);
+        else if (_app.Accounts.View.Incoming.Length > 0)
+            OpenPane(SocialPane.Friends);
+        else if (!Pane(SocialPane.Friends).Open && !Pane(SocialPane.Party).Open && !Pane(SocialPane.Players).Open && !Pane(SocialPane.Chat).Open && !Pane(SocialPane.Detail).Open)
+            OpenPane(SocialPane.Friends);
+        if (Pane(SocialPane.Friends).Open)
+            EnterAccount();
+    }
+
+    private void Raise(SocialPane pane)
+    {
+        _raisePane = pane;
+        _raisePending = true;
+        _focusedPane = pane;
     }
 
     /// <summary>Opens chat with its text field focused.</summary>
     public void OpenChat()
     {
         // A fresh open starts at the newest line.
-        _chatTotalSeen = -1;
-        // The opening key must not also activate a focused button in the player panel.
-        _socialOpen = false;
+        if (!_chatOpen && !PaneShown(SocialPane.Chat))
+            _chatTotalSeen = -1;
         _chatOpen = true;
         _chatFocus = true;
+        Pane(SocialPane.Chat).Open = true;
+        Raise(SocialPane.Chat);
+        // The key that opens chat must not also press a button keyboard navigation left focused in the workspace.
+        var context = ImGui.GetCurrentContext();
+        context.NavActivateId = default;
+        context.NavActivateDownId = default;
+        context.NavActivatePressedId = default;
     }
 
-    private void CloseSocialSurfaces()
+    /// <summary>Gives the keyboard back to flight. Chat stays on screen only in the workspace or pinned.</summary>
+    private void EndChatTyping()
     {
-        _socialOpen = _chatOpen = false;
+        var typing = _chatOpen;
+        _chatOpen = false;
         _chatFocus = false;
+        if (!_socialOpen && !Pane(SocialPane.Chat).Pinned)
+            Pane(SocialPane.Chat).Open = false;
+        // Back to flight: a pinned chat left on screen must not keep keyboard focus into the next frame.
+        if (typing && !_socialOpen)
+            FloatingWindow.ReleaseKeyboard();
     }
 
-    /// <summary>Forgets everything of the last session: open panels, the unsent line, notices.</summary>
+    /// <summary>
+    /// Closes the workspace. Pinned windows stay, without the keyboard: any text field or keyboard focus the
+    /// workspace held is let go now, so the next frame's flight keys reach the hull.
+    /// </summary>
+    private void CloseWorkspace()
+    {
+        _socialOpen = false;
+        EndChatTyping();
+        FloatingWindow.ReleaseKeyboard();
+    }
+
+    private void ClosePane(SocialPane pane)
+    {
+        switch (pane)
+        {
+            case SocialPane.Navigator:
+                if (_screen == Screen.Account)
+                    Show(Screen.MainMenu);
+                else
+                    CloseWorkspace();
+                return;
+            case SocialPane.Chat:
+                Pane(pane).Close();
+                _chatOpen = _chatFocus = false;
+                break;
+            case SocialPane.Detail:
+                Pane(pane).Close();
+                _detail.Clear();
+                break;
+            case SocialPane.Friends when _screen == Screen.Account:
+                // Friends is what the Friends screen is: closing it goes back to the menu.
+                Show(Screen.MainMenu);
+                return;
+            default:
+                Pane(pane).Close();
+                break;
+        }
+
+        if (_focusedPane == pane)
+            _focusedPane = SocialPane.Navigator;
+    }
+
+    /// <summary>
+    /// Escape in a game: chat typing first, then the focused window if it is not pinned, then the workspace.
+    /// Returns false when there was nothing social to close. Pinned windows are never closed by Escape.
+    /// </summary>
+    private bool SocialBack()
+    {
+        if (_chatOpen)
+        {
+            EndChatTyping();
+            return true;
+        }
+
+        if (!_socialOpen)
+            return false;
+        var focused = _focusedPane;
+        if (focused != SocialPane.Navigator && Pane(focused).Open && !Pane(focused).Pinned)
+            ClosePane(focused);
+        else
+            CloseWorkspace();
+        return true;
+    }
+
+    /// <summary>
+    /// Forgets everything of the last session: the open workspace, the unsent line, notices and a player shown on
+    /// the card. Where windows are and which are pinned is kept for the life of the game.
+    /// </summary>
     private void ResetSocial()
     {
-        CloseSocialSurfaces();
+        _socialOpen = _chatOpen = _chatFocus = false;
         _chatInput.Clear();
         _chatChannel = ChatChannel.Everyone;
         _chatSeenTick = long.MinValue;
@@ -126,7 +252,11 @@ internal sealed partial class ScreenHost
         _chatFollowing = true;
         _seenRefusals = -1;
         _noticeUntil = 0;
-        _quickBarShown = false;
+        if (_detail.ShowsPlayer)
+        {
+            _detail.Clear();
+            Pane(SocialPane.Detail).Close();
+        }
     }
 
     /// <summary>
@@ -145,12 +275,12 @@ internal sealed partial class ScreenHost
         var devices = _app.Devices;
         if (actions.InterfaceShortcutPressed(devices, InputAction.TogglePlayers, typing, pointerOwned))
         {
-            ToggleSocial(false);
+            TogglePane(SocialPane.Players);
             _socialHandled = true;
         }
         else if (actions.InterfaceShortcutPressed(devices, InputAction.ToggleSocial, typing, pointerOwned))
         {
-            ToggleSocial(true);
+            TogglePane(SocialPane.Party);
             _socialHandled = true;
         }
         else if (actions.InterfaceShortcutPressed(devices, InputAction.ToggleChat, typing, pointerOwned))
@@ -162,12 +292,13 @@ internal sealed partial class ScreenHost
         }
     }
 
-    private void ToggleSocial(bool party)
+    /// <summary>A window's key: opens the workspace on it, or closes the workspace when it is open there.</summary>
+    private void TogglePane(SocialPane pane)
     {
-        if (_socialOpen && !_socialFriends && _socialParty == party)
-            _socialOpen = false;
+        if (_socialOpen && Pane(pane).Open && _focusedPane == pane)
+            CloseWorkspace();
         else
-            OpenSocial(party);
+            OpenPane(pane);
     }
 
     /// <summary>Notices refusals that arrived since the last frame and keeps the chat channel valid.</summary>
@@ -181,8 +312,23 @@ internal sealed partial class ScreenHost
         if (_chatChannel == ChatChannel.Party && social.PartyCount == 0)
             _chatChannel = ChatChannel.Everyone;
 
-        if (_chatOpen && social.ChatCount > 0)
+        if ((_chatOpen || PaneShown(SocialPane.Chat)) && social.ChatCount > 0)
             _chatSeenTick = Math.Max(_chatSeenTick, social.Chat[social.ChatCount - 1].Tick);
+    }
+
+    /// <summary>True when a chat line from someone else arrived since chat was last on screen.</summary>
+    private bool ChatUnread(SessionSnapshot snapshot)
+    {
+        var social = snapshot.Social;
+        for (var i = social.ChatCount - 1; i >= 0; i--)
+        {
+            if (social.Chat[i].Tick <= _chatSeenTick)
+                return false;
+            if (social.Chat[i].Player != snapshot.PlayerId)
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>Sets the notice: a sentence, optionally followed by a name drawn as text.</summary>
@@ -225,6 +371,441 @@ internal sealed partial class ScreenHost
     }
 
     private PlayerInputBridge? Bridge => _app.Session?.Client.Input;
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // The workspace's windows
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// <summary>A window's size before it is fitted to the screen, in pixels.</summary>
+    private static float2 PaneSize(SocialPane pane) => pane switch
+    {
+        SocialPane.Navigator => new float2(Kit.Px(240), Kit.Px(FloatingWindow.TitleHeight + Theme.Space2 + 4 * 40 + Theme.Space4 + 40)),
+        SocialPane.Friends => new float2(Kit.Px(460), Kit.Px(600)),
+        SocialPane.Party => new float2(Kit.Px(400), Kit.Px(420)),
+        SocialPane.Players => new float2(Kit.Px(440), Kit.Px(480)),
+        SocialPane.Chat => new float2(Kit.Px(540), Kit.Px(340)),
+        _ => new float2(Kit.Px(360), Kit.Px(420)),
+    };
+
+    /// <summary>Where a window first appears: the navigator at the left, the lists beside it, the card at the right.</summary>
+    private float2 PaneFallback(SocialPane pane)
+    {
+        var display = _ui.DisplaySize;
+        var top = HudTop + Kit.Px(Theme.Space5);
+        var left = Kit.Px(HudLayout.Margin);
+        var beside = left + Kit.Px(240 + Theme.Space4);
+        var size = PaneSize(pane);
+        return pane switch
+        {
+            SocialPane.Navigator => new float2(left, top),
+            SocialPane.Friends => new float2(beside, top),
+            SocialPane.Players => new float2(beside + Kit.Px(Theme.Space6), top + Kit.Px(Theme.Space6)),
+            SocialPane.Party => new float2(MathF.Round(display.X * 0.5f), display.Y - size.Y - left),
+            SocialPane.Chat => new float2(left, display.Y - size.Y - left),
+            _ => new float2(display.X - size.X - left, top),
+        };
+    }
+
+    /// <summary>True when the window is drawn this frame.</summary>
+    private bool PaneShown(SocialPane pane)
+    {
+        if (pane == SocialPane.Navigator)
+            return Workspace;
+        var window = Pane(pane);
+        if (!window.Open)
+            return false;
+        var inGame = _screen == Screen.Session;
+        switch (pane)
+        {
+            case SocialPane.Party or SocialPane.Players or SocialPane.Chat when !inGame:
+                return false;
+            case SocialPane.Detail when !(_detail.ShowsFriend || (inGame && _detail.ShowsPlayer)):
+                return false;
+        }
+
+        return Workspace || window.Pinned || (pane == SocialPane.Chat && _chatOpen);
+    }
+
+    /// <summary>
+    /// What a window may take: everything on a surface the player opened (the workspace, chat while typing, the
+    /// Friends screen); the pointer only, never keyboard navigation, for a pinned window while the pointer is out;
+    /// nothing while flight has the pointer.
+    /// </summary>
+    private FloatingInput PaneInput(SocialPane pane) =>
+        _screen != Screen.Session || _socialOpen || (pane == SocialPane.Chat && _chatOpen) ? FloatingInput.Full
+        : _app.PointerCaptured ? FloatingInput.Passive : FloatingInput.Pointer;
+
+    /// <summary>The rectangles of this frame's social windows over the view, for the heads-up markers to keep clear of.</summary>
+    private void CollectPaneRects()
+    {
+        _paneRectCount = 0;
+        for (var i = 0; i < PaneCount; i++)
+        {
+            var pane = (SocialPane)i;
+            if (PaneShown(pane))
+                _paneRects[_paneRectCount++] = Pane(pane).Rect(PaneSize(pane), PaneFallback(pane), _ui.DisplaySize, Kit.Scale);
+        }
+    }
+
+    /// <summary>
+    /// Every social window drawn this frame: the workspace's, or only the pinned ones (and chat while typing) once
+    /// it is closed. <paramref name="snapshot"/> is null out of a game, where only Friends and the card exist.
+    /// </summary>
+    private void DrawSocialWindows(SessionSnapshot? snapshot)
+    {
+        ScrubAccount();
+        if (_detail.Scrub(_app.Accounts.View, _app.Session) || (!_detail.ShowsFriend && !_detail.ShowsPlayer))
+            Pane(SocialPane.Detail).Open = false;
+
+        if (snapshot is not null)
+        {
+            if (PaneShown(SocialPane.Chat))
+                DrawChatPane(snapshot);
+            if (PaneShown(SocialPane.Party))
+                DrawPartyPane(snapshot);
+            if (PaneShown(SocialPane.Players))
+                DrawPlayersPane(snapshot);
+        }
+
+        if (PaneShown(SocialPane.Friends))
+            DrawFriendsPane();
+        if (PaneShown(SocialPane.Detail))
+            DrawDetailPane(snapshot);
+        if (PaneShown(SocialPane.Navigator))
+            DrawNavigator(snapshot);
+    }
+
+    /// <summary>
+    /// Begins a window with its frame and title bar, and a body under the title. False when the window was closed
+    /// this frame; otherwise pair with <see cref="EndPane"/>. <paramref name="title"/> is drawn as text only.
+    /// </summary>
+    private bool BeginPane(SocialPane pane, ImString id, ReadOnlySpan<byte> title, bool scroll, out float width, out FloatingInput input)
+    {
+        var window = Pane(pane);
+        input = PaneInput(pane);
+        var pinnable = pane != SocialPane.Navigator && _screen == Screen.Session;
+        var frame = window.Begin(id, PaneSize(pane), PaneFallback(pane), _ui.DisplaySize, Kit.Scale, input, pinnable);
+        if (_raisePending && _raisePane == pane)
+        {
+            ImGui.Internal.BringWindowToDisplayFront(ImGui.Internal.GetCurrentWindow());
+            _raisePending = false;
+        }
+
+        if (frame.Focused && input == FloatingInput.Full)
+            _focusedPane = pane;
+        DrawPaneChrome(frame, title, pinnable, window.Pinned, input);
+        if (frame.Close)
+        {
+            ClosePane(pane);
+            FloatingWindow.End();
+            width = 0;
+            return false;
+        }
+
+        var pad = Kit.Px(Theme.Space4);
+        var top = frame.Title + Kit.Px(Theme.Space2);
+        ImGui.SetCursorScreenPos(frame.Min + new float2(pad, top));
+        var body = new float2(Math.Max(1f, frame.Size.X - pad * 2), Math.Max(1f, frame.Size.Y - top - Kit.Px(Theme.Space3)));
+        var flags = FloatingWindow.ChildFlags(input) | (scroll ? default : ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
+        ImGui.BeginChild("##body"u8, body, ImGuiChildFlags.None, flags);
+        width = ImGui.GetContentRegionAvail().X - (scroll ? Kit.Px(Theme.Space3) : 0f);
+        return true;
+    }
+
+    private static void EndPane()
+    {
+        ImGui.EndChild();
+        FloatingWindow.End();
+    }
+
+    /// <summary>
+    /// A window's frame: the heads-up panel with its amber tick, a hairline under the title, the drag grip, the
+    /// title and the pin and close marks. The border warms only for the window that has focus in the workspace.
+    /// </summary>
+    private void DrawPaneChrome(in FloatingFrame frame, ReadOnlySpan<byte> title, bool pinnable, bool pinned, FloatingInput input)
+    {
+        var draw = ImGui.GetWindowDrawList();
+        var min = frame.Min;
+        var max = min + frame.Size;
+        var chamfer = Kit.Px(Theme.Chamfer);
+        Kit.ChamferFill(draw, min, max, Kit.Color(Theme.Panel, 0.94f), chamfer);
+        Kit.ChamferOutline(draw, min, max, Kit.Color(Hud.Border(Theme.Accent, frame.Focused && input == FloatingInput.Full)), chamfer);
+        draw.AddRectFilled(min, min + new float2(Kit.Px(Hud.TickWidth), Kit.Px(Hud.TickHeight)), Kit.Color(Theme.Accent));
+        draw.AddLine(new float2(min.X + Kit.Px(1), min.Y + frame.Title), new float2(max.X - Kit.Px(1), min.Y + frame.Title), Kit.Color(Theme.Line, 0.8f));
+
+        // The grip: two columns of three dots, amber while dragged.
+        var dot = Kit.Px(2);
+        var step = Kit.Px(4);
+        var grip = new float2(min.X + Kit.Px(Theme.Space3), min.Y + MathF.Round(frame.Title * 0.5f) - step - dot * 0.5f);
+        var gripColor = Kit.Color(frame.Dragging ? Theme.Accent : Theme.TextMute);
+        for (var row = 0; row < 3; row++)
+            for (var column = 0; column < 2; column++)
+                draw.AddRectFilled(grip + new float2(column * step, row * step), grip + new float2(column * step + dot, row * step + dot), gripColor);
+
+        var button = Kit.Px(FloatingWindow.ButtonSize);
+        var inset = (frame.Title - button) * 0.5f;
+        var closeMin = new float2(max.X - inset - button, min.Y + inset);
+        var pinMin = closeMin - new float2(button + Kit.Px(Theme.Space1), 0);
+        var textLeft = grip.X + step + dot + Kit.Px(Theme.Space3);
+        var textRight = (pinnable ? pinMin.X : closeMin.X) - Kit.Px(Theme.Space2);
+        var textHeight = Kit.Measure(_ui.SansMedium, Theme.FontBody, "Ag"u8).Y;
+        Kit.ClippedText(draw, _ui.SansMedium, Theme.FontBody, new float2(textLeft, min.Y + (frame.Title - textHeight) * 0.5f), Theme.Text, title, Math.Max(0f, textRight - textLeft));
+
+        var center = closeMin + new float2(button, button) * 0.5f;
+        var arm = Kit.Px(4.5f);
+        var closeColor = Kit.Color(frame.CloseHot ? Theme.Text : Theme.TextDim);
+        draw.AddLine(center - new float2(arm, arm), center + new float2(arm, arm), closeColor, Kit.Px(1.5f));
+        draw.AddLine(center + new float2(-arm, arm), center + new float2(arm, -arm), closeColor, Kit.Px(1.5f));
+        if (!pinnable)
+            return;
+
+        // A push pin: its head, the bar it is pressed by and the needle. Amber and filled while pinned.
+        var pin = pinMin + new float2(button, button) * 0.5f;
+        var tone = pinned ? Theme.Accent : frame.PinHot ? Theme.Text : Theme.TextDim;
+        var color = Kit.Color(tone);
+        var headMin = pin + new float2(-Kit.Px(3), -Kit.Px(6));
+        var headMax = pin + new float2(Kit.Px(3), -Kit.Px(1));
+        if (pinned)
+            draw.AddRectFilled(headMin, headMax, color);
+        else
+            draw.AddRect(headMin, headMax, color);
+        draw.AddRectFilled(pin + new float2(-Kit.Px(5), -Kit.Px(1)), pin + new float2(Kit.Px(5), Kit.Px(1)), color);
+        draw.AddLine(pin + new float2(0, Kit.Px(1)), pin + new float2(0, Kit.Px(6)), color, Kit.Px(1.2f));
+    }
+
+    /// <summary>
+    /// The navigator: one row per window, lit while that window is open. Party, players and chat belong to a game;
+    /// out of one they are shown but cannot be opened.
+    /// </summary>
+    private void DrawNavigator(SessionSnapshot? snapshot)
+    {
+        if (!BeginPane(SocialPane.Navigator, "##socialnav"u8, "SOCIAL"u8, false, out var width, out _))
+            return;
+
+        var view = _app.Accounts.View;
+        var inGame = snapshot is not null && _screen == Screen.Session;
+        var incoming = view.State == AccountState.SignedIn ? view.Incoming.Length : 0;
+        if (NavRow("##navfriends"u8, "Friends"u8, incoming > 0 ? Kit.F($"+{incoming}") : default, SocialPane.Friends, true, incoming > 0))
+            NavigatorToggle(SocialPane.Friends);
+
+        var party = default(ReadOnlySpan<byte>);
+        var online = 0;
+        var invited = false;
+        var unread = false;
+        if (snapshot is not null)
+        {
+            var social = snapshot.Social;
+            party = social.PartyCount > 0 ? Kit.F($"{social.PartyCount}/{_app.Content.Social.PartySize}") : default;
+            for (var i = 0; i < social.RosterCount; i++)
+                online += social.Roster[i].Value != 0 ? 1 : 0;
+            invited = social.Invitation.Player != 0;
+            unread = ChatUnread(snapshot) && !PaneShown(SocialPane.Chat);
+        }
+
+        if (NavRow("##navparty"u8, "Party"u8, party, SocialPane.Party, inGame, invited))
+            NavigatorToggle(SocialPane.Party);
+        if (NavRow("##navplayers"u8, "Players"u8, inGame ? Kit.F($"{online}") : default, SocialPane.Players, inGame, false))
+            NavigatorToggle(SocialPane.Players);
+        if (NavRow("##navchat"u8, "Chat"u8, default, SocialPane.Chat, inGame, unread))
+        {
+            if (Pane(SocialPane.Chat).Open)
+                ClosePane(SocialPane.Chat);
+            else
+                OpenChat();
+        }
+
+        Kit.Space(Theme.Space2);
+        Kit.Paragraph(_ui.Sans, Theme.FontCaption, Theme.TextMute, inGame
+            ? "Pin a window to keep it over the view in flight. Hold the release key to use it."u8
+            : "Party, players and chat open in a game."u8, width / Kit.Scale);
+        EndPane();
+    }
+
+    private void NavigatorToggle(SocialPane pane)
+    {
+        if (Pane(pane).Open)
+        {
+            ClosePane(pane);
+            return;
+        }
+
+        OpenPane(pane);
+        if (pane == SocialPane.Friends)
+            EnterAccount();
+    }
+
+    /// <summary>A navigator row: amber bar and raised fill while its window is open, a count and a dot for news.</summary>
+    private bool NavRow(ImString id, ReadOnlySpan<byte> label, ReadOnlySpan<byte> count, SocialPane pane, bool enabled, bool badge)
+    {
+        var draw = ImGui.GetWindowDrawList();
+        var position = ImGui.GetCursorScreenPos();
+        var size = new float2(ImGui.GetContentRegionAvail().X, Kit.Px(40));
+        if (!enabled)
+            ImGui.BeginDisabled();
+        var pressed = ImGui.InvisibleButton(id, size);
+        var hot = Kit.Animate(ImGui.GetItemID(), enabled && Kit.IsHot() ? 1f : 0f);
+        if (!enabled)
+            ImGui.EndDisabled();
+
+        var open = enabled && Pane(pane).Open;
+        var max = position + size;
+        if (open || hot > 0.01f)
+            draw.AddRectFilled(position, max, Kit.Color(Theme.PanelRaised, open ? 0.9f : 0.9f * hot));
+        if (open)
+            draw.AddRectFilled(position, new float2(position.X + Kit.Px(3), max.Y), Kit.Color(Theme.Accent));
+        var textHeight = Kit.Measure(_ui.SansMedium, Theme.FontBody, label).Y;
+        var text = new float2(position.X + Kit.Px(Theme.Space4), position.Y + (size.Y - textHeight) * 0.5f);
+        Kit.Text(draw, _ui.SansMedium, Theme.FontBody, text, !enabled ? Theme.TextMute : open ? Theme.Text : Kit.Mix(Theme.TextDim, Theme.Text, hot), label);
+        if (!count.IsEmpty)
+        {
+            var countSize = Kit.Measure(_ui.Mono, Theme.FontCaption, count);
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(max.X - Kit.Px(Theme.Space3) - countSize.X, position.Y + (size.Y - countSize.Y) * 0.5f), badge ? Theme.Accent : Theme.TextDim, count);
+        }
+        else if (badge)
+        {
+            draw.AddCircleFilled(new float2(max.X - Kit.Px(Theme.Space4), position.Y + size.Y * 0.5f), Kit.Px(3.5f), Kit.Color(Theme.Accent), 12);
+        }
+
+        return pressed && enabled;
+    }
+
+    /// <summary>The players of this session, connected first and then those who left; a name opens the card.</summary>
+    private void DrawPlayersPane(SessionSnapshot snapshot)
+    {
+        var online = 0;
+        for (var i = 0; i < snapshot.Social.RosterCount; i++)
+            online += snapshot.Social.Roster[i].Value != 0 ? 1 : 0;
+        if (!BeginPane(SocialPane.Players, "##socialplayers"u8, Kit.F($"Players   {online} on this server"), true, out var width, out var input))
+            return;
+        DrawNoticeLine(width);
+        Kit.Space(Theme.Space1);
+        DrawPlayerRows(snapshot, width, input);
+        EndPane();
+    }
+
+    /// <summary>The party: members, the invitation waiting for an answer, and the way to invite or leave.</summary>
+    private void DrawPartyPane(SessionSnapshot snapshot)
+    {
+        var social = snapshot.Social;
+        var title = social.PartyCount > 0 ? Kit.F($"Party   {social.PartyCount}/{_app.Content.Social.PartySize}") : "Party"u8;
+        if (!BeginPane(SocialPane.Party, "##socialparty"u8, title, true, out var width, out _))
+            return;
+        DrawNoticeLine(width);
+        Kit.Space(Theme.Space1);
+        DrawPartyRows(snapshot, width);
+        EndPane();
+    }
+
+    /// <summary>The card: one account from the friends lists, or one player of this session.</summary>
+    private void DrawDetailPane(SessionSnapshot? snapshot)
+    {
+        if (_detail.ShowsFriend)
+        {
+            var view = _app.Accounts.View;
+            var friend = _detail.Friend(view, out var relation);
+            if (!BeginPane(SocialPane.Detail, "##socialdetail"u8, friend is null ? "Account"u8 : friend.NameUtf8, true, out var width, out _))
+                return;
+            DrawFriendDetail(view, friend, relation, width);
+            EndPane();
+            return;
+        }
+
+        if (snapshot is null)
+            return;
+        var index = _detail.Roster(_app.Session, snapshot.Social);
+        var title = index < 0 ? "Player"u8 : PlayerTitle(snapshot.Social.Roster[index]);
+        if (!BeginPane(SocialPane.Detail, "##socialdetail"u8, title, true, out var playerWidth, out _))
+            return;
+        DrawPlayerDetail(snapshot, index, playerWidth);
+        EndPane();
+    }
+
+    private static ReadOnlySpan<byte> PlayerTitle(in SocialMessage entry) =>
+        entry.Length == 0 ? Kit.F($"Player {entry.Player}") : Kit.F($"{(ReadOnlySpan<char>)entry.Text[..entry.Length]}");
+
+    /// <summary>
+    /// What this session knows of a player: their session name, whether they are still here, party standing and,
+    /// for a party member, ship and sector. A session name is what they typed when joining, not an account, so it
+    /// is never taken for a friend. The actions are the ones the server would take from this player now.
+    /// </summary>
+    private void DrawPlayerDetail(SessionSnapshot snapshot, int index, float width)
+    {
+        var social = snapshot.Social;
+        var wrap = width / Kit.Scale;
+        if (index < 0)
+        {
+            Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextDim, "This player is no longer in this session's list."u8, wrap);
+            return;
+        }
+
+        var entry = social.Roster[index];
+        var me = snapshot.PlayerId;
+        var draw = ImGui.GetWindowDrawList();
+        var at = ImGui.GetCursorScreenPos();
+        var nameHeight = Kit.Measure(_ui.SansBold, Theme.FontHeading, "Ag"u8).Y;
+        Kit.ClippedText(draw, _ui.SansBold, Theme.FontHeading, at, Theme.Text, PlayerTitle(entry), width);
+        ImGui.Dummy(new float2(width, nameHeight));
+        Kit.Space(Theme.Space1);
+        var connected = entry.Value != 0;
+        var member = SocialView.IsMember(social, entry.Player);
+        ReadOnlySpan<byte> standing =
+            entry.Player == me ? "YOU"u8
+            : !connected ? "LEFT THE SERVER"u8
+            : member && social.Leader == entry.Player ? "IN YOUR PARTY   LEADER"u8
+            : member ? "IN YOUR PARTY"u8
+            : social.Invitation.Player == entry.Player ? "INVITED YOU"u8
+            : "ON THIS SERVER"u8;
+        Kit.Label(_ui.SansMedium, Theme.FontCaption, entry.Player == me || member ? Theme.Accent : connected ? Theme.TextDim : Theme.TextMute, standing);
+        Kit.Space(Theme.Space2);
+        Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, "A session name, chosen when joining. It is not an account and is never matched to your friends."u8, wrap);
+
+        for (var i = 0; i < social.PartyCount; i++)
+        {
+            ref var status = ref social.Party[i];
+            if (status.Player != entry.Player)
+                continue;
+            Kit.Space(Theme.Space3);
+            var designs = snapshot.Content.Designs;
+            var design = designs[Math.Min((int)status.Value, designs.Length - 1)];
+            var age = SocialView.SecondsSince(status.Tick, snapshot.ServerTick);
+            var here = _app.World.Sector.Coord;
+            Kit.Label(_ui.Mono, Theme.FontCaption, age > PartyStaleSeconds ? Theme.Bad : Theme.TextDim,
+                age > PartyStaleSeconds ? Kit.F($"{design.Name}   NO SIGNAL FOR {age:0} S")
+                : status.X == here.X && status.Y == here.Y && status.Z == here.Z ? Kit.F($"{design.Name}   YOUR SECTOR")
+                : Kit.F($"{design.Name}   SECTOR {status.X} {status.Y} {status.Z}"));
+            Kit.Space(Theme.Space2);
+            var bar = new float2(Math.Min(Kit.Px(140), (width - Kit.Px(Theme.Space3)) * 0.5f), Kit.Px(3));
+            var barMin = ImGui.GetCursorScreenPos();
+            Gauge(draw, barMin, bar, status.Shield, Theme.Info);
+            Gauge(draw, barMin + new float2(bar.X + Kit.Px(Theme.Space3), 0), bar, status.Hull, Theme.Good);
+            ImGui.Dummy(new float2(width, bar.Y));
+        }
+
+        Kit.Space(Theme.Space4);
+        var name = entry.Text[..entry.Length];
+        // Every button is scoped to the player's session id, so a press cannot complete on another player's card.
+        ImGui.PushID(unchecked((int)entry.Player));
+        if (SocialView.CanInvite(social, me, entry, _app.Content.Social.PartySize))
+        {
+            if (Kit.Button("Invite to party"u8, ButtonKind.Primary, 180) && Bridge is { } bridge)
+                Request(bridge.Invite(entry.Player), "Invitation sent to "u8, name);
+        }
+        else if (member && entry.Player != me && SocialView.IsLeader(social, me))
+        {
+            if (Kit.Button("Remove from party"u8, ButtonKind.Secondary, 200) && Bridge is { } bridge)
+                Request(bridge.RemoveMember(entry.Player), "Removing from the party: "u8, name);
+        }
+
+        ImGui.PopID();
+        if (social.Invitation.Player == entry.Player)
+        {
+            Kit.Space(Theme.Space3);
+            DrawInvitationCard(snapshot, width);
+        }
+
+        Kit.Space(Theme.Space2);
+        DrawNoticeLine(width);
+    }
 
     // ---------------------------------------------------------------------------------------------------------------
     // Always shown: party list, recent chat, quick buttons
@@ -440,193 +1021,7 @@ internal sealed partial class ScreenHost
         return shown > 0 ? new HudRect(x, feedTop, x + width, bottom) : default;
     }
 
-    /// <summary>
-    /// Players, Social and Chat at the top right. They answer the pointer only while it is shown (the command view,
-    /// the release key held, or a surface open); a captured pointer is not seen by the interface at all, so they
-    /// are drawn dimmed.
-    /// </summary>
-    private void DrawQuickBar(SessionSnapshot snapshot)
-    {
-        var social = snapshot.Social;
-        var unread = false;
-        for (var i = social.ChatCount - 1; i >= 0; i--)
-        {
-            if (social.Chat[i].Tick <= _chatSeenTick)
-                break;
-            if (social.Chat[i].Player != snapshot.PlayerId)
-            {
-                unread = true;
-                break;
-            }
-        }
-
-        // With their keys while the row clears the sector panel; on a narrow or scaled screen the keys go, which
-        // the controls list (F1) still names, so the buttons never cover the panel.
-        var gap = Kit.Px(Theme.Space2);
-        var keys = true;
-        var w0 = QuickButtonWidth("PLAYERS"u8, _playersKey);
-        var w1 = QuickButtonWidth("SOCIAL"u8, _socialKey);
-        var w2 = QuickButtonWidth("CHAT"u8, _chatKey);
-        if (_ui.DisplaySize.X - Kit.Px(Theme.Space5) - (w0 + w1 + w2 + gap * 2) < HudLayout.ColumnRight(_ui.DisplaySize, Kit.Scale) + Kit.Px(HudLayout.Gap))
-        {
-            keys = false;
-            w0 = QuickButtonWidth("PLAYERS"u8, default);
-            w1 = QuickButtonWidth("SOCIAL"u8, default);
-            w2 = QuickButtonWidth("CHAT"u8, default);
-        }
-
-        var size = new float2(w0 + w1 + w2 + gap * 2, Kit.Px(QuickBarHeight));
-        var min = new float2(_ui.DisplaySize.X - Kit.Px(Theme.Space5) - size.X, Kit.Px(Theme.Space5));
-        ImGui.SetNextWindowPos(min);
-        ImGui.SetNextWindowSize(size);
-        ImGui.Begin("##quickbar"u8, RootFlags | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoScrollbar);
-        // Above the panels it opens, so it can close them again.
-        ImGui.Internal.BringWindowToDisplayFront(ImGui.Internal.GetCurrentWindow());
-        var previousFade = Kit.Fade;
-        Kit.Fade = _app.PointerCaptured ? 0.6f : 1f;
-        ImGui.SetCursorScreenPos(min);
-        if (QuickButton("##players"u8, "PLAYERS"u8, keys ? _playersKey : default, w0, _socialOpen && !_socialParty && !_socialFriends, social.Invitation.Player != 0))
-            ToggleSocial(false);
-        ImGui.SameLine(0, gap);
-        if (QuickButton("##social"u8, "SOCIAL"u8, keys ? _socialKey : default, w1, _socialOpen && _socialParty && !_socialFriends, false))
-            ToggleSocial(true);
-        ImGui.SameLine(0, gap);
-        if (QuickButton("##chat"u8, "CHAT"u8, keys ? _chatKey : default, w2, _chatOpen, unread && !_chatOpen))
-        {
-            if (_chatOpen)
-                _chatOpen = false;
-            else
-                OpenChat();
-        }
-
-        Kit.Fade = previousFade;
-        ImGui.End();
-        _quickBarShown = true;
-    }
-
-    private float QuickButtonWidth(ReadOnlySpan<byte> label, ReadOnlySpan<byte> key)
-    {
-        var width = Kit.Measure(_ui.SansMedium, Theme.FontCaption, label).X + Kit.Px(Theme.Space3) * 2;
-        if (key.Length > 0)
-            width += Hud.KeyChipWidth(_ui.Mono, Theme.FontCaption, key) + Kit.Px(Theme.Space2);
-        return width;
-    }
-
-    private bool QuickButton(ImString id, ReadOnlySpan<byte> label, ReadOnlySpan<byte> key, float width, bool active, bool badge)
-    {
-        var draw = ImGui.GetWindowDrawList();
-        var position = ImGui.GetCursorScreenPos();
-        var size = new float2(width, Kit.Px(QuickBarHeight));
-        var pressed = ImGui.InvisibleButton(id, size);
-        var hot = Kit.Animate(ImGui.GetItemID(), ImGui.IsItemHovered() ? 1f : 0f);
-        var lit = Math.Max(hot, active ? 1f : 0f);
-        var max = position + size;
-        // The heads-up panel, raised and its border turning amber as the pointer comes onto it; the open
-        // surface's button keeps an amber underline.
-        var chamfer = Kit.Px(Theme.Chamfer * 0.7f);
-        Kit.ChamferFill(draw, position, max, Kit.Color(Kit.Mix(Theme.Panel, Theme.PanelRaised, lit), Hud.FillAlpha), chamfer);
-        Kit.ChamferOutline(draw, position, max, Kit.Color(Kit.Mix(Theme.Line, Theme.Accent, lit * 0.8f)), chamfer);
-        if (active)
-            draw.AddRectFilled(new float2(position.X, max.Y - Kit.Px(2)), new float2(max.X - chamfer, max.Y), Kit.Color(Theme.Accent));
-
-        var labelSize = Kit.Measure(_ui.SansMedium, Theme.FontCaption, label);
-        var text = position + new float2(Kit.Px(Theme.Space3), (size.Y - labelSize.Y) * 0.5f);
-        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, text, Kit.Mix(Theme.TextDim, Theme.Text, lit), label);
-        Hud.KeyChip(draw, _ui.Mono, Theme.FontCaption, text.X + labelSize.X + Kit.Px(Theme.Space2), position.Y + size.Y * 0.5f, Theme.TextMute, key);
-        if (badge)
-            draw.AddCircleFilled(new float2(max.X - Kit.Px(7), position.Y + Kit.Px(7)), Kit.Px(3.5f), Kit.Color(Theme.Accent), 12);
-        return pressed;
-    }
-
-    // ---------------------------------------------------------------------------------------------------------------
-    // The player list and party panel
-    // ---------------------------------------------------------------------------------------------------------------
-
-    private void DrawSocialPanel(SessionSnapshot snapshot)
-    {
-        var display = _ui.DisplaySize;
-        var top = QuickBarBottom + Kit.Px(Theme.Space2);
-        var size = new float2(Math.Min(Kit.Px(620), display.X - Kit.Px(24)), Math.Min(Kit.Px(560), display.Y - top - Kit.Px(12)));
-        var min = new float2(MathF.Round((display.X - size.X) * 0.5f), Math.Max(top, MathF.Round((display.Y - size.Y) * 0.5f)));
-        ImGui.SetNextWindowPos(min);
-        ImGui.SetNextWindowSize(size);
-        ImGui.Begin("##social"u8, RootFlags | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
-        RaiseIfAppearing();
-        var draw = ImGui.GetWindowDrawList();
-        Kit.PanelFrame(draw, min, min + size);
-        var pad = Kit.Px(Theme.Space5);
-        ImGui.SetCursorScreenPos(min + new float2(pad, pad));
-        ImGui.BeginChild("##socialbody"u8, size - new float2(pad * 2, pad * 2), ImGuiChildFlags.None, ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoScrollbar);
-
-        var social = snapshot.Social;
-        var width = ImGui.GetContentRegionAvail().X;
-        Kit.Caption(_socialFriends ? "ACCOUNT  /  ANY SERVER"u8 : "THIS SERVER"u8, Theme.Accent);
-        Kit.Space(Theme.Space1);
-        var online = 0;
-        for (var i = 0; i < social.RosterCount; i++)
-        {
-            if (social.Roster[i].Value != 0)
-                online++;
-        }
-
-        var tabsAt = ImGui.GetCursorScreenPos();
-        if (TabButton("##tabplayers"u8, Kit.F($"Players {online}"), !_socialParty && !_socialFriends))
-            _socialParty = _socialFriends = false;
-        ImGui.SameLine(0, Kit.Px(Theme.Space5));
-        if (TabButton("##tabparty"u8, social.PartyCount > 0 ? Kit.F($"Party {social.PartyCount}/{_app.Content.Social.PartySize}") : "Party"u8, _socialParty && !_socialFriends))
-        {
-            _socialParty = true;
-            _socialFriends = false;
-        }
-
-        ImGui.SameLine(0, Kit.Px(Theme.Space5));
-        var incoming = _app.Accounts.View.Incoming.Length;
-        if (TabButton("##tabfriends"u8, incoming > 0 ? Kit.F($"Friends +{incoming}") : "Friends"u8, _socialFriends) && !_socialFriends)
-            OpenFriends();
-        var closeWidth = Kit.Measure(_ui.SansMedium, Theme.FontCaption, "CLOSE"u8).X + Kit.Px(Theme.Space2 * 2);
-        var afterTabs = ImGui.GetCursorScreenPos();
-        ImGui.SetCursorScreenPos(new float2(tabsAt.X + width - closeWidth, tabsAt.Y + Kit.Px(4)));
-        if (Kit.LinkButton("CLOSE"u8))
-            _socialOpen = false;
-        ImGui.SetCursorScreenPos(afterTabs);
-        Kit.Space(Theme.Space3);
-
-        var footer = Kit.Measure(_ui.Sans, Theme.FontSmall, "Ag"u8).Y + Kit.Px(Theme.Space2);
-        var rowsHeight = Math.Max(Kit.Px(60), ImGui.GetContentRegionAvail().Y - footer);
-        ImGui.BeginChild("##socialrows"u8, new float2(width, rowsHeight), ImGuiChildFlags.NavFlattened, ImGuiWindowFlags.NoBackground);
-        var rowWidth = ImGui.GetContentRegionAvail().X - Kit.Px(Theme.Space2);
-        if (_socialFriends)
-            DrawAccountBody(rowWidth, false);
-        else if (_socialParty)
-            DrawPartyRows(snapshot, rowWidth);
-        else
-            DrawPlayerRows(snapshot, rowWidth);
-        ImGui.EndChild();
-
-        Kit.Space(Theme.Space2);
-        if (_socialFriends)
-            DrawAccountNotice(width);
-        else
-            DrawNoticeLine(width);
-        ImGui.EndChild();
-        ImGui.End();
-    }
-
-    private bool TabButton(ImString id, ReadOnlySpan<byte> text, bool active)
-    {
-        var draw = ImGui.GetWindowDrawList();
-        var position = ImGui.GetCursorScreenPos();
-        var textSize = Kit.Measure(_ui.SansBold, Theme.FontHeading, text);
-        var size = new float2(textSize.X, textSize.Y + Kit.Px(Theme.Space2));
-        var pressed = ImGui.InvisibleButton(id, size);
-        var hot = Kit.Animate(ImGui.GetItemID(), Kit.IsHot() ? 1f : 0f);
-        Kit.Text(draw, _ui.SansBold, Theme.FontHeading, position, active ? Theme.Text : Kit.Mix(Theme.TextMute, Theme.TextDim, hot), text);
-        if (active || hot > 0.01f)
-            draw.AddRectFilled(new float2(position.X, position.Y + size.Y - Kit.Px(3)), new float2(position.X + textSize.X, position.Y + size.Y - Kit.Px(1)), Kit.Color(Theme.Accent, active ? 1f : hot));
-        return pressed;
-    }
-
-    private void DrawPlayerRows(SessionSnapshot snapshot, float width)
+    private void DrawPlayerRows(SessionSnapshot snapshot, float width, FloatingInput input)
     {
         var social = snapshot.Social;
         var me = snapshot.PlayerId;
@@ -646,15 +1041,15 @@ internal sealed partial class ScreenHost
                 ref var entry = ref social.Roster[i];
                 if ((entry.Value != 0) != (pass == 0))
                     continue;
-                DrawPlayerRow(snapshot, entry, width);
+                DrawPlayerRow(snapshot, entry, width, input);
             }
         }
 
         Kit.Space(Theme.Space3);
-        Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, "Players on this server only. Names last for this session. Friends, by account, are on the Friends tab; there are no factions yet."u8, width / Kit.Scale);
+        Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, "Players on this server, and who left it this session. These are session names, not accounts: friends are in Friends. Select a name for its card."u8, width / Kit.Scale);
     }
 
-    private void DrawPlayerRow(SessionSnapshot snapshot, in SocialMessage entry, float width)
+    private void DrawPlayerRow(SessionSnapshot snapshot, in SocialMessage entry, float width, FloatingInput input)
     {
         var social = snapshot.Social;
         var me = snapshot.PlayerId;
@@ -668,6 +1063,21 @@ internal sealed partial class ScreenHost
         var name = entry.Text[..entry.Length];
         var nameText = entry.Length == 0 ? Kit.F($"Player {entry.Player}") : Kit.F($"{(ReadOnlySpan<char>)name}");
         var nameWidth = width - Kit.Px(Theme.Space3) - (canInvite ? buttonWidth + Kit.Px(Theme.Space3) : 0);
+        var selected = _detail.Player == entry.Player && PaneShown(SocialPane.Detail);
+        // The name opens the card. Scoped to the session id, so a press cannot complete on another player's row.
+        ImGui.PushID(unchecked((int)entry.Player));
+        if (input != FloatingInput.Passive && ImGui.InvisibleButton("##card"u8, new float2(Math.Max(1f, nameWidth), height)) && _app.Session is { } session)
+        {
+            _detail.SelectPlayer(session, entry.Player);
+            OpenPane(SocialPane.Detail);
+        }
+
+        var hot = input != FloatingInput.Passive && ImGui.IsItemHovered();
+        ImGui.PopID();
+        if (selected || hot)
+            draw.AddRectFilled(position, position + new float2(width, height), Kit.Color(Theme.PanelRaised, selected ? 0.9f : 0.6f));
+        if (selected)
+            draw.AddRectFilled(position, position + new float2(Kit.Px(3), height), Kit.Color(Theme.Accent));
         Kit.ClippedText(draw, _ui.SansMedium, Theme.FontBody, position + new float2(Kit.Px(Theme.Space3), Kit.Px(4)), connected ? Theme.Text : Theme.TextMute, nameText, nameWidth);
 
         ReadOnlySpan<byte> tag =
@@ -740,7 +1150,10 @@ internal sealed partial class ScreenHost
         {
             Kit.Body("You are not in a party."u8);
             Kit.Space(Theme.Space2);
-            Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, Kit.F($"Invite players from the Players list. A party has up to {_app.Content.Social.PartySize} members, shares a chat channel and shows its members at the top left."), width / Kit.Scale);
+            Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, Kit.F($"Invite players from Players. A party has up to {_app.Content.Social.PartySize} members, shares a chat channel and shows its members at the top left."), width / Kit.Scale);
+            Kit.Space(Theme.Space3);
+            if (Kit.Button("Invite players"u8, ButtonKind.Secondary, 180))
+                OpenPane(SocialPane.Players);
             return;
         }
 
@@ -792,6 +1205,13 @@ internal sealed partial class ScreenHost
         }
 
         Kit.Space(Theme.Space4);
+        if (leader && social.PartyCount < _app.Content.Social.PartySize)
+        {
+            if (Kit.Button("Invite players"u8, ButtonKind.Secondary, 180))
+                OpenPane(SocialPane.Players);
+            ImGui.SameLine(0, Kit.Px(Theme.Space2));
+        }
+
         if (Kit.Button("Leave Party"u8, ButtonKind.Secondary, 160) && Bridge is { } leave)
             Request(leave.LeaveParty(), "Leaving the party."u8, default);
         Kit.Space(Theme.Space2);
@@ -802,61 +1222,59 @@ internal sealed partial class ScreenHost
     // Chat
     // ---------------------------------------------------------------------------------------------------------------
 
-    private void DrawChat(SessionSnapshot snapshot)
+    /// <summary>
+    /// Chat: the channel, the log and, while chat has the keyboard or the workspace is open, the line being typed.
+    /// Pinned in flight it shows the log and how to start typing; the field is not there, so it cannot hold keys.
+    /// </summary>
+    private void DrawChatPane(SessionSnapshot snapshot)
     {
         var social = snapshot.Social;
-        var display = _ui.DisplaySize;
-        var size = new float2(Math.Min(Kit.Px(560), display.X - Kit.Px(48)), Math.Min(Kit.Px(360), display.Y - QuickBarBottom - Kit.Px(Theme.Space5 + Theme.Space3)));
-        var min = new float2(Kit.Px(Theme.Space5), display.Y - size.Y - Kit.Px(Theme.Space5));
-        ImGui.SetNextWindowPos(min);
-        ImGui.SetNextWindowSize(size);
-        ImGui.Begin("##chat"u8, RootFlags | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
-        RaiseIfAppearing();
-        var draw = ImGui.GetWindowDrawList();
-        Kit.PanelFrame(draw, min, min + size);
-        var pad = Kit.Px(Theme.Space4);
-        ImGui.SetCursorScreenPos(min + new float2(pad, pad));
-        ImGui.BeginChild("##chatbody"u8, size - new float2(pad * 2, pad * 2), ImGuiChildFlags.None, ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoScrollbar);
-        var width = ImGui.GetContentRegionAvail().X;
+        if (!BeginPane(SocialPane.Chat, "##chat"u8, "Chat"u8, false, out var width, out var input))
+            return;
 
-        // Header: the channel to send on, and close. Chat's buttons take the pointer only: keyboard navigation
-        // never rests on them, so Enter, which opens chat and sends a line, cannot also press one.
+        // The channel buttons take the pointer only: keyboard navigation never rests on them, so Enter, which
+        // opens chat and sends a line, cannot also press one.
         ImGui.PushItemFlag(ImGuiItemFlags.NoNav, true);
         var headerAt = ImGui.GetCursorScreenPos();
-        Kit.Caption("CHAT"u8, Theme.Accent);
-        ImGui.SetCursorScreenPos(headerAt + new float2(Kit.Measure(_ui.SansMedium, Theme.FontCaption, "CHAT"u8).X + Kit.Px(Theme.Space5), -Kit.Px(Theme.Space1)));
         // Picking a channel puts the caret back in the field, so the key that sends is never left on a button.
         if (ChannelButton("##everyone"u8, "EVERYONE"u8, _chatChannel == ChatChannel.Everyone, true))
         {
             _chatChannel = ChatChannel.Everyone;
-            _chatFocus = true;
+            _chatFocus = _chatOpen || _socialOpen;
         }
 
         ImGui.SameLine(0, Kit.Px(Theme.Space2));
         if (ChannelButton("##party"u8, "PARTY"u8, _chatChannel == ChatChannel.Party, social.PartyCount > 0))
         {
             _chatChannel = ChatChannel.Party;
-            _chatFocus = true;
+            _chatFocus = _chatOpen || _socialOpen;
         }
-        var closeWidth = Kit.Measure(_ui.SansMedium, Theme.FontCaption, "CLOSE"u8).X + Kit.Px(Theme.Space2 * 2);
-        ImGui.SetCursorScreenPos(new float2(headerAt.X + width - closeWidth, headerAt.Y - Kit.Px(Theme.Space1)));
-        if (Kit.LinkButton("CLOSE"u8))
-            _chatOpen = false;
-        ImGui.PopItemFlag();
-        ImGui.SetCursorScreenPos(headerAt + new float2(0, Kit.Px(26)));
 
+        ImGui.PopItemFlag();
+        ImGui.SetCursorScreenPos(headerAt + new float2(0, Kit.Px(30)));
+
+        var typing = _chatOpen || _socialOpen;
         var lineHeight = Kit.Measure(_ui.Sans, Theme.FontSmall, "Ag"u8).Y;
-        var inputHeight = Kit.Px(Theme.ControlHeight);
-        var logHeight = Math.Max(Kit.Px(40), ImGui.GetContentRegionAvail().Y - inputHeight - lineHeight - Kit.Px(Theme.Space2 * 2));
-        DrawChatLog(snapshot, width, logHeight);
+        var inputHeight = typing ? Kit.Px(Theme.ControlHeight) + Kit.Px(Theme.Space1) : 0f;
+        var logHeight = Math.Max(Kit.Px(40), ImGui.GetContentRegionAvail().Y - inputHeight - lineHeight - Kit.Px(Theme.Space2));
+        DrawChatLog(snapshot, width, logHeight, FloatingWindow.ChildFlags(input));
 
         Kit.Space(Theme.Space2);
-        DrawChatStatus(width);
-        Kit.Space(Theme.Space1);
-        DrawChatInput(snapshot, width);
+        if (typing)
+        {
+            DrawChatStatus(width);
+            Kit.Space(Theme.Space1);
+            DrawChatInput(snapshot, width);
+        }
+        else
+        {
+            var at = ImGui.GetCursorScreenPos();
+            Kit.ClippedText(ImGui.GetWindowDrawList(), _ui.Sans, Theme.FontSmall, at, Theme.TextMute,
+                _chatKey.Length > 0 ? Kit.F($"{_chatKey} to type a line.") : "Open Social to type a line."u8, width);
+            ImGui.Dummy(new float2(width, lineHeight));
+        }
 
-        ImGui.EndChild();
-        ImGui.End();
+        EndPane();
     }
 
     private bool ChannelButton(ImString id, ReadOnlySpan<byte> label, bool active, bool enabled)
@@ -879,7 +1297,7 @@ internal sealed partial class ScreenHost
         return pressed && enabled;
     }
 
-    private void DrawChatLog(SessionSnapshot snapshot, float width, float height)
+    private void DrawChatLog(SessionSnapshot snapshot, float width, float height, ImGuiWindowFlags flags)
     {
         var social = snapshot.Social;
         // The log keeps the newest 64 lines: each new line past that pushes the oldest off the front, moving the
@@ -894,7 +1312,7 @@ internal sealed partial class ScreenHost
             ImGui.SetNextWindowScroll(new float2(0, Math.Max(0f, _chatScrollY - removed)));
         }
 
-        ImGui.BeginChild("##chatlog"u8, new float2(width, height), ImGuiChildFlags.None, ImGuiWindowFlags.NoBackground);
+        ImGui.BeginChild("##chatlog"u8, new float2(width, height), ImGuiChildFlags.None, flags);
         var atBottom = ImGui.GetScrollY() >= ImGui.GetScrollMaxY() - Kit.Px(4);
         var wrap = ImGui.GetContentRegionAvail().X - Kit.Px(Theme.Space2);
         if (social.ChatCount == 0)
@@ -977,12 +1395,12 @@ internal sealed partial class ScreenHost
         if (!submitted && !clicked)
             return;
 
-        // Enter on an empty line closes chat, back to flying; Enter on a line sends it and closes. The Send button
-        // keeps chat open with the caret in the field.
+        // Enter on an empty line gives the keyboard back to flight; Enter on a line sends it and does the same. The
+        // Send button keeps the caret in the field. Chat stays on screen in the workspace or pinned.
         if (_chatInput.IsEmpty)
         {
             if (submitted)
-                _chatOpen = false;
+                EndChatTyping();
             return;
         }
 
@@ -994,7 +1412,7 @@ internal sealed partial class ScreenHost
             _chatInput.Clear();
             _noticeUntil = 0;
             if (submitted)
-                _chatOpen = false;
+                EndChatTyping();
             else
                 _chatFocus = true;
         }
