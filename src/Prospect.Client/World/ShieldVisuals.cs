@@ -396,9 +396,8 @@ internal sealed class ShieldVisuals
         shield.Age = fresh ? published : shield.Age + elapsed;
         if (shield.Correction >= 0f)
         {
-            shield.Correction += Math.Max(elapsed, 0f) / _look.FadeInSeconds;
-            if (shield.Correction >= 1f)
-                shield.Correction = -1f;
+            // A new publication takes back any local advance, even one that finished the fade between publications.
+            shield.Correction = Math.Max(0f, shield.Correction + elapsed / _look.FadeInSeconds);
         }
 
         if (shown == shield.Target)
@@ -437,12 +436,12 @@ internal sealed class ShieldVisuals
         if (shield.Target == shield.From || shield.Age >= (shield.Target ? _look.FadeInSeconds : _look.CollapseSeconds))
         {
             shield.Phase = Phase.Steady;
-            shield.Glow = shield.Target ? (shield.Correction >= 0f ? shield.Correction : 1f) : 0f;
+            shield.Glow = shield.Target ? (shield.Correction >= 0f ? Math.Min(shield.Correction, 1f) : 1f) : 0f;
         }
         else if (shield.Age < 0f)
         {
             shield.Phase = Phase.Pending;
-            shield.Glow = shield.From ? (shield.Correction >= 0f ? shield.Correction : 1f) : 0f;
+            shield.Glow = shield.From ? (shield.Correction >= 0f ? Math.Min(shield.Correction, 1f) : 1f) : 0f;
         }
         else if (shield.Target)
         {
@@ -465,10 +464,16 @@ internal sealed class ShieldVisuals
     private void Ripples(ref HullShield shield, in HullView hull, float radius, float elapsed, bool fresh)
     {
         var life = _look.RippleSeconds;
-        Advance(ref shield.Ripple0, elapsed, life);
-        Advance(ref shield.Ripple1, elapsed, life);
-        Advance(ref shield.Ripple2, elapsed, life);
-        Advance(ref shield.Ripple3, elapsed, life);
+        // The newest live ripple has an authoritative age: do not expire it on the predicted clock before Place.
+        var place = fresh && hull.ShieldHit.Serial == shield.Serial;
+        if (!place || shield.Ripple0.Serial != shield.Serial)
+            Advance(ref shield.Ripple0, elapsed, life);
+        if (!place || shield.Ripple1.Serial != shield.Serial)
+            Advance(ref shield.Ripple1, elapsed, life);
+        if (!place || shield.Ripple2.Serial != shield.Serial)
+            Advance(ref shield.Ripple2, elapsed, life);
+        if (!place || shield.Ripple3.Serial != shield.Serial)
+            Advance(ref shield.Ripple3, elapsed, life);
         if (hull.ShieldHit.Serial != shield.Serial)
         {
             shield.Serial = hull.ShieldHit.Serial;

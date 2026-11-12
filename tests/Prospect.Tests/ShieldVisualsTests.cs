@@ -612,6 +612,25 @@ public sealed class ShieldVisualsTests
         }
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(11)]
+    public void ACorrectionFadeTakesBackLocalTimeOnTheNextPublication(int repeatedFrames)
+    {
+        Frame(Hull(1));
+        Frame(Hull(1, 0f, offline: true));
+        var corrected = Hull(1, changeAge: 1.9f);
+        Assert.Null(Frame(corrected));
+
+        // Render ahead of the publication, including far enough to finish the fade locally.
+        for (var i = 0; i < repeatedFrames; i++)
+            Repeat(0.1f, corrected);
+        var drawn = Frame(corrected)!.Value;
+        Assert.Equal(Dt / Look.FadeInSeconds, drawn.Params.X, 4);
+        Assert.Equal(0f, drawn.Params.Z);
+        Assert.Equal(1f, Publish(Look.FadeInSeconds, 0.1f, corrected)!.Value.Params.X);
+    }
+
     [Fact]
     public void AStallPastAPendingBreakTakesTheNewPublishedAgeAndDoesNotReplayIt()
     {
@@ -831,6 +850,29 @@ public sealed class ShieldVisualsTests
         var drawn = Publish(2f, 0.1f, hull)!.Value;
         Assert.Equal(1, RippleCount(drawn));
         Assert.Equal(0.05f, RippleAge(drawn, -50), 3);
+    }
+
+    [Fact]
+    public void ALiveRippleTakesItsCorrectedAgeBeforeItCanExpireInTheSameUpdate()
+    {
+        var hull = Hull(1);
+        hull.IsOwn = true;
+        Frame(hull);
+        hull.ShieldHit = new ShieldHit { Serial = 1, Strength = 200, X = 50 };
+        hull.ShieldHitAge = Look.RippleSeconds - Dt;
+        Assert.Equal(hull.ShieldHitAge, RippleAge(Frame(hull)!.Value, 50), 4);
+
+        // Prediction advances one input, but reconciliation makes the still-live hit younger.
+        hull.ShieldHitAge -= Dt;
+        var drawn = Frame(hull)!.Value;
+        Assert.Equal(1, RippleCount(drawn));
+        Assert.Equal(hull.ShieldHitAge, RippleAge(drawn, 50), 4);
+
+        // A genuinely expired publication still removes it; later corrections do not resurrect that slot.
+        hull.ShieldHitAge = Look.RippleSeconds;
+        Assert.Equal(0, RippleCount(Frame(hull)!.Value));
+        hull.ShieldHitAge -= Dt;
+        Assert.Equal(0, RippleCount(Frame(hull)!.Value));
     }
 
     [Fact]
