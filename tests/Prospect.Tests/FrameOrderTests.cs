@@ -97,6 +97,10 @@ public sealed class FrameOrderTests : IDisposable
     private bool _floatingField;
     private readonly ImInputString _floatingText = new(64);
     private int _floatingCloses;
+    private float2 _floatingDisplay = Screen;
+    private float _floatingScale = 1f;
+    private HudRect _floatingReserved;
+    private HudRect _floatingDrawn;
     private static readonly float2 FloatingSize = new(360, 240);
     private static readonly float2 FloatingAt = new(400, 200);
 
@@ -465,7 +469,13 @@ public sealed class FrameOrderTests : IDisposable
         if (_floating is not { } window)
             return;
         var input = FloatingMode;
-        var frame = window.Begin("##testwindow"u8, FloatingSize, FloatingAt, Screen, 1f, input, true);
+        // As ScreenHost does: the heads-up markers reserve the window's place first, then the window is drawn.
+        _floatingReserved = window.Prepare(FloatingSize, FloatingAt, _floatingDisplay, _floatingScale, input);
+        var frame = window.Begin("##testwindow"u8, FloatingSize, FloatingAt, _floatingDisplay, _floatingScale, input, true);
+        var position = ImGui.GetWindowPos();
+        var size = ImGui.GetWindowSize();
+        _floatingDrawn = new HudRect(position.X, position.Y, position.X + size.X, position.Y + size.Y);
+        Assert.Equal(frame.Min, position);
         if (frame.Close)
             _floatingCloses++;
         ImGui.BeginChild("##body"u8, frame.Size - new float2(0, frame.Title), ImGuiChildFlags.None, FloatingWindow.ChildFlags(input));
@@ -563,6 +573,55 @@ public sealed class FrameOrderTests : IDisposable
         Frame(() => Move(grab - new float2(2000, 2000)));
         Frame(() => Button(GlfwMouseButton.Left, false));
         Assert.Equal(new float2(FloatingWindow.Margin, HudLayout.TopBarBottom(1f) + FloatingWindow.Margin), _floating.Min);
+    }
+
+    [Fact]
+    public void DuringAHeldDragTheMarkersReserveExactlyWhereTheWindowIsDrawn()
+    {
+        _surfaceOpen = true;
+        _floatingFull = true;
+        _floating = new FloatingWindow { Open = true };
+        Frame(() => Move(EmptySpace));
+        Frame();
+        var start = _floating.Min;
+        var grab = TitleOf(_floating);
+        Frame(() => Move(grab));
+        Frame(() => Button(GlfwMouseButton.Left, true));
+        Assert.Equal(start, _floating.Min);
+
+        // Every frame of the drag: the reservation is the drawn rectangle, and each motion moves it exactly once.
+        for (var step = 1; step <= 5; step++)
+        {
+            Frame(() => Move(grab + new float2(40, 25) * step));
+            Assert.Equal(_floatingReserved, _floatingDrawn);
+            Assert.Equal(start + new float2(40, 25) * step, _floating.Min);
+        }
+
+        // The window shrinks under the held drag, then the interface scale doubles: still one rectangle, on screen.
+        _floatingDisplay = new float2(700, 420);
+        Frame(() => Move(grab + new float2(240, 150)));
+        Assert.Equal(_floatingReserved, _floatingDrawn);
+        Assert.True(_floatingDrawn.Right <= 700 - FloatingWindow.Margin && _floatingDrawn.Bottom <= 420 - FloatingWindow.Margin, $"{_floatingDrawn}");
+        _floatingScale = 2f;
+        Frame(() => Move(grab + new float2(200, 120)));
+        Assert.Equal(_floatingReserved, _floatingDrawn);
+        Assert.True(_floatingDrawn.Top >= HudLayout.TopBarBottom(2f) + FloatingWindow.Margin * 2, $"{_floatingDrawn}");
+
+        // Moved and let go in one poll: the release ends the drag, and the window stays where it was drawn.
+        _floatingDisplay = Screen;
+        _floatingScale = 1f;
+        Frame();
+        var held = _floating.Min;
+        Frame(() =>
+        {
+            Move(grab + new float2(-300, 0));
+            Button(GlfwMouseButton.Left, false);
+        });
+        Assert.Equal(_floatingReserved, _floatingDrawn);
+        Assert.Equal(held, _floating.Min);
+        Frame(() => Move(grab + new float2(-400, 0)));
+        Assert.Equal(held, _floating.Min);
+        Assert.Equal(_floatingReserved, _floatingDrawn);
     }
 
     [Fact]

@@ -595,17 +595,17 @@ public sealed class HudLayoutTests
             Assert.True(size.X <= width - margin * 2 && size.Y <= height - top - margin, $"size {size}");
             foreach (var at in new[] { new float2(-5000, -5000), new float2(5000, 5000), new float2(width * 0.5f, -1), new float2(-1, height) })
             {
-                var window = new FloatingWindow { Min = at, Placed = true };
-                var rect = window.Rect(new float2(Px(design.X, scale), Px(design.Y, scale)), default, display, scale);
+                var min = FloatingWindow.Clamp(at, size, display, scale);
+                var rect = new HudRect(min.X, min.Y, min.X + size.X, min.Y + size.Y);
                 Assert.True(rect.Left >= margin && rect.Right <= width - margin, $"{rect}");
                 Assert.True(rect.Top >= top && rect.Bottom <= height - margin, $"{rect}");
             }
         }
 
         // A window placed on a large screen comes back on screen when the window or the scale shrinks.
-        var placed = new FloatingWindow { Min = new float2(1800, 900), Placed = true };
-        var shrunk = placed.Rect(new float2(Px(360, scale), Px(420, scale)), default, display, scale);
-        Assert.True(shrunk.Right <= width - margin && shrunk.Bottom <= height - margin);
+        var card = FloatingWindow.Fit(new float2(Px(360, scale), Px(420, scale)), display, scale);
+        var shrunk = FloatingWindow.Clamp(new float2(1800, 900), card, display, scale) + card;
+        Assert.True(shrunk.X <= width - margin && shrunk.Y <= height - margin);
     }
 
     [Fact]

@@ -436,7 +436,10 @@ internal sealed partial class ScreenHost
         _screen != Screen.Session || _socialOpen || (pane == SocialPane.Chat && _chatOpen) ? FloatingInput.Full
         : _app.PointerCaptured ? FloatingInput.Passive : FloatingInput.Pointer;
 
-    /// <summary>The rectangles of this frame's social windows over the view, for the heads-up markers to keep clear of.</summary>
+    /// <summary>
+    /// Places this frame's social windows over the view, held drags included, and keeps their rectangles for the
+    /// heads-up markers to keep clear of. The windows are then drawn at exactly these rectangles.
+    /// </summary>
     private void CollectPaneRects()
     {
         _paneRectCount = 0;
@@ -444,7 +447,7 @@ internal sealed partial class ScreenHost
         {
             var pane = (SocialPane)i;
             if (PaneShown(pane))
-                _paneRects[_paneRectCount++] = Pane(pane).Rect(PaneSize(pane), PaneFallback(pane), _ui.DisplaySize, Kit.Scale);
+                _paneRects[_paneRectCount++] = Pane(pane).Prepare(PaneSize(pane), PaneFallback(pane), _ui.DisplaySize, Kit.Scale, PaneInput(pane));
         }
     }
 

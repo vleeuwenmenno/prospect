@@ -59,6 +59,7 @@ internal sealed class FloatingWindow
     public bool Placed;
 
     private uint _titleItem;
+    private int _preparedFrame = -1;
 
     /// <summary>Takes the window away, pinned or not: the player's explicit close.</summary>
     public void Close()
@@ -92,14 +93,30 @@ internal sealed class FloatingWindow
     }
 
     /// <summary>
-    /// The rectangle the window takes this frame, without drawing it: for keeping heads-up markers clear of a
-    /// pinned window. Matches <see cref="Begin"/> except for a drag still held, which moves it next frame.
+    /// Places the window for this frame, once: its first place, the drag Dear ImGui held on its title bar last
+    /// frame (the bar's active press, so ownership stays Dear ImGui's) and the fit to the screen under the bar.
+    /// Heads-up markers reserve exactly this rectangle, and <see cref="Begin"/> draws and hit-tests it; calling it
+    /// again in the same frame moves nothing, so the drag is applied once whoever asks first.
     /// </summary>
-    public HudRect Rect(float2 size, float2 fallback, float2 display, float scale)
+    public HudRect Prepare(float2 size, float2 fallback, float2 display, float scale, FloatingInput input)
     {
+        var frame = ImGui.GetFrameCount();
+        if (_preparedFrame != frame)
+        {
+            _preparedFrame = frame;
+            if (!Placed)
+            {
+                Min = fallback;
+                Placed = true;
+            }
+
+            if (input != FloatingInput.Passive && _titleItem != 0 && ImGui.GetCurrentContext().ActiveId == _titleItem && ImGui.IsMouseDown(ImGuiMouseButton.Left))
+                Min += ImGui.GetIO().MouseDelta;
+        }
+
         size = Fit(size, display, scale);
-        var min = Clamp(Placed ? Min : fallback, size, display, scale);
-        return new HudRect(min.X, min.Y, min.X + size.X, min.Y + size.Y);
+        Min = Clamp(Min, size, display, scale);
+        return new HudRect(Min.X, Min.Y, Min.X + size.X, Min.Y + size.Y);
     }
 
     /// <summary>
@@ -109,19 +126,9 @@ internal sealed class FloatingWindow
     /// </summary>
     public FloatingFrame Begin(ImString id, float2 size, float2 fallback, float2 display, float scale, FloatingInput input, bool pinnable)
     {
-        size = Fit(size, display, scale);
-        if (!Placed)
-        {
-            Min = fallback;
-            Placed = true;
-        }
-
-        // Dear ImGui owns the drag: it is the title bar's active press from the frame before. Moving first keeps
-        // this frame's layout, drawing and hit tests on the rectangle the window is at.
-        var context = ImGui.GetCurrentContext();
-        if (input != FloatingInput.Passive && _titleItem != 0 && context.ActiveId == _titleItem && ImGui.IsMouseDown(ImGuiMouseButton.Left))
-            Min += ImGui.GetIO().MouseDelta;
-        Min = Clamp(Min, size, display, scale);
+        // The rectangle this frame's markers reserved: the held drag is applied there, before anything is laid out.
+        var rect = Prepare(size, fallback, display, scale, input);
+        size = new float2(rect.Width, rect.Height);
 
         ImGui.SetNextWindowPos(Min);
         ImGui.SetNextWindowSize(size);
