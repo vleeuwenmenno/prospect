@@ -301,6 +301,38 @@ public sealed class ClientPredictionTests : IDisposable
     }
 
     [Fact]
+    public void ShieldAgesRebaseOnSnapshotTimeThenReplayPendingPredictedTicks()
+    {
+        var hull = Hull(OwnHull, Player, Content.PodDesign, Double3.Zero);
+        hull.State.ShieldHit = new ShieldHit { Serial = 1, Strength = 50, AgeTicks = 10 };
+        hull.State.ShieldChangeTicks = 10;
+        Snapshot(100, 0, hull);
+        Assert.Equal(10 * HullSim.Dt, Own().ShieldHitAge);
+        for (var i = 0; i < 4; i++)
+            Tick();
+        Assert.Equal(14 * HullSim.Dt, Own().ShieldChangeAge);
+
+        // The server consumed three inputs in one tick: its age is eleven, not thirteen.
+        hull.State.ShieldHit.AgeTicks = 11;
+        hull.State.ShieldChangeTicks = 11;
+        Snapshot(101, 3, hull);
+        Assert.Equal(12 * HullSim.Dt, Own().ShieldHitAge);
+        Assert.Equal(12 * HullSim.Dt, Own().ShieldChangeAge);
+        Tick();
+        Assert.Equal(13 * HullSim.Dt, Own().ShieldHitAge);
+
+        // A later authoritative reset replaces the predicted clock, including during transit.
+        hull.State.ShieldHit.AgeTicks = 0;
+        hull.State.ShieldChangeTicks = 0;
+        hull.State.Jump = JumpPhase.Tunnel;
+        hull.State.JumpTunnelSeconds = 600;
+        Snapshot(102, 5, hull);
+        Assert.Equal(0f, Own().ShieldChangeAge);
+        Tick();
+        Assert.Equal(HullSim.Dt, Own().ShieldChangeAge);
+    }
+
+    [Fact]
     public void AnotherPlayersHullCrossingThePlayersBetweenTwoTicksStrikesItInThePrediction()
     {
         // A drone belonging to someone else, coming down on the pod at 400 m/s: more than six metres a tick,

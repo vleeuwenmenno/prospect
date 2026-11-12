@@ -80,6 +80,11 @@ internal sealed class ScriptedTransport : ITransport
         _challenges = new byte[capacity * ChallengeBytes];
     }
 
+    internal delegate void SnapshotSink(int peer, ReadOnlySpan<byte> payload);
+
+    /// <summary>Optional observer of the exact snapshot bytes sent by the server.</summary>
+    internal SnapshotSink? ObserveSnapshot { get; set; }
+
     public string Description => "scripted";
 
     public int MaxPayloadSize => 1 << 20;
@@ -197,6 +202,7 @@ internal sealed class ScriptedTransport : ITransport
             case MessageId.Snapshot when SnapshotHeader.TryRead(ref reader, out var header):
                 record.Snapshots++;
                 record.AckedInput = header.AckedInput;
+                ObserveSnapshot?.Invoke(peer, payload);
                 break;
             case MessageId.Reject when RejectMessage.TryRead(ref reader, out var reject):
                 record.Rejects++;

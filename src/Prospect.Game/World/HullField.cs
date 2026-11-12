@@ -69,8 +69,19 @@ public sealed class HullField(HullStore hulls, HullDesign[] designs, bool author
     /// after another, so halfway through a round some have flown this tick and some have not; the round is how a
     /// stepping hull tells them apart, and meets each of them where the end of the tick will find it. A field
     /// whose rounds are never started steps each hull against the others exactly where they stand.
+    /// This also owns the cosmetic clock: call exactly once per world tick, even when hulls are held or take
+    /// several input steps, and before any step can hit another hull.
     /// </summary>
-    public void BeginRound() => _round++;
+    public void BeginRound()
+    {
+        _round++;
+        // Age every hull before contacts: held hulls and hulls struck before their own step share this clock.
+        for (var i = 0; i < hulls.Slots; i++)
+        {
+            if (hulls.IsAliveAt(i))
+                HullSim.AdvanceShieldClock(ref hulls.State(i));
+        }
+    }
 
     /// <summary>True if the hull in a slot has stepped in this round, so its position is already the tick's end.</summary>
     internal bool HasStepped(int index) => hulls.Info(index).Round == _round;

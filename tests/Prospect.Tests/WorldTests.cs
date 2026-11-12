@@ -2084,6 +2084,34 @@ public sealed class ShieldStateTests
         HullSim.Damage(ref state, flight, ref body, 1UL << block, 1, amount);
 
     [Fact]
+    public void AWorldRoundAgesHeldHullsAndCoalescesHitsAcrossBatchedStepsWithoutAllocating()
+    {
+        var store = new HullStore(4);
+        var hull = store.Create(1, (byte)Content.PodDesign, PodDesign, Double3.Zero);
+        var field = new HullField(store, Content.Designs);
+        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask };
+        ref var state = ref store.State(hull.Index);
+        field.BeginRound();
+        Hit(ref state, Pod, ref body, 1, 10);
+        var serial = state.ShieldHit.Serial;
+        field.Step(hull.Index, default);
+        Hit(ref state, Pod, ref body, Emitter, 20);
+        field.Step(hull.Index, default);
+        Assert.Equal(serial, state.ShieldHit.Serial);
+        Assert.Equal(0, state.ShieldHit.AgeTicks);
+        field.BeginRound();
+        field.Hold(hull.Index);
+        Assert.Equal(1, state.ShieldHit.AgeTicks);
+        Hit(ref state, Pod, ref body, 1, 5);
+        Assert.Equal((byte)(serial + 1), state.ShieldHit.Serial);
+        for (var i = 0; i < 100; i++) field.BeginRound();
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 1000; i++) field.BeginRound();
+        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
+        Assert.Equal(ShieldHit.MaxAgeTicks, state.ShieldHit.AgeTicks);
+    }
+
+    [Fact]
     public void TheRestartRulesComeFromTheContent()
     {
         Assert.Equal(0.25f, Content.Rules.ShieldRestartFraction);
@@ -2307,12 +2335,16 @@ public sealed class ShieldStateTests
 
         // The next tick's hit is a new event, and the age counts up to its cap and stops.
         HullOrder order = default;
+        HullSim.AdvanceShieldClock(ref state);
         HullSim.Step(ref state, ref order, default, Pod, ref body);
         Assert.Equal(1, state.ShieldHit.AgeTicks);
         Hit(ref state, Pod, ref body, 1, 10f);
         Assert.Equal((byte)(both.Serial + 1), state.ShieldHit.Serial);
         for (var i = 0; i < 400; i++)
+        {
+            HullSim.AdvanceShieldClock(ref state);
             HullSim.Step(ref state, ref order, default, Pod, ref body);
+        }
         Assert.Equal(ShieldHit.MaxAgeTicks, state.ShieldHit.AgeTicks);
     }
 
@@ -2345,6 +2377,7 @@ public sealed class ShieldStateTests
         var order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(40000, 0, 0) };
         for (var tick = 1; tick <= ShieldHit.MaxAgeTicks + 10; tick++)
         {
+            HullSim.AdvanceShieldClock(ref state);
             HullSim.Step(ref state, ref order, default, Pod, ref body);
             Assert.Equal(Math.Min(tick, ShieldHit.MaxAgeTicks), state.ShieldHit.AgeTicks);
         }
@@ -2472,6 +2505,7 @@ public sealed class ShieldChangeTests
 
         // A hit on a shield that is already down is not a change.
         HullOrder order = default;
+        HullSim.AdvanceShieldClock(ref state);
         HullSim.Step(ref state, ref order, default, Pod, ref body);
         HullSim.Damage(ref state, Pod, ref body, 1UL << 1, 1, 5f);
         Assert.Equal(1, state.ShieldChangeTicks);
@@ -2482,6 +2516,7 @@ public sealed class ShieldChangeTests
         order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(40000, 0, 0) };
         for (var tick = 2; tick <= ShieldHit.MaxAgeTicks + 10; tick++)
         {
+            HullSim.AdvanceShieldClock(ref state);
             HullSim.Step(ref state, ref order, default, Pod, ref body);
             Assert.Equal(Math.Min(tick, ShieldHit.MaxAgeTicks), state.ShieldChangeTicks);
         }
@@ -2491,9 +2526,15 @@ public sealed class ShieldChangeTests
         order = default;
         state.ShieldCooldown = 0f;
         state.Shield = Pod.ShieldCapacity * Pod.ShieldRestartFraction;
+        HullSim.AdvanceShieldClock(ref state);
         HullSim.Step(ref state, ref order, default, Pod, ref body);
         Assert.False(state.ShieldOffline);
         Assert.Equal(0, state.ShieldChangeTicks);
+        HullSim.Step(ref state, ref order, default, Pod, ref body);
+        Assert.Equal(0, state.ShieldChangeTicks);
+        HullSim.AdvanceShieldClock(ref state);
+        HullSim.Step(ref state, ref order, default, Pod, ref body);
+        Assert.Equal(1, state.ShieldChangeTicks);
     }
 
     [Fact]
@@ -2513,6 +2554,10 @@ public sealed class ShieldChangeTests
         Assert.Equal(0, state.ShieldChangeTicks);
         Assert.Equal(0f, store.Flight(hull.Index).ShieldCapacity);
         Assert.Equal(hit, state.ShieldHit);
+        field.BeginRound();
+        field.Step(hull.Index, default);
+        field.Refit(hull.Index, store.Info(hull.Index).Blocks);
+        Assert.Equal(1, state.ShieldChangeTicks);
 
         // An offline shield losing its last emitter shows no change: it was not drawn.
         var other = store.Create(1, (byte)Content.PodDesign, PodDesign, Double3.Zero);

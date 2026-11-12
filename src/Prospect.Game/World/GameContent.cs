@@ -177,11 +177,6 @@ public static class HullSim
         HullField? hulls = null
     )
     {
-        // The shield's event clocks follow simulation time even when transit skips flight and power updates.
-        if (state.ShieldHit.AgeTicks < ShieldHit.MaxAgeTicks)
-            state.ShieldHit.AgeTicks++;
-        if (state.ShieldChangeTicks < ShieldHit.MaxAgeTicks)
-            state.ShieldChangeTicks++;
         var input = pilot;
         if (order.Kind == OrderKind.MoveTo)
         {
@@ -200,6 +195,18 @@ public static class HullSim
         if (rocks is not null && Collide(ref state, flight, ref body, rocks, tick, impulses))
             return true;
         return hulls is not null && Collide(ref state, flight, ref body, hulls, travel);
+    }
+
+    /// <summary>
+    /// Advances cosmetic event ages once at the start of a world tick, before any hull can be struck.
+    /// Input replay owns its predicted ticks; physical steps may run zero or several times within a server tick.
+    /// </summary>
+    public static void AdvanceShieldClock(ref HullState state)
+    {
+        if (state.ShieldHit.AgeTicks < ShieldHit.MaxAgeTicks)
+            state.ShieldHit.AgeTicks++;
+        if (state.ShieldChangeTicks < ShieldHit.MaxAgeTicks)
+            state.ShieldChangeTicks++;
     }
 
     /// <summary>Numerical duration ceiling: double elapsed time retains sub-tick precision up to this value.</summary>

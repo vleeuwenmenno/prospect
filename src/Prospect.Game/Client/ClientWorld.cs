@@ -640,7 +640,10 @@ internal sealed class ClientWorld : IDisposable
             // Nothing is run into on the way: what the hull met before the snapshot's tick the server has
             // settled, and told of.
             for (var age = snapshotTick - sample.Tick; age > 0; age--)
+            {
+                HullSim.AdvanceShieldClock(ref state);
                 HullSim.Step(ref state, ref info.Order, mine ? Hold : Coast, remote.Flight);
+            }
         }
     }
 
