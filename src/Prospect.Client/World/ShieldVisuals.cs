@@ -48,8 +48,10 @@ internal struct ShieldDraw
 /// Each hull's shell is built from the blocks it still has and kept while that hull keeps them. A shield is drawn
 /// while it is online, fading in after the simulation brings it back; when it breaks or loses its last emitter it
 /// collapses red and is gone. Every absorbed hit the snapshots report spreads a ripple from where it landed, aged
-/// from when the server says it happened, so a hit long over is never shown as new. Everything is sized for
-/// the most hulls a snapshot shows, once, so the frame allocates nothing.
+/// from when the server says it happened, so a hit long over is never shown as new. Every new publication of
+/// the session puts each effect back on the clock that publication gives; only frames that draw one publication
+/// again move it on by themselves. Everything is sized for the most hulls a snapshot shows, once, so the frame
+/// allocates nothing.
 /// </summary>
 internal sealed class ShieldVisuals
 {
@@ -93,7 +95,7 @@ internal sealed class ShieldVisuals
     /// <summary>Where a shield is between its last two states, as drawn now.</summary>
     private enum Phase : byte
     {
-        /// <summary>Settled: shown or gone.</summary>
+        /// <summary>Shown or gone: nothing changed, or the change has run its course.</summary>
         Steady,
 
         /// <summary>A change the drawn moment has not reached yet: the old state is still drawn.</summary>
@@ -113,24 +115,33 @@ internal sealed class ShieldVisuals
         /// <summary>Whether the newest published state has the shield up.</summary>
         public bool Target;
 
-        /// <summary>The state the last finished change left, which is drawn while the next one waits.</summary>
-        public bool Settled;
+        /// <summary>
+        /// The state the observed change started from, which is drawn while that change waits. It is kept after
+        /// the change has run its course, so an age corrected back below the change's length shows it part-way
+        /// again. Equal to <see cref="Target"/> when no change was seen: at first sight, or once one was taken
+        /// back.
+        /// </summary>
+        public bool From;
 
         /// <summary>
-        /// Seconds from the target state's change to the moment drawn: taken from every new publication, so a
-        /// stalled frame or a corrected clock never leaves it wrong, and moved on locally only in between.
+        /// Seconds from the target state's change to the moment drawn: taken from every new publication, whatever
+        /// it reads, so a stalled frame or a corrected clock never leaves it wrong, and moved on locally only
+        /// while one publication is drawn again.
         /// </summary>
         public float Age;
 
-        /// <summary>The change age the newest publication gave, to tell a new publication from a repeated one.</summary>
-        public float Published;
+        /// <summary>The simulation tick the newest publication showed this hull at, on the hull's own timeline.</summary>
+        public double Shown;
 
-        /// <summary>The hit age the newest publication gave.</summary>
-        public float HitPublished;
+        /// <summary>Whether that timeline is the pilot's own prediction; a hull changes timelines when it changes hands.</summary>
+        public bool Own;
+
+        /// <summary>Seconds drawn past that publication on the local clock; the next publication takes them back.</summary>
+        public float Ahead;
 
         /// <summary>
-        /// A fade back in, on the local clock, after a collapse was cut short by a corrected prediction; below 0
-        /// for none.
+        /// A fade back in, over drawn simulation time, after a collapse was cut short by a corrected prediction;
+        /// below 0 for none.
         /// </summary>
         public float Correction;
         public Phase Phase;
@@ -150,6 +161,7 @@ internal sealed class ShieldVisuals
     private readonly HullShield[] _hulls = new HullShield[MaxShields];
     private HullDesign[]? _designs;
     private long _frame;
+    private long _publication;
 
     private ShieldDraw[] _draws = [];
     private int _drawCount;
@@ -163,12 +175,18 @@ internal sealed class ShieldVisuals
 
     /// <summary>
     /// Follows every hull's shield through this frame: builds the shell of a hull that has changed, starts a ripple
-    /// for each newly reported hit, and moves fades and collapses on by <paramref name="dt"/>.
+    /// for each newly reported hit, and moves fades and collapses on. <paramref name="publication"/> names the
+    /// publication the hulls come from (<see cref="SessionSnapshot.PublishedAt"/>): a new one puts every effect
+    /// on the clock it gives, even when it reads the same ages as the last, and the drawn simulation time between
+    /// the two is what its hulls' <see cref="HullView.ShownTick"/> say. Only a frame that draws the same
+    /// publication again moves on by <paramref name="dt"/>, the frame's own length.
     /// </summary>
-    public void Update(ReadOnlySpan<HullView> hulls, HullDesign[] designs, float dt)
+    public void Update(ReadOnlySpan<HullView> hulls, HullDesign[] designs, long publication, float dt)
     {
         _frame++;
         dt = Math.Clamp(dt, 0f, 0.1f);
+        var fresh = publication != _publication;
+        _publication = publication;
         if (!ReferenceEquals(designs, _designs))
         {
             // Another world evaluates its designs under its own settings: build every shell again.
@@ -203,9 +221,10 @@ internal sealed class ShieldVisuals
             if (!known)
             {
                 // First sight: as it is, with nothing to animate but a hit still young enough to be spreading.
-                shield.Target = shield.Settled = shown;
-                shield.Age = shield.Published = hull.ShieldChangeAge;
-                shield.HitPublished = hull.ShieldHitAge;
+                shield.Target = shield.From = shown;
+                shield.Age = hull.ShieldChangeAge;
+                shield.Shown = hull.ShownTick;
+                shield.Own = hull.IsOwn;
                 shield.Correction = -1f;
                 shield.Serial = hull.ShieldHit.Serial;
                 if (hull.ShieldHit.Strength > 0 && hull.ShieldHitAge < _look.RippleSeconds)
@@ -213,8 +232,27 @@ internal sealed class ShieldVisuals
             }
             else
             {
-                Ripples(ref shield, hull, radius, dt);
-                Follow(ref shield, shown, hull.ShieldChangeAge, dt);
+                // The simulation time drawn since the last frame. A new publication says where its hull is on
+                // the hull's own timeline, however long the frames between took; what was drawn ahead of the
+                // last one is part of that already.
+                var elapsed = dt;
+                if (!fresh)
+                {
+                    shield.Ahead += dt;
+                }
+                else
+                {
+                    // A hull the pilot takes or leaves is on another timeline from here on, and the two counts
+                    // say nothing about each other: that one frame moves on by its own length.
+                    if (hull.IsOwn == shield.Own)
+                        elapsed = (float)((hull.ShownTick - shield.Shown) * HullSim.Dt) - shield.Ahead;
+                    shield.Shown = hull.ShownTick;
+                    shield.Own = hull.IsOwn;
+                    shield.Ahead = 0f;
+                }
+
+                Ripples(ref shield, hull, radius, elapsed, fresh);
+                Follow(ref shield, shown, hull.ShieldChangeAge, elapsed, fresh);
             }
 
             Draw(ref shield);
@@ -348,55 +386,55 @@ internal sealed class ShieldVisuals
 
     /// <summary>
     /// Follows the shield to <paramref name="shown"/>, the newest published state, whose last change was
-    /// <paramref name="published"/> seconds before the drawn moment. A publication that says something new resets
-    /// the age; a repeated one leaves it to the local clock. A change that flips back before the drawn moment
-    /// reached it never happened; a restart that cuts a collapse short fades in on the local clock.
+    /// <paramref name="published"/> seconds before the drawn moment. A <paramref name="fresh"/> publication sets
+    /// the age, whether or not it reads as the last one did; a repeated one leaves it to the local clock. A change
+    /// that flips back before the drawn moment reached it never happened; a restart that cuts a collapse short
+    /// fades in over the <paramref name="elapsed"/> time.
     /// </summary>
-    private void Follow(ref HullShield shield, bool shown, float published, float dt)
+    private void Follow(ref HullShield shield, bool shown, float published, float elapsed, bool fresh)
     {
-        if (published != shield.Published)
-        {
-            shield.Published = published;
-            shield.Age = published;
-        }
-        else
-        {
-            shield.Age += dt;
-        }
-
+        shield.Age = fresh ? published : shield.Age + elapsed;
         if (shield.Correction >= 0f)
         {
-            shield.Correction += dt / _look.FadeInSeconds;
+            shield.Correction += Math.Max(elapsed, 0f) / _look.FadeInSeconds;
             if (shield.Correction >= 1f)
                 shield.Correction = -1f;
         }
 
         if (shown == shield.Target)
             return;
+
+        // What the new change starts from is what the last frame drew.
         switch (shield.Phase)
         {
-            case Phase.Collapsing when shown:
-                shield.Settled = true;
+            case Phase.Steady:
+                shield.From = shield.Target;
+                break;
+            case Phase.Pending:
+                // The waiting change is taken back before it showed: the state it started from is the target.
+                break;
+            case Phase.Collapsing:
+                shield.From = true;
                 shield.Correction = 0f;
                 break;
-            case Phase.Rising when !shown:
+            case Phase.Rising:
                 // Partly in: it collapses from here on the new change's clock.
-                shield.Settled = true;
+                shield.From = true;
                 break;
         }
 
         shield.Target = shown;
     }
 
-    /// <summary>Works out what the shield looks like now from where it is between its two states.</summary>
+    /// <summary>
+    /// Works out what the shield looks like now from its two states and the change's age alone, so an age that
+    /// is corrected, forward or back across the change's end, is drawn as it reads.
+    /// </summary>
     private void Draw(ref HullShield shield)
     {
         shield.Glow = 0f;
         shield.Collapse = 0f;
-        if (shield.Target != shield.Settled && shield.Age >= (shield.Target ? _look.FadeInSeconds : _look.CollapseSeconds))
-            shield.Settled = shield.Target;
-
-        if (shield.Target == shield.Settled)
+        if (shield.Target == shield.From || shield.Age >= (shield.Target ? _look.FadeInSeconds : _look.CollapseSeconds))
         {
             shield.Phase = Phase.Steady;
             shield.Glow = shield.Target ? (shield.Correction >= 0f ? shield.Correction : 1f) : 0f;
@@ -404,7 +442,7 @@ internal sealed class ShieldVisuals
         else if (shield.Age < 0f)
         {
             shield.Phase = Phase.Pending;
-            shield.Glow = shield.Settled ? (shield.Correction >= 0f ? shield.Correction : 1f) : 0f;
+            shield.Glow = shield.From ? (shield.Correction >= 0f ? shield.Correction : 1f) : 0f;
         }
         else if (shield.Target)
         {
@@ -420,37 +458,41 @@ internal sealed class ShieldVisuals
     }
 
     /// <summary>
-    /// Moves the ripples on, puts the newest back on the published clock when a publication says how old its hit
-    /// is (the others shift with it), and starts one for a newly reported hit.
+    /// Moves every ripple on by the <paramref name="elapsed"/> drawn time, whichever hit is the newest, then
+    /// starts one for a newly reported hit at the age it is published with. A <paramref name="fresh"/> publication
+    /// that tells of the same hit again puts that hit's ripple on the age it gives.
     /// </summary>
-    private void Ripples(ref HullShield shield, in HullView hull, float radius, float dt)
+    private void Ripples(ref HullShield shield, in HullView hull, float radius, float elapsed, bool fresh)
     {
-        var shift = dt;
-        if (hull.ShieldHitAge != shield.HitPublished)
-        {
-            shield.HitPublished = hull.ShieldHitAge;
-            if (hull.ShieldHit.Serial == shield.Serial && Newest(ref shield, shield.Serial) is { } age)
-                shift = hull.ShieldHitAge - age;
-        }
-
-        Advance(ref shield.Ripple0, shift, _look.RippleSeconds);
-        Advance(ref shield.Ripple1, shift, _look.RippleSeconds);
-        Advance(ref shield.Ripple2, shift, _look.RippleSeconds);
-        Advance(ref shield.Ripple3, shift, _look.RippleSeconds);
+        var life = _look.RippleSeconds;
+        Advance(ref shield.Ripple0, elapsed, life);
+        Advance(ref shield.Ripple1, elapsed, life);
+        Advance(ref shield.Ripple2, elapsed, life);
+        Advance(ref shield.Ripple3, elapsed, life);
         if (hull.ShieldHit.Serial != shield.Serial)
         {
             shield.Serial = hull.ShieldHit.Serial;
-            if (hull.ShieldHit.Strength > 0 && hull.ShieldHitAge < _look.RippleSeconds)
+            if (hull.ShieldHit.Strength > 0 && hull.ShieldHitAge < life)
                 Start(ref shield, hull.ShieldHit, hull.ShieldHitAge, radius);
+        }
+        else if (fresh)
+        {
+            Place(ref shield.Ripple0, shield.Serial, hull.ShieldHitAge, life);
+            Place(ref shield.Ripple1, shield.Serial, hull.ShieldHitAge, life);
+            Place(ref shield.Ripple2, shield.Serial, hull.ShieldHitAge, life);
+            Place(ref shield.Ripple3, shield.Serial, hull.ShieldHitAge, life);
         }
     }
 
-    private static float? Newest(ref HullShield shield, byte serial) =>
-        shield.Ripple0.Strength > 0f && shield.Ripple0.Serial == serial ? shield.Ripple0.Age
-        : shield.Ripple1.Strength > 0f && shield.Ripple1.Serial == serial ? shield.Ripple1.Age
-        : shield.Ripple2.Strength > 0f && shield.Ripple2.Serial == serial ? shield.Ripple2.Age
-        : shield.Ripple3.Strength > 0f && shield.Ripple3.Serial == serial ? shield.Ripple3.Age
-        : null;
+    /// <summary>Puts the ripple of the hit with this serial, if it is still spreading, on the published age.</summary>
+    private static void Place(ref Ripple ripple, byte serial, float age, float life)
+    {
+        if (ripple.Strength <= 0f || ripple.Serial != serial)
+            return;
+        ripple.Age = age;
+        if (age >= life || age < -life)
+            ripple = default;
+    }
 
     /// <summary>Puts a new ripple in the place of the oldest, or of one that is over.</summary>
     private static void Start(ref HullShield shield, in ShieldHit hit, float age, float radius)

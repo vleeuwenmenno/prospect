@@ -187,6 +187,9 @@ internal sealed class WorldView
 
     /// <summary>Where every hull is drawn this frame; for tests.</summary>
     internal HullVisuals Visuals => _visuals;
+
+    /// <summary>Every hull's shield as drawn this frame; for tests.</summary>
+    internal ShieldVisuals Shields => _shields;
     private bool _jumpThroughExit;
     private float _jumpTravel;
     private float _jumpCover;
@@ -440,7 +443,7 @@ internal sealed class WorldView
         // their own jump from inside until the command view has mostly taken over.
         _ownInside = _commandBlend < 0.5f;
         _visuals.Update(snapshot.Hulls.AsSpan(0, snapshot.HullCount), _designs, alpha, dt, _ownInside, FtlPreview);
-        _shields.Update(snapshot.Hulls.AsSpan(0, snapshot.HullCount), _designs, dt);
+        _shields.Update(snapshot.Hulls.AsSpan(0, snapshot.HullCount), _designs, snapshot.PublishedAt, dt);
 
         if (own.Id != _ownId)
         {

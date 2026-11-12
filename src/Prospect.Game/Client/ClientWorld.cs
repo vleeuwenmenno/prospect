@@ -70,6 +70,14 @@ public struct HullView
     /// negative for a remote hull whose drawn pose has not reached it yet.
     /// </summary>
     public float ShieldChangeAge;
+
+    /// <summary>
+    /// The moment this view shows, in simulation ticks on the hull's own timeline: the inputs predicted so far
+    /// for the player's hull, the delayed server tick a remote hull is drawn at. Two views of one hull are this
+    /// many ticks apart in what they show, which is not how long the frames between them took. It is never
+    /// compared between hulls.
+    /// </summary>
+    public double ShownTick;
 }
 
 /// <summary>
@@ -422,6 +430,7 @@ internal sealed class ClientWorld : IDisposable
                 ShieldHit = _predicted.ShieldHit,
                 ShieldHitAge = _predicted.ShieldHit.AgeTicks * HullSim.Dt,
                 ShieldChangeAge = _predicted.ShieldChangeTicks * HullSim.Dt,
+                ShownTick = _nextSequence - 1,
             };
         }
 
@@ -697,6 +706,7 @@ internal sealed class ClientWorld : IDisposable
             ShieldHit = newest.State.ShieldHit,
             ShieldHitAge = (float)(newest.State.ShieldHit.AgeTicks + (renderTick - newest.Tick)) * HullSim.Dt,
             ShieldChangeAge = (float)(newest.State.ShieldChangeTicks + (renderTick - newest.Tick)) * HullSim.Dt,
+            ShownTick = renderTick,
         };
 
         if (renderTick >= newest.Tick)

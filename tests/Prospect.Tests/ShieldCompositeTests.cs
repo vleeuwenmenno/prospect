@@ -57,7 +57,7 @@ public sealed class ShieldCompositeTests
         var shields = new ShieldVisuals(ShieldLook.Load());
         var hull = new Prospect.Game.Client.HullView { Id = 1, Design = (byte)content.PodDesign, Blocks = content.Pod.FullMask, Orientation = Quaternion.Identity, Shield = 1500f };
         var other = hull with { Id = 2 };
-        shields.Update([hull, other], content.Designs, 1f / 60f);
+        shields.Update([hull, other], content.Designs, 1, 1f / 60f);
         var draws = new ShieldDraw[4];
         var instances = new ShieldInstance[4];
         var vertices = new MeshVertex[ShieldVisuals.MaxVertices];

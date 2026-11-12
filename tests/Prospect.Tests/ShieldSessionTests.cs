@@ -107,6 +107,14 @@ public sealed class ShieldSessionTests
         Assert.InRange(Own(pilot).ShieldChangeAge, 0f, 0.3f);
         Assert.Equal(own.ShieldHit.X, seen.ShieldHit.X);
 
+        // Each view says which moment it shows. From one publication to a later one the break has aged by the
+        // simulation time between the two moments shown, however quickly the two were published.
+        for (var i = 0; i < 10; i++)
+            Step();
+        Assert.True(Find(observer, own.Id, out var later));
+        Assert.True(later.ShownTick > seen.ShownTick);
+        Assert.Equal((later.ShownTick - seen.ShownTick) * HullSim.Dt, later.ShieldChangeAge - seen.ShieldChangeAge, 3);
+
         // Someone joining two seconds later is told the shield is down, but the hit is too old to show.
         for (var i = 0; i < 120; i++)
             Step();

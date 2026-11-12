@@ -1,4 +1,5 @@
 using System.Numerics;
+using Brutal.Numerics;
 using Prospect.Client.Render;
 using Prospect.Client.World;
 using Prospect.Engine.IO;
@@ -230,14 +231,63 @@ public sealed class ShieldVisualsTests
             ShieldChangeAge = changeAge,
         };
 
-    /// <summary>Runs one frame and returns the drawn shell of the hull, if any.</summary>
-    private ShieldInstance? Frame(params HullView[] hulls)
+    // The publication the frames draw, named as SessionSnapshot.PublishedAt names it, and the tick it shows its
+    // hulls at. Every test says which frames draw a new publication and which draw the last one again.
+    private long _publication;
+    private double _shownTick;
+
+    /// <summary>
+    /// Draws a new publication, one tick of simulation after the last, in a frame one tick long. Returns the
+    /// first shell drawn, if any.
+    /// </summary>
+    private ShieldInstance? Frame(params HullView[] hulls) => Publish(Dt, Dt, hulls);
+
+    /// <summary>
+    /// Draws a new publication that shows its hulls <paramref name="simulated"/> seconds after the last one did,
+    /// in a frame <paramref name="dt"/> long: the two differ after a stall, where the application caps the
+    /// frame's length.
+    /// </summary>
+    private ShieldInstance? Publish(float simulated, float dt, params HullView[] hulls)
     {
-        _shields.Update(hulls, Content.Designs, Dt);
+        _publication += 977;
+        _shownTick += simulated / HullSim.Dt;
+        return Drawn(dt, hulls);
+    }
+
+    /// <summary>Draws the last publication again, in a frame <paramref name="dt"/> long.</summary>
+    private ShieldInstance? Repeat(float dt, params HullView[] hulls) => Drawn(dt, hulls);
+
+    private ShieldInstance? Drawn(float dt, HullView[] hulls)
+    {
+        for (var i = 0; i < hulls.Length; i++)
+            hulls[i].ShownTick = _shownTick;
+        _shields.Update(hulls, Content.Designs, _publication, dt);
         _shields.Begin(_draws);
         foreach (var hull in hulls)
             _shields.Add(hull.Id, new Vector3(1, 2, 3), Quaternion.Identity, 1f, 1f, _instances, _vertices);
         return _shields.Draws.Length > 0 ? _instances[0] : null;
+    }
+
+    private static int RippleCount(in ShieldInstance drawn) =>
+        (drawn.Strengths.X > 0f ? 1 : 0) + (drawn.Strengths.Y > 0f ? 1 : 0) + (drawn.Strengths.Z > 0f ? 1 : 0) + (drawn.Strengths.W > 0f ? 1 : 0);
+
+    /// <summary>The age of the one ripple spreading from the hit at <paramref name="x"/>, as <see cref="ShieldHit.X"/> has it.</summary>
+    private static float RippleAge(in ShieldInstance drawn, sbyte x)
+    {
+        var at = x * Pod.Flight.Radius / 127f;
+        float? age = null;
+        Span<float4> ripples = [drawn.Ripple0, drawn.Ripple1, drawn.Ripple2, drawn.Ripple3];
+        Span<float> strengths = [drawn.Strengths.X, drawn.Strengths.Y, drawn.Strengths.Z, drawn.Strengths.W];
+        for (var i = 0; i < ripples.Length; i++)
+        {
+            if (strengths[i] <= 0f || MathF.Abs(ripples[i].X - at) > 1e-3f)
+                continue;
+            Assert.Null(age);
+            age = ripples[i].W;
+        }
+
+        Assert.True(age.HasValue, $"no ripple spreads from {x}");
+        return age!.Value;
     }
 
     [Fact]
@@ -275,7 +325,7 @@ public sealed class ShieldVisualsTests
 
         // The emitter is gone: no shield, no shell, and nothing pretends to shut down.
         var bare = new ShieldVisuals(Look);
-        bare.Update([Hull(2, 0f, blocks: Pod.FullMask & ~(1UL << Emitter))], Content.Designs, Dt);
+        bare.Update([Hull(2, 0f, blocks: Pod.FullMask & ~(1UL << Emitter))], Content.Designs, 1, Dt);
         bare.Begin(_draws);
         bare.Add(2, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices);
         Assert.Equal(0, bare.Draws.Length);
@@ -291,7 +341,7 @@ public sealed class ShieldVisualsTests
 
         // The collapse runs its course, then the offline shield is not drawn at all, while its charge builds.
         var frames = 1;
-        while (Frame(Hull(1, frames * 2f, offline: true)) is { } still)
+        while (Frame(Hull(1, frames * 2f, offline: true, changeAge: frames * Dt)) is { } still)
         {
             Assert.True(still.Params.Z > 0f);
             frames++;
@@ -299,8 +349,8 @@ public sealed class ShieldVisualsTests
         }
 
         Assert.InRange(frames * Dt, Look.CollapseSeconds - 2 * Dt, Look.CollapseSeconds + 2 * Dt);
-        for (var i = 0; i < 120; i++)
-            Assert.Null(Frame(Hull(1, 300f, offline: true)));
+        for (var i = 1; i <= 120; i++)
+            Assert.Null(Frame(Hull(1, 300f, offline: true, changeAge: (frames + i) * Dt)));
 
         // Back online: it fades in over a second, from nearly nothing.
         var first = Frame(Hull(1, 380f, changeAge: Dt))!.Value;
@@ -330,9 +380,9 @@ public sealed class ShieldVisualsTests
         Frame(Hull(1));
         var lost = Pod.FullMask & ~(1UL << Emitter);
         Assert.True(Frame(Hull(1, 0f, blocks: lost))!.Value.Params.Z > 0f);
-        for (var i = 0; i < 60; i++)
-            Frame(Hull(1, 0f, blocks: lost));
-        Assert.Null(Frame(Hull(1, 0f, blocks: lost)));
+        for (var i = 1; i <= 60; i++)
+            Frame(Hull(1, 0f, blocks: lost, changeAge: i * Dt));
+        Assert.Null(Frame(Hull(1, 0f, blocks: lost, changeAge: 61 * Dt)));
     }
 
     [Fact]
@@ -356,7 +406,11 @@ public sealed class ShieldVisualsTests
         Assert.Equal(radius, slot.X, 3);
         Assert.InRange(slot.W, -0.05f, 0f);
         for (var i = 0; i < (int)(Look.RippleSeconds / Dt) + 5; i++)
+        {
+            fresh.ShieldHitAge += Dt;
             drawn = Frame(fresh)!.Value;
+        }
+
         Assert.Equal(0f, drawn.Strengths.X + drawn.Strengths.Y + drawn.Strengths.Z + drawn.Strengths.W);
     }
 
@@ -381,7 +435,7 @@ public sealed class ShieldVisualsTests
     [Fact]
     public void TheShellIsDrawnOutAndCutWithItsHull()
     {
-        _shields.Update([Hull(1)], Content.Designs, Dt);
+        _shields.Update([Hull(1)], Content.Designs, 1, Dt);
         _shields.Begin(_draws);
         var material = 1f + 4f * (5 + 1);
         _shields.Add(1, Vector3.Zero, Quaternion.Identity, 3f, material, _instances, _vertices);
@@ -523,16 +577,26 @@ public sealed class ShieldVisualsTests
 
         // The prediction broke the shield, then the server said it held, with its last change long ago: the
         // collapse gives way to a fade back in, not a snap.
-        var own = new ShieldVisuals(Look);
-        own.Update([Hull(3)], Content.Designs, Dt);
-        own.Update([Hull(3, 0f, offline: true)], Content.Designs, Dt);
-        own.Update([Hull(3, 1500f, changeAge: 1.9f)], Content.Designs, Dt);
-        own.Update([Hull(3, 1500f, changeAge: 1.9f)], Content.Designs, Dt);
-        own.Begin(_draws);
-        own.Add(3, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices);
-        Assert.Equal(1, own.Draws.Length);
-        Assert.InRange(_instances[0].Params.X, 1e-4f, 2 * Dt / Look.FadeInSeconds);
-        Assert.Equal(0f, _instances[0].Params.Z);
+        Frame(Hull(3));
+        Assert.True(Frame(Hull(3, 0f, offline: true))!.Value.Params.Z > 0f);
+        Frame(Hull(3, 1500f, changeAge: 1.9f));
+        var back = Frame(Hull(3, 1500f, changeAge: 1.9f))!.Value;
+        Assert.InRange(back.Params.X, 1e-4f, 2 * Dt / Look.FadeInSeconds);
+        Assert.Equal(0f, back.Params.Z);
+
+        // The fade runs over drawn simulation time: through publications that all read one saturated age, through
+        // frames that draw one of them again, and through a stall, whose frame is cut short but whose time is not.
+        var saturated = Hull(3, 1500f, changeAge: ShieldHit.MaxAgeTicks * HullSim.Dt);
+        for (var i = 0; i < 10; i++)
+            back = Frame(saturated)!.Value;
+        Assert.Equal(11 * Dt / Look.FadeInSeconds, back.Params.X, 3);
+        for (var i = 0; i < 2; i++)
+            back = Repeat(Dt * 0.25f, saturated)!.Value;
+        Assert.Equal(11.5f * Dt / Look.FadeInSeconds, back.Params.X, 3);
+        back = Publish(0.4f, 0.1f, saturated)!.Value;
+        Assert.Equal((11 * Dt + 0.4f) / Look.FadeInSeconds, back.Params.X, 3);
+        Assert.Equal(0f, back.Params.Z);
+        Assert.Equal(1f, Publish(1f, 0.1f, saturated)!.Value.Params.X);
     }
 
     [Fact]
@@ -548,43 +612,34 @@ public sealed class ShieldVisualsTests
         }
     }
 
-    /// <summary>Runs one frame of <paramref name="dt"/> seconds with one hull and returns its shell, if drawn.</summary>
-    private ShieldInstance? Frame(float dt, HullView hull)
-    {
-        _shields.Update([hull], Content.Designs, dt);
-        _shields.Begin(_draws);
-        _shields.Add(hull.Id, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices);
-        return _shields.Draws.Length > 0 ? _instances[0] : null;
-    }
-
     [Fact]
     public void AStallPastAPendingBreakTakesTheNewPublishedAgeAndDoesNotReplayIt()
     {
         Frame(Hull(1));
-        Assert.Equal(1f, Frame(Dt, Hull(1, 0f, offline: true, changeAge: -0.05f))!.Value.Params.X);
+        Assert.Equal(1f, Frame(Hull(1, 0f, offline: true, changeAge: -0.05f))!.Value.Params.X);
 
         // A second without frames; the next publication says the break is 0.95 s old, past the 0.7 s collapse.
-        Assert.Null(Frame(1f, Hull(1, 0f, offline: true, changeAge: 0.95f)));
-        Assert.Null(Frame(Dt, Hull(1, 0f, offline: true, changeAge: 0.95f + Dt)));
+        Assert.Null(Publish(1f, 0.1f, Hull(1, 0f, offline: true, changeAge: 0.95f)));
+        Assert.Null(Frame(Hull(1, 0f, offline: true, changeAge: 0.95f + Dt)));
     }
 
     [Fact]
     public void ARunningCollapseFollowsTheRenderedClockForwardAndBack()
     {
         Frame(Hull(1));
-        Frame(Dt, Hull(1, 0f, offline: true, changeAge: 0.1f));
-        var forward = Frame(Dt, Hull(1, 0f, offline: true, changeAge: 0.5f))!.Value;
+        Frame(Hull(1, 0f, offline: true, changeAge: 0.1f));
+        var forward = Frame(Hull(1, 0f, offline: true, changeAge: 0.5f))!.Value;
         Assert.Equal(0.5f / Look.CollapseSeconds, forward.Params.Z, 3);
-        var back = Frame(Dt, Hull(1, 0f, offline: true, changeAge: 0.2f))!.Value;
+        var back = Frame(Hull(1, 0f, offline: true, changeAge: 0.2f))!.Value;
         Assert.Equal(0.2f / Look.CollapseSeconds, back.Params.Z, 3);
 
         // Corrected back past the break itself: the drawn moment is before it again, so the shield is up.
-        var before = Frame(Dt, Hull(1, 0f, offline: true, changeAge: -0.1f))!.Value;
+        var before = Frame(Hull(1, 0f, offline: true, changeAge: -0.1f))!.Value;
         Assert.Equal(1f, before.Params.X);
         Assert.Equal(0f, before.Params.Z);
 
         // And a pending break pulled forward starts where the clock says.
-        var pulled = Frame(Dt, Hull(1, 0f, offline: true, changeAge: 0.05f))!.Value;
+        var pulled = Frame(Hull(1, 0f, offline: true, changeAge: 0.05f))!.Value;
         Assert.Equal(0.05f / Look.CollapseSeconds, pulled.Params.Z, 3);
     }
 
@@ -592,8 +647,10 @@ public sealed class ShieldVisualsTests
     public void RepeatedPublicationsMoveOnByTheLocalClock()
     {
         Frame(Hull(1));
-        var frames = 0;
-        while (Frame(Dt, Hull(1, 0f, offline: true, changeAge: -0.05f))!.Value.Params.Z == 0f)
+        var broken = Hull(1, 0f, offline: true, changeAge: -0.05f);
+        Assert.Equal(0f, Frame(broken)!.Value.Params.Z);
+        var frames = 1;
+        while (Repeat(Dt, broken)!.Value.Params.Z == 0f)
         {
             frames++;
             Assert.True(frames < 10);
@@ -602,8 +659,143 @@ public sealed class ShieldVisualsTests
         Assert.InRange(frames, 2, 4);
 
         // The same publication again and again: the collapse still runs to its end.
-        for (var i = 0; i < 60 && Frame(Dt, Hull(1, 0f, offline: true, changeAge: -0.05f)) is not null; i++)
+        for (var i = 0; i < 60 && Repeat(Dt, broken) is not null; i++)
             Assert.True(i < 50);
+    }
+
+    [Fact]
+    public void ANewPublicationSetsTheAgeEvenWhenItReadsTheSameAndOnlyARepeatedOneMovesOn()
+    {
+        Frame(Hull(1));
+        var broken = Hull(1, 0f, offline: true, changeAge: 0.1f);
+        Assert.Equal(0.1f / Look.CollapseSeconds, Frame(broken)!.Value.Params.Z, 3);
+
+        // The same publication, drawn six more times: the frames move the collapse on by themselves.
+        var drawn = default(ShieldInstance);
+        for (var i = 0; i < 6; i++)
+            drawn = Repeat(Dt, broken)!.Value;
+        Assert.Equal((0.1f + 6 * Dt) / Look.CollapseSeconds, drawn.Params.Z, 3);
+
+        // New publications that read the very same age, as a clock corrected back by what had passed does: the
+        // collapse is where each one says, not where the frames had taken it.
+        for (var i = 0; i < 6; i++)
+            Assert.Equal(0.1f / Look.CollapseSeconds, Frame(broken)!.Value.Params.Z, 3);
+
+        // The same for a hit: its ripple stays at the age every new publication repeats.
+        var hull = Hull(2);
+        Frame(hull);
+        hull.ShieldHit = new ShieldHit { Serial = 1, Strength = 200, X = 50 };
+        hull.ShieldHitAge = 0.2f;
+        Assert.Equal(0.2f, RippleAge(Frame(hull)!.Value, 50), 3);
+        for (var i = 0; i < 3; i++)
+            drawn = Repeat(Dt, hull)!.Value;
+        Assert.Equal(0.2f + 3 * Dt, RippleAge(drawn, 50), 3);
+        for (var i = 0; i < 6; i++)
+            Assert.Equal(0.2f, RippleAge(Frame(hull)!.Value, 50), 3);
+    }
+
+    [Fact]
+    public void ABreakPublishedAtTheAgeARestartWasPublishedAtStartsAtThatAge()
+    {
+        Assert.Null(Frame(Hull(1, 0f, offline: true)));
+        var restart = Hull(1, 400f, changeAge: 0.1f);
+        Assert.Equal(0.1f / Look.FadeInSeconds, Frame(restart)!.Value.Params.X, 3);
+        var drawn = default(ShieldInstance);
+        for (var i = 0; i < 12; i++)
+            drawn = Repeat(Dt, restart)!.Value;
+        Assert.Equal(0.3f / Look.FadeInSeconds, drawn.Params.X, 3);
+
+        // The break's own age happens to read as the restart's did. It is a new publication all the same.
+        var broke = Frame(Hull(1, 0f, offline: true, changeAge: 0.1f))!.Value;
+        Assert.Equal(0.1f / Look.CollapseSeconds, broke.Params.Z, 3);
+        Assert.Equal(0f, broke.Params.X);
+    }
+
+    [Fact]
+    public void AnAgeCorrectedBackAcrossTheEndOfACollapseShowsItPartWayAgain()
+    {
+        Frame(Hull(1));
+        Assert.Equal(0.69f / Look.CollapseSeconds, Frame(Hull(1, 0f, offline: true, changeAge: 0.69f))!.Value.Params.Z, 3);
+        Assert.Null(Frame(Hull(1, 0f, offline: true, changeAge: 0.71f)));
+        var back = Frame(Hull(1, 0f, offline: true, changeAge: 0.68f))!.Value;
+        Assert.Equal(0.68f / Look.CollapseSeconds, back.Params.Z, 3);
+        Assert.Equal(0f, back.Params.X);
+
+        // On over its end again, back before the break itself, and on once more.
+        Assert.Null(Frame(Hull(1, 0f, offline: true, changeAge: 0.72f)));
+        var before = Frame(Hull(1, 0f, offline: true, changeAge: -0.05f))!.Value;
+        Assert.Equal(1f, before.Params.X);
+        Assert.Equal(0f, before.Params.Z);
+        Assert.Null(Frame(Hull(1, 0f, offline: true, changeAge: 1.9f)));
+    }
+
+    [Fact]
+    public void AnAgeCorrectedBackAcrossTheEndOfARestartShowsItPartWayAgain()
+    {
+        Assert.Null(Frame(Hull(1, 0f, offline: true)));
+        var fade = Look.FadeInSeconds;
+        Assert.Equal((fade - 0.01f) / fade, Frame(Hull(1, 400f, changeAge: fade - 0.01f))!.Value.Params.X, 3);
+        Assert.Equal(1f, Frame(Hull(1, 400f, changeAge: fade + 0.01f))!.Value.Params.X);
+        Assert.Equal((fade - 0.1f) / fade, Frame(Hull(1, 400f, changeAge: fade - 0.1f))!.Value.Params.X, 3);
+
+        // Back before the restart: not there yet. Then long after it: fully on.
+        Assert.Null(Frame(Hull(1, 400f, changeAge: -0.05f)));
+        Assert.Equal(1f, Frame(Hull(1, 400f, changeAge: 1.9f))!.Value.Params.X);
+    }
+
+    [Fact]
+    public void ThePredictedAgeSteppingBackTwoTicksIsFollowedAcrossTheEndOfAChange()
+    {
+        // The pilot's own age is whole ticks, and a correction can take it from one past an effect's end to one
+        // before it.
+        var collapse = (int)MathF.Ceiling(Look.CollapseSeconds / Dt);
+        Frame(Hull(1));
+        Assert.Null(Frame(Hull(1, 0f, offline: true, changeAge: (collapse + 1) * Dt)));
+        Assert.Equal((collapse - 1) * Dt / Look.CollapseSeconds, Frame(Hull(1, 0f, offline: true, changeAge: (collapse - 1) * Dt))!.Value.Params.Z, 3);
+        Assert.Null(Frame(Hull(1, 0f, offline: true, changeAge: (collapse + 60) * Dt)));
+
+        var fade = (int)MathF.Ceiling(Look.FadeInSeconds / Dt);
+        Assert.Equal(1f, Frame(Hull(1, 400f, changeAge: (fade + 1) * Dt))!.Value.Params.X);
+        Assert.Equal((fade - 1) * Dt / Look.FadeInSeconds, Frame(Hull(1, 400f, changeAge: (fade - 1) * Dt))!.Value.Params.X, 3);
+    }
+
+    [Fact]
+    public void WhatWasNeverSeenChangingShowsNoChangeWhateverTheClockDoes()
+    {
+        // First sight of a shield already down, its age corrected back below a collapse's length: no collapse.
+        Assert.Null(Frame(Hull(7, 0f, offline: true, changeAge: 0.71f)));
+        Assert.Null(Frame(Hull(7, 0f, offline: true, changeAge: 0.3f)));
+        _shields.Clear();
+        Assert.Null(Frame(Hull(7, 0f, offline: true, changeAge: 0.3f)));
+        Assert.Null(Frame(Hull(7, 0f, offline: true, changeAge: 0.2f)));
+
+        // First sight of one already up: no fade.
+        Assert.Equal(1f, Frame(Hull(8, changeAge: 1.2f))!.Value.Params.X);
+        Assert.Equal(1f, Frame(Hull(8, changeAge: 0.3f))!.Value.Params.X);
+        Assert.Equal(1f, Frame(Hull(8, changeAge: -0.1f))!.Value.Params.X);
+    }
+
+    [Fact]
+    public void AWaitingBreakFollowsTheClockAcrossItsEndAndOneTakenBackIsGoneForGood()
+    {
+        Frame(Hull(1));
+        var waiting = Frame(Hull(1, 0f, offline: true, changeAge: -0.1f))!.Value;
+        Assert.Equal(1f, waiting.Params.X);
+        Assert.Equal(0f, waiting.Params.Z);
+
+        // The clock jumps past the whole collapse, and back to before the break: the shield is drawn up again.
+        Assert.Null(Frame(Hull(1, 0f, offline: true, changeAge: 0.9f)));
+        waiting = Frame(Hull(1, 0f, offline: true, changeAge: -0.05f))!.Value;
+        Assert.Equal(1f, waiting.Params.X);
+        Assert.Equal(0f, waiting.Params.Z);
+
+        // Taken back while it waits: it never happened, and no age afterwards makes it a change.
+        foreach (var age in (float[])[1.9f, 0.3f, -0.1f, 0.71f, 0.69f])
+        {
+            var drawn = Frame(Hull(1, 1500f, changeAge: age))!.Value;
+            Assert.Equal(1f, drawn.Params.X);
+            Assert.Equal(0f, drawn.Params.Z);
+        }
     }
 
     [Fact]
@@ -613,18 +805,193 @@ public sealed class ShieldVisualsTests
         Frame(hull);
         hull.ShieldHit = new ShieldHit { Serial = 1, Strength = 200, X = 50 };
         hull.ShieldHitAge = -0.05f;
-        var first = Frame(Dt, hull)!.Value;
-        Assert.InRange((first.Strengths.X > 0 ? first.Ripple0 : first.Strengths.Y > 0 ? first.Ripple1 : first.Strengths.Z > 0 ? first.Ripple2 : first.Ripple3).W, -0.05f, -0.04f);
+        Assert.InRange(RippleAge(Frame(hull)!.Value, 50), -0.05f, -0.04f);
 
         hull.ShieldHitAge = 0.6f;
-        var drawn = Frame(1f, hull)!.Value;
-        var live = drawn.Strengths.X > 0 ? drawn.Ripple0 : drawn.Strengths.Y > 0 ? drawn.Ripple1 : drawn.Strengths.Z > 0 ? drawn.Ripple2 : drawn.Ripple3;
-        Assert.Equal(0.6f, live.W, 3);
+        Assert.Equal(0.6f, RippleAge(Publish(1f, 0.1f, hull)!.Value, 50), 3);
 
         // Past its life on the published clock, it is gone.
         hull.ShieldHitAge = Look.RippleSeconds + 0.1f;
-        drawn = Frame(Dt, hull)!.Value;
-        Assert.Equal(0f, drawn.Strengths.X + drawn.Strengths.Y + drawn.Strengths.Z + drawn.Strengths.W);
+        Assert.Equal(0, RippleCount(Frame(hull)!.Value));
+    }
+
+    [Fact]
+    public void AStallEndsAnOlderRippleEvenWhenADifferentHitIsTheNewest()
+    {
+        var hull = Hull(1);
+        Frame(hull);
+        hull.ShieldHit = new ShieldHit { Serial = 1, Strength = 200, X = 50 };
+        hull.ShieldHitAge = 0.2f;
+        Assert.Equal(0.2f, RippleAge(Frame(hull)!.Value, 50), 3);
+
+        // Two seconds without frames. The next publication tells of another hit, so nothing in it says how old
+        // the first one is: the two seconds of simulation it skipped do. The frame itself is capped at 0.1 s.
+        hull.ShieldHit = new ShieldHit { Serial = 2, Strength = 200, X = -50 };
+        hull.ShieldHitAge = 0.05f;
+        var drawn = Publish(2f, 0.1f, hull)!.Value;
+        Assert.Equal(1, RippleCount(drawn));
+        Assert.Equal(0.05f, RippleAge(drawn, -50), 3);
+    }
+
+    [Fact]
+    public void AnOlderRippleAgesByTheSimulationTimeDrawnAndNotByTheFrameOrTheNewestHit()
+    {
+        var hull = Hull(1);
+        Frame(hull);
+        hull.ShieldHit = new ShieldHit { Serial = 1, Strength = 200, X = 50 };
+        hull.ShieldHitAge = 0.2f;
+        Frame(hull);
+
+        // Half a second passes in one capped frame, and the newest hit is another: the older ripple is half a
+        // second on, neither a tenth nor whatever the new hit's age would suggest.
+        hull.ShieldHit = new ShieldHit { Serial = 2, Strength = 200, X = -50 };
+        hull.ShieldHitAge = 0.05f;
+        var drawn = Publish(0.5f, 0.1f, hull)!.Value;
+        Assert.Equal(2, RippleCount(drawn));
+        Assert.Equal(0.7f, RippleAge(drawn, 50), 3);
+        Assert.Equal(0.05f, RippleAge(drawn, -50), 3);
+
+        // Frames that draw this publication again run ahead of it; the next publication, with a third hit, is one
+        // tick on, and that is all the older ripples have aged since the last one.
+        for (var i = 0; i < 3; i++)
+            drawn = Repeat(Dt, hull)!.Value;
+        Assert.Equal(0.7f + 3 * Dt, RippleAge(drawn, 50), 3);
+        hull.ShieldHit = new ShieldHit { Serial = 3, Strength = 200, X = 20 };
+        hull.ShieldHitAge = 0f;
+        drawn = Frame(hull)!.Value;
+        Assert.Equal(3, RippleCount(drawn));
+        Assert.Equal(0.7f + Dt, RippleAge(drawn, 50), 3);
+        Assert.Equal(0.05f + Dt, RippleAge(drawn, -50), 3);
+        Assert.Equal(0f, RippleAge(drawn, 20), 3);
+    }
+
+    [Fact]
+    public void ThePredictedHitAgeSteppingBackMovesOnlyThatHitsRipple()
+    {
+        var hull = Hull(1);
+        Frame(hull);
+        hull.ShieldHit = new ShieldHit { Serial = 6, Strength = 200, X = 50 };
+        hull.ShieldHitAge = 0.1f;
+        Frame(hull);
+        hull.ShieldHit = new ShieldHit { Serial = 7, Strength = 200, X = -50 };
+        hull.ShieldHitAge = 14 * Dt;
+        var drawn = Frame(hull)!.Value;
+        Assert.Equal(14 * Dt, RippleAge(drawn, -50), 3);
+        Assert.Equal(0.1f + Dt, RippleAge(drawn, 50), 3);
+
+        // The prediction is corrected: one tick on, the newest hit is twelve ticks old, not fifteen. The older
+        // ripple is no part of that correction; it is one tick older.
+        hull.ShieldHitAge = 12 * Dt;
+        drawn = Frame(hull)!.Value;
+        Assert.Equal(12 * Dt, RippleAge(drawn, -50), 3);
+        Assert.Equal(0.1f + 2 * Dt, RippleAge(drawn, 50), 3);
+    }
+
+    [Fact]
+    public void EveryHullAgesItsRipplesOnItsOwnTimeline()
+    {
+        // The pilot's hull counts the inputs predicted; a remote hull is drawn at a delayed server tick, which a
+        // clock correction moves by itself. One publication, two different spans of drawn time.
+        var own = Hull(1);
+        var remote = Hull(2);
+        own.ShownTick = 500;
+        remote.ShownTick = 90000.25;
+        _shields.Update([own, remote], Content.Designs, 1, Dt);
+        own.ShieldHit = remote.ShieldHit = new ShieldHit { Serial = 1, Strength = 200, X = 50 };
+        own.ShieldHitAge = remote.ShieldHitAge = 0.2f;
+        own.ShownTick += 1;
+        remote.ShownTick += 1;
+        _shields.Update([own, remote], Content.Designs, 2, Dt);
+
+        own.ShieldHit = remote.ShieldHit = new ShieldHit { Serial = 2, Strength = 200, X = -50 };
+        own.ShieldHitAge = remote.ShieldHitAge = 0f;
+        own.ShownTick += 1;
+        remote.ShownTick += 30;
+        _shields.Update([own, remote], Content.Designs, 3, Dt);
+        _shields.Begin(_draws);
+        _shields.Add(1, Vector3.Zero, Quaternion.Identity, 1f, 2f, _instances, _vertices);
+        _shields.Add(2, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices);
+        Assert.Equal(0.2f + Dt, RippleAge(_instances[0], 50), 3);
+        Assert.Equal(0.2f + 30 * Dt, RippleAge(_instances[1], 50), 3);
+
+        // The remote clock is corrected back: its ripples go back with it, the pilot's do not.
+        own.ShownTick += 1;
+        remote.ShownTick -= 12;
+        own.ShieldHitAge = Dt;
+        remote.ShieldHitAge = -12 * Dt;
+        _shields.Update([own, remote], Content.Designs, 4, Dt);
+        _shields.Begin(_draws);
+        _shields.Add(1, Vector3.Zero, Quaternion.Identity, 1f, 2f, _instances, _vertices);
+        _shields.Add(2, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices);
+        Assert.Equal(0.2f + 2 * Dt, RippleAge(_instances[0], 50), 3);
+        Assert.Equal(Dt, RippleAge(_instances[0], -50), 3);
+        Assert.Equal(0.2f + 18 * Dt, RippleAge(_instances[1], 50), 3);
+        Assert.Equal(-12 * Dt, RippleAge(_instances[1], -50), 3);
+    }
+
+    [Fact]
+    public void AHullThatChangesHandsKeepsItsRipplesAcrossTheChangeOfTimeline()
+    {
+        // Watched, the hull is shown at a delayed server tick; flown, at the pilot's count of inputs. The two
+        // numbers are far apart and mean nothing to each other.
+        var hull = Hull(1);
+        hull.ShownTick = 90000.25;
+        _shields.Update([hull], Content.Designs, 1, Dt);
+        hull.ShieldHit = new ShieldHit { Serial = 1, Strength = 200, X = 50 };
+        hull.ShieldHitAge = 0.2f;
+        hull.ShownTick += 1;
+        _shields.Update([hull], Content.Designs, 2, Dt);
+
+        // The pilot takes it, and it is hit again in the same publication: the older ripple moves on by the frame.
+        hull.IsOwn = true;
+        hull.ShownTick = 500;
+        hull.ShieldHit = new ShieldHit { Serial = 2, Strength = 200, X = -50 };
+        hull.ShieldHitAge = 0f;
+        _shields.Update([hull], Content.Designs, 3, Dt);
+        _shields.Begin(_draws);
+        _shields.Add(1, Vector3.Zero, Quaternion.Identity, 1f, 2f, _instances, _vertices);
+        Assert.Equal(0.2f + Dt, RippleAge(_instances[0], 50), 3);
+        Assert.Equal(0f, RippleAge(_instances[0], -50), 3);
+
+        // From there it follows the new timeline, and the same on the way back.
+        hull.ShownTick += 3;
+        hull.ShieldHitAge = 3 * Dt;
+        _shields.Update([hull], Content.Designs, 4, Dt);
+        hull.IsOwn = false;
+        hull.ShownTick = 90010;
+        hull.ShieldHit = new ShieldHit { Serial = 3, Strength = 200, X = 20 };
+        hull.ShieldHitAge = -0.05f;
+        _shields.Update([hull], Content.Designs, 5, Dt);
+        _shields.Begin(_draws);
+        _shields.Add(1, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices);
+        Assert.Equal(0.2f + 5 * Dt, RippleAge(_instances[0], 50), 3);
+        Assert.Equal(4 * Dt, RippleAge(_instances[0], -50), 3);
+        Assert.Equal(-0.05f, RippleAge(_instances[0], 20), 3);
+    }
+
+    [Fact]
+    public void AgesThatStopCountingHoldEveryEffectAtItsEnd()
+    {
+        // A hit on one hull and a break on another, then a publication every tick: the ages count up to where
+        // the simulation stops counting and stay there, one new publication after another reading the same.
+        var struck = Hull(1);
+        Frame(struck, Hull(2));
+        struck.ShieldHit = new ShieldHit { Serial = 1, Strength = 200, X = 50 };
+        for (var tick = 0; tick <= ShieldHit.MaxAgeTicks + 40; tick++)
+        {
+            var age = Math.Min(tick, (int)ShieldHit.MaxAgeTicks) * HullSim.Dt;
+            struck.ShieldHitAge = age;
+            var drawn = Frame(struck, Hull(2, 0f, offline: true, changeAge: age))!.Value;
+            Assert.Equal(1f, drawn.Params.X);
+            if (age < Look.RippleSeconds)
+                Assert.Equal(age, RippleAge(drawn, 50), 4);
+            else
+                Assert.Equal(0, RippleCount(drawn));
+
+            Assert.Equal(age < Look.CollapseSeconds ? 2 : 1, _shields.Draws.Length);
+            if (age < Look.CollapseSeconds)
+                Assert.Equal(Math.Max(age / Look.CollapseSeconds, 1e-3f), _instances[1].Params.Z, 4);
+        }
     }
 
     [Fact]
