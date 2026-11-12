@@ -191,7 +191,9 @@ The client opens a real window on the developer's desktop, and they are usually 
   ticks) show as the last of them, and impacts in one tick are one event. A client keeps four ripples per hull.
 - Shields copy the scene's colour and depth once a frame whenever one is drawn, to bend what is behind them, and
   are drawn last in the scene. Overlapping shields each bend that one copy; dust, the command grid and jump marks
-  have no depth, so one in front of a shield is bent as if it were behind it.
+  have no depth, so one in front of a shield is bent as if it were behind it. In the pilot's own hyperspace
+  tunnel a second copy is taken just before their own shield; where another jump's lens bends that pixel, the own
+  shield's light is lifted off and put back at the unbent pixel.
 - Hull against hull contact tests every hull against every other each tick, bounding spheres first. It needs a
   spatial index before there are thousands of hulls.
 - A sector holds at most 4,096 asteroids (`maxPerSector`; the wire format allows 65,535). An asteroid is named by

@@ -11,6 +11,9 @@ layout(set = 1, binding = 2) uniform sampler2D rocks;
 // The scene's depth, and the depth before any hull was drawn. Reverse depth: 0 is the sky.
 layout(set = 1, binding = 3) uniform sampler2D sceneDepth;
 layout(set = 1, binding = 4) uniform sampler2D rocksDepth;
+// The scene just before the pilot's own shield was drawn. Written only on frames where their hyperspace tunnel
+// covers the view and that shield is drawn; read only at its pixels on those frames.
+layout(set = 1, binding = 5) uniform sampler2D ownBehind;
 
 // Bit of bentBy for the pilot's own opening; bits 0 to 3 are frame.openings.
 const int OwnBit = 16;
@@ -490,10 +493,17 @@ void main()
     hdr = mix(hdr, cover.rgb, cover.a);
     hdr = mix(throat, hdr, real) + glow;
 
-    // Hyperspace covers everything but the pilot's own hull, which rides through it.
+    // Hyperspace covers everything but the pilot's own hull, which rides through it, and the light of their own
+    // shield, which rides with it: where that shield is the nearest thing (mask 0.4375), what it added to the scene
+    // over the copy taken just before it is lifted off, the rest tunnelled, and that light put back on top. Its bend
+    // of the old world fades as the tunnel covers it (shield.frag), so at full cover only its light is left.
     float tunnel = ownKind == 1 && !ownHull ? frame.ftlUp.w : 0.0;
     if (tunnel > 0.0)
-        hdr = mix(hdr, hyperspaceTunnel(v, frame.ftlAxis.w, pixelAngle), tunnel);
+    {
+        vec4 here = texelFetch(scene, texel, 0);
+        vec3 ownShield = here.a > 0.41 && here.a < 0.47 ? here.rgb - texelFetch(ownBehind, texel, 0).rgb : vec3(0.0);
+        hdr = mix(hdr - ownShield, hyperspaceTunnel(v, frame.ftlAxis.w, pixelAngle), tunnel) + ownShield;
+    }
 
     vec3 mapped = filmic(hdr * push.setup.x);
     float vignette = 1.0 - 0.22 * pow(length(ndc) * 0.75, 2.5);

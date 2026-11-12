@@ -112,8 +112,14 @@ void main()
         there = here;
     vec3 bent = texture(behind, there).rgb - texture(behind, here).rgb;
 
+    // The pilot's own shield in their hyperspace tunnel bends the old world only as much as the tunnel still lets
+    // it be seen, by the coverage the tone mapper tunnels with, so the light it keeps there is its own.
+    if (own != 0 && int(frame.ftl.x + 0.5) == 1)
+        bent *= 1.0 - frame.ftlUp.w;
+
     // Added onto the scene: the bend's difference moves what is behind, the light adds on top. The alpha is the
-    // lens mask, which only the second pass writes, by maximum: 0.375 like a hull, and 0.4375 for the pilot's own
-    // shield, which the tone mapper still takes for "not the pilot's own hull" (below 0.44) but can tell apart.
+    // lens mask, which only the second pass writes, by maximum and with the pilot's own shield drawn last: so it is
+    // the nearest shield's, 0.375 another hull's and 0.4375 the pilot's own (ShieldComposite.OwnShieldMask), and the
+    // own hull's 0.5 under it stays. Below 0.44 both count as "not the pilot's own hull" for the lenses.
     outColor = vec4(bent + light, own != 0 ? 0.4375 : 0.375);
 }

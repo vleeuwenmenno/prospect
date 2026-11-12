@@ -210,6 +210,13 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private VmaAllocation _behindDepthAllocation;
     private VkImageView _behindDepthView;
     private bool _behindReady;
+    // The scene just before the pilot's own shield, on frames where their hyperspace tunnel covers the view. The
+    // tone mapper reads it (set 1, binding 5) only at the own shield's pixels on such frames; it is moved to the
+    // layout the tone mapper reads before any frame uses it, so its descriptor is always valid.
+    private VkImage _ownBehindImage;
+    private VmaAllocation _ownBehindAllocation;
+    private VkImageView _ownBehindView;
+    private bool _ownBehindReady;
     private readonly GpuBuffer[] _ftlBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
     private readonly VkSampler _sampler;
     private readonly VkSampler _pointSampler;
@@ -281,7 +288,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         Span<VkDescriptorPoolSize> poolSizes =
         [
             new VkDescriptorPoolSize { Type = VkDescriptorType.UniformBuffer, DescriptorCount = FrameRenderer.FramesInFlight },
-            new VkDescriptorPoolSize { Type = VkDescriptorType.CombinedImageSampler, DescriptorCount = 5 + 2 },
+            new VkDescriptorPoolSize { Type = VkDescriptorType.CombinedImageSampler, DescriptorCount = 6 + 2 },
         ];
         _descriptorPool = device.CreateDescriptorPool(
             new DescriptorPoolEx.CreateInfo { MaxSets = FrameRenderer.FramesInFlight + 2, PoolSizes = poolSizes },
@@ -333,6 +340,13 @@ internal sealed unsafe class SceneRenderer : IDisposable
             new VkDescriptorSetLayoutBinding
             {
                 Binding = 4,
+                DescriptorType = VkDescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                StageFlags = VkShaderStageFlags.FragmentBit,
+            },
+            new VkDescriptorSetLayoutBinding
+            {
+                Binding = 5,
                 DescriptorType = VkDescriptorType.CombinedImageSampler,
                 DescriptorCount = 1,
                 StageFlags = VkShaderStageFlags.FragmentBit,
@@ -562,6 +576,12 @@ internal sealed unsafe class SceneRenderer : IDisposable
             VkPipelineStageFlags.EarlyFragmentTestsBit | VkPipelineStageFlags.LateFragmentTestsBit,
             VkImageAspectFlags.DepthBit
         );
+        if (!_ownBehindReady)
+        {
+            Transition(commands, _ownBehindImage, VkImageAspectFlags.ColorBit, VkImageLayout.Undefined, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.FragmentShaderBit);
+            _ownBehindReady = true;
+        }
+
         if (!lensing && !_fallbackReady)
         {
             Transition(commands, _skyImage, VkImageAspectFlags.ColorBit, VkImageLayout.Undefined, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.FragmentShaderBit);
@@ -635,7 +655,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
 
         // Last, so the dust, the command grid and the jump marks are in what the shields bend and stay seen
         // through their transparent margins.
-        DrawShields(commands, frameIndex, ref color, ref depth);
+        DrawShields(commands, frameIndex, constants, ref color, ref depth);
 
         commands.EndRendering();
         Transition(commands, _colorImage, VkImageAspectFlags.ColorBit, VkImageLayout.ColorAttachmentOptimal, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.FragmentShaderBit);
@@ -675,14 +695,38 @@ internal sealed unsafe class SceneRenderer : IDisposable
     /// Draws this frame's shields over everything else in the scene. What is behind them is copied once first, so
     /// each can bend it; where two overlap, both bend that one copy, an approximation that holds for faint shells.
     /// </summary>
-    private void DrawShields(CommandBuffer commands, int frameIndex, ref VkRenderingAttachmentInfo color, ref VkRenderingAttachmentInfo depth)
+    private void DrawShields(CommandBuffer commands, int frameIndex, in FrameConstants constants, ref VkRenderingAttachmentInfo color, ref VkRenderingAttachmentInfo depth)
     {
         var count = _shieldCount;
         _shieldCount = 0;
         if (count == 0)
             return;
 
+        Span<int> order = stackalloc int[ShieldVisuals.MaxShields];
+        var others = ShieldComposite.Order(_shieldDraws.AsSpan(0, count), order);
+        var ownCopy = ShieldComposite.NeedsOwnCopy(constants, others < count);
+
         KeepBehindShields(commands, ref color, ref depth);
+        BindShields(commands, frameIndex);
+        if (!ownCopy)
+        {
+            DrawShieldPass(commands, _shieldPipeline, order[..count]);
+            DrawShieldPass(commands, _shieldMaskPipeline, order[..count]);
+            return;
+        }
+
+        // The pilot's own hyperspace: everything but their own shield first, then the copy the tone mapper tunnels,
+        // then their own shield, whose light alone is what the scene gains over that copy.
+        DrawShieldPass(commands, _shieldPipeline, order[..others]);
+        DrawShieldPass(commands, _shieldMaskPipeline, order[..others]);
+        KeepBeforeOwnShield(commands, ref color, ref depth);
+        BindShields(commands, frameIndex);
+        DrawShieldPass(commands, _shieldPipeline, order[others..count]);
+        DrawShieldPass(commands, _shieldMaskPipeline, order[others..count]);
+    }
+
+    private void BindShields(CommandBuffer commands, int frameIndex)
+    {
         var zero = new ByteSize64(0);
         Span<VkBuffer> buffers = [_shieldVertexBuffers[frameIndex].Buffer, _shieldInstanceBuffers[frameIndex].Buffer];
         Span<ByteSize64> offsets = [zero, zero];
@@ -691,12 +735,52 @@ internal sealed unsafe class SceneRenderer : IDisposable
         commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _shieldPipelineLayout, 0, sets, []);
         commands.PushConstants(_shieldPipelineLayout, VkShaderStageFlags.FragmentBit, 0, new ReadOnlySpan<byte>(&look, sizeof(ShieldLookConstants)));
         commands.BindVertexBuffers(0, buffers, offsets);
-        foreach (var pipeline in (ReadOnlySpan<VkPipeline>)[_shieldPipeline, _shieldMaskPipeline])
-        {
-            commands.BindPipeline(VkPipelineBindPoint.Graphics, pipeline);
-            for (var i = 0; i < count; i++)
-                commands.Draw(_shieldDraws[i].VertexCount, 1, _shieldDraws[i].FirstVertex, i);
-        }
+    }
+
+    private void DrawShieldPass(CommandBuffer commands, VkPipeline pipeline, ReadOnlySpan<int> order)
+    {
+        if (order.IsEmpty)
+            return;
+        commands.BindPipeline(VkPipelineBindPoint.Graphics, pipeline);
+        foreach (var i in order)
+            commands.Draw(_shieldDraws[i].VertexCount, 1, _shieldDraws[i].FirstVertex, i);
+    }
+
+    /// <summary>
+    /// Copies the scene's colour as it is just before the pilot's own shield into the tone mapper's copy of it,
+    /// then carries on drawing. The last frame's tone mapper read that copy; this waits for that read first.
+    /// </summary>
+    private void KeepBeforeOwnShield(CommandBuffer commands, ref VkRenderingAttachmentInfo color, ref VkRenderingAttachmentInfo depth)
+    {
+        commands.EndRendering();
+        Barrier(commands, _colorImage, VkImageLayout.ColorAttachmentOptimal, VkImageLayout.TransferSrcOptimal, VkAccessFlags.ColorAttachmentWriteBit, VkAccessFlags.TransferReadBit, VkPipelineStageFlags.ColorAttachmentOutputBit, VkPipelineStageFlags.TransferBit);
+        Barrier(commands, _ownBehindImage, VkImageLayout.ShaderReadOnlyOptimal, VkImageLayout.TransferDstOptimal, VkAccessFlags.ShaderReadBit, VkAccessFlags.TransferWriteBit, VkPipelineStageFlags.FragmentShaderBit, VkPipelineStageFlags.TransferBit);
+        var layers = new VkImageSubresourceLayers { AspectMask = VkImageAspectFlags.ColorBit, LayerCount = 1 };
+        var region = new VkImageCopy { SrcSubresource = layers, DstSubresource = layers, Extent = new VkExtent3D(_extent.Width, _extent.Height, 1) };
+        commands.CopyImage(_colorImage, VkImageLayout.TransferSrcOptimal, _ownBehindImage, VkImageLayout.TransferDstOptimal, new ReadOnlySpan<VkImageCopy>(in region));
+        Barrier(commands, _colorImage, VkImageLayout.TransferSrcOptimal, VkImageLayout.ColorAttachmentOptimal, VkAccessFlags.TransferReadBit, VkAccessFlags.ColorAttachmentReadBit | VkAccessFlags.ColorAttachmentWriteBit, VkPipelineStageFlags.TransferBit, VkPipelineStageFlags.ColorAttachmentOutputBit);
+        Barrier(commands, _ownBehindImage, VkImageLayout.TransferDstOptimal, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.TransferWriteBit, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.TransferBit, VkPipelineStageFlags.FragmentShaderBit);
+
+        // The depth written so far stays: it is read and written again by the own shield.
+        const VkPipelineStageFlags depthTests = VkPipelineStageFlags.EarlyFragmentTestsBit | VkPipelineStageFlags.LateFragmentTestsBit;
+        const VkAccessFlags depthAccess = VkAccessFlags.DepthStencilAttachmentReadBit | VkAccessFlags.DepthStencilAttachmentWriteBit;
+        Barrier(commands, _depthImage, VkImageLayout.DepthAttachmentOptimal, VkImageLayout.DepthAttachmentOptimal, VkAccessFlags.DepthStencilAttachmentWriteBit, depthAccess, depthTests, depthTests, VkImageAspectFlags.DepthBit);
+
+        color.LoadOp = VkAttachmentLoadOp.Load;
+        depth.LoadOp = VkAttachmentLoadOp.Load;
+        var colorInfo = color;
+        var depthInfo = depth;
+        commands.BeginRendering(
+            new VkRenderingInfo
+            {
+                RenderArea = new VkRect2D(_extent),
+                LayerCount = 1,
+                ColorAttachmentCount = 1,
+                ColorAttachments = &colorInfo,
+                DepthAttachment = &depthInfo,
+            }
+        );
+        SetViewport(commands, _extent);
     }
 
     /// <summary>
@@ -931,6 +1015,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
         (_rocksDepthImage, _rocksDepthAllocation, _rocksDepthView) = CreateTarget(DepthFormat, VkImageUsageFlags.TransferDstBit | VkImageUsageFlags.SampledBit, VkImageAspectFlags.DepthBit);
         (_behindImage, _behindAllocation, _behindView) = CreateTarget(ColorFormat, VkImageUsageFlags.TransferDstBit | VkImageUsageFlags.SampledBit, VkImageAspectFlags.ColorBit);
         (_behindDepthImage, _behindDepthAllocation, _behindDepthView) = CreateTarget(DepthFormat, VkImageUsageFlags.TransferDstBit | VkImageUsageFlags.SampledBit, VkImageAspectFlags.DepthBit);
+        (_ownBehindImage, _ownBehindAllocation, _ownBehindView) = CreateTarget(ColorFormat, VkImageUsageFlags.TransferDstBit | VkImageUsageFlags.SampledBit, VkImageAspectFlags.ColorBit);
+        _ownBehindReady = false;
         _behindReady = false;
 
         var imageInfo = new VkDescriptorImageInfo
@@ -944,6 +1030,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
         // Depth is read exactly, never filtered.
         var depthInfo = imageInfo with { ImageView = _depthView, Sampler = _pointSampler };
         var rocksDepthInfo = depthInfo with { ImageView = _rocksDepthView };
+        // Read exactly, texel for texel, against the scene.
+        var ownBehindInfo = depthInfo with { ImageView = _ownBehindView };
         var behindInfo = imageInfo with { ImageView = _behindView };
         var behindDepthInfo = depthInfo with { ImageView = _behindDepthView };
         _gpu.Device.UpdateDescriptorSets(
@@ -987,6 +1075,14 @@ internal sealed unsafe class SceneRenderer : IDisposable
                     DescriptorCount = 1,
                     DescriptorType = VkDescriptorType.CombinedImageSampler,
                     ImageInfo = &rocksDepthInfo,
+                },
+                new VkWriteDescriptorSet
+                {
+                    DstSet = _sceneSet,
+                    DstBinding = 5,
+                    DescriptorCount = 1,
+                    DescriptorType = VkDescriptorType.CombinedImageSampler,
+                    ImageInfo = &ownBehindInfo,
                 },
                 new VkWriteDescriptorSet
                 {
@@ -1059,6 +1155,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
         _gpu.Device.DestroyImageView(_behindDepthView, null);
         _gpu.Allocator.DestroyImage(_behindImage, _behindAllocation);
         _gpu.Allocator.DestroyImage(_behindDepthImage, _behindDepthAllocation);
+        _gpu.Device.DestroyImageView(_ownBehindView, null);
+        _gpu.Allocator.DestroyImage(_ownBehindImage, _ownBehindAllocation);
         _gpu.Allocator.DestroyImage(_colorImage, _colorAllocation);
         _gpu.Allocator.DestroyImage(_skyImage, _skyAllocation);
         _gpu.Allocator.DestroyImage(_rocksImage, _rocksAllocation);

@@ -18,6 +18,8 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
 - **Two views of the same space.** Pilot view to fly one ship; command (RTS) view to select and order many.
 - **Shields break.** A shield emptied by a hit goes offline, takes no hits, and only comes back after a delay,
   charging to a threshold on extra power. No instant reactivation from one point of charge.
+- **The pilot's shield rides through their own hyperspace.** Its glow and ripples stay all round the hull in the
+  tunnel. Its bend of the old world fades with that world; at full cover only its light is left.
 - **You are not your ship.** You can leave a ship in a drone and take control of any ship you own.
 
 ## Decided: the world
@@ -172,13 +174,6 @@ After that:
 - Whether players can make deals with AI factions (alliance, trade pact, war), or AI factions only react.
 - What PvP rules a server can set: everywhere, by sector, or by consent.
 - Saving: how often, and what a crash may lose.
-
-## Open: shields
-
-- In the pilot's own hyperspace transit the tunnel covers the part of their own shield that lies over open sky;
-  the part over the hull stays. Built that way so the tunnel never covers the hull. Not yet approved: review it.
-- Proposed fix, in the tone mapper (not built): the own shield marks its pixels 0.4375 already; there, tunnel the
-  copy taken before the shields and add back what the shields added. Needs that copy bound to the tone mapper.
 
 ## Open: servers and players
 

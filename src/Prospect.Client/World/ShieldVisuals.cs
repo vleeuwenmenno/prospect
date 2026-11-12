@@ -38,6 +38,9 @@ internal struct ShieldDraw
 {
     public int FirstVertex;
     public int VertexCount;
+
+    /// <summary>The pilot's own hull's shield, seen from inside: its material is the own kind.</summary>
+    public bool Own;
 }
 
 /// <summary>
@@ -253,7 +256,9 @@ internal sealed class ShieldVisuals
             return;
 
         _shellVertices.AsSpan(shield.Shell * ShieldShell.MaxVertices, shell.VertexCount).CopyTo(vertices[_vertexCount..]);
-        _draws[_drawCount] = new ShieldDraw { FirstVertex = _vertexCount, VertexCount = shell.VertexCount };
+        // The material is the kind (1 a hull, 2 the pilot's own) plus four times one more than the clip slot.
+        var own = material - 4f * MathF.Floor((material + 0.5f) * 0.25f) > 1.5f;
+        _draws[_drawCount] = new ShieldDraw { FirstVertex = _vertexCount, VertexCount = shell.VertexCount, Own = own };
         _vertexCount += shell.VertexCount;
 
         var m = Matrix4x4.CreateFromQuaternion(orientation);

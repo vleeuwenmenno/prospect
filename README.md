@@ -88,7 +88,9 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   gone until the simulation brings it back online, when it fades in. Collapses and fade-ins are timed from when
   the server says the change happened: a remote one waits for the hull as drawn, an old one is not replayed.
   Durations, colours, ripple speed and width, the wavering threshold and the bend are in
-  `content/visuals/shields.json`. Not checked on a GPU yet: how it looks, its cost per frame, Vulkan validation.
+  `content/visuals/shields.json`. In the pilot's own hyperspace tunnel their shield's glow and ripples stay all
+  round the hull; its bend of the old world fades as the tunnel covers it, so at full cover only its light shows.
+  Not checked on a GPU yet: how it looks, its cost per frame, Vulkan validation.
 - **Ramming.** Two hulls that meet share the impulse by mass and inertia and both take the same damage, which
   goes by the pair's reduced mass: about the lighter hull's when the other is far heavier. A drone bounces off a
   freighter and a freighter shoves a drone aside. Below the safe speed hulls only nudge each other and can rest
