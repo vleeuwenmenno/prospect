@@ -599,11 +599,19 @@ internal sealed unsafe class SceneRenderer : IDisposable
     /// <summary>The jump-mark memory for this frame; say how many were filled when calling <see cref="Render"/>.</summary>
     public Span<FtlMark> FtlMarks(int frameIndex) => new((void*)_ftlBuffers[frameIndex].Mapped, MaxFtlMarks);
 
-    /// <summary>Recreates the render targets after the window changed size. The device must be idle.</summary>
-    public void Resize(VkExtent2D extent)
+    /// <summary>How many times the render targets have been rebuilt since they were made.</summary>
+    public int TargetRebuilds { get; private set; }
+
+    /// <summary>
+    /// Recreates the render targets after the window changed size, or, with <paramref name="always"/>, at the size
+    /// they have too (the resizing benchmark does, where a window manager will not resize the window). The device
+    /// must be idle. Runs in the frame loop: nothing here may take managed memory.
+    /// </summary>
+    public void Resize(VkExtent2D extent, bool always = false)
     {
-        if (extent.Width == _extent.Width && extent.Height == _extent.Height)
+        if (!always && extent.Width == _extent.Width && extent.Height == _extent.Height)
             return;
+        TargetRebuilds++;
         DestroyTargets();
         CreateTargets(extent);
     }

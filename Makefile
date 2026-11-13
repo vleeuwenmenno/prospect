@@ -307,11 +307,13 @@ test: need-dotnet ## Run the unit tests
 	$(call step,Running the listing server tests)
 	$(Q)"$(DOTNET)" $(BIN)/Prospect.Listing.Tests/$(config)/Prospect.Listing.Tests.dll $(TEST_ARGS)
 
-bench: need-dotnet ## Release benchmark: frame rate and per-frame allocation (fails below target)
+bench: need-dotnet ## Release benchmark: frame rate and per-frame allocation, also while resizing (fails below target)
 	$(call step,Building the client (Release))
 	$(Q)"$(DOTNET)" build $(CLIENT) -c Release $(QUIET)
 	$(call step,Benchmarking an empty scene at 1920x1080)
 	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 10 --size 1920x1080
+	$(call step,Benchmarking the same scene while the window is resized)
+	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 6 --bench-resize 6 --size 1920x1080
 
 ##@ Quality
 
