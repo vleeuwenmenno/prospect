@@ -36,9 +36,9 @@ public sealed class GasNoiseLatticeTests
         var second = new byte[GasNoiseLattice.ValueCount];
         GasNoiseLattice.Fill(first);
         GasNoiseLattice.Fill(second);
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        GasNoiseLattice.Fill(second);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        while (allocation.Measuring()) GasNoiseLattice.Fill(second);
+        Assert.Equal(0, allocation.Bytes);
         Assert.True(first.AsSpan().SequenceEqual(second));
         Assert.Equal(1024 * 1024, GasNoiseLattice.ByteCount);
         long sum = 0;

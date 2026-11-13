@@ -408,6 +408,15 @@ public sealed class ConnectionLimitTests
     [Fact]
     public void AFloodOfJunkNeitherHoldsUpTheTickNorCostsItAnyMemory()
     {
+        // The flood happens once to a server, so a run in doubt is made again on a fresh one.
+        var allocation = new AllocationProbe();
+        while (allocation.Run())
+            Flood(allocation);
+        Assert.Equal(0, allocation.Bytes);
+    }
+
+    private void Flood(AllocationProbe allocation)
+    {
         using var rig = new ScriptedServer(Content, maxPlayers: 4, Password);
         var limits = ConnectionLimits.Default;
         var player = rig.Join(Household, Password, "Player");
@@ -501,10 +510,12 @@ public sealed class ConnectionLimitTests
         var answered = rig.Net[player].Pongs;
         var firstMeasured = rig.Net.Count;
         var logged = CountingLogs.OnThisThread;
-        var before = GC.GetAllocatedBytesForCurrentThread();
         for (var tick = 310; tick < 510; tick++)
+        {
+            allocation.Start();
             FloodTick(tick);
-        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            allocation.Stop();
+        }
 
         // Among what was refused while memory was counted were clients with other content, told so each time.
         var otherContent = 0;
@@ -518,9 +529,9 @@ public sealed class ConnectionLimitTests
         Assert.InRange(otherContent, 100, 200);
         Assert.InRange(challenged, 100, 200);
 
-        // More than four hundred packets and connections a tick went through the server, and it allocated nothing.
+        // More than four hundred packets and connections a tick went through the server; what it allocated meanwhile
+        // is checked by the caller, once a run is not in doubt.
         Assert.True(rig.Net.Delivered - delivered > 200 * 400, $"the flood delivered {rig.Net.Delivered - delivered} packets");
-        Assert.Equal(0, allocated);
         Assert.Equal(logged, CountingLogs.OnThisThread);
 
         // Every junk sender was closed in the tick its first packet was read.

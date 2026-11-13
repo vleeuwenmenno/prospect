@@ -92,19 +92,21 @@ public sealed class SocialFollowupTests
     [Fact]
     public void ElevenMaximumLinesLeaveRoomForControlAndFullFleetAndKeepFifoAcrossCatchup()
     {
-        using var s = new Session();
-        var view = s.Client.AcquireSnapshot();
-        var pod = view.Hulls[view.OwnHull].Id;
-        for (var i = 0; i < 11; i++) Assert.True(s.Client.Input.SendChat(ChatChannel.Everyone, new string((char)('界' + i), 256)));
-        var order = new HullOrder { Kind = OrderKind.MoveTo, Target = new Double3(10000, 0, 0) };
-        s.Client.Input.RequestControl(0);
-        s.Client.Input.IssueFleetOrder(pod, order);
-        for (uint i = 1; i < FleetOrdersMessage.MaxOrders; i++) s.Client.Input.IssueFleetOrder(0xffff0000 + i, order);
-        s.TickServer();
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        s.TickClient();
-        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        Assert.Equal(0, allocated);
+        // The measured tick sends what was queued once, so a run in doubt starts again with a fresh session.
+        var allocation = new AllocationProbe();
+        Session? measured = null;
+        var pod = 0u;
+        while (allocation.Run())
+        {
+            measured?.Dispose();
+            measured = Queued(out pod);
+            allocation.Start();
+            measured.TickClient();
+            allocation.Stop();
+        }
+
+        using var s = measured!;
+        Assert.Equal(0, allocation.Bytes);
         Assert.Equal(7, s.ClientNet.SocialSent);
         Assert.Equal(7 * SocialMessage.MaxWireSize, s.ClientNet.SocialBytes);
         Assert.Equal(FleetOrdersMessage.MaxWireSize, s.ClientNet.FleetBytes);
@@ -135,21 +137,44 @@ public sealed class SocialFollowupTests
         Assert.Equal(4, s.Client.AcquireSnapshot().Social.ChatCount);
         Assert.Equal(11, s.ClientNet.CharacterCount);
         for (var i = 0; i < 11; i++) Assert.Equal((char)('界' + i), s.ClientNet.Characters[i]);
+
+        static Session Queued(out uint pod)
+        {
+            var s = new Session();
+            var view = s.Client.AcquireSnapshot();
+            pod = view.Hulls[view.OwnHull].Id;
+            for (var i = 0; i < 11; i++) Assert.True(s.Client.Input.SendChat(ChatChannel.Everyone, new string((char)('界' + i), 256)));
+            var order = new HullOrder { Kind = OrderKind.MoveTo, Target = new Double3(10000, 0, 0) };
+            s.Client.Input.RequestControl(0);
+            s.Client.Input.IssueFleetOrder(pod, order);
+            for (uint i = 1; i < FleetOrdersMessage.MaxOrders; i++) s.Client.Input.IssueFleetOrder(0xffff0000 + i, order);
+            s.TickServer();
+            return s;
+        }
     }
 
     [Fact]
     public void ProducerRefillingDuringSendCannotExtendTheTickDrain()
     {
-        using var s = new Session();
-        s.ClientNet.Producer = s.Client.Input;
-        s.ClientNet.ProduceText = new string('界', 256);
-        s.ClientNet.ProduceRemaining = 100;
-        s.Client.Input.SendChat(ChatChannel.Everyone, s.ClientNet.ProduceText);
-        s.TickServer();
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        s.TickClient();
-        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        Assert.Equal(0, allocated);
+        // The measured tick drains what was produced once, so a run in doubt starts again with a fresh session.
+        var allocation = new AllocationProbe();
+        Session? measured = null;
+        while (allocation.Run())
+        {
+            measured?.Dispose();
+            measured = new Session();
+            measured.ClientNet.Producer = measured.Client.Input;
+            measured.ClientNet.ProduceText = new string('界', 256);
+            measured.ClientNet.ProduceRemaining = 100;
+            measured.Client.Input.SendChat(ChatChannel.Everyone, measured.ClientNet.ProduceText);
+            measured.TickServer();
+            allocation.Start();
+            measured.TickClient();
+            allocation.Stop();
+        }
+
+        using var s = measured!;
+        Assert.Equal(0, allocation.Bytes);
         Assert.Equal(7, s.ClientNet.SocialSent);
         Assert.Equal(93, s.ClientNet.ProduceRemaining);
         s.ClientNet.ProduceRemaining = 0;

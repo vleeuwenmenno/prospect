@@ -274,9 +274,11 @@ public sealed class SocialTests
         source.Apply(new SocialMessage { Kind = SocialKind.Member, Player = 2, Leader = 1 });
         Assert.Equal(2, source.PartyCount);
         source.CopyTo(copy);
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 10000; i++) source.CopyTo(copy);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 100; i++)
+            while (allocation.Measuring())
+                for (var j = 0; j < 100; j++) source.CopyTo(copy);
+        Assert.Equal(0, allocation.Bytes);
         source.Party[0].Player = 50; Assert.Equal(1u, copy.Party[0].Player);
     }
 
@@ -307,9 +309,10 @@ public sealed class SocialTests
     public void ActivePartyTickAndSnapshotPublicationAllocateNothing()
     {
         using var r = new Rig(); r.Party(0, 1); r.Step(300);
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        r.Step(300);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 300; i++)
+            while (allocation.Measuring()) r.Step(1);
+        Assert.Equal(0, allocation.Bytes);
     }
 
     [Theory]
@@ -373,9 +376,12 @@ public sealed class SocialTests
             var good = new NetReader(w.Written[1..]); Assert.True(SocialMessage.TryRead(ref good, out _));
         }
         var random = new Random(5); random.NextBytes(bytes);
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 10000; i++)
-        { var reader = new NetReader(bytes); SocialMessage.TryRead(ref reader, out _); }
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 100; i++)
+        {
+            while (allocation.Measuring())
+                for (var j = 0; j < 100; j++) { var reader = new NetReader(bytes); SocialMessage.TryRead(ref reader, out _); }
+        }
+        Assert.Equal(0, allocation.Bytes);
     }
 }

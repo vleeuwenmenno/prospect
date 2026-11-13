@@ -290,25 +290,34 @@ public sealed class AsteroidRetuningTests
             var queryBytes = new long[7];
             for (var i = 0; i < 7; i++)
             {
-                var before = GC.GetAllocatedBytesForCurrentThread();
-                var start = Stopwatch.GetTimestamp();
-                galaxy.Generate(coord, sector);
-                generationMs[i] = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
-                generationBytes[i] = GC.GetAllocatedBytesForCurrentThread() - before;
-                before = GC.GetAllocatedBytesForCurrentThread();
-                start = Stopwatch.GetTimestamp();
-                Query(sector);
-                queryMs[i] = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
-                queryBytes[i] = GC.GetAllocatedBytesForCurrentThread() - before;
+                var generation = new AllocationProbe();
+                while (generation.Measuring())
+                {
+                    var start = Stopwatch.GetTimestamp();
+                    galaxy.Generate(coord, sector);
+                    generationMs[i] = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+                }
+                generationBytes[i] = generation.Bytes;
+                var query = new AllocationProbe();
+                while (query.Measuring())
+                {
+                    var start = Stopwatch.GetTimestamp();
+                    Query(sector);
+                    queryMs[i] = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+                }
+                queryBytes[i] = query.Bytes;
                 Assert.Equal(0, queryBytes[i]);
                 Assert.Equal(0, generationBytes[i]);
             }
-            var allocationStart = GC.GetAllocatedBytesForCurrentThread();
-            var freshStart = Stopwatch.GetTimestamp();
-            var fresh = new SectorContent();
-            galaxy.Generate(coord, fresh);
-            var freshBytes = GC.GetAllocatedBytesForCurrentThread() - allocationStart;
-            var freshGenerationMs = Stopwatch.GetElapsedTime(freshStart).TotalMilliseconds;
+            var freshAllocation = new AllocationProbe();
+            var freshGenerationMs = 0.0;
+            while (freshAllocation.Measuring())
+            {
+                var freshStart = Stopwatch.GetTimestamp();
+                galaxy.Generate(coord, new SectorContent());
+                freshGenerationMs = Stopwatch.GetElapsedTime(freshStart).TotalMilliseconds;
+            }
+            var freshBytes = freshAllocation.Bytes;
             long retained = 0;
             foreach (var owner in new object[] { sector, sector.Rocks })
                 foreach (var field in owner.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))

@@ -1469,15 +1469,17 @@ public sealed class EditorSessionTests
         // The server alone, on this thread: its tick with the grown catalogue, an edited hull and an open edit.
         var server = (ITickHandler)rig.Server;
         for (var i = 0; i < 60; i++) server.Tick(rig.Tick++);
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 120; i++) server.Tick(rig.Tick++);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 120; i++)
+            while (allocation.Measuring()) server.Tick(rig.Tick++);
+        Assert.Equal(0, allocation.Bytes);
         Assert.Equal(EditorPhase.Open, rig.Editor(1).Phase);
 
         // And the sessions' ticks, with the catalogue grown and an edit open.
         rig.Step(60);
-        before = GC.GetAllocatedBytesForCurrentThread();
-        rig.Step(120);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var sessions = new AllocationProbe();
+        for (var i = 0; i < 120; i++)
+            while (sessions.Measuring()) rig.Step();
+        Assert.Equal(0, sessions.Bytes);
     }
 }

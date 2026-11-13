@@ -341,10 +341,10 @@ public sealed class HullVisualsTests
         Assert.Equal(0, TargetPicking.Pick(ray, camera, forward, Focal, [plain], [], picks));
 
         // The grab around the drawn-out silhouette allocates nothing.
-        var before = GC.GetAllocatedBytesForCurrentThread();
+        var allocation = new AllocationProbe();
         for (var i = 0; i < 10; i++)
-            TargetPicking.Pick(ray, camera, forward, Focal, hulls, [], picks);
-        Assert.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
+            while (allocation.Measuring()) TargetPicking.Pick(ray, camera, forward, Focal, hulls, [], picks);
+        Assert.Equal(0L, allocation.Bytes);
     }
 
     [Fact]
@@ -402,25 +402,30 @@ public sealed class HullVisualsTests
     {
         var hulls = new HullView[ClientWorld.MaxViews];
         FtlKind[] drives = [FtlKind.Rift, FtlKind.Wormhole, FtlKind.Hyperspace, FtlKind.None];
-        var visuals = new HullVisuals();
-        var allocated = 0L;
-        for (var frame = 0; frame < 400; frame++)
+        // Each frame moves the visuals on, so a run in doubt starts again with fresh ones.
+        var allocation = new AllocationProbe();
+        while (allocation.Run())
         {
-            for (var i = 0; i < hulls.Length; i++)
+            var visuals = new HullVisuals();
+            for (var frame = 0; frame < 400; frame++)
             {
-                var drive = drives[i % drives.Length];
-                var design = drive == FtlKind.None ? 0 : DesignWith(drive);
-                var phase = (JumpPhase)((frame / 50 + i) % 5);
-                hulls[i] = Hull((uint)i + 1, design, phase, frame % 50 / 50f, new Double3(i * 300, 0, 0));
-            }
+                for (var i = 0; i < hulls.Length; i++)
+                {
+                    var drive = drives[i % drives.Length];
+                    var design = drive == FtlKind.None ? 0 : DesignWith(drive);
+                    var phase = (JumpPhase)((frame / 50 + i) % 5);
+                    hulls[i] = Hull((uint)i + 1, design, phase, frame % 50 / 50f, new Double3(i * 300, 0, 0));
+                }
 
-            var before = GC.GetAllocatedBytesForCurrentThread();
-            Update(visuals, hulls);
-            if (frame >= 50)
-                allocated += GC.GetAllocatedBytesForCurrentThread() - before;
+                if (frame >= 50)
+                    allocation.Start();
+                Update(visuals, hulls);
+                if (frame >= 50)
+                    allocation.Stop();
+            }
         }
 
-        Assert.Equal(0L, allocated);
+        Assert.Equal(0L, allocation.Bytes);
     }
 
     [Theory]

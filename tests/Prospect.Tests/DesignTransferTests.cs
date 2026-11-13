@@ -140,9 +140,9 @@ public sealed class DesignTransferTests
             alive, design.Flight.Radius, HalfExtents: design.BlockHalfExtents);
         Assert.Equal(1, TargetPicking.Pick(ray, new(eye.X, eye.Y, eye.Z), ray, 1000, [pick], [], new PickHit[1]));
         for (var i = 0; i < 3; i++) shell.Build(design, alive, design.ShellShape, output, indices, out _);
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        shell.Build(design, alive, design.ShellShape, output, indices, out _);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        while (allocation.Measuring()) shell.Build(design, alive, design.ShellShape, output, indices, out _);
+        Assert.Equal(0, allocation.Bytes);
         Assert.Null(client.Fault);
     }
 

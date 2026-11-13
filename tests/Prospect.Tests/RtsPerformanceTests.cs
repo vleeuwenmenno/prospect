@@ -33,21 +33,30 @@ public sealed class RtsPerformanceTests
                 for (var warm = 0; warm < 10; warm++) galaxy.Generate(coord, sector);
                 for (var i = 0; i < 100; i++)
                 {
-                    var before = GC.GetAllocatedBytesForCurrentThread();
-                    var start = Stopwatch.GetTimestamp();
-                    galaxy.Generate(coord, sector);
-                    var ms = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
-                    var bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+                    var allocation = new AllocationProbe();
+                    var ms = 0.0;
+                    while (allocation.Measuring())
+                    {
+                        var start = Stopwatch.GetTimestamp();
+                        galaxy.Generate(coord, sector);
+                        ms = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+                    }
+                    var bytes = allocation.Bytes;
                     writer.WriteLine(FormattableString.Invariant($"generation,{scale},{coord.X},{coord.Y},{coord.Z},{sector.AsteroidCount},{i},{ms},{bytes},{sector.AsteroidCount}"));
                     Assert.Equal(0, bytes);
                 }
                 for (var i = 0; i < 100; i++)
                 {
-                    var before = GC.GetAllocatedBytesForCurrentThread();
-                    var start = Stopwatch.GetTimestamp();
-                    var count = galaxy.Summarize(coord).AsteroidCount;
-                    var ms = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
-                    var bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+                    var allocation = new AllocationProbe();
+                    var ms = 0.0;
+                    var count = 0;
+                    while (allocation.Measuring())
+                    {
+                        var start = Stopwatch.GetTimestamp();
+                        count = galaxy.Summarize(coord).AsteroidCount;
+                        ms = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+                    }
+                    var bytes = allocation.Bytes;
                     writer.WriteLine(FormattableString.Invariant($"summary,{scale},{coord.X},{coord.Y},{coord.Z},{sector.AsteroidCount},{i},{ms},{bytes},{count}"));
                 }
             }
@@ -89,12 +98,18 @@ public sealed class RtsPerformanceTests
             for (var i = 0; i < 20; i++) { Array.Clear(meshCounts); run(); }
             for (var i = 0; i < 100; i++)
             {
-                Array.Clear(meshCounts);
-                var before = GC.GetAllocatedBytesForCurrentThread();
-                var start = Stopwatch.GetTimestamp();
-                var result = run();
-                var ms = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
-                var bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+                var allocation = new AllocationProbe();
+                var ms = 0.0;
+                var result = 0;
+                while (allocation.Measuring())
+                {
+                    // Each attempt starts from cleared counts; clearing takes no memory.
+                    Array.Clear(meshCounts);
+                    var start = Stopwatch.GetTimestamp();
+                    result = run();
+                    ms = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+                }
+                var bytes = allocation.Bytes;
                 writer.WriteLine(FormattableString.Invariant($"scan-transform,0,0,0,0,{population},{i},{ms},{bytes},{result}"));
                 Assert.Equal(Math.Min(32768, population + 3), result);
                 Assert.Equal(0, bytes);

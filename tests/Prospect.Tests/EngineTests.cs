@@ -113,13 +113,19 @@ public sealed class JobSystemTests
         for (var i = 0; i < 20; i++)
             Round();
 
-        var before = GC.GetAllocatedBytesForCurrentThread();
+        var allocation = new AllocationProbe();
+        var rounds = 0;
         for (var i = 0; i < 20; i++)
-            Round();
-        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        {
+            while (allocation.Measuring())
+            {
+                Round();
+                rounds++;
+            }
+        }
 
-        Assert.Equal(0, allocated);
-        Assert.Equal(8000, counter);
+        Assert.Equal(0, allocation.Bytes);
+        Assert.Equal((20 + rounds) * 200, counter);
     }
 
     [Fact]

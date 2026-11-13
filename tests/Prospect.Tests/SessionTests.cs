@@ -703,13 +703,25 @@ public sealed class ClientPredictionTests : IDisposable
     [Fact]
     public void ApplyingSnapshotsAndPublishingViewsTakesNoMemoryOnceWarmEvenWhenBlocksAreLost()
     {
+        // The losses happen once in a run, so a run in doubt is made again from the start, by a fresh client world.
+        var allocation = new AllocationProbe();
+        while (allocation.Run())
+        {
+            using var run = new ClientPredictionTests();
+            run.ApplyAndPublishLosingBlocks(allocation);
+        }
+
+        Assert.Equal(0L, allocation.Bytes);
+    }
+
+    private void ApplyAndPublishLosingBlocks(AllocationProbe allocation)
+    {
         HullRecord[] hulls =
         [
             Hull(OwnHull, Player, Content.PodDesign, Double3.Zero),
             Hull(OwnHull + 1, Player + 1, Content.PodDesign, new Double3(10, 0, 0)),
             Hull(OwnHull + 2, Player, Content.StartingFleet[0], new Double3(0, 0, 40)),
         ];
-        var allocated = 0L;
         for (var i = 1; i <= 200; i++)
         {
             Tick();
@@ -725,15 +737,16 @@ public sealed class ClientPredictionTests : IDisposable
             if (i == 160)
                 Lose(ref hulls[2], 7);
 
-            var before = GC.GetAllocatedBytesForCurrentThread();
+            // The first sixty are the warm-up; from there every step is measured.
+            if (i > 60)
+                allocation.Start();
             Snapshot(_serverTick, (uint)i, hulls);
             var count = _world.BuildViews(_views, ref _blockWords, _serverTick, _serverTick, out _);
             if (i > 60)
-                allocated += GC.GetAllocatedBytesForCurrentThread() - before;
+                allocation.Stop();
             Assert.Equal(3, count);
         }
 
-        Assert.Equal(0L, allocated);
         Assert.Equal(1u, Own().Revision);
         Assert.Equal(3, _world.BlockStates.Count);
 

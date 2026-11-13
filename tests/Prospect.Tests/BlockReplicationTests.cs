@@ -276,9 +276,10 @@ public sealed class BlockReplicationTests
         Assert.Equal(259, View().Stats.Blocks);
 
         Step(100);
-        var allocated = GC.GetAllocatedBytesForCurrentThread();
-        Step(30);
-        Assert.Equal(allocated, GC.GetAllocatedBytesForCurrentThread());
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 30; i++)
+            while (allocation.Measuring()) Step(1);
+        Assert.Equal(0, allocation.Bytes);
 
         using var late = new ClientSession(lateLink.Client, content, "Late");
         for (var i = 0; i < 80; i++) { Step(1); ((ITickHandler)late).Tick(tick - 1); }

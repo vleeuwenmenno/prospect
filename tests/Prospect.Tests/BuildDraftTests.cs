@@ -304,14 +304,17 @@ public sealed class BuildDraftTests
         int[] selection = [2, 1];
         var by = new GridSize(0, 1, 0);
         draft.CanMove(selection, by);
-        var before = GC.GetAllocatedBytesForCurrentThread();
+        var allocation = new AllocationProbe();
         for (var i = 0; i < 100; i++)
         {
-            draft.CanMove(selection, by);
-            draft.CanPaste(start, new GridSize(0, 9, 0));
-            draft.CanMerge(selection, out _);
+            while (allocation.Measuring())
+            {
+                draft.CanMove(selection, by);
+                draft.CanPaste(start, new GridSize(0, 9, 0));
+                draft.CanMerge(selection, out _);
+            }
         }
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        Assert.Equal(0, allocation.Bytes);
     }
 
     [Fact]

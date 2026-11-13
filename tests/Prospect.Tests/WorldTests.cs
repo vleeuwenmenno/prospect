@@ -1265,9 +1265,10 @@ public sealed class HullCollisionTests : IDisposable
 
         // Once through to have everything compiled, then measure.
         Scenario();
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        var shield = Scenario();
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        var shield = 0f;
+        while (allocation.Measuring()) shield = Scenario();
+        Assert.Equal(0, allocation.Bytes);
         Assert.True(shield < Content.Designs[Vessel].Flight.ShieldCapacity, "the pod never hit the vessel");
     }
 
@@ -1415,10 +1416,24 @@ public sealed class JumpTests
         state.JumpTunnelSeconds = 1000000000;
         state.JumpTunnelElapsed = 999999999;
         state.JumpTimer = (float)state.JumpTunnelElapsed;
-        for (var i = 0; i < 10; i++) HullSim.Step(ref state, ref order, default, flight);
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 51; i++) HullSim.Step(ref state, ref order, default, flight);
-        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
+
+        // The steps bring the hull out of the tunnel once, so a run in doubt starts again from the same state.
+        var tunnel = state;
+        var tunnelOrder = order;
+        var allocation = new AllocationProbe();
+        while (allocation.Run())
+        {
+            state = tunnel;
+            order = tunnelOrder;
+            for (var i = 0; i < 10; i++) HullSim.Step(ref state, ref order, default, flight);
+            for (var i = 0; i < 51; i++)
+            {
+                allocation.Start();
+                HullSim.Step(ref state, ref order, default, flight);
+                allocation.Stop();
+            }
+        }
+        Assert.Equal(0, allocation.Bytes);
         Assert.Equal(JumpPhase.Arrive, state.Jump);
     }
 
@@ -1526,9 +1541,10 @@ public sealed class JumpTests
         var state = HullState.Spawn(Double3.Zero, flight);
         var order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -1e6) };
         for (var i = 0; i < 2000; i++) HullSim.Step(ref state, ref order, default, flight);
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 2000; i++) HullSim.Step(ref state, ref order, default, flight);
-        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 2000; i++)
+            while (allocation.Measuring()) HullSim.Step(ref state, ref order, default, flight);
+        Assert.Equal(0, allocation.Bytes);
     }
 
     [Fact]
@@ -2258,9 +2274,10 @@ public sealed class ShieldStateTests
         Hit(ref state, Pod, ref body, 1, 5);
         Assert.Equal((byte)(serial + 1), state.ShieldHit.Serial);
         for (var i = 0; i < 100; i++) field.BeginRound();
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 1000; i++) field.BeginRound();
-        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 1000; i++)
+            while (allocation.Measuring()) field.BeginRound();
+        Assert.Equal(0, allocation.Bytes);
         Assert.Equal(ShieldHit.MaxAgeTicks, state.ShieldHit.AgeTicks);
     }
 
@@ -3158,14 +3175,28 @@ public sealed class BlockStateStoreTests
         }
 
         Round();
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var round = 0; round < 50; round++)
+
+        // The held hull loses each block once, so a run in doubt starts again with a fresh one.
+        var allocation = new AllocationProbe();
+        var runs = 0;
+        while (allocation.Run())
         {
-            Round();
-            store.Lose(held, round);
+            if (runs++ > 0)
+            {
+                store.Release(held);
+                held = store.Create(TestDesigns.Cubes(4096), hitPoints: true);
+            }
+
+            for (var round = 0; round < 50; round++)
+            {
+                allocation.Start();
+                Round();
+                store.Lose(held, round);
+                allocation.Stop();
+            }
         }
 
-        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
+        Assert.Equal(0, allocation.Bytes);
         Assert.Equal(50u, store.Revision(held));
     }
 }
@@ -3461,10 +3492,10 @@ public sealed class SizedCollisionTests
             field.BeginRound(); field.Step(a, default); field.Step(b, default);
         }
         for (var i = 0; i < 10; i++) Contact();
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 100; i++) Contact();
-        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        Assert.Equal(0, allocated);
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 100; i++)
+            while (allocation.Measuring()) Contact();
+        Assert.Equal(0, allocation.Bytes);
         Assert.NotEqual(stateA.Position, store.State(a).Position);
     }
 
@@ -3488,12 +3519,12 @@ public sealed class SizedCollisionTests
             return unchecked(hash * 31 + visits);
         }
         var expected = Query();
-        var before = GC.GetAllocatedBytesForCurrentThread();
+        var allocation = new AllocationProbe();
         var same = true;
-        for (var i = 0; i < 100; i++) same &= expected == Query();
-        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        for (var i = 0; i < 100; i++)
+            while (allocation.Measuring()) same &= expected == Query();
         Assert.True(same);
-        Assert.Equal(0, allocated);
+        Assert.Equal(0, allocation.Bytes);
     }
 }
 
@@ -3507,9 +3538,10 @@ public sealed class LocalClaimTickTests
         using var rig = new SaveRig(SaveRig.NewWorld(content), content);
         rig.Join();
         rig.Tick(30);
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        rig.Tick(30);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 30; i++)
+            while (allocation.Measuring()) rig.Tick();
+        Assert.Equal(0, allocation.Bytes);
         Assert.Equal(LocalClaimState.None, rig.Server.LocalClaim);
     }
 }

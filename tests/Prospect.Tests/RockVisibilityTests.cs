@@ -148,9 +148,9 @@ public sealed class RockVisibilityTests
             requests.Update(new SectorCoord(0, 2, 0), default(SectorCoord));
         }
         Run();
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        Run();
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        while (allocation.Measuring()) Run();
+        Assert.Equal(0, allocation.Bytes);
     }
 
     [Fact]
@@ -188,9 +188,9 @@ public sealed class RockVisibilityTests
             (slots[0], slots[1]) = (slots[1], slots[0]);
         }
         world.PrepareRockSelection(new Double3(20001, 0, 0), 1280f / 720, 3);
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        world.PrepareRockSelection(new Double3(20001, 0, 0), 1280f / 720, 3);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        while (allocation.Measuring()) world.PrepareRockSelection(new Double3(20001, 0, 0), 1280f / 720, 3);
+        Assert.Equal(0, allocation.Bytes);
         world.PrepareRockSelection(new Double3(20001, 0, 0), 1280f / 720, SceneRenderer.MaxInstances);
         Assert.Equal(0, world.EligibleRocks);
         Assert.Empty(world.RetainedRocks.ToArray());
