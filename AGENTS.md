@@ -32,7 +32,7 @@ Use the Makefile, not raw `dotnet` commands.
 | --- | --- |
 | `make setup` | First run on a machine: system packages for the OS (Vulkan; MoltenVK on macOS), the .NET SDK into `~/.dotnet`, restore. `make doctor` checks the toolchain and GPU. |
 | `make check` | Formatting, warnings-as-errors build and all tests. Must pass before work is called done. Takes about two minutes. |
-| `make bench` | Release benchmark. Fails under 144 fps or on any managed allocation in the frame loop. Run it after touching anything that executes every frame or every tick. |
+| `make bench` | Release benchmark, twice: an empty scene, then the same scene while the window is resized (`--bench-resize`). Fails under 144 fps or on any managed allocation in the frame loop. Run it after touching anything that executes every frame or every tick. |
 | `make run ARGS="..."` | The client. `make server` is the dedicated server. |
 | `make listing` | The listing server on 127.0.0.1:8080. `make listing-image` builds its container. |
 | `make server-image` | The dedicated server's container image. |
@@ -87,6 +87,13 @@ in a measurement. `make test` and `make check` prevent that with a large gen-0 b
   `View`. The sign-in comes back through `LoopbackReceiver` on 127.0.0.1, never a polled link. Contract and rules
   in `docs/accounts.md`. `AccountClientTests` signs in through the real service and a fake Discord, browser
   steps included; a change on either side must pass there.
+- **Anything sized by the window or the swapchain:** a resize, a fullscreen toggle and a swapchain that went out
+  of date are rebuilt inside the frame loop (`App.Run`: `FrameRenderer.Recreate`, then `SceneRenderer.Resize`),
+  so a rebuild takes no managed memory. Keep what there is one of per swapchain image in arrays that outlive the
+  rebuild, sized by `Swapchain.ImageCapacity`; log nothing above debug level there; a native import first called
+  there must be in an assembly `NativeBindings.Prelink` is given. `--bench-resize <n>` (the second run of
+  `make bench`) resizes the window n times and rebuilds both at the same size n times while measuring; a window
+  manager that keeps the window's size is reported, and the same-size rebuilds still count.
 - **Shaders:** files in `assets/shaders/` are compiled at startup. Check them first with
   `glslc -I assets/shaders assets/shaders/<file> -o /dev/null`. `frame.glsl` must match `FrameConstants` field for
   field.

@@ -6,9 +6,9 @@ namespace Prospect.Client.Platform;
 /// <summary>
 /// Binds native imports ahead of their first call. The runtime binds a P/Invoke lazily, on its first call, and that
 /// binding takes about 32 bytes of managed memory on the calling thread. An import that is first called from an
-/// event (the pointer leaving the window, a change of focus) would therefore allocate inside the frame loop, at
-/// whatever moment the event happens. Binding every import of the libraries the frame loop calls into once at
-/// startup moves that cost out of it.
+/// event (the pointer leaving the window, a change of focus, the first resize freeing a render target) would
+/// therefore allocate inside the frame loop, at whatever moment the event happens. Binding every import of the
+/// libraries the frame loop calls into once at startup moves that cost out of it.
 /// </summary>
 internal static class NativeBindings
 {
