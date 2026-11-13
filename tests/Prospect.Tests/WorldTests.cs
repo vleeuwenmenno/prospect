@@ -447,7 +447,10 @@ public sealed class PowerAndDamageTests
     [Fact]
     public void AHardImpactDestroysTheBlocksThatHitAndTheHullFliesOnWhatIsLeft()
     {
-        var destroyed = Crash(new Vector3(-1, 0, 0), new Vector3(170, 0, 0), Pod, out var state, out var alive, out var hp);
+        // At the fixed rock: which blocks a hit this hard reaches hangs on the face the rock turns to it, and a
+        // generated rock is another rock whenever generation changes.
+        var rock = new RockRef(default, 0);
+        var destroyed = Crash(ContactFixture(CrashGalaxy), rock, new Vector3(-1, 0, 0), new Vector3(160, 0, 0), Pod, out var state, out var alive, out var hp);
 
         // Hitting side-on costs the blocks on that side; the core in the middle survives.
         Assert.False(destroyed);
@@ -462,7 +465,7 @@ public sealed class PowerAndDamageTests
         Assert.True(stats.Blocks < Content.Pod.Cells.Length);
 
         // Damage grows with the square of the speed over the safe limit: a faster hit takes more with it.
-        Crash(new Vector3(-1, 0, 0), new Vector3(95, 0, 0), Pod, out var slower, out _, out _);
+        Crash(ContactFixture(CrashGalaxy), rock, new Vector3(-1, 0, 0), new Vector3(95, 0, 0), Pod, out var slower, out _, out _);
         Assert.True(slower.Hull > state.Hull);
     }
 

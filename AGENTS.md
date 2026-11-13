@@ -14,6 +14,7 @@ to work.
 - `docs/hosting.md`: visibility, hosting a local game, the password handshake, the game's side of the listing server.
 - `docs/releasing.md`: release tags, the workflow, the container images and how to run them.
 - `docs/save-foundation.md`: saved worlds: the snapshot, the store contract, limits, the world clock, closing.
+- `docs/world-generation.md`: fields and clouds in world space: anchors, which sector takes a rock, the gas query.
 - An item under "Open" is not decided. Ask; do not guess and build.
 - When a decision is made in conversation, move it from "Open" to "Decided" in the same change.
 
@@ -137,9 +138,15 @@ in a measurement. `make test` and `make check` prevent that with a large gen-0 b
   runs it against real servers on a temporary folder.
 - **A new per-tick system:** add a unit test in `tests/Prospect.Tests/WorldTests.cs` and, if it crosses the
   network, a session test that runs a real server and client.
-- **A new sector module** (stations, gas fields): derive from `SectorModule` in `Prospect.Game/World`, name its
+- **A new sector module** (stations): derive from `SectorModule` in `Prospect.Game/World`, name its
   type in `SectorModule.Read`, and list it under `sectorModules` in `content/galaxy/galaxy.json` with its own
   `id`. Draw only from `Stream(sector, purpose)`. Give `SectorSummary` and `SectorContent` the fields it fills.
+- **Anything that lies across sector walls** (fields, clouds): anchor it in the sector its centre lies in, keep it
+  within one sector of that anchor, and draw it from the anchor's streams (`Stream(galaxy, coord, purpose)`),
+  so a sector finds it among its 27 without generating a neighbour. Work positions out in the anchor's frame,
+  and give each thing a stream of its own (`SectorRandom.Numbered`): two sectors must get the same numbers and
+  exactly one takes each thing. A rock stays wholly inside its sector. `WorldSpaceGenerationTests` holds the
+  rules; `docs/world-generation.md` has the design.
 - **World generation:** it must come out the same to the last bit on every machine. Plain arithmetic in a fixed
   order and `DetMath`; no `MathF.Exp`, `Pow`, `Sin` or `Vector3.Length` where a discrete choice hangs on the
   result. If what a seed generates changes, bump `ProtocolInfo.Version` and `Galaxy.GenerationVersion` (saved worlds
@@ -230,8 +237,10 @@ The client opens a real window on the developer's desktop, and they are usually 
   cannot make: such a capture stops on Join Server or New Game with the sign-in shown. `--account-sample
   signed-in` never counts as one. Private local games are unaffected.
 - `--sector x,y,z` starts the local game in that sector instead of the home sector; it works with `--capture`
-  and `--bench`. With the default seed: `-40,0,-29` was a dense legacy sector near home (counts now depend on the rebased preset and bounded placement), `8,0,-8`
-  is very rich with five resources, `-14,0,-2` was a legacy giant-asteroid sample; rebased generation changes its rocks.
+  and `--bench`. With the default seed: `-40,0,-29` is dense (about 6,800 rocks of five fields), `8,0,-8`
+  is very rich with five resources, a large field lies across the wall between `2,0,1` and `3,0,1`, and `3,0,1`
+  has a giant 8 km across. Gas: `127,-1,-127` (ordinary cloud around arrival, rocks in it), `133,0,-77` (huge
+  cloud around arrival), `-66,1,37` (huge, with rocks).
 - The window size is whatever the tiling compositor gives it; check with `magick identify` before cropping.
 - Debug builds run with validation layers when `.tools/` exists. Any validation message is a bug.
 - What cannot be checked this way and needs the developer: how flight feels, mouse and keyboard interaction,
@@ -251,7 +260,9 @@ The client opens a real window on the developer's desktop, and they are usually 
 
 ## Gas clouds
 
-- See `docs/gas-clouds.md` for the bounded visual pass and muted capture scenarios. Gas changes no wire field and no asteroid list: no protocol or generation-version bump.
+- See `docs/gas-clouds.md` for the bounded visual pass and muted capture scenarios. Gas has no wire field. Some clouds hold asteroids, so a change to where clouds are changes asteroid lists: bump as for any generation change.
+- A cloud is anchored in the sector its centre lies in and may reach the sectors around it. `SectorContent.GasCloud` is the anchored one; `GasCloudModule.Intersecting` lists every cloud that reaches a sector or a sphere.
+- Generation keeps clouds apart so that only one shows at a time: the renderer composes one. Lift that rule in `GasCloudModule.TryGetCloud` only together with the renderer.
 - Gas uses its RGB-only pass without portals or shields; frames with either defer bounded gas segments to HDR composition. Preserve the gas-free shield copies, frame.glsl layout, and per-sample own-passage checks. The fixed 1 MiB noise lattice is renderer-owned, immutable, and independent of resize.
 
 ## Known limits to design around
@@ -280,6 +291,11 @@ The client opens a real window on the developer's desktop, and they are usually 
   spatial index before there are thousands of hulls.
 - A sector holds at most 20,480 asteroids (`maxPerSector`; the wire format allows 65,535). An asteroid is named by
   its index in its sector's generated list, so that list can never change for a given seed and build.
+- A field runs through a sector wall, a rock does not: its surface stays inside its sector, so giants thin out
+  toward walls. Spacing is kept within a sector only, and a sector over its cap drops its smallest rocks while
+  its neighbour keeps them.
+- A sector's summary estimates its asteroids without placing one. It knows nothing of crowding; the map says
+  "ABOUT". Clouds never overlap one another.
 - The client draws at most 32,768 instances a frame and shows at most 512 pushed asteroids out of place.
 - A pushed asteroid still belongs to the sector it was generated in. One that drifts across the sector's edge is
   not hit by a hull that is wholly in the next sector.

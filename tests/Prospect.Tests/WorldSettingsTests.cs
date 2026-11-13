@@ -1004,7 +1004,7 @@ public sealed class AsteroidSettingTests
             Assert.Equal(sector.AsteroidCount, sector.Summary.AsteroidCount);
             Assert.InRange(sector.Summary.FieldCount, 0, galaxy.Summarize(coord).FieldCount);
             Assert.Equal(sector.AsteroidCount == 0, sector.Summary.FieldCount == 0);
-            Assert.True(sector.AsteroidCount <= galaxy.Summarize(coord).AsteroidCount);
+            Assert.True(sector.AsteroidCount == 0 || galaxy.Summarize(coord).AsteroidCount > 0);
             for (var i = 0; i < sector.AsteroidCount; i++)
             {
                 var rock = sector.Asteroids[i];
@@ -1041,6 +1041,52 @@ public sealed class AsteroidSettingTests
                 if (rock.Resource >= 0) Assert.True(sector.Summary.Character.Has(rock.Resource));
             }
         }
+    }
+
+    [Fact]
+    public void SettingsReachFieldsThatLieAcrossSectorWalls()
+    {
+        // Over a block of sectors, so that it does not matter which sector a rock of a field lands in.
+        (long Proposed, long Placed, int Occupied, int Most) Survey(params string[] assignments)
+        {
+            var galaxy = World(assignments).Galaxy.WithSeed(42);
+            var sector = new SectorContent();
+            var totals = (Proposed: 0L, Placed: 0L, Occupied: 0, Most: 0);
+            for (var x = -6; x <= 6; x++)
+                for (var z = -6; z <= 6; z++)
+                {
+                    var coord = new SectorCoord(x, 0, z);
+                    totals.Proposed += galaxy.AsteroidFields!.Proposed(galaxy, coord, out _);
+                    galaxy.Generate(coord, sector);
+                    totals.Placed += sector.AsteroidCount;
+                    totals.Occupied += sector.AsteroidCount > 0 ? 1 : 0;
+                    totals.Most = Math.Max(totals.Most, sector.AsteroidCount);
+                }
+
+            TestContext.Current.SendDiagnosticMessage($"{string.Join(' ', assignments)}: {totals}");
+            return totals;
+        }
+
+        // Amount scales what every field proposes, wherever its rocks land.
+        var plain = Survey();
+        var doubled = Survey("asteroidAmount=2");
+        Assert.InRange(doubled.Proposed / (double)plain.Proposed, 1.9, 2.1);
+        Assert.InRange(doubled.Placed / (double)plain.Placed, 1.5, 2.1);
+
+        // Field size moves no count; larger fields reach more sectors and smaller ones fewer.
+        var wide = Survey("asteroidFieldSize=3");
+        var narrow = Survey("asteroidFieldSize=0.5");
+        Assert.Equal(plain.Proposed, wide.Proposed);
+        Assert.Equal(plain.Proposed, narrow.Proposed);
+        Assert.True(wide.Occupied > plain.Occupied && plain.Occupied > narrow.Occupied, $"{narrow.Occupied}, {plain.Occupied} and {wide.Occupied} sectors with rock");
+
+        // Occurrence thins out the fields, the cap holds for every sector whatever reaches it, and at no
+        // occurrence at all the home field is the only one left.
+        Assert.True(Survey("asteroidFrequency=0.25").Proposed < plain.Proposed * 0.7);
+        Assert.InRange(Survey("asteroidCap=64").Most, 1, 64);
+        var none = Survey("asteroidFrequency=0");
+        Assert.Equal(1, none.Occupied);
+        Assert.Equal(1500, none.Proposed);
     }
 
     [Fact]

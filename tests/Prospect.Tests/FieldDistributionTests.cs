@@ -8,7 +8,7 @@ namespace Prospect.Tests;
 /// <summary>Placed populations retain density, outskirts and asymmetric concentrations.</summary>
 public sealed class FieldDistributionTests
 {
-    /// <summary>Regression floors relative to cb42d4c, including the crowded all-five preset.</summary>
+    /// <summary>Regression floors recorded with generation version 4, including the crowded all-five preset.</summary>
     [Fact]
     public void RepresentativeFieldsKeepUsefulPlacedCounts()
     {
@@ -18,7 +18,7 @@ public sealed class FieldDistributionTests
             var assignments = new[] { "asteroidAmount", "asteroidSize", "asteroidFieldSize", "asteroidFrequency", "asteroidSpacing", "asteroidOreShare", "asteroidOreGrade" }.Select(id => $"{id}={factor}").ToArray();
             var galaxy = content.WithSettings(content.SettingCatalog.Build(null, assignments)).Galaxy.WithSeed(42);
             var sector = new SectorContent();
-            int[] baseline = factor == 1 ? [1414, 741, 298, 2754, 10627] : [3495, 1949, 943, 5621, 5014];
+            int[] baseline = factor == 1 ? [2278, 507, 734, 1805, 8704] : [5400, 1678, 2715, 4108, 5077];
             var index = 0;
             foreach (var coord in new SectorCoord[] { default, new(-40, 0, -29), new(8, 0, -8), new(-14, 0, -2), new(-26, 0, -31) })
             {
@@ -39,7 +39,7 @@ public sealed class FieldDistributionTests
         var galaxy = content.WithSettings(settings).Galaxy.WithSeed(42);
         var sector = new SectorContent();
         galaxy.Generate(new SectorCoord(-26, 0, -31), sector);
-        Assert.True(sector.AsteroidCount >= 5014 * 0.8);
+        Assert.True(sector.AsteroidCount >= 5077 * 0.8);
         for (var i = 0; i < sector.AsteroidCount; i++)
         {
             var rock = sector.Asteroids[i];
@@ -66,16 +66,30 @@ public sealed class FieldDistributionTests
     public void OccupiedSupportHasDeepGapsAtOrdinaryAndMaximumSize(int factor)
     {
         var content = GameContent.Load();
+
+        // At five times the size a field runs on into the sectors around its own, and theirs into it. With no
+        // other field anywhere the home field stands alone, 7,500 rocks at five times the amount, and its
+        // outline is read from every sector it reaches.
         var assignments = new[] { "asteroidAmount", "asteroidSize", "asteroidFieldSize", "asteroidFrequency", "asteroidSpacing", "asteroidOreShare", "asteroidOreGrade" }
-            .Select(id => $"{id}={factor}").Concat(["asteroidCountMin=7500", "asteroidRadiusMin=1", "asteroidRadiusMax=1"]).ToArray();
+            .Select(id => $"{id}={(factor == 5 && id == "asteroidFrequency" ? 0 : factor)}").Concat(["asteroidCountMin=7500", "asteroidRadiusMin=1", "asteroidRadiusMax=1"]).ToArray();
         var world = content.WithSettings(content.SettingCatalog.Build(null, assignments));
         var nonconvex = 0;
         foreach (var seed in new ulong[] { 0x50524F5350454354, 7, 11, 42, 999 })
         {
             var sector = new SectorContent();
-            world.Galaxy.WithSeed(seed).Generate(default, sector);
-            Assert.True(sector.AsteroidCount >= 7000);
-            var points = sector.Asteroids.Take(sector.AsteroidCount).Select(r => r.LocalPosition).ToArray();
+            var galaxy = world.Galaxy.WithSeed(seed);
+            var edge = (float)galaxy.SectorSize;
+            var points = new List<Vector3>();
+            for (var x = -1; x <= 1; x++)
+                for (var z = -1; z <= 1; z++)
+                {
+                    if (factor == 1 && (x | z) != 0)
+                        continue;
+                    galaxy.Generate(new SectorCoord(x, 0, z), sector);
+                    points.AddRange(sector.Asteroids.Take(sector.AsteroidCount).Select(r => r.LocalPosition + new Vector3(x * edge, 0, z * edge)));
+                }
+
+            Assert.True(points.Count >= 7000, $"only {points.Count} rocks at {factor}x under seed {seed}");
             var minX = points.Min(p => p.X);
             var maxX = points.Max(p => p.X);
             var minZ = points.Min(p => p.Z);
@@ -100,7 +114,7 @@ public sealed class FieldDistributionTests
                         dent = Math.Max(dent, bottom[middle] - (bottom[left] + (bottom[right] - bottom[left]) * share));
                     }
             var relativeDent = dent / (maxZ - minZ);
-            TestContext.Current.SendDiagnosticMessage($"support factor={factor} seed={seed} count={points.Length} inwardGap={relativeDent:F4}");
+            TestContext.Current.SendDiagnosticMessage($"support factor={factor} seed={seed} count={points.Count} inwardGap={relativeDent:F4}");
             if (relativeDent > 0.1f) nonconvex++;
             var output = Environment.GetEnvironmentVariable("PROSPECT_FIELD_POSITIONS");
             if (!string.IsNullOrEmpty(output))
@@ -154,6 +168,9 @@ public sealed class FieldDistributionTests
         var json = JsonNode.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "content", "galaxy", "galaxy.json")))!;
         var module = json["sectorModules"]![0]!;
         module.AsObject().Remove("baseline");
+
+        // Even fields: this is about spacing, not about the world's density noise.
+        module.AsObject().Remove("density");
         module["fieldsPerSector"] = new JsonArray(2, 2);
         module["voidFieldChance"] = 1;
         module["emptySectorChance"] = 0;
@@ -183,6 +200,28 @@ public sealed class FieldDistributionTests
     {
         var json = JsonNode.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "content", "galaxy", "galaxy.json")))!;
         json["sectorModules"]![0]!["distribution"]![key] = value;
+        Assert.Throws<InvalidDataException>(() => Galaxy.Parse(System.Text.Encoding.UTF8.GetBytes(json.ToJsonString()), "test"));
+    }
+
+    /// <summary>The world-space rules are bounded on load: a field's centre stays in its sector, the noise lattice fits its buffers.</summary>
+    [Theory]
+    [InlineData("distribution", "fade", 1.1f)]
+    [InlineData("distribution", "jitter", -1f)]
+    [InlineData("fieldCenters", "reach", 1.1f)]
+    [InlineData("fieldCenters", "flatten", 1.1f)]
+    [InlineData("density", "cells", 1f)]
+    [InlineData("density", "cells", 33f)]
+    [InlineData("density", "broadCells", 9f)]
+    [InlineData("density", "from", 0.7f)]
+    [InlineData("density", "sparse", 1.5f)]
+    [InlineData("inGas", "chance", 1.5f)]
+    [InlineData("inGas", "fill", 0f)]
+    [InlineData("inGas", "max", 0f)]
+    public void InvalidWorldSpaceRulesAreRejected(string block, string key, float value)
+    {
+        var json = JsonNode.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "content", "galaxy", "galaxy.json")))!;
+        Galaxy.Parse(System.Text.Encoding.UTF8.GetBytes(json.ToJsonString()), "test");
+        json["sectorModules"]![0]![block]![key] = value;
         Assert.Throws<InvalidDataException>(() => Galaxy.Parse(System.Text.Encoding.UTF8.GetBytes(json.ToJsonString()), "test"));
     }
 

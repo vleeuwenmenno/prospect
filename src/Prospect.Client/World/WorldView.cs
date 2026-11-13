@@ -858,7 +858,9 @@ internal sealed class WorldView
             if (_gasCapture.Summary.GasCloudCount != 0)
             {
                 var cloud = _gasCapture.GasCloud;
-                var offset = gasView is "inside" or "inside-absent" ? Vector3.Zero : gasView == "edge" ? new Vector3(cloud.HalfSize.X * 0.92f, 0, 0) : new Vector3(0, 0, cloud.HalfSize.Z * 2.4f);
+                // Outside, but no further than a cloud shows in full: a huge one fades out within a few kilometres of itself.
+                var outside = Math.Min(cloud.HalfSize.Z * 2.4f, cloud.HalfSize.X + (float)galaxy.SectorSize * (GasCloudModule.VisibilityMargin - GasCloudModule.VisibilityFade) * 0.8f);
+                var offset = gasView is "inside" or "inside-absent" ? Vector3.Zero : gasView == "edge" ? new Vector3(cloud.HalfSize.X * 0.92f, 0, 0) : new Vector3(0, 0, outside);
                 CameraPosition = galaxy.CenterOf(gasCoord) + cloud.Center + offset;
                 _forward = gasView == "offscreen" ? Vector3.UnitZ : -Vector3.UnitZ;
                 _right = gasView == "offscreen" ? -Vector3.UnitX : Vector3.UnitX;
@@ -1047,12 +1049,12 @@ internal sealed class WorldView
                 var cloud = slot.Content.GasCloud;
                 var center = (galaxy.CenterOf(slot.Coord) + cloud.Center).RelativeTo(camera);
                 var distance = center.Length();
-                var fade = GasCloudModule.Visibility(distance, (float)galaxy.SectorSize);
+                var fade = GasCloudModule.Visibility(distance, cloud.HalfSize.X, (float)galaxy.SectorSize);
                 if (fade <= 0 || !Visible(center, cloud.HalfSize.Length(), aspect, out _)) continue;
                 _scene.AddGas(new GasConstants
                 {
                     Center = new float4(center.X, center.Y, center.Z, cloud.Seed),
-                    HalfSize = new float4(cloud.HalfSize.X, cloud.HalfSize.Y, cloud.HalfSize.Z, gas.Extinction * fade),
+                    HalfSize = new float4(cloud.HalfSize.X, cloud.HalfSize.Y, cloud.HalfSize.Z, gas.ExtinctionOf(cloud, (float)galaxy.SectorSize) * fade),
                     Tint = new float4(gas.Tint.X, gas.Tint.Y, gas.Tint.Z, 0),
                     Motion = new float4(time * gas.Motion, 0, 0, distance),
                     Budget = new float4(gas.Samples, 0, 0, 0),

@@ -18,6 +18,7 @@ Saved multiplayer and moving a world between machines stay undelivered until ver
 - One capture buffer, taken once at the world's limits. Nothing queues behind a slow save.
 - A saved world keeps its own clock, apart from the scheduler's count of callbacks.
 - A save is refused unless content identity, generator version, design encoding and save layout all match.
+  Refused means left untouched and shown as "OTHER VERSION": there is no migration between generator versions.
 - Owners and entities are durable. Connections, handles and input queues are not saved.
 
 ## The pieces
@@ -282,7 +283,8 @@ CloseStatus Close { get; }  // any thread, takes no memory
 - `SavedOwner.Kind` remains `Local` after linking. Private reconnect always finds that local character.
 - `SavedAccount` stores an account UUID and canonical HTTPS authority, never tokens. Authority uses a lower-case DNS host, optional non-default decimal port, and a trailing slash; paths, credentials and IP literals in brackets are refused.
 - Account bindings are unique across Local and Account owners. At most one owner is Local.
-- Layout 2 is deliberately incompatible with layout 1; old saves are refused untouched. Generator compatibility remains 2.
+- Layout 2 is deliberately incompatible with layout 1; old saves are refused untouched. The generator version
+  is `Galaxy.GenerationVersion`, now 4: a saved asteroid is named by its index in a sector's generated list.
 
 `ServerHost.StageVerifiedLocalClaim` is internal, tick-thread only, and requires a private world with an active in-process local owner.
 It is a trusted integration seam, not an authentication API: no network or UI handler calls it.

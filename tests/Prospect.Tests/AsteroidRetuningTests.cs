@@ -58,15 +58,21 @@ public sealed class AsteroidRetuningTests
         var previous = 0;
         foreach (var amount in new[] { 1, 2, 5 })
         {
-            var galaxy = World($"asteroidAmount={amount}", "asteroidSize=0.25", "asteroidFieldSize=5", "asteroidSpacing=0.5");
+            // Small rocks close together, so that nearly every rock the home field proposes finds room.
+            var galaxy = World($"asteroidAmount={amount}", "asteroidSize=0.25", "asteroidSpacing=0.5");
             galaxy.Generate(default, sector);
-            Assert.Equal(1500 * amount, galaxy.Summarize(default).AsteroidCount);
+            Assert.Equal(1500 * amount, galaxy.AsteroidFields!.Proposed(galaxy, default, out var fields));
+            Assert.Equal(1, fields);
+            Assert.True(galaxy.Summarize(default).AsteroidCount >= 1500 * amount);
             Assert.True(sector.AsteroidCount > previous);
             previous = sector.AsteroidCount;
         }
         Assert.True(previous > 4096);
+
+        // At five times the size the home field runs on into the sectors around it, and theirs into home.
         var capped = World("asteroidAmount=5", "asteroidCountMin=20480", "asteroidSize=0.25", "asteroidFieldSize=5", "asteroidSpacing=0.5");
         capped.Generate(default, sector);
+        Assert.Equal(20480, capped.AsteroidFields!.Proposed(capped, default, out _));
         Assert.Equal(20480, capped.Summarize(default).AsteroidCount);
         Assert.InRange(sector.AsteroidCount, 4097, 20480);
         capped = World("asteroidCountMin=20480", "asteroidCap=64");
@@ -76,17 +82,17 @@ public sealed class AsteroidRetuningTests
     }
 
     [Theory]
-    [InlineData(1, false, 0, 0, "99DAAB1FE03565DC")]
-    [InlineData(2, false, 0, 0, "7FFBFA234F71D790")]
-    [InlineData(5, false, 0, 0, "DBC666E6F704C2D7")]
-    [InlineData(5, true, 0, 0, "AD9B955E7ABED0D9")]
-    [InlineData(1, false, -26, -31, "D64E1995252F48FA")]
-    [InlineData(2, false, -26, -31, "D3967369009F1F53")]
-    [InlineData(5, false, -26, -31, "EF2C0E7759CCA721")]
-    [InlineData(5, true, -26, -31, "8F5CFCDF07EFA593")]
+    [InlineData(1, false, 0, 0, "9B7DEFB34F193715")]
+    [InlineData(2, false, 0, 0, "FD7C002C8CEC9A9C")]
+    [InlineData(5, false, 0, 0, "A534856E8E06A506")]
+    [InlineData(5, true, 0, 0, "F3F04DA071F09CFE")]
+    [InlineData(1, false, -26, -31, "A7EDE866BA60F8A3")]
+    [InlineData(2, false, -26, -31, "0C4CC40B74AE0B95")]
+    [InlineData(5, false, -26, -31, "2335622FB5772AC6")]
+    [InlineData(5, true, -26, -31, "9C73B0E19B1AAB34")]
     public void PlacementOptimizationKeepsRecordedSectorBytes(int amount, bool all, int x, int z, string expected)
     {
-        // Recorded with the pre-optimization index and generation v2: lobes, outskirts and bounded placement.
+        // Recorded with generation version 4: fields in world space, a stream for each rock and density noise.
         var assignments = new List<string> { $"asteroidAmount={amount}" };
         if (all) assignments.AddRange(["asteroidSize=5", "asteroidFieldSize=5", "asteroidFrequency=5", "asteroidSpacing=5", "asteroidOreShare=5", "asteroidOreGrade=5"]);
         var galaxy = World(assignments.ToArray());
@@ -222,8 +228,8 @@ public sealed class AsteroidRetuningTests
         var sector = new SectorContent();
         galaxy.Generate(coord, sector);
         Assert.Equal(new SectorCoord(-39, 0, -19), coord);
-        Assert.Equal(11129, sector.AsteroidCount);
-        Assert.Equal("01F4137C29DAFFF9", Sectors.Hash(sector).ToString("X16"));
+        Assert.Equal(8711, sector.AsteroidCount);
+        Assert.Equal("D2C1ED381858C02C", Sectors.Hash(sector).ToString("X16"));
     }
 
     [Fact]

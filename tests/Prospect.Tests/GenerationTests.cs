@@ -116,7 +116,16 @@ public sealed class GalaxyTests
         var content = new SectorContent();
         var hash = 0xCBF29CE484222325;
         var rocks = 0;
-        SectorCoord[] coords = [default, new(1, 0, 0), new(-7, 1, 12), new(23, 0, -23), new(-40, 0, -29), new(-150, 0, 100), new(-120, 2, 60), new(310, -1, -45)];
+        var clouds = 0;
+        var reaching = 0;
+        Span<GasCloudPlacement> placements = stackalloc GasCloudPlacement[GasCloudModule.MaxPerSector];
+
+        // The last three are a small cloud, a huge one with rocks in it and the sector that one reaches into.
+        SectorCoord[] coords =
+        [
+            default, new(1, 0, 0), new(-7, 1, 12), new(23, 0, -23), new(-40, 0, -29), new(-150, 0, 100), new(-120, 2, 60), new(310, -1, -45),
+            new(-3, 0, 5), new(2, 0, -16), new(3, 0, -16),
+        ];
         foreach (var coord in coords)
         {
             galaxy.Generate(coord, content);
@@ -127,13 +136,26 @@ public sealed class GalaxyTests
             hash = (hash ^ BitConverter.SingleToUInt32Bits(summary.Character.Richness)) * 0x100000001B3;
             hash = (hash ^ BitConverter.SingleToUInt32Bits(summary.Density)) * 0x100000001B3;
             rocks += content.AsteroidCount;
+
+            // The clouds too: which sector anchors one hangs on comparisons that must come out the same everywhere.
+            clouds += summary.GasCloudCount;
+            var listed = galaxy.GasClouds!.Intersecting(galaxy, coord, placements);
+            reaching += listed;
+            hash = (hash ^ (ulong)summary.GasCloudCount) * 0x100000001B3;
+            foreach (var placement in placements[..listed])
+            {
+                foreach (var value in (ReadOnlySpan<float>)[placement.Anchor.X, placement.Anchor.Y, placement.Anchor.Z, placement.Cloud.Center.X, placement.Cloud.Center.Y,
+                    placement.Cloud.Center.Z, placement.Cloud.HalfSize.X, placement.Cloud.HalfSize.Y, placement.Cloud.HalfSize.Z, placement.Cloud.Seed])
+                    hash = (hash ^ BitConverter.SingleToUInt32Bits(value)) * 0x100000001B3;
+            }
         }
 
         Assert.True(rocks > 2000, $"only {rocks} asteroids in the sample");
+        Assert.True(clouds >= 2 && reaching > clouds, $"{clouds} clouds anchored and {reaching} reaching in the sample");
         Assert.Equal(RecordedHash, hash);
     }
 
-    private const ulong RecordedHash = 17670301587945361715;
+    private const ulong RecordedHash = 9277006589864951221;
 
     /// <summary>A second module, for the tests only: it draws from its own stream and remembers what came out.</summary>
     private sealed class ProbeModule(string id, int draws) : SectorModule(id)
@@ -172,12 +194,14 @@ public sealed class GalaxyTests
     {
         var plain = Content.Galaxy.WithSeed(5);
         var asteroids = plain.Modules[0];
+        var gas = plain.GasClouds!;
 
-        // The probe runs before the asteroids here, and draws a different amount in the third galaxy.
+        // The probe runs before the asteroids here, and draws a different amount in the third galaxy. The gas
+        // stays: some clouds hold rocks, which is the asteroid module reading what the gas module anchors.
         var probe = new ProbeModule("probe", 7);
         var greedy = new ProbeModule("probe", 4000);
-        var withProbe = plain.WithModules(probe, asteroids);
-        var withGreedy = plain.WithModules(asteroids, greedy);
+        var withProbe = plain.WithModules(probe, asteroids, gas);
+        var withGreedy = plain.WithModules(asteroids, gas, greedy);
 
         // The same galaxy with the asteroid module retuned: other sizes, other spacing, more fields.
         var retuned = Retuned(
@@ -190,7 +214,7 @@ public sealed class GalaxyTests
             5
         );
         var retunedProbe = new ProbeModule("probe", 7);
-        var retunedWithProbe = retuned.WithModules(retuned.Modules[0], retunedProbe);
+        var retunedWithProbe = retuned.WithModules(retuned.Modules[0], retuned.GasClouds!, retunedProbe);
 
         // And with the module only renamed: its id keys its streams, so it must come out different.
         var renamed = Retuned(module => module["id"] = "asteroid-fields-renamed", 5);
@@ -213,8 +237,10 @@ public sealed class GalaxyTests
                 withProbe.Generate(coord, b);
                 Assert.True(Sectors.Bytes(a).SequenceEqual(Sectors.Bytes(b)), $"a module ahead of the asteroids changed sector {coord}");
                 var drawn = probe.Last;
+                Assert.Equal(a.GasCloud, b.GasCloud);
                 withGreedy.Generate(coord, b);
                 Assert.True(Sectors.Bytes(a).SequenceEqual(Sectors.Bytes(b)), $"a module after the asteroids changed sector {coord}");
+                Assert.Equal(a.GasCloud, b.GasCloud);
 
                 // Retuning the asteroids changes them and leaves the probe's stream exactly as it was.
                 retunedWithProbe.Generate(coord, b);
@@ -338,6 +364,8 @@ public sealed class GalaxyTests
         var content = new SectorContent();
         var withOre = 0;
         var barrenWithRock = 0;
+        var estimated = 0L;
+        var generated = 0L;
         for (var x = -10; x <= 10; x++)
             for (var z = -10; z <= 10; z++)
             {
@@ -345,12 +373,20 @@ public sealed class GalaxyTests
                 var summary = galaxy.Summarize(coord);
                 galaxy.Generate(coord, content);
 
-                // Bounded placement may omit crowded rocks; the map reports an upper count.
-                Assert.InRange(content.AsteroidCount, 0, summary.AsteroidCount);
+                // The map's count is an estimate: it weighs the fields that reach a sector without placing a
+                // rock. What it calls empty is empty, and it never misses a full sector by much.
+                estimated += summary.AsteroidCount;
+                generated += content.AsteroidCount;
+                if (summary.AsteroidCount == 0)
+                    Assert.Equal(0, content.AsteroidCount);
+                Assert.True(Math.Abs(content.AsteroidCount - summary.AsteroidCount) <= 250 + summary.AsteroidCount * 0.5f, $"sector {coord}: {summary.AsteroidCount} estimated, {content.AsteroidCount} generated");
+                Assert.Equal(content.AsteroidCount, content.Summary.AsteroidCount);
+                Assert.Equal(content.AsteroidCount > 0, content.Summary.FieldCount > 0);
                 Assert.Equal(summary.Character.Resources, content.Summary.Character.Resources);
                 Assert.Equal(summary.Character.Richness, content.Summary.Character.Richness);
                 Assert.Equal(summary.FieldCount > 0, summary.AsteroidCount > 0);
-                Assert.InRange(summary.FieldCount, 0, AsteroidFieldsModule.MaxFields);
+                Assert.InRange(summary.FieldCount, 0, AsteroidFieldsModule.MaxFieldsInReach);
+                Assert.InRange(content.Summary.FieldCount, 0, summary.FieldCount);
 
                 // Ore comes only from the resources the sector has; a barren sector's rocks are all bare.
                 var ore = 0;
@@ -378,6 +414,7 @@ public sealed class GalaxyTests
 
         Assert.True(withOre > 20);
         Assert.True(barrenWithRock > 3);
+        Assert.InRange(generated / (double)estimated, 0.85, 1.1);
     }
 
     [Fact]
@@ -466,12 +503,22 @@ public sealed class GalaxyTests
         Assert.True(home.Character.Level >= 2);
         Assert.True(home.Character.Has(0));
 
-        // Far outside the disc there is next to nothing.
-        var outside = 0;
+        // Far outside the disc there is next to nothing: a stray field or a cloud with rocks, each reaching a
+        // few sectors, against the fields of the same stretch of space near home.
+        var outside = 0L;
+        var near = 0L;
+        var touched = 0;
         for (var x = 0; x < 40; x++)
             for (var z = 0; z < 40; z++)
-                outside += galaxy.Summarize(new SectorCoord(900 + x, 0, 900 + z)).AsteroidCount > 0 ? 1 : 0;
-        Assert.True(outside < 1600 / 10);
+            {
+                var count = galaxy.Summarize(new SectorCoord(900 + x, 0, 900 + z)).AsteroidCount;
+                outside += count;
+                touched += count > 0 ? 1 : 0;
+                near += galaxy.Summarize(new SectorCoord(x - 20, 0, z - 20)).AsteroidCount;
+            }
+
+        Assert.True(touched < 1600 / 4, $"{touched} of 1600 sectors outside the disc have rock");
+        Assert.True(outside < near / 8, $"{outside} asteroids outside the disc against {near} near home");
     }
 
     [Fact]

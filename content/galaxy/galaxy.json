@@ -58,17 +58,19 @@
       "densityGain": 1.6,
       "sparseFill": 0.3,
       "fieldsPerSector": [1, 3],
-      "fieldCenters": { "reach": 0.7, "flatten": 0.8 },
+      "fieldCenters": { "reach": 1.0, "flatten": 1.0 },
       "arrivalClearance": 400,
       "spacing": 2.2,
       "placementAttempts": 10,
-      "distribution": { "outskirts": 0.3, "width": [0.65, 1.0], "bend": 0.85 },
+      "distribution": { "outskirts": 0.3, "width": [0.65, 1.0], "bend": 0.85, "fade": 0.6, "jitter": 6 },
+      "density": { "cells": 16, "broadCells": 4, "broadShare": 0.6, "sparse": 0.05, "from": 0.3, "to": 0.6 },
+      "inGas": { "chance": 0.5, "perCubicKm": 0.8, "fill": 0.8, "max": 6000 },
       "largestShareOfField": 0.35,
       "kinds": [
-        { "name": "Scatter", "weight": 6, "asteroids": [20, 176], "length": [3200, 8400], "width": [2500, 6300], "height": [800, 2100] },
-        { "name": "Cluster", "weight": 3, "asteroids": [224, 896], "length": [2600, 5500], "width": [1900, 4200], "height": [750, 1700] },
-        { "name": "Belt", "weight": 0.8, "asteroids": [1100, 3500], "length": [12000, 17000], "width": [1700, 3600], "height": [500, 1260] },
-        { "name": "Great field", "weight": 0.25, "asteroids": [1900, 4096], "length": [10000, 17000], "width": [8000, 15000], "height": [1900, 4600] }
+        { "name": "Scatter", "weight": 6, "asteroids": [30, 264], "length": [3200, 8400], "width": [2500, 6300], "height": [800, 2100] },
+        { "name": "Cluster", "weight": 3, "asteroids": [336, 1344], "length": [2600, 5500], "width": [1900, 4200], "height": [750, 1700] },
+        { "name": "Belt", "weight": 0.8, "asteroids": [1650, 5250], "length": [12000, 17000], "width": [1700, 3600], "height": [500, 1260] },
+        { "name": "Great field", "weight": 0.25, "asteroids": [2850, 6144], "length": [10000, 17000], "width": [8000, 15000], "height": [1900, 4600] }
       ],
       "sizes": [
         { "name": "Pebble", "weight": 52, "radius": [3, 12] },
@@ -81,7 +83,8 @@
       "ore": { "share": [0.1, 0.85], "grade": [0.1, 1.0], "gradeFromRichness": 0.5 },
       "home": { "asteroids": 750, "length": 4800, "width": 3400, "height": 1300, "offset": [0, -60, -1500] }
     },
-    { "id": "gas-clouds", "type": "gasClouds", "chance": 0.04, "halfSizeShare": 0.12,
+    { "id": "gas-clouds", "type": "gasClouds", "chance": 0.04, "centerReach": 1.0, "halfSizeShare": [0.1, 0.14],
+      "huge": { "chance": 0.08, "halfSizeShare": [0.25, 0.5] },
       "extinction": 0.0025, "samples": 48, "tint": [0.42, 0.48, 0.52], "motion": 0.001,
       "shape": { "fill": 0.56, "lumpiness": 1.8, "warp": 0.1, "lean": 0.24,
                  "edge": 0.14, "knots": 2.2, "wisps": 1.5, "veil": 0.03 } }
