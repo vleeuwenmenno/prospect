@@ -90,6 +90,8 @@ public sealed class WorldIdentityTests : IDisposable
         File.SetUnixFileMode(shared, File.GetUnixFileMode(shared) | UnixFileMode.GroupWrite);
         Directory.CreateSymbolicLink(Path.Combine(_root, "link"), target);
         Assert.False(WorldIdentity.SafeDirectory(Path.Combine(_root, "link")));
+        // A trailing separator (shell completion adds one) must not let the final link go unchecked.
+        Assert.False(WorldIdentity.SafeDirectory(Path.Combine(_root, "link") + Path.DirectorySeparatorChar));
     }
 
     [Fact]

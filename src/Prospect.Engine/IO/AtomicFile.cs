@@ -10,7 +10,7 @@ public static class AtomicFile
     public static void Write(string path, ReadOnlySpan<byte> contents)
     {
         var directory = Path.GetDirectoryName(Path.GetFullPath(path))!;
-        Directory.CreateDirectory(directory);
+        AppPaths.CreatePrivateDirectory(directory);
 
         var temporary = Path.Combine(directory, $".{Path.GetFileName(path)}.{Environment.ProcessId}.tmp");
         try

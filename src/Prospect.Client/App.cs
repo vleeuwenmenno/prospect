@@ -869,7 +869,7 @@ internal sealed class App : IDisposable
         if (Actions.Pressed(Devices, InputAction.Screenshot, keyboard))
         {
             var directory = AppPaths.UserData("screenshots");
-            Directory.CreateDirectory(directory);
+            AppPaths.CreatePrivateDirectory(directory);
             RequestScreenshot(Path.Combine(directory, $"prospect-{DateTime.Now:yyyyMMdd-HHmmss-fff}.png"));
         }
     }

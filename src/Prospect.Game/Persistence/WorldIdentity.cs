@@ -98,7 +98,7 @@ public sealed partial record WorldIdentity(Guid WorldId, string PublicKey, strin
             finally { CryptographicOperations.ZeroMemory(bytes); }
         }
         catch (FileNotFoundException) { return WorldKeyStatus.Missing; }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or CryptographicException or ArgumentException or FormatException or EntryPointNotFoundException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or CryptographicException or ArgumentException or FormatException or TypeLoadException)
         {
             return WorldKeyStatus.Unreadable;
         }
@@ -107,8 +107,10 @@ public sealed partial record WorldIdentity(Guid WorldId, string PublicKey, strin
     internal static bool SafeDirectory(string folder)
     {
         if (!OperatingSystem.IsLinux()) return false;
-        try { return SafePath(Path.GetFullPath(folder), true, 0); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or EntryPointNotFoundException)
+        // A trailing separator makes statx follow a final link while readlink refuses it, which would skip the
+        // target's ancestors; every checked path is therefore trimmed first.
+        try { return SafePath(Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder)), true, 0); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or TypeLoadException)
         { return false; }
     }
 
@@ -122,7 +124,7 @@ public sealed partial record WorldIdentity(Guid WorldId, string PublicKey, strin
             || (stat.Uid != GetEuid() && stat.Uid != 0)) return false;
         // Validate both the link's containing path and the target's containing path.
         if (directory.ResolveLinkTarget(false) is { } target)
-            return SafePath(target.FullName, leaf, links + 1);
+            return SafePath(Path.TrimEndingDirectorySeparator(target.FullName), leaf, links + 1);
         if ((stat.Mode & 0xf000) != 0x4000) return false;
         var mode = (UnixFileMode)(stat.Mode & 0xfff);
         return (mode & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) == 0
@@ -174,8 +176,15 @@ public sealed partial record WorldIdentity(Guid WorldId, string PublicKey, strin
                         Share = FileShare.None,
                         UnixCreateMode = SecretMode,
                     });
+                    // A create mode narrowed by the umask, an ACL or the file system leaves an unprotected file. It
+                    // was created exclusively in a checked folder, so it is removed before anyone is told it exists.
+                    if (!OwnedFile(file))
+                    {
+                        file.Dispose();
+                        File.Delete(staging);
+                        return key.ExportSubjectPublicKeyInfo();
+                    }
                     acquired();
-                    if (!OwnedFile(file)) return key.ExportSubjectPublicKeyInfo();
                     file.Write(bytes);
                     file.Flush(flushToDisk: true);
                 }
