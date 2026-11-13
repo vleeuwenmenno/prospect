@@ -1,6 +1,8 @@
 #version 450
 #include "frame.glsl"
 #include "hull_clip.glsl"
+#include "gas.glsl"
+layout(constant_id = 1) const bool maskOnly = false;
 
 // What the scene held just before the shields were drawn, colour and depth, copied for this pass alone. The shell
 // bends the view through it a little; where the bent lookup would land on something in front of the shield, it
@@ -104,6 +106,11 @@ void main()
     if (max(present, burning) <= 0.001)
         discard;
 
+    if(maskOnly) {
+        outColor=vec4(0.0,0.0,0.0,own != 0 ? 0.4375 : 0.375);
+        return;
+    }
+
     // Charge falls gradually from neutral through amber to the red of a collapsing field.
     vec3 tint = mix(shieldLook.calm.rgb, shieldLook.strained.rgb, min(unstable * 2.0, 1.0));
     tint = mix(tint, shieldLook.collapse.rgb, smoothstep(0.55, 1.0, unstable));
@@ -123,6 +130,13 @@ void main()
     if (max(max(nearer.x, nearer.y), max(nearer.z, nearer.w)) > gl_FragCoord.z)
         there = here;
     vec3 bent = texture(behind, there).rgb - texture(behind, here).rgb;
+    if(frame.gas.budget.x>0.0 && there!=here) {
+        float at=gasViewDepth(gl_FragCoord.z);
+        float angle=2.0*frame.lens.x/frame.lens.w;
+        vec4 thereGas=gasSegment(frame.gas,gasRay(there),at,gasViewDepth(texture(behindDepth,there).r),angle);
+        vec4 hereGas=gasSegment(frame.gas,gasRay(here),at,gasViewDepth(texture(behindDepth,here).r),angle);
+        bent=gasOver(thereGas,texture(behind,there).rgb)-gasOver(hereGas,texture(behind,here).rgb);
+    }
 
     // The pilot's own shield in their hyperspace tunnel bends the old world only as much as the tunnel still lets
     // it be seen, by the coverage the tone mapper tunnels with, so the light it keeps there is its own.

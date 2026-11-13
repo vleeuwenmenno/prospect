@@ -13,6 +13,7 @@ to work.
 - `docs/listing-server.md`: the listing server: its HTTP contract for the game side, configuration, deployment.
 - `docs/hosting.md`: visibility, hosting a local game, the password handshake, the game's side of the listing server.
 - `docs/releasing.md`: release tags, the workflow, the container images and how to run them.
+- `docs/save-foundation.md`: saved worlds: the snapshot, the store contract, limits, the world clock, closing.
 - An item under "Open" is not decided. Ask; do not guess and build.
 - When a decision is made in conversation, move it from "Open" to "Decided" in the same change.
 
@@ -115,6 +116,25 @@ in a measurement. `make test` and `make check` prevent that with a large gen-0 b
   the world (`EditorPalette.HandBack`), so the ghost shows without a click away. A turn with `R` is never
   confirmed: a press on the ghost ends it and becomes placing's press (`WorldView.UpdatePartRotation`). Warning thresholds and the part tabs are client data in
   `content/visuals/editor.json`; warnings never block Apply.
+- **Saved worlds:** the contract is in `docs/save-foundation.md`; change it with the code. State the server
+  must not lose goes into `WorldSnapshot`, its codec (bump `WorldSnapshotCodec.Version`), `ServerHost.Capture`
+  and `RestoreWorld`, with a load rule for it; `SaveLifecycleTests` saves a world with one of everything and
+  loads it back through an in-memory store. Anything that makes a saved world grow asks `HasRoom` first. The
+  tick never touches the store and takes no memory to capture; the store is used by `SaveWorker` alone. A hull
+  created on the server goes through `CreateHull`, and a connection is seated with `SetHull`. Never let a
+  remote connection in as an owner by a name, an address or an account the server did not verify. The store on
+  disk is `SqliteWorldStore`: the lease before anything is opened, a read-only look before the writing
+  connection, `Failed` only when it knows nothing changed, and nothing after a commit may report it undone.
+  A new SQLite package means reading what changed and updating `AuditedSqliteVersion` and its source id
+  together; `SqliteWorldStoreTests` runs on a real disk and in a second process, so keep it passing there.
+- **Opening, leaving or replacing a session:** only through `SessionLifecycle` (`App.Lifecycle`): close with
+  `BeginClose`, stop reading the session, dispose it on a worker, and open the next only after that, so a world's
+  lease is free. Disk and network work for it runs on workers (`LocalWorlds`, `WorldShelf`), never on the frame.
+  A close that is not clean is reported (`CloseReport`) and holds back what was to follow, quitting too. An open
+  takes a cancellation token and stops before the disk and before the server starts; whatever an abandoned open
+  still makes is closed by its own cleanup. `--save-fault slow|fail|unknown|degraded` with `--open leave`,
+  `--capture` and a scratch `--worlds` captures the saving screen and the reports. `SavedWorldPlayTests`
+  runs it against real servers on a temporary folder.
 - **A new per-tick system:** add a unit test in `tests/Prospect.Tests/WorldTests.cs` and, if it crosses the
   network, a session test that runs a real server and client.
 - **A new sector module** (stations, gas fields): derive from `SectorModule` in `Prospect.Game/World`, name its
@@ -122,7 +142,8 @@ in a measurement. `make test` and `make check` prevent that with a large gen-0 b
   `id`. Draw only from `Stream(sector, purpose)`. Give `SectorSummary` and `SectorContent` the fields it fills.
 - **World generation:** it must come out the same to the last bit on every machine. Plain arithmetic in a fixed
   order and `DetMath`; no `MathF.Exp`, `Pow`, `Sin` or `Vector3.Length` where a discrete choice hangs on the
-  result. If what a seed generates changes, bump `ProtocolInfo.Version` and record the new hash in
+  result. If what a seed generates changes, bump `ProtocolInfo.Version` and `Galaxy.GenerationVersion` (saved worlds
+  name asteroids by index) and record the new hash in
   `GalaxyTests.GenerationMatchesTheRecordedGalaxyOnEveryMachine`. Retuning `galaxy.json` needs neither: that test
   runs on a frozen copy in `tests/Prospect.Tests/fixtures`.
 - **A new hull design:** add it to `content/ships/fleet.json`. Stats are derived from blocks; do not add stat
@@ -141,7 +162,7 @@ The client opens a real window on the developer's desktop, and they are usually 
   and exits. Views: `command`, `edit` (asks to edit the own ship; the editor opens on the grant), `map`, `map-hover` (the map with the pointer on your own sector), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,
   `players`, `social`, `friends`, `chat`, `hud` (the world with the party list and recent chat only). The social views and
   `hud` leave the performance overlay off. Screens
-  without a session: `--start menu|join|settings|newgame|credits|account`; `--set id=value` shows on `newgame`, and so
+  without a session: `--start menu|join|settings|newgame|credits|account|load`; `--set id=value` shows on `newgame`, and so
   does `--host public --host-name ... --password ...` (with `--start newgame` it fills the hosting section
   instead of starting a game; the password shows masked). `--open menu` opens the in-game menu, which says
   whether a hosted public game is listed.
@@ -171,6 +192,9 @@ The client opens a real window on the developer's desktop, and they are usually 
   (repeatable), `--accept-invites`, `--say`, `--party-say`). `--accept-invites` on the capturing client makes it
   accept, so the party list fills. Point `XDG_CONFIG_HOME` at a scratch copy of the settings: a capture saves
   them on exit.
+- Own jumps aim at the centre of sector 12,0,-7; `--jump-to x,y,z` aims at another sector's centre (with `--sector` to
+  start next to it, e.g. into a known gas cloud). `--open jump-fleet-ahead` sends the rest of the fleet to points
+  160 m and 280 m ahead of and above the camera, so their exit openings overlap in view (about 13–16 s after start).
 - `--look <degrees>` holds the pilot camera that far to the right of the hull's nose, as free look would (`0`
   looks along the nose, `150` nearly back). Use it to check that an effect follows the hull, not the view.
 - `--target` targets the nearest other hull once in space (in a local game the Prospector, about 120 degrees to
@@ -178,6 +202,10 @@ The client opens a real window on the developer's desktop, and they are usually 
   camera evenly from one angle to the other over the captures: `--target --look 40 --look-to 130
   --capture-count 16 --capture-every 0.12` brings the target into view from the right edge, and `--look -90
   --look-to -30` sweeps it past straight behind.
+- Saved worlds in a capture: a capture or a benchmark saves nothing and lists no world unless given
+  `--worlds <scratch folder>`; never point it at the player's own. With one, `--start local` creates a world there
+  (named by `--host-name`), `--start continue` opens the one played last and `--start load` shows the list. A
+  capture's quit closes and saves the world first, as the player's would.
 - Captures time themselves by the wall clock and present without vsync, so they also run while the display is
   asleep.
 - `--host unlisted|public` hosts the local game for others and opens UDP 27420 on the developer's machine; add
@@ -205,6 +233,11 @@ The client opens a real window on the developer's desktop, and they are usually 
   guessing a signature.
 - Licence: the BRUTAL logo shows before gameplay, its copyright is on the credits screen and `NOTICE.txt` ships
   beside the binaries. Do not remove any of the three.
+
+## Gas clouds
+
+- See `docs/gas-clouds.md` for the bounded visual pass and muted capture scenarios. Gas changes no wire field and no asteroid list: no protocol or generation-version bump.
+- Gas uses its RGB-only pass without portals or shields; frames with either defer bounded gas segments to HDR composition. Preserve the gas-free shield copies, frame.glsl layout, and per-sample own-passage checks. The fixed 1 MiB noise lattice is renderer-owned, immutable, and independent of resize.
 
 ## Known limits to design around
 

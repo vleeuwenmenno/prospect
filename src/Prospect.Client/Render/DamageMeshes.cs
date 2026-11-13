@@ -95,6 +95,7 @@ internal sealed class DamageMeshes(JobSystem jobs, int vertexCapacity = DamageMe
     private readonly Build _build = new();
     private JobHandle _handle;
     private bool _pending;
+    public double LastBuildMs { get; private set; }
     private int _generation;
 
     public void Clear() { _generation++; Array.Clear(_entries); }
@@ -110,6 +111,7 @@ internal sealed class DamageMeshes(JobSystem jobs, int vertexCapacity = DamageMe
         }
         if (!_pending || !jobs.IsComplete(_handle)) return;
         _pending = false;
+        LastBuildMs = _build.Milliseconds;
         if (_build.Generation != _generation) return;
         ref var entry = ref _entries[_build.Slot];
         if (entry.Id != _build.Id || entry.Design != _build.Design) return;
@@ -146,6 +148,12 @@ internal sealed class DamageMeshes(JobSystem jobs, int vertexCapacity = DamageMe
         public VisualDamageState Visual;
         public readonly ulong[] Alive = new ulong[64];
         public DamageMesh? Result;
-        public void Run() => Result = DamageMesh.Build(Design, Alive.AsSpan(0, Words), Visual, Capacity, MaxDepth);
+        public double Milliseconds;
+        public void Run()
+        {
+            var start = System.Diagnostics.Stopwatch.GetTimestamp();
+            Result = DamageMesh.Build(Design, Alive.AsSpan(0, Words), Visual, Capacity, MaxDepth);
+            Milliseconds = System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+        }
     }
 }

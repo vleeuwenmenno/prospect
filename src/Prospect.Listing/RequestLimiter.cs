@@ -12,6 +12,10 @@ public enum RequestKind
     Auth,
     /// <summary>Account and friends operations.</summary>
     Account,
+    /// <summary>Issuing game tickets (<see cref="ListingOptions.TicketIssuesPerMinute"/>).</summary>
+    TicketIssue,
+    /// <summary>Redeeming game tickets (<see cref="ListingOptions.TicketRedeemsPerMinute"/>).</summary>
+    TicketRedeem,
 }
 
 /// <summary>What the limiter decided about one request.</summary>
@@ -22,7 +26,7 @@ public readonly record struct LimitDecision(bool Allowed, bool Global, TimeSpan 
 
 /// <summary>
 /// The request limits: one bucket for the whole service, and per address group (an IPv4 address or an IPv6 prefix) one
-/// bucket for posts and one for lists.
+/// bucket for each <see cref="RequestKind"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -52,6 +56,8 @@ public sealed class RequestLimiter
     private readonly Cell global;
     private readonly Cell auth;
     private readonly Cell account;
+    private readonly Cell ticketIssue;
+    private readonly Cell ticketRedeem;
     private readonly long sweepSpacing;
     private readonly Dictionary<string, int> slotOf;
     private readonly Slot[] slots;
@@ -70,6 +76,8 @@ public sealed class RequestLimiter
         list = Cell.Of(options.ListsPerMinute, 60 * frequency);
         auth = Cell.Of(options.AuthPerMinute, 60 * frequency);
         account = Cell.Of(options.AccountPerMinute, 60 * frequency);
+        ticketIssue = Cell.Of(options.TicketIssuesPerMinute, 60 * frequency);
+        ticketRedeem = Cell.Of(options.TicketRedeemsPerMinute, 60 * frequency);
         global = Cell.Of(options.GlobalRequestsPerSecond, frequency);
 
         // A full sweep walks every slot, so it runs at most once a second, and only when a new address finds no slot.
@@ -120,7 +128,17 @@ public sealed class RequestLimiter
     /// </summary>
     public LimitDecision TryAcquire(string group, RequestKind kind)
     {
-        var cell = kind switch { RequestKind.Post => post, RequestKind.List => list, RequestKind.Auth => auth, _ => account };
+        // Every kind is named: a kind added later must get a bucket of its own here, never another kind's.
+        var cell = kind switch
+        {
+            RequestKind.Post => post,
+            RequestKind.List => list,
+            RequestKind.Auth => auth,
+            RequestKind.Account => account,
+            RequestKind.TicketIssue => ticketIssue,
+            RequestKind.TicketRedeem => ticketRedeem,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
         lock (gate)
         {
             // Read inside the lock, so requests are judged in the order their times were taken.
@@ -131,7 +149,7 @@ public sealed class RequestLimiter
             }
 
             ref var slot = ref Find(group, now);
-            ref var tat = ref kind == RequestKind.Post ? ref slot.Post : ref kind == RequestKind.List ? ref slot.List : ref kind == RequestKind.Auth ? ref slot.Auth : ref slot.Account;
+            ref var tat = ref Bucket(ref slot, kind);
             if (!cell.Admits(tat, now, out var wait))
             {
                 return new LimitDecision(false, false, ToTimeSpan(wait));
@@ -140,6 +158,20 @@ public sealed class RequestLimiter
             cell.Spend(ref tat, now);
             global.Spend(ref globalTat, now);
             return new LimitDecision(true, false, TimeSpan.Zero);
+        }
+    }
+
+    private static ref long Bucket(ref Slot slot, RequestKind kind)
+    {
+        switch (kind)
+        {
+            case RequestKind.Post: return ref slot.Post;
+            case RequestKind.List: return ref slot.List;
+            case RequestKind.Auth: return ref slot.Auth;
+            case RequestKind.Account: return ref slot.Account;
+            case RequestKind.TicketIssue: return ref slot.TicketIssue;
+            case RequestKind.TicketRedeem: return ref slot.TicketRedeem;
+            default: throw new ArgumentOutOfRangeException(nameof(kind));
         }
     }
 
@@ -166,7 +198,7 @@ public sealed class RequestLimiter
         // The address may have been spending from its overflow bucket until now. Its own slot starts from that
         // bucket's state, not from a full allowance, or moving out of overflow would hand it a second burst.
         index = free[--freeCount];
-        slots[index] = new Slot { Group = group, Post = shared.Post, List = shared.List, Auth = shared.Auth, Account = shared.Account };
+        slots[index] = shared with { Group = group };
         slotOf.Add(group, index);
         return ref slots[index];
     }
@@ -177,7 +209,8 @@ public sealed class RequestLimiter
         for (var i = 0; i < slots.Length; i++)
         {
             ref var slot = ref slots[i];
-            if (slot.Group is { } group && slot.Post <= now && slot.List <= now && slot.Auth <= now && slot.Account <= now)
+            if (slot.Group is { } group && slot.Post <= now && slot.List <= now && slot.Auth <= now && slot.Account <= now
+                && slot.TicketIssue <= now && slot.TicketRedeem <= now)
             {
                 slotOf.Remove(group);
                 slot = Slot.Fresh;
@@ -192,13 +225,23 @@ public sealed class RequestLimiter
     /// <summary>One address group's state: when each of its buckets is next back to empty use ("theoretical arrival time").</summary>
     private struct Slot
     {
-        public static readonly Slot Fresh = new() { Post = long.MinValue, List = long.MinValue, Auth = long.MinValue, Account = long.MinValue };
+        public static readonly Slot Fresh = new()
+        {
+            Post = long.MinValue,
+            List = long.MinValue,
+            Auth = long.MinValue,
+            Account = long.MinValue,
+            TicketIssue = long.MinValue,
+            TicketRedeem = long.MinValue,
+        };
 
         public string? Group;
         public long Post;
         public long List;
         public long Auth;
         public long Account;
+        public long TicketIssue;
+        public long TicketRedeem;
     }
 
     /// <summary>One bucket's shape: the interval between requests at the sustained rate, and how far ahead a burst may run.</summary>

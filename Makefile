@@ -315,6 +315,14 @@ bench: need-dotnet ## Release benchmark: frame rate and per-frame allocation (fa
 
 ##@ Quality
 
+.PHONY: gas-shaders gas-overlay-tests
+gas-shaders: ## Compile shaders and inspect the shield mask specialization offline (no GPU)
+	$(call step,Checking gas shaders and shield mask specialization)
+	$(Q)python3 tools/check_gas_shaders.py
+
+gas-overlay-tests: ## Verify overlay capture evidence validation (no GPU)
+	$(Q)python3 tools/test_gas_overlay.py
+
 fmt: need-dotnet ## Format the code
 	$(call step,Formatting)
 	$(Q)"$(DOTNET)" format $(SOLUTION) $(FORMAT_ARGS)

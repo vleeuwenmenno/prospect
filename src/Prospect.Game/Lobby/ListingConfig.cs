@@ -11,6 +11,9 @@ namespace Prospect.Game.Lobby;
 /// </summary>
 public sealed record ListingConfig
 {
+    // Tests route the configured HTTPS authority to an in-process service without weakening URL validation.
+    internal Func<HttpMessageHandler>? HandlerFactory { get; init; }
+
     private ListingConfig(Uri url)
     {
         Url = url;

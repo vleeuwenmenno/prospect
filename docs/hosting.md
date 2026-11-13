@@ -33,8 +33,11 @@ A hosted local game is the same server a local game always runs, with a UDP list
 
 In the client: New Game, then "Who can join". Unlisted and Public show the name, password, player slots and port,
 and need a Discord sign-in before Start ([accounts](accounts.md)). Private does not. Join Server needs it too.
-A start that fails (port busy, a name or password that cannot be used) stays on the screen with the reason. In the
+A start that fails (port busy, a name or password that cannot be used) comes back to the screen with the reason. In the
 game, the `Esc` menu says whether a public game is listed right now.
+
+A hosted game is not saved, and the screen says so. A private game is a saved world
+([save-foundation](save-foundation.md)); a saved world lets in no remote player until the server can verify one.
 
 The same from the command line:
 
@@ -496,7 +499,7 @@ Shared sanitization bounds every endpoint and lowers a crossed minimum to its ma
 The paired ranges and per-material rules are listed in the README. Material abundance weights only existing availability;
 zero removes the material consistently from sector character and asteroid picks.
 
-Protocol 35 and generation version 3 identify the irregular field algorithm.
+Protocol 35 and generation version 3 identify the irregular field algorithm; older saved generation identities are refused.
 Field support follows four seeded transverse sections with smooth bends, varying widths and tapered ends.
 Sparse outskirts follow that support rather than filling an enclosing ellipsoid.
 `distribution.outskirts`, `distribution.width` and `distribution.bend` tune this shape in galaxy content.
@@ -607,3 +610,57 @@ Client prediction therefore still cannot promise exact remote motion when poses 
 Memory now includes independent prediction block states, not borrowed published blocks.
 Each uses BlockStateStore.BytesFor(design, true), with pooled unmanaged storage reused during replay.
 The fixed 256 held recovery poses also retain the inline sparse health payload (about 1.4 MiB).
+
+## Dedicated saved worlds
+
+Saved dedicated worlds are not joinable yet: every remote admission is refused until verified ownership exists.
+This preserves state, but does not provide playable persistent multiplayer or portable owner identities.
+
+- Without `--world`, the dedicated server remains unsaved.
+- `--world <folder>` opens an existing world. A missing save is an error, never an implicit new game.
+- `--world <folder> --create-world` creates only when no world exists. An existing compatible world is opened;
+  conflicting seed/settings, damaged files and busy leases are refused, never overwritten.
+- `--autosave <seconds>` requires `--world`: 1–3600 seconds, default 30, only while dirty. There is no manual-save option.
+- The saved seed and settings are authoritative. Explicit `--seed`, file settings and `--set` must agree;
+  omitted settings retain saved values. Normal setting parsing/clamping and last-assignment precedence apply.
+
+### Startup and refusal
+
+Launch seed/settings are validated against the decoded snapshot under the world's lease, before writable open
+clears the clean-close mark. The same lease remains held through writable open and the store's lifetime.
+A conflict releases the lease and leaves database, WAL and clean-close metadata unchanged.
+Compatibility and structural storage checks also run before the launch validator and writable open.
+The server owns the store after construction starts, including when construction fails.
+
+### Stop and files
+
+SIGTERM and Ctrl+C request a final save; the server waits up to 60 seconds for close, then disposes the store.
+Store disposal can wait another 15 seconds. Give container shutdown at least 90 seconds.
+Exit 0 means committed (or unsaved mode); checkpoint/backup degradation is separately reported on stderr.
+Exit 1 means definite failure or startup failure; exit 3 means final commit is unknown or unfinished.
+A clean-close mark alone does not prove checkpoint or backup success: read the shutdown diagnostics.
+Use local filesystems with working locks. See [save-foundation.md](save-foundation.md) for the folder contract
+and [releasing.md](releasing.md) for the nonroot container volume.
+
+## Private saved-world account proof
+
+An explicit `GameSession.RequestLocalClaim` uses a bounded in-process mailbox, not game transport messages.
+`ServerConfig.AccountAuthority` configures the verifier service separately from advertisement, defaulting to `Listing`.
+The client option `--account-authority` defaults to its listing configuration; `off` prevents account requests.
+Only private saved local connections qualify. Remote connections cannot request a challenge or submit a proof.
+The existing remote saved-world refusal is unchanged. No hosting unlock or player-facing claim UI is implemented.
+Proof/authority/deadline rules are in docs/accounts.md; exact durable outcomes are in docs/save-foundation.md.
+
+## Protected disk world identity foundation
+
+Linux disk worlds now have an immutable P256 public key in database schema 2 and a separate `world.key`.
+Snapshot codec 2 and its account/owner bindings are unchanged; older database schemas are refused without migration.
+`SqliteWorldStore.Identity` exposes UUID, canonical 91-byte SPKI (base64), SHA256 fingerprint and key status.
+Missing, malformed, mismatched or unsafe keys never regenerate; private gameplay remains loadable.
+This status is an observation at open, not hosting authorization. Saved multiplayer remains locked.
+
+- Key creation uses mode 0600 from the first byte, file flush and durable publication before database publication.
+- Only Linux protection is supported. Windows and macOS creation are refused; copied worlds can open privately with status Unsafe.
+- Automatic database copies are gameplay-only: they cannot recover a lost private key. Protected identity recovery artifacts are not implemented.
+- Move or copy the complete stopped folder, preserving key permissions, to retain identity. A bare database is insufficient.
+- Independent Claude security review remains required. No admission, TLS, key rotation or destructive recovery is included.

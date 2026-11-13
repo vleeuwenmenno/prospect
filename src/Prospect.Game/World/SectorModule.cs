@@ -62,6 +62,7 @@ public abstract class SectorModule
         var type = element.GetProperty("type"u8).GetString();
         return type switch
         {
+            GasCloudModule.TypeName => GasCloudModule.Read(id, element, path),
             AsteroidFieldsModule.TypeName => AsteroidFieldsModule.Read(id, element, path),
             _ => throw new InvalidDataException($"{path}: unknown sector module type '{type}'"),
         };

@@ -76,8 +76,30 @@ docker run -d -p 27420:27420/udp -v ./settings.json:/config/settings.json:ro \
 - The file can also hold the server's name, visibility, port, player slots, password, listing address and
   connection limits under `"server"`; see [hosting.md](hosting.md). A world-readable file is no place for a
   password: use the variable.
-- The server writes no files. Nothing needs a volume.
+- Without `--world`, the server saves nothing. Saved worlds require a writable volume (below).
 - Ids and ranges for settings: `content/rules/settings.json`.
+
+## Dedicated world volume
+
+Saved mode is not joinable yet; remote players are refused until verified ownership is implemented.
+The image provides `/data`, owned by its unprivileged user (`APP_UID`, currently 1654).
+Use a named volume; a bind mount must already be writable by that uid. Do not use a network filesystem.
+
+```sh
+docker run -d --name prospect-saved --stop-timeout 90 -v prospect-worlds:/data \
+  ghcr.io/<owner>/prospect-server:latest --world /data/world --create-world --listing off
+```
+
+- First run creates the world. Later runs open it, never overwrite it; remove `--create-world` to require existence.
+- Add `--autosave 30` to set the interval (1–3600 seconds). No changes means no periodic write; stop still saves.
+- Saved seed/settings win. Conflicting explicit launch values are refused under the lease before writable open; see [hosting.md](hosting.md).
+- Stop with `docker stop --time 90 prospect-saved`. Read logs for checkpoint/backup failures even with exit 0.
+- Retain the named volume across image replacement. Copy only after a successful final checkpoint;
+  copying only `world.db` while a WAL is needed can lose committed data.
+
+The published server includes SQLite native runtime assets and the dependency notices from `LICENSES/`.
+Linux native-load/process-close and container checks must run before accepting a release;
+macOS and Windows are separate checks, not implied by Linux success.
 
 ## Run the listing server
 
@@ -104,3 +126,17 @@ make listing-image    # prospect-listing
 Accounts are disabled by default. Enabling them requires Discord credentials and a durable writable /data volume.
 The image owns /data as APP_UID; bind mounts must grant that user write access.
 SQLite native assets ship for amd64 and arm64. Account configuration, callback registration, backups and logging rules: [accounts.md](accounts.md).
+
+## Protected disk world identity foundation
+
+Linux disk worlds now have an immutable P256 public key in database schema 2 and a separate `world.key`.
+Snapshot codec 2 and its account/owner bindings are unchanged; older database schemas are refused without migration.
+`SqliteWorldStore.Identity` exposes UUID, canonical 91-byte SPKI (base64), SHA256 fingerprint and key status.
+Missing, malformed, mismatched or unsafe keys never regenerate; private gameplay remains loadable.
+This status is an observation at open, not hosting authorization. Saved multiplayer remains locked.
+
+- Key creation uses mode 0600 from the first byte, file flush and durable publication before database publication.
+- Only Linux protection is supported. Windows and macOS creation are refused; copied worlds can open privately with status Unsafe.
+- Automatic database copies are gameplay-only: they cannot recover a lost private key. Protected identity recovery artifacts are not implemented.
+- Move or copy the complete stopped folder, preserving key permissions, to retain identity. A bare database is insufficient.
+- Independent Claude security review remains required. No admission, TLS, key rotation or destructive recovery is included.

@@ -326,6 +326,20 @@ public sealed class HullField
     }
 
     /// <summary>
+    /// Reads the flight figures of a hull that was just restored from a save off its restored sums, and leaves its
+    /// motion, charge and jump exactly as they were saved. <see cref="Refit"/> is not used for this: it clamps
+    /// charge and can restart the shield's change clock, which is right when a block goes and wrong when nothing
+    /// happened but a load. Whoever restores the hull checks the saved charge against these figures.
+    /// </summary>
+    internal void RestoreFigures(int index)
+    {
+        ref var info = ref _hulls.Info(index);
+        info.FittedRevision = _hulls.Revision(index);
+        if (info.FittedRevision != 0)
+            _designs[info.Design].Figures(_hulls.BlockStates.Sums(info.BlockState), out _hulls.Flight(index), out _);
+    }
+
+    /// <summary>
     /// Reads a hull's flight figures again if it has lost blocks since they were last read. The loss is told by
     /// the block state's revision, which rose when the block was taken; block sets are not compared. The figures
     /// come off the hull's running sums, which were brought up to date when the block went, so this looks at no

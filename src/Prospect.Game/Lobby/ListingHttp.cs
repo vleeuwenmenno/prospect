@@ -83,7 +83,13 @@ internal sealed class ListingHttp : IDisposable
             };
         }
 
-        _client = new HttpClient(handler, disposeHandler: true) { Timeout = Timeout.InfiniteTimeSpan };
+        HttpMessageHandler selected = handler;
+        if (config.HandlerFactory is { } factory)
+        {
+            handler.Dispose();
+            selected = factory();
+        }
+        _client = new HttpClient(selected, disposeHandler: true) { Timeout = Timeout.InfiniteTimeSpan };
         _client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("prospect", ProtocolInfo.GameVersion));
         _client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
     }

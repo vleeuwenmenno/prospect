@@ -22,7 +22,7 @@ namespace Prospect.Game.Lobby;
 /// token, so a late answer never brings an old account back. Every answer is checked as untrusted.
 /// </para>
 /// </summary>
-public sealed class AccountClient : IDisposable
+public sealed partial class AccountClient : IDisposable
 {
     /// <summary>The most entries read from each friends list; a reply with more is refused as a whole.</summary>
     public const int MaxListEntries = 400;

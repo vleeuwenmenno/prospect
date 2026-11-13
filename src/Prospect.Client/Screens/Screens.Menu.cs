@@ -48,18 +48,47 @@ internal sealed partial class ScreenHost
         var draw = ImGui.GetWindowDrawList();
         var size = _ui.DisplaySize;
         var left = Kit.Px(96);
-        var y = size.Y * 0.2f + Slide(fade);
+        // A short window keeps the menu whole: a smaller title, and the entries scroll in what is left above the hints.
+        var shortWindow = size.Y < Kit.Px(760);
+        var y = (shortWindow ? Math.Max(HudTop + Kit.Px(Theme.Space4), size.Y * 0.06f) : size.Y * 0.2f) + Slide(fade);
 
         Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(left + Kit.Px(4), y), Theme.Accent, "COMMAND POD  /  FLEET OPERATIONS"u8);
         y += Kit.Px(18);
-        var title = Kit.Text(draw, _ui.SansBold, Theme.FontTitle, new float2(left, y), Theme.Text, "PROSPECT"u8);
+        var title = Kit.Text(draw, _ui.SansBold, shortWindow ? Theme.FontHeading : Theme.FontTitle, new float2(left, y), Theme.Text, "PROSPECT"u8);
         y += title.Y + Kit.Px(2);
         draw.AddRectFilled(new float2(left + Kit.Px(4), y), new float2(left + Kit.Px(4) + title.X * 0.5f, y + Kit.Px(2)), Kit.Color(Theme.Accent));
-        y += Kit.Px(Theme.Space4);
-        Kit.Text(draw, _ui.Sans, Theme.FontBody, new float2(left + Kit.Px(4), y), Theme.TextDim, "Cut the rock. Haul the ore. Build the fleet."u8);
+        if (!shortWindow)
+        {
+            y += Kit.Px(Theme.Space4);
+            Kit.Text(draw, _ui.Sans, Theme.FontBody, new float2(left + Kit.Px(4), y), Theme.TextDim, "Cut the rock. Haul the ore. Build the fleet."u8);
+            y += Kit.Px(Theme.Space7);
+        }
 
-        ImGui.SetCursorScreenPos(new float2(left, y + Kit.Px(Theme.Space7 + 8)));
+        y += Kit.Px(shortWindow ? Theme.Space3 + 8 : 8);
+        ImGui.SetCursorScreenPos(new float2(left, y));
+        var itemsHeight = Math.Max(Kit.Px(46), size.Y - Kit.Px(72) - y);
+        ImGui.BeginChild("##menuitems"u8, new float2(Kit.Px(400), itemsHeight), ImGuiChildFlags.NavFlattened, ImGuiWindowFlags.NoBackground);
+        draw = ImGui.GetWindowDrawList();
         ImGui.BeginGroup();
+        // Continue is the world played last, named beside it; a world that is gone is reported when chosen, never
+        // made again.
+        if (_app.Worlds.List.LastWorld is not null)
+        {
+            if (Kit.MenuItem("Continue"u8, 360))
+            {
+                _menuError = "";
+                _app.ContinueWorld();
+            }
+
+            var item = ImGui.GetItemRectMin();
+            var last = _app.Worlds.LastWorld;
+            var label = last?.Name ?? "Last world not found";
+            var labelWidth = Math.Min(Kit.Measure(_ui.Mono, Theme.FontCaption, label).X, Kit.Px(200));
+            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, item + new float2(Kit.Px(360) - labelWidth - Kit.Px(Theme.Space3), Kit.Px(17)), last is { Ready: true } ? Theme.TextDim : Theme.Bad, label, Kit.Px(200));
+        }
+
+        if (_app.SavesWorlds && Kit.MenuItem("Load World"u8, 360))
+            OpenLoadWorld();
         if (Kit.MenuItem("New Game"u8, 360))
             OpenNewGame();
         if (Kit.MenuItem("Join Server"u8, 360))
@@ -73,6 +102,16 @@ internal sealed partial class ScreenHost
         if (Kit.MenuItem("Quit"u8, 360))
             _app.Quit();
         ImGui.EndGroup();
+        if (_menuError.Length > 0)
+        {
+            Kit.Space(Theme.Space2);
+            ImGui.Indent(Kit.Px(Theme.Space4));
+            Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.Bad, _menuError, 420);
+            ImGui.Unindent(Kit.Px(Theme.Space4));
+        }
+
+        ImGui.EndChild();
+        draw = ImGui.GetWindowDrawList();
 
         var version = Kit.Measure(_ui.Mono, Theme.FontCaption, App.VersionLabel);
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(size.X - version.X - Kit.Px(96), size.Y - Kit.Px(50)), Theme.TextMute, App.VersionLabel);

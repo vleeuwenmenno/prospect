@@ -54,7 +54,8 @@ internal sealed partial class ScreenHost
         _newGame = _app.NewGameSettings;
         _hosting = _app.NewGameHosting.Clone();
         var name = _hosting.Name;
-        if (name.Length == 0 && !ServerNames.TryNormalize($"{_app.Settings.PlayerName}'s game", out name))
+        var fallback = _hosting.Visibility == ServerVisibility.Private && _app.SavesWorlds ? $"{_app.Settings.PlayerName}'s world" : $"{_app.Settings.PlayerName}'s game";
+        if (name.Length == 0 && !ServerNames.TryNormalize(fallback, out name))
             name = "";
         _hostName.SetValue(name);
         _hostPassword.SetValue(_hosting.Password);
@@ -111,6 +112,11 @@ internal sealed partial class ScreenHost
         {
             case ServerVisibility.Private:
                 Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, "Only you. Nothing is opened on the network and nobody else can join."u8, WorldRowWidth - 24);
+                Kit.Space(Theme.Space1);
+                if (_app.SavesWorlds)
+                    Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.Good, Kit.F($"Saved automatically every {_app.Settings.AutosaveSeconds} s and when you leave. Continue it later from the main menu."), WorldRowWidth - 24);
+                else
+                    Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.Accent, "Saved worlds are off for this run: this game is not saved."u8, WorldRowWidth - 24);
                 break;
             case ServerVisibility.Unlisted:
                 Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextDim, "Others join with your address and the port below. It is not shown in the server browser."u8, WorldRowWidth - 24);
@@ -135,9 +141,23 @@ internal sealed partial class ScreenHost
         {
             Kit.Space(Theme.Space1);
             Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.Accent, "The port must be reachable from outside: forward it on your router if you have one. The game does not do that for you."u8, WorldRowWidth - 24);
+            Kit.Space(Theme.Space1);
+            Kit.Paragraph(
+                _ui.Sans,
+                Theme.FontSmall,
+                Theme.Accent,
+                "A hosted game is not saved yet: the game cannot yet tell who a returning player is. Choose Private for a world that is saved."u8,
+                WorldRowWidth - 24
+            );
         }
 
         ImGui.Unindent(Kit.Px(Theme.Space3));
+
+        if (_hosting.Visibility == ServerVisibility.Private && _app.SavesWorlds)
+        {
+            Kit.Space(Theme.Space4);
+            Kit.TextField("WORLD NAME"u8, "##worldname"u8, _hostName, WorldRowWidth);
+        }
 
         if (_hosting.Visibility != ServerVisibility.Private)
         {
@@ -185,7 +205,7 @@ internal sealed partial class ScreenHost
             Kit.Space(Theme.Space1);
             Kit.Heading("New Game"u8);
             Kit.Space(Theme.Space2);
-            Kit.Body("Who can join, and the world's settings. The server keeps them for as long as the game runs."u8);
+            Kit.Body("A new world: who can join, its name and its settings. Its settings stay as they are chosen here."u8);
             Kit.Space(Theme.Space4);
         }
 
@@ -222,7 +242,8 @@ internal sealed partial class ScreenHost
             Kit.Space(Theme.Space2);
         }
 
-        if (Kit.Button("Start"u8, ButtonKind.Primary, 160))
+        var label = _hosting.Visibility != ServerVisibility.Private ? "Host Game"u8 : _app.SavesWorlds ? "Create World"u8 : "Start"u8;
+        if (Kit.Button(label, ButtonKind.Primary, 180))
             StartNewGame();
         ImGui.SameLine(0, Kit.Px(Theme.Space3));
         if (Kit.Button("Back"u8, ButtonKind.Secondary, 120) || BackPressed())

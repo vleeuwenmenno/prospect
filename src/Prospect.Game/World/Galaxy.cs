@@ -108,6 +108,8 @@ public struct SectorSummary
     /// <summary>Written by the asteroid field module: planned upper counts on the map; actual counts after generation.</summary>
     public int AsteroidCount;
     public int FieldCount;
+    /// <summary>Number of decorative gas volumes, zero or one.</summary>
+    public int GasCloudCount;
 }
 
 public struct Asteroid
@@ -197,6 +199,8 @@ public sealed class GalaxyShape
 public sealed class SectorContent
 {
     public SectorSummary Summary;
+    /// <summary>The sector's sole optional gas descriptor.</summary>
+    public GasCloud GasCloud;
 
     /// <summary>
     /// The sector's asteroids, largest first; the first <see cref="AsteroidCount"/> are meaningful. An asteroid's
@@ -308,6 +312,8 @@ public sealed class Galaxy
 
     /// <summary>The module that makes the asteroid fields, or null in a galaxy without one.</summary>
     public AsteroidFieldsModule? AsteroidFields { get; private set; }
+    /// <summary>The optional decorative gas module.</summary>
+    public GasCloudModule? GasClouds { get; private set; }
 
     /// <summary>The asteroid count at which a sector shows at full strength on the map.</summary>
     public float MapFullSignalAsteroids { get; private set; }
@@ -360,8 +366,14 @@ public sealed class Galaxy
         _modules = modules;
         MaxAsteroidsPerSector = 0;
         AsteroidFields = null;
+        GasClouds = null;
         foreach (var module in modules)
         {
+            if (module is GasCloudModule gas)
+            {
+                if (GasClouds is not null) throw new InvalidDataException("A galaxy takes one gas module");
+                GasClouds = gas;
+            }
             if (module is not AsteroidFieldsModule fields)
                 continue;
 
@@ -544,6 +556,7 @@ public sealed class Galaxy
     {
         content.Summary = Summarize(coord);
         content.AsteroidCount = 0;
+        content.GasCloud = default;
         content.BoundsCenter = default;
         content.BoundsRadius = 0;
         content.Rocks.Reset(0, SectorSize);

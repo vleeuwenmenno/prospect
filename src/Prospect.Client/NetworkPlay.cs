@@ -31,35 +31,23 @@ internal static class NetworkPlay
     }
 
     /// <summary>
-    /// Opens a session in place of the current one. A network session is checked with <see cref="Allowed"/>
-    /// first, before <paramref name="leave"/> touches the session that runs, so a refused attempt leaves it as it
-    /// was and opens no socket. Once allowed, the current session is left, then <paramref name="open"/> runs; a
-    /// failure there returns false with its message, the old session already gone.
+    /// Asks for a session in place of the current one. A network session is checked with <see cref="Allowed"/>
+    /// first, before <paramref name="enter"/> runs, so a refused attempt leaves the session that runs as it was
+    /// and opens no socket. <paramref name="enter"/> hands the request to <see cref="SessionLifecycle.Enter"/>,
+    /// which closes and releases the current session before the new one is opened off the frame; a failure
+    /// there is reported by the lifecycle, not here.
     /// </summary>
     /// <param name="accounts">The player's account.</param>
     /// <param name="network">True for a join, or a local game others can join; false for a private one.</param>
     /// <param name="hosting">For the sentence: true when the network session is one this game hosts.</param>
-    /// <param name="leave">Ends the current session, if any.</param>
-    /// <param name="open">Starts the new session; may throw <see cref="IOException"/> or <see cref="InvalidDataException"/>.</param>
-    /// <param name="session">The new session, or null.</param>
-    /// <param name="error">Why it was not opened, or empty.</param>
-    public static bool TryEnter(AccountClient accounts, bool network, bool hosting, Action leave, Func<GameSession> open, out GameSession? session, out string error)
+    /// <param name="enter">Asks the lifecycle for the session.</param>
+    /// <param name="error">Why it was refused, or empty.</param>
+    public static bool TryEnter(AccountClient accounts, bool network, bool hosting, Action enter, out string error)
     {
-        session = null;
         if (network && !Allowed(accounts, hosting, out error))
             return false;
-        leave();
-        try
-        {
-            session = open();
-        }
-        catch (Exception e) when (e is IOException or InvalidDataException)
-        {
-            error = e.Message;
-            return false;
-        }
-
         error = "";
+        enter();
         return true;
     }
 }

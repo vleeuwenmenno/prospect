@@ -4,6 +4,7 @@ using Prospect.Engine.Diagnostics;
 using Prospect.Engine.Net;
 using Prospect.Engine.Time;
 using Prospect.Game.Lobby;
+using Prospect.Game.Persistence;
 using Prospect.Game.Protocol;
 using Prospect.Game.World;
 
@@ -11,6 +12,9 @@ namespace Prospect.Game.Server;
 
 public sealed class ServerConfig
 {
+    /// <summary>Bounded private diagnostic scene; no wire command can enable it.</summary>
+    public VisualBenchmarkScene? VisualBenchmark { get; init; }
+
     /// <summary>
     /// The name the host chose, shown to players and on the list. It must pass
     /// <see cref="ServerNames.TryNormalize"/>: 1 to 48 characters once cleaned, as the listing server demands.
@@ -40,7 +44,13 @@ public sealed class ServerConfig
 
     /// <summary>The listing server a public game announces itself to, or null to announce nowhere.</summary>
     public ListingConfig? Listing { get; init; }
-    public ulong GalaxySeed { get; init; } = 0x50524F5350454354;
+
+    /// <summary>Explicit account authority for local claims; defaults to Listing. Null with no listing keeps accounts off.</summary>
+    public ListingConfig? AccountAuthority { get; init; }
+
+    /// <summary>The seed a world has when none is chosen.</summary>
+    internal const ulong DefaultSeed = 0x50524F5350454354;
+    public ulong GalaxySeed { get; init; } = DefaultSeed;
 
     /// <summary>
     /// The world's settings, fixed for as long as the server runs; null for the defaults in the content. Build
@@ -50,6 +60,17 @@ public sealed class ServerConfig
 
     /// <summary>The sector new players arrive in the middle of. The home sector unless a server is set up otherwise.</summary>
     public SectorCoord SpawnSector { get; init; }
+
+    /// <summary>
+    /// The saved world this server runs, or null for a game that is not saved. With it the server begins from
+    /// the world's state and keeps saving it; the world's seed, settings and spawn sector are the saved ones, and
+    /// setting <see cref="GalaxySeed"/>, <see cref="Settings"/> or <see cref="SpawnSector"/> to anything else is
+    /// refused. The server owns the world's store from the moment it is constructed, also when that fails.
+    /// Constructing the server restores and checks the whole world, designs included: do it off the frame loop.
+    /// A saved world lets in only the host's own client for now; see <see cref="ServerHost.BeginClose"/> for
+    /// how it is closed.
+    /// </summary>
+    public WorldPersistence? World { get; init; }
 
     /// <summary>The clock handshake deadlines and lock-outs are measured by. A test moves its own.</summary>
     internal TimeProvider Clock { get; init; } = TimeProvider.System;
@@ -115,6 +136,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
     private sealed class Connection
     {
+        public long Generation;
         public ConnectionState State;
         public ITransport Transport = null!;
         public int Peer;
@@ -197,6 +219,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public bool Pending => State is ConnectionState.AwaitingHello or ConnectionState.AwaitingProof;
 
         public HullHandle Hull;
+
+        /// <summary>The slot of the durable owner this connection was let in as; -1 in a world that is not saved.</summary>
+        public int OwnerSlot = -1;
         public readonly InputTimeline Inputs = new();
         public uint ControlEpoch = 1;
         public uint LastSimulatedSequence;
@@ -207,6 +232,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
         public void Reset()
         {
+            Generation++;
             Party = Inviter = 0;
             InvitationId = 0;
             InviteUntil = SocialAt = 0;
@@ -239,6 +265,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             Origin = 0;
             Array.Clear(Challenge);
             Hull = default;
+            OwnerSlot = -1;
             Inputs.Clear();
             ControlEpoch = 1;
             LastSimulatedSequence = 0;
@@ -260,6 +287,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         TooFast,
         AddressBusy,
         DoorFull,
+
+        /// <summary>A saved world has no way yet to know who a remote player is, and lets none in.</summary>
+        SavedWorld,
         Count,
     }
 
@@ -316,12 +346,20 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     public ServerHost(ServerConfig config, GameContent content, params ITransport[] transports)
     {
         ITransport? listener = null;
+        var world = config.World;
         try
         {
+            // A diagnostic scene is an unsaved private game: it never runs in a saved world, so restored fleets and
+            // their persistence are never touched by it.
+            if (config.VisualBenchmark is not null && (config.Visibility != ServerVisibility.Private || world is not null || transports.Any(t => !t.IsInProcess)))
+                throw new InvalidDataException("Visual benchmark requires an unsaved private in-process server.");
+            config.VisualBenchmark?.Validate();
+            _visualBenchmark = config.VisualBenchmark;
             _maxPlayers = config.MaxPlayers;
             _visibility = config.Visibility;
-            _galaxySeed = config.GalaxySeed;
-            _spawnSector = config.SpawnSector;
+            _accountAuthority = config.AccountAuthority ?? config.Listing;
+            _galaxySeed = world?.World.Seed ?? config.GalaxySeed;
+            _spawnSector = world?.World.SpawnSector ?? config.SpawnSector;
             _listingHost = config.Listing?.Url.Host;
             _limits = config.Limits;
             _clock = config.Clock;
@@ -365,15 +403,43 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 );
             }
 
-            // From here on the server only knows the content as its own world's settings make it.
-            _content = content.WithSettings(config.Settings ?? content.SettingCatalog.Defaults);
+            // From here on the server only knows the content as its own world's settings make it. A saved world
+            // brings its settings and its whole catalogue; what the files say about either is not asked.
+            if (world is null)
+            {
+                _content = content.WithSettings(config.Settings ?? content.SettingCatalog.Defaults);
+            }
+            else
+            {
+                if (world.AutosaveSeconds is < 1 or > 3600)
+                    throw new InvalidDataException("A world is saved every 1 to 3600 seconds.");
+                _saveLimits = world.Limits;
+                if (_saveLimits.MaxOwners < 1 || _saveLimits.MaxHulls <= _saveLimits.MaxOwners || _saveLimits.MaxBlocks < 1 || _saveLimits.MaxRocks < 0 || _saveLimits.MaxMovedSectors < 0)
+                    throw new InvalidDataException("A saved world's limits leave it no room.");
+                _content = RestoreContent(config, content, world.World);
+                _compatibility = world.World.Compatibility;
+                _worldId = world.World.WorldId;
+                _worldName = world.World.Name;
+                _worldCreated = world.World.CreatedUnixMs;
+                _settingIds = new string[_content.SettingCatalog.Definitions.Length];
+                for (var i = 0; i < _settingIds.Length; i++)
+                    _settingIds[i] = _content.SettingCatalog.Definitions[i].Id;
+                _owners = new SavedOwner[_saveLimits.MaxOwners];
+                _autosaveInterval = world.AutosaveSeconds * _clock.TimestampFrequency;
+                _retryInterval = (long)(Math.Min(world.RetrySeconds, world.AutosaveSeconds) * _clock.TimestampFrequency);
+                _stopTimeout = world.StopTimeoutMilliseconds;
+                _lastCapture = _clock.GetTimestamp();
+            }
+
             _catalogue = new DesignCatalogue(_content);
             _startupDesigns = _catalogue.Count;
             _uploads = new EditUpload[_content.Editor.Uploads];
             for (var i = 0; i < _uploads.Length; i++)
                 _uploads[i] = new EditUpload(_content.BlockTransfers.MaxBytes);
-            Galaxy = _content.Galaxy.WithSeed(config.GalaxySeed);
-            _rocks = new RockField(Galaxy);
+            Galaxy = _content.Galaxy.WithSeed(_galaxySeed);
+
+            // A saved world's asteroids are bounded before they are pushed, never when they are saved.
+            _rocks = world is null ? new RockField(Galaxy) : new RockField(Galaxy, _saveLimits.MaxRocks, _saveLimits.MaxMovedSectors);
 
             // Room for the largest design the editor can add, taken now: a new design costs the tick no memory.
             _field = new HullField(_hulls, _content.Designs, reserveBlocks: Math.Min(_content.Blocks.Limits.MaxBlocks, GeometryAdmission.MaxBlocks));
@@ -392,6 +458,15 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             }
 
             _loop = new TickLoop("Server", TickLoop.SimulationHz, this);
+
+            // Last, so that everything above can still refuse the world: the worker owns the store from here.
+            if (world is not null)
+            {
+                if ((long)_saveLimits.MaxOwners * _content.Designs[_content.DroneDesign].BlockCount >= _saveLimits.MaxBlocks)
+                    throw new InvalidDataException("A saved world's limits leave it no room.");
+                RestoreWorld(world.World);
+                _save = new SaveWorker(world, _clock);
+            }
         }
         catch
         {
@@ -401,7 +476,11 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             finally
             {
                 try { _announcer?.Dispose(); }
-                finally { _hulls.Dispose(); }
+                finally
+                {
+                    try { _hulls.Dispose(); }
+                    finally { world?.Store.Dispose(); }
+                }
             }
             throw;
         }
@@ -444,6 +523,11 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     /// Stops the tick thread, closes every transport and frees the world. A public server also takes itself
     /// off the list, which may take a few seconds when the listing server is slow.
     ///
+    /// For a saved world this is cleanup and nothing more: it captures nothing, so what was not saved yet is
+    /// lost and the world is not marked as closed cleanly. Close the world first with <see cref="BeginClose"/>
+    /// and dispose it when <see cref="Close"/> says it is over. The save worker is given a bounded time to
+    /// write what it already holds and release the store.
+    ///
     /// The password's key is cleared here. That is what this class can promise: it never kept the password, and
     /// its one copy of the key is gone when it is disposed. It cannot promise that the password is nowhere in
     /// the process. The text it was derived from is a managed string owned by whoever configured the server:
@@ -453,7 +537,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     public void Dispose()
     {
         _loop.Stop();
+        StopLocalClaim();
         StopEditor();
+        StopSaving();
         // Clear secrets before any external cleanup can throw.
         if (_passwordKey is not null)
             CryptographicOperations.ZeroMemory(_passwordKey);
@@ -505,9 +591,45 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             Logs.Sim.Info("World settings: all at their defaults");
     }
 
+    /// <summary>
+    /// One callback of the scheduler. A game that is not saved takes the scheduler's count as its interval. A
+    /// saved world binds the callback to its own next interval instead and gives the count no meaning. A tick
+    /// that throws marks the world as caught inside an interval, before the exception leaves: nothing captures
+    /// it after that, whoever asks.
+    /// </summary>
     void ITickHandler.Tick(long tick)
     {
-        _tick = tick;
+        if (_tickFaulted)
+        {
+            CompleteClose(FinalCommitOutcome.SkippedAfterFault);
+            return;
+        }
+
+        try
+        {
+            if (_save is null)
+            {
+                _tick = tick;
+            }
+            else if (Volatile.Read(ref _closePhase) != (int)ClosePhase.Open)
+            {
+                ServiceLocalClaim();
+                ServiceClose();
+                PublishLocalClaim();
+                return;
+            }
+
+            Advance(_tick);
+        }
+        catch
+        {
+            _tickFaulted = true;
+            throw;
+        }
+    }
+
+    private void Advance(long tick)
+    {
         // First what must happen whatever arrives: handshakes that have run out of time end, by the clock, and
         // players who keep sending far more than a client does are removed. Network input is read after this
         // and within a budget, so no amount of it can put either off or keep the simulation from its turn.
@@ -547,12 +669,31 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         if (carriedOver)
             _budgetTicks++;
         ReportRefusals(now);
+        ServiceLocalClaim();
+
+        if (_save is not null)
+        {
+            if (_touched)
+            {
+                _touched = false;
+                Volatile.Write(ref _dirty, _dirty + 1);
+            }
+
+            // With nobody let in the world stands still and its interval is not used up. A player who is let
+            // in and still downloading counts: their clock runs from the welcome. The save goes on either way.
+            if (_playerCount == 0)
+            {
+                ServiceSave(now);
+                return;
+            }
+        }
 
         foreach (var connection in _connections)
             if (connection.State == ConnectionState.Active) PreparePlayer(connection);
 
         // Edits move on before the hulls step, so a hull that is replaced steps as the new one this tick.
         TickEditor(tick);
+        TickVisualBenchmark(tick);
 
         // Capture generations before the round: replacement drones wait until the next interval.
         var participantCount = _hulls.Slots;
@@ -570,12 +711,30 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 _hulls.Destroy(handle);
         }
 
-        // Asteroids that were hit this tick take their new motion, and every client is told.
+        // Contacts with an asteroid the world could not move were settled where they happened, against an
+        // asteroid that does not give way: nothing of them is pending, they are only counted.
+        if (_impulses.Refused > 0)
+        {
+            if (_save is not null)
+                Volatile.Write(ref _refusedGrowth, _refusedGrowth + _impulses.Refused);
+            _impulses.Refused = 0;
+        }
+
+        // Asteroids that were hit this tick take their new motion, and every client is told. Each was
+        // promised its place before its contact was resolved (RockField.CanMove), so the field takes them all;
+        // one it still refused would stay where it is for everyone, be counted, and reach no client.
         if (_impulses.Count > 0)
         {
-            var hit = _impulses.Items.AsSpan(0, _impulses.Count);
-            foreach (ref readonly var delta in hit)
-                _rocks.Set(delta);
+            var kept = 0;
+            for (var i = 0; i < _impulses.Count; i++)
+            {
+                if (_rocks.Set(_impulses.Items[i]))
+                    _impulses.Items[kept++] = _impulses.Items[i];
+                else if (_save is not null)
+                    Volatile.Write(ref _refusedGrowth, _refusedGrowth + 1);
+            }
+
+            var hit = _impulses.Items.AsSpan(0, kept);
             foreach (var connection in _connections)
             {
                 if (connection.State == ConnectionState.Active)
@@ -593,9 +752,33 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
         TickSocial(tick);
         Volatile.Write(ref _tick, tick + 1);
+
+        // The interval is complete: this is the one moment the world may be captured.
+        if (_save is not null)
+        {
+            Volatile.Write(ref _dirty, _dirty + 1);
+            ServiceSave(now);
+        }
     }
 
     void ITickHandler.OnStop()
+    {
+        DisconnectAll();
+
+        // A loop that a tick's exception ended leaves the world inside an interval: it is not captured. What
+        // the worker already holds was complete when it was taken, and is written as an ordinary save.
+        if (_loop.Fault is not null || _tickFaulted)
+        {
+            _tickFaulted = true;
+            if ((ClosePhase)Volatile.Read(ref _closePhase) != ClosePhase.Saving)
+                CompleteClose(FinalCommitOutcome.SkippedAfterFault);
+        }
+
+        Logs.Sim.Info($"Server '{_name}' stopped at tick {_tick}");
+    }
+
+    /// <summary>Lets every connection go. In a saved world the hulls stay; the connections were never part of it.</summary>
+    private void DisconnectAll()
     {
         foreach (var connection in _connections)
         {
@@ -606,7 +789,6 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         }
 
         Volatile.Write(ref _playerCount, 0);
-        Logs.Sim.Info($"Server '{_name}' stopped at tick {_tick}");
     }
 
     void ITransportHandler.OnConnected(ITransport transport, int peer)
@@ -744,6 +926,8 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         if (payload.IsEmpty)
             return;
 
+        // A command may change the world outside an interval, and its sender may be gone before the next one.
+        _touched = true;
         var reader = new NetReader(payload[1..]);
         if (!connection.CatalogueReady)
         {
@@ -856,10 +1040,14 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             if (currentInfo.EscapeDrone)
                 return;
 
+            // A saved world that is full launches no drone: the pilot stays in the hull.
+            if (!HasRoom(1, _content.Designs[drone].BlockCount))
+                return;
+
             var from = _hulls.State(current.Index);
             var clearance = _content.Designs[currentInfo.Design].Flight.Radius + _content.Designs[drone].Flight.Radius + 4f;
             var above = from.Position + System.Numerics.Vector3.Transform(System.Numerics.Vector3.UnitY, from.Orientation) * clearance;
-            next = _hulls.Create(connection.PlayerId, drone, _content.Designs[drone], above);
+            next = CreateHull(connection.PlayerId, drone, above);
             ref var launched = ref _hulls.State(next.Index);
             launched.Orientation = from.Orientation;
             launched.Velocity = from.Velocity;
@@ -892,7 +1080,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         info.Piloted = true;
         info.Order = default;
         info.OrderId = connection.OrderId;
-        connection.Hull = next;
+        SetHull(connection, next);
         ResetControl(connection);
     }
 
@@ -1002,8 +1190,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         var state = _hulls.State(lost.Index);
         _hulls.Destroy(lost);
 
+        // A new hull with a new durable name. A saved world always has room for it: see HasRoom.
         var drone = (byte)_content.DroneDesign;
-        connection.Hull = _hulls.Create(connection.PlayerId, drone, _content.Designs[drone], wasDrone ? SpawnPoint : state.Position);
+        SetHull(connection, CreateHull(connection.PlayerId, drone, wasDrone ? SpawnPoint : state.Position));
         ref var info = ref _hulls.Info(connection.Hull.Index);
         info.EscapeDrone = true;
         info.Piloted = true;
@@ -1153,6 +1342,15 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             return;
         }
 
+        // A saved world's hulls belong to durable owners, and nothing a remote connection can send proves it is
+        // one: not a name, not an address, not an account the server cannot verify. Until it can, the only way
+        // in is the in-process link of the host's own client. Refused before the name is read.
+        if (_save is not null && !connection.Transport.IsInProcess)
+        {
+            Refuse(connection, Refusal.SavedWorld);
+            return;
+        }
+
         var challenged = _passwordKey is not null && !connection.Transport.IsInProcess;
         if (challenged)
         {
@@ -1228,32 +1426,59 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         Admit(connection);
     }
 
-    /// <summary>Lets a player in: gives them their fleet and tells them about the world.</summary>
+    /// <summary>
+    /// Lets a player in and tells them about the world. In a game that is not saved every player is new and is
+    /// given a fleet. In a saved world a player is let in as a durable owner: creating the owner is what gives
+    /// the fleet, once; an owner that exists is put back into the hull they fly and given nothing.
+    /// </summary>
     private void Admit(Connection connection)
     {
+        // Decided before anything is changed: whether there is an owner to be, and room to make one.
+        var ownerSlot = -1;
+        var created = false;
+        if (_save is not null)
+        {
+            ownerSlot = LocalOwner();
+            created = ownerSlot < 0;
+            if (created ? !HasRoomForOwner() : OwnerBound(ownerSlot))
+            {
+                Refuse(connection, Refusal.ServerFull);
+                return;
+            }
+        }
+
         Array.Clear(connection.Challenge);
         connection.State = ConnectionState.Active;
         connection.Blocks = new BlockSender(_content.BlockTransfers);
         connection.CatalogueDeadline = _tick + _content.BlockTransfers.AdmissionTicks;
 
         connection.Name = new string(connection.NameChars, 0, connection.NameLength);
-        connection.PlayerId = _nextPlayerId++;
+        if (_save is null)
+        {
+            connection.PlayerId = _nextPlayerId++;
+        }
+        else
+        {
+            if (created)
+            {
+                ownerSlot = _ownerCount++;
+                _owners[ownerSlot] = new SavedOwner { Id = _nextPlayerId++, Kind = OwnerKind.Local };
+            }
+
+            connection.OwnerSlot = ownerSlot;
+            connection.PlayerId = _owners[ownerSlot].Id;
+            _touched = true;
+        }
+
         Volatile.Write(ref _playerCount, _playerCount + 1);
 
-        // Each player's group arrives in its own lane beside the spawn point, the pod in front and the rest of
-        // the starting fleet fanned out behind it, so nothing starts inside anything else.
-        var lane = (int)(connection.PlayerId - 1);
-        var origin = SpawnPoint + new Double3((lane + 1) / 2 * 160.0 * (lane % 2 == 0 ? 1 : -1), 0, 0);
-        var pod = (byte)_content.PodDesign;
-        connection.Hull = _hulls.Create(connection.PlayerId, pod, _content.Designs[pod], origin);
-        _hulls.Info(connection.Hull.Index).Piloted = true;
-        for (var i = 0; i < _content.StartingFleet.Length; i++)
-        {
-            var design = (byte)_content.StartingFleet[i];
-            var side = (i / 2 + 1) * 45.0 * (i % 2 == 0 ? 1 : -1);
-            var position = origin + new Double3(side, 0, 40.0 + 20.0 * (i / 2));
-            _hulls.Create(connection.PlayerId, design, _content.Designs[design], position);
-        }
+        // A new owner's lane is their place in the owner table, which is bounded; a player number is not.
+        if (_save is null)
+            SpawnFleet(connection, (int)(connection.PlayerId - 1));
+        else if (created)
+            SpawnFleet(connection, ownerSlot);
+        else
+            Rebind(connection);
 
         var welcome = new WelcomeMessage
         {
@@ -1279,6 +1504,25 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         Logs.Sim.Info($"{connection.Name} joined as player {connection.PlayerId} via {connection.Transport.Description}");
     }
 
+    /// <summary>
+    /// Gives a new player their fleet. Each player's group arrives in its own lane beside the spawn point, the
+    /// pod in front and the rest of the starting fleet fanned out behind it, so nothing starts inside anything
+    /// else that started there. A lane is not checked for hulls that have flown into it since.
+    /// </summary>
+    private void SpawnFleet(Connection connection, int lane)
+    {
+        var origin = SpawnPoint + new Double3((lane + 1) / 2 * 160.0 * (lane % 2 == 0 ? 1 : -1), 0, 0);
+        SetHull(connection, CreateHull(connection.PlayerId, (byte)_content.PodDesign, origin));
+        _hulls.Info(connection.Hull.Index).Piloted = true;
+        // A diagnostic scene places its own population; only then is the ordinary fleet left out.
+        for (var i = 0; i < (_visualBenchmark is null ? _content.StartingFleet.Length : 0); i++)
+        {
+            var side = (i / 2 + 1) * 45.0 * (i % 2 == 0 ? 1 : -1);
+            var position = origin + new Double3(side, 0, 40.0 + 20.0 * (i / 2));
+            CreateHull(connection.PlayerId, (byte)_content.StartingFleet[i], position);
+        }
+    }
+
     /// <summary>Ends a connection that is shaking hands, telling the other end why, and frees its slot.</summary>
     private void Refuse(Connection connection, Refusal why, int retryAfterSeconds = 0)
     {
@@ -1296,7 +1540,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         var reason = why switch
         {
             Refusal.VersionMismatch => RejectReason.VersionMismatch,
-            Refusal.ServerFull => RejectReason.ServerFull,
+            Refusal.ServerFull or Refusal.SavedWorld => RejectReason.ServerFull,
             Refusal.WrongPassword => RejectReason.WrongPassword,
             Refusal.ContentMismatch => RejectReason.ContentMismatch,
             Refusal.LockedOut or Refusal.TooFast or Refusal.AddressBusy or Refusal.DoorFull => RejectReason.TooManyAttempts,
@@ -1335,7 +1579,8 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                     + $"{_refused[(int)Refusal.LockedOut]} locked out, "
                     + $"{_refused[(int)Refusal.VersionMismatch]} other version, "
                     + $"{_refused[(int)Refusal.ContentMismatch]} other content, "
-                    + $"{_refused[(int)Refusal.ServerFull]} server full"
+                    + $"{_refused[(int)Refusal.ServerFull]} server full, "
+                    + $"{_refused[(int)Refusal.SavedWorld]} a saved world lets no remote player in yet"
             );
         }
 
@@ -1356,16 +1601,22 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         connection.Reset();
     }
 
-    /// <summary>Takes a player's hulls out of the world and frees their player slot.</summary>
+    /// <summary>
+    /// Frees a player's slot. In a game that is not saved their hulls leave the world with them. In a saved
+    /// world the hulls are the owner's, not the connection's, and stay: the one they flew keeps its order and is
+    /// held by its dampeners until its owner is let in again.
+    /// </summary>
     private void RemovePlayer(Connection connection)
     {
         CloseEdit(connection);
         LeaveSocial(connection);
-        for (var i = 0; i < _hulls.Slots; i++)
+        for (var i = 0; _save is null && i < _hulls.Slots; i++)
         {
             if (_hulls.IsAliveAt(i) && _hulls.Info(i).Owner == connection.PlayerId)
                 _hulls.Destroy(_hulls.HandleAt(i));
         }
+
+        _touched = true;
 
         Volatile.Write(ref _playerCount, _playerCount - 1);
     }

@@ -166,6 +166,89 @@ public sealed unsafe class BlockStateStore : IDisposable
         new ReadOnlySpan<byte>(origin, bytes).CopyTo(new Span<byte>(destination, bytes));
     }
 
+    /// <summary>
+    /// How far a saved hit total may stand from its blocks' hit points added up afresh, as a share of the intact
+    /// design's total. The live total is kept by subtraction in double precision and never re-added, so it
+    /// drifts from a fresh sum by at most half a unit in the last place of the intact total for every hit the
+    /// hull ever took: about 1.1e-16 of it each. One millionth leaves room for billions of hits and still tells a
+    /// total that belongs to these hit points from one that does not.
+    /// </summary>
+    public const double HitTotalTolerance = 1e-6;
+
+    /// <summary>
+    /// Brings a state that was just created, intact and with hit points, to what a save holds: the blocks lost,
+    /// in the order they went, each remaining block's hit points and the hit total as it was kept. The losses are
+    /// replayed through <see cref="Lose"/>, so the block set, the revision, the lost cores, the collision counts
+    /// and the sums come out as that order of losses makes them; the sums are recomputed in a fixed order and do
+    /// not depend on it. Nothing is trusted: a loss out of range or named twice, hit points that are no number,
+    /// not above zero for a block that is left, not zero for one that is gone, or above the block's intact hit
+    /// points, and a total further from the hit points than <see cref="HitTotalTolerance"/> allows are refused.
+    /// Returns false with the reason; the state is then half restored and only fit to be released.
+    /// </summary>
+    public bool TryRestore(BlockStateHandle handle, ReadOnlySpan<int> losses, ReadOnlySpan<float> hitPoints, double hitTotal, out string error)
+    {
+        var header = Find(handle);
+        var blocks = header->Blocks;
+        if (header->HasHitPoints == 0 || header->Revision != 0)
+            throw new InvalidOperationException("Only an intact block state with hit points can be restored.");
+        if (hitPoints.Length != blocks || losses.Length > blocks)
+        {
+            error = "the saved blocks do not match the design";
+            return false;
+        }
+
+        foreach (var block in losses)
+        {
+            if ((uint)block >= (uint)blocks || !Lose(handle, block))
+            {
+                error = "a lost block is out of range or named twice";
+                return false;
+            }
+        }
+
+        var design = _slots[handle.Index].Design!;
+        var intact = design.IntactHitPoints;
+        var alive = AliveOf(header);
+        var kept = HitPointsOf(header);
+        var sum = 0.0;
+        for (var block = 0; block < blocks; block++)
+        {
+            var points = hitPoints[block];
+            if (!BlockSet.Has(alive, block))
+            {
+                if (points != 0f)
+                {
+                    error = "a lost block has hit points";
+                    return false;
+                }
+
+                continue;
+            }
+
+            // Written so that a value that is no number fails it.
+            if (!(points > 0f) || points > intact[block])
+            {
+                error = "a block's hit points are outside what the design allows";
+                return false;
+            }
+
+            kept[block] = points;
+            sum += points;
+        }
+
+        // Nothing is exactly nothing, as Lose keeps it; otherwise the total must belong to these hit points.
+        var allowed = losses.Length == blocks ? 0.0 : design.IntactHitTotal * HitTotalTolerance;
+        if (!double.IsFinite(hitTotal) || hitTotal < 0.0 || Math.Abs(hitTotal - sum) > allowed)
+        {
+            error = "the hit total does not belong to the blocks' hit points";
+            return false;
+        }
+
+        header->HitTotal = hitTotal;
+        error = "";
+        return true;
+    }
+
     /// <summary>Gives a block state back; its memory serves the next one of its size. A stale handle does nothing.</summary>
     public void Release(BlockStateHandle handle)
     {

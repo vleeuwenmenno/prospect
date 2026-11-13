@@ -80,7 +80,11 @@
       ],
       "ore": { "share": [0.1, 0.85], "grade": [0.1, 1.0], "gradeFromRichness": 0.5 },
       "home": { "asteroids": 750, "length": 4800, "width": 3400, "height": 1300, "offset": [0, -60, -1500] }
-    }
+    },
+    { "id": "gas-clouds", "type": "gasClouds", "chance": 0.04, "halfSizeShare": 0.12,
+      "extinction": 0.0025, "samples": 48, "tint": [0.42, 0.48, 0.52], "motion": 0.001,
+      "shape": { "fill": 0.56, "lumpiness": 1.8, "warp": 0.1, "lean": 0.24,
+                 "edge": 0.14, "knots": 2.2, "wisps": 1.5, "veil": 0.03 } }
   ],
   "map": {
     "fullSignalAsteroids": 700

@@ -11,7 +11,14 @@ internal static class Program
 {
     private const string Usage = """
         prospect [options]
-          --start <screen>        Open on: menu, join, settings, newgame, credits, account (friends), or local (start a local game)
+          --start <screen>        Open on: menu, join, settings, newgame, credits, account (friends), load (Load World),
+                                  continue (the world played last), or local (start a new local game: a saved world
+                                  when saved worlds are on, see --worlds)
+          --worlds <folder>       The folder of saved worlds instead of the player's own. Captures and benchmarks
+                                  save nothing and list no world unless given one
+          --save-fault <kind>     With --capture and --worlds: make a world's final save slow (8 s), fail, end
+                                  unknown or degraded, to capture the saving screen and the close report. Pair with
+                                  --open leave, which leaves the game once in space
           --join <host[:port]>    Join a server after the splash. Joining needs a Discord sign-in, which the game
                                   never has at launch, so this opens Join Server filled in: sign in, then Connect
           --host <visibility>     Start a local game others can join: unlisted (by address) or public (also in the
@@ -23,19 +30,24 @@ internal static class Program
           --host-port <n>         With --host: the UDP port to listen on (default 27420)
           --password <text>       With --host: the password others need. With --join: the server's password.
                                   Arguments show in process lists; PROSPECT_PASSWORD in the environment works too
+          --account-authority <url|off>  Account service (defaults to --listing); local claims require an HTTPS origin
           --listing <url|off>     The listing server for public games and the server browser (default: content/net/listing.json)
           --set <id>=<value>      A world setting for local games started in this run; repeat for more (ids and ranges: content/rules/settings.json)
-          --open <view>           With --start local or --join: open the command view, the map or the ship data sheet (command, map, map-menu, map-hover, galaxy, info), start a jump (jump, jump-wormhole, jump-rift), send the rest of the fleet on short jumps 600 m along -x for another client to watch (jump-fleet), or show Controls (controls), ask to edit the own ship in the ship editor (edit), the in-game menu (menu), the world settings in force (world-settings), the player list (players), the party
+          --open <view>           With --start local or --join: open the command view, the map or the ship data sheet (command, map, map-menu, map-hover, galaxy, info), start a jump (jump, jump-wormhole, jump-rift), send the rest of the fleet on short jumps 600 m along -x for another client to watch (jump-fleet) or straight ahead of the camera so their openings overlap (jump-fleet-ahead), or show Controls (controls), ask to edit the own ship in the ship editor (edit), the in-game menu (menu), the world settings in force (world-settings), the player list (players), the party
                                   panel (social), the Friends tab (friends), chat (chat) or the world with only the always-shown party and chat (hud)
           --browser-sample <s>    The server browser shows a fixed sample instead of asking the listing server, for captures:
                                   ready, loading, failed, empty, off, or password (the sample with the password prompt open)
           --account-sample <s>    With --capture or --bench: the account and friends show a fixed sample instead of the
                                   account service, and nothing signs in: signed-out, waiting, signed-in, friends (full
                                   lists of hostile names), failed or off
+          --gas-fixture <1..13>    With --capture only: controlled production-shader regression inputs (13: real-source overlay check)
+          --gas-view <view>       Muted cloud camera: outside, inside, edge, offscreen, absent, inside-absent, pilot-absent, pilot
           --sector <x>,<y>,<z>    With --start local or --bench: start in this sector instead of the home sector
+          --jump-to <x>,<y>,<z>   With --open jump, jump-wormhole or jump-rift: jump to this sector's centre instead of 12,0,-7
           --size <W>x<H>          Start windowed at this size
           --validation            Enable Vulkan validation layers (default in debug builds)
           --no-validation         Disable Vulkan validation layers
+          --visual-scene <spec>  With --bench/--capture: 30|50,clean|dents|impacts|repair|jump,near|far|behind[,large]
           --bench <seconds>       Start a local game, measure frame pacing and allocation, print a report and exit
           --capture <file.png>    Save a screenshot after --capture-after seconds, then exit
           --capture-after <sec>   Delay for --capture, counted from the end of the splash (default 1.5)
@@ -44,6 +56,7 @@ internal static class Program
           --look <degrees>        Pilot view: hold the camera this many degrees to the right of the hull's nose
           --look-to <degrees>     With --look and --capture: turn the camera from --look to this angle, evenly
                                   over the time the captures take
+          --rts-script <json>     Private muted capture poses; --rts-seed <n> selects the diagnostic seed
           --target                Pilot view: target the nearest other hull once in space
           --social-run <seconds>  Run a headless client script, then exit; uses --join or a private local game
           --player <name>         Player name for the headless script
@@ -93,6 +106,12 @@ internal static class Program
                         case "local":
                             options.StartLocalGame = true;
                             break;
+                        case "load":
+                            options.StartScreen = Screen.LoadWorld;
+                            break;
+                        case "continue":
+                            options.ContinueWorld = true;
+                            break;
                         default:
                             return Fail($"Unknown screen: {args[i]}");
                     }
@@ -137,13 +156,23 @@ internal static class Program
                         return Fail($"A password is 1 to {Passwords.MaxChars} characters.");
                     options.Password = args[i];
                     break;
+                case "--save-fault" when hasValue && Enum.TryParse<StoreFault>(args[i + 1], true, out var fault) && fault != StoreFault.None:
+                    options.SaveFault = fault;
+                    i++;
+                    break;
+                case "--worlds" when hasValue:
+                    options.WorldsRoot = args[++i];
+                    break;
+                case "--account-authority" when hasValue:
+                    options.AccountAuthority = args[++i];
+                    break;
                 case "--listing" when hasValue:
                     options.Listing = args[++i];
                     break;
                 case "--set" when hasValue:
                     options.WorldSettingArgs.Add(args[++i]);
                     break;
-                case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "map-hover" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit":
+                case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "map-hover" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "leave":
                     options.OpenView = args[++i];
                     break;
                 case "--browser-sample" when hasValue:
@@ -163,6 +192,24 @@ internal static class Program
                 case "--account-sample" when hasValue && args[i + 1] is "signed-out" or "waiting" or "signed-in" or "friends" or "failed" or "off":
                     options.AccountSample = args[++i];
                     break;
+                case "--gas-fixture" when hasValue:
+                    if (!int.TryParse(args[++i], out var gasFixture) || gasFixture < 1 || gasFixture > Prospect.Client.Render.GasShaderFixture.OverlayCheck)
+                        return Fail("Invalid --gas-fixture: expected 1..13.");
+                    options.GasFixture = gasFixture;
+                    break;
+                case "--gas-view" when hasValue:
+                    options.GasView = args[++i];
+                    if (options.GasView is not ("outside" or "inside" or "edge" or "offscreen" or "absent" or "inside-absent" or "pilot-absent" or "pilot"))
+                        return Fail("Invalid --gas-view: outside, inside, edge, offscreen, absent, inside-absent, pilot-absent, pilot.");
+                    break;
+                case "--jump-to" when hasValue:
+                    {
+                        var parts = args[++i].Split(',');
+                        if (parts.Length != 3 || !int.TryParse(parts[0], out var x) || !int.TryParse(parts[1], out var y) || !int.TryParse(parts[2], out var z))
+                            return Fail($"Invalid jump target: {args[i]} (expected x,y,z)");
+                        options.JumpTo = new Prospect.Game.World.SectorCoord(x, y, z);
+                        break;
+                    }
                 case "--sector" when hasValue:
                     {
                         var parts = args[++i].Split(',');
@@ -185,6 +232,13 @@ internal static class Program
                 case "--no-validation":
                     options.Validation = false;
                     break;
+                case "--visual-scene" when hasValue:
+                    var scene = args[++i].Split(',');
+                    if (scene.Length is not (3 or 4) || scene.Length == 4 && scene[3] != "large" || !int.TryParse(scene[0], out var hulls)) return Fail("Expected hulls,activity,view");
+                    options.VisualBenchmark = new Prospect.Game.Server.VisualBenchmarkScene(hulls, scene[1], scene[2], scene.Length == 4 && scene[3] == "large");
+                    try { options.VisualBenchmark.Validate(); } catch (InvalidDataException e) { return Fail(e.Message); }
+                    options.StartLocalGame = true;
+                    break;
                 case "--bench" when hasValue && float.TryParse(args[i + 1], out var seconds) && seconds is > 0 and <= 600:
                     options.BenchSeconds = seconds;
                     i++;
@@ -204,6 +258,10 @@ internal static class Program
                     options.CaptureEvery = every;
                     i++;
                     break;
+                case "--rts-seed" when hasValue && ulong.TryParse(args[i + 1], out var rtsSeed):
+                    options.RtsSeed = rtsSeed; i++; break;
+                case "--rts-script" when hasValue:
+                    options.RtsScript = args[++i]; break;
                 case "--look" when hasValue && float.TryParse(args[i + 1], out var look):
                     options.LookDegrees = look;
                     i++;
@@ -238,13 +296,40 @@ internal static class Program
             }
         }
 
+        if ((options.JumpTo is not null || options.OpenView == "jump-fleet-ahead") && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--jump-to and --open jump-fleet-ahead work only with --capture or --bench.");
+
+        if (options.GasFixture > 0 && (options.CapturePath is null || options.BenchSeconds > 0))
+            return Fail("--gas-fixture works only with --capture, without --bench.");
+
+        if (options.GasView is not null && (options.CapturePath is null && options.BenchSeconds <= 0))
+            return Fail("--gas-view works only with --capture or --bench.");
+
+        if (options.RtsSeed is not null && options.RtsScript is null) return Fail("--rts-seed requires --rts-script.");
+        if (options.RtsScript is not null && (options.CapturePath is null || options.BenchSeconds > 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private))
+            return Fail("--rts-script requires --capture and private local play, without --bench.");
+
+        if (options.VisualBenchmark is not null && (options.BenchSeconds <= 0 && options.CapturePath is null || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private))
+            return Fail("--visual-scene requires --bench or --capture and private local play.");
+
         // A sample stands in for the account service only where nobody can act on it.
         if (options.AccountSample is not null && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--account-sample works only with --capture or --bench.");
 
+        // A broken store is for captures of what the player is told, in a folder of the capture's own.
+        if (options.SaveFault != StoreFault.None && (options.CapturePath is null || options.WorldsRoot is null))
+            return Fail("--save-fault works only with --capture and --worlds.");
+
         // The New Game screen shows the hosting --host asked for and lets the player start it from there.
         if (options.StartScreen == Screen.NewGame)
             options.StartLocalGame = false;
+
+        // A diagnostic run is an unsaved private local game started at launch: it never lists, opens, creates or
+        // saves a world, and never leaves to the menu, so its measurement ends with its own world.
+        var diagnostic = options.RtsScript is not null || options.VisualBenchmark is not null;
+        if (diagnostic && (options.WorldsRoot is not null || options.ContinueWorld || options.SaveFault != StoreFault.None || options.OpenView == "leave"
+            || options.StartScreen != Screen.MainMenu || (!options.StartLocalGame && options.BenchSeconds <= 0)))
+            return Fail("--rts-script and --visual-scene need a new private local game (--start local or --bench), without --worlds, --save-fault, --start continue, load or newgame, or --open leave.");
 
         // The password may come from the environment instead, where a process list does not show it.
         if (options.Password is null && Environment.GetEnvironmentVariable("PROSPECT_PASSWORD") is { Length: > 0 } fromEnvironment)

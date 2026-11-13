@@ -15,6 +15,8 @@ internal sealed partial class ScreenHost
     private static readonly float[] UiScaleValues = [0.75f, 1f, 1.25f, 1.5f, 2f];
     private static readonly string[] SensitivityLabels = ["50%", "75%", "100%", "125%", "150%", "200%"];
     private static readonly float[] SensitivityValues = [0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f];
+    private static readonly string[] AutosaveLabels = ["15 s", "30 s", "1 min", "2 min", "5 min"];
+    private static readonly int[] AutosaveValues = [15, 30, 60, 120, 300];
     private static readonly string[] AxisLabels = ControlsCatalog.AxisLabels;
     private static readonly string[] ActionLabels = ControlsCatalog.ActionLabels;
 
@@ -120,6 +122,23 @@ internal sealed partial class ScreenHost
         var invert = settings.InvertPitch;
         if (Kit.Toggle("Invert pitch"u8, ref invert, rowWidth))
             settings.InvertPitch = invert;
+
+        Kit.Space(Theme.Space5);
+        Kit.Caption("SAVED WORLDS"u8);
+        Kit.Space(Theme.Space2);
+        var autosaveIndex = 1;
+        for (var i = 0; i < AutosaveValues.Length; i++)
+        {
+            if (AutosaveValues[i] == settings.AutosaveSeconds)
+                autosaveIndex = i;
+        }
+
+        if (Kit.Choice("Save automatically every"u8, AutosaveLabels, ref autosaveIndex, rowWidth))
+            settings.AutosaveSeconds = AutosaveValues[autosaveIndex];
+        Kit.Space(Theme.Space1);
+        ImGui.Indent(Kit.Px(Theme.Space3));
+        Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, "While the world has changed. A world is also saved when you leave it. Takes effect the next time a world is opened."u8, rowWidth - 24);
+        ImGui.Unindent(Kit.Px(Theme.Space3));
 
         Kit.Space(Theme.Space5);
         Kit.Caption("PROFILE"u8);

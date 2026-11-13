@@ -54,6 +54,12 @@ public sealed class ListingOptions
     /// <summary>Authenticated account requests per address per minute.</summary>
     public int AccountPerMinute { get; set; } = 120;
 
+    /// <summary>Game tickets one address may ask for per minute.</summary>
+    public int TicketIssuesPerMinute { get; set; } = 30;
+
+    /// <summary>Game ticket redemptions one address may make per minute. A game server redeems for all its players.</summary>
+    public int TicketRedeemsPerMinute { get; set; } = 240;
+
     /// <summary>
     /// Requests per second the whole service accepts, from all addresses together: a burst of this many, then this
     /// many per second. A request refused by its own address's limit does not use any of it.
@@ -112,6 +118,8 @@ public sealed class ListingOptions
         Require(PostsPerMinute, 1, 1_000_000, nameof(PostsPerMinute));
         Require(AuthPerMinute, 1, 1_000_000, nameof(AuthPerMinute));
         Require(AccountPerMinute, 1, 1_000_000, nameof(AccountPerMinute));
+        Require(TicketIssuesPerMinute, 1, 1_000_000, nameof(TicketIssuesPerMinute));
+        Require(TicketRedeemsPerMinute, 1, 1_000_000, nameof(TicketRedeemsPerMinute));
         Require(ListsPerMinute, 1, 1_000_000, nameof(ListsPerMinute));
         Require(GlobalRequestsPerSecond, 1, 1_000_000, nameof(GlobalRequestsPerSecond));
         Require(RateLimitAddresses, 1, 1_000_000, nameof(RateLimitAddresses));

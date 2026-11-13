@@ -1,3 +1,5 @@
+// shape: fill, lumpiness, warp, lean; look: edge softness, knot density, wisp strength, veil density (GasCloudModule).
+struct GasData { vec4 center; vec4 halfSize; vec4 tint; vec4 motion; vec4 budget; vec4 shape; vec4 look; };
 // Per-frame constants shared by every scene shader. Positions are relative to the camera: the world is
 // rebased around it every frame so single precision never has to represent a galactic coordinate.
 layout(set = 0, binding = 0) uniform Frame
@@ -27,4 +29,5 @@ layout(set = 0, binding = 0) uniform Frame
                        // drive kind (2 wormhole, 3 rift), y how far open 0..1, z seed
     vec4 clips[64];    // per followed jump (passage slot), two vectors: xyz a camera-relative point on the plane its
                        // opening cuts its own hull at, and xyz the plane's normal toward the hidden side (zero: none)
+    GasData gas; // Nonzero sample budget only when gas is deferred to HDR portal composition.
 } frame;

@@ -18,6 +18,7 @@ using Prospect.Engine.Jobs;
 using Prospect.Engine.Time;
 using Prospect.Game.Client;
 using Prospect.Game.Lobby;
+using Prospect.Game.Persistence;
 using Prospect.Game.Protocol;
 using Prospect.Game.Server;
 using Prospect.Game.World;
@@ -31,6 +32,18 @@ internal sealed class AppOptions
     public bool Validation { get; set; }
     public Screen StartScreen { get; set; } = Screen.MainMenu;
     public bool StartLocalGame { get; set; }
+
+    /// <summary>Continue the world played last once the splash is over (<c>--start continue</c>).</summary>
+    public bool ContinueWorld { get; set; }
+
+    /// <summary>
+    /// The folder of saved worlds (<c>--worlds</c>), or null for the player's own. A scripted run (a capture or a
+    /// benchmark) without one saves nothing and reads no saved world, so it never touches the player's saves.
+    /// </summary>
+    public string? WorldsRoot { get; set; }
+
+    /// <summary>What goes wrong with a world's final save (<c>--save-fault</c>); captures with their own <see cref="WorldsRoot"/> only.</summary>
+    public StoreFault SaveFault { get; set; }
     public string? JoinHost { get; set; }
     public ushort JoinPort { get; set; }
 
@@ -50,6 +63,7 @@ internal sealed class AppOptions
 
     /// <summary>The listing server's address, <c>off</c>, or null for the content's default.</summary>
     public string? Listing { get; set; }
+    public string? AccountAuthority { get; set; }
     /// <summary>What the server browser shows instead of the listing server's answer; for scripted screenshots.</summary>
     public BrowserSample BrowserSample { get; set; }
 
@@ -58,7 +72,15 @@ internal sealed class AppOptions
 
     /// <summary>Open the command view or the map once in space; for scripted screenshots.</summary>
     public string? OpenView { get; set; }
+    /// <summary>Muted deterministic camera placement around a generated cloud.</summary>
+    public string? GasView { get; set; }
+    /// <summary>Muted production-shader regression fixture, zero when disabled.</summary>
+    public int GasFixture { get; set; }
     public float BenchSeconds { get; set; }
+    /// <summary>Opt-in private populated diagnostic, restricted to muted scripted runs.</summary>
+    public ulong? RtsSeed { get; set; }
+    public string? RtsScript { get; set; }
+    public VisualBenchmarkScene? VisualBenchmark { get; set; }
     public string? CapturePath { get; set; }
     public float CaptureAfter { get; set; } = 1.5f;
 
@@ -83,6 +105,8 @@ internal sealed class AppOptions
 
     /// <summary>The sector a local game starts in; for scripted screenshots and benchmarks of a particular sector.</summary>
     public SectorCoord SpawnSector { get; set; }
+    /// <summary>The sector whose centre the scripted own jumps (<c>--open jump*</c>) aim at; (12, 0, -7) when unset.</summary>
+    public SectorCoord? JumpTo { get; set; }
     public int2? WindowSize { get; set; }
 }
 
@@ -147,6 +171,9 @@ internal sealed class App : IDisposable
     private int2 _windowedSize;
     private bool _swapchainDirty;
     private bool _quit;
+    private long _frameStart;
+    private readonly SessionPump _pump;
+    private readonly Func<int2> _pollFrame;
     private bool _vsync;
 
     private readonly PointerRouter _pointer;
@@ -156,15 +183,25 @@ internal sealed class App : IDisposable
     private bool _captureRequested;
     private int _capturesTaken;
     private Benchmark? _benchmark;
+    private PopulatedMeasurement? _populated;
+    private readonly RtsCapture? _rts;
+    private bool _benchmarkEditRequested, _benchmarkRepairRequested;
+
+    // The run time at which a scripted diagnostic run reached its own end (all captures saved, or the benchmark
+    // finished), or null before that. Closing the session afterwards takes more frames, which are not measured.
+    private float? _diagnosticEnd;
 
     public App(AppOptions options)
     {
         _options = options;
+        if (options.RtsScript is { } script) { _rts = new RtsCapture(script); options.CaptureCount = _rts.Count; }
+        if (options.VisualBenchmark is not null) _populated = new PopulatedMeasurement();
         Settings = ClientSettings.Load();
         Jobs = new JobSystem(Math.Clamp(Environment.ProcessorCount - 3, 1, 16), "Job");
 
         _catalogueMeshes = new CatalogueMeshes(Jobs);
         Content = GameContent.Load();
+        if (options.VisualBenchmark is { } scenario) Content = scenario.PrepareContent(Content);
         NewGameSettings = Content.SettingCatalog.Build(null, options.WorldSettingArgs, message => Logs.App.Warning(message));
         NewGameHosting = options.Hosting.Clone();
         if (options.JoinHost is null)
@@ -176,8 +213,16 @@ internal sealed class App : IDisposable
             options.Password = null;
         }
 
+        // Saved worlds live under the user's data folder. A scripted run has none unless it is given a folder of
+        // its own, so captures and benchmarks are reproducible and never touch the player's saves.
+        var scriptedRun = options.BenchSeconds > 0 || options.CapturePath is not null;
+        var worldsRoot = options.WorldsRoot ?? (scriptedRun ? null : AppPaths.UserData("worlds"));
+        Worlds = new WorldShelf(worldsRoot is null ? null : new WorldLibrary(worldsRoot), SaveCompatibility.Of(Content));
+        Worlds.Refresh();
+
         // Nothing is fetched until a screen asks: making the browser opens no connection.
         Listing = ListingConfig.Resolve(options.Listing);
+        AccountAuthority = options.AccountAuthority is null ? Listing : ListingConfig.Resolve(options.AccountAuthority);
         Browser = new ServerBrowser(Listing);
 
         // One account for the life of the game, so joining and leaving games keeps the sign-in. A scripted run
@@ -185,7 +230,7 @@ internal sealed class App : IDisposable
         var scripted = options.BenchSeconds > 0 || options.CapturePath is not null;
         Accounts = options.AccountSample is { } accountSample
             ? ScreenHost.AccountSample(accountSample)
-            : new AccountClient(Listing, scripted ? static _ => false : BrowserLauncher.Open);
+            : new AccountClient(AccountAuthority, scripted ? static _ => false : BrowserLauncher.Open);
 
         // Decode the logo, parse the bindings, compile the shaders and build the meshes on workers while the
         // window and the GPU come up on this thread.
@@ -245,6 +290,7 @@ internal sealed class App : IDisposable
 
         _gpu = new GraphicsDevice(_window, options.Validation);
         _framebufferSize = _window.FramebufferSize;
+        if (options.GasView is not null || options.GasFixture > 0) Logs.App.Info($"Gas capture {options.GasView}, fixture {options.GasFixture}: framebuffer {_framebufferSize.X}x{_framebufferSize.Y}");
         _swapchain = new Swapchain(_gpu, _framebufferSize, _vsync);
         _renderer = new FrameRenderer(_gpu, _swapchain);
         Devices = new InputDevices(_window) { Muted = options.BenchSeconds > 0 || options.CapturePath is not null };
@@ -270,6 +316,8 @@ internal sealed class App : IDisposable
         World = new WorldView(Devices, Actions, Settings, Jobs, _scene, Content.Designs);
 
         _screens = new ScreenHost(this, _ui);
+        _pump = new SessionPump(Lifecycle, Worlds, scriptedRun, () => _screens.Show(Screen.Session));
+        _pollFrame = PollFrame;
         if (options.BrowserSample != BrowserSample.None)
             _screens.UseBrowserSample(options.BrowserSample);
         if (options.BenchSeconds > 0)
@@ -297,6 +345,9 @@ internal sealed class App : IDisposable
     /// <summary>The listing server in use, or null when it is turned off.</summary>
     public ListingConfig? Listing { get; }
 
+    /// <summary>Account service configuration, separate from game advertisement.</summary>
+    public ListingConfig? AccountAuthority { get; }
+
     /// <summary>
     /// The list of public games for a server browser. <see cref="ServerBrowser.Refresh"/> starts a fetch and
     /// returns at once; <see cref="ServerBrowser.State"/> and <see cref="ServerBrowser.List"/> are read every
@@ -320,7 +371,20 @@ internal sealed class App : IDisposable
     /// <summary>The galaxy seen from above, the backdrop of the galaxy map.</summary>
     public ImTextureRef GalaxyImageRef { get; }
     public string GpuLabel { get; }
-    public GameSession? Session { get; private set; }
+    /// <summary>
+    /// The session the frame reads, or null. A session that is closing, saving or being opened is never this:
+    /// see <see cref="Lifecycle"/>.
+    /// </summary>
+    public GameSession? Session => Lifecycle.Session;
+
+    /// <summary>Opens, closes and replaces the play session, off the frame; every way a session ends goes through it.</summary>
+    public SessionLifecycle Lifecycle { get; } = new();
+
+    /// <summary>The saved worlds, read off the frame, for Continue and Load World.</summary>
+    public WorldShelf Worlds { get; }
+
+    /// <summary>True when saved worlds are on in this run: a private game is then a saved world.</summary>
+    public bool SavesWorlds => Worlds.Library is not null;
     public bool ShowPerformance { get; private set; }
 
     /// <summary>True while the pointer is hidden and steers the view; the interface then cannot be pointed at.</summary>
@@ -353,12 +417,13 @@ internal sealed class App : IDisposable
 
     /// <summary>
     /// Starts a local game in a world with the given settings, hosted as <paramref name="hosting"/> says; both
-    /// also become the next game's. A private game is the host alone. An unlisted or public one is the same
-    /// game with a UDP listener, which other players join by address; a public one also announces itself to
-    /// the listing server. Hosting for others needs a Discord sign-in (<see cref="NetworkPlay"/>): without one
-    /// this returns false and the session that runs is left running. Otherwise it returns false with a sentence
-    /// for the player when the name or the password cannot be used or the port cannot be opened, the session
-    /// that was running having been left.
+    /// also become the next game's. A private game is a new saved world when saved worlds are on: created with
+    /// its name, seed, settings and spawn sector, and saved automatically from then on. An unlisted or public one
+    /// is the same server with a UDP listener, which other players join by address; it is not saved, since a
+    /// saved world cannot yet tell one remote player from another. Hosting for others needs a Discord sign-in
+    /// (<see cref="NetworkPlay"/>): without one this returns false and the session that runs is left running.
+    /// Otherwise the session that runs is closed (and saved) and the new one is opened off the frame; a failure
+    /// there opens the New Game screen with the reason.
     /// </summary>
     public bool StartLocalGame(in WorldSettings settings, HostingOptions hosting, out string error)
     {
@@ -366,27 +431,78 @@ internal sealed class App : IDisposable
         NewGameHosting = hosting.Clone();
 
         var hosted = hosting.Visibility != ServerVisibility.Private;
-        var name = hosting.Name.Trim().Length > 0 ? hosting.Name : hosted ? $"{Settings.PlayerName}'s game" : "Local game";
+        var saved = !hosted && Worlds.Library is not null;
+        var raw = hosting.Name.Trim().Length > 0 ? hosting.Name : hosted ? $"{Settings.PlayerName}'s game" : saved ? "New world" : "Local game";
+        if (!ServerNames.TryNormalize(raw, out var name))
+        {
+            error = $"A name is 1 to {ServerNames.MaxLength} characters.";
+            return false;
+        }
+
         if (hosting.Visibility == ServerVisibility.Public && Listing is null)
             Logs.App.Warning("The game is public but the listing server is turned off: it will not show in any server browser");
 
-        var config = new ServerConfig
+        var player = Settings.PlayerName;
+        var chosen = NewGameSettings;
+        var spawn = _options.SpawnSector;
+        Func<CancellationToken, SessionStart> open;
+        if (saved)
         {
-            Name = name,
-            MaxPlayers = hosted ? Math.Clamp(hosting.MaxPlayers, 1, 256) : 1,
-            Settings = NewGameSettings,
-            SpawnSector = _options.SpawnSector,
-            Visibility = hosting.Visibility,
-            Password = hosted && hosting.Password.Length > 0 ? hosting.Password : null,
-            Port = hosting.Port,
-            Listing = Listing,
-        };
+            var library = Worlds.Library!;
+            var autosave = Settings.AutosaveSeconds;
+            var fault = _options.SaveFault;
+            open = cancel => LocalWorlds.Create(library, Content, name, chosen, spawn, autosave, player, cancel, fault, AccountAuthority);
+        }
+        else
+        {
+            // Diagnostic scenes only ever run here, unsaved: Program refuses them with saved-world options.
+            var config = new ServerConfig
+            {
+                Name = name,
+                MaxPlayers = hosted ? Math.Clamp(hosting.MaxPlayers, 1, 256) : 1,
+                Settings = chosen,
+                GalaxySeed = _options.RtsSeed ?? new ServerConfig().GalaxySeed,
+                VisualBenchmark = _options.VisualBenchmark,
+                SpawnSector = spawn,
+                Visibility = hosting.Visibility,
+                Password = hosted && hosting.Password.Length > 0 ? hosting.Password : null,
+                Port = hosting.Port,
+                Listing = Listing,
+            };
+            open = _ => new SessionStart(GameSession.StartLocal(config, Content, player), "");
+        }
 
-        if (!NetworkPlay.TryEnter(Accounts, hosted, true, LeaveSession, () => GameSession.StartLocal(config, Content, Settings.PlayerName), out var session, out error))
-            return false;
-        Session = session;
-        _screens.Show(Screen.Session);
-        return true;
+        return NetworkPlay.TryEnter(Accounts, hosted, true, () => Lifecycle.Enter(name, null, open, failed => _screens.OpenNewGame(failed)), out error);
+    }
+
+    /// <summary>
+    /// Continues the world played last. Which one that is is read off the frame; a world that is no longer
+    /// there is reported, never made again. A failure shows on the main menu.
+    /// </summary>
+    public void ContinueWorld()
+    {
+        if (Worlds.Library is not { } library)
+            return;
+        var title = Worlds.LastWorld?.Name ?? "Last world";
+        var player = Settings.PlayerName;
+        var autosave = Settings.AutosaveSeconds;
+        Lifecycle.Enter(
+            title,
+            Worlds.List.LastWorld,
+            cancel => LocalWorlds.Continue(library, Content, autosave, player, cancel, _options.SaveFault, AccountAuthority),
+            failed => _screens.ShowMenuError(failed)
+        );
+    }
+
+    /// <summary>Opens a saved world from the list. A failure shows on the Load World screen.</summary>
+    public void LoadWorld(WorldEntry world)
+    {
+        if (Worlds.Library is not { } library)
+            return;
+        var player = Settings.PlayerName;
+        var autosave = Settings.AutosaveSeconds;
+        var folder = world.FolderId;
+        Lifecycle.Enter(world.Name, folder, cancel => LocalWorlds.Open(library, Content, folder, autosave, player, cancel, _options.SaveFault, AccountAuthority), failed => _screens.ShowLoadError(failed));
     }
 
     /// <summary>Joins a server by address, without a password.</summary>
@@ -404,11 +520,14 @@ internal sealed class App : IDisposable
     {
         if (!CheckPassword(ref password, out error))
             return false;
-        if (!NetworkPlay.TryEnter(Accounts, true, false, LeaveSession, () => GameSession.Join(host, port, Content, Settings.PlayerName, password), out var session, out error))
-            return false;
-        Session = session;
-        _screens.Show(Screen.Session);
-        return true;
+        var player = Settings.PlayerName;
+        return NetworkPlay.TryEnter(
+            Accounts,
+            true,
+            false,
+            () => Lifecycle.Enter($"{host}:{port}", null, _ => new SessionStart(GameSession.Join(host, port, Content, player, password), ""), failed => _screens.ShowJoinError(failed)),
+            out error
+        );
     }
 
     /// <summary>
@@ -419,11 +538,14 @@ internal sealed class App : IDisposable
     {
         if (!CheckPassword(ref password, out error))
             return false;
-        if (!NetworkPlay.TryEnter(Accounts, true, false, LeaveSession, () => GameSession.Join(game, Content, Settings.PlayerName, password), out var session, out error))
-            return false;
-        Session = session;
-        _screens.Show(Screen.Session);
-        return true;
+        var player = Settings.PlayerName;
+        return NetworkPlay.TryEnter(
+            Accounts,
+            true,
+            false,
+            () => Lifecycle.Enter(game.Name, null, _ => new SessionStart(GameSession.Join(game, Content, player, password), ""), failed => _screens.ShowJoinError(failed)),
+            out error
+        );
     }
 
     /// <summary>
@@ -456,15 +578,17 @@ internal sealed class App : IDisposable
         return false;
     }
 
+    /// <summary>
+    /// Leaves the session: a local world is frozen and saved before the client lets go, and the session is
+    /// disposed off the frame. The menu shows how that goes. Cancels a session that is still being opened.
+    /// </summary>
     public void LeaveSession()
     {
-        if (Session is null)
-            return;
-        Session.Dispose();
-        Session = null;
+        Lifecycle.Leave();
         _screens.Show(Screen.MainMenu);
     }
 
+    /// <summary>Asks the game to end: the session is closed and saved first, as by <see cref="LeaveSession"/>.</summary>
     public void Quit() => _quit = true;
 
     /// <summary>Applies vsync, fullscreen and interface-scale settings that changed, and saves them.</summary>
@@ -509,6 +633,10 @@ internal sealed class App : IDisposable
                 _screens.OpenNewGame(error);
             }
         }
+        else if (_options.ContinueWorld)
+        {
+            ContinueWorld();
+        }
         else if (_options.JoinHost is { } host)
         {
             // Without a sign-in (and a sign-in never outlives the game) this opens the Join screen with the address
@@ -525,29 +653,38 @@ internal sealed class App : IDisposable
             _screens.OpenSettings(Screen.MainMenu);
         else if (_options.StartScreen == Screen.NewGame)
             _screens.OpenNewGame();
+        else if (_options.StartScreen == Screen.LoadWorld)
+            _screens.OpenLoadWorld();
         else
             _screens.Show(_options.StartScreen);
     }
 
     public void Run()
     {
-        while (!_window.ShouldClose && !_quit)
+        while (true)
         {
-            var frameStart = Stopwatch.GetTimestamp();
-            Stats.BeginFrame();
+            // Closing the window, Quit and the end of a scripted run all close the session the same way: it is
+            // saved, then released, and only then does the loop end. The window stays until then.
+            if (_window.ShouldClose)
+            {
+                _window.ShouldClose = false;
+                _quit = true;
+            }
 
-            Devices.BeginFrame();
-            Glfw.PollEvents();
-            Devices.PollGamepad();
-
-            var framebuffer = _window.FramebufferSize;
-            if (framebuffer.X == 0 || framebuffer.Y == 0)
+            // The session moves on whether or not there is anything to draw: a minimised window still saves,
+            // closes, opens and quits. See SessionPump.
+            var step = _pump.Next(ref _quit, _pollFrame);
+            if (step == FrameStep.Exit)
+                break;
+            if (step == FrameStep.Skip)
             {
                 // Minimised: nothing to draw into. Idle without spinning.
                 Thread.Sleep(50);
                 continue;
             }
 
+            var frameStart = _frameStart;
+            var framebuffer = _window.FramebufferSize;
             if (framebuffer != _framebufferSize || _renderer.NeedsRecreate || _swapchainDirty)
             {
                 _renderer.Recreate(framebuffer, _vsync);
@@ -560,11 +697,6 @@ internal sealed class App : IDisposable
 
             Jobs.Pump();
             HandleGlobalActions();
-            if (Session?.Fault is { } fault)
-            {
-                Logs.App.Error($"The session stopped unexpectedly: {fault}");
-                LeaveSession();
-            }
 
             var dt = _lastFrameTimestamp == 0 ? 1f / 60f : Math.Min((float)Stopwatch.GetElapsedTime(_lastFrameTimestamp, frameStart).TotalSeconds, 0.1f);
             _lastFrameTimestamp = frameStart;
@@ -646,10 +778,14 @@ internal sealed class App : IDisposable
             if (!_screens.WorldInputEnabled)
                 _pointer.SurfaceOpened();
 
+            var worldDrawn = false;
             if (_renderer.Begin(out var commands))
             {
                 if (inSpace)
+                {
                     World.Draw(commands, _renderer.FrameIndex, snapshot!, _ui.Time);
+                    worldDrawn = true;
+                }
                 _renderer.BeginPresentPass(ClearColor);
                 if (inSpace)
                     _scene.Present(commands, World.ExposureValue);
@@ -665,12 +801,19 @@ internal sealed class App : IDisposable
                 StartScreenshotEncode(shot);
 
             Stats.EndFrame();
-            Automate(MeshesReady ? snapshot : null);
+            Automate(MeshesReady ? snapshot : null, worldDrawn);
 
             if (!_vsync && Settings.FrameCap > 0 && _benchmark is null)
                 PreciseSleep.Until(frameStart + Stopwatch.Frequency / Settings.FrameCap);
         }
 
+        // Measurements end at the last frame of the diagnostic world, not after the session closed and saved. A
+        // run that ended any other way reports an end just after its last frame, so a prefix is never complete.
+        var measuredEnd = _diagnosticEnd ?? MathF.BitIncrement(_sinceSplash);
+        if (_rts is not null && !_rts.Report(_gpu.ValidationEnabled, GraphicsDevice.ValidationErrorCount, measuredEnd, Volatile.Read(ref _screenshotJob.Saved), Volatile.Read(ref _screenshotJob.Failed)))
+            ExitCode = 1;
+        if (_populated is not null && !_populated.Report(_options.VisualBenchmark!, _gpu, _swapchain, measuredEnd))
+            ExitCode = 1;
         if (!_window.IsFullscreen)
         {
             Settings.WindowWidth = _windowedSize.X;
@@ -680,9 +823,21 @@ internal sealed class App : IDisposable
         Settings.Save();
     }
 
+    /// <summary>Starts a frame: the frame's clock, the statistics and the input. Returns the framebuffer's size.</summary>
+    private int2 PollFrame()
+    {
+        _frameStart = Stopwatch.GetTimestamp();
+        Stats.BeginFrame();
+        Devices.BeginFrame();
+        Glfw.PollEvents();
+        Devices.PollGamepad();
+        return _window.FramebufferSize;
+    }
+
     public void Dispose()
     {
-        Session?.Dispose();
+        Lifecycle.Dispose();
+        Worlds.Wait();
         Browser.Dispose();
         Accounts.Dispose();
         Jobs.CompleteAll();
@@ -724,6 +879,8 @@ internal sealed class App : IDisposable
         if (_screenshotJob.Busy)
             return;
         _screenshotJob.Path = path;
+        if (_options.GasFixture == GasShaderFixture.OverlayCheck)
+            File.Delete(path + ".json");
         _renderer.RequestScreenshot();
     }
 
@@ -731,6 +888,16 @@ internal sealed class App : IDisposable
     {
         _screenshotJob.Busy = true;
         _screenshotJob.Shot = shot;
+        _screenshotJob.Overlay = _options.GasFixture == GasShaderFixture.OverlayCheck;
+        if (_screenshotJob.Overlay)
+        {
+            var mode = World.LastGasMode;
+            _screenshotJob.CaptureIndex = _capturesTaken - 1;
+            _screenshotJob.Deferred = mode.Deferred;
+            _screenshotJob.HasGas = mode.HasGas;
+            _screenshotJob.Shields = mode.Shields;
+            _screenshotJob.Opening = World.GasOverlayOpening;
+        }
         Jobs.Schedule(_screenshotJob, 8);
     }
 
@@ -742,12 +909,30 @@ internal sealed class App : IDisposable
     }
 
     /// <summary>Drives the scripted runs: a timed screenshot (<c>--capture</c>) and the benchmark (<c>--bench</c>).</summary>
-    private void Automate(SessionSnapshot? snapshot)
+    private void Automate(SessionSnapshot? snapshot, bool worldDrawn)
     {
         if (_sinceSplash < 0)
             return;
         // Wall-clock time, so scripted captures line up with the simulation whatever the frame pacing.
         _sinceSplash = (float)Stopwatch.GetElapsedTime(_splashFinishedAt).TotalSeconds;
+
+        // Nothing is sampled once the diagnostic run has ended: the frames that follow close the session.
+        var measuring = _diagnosticEnd is null;
+        if (_populated is not null && measuring && snapshot is { State: SessionState.Active })
+            _populated.Record(_sinceSplash, Stats, snapshot, World, _scene, Session?.LocalServerStatus?.Loop.LastMs ?? 0, worldDrawn);
+        if (_options.VisualBenchmark?.Activity == "repair" && measuring && snapshot is { OwnHull: >= 0 } && Session is not null)
+        {
+            if (!_benchmarkEditRequested && _sinceSplash > 2)
+            {
+                _benchmarkEditRequested = true;
+                Session.Client.Input.RequestEdit(snapshot.Hulls[snapshot.OwnHull].Id);
+            }
+            if (!_benchmarkRepairRequested && _sinceSplash > 4 && snapshot.Editor.Phase == EditorPhase.Open)
+            {
+                _benchmarkRepairRequested = true;
+                Session.Client.Input.RepairEdit(snapshot.Editor.Token);
+            }
+        }
 
         if (_options.OpenView is { } view && !_viewOpened && Session is not null && _sinceSplash > 0.6f)
         {
@@ -767,6 +952,8 @@ internal sealed class App : IDisposable
                 _screens.RequestWorldSettings();
             else if (view == "menu")
                 _screens.OpenSessionMenu();
+            else if (view == "leave")
+                LeaveSession();
             else if (view == "players")
                 _screens.OpenSocial(false);
             else if (view == "social")
@@ -786,6 +973,24 @@ internal sealed class App : IDisposable
                 _screens.OpenMapMenuNear(3, 2);
             else if (view == "map-hover")
                 _screens.OpenMapHover();
+            else if (view == "jump-fleet-ahead" && snapshot is { OwnHull: >= 0 })
+            {
+                // The player's other hulls jump to points ahead of and above the camera, 160 m and 280 m away along
+                // nearly the same line of sight, so the pilot sees their exit openings overlap.
+                var forward = World.CameraForward;
+                var up = World.CameraUp;
+                var right = World.CameraRight;
+                var lane = 0;
+                for (var i = 0; i < snapshot.HullCount; i++)
+                {
+                    ref var hull = ref snapshot.Hulls[i];
+                    if (hull.IsOwn || hull.Owner != snapshot.PlayerId)
+                        continue;
+                    var distance = 160f + 120f * lane;
+                    var offset = forward * distance + up * (distance * 0.3f) + right * (4f * lane++);
+                    Session.Client.Input.IssueFleetOrder(hull.Id, new HullOrder { Kind = OrderKind.Jump, Target = World.CameraPosition + new Double3(offset.X, offset.Y, offset.Z) });
+                }
+            }
             else if (view == "jump-fleet" && snapshot is { OwnHull: >= 0 })
             {
                 // The player's other hulls make short jumps side by side to 600 m along -x from the pod, so another
@@ -810,12 +1015,17 @@ internal sealed class App : IDisposable
                     "jump-rift" => FtlKind.Rift,
                     _ => FtlKind.None,
                 };
-                Session.Client.Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = World.Galaxy!.CenterOf(new SectorCoord(12, 0, -7)) });
+                Session.Client.Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = World.Galaxy!.CenterOf(_options.JumpTo ?? new SectorCoord(12, 0, -7)) });
             }
             else
                 _screens.OpenMap();
         }
 
+        World.GasView = Devices.Muted ? _options.GasView : null;
+        World.GasFixture = Devices.Muted ? _options.GasFixture : 0;
+        // Advance only after the first image is saved, never from elapsed capture time.
+        World.GasOverlayOpening = _options.GasFixture == GasShaderFixture.OverlayCheck
+            && Volatile.Read(ref _screenshotJob.Saved) > 0;
         if (_options.LookDegrees is { } look && Session is not null)
         {
             if (_options.LookToDegrees is { } lookTo)
@@ -839,11 +1049,20 @@ internal sealed class App : IDisposable
             Session.Client.Input.AcceptInvitation(_acceptedInvitation);
         }
 
+        var rtsReady = true;
+        if (_rts is not null && measuring && snapshot is { State: SessionState.Active })
+        {
+            _rts.Record(World, _sinceSplash, Stats, (int)_swapchain.Extent.Width, (int)_swapchain.Extent.Height, worldDrawn);
+            rtsReady = worldDrawn && _rts.Advance(World, _capturesTaken, _sinceSplash);
+        }
+        else if (_rts is not null)
+            rtsReady = false;
+
         if (_options.CapturePath is { } path)
         {
             var count = _options.CaptureCount;
             var due = _options.CaptureAfter + _capturesTaken * _options.CaptureEvery;
-            if (_capturesTaken < count && _sinceSplash >= due && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
+            if (_capturesTaken < count && rtsReady && _sinceSplash >= due && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
             {
                 ShowPerformance |= Session is not null && _options.OpenView is not ("controls" or "players" or "social" or "friends" or "chat" or "hud");
                 var file = Path.GetFullPath(path);
@@ -859,7 +1078,7 @@ internal sealed class App : IDisposable
             }
             else if (_captureRequested && _capturesTaken >= count && _sinceSplash >= due - _options.CaptureEvery + 0.25f && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
             {
-                _quit = true;
+                EndDiagnosticRun();
             }
         }
 
@@ -873,7 +1092,18 @@ internal sealed class App : IDisposable
         if (!_benchmark.Finished)
             return;
 
-        ExitCode = _benchmark.Report(_gpu, _swapchain) ? 0 : 1;
+        if (_populated is null)
+            ExitCode = _benchmark.Report(_gpu, _swapchain) ? 0 : 1;
+        EndDiagnosticRun();
+    }
+
+    /// <summary>
+    /// Ends a scripted run at this frame: what it measured ends here, at the frame of its last sample, and the
+    /// session is then closed as by Quit. Later calls while the session closes keep the first end.
+    /// </summary>
+    private void EndDiagnosticRun()
+    {
+        _diagnosticEnd ??= _sinceSplash;
         _quit = true;
     }
 
@@ -928,8 +1158,19 @@ internal sealed class App : IDisposable
         public string Path = "";
         public Screenshot Shot;
 
+        // PNGs written and PNGs that failed, for a scripted run's report and the gas overlay check; read with
+        // Volatile.Read. With Overlay, a PNG counts as saved only once its metadata is written too.
+        public int Saved;
+        public int Failed;
+
+        // The gas overlay check's metadata: the mode of the frame this shot was taken from, and this run's identity.
+        public bool Overlay, Deferred, HasGas, Opening;
+        public int CaptureIndex, Shields;
+        private readonly Guid _run = Guid.NewGuid();
+
         public void Run()
         {
+            var saved = false;
             try
             {
                 var pixels = Shot.Pixels.AsSpan(0, Shot.Width * Shot.Height * 4);
@@ -940,15 +1181,54 @@ internal sealed class App : IDisposable
                     pixels[i + 3] = 255;
                 }
 
-                if (Stb.WritePng(Path, Shot.Width, Shot.Height, 4, pixels))
-                    Logs.App.Info($"Screenshot saved to {Path}");
-                else
+                if (!Stb.WritePng(Path, Shot.Width, Shot.Height, 4, pixels))
                     Logs.App.Warning($"Could not write screenshot to {Path}");
+                else if (Overlay && !TryWriteOverlayMetadata())
+                    Logs.App.Warning($"Screenshot written to {Path}, but not its metadata: it counts as failed");
+                else
+                {
+                    saved = true;
+                    Logs.App.Info($"Screenshot saved to {Path}");
+                }
             }
             finally
             {
+                if (saved)
+                    Interlocked.Increment(ref Saved);
+                else
+                    Interlocked.Increment(ref Failed);
                 Shot.Release();
                 Busy = false;
+            }
+        }
+
+        /// <summary>
+        /// Writes the overlay check's sidecar after the PNG: the hash is of the file as saved. A sidecar that cannot
+        /// be written is removed, so the checker finds no evidence rather than stale or partial evidence.
+        /// </summary>
+        private bool TryWriteOverlayMetadata()
+        {
+            var sidecar = Path + ".json";
+            try
+            {
+                var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(Path)));
+                var metadata = new { Run = _run, Index = CaptureIndex, Deferred, HasGas, Shields, Opening, Saved = true, Sha256 = hash };
+                File.WriteAllText(sidecar, System.Text.Json.JsonSerializer.Serialize(metadata));
+                return true;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                Logs.App.Warning($"Could not write {sidecar}: {e.Message}");
+                try
+                {
+                    File.Delete(sidecar);
+                }
+                catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException)
+                {
+                    Logs.App.Warning($"Could not remove {sidecar}: {cleanup.Message}");
+                }
+
+                return false;
             }
         }
     }

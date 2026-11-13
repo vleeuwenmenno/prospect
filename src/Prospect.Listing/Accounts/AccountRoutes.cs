@@ -19,8 +19,12 @@ internal static class AccountRoutes
         Route("POST", "/v1/friends/requests/{id}/decline", RequestKind.Account, Protected);
         Route("DELETE", "/v1/friends/requests/{id}", RequestKind.Account, Protected);
         Route("DELETE", "/v1/friends/{id}", RequestKind.Account, Protected);
+        Route("POST", "/v1/game/tickets", RequestKind.TicketIssue, IssueTicket, strict: true);
+        Route("POST", "/v1/game/tickets/redeem", RequestKind.TicketRedeem, RedeemTicket, strict: true);
 
-        void Route(string method, string path, RequestKind kind, Func<HttpContext, Task<IResult>> handler)
+        // A strict route checks its own input and throws AccountFailure for it, so any other exception is a fault of
+        // the service: it is left to the application's handler (a fixed 500) instead of being called a bad request.
+        void Route(string method, string path, RequestKind kind, Func<HttpContext, Task<IResult>> handler, bool strict = false)
         {
             app.MapMethods(path, [method], async (HttpContext context) =>
             {
@@ -32,7 +36,8 @@ internal static class AccountRoutes
                 }
                 catch (AccountFailure failure) { return Error(failure.Status); }
                 catch (BadHttpRequestException failure) { return Error(failure.StatusCode); }
-                catch (Exception e) when (e is JsonException or InvalidOperationException or KeyNotFoundException or FormatException)
+                catch (JsonException) { return Error(400); }
+                catch (Exception e) when (!strict && e is InvalidOperationException or KeyNotFoundException or FormatException)
                 { return Error(400); }
             }).WithMetadata(new ListingApp.LimitedBy(kind));
         }
@@ -127,12 +132,66 @@ internal static class AccountRoutes
             c.RequestServices.GetRequiredService<AccountStore>());
         return Results.Json(result, statusCode: 201);
     }
-    private static async Task<IResult> Protected(HttpContext c)
+    private static string Bearer(HttpContext c)
     {
         var headers = c.Request.Headers.Authorization;
         if (headers.Count != 1 || headers[0] is not { } header || !header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
             throw new AccountFailure(401);
-        var token = header[7..];
+        return header[7..];
+    }
+
+    // The body must be one object holding exactly these properties, each a string: no other, missing or repeated
+    // name (the parser refuses repeats) and no other type.
+    private static async Task<string[]> Strings(HttpContext c, params string[] names)
+    {
+        try
+        {
+            var body = await Body(c);
+            if (body.ValueKind != JsonValueKind.Object) throw new AccountFailure(400);
+            var values = new string[names.Length];
+            var seen = 0;
+            foreach (var property in body.EnumerateObject())
+            {
+                var index = Array.IndexOf(names, property.Name);
+                if (index < 0 || property.Value.ValueKind != JsonValueKind.String) throw new AccountFailure(400);
+                values[index] = property.Value.GetString()!;
+                seen++;
+            }
+            return seen == names.Length ? values : throw new AccountFailure(400);
+        }
+        catch (InvalidOperationException)
+        {
+            // Text that is valid JSON but not valid Unicode (a lone surrogate escape) fails only when it is read.
+            throw new AccountFailure(400);
+        }
+    }
+
+    // Everything is checked before the database is asked: a malformed request costs no database work.
+    private static async Task<IResult> IssueTicket(HttpContext c)
+    {
+        var token = Bearer(c);
+        if (!AccountCrypto.Canonical(token)) throw new AccountFailure(401);
+        var challenge = (await Strings(c, "challenge"))[0];
+        if (!AccountCrypto.Canonical(challenge)) throw new AccountFailure(400);
+        var (ticket, expiresIn) = c.RequestServices.GetRequiredService<GameTickets>().Issue(token, challenge);
+        return Results.Json(new { ticket, expiresIn }, statusCode: 201);
+    }
+
+    // No bearer token: the caller is a game server, which proves itself only by holding the ticket and the verifier.
+    // From here on the request's cancellation is not observed, so a redemption that began is always settled.
+    private static async Task<IResult> RedeemTicket(HttpContext c)
+    {
+        var fields = await Strings(c, "ticket", "verifier");
+        if (!AccountCrypto.Canonical(fields[0]) || !AccountCrypto.Canonical(fields[1])) throw new AccountFailure(400);
+        var holder = c.RequestServices.GetRequiredService<GameTickets>().Redeem(fields[0], fields[1]);
+
+        // Written out field by field: an account's friend code must never reach a game server.
+        return Results.Json(new { account = new { id = holder.Id, name = holder.Name } });
+    }
+
+    private static async Task<IResult> Protected(HttpContext c)
+    {
+        var token = Bearer(c);
         var path = c.Request.Path.Value!.TrimEnd('/');
         string? friendCode = null;
         if (path.Equals("/v1/friends/requests", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(c.Request.Method))

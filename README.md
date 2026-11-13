@@ -11,6 +11,10 @@ or that local game opened to other players. There is one simulation and one code
 
 ## Status
 
+Rare decorative volumetric gas clouds are generated: lopsided, self-shadowed, with billowy edges and wisps. Full-screen views reach 144 FPS at 5096x1390 except a pilot view in dense asteroids; visual acceptance is pending. See [gas clouds](docs/gas-clouds.md).
+
+Explicit private local claims have a nonvisual API backed by account-service tickets and an exact durable save commit. No player-facing claim UI exists; remote saved-world admission remains missing. Linked local owners still play offline. Save layout 2 refuses older layouts without migration.
+
 Chat, the player roster and parties work end to end: the server decides, the client shows them.
 
 - **Navigation bar** along the top. In a game: Play (pilot view), Fleet (command view), Map, Social and
@@ -246,6 +250,16 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   (also on the list). A local game can be hosted for others: the same in-process server, listening on UDP as
   well. A server has a name its host chooses. The New Game screen sets who can join, the name, a password, the
   player slots and the port; see [Hosting and joining](#hosting-and-joining) and [docs/hosting.md](docs/hosting.md).
+- **Saved worlds.** A private game is a saved world: New Game creates it with a name and the chosen settings,
+  and it saves itself every 30 seconds while it changes (Settings, Saved worlds: 15 s to 5 min) and when you
+  leave or quit. There is no save button. The main menu's Continue opens the world played last; Load World lists
+  every world with when it was saved, and keeps one that is in use, damaged or from another version in the list
+  with the reason. Leaving shows the save in progress; a save that failed or could not be confirmed is reported,
+  never passed over. Worlds live in the user data folder (`~/.local/share/prospect/worlds` on Linux,
+  `%APPDATA%\prospect\worlds` on Windows); see [docs/save-foundation.md](docs/save-foundation.md).
+- **Dedicated saves.** `--world <folder>` loads an existing world; add `--create-world` to create if absent.
+  Autosave defaults to 30 seconds (`--autosave 1..3600`). Saved mode refuses all remote players until verified
+  ownership exists; it is not playable multiplayer. See [hosting](docs/hosting.md#dedicated-saved-worlds).
 - **Server browser.** Join Server opens on the list of public games: name, players, a lock for a password, version.
   Refresh, loading, failed and empty states; entries the game dropped as invalid are counted. Joining a game with a
   password asks for it first. Direct connect (address, port, optional password) sits beside the list.
@@ -265,7 +279,9 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   images to GitHub Container Registry. See [docs/releasing.md](docs/releasing.md).
 
 Not there yet: NAT traversal or automatic port forwarding (a host needs a UDP port others can reach), encryption of game traffic, IPv6, mining, taking control of ships owned by other players (permissions), jump range and cost, gates,
-saving. Stations and gas fields are not generated yet; asteroids do not crack into pieces, and ore shows only as
+saving hosted games (an unlisted or public game is not saved: a saved world cannot yet tell who a returning player
+is), playable saved multiplayer, deleting or renaming a world from the game, restoring a recovery copy
+from the game. Stations are not generated yet; gas has no gameplay effects; asteroids do not crack into pieces, and ore shows only as
 a tint. Asteroids come in a shared set of shapes until mining gives each one its own body. Mixed-size designs of hundreds of blocks now load, transfer, fly and take replicated damage.
 Shared admission bounds geometry work, the intact shield shell and total catalogue resources before play.
 The default shell budget is 32,768 vertices and 196,608 indices per hull, and at most 910 blocks. A separate
@@ -473,7 +489,8 @@ make server ARGS="--settings my-world.json"                                     
 - A client that joins plays by the server's settings; its own `--set` only applies to local games.
 - In the client, New Game opens a screen with every setting, starting from the defaults plus any `--set`.
   Changed ones are marked and can be reset one at a time or all at once. Choices are kept until the game exits;
-  there are no saved presets.
+  there are no saved presets. A saved world keeps the settings it was created with, its seed and its spawn
+  sector for good: loading it never takes them from `--set` or the screen.
 - In a game, `Esc` then World Settings shows the settings in force, read-only. On someone else's server these
   are the server's.
 
@@ -560,7 +577,8 @@ See [docs/social-interface.md](docs/social-interface.md) for the interface contr
 ```sh
 make setup                                 # first time: SDK, system packages, restore
 make run                                   # the game
-make run ARGS="--start local"              # straight into a local game
+make run ARGS="--start local"              # straight into a new local game (a saved world)
+make run ARGS="--start continue"           # the world played last
 make server                                # headless dedicated server on UDP 27420
 make server ARGS="--set hullStrength=2"    # the same, in a world with its own settings
 make run ARGS="--join 127.0.0.1"           # join it, after a Discord sign-in
@@ -630,3 +648,17 @@ Prediction replays intervals from authoritative snapshots, including missing con
 Snapshot block health lets prediction reproduce losses on isolated copies; reconciliation restores them without changing authoritative published blocks.
 The client schedules controls 3–16 intervals ahead based on RTT and predicts them immediately.
 Unknown remote intent and omitted state can still cause corrections. Timing limits are in [hosting.md](docs/hosting.md).
+
+## Protected disk world identity foundation
+
+Linux disk worlds now have an immutable P256 public key in database schema 2 and a separate `world.key`.
+Snapshot codec 2 and its account/owner bindings are unchanged; older database schemas are refused without migration.
+`SqliteWorldStore.Identity` exposes UUID, canonical 91-byte SPKI (base64), SHA256 fingerprint and key status.
+Missing, malformed, mismatched or unsafe keys never regenerate; private gameplay remains loadable.
+This status is an observation at open, not hosting authorization. Saved multiplayer remains locked.
+
+- Key creation uses mode 0600 from the first byte, file flush and durable publication before database publication.
+- Only Linux protection is supported. Windows and macOS creation are refused; copied worlds can open privately with status Unsafe.
+- Automatic database copies are gameplay-only: they cannot recover a lost private key. Protected identity recovery artifacts are not implemented.
+- Move or copy the complete stopped folder, preserving key permissions, to retain identity. A bare database is insufficient.
+- Independent Claude security review remains required. No admission, TLS, key rotation or destructive recovery is included.

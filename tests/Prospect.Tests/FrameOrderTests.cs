@@ -638,6 +638,108 @@ public sealed class FrameOrderTests : IDisposable
     private float2 FieldOf(FloatingWindow window) => window.Min + new float2(40, FloatingWindow.TitleHeight + 10);
 
     [Fact]
+    public void PickingDropsRetainedMaskWhenCameraAdvancedWithoutARender()
+    {
+        _world.PrepareRockSelection(_world.CameraPosition, Screen.X / Screen.Y, Prospect.Client.Render.SceneRenderer.MaxInstances);
+        var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        var slots = (WorldView.SectorSlot[])typeof(WorldView).GetField("_slots", flags)!.GetValue(_world)!;
+        slots[0].Drawn[0] = 1;
+        var fov = typeof(WorldView).GetField("_tanHalfFov", flags)!;
+        fov.SetValue(_world, (float)fov.GetValue(_world)! * 1.1f);
+        Frame();
+        Assert.Equal(0UL, slots[0].Drawn[0]);
+    }
+
+    [Fact]
+    public void MutedCommandOrbitProtectsFocusAcrossYRowsAndReleasesItAfterPilotBlend()
+    {
+        Assert.False(_world.SetCommandCapturePose(default, 90000, 0, -0.7f));
+        _devices.Muted = true;
+        var focus = default(Double3);
+        Assert.True(_world.SetCommandCapturePose(focus, 90000, 0, -0.7f));
+        Frame();
+        var galaxy = _snapshot.Galaxy!;
+        var requests = (SectorRequests)typeof(WorldView).GetField("_sectorRequests", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(_world)!;
+        Assert.Equal(1, galaxy.SectorOf(_world.CameraPosition).Y);
+        Assert.True(requests.Contains(default));
+        _world.SetCommandCapturePose(focus, 90000, 0, -0.8f);
+        Frame();
+        Assert.Equal(2, galaxy.SectorOf(_world.CameraPosition).Y);
+        Assert.True(requests.Contains(default));
+        _world.SetCommandCapturePose(new Double3(400000, 0, 0), 90000, 0, -0.8f);
+        Frame();
+        Assert.Equal(new SectorCoord(10, 0, 0), requests.Coordinates[0]);
+        _world.SetMode(ViewMode.Pilot);
+        for (var i = 0; i < 30; i++) Frame();
+        Assert.Equal(0, _world.CommandBlend);
+        Assert.Equal(75, requests.Coordinates.Length);
+        Assert.False(requests.Contains(new SectorCoord(10, 0, 0)));
+    }
+
+    [Fact]
+    public void BoxSelectionUsesRenderedRockMaskEvenWhenOtherReadyRocksAreInsideBox()
+    {
+        _jobs.CompleteAll();
+        _world.SetMode(ViewMode.Command);
+        var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        var slots = (WorldView.SectorSlot[])typeof(WorldView).GetField("_slots", flags)!.GetValue(_world)!;
+        foreach (var item in slots) Array.Clear(item.Drawn);
+        var slot = slots[0];
+        slot.Galaxy = _snapshot.Galaxy;
+        slot.State = WorldView.SectorSlot.Ready;
+        slot.Displaced = true;
+        slot.Coord = _snapshot.Galaxy!.SectorOf(_world.CameraPosition);
+        var forward = (Vector3)typeof(WorldView).GetField("_forward", flags)!.GetValue(_world)!;
+        var local = (_world.CameraPosition + forward * 1000).RelativeTo(_snapshot.Galaxy.CenterOf(slot.Coord));
+        slot.Content.Asteroids = [new() { Radius = 100, LocalPosition = local, Rotation = Quaternion.Identity },
+            new() { Radius = 100, LocalPosition = local, Rotation = Quaternion.Identity }];
+        slot.Content.AsteroidCount = 2;
+        slot.Offsets = new Vector3[2];
+        slot.Drawn[0] = 2;
+        // Remove hull priority from this fixture, so the full-screen box considers rocks.
+        var count = _snapshot.HullCount;
+        _snapshot.HullCount = 0;
+        typeof(WorldView).GetMethod("SelectBox", flags)!.Invoke(_world, [_snapshot, float2.Zero, Screen, false]);
+        _snapshot.HullCount = count;
+        var selected = (RockRef[])typeof(WorldView).GetField("_selectedRocks", flags)!.GetValue(_world)!;
+        Assert.Equal(1, (int)typeof(WorldView).GetField("_selectedRockCount", flags)!.GetValue(_world)!);
+        Assert.Equal(new RockRef(slot.Coord, 1), selected[0]);
+    }
+
+    /// <summary>
+    /// App ends an RTS measurement at the frame of its last sample, and a run that went on after it (the session
+    /// closing and saving, or a quit before the script finished) at a time just after it, as here.
+    /// </summary>
+    [Fact]
+    public void RtsMeasurementIsCompleteOnlyWhenItEndsAtTheLastRecordedWorldFrame()
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path, "[{\"pilot\":true,\"waitReady\":false,\"hold\":0}]");
+            Frame();
+            Assert.NotNull(_world.Galaxy);
+            var stats = new Prospect.Client.Diagnostics.FrameStats();
+            bool Run(float end)
+            {
+                var capture = new Prospect.Client.Diagnostics.RtsCapture(path);
+                Assert.False(capture.Advance(_world, 0, 1f));
+                capture.Record(_world, 1f, stats, (int)Screen.X, (int)Screen.Y, true);
+                return capture.Report(false, 0, end, 1, 0);
+            }
+
+            Assert.True(Run(1f));
+            Assert.False(Run(MathF.BitIncrement(1f)));
+        }
+        finally
+        {
+            File.Delete(path);
+            File.Delete(path + ".csv");
+            File.Delete(path + ".csv.meta.json");
+        }
+    }
+
+    [Fact]
     public void APinnedWindowInFlightTakesNothingAndLeavesWAndBoostToTheHull()
     {
         ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
@@ -2520,6 +2622,39 @@ public sealed class FrameOrderTests : IDisposable
         Frame(poll, () => _world.Editor.HandleKeys(_actions, _devices, _snapshot.Hulls[_snapshot.OwnHull], Bridge, ImGui.GetIO().WantTextInput, _router.PointerOverInterface));
     }
 
+    /// <summary>
+    /// Draws frames until the editor's worker has checked the draft as it stands. A check that is running
+    /// finishes before the next frame is drawn, so the frames that pass are the ones the editor waits before it
+    /// checks an edit, and not however long its worker was kept from a processor. A frame is a sixtieth of a
+    /// second here whatever the clock says, so 600 of them are ten seconds of the editor's time.
+    /// </summary>
+    private void AwaitCheck()
+    {
+        var editor = _world.Editor;
+        for (var i = 0; i < 600 && !(editor.Check == DraftCheck.Ready && editor.CheckedVersion == editor.Draft!.Version); i++)
+        {
+            FinishJobs();
+            EditorFrame();
+        }
+    }
+
+    /// <summary>Waits for the jobs that are scheduled or running, pumping as the frame loop does; one that never ends fails the test.</summary>
+    private void FinishJobs()
+    {
+        var limit = TimeSpan.FromSeconds(30);
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        var spin = new SpinWait();
+        while (true)
+        {
+            _jobs.Pump();
+            if (_jobs.Pending == 0)
+                return;
+            if (System.Diagnostics.Stopwatch.GetElapsedTime(started) > limit)
+                Assert.Fail($"{_jobs.Pending} job(s) were still running after {limit.TotalSeconds:0} s; the editor's check is {_world.Editor.Check}");
+            spin.SpinOnce(-1);
+        }
+    }
+
     /// <summary>Simulates and draws, as the game does, until a condition holds; the renderer reports every design installed.</summary>
     private bool PlayUntil(Func<bool> condition, int steps = 3000)
     {
@@ -2707,11 +2842,7 @@ public sealed class FrameOrderTests : IDisposable
         Assert.True(editor.Draft!.CanUndo);
         // Apply waits for the worker's check of exactly this version.
         Assert.False(editor.CanApply);
-        for (var i = 0; i < 600 && !(editor.Check == DraftCheck.Ready && editor.CheckedVersion == editor.Draft.Version); i++)
-        {
-            Thread.Sleep(1);
-            EditorFrame();
-        }
+        AwaitCheck();
 
         Assert.Equal(DraftCheck.Ready, editor.Check);
         Assert.True(editor.CanApply);
@@ -3212,11 +3343,7 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal((shape, placed.Size), (editor.Draft!.Boxes[^1].Shape, editor.Draft!.Boxes[^1].Size));
 
         // Checked as the server checks it and applied: the new ship has both wedges.
-        for (var i = 0; i < 600 && !(editor.Check == DraftCheck.Ready && editor.CheckedVersion == editor.Draft.Version); i++)
-        {
-            Thread.Sleep(1);
-            EditorFrame();
-        }
+        AwaitCheck();
 
         Assert.Equal(DraftCheck.Ready, editor.Check);
         Assert.True(editor.Apply(Bridge));
@@ -4577,11 +4704,7 @@ public sealed class FrameOrderTests : IDisposable
                 editor.Select(i, editor.Selection.Length > 0);
         Assert.NotEmpty(editor.Selection.ToArray());
         editor.DeleteSelected();
-        for (var i = 0; i < 600 && !(editor.Check == DraftCheck.Ready && editor.CheckedVersion == editor.Draft!.Version); i++)
-        {
-            Thread.Sleep(1);
-            EditorFrame();
-        }
+        AwaitCheck();
 
         Assert.Equal(DraftCheck.Ready, editor.Check);
         var tuning = EditorTuning.Load(Path.Combine(AppContext.BaseDirectory, "content", "visuals", "editor.json"));

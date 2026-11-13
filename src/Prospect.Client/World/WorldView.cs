@@ -42,7 +42,7 @@ internal sealed class WorldView
 
     private const int RingXZ = 2;
     private const int RingY = 1;
-    // Enough for the block around the camera plus the heart of a jump's destination, generated ahead of arrival.
+    // Enough for the camera ring and a disjoint command-focus neighborhood.
     private const int SlotCount = (RingXZ * 2 + 1) * (RingXZ * 2 + 1) * (RingY * 2 + 1) + 27;
     private const float JumpGap = HullVisuals.JumpGap;
     private const float NearPlane = 0.25f;
@@ -78,7 +78,7 @@ internal sealed class WorldView
     private const float LensReach = 4.4f;
 
     /// <summary>A sector's generated contents and the job that fills them.</summary>
-    private sealed class SectorSlot : IJob
+    internal sealed class SectorSlot : IJob
     {
         public const int Empty = 0;
         public const int Generating = 1;
@@ -88,6 +88,10 @@ internal sealed class WorldView
 
         /// <summary>Per asteroid, how far it has been pushed from its generated position, as of this frame.</summary>
         public Vector3[] Offsets = [];
+        /// <summary>Last rendered identities, owned by the render thread and cleared before slot reuse.</summary>
+        internal bool Scanned;
+        internal Vector3 CameraCenter;
+        public readonly ulong[] Drawn = new ulong[(ushort.MaxValue + 1) / 64];
         public bool Displaced;
         public Galaxy? Galaxy;
         public SectorCoord Coord;
@@ -113,6 +117,13 @@ internal sealed class WorldView
     private readonly ClientSettings _settings;
     private readonly JobSystem _jobs;
     private readonly DamageMeshes _damage;
+    public int VisibleHulls { get; private set; }
+    public int DrawnDents { get; private set; }
+    public int DamageFallbacks { get; private set; }
+    public int GeneratedRocks { get; private set; }
+    public int EligibleRocks { get; private set; }
+    public int VisibleRocks { get; private set; }
+    public double DamageWorkerMs => _damage.LastBuildMs;
     private readonly CollisionSparks _sparks = new();
     private readonly CollisionDetail _collision = CollisionDetail.Load();
     private readonly SceneRenderer _scene;
@@ -122,6 +133,11 @@ internal sealed class WorldView
     private readonly int _meshCount;
     private readonly int _cubeMesh;
     private readonly SectorSlot[] _slots = new SectorSlot[SlotCount];
+    private readonly record struct RockFrame(Double3 Camera, Vector3 Right, Vector3 Up, Vector3 Forward, float Tan, float2 Viewport, float2 Screen);
+    private RockFrame _rockFrame;
+    private bool _hasRockFrame;
+    private readonly RockSelection _rockSelection = new(SceneRenderer.MaxInstances);
+    private readonly SectorRequests _sectorRequests = new();
     private readonly Candidate[] _candidates = new Candidate[SceneRenderer.MaxInstances];
     private readonly int[] _meshCounts;
     private readonly int[] _meshOffsets;
@@ -481,6 +497,26 @@ internal sealed class WorldView
     public float CommandBlend => _commandBlend;
 
     public Double3 CameraPosition { get; private set; }
+    /// <summary>The camera's last drawn orientation, for scripted capture staging.</summary>
+    public Vector3 CameraForward => _forward;
+    /// <summary>The camera's last drawn up direction.</summary>
+    public Vector3 CameraUp => _up;
+    /// <summary>The camera's last drawn right direction.</summary>
+    public Vector3 CameraRight => _right;
+    /// <summary>Muted capture camera only; never creates or changes generated cloud descriptors.</summary>
+    public string? GasView { get; set; }
+    /// <summary>Controlled shader inputs, applied only while devices are muted.</summary>
+    public int GasFixture { get; set; }
+    /// <summary>
+    /// With <see cref="GasShaderFixture.OverlayCheck"/>: submit one opening behind the camera, which no pixel can see,
+    /// so only the renderer's gas mode changes.
+    /// </summary>
+    public bool GasOverlayOpening { get; set; }
+    /// <summary>Whether the last rendered frame deferred gas to composition, and how many shields it queued.</summary>
+    public (bool Deferred, int Shields, bool HasGas) LastGasMode => _scene.LastGasMode;
+    private readonly SectorContent _gasCapture = new();
+    private Galaxy? _gasCaptureGalaxy;
+    private SectorCoord _gasCaptureCoord;
 
     /// <summary>The player's hull as drawn this frame, interpolated between simulation ticks.</summary>
     public HullView Own { get; private set; }
@@ -572,6 +608,12 @@ internal sealed class WorldView
         bool pointerOverUi
     )
     {
+        // A skipped draw or resize must not let input combine old admission with another projection.
+        if (_hasRockFrame && _rockFrame != new RockFrame(CameraPosition, _right, _up, _forward, _tanHalfFov, viewport, screen))
+        {
+            foreach (var slot in _slots) Array.Clear(slot.Drawn);
+            _hasRockFrame = false;
+        }
         _viewport = viewport;
         _screen = screen;
         _snapshot = snapshot;
@@ -799,6 +841,30 @@ internal sealed class WorldView
         bridge.Submit(controls);
         UpdateJump(dt);
         UpdateCamera(dt);
+        if (_devices.Muted && GasView is { } gasView && gasView is not ("pilot" or "pilot-absent"))
+        {
+            var gasCoord = galaxy.SectorOf(OwnPosition);
+            if (!ReferenceEquals(_gasCaptureGalaxy, galaxy) || _gasCaptureCoord != gasCoord)
+            {
+                // Only the gas module is needed; the asteroid worker remains untouched.
+                _gasCapture.Summary = galaxy.Summarize(gasCoord);
+                galaxy.GasClouds?.Generate(new SectorContext(galaxy, gasCoord, _gasCapture.Summary.Density), _gasCapture);
+                _gasCaptureGalaxy = galaxy;
+                _gasCaptureCoord = gasCoord;
+                if (_gasCapture.Summary.GasCloudCount == 0)
+                    throw new InvalidDataException("--gas-view needs a generated cloud: use --sector -3,0,5 with the default seed.");
+                Console.WriteLine($"Gas scenario: seed={galaxy.Seed}, sector={gasCoord}, cloud={_gasCapture.GasCloud}");
+            }
+            if (_gasCapture.Summary.GasCloudCount != 0)
+            {
+                var cloud = _gasCapture.GasCloud;
+                var offset = gasView is "inside" or "inside-absent" ? Vector3.Zero : gasView == "edge" ? new Vector3(cloud.HalfSize.X * 0.92f, 0, 0) : new Vector3(0, 0, cloud.HalfSize.Z * 2.4f);
+                CameraPosition = galaxy.CenterOf(gasCoord) + cloud.Center + offset;
+                _forward = gasView == "offscreen" ? Vector3.UnitZ : -Vector3.UnitZ;
+                _right = gasView == "offscreen" ? -Vector3.UnitX : Vector3.UnitX;
+                _up = Vector3.UnitY;
+            }
+        }
         // Which side of the opening the camera is on, from where the camera is this frame.
         UpdateThrough(dt);
         UpdateStream();
@@ -807,6 +873,9 @@ internal sealed class WorldView
     /// <summary>Builds this frame's instances and constants and records the scene.</summary>
     public void Draw(CommandBuffer commands, int frameIndex, SessionSnapshot snapshot, float time)
     {
+        // The overlay check compares two captures pixel for pixel: dust, gas drift and composition time stand still.
+        var overlayCheck = _devices.Muted && GasFixture == GasShaderFixture.OverlayCheck;
+        if (overlayCheck) time = GasShaderFixture.OverlayCheckTime;
         var galaxy = _galaxy!;
         // The same moment the camera was placed at. Asking the clock again here would put hulls a fraction of a
         // frame ahead of the camera, which at speed shows as the flown hull shivering against the view.
@@ -817,6 +886,9 @@ internal sealed class WorldView
         Array.Clear(_meshCounts);
         _damage.Begin(snapshot.Hulls.AsSpan(0, snapshot.HullCount));
         _scene.BeginDamage();
+        VisibleHulls = DrawnDents = DamageFallbacks = GeneratedRocks = VisibleRocks = 0;
+        foreach (var slot in _slots)
+            if (slot.State == SectorSlot.Ready && ReferenceEquals(slot.Galaxy, galaxy)) GeneratedRocks += slot.Content.AsteroidCount;
         _sparks.Begin(snapshot.Hulls.AsSpan(0, snapshot.HullCount));
         var marks = _scene.FtlMarks(frameIndex);
         var markCount = 0;
@@ -864,6 +936,7 @@ internal sealed class WorldView
                 continue;
             // The material says what the mesh is and, above it in steps of four, which opening cuts it.
             // The pilot's own hull inside its jump takes no slot: its opening is cut from the frame's own jump.
+            VisibleHulls++;
             var material = Material(visual.Inside, visual.Inside ? -1 : visual.Clip);
             // The shield goes where the hull goes, drawn out and cut with it by the same material.
             _shields.Add(hull.Id, position, orientation, stretch, material, shieldInstances, shieldVertices, shieldIndices);
@@ -873,7 +946,8 @@ internal sealed class WorldView
             {
                 var mesh = _damage.Get(hull.Id, hull.Revision, design, hull.Blocks.Span, hull.Visual, snapshot.Content.Rules.DentMaxDepth);
                 var instance = MeshTransform(position, orientation, Vector3.One, design.Color, material, stretch);
-                if (mesh is not null && _scene.AddDamage(frameIndex, mesh, instance, detail)) continue;
+                if (mesh is not null && _scene.AddDamage(frameIndex, mesh, instance, detail)) { DrawnDents += hull.Visual.Count; continue; }
+                DamageFallbacks++;
             }
             if (visual.Intact)
             {
@@ -894,21 +968,14 @@ internal sealed class WorldView
         }
 
         AddOpenings(camera, aspect, marks, ref markCount, ref composite, ref openings, ref clips);
-
-        // Rocks in the sectors around the camera: the camera's own sector first, so that if the instance buffer
-        // ever fills it is the far rocks that go missing.
-        var cameraSector = galaxy.SectorOf(camera);
-        foreach (var slot in _slots)
+        if (overlayCheck && GasOverlayOpening && composite.Setup.W < CompositeConstants.MaxLenses)
         {
-            if (slot.State == SectorSlot.Ready && ReferenceEquals(slot.Galaxy, galaxy) && slot.Coord == cameraSector)
-                AddRocks(slot, galaxy, camera, aspect, ref candidateCount);
+            // Behind the camera and facing away: it switches the renderer to deferred gas without bending any pixel.
+            openings.Set((int)composite.Setup.W, -_forward * 10f, 2, _forward, _up, FtlKind.Rift, 1, 0.3f);
+            composite.Setup.W += 1;
         }
 
-        foreach (var slot in _slots)
-        {
-            if (slot.State == SectorSlot.Ready && ReferenceEquals(slot.Galaxy, galaxy) && slot.Coord != cameraSector)
-                AddRocks(slot, galaxy, camera, aspect, ref candidateCount);
-        }
+        PrepareRockInstances(camera, aspect, ref candidateCount);
 
         // Group instances by mesh so each mesh is one draw call: asteroids first, then hulls, so the jump lenses can
         // keep the world as it was before any hull was drawn over it.
@@ -971,10 +1038,42 @@ internal sealed class WorldView
         };
 
         FillOwnJump(ref constants, camera);
+        _scene.BeginGas();
+        if (GasView is not ("absent" or "inside-absent" or "pilot-absent") && galaxy.GasClouds is { } gas)
+        {
+            foreach (var slot in _slots)
+            {
+                if (slot.State != SectorSlot.Ready || !ReferenceEquals(slot.Galaxy, galaxy) || slot.Content.Summary.GasCloudCount == 0) continue;
+                var cloud = slot.Content.GasCloud;
+                var center = (galaxy.CenterOf(slot.Coord) + cloud.Center).RelativeTo(camera);
+                var distance = center.Length();
+                var fade = GasCloudModule.Visibility(distance, (float)galaxy.SectorSize);
+                if (fade <= 0 || !Visible(center, cloud.HalfSize.Length(), aspect, out _)) continue;
+                _scene.AddGas(new GasConstants
+                {
+                    Center = new float4(center.X, center.Y, center.Z, cloud.Seed),
+                    HalfSize = new float4(cloud.HalfSize.X, cloud.HalfSize.Y, cloud.HalfSize.Z, gas.Extinction * fade),
+                    Tint = new float4(gas.Tint.X, gas.Tint.Y, gas.Tint.Z, 0),
+                    Motion = new float4(time * gas.Motion, 0, 0, distance),
+                    Budget = new float4(gas.Samples, 0, 0, 0),
+                    Shape = new float4(gas.Shape.X, gas.Shape.Y, gas.Shape.Z, gas.Shape.W),
+                    Look = new float4(gas.Look.X, gas.Look.Y, gas.Look.Z, gas.Look.W),
+                });
+            }
+        }
+
+        if (_devices.Muted && GasFixture is > 0 and <= GasShaderFixture.Count)
+        {
+            var fixtureGas = GasShaderFixture.Apply(GasFixture, ref constants, ref composite);
+            _scene.BeginGas();
+            _scene.AddGas(fixtureGas);
+        }
 
         // The lenses need the sky kept apart while a rift or a wormhole is in view, from outside or the pilot's own.
         var lensing = composite.Setup.W > 0f || (constants.Ftl.Y > 0f && constants.Ftl.X > (float)FtlKind.Hyperspace);
-        _scene.QueueShields(_shields.Draws.Length, _shields.Look.Constants);
+        // The overlay check needs the ordinary gas pass, which any queued shield (even off screen) replaces, so it
+        // queues none in either capture; hulls in view are drawn without shields in both.
+        _scene.QueueShields(overlayCheck ? 0 : _shields.Draws.Length, _shields.Look.Constants);
         _scene.Render(commands, frameIndex, constants, composite, _batches.AsSpan(0, rockBatches), _batches.AsSpan(rockBatches, batchCount - rockBatches), _commandBlend > 0.01f, markCount, lensing);
     }
 
@@ -1020,14 +1119,114 @@ internal sealed class WorldView
     /// <summary>The angle one pixel of the view spans, as the passes that cut the pilot's own hull take it.</summary>
     internal float PixelAngle => 2f / Math.Max(_viewport.Y, 1f) * _tanHalfFov;
 
+    /// <summary>Muted field-overview isolation; null preserves the ordinary scene.</summary>
+    internal SectorCoord? CaptureOnlySector { get; set; }
+
+    /// <summary>Production scan and transform path, also used by matched CPU measurements.</summary>
+    internal void PrepareRockInstances(Double3 camera, float aspect, ref int candidateCount)
+    {
+        PrepareRockSelection(camera, aspect, candidateCount);
+        foreach (var selected in _rockSelection.Items)
+            AddRock(_slots[selected.Slot], selected.Id.Index, selected.Pixels, _galaxy!, ref candidateCount);
+    }
+
+    /// <summary>Runs framebuffer admission once, after hull reservation, and publishes the same identities to picking.</summary>
+    internal void PrepareRockSelection(Double3 camera, float aspect, int hullInstances)
+    {
+        _rockFrame = new RockFrame(camera, _right, _up, _forward, _tanHalfFov, _viewport, _screen);
+        _hasRockFrame = true;
+        EligibleRocks = 0;
+        _rockSelection.Begin(_candidates.Length - hullInstances);
+        if (hullInstances >= _candidates.Length)
+        {
+            foreach (var slot in _slots)
+            {
+                Array.Clear(slot.Drawn);
+                slot.Scanned = slot.State == SectorSlot.Ready && ReferenceEquals(slot.Galaxy, _galaxy);
+            }
+            return;
+        }
+        for (var slotIndex = 0; slotIndex < _slots.Length; slotIndex++)
+        {
+            var slot = _slots[slotIndex];
+            slot.Scanned = false;
+            if (slot.State == SectorSlot.Ready && ReferenceEquals(slot.Galaxy, _galaxy) && (!_devices.Muted || CaptureOnlySector is not { } only || slot.Coord == only))
+            {
+                slot.Scanned = true;
+                SelectRocks(slot, slotIndex, camera, aspect);
+            }
+        }
+        foreach (var slot in _slots) Array.Clear(slot.Drawn);
+        foreach (var selected in _rockSelection.Items)
+            _slots[selected.Slot].Drawn[selected.Id.Index >> 6] |= 1UL << (selected.Id.Index & 63);
+    }
+
+    /// <summary>Numeric diagnostic rejection reason; retained does not imply passing GPU depth.</summary>
+    internal int CaptureRockReason(RockRef rock, out float pixels)
+    {
+        pixels = 0;
+        foreach (var slot in _slots)
+        {
+            if (!ReferenceEquals(slot.Galaxy, _galaxy) || slot.Coord != rock.Sector || slot.State == SectorSlot.Empty) continue;
+            if (slot.State != SectorSlot.Ready || !slot.Scanned) return 1;
+            if ((uint)rock.Index >= (uint)slot.Content.AsteroidCount) return 0;
+            ref var asteroid = ref slot.Content.Asteroids[rock.Index];
+            var position = _galaxy!.CenterOf(slot.Coord).RelativeTo(CameraPosition) + asteroid.LocalPosition + (slot.Displaced ? slot.Offsets[rock.Index] : Vector3.Zero);
+            if (!Visible(position, asteroid.Radius, _viewport.X / _viewport.Y, out pixels)) return 2;
+            if (pixels < RockMinPixels) return 3;
+            return BlockSet.Has(slot.Drawn, rock.Index) ? 5 : 4;
+        }
+        return 0;
+    }
+
+    /// <summary>The retained identities from the last frame, borrowed by muted capture diagnostics.</summary>
+    internal ReadOnlySpan<RockSelection.Entry> RetainedRocks => _rockSelection.Items;
+
+    /// <summary>Whether all currently requested sectors are ready, for capture warm-up without an assumed delay.</summary>
+    internal bool CaptureSectorsReady
+    {
+        get
+        {
+            if (_sectorRequests.Coordinates.IsEmpty) return false;
+            foreach (var coord in _sectorRequests.Coordinates)
+            {
+                var ready = false;
+                foreach (var slot in _slots)
+                    if (slot.State == SectorSlot.Ready && ReferenceEquals(slot.Galaxy, _galaxy) && slot.Coord == coord)
+                    {
+                        ready = true;
+                        break;
+                    }
+                if (!ready) return false;
+            }
+            return true;
+        }
+    }
+
+    /// <summary>Muted capture harness hook; angles are radians. Call before Update, never from ordinary input.</summary>
+    internal bool SetCommandCapturePose(Double3 focus, float distance, float yaw, float pitch)
+    {
+        if (!_devices.Muted) return false;
+        SetMode(ViewMode.Command);
+        _followId = 0;
+        _focusBlend = 1;
+        _commandBlend = 1;
+        _commandFocus = focus;
+        _commandDistance = Math.Clamp(distance, MinCommandDistance, MaxCommandDistance);
+        _commandYaw = yaw;
+        _commandPitch = Math.Clamp(pitch, -1.52f, -0.1f);
+        return true;
+    }
+
     /// <summary>Adds one sector's visible asteroids to the frame's instances.</summary>
-    private void AddRocks(SectorSlot slot, Galaxy galaxy, Double3 camera, float aspect, ref int candidateCount)
+    private void SelectRocks(SectorSlot slot, int slotIndex, Double3 camera, float aspect)
     {
         var content = slot.Content;
         if (content.AsteroidCount == 0 || !SectorInView(slot, camera, aspect, _viewport.Y, out var center, out var smallest))
             return;
 
-        for (var i = 0; i < content.AsteroidCount && candidateCount < _candidates.Length; i++)
+        slot.CameraCenter = center;
+        for (var i = 0; i < content.AsteroidCount; i++)
         {
             ref var rock = ref content.Asteroids[i];
 
@@ -1038,22 +1237,31 @@ internal sealed class WorldView
             if (!Visible(position, rock.Radius, aspect, out var pixels) || pixels < RockMinPixels)
                 continue;
 
-            // How much of the view the asteroid takes up, from 0 to 1 at its surface.
-            var nearness = pixels * _tanHalfFov * 2f / _viewport.Y;
-            var detail =
-                rock.Radius >= RockFineRadius && nearness > RockFineNearness ? DetailFine
-                : rock.Radius >= RockCloseRadius && nearness > RockCloseNearness ? DetailClose
-                : pixels > RockNormalPixels ? DetailNormal
-                : pixels > RockSpeckPixels ? DetailCoarse
-                : DetailSpeck;
-
-            // Bare rock is grey; ore shows through in its own colour, more strongly the richer the rock.
-            var shade = 0.2f + 0.05f * (rock.Shape % 4);
-            var tint = new Vector3(shade, shade * 0.95f, shade * 0.88f);
-            if (rock.Resource >= 0)
-                tint = Vector3.Lerp(tint, galaxy.Resources[rock.Resource].Color * 0.55f, 0.25f + 0.5f * rock.Grade);
-            Add(ref candidateCount, _asteroidMeshBase + detail * Galaxy.AsteroidShapes + rock.Shape, position, rock.Rotation, rock.Radius, tint, 0f);
+            EligibleRocks++;
+            _rockSelection.Offer(new RockRef(slot.Coord, i), slotIndex, pixels, BlockSet.Has(slot.Drawn, i));
         }
+    }
+
+    private void AddRock(SectorSlot slot, int i, float pixels, Galaxy galaxy, ref int candidateCount)
+    {
+        ref var rock = ref slot.Content.Asteroids[i];
+        var position = slot.CameraCenter + rock.LocalPosition + (slot.Displaced ? slot.Offsets[i] : Vector3.Zero);
+        // How much of the view the asteroid takes up, from 0 to 1 at its surface.
+        var nearness = pixels * _tanHalfFov * 2f / _viewport.Y;
+        var detail =
+            rock.Radius >= RockFineRadius && nearness > RockFineNearness ? DetailFine
+            : rock.Radius >= RockCloseRadius && nearness > RockCloseNearness ? DetailClose
+            : pixels > RockNormalPixels ? DetailNormal
+            : pixels > RockSpeckPixels ? DetailCoarse
+            : DetailSpeck;
+
+        // Bare rock is grey; ore shows through in its own colour, more strongly the richer the rock.
+        var shade = 0.2f + 0.05f * (rock.Shape % 4);
+        var tint = new Vector3(shade, shade * 0.95f, shade * 0.88f);
+        if (rock.Resource >= 0)
+            tint = Vector3.Lerp(tint, galaxy.Resources[rock.Resource].Color * 0.55f, 0.25f + 0.5f * rock.Grade);
+        VisibleRocks++;
+        Add(ref candidateCount, _asteroidMeshBase + detail * Galaxy.AsteroidShapes + rock.Shape, position, rock.Rotation, rock.Radius, tint, 0f);
     }
 
     /// <summary>
@@ -1079,7 +1287,9 @@ internal sealed class WorldView
         return true;
     }
 
-    /// <summary>Builds borrowed candidate views and uses the same ordered picker for every interaction.</summary>
+    /// <summary>Uses the last rendered rock identities with the camera input currently sees, before UpdateCamera.
+    /// Slot reuse clears the mask; workers never write it. Hull interpolation and rock displacement use this update.
+    /// The framebuffer admission owns the size cutoff; logical pixels only set the pointer grab radius.</summary>
     private int PickTargets(SessionSnapshot snapshot, float2 pointer, bool pilot)
     {
         var hullCount = 0;
@@ -1108,13 +1318,13 @@ internal sealed class WorldView
             if (slot.State != SectorSlot.Ready || !ReferenceEquals(slot.Galaxy, _galaxy)) continue;
             _pickSectors[sectorCount++] = new PickSector(slot.Coord, _galaxy!.CenterOf(slot.Coord),
                 slot.Content.Asteroids, slot.Content.AsteroidCount, slot.Displaced ? slot.Offsets : null,
-                slot.Content.BoundsCenter, slot.Content.BoundsRadius);
+                slot.Content.BoundsCenter, slot.Content.BoundsRadius, slot.Drawn);
         }
         var nx = pointer.X / _screen.X * 2 - 1;
         var ny = pointer.Y / _screen.Y * 2 - 1;
         var ray = Vector3.Normalize(_forward + _right * (nx * _tanHalfFov * _screen.X / _screen.Y) - _up * (ny * _tanHalfFov));
         return TargetPicking.Pick(ray, CameraPosition, _forward, _screen.Y / (2 * _tanHalfFov),
-            _pickHulls.AsSpan(0, hullCount), _pickSectors.AsSpan(0, sectorCount), _pickHits, RockMinPixels, NearPlane);
+            _pickHulls.AsSpan(0, hullCount), _pickSectors.AsSpan(0, sectorCount), _pickHits, 0, NearPlane);
     }
 
     /// <summary>
@@ -2066,19 +2276,16 @@ internal sealed class WorldView
             return;
         }
 
-        // Largest first within each sector, and only those large enough to be drawn.
-        var aspect = _screen.X / _screen.Y;
+        // Input uses the previous rendered camera and its retained identities, before UpdateCamera.
+        // Do not apply another logical-pixel threshold to framebuffer-selected rocks.
         foreach (var slot in _slots)
         {
             if (slot.State != SectorSlot.Ready || !ReferenceEquals(slot.Galaxy, _galaxy) || slot.Content.AsteroidCount == 0)
                 continue;
-            if (!SectorInView(slot, CameraPosition, aspect, _screen.Y, out var center, out var smallest))
-                continue;
+            var center = _galaxy!.CenterOf(slot.Coord).RelativeTo(CameraPosition);
             for (var i = 0; i < slot.Content.AsteroidCount && _selectedRockCount < MaxSelection; i++)
             {
-                if (slot.Content.Asteroids[i].Radius < smallest)
-                    break;
-                if (!RockOnScreen(slot, center, i, out var screen, out var pixels, out _) || pixels < RockMinPixels)
+                if (!BlockSet.Has(slot.Drawn, i) || !RockOnScreen(slot, center, i, out var screen, out _, out _))
                     continue;
                 var rock = new RockRef(slot.Coord, i);
                 if (screen.X >= min.X && screen.X <= max.X && screen.Y >= min.Y && screen.Y <= max.Y && !_selectedRocks.AsSpan(0, _selectedRockCount).Contains(rock))
@@ -3316,8 +3523,7 @@ internal sealed class WorldView
             _streamDirty = true;
         }
 
-        // While a jump is being prepared, the heart of the destination is generated too, so that it is already
-        // there when the hull comes out.
+        // Preserve the existing jump-triggered refresh; destination prefetch is not enumerated here.
         var ahead = Own.Order.Kind == OrderKind.Jump ? galaxy.SectorOf(Own.Order.Target) : center;
         if (ahead != _streamAhead)
         {
@@ -3325,60 +3531,56 @@ internal sealed class WorldView
             _streamDirty = true;
         }
 
-        if (!_streamDirty)
-            return;
-
+        var focus = Mode == ViewMode.Command || _commandBlend > 0f ? galaxy.SectorOf(_commandFocus) : (SectorCoord?)null;
+        if (_sectorRequests.Update(center, focus)) _streamDirty = true;
+        if (!_streamDirty) return;
         _streamDirty = false;
-        for (var dx = -RingXZ; dx <= RingXZ; dx++)
-            for (var dy = -RingY; dy <= RingY; dy++)
-                for (var dz = -RingXZ; dz <= RingXZ; dz++)
-                {
-                    var coord = center.Offset(dx, dy, dz);
-                    SectorSlot? free = null;
-                    var present = false;
-                    foreach (var slot in _slots)
-                    {
-                        var current = ReferenceEquals(slot.Galaxy, galaxy) && slot.State != SectorSlot.Empty;
-                        if (current && slot.Coord == coord)
-                        {
-                            present = true;
-                            break;
-                        }
+        foreach (var coord in _sectorRequests.Coordinates)
+        {
+            var free = FindStreamSlot(_slots, galaxy, _sectorRequests, coord, out var present);
+            if (present)
+                continue;
 
-                        // A slot can be reused if it is not mid-generation and holds nothing inside the wanted block.
-                        if (free is null && slot.State != SectorSlot.Generating && !(current && InRing(slot.Coord, center)))
-                            free = slot;
-                    }
+            if (free is null)
+            {
+                // Every spare slot is still generating; try again next frame.
+                _streamDirty = true;
+                continue;
+            }
 
-                    if (present)
-                        continue;
+            // The slot's push offsets belong to the sector it held; the next one starts with none.
+            if (free.Displaced)
+            {
+                Array.Clear(free.Offsets);
+                free.Displaced = false;
+            }
 
-                    if (free is null)
-                    {
-                        // Every spare slot is still generating; try again next frame.
-                        _streamDirty = true;
-                        continue;
-                    }
-
-                    // The slot's push offsets belong to the sector it held; the next one starts with none.
-                    if (free.Displaced)
-                    {
-                        Array.Clear(free.Offsets);
-                        free.Displaced = false;
-                    }
-
-                    free.Galaxy = galaxy;
-                    free.Coord = coord;
-                    free.State = SectorSlot.Generating;
-                    _jobs.Schedule(free, 2);
-                }
+            Array.Clear(free.Drawn);
+            free.Galaxy = galaxy;
+            free.Coord = coord;
+            free.State = SectorSlot.Generating;
+            _jobs.Schedule(free, 2);
+        }
     }
 
-    private bool NearAhead(SectorCoord coord) =>
-        Math.Abs(coord.X - _streamAhead.X) <= 1 && Math.Abs(coord.Y - _streamAhead.Y) <= 1 && Math.Abs(coord.Z - _streamAhead.Z) <= 1;
-
-    private static bool InRing(SectorCoord coord, SectorCoord center) =>
-        Math.Abs(coord.X - center.X) <= RingXZ && Math.Abs(coord.Y - center.Y) <= RingY && Math.Abs(coord.Z - center.Z) <= RingXZ;
+    /// <summary>Finds reusable storage without borrowing any worker-owned or desired sector.</summary>
+    internal static SectorSlot? FindStreamSlot(SectorSlot[] slots, Galaxy galaxy, SectorRequests requests, SectorCoord coord, out bool present)
+    {
+        SectorSlot? free = null;
+        present = false;
+        foreach (var slot in slots)
+        {
+            var current = ReferenceEquals(slot.Galaxy, galaxy) && slot.State != SectorSlot.Empty;
+            if (current && slot.Coord == coord)
+            {
+                present = true;
+                return null;
+            }
+            if (free is null && slot.State != SectorSlot.Generating && !(current && requests.Contains(slot.Coord)))
+                free = slot;
+        }
+        return free;
+    }
 
     /// <summary>Sphere against the view frustum, also reporting the sphere's radius on screen in pixels.</summary>
     private bool Visible(Vector3 position, float radius, float aspect, out float pixels)

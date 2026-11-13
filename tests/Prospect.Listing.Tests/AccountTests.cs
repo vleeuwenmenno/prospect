@@ -340,10 +340,20 @@ public sealed class AccountTests
     [Theory]
     [InlineData(RequestKind.Auth)]
     [InlineData(RequestKind.Account)]
+    [InlineData(RequestKind.TicketIssue)]
+    [InlineData(RequestKind.TicketRedeem)]
     public void NewLimiterBucketsSurviveOverflowAndRequireAllRefills(RequestKind kind)
     {
         var clock = new ManualClock();
-        var options = new ListingOptions { RateLimitAddresses = 1, RateLimitOverflowBuckets = 1, AuthPerMinute = 1, AccountPerMinute = 1 };
+        var options = new ListingOptions
+        {
+            RateLimitAddresses = 1,
+            RateLimitOverflowBuckets = 1,
+            AuthPerMinute = 1,
+            AccountPerMinute = 1,
+            TicketIssuesPerMinute = 1,
+            TicketRedeemsPerMinute = 1,
+        };
         var limiter = new RequestLimiter(options, clock);
         Assert.True(limiter.TryAcquire("a", kind).Allowed);
         clock.Advance(TimeSpan.FromSeconds(2));

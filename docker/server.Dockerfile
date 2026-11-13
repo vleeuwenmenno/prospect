@@ -28,7 +28,10 @@ FROM mcr.microsoft.com/dotnet/runtime:10.0
 WORKDIR /app
 COPY --from=build /app ./
 ENV DOTNET_NOLOGO=1
-# The image's built-in unprivileged user; the server writes no files.
+# Named volumes inherit this ownership; bind mounts must be writable by APP_UID (1654).
+RUN mkdir /data && chown "$APP_UID:$APP_UID" /data
+VOLUME ["/data"]
+# Saving remains opt-in with --world /data/<world>.
 USER $APP_UID
 EXPOSE 27420/udp
 ENTRYPOINT ["dotnet", "prospect-server.dll"]

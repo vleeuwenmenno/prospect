@@ -600,13 +600,28 @@ public static class HullSim
         state.Position += normal * deepest;
         local += normal * deepest;
 
+        // Whether the asteroid can take its share is settled before anything is exchanged. Where its motion
+        // is decided, it must be possible to write that motion down: there is a place left for it among this
+        // tick's impulses, and the field can still take it, the motions already promised in this tick counted.
+        // One that cannot move is struck as a body that does not give way, at the velocity it has, so the hull
+        // gets the whole of an impact whose other half nobody would otherwise carry. A predicting client has
+        // no say in it and assumes the asteroid moves; the server's snapshot corrects it if not.
+        var listed = impulses is null || impulses.Count < impulses.Items.Length;
+        var movable = listed && (impulses is null || rocks.CanMove(name, impulses.Items.AsSpan(0, impulses.Count)));
+
         // One impulse along the contact normal; the asteroid takes its share without turning.
         var rockMass = rocks.Mass(rock.Radius);
-        var impulse = Bounce(ref state, flight, contact, normal, rockVelocity, 1f / rockMass, 0f, out var closing);
+        var impulse = Bounce(ref state, flight, contact, normal, rockVelocity, movable ? 1f / rockMass : 0f, 0f, out var closing);
         if (impulse <= 0)
             return false;
 
-        if (impulses is not null && impulses.Count < impulses.Items.Length)
+        if (!movable)
+        {
+            // Counted only when it was the field that had no room, which is what a full world looks like.
+            if (listed)
+                impulses!.Refused++;
+        }
+        else if (impulses is not null)
         {
             impulses.Items[impulses.Count++] = new RockDelta
             {

@@ -1,5 +1,6 @@
 using Prospect.Engine.Net;
 using Prospect.Game.Lobby;
+using Prospect.Game.Persistence;
 using Prospect.Game.Server;
 using Prospect.Game.World;
 
@@ -13,6 +14,7 @@ public sealed class GameSession : IDisposable
 {
     private readonly ServerHost? _server;
     private readonly LoopbackLink? _link;
+    private bool _closeRequested;
 
     private GameSession(ClientSession client, ServerHost? server, LoopbackLink? link, string title)
     {
@@ -23,6 +25,12 @@ public sealed class GameSession : IDisposable
     }
 
     public ClientSession Client { get; }
+
+    /// <summary>Explicitly asks to link the private saved local character to this signed-in account. No UI is wired yet.</summary>
+    public bool RequestLocalClaim(AccountClient account) => !Volatile.Read(ref _closeRequested) && (_server?.RequestLocalClaim(account) ?? false);
+
+    /// <summary>Proof and durable claim outcome, independently of save/close status. Safe from any thread.</summary>
+    public LocalClaimState LocalClaim => _server?.LocalClaim ?? LocalClaimState.None;
 
     /// <summary>True when this process also runs the server.</summary>
     public bool IsLocal => _server is not null;
@@ -48,6 +56,36 @@ public sealed class GameSession : IDisposable
     /// <summary>The first exception thrown by any of the session's threads, if one died.</summary>
     public Exception? Fault => Client.Fault ?? _server?.Fault;
 
+    /// <summary>True when this process runs the server and the server keeps its world in a store.</summary>
+    public bool IsPersistent => _server?.IsPersistent ?? false;
+
+    /// <summary>Where the local world's saves stand; off for a remote session and for a game that is not saved. Safe from any thread.</summary>
+    public SaveStatus Save => _server?.Save ?? SaveStatus.Off;
+
+    /// <summary>
+    /// Where closing the session stands. A remote session has nothing of its own to save: it is closed the
+    /// moment <see cref="BeginClose"/> is called. Safe from any thread; takes no memory.
+    /// </summary>
+    public CloseStatus Close =>
+        _server?.Close
+        ?? (Volatile.Read(ref _closeRequested)
+            ? new CloseStatus(ClosePhase.Completed, FinalCommitOutcome.NotPersisted, CheckpointOutcome.NotAttempted, BackupOutcome.NotAttempted, null)
+            : CloseStatus.Running);
+
+    /// <summary>
+    /// Asks the session to close, and returns at once. A local saved world is frozen at the end of its current
+    /// interval and saved as it is then, before the client is disconnected: leaving must not be what the save
+    /// records. Call it instead of disposing straight away, keep drawing the session while <see cref="Close"/>
+    /// is not completed, then stop reading it and call <see cref="Dispose"/>. Look at
+    /// <see cref="CloseStatus.FinalCommit"/> first: a final save that failed is not a clean exit, and the player
+    /// should be told. Calling it again changes nothing.
+    /// </summary>
+    public void BeginClose()
+    {
+        Volatile.Write(ref _closeRequested, true);
+        _server?.BeginClose();
+    }
+
     /// <summary>
     /// Starts a server in this process and joins it over the in-process link. A private game touches no
     /// network. An unlisted or public one is the same server with a UDP listener beside the link, so other
@@ -69,9 +107,22 @@ public sealed class GameSession : IDisposable
             throw;
         }
 
-        var client = new ClientSession(link.Client, content, playerName);
-        server.Start();
-        client.Start();
+        // From here the server holds what it was given (a saved world's store too): a failure must dispose it.
+        ClientSession? client = null;
+        try
+        {
+            client = new ClientSession(link.Client, content, playerName);
+            server.Start();
+            client.Start();
+        }
+        catch
+        {
+            client?.Dispose();
+            server.Dispose();
+            link.Dispose();
+            throw;
+        }
+
         return new GameSession(client, server, link, server.Name);
     }
 
@@ -99,6 +150,12 @@ public sealed class GameSession : IDisposable
         return Join(game.Address, game.Port, content, playerName, password);
     }
 
+    /// <summary>
+    /// Stops the session's threads and frees what they used. This saves nothing: for a saved world call
+    /// <see cref="BeginClose"/> first and wait for <see cref="Close"/>. Disposing a saved world that was not
+    /// closed loses what was not saved yet, never more: the owner's hulls stay in the world when the client
+    /// disconnects, so the last completed save is whole whichever side stops first.
+    /// </summary>
     public void Dispose()
     {
         // Threads first, then the memory they were using.

@@ -80,6 +80,13 @@ public struct HullInfo
 
     /// <summary>The round of the <see cref="HullField"/> that <see cref="Flown"/> was measured in.</summary>
     public long FlownRound;
+
+    /// <summary>
+    /// The hull's durable name on the server that decides it: given once when the hull comes into the world, never
+    /// reused, kept across a save and across a repair or an edit, which replace the hull and its handle. Zero on a
+    /// client, which knows hulls by handle only.
+    /// </summary>
+    public ulong Entity;
 }
 
 /// <summary>
@@ -101,6 +108,7 @@ public sealed unsafe class HullStore : IDisposable
     private int _capacity;
     private int _highWater;
     private int _count;
+    private long _blockTotal;
 
     /// <summary>
     /// A store with room for <paramref name="capacity"/> hulls before it grows. With no
@@ -124,17 +132,32 @@ public sealed unsafe class HullStore : IDisposable
     public int Slots => _highWater;
 
     /// <summary>
+    /// The blocks of every live hull's design added up, lost blocks included: what a save of the store must have
+    /// room for. Kept as hulls come and go, so asking costs nothing.
+    /// </summary>
+    public long BlockTotal => _blockTotal;
+
+    /// <summary>
     /// Creates an intact hull of a design at a position, at rest, with full shield and battery. Its block state,
     /// with every block's hit points and the design's intact sums, is taken here and given back when the hull is
     /// destroyed.
     /// </summary>
-    public HullHandle Create(uint owner, byte designIndex, HullDesign design, Double3 position)
+    public HullHandle Create(uint owner, byte designIndex, HullDesign design, Double3 position) =>
+        Restore(owner, designIndex, design, HullState.Spawn(position, design.Flight));
+
+    /// <summary>
+    /// Creates a hull of a design with the motion a save holds, over an intact block state of its own. The
+    /// caller brings the block state to what was saved with <see cref="BlockStateStore.TryRestore"/> and reads the
+    /// flight figures again with <see cref="HullField.RestoreFigures"/>; nothing here judges the saved motion.
+    /// </summary>
+    public HullHandle Restore(uint owner, byte designIndex, HullDesign design, in HullState state)
     {
-        var handle = Create(owner, designIndex, HullState.Spawn(position, design.Flight));
+        var handle = Create(owner, designIndex, state);
         _flights[handle.Index] = design.Flight;
         ref var info = ref _infos[handle.Index];
         info.BlockState = _blockStates.Create(design, hitPoints: true);
         info.OwnsBlockState = true;
+        _blockTotal += design.BlockCount;
         return handle;
     }
 
@@ -153,6 +176,7 @@ public sealed unsafe class HullStore : IDisposable
         ref var info = ref _infos[handle.Index];
         info.BlockState = blockState;
         info.FittedRevision = _blockStates.Revision(blockState);
+        _blockTotal += design.BlockCount;
         return handle;
     }
 
@@ -221,6 +245,7 @@ public sealed unsafe class HullStore : IDisposable
 
         _highWater = 0;
         _count = 0;
+        _blockTotal = 0;
     }
 
     /// <summary>Removes a hull. Its block state goes with it if the store took it; a stale handle does nothing.</summary>
@@ -235,6 +260,10 @@ public sealed unsafe class HullStore : IDisposable
     private void Remove(ref HullInfo info)
     {
         info.Alive = false;
+
+        // A hull over a state kept elsewhere may outlive it; only a store that decides its hulls reads the total.
+        if (_blockStates.IsLive(info.BlockState))
+            _blockTotal -= _blockStates.Blocks(info.BlockState);
         if (info.OwnsBlockState)
             _blockStates.Release(info.BlockState);
         info.BlockState = default;

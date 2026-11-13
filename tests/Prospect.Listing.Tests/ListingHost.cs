@@ -10,10 +10,14 @@ using Xunit;
 
 namespace Prospect.Listing.Tests;
 
-/// <summary>A clock the tests move by hand, so expiry and rate-limit refills are tested without waiting.</summary>
+/// <summary>
+/// A clock the tests move by hand, so expiry and rate-limit refills are tested without waiting. The wall clock and the
+/// monotonic clock are two readings that can also be moved apart, as a corrected or stepped system clock does.
+/// </summary>
 public sealed class ManualClock : TimeProvider
 {
     private long ticks = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
+    private long timestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
 
     /// <inheritdoc />
     public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref ticks), TimeSpan.Zero);
@@ -22,10 +26,24 @@ public sealed class ManualClock : TimeProvider
     public override long TimestampFrequency => TimeSpan.TicksPerSecond;
 
     /// <inheritdoc />
-    public override long GetTimestamp() => Interlocked.Read(ref ticks);
+    public override long GetTimestamp() => Interlocked.Read(ref timestamp);
 
-    /// <summary>Moves the clock forward.</summary>
-    public void Advance(TimeSpan by) => Interlocked.Add(ref ticks, by.Ticks);
+    /// <summary>Moves both clocks forward together.</summary>
+    public void Advance(TimeSpan by)
+    {
+        AdvanceUtc(by);
+        AdvanceMonotonic(by);
+    }
+
+    /// <summary>Moves only the wall clock; a negative span sets it back.</summary>
+    public void AdvanceUtc(TimeSpan by) => Interlocked.Add(ref ticks, by.Ticks);
+
+    /// <summary>Moves only the monotonic clock, forward.</summary>
+    public void AdvanceMonotonic(TimeSpan by)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(by, TimeSpan.Zero);
+        Interlocked.Add(ref timestamp, by.Ticks);
+    }
 }
 
 /// <summary>The real listing service, running in the test process on a loopback port, with an HttpClient pointed at it.</summary>

@@ -25,6 +25,9 @@ internal sealed class ClientSettings
     public string LastHost { get; set; } = "127.0.0.1";
     public int LastPort { get; set; } = ProtocolInfo.DefaultPort;
 
+    /// <summary>Seconds between automatic saves of a world this game runs, from 10 to 600. Read when a world is opened.</summary>
+    public int AutosaveSeconds { get; set; } = 30;
+
     private static string FilePath => AppPaths.UserConfig("settings.json");
 
     /// <summary>Loads the settings file. A missing or unreadable file yields defaults; it is never fatal.</summary>
@@ -74,6 +77,7 @@ internal sealed class ClientSettings
         PlayerName = PlayerNames.Sanitize(PlayerName);
         LastHost = string.IsNullOrWhiteSpace(LastHost) ? "127.0.0.1" : LastHost.Trim();
         LastPort = LastPort is > 0 and <= ushort.MaxValue ? LastPort : ProtocolInfo.DefaultPort;
+        AutosaveSeconds = Math.Clamp(AutosaveSeconds, 10, 600);
     }
 }
 

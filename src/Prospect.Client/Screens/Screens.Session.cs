@@ -58,6 +58,7 @@ internal sealed partial class ScreenHost
                 var mapWasOpen = _mapOpen;
                 TrackSocial(snapshot);
                 DrawWorldInterface(snapshot);
+                DrawSaveWarning();
                 // The social windows over the world but under the map and the menu, which close them first.
                 if (!_mapOpen && !_sessionMenuOpen)
                     DrawSocialWindows(snapshot);
@@ -217,7 +218,7 @@ internal sealed partial class ScreenHost
     {
         DrawDim(0.6f);
         BeginRoot("##sessionmenu"u8);
-        var size = new float2(Kit.Px(424), Math.Min(Kit.Px(452), _ui.DisplaySize.Y - Kit.Px(24)));
+        var size = new float2(Kit.Px(424), Math.Min(Kit.Px(512), _ui.DisplaySize.Y - Kit.Px(24)));
         var min = (_ui.DisplaySize - size) * 0.5f;
         BeginPanel("##sessionmenupanel"u8, min, size);
 
@@ -234,13 +235,15 @@ internal sealed partial class ScreenHost
             OpenWorldSettings(snapshot);
         if (Kit.MenuItem("Settings"u8, 360))
             OpenSettings(Screen.Session);
-        if (Kit.MenuItem("Leave Session"u8, 360))
+        // A saved world is saved on the way out; the labels say so, since there is no other save to make.
+        var saved = _app.Session is { IsPersistent: true };
+        if (Kit.MenuItem(saved ? "Save and Leave"u8 : "Leave Session"u8, 360))
         {
             _sessionMenuOpen = false;
             _app.LeaveSession();
         }
 
-        if (Kit.MenuItem("Quit to Desktop"u8, 360))
+        if (Kit.MenuItem(saved ? "Save and Quit"u8 : "Quit to Desktop"u8, 360))
             _app.Quit();
 
         EndPanel();
@@ -275,7 +278,10 @@ internal sealed partial class ScreenHost
             Kit.Lock(draw, new float2(lockAt.X + Kit.Px(14), (ImGui.GetItemRectMin().Y + lockAt.Y) * 0.5f), Theme.TextDim);
         }
 
-        if (_app.Session is not { IsLocal: true } session || snapshot.Visibility != ServerVisibility.Public)
+        if (_app.Session is not { IsLocal: true } session)
+            return;
+        DrawSaveStatus(session, snapshot.Visibility);
+        if (snapshot.Visibility != ServerVisibility.Public)
             return;
 
         Kit.Space(Theme.Space1);

@@ -3,6 +3,11 @@
     <ProjectReference Include="../Prospect.Engine/Prospect.Engine.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <!-- World saves. The versions are pinned centrally; SqliteWorldStore checks the native build it was audited with. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
+  </ItemGroup>
+  <ItemGroup>
     <InternalsVisibleTo Include="Prospect.Tests" />
   </ItemGroup>
 </Project>

@@ -29,6 +29,12 @@ public sealed class AccountsOptions
     public int MaxIncoming { get; set; } = 200;
     /// <summary>Pending requests expire after this many days.</summary>
     public int PendingDays { get; set; } = 30;
+    /// <summary>Seconds a game ticket can be redeemed after it is issued.</summary>
+    public int TicketSeconds { get; set; } = 30;
+    /// <summary>Unredeemed game tickets the whole service holds at once.</summary>
+    public int MaxTickets { get; set; } = 10000;
+    /// <summary>Unredeemed game tickets one account holds at once.</summary>
+    public int TicketsPerAccount { get; set; } = 4;
     internal string Callback => PublicUrl.TrimEnd('/') + "/v1/accounts/discord/callback";
 
     internal void Validate()
@@ -44,7 +50,9 @@ public sealed class AccountsOptions
         if (MaxAttempts is < 1 or > 100000 || AttemptsPerAddress < 1 || AttemptsPerAddress > MaxAttempts
             || DiscordConcurrency is < 1 or > 64 || DiscordTimeoutSeconds is < 1 or > 60
             || MaxFriends is < 1 or > 200 || MaxOutgoing is < 1 or > 50 || MaxIncoming is < 1 or > 1000
-            || PendingDays is < 1 or > 365)
+            || PendingDays is < 1 or > 365
+            || TicketSeconds is < 1 or > 300 || MaxTickets is < 1 or > 1000000
+            || TicketsPerAccount < 1 || TicketsPerAccount > MaxTickets)
             throw new InvalidOperationException("Invalid Accounts limits.");
     }
 }

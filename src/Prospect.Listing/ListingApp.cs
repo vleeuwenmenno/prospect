@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Net.Http.Headers;
@@ -36,7 +37,12 @@ public static class ListingApp
         builder.Services.TryAddSingleton<DiscordEndpoints>();
         builder.Services.AddSingleton<DiscordClient>();
         builder.Services.AddSingleton<SigninAttempts>();
-        if (accounts.Enabled) builder.Services.AddHostedService(p => p.GetRequiredService<SigninAttempts>());
+        builder.Services.AddSingleton<GameTickets>();
+        if (accounts.Enabled)
+        {
+            builder.Services.AddHostedService(p => p.GetRequiredService<SigninAttempts>());
+            builder.Services.AddHostedService(p => p.GetRequiredService<GameTickets>());
+        }
         builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 
         builder.Services.AddSingleton(options);
@@ -89,7 +95,17 @@ public static class ListingApp
         // Whatever goes wrong, a caller sees one fixed sentence: never a stack trace, never what it sent.
         app.UseExceptionHandler(new ExceptionHandlerOptions
         {
-            ExceptionHandler = context => WriteError(context.Response, 500, "Internal error."),
+            ExceptionHandler = context =>
+            {
+                // The handler starts from an emptied response, so what the gate set for an account route is put back.
+                var endpoint = context.Features.Get<IExceptionHandlerFeature>()?.Endpoint;
+                if (endpoint?.Metadata.GetMetadata<LimitedBy>() is { } limitedBy)
+                {
+                    KeepPrivate(context.Response, limitedBy.Kind);
+                }
+
+                return WriteError(context.Response, 500, "Internal error.");
+            },
         });
         // The built-in middleware treats two empty trust lists as "trust every peer", so with no trusted proxy it must
         // not run at all. Then the address is always the one the request connected from.
@@ -223,11 +239,7 @@ public static class ListingApp
             return next(context);
         }
 
-        if (limitedBy.Kind is RequestKind.Auth or RequestKind.Account)
-        {
-            context.Response.Headers.CacheControl = "no-store";
-            context.Response.Headers["Referrer-Policy"] = "no-referrer";
-        }
+        KeepPrivate(context.Response, limitedBy.Kind);
         var address = ClientAddress(context);
         if (IsTrustedProxy(address, options))
         {
@@ -246,6 +258,19 @@ public static class ListingApp
             context.Response,
             429,
             decision.Global ? "The service is busy. Try again shortly." : "Too many requests from this address.");
+    }
+
+    // Account answers carry tokens, tickets and identities. They are marked before anything can refuse the request,
+    // so a refusal (proxy, rate limit, validation, a fault) is marked exactly as a success is.
+    private static void KeepPrivate(HttpResponse response, RequestKind kind)
+    {
+        if (kind is RequestKind.Post or RequestKind.List)
+        {
+            return;
+        }
+
+        response.Headers.CacheControl = "no-store";
+        response.Headers["Referrer-Policy"] = "no-referrer";
     }
 
     private static bool IsTrustedProxy(IPAddress normalized, ListingOptions options)

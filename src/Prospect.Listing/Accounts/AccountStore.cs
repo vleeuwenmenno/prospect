@@ -8,9 +8,24 @@ internal sealed class AccountStore(AccountsOptions options, TimeProvider time)
     private bool initialized;
 
     // SQLite is synchronous. Immediate admission bounds contention to one request thread, including external locks.
-    internal T Run<T>(Func<SqliteConnection, T> work)
+    //
+    // committed runs only after the transaction has committed and the connection is closed, and before the next
+    // operation is admitted. What it does is therefore ordered against every other database operation (a logout, a
+    // session eviction) exactly as this transaction was. It must be brief and must not start database work.
+    internal T Run<T>(Func<SqliteConnection, T> work, Action<T>? committed = null)
     {
         if (!slot.Wait(0)) throw new AccountFailure(503);
+        try
+        {
+            var result = Transact(work);
+            committed?.Invoke(result);
+            return result;
+        }
+        finally { slot.Release(); }
+    }
+
+    private T Transact<T>(Func<SqliteConnection, T> work)
+    {
         try
         {
             using var db = new SqliteConnection(new SqliteConnectionStringBuilder
@@ -58,7 +73,6 @@ internal sealed class AccountStore(AccountsOptions options, TimeProvider time)
         {
             throw new AccountFailure(503);
         }
-        finally { slot.Release(); }
     }
 
     internal long Now => time.GetUtcNow().ToUnixTimeSeconds();
@@ -94,6 +108,27 @@ internal sealed class AccountStore(AccountsOptions options, TimeProvider time)
         var id = Scalar(db, "SELECT account FROM sessions WHERE hash=$h AND expires>$n",
             ("$h", AccountCrypto.Hash(token)), ("$n", Now)) as string;
         return id is null ? throw new AccountFailure(401) : ReadAccount(db, id);
+    }
+
+    // The account and absolute expiry of a live session, named by its hash: what a game ticket is issued against.
+    internal SessionGrant Grant(SqliteConnection db, byte[] hash)
+    {
+        using var command = Command(db, "SELECT account,expires FROM sessions WHERE hash=$h AND expires>$n", ("$h", hash), ("$n", Now));
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? new(reader.GetString(0), reader.GetInt64(1)) : throw new AccountFailure(401);
+    }
+
+    // Redemption asks for the exact pair a ticket was issued to: the session must still exist, still belong to that
+    // account and still be unexpired. An account alone is not enough, since logout and eviction end one session.
+    // Expiry is tested here because Cleanup reclaims only some expired rows per operation.
+    internal TicketHolder? Holder(SqliteConnection db, byte[] hash, string account)
+    {
+        using var command = Command(db, """
+            SELECT a.name,s.expires FROM sessions s JOIN accounts a ON a.id=s.account
+            WHERE s.hash=$h AND s.account=$i AND s.expires>$n
+            """, ("$h", hash), ("$i", account), ("$n", Now));
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? new(account, reader.GetString(0), reader.GetInt64(1)) : null;
     }
 
     private static Account ReadAccount(SqliteConnection db, string id)

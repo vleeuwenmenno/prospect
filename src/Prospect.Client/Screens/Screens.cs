@@ -17,6 +17,9 @@ internal enum Screen
 
     /// <summary>The account and friends, from the main menu.</summary>
     Account,
+
+    /// <summary>The list of saved worlds, from the main menu.</summary>
+    LoadWorld,
 }
 
 /// <summary>
@@ -67,6 +70,13 @@ internal sealed partial class ScreenHost
             EnterJoin();
         if (screen == Screen.Account)
             EnterAccount();
+        if (screen is Screen.MainMenu or Screen.LoadWorld)
+        {
+            _menuError = "";
+            _loadError = "";
+            if (!_app.Lifecycle.Busy)
+                _app.Worlds.Refresh();
+        }
     }
 
     public void Draw(SessionSnapshot? snapshot)
@@ -79,46 +89,65 @@ internal sealed partial class ScreenHost
         if (_screen == Screen.Session && snapshot is null)
             Show(Screen.MainMenu);
 
-        switch (_screen)
+        // While a session is on its way in or out, or the player has to hear how one closed, that is all there
+        // is: nothing else can be asked of a session in between.
+        var lifecycle = _app.Lifecycle;
+        var holding = lifecycle.Busy || lifecycle.Report is not null;
+        if (lifecycle.Busy)
         {
-            case Screen.Splash:
-                DrawSplash();
-                break;
-            case Screen.MainMenu:
-                DrawBackdrop();
-                DrawMainMenu(fade);
-                break;
-            case Screen.Join:
-                DrawBackdrop();
-                DrawJoin(fade);
-                break;
-            case Screen.Settings:
-                if (_settingsReturn == Screen.Session)
-                    DrawDim(0.72f);
-                else
-                    DrawBackdrop();
-                DrawSettings(fade);
-                break;
-            case Screen.NewGame:
-                DrawBackdrop();
-                DrawNewGame(fade);
-                break;
-            case Screen.Credits:
-                DrawBackdrop();
-                DrawCredits(fade);
-                break;
-            case Screen.Account:
-                DrawBackdrop();
-                DrawAccountScreen(fade);
-                break;
-            case Screen.Session when snapshot is not null:
-                DrawSession(snapshot, fade);
-                break;
+            DrawBackdrop();
+            DrawLifecycle(fade);
         }
+        else if (lifecycle.Report is { } report)
+        {
+            DrawBackdrop();
+            DrawCloseReport(report, fade);
+        }
+        else
+            switch (_screen)
+            {
+                case Screen.Splash:
+                    DrawSplash();
+                    break;
+                case Screen.MainMenu:
+                    DrawBackdrop();
+                    DrawMainMenu(fade);
+                    break;
+                case Screen.Join:
+                    DrawBackdrop();
+                    DrawJoin(fade);
+                    break;
+                case Screen.Settings:
+                    if (_settingsReturn == Screen.Session)
+                        DrawDim(0.72f);
+                    else
+                        DrawBackdrop();
+                    DrawSettings(fade);
+                    break;
+                case Screen.NewGame:
+                    DrawBackdrop();
+                    DrawNewGame(fade);
+                    break;
+                case Screen.Credits:
+                    DrawBackdrop();
+                    DrawCredits(fade);
+                    break;
+                case Screen.Account:
+                    DrawBackdrop();
+                    DrawAccountScreen(fade);
+                    break;
+                case Screen.LoadWorld:
+                    DrawBackdrop();
+                    DrawLoadWorld(fade);
+                    break;
+                case Screen.Session when snapshot is not null:
+                    DrawSession(snapshot, fade);
+                    break;
+            }
 
         Kit.Fade = 1f;
         // The game screen draws its own bar, between the world's windows and its menu.
-        if (_screen is Screen.MainMenu or Screen.Account or Screen.Settings)
+        if (!holding && _screen is Screen.MainMenu or Screen.Account or Screen.Settings)
             DrawTopBar(snapshot);
         if (_app.ShowPerformance)
             DrawPerformance(snapshot);

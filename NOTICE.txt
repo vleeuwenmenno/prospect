@@ -3,3 +3,23 @@ BRUTAL game development framework is Copyright (c) 2024 Ahwoo Limited.
 This product is built with BRUTAL, a game development framework by Ahwoo Limited, used under the BRUTAL License v1.0.
 
 www.ahwoo.com/brutal
+
+World persistence dependencies:
+
+Microsoft.Data.Sqlite and Microsoft.Data.Sqlite.Core 10.0.0
+Copyright (c) .NET Foundation and Contributors.
+NuGet attribution: © Microsoft Corporation. All rights reserved.
+MIT license: LICENSES/third-party/Microsoft.Data.Sqlite-MIT.txt
+Source: https://github.com/dotnet/dotnet/tree/b0f34d51fccc69fd334253924abd8d6853fad7aa
+License copied from that commit's LICENSE.TXT (the commit in the Core package's nuspec).
+
+SQLitePCLRaw core/provider/config/bundle_e_sqlite3 3.0.5
+Copyright 2014-2025 SourceGear, LLC (core); Copyright 2014-2026 SourceGear, LLC (bundle).
+Apache License 2.0: LICENSES/third-party/SQLitePCLRaw-Apache-2.0.txt
+Source: https://github.com/ericsink/SQLitePCL.raw/tree/ed046114d5a30534e13294d94d78eb73de896ad4
+License copied from that commit's LICENSE.TXT (the commit in the core package's nuspec).
+
+SQLite 3.53.4 (native e_sqlite3)
+Public domain: LICENSES/third-party/SQLite-Public-Domain.txt
+That file is copied verbatim from NuGet SQLite 3.53.4 LICENSE.txt.
+Source and public-domain declaration: https://sqlite.org/copyright.html

@@ -95,7 +95,7 @@ public sealed class EditorSessionTests
             Server = new ServerHost(new ServerConfig(), Content, [.. Wires]);
             Hulls = Field<HullStore>("_hulls");
             for (var i = 0; i < joined; i++) Join(i);
-            Assert.True(Until(() => Enumerable.Range(0, joined).All(i => Snap(i).HullCount > 0), sleep: true), "the clients should be in space");
+            Assert.True(Until(() => Enumerable.Range(0, joined).All(i => Snap(i).HullCount > 0), settle: true), "the clients should be in space");
         }
 
         internal T Field<T>(string name) => (T)typeof(ServerHost).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(Server)!;
@@ -119,15 +119,27 @@ public sealed class EditorSessionTests
             }
         }
 
-        /// <summary>Steps until a condition holds; with <paramref name="sleep"/> it gives worker threads their time.</summary>
-        internal bool Until(Func<bool> condition, int steps = 2400, bool sleep = false)
+        /// <summary>
+        /// Steps until a condition holds. With <paramref name="settle"/>, a check or decode that is running on a
+        /// worker finishes before each interval is stepped (<see cref="TestWorkers"/>), so what the wait costs
+        /// in intervals does not depend on how soon the machine gave the worker a processor.
+        /// </summary>
+        internal bool Until(Func<bool> condition, int steps = 2400, bool settle = false)
         {
             for (var i = 0; i < steps && !condition(); i++)
             {
+                if (settle) Settle();
                 Step();
-                if (sleep) Thread.Sleep(1);
             }
             return condition();
+        }
+
+        /// <summary>Waits, without stepping an interval, for the checks and decodes that are running right now.</summary>
+        internal void Settle()
+        {
+            TestWorkers.Settle(Server);
+            for (var i = 0; i < Clients.Length; i++)
+                if (Clients[i] is { } client) TestWorkers.Settle(client, "client " + i);
         }
 
         internal SessionSnapshot Snap(int client) => Clients[client]!.AcquireSnapshot();
@@ -153,9 +165,9 @@ public sealed class EditorSessionTests
         }
 
         /// <summary>Waits for the next answer the client gets about its edit.</summary>
-        internal EditorView Answer(int client, uint after, bool sleep = false)
+        internal EditorView Answer(int client, uint after, bool settle = false)
         {
-            Assert.True(Until(() => Editor(client).Serial != after, sleep: sleep), "the server should answer");
+            Assert.True(Until(() => Editor(client).Serial != after, settle: settle), "the server should answer");
             return Editor(client);
         }
 
@@ -232,8 +244,8 @@ public sealed class EditorSessionTests
         var old = rig.Own(0);
         var token = rig.Open(0);
         Assert.True(rig.Input(0).CommitEdit(token, Edited(rig.Snap(0))));
-        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, sleep: true));
-        Assert.True(rig.Until(() => rig.Snap(0).Content.Designs.Length == rig.Content.Designs.Length + 1, sleep: true));
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, settle: true));
+        Assert.True(rig.Until(() => rig.Snap(0).Content.Designs.Length == rig.Content.Designs.Length + 1, settle: true));
         rig.Input(0).IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = rig.Hulls.State(Rig.Index(old)).Position + new Double3(600, 0, 0) });
         // The scheduled order must reach its interval before mesh readiness can replace the hull.
         Assert.True(rig.Until(() => rig.Hulls.State(Rig.Index(old)).Jump != JumpPhase.None));
@@ -251,8 +263,8 @@ public sealed class EditorSessionTests
         var old = rig.Own(0);
         var token = rig.Open(0);
         Assert.True(rig.Input(0).CommitEdit(token, Edited(rig.Snap(0))));
-        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, sleep: true));
-        Assert.True(rig.Until(() => rig.Snap(0).Content.Designs.Length == rig.Content.Designs.Length + 1, sleep: true));
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, settle: true));
+        Assert.True(rig.Until(() => rig.Snap(0).Content.Designs.Length == rig.Content.Designs.Length + 1, settle: true));
         // Let previously scheduled neutral inputs expire without sampling more.
         for (var i = 0; i < 32; i++) ((ITickHandler)rig.Server).Tick(rig.Tick++);
         var connection = rig.Field<Array>("_connections").GetValue(0)!;
@@ -286,7 +298,7 @@ public sealed class EditorSessionTests
         var token = rig.Open(0);
         Assert.True(rig.Input(0).CommitEdit(token, bytes));
         rig.Input(0).ReportInstalledDesigns(rig.Content.Designs.Length + 1);
-        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied, sleep: true));
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied, settle: true));
         Assert.True(rig.Until(() => rig.Own(0) == rig.Editor(0).Hull));
         token = rig.Open(0);
         var serial = rig.Editor(0).Serial;
@@ -321,7 +333,7 @@ public sealed class EditorSessionTests
         var token = rig.Open(0);
         Assert.True(rig.Input(0).CommitEdit(token, Edited(rig.Snap(0))));
         rig.Input(0).ReportInstalledDesigns(rig.Content.Designs.Length + 1);
-        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied, sleep: true));
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied, settle: true));
         var drone = Rig.Handle(rig.Editor(0).Hull);
         Assert.True(rig.Until(() => rig.Own(0) == drone.Packed));
         Assert.True(rig.Hulls.Info(drone.Index).EscapeDrone);
@@ -368,13 +380,13 @@ public sealed class EditorSessionTests
         var token = rig.Open(0);
         Assert.True(rig.Input(0).CommitEdit(token, bytes));
         rig.Input(0).ReportInstalledDesigns(startup + 1);
-        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied, sleep: true));
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied, settle: true));
         Assert.True(rig.Until(() => rig.Wires[1].DesignChunksBeforeRefusal == 0));
         Assert.Equal(startup, rig.Snap(1).Content.Designs.Length);
         var requests = rig.Wires[1].Received[(byte)MessageId.DesignRequest];
         rig.Step(checked((int)rig.Content.BlockTransfers.AdmissionTicks + 2));
         rig.Wires[1].DesignChunksBeforeRefusal = -1;
-        Assert.True(rig.Until(() => rig.Snap(1).Content.Designs.Length == startup + 1, sleep: true), "partial download should restart after the sender expires");
+        Assert.True(rig.Until(() => rig.Snap(1).Content.Designs.Length == startup + 1, settle: true), "partial download should restart after the sender expires");
         Assert.True(rig.Wires[1].Received[(byte)MessageId.DesignRequest] > requests);
         Assert.Equal(bytes, DesignBytes.Encode(rig.Snap(1).Content.Designs[startup]));
         rig.Input(1).ReportInstalledDesigns(startup + 1);
@@ -384,7 +396,7 @@ public sealed class EditorSessionTests
         var next = Edited(rig.Snap(0));
         Assert.True(rig.Input(0).CommitEdit(token, next));
         rig.Input(0).ReportInstalledDesigns(startup + 2);
-        Assert.True(rig.Until(() => rig.Snap(1).Content.Designs.Length == startup + 2, sleep: true));
+        Assert.True(rig.Until(() => rig.Snap(1).Content.Designs.Length == startup + 2, settle: true));
         Assert.Equal(next, DesignBytes.Encode(rig.Snap(1).Content.Designs[startup + 1]));
     }
 
@@ -405,12 +417,12 @@ public sealed class EditorSessionTests
 
         var token = rig.Open(0);
         Assert.True(rig.Input(0).CommitEdit(token, bytes));
-        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, sleep: true), $"the design should be accepted, not {rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, settle: true), $"the design should be accepted, not {rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
         Assert.True(rig.Wires[0].Received[(byte)MessageId.EditorData] >= 1);
         Assert.Equal(bytes.Length, rig.Editor(0).SentBytes);
 
         // The design is in both sessions' catalogues, checked and decoded, at the end and nowhere else.
-        Assert.True(rig.Until(() => rig.Snap(0).Content.Designs.Length == startup + 1 && rig.Snap(1).Content.Designs.Length == startup + 1, sleep: true));
+        Assert.True(rig.Until(() => rig.Snap(0).Content.Designs.Length == startup + 1 && rig.Snap(1).Content.Designs.Length == startup + 1, settle: true));
         for (var client = 0; client < 2; client++)
         {
             var content = rig.Snap(client).Content;
@@ -519,10 +531,10 @@ public sealed class EditorSessionTests
 
         var token = rig.Open(0);
         Assert.True(rig.Input(0).CommitEdit(token, bytes));
-        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, sleep: true), $"the wedges should be accepted, not {rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, settle: true), $"the wedges should be accepted, not {rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
 
         // Both players decode the same design, wedges and all, and their figures agree with the server's.
-        Assert.True(rig.Until(() => rig.Snap(0).Content.Designs.Length == startup + 1 && rig.Snap(1).Content.Designs.Length == startup + 1, sleep: true));
+        Assert.True(rig.Until(() => rig.Snap(0).Content.Designs.Length == startup + 1 && rig.Snap(1).Content.Designs.Length == startup + 1, settle: true));
         var served = rig.Server.Content.Designs[startup];
         for (var client = 0; client < 2; client++)
         {
@@ -584,9 +596,10 @@ public sealed class EditorSessionTests
         Assert.True(rig.Input(0).CommitEdit(token, bytes));
         Assert.True(rig.Until(() => rig.Wires[0].LastPhase == EditorPhase.Checking), "the design should arrive");
         rig.Hulls.Info(own).DamageTick = rig.Tick;
-        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Closed, sleep: true));
+        // Not settled: the edit must end while its check is still running, so the buffer is one a worker reads.
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Closed));
         Assert.Equal(EditorReason.Damaged, rig.Editor(0).Reason);
-        Assert.True(rig.Until(() => !Held(), sleep: true), "the buffer should come back when the check is done");
+        Assert.True(rig.Until(() => !Held(), settle: true), "the buffer should come back when the check is done");
         Assert.Equal(rig.Content.Designs.Length, rig.Field<DesignCatalogue>("_catalogue").Count);
         rig.Step(TickLoop.SimulationHz);
 
@@ -597,7 +610,7 @@ public sealed class EditorSessionTests
         rig.Input(0).RequestControl(0);
         Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Closed));
         Assert.Equal(EditorReason.HullChanged, rig.Editor(0).Reason);
-        Assert.True(rig.Until(() => !Held(), sleep: true));
+        Assert.True(rig.Until(() => !Held(), settle: true));
 
         // Back in the pod: a jump order ends an edit, and a hull in a jump is not edited.
         Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Design == rig.Content.DroneDesign));
@@ -616,7 +629,7 @@ public sealed class EditorSessionTests
         // Damage while the clients get ready: the design stays in the catalogue, the hull is not replaced.
         token = rig.Open(0);
         Assert.True(rig.Input(0).CommitEdit(token, bytes));
-        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, sleep: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, settle: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
         rig.Hulls.Info(own).DamageTick = rig.Tick;
         Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Closed));
         Assert.Equal(EditorReason.Damaged, rig.Editor(0).Reason);
@@ -723,7 +736,7 @@ public sealed class EditorSessionTests
             Commit(design, digest);
             for (var at = 0; at < design.Length; at += EditorDataMessage.MaxChunk)
                 rig.Raw(0, NetChannel.Bulk, Chunk(token, at, design.AsSpan(at, Math.Min(EditorDataMessage.MaxChunk, design.Length - at))));
-            Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Open, sleep: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
+            Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Open, settle: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
             Assert.Equal(expected, rig.Editor(0).Reason);
         }
 
@@ -759,7 +772,7 @@ public sealed class EditorSessionTests
         Commit(bytes, hash);
         for (var at = 0; at < bytes.Length; at += EditorDataMessage.MaxChunk)
             rig.Raw(0, NetChannel.Bulk, Chunk(token, at, bytes.AsSpan(at, Math.Min(EditorDataMessage.MaxChunk, bytes.Length - at))));
-        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, sleep: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, settle: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
         Assert.Equal(startup + 1, catalogue.Count);
         Assert.Equal(bytes, catalogue.Bytes[startup]);
     }
@@ -803,7 +816,7 @@ public sealed class EditorSessionTests
         Assert.True(rig.Input(0).CommitEdit(token, bytes));
         rig.Input(0).ReportInstalledDesigns(startup + 1);
         rig.Input(1).ReportInstalledDesigns(startup + 1);
-        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied, sleep: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied, settle: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
         Assert.Equal(startup + 1, catalogue.Count);
         var rebuilt = Rig.Handle(rig.Editor(0).Hull);
         Assert.Equal(0u, rig.Hulls.Revision(rebuilt.Index));
@@ -820,6 +833,8 @@ public sealed class EditorSessionTests
         // The other player builds the same thing: the catalogue has it, so nothing is sent and no number is used.
         var uploaded = rig.Wires[1].Received[(byte)MessageId.EditorData];
         var theirs = rig.Own(1);
+        // Their client has decoded the first player's design by now: only then can it say it is ready for it.
+        Assert.True(rig.Until(() => rig.Snap(1).Content.Designs.Length == startup + 1, settle: true), "the other player should have the design");
         token = rig.Open(1);
         Assert.True(rig.Input(1).CommitEdit(token, bytes));
         Assert.True(rig.Until(() => rig.Editor(1).Phase == EditorPhase.Applied), $"{rig.Editor(1).Phase}/{rig.Editor(1).Reason}");
@@ -856,7 +871,7 @@ public sealed class EditorSessionTests
         bool Held() => rig.Field<Array>("_uploads").Cast<object>().Any(u => (bool)u.GetType().GetField("Held")!.GetValue(u)!);
         void Applied()
         {
-            Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied, sleep: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
+            Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied, settle: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
             Assert.True(rig.Until(() => rig.Own(0) == rig.Editor(0).Hull));
         }
 
@@ -936,11 +951,11 @@ public sealed class EditorSessionTests
         var bytes = Edited(rig.Snap(0));
         var token = rig.Open(0);
         Assert.True(rig.Input(0).CommitEdit(token, bytes));
-        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, sleep: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, settle: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
 
         // The second joins now: its manifest lists the new design, and it fetches it as part of being let in.
         rig.Join(3);
-        Assert.True(rig.Until(() => rig.Snap(3).HullCount > 0, sleep: true), "the second latecomer should be let in");
+        Assert.True(rig.Until(() => rig.Snap(3).HullCount > 0, settle: true), "the second latecomer should be let in");
         Assert.Equal(startup + 1, rig.Snap(3).Content.Designs.Length);
         Assert.Equal(bytes, DesignBytes.Encode(rig.Snap(3).Content.Designs[startup]));
         Assert.Equal(0, rig.Wires[3].Sent[(byte)MessageId.DesignNotice]);
@@ -948,7 +963,7 @@ public sealed class EditorSessionTests
         // The first gets its old manifest, is let in knowing the old designs, and is told of the new one then.
         Assert.Equal(SessionState.Downloading, rig.Snap(2).State);
         rig.Wires[2].RefuseBulk = false;
-        Assert.True(rig.Until(() => rig.Snap(2).HullCount > 0 && rig.Snap(2).Content.Designs.Length == startup + 1, sleep: true), "the first latecomer should catch up");
+        Assert.True(rig.Until(() => rig.Snap(2).HullCount > 0 && rig.Snap(2).Content.Designs.Length == startup + 1, settle: true), "the first latecomer should catch up");
         Assert.Equal(1, rig.Wires[2].Sent[(byte)MessageId.DesignNotice]);
         Assert.Equal(bytes, DesignBytes.Encode(rig.Snap(2).Content.Designs[startup]));
 
@@ -996,16 +1011,16 @@ public sealed class EditorSessionTests
         Assert.Equal(EditorPhase.Open, rig.Editor(0).Phase);
         Assert.Equal(startup, rig.Snap(1).Content.Designs.Length);
         rig.Wires[0].RefuseReliable = false;
-        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, sleep: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, settle: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
         rig.Wires[1].RefuseReliable = false;
         Assert.True(rig.Until(() => rig.Wires[1].Sent[(byte)MessageId.DesignNotice] == 1));
         rig.Step(90);
         Assert.Equal(startup, rig.Snap(1).Content.Designs.Length);
         rig.Wires[1].RefuseBulk = false;
-        Assert.True(rig.Until(() => rig.Snap(1).Content.Designs.Length == startup + 1, sleep: true), "the other player should get the design once bulk data flows");
+        Assert.True(rig.Until(() => rig.Snap(1).Content.Designs.Length == startup + 1, settle: true), "the other player should get the design once bulk data flows");
 
         // The owner's renderer could not build the mesh: the edit ends, the old hull stays and is still flown.
-        Assert.True(rig.Until(() => rig.Snap(0).Content.Designs.Length == startup + 1, sleep: true));
+        Assert.True(rig.Until(() => rig.Snap(0).Content.Designs.Length == startup + 1, settle: true));
         rig.Input(0).ReportInstalledDesigns(startup);
         rig.Input(0).ReportDesignFailure(startup + 1);
         Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Closed), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
@@ -1029,7 +1044,7 @@ public sealed class EditorSessionTests
         var theirs = rig.Own(1);
         token = rig.Open(1);
         Assert.True(rig.Input(1).CommitEdit(token, Edited(rig.Snap(1), 2)));
-        Assert.True(rig.Until(() => rig.Editor(1).Phase == EditorPhase.Publishing, sleep: true), $"{rig.Editor(1).Phase}/{rig.Editor(1).Reason}");
+        Assert.True(rig.Until(() => rig.Editor(1).Phase == EditorPhase.Publishing, settle: true), $"{rig.Editor(1).Phase}/{rig.Editor(1).Reason}");
         Assert.True(rig.Until(() => rig.Editor(1).Phase == EditorPhase.Closed, 2 * TickLoop.SimulationHz + 30));
         Assert.Equal(EditorReason.ClientNotReady, rig.Editor(1).Reason);
         Assert.True(rig.Hulls.IsAlive(Rig.Handle(theirs)));
@@ -1064,7 +1079,7 @@ public sealed class EditorSessionTests
 
         // Now the second player's design goes through.
         Assert.True(rig.Input(1).CommitEdit(theirs, other));
-        Assert.True(rig.Until(() => rig.Editor(1).Phase == EditorPhase.Publishing, sleep: true), $"{rig.Editor(1).Phase}/{rig.Editor(1).Reason}");
+        Assert.True(rig.Until(() => rig.Editor(1).Phase == EditorPhase.Publishing, settle: true), $"{rig.Editor(1).Phase}/{rig.Editor(1).Reason}");
 
         // A commit right after a failed one is asked to wait; after the wait it is taken.
         rig.Raw(0, NetChannel.Reliable, Request(EditorRequestKind.Commit, token, bytes.Length, hash));
@@ -1078,7 +1093,7 @@ public sealed class EditorSessionTests
         Assert.Equal((EditorPhase.Open, EditorReason.TooSoon, 1), (wait.Phase, wait.Reason, wait.WaitSeconds));
         rig.Step(TickLoop.SimulationHz);
         Assert.True(rig.Input(0).CommitEdit(token, bytes));
-        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, sleep: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, settle: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
         Assert.Equal(rig.Content.Designs.Length + 2, rig.Field<DesignCatalogue>("_catalogue").Count);
     }
 
@@ -1335,7 +1350,7 @@ public sealed class EditorSessionTests
         var token = rig.Open(0);
         Assert.True(rig.Input(0).CommitEdit(token, export.Bytes));
         rig.Input(0).ReportInstalledDesigns(designs);
-        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied, sleep: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied, settle: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
         Assert.True(rig.Until(() => rig.Own(0) == rig.Editor(0).Hull));
         return Rig.Index(rig.Editor(0).Hull);
     }
@@ -1446,7 +1461,7 @@ public sealed class EditorSessionTests
         Assert.True(rig.Input(0).CommitEdit(token, Edited(rig.Snap(0))));
         rig.Input(0).ReportInstalledDesigns(startup + 1);
         rig.Input(1).ReportInstalledDesigns(startup + 1);
-        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied, sleep: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied, settle: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
         Assert.True(rig.Until(() => rig.Own(0) == rig.Editor(0).Hull));
         rig.Open(1);
         rig.Step(240);

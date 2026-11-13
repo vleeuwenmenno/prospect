@@ -38,9 +38,11 @@ internal sealed class AccountService : IAsyncDisposable
     /// <summary>The Discord user the next consent signs in as.</summary>
     public string User = "1001";
 
-    public static async Task<AccountService> StartAsync()
+    internal TimeProvider Clock = TimeProvider.System;
+
+    public static async Task<AccountService> StartAsync(TimeProvider? clock = null)
     {
-        var service = new AccountService();
+        var service = new AccountService { Clock = clock ?? TimeProvider.System };
         Directory.CreateDirectory(service._directory);
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
@@ -101,6 +103,7 @@ internal sealed class AccountService : IAsyncDisposable
         _app = Prospect.Listing.ListingApp.Build([], b =>
         {
             b.Configuration.AddInMemoryCollection(values);
+            b.Services.AddSingleton(Clock);
             b.Services.AddSingleton(new DiscordEndpoints(new(provider, "/token"), new(provider, "/user"), new(provider, "/authorization")));
             b.Logging.ClearProviders();
             b.WebHost.UseUrls("http://127.0.0.1:0");
@@ -708,30 +711,24 @@ public sealed class AccountClientTests
     [Fact]
     public async Task EnteringANetworkGameIsCheckedBeforeTheRunningSessionIsLeft()
     {
-        var leaves = 0;
-        var opens = 0;
-        void Leave() => leaves++;
-        // The opener fails as a busy port does, so no real session is needed to see whether it ran.
-        GameSession Open()
-        {
-            opens++;
-            throw new IOException("The port is in use.");
-        }
+        // Entering hands the request to the session lifecycle, which closes the running session first: counting
+        // the hand-overs is counting the sessions that would have been left.
+        var enters = 0;
+        void Enter() => enters++;
 
         // Without accounts: a private game goes ahead; a network one leaves the running session alone.
         using var off = new AccountClient(null, static _ => false);
-        Assert.False(NetworkPlay.TryEnter(off, false, true, Leave, Open, out var session, out var error));
-        Assert.Equal((1, 1, "The port is in use."), (leaves, opens, error));
-        Assert.Null(session);
-        Assert.False(NetworkPlay.TryEnter(off, true, true, Leave, Open, out _, out error));
-        Assert.Equal((1, 1), (leaves, opens));
+        Assert.True(NetworkPlay.TryEnter(off, false, true, Enter, out var error));
+        Assert.Equal((1, ""), (enters, error));
+        Assert.False(NetworkPlay.TryEnter(off, true, true, Enter, out error));
+        Assert.Equal(1, enters);
         Assert.Contains("--listing off", error);
-        Assert.False(NetworkPlay.TryEnter(off, true, false, Leave, Open, out _, out error));
-        Assert.Equal((1, 1), (leaves, opens));
+        Assert.False(NetworkPlay.TryEnter(off, true, false, Enter, out error));
+        Assert.Equal(1, enters);
 
         using var sample = AccountClient.Sample(AccountState.SignedIn, Encoding.UTF8.GetBytes(Account), default, AccountNotice.None, null);
-        Assert.False(NetworkPlay.TryEnter(sample, true, false, Leave, Open, out _, out _));
-        Assert.Equal((1, 1), (leaves, opens));
+        Assert.False(NetworkPlay.TryEnter(sample, true, false, Enter, out _));
+        Assert.Equal(1, enters);
 
         // Signed in, the join is tried; once the session's lifetime is up it is refused again before leaving.
         var clock = new ManualClock();
@@ -740,11 +737,11 @@ public sealed class AccountClientTests
         using (client)
         using (browser)
         {
-            Assert.False(NetworkPlay.TryEnter(client, true, false, Leave, Open, out _, out error));
-            Assert.Equal((2, 2, "The port is in use."), (leaves, opens, error));
+            Assert.True(NetworkPlay.TryEnter(client, true, false, Enter, out error));
+            Assert.Equal(2, enters);
             Volatile.Write(ref clock.Now, 1000 + 86_400_000);
-            Assert.False(NetworkPlay.TryEnter(client, true, true, Leave, Open, out _, out error));
-            Assert.Equal((2, 2), (leaves, opens));
+            Assert.False(NetworkPlay.TryEnter(client, true, true, Enter, out error));
+            Assert.Equal(2, enters);
             Assert.Equal("Sign in with Discord to host for others, or choose Private.", error);
             Assert.Equal(AccountNotice.Expired, client.View.Notice);
         }

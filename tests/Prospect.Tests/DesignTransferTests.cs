@@ -82,7 +82,7 @@ public sealed class DesignTransferTests
         using var client = new ClientSession(link.Client, local, "Admission");
         long tick = 0;
         void Step() { ((ITickHandler)server).Tick(tick); ((ITickHandler)client).Tick(tick++); }
-        for (var i = 0; i < 1200 && client.AcquireSnapshot().HullCount == 0; i++) { Step(); Thread.Sleep(1); }
+        for (var i = 0; i < 1200 && client.AcquireSnapshot().HullCount == 0; i++) { TestWorkers.Settle(client, "the client"); Step(); }
         var snapshot = client.AcquireSnapshot();
         Assert.Equal(SessionState.Active, snapshot.State);
         Assert.True(wire.Designs > 1);
@@ -166,7 +166,8 @@ public sealed class DesignTransferTests
         for (var i = 0; i < 10; i++) Step();
         Assert.Equal(SessionState.Downloading, client.AcquireSnapshot().State);
         wire.Refuse = false;
-        for (var i = 0; i < 500 && client.AcquireSnapshot().HullCount == 0; i++) { Step(); Thread.Sleep(1); }
+        // A decode that is running finishes before the next interval, so 500 of them are enough on any machine.
+        for (var i = 0; i < 500 && client.AcquireSnapshot().HullCount == 0; i++) { TestWorkers.Settle(client, "the client"); Step(); }
         var snapshot = client.AcquireSnapshot();
         Assert.Equal(SessionState.Active, snapshot.State);
         Assert.NotSame(local, snapshot.Content);
@@ -228,7 +229,7 @@ public sealed class DesignTransferTests
         Receive(0, cache.Bytes[0]);
         using var link = new LoopbackLink();
         var buffer = new byte[4096];
-        for (var i = 0; i < 100 && !download.Failed; i++) { download.Tick(link.Client, buffer, i); Thread.Sleep(1); }
+        for (var i = 0; i < 100 && !download.Failed; i++) { TestWorkers.Settle(download, "the download"); download.Tick(link.Client, buffer, i); }
         Assert.True(download.Failed); Assert.Null(download.Result);
 
         var sender = new BlockSender(content.BlockTransfers);
@@ -321,7 +322,8 @@ public sealed class DesignTransferTests
         var tick = 0;
         for (; tick < 2000 && client.AcquireSnapshot().HullCount == 0; tick++)
         {
-            ((ITickHandler)server).Tick(tick); ((ITickHandler)client).Tick(tick); Thread.Sleep(1);
+            TestWorkers.Settle(client, "the client");
+            ((ITickHandler)server).Tick(tick); ((ITickHandler)client).Tick(tick);
         }
         Assert.True(tick > 600);
         Assert.Equal(SessionState.Active, client.AcquireSnapshot().State);

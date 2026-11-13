@@ -2,6 +2,9 @@
 
 "Decided" is settled. "Open" is not: do not build on an open item, ask.
 
+The [persistence and exploration roadmap](roadmap/README.md) records the agreed next work in detail.
+Its product decisions are settled; technical proposals and remaining questions are labelled separately.
+
 ## The game in one line
 
 A multiplayer space sandbox: build ships from blocks, mine, and command a fleet across one continuous galaxy that
@@ -60,8 +63,9 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
 - **The world advances only while someone is connected.** With nobody online it pauses.
 - **Travel.** Sublight inside a sector, faster-than-light between them. Three drive kinds (hyperspace, wormhole,
   rift). Transit takes base time plus straight-line distance divided by content speed: initially 3 s plus 1 s per 40 km.
-  Preparation and arrival stay unchanged. No distance energy cost or gameplay range limit is added.
-  Limits come later from modules, power and mass.
+  Preparation and arrival stay unchanged. The current implementation has no distance energy cost or gameplay range limit.
+  Planned: a drive range limit, a safe band for blind jumps and nonfatal risk beyond it; destination charts remove
+  blind-jump risk. See [exploration](roadmap/exploration.md) for the agreed rules and open tuning.
   Durations beyond 2^40 seconds are rejected to keep elapsed time precise; this is a numerical bound, not drive range.
 - **Jump looks.** Physical, not an overlay: effects sit in the world around the hull, laid out around its nose,
   never the view. No cuts, no full-screen flash; each stage eases into the next. Only hyperspace fills the view
@@ -89,6 +93,20 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
   browser fed by it. Ours will run at `prospect.mvl.sh`, and clients use that by default.
 - **Releases build two containers:** the game server and the listing server. A version tag says which one, or
   both.
+
+## Decided: persistent worlds and exploration (planned)
+
+- **Automatic saves only:** configurable interval, 30 seconds by default, plus clean-shutdown saves and recovery copies.
+  One save per world; Continue and Load World. The interval is not a guaranteed maximum crash-loss window.
+- **One portable world:** private play can become hosted multiplayer, then move to a dedicated server.
+  Explicit Discord claiming preserves the local character's progress; private offline play remains available.
+- **Ships remain after MP logout:** configurable personal protection and separate future alliance protection,
+  with per-ship damage-reset delays and deadlines that survive server downtime. Details: [persistence](roadmap/persistence.md).
+- **Explore a bounded 3D galaxy:** configurable thickness, interactive slices/tilt, anonymous destinations,
+  hover/pinned sector cards and ship lists. This is a planned map upgrade, not removal of the existing Y layers.
+- **Charting and sensors are separate blocks:** manual scans while flying create permanent personal charts;
+  passive 3D sensors give live coverage across sector borders. Stale knowledge remains without live updates.
+  Details and deferred chart sharing/trading: [exploration](roadmap/exploration.md).
 
 ## Decided: players together
 
@@ -268,6 +286,10 @@ Remaining scale work: full-state snapshots, bounded runtime geometry and hull-on
 
 ## Planned, in order
 
+Persistence is the foundation for the newly agreed exploration/map work.
+The [implementation sequence](roadmap/implementation.md) orders that work and its parallel-agent boundaries.
+The existing editor and scale tracks below continue separately; this roadmap does not cancel ongoing work.
+
 Next:
 
 1. The ship editor (B): its second slice and wedges are in. Smooth shields are in. Next: mirror, stock parts, a drag handle.
@@ -290,7 +312,7 @@ After that:
 
 - Whether players can make deals with AI factions (alliance, trade pact, war), or AI factions only react.
 - What PvP rules a server can set: everywhere, by sector, or by consent.
-- Saving: how often, and what a crash may lose.
+- Persistence architecture and remaining load/recovery policies: [open items](roadmap/persistence.md#open-before-implementation).
 
 ## Open: servers and players
 

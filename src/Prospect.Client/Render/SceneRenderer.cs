@@ -60,6 +60,9 @@ internal struct FrameConstants
 
     /// <summary>Per followed jump, the plane its opening cuts its own hull at; see <see cref="FtlClips"/>.</summary>
     public FtlClips Clips;
+
+    /// <summary>Deferred gas, matching the final GasData in frame.glsl.</summary>
+    public GasConstants Gas;
 }
 
 /// <summary>Four vectors per opening for <see cref="FrameConstants.Openings"/>; matches <c>frame.glsl</c>.</summary>
@@ -195,6 +198,10 @@ internal sealed unsafe class SceneRenderer : IDisposable
     // they were drawn, colour and depth, copied into images of their own that nothing else reads or writes.
     private readonly DescriptorSetLayoutEx _shieldLayout;
     private readonly VkPipelineLayout _shieldPipelineLayout;
+    private readonly VkPipeline _gasPipeline;
+    private readonly GasNoiseTexture? _gasNoise;
+    private readonly GasConstants[] _gas = new GasConstants[GasCloudModule.MaxActive];
+    private int _gasCount;
     private readonly VkPipeline _shieldPipeline;
     private readonly VkPipeline _shieldMaskPipeline;
     private ShieldLookConstants _shieldLook;
@@ -306,12 +313,12 @@ internal sealed unsafe class SceneRenderer : IDisposable
             throw;
         }
 
-        // Descriptors: set 0 of every shader is the frame constants; set 1 of the tone mapper is the scene image, the
+        // Set 0 shares frame constants and immutable gas noise; set 1 of the tone mapper is the scene image, the
         // scene before anything solid and before any hull was drawn, the scene's depth and the depth before hulls.
         Span<VkDescriptorPoolSize> poolSizes =
         [
             new VkDescriptorPoolSize { Type = VkDescriptorType.UniformBuffer, DescriptorCount = FrameRenderer.FramesInFlight },
-            new VkDescriptorPoolSize { Type = VkDescriptorType.CombinedImageSampler, DescriptorCount = 6 + 2 },
+            new VkDescriptorPoolSize { Type = VkDescriptorType.CombinedImageSampler, DescriptorCount = 8 + 2 + FrameRenderer.FramesInFlight },
         ];
         _descriptorPool = device.CreateDescriptorPool(
             new DescriptorPoolEx.CreateInfo { MaxSets = FrameRenderer.FramesInFlight + 2, PoolSizes = poolSizes },
@@ -326,6 +333,13 @@ internal sealed unsafe class SceneRenderer : IDisposable
                 DescriptorType = VkDescriptorType.UniformBuffer,
                 DescriptorCount = 1,
                 StageFlags = VkShaderStageFlags.VertexBit | VkShaderStageFlags.FragmentBit,
+            },
+            new VkDescriptorSetLayoutBinding
+            {
+                Binding = 1,
+                DescriptorType = VkDescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                StageFlags = VkShaderStageFlags.FragmentBit,
             },
         ];
         _frameLayout = device.CreateDescriptorSetLayout(new DescriptorSetLayoutEx.CreateInfo { Bindings = frameBindings }, null);
@@ -374,6 +388,20 @@ internal sealed unsafe class SceneRenderer : IDisposable
                 DescriptorCount = 1,
                 StageFlags = VkShaderStageFlags.FragmentBit,
             },
+            new VkDescriptorSetLayoutBinding
+            {
+                Binding = 6,
+                DescriptorType = VkDescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                StageFlags = VkShaderStageFlags.FragmentBit,
+            },
+            new VkDescriptorSetLayoutBinding
+            {
+                Binding = 7,
+                DescriptorType = VkDescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                StageFlags = VkShaderStageFlags.FragmentBit,
+            },
         ];
         _sceneLayout = device.CreateDescriptorSetLayout(new DescriptorSetLayoutEx.CreateInfo { Bindings = sceneBindings }, null);
 
@@ -400,7 +428,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
         _shieldLayout = device.CreateDescriptorSetLayout(new DescriptorSetLayoutEx.CreateInfo { Bindings = shieldBindings }, null);
         _shieldPipelineLayout = device.CreatePipelineLayout(
             [_frameLayout.Handle, _shieldLayout.Handle],
-            [new VkPushConstantRange { StageFlags = VkShaderStageFlags.FragmentBit, Offset = (ByteSize32)0, Size = (ByteSize32)sizeof(ShieldLookConstants) }],
+            // Shared by the shield passes (ShieldLookConstants) and the ordinary gas pass (GasConstants).
+            [new VkPushConstantRange { StageFlags = VkShaderStageFlags.FragmentBit, Offset = (ByteSize32)0, Size = (ByteSize32)Math.Max(sizeof(ShieldLookConstants), sizeof(GasConstants)) }],
             null
         );
         _tonemapPipelineLayout = device.CreatePipelineLayout(
@@ -524,12 +553,47 @@ internal sealed unsafe class SceneRenderer : IDisposable
         var maskBlend = new VkPipelineColorBlendStateCreateInfo { AttachmentCount = 1, Attachments = &maskAttachment };
         var shieldInput = VertexInput.For<MeshVertex, ShieldInstance>();
         _shieldPipeline = Pipeline(Module(shaders, "shield.vert"), Module(shaders, "shield.frag"), shieldInput, &cullBack, &depthRead, &shieldBlend, _shieldPipelineLayout, VkRenderPass.NullHandle);
-        _shieldMaskPipeline = Pipeline(Module(shaders, "shield.vert"), Module(shaders, "shield.frag"), shieldInput, &cullBack, &depthWrite, &maskBlend, _shieldPipelineLayout, VkRenderPass.NullHandle);
+        var maskOnly = 1u;
+        var maskEntry = new VkSpecializationMapEntry { ConstantID = 1, Offset = (ByteSize32)0, Size = new ByteSize64(sizeof(uint)) };
+        var maskInfo = new VkSpecializationInfo { MapEntryCount = 1, MapEntries = &maskEntry, DataSize = new ByteSize64(sizeof(uint)), Data = &maskOnly };
+        _shieldMaskPipeline = Pipeline(Module(shaders, "shield.vert"), Module(shaders, "shield.frag"), shieldInput, &cullBack, &depthWrite, &maskBlend, _shieldPipelineLayout, VkRenderPass.NullHandle, &maskInfo);
 
         var markInput = new VertexInput(1, 3).AddBindingWithAttributes<FtlMark>(0, 0, VkVertexInputRate.Instance);
         _ftlMarkPipeline = ScenePipeline(Module(shaders, "ftl_mark.vert"), Module(shaders, "ftl_mark.frag"), markInput, Presets.Rasterization.Fill.CullNone, &depthRead, &additive);
 
         CreateTargets(swapchain.Extent);
+        // The immutable gas lattice is created last so every later failure can retire the completed renderer.
+        try
+        {
+            _gasNoise = GasNoiseTexture.Create(gpu);
+            var noiseInfo = new VkDescriptorImageInfo { Sampler = _gasNoise.Sampler, ImageView = _gasNoise.View, ImageLayout = VkImageLayout.ShaderReadOnlyOptimal };
+            for (var i = 0; i < FrameRenderer.FramesInFlight; i++)
+                device.UpdateDescriptorSets([new VkWriteDescriptorSet
+                {
+                    DstSet = _frameSets[i], DstBinding = 1, DescriptorCount = 1,
+                    DescriptorType = VkDescriptorType.CombinedImageSampler, ImageInfo = &noiseInfo,
+                }], []);
+            var gasAttachment = translucentAttachment with { SrcColorBlendFactor = VkBlendFactor.One };
+            var gasBlend = new VkPipelineColorBlendStateCreateInfo { AttachmentCount = 1, Attachments = &gasAttachment };
+            var gasVertex = Module(shaders, "fullscreen.vert");
+            VkShaderModule gasFragment;
+            try
+            {
+                gasFragment = Module(shaders, "gas.frag");
+            }
+            catch
+            {
+                // Pipeline owns both modules only after both have been acquired.
+                _gpu.Device.DestroyShaderModule(gasVertex, null);
+                throw;
+            }
+            _gasPipeline = Pipeline(gasVertex, gasFragment, noInput, Presets.Rasterization.Fill.CullNone, &depthOff, &gasBlend, _shieldPipelineLayout, VkRenderPass.NullHandle);
+        }
+        catch
+        {
+            Dispose();
+            throw;
+        }
     }
 
     /// <summary>The jump-mark memory for this frame; say how many were filled when calling <see cref="Render"/>.</summary>
@@ -586,7 +650,17 @@ internal sealed unsafe class SceneRenderer : IDisposable
     {
         _composite = composite;
         _frameIndex = frameIndex;
-        *(FrameConstants*)_frameBuffers[frameIndex].Mapped = constants;
+        var deferredGas = _gasCount > 0 && (lensing || _shieldCount > 0);
+        LastGasMode = (deferredGas, _shieldCount, _gasCount > 0);
+        var frame = constants;
+        // Visibility spheres cannot overlap: centers are >= .9 sector edges apart, radii <= .4 each.
+        frame.Gas = deferredGas ? _gas[0] : default;
+        if (constants.Gas.Budget.Z > 0)
+        {
+            frame.Gas.Budget.Z = constants.Gas.Budget.Z;
+            frame.Gas.Budget.W = _shieldCount;
+        }
+        *(FrameConstants*)_frameBuffers[frameIndex].Mapped = frame;
 
         // The scene's colour and depth are shared by both frame slots: last frame's tone mapper read them, and its
         // reads must be done before they are written again, whatever is in them now.
@@ -602,6 +676,13 @@ internal sealed unsafe class SceneRenderer : IDisposable
             VkPipelineStageFlags.EarlyFragmentTestsBit | VkPipelineStageFlags.LateFragmentTestsBit,
             VkImageAspectFlags.DepthBit
         );
+        // These views are statically bound by the tone mapper even on frames that do not sample gas.
+        if (!_behindReady)
+        {
+            Transition(commands, _behindImage, VkImageAspectFlags.ColorBit, VkImageLayout.Undefined, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.FragmentShaderBit);
+            Transition(commands, _behindDepthImage, VkImageAspectFlags.DepthBit, VkImageLayout.Undefined, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.FragmentShaderBit);
+            _behindReady = true;
+        }
         if (!_ownBehindReady)
         {
             Transition(commands, _ownBehindImage, VkImageAspectFlags.ColorBit, VkImageLayout.Undefined, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.FragmentShaderBit);
@@ -628,7 +709,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
             ImageLayout = VkImageLayout.DepthAttachmentOptimal,
             LoadOp = VkAttachmentLoadOp.Clear,
             // Kept when the lenses read it, or when the shields copy it before they are drawn.
-            StoreOp = lensing || _shieldCount > 0 ? VkAttachmentStoreOp.Store : VkAttachmentStoreOp.DontCare,
+            StoreOp = lensing || _shieldCount > 0 || _gasCount > 0 ? VkAttachmentStoreOp.Store : VkAttachmentStoreOp.DontCare,
             ClearValue = new VkClearValue { DepthStencil = new VkClearDepthStencilValue { Depth = 0f } },
         };
         commands.BeginRendering(
@@ -671,6 +752,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
                 commands.Draw(_damageRanges[i].IndexCount, 1, _damageRanges[i].FirstIndex, i);
         }
 
+        commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _scenePipelineLayout, 0, new ReadOnlySpan<VkDescriptorSet>(in set), []);
         commands.BindPipeline(VkPipelineBindPoint.Graphics, _dustPipeline);
         commands.Draw(6, DustCount, 0, 0);
 
@@ -688,13 +770,19 @@ internal sealed unsafe class SceneRenderer : IDisposable
             commands.Draw(6, ftlMarks, 0, 0);
         }
 
+        // Both gas paths include these overlays, so unrelated portals cannot change their attenuation.
+        if (!deferredGas) DrawGas(commands, frameIndex, ref color, ref depth);
+
         // Last, so the dust, the command grid and the jump marks are in what the shields bend and stay seen
         // through their transparent margins.
+        // Deferred composition needs the gas-free opaque scene even when no shield is drawn.
+        if (deferredGas && _shieldCount == 0) KeepBehindShields(commands, ref color, ref depth);
         DrawShields(commands, frameIndex, constants, ref color, ref depth);
+        _gasCount = 0;
 
         commands.EndRendering();
         Transition(commands, _colorImage, VkImageAspectFlags.ColorBit, VkImageLayout.ColorAttachmentOptimal, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.FragmentShaderBit);
-        // The tone mapper reads the depth on frames with a lens; on others it is bound but not read.
+        // The tone mapper reads depth for lenses and deferred gas/shields; otherwise it is only bound.
         Barrier(
             commands,
             _depthImage,
@@ -742,7 +830,10 @@ internal sealed unsafe class SceneRenderer : IDisposable
     }
 
     /// <summary>Called after the current frame fence, before any dynamic triangle uploads.</summary>
-    public void BeginDamage() { _damageCount = 0; _damageUsed = 0; }
+    public int DamageDraws => _damageCount - (SparkVertices > 0 ? 1 : 0);
+    public int SparkVertices { get; private set; }
+    public int DynamicBytes => _damageUsed * sizeof(MeshVertex) + _damageCount * sizeof(MeshInstance);
+    public void BeginDamage() { _damageCount = 0; _damageUsed = 0; SparkVertices = 0; }
 
     /// <summary>Refuses the whole mesh before touching mapped memory when its budget is exhausted.</summary>
     public bool AddDamage(int frame, DamageMesh mesh, in MeshInstance instance, float fade)
@@ -758,6 +849,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
     public void AddSparks(int frame, ReadOnlySpan<MeshVertex> vertices)
     {
         if (vertices.IsEmpty || vertices.Length > DamageVertices - _damageUsed || _damageCount == 65) return;
+        SparkVertices = vertices.Length;
         vertices.CopyTo(new Span<MeshVertex>((void*)_damageVertices[frame].Mapped, DamageVertices).Slice(_damageUsed));
         var instance = WorldView.MeshTransform(System.Numerics.Vector3.Zero, System.Numerics.Quaternion.Identity, System.Numerics.Vector3.One, new System.Numerics.Vector3(7, 2, 0.2f), -1, 1);
         FinishDamage(frame, vertices.Length, instance);
@@ -827,6 +919,38 @@ internal sealed unsafe class SceneRenderer : IDisposable
         BindShields(commands, frameIndex);
         DrawShieldPass(commands, _shieldPipeline, order[others..count]);
         DrawShieldPass(commands, _shieldMaskPipeline, order[others..count]);
+    }
+
+    /// <summary>Starts the bounded cloud list for this frame.</summary>
+    public void BeginGas() => _gasCount = 0;
+
+    /// <summary>For muted capture diagnostics: whether the last frame deferred gas, and how many shields it queued.</summary>
+    public (bool Deferred, int Shields, bool HasGas) LastGasMode { get; private set; }
+
+    /// <summary>Queues a visible cloud, farthest first; sector bounds make the cap sufficient.</summary>
+    public void AddGas(in GasConstants gas)
+    {
+        if (_gasCount == _gas.Length) return;
+        var index = _gasCount++;
+        while (index > 0 && _gas[index - 1].Motion.W < gas.Motion.W)
+        { _gas[index] = _gas[index - 1]; index--; }
+        _gas[index] = gas;
+    }
+
+    private void DrawGas(CommandBuffer commands, int frameIndex, ref VkRenderingAttachmentInfo color, ref VkRenderingAttachmentInfo depth)
+    {
+        if (_gasCount == 0) return;
+        KeepBehindShields(commands, ref color, ref depth);
+        Span<VkDescriptorSet> sets = [_frameSets[frameIndex], _shieldSet];
+        commands.BindPipeline(VkPipelineBindPoint.Graphics, _gasPipeline);
+        commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _shieldPipelineLayout, 0, sets, []);
+        for (var i = 0; i < _gasCount; i++)
+        {
+            var gas = _gas[i];
+            commands.PushConstants(_shieldPipelineLayout, VkShaderStageFlags.FragmentBit, 0, new ReadOnlySpan<byte>(&gas, sizeof(GasConstants)));
+            commands.Draw(3, 1, 0, 0);
+        }
+        _gasCount = 0;
     }
 
     private void BindShields(CommandBuffer commands, int frameIndex)
@@ -1022,6 +1146,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         device.DestroySampler(_pointSampler, null);
         foreach (var pipeline in (ReadOnlySpan<VkPipeline>)[_backgroundPipeline, _starPipeline, _dustPipeline, _meshPipeline, _hullPipeline, _gridPipeline, _tonemapPipeline, _ftlMarkPipeline])
             device.DestroyPipeline(pipeline, null);
+        device.DestroyPipeline(_gasPipeline, null);
         device.DestroyPipeline(_shieldPipeline, null);
         device.DestroyPipeline(_shieldMaskPipeline, null);
         device.DestroyPipelineLayout(_shieldPipelineLayout, null);
@@ -1029,6 +1154,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         device.DestroyPipelineLayout(_scenePipelineLayout, null);
         device.DestroyPipelineLayout(_tonemapPipelineLayout, null);
         _descriptorPool.Dispose();
+        _gasNoise?.Dispose();
         _frameLayout.Dispose();
         _sceneLayout.Dispose();
         DestroyBuffers();
@@ -1203,6 +1329,22 @@ internal sealed unsafe class SceneRenderer : IDisposable
                     DescriptorCount = 1,
                     DescriptorType = VkDescriptorType.CombinedImageSampler,
                     ImageInfo = &ownBehindInfo,
+                },
+                new VkWriteDescriptorSet
+                {
+                    DstSet = _sceneSet,
+                    DstBinding = 6,
+                    DescriptorCount = 1,
+                    DescriptorType = VkDescriptorType.CombinedImageSampler,
+                    ImageInfo = &behindInfo,
+                },
+                new VkWriteDescriptorSet
+                {
+                    DstSet = _sceneSet,
+                    DstBinding = 7,
+                    DescriptorCount = 1,
+                    DescriptorType = VkDescriptorType.CombinedImageSampler,
+                    ImageInfo = &behindDepthInfo,
                 },
                 new VkWriteDescriptorSet
                 {

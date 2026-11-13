@@ -494,7 +494,8 @@ public sealed partial class ServerHost
 
     /// <summary>
     /// Puts a new hull of the committed design where the edited one is and removes the old one. The new hull has
-    /// a new id: a hull never changes design, and a repaired hull is a new hull of the same one. It keeps the
+    /// a new id: a hull never changes design, and a repaired hull is a new hull of the same one. It is still
+    /// the same ship, so it keeps the old hull's durable name (<see cref="HullInfo.Entity"/>). It keeps the
     /// owner, the pilot, the heading and the motion, and the grid stays where it was in space, so a block that
     /// was not touched does not move. Its blocks are new and whole, as building is free; its shield and battery
     /// keep the charge they had, up to what the new design holds. The old hull is removed only after the new
@@ -516,11 +517,18 @@ public sealed partial class ServerHost
         var from = _content.Designs[oldInfo.Design];
         var to = _content.Designs[design];
 
+        // A saved world takes a larger design only while its save has room for the difference.
+        if (to.BlockCount > from.BlockCount && !HasRoom(0, to.BlockCount - from.BlockCount))
+        {
+            EndEdit(connection, EditorReason.HullLimit);
+            return;
+        }
+
         // A hull's position is its design's centre. The two designs share a grid, so the new centre is the old
         // one moved by the difference of the centres, in the hull's own frame.
         var moved = (to.Pivot - from.Pivot) * to.BlockSize;
         var position = oldState.Position + Vector3.Transform(new Vector3((float)moved.X, (float)moved.Y, (float)moved.Z), oldState.Orientation);
-        var next = _hulls.Create(oldInfo.Owner, design, to, position);
+        var next = CreateHull(oldInfo.Owner, design, position, oldInfo.Entity);
 
         ref var state = ref _hulls.State(next.Index);
         ref var flight = ref _hulls.Flight(next.Index);
@@ -542,7 +550,7 @@ public sealed partial class ServerHost
         _hulls.Destroy(old);
 
         // Inputs that were queued were for the old hull.
-        connection.Hull = next;
+        SetHull(connection, next);
         ResetControl(connection);
 
         connection.EditPhase = EditorPhase.Closed;

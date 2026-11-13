@@ -475,6 +475,29 @@ public sealed class PowerAndDamageTests
     }
 
     [Fact]
+    public void AFullImpulseBufferResolvesContactAgainstAFixedAsteroid()
+    {
+        var rocks = new RockField(CrashGalaxy);
+        var rock = rocks.Sector(default).Asteroids[OrdinaryRock.Index];
+        var heavy = Pod;
+        heavy.Mass = rocks.Mass(rock.Radius);
+        heavy.Inertia = Pod.Inertia * (heavy.Mass / Pod.Mass);
+        heavy.CollisionDamagePerTonneSpeedSquared = 0;
+        var full = new RockImpulses();
+        full.Count = full.Items.Length;
+        var before = full.Items.ToArray();
+        Crash(rocks, OrdinaryRock, -Vector3.UnitX, Vector3.UnitX * 20f, heavy, out var actual, out _, out _, full);
+        var fixedRocks = new RockField(CrashGalaxy, maxDeltas: 0);
+        Crash(fixedRocks, OrdinaryRock, -Vector3.UnitX, Vector3.UnitX * 20f, heavy, out var expected, out _, out _, new RockImpulses());
+        Assert.True(actual.Velocity.X < 0f);
+        Assert.Equal(expected.Position, actual.Position);
+        Assert.Equal(expected.Velocity, actual.Velocity);
+        Assert.Equal(full.Items.Length, full.Count);
+        Assert.Equal(before, full.Items);
+        Assert.Empty(rocks.Deltas.ToArray());
+    }
+
+    [Fact]
     public void AHeavyHullShovesAnAsteroidWhichThenDriftsToRest()
     {
         var galaxy = CrashGalaxy;
@@ -3471,5 +3494,22 @@ public sealed class SizedCollisionTests
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Assert.True(same);
         Assert.Equal(0, allocated);
+    }
+}
+
+/// <summary>The local proof mailbox adds no work or memory traffic requiring an account request during ordinary ticks.</summary>
+public sealed class LocalClaimTickTests
+{
+    [Fact]
+    public void OfflinePrivateTicksAllocateNothingAndNeverStartProof()
+    {
+        var content = GameContent.Load();
+        using var rig = new SaveRig(SaveRig.NewWorld(content), content);
+        rig.Join();
+        rig.Tick(30);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        rig.Tick(30);
+        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        Assert.Equal(LocalClaimState.None, rig.Server.LocalClaim);
     }
 }

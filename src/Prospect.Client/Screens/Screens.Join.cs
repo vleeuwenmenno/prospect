@@ -81,6 +81,13 @@ internal sealed partial class ScreenHost
     /// Opens the Join screen with an address, port and password already filled in and a reason shown, as for a
     /// <c>--join</c> that could not go ahead (no sign-in yet). The password stays in the field's memory only.
     /// </summary>
+    /// <summary>Shows why a join did not start, on the Join screen.</summary>
+    public void ShowJoinError(string error)
+    {
+        Show(Screen.Join);
+        _joinError = error;
+    }
+
     public void OpenJoin(string host, ushort port, string? password, string error)
     {
         _joinHost.SetValue(host);

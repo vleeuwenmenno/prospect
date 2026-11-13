@@ -30,6 +30,7 @@ internal sealed class AccountHost : IAsyncDisposable
     internal string? ExpectedProviderChallenge;
     internal readonly List<string> Logs = [];
     internal AccountStore Store => app.Services.GetRequiredService<AccountStore>();
+    internal GameTickets Tickets => app.Services.GetRequiredService<GameTickets>();
 
     internal static async Task<AccountHost> Start(params (string, string)[] settings)
     {
@@ -88,6 +89,8 @@ internal sealed class AccountHost : IAsyncDisposable
             ["Accounts:AttemptsPerAddress"] = "1000",
             ["Listing:AuthPerMinute"] = "100000",
             ["Listing:AccountPerMinute"] = "100000",
+            ["Listing:TicketIssuesPerMinute"] = "100000",
+            ["Listing:TicketRedeemsPerMinute"] = "100000",
             ["Listing:GlobalRequestsPerSecond"] = "100000",
             ["Logging:LogLevel:Default"] = "Warning",
         };

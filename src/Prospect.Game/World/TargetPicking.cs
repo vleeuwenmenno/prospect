@@ -19,8 +19,9 @@ public readonly record struct PickHull(uint Id, Double3 Position, Quaternion Rot
     float Stretch = 1, Vector3 CutPoint = default, Vector3 CutNormal = default, byte[]? Faces = null, FtlAperture Aperture = default, Vector3[]? HalfExtents = null,
     BlockShape[]? Shapes = null);
 
-/// <summary>A loaded sector and its current displacement offsets, borrowed without copying.</summary>
-public readonly record struct PickSector(SectorCoord Id, Double3 Center, Asteroid[] Rocks, int Count, Vector3[]? Offsets, Vector3 BoundsCenter = default, float BoundsRadius = 0);
+/// <summary>A loaded sector and its current displacement offsets, borrowed without copying.
+/// Optional Drawn is the caller's retained-frame bitset; null permits every rock.</summary>
+public readonly record struct PickSector(SectorCoord Id, Double3 Center, Asteroid[] Rocks, int Count, Vector3[]? Offsets, Vector3 BoundsCenter = default, float BoundsRadius = 0, ulong[]? Drawn = null);
 
 /// <summary>A target and its first intersection distance. Hulls have priority over rocks.</summary>
 public readonly record struct PickHit(uint Hull, RockRef? Rock, float Distance) : IComparable<PickHit>
@@ -126,6 +127,7 @@ public static class TargetPicking
             }
             for (var i = 0; i < sector.Count; i++)
             {
+                if (sector.Drawn is not null && !BlockSet.Has(sector.Drawn, i)) continue;
                 ref readonly var rock = ref sector.Rocks[i];
                 var position = center + rock.LocalPosition + (sector.Offsets is null ? Vector3.Zero : sector.Offsets[i]);
                 var depth = Vector3.Dot(position, forward);

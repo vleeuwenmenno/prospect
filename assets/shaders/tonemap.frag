@@ -2,6 +2,7 @@
 #include "frame.glsl"
 #include "ftl.glsl"
 #include "ftl_own.glsl"
+#include "gas.glsl"
 
 // Set 0 is the frame constants, for the camera and the jumps in view; set 1 the scene and, on frames with a lens,
 // the scene as it was before anything solid was drawn (the sky) and before any hull was (the sky and asteroids).
@@ -14,6 +15,9 @@ layout(set = 1, binding = 4) uniform sampler2D rocksDepth;
 // The scene just before the pilot's own shield was drawn. Written only on frames where their hyperspace tunnel
 // covers the view and that shield is drawn; read only at its pixels on those frames.
 layout(set = 1, binding = 5) uniform sampler2D ownBehind;
+// Gas-free scene before shields, kept on every deferred gas frame. The ordinary fallbacks remain gas-free too.
+layout(set = 1, binding = 6) uniform sampler2D beforeShields;
+layout(set = 1, binding = 7) uniform sampler2D opaqueDepth;
 
 // Bit of bentBy for the pilot's own opening; bits 0 to 3 are frame.openings.
 const int OwnBit = 16;
@@ -412,8 +416,154 @@ float mouthDepth(int bentBy, vec3 v)
     return farthest;
 }
 
+// Only the gas path needs depth-ordered mouths: gas between two lenses sees the nearer bend, not the farther.
+// Five mouths (four external plus own) yield at most six bounded volume intervals.
+struct GasEvent { float depth; vec2 bend; vec4 cover; vec3 glow; int mask; int id; bool own; };
+float gasMouth(int id, vec3 ray)
+{
+    if(id==4) return ftlOwnRay(ray,2.0*frame.lens.x/frame.lens.w).at;
+    vec4 place=frame.openings[id*4], params=frame.openings[id*4+3];
+    return int(params.x+0.5)==3 ? planeDepth(ray,place.xyz,frame.openings[id*4+1].xyz) : sphereDepth(ray,place.xyz,place.w*params.y);
+}
+vec2 gasLookup(vec2 pos, vec2 bend, float aspect)
+{
+    return 1.0-abs(1.0-abs((pos+bend)/vec2(aspect,1.0)*0.5+0.5));
+}
+bool gasFixtureSource(out vec3 base, out float cutoff, out vec3 delta, out float shieldAt, out bool ownSource);
+// Select the gas-free source for this prefix of lenses. Each fallback supplies its own cutoff, never hull depth.
+vec3 gasReadSource(vec2 uv, int mask, bool unbent, out float cutoff, out vec3 delta, out float shieldAt, out bool ownSource)
+{
+    vec3 fixtureBase;
+    if(gasFixtureSource(fixtureBase,cutoff,delta,shieldAt,ownSource)) return fixtureBase;
+    bool sceneClear=true, rocksClear=true;
+    if(mask!=0) {
+        vec4 what=textureGather(scene,uv,3), depths=textureGather(sceneDepth,uv,0), rockDepths=textureGather(rocksDepth,uv,0);
+        vec2 size=vec2(textureSize(scene,0)), corner=floor(uv*size-0.5);
+        for(int i=0;i<4;i++) {
+            vec2 at=clamp(corner+vec2(i==1 || i==2 ? 1.0:0.0,i<2 ? 1.0:0.0),vec2(0),size-1.0);
+            float mouth=mouthDepth(mask,viewRay((at+0.5)/size*2.0-1.0));
+            sceneClear=sceneClear && what[i]<0.44 && viewDepth(depths[i])>=mouth;
+            rocksClear=rocksClear && viewDepth(rockDepths[i])>=mouth;
+        }
+    }
+    if(mask==0 && unbent) {
+        // No lens moves this pixel: read its own texels exactly, as the ordinary gas pass and the gas-free path do.
+        // A filtered read at the interpolated position blended a sliver of the neighbour across hard silhouettes.
+        ivec2 own=ivec2(gl_FragCoord.xy);
+        vec4 here=texelFetch(scene,own,0);
+        vec3 before=texelFetch(beforeShields,own,0).rgb;
+        ownSource=here.a>0.44;
+        cutoff=viewDepth(texelFetch(opaqueDepth,own,0).r);
+        delta=here.rgb-before;
+        shieldAt=viewDepth(texelFetch(sceneDepth,own,0).r);
+        return before;
+    }
+    ownSource=sceneClear && texture(scene,uv).a>0.44;
+    cutoff=sceneClear ? viewDepth(texture(opaqueDepth,uv).r) : rocksClear ? viewDepth(texture(rocksDepth,uv).r) : Far;
+    vec3 base=sceneClear ? texture(beforeShields,uv).rgb : rocksClear ? texture(rocks,uv).rgb : texture(sky,uv).rgb;
+    delta=sceneClear ? texture(scene,uv).rgb-base : vec3(0);
+    shieldAt=sceneClear ? viewDepth(texture(sceneDepth,uv).r) : cutoff;
+    return base;
+}
+// Camera-side own dissolve is not an occludable surface. Reapply it when a nearer source resets layers
+// that already passed the own event; leave gas scattering outside this surface-only operation.
+vec3 gasOwnSurface(vec3 surface, vec3 ray, float depth, bool ownSource, float pixelAngle)
+{
+    if(ownSource) return surface;
+    float real=ftlOwnReal(ftlOwnRay(ray,pixelAngle),depth);
+    if(real>=1.0) return surface;
+    vec3 throat=int(frame.ftl.x+0.5)==3 ? riftThroat(ray,frame.ftlAxis.w,frame.ftl.w,frame.dust.w,pixelAngle)
+        : wormholeThroat(ray,frame.ftlAxis.w,frame.ftl.w,frame.dust.w,pixelAngle);
+    return mix(throat,surface,real);
+}
+vec3 gasComposite(GasData gas, GasEvent events[5], int count, vec2 pos, float aspect, float pixelAngle)
+{
+    // Insertion sort is bounded by five events. Keep the existing order for coincident mouths.
+    for(int i=1;i<5;i++) {
+        if(i>=count) break;
+        GasEvent event=events[i]; int j=i;
+        while(j>0 && events[j-1].depth>event.depth) { events[j]=events[j-1]; j--; }
+        events[j]=event;
+    }
+    vec2 bends[6]; int masks[6];
+    bends[0]=vec2(0); masks[0]=0;
+    for(int i=0;i<5;i++) {
+        if(i>=count) break;
+        bends[i+1]=bends[i]+events[i].bend;
+        masks[i+1]=masks[i]|events[i].mask;
+    }
+    int ownIndex=-1;
+    for(int i=0;i<5;i++) { if(i>=count) break; if(events[i].own) ownIndex=i; }
+    vec3 surface=vec3(0), scattering=vec3(0);
+    int firstStage=count;
+    // Start at the nearest opaque external cover. All farther volume work is provably invisible.
+    for(int i=0;i<5;i++) {
+        if(i>=count) break;
+        if(!events[i].own && events[i].cover.a>=1.0) {
+            firstStage=i;
+            surface=events[i].cover.rgb+events[i].glow;
+            if(ownIndex>i) surface=gasOwnSurface(surface,viewRay(gasLookup(pos,bends[i],aspect)*2.0-1.0),events[i].depth,false,pixelAngle);
+            break;
+        }
+    }
+    for(int stage=5;stage>=0;stage--) {
+        if(stage>firstStage) continue;
+        vec2 uv=gasLookup(pos,bends[stage],aspect);
+        vec3 ray=viewRay(uv*2.0-1.0);
+        float cutoff, shieldAt; vec3 delta; bool ownSource;
+        vec3 base=gasReadSource(uv,masks[stage],bends[stage]==vec2(0),cutoff,delta,shieldAt,ownSource);
+        float start=0.0;
+        // Prefix depth is monotone even where a tilted, bent lookup changes the apparent order of planes.
+        for(int i=0;i<5;i++) {
+            if(i>=stage) break;
+            float at=gasMouth(events[i].id,ray);
+            start=max(start,at<Far ? at : events[i].depth);
+        }
+        float stop=cutoff;
+        bool occludes=false;
+        if(stage<count) {
+            float at=gasMouth(events[stage].id,ray);
+            // A ray parallel to a plane retains its ordered screen-space layer depth.
+            if(at>=Far) at=events[stage].depth;
+            float boundary=max(start,at);
+            occludes=cutoff<boundary;
+            stop=min(stop,boundary);
+        }
+        vec4 volume=gasSegment(gas,ray,start,stop,pixelAngle);
+        if(stage==count || occludes) {
+            float front=delta!=vec3(0) ? gasSegment(gas,ray,start,min(shieldAt,cutoff),pixelAngle).a : 1.0;
+            surface=volume.a*base+front*delta;
+            if(occludes && ownIndex>=stage)
+                surface=gasOwnSurface(surface,ray,cutoff,ownSource,pixelAngle);
+            scattering=volume.rgb;
+        } else {
+            surface*=volume.a;
+            scattering=gasOver(volume,scattering);
+            // A translucent shield between mouths belongs to this interval, not the farther lens's source.
+            if(delta!=vec3(0) && shieldAt>=start && shieldAt<stop)
+                surface+=gasSegment(gas,ray,start,shieldAt,pixelAngle).a*delta;
+        }
+        if(stage>0) {
+            GasEvent event=events[stage-1];
+            vec3 coverLight=event.cover.rgb;
+            if(!event.own && ownIndex>=stage)
+                coverLight=gasOwnSurface(coverLight,ray,event.depth,false,pixelAngle);
+            surface=mix(surface,coverLight,event.cover.a)+event.glow;
+            // Own-world visibility was already applied at each sample. External cover replaces gas behind it.
+            if(!event.own) scattering*=1.0-event.cover.a;
+        }
+    }
+    return surface+scattering;
+}
+
+#include "gas_fixture.glsl"
+
 void main()
 {
+    if(frame.gas.budget.z>0.0) {
+        outColor=gasFixtureResult();
+        return;
+    }
     float aspect = push.setup.y;
     float time = push.setup.z;
     int count = int(push.setup.w + 0.5);
@@ -428,10 +578,12 @@ void main()
 
     int ownKind = int(frame.ftl.x + 0.5);
     int ownStage = int(frame.ftl.y + 0.5);
+    GasData composeGas=frame.gas;
+    if(ownHull && ownKind==1) composeGas.halfSize.w*=1.0-clamp(frame.ftlUp.w,0.0,1.0);
     bool ownPassageOn = ownStage > 0 && (ownKind == 2 || ownKind == 3);
-    // The depths and the copies before solid things were drawn are only kept on frames with an opening in view.
+    // Lens fallbacks need the sky/rock copies; deferred gas with shields also reads the final scene depth.
     bool lensing = count > 0 || ownPassageOn;
-    float depth = lensing ? viewDepth(texelFetch(sceneDepth, texel, 0).r) : Far;
+    float depth = (lensing || frame.gas.budget.x>0.0) ? viewDepth(texelFetch(sceneDepth, texel, 0).r) : Far;
     vec3 v = viewRay(ndc);
 
     // Openings of other hulls, and of the pilot's own when seen from the command view.
@@ -439,11 +591,22 @@ void main()
     int bentBy = 0;
     vec4 cover = vec4(0.0);
     vec3 glow = vec3(0.0);
+    GasEvent gasEvents[5];
+    int gasEventCount=0;
     for (int i = 0; i < 4; i++)
     {
         if (i >= count)
             break;
         opening(i, v, pos, pixelAngle, time, depth, bend, bentBy, cover, glow);
+        if(frame.gas.budget.x>0.0) {
+            vec2 localBend=vec2(0); int localMask=0; vec4 localCover=vec4(0); vec3 localGlow=vec3(0);
+            opening(i,v,pos,pixelAngle,time,depth,localBend,localMask,localCover,localGlow);
+            if(localBend!=vec2(0) || localCover.a>0.0 || localGlow!=vec3(0)) {
+                // opening accumulates premultiplied cover into a zero input; retain straight colour for layering.
+                if(localCover.a>0.0) localCover.rgb/=localCover.a;
+                gasEvents[gasEventCount++]=GasEvent(gasMouth(i,v),localBend,localCover,localGlow,localMask,i,false);
+            }
+        }
     }
 
     // The pilot's own jump, from the inside.
@@ -451,13 +614,22 @@ void main()
     vec3 throat = vec3(0.0);
     if (ownPassageOn)
     {
+        vec2 oldBend=bend; int oldMask=bentBy; vec3 oldGlow=glow;
         real = ownPassage(ownKind, v, pos, pixelAngle, depth, ownHull, bend, bentBy, glow);
         if (real < 1.0)
             throat = ownKind == 3 ? riftThroat(v, frame.ftlAxis.w, frame.ftl.w, time, pixelAngle) : wormholeThroat(v, frame.ftlAxis.w, frame.ftl.w, time, pixelAngle);
+        if(frame.gas.budget.x>0.0) {
+            float at=gasMouth(4,v);
+            if(at>=Far) at=0.0;
+            gasEvents[gasEventCount++]=GasEvent(at,bend-oldBend,vec4(throat,1.0-real),glow-oldGlow,bentBy & ~oldMask,4,true);
+        }
     }
 
     vec3 hdr;
-    if (bend == vec2(0.0))
+    if(frame.gas.budget.x>0.0) {
+        hdr=gasComposite(composeGas,gasEvents,gasEventCount,pos,aspect,pixelAngle);
+    }
+    else if (bend == vec2(0.0))
     {
         hdr = texelFetch(scene, texel, 0).rgb;
     }
@@ -490,8 +662,10 @@ void main()
         }
         hdr = sceneClear ? texture(scene, lookup).rgb : rocksClear ? texture(rocks, lookup).rgb : texture(sky, lookup).rgb;
     }
-    hdr = mix(hdr, cover.rgb, cover.a);
-    hdr = mix(throat, hdr, real) + glow;
+    if(frame.gas.budget.x<1.0) {
+        hdr = mix(hdr, cover.rgb, cover.a);
+        hdr = mix(throat, hdr, real) + glow;
+    }
 
     // Hyperspace covers everything but the pilot's own hull, which rides through it, and the light of their own
     // shield, which rides with it: where that shield is the nearest thing (mask 0.4375), what it added to the scene
@@ -502,7 +676,11 @@ void main()
     {
         vec4 here = texelFetch(scene, texel, 0);
         vec3 ownShield = here.a > 0.41 && here.a < 0.47 ? here.rgb - texelFetch(ownBehind, texel, 0).rgb : vec3(0.0);
-        hdr = mix(hdr - ownShield, hyperspaceTunnel(v, frame.ftlAxis.w, pixelAngle), tunnel) + ownShield;
+        vec3 shieldInHdr=ownShield;
+        if(frame.gas.budget.x>0.0 && ownShield!=vec3(0))
+            shieldInHdr*=gasSegment(composeGas,v,0.0,depth,pixelAngle).a;
+        // Lift out the attenuated contribution, but put back the actual own light above the tunnel.
+        hdr = mix(hdr - shieldInHdr, hyperspaceTunnel(v, frame.ftlAxis.w, pixelAngle), tunnel) + mix(shieldInHdr, ownShield, tunnel);
     }
 
     vec3 mapped = filmic(hdr * push.setup.x);

@@ -5,11 +5,16 @@ Private local play needs no account. The official client asks for a Discord sign
 or hosts an unlisted or public game. Game servers do not see or check the account: party, chat and the roster
 keep their session identities, and a roster name is not a verified account identity.
 Recovery depends on Discord; there is no email/password recovery or account linking.
+The service can also issue game tickets (below). The game does not use them yet.
 
 ## Sign-in contract
 
 Bodies are UTF-8 JSON with exact camelCase names; duplicate properties are rejected.
-All account responses use Cache-Control: no-store; redirects also use Referrer-Policy: no-referrer.
+Every answer from an account or ticket route carries Cache-Control: no-store and Referrer-Policy: no-referrer:
+successes, refusals (proxy, rate limit, validation, 401, 404, 503) and the fixed 500.
+Not covered: a request that matches no route. A wrong method (405), an unknown path (404) and what Kestrel
+refuses before routing (a malformed request, oversized headers) carry neither header.
+None of those reads a token, a ticket, a verifier or a body.
 Errors contain fixed safe text. No endpoint polls for completion, codes or sessions.
 
 1. The native client binds a listener on literal 127.0.0.1, using an ephemeral port from 1024 through 65535.
@@ -75,7 +80,69 @@ There are at most 200 friends, 50 outgoing pending and 200 incoming pending per 
 Pending requests expire after 30 days; accepted friendships remain until removed.
 Canonical unordered pairs use ordinal lower-case hex order and SQLite BINARY collation.
 Unique constraints and immediate transactions prevent duplicate/crossed relationships and cap races.
-No global presence, game tickets or game protocol changes are included.
+No global presence or game protocol changes are included.
+
+## Game tickets (service only)
+
+Groundwork for telling a game server which account a player has. Only the service side exists.
+The explicit private saved-world claim API issues and redeems tickets. Network game names remain unverified; remote saved-world admission is not implemented.
+
+What a ticket proves, and what it does not:
+
+- **Proves:** whoever redeems it holds the verifier behind the challenge an authenticated session supplied.
+- **Does not prove:** which game server is redeeming, or that the player agreed to anything.
+- The challenge is opaque to the service. Binding it to a server, a purpose or a handshake is the game's job.
+- No session keys or other secrets are derived or returned.
+
+Issue: `POST /v1/game/tickets`, `Authorization: Bearer <session token>`, body `{challenge}`.
+
+- `challenge` is unpadded base64url of SHA256 of the verifier's ASCII text, as in sign-in.
+- 201 `{ticket,expiresIn}`. `ticket` is 32 random bytes in base64url.
+- `expiresIn` is 30 seconds, or what is left of the session when that is less.
+
+Redeem: `POST /v1/game/tickets/redeem`, no bearer token, body `{ticket,verifier}`.
+
+- 200 `{account:{id,name}}`. Nothing else: no friend code, no token.
+- A ticket is consumed at most once. A lost answer is not repeated: ask for a new ticket.
+
+Both bodies are strict: exactly the named properties, each a string, each canonical (43 characters).
+A missing, extra, repeated or wrongly cased property is a 400.
+
+| Status | Issue | Redeem |
+| --- | --- | --- |
+| 400 | Bad body or challenge | Bad body, ticket or verifier |
+| 401 | No single Bearer header, or no live session | never |
+| 404 | never | Unknown, used or expired ticket; wrong verifier; session ended |
+| 413 / 415 | Body over the cap / not JSON | the same |
+| 429 | Address rate limit (Retry-After), or a ticket cap | Address rate limit (Retry-After) |
+| 503 | Database busy or failing; accounts disabled | the same, or the ticket is being redeemed right now |
+
+Rules:
+
+- **Wrong verifier changes nothing.** It is the same 404 as an unknown ticket, and the ticket stays usable.
+- **The session is asked again at redemption.** It must exist, be unexpired and belong to the same account.
+  Logout, eviction or expiry before redemption gives 404 and drops the ticket.
+- **Logout after consumption changes nothing**, even if the 200 has not arrived yet.
+- **503 means this request did not consume the ticket.** Another in-flight redemption may consume it;
+  bounded retries may return 404. Never restore a ticket after response loss.
+- **A redemption that began is finished** even if the caller disconnects.
+
+Limits:
+
+- A ticket lives 30 seconds on a monotonic clock, counted from when it is issued, not from the request.
+- The session's own expiry still ends it sooner. A wait for the database never extends either.
+- At most 10,000 tickets in all and 4 per account. A ticket being redeemed counts until it is settled.
+- 30 issues and 240 redemptions per address per minute. Every request spends allowance, refused ones too.
+- Tickets live in memory, keyed by hash. A restart drops them all; clients ask again.
+
+Decided (game side, not built):
+
+- A server reached by a bare address is accepted by the player explicitly on first contact, and then pinned.
+- A changed pin needs the player's explicit trust again.
+
+Open (game side, not built):
+
+- The remote handshake that carries a ticket and binds it to an accepted server identity.
 
 ## Game client
 
@@ -135,7 +202,7 @@ Network play (`NetworkPlay` in `Prospect.Client`):
   session sooner; the client learns that from its next 401.
 
 Not in the game yet: online presence, same-server friend markers, adding from the player list, account identity
-on game servers.
+on remote game servers. The private local claim API uses tickets; no player-facing claim UI exists.
 The game does not revoke the session when it quits; the session expires at the service after 24 hours.
 
 ## Configuration
@@ -152,6 +219,8 @@ Environment variables use Accounts__<Key>; configuration files use the Accounts 
 | DiscordConcurrency, DiscordTimeoutSeconds | 8, 15 |
 | MaxFriends, MaxOutgoing, MaxIncoming | 200, 50, 200 |
 | PendingDays | 30 |
+| TicketSeconds | 30 (1 to 300) |
+| MaxTickets, TicketsPerAccount | 10000, 4 |
 
 PublicUrl is an HTTPS origin without userinfo, path, query or fragment.
 HTTP is allowed only for literal loopback 127.0.0.1 or [::1] development origins.
@@ -162,8 +231,10 @@ Limits are validated at startup; invalid enabled configuration fails without pri
 Disabled accounts neither open/create a database nor require OAuth credentials, and mapped endpoints return 503.
 Proxy/rate gates still run first, so malformed forwarding or exhausted limits can return 400/429 instead.
 Listing__AuthPerMinute=20 and Listing__AccountPerMinute=120 add separate address buckets.
+Listing__TicketIssuesPerMinute=30 and Listing__TicketRedeemsPerMinute=240 add two more, for game tickets.
 All routes, including browser start and callback, carry limiter metadata.
-All four address buckets must refill before a limiter slot can be recycled.
+All six address buckets must refill before a limiter slot can be recycled.
+An address moved out of a shared overflow bucket inherits all six, so the move grants no fresh burst.
 
 ## Operations and storage
 
@@ -175,6 +246,8 @@ Every DB operation and the ten-second sweeper delete at most 256 expired session
 Expiry checks apply even before rows are physically reclaimed. SQLite reuses freed pages.
 Attempt sweeps cover started, aborted, failed and completed states with cost bounded by MaxAttempts.
 Restart drops in-flight attempts; users restart sign-in.
+Game tickets take no database rows: redemption only reads the session, inside the same one-at-a-time slot.
+Expired tickets are dropped by every issue and redemption, and every Listing__SweepIntervalMilliseconds without one.
 Abandoned flows without a callback retain their slot until the ten-minute expiry.
 
 Discord exchanges have immediate admission, one total timeout, 64-KiB response caps, no redirects or decompression.
@@ -185,7 +258,7 @@ Register the exact external callback https://prospect.mvl.sh/v1/accounts/discord
 Supply client credentials via protected service configuration/environment, never command arguments or source control.
 Keep Microsoft.AspNetCore at Warning. Do not enable HTTP body/header logging.
 Configure proxy access logs to omit callback query strings, Authorization headers and redirect Location values.
-Never log account tokens, handoff codes, Discord tokens, Discord IDs or credential values.
+Never log account tokens, handoff codes, game tickets, verifiers, Discord tokens, Discord IDs or credential values.
 
 Mount durable storage at /data; the image creates it owned by APP_UID (the runtime's unprivileged app user).
 For a bind mount, give that user write access to the directory, database, WAL and SHM files.
@@ -198,3 +271,27 @@ Microsoft.Data.Sqlite 10.0.0 is centrally pinned; SQLitePCLRaw.bundle_e_sqlite3 
 Package references: [Microsoft.Data.Sqlite](https://www.nuget.org/packages/Microsoft.Data.Sqlite/10.0.0),
 [SQLitePCLRaw](https://www.nuget.org/packages/SQLitePCLRaw.bundle_e_sqlite3/3.0.5).
 Provider contract: [Discord OAuth2](https://docs.discord.com/developers/topics/oauth2).
+
+## Private local claim API
+
+`GameSession.RequestLocalClaim(AccountClient)` records explicit intent; `LocalClaim` is a thread-safe enum result.
+Only a private saved world with an active in-process local connection accepts it.
+No menu, load, reconnect or ordinary tick requests a ticket automatically.
+
+- The server worker generates a fresh 256-bit verifier and S256 challenge for purpose `local-claim`.
+- The client matches its configured authority and captured account generation before issuing a ticket through its in-memory bearer.
+- The server redeems through its own configured authority, without a bearer. Only the service's verified UUID can enter the claim save path.
+- The tick rechecks connection generation, the 30-second deadline, authority, private state and closing before staging the candidate.
+- One slot stays occupied until the worker ends, including cancellation. Proof success is not claim success: only exact `Committed` or `AlreadyLinked` means linked.
+
+`--account-authority <url|off>` configures accounts independently of advertisement; omitted, it follows `--listing`.
+Thus `--listing off` leaves accounts off unless explicitly configured. Configuration alone makes no request.
+Claims require a canonical HTTPS origin accepted by `SavedAccount`, with no path or bracketed IP literal.
+Existing listing URLs with a path or loopback HTTP still work for their existing purposes but cannot claim a saved identity.
+No bearer is sent to a server-chosen URL; the two configured authorities must match exactly.
+
+503 retries are bounded to three attempts, delays clamped to 250 ms–5 s, within a 30-second whole-proof limit.
+A timeout or lost answer is terminal for that proof. A later explicit request creates a fresh verifier and ticket.
+No credentials or proof material enter saves, game transport messages or logs.
+The mailbox is in-process only; it adds no wire message or protocol version change.
+A linked world's other authority is refused, never merged or replaced. Local offline ownership remains available.
