@@ -158,6 +158,8 @@ The client opens a real window on the developer's desktop, and they are usually 
 
 - Only launch it with `--capture <file.png>` or `--bench <seconds>`. Both mute every input device, so the window
   cannot grab the pointer or react to their typing. Never start it any other way from an agent session.
+- Such a run titles its window `PROSPECT capture` (`App.ScriptedWindowTitle`). The developer's Hyprland sends
+  that title to a hidden special workspace, where it still renders and captures normally. Keep the title.
 - `make run ARGS="--start local --open <view> --capture /path/shot.png --capture-after 2.5"` saves a screenshot
   and exits. Views: `command`, `edit` (asks to edit the own ship; the editor opens on the grant), `map`, `map-hover` (the map with the pointer on your own sector), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,
   `players`, `social`, `friends`, `chat`, `hud` (the world with the party list and recent chat only). The social views and

@@ -145,6 +145,9 @@ internal sealed class HostingOptions
 internal sealed class App : IDisposable
 {
     public const string VersionLabel = "PROSPECT 0.1.0";
+
+    /// <summary>The window title of a capture or benchmark run, which a compositor rule can match to hide it.</summary>
+    public const string ScriptedWindowTitle = "PROSPECT capture";
     private const float BenchWarmupSeconds = 2f;
     private static readonly float4 ClearColor = new(0.0196f, 0.0275f, 0.0392f, 1f);
 
@@ -283,7 +286,9 @@ internal sealed class App : IDisposable
         _vsync = options.BenchSeconds <= 0 && options.CapturePath is null && Settings.VSync;
         _windowedSize = options.WindowSize ?? new int2(Settings.WindowWidth, Settings.WindowHeight);
         Glfw.WindowHint(GlfwWindowHint.ClientApi, Glfw.Constants.GLFW_NO_API);
-        _window = Glfw.CreateWindow(new GlfwWindow.CreateInfo { Title = "PROSPECT", Size = _windowedSize });
+        // A scripted run carries its own title so the developer's compositor can keep it off their screen
+        // (see "Checking the client without a person at the screen" in AGENTS.md).
+        _window = Glfw.CreateWindow(new GlfwWindow.CreateInfo { Title = scripted ? ScriptedWindowTitle : "PROSPECT", Size = _windowedSize });
         _window.SetSizeLimits(new int2(960, 540), new int2(-1, -1));
         if (Settings.Fullscreen && options.WindowSize is null)
             EnterFullscreen();
