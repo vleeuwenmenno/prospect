@@ -156,6 +156,12 @@ internal sealed class App : IDisposable
 
     /// <summary>The window title of a capture or benchmark run, which a compositor rule can match to hide it.</summary>
     public const string ScriptedWindowTitle = "PROSPECT capture";
+
+    /// <summary>
+    /// The Wayland app id and X11 class of a capture or benchmark run. Agent windows begin with <c>agent.</c>, which
+    /// the developer's compositor routes to a hidden workspace.
+    /// </summary>
+    public const string ScriptedAppId = "agent.prospect";
     private const float BenchWarmupSeconds = 2f;
     private static readonly float4 ClearColor = new(0.0196f, 0.0275f, 0.0392f, 1f);
 
@@ -297,8 +303,12 @@ internal sealed class App : IDisposable
         _vsync = options.BenchSeconds <= 0 && options.CapturePath is null && Settings.VSync;
         _windowedSize = options.WindowSize ?? new int2(Settings.WindowWidth, Settings.WindowHeight);
         Glfw.WindowHint(GlfwWindowHint.ClientApi, Glfw.Constants.GLFW_NO_API);
-        // A scripted run carries its own title so the developer's compositor can keep it off their screen
-        // (see "Checking the client without a person at the screen" in AGENTS.md).
+        // A scripted run carries its own app id, class and title so the developer's compositor can keep it off
+        // their screen (see "Checking the client without a person at the screen" in AGENTS.md). The hints must be
+        // set before the window first maps; a rule cannot match a name given afterwards.
+        var appId = scripted ? ScriptedAppId : "prospect";
+        Glfw.PInvoke.WindowHintString(Glfw.Constants.GLFW_WAYLAND_APP_ID, appId);
+        Glfw.PInvoke.WindowHintString(Glfw.Constants.GLFW_X11_CLASS_NAME, appId);
         _window = Glfw.CreateWindow(new GlfwWindow.CreateInfo { Title = scripted ? ScriptedWindowTitle : "PROSPECT", Size = _windowedSize });
         // BRUTAL's refresh handler reads every window property back from GLFW, the title too, and marshalling the
         // title makes a new string each time the compositor asks for a redraw (an expose, a resize, a change of
