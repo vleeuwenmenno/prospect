@@ -16,6 +16,9 @@ public enum SettingKind : byte
 
     /// <summary>On or off.</summary>
     Switch,
+
+    /// <summary>A bounded whole number.</summary>
+    Integer,
 }
 
 /// <summary>
@@ -37,6 +40,19 @@ public sealed class SettingDefinition
     public string Name { get; internal init; } = "";
     public string Description { get; internal init; } = "";
     public SettingKind Kind { get; internal init; }
+
+    /// <summary>The content-defined section containing this setting.</summary>
+    public string Group { get; internal init; } = "";
+    /// <summary>The galaxy material id, or empty for a general setting.</summary>
+    public string Material { get; internal init; } = "";
+    /// <summary>The unit shown alongside numeric values.</summary>
+    public string Unit { get; internal init; } = "x";
+    /// <summary>The paired upper endpoint's id, or empty for a scalar.</summary>
+    public string RangeMax { get; internal init; } = "";
+    /// <summary>The resolved upper endpoint, or null for a scalar.</summary>
+    public SettingDefinition? Upper { get; internal set; }
+    /// <summary>Whether this endpoint is displayed by its paired minimum.</summary>
+    public bool IsUpper { get; internal set; }
 
     /// <summary>The value a world has unless it is set otherwise.</summary>
     public float Default { get; internal init; }
@@ -65,7 +81,7 @@ public sealed class SettingDefinition
 
         return Kind switch
         {
-            SettingKind.Multiplier => Math.Clamp(value, Minimum, Maximum),
+            SettingKind.Multiplier or SettingKind.Integer => Math.Clamp(Kind == SettingKind.Integer ? MathF.Round(value) : value, Minimum, Maximum),
             SettingKind.Choice => Math.Clamp(MathF.Round(value), 0f, OptionNames.Length - 1),
             _ => value >= 0.5f ? 1f : 0f,
         };
@@ -92,6 +108,7 @@ public sealed class SettingDefinition
         switch (Kind)
         {
             case SettingKind.Multiplier:
+            case SettingKind.Integer:
                 return float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) && float.IsFinite(value);
 
             case SettingKind.Choice:
@@ -122,7 +139,7 @@ public sealed class SettingDefinition
         var clean = Clamp(value);
         return Kind switch
         {
-            SettingKind.Multiplier => clean.ToString("0.##", CultureInfo.InvariantCulture),
+            SettingKind.Multiplier or SettingKind.Integer => clean.ToString("0.##", CultureInfo.InvariantCulture),
             SettingKind.Choice => OptionNames[(int)clean],
             _ => clean != 0 ? "on" : "off",
         };
@@ -132,7 +149,7 @@ public sealed class SettingDefinition
     internal string Expects =>
         Kind switch
         {
-            SettingKind.Multiplier => string.Create(CultureInfo.InvariantCulture, $"a number from {Minimum:0.##} to {Maximum:0.##}"),
+            SettingKind.Multiplier or SettingKind.Integer => string.Create(CultureInfo.InvariantCulture, $"a number from {Minimum:0.##} to {Maximum:0.##}"),
             SettingKind.Choice => "one of " + string.Join(", ", OptionNames),
             _ => "on or off",
         };
@@ -146,7 +163,7 @@ public sealed class SettingDefinition
 public struct WorldSettings : IEquatable<WorldSettings>
 {
     /// <summary>The most settings a world can have.</summary>
-    public const int Capacity = 32;
+    public const int Capacity = 48;
 
     [InlineArray(Capacity)]
     private struct Slots
@@ -217,6 +234,15 @@ public sealed class WorldSettingCatalog
         var defaults = default(WorldSettings);
         foreach (var definition in definitions)
             defaults.Set(definition, definition.Default);
+        foreach (var definition in definitions)
+        {
+            if (definition.RangeMax.Length == 0) continue;
+            var upper = Find(definition.RangeMax);
+            if (upper is null || upper == definition || upper.IsUpper || upper.RangeMax.Length != 0 || upper.Kind != definition.Kind || upper.Minimum != definition.Minimum || upper.Maximum != definition.Maximum || upper.Default < definition.Default)
+                throw new InvalidDataException($"{source}: invalid range {definition.Id}");
+            definition.Upper = upper;
+            upper.IsUpper = true;
+        }
         Defaults = defaults;
     }
 
@@ -254,6 +280,12 @@ public sealed class WorldSettingCatalog
         var clean = default(WorldSettings);
         foreach (var definition in _definitions)
             clean.Set(definition, settings.Get(definition));
+        foreach (var definition in _definitions)
+            if (definition.Upper is { } upper && clean.Get(definition) > clean.Get(upper))
+            {
+                // The maximum wins, so a zero cap always disables asteroids even with a requested minimum.
+                clean.Set(definition, clean.Get(upper));
+            }
         return clean;
     }
 
@@ -270,7 +302,7 @@ public sealed class WorldSettingCatalog
             ReadFile(ref settings, valuesFile, warn);
         foreach (var assignment in assignments)
             Assign(ref settings, assignment, warn);
-        return settings;
+        return Sanitize(settings);
     }
 
     /// <summary>Applies one <c>id=value</c> assignment, as given with <c>--set</c> on a command line.</summary>
@@ -320,7 +352,7 @@ public sealed class WorldSettingCatalog
             var value = entry.Value;
             var ok = definition.Kind switch
             {
-                SettingKind.Multiplier => value.ValueKind == JsonValueKind.Number,
+                SettingKind.Multiplier or SettingKind.Integer => value.ValueKind == JsonValueKind.Number,
                 SettingKind.Choice => value.ValueKind == JsonValueKind.String,
                 _ => value.ValueKind is JsonValueKind.True or JsonValueKind.False,
             };
@@ -367,7 +399,7 @@ public sealed class WorldSettingCatalog
                 settings.Set(definition, value);
         }
 
-        return settings;
+        return Sanitize(settings);
     }
 
     public static WorldSettingCatalog Load(string path) => Parse(File.ReadAllBytes(path), path);
@@ -428,6 +460,7 @@ public sealed class WorldSettingCatalog
         var description = RequiredText(entry, "description", where);
         switch (RequiredText(entry, "kind", where))
         {
+            case "integer":
             case "multiplier":
                 {
                     var minimum = RequiredNumber(entry, "minimum", where);
@@ -443,11 +476,15 @@ public sealed class WorldSettingCatalog
                         Id = id,
                         Name = name,
                         Description = description,
-                        Kind = SettingKind.Multiplier,
+                        Kind = entry.GetProperty("kind"u8).GetString() == "integer" ? SettingKind.Integer : SettingKind.Multiplier,
                         Default = initial,
                         Minimum = minimum,
                         Maximum = maximum,
                         Step = step,
+                        Group = entry.TryGetProperty("group"u8, out var group) ? group.GetString()! : "",
+                        Material = entry.TryGetProperty("material"u8, out var material) ? material.GetString()! : "",
+                        Unit = entry.TryGetProperty("unit"u8, out var unit) ? unit.GetString()! : "x",
+                        RangeMax = entry.TryGetProperty("rangeMax"u8, out var pair) ? pair.GetString()! : "",
                     };
                 }
 

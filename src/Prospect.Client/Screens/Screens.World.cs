@@ -236,6 +236,7 @@ internal sealed partial class ScreenHost
             draw.AddLine(new float2(ruleLeft, min.Y + Kit.Px(101)), new float2(ruleRight, min.Y + Kit.Px(101)), rule, 1f);
 
         var star = world.Galaxy!.StarClasses[world.Sector.StarClass];
+        var countPrefix = world.Galaxy.AsteroidFields?.EstimatesCounts == true ? "UP TO " : "";
         var text = min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3));
         if (compact)
         {
@@ -243,7 +244,7 @@ internal sealed partial class ScreenHost
             Kit.ClippedText(draw, _ui.SansMedium, Theme.FontBody, text + new float2(Kit.Px(18), 0), Theme.Text, world.SectorName, inner - Kit.Px(18));
             var at = world.Sector.Coord;
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(28)), Theme.TextDim,
-                Kit.F($"SECTOR {at.X} {at.Y} {at.Z}   {world.Sector.AsteroidCount} ROCKS   PLAYERS {snapshot.PlayerCount}/{snapshot.MaxPlayers}"), inner);
+                Kit.F($"SECTOR {at.X} {at.Y} {at.Z}   {countPrefix}{world.Sector.AsteroidCount} ROCKS   PLAYERS {snapshot.PlayerCount}/{snapshot.MaxPlayers}"), inner);
             draw.PopClipRect();
             return min.Y + size.Y;
         }
@@ -254,7 +255,7 @@ internal sealed partial class ScreenHost
         Kit.ClippedText(draw, _ui.SansMedium, Theme.FontBody, text + new float2(Kit.Px(18), 0), Theme.Text, world.SectorName, inner - Kit.Px(18));
 
         var coord = world.Sector.Coord;
-        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(30)), Theme.TextDim, Kit.F($"SECTOR {coord.X} {coord.Y} {coord.Z}   {world.Sector.AsteroidCount} ROCKS"), inner);
+        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(30)), Theme.TextDim, Kit.F($"SECTOR {coord.X} {coord.Y} {coord.Z}   {countPrefix}{world.Sector.AsteroidCount} ROCKS"), inner);
 
         // The server: its name on a line of its own, cut off at the panel's edge since a host may choose a long
         // one, then who can join it and how full it is.
@@ -1463,7 +1464,7 @@ internal sealed partial class ScreenHost
                 Theme.FontCaption,
                 text + new float2(0, y),
                 Theme.TextDim,
-                summary.AsteroidCount > 0 ? Kit.F($"ASTEROIDS     {summary.AsteroidCount} IN {summary.FieldCount} {(summary.FieldCount == 1 ? "FIELD" : "FIELDS")}") : "ASTEROIDS     none"u8
+                summary.AsteroidCount > 0 ? Kit.F($"ASTEROIDS     {(galaxy.AsteroidFields?.EstimatesCounts == true ? "UP TO " : "")}{summary.AsteroidCount} IN {summary.FieldCount} {(galaxy.AsteroidFields?.EstimatesCounts == true ? "PLANNED " : "")}{(summary.FieldCount == 1 ? "FIELD" : "FIELDS")}") : "ASTEROIDS     none"u8
             );
             y += line;
             if (hasRock)

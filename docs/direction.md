@@ -144,8 +144,16 @@ exists.
 - **A world has settings:** switches and multipliers, chosen when a new game or a server is set up.
 - **The server owns them.** A client is told on joining and plays by them.
 - **First ones:** collision damage, shields against collisions (full, weak, none), shield recharge, jump charge
-  speed, hull strength. Many more follow.
+  speed and hull strength. Asteroid settings control amount, per-sector cap, radius, field dimensions,
+  occurrence, spacing, ore-bearing share and grade. Defaults preserve the original galaxy.
 - **Fixed for the life of a world.** Set when a server or a local game starts, not while it runs.
+
+## Decided: world generation controls
+
+- Counts are requested per-sector ranges, and sizes are radius ranges in metres; placement may fall short.
+- Richness ranges clamp sector character; ore grade ranges clamp ore quality, globally then per material.
+- Material abundance weights only materials already allowed in that sector; zero removes their share and map presence.
+- Existing sampled distributions and default home rules stay intact. No mining economy changes.
 
 ## Decided: building
 
@@ -250,7 +258,7 @@ Remaining scale work: full-state snapshots, bounded runtime geometry and hull-on
 
 Next:
 
-1. The ship editor (B): its second slice and wedges are in. Next: smooth shields, then mirror, stock parts, a drag handle.
+1. The ship editor (B): its second slice and wedges are in. Smooth shields are in. Next: mirror, stock parts, a drag handle.
 2. Blocks at scale, stages 3 to 5: collision, drawing and the full load.
 3. The entity store and the entity kinds: ships, stations, fighters, asteroids, gas fields.
 4. Interest management and delta snapshots.

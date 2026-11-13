@@ -105,7 +105,7 @@ public struct SectorSummary
     /// <summary>How rich the sector is and which resources occur in it.</summary>
     public SectorCharacter Character;
 
-    /// <summary>Written by the asteroid field module: how many asteroids the sector has, in how many fields.</summary>
+    /// <summary>Written by the asteroid field module: planned upper counts on the map; actual counts after generation.</summary>
     public int AsteroidCount;
     public int FieldCount;
 }
@@ -314,6 +314,25 @@ public sealed class Galaxy
     {
         var copy = (Galaxy)MemberwiseClone();
         copy.SetModules(modules);
+        return copy;
+    }
+
+    private float _richnessMin, _richnessMax = 1;
+    private float[] _materialAbundance = [];
+
+    /// <summary>Applies world generation settings without changing the seed or other modules.</summary>
+    public Galaxy Under(WorldSettingCatalog catalog, in WorldSettings settings)
+    {
+        var clean = catalog.Sanitize(settings);
+        var modules = new SectorModule[_modules.Length];
+        for (var i = 0; i < modules.Length; i++)
+            modules[i] = _modules[i] is AsteroidFieldsModule fields ? fields.Under(catalog, clean, Resources) : _modules[i];
+        var copy = WithModules(modules);
+        copy._richnessMin = catalog.Number(clean, "oreRichnessMin");
+        copy._richnessMax = catalog.Number(clean, "oreRichnessMax");
+        copy._materialAbundance = new float[Resources.Length];
+        for (var i = 0; i < Resources.Length; i++)
+            copy._materialAbundance[i] = catalog.Number(clean, Resources[i].Id + "Abundance");
         return copy;
     }
 
@@ -548,6 +567,7 @@ public sealed class Galaxy
         if (isHome)
             richness = Math.Max(richness, _homeMinRichness);
 
+        richness = Math.Clamp(richness, _richnessMin, _richnessMax);
         var character = new SectorCharacter { Main = -1 };
         var nearCore = Shape.CoreProximity(coord);
         var every = random.NextSingle() < _everyResourceChance;
@@ -564,6 +584,8 @@ public sealed class Galaxy
                 continue;
 
             var share = Resources[i].Weight * common * (_shareEvenness + (1f - _shareEvenness) * spread * spread);
+            if (_materialAbundance.Length != 0) share *= _materialAbundance[i];
+            if (share <= 0) continue;
             character.Resources |= 1u << i;
             character.Shares[i] = share;
             total += share;

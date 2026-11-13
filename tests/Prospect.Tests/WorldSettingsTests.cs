@@ -360,9 +360,11 @@ public sealed class WorldSettingParsingTests
     }
 
     [Fact]
-    public void TheShippedSettingsAreTheFiveWithTheirRangesAndDefaults()
+    public void TheShippedSettingsHaveTheirRangesAndDefaults()
     {
-        Assert.Equal(["collisionDamage", "collisionShields", "shieldRecharge", "jumpChargeSpeed", "hullStrength"], Catalog.Definitions.ToArray().Select(d => d.Id));
+        Assert.Equal(["collisionDamage", "collisionShields", "shieldRecharge", "jumpChargeSpeed", "hullStrength", "asteroidAmount", "asteroidCap", "asteroidSize", "asteroidFieldSize", "asteroidFrequency", "asteroidSpacing", "asteroidOreShare", "asteroidOreGrade"], Catalog.Definitions.ToArray().Take(13).Select(d => d.Id));
+        Assert.Equal(38, Catalog.Definitions.Length);
+        Assert.Equal(10, Catalog.Definitions.ToArray().Count(d => d.Upper is not null));
 
         var damage = Catalog.Find("collisionDamage")!;
         Assert.Equal((SettingKind.Multiplier, 1f, 0f, 4f), (damage.Kind, damage.Default, damage.Minimum, damage.Maximum));
@@ -643,7 +645,7 @@ public sealed class WorldSettingParsingTests
         Assert.Equal(0, reader.Remaining);
 
         var tooMany = Assert.Throws<InvalidDataException>(() => WorldSettingCatalog.Parse(Encoding.UTF8.GetBytes(FullList(WorldSettings.Capacity + 1)), "full.json"));
-        Assert.Contains("at most 32", tooMany.Message);
+        Assert.Contains($"at most {WorldSettings.Capacity}", tooMany.Message);
     }
 
     [Fact]
@@ -710,7 +712,7 @@ public sealed class WorldSettingSessionTests
     public void AClientPlaysByTheSettingsOfTheServerItJoinsAndNotByItsOwnFiles()
     {
         var catalog = Content.SettingCatalog;
-        var settings = catalog.Build(null, ["collisionDamage=0.5", "collisionShields=Weak", "shieldRecharge=0.5", "jumpChargeSpeed=4", "hullStrength=2"]);
+        var settings = catalog.Build(null, ["collisionDamage=0.5", "collisionShields=Weak", "shieldRecharge=0.5", "jumpChargeSpeed=4", "hullStrength=2", "asteroidAmount=0.5", "asteroidCap=128", "asteroidSize=2", "asteroidFieldSize=0.5", "asteroidFrequency=2", "asteroidSpacing=2", "asteroidOreShare=2", "asteroidOreGrade=0.5", "asteroidCountMin=100", "asteroidRadiusMin=6", "asteroidRadiusMax=80", "oreRichnessMin=0.5", "oreRichnessMax=0.9", "oreGradeMin=0.2", "oreGradeMax=0.8", "ironAbundance=0", "copperGradeMin=0.6", "copperGradeMax=0.7"]);
         var port = (ushort)(51000 + Environment.ProcessId % 2000);
         using var server = new ServerHost(new ServerConfig { MaxPlayers = 2, Settings = settings }, Content, RakNetTransport.Listen(port, 8));
         server.Start();
@@ -729,6 +731,17 @@ public sealed class WorldSettingSessionTests
         {
             Assert.Equal(world.Designs[i].Flight, snapshot.Content.Designs[i].Flight);
             Assert.Equal(world.Designs[i].Stats, snapshot.Content.Designs[i].Stats);
+        }
+
+        var serverSector = new SectorContent();
+        var clientSector = new SectorContent();
+        foreach (var coord in new SectorCoord[] { default, new(-40, 0, -29), new(8, 0, -8) })
+        {
+            server.Galaxy.Generate(coord, serverSector);
+            snapshot.Galaxy!.Generate(coord, clientSector);
+            Assert.Equal(Sectors.Hash(serverSector), Sectors.Hash(clientSector));
+            Assert.Equal(serverSector.Summary.AsteroidCount, clientSector.Summary.AsteroidCount);
+            Assert.InRange(clientSector.AsteroidCount, 0, 128);
         }
 
         // The figures the client predicts its own hull with, and the hull the server gave it.
@@ -823,5 +836,228 @@ public sealed class WorldSettingSessionTests
         // The same bound the ram at the default settings keeps: the client collided by the server's figures.
         Assert.True(worst < 0.15f, $"prediction was off by up to {worst:0.000} m");
         Assert.Null(session.Fault);
+    }
+}
+
+/// <summary>Generation settings share one immutable application path on both sides of a session.</summary>
+public sealed class AsteroidSettingTests
+{
+    private static readonly GameContent Content = GameContent.Load();
+    private static readonly SectorCoord[] Coords = [default, new(-40, 0, -29), new(8, 0, -8), new(-14, 0, -2)];
+
+    private static GameContent World(params string[] assignments) => Content.WithSettings(Content.SettingCatalog.Build(null, assignments));
+
+    [Fact]
+    public void RangeNormalizationAndMaterialRulesReachActualGeneration()
+    {
+        var catalog = Content.SettingCatalog;
+        var settings = catalog.Build(null, ["asteroidCountMin=200", "asteroidCap=100", "asteroidRadiusMin=40", "asteroidRadiusMax=8"]);
+        Assert.Equal(100, catalog.Number(settings, "asteroidCountMin"));
+        Assert.Equal(100, catalog.Number(settings, "asteroidCap"));
+        Assert.Equal(8, catalog.Number(settings, "asteroidRadiusMin"));
+        var bytes = new byte[WorldSettingCatalog.MaxWireSize];
+        settings.Set(catalog.Find("oreGradeMin")!, float.PositiveInfinity);
+        settings.Set(catalog.Find("oreGradeMax")!, float.NegativeInfinity);
+        var writer = new NetWriter(bytes);
+        catalog.Write(ref writer, settings);
+        var reader = new NetReader(writer.Written);
+        Assert.Equal(catalog.Sanitize(settings), catalog.Read(ref reader));
+        var assignments = new List<string> { "asteroidRadiusMin=8", "asteroidRadiusMax=40", "asteroidCountMin=100", "asteroidCap=200", "oreRichnessMin=0.6", "oreRichnessMax=0.9" };
+        foreach (var resource in Content.Galaxy.Resources)
+        {
+            assignments.Add(resource.Id + "Abundance=" + (resource.Id == "copper" ? "4" : "0"));
+            assignments.Add(resource.Id + "GradeMin=0.75");
+            assignments.Add(resource.Id + "GradeMax=0.75");
+        }
+        var world = World(assignments.ToArray());
+        var galaxy = world.Galaxy.WithSeed(42);
+        var sector = new SectorContent();
+        var repeat = new SectorContent();
+        var copper = Array.FindIndex(galaxy.Resources, r => r.Id == "copper");
+        var ores = 0;
+        foreach (var coord in Coords)
+        {
+            galaxy.Generate(coord, sector);
+            world.Galaxy.Under(catalog, world.Settings).WithSeed(42).Generate(coord, repeat);
+            Assert.Equal(Sectors.Hash(sector), Sectors.Hash(repeat));
+            Assert.InRange(sector.AsteroidCount, 0, 200);
+            foreach (var rock in sector.Asteroids.Take(sector.AsteroidCount))
+            {
+                Assert.InRange(rock.Radius, 8, 40);
+                if (rock.Resource < 0) continue;
+                ores++;
+                Assert.Equal(copper, rock.Resource);
+                Assert.Equal(0.75f, rock.Grade);
+                Assert.True(Content.Galaxy.WithSeed(42).Summarize(coord).Character.Has(copper));
+            }
+        }
+        Assert.True(ores > 0);
+        foreach (var zero in new[] { "asteroidAmount=0", "asteroidCap=0" })
+        {
+            var empty = World("asteroidCountMin=4096", zero).Galaxy.WithSeed(42);
+            empty.Generate(default, sector);
+            Assert.Equal(0, sector.AsteroidCount);
+        }
+        Assert.Equal(0, World("asteroidFrequency=0", "asteroidCountMin=4096").Galaxy.WithSeed(42).Summarize(Coords[1]).AsteroidCount);
+    }
+
+    [Theory]
+    [InlineData("iron")]
+    [InlineData("copper")]
+    [InlineData("nickel")]
+    [InlineData("titanium")]
+    [InlineData("silver")]
+    [InlineData("gold")]
+    public void EveryMaterialsAbundanceAndGradeAffectItsGeneratedRocks(string material)
+    {
+        var original = Content.Galaxy.WithSeed(42);
+        var index = Array.FindIndex(original.Resources, r => r.Id == material);
+        var assignments = new List<string> { "asteroidCap=64", "asteroidOreShare=2", "oreGradeMin=0.2", "oreGradeMax=0.3", material + "GradeMin=0.7", material + "GradeMax=0.7" };
+        foreach (var resource in original.Resources)
+            assignments.Add(resource.Id + "Abundance=" + (resource.Id == material ? "4" : "0"));
+        var galaxy = World(assignments.ToArray()).Galaxy.WithSeed(42);
+        var sector = new SectorContent();
+        for (var x = -40; x < 40; x++)
+        {
+            var coord = new SectorCoord(x, 0, -8);
+            var summary = original.Summarize(coord);
+            if (summary.AsteroidCount == 0 || !summary.Character.Has(index)) continue;
+            galaxy.Generate(coord, sector);
+            var ore = sector.Asteroids.Take(sector.AsteroidCount).Where(r => r.Resource >= 0).ToArray();
+            Assert.NotEmpty(ore);
+            Assert.All(ore, rock => { Assert.Equal(index, rock.Resource); Assert.Equal(0.7f, rock.Grade); });
+            Assert.Equal(1u << index, galaxy.Summarize(coord).Character.Resources);
+            return;
+        }
+        Assert.Fail("No sector exercised the material");
+    }
+
+    [Theory]
+    [InlineData("asteroidAmount=0")]
+    [InlineData("asteroidCap=0")]
+    public void ZeroDisablesHomeAndOrdinarySectors(string assignment)
+    {
+        var galaxy = World(assignment).Galaxy.WithSeed(42);
+        var sector = new SectorContent();
+        foreach (var coord in Coords)
+        {
+            galaxy.Generate(coord, sector);
+            Assert.Equal(0, sector.AsteroidCount);
+            Assert.Equal(0, galaxy.Summarize(coord).AsteroidCount);
+        }
+    }
+
+    [Fact]
+    public void SettingsNeverCompoundAndDefaultsKeepTheOriginalGeneration()
+    {
+        var a = World("asteroidSize=2", "asteroidAmount=2", "asteroidFieldSize=0.5");
+        var b = Content.SettingCatalog.Build(null, ["asteroidSize=0.5", "asteroidAmount=0.5", "asteroidCap=128"]);
+        var direct = Content.WithSettings(b).Galaxy.WithSeed(42);
+        var stacked = a.WithSettings(b).Galaxy.WithSeed(42);
+        var reset = a.WithSettings(Content.Settings).Galaxy.WithSeed(42);
+        var original = Content.Galaxy.WithSeed(42);
+        var left = new SectorContent();
+        var right = new SectorContent();
+        foreach (var coord in Coords)
+        {
+            direct.Generate(coord, left);
+            stacked.Generate(coord, right);
+            Assert.Equal(Sectors.Hash(left), Sectors.Hash(right));
+            Assert.InRange(left.AsteroidCount, 0, 128);
+            reset.Generate(coord, left);
+            original.Generate(coord, right);
+            Assert.Equal(Sectors.Hash(left), Sectors.Hash(right));
+        }
+        Assert.Equal(4096, Content.Galaxy.MaxAsteroidsPerSector);
+        Assert.False(Content.Galaxy.AsteroidFields!.EstimatesCounts);
+        Assert.False(reset.AsteroidFields!.EstimatesCounts);
+        Assert.True(direct.AsteroidFields!.EstimatesCounts);
+        Assert.Equal(42ul, direct.Seed);
+    }
+
+    [Theory]
+    [InlineData(2, 0.5, 2)]
+    [InlineData(0.25, 1.5, 0.5)]
+    public void ExtremeGeometryIsRepeatableBoundedClearAndNonoverlapping(float size, float field, float spacing)
+    {
+        var settings = Content.Settings;
+        settings.Set(Content.SettingCatalog.Find("asteroidSize")!, size);
+        settings.Set(Content.SettingCatalog.Find("asteroidFieldSize")!, field);
+        settings.Set(Content.SettingCatalog.Find("asteroidSpacing")!, spacing);
+        settings.Set(Content.SettingCatalog.Find("asteroidAmount")!, 2);
+        var galaxy = Content.WithSettings(settings).Galaxy.WithSeed(42);
+        var sector = new SectorContent();
+        var again = new SectorContent();
+        foreach (var coord in Coords)
+        {
+            galaxy.Generate(coord, sector);
+            galaxy.Generate(coord, again);
+            Assert.Equal(Sectors.Hash(sector), Sectors.Hash(again));
+            Assert.InRange(sector.AsteroidCount, 0, 4096);
+            Assert.Equal(sector.AsteroidCount, sector.Summary.AsteroidCount);
+            Assert.InRange(sector.Summary.FieldCount, 0, galaxy.Summarize(coord).FieldCount);
+            Assert.Equal(sector.AsteroidCount == 0, sector.Summary.FieldCount == 0);
+            Assert.True(sector.AsteroidCount <= galaxy.Summarize(coord).AsteroidCount);
+            for (var i = 0; i < sector.AsteroidCount; i++)
+            {
+                var rock = sector.Asteroids[i];
+                Assert.True(float.IsFinite(rock.Radius));
+                Assert.True(rock.LocalPosition.Length() + 0.01f >= rock.Radius + galaxy.AsteroidFields!.ArrivalClearance);
+                Assert.True(Math.Abs(rock.LocalPosition.X) + rock.Radius <= galaxy.SectorSize / 2 + 0.01);
+                Assert.True(Math.Abs(rock.LocalPosition.Y) + rock.Radius <= galaxy.SectorSize / 2 + 0.01);
+                Assert.True(Math.Abs(rock.LocalPosition.Z) + rock.Radius <= galaxy.SectorSize / 2 + 0.01);
+                for (var j = 0; j < i; j++)
+                    Assert.True(Vector3.Distance(rock.LocalPosition, sector.Asteroids[j].LocalPosition) + 0.01f >= rock.Radius + sector.Asteroids[j].Radius);
+            }
+        }
+    }
+
+    [Fact]
+    public void FrequencyLeavesHomeAndOreSettingsRespectAvailability()
+    {
+        var galaxy = World("asteroidFrequency=0", "asteroidOreShare=0").Galaxy.WithSeed(42);
+        var sector = new SectorContent();
+        galaxy.Generate(default, sector);
+        Assert.Equal(750, sector.AsteroidCount);
+        Assert.All(sector.Asteroids.Take(sector.AsteroidCount), rock => Assert.Equal(-1, rock.Resource));
+        foreach (var coord in Coords.Skip(1))
+            Assert.Equal(0, galaxy.Summarize(coord).AsteroidCount);
+        galaxy = World("asteroidOreShare=2", "asteroidOreGrade=2").Galaxy.WithSeed(42);
+        foreach (var coord in Coords)
+        {
+            galaxy.Generate(coord, sector);
+            foreach (var rock in sector.Asteroids.Take(sector.AsteroidCount))
+            {
+                Assert.InRange(rock.Grade, 0, 1);
+                if (rock.Resource >= 0) Assert.True(sector.Summary.Character.Has(rock.Resource));
+            }
+        }
+    }
+
+    [Fact]
+    public void IntegerCapClampsAcrossCliFileAndWireAndOldFilesUseDefaults()
+    {
+        var catalog = Content.SettingCatalog;
+        var values = catalog.Build(null, ["asteroidCap=9000"]);
+        Assert.Equal(4096, catalog.Number(values, "asteroidCap"));
+        catalog.Assign(ref values, "asteroidCap=12.7");
+        Assert.Equal(13, catalog.Number(values, "asteroidCap"));
+        var path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path, "{\"hullStrength\":2}");
+            values = catalog.Build(path, []);
+            Assert.Equal(4096, catalog.Number(values, "asteroidCap"));
+            Assert.Equal(1, catalog.Number(values, "asteroidAmount"));
+            File.WriteAllText(path, "{\"asteroidCap\":128,\"asteroidAmount\":0.5}");
+            values = catalog.Build(path, []);
+            Span<byte> bytes = stackalloc byte[WorldSettingCatalog.MaxWireSize];
+            var writer = new NetWriter(bytes);
+            catalog.Write(ref writer, values);
+            var reader = new NetReader(writer.Written);
+            Assert.Equal(values, catalog.Read(ref reader));
+            Assert.True(reader.IsValid);
+        }
+        finally { File.Delete(path); }
     }
 }

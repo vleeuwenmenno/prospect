@@ -113,7 +113,7 @@ public sealed class GameContent
         var designs = new HullDesign[Designs.Length];
         for (var i = 0; i < designs.Length; i++)
             designs[i] = Designs[i].WithRules(rules);
-        return new GameContent(Galaxy, Blocks, SettingCatalog, clean, rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor);
+        return new GameContent(Galaxy.Under(SettingCatalog, clean), Blocks, SettingCatalog, clean, rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor);
     }
 
     internal GameContent WithCatalogue(HullDesign[] designs, int pod, int drone, int[] fleet) =>
@@ -179,7 +179,7 @@ public sealed class GameContent
         if (designs.Count is 0 or > byte.MaxValue)
             throw new InvalidDataException("fleet.json: needs between 1 and 255 designs");
 
-        var galaxy = Galaxy.Parse(Shared("galaxy", "galaxy.json"), At("galaxy", "galaxy.json"));
+        var galaxy = Galaxy.Parse(Shared("galaxy", "galaxy.json"), At("galaxy", "galaxy.json")).Under(settingCatalog, settings);
 
         // Not shared: the server enforces its own social limits and the wire's bounds are fixed in code, so a
         // client with other numbers shows another party size or chat counter and nothing in the simulation moves.

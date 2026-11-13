@@ -10,7 +10,7 @@ namespace Prospect.Client.Screens;
 
 internal sealed partial class ScreenHost
 {
-    private const float WorldRowWidth = 600;
+    private float WorldRowWidth => Math.Clamp(_ui.DisplaySize.X / Kit.Scale - Theme.Space6 * 2 - 62, 320, 600);
 
     /// <summary>Room left of each setting for the bar that marks a changed one.</summary>
     private const float MarkerGutter = 14;
@@ -171,6 +171,7 @@ internal sealed partial class ScreenHost
         var catalog = _app.Content.SettingCatalog;
         var min = new float2(Kit.Px(96), _ui.DisplaySize.Y * 0.08f + Slide(fade));
         var size = new float2(Kit.Px(WorldRowWidth + Theme.Space6 * 2 + 30), Math.Min(Kit.Px(1100), _ui.DisplaySize.Y * 0.92f - Kit.Px(72)));
+        min.X = Math.Min(min.X, Math.Max(Kit.Px(8), (_ui.DisplaySize.X - size.X) * 0.5f));
         BeginPanel("##newgamepanel"u8, min, size);
 
         if (Compact)
@@ -207,9 +208,9 @@ internal sealed partial class ScreenHost
         {
             if (_newGame.Get(definition) != definition.Default)
                 changed++;
-            DrawSettingEditor(definition);
         }
 
+        DrawSettingGroups(catalog, false);
         ImGui.Unindent(Kit.Px(MarkerGutter));
         ImGui.EndChild();
 
@@ -251,25 +252,35 @@ internal sealed partial class ScreenHost
         ImGui.PushID(definition.Id);
         var top = ImGui.GetCursorScreenPos();
         var value = _newGame.Get(definition);
-        switch (definition.Kind)
+        if (definition.Upper is { } upper)
         {
-            case SettingKind.Multiplier:
-                if (Kit.Slider(definition.Name, ref value, definition.Minimum, definition.Maximum, definition.Step, Kit.F($"{value:0.##}x"), WorldRowWidth))
-                    _newGame.Set(definition, value);
-                break;
-            case SettingKind.Choice:
-                var index = (int)value;
-                if (Kit.Choice(definition.Name, _settingOptions[definition.Index], ref index, WorldRowWidth))
-                    _newGame.Set(definition, index);
-                break;
-            default:
-                var on = value != 0;
-                if (Kit.Toggle(definition.Name, ref on, WorldRowWidth))
-                    _newGame.Set(definition, on ? 1 : 0);
-                break;
+            var high = _newGame.Get(upper);
+            if (Kit.RangeSlider(definition.Name, ref value, ref high, definition.Minimum, definition.Maximum, definition.Step, definition.Unit, WorldRowWidth))
+            {
+                _newGame.Set(definition, value);
+                _newGame.Set(upper, high);
+            }
         }
+        else switch (definition.Kind)
+            {
+                case SettingKind.Integer:
+                case SettingKind.Multiplier:
+                    if (Kit.Slider(definition.Name, ref value, definition.Minimum, definition.Maximum, definition.Step, definition.Kind == SettingKind.Multiplier ? Kit.F($"{value:0.##}{definition.Unit}") : Kit.F($"{value:0}"), WorldRowWidth))
+                        _newGame.Set(definition, value);
+                    break;
+                case SettingKind.Choice:
+                    var index = (int)value;
+                    if (Kit.Choice(definition.Name, _settingOptions[definition.Index], ref index, WorldRowWidth))
+                        _newGame.Set(definition, index);
+                    break;
+                default:
+                    var on = value != 0;
+                    if (Kit.Toggle(definition.Name, ref on, WorldRowWidth))
+                        _newGame.Set(definition, on ? 1 : 0);
+                    break;
+            }
 
-        var changed = _newGame.Get(definition) != definition.Default;
+        var changed = _newGame.Get(definition) != definition.Default || (definition.Upper is { } paired && _newGame.Get(paired) != paired.Default);
         Kit.Space(Theme.Space1);
         ImGui.Indent(Kit.Px(Theme.Space3));
         var textTop = ImGui.GetCursorScreenPos();
@@ -279,7 +290,10 @@ internal sealed partial class ScreenHost
         {
             ImGui.SetCursorScreenPos(new float2(top.X + Kit.Px(WorldRowWidth - 66), textTop.Y));
             if (Kit.LinkButton("RESET"u8))
+            {
                 _newGame.Set(definition, definition.Default);
+                if (definition.Upper is { } resetUpper) _newGame.Set(resetUpper, resetUpper.Default);
+            }
             bottom = Math.Max(bottom, ImGui.GetCursorScreenPos().Y);
             ImGui.SetCursorScreenPos(new float2(textTop.X, bottom));
         }
@@ -315,11 +329,17 @@ internal sealed partial class ScreenHost
         foreach (var definition in definitions)
         {
             var value = content.Settings.Get(definition);
-            _inForceValue[definition.Index] = definition.Kind == SettingKind.Multiplier ? definition.Format(value) + "x" : definition.Format(value);
+            _inForceValue[definition.Index] = definition.Kind == SettingKind.Multiplier ? definition.Format(value) + definition.Unit : definition.Format(value);
             _inForceDefault[definition.Index] =
-                value == definition.Default ? "" : "default " + definition.Format(definition.Default) + (definition.Kind == SettingKind.Multiplier ? "x" : "");
+                value == definition.Default ? "" : "default " + definition.Format(definition.Default) + (definition.Kind == SettingKind.Multiplier ? definition.Unit : "");
         }
 
+        foreach (var definition in definitions)
+            if (definition.Upper is { } upper)
+            {
+                _inForceValue[definition.Index] = definition.Format(content.Settings.Get(definition)) + " – " + upper.Format(content.Settings.Get(upper)) + " " + definition.Unit;
+                _inForceDefault[definition.Index] = content.Settings.Get(definition) == definition.Default && content.Settings.Get(upper) == upper.Default ? "" : "default " + definition.Format(definition.Default) + " – " + upper.Format(upper.Default);
+            }
         _worldSettingsOpen = true;
         _worldSettingsRequested = false;
     }
@@ -344,35 +364,7 @@ internal sealed partial class ScreenHost
         var listHeight = Math.Max(Kit.Px(80), ImGui.GetContentRegionAvail().Y - footer);
         ImGui.BeginChild("##worldsettingslist"u8, new float2(0, listHeight), ImGuiChildFlags.NavFlattened, ImGuiWindowFlags.NoBackground);
         ImGui.Indent(Kit.Px(MarkerGutter));
-        var draw = ImGui.GetWindowDrawList();
-        foreach (var definition in content.SettingCatalog.Definitions)
-        {
-            var top = ImGui.GetCursorScreenPos();
-            var rowSize = new float2(Kit.Px(WorldRowWidth), Kit.Px(34));
-            var nameSize = Kit.Measure(_ui.Sans, Theme.FontBody, definition.Name);
-            Kit.Text(draw, _ui.Sans, Theme.FontBody, top + new float2(Kit.Px(Theme.Space3), (rowSize.Y - nameSize.Y) * 0.5f), Theme.Text, definition.Name);
-            var value = _inForceValue[definition.Index];
-            var valueSize = Kit.Measure(_ui.Mono, Theme.FontSmall, value);
-            var valueAt = top + new float2(rowSize.X - valueSize.X - Kit.Px(Theme.Space3), (rowSize.Y - valueSize.Y) * 0.5f);
-            Kit.Text(draw, _ui.Mono, Theme.FontSmall, valueAt, Theme.Text, value);
-            var standard = _inForceDefault[definition.Index];
-            if (standard.Length > 0)
-            {
-                var standardSize = Kit.Measure(_ui.Mono, Theme.FontCaption, standard);
-                Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(valueAt.X - standardSize.X - Kit.Px(Theme.Space3), top.Y + (rowSize.Y - standardSize.Y) * 0.5f), Theme.Accent, standard);
-            }
-
-            draw.AddLine(top + new float2(0, rowSize.Y - 0.5f), top + new float2(rowSize.X, rowSize.Y - 0.5f), Kit.Color(Theme.Line, 0.6f));
-            ImGui.Dummy(rowSize);
-            Kit.Space(Theme.Space1);
-            ImGui.Indent(Kit.Px(Theme.Space3));
-            Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, definition.Description, WorldRowWidth - 150);
-            ImGui.Unindent(Kit.Px(Theme.Space3));
-            var bottom = ImGui.GetCursorScreenPos().Y;
-            if (standard.Length > 0)
-                ChangedMarker(top, bottom);
-            Kit.Space(Theme.Space4);
-        }
+        DrawSettingGroups(content.SettingCatalog, true);
 
         ImGui.Unindent(Kit.Px(MarkerGutter));
         ImGui.EndChild();
@@ -384,4 +376,51 @@ internal sealed partial class ScreenHost
         EndPanel();
         EndRoot();
     }
+    private void DrawSettingGroups(WorldSettingCatalog catalog, bool readOnly)
+    {
+        DrawSettingGroup(catalog, "", "", readOnly);
+        if (ImGui.CollapsingHeader("Asteroids"u8, ImGuiTreeNodeFlags.DefaultOpen)) DrawSettingGroup(catalog, "Asteroids", "", readOnly);
+        if (ImGui.CollapsingHeader("Resources / Materials"u8, ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            DrawSettingGroup(catalog, "Resources", "", readOnly);
+            foreach (var resource in _app.Content.Galaxy.Resources)
+            {
+                ImGui.PushID(resource.Id);
+                if (ImGui.CollapsingHeader(resource.Name)) DrawSettingGroup(catalog, "Resources", resource.Id, readOnly);
+                ImGui.PopID();
+            }
+        }
+    }
+
+    private void DrawSettingGroup(WorldSettingCatalog catalog, string group, string material, bool readOnly)
+    {
+        foreach (var definition in catalog.Definitions)
+        {
+            if (definition.IsUpper || definition.Group != group || definition.Material != material) continue;
+            if (readOnly) DrawInForceSetting(definition);
+            else DrawSettingEditor(definition);
+        }
+    }
+
+    private void DrawInForceSetting(SettingDefinition definition)
+    {
+        var draw = ImGui.GetWindowDrawList();
+        var top = ImGui.GetCursorScreenPos();
+        Kit.Label(_ui.Sans, Theme.FontBody, Theme.Text, definition.Name);
+        Kit.Label(_ui.Mono, Theme.FontSmall, Theme.Text, _inForceValue[definition.Index]);
+        var standard = _inForceDefault[definition.Index];
+        if (standard.Length > 0)
+            Kit.Label(_ui.Mono, Theme.FontCaption, Theme.Accent, standard);
+        var line = ImGui.GetCursorScreenPos();
+        draw.AddLine(line, line + new float2(Kit.Px(WorldRowWidth), 0), Kit.Color(Theme.Line, 0.6f));
+        Kit.Space(Theme.Space1);
+        ImGui.Indent(Kit.Px(Theme.Space3));
+        Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, definition.Description, WorldRowWidth - 150);
+        ImGui.Unindent(Kit.Px(Theme.Space3));
+        var bottom = ImGui.GetCursorScreenPos().Y;
+        if (standard.Length > 0)
+            ChangedMarker(top, bottom);
+        Kit.Space(Theme.Space4);
+    }
+
 }

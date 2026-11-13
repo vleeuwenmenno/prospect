@@ -510,14 +510,77 @@ internal static class Kit
         return value != before;
     }
 
+    private static bool _rangeUpper;
+
+    /// <summary>Two handles on one range. Click selects the nearest handle; keyboard tabs select either endpoint.</summary>
+    public static bool RangeSlider(ImString label, ref float low, ref float high, float minimum, float maximum, float step, string unit, float width)
+    {
+        var beforeLow = low;
+        var beforeHigh = high;
+        Label(_ui.Sans, Theme.FontBody, Theme.Text, label);
+        ImGui.PushID(label);
+        ImGui.PushID("minimum"u8);
+        if (LinkButton(F($"MIN {low:0.##} {unit}"), "endpoint")) _rangeUpper = false;
+        var lowFocused = ImGui.IsItemFocused();
+        if (lowFocused)
+        {
+            ImGui.Internal.SetKeyOwner(ImGuiKey.LeftArrow, ImGui.GetItemID());
+            ImGui.Internal.SetKeyOwner(ImGuiKey.RightArrow, ImGui.GetItemID());
+        }
+        ImGui.PopID();
+        ImGui.SameLine();
+        ImGui.PushID("maximum"u8);
+        if (LinkButton(F($"MAX {high:0.##} {unit}"), "endpoint")) _rangeUpper = true;
+        var highFocused = ImGui.IsItemFocused();
+        if (highFocused)
+        {
+            ImGui.Internal.SetKeyOwner(ImGuiKey.LeftArrow, ImGui.GetItemID());
+            ImGui.Internal.SetKeyOwner(ImGuiKey.RightArrow, ImGui.GetItemID());
+        }
+        ImGui.PopID();
+        if (lowFocused || highFocused)
+        {
+            var delta = ImGui.IsKeyPressed(ImGuiKey.LeftArrow) ? -step : ImGui.IsKeyPressed(ImGuiKey.RightArrow) ? step : 0;
+            if (lowFocused) low = Math.Clamp(low + delta, minimum, high);
+            else high = Math.Clamp(high + delta, low, maximum);
+        }
+        var start = ImGui.GetCursorScreenPos();
+        var size = new float2(Px(width), Px(32));
+        ImGui.PushItemFlag(ImGuiItemFlags.NoNav, true);
+        ImGui.InvisibleButton("range"u8, size);
+        ImGui.PopItemFlag();
+        var x = start.X + Px(8);
+        var length = size.X - Px(16);
+        var span = maximum - minimum;
+        var at = Math.Clamp((ImGui.GetMousePos().X - x) / length, 0, 1);
+        var value = Math.Clamp(minimum + MathF.Round(at * span / step) * step, minimum, maximum);
+        if (ImGui.IsItemActivated())
+            _rangeUpper = Math.Abs(value - high) < Math.Abs(value - low) || (low == high && value > high);
+        if (ImGui.IsItemActive())
+        {
+            if (_rangeUpper) high = Math.Max(value, low);
+            else low = Math.Min(value, high);
+        }
+        var y = start.Y + size.Y / 2;
+        var left = x + (low - minimum) / span * length;
+        var right = x + (high - minimum) / span * length;
+        var draw = ImGui.GetWindowDrawList();
+        draw.AddRectFilled(new float2(x, y - Px(1)), new float2(x + length, y + Px(1)), Color(Theme.LineStrong));
+        draw.AddRectFilled(new float2(left, y - Px(2)), new float2(right, y + Px(2)), Color(Theme.Accent));
+        draw.AddRectFilled(new float2(left - Px(4), y - Px(9)), new float2(left + Px(4), y + Px(9)), Color(Theme.Text));
+        draw.AddRectFilled(new float2(right - Px(4), y - Px(9)), new float2(right + Px(4), y + Px(9)), Color(Theme.Accent));
+        ImGui.PopID();
+        return low != beforeLow || high != beforeHigh;
+    }
+
     /// <summary>A small text-only button, for secondary actions beside other content. Returns true when pressed.</summary>
-    public static bool LinkButton(ImString label)
+    public static bool LinkButton(ImString label, string? id = null)
     {
         var draw = ImGui.GetWindowDrawList();
         var position = ImGui.GetCursorScreenPos();
         var textSize = Measure(_ui.SansMedium, Theme.FontCaption, label);
         var pad = new float2(Px(Theme.Space2), Px(Theme.Space1));
-        var pressed = ImGui.InvisibleButton(label, textSize + pad * 2);
+        var pressed = ImGui.InvisibleButton(id is null ? label : (ImString)id, textSize + pad * 2, id is null ? default : ImGuiButtonFlags.EnableNav);
         var t = Animate(ImGui.GetItemID(), IsHot() ? 1f : 0f);
         if (t > 0.01f)
             draw.AddRect(position, position + textSize + pad * 2, Color(Theme.Accent, t));

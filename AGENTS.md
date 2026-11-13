@@ -127,8 +127,8 @@ in a measurement. `make test` and `make check` prevent that with a large gen-0 b
   runs on a frozen copy in `tests/Prospect.Tests/fixtures`.
 - **A new hull design:** add it to `content/ships/fleet.json`. Stats are derived from blocks; do not add stat
   fields to the design file.
-- **A new world setting:** one entry in `content/rules/settings.json`, its number applied in `FlightRules.Under`,
-  a unit test in `WorldSettingsTests.cs`, a row in the README table. Read a setting nowhere else.
+- **A new world setting:** one entry in `content/rules/settings.json`, its number applied in `FlightRules.Under` (flight) or `Galaxy.Under` / `AsteroidFieldsModule.Under` (generation),
+  a unit test in `WorldSettingsTests.cs`, a row in the README table. Read setting ids only in those shared application paths, never in generation or simulation loops.
 - **README:** keep the Status and Controls sections true. Say what is not there.
 
 ## Checking the client without a person at the screen

@@ -471,3 +471,23 @@ Evaluator identity 4 includes half-volume statistics and shape-aware collision.
 JSON version 3 carries canonical shape names; old JSON 1/2 files remain boxes.
 Wedges are playable through the editor and take the smooth shield like any block; see
 [wedges](blocks-at-scale.md#wedges-protocol-27).
+
+## World generation settings (protocol 30)
+
+The welcome carries asteroid settings by id through the existing world settings catalogue.
+Server and client apply them before creating their seeded galaxy or generating any rocks.
+`GameContent.WithSettings` applies `Galaxy.Under` and `AsteroidFieldsModule.Under` from original rules,
+alongside `FlightRules.Under`; repeated applications never compound and other sessions stay unchanged.
+
+- Controls and ranges: [World settings](../README.md#world-settings). They also work through `--set` and settings files.
+- Missing entries in older settings files use catalogue defaults. The shared content identity covers this catalogue.
+- The cap never raises the content's `maxPerSector`; settings do not raise placement attempts or field budgets.
+- Changed geometry uses bounded placement: failed placements are omitted. Map planning counts are upper counts;
+  generated sector summaries use actual counts. Arrival clearance and resource availability remain enforced.
+- Defaults keep the recorded galaxy exactly. Protocol 30 separates the new generation semantics; block evaluator unchanged.
+
+World settings now have 48 slots (38 shipped); the maximum settings payload is 1,777 bytes.
+Welcome's maximum grows from that constant; the server has a 64 KiB send buffer and RakNet grows its receive scratch buffer.
+Shared sanitization bounds every endpoint and lowers a crossed minimum to its maximum before generation and after network reads.
+The paired ranges and per-material rules are listed in the README. Material abundance weights only existing availability;
+zero removes the material consistently from sector character and asteroid picks. Defaults retain the frozen generation hash.

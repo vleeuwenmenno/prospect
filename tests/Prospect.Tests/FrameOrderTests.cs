@@ -398,6 +398,90 @@ public sealed class FrameOrderTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData(1f)]
+    [InlineData(2f)]
+    public void WorldRangeHandlesClampCrossingAndRemainUsableInAScrollingPanel(float scale)
+    {
+        var fonts = ShippedFonts();
+        var kit = (UiContext)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(UiContext));
+        void Field(string name, object value) => typeof(UiContext).GetField("<" + name + ">k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(kit, value);
+        Field("Sans", fonts.Sans);
+        Field("SansMedium", fonts.SansMedium);
+        Field("SansBold", fonts.SansBold);
+        Field("Mono", fonts.Mono);
+        Field("Scale", scale);
+        Field("DeltaTime", 1f / 60f);
+        ImGui.GetStyle().FontScaleMain = scale;
+        var low = 20f;
+        var high = 80f;
+        var track = float2.Zero;
+        var trackEnd = float2.Zero;
+        var open = true;
+        var scrollMax = 0f;
+        var scroll = 0f;
+        var header = float2.Zero;
+        void Draw()
+        {
+            _ui.NewFrame();
+            Kit.BeginFrame(kit);
+            ImGui.SetNextWindowPos(new float2(20, 20));
+            ImGui.SetNextWindowSize(new float2(1000, 500));
+            ImGui.Begin("range test"u8, ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize);
+            ImGui.BeginChild("settings"u8, new float2(960, 300));
+            ImGui.SetNextItemOpen(open);
+            var expanded = ImGui.CollapsingHeader("Copper"u8);
+            header = (ImGui.GetItemRectMin() + ImGui.GetItemRectMax()) / 2;
+            open = expanded;
+            if (expanded)
+            {
+                Kit.RangeSlider("Grade"u8, ref low, ref high, 0, 100, 1, "%", 440);
+                track = ImGui.GetItemRectMin();
+                trackEnd = ImGui.GetItemRectMax();
+                for (var i = 0; i < 20; i++) Kit.Paragraph(fonts.Sans, Theme.FontBody, Theme.Text, "Material details"u8, 440);
+            }
+            scrollMax = ImGui.GetScrollMaxY();
+            scroll = ImGui.GetScrollY();
+            ImGui.EndChild();
+            ImGui.End();
+            ImGui.Render();
+        }
+        float2 At(float value) => new(track.X + 8 * scale + (trackEnd.X - track.X - 16 * scale) * value / 100, (track.Y + trackEnd.Y) / 2);
+        var io = ImGui.GetIO();
+        io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
+        Draw(); Draw();
+        Assert.True(scrollMax > 0);
+        io.AddMousePosEvent(track.X + 25 * scale, track.Y - 10 * scale); Draw();
+        io.AddMouseButtonEvent(0, true); Draw();
+        io.AddMouseButtonEvent(0, false); Draw();
+        for (var i = 0; i < 2; i++)
+        {
+            io.AddKeyEvent(ImGuiKey.RightArrow, true); Draw();
+            io.AddKeyEvent(ImGuiKey.RightArrow, false); Draw();
+        }
+        Assert.Equal(22, low);
+        io.AddMousePosEvent(At(22).X, At(22).Y); Draw();
+        io.AddMouseButtonEvent(0, true); Draw();
+        io.AddMousePosEvent(At(95).X, At(95).Y); Draw();
+        Assert.Equal(80, low);
+        Assert.Equal(80, high);
+        io.AddMouseButtonEvent(0, false); Draw();
+        io.AddMousePosEvent(At(90).X, At(90).Y); Draw();
+        io.AddMouseButtonEvent(0, true); Draw();
+        io.AddMousePosEvent(At(10).X, At(10).Y); Draw();
+        Assert.Equal(low, high);
+        io.AddMouseButtonEvent(0, false); Draw();
+        io.AddMousePosEvent(header.X, header.Y); Draw();
+        io.AddMouseButtonEvent(0, true); Draw();
+        io.AddMouseButtonEvent(0, false); Draw();
+        Assert.False(open);
+        open = true;
+        Draw(); Draw();
+        io.AddMousePosEvent(500, 250); Draw();
+        io.AddMouseWheelEvent(0, -5); Draw(); Draw();
+        Assert.True(scroll > 0);
+    }
+
     /// <summary>The interface fonts, loaded into this test's context as the game loads them.</summary>
     private static UiFontSet ShippedFonts()
     {

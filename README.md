@@ -216,7 +216,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   before the drive fires cancels the jump and loses the charge. The client generates the destination while the
   drive charges.
 - **World settings.** A world has settings, chosen when a server or a local game starts: collision damage,
-  shields against collisions (full, weak, none), shield recharge, jump charge speed and hull strength. The
+  shields against collisions (full, weak, none), shield recharge, jump charge speed, hull strength and asteroid generation. The
   server owns them and tells each client on joining; the client predicts by the server's figures, and the data
   sheet and the readouts show the numbers in force. The New game screen sets them for a local game; in a game,
   the menu's World Settings shows the ones in force. See [World settings](#world-settings).
@@ -420,6 +420,33 @@ Settings are fixed for the life of a server or a local game. Defaults and ranges
 | `shieldRecharge` | 0.25 to 4 | 1 | Multiplies how fast shields recharge. |
 | `jumpChargeSpeed` | 0.25 to 4 | 1 | Multiplies how fast a jump drive charges. A jump takes the same energy. |
 | `hullStrength` | 0.25 to 4 | 1 | Multiplies every block's hit points. |
+| `asteroidAmount` | 0 to 2 | 1 | Requested asteroid counts, including home; 0 disables rocks. |
+| `asteroidCap` | 0 to 4096, integer | 4096 | Per-sector upper count limit, never above shared content. |
+| `asteroidSize` | 0.25 to 2 | 1 | Radius multiplier, limited by field fit. |
+| `asteroidFieldSize` | 0.5 to 1.5 | 1 | Field dimension multiplier, including home, bounded by sector walls. |
+| `asteroidFrequency` | 0 to 2 | 1 | Field occurrence probability multiplier, capped at 100%; home is exempt. |
+| `asteroidSpacing` | 0.5 to 2 | 1 | Spacing multiplier, with a nonoverlap minimum. |
+| `asteroidOreShare` | 0 to 2 | 1 | Ore-bearing fraction multiplier, capped at 100%; no new resource kinds. |
+| `asteroidOreGrade` | 0.25 to 2 | 1 | Grade multiplier within ore-bearing rocks, capped at 100%. |
+
+| `asteroidCountMin` | 0 to 4096, integer | 0 | Lower requested count per sector with fields; pairs with `asteroidCap`. |
+| `asteroidRadiusMin`, `asteroidRadiusMax` | 0.75 to 6000 metres | 0.75, 6000 | Clamp sampled radii after the size multiplier. Diameter is twice radius. Rocks that cannot fit are omitted. |
+| `oreRichnessMin`, `oreRichnessMax` | 0 to 1 | 0, 1 | Clamp sector richness after the home floor; affects map character, ore-bearing fraction and grade. |
+| `oreGradeMin`, `oreGradeMax` | 0 to 1 | 0, 1 | Clamp ore grade after the grade multiplier; 1 means 100%. |
+| `<material>Abundance` | 0 to 4 | 1 | Relative share among already available materials. Zero removes that material from the sector character and rocks. |
+| `<material>GradeMin`, `<material>GradeMax` | 0 to 1 | 0, 1 | Per-material grade clamp, applied after the global grade range. |
+
+Materials come from galaxy content: `iron`, `copper`, `nickel`, `titanium`, `silver`, `gold`.
+New Game has collapsible Asteroids and Resources / Materials sections, and one expandable section per material.
+Ranges use paired handles on one track; click the nearest handle and drag, or focus MIN / MAX and use arrow keys.
+Ranges clamp existing sampled distributions, not uniform replacement draws. Crossed input limits lower the minimum to the maximum.
+A count minimum never creates fields; amount or cap zero disables rocks. Frequency zero keeps the baseline home field but does not raise it to the minimum.
+Requested minimum counts can fail to fit. Radius minimums that cannot fit a field omit the rock rather than shrink below the minimum.
+
+Generation settings are shared gameplay rules, not local graphics settings.
+Counts are requests: changed amount, size, field size or spacing uses bounded placement and can produce fewer rocks.
+The map and sector readouts mark custom placement counts as "UP TO" and fields as planned; generated sector summaries report actual counts.
+Default settings preserve the original generated world, including its crowded-field placement fallback.
 
 How to set them:
 
