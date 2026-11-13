@@ -20,13 +20,13 @@ public sealed class WorldSettingEffectTests
     private static GameContent World(params string[] assignments) => Content.WithSettings(Content.SettingCatalog.Build(null, assignments));
 
     /// <summary>Flies a pod at an asteroid at a speed until it bounces back, is destroyed, or the ticks run out.</summary>
-    private static HullState Crash(GameContent world, float speed, out ulong alive, bool verifyContactBounce = false)
+    private static HullState Crash(GameContent world, float speed, out ulong alive, bool verifyContactBounce = false, bool fixedRock = false)
     {
         var galaxy = world.Galaxy.WithSeed(11);
-        var rocks = new RockField(galaxy);
+        var rocks = fixedRock ? PowerAndDamageTests.ContactFixture(galaxy) : new RockField(galaxy);
         // Fields are dense: pick a rock of ordinary size with nothing else on the way in.
         var side = -Vector3.UnitX;
-        var rock = rocks.Sector(default).Asteroids[PowerAndDamageTests.ClearRock(galaxy, default, 80f, 260f, side).Index];
+        var rock = rocks.Sector(default).Asteroids[fixedRock ? 0 : PowerAndDamageTests.ClearRock(galaxy, default, 80f, 260f, side).Index];
         var design = world.Pod;
         var flight = design.Flight;
         using var states = new BlockStateStore();
@@ -251,9 +251,10 @@ public sealed class WorldSettingEffectTests
             Assert.Equal(design.Flight.HullPoints, hp.ToArray().Sum());
         }
 
+        // Fixed geometry keeps the struck blocks the same when galaxy generation changes.
         // A stronger hull keeps a block that a plain one loses to the same impact.
-        Crash(Content, 60, out var plainLeft);
-        Crash(World("hullStrength=4"), 60, out var strongLeft);
+        Crash(Content, 60, out var plainLeft, fixedRock: true);
+        Crash(World("hullStrength=4"), 60, out var strongLeft, fixedRock: true);
         Assert.NotEqual(plain.FullMask(), plainLeft);
         Assert.Equal(plain.FullMask(), strongLeft);
     }
@@ -1012,9 +1013,10 @@ public sealed class AsteroidSettingTests
                 Assert.True(Math.Abs(rock.LocalPosition.X) + rock.Radius <= galaxy.SectorSize / 2 + 0.01);
                 Assert.True(Math.Abs(rock.LocalPosition.Y) + rock.Radius <= galaxy.SectorSize / 2 + 0.01);
                 Assert.True(Math.Abs(rock.LocalPosition.Z) + rock.Radius <= galaxy.SectorSize / 2 + 0.01);
-                var nearby = sector.Rocks.Near(rock.LocalPosition, rock.Radius);
+                var reach = rock.Radius * Math.Max(1f, 2.2f * 2f * spacing);
+                var nearby = sector.Rocks.Near(rock.LocalPosition, reach);
                 while (nearby.Next(out var j))
-                    if (j < i) Assert.True(Vector3.Distance(rock.LocalPosition, sector.Asteroids[j].LocalPosition) + 0.01f >= rock.Radius + sector.Asteroids[j].Radius);
+                    if (j < i) Assert.True(Vector3.Distance(rock.LocalPosition, sector.Asteroids[j].LocalPosition) + 0.01f >= reach + sector.Asteroids[j].Radius);
             }
         }
     }

@@ -494,7 +494,14 @@ World settings now have 48 slots (38 shipped); the maximum settings payload is 1
 Welcome's maximum grows from that constant; the server has a 64 KiB send buffer and RakNet grows its receive scratch buffer.
 Shared sanitization bounds every endpoint and lowers a crossed minimum to its maximum before generation and after network reads.
 The paired ranges and per-material rules are listed in the README. Material abundance weights only existing availability;
-zero removes the material consistently from sector character and asteroid picks. The frozen legacy content retains its generation hash; live content intentionally changes.
+zero removes the material consistently from sector character and asteroid picks.
+
+Protocol 35 and generation version 3 identify the irregular field algorithm.
+Field support follows four seeded transverse sections with smooth bends, varying widths and tapered ends.
+Sparse outskirts follow that support rather than filling an enclosing ellipsoid.
+`distribution.outskirts`, `distribution.width` and `distribution.bend` tune this shape in galaxy content.
+Field envelopes may overlap, but every candidate passes sector bounds, arrival clearance and spacing against all previously placed rocks.
+No rock is moved after acceptance. The frozen generation hash and live retuning hashes record this algorithm.
 
 ## Visual collision damage backend (protocol 33)
 

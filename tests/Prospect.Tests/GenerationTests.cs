@@ -38,6 +38,7 @@ internal static class Sectors
     }
 }
 
+[Collection(TimingBudgets.Name)]
 public sealed class GalaxyTests
 {
     private static readonly GameContent Content = GameContent.Load();
@@ -132,7 +133,7 @@ public sealed class GalaxyTests
         Assert.Equal(RecordedHash, hash);
     }
 
-    private const ulong RecordedHash = 6024413946682158343;
+    private const ulong RecordedHash = 17670301587945361715;
 
     /// <summary>A second module, for the tests only: it draws from its own stream and remembers what came out.</summary>
     private sealed class ProbeModule(string id, int draws) : SectorModule(id)

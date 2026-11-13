@@ -29,6 +29,7 @@ public sealed class RockIndex
     private int[] _keys = [];
     private int _shift;
     private float _half;
+    private int _fineFiled, _coarseFiled;
 
     /// <summary>How many of the sector's first asteroids are too large for the grids.</summary>
     public int GiantCount { get; private set; }
@@ -58,6 +59,7 @@ public sealed class RockIndex
         _shift = 32 - bits;
         _half = (float)(sectorSize * 0.5);
         GiantCount = 0;
+        _fineFiled = _coarseFiled = 0;
     }
 
     /// <summary>Files an asteroid. Asteroids must be added in order, largest first.</summary>
@@ -69,6 +71,9 @@ public sealed class RockIndex
             GiantCount = rock + 1;
             return;
         }
+
+        if (level == 0) _fineFiled++;
+        else _coarseFiled++;
 
         var key = Key(level, Cell(position.X, level), Cell(position.Y, level), Cell(position.Z, level));
         var bucket = Bucket(key);
@@ -107,15 +112,17 @@ public sealed class RockIndex
 
     private CellRange Cells(Vector3 center, float radius, int level)
     {
-        var reach = radius + (level == 0 ? FineCell : CoarseCell) * 0.5f;
+        var edge = level == 0 ? FineCell : CoarseCell;
+        var reach = radius + edge * 0.5f;
+        // Match Cell's operation order without twelve extra calls per placement in debug builds.
         return new CellRange
         {
-            MinX = Cell(center.X - reach, level),
-            MaxX = Cell(center.X + reach, level),
-            MinY = Cell(center.Y - reach, level),
-            MaxY = Cell(center.Y + reach, level),
-            MinZ = Cell(center.Z - reach, level),
-            MaxZ = Cell(center.Z + reach, level),
+            MinX = Math.Clamp((int)((center.X - reach + _half) / edge), 0, AxisMax),
+            MaxX = Math.Clamp((int)((center.X + reach + _half) / edge), 0, AxisMax),
+            MinY = Math.Clamp((int)((center.Y - reach + _half) / edge), 0, AxisMax),
+            MaxY = Math.Clamp((int)((center.Y + reach + _half) / edge), 0, AxisMax),
+            MinZ = Math.Clamp((int)((center.Z - reach + _half) / edge), 0, AxisMax),
+            MaxZ = Math.Clamp((int)((center.Z + reach + _half) / edge), 0, AxisMax),
         };
     }
 
@@ -140,6 +147,9 @@ public sealed class RockIndex
 
         for (var level = 0; level < Levels; level++)
         {
+            // Largest-first placement leaves the fine grid empty while large rocks are being placed.
+            if ((level == 0 ? _fineFiled : _coarseFiled) == 0)
+                continue;
             var cells = level == 0 ? fine : coarse;
             for (var z = cells.MinZ; z <= cells.MaxZ; z++)
                 for (var y = cells.MinY; y <= cells.MaxY; y++)
@@ -150,7 +160,15 @@ public sealed class RockIndex
                         for (var entry = _heads[bucket]; entry != 0; entry = _next[entry - 1])
                         {
                             var other = entry - 1;
-                            if (_keys[other] == key && Touches(placed[other], center, radius))
+                            if (_keys[other] != key)
+                                continue;
+                            // Keep the scalar operation order of Touches; debug generation avoids a call per candidate.
+                            ref readonly var rock = ref placed[other];
+                            var dx = center.X - rock.LocalPosition.X;
+                            var dy = center.Y - rock.LocalPosition.Y;
+                            var dz = center.Z - rock.LocalPosition.Z;
+                            var apart = radius + rock.Radius;
+                            if (dx * dx + dy * dy + dz * dz < apart * apart)
                                 return true;
                         }
                     }

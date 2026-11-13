@@ -19,7 +19,11 @@ internal static class TestSetup
     /// counter: a test can then see how much was logged, and what logging a line costs is really spent.
     /// </summary>
     [System.Runtime.CompilerServices.ModuleInitializer]
-    public static void Initialize() =>
+    public static void Initialize()
+    {
+        // Parallel synchronous tests occupy pool threads while game jobs need additional workers to finish.
+        ThreadPool.GetMinThreads(out var workers, out var completion);
+        ThreadPool.SetMinThreads(Math.Max(workers, 4 * Environment.ProcessorCount), completion);
         Logs.Initialize(
             LogLevel.Information,
             builder =>
@@ -28,6 +32,7 @@ internal static class TestSetup
                 builder.AddProvider(new CountingLogs());
             }
         );
+    }
 }
 
 /// <summary>Counts the lines the game logs on each thread, and keeps none of them.</summary>
@@ -132,7 +137,7 @@ public sealed class ProtocolTests
             reader = new NetReader(writer.Written[..length]);
             Assert.False(HullRecord.TryRead(ref reader, out _));
         }
-        Assert.Equal(33u, ProtocolInfo.Version);
+        Assert.Equal(35u, ProtocolInfo.Version);
     }
 
     [Fact]

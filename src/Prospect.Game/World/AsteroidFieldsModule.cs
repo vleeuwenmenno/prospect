@@ -25,6 +25,8 @@ public sealed class AsteroidFieldsModule : SectorModule
     private const uint PlaceStream = 3;
     private const uint LookStream = 4;
     private const uint OreStream = 5;
+    private const uint ContourStream = 6;
+    private const int KnotsPerField = 4;
 
     private readonly record struct Range(float Min, float Max)
     {
@@ -40,7 +42,14 @@ public sealed class AsteroidFieldsModule : SectorModule
     /// <summary>A band of asteroid sizes, what an asteroid in it is called and how often an asteroid falls in it.</summary>
     private readonly record struct SizeClass(string Name, float Weight, Range Radius);
 
-    /// <summary>One field of a sector: an ellipsoid lying flat, turned to some heading.</summary>
+    // Four transverse sections define one continuous support; nothing samples an enclosing ellipsoid.
+    private readonly struct RibbonKnot(float center, float width)
+    {
+        public readonly float Center = center;
+        public readonly float Width = width;
+    }
+
+    /// <summary>One field envelope, containing a bent ribbon with tapered, sparsely populated ends.</summary>
     private struct Field
     {
         public Vector3 Center;
@@ -77,10 +86,12 @@ public sealed class AsteroidFieldsModule : SectorModule
     private readonly Range _grade;
     private readonly float _gradeFromRichness;
     private readonly Field _home;
+    private readonly float _outskirts;
+    private readonly Range _ribbonWidth;
+    private readonly float _bend;
 
     private AsteroidFieldsModule? _baseRules;
     private float _amount = 1, _size = 1, _fieldSize = 1, _frequency = 1, _spacingScale = 1, _oreShareScale = 1, _gradeScale = 1;
-    private bool _boundedPlacement;
     private int _countMin;
     private Range _radiusLimits = new(0, float.MaxValue), _gradeLimits = new(0, 1);
     private Range[] _materialGrades = [];
@@ -109,7 +120,6 @@ public sealed class AsteroidFieldsModule : SectorModule
             copy._materialGrades[i] = new(catalog.Number(clean, resources[i].Id + "GradeMin"), catalog.Number(clean, resources[i].Id + "GradeMax"));
         copy.SmallestRadius = Math.Clamp(original.SmallestRadius * catalog.Number(clean, "asteroidSize"), copy._radiusLimits.Min, copy._radiusLimits.Max);
         copy.LargestRadius = Math.Clamp(original.LargestRadius * catalog.Number(clean, "asteroidSize"), copy._radiusLimits.Min, copy._radiusLimits.Max);
-        copy._boundedPlacement = original._boundedPlacement || copy._amount != 1 || copy._size != 1 || copy._fieldSize != 1 || copy._spacingScale != 1 || copy._countMin != 0 || copy._radiusLimits.Min > original.SmallestRadius * catalog.Number(clean, "asteroidSize") || copy._radiusLimits.Max < original.LargestRadius * catalog.Number(clean, "asteroidSize");
         return copy;
     }
 
@@ -131,6 +141,15 @@ public sealed class AsteroidFieldsModule : SectorModule
         _spacing = json.GetProperty("spacing"u8).GetSingle();
         _placementAttempts = json.GetProperty("placementAttempts"u8).GetInt32();
         _largestShareOfField = json.GetProperty("largestShareOfField"u8).GetSingle();
+
+        var distribution = json.GetProperty("distribution"u8);
+        _outskirts = distribution.GetProperty("outskirts"u8).GetSingle();
+        _ribbonWidth = ReadRange(distribution.GetProperty("width"u8));
+        _bend = distribution.GetProperty("bend"u8).GetSingle();
+        if (!float.IsFinite(_bend) || _bend < 0 || _bend > 1 || !float.IsFinite(_outskirts) || _outskirts < 0 || _outskirts > 1 ||
+            !float.IsFinite(_ribbonWidth.Min) || !float.IsFinite(_ribbonWidth.Max) ||
+            _ribbonWidth.Min <= 0 || _ribbonWidth.Max > 1 || _ribbonWidth.Min > _ribbonWidth.Max)
+            throw new InvalidDataException($"{path}: {id}: invalid field distribution");
 
         var kinds = new List<FieldKind>();
         foreach (var kind in json.GetProperty("kinds"u8).EnumerateArray())
@@ -178,7 +197,7 @@ public sealed class AsteroidFieldsModule : SectorModule
         _kinds = [.. kinds];
         _sizes = [.. sizes];
 
-        // Optional scales rebase live content while old fixtures keep their original arithmetic.
+        // Optional scales rebase live content; the frozen fixture keeps its original scale.
         if (json.TryGetProperty("baseline"u8, out var baseline))
         {
             _amount = Baseline("amount");
@@ -190,7 +209,6 @@ public sealed class AsteroidFieldsModule : SectorModule
             _gradeScale = Baseline("oreGrade");
             SmallestRadius *= _size;
             LargestRadius *= _size;
-            _boundedPlacement = true;
 
             float Baseline(string name)
             {
@@ -216,7 +234,7 @@ public sealed class AsteroidFieldsModule : SectorModule
     public int MaxPerSector { get; private set; }
 
     /// <summary>Whether planned counts are upper bounds because crowded placements can be omitted.</summary>
-    public bool EstimatesCounts => _boundedPlacement;
+    public bool EstimatesCounts => true;
 
     /// <summary>Radius of the smallest and of the largest asteroid the size table allows, in metres.</summary>
     public float SmallestRadius { get; private set; }
@@ -262,6 +280,39 @@ public sealed class AsteroidFieldsModule : SectorModule
             return;
         content.Reserve(total);
 
+        // Contour draws use their own stream; fitting the support may constrain the allowed radii.
+        Span<RibbonKnot> knots = stackalloc RibbonKnot[MaxFields * KnotsPerField];
+        var contour = Stream(sector, ContourStream);
+        for (var f = 0; f < fieldCount; f++)
+        {
+            var lowZ = float.MaxValue;
+            var highZ = float.MinValue;
+            for (var k = 0; k < KnotsPerField; k++)
+            {
+                var width = _ribbonWidth.At(contour.NextSingle());
+                var centerZ = contour.NextSigned() * _bend;
+                knots[f * KnotsPerField + k] = new RibbonKnot(centerZ, width);
+                lowZ = Math.Min(lowZ, centerZ - width);
+                highZ = Math.Max(highZ, centerZ + width);
+            }
+            // Fit the actual ribbon's transverse support, not an enclosing ball that fills its gaps.
+            var mid = (lowZ + highZ) * 0.5f;
+            var extent = (highZ - lowZ) * 0.5f;
+            for (var k = 0; k < KnotsPerField; k++)
+            {
+                ref var knot = ref knots[f * KnotsPerField + k];
+                knot = new RibbonKnot((knot.Center - mid) / extent, knot.Width / extent);
+            }
+            Fit(ref fields[f], sector.HalfSize, knots.Slice(f * KnotsPerField, KnotsPerField));
+            if (sector.IsHome)
+            {
+                // The starter field's middle stays beside arrival even when its seeded ends bend away.
+                var middle = (knots[f * KnotsPerField + 1].Center + knots[f * KnotsPerField + 2].Center) * 0.5f;
+                var room = Math.Max(0f, sector.HalfSize - fields[f].Width);
+                fields[f].Center.Z = Math.Clamp(_home.Center.Z - middle * fields[f].Width, -room, room);
+            }
+        }
+
         // Sizes first, for every asteroid of every field, then sorted largest first. The big ones are then placed
         // while the field is empty and the small ones fill in around them. The order is also what makes distant
         // sectors cheap to draw: the loop over a sector stops at the first asteroid too small to see.
@@ -273,7 +324,7 @@ public sealed class AsteroidFieldsModule : SectorModule
         var drawn = 0u;
         for (var f = 0; f < fieldCount; f++)
         {
-            var limit = _boundedPlacement ? fields[f].LargestRadius : Math.Max(fields[f].LargestRadius, _sizes[0].Radius.Max);
+            var limit = fields[f].LargestRadius;
             var allowed = AllowedWeight(limit);
             for (var i = 0; i < fields[f].Count; i++)
             {
@@ -297,11 +348,16 @@ public sealed class AsteroidFieldsModule : SectorModule
         {
             var radius = BitConverter.UInt32BitsToSingle(~(uint)(keys[i] >> 32));
             if (radius < _radiusLimits.Min) continue;
-            var position = Place(ref place, fields[(int)(keys[i] >> 24 & 0xFF)], radius, half, content, placed);
+            var fieldIndex = (int)(keys[i] >> 24 & 0xFF);
+            var position = Place(ref place, fields[fieldIndex], knots.Slice(fieldIndex * KnotsPerField, KnotsPerField), radius, half, content, placed);
+            if (!float.IsFinite(position.X))
+            {
+                // Failed candidates still consume their look draws, but need no quaternion normalization.
+                for (var draw = 0; draw < 5; draw++) look.NextUInt64();
+                continue;
+            }
             var rotation = Rotation(ref look);
             var shape = look.NextInt(Galaxy.AsteroidShapes);
-            if (!float.IsFinite(position.X))
-                continue;
             occupiedFields |= 1u << (int)(keys[i] >> 24 & 0xFF);
             asteroids[placed] = new Asteroid
             {
@@ -359,7 +415,6 @@ public sealed class AsteroidFieldsModule : SectorModule
             // The home sector always has the same field to work, beside the arrival point.
             fields[0] = _home;
             fields[0].Count = total = Math.Min(Math.Max((int)(_home.Count * _amount), _frequency == 0 ? 0 : _countMin), MaxPerSector);
-            Fit(ref fields[0], sector.HalfSize);
             return 1;
         }
 
@@ -397,15 +452,13 @@ public sealed class AsteroidFieldsModule : SectorModule
             field.Height = Math.Min(kind.Height.At(random.NextSingle()), field.Width);
             Heading(ref random, out field.AlongX, out field.AlongZ);
 
-            // Anywhere in the sector's middle, kept far enough from the walls for the whole field to fit.
-            var room = Math.Max(0f, half - field.Length);
+            // Fields may overlap. Only actual asteroid surfaces reserve space.
             field.Center = new Vector3(
-                Math.Clamp(random.NextSigned() * half * _centerReach, -room, room),
-                Math.Clamp(random.NextSigned() * half * _centerReach * _centerFlatten, -room, room),
-                Math.Clamp(random.NextSigned() * half * _centerReach, -room, room)
+                random.NextSigned() * half * _centerReach,
+                random.NextSigned() * half * _centerReach * _centerFlatten,
+                random.NextSigned() * half * _centerReach
             );
             field.LargestRadius = _largestShareOfField * field.Width;
-            Fit(ref field, half);
             total += field.Count;
         }
 
@@ -418,16 +471,56 @@ public sealed class AsteroidFieldsModule : SectorModule
         return count;
     }
 
-    // Legacy content preserves the recorded galaxy; rebased and custom geometry must fit at every extreme.
-    private void Fit(ref Field field, float half)
+    private void Fit(ref Field field, float half, ReadOnlySpan<RibbonKnot> knots)
     {
-        if (!_boundedPlacement)
-            return;
+        // Scale each content dimension independently; a saturated length must not squeeze the ribbon twice.
         field.Length = Math.Min(field.Length * _fieldSize, half);
-        field.Width = Math.Min(field.Width * _fieldSize, field.Length);
+        field.Width = Math.Min(field.Width * _fieldSize, half);
         field.Height = Math.Min(field.Height * _fieldSize, field.Width);
-        var room = half - field.Length;
-        field.Center = Vector3.Clamp(field.Center, new Vector3(-room), new Vector3(room));
+        var lowX = float.MaxValue;
+        var lowZ = float.MaxValue;
+        var highX = float.MinValue;
+        var highZ = float.MinValue;
+        // Enclose each short piece, rather than shrinking the whole ribbon to an empty rectangle's corners.
+        // Smoothstep is monotone and the taper peaks nearest zero, so these are bounds, not sampled guesses.
+        const int pieces = 8;
+        for (var k = 0; k < KnotsPerField - 1; k++)
+            for (var i = 0; i < pieces; i++)
+            {
+                var u = i / (float)pieces;
+                var v = (i + 1) / (float)pieces;
+                var x0 = (k + u) * (2f / (KnotsPerField - 1)) - 1f;
+                var x1 = (k + v) * (2f / (KnotsPerField - 1)) - 1f;
+                u = u * u * (3f - 2f * u);
+                v = v * v * (3f - 2f * v);
+                var a = knots[k];
+                var b = knots[k + 1];
+                var c0 = a.Center + (b.Center - a.Center) * u;
+                var c1 = a.Center + (b.Center - a.Center) * v;
+                var width = Math.Max(a.Width + (b.Width - a.Width) * u, a.Width + (b.Width - a.Width) * v);
+                var near = x0 <= 0 && x1 >= 0 ? 0 : Math.Min(Math.Abs(x0), Math.Abs(x1));
+                var near2 = near * near;
+                width *= 1f - near2 * near2;
+                var z0 = (Math.Min(c0, c1) - width) * field.Width;
+                var z1 = (Math.Max(c0, c1) + width) * field.Width;
+                x0 *= field.Length;
+                x1 *= field.Length;
+                lowX = Math.Min(lowX, Math.Min(field.AlongX * x0, field.AlongX * x1) + Math.Min(-field.AlongZ * z0, -field.AlongZ * z1));
+                highX = Math.Max(highX, Math.Max(field.AlongX * x0, field.AlongX * x1) + Math.Max(-field.AlongZ * z0, -field.AlongZ * z1));
+                lowZ = Math.Min(lowZ, Math.Min(field.AlongZ * x0, field.AlongZ * x1) + Math.Min(field.AlongX * z0, field.AlongX * z1));
+                highZ = Math.Max(highZ, Math.Max(field.AlongZ * x0, field.AlongZ * x1) + Math.Max(field.AlongX * z0, field.AlongX * z1));
+            }
+        var fit = Math.Min(1f, half * 2 / Math.Max(highX - lowX, highZ - lowZ));
+        field.Length *= fit;
+        field.Width *= fit;
+        var roomY = Math.Max(0, half - field.Height);
+        // Roundoff can reverse a saturated interval by a fraction of a millimetre.
+        var minX = -half - lowX * fit;
+        var maxX = Math.Max(minX, half - highX * fit);
+        var minZ = -half - lowZ * fit;
+        var maxZ = Math.Max(minZ, half - highZ * fit);
+        field.Center = new Vector3(Math.Clamp(field.Center.X, minX, maxX),
+            Math.Clamp(field.Center.Y, -roomY, roomY), Math.Clamp(field.Center.Z, minZ, maxZ));
         field.LargestRadius = Math.Min(_largestShareOfField * field.Width, field.Height);
     }
 
@@ -489,74 +582,71 @@ public sealed class AsteroidFieldsModule : SectorModule
 
     /// <summary>
     /// Finds a place for an asteroid in its field: clear of the sector's arrival point and, where a few tries can
-    /// manage it, clear of the asteroids already placed. Custom placement omits failed attempts; the original
-    /// rules retain the last try to preserve the recorded default galaxy.
+    /// manage it, clear of the asteroids already placed. Exhausted attempts omit the asteroid.
     /// </summary>
-    private Vector3 Place(ref SectorRandom random, in Field field, float radius, float half, SectorContent content, int placed)
+    private Vector3 Place(ref SectorRandom random, in Field field, ReadOnlySpan<RibbonKnot> knots, float radius, float half, SectorContent content, int placed)
     {
         var wall = half - radius;
         var clear = radius + ArrivalClearance;
         var reach = radius * Math.Max(1f, _spacing * _spacingScale);
+        var interior = field;
+        interior.Length -= radius;
+        interior.Width -= radius;
+        interior.Height -= radius;
         var position = default(Vector3);
         for (var attempt = 0; attempt < _placementAttempts; attempt++)
         {
-            var interior = field;
-            if (_boundedPlacement)
-            {
-                interior.Length -= radius;
-                interior.Width -= radius;
-                interior.Height -= radius;
-            }
-            position = PointIn(ref random, interior);
-            position = new Vector3(Math.Clamp(position.X, -wall, wall), Math.Clamp(position.Y, -wall, wall), Math.Clamp(position.Z, -wall, wall));
+            position = PointIn(ref random, interior, knots);
+            if (Math.Abs(position.X) > wall || Math.Abs(position.Y) > wall || Math.Abs(position.Z) > wall)
+                continue;
             if (position.X * position.X + position.Y * position.Y + position.Z * position.Z < clear * clear)
                 continue;
             if (!Overlaps(content, placed, position, reach))
                 return position;
         }
 
-        if (_boundedPlacement)
-            return new Vector3(float.NaN);
-
-        // The arrival point stays clear whatever else gives: push the asteroid straight out of it.
-        var fromArrival = MathF.Sqrt(position.X * position.X + position.Y * position.Y + position.Z * position.Z);
-        if (fromArrival < clear)
-        {
-            var scale = fromArrival > 1e-3f ? clear / fromArrival : 0f;
-            position = scale > 0f ? new Vector3(position.X * scale, position.Y * scale, position.Z * scale) : new Vector3(0, 0, -clear);
-        }
-
-        return position;
+        return new Vector3(float.NaN);
     }
 
     /// <summary>True if a sphere would come within reach of an asteroid already placed.</summary>
     internal static bool Overlaps(SectorContent content, int placed, Vector3 position, float reach) =>
         content.Rocks.PlacementOverlaps(content.Asteroids, placed, position, reach);
 
-    /// <summary>
-    /// A random point of a field. It is drawn evenly from a ball and then pulled toward the middle, so a field is
-    /// thick at its heart and thins out toward its edge, and the ball is stretched and turned into the field.
-    /// </summary>
-    private static Vector3 PointIn(ref SectorRandom random, in Field field)
+    /// <summary>Samples a bent, variable-width ribbon. Sparse outskirts follow its bends and tapered ends.</summary>
+    private Vector3 PointIn(ref SectorRandom random, in Field field, ReadOnlySpan<RibbonKnot> knots)
     {
-        float x;
-        float y;
-        float z;
-        float lengthSquared;
+        var along = random.NextSingle();
+        var second = random.NextSingle();
+        // Most proposals concentrate along the middle; the sparse component reaches the same bent tails.
+        if (random.NextSingle() >= _outskirts) along = (along + second) * 0.5f;
+        var t = along * (KnotsPerField - 1);
+        var k = (int)t;
+        var fraction = t - k;
+        fraction = fraction * fraction * (3f - 2f * fraction);
+        var a = knots[k];
+        var b = knots[k + 1];
+        var centerZ = a.Center + (b.Center - a.Center) * fraction;
+        var width = a.Width + (b.Width - a.Width) * fraction;
+        var x = t * (2f / (KnotsPerField - 1)) - 1f;
+        var x2 = x * x;
+        var taper = 1f - x2 * x2;
+        float y, z, squared;
         var tries = 0;
         do
         {
-            x = random.NextSigned();
             y = random.NextSigned();
             z = random.NextSigned();
-            lengthSquared = x * x + y * y + z * z;
-        } while (lengthSquared > 1f && ++tries < 8);
-
-        var length = MathF.Sqrt(lengthSquared);
-        var pull = length > 1f ? 1f / length : MathF.Sqrt(MathF.Sqrt(length));
-        x *= pull;
-        y *= pull;
-        z *= pull;
+            squared = y * y + z * z;
+        } while (squared > 1f && ++tries < 8);
+        // The usual path needs no roots. The bounded rejection fallback still stays inside the disc.
+        if (squared > 1f)
+        {
+            var inverse = 1f / MathF.Sqrt(squared);
+            y *= inverse;
+            z *= inverse;
+        }
+        y *= (1f - x2 * x2 * x2 * x2);
+        z = centerZ + z * width * taper;
         return new Vector3(
             field.Center.X + field.AlongX * (x * field.Length) - field.AlongZ * (z * field.Width),
             field.Center.Y + y * field.Height,

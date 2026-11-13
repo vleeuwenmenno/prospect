@@ -240,6 +240,17 @@ public sealed class Galaxy
 {
     public const int AsteroidShapes = 12;
 
+    /// <summary>
+    /// The version of what a seed generates: which asteroids a sector has, in which order, and where. A saved
+    /// world names a pushed asteroid by its index in its sector's generated list, so a save made under one
+    /// version is refused under another. Bump it whenever the same seed, settings and content files would
+    /// generate anything else: a change to a module's arithmetic, its order of draws or the order of the list.
+    /// Retuning <c>galaxy.json</c> needs no bump: the file is part of the content identity, which a save is
+    /// held to as well. It is not the network protocol's version, which changes for reasons a save does not
+    /// care about.
+    /// </summary>
+    public const int GenerationVersion = 3;
+
     /// <summary>The most resources the content may define: a sector's resources travel as one bit each.</summary>
     public const int MaxResources = 16;
 

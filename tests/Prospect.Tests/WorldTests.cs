@@ -175,6 +175,7 @@ public sealed class HullDesignTests
     }
 }
 
+[Collection(TimingBudgets.Name)]
 public sealed class PowerAndDamageTests
 {
     private static readonly GameContent Content = GameContent.Load();
@@ -324,6 +325,20 @@ public sealed class PowerAndDamageTests
     private static readonly Galaxy CrashGalaxy = Content.Galaxy.WithSeed(11);
     private static readonly RockRef OrdinaryRock = ClearRock(CrashGalaxy, default, 80f, 260f, new Vector3(-1, 0, 0), new Vector3(0, 1, 0));
 
+    /// <summary>A single fixed rock, so contact tests do not change with galaxy placement or appearance streams.</summary>
+    internal static RockField ContactFixture(Galaxy galaxy)
+    {
+        var rocks = new RockField(galaxy);
+        var sector = rocks.Sector(default);
+        sector.Asteroids = [new Asteroid { Radius = 128f, Rotation = Quaternion.Identity, Shape = 0, Resource = -1 }];
+        sector.AsteroidCount = sector.Summary.AsteroidCount = 1;
+        sector.BoundsCenter = Vector3.Zero;
+        sector.BoundsRadius = 128f;
+        sector.Rocks.Reset(1, galaxy.SectorSize);
+        sector.Rocks.Add(0, Vector3.Zero, 128f);
+        return rocks;
+    }
+
     /// <summary>How far an asteroid's surface is from its centre toward a side, in metres.</summary>
     internal static float SurfaceToward(in Asteroid rock, Vector3 side) =>
         rock.Radius * AsteroidShape.RadiusAlong(rock.Shape, Vector3.Transform(Vector3.Normalize(side), Quaternion.Conjugate(rock.Rotation)));
@@ -463,8 +478,8 @@ public sealed class PowerAndDamageTests
     public void AHeavyHullShovesAnAsteroidWhichThenDriftsToRest()
     {
         var galaxy = CrashGalaxy;
-        var rocks = new RockField(galaxy);
-        var rock = rocks.Sector(default).Asteroids[OrdinaryRock.Index];
+        var rocks = ContactFixture(galaxy);
+        var rock = rocks.Sector(default).Asteroids[0];
         var rockMass = rocks.Mass(rock.Radius);
 
         // A hull as heavy as the rock itself, with damage switched off to look at the momentum alone.
@@ -473,11 +488,11 @@ public sealed class PowerAndDamageTests
         heavy.Inertia = Pod.Inertia * (rockMass / Pod.Mass);
         heavy.CollisionDamagePerTonneSpeedSquared = 0;
         var impulses = new RockImpulses();
-        Crash(new Vector3(-1, 0, 0), new Vector3(20, 0, 0), heavy, out var state, out _, out _, impulses);
+        Crash(rocks, new RockRef(default, 0), new Vector3(-1, 0, 0), new Vector3(20, 0, 0), heavy, out var state, out _, out _, impulses);
 
         Assert.True(impulses.Count >= 1);
         var delta = impulses.Items[0];
-        Assert.Equal(OrdinaryRock, delta.Rock);
+        Assert.Equal(new RockRef(default, 0), delta.Rock);
 
         // Equal masses share the impulse: the rock leaves with a good part of the speed the hull loses.
         Assert.InRange(delta.Velocity.X, 6f, 14f);
@@ -491,7 +506,7 @@ public sealed class PowerAndDamageTests
 
         // A pod hitting the same rock barely moves it.
         var light = new RockImpulses();
-        Crash(new Vector3(0, 1, 0), new Vector3(0, -20, 0), Pod, out _, out _, out _, light);
+        Crash(ContactFixture(galaxy), new RockRef(default, 0), new Vector3(0, 1, 0), new Vector3(0, -20, 0), Pod, out _, out _, out _, light);
         Assert.True(light.Count >= 1);
         Assert.True(light.Items[0].Velocity.Length() < 0.1f);
     }

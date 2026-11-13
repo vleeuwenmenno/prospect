@@ -76,17 +76,17 @@ public sealed class AsteroidRetuningTests
     }
 
     [Theory]
-    [InlineData(1, false, 0, 0, "99E3A1A376487F6C")]
-    [InlineData(2, false, 0, 0, "46E3CD07ADB9F2B5")]
-    [InlineData(5, false, 0, 0, "C1A447C28FE79A57")]
-    [InlineData(5, true, 0, 0, "B3B5990B118D66C9")]
-    [InlineData(1, false, -26, -31, "8F9ED6CC722826C5")]
-    [InlineData(2, false, -26, -31, "9C0030659036F480")]
-    [InlineData(5, false, -26, -31, "5CB8286949CB3121")]
-    [InlineData(5, true, -26, -31, "4FF6D811B255D9AD")]
+    [InlineData(1, false, 0, 0, "99DAAB1FE03565DC")]
+    [InlineData(2, false, 0, 0, "7FFBFA234F71D790")]
+    [InlineData(5, false, 0, 0, "DBC666E6F704C2D7")]
+    [InlineData(5, true, 0, 0, "AD9B955E7ABED0D9")]
+    [InlineData(1, false, -26, -31, "D64E1995252F48FA")]
+    [InlineData(2, false, -26, -31, "D3967369009F1F53")]
+    [InlineData(5, false, -26, -31, "EF2C0E7759CCA721")]
+    [InlineData(5, true, -26, -31, "8F5CFCDF07EFA593")]
     public void PlacementOptimizationKeepsRecordedSectorBytes(int amount, bool all, int x, int z, string expected)
     {
-        // Recorded before the placement search optimization, with the accepted rebased content.
+        // Recorded with the pre-optimization index and generation v2: lobes, outskirts and bounded placement.
         var assignments = new List<string> { $"asteroidAmount={amount}" };
         if (all) assignments.AddRange(["asteroidSize=5", "asteroidFieldSize=5", "asteroidFrequency=5", "asteroidSpacing=5", "asteroidOreShare=5", "asteroidOreGrade=5"]);
         var galaxy = World(assignments.ToArray());
@@ -159,6 +159,61 @@ public sealed class AsteroidRetuningTests
         }
     }
 
+    /// <summary>Placement agrees with a complete scan through reused grids and strict contact boundaries.</summary>
+    [Theory]
+    [InlineData(173)]
+    [InlineData(2026)]
+    [InlineData(42)]
+    public void PlacementMatchesScanAcrossGridPopulationsAndResets(int seed)
+    {
+        var random = new Random(seed);
+        var index = new RockIndex();
+        var rocks = new Asteroid[1024];
+        // Reuse storage through populated, empty and single-level sectors.
+        foreach (var population in new[] { 3, 0, 1, 2, 3 })
+        {
+            index.Reset(rocks.Length, 40000);
+            for (var i = 0; i < rocks.Length; i++)
+            {
+                var radius = population switch
+                {
+                    0 => 0.75f,
+                    1 => 128f,
+                    2 => 1024f,
+                    _ => i < 4 ? 6000f : i < 128 ? 1024f : 128f
+                };
+                var position = new Vector3(random.Next(-20000, 20001), random.Next(-20000, 20001), random.Next(-20000, 20001));
+                rocks[i] = new Asteroid { LocalPosition = position, Radius = radius };
+                index.Add(i, position, radius);
+            }
+            for (var probe = 0; probe < 2000; probe++)
+            {
+                var reach = probe % 7 == 0 ? 6000f : random.NextSingle() * 256f;
+                var point = probe % 2 == 0
+                    ? new Vector3(random.Next(-22000, 22001), random.Next(-22000, 22001), random.Next(-22000, 22001))
+                    : rocks[probe % rocks.Length].LocalPosition;
+                // Boundary neighbours exercise strict touching on the indexed path as well as the scan.
+                if (probe % 2 != 0)
+                {
+                    var distance = reach + rocks[probe % rocks.Length].Radius;
+                    point.X += probe % 3 == 0 ? MathF.BitDecrement(distance) : probe % 3 == 1 ? distance : MathF.BitIncrement(distance);
+                }
+                var expected = false;
+                foreach (ref readonly var rock in rocks.AsSpan())
+                {
+                    var dx = point.X - rock.LocalPosition.X;
+                    var dy = point.Y - rock.LocalPosition.Y;
+                    var dz = point.Z - rock.LocalPosition.Z;
+                    var apart = reach + rock.Radius;
+                    expected |= dx * dx + dy * dy + dz * dz < apart * apart;
+                }
+                Assert.Equal(expected, index.PlacementOverlaps(rocks, rocks.Length, point, reach));
+            }
+            index.Reset(0, 40000);
+            Assert.False(index.PlacementOverlaps(rocks, 0, Vector3.Zero, 6000));
+        }
+    }
+
     [Fact]
     public void DebugBudgetSectorKeepsItsRecordedBytes()
     {
@@ -167,8 +222,8 @@ public sealed class AsteroidRetuningTests
         var sector = new SectorContent();
         galaxy.Generate(coord, sector);
         Assert.Equal(new SectorCoord(-39, 0, -19), coord);
-        Assert.Equal(11319, sector.AsteroidCount);
-        Assert.Equal("7D293894B20693C1", Sectors.Hash(sector).ToString("X16"));
+        Assert.Equal(11129, sector.AsteroidCount);
+        Assert.Equal("01F4137C29DAFFF9", Sectors.Hash(sector).ToString("X16"));
     }
 
     [Fact]
