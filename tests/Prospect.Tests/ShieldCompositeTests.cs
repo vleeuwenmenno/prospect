@@ -55,16 +55,17 @@ public sealed class ShieldCompositeTests
     {
         var content = GameContent.Load();
         var shields = new ShieldVisuals(ShieldLook.Load());
-        var hull = new Prospect.Game.Client.HullView { Id = 1, Design = (byte)content.PodDesign, Blocks = content.Pod.FullMask, Orientation = Quaternion.Identity, Shield = 1500f };
+        var hull = new Prospect.Game.Client.HullView { Id = 1, Design = (byte)content.PodDesign, Blocks = content.Pod.FullSet.ToArray(), Stats = content.Pod.Stats, Orientation = Quaternion.Identity, Shield = 1500f };
         var other = hull with { Id = 2 };
         shields.Update([hull, other], content.Designs, 1, 1f / 60f);
         var draws = new ShieldDraw[4];
         var instances = new ShieldInstance[4];
         var vertices = new MeshVertex[ShieldVisuals.MaxVertices];
+        var indices = new ushort[ShieldVisuals.MaxIndices];
         shields.Begin(draws);
-        shields.Add(1, Vector3.Zero, Quaternion.Identity, 1f, Own, instances, vertices);
-        shields.Add(2, Vector3.Zero, Quaternion.Identity, 1f, Other, instances, vertices);
-        shields.Add(2, Vector3.Zero, Quaternion.Identity, 1f, WorldView.Material(true, 5), instances, vertices);
+        shields.Add(1, Vector3.Zero, Quaternion.Identity, 1f, Own, instances, vertices, indices);
+        shields.Add(2, Vector3.Zero, Quaternion.Identity, 1f, Other, instances, vertices, indices);
+        shields.Add(2, Vector3.Zero, Quaternion.Identity, 1f, WorldView.Material(true, 5), instances, vertices, indices);
         Assert.True(draws[0].Own);
         Assert.False(draws[1].Own);
         Assert.True(draws[2].Own);

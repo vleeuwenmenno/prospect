@@ -25,7 +25,7 @@ namespace Prospect.Client.Screens;
 /// </summary>
 internal sealed class MapPointer
 {
-    private const int MaxBlocked = 3;
+    private const int MaxBlocked = 4;
     private readonly float2[] _blockedMin = new float2[MaxBlocked];
     private readonly float2[] _blockedMax = new float2[MaxBlocked];
     private int _blockedCount;

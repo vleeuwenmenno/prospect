@@ -25,9 +25,6 @@ internal sealed partial class ScreenHost
     private Galaxy? _mapGalaxy;
     private bool _mapOpen;
     private bool _shipInfoOpen;
-    private HullDesign? _sheetDesign;
-    private ulong _sheetBlocks;
-    private HullStats _sheetStats;
     private float _mapTime;
     private float2 _mapCenter;
     private readonly MapPointer _mapPointer = new();
@@ -112,7 +109,9 @@ internal sealed partial class ScreenHost
     {
         var world = _app.World;
         UpdateDiscovery(snapshot, world);
-        if (!_sessionMenuOpen && !SocialSurfaceOpen && _app.Actions.Pressed(_app.Devices, InputAction.ToggleMap, !_ui.WantsTextInput))
+        // While the ship editor is shown its own keys apply: the map and the data sheet wait until it closes.
+        var editing = world.Editor.Shown;
+        if (!editing && !_sessionMenuOpen && !SocialSurfaceOpen && _app.Actions.Pressed(_app.Devices, InputAction.ToggleMap, !_ui.WantsTextInput))
         {
             if (_mapOpen)
                 _mapOpen = false;
@@ -120,7 +119,7 @@ internal sealed partial class ScreenHost
                 OpenMap();
         }
 
-        if (!_sessionMenuOpen && !_mapOpen && !SocialSurfaceOpen && _app.Actions.Pressed(_app.Devices, InputAction.ShipInfo, !_ui.WantsTextInput))
+        if (!editing && !_sessionMenuOpen && !_mapOpen && !SocialSurfaceOpen && _app.Actions.Pressed(_app.Devices, InputAction.ShipInfo, !_ui.WantsTextInput))
             _shipInfoOpen = !_shipInfoOpen;
 
         // Everything shown over the world goes on ImGui's background layer, which is drawn beneath every window.
@@ -135,13 +134,10 @@ internal sealed partial class ScreenHost
             // The party list must keep at least one member on screen above the flight readouts, and above the
             // jump strip while it is drawn and shares the list's width. When the full sector panel leaves no room
             // for the whole list, the panel drops its ore and server lines (they are on the map and in the menu),
-            // and if that is still not enough the list turns into one-line rows.
+            // and if that is still not enough the list turns into one-line rows. A closed panel takes no room.
             var limit = pilot > 0.01f ? ReservedTop(Kit.Px(HudLayout.Margin), HudLayout.ColumnRight(_ui.DisplaySize, Kit.Scale)) : _ui.DisplaySize.Y - Kit.Px(Theme.Space5);
-            var party = PartyHudCardsHeight(snapshot);
-            var gap = Kit.Px(Theme.Space3);
-            var compactSector = party > 0 && HudTop + SectorPanelHeight(world, false) + gap + party > limit;
-            var cards = !compactSector || HudTop + SectorPanelHeight(world, true) + gap + party <= limit;
-            var sectorBottom = HudTop + SectorPanelHeight(world, compactSector);
+            var (sectorBottom, compactSector, cards) = SectorInfoToggle.Column(Kit.Scale, _sectorInfo.Open,
+                SectorPanelHeight(world, false), SectorPanelHeight(world, true), PartyHudCardsHeight(snapshot), limit);
             _columnBottom = HudLayout.PartyRows(sectorBottom, limit, cards, snapshot.Social.Invitation.Player != 0,
                 snapshot.Social.PartyCount >= 2 ? OtherMembers(snapshot) : 0, Kit.Scale).Bottom;
             // The same layout pass measures and paints the wrapped lines so their reserved bounds cannot drift. With
@@ -149,13 +145,21 @@ internal sealed partial class ScreenHost
             var chatShown = PaneShown(SocialPane.Chat);
             _chatFeedBounds = chatShown ? default : DrawChatFeed(draw, snapshot, _columnBottom, paint: false);
             CollectPaneRects();
+            if (editing)
+            {
+                // The editor replaces the flight readouts and the columns: the middle of the view is the ship's.
+                DrawEditor(draw, snapshot, world);
+                return;
+            }
+
             if (pilot > 0.01f)
                 DrawFlightReadouts(draw, snapshot, world, pilot);
             if (world.CommandBlend > 0.01f)
                 DrawCommandOverlay(draw, snapshot, world, world.CommandBlend);
             if (pilot > 0.01f)
                 DrawTargetReadout(draw, snapshot, world, pilot);
-            DrawSectorPanel(draw, snapshot, world, compactSector);
+            if (_sectorInfo.Open)
+                DrawSectorPanel(draw, snapshot, world, compactSector);
             DrawPartyHud(draw, snapshot, world, sectorBottom, limit, cards);
             if (!chatShown)
                 DrawChatFeed(draw, snapshot, _columnBottom, paint: true);
@@ -163,6 +167,13 @@ internal sealed partial class ScreenHost
                 DrawSheet(draw, snapshot, world);
             if (world.CommandBlend > 0.5f)
                 DrawFleetList(snapshot, world, world.CommandBlend);
+            DrawEditorNotice(draw, world.Editor);
+            if (world.ControlOutOfSector)
+            {
+                var notice = Kit.F($"Outside your sector - travel there to take control ({world.SwitchKeyName})");
+                var width = _ui.DisplaySize.X - Kit.Px(Theme.Space5) * 2;
+                Kit.ClippedText(draw, _ui.SansMedium, Theme.FontSmall, new float2(Kit.Px(Theme.Space5), _ui.DisplaySize.Y * 0.5f + Kit.Px(84)), Theme.Bad, notice, width);
+            }
         }
         else
         {
@@ -185,7 +196,7 @@ internal sealed partial class ScreenHost
         var shown = world.Own;
         if (world.Mode == ViewMode.Command && world.Selection.Length > 0 && world.TryGetHull(world.Selection[0], out var picked))
             shown = picked;
-        DrawShipInfo(draw, snapshot.Content.Designs[Math.Min(shown.Design, snapshot.Content.Designs.Length - 1)], shown.Blocks, world.Mode == ViewMode.Command);
+        DrawShipInfo(draw, snapshot.Content.Designs[Math.Min(shown.Design, snapshot.Content.Designs.Length - 1)], shown, world.Mode == ViewMode.Command);
     }
 
     /// <summary>The sector panel's height: full, or compact with only the name and one line of figures.</summary>
@@ -199,14 +210,15 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
-    /// Draws the sector panel at the top left and returns where it ends, for what goes under it. Compact, it keeps
-    /// the name, the coordinates, the rocks and the players, and leaves out the server line and the ore.
+    /// Draws the open sector panel at the top left, under its control, and returns where it ends, for what goes
+    /// under it. Compact, it keeps the name, the coordinates, the rocks and the players, and leaves out the server
+    /// line and the ore.
     /// </summary>
     private float DrawSectorPanel(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, bool compact = false)
     {
         // The panel grows by what there is to say about the sector's ore; a sector without asteroids has none.
         // Under the map it stays short: the map's own heading sits below it, and the map describes sectors itself.
-        var min = new float2(Kit.Px(Theme.Space5), HudTop);
+        var min = new float2(Kit.Px(Theme.Space5), SectorInfoToggle.PanelTop(Kit.Scale));
         var width = HudLayout.ColumnWidth(_ui.DisplaySize, Kit.Scale);
         var inner = width - Kit.Px(Theme.Space4) * 2;
         var hasRock = world.Sector.AsteroidCount > 0 && !_mapOpen;
@@ -318,7 +330,7 @@ internal sealed partial class ScreenHost
 
         // Speed in the middle; what keeps the hull alive on the left, what drives it on the right. Above it, the
         // jump strip: what the drive is doing and what the pilot can do, kept off the middle of the view.
-        DrawFlightConsole(draw, snapshot, own, speed);
+        DrawFlightConsole(draw, snapshot, own, speed, world.Mode == ViewMode.Pilot && WorldInputEnabled && _app.PointerReleased);
         DrawJumpStrip(draw, snapshot, world, _jumpPrompt);
 
         if (own.Order.Kind == OrderKind.MoveTo && world.Project(own.Order.Target, out var target))
@@ -537,10 +549,10 @@ internal sealed partial class ScreenHost
             var gaugeMin = rowMin + new float2(rowSize.X - Kit.Px(70), Kit.Px(24));
             var gauge = new float2(Kit.Px(58), Kit.Px(3));
             draw.AddRectFilled(gaugeMin, gaugeMin + gauge, Kit.Color(Theme.Void));
-            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * Math.Clamp(hull.Shield / flight.ShieldCapacity, 0f, 1f), gauge.Y), Kit.Color(hull.ShieldOffline ? Theme.LineStrong : Theme.Info));
+            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * FlightConsole.Fraction(hull.Shield, flight.ShieldCapacity), gauge.Y), Kit.Color(hull.ShieldOffline ? Theme.LineStrong : Theme.Info));
             gaugeMin.Y += Kit.Px(6);
             draw.AddRectFilled(gaugeMin, gaugeMin + gauge, Kit.Color(Theme.Void));
-            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * Math.Clamp(hull.Hull / flight.HullPoints, 0f, 1f), gauge.Y), Kit.Color(Theme.Good));
+            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * FlightConsole.Fraction(hull.Hull, flight.HullPoints), gauge.Y), Kit.Color(Theme.Good));
             y += rowHeight;
         }
 
@@ -673,10 +685,10 @@ internal sealed partial class ScreenHost
             var gauge = new float2(size.X - Kit.Px(Theme.Space4 * 2), Kit.Px(5));
             var gaugeMin = text + new float2(0, Kit.Px(48));
             draw.AddRectFilled(gaugeMin, gaugeMin + gauge, Kit.Color(Theme.Void));
-            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * Math.Clamp(target.Shield / flight.ShieldCapacity, 0f, 1f), gauge.Y), Kit.Color(target.ShieldOffline ? Theme.LineStrong : Theme.Info));
+            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * FlightConsole.Fraction(target.Shield, flight.ShieldCapacity), gauge.Y), Kit.Color(target.ShieldOffline ? Theme.LineStrong : Theme.Info));
             gaugeMin.Y += Kit.Px(10);
             draw.AddRectFilled(gaugeMin, gaugeMin + gauge, Kit.Color(Theme.Void));
-            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * Math.Clamp(target.Hull / flight.HullPoints, 0f, 1f), gauge.Y), Kit.Color(Theme.Good));
+            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * FlightConsole.Fraction(target.Hull, flight.HullPoints), gauge.Y), Kit.Color(Theme.Good));
             Kit.Text(draw, _ui.Sans, Theme.FontCaption, gaugeMin + new float2(0, Kit.Px(10)), Theme.TextMute, mine ? "T takes control"u8 : "Not yours: cannot take control"u8);
         }
         else if (world.TargetRock is { } targetRock && world.TryGetRock(targetRock, out var rockPosition, out var rockRadius))
@@ -829,17 +841,10 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>The hull's data sheet: every figure follows from the blocks it is built from.</summary>
-    private void DrawShipInfo(ImDrawListPtr draw, HullDesign design, ulong blocks, bool besideFleetList)
+    private void DrawShipInfo(ImDrawListPtr draw, HullDesign design, in HullView hull, bool besideFleetList)
     {
-        // The sheet is cached per hull state; it only needs working out again when the hull loses blocks.
-        if (!ReferenceEquals(design, _sheetDesign) || blocks != _sheetBlocks)
-        {
-            _sheetDesign = design;
-            _sheetBlocks = blocks;
-            design.Evaluate(blocks, out _, out _sheetStats);
-        }
-
-        var stats = _sheetStats;
+        // The session publishes the sheet with the hull, for the blocks it has left: nothing is worked out here.
+        var stats = hull.Stats;
         var line = Kit.Px(21);
         var size = new float2(Kit.Px(400), Kit.Px(Theme.Space5 * 2 + 46) + line * 25);
         var inset = besideFleetList ? Kit.Px(300 + Theme.Space5 * 2) : Kit.Px(Theme.Space5);
@@ -861,13 +866,15 @@ internal sealed partial class ScreenHost
             y += line;
         }
 
-        Row("Hull"u8, Kit.F($"{stats.HullPoints:0} hp"));
+        // Points now against the blueprint's full strength: the sheet's own figure shrinks with lost blocks.
+        Row("Hull (now / built)"u8, Kit.F($"{FlightConsole.Shown(hull.Hull, float.MaxValue):0} / {design.Flight.HullPoints:0} hp"),
+            hull.Hull < design.Flight.HullPoints ? Theme.Bad : Theme.Text);
         Row("Shield"u8, Kit.F($"{stats.ShieldCapacity:0} hp"));
         Row("Shield recharge"u8, Kit.F($"{stats.ShieldRecharge:0} hp/s"));
         Row("Mass"u8, Kit.F($"{stats.Mass:0.0} t"));
         Row("Volume"u8, Kit.F($"{stats.Volume:0} m³"));
         Row("W x H x L"u8, Kit.F($"{stats.Size.X:0} x {stats.Size.Y:0} x {stats.Size.Z:0} m"));
-        Row("Blocks"u8, stats.Blocks == design.Cells.Length ? Kit.F($"{stats.Blocks}") : Kit.F($"{stats.Blocks} of {design.Cells.Length}"), stats.Blocks == design.Cells.Length ? Theme.Text : Theme.Bad);
+        Row("Blocks"u8, stats.Blocks == design.BlockCount ? Kit.F($"{stats.Blocks}") : Kit.F($"{stats.Blocks} of {design.BlockCount}"), stats.Blocks == design.BlockCount ? Theme.Text : Theme.Bad);
         Row("Cargo hold"u8, Kit.F($"{stats.CargoHold:0.0} m³"));
         Row("Crew"u8, Kit.F($"{stats.Crew}"));
         y += line * 0.5f;
@@ -974,6 +981,10 @@ internal sealed partial class ScreenHost
         }
 
         var boxReleased = pointer.BoxReleased;
+
+        // Taking control of the one selected ship leaves the map open; the keyboard must be free of text fields.
+        if (Bridge is { } switchBridge)
+            world.SwitchToSelectedFromMap(switchBridge, WorldView.MapSwitchKeyAvailable(_sessionMenuOpen, SocialSurfaceOpen, _controlsOpen, _ui.WantsTextInput));
 
         // Escape closes the menu first and the map only after that.
         if (BackPressed())
@@ -1217,7 +1228,8 @@ internal sealed partial class ScreenHost
         }
 
         // The world interface is beneath the map, so the map shows the sector panel itself.
-        DrawSectorPanel(draw, snapshot, world);
+        if (_sectorInfo.Open)
+            DrawSectorPanel(draw, snapshot, world);
 
         // Title, layer and scale, clear of the sector panel above them. Where the unit list needs the room, only
         // the layer and scale stay, on one line under the sector panel.
@@ -1229,12 +1241,19 @@ internal sealed partial class ScreenHost
         else
         {
             // In the column the sector panel and the unit list share, its text on their text's edge.
-            var at = new float2(Kit.Px(HudLayout.Margin + Theme.Space4), MapUnitList.HeadingTop(HudTop + SectorPanelHeight(world, false), Kit.Scale));
+            var at = new float2(Kit.Px(HudLayout.Margin + Theme.Space4), MapUnitList.HeadingTop(SectorColumnBottom(world, false), Kit.Scale));
             var width = units.Size.X - Kit.Px(Theme.Space4) * 2;
             Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, at, Theme.Accent, "NAVIGATION"u8);
             Kit.Text(draw, _ui.SansBold, Theme.FontHeading, at + new float2(0, Kit.Px(16)), Theme.Text, "Galaxy Map"u8);
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(0, Kit.Px(50)), Theme.TextDim, Kit.F($"LAYER {_mapLayer:+0;-0;0}   {display.X / cell:0} SECTORS ACROSS   {size / 1000:0} KM EACH"), width);
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(0, Kit.Px(68)), Theme.TextMute, Kit.F($"{_discovered.Count} SECTORS DISCOVERED   {world.Selection.Length} SHIPS SELECTED"), width);
+        }
+
+        if (world.ControlOutOfSector)
+        {
+            var notice = Kit.F($"Outside your sector - travel there to take control ({world.SwitchKeyName})");
+            var noticeSize = Kit.Measure(_ui.SansMedium, Theme.FontSmall, notice);
+            Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, new float2((display.X - noticeSize.X) * 0.5f, display.Y - Kit.Px(56)), Theme.Bad, notice);
         }
 
         if (pointerOnMap)

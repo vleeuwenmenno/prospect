@@ -1,0 +1,10 @@
+{
+  "catalogueBytes": 196608,
+  "catalogueBoxes": 8192,
+  "maxBytes": 32768,
+  "transfers": 2,
+  "heldBytes": 65536,
+  "requestTicks": 30,
+  "timeoutTicks": 600,
+  "bytesPerTick": 1024
+}

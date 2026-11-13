@@ -14,8 +14,25 @@ public struct HullView
     /// <summary>Index of the hull's design.</summary>
     public byte Design;
 
-    /// <summary>One bit per block of the design; a cleared bit is a destroyed block.</summary>
-    public ulong Blocks;
+    /// <summary>
+    /// The blocks the hull still has: a <see cref="BlockSet"/> of its design, copied into the snapshot the view
+    /// is published in. It is that snapshot's memory, so it is good for as long as the snapshot is.
+    /// </summary>
+    public ReadOnlyMemory<ulong> Blocks;
+
+    /// <summary>
+    /// How many blocks the hull has lost. It only grows, so with the hull's id it names the block set: a reader
+    /// that kept something worked out from <see cref="Blocks"/> needs to work it out again only when this moves.
+    /// </summary>
+    public uint Revision;
+
+    /// <summary>
+    /// The hull's data sheet with the blocks it has left, in the world's rules: copied from the figures the
+    /// session keeps for the hull, which are read off its running sums when it loses a block. Whoever draws or
+    /// lists the hull reads its shield capacity, its drive and the rest here, and works nothing out from
+    /// <see cref="Blocks"/>.
+    /// </summary>
+    public HullStats Stats;
 
     /// <summary>True for the hull the player is flying.</summary>
     public bool IsOwn;
@@ -86,8 +103,13 @@ public struct HullView
 /// server has not seen yet. Other hulls are drawn slightly in the past, interpolated between snapshots. The
 /// prediction runs into them all the same: it steps a copy of the hulls near the player's, brought up to the
 /// present, with the code the server steps them with.
+/// <para>
+/// The world keeps the block state of every hull it knows, its own and the others, for as long as it knows the
+/// hull. The hulls it predicts with are created over those states and only borrow them: clearing and filling that
+/// store at every snapshot copies, rebuilds and releases nothing.
+/// </para>
 /// </summary>
-internal sealed class ClientWorld : IDisposable
+internal sealed partial class ClientWorld : IDisposable
 {
     public const int MaxViews = 64;
     private const int PendingCapacity = 256;
@@ -153,19 +175,31 @@ internal sealed class ClientWorld : IDisposable
         public uint Id;
         public uint Owner;
         public byte Design;
-        public ulong Blocks;
+
+        /// <summary>The hull's block state in the world's store, kept from when the hull is first heard of until it is forgotten.</summary>
+        public BlockStateHandle Blocks;
         public long LastSeenTick;
         public int Newest;
         public int Count;
 
         /// <summary>The hull's flight figures with the blocks it has left: its mass, inertia and reach in a collision.</summary>
         public FlightParams Flight;
+
+        /// <summary>The hull's data sheet with the blocks it has left, for whoever views it.</summary>
+        public HullStats Stats;
     }
 
     private GameContent _content;
+    private BlockReplica _replica;
+
+    // The figures of the hull the player flies, read off its sums whenever it loses a block.
     private FlightParams _flight;
+    private HullStats _stats;
     private byte _ownDesign;
-    private ulong _ownBlocks;
+
+    // The block state of every hull the world knows. No hit points: only the server has those.
+    private readonly BlockStateStore _blocks = new(MaxViews + 1);
+    private BlockStateHandle _ownBlocks;
     private uint _playerId;
     private readonly Pending[] _pending = new Pending[PendingCapacity];
     private readonly Remote[] _remotes = new Remote[MaxViews];
@@ -173,8 +207,8 @@ internal sealed class ClientWorld : IDisposable
     private readonly HullView[] _lastViews = new HullView[MaxViews];
 
     // The predicted world: the player's hull in slot 0 and the hulls near it after that, in the server's order.
-    // Rebuilt from each snapshot and stepped once per input.
-    private readonly HullStore _near = new(MaxViews + 1);
+    // Rebuilt from each snapshot and stepped once per input. Its hulls borrow their block states from _blocks.
+    private readonly HullStore _near;
     private HullField _field;
     private int _ticksSinceSnapshot;
     private readonly byte[] _sendBuffer = new byte[256];
@@ -199,12 +233,47 @@ internal sealed class ClientWorld : IDisposable
     public ClientWorld(GameContent content)
     {
         _content = content;
+        _replica = new BlockReplica(content);
         _flight = content.Pod.Flight;
+        _stats = content.Pod.Stats;
         _ownDesign = (byte)content.PodDesign;
+        _near = new HullStore(MaxViews + 1, _blocks);
         _field = new HullField(_near, content.Designs, authoritative: false);
     }
 
-    public void Dispose() => _near.Dispose();
+    public void Dispose()
+    {
+        _replica.Dispose();
+        _near.Dispose();
+        _blocks.Dispose();
+    }
+
+    /// <summary>Where the world keeps the block state of the hulls it knows.</summary>
+    internal BlockStateStore BlockStates => _blocks;
+
+    /// <summary>The store of hulls the prediction steps, filled again from every snapshot.</summary>
+    internal HullStore Near => _near;
+
+    /// <summary>The block state of a hull the world knows, the player's or another; false if it knows no such hull.</summary>
+    internal bool TryGetBlockState(uint hull, out BlockStateHandle state)
+    {
+        state = default;
+        if (hull == _ownHullId && _ownBlocks.IsValid)
+        {
+            state = _ownBlocks;
+            return true;
+        }
+
+        for (var i = 0; i < _remotes.Length; i++)
+        {
+            if (!_remotes[i].Used || _remotes[i].Id != hull)
+                continue;
+            state = _remotes[i].Blocks;
+            return true;
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Gives the world the content as the server's settings make it. The prediction has to run on the server's
@@ -213,9 +282,37 @@ internal sealed class ClientWorld : IDisposable
     /// </summary>
     public void SetContent(GameContent content)
     {
+        if (!_hasOwnState)
+        {
+            // Admission replaces every consumer of design indices before any pose is accepted.
+            _replica.Dispose();
+            _replica = new BlockReplica(content);
+            _ownDesign = (byte)content.PodDesign;
+        }
         _content = content;
         _field = new HullField(_near, content.Designs, authoritative: false);
-        OwnDesign.Evaluate(_hasOwnState ? _ownBlocks : OwnDesign.FullMask, out _flight, out _);
+        if (_hasOwnState)
+        {
+            // The sums do not depend on a world's rules; the figures read off them do.
+            OwnDesign.Figures(_blocks.Sums(_ownBlocks), out _flight, out _stats);
+        }
+        else
+        {
+            _flight = OwnDesign.Flight;
+            _stats = OwnDesign.Stats;
+        }
+    }
+
+    /// <summary>
+    /// Gives the world a catalogue that has grown at its end during play. Every design it had keeps its number
+    /// and is the same object, so the player's hull, the hulls it knows, their block states and whatever is being
+    /// recovered stay exactly as they are; only hulls of the new designs become acceptable. Call it between ticks.
+    /// </summary>
+    public void AppendContent(GameContent content)
+    {
+        _content = content;
+        _replica.Append(content);
+        _field.SetDesigns(content.Designs);
     }
 
     public void SetPlayer(uint playerId) => _playerId = playerId;
@@ -242,9 +339,10 @@ internal sealed class ClientWorld : IDisposable
     /// Predicts one tick and sends input. When sendCommands is false, reliable control/fleet intents stay queued
     /// until the session receives a newer server snapshot, so catch-up ticks cannot spend the allowance again.
     /// </summary>
-    public void Tick(PlayerInputBridge bridge, ITransport transport, double serverTick, bool sendCommands = true)
+    public void Tick(PlayerInputBridge bridge, ITransport transport, double serverTick, bool sendCommands = true, long clientTick = -1)
     {
         _serverTick = serverTick;
+        _replica.SendAcks(transport, clientTick < 0 ? (long)serverTick : clientTick);
         var controls = bridge.Consume(out var hasOrder, out var order);
         _correction *= 0.86f;
 
@@ -282,8 +380,11 @@ internal sealed class ClientWorld : IDisposable
             var local = Vector3.Transform(controls.Aim, Quaternion.Conjugate(_predicted.Orientation));
             var yawError = MathF.Atan2(local.X, -local.Z);
             var pitchError = MathF.Atan2(local.Y, MathF.Sqrt(local.X * local.X + local.Z * local.Z));
-            yaw = Math.Clamp(yawError * AlignGain / _flight.TurnRate.Y, -1f, 1f);
-            pitch = Math.Clamp(pitchError * AlignGain / _flight.TurnRate.X, -1f, 1f);
+            // A hull that cannot turn is asked for no turn: its rate of zero divides into no number.
+            if (_flight.TurnRate.Y > 0f)
+                yaw = Math.Clamp(yawError * AlignGain / _flight.TurnRate.Y, -1f, 1f);
+            if (_flight.TurnRate.X > 0f)
+                pitch = Math.Clamp(pitchError * AlignGain / _flight.TurnRate.X, -1f, 1f);
         }
 
         var input = new FlightInput
@@ -340,6 +441,13 @@ internal sealed class ClientWorld : IDisposable
             if (!HullRecord.TryRead(ref reader, out var record))
                 break;
 
+            if (!_replica.Accept(record, clientTick))
+            {
+                HoldPose(record, header, clientTick);
+                continue;
+            }
+            ClearHeld(record.Id);
+
             if (record.Id == header.OwnHull)
             {
                 own = record;
@@ -363,14 +471,20 @@ internal sealed class ClientWorld : IDisposable
 
         if (own.Id != _ownHullId || !_hasOwnState)
             SwitchHull(own);
-        if (own.Blocks != _ownBlocks)
+        if (ApplyLosses(_ownBlocks, _replica.Losses(own.Id)))
         {
             // The hull has lost blocks: it flies on what is left.
-            _ownBlocks = own.Blocks;
-            OwnDesign.Evaluate(_ownBlocks, out _flight, out _);
+            OwnDesign.Figures(_blocks.Sums(_ownBlocks), out _flight, out _stats);
         }
 
         Reconcile(own.State, own.Order, header.AckedInput, header.ServerTick);
+    }
+
+    /// <summary>Receives a bounded block recovery chunk.</summary>
+    public void OnBlockState(ref NetReader reader, long tick)
+    {
+        _replica.Receive(ref reader, tick);
+        ReplayHeld(tick);
     }
 
     /// <summary>Applies asteroid motion records from the server.</summary>
@@ -394,11 +508,28 @@ internal sealed class ClientWorld : IDisposable
         return count;
     }
 
-    /// <summary>Writes this tick's hull views. Returns how many were written and which one is the player's.</summary>
-    public int BuildViews(HullView[] views, double serverTick, long clientTick, out int ownIndex)
+    /// <summary>
+    /// Writes this tick's hull views. Returns how many were written and which one is the player's. Each view's
+    /// blocks are copied into <paramref name="blockWords"/>, the publication's own memory for them, so the
+    /// reader of the views never looks into the world's store. That memory is replaced by a larger one only
+    /// when the hulls in view need more words than it has.
+    /// </summary>
+    public int BuildViews(HullView[] views, ref ulong[] blockWords, double serverTick, long clientTick, out int ownIndex)
     {
         var count = 0;
         ownIndex = -1;
+
+        // The most words the views can take, known before any is written: a view keeps the memory it was given.
+        var needed = _hasOwnState ? _blocks.Alive(_ownBlocks).Length : 0;
+        for (var r = 0; r < _remotes.Length; r++)
+        {
+            if (_remotes[r].Used)
+                needed += _blocks.Alive(_remotes[r].Blocks).Length;
+        }
+
+        if (blockWords.Length < needed)
+            blockWords = new ulong[Math.Max(needed, blockWords.Length * 2)];
+        var used = 0;
 
         if (_hasOwnState)
         {
@@ -408,7 +539,9 @@ internal sealed class ClientWorld : IDisposable
                 Id = _ownHullId,
                 Owner = _playerId,
                 Design = _ownDesign,
-                Blocks = _ownBlocks,
+                Blocks = Publish(_ownBlocks, blockWords, ref used),
+                Revision = _blocks.Revision(_ownBlocks),
+                Stats = _stats,
                 IsOwn = true,
                 Position = _predicted.Position + _correction,
                 Orientation = _predicted.Orientation,
@@ -442,11 +575,14 @@ internal sealed class ClientWorld : IDisposable
                 continue;
             if (clientTick - remote.LastSeenTick > RemoteExpiryTicks)
             {
-                remote.Used = false;
+                Forget(ref remote);
                 continue;
             }
 
-            views[count++] = Interpolate(r, ref remote, renderTick);
+            views[count] = Interpolate(r, ref remote, renderTick);
+            views[count].Blocks = Publish(remote.Blocks, blockWords, ref used);
+            views[count].Stats = remote.Stats;
+            views[count++].Revision = _blocks.Revision(remote.Blocks);
         }
 
         // Pair each view with where it was last tick so the render thread can interpolate between the two.
@@ -457,7 +593,7 @@ internal sealed class ClientWorld : IDisposable
             view.PreviousOrientation = view.Orientation;
             for (var j = 0; j < _lastViewCount; j++)
             {
-                if (_lastViews[j].Id != view.Id)
+                if (_lastViews[j].Id != view.Id || _lastViews[j].Revision != view.Revision)
                     continue;
                 view.PreviousPosition = _lastViews[j].Position;
                 view.PreviousOrientation = _lastViews[j].Orientation;
@@ -470,16 +606,97 @@ internal sealed class ClientWorld : IDisposable
         return count;
     }
 
+    /// <summary>Copies a hull's blocks into a publication's memory and returns where they are.</summary>
+    private ReadOnlyMemory<ulong> Publish(BlockStateHandle state, ulong[] blockWords, ref int used)
+    {
+        var alive = _blocks.Alive(state);
+        var published = new Memory<ulong>(blockWords, used, alive.Length);
+        alive.CopyTo(published.Span);
+        used += alive.Length;
+        return published;
+    }
+
+    /// <summary>
+    /// Creates the published state from the replica's validated loss history. Sums follow each loss.
+    /// </summary>
+    private BlockStateHandle TakeBlocks(HullDesign design, ReadOnlySpan<int> wire)
+    {
+        var state = _blocks.Create(design, hitPoints: false);
+        ApplyLosses(state, wire);
+        return state;
+    }
+
+    /// <summary>
+    /// Applies only losses not already published; unchanged snapshots never scan a block set.
+    /// </summary>
+    private bool ApplyLosses(BlockStateHandle state, ReadOnlySpan<int> wire)
+    {
+        var revision = (int)_blocks.Revision(state);
+        for (var i = revision; i < wire.Length; i++) _blocks.Lose(state, wire[i]);
+        return revision != wire.Length;
+    }
+
+    /// <summary>Forgets a hull that is no longer heard of, and gives its block state back.</summary>
+    private void Forget(ref Remote remote)
+    {
+        ReleaseBlocks(remote.Blocks);
+        remote = default;
+    }
+
+    /// <summary>
+    /// Reads again the figures of a predicted hull made over a block state that has just lost blocks. The
+    /// predicted hull borrows the state, so it has the loss at once; a record that arrives out of order can bring
+    /// the loss without the prediction being rebuilt, and the hull must not then collide as what is left of it
+    /// with the mass of what it was.
+    /// </summary>
+    private void RefitNear(BlockStateHandle state, in HullRecord record, long serverTick)
+    {
+        for (var i = 1; i < _near.Slots; i++)
+        {
+            if (!_near.IsAliveAt(i) || _near.Info(i).BlockState != state) continue;
+            _field.Refit(i);
+            _near.State(i) = record.State;
+            var mine = record.Owner == _playerId;
+            _near.Info(i).Order = mine ? record.Order : default;
+            var age = Math.Clamp(_snapshotTick - serverTick + (_nextSequence - 1 - _ackedSequence), 0, NearStaleTicks);
+            for (var step = 0; step < age; step++)
+            {
+                HullSim.AdvanceShieldClock(ref _near.State(i));
+                HullSim.Step(ref _near.State(i), ref _near.Info(i).Order, mine ? Hold : Coast, _near.Flight(i));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gives back the block state of a hull that is not the player's. A predicted hull still made over it goes
+    /// first: it borrows the state, and must not be stepped once the state is gone.
+    /// </summary>
+    private void ReleaseBlocks(BlockStateHandle state)
+    {
+        for (var i = 1; i < _near.Slots; i++)
+        {
+            if (_near.IsAliveAt(i) && _near.Info(i).BlockState == state)
+                _near.Destroy(_near.HandleAt(i));
+        }
+
+        _blocks.Release(state);
+    }
+
     /// <summary>
     /// The server has put the player in a different hull: start predicting that one. Inputs already sent were
     /// for the old hull, so they are not replayed onto the new one.
     /// </summary>
     private void SwitchHull(in HullRecord record)
     {
+        // The replica accepted the record, so its design is one the world has: a record of a design it does
+        // not know is held back before it gets here, never taken for another design.
         _ownHullId = record.Id;
-        _ownDesign = (byte)Math.Min(record.Design, _content.Designs.Length - 1);
-        _ownBlocks = record.Blocks;
-        OwnDesign.Evaluate(_ownBlocks, out _flight, out _);
+        _ownDesign = record.Design;
+
+        // Another hull, so another block state: the old hull's goes back, and it is heard of as a remote from here on.
+        _blocks.Release(_ownBlocks);
+        _ownBlocks = TakeBlocks(OwnDesign, _replica.Losses(record.Id));
+        OwnDesign.Figures(_blocks.Sums(_ownBlocks), out _flight, out _stats);
         _hasOwnState = false;
         _correction = Vector3.Zero;
         _ackedSequence = _nextSequence - 1;
@@ -489,7 +706,7 @@ internal sealed class ClientWorld : IDisposable
         for (var i = 0; i < _remotes.Length; i++)
         {
             if (_remotes[i].Used && _remotes[i].Id == record.Id)
-                _remotes[i].Used = false;
+                Forget(ref _remotes[i]);
         }
     }
 
@@ -578,15 +795,28 @@ internal sealed class ClientWorld : IDisposable
         if (remote.Count > 0 && _samples[slot * SamplesPerHull + remote.Newest].Tick >= serverTick)
             return;
 
-        var design = (byte)Math.Min(record.Design, _content.Designs.Length - 1);
+        // The replica accepted the record, so the design is one the world has.
+        var design = record.Design;
 
-        // What the hull weighs in a collision follows from the blocks it has left.
-        if (!known || remote.Design != design || remote.Blocks != record.Blocks)
-            _content.Designs[design].Evaluate(record.Blocks, out remote.Flight, out _);
+        // What the hull weighs in a collision follows from the blocks it has left. A hull first heard of, or one
+        // that turns out to be of another design, gets a block state of its own, kept until the hull is forgotten;
+        // a known hull loses from the state it has whatever the record no longer shows.
+        if (!known || remote.Design != design)
+        {
+            if (known)
+                ReleaseBlocks(remote.Blocks);
+            remote.Design = design;
+            remote.Blocks = TakeBlocks(_content.Designs[design], _replica.Losses(record.Id));
+            _content.Designs[design].Figures(_blocks.Sums(remote.Blocks), out remote.Flight, out remote.Stats);
+        }
+        else if (ApplyLosses(remote.Blocks, _replica.Losses(record.Id)))
+        {
+            _content.Designs[design].Figures(_blocks.Sums(remote.Blocks), out remote.Flight, out remote.Stats);
+            RefitNear(remote.Blocks, record, serverTick);
+            remote.Count = 0;
+        }
 
         remote.Owner = record.Owner;
-        remote.Design = design;
-        remote.Blocks = record.Blocks;
         remote.Newest = (remote.Newest + 1) % SamplesPerHull;
         remote.Count = Math.Min(remote.Count + 1, SamplesPerHull);
         _samples[slot * SamplesPerHull + remote.Newest] = new Sample
@@ -605,9 +835,8 @@ internal sealed class ClientWorld : IDisposable
     {
         _ticksSinceSnapshot = 0;
         _near.Clear();
-        _near.Create(_playerId, _ownDesign, OwnDesign, own.Position);
+        _near.Create(_playerId, _ownDesign, OwnDesign, own.Position, _ownBlocks);
         _near.State(0) = own;
-        _near.Info(0).Blocks = _ownBlocks;
         _near.Flight(0) = _flight;
 
         // The server steps the hulls nobody flies in slot order, and the order decides who gives way when two
@@ -635,11 +864,10 @@ internal sealed class ClientWorld : IDisposable
         {
             ref var remote = ref _remotes[order[i]];
             ref var sample = ref _samples[order[i] * SamplesPerHull + remote.Newest];
-            var index = _near.Create(remote.Owner, remote.Design, _content.Designs[remote.Design], sample.State.Position).Index;
+            var index = _near.Create(remote.Owner, remote.Design, _content.Designs[remote.Design], sample.State.Position, remote.Blocks).Index;
             ref var info = ref _near.Info(index);
             ref var state = ref _near.State(index);
             var mine = remote.Owner == _playerId;
-            info.Blocks = remote.Blocks;
             info.Order = mine ? sample.Order : default;
             state = sample.State;
             _near.Flight(index) = remote.Flight;
@@ -686,7 +914,6 @@ internal sealed class ClientWorld : IDisposable
             Id = remote.Id,
             Owner = remote.Owner,
             Design = remote.Design,
-            Blocks = remote.Blocks,
             Position = newest.State.Position,
             Orientation = newest.State.Orientation,
             Velocity = newest.State.Velocity,

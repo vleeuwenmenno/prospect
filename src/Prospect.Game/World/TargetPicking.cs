@@ -5,14 +5,19 @@ namespace Prospect.Game.World;
 /// <summary>
 /// A hull's visible blocks at the interpolated frame position, shaped as drawn: <paramref name="Stretch"/> draws it out
 /// along its local z (1 is not at all), and the part where <c>dot(p - Position - CutPoint, CutNormal) &gt; 0</c> is cut
-/// away. Both are in world axes; a zero <paramref name="CutNormal"/> cuts nothing. <paramref name="Faces"/> holds, per
+/// away. Both are in world axes; a zero <paramref name="CutNormal"/> cuts nothing. <paramref name="Mask"/> is the
+/// <see cref="BlockSet"/> of the blocks that can be picked, in memory the caller keeps. <paramref name="Faces"/> holds, per
 /// block, the faces drawn in <see cref="HullDesign.ExteriorFaces"/> order; null draws all six, a block as its own cube.
+/// <paramref name="HalfExtents"/> supplies per-box metre dimensions; null retains the uniform cube convenience.
+/// <paramref name="Shapes"/> gives each block's shape: a wedge is picked only on its real faces, never in the empty
+/// half of its box, and its face bit (u, +su) is its slant. Null makes every block a box.
 /// Only faces turned to the camera are drawn, and nothing caps a cut, so only those faces can be picked.
 /// <paramref name="Aperture"/>, for the pilot's own hull inside its own rift or wormhole, leaves out the samples its
 /// mesh pass leaves out: a point counts at the viewport pixel the ray through it lands in, as that pixel is drawn.
 /// </summary>
-public readonly record struct PickHull(uint Id, Double3 Position, Quaternion Rotation, Vector3[] Blocks, float BlockSize, ulong Mask, float Radius,
-    float Stretch = 1, Vector3 CutPoint = default, Vector3 CutNormal = default, byte[]? Faces = null, FtlAperture Aperture = default);
+public readonly record struct PickHull(uint Id, Double3 Position, Quaternion Rotation, Vector3[] Blocks, float BlockSize, ReadOnlyMemory<ulong> Mask, float Radius,
+    float Stretch = 1, Vector3 CutPoint = default, Vector3 CutNormal = default, byte[]? Faces = null, FtlAperture Aperture = default, Vector3[]? HalfExtents = null,
+    BlockShape[]? Shapes = null);
 
 /// <summary>A loaded sector and its current displacement offsets, borrowed without copying.</summary>
 public readonly record struct PickSector(SectorCoord Id, Double3 Center, Asteroid[] Rocks, int Count, Vector3[]? Offsets, Vector3 BoundsCenter = default, float BoundsRadius = 0);
@@ -63,9 +68,11 @@ public static class TargetPicking
             var origin = Vector3.Transform(-center, inverse);
             var direction = Vector3.Transform(ray, inverse);
             var view = Vector3.Transform(forward, inverse);
-            var cut = Vector3.Transform(hull.CutNormal, inverse);
-            // A point q from the camera is drawn where dot(q, cut) <= cutAt.
-            var cutAt = Vector3.Dot(Vector3.Transform(hull.CutPoint, inverse) - origin, cut);
+            // A point q from the camera is drawn where dot(q, cut) <= cutAt. No cut stays exactly none: turning a
+            // zero normal by a quaternion can leave rounding noise, which would refuse faces at random.
+            var uncut = hull.CutNormal == Vector3.Zero;
+            var cut = uncut ? Vector3.Zero : Vector3.Transform(hull.CutNormal, inverse);
+            var cutAt = uncut ? 0f : Vector3.Dot(Vector3.Transform(hull.CutPoint, inverse) - origin, cut);
             var half = new Vector3(hull.BlockSize * 0.5f, hull.BlockSize * 0.5f, hull.BlockSize * 0.5f * stretch);
             // Nothing nearer than the near plane is drawn, so a ray only starts to hit there.
             var rayDepth = Vector3.Dot(ray, forward);
@@ -73,6 +80,7 @@ public static class TargetPicking
             var nearest = float.PositiveInfinity;
             var padded = float.PositiveInfinity;
             var aperture = hull.Aperture;
+            var mask = hull.Mask.Span;
             if (aperture.Active)
             {
                 // The pilot's own hull inside its rift or wormhole is drawn sample by sample: a pixel shows it where
@@ -88,18 +96,18 @@ public static class TargetPicking
                 var shown = default(Shown);
                 for (var b = 0; b < hull.Blocks.Length; b++)
                 {
-                    if ((hull.Mask & (1UL << b)) == 0) continue;
+                    if (!BlockSet.Has(mask, b)) continue;
                     var block = hull.Blocks[b];
                     block.Z *= stretch;
-                    nearest = Faces(block - origin, direction, half, hull.Faces?[b] ?? AllFaces, cut, cutAt, start, nearest, shown);
+                    nearest = Faces(block - origin, direction, Half(hull, b, stretch), Shape(hull, b), hull.Faces?[b] ?? AllFaces, cut, cutAt, start, nearest, shown);
                 }
                 // The pointer is on no drawn face, so the grab is measured to their edges.
                 for (var b = 0; b < hull.Blocks.Length && !float.IsFinite(nearest) && rayDepth > 0; b++)
                 {
-                    if ((hull.Mask & (1UL << b)) == 0) continue;
+                    if (!BlockSet.Has(mask, b)) continue;
                     var block = hull.Blocks[b];
                     block.Z *= stretch;
-                    if (NearFaces(direction / rayDepth, view, pixelsPerTangent, block - origin, half, hull.Faces?[b] ?? AllFaces, cut, cutAt, nearPlane))
+                    if (NearFaces(direction / rayDepth, view, pixelsPerTangent, block - origin, Half(hull, b, stretch), Shape(hull, b), hull.Faces?[b] ?? AllFaces, cut, cutAt, nearPlane))
                         padded = Math.Min(padded, Math.Max(0, Vector3.Dot(block - origin, direction)));
                 }
             }
@@ -137,6 +145,15 @@ public static class TargetPicking
         return count;
     }
 
+    private static Vector3 Half(in PickHull hull, int block, float stretch)
+    {
+        var half = hull.HalfExtents?[block] ?? new Vector3(hull.BlockSize * 0.5f);
+        half.Z *= stretch;
+        return half;
+    }
+
+    private static BlockShape Shape(in PickHull hull, int block) => hull.Shapes?[block] ?? BlockShape.Box;
+
     private static bool NearPoint(Vector3 ray, Vector3 point, Vector3 forward, float focal)
     {
         var depth = Vector3.Dot(point, forward);
@@ -161,12 +178,13 @@ public static class TargetPicking
         float start, Vector3 cut, float cutAt, in Shown shown)
     {
         var nearest = float.PositiveInfinity;
+        var mask = hull.Mask.Span;
         for (var b = 0; b < hull.Blocks.Length; b++)
         {
-            if ((hull.Mask & (1UL << b)) == 0) continue;
+            if (!BlockSet.Has(mask, b)) continue;
             var block = hull.Blocks[b];
             block.Z *= stretch;
-            nearest = Faces(block - origin, direction, half, hull.Faces?[b] ?? AllFaces, cut, cutAt, start, nearest, shown);
+            nearest = Faces(block - origin, direction, Half(hull, b, stretch), Shape(hull, b), hull.Faces?[b] ?? AllFaces, cut, cutAt, start, nearest, shown);
         }
         return nearest;
     }
@@ -214,15 +232,16 @@ public static class TargetPicking
         }
         return float.PositiveInfinity;
     }
-    private static readonly Vector3[] Axes = [Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ];
 
     /// <summary>
     /// The nearest of <paramref name="nearest"/> and the drawn faces of a block, centred at <paramref name="block"/>
     /// from the camera, that the ray meets from <paramref name="start"/> on, on the drawn side of the cut. A face is
     /// only met from its outside, which is the side it is drawn from.
     /// </summary>
-    private static float Faces(Vector3 block, Vector3 ray, Vector3 half, int faces, Vector3 cut, float cutAt, float start, float nearest, in Shown shown)
+    private static float Faces(Vector3 block, Vector3 ray, Vector3 half, BlockShape shape, int faces, Vector3 cut, float cutAt, float start, float nearest, in Shown shown)
     {
+        if (shape != BlockShape.Box)
+            return WedgeFaces(block, ray, half, shape, faces, cut, cutAt, start, nearest, shown);
         for (var side = 0; side < 6; side++)
         {
             var axis = side >> 1;
@@ -240,32 +259,70 @@ public static class TargetPicking
     }
 
     /// <summary>
+    /// As <see cref="Faces"/> for a wedge: its rectangles, triangles and slant, each a convex polygon met from its
+    /// outside within its edges. A ray through the empty half of the box meets none of them.
+    /// </summary>
+    private static float WedgeFaces(Vector3 block, Vector3 ray, Vector3 half, BlockShape shape, int faces, Vector3 cut, float cutAt, float start, float nearest, in Shown shown)
+    {
+        Span<int> corners = stackalloc int[4];
+        Span<Vector3> polygon = stackalloc Vector3[4];
+        for (var side = 0; side < 6; side++)
+        {
+            if ((faces & 1 << side) == 0) continue;
+            var count = BlockShapes.Face(shape, side, corners);
+            if (count == 0) continue;
+            var normal = BlockShapes.FaceNormal(shape, half, side);
+            var facing = Vector3.Dot(normal, ray);
+            if (facing >= 0) continue;
+            for (var i = 0; i < count; i++)
+                polygon[i] = block + BlockShapes.Corner(corners[i], half);
+            var t = Vector3.Dot(normal, polygon[0]) / facing;
+            if (t < start || t >= nearest) continue;
+            var point = ray * t;
+            if (Inside(polygon[..count], normal, point) && Vector3.Dot(point, cut) <= cutAt && shown.At(point))
+                nearest = t;
+        }
+        return nearest;
+    }
+
+    /// <summary>Whether a point on a convex polygon's plane is within it; the corners run counter-clockwise about the normal.</summary>
+    private static bool Inside(ReadOnlySpan<Vector3> polygon, Vector3 normal, Vector3 point)
+    {
+        for (var i = 0; i < polygon.Length; i++)
+        {
+            var a = polygon[i];
+            var edge = polygon[(i + 1) % polygon.Length] - a;
+            // A small allowance, scaled to the edge, keeps the seam between two faces from letting a ray through.
+            if (Vector3.Dot(Vector3.Cross(edge, point - a), normal) < -1e-5f * edge.LengthSquared())
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>
     /// Whether the pointer is within the grab of a block's drawn faces turned to the camera, each less what is past
     /// the cut and nearer than the near plane. Both planes can cut a face, so each is clipped as a polygon and its
     /// corners need not be the box's.
     /// </summary>
-    private static bool NearFaces(Vector3 pointer, Vector3 forward, float focal, Vector3 block, Vector3 half, int faces,
+    private static bool NearFaces(Vector3 pointer, Vector3 forward, float focal, Vector3 block, Vector3 half, BlockShape shape, int faces,
         Vector3 cut, float cutAt, float nearPlane)
     {
         var squared = GrabPixels * GrabPixels / (focal * focal);
-        // A quad clipped by two planes keeps at most six corners.
+        // A quad clipped by two planes keeps at most six corners; a triangle five.
         Span<Vector3> face = stackalloc Vector3[8];
         Span<Vector3> clipped = stackalloc Vector3[8];
+        Span<int> corners = stackalloc int[4];
         for (var side = 0; side < 6; side++)
         {
-            var axis = side >> 1;
-            var sign = (side & 1) == 0 ? 1f : -1f;
-            var plane = block[axis] + sign * half[axis];
+            if ((faces & 1 << side) == 0) continue;
+            // The face's own corners: a box's rectangle, or a wedge's rectangle, triangle or slant.
+            var sides = BlockShapes.Face(shape, side, corners);
+            if (sides == 0) continue;
+            for (var i = 0; i < sides; i++)
+                face[i] = block + BlockShapes.Corner(corners[i], half);
             // The camera must be outside the face's plane to see it; the renderer culls it otherwise.
-            if ((faces & 1 << side) == 0 || plane * sign >= 0) continue;
-            var middle = block + Axes[axis] * (sign * half[axis]);
-            var u = Axes[(axis + 1) % 3] * half[(axis + 1) % 3];
-            var v = Axes[(axis + 2) % 3] * half[(axis + 2) % 3];
-            face[0] = middle - u - v;
-            face[1] = middle + u - v;
-            face[2] = middle + u + v;
-            face[3] = middle - u + v;
-            var count = Keep(face[..4], clipped, forward, nearPlane);
+            if (Vector3.Dot(BlockShapes.FaceNormal(shape, half, side), face[0]) >= 0) continue;
+            var count = Keep(face[..sides], clipped, forward, nearPlane);
             count = Keep(clipped[..count], face, -cut, -cutAt);
             // The pointer is on no drawn face, so its nearest point on one is on the edge of what is left of it.
             for (var i = 0; i < count; i++)

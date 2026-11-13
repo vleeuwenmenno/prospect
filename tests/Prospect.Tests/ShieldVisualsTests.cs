@@ -10,58 +10,76 @@ using Xunit;
 namespace Prospect.Tests;
 
 /// <summary>
-/// The shield's shell, built from whatever blocks a hull has: closed, a margin off the blocks all round, wound to
-/// face out, and within its vertex budget for every design a live hull can have.
+/// The shield's shell for unit-cell and shipped designs, built by the smooth builder every design shares: wound to
+/// face out, closed edge for edge, every block inside it and every triangle's interior clear of the blocks, whole or
+/// damaged; round where the old square shell had corners; and losing a block changes the shell without opening it.
+/// The square fallback this class once checked is gone: a damaged hull whose own shell would not fit keeps its intact
+/// one (see <see cref="SmoothShieldTests"/>).
 /// </summary>
 public sealed class ShieldShellTests
 {
     private static readonly GameContent Content = GameContent.Load();
+    private static readonly BlockCatalog Catalog = BlockCatalog.Load(AppPaths.Content("blocks", "blocks.json"));
+    private static readonly HullDesign Cube2 = Grid(2);
+    private static readonly HullDesign Cube3 = Grid(3);
 
-    private static Vector3 P(in MeshVertex v) => new(v.Position.X, v.Position.Y, v.Position.Z);
-
-    private static Vector3 N(in MeshVertex v) => new(v.Normal.X, v.Normal.Y, v.Normal.Z);
-
-    private static MeshVertex[] Shell(HullDesign design, ulong alive)
+    /// <summary>A design with blocks at these cells, two metres a block; the first five are the parts a hull needs to fly.</summary>
+    private static HullDesign Design(IReadOnlyList<(int X, int Y, int Z)> cells)
     {
-        var vertices = new MeshVertex[ShieldShell.MaxVertices];
-        var count = ShieldShell.Build(design, alive, vertices);
-        Assert.Equal(0, count % 3);
-        return vertices[..count];
-    }
-
-    /// <summary>How far a point is outside a block's cube; zero inside it.</summary>
-    private static float OutsideBlock(HullDesign design, int block, Vector3 point)
-    {
-        var d = Vector3.Abs(point - design.BlockOffsets[block]) - new Vector3(design.BlockSize * 0.5f);
-        return Vector3.Max(d, Vector3.Zero).Length();
-    }
-
-    /// <summary>How many triangles a ray from <paramref name="origin"/> along <paramref name="direction"/> crosses.</summary>
-    private static int Crossings(ReadOnlySpan<MeshVertex> shell, Vector3 origin, Vector3 direction)
-    {
-        var crossings = 0;
-        for (var i = 0; i < shell.Length; i += 3)
+        var dir = Path.Combine(Path.GetTempPath(), $"prospect-shell-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
         {
-            var a = P(shell[i]);
-            var e1 = P(shell[i + 1]) - a;
-            var e2 = P(shell[i + 2]) - a;
-            var p = Vector3.Cross(direction, e2);
-            var det = Vector3.Dot(e1, p);
-            if (MathF.Abs(det) < 1e-9f)
-                continue;
-            var t0 = origin - a;
-            var u = Vector3.Dot(t0, p) / det;
-            if (u < 0 || u > 1)
-                continue;
-            var q = Vector3.Cross(t0, e1);
-            var v = Vector3.Dot(direction, q) / det;
-            if (v < 0 || u + v > 1)
-                continue;
-            if (Vector3.Dot(e2, q) / det > 0)
-                crossings++;
+            var blocks = new List<string>();
+            for (var i = 0; i < cells.Count; i++)
+            {
+                var type = i switch { 0 => "core", 1 => "shield", 2 => "thruster", 3 => "gyro", 4 => "generator", _ => "hull" };
+                blocks.Add($"{{ \"at\": [{cells[i].X}, {cells[i].Y}, {cells[i].Z}], \"type\": \"{type}\" }}");
+            }
+
+            var path = Path.Combine(dir, "test.json");
+            File.WriteAllText(path, $"{{ \"name\": \"T\", \"class\": \"ship\", \"blockSize\": 2.0, \"color\": [0.5, 0.5, 0.5], \"blocks\": [{string.Join(",", blocks)}] }}");
+            return HullDesign.Load(path, Catalog, Catalog.Rules);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    private static HullDesign Grid(int n)
+    {
+        var cells = new List<(int, int, int)>();
+        for (var i = 0; i < n * n * n; i++)
+            cells.Add((i % n, i / n % n, i / (n * n)));
+        return Design(cells);
+    }
+
+    /// <summary>Sixty-four blocks: a 4 x 4 x 4 cube, a line, touching only at edges, or only at corners.</summary>
+    private static HullDesign Sixty(string shape)
+    {
+        var cells = new List<(int, int, int)>();
+        for (var i = 0; i < 64; i++)
+        {
+            cells.Add(shape switch
+            {
+                "cube" => (i % 4, i / 4 % 4, i / 16),
+                "line" => (0, 0, i),
+                "staircase" => (i / 2, (i + 1) / 2, 0),
+                "diagonal" => (i, i, i),
+                // Every other cell of an 8 x 8 x 2 slab.
+                _ => (i % 8, i / 8 % 4 * 2 + (i % 8 + i / 32) % 2, i / 32),
+            });
         }
 
-        return crossings;
+        return Design(cells);
+    }
+
+    private static ShellVertex[] Shell(HullDesign design, ulong alive)
+    {
+        var shell = SmoothShieldTests.Triangles(design, [alive], design.ShellShape);
+        Assert.True(shell is not null, "the shell does not fit");
+        return shell!;
     }
 
     public static TheoryData<int> Designs()
@@ -74,131 +92,108 @@ public sealed class ShieldShellTests
 
     [Theory]
     [MemberData(nameof(Designs))]
-    public void EveryDesignWholeOrDamagedGetsAClosedShellAMarginOffItsBlocks(int index)
+    public void EveryDesignWholeOrDamagedGetsAClosedShellClearOfItsBlocks(int index)
     {
         var design = Content.Designs[index];
+        Assert.False(design.IntactShell.IsEmpty);
+        SmoothShieldTests.Holds(design, design.FullSet, SmoothShieldTests.Intact(design));
         var random = new Random(index * 31 + 7);
-        var masks = new List<ulong> { design.FullMask };
         for (var i = 0; i < 6; i++)
-            masks.Add(design.FullMask & ((ulong)random.NextInt64() | (ulong)random.NextInt64() << 1));
-
-        foreach (var alive in masks)
         {
-            if (alive == 0)
-                continue;
-            var shell = Shell(design, alive);
-            var margin = design.BlockSize * ShieldShell.Margin;
-            for (var i = 0; i < shell.Length; i += 3)
-            {
-                // Wound counter-clockwise from outside, like the hull's own mesh, so back faces are culled.
-                var a = P(shell[i]);
-                var winding = Vector3.Cross(P(shell[i + 1]) - a, P(shell[i + 2]) - a);
-                Assert.True(Vector3.Dot(winding, N(shell[i])) > 0f);
-
-                // Every corner stands at least the margin off every block it has, and close to the nearest.
-                for (var k = 0; k < 3; k++)
-                {
-                    var nearest = float.MaxValue;
-                    for (var b = 0; b < design.BlockOffsets.Length; b++)
-                    {
-                        if ((alive & 1UL << b) == 0)
-                            continue;
-                        var outside = OutsideBlock(design, b, P(shell[i + k]));
-                        Assert.True(outside >= margin - 1e-3f, $"a shell corner is {outside} m off a block {b} at {P(shell[i + k])} normal {N(shell[i])} block {design.BlockOffsets[b]} size {design.BlockSize} mask {alive:X}");
-                        nearest = Math.Min(nearest, outside);
-                    }
-
-                    Assert.True(nearest <= margin * MathF.Sqrt(3f) + 1e-3f, $"a shell corner is {nearest} m from the hull");
-                }
-            }
-
-            // Closed: a ray out of any block it has crosses the shell an odd number of times, whichever way.
-            for (var b = 0; b < design.BlockOffsets.Length; b++)
-            {
-                if ((alive & 1UL << b) == 0)
-                    continue;
-                for (var r = 0; r < 24; r++)
-                {
-                    var direction = Vector3.Normalize(new Vector3(random.NextSingle() - 0.5f, random.NextSingle() - 0.5f, random.NextSingle() - 0.5f));
-                    var crossings = Crossings(shell, design.BlockOffsets[b], direction);
-                    Assert.True(crossings % 2 == 1, $"{crossings} crossings from block {b} {design.Cells[b]} along {direction} with blocks {alive:X}");
-                }
-            }
+            var alive = design.FullMask() & ((ulong)random.NextInt64() | (ulong)random.NextInt64() << 1);
+            if (alive != 0)
+                SmoothShieldTests.Holds(design, [alive], Shell(design, alive));
         }
     }
 
     [Fact]
-    public void OneBlockIsACubeTheMarginBiggerAllRound()
+    public void EveryArrangementOfTwoByTwoByTwoBlocksHolds()
     {
-        var design = Content.Pod;
-        var shell = Shell(design, 1UL);
-        Assert.Equal(36, shell.Length);
-        var reach = design.BlockSize * (0.5f + ShieldShell.Margin);
-        foreach (var vertex in shell)
-        {
-            var local = Vector3.Abs(P(vertex) - design.BlockOffsets[0]);
-            Assert.Equal(reach, Math.Max(local.X, Math.Max(local.Y, local.Z)), 4);
-            Assert.Equal(reach, local.X, 4);
-            Assert.Equal(reach, local.Y, 4);
-            Assert.Equal(reach, local.Z, 4);
-        }
+        // Blocks touching along an edge or only at a corner, with and without the blocks between.
+        for (ulong alive = 1; alive < 256; alive++)
+            SmoothShieldTests.Holds(Cube2, [alive], Shell(Cube2, alive));
     }
 
     [Fact]
-    public void LosingABlockOpensNoHoleAndShrinksTheShell()
+    public void RandomArrangementsOfThreeByThreeByThreeBlocksHold()
     {
-        var design = Content.Pod;
-        var whole = Shell(design, design.FullMask);
-        var emitter = Array.FindIndex(design.Types, t => t.Shield > 0);
-        var damaged = Shell(design, design.FullMask & ~(1UL << emitter));
-        Assert.True(damaged.Length < whole.Length);
-
-        // Where the lost block was is now outside the shell: a ray from there crosses it an even number of times.
-        var direction = Vector3.Normalize(new Vector3(1f, 0.013f, 0.007f));
-        Assert.Equal(0, Crossings(damaged, design.BlockOffsets[emitter], direction) % 2);
-        Assert.Equal(1, Crossings(whole, design.BlockOffsets[emitter], direction) % 2);
+        var random = new Random(13);
+        for (var i = 0; i < 40; i++)
+        {
+            var alive = Cube3.FullMask() & (ulong)random.NextInt64();
+            if (alive != 0)
+                SmoothShieldTests.Holds(Cube3, [alive], Shell(Cube3, alive));
+        }
     }
 
     [Theory]
     [InlineData("cube")]
     [InlineData("line")]
+    [InlineData("staircase")]
     [InlineData("checker")]
-    public void SixtyFourBlocksFitTheBudget(string shape)
+    [InlineData("diagonal")]
+    public void SixtyFourBlocksHold(string shape)
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"prospect-shell-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
-        try
-        {
-            var blocks = new List<string>();
-            for (var i = 0; i < HullDesign.MaxBlocks; i++)
-            {
-                var at = shape switch
-                {
-                    "cube" => (i % 4, i / 4 % 4, i / 16),
-                    "line" => (0, 0, i),
-                    // Blocks touching only at edges: every other cell of a 8 x 8 x 2 slab.
-                    _ => (i % 8, i / 8 % 4 * 2 + (i % 8 + i / 32) % 2, i / 32),
-                };
-                blocks.Add($"{{ \"at\": [{at.Item1}, {at.Item2}, {at.Item3}], \"type\": \"{i switch { 0 => "core", 1 => "shield", 2 => "thruster", 3 => "gyro", 4 => "generator", _ => "hull" }}\" }}");
-            }
+        var design = Sixty(shape);
+        SmoothShieldTests.Holds(design, design.FullSet, SmoothShieldTests.Intact(design));
+    }
 
-            var path = Path.Combine(dir, "test.json");
-            File.WriteAllText(path, $"{{ \"name\": \"T\", \"class\": \"ship\", \"blockSize\": 2.0, \"color\": [0.5, 0.5, 0.5], \"blocks\": [{string.Join(",", blocks)}] }}");
-            var catalog = BlockCatalog.Load(AppPaths.Content("blocks", "blocks.json"));
-            var design = HullDesign.Load(path, catalog, catalog.Rules);
-            var shell = Shell(design, design.FullMask);
-            Assert.InRange(shell.Length, 36, ShieldShell.MaxVertices);
-            var random = new Random(5);
-            for (var r = 0; r < 16; r++)
-            {
-                var direction = Vector3.Normalize(new Vector3(random.NextSingle() - 0.5f, random.NextSingle() - 0.5f, random.NextSingle() - 0.5f));
-                Assert.Equal(1, Crossings(shell, design.BlockOffsets[r * 3], direction) % 2);
-            }
-        }
-        finally
+    [Fact]
+    public void ARoundShellLosesTheCubesCornersAndKeepsItsFaces()
+    {
+        // One cube: straight out of a face's middle the shell is the margin off, as a square one was; out of a
+        // corner it is about the margin off too, where a square shell's corner was √3 times that.
+        var design = HullDesign.Of(new BoxDesign("cube", 2f, [new DesignBox(default, new GridSize(1, 1, 1), Catalog.Get("core"))], Catalog.Limits, "cube"), Catalog.Rules);
+        var shell = Shell(design, 1UL);
+        var half = design.BlockSize * 0.5f;
+        var margin = design.BlockSize * GeometryAdmission.Margin;
+        // Rays start a hair off the vertices a fan or a run shares, so a hit is never lost on an edge.
+        var nudge = new Vector3(0.0013f, 0.0007f, 0.0011f);
+        Assert.Equal(margin, Hit(shell, new Vector3(half, 0, 0) + nudge, Vector3.UnitX), 2);
+        var corner = Hit(shell, new Vector3(half) + nudge, Vector3.Normalize(Vector3.One));
+        Assert.InRange(corner, margin * 0.85f, margin * 1.3f);
+        Assert.True(corner < margin * MathF.Sqrt(3) * 0.8f, $"the corner is {corner} out, as a square shell's would be");
+        var edge = Hit(shell, new Vector3(half, half, 0) + nudge, Vector3.Normalize(new Vector3(1, 1, 0)));
+        Assert.True(edge < margin * MathF.Sqrt(2) * 0.85f, $"the edge is {edge} out, as a square shell's would be");
+    }
+
+    /// <summary>How far along a ray from a point the shell is first met.</summary>
+    private static float Hit(ReadOnlySpan<ShellVertex> shell, Vector3 from, Vector3 direction)
+    {
+        var best = float.MaxValue;
+        for (var i = 0; i < shell.Length; i += 3)
         {
-            Directory.Delete(dir, true);
+            var a = shell[i].Position;
+            var e1 = shell[i + 1].Position - a;
+            var e2 = shell[i + 2].Position - a;
+            var p = Vector3.Cross(direction, e2);
+            var det = Vector3.Dot(e1, p);
+            if (MathF.Abs(det) < 1e-12f) continue;
+            var t0 = from - a;
+            var u = Vector3.Dot(t0, p) / det;
+            var q = Vector3.Cross(t0, e1);
+            var v = Vector3.Dot(direction, q) / det;
+            if (u < 0 || v < 0 || u + v > 1) continue;
+            var t = Vector3.Dot(e2, q) / det;
+            if (t > 0) best = Math.Min(best, t);
         }
+        return best;
+    }
+
+    [Fact]
+    public void LosingABlockChangesTheShellAndOpensNoHole()
+    {
+        // Where the lost block was need not be outside: a gap of a block or so is closed over on purpose.
+        var design = Content.Pod;
+        var emitter = Array.FindIndex(design.Types, t => t.Shield > 0);
+        var damaged = design.FullMask() & ~(1UL << emitter);
+        var shell = Shell(design, damaged);
+        SmoothShieldTests.Holds(design, [damaged], shell);
+        var intact = SmoothShieldTests.Intact(design);
+        var same = intact.Length == shell.Length;
+        for (var i = 0; same && i < shell.Length; i++)
+            same = intact[i].Position == shell[i].Position;
+        Assert.False(same, "losing the emitter should change the shell");
     }
 }
 
@@ -218,13 +213,15 @@ public sealed class ShieldVisualsTests
     private readonly ShieldDraw[] _draws = new ShieldDraw[ShieldVisuals.MaxShields];
     private readonly ShieldInstance[] _instances = new ShieldInstance[ShieldVisuals.MaxShields];
     private readonly MeshVertex[] _vertices = new MeshVertex[ShieldVisuals.MaxVertices];
+    private readonly ushort[] _indices = new ushort[ShieldVisuals.MaxIndices];
 
     private static HullView Hull(uint id, float shield = 1500f, bool offline = false, ulong? blocks = null, float changeAge = 0f) =>
         new()
         {
             Id = id,
             Design = (byte)Content.PodDesign,
-            Blocks = blocks ?? Pod.FullMask,
+            Blocks = BlockMasks.Set(blocks ?? Pod.FullMask()),
+            Stats = Pod.StatsOf([blocks ?? Pod.FullMask()]),
             Orientation = Quaternion.Identity,
             Shield = shield,
             ShieldOffline = offline,
@@ -264,7 +261,7 @@ public sealed class ShieldVisualsTests
         _shields.Update(hulls, Content.Designs, _publication, dt);
         _shields.Begin(_draws);
         foreach (var hull in hulls)
-            _shields.Add(hull.Id, new Vector3(1, 2, 3), Quaternion.Identity, 1f, 1f, _instances, _vertices);
+            _shields.Add(hull.Id, new Vector3(1, 2, 3), Quaternion.Identity, 1f, 1f, _instances, _vertices, _indices);
         return _shields.Draws.Length > 0 ? _instances[0] : null;
     }
 
@@ -310,7 +307,7 @@ public sealed class ShieldVisualsTests
         foreach (var hull in hulls)
         {
             _shields.Begin(_draws);
-            _shields.Add(hull.Id, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices);
+            _shields.Add(hull.Id, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices, _indices);
             Assert.Equal(1, _shields.Draws.Length);
         }
     }
@@ -325,9 +322,9 @@ public sealed class ShieldVisualsTests
 
         // The emitter is gone: no shield, no shell, and nothing pretends to shut down.
         var bare = new ShieldVisuals(Look);
-        bare.Update([Hull(2, 0f, blocks: Pod.FullMask & ~(1UL << Emitter))], Content.Designs, 1, Dt);
+        bare.Update([Hull(2, 0f, blocks: Pod.FullMask() & ~(1UL << Emitter))], Content.Designs, 1, Dt);
         bare.Begin(_draws);
-        bare.Add(2, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices);
+        bare.Add(2, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices, _indices);
         Assert.Equal(0, bare.Draws.Length);
     }
 
@@ -378,7 +375,7 @@ public sealed class ShieldVisualsTests
     public void LosingTheLastEmitterWhileOnlineCollapsesTheShieldOnce()
     {
         Frame(Hull(1));
-        var lost = Pod.FullMask & ~(1UL << Emitter);
+        var lost = Pod.FullMask() & ~(1UL << Emitter);
         Assert.True(Frame(Hull(1, 0f, blocks: lost))!.Value.Params.Z > 0f);
         for (var i = 1; i <= 60; i++)
             Frame(Hull(1, 0f, blocks: lost, changeAge: i * Dt));
@@ -438,21 +435,61 @@ public sealed class ShieldVisualsTests
         _shields.Update([Hull(1)], Content.Designs, 1, Dt);
         _shields.Begin(_draws);
         var material = 1f + 4f * (5 + 1);
-        _shields.Add(1, Vector3.Zero, Quaternion.Identity, 3f, material, _instances, _vertices);
+        _shields.Add(1, Vector3.Zero, Quaternion.Identity, 3f, material, _instances, _vertices, _indices);
         var drawn = _instances[0];
         Assert.Equal(material, drawn.Params.W);
         Assert.Equal(3f, drawn.Row2.Z, 4);
         Assert.Equal(1f, drawn.Row0.X, 4);
 
-        // Its vertices are the shell of the blocks it has.
-        var shell = new MeshVertex[ShieldShell.MaxVertices];
-        var count = ShieldShell.Build(Pod, Pod.FullMask, shell);
-        Assert.Equal(count, _shields.Draws[0].VertexCount);
+        // Its vertices are the intact shell its design was admitted with.
+        var shell = Pod.IntactShell.Span;
+        Assert.True(shell.Length > 0);
+        Assert.Equal(shell.Length, _shields.Draws[0].VertexCount);
+        Assert.True(Pod.IntactIndices.Span.SequenceEqual(_indices.AsSpan(_shields.Draws[0].FirstIndex, _shields.Draws[0].IndexCount)));
         Assert.Equal(shell[5].Position.Y, _vertices[_shields.Draws[0].FirstVertex + 5].Position.Y);
 
         // A hull not in the snapshot this frame adds nothing.
-        _shields.Add(99, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices);
+        _shields.Add(99, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices, _indices);
         Assert.Equal(1, _shields.Draws.Length);
+    }
+
+    [Fact]
+    public void HullsThatLostAsManyBlocksButNotTheSameOnesEachGetTheirOwnShell()
+    {
+        // Two blocks whose loss leaves shells of different sizes, neither of them the emitter.
+        int Size(ulong mask) => SmoothShieldTests.Count(Pod, [mask], Pod.ShellShape, out _);
+        var first = -1;
+        var second = -1;
+        for (var b = 1; b < Pod.Cells.Length && second < 0; b++)
+        {
+            if (b == Emitter)
+                continue;
+            if (first < 0)
+                first = b;
+            else if (Size(Pod.FullMask() & ~(1UL << b)) != Size(Pod.FullMask() & ~(1UL << first)))
+                second = b;
+        }
+
+        Assert.True(second > 0);
+        var lostFirst = Pod.FullMask() & ~(1UL << first);
+        var lostSecond = Pod.FullMask() & ~(1UL << second);
+
+        // The same revision, one block lost each: the blocks themselves tell the shells apart.
+        var a = Hull(1, blocks: lostFirst) with { Revision = 1 };
+        var b2 = Hull(2, blocks: lostSecond) with { Revision = 1 };
+        Frame(a, b2);
+        Assert.Equal(Size(lostFirst), _shields.Draws[0].VertexCount);
+        Assert.Equal(Size(lostSecond), _shields.Draws[1].VertexCount);
+
+        // A view's blocks live in its snapshot's memory, which is used again: the shell keeps its own copy, so
+        // memory that now reads other blocks is not taken for the old ones.
+        var words = new[] { lostFirst };
+        Frame(Hull(3, blocks: lostFirst) with { Revision = 1, Blocks = words });
+        Assert.Equal(Size(lostFirst), _shields.Draws[0].VertexCount);
+        words[0] = lostSecond;
+        Frame(Hull(4, blocks: lostSecond) with { Revision = 1, Blocks = words }, Hull(5, blocks: lostFirst) with { Revision = 1 });
+        Assert.Equal(Size(lostSecond), _shields.Draws[0].VertexCount);
+        Assert.Equal(Size(lostFirst), _shields.Draws[1].VertexCount);
     }
 
     [Fact]
@@ -472,11 +509,370 @@ public sealed class ShieldVisualsTests
     }
 
     [Fact]
+    public void HalfChargeAlreadyShowsStrainAndLightContactsHaveAVisibleFloor()
+    {
+        var capacity = Pod.Flight.ShieldCapacity;
+        Assert.Equal(0f, Frame(Hull(1, capacity))!.Value.Params.Y);
+        var early = Frame(Hull(1, capacity * 0.7f))!.Value.Params.Y;
+        var half = Frame(Hull(1, capacity * 0.5f))!.Value.Params.Y;
+        var low = Frame(Hull(1, capacity * 0.2f))!.Value.Params.Y;
+        Assert.InRange(early, 0.01f, 0.2f);
+        Assert.InRange(half, 0.3f, 0.7f);
+        Assert.True(low > half);
+        var hit = Hull(2);
+        hit.ShieldHit = new ShieldHit { Serial = 1, Strength = 1 };
+        var drawn = Frame(hit)!.Value;
+        Assert.InRange(drawn.Strengths.X, 0.6f, 1f);
+        Assert.Equal(Look.ImpactRadius, Look.Constants.Impact.X);
+        Assert.Equal(Look.ImpactSeconds, Look.Constants.Impact.Y);
+        Assert.Equal(Look.ImpactGlow, Look.Constants.Impact.Z);
+        Assert.Equal(Look.RippleGlow, Look.Constants.Ripple.W);
+    }
+
+    [Fact]
+    public void AShieldChargingUpShiversAndSettlesOnceFull()
+    {
+        var capacity = Pod.Flight.ShieldCapacity;
+        Assert.Equal(0f, Frame(Hull(1, capacity * 0.5f))!.Value.Recovery.Y);
+
+        // One rise is not yet a recharge; a second running is.
+        Assert.Equal(0f, Frame(Hull(1, capacity * 0.51f))!.Value.Recovery.Y);
+        var charging = Frame(Hull(1, capacity * 0.52f))!.Value;
+        Assert.Equal(1f, charging.Recovery.Y);
+        Assert.Equal(Look.RecoveryHz, charging.Recovery.Z);
+        var strain = Look.RecoveryWobble * Pod.BlockSize / Pod.Flight.Radius;
+        Assert.Equal(strain, charging.Recovery.X, 5);
+
+        // As a remote hull's charge reads, new only every third publication: it keeps shivering between.
+        var charge = capacity * 0.52f;
+        for (var i = 0; i < 30; i++)
+        {
+            if (i % 3 == 0)
+                charge += capacity * 0.01f;
+            Assert.True(Frame(Hull(1, charge))!.Value.Recovery.Y > 0.9f);
+        }
+
+        // Full: it settles over the settle time, smoothly, and stays settled.
+        var previous = 1f;
+        var frames = 0;
+        float level;
+        do
+        {
+            level = Frame(Hull(1, capacity))!.Value.Recovery.Y;
+            Assert.True(level <= previous && previous - level < 0.1f, $"{previous} to {level}");
+            previous = level;
+            frames++;
+        }
+        while (level > 0f);
+        Assert.InRange(frames * Dt, Look.RecoverySettleSeconds - 2 * Dt, Look.RecoverySettleSeconds + 3 * Dt);
+        for (var i = 0; i < 30; i++)
+            Assert.Equal(0f, Frame(Hull(1, capacity))!.Value.Recovery.X);
+    }
+
+    [Theory]
+    [InlineData("waiting")]
+    [InlineData("hit")]
+    [InlineData("repeated")]
+    public void AChargeThatDoesNotRiseNeverShivers(string why)
+    {
+        var capacity = Pod.Flight.ShieldCapacity;
+        var charge = capacity * 0.4f;
+        for (var i = 0; i < 40; i++)
+        {
+            ShieldInstance drawn;
+            switch (why)
+            {
+                case "waiting":
+                    // Below full but waiting out its delay, or with no energy to charge with: the charge holds.
+                    drawn = Frame(Hull(1, charge))!.Value;
+                    break;
+                case "hit":
+                    // Each hit takes some away, and each rise after one is the first of its run.
+                    charge += i % 2 == 0 ? -capacity * 0.02f : capacity * 0.01f;
+                    drawn = Frame(Hull(1, charge))!.Value;
+                    break;
+                default:
+                    // One publication drawn again and again, however long.
+                    drawn = i == 0 ? Frame(Hull(1, charge))!.Value : Repeat(Dt, Hull(1, charge * (1f + i)))!.Value;
+                    break;
+            }
+
+            Assert.Equal(0f, drawn.Recovery.Y);
+            Assert.Equal(0f, drawn.Recovery.X);
+        }
+    }
+
+    [Fact]
+    public void ARestartShiversAsItFadesInAndOnWhileItChargesWhileOfflineNothingShows()
+    {
+        var capacity = Pod.Flight.ShieldCapacity;
+        Frame(Hull(1));
+        Frame(Hull(1, 0f, offline: true));
+
+        // Broken and charging back: once the collapse is over nothing is drawn, shivering or not.
+        var frames = 1;
+        while (Frame(Hull(1, frames * 4f, offline: true, changeAge: frames * Dt)) is not null)
+            frames++;
+        for (var i = 0; i < 20; i++, frames++)
+            Assert.Null(Frame(Hull(1, frames * 4f, offline: true, changeAge: frames * Dt)));
+
+        // Back online at the restart threshold: it fades in shivering, and goes on while the charge rises.
+        var charge = capacity * 0.25f;
+        for (var i = 1; i < 90; i++)
+        {
+            charge += 4f;
+            var drawn = Frame(Hull(1, charge, changeAge: i * Dt))!.Value;
+            Assert.True(drawn.Params.X > 0f);
+            Assert.Equal(1f, drawn.Recovery.Y);
+        }
+    }
+
+    [Fact]
+    public void CorrectionsNewOwnersAndCapacityChangesAreNotRecharges()
+    {
+        var capacity = Pod.Flight.ShieldCapacity;
+        var hull = Hull(1, capacity * 0.5f);
+        Frame(hull);
+        Frame(hull);
+
+        // A publication that goes back on the hull's timeline and reads more is a correction.
+        hull.Shield = capacity * 0.6f;
+        _shownTick -= 5;
+        Assert.Equal(0f, Frame(hull)!.Value.Recovery.Y);
+        hull.Shield = capacity * 0.61f;
+        Assert.Equal(0f, Frame(hull)!.Value.Recovery.Y);
+
+        // So is one that changes hands, onto the pilot's own timeline.
+        Frame(hull);
+        hull.IsOwn = true;
+        hull.Shield = capacity * 0.7f;
+        Assert.Equal(0f, Frame(hull)!.Value.Recovery.Y);
+        hull.Shield = capacity * 0.71f;
+        Assert.Equal(0f, Frame(hull)!.Value.Recovery.Y);
+
+        // And one at another capacity: a lost block that held no emitter keeps it, one that held an emitter not.
+        Frame(hull);
+        var other = Array.FindIndex(Pod.Types, t => t.Shield <= 0f && t != Pod.Types[0]);
+        hull.Blocks = BlockMasks.Set(Pod.FullMask() & ~(1UL << other));
+        hull.Shield = capacity * 0.72f;
+        Assert.Equal(1f, Frame(hull)!.Value.Recovery.Y);
+
+        // First sight while charging: two rises seen before it shivers.
+        var seen = Hull(2, capacity * 0.3f);
+        Assert.Equal(0f, Frame(seen)!.Value.Recovery.Y);
+        seen.Shield = capacity * 0.31f;
+        Assert.Equal(0f, Frame(seen)!.Value.Recovery.Y);
+        seen.Shield = capacity * 0.32f;
+        Assert.Equal(1f, Frame(seen)!.Value.Recovery.Y);
+    }
+
+    [Fact]
+    public void ACapacityChangeIsNotARecharge()
+    {
+        // Two emitters: losing one halves the capacity, and the charge it reads is no rise.
+        var design = TwoEmitters.Value;
+        HullView Two(float shield, ulong blocks) =>
+            new() { Id = 7, Design = 0, Blocks = BlockMasks.Set(blocks), Stats = design.StatsOf([blocks]), Orientation = Quaternion.Identity, Shield = shield };
+        HullDesign[] designs = [design];
+        var emitter = Array.FindIndex(design.Types, t => t.Shield > 0f);
+        var capacity = design.Flight.ShieldCapacity;
+        ShieldInstance Draw(HullView hull)
+        {
+            _publication += 977;
+            _shownTick += 1;
+            hull.ShownTick = _shownTick;
+            _shields.Update([hull], designs, _publication, Dt);
+            _shields.Begin(_draws);
+            _shields.Add(hull.Id, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices, _indices);
+            return _instances[0];
+        }
+
+        Draw(Two(capacity * 0.3f, design.FullMask()));
+        Draw(Two(capacity * 0.31f, design.FullMask()));
+        var damaged = design.FullMask() & ~(1UL << emitter);
+        Assert.Equal(0f, Draw(Two(capacity * 0.4f, damaged)).Recovery.Y);
+        Assert.Equal(0f, Draw(Two(capacity * 0.41f, damaged)).Recovery.Y);
+        Assert.Equal(1f, Draw(Two(capacity * 0.42f, damaged)).Recovery.Y);
+    }
+
+    /// <summary>Charges the hull up until it shivers fully, and returns the charge it reached.</summary>
+    private float Shivering(ref HullView hull)
+    {
+        var capacity = Pod.Flight.ShieldCapacity;
+        for (var i = 0; i < 3; i++)
+        {
+            hull.Shield += capacity * 0.01f;
+            Frame(hull);
+        }
+
+        hull.Shield += capacity * 0.01f;
+        Assert.Equal(1f, Frame(hull)!.Value.Recovery.Y);
+        return hull.Shield;
+    }
+
+    [Fact]
+    public void ACorrectionBackWhileShiveringTakesBackDrawnTimeOnlyAndItStillSettles()
+    {
+        var hull = Hull(1, Pod.Flight.ShieldCapacity * 0.4f);
+        Frame(hull);
+        Shivering(ref hull);
+
+        // The charge stops rising: it settles frame by frame.
+        var levels = new List<float>();
+        for (var i = 0; i < 12; i++)
+            levels.Add(Frame(hull)!.Value.Recovery.Y);
+        Assert.True(levels[^1] < levels[0] && levels[^1] > 0f);
+
+        // A correction takes six ticks back: the shiver is as it was six ticks ago, never more than full, and the
+        // charge it reads, higher or not, is no rise of its own.
+        _shownTick -= 7;
+        hull.Shield += 100f;
+        var back = Frame(hull)!.Value.Recovery.Y;
+        Assert.Equal(levels[^7], back, 3);
+        Assert.InRange(back, 0f, 1f);
+
+        // Drawn again and again, then published on: it settles within the settle time and stays settled.
+        var previous = back;
+        for (var i = 0; i < 4; i++)
+        {
+            var level = Repeat(Dt, hull)!.Value.Recovery.Y;
+            Assert.True(level <= previous);
+            previous = level;
+        }
+
+        var frames = 0;
+        while (Frame(hull)!.Value.Recovery.Y > 0f)
+        {
+            frames++;
+            Assert.True(frames * Dt <= Look.RecoverySettleSeconds, "it never settles");
+        }
+
+        for (var i = 0; i < 20; i++)
+            Assert.Equal(0f, Frame(hull)!.Value.Recovery.Y);
+    }
+
+    [Fact]
+    public void ANewOwnerOrCapacityWhileShiveringDoesNotRestartIt()
+    {
+        var capacity = Pod.Flight.ShieldCapacity;
+        var hull = Hull(1, capacity * 0.4f);
+        Frame(hull);
+        Shivering(ref hull);
+        var settling = Frame(hull)!.Value.Recovery.Y;
+
+        // Taken over, onto the pilot's own timeline, reading more: it goes on settling, not shivering afresh.
+        hull.IsOwn = true;
+        hull.Shield += capacity * 0.05f;
+        var taken = Frame(hull)!.Value.Recovery.Y;
+        Assert.True(taken < settling);
+
+        // One rise after is the first of a run; a second is charging again, which a forward correction would also
+        // read as, so it shivers.
+        hull.Shield += capacity * 0.01f;
+        Assert.True(Frame(hull)!.Value.Recovery.Y < taken);
+        hull.Shield += capacity * 0.01f;
+        Assert.Equal(1f, Frame(hull)!.Value.Recovery.Y);
+
+        // A lost block that held no emitter keeps the capacity and the run: losing the emitter is another matter
+        // (ACapacityChangeIsNotARecharge). Here the capacity holds and the next rise goes on shivering.
+        var other = Array.FindIndex(Pod.Types, t => t.Shield <= 0f && t != Pod.Types[0]);
+        hull.Blocks = BlockMasks.Set(Pod.FullMask() & ~(1UL << other));
+        hull.Shield += capacity * 0.01f;
+        Assert.Equal(1f, Frame(hull)!.Value.Recovery.Y);
+    }
+
+    [Fact]
+    public void ACapacityChangeWhileShiveringDoesNotRestartIt()
+    {
+        var design = TwoEmitters.Value;
+        HullDesign[] designs = [design];
+        var emitter = Array.FindIndex(design.Types, t => t.Shield > 0f);
+        var capacity = design.Flight.ShieldCapacity;
+        float Draw(float shield, ulong blocks)
+        {
+            _publication += 977;
+            _shownTick += 1;
+            var hull = new HullView { Id = 7, Design = 0, Blocks = BlockMasks.Set(blocks), Stats = design.StatsOf([blocks]), Orientation = Quaternion.Identity, Shield = shield, ShownTick = _shownTick };
+            _shields.Update([hull], designs, _publication, Dt);
+            _shields.Begin(_draws);
+            _shields.Add(hull.Id, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices, _indices);
+            return _instances[0].Recovery.Y;
+        }
+
+        for (var i = 0; i < 4; i++)
+            Draw(capacity * (0.3f + 0.01f * i), design.FullMask());
+        Assert.Equal(1f, Draw(capacity * 0.35f, design.FullMask()));
+        var settling = Draw(capacity * 0.35f, design.FullMask());
+        var damaged = design.FullMask() & ~(1UL << emitter);
+        var changed = Draw(capacity * 0.45f, damaged);
+        Assert.True(changed < settling);
+        Assert.True(Draw(capacity * 0.46f, damaged) < changed);
+    }
+
+    private static readonly Lazy<HullDesign> TwoEmitters = new(() =>
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"prospect-two-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var path = Path.Combine(dir, "two.json");
+            string[] types = ["core", "shield", "shield", "thruster", "gyro", "generator"];
+            var blocks = string.Join(",", types.Select((t, i) => $"{{ \"at\": [0, 0, {i}], \"type\": \"{t}\" }}"));
+            File.WriteAllText(path, $"{{ \"name\": \"Two\", \"class\": \"ship\", \"blockSize\": 2.0, \"color\": [0.5, 0.5, 0.5], \"blocks\": [{blocks}] }}");
+            var catalog = BlockCatalog.Load(AppPaths.Content("blocks", "blocks.json"));
+            return HullDesign.Load(path, catalog, catalog.Rules);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    });
+
+    [Fact]
+    public void EveryShellOfAFullSnapshotIsDrawnWhateverItsShape()
+    {
+        // Sixty-four hulls whose blocks touch only at their edges: each shell falls back to fit its room, none is
+        // left out and none is cut short.
+        var cells = new List<string>();
+        for (var i = 0; i < 64; i++)
+        {
+            var type = i switch { 0 => "core", 1 => "shield", 2 => "thruster", 3 => "gyro", 4 => "generator", _ => "hull" };
+            cells.Add($"{{ \"at\": [{i % 8}, {i / 8 % 4 * 2 + (i % 8 + i / 32) % 2}, {i / 32}], \"type\": \"{type}\" }}");
+        }
+
+        var dir = Path.Combine(Path.GetTempPath(), $"prospect-checker-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        HullDesign checker;
+        try
+        {
+            var path = Path.Combine(dir, "checker.json");
+            File.WriteAllText(path, $"{{ \"name\": \"C\", \"class\": \"ship\", \"blockSize\": 2.0, \"color\": [0.5, 0.5, 0.5], \"blocks\": [{string.Join(",", cells)}] }}");
+            var catalog = BlockCatalog.Load(AppPaths.Content("blocks", "blocks.json"));
+            checker = HullDesign.Load(path, catalog, catalog.Rules);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+
+        var hulls = new HullView[ShieldVisuals.MaxShields];
+        for (var i = 0; i < hulls.Length; i++)
+            hulls[i] = new HullView { Id = (uint)i + 1, Design = 0, Blocks = BlockMasks.Set(checker.FullMask() & ~(1UL << (5 + i % 50))), Stats = checker.StatsOf([checker.FullMask() & ~(1UL << (5 + i % 50))]), Orientation = Quaternion.Identity, Shield = 1f, ShownTick = 1 };
+        _shields.Update(hulls, [checker], 1, Dt);
+        _shields.Begin(_draws);
+        foreach (var hull in hulls)
+            _shields.Add(hull.Id, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices, _indices);
+        Assert.Equal(hulls.Length, _shields.Draws.Length);
+        foreach (var draw in _shields.Draws)
+            Assert.InRange(draw.VertexCount, 36, ShieldVisuals.ShellVertices);
+    }
+
+    [Fact]
     public void AFullFrameOfShieldsAllocatesNothingOnceWarm()
     {
         var hulls = new HullView[ShieldVisuals.MaxShields];
         for (var i = 0; i < hulls.Length; i++)
-            hulls[i] = Hull((uint)i + 1, 700f, blocks: Pod.FullMask & ~(1UL << (i % Pod.Cells.Length)));
+            hulls[i] = Hull((uint)i + 1, 700f, blocks: Pod.FullMask() & ~(1UL << (i % Pod.Cells.Length)));
         for (var warm = 0; warm < 3; warm++)
             Frame(hulls);
 
@@ -497,7 +893,7 @@ public sealed class ShieldVisualsTests
         var count = 0;
         foreach (var hull in hulls)
         {
-            Pod.Evaluate(hull.Blocks, out var flight, out _);
+            Pod.Evaluate(hull.Blocks.Span, out var flight, out _);
             if (flight.ShieldCapacity <= 0f)
                 count++;
         }
@@ -553,7 +949,7 @@ public sealed class ShieldVisualsTests
     public void LosingTheLastEmitterIsTimedLikeABreak()
     {
         Frame(Hull(1));
-        var lost = Pod.FullMask & ~(1UL << Emitter);
+        var lost = Pod.FullMask() & ~(1UL << Emitter);
         Assert.Equal(0f, Frame(Hull(1, 0f, blocks: lost, changeAge: -0.05f))!.Value.Params.Z);
         for (var i = 0; i < 3; i++)
             Frame(Hull(1, 0f, blocks: lost, changeAge: -0.05f + (i + 1) * Dt));
@@ -951,8 +1347,8 @@ public sealed class ShieldVisualsTests
         remote.ShownTick += 30;
         _shields.Update([own, remote], Content.Designs, 3, Dt);
         _shields.Begin(_draws);
-        _shields.Add(1, Vector3.Zero, Quaternion.Identity, 1f, 2f, _instances, _vertices);
-        _shields.Add(2, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices);
+        _shields.Add(1, Vector3.Zero, Quaternion.Identity, 1f, 2f, _instances, _vertices, _indices);
+        _shields.Add(2, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices, _indices);
         Assert.Equal(0.2f + Dt, RippleAge(_instances[0], 50), 3);
         Assert.Equal(0.2f + 30 * Dt, RippleAge(_instances[1], 50), 3);
 
@@ -963,8 +1359,8 @@ public sealed class ShieldVisualsTests
         remote.ShieldHitAge = -12 * Dt;
         _shields.Update([own, remote], Content.Designs, 4, Dt);
         _shields.Begin(_draws);
-        _shields.Add(1, Vector3.Zero, Quaternion.Identity, 1f, 2f, _instances, _vertices);
-        _shields.Add(2, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices);
+        _shields.Add(1, Vector3.Zero, Quaternion.Identity, 1f, 2f, _instances, _vertices, _indices);
+        _shields.Add(2, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices, _indices);
         Assert.Equal(0.2f + 2 * Dt, RippleAge(_instances[0], 50), 3);
         Assert.Equal(Dt, RippleAge(_instances[0], -50), 3);
         Assert.Equal(0.2f + 18 * Dt, RippleAge(_instances[1], 50), 3);
@@ -991,7 +1387,7 @@ public sealed class ShieldVisualsTests
         hull.ShieldHitAge = 0f;
         _shields.Update([hull], Content.Designs, 3, Dt);
         _shields.Begin(_draws);
-        _shields.Add(1, Vector3.Zero, Quaternion.Identity, 1f, 2f, _instances, _vertices);
+        _shields.Add(1, Vector3.Zero, Quaternion.Identity, 1f, 2f, _instances, _vertices, _indices);
         Assert.Equal(0.2f + Dt, RippleAge(_instances[0], 50), 3);
         Assert.Equal(0f, RippleAge(_instances[0], -50), 3);
 
@@ -1005,7 +1401,7 @@ public sealed class ShieldVisualsTests
         hull.ShieldHitAge = -0.05f;
         _shields.Update([hull], Content.Designs, 5, Dt);
         _shields.Begin(_draws);
-        _shields.Add(1, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices);
+        _shields.Add(1, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices, _indices);
         Assert.Equal(0.2f + 5 * Dt, RippleAge(_instances[0], 50), 3);
         Assert.Equal(4 * Dt, RippleAge(_instances[0], -50), 3);
         Assert.Equal(-0.05f, RippleAge(_instances[0], 20), 3);
@@ -1049,11 +1445,19 @@ public sealed class ShieldVisualsTests
 
     [Theory]
     [InlineData("\"collapseSeconds\": 0.7", "\"collapseSeconds\": 1.6")]
-    [InlineData("\"rippleSeconds\": 1.2", "\"rippleSeconds\": 0")]
-    [InlineData("\"unstableFull\": 0.08", "\"unstableFull\": 0.5")]
-    [InlineData("\"calmColor\": [0.16, 0.34, 0.42]", "\"calmColor\": [0.16, 0.34]")]
-    [InlineData("\"refractionPixels\": 2.2", "\"refractionPixels\": 9")]
-    [InlineData("\"rippleWidth\": 1.1", "\"rippleWidth\": -1")]
+    [InlineData("\"rippleSeconds\": 0.85", "\"rippleSeconds\": 0")]
+    [InlineData("\"unstableFull\": 0.08", "\"unstableFull\": 0.9")]
+    [InlineData("\"calmColor\": [0.32, 0.36, 0.35]", "\"calmColor\": [0.16, 0.34]")]
+    [InlineData("\"refractionPixels\": 1.2", "\"refractionPixels\": 9")]
+    [InlineData("\"rippleWidth\": 0.45", "\"rippleWidth\": -1")]
+    [InlineData("\"impactRadius\": 1.2", "\"impactRadius\": 0")]
+    [InlineData("\"impactSeconds\": 0.45", "\"impactSeconds\": 1.2")]
+    [InlineData("\"contactStrength\": 0.65", "\"contactStrength\": 2")]
+    [InlineData("\"recoveryWobble\": 0.008", "\"recoveryWobble\": 0.2")]
+    [InlineData("\"recoveryHz\": 2.5", "\"recoveryHz\": 0")]
+    [InlineData("\"recoveryShimmer\": 0.3", "\"recoveryShimmer\": 1.5")]
+    [InlineData("\"recoveryShimmer\": 0.3", "\"recoveryShimmer\": -0.1")]
+    [InlineData("\"recoverySettleSeconds\": 0.6", "\"recoverySettleSeconds\": 2")]
     public void TheLookRefusesValuesOutOfRange(string from, string to)
     {
         var source = File.ReadAllText(AppPaths.Content("visuals", "shields.json"));
@@ -1092,9 +1496,15 @@ public sealed class ShieldShaderSeamTests
         Assert.Contains("#include \"hull_clip.glsl\"", Shader("shield.frag"));
         Assert.Contains("if (hullCut(cut, own != 0, worldPosition))", Shader("shield.frag"));
 
+        // The recovery bands' strength rides in the collapse colour's spare lane, and the shader scales them by it.
+        var look = ShieldLook.Load();
+        Assert.Equal(look.RecoveryShimmer, look.Constants.Collapse.W);
+        Assert.Contains("float shiver = recovering.y * bands * shieldLook.collapse.a;", Shader("shield.frag"));
+
         // Two vertex attributes, then one location per four floats of the instance.
         var locations = System.Runtime.CompilerServices.Unsafe.SizeOf<ShieldInstance>() / 16;
-        Assert.Equal(9, locations);
-        Assert.Contains($"layout(location = {2 + locations - 1}) in vec4 strengths;", shield);
+        Assert.Equal(10, locations);
+        Assert.Contains("layout(location = 10) in vec4 strengths;", shield);
+        Assert.Contains($"layout(location = {2 + locations - 1}) in vec4 recovery;", shield);
     }
 }

@@ -20,17 +20,21 @@ internal unsafe struct GpuBuffer
     /// <summary>A buffer the CPU rewrites every frame, kept mapped.</summary>
     public static GpuBuffer CreateMapped(GraphicsDevice gpu, VkBufferUsageFlags usage, int bytes)
     {
-        gpu.Allocator.CreateBuffer(
+        var result = gpu.Allocator.CreateBuffer(
             new VkBufferCreateInfo { Size = new ByteSize64((ulong)bytes), Usage = usage },
             new VmaAllocationCreateInfo
             {
                 Usage = VmaMemoryUsage.Auto,
                 Flags = VmaAllocationCreateFlags.HostAccessSequentialWriteBit | VmaAllocationCreateFlags.MappedBit,
+                // Frame writes and staging uploads do not issue explicit allocation flushes.
+                RequiredFlags = VkMemoryPropertyFlags.HostCoherentBit,
             },
             out var buffer,
             out var allocation,
             out var info
         );
+        if (result != VkResult.Success)
+            throw new VkResultError(result, "Could not allocate mapped GPU buffer.");
         return new GpuBuffer
         {
             Buffer = buffer,
@@ -45,33 +49,57 @@ internal unsafe struct GpuBuffer
     {
         var bytes = MemoryMarshal.AsBytes(data);
         var staging = CreateMapped(gpu, VkBufferUsageFlags.TransferSrcBit, bytes.Length);
-        bytes.CopyTo(new Span<byte>((void*)staging.Mapped, bytes.Length));
-
-        gpu.Allocator.CreateBuffer(
-            new VkBufferCreateInfo { Size = new ByteSize64((ulong)bytes.Length), Usage = usage | VkBufferUsageFlags.TransferDstBit },
-            new VmaAllocationCreateInfo { Usage = VmaMemoryUsage.Auto },
-            out var buffer,
-            out var allocation,
-            out _
-        );
-
+        var destination = default(GpuBuffer);
         var device = gpu.Device;
-        var pool = device.CreateCommandPool(
-            new VkCommandPoolCreateInfo { QueueFamilyIndex = gpu.QueueFamily, Flags = VkCommandPoolCreateFlags.TransientBit },
-            null
-        );
-        var commands = device.AllocateCommandBuffer(
-            new VkCommandBufferAllocateInfo { CommandPool = pool, Level = VkCommandBufferLevel.Primary }
-        );
-        commands.Begin(VkCommandBufferUsageFlags.OneTimeSubmitBit);
-        commands.CopyBuffer(staging.Buffer, buffer, [new VkBufferCopy { Size = new ByteSize64((ulong)bytes.Length) }]);
-        commands.End();
-        gpu.Queue.Submit([], [], [commands], [], VkFence.NullHandle);
-        gpu.Queue.WaitIdle();
-        device.DestroyCommandPool(pool, null);
-        staging.Destroy(gpu);
-
-        return new GpuBuffer { Buffer = buffer, Allocation = allocation };
+        var pool = VkCommandPool.NullHandle;
+        var submitted = false;
+        try
+        {
+            bytes.CopyTo(new Span<byte>((void*)staging.Mapped, bytes.Length));
+            var result = gpu.Allocator.CreateBuffer(
+                new VkBufferCreateInfo { Size = new ByteSize64((ulong)bytes.Length), Usage = usage | VkBufferUsageFlags.TransferDstBit },
+                new VmaAllocationCreateInfo { Usage = VmaMemoryUsage.Auto },
+                out var buffer, out var allocation, out _
+            );
+            if (result != VkResult.Success)
+                throw new VkResultError(result, "Could not allocate static GPU buffer.");
+            destination = new GpuBuffer { Buffer = buffer, Allocation = allocation };
+            pool = device.CreateCommandPool(
+                new VkCommandPoolCreateInfo { QueueFamilyIndex = gpu.QueueFamily, Flags = VkCommandPoolCreateFlags.TransientBit }, null);
+            var commands = device.AllocateCommandBuffer(
+                new VkCommandBufferAllocateInfo { CommandPool = pool, Level = VkCommandBufferLevel.Primary });
+            commands.Begin(VkCommandBufferUsageFlags.OneTimeSubmitBit);
+            commands.CopyBuffer(staging.Buffer, buffer, [new VkBufferCopy { Size = new ByteSize64((ulong)bytes.Length) }]);
+            commands.End();
+            gpu.Queue.Submit([], [], [commands], [], VkFence.NullHandle);
+            submitted = true;
+            gpu.Queue.WaitIdle();
+            submitted = false;
+            var uploaded = destination;
+            destination = default;
+            return uploaded;
+        }
+        catch (VkResultError error) when (error.Result == VkResult.ErrorDeviceLost)
+        {
+            // A lost device cannot execute more work; its resources may be released during unwinding.
+            submitted = false;
+            throw;
+        }
+        finally
+        {
+            // Never free a staging buffer or command pool while a submitted copy can still use it.
+            if (submitted)
+            {
+                try { gpu.Queue.WaitIdle(); }
+                catch (VkResultError error) when (error.Result == VkResult.ErrorDeviceLost)
+                {
+                    // Finish cleanup after device loss, then propagate the original upload failure.
+                }
+            }
+            if (!pool.IsNull()) device.DestroyCommandPool(pool, null);
+            staging.Destroy(gpu);
+            destination.Destroy(gpu);
+        }
     }
 
     public void Destroy(GraphicsDevice gpu)

@@ -222,7 +222,7 @@ internal sealed partial class ScreenHost
                 world.SetMode(ViewMode.Command);
                 break;
             case BarTab.Map:
-                if (_socialOpen)
+                if (SocialSurfaceOpen)
                     CloseWorkspace();
                 if (!_mapOpen && world.Galaxy is not null)
                     OpenMap();

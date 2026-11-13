@@ -90,6 +90,19 @@ public sealed record FlightRules
 
     /// <summary>How many times its normal recharge power a broken shield draws while it charges back, 1 to 10.</summary>
     public float ShieldRestartPowerMultiplier { get; init; } = 2f;
+    /// <summary>Minimum closing speed for a contact glint, independent of damage.</summary>
+    public float ShieldContactSpeed { get; init; } = 0.1f;
+
+    /// <summary>Maximum tree visits per hull pair stride or asteroid query.</summary>
+    public int CollisionTreeVisits { get; init; } = 8192;
+    /// <summary>Maximum narrow-phase tests per query.</summary>
+    public int CollisionBoxTests { get; init; } = 2048;
+    /// <summary>Maximum touching pairs retained per query.</summary>
+    public int CollisionContacts { get; init; } = 256;
+    /// <summary>Storage ceiling for a query's retained contact pairs.</summary>
+    public const int MaxCollisionContacts = 4096;
+    /// <summary>Maximum translation samples per hull pair step.</summary>
+    public int CollisionStrides { get; init; } = 32;
     public required float CollisionSafeSpeed { get; init; }
     public required float CollisionDamagePerTonneSpeedSquared { get; init; }
     public required float CollisionBounce { get; init; }
@@ -163,9 +176,15 @@ public sealed class BlockCatalog
     public BlockType Get(string id) =>
         _types.TryGetValue(id, out var type) ? type : throw new InvalidDataException($"Unknown block type \"{id}\"");
 
-    public static BlockCatalog Load(string path)
+    /// <summary>Every block type, in the order the file lists them: what a parts palette offers.</summary>
+    public IReadOnlyList<BlockType> Types { get; private init; } = [];
+
+    public static BlockCatalog Load(string path) => Parse(File.ReadAllBytes(path), path);
+
+    /// <summary>Reads the catalogue from a file's bytes. <paramref name="path"/> names where they came from in error messages.</summary>
+    public static BlockCatalog Parse(ReadOnlyMemory<byte> json, string path)
     {
-        using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+        using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
         var r = root.GetProperty("rules"u8);
         var rules = new FlightRules
@@ -181,6 +200,11 @@ public sealed class BlockCatalog
             ShieldRechargeDelaySeconds = r.GetProperty("shieldRechargeDelaySeconds"u8).GetSingle(),
             ShieldRestartFraction = r.GetProperty("shieldRestartFraction"u8).GetSingle(),
             ShieldRestartPowerMultiplier = r.GetProperty("shieldRestartPowerMultiplier"u8).GetSingle(),
+            ShieldContactSpeed = r.TryGetProperty("shieldContactSpeed"u8, out var contactSpeed) ? contactSpeed.GetSingle() : 0.1f,
+            CollisionTreeVisits = r.GetProperty("collisionTreeVisits"u8).GetInt32(),
+            CollisionBoxTests = r.GetProperty("collisionBoxTests"u8).GetInt32(),
+            CollisionContacts = r.GetProperty("collisionContacts"u8).GetInt32(),
+            CollisionStrides = r.GetProperty("collisionStrides"u8).GetInt32(),
             CollisionSafeSpeed = r.GetProperty("collisionSafeSpeed"u8).GetSingle(),
             CollisionDamagePerTonneSpeedSquared = r.GetProperty("collisionDamagePerTonneSpeedSquared"u8).GetSingle(),
             CollisionBounce = r.GetProperty("collisionBounce"u8).GetSingle(),
@@ -193,6 +217,10 @@ public sealed class BlockCatalog
             FtlArrivalReach = r.GetProperty("ftlArrivalReach"u8).GetSingle(),
             FtlArrivalPulseMass = r.GetProperty("ftlArrivalPulseMass"u8).GetSingle(),
         };
+        if (rules.CollisionTreeVisits is < 1 or > 1000000 || rules.CollisionBoxTests is < 1 or > 1000000 || rules.CollisionContacts is < 1 or > FlightRules.MaxCollisionContacts || rules.CollisionStrides is < 1 or > 1024)
+            throw new InvalidDataException($"{path}: invalid collision budgets");
+        if (!float.IsFinite(rules.ShieldContactSpeed) || rules.ShieldContactSpeed <= 0)
+            throw new InvalidDataException($"{path}: shieldContactSpeed must be finite and positive");
         if (!float.IsFinite(rules.ShieldRechargeDelaySeconds) || rules.ShieldRechargeDelaySeconds < 0)
             throw new InvalidDataException($"{path}: shieldRechargeDelaySeconds must be finite and nonnegative");
         if (!(rules.ShieldRestartFraction > 0 && rules.ShieldRestartFraction <= 1))
@@ -249,7 +277,11 @@ public sealed class BlockCatalog
             };
         }
 
-        return new BlockCatalog(types, rules) { Limits = DesignLimits.Read(root.GetProperty("limits"u8), path) };
+        // A dictionary does not promise an order; the file's is kept apart for whoever lists the types.
+        var listed = new List<BlockType>(types.Count);
+        foreach (var entry in root.GetProperty("blocks"u8).EnumerateObject())
+            if (!listed.Contains(types[entry.Name])) listed.Add(types[entry.Name]);
+        return new BlockCatalog(types, rules) { Limits = DesignLimits.Read(root.GetProperty("limits"u8), path), Types = listed.AsReadOnly() };
     }
 }
 
@@ -306,298 +338,256 @@ public enum HullClass : byte
     Station,
 }
 
-/// <summary>A hull design loaded from <c>content/ships</c>: its blocks, and everything that follows from them.</summary>
+/// <summary>
+/// A hull design loaded from <c>content/ships</c>: its blocks as boxes, and everything that follows from them.
+/// A design never changes and is shared by every hull built to it; a hull adds only which blocks it still has.
+/// </summary>
 public sealed class HullDesign
 {
-    private HullDesign(string name, float blockSize, (int X, int Y, int Z)[] cells, BlockType[] types, Vector3 color)
+    private readonly BoxDesign _boxes;
+    private FlightRules _rules = null!;
+    internal BoxCollision Collision { get; }
+    internal FlightRules CollisionRules => _rules;
+    private float[] _hitPoints = [];
+    private readonly ulong[] _fullSet;
+    private readonly ulong[] _coreSet;
+
+    private HullDesign(BoxDesign boxes, FlightRules rules)
     {
-        Name = name;
-        BlockSize = blockSize;
-        Cells = cells;
-        Types = types;
-        Color = color;
+        _boxes = boxes;
+        var blocks = boxes.Blocks;
+        Cells = new (int, int, int)[blocks.Length];
+        Types = new BlockType[blocks.Length];
+        BlockOffsets = new Vector3[blocks.Length];
+        BlockHalfExtents = new Vector3[blocks.Length];
+        ExteriorFaces = new byte[blocks.Length];
+        Shapes = new BlockShape[blocks.Length];
+        _fullSet = new ulong[BlockSet.WordCount(blocks.Length)];
+        _coreSet = new ulong[_fullSet.Length];
+        BlockSet.Fill(_fullSet, blocks.Length);
+
+        for (var i = 0; i < blocks.Length; i++)
+        {
+            ref readonly var box = ref blocks[i];
+            Cells[i] = (box.At.X, box.At.Y, box.At.Z);
+            Types[i] = box.Type;
+            BlockOffsets[i] = boxes.Offset(box);
+            BlockHalfExtents[i] = boxes.HalfExtents(box);
+            Shapes[i] = box.Shape;
+            if (box.Type.Core)
+                BlockSet.Add(_coreSet, i);
+        }
+
+        UsesRoundedUnitShell = true;
+        foreach (var box in blocks) UsesRoundedUnitShell &= box.Shape == BlockShape.Box && box.Size == new GridSize(1, 1, 1);
+
+        Collision = new BoxCollision(BlockOffsets, BlockHalfExtents);
+        // Partial adjacency retains a whole face, shared with picking. Adjacent boxes never overlap in area.
+        Span<long> covered = stackalloc long[6];
+        for (var i = 0; i < blocks.Length; i++)
+        {
+            covered.Clear();
+            var box = blocks[i];
+            var lo = new Vector3(box.At.X, box.At.Y, box.At.Z);
+            var hi = lo + new Vector3(box.Size.X, box.Size.Y, box.Size.Z);
+            var cursor = 0;
+            var visits = int.MaxValue;
+            var padding = new Vector3(0.001f);
+            while (Collision.Next(ref cursor, BlockOffsets[i] - BlockHalfExtents[i] - padding,
+                BlockOffsets[i] + BlockHalfExtents[i] + padding, _fullSet, ref visits, out var j))
+            {
+                if (i == j) continue;
+                var other = blocks[j];
+                if (other.Shape != BlockShape.Box) continue;
+                var otherLo = new Vector3(other.At.X, other.At.Y, other.At.Z);
+                var otherHi = otherLo + new Vector3(other.Size.X, other.Size.Y, other.Size.Z);
+                for (var axis = 0; axis < 3; axis++)
+                {
+                    var u = (axis + 1) % 3;
+                    var v = (axis + 2) % 3;
+                    var area = (long)Math.Max(0, Math.Min(hi[u], otherHi[u]) - Math.Max(lo[u], otherLo[u]))
+                        * (long)Math.Max(0, Math.Min(hi[v], otherHi[v]) - Math.Max(lo[v], otherLo[v]));
+                    if (hi[axis] == otherLo[axis]) covered[2 * axis] += area;
+                    if (lo[axis] == otherHi[axis]) covered[2 * axis + 1] += area;
+                }
+            }
+            var faces = 0x3F;
+            for (var side = 0; side < 6; side++)
+            {
+                var u = (side / 2 + 1) % 3;
+                var v = (side / 2 + 2) % 3;
+                if (covered[side] >= (long)(hi[u] - lo[u]) * (long)(hi[v] - lo[v]))
+                    faces &= ~(1 << side);
+            }
+            ExteriorFaces[i] = box.Shape == BlockShape.Box ? (byte)faces : (byte)0x3F;
+        }
+
+        Sums = new BoxHullSums(boxes);
+        Apply(rules);
     }
 
-    public string Name { get; }
-    public HullClass Class { get; private init; }
-    public float BlockSize { get; }
+    /// <summary>
+    /// The smooth shield shell of the intact hull, kept by admission (<see cref="GeometryAdmission.Measure"/>), in
+    /// the hull's frame and metres; empty for a design that was never admitted. A damaged hull whose own shell would
+    /// not fit, or is still being built, is drawn with this one: what is left of a hull is inside it.
+    /// </summary>
+    public ReadOnlyMemory<ShellVertex> IntactShell => _intact.Vertices;
 
-    /// <summary>Grid cells occupied by a block, and the type of block in each.</summary>
-    public (int X, int Y, int Z)[] Cells { get; }
-    public BlockType[] Types { get; }
-    public Vector3 Color { get; }
+    /// <summary>The triangles of <see cref="IntactShell"/>, three indices each, kept with it.</summary>
+    public ReadOnlyMemory<ushort> IntactIndices => _intact.Indices;
 
-    /// <summary>The most blocks a design may have, set by how block state is sent: one bit per block.</summary>
-    public const int MaxBlocks = 64;
+    /// <summary>The shape <see cref="IntactShell"/> was built with, and every shell of this design is built with.</summary>
+    public ShellShape ShellShape => _intact.Shape;
 
-    /// <summary>The centre of mass of the intact hull in grid units; the hull turns about this point.</summary>
-    public Vector3 CenterOfMass { get; private set; }
+    // One object, swapped whole, so a reader on another thread never sees vertices of one build with indices of another.
+    private IntactShellData _intact = new([], [], ShellShape.Default);
 
-    /// <summary>Each block's centre relative to the centre of mass, in metres, in the hull's own frame.</summary>
-    public Vector3[] BlockOffsets { get; private set; } = [];
+    private sealed record IntactShellData(ShellVertex[] Vertices, ushort[] Indices, ShellShape Shape);
 
-    /// <summary>One bit per block, all set: the intact hull.</summary>
-    public ulong FullMask { get; private set; }
+    internal void Admit(ShellVertex[] vertices, ushort[] indices, ShellShape shape) => _intact = new IntactShellData(vertices, indices, shape);
+
+    /// <summary>Only box-only unit designs may use the rounded cell shell.</summary>
+    public bool UsesRoundedUnitShell { get; }
+
+    public string Name => _boxes.Name;
+    public HullClass Class => _boxes.Class;
+
+    /// <summary>Metres per grid cell.</summary>
+    public float BlockSize => _boxes.BlockSize;
+    public Vector3 Color => _boxes.Color;
+
+    /// <summary>The blocks as the file has them: each a box of whole cells and a type. A block's id is its index here.</summary>
+    public ReadOnlySpan<DesignBox> Boxes => _boxes.Blocks;
 
     /// <summary>
-    /// For each block, the faces the intact hull's mesh has: those with no block beside them. Face bit
-    /// <c>2 * axis + (negative ? 1 : 0)</c>, so +x, -x, +y, -y, +z, -z, the order <c>MeshBuilder.Hull</c> walks them.
+    /// The lowest cell of each block, and each block's type. The rounded unit-cube shield uses these; sized geometry reads the full boxes.
     /// </summary>
-    public byte[] ExteriorFaces { get; private set; } = [];
+    public (int X, int Y, int Z)[] Cells { get; }
+    public BlockType[] Types { get; }
 
-    /// <summary>The bits of the blocks whose loss destroys the hull.</summary>
-    public ulong CoreMask { get; private set; }
+    /// <summary>How many blocks the design has. A block's id is its index in <see cref="Boxes"/>.</summary>
+    public int BlockCount => Cells.Length;
+
+    /// <summary>
+    /// The point the hull turns about, in grid units: the intact design's centre of mass. It never moves, whatever
+    /// the hull loses.
+    /// </summary>
+    public Double3 Pivot => _boxes.Center;
+
+    /// <summary><see cref="Pivot"/> in single precision, for building a mesh about it.</summary>
+    public Vector3 CenterOfMass => new((float)_boxes.Center.X, (float)_boxes.Center.Y, (float)_boxes.Center.Z);
+
+    /// <summary>Each block's centre relative to <see cref="Pivot"/>, in metres, in the hull's own frame.</summary>
+    public Vector3[] BlockOffsets { get; }
+
+    /// <summary>Half of each block's width, height and length, in metres.</summary>
+    public Vector3[] BlockHalfExtents { get; }
+
+    /// <summary>
+    /// Each block's shape, in block order, for callers that keep arrays rather than the design: a wedge fills half of
+    /// the box <see cref="BlockOffsets"/> and <see cref="BlockHalfExtents"/> describe.
+    /// </summary>
+    public BlockShape[] Shapes { get; }
+
+    /// <summary>The <see cref="BlockSet"/> of the intact hull: every block of the design. Never changes.</summary>
+    public ReadOnlySpan<ulong> FullSet => _fullSet;
+
+    /// <summary>
+    /// For each block, the faces not wholly covered by adjacent boxes. Face bit <c>2 * axis + (negative ? 1 : 0)</c>, so +x, -x, +y, -y, +z, -z, the order
+    /// <c>MeshBuilder.Hull</c> walks them. Partial adjacency retains the whole face.
+    /// </summary>
+    public byte[] ExteriorFaces { get; }
+
+    /// <summary>The <see cref="BlockSet"/> of the blocks whose loss destroys the hull. Never changes.</summary>
+    public ReadOnlySpan<ulong> CoreSet => _coreSet;
+
+    /// <summary>
+    /// What each block adds to the hull's figures and the sums of the intact hull. A hull's own sums, kept with
+    /// its block state, are laid out by this and start as a copy of <see cref="BoxHullSums.Intact"/>.
+    /// </summary>
+    public BoxHullSums Sums { get; }
 
     /// <summary>The intact hull's data sheet and flight figures.</summary>
     public HullStats Stats { get; private set; }
     public FlightParams Flight { get; private set; }
 
-    private FlightRules _rules = null!;
-
     /// <summary>Loads a design and works out its figures under a world's rules.</summary>
-    public static HullDesign Load(string path, BlockCatalog catalog, FlightRules rules)
+    public static HullDesign Load(string path, BlockCatalog catalog, FlightRules rules) => Parse(File.ReadAllBytes(path), path, catalog, rules);
+
+    /// <summary>
+    /// Reads a design from a file's bytes and works out its figures under a world's rules.
+    /// <paramref name="path"/> names where the bytes came from in error messages.
+    /// </summary>
+    public static HullDesign Parse(ReadOnlyMemory<byte> json, string path, BlockCatalog catalog, FlightRules rules)
     {
-        using var document = JsonDocument.Parse(File.ReadAllBytes(path));
-        var root = document.RootElement;
+        using var document = JsonDocument.Parse(json);
+        var boxes = BoxDesign.Parse(document.RootElement, catalog, path);
+        GeometryAdmission.Count(boxes.Blocks.Length, catalog.Limits);
 
-        var boxes = BoxDesign.Parse(root, catalog, path);
-        if (boxes.Blocks.Length > MaxBlocks || boxes.Blocks.ToArray().Any(b => b.Size != new GridSize(1, 1, 1)))
-            throw new InvalidDataException($"{path}: sized boxes or more than 64 blocks need blocks-at-scale stage 2 (storage, wire, collision and drawing)");
-
-        var cells = new List<(int, int, int)>();
-        var types = new List<BlockType>();
-        foreach (var block in root.GetProperty("blocks"u8).EnumerateArray())
-        {
-            var at = block.GetProperty("at"u8);
-            cells.Add((at[0].GetInt32(), at[1].GetInt32(), at[2].GetInt32()));
-            types.Add(catalog.Get(block.GetProperty("type"u8).GetString()!));
-        }
-
-        if (cells.Count == 0)
-            throw new InvalidDataException($"{path}: a hull needs at least one block");
-
-        var color = root.GetProperty("color"u8);
-        var design = new HullDesign(
-            root.GetProperty("name"u8).GetString()!,
-            root.GetProperty("blockSize"u8).GetSingle(),
-            [.. cells],
-            [.. types],
-            new Vector3(color[0].GetSingle(), color[1].GetSingle(), color[2].GetSingle())
-        )
-        {
-            Class = root.GetProperty("class"u8).GetString() switch
-            {
-                "ship" => HullClass.Ship,
-                "fighter" => HullClass.Fighter,
-                "station" => HullClass.Station,
-                var other => throw new InvalidDataException($"{path}: unknown class \"{other}\""),
-            },
-        };
-        if (cells.Count > MaxBlocks)
-            throw new InvalidDataException($"{path}: {cells.Count} blocks; a design may have at most {MaxBlocks}");
-
-        design.Initialize(rules, path);
+        var design = new HullDesign(boxes, rules);
+        GeometryAdmission.Validate(design, catalog.Limits);
+        if (design.Flight.Acceleration.X <= 0 || design.Flight.TurnRate.X <= 0 || design.Flight.PowerGenerated <= 0 || !BlockSet.Any(design._coreSet))
+            throw new InvalidDataException($"{path}: a hull needs a core, a thruster, a gyro and a generator to fly");
         return design;
     }
 
     /// <summary>
     /// The same design in a world with other rules: the same blocks in the same places, with the figures that
     /// follow from them worked out again. The original is left as it was, so two worlds in one process, or a
-    /// server and a client that disagree, each keep their own.
+    /// server and a client that disagree, each keep their own. The sums are shared: nothing in them depends on
+    /// a world's rules.
     /// </summary>
     public HullDesign WithRules(FlightRules rules)
     {
         var design = (HullDesign)MemberwiseClone();
-        design._rules = rules;
-        design.Evaluate(FullMask, out var flight, out var stats);
-        design.Flight = flight;
-        design.Stats = stats;
+        design.Apply(rules);
         return design;
     }
 
-    /// <summary>The hit points a block of this design has when intact, in the world the design was evaluated for.</summary>
-    public float BlockHitPoints(int block) => Types[block].Hull * _rules.HullStrength;
-
-    private void Initialize(FlightRules rules, string path)
-    {
-        _rules = rules;
-        var mass = 0f;
-        var weighted = Vector3.Zero;
-        for (var i = 0; i < Cells.Length; i++)
-        {
-            mass += Types[i].Mass;
-            weighted += new Vector3(Cells[i].X, Cells[i].Y, Cells[i].Z) * Types[i].Mass;
-            if (Types[i].Core)
-                CoreMask |= 1UL << i;
-        }
-
-        CenterOfMass = weighted / mass;
-        FullMask = Cells.Length == 64 ? ulong.MaxValue : (1UL << Cells.Length) - 1;
-        BlockOffsets = new Vector3[Cells.Length];
-        for (var i = 0; i < Cells.Length; i++)
-            BlockOffsets[i] = (new Vector3(Cells[i].X, Cells[i].Y, Cells[i].Z) - CenterOfMass) * BlockSize;
-        ExteriorFaces = new byte[Cells.Length];
-        for (var i = 0; i < Cells.Length; i++)
-        {
-            var faces = 0x3F;
-            foreach (var other in Cells)
-            {
-                var (x, y, z) = (other.X - Cells[i].X, other.Y - Cells[i].Y, other.Z - Cells[i].Z);
-                if (Math.Abs(x) + Math.Abs(y) + Math.Abs(z) == 1)
-                    faces &= ~(1 << (2 * (x != 0 ? 0 : y != 0 ? 1 : 2) + (x + y + z < 0 ? 1 : 0)));
-            }
-
-            ExteriorFaces[i] = (byte)faces;
-        }
-
-        Evaluate(FullMask, out var flight, out var stats);
-        Flight = flight;
-        Stats = stats;
-        if (flight.Acceleration.X <= 0 || flight.TurnRate.X <= 0 || flight.PowerGenerated <= 0 || CoreMask == 0)
-            throw new InvalidDataException($"{path}: a hull needs a core, a thruster, a gyro and a generator to fly");
-    }
+    /// <summary>
+    /// Builds a design straight from validated boxes, of any size and number, with no check that it can fly:
+    /// used by isolated storage and arithmetic tests. Public loading also checks runtime resource budgets.
+    /// </summary>
+    internal static HullDesign Of(BoxDesign boxes, FlightRules rules) => new(boxes, rules);
 
     /// <summary>
-    /// Works out how the hull flies from the blocks it still has: mass and moments of inertia from where they
-    /// sit, acceleration from thrust over mass, turning from gyro torque over inertia, and the power budget.
-    /// A hull that has lost blocks is lighter and may have lost thrust, power or shields with them.
+    /// Whether a hull of this design has anything to repair: it has lost a block, which its
+    /// <paramref name="revision"/> counts, or has fewer <paramref name="hullPoints"/> than the design as built.
+    /// A shield that is down is no damage to the hull. The server decides a repair by this, and a client asks
+    /// the same of the hull it was sent to know whether a repair would be taken.
     /// </summary>
-    public void Evaluate(ulong alive, out FlightParams flight, out HullStats stats)
+    public bool NeedsRepair(uint revision, float hullPoints) => revision > 0 || hullPoints < Flight.HullPoints;
+
+    /// <summary>The hit points a block of this design has when intact, in the world the design was evaluated for.</summary>
+    public float BlockHitPoints(int block) => _hitPoints[block];
+
+    /// <summary>Every block's hit points when intact, in block order, and what they add up to.</summary>
+    internal ReadOnlySpan<float> IntactHitPoints => _hitPoints;
+    internal double IntactHitTotal { get; private set; }
+
+    /// <summary>
+    /// A hull's flight figures and data sheet read off its sums, in the world the design was evaluated for.
+    /// Constant time: this is what a hull is refitted with when it loses blocks.
+    /// </summary>
+    public void Figures(ReadOnlySpan<HullSum> sums, out FlightParams flight, out HullStats stats) => Sums.Evaluate(sums, _rules, out flight, out stats);
+
+    private void Apply(FlightRules rules)
     {
-        var rules = _rules;
-        var size = BlockSize;
-        var mass = 0f;
-        var min = new Vector3(float.MaxValue);
-        var max = new Vector3(float.MinValue);
-        var inertia = Vector3.Zero;
-        var radius = 0f;
-        float hull = 0, shield = 0, recharge = 0, engineThrust = 0, thrusterThrust = 0, torque = 0;
-        float generated = 0, idlePower = 0, thrustPower = 0, shieldPower = 0, storage = 0, cargo = 0;
-        var crew = 0;
-        var blocks = 0;
-        var ftl = FtlKind.None;
-        var ftlPower = 0f;
+        _rules = rules;
+        Sums.Evaluate(Sums.Intact, rules, out var flight, out var stats);
+        Flight = flight;
+        Stats = stats;
 
-        for (var i = 0; i < Cells.Length; i++)
+        // A block's hit points follow from its type and size, times the world's hull strength.
+        var points = new float[BlockCount];
+        var total = 0.0;
+        for (var i = 0; i < points.Length; i++)
         {
-            // The collision sphere stays that of the intact hull; what is left still turns about the same point.
-            var r = BlockOffsets[i];
-            radius = Math.Max(radius, r.Length() + size * 0.87f);
-            if ((alive & 1UL << i) == 0)
-                continue;
-
-            var type = Types[i];
-            var cell = new Vector3(Cells[i].X, Cells[i].Y, Cells[i].Z);
-            blocks++;
-            mass += type.Mass;
-            min = Vector3.Min(min, cell);
-            max = Vector3.Max(max, cell);
-            hull += type.Hull * rules.HullStrength;
-            shield += type.Shield;
-            recharge += type.ShieldRecharge;
-            torque += type.Torque;
-            generated += type.PowerOutput;
-            storage += type.EnergyStorage;
-            cargo += type.Cargo;
-            crew += type.Crew;
-            if (ftl == FtlKind.None)
-                ftl = type.Ftl;
-            if (type.Ftl == ftl)
-                ftlPower += type.FtlPower;
-
-            if (type.ForwardOnly)
-                engineThrust += type.Thrust;
-            else
-                thrusterThrust += type.Thrust;
-
-            if (type.Thrust > 0)
-                thrustPower += type.PowerDraw;
-            else if (type.Shield > 0)
-                shieldPower += type.PowerDraw;
-            else
-                idlePower += type.PowerDraw;
-
-            // Each block is a solid cube turning about the hull's centre of mass.
-            var own = type.Mass * size * size / 6f;
-            inertia += new Vector3(type.Mass * (r.Y * r.Y + r.Z * r.Z) + own, type.Mass * (r.X * r.X + r.Z * r.Z) + own, type.Mass * (r.X * r.X + r.Y * r.Y) + own);
+            points[i] = (float)Sums.HullPoints(i) * rules.HullStrength;
+            total += points[i];
         }
 
-        mass = Math.Max(mass, 0.01f);
-        inertia = Vector3.Max(inertia, new Vector3(0.001f));
-        recharge *= rules.ShieldRechargeMultiplier;
-
-        // A drive that takes power faster charges sooner; what a jump costs in all is the same.
-        ftlPower *= rules.FtlChargeMultiplier;
-        var lateral = thrusterThrust / mass;
-        var forward = (engineThrust + thrusterThrust) / mass;
-        var turnAcceleration = new Vector3(torque) / inertia;
-        var turnRate = new Vector3(MathF.Sqrt(turnAcceleration.X), MathF.Sqrt(turnAcceleration.Y), MathF.Sqrt(turnAcceleration.Z)) * rules.TurnRatePerRootAcceleration;
-        var maxSpeed = rules.SpeedPerRootAcceleration * MathF.Sqrt(forward);
-
-        flight = new FlightParams
-        {
-            Acceleration = new Vector3(lateral, lateral, forward),
-            ReverseAcceleration = lateral,
-            BoostMultiplier = rules.BoostThrustMultiplier,
-            MaxSpeed = maxSpeed,
-            BoostMaxSpeed = maxSpeed * rules.BoostSpeedMultiplier,
-            TurnRate = turnRate,
-            TurnAcceleration = turnAcceleration,
-            HeatRate = 1f / rules.BoostHeatSeconds,
-            CoolRate = 1f / rules.CoolSeconds,
-            Mass = mass,
-            Inertia = inertia,
-            Radius = radius,
-            HullPoints = hull,
-            ShieldCapacity = shield,
-            ShieldRecharge = recharge,
-            ShieldDelay = rules.ShieldRechargeDelaySeconds,
-            PowerGenerated = generated,
-            IdlePower = idlePower,
-            ThrustPower = thrustPower,
-            ShieldPower = shieldPower,
-            ShieldRestartFraction = rules.ShieldRestartFraction,
-            ShieldRestartPower = shieldPower * rules.ShieldRestartPowerMultiplier,
-            BoostPowerMultiplier = rules.BoostPowerMultiplier,
-            EnergyStorage = storage,
-            BoostEnergyFloor = rules.BoostEnergyFloor * storage,
-            CollisionSafeSpeed = rules.CollisionSafeSpeed,
-            CollisionDamagePerTonneSpeedSquared = rules.CollisionDamagePerTonneSpeedSquared,
-            CollisionBounce = rules.CollisionBounce,
-            CollisionShieldCost = rules.CollisionShieldCost,
-            Ftl = ftl,
-            FtlPower = ftlPower,
-            FtlEnergy = rules.FtlEnergyPerTonne * mass,
-            FtlAlignCosine = MathF.Cos(rules.FtlAlignDegrees * MathF.PI / 180f),
-            FtlCalculateSeconds = rules.FtlCalculateSeconds,
-            FtlTunnelSeconds = rules.FtlTunnelSeconds,
-            FtlSpeed = rules.FtlSpeed,
-            FtlArriveSeconds = rules.FtlArriveSeconds,
-        };
-
-        stats = new HullStats
-        {
-            HullPoints = hull,
-            ShieldCapacity = shield,
-            ShieldRecharge = recharge,
-            Mass = mass,
-            Volume = blocks * size * size * size,
-            Size = blocks > 0 ? (max - min + Vector3.One) * size : Vector3.Zero,
-            Blocks = blocks,
-            CargoHold = cargo,
-            Crew = crew,
-            Acceleration = forward,
-            Deceleration = lateral,
-            LateralAcceleration = lateral,
-            MaxSpeed = maxSpeed,
-            BoostMaxSpeed = maxSpeed * rules.BoostSpeedMultiplier,
-            TurnRate = turnRate,
-            PowerRequired = flight.PowerRequired,
-            PowerGenerated = generated,
-            EnergyStorage = storage,
-            Ftl = ftl,
-            FtlEnergy = rules.FtlEnergyPerTonne * mass,
-            FtlPower = ftlPower,
-        };
+        _hitPoints = points;
+        IntactHitTotal = total;
     }
 }

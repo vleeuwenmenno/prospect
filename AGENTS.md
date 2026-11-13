@@ -41,6 +41,8 @@ Use the Makefile, not raw `dotnet` commands.
 Run one test class or method with the test binary directly:
 `dotnet artifacts/bin/Prospect.Tests/debug/Prospect.Tests.dll -class Prospect.Tests.JumpTests` (or `-method <full name>`).
 Always wrap long test runs in `timeout`; a session test that waits on the simulation can otherwise sit for minutes.
+A whole run started this way can fail an allocation test by up to 8 KiB it never took, when a collection lands
+in a measurement. `make test` and `make check` prevent that with a large gen-0 budget (`TEST_ENV` in the Makefile).
 
 ## Rules that are not negotiable
 
@@ -68,6 +70,10 @@ Always wrap long test runs in `timeout`; a session test that waits on the simula
   both, bump `ProtocolInfo.Version`, and keep `HostingTests` passing. Keep the first field of `Hello` and of
   `Reject` where they are, so two versions can still tell each other they differ. A proof is checked once per
   connection, and never while the address is locked out.
+- **Content both sides simulate from:** a new file goes through `Shared(...)` in `GameContent.Load`, which puts
+  it in the content identity; list it in `docs/hosting.md` and give `ContentIdentityTests` a case. Bump
+  `ContentIdentity.EvaluatorVersion` when the arithmetic that turns blocks into figures (`BoxHullSums`, size
+  rules, `FlightRules.Under`) changes what comes out while the files stay the same.
 - **What a server does before a player is let in:** the limits are in `ConnectionLimits` and
   `docs/hosting.md`; change both. Nothing may be read, allocated or logged for a connection before the limits
   are checked, and a refusal never allocates. `ConnectionLimitTests` runs a server by hand (`ScriptedServer`:
@@ -89,6 +95,26 @@ Always wrap long test runs in `timeout`; a session test that waits on the simula
   change the view there; `UiPointerInput` is what Dear ImGui is told. Only the pilot view captures the pointer.
   `FrameOrderTests` runs that frame headless: real devices, router, `WorldView` and a Dear ImGui context, events fed as a poll delivers them. Dear ImGui has one
   global context, so keep every test that uses it in that class.
+- **The ship editor:** the limits are in `EditorRules`, `content/net/editor.json` and `docs/hosting.md`;
+  change all three. A design reaches the catalogue only through `DesignBytes.Decode` on a worker, the catalogue
+  only grows (`DesignCatalogue.Append`, `GameContent.WithDesign`), and a hull never changes design: it is
+  replaced. A client is sent hulls of a new design only after `DesignReady`; never use `CatalogueReady` for
+  that, it stops everything else the client sends. A repair (`RepairEdit`) replaces the hull by the design it
+  already has: same number, nothing appended; `HullDesign.NeedsRepair` is the one test of damage for both
+  sides. A design need not fly: `DesignBytes.Decode` checks structure and finite figures, not capability, so
+  shared flight code must stay right at zero thrust, torque and power. `EditorSessionTests` ticks a server and clients by hand and
+  says a mesh is installed through `PlayerInputBridge.ReportInstalledDesigns`, as the renderer does. The
+  client side is `ShipEditor` (state, worker check of a frozen `DraftCopy`, never the live draft), its keys in
+  the shortcut phase (`ShipEditor.HandleKeys`) and the view in `WorldView`; `FrameOrderTests` drives it through
+  a real server, headless. The draft opens as the full blueprint (`BuildDraft.FromBlueprint`); lost blocks are
+  matched to draft boxes by value, not index. Selection, move, paste, merge and delete go through
+  `ShipEditor` and the draft's group edits, one undo step each; any edit that shifts indices resets the
+  selection itself. A press begun on a panel never reaches the world, except a part card's drag
+  (`EditorPalette.Card` hands it over, `WorldView.HoldsInterfacePress`, released by the raw button over
+  `PointerRouter.PointerOverWindow`); add no other. A mouse choice on the part list gives the keyboard back to
+  the world (`EditorPalette.HandBack`), so the ghost shows without a click away. A turn with `R` is never
+  confirmed: a press on the ghost ends it and becomes placing's press (`WorldView.UpdatePartRotation`). Warning thresholds and the part tabs are client data in
+  `content/visuals/editor.json`; warnings never block Apply.
 - **A new per-tick system:** add a unit test in `tests/Prospect.Tests/WorldTests.cs` and, if it crosses the
   network, a session test that runs a real server and client.
 - **A new sector module** (stations, gas fields): derive from `SectorModule` in `Prospect.Game/World`, name its
@@ -112,7 +138,7 @@ The client opens a real window on the developer's desktop, and they are usually 
 - Only launch it with `--capture <file.png>` or `--bench <seconds>`. Both mute every input device, so the window
   cannot grab the pointer or react to their typing. Never start it any other way from an agent session.
 - `make run ARGS="--start local --open <view> --capture /path/shot.png --capture-after 2.5"` saves a screenshot
-  and exits. Views: `command`, `map`, `map-hover` (the map with the pointer on your own sector), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,
+  and exits. Views: `command`, `edit` (asks to edit the own ship; the editor opens on the grant), `map`, `map-hover` (the map with the pointer on your own sector), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,
   `players`, `social`, `friends`, `chat`, `hud` (the world with the party list and recent chat only). The social views and
   `hud` leave the performance overlay off. Screens
   without a session: `--start menu|join|settings|newgame|credits|account`; `--set id=value` shows on `newgame`, and so
@@ -182,11 +208,19 @@ The client opens a real window on the developer's desktop, and they are usually 
 
 ## Known limits to design around
 
-- Hull designs are capped at 64 blocks: block state travels as one bit per block. Larger ships need chunked block
-  replication first.
+- Runtime designs obey shared surface/work and catalogue budgets; see docs/blocks-at-scale.md.
+  The old 64-block and unit-cell restrictions are removed; 150,000-block play remains future work.
+- A server's design catalogue only grows: an edited ship takes a design number (255 at most) and catalogue
+  bytes for as long as the server runs, and a full catalogue refuses every new design. The editor screen has no
+  shapes other than boxes and wedges, mirror, stock parts or drag handle on a placed block yet; a placed block's resizing is numeric.
 - Snapshots are full state, not delta-compressed, and there is no interest management yet.
 - Sector discovery is kept by the client for the session; nothing is saved.
 - Asteroids do not collide with each other.
+- A shield shell is the smooth closing of the blocks (`ShieldSurface`), indexed, at most 32,768 vertices and
+  196,608 indices; separate box-shaped parts use triangulated rounded boxes with analytic normals. Admission builds
+  the intact shell off the tick and keeps it with the design; a design whose intact shell does not fit is refused.
+  Damaged shells are built one at a time on a client worker and fall back to the hull's earlier or intact shell;
+  nothing builds a shell in a frame or a tick. Some four hundred or more separate parts do not fit.
 - A shield's ripple shows the newest hit a snapshot reports; hits between two snapshots of a remote hull (three
   ticks) show as the last of them, and impacts in one tick are one event. A client keeps four ripples per hull.
 - Shields copy the scene's colour and depth once a frame whenever one is drawn, to bend what is behind them, and
@@ -201,7 +235,9 @@ The client opens a real window on the developer's desktop, and they are usually 
 - The client draws at most 32,768 instances a frame and shows at most 512 pushed asteroids out of place.
 - A pushed asteroid still belongs to the sector it was generated in. One that drifts across the sector's edge is
   not hit by a hull that is wholly in the next sector.
-- A hull touching an asteroid tests every block against the surface, about 1 microsecond per block per tick.
+- Box collision prunes a per-design tree with live branch counts and content budgets. Asteroids use nearest-point
+  and corner samples against the seeded surface; narrow ridges between samples can be missed. Large-hull tick
+  performance is not yet established.
 - The client predicts contact only with hulls near its own, and flies only its own fleet's hulls forward exactly;
   another player's hull is assumed to keep its velocity until the next snapshot.
 - The client replays one step of the fleet per input. When the server simulates several of a player's inputs in

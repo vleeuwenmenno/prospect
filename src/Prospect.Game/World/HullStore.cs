@@ -26,8 +26,26 @@ public struct HullInfo
     /// <summary>True while a player flies the hull directly; the rest are flown by the server under their orders.</summary>
     public bool Piloted;
 
-    /// <summary>One bit per block of the design; a cleared bit is a destroyed block.</summary>
-    public ulong Blocks;
+    /// <summary>True for a temporary escape drone, even after editing gives it a new design.</summary>
+    public bool EscapeDrone;
+
+    /// <summary>
+    /// The hull's block state in the store's <see cref="BlockStateStore"/>: the blocks it still has, how many it
+    /// has lost, the sums its figures are read from and, where the hull is decided, each block's hit points.
+    /// </summary>
+    public BlockStateHandle BlockState;
+
+    /// <summary>
+    /// True if the store took the block state when it created the hull and gives it back when the hull goes.
+    /// False for a hull created over a state someone else keeps, which outlives the hull's time in this store.
+    /// </summary>
+    public bool OwnsBlockState;
+
+    /// <summary>
+    /// The block state's revision the hull's flight figures were last worked out for. When the state's revision
+    /// has moved past it the hull has lost blocks since, and <see cref="HullField"/> fits the figures again.
+    /// </summary>
+    public uint FittedRevision;
     public HullOrder Order;
 
     /// <summary>The owner's order counter at the time <see cref="Order"/> was set.</summary>
@@ -38,6 +56,13 @@ public struct HullInfo
     /// about is not where anyone would expect it, so the server tells of it at once.
     /// </summary>
     public long ContactTick;
+
+    /// <summary>
+    /// The tick in which the hull last took damage: an impact its shield paid for or its blocks took. A contact
+    /// too slow to harm does not count. <see cref="long.MinValue"/> for a hull that never has; compare it, never
+    /// subtract from it. Only a store that decides its hulls keeps it meaningfully.
+    /// </summary>
+    public long DamageTick;
 
     /// <summary>The round of the <see cref="HullField"/> in which the hull last stepped; zero if it never has.</summary>
     public long Round;
@@ -54,7 +79,10 @@ public struct HullInfo
 
 /// <summary>
 /// Hull storage: parallel arrays in unmanaged memory, addressed by handle. The motion states sit together so the
-/// simulation walks them in one contiguous pass; the garbage collector never sees any of it.
+/// simulation walks them in one contiguous pass; the garbage collector never sees any of it. What a hull is made
+/// of sits apart, in a <see cref="BlockStateStore"/>, sized to its design. A store that decides its hulls has one
+/// of its own and each hull's state lives and dies with the hull. A store of hulls that are only predicted is
+/// given the store of whoever knows those hulls, and its hulls are created over states kept there.
 /// </summary>
 public sealed unsafe class HullStore : IDisposable
 {
@@ -63,15 +91,26 @@ public sealed unsafe class HullStore : IDisposable
     private HullState* _states;
     private HullInfo* _infos;
     private FlightParams* _flights;
-    private float* _blockHp;
+    private readonly BlockStateStore _blockStates;
+    private readonly bool _ownsBlockStates;
     private int _capacity;
     private int _highWater;
     private int _count;
 
-    public HullStore(int capacity = 256)
+    /// <summary>
+    /// A store with room for <paramref name="capacity"/> hulls before it grows. With no
+    /// <paramref name="blockStates"/> it keeps the block states of its hulls itself; given one, it shares that
+    /// store, which its owner disposes.
+    /// </summary>
+    public HullStore(int capacity = 256, BlockStateStore? blockStates = null)
     {
+        _ownsBlockStates = blockStates is null;
+        _blockStates = blockStates ?? new BlockStateStore(capacity);
         Resize(capacity);
     }
+
+    /// <summary>Where the block states of the store's hulls are kept.</summary>
+    public BlockStateStore BlockStates => _blockStates;
 
     /// <summary>Live hulls.</summary>
     public int Count => _count;
@@ -80,25 +119,52 @@ public sealed unsafe class HullStore : IDisposable
     public int Slots => _highWater;
 
     /// <summary>
-    /// Creates an intact hull of a design at a position, at rest, with full shield and battery.
+    /// Creates an intact hull of a design at a position, at rest, with full shield and battery. Its block state,
+    /// with every block's hit points and the design's intact sums, is taken here and given back when the hull is
+    /// destroyed.
     /// </summary>
     public HullHandle Create(uint owner, byte designIndex, HullDesign design, Double3 position)
     {
         var handle = Create(owner, designIndex, HullState.Spawn(position, design.Flight));
         _flights[handle.Index] = design.Flight;
-        _infos[handle.Index].Blocks = design.FullMask;
-        var hp = BlockHp(handle.Index);
-        hp.Clear();
-        for (var i = 0; i < design.Types.Length; i++)
-            hp[i] = design.BlockHitPoints(i);
+        ref var info = ref _infos[handle.Index];
+        info.BlockState = _blockStates.Create(design, hitPoints: true);
+        info.OwnsBlockState = true;
+        return handle;
+    }
+
+    /// <summary>
+    /// Creates a hull of a design at a position over a block state that is kept elsewhere in
+    /// <see cref="BlockStates"/>: the hull has the blocks that state says, and destroying the hull or clearing
+    /// the store leaves the state as it is. Its flight figures start as the intact design's; whoever keeps the
+    /// state knows the figures that go with it and sets them.
+    /// </summary>
+    public HullHandle Create(uint owner, byte designIndex, HullDesign design, Double3 position, BlockStateHandle blockState)
+    {
+        if (_blockStates.Blocks(blockState) != design.BlockCount)
+            throw new ArgumentException("The block state was taken for another design.", nameof(blockState));
+        var handle = Create(owner, designIndex, HullState.Spawn(position, design.Flight));
+        _flights[handle.Index] = design.Flight;
+        ref var info = ref _infos[handle.Index];
+        info.BlockState = blockState;
+        info.FittedRevision = _blockStates.Revision(blockState);
         return handle;
     }
 
     /// <summary>The hull's current flight figures, which fall as it loses blocks.</summary>
     public ref FlightParams Flight(int index) => ref _flights[index];
 
-    /// <summary>Remaining hull points of each of the hull's blocks.</summary>
-    public Span<float> BlockHp(int index) => new(_blockHp + index * HullDesign.MaxBlocks, HullDesign.MaxBlocks);
+    /// <summary>
+    /// The blocks the hull still has, as a <see cref="BlockSet"/> over its stored state. A block is taken through
+    /// <see cref="BlockStates"/>, which keeps the count of losses and the sums in step.
+    /// </summary>
+    public ReadOnlySpan<ulong> Blocks(int index) => _blockStates.Alive(_infos[index].BlockState);
+
+    /// <summary>Remaining hull points of each of the hull's blocks; nothing if its block state has none.</summary>
+    public ReadOnlySpan<float> BlockHp(int index) => _blockStates.HitPoints(_infos[index].BlockState);
+
+    /// <summary>How many blocks the hull has lost; see <see cref="BlockStateStore.Revision"/>.</summary>
+    public uint Revision(int index) => _blockStates.Revision(_infos[index].BlockState);
 
     private HullHandle Create(uint owner, byte design, in HullState state)
     {
@@ -132,6 +198,7 @@ public sealed unsafe class HullStore : IDisposable
             Owner = owner,
             Design = design,
             ContactTick = long.MinValue,
+            DamageTick = long.MinValue,
         };
         _states[index] = state;
         _count++;
@@ -142,17 +209,31 @@ public sealed unsafe class HullStore : IDisposable
     public void Clear()
     {
         for (var i = 0; i < _highWater; i++)
-            _infos[i].Alive = false;
+        {
+            if (_infos[i].Alive)
+                Remove(ref _infos[i]);
+        }
+
         _highWater = 0;
         _count = 0;
     }
 
+    /// <summary>Removes a hull. Its block state goes with it if the store took it; a stale handle does nothing.</summary>
     public void Destroy(HullHandle handle)
     {
         if (!IsAlive(handle))
             return;
-        _infos[handle.Index].Alive = false;
+        Remove(ref _infos[handle.Index]);
         _count--;
+    }
+
+    private void Remove(ref HullInfo info)
+    {
+        info.Alive = false;
+        if (info.OwnsBlockState)
+            _blockStates.Release(info.BlockState);
+        info.BlockState = default;
+        info.OwnsBlockState = false;
     }
 
     public bool IsAlive(HullHandle handle) =>
@@ -168,14 +249,21 @@ public sealed unsafe class HullStore : IDisposable
 
     public void Dispose()
     {
+        if (_infos == null)
+            return;
+
+        // A block state store that is shared outlives this one: what these hulls took from it goes back, and
+        // what they only borrowed stays with its owner.
+        if (!_ownsBlockStates)
+            Clear();
         NativeMemory.Free(_states);
         NativeMemory.Free(_infos);
         NativeMemory.Free(_flights);
-        NativeMemory.Free(_blockHp);
         _states = null;
         _infos = null;
         _flights = null;
-        _blockHp = null;
+        if (_ownsBlockStates)
+            _blockStates.Dispose();
     }
 
     private void Resize(int capacity)
@@ -183,7 +271,6 @@ public sealed unsafe class HullStore : IDisposable
         _states = (HullState*)NativeMemory.Realloc(_states, (nuint)(capacity * sizeof(HullState)));
         _infos = (HullInfo*)NativeMemory.Realloc(_infos, (nuint)(capacity * sizeof(HullInfo)));
         _flights = (FlightParams*)NativeMemory.Realloc(_flights, (nuint)(capacity * sizeof(FlightParams)));
-        _blockHp = (float*)NativeMemory.Realloc(_blockHp, (nuint)(capacity * HullDesign.MaxBlocks * sizeof(float)));
         new Span<HullInfo>(_infos + _capacity, capacity - _capacity).Clear();
         _capacity = capacity;
     }

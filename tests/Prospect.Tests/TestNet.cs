@@ -12,6 +12,7 @@ using Prospect.Engine.Net;
 using Prospect.Game.Client;
 using Prospect.Game.Lobby;
 using Prospect.Game.Protocol;
+using Prospect.Game.World;
 using Xunit;
 
 namespace Prospect.Tests;
@@ -72,6 +73,7 @@ internal static class TestNet
 /// </summary>
 internal sealed class RawClient : ITransportHandler, IDisposable
 {
+    private static readonly GameContent Shipped = GameContent.Load();
     private readonly RakNetTransport _transport;
     private readonly Queue<byte[]> _messages = new();
 
@@ -89,11 +91,12 @@ internal sealed class RawClient : ITransportHandler, IDisposable
 
     public void Send(ReadOnlySpan<byte> payload, NetChannel channel = NetChannel.Reliable) => _transport.Send(0, channel, payload);
 
-    public void SendHello(uint version = ProtocolInfo.Version, string name = "Raw")
+    /// <summary>A hello as a client of this build sends it, with the shipped content unless the test gives another.</summary>
+    public void SendHello(uint version = ProtocolInfo.Version, string name = "Raw", GameContent? content = null)
     {
-        Span<byte> buffer = stackalloc byte[128];
+        Span<byte> buffer = stackalloc byte[HelloMessage.MaxWireSize];
         var writer = new NetWriter(buffer);
-        new HelloMessage { ProtocolVersion = version, PlayerName = name }.Write(ref writer);
+        new HelloMessage { ProtocolVersion = version, PlayerName = name, Content = (content ?? Shipped).Identity }.Write(ref writer);
         Send(writer.Written);
     }
 

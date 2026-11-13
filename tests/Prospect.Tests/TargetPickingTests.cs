@@ -10,7 +10,7 @@ namespace Prospect.Tests;
 public sealed class TargetPickingTests
 {
     private static Asteroid Rock(float radius, Vector3 position) => new() { Radius = radius, LocalPosition = position, Rotation = Quaternion.Identity };
-    private static PickHull Hull(float x = 0, float z = 8000) => new(1, new Double3(x, 0, z), Quaternion.Identity, [Vector3.Zero], 2, 1, 2);
+    private static PickHull Hull(float x = 0, float z = 8000) => new(1, new Double3(x, 0, z), Quaternion.Identity, [Vector3.Zero], 2, BlockMasks.Set(1), 2);
     private static PickSector Sector(params Asteroid[] rocks) => new(default, default, rocks, rocks.Length, null);
     private static PickHit[] Pick(PickHull[] hulls, PickSector sector, Vector3? ray = null, Double3 camera = default)
     {
@@ -32,7 +32,7 @@ public sealed class TargetPickingTests
     [Fact]
     public void MissingHullBlocksCannotBePicked()
     {
-        Assert.Empty(Pick([Hull() with { Mask = 0 }], Sector()));
+        Assert.Empty(Pick([Hull() with { Mask = BlockMasks.Set(0) }], Sector()));
     }
 
     [Fact]
@@ -221,7 +221,7 @@ public sealed class TargetPickingTests
     {
         // A one-metre block whose centre is 0.1 m past the cut: the slab from x = -0.5 to -0.1 is drawn. The grab
         // reaches 12 pixels, 0.012 m at 100 m here, past the cut's edge, which is no edge of the box.
-        var hull = new PickHull(1, new Double3(0, 0, 100), Quaternion.Identity, [Vector3.Zero], 1, 1, 1,
+        var hull = new PickHull(1, new Double3(0, 0, 100), Quaternion.Identity, [Vector3.Zero], 1, BlockMasks.Set(1), 1,
             CutPoint: new Vector3(-0.1f, 0, 0), CutNormal: Vector3.UnitX);
         var ray = Vector3.Normalize(new Vector3(x, 0, 100));
         var hits = new PickHit[1];
@@ -235,7 +235,7 @@ public sealed class TargetPickingTests
     {
         // The front face is past the cut and discarded, the others face away and are culled, and nothing caps the
         // cut: from here the block draws nothing, so nothing is picked, not even within the grab of its middle.
-        var hull = new PickHull(1, new Double3(0, 0, 10), Quaternion.Identity, [Vector3.Zero], 1, 1, 0.87f,
+        var hull = new PickHull(1, new Double3(0, 0, 10), Quaternion.Identity, [Vector3.Zero], 1, BlockMasks.Set(1), 0.87f,
             CutPoint: new Vector3(0, 0, 0.1f), CutNormal: -Vector3.UnitZ);
         var hits = new PickHit[1];
         Assert.Equal(0, TargetPicking.Pick(Vector3.UnitZ, default, Vector3.UnitZ, 1000, [hull], [], hits));
@@ -253,7 +253,7 @@ public sealed class TargetPickingTests
         // A 0.2 m block from z = 0.15 to 0.35 with the near plane at 0.25 m. Straight ahead its front face is nearer
         // than the near plane and every other face is turned away, so nothing is drawn. Off to the side its -x face,
         // at x = x - 0.1, is drawn from 0.25 m on: the ray meeting it there picks it, the one meeting it nearer misses.
-        var hull = new PickHull(1, new Double3(x, 0, 0.25f), Quaternion.Identity, [Vector3.Zero], 0.2f, 1, 0.18f);
+        var hull = new PickHull(1, new Double3(x, 0, 0.25f), Quaternion.Identity, [Vector3.Zero], 0.2f, BlockMasks.Set(1), 0.18f);
         var ray = x == 0 ? Vector3.UnitZ : Vector3.Normalize(new Vector3(x - 0.1f, 0, aim));
         var hits = new PickHit[1];
         Assert.Equal(expected, TargetPicking.Pick(ray, default, Vector3.UnitZ, 1000, [hull], [], hits));
@@ -269,7 +269,7 @@ public sealed class TargetPickingTests
         // cube's own front face is there.
         byte front = 0x3F & ~(1 << 4);
         byte back = 0x3F & ~(1 << 5);
-        var cubes = new PickHull(1, new Double3(0, 0, 10), Quaternion.Identity, [new Vector3(0, 0, -0.5f), new Vector3(0, 0, 0.5f)], 1, 3, 1.2f,
+        var cubes = new PickHull(1, new Double3(0, 0, 10), Quaternion.Identity, [new Vector3(0, 0, -0.5f), new Vector3(0, 0, 0.5f)], 1, BlockMasks.Set(3), 1.2f,
             CutPoint: new Vector3(0, 0, -0.1f), CutNormal: -Vector3.UnitZ);
         var hits = new PickHit[1];
         Assert.Equal(0, TargetPicking.Pick(Vector3.UnitZ, default, Vector3.UnitZ, 1000, [cubes with { Faces = [front, back] }], [], hits));
@@ -332,10 +332,10 @@ public sealed class TargetPickingTests
             var center = new Vector3((random.NextSingle() - 0.5f) * size, (random.NextSingle() - 0.5f) * size, depth);
             var normal = Vector3.Normalize(new Vector3(random.NextSingle() - 0.5f, random.NextSingle() - 0.5f, random.NextSingle() - 0.5f));
             var cutPoint = new Vector3(random.NextSingle() - 0.5f, random.NextSingle() - 0.5f, random.NextSingle() - 0.5f) * size * 0.8f;
-            var mask = kind == 2 ? design.FullMask & ~(1UL << random.Next(design.BlockOffsets.Length)) : design.FullMask;
+            var mask = kind == 2 ? design.FullMask() & ~(1UL << random.Next(design.BlockOffsets.Length)) : design.FullMask();
             var hull = kind == 0
-                ? new PickHull(1, new Double3(center.X, center.Y, center.Z), rotation, [Vector3.Zero], 1, 1, 0.87f, stretch, cutPoint, normal)
-                : new PickHull(1, new Double3(center.X, center.Y, center.Z), rotation, design.BlockOffsets, design.BlockSize, mask,
+                ? new PickHull(1, new Double3(center.X, center.Y, center.Z), rotation, [Vector3.Zero], 1, BlockMasks.Set(1), 0.87f, stretch, cutPoint, normal)
+                : new PickHull(1, new Double3(center.X, center.Y, center.Z), rotation, design.BlockOffsets, design.BlockSize, BlockMasks.Set(mask),
                     design.Flight.Radius, stretch, cutPoint, normal, kind == 1 ? design.ExteriorFaces : null);
 
             // The triangles as the mesh pass places them: one hull mesh, or a cube per block it has.
@@ -435,7 +435,7 @@ public sealed class TargetPickingTests
         var hulls = new PickHull[256];
         for (var i = 0; i < hulls.Length; i++)
             hulls[i] = new PickHull((uint)i + 1, new Double3(i % 2 == 0 ? 0 : radius * 0.9f, 0, 30 + i), Quaternion.CreateFromAxisAngle(Vector3.UnitY, i),
-                design.BlockOffsets, design.BlockSize, design.FullMask, radius, 1.5f, new Vector3(0, 0, 0.3f), Vector3.Normalize(new Vector3(1, 0, -1)), design.ExteriorFaces);
+                design.BlockOffsets, design.BlockSize, design.FullSet.ToArray(), radius, 1.5f, new Vector3(0, 0, 0.3f), Vector3.Normalize(new Vector3(1, 0, -1)), design.ExteriorFaces);
         var hits = new PickHit[hulls.Length];
         for (var i = 0; i < 20; i++) TargetPicking.Pick(Vector3.UnitZ, default, Vector3.UnitZ, 1000, hulls, [], hits);
         var start = Stopwatch.GetTimestamp();

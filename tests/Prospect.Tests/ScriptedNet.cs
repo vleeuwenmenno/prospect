@@ -274,12 +274,15 @@ internal sealed class ScriptedServer : IDisposable
         }
     }
 
-    /// <summary>A hello as a client of this build sends it.</summary>
-    public void Hello(int peer, string name = "Scripted", uint version = ProtocolInfo.Version)
+    /// <summary>
+    /// A hello as a client of this build sends it: with the server's own content, unless the test says the
+    /// client has <paramref name="content"/>.
+    /// </summary>
+    public void Hello(int peer, string name = "Scripted", uint version = ProtocolInfo.Version, GameContent? content = null)
     {
-        var bytes = new byte[64];
+        var bytes = new byte[HelloMessage.MaxWireSize];
         var writer = new NetWriter(bytes);
-        new HelloMessage { ProtocolVersion = version, PlayerName = name }.Write(ref writer);
+        new HelloMessage { ProtocolVersion = version, PlayerName = name, Content = (content ?? Server.Content).Identity }.Write(ref writer);
         Net.Deliver(peer, bytes, writer.Length);
     }
 
@@ -298,14 +301,17 @@ internal sealed class ScriptedServer : IDisposable
     }
 
     /// <summary>Connects from an address and goes through the whole handshake. Returns the peer.</summary>
-    public int Join(ulong origin, string? password = null, string name = "Scripted")
+    public int Join(ulong origin, string? password = null, string name = "Scripted", GameContent? content = null)
     {
         var peer = Net.Connect(origin);
-        Hello(peer, name);
+        Hello(peer, name, content: content);
+        // This fixture already owns Server.Content, so its canonical catalogue is a complete cache hit.
+        if (password is null) Net.Deliver(peer, [(byte)MessageId.CatalogueReady]);
         Tick();
         if (password is not null && Net[peer].Challenges == 1)
         {
             Proof(peer, password);
+            Net.Deliver(peer, [(byte)MessageId.CatalogueReady]);
             Tick();
         }
 

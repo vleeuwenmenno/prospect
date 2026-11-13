@@ -343,9 +343,12 @@ public sealed class Galaxy
         }
     }
 
-    public static Galaxy Load(string path, ulong seed = 0)
+    public static Galaxy Load(string path, ulong seed = 0) => Parse(File.ReadAllBytes(path), path, seed);
+
+    /// <summary>Reads the galaxy's rules from a file's bytes. <paramref name="path"/> names where they came from in error messages.</summary>
+    public static Galaxy Parse(ReadOnlyMemory<byte> json, string path, ulong seed = 0)
     {
-        using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+        using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
         var stars = new List<StarClass>();
         foreach (var star in root.GetProperty("starClasses"u8).EnumerateArray())
@@ -445,6 +448,12 @@ public sealed class Galaxy
         galaxy.SetModules([.. modules]);
         return galaxy;
     }
+
+    /// <summary>
+    /// True when both positions lie in the same sector on every axis. This is the range of taking direct control of
+    /// another hull: the server and the client ask it of the same positions. It is not a range for orders.
+    /// </summary>
+    public bool InSameSector(Double3 a, Double3 b) => SectorOf(a) == SectorOf(b);
 
     public SectorCoord SectorOf(Double3 position) =>
         new(

@@ -304,6 +304,107 @@ public sealed class ConnectionLimitTests
         Assert.Equal(RejectReason.VersionMismatch, rig.Net[other].Reject);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData(Password)]
+    public void ContentMustMatchToJoinAndOtherContentIsRefusedBeforeAnyChallenge(string? password)
+    {
+        using var rig = new ScriptedServer(Content, maxPlayers: 4, password);
+
+        // The same version with other content: told why and closed, in the tick the hello is read. With a
+        // password it is never asked for it, since the right one would not let this client play here either.
+        var modded = rig.Net.Connect(Stranger);
+        rig.Hello(modded, "Modded", content: OtherContent.Value);
+        rig.Tick();
+        Assert.Equal(1, rig.Net[modded].Rejects);
+        Assert.Equal(RejectReason.ContentMismatch, rig.Net[modded].Reject);
+        Assert.Equal(0, rig.Net[modded].RetryAfterSeconds);
+        Assert.True(rig.Net[modded].ClosedByServer);
+        Assert.Equal(0, rig.Net[modded].Challenges);
+        Assert.Equal(0, rig.Net[modded].Welcomes);
+        Assert.Equal(0, rig.Server.Status.PlayerCount);
+
+        // It is not a wrong password, however often it happens: nothing is counted against the address.
+        for (var i = 0; i < AttemptLimiter.FreeFailures + 3; i++)
+        {
+            var again = rig.Join(Stranger, password, "Modded", OtherContent.Value);
+            Assert.Equal(RejectReason.ContentMismatch, rig.Net[again].Reject);
+            Assert.Equal(0, rig.Net[again].Challenges);
+        }
+
+        // The server's own content joins, from that same address, and goes through the password as before.
+        var stock = rig.Join(Stranger, password, "Stock");
+        Assert.Equal(password is null ? 0 : 1, rig.Net[stock].Challenges);
+        Assert.Equal(1, rig.Net[stock].Welcomes);
+        Assert.Equal(0, rig.Net[stock].Rejects);
+        Assert.Equal(1, rig.Server.Status.PlayerCount);
+    }
+
+    [Fact]
+    public void ContentIsComparedOnlyAfterEverythingElseThatTurnsAHelloAway()
+    {
+        using var rig = new ScriptedServer(Content, maxPlayers: 1, Password);
+        var version = BitConverter.GetBytes(ProtocolInfo.Version);
+        var identity = new byte[ContentIdentity.WireSize];
+
+        // Another version is told so, whatever content it has: a build that differs cannot be asked about it.
+        var otherVersion = rig.Net.Connect(Stranger);
+        rig.Hello(otherVersion, version: ProtocolInfo.Version + 1, content: OtherContent.Value);
+
+        // A hello as the last version sent it, a version and a name and no identity, is another version too.
+        var lastVersion = rig.Net.Connect(Stranger);
+        rig.Net.Deliver(lastVersion, [(byte)MessageId.Hello, .. BitConverter.GetBytes(ProtocolInfo.Version - 1), 3, (byte)'O', (byte)'l', (byte)'d']);
+
+        // This version's hello without the identity, or with part of one, is no hello.
+        var missing = rig.Net.Connect(Stranger);
+        rig.Net.Deliver(missing, [(byte)MessageId.Hello, .. version, 3, (byte)'C', (byte)'u', (byte)'t']);
+        var partial = rig.Net.Connect(Stranger);
+        rig.Net.Deliver(partial, [(byte)MessageId.Hello, .. version, 3, (byte)'C', (byte)'u', (byte)'t', .. identity.AsSpan(1)]);
+
+        // A name the server does not take is a bad handshake, with an identity behind it that is not the server's.
+        var badName = rig.Net.Connect(Stranger);
+        rig.Net.Deliver(badName, [(byte)MessageId.Hello, .. version, 200, .. new byte[200], .. identity]);
+
+        // And a whole hello whose identity is simply another one.
+        var zero = rig.Net.Connect(Stranger);
+        rig.Net.Deliver(zero, [(byte)MessageId.Hello, .. version, 3, (byte)'C', (byte)'u', (byte)'t', .. identity]);
+
+        rig.Tick();
+        Assert.Equal(RejectReason.VersionMismatch, rig.Net[otherVersion].Reject);
+        Assert.Equal(RejectReason.VersionMismatch, rig.Net[lastVersion].Reject);
+        Assert.Equal(RejectReason.BadHandshake, rig.Net[missing].Reject);
+        Assert.Equal(RejectReason.BadHandshake, rig.Net[partial].Reject);
+        Assert.Equal(RejectReason.BadHandshake, rig.Net[badName].Reject);
+        Assert.Equal(RejectReason.ContentMismatch, rig.Net[zero].Reject);
+        Assert.All(new[] { otherVersion, lastVersion, missing, partial, badName, zero }, peer => Assert.True(rig.Net[peer].ClosedByServer));
+        Assert.All(new[] { otherVersion, lastVersion, missing, partial, badName, zero }, peer => Assert.Equal(0, rig.Net[peer].Challenges));
+
+        // An address that is locked out is told to wait, as before: its content is not looked at.
+        for (var i = 0; i < AttemptLimiter.FreeFailures; i++)
+        {
+            var guesser = rig.Net.Connect(Attacker);
+            rig.Hello(guesser);
+            rig.Tick();
+            rig.Proof(guesser, "wrong");
+            rig.Tick();
+            Assert.Equal(RejectReason.WrongPassword, rig.Net[guesser].Reject);
+        }
+
+        var locked = rig.Net.Connect(Attacker);
+        rig.Hello(locked, content: OtherContent.Value);
+        rig.Tick();
+        Assert.Equal(RejectReason.TooManyAttempts, rig.Net[locked].Reject);
+        Assert.InRange(rig.Net[locked].RetryAfterSeconds, 1, 2);
+
+        // And a full server says it is full, as before.
+        var player = rig.Join(Household, Password, "Player");
+        Assert.Equal(1, rig.Net[player].Welcomes);
+        var late = rig.Net.Connect(Stranger);
+        rig.Hello(late, content: OtherContent.Value);
+        rig.Tick();
+        Assert.Equal(RejectReason.ServerFull, rig.Net[late].Reject);
+    }
+
     [Fact]
     public void AFloodOfJunkNeitherHoldsUpTheTickNorCostsItAnyMemory()
     {
@@ -321,10 +422,16 @@ public sealed class ConnectionLimitTests
             random.NextBytes(junk[i]);
         }
 
-        var hello = new byte[64];
+        var hello = new byte[HelloMessage.MaxWireSize];
         var helloWriter = new NetWriter(hello);
-        new HelloMessage { ProtocolVersion = ProtocolInfo.Version, PlayerName = "Flood" }.Write(ref helloWriter);
+        new HelloMessage { ProtocolVersion = ProtocolInfo.Version, PlayerName = "Flood", Content = Content.Identity }.Write(ref helloWriter);
         var helloLength = helloWriter.Length;
+
+        // And the hello of a client with other content, which is turned away for that.
+        var otherHello = new byte[HelloMessage.MaxWireSize];
+        var otherWriter = new NetWriter(otherHello);
+        new HelloMessage { ProtocolVersion = ProtocolInfo.Version, PlayerName = "Modded", Content = OtherContent.Value.Identity }.Write(ref otherWriter);
+        var otherLength = otherWriter.Length;
 
         var sequence = 0u;
         var pings = 0;
@@ -336,14 +443,16 @@ public sealed class ConnectionLimitTests
 
         void FloodTick(int tick)
         {
-            // What was opened a tick ago and given a slot now sends junk, an empty message, or a good hello
-            // followed by junk; all of it many times over.
+            // What was opened a tick ago and given a slot now sends junk, an empty message, a good hello or the
+            // hello of a client with other content, followed by junk; all of it many times over.
             for (var peer = previous; peer < rig.Net.Count; peer++)
             {
                 if (peer == silent || !rig.Net[peer].Open)
                     continue;
                 if (peer % 3 == 0)
                     rig.Net.Deliver(peer, hello, helloLength);
+                else if (peer % 3 == 1)
+                    rig.Net.Deliver(peer, otherHello, otherLength);
                 for (var i = 0; i < 20; i++)
                     rig.Net.Deliver(peer, junk[(peer + i) % junk.Length], (NetChannel)(i % 2));
             }
@@ -390,11 +499,24 @@ public sealed class ConnectionLimitTests
 
         var delivered = rig.Net.Delivered;
         var answered = rig.Net[player].Pongs;
+        var firstMeasured = rig.Net.Count;
         var logged = CountingLogs.OnThisThread;
         var before = GC.GetAllocatedBytesForCurrentThread();
         for (var tick = 310; tick < 510; tick++)
             FloodTick(tick);
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Among what was refused while memory was counted were clients with other content, told so each time.
+        var otherContent = 0;
+        var challenged = 0;
+        for (var peer = firstMeasured; peer < rig.Net.Count; peer++)
+        {
+            otherContent += rig.Net[peer].Reject == RejectReason.ContentMismatch ? 1 : 0;
+            challenged += rig.Net[peer].Challenges;
+        }
+
+        Assert.InRange(otherContent, 100, 200);
+        Assert.InRange(challenged, 100, 200);
 
         // More than four hundred packets and connections a tick went through the server, and it allocated nothing.
         Assert.True(rig.Net.Delivered - delivered > 200 * 400, $"the flood delivered {rig.Net.Delivered - delivered} packets");

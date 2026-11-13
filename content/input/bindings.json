@@ -16,7 +16,9 @@
     "SwitchHull": ["Key:T", "Pad:DpadDown"],
     "TogglePlayers": ["Key:Tab", "Key:P"],
     "ToggleSocial": ["Key:O"],
-    "ToggleChat": ["Key:Enter", "Key:KpEnter"]
+    "ToggleChat": ["Key:Enter", "Key:KpEnter"],
+    "ToggleSectorInfo": ["Key:F2"],
+    "ToggleEditor": ["Key:B"]
   },
   "axes": {
     "Strafe": [{ "negative": "Key:A", "positive": "Key:D" }, { "axis": "Pad:LeftX" }],

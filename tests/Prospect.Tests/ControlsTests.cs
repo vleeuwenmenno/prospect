@@ -1,5 +1,6 @@
 using Brutal.GlfwApi;
 using Prospect.Client.Input;
+using Prospect.Client.Screens;
 using Xunit;
 
 namespace Prospect.Tests;
@@ -195,5 +196,78 @@ public sealed class ControlsTests
         {
             File.Delete(path);
         }
+    }
+
+    [Fact]
+    public void F2TogglesTheSectorPanelOnTheFrameItGoesDownAndFKeepsDownwardThrustAndFollow()
+    {
+        var map = Defaults();
+        var binding = Assert.Single(map.Bindings(InputAction.ToggleSectorInfo).ToArray());
+        Assert.Equal("F2", binding.DisplayName);
+        Assert.Contains(new ControlsCatalog(map).Rows, r => r.Action == ControlsCatalog.ActionLabels[(int)InputAction.ToggleSectorInfo] && r.Binding == "F2");
+        Assert.Equal((int)InputAction.Count, ControlsCatalog.ActionLabels.Length);
+
+        // F is still the vertical axis's downward key and Follow's key, and does not touch the sector panel.
+        var devices = new InputDevices();
+        var panel = new SectorInfoToggle();
+        devices.OnKey(GlfwKey.F, GlfwKeyAction.Press);
+        Assert.Equal(-1f, map.Axis(devices, InputAxis.Vertical, true));
+        Assert.True(map.Pressed(devices, InputAction.Follow, true));
+        Assert.False(panel.HandleShortcut(map, devices, true, false, false));
+        Assert.False(panel.Open);
+
+        // F2 opens it on the frame it goes down, and only then; it moves no flight control.
+        devices.BeginFrame();
+        devices.OnKey(GlfwKey.F, GlfwKeyAction.Release);
+        devices.OnKey(GlfwKey.F2, GlfwKeyAction.Press);
+        Assert.Equal(0f, map.Axis(devices, InputAxis.Vertical, true));
+        Assert.False(map.Held(devices, InputAction.Follow, true));
+        Assert.False(map.Held(devices, InputAction.Boost, true));
+        Assert.True(panel.HandleShortcut(map, devices, true, false, false));
+        Assert.True(panel.Open);
+        devices.BeginFrame();
+        Assert.False(panel.HandleShortcut(map, devices, true, false, false));
+        Assert.True(panel.Open);
+
+        // Not through a menu, Controls or the social workspace, and not while a field is being typed in, although
+        // F2 is a function key that the other interface shortcuts take from a text field.
+        devices.BeginFrame();
+        devices.OnKey(GlfwKey.F2, GlfwKeyAction.Release);
+        devices.OnKey(GlfwKey.F2, GlfwKeyAction.Press);
+        Assert.False(panel.HandleShortcut(map, devices, false, false, false));
+        Assert.False(panel.HandleShortcut(map, devices, true, true, false));
+        Assert.True(panel.Open);
+        Assert.True(panel.HandleShortcut(map, devices, true, false, false));
+        Assert.False(panel.Open);
+
+        // A new game starts closed.
+        devices.BeginFrame();
+        devices.OnKey(GlfwKey.F2, GlfwKeyAction.Release);
+        devices.OnKey(GlfwKey.F2, GlfwKeyAction.Press);
+        Assert.True(panel.HandleShortcut(map, devices, true, false, false));
+        Assert.True(panel.Open);
+        panel.Reset();
+        Assert.False(panel.Open);
+    }
+
+    [Fact]
+    public void BOpensTheEditorAndIsBoundToNothingElseAndHelpNamesTheEditorsKeys()
+    {
+        var map = Defaults();
+        var binding = Assert.Single(map.Bindings(InputAction.ToggleEditor).ToArray());
+        Assert.Equal("B", binding.DisplayName);
+
+        // No other action or axis reads B, so the key never also does something in flight.
+        var devices = new InputDevices();
+        devices.OnKey(GlfwKey.B, GlfwKeyAction.Press);
+        for (var action = (InputAction)0; action < InputAction.Count; action++)
+            Assert.Equal(action == InputAction.ToggleEditor, map.Pressed(devices, action, true));
+        for (var axis = (InputAxis)0; axis < InputAxis.Count; axis++)
+            Assert.Equal(0f, map.Axis(devices, axis, true));
+
+        var rows = new ControlsCatalog(map).Rows;
+        Assert.Contains(rows, r => r.Category == "Editor" && r.Action == ControlsCatalog.ActionLabels[(int)InputAction.ToggleEditor] && r.Binding == "B");
+        Assert.Contains(rows, r => r.Category == "Editor" && r.Action == "Cancel the edit" && r.Binding.Contains('B') && r.Binding.Contains("Escape"));
+        Assert.Contains(rows, r => r.Category == "Editor" && r.Action.StartsWith("Undo"));
     }
 }

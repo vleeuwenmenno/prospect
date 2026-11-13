@@ -17,6 +17,9 @@ public enum SessionState : byte
     /// <summary>Connected; waiting for the server to accept the handshake.</summary>
     Handshaking,
 
+    /// <summary>Accepted; downloading the immutable server catalogue.</summary>
+    Downloading,
+
     /// <summary>In the game.</summary>
     Active,
 
@@ -46,6 +49,12 @@ public enum SessionEndReason : byte
     /// <see cref="SessionSnapshot.RetryAfterSeconds"/> says how long the server wants this address to wait.
     /// </summary>
     TooManyAttempts,
+
+    /// <summary>
+    /// The game's content files are not the server's: the same version, with other blocks, rules, designs or
+    /// galaxy rules. Nothing a retry changes; the files have to match.
+    /// </summary>
+    ContentMismatch,
 }
 
 /// <summary>
@@ -56,6 +65,12 @@ public sealed class SessionSnapshot(GameContent content)
 {
     /// <summary>Roster, recent chat, party status, invitation and refusal for the interface.</summary>
     public readonly SocialState Social = new();
+
+    /// <summary>
+    /// Where the player's edit of their hull stands, as the server decides it: whether the draft may be committed,
+    /// what was refused and why, how long to wait, and after a rebuild the old and the new hull.
+    /// </summary>
+    public EditorView Editor;
 
     public SessionState State;
     public SessionEndReason EndReason;
@@ -94,13 +109,23 @@ public sealed class SessionSnapshot(GameContent content)
     /// <summary>
     /// The game's content as the server's world plays by it, once the server has said what its settings are;
     /// until then, as the files have it. Hull figures shown to the player come from here, so a data sheet reads
-    /// what the simulation uses. It never changes after loading and is safe to read from any thread.
+    /// what the simulation uses. A content never changes and is safe to read from any thread. When a design is
+    /// added during play this becomes another content with that design at the end: every earlier design keeps
+    /// its number and is the same object, and every hull in <see cref="Hulls"/> is of a design in this content.
     /// </summary>
     public GameContent Content = content;
 
     /// <summary>The hulls to draw this tick; only the first <see cref="HullCount"/> entries are meaningful.</summary>
     public readonly HullView[] Hulls = new HullView[ClientWorld.MaxViews];
     public int HullCount;
+
+    /// <summary>
+    /// The memory behind every <see cref="HullView.Blocks"/> of this snapshot: each viewed hull's block set,
+    /// copied here when the snapshot is filled, so the render thread reads blocks without reaching into the
+    /// session's stores. Read it through the views. It starts with a word per view and is replaced by a larger
+    /// one only when the hulls in view need more.
+    /// </summary>
+    internal ulong[] BlockWords = new ulong[ClientWorld.MaxViews];
 
     /// <summary>Index of the player's own hull in <see cref="Hulls"/>, or -1 before it exists.</summary>
     public int OwnHull = -1;
@@ -126,10 +151,13 @@ public sealed class SessionSnapshot(GameContent content)
 /// </summary>
 public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
 {
-    // Reserve the full fleet message and one five-byte Control before allowing any social traffic.
-    internal const int SocialBytesPerTick = ServerHost.PlayerBytesPerTick - FleetOrdersMessage.MaxWireSize - 5;
-    internal static readonly int SocialMessagesPerTick = Math.Min(ServerHost.PlayerMessagesPerTick - 2, SocialBytesPerTick / SocialMessage.MaxWireSize);
+    // Reserve the full fleet message, one five-byte Control, one editor request and one design acknowledgement
+    // before allowing any social traffic.
+    internal const int EditorBytesPerTick = EditorRequestMessage.MaxWireSize + DesignReadyMessage.WireSize;
+    internal const int SocialBytesPerTick = ServerHost.PlayerBytesPerTick - FleetOrdersMessage.MaxWireSize - 5 - EditorBytesPerTick;
+    internal static readonly int SocialMessagesPerTick = Math.Min(ServerHost.PlayerMessagesPerTick - 4, SocialBytesPerTick / SocialMessage.MaxWireSize);
     private long _receivedSnapshotTick = -1;
+    private long _clientTick;
     private long _sentReliableTick = -1;
 
     private const int PingIntervalTicks = TickLoop.SimulationHz / 2;
@@ -139,6 +167,15 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     private readonly ITransport _transport;
 
     // The content as loaded, and as the server's settings make it once the server has sent them.
+    private readonly DesignCatalogue _cache;
+    private DesignDownload? _download;
+    private long _downloadDeadline;
+
+    // Designs the server adds during play, and which of them the server has been told this client can show:
+    // every design below _readySent, and failure for the ones below _failSent that it cannot.
+    private DesignAppend? _append;
+    private int _readySent, _failSent;
+    private readonly EditorClient _editor = new();
     private readonly GameContent _loaded;
     private GameContent _content;
     private readonly ClientWorld _world;
@@ -184,10 +221,12 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         _password = password is not null && Passwords.IsUsable(password) ? password : null;
         _transport = transport;
         _loaded = content;
+        _cache = new DesignCatalogue(content);
         _content = content;
         _snapshots = new SnapshotExchange<SessionSnapshot>(() => new SessionSnapshot(content));
         _world = new ClientWorld(content);
         _playerName = PlayerNames.Sanitize(playerName);
+        Input.MaxCommitBytes = content.BlockTransfers.MaxBytes;
         _loop = new TickLoop("ClientSim", TickLoop.SimulationHz, this);
     }
 
@@ -209,6 +248,11 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     public void Dispose()
     {
         _loop.Stop();
+        _download?.Dispose();
+        _download = null;
+        _append?.Dispose();
+        _append = null;
+        _editor.Clear();
         _password = null;
         try { _transport.Dispose(); }
         finally { _world.Dispose(); }
@@ -218,13 +262,32 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
 
     void ITickHandler.Tick(long tick)
     {
+        _clientTick = tick;
         if (_state != SessionState.Ended)
         {
             _transport.Poll(this);
 
+            if (_state == SessionState.Downloading)
+            {
+                _download!.Tick(_transport, _sendBuffer, tick);
+                if (_download.Failed || tick > _downloadDeadline) End(SessionEndReason.ContentMismatch);
+                else if (_download.Result is { } ready)
+                {
+                    if (!ReferenceEquals(_content, ready)) { _content = ready; _world.SetContent(ready); }
+                    _sendBuffer[0] = (byte)MessageId.CatalogueReady;
+                    if (_transport.Send(0, NetChannel.Reliable, _sendBuffer.AsSpan(0, 1)))
+                    {
+                        _state = SessionState.Active;
+                        _append = new DesignAppend(_content, _cache, _content.Designs.Length, _download.TotalBytes);
+                        _readySent = _failSent = _content.Designs.Length;
+                        _download.Dispose(); _download = null;
+                        SendPing();
+                    }
+                }
+            }
             if (_leaveRequested)
                 End(SessionEndReason.LeftByPlayer);
-            else if (_state != SessionState.Active && tick > ConnectTimeoutTicks)
+            else if (_state is SessionState.Connecting or SessionState.Handshaking && tick > ConnectTimeoutTicks)
                 End(SessionEndReason.ConnectFailed);
             else if (_state == SessionState.Active && tick % PingIntervalTicks == 0)
                 SendPing();
@@ -245,13 +308,27 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                     }
                 }
                 if (_state == SessionState.Active)
-                    _world.Tick(Input, _transport, EstimateServerTick(Stopwatch.GetTimestamp()), sendCommands);
+                {
+                    // A design the server added is put at the end of the catalogue between ticks, once it has
+                    // been checked. Nothing that is known changes: the world goes on with what it had.
+                    if (_append!.Tick(_content.Designs.Length, _editor, _transport, _sendBuffer, tick) is { } added)
+                    {
+                        _content = _content.WithDesign(added);
+                        _world.AppendContent(_content);
+                    }
+
+                    _editor.Tick(Input, _transport, sendCommands, _content.BlockTransfers.MaxBytes);
+                    if (sendCommands)
+                        ReportDesigns();
+                    _world.Tick(Input, _transport, EstimateServerTick(Stopwatch.GetTimestamp()), sendCommands, tick);
+                }
             }
         }
 
         var snapshot = _snapshots.WriteBuffer;
         var now = Stopwatch.GetTimestamp();
         _social.CopyTo(snapshot.Social);
+        snapshot.Editor = _editor.View;
         snapshot.State = _state;
         snapshot.EndReason = _endReason;
         snapshot.PlayerId = _playerId;
@@ -269,7 +346,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         snapshot.RockCount = _state == SessionState.Active ? _world.CopyRockDeltas(snapshot.Rocks) : 0;
         snapshot.Galaxy = _galaxy;
         snapshot.Content = _content;
-        snapshot.HullCount = _state == SessionState.Active ? _world.BuildViews(snapshot.Hulls, serverTick, tick, out snapshot.OwnHull) : 0;
+        snapshot.HullCount = _state == SessionState.Active ? _world.BuildViews(snapshot.Hulls, ref snapshot.BlockWords, serverTick, tick, out snapshot.OwnHull) : 0;
         if (snapshot.HullCount == 0)
             snapshot.OwnHull = -1;
         snapshot.Dampeners = _world.Dampeners;
@@ -296,7 +373,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
             return;
 
         _state = SessionState.Handshaking;
-        var hello = new HelloMessage { ProtocolVersion = ProtocolInfo.Version, PlayerName = _playerName };
+        var hello = new HelloMessage { ProtocolVersion = ProtocolInfo.Version, PlayerName = _playerName, Content = _loaded.Identity };
         var writer = new NetWriter(_sendBuffer);
         hello.Write(ref writer);
         transport.Send(peer, NetChannel.Reliable, writer.Written);
@@ -329,7 +406,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         {
             case MessageId.Welcome
                 when _state == SessionState.Handshaking && WelcomeMessage.TryRead(ref reader, _loaded.SettingCatalog, out var welcome):
-                _state = SessionState.Active;
+                _state = SessionState.Downloading;
                 _password = null;
                 _playerId = welcome.PlayerId;
                 _serverName = welcome.ServerName;
@@ -341,7 +418,8 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
 
                 // The server's world, not this machine's files, says how hard things hit: predict by its settings.
                 _content = _loaded.WithSettings(welcome.Settings);
-                _world.SetContent(_content);
+                _download = new DesignDownload(_content, _cache);
+                _downloadDeadline = _clientTick + _content.BlockTransfers.AdmissionTicks;
                 _galaxy = _content.Galaxy.WithSeed(welcome.GalaxySeed);
                 _world.SetGalaxy(_galaxy);
                 _world.SetPlayer(welcome.PlayerId);
@@ -353,6 +431,22 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                 SendPing();
                 break;
 
+            case MessageId.DesignData when _state == SessionState.Downloading && channel == NetChannel.Bulk:
+                _download!.Receive(ref reader);
+                break;
+
+            case MessageId.DesignData when _state == SessionState.Active && channel == NetChannel.Bulk:
+                _append!.OnData(ref reader, _content.Designs.Length, _clientTick);
+                break;
+
+            case MessageId.DesignNotice when _state == SessionState.Active && channel == NetChannel.Reliable:
+                _append!.OnNotice(ref reader);
+                break;
+
+            case MessageId.EditorState when _state == SessionState.Active && channel == NetChannel.Reliable:
+                _editor.OnState(ref reader);
+                break;
+
             case MessageId.Challenge when _state == SessionState.Handshaking && channel == NetChannel.Reliable:
                 AnswerChallenge(ref reader);
                 break;
@@ -361,6 +455,10 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                 {
                     RejectMessage.TryRead(ref reader, out var reject);
                     _retryAfterSeconds = reject.Reason == RejectReason.TooManyAttempts ? reject.RetryAfterSeconds : 0;
+
+                    // The server's log has its own: comparing the two is how a host and a player find which side changed.
+                    if (reject.Reason == RejectReason.ContentMismatch)
+                        Logs.Net.Info($"The server plays other content than this game's {_loaded.Identity}");
                     End(
                         reject.Reason switch
                         {
@@ -368,6 +466,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                             RejectReason.ServerFull => SessionEndReason.ServerFull,
                             RejectReason.WrongPassword => SessionEndReason.WrongPassword,
                             RejectReason.TooManyAttempts => SessionEndReason.TooManyAttempts,
+                            RejectReason.ContentMismatch => SessionEndReason.ContentMismatch,
                             _ => SessionEndReason.Refused,
                         }
                     );
@@ -384,11 +483,14 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                 _world.OnRockDeltas(ref reader);
                 break;
 
+            case MessageId.BlockState when _state == SessionState.Active && channel == NetChannel.Bulk:
+                _world.OnBlockState(ref reader, _clientTick);
+                break;
             case MessageId.Snapshot when _state == SessionState.Active:
                 var headerReader = reader;
                 if (SnapshotHeader.TryRead(ref headerReader, out var header))
                     _receivedSnapshotTick = Math.Max(_receivedSnapshotTick, header.ServerTick);
-                _world.OnSnapshot(ref reader, _loop.Stats.Tick);
+                _world.OnSnapshot(ref reader, _clientTick);
                 break;
 
             case MessageId.Pong when _state == SessionState.Active && PongMessage.TryRead(ref reader, out var pong):
@@ -452,6 +554,39 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         _transport.Send(0, NetChannel.Reliable, writer.Written);
     }
 
+    /// <summary>
+    /// Tells the server, one design a tick, which of the designs it added this client can show: a design that has
+    /// been checked and decoded here and whose mesh the renderer has installed, as it reports through
+    /// <see cref="PlayerInputBridge.ReportInstalledDesigns"/>. Until then the server sends no hull of it. A design
+    /// this client could not take, or could not build a mesh for, is reported as that, so the server does not
+    /// keep an edit waiting for it.
+    /// </summary>
+    private void ReportDesigns()
+    {
+        var append = _append!;
+        if (_readySent < append.Announced && _readySent < _content.Designs.Length && _readySent < Input.InstalledDesigns)
+        {
+            if (SendDesignReady(_readySent, true))
+                _readySent++;
+            return;
+        }
+
+        var id = Math.Max(_readySent, _failSent);
+        if (id >= append.Announced)
+            return;
+        var undecoded = append.Failed && id >= _content.Designs.Length;
+        var unbuilt = id >= Input.InstalledDesigns && id < Input.FailedDesigns;
+        if ((undecoded || unbuilt) && SendDesignReady(id, false))
+            _failSent = id + 1;
+    }
+
+    private bool SendDesignReady(int design, bool ready)
+    {
+        var writer = new NetWriter(_sendBuffer);
+        DesignReadyMessage.Write(ref writer, (byte)design, ready);
+        return _transport.Send(0, NetChannel.Reliable, writer.Written);
+    }
+
     private void SendPing()
     {
         var ping = new PingMessage { ClientTimestamp = Stopwatch.GetTimestamp() };
@@ -462,6 +597,9 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
 
     private void End(SessionEndReason reason)
     {
+        _download?.Dispose(); _download = null;
+        _append?.Dispose(); _append = null;
+        _editor.Clear();
         _transport.Disconnect(0);
         _state = SessionState.Ended;
         _social.Disconnect();

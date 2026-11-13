@@ -16,6 +16,7 @@ layout(location = 4) flat in vec4 ripples[4];
 layout(location = 8) flat in vec4 rippleStrength;
 layout(location = 9) flat in int cut;
 layout(location = 10) flat in int own;
+layout(location = 11) flat in vec4 recovering;  // see ShieldInstance.Recovery
 layout(location = 0) out vec4 outColor;
 
 // How shields look, from content/visuals/shields.json (ShieldLookConstants).
@@ -23,8 +24,9 @@ layout(push_constant) uniform Look
 {
     vec4 calm;      // rgb: the calm colour; a: the rim's glow
     vec4 strained;  // rgb: the colour near breaking; a: pixels the rim bends what is behind
-    vec4 collapse;  // rgb: the collapse's colour
-    vec4 ripple;    // x: metres a second the ring spreads, y: metres across it, z: seconds it lasts
+    vec4 collapse;  // rgb: the collapse's colour; a: how strongly a recovering shield's bands show
+    vec4 ripple;    // speed, width, life, peak glow
+    vec4 impact;    // contact patch radius, life, peak glow, minimum contact strength
 } shieldLook;
 
 float hash(vec3 p)
@@ -45,17 +47,21 @@ float noise(vec3 x)
         f.z);
 }
 
-float ripple(vec4 at, float strength)
+vec2 ripple(vec4 at, float strength)
 {
     float age = at.w;
     float seconds = shieldLook.ripple.z;
     if (strength <= 0.0 || age < 0.0 || age >= seconds)
-        return 0.0;
+        return vec2(0.0);
     float d = length(localPosition - at.xyz);
     float ring = (d - age * shieldLook.ripple.x) / shieldLook.ripple.y;
     float life = 1.0 - age / seconds;
-    // A ring that spreads and fades, and a brief flash where it struck.
-    return strength * life * life * (exp(-ring * ring) + 1.5 * exp(-d * d * 0.6) * exp(-age * 9.0));
+    // A bright contact patch and two narrow wavefronts share the authoritative hit clock.
+    float echo = ring + 1.8;
+    float spot = d / shieldLook.impact.x;
+    float flashLife = max(0.0, 1.0 - age / shieldLook.impact.y);
+    return strength * vec2(life * life * (exp(-ring * ring) + 0.3 * exp(-echo * echo * 2.0)),
+        flashLife * flashLife * exp(-spot * spot));
 }
 
 void main()
@@ -78,12 +84,16 @@ void main()
     float fine = noise(localPosition * 2.6 - vec3(time * 0.5, 0.0, time * 0.4));
     float field = drift * 0.65 + fine * 0.35;
 
-    float hit = ripple(ripples[0], rippleStrength.x) + ripple(ripples[1], rippleStrength.y)
+    vec2 hit = ripple(ripples[0], rippleStrength.x) + ripple(ripples[1], rippleStrength.y)
         + ripple(ripples[2], rippleStrength.z) + ripple(ripples[3], rippleStrength.w);
 
     // Near breaking, broad slow waves roll across the whole shell, never a flicker.
     float wave = 0.5 + 0.5 * sin(dot(localPosition, vec3(0.55, 0.9, 0.4)) * 1.1 - time * 1.6 + field * 2.5);
     float waver = unstable * (0.35 + 0.65 * wave);
+
+    // Charging back up, faint bands drift across the field: a quiet sign of the charge, never a flash.
+    float bands = 0.5 + 0.5 * sin(dot(localPosition, vec3(1.7, 2.3, 1.1)) * 1.6 - time * recovering.z * 6.2831853 + field * 3.0);
+    float shiver = recovering.y * bands * shieldLook.collapse.a;
 
     // Coming online, the field fills in through the noise; collapsing, it burns away through it.
     float present = online > 0.0 ? smoothstep(0.0, 0.25, online - (1.0 - field) * 0.75) : 0.0;
@@ -94,15 +104,17 @@ void main()
     if (max(present, burning) <= 0.001)
         discard;
 
-    // Muted cyan, a little stronger and wavering near breaking; red as it collapses.
-    vec3 tint = mix(shieldLook.calm.rgb, shieldLook.strained.rgb, unstable);
-    float glow = present * (0.025 + shieldLook.calm.a * rim + 0.05 * field * rim + 0.10 * waver * (0.4 + rim)) + present * hit * 0.55;
-    vec3 light = tint * glow + shieldLook.collapse.rgb * burning * (0.35 + 0.8 * rim) * 1.4;
+    // Charge falls gradually from neutral through amber to the red of a collapsing field.
+    vec3 tint = mix(shieldLook.calm.rgb, shieldLook.strained.rgb, min(unstable * 2.0, 1.0));
+    tint = mix(tint, shieldLook.collapse.rgb, smoothstep(0.55, 1.0, unstable));
+    float glow = present * (0.008 + shieldLook.calm.a * rim + 0.025 * field * rim + 0.10 * waver * (0.4 + rim) + 0.05 * shiver * (0.5 + rim)) + present * hit.x * shieldLook.ripple.w;
+    vec3 flashTint = mix(tint, vec3(1.0, 0.95, 0.8), 0.65);
+    vec3 light = tint * glow + present * flashTint * hit.y * shieldLook.impact.z + shieldLook.collapse.rgb * burning * (0.35 + 0.8 * rim) * 1.4;
 
     // The bend: along the shell's normal as seen on screen, strongest at the rim and in a ripple, a few pixels at most.
     vec2 size = frame.lens.zw;
     vec2 across = vec2(dot(n, frame.cameraRight.xyz), -dot(n, frame.cameraUp.xyz));
-    float pixels = (0.6 + shieldLook.strained.a * rim + 3.0 * min(hit, 1.0) + 1.5 * waver) * (field - 0.35) * 2.0 * max(present, burning);
+    float pixels = (0.2 + shieldLook.strained.a * rim + 3.0 * min(hit.x + hit.y, 1.0) + 1.5 * waver + 1.2 * shiver) * (field - 0.35) * 2.0 * max(present, burning);
     vec2 here = gl_FragCoord.xy / size;
     vec2 there = (gl_FragCoord.xy + across * pixels) / size;
     // Reverse depth: greater is nearer. Any of the four texels the lookup blends that is in front of the shell

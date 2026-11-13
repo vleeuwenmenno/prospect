@@ -58,6 +58,7 @@ internal sealed partial class ScreenHost
         if (screen == Screen.MainMenu)
         {
             _controlsOpen = _mapOpen = _shipInfoOpen = _sessionMenuOpen = false;
+            _sectorInfo.Reset();
             ResetSocial();
         }
         _screen = screen;

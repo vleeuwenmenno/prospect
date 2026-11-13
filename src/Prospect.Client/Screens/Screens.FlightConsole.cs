@@ -20,14 +20,18 @@ internal sealed partial class ScreenHost
     /// The pilot console at the bottom centre: shield and hull on the left, energy and boost heat on the right,
     /// speed in a hexagon between them, and the dampeners beside the boost heat. Each bar is a row of slanted
     /// segments in a slanted frame. Every reading has a word or a number beside its colour, so
-    /// nothing is told by colour alone.
+    /// nothing is told by colour alone. With the pointer <paramref name="pointable"/> (the release key held in the
+    /// pilot view), the row under it is lit and its figures are shown above the console.
     /// </summary>
-    private void DrawFlightConsole(ImDrawListPtr draw, SessionSnapshot snapshot, in HullView own, float speed)
+    private void DrawFlightConsole(ImDrawListPtr draw, SessionSnapshot snapshot, in HullView own, float speed, bool pointable)
     {
-        var flight = snapshot.Flight;
+        // The live figures of the blocks the hull has left, except the hull's full strength: that is the
+        // blueprint's, so a damaged hull's bar and its tooltip read against what it had when built.
+        var flight = FlightConsole.WithBlueprintHull(snapshot.Flight, snapshot.Content.Designs, own.Design);
         var layout = FlightConsole.Layout(_ui.DisplaySize, Kit.Scale);
         var row = layout.Row;
         var second = layout.Top + row + layout.RowGap;
+        var hovered = FlightConsole.Hovered(layout, ImGui.GetIO().MousePos, pointable, _ui.PointerOverInterface);
 
         var shield = FlightConsole.Fraction(own.Shield, flight.ShieldCapacity);
         var hull = FlightConsole.Fraction(own.Hull, flight.HullPoints);
@@ -51,26 +55,31 @@ internal sealed partial class ScreenHost
 
         // Left: what keeps the hull alive.
         // A broken shield says so: the bar still shows the charge it is building back, dimmed, because that charge
-        // takes no hits until the simulation brings the shield online again.
+        // takes no hits until the simulation brings the shield online again. The mark is where it restarts.
         var hasShield = flight.ShieldCapacity > 0f;
         var offline = hasShield && own.ShieldOffline;
-        ConsoleRow(draw, layout, layout.LeftX, layout.Top, ConsoleIcon.Shield, "SHIELD"u8, offline ? Theme.Bad : hasShield ? Theme.Info : Theme.LineStrong, out var track);
-        if (offline)
+        var restart = offline ? FlightConsole.RestartMark(flight) : 0f;
+        ConsoleRow(draw, layout, layout.LeftX, layout.Top, ConsoleIcon.Shield, "SHIELD"u8, offline ? Theme.Bad : hasShield ? Theme.Info : Theme.LineStrong, out var track, hot: hovered == ConsoleBar.Shield);
+        if (restart > 0f)
+            DrawShieldRestart(draw, layout, FlightConsole.RestartProgress(own.Shield, flight), track);
+        else if (offline)
             ConsoleReading(draw, layout, layout.LeftX, layout.Top, "OFFLINE"u8, _ui.SansMedium, Theme.Bad, track);
         else if (hasShield)
             ConsoleReading(draw, layout, layout.LeftX, layout.Top, Points(own.Shield, flight.ShieldCapacity), _ui.Mono, Theme.Text, track);
         else
             ConsoleReading(draw, layout, layout.LeftX, layout.Top, "NONE"u8, _ui.SansMedium, Theme.TextMute, track);
         ConsoleSegments(draw, track, shield, _trailShield, offline ? Theme.LineStrong : Theme.Info, false);
+        if (restart > 0f)
+            ConsoleMarker(draw, track, restart, 0.85f);
 
         var hullColor = hull < 0.3f ? Theme.Bad : Theme.Good;
-        ConsoleRow(draw, layout, layout.LeftX, second, ConsoleIcon.Hull, "HULL"u8, hullColor, out track);
+        ConsoleRow(draw, layout, layout.LeftX, second, ConsoleIcon.Hull, "HULL"u8, hullColor, out track, hot: hovered == ConsoleBar.Hull);
         ConsoleReading(draw, layout, layout.LeftX, second, Points(own.Hull, flight.HullPoints), _ui.Mono, hull < 0.3f ? Theme.Bad : Theme.Text, track);
         ConsoleSegments(draw, track, hull, _trailHull, hullColor, false);
 
         // Right: the battery, and the boost drive's heat.
         var energyColor = energy < 0.15f ? Theme.Bad : Theme.Accent;
-        ConsoleRow(draw, layout, layout.RightX, layout.Top, ConsoleIcon.Energy, "ENERGY"u8, energyColor, out track);
+        ConsoleRow(draw, layout, layout.RightX, layout.Top, ConsoleIcon.Energy, "ENERGY"u8, energyColor, out track, hot: hovered == ConsoleBar.Energy);
         DrawEnergyReadings(draw, layout, own, flight, energy, track);
         ConsoleSegments(draw, track, energy, _trailEnergy, energyColor, false);
 
@@ -80,9 +89,9 @@ internal sealed partial class ScreenHost
             ConsoleMarker(draw, track, FlightConsole.Fraction(flight.BoostEnergyFloor, flight.EnergyStorage), 0.85f);
 
         // Why boost is unavailable, when it is: the drive overheated and is cooling, or the battery is below its floor.
-        var noEnergy = !own.Boosting && (own.Energy <= 0f || own.Energy < flight.BoostEnergyFloor);
+        var noEnergy = FlightConsole.BoostStarved(own, flight);
         var heatColor = own.BoostLocked || noEnergy ? Theme.Bad : FlightConsole.HeatColor(heat);
-        ConsoleRow(draw, layout, layout.RightX, second, ConsoleIcon.Heat, own.Boosting ? "BOOSTING"u8 : "BOOST HEAT"u8, heatColor, out track, own.Boosting);
+        ConsoleRow(draw, layout, layout.RightX, second, ConsoleIcon.Heat, own.Boosting ? "BOOSTING"u8 : "BOOST HEAT"u8, heatColor, out track, own.Boosting, hovered == ConsoleBar.Heat);
         DrawHeatReadings(draw, layout, second, own.BoostLocked ? "OVERHEAT"u8 : noEnergy ? "NO ENERGY"u8 : Kit.F($"{heat * 100f:0} %"), own.BoostLocked || noEnergy, heatColor, snapshot.Dampeners, ref track);
         ConsoleSegments(draw, track, heat, heat, own.BoostLocked ? Theme.Bad : heatColor, !own.BoostLocked);
 
@@ -102,6 +111,51 @@ internal sealed partial class ScreenHost
         Kit.Text(draw, _ui.Mono, FlightConsole.SpeedFont, new float2(cx - speedSize.X * 0.5f, top + Kit.Px(FlightConsole.SpeedTop)), Theme.Text, speedText);
         var unit = Kit.Measure(_ui.SansMedium, Theme.FontCaption, "M/S"u8);
         Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(cx - unit.X * 0.5f, top + Kit.Px(FlightConsole.UnitTop)), Theme.TextMute, "M/S"u8);
+
+        // The hovered row's figures, above the console and over any window: a tooltip, which takes no input.
+        if (hovered != ConsoleBar.None)
+        {
+            var size = ConsoleTip.Measure(_ui.Mono, _ui.SansMedium, Kit.Scale, hovered, own, flight);
+            var rect = FlightConsole.TipRect(layout, hovered, size, _ui.DisplaySize, Kit.Scale);
+            var tone = hovered switch
+            {
+                ConsoleBar.Shield => offline ? Theme.Bad : hasShield ? Theme.Info : Theme.LineStrong,
+                ConsoleBar.Hull => hullColor,
+                ConsoleBar.Energy => energyColor,
+                _ => heatColor,
+            };
+            ConsoleTip.Draw(ImGui.GetForegroundDrawList(), _ui.Mono, _ui.SansMedium, Kit.Scale, rect, tone, hovered, own, flight);
+        }
+    }
+
+    /// <summary>
+    /// A broken shield's readings: that it is offline, and how far its stored charge is towards the restart mark
+    /// on the bar. With room the two stack in the reading column; in a compact row the progress goes beside the
+    /// label while it fits. No time is promised: the shield also waits out its delay after the last hit.
+    /// </summary>
+    private void DrawShieldRestart(ImDrawListPtr draw, in FlightConsoleLayout layout, float progress, in ConsoleTrack track)
+    {
+        var x = layout.LeftX;
+        var y = layout.Top;
+        var right = x + layout.GroupWidth - Kit.Px(FlightConsole.Slant * 0.5f + FlightConsole.Pad);
+        var state = Kit.Measure(_ui.SansMedium, Theme.FontSmall, "OFFLINE"u8);
+        var restart = Kit.F($"RESTART {progress * 100f:0} %");
+        var restartSize = Kit.Measure(_ui.Mono, Theme.FontCaption, restart);
+        draw.PushClipRect(new float2(x, y), new float2(x + layout.GroupWidth, y + layout.Row), true);
+        if (!layout.Compact)
+        {
+            Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, new float2(right - state.X, y + Kit.Px(4)), Theme.Bad, "OFFLINE"u8);
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(right - restartSize.X, y + Kit.Px(20)), Theme.TextDim, restart);
+        }
+        else
+        {
+            Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, new float2(right - state.X, y + Kit.Px(3)), Theme.Bad, "OFFLINE"u8);
+            var labelEnd = track.LabelEnd + Kit.Px(FlightConsole.ColumnGap);
+            if (labelEnd + restartSize.X + Kit.Px(FlightConsole.ColumnGap) <= right - state.X)
+                Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(labelEnd, y + Kit.Px(5)), Theme.TextDim, restart);
+        }
+
+        draw.PopClipRect();
     }
 
     /// <summary>
@@ -203,7 +257,7 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>Shield or hull points out of the most the hull holds, in thousands once they no longer fit.</summary>
-    private static ReadOnlySpan<byte> Points(float value, float capacity)
+    internal static ReadOnlySpan<byte> Points(float value, float capacity)
     {
         capacity = FlightConsole.Shown(capacity, float.MaxValue);
         var shown = FlightConsole.Shown(value, capacity);
@@ -213,7 +267,7 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>Stored energy out of capacity, in megajoules, or gigajoules for the largest hulls.</summary>
-    private static ReadOnlySpan<byte> Energy(float value, float capacity)
+    internal static ReadOnlySpan<byte> Energy(float value, float capacity)
     {
         capacity = FlightConsole.Shown(capacity, float.MaxValue);
         var shown = FlightConsole.Shown(value, capacity);
@@ -233,8 +287,11 @@ internal sealed partial class ScreenHost
     /// <summary>Where a row's segments go, and where its label ends.</summary>
     private readonly record struct ConsoleTrack(float Left, float Right, float Top, float Bottom, float LabelEnd);
 
-    /// <summary>One slanted row: its frame, icon and label, and where its segments go.</summary>
-    private void ConsoleRow(ImDrawListPtr draw, in FlightConsoleLayout layout, float x, float y, ConsoleIcon icon, ImString label, uint rgb, out ConsoleTrack track, bool lit = false)
+    /// <summary>
+    /// One slanted row: its frame, icon and label, and where its segments go. A <paramref name="hot"/> row, under
+    /// the pointer, is raised a shade and has its border lit.
+    /// </summary>
+    private void ConsoleRow(ImDrawListPtr draw, in FlightConsoleLayout layout, float x, float y, ConsoleIcon icon, ImString label, uint rgb, out ConsoleTrack track, bool lit = false, bool hot = false)
     {
         var w = layout.GroupWidth;
         var h = layout.Row;
@@ -244,8 +301,8 @@ internal sealed partial class ScreenHost
         var p2 = new float2(x + w - s, y + h);
         var p3 = new float2(x, y + h);
         // The heads-up panel look: muted fill, a quiet border, and the reading's colour only on the leading edge.
-        draw.AddQuadFilled(p0, p1, p2, p3, Kit.Color(Theme.Panel, Hud.FillAlpha));
-        draw.AddQuad(p0, p1, p2, p3, Kit.Color(Hud.Border(rgb, lit)), 1f);
+        draw.AddQuadFilled(p0, p1, p2, p3, Kit.Color(hot ? Theme.PanelRaised : Theme.Panel, Hud.FillAlpha));
+        draw.AddQuad(p0, p1, p2, p3, Kit.Color(Hud.Border(rgb, lit || hot)), 1f);
         draw.AddLine(p3, p0, Kit.Color(rgb, 0.85f), Kit.Px(2));
 
         var pad = Kit.Px(FlightConsole.Pad);
@@ -387,6 +444,16 @@ internal sealed partial class ScreenHost
     }
 }
 
+/// <summary>One of the pilot console's four bars, as the pointer finds them.</summary>
+internal enum ConsoleBar
+{
+    None,
+    Shield,
+    Hull,
+    Energy,
+    Heat,
+}
+
 /// <summary>Where the pilot console sits on a screen of a given size and interface scale.</summary>
 /// <param name="Top">The console's top edge; the party list and chat stay above it.</param>
 /// <param name="LeftX">The left group's left edge, which is also the console's.</param>
@@ -461,6 +528,65 @@ internal static class FlightConsole
     public const uint DrawColor = 0xFF7A2E;
     public const uint ChargeColor = Theme.Good;
 
+    /// <summary>
+    /// A row's whole rectangle, slant included: the shield and hull on the left, energy and boost heat on the right,
+    /// each group's first row on top.
+    /// </summary>
+    public static HudRect BarRect(in FlightConsoleLayout layout, ConsoleBar bar)
+    {
+        var left = bar is ConsoleBar.Shield or ConsoleBar.Hull ? layout.LeftX : layout.RightX;
+        var top = bar is ConsoleBar.Shield or ConsoleBar.Energy ? layout.Top : layout.Top + layout.Row + layout.RowGap;
+        return new HudRect(left, top, left + layout.GroupWidth, top + layout.Row);
+    }
+
+    /// <summary>
+    /// The row under the pointer, or none. Only a pointer <paramref name="shown"/> for the heads-up display (the
+    /// pilot holding the release key, with nothing open) can point at a row, and never while it is over a window
+    /// of the interface, such as a pinned social window covering the console. A captured pointer's last position
+    /// therefore never counts.
+    /// </summary>
+    public static ConsoleBar Hovered(in FlightConsoleLayout layout, float2 pointer, bool shown, bool overInterface)
+    {
+        if (!shown || overInterface)
+            return ConsoleBar.None;
+        for (var bar = ConsoleBar.Shield; bar <= ConsoleBar.Heat; bar++)
+        {
+            if (BarRect(layout, bar).Contains(pointer))
+                return bar;
+        }
+
+        return ConsoleBar.None;
+    }
+
+    /// <summary>
+    /// Where a row's details go: above the console so they never cover a bar, from the row's outer edge, and kept
+    /// inside the side margins of a <paramref name="display"/> of any size. Wider than the screen allows, the
+    /// details are cut to it.
+    /// </summary>
+    public static HudRect TipRect(in FlightConsoleLayout layout, ConsoleBar bar, float2 size, float2 display, float scale)
+    {
+        var side = MathF.Round(Side * scale);
+        var width = Math.Min(size.X, Math.Max(0f, display.X - 2 * side));
+        var row = BarRect(layout, bar);
+        var left = bar is ConsoleBar.Shield or ConsoleBar.Hull ? row.Left : row.Right - width;
+        left = Math.Clamp(left, side, Math.Max(side, display.X - side - width));
+        var top = Math.Max(side, layout.Top - MathF.Round(Theme.Space2 * scale) - size.Y);
+        return new HudRect(left, top, left + width, top + size.Y);
+    }
+
+    /// <summary>
+    /// Where a broken shield comes back online, as a share of its capacity: the hull's own restart rule. Zero when
+    /// there is no shield, so no mark is drawn.
+    /// </summary>
+    public static float RestartMark(in FlightParams flight) =>
+        flight.ShieldCapacity > 0f && float.IsFinite(flight.ShieldCapacity) && flight.ShieldRestartFraction is > 0f and <= 1f
+            ? flight.ShieldRestartFraction
+            : 0f;
+
+    /// <summary>How far a broken shield's stored charge is towards its restart mark, 0 to 1.</summary>
+    public static float RestartProgress(float shield, in FlightParams flight) =>
+        Fraction(shield, flight.ShieldCapacity * RestartMark(flight));
+
     public static FlightConsoleLayout Layout(float2 display, float scale)
     {
         float Px(float design) => MathF.Round(design * scale);
@@ -475,6 +601,25 @@ internal static class FlightConsole
         var cx = MathF.Round(display.X * 0.5f);
         var half = center * 0.5f;
         return new FlightConsoleLayout(top, cx - half - gap - group, cx + half + gap, cx, group, row, rowGap, group < Px(FullMin));
+    }
+
+    /// <summary>
+    /// True when boost cannot start for want of energy: not already running, and the battery is empty or below
+    /// its boost floor.
+    /// </summary>
+    public static bool BoostStarved(in HullView own, in FlightParams flight) =>
+        !own.Boosting && (own.Energy <= 0f || own.Energy < flight.BoostEnergyFloor);
+
+    /// <summary>
+    /// The hull's live flight figures with <see cref="FlightParams.HullPoints"/> set to its design's full hull
+    /// points. The live figure is worked out from the blocks the hull still has, so it shrinks with them and a
+    /// damaged hull would otherwise read as nearly whole.
+    /// </summary>
+    public static FlightParams WithBlueprintHull(FlightParams flight, HullDesign[] designs, byte design)
+    {
+        if (design < designs.Length)
+            flight.HullPoints = designs[design].Flight.HullPoints;
+        return flight;
     }
 
     /// <summary>A reading as a fraction of its capacity: 0 to 1, and 0 for no capacity or a value that is not a number.</summary>

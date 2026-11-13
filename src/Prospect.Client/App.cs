@@ -135,6 +135,13 @@ internal sealed class App : IDisposable
     private readonly Texture2D _galaxyImage;
     private long _lastFrameTimestamp;
     private bool _viewOpened;
+    private readonly CatalogueMeshes _catalogueMeshes;
+
+    /// <summary>Whether the acquired catalogue can be drawn safely.</summary>
+    public bool MeshesReady { get; private set; }
+
+    /// <summary>A preparation failure shown instead of entering the world.</summary>
+    public string? MeshError => _catalogueMeshes.Error;
     private readonly ScreenshotJob _screenshotJob = new();
     private int2 _framebufferSize;
     private int2 _windowedSize;
@@ -156,6 +163,7 @@ internal sealed class App : IDisposable
         Settings = ClientSettings.Load();
         Jobs = new JobSystem(Math.Clamp(Environment.ProcessorCount - 3, 1, 16), "Job");
 
+        _catalogueMeshes = new CatalogueMeshes(Jobs);
         Content = GameContent.Load();
         NewGameSettings = Content.SettingCatalog.Build(null, options.WorldSettingArgs, message => Logs.App.Warning(message));
         NewGameHosting = options.Hosting.Clone();
@@ -193,13 +201,7 @@ internal sealed class App : IDisposable
                 shaderJobs.Add(new ShaderJob(Path.GetFileName(file)));
         }
 
-        var designCount = Content.Designs.Length;
-        var meshJobs = new MeshJob[WorldView.MeshCount(designCount)];
-        for (var i = 0; i < designCount; i++)
-        {
-            var design = Content.Designs[i];
-            meshJobs[i] = new MeshJob(() => MeshBuilder.Hull(design));
-        }
+        var meshJobs = new MeshJob?[WorldView.MeshCount()];
 
         for (var shape = 0; shape < Galaxy.AsteroidShapes; shape++)
         {
@@ -207,17 +209,22 @@ internal sealed class App : IDisposable
             for (var detail = 0; detail < WorldView.AsteroidDetail.Length; detail++)
             {
                 var subdivisions = WorldView.AsteroidDetail[detail];
-                meshJobs[WorldView.AsteroidMesh(designCount, shape, detail)] = new MeshJob(() => MeshBuilder.Asteroid(index, subdivisions));
+                meshJobs[WorldView.AsteroidMesh(shape, detail)] = new MeshJob(() => MeshBuilder.Asteroid(index, subdivisions));
             }
         }
 
         var galaxyJob = new GalaxyImageJob(Content.Galaxy.Shape);
         Jobs.Schedule(galaxyJob, 20);
-        meshJobs[WorldView.CubeMesh(designCount)] = new MeshJob(MeshBuilder.Cube);
+        for (var shape = 0; shape <= (int)BlockShape.WedgeZMinusMinus; shape++)
+        {
+            var block = (BlockShape)shape;
+            meshJobs[WorldView.BlockMesh(block)] = new MeshJob(() => MeshBuilder.Primitive(block));
+        }
         foreach (var job in shaderJobs)
             Jobs.Schedule(job, 6);
         foreach (var job in meshJobs)
-            Jobs.Schedule(job, 3);
+            if (job is not null)
+                Jobs.Schedule(job, 3);
         Jobs.Pump();
 
         if (!Glfw.Init())
@@ -256,8 +263,9 @@ internal sealed class App : IDisposable
         foreach (var job in shaderJobs)
             shaders[job.FileName] = job.Result!;
         var meshes = new MeshData[meshJobs.Length];
+        var emptyShipSlot = new MeshData();
         for (var i = 0; i < meshes.Length; i++)
-            meshes[i] = meshJobs[i].Result!;
+            meshes[i] = meshJobs[i]?.Result ?? emptyShipSlot;
         _scene = new SceneRenderer(_gpu, _swapchain, shaders, meshes);
         World = new WorldView(Devices, Actions, Settings, Jobs, _scene, Content.Designs);
 
@@ -317,6 +325,12 @@ internal sealed class App : IDisposable
 
     /// <summary>True while the pointer is hidden and steers the view; the interface then cannot be pointed at.</summary>
     public bool PointerCaptured => _pointer.Captured;
+
+    /// <summary>
+    /// True while the pilot holds the release key (Shift by default) and the pointer is shown: the heads-up display
+    /// may then be pointed at.
+    /// </summary>
+    public bool PointerReleased => _pointer.ReleaseHeld && !_pointer.Captured;
 
     /// <summary>Process exit code: non-zero when a benchmark missed its targets.</summary>
     public int ExitCode { get; private set; }
@@ -557,7 +571,29 @@ internal sealed class App : IDisposable
 
             // The world is drawn whenever the session has put the player's hull in space.
             var snapshot = Session?.Client.AcquireSnapshot();
-            var inSpace = snapshot is { State: SessionState.Active, OwnHull: >= 0, Galaxy: not null };
+            var designs = snapshot is { State: SessionState.Active } ? snapshot.Content.Designs : null;
+            var prepared = _catalogueMeshes.Prepare(designs);
+            if (prepared is not null)
+            {
+                _scene.ReplaceShipMeshes(prepared);
+                _catalogueMeshes.Accept(designs!, prepared);
+            }
+
+            // A catalogue that grew during play keeps the world on screen: the meshes that are installed stay in
+            // use while a worker prepares the longer catalogue, and hulls of the new designs are not drawn, nor
+            // sent by the server, until this says they are installed. Only the first catalogue of a session is
+            // waited for.
+            var installed = _catalogueMeshes.Installed(designs);
+            MeshesReady = installed > 0;
+            World.InstalledDesigns = installed;
+            if (designs is not null && Session is { } playing)
+            {
+                playing.Client.Input.ReportInstalledDesigns(installed);
+                if (installed > 0 && installed < designs.Length && _catalogueMeshes.Error is not null)
+                    playing.Client.Input.ReportDesignFailure(designs.Length);
+            }
+
+            var inSpace = MeshesReady && snapshot is { State: SessionState.Active, OwnHull: >= 0, Galaxy: not null };
             var focused = _window.IsFocused;
 
             // Whether the pointer is shown depends on what is open, the release key and focus; a frame in which
@@ -568,15 +604,22 @@ internal sealed class App : IDisposable
                 InSpace = inSpace,
                 Focused = focused,
                 SurfaceOpen = !_screens.WorldInputEnabled,
-                CommandView = World.Mode == ViewMode.Command,
+                CommandView = World.PointerView,
             };
             _pointer.Update(pointerFrame);
             _screens.HandleControlsShortcut(inSpace && focused);
             _screens.HandleSocialShortcuts(inSpace && focused);
+            _screens.HandleSectorInfoShortcut(inSpace && focused);
+            // B and Escape for the ship editor, before flight reads the keys; the editor itself opens only when the
+            // server allows it, inside the world's update.
+            _screens.HandleEditorShortcut(inSpace && focused, snapshot, Session?.Client.Input);
             // A shortcut can open or close a surface after NewFrame; its cursor change belongs to this frame.
             pointerFrame.SurfaceOpen = !_screens.WorldInputEnabled;
             _pointer.RefreshCapture(pointerFrame);
-            var worldInput = inSpace && _screens.WorldInputEnabled && focused && !_screens.ControlsHandled && !_screens.SocialHandled && !_ui.WantsKeyboardInput;
+            // A part card held for a drag keeps an interface item active, which claims the keyboard; the world still
+            // takes that one press over, as the editor's palette hands it (WorldView.HoldsInterfacePress).
+            var worldInput = inSpace && _screens.WorldInputEnabled && focused && !_screens.ControlsHandled && !_screens.SocialHandled
+                && !_screens.EditorHandled && (!_ui.WantsKeyboardInput || World.HoldsInterfacePress);
             // Opening or closing an interface consumes its frame, including any simultaneous mouse click.
             worldInput &= !Actions.Pressed(Devices, InputAction.Pause, true)
                 && !Actions.Pressed(Devices, InputAction.ToggleMap, true)
@@ -589,11 +632,12 @@ internal sealed class App : IDisposable
                 var windowSize = _window.Size;
                 var screen = windowSize.X > 0 && windowSize.Y > 0 ? new float2(windowSize.X, windowSize.Y) : viewport;
                 _pointer.BeginWorldMouse(worldInput);
+                World.PointerOverPanel = _pointer.PointerOverWindow;
                 World.Update(snapshot!, Session!.Client.Input, dt, worldInput, viewport, screen, _pointer.PointerOverInterface);
                 _pointer.EndWorldMouse();
                 // The command key and taking control change the view inside the update; the pointer follows in
                 // the same frame, quarantining whatever that poll still held.
-                pointerFrame.CommandView = World.Mode == ViewMode.Command;
+                pointerFrame.CommandView = World.PointerView;
                 _pointer.RefreshCapture(pointerFrame);
             }
 
@@ -621,7 +665,7 @@ internal sealed class App : IDisposable
                 StartScreenshotEncode(shot);
 
             Stats.EndFrame();
-            Automate(snapshot);
+            Automate(MeshesReady ? snapshot : null);
 
             if (!_vsync && Settings.FrameCap > 0 && _benchmark is null)
                 PreciseSleep.Until(frameStart + Stopwatch.Frequency / Settings.FrameCap);
@@ -715,6 +759,8 @@ internal sealed class App : IDisposable
             }
             else if (view == "controls")
                 _screens.OpenControls();
+            else if (view == "edit" && snapshot is { OwnHull: >= 0 })
+                World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
             else if (view == "info")
                 _screens.OpenShipInfo();
             else if (view == "world-settings")

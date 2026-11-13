@@ -35,7 +35,7 @@ public sealed class SocialTests
                 Clients[i] = new ClientSession(Links[i].Client, Content, $"Player{i}");
             }
             Server = new ServerHost(new ServerConfig { MaxPlayers = count }, Content, transports);
-            Step(3);
+            Step(4); // CatalogueReady reaches the server before the initial roster is published.
             foreach (var c in Clients) Assert.Equal(SessionState.Active, c.AcquireSnapshot().State);
         }
         public SessionSnapshot View(int i) => Clients[i].AcquireSnapshot();

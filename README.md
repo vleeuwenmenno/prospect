@@ -47,8 +47,73 @@ alliances. The sign-in lasts while the game runs; after a restart, sign in again
 last only for the session, and presence covers only the server you are on.
 
 Stage 1 of blocks at scale exists in tooling and tests: versioned boxes, content limits and size rules,
-solid-box evaluation and running sums, with seeded 4,096-block and 150,000-block fixtures.
-See [docs/blocks-at-scale.md](docs/blocks-at-scale.md) for measurements and the remaining stages.
+with seeded 4,096-block and 150,000-block fixtures. Its solid-box evaluation and running sums are how every
+hull's figures are now worked out. Stage 2 supports mixed-size designs of hundreds of boxes through loading,
+network transfer, collision and drawing. Shared resource budgets replace the old 64-block restriction.
+See [docs/blocks-at-scale.md](docs/blocks-at-scale.md#final-admission-evidence-and-limits) for current limits,
+measurements and the remaining stages.
+
+**Ship editor (second slice).** `B` asks the server to edit the ship you fly; it opens only when the server says
+yes (no damage for 30 seconds, no jump ordered or running). The world keeps running around you and other players
+are never blocked. The editor works in space, around your ship:
+
+- The part list has a search at the top, tabs by role (hull, power, move, shield, jump) and a Drone tab for the
+  compact parts. Each card shows the part's figures at the size parts are placed at (whole cells on X, Y, Z).
+- Click a card, then click a block face; or drag the card onto the ship. The ghost shows green where the part
+  fits and red with the reason where it does not. Let go over a panel, or press `Esc`, and nothing changes.
+- Size the part before placing it: hold `S` with its ghost on a face. The ghost holds still; the face of the
+  ghost under the pointer is highlighted, with an arrow along the axis it moves on and the size on X, Y and Z
+  beside the pointer. Left-drag that face: it moves out or in by whole cells, 1 to the largest box side, and the
+  opposite face stays where it is. The pointer is followed along the face's axis as it shows on screen; a face
+  pointing nearly straight at the camera is dragged up (grow) and down instead. A wedge's slant moves the box
+  side it stands for, and the wedge stays the same wedge. Let go of the button or `S`: nothing is placed; the
+  size and place stay, and a new click while the pointer is still or on the ghost places it there. `Esc` puts
+  back the size and place from before `S`. The right button still orbits while `S` is held.
+- Turn the part before placing it: `R` with its ghost on a face shows two rings around the ghost, about the
+  grid's x (red) and y (green). Left-drag a ring round: the ghost follows the pointer, and the part itself turns
+  in exact quarter turns (90 degrees) as the drag passes each half way. Let go, and the ghost glides onto the
+  quarter turn; nothing else happens. The wheel over a ring turns a quarter either way; a click on it a quarter
+  forward, `Shift`+click back. The two rings together reach all twelve wedge orientations. Each turn glides over
+  `turnSeconds` in `content/visuals/editor.json`; the glide is only drawn, the part placed is always the quarter
+  turn. The right button orbits the camera without ending the turn. Every turn counts at once; nothing confirms
+  it. A click on the ghost places it as it is drawn and ends the turn. `R` again, or a left or middle click
+  anywhere else (the sidebar included), ends the turn and keeps it, without placing: the ghost then follows the
+  pointer as usual, so the next click places. `Esc`, or choosing another part, shape or the select tool, puts
+  back the shape and size from before `R`.
+- A ship takes FTL drives of one kind: several hyperspace drives, say, but not a hyperspace drive and a rift
+  cutter. The editor refuses a part of another kind at once, and the server and the design files refuse such a
+  design.
+- The middle button selects a block, also while placing; `Shift` adds or removes one; a middle drag still pans.
+  Every selected block is outlined blue. A middle click on empty space clears the selection.
+- Drag a selected block with the left button to move the whole selection onto another face. `Ctrl+C` and
+  `Ctrl+V` copy and paste it; `Delete` deletes it; **Merge** joins blocks of one type that fill a box exactly,
+  and shows how the figures change. Each is one step to undo. Undo and redo clear the selection.
+- `F` (the Follow key) turns the camera to the selection, or to the whole draft with nothing selected, keeping
+  its angle. The camera's range grows with the draft.
+- The draft is the ship's full blueprint: blocks the ship lost are in it, outlined red, and the panel shows hull
+  points now against built. A damaged ship (lost blocks or hull points; a shield that is down does not count) is
+  repaired first: the editor opens on it to look, select and **Repair**, and nothing can be changed or applied
+  until it is whole. The server refuses a design for a damaged hull too. **Repair** rebuilds the ship as built,
+  for free. Changes kept from before the damage hold it back until **Discard changes** throws them away.
+- The right panel shows the checked figures. Low power, no battery for the shield, low or no forward
+  acceleration, low top speed and slow turning show in red with the reason. These warnings never stop Apply.
+  Figures of an older version are labelled as such. Thresholds are in `content/visuals/editor.json`.
+- The shield shape's complexity is shown against its limit. Over the limit the draft cannot be applied, and the
+  panel says why.
+- Apply sends the design, shows its progress, and the server rebuilds the ship; you fly the new design at once.
+- Damage, a jump or leaving the ship closes the edit and says why; your changes are kept for the next `B`
+  on the same hull and design, including after block loss. `B`, `Esc` or Cancel throws the draft away.
+
+- **Wedges.** Part shape Box or Wedge sits under the part list, with the size, the shape and the sizing and
+  turning keys. A wedge fills half its box, with half the box's figures; the part cards show them. A selected
+  block turns with its own Turn X/Y/Z, keeping
+  its low corner; a turn that would overlap is refused. Copy, paste, move and undo keep each block's shape.
+  Merge joins boxes only. A part placed on a slope snaps against the wedge's box, on the larger box side.
+
+**Not there in the editor:** other shapes, stock or custom meshes, mirror or symmetry,
+dragging a face of a placed block with the mouse (its resize is numeric), saved designs, renaming or recolouring a ship. Ships stay at
+the current limits of a few hundred boxes. A server's design catalogue only grows, so it can fill up until it
+restarts; the editor then says so. The editor has not been checked on screen by a person yet.
 
 Milestone 1 (skeleton) is complete. On top of it, the first slice of the world is in:
 
@@ -60,7 +125,8 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   are the only module so far. The same seed gives the same world to the last bit on every machine.
 - **Sector character.** Every sector has a richness, from barren to very rich, and a set of resources that can
   occur there. Rich and poor space come in regions. Some sectors have every resource, some none, most a few; the
-  sector panel and the map (for a discovered sector) show both.
+  sector panel and the map (for a discovered sector) show both. The sector panel is closed by default: `F2` shows it.
+  There is no closed-state hint or reserved row.
 - **Asteroid fields.** A sector has no field, a thin scatter, a cluster or a dense belt: up to 4,096 asteroids.
   Sizes run from pebbles 6 m across to giants 6 km across; most are tiny and a giant is rare. The middle of every
   sector, where ships arrive, is kept clear.
@@ -75,7 +141,11 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   and speed with its unit in a hexagon between them, as slanted segmented bars. The energy bar marks the 5%, a
   strip under it shows the battery's live net draw or recharge, and the heat bar turns from cyan to red and says
   when boost is overheated (with the mark where it unlocks) or out of energy. The boost heat row also says
-  whether the dampeners are on; off is amber. Heads-up panels share the unit list's look: a muted dark panel, a
+  whether the dampeners are on; off is amber. With `Shift` held in the pilot view, the bar under the cursor is
+  lit and its live figures show above the console: shield charge, recharge rate, delay after damage, draw and
+  restart rule; hull points, mass and safe impact speed; stored energy, net flow, generation, base draw and boost
+  floor; heat, heating and cooling rates, boost draw and why boost is unavailable. A window covering a bar keeps
+  it from the cursor. Heads-up panels share the unit list's look: a muted dark panel, a
   thin quiet border and a small tick in the colour of their state. Nothing glows.
 - **Collisions and damage.** Hulls collide block by block against each asteroid's real surface, and block
   against block with each other. An impact bounces and turns the hull; damage grows with the square of the speed
@@ -85,17 +155,30 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   takes no hits, even with charge in it: every hit lands on the blocks. After the usual 4 s without a hit it
   charges back at its normal rate on twice its normal power, and comes online only at 25% of its capacity
   (`shieldRestartFraction` and `shieldRestartPowerMultiplier` in `content/blocks/blocks.json`). Online it tops up
-  as before. The console says `OFFLINE` in red and dims the charge being rebuilt; target and fleet gauges dim too,
-  and the party list shows a broken shield as empty. Snapshots carry the offline state and the newest absorbed hit
+  as before. The console says `OFFLINE` in red, dims the charge being rebuilt, marks the restart point on the bar
+  (the hull's own `shieldRestartFraction`) and how far the charge is towards it (`RESTART 60 %`: 60% of the way). No
+  countdown is shown: the delay after the last hit is not published. Target and fleet gauges dim too,
+  and the party list shows a broken shield as empty. Snapshots carry the offline state and the newest shield contact
   (where, how hard, how long ago), so every client agrees on both.
-- **Shield looks.** Every hull with a shield shows a faint, muted cyan shell a margin off its blocks, built from the
-  blocks it still has, so it fits any design and any damage. It shimmers and bends what is behind it by a few
-  pixels, most at its rim. An absorbed hit spreads a ripple from where it landed, on the pilot's own hull and on
-  everyone else's, aged from when the server says it happened (a hit long over is never shown on joining). Near
-  breaking it tints stronger with slow waves; a break, or the loss of the last emitter, collapses it red and it is
-  gone until the simulation brings it back online, when it fades in. Collapses and fade-ins are timed from when
+- **Shield looks.** Every hull with a shield shows a faint, neutral translucent shell a margin off its blocks: the
+  blocks grown round, with gaps of about a block bridged, slopes followed, and the same shell however the shape
+  is split into blocks (`shieldRoundness` and `shieldBlend` in `content/blocks/blocks.json`, shared). A damaged hull's
+  shell is built on a worker from the blocks it still has; until then, or if it would not fit, it keeps the shell
+  it had or its intact one, so heavy damage can keep the original outline. A design whose intact shell does not fit
+  is refused before Apply: some four hundred or more separate parts need more than the room. It shimmers and bends what is
+  behind it by a few pixels, most at its rim. A contact lights a short, bright patch and paired fading ripples
+  at the contacted surface, on the pilot's hull and everyone else's, aged from the server event (old hits never
+  restart on joining). Below 80% charge it shifts gradually from neutral through amber, visible by half charge,
+  then towards red near empty, with slow waves; a break, or the loss of the last emitter, collapses it red and it is
+  gone until the simulation brings it back online, when it fades in. While it comes back and while its charge
+  keeps rising it shivers gently: the whole shell squashes and stretches very slightly and faint bands drift across
+  it (`recoveryWobble`, `recoveryHz`, and `recoveryShimmer` for the bands' light and bend), settling
+  once the charge is full or stops rising (a delay, no energy). Charging is read from the charge rising twice
+  running, so a correction that raises it can read as charging too. Collapses and fade-ins are timed from when
   the server says the change happened: a remote one waits for the hull as drawn, an old one is not replayed.
-  Durations, colours, ripple speed and width, the wavering threshold and the bend are in
+  Light taps also show feedback without changing damage, charge or recharge delay. The minimum closing speed
+  is `shieldContactSpeed` in `content/blocks/blocks.json`; offline and bypassed shields show no contact.
+  Durations, colours, ripple speed and width, the wavering threshold, the bend, the rounding and the shiver are in
   `content/visuals/shields.json`. In the pilot's own hyperspace tunnel their shield's glow and ripples stay all
   round the hull; its bend of the old world fades as the tunnel covers it, so at full cover only its light shows.
   Not checked on a GPU yet: how it looks, its cost per frame, Vulkan validation.
@@ -182,9 +265,14 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 
 Not there yet: NAT traversal or automatic port forwarding (a host needs a UDP port others can reach), encryption of game traffic, IPv6, mining, taking control of ships owned by other players (permissions), jump range and cost, gates,
 saving. Stations and gas fields are not generated yet; asteroids do not crack into pieces, and ore shows only as
-a tint. Asteroids come in a shared set of shapes until mining gives each one its own body. Designs are limited to 64
-unit-sized blocks for now, because block state is sent as one bit per block. Sized boxes and larger designs
-are refused by the live loader until stage 2 adds storage, wire support, collision and drawing.
+a tint. Asteroids come in a shared set of shapes until mining gives each one its own body. Mixed-size designs of hundreds of blocks now load, transfer, fly and take replicated damage.
+Shared admission bounds geometry work, the intact shield shell and total catalogue resources before play.
+The default shell budget is 32,768 vertices and 196,608 indices per hull, and at most 910 blocks. A separate
+box-shaped part uses a triangulated rounded box of 80 surface vertices, so about four hundred separate boxes fit; separate
+non-box parts cost more. The catalogue is limited to 192 KiB encoded data
+and a conservative 8,192-box decoded budget. These are practical stage 2 limits, not unlimited scale.
+Client meshes, damaged transforms, picking and smooth shields have headless integration coverage.
+Full-scale geometry and performance remain stages 3–5.
 
 ## Controls
 
@@ -202,6 +290,10 @@ The cursor is hidden only in the pilot view. The command view, the map and every
   something is open.
 - **Menus, data sheet, map, Controls, the Social workspace, Chat while typing:** the cursor shows until they
   close, and the world gets no mouse. Pinned windows do not count: they leave the cursor hidden.
+- **Ship editor:** the cursor is shown and the mouse works on the ship, except over the editor's panels. The ship
+  gets no controls while it is open. A press on a panel never reaches the ship, with one exception: a part card
+  dragged out of the part list. When the editor closes, flight keys still held from it do nothing until they are
+  let go.
 
 Gameplay has no bottom-left keybind strip. Bindings come from `content/input/bindings.json`.
 
@@ -217,19 +309,20 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Zoom camera | Mouse wheel | |
 | Roll | `Q` `E` | Bumpers |
 | Boost | `Space` | Left stick click |
-| Show the cursor (pilot view) | Hold `Shift`; with it, right-drag over space turns the camera | |
+| Show the cursor (pilot view) | Hold `Shift`; with it, right-drag over space turns the camera, and pointing at a console bar shows its figures | |
 | Dampeners on / off | `Z` | `X` |
 | Command view | `N` or `F9` | `Back` |
 | Galaxy map | `M` | `Y` |
 | Halt (cancel order) | `H` or `Backspace` | `B` |
 | Ship data sheet | `I` | D-pad up |
 | Target the ship under the reticle, or the asteroid if there is no ship | Middle mouse button | |
-| Take control of the target, or leave in a drone | `T` | D-pad down |
+| Take control of the target (same sector only), or leave in a drone | `T` | D-pad down |
 | Menu or back | `Esc` | `Start` |
 | Social: Players window | `Tab` or `P` | |
 | Social: Party window | `O` | |
 | Chat: open, send, close | `Enter`; `Enter` sends, `Esc` closes | |
 | Close the focused social window, then Social | `Esc` (never a pinned window) | |
+| Ship editor: ask to edit / cancel | `B`; `Esc` also cancels | |
 
 On menu screens the arrow keys or the D-pad move between rows, left and right change the focused setting, and
 `Enter` or `A` selects. The mouse works too: click a row's arrows, or drag a slider. In the server browser, the
@@ -261,6 +354,22 @@ Command view (the cursor is always shown):
 | Focus the camera on the selection | `Space` or `F`, or double-click a row in the fleet list |
 | Halt the selection | `H` or `Backspace` |
 
+Ship editor (`B`; the cursor is always shown):
+
+| | |
+| --- | --- |
+| Place the chosen part | Left-click a block face, or drag a part card onto one; new and pasted blocks are not automatically selected |
+| Size the part to place | Hold `S` over a face, then left-drag a highlighted face of the ghost (the opposite face stays); click again to place, `Esc` puts it back |
+| Turn the part to place | `R` over a face, then left-drag a ring round (exact quarter turns), or the wheel or a click on it (`Shift`+click back); click the ghost to place it, `R` keeps the turn, `Esc` puts it back |
+| Select a block / add or remove one | Middle-click / `Shift` + middle-click (left-click too after a right-click stops placing) |
+| Move the selection | Left-drag a selected block onto a face; `Esc` or right-click drops it unchanged |
+| Copy / paste the selection | `Ctrl` + `C` / `Ctrl` + `V`, then click a face |
+| Delete the selection | `Delete` |
+| Focus the camera on the selection, or the whole ship | `F` or `Space` (the Follow key) |
+| Orbit / pan / zoom the camera | Right-drag / middle-drag / mouse wheel |
+| Undo / redo | `Ctrl` + `Z` / `Ctrl` + `Y` or `Ctrl` + `Shift` + `Z` |
+| Put back a turn, drop what is carried, then cancel the edit | `Esc`; `B` or Cancel ends the edit at once |
+
 Galaxy map:
 
 | | |
@@ -269,6 +378,7 @@ Galaxy map:
 | Add or remove one ship | Click its row in the unit list; **All** and **Clear** change the whole list |
 | Set course | Right-click a sector, then pick **Move here**, or **Plot jump** (the ship you fly) / **Jump here** (selected fleet ships) in the menu |
 | Close the menu | Left-click elsewhere, or `Esc` (a second `Esc` closes the map) |
+| Take control of a ship | Select exactly one other ship of yours in the sector you are in, then `T`; the map stays open. Another sector: travel there first |
 | Pan / zoom | `W` `A` `S` `D`, arrow keys or middle-drag / mouse wheel |
 | Change layer, centre on your ship | `Page Up` / `Page Down`, `Space` |
 
@@ -290,7 +400,10 @@ Where the command plane cuts through an asteroid or a hull, the cut is drawn as 
 the plane is dimmed, so it is clear what sits on the plane. `I` shows the data sheet of the first selected hull or
 asteroid.
 
-`F3` shows the
+`F2` shows or hides the sector panel (name,
+coordinates, rocks, server, players, richness and resources) in the pilot, command and map views. It starts each
+game closed and stays as set when switching views. No closed-state hint is drawn. It takes no flight
+keys: `F` is still down and Follow. `F3` shows the
 performance overlay, `F11` toggles fullscreen, `F12` takes a screenshot. Bindings live in
 `content/input/bindings.json`; block types and flight rules in `content/blocks`, hull designs in `content/ships`,
 galaxy rules in `content/galaxy`, world settings in `content/rules`, the listing server's address in `content/net`.
@@ -360,7 +473,7 @@ make run ARGS="--host public --listing http://127.0.0.1:8080"              # aga
 - `--listing <url>` picks another listing server; `--listing off` turns it off. HTTPS only, except on this machine.
 - A server's settings file can hold `name`, `visibility`, `port`, `maxPlayers`, `password`, `listing` and
   `limits` under `"server"`. An argument wins over `PROSPECT_PASSWORD`, which wins over the file.
-- In a game, the sector panel shows the server's name, its visibility and the player slots. The `Esc` menu shows
+- In a game, the sector panel (`F2`) shows the server's name, its visibility and the player slots. The `Esc` menu shows
   them too, and for a public game you host, whether the listing server has it right now.
 - Joining and hosting unlisted or public need a Discord sign-in in the client; private does not. `--join` and
   `--host` without one open Join Server or New Game filled in, to sign in there. A dedicated server needs none.
@@ -457,3 +570,7 @@ make help                                  # every target
 PROSPECT is built with BRUTAL, a game development framework by Ahwoo Limited, used under the BRUTAL License v1.0.
 `NOTICE.txt` ships beside the binaries, the BRUTAL logo is shown at startup and the copyright notice is on the
 credits screen. Third-party licence texts, including those of the bundled fonts, are in `LICENSES/`.
+
+
+Wedges are drawn, picked, collided, edited and shielded as their real shape; see
+[wedges](docs/blocks-at-scale.md#wedges-protocol-27).

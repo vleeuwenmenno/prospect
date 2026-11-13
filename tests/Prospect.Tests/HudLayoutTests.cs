@@ -1,6 +1,7 @@
 using System.Text;
 using Brutal.Numerics;
 using Prospect.Client.Screens;
+using Prospect.Client.Ui;
 using Prospect.Game.World;
 using Xunit;
 
@@ -85,6 +86,75 @@ public sealed class HudLayoutTests
         else
         {
             Assert.True(HudLayout.ReservedTop(display, scale, left, left + feed, true) <= strip.Top || !strip.Spans(left, left + feed));
+        }
+    }
+
+    [Fact]
+    public void AClosedSectorPanelStillCompactsThePartyBeforeHidingMembers()
+    {
+        var display = new float2(1655, 688);
+        const float scale = 2f;
+        var limit = HudLayout.ReservedTop(display, scale, Px(HudLayout.Margin, scale), HudLayout.ColumnRight(display, scale), true);
+        var partyHeight = Px(18, scale) + 7 * (Px(58, scale) + Px(Theme.Space1, scale));
+        var column = SectorInfoToggle.Column(scale, false, Px(116, scale), Px(64, scale), partyHeight, limit);
+        Assert.False(column.Compact);
+        Assert.False(column.Cards);
+        var rows = HudLayout.PartyRows(column.Bottom, limit, column.Cards, false, 7, scale);
+        Assert.Equal(4, rows.Count);
+        Assert.True(rows.Bottom <= limit);
+
+        var open = SectorInfoToggle.Column(scale, true, Px(116, scale), Px(64, scale), partyHeight, limit);
+        Assert.True(open.Compact);
+        Assert.False(open.Cards);
+        Assert.Equal(2, HudLayout.PartyRows(open.Bottom, limit, open.Cards, false, 7, scale).Count);
+
+        // Where the full cards fit, opening or closing the sector panel keeps the full party readouts.
+        foreach (var expanded in new[] { false, true })
+        {
+            var roomy = SectorInfoToggle.Column(1f, expanded, 116f, 64f, partyHeight / scale, 982f);
+            Assert.False(roomy.Compact);
+            Assert.True(roomy.Cards);
+            Assert.Equal(7, HudLayout.PartyRows(roomy.Bottom, 982f, roomy.Cards, false, 7, 1f).Count);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Screens))]
+    public void AClosedSectorPanelGivesItsHeightBackAndAnOpenOneReservesIt(float width, float height, float scale)
+    {
+        var display = new float2(width, height);
+        var closed = SectorInfoToggle.Bottom(scale, false, Px(116, scale));
+        Assert.Equal(HudLayout.Top(scale), closed);
+        Assert.Equal(closed, SectorInfoToggle.PanelTop(scale));
+        foreach (var panel in new[] { Px(64, scale), Px(116, scale), Px(170, scale) })
+            Assert.Equal(SectorInfoToggle.PanelTop(scale) + panel, SectorInfoToggle.Bottom(scale, true, panel));
+        var open = SectorInfoToggle.Bottom(scale, true, Px(116, scale));
+
+        // What goes under it moves up when the panel is closed: the party rows and the room kept for the cues.
+        var limit = HudLayout.ReservedTop(display, scale, Px(HudLayout.Margin, scale), HudLayout.ColumnRight(display, scale), true);
+        var closedRows = HudLayout.PartyRows(closed, limit, true, true, 3, scale);
+        var openRows = HudLayout.PartyRows(open, limit, true, true, 3, scale);
+        Assert.True(closedRows.Top < openRows.Top);
+        Assert.True(closedRows.Count >= openRows.Count && closedRows.Count >= 1);
+        Assert.True(closedRows.Bottom <= limit || closedRows.Count == 1);
+
+        var closedRoom = new HudCueRoom(display, scale, closed + Px(Theme.Space3, scale), true, true);
+        var openRoom = new HudCueRoom(display, scale, open + Px(Theme.Space3, scale), true, true);
+        var under = new float2(Px(HudLayout.Margin, scale) + Px(80, scale), MathF.Round((closed + open) * 0.5f) + Px(40, scale));
+        Assert.False(openRoom.Clear(under, openRoom.Pad(false)));
+        Assert.True(closedRoom.Clear(under, closedRoom.Pad(false)), $"{under}");
+
+        // The map's heading and unit list tuck up under a closed panel and still fit under an open one.
+        var hover = MapUnitList.HoverCardLeft(width, scale, 340f, MapUnitList.HoverRight);
+        var closedUnits = MapUnitList.Layout(display, scale, 3, closed, hover);
+        var openUnits = MapUnitList.Layout(display, scale, 3, open, hover);
+        Assert.True(closedUnits.Min.Y < openUnits.Min.Y);
+        foreach (var (units, bottom) in new[] { (closedUnits, closed), (openUnits, open) })
+        {
+            var above = units.ShortHeading ? bottom : MapUnitList.HeadingTop(bottom, scale) + Px(MapUnitList.HeadingHeight, scale);
+            Assert.True(units.Min.Y >= above, $"{units.Min.Y} under {above}");
+            Assert.True(units.Min.Y + units.Size.Y <= height);
+            Assert.True(units.Min.Y >= HudLayout.Top(scale));
         }
     }
 

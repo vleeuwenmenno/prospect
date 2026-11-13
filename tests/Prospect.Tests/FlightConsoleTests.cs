@@ -164,4 +164,62 @@ public sealed class FlightConsoleTests
             previous = color;
         }
     }
+
+    [Theory]
+    [InlineData(1280f, 720f, 1f)]
+    [InlineData(1655f, 688f, 1f)]
+    [InlineData(1920f, 1080f, 1f)]
+    [InlineData(1280f, 720f, 2f)]
+    [InlineData(1655f, 688f, 2f)]
+    [InlineData(1920f, 1080f, 2f)]
+    public void ARowsDetailsSitAboveItsGroupAndStayOnScreen(float width, float height, float scale)
+    {
+        var display = new float2(width, height);
+        var layout = FlightConsole.Layout(display, scale);
+        var side = MathF.Round(FlightConsole.Side * scale);
+        for (var bar = ConsoleBar.Shield; bar <= ConsoleBar.Heat; bar++)
+        {
+            // A modest box starts at the row's outer edge, above the console.
+            var row = FlightConsole.BarRect(layout, bar);
+            var rect = FlightConsole.TipRect(layout, bar, new float2(MathF.Round(200 * scale), MathF.Round(120 * scale)), display, scale);
+            if (bar is ConsoleBar.Shield or ConsoleBar.Hull)
+                Assert.Equal(row.Left, rect.Left);
+            else
+                Assert.Equal(row.Right, rect.Right);
+            Assert.True(rect.Bottom <= layout.Top);
+
+            // One wider than the screen is cut to its margins.
+            var wide = FlightConsole.TipRect(layout, bar, new float2(width * 2, MathF.Round(120 * scale)), display, scale);
+            Assert.Equal(side, wide.Left);
+            Assert.Equal(width - side, wide.Right);
+        }
+    }
+
+    [Fact]
+    public void OnlyAShownPointerOffEveryWindowFindsARow()
+    {
+        var layout = FlightConsole.Layout(new float2(1280f, 720f), 1f);
+        var shield = FlightConsole.BarRect(layout, ConsoleBar.Shield);
+        var on = new float2(shield.Left + 40, shield.Top + 10);
+        Assert.Equal(ConsoleBar.Shield, FlightConsole.Hovered(layout, on, true, false));
+        Assert.Equal(ConsoleBar.None, FlightConsole.Hovered(layout, on, false, false));
+        Assert.Equal(ConsoleBar.None, FlightConsole.Hovered(layout, on, true, true));
+        Assert.Equal(ConsoleBar.None, FlightConsole.Hovered(layout, new float2(-float.MaxValue, -float.MaxValue), true, false));
+        var heat = FlightConsole.BarRect(layout, ConsoleBar.Heat);
+        Assert.Equal(ConsoleBar.Heat, FlightConsole.Hovered(layout, new float2(heat.Right - 2, heat.Bottom - 2), true, false));
+        Assert.Equal(ConsoleBar.None, FlightConsole.Hovered(layout, new float2(layout.CenterX, layout.Top + 10), true, false));
+    }
+
+    [Theory]
+    [InlineData(3000f, 0.4f, 600f, 0.4f, 0.5f)]
+    [InlineData(3000f, 1f, 1500f, 1f, 0.5f)]
+    [InlineData(3000f, 0.25f, 900f, 0.25f, 1f)]
+    [InlineData(0f, 0.25f, 0f, 0f, 0f)]
+    [InlineData(3000f, 0f, 600f, 0f, 0f)]
+    public void TheRestartMarkFollowsTheHullsOwnRule(float capacity, float fraction, float stored, float mark, float progress)
+    {
+        var flight = new FlightParams { ShieldCapacity = capacity, ShieldRestartFraction = fraction };
+        Assert.Equal(mark, FlightConsole.RestartMark(flight));
+        Assert.Equal(progress, FlightConsole.RestartProgress(stored, flight), 5);
+    }
 }

@@ -108,10 +108,12 @@ public sealed class ProtocolTests
         var writer = new NetWriter(buffer);
         new HullRecord
         {
+            LossCount = HullRecord.MaxLosses,
+            Revision = HullRecord.MaxLosses,
             State = new HullState { Orientation = Quaternion.Identity, Jump = JumpPhase.Charge, JumpCalculation = calculation },
             Order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -1e6) }
         }.Write(ref writer);
-        Assert.Equal(153, HullRecord.MaxWireSize);
+        Assert.Equal(218, HullRecord.MaxWireSize);
         Assert.Equal(HullRecord.MaxWireSize, writer.Length);
         var reader = new NetReader(writer.Written);
         Assert.Equal(valid, HullRecord.TryRead(ref reader, out var copy));
@@ -121,7 +123,112 @@ public sealed class ProtocolTests
             reader = new NetReader(writer.Written[..length]);
             Assert.False(HullRecord.TryRead(ref reader, out _));
         }
-        Assert.Equal(20u, ProtocolInfo.Version);
+        Assert.Equal(26u, ProtocolInfo.Version);
+    }
+
+    [Fact]
+    public void EditorMessagesHaveExactSizesAndRefuseEveryTruncationAndUnknownValue()
+    {
+        Span<byte> buffer = stackalloc byte[2048];
+        Span<byte> hash = stackalloc byte[32];
+        Span<byte> read = stackalloc byte[32];
+        for (var i = 0; i < hash.Length; i++) hash[i] = (byte)(i + 1);
+
+        // Requests: a commit is the longest, and a begin, cancel or repair carries nothing after its number.
+        var writer = new NetWriter(buffer);
+        new EditorRequestMessage { Kind = EditorRequestKind.Commit, Token = 7, Total = 1234 }.Write(ref writer, hash);
+        Assert.Equal(42, EditorRequestMessage.MaxWireSize);
+        Assert.Equal(EditorRequestMessage.MaxWireSize, writer.Length);
+        var reader = new NetReader(writer.Written[1..]);
+        Assert.True(EditorRequestMessage.TryRead(ref reader, read, out var request));
+        Assert.Equal((EditorRequestKind.Commit, 7u, 1234), (request.Kind, request.Token, request.Total));
+        Assert.True(read.SequenceEqual(hash));
+        for (var length = 1; length < writer.Length; length++)
+        {
+            reader = new NetReader(writer.Written[1..length]);
+            Assert.False(EditorRequestMessage.TryRead(ref reader, read, out _));
+        }
+        foreach (var kind in new[] { EditorRequestKind.Begin, EditorRequestKind.Cancel, EditorRequestKind.Repair })
+        {
+            writer = new NetWriter(buffer);
+            new EditorRequestMessage { Kind = kind, Hull = 9, Token = 9 }.Write(ref writer, hash);
+            Assert.Equal(6, writer.Length);
+            reader = new NetReader(writer.Written[1..]);
+            Assert.True(EditorRequestMessage.TryRead(ref reader, read, out request));
+            Assert.Equal((kind, 9u), (request.Kind, kind == EditorRequestKind.Begin ? request.Hull : request.Token));
+            reader = new NetReader([.. writer.Written[1..], 0]);
+            Assert.False(EditorRequestMessage.TryRead(ref reader, read, out _));
+        }
+        reader = new NetReader([4, 0, 0, 0, 0]);
+        Assert.False(EditorRequestMessage.TryRead(ref reader, read, out _));
+
+        // Chunks: the header, then exactly the bytes it counts, one to a chunk's worth.
+        var bytes = new byte[EditorDataMessage.MaxChunk];
+        writer = new NetWriter(buffer);
+        EditorDataMessage.Write(ref writer, 7, 4096, bytes);
+        Assert.Equal(EditorDataMessage.HeaderBytes + EditorDataMessage.MaxChunk, writer.Length);
+        reader = new NetReader(writer.Written[1..]);
+        Assert.True(EditorDataMessage.TryReadHeader(ref reader, out var token, out var offset, out var count));
+        Assert.Equal((7u, 4096, EditorDataMessage.MaxChunk), (token, offset, count));
+        reader = new NetReader(writer.Written[1..^1]);
+        Assert.False(EditorDataMessage.TryReadHeader(ref reader, out _, out _, out _));
+        reader = new NetReader([.. writer.Written[1..], 0]);
+        Assert.False(EditorDataMessage.TryReadHeader(ref reader, out _, out _, out _));
+        writer = new NetWriter(buffer);
+        EditorDataMessage.Write(ref writer, 7, 0, []);
+        reader = new NetReader(writer.Written[1..]);
+        Assert.False(EditorDataMessage.TryReadHeader(ref reader, out _, out _, out _));
+
+        // The answer.
+        writer = new NetWriter(buffer);
+        new EditorStateMessage { Phase = EditorPhase.Applied, Reason = EditorReason.HullLimit, Token = 3, Hull = 0x00020005, ReplacedHull = 0x00010004, WaitSeconds = 30 }.Write(ref writer);
+        Assert.Equal(17, EditorStateMessage.WireSize);
+        Assert.Equal(EditorStateMessage.WireSize, writer.Length);
+        reader = new NetReader(writer.Written[1..]);
+        Assert.True(EditorStateMessage.TryRead(ref reader, out var state));
+        Assert.Equal((EditorPhase.Applied, EditorReason.HullLimit, 3u, 0x00020005u, 0x00010004u, (ushort)30), (state.Phase, state.Reason, state.Token, state.Hull, state.ReplacedHull, state.WaitSeconds));
+        for (var length = 1; length < writer.Length; length++)
+        {
+            reader = new NetReader(writer.Written[1..length]);
+            Assert.False(EditorStateMessage.TryRead(ref reader, out _));
+        }
+        var wrong = writer.Written.ToArray();
+        wrong[1] = (byte)EditorPhase.Applied + 1;
+        reader = new NetReader(wrong.AsSpan(1));
+        Assert.False(EditorStateMessage.TryRead(ref reader, out _));
+        wrong[1] = 0;
+        // A reason only a client gives itself never comes from a server.
+        wrong[2] = (byte)EditorReason.Unavailable;
+        reader = new NetReader(wrong.AsSpan(1));
+        Assert.False(EditorStateMessage.TryRead(ref reader, out _));
+
+        // A design's announcement and the client's word on it.
+        writer = new NetWriter(buffer);
+        DesignNoticeMessage.Write(ref writer, 200, 32768, hash);
+        Assert.Equal(38, DesignNoticeMessage.WireSize);
+        Assert.Equal(DesignNoticeMessage.WireSize, writer.Length);
+        reader = new NetReader(writer.Written[1..]);
+        Assert.True(DesignNoticeMessage.TryRead(ref reader, out var design, out var size, read));
+        Assert.Equal((200, 32768), (design, size));
+        Assert.True(read.SequenceEqual(hash));
+        reader = new NetReader(writer.Written[1..^1]);
+        Assert.False(DesignNoticeMessage.TryRead(ref reader, out _, out _, read));
+        writer = new NetWriter(buffer);
+        DesignReadyMessage.Write(ref writer, 200, true);
+        Assert.Equal(3, DesignReadyMessage.WireSize);
+        Assert.Equal(DesignReadyMessage.WireSize, writer.Length);
+        reader = new NetReader(writer.Written[1..]);
+        Assert.True(DesignReadyMessage.TryRead(ref reader, out design, out var ready));
+        Assert.Equal((200, true), (design, ready));
+        reader = new NetReader([200, 2]);
+        Assert.False(DesignReadyMessage.TryRead(ref reader, out _, out _));
+        reader = new NetReader([200]);
+        Assert.False(DesignReadyMessage.TryRead(ref reader, out _, out _));
+
+        // What a client may send in one tick besides social traffic still fits the server's allowance for it.
+        Assert.Equal(EditorRequestMessage.MaxWireSize + DesignReadyMessage.WireSize, ClientSession.EditorBytesPerTick);
+        Assert.True(ClientSession.SocialMessagesPerTick * SocialMessage.MaxWireSize + FleetOrdersMessage.MaxWireSize + 5 + ClientSession.EditorBytesPerTick <= ServerHost.PlayerBytesPerTick);
+        Assert.True(ClientSession.SocialMessagesPerTick + 4 <= ServerHost.PlayerMessagesPerTick);
     }
 
     [Theory]
@@ -243,6 +350,7 @@ public sealed class ClientPredictionTests : IDisposable
     private readonly LoopbackLink _link = new();
     private readonly PlayerInputBridge _input = new();
     private readonly HullView[] _views = new HullView[ClientWorld.MaxViews];
+    private ulong[] _blockWords = [];
     private readonly byte[] _buffer = new byte[1024];
     private long _serverTick = 100;
 
@@ -267,9 +375,21 @@ public sealed class ClientPredictionTests : IDisposable
             Id = id,
             Owner = owner,
             Design = (byte)design,
-            Blocks = Content.Designs[design].FullMask,
             State = state,
         };
+    }
+
+    private static void Lose(ref HullRecord hull, params ReadOnlySpan<int> blocks)
+    {
+        foreach (var block in blocks) hull.Losses[hull.LossCount++] = block;
+        hull.Revision = hull.LossCount;
+    }
+
+    private static ulong Mask(HullRecord hull)
+    {
+        var mask = Content.Designs[hull.Design].FullMask();
+        for (var i = 0; i < hull.LossCount; i++) mask &= ~(1UL << hull.Losses[i]);
+        return mask;
     }
 
     /// <summary>Delivers a snapshot the server took at a tick. The first hull is the player's.</summary>
@@ -296,7 +416,7 @@ public sealed class ClientPredictionTests : IDisposable
     /// <summary>The player's hull as the client now predicts it.</summary>
     private HullView Own()
     {
-        _world.BuildViews(_views, _serverTick, _serverTick, out var own);
+        _world.BuildViews(_views, ref _blockWords, _serverTick, _serverTick, out var own);
         return _views[own];
     }
 
@@ -379,6 +499,270 @@ public sealed class ClientPredictionTests : IDisposable
         twice.State.Velocity = new Vector3(-30, 0, 0);
         Snapshot(_serverTick + 1, 3, twice);
         Assert.Equal(struck.State.Velocity, Own().Velocity);
+    }
+
+    [Fact]
+    public void ALateSnapshotThatCostsANearHullABlockLeavesItsPredictedFiguresFittingItsBlocks()
+    {
+        var design = Content.Designs[Content.PodDesign];
+        var own = Hull(OwnHull, Player, Content.PodDesign, Double3.Zero);
+        var other = Hull(OwnHull + 1, Player + 1, Content.PodDesign, new Double3(10, 0, 0));
+        Snapshot(100, 0, own, other);
+
+        // A newer snapshot with the player's hull alone is taken first; the other hull is still predicted.
+        Snapshot(102, 0, own);
+        Assert.Equal(2, _world.Near.Count);
+
+        // Then the snapshot from before it arrives, in which the other hull has lost a block. It is too old to
+        // rebuild the prediction from, and it is still the newest word on the other hull.
+        var lost = -1;
+        for (var b = 0; b < design.BlockCount; b++)
+        {
+            if (!BlockSet.Has(design.CoreSet, b))
+                lost = b;
+        }
+
+        Assert.True(lost >= 0);
+        Lose(ref other, lost);
+        other.State.Position = new Double3(15, 0, 0);
+        Snapshot(101, 0, own, other);
+
+        // The predicted hull borrows the block state, so it has the loss; its figures must be those of what is left.
+        Assert.Equal(2, _world.Near.Count);
+        Assert.True(_world.TryGetBlockState(OwnHull + 1, out var state));
+        Assert.Equal(1u, _world.BlockStates.Revision(state));
+        Assert.Equal(state, _world.Near.Info(1).BlockState);
+        design.Evaluate(_world.BlockStates.Alive(state), out var fitting, out _);
+        Assert.True(fitting.Mass < design.Flight.Mass);
+        Assert.Equal(fitting.Mass, _world.Near.Flight(1).Mass);
+        Assert.Equal(fitting.Inertia, _world.Near.Flight(1).Inertia);
+        Assert.Equal(1u, _world.Near.Info(1).FittedRevision);
+        Assert.Equal(other.State.Position, _world.Near.State(1).Position);
+    }
+
+    [Fact]
+    public void AKnownHullsBlockStateIsKeptAcrossSnapshotsAndOnlyBorrowedByThePrediction()
+    {
+        var own = Hull(OwnHull, Player, Content.PodDesign, Double3.Zero);
+        var other = Hull(OwnHull + 1, Player + 1, Content.PodDesign, new Double3(10, 0, 0));
+        Snapshot(_serverTick, 0, own, other);
+
+        // One block state per hull the world knows, taken when it first heard of the hull.
+        var states = _world.BlockStates;
+        Assert.True(_world.TryGetBlockState(OwnHull, out var ownState));
+        Assert.True(_world.TryGetBlockState(OwnHull + 1, out var otherState));
+        Assert.False(_world.TryGetBlockState(OwnHull + 2, out _));
+        Assert.Equal(2, states.Count);
+        var ownBlocks = states.Alive(ownState);
+        var otherBlocks = states.Alive(otherState);
+        Assert.True(states.HitPoints(ownState).IsEmpty);
+
+        // The hulls the prediction steps are made over those states, and own none of them.
+        void Borrowed()
+        {
+            Assert.Equal(2, _world.Near.Count);
+            Assert.Equal(ownState, _world.Near.Info(0).BlockState);
+            Assert.Equal(otherState, _world.Near.Info(1).BlockState);
+            Assert.False(_world.Near.Info(0).OwnsBlockState);
+            Assert.False(_world.Near.Info(1).OwnsBlockState);
+            Assert.Equal(2, states.Count);
+        }
+
+        void Kept(BlockStateHandle state, ReadOnlySpan<ulong> where, uint id, uint revision)
+        {
+            Assert.True(_world.TryGetBlockState(id, out var now));
+            Assert.Equal(state, now);
+            Assert.True(states.IsLive(state));
+            Assert.True(where.Overlaps(states.Alive(state), out var offset));
+            Assert.Equal(0, offset);
+            Assert.Equal(revision, states.Revision(state));
+        }
+
+        Borrowed();
+
+        // Snapshot after snapshot empties the predicted hulls and fills them again. Nothing is taken, released,
+        // rebuilt or moved: the same handles name the same memory, and nothing was lost.
+        for (var i = 1; i <= 8; i++)
+        {
+            Tick();
+            Snapshot(_serverTick, (uint)i, own, other);
+            Borrowed();
+            Kept(ownState, ownBlocks, OwnHull, 0);
+            Kept(otherState, otherBlocks, OwnHull + 1, 0);
+        }
+
+        Assert.Equal(Content.Pod.FullMask(), Own().Mask());
+        Assert.Equal(0u, Own().Revision);
+
+        // The server says both have lost blocks. The blocks leave the stored sets where they are, each loss is
+        // counted, and the player's hull flies on what is left.
+        Lose(ref own, 5, 6);
+        Lose(ref other, 3);
+        Tick();
+        Snapshot(_serverTick, 9, own, other);
+        Borrowed();
+        Kept(ownState, ownBlocks, OwnHull, 2);
+        Kept(otherState, otherBlocks, OwnHull + 1, 1);
+        Assert.Equal(Mask(own), BlockMasks.Word(ownBlocks));
+        Assert.Equal(Mask(other), BlockMasks.Word(otherBlocks));
+        Content.Pod.Evaluate(ownBlocks, out var left, out _);
+        Assert.Equal(left, _world.Flight);
+        Assert.True(left.Mass < Content.Pod.Flight.Mass);
+        Assert.Equal(left, _world.Near.Flight(0));
+
+        // The same masks again are no further loss, and a block the hull lost stays lost.
+        Tick();
+        Snapshot(_serverTick, 10, own, other);
+        Kept(ownState, ownBlocks, OwnHull, 2);
+        Kept(otherState, otherBlocks, OwnHull + 1, 1);
+
+        // What is published is a copy with the count beside it, not the stored memory.
+        var view = Own();
+        Assert.Equal(Mask(own), view.Mask());
+        Assert.Equal(2u, view.Revision);
+        Assert.False(view.Blocks.Span.Overlaps(ownBlocks));
+    }
+
+    [Fact]
+    public void AnExistingHullCannotRebindItsDesignOrReplaceItsBlockState()
+    {
+        var own = Hull(OwnHull, Player, Content.PodDesign, Double3.Zero);
+        var other = Hull(OwnHull + 1, Player + 1, Content.PodDesign, new Double3(10, 0, 0));
+        Snapshot(_serverTick, 0, own, other);
+        Assert.True(_world.TryGetBlockState(OwnHull + 1, out var first));
+        Assert.Equal(2, _world.Near.Count);
+
+        // A hostile design change must not reinterpret the existing block ids or release their storage.
+        var changed = Hull(OwnHull + 1, Player + 1, Content.DroneDesign, new Double3(10, 0, 0));
+        var writer = new NetWriter(_buffer);
+        new SnapshotHeader { ServerTick = _serverTick + 1, AckedInput = 0, OwnHull = OwnHull, HullCount = 1 }.Write(ref writer);
+        changed.Write(ref writer);
+        var reader = new NetReader(writer.Written[1..]);
+        _world.OnSnapshot(ref reader, _serverTick);
+
+        Assert.True(_world.TryGetBlockState(OwnHull + 1, out var second));
+        Assert.Equal(first, second);
+        Assert.True(_world.BlockStates.IsLive(first));
+        Assert.Equal(Content.Pod.BlockCount, _world.BlockStates.Blocks(second));
+        Assert.Equal(2, _world.BlockStates.Count);
+        Assert.Equal(2, _world.Near.Count);
+        Tick();
+
+        // The original immutable binding continues to predict after the rejected packet.
+        Snapshot(_serverTick + 2, 1, own, other);
+        Assert.Equal(2, _world.Near.Count);
+        Assert.Equal(second, _world.Near.Info(1).BlockState);
+        Tick();
+    }
+
+    [Fact]
+    public void ApplyingSnapshotsAndPublishingViewsTakesNoMemoryOnceWarmEvenWhenBlocksAreLost()
+    {
+        HullRecord[] hulls =
+        [
+            Hull(OwnHull, Player, Content.PodDesign, Double3.Zero),
+            Hull(OwnHull + 1, Player + 1, Content.PodDesign, new Double3(10, 0, 0)),
+            Hull(OwnHull + 2, Player, Content.StartingFleet[0], new Double3(0, 0, 40)),
+        ];
+        var allocated = 0L;
+        for (var i = 1; i <= 200; i++)
+        {
+            Tick();
+
+            // Halfway, two of the hulls lose blocks, and later the third: the stored sets change in place, the
+            // sums follow and the figures published with each view are read off them again.
+            if (i == 120)
+            {
+                Lose(ref hulls[0], 5);
+                Lose(ref hulls[1], 3, 4);
+            }
+
+            if (i == 160)
+                Lose(ref hulls[2], 7);
+
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            Snapshot(_serverTick, (uint)i, hulls);
+            var count = _world.BuildViews(_views, ref _blockWords, _serverTick, _serverTick, out _);
+            if (i > 60)
+                allocated += GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.Equal(3, count);
+        }
+
+        Assert.Equal(0L, allocated);
+        Assert.Equal(1u, Own().Revision);
+        Assert.Equal(3, _world.BlockStates.Count);
+
+        // What was published without taking memory is each hull's data sheet for the blocks it has left.
+        _world.BuildViews(_views, ref _blockWords, _serverTick, _serverTick, out _);
+        foreach (var hull in hulls)
+        {
+            var view = _views.First(v => v.Id == hull.Id);
+            Figures.AssertIdentical(Content.Designs[hull.Design].StatsOf([Mask(hull)]), view.Stats);
+            Assert.True(view.Stats.Blocks < Content.Designs[hull.Design].BlockCount);
+        }
+    }
+
+    [Fact]
+    public void AHullFirstHeardOfWithLossesAndOneThatLosesThemOverSnapshotsHaveTheSameFigures()
+    {
+        var pod = Content.Pod;
+        var own = Hull(OwnHull, Player, Content.PodDesign, Double3.Zero);
+        var early = Hull(OwnHull + 1, Player + 1, Content.PodDesign, new Double3(-400, 0, 0));
+        var late = Hull(OwnHull + 2, Player + 1, Content.PodDesign, new Double3(400, 0, 0));
+
+        HullView View(uint id)
+        {
+            var count = _world.BuildViews(_views, ref _blockWords, _serverTick, _serverTick, out _);
+            return _views.Take(count).First(v => v.Id == id);
+        }
+
+        // Intact, every hull is published with its design's own data sheet.
+        Snapshot(_serverTick, 0, own, early);
+        Figures.AssertIdentical(pod.Stats, View(OwnHull).Stats);
+        Figures.AssertIdentical(pod.Stats, View(OwnHull + 1).Stats);
+
+        // One hull is known from the start and loses three blocks over three snapshots, the highest first.
+        uint acked = 0;
+        foreach (var block in new[] { 6, 3, 5 })
+        {
+            Lose(ref early, block);
+            Tick();
+            Snapshot(_serverTick, ++acked, own, early);
+        }
+
+        // The other is first heard of with the same three blocks gone already.
+        late.Losses = early.Losses;
+        late.LossCount = early.LossCount;
+        late.Revision = early.Revision;
+        Tick();
+        Snapshot(_serverTick, ++acked, own, early, late);
+
+        var states = _world.BlockStates;
+        Assert.True(_world.TryGetBlockState(OwnHull + 1, out var earlyState));
+        Assert.True(_world.TryGetBlockState(OwnHull + 2, out var lateState));
+        Assert.Equal(3u, states.Revision(earlyState));
+        Assert.Equal(3u, states.Revision(lateState));
+        Assert.True(BlockSet.Equal(states.Alive(earlyState), states.Alive(lateState)));
+        Assert.True(Figures.SameSums(states.Sums(earlyState), states.Sums(lateState)), "the two hulls have the same blocks and different sums");
+
+        // What is published with each view is what its sums say, and what sums built afresh for those blocks say.
+        pod.Figures(states.Sums(earlyState), out _, out var fromSums);
+        var rebuilt = pod.StatsOf([Mask(early)]);
+        Figures.AssertIdentical(fromSums, View(OwnHull + 1).Stats);
+        Figures.AssertIdentical(fromSums, View(OwnHull + 2).Stats);
+        Figures.AssertIdentical(rebuilt, fromSums);
+        Assert.Equal(pod.BlockCount - 3, fromSums.Blocks);
+        Assert.True(fromSums.Mass < pod.Stats.Mass);
+
+        // The player's own hull loses a block: its view and its flight figures follow in the same snapshot.
+        Lose(ref own, 4);
+        Tick();
+        Snapshot(_serverTick, ++acked, own, early, late);
+        Assert.True(_world.TryGetBlockState(OwnHull, out var ownState));
+        pod.Figures(states.Sums(ownState), out var ownFlight, out var ownStats);
+        Figures.AssertIdentical(ownStats, View(OwnHull).Stats);
+        Figures.AssertIdentical(ownFlight, _world.Flight);
+        Figures.AssertIdentical(pod.StatsOf([Mask(own)]), ownStats);
     }
 }
 

@@ -24,6 +24,8 @@ internal enum InputAction
     TogglePlayers,
     ToggleSocial,
     ToggleChat,
+    ToggleSectorInfo,
+    ToggleEditor,
     Count,
 }
 

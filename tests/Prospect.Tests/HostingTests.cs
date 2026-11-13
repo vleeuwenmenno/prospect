@@ -94,6 +94,56 @@ public sealed class HostingProtocolTests
     }
 
     [Fact]
+    public void AHelloCarriesTheVersionTheNameAndTheContentIdentityWithinItsStatedSize()
+    {
+        var content = GameContent.Load();
+
+        // The longest name a server reads: sixteen characters of three bytes each.
+        var longest = new string('東', ProtocolInfo.MaxNameBytes / 3);
+        Span<byte> buffer = stackalloc byte[HelloMessage.MaxWireSize];
+        var writer = new NetWriter(buffer);
+        new HelloMessage { ProtocolVersion = ProtocolInfo.Version, PlayerName = longest, Content = content.Identity }.Write(ref writer);
+        Assert.Equal(70, HelloMessage.MaxWireSize);
+        Assert.Equal(HelloMessage.MaxWireSize, writer.Length);
+        Assert.Equal((byte)MessageId.Hello, writer.Written[0]);
+
+        // The version is the first field, as it has been in every version: that is what lets two builds say they differ.
+        Assert.Equal(ProtocolInfo.Version, BitConverter.ToUInt32(writer.Written.Slice(1, 4)));
+
+        Assert.True(TryReadHello(writer.Written[1..], out var version, out var name, out var identity));
+        Assert.Equal(ProtocolInfo.Version, version);
+        Assert.Equal(longest, name);
+        Assert.Equal(content.Identity, identity);
+        Assert.NotEqual(OtherContent.Value.Identity, identity);
+
+        // Cut anywhere, it is not a hello: the identity is not optional and no part of it is made up.
+        for (var length = 0; length < writer.Length - 1; length++)
+            Assert.False(TryReadHello(writer.Written.Slice(1, length), out _, out _, out _), $"a hello cut to {length} bytes was read");
+
+        // A hello as the last version sent it, the version and the name, is read up to where the identity is missing.
+        var old = new NetWriter(buffer);
+        old.WriteByte((byte)MessageId.Hello);
+        old.WriteUInt32(ProtocolInfo.Version - 1);
+        old.WriteString("Old");
+        var reader = new NetReader(old.Written[1..]);
+        Assert.True(HelloMessage.TryReadVersion(ref reader, out var before));
+        Assert.Equal(ProtocolInfo.Version - 1, before);
+        Assert.False(TryReadHello(old.Written[1..], out _, out _, out _));
+
+        static bool TryReadHello(ReadOnlySpan<byte> payload, out uint version, out string name, out ContentIdentity identity)
+        {
+            var reader = new NetReader(payload);
+            var chars = new char[ProtocolInfo.MaxNameChars];
+            name = "";
+            identity = default;
+            if (!HelloMessage.TryReadVersion(ref reader, out version) || !HelloMessage.TryReadName(ref reader, chars, out var length))
+                return false;
+            name = new string(chars, 0, length);
+            return HelloMessage.TryReadContent(ref reader, out identity);
+        }
+    }
+
+    [Fact]
     public void ARefusalFromAnOlderServerStillSaysWhy()
     {
         // Before the wait was added a refusal was the reason alone. A version mismatch must stay readable.
@@ -432,6 +482,43 @@ public sealed class HostingTests
     }
 
     [Fact]
+    public void AClientWithOtherContentIsToldSoAndTheSameContentJoinsWhicheverItIs()
+    {
+        var port = TestNet.Port(12);
+        using var server = new ServerHost(new ServerConfig { Name = "Stock", MaxPlayers = 4, Visibility = ServerVisibility.Unlisted, Port = port }, Content);
+        server.Start();
+
+        // The same version of the game with one block's figure changed: it would fly its hulls differently.
+        using var modded = GameSession.Join("127.0.0.1", port, OtherContent.Value, "Modded");
+        var ended = TestNet.WaitFor(modded, s => s.State == SessionState.Ended);
+        Assert.Equal(SessionEndReason.ContentMismatch, ended.EndReason);
+        Assert.Equal(0, ended.RetryAfterSeconds);
+        Assert.Equal(0, server.Status.PlayerCount);
+
+        // The shipped content still joins, and being refused for content held nothing against the address.
+        using var stock = GameSession.Join("127.0.0.1", port, Content, "Stock");
+        TestNet.WaitFor(stock, s => s.State == SessionState.Active);
+        Assert.Equal(1, server.Status.PlayerCount);
+
+        // With a password the answer is the same, and it comes instead of the question: no password would help.
+        using var locked = Protected(13);
+        using var guest = GameSession.Join("127.0.0.1", TestNet.Port(13), OtherContent.Value, "Modded", Password);
+        Assert.Equal(SessionEndReason.ContentMismatch, TestNet.WaitFor(guest, s => s.State == SessionState.Ended).EndReason);
+        using var unasked = GameSession.Join("127.0.0.1", TestNet.Port(13), OtherContent.Value, "Modded");
+        Assert.Equal(SessionEndReason.ContentMismatch, TestNet.WaitFor(unasked, s => s.State == SessionState.Ended).EndReason);
+
+        // A local game is a server and a client on one content, whichever content that is: it passes the same
+        // check a stranger's client fails, on the in-process link.
+        using var local = GameSession.StartLocal(new ServerConfig { Name = "Modded world", MaxPlayers = 1 }, OtherContent.Value, "Host");
+        Assert.Equal("Modded world", TestNet.WaitFor(local, s => s.State == SessionState.Active).ServerName);
+        using var shipped = GameSession.StartLocal(new ServerConfig { Name = "Stock world", MaxPlayers = 1 }, Content, "Host");
+        Assert.Equal("Stock world", TestNet.WaitFor(shipped, s => s.State == SessionState.Active).ServerName);
+
+        Assert.Null(server.Fault);
+        Assert.Null(locked.Fault);
+    }
+
+    [Fact]
     public void AServerWithoutAPasswordTakesAClientThatOffersOne()
     {
         var port = TestNet.Port(1);
@@ -613,7 +700,7 @@ public sealed class HostingTests
             {
                 Span<byte> buffer = stackalloc byte[64];
                 var writer = new NetWriter(buffer);
-                new HelloMessage { ProtocolVersion = ProtocolInfo.Version, PlayerName = "Raw" }.Write(ref writer);
+                new HelloMessage { ProtocolVersion = ProtocolInfo.Version, PlayerName = "Raw", Content = Content.Identity }.Write(ref writer);
                 c.Send(writer.Written, NetChannel.Unreliable);
                 c.Send(writer.Written, NetChannel.Unreliable);
             },

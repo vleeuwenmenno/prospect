@@ -160,18 +160,28 @@ public static class RockDeltasMessage
 public struct HullRecord
 {
     /// <summary>
-    /// Id, owner, design, blocks, position, velocity, orientation, spin, heat, flags, the jump's four figures,
+    /// Id, owner, design, block revision and losses, position, velocity, orientation, spin, heat, flags, the jump's four figures,
     /// energy, shield, hull and shield delay, the shield's newest hit and the age of its last change, and the
     /// order's target.
     /// </summary>
-    public const int MaxWireSize = 4 + 4 + 1 + 8 + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 4 + 4 + 8 + 16 + 6 + 1 + 24;
+    public const int MaxWireSize = 4 + 4 + 1 + 4 + 4 + 1 + 4 * MaxLosses + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 4 + 4 + 8 + 16 + 6 + 1 + 24;
 
     public uint Id;
     public uint Owner;
     public byte Design;
 
-    /// <summary>One bit per block of the design; a cleared bit is a destroyed block.</summary>
-    public ulong Blocks;
+    /// <summary>Maximum losses accompanying one pose; larger backlogs recover on the bulk lane.</summary>
+    public const int MaxLosses = 16;
+    /// <summary>The block revision required by this pose.</summary>
+    public uint Revision;
+    /// <summary>The revision immediately before the first loss.</summary>
+    public uint LossStart;
+    /// <summary>Number of file-order block ids carried.</summary>
+    public byte LossCount;
+    /// <summary>Inline bounded loss payload.</summary>
+    [System.Runtime.CompilerServices.InlineArray(MaxLosses)]
+    public struct LossBuffer { private int _element0; }
+    public LossBuffer Losses;
     public HullState State;
     public HullOrder Order;
 
@@ -180,7 +190,10 @@ public struct HullRecord
         writer.WriteUInt32(Id);
         writer.WriteUInt32(Owner);
         writer.WriteByte(Design);
-        writer.WriteUInt64(Blocks);
+        writer.WriteUInt32(Revision);
+        writer.WriteUInt32(LossStart);
+        writer.WriteByte(LossCount);
+        for (var i = 0; i < LossCount; i++) writer.WriteInt32(Losses[i]);
         WorldWire.WritePosition(ref writer, State.Position);
         WorldWire.WriteVector(ref writer, State.Velocity);
         writer.WriteSingle(State.Orientation.X);
@@ -215,7 +228,12 @@ public struct HullRecord
         record.Id = reader.ReadUInt32();
         record.Owner = reader.ReadUInt32();
         record.Design = reader.ReadByte();
-        record.Blocks = reader.ReadUInt64();
+        record.Revision = reader.ReadUInt32();
+        record.LossStart = reader.ReadUInt32();
+        record.LossCount = reader.ReadByte();
+        if (record.LossCount > MaxLosses || record.LossStart > record.Revision || record.LossCount > record.Revision - record.LossStart)
+            return false;
+        for (var i = 0; i < record.LossCount; i++) record.Losses[i] = reader.ReadInt32();
         var ok = WorldWire.TryReadPosition(ref reader, out record.State.Position);
         ok &= WorldWire.TryReadVector(ref reader, out record.State.Velocity);
         var q = new Quaternion(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());

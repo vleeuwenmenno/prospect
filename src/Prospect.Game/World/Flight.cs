@@ -126,6 +126,9 @@ public struct FlightParams
     /// </summary>
     public float BoostEnergyFloor;
 
+    /// <summary>Minimum closing speed for visual shield contact feedback.</summary>
+    public float ShieldContactSpeed;
+
     /// <summary>Impacts slower than this do no damage, in m/s.</summary>
     public float CollisionSafeSpeed;
     public float CollisionDamagePerTonneSpeedSquared;
@@ -176,7 +179,7 @@ public enum JumpPhase : byte
 }
 
 /// <summary>
-/// The newest impact a hull's shield absorbed, for drawing its ripple. Simulation state like the rest of the hull:
+/// The newest contact a hull's shield reported, for drawing its ripple. Simulation state like the rest of the hull:
 /// the server and the predicting client write it with the same code, and snapshots carry it as it is stored, so
 /// every viewer agrees on where and how long ago the shield was hit. Impacts in one tick are one event.
 /// </summary>
@@ -185,10 +188,10 @@ public struct ShieldHit
     /// <summary>Ticks after which a hit is too old to show; the age stops counting there.</summary>
     public const byte MaxAgeTicks = 120;
 
-    /// <summary>Counts absorbing ticks, wrapping, so a viewer can tell a new hit from one it has seen.</summary>
+    /// <summary>Counts contact ticks, wrapping, so a viewer can tell a new hit from one it has seen.</summary>
     public byte Serial;
 
-    /// <summary>How hard the hit was, 1 to 255 as a share of the shield's capacity; 0 means no hit.</summary>
+    /// <summary>How hard the hit was, 1 for a light contact, up to 255 for absorbed damage; 0 means no hit.</summary>
     public byte Strength;
 
     /// <summary>Where it landed: the hull-local point, divided by the hull's radius, times 127.</summary>
@@ -239,7 +242,7 @@ public struct HullState
     /// </summary>
     public bool ShieldOffline;
 
-    /// <summary>The newest impact the shield absorbed.</summary>
+    /// <summary>The newest contact reported by the shield.</summary>
     public ShieldHit ShieldHit;
 
     /// <summary>
@@ -426,9 +429,9 @@ public static class Autopilot
 
         var toLocal = Quaternion.Conjugate(state.Orientation);
         var error = Vector3.Transform(desired - state.Velocity, toLocal);
-        input.Strafe = FlightInput.Quantize(error.X / (p.Acceleration.X * dt));
-        input.Vertical = FlightInput.Quantize(error.Y / (p.Acceleration.Y * dt));
-        input.Forward = FlightInput.Quantize(-error.Z / ((error.Z < 0 ? p.Acceleration.Z : p.ReverseAcceleration) * dt));
+        input.Strafe = Axis(error.X, p.Acceleration.X * dt);
+        input.Vertical = Axis(error.Y, p.Acceleration.Y * dt);
+        input.Forward = Axis(-error.Z, (error.Z < 0 ? p.Acceleration.Z : p.ReverseAcceleration) * dt);
 
         // Point the nose along the route while there is still some way to go.
         if (distance > 25f)
@@ -442,4 +445,11 @@ public static class Autopilot
 
         return input;
     }
+
+    /// <summary>
+    /// The share of one tick's push that closes an error in speed. A hull that cannot push along the axis is
+    /// asked for nothing: dividing by its zero would ask for a number that is none, and thrust it does not
+    /// have would still be charged for.
+    /// </summary>
+    private static sbyte Axis(float error, float push) => push > 0f ? FlightInput.Quantize(error / push) : (sbyte)0;
 }

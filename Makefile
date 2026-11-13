@@ -10,6 +10,8 @@
 CONFIG   ?= Debug
 ARGS     ?=
 V        ?=
+# xUnit options, for example TEST_ARGS="-parallel none" for timing-sensitive integration checks.
+TEST_ARGS ?=
 
 SOLUTION := Prospect.slnx
 CLIENT   := src/Prospect.Client
@@ -124,6 +126,12 @@ ifneq ($(filter $(DOTNET_HOME)/%,$(DOTNET)),)
   export PATH        := $(DOTNET_HOME):$(PATH)
 endif
 export DOTNET_NOLOGO := 1
+
+# The allocation tests read how much the current thread has allocated. A collection that falls inside a measured
+# stretch counts the unused rest of that thread's allocation buffer against it: up to 8 KiB the test never took.
+# The tests run side by side and collect often, so a full run failed that way about one time in two. A gen-0
+# budget of 256 MiB keeps collections out of those stretches.
+TEST_ENV := DOTNET_GCgen0size=0x10000000 DOTNET_GCgen0MaxBudget=0x10000000
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Vulkan validation layers fetched by `make tools` (for machines without a system-wide install).
@@ -295,9 +303,9 @@ test: need-dotnet ## Run the unit tests
 	$(Q)"$(DOTNET)" build $(TESTS) -c $(CONFIG) $(QUIET)
 	$(Q)"$(DOTNET)" build $(LTESTS) -c $(CONFIG) $(QUIET)
 	$(call step,Running the tests)
-	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Tests/$(config)/Prospect.Tests.dll
+	$(Q)$(RUN_ENV) $(TEST_ENV) "$(DOTNET)" $(BIN)/Prospect.Tests/$(config)/Prospect.Tests.dll $(TEST_ARGS)
 	$(call step,Running the listing server tests)
-	$(Q)"$(DOTNET)" $(BIN)/Prospect.Listing.Tests/$(config)/Prospect.Listing.Tests.dll
+	$(Q)"$(DOTNET)" $(BIN)/Prospect.Listing.Tests/$(config)/Prospect.Listing.Tests.dll $(TEST_ARGS)
 
 bench: need-dotnet ## Release benchmark: frame rate and per-frame allocation (fails below target)
 	$(call step,Building the client (Release))
@@ -309,7 +317,7 @@ bench: need-dotnet ## Release benchmark: frame rate and per-frame allocation (fa
 
 fmt: need-dotnet ## Format the code
 	$(call step,Formatting)
-	$(Q)"$(DOTNET)" format $(SOLUTION)
+	$(Q)"$(DOTNET)" format $(SOLUTION) $(FORMAT_ARGS)
 	@$(call ok,Formatted)
 
 check: need-dotnet ## Formatting, warnings-as-errors build and tests; must be clean before a milestone is done
@@ -318,9 +326,9 @@ check: need-dotnet ## Formatting, warnings-as-errors build and tests; must be cl
 	$(call step,Building $(SOLUTION) ($(CONFIG)))
 	$(Q)"$(DOTNET)" build $(SOLUTION) -c $(CONFIG) $(QUIET)
 	$(call step,Running the tests)
-	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Tests/$(config)/Prospect.Tests.dll
+	$(Q)$(RUN_ENV) $(TEST_ENV) "$(DOTNET)" $(BIN)/Prospect.Tests/$(config)/Prospect.Tests.dll $(TEST_ARGS)
 	$(call step,Running the listing server tests)
-	$(Q)"$(DOTNET)" $(BIN)/Prospect.Listing.Tests/$(config)/Prospect.Listing.Tests.dll
+	$(Q)"$(DOTNET)" $(BIN)/Prospect.Listing.Tests/$(config)/Prospect.Listing.Tests.dll $(TEST_ARGS)
 	@printf '\n%s\n' "$(GREEN)$(BOLD)All checks passed.$(RESET)"
 
 clean: ## Remove build output

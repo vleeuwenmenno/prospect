@@ -25,7 +25,7 @@ internal static class Program
                                   Arguments show in process lists; PROSPECT_PASSWORD in the environment works too
           --listing <url|off>     The listing server for public games and the server browser (default: content/net/listing.json)
           --set <id>=<value>      A world setting for local games started in this run; repeat for more (ids and ranges: content/rules/settings.json)
-          --open <view>           With --start local or --join: open the command view, the map or the ship data sheet (command, map, map-menu, map-hover, galaxy, info), start a jump (jump, jump-wormhole, jump-rift), send the rest of the fleet on short jumps 600 m along -x for another client to watch (jump-fleet), or show Controls (controls), the in-game menu (menu), the world settings in force (world-settings), the player list (players), the party
+          --open <view>           With --start local or --join: open the command view, the map or the ship data sheet (command, map, map-menu, map-hover, galaxy, info), start a jump (jump, jump-wormhole, jump-rift), send the rest of the fleet on short jumps 600 m along -x for another client to watch (jump-fleet), or show Controls (controls), ask to edit the own ship in the ship editor (edit), the in-game menu (menu), the world settings in force (world-settings), the player list (players), the party
                                   panel (social), the Friends tab (friends), chat (chat) or the world with only the always-shown party and chat (hud)
           --browser-sample <s>    The server browser shows a fixed sample instead of asking the listing server, for captures:
                                   ready, loading, failed, empty, off, or password (the sample with the password prompt open)
@@ -143,7 +143,7 @@ internal static class Program
                 case "--set" when hasValue:
                     options.WorldSettingArgs.Add(args[++i]);
                     break;
-                case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "map-hover" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud":
+                case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "map-hover" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit":
                     options.OpenView = args[++i];
                     break;
                 case "--browser-sample" when hasValue:

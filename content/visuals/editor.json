@@ -1,0 +1,19 @@
+{
+  "compactMassBelow": 0.75,
+  "categories": [
+    { "name": "All" },
+    { "name": "Hull", "roles": ["structure", "cargo", "crew"], "compact": false },
+    { "name": "Power", "roles": ["core", "power", "storage"], "compact": false },
+    { "name": "Move", "roles": ["engine", "thruster", "gyro"], "compact": false },
+    { "name": "Shield", "roles": ["shield"], "compact": false },
+    { "name": "Jump", "roles": ["drive"], "compact": false },
+    { "name": "Drone", "compact": true }
+  ],
+  "lowForwardAcceleration": 2.0,
+  "lowTopSpeed": 40,
+  "lowTurnDegrees": 8,
+  "sizePixelsPerCell": 24,
+  "rotateRingPixels": 12,
+  "edgeOnDegrees": 12,
+  "turnSeconds": 0.16
+}

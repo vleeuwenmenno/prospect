@@ -25,42 +25,54 @@ internal sealed class MeshData
 
 internal static class MeshBuilder
 {
-    private static readonly (int X, int Y, int Z)[] FaceNormals = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)];
-
     /// <summary>
-    /// Meshes a block hull: one quad for every block face that is not covered by a neighbouring block, centred on
-    /// the hull's centre of mass.
+    /// Meshes a block hull: one polygon for every block face that is not covered by a neighbouring block, centred
+    /// on the hull's centre of mass. A wedge's faces are its two full sides, two triangular caps and the slant, which
+    /// its exterior-face bit (u, +su) stands for; its bit (v, +sv) has no face.
     /// </summary>
     public static MeshData Hull(HullDesign design)
     {
-        var occupied = new HashSet<(int, int, int)>(design.Cells);
-        var center = design.CenterOfMass;
-
         var mesh = new MeshData();
-        var half = 0.5f;
-        foreach (var (x, y, z) in design.Cells)
+        for (var b = 0; b < design.BlockCount; b++)
         {
-            var blockCenter = new Vector3(x, y, z) - center;
-            foreach (var (nx, ny, nz) in FaceNormals)
+            for (var side = 0; side < 6; side++)
             {
-                if (occupied.Contains((x + nx, y + ny, z + nz)))
-                    continue;
-
-                var normal = new Vector3(nx, ny, nz);
-                // Two axes spanning the face, ordered so the quad winds counter-clockwise seen from outside.
-                var u = nx != 0 ? new Vector3(0, 1, 0) : ny != 0 ? new Vector3(0, 0, 1) : new Vector3(1, 0, 0);
-                var v = Vector3.Cross(normal, u);
-                var faceCenter = blockCenter + normal * half;
-                var first = (uint)mesh.Vertices.Count;
-                AddVertex(mesh, (faceCenter - u * half - v * half) * design.BlockSize, normal);
-                AddVertex(mesh, (faceCenter + u * half - v * half) * design.BlockSize, normal);
-                AddVertex(mesh, (faceCenter + u * half + v * half) * design.BlockSize, normal);
-                AddVertex(mesh, (faceCenter - u * half + v * half) * design.BlockSize, normal);
-                mesh.Indices.AddRange([first, first + 1, first + 2, first, first + 2, first + 3]);
+                if ((design.ExteriorFaces[b] & (1 << side)) != 0)
+                    AddFace(mesh, design.Shapes[b], design.BlockOffsets[b], design.BlockHalfExtents[b], side);
             }
         }
 
         return mesh;
+    }
+
+    /// <summary>
+    /// One block of unit bounding box centred on the origin, for hulls drawn block by block: a cube for
+    /// <see cref="BlockShape.Box"/>, a triangular prism for a wedge. Scaled per axis it is the block at any size;
+    /// the mesh shader turns its normals for that scaling.
+    /// </summary>
+    public static MeshData Primitive(BlockShape shape)
+    {
+        var mesh = new MeshData();
+        for (var side = 0; side < 6; side++)
+            AddFace(mesh, shape, Vector3.Zero, new Vector3(0.5f), side);
+        return mesh;
+    }
+
+    /// <summary>A unit cube centred on the origin: one block, for hulls drawn block by block.</summary>
+    public static MeshData Cube() => Primitive(BlockShape.Box);
+
+    private static void AddFace(MeshData mesh, BlockShape shape, Vector3 center, Vector3 half, int side)
+    {
+        Span<int> corners = stackalloc int[4];
+        var count = BlockShapes.Face(shape, side, corners);
+        if (count == 0)
+            return;
+        var normal = BlockShapes.FaceNormal(shape, half, side);
+        var first = (uint)mesh.Vertices.Count;
+        for (var i = 0; i < count; i++)
+            AddVertex(mesh, center + BlockShapes.Corner(corners[i], half), normal);
+        for (var i = 1; i + 1 < count; i++)
+            mesh.Indices.AddRange([first, first + (uint)i, first + (uint)i + 1]);
     }
 
     /// <summary>
@@ -90,27 +102,6 @@ internal static class MeshBuilder
         for (var i = 0; i < positions.Length; i++)
             mesh.Vertices.Add(new MeshVertex { Position = ToFloat3(positions[i]), Normal = ToFloat3(Vector3.Normalize(normals[i])) });
         mesh.Indices.AddRange(indices);
-        return mesh;
-    }
-
-    /// <summary>A unit cube centred on the origin: one block, for hulls drawn block by block.</summary>
-    public static MeshData Cube()
-    {
-        var mesh = new MeshData();
-        foreach (var (nx, ny, nz) in FaceNormals)
-        {
-            var normal = new Vector3(nx, ny, nz);
-            var u = nx != 0 ? new Vector3(0, 1, 0) : ny != 0 ? new Vector3(0, 0, 1) : new Vector3(1, 0, 0);
-            var v = Vector3.Cross(normal, u);
-            var center = normal * 0.5f;
-            var first = (uint)mesh.Vertices.Count;
-            AddVertex(mesh, center - u * 0.5f - v * 0.5f, normal);
-            AddVertex(mesh, center + u * 0.5f - v * 0.5f, normal);
-            AddVertex(mesh, center + u * 0.5f + v * 0.5f, normal);
-            AddVertex(mesh, center - u * 0.5f + v * 0.5f, normal);
-            mesh.Indices.AddRange([first, first + 1, first + 2, first, first + 2, first + 3]);
-        }
-
         return mesh;
     }
 

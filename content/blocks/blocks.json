@@ -1,5 +1,5 @@
 {
-  "limits": { "maxBoxSide": 64, "maxDesignSide": 4096, "maxBlocks": 150000 },
+  "limits": { "maxBoxSide": 64, "maxDesignSide": 4096, "maxBlocks": 150000, "surfaceVertices": 32768, "surfaceIndices": 196608, "geometryPairTests": 6000000, "shieldRoundness": 1.0, "shieldBlend": 0.3 },
   "rules": {
     "speedPerRootAcceleration": 60,
     "turnRatePerRootAcceleration": 0.52,
@@ -12,6 +12,11 @@
     "shieldRechargeDelaySeconds": 4,
     "shieldRestartFraction": 0.25,
     "shieldRestartPowerMultiplier": 2,
+    "shieldContactSpeed": 0.1,
+    "collisionTreeVisits": 8192,
+    "collisionBoxTests": 2048,
+    "collisionContacts": 256,
+    "collisionStrides": 32,
     "collisionSafeSpeed": 5,
     "collisionDamagePerTonneSpeedSquared": 0.02,
     "collisionBounce": 0.3,

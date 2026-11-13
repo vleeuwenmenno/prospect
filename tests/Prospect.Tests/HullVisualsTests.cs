@@ -49,7 +49,7 @@ public sealed class HullVisualsTests
         {
             Id = id,
             Design = (byte)design,
-            Blocks = Content.Designs[design].FullMask,
+            Blocks = Content.Designs[design].FullSet.ToArray(),
             Position = at,
             PreviousPosition = at,
             Orientation = Quaternion.Identity,
@@ -190,7 +190,7 @@ public sealed class HullVisualsTests
     {
         var design = DesignWith(drive);
         var flight = Content.Designs[design].Flight;
-        var full = Content.Designs[design].FullMask;
+        var full = Content.Designs[design].FullMask();
         var visuals = new HullVisuals();
 
         // Late in the charge the hull goes into its opening: find a moment it is partly through.
@@ -198,7 +198,7 @@ public sealed class HullVisualsTests
         for (; progress < 1f; progress += 0.002f)
         {
             Update(visuals, [Hull(1, design, JumpPhase.Charge, progress)]);
-            var through = visuals.Hulls[0].PickBlocks;
+            var through = BlockMasks.Word(visuals.Hulls[0].PickBlocks.Span);
             if (through != full && through != 0)
                 break;
         }
@@ -213,7 +213,7 @@ public sealed class HullVisualsTests
         var beside = visuals.Hulls[1];
         Assert.True(jumping.Clip >= 0);
         Assert.Equal(-1, beside.Clip);
-        Assert.Equal(full, beside.PickBlocks);
+        Assert.Equal(full, BlockMasks.Word(beside.PickBlocks.Span));
         Assert.True(beside.Visible);
 
         // A block stays pickable while any of it is on the shown side of the plane the mesh pass cuts at.
@@ -227,7 +227,7 @@ public sealed class HullVisualsTests
         {
             var centre = jumping.Position + Vector3.Transform(blocks[b], jumping.Orientation);
             var past = Vector3.Dot(centre.RelativeTo(slot.Mouth), slot.Axis * slot.Clip);
-            Assert.Equal(past - half <= 0f, (jumping.PickBlocks & 1UL << b) != 0);
+            Assert.Equal(past - half <= 0f, (BlockMasks.Word(jumping.PickBlocks.Span) & 1UL << b) != 0);
 
             // Picked through the same picker the world uses, with nothing in the way: the cut part of a block is
             // not a target, even when the rest of it is. Seen from the side, the blocks along the ray through its
@@ -261,7 +261,7 @@ public sealed class HullVisualsTests
             var centres = true;
             foreach (var block in blocks)
                 centres &= Vector3.Dot((visual.Position + block).RelativeTo(slot.Mouth), slot.Axis * slot.Clip) > 0f;
-            found = centres && visual.PickBlocks != 0;
+            found = centres && BlockMasks.Word(visual.PickBlocks.Span) != 0;
         }
 
         Assert.True(found, "the hull is never drawn with every block centre past its opening");
@@ -293,7 +293,7 @@ public sealed class HullVisualsTests
         Assert.Equal(0, TargetPicking.Pick(into, ahead, into, 1e6f, [hull], [], picks));
 
         // Missing a block, it is drawn a cube per block, with every face of each.
-        var damaged = Hull(1, design, JumpPhase.Charge, 0.5f) with { Blocks = Content.Designs[design].FullMask & ~1UL };
+        var damaged = Hull(1, design, JumpPhase.Charge, 0.5f) with { Blocks = BlockMasks.Set(Content.Designs[design].FullMask() & ~1UL) };
         Update(visuals, [damaged]);
         Assert.Null(visuals.Pick(1, visuals.Hulls[0], visuals.Hulls[0].Position, Content.Designs[design]).Faces);
     }
@@ -479,6 +479,10 @@ public sealed class HullVisualsTests
                 if (started && seen.Jump == JumpPhase.None)
                     break;
                 var visual = world.Visuals.Hulls[index];
+
+                // Both sets are this frame's memory, which the next frame fills again: keep them as numbers.
+                var pickable = BlockMasks.Word(visual.PickBlocks.Span);
+                var whole = seen.Mask();
                 Assert.False(visual.Inside);
                 var drawn = world.DrawnPosition(seen);
                 Assert.Equal(visual.Position, drawn);
@@ -488,7 +492,7 @@ public sealed class HullVisualsTests
                     continue;
                 devices.PlacePointer(at);
                 Step(false);
-                if (visual.Visible && visual.PickBlocks == seen.Blocks)
+                if (visual.Visible && pickable == whole)
                 {
                     Assert.True(seen.Id == world.HoveredHull, $"{seen.Jump} {WorldView.JumpProgress(seen, Content.Designs[seen.Design].Flight)}: hovered {world.HoveredHull}");
                     shownPicked++;

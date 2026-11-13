@@ -75,6 +75,154 @@ public sealed class PlayerInputBridge
         }
     }
 
+    /// <summary>What the editor asks of the session next, as <see cref="ConsumeEdit"/> hands it over.</summary>
+    internal enum EditIntent : byte
+    {
+        None,
+        Begin,
+        Cancel,
+        Commit,
+        Repair,
+    }
+
+    private bool _hasEditBegin, _hasEditCancel, _hasEditRepair;
+    private uint _editHull, _editToken;
+    private byte[]? _editBytes;
+    private int _installedDesigns, _failedDesigns;
+
+    /// <summary>The most canonical bytes <see cref="CommitEdit"/> takes; the session sets it from the content's transfer limit.</summary>
+    internal int MaxCommitBytes { get; set; } = 32768;
+
+    /// <summary>
+    /// Asks the server to let the player edit a hull, which must be the one they fly. The answer, an open edit
+    /// with its token or a refusal with its reason and wait, shows in <see cref="SessionSnapshot.Editor"/>. A
+    /// newer request replaces one the session has not taken yet.
+    /// </summary>
+    public void RequestEdit(uint hull)
+    {
+        lock (_lock)
+        {
+            _hasEditBegin = true;
+            _editHull = hull;
+            _hasEditCancel = false;
+            _hasEditRepair = false;
+            _editBytes = null;
+        }
+    }
+
+    /// <summary>Ends the player's edit, whatever stage it is in, and drops a request or design the session has not taken yet.</summary>
+    public void CancelEdit()
+    {
+        lock (_lock)
+        {
+            _hasEditCancel = true;
+            _hasEditBegin = false;
+            _hasEditRepair = false;
+            _editBytes = null;
+        }
+    }
+
+    /// <summary>
+    /// Commits a design for the open edit <paramref name="token"/> names: the canonical bytes
+    /// <see cref="BuildDraft.Export"/> gives. They are copied here, so the caller may do with its own what it
+    /// likes; the copy is never written to again. False when they are empty or more than a design may be. The
+    /// server checks the design itself and answers in <see cref="SessionSnapshot.Editor"/>; a newer commit
+    /// replaces one the session has not taken yet. Allocates: call it when the player applies, not every frame.
+    /// </summary>
+    public bool CommitEdit(uint token, ReadOnlySpan<byte> canonicalBytes)
+    {
+        if (canonicalBytes.IsEmpty || canonicalBytes.Length > MaxCommitBytes)
+            return false;
+        var copy = canonicalBytes.ToArray();
+        lock (_lock)
+        {
+            _editBytes = copy;
+            _editToken = token;
+            _hasEditCancel = false;
+            _hasEditRepair = false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Asks the server to repair the hull of the open edit <paramref name="token"/> names: to rebuild it as the
+    /// design it has, with every block back and whole. Nothing is sent but the request, and the draft plays no
+    /// part, so an interface with unsaved changes should say so before it asks. The server refuses a hull with
+    /// nothing to repair (<see cref="EditorReason.NoChange"/>; <see cref="HullDesign.NeedsRepair"/> says so
+    /// beforehand) and spaces repairs as it spaces commits. The answer shows in
+    /// <see cref="SessionSnapshot.Editor"/>, ending in <see cref="EditorPhase.Applied"/> with the new hull. A
+    /// repair replaces a commit the session has not taken yet, and a commit replaces a repair.
+    /// </summary>
+    public void RepairEdit(uint token)
+    {
+        lock (_lock)
+        {
+            _hasEditRepair = true;
+            _editToken = token;
+            _hasEditCancel = false;
+            _editBytes = null;
+        }
+    }
+
+    /// <summary>
+    /// Called by the simulation: takes the next editor request, a cancel before a begin before a repair or a
+    /// commit. The bytes of a commit are the session's from here on.
+    /// </summary>
+    internal EditIntent ConsumeEdit(out uint value, out byte[]? bytes)
+    {
+        lock (_lock)
+        {
+            value = 0;
+            bytes = null;
+            if (_hasEditCancel)
+            {
+                _hasEditCancel = false;
+                return EditIntent.Cancel;
+            }
+
+            if (_hasEditBegin)
+            {
+                _hasEditBegin = false;
+                value = _editHull;
+                return EditIntent.Begin;
+            }
+
+            if (_hasEditRepair)
+            {
+                _hasEditRepair = false;
+                value = _editToken;
+                return EditIntent.Repair;
+            }
+
+            if (_editBytes is null)
+                return EditIntent.None;
+            value = _editToken;
+            bytes = _editBytes;
+            _editBytes = null;
+            return EditIntent.Commit;
+        }
+    }
+
+    /// <summary>
+    /// Called by the render thread: the meshes of the first <paramref name="count"/> designs of the session's
+    /// catalogue are in the renderer. The session tells the server it can show a design added during play only
+    /// once the design is counted here, and until then the server sends no hull of it. A session with no renderer
+    /// never reports, and so is never sent such a hull.
+    /// </summary>
+    public void ReportInstalledDesigns(int count) => Volatile.Write(ref _installedDesigns, count);
+
+    /// <summary>
+    /// Called by the render thread: the meshes for the session's catalogue of <paramref name="count"/> designs
+    /// could not be prepared. The designs past the installed ones stay unavailable, and the session tells the
+    /// server so, which ends an edit that was waiting for one of them.
+    /// </summary>
+    public void ReportDesignFailure(int count) => Volatile.Write(ref _failedDesigns, count);
+
+    /// <summary>How many designs the renderer has installed, and the size of the newest catalogue it could not prepare.</summary>
+    internal int InstalledDesigns => Volatile.Read(ref _installedDesigns);
+    internal int FailedDesigns => Volatile.Read(ref _failedDesigns);
+
     private PlayerControls _controls;
     private bool _hasOrder;
     private HullOrder _order;

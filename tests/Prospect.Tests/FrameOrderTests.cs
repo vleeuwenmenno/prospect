@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Reflection;
 using System.Text;
 using Brutal.GlfwApi;
 using Brutal.ImGuiApi;
@@ -73,7 +74,8 @@ public sealed class FrameOrderTests : IDisposable
     private readonly HeadlessInterface _ui;
     private readonly PointerRouter _router;
     private readonly WorldView _world;
-    private readonly SessionSnapshot _snapshot;
+    private readonly ActionMap _actions;
+    private SessionSnapshot _snapshot;
     private int _buttonClicks;
     private long _tick;
     private bool _surfaceOpen;
@@ -110,6 +112,13 @@ public sealed class FrameOrderTests : IDisposable
     private static readonly float2 BarTabMin = new(48, 0);
     private static readonly float2 BarTabSize = new(80, 28);
 
+    // The sector control at the top left, submitted before the frame's layout as ScreenHost does, in the world and
+    // before the map's surface; and whether its key may act this frame (no menu, Controls or workspace).
+    private bool _sectorShown;
+    private bool _sectorKeyAllowed = true;
+    private readonly SectorInfoToggle _sector = new();
+    private static readonly float2 OverSector = new(84f, 44f);
+
     // The course menu as the map opens it on a right click, and what its rows ordered.
     private static readonly float2 MenuSize = MapCourseMenu.Size(1f);
     private bool _menuOpen;
@@ -143,6 +152,7 @@ public sealed class FrameOrderTests : IDisposable
 
         var actions = ActionMap.Load(Path.Combine(AppContext.BaseDirectory, "content", "input", "bindings.json"));
         _ui = new HeadlessInterface(_devices);
+        _actions = actions;
         _router = new PointerRouter(_devices, actions, _ui);
         _world = new WorldView(_devices, actions, new ClientSettings(), _jobs, null!, content.Designs);
         Frame();
@@ -429,16 +439,20 @@ public sealed class FrameOrderTests : IDisposable
     {
         _devices.BeginFrame();
         poll?.Invoke();
-        var pointerFrame = new PointerFrame { InSpace = true, Focused = true, SurfaceOpen = _surfaceOpen, CommandView = _world.Mode == ViewMode.Command };
+        var pointerFrame = new PointerFrame { InSpace = true, Focused = true, SurfaceOpen = _surfaceOpen, CommandView = _world.PointerView };
         _router.Update(pointerFrame);
         var handled = shortcut?.Invoke() ?? false;
+        // As App.Run: the sector key after the other interface shortcuts, never consuming the frame's input.
+        if (_sectorShown)
+            _sector.HandleShortcut(_actions, _devices, _sectorKeyAllowed, ImGui.GetIO().WantTextInput, _router.PointerOverInterface);
         pointerFrame.SurfaceOpen = _surfaceOpen;
         _router.RefreshCapture(pointerFrame);
-        var worldInput = !_surfaceOpen && !handled && !ImGui.GetIO().WantCaptureKeyboard;
+        var worldInput = !_surfaceOpen && !handled && (!ImGui.GetIO().WantCaptureKeyboard || _world.HoldsInterfacePress);
         _router.BeginWorldMouse(worldInput);
+        _world.PointerOverPanel = _router.PointerOverWindow;
         _world.Update(_snapshot, Bridge, 1f / 60f, worldInput, Screen, Screen, _router.PointerOverInterface);
         _router.EndWorldMouse();
-        pointerFrame.CommandView = _world.Mode == ViewMode.Command;
+        pointerFrame.CommandView = _world.PointerView;
         _router.RefreshCapture(pointerFrame);
 
         if (_mapShown)
@@ -449,6 +463,9 @@ public sealed class FrameOrderTests : IDisposable
         }
 
         DrawFloating();
+        // As the editor screen does before its panels: a press on one ends a turn, keeping it.
+        _world.EndPartRotationOnPanelPress();
+        DrawPalette();
 
         // The quick buttons, drawn after the world as ScreenHost draws them.
         ImGui.SetNextWindowPos(ButtonMin);
@@ -459,6 +476,44 @@ public sealed class FrameOrderTests : IDisposable
             _buttonClicks++;
         ImGui.End();
         ImGui.Render();
+    }
+
+    // A part card of the editor's part list, submitted with the production helper after the world as ScreenHost
+    // submits it, a search field like the list's and a shape button handed back as the list's buttons are. As
+    // BeginEditorPanel does, the items sit in a child body of a window without keyboard navigation: the child keeps
+    // navigation, so a click in it claims the keyboard until it is handed back.
+    private bool _paletteShown;
+    private int _palettePart;
+    private readonly ImInputString _paletteSearch = new(48);
+    private static readonly float2 PaletteMin = new(20, 120);
+    private static readonly float2 CardSize = new(220, 70);
+    private static readonly float2 OverCard = PaletteMin + new float2(110, 35);
+    private static readonly float2 OverSearch = PaletteMin + new float2(110, 90);
+    private static readonly float2 OverShapeBox = PaletteMin + new float2(110, 122);
+
+    private void DrawPalette()
+    {
+        if (!_paletteShown)
+            return;
+        var size = new float2(CardSize.X, CardSize.Y + 70);
+        ImGui.SetNextWindowPos(PaletteMin);
+        ImGui.SetNextWindowSize(size);
+        ImGui.Begin("##editorparts"u8, ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoFocusOnAppearing
+            | ImGuiWindowFlags.NoScrollbar);
+        ImGui.SetCursorScreenPos(PaletteMin);
+        ImGui.BeginChild("##editorpartsbody"u8, size, ImGuiChildFlags.None, ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoScrollbar);
+        ImGui.SetCursorScreenPos(PaletteMin);
+        ImGui.PushID(_palettePart);
+        EditorPalette.Card(_palettePart, CardSize, _world.Editor);
+        ImGui.PopID();
+        ImGui.SetCursorScreenPos(PaletteMin + new float2(0, CardSize.Y + 10));
+        ImGui.SetNextItemWidth(CardSize.X);
+        ImGui.InputText("##partsearch"u8, _paletteSearch.Buffer, ImGuiInputTextFlags.NoUndoRedo);
+        ImGui.SetCursorScreenPos(PaletteMin + new float2(0, CardSize.Y + 40));
+        if (EditorPalette.HandBack(ImGui.InvisibleButton("##shapebox"u8, new float2(CardSize.X, 24))))
+            _world.Editor.SetPartShape(BlockShape.Box);
+        ImGui.EndChild();
+        ImGui.End();
     }
 
     private FloatingInput FloatingMode => _floatingFull ? FloatingInput.Full : _router.Captured ? FloatingInput.Passive : FloatingInput.Pointer;
@@ -706,6 +761,70 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal(1, _mapPresses);
         Assert.Equal(1, _mapReleases);
         Assert.Equal(2, _barClicks);
+    }
+
+    [Fact]
+    public void F2TogglesTheSectorPanelInFlightAndLeavesWAndBoostToTheHull()
+    {
+        ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
+        _sectorShown = true;
+        Frame();
+        Frame();
+        Assert.True(_router.Captured);
+        Assert.False(_sector.Open);
+        Bridge.Consume(out _, out _);
+
+        // The key toggles the panel in the frame it goes down, and W and Space pressed in the same poll still fly.
+        Frame(() =>
+        {
+            Key(GlfwKey.W, true);
+            Key(GlfwKey.Space, true);
+            Key(GlfwKey.F2, true);
+        });
+        Assert.True(_sector.Open);
+        var sent = Sent();
+        Assert.True(sent.Forward > 0);
+        Assert.True(sent.Boost);
+        Assert.False(ImGui.GetIO().WantCaptureKeyboard);
+        Assert.True(_router.Captured);
+
+        // Held, it does nothing more; pressed again, it closes the panel.
+        Frame();
+        Frame();
+        Assert.True(_sector.Open);
+        Frame(() => Key(GlfwKey.F2, false));
+        Frame(() => Key(GlfwKey.F2, true));
+        Assert.False(_sector.Open);
+
+        // With the pointer captured a click is the hull's, never the control's.
+        Frame(() => Key(GlfwKey.F2, false));
+        Frame(() => Move(OverSector));
+        Frame(() => Click());
+        Frame();
+        Assert.False(_sector.Open);
+
+        // Not while a menu or a surface has the input.
+        _sectorKeyAllowed = false;
+        Frame(() => Key(GlfwKey.F2, true));
+        Assert.False(_sector.Open);
+    }
+
+    [Fact]
+    public void F2LeavesTheSectorPanelAloneWhileAFieldIsBeingTypedIn()
+    {
+        _sectorShown = true;
+        _surfaceOpen = true;
+        _floatingFull = true;
+        _floatingField = true;
+        _floating = new FloatingWindow { Open = true };
+        Frame(() => Move(EmptySpace));
+        Frame(() => Move(FieldOf(_floating)));
+        Frame(() => Click());
+        Frame();
+        Assert.True(ImGui.GetIO().WantTextInput);
+        Frame(() => Key(GlfwKey.F2, true));
+        Frame();
+        Assert.False(_sector.Open);
     }
 
     /// <summary>The command view without Shift, the pointer shown and resting on empty space, the own hull selected.</summary>
@@ -1257,6 +1376,190 @@ public sealed class FrameOrderTests : IDisposable
         Bridge.Consume(out hasOrder, out order);
         Assert.True(hasOrder);
         Assert.Equal(OrderKind.MoveTo, order.Kind);
+    }
+
+    [Fact]
+    public void TheMapTakesControlOfExactlyOneSelectedOwnShipWithoutClosing()
+    {
+        var own = _world.Own.Id;
+        _unitCount = MapUnitList.Collect(_snapshot, _units);
+        var others = _units.AsSpan(0, _unitCount).ToArray().Where(id => id != own).ToArray();
+        Assert.Equal(2, others.Length);
+        Bridge.ConsumeControlRequest(out _);
+        // The map is a surface: flight's own T handling is off while it is open.
+        _surfaceOpen = true;
+
+        bool Press(bool keyboard = true)
+        {
+            var sent = false;
+            Frame(() => Key(GlfwKey.T, true));
+            sent = _world.SwitchToSelectedFromMap(Bridge, keyboard);
+            Frame(() => Key(GlfwKey.T, false));
+            return sent;
+        }
+
+        // Nothing selected, the hull being flown, several, a rock with a hull, a stale id: no request.
+        _world.ClearSelection();
+        Assert.False(Press());
+        _world.Select(own, false);
+        Assert.False(Press());
+        _world.Select(others[0], true);
+        Assert.False(Press());
+        _world.ClearSelection();
+        _world.Select(0xFFFF_FF00u, false);
+        Assert.False(Press());
+        Assert.False(Bridge.ConsumeControlRequest(out _));
+
+        // Typing owns the keyboard.
+        _world.Select(others[0], false);
+        Assert.False(Press(false));
+        Assert.False(Bridge.ConsumeControlRequest(out _));
+
+        // One other own ship: the request names it, the selection stays, and nothing moves until a snapshot says so.
+        Assert.True(Press());
+        Assert.True(Bridge.ConsumeControlRequest(out var requested));
+        Assert.Equal(others[0], requested);
+        Assert.Equal(1, _world.Selection.Length);
+        Assert.Equal(others[0], _world.Selection[0]);
+        Assert.Equal(own, _world.Own.Id);
+
+        // A held key sends nothing more: only the frame of the press counts.
+        Frame(() => Key(GlfwKey.T, true));
+        Assert.True(_world.SwitchToSelectedFromMap(Bridge, true));
+        Assert.True(Bridge.ConsumeControlRequest(out _));
+        Frame();
+        Assert.False(_world.SwitchToSelectedFromMap(Bridge, true));
+        Frame(() => Key(GlfwKey.T, true));
+        Assert.False(_world.SwitchToSelectedFromMap(Bridge, true));
+        Assert.False(Bridge.ConsumeControlRequest(out _));
+        Frame(() => Key(GlfwKey.T, false));
+    }
+
+    [Fact]
+    public void TheMapSwitchKeyFollowsTheBindingFileNotTheLetterT()
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path, """{"actions":{"SwitchHull":["Key:G"]},"axes":{}}""");
+            var rebound = new WorldView(_devices, ActionMap.Load(path), new ClientSettings(), _jobs, null!, GameContent.Load().Designs);
+            _unitCount = MapUnitList.Collect(_snapshot, _units);
+            var other = _units.AsSpan(0, _unitCount).ToArray().First(id => id != _world.Own.Id);
+            Bridge.ConsumeControlRequest(out _);
+
+            bool Press(GlfwKey key)
+            {
+                _devices.BeginFrame();
+                Key(key, true);
+                rebound.Update(_snapshot, Bridge, 1f / 60f, false, Screen, Screen, false);
+                var sent = rebound.SwitchToSelectedFromMap(Bridge, true);
+                _devices.BeginFrame();
+                Key(key, false);
+                return sent;
+            }
+
+            rebound.Update(_snapshot, Bridge, 1f / 60f, false, Screen, Screen, false);
+            rebound.Select(other, false);
+            Assert.Equal("G", rebound.SwitchKeyName);
+            Assert.False(Press(GlfwKey.T));
+            Assert.False(Bridge.ConsumeControlRequest(out _));
+            Assert.True(Press(GlfwKey.G));
+            Assert.True(Bridge.ConsumeControlRequest(out var requested));
+            Assert.Equal(other, requested);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void TheMapSwitchRefusesARockWithAShipAndAHullThatIsNotTheirs()
+    {
+        _surfaceOpen = true;
+        _unitCount = MapUnitList.Collect(_snapshot, _units);
+        var other = _units.AsSpan(0, _unitCount).ToArray().First(id => id != _world.Own.Id);
+        Bridge.ConsumeControlRequest(out _);
+
+        bool Press()
+        {
+            Frame(() => Key(GlfwKey.T, true));
+            var sent = _world.SwitchToSelectedFromMap(Bridge, true);
+            Frame(() => Key(GlfwKey.T, false));
+            return sent;
+        }
+
+        // A ship and an asteroid selected together: not one ship, so nothing is taken. The asteroid list is private
+        // to the view and only the command view fills it, so the test fills it as a pick there would.
+        _world.Select(other, false);
+        var rocks = typeof(WorldView).GetField("_selectedRocks", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var count = typeof(WorldView).GetField("_selectedRockCount", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        ((RockRef[])rocks.GetValue(_world)!)[0] = new RockRef(new SectorCoord(0, 0, 0), 0);
+        count.SetValue(_world, 1);
+        Assert.False(Press());
+        Assert.False(Bridge.ConsumeControlRequest(out _));
+        _world.ClearSelection();
+
+        // A hull another player owns cannot be selected for this: it is pruned and nothing is requested.
+        ref var hull = ref FindHull(other);
+        var owner = hull.Owner;
+        hull.Owner = owner + 1;
+        try
+        {
+            _world.Select(other, false);
+            Assert.False(Press());
+            Assert.Equal(0, _world.Selection.Length);
+            Assert.False(Bridge.ConsumeControlRequest(out _));
+        }
+        finally
+        {
+            hull.Owner = owner;
+        }
+    }
+
+    private ref HullView FindHull(uint id)
+    {
+        for (var i = 0; i < _snapshot.HullCount; i++)
+        {
+            if (_snapshot.Hulls[i].Id == id)
+                return ref _snapshot.Hulls[i];
+        }
+
+        throw new InvalidOperationException("no such hull");
+    }
+
+    [Fact]
+    public void TheMapSwitchKeyIsNotReadWhileTypingOrWhileAMenuOrControlsOwnTheKeyboard()
+    {
+        // A real text field takes focus through the frame path, then the production gate says no key is available.
+        ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
+        _surfaceOpen = true;
+        _floatingFull = true;
+        _floatingField = true;
+        _floating = new FloatingWindow { Open = true, Pinned = true };
+        _unitCount = MapUnitList.Collect(_snapshot, _units);
+        var other = _units.AsSpan(0, _unitCount).ToArray().First(id => id != _world.Own.Id);
+        Bridge.ConsumeControlRequest(out _);
+        Frame(() => Move(EmptySpace));
+        Frame(() => Move(FieldOf(_floating)));
+        Frame(() => Click());
+        Frame();
+        Assert.True(ImGui.GetIO().WantTextInput);
+
+        _world.Select(other, false);
+        Frame(() => Key(GlfwKey.T, true));
+        var typing = ImGui.GetIO().WantTextInput;
+        var available = WorldView.MapSwitchKeyAvailable(false, false, false, typing);
+        Assert.False(available);
+        Assert.False(_world.SwitchToSelectedFromMap(Bridge, available));
+        Assert.False(Bridge.ConsumeControlRequest(out _));
+
+        // The same press with nothing in the way is available, and each owner of the keyboard alone takes it away.
+        Assert.True(WorldView.MapSwitchKeyAvailable(false, false, false, false));
+        Assert.False(WorldView.MapSwitchKeyAvailable(true, false, false, false));
+        Assert.False(WorldView.MapSwitchKeyAvailable(false, true, false, false));
+        Assert.False(WorldView.MapSwitchKeyAvailable(false, false, true, false));
+        FloatingWindow.ReleaseKeyboard();
     }
 
     [Fact]
@@ -1860,5 +2163,2398 @@ public sealed class FrameOrderTests : IDisposable
         io.AddMouseButtonEvent(0, false);
         Card(replacement);
         Assert.Equal(1, accepted);
+    }
+
+    // The pilot console at this test's screen, unscaled, and the middle of each of its rows.
+    private static readonly FlightConsoleLayout Bars = FlightConsole.Layout(Screen, 1f);
+
+    private static float2 MiddleOf(ConsoleBar bar)
+    {
+        var rect = FlightConsole.BarRect(Bars, bar);
+        return new float2((rect.Left + rect.Right) * 0.5f, (rect.Top + rect.Bottom) * 0.5f);
+    }
+
+    /// <summary>The row the console lights this frame, from what ScreenHost passes it: pilot view, nothing open, the release key's pointer.</summary>
+    private ConsoleBar ConsoleHovered => FlightConsole.Hovered(Bars, ImGui.GetIO().MousePos,
+        !_surfaceOpen && _world.Mode == ViewMode.Pilot && _router.ReleaseHeld && !_router.Captured, _router.PointerOverInterface);
+
+    [Fact]
+    public void AConsoleRowIsPointedAtOnlyWithTheReleaseKeyAndLeavesWAndTheWorldAlone()
+    {
+        // Flying: the hidden pointer is over the shield bar, but the interface never sees it.
+        Frame(() =>
+        {
+            Key(GlfwKey.W, true);
+            Move(MiddleOf(ConsoleBar.Shield));
+        });
+        Frame();
+        Assert.True(_router.Captured);
+        Assert.Equal(ConsoleBar.None, ConsoleHovered);
+
+        // Shift shows the pointer; each row is found where it is drawn, the gap between rows is none of them.
+        PilotWithShift();
+        Assert.Equal(ConsoleBar.None, ConsoleHovered);
+        for (var bar = ConsoleBar.Shield; bar <= ConsoleBar.Heat; bar++)
+        {
+            Frame(() => Move(MiddleOf(bar)));
+            Assert.Equal(bar, ConsoleHovered);
+            Assert.False(ImGui.GetIO().WantCaptureMouse);
+            Assert.False(ImGui.GetIO().WantCaptureKeyboard);
+        }
+
+        Frame(() => Move(new float2(MiddleOf(ConsoleBar.Hull).X, Bars.Top + Bars.Row + Bars.RowGap * 0.5f)));
+        Assert.Equal(ConsoleBar.None, ConsoleHovered);
+
+        // Pointing and clicking at a row takes nothing: W still reaches the hull, no interface button is pressed.
+        Frame(() => Move(MiddleOf(ConsoleBar.Shield)));
+        Frame(() => Click());
+        Assert.Equal(ConsoleBar.Shield, ConsoleHovered);
+        Bridge.Consume(out _, out _);
+        Frame();
+        Assert.True(Sent().Forward > 0);
+        Assert.Equal(0, _buttonClicks);
+
+        // Letting go of Shift captures the pointer again, and the interface forgets where it was.
+        Frame(() => Key(GlfwKey.LeftShift, false));
+        Frame();
+        Assert.True(_router.Captured);
+        Assert.False(FlightConsole.BarRect(Bars, ConsoleBar.Shield).Contains(ImGui.GetIO().MousePos));
+        Assert.Equal(ConsoleBar.None, ConsoleHovered);
+
+        // An open surface (chat, a menu) shows the pointer for itself: the interface sees it over the bar, and the
+        // console still does not take it.
+        _surfaceOpen = true;
+        Frame();
+        Frame(() => Move(MiddleOf(ConsoleBar.Shield)));
+        Assert.False(_router.Captured);
+        Assert.True(FlightConsole.BarRect(Bars, ConsoleBar.Shield).Contains(ImGui.GetIO().MousePos));
+        Assert.Equal(ConsoleBar.None, ConsoleHovered);
+    }
+
+    [Fact]
+    public void APinnedWindowOverTheConsoleKeepsItsRowsFromThePointer()
+    {
+        _floating = new FloatingWindow { Open = true, Pinned = true, Placed = true, Min = new float2(Bars.LeftX, Screen.Y - FloatingSize.Y - 4f) };
+        PilotWithShift();
+        Frame();
+        Assert.True(_floatingDrawn.Contains(MiddleOf(ConsoleBar.Shield)), $"window {_floatingDrawn}");
+
+        Frame(() => Move(MiddleOf(ConsoleBar.Shield)));
+        Frame();
+        Assert.True(_router.PointerOverInterface);
+        Assert.Equal(ConsoleBar.None, ConsoleHovered);
+
+        // The other group is in the clear.
+        Frame(() => Move(MiddleOf(ConsoleBar.Energy)));
+        Assert.False(_floatingDrawn.Contains(MiddleOf(ConsoleBar.Energy)));
+        Assert.Equal(ConsoleBar.Energy, ConsoleHovered);
+    }
+
+    /// <summary>Collects a console row's details as text, as the tooltip would show them.</summary>
+    private struct TipRecorder(List<string> lines) : IConsoleTipSink
+    {
+        public void Title(ReadOnlySpan<byte> title, ReadOnlySpan<byte> state, uint stateColor) =>
+            lines.Add($"{Encoding.UTF8.GetString(title)}: {Encoding.UTF8.GetString(state)}");
+
+        public void Line(ReadOnlySpan<byte> label, ReadOnlySpan<byte> value, uint valueColor) =>
+            lines.Add($"{Encoding.UTF8.GetString(label)}: {Encoding.UTF8.GetString(value)}");
+
+        public void Note(ReadOnlySpan<byte> text, uint color) => lines.Add(Encoding.UTF8.GetString(text));
+    }
+
+    private static List<string> Tip(ConsoleBar bar, in HullView own, in FlightParams flight)
+    {
+        UiText.ResetArena();
+        var lines = new List<string>();
+        var recorder = new TipRecorder(lines);
+        ConsoleTip.Write(ref recorder, bar, own, flight);
+        return lines;
+    }
+
+    [Fact]
+    public void ARowsDetailsAreTheHullsOwnLiveFigures()
+    {
+        // A restart rule other than the shipped one: the threshold follows it.
+        var flight = _snapshot.Flight;
+        flight.ShieldCapacity = 3000f;
+        flight.ShieldRestartFraction = 0.4f;
+        flight.ShieldRecharge = 45f;
+        flight.ShieldDelay = 2.5f;
+        flight.ShieldRestartPower = 18f;
+        var own = _snapshot.Hulls[_snapshot.OwnHull];
+        own.Energy = flight.EnergyStorage;
+        own.Shield = 600f;
+        own.ShieldOffline = true;
+
+        var offline = Tip(ConsoleBar.Shield, own, flight);
+        Assert.Equal("SHIELD: OFFLINE", offline[0]);
+        Assert.Contains("STORED: 600 / 3000", offline);
+        Assert.Contains("RESTARTS AT: 1200 (40 %)", offline);
+        Assert.Contains("PROGRESS: 50 %", offline);
+        Assert.Contains("RECHARGE: 45 /S", offline);
+        Assert.Contains("DELAY: 2.5 S AFTER DAMAGE", offline);
+        Assert.Contains("RESTART DRAW: 18 MW", offline);
+        Assert.Contains("NO PROTECTION UNTIL IT RESTARTS", offline);
+        Assert.Equal(0.4f, FlightConsole.RestartMark(flight));
+
+        // Online: the same rule is told as what a break would mean, and nothing says the hull is unprotected.
+        own.ShieldOffline = false;
+        own.Shield = 2400f;
+        var online = Tip(ConsoleBar.Shield, own, flight);
+        Assert.Equal("SHIELD: ONLINE", online[0]);
+        Assert.Contains("CHARGE: 2400 / 3000", online);
+        Assert.Contains("IF BROKEN: RESTARTS AT 40 %", online);
+        Assert.DoesNotContain("NO PROTECTION UNTIL IT RESTARTS", online);
+
+        // A flat battery stops the charge, and the details say so.
+        own.Energy = 0f;
+        Assert.Contains("BATTERY EMPTY: NOT CHARGING", Tip(ConsoleBar.Shield, own, flight));
+
+        // No emitter: no threshold and no stored charge to speak of.
+        flight.ShieldCapacity = 0f;
+        own.ShieldOffline = true;
+        var none = Tip(ConsoleBar.Shield, own, flight);
+        Assert.Equal("SHIELD: NONE", none[0]);
+        Assert.DoesNotContain(none, line => line.StartsWith("RESTARTS AT", StringComparison.Ordinal) || line.StartsWith("STORED", StringComparison.Ordinal));
+        Assert.Equal(0f, FlightConsole.RestartMark(flight));
+
+        // The battery's flow is read again each time it is asked for.
+        own.Energy = flight.EnergyStorage * 0.5f;
+        own.EnergyRate = -12.5f;
+        Assert.Contains("NET FLOW: -12.5 MW", Tip(ConsoleBar.Energy, own, flight));
+        own.EnergyRate = 3f;
+        Assert.Contains("NET FLOW: +3.0 MW", Tip(ConsoleBar.Energy, own, flight));
+
+        // Hull points, and the heat at which an overheated drive unlocks.
+        own.Hull = flight.HullPoints * 0.25f;
+        Assert.Contains($"POINTS: {flight.HullPoints * 0.25f:0} / {flight.HullPoints:0}", Tip(ConsoleBar.Hull, own, flight));
+        own.Heat = 1f;
+        own.BoostLocked = true;
+        var heat = Tip(ConsoleBar.Heat, own, flight);
+        Assert.Equal("BOOST HEAT: OVERHEATED", heat[0]);
+        Assert.Contains($"UNLOCKS AT: {FlightModel.BoostUnlockHeat * 100f:0} %", heat);
+    }
+
+    [Theory]
+    [InlineData(1280f, 720f, 1f)]
+    [InlineData(1655f, 688f, 1f)]
+    [InlineData(1920f, 1080f, 1f)]
+    [InlineData(1280f, 720f, 2f)]
+    [InlineData(1655f, 688f, 2f)]
+    [InlineData(1920f, 1080f, 2f)]
+    public void EveryRowsDetailsAndTheOfflineShieldFitTheScreenWithTheShippedFonts(float width, float height, float scale)
+    {
+        var shipped = ShippedFonts();
+        var (mono, sans) = (shipped.Mono, shipped.SansMedium);
+        ImGui.GetStyle().FontScaleMain = scale;
+        _ui.NewFrame();
+        try
+        {
+            UiText.ResetArena();
+            var display = new float2(width, height);
+            var layout = FlightConsole.Layout(display, scale);
+            var side = MathF.Round(FlightConsole.Side * scale);
+
+            // The largest figures the console prints in full, every state with its longest words.
+            var flight = _snapshot.Flight;
+            flight.ShieldCapacity = 99_999f;
+            flight.HullPoints = 99_999f;
+            flight.EnergyStorage = 99_999f;
+            flight.PowerGenerated = 9_999f;
+            flight.ShieldRestartPower = 999.9f;
+            flight.ShieldPower = 999.9f;
+            flight.ShieldDelay = 99.9f;
+            flight.ShieldRecharge = 9_999f;
+            flight.BoostEnergyFloor = 99_999f;
+            var own = _snapshot.Hulls[_snapshot.OwnHull];
+            own.Shield = 99_999f;
+            own.Hull = 99_999f;
+            own.EnergyRate = -9_999f;
+            foreach (var state in new[] { 0, 1, 2 })
+            {
+                own.ShieldOffline = state == 1;
+                own.BoostLocked = state == 1;
+                own.Energy = state == 2 ? 0f : 99_999f;
+                for (var bar = ConsoleBar.Shield; bar <= ConsoleBar.Heat; bar++)
+                {
+                    var size = ConsoleTip.Measure(mono, sans, scale, bar, own, flight);
+                    var rect = FlightConsole.TipRect(layout, bar, size, display, scale);
+                    Assert.Equal(size.X, rect.Width);
+                    Assert.True(rect.Left >= side && rect.Right <= width - side, $"{bar} {state}: {rect}");
+                    Assert.True(rect.Top >= 0f && rect.Bottom <= layout.Top, $"{bar} {state}: {rect}, console {layout.Top}");
+                }
+            }
+
+            // Measuring a row's details every frame allocates nothing.
+            own.ShieldOffline = true;
+            ConsoleTip.Measure(mono, sans, scale, ConsoleBar.Shield, own, flight);
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            for (var bar = ConsoleBar.Shield; bar <= ConsoleBar.Heat; bar++)
+                ConsoleTip.Measure(mono, sans, scale, bar, own, flight);
+            Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
+
+            // An offline shield's words fit its reading column; a compact row has OFFLINE beside its label.
+            float Px(float design) => MathF.Round(design * scale);
+            if (!layout.Compact)
+            {
+                Assert.InRange(Kit.Measure(mono, Theme.FontCaption, "RESTART 100 %"u8).X, 1f, Px(FlightConsole.ReadingColumn));
+                Assert.InRange(Kit.Measure(sans, Theme.FontSmall, "OFFLINE"u8).X, 1f, Px(FlightConsole.ReadingColumn));
+            }
+            else
+            {
+                var room = layout.GroupWidth - Px(FlightConsole.Slant + 2 * FlightConsole.Pad + FlightConsole.ColumnGap) - Kit.Measure(sans, Theme.FontSmall, "SHIELD"u8).X;
+                Assert.InRange(Kit.Measure(sans, Theme.FontSmall, "OFFLINE"u8).X, 1f, room);
+            }
+        }
+        finally
+        {
+            ImGui.Render();
+        }
+    }
+
+    /// <summary>Ticks the server and this client as their loops would, then takes the client's newest snapshot.</summary>
+    private void Tick(int count = 1, bool sleep = false)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            ((ITickHandler)_server).Tick(_tick);
+            ((ITickHandler)_client).Tick(_tick++);
+            if (sleep)
+                Thread.Sleep(1);
+        }
+
+        _snapshot = _client.AcquireSnapshot();
+    }
+
+    /// <summary>
+    /// One frame with the ship editor's keys read in the shortcut phase, as <c>ScreenHost.HandleEditorShortcut</c>
+    /// reads them, and the job system pumped first, as <c>App.Run</c> pumps it.
+    /// </summary>
+    private void EditorFrame(Action? poll = null)
+    {
+        _jobs.Pump();
+        Frame(poll, () => _world.Editor.HandleKeys(_actions, _devices, _snapshot.Hulls[_snapshot.OwnHull], Bridge, ImGui.GetIO().WantTextInput, _router.PointerOverInterface));
+    }
+
+    /// <summary>Simulates and draws, as the game does, until a condition holds; the renderer reports every design installed.</summary>
+    private bool PlayUntil(Func<bool> condition, int steps = 3000)
+    {
+        for (var i = 0; i < steps && !condition(); i++)
+        {
+            Tick(1, sleep: true);
+            Bridge.ReportInstalledDesigns(_snapshot.Content.Designs.Length);
+            EditorFrame();
+        }
+
+        return condition();
+    }
+
+    /// <summary>Presses and lets go of the editor key, then plays until the server's grant has opened the editor.</summary>
+    private void OpenEditor()
+    {
+        EditorFrame(() => Key(GlfwKey.B, true));
+        EditorFrame(() => Key(GlfwKey.B, false));
+        Assert.True(PlayUntil(() => _world.Editor.Shown), $"the editor should open, not {_world.Editor.Stage} {_snapshot.Editor.Phase}/{_snapshot.Editor.Reason}");
+    }
+
+    /// <summary>Where the edited hull's centre is on screen this frame.</summary>
+    private float2 HullOnScreen()
+    {
+        Assert.True(_world.Project(_world.OwnDrawnPosition, out var at));
+        return at;
+    }
+
+    [Fact]
+    public void TheEditorKeyAsksFirstAndTheGrantShowsTheEditorWithThePointerAndNothingForTheHull()
+    {
+        Frame();
+        Assert.True(_router.Captured);
+        Frame(() => Key(GlfwKey.W, true));
+        Assert.True(Sent().Forward > 0);
+
+        // The key asks the server; until it answers the world flies on as before, the pointer still steers.
+        EditorFrame(() => Key(GlfwKey.B, true));
+        Assert.Equal(EditorStage.Requesting, _world.Editor.Stage);
+        EditorFrame(() => Key(GlfwKey.B, false));
+        Assert.False(_world.Editor.Shown);
+        Assert.True(_router.Captured);
+        Assert.True(Sent().Forward > 0);
+
+        // The frame that sees the grant shows the editor, frees the pointer and gives the hull no controls, with W
+        // still held.
+        for (var i = 0; i < 600 && _snapshot.Editor.Phase != EditorPhase.Open; i++)
+            Tick();
+        Assert.Equal(EditorPhase.Open, _snapshot.Editor.Phase);
+        EditorFrame();
+        Assert.True(_world.Editor.Shown);
+        Assert.True(_world.PointerView);
+        Assert.False(_router.Captured);
+        var sent = Sent();
+        Assert.Equal((0f, false, false), (sent.Forward, sent.Boost, sent.Align));
+
+        // Boost, the command key and Halt are not flight's while the editor is open.
+        EditorFrame(() =>
+        {
+            Key(GlfwKey.Space, true);
+            Key(GlfwKey.N, true);
+            Key(GlfwKey.H, true);
+        });
+        sent = Sent();
+        Assert.Equal(ViewMode.Pilot, _world.Mode);
+        Assert.False(sent.Boost);
+        Assert.Equal(0f, sent.Forward);
+        Assert.Equal(OrderKind.None, _snapshot.Hulls[_snapshot.OwnHull].Order.Kind);
+    }
+
+    [Fact]
+    public void EscapeClosesTheEditorAndKeysHeldThroughItWaitToBeLetGo()
+    {
+        OpenEditor();
+        EditorFrame(() => Key(GlfwKey.W, true));
+        Assert.Equal(0f, Sent().Forward);
+
+        EditorFrame(() => Key(GlfwKey.Escape, true));
+        Assert.Equal(EditorStage.Closed, _world.Editor.Stage);
+        Assert.Null(_world.Editor.Draft);
+        EditorFrame(() => Key(GlfwKey.Escape, false));
+        Assert.True(_router.Captured);
+        Assert.True(_world.FlightHeld);
+        EditorFrame();
+        Assert.Equal(0f, Sent().Forward);
+
+        // W let go and pressed again flies.
+        EditorFrame(() => Key(GlfwKey.W, false));
+        Assert.False(_world.FlightHeld);
+        EditorFrame(() => Key(GlfwKey.W, true));
+        Assert.True(Sent().Forward > 0);
+        Assert.True(PlayUntil(() => _snapshot.Editor.Phase == EditorPhase.Closed));
+        Assert.Equal(EditorReason.Cancelled, _snapshot.Editor.Reason);
+    }
+
+    [Fact]
+    public void TheEditorKeyIsLeftToATextFieldThatHasTheKeyboard()
+    {
+        _floating = new FloatingWindow { Open = true, Pinned = false };
+        _floatingFull = true;
+        _floatingField = true;
+        _surfaceOpen = true;
+        Frame();
+        Frame(() => Move(FieldOf(_floating)));
+        Frame(() => Click());
+        Frame();
+        Assert.True(ImGui.GetIO().WantTextInput);
+        EditorFrame(() => Key(GlfwKey.B, true));
+        Assert.Equal(EditorStage.Closed, _world.Editor.Stage);
+    }
+
+    [Fact]
+    public void ThePointerOverAPanelNeitherPlacesNorOrbitsAndOverTheShipItPlaces()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        var blocks = editor.Draft!.Boxes.Length;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+
+        // Over the ship the part's ghost shows where it would go, and fits.
+        var hull = HullOnScreen();
+        EditorFrame(() => Move(hull));
+        Assert.True(editor.HasHover);
+        Assert.True(editor.HasGhost);
+        Assert.Equal(DraftEdit.Done, editor.GhostCheck);
+
+        // Over a panel: no ghost, and a click there is the panel's.
+        EditorFrame(() => Move(OverButton));
+        EditorFrame();
+        Assert.True(_router.PointerOverInterface);
+        Assert.False(editor.HasHover);
+        EditorFrame(() => Click());
+        EditorFrame();
+        Assert.Equal(1, _buttonClicks);
+        Assert.Equal(blocks, editor.Draft!.Boxes.Length);
+
+        // A right drag begun on the panel does not orbit; one begun over space does.
+        Vector3 Camera() => _world.CameraPosition.RelativeTo(_world.OwnDrawnPosition);
+        var before = Camera();
+        EditorFrame(() => Button(GlfwMouseButton.Right, true));
+        EditorFrame(() => Move(EmptySpace));
+        EditorFrame(() => Move(EmptySpace + new float2(120, 0)));
+        EditorFrame(() => Button(GlfwMouseButton.Right, false));
+        Assert.True((Camera() - before).Length() < 0.05f, $"moved {(Camera() - before).Length()}");
+        EditorFrame(() => Button(GlfwMouseButton.Right, true));
+        EditorFrame(() => Move(EmptySpace));
+        EditorFrame(() => Move(EmptySpace + new float2(-120, 0)));
+        EditorFrame(() => Button(GlfwMouseButton.Right, false));
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        Assert.True((Camera() - before).Length() > 1f);
+
+        // A click over the ship places the part, and Ctrl+Z takes it back.
+        hull = HullOnScreen();
+        EditorFrame(() => Move(hull));
+        Assert.Equal(DraftEdit.Done, editor.GhostCheck);
+        EditorFrame(() => Click());
+        Assert.Equal(blocks + 1, editor.Draft!.Boxes.Length);
+        EditorFrame(() =>
+        {
+            Key(GlfwKey.LeftControl, true);
+            Key(GlfwKey.Z, true);
+        });
+        Assert.Equal(blocks, editor.Draft!.Boxes.Length);
+        EditorFrame(() => Key(GlfwKey.Z, false));
+        EditorFrame(() => Key(GlfwKey.Y, true));
+        Assert.Equal(blocks + 1, editor.Draft!.Boxes.Length);
+    }
+
+    [Fact]
+    public void AnEditPlacedWithTheMouseIsAppliedByTheServerAndTheNewShipFlies()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        var old = _snapshot.Hulls[_snapshot.OwnHull].Id;
+        var oldBlocks = BlockSet.Count(_snapshot.Hulls[_snapshot.OwnHull].Blocks.Span);
+        var designs = _snapshot.Content.Designs.Length;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        Assert.False(editor.CanApply);
+
+        EditorFrame(() => Move(HullOnScreen()));
+        EditorFrame(() => Click());
+        Assert.True(editor.Draft!.CanUndo);
+        // Apply waits for the worker's check of exactly this version.
+        Assert.False(editor.CanApply);
+        for (var i = 0; i < 600 && !(editor.Check == DraftCheck.Ready && editor.CheckedVersion == editor.Draft.Version); i++)
+        {
+            Thread.Sleep(1);
+            EditorFrame();
+        }
+
+        Assert.Equal(DraftCheck.Ready, editor.Check);
+        Assert.True(editor.CanApply);
+        Assert.Equal(oldBlocks + 1, editor.Checked.Design!.BlockCount);
+
+        Assert.True(editor.Apply(Bridge));
+        Assert.Equal(EditorStage.Applying, editor.Stage);
+        Assert.False(editor.CanEdit);
+        Assert.True(PlayUntil(() => editor.Stage == EditorStage.Closed), $"{_snapshot.Editor.Phase}/{_snapshot.Editor.Reason}");
+        Assert.True(editor.NoticeApplied, $"{editor.Notice}");
+        Assert.Null(editor.Draft);
+        Assert.True(PlayUntil(() => _snapshot.Hulls[_snapshot.OwnHull].Id != old));
+        ref var own = ref _snapshot.Hulls[_snapshot.OwnHull];
+        Assert.Equal(_snapshot.Editor.Hull, own.Id);
+        Assert.Equal(designs, own.Design);
+        Assert.Equal(oldBlocks + 1, BlockSet.Count(own.Blocks.Span));
+
+        // The pilot view is back, and the new ship takes the controls.
+        EditorFrame();
+        Assert.False(_world.Editor.Shown);
+        Assert.True(_router.Captured);
+        EditorFrame(() => Key(GlfwKey.W, true));
+        Assert.True(Sent().Forward > 0);
+    }
+
+    [Fact]
+    public void DamageClosesTheEditKeepsTheDraftAndTheNextGrantGoesOnWithIt()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        var blocks = editor.Draft!.Boxes.Length;
+        var token = editor.Token;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        EditorFrame(() => Move(HullOnScreen()));
+        EditorFrame(() => Click());
+        Assert.Equal(blocks + 1, editor.Draft!.Boxes.Length);
+
+        // A hit while the edit is open: the server ends it, the editor says why and keeps the player's changes.
+        var hulls = (HullStore)typeof(ServerHost).GetField("_hulls", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(_server)!;
+        var own = (int)(_snapshot.Hulls[_snapshot.OwnHull].Id & 0xFFFF);
+        hulls.Info(own).DamageTick = _tick;
+        Assert.True(PlayUntil(() => editor.Stage == EditorStage.Closed));
+        Assert.Equal(EditorReason.Damaged, editor.Notice);
+        Assert.True(editor.DraftKept);
+        Assert.False(_world.Editor.Shown);
+        Assert.True(_router.Captured);
+
+        // Asking again at once is refused with the wait, and the draft is still kept.
+        EditorFrame(() => Key(GlfwKey.B, true));
+        EditorFrame(() => Key(GlfwKey.B, false));
+        Assert.True(PlayUntil(() => editor.Stage == EditorStage.Closed));
+        Assert.Equal(EditorReason.Quiet, editor.Notice);
+        Assert.True(editor.NoticeWait > 0);
+        Assert.NotNull(editor.Draft);
+
+        // Once the hull is quiet again, the grant opens the same draft, on the edit's new token.
+        hulls.Info(own).DamageTick = long.MinValue;
+        OpenEditor();
+        Assert.Equal(blocks + 1, editor.Draft!.Boxes.Length);
+        Assert.True(editor.Draft.CanUndo);
+        Assert.False(editor.DraftRestarted);
+        Assert.NotEqual(token, editor.Token);
+    }
+
+    private int DraftBlocks => _world.Editor.Draft!.Boxes.Length;
+
+    /// <summary>One frame with keys pressed together in one poll, then let go in the next.</summary>
+    private void Chord(params GlfwKey[] keys)
+    {
+        EditorFrame(() =>
+        {
+            foreach (var key in keys)
+                Key(key, true);
+        });
+        EditorFrame(() =>
+        {
+            foreach (var key in keys)
+                Key(key, false);
+        });
+    }
+
+    /// <summary>
+    /// Moves the pointer over the ship, a frame per step, until the editor shows what <paramref name="found"/> wants
+    /// there; false when no point near the ship does.
+    /// </summary>
+    private bool PointWhere(Func<ShipEditor, bool> found, out float2 at)
+    {
+        var middle = HullOnScreen();
+        for (var ring = 0; ring <= 12; ring++)
+        {
+            for (var step = 0; step < Math.Max(1, ring * 8); step++)
+            {
+                var angle = step * MathF.Tau / Math.Max(1, ring * 8);
+                at = middle + new float2(MathF.Cos(angle), MathF.Sin(angle)) * (ring * 14f);
+                var point = at;
+                EditorFrame(() => Move(point));
+                if (found(_world.Editor))
+                    return true;
+            }
+        }
+
+        at = default;
+        return false;
+    }
+
+    /// <summary>Opens the editor and selects two blocks with the middle button, the second with Shift; returns both.</summary>
+    private (int First, int Second, float2 SecondAt) SelectTwoWithTheMiddleButton()
+    {
+        var editor = _world.Editor;
+        EditorFrame(() => Move(HullOnScreen()));
+        Assert.True(editor.HasHover);
+        var first = editor.Hover.Block;
+        EditorFrame(() => Click(GlfwMouseButton.Middle));
+        Assert.Equal([first], editor.Selection.ToArray());
+        Assert.True(PointWhere(e => e.HasHover && e.Hover.Block != first, out var at));
+        var second = editor.Hover.Block;
+        EditorFrame(() =>
+        {
+            Key(GlfwKey.LeftShift, true);
+            Click(GlfwMouseButton.Middle);
+        });
+        EditorFrame(() => Key(GlfwKey.LeftShift, false));
+        Assert.Equal([first, second], editor.Selection.ToArray());
+        return (first, second, at);
+    }
+
+    [Fact]
+    public void APartDraggedFromItsCardIsPlacedOnTheShipAndNothingElseOnAPanelReachesTheShip()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        var types = _snapshot.Content.Blocks.Types;
+        _palettePart = types.ToList().FindIndex(t => t.Id == "thruster");
+        Assert.NotEqual(editor.Part, _palettePart);
+        _paletteShown = true;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var blocks = DraftBlocks;
+        var hull = HullOnScreen();
+
+        // Held on the card and dragged out over the ship: the card's part follows the pointer, nothing is placed yet.
+        EditorFrame(() => Move(OverCard));
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        EditorFrame(() => Move(OverCard + new float2(20, 0)));
+        Assert.Equal(EditorCarry.Part, editor.Carry);
+        Assert.Equal(_palettePart, editor.Part);
+        EditorFrame(() => Move(hull));
+        EditorFrame();
+        Assert.True(_router.PointerOverInterface, "the part list still holds the press");
+        Assert.True(editor.HasGhost);
+        Assert.Equal(DraftEdit.Done, editor.GhostCheck);
+        Assert.Equal(blocks, DraftBlocks);
+
+        // Let go over the ship: placed without selecting it, and nothing is carried any more.
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        Assert.Equal(blocks + 1, DraftBlocks);
+        Assert.Same(types[_palettePart], editor.Draft!.Boxes[blocks].Type);
+        Assert.Empty(editor.Selection.ToArray());
+        Assert.Equal(EditorCarry.None, editor.Carry);
+
+        // Dragged out and back onto a panel: let go there, nothing is placed and the panel is not clicked.
+        EditorFrame(() => Move(OverCard));
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        EditorFrame(() => Move(OverCard + new float2(20, 0)));
+        EditorFrame(() => Move(hull));
+        Assert.True(editor.HasGhost);
+        EditorFrame(() => Move(OverButton));
+        EditorFrame();
+        Assert.False(editor.HasGhost);
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        EditorFrame();
+        Assert.Equal(blocks + 1, DraftBlocks);
+        Assert.Equal(EditorCarry.None, editor.Carry);
+        Assert.Equal(0, _buttonClicks);
+
+        // A press that begins on any other panel never reaches the ship, wherever it is let go.
+        EditorFrame(() => Move(OverButton));
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        EditorFrame(() => Move(hull));
+        EditorFrame();
+        Assert.Equal(EditorCarry.None, editor.Carry);
+        Assert.False(editor.HasGhost);
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        EditorFrame();
+        Assert.Equal(blocks + 1, DraftBlocks);
+
+        // And a drag let go with Escape first leaves the edit open with nothing changed.
+        EditorFrame(() => Move(OverCard));
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        EditorFrame(() => Move(OverCard + new float2(20, 0)));
+        EditorFrame(() => Move(hull));
+        EditorFrame(() => Key(GlfwKey.Escape, true));
+        Assert.Equal(EditorCarry.None, editor.Carry);
+        Assert.True(editor.Shown);
+        EditorFrame(() => Key(GlfwKey.Escape, false));
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        Assert.Equal(blocks + 1, DraftBlocks);
+    }
+
+    [Fact]
+    public void ClosingDuringAPartDragAllowsTheFirstDragAfterReopening()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        _paletteShown = true;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        EditorFrame(() => Move(OverCard));
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        EditorFrame(() => Move(OverCard + new float2(20, 0)));
+        Assert.Equal(EditorCarry.Part, editor.Carry);
+
+        EditorFrame(() => Key(GlfwKey.B, true));
+        Assert.Equal(EditorStage.Closed, editor.Stage);
+        // The card is gone when the mouse is released, so its deactivation cannot reset the press.
+        _paletteShown = false;
+        EditorFrame(() => Key(GlfwKey.B, false));
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        Tick(3);
+        OpenEditor();
+        _paletteShown = true;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var blocks = DraftBlocks;
+        EditorFrame(() => Move(OverCard));
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        EditorFrame(() => Move(OverCard + new float2(20, 0)));
+        Assert.Equal(EditorCarry.Part, editor.Carry);
+        EditorFrame(() => Move(HullOnScreen()));
+        EditorFrame();
+        Assert.True(editor.HasGhost);
+        Assert.Equal(DraftEdit.Done, editor.GhostCheck);
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        Assert.Equal(blocks + 1, DraftBlocks);
+    }
+
+    [Fact]
+    public void AClickedCardSearchOrShapeGivesTheWorldBackSoTheGhostFollowsAndTheFirstClickPlacesOnce()
+    {
+        // As the game sets the interface up: keyboard navigation claims the keyboard for a focused window.
+        ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard | ImGuiConfigFlags.NavEnableGamepad;
+        ImGui.GetIO().ConfigNavCursorVisibleAuto = true;
+        OpenEditor();
+        var editor = _world.Editor;
+        var types = _snapshot.Content.Blocks.Types;
+        _palettePart = types.ToList().FindIndex(t => t.Id == "thruster");
+        Assert.NotEqual(editor.Part, _palettePart);
+        _paletteShown = true;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var blocks = DraftBlocks;
+
+        // Click a card and let go: the part is chosen, nothing is carried or placed, and the keyboard is the world's.
+        EditorFrame(() => Move(OverCard));
+        EditorFrame();
+        EditorFrame(() => Click());
+        EditorFrame();
+        Assert.Equal(_palettePart, editor.Part);
+        Assert.True(editor.Placing);
+        Assert.Equal(EditorCarry.None, editor.Carry);
+        // Dear ImGui decides who has the keyboard before it reads navigation, so the frame after the release still
+        // reports it claimed; the one after that, it is the world's.
+        EditorFrame();
+        Assert.False(ImGui.GetIO().WantCaptureKeyboard);
+        Assert.Equal(blocks, DraftBlocks);
+
+        // Straight on to the ship, with no click between: the ghost follows the pointer, and the first click places
+        // the part there, once.
+        Assert.True(PointWhere(e => e.HasGhost && e.GhostCheck == DraftEdit.Done, out _));
+        var drawn = (editor.GhostAt, editor.PartSize, editor.PartShape);
+        EditorFrame(() => Click());
+        EditorFrame();
+        EditorFrame();
+        Assert.Equal(blocks + 1, DraftBlocks);
+        Assert.Same(types[_palettePart], editor.Draft!.Boxes[^1].Type);
+        Assert.Equal(drawn, (editor.Draft.Boxes[^1].At, editor.Draft.Boxes[^1].Size, editor.Draft.Boxes[^1].Shape));
+        blocks++;
+
+        // The search keeps the keyboard while it is typed in: the world takes nothing, not even the pointer's hover.
+        EditorFrame(() => Move(OverSearch));
+        EditorFrame(() => Click());
+        EditorFrame();
+        Assert.True(ImGui.GetIO().WantTextInput);
+        EditorFrame(() => Move(HullOnScreen()));
+        EditorFrame();
+        Assert.False(editor.HasGhost);
+        Assert.True(ImGui.GetIO().WantTextInput);
+
+        // Choosing a card from there ends the typing and gives the world back, as above.
+        EditorFrame(() => Move(OverCard));
+        EditorFrame();
+        EditorFrame(() => Click());
+        EditorFrame();
+        EditorFrame();
+        Assert.False(ImGui.GetIO().WantTextInput);
+        Assert.False(ImGui.GetIO().WantCaptureKeyboard);
+        Assert.True(PointWhere(e => e.HasGhost && e.GhostCheck == DraftEdit.Done, out _));
+        EditorFrame(() => Click());
+        EditorFrame();
+        Assert.Equal(blocks + 1, DraftBlocks);
+        blocks++;
+
+        // A shape button of the list does the same.
+        EditorFrame(() => Move(OverShapeBox));
+        EditorFrame();
+        editor.SetPartShape(BlockShape.WedgeXPlusPlus);
+        EditorFrame(() => Click());
+        EditorFrame();
+        EditorFrame();
+        Assert.Equal(BlockShape.Box, editor.PartShape);
+        Assert.False(ImGui.GetIO().WantCaptureKeyboard);
+        Assert.True(PointWhere(e => e.HasGhost && e.GhostCheck == DraftEdit.Done, out _));
+        EditorFrame(() => Click());
+        EditorFrame();
+        Assert.Equal(blocks + 1, DraftBlocks);
+        blocks++;
+
+        // A press on the card held and let go over the card, then over the ship: no drag, nothing placed by it.
+        EditorFrame(() => Move(OverCard));
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        EditorFrame(() => Move(OverCard + new float2(2, 0)));
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        EditorFrame(() => Move(HullOnScreen()));
+        EditorFrame();
+        EditorFrame();
+        Assert.Equal(EditorCarry.None, editor.Carry);
+        Assert.Equal(blocks, DraftBlocks);
+    }
+
+    [Fact]
+    public void AMiddleClickSelectsWhilePlacingShiftAddsOrRemovesAndAMiddleDragPansWithoutSelecting()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var blocks = DraftBlocks;
+        Assert.True(editor.Placing);
+
+        var (first, second, secondAt) = SelectTwoWithTheMiddleButton();
+        Assert.True(editor.Placing, "selecting never stops placing");
+        Assert.Equal(blocks, DraftBlocks);
+        Assert.Equal(second, editor.Selected);
+
+        // Shift and the middle button again on a selected block takes it out.
+        EditorFrame(() => Move(secondAt));
+        EditorFrame(() =>
+        {
+            Key(GlfwKey.LeftShift, true);
+            Click(GlfwMouseButton.Middle);
+        });
+        EditorFrame(() => Key(GlfwKey.LeftShift, false));
+        Assert.Equal([first], editor.Selection.ToArray());
+
+        // A middle drag pans the camera and selects nothing.
+        var focus = _world.EditorFocus;
+        var start = HullOnScreen();
+        EditorFrame(() => Move(start));
+        EditorFrame(() => Button(GlfwMouseButton.Middle, true));
+        EditorFrame(() => Move(start + new float2(60, 0)));
+        EditorFrame(() => Move(start + new float2(140, 30)));
+        EditorFrame(() => Button(GlfwMouseButton.Middle, false));
+        Assert.True((_world.EditorFocus - focus).Length() > 0.1f, $"panned {(_world.EditorFocus - focus).Length()}");
+        Assert.Equal([first], editor.Selection.ToArray());
+
+        // A middle click on empty space clears the selection; with Shift it changes nothing.
+        EditorFrame(() => Move(EmptySpace));
+        EditorFrame(() =>
+        {
+            Key(GlfwKey.LeftShift, true);
+            Click(GlfwMouseButton.Middle);
+        });
+        EditorFrame(() => Key(GlfwKey.LeftShift, false));
+        Assert.Equal([first], editor.Selection.ToArray());
+        EditorFrame(() => Click(GlfwMouseButton.Middle));
+        Assert.Empty(editor.Selection.ToArray());
+        Assert.Equal(blocks, DraftBlocks);
+    }
+
+    [Fact]
+    public void AGroupIsDeletedPastedAndMovedEachAsOneUndoAndADropOnAPanelChangesNothing()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var before = editor.Draft!.Boxes.ToArray();
+        SelectTwoWithTheMiddleButton();
+
+        // Copy, then delete both at once; one undo brings both back, and the selection does not name moved blocks.
+        Chord(GlfwKey.LeftControl, GlfwKey.C);
+        Assert.Equal(2, editor.Clipboard.Length);
+        Chord(GlfwKey.Delete);
+        Assert.Equal(before.Length - 2, DraftBlocks);
+        Assert.Empty(editor.Selection.ToArray());
+        Chord(GlfwKey.LeftControl, GlfwKey.Z);
+        Assert.Equal(before, editor.Draft!.Boxes.ToArray());
+        Assert.Empty(editor.Selection.ToArray());
+
+        // Paste: the copies follow the pointer, snapped to the face under it, and a click where they fit places both.
+        Chord(GlfwKey.LeftControl, GlfwKey.V);
+        Assert.Equal(EditorCarry.Paste, editor.Carry);
+        Assert.Equal(before.Length, DraftBlocks);
+        Assert.True(PointWhere(e => e.HasCarryGhost && e.CarryCheck == DraftEdit.Done, out _));
+        Assert.Equal(before.Length, DraftBlocks);
+        EditorFrame(() => Click());
+        Assert.Equal(before.Length + 2, DraftBlocks);
+        Assert.Equal(EditorCarry.None, editor.Carry);
+        Assert.Empty(editor.Selection.ToArray());
+        Chord(GlfwKey.LeftControl, GlfwKey.Z);
+        Assert.Equal(before, editor.Draft!.Boxes.ToArray());
+
+        // Move: a left drag from a selected block carries it; let go over a panel, nothing changes.
+        EditorFrame(() => Move(HullOnScreen()));
+        var held = editor.Hover.Block;
+        EditorFrame(() => Click(GlfwMouseButton.Middle));
+        var version = editor.Draft!.Version;
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        EditorFrame(() => Move(HullOnScreen() + new float2(12, 0)));
+        Assert.Equal(EditorCarry.Move, editor.Carry);
+        EditorFrame(() => Move(OverButton));
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        Assert.Equal(EditorCarry.None, editor.Carry);
+        Assert.Equal(version, editor.Draft!.Version);
+        Assert.Equal(0, _buttonClicks);
+
+        // Let go where it fits, it moves there; its index and the selection stay, and one undo puts it back.
+        EditorFrame(() => Move(HullOnScreen()));
+        Assert.Equal(held, editor.Hover.Block);
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        EditorFrame(() => Move(HullOnScreen() + new float2(12, 0)));
+        Assert.True(PointWhere(e => e.HasCarryGhost && e.CarryCheck == DraftEdit.Done, out _));
+        var by = editor.CarryBy;
+        Assert.Equal(before, editor.Draft!.Boxes.ToArray());
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        var moved = editor.Draft!.Boxes.ToArray();
+        Assert.Equal(before.Length, moved.Length);
+        Assert.Equal(before[held] with { At = new GridSize(before[held].At.X + by.X, before[held].At.Y + by.Y, before[held].At.Z + by.Z) }, moved[held]);
+        Assert.Equal([held], editor.Selection.ToArray());
+        Chord(GlfwKey.LeftControl, GlfwKey.Z);
+        Assert.Equal(before, editor.Draft!.Boxes.ToArray());
+    }
+
+    [Fact]
+    public void AWedgeIsChosenTurnedPlacedCopiedPastedAndAppliedInItsShapeThroughTheServer()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        var old = _snapshot.Hulls[_snapshot.OwnHull].Id;
+        var designs = _snapshot.Content.Designs.Length;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var blocks = DraftBlocks;
+
+        // Choose a wedge, two cells long on x, and turn it a quarter about z: its slope turns and its size swaps.
+        editor.SetPartSize(0, 2);
+        editor.SetPartShape(BlockShape.WedgeXPlusPlus);
+        editor.RotatePart(2);
+        var shape = BlockShapes.Rotate(BlockShape.WedgeXPlusPlus, 2);
+        Assert.Equal(shape, editor.PartShape);
+        Assert.Equal(new GridSize(1, 2, 1), editor.PartSize);
+
+        // Placed with a click where its ghost fits: the draft has it in that shape and size, unselected.
+        Assert.True(PointWhere(e => e.HasGhost && e.GhostCheck == DraftEdit.Done, out _));
+        EditorFrame(() => Click());
+        Assert.Equal(blocks + 1, DraftBlocks);
+        var placed = editor.Draft!.Boxes[^1];
+        Assert.Equal((shape, new GridSize(1, 2, 1)), (placed.Shape, placed.Size));
+        Assert.Empty(editor.Selection.ToArray());
+
+        // Explicitly select the placed block before turning it; placement itself leaves it unselected.
+        editor.Select(blocks, false);
+        // A turn of the placed block, where it fits, is one undo; the wedge's slope turns with it.
+        var rotated = false;
+        for (var axis = 0; axis < 3; axis++)
+        {
+            if (editor.CanRotateSelected(axis) != DraftEdit.Done)
+                continue;
+            editor.RotateSelected(axis);
+            Assert.Equal(BlockShapes.Rotate(shape, axis), editor.Draft!.Boxes[blocks].Shape);
+            editor.Undo();
+            Assert.Equal(placed, editor.Draft!.Boxes[blocks]);
+            editor.Select(blocks, false);
+            rotated = true;
+            break;
+        }
+        Assert.True(rotated, "the placed wedge must have room for at least one tested rotation");
+
+        // Copied and pasted, the copy keeps the shape.
+        Chord(GlfwKey.LeftControl, GlfwKey.C);
+        Assert.Equal(shape, editor.Clipboard[0].Shape);
+        Chord(GlfwKey.LeftControl, GlfwKey.V);
+        Assert.Equal(EditorCarry.Paste, editor.Carry);
+        Assert.True(PointWhere(e => e.HasCarryGhost && e.CarryCheck == DraftEdit.Done, out _));
+        EditorFrame(() => Click());
+        Assert.Equal(blocks + 2, DraftBlocks);
+        Assert.Equal((shape, placed.Size), (editor.Draft!.Boxes[^1].Shape, editor.Draft!.Boxes[^1].Size));
+
+        // Checked as the server checks it and applied: the new ship has both wedges.
+        for (var i = 0; i < 600 && !(editor.Check == DraftCheck.Ready && editor.CheckedVersion == editor.Draft.Version); i++)
+        {
+            Thread.Sleep(1);
+            EditorFrame();
+        }
+
+        Assert.Equal(DraftCheck.Ready, editor.Check);
+        Assert.True(editor.Apply(Bridge));
+        Assert.True(PlayUntil(() => editor.Stage == EditorStage.Closed), $"{_snapshot.Editor.Phase}/{_snapshot.Editor.Reason}");
+        Assert.True(editor.NoticeApplied, $"{editor.Notice}");
+        Assert.True(PlayUntil(() => _snapshot.Hulls[_snapshot.OwnHull].Id != old));
+        ref var own = ref _snapshot.Hulls[_snapshot.OwnHull];
+        Assert.Equal(designs, own.Design);
+        var design = _snapshot.Content.Designs[own.Design];
+        var wedges = 0;
+        foreach (var box in design.Boxes)
+            wedges += box.Shape == shape ? 1 : 0;
+        Assert.Equal(2, wedges);
+        Assert.Equal(design.BlockCount, BlockSet.Count(own.Blocks.Span));
+    }
+
+    [Fact]
+    public void MergingTwoBlocksIsOneUndoAndTheSelectionNeverNamesAShiftedBlock()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        var draft = editor.Draft!;
+        var boxes = draft.Boxes.ToArray();
+        int first = -1, second = -1, other = -1;
+        for (var i = 0; i < boxes.Length && first < 0; i++)
+            for (var j = i + 1; j < boxes.Length && first < 0; j++)
+                if (draft.CanMerge([i, j], out _) == DraftEdit.Done)
+                    (first, second) = (i, j);
+        Assert.True(first >= 0, "the pod has two blocks that make one box");
+        for (var k = 0; k < boxes.Length && other < 0; k++)
+            if (boxes[k].Type != boxes[first].Type)
+                other = k;
+
+        // Two types never merge, and the panel says so.
+        editor.Select(first, false);
+        editor.Select(other, true);
+        editor.RefreshMerge();
+        Assert.Equal(DraftEdit.MixedTypes, editor.MergeCheck);
+
+        editor.Select(first, false);
+        editor.Select(second, true);
+        editor.RefreshMerge();
+        Assert.Equal(DraftEdit.Done, editor.MergeCheck);
+        var merged = editor.Merged;
+        Assert.Equal(editor.MergeBefore.Hull, editor.MergeAfter.Hull, 1);
+        editor.MergeSelected();
+        Assert.Equal(boxes.Length - 1, DraftBlocks);
+        Assert.Equal([first], editor.Selection.ToArray());
+        Assert.Equal(merged, editor.Draft!.Boxes[first]);
+
+        // Undo and redo each take the whole merge, and leave nothing selected rather than a block that moved.
+        editor.Undo();
+        Assert.Equal(boxes, editor.Draft!.Boxes.ToArray());
+        Assert.Empty(editor.Selection.ToArray());
+        editor.Redo();
+        Assert.Equal(boxes.Length - 1, DraftBlocks);
+        Assert.Empty(editor.Selection.ToArray());
+
+        // A selection past the end after a delete of the last block is never kept.
+        editor.Select(DraftBlocks - 1, false);
+        editor.DeleteSelected();
+        Assert.Empty(editor.Selection.ToArray());
+    }
+
+    [Fact]
+    public void FocusFitsTheSelectionOrTheWholeDraftKeepsTheAngleAndIsLeftToATextField()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        _paletteShown = true;
+        for (var i = 0; i < 40; i++)
+            EditorFrame();
+        var source = editor.Source!;
+        Vector3 Direction() => Vector3.Normalize(Vector3.Transform(
+            _world.CameraPosition.RelativeTo(_world.OwnDrawnPosition), Quaternion.Conjugate(_world.OwnOrientation)) - _world.EditorFocus);
+
+        // One block selected: the camera glides to its middle and close enough to fill the view with it.
+        EditorFrame(() => Move(HullOnScreen()));
+        var block = editor.Hover.Block;
+        EditorFrame(() => Click(GlfwMouseButton.Middle));
+        var angle = Direction();
+        var whole = _world.EditorDistance;
+        Chord(GlfwKey.F);
+        for (var i = 0; i < 90; i++)
+            EditorFrame();
+        var box = editor.Draft!.Boxes[block];
+        Assert.True((_world.EditorFocus - EditorGeometry.ToHull(EditorGeometry.Middle(box), source.Pivot, source.BlockSize)).Length() < 0.05f);
+        Assert.True(Vector3.Distance(angle, Direction()) < 1e-3f, "the orbit's angle is kept");
+        var near = _world.EditorDistance;
+        Assert.True(near < whole, $"{near} against {whole}");
+
+        // Nothing selected: the whole draft, from further away.
+        EditorFrame(() => Move(EmptySpace));
+        EditorFrame(() => Click(GlfwMouseButton.Middle));
+        Assert.Empty(editor.Selection.ToArray());
+        Chord(GlfwKey.F);
+        for (var i = 0; i < 90; i++)
+            EditorFrame();
+        Assert.True(EditorGeometry.Bounds(editor.Draft!.Boxes, default, out var low, out var high));
+        Assert.True((_world.EditorFocus - EditorGeometry.ToHull((low + high) * 0.5f, source.Pivot, source.BlockSize)).Length() < 0.05f);
+        Assert.True(_world.EditorDistance > near);
+
+        // Typing in the part search: F is a letter there, not a focus.
+        var focus = _world.EditorFocus;
+        EditorFrame(() => Move(OverSearch));
+        EditorFrame(() => Click());
+        EditorFrame();
+        Assert.True(ImGui.GetIO().WantTextInput);
+        EditorFrame(() => Move(HullOnScreen()));
+        EditorFrame(() => Click(GlfwMouseButton.Middle));
+        Chord(GlfwKey.F);
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        Assert.Equal(focus, _world.EditorFocus);
+        Assert.True(editor.Shown);
+    }
+
+    /// <summary>The server's hull store, to wear a hull down as damage would without the stamp of a hit.</summary>
+    private HullStore ServerHulls => (HullStore)typeof(ServerHost).GetField("_hulls", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(_server)!;
+
+    [Fact]
+    public void ADamagedShipOpensRepairOnlyAndRepairThroughTheServerRebuildsItThenItCanBeEdited()
+    {
+        var hulls = ServerHulls;
+        ref var own = ref _snapshot.Hulls[_snapshot.OwnHull];
+        var old = own.Id;
+        var designIndex = own.Design;
+        var design = _snapshot.Content.Designs[designIndex];
+        var index = (int)(old & 0xFFFF);
+        var lost = 0;
+        while (design.Boxes[lost].Type.Core)
+            lost++;
+        var state = hulls.Info(index).BlockState;
+        Assert.True(hulls.BlockStates.Lose(state, lost));
+        hulls.State(index).Hull = (float)hulls.BlockStates.HitTotal(state);
+        Assert.True(PlayUntil(() => _snapshot.Hulls[_snapshot.OwnHull].Revision > 0));
+
+        // The draft is the whole blueprint; the lost block is in it and marked, and the hull reads against the blueprint.
+        OpenEditor();
+        var editor = _world.Editor;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        Assert.Equal(design.BlockCount, DraftBlocks);
+        Assert.Equal(1, editor.MissingCount);
+        Assert.True(editor.IsMissing(lost));
+        Assert.True(editor.Damaged);
+        Assert.True(editor.OwnHullPoints < design.Flight.HullPoints);
+        Assert.Equal(RepairBlock.None, editor.RepairState);
+        Assert.True(editor.RepairOnly);
+        Assert.False(editor.CanEdit);
+        Assert.False(editor.CanApply);
+
+        // Repair only: the pointer finds blocks and a click selects one, with no ghost and nothing placed.
+        var version = editor.Draft!.Version;
+        EditorFrame(() => Move(HullOnScreen()));
+        Assert.True(editor.HasHover);
+        Assert.False(editor.HasGhost);
+        EditorFrame(() => Click());
+        Assert.Equal(design.BlockCount, DraftBlocks);
+        Assert.NotEmpty(editor.Selection.ToArray());
+
+        // No key, gesture or call changes the draft: delete, paste, undo, a sizing key, R, a drag, every edit.
+        Chord(GlfwKey.LeftControl, GlfwKey.C);
+        Chord(GlfwKey.LeftControl, GlfwKey.V);
+        Chord(GlfwKey.Delete);
+        Chord(GlfwKey.LeftControl, GlfwKey.Z);
+        var size = editor.PartSize;
+        EditorFrame(() => Key(GlfwKey.S, true));
+        EditorFrame(() => Move(HullOnScreen() + new float2(200, 0)));
+        Assert.False(editor.SizingPart);
+        Assert.Equal(-1, _world.PartSizingFace);
+        EditorFrame(() => Key(GlfwKey.S, false));
+        Assert.Equal(size, editor.PartSize);
+        Chord(GlfwKey.R);
+        Assert.False(editor.RotatingPart);
+        EditorFrame(() => Move(HullOnScreen()));
+        var selected = editor.Selected;
+        editor.DeleteSelected();
+        editor.MergeSelected();
+        editor.ResizeSelected(editor.SelectedLength + 1);
+        editor.RotateSelected(0);
+        editor.Undo();
+        editor.Click();
+        Assert.False(editor.BeginMove(selected));
+        Assert.False(editor.BeginPaste());
+        editor.BeginPartDrag(0);
+        Assert.Equal(EditorCarry.None, editor.Carry);
+        Assert.False(editor.BeginPartRotation());
+        Assert.Equal(version, editor.Draft!.Version);
+        Assert.False(editor.Dirty);
+
+        // Repair: the server rebuilds the ship as built under the same design, and the editor closes as for an apply.
+        Assert.True(editor.Repair(Bridge));
+        Assert.Equal(EditorStage.Applying, editor.Stage);
+        Assert.True(PlayUntil(() => editor.Stage == EditorStage.Closed), $"{_snapshot.Editor.Phase}/{_snapshot.Editor.Reason}");
+        Assert.True(editor.NoticeApplied, $"{editor.Notice}");
+        Assert.True(PlayUntil(() => _snapshot.Hulls[_snapshot.OwnHull].Id != old));
+        own = ref _snapshot.Hulls[_snapshot.OwnHull];
+        Assert.Equal(designIndex, own.Design);
+        Assert.True(BlockSet.IsFull(own.Blocks.Span, design.BlockCount));
+        Assert.Equal(design.Flight.HullPoints, own.Hull);
+        Assert.False(design.NeedsRepair(own.Revision, own.Hull));
+
+        // Whole again, the ship is edited as usual.
+        Tick(3);
+        OpenEditor();
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        Assert.True(editor.CanEdit);
+        Assert.False(editor.RepairOnly);
+        EditorFrame(() => Move(HullOnScreen()));
+        Assert.True(editor.HasGhost);
+        EditorFrame(() => Click());
+        Assert.Equal(design.BlockCount + 1, DraftBlocks);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ChangesKeptFromBeforeTheDamageHoldRepairBackUntilTheyAreDiscarded(bool loseBlock)
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var blocks = DraftBlocks;
+        EditorFrame(() => Move(HullOnScreen()));
+        EditorFrame(() => Click());
+        Assert.Equal(blocks + 1, DraftBlocks);
+
+        // Both worn and missing blocks end the edit without discarding the player's draft.
+        var hulls = ServerHulls;
+        var own = (int)(_snapshot.Hulls[_snapshot.OwnHull].Id & 0xFFFF);
+        if (loseBlock)
+        {
+            var design = _snapshot.Content.Designs[_snapshot.Hulls[_snapshot.OwnHull].Design];
+            var lost = 0;
+            while (design.Boxes[lost].Type.Core) lost++;
+            var state = hulls.Info(own).BlockState;
+            Assert.True(hulls.BlockStates.Lose(state, lost));
+            hulls.State(own).Hull = (float)hulls.BlockStates.HitTotal(state);
+        }
+        else
+            hulls.State(own).Hull -= 5f;
+        hulls.Info(own).DamageTick = _tick;
+        Assert.True(PlayUntil(() => editor.Stage == EditorStage.Closed));
+        Assert.True(editor.DraftKept);
+        hulls.Info(own).DamageTick = long.MinValue;
+
+        // Opened again on the damaged ship: the kept draft is there, Repair waits and nothing can be applied.
+        OpenEditor();
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        Assert.Equal(blocks + 1, DraftBlocks);
+        Assert.True(editor.Dirty);
+        Assert.True(editor.RepairOnly);
+        Assert.Equal(loseBlock ? 1 : 0, editor.MissingCount);
+        Assert.Equal(RepairBlock.Unsaved, editor.RepairState);
+        Assert.False(editor.Repair(Bridge));
+        Assert.False(editor.CanApply);
+        Assert.False(editor.Apply(Bridge));
+        Assert.Equal(EditorStage.Editing, editor.Stage);
+
+        // Only the player's word throws the changes away; then Repair goes through.
+        Assert.True(editor.DiscardChanges());
+        Assert.False(editor.Dirty);
+        Assert.Equal(blocks, DraftBlocks);
+        Assert.False(editor.Draft!.CanUndo);
+        Assert.Equal(RepairBlock.None, editor.RepairState);
+        Assert.True(editor.Repair(Bridge));
+        Assert.True(PlayUntil(() => editor.Stage == EditorStage.Closed), $"{_snapshot.Editor.Phase}/{_snapshot.Editor.Reason}");
+        Assert.True(editor.NoticeApplied, $"{editor.Notice}");
+    }
+
+    /// <summary>
+    /// Where the middle of side <paramref name="side"/> of the ghost shows on screen, and how far one cell out of
+    /// that side moves on screen; false when either is behind the camera.
+    /// </summary>
+    private bool GhostFaceOnScreen(int side, out float2 at, out float2 cell)
+    {
+        var editor = _world.Editor;
+        var size = editor.PartSize;
+        var normal = EditorGeometry.Normal(side);
+        var face = GhostMotion.Middle(editor.GhostAt, size) + normal * (EditorGeometry.Of(size, side >> 1) * 0.5f);
+        cell = default;
+        if (!_world.Project(_world.EditorPoint(face), out at) || !_world.Project(_world.EditorPoint(face + normal), out var next))
+            return false;
+        cell = next - at;
+        return true;
+    }
+
+    /// <summary>
+    /// A side of the ghost, plus or minus as asked and not the one against the hull, whose middle the pointer
+    /// highlights, its axis well across the view; the pointer is left on it. While none shows, the camera is orbited
+    /// with the right button, as a player would, a little at a time.
+    /// </summary>
+    private int SizableFace(bool plus, out float2 at, out float2 cell)
+    {
+        var editor = _world.Editor;
+        for (var attempt = 0; attempt < 12; attempt++)
+        {
+            for (var side = plus ? 0 : 1; side < 6; side += 2)
+            {
+                if (side == (editor.Hover.Side ^ 1) || !GhostFaceOnScreen(side, out at, out cell) || cell.Length() < 12f)
+                    continue;
+                var point = at;
+                EditorFrame(() => Move(point));
+                if (_world.PartSizingFace == side && !_world.PartSizingEdgeOn)
+                    return side;
+            }
+
+            var from = new float2(640, 360);
+            EditorFrame(() => Move(from));
+            EditorFrame(() => Button(GlfwMouseButton.Right, true));
+            EditorFrame(() => Move(from + new float2(40, attempt % 3 == 2 ? 30 : 0)));
+            EditorFrame(() => Move(from + new float2(80, attempt % 3 == 2 ? 60 : 0)));
+            EditorFrame(() => Button(GlfwMouseButton.Right, false));
+            Assert.True(editor.SizingPart);
+        }
+
+        at = cell = default;
+        Assert.Fail($"no {(plus ? "plus" : "minus")} face of the ghost to size on screen");
+        return -1;
+    }
+
+    /// <summary>Presses on a face of the ghost and moves the pointer <paramref name="cells"/> cells out of it in four steps.</summary>
+    private void DragFace(float2 at, float2 cell, float cells, bool release = true)
+    {
+        EditorFrame(() => Move(at));
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        for (var i = 1; i <= 4; i++)
+        {
+            var point = at + cell * (cells * i / 4f);
+            EditorFrame(() => Move(point));
+        }
+
+        if (release)
+            EditorFrame(() => Button(GlfwMouseButton.Left, false));
+    }
+
+    [Fact]
+    public void HoldingSAndDraggingAGhostFaceSizesItWithTheOppositeFaceFixedThenANewClickPlacesIt()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var blocks = DraftBlocks;
+        var limit = editor.Content!.Blocks.Limits.MaxBoxSide;
+        EditorFrame(() => Move(HullOnScreen()));
+        Assert.True(editor.HasGhost);
+        var face = (editor.Hover.Block, editor.Hover.Side);
+        Vector3 Camera() => _world.CameraPosition.RelativeTo(_world.OwnDrawnPosition);
+
+        // S holds the ghost still wherever the pointer goes; nothing is highlighted off the ghost.
+        var held = (editor.GhostAt, editor.PartSize);
+        EditorFrame(() => Key(GlfwKey.S, true));
+        Assert.True(editor.SizingPart);
+        EditorFrame(() => Move(EmptySpace));
+        Assert.Equal(held, (editor.GhostAt, editor.PartSize));
+        Assert.Equal(-1, _world.PartSizingFace);
+
+        // A plus face moves out two cells and back one; the low corner stays.
+        void Plus(int grow)
+        {
+            var side = SizableFace(true, out var at, out var cell);
+            var axis = side >> 1;
+            var (ghostAt, size) = (editor.GhostAt, editor.PartSize);
+            DragFace(at, cell, grow + 0.2f * Math.Sign(grow));
+            Assert.Equal(EditorGeometry.With(size, axis, EditorGeometry.Of(size, axis) + grow), editor.PartSize);
+            Assert.Equal(ghostAt, editor.GhostAt);
+        }
+
+        // A minus face moves out too, and the ghost's high face stays where it was in the grid.
+        void Minus(int grow)
+        {
+            var side = SizableFace(false, out var at, out var cell);
+            var axis = side >> 1;
+            var (ghostAt, size) = (editor.GhostAt, editor.PartSize);
+            var high = EditorGeometry.Of(ghostAt, axis) + EditorGeometry.Of(size, axis);
+            DragFace(at, cell, grow + 0.2f * Math.Sign(grow));
+            Assert.Equal(EditorGeometry.Of(size, axis) + grow, EditorGeometry.Of(editor.PartSize, axis));
+            Assert.Equal(high, EditorGeometry.Of(editor.GhostAt, axis) + EditorGeometry.Of(editor.PartSize, axis));
+            for (var other = 0; other < 3; other++)
+                if (other != axis)
+                    Assert.Equal(EditorGeometry.Of(ghostAt, other), EditorGeometry.Of(editor.GhostAt, other));
+        }
+
+        Plus(2);
+        Plus(-1);
+        Minus(2);
+        Minus(-1);
+        Assert.Equal(blocks, DraftBlocks);
+        Assert.Equal(face, (editor.Hover.Block, editor.Hover.Side));
+
+        // A right drag orbits the camera through the gesture: the ghost, its size and placing all stay, and a
+        // right click alone changes nothing either.
+        var camera = Camera();
+        var sized = (editor.GhostAt, editor.PartSize);
+        EditorFrame(() => Move(EmptySpace + new float2(400, -300)));
+        EditorFrame(() => Button(GlfwMouseButton.Right, true));
+        EditorFrame(() => Move(EmptySpace + new float2(520, -330)));
+        EditorFrame(() => Move(EmptySpace + new float2(640, -360)));
+        EditorFrame(() => Button(GlfwMouseButton.Right, false));
+        EditorFrame(() => Click(GlfwMouseButton.Right));
+        Assert.True((Camera() - camera).Length() > 0.5f, "the camera should have orbited");
+        Assert.True(editor.SizingPart);
+        Assert.True(editor.Placing);
+        Assert.Equal(sized, (editor.GhostAt, editor.PartSize));
+
+        // From the turned camera the faces still move along their own axes, and stop at the limits: pushed past
+        // one, turning back answers at once.
+        Plus(1);
+        Minus(1);
+        var side = SizableFace(true, out var at, out var cell);
+        var axis = side >> 1;
+        DragFace(at, cell, limit + 5, release: false);
+        Assert.Equal(limit, EditorGeometry.Of(editor.PartSize, axis));
+        var far = at + cell * (limit + 5);
+        EditorFrame(() => Move(far - cell * 1.2f));
+        Assert.Equal(limit - 1, EditorGeometry.Of(editor.PartSize, axis));
+        EditorFrame(() => Move(far - cell * (limit * 3)));
+        Assert.Equal(1, EditorGeometry.Of(editor.PartSize, axis));
+        EditorFrame(() => Move(far - cell * (limit * 3 - 1.2f)));
+        Assert.Equal(2, EditorGeometry.Of(editor.PartSize, axis));
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+
+        // A right drag in the middle of a face drag holds the face still, and the drag then goes on from wherever
+        // the pointer is let go, along the axis as the new view shows it.
+        side = SizableFace(true, out at, out cell);
+        axis = side >> 1;
+        var length = EditorGeometry.Of(editor.PartSize, axis);
+        DragFace(at, cell, 1.2f, release: false);
+        Assert.Equal(length + 1, EditorGeometry.Of(editor.PartSize, axis));
+        var pointer = at + cell * 1.2f;
+        EditorFrame(() => Button(GlfwMouseButton.Right, true));
+        EditorFrame(() => Move(pointer + new float2(-90, 60)));
+        EditorFrame(() => Move(pointer + new float2(-180, 120)));
+        Assert.Equal(length + 1, EditorGeometry.Of(editor.PartSize, axis));
+        EditorFrame(() => Button(GlfwMouseButton.Right, false));
+        EditorFrame();
+        Assert.Equal(length + 1, EditorGeometry.Of(editor.PartSize, axis));
+        Assert.Equal(side, _world.PartSizingFace);
+        Assert.True(GhostFaceOnScreen(side, out _, out var turned));
+        pointer += new float2(-180, 120);
+        EditorFrame(() => Move(pointer + turned * 1.2f));
+        Assert.Equal(length + 2, EditorGeometry.Of(editor.PartSize, axis));
+
+        // Letting go of S with the button still held ends sizing; letting go of the button then places nothing.
+        EditorFrame(() => Key(GlfwKey.S, false));
+        Assert.False(editor.SizingPart);
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        Assert.Equal(blocks, DraftBlocks);
+
+        // The size and place stay while the pointer is still, and a new click places exactly that.
+        var ghost = editor.GhostAt;
+        var final = editor.PartSize;
+        EditorFrame();
+        Assert.True(editor.HasGhost);
+        Assert.Equal((ghost, final), (editor.GhostAt, editor.PartSize));
+        if (editor.GhostCheck == DraftEdit.Done)
+        {
+            EditorFrame(() => Click());
+            Assert.Equal(blocks + 1, DraftBlocks);
+            Assert.Equal(new DesignBox(ghost, final, editor.Content.Blocks.Types[editor.Part], BlockShape.Box), editor.Draft!.Boxes[^1]);
+        }
+        else
+        {
+            // Where it does not fit nothing is placed, and the reason shows as it would for any ghost.
+            EditorFrame(() => Click());
+            Assert.Equal(blocks, DraftBlocks);
+        }
+    }
+
+    [Fact]
+    public void AGhostSizedOnItsFaceStaysForTheClickWhileThePointerIsOnItAndAWedgeStaysAWedge()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var blocks = DraftBlocks;
+        editor.SetPartShape(BlockShape.WedgeXPlusPlus);
+        EditorFrame(() => Move(HullOnScreen()));
+        Assert.True(editor.HasGhost);
+
+        // A wedge's faces size it as a box's do, the slant as the box side it stands for; it stays the same wedge.
+        EditorFrame(() => Key(GlfwKey.S, true));
+        var middle = GhostMotion.Middle(editor.GhostAt, editor.PartSize);
+        Assert.True(_world.Project(_world.EditorPoint(middle), out var inside));
+        EditorFrame(() => Move(inside));
+        var read = _world.PartSizingFace;
+        var ghost = new DesignBox(editor.GhostAt, editor.PartSize, null!, editor.PartShape);
+        Assert.True(read >= 0, "the middle of the ghost should be on one of its faces");
+        Assert.True(BlockShapes.Face(editor.PartShape, read, stackalloc int[4]) > 0 || read == EditorGeometry.SlantEntry(ghost),
+            "a side with no face of its own is read only through the slant");
+        var side = SizableFace(true, out var at, out var cell);
+        var size = editor.PartSize;
+        DragFace(at, cell, 2.2f);
+        Assert.Equal(EditorGeometry.Of(size, side >> 1) + 2, EditorGeometry.Of(editor.PartSize, side >> 1));
+        Assert.Equal(BlockShape.WedgeXPlusPlus, editor.PartShape);
+
+        // The pointer is still on the sized face when S is let go: moving it over the ghost keeps the ghost where
+        // it is, and a click places it there, as sized.
+        var held = (editor.GhostAt, editor.PartSize);
+        Assert.True(GhostFaceOnScreen(side, out var on, out _));
+        EditorFrame(() => Move(on));
+        EditorFrame(() => Key(GlfwKey.S, false));
+        Assert.False(editor.SizingPart);
+        EditorFrame(() => Move(on + new float2(1, 1)));
+        Assert.True(editor.GhostPinned);
+        Assert.Equal(held, (editor.GhostAt, editor.PartSize));
+        Assert.Equal(DraftEdit.Done, editor.GhostCheck);
+        EditorFrame(() => Click());
+        Assert.Equal(blocks + 1, DraftBlocks);
+        Assert.Equal(new DesignBox(held.GhostAt, held.PartSize, editor.Content!.Blocks.Types[editor.Part], BlockShape.WedgeXPlusPlus), editor.Draft!.Boxes[^1]);
+        blocks++;
+
+        // Off the ghost and back on the ship, placing follows the pointer again, at the size it was given.
+        EditorFrame(() => Move(EmptySpace));
+        EditorFrame(() => Move(HullOnScreen()));
+        Assert.False(editor.GhostPinned);
+        Assert.Equal(held.PartSize, editor.PartSize);
+        Assert.Equal(blocks, DraftBlocks);
+    }
+
+    [Fact]
+    public void SIsLeftToTextFieldsPanelsAndCtrlAndEscapeOrClosingPutsTheGestureBackWithNothingLeftForFlight()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        _paletteShown = true;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var size = editor.PartSize;
+
+        // Over a panel S starts nothing.
+        EditorFrame(() => Move(OverButton));
+        EditorFrame();
+        EditorFrame(() => Key(GlfwKey.S, true));
+        Assert.False(editor.SizingPart);
+        EditorFrame(() => Key(GlfwKey.S, false));
+
+        // With Ctrl held, nor does it.
+        EditorFrame(() => Move(HullOnScreen()));
+        Assert.True(editor.HasGhost);
+        EditorFrame(() => Key(GlfwKey.LeftControl, true));
+        EditorFrame(() => Key(GlfwKey.S, true));
+        Assert.False(editor.SizingPart);
+        EditorFrame(() => Key(GlfwKey.S, false));
+        EditorFrame(() => Key(GlfwKey.LeftControl, false));
+
+        // A text field with the keyboard keeps its letters.
+        EditorFrame(() => Move(OverSearch));
+        EditorFrame(() => Click());
+        EditorFrame();
+        Assert.True(ImGui.GetIO().WantTextInput);
+        EditorFrame(() => Move(HullOnScreen()));
+        EditorFrame(() => Key(GlfwKey.S, true));
+        Assert.False(editor.SizingPart);
+        Assert.Equal(size, editor.PartSize);
+        EditorFrame(() => Key(GlfwKey.S, false));
+        EditorFrame(() => Move(EmptySpace));
+        EditorFrame(() => Click());
+        EditorFrame();
+        Assert.False(ImGui.GetIO().WantTextInput);
+        _paletteShown = false;
+
+        // Escape in the middle of a face drag puts back the size and place from before S and leaves the edit open.
+        EditorFrame(() => Move(HullOnScreen()));
+        var before = (editor.GhostAt, editor.PartSize);
+        EditorFrame(() => Key(GlfwKey.S, true));
+        Assert.True(editor.SizingPart);
+        var side = SizableFace(false, out var at, out var cell);
+        DragFace(at, cell, 2.2f, release: false);
+        Assert.NotEqual(before, (editor.GhostAt, editor.PartSize));
+        EditorFrame(() => Key(GlfwKey.Escape, true));
+        Assert.False(editor.SizingPart);
+        Assert.Equal(EditorStage.Editing, editor.Stage);
+        Assert.Equal(before, (editor.GhostAt, editor.PartSize));
+        EditorFrame(() => Key(GlfwKey.Escape, false));
+        Assert.Equal(-1, _world.PartSizingFace);
+        // Neither the button let go nor S still held does anything more.
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        EditorFrame(() => Move(at + cell * 3f));
+        Assert.False(editor.SizingPart);
+        Assert.Equal(before.PartSize, editor.PartSize);
+
+        // Escape again, with S still held, ends the edit: S does not fly until it is let go.
+        EditorFrame(() => Key(GlfwKey.Escape, true));
+        Assert.Equal(EditorStage.Closed, editor.Stage);
+        EditorFrame(() => Key(GlfwKey.Escape, false));
+        Assert.True(_world.FlightHeld);
+        EditorFrame(() => Move(EmptySpace + new float2(0, -100)));
+        Assert.Equal(0f, Sent().Forward);
+        EditorFrame(() => Key(GlfwKey.S, false));
+        EditorFrame(() => Key(GlfwKey.S, true));
+        Assert.True(Sent().Forward < 0);
+        EditorFrame(() => Key(GlfwKey.S, false));
+
+        // The editor key closes the edit mid-gesture; the next edit starts with nothing held.
+        Tick(3);
+        OpenEditor();
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        EditorFrame(() => Move(HullOnScreen()));
+        EditorFrame(() => Key(GlfwKey.S, true));
+        Assert.True(editor.SizingPart);
+        Chord(GlfwKey.B);
+        Assert.Equal(EditorStage.Closed, editor.Stage);
+        Assert.False(editor.SizingPart);
+        Assert.False(editor.GhostPinned);
+        EditorFrame(() => Key(GlfwKey.S, false));
+        Tick(3);
+        OpenEditor();
+        Assert.False(editor.SizingPart);
+        Assert.Equal(-1, _world.PartSizingFace);
+        _ = side;
+    }
+
+    /// <summary>
+    /// A point on screen on the rotation ring about <paramref name="axis"/>, as far from the other ring as any:
+    /// where a press takes that ring and no other.
+    /// </summary>
+    private float2 RingAt(int axis)
+    {
+        Assert.True(_world.PartRings(out var middle, out var radius));
+        var best = default(float2);
+        var room = -1f;
+        for (var i = 0; i < WorldView.RingSegments; i++)
+        {
+            if (!_world.Project(_world.EditorPoint(WorldView.RingPoint(middle, radius, axis, i)), out var point))
+                continue;
+            var nearest = float.MaxValue;
+            for (var j = 0; j < WorldView.RingSegments; j++)
+                if (_world.Project(_world.EditorPoint(WorldView.RingPoint(middle, radius, 1 - axis, j)), out var other))
+                    nearest = Math.Min(nearest, (other - point).Length());
+            if (nearest > room && point.X > 0 && point.Y > 0 && point.X < Screen.X && point.Y < Screen.Y)
+            {
+                room = nearest;
+                best = point;
+            }
+        }
+
+        Assert.True(room > 24f, $"the rings should be apart on screen, {room}");
+        return best;
+    }
+
+    /// <summary>Opens the editor with a wedge's ghost on a face of the ship, ready to be turned.</summary>
+    private ShipEditor WedgeOnAFace()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        editor.SetPartShape(BlockShape.WedgeXPlusPlus);
+        editor.SetPartSize(0, 2);
+        EditorFrame(() => Move(HullOnScreen()));
+        Assert.True(editor.HasGhost);
+        return editor;
+    }
+
+    [Fact]
+    public void RTurnsTheGhostWithTwoRingsThroughEveryWedgeOrientationAndAClickOnTheGhostPlacesItUnconfirmed()
+    {
+        var editor = WedgeOnAFace();
+        var blocks = DraftBlocks;
+        var face = (editor.Hover.Block, editor.Hover.Side);
+        var before = (editor.PartSize, editor.PartShape);
+
+        Chord(GlfwKey.R);
+        Assert.True(editor.RotatingPart);
+
+        // Each ring by the wheel and by a click turns a quarter about its own axis, never placing, and the ghost
+        // keeps its face. A walk over both rings reaches all twelve wedges.
+        var seen = new HashSet<BlockShape> { editor.PartShape };
+        void Turn(int axis, bool wheel)
+        {
+            var expected = BlockShapes.Rotate(editor.PartShape, axis);
+            var size = editor.PartSize;
+            var swapped = axis == 0 ? new GridSize(size.X, size.Z, size.Y) : new GridSize(size.Z, size.Y, size.X);
+            var at = RingAt(axis);
+            EditorFrame(() => Move(at));
+            Assert.Equal(axis, _world.RotationRingHovered);
+            EditorFrame(() =>
+            {
+                if (wheel)
+                    Wheel(1);
+                else
+                    Click();
+            });
+            Assert.Equal((swapped, expected), (editor.PartSize, editor.PartShape));
+            Assert.Equal(face, (editor.Hover.Block, editor.Hover.Side));
+            Assert.True(editor.RotatingPart);
+            seen.Add(expected);
+        }
+
+        // The walk goes to the nearest wedge not yet seen, a quarter turn of either ring at a time, until it has seen
+        // all twelve; each turn is made on screen, the wheel and a click by turns.
+        var turns = 0;
+        while (seen.Count < 12 && turns < 60)
+        {
+            var from = new Dictionary<BlockShape, (BlockShape Shape, int Axis)>();
+            var queue = new Queue<BlockShape>([editor.PartShape]);
+            var target = editor.PartShape;
+            while (queue.Count > 0 && seen.Contains(target))
+            {
+                var node = queue.Dequeue();
+                for (var axis = 0; axis < 2; axis++)
+                {
+                    var next = BlockShapes.Rotate(node, axis);
+                    if (next == editor.PartShape || from.ContainsKey(next))
+                        continue;
+                    from[next] = (node, axis);
+                    queue.Enqueue(next);
+                    if (!seen.Contains(next) && seen.Contains(target))
+                        target = next;
+                }
+            }
+
+            Assert.False(seen.Contains(target), "every wedge should be reachable with the two rings");
+            var path = new Stack<int>();
+            for (var node = target; node != editor.PartShape; node = from[node].Shape)
+                path.Push(from[node].Axis);
+            foreach (var axis in path)
+                Turn(axis, turns++ % 2 == 0);
+        }
+
+        Assert.Equal(12, seen.Count);
+        Assert.Equal(blocks, DraftBlocks);
+
+        // The wheel the other way and Shift with a click turn back.
+        var shape = editor.PartShape;
+        var at = RingAt(0);
+        EditorFrame(() => Move(at));
+        EditorFrame(() => Wheel(1));
+        EditorFrame(() => Wheel(-1));
+        Assert.Equal(shape, editor.PartShape);
+        at = RingAt(1);
+        EditorFrame(() => Move(at));
+        EditorFrame(() => Click());
+        EditorFrame(() =>
+        {
+            Key(GlfwKey.LeftShift, true);
+            Click();
+        });
+        EditorFrame(() => Key(GlfwKey.LeftShift, false));
+        Assert.Equal(shape, editor.PartShape);
+        EditorFrame(() => Click());
+        var turned = (editor.PartSize, editor.PartShape);
+        Assert.NotEqual(before, turned);
+
+        // Nothing confirms the turn: one click on the ghost places it as drawn, where it is drawn, once.
+        Assert.True(editor.RotatingPart);
+        Assert.Equal(blocks, DraftBlocks);
+        PlaceTheTurnedGhost(blocks);
+    }
+
+    /// <summary>
+    /// A point on screen inside the ghost of the part being turned, clear of both rings: the pointer is left there.
+    /// </summary>
+    private float2 OnTheGhost()
+    {
+        var editor = _world.Editor;
+        var middle = GhostMotion.Middle(editor.GhostAt, editor.PartSize);
+        var size = new Vector3(editor.PartSize.X, editor.PartSize.Y, editor.PartSize.Z);
+        // The middle first, then toward each corner: a wedge's solid half holds some of them.
+        for (var i = 0; i < 27; i++)
+        {
+            var k = (i + 13) % 27;
+            var offset = new Vector3(k % 3 - 1, k / 3 % 3 - 1, k / 9 - 1) * 0.3f * size;
+            if (!_world.Project(_world.EditorPoint(middle + offset), out var at))
+                continue;
+            EditorFrame(() => Move(at));
+            if (_world.RotationRingHovered < 0)
+                return at;
+        }
+
+        Assert.Fail("some point inside the ghost should be clear of the rings");
+        return default;
+    }
+
+    /// <summary>
+    /// With a part being turned and its ghost fitting: a press on the ghost ends the turn and places nothing yet,
+    /// and its release places exactly the ghost that was drawn, once.
+    /// </summary>
+    private void PlaceTheTurnedGhost(int blocks)
+    {
+        var editor = _world.Editor;
+        Assert.True(editor.RotatingPart);
+        Assert.Equal(DraftEdit.Done, editor.GhostCheck);
+        var drawn = new DesignBox(editor.GhostAt, editor.PartSize, editor.Content!.Blocks.Types[editor.Part], editor.PartShape);
+        OnTheGhost();
+        Assert.Equal(drawn.At, editor.GhostAt);
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        Assert.False(editor.RotatingPart);
+        Assert.Equal(blocks, DraftBlocks);
+        Assert.Equal((drawn.At, drawn.Size, drawn.Shape), (editor.GhostAt, editor.PartSize, editor.PartShape));
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        Assert.Equal(blocks + 1, DraftBlocks);
+        Assert.Equal(drawn, editor.Draft!.Boxes[^1]);
+        EditorFrame();
+        EditorFrame();
+        Assert.Equal(blocks + 1, DraftBlocks);
+    }
+
+    [Fact]
+    public void ATurnIsKeptByRAClickElsewhereOrAPanelAndPutBackByEscapeAnotherShapeAndClosing()
+    {
+        // As the game sets the interface up: keyboard navigation claims the keyboard for a focused window.
+        ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard | ImGuiConfigFlags.NavEnableGamepad;
+        ImGui.GetIO().ConfigNavCursorVisibleAuto = true;
+        var editor = WedgeOnAFace();
+        _paletteShown = true;
+        _palettePart = 1;
+        EditorFrame();
+        var blocks = DraftBlocks;
+        var version = editor.Draft!.Version;
+        var before = (editor.PartSize, editor.PartShape, editor.Part);
+        Vector3 Camera() => _world.CameraPosition.RelativeTo(_world.OwnDrawnPosition);
+        var hull = HullOnScreen();
+        (GridSize, BlockShape, int) turned = default;
+        void Turned()
+        {
+            EditorFrame(() => Move(hull));
+            Assert.True(editor.HasGhost);
+            Chord(GlfwKey.R);
+            Assert.True(editor.RotatingPart);
+            var at = RingAt(0);
+            EditorFrame(() => Move(at));
+            EditorFrame(() => Wheel(1));
+            turned = (editor.PartSize, editor.PartShape, editor.Part);
+            Assert.NotEqual(before, turned);
+        }
+
+        void Unchanged()
+        {
+            Assert.Equal(version, editor.Draft!.Version);
+            Assert.Equal(blocks, DraftBlocks);
+        }
+
+        void Kept()
+        {
+            Assert.False(editor.RotatingPart);
+            Assert.Equal(turned, (editor.PartSize, editor.PartShape, editor.Part));
+            Unchanged();
+        }
+
+        void PutBack()
+        {
+            Assert.False(editor.RotatingPart);
+            Assert.Equal(before, (editor.PartSize, editor.PartShape, editor.Part));
+            Unchanged();
+        }
+
+        // R again keeps the turn, and the ghost stays where it was turned for the next click.
+        Turned();
+        var held = editor.GhostAt;
+        Chord(GlfwKey.R);
+        Kept();
+        Assert.True(editor.GhostPinned);
+        Assert.Equal(held, editor.GhostAt);
+        editor.SetPartShape(before.PartShape);
+
+        // Escape puts the turn back and leaves the edit open.
+        Turned();
+        Chord(GlfwKey.Escape);
+        PutBack();
+        Assert.Equal(EditorStage.Editing, editor.Stage);
+
+        // A click elsewhere in the world keeps the turn, and the press reaches neither placing, selecting nor the
+        // camera. The ghost then follows the pointer, and the next click places the turned part there.
+        Turned();
+        var camera = Camera();
+        var selection = editor.Selection.Length;
+        EditorFrame(() => Move(EmptySpace));
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        Kept();
+        EditorFrame(() => Move(hull));
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        EditorFrame();
+        Kept();
+        Assert.Equal(selection, editor.Selection.Length);
+        Assert.True((Camera() - camera).Length() < 0.01f);
+        Assert.True(editor.HasGhost);
+        Assert.False(editor.GhostPinned);
+        if (editor.GhostCheck != DraftEdit.Done)
+            Assert.True(PointWhere(e => e.HasGhost && e.GhostCheck == DraftEdit.Done, out _));
+        var drawn = (editor.GhostAt, editor.PartSize, editor.PartShape);
+        EditorFrame(() => Click());
+        Assert.Equal(blocks + 1, DraftBlocks);
+        Assert.Equal(drawn, (editor.Draft!.Boxes[^1].At, editor.Draft.Boxes[^1].Size, editor.Draft.Boxes[^1].Shape));
+        editor.Undo();
+        Assert.Equal(blocks, DraftBlocks);
+        version = editor.Draft!.Version;
+        editor.SetPartShape(before.PartShape);
+
+        // A middle click elsewhere keeps it too, and still places; a right press only orbits (see the orbit test).
+        Turned();
+        EditorFrame(() => Move(EmptySpace));
+        EditorFrame(() => Click(GlfwMouseButton.Middle));
+        Kept();
+        Assert.True(editor.Placing);
+        editor.SetPartShape(before.PartShape);
+
+        // A press on the sidebar keeps it; releasing over the hull must not place or select.
+        Turned();
+        selection = editor.Selection.Length;
+        EditorFrame(() => Move(PaletteMin + new float2(110, 75)));
+        EditorFrame();
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        Kept();
+        EditorFrame(() => Move(hull));
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        EditorFrame();
+        Kept();
+        Assert.Equal(selection, editor.Selection.Length);
+        // That press left the panel focused; a click on the empty world gives the keyboard back.
+        EditorFrame(() => Move(EmptySpace));
+        EditorFrame(() => Click());
+        EditorFrame();
+        editor.SetPartShape(before.PartShape);
+
+        // Another shape chosen in code, as nothing but the panel's buttons does: put back first, then the shape.
+        Turned();
+        editor.SetPartShape(BlockShape.Box);
+        Assert.False(editor.RotatingPart);
+        Assert.Equal((before.PartSize, BlockShape.Box), (editor.PartSize, editor.PartShape));
+        editor.SetPartShape(before.PartShape);
+
+        // The part list's shape button and another part's card: the press on the panel keeps the turn first, then
+        // the choice is made on it, and never the choice put back.
+        Turned();
+        EditorFrame(() => Move(OverShapeBox));
+        EditorFrame();
+        EditorFrame(() => Click());
+        EditorFrame();
+        Assert.False(editor.RotatingPart);
+        Assert.Equal((turned.Item1, BlockShape.Box), (editor.PartSize, editor.PartShape));
+        editor.SetPartShape(before.PartShape);
+        Turned();
+        EditorFrame(() => Move(OverCard));
+        EditorFrame();
+        EditorFrame(() => Click());
+        EditorFrame();
+        Assert.False(editor.RotatingPart);
+        Assert.Equal((turned.Item1, turned.Item2, 1), (editor.PartSize, editor.PartShape, editor.Part));
+        Unchanged();
+        editor.ChoosePart(before.Part);
+        editor.SetPartShape(before.PartShape);
+        _paletteShown = false;
+
+        // The editor key closes the edit mid-turn; the next edit has no turn and no ring left over.
+        Turned();
+        Chord(GlfwKey.B);
+        Assert.Equal(EditorStage.Closed, editor.Stage);
+        Assert.False(editor.RotatingPart);
+        Assert.Equal(-1, _world.RotationRingHovered);
+        Tick(3);
+        OpenEditor();
+        Assert.False(editor.RotatingPart);
+        Assert.Equal(before, (editor.PartSize, editor.PartShape, editor.Part));
+    }
+
+    /// <summary>
+    /// The angle along the ring about <paramref name="axis"/> (as <see cref="WorldView.RingPointAt"/> takes it) of the
+    /// point <see cref="RingAt"/> would press.
+    /// </summary>
+    private float RingAngleAt(int axis)
+    {
+        var at = RingAt(axis);
+        Assert.True(_world.PartRings(out var middle, out var radius));
+        var best = 0f;
+        var nearest = float.MaxValue;
+        for (var i = 0; i < WorldView.RingSegments; i++)
+        {
+            var angle = i * MathF.Tau / WorldView.RingSegments;
+            if (_world.Project(_world.EditorPoint(WorldView.RingPointAt(middle, radius, axis, angle)), out var point) && (point - at).Length() < nearest)
+            {
+                nearest = (point - at).Length();
+                best = angle;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>The ring about <paramref name="axis"/> at <paramref name="angle"/>, on screen as the camera is now.</summary>
+    private float2 RingOnScreen(int axis, float angle)
+    {
+        Assert.True(_world.PartRings(out var middle, out var radius));
+        Assert.True(_world.Project(_world.EditorPoint(WorldView.RingPointAt(middle, radius, axis, angle)), out var at));
+        return at;
+    }
+
+    /// <summary>Moves the pointer along the ring about <paramref name="axis"/> from one angle to another, ten degrees a frame.</summary>
+    private void AlongRing(int axis, float from, float to)
+    {
+        var steps = (int)MathF.Ceiling(MathF.Abs(to - from) / (MathF.PI / 18f));
+        for (var i = 1; i <= steps; i++)
+        {
+            var point = RingOnScreen(axis, from + (to - from) * i / steps);
+            EditorFrame(() => Move(point));
+        }
+    }
+
+    private static float Degrees(float degrees) => degrees * MathF.PI / 180f;
+
+    private static float TurnAngle(Quaternion turn) => 2f * MathF.Acos(Math.Clamp(MathF.Abs(turn.W), 0f, 1f));
+
+    [Fact]
+    public void DraggingARingTurnsThePartAQuarterAtATimeAcrossTheWrapTheGhostGlidesAndLettingGoAddsNothing()
+    {
+        var editor = WedgeOnAFace();
+        var blocks = DraftBlocks;
+        var version = editor.Draft!.Version;
+        Chord(GlfwKey.R);
+        Assert.True(editor.RotatingPart);
+        var start = (editor.PartSize, editor.PartShape);
+        var once = (new GridSize(start.PartSize.X, start.PartSize.Z, start.PartSize.Y), BlockShapes.Rotate(start.PartShape, 0));
+
+        // Press on the ring about x and go round it: short of half a quarter the part stays, the ghost follows.
+        var a0 = RingAngleAt(0);
+        EditorFrame(() => Move(RingOnScreen(0, a0)));
+        Assert.Equal(0, _world.RotationRingHovered);
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        AlongRing(0, a0, a0 + Degrees(30));
+        Assert.True(_world.RotationRingDragged);
+        Assert.Equal(start, (editor.PartSize, editor.PartShape));
+        _world.GhostPose(out var turn, out _);
+        Assert.InRange(TurnAngle(turn), Degrees(5), Degrees(31));
+
+        // Past half a quarter it is a whole quarter turn, sizes swapped; the ghost is drawn short of it, following.
+        AlongRing(0, a0 + Degrees(30), a0 + Degrees(60));
+        Assert.Equal(once, (editor.PartSize, editor.PartShape));
+        _world.GhostPose(out turn, out var shift);
+        Assert.True(float.IsFinite(turn.W) && float.IsFinite(shift.X) && float.IsFinite(shift.Y) && float.IsFinite(shift.Z));
+        Assert.InRange(TurnAngle(turn), Degrees(1), Degrees(89));
+
+        // All the way round, through the angle where it wraps, it is four quarter turns: as it was.
+        AlongRing(0, a0 + Degrees(60), a0 + Degrees(370));
+        Assert.Equal(start, (editor.PartSize, editor.PartShape));
+        AlongRing(0, a0 + Degrees(370), a0 + Degrees(420));
+        Assert.Equal(once, (editor.PartSize, editor.PartShape));
+
+        // Back the other way past where it started: a quarter turn back.
+        AlongRing(0, a0 + Degrees(420), a0 - Degrees(60));
+        var back = (new GridSize(start.PartSize.X, start.PartSize.Z, start.PartSize.Y), BlockShapes.Rotate(BlockShapes.Rotate(BlockShapes.Rotate(start.PartShape, 0), 0), 0));
+        Assert.Equal(back, (editor.PartSize, editor.PartShape));
+
+        // Let go: no click's turn, nothing placed or selected, still turning; the ghost glides onto the quarter turn
+        // and ends exactly on it.
+        var selection = editor.Selection.Length;
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        Assert.Equal(back, (editor.PartSize, editor.PartShape));
+        Assert.True(editor.RotatingPart);
+        Assert.False(_world.RotationRingDragged);
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        _world.GhostPose(out turn, out shift);
+        Assert.Equal(Quaternion.Identity, turn);
+        Assert.Equal(Vector3.Zero, shift);
+        Assert.Equal(blocks, DraftBlocks);
+        Assert.Equal(version, editor.Draft!.Version);
+        Assert.Equal(selection, editor.Selection.Length);
+
+        // A click on a ring, then at once a click on the ghost while it still glides: the ring's click turns and
+        // places nothing; the ghost's places the part at its quarter turn, where its ghost is.
+        var at = RingAt(1);
+        EditorFrame(() => Move(at));
+        EditorFrame(() => Click());
+        var turned = (editor.PartSize, editor.PartShape);
+        Assert.NotEqual(back, turned);
+        Assert.True(editor.RotatingPart);
+        Assert.Equal(blocks, DraftBlocks);
+        _world.GhostPose(out turn, out _);
+        Assert.NotEqual(Quaternion.Identity, turn);
+        PlaceTheTurnedGhost(blocks);
+        Assert.Equal(turned, (editor.Draft!.Boxes[^1].Size, editor.Draft.Boxes[^1].Shape));
+    }
+
+    [Fact]
+    public void RThenARingDragAndOneClickOnTheGhostPlacesTheTurnedPartWithNothingToConfirm()
+    {
+        var editor = WedgeOnAFace();
+        var blocks = DraftBlocks;
+        Chord(GlfwKey.R);
+        var start = editor.PartShape;
+
+        // Drag the ring a quarter round and let go: turned, still turning, nothing placed.
+        var a0 = RingAngleAt(0);
+        EditorFrame(() => Move(RingOnScreen(0, a0)));
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        AlongRing(0, a0, a0 + Degrees(90));
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        Assert.Equal(BlockShapes.Rotate(start, 0), editor.PartShape);
+        Assert.True(editor.RotatingPart);
+        Assert.Equal(blocks, DraftBlocks);
+
+        // The very next ordinary click, on the ghost, places it: no confirming click and no click used up.
+        PlaceTheTurnedGhost(blocks);
+        Assert.Equal(BlockShapes.Rotate(start, 0), editor.Draft!.Boxes[^1].Shape);
+
+        // The part keeps its turn for the next placement, and the next click on the ship places it again.
+        Assert.Equal(BlockShapes.Rotate(start, 0), editor.PartShape);
+        Assert.True(PointWhere(e => e.HasGhost && e.GhostCheck == DraftEdit.Done && !e.GhostPinned, out _));
+        var drawn = (editor.GhostAt, editor.PartSize, editor.PartShape);
+        EditorFrame(() => Click());
+        Assert.Equal(blocks + 2, DraftBlocks);
+        Assert.Equal(drawn, (editor.Draft!.Boxes[^1].At, editor.Draft.Boxes[^1].Size, editor.Draft.Boxes[^1].Shape));
+    }
+
+    [Fact]
+    public void TheRightButtonOrbitsThroughATurnAndARingDragWithoutPuttingItBackOrTurningThePart()
+    {
+        var editor = WedgeOnAFace();
+        _paletteShown = true;
+        EditorFrame();
+        var blocks = DraftBlocks;
+        Vector3 Camera() => _world.CameraPosition.RelativeTo(_world.OwnDrawnPosition);
+        Chord(GlfwKey.R);
+        var before = (editor.PartSize, editor.PartShape);
+
+        // A right drag over space orbits and the turn stays, as it is; so does a right click alone.
+        var camera = Camera();
+        EditorFrame(() => Move(EmptySpace));
+        EditorFrame(() => Button(GlfwMouseButton.Right, true));
+        EditorFrame(() => Move(EmptySpace + new float2(80, -10)));
+        EditorFrame(() => Move(EmptySpace + new float2(160, -20)));
+        EditorFrame(() => Button(GlfwMouseButton.Right, false));
+        Assert.True((Camera() - camera).Length() > 0.5f, "the camera should have orbited");
+        Assert.True(editor.RotatingPart);
+        Assert.True(editor.Placing);
+        Assert.Equal(before, (editor.PartSize, editor.PartShape));
+        EditorFrame(() => Click(GlfwMouseButton.Right));
+        EditorFrame();
+        Assert.True(editor.RotatingPart);
+        Assert.True(editor.Placing);
+
+        // With the right button held the wheel over a ring turns nothing.
+        var at = RingAt(0);
+        EditorFrame(() => Move(at));
+        EditorFrame(() => Button(GlfwMouseButton.Right, true));
+        EditorFrame(() => Wheel(1));
+        EditorFrame(() => Button(GlfwMouseButton.Right, false));
+        Assert.Equal(before, (editor.PartSize, editor.PartShape));
+        Assert.True(editor.RotatingPart);
+
+        // The rings were reprojected with the camera: a click on one still turns it.
+        at = RingAt(0);
+        EditorFrame(() => Move(at));
+        EditorFrame(() => Click());
+        var once = (editor.PartSize, editor.PartShape);
+        Assert.Equal(BlockShapes.Rotate(before.PartShape, 0), once.PartShape);
+
+        // A ring drag held while the camera orbits: the orbit turns nothing, and the drag goes on from where the
+        // pointer is when the right button is let go.
+        var a0 = RingAngleAt(0);
+        EditorFrame(() => Move(RingOnScreen(0, a0)));
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        AlongRing(0, a0, a0 + Degrees(20));
+        Assert.Equal(once, (editor.PartSize, editor.PartShape));
+        var pointer = RingOnScreen(0, a0 + Degrees(20));
+        camera = Camera();
+        EditorFrame(() => Button(GlfwMouseButton.Right, true));
+        EditorFrame(() => Move(pointer + new float2(30, 10)));
+        EditorFrame(() => Move(pointer + new float2(60, 20)));
+        Assert.True((Camera() - camera).Length() > 0.1f, "the camera should have orbited");
+        Assert.Equal(once, (editor.PartSize, editor.PartShape));
+        // The pointer comes back to the ring further round than it left it: had the drag not started again from
+        // there, the thirty degrees between would count.
+        var a1 = a0 + Degrees(50);
+        var resume = RingOnScreen(0, a1);
+        EditorFrame(() =>
+        {
+            Move(resume);
+            Button(GlfwMouseButton.Right, false);
+        });
+        Assert.Equal(once, (editor.PartSize, editor.PartShape));
+        Assert.True(editor.RotatingPart);
+        AlongRing(0, a1, a1 + Degrees(60));
+        Assert.Equal(BlockShapes.Rotate(once.PartShape, 0), editor.PartShape);
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        Assert.Equal(BlockShapes.Rotate(once.PartShape, 0), editor.PartShape);
+        Assert.True(editor.RotatingPart);
+        Assert.Equal(blocks, DraftBlocks);
+
+        // A ring drag passes over a panel and is let go there: the turn is neither put back nor clicked.
+        a0 = RingAngleAt(0);
+        var shape = editor.PartShape;
+        EditorFrame(() => Move(RingOnScreen(0, a0)));
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        AlongRing(0, a0, a0 + Degrees(20));
+        EditorFrame(() => Move(PaletteMin + new float2(110, 75)));
+        EditorFrame(() => Move(RingOnScreen(0, a0 + Degrees(20))));
+        Assert.True(editor.RotatingPart);
+        Assert.Equal(shape, editor.PartShape);
+        EditorFrame(() => Move(PaletteMin + new float2(110, 75)));
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        EditorFrame();
+        Assert.True(editor.RotatingPart);
+        Assert.Equal(blocks, DraftBlocks);
+
+        // Escape puts back the size and shape from before R, and the ghost is drawn as it is at once.
+        Chord(GlfwKey.Escape);
+        Assert.False(editor.RotatingPart);
+        Assert.Equal(EditorStage.Editing, editor.Stage);
+        Assert.Equal(before, (editor.PartSize, editor.PartShape));
+        _world.GhostPose(out var turn, out var shift);
+        Assert.Equal(Quaternion.Identity, turn);
+        Assert.Equal(Vector3.Zero, shift);
+    }
+
+    [Fact]
+    public void InterruptedRingDragsSettleAndOrbitingAPendingClickDoesNotTurnTheBlock()
+    {
+        var editor = WedgeOnAFace();
+        Chord(GlfwKey.R);
+        var before = (editor.PartSize, editor.PartShape);
+        var blocks = DraftBlocks;
+        var angle = RingAngleAt(0);
+        EditorFrame(() => Move(RingOnScreen(0, angle)));
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        AlongRing(0, angle, angle + Degrees(20));
+        for (var i = 0; i < 20; i++) EditorFrame();
+        _world.GhostPose(out var partial, out _);
+        Assert.NotEqual(Quaternion.Identity, partial);
+
+        // Losing world input interrupts the drag; the eventual release cannot leave a residual visual angle.
+        _surfaceOpen = true;
+        EditorFrame();
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        _surfaceOpen = false;
+        for (var i = 0; i < 30; i++) EditorFrame();
+        _world.GhostPose(out var settled, out var shift);
+        Assert.Equal(Quaternion.Identity, settled);
+        Assert.Equal(Vector3.Zero, shift);
+        Assert.True(editor.RotatingPart);
+        Assert.Equal(before, (editor.PartSize, editor.PartShape));
+
+        // Orbit before the left press has become a ring drag, then release left while still orbiting.
+        var at = RingAt(0);
+        EditorFrame(() => Move(at));
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        EditorFrame(() => Button(GlfwMouseButton.Right, true));
+        EditorFrame(() => Move(at + new float2(80, 20)));
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        EditorFrame(() => Button(GlfwMouseButton.Right, false));
+        for (var i = 0; i < 30; i++) EditorFrame();
+        Assert.True(editor.RotatingPart);
+        Assert.Equal(before, (editor.PartSize, editor.PartShape));
+        Assert.Equal(blocks, DraftBlocks);
+        _world.GhostPose(out settled, out shift);
+        Assert.Equal(Quaternion.Identity, settled);
+        Assert.Equal(Vector3.Zero, shift);
+    }
+
+    [Fact]
+    public void REndingAPartialRingDragSettlesTheKeptGhostWithoutPlacing()
+    {
+        var editor = WedgeOnAFace();
+        Chord(GlfwKey.R);
+        var before = (editor.PartSize, editor.PartShape);
+        var blocks = DraftBlocks;
+        var angle = RingAngleAt(0);
+        EditorFrame(() => Move(RingOnScreen(0, angle)));
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        AlongRing(0, angle, angle + Degrees(20));
+        for (var i = 0; i < 20; i++) EditorFrame();
+        _world.GhostPose(out var partial, out _);
+        Assert.NotEqual(Quaternion.Identity, partial);
+        Chord(GlfwKey.R);
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        for (var i = 0; i < 30; i++) EditorFrame();
+        Assert.False(editor.RotatingPart);
+        Assert.True(editor.HasGhost);
+        Assert.True(editor.GhostPinned);
+        Assert.Equal(before, (editor.PartSize, editor.PartShape));
+        Assert.Equal(blocks, DraftBlocks);
+        _world.GhostPose(out var settled, out var shift);
+        Assert.Equal(Quaternion.Identity, settled);
+        Assert.Equal(Vector3.Zero, shift);
+    }
+
+    [Fact]
+    public void RStartsATurnOnlyWithAGhostOnAFaceAndTheKeyboardFree()
+    {
+        var editor = WedgeOnAFace();
+        _paletteShown = true;
+
+        // Over empty space there is no ghost to turn.
+        EditorFrame(() => Move(EmptySpace));
+        Assert.False(editor.HasGhost);
+        Chord(GlfwKey.R);
+        Assert.False(editor.RotatingPart);
+
+        // While selecting, not placing, there is none either.
+        editor.StopPlacing();
+        EditorFrame(() => Move(HullOnScreen()));
+        Chord(GlfwKey.R);
+        Assert.False(editor.RotatingPart);
+        editor.ChoosePart(editor.Part);
+
+        // A text field with the keyboard keeps its R.
+        EditorFrame(() => Move(OverSearch));
+        EditorFrame(() => Click());
+        EditorFrame();
+        Assert.True(ImGui.GetIO().WantTextInput);
+        EditorFrame(() => Move(HullOnScreen()));
+        Chord(GlfwKey.R);
+        Assert.False(editor.RotatingPart);
+        EditorFrame(() => Move(EmptySpace));
+        EditorFrame(() => Click());
+        EditorFrame();
+
+        // With the ghost on a face and the keyboard free, it starts.
+        EditorFrame(() => Move(HullOnScreen()));
+        Assert.True(editor.HasGhost);
+        Chord(GlfwKey.R);
+        Assert.True(editor.RotatingPart);
+    }
+
+    [Fact]
+    public void ADesignThatCannotPowerItselfIsWarnedAboutAndCanStillBeApplied()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        var boxes = editor.Draft!.Boxes;
+        for (var i = 0; i < boxes.Length; i++)
+            if (boxes[i].Type.PowerOutput > 0f)
+                editor.Select(i, editor.Selection.Length > 0);
+        Assert.NotEmpty(editor.Selection.ToArray());
+        editor.DeleteSelected();
+        for (var i = 0; i < 600 && !(editor.Check == DraftCheck.Ready && editor.CheckedVersion == editor.Draft!.Version); i++)
+        {
+            Thread.Sleep(1);
+            EditorFrame();
+        }
+
+        Assert.Equal(DraftCheck.Ready, editor.Check);
+        var tuning = EditorTuning.Load(Path.Combine(AppContext.BaseDirectory, "content", "visuals", "editor.json"));
+        Span<DesignWarning> warnings = stackalloc DesignWarning[DesignWarnings.Count];
+        var count = DesignWarnings.Of(editor.Checked.Design!.Flight, tuning, warnings);
+        Assert.Contains(DesignWarning.NoPower, warnings[..count].ToArray());
+        Assert.True(editor.CanApply);
+        Assert.NotNull(editor.Latest.Surface);
+        Assert.True(editor.Latest.Surface!.Value.Fits);
+    }
+
+    [Theory]
+    [InlineData(960f, 540f, 1f)]
+    [InlineData(1280f, 720f, 1f)]
+    [InlineData(1280f, 720f, 2f)]
+    [InlineData(1655f, 688f, 2f)]
+    [InlineData(1920f, 1080f, 2f)]
+    [InlineData(960f, 540f, 2f)]
+    public void TheEditorsPanelsLeaveTheMiddleClearAndHoldTheirWordsWithTheShippedFonts(float width, float height, float scale)
+    {
+        var shipped = ShippedFonts();
+        ImGui.GetStyle().FontScaleMain = scale;
+        _ui.NewFrame();
+        try
+        {
+            float Px(float design) => MathF.Round(design * scale);
+            var display = new float2(width, height);
+            var layout = EditorLayout.Of(display, scale);
+            HudRect[] panels = [layout.Parts, layout.Details, layout.Bar];
+            foreach (var panel in panels)
+            {
+                Assert.True(panel.Left >= 0 && panel.Right <= width && panel.Top >= HudLayout.TopBarBottom(scale) && panel.Bottom <= height, $"{panel}");
+                Assert.True(panel.Width > 0 && panel.Height > 0, $"{panel}");
+            }
+
+            Assert.False(layout.Parts.Overlaps(layout.Details));
+            Assert.False(layout.Parts.Overlaps(layout.Bar));
+            Assert.False(layout.Details.Overlaps(layout.Bar));
+            // At least a third of the width between the side panels is the ship's.
+            Assert.True(layout.Details.Left - layout.Parts.Right >= width / 3f, $"{layout.Details.Left - layout.Parts.Right}");
+
+            // The bar holds its buttons; their labels fit them.
+            Assert.True(EditorLayout.ButtonsWidth(scale) + Px(EditorLayout.Pad) <= layout.Bar.Width);
+            ReadOnlySpan<string> labels = ["Undo", "Redo", "Cancel", "Applying"];
+            for (var i = 0; i < labels.Length; i++)
+            {
+                var label = Kit.Measure(shipped.SansMedium, Theme.FontSmall, Encoding.UTF8.GetBytes(labels[i])).X;
+                Assert.InRange(label, 1f, Px(EditorLayout.ButtonWidths[Math.Min(i, 3)]) - Px(4));
+            }
+
+            // Every part's name fits its card beside the swatch, with the list's scroll bar showing, down to 640
+            // design pixels across (1280 at a scale of 2); narrower than that a long name is cut with dots rather
+            // than spill out of the panel. The drone tag sits on the line below, with the role.
+            var tuning = EditorTuning.Load(Path.Combine(AppContext.BaseDirectory, "content", "visuals", "editor.json"));
+            var inner = layout.Parts.Width - Px(EditorLayout.Pad) * 2;
+            var card = inner - ImGui.GetStyle().ScrollbarSize - Px(26) - Px(6);
+            if (width / scale >= 640f)
+                foreach (var type in GameContent.Load().Blocks.Types)
+                    Assert.InRange(Kit.Measure(shipped.SansMedium, Theme.FontSmall, Encoding.UTF8.GetBytes(type.Name)).X, 1f, card);
+
+            // The tabs hold their names at every size: four to a row, fewer in a narrow panel, and at most four rows.
+            var widest = 0f;
+            foreach (var category in tuning.Categories)
+                widest = Math.Max(widest, Kit.Measure(shipped.SansMedium, Theme.FontSmall, category.Label).X);
+            var perRow = EditorLayout.TabsPerRow(inner, widest, Px(Theme.Space1), scale);
+            Assert.InRange(widest, 1f, EditorLayout.TabWidth(inner, perRow, Px(Theme.Space1)) - Px(4));
+            Assert.True((tuning.Categories.Length + perRow - 1) / perRow <= 4, $"{perRow} tabs a row");
+
+            // The two hints for sizing and turning the part are a line each from 800 design pixels across; narrower
+            // they wrap.
+            if (width / scale >= 800f)
+            {
+                Assert.InRange(Kit.Measure(shipped.Sans, Theme.FontSmall, ScreenHost.SizeHint).X, 1f, inner);
+                Assert.InRange(Kit.Measure(shipped.Sans, Theme.FontSmall, ScreenHost.TurnHint).X, 1f, inner);
+            }
+
+            // The face buttons, in two rows of three, each hold their label.
+            var details = layout.Details.Width - Px(EditorLayout.Pad) * 2;
+            var chip = MathF.Floor((details - Px(Theme.Space1) * 2) / 3f);
+            Assert.InRange(Kit.Measure(shipped.SansMedium, Theme.FontSmall, "+X"u8).X, 1f, chip - Px(4));
+        }
+        finally
+        {
+            ImGui.Render();
+        }
     }
 }

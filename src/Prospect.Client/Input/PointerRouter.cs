@@ -84,6 +84,13 @@ internal sealed class PointerRouter(InputDevices devices, ActionMap actions, IIn
     public bool PointerOverInterface { get; private set; }
 
     /// <summary>
+    /// True when an interface window is under the shown pointer, whoever holds a button: unlike
+    /// <see cref="PointerOverInterface"/> it does not follow a press. The ship editor reads it to tell where
+    /// something carried was let go.
+    /// </summary>
+    public bool PointerOverWindow { get; private set; }
+
+    /// <summary>
     /// Decides capture for this frame, then starts the interface frame and reads who the pointer belongs to. Call
     /// once per frame after events are polled, before shortcuts or the world read input.
     /// </summary>
@@ -92,6 +99,7 @@ internal sealed class PointerRouter(InputDevices devices, ActionMap actions, IIn
         RefreshCapture(frame);
         ui.NewFrame();
         PointerOverInterface = !Captured && ui.PointerOverInterface;
+        PointerOverWindow = !Captured && ui.PointerOverWindow(devices.MousePosition);
     }
 
     /// <summary>Rechecks capture after shortcuts change the open surfaces, without starting another UI frame.</summary>
@@ -101,6 +109,7 @@ internal sealed class PointerRouter(InputDevices devices, ActionMap actions, IIn
         _commandView = frame.CommandView;
         Apply(frame.InSpace && frame.Focused && !devices.Muted && !frame.SurfaceOpen && !frame.CommandView && !ReleaseHeld);
         PointerOverInterface = !Captured && ui.PointerOverInterface;
+        PointerOverWindow &= !Captured;
     }
 
     /// <summary>

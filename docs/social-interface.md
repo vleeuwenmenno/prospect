@@ -82,8 +82,10 @@ the state, the card's selection, the windows' lifecycle and the route to the bri
 ### Party and chat display
 
 - A party member whose status is over two seconds old shows as out of contact.
+- `F2` toggles the sector panel (`SectorInfoToggle`). Closed, it takes no room and has no hint or pointer hitbox;
+  open, the column starts under the panel. The map uses the same layout.
 - The party list never disappears while in a party. Short of room above the flight readouts (and above the jump
-  strip while it is drawn and shares the list's width), the sector panel drops its server and ore lines; still
+  strip while it is drawn and shares the list's width), the open sector panel drops its server and ore lines; still
   short, members become one-line rows (name, shield, hull), leader first, at least one, with the rest counted
   in the caption.
 - Recent chat lines show while the chat window is not on screen, beside the jump strip where a 300-pixel line

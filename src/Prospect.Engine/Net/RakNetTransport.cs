@@ -163,12 +163,12 @@ public sealed unsafe class RakNetTransport : ITransport
         _scratch[1] = (byte)channel;
         payload.CopyTo(_scratch.AsSpan(HeaderSize));
 
-        var reliable = channel == NetChannel.Reliable;
+        var reliable = channel != NetChannel.Unreliable;
         var receipt = _rak.Send(
             _scratch.AsSpan(0, size),
             reliable ? PacketPriority.HighPriority : PacketPriority.ImmediatePriority,
             reliable ? PacketReliability.ReliableOrdered : PacketReliability.Unreliable,
-            0,
+            (byte)(channel == NetChannel.Bulk ? 1 : 0),
             new AddressOrGUID(_peers[peer].Guid),
             false
         );
@@ -254,7 +254,7 @@ public sealed unsafe class RakNetTransport : ITransport
                 {
                     var peer = Find(packet->Guid);
                     var channel = packet->Data[1];
-                    if (peer >= 0 && channel <= (byte)NetChannel.Reliable)
+                    if (peer >= 0 && channel <= (byte)NetChannel.Bulk)
                         handler.OnMessage(
                             this,
                             peer,

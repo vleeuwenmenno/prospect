@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Prospect.Engine.IO;
 
 namespace Prospect.Game.World;
 
@@ -20,9 +19,9 @@ public sealed class SocialRules
     public int InviteSeconds { get; init; }
     /// <summary>Party refreshes per second.</summary>
     public int StatusHz { get; init; }
-    internal static SocialRules Load()
+    internal static SocialRules Load(string path)
     {
-        var rules = JsonSerializer.Deserialize<SocialRules>(File.ReadAllText(AppPaths.Content("net", "social.json")), new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+        var rules = JsonSerializer.Deserialize<SocialRules>(File.ReadAllText(path), new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
         if (rules.ChatChars is < 1 or > 256 || rules.ChatBytes is < 1 or > 768 || rules.Burst is < 1 or > 32 || rules.PerSecond is < 1 or > 10 || rules.PartySize is < 2 or > 16 || rules.InviteSeconds is < 1 or > 300 || rules.StatusHz is < 1 or > 10 || Prospect.Engine.Time.TickLoop.SimulationHz % rules.StatusHz != 0)
             throw new InvalidDataException("Invalid social limits.");
         return rules;

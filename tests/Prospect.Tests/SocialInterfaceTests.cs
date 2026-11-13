@@ -39,7 +39,10 @@ public sealed class SocialInterfaceTests
             }
 
             _server = new ServerHost(new ServerConfig { MaxPlayers = count }, Content, transports);
-            Step(3);
+            for (var ticks = 0; ticks < 60 && Clients.Any(c => c.AcquireSnapshot().Social.RosterCount != count); ticks++)
+                Step(1);
+            foreach (var client in Clients)
+                Assert.Equal(count, client.AcquireSnapshot().Social.RosterCount);
         }
 
         public SessionSnapshot View(int i) => Clients[i].AcquireSnapshot();

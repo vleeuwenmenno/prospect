@@ -17,9 +17,15 @@ public sealed class GameContent
         int pod,
         int drone,
         int[] startingFleet,
-        SocialRules social
+        SocialRules social,
+        ContentIdentity identity,
+        BlockTransferRules blockTransfers,
+        EditorRules editor
     )
     {
+        Editor = editor;
+        BlockTransfers = blockTransfers;
+        Identity = identity;
         Social = social;
         DroneDesign = drone;
         Galaxy = galaxy;
@@ -38,8 +44,28 @@ public sealed class GameContent
     /// </summary>
     public HullDesign[] Designs { get; }
 
-    /// <summary>Social limits for this world.</summary>
+    /// <summary>Shared block recovery budgets.</summary>
+    public BlockTransferRules BlockTransfers { get; }
+
+    /// <summary>
+    /// The ship editor's limits as this machine's files have them. A server enforces its own and tells a client
+    /// what it refused and how long to wait, so they are not part of <see cref="Identity"/>.
+    /// </summary>
+    public EditorRules Editor { get; }
+
+    /// <summary>
+    /// Social limits as this machine's files have them. A server enforces its own; a client's only shape what
+    /// its interface offers, so they are not part of <see cref="Identity"/>.
+    /// </summary>
     public SocialRules Social { get; }
+
+    /// <summary>
+    /// What the shared content comes to: the block catalogue with its rules and limits, the world setting
+    /// catalogue, galaxy rules, bulk transfer limits and the evaluator's version. Designs arrive separately. A
+    /// server lets a client in only when theirs are the same. A world's settings are not part of it: they travel
+    /// in the welcome, so <see cref="WithSettings"/> keeps it.
+    /// </summary>
+    public ContentIdentity Identity { get; }
 
     /// <summary>Every setting a world can have: what it is called, its range and its default.</summary>
     public WorldSettingCatalog SettingCatalog { get; }
@@ -87,23 +113,61 @@ public sealed class GameContent
         var designs = new HullDesign[Designs.Length];
         for (var i = 0; i < designs.Length; i++)
             designs[i] = Designs[i].WithRules(rules);
-        return new GameContent(Galaxy, Blocks, SettingCatalog, clean, rules, designs, PodDesign, DroneDesign, StartingFleet, Social);
+        return new GameContent(Galaxy, Blocks, SettingCatalog, clean, rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor);
     }
 
-    public static GameContent Load()
+    internal GameContent WithCatalogue(HullDesign[] designs, int pod, int drone, int[] fleet) =>
+        new(Galaxy, Blocks, SettingCatalog, Settings, Rules, (HullDesign[])designs.Clone(), pod, drone,
+            (int[])fleet.Clone(), Social, Identity, BlockTransfers, Editor);
+
+    /// <summary>
+    /// This content with one more design at the end of the catalogue. Every design it had keeps its number and is
+    /// the same object, so whatever holds a design or its number stays right. Nothing here is changed.
+    /// </summary>
+    internal GameContent WithDesign(HullDesign design)
     {
-        var blocks = BlockCatalog.Load(AppPaths.Content("blocks", "blocks.json"));
-        var settingCatalog = WorldSettingCatalog.Load(AppPaths.Content("rules", "settings.json"));
+        if (Designs.Length >= byte.MaxValue) throw new InvalidOperationException("The design catalogue is full.");
+        var designs = new HullDesign[Designs.Length + 1];
+        Designs.CopyTo(designs, 0);
+        designs[^1] = design;
+        return new GameContent(Galaxy, Blocks, SettingCatalog, Settings, Rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor);
+    }
+
+    /// <summary>Loads the content shipped beside the executable.</summary>
+    public static GameContent Load() => Load(AppPaths.Content());
+
+    /// <summary>
+    /// Loads the content in a directory laid out as <c>content/</c> is, and works out its
+    /// <see cref="Identity"/> from the same files.
+    /// </summary>
+    public static GameContent Load(string directory)
+    {
+        // Every file the server and the client must agree on is loaded through this, which is what puts it in
+        // the identity: a file the shared simulation reads cannot be added here and left out there. The order
+        // of the calls is the order the files are hashed in.
+        var identity = new ContentIdentityBuilder();
+        string At(string folder, string file) => Path.Combine(directory, folder, file);
+        byte[] Shared(string folder, string file) => identity.Add(folder + "/" + file, At(folder, file));
+
+        var blocks = BlockCatalog.Parse(Shared("blocks", "blocks.json"), At("blocks", "blocks.json"));
+        var settingCatalog = WorldSettingCatalog.Parse(Shared("rules", "settings.json"), At("rules", "settings.json"));
         var settings = settingCatalog.Defaults;
         var rules = blocks.Rules.Under(settingCatalog, settings);
-        using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(AppPaths.Content("ships", "fleet.json")));
+        using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(At("ships", "fleet.json")));
         var root = document.RootElement;
+        var transfers = BlockTransferRules.Parse(Shared("net", "blocks.json"));
+        long catalogueBytes = 0;
         var ids = new List<string>();
         var designs = new List<HullDesign>();
         foreach (var id in root.GetProperty("designs"u8).EnumerateArray())
         {
+            if (designs.Count == 255) throw new InvalidDataException("Too many designs.");
             ids.Add(id.GetString()!);
-            designs.Add(HullDesign.Load(AppPaths.Content("ships", ids[^1] + ".json"), blocks, rules));
+            designs.Add(HullDesign.Parse(File.ReadAllBytes(At("ships", ids[^1] + ".json")), At("ships", ids[^1] + ".json"), blocks, rules));
+            var size = DesignBytes.Encode(designs[^1]).Length;
+            catalogueBytes += size;
+            if (size > transfers.MaxBytes || !transfers.AllowsCatalogue(catalogueBytes))
+                throw new InvalidDataException("Catalogue exceeds shared resource budgets.");
         }
 
         int Index(string id) =>
@@ -115,8 +179,20 @@ public sealed class GameContent
         if (designs.Count is 0 or > byte.MaxValue)
             throw new InvalidDataException("fleet.json: needs between 1 and 255 designs");
 
+        var galaxy = Galaxy.Parse(Shared("galaxy", "galaxy.json"), At("galaxy", "galaxy.json"));
+
+        // Not shared: the server enforces its own social limits and the wire's bounds are fixed in code, so a
+        // client with other numbers shows another party size or chat counter and nothing in the simulation moves.
+        var social = SocialRules.Load(Path.Combine(directory, "net", "social.json"));
+
+        // Not shared either: only the server applies the editor's limits, and it tells a client what it decided.
+        var editor = EditorRules.Load(Path.Combine(directory, "net", "editor.json"), transfers);
+
+        foreach (var design in designs)
+            if ((long)BlockSet.WordCount(design.BlockCount) * sizeof(ulong) > transfers.MaxBytes)
+                throw new InvalidDataException("A design's block set exceeds the bulk transfer limit.");
         return new GameContent(
-            Galaxy.Load(AppPaths.Content("galaxy", "galaxy.json")),
+            galaxy,
             blocks,
             settingCatalog,
             settings,
@@ -125,7 +201,10 @@ public sealed class GameContent
             Index(root.GetProperty("pod"u8).GetString()!),
             Index(root.GetProperty("drone"u8).GetString()!),
             [.. fleet],
-            SocialRules.Load()
+            social,
+            identity.Build(),
+            transfers,
+            editor
         );
     }
 }
@@ -135,14 +214,36 @@ public ref struct HullBody
 {
     public HullDesign Design;
 
-    /// <summary>One bit per block of the design; a cleared bit is a destroyed block.</summary>
-    public ulong Alive;
+    /// <summary>
+    /// The blocks the hull still has: a <see cref="BlockSet"/>. For a body that takes damage it is the set of
+    /// <see cref="State"/> itself, so a block that is destroyed is gone from it at once.
+    /// </summary>
+    public ReadOnlySpan<ulong> Alive;
 
     /// <summary>
-    /// Remaining hull points per block. Only the server has these; a predicting client passes none and leaves
-    /// block damage to the server.
+    /// Where the hull's block state is kept, for a hull that is decided here: its blocks have hit points there,
+    /// and a block that runs out is taken through the store, which counts the loss and keeps the hull's sums and
+    /// hit total in step. A predicting client passes none and leaves block damage to the server.
     /// </summary>
-    public Span<float> BlockHp;
+    public BlockStateStore? States;
+
+    /// <summary>The hull's block state in <see cref="States"/>.</summary>
+    public BlockStateHandle State;
+
+    /// <summary>
+    /// Working memory for contacts, large enough for the design. Needed by a step that can run into anything;
+    /// a hull stepped through a <see cref="HullField"/> gets the field's.
+    /// </summary>
+    public ContactScratch? Scratch;
+
+    /// <summary>Live branch counts borrowed from the block state, including on prediction.</summary>
+    internal ReadOnlySpan<int> CollisionCounts;
+
+    /// <summary>
+    /// Set by <see cref="HullSim.Damage"/> when the body took damage, absorbed by its shield or not. A contact
+    /// that only shows on the shield leaves it clear. Whoever steps the body reads it afterwards.
+    /// </summary>
+    public bool Damaged;
 }
 
 /// <summary>One simulation step of a hull under its pilot or its standing order.</summary>
@@ -150,8 +251,6 @@ public static class HullSim
 {
     public const float Dt = (float)TickLoop.SimulationDt;
 
-    /// <summary>The most places along one tick's flight at which a hull is tested against another.</summary>
-    private const int MaxStrides = 32;
 
     /// <summary>
     /// How much further than the hull's own radius the search for nearby asteroids reaches, in metres: more than
@@ -457,33 +556,30 @@ public static class HullSim
 
         // Narrow phase: every remaining block against the asteroid's surface in the block's direction.
         var design = body.Design;
-        var half = design.BlockSize * 0.5f;
-        var toRockFrame = Quaternion.Conjugate(rock.Rotation);
         var deepest = 0f;
         var normalSum = Vector3.Zero;
         var armSum = Vector3.Zero;
-        var touching = 0UL;
+        var shieldPointSum = Vector3.Zero;
+        var touching = Scratch(body).Mine.AsSpan(0, body.Alive.Length);
+        touching.Clear();
         var touchCount = 0;
-        for (var b = 0; b < design.BlockOffsets.Length; b++)
+        var rules = design.CollisionRules;
+        var visits = rules.CollisionTreeVisits;
+        var tests = rules.CollisionBoxTests;
+        var cursor = 0;
+        var rockInHull = Vector3.Transform(-toHull, Quaternion.Conjugate(state.Orientation));
+        var reach = new Vector3(rock.Radius);
+        while (tests > 0 && touchCount < rules.CollisionContacts && design.Collision.Next(ref cursor, rockInHull - reach, rockInHull + reach, body.Alive, ref visits, out var b, body.CollisionCounts))
         {
-            if ((body.Alive & 1UL << b) == 0)
-                continue;
+            tests--;
             var arm = Vector3.Transform(design.BlockOffsets[b], state.Orientation);
-            var fromRock = toHull + arm;
-            var distance = fromRock.Length();
-            if (distance >= rock.Radius + half || distance < 1e-3f)
+            if (!BoxCollision.Rock(toHull + arm, design.BlockHalfExtents[b], state.Orientation, rock, out var direction, out var depth, out var point, design.Boxes[b].Shape))
                 continue;
-
-            var direction = fromRock / distance;
-            var surface = rock.Radius * AsteroidShape.RadiusAlong(rock.Shape, Vector3.Transform(direction, toRockFrame));
-            var depth = surface + half - distance;
-            if (depth <= 0)
-                continue;
-
             deepest = Math.Max(deepest, depth);
             normalSum += direction;
             armSum += arm;
-            touching |= 1UL << b;
+            shieldPointSum += arm + point;
+            BlockSet.Add(touching, b);
             touchCount++;
         }
 
@@ -512,13 +608,14 @@ public static class HullSim
             };
         }
 
+        var shieldPoint = Vector3.Transform(shieldPointSum / touchCount, Quaternion.Conjugate(state.Orientation));
+        ShieldContact(ref state, flight, body.Design, touching, closing, shieldPoint);
         var damage = ImpactDamage(closing, flight.Mass, flight);
-        return damage > 0 && Damage(ref state, flight, ref body, touching, touchCount, damage);
+        return damage > 0 && Damage(ref state, flight, ref body, touching, touchCount, damage, shieldPoint);
     }
 
     /// <summary>
-    /// Resolves the hull running into other hulls, block against block, each block the same ball the asteroid
-    /// contact takes it for. The rules are those of an asteroid impact: one impulse shared by mass and inertia,
+    /// Resolves the hull running into other hulls, oriented box against oriented box. The rules are those of an asteroid impact: one impulse shared by mass and inertia,
     /// the hull pushed back out, and damage on the blocks that touched. The other hull's share of the impulse and
     /// its damage are written to <paramref name="field"/> when it collects them; a predicting client's does not,
     /// and waits to be told. Returns true if the hull was destroyed.
@@ -528,7 +625,8 @@ public static class HullSim
         var store = field.Hulls;
         var design = body.Design;
         var half = design.BlockSize * 0.5f;
-        Span<Vector3> arms = stackalloc Vector3[HullDesign.MaxBlocks];
+        var scratch = Scratch(body);
+        var touchMine = scratch.Mine.AsSpan(0, body.Alive.Length);
 
         for (var j = 0; j < store.Slots; j++)
         {
@@ -570,22 +668,19 @@ public static class HullSim
 
             ref var otherInfo = ref store.Info(j);
             var otherDesign = field.Designs[otherInfo.Design];
-            var theirs = otherInfo.Blocks & otherDesign.FullMask;
+            ReadOnlySpan<ulong> theirs = store.Blocks(j);
+            var touchTheirs = scratch.Theirs.AsSpan(0, theirs.Length);
             var otherHalf = otherDesign.BlockSize * 0.5f;
-            var mine = body.Alive & design.FullMask;
+            ReadOnlySpan<ulong> mine = body.Alive;
 
             // The narrow phase runs in the other hull's frame, where its blocks are where its design puts them.
             var toOtherFrame = Quaternion.Conjugate(other.Orientation);
-            for (var bits = mine; bits != 0; bits &= bits - 1)
-            {
-                var b = BitOperations.TrailingZeroCount(bits);
-                arms[b] = Vector3.Transform(Vector3.Transform(design.BlockOffsets[b], state.Orientation), toOtherFrame);
-            }
+            var relativeRotation = Quaternion.Normalize(toOtherFrame * state.Orientation);
 
             // A fast hull covers more than a block in a tick. Walk the path in strides too short to step over
             // a block, and stop at the first place it strikes.
             var stride = (half + otherHalf) * 0.5f;
-            var strides = pathLength > stride ? Math.Min(MaxStrides, (int)MathF.Ceiling(pathLength / stride)) : 1;
+            var strides = pathLength > stride ? Math.Min(design.CollisionRules.CollisionStrides, (int)MathF.Ceiling(pathLength / stride)) : 1;
             var pushed = Vector3.Zero;
             for (var k = 1; k <= strides; k++)
             {
@@ -593,21 +688,30 @@ public static class HullSim
                 var back = path * remaining;
                 var centre = apart - back + pushed;
                 var centreInFrame = Vector3.Transform(centre, toOtherFrame);
-                if (!Touch(arms, mine, centreInFrame, half, otherDesign, theirs, otherHalf, otherFlight.Radius, out var touch))
+                if (!Touch(design, relativeRotation, mine, body.CollisionCounts, centreInFrame, otherDesign, theirs, store.BlockStates.CollisionCounts(otherInfo.BlockState), touchMine, touchTheirs, scratch, out var touch))
                     continue;
 
                 // Where the blocks' own directions mostly cancel the hulls are inside each other, and the way
                 // out is along the line between their centres.
                 var normal =
-                    touch.NormalSum.LengthSquared() > 0.01f * touch.Pairs * touch.Pairs ? Vector3.Normalize(Vector3.Transform(touch.NormalSum, other.Orientation))
+                    touch.NormalSum.LengthSquared() > 0.01f * touch.Weight * touch.Weight ? Vector3.Normalize(Vector3.Transform(touch.NormalSum, other.Orientation))
                     : centre.LengthSquared() > 1e-6f ? Vector3.Normalize(centre)
                     : Vector3.UnitY;
-                var clearance = Clearance(arms, centreInFrame, Vector3.Transform(normal, toOtherFrame), otherDesign, half + otherHalf, touch);
+                var clearance = 0f;
+                var localNormal = Vector3.Transform(normal, toOtherFrame);
+                var ownNormal = Vector3.Transform(localNormal, Quaternion.Conjugate(relativeRotation));
+                for (var pair = 0; pair < touch.Pairs; pair++)
+                {
+                    var a = scratch.PairA[pair]; var b = scratch.PairB[pair];
+                    var between = centreInFrame + Vector3.Transform(design.BlockOffsets[a], relativeRotation) - otherDesign.BlockOffsets[b];
+                    var reachAlong = BlockShapes.Support(otherDesign.Boxes[b].Shape, otherDesign.BlockHalfExtents[b], localNormal) + BlockShapes.Support(design.Boxes[a].Shape, design.BlockHalfExtents[a], -ownNormal);
+                    clearance = Math.Max(clearance, reachAlong - Vector3.Dot(between, localNormal));
+                }
                 pushed += normal * clearance;
                 centre += normal * clearance;
 
                 // The point of contact as each hull sees it, and how freely the other gives way there.
-                var otherArm = Vector3.Transform(touch.PointSum / touch.Pairs, other.Orientation);
+                var otherArm = Vector3.Transform(touch.PointSum / touch.Weight, other.Orientation);
                 var otherSpin = Vector3.Transform(other.AngularVelocity, other.Orientation);
                 var otherLever = Lever(other.Orientation, otherArm, normal);
                 var otherInverseMass = 1f / otherFlight.Mass + Vector3.Dot(otherLever / otherFlight.Inertia, otherLever);
@@ -654,13 +758,17 @@ public static class HullSim
                         Shift = shift,
                         Velocity = -normal * (impulse / otherFlight.Mass),
                         AngularVelocity = -otherLever * impulse / otherFlight.Inertia,
-                        Touching = touch.Theirs,
+                        ContactSpeed = closing,
+                        ShieldPoint = touch.ShieldTheirsSum / touch.Weight,
                         Damage = harmless ? 0f : ImpactDamage(closing, involved, otherFlight),
-                    }
+                    },
+                    touchTheirs
                 );
 
+                var shieldPoint = touch.ShieldMineSum / touch.Weight;
+                ShieldContact(ref state, flight, body.Design, touchMine, closing, shieldPoint);
                 var damage = harmless ? 0f : ImpactDamage(closing, involved, flight);
-                if (damage > 0 && Damage(ref state, flight, ref body, touch.Mine, BitOperations.PopCount(touch.Mine), damage))
+                if (damage > 0 && Damage(ref state, flight, ref body, touchMine, BlockSet.Count(touchMine), damage, shieldPoint))
                 {
                     state.Position += pushed;
                     return true;
@@ -675,103 +783,95 @@ public static class HullSim
         return false;
     }
 
+    /// <summary>
+    /// The working memory a body brings for its contacts. A hull that can run into something must bring some
+    /// that holds its design; a hull stepped through a field always does.
+    /// </summary>
+    private static ContactScratch Scratch(in HullBody body)
+    {
+        var scratch = body.Scratch;
+        if (scratch is null || scratch.Blocks < body.Design.BlockCount)
+            throw new InvalidOperationException("A hull that can run into something needs working memory for its design; see HullBody.Scratch.");
+        return scratch;
+    }
+
     /// <summary>What the blocks of two hulls have to say about a contact between them, in the other hull's frame.</summary>
     private struct BlockTouch
     {
         /// <summary>The sum of the directions from the other hull's blocks to this hull's, one per touching pair.</summary>
         public Vector3 NormalSum;
 
-        /// <summary>The sum of the points where the pairs meet.</summary>
+        /// <summary>The penetration-weighted sum of the pairs' contact points.</summary>
         public Vector3 PointSum;
-
-        /// <summary>The blocks of this hull and of the other that touch, one bit per block.</summary>
-        public ulong Mine;
-        public ulong Theirs;
+        /// <summary>Penetration-weighted visual surface points in each hull's own frame.</summary>
+        public Vector3 ShieldMineSum, ShieldTheirsSum;
         public int Pairs;
+        public float Weight;
     }
 
     /// <summary>
-    /// Finds the pairs of blocks of two hulls that are into each other. <paramref name="arms"/> are this hull's
-    /// blocks from its centre and <paramref name="centre"/> is that centre, both in the other hull's frame.
+    /// Finds overlapping box pairs. The relative rotation and <paramref name="centre"/> place this hull
+    /// in the other hull's frame. The
+    /// blocks of this hull and of the other that touch are written to <paramref name="touchMine"/> and
+    /// <paramref name="touchTheirs"/>, each a <see cref="BlockSet"/> of its hull's design.
     /// </summary>
     private static bool Touch(
-        ReadOnlySpan<Vector3> arms,
-        ulong mine,
-        Vector3 centre,
-        float half,
-        HullDesign other,
-        ulong theirs,
-        float otherHalf,
-        float otherRadius,
-        out BlockTouch touch
-    )
+        HullDesign design, Quaternion rotation, ReadOnlySpan<ulong> mine, ReadOnlySpan<int> mineCounts, Vector3 centre,
+        HullDesign other, ReadOnlySpan<ulong> theirs, ReadOnlySpan<int> theirCounts, Span<ulong> touchMine, Span<ulong> touchTheirs, ContactScratch scratch,
+        out BlockTouch touch)
     {
         touch = default;
-        var offsets = other.BlockOffsets;
-        var reach = half + otherHalf;
-        var bound = otherRadius + half;
-        for (var bits = mine; bits != 0; bits &= bits - 1)
+        touchMine.Clear(); touchTheirs.Clear();
+        var rules = design.CollisionRules;
+        var visits = rules.CollisionTreeVisits;
+        var tests = rules.CollisionBoxTests;
+        var cursor = 0;
+        var inverse = Quaternion.Conjugate(rotation);
+        var query = Vector3.Transform(-centre, inverse);
+        var reach = new Vector3(other.Flight.Radius);
+        while (tests > 0 && touch.Pairs < rules.CollisionContacts && design.Collision.Next(ref cursor, query - reach, query + reach, mine, ref visits, out var a, mineCounts))
         {
-            // A block outside the other hull's sphere touches none of its blocks.
-            var a = BitOperations.TrailingZeroCount(bits);
-            var block = centre + arms[a];
-            if (block.LengthSquared() >= bound * bound)
-                continue;
-
-            for (var rest = theirs; rest != 0; rest &= rest - 1)
+            var block = centre + Vector3.Transform(design.BlockOffsets[a], rotation);
+            var bounds = BoxCollision.Bounds(design.BlockHalfExtents[a], rotation);
+            var otherCursor = 0;
+            while (tests > 0 && touch.Pairs < rules.CollisionContacts && other.Collision.Next(ref otherCursor, block - bounds, block + bounds, theirs, ref visits, out var b, theirCounts))
             {
-                var b = BitOperations.TrailingZeroCount(rest);
-                var between = block - offsets[b];
-                var squared = between.LengthSquared();
-                if (squared >= reach * reach)
-                    continue;
-
-                // Two blocks in the same place have no direction to part in; they still count as touching.
-                var distance = MathF.Sqrt(squared);
-                var depth = reach - distance;
-                var point = offsets[b];
-                if (distance > 1e-3f)
-                {
-                    var direction = between / distance;
-                    touch.NormalSum += direction;
-                    point += direction * (otherHalf - depth * 0.5f);
-                }
-
-                touch.PointSum += point;
-                touch.Mine |= 1UL << a;
-                touch.Theirs |= 1UL << b;
-                touch.Pairs++;
+                var cost = design.Boxes[a].Shape == BlockShape.Box && other.Boxes[b].Shape == BlockShape.Box ? 1 : 4;
+                if (tests < cost) break;
+                tests -= cost;
+                var between = block - other.BlockOffsets[b];
+                if (!BoxCollision.Contact(between, design.BlockHalfExtents[a], rotation, other.BlockHalfExtents[b], design.Boxes[a].Shape, other.Boxes[b].Shape, out var normal, out var depth)) continue;
+                // Weight the manifold by penetration so grazing edges do not dominate a broad face contact.
+                touch.NormalSum += normal * depth;
+                touch.Weight += depth;
+                touch.PointSum += (block + other.BlockOffsets[b]) * (0.5f * depth);
+                // The visual event uses each box's surface; the impulse keeps its existing manifold point.
+                var middle = (block + other.BlockOffsets[b]) * 0.5f;
+                var minePoint = Vector3.Transform(middle - centre, inverse) - design.BlockOffsets[a];
+                touch.ShieldMineSum += (design.BlockOffsets[a] + BoxSurface(minePoint, design.BlockHalfExtents[a], Vector3.Transform(-normal, inverse), design.Boxes[a].Shape)) * depth;
+                touch.ShieldTheirsSum += (other.BlockOffsets[b] + BoxSurface(middle - other.BlockOffsets[b], other.BlockHalfExtents[b], normal, other.Boxes[b].Shape)) * depth;
+                scratch.PairA[touch.Pairs] = a; scratch.PairB[touch.Pairs] = b;
+                BlockSet.Add(touchMine, a); BlockSet.Add(touchTheirs, b); touch.Pairs++;
             }
         }
-
         return touch.Pairs > 0;
     }
 
-    /// <summary>
-    /// How far the hull has to move along <paramref name="normal"/> for none of the touching pairs of blocks to
-    /// be into each other any more. Everything is in the other hull's frame.
-    /// </summary>
-    private static float Clearance(ReadOnlySpan<Vector3> arms, Vector3 centre, Vector3 normal, HullDesign other, float reach, in BlockTouch touch)
+    // A bounded visual contact estimate on the box, without changing the physical contact manifold.
+    private static Vector3 BoxSurface(Vector3 point, Vector3 half, Vector3 outward, BlockShape shape)
     {
-        var offsets = other.BlockOffsets;
-        var clearance = 0f;
-        for (var bits = touch.Mine; bits != 0; bits &= bits - 1)
+        point = BlockShapes.Closest(shape, half, point);
+        var distance = float.PositiveInfinity;
+        for (var axis = 0; axis < 3; axis++)
+            if (MathF.Abs(outward[axis]) > 1e-6f)
+                distance = Math.Min(distance, (half[axis] - MathF.Sign(outward[axis]) * point[axis]) / MathF.Abs(outward[axis]));
+        if (shape != BlockShape.Box)
         {
-            var block = centre + arms[BitOperations.TrailingZeroCount(bits)];
-            for (var rest = touch.Theirs; rest != 0; rest &= rest - 1)
-            {
-                var between = block - offsets[BitOperations.TrailingZeroCount(rest)];
-                var inside = reach * reach - between.LengthSquared();
-                if (inside <= 0)
-                    continue;
-
-                // The distance along the normal at which this pair is exactly their two radii apart.
-                var along = Vector3.Dot(between, normal);
-                clearance = Math.Max(clearance, MathF.Sqrt(along * along + inside) - along);
-            }
+            var n = BlockShapes.Slant(shape, half);
+            var rate = Vector3.Dot(n, outward);
+            if (rate > 1e-6f) distance = Math.Min(distance, Math.Max(0, -Vector3.Dot(n, point) / rate));
         }
-
-        return clearance;
+        return point + outward * (float.IsFinite(distance) ? distance : 0f);
     }
 
     /// <summary>
@@ -832,11 +932,14 @@ public static class HullSim
     /// What the shield pays for each point it takes is the world's choice, and so is whether it stands in the
     /// way of a collision at all. A shield that pays out everything it had breaks and goes offline; an offline
     /// shield takes nothing, whatever charge it is building back. Every hit, absorbed or not, restarts the
-    /// recharge delay. A block at zero is gone. Returns true if the hull is destroyed: its core is gone or
-    /// nothing is left.
+    /// recharge delay. A block at zero is gone, and its loss is counted in the body's block state. Only the blocks
+    /// that touched are looked at: the hull's total comes from the running total its block state keeps.
+    /// <paramref name="touching"/> is the <see cref="BlockSet"/> of the blocks that touched. Returns true if the
+    /// hull is destroyed: its core is gone or nothing is left.
     /// </summary>
-    internal static bool Damage(ref HullState state, in FlightParams flight, ref HullBody body, ulong touching, int touchCount, float amount)
+    internal static bool Damage(ref HullState state, in FlightParams flight, ref HullBody body, scoped ReadOnlySpan<ulong> touching, int touchCount, float amount, Vector3? shieldPoint = null)
     {
+        body.Damaged = true;
         state.ShieldCooldown = flight.ShieldDelay;
         var remaining = amount;
         var cost = flight.CollisionShieldCost;
@@ -862,13 +965,13 @@ public static class HullSim
             }
 
             if (absorbed > 0)
-                RecordShieldHit(ref state, flight, body.Design, touching, absorbed);
+                RecordShieldHit(ref state, flight, body.Design, touching, absorbed, shieldPoint);
         }
 
         if (remaining <= 0)
             return false;
 
-        if (body.BlockHp.IsEmpty)
+        if (body.States is not { } states)
         {
             // Predicting: the server decides which blocks are lost; show the hull total falling meanwhile.
             state.Hull = Math.Max(0f, state.Hull - remaining);
@@ -876,47 +979,58 @@ public static class HullSim
         }
 
         var share = remaining / touchCount;
-        var total = 0f;
-        for (var b = 0; b < body.Design.BlockOffsets.Length; b++)
+        var blocks = body.Design.BlockCount;
+        foreach (var b in BlockSet.Each(touching))
         {
-            if ((touching & 1UL << b) != 0)
-            {
-                body.BlockHp[b] = Math.Max(0f, body.BlockHp[b] - share);
-                if (body.BlockHp[b] <= 0)
-                    body.Alive &= ~(1UL << b);
-            }
-
-            total += body.BlockHp[b];
+            // A set handed in from outside may name blocks the design does not have; they touched nothing.
+            if (b >= blocks)
+                break;
+            states.Hit(body.State, b, share);
         }
 
-        state.Hull = total;
-        return total <= 0 || (body.Alive & body.Design.CoreMask) != body.Design.CoreMask;
+        state.Hull = (float)states.HitTotal(body.State);
+
+        // Whether anything is left is counted, not read off the total: the total is kept by subtraction, and
+        // beside one enormous block the others can round out of it while they are still there.
+        return states.Revision(body.State) == (uint)states.Blocks(body.State) || states.CoresLost(body.State) > 0;
+    }
+
+    /// <summary>Reports a light contact without changing charge, damage or the recharge delay.</summary>
+    internal static void ShieldContact(ref HullState state, in FlightParams flight, HullDesign design, ReadOnlySpan<ulong> touching, float closing, Vector3? shieldPoint = null)
+    {
+        if (closing < flight.ShieldContactSpeed || closing <= 0 || flight.CollisionShieldCost <= 0 || flight.ShieldCapacity <= 0 || state.ShieldOffline || state.Shield <= 0)
+            return;
+        RecordShieldHit(ref state, flight, design, touching, 0f, shieldPoint);
     }
 
     /// <summary>
-    /// Records an absorbed impact for the shield's ripple, at the middle of the blocks that touched. Impacts in
-    /// the same tick are one event: the strongest individual impact supplies both strength and position.
+    /// Records a contact or absorbed impact at its surface point, or the middle of touched blocks for callers
+    /// without one. Impacts in the same tick are one event: the strongest individual impact supplies both strength and position.
     /// </summary>
-    private static void RecordShieldHit(ref HullState state, in FlightParams flight, HullDesign? design, ulong touching, float absorbed)
+    private static void RecordShieldHit(ref HullState state, in FlightParams flight, HullDesign? design, ReadOnlySpan<ulong> touching, float absorbed, Vector3? surfacePoint)
     {
         var point = Vector3.Zero;
         var count = 0;
-        if (design is not null)
+        if (surfacePoint is null && design is not null)
         {
             var offsets = design.BlockOffsets;
-            for (var bits = touching & design.FullMask; bits != 0; bits &= bits - 1)
+            foreach (var b in BlockSet.Each(touching))
             {
-                point += offsets[BitOperations.TrailingZeroCount(bits)];
+                // A set handed in from outside may name blocks the design does not have; they touched nothing.
+                if (b >= offsets.Length)
+                    break;
+                point += offsets[b];
                 count++;
             }
         }
 
         if (count > 0)
             point /= count;
+        point = surfacePoint ?? point;
         var scale = flight.Radius > 0 ? 127f / flight.Radius : 0f;
         point = Vector3.Clamp(point * scale, new Vector3(-127f), new Vector3(127f));
 
-        // Four hits of a quarter of the shield each show at full strength; any absorbed hit shows at all.
+        // Four hits of a quarter of the shield each show at full strength; a contact with no absorbed damage gets the minimum strength.
         var strength = (int)MathF.Ceiling(Math.Min(1f, absorbed / flight.ShieldCapacity * 4f) * 255f);
         strength = Math.Clamp(strength, 1, 255);
         ref var hit = ref state.ShieldHit;

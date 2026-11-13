@@ -136,6 +136,8 @@ internal sealed class WorldView
     private float _chaseZoom = 1f;
     private uint _ownId;
     private float _deniedAt = -10f;
+    private float _outOfSectorAt = -10f;
+    private string? _switchKeyName;
     private float _time;
     private float2 _leftDragStart;
     private bool _leftDragging;
@@ -168,6 +170,90 @@ internal sealed class WorldView
     private Vector3 _up = Vector3.UnitY;
     private Vector3 _forward = -Vector3.UnitZ;
     private float _tanHalfFov = MathF.Tan(PilotFov / 2);
+
+    // The ship editor's camera: an orbit about a point fixed to the hull, in the hull's own frame, so the ship
+    // holds still on screen while it is built. Blend is how far the camera has moved from the flight view to it.
+    private float _editYaw;
+    private float _editPitch;
+    private float _editDistance = 40f;
+    private Vector3 _editPan;
+    private float _editBlend;
+    private bool _editShown;
+    private bool _editLeftDown;
+    private bool _editLeftMoved;
+    private float2 _editLeftStart;
+    private bool _editRightDown;
+    private bool _editRightMoved;
+    private float2 _editRightStart;
+    private bool _editMiddleDown;
+    private bool _editMiddleMoved;
+    private float2 _editMiddleStart;
+
+    // The block a left press began on, when it was selected: moving the pointer then drags the selection.
+    private int _editGrab = -1;
+
+    // A right press in the editor that began while a part was sized or turned: its click leaves placing alone.
+    private bool _editRightReserved;
+
+    // The part-size gesture (UpdatePartSizing), while the editor's SizingPart holds: the ghost face under the
+    // pointer, and a face being dragged: its side, where the drag began on screen, the length it began from (moved
+    // when a limit is pushed past, so turning back answers at once), the pixels one cell spans along the face's axis
+    // on screen, whether it is followed up and down instead because that axis points along the view, and whether it
+    // must start again from where the pointer is after the camera turned. The draft version it began on.
+    private int _sizeFace = -1;
+    private bool _sizeDragging;
+    private int _sizeSide;
+    private float2 _sizeStart;
+    private float _sizeBase;
+    private float2 _sizeCell;
+    private bool _sizeEdgeOn;
+    private bool _sizeRebase;
+    private int _sizeVersion;
+    private EditorTuning? _editTuning;
+
+    // The rotation ring under the pointer while the part to place is turned (0 about x, 1 about y), or -1, and
+    // where the rings stand: fixed when the turn starts, so a turn that shifts the ghost does not move them away.
+    private int _ringHovered = -1;
+    private Vector3 _ringMiddle;
+    private float _ringRadius;
+
+    // A left press on a ring: the ring, where it began, whether it has moved far enough to be a drag rather than a
+    // click, the angle about the ring's axis the pointer was at last, how far it has turned since the press, the
+    // quarter turns that has made, and whether the angle must be read afresh (after the camera turned, or while the
+    // ring was too near edge-on to read) before it counts again.
+    private bool _ringPress;
+    private int _ringAxis;
+    private float2 _ringPressAt;
+    private bool _ringDragging;
+    private float _ringLast;
+    private float _ringAngle;
+    private int _ringTurns;
+    private bool _ringRebase;
+    private int _ringCancels;
+
+    // How the ghost of the part to place is drawn while it turns: client only, never the part placed.
+    private readonly GhostMotion _ghostMotion = new();
+
+    // Where the editor's camera glides to after a focus: the point it orbits and its distance. Any pan or zoom by
+    // hand stops the glide.
+    private bool _editFocusing;
+    private Vector3 _editPanGoal;
+    private float _editDistanceGoal;
+
+    // How far the draft reaches from the pivot, worked out again when the draft changes, so the camera's limits
+    // grow with a draft that grows past the ship.
+    private float _editReach;
+    private int _editReachVersion = -1;
+    private BuildDraft? _editReachDraft;
+
+    // After the editor closes, flight waits until every flight key held through it has been let go, so a key
+    // pressed for the editor never becomes thrust the moment it closes.
+    private bool _flightHeld;
+
+    // An applied edit swaps the flown hull for a new one: the view keeps its target and course across exactly that
+    // swap, as it would for the same ship.
+    private uint _carryFrom;
+    private uint _carryTo;
     // The pilot's own jump as drawn: client-side only, worked out each frame from the simulation's stage and
     // progress. The axis is the hull's nose while the drive works, held once the hull is through. The hull is drawn
     // ahead of (or behind) where the simulation has it by the offset, along the axis, so it can be seen flying into
@@ -182,7 +268,7 @@ internal sealed class WorldView
     // Where every hull is drawn this frame, with the jumps of hulls seen from outside; worked out in the update.
     private readonly HullVisuals _visuals = new();
     // Every shielded hull's shield as drawn: client side only, from the replicated shield state.
-    private readonly ShieldVisuals _shields = new(ShieldLook.Load());
+    private readonly ShieldVisuals _shields;
     private bool _ownInside = true;
 
     /// <summary>Where every hull is drawn this frame; for tests.</summary>
@@ -236,9 +322,12 @@ internal sealed class WorldView
         var boost = actions.Bindings(InputAction.Boost);
         BoostKeyName = boost.IsEmpty ? "BOOST" : boost[0].DisplayName.ToUpperInvariant();
         _designs = designs;
-        _asteroidMeshBase = AsteroidMesh(designs.Length, 0, 0);
-        _meshCount = MeshCount(designs.Length);
-        _cubeMesh = CubeMesh(designs.Length);
+        Editor = new ShipEditor(jobs);
+        // Damaged shells are built on a worker, one at a time; nothing builds one in the frame.
+        _shields = new ShieldVisuals(ShieldLook.Load(), jobs);
+        _asteroidMeshBase = AsteroidMesh(0, 0);
+        _meshCount = MeshCount();
+        _cubeMesh = CubeMesh();
         _meshCounts = new int[_meshCount];
         _meshOffsets = new int[_meshCount];
         _batches = new DrawBatch[_meshCount];
@@ -258,15 +347,62 @@ internal sealed class WorldView
     private const int DetailCoarse = 3;
     private const int DetailSpeck = 4;
 
-    /// <summary>Meshes are numbered: one per hull design, then the asteroid shapes at each level of detail, then the block.</summary>
-    public static int MeshCount(int designs) => designs + Galaxy.AsteroidShapes * AsteroidDetail.Length + 1;
+    /// <summary>Ship slots are reserved for the largest admitted catalogue, keeping rocks and blocks stable.</summary>
+    public const int ShipMeshSlots = 255;
+
+    /// <summary>
+    /// How many of the catalogue's first designs have their meshes in the renderer. A hull of a later design is
+    /// neither drawn nor picked until its mesh is there. The application sets it every frame; everything by default.
+    /// </summary>
+    public int InstalledDesigns { get; set; } = int.MaxValue;
+
+    /// <summary>Total reserved mesh slots.</summary>
+    public static int MeshCount() => ShipMeshSlots + Galaxy.AsteroidShapes * AsteroidDetail.Length + BlockShapeCount;
+
+    /// <summary>One single-block mesh for each <see cref="BlockShape"/>: the cube and the twelve wedges.</summary>
+    private const int BlockShapeCount = 13;
 
     /// <summary>The single-block mesh, used to draw hulls that have lost blocks.</summary>
-    public static int CubeMesh(int designs) => designs + Galaxy.AsteroidShapes * AsteroidDetail.Length;
+    public static int CubeMesh() => ShipMeshSlots + Galaxy.AsteroidShapes * AsteroidDetail.Length;
 
-    public static int AsteroidMesh(int designs, int shape, int detail) => designs + detail * Galaxy.AsteroidShapes + shape;
+    /// <summary>
+    /// The single-block mesh of a shape, a unit bounding box scaled per axis to the block: the cube for a box, the
+    /// prism after it for each wedge. Every block mesh comes after the rocks, so none is drawn as one.
+    /// </summary>
+    public static int BlockMesh(BlockShape shape) => CubeMesh() + (int)shape;
+
+    public static int AsteroidMesh(int shape, int detail) => ShipMeshSlots + detail * Galaxy.AsteroidShapes + shape;
 
     public ViewMode Mode { get; private set; }
+
+    /// <summary>The ship editor: its draft, what is selected, and where the edit stands with the server.</summary>
+    public ShipEditor Editor { get; }
+
+    /// <summary>
+    /// True while the pointer is shown over the world and the world uses it: the command view, and the ship editor.
+    /// The pointer router treats both alike (<see cref="PointerFrame.CommandView"/>).
+    /// </summary>
+    public bool PointerView => Mode == ViewMode.Command || Editor.Shown;
+
+    /// <summary>True while flight ignores flight keys that were held when the editor closed, until they are let go.</summary>
+    public bool FlightHeld => _flightHeld;
+
+    /// <summary>
+    /// Whether an interface window is under the pointer this frame, whoever holds the button: set by the frame
+    /// loop from <see cref="Input.PointerRouter.PointerOverWindow"/> before <see cref="Update"/>. The editor reads it
+    /// only while the pointer carries something, to tell a drop on the ship from a drop on a panel.
+    /// </summary>
+    public bool PointerOverPanel { get; set; }
+
+    /// <summary>
+    /// True while the world carries a press the interface began: a part dragged out of the editor's part list. The
+    /// interface item stays active and claims the keyboard meanwhile; the frame loop lets the world read input anyway.
+    /// </summary>
+    public bool HoldsInterfacePress => Editor.Carry == EditorCarry.Part;
+
+    /// <summary>The point the editor's camera orbits, in the hull's own frame, and its distance from it, in metres.</summary>
+    public Vector3 EditorFocus => _editPan;
+    public float EditorDistance => _editDistance;
 
     /// <summary>The hulls selected in the command view, by id.</summary>
     public ReadOnlySpan<uint> Selection => _selected.AsSpan(0, _selectedCount);
@@ -295,6 +431,36 @@ internal sealed class WorldView
     /// <summary>In the pilot view: the asteroid under the reticle and the targeted asteroid, if any.</summary>
     public RockRef? HoveredRock { get; private set; }
     public RockRef? TargetRock { get; private set; }
+
+    /// <summary>True for a moment after the player tried to take control of an own hull in another sector.</summary>
+    public bool ControlOutOfSector => _time - _outOfSectorAt < 2.5f;
+
+    /// <summary>The name of the control bound first to taking control, for the notice that points at it.</summary>
+    public string SwitchKeyName
+    {
+        get
+        {
+            if (_switchKeyName is null)
+            {
+                var bindings = _actions.Bindings(InputAction.SwitchHull);
+                _switchKeyName = bindings.Length > 0 ? bindings[0].DisplayName : "the take-control key";
+            }
+
+            return _switchKeyName;
+        }
+    }
+
+    /// <summary>
+    /// True when the player may take control of the hull from where they fly: it is theirs and in the same sector as
+    /// the hull they fly, as the snapshot shows both. The server checks the same rule on its own positions.
+    /// </summary>
+    public bool CanTakeControlOf(in HullView hull)
+    {
+        var snapshot = _snapshot;
+        if (snapshot is null || _galaxy is null || hull.Owner != snapshot.PlayerId)
+            return false;
+        return _galaxy.InSameSector(Own.Position, hull.Position);
+    }
 
     /// <summary>True for a moment after the player tried to take control of a hull that is not theirs.</summary>
     public bool ControlDenied => _time - _deniedAt < 2.5f;
@@ -418,6 +584,11 @@ internal sealed class WorldView
             _commandCycle.Reset();
             _pilotCycle.Reset();
             _jumpChord.Clear();
+            Editor.Reset();
+            _editShown = false;
+            _editBlend = 0f;
+            _flightHeld = false;
+            _carryFrom = _carryTo = 0;
             _pickHulls = new PickHull[snapshot.Hulls.Length];
             _pickHits = new PickHit[SlotCount * galaxy.MaxAsteroidsPerSector + snapshot.Hulls.Length];
             _streamDirty = true;
@@ -445,17 +616,37 @@ internal sealed class WorldView
         _visuals.Update(snapshot.Hulls.AsSpan(0, snapshot.HullCount), _designs, alpha, dt, _ownInside, FtlPreview);
         _shields.Update(snapshot.Hulls.AsSpan(0, snapshot.HullCount), _designs, snapshot.PublishedAt, dt);
 
+        // The editor follows the server before anything reads input, so a grant or an end shows this frame.
+        Editor.Track(snapshot, bridge, dt);
+        if (Editor.TakeReplacement(out var replaced, out var replacement))
+            ReplaceHull(replaced, replacement);
+        if (Editor.Shown != _editShown)
+        {
+            _editShown = Editor.Shown;
+            if (_editShown)
+                BeginEditing();
+            else
+                EndEditing();
+        }
+
         if (own.Id != _ownId)
         {
-            // The player is in a different hull: put the camera behind it and forget the old target and course.
+            // The player is in a different hull: put the camera behind it and forget the old target and course;
+            // unless an applied edit rebuilt the same ship, which keeps them and the camera where it is.
+            var rebuilt = _ownId != 0 && _ownId == _carryFrom && own.Id == _carryTo;
+            _carryFrom = _carryTo = 0;
             _ownId = own.Id;
-            _chaseInitialised = false;
             ResetOwnJump();
             _jumpAxis = Vector3.Normalize(Vector3.Transform(-Vector3.UnitZ, OwnOrientation));
             _jumpUp = Vector3.Transform(Vector3.UnitY, OwnOrientation);
-            TargetHull = 0;
-            NavTarget = null;
-            _jumpChord.Clear();
+            if (!rebuilt)
+            {
+                _chaseInitialised = false;
+                TargetHull = 0;
+                NavTarget = null;
+                _jumpChord.Clear();
+            }
+
             if (_followId != 0)
                 FocusOn(own.Id);
         }
@@ -480,11 +671,20 @@ internal sealed class WorldView
         if (!inputEnabled || _devices.SuppressMouse)
             _leftDragging = _rightDragging = false;
         var keyboard = inputEnabled;
-        if (inputEnabled && _actions.Pressed(_devices, InputAction.ToggleCommand, true))
+        var editing = Editor.Shown;
+        if (inputEnabled && !editing && _actions.Pressed(_devices, InputAction.ToggleCommand, true))
             SetMode(Mode == ViewMode.Pilot ? ViewMode.Command : ViewMode.Pilot);
 
         var controls = new PlayerControls();
-        if (inputEnabled)
+        if (editing)
+        {
+            // The editor has the mouse and its own keys; the hull gets no controls at all, so nothing flies, fires,
+            // orders or jumps while it is open.
+            HoveredHull = 0;
+            HoveredRock = null;
+            UpdateEditorControls(inputEnabled, pointerOverUi, dt);
+        }
+        else if (inputEnabled)
         {
             controls.ToggleDampeners = _actions.Pressed(_devices, InputAction.ToggleDampeners, true);
             if (_actions.Pressed(_devices, InputAction.Halt, true))
@@ -497,13 +697,21 @@ internal sealed class WorldView
             }
         }
 
-        if (inputEnabled && Mode == ViewMode.Pilot)
+        if (inputEnabled && !editing && Mode == ViewMode.Pilot)
         {
             controls.Strafe = _actions.Axis(_devices, InputAxis.Strafe, keyboard);
             controls.Vertical = _actions.Axis(_devices, InputAxis.Vertical, keyboard);
             controls.Forward = _actions.Axis(_devices, InputAxis.Forward, keyboard);
             controls.Roll = _actions.Axis(_devices, InputAxis.Roll, keyboard);
             controls.Boost = _actions.Held(_devices, InputAction.Boost, keyboard);
+            if (_flightHeld)
+            {
+                // Keys held through the editor stay without effect until every one of them is up.
+                if (controls.Strafe != 0 || controls.Vertical != 0 || controls.Forward != 0 || controls.Roll != 0 || controls.Boost)
+                    controls = new PlayerControls();
+                else
+                    _flightHeld = false;
+            }
 
             // Pointer, arrow keys and right stick turn the view, not the hull.
             var invert = _settings.InvertPitch ? -1f : 1f;
@@ -527,7 +735,7 @@ internal sealed class WorldView
 
             // A plotted jump starts when the pilot boosts with the nose on it, or pushes forward while boosting: the
             // two in either order are one start. Off it, boost is boost.
-            var boostPressed = _actions.Pressed(_devices, InputAction.Boost, keyboard);
+            var boostPressed = !_flightHeld && _actions.Pressed(_devices, InputAction.Boost, keyboard);
             if (!_actions.Pressed(_devices, InputAction.Halt, keyboard) && NavAimed && Own.Jump == JumpPhase.None && Own.Order.Kind != OrderKind.Jump && (boostPressed || (forwardPressed && controls.Boost)))
             {
                 bridge.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = NavTarget!.Value });
@@ -554,7 +762,7 @@ internal sealed class WorldView
             controls.Aim = _lookDirection;
             controls.Align = thrusting && !freeLook;
         }
-        else if (inputEnabled)
+        else if (inputEnabled && !editing)
         {
             // A hidden pointer hovers nothing: only a pointer the world may use marks what is under it.
             if (_devices.SuppressMouse)
@@ -572,7 +780,7 @@ internal sealed class WorldView
             UpdateCommandControls(snapshot, bridge, dt, pointerOverUi);
         }
 
-        if (LookDegrees is { } look && Mode == ViewMode.Pilot)
+        if (LookDegrees is { } look && Mode == ViewMode.Pilot && !editing)
         {
             var nose = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
             var hullUp = Vector3.Transform(Vector3.UnitY, OwnOrientation);
@@ -608,6 +816,7 @@ internal sealed class WorldView
         var clips = new FtlClips();
         var shieldInstances = _scene.ShieldInstances(frameIndex);
         var shieldVertices = _scene.ShieldVertices(frameIndex);
+        var shieldIndices = _scene.ShieldIndices(frameIndex);
         _shields.Begin(_scene.ShieldDraws);
 
         // Hulls, where the update has them drawn this frame.
@@ -616,7 +825,18 @@ internal sealed class WorldView
         {
             ref var hull = ref snapshot.Hulls[i];
             ref readonly var visual = ref visuals[i];
-            var design = _designs[Math.Min(hull.Design, _designs.Length - 1)];
+
+            // A hull whose design has no mesh yet is left out, never drawn as another design.
+            if (hull.Design >= InstalledDesigns || hull.Design >= _designs.Length)
+                continue;
+            var design = _designs[hull.Design];
+            // While the editor is open the draft is drawn in the ship's place, block by block, without its shield.
+            if (_editShown && hull.Id == Editor.Hull && Editor.Draft is { } draft && Editor.Source is { } source)
+            {
+                AddDraft(ref candidateCount, draft, source, camera);
+                continue;
+            }
+
             var position = DrawnPosition(visual).RelativeTo(camera);
             var orientation = visual.Orientation;
 
@@ -633,21 +853,22 @@ internal sealed class WorldView
             // The pilot's own hull inside its jump takes no slot: its opening is cut from the frame's own jump.
             var material = Material(visual.Inside, visual.Inside ? -1 : visual.Clip);
             // The shield goes where the hull goes, drawn out and cut with it by the same material.
-            _shields.Add(hull.Id, position, orientation, stretch, material, shieldInstances, shieldVertices);
+            _shields.Add(hull.Id, position, orientation, stretch, material, shieldInstances, shieldVertices, shieldIndices);
             if (visual.Intact)
             {
-                Add(ref candidateCount, Math.Min(hull.Design, _designs.Length - 1), position, orientation, 1f, design.Color, material, stretch);
+                Add(ref candidateCount, hull.Design, position, orientation, 1f, design.Color, material, stretch);
                 continue;
             }
 
-            // A hull that has lost blocks is drawn from the ones it still has, each as its own cube.
+            // A hull that has lost blocks is drawn from the ones it still has, each as its own cube or prism.
+            var alive = hull.Blocks.Span;
             for (var b = 0; b < design.BlockOffsets.Length && candidateCount < _candidates.Length; b++)
             {
-                if ((hull.Blocks & 1UL << b) == 0)
+                if (!BlockSet.Has(alive, b))
                     continue;
                 var block = design.BlockOffsets[b];
                 block.Z *= stretch;
-                Add(ref candidateCount, _cubeMesh, position + Vector3.Transform(block, orientation), orientation, design.BlockSize, design.Color, material, stretch);
+                Add(ref candidateCount, _cubeMesh + (int)design.Shapes[b], position + Vector3.Transform(block, orientation), orientation, design.BlockHalfExtents[b] * 2f, design.Color, material, stretch);
             }
         }
 
@@ -847,9 +1068,13 @@ internal sealed class WorldView
             ref readonly var visual = ref visuals[i];
             // Only what is drawn can be picked: not a hull between a jump's openings, nor the part past an opening,
             // and a hull drawn out by hyperspace is picked drawn out.
-            if ((pilot && hull.IsOwn) || (!pilot && hull.Owner != snapshot.PlayerId) || !visual.Visible || visual.PickBlocks == 0)
+            if ((pilot && hull.IsOwn) || (!pilot && hull.Owner != snapshot.PlayerId) || !visual.Visible || !BlockSet.Any(visual.PickBlocks.Span))
                 continue;
-            _pickHulls[hullCount++] = _visuals.Pick(hull.Id, visual, DrawnPosition(visual), _designs[Math.Min(hull.Design, _designs.Length - 1)]);
+
+            // What is not drawn for want of a mesh is not picked either.
+            if (hull.Design >= InstalledDesigns || hull.Design >= _designs.Length)
+                continue;
+            _pickHulls[hullCount++] = _visuals.Pick(hull.Id, visual, DrawnPosition(visual), _designs[hull.Design]);
             // The pilot's own hull, still drawn from inside its jump as the command view takes over, is cut as its
             // mesh pass cuts it.
             if (visual.Inside)
@@ -980,8 +1205,15 @@ internal sealed class WorldView
         }
         else if (TryGetHull(TargetHull, out var target) && target.Owner == snapshot.PlayerId)
         {
-            bridge.RequestControl(TargetHull);
-            TargetHull = 0;
+            if (CanTakeControlOf(target))
+            {
+                bridge.RequestControl(TargetHull);
+                TargetHull = 0;
+            }
+            else
+            {
+                _outOfSectorAt = _time;
+            }
         }
         else
         {
@@ -1596,12 +1828,7 @@ internal sealed class WorldView
     public bool CanJumpTo(in HullView hull, Double3 target) => HasJumpDrive(hull) && !InSectorOf(hull, target);
 
     /// <summary>True when the hull still has a working faster-than-light drive; losing the drive block loses it.</summary>
-    private bool HasJumpDrive(in HullView hull)
-    {
-        var design = _designs[Math.Min(hull.Design, _designs.Length - 1)];
-        design.Evaluate(hull.Blocks, out var flight, out _);
-        return flight.Ftl != FtlKind.None;
-    }
+    private static bool HasJumpDrive(in HullView hull) => hull.Stats.Ftl != FtlKind.None;
 
     private bool InSectorOf(in HullView hull, Double3 target) => _galaxy is not null && _galaxy.SectorOf(HullPosition(hull)) == _galaxy.SectorOf(target);
 
@@ -1614,6 +1841,38 @@ internal sealed class WorldView
     {
         PruneSelection();
         OrderSelection(bridge, target, true, false);
+    }
+
+    /// <summary>
+    /// Whether the map's take-control key may be read at all: no menu, social surface or Controls screen owns the
+    /// keyboard, and no text field is being typed in.
+    /// </summary>
+    public static bool MapSwitchKeyAvailable(bool sessionMenuOpen, bool socialSurfaceOpen, bool controlsOpen, bool typing) =>
+        !sessionMenuOpen && !socialSurfaceOpen && !controlsOpen && !typing;
+
+    /// <summary>
+    /// The map's take-control shortcut: when the switch action is pressed and exactly one hull is selected, no
+    /// asteroid, and that hull is the player's and not the one being flown, asks the server to put the player in it, if it is in the sector the player is in; otherwise it raises the out-of-sector notice.
+    /// The map, the selection and the view stay as they are; the own-hull marks follow the next snapshot that
+    /// names the new hull. Returns whether a request was sent.
+    /// </summary>
+    public bool SwitchToSelectedFromMap(PlayerInputBridge bridge, bool keyboardAvailable)
+    {
+        if (!_actions.Pressed(_devices, InputAction.SwitchHull, keyboardAvailable))
+            return false;
+        PruneSelection();
+        if (_selectedCount != 1 || _selectedRockCount != 0 || _selected[0] == Own.Id)
+            return false;
+        if (!TryGetHull(_selected[0], out var hull))
+            return false;
+        if (!CanTakeControlOf(hull))
+        {
+            _outOfSectorAt = _time;
+            return false;
+        }
+
+        bridge.RequestControl(_selected[0]);
+        return true;
     }
 
     /// <summary>Drops selected hulls that are gone from the snapshot or no longer the player's.</summary>
@@ -1944,9 +2203,19 @@ internal sealed class WorldView
         // Taking control of the selected hull drops straight into its pilot view.
         if (_actions.Pressed(_devices, InputAction.SwitchHull, true) && _selectedCount > 0)
         {
-            if (_selected[0] != Own.Id)
+            if (_selected[0] == Own.Id)
+            {
+                SetMode(ViewMode.Pilot);
+            }
+            else if (TryGetHull(_selected[0], out var chosen) && CanTakeControlOf(chosen))
+            {
                 bridge.RequestControl(_selected[0]);
-            SetMode(ViewMode.Pilot);
+                SetMode(ViewMode.Pilot);
+            }
+            else
+            {
+                _outOfSectorAt = _time;
+            }
         }
 
         if (!pointerOverUi && _devices.Scroll != 0)
@@ -2098,12 +2367,920 @@ internal sealed class WorldView
 
         CameraPosition = Double3.Lerp(chasePosition, commandPosition, t);
         var orientation = Quaternion.Slerp(chaseOrientation, commandOrientation, t);
+
+        // The editor's orbit, in the hull's own frame about a point fixed to it, eased in and out.
+        _editBlend += Math.Clamp((Editor.Shown ? 1f : 0f) - _editBlend, -dt / EditBlendSeconds, dt / EditBlendSeconds);
+        var edit = Smooth(_editBlend);
+        if (edit > 0f)
+        {
+            var editOrientation = Quaternion.Concatenate(Quaternion.CreateFromYawPitchRoll(_editYaw, _editPitch, 0f), OwnOrientation);
+            var focus = OwnDrawnPosition + Vector3.Transform(_editPan, OwnOrientation);
+            CameraPosition = Double3.Lerp(CameraPosition, focus + Vector3.Transform(new Vector3(0f, 0f, _editDistance), editOrientation), edit);
+            orientation = Quaternion.Slerp(orientation, editOrientation, edit);
+        }
+
         _right = Vector3.Transform(Vector3.UnitX, orientation);
         _up = Vector3.Transform(Vector3.UnitY, orientation);
         _forward = Vector3.Transform(-Vector3.UnitZ, orientation);
 
         var pilotFov = PilotFov + Math.Min(speed / 720f, 1f) * 0.16f;
-        _tanHalfFov = MathF.Tan((pilotFov + (CommandFov - pilotFov) * t) / 2f);
+        var fov = pilotFov + (CommandFov - pilotFov) * t;
+        _tanHalfFov = MathF.Tan((fov + (CommandFov - fov) * edit) / 2f);
+    }
+
+    /// <summary>Seconds the camera takes to move into the editor's orbit and back.</summary>
+    private const float EditBlendSeconds = 0.35f;
+
+    /// <summary>The editor opened: the view drops back to the pilot view and the orbit starts above and behind.</summary>
+    private void BeginEditing()
+    {
+        SetMode(ViewMode.Pilot);
+        var radius = EditRadius();
+        _editYaw = 0.6f;
+        _editPitch = -0.45f;
+        _editDistance = Math.Clamp(radius * 2.6f, EditMinDistance(radius), EditMaxDistance(radius));
+        _editPan = Vector3.Zero;
+        _editFocusing = false;
+        _editGrab = -1;
+        _editLeftDown = _editRightDown = _editMiddleDown = false;
+        ResetPartGestures();
+        _editTuning ??= EditorTuning.Load();
+        _freeLook = false;
+        _leftDragging = _rightDragging = false;
+    }
+
+    /// <summary>The editor closed: the view returns behind the hull, and held flight keys wait to be let go.</summary>
+    private void EndEditing()
+    {
+        _flightHeld = true;
+        _lookDirection = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
+        _editLeftDown = _editRightDown = _editMiddleDown = false;
+        ResetPartGestures();
+        _editFocusing = false;
+    }
+
+    /// <summary>
+    /// The radius the editor's camera works within: the ship's, or the draft's reach from the pivot when the draft
+    /// has grown past it.
+    /// </summary>
+    private float EditRadius()
+    {
+        var radius = _designs[Math.Min(Own.Design, _designs.Length - 1)].Flight.Radius;
+        if (Editor.Draft is not { } draft || Editor.Source is not { } source)
+            return radius;
+        if (!ReferenceEquals(draft, _editReachDraft) || draft.Version != _editReachVersion)
+        {
+            _editReachDraft = draft;
+            _editReachVersion = draft.Version;
+            _editReach = EditorGeometry.Reach(draft.Boxes, source.Pivot, source.BlockSize);
+        }
+
+        return Math.Max(radius, _editReach);
+    }
+
+    /// <summary>
+    /// Glides the editor's camera to the selected blocks, or to the whole draft with nothing selected: it orbits
+    /// their middle at a distance that fits them in view, from the angle it has now.
+    /// </summary>
+    internal void FocusEditor()
+    {
+        if (Editor.Draft is not { } draft || Editor.Source is not { } source)
+            return;
+        if (!EditorGeometry.Bounds(draft.Boxes, Editor.Selection, out var low, out var high))
+            return;
+        var radius = EditRadius();
+        _editPanGoal = EditorGeometry.ToHull((low + high) * 0.5f, source.Pivot, source.BlockSize);
+        var fit = Math.Max((high - low).Length() * 0.5f * source.BlockSize, source.BlockSize);
+        // A sphere of radius r fills the narrower half-angle of the view at r / sin(angle); a little more leaves a margin.
+        var aspect = _screen.Y > 0 ? _screen.X / _screen.Y : 1f;
+        var half = MathF.Atan(MathF.Tan(CommandFov / 2f) * Math.Min(1f, aspect));
+        _editDistanceGoal = Math.Clamp(fit / MathF.Sin(half) * 1.15f, EditMinDistance(radius), EditMaxDistance(radius));
+        _editFocusing = true;
+    }
+
+    private static float EditMinDistance(float radius) => Math.Max(radius * 0.5f, 3f);
+
+    private static float EditMaxDistance(float radius) => radius * 12f + 60f;
+
+    /// <summary>
+    /// An applied edit replaced <paramref name="from"/> with <paramref name="to"/>: the selection, the followed hull
+    /// and, once the snapshot flies the new hull, the target and course carry over to it.
+    /// </summary>
+    internal void ReplaceHull(uint from, uint to)
+    {
+        for (var i = 0; i < _selectedCount; i++)
+            if (_selected[i] == from)
+                _selected[i] = to;
+        if (_followId == from)
+            _followId = to;
+        _carryFrom = from;
+        _carryTo = to;
+    }
+
+    /// <summary>
+    /// The editor's mouse and keys. Right drag orbits and a right click stops placing (or drops what is carried);
+    /// middle drag pans and a middle click selects (Shift adds or removes); the wheel zooms. A left click places,
+    /// or selects when not placing; a left drag that starts on a selected block moves the selection. A part dragged
+    /// from the part list follows the pointer until the button is let go. Ctrl+Z, Ctrl+Y (or Ctrl+Shift+Z), Ctrl+C,
+    /// Ctrl+V and Delete edit; the Follow key focuses the camera. Holding S sizes the part to place and R turns it;
+    /// the right button still orbits through both. Nothing starts over the interface.
+    /// </summary>
+    private void UpdateEditorControls(bool inputEnabled, bool pointerOverUi, float dt)
+    {
+        _ghostMotion.Step(dt);
+        if (!inputEnabled)
+        {
+            _editLeftDown = _editRightDown = _editMiddleDown = false;
+            _editGrab = -1;
+            _ringHovered = -1;
+            ResetSizeDrag();
+            // An interrupted drag will not see its release; settle its visual remainder onto the actual block.
+            if (_ringPress)
+                _ghostMotion.Aim(_ringAxis, 0f, Editor.GhostAt, Editor.PartSize, Editor.PartShape, _editTuning?.TurnSeconds ?? 0f);
+            ResetRingDrag();
+            // A surface over the world ends sizing where it is: the gesture's key may not be seen let go.
+            if (Editor.SizingPart)
+                Editor.EndPartSizing();
+            if (Editor.Carry is EditorCarry.Part or EditorCarry.Move)
+                Editor.CancelCarry();
+            // A part being turned waits, ghost and all, until a surface over the world gives the input back. Escape,
+            // R and clicks reach it only with the world's input.
+            if (!Editor.RotatingPart)
+                Editor.ClearHover();
+            GlideEditorCamera(dt);
+            return;
+        }
+
+        var control = _devices.KeyDown(GlfwKey.LeftControl) || _devices.KeyDown(GlfwKey.RightControl);
+        var shift = _devices.KeyDown(GlfwKey.LeftShift) || _devices.KeyDown(GlfwKey.RightShift);
+        if (control && _devices.KeyPressed(GlfwKey.Z))
+        {
+            if (shift)
+                Editor.Redo();
+            else
+                Editor.Undo();
+        }
+        else if (control && _devices.KeyPressed(GlfwKey.Y))
+            Editor.Redo();
+        else if (control && _devices.KeyPressed(GlfwKey.C))
+            Editor.CopySelection();
+        else if (control && _devices.KeyPressed(GlfwKey.V))
+            Editor.BeginPaste();
+        if (_devices.KeyPressed(GlfwKey.Delete))
+            Editor.DeleteSelected();
+        if (Editor.TakeFocusRequest() || (!control && _actions.Pressed(_devices, InputAction.Follow, true)))
+            FocusEditor();
+
+        // While the part is turned with its rings, or sized with S held, the left button and the wheel are theirs;
+        // the right button still orbits, and its click leaves placing alone.
+        if (UpdatePartRotation(pointerOverUi, control, shift) || UpdatePartSizing(pointerOverUi, control))
+        {
+            GlideEditorCamera(dt);
+            return;
+        }
+
+        var radius = EditRadius();
+        if (!pointerOverUi && _devices.Scroll != 0)
+        {
+            _editFocusing = false;
+            _editDistance = Math.Clamp(_editDistance * MathF.Pow(0.88f, _devices.Scroll), EditMinDistance(radius), EditMaxDistance(radius));
+        }
+
+        // Right: drag to orbit, click to drop what is carried or to stop placing.
+        UpdateOrbit(pointerOverUi, false);
+
+        // Middle: a drag pans across the view, kept within reach of the draft; a click selects.
+        if (_devices.MousePressed(GlfwMouseButton.Middle) && !pointerOverUi)
+        {
+            _editMiddleDown = true;
+            _editMiddleMoved = false;
+            _editMiddleStart = _devices.MousePosition;
+        }
+
+        var middleClick = false;
+        if (_editMiddleDown)
+        {
+            var moved = _devices.MousePosition - _editMiddleStart;
+            _editMiddleMoved |= MathF.Abs(moved.X) + MathF.Abs(moved.Y) > ClickSlop;
+            if (!_devices.MouseDown(GlfwMouseButton.Middle))
+            {
+                _editMiddleDown = false;
+                middleClick = !_editMiddleMoved;
+            }
+            else if (_editMiddleMoved)
+            {
+                _editFocusing = false;
+                var metresPerPixel = _editDistance * 2f * _tanHalfFov / Math.Max(_screen.Y, 1f);
+                var delta = (-_right * _devices.MouseDelta.X + _up * _devices.MouseDelta.Y) * metresPerPixel;
+                _editPan += Vector3.Transform(delta, Quaternion.Conjugate(OwnOrientation));
+                var reach = radius * 2f + 10f;
+                if (_editPan.Length() > reach)
+                    _editPan = Vector3.Normalize(_editPan) * reach;
+            }
+        }
+
+        // What is under the pointer, before a click is let go, so the click acts on what the player sees. While
+        // something is carried the pointer may be over a panel with the button held by the world or by the part
+        // list; only a panel under the pointer hides the ghost then.
+        var draft = Editor.Draft;
+        var source = Editor.Source;
+        var carrying = Editor.Carry != EditorCarry.None;
+        var blocked = carrying ? PointerOverPanel : pointerOverUi;
+        if (blocked || (_editRightDown && _editRightMoved) || (_editMiddleDown && _editMiddleMoved) || !Editor.CanInspect || draft is null || source is null)
+            Editor.ClearHover();
+        else
+        {
+            PointerInGrid(out var origin, out var direction);
+            // A moved group is laid against what is behind it, never against itself.
+            var skip = Editor.Carry == EditorCarry.Move ? Editor.SelectionMarks : default;
+            var found = EditorGeometry.Pick(draft.Boxes, origin, direction, skip, out var hit);
+            // A ghost held where sizing or a turn left it stays while the pointer is still or on the ghost, so a click
+            // there places it as it is; once the pointer leaves it for the ship, placing follows the pointer again.
+            if (Editor.GhostPinned && !carrying && Editor.HasGhost
+                && (_devices.MouseDelta == default || GhostUnder(origin, direction, found ? hit.Distance : float.PositiveInfinity, out _)))
+            {
+            }
+            else if (found)
+                Editor.SetHover(hit);
+            else
+                Editor.ClearHover();
+        }
+
+        if (middleClick && !pointerOverUi)
+            Editor.Pick(shift);
+
+        // A part dragged out of the part list: the interface holds the button, so its release is read raw. Let go
+        // over the ship it is placed if it fits; over a panel, or where it does not fit, nothing changes.
+        if (Editor.Carry == EditorCarry.Part)
+        {
+            if (!_devices.RawMouseDown(GlfwMouseButton.Left))
+            {
+                if (PointerOverPanel)
+                    Editor.CancelCarry();
+                else
+                    Editor.Drop();
+            }
+
+            GlideEditorCamera(dt);
+            return;
+        }
+
+        // Left: a click places or selects; a drag from a selected block moves the selection; any other drag does
+        // nothing, so a slip of the hand changes nothing.
+        if (_devices.MousePressed(GlfwMouseButton.Left) && !pointerOverUi)
+        {
+            _editLeftDown = true;
+            _editLeftMoved = false;
+            _editLeftStart = _devices.MousePosition;
+            _editGrab = Editor.Carry == EditorCarry.None && Editor.HasHover && Editor.IsSelected(Editor.Hover.Block) ? Editor.Hover.Block : -1;
+        }
+
+        if (_editLeftDown)
+        {
+            var moved = _devices.MousePosition - _editLeftStart;
+            _editLeftMoved |= MathF.Abs(moved.X) + MathF.Abs(moved.Y) > ClickSlop;
+            if (_editLeftMoved && _editGrab >= 0 && Editor.Carry == EditorCarry.None)
+            {
+                Editor.BeginMove(_editGrab);
+                _editGrab = -1;
+            }
+
+            if (!_devices.MouseDown(GlfwMouseButton.Left))
+            {
+                _editLeftDown = false;
+                _editGrab = -1;
+                if (Editor.Carry == EditorCarry.Move)
+                {
+                    if (PointerOverPanel)
+                        Editor.CancelCarry();
+                    else
+                        Editor.Drop();
+                }
+                else if (!_editLeftMoved && !pointerOverUi)
+                    Editor.Click(shift);
+            }
+        }
+
+        GlideEditorCamera(dt);
+    }
+
+    /// <summary>Pixels a press may move and still count as a click rather than a drag.</summary>
+    private const float ClickSlop = 5f;
+
+    /// <summary>
+    /// The right button: a drag orbits the camera and a click drops what is carried or stops placing. A press that
+    /// began while a part was sized or turned (<paramref name="reserved"/>) only orbits: its click changes nothing.
+    /// A press over the interface starts nothing.
+    /// </summary>
+    private void UpdateOrbit(bool pointerOverUi, bool reserved)
+    {
+        if (_devices.MousePressed(GlfwMouseButton.Right) && !pointerOverUi)
+        {
+            _editRightDown = true;
+            _editRightMoved = false;
+            _editRightStart = _devices.MousePosition;
+            _editRightReserved = reserved;
+        }
+
+        if (!_editRightDown)
+            return;
+        _editRightReserved |= reserved;
+        var moved = _devices.MousePosition - _editRightStart;
+        _editRightMoved |= MathF.Abs(moved.X) + MathF.Abs(moved.Y) > ClickSlop;
+        if (_editRightMoved)
+        {
+            _editYaw -= _devices.MouseDelta.X * 0.006f;
+            _editPitch = Math.Clamp(_editPitch - _devices.MouseDelta.Y * 0.006f, -1.5f, 1.5f);
+        }
+
+        if (_devices.MouseDown(GlfwMouseButton.Right))
+            return;
+        _editRightDown = false;
+        if (_editRightMoved || _editRightReserved)
+            return;
+        if (Editor.Carry != EditorCarry.None)
+            Editor.CancelCarry();
+        else
+            Editor.StopPlacing();
+    }
+
+    /// <summary>The camera and the ray under the pointer, in the draft's grid.</summary>
+    private void PointerInGrid(out Vector3 origin, out Vector3 direction)
+    {
+        var source = Editor.Source!;
+        var inverse = Quaternion.Conjugate(OwnOrientation);
+        origin = EditorGeometry.ToGrid(Vector3.Transform(CameraPosition.RelativeTo(OwnDrawnPosition), inverse), source.Pivot, source.BlockSize);
+        direction = Vector3.Transform(PointerRay(_devices.MousePosition), inverse);
+    }
+
+    /// <summary>
+    /// The face of the ghost of the part to place that the ray enters, nearer than <paramref name="nearer"/>: a
+    /// wedge's slant counts as the box side it stands for (<see cref="EditorGeometry.SlantEntry"/>). False when the
+    /// ray misses it.
+    /// </summary>
+    private bool GhostUnder(Vector3 origin, Vector3 direction, float nearer, out int side)
+    {
+        var ghost = new DesignBox(Editor.GhostAt, Editor.PartSize, null!, Editor.PartShape);
+        return EditorGeometry.Enter(ghost, origin, direction, out var distance, out side) && distance <= nearer;
+    }
+
+    /// <summary>The side of the ghost being sized that is highlighted (dragged, or under the pointer), or -1.</summary>
+    internal int PartSizingFace => Editor.SizingPart ? _sizeDragging ? _sizeSide : _sizeFace : -1;
+
+    /// <summary>True while a face of the ghost is dragged up and down, its axis pointing too nearly along the view.</summary>
+    internal bool PartSizingEdgeOn => Editor.SizingPart && _sizeDragging && _sizeEdgeOn;
+
+    /// <summary>
+    /// The part-size gesture. S held with the ghost on a face holds the ghost still; the face of the ghost under the
+    /// pointer is highlighted, and a left drag on it moves that face by whole cells, from one cell to the content's
+    /// largest box side, while the opposite face stays put. The pointer is followed along the face's axis as it
+    /// shows on screen at the press; an axis pointing too nearly along the view is followed up (grow) and down
+    /// instead. Letting go of the button or of S keeps the size and place for the next click, which places it;
+    /// Escape puts both back. The right button orbits meanwhile, holding a drag still until it is let go. Never
+    /// starts over the interface, with Ctrl or a mouse button held, while something is carried, while selecting or
+    /// turning, or on a damaged ship. True while it holds the controls.
+    /// </summary>
+    private bool UpdatePartSizing(bool pointerOverUi, bool control)
+    {
+        var allowed = Editor.CanEdit && Editor.Placing && Editor.Carry == EditorCarry.None && _editTuning is not null && Editor.Draft is not null;
+        if (!Editor.SizingPart)
+        {
+            ResetSizeDrag();
+            if (!allowed || control || pointerOverUi || _editLeftDown || _editRightDown || _editMiddleDown || !_devices.KeyPressed(GlfwKey.S)
+                || !Editor.BeginPartSizing())
+                return false;
+            _sizeVersion = Editor.Draft!.Version;
+        }
+
+        if (!allowed || !_devices.KeyDown(GlfwKey.S) || Editor.Draft!.Version != _sizeVersion)
+        {
+            // Let go: the size and the place stay for the next click, which takes a press of its own.
+            Editor.EndPartSizing();
+            ResetSizeDrag();
+            return false;
+        }
+
+        UpdateOrbit(pointerOverUi, true);
+        if (_editRightDown)
+        {
+            // The camera turns: a face drag holds still and starts again from wherever the pointer is let go.
+            _sizeRebase = _sizeDragging;
+            if (!_sizeDragging)
+                _sizeFace = -1;
+            return true;
+        }
+
+        if (_sizeDragging && !_devices.RawMouseDown(GlfwMouseButton.Left))
+            _sizeDragging = false;
+        if (_sizeDragging)
+        {
+            if (_sizeRebase)
+                StartSizeDrag(_sizeSide);
+            else
+                DragSizeFace();
+            return true;
+        }
+
+        PointerInGrid(out var origin, out var direction);
+        _sizeFace = !pointerOverUi && GhostUnder(origin, direction, float.PositiveInfinity, out var side) ? side : -1;
+        if (_sizeFace >= 0 && _devices.MousePressed(GlfwMouseButton.Left))
+            StartSizeDrag(_sizeFace);
+        return true;
+    }
+
+    /// <summary>
+    /// Starts dragging a face of the ghost, or starts again from where the pointer is: the length it has now, and
+    /// how a cell along the face's axis shows on screen from here.
+    /// </summary>
+    private void StartSizeDrag(int side)
+    {
+        _sizeDragging = true;
+        _sizeRebase = false;
+        _sizeSide = side;
+        _sizeStart = _devices.MousePosition;
+        var axis = side >> 1;
+        _sizeBase = EditorGeometry.Of(Editor.PartSize, axis);
+        var tuning = _editTuning!;
+        var size = Editor.PartSize;
+        var normal = EditorGeometry.Normal(side);
+        var face = GhostMotion.Middle(Editor.GhostAt, size) + normal * (EditorGeometry.Of(size, axis) * 0.5f);
+        PointerInGrid(out var origin, out _);
+        var view = face - origin;
+        var sine = view.LengthSquared() > 1e-8f ? Vector3.Cross(normal, Vector3.Normalize(view)).Length() : 0f;
+        var a = default(float2);
+        var b = default(float2);
+        _sizeEdgeOn = sine < MathF.Sin(tuning.EdgeOnDegrees * (MathF.PI / 180f))
+            || !Project(EditorPoint(face), out a) || !Project(EditorPoint(face + normal), out b);
+        if (_sizeEdgeOn)
+        {
+            _sizeCell = new float2(0f, -tuning.SizePixelsPerCell);
+            return;
+        }
+
+        // A face far away still takes a fair stretch of the pointer per cell, so the hand's tremor does not size it.
+        _sizeCell = b - a;
+        var length = MathF.Sqrt(_sizeCell.X * _sizeCell.X + _sizeCell.Y * _sizeCell.Y);
+        var shortest = tuning.SizePixelsPerCell * 0.5f;
+        if (length < shortest)
+            _sizeCell *= shortest / Math.Max(length, 1e-3f);
+    }
+
+    /// <summary>Moves the dragged face to the whole cell nearest where the pointer has taken it.</summary>
+    private void DragSizeFace()
+    {
+        var moved = _devices.MousePosition - _sizeStart;
+        var cells = (moved.X * _sizeCell.X + moved.Y * _sizeCell.Y) / (_sizeCell.X * _sizeCell.X + _sizeCell.Y * _sizeCell.Y);
+        var limit = Editor.Content!.Blocks.Limits.MaxBoxSide;
+        var length = _sizeBase + cells;
+        // Past a limit the movement is dropped, so turning back answers at once.
+        if (length > limit)
+        {
+            _sizeBase -= length - limit;
+            length = limit;
+        }
+        else if (length < 1f)
+        {
+            _sizeBase += 1f - length;
+            length = 1f;
+        }
+
+        var whole = Math.Clamp((int)MathF.Floor(length + 0.5f), 1, limit);
+        if (whole != EditorGeometry.Of(Editor.PartSize, _sizeSide >> 1))
+            Editor.SizePartFace(_sizeSide, whole);
+    }
+
+    /// <summary>Forgets the face under the pointer and any face drag.</summary>
+    private void ResetSizeDrag()
+    {
+        _sizeFace = -1;
+        _sizeDragging = false;
+        _sizeRebase = false;
+        _sizeEdgeOn = false;
+    }
+
+    /// <summary>Segments of a rotation ring, as it is hit and drawn.</summary>
+    internal const int RingSegments = 48;
+
+    /// <summary>The rotation ring under the pointer or held by a drag (0 about x, 1 about y), or -1.</summary>
+    internal int RotationRingHovered => Editor.RotatingPart ? _ringHovered : -1;
+
+    /// <summary>True while a rotation ring is held by a left drag.</summary>
+    internal bool RotationRingDragged => Editor.RotatingPart && _ringPress && _ringDragging;
+
+    /// <summary>
+    /// The middle of the rings of the part being turned and their radius, in the draft's grid; false with no part
+    /// being turned. They stand where the ghost was when the turn started, clear of it at any of its turns.
+    /// </summary>
+    internal bool PartRings(out Vector3 middle, out float radius)
+    {
+        middle = _ringMiddle;
+        radius = _ringRadius;
+        return Editor.RotatingPart && Editor.HasGhost;
+    }
+
+    /// <summary>
+    /// How the ghost of the part to place is drawn this frame while it glides into a turn: its outline turned about
+    /// its middle, then that middle shifted, in the draft's grid. Identity when it is not turning.
+    /// </summary>
+    internal void GhostPose(out Quaternion turn, out Vector3 shift)
+    {
+        if (!Editor.HasGhost)
+        {
+            turn = Quaternion.Identity;
+            shift = Vector3.Zero;
+            return;
+        }
+
+        _ghostMotion.Pose(Editor.GhostAt, Editor.PartSize, Editor.PartShape, out turn, out shift);
+    }
+
+    // The middle of the ghost and a radius that clears it at any turn: the half diagonal does not change as it turns.
+    private bool GhostRings(out Vector3 middle, out float radius)
+    {
+        middle = default;
+        radius = 0f;
+        if (!Editor.HasGhost)
+            return false;
+        var size = Editor.PartSize;
+        var half = new Vector3(size.X, size.Y, size.Z) * 0.5f;
+        var at = Editor.GhostAt;
+        middle = new Vector3(at.X - 0.5f, at.Y - 0.5f, at.Z - 0.5f) + half;
+        radius = half.Length() + 0.6f;
+        return true;
+    }
+
+    /// <summary>Point <paramref name="segment"/> of the ring about grid axis <paramref name="axis"/> (0 x, 1 y), in the grid.</summary>
+    internal static Vector3 RingPoint(Vector3 middle, float radius, int axis, int segment) =>
+        RingPointAt(middle, radius, axis, segment * MathF.Tau / RingSegments);
+
+    /// <summary>
+    /// The point of the ring about grid axis <paramref name="axis"/> (0 x, 1 y) at <paramref name="angle"/> along it,
+    /// in the grid. The angle runs y to z about x, and x to z about y: for the y ring that is a turn the other way.
+    /// </summary>
+    internal static Vector3 RingPointAt(Vector3 middle, float radius, int axis, float angle)
+    {
+        var a = MathF.Cos(angle) * radius;
+        var b = MathF.Sin(angle) * radius;
+        return middle + (axis == 0 ? new Vector3(0f, a, b) : new Vector3(a, 0f, b));
+    }
+
+    /// <summary>
+    /// Turning the part to place, before it is placed. R over a face starts it: two rings stand around the ghost,
+    /// one about the grid's x axis and one about its y; together their quarter turns reach every orientation a block
+    /// may have. A left drag on a ring turns the ghost with the pointer, the part itself in whole quarter turns as
+    /// the drag passes each half way; the wheel over a ring turns a quarter either way, and a click on it a quarter
+    /// forward, with Shift back. The ghost glides into each turn. Every turn counts at once; nothing confirms it.
+    /// A left press on the ghost ends the turn and becomes placing's press, so its click places the part as it is
+    /// drawn, where it is drawn. R again, a left or middle press anywhere else, or a press on a panel ends the turn
+    /// keeping it, and that press goes no further; Escape, or choosing another part, shape or the select tool, puts
+    /// back the shape and size from before R. The right button orbits meanwhile and its click changes nothing. A
+    /// ring's press and release never place. True while it holds the controls.
+    /// </summary>
+    private bool UpdatePartRotation(bool pointerOverUi, bool control, bool shift)
+    {
+        var r = !control && _devices.KeyPressed(GlfwKey.R);
+        if (!Editor.RotatingPart)
+        {
+            _ringHovered = -1;
+            ResetRingDrag();
+            // A turn put back shows the ghost as it was at once, not gliding out of the turn it no longer has.
+            if (_ringCancels != Editor.RotationCancels)
+            {
+                _ringCancels = Editor.RotationCancels;
+                _ghostMotion.Reset();
+            }
+
+            if (!r || Editor.SizingPart || _editLeftDown || _editRightDown || _editMiddleDown || pointerOverUi || !GhostRings(out _ringMiddle, out _ringRadius)
+                || !Editor.BeginPartRotation())
+                return false;
+            _ghostMotion.Reset();
+            _ringCancels = Editor.RotationCancels;
+            return true;
+        }
+
+        if (r)
+        {
+            // R again ends the turn and keeps it; the ghost stays where it was turned for the next click.
+            if (_ringPress)
+                _ghostMotion.Aim(_ringAxis, 0f, Editor.GhostAt, Editor.PartSize, Editor.PartShape, _editTuning?.TurnSeconds ?? 0f);
+            Editor.EndPartRotation(true);
+            _ringHovered = -1;
+            ResetRingDrag();
+            return true;
+        }
+
+        UpdateOrbit(pointerOverUi, true);
+        if (_ringPress)
+        {
+            DragRing(shift);
+            return true;
+        }
+
+        // While the camera turns, the rings are only looked at: no wheel turns and no press starts.
+        if (_editRightDown)
+        {
+            _ringHovered = -1;
+            return true;
+        }
+
+        _ringHovered = pointerOverUi ? -1 : RingUnderPointer();
+        var left = _devices.MousePressed(GlfwMouseButton.Left);
+        if (_ringHovered >= 0)
+        {
+            if (_devices.Scroll != 0)
+                TurnGhost(_ringHovered, _devices.Scroll > 0 ? 1 : -1);
+            if (left)
+            {
+                // A click or a drag: which, the pointer's way from here tells.
+                _ringPress = true;
+                _ringAxis = _ringHovered;
+                _ringPressAt = _devices.MousePosition;
+                _ringDragging = false;
+                _ringAngle = 0f;
+                _ringTurns = 0;
+                _ringRebase = true;
+                DragRing(shift);
+            }
+        }
+        else if (!pointerOverUi && left && PointerOnGhost())
+        {
+            // A press on the ghost: the turn is kept and the press is placing's from here, held on the ghost, so its
+            // click places exactly what is drawn. Moved off as a drag, it places nothing, as any slip of the hand.
+            Editor.EndPartRotation(true);
+            _ringHovered = -1;
+            _editLeftDown = true;
+            _editLeftMoved = false;
+            _editLeftStart = _devices.MousePosition;
+            _editGrab = -1;
+        }
+        else if (!pointerOverUi && (left || _devices.MousePressed(GlfwMouseButton.Middle)))
+        {
+            // A press anywhere else ends the turn, keeping it, and goes no further: the ghost was not drawn there,
+            // so nothing is placed or selected. The ghost follows the pointer again from the next frame.
+            Editor.EndPartRotation(false);
+            _ringHovered = -1;
+        }
+
+        return true;
+    }
+
+    /// <summary>True when the pointer's ray meets the ghost of the part to place before any block of the draft.</summary>
+    private bool PointerOnGhost()
+    {
+        if (!Editor.HasGhost || Editor.Draft is not { } draft || Editor.Source is null)
+            return false;
+        PointerInGrid(out var origin, out var direction);
+        var found = EditorGeometry.Pick(draft.Boxes, origin, direction, out var hit);
+        return GhostUnder(origin, direction, found ? hit.Distance : float.PositiveInfinity, out _);
+    }
+
+    /// <summary>
+    /// A ring held by the left button. Let go without moving, it was a click: a quarter turn forward, or back with
+    /// Shift. Moved, it is a drag: the angle the pointer has gone round the ring's middle, read where the pointer's ray
+    /// meets the ring's plane and summed a small step at a time so it never wraps, turns the part a quarter at each
+    /// half way past a quarter, and the ghost follows the rest. Let go after a drag, the ghost glides onto the part's
+    /// quarter turn and nothing else happens. While the camera turns, or the ring is too near edge-on to read, the
+    /// angle waits and is read afresh after, so neither turns the part.
+    /// </summary>
+    private void DragRing(bool shift)
+    {
+        _ringHovered = _ringAxis;
+        var seconds = _editTuning?.TurnSeconds ?? 0f;
+        // Orbit motion also disqualifies a pending click, including movement delivered with the release.
+        var moved = _devices.MousePosition - _ringPressAt;
+        _ringDragging |= MathF.Abs(moved.X) + MathF.Abs(moved.Y) > ClickSlop;
+        if (!_devices.RawMouseDown(GlfwMouseButton.Left))
+        {
+            if (!_ringDragging)
+                TurnGhost(_ringAxis, shift ? -1 : 1);
+            else
+                _ghostMotion.Aim(_ringAxis, 0f, Editor.GhostAt, Editor.PartSize, Editor.PartShape, seconds);
+            ResetRingDrag();
+            return;
+        }
+
+        if (_editRightDown)
+        {
+            _ringRebase = true;
+            return;
+        }
+
+        if (!RingAngle(_ringAxis, out var angle))
+        {
+            _ringRebase = true;
+            return;
+        }
+
+        if (_ringRebase)
+        {
+            _ringLast = angle;
+            _ringRebase = false;
+        }
+
+        var step = angle - _ringLast;
+        if (step > MathF.PI)
+            step -= MathF.Tau;
+        else if (step < -MathF.PI)
+            step += MathF.Tau;
+        _ringLast = angle;
+        _ringAngle += step;
+        if (!_ringDragging)
+            return;
+        const float quarter = MathF.PI * 0.5f;
+        while (_ringAngle - _ringTurns * quarter > quarter * 0.5f)
+        {
+            TurnGhost(_ringAxis, 1);
+            _ringTurns++;
+        }
+
+        while (_ringAngle - _ringTurns * quarter < -quarter * 0.5f)
+        {
+            TurnGhost(_ringAxis, -1);
+            _ringTurns--;
+        }
+
+        _ghostMotion.Aim(_ringAxis, _ringAngle - _ringTurns * quarter, Editor.GhostAt, Editor.PartSize, Editor.PartShape, seconds);
+    }
+
+    /// <summary>
+    /// The pointer's angle about the axis of ring <paramref name="axis"/>, right-handed, where its ray meets the
+    /// ring's plane. False when the plane is too near edge-on, behind the camera, or the pointer is too near the
+    /// middle for its angle to mean anything.
+    /// </summary>
+    private bool RingAngle(int axis, out float angle)
+    {
+        angle = 0f;
+        PointerInGrid(out var origin, out var direction);
+        var across = direction[axis];
+        var edgeOn = MathF.Sin((_editTuning?.EdgeOnDegrees ?? 12f) * (MathF.PI / 180f));
+        if (MathF.Abs(across) < edgeOn)
+            return false;
+        var t = (_ringMiddle[axis] - origin[axis]) / across;
+        if (t <= 0f)
+            return false;
+        var p = origin + direction * t - _ringMiddle;
+        if (p.LengthSquared() < _ringRadius * _ringRadius * 0.01f)
+            return false;
+        // About x the angle runs y to z; about y it runs z to x, as a right-handed turn does.
+        angle = axis == 0 ? MathF.Atan2(p.Z, p.Y) : MathF.Atan2(p.X, p.Z);
+        return true;
+    }
+
+    /// <summary>Turns the part being turned and glides its ghost from where it was drawn into the new turn.</summary>
+    private void TurnGhost(int axis, int turns)
+    {
+        var (at, size, shape) = (Editor.GhostAt, Editor.PartSize, Editor.PartShape);
+        Editor.TurnPart(axis, turns);
+        if (Editor.HasGhost)
+            _ghostMotion.Turned(axis, turns, at, size, shape, Editor.GhostAt, Editor.PartSize, Editor.PartShape, _editTuning?.TurnSeconds ?? 0f);
+    }
+
+    /// <summary>Lets go of a ring press.</summary>
+    private void ResetRingDrag()
+    {
+        _ringPress = false;
+        _ringDragging = false;
+        _ringRebase = false;
+    }
+
+    /// <summary>
+    /// A left or middle press on a panel ends a turn, keeping it, as a press elsewhere in the world does. Called by
+    /// the editor screen after the world, once the router has given the interface the raw mouse again: the world
+    /// never sees a press over a panel. A ring held by a drag keeps the turn going.
+    /// </summary>
+    internal void EndPartRotationOnPanelPress()
+    {
+        // ImGui can defer a click across frames; this reads the poll's own press and where the pointer is with it.
+        // The right button only orbits while a part is turned, so its press on a panel leaves the turn alone.
+        if (!Editor.RotatingPart || _ringPress || !PointerOverPanel
+            || !(_devices.MousePressed(GlfwMouseButton.Left) || _devices.MousePressed(GlfwMouseButton.Middle)))
+            return;
+        Editor.EndPartRotation(true);
+        _ringHovered = -1;
+    }
+
+    /// <summary>The ring nearest the pointer within the tuning's reach, or -1. Allocates nothing.</summary>
+    private int RingUnderPointer()
+    {
+        if (_editTuning is null || !PartRings(out var middle, out var radius))
+            return -1;
+        var pointer = _devices.MousePosition;
+        var best = -1;
+        var nearest = _editTuning.RotateRingPixels;
+        for (var axis = 0; axis < 2; axis++)
+        {
+            for (var i = 0; i < RingSegments; i++)
+            {
+                if (!ProjectSegment(EditorPoint(RingPoint(middle, radius, axis, i)), EditorPoint(RingPoint(middle, radius, axis, i + 1)), out var a, out var b))
+                    continue;
+                var ab = b - a;
+                var length = ab.X * ab.X + ab.Y * ab.Y;
+                var t = length > 0f ? Math.Clamp(((pointer.X - a.X) * ab.X + (pointer.Y - a.Y) * ab.Y) / length, 0f, 1f) : 0f;
+                var dx = a.X + ab.X * t - pointer.X;
+                var dy = a.Y + ab.Y * t - pointer.Y;
+                var distance = MathF.Sqrt(dx * dx + dy * dy);
+                if (distance < nearest)
+                {
+                    nearest = distance;
+                    best = axis;
+                }
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>Lets go of every part gesture the view holds: a face drag, a ring press and the ghost's glide.</summary>
+    private void ResetPartGestures()
+    {
+        ResetSizeDrag();
+        ResetRingDrag();
+        _ringHovered = -1;
+        _editRightReserved = false;
+        _ghostMotion.Reset();
+    }
+
+    /// <summary>Moves the editor's camera a step towards a focus, easing out.</summary>
+    private void GlideEditorCamera(float dt)
+    {
+        if (!_editFocusing)
+            return;
+        var t = 1f - MathF.Exp(-dt * 9f);
+        _editPan = Vector3.Lerp(_editPan, _editPanGoal, t);
+        _editDistance += (_editDistanceGoal - _editDistance) * t;
+        if (Vector3.DistanceSquared(_editPan, _editPanGoal) < 1e-4f && MathF.Abs(_editDistance - _editDistanceGoal) < 0.01f)
+        {
+            _editPan = _editPanGoal;
+            _editDistance = _editDistanceGoal;
+            _editFocusing = false;
+        }
+    }
+
+    /// <summary>Adds the draft's blocks in their own shapes where the hull is, each tinted for its role.</summary>
+    private void AddDraft(ref int count, BuildDraft draft, HullDesign source, Double3 camera)
+    {
+        var hull = OwnDrawnPosition.RelativeTo(camera);
+        var orientation = OwnOrientation;
+        var boxes = draft.Boxes;
+        var material = Material(false, -1);
+        for (var i = 0; i < boxes.Length && count < _candidates.Length; i++)
+        {
+            ref readonly var box = ref boxes[i];
+            var middle = EditorGeometry.ToHull(EditorGeometry.Middle(box), source.Pivot, source.BlockSize);
+            var size = new Vector3(box.Size.X, box.Size.Y, box.Size.Z) * source.BlockSize;
+            var color = EditorGeometry.BlockColor(source.Color, box.Type);
+            // A block the ship has lost is drawn dark red; a selected one lighter and bluer. The outlines say which
+            // is which as well, so the colours never have to carry it alone.
+            if (Editor.IsMissing(i))
+                color = Vector3.Lerp(color, new Vector3(0.45f, 0.08f, 0.06f), 0.7f);
+            if (Editor.IsSelected(i))
+                color = Vector3.Lerp(color, new Vector3(0.6f, 0.8f, 1f), 0.4f);
+            Add(ref count, _cubeMesh + (int)box.Shape, hull + Vector3.Transform(middle, orientation), orientation, size, color, material);
+        }
+    }
+
+    /// <summary>A point of the draft's grid in the world, where the edited hull is drawn this frame.</summary>
+    public Double3 EditorPoint(Vector3 grid)
+    {
+        var source = Editor.Source;
+        return source is null ? OwnDrawnPosition : OwnDrawnPosition + Vector3.Transform(EditorGeometry.ToHull(grid, source.Pivot, source.BlockSize), OwnOrientation);
+    }
+
+    /// <summary>The direction of the view ray under a window position.</summary>
+    public Vector3 PointerRay(float2 pointer)
+    {
+        var aspect = _screen.X / _screen.Y;
+        var nx = pointer.X / _screen.X * 2f - 1f;
+        var ny = pointer.Y / _screen.Y * 2f - 1f;
+        return Vector3.Normalize(_forward + _right * (nx * _tanHalfFov * aspect) - _up * (ny * _tanHalfFov));
+    }
+
+    /// <summary>
+    /// Projects a line between two world points to window coordinates, cut at the near plane. False when all of it
+    /// is behind the camera.
+    /// </summary>
+    public bool ProjectSegment(Double3 from, Double3 to, out float2 a, out float2 b)
+    {
+        var va = ToView(from);
+        var vb = ToView(to);
+        a = b = default;
+        if (va.Z < NearPlane && vb.Z < NearPlane)
+            return false;
+        if (va.Z < NearPlane)
+            va = Vector3.Lerp(va, vb, (NearPlane - va.Z) / (vb.Z - va.Z));
+        else if (vb.Z < NearPlane)
+            vb = Vector3.Lerp(vb, va, (NearPlane - vb.Z) / (va.Z - vb.Z));
+        a = ViewToScreen(va);
+        b = ViewToScreen(vb);
+        return true;
+    }
+
+    private float2 ViewToScreen(Vector3 view)
+    {
+        var aspect = _screen.X / _screen.Y;
+        var x = view.X / (view.Z * _tanHalfFov * aspect);
+        var y = -view.Y / (view.Z * _tanHalfFov);
+        return new float2((x * 0.5f + 0.5f) * _screen.X, (y * 0.5f + 0.5f) * _screen.Y);
     }
 
     /// <summary>Keeps the block of sectors around the camera generated, on worker threads.</summary>
@@ -2201,22 +3378,32 @@ internal sealed class WorldView
 
     /// <summary>Adds one mesh instance; <paramref name="stretch"/> draws it out along its local z, the hull's nose.</summary>
     private void Add(ref int count, int mesh, Vector3 position, Quaternion rotation, float scale, Vector3 color, float material, float stretch = 1f)
+        => Add(ref count, mesh, position, rotation, new Vector3(scale), color, material, stretch);
+
+    private void Add(ref int count, int mesh, Vector3 position, Quaternion rotation, Vector3 scale, Vector3 color, float material, float stretch = 1f)
     {
-        var m = Matrix4x4.CreateFromQuaternion(rotation);
-        var along = scale * stretch;
+        if (count == _candidates.Length) return;
         _candidates[count++] = new Candidate
         {
             Mesh = mesh,
-            Instance = new MeshInstance
-            {
-                // System.Numerics matrices transform row vectors, so the rotation's columns are its rows here.
-                Row0 = new float4(m.M11 * scale, m.M21 * scale, m.M31 * along, position.X),
-                Row1 = new float4(m.M12 * scale, m.M22 * scale, m.M32 * along, position.Y),
-                Row2 = new float4(m.M13 * scale, m.M23 * scale, m.M33 * along, position.Z),
-                Tint = new float4(color.X, color.Y, color.Z, material),
-            },
+            Instance = MeshTransform(position, rotation, scale, color, material, stretch),
         };
         _meshCounts[mesh]++;
+    }
+
+    /// <summary>The actual instance transform, shared by intact meshes and individual damaged boxes.</summary>
+    internal static MeshInstance MeshTransform(Vector3 position, Quaternion rotation, Vector3 scale, Vector3 color, float material, float stretch)
+    {
+        var m = Matrix4x4.CreateFromQuaternion(rotation);
+        var along = scale.Z * stretch;
+        return new MeshInstance
+        {
+            // System.Numerics matrices transform row vectors, so the rotation's columns are its rows here.
+            Row0 = new float4(m.M11 * scale.X, m.M21 * scale.Y, m.M31 * along, position.X),
+            Row1 = new float4(m.M12 * scale.X, m.M22 * scale.Y, m.M32 * along, position.Y),
+            Row2 = new float4(m.M13 * scale.X, m.M23 * scale.Y, m.M33 * along, position.Z),
+            Tint = new float4(color.X, color.Y, color.Z, material),
+        };
     }
 
     private static float Wrap(double value, double period) => (float)(value - Math.Floor(value / period) * period);

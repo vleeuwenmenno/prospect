@@ -10,8 +10,9 @@ namespace Prospect.Game.Protocol;
 /// <list type="number">
 /// <item>The server makes a random <b>salt</b> of 16 bytes when it starts, and derives its <b>key</b> once:
 /// PBKDF2-HMAC-SHA256 of the password's UTF-8 bytes with that salt, 200,000 rounds, 32 bytes out.</item>
-/// <item>It answers every hello with the salt and a <b>challenge</b>: 32 random bytes made for that one
-/// connection.</item>
+/// <item>It answers every hello it does not refuse outright with the salt and a <b>challenge</b>: 32 random
+/// bytes made for that one connection. A hello of another version or with other content
+/// (<see cref="World.ContentIdentity"/>) is refused without one.</item>
 /// <item>The client derives the same key from the password it was given and the server's salt, and sends the
 /// <b>proof</b>: HMAC-SHA256, keyed with the key, of the text <c>PROSPECT password proof v1</c>, the protocol
 /// version (four bytes, little-endian), the salt and the challenge, in that order.</item>
@@ -23,6 +24,9 @@ namespace Prospect.Game.Protocol;
 /// else. This protects the password and nothing more: game packets are neither encrypted nor signed, someone on
 /// the path can read and alter them, and someone who relays a live handshake gets in with it. A weak password
 /// can be guessed offline by anyone who overhears one handshake; the rounds only make each guess slower.
+///
+/// The proof covers the version, the salt and the challenge, and nothing else of the hello: not the name and not
+/// the content identity. Neither is secret, and the server has compared the identity before it challenges.
 /// </summary>
 public static class Passwords
 {

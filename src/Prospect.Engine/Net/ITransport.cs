@@ -8,6 +8,8 @@ public enum NetChannel : byte
 
     /// <summary>Arrives exactly once and in order. For events that must not be lost.</summary>
     Reliable = 1,
+    /// <summary>Ordered bulk recovery, independent of gameplay's reliable ordering stream.</summary>
+    Bulk = 2,
 }
 
 public enum DisconnectReason : byte

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Prospect.Game.Client;
 using Prospect.Game.Server;
 using Prospect.Game.World;
@@ -340,10 +341,8 @@ public sealed class PowerAndDamageTests
         var rockCenter = galaxy.CenterOf(target.Sector) + rock.LocalPosition + pushed;
 
         var design = Content.Pod;
-        hp = new float[HullDesign.MaxBlocks];
-        for (var i = 0; i < design.Types.Length; i++)
-            hp[i] = design.Types[i].Hull;
-        var body = new HullBody { Design = design, Alive = design.FullMask, BlockHp = hp };
+        using var states = new BlockStateStore();
+        var body = states.Body(design);
 
         state = HullState.Spawn(rockCenter + Vector3.Normalize(from) * (SurfaceToward(rock, from) + 60f), flight);
         state.Velocity = velocity;
@@ -356,8 +355,29 @@ public sealed class PowerAndDamageTests
                 break;
         }
 
-        alive = body.Alive;
+        alive = BlockMasks.Word(body.Alive);
+        hp = states.HitPoints(body.State).ToArray();
         return destroyed;
+    }
+
+    [Fact]
+    public void ALightAsteroidTapShowsFeedbackWithoutDamage()
+    {
+        var rocks = new RockField(CrashGalaxy);
+        var rock = rocks.Sector(OrdinaryRock.Sector).Asteroids[OrdinaryRock.Index];
+        var from = -Vector3.UnitX;
+        var center = CrashGalaxy.CenterOf(OrdinaryRock.Sector) + rock.LocalPosition;
+        using var states = new BlockStateStore();
+        var body = states.Body(Content.Pod);
+        var state = HullState.Spawn(center + from * (SurfaceToward(rock, from) + 2f), Pod);
+        state.Velocity = Vector3.UnitX;
+        var order = default(HullOrder);
+        for (var tick = 0; tick < 300 && state.ShieldHit.Strength == 0; tick++)
+            HullSim.Step(ref state, ref order, default, Pod, ref body, rocks, tick);
+        Assert.True(state.ShieldHit.Strength > 0);
+        Assert.Equal(Pod.ShieldCapacity, state.Shield);
+        Assert.Equal(Pod.HullPoints, state.Hull);
+        Assert.Equal(0f, state.ShieldCooldown);
     }
 
     [Fact]
@@ -368,7 +388,7 @@ public sealed class PowerAndDamageTests
         Assert.False(destroyed);
         Assert.True(state.Velocity.X < 0, "the hull should have bounced back");
         Assert.InRange(state.Shield, 1f, Pod.ShieldCapacity - 1f);
-        Assert.Equal(Content.Pod.FullMask, alive);
+        Assert.Equal(Content.Pod.FullMask(), alive);
         Assert.Equal(Pod.HullPoints, state.Hull);
     }
 
@@ -379,13 +399,13 @@ public sealed class PowerAndDamageTests
 
         // Hitting side-on costs the blocks on that side; the core in the middle survives.
         Assert.False(destroyed);
-        Assert.NotEqual(Content.Pod.FullMask, alive);
-        Assert.Equal(Content.Pod.CoreMask, alive & Content.Pod.CoreMask);
+        Assert.NotEqual(Content.Pod.FullMask(), alive);
+        Assert.Equal(Content.Pod.CoreMask(), alive & Content.Pod.CoreMask());
         Assert.Equal(0f, state.Shield);
         Assert.Equal(hp.Sum(), state.Hull, 1);
         Assert.True(state.Hull < Pod.HullPoints);
 
-        Content.Pod.Evaluate(alive, out var flight, out var stats);
+        Content.Pod.Evaluate([alive], out var flight, out var stats);
         Assert.True(flight.Mass < Pod.Mass);
         Assert.True(stats.Blocks < Content.Pod.Cells.Length);
 
@@ -399,7 +419,7 @@ public sealed class PowerAndDamageTests
     {
         // Belly-first at speed: the core sits in the bottom layer and takes the hit.
         Assert.True(Crash(new Vector3(0, 1, 0), new Vector3(0, -300, 0), Pod, out _, out var alive, out _));
-        Assert.NotEqual(Content.Pod.CoreMask, alive & Content.Pod.CoreMask);
+        Assert.NotEqual(Content.Pod.CoreMask(), alive & Content.Pod.CoreMask());
     }
 
     [Fact]
@@ -455,7 +475,7 @@ public sealed class PowerAndDamageTests
         Assert.False(destroyed);
         Assert.True(struck.Count >= 1, "the pod flew through the pebble");
         Assert.Equal(pebble, struck.Items[0].Rock);
-        Assert.Equal(Content.Pod.FullMask, alive);
+        Assert.Equal(Content.Pod.FullMask(), alive);
 
         // Even a pebble outweighs a pod several times over: the pod comes back off it, and the pebble is sent
         // on its way at a speed anyone can see.
@@ -527,8 +547,8 @@ public sealed class PowerAndDamageTests
         // Where it was generated there is nothing left to hit.
         var gone = new RockImpulses();
         var design = Content.Pod;
-        var hp = new float[HullDesign.MaxBlocks];
-        var body = new HullBody { Design = design, Alive = design.FullMask, BlockHp = hp };
+        using var states = new BlockStateStore();
+        var body = states.Body(design);
         var state = HullState.Spawn(galaxy.CenterOf(default) + rock.LocalPosition + side * (SurfaceToward(rock, side) + 60f), Pod);
         state.Velocity = new Vector3(0, -40, 0);
         var order = default(HullOrder);
@@ -582,10 +602,10 @@ public sealed class PowerAndDamageTests
         // steps it: the asteroids it moves are recorded and from then on found where they have drifted to.
         var rock = content.Asteroids[anchor];
         var design = Content.Pod;
-        var hp = new float[HullDesign.MaxBlocks];
-        for (var i = 0; i < design.Types.Length; i++)
-            hp[i] = 1e9f;
-        var body = new HullBody { Design = design, Alive = design.FullMask, BlockHp = hp };
+        using var states = new BlockStateStore();
+        var body = states.Body(design);
+        for (var i = 0; i < design.BlockCount; i++)
+            states.SetHitPoints(body.State, i, 1e9f);
         var flight = Pod;
         flight.CollisionDamagePerTonneSpeedSquared = 0;
         var state = default(HullState);
@@ -714,12 +734,12 @@ public sealed class HullCollisionTests : IDisposable
         var second = Content.Designs[_hulls.Info(b).Design];
         for (var i = 0; i < first.BlockOffsets.Length; i++)
         {
-            if ((_hulls.Info(a).Blocks & 1UL << i) == 0)
+            if ((_hulls.Mask(a) & 1UL << i) == 0)
                 continue;
             var world = _hulls.State(a).Position + Vector3.Transform(first.BlockOffsets[i], _hulls.State(a).Orientation);
             for (var j = 0; j < second.BlockOffsets.Length; j++)
             {
-                if ((_hulls.Info(b).Blocks & 1UL << j) == 0)
+                if ((_hulls.Mask(b) & 1UL << j) == 0)
                     continue;
                 var other = _hulls.State(b).Position + Vector3.Transform(second.BlockOffsets[j], _hulls.State(b).Orientation);
                 smallest = Math.Min(smallest, world.RelativeTo(other).Length());
@@ -756,19 +776,42 @@ public sealed class HullCollisionTests : IDisposable
         var vessel = Add(Vessel, Double3.Zero);
         var pod = Add(Content.PodDesign, new Double3(30, 0, 0), new Vector3(-80, 0, 0));
         var before = Momentum(pod) + Momentum(vessel);
-        var podMass = _hulls.Flight(pod).Mass;
-        var vesselMass = _hulls.Flight(vessel).Mass;
+        var shed = Vector3.Zero;
+        var closest = float.MaxValue;
+        var checkedFirstDamage = false;
+        for (var tick = 0; tick < 60; tick++)
+        {
+            _field.BeginRound();
+            foreach (var stepping in new[] { vessel, pod })
+            {
+                var podMass = _hulls.Flight(pod).Mass;
+                var vesselMass = _hulls.Flight(vessel).Mass;
+                var momentum = Momentum(pod) + Momentum(vessel);
+                Assert.False(_field.Step(stepping, default));
+                Assert.Empty(_field.Lost.ToArray());
+                // Lost material leaves with its hull's velocity at that impact. Subsequent box contacts use
+                // the reduced mass, so using the original masses after sixty ticks is not momentum accounting.
+                var debris = _hulls.State(pod).Velocity * (podMass - _hulls.Flight(pod).Mass)
+                    + _hulls.State(vessel).Velocity * (vesselMass - _hulls.Flight(vessel).Mass);
+                if (!checkedFirstDamage && DamagedBlocks(vessel) > 0)
+                {
+                    var hp = _hulls.BlockHp(vessel);
+                    var design = Content.Designs[Vessel];
+                    for (var i = 0; i < design.Types.Length; i++)
+                        Assert.True(hp[i] >= design.Types[i].Hull || design.BlockOffsets[i].X > 0, $"block {i} on the far side was damaged at first impact");
+                    checkedFirstDamage = true;
+                }
+                shed += debris;
+                closest = Math.Min(closest, Gap(pod, vessel));
+                Assert.True((Momentum(pod) + Momentum(vessel) + debris - momentum).Length() < before.Length() * 1e-3f);
+            }
+        }
 
-        var closest = Run(60, pod, vessel);
-
-        // Both changed course: the pod lost speed, the vessel was shoved the way the pod was going.
         var podVelocity = _hulls.State(pod).Velocity;
         var vesselVelocity = _hulls.State(vessel).Velocity;
         Assert.True(podVelocity.X > -60f, $"the pod kept {podVelocity.X} m/s");
         Assert.True(vesselVelocity.X < -15f, $"the vessel only reached {vesselVelocity.X} m/s");
-
-        // What one lost the other gained, weighed with the masses they had when they met.
-        var after = podVelocity * podMass + vesselVelocity * vesselMass;
+        var after = Momentum(pod) + Momentum(vessel) + shed;
         Assert.True((after - before).Length() < before.Length() * 1e-3f, $"momentum went from {before} to {after}");
 
         // The shields went first, then the blocks that touched: some on each hull, and not all of either.
@@ -779,11 +822,8 @@ public sealed class HullCollisionTests : IDisposable
         Assert.True(_hulls.State(pod).Hull < Content.Pod.Flight.HullPoints);
         Assert.True(_hulls.State(vessel).Hull < Content.Designs[Vessel].Flight.HullPoints);
 
-        // The pod came from +X: the damage is on the vessel's side facing it.
-        var hp = _hulls.BlockHp(vessel);
-        var design = Content.Designs[Vessel];
-        for (var i = 0; i < design.Types.Length; i++)
-            Assert.True(hp[i] >= design.Types[i].Hull || design.BlockOffsets[i].X > 0, $"block {i} on the far side was damaged");
+        // Later box contacts can reach another side after the first impact turns either hull.
+        Assert.True(checkedFirstDamage);
 
         // At no point were they inside each other, and they have parted.
         Assert.True(closest > 0.95f, $"the hulls were {closest} m apart at the closest");
@@ -838,6 +878,8 @@ public sealed class HullCollisionTests : IDisposable
 
         Assert.Equal(Content.Pod.Flight.ShieldCapacity, _hulls.State(pod).Shield);
         Assert.Equal(Content.Designs[Vessel].Flight.ShieldCapacity, _hulls.State(vessel).Shield);
+        Assert.True(_hulls.State(pod).ShieldHit.Strength > 0);
+        Assert.True(_hulls.State(vessel).ShieldHit.Strength > 0);
         Assert.Equal(0f, _hulls.State(pod).ShieldCooldown);
         Assert.Equal(0f, _hulls.State(vessel).ShieldCooldown);
         Assert.Equal(0, DamagedBlocks(pod) + DamagedBlocks(vessel));
@@ -951,11 +993,11 @@ public sealed class HullCollisionTests : IDisposable
         {
             _hulls.Clear();
             var pod = Add(Content.PodDesign, Double3.Zero);
-            _hulls.Info(pod).Blocks = 1UL << left;
+            _hulls.Lose(pod, design.FullMask() & ~(1UL << left));
             var drone = Add(Content.DroneDesign, Double3.Zero + design.BlockOffsets[over] + new Vector3(0, 6, 0), new Vector3(0, -4, 0));
             for (var i = 0; i < 180; i++)
                 Tick();
-            Assert.Equal(1UL << left, _hulls.Info(pod).Blocks);
+            Assert.Equal(1UL << left, _hulls.Mask(pod));
             return _hulls.State(drone).Velocity;
         }
 
@@ -1106,7 +1148,7 @@ public sealed class HullCollisionTests : IDisposable
         }
 
         Assert.True(lost, "the pod should have been reported destroyed");
-        Assert.NotEqual(Content.Pod.CoreMask, _hulls.Info(pod).Blocks & Content.Pod.CoreMask);
+        Assert.NotEqual(Content.Pod.CoreMask(), _hulls.Mask(pod) & Content.Pod.CoreMask());
         Assert.True(_hulls.State(pod).Velocity.Y > 50f, "the pod should still have been thrown upward");
         Assert.True(DamagedBlocks(vessel) > 0);
     }
@@ -1208,9 +1250,9 @@ public sealed class HullCollisionTests : IDisposable
             Assert.Equal(0, predicted.Lost.Length);
         }
 
-        Assert.NotEqual(Content.Pod.FullMask, _hulls.Info(pod).Blocks);
-        Assert.Equal(Content.Pod.FullMask, copy.Info(pod).Blocks);
-        Assert.Equal(Content.Designs[Vessel].FullMask, copy.Info(vessel).Blocks);
+        Assert.NotEqual(Content.Pod.FullMask(), _hulls.Mask(pod));
+        Assert.Equal(Content.Pod.FullMask(), copy.Mask(pod));
+        Assert.Equal(Content.Designs[Vessel].FullMask(), copy.Mask(vessel));
         Assert.Equal(0f, copy.State(pod).Shield);
         Assert.True(copy.State(pod).Hull < Content.Pod.Flight.HullPoints);
         Assert.True(copy.State(vessel).Hull < Content.Designs[Vessel].Flight.HullPoints);
@@ -1519,7 +1561,7 @@ public sealed class JumpTests
     {
         var pod = Content.Pod;
         var drive = Array.FindIndex(pod.Types, t => t.Ftl != FtlKind.None);
-        pod.Evaluate(pod.FullMask & ~(1UL << drive), out var flight, out var stats);
+        pod.Evaluate([pod.FullMask() & ~(1UL << drive)], out var flight, out var stats);
         Assert.Equal(FtlKind.None, stats.Ftl);
 
         var state = HullState.Spawn(Double3.Zero, flight);
@@ -1533,6 +1575,27 @@ public sealed class JumpTests
 public sealed class HullStoreTests
 {
     [Fact]
+    public void DisposingAStoreGivesBackTheBlockStatesItTookFromASharedStoreAndLeavesTheBorrowedOnes()
+    {
+        var pod = GameContent.Load().Pod;
+        using var states = new BlockStateStore();
+        var lent = states.Create(pod, hitPoints: false);
+
+        var store = new HullStore(2, states);
+        store.Create(1, 0, pod, new Double3(1, 0, 0));
+        store.Create(2, 0, pod, new Double3(2, 0, 0), lent);
+        Assert.Equal(2, states.Count);
+
+        store.Dispose();
+        Assert.Equal(1, states.Count);
+        Assert.True(states.IsLive(lent));
+
+        // Disposing it again gives nothing back twice.
+        store.Dispose();
+        Assert.Equal(1, states.Count);
+    }
+
+    [Fact]
     public void HandlesGoStaleWhenTheirHullIsDestroyedAndSlotsAreReused()
     {
         var pod = GameContent.Load().Pod;
@@ -1542,7 +1605,7 @@ public sealed class HullStoreTests
         var c = store.Create(3, 0, pod, new Double3(3, 0, 0));
         Assert.Equal(3, store.Count);
         Assert.Equal(2.0, store.State(b.Index).Position.X);
-        Assert.Equal(pod.FullMask, store.Info(b.Index).Blocks);
+        Assert.Equal(pod.FullMask(), store.Mask(b.Index));
         Assert.Equal(pod.Flight.HullPoints, store.BlockHp(b.Index).ToArray().Sum(), 1);
         Assert.Equal(pod.Flight.Mass, store.Flight(c.Index).Mass);
 
@@ -1778,53 +1841,70 @@ public sealed class FlightSessionTests
     [Fact]
     public void RammingAnAsteroidCostsBlocksAndInTheEndTheHullLeavingThePlayerInADrone()
     {
-        using var session = GameSession.StartLocal(new ServerConfig { MaxPlayers = 1 }, Content, "Pilot");
-        var pod = WaitForOwnHull(session);
-        Assert.Equal(Content.Pod.FullMask, pod.Blocks);
-
-        // Point the pod at the nearest asteroid of some size and hold full boost, steering all the way: the field
-        // is full of pebbles to miss. It rams the rock, bounces, and rams again.
-        var content = new SectorContent();
-        session.Client.AcquireSnapshot().Galaxy!.Generate(default, content);
-        var nearest = content.Asteroids.Take(content.AsteroidCount).Where(a => a.Radius >= 40f).OrderBy(a => a.LocalPosition.Length() - a.Radius).First();
-
-        // First it loses blocks, and the client is told and flies on what is left.
-        var damaged = pod;
-        var firstHit = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 60;
-        while (damaged.Blocks == Content.Pod.FullMask && damaged.Design != Content.DroneDesign && Stopwatch.GetTimestamp() < firstHit)
+        using var link = new Prospect.Engine.Net.LoopbackLink();
+        using var server = new ServerHost(new ServerConfig { MaxPlayers = 1 }, Content, link.Server);
+        using var client = new ClientSession(link.Client, Content, "Pilot");
+        long tick = 0;
+        void Step()
         {
-            var aim = Vector3.Normalize(nearest.LocalPosition - damaged.Position.RelativeTo(Double3.Zero));
-            session.Client.Input.Submit(new PlayerControls { Forward = 1, Boost = true, Aim = aim, Align = true });
-            Thread.Sleep(50);
-            damaged = OwnHull(session);
+            ((Prospect.Engine.Time.ITickHandler)server).Tick(tick);
+            ((Prospect.Engine.Time.ITickHandler)client).Tick(tick++);
         }
 
-        Assert.True(damaged.Blocks != Content.Pod.FullMask || damaged.Design == Content.DroneDesign, "the pod never hit anything hard enough to lose a block");
-        if (damaged.Design != Content.DroneDesign)
+        for (var i = 0; i < 30; i++)
+            Step();
+        var snapshot = client.AcquireSnapshot();
+        Assert.True(snapshot.OwnHull >= 0);
+        var pod = snapshot.Hulls[snapshot.OwnHull];
+        Assert.Equal(Content.Pod.FullMask(), pod.Mask());
+        var hulls = (HullStore)typeof(ServerHost).GetField("_hulls", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(server)!;
+        var rocks = (RockField)typeof(ServerHost).GetField("_rocks", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(server)!;
+        var index = (int)(pod.Id & 65535);
+        var handle = hulls.HandleAt(index);
+        var sector = rocks.Sector(default);
+        var rockIndex = Enumerable.Range(0, sector.AsteroidCount).Where(i => sector.Asteroids[i].Radius >= 40f)
+            .OrderBy(i => sector.Asteroids[i].LocalPosition.Length() - sector.Asteroids[i].Radius).First();
+        var rock = sector.Asteroids[rockIndex];
+        var surface = rock.Radius * AsteroidShape.RadiusAlong(rock.Shape, Vector3.Transform(Vector3.UnitZ, Quaternion.Conjugate(rock.Rotation)));
+        var lostBlocks = false;
+
+        // Stage each approach independently: a damaged pod may lose its gyro or thrusters before its core.
+        // Only pose and velocity are set; real server collisions decide every loss and the eventual respawn.
+        for (var pass = 0; pass < 30 && hulls.IsAlive(handle); pass++)
         {
-            Assert.Equal(pod.Id, damaged.Id);
-            Assert.True(session.Client.AcquireSnapshot().Flight.Mass < Content.Pod.Flight.Mass);
+            rocks.Displacement(new RockRef(default, rockIndex), tick, out var offset, out _);
+            ref var state = ref hulls.State(index);
+            state.Position = new Double3(rock.LocalPosition.X + offset.X, rock.LocalPosition.Y + offset.Y, rock.LocalPosition.Z + offset.Z + surface + 20);
+            state.Orientation = Quaternion.Identity;
+            state.Velocity = -Vector3.UnitZ * 100;
+            state.AngularVelocity = Vector3.Zero;
+            client.Input.Submit(new PlayerControls { Forward = 1 });
+            for (var i = 0; i < 120 && hulls.IsAlive(handle); i++)
+            {
+                Step();
+                snapshot = client.AcquireSnapshot();
+                var own = snapshot.Hulls[snapshot.OwnHull];
+                if (own.Id == pod.Id && own.Mask() != Content.Pod.FullMask())
+                {
+                    Assert.True(snapshot.Flight.Mass < Content.Pod.Flight.Mass);
+                    lostBlocks = true;
+                }
+            }
         }
 
-        // Keep steering back at the rock. In the end the core goes, the pod is gone, and the player is in a
-        // drone where it died.
-        var deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 100;
-        var drone = OwnHull(session);
-        while (drone.Design != Content.DroneDesign && Stopwatch.GetTimestamp() < deadline)
-        {
-            var toRock = nearest.LocalPosition - drone.Position.RelativeTo(Double3.Zero);
-            session.Client.Input.Submit(new PlayerControls { Forward = 1, Boost = true, Aim = Vector3.Normalize(toRock), Align = true });
-            Thread.Sleep(100);
-            drone = OwnHull(session);
-        }
-
-        session.Client.Input.Submit(default);
+        Assert.True(lostBlocks, "the client never received a nonfatal collision loss");
+        Assert.False(hulls.IsAlive(handle), "the staged collisions never destroyed the pod");
+        client.Input.Submit(default);
+        for (var i = 0; i < 6; i++)
+            Step();
+        snapshot = client.AcquireSnapshot();
+        var drone = snapshot.Hulls[snapshot.OwnHull];
         Assert.Equal(Content.DroneDesign, drone.Design);
         Assert.NotEqual(pod.Id, drone.Id);
-        Assert.Equal(Content.Designs[Content.DroneDesign].FullMask, drone.Blocks);
-        var snapshot = session.Client.AcquireSnapshot();
-        Assert.DoesNotContain(snapshot.Hulls.Take(snapshot.HullCount), h => h.Id == pod.Id && !h.IsOwn && h.Design == Content.PodDesign);
-        Assert.Null(session.Fault);
+        Assert.Equal(Content.Designs[Content.DroneDesign].FullMask(), drone.Mask());
+        Assert.DoesNotContain(snapshot.Hulls.Take(snapshot.HullCount), h => h.Id == pod.Id);
+        Assert.Null(server.Fault);
+        Assert.Null(client.Fault);
     }
 
     [Fact]
@@ -2072,16 +2152,11 @@ public sealed class ShieldStateTests
     private static readonly FlightParams Pod = PodDesign.Flight;
     private static readonly int Emitter = Array.FindIndex(PodDesign.Types, t => t.Shield > 0);
 
-    private static float[] FullHp()
-    {
-        var hp = new float[HullDesign.MaxBlocks];
-        for (var i = 0; i < PodDesign.Types.Length; i++)
-            hp[i] = PodDesign.Types[i].Hull;
-        return hp;
-    }
+    /// <summary>Where the bodies these tests damage keep their blocks and hit points.</summary>
+    private static readonly BlockStateStore States = new();
 
     private static bool Hit(ref HullState state, in FlightParams flight, ref HullBody body, int block, float amount) =>
-        HullSim.Damage(ref state, flight, ref body, 1UL << block, 1, amount);
+        HullSim.Damage(ref state, flight, ref body, [1UL << block], 1, amount);
 
     [Fact]
     public void AWorldRoundAgesHeldHullsAndCoalescesHitsAcrossBatchedStepsWithoutAllocating()
@@ -2089,7 +2164,7 @@ public sealed class ShieldStateTests
         var store = new HullStore(4);
         var hull = store.Create(1, (byte)Content.PodDesign, PodDesign, Double3.Zero);
         var field = new HullField(store, Content.Designs);
-        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask };
+        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullSet.ToArray(), Scratch = PodDesign.Scratch() };
         ref var state = ref store.State(hull.Index);
         field.BeginRound();
         Hit(ref state, Pod, ref body, 1, 10);
@@ -2123,8 +2198,7 @@ public sealed class ShieldStateTests
     [Fact]
     public void ABreakingHitTakesTheShieldOfflineAndOnlyTheExcessReachesTheBlocks()
     {
-        var hp = FullHp();
-        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = hp };
+        var body = States.Body(PodDesign);
         var state = HullState.Spawn(Double3.Zero, Pod);
         state.Shield = 100f;
 
@@ -2141,7 +2215,7 @@ public sealed class ShieldStateTests
     [Fact]
     public void AnOfflineShieldTakesNoHitsWhateverChargeItIsBuildingBack()
     {
-        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = FullHp() };
+        var body = States.Body(PodDesign);
         var state = HullState.Spawn(Double3.Zero, Pod);
         state.Shield = Pod.ShieldCapacity * 0.2f;
         state.ShieldOffline = true;
@@ -2231,7 +2305,7 @@ public sealed class ShieldStateTests
     [Fact]
     public void AShieldJustBackOnlineIsNotKnockedOffAgainByOnePoint()
     {
-        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = FullHp() };
+        var body = States.Body(PodDesign);
         var state = HullState.Spawn(Double3.Zero, Pod);
         state.Shield = 1f;
         state.ShieldOffline = true;
@@ -2284,7 +2358,7 @@ public sealed class ShieldStateTests
         Assert.Equal(hit.Serial, state.ShieldHit.Serial);
 
         // A hull without a shield takes every hit on its blocks and records none.
-        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = FullHp() };
+        var body = States.Body(PodDesign);
         Hit(ref state, none, ref body, 1, 10f);
         Assert.Equal(hit.Serial, state.ShieldHit.Serial);
         Assert.False(state.ShieldOffline);
@@ -2293,14 +2367,13 @@ public sealed class ShieldStateTests
     [Fact]
     public void AHitThatDestroysTheLastEmitterCollapsesTheShieldOnce()
     {
-        var hp = FullHp();
-        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = hp };
+        var body = States.Body(PodDesign);
         var state = HullState.Spawn(Double3.Zero, Pod);
         state.Shield = 10f;
 
         // The shield breaks on the hit and the emitter is shot away by what it could not hold.
         Hit(ref state, Pod, ref body, Emitter, 10f + PodDesign.Types[Emitter].Hull + 1f);
-        Assert.Equal(0UL, body.Alive & 1UL << Emitter);
+        Assert.Equal(0UL, BlockMasks.Word(body.Alive) & 1UL << Emitter);
         Assert.True(state.ShieldOffline);
         Assert.Equal(1, state.ShieldHit.Serial);
 
@@ -2314,7 +2387,7 @@ public sealed class ShieldStateTests
     [Fact]
     public void HitsInOneTickAreOneEventAndTheHarderOneSaysWhere()
     {
-        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = FullHp() };
+        var body = States.Body(PodDesign);
         var state = HullState.Spawn(Double3.Zero, Pod);
 
         Hit(ref state, Pod, ref body, 1, 10f);
@@ -2351,7 +2424,7 @@ public sealed class ShieldStateTests
     [Fact]
     public void TheStrongestThirdContactSuppliesTheRipplePoint()
     {
-        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = FullHp() };
+        var body = States.Body(PodDesign);
         var state = HullState.Spawn(Double3.Zero, Pod);
         Hit(ref state, Pod, ref body, 0, 100f);
         Hit(ref state, Pod, ref body, 1, 100f);
@@ -2367,7 +2440,7 @@ public sealed class ShieldStateTests
     [Fact]
     public void AnImpactAgesOncePerTickThroughoutTransitWithoutAdvancingRecharge()
     {
-        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = FullHp() };
+        var body = States.Body(PodDesign);
         var state = HullState.Spawn(Double3.Zero, Pod);
         Hit(ref state, Pod, ref body, 1, 100f);
         var cooldown = state.ShieldCooldown;
@@ -2387,11 +2460,31 @@ public sealed class ShieldStateTests
     }
 
     [Fact]
+    public void LightShieldContactDoesNotDamageOrDelayRechargeAndRespectsOfflineState()
+    {
+        var body = States.Body(PodDesign);
+        var state = HullState.Spawn(Double3.Zero, Pod);
+        HullSim.ShieldContact(ref state, Pod, PodDesign, body.Alive, Pod.ShieldContactSpeed * 0.5f);
+        Assert.Equal(0, state.ShieldHit.Strength);
+        HullSim.ShieldContact(ref state, Pod, PodDesign, body.Alive, Pod.ShieldContactSpeed * 2f);
+        Assert.Equal(1, state.ShieldHit.Strength);
+        Assert.Equal(Pod.ShieldCapacity, state.Shield);
+        Assert.Equal(Pod.HullPoints, state.Hull);
+        Assert.Equal(0f, state.ShieldCooldown);
+        var hit = state.ShieldHit;
+        state.ShieldOffline = true;
+        state.ShieldHit.AgeTicks = 1;
+        HullSim.ShieldContact(ref state, Pod, PodDesign, body.Alive, Pod.CollisionSafeSpeed);
+        Assert.Equal(hit.Serial, state.ShieldHit.Serial);
+        Assert.Equal(1, state.ShieldHit.AgeTicks);
+    }
+
+    [Fact]
     public void CollisionsThatPassTheShieldNeverBreakIt()
     {
         var through = Pod;
         through.CollisionShieldCost = 0f;
-        var body = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = FullHp() };
+        var body = States.Body(PodDesign);
         var state = HullState.Spawn(Double3.Zero, through);
         Hit(ref state, through, ref body, 1, 50f);
         Assert.Equal(Pod.ShieldCapacity, state.Shield);
@@ -2402,8 +2495,8 @@ public sealed class ShieldStateTests
     [Fact]
     public void APredictingClientBreaksTheShieldExactlyAsTheServerDoes()
     {
-        var server = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = FullHp() };
-        var client = new HullBody { Design = PodDesign, Alive = PodDesign.FullMask };
+        var server = States.Body(PodDesign);
+        var client = new HullBody { Design = PodDesign, Alive = PodDesign.FullSet.ToArray(), Scratch = PodDesign.Scratch() };
         var a = HullState.Spawn(Double3.Zero, Pod);
         a.Shield = 40f;
         var b = a;
@@ -2481,13 +2574,10 @@ public sealed class ShieldChangeTests
     private static readonly FlightParams Pod = PodDesign.Flight;
     private static readonly int Emitter = Array.FindIndex(PodDesign.Types, t => t.Shield > 0);
 
-    private static HullBody Body()
-    {
-        var hp = new float[HullDesign.MaxBlocks];
-        for (var i = 0; i < PodDesign.Types.Length; i++)
-            hp[i] = PodDesign.Types[i].Hull;
-        return new HullBody { Design = PodDesign, Alive = PodDesign.FullMask, BlockHp = hp };
-    }
+    /// <summary>Where the bodies these tests damage keep their blocks and hit points.</summary>
+    private static readonly BlockStateStore States = new();
+
+    private static HullBody Body() => States.Body(PodDesign);
 
     [Fact]
     public void ANewHullsLastChangeIsLongPast() =>
@@ -2499,7 +2589,7 @@ public sealed class ShieldChangeTests
         var body = Body();
         var state = HullState.Spawn(Double3.Zero, Pod);
         state.Shield = 10f;
-        HullSim.Damage(ref state, Pod, ref body, 1UL << 1, 1, 50f);
+        HullSim.Damage(ref state, Pod, ref body, [1UL << 1], 1, 50f);
         Assert.True(state.ShieldOffline);
         Assert.Equal(0, state.ShieldChangeTicks);
 
@@ -2507,7 +2597,7 @@ public sealed class ShieldChangeTests
         HullOrder order = default;
         HullSim.AdvanceShieldClock(ref state);
         HullSim.Step(ref state, ref order, default, Pod, ref body);
-        HullSim.Damage(ref state, Pod, ref body, 1UL << 1, 1, 5f);
+        HullSim.Damage(ref state, Pod, ref body, [1UL << 1], 1, 5f);
         Assert.Equal(1, state.ShieldChangeTicks);
 
         // Through a long transit the clock keeps counting, and stops at its cap.
@@ -2547,16 +2637,18 @@ public sealed class ShieldChangeTests
         var hit = state.ShieldHit;
 
         // Losing any other block changes nothing about the shield.
-        field.Refit(hull.Index, PodDesign.FullMask & ~(1UL << 1));
+        store.Lose(hull.Index, 1UL << 1);
+        field.Refit(hull.Index);
         Assert.Equal(ShieldHit.MaxAgeTicks, state.ShieldChangeTicks);
 
-        field.Refit(hull.Index, PodDesign.FullMask & ~(1UL << 1) & ~(1UL << Emitter));
+        store.Lose(hull.Index, 1UL << Emitter);
+        field.Refit(hull.Index);
         Assert.Equal(0, state.ShieldChangeTicks);
         Assert.Equal(0f, store.Flight(hull.Index).ShieldCapacity);
         Assert.Equal(hit, state.ShieldHit);
         field.BeginRound();
         field.Step(hull.Index, default);
-        field.Refit(hull.Index, store.Info(hull.Index).Blocks);
+        field.Refit(hull.Index);
         Assert.Equal(1, state.ShieldChangeTicks);
 
         // An offline shield losing its last emitter shows no change: it was not drawn.
@@ -2564,7 +2656,725 @@ public sealed class ShieldChangeTests
         ref var down = ref store.State(other.Index);
         down.ShieldOffline = true;
         down.ShieldChangeTicks = 50;
-        field.Refit(other.Index, PodDesign.FullMask & ~(1UL << Emitter));
+        store.Lose(other.Index, 1UL << Emitter);
+        field.Refit(other.Index);
         Assert.Equal(50, down.ShieldChangeTicks);
+    }
+}
+
+/// <summary>Sets of block ids as 64-bit words, at the sizes a design can have.</summary>
+public sealed class BlockSetTests
+{
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(63, 1)]
+    [InlineData(64, 1)]
+    [InlineData(65, 2)]
+    [InlineData(4096, 64)]
+    [InlineData(150_000, 2344)]
+    public void ASetTakesAWordPerSixtyFourBlocksAndNeverHoldsABlockPastItsDesign(int blocks, int words)
+    {
+        Assert.Equal(words, BlockSet.WordCount(blocks));
+
+        // Filled over whatever was there before, it is the design's blocks and nothing else.
+        var set = new ulong[words];
+        Array.Fill(set, ulong.MaxValue);
+        BlockSet.Fill(set, blocks);
+        Assert.Equal(blocks, BlockSet.Count(set));
+        Assert.True(BlockSet.IsFull(set, blocks));
+        Assert.True(BlockSet.Has(set, 0));
+        Assert.True(BlockSet.Has(set, blocks - 1));
+        for (var past = blocks; past < words * 64; past++)
+            Assert.False(BlockSet.Has(set, past));
+
+        // Losing the last block leaves it short of full, and no bit past the design appears.
+        BlockSet.Remove(set, blocks - 1);
+        Assert.False(BlockSet.IsFull(set, blocks));
+        Assert.Equal(blocks - 1, BlockSet.Count(set));
+        Assert.Equal(blocks > 1, BlockSet.Any(set));
+        for (var past = blocks; past < words * 64; past++)
+            Assert.False(BlockSet.Has(set, past));
+    }
+
+    [Fact]
+    public void BlocksAreWalkedFromTheLowestIdUpAcrossWords()
+    {
+        int[] members = [0, 5, 63, 64, 100, 127, 128, 4095];
+        var set = new ulong[BlockSet.WordCount(4096)];
+
+        // Put in out of order; the walk is by id all the same.
+        foreach (var block in members.Reverse())
+            BlockSet.Add(set, block);
+        var walked = new List<int>();
+        foreach (var block in BlockSet.Each(set))
+            walked.Add(block);
+        Assert.Equal(members, walked);
+        Assert.Equal(members.Length, BlockSet.Count(set));
+
+        foreach (var _ in BlockSet.Each(new ulong[3]))
+            Assert.Fail("an empty set has no blocks to walk");
+        foreach (var _ in BlockSet.Each([]))
+            Assert.Fail("a set of no words has no blocks to walk");
+    }
+
+    [Fact]
+    public void SetsOfOneDesignCompareCopyAndContain()
+    {
+        var all = new ulong[2];
+        BlockSet.Fill(all, 100);
+        var some = new ulong[2];
+        BlockSet.Add(some, 3);
+        BlockSet.Add(some, 99);
+        Assert.True(BlockSet.HasAll(all, some));
+        Assert.False(BlockSet.HasAll(some, all));
+        Assert.False(BlockSet.Equal(all, some));
+        Assert.False(BlockSet.Any(new ulong[2]));
+
+        var copy = new ulong[2];
+        BlockSet.Copy(some, copy);
+        Assert.True(BlockSet.Equal(some, copy));
+        BlockSet.Remove(copy, 99);
+        Assert.False(BlockSet.Has(copy, 99));
+        Assert.True(BlockSet.Has(some, 99));
+        Assert.False(BlockSet.HasAll(copy, some));
+    }
+
+    [Fact]
+    public void TheShippedDesignsKeepTheirSetsAsWords()
+    {
+        foreach (var design in GameContent.Load().Designs)
+        {
+            Assert.Equal(BlockSet.WordCount(design.BlockCount), design.FullSet.Length);
+            Assert.True(BlockSet.IsFull(design.FullSet, design.BlockCount));
+            Assert.True(BlockSet.Any(design.CoreSet));
+            Assert.True(BlockSet.HasAll(design.FullSet, design.CoreSet));
+            foreach (var block in BlockSet.Each(design.CoreSet))
+                Assert.True(design.Types[block].Core);
+            Assert.InRange(design.BlockCount, 1, 64);
+        }
+    }
+}
+
+/// <summary>Where a hull's blocks, sums and hit points are kept: taken when it appears, given back when it goes.</summary>
+public sealed class BlockStateStoreTests
+{
+    [Theory]
+    [InlineData(1)]
+    [InlineData(64)]
+    [InlineData(65)]
+    [InlineData(4096)]
+    public void AStateIsSizedToItsDesignAndStartsIntact(int blocks)
+    {
+        var design = TestDesigns.Cubes(blocks);
+        using var store = new BlockStateStore();
+        var decided = store.Create(design, hitPoints: true);
+        var predicted = store.Create(design, hitPoints: false);
+        Assert.Equal(2, store.Count);
+
+        foreach (var state in new[] { decided, predicted })
+        {
+            Assert.True(store.IsLive(state));
+            Assert.Equal(blocks, store.Blocks(state));
+            Assert.Same(design, store.Design(state));
+            Assert.Equal(BlockSet.WordCount(blocks), store.Alive(state).Length);
+            Assert.True(BlockSet.IsFull(store.Alive(state), blocks));
+            Assert.Equal(0u, store.Revision(state));
+            Assert.Equal(0, store.CoresLost(state));
+
+            // The sums start as the design's intact sums, bit for bit, and so do the figures read off them.
+            Assert.True(Figures.SameSums(design.Sums.Intact, store.Sums(state)));
+            design.Figures(store.Sums(state), out var flight, out var stats);
+            Assert.Equal(design.Flight, flight);
+            Assert.Equal(design.Stats, stats);
+        }
+
+        // Where the hull is decided every block has its hit points; a predicting client has none.
+        Assert.Equal(blocks, store.HitPoints(decided).Length);
+        Assert.True(store.HitPoints(predicted).IsEmpty);
+        var total = 0.0;
+        for (var b = 0; b < blocks; b++)
+        {
+            Assert.Equal(design.BlockHitPoints(b), store.HitPoints(decided)[b]);
+            total += design.BlockHitPoints(b);
+        }
+
+        Assert.Equal(total, store.HitTotal(decided));
+        Assert.Equal(0.0, store.HitTotal(predicted));
+        Assert.Throws<InvalidOperationException>(() => store.Hit(predicted, 0, 1f));
+
+        // The two do not share memory: what one loses the other keeps.
+        Assert.True(store.Lose(decided, blocks - 1));
+        Assert.True(BlockSet.Has(store.Alive(predicted), blocks - 1));
+        Assert.True(Figures.SameSums(design.Sums.Intact, store.Sums(predicted)));
+        Assert.Equal(0f, store.HitPoints(decided)[blocks - 1]);
+    }
+
+    [Fact]
+    public void AReleasedStatesMemoryServesTheNextAndItsHandleGoesStale()
+    {
+        var design = TestDesigns.Cubes(64);
+        using var store = new BlockStateStore(2);
+        var first = store.Create(design, hitPoints: true);
+        var kept = store.Create(design, hitPoints: true);
+        var where = store.Alive(first);
+        var sums = store.Sums(first);
+        store.Lose(first, 10);
+        store.Hit(first, 20, 3f);
+        store.SetHitPoints(first, 30, 3f);
+
+        store.Release(first);
+        Assert.False(store.IsLive(first));
+        Assert.Equal(1, store.Count);
+        Assert.Throws<InvalidOperationException>(() => store.Alive(first));
+        Assert.Throws<InvalidOperationException>(() => store.Revision(first));
+        Assert.Throws<InvalidOperationException>(() => store.Sums(first));
+        Assert.False(store.IsLive(default));
+
+        // The next hull of that size gets the same memory under a new handle, as an intact hull: its blocks,
+        // its hit points and its sums are the design's again.
+        var next = store.Create(design, hitPoints: true);
+        Assert.Equal(first.Index, next.Index);
+        Assert.NotEqual(first, next);
+        Assert.False(store.IsLive(first));
+        Assert.True(where.Overlaps(store.Alive(next), out var offset));
+        Assert.Equal(0, offset);
+        Assert.True(sums.Overlaps(store.Sums(next), out var sumsOffset));
+        Assert.Equal(0, sumsOffset);
+        Assert.True(BlockSet.IsFull(store.Alive(next), 64));
+        Assert.Equal(0u, store.Revision(next));
+        Assert.True(Figures.SameSums(design.Sums.Intact, store.Sums(next)));
+        Assert.Equal(store.HitTotal(kept), store.HitTotal(next));
+        for (var b = 0; b < 64; b++)
+            Assert.Equal(design.BlockHitPoints(b), store.HitPoints(next)[b]);
+
+        // Releasing twice, or releasing a handle that was never taken, does nothing to anyone else.
+        store.Release(first);
+        store.Release(default);
+        Assert.Equal(2, store.Count);
+        Assert.True(store.IsLive(kept) && store.IsLive(next));
+    }
+
+    [Fact]
+    public void AStateStaysWhereItIsAndAsItIsWhileOthersComeAndGo()
+    {
+        using var store = new BlockStateStore(1);
+        int[] sizes = [1, 64, 65, 4096];
+        var designs = sizes.Select(TestDesigns.Cubes).ToArray();
+        var kept = new BlockStateHandle[sizes.Length];
+        for (var i = 0; i < sizes.Length; i++)
+        {
+            kept[i] = store.Create(designs[i], hitPoints: true);
+            for (var b = 0; b < sizes[i]; b++)
+                store.SetHitPoints(kept[i], b, sizes[i] + b);
+            store.Lose(kept[i], sizes[i] / 2);
+        }
+
+        // The spans taken now are compared with what the store hands out at the end.
+        var alive0 = store.Alive(kept[0]);
+        var alive1 = store.Alive(kept[1]);
+        var alive2 = store.Alive(kept[2]);
+        var alive3 = store.Alive(kept[3]);
+        var points3 = store.HitPoints(kept[3]);
+        var sums3 = store.Sums(kept[3]);
+        var before = new ulong[sizes.Length][];
+        var sumsBefore = new byte[sizes.Length][];
+        var totals = new double[sizes.Length];
+        for (var i = 0; i < sizes.Length; i++)
+        {
+            before[i] = store.Alive(kept[i]).ToArray();
+            sumsBefore[i] = MemoryMarshal.AsBytes(store.Sums(kept[i])).ToArray();
+            totals[i] = store.HitTotal(kept[i]);
+        }
+
+        // Thousands of hulls of every size appear, are knocked about and go: new chunks are taken and the
+        // handle table grows.
+        var others = new List<BlockStateHandle>();
+        for (var round = 0; round < 6; round++)
+        {
+            for (var i = 0; i < 600; i++)
+            {
+                var design = designs[(i + round) % sizes.Length];
+                var state = store.Create(design, hitPoints: i % 3 != 0);
+                for (var b = 0; b < design.BlockCount; b += Math.Max(1, design.BlockCount / 5))
+                    store.Lose(state, b);
+                if (i % 3 != 0)
+                    store.Hit(state, design.BlockCount - 1, 1e9f);
+                others.Add(state);
+            }
+
+            for (var i = others.Count - 1; i >= 0; i -= 2)
+            {
+                store.Release(others[i]);
+                others.RemoveAt(i);
+            }
+        }
+
+        Assert.Equal(sizes.Length + others.Count, store.Count);
+        Assert.True(alive0.Overlaps(store.Alive(kept[0]), out var offset0) && offset0 == 0);
+        Assert.True(alive1.Overlaps(store.Alive(kept[1]), out var offset1) && offset1 == 0);
+        Assert.True(alive2.Overlaps(store.Alive(kept[2]), out var offset2) && offset2 == 0);
+        Assert.True(alive3.Overlaps(store.Alive(kept[3]), out var offset3) && offset3 == 0);
+        Assert.True(points3.Overlaps(store.HitPoints(kept[3]), out var offsetPoints) && offsetPoints == 0);
+        Assert.True(sums3.Overlaps(store.Sums(kept[3]), out var offsetSums) && offsetSums == 0);
+        for (var i = 0; i < sizes.Length; i++)
+        {
+            Assert.Equal(before[i], store.Alive(kept[i]).ToArray());
+            Assert.Equal(sumsBefore[i], MemoryMarshal.AsBytes(store.Sums(kept[i])).ToArray());
+            Assert.Equal(totals[i], store.HitTotal(kept[i]));
+            Assert.Equal(1u, store.Revision(kept[i]));
+            Assert.False(BlockSet.Has(store.Alive(kept[i]), sizes[i] / 2));
+            var points = store.HitPoints(kept[i]);
+            for (var b = 0; b < points.Length; b++)
+                Assert.Equal(b == sizes[i] / 2 ? 0f : sizes[i] + b, points[b]);
+        }
+    }
+
+    [Fact]
+    public void ALossKeepsTheSetTheCountTheSumsAndTheHitTotalInStep()
+    {
+        var design = TestDesigns.Cubes(300);
+        using var store = new BlockStateStore();
+        var state = store.Create(design, hitPoints: true);
+
+        void InStep(int lost)
+        {
+            Assert.Equal((uint)lost, store.Revision(state));
+            Assert.Equal(300 - lost, BlockSet.Count(store.Alive(state)));
+
+            // The sums are those built afresh for the blocks that are left, to the last bit.
+            var fresh = new HullSum[design.Sums.NodeCount];
+            design.Sums.Build(fresh, store.Alive(state));
+            Assert.True(Figures.SameSums(fresh, store.Sums(state)));
+            design.Figures(store.Sums(state), out _, out var stats);
+            Assert.Equal(300 - lost, stats.Blocks);
+
+            // The total is what the blocks that are left have, and a block that is gone has nothing.
+            var total = 0.0;
+            for (var b = 0; b < 300; b++)
+            {
+                Assert.True(BlockSet.Has(store.Alive(state), b) || store.HitPoints(state)[b] == 0f);
+                total += store.HitPoints(state)[b];
+            }
+
+            Assert.Equal(total, store.HitTotal(state), 1e-6);
+        }
+
+        InStep(0);
+        Assert.True(store.Lose(state, 70));
+        InStep(1);
+        Assert.True(store.Lose(state, 299));
+        InStep(2);
+
+        // A block that is gone cannot be lost again, and has no hit points to set.
+        Assert.False(store.Lose(state, 70));
+        InStep(2);
+        Assert.Throws<ArgumentOutOfRangeException>(() => store.Lose(state, 300));
+        Assert.Throws<InvalidOperationException>(() => store.SetHitPoints(state, 70, 5f));
+
+        // A hit a block survives is no loss; the one that empties it is, in the same call.
+        var points = design.BlockHitPoints(5);
+        Assert.False(store.Hit(state, 5, points * 0.5f));
+        InStep(2);
+        Assert.Equal(points * 0.5f, store.HitPoints(state)[5]);
+        Assert.True(store.Hit(state, 5, points));
+        InStep(3);
+        Assert.False(store.Hit(state, 5, points));
+        InStep(3);
+
+        // The core is block 0 of these designs: its loss is told apart from any other.
+        Assert.Equal(0, store.CoresLost(state));
+        Assert.True(store.Lose(state, 0));
+        Assert.Equal(1, store.CoresLost(state));
+        InStep(4);
+    }
+
+    [Fact]
+    public void AStationOfAHundredAndFiftyThousandBlocksIsStoredAndItsMemoryServesTheNextStation()
+    {
+        const int blocks = 150_000;
+        var design = TestDesigns.Station;
+        using var store = new BlockStateStore();
+        var station = store.Create(design, hitPoints: true);
+        Assert.Equal(2344, store.Alive(station).Length);
+        Assert.Equal(blocks, BlockSet.Count(store.Alive(station)));
+        Assert.Equal(blocks, store.HitPoints(station).Length);
+        var where = store.Alive(station);
+
+        // The first and the last block are as much its own as any between.
+        Assert.True(store.Lose(station, blocks - 1));
+        Assert.True(store.Lose(station, 1));
+        Assert.Equal(blocks - 2, BlockSet.Count(store.Alive(station)));
+        Assert.Equal(2u, store.Revision(station));
+
+        // A small hull beside it lives in a chunk; the station has a block of its own, kept for the next one.
+        var pod = store.Create(TestDesigns.Cubes(27), hitPoints: true);
+        store.Release(station);
+        var next = store.Create(design, hitPoints: true);
+        Assert.True(where.Overlaps(store.Alive(next), out var offset) && offset == 0);
+        Assert.True(BlockSet.IsFull(store.Alive(next), blocks));
+        Assert.True(BlockSet.IsFull(store.Alive(pod), 27));
+        Assert.Equal(0u, store.Revision(next));
+        Assert.True(Figures.SameSums(design.Sums.Intact, store.Sums(next)));
+    }
+
+    [Fact]
+    public void LosingBlocksAndHullsComingAndGoingAtASteadyNumberTakeNoManagedMemory()
+    {
+        var small = TestDesigns.Cubes(64);
+        var large = TestDesigns.Cubes(300);
+        using var store = new BlockStateStore();
+        var held = store.Create(TestDesigns.Cubes(4096), hitPoints: true);
+        var states = new BlockStateHandle[64];
+
+        void Round()
+        {
+            for (var i = 0; i < states.Length; i++)
+                states[i] = store.Create(i % 2 == 0 ? small : large, hitPoints: i % 4 < 2);
+            for (var i = 0; i < states.Length; i++)
+            {
+                store.Lose(states[i], i % 64);
+                if (i % 4 < 2)
+                    store.Hit(states[i], 63 - i % 64, 10f);
+                store.Release(states[i]);
+            }
+        }
+
+        Round();
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var round = 0; round < 50; round++)
+        {
+            Round();
+            store.Lose(held, round);
+        }
+
+        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
+        Assert.Equal(50u, store.Revision(held));
+    }
+}
+
+/// <summary>
+/// Hulls of more blocks than the loader admits yet, built straight from boxes: stored, damaged, refitted and
+/// collided through the same code as the shipped designs, with the blocks past the first 64 doing the work.
+/// </summary>
+public sealed class LargeHullTests
+{
+    private static readonly GameContent Content = GameContent.Load();
+
+    /// <summary>The slab's core, in the middle of it and well past the first word of its block set.</summary>
+    private const int Core = 150;
+    private static readonly HullDesign Slab = BuildSlab();
+    private static readonly HullDesign[] Designs = [Slab];
+
+    /// <summary>
+    /// A slab of 300 unit cubes, 12 long, 5 high and 5 deep, numbered along its length: block 25 x + 5 y + z, so
+    /// the face at the far end of x is blocks 275 to 299. Its working blocks sit in the middle.
+    /// </summary>
+    private static HullDesign BuildSlab()
+    {
+        var boxes = new DesignBox[300];
+        for (var i = 0; i < boxes.Length; i++)
+        {
+            var type = Content.Blocks.Get(
+                i switch
+                {
+                    Core => "core",
+                    151 or 152 => "generator",
+                    >= 153 and <= 156 => "thruster",
+                    >= 157 and <= 160 => "gyro",
+                    161 or 162 => "shield",
+                    _ => "hull",
+                }
+            );
+            boxes[i] = new DesignBox(new GridSize(i / 25, i / 5 % 5, i % 5), new GridSize(1, 1, 1), type);
+        }
+
+        return HullDesign.Of(new BoxDesign("Slab", 1f, boxes, Content.Blocks.Limits, "slab", HullClass.Ship, new Vector3(0.5f)), Content.Rules);
+    }
+
+    private static ulong[] Set(params int[] blocks)
+    {
+        var set = new ulong[Slab.FullSet.Length];
+        foreach (var block in blocks)
+            BlockSet.Add(set, block);
+        return set;
+    }
+
+    private static List<int> LostBlocks(HullStore store, int hull)
+    {
+        var lost = new List<int>();
+        for (var b = 0; b < Slab.BlockCount; b++)
+        {
+            if (!BlockSet.Has(store.Blocks(hull), b))
+                lost.Add(b);
+        }
+
+        return lost;
+    }
+
+    [Fact]
+    public void TheLoaderAdmitsMoreThanOneWord()
+    {
+        Assert.True(Slab.BlockCount > 64);
+        Assert.Equal(5, Slab.FullSet.Length);
+        Assert.True(BlockSet.IsFull(Slab.FullSet, 300));
+        Assert.True(BlockSet.Equal(Slab.CoreSet, Set(Core)));
+
+        // A normal file now admits more than one word of live blocks.
+        var dir = Path.Combine(Path.GetTempPath(), $"prospect-slab-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var blocks = string.Join(",", Enumerable.Range(0, 65).Select(i => $"{{ \"at\": [{i}, 0, 0], \"type\": \"{(i switch { 0 => "core", 1 => "thruster", 2 => "gyro", 3 => "generator", _ => "hull" })}\" }}"));
+            var path = Path.Combine(dir, "slab.json");
+            File.WriteAllText(path, $"{{ \"name\": \"T\", \"class\": \"ship\", \"blockSize\": 1.0, \"color\": [0.5, 0.5, 0.5], \"blocks\": [{blocks}] }}");
+            Assert.Equal(65, HullDesign.Load(path, Content.Blocks, Content.Rules).BlockCount);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+
+        Assert.Equal(300, Slab.Stats.Blocks);
+        Assert.True(Slab.Flight.ShieldCapacity > 0f);
+    }
+
+    [Fact]
+    public void AHullOfThreeHundredBlocksLosesBlocksPastTheFirstWordIsRefittedOnceAndDiesWithItsCore()
+    {
+        using var store = new HullStore(4);
+        var field = new HullField(store, Designs);
+        var hull = store.Create(1, 0, Slab, Double3.Zero).Index;
+        ref var state = ref store.State(hull);
+        Assert.Equal(300, store.BlockHp(hull).Length);
+        Assert.Equal(Slab.Flight.HullPoints, store.BlockHp(hull).ToArray().Sum(), 0);
+
+        // With the shield down a blow lands on the blocks it touched: three plates, each given exactly its own.
+        state.ShieldOffline = true;
+        var body = new HullBody { Design = Slab, Alive = store.Blocks(hull), States = store.BlockStates, State = store.Info(hull).BlockState };
+        var plate = Slab.BlockHitPoints(70);
+        Assert.False(HullSim.Damage(ref state, store.Flight(hull), ref body, Set(70, 200, 299), 3, plate * 3));
+        Assert.Equal([70, 200, 299], LostBlocks(store, hull));
+        Assert.Equal(3u, store.Revision(hull));
+        Assert.Equal(Slab.Flight.HullPoints - plate * 3, state.Hull, 0);
+
+        // The stored set changed at once; the figures follow at the refit, and are those of a fresh evaluation.
+        Assert.Equal(Slab.Flight.Mass, store.Flight(hull).Mass);
+        field.Refit(hull);
+        Slab.Evaluate(store.Blocks(hull), out var flight, out var stats);
+        Assert.Equal(flight, store.Flight(hull));
+        Assert.Equal(297, stats.Blocks);
+        Assert.True(flight.Mass < Slab.Flight.Mass);
+        Assert.Equal(3u, store.Info(hull).FittedRevision);
+
+        // With nothing lost since, a refit works nothing out: figures changed behind its back stay as they are.
+        store.Flight(hull).Mass = 1f;
+        field.Refit(hull);
+        Assert.Equal(1f, store.Flight(hull).Mass);
+        store.Flight(hull) = flight;
+
+        // A blow a block survives is no loss.
+        Assert.False(HullSim.Damage(ref state, store.Flight(hull), ref body, Set(250), 1, plate * 0.5f));
+        Assert.Equal(3u, store.Revision(hull));
+        field.Refit(hull);
+        Assert.Equal(flight, store.Flight(hull));
+
+        // Both emitters go in one blow: two losses, one refit, and the shield is gone with them.
+        var emitter = Slab.BlockHitPoints(161);
+        Assert.False(HullSim.Damage(ref state, store.Flight(hull), ref body, Set(161, 162), 2, emitter * 2));
+        Assert.Equal(5u, store.Revision(hull));
+        field.Refit(hull);
+        Slab.Evaluate(store.Blocks(hull), out flight, out _);
+        Assert.Equal(flight, store.Flight(hull));
+        Assert.Equal(0f, flight.ShieldCapacity);
+        Assert.Equal(0f, state.Shield);
+
+        // The core is block 150. When it goes the hull is destroyed, and its block state goes back with it.
+        Assert.True(HullSim.Damage(ref state, store.Flight(hull), ref body, Set(Core), 1, Slab.BlockHitPoints(Core)));
+        Assert.False(BlockSet.Has(store.Blocks(hull), Core));
+        Assert.Equal(6u, store.Revision(hull));
+        var blocks = store.Info(hull).BlockState;
+        store.Destroy(store.HandleAt(hull));
+        Assert.False(store.BlockStates.IsLive(blocks));
+        Assert.Equal(0, store.BlockStates.Count);
+    }
+
+    /// <summary>Two slabs end to end along x, the second turned about so its far face meets the first's, closing at a speed.</summary>
+    private static (int Struck, int Rammer) Place(HullStore store, float speed)
+    {
+        store.Clear();
+        var struck = store.Create(1, 0, Slab, Double3.Zero).Index;
+        var rammer = store.Create(2, 0, Slab, new Double3(14, 0, 0)).Index;
+        store.State(rammer).Orientation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI);
+        store.State(rammer).Velocity = new Vector3(-speed, 0, 0);
+        return (struck, rammer);
+    }
+
+    [Fact]
+    public void TwoLargeHullsRammingLoseBlocksPastTheFirstWordAndThePredictionPicksTheSameContact()
+    {
+        using var store = new HullStore();
+        using var copy = new HullStore();
+        var field = new HullField(store, Designs);
+        var predicted = new HullField(copy, Designs, authoritative: false);
+
+        // A ram the shields can take: the predicting field, which knows no hit points, moves both hulls exactly
+        // as the deciding one does, tick for tick, through the contact and after it.
+        var (struck, rammer) = Place(store, 12f);
+        Place(copy, 12f);
+        for (var i = 0; i < 40; i++)
+        {
+            field.BeginRound();
+            field.Step(rammer, default);
+            field.Step(struck, default);
+            predicted.BeginRound();
+            predicted.Step(rammer, default);
+            predicted.Step(struck, default);
+            foreach (var hull in new[] { struck, rammer })
+            {
+                Assert.Equal(store.State(hull).Position, copy.State(hull).Position);
+                Assert.Equal(store.State(hull).Velocity, copy.State(hull).Velocity);
+                Assert.Equal(store.State(hull).AngularVelocity, copy.State(hull).AngularVelocity);
+                Assert.Equal(store.State(hull).Shield, copy.State(hull).Shield);
+            }
+        }
+
+        Assert.True(store.State(struck).Velocity.X < -1f, "the ram never happened");
+        Assert.True(store.State(struck).Shield < Slab.Flight.ShieldCapacity, "the shield took nothing");
+        Assert.Equal(0u, store.Revision(struck));
+        Assert.Equal(0u, store.Revision(rammer));
+
+        // A ram that breaks blocks off both. The faces that meet are blocks 275 to 299 of each hull.
+        (struck, rammer) = Place(store, 160f);
+        Place(copy, 160f);
+        for (var i = 0; i < 10; i++)
+        {
+            field.BeginRound();
+            field.Step(rammer, default);
+            field.Step(struck, default);
+            predicted.BeginRound();
+            predicted.Step(rammer, default);
+            predicted.Step(struck, default);
+            Assert.Equal(0, predicted.Lost.Length);
+        }
+
+        foreach (var hull in new[] { struck, rammer })
+        {
+            var lost = LostBlocks(store, hull);
+            Assert.NotEmpty(lost);
+            Assert.All(lost, block => Assert.InRange(block, 275, 299));
+            Assert.Equal((uint)lost.Count, store.Revision(hull));
+
+            // Each was refitted for what it lost, to the figures a fresh evaluation gives.
+            Assert.Equal(store.Revision(hull), store.Info(hull).FittedRevision);
+            Slab.Evaluate(store.Blocks(hull), out var flight, out _);
+            Assert.Equal(flight, store.Flight(hull));
+            Assert.Equal(store.BlockHp(hull).ToArray().Sum(), store.State(hull).Hull, 0);
+
+            // The prediction shows the hull points falling and keeps every block until it is told.
+            Assert.True(BlockSet.IsFull(copy.Blocks(hull), Slab.BlockCount));
+            Assert.Equal(0u, copy.Revision(hull));
+            Assert.Equal(Slab.Flight, copy.Flight(hull));
+            Assert.True(copy.State(hull).Hull < Slab.Flight.HullPoints);
+            Assert.Equal(0f, copy.State(hull).Shield);
+        }
+    }
+}
+
+public sealed class SizedCollisionTests
+{
+    private static readonly GameContent Content = GameContent.Load();
+
+    private static HullDesign Beam(FlightRules? rules = null)
+    {
+        var boxes = new DesignBox[70];
+        for (var i = 0; i < 69; i++)
+            boxes[i] = new(new GridSize(i * 3, 100, 0), new GridSize(1, 1, 1), Content.Blocks.Get(i == 0 ? "core" : "hull"));
+        boxes[69] = new(new GridSize(0, 0, 0), new GridSize(32, 1, 1), Content.Blocks.Get("hull"));
+        return HullDesign.Of(new BoxDesign("Beam", 1, boxes, Content.Blocks.Limits, "collision fixture"), rules ?? Content.Rules);
+    }
+
+    [Fact]
+    public void RotatedThinBoxesUseAllSeparatingAxesAndRejectCorners()
+    {
+        var rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI / 4);
+        var end = Vector3.Transform(new Vector3(14, 0, 0), rotation);
+        Assert.True(BoxCollision.Contact(-end, new Vector3(16, 0.5f, 0.5f), rotation, new Vector3(0.5f), out _, out var depth));
+        Assert.True(depth > 0);
+        Assert.False(BoxCollision.Contact(new Vector3(8, -8, 0), new Vector3(16, 0.5f, 0.5f), rotation, new Vector3(0.5f), out _, out _));
+    }
+
+    [Fact]
+    public void FieldTouchesRotatedBeamFarFromItsCenterBeyondId63AndSkipsDeadBranches()
+    {
+        var beam = Beam();
+        var cube = HullDesign.Of(new BoxDesign("Cube", 1, [new(new GridSize(0, 0, 0), new GridSize(1, 1, 1), Content.Blocks.Get("core"))], Content.Blocks.Limits, "cube"), Content.Rules with { CollisionTreeVisits = 32, CollisionBoxTests = 1, CollisionContacts = 1 });
+        using var store = new HullStore();
+        var a = store.Create(1, 0, beam, Double3.Zero).Index;
+        var rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI / 4);
+        store.State(a).Orientation = rotation;
+        var hit = Vector3.Transform(beam.BlockOffsets[69] + new Vector3(14, 0.8f, 0), rotation);
+        var b = store.Create(2, 1, cube, Double3.Zero + hit).Index;
+        var field = new HullField(store, [beam, cube]);
+        store.BlockStates.SetHitPoints(store.Info(a).BlockState, 69, 0.01f);
+        store.State(b).Velocity = Vector3.Transform(new Vector3(0, -10, 0), rotation);
+        var before = store.State(b).Position;
+        field.Step(b, default);
+        Assert.NotEqual(before, store.State(b).Position);
+        Assert.False(BlockSet.Has(store.Blocks(a), 69));
+        store.State(b).Velocity = Vector3.Zero;
+        store.State(b).Position = before;
+        field.Step(b, default);
+        Assert.Equal(before, store.State(b).Position);
+        Assert.Equal(69, store.BlockStates.CollisionCounts(store.Info(a).BlockState)[0]);
+    }
+
+    [Fact]
+    public void SizedFieldContactAndDeadBranchQueriesTakeNoWarmMemory()
+    {
+        var design = Beam(Content.Rules with { CollisionDamagePerTonneSpeedSquared = 0 });
+        using var store = new HullStore();
+        var a = store.Create(1, 0, design, Double3.Zero).Index;
+        var b = store.Create(2, 0, design, new Double3(0, 0.9, 0)).Index;
+        var field = new HullField(store, [design]);
+        var stateA = store.State(a); var stateB = store.State(b);
+        void Contact()
+        {
+            store.State(a) = stateA; store.State(b) = stateB;
+            field.BeginRound(); field.Step(a, default); field.Step(b, default);
+        }
+        for (var i = 0; i < 10; i++) Contact();
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 100; i++) Contact();
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.Equal(0, allocated);
+        Assert.NotEqual(stateA.Position, store.State(a).Position);
+    }
+
+    [Fact]
+    public void RockSamplesFindAnEdgeAwayFromTheBoxCenterAndRejectEmptySpace()
+    {
+        var rock = new Asteroid { Radius = 2, Rotation = Quaternion.Identity, Shape = 0 };
+        Assert.True(BoxCollision.Rock(new Vector3(15, 0, 0), new Vector3(16, 0.5f, 0.5f), Quaternion.Identity, rock, out _, out var depth, out _));
+        Assert.True(depth > 0);
+        Assert.False(BoxCollision.Rock(new Vector3(15, 5, 0), new Vector3(16, 0.5f, 0.5f), Quaternion.Identity, rock, out _, out _, out _));
+    }
+
+    [Fact]
+    public void TreeBudgetAndOrderAreFixedAndWarmTraversalAllocatesNothing()
+    {
+        var design = Beam(Content.Rules with { CollisionTreeVisits = 20, CollisionBoxTests = 1, CollisionContacts = 1 });
+        int Query()
+        {
+            var cursor = 0; var visits = 20; var hash = 0;
+            while (design.Collision.Next(ref cursor, new Vector3(-1000), new Vector3(1000), design.FullSet, ref visits, out var id)) hash = unchecked(hash * 31 + id);
+            return unchecked(hash * 31 + visits);
+        }
+        var expected = Query();
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var same = true;
+        for (var i = 0; i < 100; i++) same &= expected == Query();
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.True(same);
+        Assert.Equal(0, allocated);
     }
 }

@@ -18,9 +18,27 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
 - **Two views of the same space.** Pilot view to fly one ship; command (RTS) view to select and order many.
 - **Shields break.** A shield emptied by a hit goes offline, takes no hits, and only comes back after a delay,
   charging to a threshold on extra power. No instant reactivation from one point of charge.
+- **Shields are smooth and shiver as they recover.** The shell is the blocks grown round by the margin, with gaps of
+  about a block bridged: it follows the hull's outline and its slopes, never a box or a hull-sized bubble.
+  Rounding stays whatever blocks are resized, merged or turned into wedges: the shell depends only on the shape
+  the blocks fill, so one box and the same box built of cubes get the same shield. There is no square fallback.
+  A damaged hull gets its own shell, built off the frame; until it is ready, or when it would not fit, the hull
+  keeps the shell it had or its intact one, which enclose what is left of it. Heavy damage can therefore keep
+  the original outline. A design whose intact shell does not fit is refused before Apply. Coming back online, and while the charge keeps rising, it shivers
+  gently (a slow, faint motion, not bubbling) and settles once charging stops. An offline shield stays invisible until it
+  restarts; the console marks its restart point and the charge towards it.
+- **Shield contacts stay local and visible.** A brief bright patch and paired rings mark the contact surface.
+  Below 80% charge the shell gradually warms through amber, already visible at half charge, then red near empty.
 - **The pilot's shield rides through their own hyperspace.** Its glow and ripples stay all round the hull in the
   tunnel. Its bend of the old world fades with that world; at full cover only its light is left.
 - **You are not your ship.** You can leave a ship in a drone and take control of any ship you own.
+- **Taking control reaches one sector.** Only a ship in the same sector as the hull you fly now (a drone
+  included), on every axis x, y and z. To take control further away, travel or jump into that sector first.
+  Leaving in a drone has no range. The server checks it; the client checks the same rule to say why it did not
+  ask. Fleet orders and autopilot have no such range.
+- **Planned: remote control and relays.** A separate remote-control range, player-built relay stations that
+  extend it, and map coverage visualization. Detailed range and relay rules remain open. None exists yet;
+  current fleet orders remain unrestricted.
 
 ## Decided: the world
 
@@ -79,6 +97,9 @@ exists.
   at the right. No inventory tab until there is an inventory.
 - **Social windows are movable and can be pinned.** Pinned means kept on screen in flight, not locked in place.
   A pinned window never takes flight's keys; the release key (`Shift`) lets the pointer use it.
+- **The sector panel is hidden until asked for.** `F2` (from `bindings.json`) shows and hides the panel in the pilot view, the command
+  view and the map. No hint or empty row is drawn when closed. Closed at the start of every game, kept while switching views, never saved. Passive: it never
+  pauses, captures the pointer or takes flight keys. `F` stays downward thrust and Follow.
 - **No calls.** No voice, video or phone controls.
 - **Show only what the services say.** No presence, avatars, activity or join buttons until an API gives them.
 
@@ -128,14 +149,77 @@ exists.
 
 ## Decided: building
 
-- **Big builds that stay smooth.** A ship has thousands of blocks; a station can reach about 150,000. 20 ships
-  and 10 stations of that size on screen at once must not hurt the frame rate or the tick.
+- **Big builds that stay smooth.** The near-term target is 30–50 ships and stations in a sector, with thousands
+  of blocks per hull. Later, stations can reach about 150,000 blocks; 20 ships and 10 such stations on screen
+  must stay within the frame and tick budgets. These are targets, not current measured capacity.
 - **A block is a box on the grid.** Any whole size, so a long wall is one block, not hundreds. A box that takes
   enough damage breaks as a whole; it does not chip into pieces.
 - **Building is free for now.** Later it costs materials.
-- **Build anywhere out of combat:** only when the ship has taken no damage for 30 seconds.
 - **A ship generator comes later.** Pick a style, move sliders, shuffle a seed, preview, build. For players who
   do not want to place blocks.
+
+## Decided: the ship editor
+
+References for feel: the assembly building of Kerbal Space Program (parts, attaching, symmetry) and Avorion
+(stretching a block). References, not clone targets.
+
+- **A parts editor over the grid.** Pick a part from a catalogue, attach it face to face, stretch it, mirror
+  it. What it saves is still boxes on the grid.
+- **Two kinds of part.** A dynamic part stretches to any whole size. A stock part has a fixed shape and mesh and
+  fills a box on the grid, so it snaps and collides like any other box.
+- **B opens the editor around the ship in space** after 30 seconds without damage. Until hostility exists,
+  other players in the sector do not block editing; there is no enemy-presence gate yet.
+- **Shipyards become the normal place to build, later.** Building anywhere stays as the fallback for when no
+  shipyard is left.
+- **Stage 2 is implemented:** the old 64-block cap is gone. The editor is next, within the current shared
+  resource limits; scale work must raise measured capacity before thousands of blocks are promised.
+
+## Decided: applying an edit
+
+The server and session side is built ([hosting](hosting.md#ship-editor-protocol-26)), and so is a first,
+playable editor on top of it.
+
+- **Playable first, scale after.** The editor works within today's limits; nothing is raised for it.
+- **A design never changes.** Applying an edit puts a new hull, with a new id, where the old one was.
+- **The catalogue only grows** while a server runs. No number is reused or rebound. It can fill up.
+- **No protection while editing.** Damage ends the edit; the draft stays with the player.
+- **Building is free:** new blocks are whole. Shield and battery charge is kept, not refilled.
+- **A ship keeps its blueprint.** Losing blocks does not change the design. The hull points a ship is shown
+  against are the blueprint's, not what its surviving blocks add up to.
+- **Repair is its own request, and free for now.** It rebuilds the ship as its blueprint. Later it costs materials.
+- **A design need not work.** Missing thrust, torque or power does not stop Apply. Those systems are simply
+  off; the editor warns instead of refusing.
+
+## The editor as built (second slice)
+
+What works now:
+
+- `B` asks; the editor opens only on the server's grant. The world keeps running; the ship gets no controls.
+- The draft is the full blueprint. Lost blocks are in it, outlined red; the hull reads now against built.
+- An orbit camera around the ship. `F` (the Follow key) fits the selection, or the whole draft, in view.
+- Parts: a search, tabs by role, drone parts on their own tab, cards with figures at the placing size.
+- Place by click or by dragging a card onto a face. Select with the middle button; Shift adds or removes.
+- Selected blocks are outlined blue. A left drag moves them; Copy, Paste, Delete and Merge act on all.
+- Every change is one undo step. Undo and redo clear the selection rather than name shifted blocks.
+- Repair first: a damaged ship opens repair-only (look, select, Repair). Changes kept from before the damage
+  are thrown away only with **Discard changes**. The server refuses any other design for a damaged hull.
+- One kind of FTL drive per ship, any number of it; refused at placement, in the check and on the server.
+- The part to place is sized by holding `S` and dragging a face of its ghost (the opposite face stays), and
+  turned with `R` by dragging one of two rings around its ghost, in exact quarter turns, before it is placed.
+- The ghost glides into each turn; the glide is drawn only, never placed. The right button orbits through both.
+- A turn needs no confirming. A click on the turned ghost places it; `R` or a click elsewhere keeps the turn
+  without placing; `Esc` puts it back.
+- Choosing a part, tab or shape in the part list hands the keyboard back to the world: the ghost follows the
+  pointer onto the ship at once, and the first click there places.
+- Figures in red with the reason when the ship cannot power, move or turn well. Warnings never stop Apply.
+- The shield shape's complexity against its limit. Over the limit blocks Apply, with the reason.
+
+Not built yet:
+
+- Shapes other than boxes and wedges; stock parts with their own meshes.
+- Mirror and symmetry. Saved designs; changing a ship's name, class, block size or colour.
+- A drag handle for resizing a placed block; its resize is numeric.
+- Anything past today's limits of a few hundred boxes.
 
 ## Decided: networking
 
@@ -160,25 +244,29 @@ Not built yet. These are the consequences of the decisions above, in the order t
    128 sectors of physics.
 5. **Sectors simulated in parallel** on the job graph: one occupied sector, one job.
 
-Limits that go first: ship designs capped at 64 blocks, full-state snapshots, hull-only storage.
+Remaining scale work: full-state snapshots, bounded runtime geometry and hull-only storage.
 
 ## Planned, in order
 
 Next:
 
-1. Blocks at scale: no 64-block cap, a design is sent once per ship, damage is sent as changes.
-2. The entity store and the entity kinds: ships, stations, fighters, asteroids, gas fields.
-3. Interest management and delta snapshots.
+1. The ship editor (B): its second slice and wedges are in. Next: smooth shields, then mirror, stock parts, a drag handle.
+2. Blocks at scale, stages 3 to 5: collision, drawing and the full load.
+3. The entity store and the entity kinds: ships, stations, fighters, asteroids, gas fields.
+4. Interest management and delta snapshots.
 
 After that:
 
 1. Asteroid looks: more complex shapes, generated textures, dust where a ship bumps one.
 2. Asteroids that crack into pieces, for the ones with a rich core.
-3. The ship editor (B), then the ship generator.
+3. The ship generator.
 4. Mining and the loop it feeds: mine, haul, refine, sell, build. Shipyards.
 5. Factions: strategic model first, then their ships and stations in occupied sectors.
 
 ## Open
+
+- **Shield room for many separate non-box parts.** A separate part that is not a box (a wedge, an L) is sampled
+  and needs about a thousand indices; a few hundred of them do not fit. Cheaper shapes for those are undecided.
 
 - Whether players can make deals with AI factions (alliance, trade pact, war), or AI factions only react.
 - What PvP rules a server can set: everywhere, by sector, or by consent.
@@ -190,4 +278,5 @@ After that:
 
 ## Open: building
 
-- Whether building later moves to shipyards only.
+- What "no shipyard is left" means once shipyards exist: none in the galaxy, in the faction, or in reach.
+- Where stock part meshes come from: generated in code, or modelled files.

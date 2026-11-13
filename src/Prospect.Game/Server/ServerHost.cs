@@ -136,6 +136,50 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public long InviteUntil, SocialAt;
         public double SocialCredit;
         public bool SocialFailed;
+        public BlockSender? Blocks;
+        public bool CatalogueReady;
+        public long CatalogueDeadline;
+
+        /// <summary>
+        /// How many designs the manifest this client was sent lists; zero until it has asked for one. Designs from
+        /// that number on were added later and are announced one by one.
+        /// </summary>
+        public int ManifestDesigns;
+
+        /// <summary>One past the last design announced to the client.</summary>
+        public int NoticedDesigns;
+
+        /// <summary>
+        /// The designs the client can show, and the ones it said it cannot, by design number. The client is sent
+        /// no hull of a design it is not ready for.
+        /// </summary>
+        public readonly ulong[] ReadyDesigns = new ulong[4];
+        public readonly ulong[] FailedDesigns = new ulong[4];
+
+        /// <summary>Where the player's edit stands; see <see cref="ServerHost.TickEditor"/>.</summary>
+        public EditorPhase EditPhase;
+
+        /// <summary>The edit's name, the hull it is of, and the tick it was allowed in: damage from then on ends it.</summary>
+        public uint EditToken;
+        public HullHandle EditHull;
+        public long EditStartTick;
+
+        /// <summary>When the upload, the owner's client or the other clients run out of time, by stage.</summary>
+        public long EditDeadline;
+
+        /// <summary>The earliest tick the player may commit another design.</summary>
+        public long EditNextCommit;
+
+        /// <summary>The buffer the committed design arrives in, while it arrives and is checked.</summary>
+        public EditUpload? EditUpload;
+
+        /// <summary>The design the hull will be replaced with, and whether its owner's client is ready for it.</summary>
+        public byte EditDesign;
+        public bool EditOwnerReady;
+
+        /// <summary>The newest answer about the edit, and whether the transport has yet to take it.</summary>
+        public EditorStateMessage EditReply;
+        public bool EditReplyDirty;
         public string Name = "";
 
         /// <summary>The name a hello gave, cleaned, kept here without allocating until the player is let in.</summary>
@@ -182,6 +226,20 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             InviteUntil = SocialAt = 0;
             SocialCredit = 0;
             SocialFailed = false;
+            Blocks = null;
+            CatalogueReady = false;
+            ManifestDesigns = NoticedDesigns = 0;
+            Array.Clear(ReadyDesigns);
+            Array.Clear(FailedDesigns);
+            EditPhase = EditorPhase.Closed;
+            EditToken = 0;
+            EditHull = default;
+            EditStartTick = EditDeadline = EditNextCommit = 0;
+            EditUpload = null;
+            EditDesign = 0;
+            EditOwnerReady = false;
+            EditReply = default;
+            EditReplyDirty = false;
             State = ConnectionState.Free;
             Transport = null!;
             Name = "";
@@ -211,6 +269,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         BadHandshake,
         WrongPassword,
         LockedOut,
+        ContentMismatch,
         TimedOut,
         TooFast,
         AddressBusy,
@@ -230,10 +289,13 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     private readonly ITransport[] _transports;
     private readonly Connection[] _connections;
     private readonly TickLoop _loop;
+    private readonly DesignCatalogue _catalogue;
     private readonly byte[] _sendBuffer = new byte[64 * 1024];
     private readonly HullStore _hulls = new();
     private readonly HullField _field;
-    private readonly GameContent _content;
+
+    // Replaced, never changed, when a design is added: the same content with one more design at the end.
+    private GameContent _content;
     private readonly RockField _rocks;
     private readonly RockImpulses _impulses = new();
     private readonly string _name;
@@ -316,9 +378,16 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
             // From here on the server only knows the content as its own world's settings make it.
             _content = content.WithSettings(config.Settings ?? content.SettingCatalog.Defaults);
+            _catalogue = new DesignCatalogue(_content);
+            _startupDesigns = _catalogue.Count;
+            _uploads = new EditUpload[_content.Editor.Uploads];
+            for (var i = 0; i < _uploads.Length; i++)
+                _uploads[i] = new EditUpload(_content.BlockTransfers.MaxBytes);
             Galaxy = _content.Galaxy.WithSeed(config.GalaxySeed);
             _rocks = new RockField(Galaxy);
-            _field = new HullField(_hulls, _content.Designs);
+
+            // Room for the largest design the editor can add, taken now: a new design costs the tick no memory.
+            _field = new HullField(_hulls, _content.Designs, reserveBlocks: Math.Min(_content.Blocks.Limits.MaxBlocks, GeometryAdmission.MaxBlocks));
 
             // A slot for every player, and apart from those one for every connection that may be pending: however
             // many stand at the door, there is a slot for whoever is let in. The in-process links are not counted
@@ -395,6 +464,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     public void Dispose()
     {
         _loop.Stop();
+        StopEditor();
         // Clear secrets before any external cleanup can throw.
         if (_passwordKey is not null)
             CryptographicOperations.ZeroMemory(_passwordKey);
@@ -425,6 +495,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 _ => $"Public: announcing to {_listingHost}, {(_passwordKey is null ? "no password" : "with a password")}",
             }
         );
+
+        // A player turned away for other content can compare this with what their own log says.
+        Logs.Sim.Info($"Content {_content.Identity}: a client joins only with the same blocks, rules, designs and galaxy rules");
 
         // Whoever reads the log should be able to tell how this world differs from a plain one.
         var catalog = _content.SettingCatalog;
@@ -458,7 +531,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             }
             else if (connection.State == ConnectionState.Active)
             {
-                if (connection.SocialFailed)
+                if (connection.SocialFailed || (!connection.CatalogueReady && tick > connection.CatalogueDeadline))
                 {
                     connection.Transport.Disconnect(connection.Peer);
                     RemovePlayer(connection);
@@ -484,6 +557,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         if (carriedOver)
             _budgetTicks++;
         ReportRefusals(now);
+
+        // Edits move on before the hulls step, so a hull that is replaced steps as the new one this tick.
+        TickEditor(tick);
 
         // From here every hull steps for this tick: the piloted ones first, by the inputs that arrived, then the rest.
         _field.BeginRound();
@@ -542,6 +618,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         {
             if (connection.State != ConnectionState.Free)
                 connection.Transport.Disconnect(connection.Peer);
+            CloseEdit(connection);
             connection.Reset();
         }
 
@@ -685,8 +762,38 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             return;
 
         var reader = new NetReader(payload[1..]);
+        if (!connection.CatalogueReady)
+        {
+            if (payload[0] == (byte)MessageId.DesignRequest && channel == NetChannel.Unreliable && payload.Length == 2)
+            {
+                var id = payload[1];
+                if (id == 255)
+                {
+                    // The manifest and the designs it lists never change once made, so what this client is
+                    // sent stays whole whatever is added meanwhile. What is added later it is told afterwards.
+                    if (connection.Blocks!.QueueDesign(id, _catalogue.Manifest, _tick))
+                        connection.ManifestDesigns = _catalogue.Count;
+                }
+                else if (id < _catalogue.Bytes.Length) connection.Blocks!.QueueDesign(id, _catalogue.Bytes[id], _tick);
+            }
+            else if (payload[0] == (byte)MessageId.CatalogueReady && channel == NetChannel.Reliable && payload.Length == 1)
+            {
+                // A client that never asked for the manifest can know no more than the designs the server started with.
+                if (connection.ManifestDesigns == 0)
+                    connection.ManifestDesigns = _startupDesigns;
+                BlockSet.Fill(connection.ReadyDesigns, connection.ManifestDesigns);
+                connection.NoticedDesigns = connection.ManifestDesigns;
+                connection.CatalogueReady = true;
+                SendRockDeltas(connection, _rocks.Deltas);
+                JoinSocial(connection);
+            }
+            return;
+        }
         switch ((MessageId)payload[0])
         {
+            case MessageId.BlockAck when channel == NetChannel.Unreliable:
+                connection.Blocks!.Receive(ref reader, _hulls, _tick);
+                break;
             case MessageId.Social when channel == NetChannel.Reliable:
                 ReceiveSocial(connection, ref reader);
                 break;
@@ -714,6 +821,23 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             case MessageId.FleetOrders when channel == NetChannel.Reliable:
                 ReceiveFleetOrders(connection, ref reader);
                 break;
+            case MessageId.Editor when channel == NetChannel.Reliable:
+                ReceiveEditor(connection, ref reader);
+                break;
+            case MessageId.EditorData when channel == NetChannel.Bulk:
+                ReceiveEditorData(connection, ref reader);
+                break;
+            case MessageId.DesignReady when channel == NetChannel.Reliable:
+                ReceiveDesignReady(connection, ref reader);
+                break;
+            case MessageId.DesignRequest when channel == NetChannel.Unreliable && payload.Length == 2:
+                {
+                    // Only a design added since this client's manifest, announced to it and not yet shown by it.
+                    var id = payload[1];
+                    if (id >= connection.ManifestDesigns && id < connection.NoticedDesigns && !BlockSet.Has(connection.ReadyDesigns, id))
+                        connection.Blocks!.QueueDesign(id, _catalogue.Bytes[id], _tick, repeat: true);
+                    break;
+                }
         }
     }
 
@@ -762,7 +886,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         if (hullId == 0)
         {
             // Already in a drone: there is nothing smaller to step out into.
-            if (currentInfo.Design == drone)
+            if (currentInfo.EscapeDrone)
                 return;
 
             var from = _hulls.State(current.Index);
@@ -775,15 +899,23 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
             // Creating a hull may have moved the storage; look the old one up again.
             currentInfo = ref _hulls.Info(current.Index);
+
+            // Stepping out does not leave the damage behind: the drone has been as quiet as the hull it left.
+            _hulls.Info(next.Index).DamageTick = currentInfo.DamageTick;
+            _hulls.Info(next.Index).EscapeDrone = true;
         }
         else
         {
             next = new HullHandle((int)(hullId & 0xFFFF), (int)(hullId >> 16));
             if (next == current || !_hulls.IsAlive(next) || _hulls.Info(next.Index).Owner != connection.PlayerId)
                 return;
+
+            // Check before mutation so an out-of-sector refusal also preserves an escape drone.
+            if (!Galaxy.InSameSector(_hulls.State(current.Index).Position, _hulls.State(next.Index).Position))
+                return;
         }
 
-        if (currentInfo.Design == drone)
+        if (currentInfo.EscapeDrone)
             _hulls.Destroy(current);
         else
             currentInfo.Piloted = false;
@@ -908,15 +1040,19 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     private void LoseHull(Connection connection)
     {
         var lost = connection.Hull;
-        var wasDrone = _hulls.Info(lost.Index).Design == _content.DroneDesign;
+        var wasDrone = _hulls.Info(lost.Index).EscapeDrone;
         var state = _hulls.State(lost.Index);
         _hulls.Destroy(lost);
 
         var drone = (byte)_content.DroneDesign;
         connection.Hull = _hulls.Create(connection.PlayerId, drone, _content.Designs[drone], wasDrone ? SpawnPoint : state.Position);
         ref var info = ref _hulls.Info(connection.Hull.Index);
+        info.EscapeDrone = true;
         info.Piloted = true;
         info.OrderId = connection.OrderId;
+
+        // The drone comes out of a hull that was just destroyed: its time without damage starts now.
+        info.DamageTick = _tick;
         if (!wasDrone)
         {
             ref var escaped = ref _hulls.State(connection.Hull.Index);
@@ -942,6 +1078,8 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
     private void SendSnapshot(Connection connection, long tick)
     {
+        connection.Blocks!.Send(connection.Transport, connection.Peer, _sendBuffer, tick);
+        if (!connection.CatalogueReady) return;
         var includeRemote = (tick + connection.PlayerId) % RemoteHullInterval == 0;
         var writer = new NetWriter(_sendBuffer);
         var header = new SnapshotHeader
@@ -968,16 +1106,24 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             if (writer.Length + HullRecord.MaxWireSize > _sendBuffer.Length)
                 break;
 
+            // A hull of a design this client cannot show yet is left out until the client says it can.
             ref var info = ref _hulls.Info(i);
-            new HullRecord
+            if (!BlockSet.Has(connection.ReadyDesigns, info.Design))
+                continue;
+            var record = new HullRecord
             {
                 Id = _hulls.HandleAt(i).Packed,
                 Owner = info.Owner,
                 Design = info.Design,
-                Blocks = info.Blocks,
+                Revision = _hulls.Revision(i),
                 State = _hulls.State(i),
                 Order = info.Order,
-            }.Write(ref writer);
+            };
+            record.LossStart = Math.Min(record.Revision, connection.Blocks.Acknowledged(record.Id));
+            var losses = _hulls.BlockStates.Losses(info.BlockState);
+            record.LossCount = (byte)Math.Min(HullRecord.MaxLosses, record.Revision - record.LossStart);
+            for (var loss = 0; loss < record.LossCount; loss++) record.Losses[loss] = losses[(int)record.LossStart + loss];
+            record.Write(ref writer);
             count++;
         }
 
@@ -992,8 +1138,12 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     /// Answers a hello. Without a password, or on the in-process link of the host's own client, the player is
     /// let in. Otherwise the answer is a challenge, unless the address has sent too many wrong passwords.
     ///
-    /// Everything that can turn the connection away is checked before the name is read, and the name is kept in
-    /// the connection's own buffer: a hello that is refused costs the server no memory, however many arrive.
+    /// The checks run in a fixed order: the version, a free player slot, the lock-out, the name, the content.
+    /// Everything that can turn the connection away without the name is checked before the name is read, and the
+    /// name is kept in the connection's own buffer: a hello that is refused costs the server no memory, however
+    /// many arrive. Content is compared last, and before any challenge: a client whose content differs could not
+    /// play here with the right password either, so it is told so without being asked for one. The host's own
+    /// client goes through the same comparison, which it passes because it was given the same content.
     /// </summary>
     private void Greet(Connection connection, ref NetReader hello)
     {
@@ -1029,6 +1179,18 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         if (!HelloMessage.TryReadName(ref hello, connection.NameChars, out connection.NameLength))
         {
             Refuse(connection, Refusal.BadHandshake);
+            return;
+        }
+
+        if (!HelloMessage.TryReadContent(ref hello, out var content))
+        {
+            Refuse(connection, Refusal.BadHandshake);
+            return;
+        }
+
+        if (content != _content.Identity)
+        {
+            Refuse(connection, Refusal.ContentMismatch);
             return;
         }
 
@@ -1083,6 +1245,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     {
         Array.Clear(connection.Challenge);
         connection.State = ConnectionState.Active;
+        connection.Blocks = new BlockSender(_content.BlockTransfers);
+        connection.CatalogueDeadline = _tick + _content.BlockTransfers.AdmissionTicks;
+
         connection.Name = new string(connection.NameChars, 0, connection.NameLength);
         connection.PlayerId = _nextPlayerId++;
         Volatile.Write(ref _playerCount, _playerCount + 1);
@@ -1121,8 +1286,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
         // The newcomer generates the galaxy from the seed like everyone else; what it cannot know is which
         // asteroids have been knocked about since.
-        SendRockDeltas(connection, _rocks.Deltas);
-        JoinSocial(connection);
+
 
         Logs.Sim.Info($"{connection.Name} joined as player {connection.PlayerId} via {connection.Transport.Description}");
     }
@@ -1146,6 +1310,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             Refusal.VersionMismatch => RejectReason.VersionMismatch,
             Refusal.ServerFull => RejectReason.ServerFull,
             Refusal.WrongPassword => RejectReason.WrongPassword,
+            Refusal.ContentMismatch => RejectReason.ContentMismatch,
             Refusal.LockedOut or Refusal.TooFast or Refusal.AddressBusy or Refusal.DoorFull => RejectReason.TooManyAttempts,
             _ => RejectReason.BadHandshake,
         };
@@ -1181,6 +1346,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                     + $"{_refused[(int)Refusal.WrongPassword]} wrong password, "
                     + $"{_refused[(int)Refusal.LockedOut]} locked out, "
                     + $"{_refused[(int)Refusal.VersionMismatch]} other version, "
+                    + $"{_refused[(int)Refusal.ContentMismatch]} other content, "
                     + $"{_refused[(int)Refusal.ServerFull]} server full"
             );
         }
@@ -1205,6 +1371,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     /// <summary>Takes a player's hulls out of the world and frees their player slot.</summary>
     private void RemovePlayer(Connection connection)
     {
+        CloseEdit(connection);
         LeaveSocial(connection);
         for (var i = 0; i < _hulls.Slots; i++)
         {

@@ -21,7 +21,13 @@ void main()
 {
     vec4 p = vec4(position, 1.0);
     worldPosition = vec3(dot(row0, p), dot(row1, p), dot(row2, p));
-    worldNormal = vec3(dot(row0.xyz, normal), dot(row1.xyz, normal), dot(row2.xyz, normal));
+    // Blocks are scaled per axis and hulls drawn out along their length, so a normal is turned by the cofactor
+    // matrix (the inverse transpose times the determinant): the model's columns crossed in pairs. The fragment
+    // shader normalises it, so the determinant's size does not matter, and every scale here is positive.
+    vec3 cx = vec3(row0.x, row1.x, row2.x);
+    vec3 cy = vec3(row0.y, row1.y, row2.y);
+    vec3 cz = vec3(row0.z, row1.z, row2.z);
+    worldNormal = cross(cy, cz) * normal.x + cross(cz, cx) * normal.y + cross(cx, cy) * normal.z;
     localPosition = position;
     int slot = int((tint.a + 0.5) * 0.25);
     cut = slot - 1;

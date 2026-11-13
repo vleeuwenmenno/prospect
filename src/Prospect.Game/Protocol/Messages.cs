@@ -50,6 +50,31 @@ public enum MessageId : byte
 
     /// <summary>Reliable social requests and authoritative social events.</summary>
     Social = 13,
+    /// <summary>Applied block revision, or a request for a complete block set.</summary>
+    BlockAck = 14,
+    /// <summary>A bounded chunk of a complete alive block set, on the bulk channel.</summary>
+    BlockState = 15,
+    /// <summary>Admission catalogue or canonical design chunk on the shared bulk lane.</summary>
+    DesignData = 16,
+    /// <summary>Admission request for a missing canonical design.</summary>
+    DesignRequest = 17,
+    /// <summary>The client has validated the complete admission catalogue.</summary>
+    CatalogueReady = 18,
+
+    /// <summary>Client to server, reliable: begin or cancel an edit of the hull the player flies, or commit a design.</summary>
+    Editor = 19,
+
+    /// <summary>Client to server, on the bulk channel: the next bytes of a committed design.</summary>
+    EditorData = 20,
+
+    /// <summary>Server to client, reliable: where the client's edit stands.</summary>
+    EditorState = 21,
+
+    /// <summary>Server to client, reliable: a design was added to the catalogue after admission.</summary>
+    DesignNotice = 22,
+
+    /// <summary>Client to server, reliable: the client can show hulls of an announced design, or cannot.</summary>
+    DesignReady = 23,
 }
 
 public enum RejectReason : byte
@@ -66,6 +91,12 @@ public enum RejectReason : byte
     /// takes them, or the server has too many connections waiting to be let in; the message says how long to wait.
     /// </summary>
     TooManyAttempts = 5,
+
+    /// <summary>
+    /// The client's content is not the server's: the same version of the game with other blocks, rules, designs
+    /// or galaxy rules; see <see cref="ContentIdentity"/>.
+    /// </summary>
+    ContentMismatch = 6,
 }
 
 /// <summary>Who can find and join a game.</summary>
@@ -120,7 +151,7 @@ public static class ProtocolInfo
     /// index in a list both ends generate for themselves, so two builds that generate differently would mean
     /// different rocks by the same number. Client and server must match exactly.
     /// </summary>
-    public const uint Version = 20;
+    public const uint Version = 28;
 
     public const ushort DefaultPort = 27420;
     public const int MaxNameBytes = 48;
@@ -130,22 +161,38 @@ public static class ProtocolInfo
     public static string GameVersion { get; } = typeof(ProtocolInfo).Assembly.GetName().Version?.ToString(3) ?? "0";
 }
 
+/// <summary>
+/// The first message on a connection: the protocol version, the player's name and the identity of the client's
+/// content. The version stays first in every version of the protocol, so two builds can always tell each other
+/// that they differ.
+/// </summary>
 public struct HelloMessage
 {
     public uint ProtocolVersion;
     public string PlayerName;
+
+    /// <summary>What the client's shared content comes to. The server lets in only its own.</summary>
+    public ContentIdentity Content;
+
+    /// <summary>
+    /// The most bytes a hello takes: the message id, the version, the name with its one-byte length and the
+    /// content identity.
+    /// </summary>
+    public const int MaxWireSize = 1 + 4 + 1 + ProtocolInfo.MaxNameBytes + ContentIdentity.WireSize;
 
     public readonly void Write(ref NetWriter writer)
     {
         writer.WriteByte((byte)MessageId.Hello);
         writer.WriteUInt32(ProtocolVersion);
         writer.WriteString(PlayerName);
+        Content.Write(ref writer);
     }
 
     /// <summary>
-    /// Reads the first field of a hello, the protocol version, and nothing else. A server reads a hello in two
+    /// Reads the first field of a hello, the protocol version, and nothing else. A server reads a hello in
     /// steps so that a connection it is going to refuse anyway costs it no memory: the name is read, with
-    /// <see cref="TryReadName"/>, only once everything that can be checked without it has passed.
+    /// <see cref="TryReadName"/>, only once everything that can be checked without it has passed, and the
+    /// content identity, with <see cref="TryReadContent"/>, after the name.
     /// </summary>
     public static bool TryReadVersion(ref NetReader reader, out uint version)
     {
@@ -154,7 +201,7 @@ public struct HelloMessage
     }
 
     /// <summary>
-    /// Reads the rest of a hello after <see cref="TryReadVersion"/>: the player's name, cleaned as
+    /// Reads the second field of a hello after <see cref="TryReadVersion"/>: the player's name, cleaned as
     /// <see cref="PlayerNames.Sanitize(ReadOnlySpan{char}, Span{char})"/> cleans it, into <paramref name="name"/>,
     /// which must hold <see cref="ProtocolInfo.MaxNameChars"/> characters. Allocates nothing.
     /// </summary>
@@ -165,6 +212,12 @@ public struct HelloMessage
         length = reader.IsValid ? PlayerNames.Sanitize(raw[..read], name) : 0;
         return reader.IsValid;
     }
+
+    /// <summary>
+    /// Reads the last field of a hello after <see cref="TryReadName"/>: the identity of the client's content.
+    /// False when the hello ends before it does. Allocates nothing.
+    /// </summary>
+    public static bool TryReadContent(ref NetReader reader, out ContentIdentity content) => ContentIdentity.TryRead(ref reader, out content);
 }
 
 public struct WelcomeMessage

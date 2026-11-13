@@ -23,7 +23,7 @@ public sealed class OwnAperturePickingTests
             new Vector4(0.5f, 16f / 9f, 1280, 720));
 
     private static PickHull Hull(FtlAperture aperture) =>
-        new(7, Centre, Quaternion.Identity, [Vector3.Zero], 10f, 1, 8.7f, Aperture: aperture);
+        new(7, Centre, Quaternion.Identity, [Vector3.Zero], 1f, BlockMasks.Set(1), 8.7f, Aperture: aperture, HalfExtents: [new Vector3(5f)]);
 
     private static PickHit? Pick(FtlAperture aperture, Vector2 pixel)
     {

@@ -35,10 +35,11 @@ public sealed class BoxDesignTests
         var content = GameContent.Load();
         var rules = Catalog.Rules with { FtlSpeed = 12345 };
         var changed = content.Pod.WithRules(rules);
-        changed.Evaluate(changed.FullMask, out var flight, out _);
+        changed.Evaluate(changed.FullSet, out var flight, out _);
         Assert.Equal(12345, flight.FtlSpeed);
         Assert.Equal(12345, changed.Flight.FtlSpeed);
-        new BoxHullSums(Design(Box("core"), Box("hyperdrive", 2))).Evaluate(rules, out var box, out _);
+        var sums = new BoxHullSums(Design(Box("core"), Box("hyperdrive", 2)));
+        sums.Evaluate(sums.Intact, rules, out var box, out _);
         Assert.Equal(12345, box.FtlSpeed);
         var settings = content.SettingCatalog.Build(null, ["jumpChargeSpeed=2"]);
         Assert.Equal(12345, rules.Under(content.SettingCatalog, settings).FtlSpeed);
@@ -53,9 +54,9 @@ public sealed class BoxDesignTests
         var before = GC.GetAllocatedBytesForCurrentThread(); var timer = Stopwatch.StartNew();
         var boxes = Generate(count, 1234); var generation = timer.Elapsed.TotalMilliseconds;
         timer.Restart(); var design = Design(boxes); var validation = timer.Elapsed.TotalMilliseconds;
-        timer.Restart(); var sums = new BoxHullSums(design); sums.Evaluate(Catalog.Rules, out var flight, out var stats); var evaluation = timer.Elapsed.TotalMilliseconds;
+        timer.Restart(); var sums = new BoxHullSums(design); sums.Evaluate(sums.Intact, Catalog.Rules, out var flight, out var stats); var evaluation = timer.Elapsed.TotalMilliseconds;
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        Console.WriteLine($"BOX {count}: generate {generation:F2} ms; validate {validation:F2} ms; evaluate {evaluation:F2} ms; allocated {allocated} bytes; sums retained {sums.StorageBytes} bytes");
+        Console.WriteLine($"BOX {count}: generate {generation:F2} ms; validate {validation:F2} ms; evaluate {evaluation:F2} ms; allocated {allocated} bytes; sums {sums.StorageBytes} bytes a hull; design keeps {sums.DesignBytes} bytes");
         Assert.True(generation + validation + evaluation < 15000, "15 second tooling budget");
         Assert.True(allocated < 256L * 1024 * 1024, "256 MiB allocation budget");
         Assert.Equal(count, stats.Blocks); Assert.True(flight.Mass > 0); Assert.True(flight.PowerGenerated > 0);
@@ -66,16 +67,17 @@ public sealed class BoxDesignTests
     public void RunningSumsHaveNoLossHistoryDrift()
     {
         var design = Design(Generate(4096, 42)); var sums = new BoxHullSums(design);
-        var alive = Enumerable.Repeat(true, 4096).ToArray(); var order = Enumerable.Range(0, 4096).ToArray();
+        var running = sums.Intact.ToArray(); var fresh = new HullSum[sums.NodeCount];
+        var alive = new ulong[BlockSet.WordCount(4096)]; BlockSet.Fill(alive, 4096); var order = Enumerable.Range(0, 4096).ToArray();
         uint seed = 82;
         for (var i = order.Length - 1; i > 0; i--) { seed = unchecked(seed * 1664525 + 1013904223); var j = (int)(seed % (uint)(i + 1)); (order[i], order[j]) = (order[j], order[i]); }
         for (var i = 0; i < order.Length; i++)
         {
-            sums.Lose(order[i]); sums.Lose(order[i]); alive[order[i]] = false;
+            BlockSet.Remove(alive, order[i]); sums.Lose(running, alive, order[i]); sums.Lose(running, alive, order[i]);
             if (i % 137 != 0 && i != order.Length - 1) continue;
-            sums.Evaluate(Catalog.Rules, out var actual, out var stats);
-            var fresh = new BoxHullSums(design, alive); fresh.Evaluate(Catalog.Rules, out var expected, out var expectedStats);
-            Assert.Equal(expected, actual); Assert.Equal(expectedStats, stats); Assert.Equal(fresh.Center, sums.Center);
+            sums.Evaluate(running, Catalog.Rules, out var actual, out var stats);
+            sums.Build(fresh, alive); sums.Evaluate(fresh, Catalog.Rules, out var expected, out var expectedStats);
+            Assert.Equal(expected, actual); Assert.Equal(expectedStats, stats); Assert.True(Figures.SameSums(fresh, running));
         }
     }
 
@@ -88,8 +90,75 @@ public sealed class BoxDesignTests
     {
         string[] names = ["mass", "hull", "thrust", "torque", "powerOutput", "powerDraw", "energyStorage", "shield", "shieldRecharge", "cargo", "crew", "ftlPower"];
         var type = new BlockType { Id = "test", Name = "test", Mass = 1, Hull = 1, SizeRules = names.ToDictionary(n => n, _ => exponent) };
-        foreach (var name in names) { Assert.Equal(0.3f, BoxDesign.Scale(type, name, 0.3f, 1)); Assert.Equal(3 * multiplier, BoxDesign.Scale(type, name, 3, 4)); }
+        // A power taken with DetMath is the same on every machine and within rounding of the true one; one cell
+        // and the exponents 0 and 1 take no power and are exact.
+        foreach (var name in names)
+        {
+            Assert.Equal(0.3f, BoxDesign.Scale(type, name, 0.3f, 1));
+            if (exponent is 0 or 1) Assert.Equal(3 * multiplier, BoxDesign.Scale(type, name, 3, 4));
+            else Assert.Equal(3 * multiplier, BoxDesign.Scale(type, name, 3, 4), 3 * multiplier * 1e-12);
+        }
         Assert.Equal(12, BoxDesign.Scale(Catalog.Get("hull"), "mass", 3, 4));
+    }
+
+    [Fact]
+    public void CrewThatScalesToAWholeNumberIsNotRoundedDownByThePower()
+    {
+        // The shipped quarters hold 2 and grow with the square root of their cells: 9 cells hold exactly 6.
+        var quarters = Catalog.Get("quarters");
+        Assert.Equal(6, BoxDesign.WholeCrew(quarters, 9));
+        Assert.Equal(4, BoxDesign.WholeCrew(quarters, 4));
+        Assert.Equal(2 * 512, BoxDesign.WholeCrew(quarters, 262_144));
+        Assert.Equal(2, BoxDesign.WholeCrew(quarters, 2));
+        Assert.Equal(6, BoxDesign.Scale(quarters, "crew", 2, 9));
+
+        // Other powers go through DetMath and can land a hair under the whole number they stand for; every
+        // perfect power still holds its whole crew, and what is truly between two whole numbers is rounded down.
+        foreach (var (exponent, root) in new[] { (0.25, 4), (0.75, 4), (1.5, 2), (1.25, 4), (1.0 / 3.0, 3) })
+        {
+            var type = new BlockType { Id = "test", Name = "test", Mass = 1, Hull = 1, Crew = 3, SizeRules = new Dictionary<string, double> { ["crew"] = exponent } };
+            for (var n = 2; n <= 8; n++)
+            {
+                var cells = (long)Math.Round(Math.Pow(n, root));
+                var whole = 3 * (long)Math.Round(Math.Pow(n, root * exponent));
+                Assert.Equal(whole, BoxDesign.WholeCrew(type, cells));
+            }
+        }
+
+        var half = new BlockType { Id = "test", Name = "test", Mass = 1, Hull = 1, Crew = 2, SizeRules = new Dictionary<string, double> { ["crew"] = 0.75 } };
+        Assert.Equal(Math.Floor(2 * Math.Pow(5, 0.75)), BoxDesign.WholeCrew(half, 5));
+    }
+
+    [Fact]
+    public void ScalingThroughDetMathMatchesThePowerFunctionAndIsExactWhereNoPowerIsTaken()
+    {
+        // Every exponent a rule may have, in steps of a fortieth, against every cell count a box of 64 a side
+        // can have that matters: all the small ones, and a spread up to the largest.
+        var worst = 0.0;
+        for (var step = 0; step <= 80; step++)
+        {
+            var exponent = step / 40.0;
+            var type = new BlockType { Id = "test", Name = "test", Mass = 1, Hull = 1, SizeRules = new Dictionary<string, double> { ["mass"] = exponent } };
+            for (long cells = 1; cells <= 262_144; cells += cells < 4_096 ? 1 : 251)
+            {
+                var scaled = BoxDesign.Scale(type, "mass", 1.7, cells);
+                var expected = 1.7 * Math.Pow(cells, exponent);
+                if (cells == 1 || exponent == 0)
+                    Assert.Equal(1.7, scaled);
+                else if (exponent == 1)
+                    Assert.Equal(1.7 * cells, scaled);
+                else
+                    worst = Math.Max(worst, Math.Abs(scaled - expected) / expected);
+            }
+
+            Assert.Equal(1.7 * Math.Pow(262_144, exponent), BoxDesign.Scale(type, "mass", 1.7, 262_144), 1.7 * Math.Pow(262_144, exponent) * 1e-12);
+        }
+
+        Console.WriteLine($"SCALE worst relative difference from Math.Pow: {worst:E3}");
+        Assert.True(worst < 1e-12, $"worst relative difference {worst}");
+
+        // A stat with no rule grows with the cells, exactly.
+        Assert.Equal(1.7 * 4096, BoxDesign.Scale(Catalog.Get("hull"), "mass", 1.7, 4096));
     }
 
     [Fact]
@@ -104,7 +173,8 @@ public sealed class BoxDesignTests
         foreach (var c in cells) { mass += c.Mass; x += c.X * c.Mass; y += c.Y * c.Mass; z += c.Z * c.Mass; }
         var centre = new Double3(x / mass, y / mass, z / mass); var inertia = Double3.Zero;
         foreach (var c in cells) { var rx = c.X - centre.X; var ry = c.Y - centre.Y; var rz = c.Z - centre.Z; inertia += new Double3(c.Mass * (ry * ry + rz * rz + 1.0 / 6), c.Mass * (rx * rx + rz * rz + 1.0 / 6), c.Mass * (rx * rx + ry * ry + 1.0 / 6)); }
-        new BoxHullSums(design).Evaluate(Catalog.Rules, out var flight, out _);
+        var sums = new BoxHullSums(design);
+        sums.Evaluate(sums.Intact, Catalog.Rules, out var flight, out _);
         Assert.Equal(mass, flight.Mass); Assert.True((centre - design.Center).Length < 1e-12);
         Assert.True(Math.Abs(inertia.X - flight.Inertia.X) / inertia.X < 1e-6); Assert.True(Math.Abs(inertia.Y - flight.Inertia.Y) / inertia.Y < 1e-6); Assert.True(Math.Abs(inertia.Z - flight.Inertia.Z) / inertia.Z < 1e-6);
     }
@@ -119,7 +189,7 @@ public sealed class BoxDesignTests
     }
 
     [Fact]
-    public void VersionTwoRoundTripsAndLiveLoaderRefusesLaterStageDesigns()
+    public void VersionTwoRoundTripsAndLiveLoaderStillRequiresFlightSystems()
     {
         foreach (var boxes in new[] { new[] { Box("core", size: new GridSize(2, 1, 1)) }, Generate(65, 12) })
         {
@@ -128,7 +198,8 @@ public sealed class BoxDesignTests
             {
                 using (var stream = File.Create(path)) design.Write(stream);
                 var read = BoxDesign.Load(path, Catalog); Assert.Equal(design.Blocks.ToArray(), read.Blocks.ToArray());
-                Assert.Contains("stage 2", Assert.Throws<InvalidDataException>(() => HullDesign.Load(path, Catalog, Catalog.Rules)).Message);
+                if (boxes.Length == 1) Assert.Throws<InvalidDataException>(() => HullDesign.Load(path, Catalog, Catalog.Rules));
+                else Assert.Equal(boxes.Length, HullDesign.Load(path, Catalog, Catalog.Rules).BlockCount);
             }
             finally { File.Delete(path); }
         }
@@ -158,16 +229,20 @@ public sealed class BoxDesignTests
             "{\"type\":\"core\",\"at\":[4096,0,0]}",
             "{\"type\":\"core\",\"at\":[0,0]}",
             "{\"type\":\"missing\",\"at\":[0,0,0]}",
-            "{\"type\":\"hull\",\"at\":[0,0,0]}"
+            "{\"type\":\"hull\",\"at\":[0,0,0]}",
+            "{\"type\":\"core\",\"at\":[0,0,0],\"shape\":\"wedge-z\"}"
         ];
         var path = Path.GetTempFileName();
         try
         {
             foreach (var entry in entries)
             {
-                File.WriteAllText(path, "{\"version\":2,\"name\":\"bad\",\"class\":\"ship\",\"blockSize\":1,\"color\":[1,1,1],\"blocks\":[" + entry + "]}");
-                var error = Assert.Throws<InvalidDataException>(() => BoxDesign.Load(path, Catalog));
-                Assert.Contains(path, error.Message); Assert.Contains("block", error.Message);
+                foreach (var version in new[] { 2, 3 })
+                {
+                    File.WriteAllText(path, "{\"version\":" + version + ",\"name\":\"bad\",\"class\":\"ship\",\"blockSize\":1,\"color\":[1,1,1],\"blocks\":[" + entry + "]}");
+                    var error = Assert.Throws<InvalidDataException>(() => BoxDesign.Load(path, Catalog));
+                    Assert.Contains(path, error.Message); Assert.Contains("block", error.Message);
+                }
             }
         }
         finally { File.Delete(path); }
@@ -178,17 +253,18 @@ public sealed class BoxDesignTests
     {
         var design = Design(Box("core"), Box("generator", 2, new GridSize(2, 2, 2)), Box("quarters", 5, new GridSize(2, 2, 2)), Box("shield", 8), Box("hyperdrive", 9));
         var sums = new BoxHullSums(design);
-        sums.Evaluate(Catalog.Rules, out var plain, out var stats);
+        var tree = sums.Intact;
+        sums.Evaluate(tree, Catalog.Rules, out var plain, out var stats);
         Assert.Equal((float)(6 * Math.Pow(8, 1.25)), plain.PowerGenerated);
         Assert.Equal(5, stats.Crew);
-        sums.Evaluate(Catalog.Rules with { HullStrength = 2, ShieldRechargeMultiplier = 3, FtlChargeMultiplier = 4 }, out var changed, out _);
+        sums.Evaluate(tree, Catalog.Rules with { HullStrength = 2, ShieldRechargeMultiplier = 3, FtlChargeMultiplier = 4 }, out var changed, out _);
         Assert.Equal(plain.HullPoints * 2, changed.HullPoints);
         Assert.Equal(plain.ShieldRecharge * 3, changed.ShieldRecharge);
         Assert.Equal(plain.FtlPower * 4, changed.FtlPower);
         Assert.Equal(12f, plain.FtlCalculateSeconds);
         Assert.Equal(GameContent.Load().Pod.Flight.FtlCalculateSeconds, plain.FtlCalculateSeconds);
         Assert.Equal(plain.FtlCalculateSeconds, changed.FtlCalculateSeconds);
-        sums.Evaluate(Catalog.Rules with { FtlCalculateSeconds = 0 }, out var instant, out _);
+        sums.Evaluate(tree, Catalog.Rules with { FtlCalculateSeconds = 0 }, out var instant, out _);
         Assert.Equal(0, instant.FtlCalculateSeconds);
         Assert.Equal(plain.Inertia, changed.Inertia);
     }
@@ -198,14 +274,15 @@ public sealed class BoxDesignTests
     {
         var design = Design(Box("core"), Box("hyperdrive", 3), Box("riftcutter", 8), Box("hyperdrive", 10));
         var sums = new BoxHullSums(design);
-        sums.Evaluate(Catalog.Rules, out var first, out _);
+        var running = sums.Intact.ToArray(); var alive = new ulong[1]; BlockSet.Fill(alive, 4);
+        void Lose(int block) { BlockSet.Remove(alive, block); sums.Lose(running, alive, block); }
+        sums.Evaluate(running, Catalog.Rules, out var first, out _);
         Assert.Equal(FtlKind.Hyperspace, first.Ftl); Assert.Equal(16, first.FtlPower);
-        sums.Lose(1); sums.Evaluate(Catalog.Rules, out var next, out _);
+        Lose(1); sums.Evaluate(running, Catalog.Rules, out var next, out _);
         Assert.Equal(FtlKind.Rift, next.Ftl); Assert.Equal(10, next.FtlPower);
-        Assert.NotEqual(design.Center, sums.Center);
         var original = design.Center;
-        sums.Lose(2); sums.Lose(3);
-        sums.Evaluate(Catalog.Rules, out var core, out _);
+        Lose(2); Lose(3);
+        sums.Evaluate(running, Catalog.Rules, out var core, out _);
         Assert.Equal(original, design.Center);
         Assert.Equal((float)(3 * (original.X * original.X + 1.0 / 6)), core.Inertia.Y);
     }

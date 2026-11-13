@@ -55,6 +55,8 @@ public sealed class FloodRegressionTests
         Assert.Equal(1, rig.Net[honest].Pongs);
         var replacement = rig.Net.Connect(3);
         rig.Hello(replacement);
+        // The fixture owns the catalogue; admit it before gameplay without adding a budget-reset tick.
+        rig.Net.Deliver(replacement, [(byte)MessageId.CatalogueReady]);
         rig.Net.Deliver(replacement, new byte[] { (byte)MessageId.Ping, 0, 0, 0, 0, 0, 0, 0, 0 });
         rig.Tick();
         Assert.Equal(1, rig.Net[replacement].Pongs);

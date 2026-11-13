@@ -37,6 +37,7 @@ public sealed class ShieldTimingTests : IDisposable
     private readonly ShieldDraw[] _draws = new ShieldDraw[ShieldVisuals.MaxShields];
     private readonly ShieldInstance[] _instances = new ShieldInstance[ShieldVisuals.MaxShields];
     private readonly MeshVertex[] _vertices = new MeshVertex[ShieldVisuals.MaxVertices];
+    private readonly ushort[] _indices = new ushort[ShieldVisuals.MaxIndices];
     private long _tick;
 
     public ShieldTimingTests()
@@ -133,7 +134,7 @@ public sealed class ShieldTimingTests : IDisposable
         _world.Update(snapshot, _client.Input, dt, false, Screen, Screen, false);
         var shields = _world.Shields;
         shields.Begin(_draws);
-        shields.Add(snapshot.Hulls[snapshot.OwnHull].Id, Vector3.Zero, Quaternion.Identity, 1f, 2f, _instances, _vertices);
+        shields.Add(snapshot.Hulls[snapshot.OwnHull].Id, Vector3.Zero, Quaternion.Identity, 1f, 2f, _instances, _vertices, _indices);
         return shields.Draws.Length > 0 ? _instances[0] : null;
     }
 

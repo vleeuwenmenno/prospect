@@ -43,9 +43,9 @@ public sealed class ShieldClockTests
             if (store.Info(i).Piloted && pilot < 0) pilot = i;
             ref var state = ref store.State(i);
             state.Position = new Double3(i * 1000, 100000, 0);
-            var body = new HullBody { Design = content.Designs[store.Info(i).Design], Alive = store.Info(i).Blocks };
+            var body = new HullBody { Design = content.Designs[store.Info(i).Design], Alive = store.Blocks(i) };
             state.Shield = 1;
-            HullSim.Damage(ref state, store.Flight(i), ref body, 1, 1, 1);
+            HullSim.Damage(ref state, store.Flight(i), ref body, [1], 1, 1);
             state.ShieldCooldown = 1000;
             if (tunnel)
             {
@@ -59,6 +59,7 @@ public sealed class ShieldClockTests
         observer.SetPlayer(uint.MaxValue);
         using var lateObserver = new ClientWorld(content);
         var lateSaw = false;
+        var words = Array.Empty<ulong>();
         var views = new HullView[ClientWorld.MaxViews];
         var snapshots = 0;
         rig.Net.ObserveSnapshot = (who, bytes) =>
@@ -77,7 +78,7 @@ public sealed class ShieldClockTests
             // A first-sight observer receives the same wire bytes, using its delayed display moment.
             reader = new NetReader(bytes[1..]);
             observer.OnSnapshot(ref reader, header.ServerTick);
-            var count = observer.BuildViews(views, header.ServerTick + 6, header.ServerTick, out _);
+            var count = observer.BuildViews(views, ref words, header.ServerTick + 6, header.ServerTick, out _);
             Assert.True(count > 1);
             for (var i = 0; i < count; i++)
             {
@@ -88,7 +89,7 @@ public sealed class ShieldClockTests
             {
                 reader = new NetReader(bytes[1..]);
                 lateObserver.OnSnapshot(ref reader, header.ServerTick);
-                count = lateObserver.BuildViews(views, header.ServerTick + 6, header.ServerTick, out _);
+                count = lateObserver.BuildViews(views, ref words, header.ServerTick + 6, header.ServerTick, out _);
                 Assert.True(count > 1);
                 for (var i = 0; i < count; i++)
                 {

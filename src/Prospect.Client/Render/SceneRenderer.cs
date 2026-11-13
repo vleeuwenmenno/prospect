@@ -200,6 +200,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private ShieldLookConstants _shieldLook;
     private readonly VkDescriptorSet _shieldSet;
     private readonly GpuBuffer[] _shieldVertexBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
+    private readonly GpuBuffer[] _shieldIndexBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
     private readonly GpuBuffer[] _shieldInstanceBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
     private readonly ShieldDraw[] _shieldDraws = new ShieldDraw[ShieldVisuals.MaxShields];
     private int _shieldCount;
@@ -228,6 +229,9 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private readonly GpuBuffer _vertexBuffer;
     private readonly GpuBuffer _indexBuffer;
     private readonly MeshRange[] _meshes;
+    private MeshRange[] _shipMeshes = [];
+    private GpuBuffer _shipVertices;
+    private GpuBuffer _shipIndices;
 
     private VkImage _colorImage;
     private VmaAllocation _colorAllocation;
@@ -270,17 +274,28 @@ internal sealed unsafe class SceneRenderer : IDisposable
             indices.AddRange(meshes[i].Indices);
         }
 
-        _vertexBuffer = GpuBuffer.CreateStatic<MeshVertex>(gpu, VkBufferUsageFlags.VertexBufferBit, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(vertices));
-        _indexBuffer = GpuBuffer.CreateStatic<uint>(gpu, VkBufferUsageFlags.IndexBufferBit, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(indices));
-        _starBuffer = GpuBuffer.CreateStatic<StarInstance>(gpu, VkBufferUsageFlags.VertexBufferBit, GenerateStars());
-
-        for (var i = 0; i < FrameRenderer.FramesInFlight; i++)
+        // Buffers made here are freed again if one of them cannot be made: nothing has been submitted that uses them,
+        // and destroying a buffer never made is a no-op.
+        try
         {
-            _frameBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.UniformBufferBit, sizeof(FrameConstants));
-            _instanceBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshInstance) * MaxInstances);
-            _ftlBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(FtlMark) * MaxFtlMarks);
-            _shieldVertexBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshVertex) * ShieldVisuals.MaxVertices);
-            _shieldInstanceBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(ShieldInstance) * ShieldVisuals.MaxShields);
+            _vertexBuffer = GpuBuffer.CreateStatic<MeshVertex>(gpu, VkBufferUsageFlags.VertexBufferBit, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(vertices));
+            _indexBuffer = GpuBuffer.CreateStatic<uint>(gpu, VkBufferUsageFlags.IndexBufferBit, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(indices));
+            _starBuffer = GpuBuffer.CreateStatic<StarInstance>(gpu, VkBufferUsageFlags.VertexBufferBit, GenerateStars());
+
+            for (var i = 0; i < FrameRenderer.FramesInFlight; i++)
+            {
+                _frameBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.UniformBufferBit, sizeof(FrameConstants));
+                _instanceBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshInstance) * MaxInstances);
+                _ftlBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(FtlMark) * MaxFtlMarks);
+                _shieldVertexBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshVertex) * ShieldVisuals.MaxVertices);
+                _shieldIndexBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.IndexBufferBit, sizeof(ushort) * ShieldVisuals.MaxIndices);
+                _shieldInstanceBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(ShieldInstance) * ShieldVisuals.MaxShields);
+            }
+        }
+        catch
+        {
+            DestroyBuffers();
+            throw;
         }
 
         // Descriptors: set 0 of every shader is the frame constants; set 1 of the tone mapper is the scene image, the
@@ -524,6 +539,9 @@ internal sealed unsafe class SceneRenderer : IDisposable
     /// <summary>This frame's shield vertex and instance memory, and where each shell's vertices start.</summary>
     public Span<MeshVertex> ShieldVertices(int frameIndex) => new((void*)_shieldVertexBuffers[frameIndex].Mapped, ShieldVisuals.MaxVertices);
 
+    /// <summary>This frame's shield indices, 16 bits each, counted from each shell's first vertex.</summary>
+    public Span<ushort> ShieldIndices(int frameIndex) => new((void*)_shieldIndexBuffers[frameIndex].Mapped, ShieldVisuals.MaxIndices);
+
     public Span<ShieldInstance> ShieldInstances(int frameIndex) => new((void*)_shieldInstanceBuffers[frameIndex].Mapped, ShieldVisuals.MaxShields);
 
     public ShieldDraw[] ShieldDraws => _shieldDraws;
@@ -674,6 +692,38 @@ internal sealed unsafe class SceneRenderer : IDisposable
         _fallbackReady = true;
     }
 
+    /// <summary>Installs an admission catalogue before frame recording. Both old frame slots finish before retirement.</summary>
+    public void ReplaceShipMeshes(IReadOnlyList<MeshData> meshes)
+    {
+        var vertices = new List<MeshVertex>();
+        var indices = new List<uint>();
+        var ranges = new MeshRange[meshes.Count];
+        for (var i = 0; i < meshes.Count; i++)
+        {
+            ranges[i] = new MeshRange(indices.Count, meshes[i].Indices.Count, vertices.Count);
+            vertices.AddRange(meshes[i].Vertices);
+            indices.AddRange(meshes[i].Indices);
+        }
+        // Admission is the only swap boundary. No recorded or submitted frame can still borrow old buffers.
+        _gpu.Device.WaitIdle();
+        var newVertices = GpuBuffer.CreateStatic<MeshVertex>(_gpu, VkBufferUsageFlags.VertexBufferBit, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(vertices));
+        GpuBuffer newIndices;
+        try
+        {
+            newIndices = GpuBuffer.CreateStatic<uint>(_gpu, VkBufferUsageFlags.IndexBufferBit, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(indices));
+        }
+        catch
+        {
+            newVertices.Destroy(_gpu);
+            throw;
+        }
+        _shipVertices.Destroy(_gpu);
+        _shipIndices.Destroy(_gpu);
+        _shipVertices = newVertices;
+        _shipIndices = newIndices;
+        _shipMeshes = ranges;
+    }
+
     private void DrawMeshes(CommandBuffer commands, int frameIndex, ReadOnlySpan<DrawBatch> batches, VkPipeline pipeline)
     {
         if (batches.IsEmpty)
@@ -682,11 +732,19 @@ internal sealed unsafe class SceneRenderer : IDisposable
         Span<VkBuffer> buffers = [_vertexBuffer.Buffer, _instanceBuffers[frameIndex].Buffer];
         Span<ByteSize64> offsets = [zero, zero];
         commands.BindPipeline(VkPipelineBindPoint.Graphics, pipeline);
-        commands.BindVertexBuffers(0, buffers, offsets);
-        commands.BindIndexBuffer(_indexBuffer.Buffer, zero, VkIndexType.UInt32);
+        int bound = -1;
         foreach (var batch in batches)
         {
-            var mesh = _meshes[batch.Mesh];
+            var ship = batch.Mesh < WorldView.ShipMeshSlots;
+            var kind = ship ? 1 : 0;
+            if (bound != kind)
+            {
+                buffers[0] = ship ? _shipVertices.Buffer : _vertexBuffer.Buffer;
+                commands.BindVertexBuffers(0, buffers, offsets);
+                commands.BindIndexBuffer(ship ? _shipIndices.Buffer : _indexBuffer.Buffer, zero, VkIndexType.UInt32);
+                bound = kind;
+            }
+            var mesh = ship ? _shipMeshes[batch.Mesh] : _meshes[batch.Mesh];
             commands.DrawIndexed(mesh.IndexCount, batch.InstanceCount, mesh.FirstIndex, mesh.VertexOffset, batch.FirstInstance);
         }
     }
@@ -735,6 +793,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _shieldPipelineLayout, 0, sets, []);
         commands.PushConstants(_shieldPipelineLayout, VkShaderStageFlags.FragmentBit, 0, new ReadOnlySpan<byte>(&look, sizeof(ShieldLookConstants)));
         commands.BindVertexBuffers(0, buffers, offsets);
+        commands.BindIndexBuffer(_shieldIndexBuffers[frameIndex].Buffer, zero, VkIndexType.UInt16);
     }
 
     private void DrawShieldPass(CommandBuffer commands, VkPipeline pipeline, ReadOnlySpan<int> order)
@@ -742,8 +801,9 @@ internal sealed unsafe class SceneRenderer : IDisposable
         if (order.IsEmpty)
             return;
         commands.BindPipeline(VkPipelineBindPoint.Graphics, pipeline);
+        // A shell's indices count from its own first vertex, which the vertex offset adds.
         foreach (var i in order)
-            commands.Draw(_shieldDraws[i].VertexCount, 1, _shieldDraws[i].FirstVertex, i);
+            commands.DrawIndexed(_shieldDraws[i].IndexCount, 1, _shieldDraws[i].FirstIndex, _shieldDraws[i].FirstVertex, i);
     }
 
     /// <summary>
@@ -925,12 +985,24 @@ internal sealed unsafe class SceneRenderer : IDisposable
         _descriptorPool.Dispose();
         _frameLayout.Dispose();
         _sceneLayout.Dispose();
+        DestroyBuffers();
+        _shipVertices.Destroy(_gpu);
+        _shipIndices.Destroy(_gpu);
+    }
+
+    /// <summary>
+    /// Frees the buffers the constructor makes, whichever of them were made. Only once the device is idle, or before
+    /// anything was submitted.
+    /// </summary>
+    private void DestroyBuffers()
+    {
         for (var i = 0; i < FrameRenderer.FramesInFlight; i++)
         {
             _frameBuffers[i].Destroy(_gpu);
             _instanceBuffers[i].Destroy(_gpu);
             _ftlBuffers[i].Destroy(_gpu);
             _shieldVertexBuffers[i].Destroy(_gpu);
+            _shieldIndexBuffers[i].Destroy(_gpu);
             _shieldInstanceBuffers[i].Destroy(_gpu);
         }
 

@@ -182,6 +182,7 @@ public sealed partial class ServerHost
                 var index = member.Hull.Index;
                 ref var state = ref _hulls.State(index);
                 ref var flight = ref _hulls.Flight(index);
+                var built = _content.Designs[_hulls.Info(index).Design].Flight.HullPoints;
                 var sector = _content.Galaxy.SectorOf(state.Position);
                 SocialSend(recipient, new SocialMessage
                 {
@@ -192,7 +193,9 @@ public sealed partial class ServerHost
                     Value = _hulls.Info(index).Design,
                     // A broken shield building its charge back protects nothing yet, so it shows as down.
                     Shield = flight.ShieldCapacity > 0 && !state.ShieldOffline ? Math.Clamp(state.Shield / flight.ShieldCapacity, 0, 1) : 0,
-                    Hull = flight.HullPoints > 0 ? Math.Clamp(state.Hull / flight.HullPoints, 0, 1) : 0,
+                    // Against the design as built: what the hull has left falls with its blocks, and a ship that
+                    // has lost half of them is not whole again.
+                    Hull = built > 0 ? Math.Clamp(state.Hull / built, 0, 1) : 0,
                     X = sector.X,
                     Y = sector.Y,
                     Z = sector.Z,

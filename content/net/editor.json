@@ -1,0 +1,8 @@
+{
+  "quietSeconds": 30,
+  "uploads": 2,
+  "uploadSeconds": 20,
+  "readySeconds": 20,
+  "peerWaitSeconds": 3,
+  "commitSeconds": 2
+}

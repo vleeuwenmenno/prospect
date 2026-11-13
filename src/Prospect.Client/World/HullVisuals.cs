@@ -86,8 +86,12 @@ internal sealed class HullVisuals
         /// <summary>The passage whose opening cuts the hull where it is past it, or -1.</summary>
         public int Clip;
 
-        /// <summary>The blocks that can be picked: those it has, less those wholly past its opening.</summary>
-        public ulong PickBlocks;
+        /// <summary>
+        /// The blocks that can be picked, as a <see cref="BlockSet"/>: those it has, less those wholly past its
+        /// opening. It is the snapshot's own set for a hull that is not cut, and this frame's working memory for
+        /// one that is; either way it is good until the next update.
+        /// </summary>
+        public ReadOnlyMemory<ulong> PickBlocks;
 
         /// <summary>
         /// Whether the hull has every block and is drawn as its design's one mesh, which leaves out the faces between
@@ -103,6 +107,10 @@ internal sealed class HullVisuals
     private readonly PassageState[] _passages = new PassageState[MaxPassages];
     private HullVisual[] _hulls = [];
     private int _count;
+
+    // The pickable blocks of the hulls an opening cuts this frame, one set after another.
+    private ulong[] _pickWords = [];
+    private int _pickUsed;
 
     /// <summary>The jumps followed, by slot; a slot's index is its clipping plane on the GPU.</summary>
     public ReadOnlySpan<PassageState> Passages => _passages;
@@ -129,6 +137,16 @@ internal sealed class HullVisuals
         if (_hulls.Length < hulls.Length)
             _hulls = new HullVisual[hulls.Length];
         _count = hulls.Length;
+
+        // Room for every hull to be cut at once, found before any set is handed out; it grows only when the
+        // hulls in view have more blocks than any frame before.
+        var words = 0;
+        for (var i = 0; i < hulls.Length; i++)
+            words += hulls[i].Blocks.Length;
+        if (_pickWords.Length < words)
+            _pickWords = new ulong[words];
+        _pickUsed = 0;
+
         dt = Math.Clamp(dt, 0f, 0.1f);
         for (var i = 0; i < hulls.Length; i++)
         {
@@ -144,7 +162,7 @@ internal sealed class HullVisuals
                 Stretch = 1f,
                 Clip = -1,
                 PickBlocks = hull.Blocks,
-                Intact = hull.Blocks == design.FullMask,
+                Intact = BlockSet.Equal(hull.Blocks.Span, design.FullSet),
                 Visible = true,
                 Inside = hull.IsOwn && ownInside,
             };
@@ -235,31 +253,34 @@ internal sealed class HullVisuals
         if (slot.Clip != 0f)
         {
             visual.Clip = index;
-            visual.PickBlocks &= Uncut(design, visual, slot);
+            var uncut = new Memory<ulong>(_pickWords, _pickUsed, hull.Blocks.Length);
+            _pickUsed += uncut.Length;
+            Uncut(design, visual, slot, hull.Blocks.Span, uncut.Span);
+            visual.PickBlocks = uncut;
         }
     }
 
     /// <summary>
-    /// The blocks with any part on the shown side of the opening that cuts the hull, drawn out as it is drawn. Picking
-    /// cuts what is past the opening away from each of them exactly; see <see cref="Pick"/>.
+    /// Writes to <paramref name="uncut"/> the blocks of <paramref name="alive"/> with any part on the shown side of
+    /// the opening that cuts the hull, drawn out as it is drawn. Picking cuts what is past the opening away from each
+    /// of them exactly; see <see cref="Pick"/>.
     /// </summary>
-    private static ulong Uncut(HullDesign design, in HullVisual visual, in PassageState slot)
+    private static void Uncut(HullDesign design, in HullVisual visual, in PassageState slot, ReadOnlySpan<ulong> alive, Span<ulong> uncut)
     {
         var inverse = Quaternion.Conjugate(visual.Orientation);
         var hidden = Vector3.Transform(slot.Axis * slot.Clip, inverse);
         var from = Vector3.Transform(visual.Position.RelativeTo(slot.Mouth), inverse);
-        // How far a block's box reaches towards the shown side from its centre.
-        var reach = design.BlockSize * 0.5f * (MathF.Abs(hidden.X) + MathF.Abs(hidden.Y) + MathF.Abs(hidden.Z) * visual.Stretch);
-        var mask = 0UL;
+        uncut.Clear();
         for (var b = 0; b < design.BlockOffsets.Length; b++)
         {
+            // How far a block reaches from its centre towards the shown side, against the hidden direction. Drawn out
+            // along z, it reaches as its unstretched shape does along that direction scaled the same way.
+            var reach = BlockShapes.Support(design.Shapes[b], design.BlockHalfExtents[b], -hidden * new Vector3(1f, 1f, visual.Stretch));
             var block = design.BlockOffsets[b];
             block.Z *= visual.Stretch;
-            if (Vector3.Dot(from + block, hidden) - reach <= 0f)
-                mask |= 1UL << b;
+            if (BlockSet.Has(alive, b) && Vector3.Dot(from + block, hidden) - reach <= 0f)
+                BlockSet.Add(uncut, b);
         }
-
-        return mask;
     }
 
     /// <summary>
@@ -270,7 +291,7 @@ internal sealed class HullVisuals
     public PickHull Pick(uint id, in HullVisual visual, Double3 position, HullDesign design)
     {
         var hull = new PickHull(id, position, visual.Orientation, design.BlockOffsets, design.BlockSize, visual.PickBlocks,
-            design.Flight.Radius, visual.Stretch, Faces: visual.Intact ? design.ExteriorFaces : null);
+            design.Flight.Radius, visual.Stretch, Faces: visual.Intact ? design.ExteriorFaces : null, HalfExtents: design.BlockHalfExtents, Shapes: design.Shapes);
         if (visual.Clip < 0)
             return hull;
         ref readonly var slot = ref _passages[visual.Clip];

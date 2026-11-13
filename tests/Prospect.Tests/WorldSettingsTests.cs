@@ -20,7 +20,7 @@ public sealed class WorldSettingEffectTests
     private static GameContent World(params string[] assignments) => Content.WithSettings(Content.SettingCatalog.Build(null, assignments));
 
     /// <summary>Flies a pod at an asteroid at a speed until it bounces back, is destroyed, or the ticks run out.</summary>
-    private static HullState Crash(GameContent world, float speed, out ulong alive)
+    private static HullState Crash(GameContent world, float speed, out ulong alive, bool verifyContactBounce = false)
     {
         var galaxy = world.Galaxy.WithSeed(11);
         var rocks = new RockField(galaxy);
@@ -29,26 +29,52 @@ public sealed class WorldSettingEffectTests
         var rock = rocks.Sector(default).Asteroids[PowerAndDamageTests.ClearRock(galaxy, default, 80f, 260f, side).Index];
         var design = world.Pod;
         var flight = design.Flight;
-        var hp = new float[HullDesign.MaxBlocks];
-        for (var i = 0; i < design.Types.Length; i++)
-            hp[i] = design.BlockHitPoints(i);
-        var body = new HullBody
-        {
-            Design = design,
-            Alive = design.FullMask,
-            BlockHp = hp,
-        };
+        using var states = new BlockStateStore();
+        var body = states.Body(design);
 
         var state = HullState.Spawn(galaxy.CenterOf(default) + rock.LocalPosition + side * (PowerAndDamageTests.SurfaceToward(rock, side) + 60f), flight);
         state.Velocity = new Vector3(speed, 0, 0);
         var order = default(HullOrder);
+        var verified = false;
         for (var tick = 0; tick < 300; tick++)
         {
-            if (HullSim.Step(ref state, ref order, default, flight, ref body, rocks, tick) || state.Velocity.X < 0)
+            var before = state;
+            var destroyed = HullSim.Step(ref state, ref order, default, flight, ref body, rocks, tick);
+            if (verifyContactBounce && !verified && (state.Velocity - before.Velocity).LengthSquared() > 1f)
+            {
+                // Reconstruct the first contact before separation, independently scanning the intact boxes.
+                FlightModel.Step(ref before, default, flight, HullSim.Dt);
+                var center = galaxy.CenterOf(default) + rock.LocalPosition;
+                var arm = Vector3.Zero;
+                var normal = Vector3.Zero;
+                var contacts = 0;
+                for (var block = 0; block < design.BlockCount; block++)
+                {
+                    var offset = Vector3.Transform(design.BlockOffsets[block], before.Orientation);
+                    if (!BoxCollision.Rock(before.Position.RelativeTo(center) + offset, design.BlockHalfExtents[block], before.Orientation, rock, out var direction, out _, out _))
+                        continue;
+                    arm += offset;
+                    normal += direction;
+                    contacts++;
+                }
+                Assert.True(contacts > 0);
+                arm /= contacts;
+                normal = Vector3.Normalize(normal);
+                var incoming = Vector3.Dot(before.Velocity + Vector3.Cross(Vector3.Transform(before.AngularVelocity, before.Orientation), arm), normal);
+                var outgoing = Vector3.Dot(state.Velocity + Vector3.Cross(Vector3.Transform(state.AngularVelocity, state.Orientation), arm), normal);
+                Assert.True(incoming < 0);
+                Assert.True(outgoing > 0, $"contact was still closing at {-outgoing} m/s");
+                var rockVelocity = -(state.Velocity - before.Velocity) * (flight.Mass / rocks.Mass(rock.Radius));
+                Assert.Equal(-incoming * flight.CollisionBounce, outgoing - Vector3.Dot(rockVelocity, normal), 0.01f);
+                TestContext.Current.SendDiagnosticMessage($"impact tick {tick}: centre {state.Velocity}, spin {state.AngularVelocity}, contact normal velocity {incoming} -> {outgoing} m/s");
+                verified = true;
+            }
+            if (destroyed || state.Velocity.X < 0)
                 break;
         }
 
-        alive = body.Alive;
+        if (verifyContactBounce) Assert.True(verified, "no collision response was measured");
+        alive = BlockMasks.Word(body.Alive);
         return state;
     }
 
@@ -72,7 +98,7 @@ public sealed class WorldSettingEffectTests
             Assert.True(field.Lost.IsEmpty, "a hull was destroyed");
         }
 
-        return new Rammed(hulls.State(pod), hulls.State(vessel), hulls.Info(pod).Blocks, hulls.Info(vessel).Blocks);
+        return new Rammed(hulls.State(pod), hulls.State(vessel), hulls.Mask(pod), hulls.Mask(vessel));
     }
 
     [Fact]
@@ -102,12 +128,13 @@ public sealed class WorldSettingEffectTests
 
         // An asteroid at a speed that tears blocks off in a plain world.
         Crash(Content, 170, out var plain);
-        Assert.NotEqual(Content.Pod.FullMask, plain);
-        var state = Crash(harmless, 170, out var alive);
-        Assert.True(state.Velocity.X < 0, "the hull should have bounced back");
+        Assert.NotEqual(Content.Pod.FullMask(), plain);
+        var state = Crash(harmless, 170, out var alive, verifyContactBounce: true);
+        // The hard, off-centre hit spins the pod; the contact reverses, not necessarily its centre.
+        Assert.True(Crash(harmless, 40, out _).Velocity.X < 0, "the gentle impact should bounce the centre back");
         Assert.Equal(pod.ShieldCapacity, state.Shield);
         Assert.Equal(pod.HullPoints, state.Hull);
-        Assert.Equal(harmless.Pod.FullMask, alive);
+        Assert.Equal(harmless.Pod.FullMask(), alive);
 
         // Another hull: both are shoved, neither is hurt.
         var rammed = Ram(harmless, 80);
@@ -117,8 +144,8 @@ public sealed class WorldSettingEffectTests
         Assert.Equal(pod.HullPoints, rammed.Pod.Hull);
         Assert.Equal(harmless.Designs[Vessel].Flight.ShieldCapacity, rammed.Vessel.Shield);
         Assert.Equal(harmless.Designs[Vessel].Flight.HullPoints, rammed.Vessel.Hull);
-        Assert.Equal(harmless.Pod.FullMask, rammed.PodBlocks);
-        Assert.Equal(harmless.Designs[Vessel].FullMask, rammed.VesselBlocks);
+        Assert.Equal(harmless.Pod.FullMask(), rammed.PodBlocks);
+        Assert.Equal(harmless.Designs[Vessel].FullMask(), rammed.VesselBlocks);
     }
 
     [Fact]
@@ -139,7 +166,7 @@ public sealed class WorldSettingEffectTests
         Assert.True(state.Hull < pod.HullPoints, "the blocks should have taken the damage");
 
         // With nothing in the way, the block that touched takes the whole hit and is lost.
-        Assert.NotEqual(bare.Pod.FullMask, alive);
+        Assert.NotEqual(bare.Pod.FullMask(), alive);
 
         var rammed = Ram(bare, 30);
         Assert.Equal(pod.ShieldCapacity, rammed.Pod.Shield);
@@ -167,7 +194,7 @@ public sealed class WorldSettingEffectTests
         Assert.InRange(full, 20f, capacity / 4 - 1f);
         Assert.Equal(full * 4, capacity - state.Shield, 1);
         Assert.Equal(weak.Pod.Flight.HullPoints, state.Hull);
-        Assert.Equal(weak.Pod.FullMask, alive);
+        Assert.Equal(weak.Pod.FullMask(), alive);
 
         // And against another hull, for both of them.
         var plainRam = Ram(Content, 20);
@@ -184,23 +211,16 @@ public sealed class WorldSettingEffectTests
         var weak = World("collisionShields=Weak");
         var design = weak.Pod;
         var flight = design.Flight;
-        var hp = new float[HullDesign.MaxBlocks];
-        for (var i = 0; i < design.Types.Length; i++)
-            hp[i] = design.BlockHitPoints(i);
-        var body = new HullBody
-        {
-            Design = design,
-            Alive = design.FullMask,
-            BlockHp = hp,
-        };
+        using var states = new BlockStateStore();
+        var body = states.Body(design);
 
         // 100 shield points at four a point absorb 25 of a 100 point hit; the other 75 reach the block.
         var state = HullState.Spawn(Double3.Zero, flight);
         state.Shield = 100;
-        Assert.False(HullSim.Damage(ref state, flight, ref body, 1UL, 1, 100));
+        Assert.False(HullSim.Damage(ref state, flight, ref body, [1UL], 1, 100));
         Assert.Equal(0f, state.Shield);
         Assert.Equal(flight.HullPoints - 75f, state.Hull, 2);
-        Assert.Equal(design.BlockHitPoints(0) - 75f, hp[0], 3);
+        Assert.Equal(design.BlockHitPoints(0) - 75f, states.HitPoints(body.State)[0], 3);
     }
 
     [Fact]
@@ -234,8 +254,8 @@ public sealed class WorldSettingEffectTests
         // A stronger hull keeps a block that a plain one loses to the same impact.
         Crash(Content, 60, out var plainLeft);
         Crash(World("hullStrength=4"), 60, out var strongLeft);
-        Assert.NotEqual(plain.FullMask, plainLeft);
-        Assert.Equal(plain.FullMask, strongLeft);
+        Assert.NotEqual(plain.FullMask(), plainLeft);
+        Assert.Equal(plain.FullMask(), strongLeft);
     }
 
     [Fact]

@@ -31,7 +31,7 @@ internal sealed partial class ScreenHost
     {
         switch (snapshot.State)
         {
-            case SessionState.Connecting or SessionState.Handshaking:
+            case SessionState.Connecting or SessionState.Handshaking or SessionState.Downloading:
                 DrawBackdrop();
                 DrawConnecting(fade);
                 break;
@@ -40,6 +40,12 @@ internal sealed partial class ScreenHost
                 DrawSessionEnded(snapshot, fade);
                 break;
             default:
+                if (!_app.MeshesReady)
+                {
+                    DrawBackdrop();
+                    DrawConnecting(fade);
+                    break;
+                }
                 if (snapshot.OwnHull < 0 || snapshot.Galaxy is null)
                     break;
                 if (_controlsOpen)
@@ -61,7 +67,8 @@ internal sealed partial class ScreenHost
                 // Escape backs out one level at a time: the map closes itself, chat and the social windows close
                 // (never a pinned one), the command view returns to the pilot view, and only from the pilot view
                 // does it open the menu.
-                if (!mapWasOpen && !_mapOpen && BackPressed() && !SocialBack())
+                // Escape that cancelled the ship editor this frame was its, not the menu's.
+                if (!_editorHandled && !mapWasOpen && !_mapOpen && BackPressed() && !SocialBack())
                 {
                     if (_shipInfoOpen)
                         _shipInfoOpen = false;
@@ -93,7 +100,7 @@ internal sealed partial class ScreenHost
 
         var title = Kit.Measure(_ui.SansMedium, Theme.FontCaption, "CONNECTING"u8);
         Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, center - new float2(title.X * 0.5f, Kit.Px(24)), Theme.Accent, "CONNECTING"u8);
-        var target = _app.Session?.Title ?? "";
+        var target = _app.MeshError ?? _app.Session?.Title ?? "";
         var targetSize = Kit.Measure(_ui.Sans, Theme.FontHeading, target);
         Kit.Text(draw, _ui.Sans, Theme.FontHeading, center - new float2(targetSize.X * 0.5f, 0), Theme.Text, target);
 
@@ -138,6 +145,7 @@ internal sealed partial class ScreenHost
                 SessionEndReason.PasswordRequired => "This server needs a password"u8,
                 SessionEndReason.WrongPassword => "Wrong password"u8,
                 SessionEndReason.TooManyAttempts => "Too many attempts"u8,
+                SessionEndReason.ContentMismatch => "Game files do not match"u8,
                 _ => "Session closed"u8,
             }
         );
@@ -154,6 +162,7 @@ internal sealed partial class ScreenHost
                 SessionEndReason.PasswordRequired => "Enter the password its host gave you."u8,
                 SessionEndReason.WrongPassword => "That is not this server's password. Try again."u8,
                 SessionEndReason.TooManyAttempts => "The server makes this address wait before the next try."u8,
+                SessionEndReason.ContentMismatch => "Same version, other content files. Use the server's files."u8,
                 _ => "You have left the session."u8,
             }
         );

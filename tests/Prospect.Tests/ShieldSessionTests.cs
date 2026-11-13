@@ -16,9 +16,9 @@ public sealed class ShieldSessionTests
     [Fact]
     public void ABrokenShieldStaysOfflineUntilItsThresholdAndEveryClientAgrees()
     {
-        // Collisions hit hard and drain the shield four times as fast, so one pass breaks it.
+        // Weak shields break in one pass; stronger blocks keep the emitter alive so it can recharge.
         var content = GameContent.Load();
-        content = content.WithSettings(content.SettingCatalog.Build(null, ["collisionShields=Weak"]));
+        content = content.WithSettings(content.SettingCatalog.Build(null, ["collisionShields=Weak", "hullStrength=4"]));
         var pod = content.Pod.Flight;
         using var link = new LoopbackLink();
         using var observerLink = new LoopbackLink();
@@ -99,6 +99,7 @@ public sealed class ShieldSessionTests
         for (var i = 0; i < 6; i++)
             Step();
         Assert.True(Find(observer, own.Id, out var seen));
+        Assert.Equal(pod.ShieldCapacity, seen.Stats.ShieldCapacity);
         Assert.True(seen.ShieldOffline);
         Assert.Equal(serial, seen.ShieldHit.Serial);
 
