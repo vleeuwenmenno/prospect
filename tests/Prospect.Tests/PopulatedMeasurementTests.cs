@@ -43,14 +43,21 @@ public sealed class PopulatedMeasurementTests
     [Fact]
     public void FixedBufferOverflowRetainsRealEndAndFailsVerificationWithoutAllocating()
     {
+        // The overflow happens once to a measurement, so a run in doubt starts again with a fresh one.
+        var allocation = new AllocationProbe();
         var measurement = new PopulatedMeasurement(2);
-        measurement.Record(Effect(1));
-        measurement.Record(Effect(2));
-        Assert.True(measurement.Verify(new VisualBenchmarkScene(30, "dents", "near"), 0));
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        measurement.Record(Effect(80));
-        measurement.Record(Effect(120));
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        while (allocation.Run())
+        {
+            measurement = new PopulatedMeasurement(2);
+            measurement.Record(Effect(1));
+            measurement.Record(Effect(2));
+            Assert.True(measurement.Verify(new VisualBenchmarkScene(30, "dents", "near"), 0));
+            allocation.Start();
+            measurement.Record(Effect(80));
+            measurement.Record(Effect(120));
+            allocation.Stop();
+        }
+        Assert.Equal(0, allocation.Bytes);
         Assert.Equal(2, measurement.Samples.Length);
         Assert.Equal(2, measurement.Overflow);
         Assert.Equal(120, measurement.EndSeconds);

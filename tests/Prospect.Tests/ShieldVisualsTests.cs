@@ -876,15 +876,19 @@ public sealed class ShieldVisualsTests
         for (var warm = 0; warm < 3; warm++)
             Frame(hulls);
 
-        var before = GC.GetAllocatedBytesForCurrentThread();
+        var allocation = new AllocationProbe();
         for (var frame = 0; frame < 30; frame++)
         {
-            hulls[frame % hulls.Length].ShieldHit.Serial++;
-            hulls[frame % hulls.Length].ShieldHit.Strength = 50;
-            Frame(hulls);
+            // Every attempt is a frame with a new hit.
+            while (allocation.Measuring())
+            {
+                hulls[frame % hulls.Length].ShieldHit.Serial++;
+                hulls[frame % hulls.Length].ShieldHit.Strength = 50;
+                Frame(hulls);
+            }
         }
 
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        Assert.Equal(0, allocation.Bytes);
         Assert.Equal(ShieldVisuals.MaxShields - CountUnshielded(hulls), _shields.Draws.Length);
     }
 

@@ -81,9 +81,10 @@ public sealed class VisualDamageTests
         body.Visual = visual; body.Contacts = contacts;
         var state = HullState.Spawn(default, design.Flight); state.ShieldOffline = true;
         for (var i = 0; i < 50; i++) { states.SetHitPoints(body.State, 0, design.BlockHitPoints(0)); HullSim.Damage(ref state, design.Flight, ref body, design.FullSet, 1, 20); }
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 1000; i++) { states.SetHitPoints(body.State, 0, design.BlockHitPoints(0)); HullSim.Damage(ref state, design.Flight, ref body, design.FullSet, 1, 20); }
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 1000; i++)
+            while (allocation.Measuring()) { states.SetHitPoints(body.State, 0, design.BlockHitPoints(0)); HullSim.Damage(ref state, design.Flight, ref body, design.FullSet, 1, 20); }
+        Assert.Equal(0, allocation.Bytes);
         var withVisual = state;
         states.SetHitPoints(body.State, 0, design.BlockHitPoints(0)); body.Visual = default;
         HullSim.Damage(ref state, design.Flight, ref body, design.FullSet, 1, 20);
@@ -115,9 +116,10 @@ public sealed class VisualDamageTests
         Assert.True(a.Info(0).Visual.Count > 0); Assert.Equal(0, b.Info(0).Visual.Count);
         for (var i = 0; i < 2; i++) { Assert.Equal(a.State(i), b.State(i)); Assert.Equal(a.BlockHp(i).ToArray(), b.BlockHp(i).ToArray()); }
         for (var i = 0; i < 20; i++) { Reset(a); fieldA.BeginRound(); fieldA.Step(0, default, tick: i); }
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 100; i++) { Reset(a); fieldA.BeginRound(); fieldA.Step(0, default, tick: i); }
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 100; i++)
+            while (allocation.Measuring()) { Reset(a); fieldA.BeginRound(); fieldA.Step(0, default, tick: i); }
+        Assert.Equal(0, allocation.Bytes);
         var predicted = new HullField(b, [design], authoritative: false); Reset(b); predicted.BeginRound(); predicted.Step(0, default);
         Assert.Equal(0u, b.Info(0).Visual.Version); Assert.Equal(0u, b.Info(1).Visual.Spark.Sequence);
     }

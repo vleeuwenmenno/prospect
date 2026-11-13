@@ -109,9 +109,10 @@ public sealed class BlockShapeTests
             BoxCollision.Rock(Vector3.One, new Vector3(2, 3, 4), Quaternion.Identity, rock, out _, out _, out _, BlockShape.WedgeYMinusMinus);
         }
         for (var i = 0; i < 100; i++) Run();
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 100; i++) Run();
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 100; i++)
+            while (allocation.Measuring()) Run();
+        Assert.Equal(0, allocation.Bytes);
     }
 
     [Fact]

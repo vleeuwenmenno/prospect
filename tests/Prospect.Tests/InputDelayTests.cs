@@ -146,12 +146,22 @@ public sealed class InputDelayTests
         }
         for (var i = 0; i < 300; i++, tick++) Step();
         var start = System.Diagnostics.Stopwatch.GetTimestamp();
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 600; i++, tick++) Step();
-        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        var allocation = new AllocationProbe();
+        var steps = 0;
+        for (var i = 0; i < 600; i++)
+        {
+            // An attempt in doubt is measured again on the next tick: every pair is a warm one.
+            while (allocation.Measuring())
+            {
+                Step();
+                tick++;
+                steps++;
+            }
+        }
+        var allocated = allocation.Bytes;
         var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(start);
         Assert.Equal(0, allocated);
-        Console.WriteLine($"Warm local server/client damaged={damaged}: {elapsed.TotalMilliseconds / 600:F4} ms per pair, {allocated} managed bytes in 600 pairs.");
+        Console.WriteLine($"Warm local server/client damaged={damaged}: {elapsed.TotalMilliseconds / steps:F4} ms per pair, {allocated} managed bytes in {steps} pairs.");
         void Step()
         {
             clock.Advance(ManualTime.Tick);

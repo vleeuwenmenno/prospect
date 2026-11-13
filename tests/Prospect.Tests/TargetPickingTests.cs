@@ -439,11 +439,13 @@ public sealed class TargetPickingTests
         var hits = new PickHit[hulls.Length];
         for (var i = 0; i < 20; i++) TargetPicking.Pick(Vector3.UnitZ, default, Vector3.UnitZ, 1000, hulls, [], hits);
         var start = Stopwatch.GetTimestamp();
-        var allocated = GC.GetAllocatedBytesForCurrentThread();
         var count = 0;
         for (var i = 0; i < 100; i++) count = TargetPicking.Pick(Vector3.UnitZ, default, Vector3.UnitZ, 1000, hulls, [], hits);
-        allocated = GC.GetAllocatedBytesForCurrentThread() - allocated;
         var milliseconds = Stopwatch.GetElapsedTime(start).TotalMilliseconds / 100;
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 100; i++)
+            while (allocation.Measuring()) TargetPicking.Pick(Vector3.UnitZ, default, Vector3.UnitZ, 1000, hulls, [], hits);
+        var allocated = allocation.Bytes;
         Console.WriteLine($"PICK 256 HULLS: {milliseconds:F3} ms per pick; {count} hits; {allocated} bytes; budget 5 ms");
         Assert.InRange(count, 128, 256);
         Assert.Equal(0, allocated);
@@ -460,11 +462,13 @@ public sealed class TargetPickingTests
         var hits = new PickHit[rocks.Length];
         for (var i = 0; i < 20; i++) TargetPicking.Pick(Vector3.UnitZ, default, Vector3.UnitZ, 1000, [], sectors, hits);
         var start = Stopwatch.GetTimestamp();
-        var allocated = GC.GetAllocatedBytesForCurrentThread();
         var count = 0;
         for (var i = 0; i < 100; i++) count = TargetPicking.Pick(Vector3.UnitZ, default, Vector3.UnitZ, 1000, [], sectors, hits);
-        allocated = GC.GetAllocatedBytesForCurrentThread() - allocated;
         var milliseconds = Stopwatch.GetElapsedTime(start).TotalMilliseconds / 100;
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 100; i++)
+            while (allocation.Measuring()) TargetPicking.Pick(Vector3.UnitZ, default, Vector3.UnitZ, 1000, [], sectors, hits);
+        var allocated = allocation.Bytes;
         Console.WriteLine($"PICK 4096: {milliseconds:F3} ms per pick; {allocated} bytes; budget 5 ms");
         Assert.Equal(1, count);
         Assert.Equal(0, allocated);

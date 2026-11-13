@@ -2574,10 +2574,10 @@ public sealed class FrameOrderTests : IDisposable
             // Measuring a row's details every frame allocates nothing.
             own.ShieldOffline = true;
             ConsoleTip.Measure(mono, sans, scale, ConsoleBar.Shield, own, flight);
-            var before = GC.GetAllocatedBytesForCurrentThread();
+            var allocation = new AllocationProbe();
             for (var bar = ConsoleBar.Shield; bar <= ConsoleBar.Heat; bar++)
-                ConsoleTip.Measure(mono, sans, scale, bar, own, flight);
-            Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
+                while (allocation.Measuring()) ConsoleTip.Measure(mono, sans, scale, bar, own, flight);
+            Assert.Equal(0, allocation.Bytes);
 
             // An offline shield's words fit its reading column; a compact row has OFFLINE beside its label.
             float Px(float design) => MathF.Round(design * scale);

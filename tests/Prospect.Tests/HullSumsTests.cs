@@ -578,22 +578,36 @@ public sealed class HullSumsTests
         var order = Shuffled(blocks, 31);
 
         var timer = new Stopwatch();
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        timer.Start();
-        var state = store.Create(design, hitPoints: true);
-        var create = timer.Elapsed.TotalMilliseconds;
-
-        timer.Restart();
+        var allocation = new AllocationProbe();
+        var state = default(BlockStateHandle);
+        var create = 0.0;
+        var lose = 0.0;
         var mass = 0f;
-        for (var i = 0; i < losses; i++)
+        var runs = 0;
+        while (allocation.Run())
         {
-            Assert.True(store.Lose(state, order[i]));
-            design.Figures(store.Sums(state), out var flight, out _);
-            mass += flight.Mass;
+            // A run in doubt is made again on a fresh hull.
+            if (runs++ > 0)
+                store.Release(state);
+            allocation.Start();
+            timer.Restart();
+            state = store.Create(design, hitPoints: true);
+            create = timer.Elapsed.TotalMilliseconds;
+
+            timer.Restart();
+            mass = 0f;
+            for (var i = 0; i < losses; i++)
+            {
+                Assert.True(store.Lose(state, order[i]));
+                design.Figures(store.Sums(state), out var flight, out _);
+                mass += flight.Mass;
+            }
+
+            lose = timer.Elapsed.TotalMilliseconds;
+            allocation.Stop();
         }
 
-        var lose = timer.Elapsed.TotalMilliseconds;
-        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        var allocated = allocation.Bytes;
         Console.WriteLine($"SUMS station: create {create:F3} ms; {losses} losses with a read each {lose:F3} ms ({lose * 1000 / losses:F2} us each); allocated {allocated} B managed; state {BlockStateStore.BytesFor(design, true)} B");
 
         // Budgets for a debug build on a busy machine: a hull appears in under 50 ms, a loss and a read of the
@@ -722,10 +736,10 @@ public sealed class MixedBoxHullTests
         }
 
         Blow(0);
-        var before = GC.GetAllocatedBytesForCurrentThread();
+        var allocation = new AllocationProbe();
         for (var i = 1; i < 200; i++)
-            Blow(i);
-        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
+            while (allocation.Measuring()) Blow(i);
+        Assert.Equal(0, allocation.Bytes);
         Assert.True(store.Revision(hull) > 100);
     }
 }

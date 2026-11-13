@@ -127,10 +127,9 @@ ifneq ($(filter $(DOTNET_HOME)/%,$(DOTNET)),)
 endif
 export DOTNET_NOLOGO := 1
 
-# The allocation tests read how much the current thread has allocated. A collection that falls inside a measured
-# stretch counts the unused rest of that thread's allocation buffer against it: up to 8 KiB the test never took.
-# The tests run side by side and collect often, so a full run failed that way about one time in two. A gen-0
-# budget of 256 MiB keeps collections out of those stretches.
+# The allocation tests read how much the current thread has allocated. A collection pause inside a measured stretch
+# adds the unused rest of that thread's allocation buffer: up to 8 KiB the test never took. AllocationProbe in the
+# tests measures such a stretch again; a gen-0 budget of 256 MiB keeps collections, and so those repeats, rare.
 TEST_ENV := DOTNET_GCgen0size=0x10000000 DOTNET_GCgen0MaxBudget=0x10000000
 
 # ---------------------------------------------------------------------------------------------------------------------

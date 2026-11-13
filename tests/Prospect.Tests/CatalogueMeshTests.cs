@@ -34,13 +34,16 @@ public sealed class CatalogueMeshTests
         Assert.Contains(meshes[1].Vertices, vertex => vertex.Position.X == center);
         Assert.False(preparation.IsReady(designs));
         preparation.Accept(designs);
-        var before = GC.GetAllocatedBytesForCurrentThread();
+        var allocation = new AllocationProbe();
         for (var i = 0; i < 100; i++)
         {
-            preparation.Prepare(designs);
-            preparation.IsReady(designs);
+            while (allocation.Measuring())
+            {
+                preparation.Prepare(designs);
+                preparation.IsReady(designs);
+            }
         }
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        Assert.Equal(0, allocation.Bytes);
         Assert.True(preparation.IsReady(designs));
         Assert.True(WorldView.AsteroidMesh(0, 0) >= 255);
         // The cube and then the twelve wedge prisms close the list, after every rock.

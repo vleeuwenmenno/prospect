@@ -54,8 +54,9 @@ public sealed class GasShaderFixtureTests
         Assert.Equal(-50, frame.Openings[0].Z);
         Assert.Equal(-10, frame.Openings[4].Z);
         for (var i = 1; i <= GasShaderFixture.Count; i++) GasShaderFixture.Apply(i, ref frame, ref composite);
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 1; i <= GasShaderFixture.Count; i++) GasShaderFixture.Apply(i, ref frame, ref composite);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        for (var i = 1; i <= GasShaderFixture.Count; i++)
+            while (allocation.Measuring()) GasShaderFixture.Apply(i, ref frame, ref composite);
+        Assert.Equal(0, allocation.Bytes);
     }
 }

@@ -116,9 +116,10 @@ public sealed class GasCloudTests
         }
         Assert.InRange(present, 1, 30);
         for (var i = 0; i < 100; i++) galaxy.Generate(new(i, 0, 0), a);
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 100; i++) galaxy.Generate(new(i, 0, 0), a);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 100; i++)
+            while (allocation.Measuring()) galaxy.Generate(new(i, 0, 0), a);
+        Assert.Equal(0, allocation.Bytes);
     }
 
     [Fact]

@@ -43,8 +43,10 @@ Use the Makefile, not raw `dotnet` commands.
 Run one test class or method with the test binary directly:
 `dotnet artifacts/bin/Prospect.Tests/debug/Prospect.Tests.dll -class Prospect.Tests.JumpTests` (or `-method <full name>`).
 Always wrap long test runs in `timeout`; a session test that waits on the simulation can otherwise sit for minutes.
-A whole run started this way can fail an allocation test by up to 8 KiB it never took, when a collection lands
-in a measurement. `make test` and `make check` prevent that with a large gen-0 budget (`TEST_ENV` in the Makefile).
+A test that code takes no memory measures through `AllocationProbe` (`tests/Prospect.Tests`), never
+`GC.GetAllocatedBytesForCurrentThread` directly: a collection pause adds up to 8 KiB the code never took, and the
+probe measures such a stretch again. Measure a loop an iteration at a time; a step that happens once goes in a
+scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps collections, and so repeats, rare.
 
 ## Rules that are not negotiable
 

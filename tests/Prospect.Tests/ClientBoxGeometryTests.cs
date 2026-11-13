@@ -208,9 +208,10 @@ public sealed class ClientBoxGeometryTests
         // The row ends a box sooner: the far end of the shell moved in by that box's length.
         Assert.True(reach < design.BlockOffsets[129].X, $"the shell still reaches {reach}");
         for (var i = 0; i < 3; i++) builder.Build(design, alive, ShellShape.Default, output, indices, out _);
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 3; i++) builder.Build(design, alive, ShellShape.Default, output, indices, out _);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 3; i++)
+            while (allocation.Measuring()) builder.Build(design, alive, ShellShape.Default, output, indices, out _);
+        Assert.Equal(0, allocation.Bytes);
         Assert.Throws<InvalidDataException>(() => GeometryAdmission.Validate(design, maxVertices: whole - 1));
     }
 
@@ -261,9 +262,10 @@ public sealed class ClientBoxGeometryTests
         Frame(2);
         Assert.False(initial.AsSpan().SequenceEqual(vertices.AsSpan(0, draws[0].VertexCount)));
         for (var i = 0; i < 10; i++) Frame(2);
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 30; i++) Frame(2);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 30; i++)
+            while (allocation.Measuring()) Frame(2);
+        Assert.Equal(0, allocation.Bytes);
         shields.Clear();
         designs = [Long()];
         hulls[0].Blocks = new ulong[] { 1 };

@@ -88,16 +88,25 @@ public sealed class EditorWorldTests
 
         foreach (var reserve in new[] { 0, GeometryAdmission.MaxBlocks })
         {
-            using var store = new HullStore(4);
-            var field = new HullField(store, [small], reserveBlocks: reserve);
-            var first = store.Create(1, 0, small, Double3.Zero);
-            field.BeginRound();
-            field.Step(first.Index, default);
+            // A field takes the grown catalogue once, so a run in doubt starts again with a fresh one.
+            var allocation = new AllocationProbe();
+            HullStore? measured = null;
+            HullField field = null!;
+            while (allocation.Run())
+            {
+                measured?.Dispose();
+                measured = new HullStore(4);
+                field = new HullField(measured, [small], reserveBlocks: reserve);
+                var first = measured.Create(1, 0, small, Double3.Zero);
+                field.BeginRound();
+                field.Step(first.Index, default);
+                allocation.Start();
+                field.SetDesigns(grown);
+                allocation.Stop();
+            }
 
-            var before = GC.GetAllocatedBytesForCurrentThread();
-            field.SetDesigns(grown);
-            var taken = GC.GetAllocatedBytesForCurrentThread() - before;
-            Assert.Equal(reserve == 0, taken > 0);
+            using var store = measured!;
+            Assert.Equal(reserve == 0, allocation.Bytes > 0);
             Assert.Same(grown, field.Designs);
 
             // Two of the large design strike each other at their far ends, past the first words of a block set.
@@ -154,9 +163,10 @@ public sealed class EditorWorldTests
         Assert.Equal(0, preparation.Installed(designs[..2]));
         Assert.Equal(0, preparation.Installed(null));
 
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 100; i++) preparation.Installed(broken);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 100; i++)
+            while (allocation.Measuring()) preparation.Installed(broken);
+        Assert.Equal(0, allocation.Bytes);
     }
 
     [Fact]

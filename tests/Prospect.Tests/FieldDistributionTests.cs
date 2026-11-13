@@ -155,10 +155,9 @@ public sealed class FieldDistributionTests
         var galaxy = GameContent.Load().Galaxy.WithSeed(42);
         var sector = new SectorContent();
         for (var i = 0; i < 3; i++) galaxy.Generate(default, sector);
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        galaxy.Generate(default, sector);
-        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        Assert.Equal(0, allocated);
+        var allocation = new AllocationProbe();
+        while (allocation.Measuring()) galaxy.Generate(default, sector);
+        Assert.Equal(0, allocation.Bytes);
     }
 
     /// <summary>Two coincident field envelopes both populate while one shared spacing budget protects every pair.</summary>

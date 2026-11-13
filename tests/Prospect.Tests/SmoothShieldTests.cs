@@ -635,10 +635,10 @@ public sealed class SmoothShieldTests
         BlockSet.Remove(alive, 3);
         builder.Build(design, alive, ShellShape.Default, _vertexOut, _indexOut, out _);
         builder.Build(design, design.FullSet, ShellShape.Default, _vertexOut, _indexOut, out _);
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        builder.Build(design, alive, ShellShape.Default, _vertexOut, _indexOut, out _);
-        builder.Build(design, design.FullSet, ShellShape.Default, _vertexOut, _indexOut, out _);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        while (allocation.Measuring()) builder.Build(design, alive, ShellShape.Default, _vertexOut, _indexOut, out _);
+        while (allocation.Measuring()) builder.Build(design, design.FullSet, ShellShape.Default, _vertexOut, _indexOut, out _);
+        Assert.Equal(0, allocation.Bytes);
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -743,9 +743,9 @@ public sealed class SmoothShieldTests
         Assert.True(Pod.IntactIndices.Span.SequenceEqual(DrawnIndices(shields)));
         HullView[] view = [Hull(1, damaged, 1)];
         Frames(shields, view);
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        Frames(shields, view);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        while (allocation.Measuring()) Frames(shields, view);
+        Assert.Equal(0, allocation.Bytes);
     }
 
     [Fact]

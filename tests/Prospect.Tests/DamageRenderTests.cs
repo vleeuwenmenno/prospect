@@ -114,9 +114,13 @@ public sealed class DamageRenderTests
             return sparks.Expand(Double3.Zero, Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ, 1, 1, 1000, 100, tuning).Length;
         }
         for (var i = 0; i < 20; i++) Assert.Equal(128 * 6 * 6, Prepare());
-        var timer = Stopwatch.StartNew(); var before = GC.GetAllocatedBytesForCurrentThread();
+        var timer = Stopwatch.StartNew();
         for (var i = 0; i < 100; i++) Prepare();
-        var allocated = GC.GetAllocatedBytesForCurrentThread() - before; timer.Stop(); Assert.Equal(0, allocated);
+        timer.Stop();
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 100; i++)
+            while (allocation.Measuring()) Prepare();
+        var allocated = allocation.Bytes; Assert.Equal(0, allocated);
         File.WriteAllText("/tmp/prospect-visual-damage-sparks-performance.txt", $"Debug CPU; 128 bursts, 6 streaks each, 4608 vertices, 110592 upload bytes, 1 draw; 20 warmups, 100 samples; {timer.Elapsed.TotalMilliseconds / 100:F4} ms/preparation; {allocated} managed bytes. No GPU measurement.\n");
     }
 
@@ -133,8 +137,11 @@ public sealed class DamageRenderTests
                     var position = new Vector3(0, 0, far ? 5000 : 200);
                     void Prepare() { for (var h = 0; h < hulls; h++) { var fade = tuning.Fade(position, design.Flight.Radius, 100); if (fade > 0 && dents > 0) mesh!.CopyTo(destination.AsSpan(h * mesh.Dented.Length), fade); } }
                     for (var i = 0; i < 3; i++) Prepare();
-                    timer.Restart(); var before = GC.GetAllocatedBytesForCurrentThread(); for (var i = 0; i < 20; i++) Prepare(); var allocated = GC.GetAllocatedBytesForCurrentThread() - before; timer.Stop();
-                    Assert.Equal(0, allocated); var detailed = !far && dents > 0;
+                    timer.Restart(); for (var i = 0; i < 20; i++) Prepare(); timer.Stop();
+                    var allocation = new AllocationProbe();
+                    for (var i = 0; i < 20; i++)
+                        while (allocation.Measuring()) Prepare();
+                    var allocated = allocation.Bytes; Assert.Equal(0, allocated); var detailed = !far && dents > 0;
                     report.Add($"{hulls},{dents},{(far ? "far" : "near")},{worker:F4},{timer.Elapsed.TotalMilliseconds / 20:F4},{allocated},{(detailed ? hulls : 1)},{hulls},{(detailed ? mesh!.Dented.Length / 3 : 910 * 12) * hulls},{(detailed ? mesh!.Dented.Length * 24L * hulls : 0)}");
                 }
         File.WriteAllLines("/tmp/prospect-visual-damage-render-performance.csv", report);
