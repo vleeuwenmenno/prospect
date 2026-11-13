@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Prospect.Tests;
 
+[Collection(TimingBudgets.Name)]
 public sealed class TargetPickingTests
 {
     private static Asteroid Rock(float radius, Vector3 position) => new() { Radius = radius, LocalPosition = position, Rotation = Quaternion.Identity };

@@ -225,9 +225,9 @@ public sealed class WorldSpaceGenerationTests
         }
 
         // Warm, with fields from every side and the noise lattice in use, generation takes no memory.
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        galaxy.Generate(new SectorCoord(3, 0, 1), reused);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocation = new AllocationProbe();
+        while (allocation.Measuring()) galaxy.Generate(new SectorCoord(3, 0, 1), reused);
+        Assert.Equal(0, allocation.Bytes);
     }
 
     private static bool Overlaps(Galaxy galaxy, SectorCoord anchor, in GasCloud cloud, SectorCoord sector)
