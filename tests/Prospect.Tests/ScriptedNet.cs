@@ -84,6 +84,7 @@ internal sealed class ScriptedTransport : ITransport
 
     /// <summary>Optional observer of the exact snapshot bytes sent by the server.</summary>
     internal SnapshotSink? ObserveSnapshot { get; set; }
+    internal int SnapshotsToRefuse { get; set; }
 
     public string Description => "scripted";
 
@@ -200,6 +201,11 @@ internal sealed class ScriptedTransport : ITransport
                 payload.Slice(1, ChallengeBytes).CopyTo(_challenges.AsSpan(peer * ChallengeBytes));
                 break;
             case MessageId.Snapshot when SnapshotHeader.TryRead(ref reader, out var header):
+                if (SnapshotsToRefuse > 0)
+                {
+                    SnapshotsToRefuse--;
+                    return false;
+                }
                 record.Snapshots++;
                 record.AckedInput = header.AckedInput;
                 ObserveSnapshot?.Invoke(peer, payload);
@@ -321,9 +327,9 @@ internal sealed class ScriptedServer : IDisposable
     /// <summary>One input from a player, with nobody at the controls. Allocates nothing.</summary>
     public void Input(int peer, uint sequence)
     {
-        Span<InputRecord> records = [new InputRecord { Sequence = sequence, Input = new FlightInput { Dampeners = true } }];
+        Span<InputRecord> records = [new InputRecord { TargetTick = Server.Status.Tick, Sequence = sequence, Input = new FlightInput { Dampeners = true } }];
         var writer = new NetWriter(_inputBuffer);
-        InputMessage.Write(ref writer, records, 0, default);
+        InputMessage.Write(ref writer, records, 1);
         Net.Deliver(peer, _inputBuffer, writer.Length, NetChannel.Unreliable);
     }
 

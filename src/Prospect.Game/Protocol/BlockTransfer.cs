@@ -9,6 +9,7 @@ internal sealed class BlockTransfer
     internal const int HeaderBytes = 1 + 4 + 1 + 4 + 4 + 4 + 2;
     internal readonly ulong[] Words;
     internal byte[]? Data;
+    internal bool Visual;
     internal uint Hull, Revision;
     internal byte Design;
     internal int Count, Offset;
@@ -16,7 +17,7 @@ internal sealed class BlockTransfer
 
     internal BlockTransfer(int bytes) => Words = new ulong[bytes / 8];
 
-    internal void Clear() { Hull = 0; Data = null; Offset = Count = 0; }
+    internal void Clear() { Hull = 0; Data = null; Visual = false; Offset = Count = 0; }
 
     internal bool Send(ITransport transport, int peer, Span<byte> buffer, ref int budget)
     {
@@ -38,14 +39,15 @@ internal sealed class BlockTransfer
         var count = Math.Min(Count - Offset, Math.Min((budget - HeaderBytes) / 8, (buffer.Length - HeaderBytes) / 8));
         if (Hull == 0 || count <= 0) return false;
         var writer = new NetWriter(buffer);
-        writer.WriteByte((byte)MessageId.BlockState);
+        writer.WriteByte((byte)(Visual ? MessageId.VisualState : MessageId.BlockState));
         writer.WriteUInt32(Hull);
         writer.WriteByte(Design);
         writer.WriteUInt32(Revision);
         writer.WriteInt32(Count);
         writer.WriteInt32(Offset);
         writer.WriteUInt16((ushort)count);
-        for (var i = 0; i < count; i++) writer.WriteUInt64(Words[Offset + i]);
+        if (Visual) writer.WriteBytes(System.Runtime.InteropServices.MemoryMarshal.AsBytes(Words.AsSpan(Offset, count)));
+        else for (var i = 0; i < count; i++) writer.WriteUInt64(Words[Offset + i]);
         budget -= writer.Length;
         if (!transport.Send(peer, NetChannel.Bulk, writer.Written)) return false;
         Offset += count;

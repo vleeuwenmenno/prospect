@@ -164,7 +164,7 @@ public sealed class ContentIdentityTests
     [InlineData("blocks/blocks.json", "\"maxBoxSide\": 64", "\"maxBoxSide\": 63")]
     [InlineData("blocks/blocks.json", "\"Hull plating\"", "\"Hull plate\"")]
     // The world setting catalogue: what a setting may be set to.
-    [InlineData("rules/settings.json", "\"name\": \"Weak\", \"value\": 4", "\"name\": \"Weak\", \"value\": 5")]
+    [InlineData("rules/settings.json", "\"name\": \"Weak\",\n          \"value\": 4", "\"name\": \"Weak\",\n          \"value\": 5")]
     // The galaxy rules.
     [InlineData("galaxy/galaxy.json", "\"winding\": 4.5", "\"winding\": 4.6")]
     public void AnyChangeToWhatBothSidesSimulateGivesAnotherIdentity(string file, string old, string replacement)

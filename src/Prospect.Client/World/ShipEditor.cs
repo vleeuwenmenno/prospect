@@ -129,6 +129,7 @@ internal sealed class ShipEditor(JobSystem jobs)
     private ulong[] _missing = [];
     private float _ownHull;
     private uint _ownRevision;
+    private int _ownDents;
 
     // The merge the details panel offers, worked out again only when the draft or the selection changes.
     private int _mergeDraftVersion = -1;
@@ -287,7 +288,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         && Server.Token != 0 && Check == DraftCheck.Ready && CheckedVersion == Draft!.Version;
 
     /// <summary>True when the ship has lost or worn blocks, or was repaired before, so its blueprint can rebuild it.</summary>
-    public bool Damaged => Source is { } source && source.NeedsRepair(_ownRevision, _ownHull);
+    public bool Damaged => Source is { } source && source.NeedsRepair(_ownRevision, _ownHull, _ownDents);
 
     /// <summary>Why the ship cannot be repaired from the blueprint now, or <see cref="RepairBlock.None"/>.</summary>
     public RepairBlock RepairState =>
@@ -486,6 +487,7 @@ internal sealed class ShipEditor(JobSystem jobs)
                 {
                     _ownHull = own.Hull;
                     _ownRevision = own.Revision;
+                    _ownDents = own.Visual.Count;
                 }
 
                 if (own.Id != Hull)
@@ -1309,6 +1311,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         Stage = EditorStage.Editing;
         _ownHull = own.Hull;
         _ownRevision = own.Revision;
+        _ownDents = own.Visual.Count;
         Notice = Refusal = EditorReason.None;
         NoticeApplied = false;
         Carry = EditorCarry.None;

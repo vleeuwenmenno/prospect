@@ -15,8 +15,9 @@ public sealed class BlockReplicationTests
     private static GameContent LargeContent()
     {
         var content = GameContent.Load();
+        // Two-cell gaps keep separate rounded shells inside admission limits; these tests exercise recovery, not shield blending.
         var boxes = new DesignBox[300];
-        for (var i = 0; i < boxes.Length; i++) boxes[i] = new DesignBox(new GridSize(i * 2, 0, 0), new GridSize(1, 1, 1), content.Blocks.Get(i == 0 ? "core" : "hull"));
+        for (var i = 0; i < boxes.Length; i++) boxes[i] = new DesignBox(new GridSize(i * 3, 0, 0), new GridSize(1, 1, 1), content.Blocks.Get(i == 0 ? "core" : "hull"));
         content.Designs[content.DroneDesign] = HullDesign.Of(new BoxDesign("Network fixture", 1, boxes, content.Blocks.Limits, "network"), content.Rules);
         return content;
     }

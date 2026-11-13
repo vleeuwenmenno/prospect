@@ -93,7 +93,8 @@ public sealed class ProtocolTests
             Assert.Equal(duration, copy.State.JumpTunnelSeconds);
             Assert.Equal(elapsed, copy.State.JumpTunnelElapsed);
         }
-        Assert.True(18 + byte.MaxValue * HullRecord.MaxWireSize < 65536);
+        Assert.True(SnapshotHeader.MaxWireSize + byte.MaxValue * (HullRecord.MaxWireSize - HullRecord.MaxHealth * 6) < 65536);
+        Assert.Equal(11, (65536 - SnapshotHeader.MaxWireSize) / HullRecord.MaxWireSize);
     }
 
     [Theory]
@@ -106,14 +107,22 @@ public sealed class ProtocolTests
     {
         Span<byte> buffer = stackalloc byte[HullRecord.MaxWireSize];
         var writer = new NetWriter(buffer);
-        new HullRecord
+        var record = new HullRecord
         {
+            HasHealth = true,
+            HealthCount = HullRecord.MaxHealth,
             LossCount = HullRecord.MaxLosses,
             Revision = HullRecord.MaxLosses,
             State = new HullState { Orientation = Quaternion.Identity, Jump = JumpPhase.Charge, JumpCalculation = calculation },
             Order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -1e6) }
-        }.Write(ref writer);
-        Assert.Equal(218, HullRecord.MaxWireSize);
+        };
+        for (var block = 0; block < record.HealthCount; block++)
+        {
+            record.DamagedBlocks[block] = (ushort)block;
+            record.RemainingHealth[block] = 1;
+        }
+        record.Write(ref writer);
+        Assert.Equal(5707, HullRecord.MaxWireSize);
         Assert.Equal(HullRecord.MaxWireSize, writer.Length);
         var reader = new NetReader(writer.Written);
         Assert.Equal(valid, HullRecord.TryRead(ref reader, out var copy));
@@ -123,7 +132,7 @@ public sealed class ProtocolTests
             reader = new NetReader(writer.Written[..length]);
             Assert.False(HullRecord.TryRead(ref reader, out _));
         }
-        Assert.Equal(26u, ProtocolInfo.Version);
+        Assert.Equal(33u, ProtocolInfo.Version);
     }
 
     [Fact]
@@ -375,6 +384,7 @@ public sealed class ClientPredictionTests : IDisposable
             Id = id,
             Owner = owner,
             Design = (byte)design,
+            HasHealth = true,
             State = state,
         };
     }
@@ -420,6 +430,21 @@ public sealed class ClientPredictionTests : IDisposable
         return _views[own];
     }
 
+    private void AssertPredictionCopy(int slot, BlockStateHandle authoritative)
+    {
+        var source = _world.BlockStates;
+        var predicted = _world.Near.BlockStates;
+        var copy = _world.Near.Info(slot).BlockState;
+        Assert.NotSame(source, predicted);
+        Assert.True(_world.Near.Info(slot).OwnsBlockState);
+        Assert.True(predicted.IsLive(copy));
+        Assert.False(source.Alive(authoritative).Overlaps(predicted.Alive(copy)));
+        Assert.False(source.HitPoints(authoritative).Overlaps(predicted.HitPoints(copy)));
+        Assert.True(BlockSet.Equal(source.Alive(authoritative), predicted.Alive(copy)));
+        Assert.True(source.HitPoints(authoritative).SequenceEqual(predicted.HitPoints(copy)));
+        Assert.Equal(source.Revision(authoritative), predicted.Revision(copy));
+    }
+
     [Fact]
     public void ShieldAgesRebaseOnSnapshotTimeThenReplayPendingPredictedTicks()
     {
@@ -430,26 +455,29 @@ public sealed class ClientPredictionTests : IDisposable
         Assert.Equal(10 * HullSim.Dt, Own().ShieldHitAge);
         for (var i = 0; i < 4; i++)
             Tick();
-        Assert.Equal(14 * HullSim.Dt, Own().ShieldChangeAge);
+        // The first sample targets 104 (estimated server tick 101 plus three ticks of lead).
+        // Four samples reach 107; fallback intervals 101–103 age the shield too.
+        Assert.Equal(107d, Own().ShownTick);
+        Assert.Equal((10 + 107 - 100) * HullSim.Dt, Own().ShieldChangeAge);
 
-        // The server consumed three inputs in one tick: its age is eleven, not thirteen.
+        // No input targeted 101. Its authoritative age advances once, then intervals 102–107 replay.
         hull.State.ShieldHit.AgeTicks = 11;
         hull.State.ShieldChangeTicks = 11;
-        Snapshot(101, 3, hull);
-        Assert.Equal(12 * HullSim.Dt, Own().ShieldHitAge);
-        Assert.Equal(12 * HullSim.Dt, Own().ShieldChangeAge);
+        Snapshot(101, 0, hull);
+        Assert.Equal((11 + 107 - 101) * HullSim.Dt, Own().ShieldHitAge);
+        Assert.Equal((11 + 107 - 101) * HullSim.Dt, Own().ShieldChangeAge);
         Tick();
-        Assert.Equal(13 * HullSim.Dt, Own().ShieldHitAge);
+        Assert.Equal((11 + 108 - 101) * HullSim.Dt, Own().ShieldHitAge);
 
         // A later authoritative reset replaces the predicted clock, including during transit.
         hull.State.ShieldHit.AgeTicks = 0;
         hull.State.ShieldChangeTicks = 0;
         hull.State.Jump = JumpPhase.Tunnel;
         hull.State.JumpTunnelSeconds = 600;
-        Snapshot(102, 5, hull);
-        Assert.Equal(0f, Own().ShieldChangeAge);
+        Snapshot(102, 0, hull);
+        Assert.Equal((108 - 102) * HullSim.Dt, Own().ShieldChangeAge);
         Tick();
-        Assert.Equal(HullSim.Dt, Own().ShieldChangeAge);
+        Assert.Equal((109 - 102) * HullSim.Dt, Own().ShieldChangeAge);
     }
 
     [Fact]
@@ -477,7 +505,7 @@ public sealed class ClientPredictionTests : IDisposable
         Snapshot(_serverTick, 0, rest);
         for (var i = 0; i < 3; i++)
             Tick();
-        Snapshot(_serverTick, 3, rest);
+        Snapshot(_serverTick, 0, rest);
         Assert.Equal(Vector3.Zero, Own().Velocity);
 
         // Something ran into the pod on the server. No input of the player's had a part in it, so the
@@ -485,20 +513,30 @@ public sealed class ClientPredictionTests : IDisposable
         var struck = rest;
         struck.State.Velocity = new Vector3(12, 0, 0);
         struck.State.Shield = pod.ShieldCapacity * 0.5f;
-        Snapshot(_serverTick + 1, 3, struck);
-        Assert.Equal(struck.State.Velocity, Own().Velocity);
-        Assert.Equal(struck.State.Shield, Own().Shield);
+        // Three client samples reach 106; the correction at 104 replays intervals 105 and 106.
+        var expected = struck.State;
+        var order = default(HullOrder);
+        for (var tick = 105; tick <= 106; tick++)
+        {
+            HullSim.AdvanceShieldClock(ref expected);
+            HullSim.Step(ref expected, ref order, InputTimeline.Fallback, pod, tick);
+        }
+        Snapshot(_serverTick + 1, 0, struck);
+        Assert.Equal(106d, Own().ShownTick);
+        Assert.Equal(expected.Position, _world.Near.State(0).Position);
+        Assert.Equal(expected.Velocity, Own().Velocity);
+        Assert.Equal(expected.Shield, Own().Shield);
 
         // The snapshot from before the blow turns up late. It is older, whatever it acknowledges.
-        Snapshot(_serverTick, 3, rest);
-        Assert.Equal(struck.State.Velocity, Own().Velocity);
-        Assert.Equal(struck.State.Shield, Own().Shield);
+        Snapshot(_serverTick, 0, rest);
+        Assert.Equal(expected.Velocity, Own().Velocity);
+        Assert.Equal(expected.Shield, Own().Shield);
 
         // So does the very same one again.
         var twice = struck;
         twice.State.Velocity = new Vector3(-30, 0, 0);
-        Snapshot(_serverTick + 1, 3, twice);
-        Assert.Equal(struck.State.Velocity, Own().Velocity);
+        Snapshot(_serverTick + 1, 0, twice);
+        Assert.Equal(expected.Velocity, Own().Velocity);
     }
 
     [Fact]
@@ -527,11 +565,11 @@ public sealed class ClientPredictionTests : IDisposable
         other.State.Position = new Double3(15, 0, 0);
         Snapshot(101, 0, own, other);
 
-        // The predicted hull borrows the block state, so it has the loss; its figures must be those of what is left.
+        // The isolated prediction copy must receive the late loss and refit to the same geometry.
         Assert.Equal(2, _world.Near.Count);
         Assert.True(_world.TryGetBlockState(OwnHull + 1, out var state));
         Assert.Equal(1u, _world.BlockStates.Revision(state));
-        Assert.Equal(state, _world.Near.Info(1).BlockState);
+        AssertPredictionCopy(1, state);
         design.Evaluate(_world.BlockStates.Alive(state), out var fitting, out _);
         Assert.True(fitting.Mass < design.Flight.Mass);
         Assert.Equal(fitting.Mass, _world.Near.Flight(1).Mass);
@@ -541,7 +579,7 @@ public sealed class ClientPredictionTests : IDisposable
     }
 
     [Fact]
-    public void AKnownHullsBlockStateIsKeptAcrossSnapshotsAndOnlyBorrowedByThePrediction()
+    public void AKnownHullsBlockStateIsKeptAcrossSnapshotsAndCopiedIntoIsolatedPrediction()
     {
         var own = Hull(OwnHull, Player, Content.PodDesign, Double3.Zero);
         var other = Hull(OwnHull + 1, Player + 1, Content.PodDesign, new Double3(10, 0, 0));
@@ -555,16 +593,16 @@ public sealed class ClientPredictionTests : IDisposable
         Assert.Equal(2, states.Count);
         var ownBlocks = states.Alive(ownState);
         var otherBlocks = states.Alive(otherState);
-        Assert.True(states.HitPoints(ownState).IsEmpty);
+        Assert.True(states.HitPoints(ownState).SequenceEqual(Content.Pod.IntactHitPoints));
+        Assert.True(states.HitPoints(otherState).SequenceEqual(Content.Pod.IntactHitPoints));
 
-        // The hulls the prediction steps are made over those states, and own none of them.
-        void Borrowed()
+        // Prediction owns independent copies; rebuilding them must not move authoritative storage.
+        void Copied()
         {
             Assert.Equal(2, _world.Near.Count);
-            Assert.Equal(ownState, _world.Near.Info(0).BlockState);
-            Assert.Equal(otherState, _world.Near.Info(1).BlockState);
-            Assert.False(_world.Near.Info(0).OwnsBlockState);
-            Assert.False(_world.Near.Info(1).OwnsBlockState);
+            AssertPredictionCopy(0, ownState);
+            AssertPredictionCopy(1, otherState);
+            Assert.Equal(2, _world.Near.BlockStates.Count);
             Assert.Equal(2, states.Count);
         }
 
@@ -578,15 +616,14 @@ public sealed class ClientPredictionTests : IDisposable
             Assert.Equal(revision, states.Revision(state));
         }
 
-        Borrowed();
+        Copied();
 
-        // Snapshot after snapshot empties the predicted hulls and fills them again. Nothing is taken, released,
-        // rebuilt or moved: the same handles name the same memory, and nothing was lost.
+        // Rebuilding prediction leaves authoritative handles and their memory unchanged, with no losses.
         for (var i = 1; i <= 8; i++)
         {
             Tick();
             Snapshot(_serverTick, (uint)i, own, other);
-            Borrowed();
+            Copied();
             Kept(ownState, ownBlocks, OwnHull, 0);
             Kept(otherState, otherBlocks, OwnHull + 1, 0);
         }
@@ -600,7 +637,7 @@ public sealed class ClientPredictionTests : IDisposable
         Lose(ref other, 3);
         Tick();
         Snapshot(_serverTick, 9, own, other);
-        Borrowed();
+        Copied();
         Kept(ownState, ownBlocks, OwnHull, 2);
         Kept(otherState, otherBlocks, OwnHull + 1, 1);
         Assert.Equal(Mask(own), BlockMasks.Word(ownBlocks));
@@ -651,7 +688,10 @@ public sealed class ClientPredictionTests : IDisposable
         // The original immutable binding continues to predict after the rejected packet.
         Snapshot(_serverTick + 2, 1, own, other);
         Assert.Equal(2, _world.Near.Count);
-        Assert.Equal(second, _world.Near.Info(1).BlockState);
+        Assert.True(_world.TryGetBlockState(OwnHull + 1, out var stillKnown));
+        Assert.Equal(second, stillKnown);
+        Assert.Equal((byte)Content.PodDesign, _world.Near.Info(1).Design);
+        AssertPredictionCopy(1, second);
         Tick();
     }
 

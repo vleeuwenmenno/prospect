@@ -28,7 +28,7 @@ public sealed record BlockTransferRules(int MaxBytes, int Transfers, int HeldByt
             CatalogueBytes = r.GetProperty("catalogueBytes"u8).GetInt32(),
             CatalogueBoxes = r.GetProperty("catalogueBoxes"u8).GetInt32()
         };
-        if (result.MaxBytes is < 8 or > 8388608 || result.MaxBytes % 8 != 0 || result.Transfers is < 1 or > 8
+        if (result.MaxBytes is < 168 or > 8388608 || result.MaxBytes % 8 != 0 || result.Transfers is < 1 or > 8
             || result.HeldBytes < (long)result.MaxBytes * result.Transfers || result.HeldBytes > 67108864
             || result.RequestTicks is < 1 or > 3600 || result.TimeoutTicks < result.RequestTicks || result.TimeoutTicks > 36000
             || result.BytesPerTick is < 64 or > 8192

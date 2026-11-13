@@ -127,8 +127,9 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   occur there. Rich and poor space come in regions. Some sectors have every resource, some none, most a few; the
   sector panel and the map (for a discovered sector) show both. The sector panel is closed by default: `F2` shows it.
   There is no closed-state hint or reserved row.
-- **Asteroid fields.** A sector has no field, a thin scatter, a cluster or a dense belt: up to 4,096 asteroids.
-  Sizes run from pebbles 6 m across to giants 6 km across; most are tiny and a giant is rare. The middle of every
+- **Asteroid fields.** A sector has no field, a thin scatter, a cluster or a dense belt: up to 20,480 asteroids.
+  Counts are planned upper bounds; crowded placements are omitted. The default size table runs from pebbles
+  12 m across to giants 12 km across, limited by field fit; most are tiny and a giant is rare. The middle of every
   sector, where ships arrive, is kept clear.
 - **Hulls from blocks.** A hull is a list of typed blocks (engine, thruster, gyro, generator, battery, shield
   emitter, cargo, quarters, plating). Mass, moments of inertia, acceleration, turn rates, top speed, hull and
@@ -152,7 +153,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   over a safe limit and lands on the blocks that touched, after the shield. A block at zero is gone, and the hull
   flies on what is left. Losing the core destroys the hull; its pilot gets out in a drone.
 - **Shields break and restart.** A shield that pays out everything it had breaks and goes offline. Offline it
-  takes no hits, even with charge in it: every hit lands on the blocks. After the usual 4 s without a hit it
+  takes no hits, even with charge in it: every hit lands on the blocks. After 8 s without damaging hits it
   charges back at its normal rate on twice its normal power, and comes online only at 25% of its capacity
   (`shieldRestartFraction` and `shieldRestartPowerMultiplier` in `content/blocks/blocks.json`). Online it tops up
   as before. The console says `OFFLINE` in red, dims the charge being rebuilt, marks the restart point on the bar
@@ -413,6 +414,14 @@ galaxy rules in `content/galaxy`, world settings in `content/rules`, the listing
 Settings are fixed for the life of a server or a local game. Defaults and ranges live in
 `content/rules/settings.json`.
 
+Asteroid 1× is the former maximum multiplier preset: amount, radius, occurrence, spacing, ore share and
+grade at old 2×; field dimensions at old 1.5×. Material abundance and paired minimum/maximum defaults stay unchanged.
+All seven multipliers now reach 5× of that baseline. The old 4,096 count clipping is removed: dense 1× sectors
+can contain more rocks than the former preset. Probabilities and grade saturate at 100%; radius remains capped
+at 6,000 m and field dimensions fit the sector. Large rocks and spacing compete for room, so 5× requested amount
+does not guarantee five times the placed count. Rendering still has a shared 32,768-instance frame budget;
+the generation cap does not mean every rock in every visible sector draws simultaneously.
+
 | Id | Values | Default | What it does |
 | --- | --- | --- | --- |
 | `collisionDamage` | 0 to 4 | 1 | Multiplies collision damage. At 0 collisions push but never damage. |
@@ -420,16 +429,15 @@ Settings are fixed for the life of a server or a local game. Defaults and ranges
 | `shieldRecharge` | 0.25 to 4 | 1 | Multiplies how fast shields recharge. |
 | `jumpChargeSpeed` | 0.25 to 4 | 1 | Multiplies how fast a jump drive charges. A jump takes the same energy. |
 | `hullStrength` | 0.25 to 4 | 1 | Multiplies every block's hit points. |
-| `asteroidAmount` | 0 to 2 | 1 | Requested asteroid counts, including home; 0 disables rocks. |
-| `asteroidCap` | 0 to 4096, integer | 4096 | Per-sector upper count limit, never above shared content. |
-| `asteroidSize` | 0.25 to 2 | 1 | Radius multiplier, limited by field fit. |
-| `asteroidFieldSize` | 0.5 to 1.5 | 1 | Field dimension multiplier, including home, bounded by sector walls. |
-| `asteroidFrequency` | 0 to 2 | 1 | Field occurrence probability multiplier, capped at 100%; home is exempt. |
-| `asteroidSpacing` | 0.5 to 2 | 1 | Spacing multiplier, with a nonoverlap minimum. |
-| `asteroidOreShare` | 0 to 2 | 1 | Ore-bearing fraction multiplier, capped at 100%; no new resource kinds. |
-| `asteroidOreGrade` | 0.25 to 2 | 1 | Grade multiplier within ore-bearing rocks, capped at 100%. |
-
-| `asteroidCountMin` | 0 to 4096, integer | 0 | Lower requested count per sector with fields; pairs with `asteroidCap`. |
+| `asteroidAmount` | 0 to 5 | 1 | Requested asteroid counts, including home; 0 disables rocks. |
+| `asteroidCap` | 0 to 20480, integer | 20480 | Per-sector upper count limit, never above shared content. |
+| `asteroidSize` | 0.25 to 5 | 1 | Radius multiplier, limited by field fit. |
+| `asteroidFieldSize` | 0.5 to 5 | 1 | Field dimension multiplier, including home, bounded by sector walls. |
+| `asteroidFrequency` | 0 to 5 | 1 | Field occurrence probability multiplier, capped at 100%; home is exempt. |
+| `asteroidSpacing` | 0.5 to 5 | 1 | Spacing multiplier, with a nonoverlap minimum. |
+| `asteroidOreShare` | 0 to 5 | 1 | Ore-bearing fraction multiplier, capped at 100%; no new resource kinds. |
+| `asteroidOreGrade` | 0.25 to 5 | 1 | Grade multiplier within ore-bearing rocks, capped at 100%. |
+| `asteroidCountMin` | 0 to 20480, integer | 0 | Lower requested count per sector with fields; pairs with `asteroidCap`. |
 | `asteroidRadiusMin`, `asteroidRadiusMax` | 0.75 to 6000 metres | 0.75, 6000 | Clamp sampled radii after the size multiplier. Diameter is twice radius. Rocks that cannot fit are omitted. |
 | `oreRichnessMin`, `oreRichnessMax` | 0 to 1 | 0, 1 | Clamp sector richness after the home floor; affects map character, ore-bearing fraction and grade. |
 | `oreGradeMin`, `oreGradeMax` | 0 to 1 | 0, 1 | Clamp ore grade after the grade multiplier; 1 means 100%. |
@@ -601,3 +609,24 @@ credits screen. Third-party licence texts, including those of the bundled fonts,
 
 Wedges are drawn, picked, collided, edited and shielded as their real shape; see
 [wedges](docs/blocks-at-scale.md#wedges-protocol-27).
+
+### Visual collision damage
+
+Authoritative collision contacts now retain up to 16 strongest block dents per hull and recent spark metadata.
+State replicates independently of poses and block losses; repair clears it. Shields prevent dents until damage reaches the hull.
+Collision shapes and asteroids stay unchanged. Far clients retain state; the renderer culls detail by distance.
+Nearby surviving blocks draw inward dents at the replicated contact point; recent hull/hull and hull/asteroid contacts emit short sparks.
+Detail fades between 400 and 800 metres from the hull bounds and between 8 and 16 projected pixels.
+Repair restores dents too, and a dent-only ship must repair before editing.
+Physics, picking and shield geometry retain the original surfaces.
+
+Client budgets and current rendering limits: [collision visuals](docs/collision-visuals.md).
+Backend/API and bounded transfer costs: [hosting](docs/hosting.md#visual-collision-damage-backend-protocol-33).
+Appearance and GPU performance have not yet been checked in a running client.
+
+Pilot networking uses protocol 33: controls target explicit world intervals, and every hull advances once per interval.
+Missing controls brake while standing orders, jumps and recharge continue.
+Prediction replays intervals from authoritative snapshots, including missing controls; input batches no longer create extra pilot steps.
+Snapshot block health lets prediction reproduce losses on isolated copies; reconciliation restores them without changing authoritative published blocks.
+The client schedules controls 3–16 intervals ahead based on RTT and predicts them immediately.
+Unknown remote intent and omitted state can still cause corrections. Timing limits are in [hosting.md](docs/hosting.md).

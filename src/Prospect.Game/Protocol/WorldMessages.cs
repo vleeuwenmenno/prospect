@@ -4,64 +4,56 @@ using Prospect.Game.World;
 
 namespace Prospect.Game.Protocol;
 
-/// <summary>One simulated tick of a client's hull as sent to the server.</summary>
+/// <summary>Complete pilot intent for one authoritative world interval.</summary>
 public struct InputRecord
 {
-    /// <summary>The client's tick number for this input; strictly increasing.</summary>
+    public long TargetTick;
     public uint Sequence;
     public FlightInput Input;
-
-    /// <summary>The client's order counter in force during this tick.</summary>
     public ushort OrderId;
+    public HullOrder Order;
 }
 
-/// <summary>
-/// Client to server, every tick, unreliable. Carries the newest inputs with a little history so a lost packet
-/// costs nothing, plus the definition of the client's current order.
-/// </summary>
+/// <summary>Redundant, immutable interval records scoped to a server-issued control epoch.</summary>
 public static class InputMessage
 {
     public const int MaxRecords = 4;
+    public const int MaxWireSize = 6 + MaxRecords * (8 + 4 + FlightInput.WireSize + 2 + 1 + 24);
 
-    public static void Write(ref NetWriter writer, scoped ReadOnlySpan<InputRecord> records, ushort orderId, in HullOrder order)
+    public static void Write(ref NetWriter writer, scoped ReadOnlySpan<InputRecord> records, uint epoch)
     {
         writer.WriteByte((byte)MessageId.Input);
+        writer.WriteUInt32(epoch);
         writer.WriteByte((byte)records.Length);
         foreach (var record in records)
         {
+            writer.WriteInt64(record.TargetTick);
             writer.WriteUInt32(record.Sequence);
             record.Input.Write(ref writer);
             writer.WriteUInt16(record.OrderId);
+            writer.WriteByte((byte)record.Order.Kind);
+            if (record.Order.Kind != OrderKind.None)
+                WorldWire.WritePosition(ref writer, record.Order.Target);
         }
-
-        writer.WriteUInt16(orderId);
-        writer.WriteByte((byte)order.Kind);
-        if (order.Kind != OrderKind.None)
-            WorldWire.WritePosition(ref writer, order.Target);
     }
 
-    public static bool TryRead(ref NetReader reader, scoped Span<InputRecord> records, out int count, out ushort orderId, out HullOrder order)
+    public static bool TryRead(ref NetReader reader, scoped Span<InputRecord> records, out int count, out uint epoch)
     {
+        epoch = reader.ReadUInt32();
         count = reader.ReadByte();
-        orderId = 0;
-        order = default;
-        if (count > MaxRecords)
-            return false;
-
+        if (count is < 1 or > MaxRecords || count > records.Length) return false;
         for (var i = 0; i < count; i++)
         {
+            records[i] = default;
+            records[i].TargetTick = reader.ReadInt64();
             records[i].Sequence = reader.ReadUInt32();
             records[i].Input = FlightInput.Read(ref reader);
             records[i].OrderId = reader.ReadUInt16();
+            var kind = reader.ReadByte();
+            if (kind > (byte)OrderKind.Jump) return false;
+            records[i].Order.Kind = (OrderKind)kind;
+            if (kind != 0 && !WorldWire.TryReadPosition(ref reader, out records[i].Order.Target)) return false;
         }
-
-        orderId = reader.ReadUInt16();
-        var kind = reader.ReadByte();
-        if (kind > (byte)OrderKind.Jump)
-            return false;
-        order.Kind = (OrderKind)kind;
-        if (order.Kind != OrderKind.None && !WorldWire.TryReadPosition(ref reader, out order.Target))
-            return false;
         return reader.IsValid;
     }
 }
@@ -164,7 +156,8 @@ public struct HullRecord
     /// energy, shield, hull and shield delay, the shield's newest hit and the age of its last change, and the
     /// order's target.
     /// </summary>
-    public const int MaxWireSize = 4 + 4 + 1 + 4 + 4 + 1 + 4 * MaxLosses + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 4 + 4 + 8 + 16 + 6 + 1 + 24;
+    public const int MaxHealth = GeometryAdmission.MaxBlocks;
+    public const int MaxWireSize = 26 + 3 + MaxHealth * 6 + 4 + 4 + 1 + 4 + 4 + 1 + 4 * MaxLosses + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 4 + 4 + 8 + 16 + 6 + 1 + 24;
 
     public uint Id;
     public uint Owner;
@@ -176,22 +169,46 @@ public struct HullRecord
     public uint Revision;
     /// <summary>The revision immediately before the first loss.</summary>
     public uint LossStart;
+    /// <summary>Independent cosmetic revision; missing visual data never blocks a pose.</summary>
+    public uint VisualVersion;
+    /// <summary>Latest authoritative local contact, independent of recovery.</summary>
+    public CollisionSpark Spark;
     /// <summary>Number of file-order block ids carried.</summary>
     public byte LossCount;
     /// <summary>Inline bounded loss payload.</summary>
     [System.Runtime.CompilerServices.InlineArray(MaxLosses)]
     public struct LossBuffer { private int _element0; }
     public LossBuffer Losses;
+    /// <summary>Complete sparse remaining health: unlisted live blocks retain their intact health.</summary>
+    public bool HasHealth;
+    public ushort HealthCount;
+    [System.Runtime.CompilerServices.InlineArray(MaxHealth)]
+    public struct HealthIds { private ushort _element0; }
+    [System.Runtime.CompilerServices.InlineArray(MaxHealth)]
+    public struct HealthValues { private float _element0; }
+    public HealthIds DamagedBlocks;
+    public HealthValues RemainingHealth;
     public HullState State;
     public HullOrder Order;
+    /// <summary>Conservative actual record bound, excluding unused health entries.</summary>
+    public readonly int WireBound => MaxWireSize - (MaxHealth - HealthCount) * 6;
 
     public readonly void Write(ref NetWriter writer)
     {
+        writer.WriteByte(HasHealth ? (byte)1 : (byte)0);
+        writer.WriteUInt16(HealthCount);
+        for (var i = 0; i < HealthCount; i++)
+        {
+            writer.WriteUInt16(DamagedBlocks[i]);
+            writer.WriteSingle(RemainingHealth[i]);
+        }
         writer.WriteUInt32(Id);
         writer.WriteUInt32(Owner);
         writer.WriteByte(Design);
         writer.WriteUInt32(Revision);
         writer.WriteUInt32(LossStart);
+        writer.WriteUInt32(VisualVersion);
+        Spark.Write(ref writer);
         writer.WriteByte(LossCount);
         for (var i = 0; i < LossCount; i++) writer.WriteInt32(Losses[i]);
         WorldWire.WritePosition(ref writer, State.Position);
@@ -225,11 +242,24 @@ public struct HullRecord
     public static bool TryRead(ref NetReader reader, out HullRecord record)
     {
         record = default;
+        var health = reader.ReadByte();
+        record.HasHealth = health == 1;
+        record.HealthCount = reader.ReadUInt16();
+        if (health > 1 || record.HealthCount > MaxHealth || (!record.HasHealth && record.HealthCount != 0)) return false;
+        for (var i = 0; i < record.HealthCount; i++)
+        {
+            record.DamagedBlocks[i] = reader.ReadUInt16();
+            record.RemainingHealth[i] = reader.ReadSingle();
+            if (!float.IsFinite(record.RemainingHealth[i]) || record.RemainingHealth[i] <= 0 ||
+                (i > 0 && record.DamagedBlocks[i] <= record.DamagedBlocks[i - 1])) return false;
+        }
         record.Id = reader.ReadUInt32();
         record.Owner = reader.ReadUInt32();
         record.Design = reader.ReadByte();
         record.Revision = reader.ReadUInt32();
         record.LossStart = reader.ReadUInt32();
+        record.VisualVersion = reader.ReadUInt32();
+        record.Spark = CollisionSpark.Read(ref reader);
         record.LossCount = reader.ReadByte();
         if (record.LossCount > MaxLosses || record.LossStart > record.Revision || record.LossCount > record.Revision - record.LossStart)
             return false;
@@ -291,7 +321,10 @@ public struct HullRecord
 /// </summary>
 public struct SnapshotHeader
 {
+    public const int MaxWireSize = 24;
     public long ServerTick;
+    public uint ControlEpoch;
+    public ushort AppliedOrderId;
 
     /// <summary>The last input of the receiving client that the server has simulated.</summary>
     public uint AckedInput;
@@ -304,6 +337,8 @@ public struct SnapshotHeader
     {
         writer.WriteByte((byte)MessageId.Snapshot);
         writer.WriteInt64(ServerTick);
+        writer.WriteUInt32(ControlEpoch);
+        writer.WriteUInt16(AppliedOrderId);
         writer.WriteUInt32(AckedInput);
         writer.WriteUInt32(OwnHull);
         writer.WriteByte(HullCount);
@@ -312,10 +347,12 @@ public struct SnapshotHeader
     public static bool TryRead(ref NetReader reader, out SnapshotHeader header)
     {
         header.ServerTick = reader.ReadInt64();
+        header.ControlEpoch = reader.ReadUInt32();
+        header.AppliedOrderId = reader.ReadUInt16();
         header.AckedInput = reader.ReadUInt32();
         header.OwnHull = reader.ReadUInt32();
         header.HullCount = reader.ReadByte();
-        return reader.IsValid;
+        return reader.IsValid && header.ServerTick >= 0 && header.ServerTick <= long.MaxValue - 256;
     }
 }
 

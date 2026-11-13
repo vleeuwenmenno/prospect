@@ -112,6 +112,9 @@ internal sealed class WorldView
     private readonly ActionMap _actions;
     private readonly ClientSettings _settings;
     private readonly JobSystem _jobs;
+    private readonly DamageMeshes _damage;
+    private readonly CollisionSparks _sparks = new();
+    private readonly CollisionDetail _collision = CollisionDetail.Load();
     private readonly SceneRenderer _scene;
     // The designs as the session's world evaluates them; the meshes built from them are the same in every world.
     private HullDesign[] _designs;
@@ -318,6 +321,7 @@ internal sealed class WorldView
         _actions = actions;
         _settings = settings;
         _jobs = jobs;
+        _damage = new DamageMeshes(jobs, _collision.MeshVertices);
         _scene = scene;
         var boost = actions.Bindings(InputAction.Boost);
         BoostKeyName = boost.IsEmpty ? "BOOST" : boost[0].DisplayName.ToUpperInvariant();
@@ -579,6 +583,8 @@ internal sealed class WorldView
             // Each admitted session creates its own galaxy, even when its seed and hull IDs match the last one.
             _visuals.Clear();
             _shields.Clear();
+            _damage.Clear();
+            _sparks.Clear();
             _ownId = 0;
             ResetOwnJump();
             _commandCycle.Reset();
@@ -809,6 +815,9 @@ internal sealed class WorldView
         var aspect = _viewport.X / _viewport.Y;
         var candidateCount = 0;
         Array.Clear(_meshCounts);
+        _damage.Begin(snapshot.Hulls.AsSpan(0, snapshot.HullCount));
+        _scene.BeginDamage();
+        _sparks.Begin(snapshot.Hulls.AsSpan(0, snapshot.HullCount));
         var marks = _scene.FtlMarks(frameIndex);
         var markCount = 0;
         var composite = new CompositeConstants { Setup = new float4(Exposure, aspect, time, 0) };
@@ -846,6 +855,10 @@ internal sealed class WorldView
                 AddOwnJumpMarks(design.Flight, camera, marks, ref markCount);
             else if (!visual.Inside)
                 AddHyperspaceMarks(hull, visual, design.Flight, camera, marks, ref markCount);
+            var sparkPixels = design.Flight.Radius * _viewport.Y / (Math.Max(position.Length(), 1f) * _tanHalfFov);
+            var sparkVisible = visual.Visible && Visible(position, design.Flight.Radius, aspect, out _)
+                && _collision.Fade(position, design.Flight.Radius, sparkPixels) > 0;
+            _sparks.Observe(hull, design, DrawnPosition(visual), orientation, sparkVisible, snapshot.ServerTickPrecise + alpha, _collision);
             var stretch = visual.Stretch;
             if (!visual.Visible || !Visible(position, design.Flight.Radius * stretch, aspect, out _))
                 continue;
@@ -854,6 +867,14 @@ internal sealed class WorldView
             var material = Material(visual.Inside, visual.Inside ? -1 : visual.Clip);
             // The shield goes where the hull goes, drawn out and cut with it by the same material.
             _shields.Add(hull.Id, position, orientation, stretch, material, shieldInstances, shieldVertices, shieldIndices);
+            var pixels = design.Flight.Radius * _viewport.Y / (Math.Max(position.Length(), 1f) * _tanHalfFov);
+            var detail = _collision.Fade(position, design.Flight.Radius * stretch, pixels);
+            if (detail > 0 && hull.Visual.Count > 0)
+            {
+                var mesh = _damage.Get(hull.Id, hull.Revision, design, hull.Blocks.Span, hull.Visual, snapshot.Content.Rules.DentMaxDepth);
+                var instance = MeshTransform(position, orientation, Vector3.One, design.Color, material, stretch);
+                if (mesh is not null && _scene.AddDamage(frameIndex, mesh, instance, detail)) continue;
+            }
             if (visual.Intact)
             {
                 Add(ref candidateCount, hull.Design, position, orientation, 1f, design.Color, material, stretch);
@@ -915,6 +936,7 @@ internal sealed class WorldView
         for (var i = 0; i < candidateCount; i++)
             instances[_meshOffsets[_candidates[i].Mesh]++] = _candidates[i].Instance;
 
+        _scene.AddSparks(frameIndex, _sparks.Expand(camera, _right, _up, _forward, aspect, _tanHalfFov, _viewport.Y, snapshot.ServerTickPrecise + alpha, _collision));
         var f = 1f / _tanHalfFov;
         var sunColor = galaxy.StarClasses[Sector.StarClass].Color * 1.7f;
         var sunDirection = Sector.SunDirection;

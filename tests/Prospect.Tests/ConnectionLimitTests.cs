@@ -556,10 +556,19 @@ public sealed class ConnectionLimitTests
         var junk = new byte[40];
         for (var i = 0; i < perTick * 4 + 100; i++)
             rig.Net.Deliver(closed, junk);
-        rig.Input(player, 1);
+        // Target the fifth processing tick, when the bounded receive loop can reach this packet.
+        var input = new byte[InputMessage.MaxWireSize];
+        var writer = new NetWriter(input);
+        InputMessage.Write(ref writer, [new InputRecord
+        {
+            TargetTick = rig.Server.Status.Tick + 4,
+            Sequence = 1,
+            Input = InputTimeline.Fallback,
+        }], 1);
+        rig.Net.Deliver(player, input, writer.Length, NetChannel.Unreliable);
 
         // Each tick reads its budget and no more, and goes on to simulate: the player hears from the server
-        // every tick, and the input is read in the tick the queue reaches it. It was late, not lost.
+        // every tick, and the queued input is read in time for its target interval, without dropping packets.
         for (var tick = 1; tick <= 4; tick++)
         {
             var before = rig.Net.Delivered;
@@ -569,7 +578,9 @@ public sealed class ConnectionLimitTests
             Assert.Equal(1 + 1 + tick, rig.Net[player].Snapshots);
         }
 
+        var beforeLast = rig.Net.Delivered;
         rig.Tick();
+        Assert.Equal(101, rig.Net.Delivered - beforeLast);
         Assert.Equal(1u, rig.Net[player].AckedInput);
 
         // The same again, for longer than a handshake may take: the silent connection's time still runs out on

@@ -24,17 +24,19 @@ public sealed class ShieldSessionTests
         using var observerLink = new LoopbackLink();
         using var lateLink = new LoopbackLink();
         using var server = new ServerHost(new ServerConfig { MaxPlayers = 3, Settings = content.Settings }, content, link.Server, observerLink.Server, lateLink.Server);
-        using var pilot = new ClientSession(link.Client, content, "Pilot");
-        using var observer = new ClientSession(observerLink.Client, content, "Observer");
+        var clock = new ManualTime();
+        using var pilot = new ClientSession(link.Client, content, "Pilot", clock: clock);
+        using var observer = new ClientSession(observerLink.Client, content, "Observer", clock: clock);
         ClientSession? late = null;
-        long tick = 0;
+        long tick = 0, pilotTick = 0, observerTick = 0, lateTick = 0;
         void Step()
         {
+            clock.Advance(ManualTime.Tick);
             ((ITickHandler)server).Tick(tick++);
-            ((ITickHandler)pilot).Tick(0);
-            ((ITickHandler)observer).Tick(0);
+            ((ITickHandler)pilot).Tick(pilotTick++);
+            ((ITickHandler)observer).Tick(observerTick++);
             if (late is not null)
-                ((ITickHandler)late).Tick(0);
+                ((ITickHandler)late).Tick(lateTick++);
         }
 
         HullView Own(ClientSession session)
@@ -78,7 +80,7 @@ public sealed class ShieldSessionTests
 
         // Inputs run ahead of the server, so the prediction replays across the break.
         for (var i = 0; i < 4; i++)
-            ((ITickHandler)pilot).Tick(0);
+            ((ITickHandler)pilot).Tick(pilotTick++);
 
         var broke = -1;
         for (var i = 0; i < 60 * 20 && broke < 0; i++)
@@ -95,12 +97,19 @@ public sealed class ShieldSessionTests
         Assert.InRange(own.ShieldHitAge, 0f, 0.5f);
         var serial = own.ShieldHit.Serial;
 
-        // The observer sees the same break and the same hit, through snapshots alone.
-        for (var i = 0; i < 6; i++)
+        // Prediction leads authority and the observer draws an interpolated past interval.
+        // Compare the same displayed time instead of assuming six frames bridge both offsets.
+        var observerTicks = 0;
+        HullView seen = default;
+        while (observerTicks < 32 && (!Find(observer, own.Id, out seen) || seen.ShownTick < own.ShownTick))
+        {
             Step();
-        Assert.True(Find(observer, own.Id, out var seen));
+            observerTicks++;
+        }
+        Assert.True(Find(observer, own.Id, out seen));
+        Assert.True(seen.ShownTick >= own.ShownTick);
         Assert.Equal(pod.ShieldCapacity, seen.Stats.ShieldCapacity);
-        Assert.True(seen.ShieldOffline);
+        Assert.True(seen.ShieldOffline, $"pilot break at shown {own.ShownTick}, observer at {seen.ShownTick}, authority tick {tick}, observer shield {seen.Shield}");
         Assert.Equal(serial, seen.ShieldHit.Serial);
 
         // The observer times the break from the server's own count, against the past moment it draws.
@@ -119,11 +128,12 @@ public sealed class ShieldSessionTests
         // Someone joining two seconds later is told the shield is down, but the hit is too old to show.
         for (var i = 0; i < 120; i++)
             Step();
-        late = new ClientSession(lateLink.Client, content, "Late");
+        late = new ClientSession(lateLink.Client, content, "Late", clock: clock);
         try
         {
             var threshold = pod.ShieldCapacity * pod.ShieldRestartFraction;
             var restarted = -1;
+            var restartedAt = 0d;
             var lateSaw = false;
             for (var i = 0; i < 60 * 30 && restarted < 0; i++)
             {
@@ -132,6 +142,7 @@ public sealed class ShieldSessionTests
                 if (!now.ShieldOffline)
                 {
                     restarted = i;
+                    restartedAt = now.ShownTick;
                     Assert.True(now.Shield >= threshold, $"online at {now.Shield} of {threshold}");
                     Assert.InRange(now.ShieldChangeAge, 0f, 0.1f);
                 }
@@ -152,15 +163,21 @@ public sealed class ShieldSessionTests
 
             // The pod may have been knocked about more than once; the last hit sets the delay, so the
             // restart is at least the delay plus the time to charge to the threshold after the break.
-            var seconds = (restarted + 6 + 120) * HullSim.Dt;
+            var seconds = (restarted + observerTicks + 120) * HullSim.Dt;
             Assert.True(seconds >= pod.ShieldDelay + threshold / pod.ShieldRecharge - 0.2f, $"back after {seconds} s");
 
-            // Everyone agrees it is back.
-            for (var i = 0; i < 6; i++)
+            // Both remote views must reach the interval where prediction first showed the restart.
+            for (var i = 0; i < 32; i++)
+            {
+                if (Find(observer, own.Id, out seen) && seen.ShownTick >= restartedAt
+                    && Find(late, own.Id, out var lateView) && lateView.ShownTick >= restartedAt) break;
                 Step();
+            }
             Assert.True(Find(observer, own.Id, out seen));
+            Assert.True(seen.ShownTick >= restartedAt);
             Assert.False(seen.ShieldOffline);
             Assert.True(Find(late, own.Id, out seen));
+            Assert.True(seen.ShownTick >= restartedAt);
             Assert.False(seen.ShieldOffline);
             Assert.Null(server.Fault);
         }

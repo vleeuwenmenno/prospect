@@ -70,7 +70,7 @@ A node is 200 B. A hull has two nodes per 32 blocks, less one. Its design keeps 
 | 4,096 | 51,000 B | 100,692 B | 117,076 B |
 | 150,000 | 1,875,000 B | 3,693,780 B | 4,293,780 B |
 
-- A block state is a header, alive words, sums, a 4-B-per-block loss journal and live collision branch counts. The server adds hit points (4 B/block).
+- A block state is a header, alive words, sums, a 4-B-per-block loss journal and live collision branch counts. The server and client authority baseline add hit points (4 B/block). Prediction owns another restorable block state.
 - The client keeps a receive state and a published state separately while recovery can be incomplete.
   The table is per state; a known client hull can therefore use twice its client column.
 - The store rounds a state up to a power of two, and past 64 KiB to a multiple of 64 KiB.
@@ -137,8 +137,9 @@ Slice 2b was checked with targeted headless tests; the parent integration gate i
 
 - **The live design is box data.** `HullDesign` holds boxes; the file index stays the block id.
 - **Alive blocks are a block set:** 64-bit words, sized to the design. No single `ulong` mask is left in the live path.
-- **Block state has its own store,** addressed by handle: alive words, hit points (server only), running sums.
-  It lasts as long as the hull is known, on the server and on the client. A prediction field borrows it, never copies it.
+- **Block state has its own store,** addressed by handle: alive words, hit points and running sums.
+  The client keeps an authoritative baseline and an isolated prediction copy, restored before replay.
+  Predicted losses never alter published authoritative blocks or revision acknowledgements.
 - **Memory is taken when a hull appears, never at a loss.** Sums start as a copy of the design's intact tree.
   A loss is signalled explicitly; nothing compares block sets to find one.
 - **One sum leaf covers a group of blocks** (32 to start). A loss rescans one group, then its ancestors.

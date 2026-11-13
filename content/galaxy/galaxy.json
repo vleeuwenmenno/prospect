@@ -51,7 +51,8 @@
     {
       "id": "asteroid-fields",
       "type": "asteroidFields",
-      "maxPerSector": 4096,
+      "maxPerSector": 20480,
+      "baseline": { "amount": 2, "size": 2, "fieldSize": 1.5, "frequency": 2, "spacing": 2, "oreShare": 2, "oreGrade": 2 },
       "emptySectorChance": 0.35,
       "voidFieldChance": 0.02,
       "densityGain": 1.6,

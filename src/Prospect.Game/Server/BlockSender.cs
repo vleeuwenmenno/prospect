@@ -33,6 +33,7 @@ internal sealed class BlockSender
             if (transfer.Data is not null && transfer.Design == id) return false;
         foreach (var transfer in _transfers)
         {
+            if (transfer.Visual) transfer.Clear();
             if (transfer.Hull != 0) continue;
             _designQueued[id] |= !repeat;
             transfer.Hull = uint.MaxValue; transfer.Design = id; transfer.Data = bytes;
@@ -52,38 +53,67 @@ internal sealed class BlockSender
     internal void Receive(ref NetReader reader, HullStore hulls, long tick)
     {
         var count = reader.ReadByte();
-        if (count > 64) return;
-        for (var n = 0; n < count; n++)
+        if (!reader.IsValid || count > 32 || reader.Remaining != count * 13) return;
+        var entries = reader;
+        // Resolve loss recovery before cosmetic requests, regardless of acknowledgement order.
+        for (var pass = 0; pass < 2; pass++)
         {
-            var id = reader.ReadUInt32();
-            var revision = reader.ReadUInt32();
-            var request = reader.ReadByte();
-            var index = (int)(id & 65535);
-            if (!reader.IsValid) return;
-            if (request > 1 || !hulls.IsAlive(new HullHandle(index, (int)(id >> 16))) || revision > hulls.Revision(index)) continue;
-            var slot = -1;
-            for (var i = 0; i < _ids.Length; i++) if (_ids[i] == id) { slot = i; break; }
-            if (slot < 0) { slot = _replace++ % _ids.Length; _replace %= _ids.Length; _ids[slot] = id; _revisions[slot] = 0; }
-            _revisions[slot] = Math.Max(_revisions[slot], revision);
-            if (request == 0 || tick < _nextRequest) continue;
-            _nextRequest = tick + _rules.RequestTicks;
-            BlockTransfer? available = null;
-            var active = false;
-            foreach (var transfer in _transfers)
+            reader = entries;
+            for (var n = 0; n < count; n++)
             {
-                if (transfer.Hull == id) active = true;
-                if (transfer.Hull == 0) available = transfer;
+                var id = reader.ReadUInt32();
+                var revision = reader.ReadUInt32();
+                var request = reader.ReadByte();
+                var visualRevision = reader.ReadUInt32();
+                var index = (int)(id & 65535);
+                if (!reader.IsValid) return;
+                if (request > 3 || !hulls.IsAlive(new HullHandle(index, (int)(id >> 16))) || revision > hulls.Revision(index)) continue;
+                var slot = -1;
+                for (var i = 0; i < _ids.Length; i++) if (_ids[i] == id) { slot = i; break; }
+                if (slot < 0) { slot = _replace++ % _ids.Length; _replace %= _ids.Length; _ids[slot] = id; _revisions[slot] = 0; }
+                _revisions[slot] = Math.Max(_revisions[slot], revision);
+                var loss = (request & 1) != 0;
+                if (request == 0 || loss != (pass == 0) || tick < _nextRequest) continue;
+                var active = false;
+                foreach (var transfer in _transfers)
+                    if (transfer.Hull == id && (!transfer.Visual || !loss)) active = true;
+                if (active) continue;
+                BlockTransfer? available = null;
+                foreach (var transfer in _transfers)
+                {
+                    if (transfer.Visual && loss) transfer.Clear();
+                    if (transfer.Hull == 0) available = transfer;
+                }
+                if (available is null) continue;
+                if ((request & 1) == 0 && (request & 2) != 0)
+                {
+                    ref var visual = ref hulls.Info(index).Visual;
+                    if (visualRevision >= visual.Version || available.Words.Length < 21) continue;
+                    var bytes = System.Runtime.InteropServices.MemoryMarshal.AsBytes(available.Words.AsSpan(0, 21));
+                    bytes.Clear();
+                    var writer = new NetWriter(bytes);
+                    visual.Write(ref writer);
+                    available.Visual = true;
+                    available.Hull = id;
+                    available.Design = hulls.Info(index).Design;
+                    available.Revision = visual.Version;
+                    available.Count = 21;
+                    available.Offset = 0;
+                    available.Deadline = tick + _rules.TransferTicks;
+                    _nextRequest = tick + _rules.RequestTicks;
+                    continue;
+                }
+                var words = hulls.Blocks(index);
+                if (words.Length > available.Words.Length) continue;
+                words.CopyTo(available.Words);
+                available.Hull = id;
+                available.Design = hulls.Info(index).Design;
+                available.Revision = hulls.Revision(index);
+                available.Count = words.Length;
+                available.Offset = 0;
+                available.Deadline = tick + _rules.TransferTicks;
+                _nextRequest = tick + _rules.RequestTicks;
             }
-            if (active || available is null) continue;
-            var words = hulls.Blocks(index);
-            if (words.Length > available.Words.Length) continue;
-            words.CopyTo(available.Words);
-            available.Hull = id;
-            available.Design = hulls.Info(index).Design;
-            available.Revision = hulls.Revision(index);
-            available.Count = words.Length;
-            available.Offset = 0;
-            available.Deadline = tick + _rules.TransferTicks;
         }
     }
 

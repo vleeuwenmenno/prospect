@@ -1,0 +1,14 @@
+{
+  "near": 400,
+  "far": 800,
+  "minPixels": 8,
+  "fullPixels": 16,
+  "meshVertices": 40000,
+  "frameVertices": 2000000,
+  "sparkCapacity": 128,
+  "streaks": 6,
+  "seconds": 0.35,
+  "speed": 14,
+  "width": 0.025,
+  "length": 0.3
+}

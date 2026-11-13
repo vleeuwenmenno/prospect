@@ -93,13 +93,13 @@ public sealed class AsteroidFieldsModule : SectorModule
         var original = _baseRules ?? this;
         var copy = (AsteroidFieldsModule)original.MemberwiseClone();
         copy._baseRules = original;
-        copy._amount = catalog.Number(clean, "asteroidAmount");
-        copy._size = catalog.Number(clean, "asteroidSize");
-        copy._fieldSize = catalog.Number(clean, "asteroidFieldSize");
-        copy._frequency = catalog.Number(clean, "asteroidFrequency");
-        copy._spacingScale = catalog.Number(clean, "asteroidSpacing");
-        copy._oreShareScale = catalog.Number(clean, "asteroidOreShare");
-        copy._gradeScale = catalog.Number(clean, "asteroidOreGrade");
+        copy._amount = original._amount * catalog.Number(clean, "asteroidAmount");
+        copy._size = original._size * catalog.Number(clean, "asteroidSize");
+        copy._fieldSize = original._fieldSize * catalog.Number(clean, "asteroidFieldSize");
+        copy._frequency = original._frequency * catalog.Number(clean, "asteroidFrequency");
+        copy._spacingScale = original._spacingScale * catalog.Number(clean, "asteroidSpacing");
+        copy._oreShareScale = original._oreShareScale * catalog.Number(clean, "asteroidOreShare");
+        copy._gradeScale = original._gradeScale * catalog.Number(clean, "asteroidOreGrade");
         copy.MaxPerSector = Math.Min(original.MaxPerSector, (int)catalog.Number(clean, "asteroidCap"));
         copy._countMin = (int)catalog.Number(clean, "asteroidCountMin");
         copy._radiusLimits = new(catalog.Number(clean, "asteroidRadiusMin"), catalog.Number(clean, "asteroidRadiusMax"));
@@ -107,9 +107,9 @@ public sealed class AsteroidFieldsModule : SectorModule
         copy._materialGrades = new Range[resources.Length];
         for (var i = 0; i < resources.Length; i++)
             copy._materialGrades[i] = new(catalog.Number(clean, resources[i].Id + "GradeMin"), catalog.Number(clean, resources[i].Id + "GradeMax"));
-        copy.SmallestRadius = Math.Clamp(original.SmallestRadius * copy._size, copy._radiusLimits.Min, copy._radiusLimits.Max);
-        copy.LargestRadius = Math.Clamp(original.LargestRadius * copy._size, copy._radiusLimits.Min, copy._radiusLimits.Max);
-        copy._boundedPlacement = copy._amount != 1 || copy._size != 1 || copy._fieldSize != 1 || copy._spacingScale != 1 || copy._countMin != 0 || copy._radiusLimits.Min > original.SmallestRadius * copy._size || copy._radiusLimits.Max < original.LargestRadius * copy._size;
+        copy.SmallestRadius = Math.Clamp(original.SmallestRadius * catalog.Number(clean, "asteroidSize"), copy._radiusLimits.Min, copy._radiusLimits.Max);
+        copy.LargestRadius = Math.Clamp(original.LargestRadius * catalog.Number(clean, "asteroidSize"), copy._radiusLimits.Min, copy._radiusLimits.Max);
+        copy._boundedPlacement = original._boundedPlacement || copy._amount != 1 || copy._size != 1 || copy._fieldSize != 1 || copy._spacingScale != 1 || copy._countMin != 0 || copy._radiusLimits.Min > original.SmallestRadius * catalog.Number(clean, "asteroidSize") || copy._radiusLimits.Max < original.LargestRadius * catalog.Number(clean, "asteroidSize");
         return copy;
     }
 
@@ -177,6 +177,29 @@ public sealed class AsteroidFieldsModule : SectorModule
 
         _kinds = [.. kinds];
         _sizes = [.. sizes];
+
+        // Optional scales rebase live content while old fixtures keep their original arithmetic.
+        if (json.TryGetProperty("baseline"u8, out var baseline))
+        {
+            _amount = Baseline("amount");
+            _size = Baseline("size");
+            _fieldSize = Baseline("fieldSize");
+            _frequency = Baseline("frequency");
+            _spacingScale = Baseline("spacing");
+            _oreShareScale = Baseline("oreShare");
+            _gradeScale = Baseline("oreGrade");
+            SmallestRadius *= _size;
+            LargestRadius *= _size;
+            _boundedPlacement = true;
+
+            float Baseline(string name)
+            {
+                var value = baseline.GetProperty(name).GetSingle();
+                if (!float.IsFinite(value) || value <= 0 || value > 5)
+                    throw new InvalidDataException($"{path}: {id}: baseline {name} must be positive and at most 5");
+                return value;
+            }
+        }
 
         // An asteroid travels as a 16-bit index into its sector's list.
         if (MaxPerSector is < 1 or > ushort.MaxValue)
@@ -274,7 +297,7 @@ public sealed class AsteroidFieldsModule : SectorModule
         {
             var radius = BitConverter.UInt32BitsToSingle(~(uint)(keys[i] >> 32));
             if (radius < _radiusLimits.Min) continue;
-            var position = Place(ref place, fields[(int)(keys[i] >> 24 & 0xFF)], radius, half, content);
+            var position = Place(ref place, fields[(int)(keys[i] >> 24 & 0xFF)], radius, half, content, placed);
             var rotation = Rotation(ref look);
             var shape = look.NextInt(Galaxy.AsteroidShapes);
             if (!float.IsFinite(position.X))
@@ -395,7 +418,7 @@ public sealed class AsteroidFieldsModule : SectorModule
         return count;
     }
 
-    // The default path preserves the recorded galaxy; custom geometry must fit even at the range extremes.
+    // Legacy content preserves the recorded galaxy; rebased and custom geometry must fit at every extreme.
     private void Fit(ref Field field, float half)
     {
         if (!_boundedPlacement)
@@ -469,7 +492,7 @@ public sealed class AsteroidFieldsModule : SectorModule
     /// manage it, clear of the asteroids already placed. Custom placement omits failed attempts; the original
     /// rules retain the last try to preserve the recorded default galaxy.
     /// </summary>
-    private Vector3 Place(ref SectorRandom random, in Field field, float radius, float half, SectorContent content)
+    private Vector3 Place(ref SectorRandom random, in Field field, float radius, float half, SectorContent content, int placed)
     {
         var wall = half - radius;
         var clear = radius + ArrivalClearance;
@@ -488,7 +511,7 @@ public sealed class AsteroidFieldsModule : SectorModule
             position = new Vector3(Math.Clamp(position.X, -wall, wall), Math.Clamp(position.Y, -wall, wall), Math.Clamp(position.Z, -wall, wall));
             if (position.X * position.X + position.Y * position.Y + position.Z * position.Z < clear * clear)
                 continue;
-            if (!Overlaps(content, position, reach))
+            if (!Overlaps(content, placed, position, reach))
                 return position;
         }
 
@@ -507,23 +530,8 @@ public sealed class AsteroidFieldsModule : SectorModule
     }
 
     /// <summary>True if a sphere would come within reach of an asteroid already placed.</summary>
-    private static bool Overlaps(SectorContent content, Vector3 position, float reach)
-    {
-        var asteroids = content.Asteroids;
-        var query = content.Rocks.Near(position, reach);
-        while (query.Next(out var other))
-        {
-            ref readonly var rock = ref asteroids[other];
-            var dx = position.X - rock.LocalPosition.X;
-            var dy = position.Y - rock.LocalPosition.Y;
-            var dz = position.Z - rock.LocalPosition.Z;
-            var apart = reach + rock.Radius;
-            if (dx * dx + dy * dy + dz * dz < apart * apart)
-                return true;
-        }
-
-        return false;
-    }
+    internal static bool Overlaps(SectorContent content, int placed, Vector3 position, float reach) =>
+        content.Rocks.PlacementOverlaps(content.Asteroids, placed, position, reach);
 
     /// <summary>
     /// A random point of a field. It is drawn evenly from a ball and then pulled toward the middle, so a field is

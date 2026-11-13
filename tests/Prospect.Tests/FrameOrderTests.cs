@@ -3338,6 +3338,33 @@ public sealed class FrameOrderTests : IDisposable
     private HullStore ServerHulls => (HullStore)typeof(ServerHost).GetField("_hulls", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(_server)!;
 
     [Fact]
+    public void DentOnlyShipRequiresRepairBeforeApplyingADraft()
+    {
+        var own = _snapshot.Hulls[_snapshot.OwnHull];
+        var design = _snapshot.Content.Designs[own.Design];
+        var index = (int)(own.Id & 0xFFFF);
+        ServerHulls.Info(index).Visual.Hit(design, 0, design.BlockHitPoints(0) * 0.2f,
+            design.BlockOffsets[0], Vector3.UnitX, _tick);
+        Assert.True(PlayUntil(() => _snapshot.Hulls[_snapshot.OwnHull].Visual.Count > 0));
+        OpenEditor();
+        for (var i = 0; i < 30; i++) EditorFrame();
+        var editor = _world.Editor;
+        Assert.Equal(0, editor.MissingCount);
+        Assert.True(editor.Damaged);
+        Assert.True(editor.RepairOnly);
+        Assert.False(editor.CanEdit);
+        Assert.False(editor.Apply(Bridge));
+        Assert.Equal(RepairBlock.None, editor.RepairState);
+        Assert.True(editor.Repair(Bridge));
+        Assert.True(PlayUntil(() => _snapshot.Hulls[_snapshot.OwnHull].Id != own.Id));
+        Assert.Equal(0, _snapshot.Hulls[_snapshot.OwnHull].Visual.Count);
+        OpenEditor();
+        for (var i = 0; i < 30; i++) EditorFrame();
+        Assert.False(editor.Damaged);
+        Assert.True(editor.CanEdit);
+    }
+
+    [Fact]
     public void ADamagedShipOpensRepairOnlyAndRepairThroughTheServerRebuildsItThenItCanBeEdited()
     {
         var hulls = ServerHulls;

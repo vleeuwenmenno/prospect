@@ -12,7 +12,7 @@ internal sealed partial class ClientWorld
         internal long Until;
     }
     private readonly HeldPose[] _held = new HeldPose[256];
-    private readonly byte[] _heldWire = new byte[18 + HullRecord.MaxWireSize];
+    private readonly byte[] _heldWire = new byte[SnapshotHeader.MaxWireSize + HullRecord.MaxWireSize];
 
     private void HoldPose(in HullRecord record, in SnapshotHeader header, long tick)
     {

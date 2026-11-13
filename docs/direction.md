@@ -40,6 +40,15 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
   extend it, and map coverage visualization. Detailed range and relay rules remain open. None exists yet;
   current fleet orders remain unrestricted.
 
+## Decided: first flight and shield balance pass
+
+- Standard and drone thrust is 20% lower. Boost gives 2× thrust and 2× rated speed, still drawing 4× thrust power.
+- Shield recharge is halved: 37.5 points/s per standard emitter, 5 points/s per drone emitter.
+- Every damaging hit resets an 8 s recharge delay, including hits while the shield is offline.
+  Harmless contact feedback does not delay recovery. Restart remains at 25% charge on twice normal shield power.
+- These are starting values, not final flight-feel approval. Capacity, mass, gyro, control rules and FTL stay unchanged.
+  Power shortage can still slow recovery; the world shield-recharge multiplier still applies.
+
 ## Decided: the world
 
 - **AI factions are real actors.** Each runs its own economy, stations and ships, sets up supply lines, fights
@@ -132,12 +141,15 @@ exists.
 ## Decided: world generation
 
 - **One seed makes the whole world.** Same seed, same world, on the server and on every client.
+- **Asteroid baseline:** the former maximum asteroid multipliers are the new 1× defaults, with controls up to 5×.
+  This includes ore share and grade, not material abundance or paired minima. The per-sector ceiling is 20,480;
+  bounded placement can omit rocks. Frequency and ore saturate at 100%; geometry must fit the sector.
 - **Sectors are filled by modules.** Each module makes one kind of thing: asteroid fields first, stations and gas
   fields later. Adding a module does not change what the others make.
 - **Every sector has a character:** how rich it is and which resources can occur there. Some have every
   resource, some have none, some never have a given one.
 - **Asteroids come in all sizes.** Many tiny ones, a few huge ones, in dense fields.
-- **An asteroid with ore looks slightly different** from bare rock: noticeable, not loud.
+  An asteroid with ore looks slightly different from bare rock: noticeable, not loud.
 
 ## Decided: world settings
 
@@ -145,7 +157,7 @@ exists.
 - **The server owns them.** A client is told on joining and plays by them.
 - **First ones:** collision damage, shields against collisions (full, weak, none), shield recharge, jump charge
   speed and hull strength. Asteroid settings control amount, per-sector cap, radius, field dimensions,
-  occurrence, spacing, ore-bearing share and grade. Defaults preserve the original galaxy.
+  occurrence, spacing, ore-bearing share and grade. Defaults use the approved former-maximum asteroid preset as 1×.
 - **Fixed for the life of a world.** Set when a server or a local game starts, not while it runs.
 
 ## Decided: world generation controls
@@ -153,7 +165,7 @@ exists.
 - Counts are requested per-sector ranges, and sizes are radius ranges in metres; placement may fall short.
 - Richness ranges clamp sector character; ore grade ranges clamp ore quality, globally then per material.
 - Material abundance weights only materials already allowed in that sector; zero removes their share and map presence.
-- Existing sampled distributions and default home rules stay intact. No mining economy changes.
+- Existing distribution shapes and the guaranteed home field stay intact under the rebased scales. No mining economy changes.
 
 ## Decided: building
 
@@ -288,3 +300,10 @@ After that:
 
 - What "no shipyard is left" means once shipyards exist: none in the galaxy, in the faction, or in reach.
 - Where stock part meshes come from: generated in code, or modelled files.
+
+## Decided: visual collision damage
+
+- Surviving blocks can retain bounded dents after sufficiently hard collision damage passes shields; both players share authoritative state.
+- Dents are visual only. Hull and asteroid collision shapes stay unchanged; asteroids do not deform.
+- Repair restores the original blueprint. Far clients may skip drawing detail but retain state for returning nearby.
+- The client draws nearby inward dent meshes and short contact sparks from replicated state, with distance and projected-size fading. Physics and picking keep the original surfaces. GPU appearance remains unchecked.

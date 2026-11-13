@@ -203,6 +203,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     // Clock sync: the server tick reported by the last pong and the local time at which it was (estimated) current.
     private long _syncServerTick;
     private long _syncTimestamp;
+    private readonly TimeProvider _clock;
 
     private volatile bool _leaveRequested;
 
@@ -216,8 +217,9 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     /// it cannot be overwritten, so the text stays in memory until the collector frees it, and whoever handed
     /// it over may still hold it.
     /// </param>
-    public ClientSession(ITransport transport, GameContent content, string playerName, string? password = null)
+    public ClientSession(ITransport transport, GameContent content, string playerName, string? password = null, TimeProvider? clock = null)
     {
+        _clock = clock ?? TimeProvider.System;
         _password = password is not null && Passwords.IsUsable(password) ? password : null;
         _transport = transport;
         _loaded = content;
@@ -320,13 +322,13 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                     _editor.Tick(Input, _transport, sendCommands, _content.BlockTransfers.MaxBytes);
                     if (sendCommands)
                         ReportDesigns();
-                    _world.Tick(Input, _transport, EstimateServerTick(Stopwatch.GetTimestamp()), sendCommands, tick);
+                    _world.Tick(Input, _transport, EstimateServerTick(_clock.GetTimestamp()), sendCommands, tick, _roundTripMs);
                 }
             }
         }
 
         var snapshot = _snapshots.WriteBuffer;
-        var now = Stopwatch.GetTimestamp();
+        var now = _clock.GetTimestamp();
         _social.CopyTo(snapshot.Social);
         snapshot.Editor = _editor.View;
         snapshot.State = _state;
@@ -353,13 +355,13 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         snapshot.PredictionError = _world.PredictionError;
         snapshot.Flight = _world.Flight;
         snapshot.RoundTripMs = _roundTripMs;
-        snapshot.PublishedAt = now;
+        snapshot.PublishedAt = Stopwatch.GetTimestamp();
         snapshot.Loop = _loop.Stats;
         _snapshots.Publish();
     }
 
     private double EstimateServerTick(long now) =>
-        _syncServerTick + (now - _syncTimestamp) * (double)TickLoop.SimulationHz / Stopwatch.Frequency;
+        _syncServerTick + (now - _syncTimestamp) * (double)TickLoop.SimulationHz / _clock.TimestampFrequency;
 
     void ITickHandler.OnStop()
     {
@@ -426,7 +428,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                 _world.SetOwnHull(welcome.HullId);
                 _playerCount = 1;
                 _syncServerTick = welcome.ServerTick;
-                _syncTimestamp = Stopwatch.GetTimestamp();
+                _syncTimestamp = _clock.GetTimestamp();
                 Logs.Net.Info($"Joined '{_serverName}' as player {_playerId}");
                 SendPing();
                 break;
@@ -483,6 +485,9 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                 _world.OnRockDeltas(ref reader);
                 break;
 
+            case MessageId.VisualState when _state == SessionState.Active && channel == NetChannel.Bulk:
+                _world.OnBlockState(ref reader, _clientTick, true);
+                break;
             case MessageId.BlockState when _state == SessionState.Active && channel == NetChannel.Bulk:
                 _world.OnBlockState(ref reader, _clientTick);
                 break;
@@ -495,12 +500,12 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
 
             case MessageId.Pong when _state == SessionState.Active && PongMessage.TryRead(ref reader, out var pong):
                 {
-                    var now = Stopwatch.GetTimestamp();
+                    var now = _clock.GetTimestamp();
                     var roundTrip = now - pong.ClientTimestamp;
-                    if (roundTrip < 0 || roundTrip > Stopwatch.Frequency * 10)
+                    if (roundTrip < 0 || roundTrip > _clock.TimestampFrequency * 10 || pong.ServerTick < 0 || pong.ServerTick > long.MaxValue - 1024)
                         break;
 
-                    var ms = (float)(roundTrip * 1000.0 / Stopwatch.Frequency);
+                    var ms = (float)(roundTrip * 1000.0 / _clock.TimestampFrequency);
                     _roundTripMs = _roundTripMs < 0 ? ms : _roundTripMs + (ms - _roundTripMs) * 0.2f;
                     _playerCount = pong.PlayerCount;
 
@@ -589,7 +594,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
 
     private void SendPing()
     {
-        var ping = new PingMessage { ClientTimestamp = Stopwatch.GetTimestamp() };
+        var ping = new PingMessage { ClientTimestamp = _clock.GetTimestamp() };
         var writer = new NetWriter(_sendBuffer);
         ping.Write(ref writer);
         _transport.Send(0, NetChannel.Unreliable, writer.Written);

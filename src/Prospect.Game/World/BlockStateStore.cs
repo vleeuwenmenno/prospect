@@ -18,8 +18,8 @@ public readonly record struct BlockStateHandle(int Index, int Generation)
 /// A block state lasts as long as its hull is known, and one party owns it. On the server that is the
 /// <see cref="HullStore"/> the hull lives in: it takes the state when the hull is created and gives it back when
 /// the hull is destroyed. On a client it is the client's world, which keeps the state of every hull it has heard
-/// of across snapshots; the store of hulls it predicts with is emptied and filled again at every snapshot and
-/// only borrows those states. So a <see cref="HullInfo"/> carries the handle and one flag saying whether its
+/// of across snapshots; the store of hulls it predicts with holds isolated copies restored at every snapshot.
+/// A <see cref="HullInfo"/> carries the handle and one flag saying whether its
 /// store gives the state back. The network replica has a separate store so incomplete recovery cannot mutate
 /// a published or predicted hull; validated losses are copied to this state only with a matching pose.
 /// </para>
@@ -110,7 +110,7 @@ public sealed unsafe class BlockStateStore : IDisposable
     /// <summary>
     /// Takes the block state of an intact hull of a design: every block alive, none lost, and the design's
     /// intact sums, copied. With <paramref name="hitPoints"/> it also holds each block's hit points, full; a
-    /// predicting client asks for none.
+    /// prediction baseline also needs these to reproduce block losses.
     /// </summary>
     public BlockStateHandle Create(HullDesign design, bool hitPoints)
     {
@@ -153,6 +153,17 @@ public sealed unsafe class BlockStateStore : IDisposable
         }
 
         return new BlockStateHandle(index, slot.Generation);
+    }
+
+    /// <summary>Restores an isolated prediction state from a complete authoritative state of the same design.</summary>
+    public void CopyFrom(BlockStateHandle target, BlockStateStore source, BlockStateHandle from)
+    {
+        var destination = Find(target);
+        var origin = source.Find(from);
+        if (!ReferenceEquals(Design(target), source.Design(from)) || destination->HasHitPoints != origin->HasHitPoints)
+            throw new InvalidOperationException("Block state copies require the same design and health layout.");
+        var bytes = checked((int)BytesFor(Design(target), destination->HasHitPoints != 0));
+        new ReadOnlySpan<byte>(origin, bytes).CopyTo(new Span<byte>(destination, bytes));
     }
 
     /// <summary>Gives a block state back; its memory serves the next one of its size. A stale handle does nothing.</summary>

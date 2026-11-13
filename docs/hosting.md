@@ -444,7 +444,7 @@ The replacement:
 - Owner, pilot, heading, velocity and spin are kept. The grid stays where it was in space.
 - Blocks are new and whole: building is free. Shield and battery keep their charge, up to the new capacity.
 - A repair is this same replacement, by the design the hull already has.
-- A jump order already received cancels the edit before replacement. Otherwise queued inputs are dropped.
+- A jump order effective in this interval cancels the edit before replacement. Otherwise queued inputs are dropped.
   `EditorState` gives the old and the new id.
 - The time without damage carries over, also into a drone a player steps out in. Editing an escape drone
   preserves its temporary identity: no further ejection, cleanup on leaving, and respawn at the spawn point.
@@ -472,7 +472,7 @@ JSON version 3 carries canonical shape names; old JSON 1/2 files remain boxes.
 Wedges are playable through the editor and take the smooth shield like any block; see
 [wedges](blocks-at-scale.md#wedges-protocol-27).
 
-## World generation settings (protocol 30)
+## World generation settings (protocol 33)
 
 The welcome carries asteroid settings by id through the existing world settings catalogue.
 Server and client apply them before creating their seeded galaxy or generating any rocks.
@@ -484,10 +484,119 @@ alongside `FlightRules.Under`; repeated applications never compound and other se
 - The cap never raises the content's `maxPerSector`; settings do not raise placement attempts or field budgets.
 - Changed geometry uses bounded placement: failed placements are omitted. Map planning counts are upper counts;
   generated sector summaries use actual counts. Arrival clearance and resource availability remain enforced.
-- Defaults keep the recorded galaxy exactly. Protocol 30 separates the new generation semantics; block evaluator unchanged.
+- Live defaults use the former maximum asteroid multiplier preset as 1×; seven multipliers accept up to 5×.
+  Content and the absolute count maximum now allow 20,480 rocks per sector. Dense defaults may exceed old clipping.
+  Radius stays within 0.75–6,000 m controls and field fit; occurrence, ore share and grade cap at 100%.
+  Placement has ten attempts per rock and can omit crowded rocks, even below the requested minimum.
+  Protocol 33 separates this retuning; the frozen legacy fixture and block evaluator are unchanged.
 
 World settings now have 48 slots (38 shipped); the maximum settings payload is 1,777 bytes.
 Welcome's maximum grows from that constant; the server has a 64 KiB send buffer and RakNet grows its receive scratch buffer.
 Shared sanitization bounds every endpoint and lowers a crossed minimum to its maximum before generation and after network reads.
 The paired ranges and per-material rules are listed in the README. Material abundance weights only existing availability;
-zero removes the material consistently from sector character and asteroid picks. Defaults retain the frozen generation hash.
+zero removes the material consistently from sector character and asteroid picks. The frozen legacy content retains its generation hash; live content intentionally changes.
+
+## Visual collision damage backend (protocol 33)
+
+- The server retains at most 16 dents per hull, one strongest quantized profile per blueprint block.
+  New blocks are dropped at capacity; existing profiles remain, and destruction frees slots. Physical damage is unchanged.
+- Threshold, full-depth damage fraction and maximum inward fraction are shared content in `blocks/blocks.json`.
+  Dents require post-shield collision damage. Asteroids and collision shapes never deform. Repair replaces the hull and clears dents and spark ownership.
+- Cosmetic revisions are independent of loss revisions and input sequences. Each pose adds 26 bytes: visual version (4), spark sequence (4), authoritative tick (8), contact profile (10).
+  A full dent payload is 161 bytes maximum, zero-padded to 168 bytes for the existing word transfer envelope (20 bytes); one chunk costs 188 bytes.
+- `VisualState` uses the existing bulk slots, byte budget, timeout and request spacing. Transfers freeze bytes/version; acknowledgements request the latest missing revision again.
+  Loss recovery preempts cosmetic transfers. Client installation is atomic; poses never wait for dents. Each acknowledgement is 13 bytes, at most 32 entries (418 bytes including header).
+- Defaults remain two slots, 32,768 bytes per slot, 65,536 held bytes, 1,024 bytes per tick and one new request per 30 ticks.
+  Two dirty hulls normally recover within two request intervals after catalogue admission; many dirty hulls share this finite service rate. Retries have no guaranteed latency under sustained congestion.
+
+### Renderer contract (backend only)
+
+`HullView.Visual` is an inline value copy owned by each `SessionSnapshot`; no simulation arrays are borrowed.
+`Version` names the installed full state, not necessarily the latest advertised version. Read only `Dents[0..Count]`.
+Profiles retain blueprint block indices; use the view's live block mask to hide destroyed blocks while a newer cosmetic revision is in flight.
+
+- `DentProfile.Point(design)` returns hull-local coordinates relative to the immutable design pivot.
+  `Face` uses `BlockShapes.Face` sides: +X, -X, +Y, -Y, +Z, -Z. Wedge slants use `BlockShapes.SlantSide`; absent faces are rejected.
+- `U/65535` and `V/65535` multiply the face edges from corner 0 to corner 1 and corner 0 to the last corner.
+  Triangles require U+V <= 65535. `BlockShapes.FaceNormal` supplies the outward normal.
+- `Depth/255 * Content.Rules.DentMaxDepth` is the inward fraction toward the original solid centroid; geometry, pivots and physics remain unchanged in this slice.
+  Equal quantized strength keeps the earlier profile. Versions saturate at uint.MaxValue; all profile writes then stop; the live mask still hides destroyed blocks.
+- `Visual.Spark` carries independent sequence, authoritative world tick and localized contact/strength (`Contact.Depth`). Coalesced to the strongest hit per tick.
+  First observation establishes a baseline, recovery never creates events, and publication suppresses events older than 30 ticks or ahead of the estimated server clock.
+  Renderers must remember sequences by hull id and never replay the same sequence; a same-sequence stronger sample can refine an existing effect.
+- Far clients retain all received profiles. The renderer culls detail by distance and projected size, independently of replication.
+  Nearby dents and sparks are drawn from replicated profiles; `NeedsRepair` and the editor include dent-only damage.
+
+Inline storage is 12 bytes per profile and 232 bytes per visual state on the tested runtime.
+Contact records are 28 bytes: two 4,096-entry scratch arrays (229,376 bytes), plus 64 deferred 4,096-entry arrays (7,340,032 bytes) and 256 count bytes per field.
+These are allocated when the field is provisioned, never during a contact. Transfer buffers reuse existing allocations; each replica reserves 256 inline visual states, and every hull view owns its copy (14,848 additional bytes for a 64-view snapshot, plus the same for the client's previous-view array).
+
+## Pilot interval contract (protocol 33)
+
+A snapshot at T contains state after world interval T; T also closes input acceptance through T.
+Every eligible hull advances one HullSim.Dt per interval, regardless of packets or player count.
+
+- Before the round, resolve control changes and orders effective in T, then editor lifecycle work.
+- Capture participant handles, including generation. A drone created during the round waits until the next interval.
+- Step hulls and collision candidates in authoritative slot order. Prediction retains that order for its known subset.
+- Missing input means zero axes, boost off and dampeners on; the standing order, physics, jumps and cooldowns continue.
+
+Input packets carry a server-issued control epoch and up to four complete records.
+Each record carries a signed 64-bit target tick, diagnostic sequence, order id and full order definition.
+
+- The server retains 32 target-tagged slots and accepts T through T+31 while preparing T.
+- Older targets are discarded without retargeting; unseen future targets are accepted even after higher targets arrived.
+- Validate the whole packet before mutation. Identical duplicates are harmless; conflicting targets mark the existing abuse budget.
+- Receive limits remain unchanged. Packet arrival never advances simulation time.
+
+A control change, ejection, destruction or editor replacement increments the epoch and clears input/order state.
+Returning to an earlier hull still uses a new epoch. A usable authoritative pose resets client prediction.
+The snapshot includes the epoch and applied order id.
+Order ids use ushort serial comparison: forward differences below 32768 are newer, including rollover.
+Repeated definitions do not restart completed orders or jumps.
+
+The client samples at 60 Hz and retains 256 tick-tagged history slots.
+Initial lead is ceil(smoothed RTT / 2 / Dt) + 3, clamped to 3–16 intervals.
+These limits are fixed by this protocol, not independently configurable.
+Lead increases leave explicit fallback gaps; decreases pause assignment while retaining current controls and order intent.
+Transmitted targets never change.
+
+Reconciliation restores authoritative T and replays every interval through the prediction horizon.
+Assignment stops at the 32-slot window; silence for 256 client ticks requires a fresh usable pose.
+Phase drift beyond eight intervals triggers bounded gap/wait correction.
+Render-time estimation is separate from physics interval ticks; session clocks can be injected in tests.
+Server late/fallback counters and client fallback/phase-reset counters are diagnostic state.
+
+Unknown remote controls and omitted remote poses remain correction sources.
+This contract does not promise exact prediction of another player's undisclosed intent.
+
+
+### Damage during prediction lead
+
+Protocol 33 snapshots include complete sparse health for each hull record: live damaged block ids and remaining HP.
+Unlisted live blocks have intact HP; lost blocks still come through the existing revision/loss recovery contract.
+Ids are sorted, unique and bounded by the design; values must be finite, positive and below intact HP.
+A record carries at most 910 entries, derived from GeometryAdmission.MaxBlocks.
+
+The client retains this health with the authoritative block state and copies it into a separate prediction store.
+The same HullField/HullSim damage path may remove predicted blocks there.
+Reconciliation restores the entire copy, including blocks, health, sums, collision branch counts and loss history.
+Speculative losses never change published block sets, revision acknowledgements or the recovery replica.
+
+A record without complete health uses aggregate-only prediction.
+The server always supplies complete health; the flag also permits bounded parser/test fixtures without inventing block HP.
+
+Health adds three fixed bytes plus six per damaged live block.
+HullRecord.MaxWireSize is 5,707 bytes including visual metadata; actual sparse records are normally much smaller.
+Snapshots remain at most 65,536 bytes and 255 hulls; the own hull is serialized first.
+A full-health worst-case record allows at most eleven hulls in that packet.
+Each connection resumes at its first unsent remote slot, draining overflow on intervening ticks as well.
+A refused transport send does not advance that cursor; a new connection starts a fresh sweep.
+With 50 ready hulls and successful delivery, a complete sweep takes five packets, plus at most two ticks
+waiting for the next regular remote snapshot, below the 12-tick collision freshness window.
+Larger fleets or packet loss can still exceed that window; this is not interest management or compression.
+Client prediction therefore still cannot promise exact remote motion when poses or intent are missing.
+
+Memory now includes independent prediction block states, not borrowed published blocks.
+Each uses BlockStateStore.BytesFor(design, true), with pooled unmanaged storage reused during replay.
+The fixed 256 held recovery poses also retain the inline sparse health payload (about 1.4 MiB).

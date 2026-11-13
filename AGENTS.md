@@ -187,8 +187,8 @@ The client opens a real window on the developer's desktop, and they are usually 
   cannot make: such a capture stops on Join Server or New Game with the sign-in shown. `--account-sample
   signed-in` never counts as one. Private local games are unaffected.
 - `--sector x,y,z` starts the local game in that sector instead of the home sector; it works with `--capture`
-  and `--bench`. With the default seed: `-40,0,-29` is the densest sector near home (4,096 asteroids, the per-sector cap), `8,0,-8`
-  is very rich with five resources, `-14,0,-2` (1,377 asteroids) has an asteroid 5.7 km across 1.1 km from the arrival point.
+  and `--bench`. With the default seed: `-40,0,-29` was a dense legacy sector near home (counts now depend on the rebased preset and bounded placement), `8,0,-8`
+  is very rich with five resources, `-14,0,-2` was a legacy giant-asteroid sample; rebased generation changes its rocks.
 - The window size is whatever the tiling compositor gives it; check with `magick identify` before cropping.
 - Debug builds run with validation layers when `.tools/` exists. Any validation message is a bug.
 - What cannot be checked this way and needs the developer: how flight feels, mouse and keyboard interaction,
@@ -230,7 +230,7 @@ The client opens a real window on the developer's desktop, and they are usually 
   shield's light is lifted off and put back at the unbent pixel.
 - Hull against hull contact tests every hull against every other each tick, bounding spheres first. It needs a
   spatial index before there are thousands of hulls.
-- A sector holds at most 4,096 asteroids (`maxPerSector`; the wire format allows 65,535). An asteroid is named by
+- A sector holds at most 20,480 asteroids (`maxPerSector`; the wire format allows 65,535). An asteroid is named by
   its index in its sector's generated list, so that list can never change for a given seed and build.
 - The client draws at most 32,768 instances a frame and shows at most 512 pushed asteroids out of place.
 - A pushed asteroid still belongs to the sector it was generated in. One that drifts across the sector's edge is
@@ -240,8 +240,11 @@ The client opens a real window on the developer's desktop, and they are usually 
   performance is not yet established.
 - The client predicts contact only with hulls near its own, and flies only its own fleet's hulls forward exactly;
   another player's hull is assumed to keep its velocity until the next snapshot.
-- The client replays one step of the fleet per input. When the server simulates several of a player's inputs in
-  one tick, contact between their hull and a fleet hull is mispredicted until the next snapshot.
+- Snapshot T is state after interval T. Pilot records name their target interval and control epoch.
+  Every eligible hull steps once per interval in authoritative slot order; missing controls use dampeners.
+  Replay advances intervals, including missing ones. Sparse snapshot health restores isolated prediction block
+  states; speculative losses must never mutate published blocks or revision acknowledgements.
+  See docs/hosting.md for the wire and scheduling limits.
 - A hull knocked back by a hit is not checked against a third hull until the next tick, so the two can overlap
   for one tick.
 - A player's hulls are removed when they disconnect.

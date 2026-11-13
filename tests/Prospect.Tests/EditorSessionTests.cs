@@ -226,7 +226,7 @@ public sealed class EditorSessionTests
     }
 
     [Fact]
-    public void AJumpReceivedWithMeshReadinessCancelsApplyBeforeReplacingTheHull()
+    public void AJumpEffectiveBeforeMeshReadinessCancelsApplyBeforeReplacingTheHull()
     {
         using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);
         var old = rig.Own(0);
@@ -234,9 +234,44 @@ public sealed class EditorSessionTests
         Assert.True(rig.Input(0).CommitEdit(token, Edited(rig.Snap(0))));
         Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, sleep: true));
         Assert.True(rig.Until(() => rig.Snap(0).Content.Designs.Length == rig.Content.Designs.Length + 1, sleep: true));
-        rig.Input(0).ReportInstalledDesigns(rig.Content.Designs.Length + 1);
         rig.Input(0).IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = rig.Hulls.State(Rig.Index(old)).Position + new Double3(600, 0, 0) });
+        // The scheduled order must reach its interval before mesh readiness can replace the hull.
+        Assert.True(rig.Until(() => rig.Hulls.State(Rig.Index(old)).Jump != JumpPhase.None));
+        rig.Input(0).ReportInstalledDesigns(rig.Content.Designs.Length + 1);
         Assert.True(rig.Until(() => rig.Editor(0).Phase is EditorPhase.Closed or EditorPhase.Applied));
+        Assert.Equal(EditorReason.Jumping, rig.Editor(0).Reason);
+        Assert.True(rig.Hulls.IsAlive(Rig.Handle(old)));
+        Assert.Equal(old, rig.Own(0));
+    }
+
+    [Fact]
+    public void EffectiveJumpAndReadinessInTheSamePollCancelReplacement()
+    {
+        using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);
+        var old = rig.Own(0);
+        var token = rig.Open(0);
+        Assert.True(rig.Input(0).CommitEdit(token, Edited(rig.Snap(0))));
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, sleep: true));
+        Assert.True(rig.Until(() => rig.Snap(0).Content.Designs.Length == rig.Content.Designs.Length + 1, sleep: true));
+        // Let previously scheduled neutral inputs expire without sampling more.
+        for (var i = 0; i < 32; i++) ((ITickHandler)rig.Server).Tick(rig.Tick++);
+        var connection = rig.Field<Array>("_connections").GetValue(0)!;
+        var epoch = (uint)connection.GetType().GetField("ControlEpoch")!.GetValue(connection)!;
+        var orderId = (ushort)(rig.Hulls.Info(Rig.Index(old)).OrderId + 1);
+        var buffer = new byte[InputMessage.MaxWireSize];
+        var writer = new NetWriter(buffer);
+        InputMessage.Write(ref writer, [new InputRecord
+        {
+            TargetTick = rig.Tick,
+            OrderId = orderId,
+            Order = new HullOrder { Kind = OrderKind.Jump, Target = rig.Hulls.State(Rig.Index(old)).Position + new Double3(600, 0, 0) },
+            Input = InputTimeline.Fallback,
+        }], epoch);
+        rig.Raw(0, NetChannel.Unreliable, writer.Written);
+        writer = new NetWriter(buffer);
+        DesignReadyMessage.Write(ref writer, (byte)rig.Content.Designs.Length, true);
+        rig.Raw(0, NetChannel.Reliable, writer.Written);
+        rig.Step();
         Assert.Equal(EditorReason.Jumping, rig.Editor(0).Reason);
         Assert.True(rig.Hulls.IsAlive(Rig.Handle(old)));
         Assert.Equal(old, rig.Own(0));
@@ -1144,6 +1179,8 @@ public sealed class EditorSessionTests
         Assert.True(rig.Hulls.IsAlive(Rig.Handle(old)));
         Assert.Equal(1u, rig.Hulls.Revision(pod));
 
+        rig.Hulls.Info(pod).Visual.Hit(design, 1, design.BlockHitPoints(1) * 0.2f, design.BlockOffsets[1], System.Numerics.Vector3.UnitX, 1);
+        Assert.True(rig.Hulls.Info(pod).Visual.Count > 0);
         // The repair: the refusal above did not count as one, so it is taken at once.
         rig.Hulls.State(pod).Energy = 0f;
         var before = rig.Hulls.State(pod);
@@ -1166,6 +1203,8 @@ public sealed class EditorSessionTests
         // Every block back and whole, at the blueprint's hull points; the same place and heading.
         Assert.True(BlockSet.IsFull(rig.Hulls.Blocks(next.Index), design.BlockCount));
         Assert.Equal(0u, rig.Hulls.Revision(next.Index));
+        Assert.Equal(0, rig.Hulls.Info(next.Index).Visual.Count);
+        Assert.Equal(0u, rig.Hulls.Info(next.Index).Visual.Spark.Sequence);
         Assert.Equal((built, built), (rig.Hulls.State(next.Index).Hull, rig.Hulls.Flight(next.Index).HullPoints));
         for (var block = 0; block < design.BlockCount; block++)
             Assert.Equal(design.BlockHitPoints(block), rig.Hulls.BlockHp(next.Index)[block]);

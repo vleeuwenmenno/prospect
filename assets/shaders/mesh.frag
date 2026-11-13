@@ -38,6 +38,9 @@ void main()
     if (CutHulls && hullCut(cut, color.a > 1.5, worldPosition))
         discard;
 
+    // Sparks belong to the outside scene, without the pilot hull's exemption from jump effects.
+    if (color.a < -0.5) { outColor = vec4(color.rgb, 0.375); return; }
+
     vec3 n = normalize(worldNormal);
     vec3 view = normalize(-worldPosition);
     vec3 albedo = color.rgb;

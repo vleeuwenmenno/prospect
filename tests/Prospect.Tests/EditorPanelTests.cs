@@ -59,8 +59,8 @@ public sealed class EditorPanelTests
         var rules = Content.Rules;
         var shield = PartFigures.Of(Content.Blocks.Get("shield"), 1, rules);
         var micro = PartFigures.Of(Content.Blocks.Get("microshield"), 1, rules);
-        Assert.Equal((1500f, 75f * rules.ShieldRechargeMultiplier, 1.5f, 2.5f), (shield.Shield, shield.Recharge, shield.PowerDraw, shield.Mass));
-        Assert.Equal((120f, 10f * rules.ShieldRechargeMultiplier, 0.2f, 0.3f), (micro.Shield, micro.Recharge, micro.PowerDraw, micro.Mass));
+        Assert.Equal((1500f, 37.5f * rules.ShieldRechargeMultiplier, 1.5f, 2.5f), (shield.Shield, shield.Recharge, shield.PowerDraw, shield.Mass));
+        Assert.Equal((120f, 5f * rules.ShieldRechargeMultiplier, 0.2f, 0.3f), (micro.Shield, micro.Recharge, micro.PowerDraw, micro.Mass));
 
         // A card follows the size parts are placed at, by the size rules: a generator's output grows faster than its
         // volume, a core's draw not at all.

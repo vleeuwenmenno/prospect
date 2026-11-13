@@ -101,16 +101,16 @@ public sealed class ShieldClockTests
             snapshots++;
         };
         uint sequence = 0;
-        for (var elapsed = 1; elapsed <= (batch ? 3 : 150); elapsed++)
+        for (var elapsed = 1; elapsed <= (batch ? 4 : 150); elapsed++)
         {
             if (batch && elapsed == 1)
             {
                 var records = new InputRecord[4];
                 for (var j = 0; j < records.Length; j++)
-                    records[j] = new InputRecord { Sequence = ++sequence, Input = new FlightInput { Dampeners = true } };
+                    records[j] = new InputRecord { TargetTick = rig.Server.Status.Tick + j, Sequence = ++sequence, Input = new FlightInput { Dampeners = true } };
                 var buffer = new byte[256];
                 var writer = new NetWriter(buffer);
-                InputMessage.Write(ref writer, records, 0, default);
+                InputMessage.Write(ref writer, records, 1);
                 rig.Net.Deliver(peer, buffer, writer.Length, NetChannel.Unreliable);
             }
             else if (interval > 0 && elapsed % interval == 0)
@@ -120,8 +120,8 @@ public sealed class ShieldClockTests
         Assert.True(snapshots > 0);
         if (batch) Assert.Equal(4u, rig.Net[peer].AckedInput);
         else Assert.True(lateSaw);
-        // Recharge/cooldown still follow physical steps, not the cosmetic world clock.
-        var steps = batch ? 4 : interval > 0 ? 150 / interval + 4 : 150 - 5;
+        // Every world interval advances physics, including fallback intervals.
+        var steps = batch ? 4 : 150;
         var expectedCooldown = 1000f;
         if (!tunnel)
             for (var i = 0; i < steps; i++) expectedCooldown -= HullSim.Dt;

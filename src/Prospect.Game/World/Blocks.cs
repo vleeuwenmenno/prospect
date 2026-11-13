@@ -98,6 +98,12 @@ public sealed record FlightRules
     /// <summary>Maximum narrow-phase tests per query.</summary>
     public int CollisionBoxTests { get; init; } = 2048;
     /// <summary>Maximum touching pairs retained per query.</summary>
+    /// <summary>Minimum fraction of original block HP for a visual dent.</summary>
+    public float DentThreshold { get; init; } = 0.02f;
+    /// <summary>Damage fraction producing the maximum visual depth.</summary>
+    public float DentFullDamage { get; init; } = 0.5f;
+    /// <summary>Maximum inward dent as a fraction of the distance to the solid centroid.</summary>
+    public float DentMaxDepth { get; init; } = 0.2f;
     public int CollisionContacts { get; init; } = 256;
     /// <summary>Storage ceiling for a query's retained contact pairs.</summary>
     public const int MaxCollisionContacts = 4096;
@@ -203,6 +209,9 @@ public sealed class BlockCatalog
             ShieldContactSpeed = r.TryGetProperty("shieldContactSpeed"u8, out var contactSpeed) ? contactSpeed.GetSingle() : 0.1f,
             CollisionTreeVisits = r.GetProperty("collisionTreeVisits"u8).GetInt32(),
             CollisionBoxTests = r.GetProperty("collisionBoxTests"u8).GetInt32(),
+            DentThreshold = r.GetProperty("dentThreshold"u8).GetSingle(),
+            DentFullDamage = r.GetProperty("dentFullDamage"u8).GetSingle(),
+            DentMaxDepth = r.GetProperty("dentMaxDepth"u8).GetSingle(),
             CollisionContacts = r.GetProperty("collisionContacts"u8).GetInt32(),
             CollisionStrides = r.GetProperty("collisionStrides"u8).GetInt32(),
             CollisionSafeSpeed = r.GetProperty("collisionSafeSpeed"u8).GetSingle(),
@@ -217,6 +226,9 @@ public sealed class BlockCatalog
             FtlArrivalReach = r.GetProperty("ftlArrivalReach"u8).GetSingle(),
             FtlArrivalPulseMass = r.GetProperty("ftlArrivalPulseMass"u8).GetSingle(),
         };
+        if (!float.IsFinite(rules.DentThreshold) || rules.DentThreshold <= 0 || !float.IsFinite(rules.DentFullDamage) || rules.DentFullDamage < rules.DentThreshold
+            || !float.IsFinite(rules.DentMaxDepth) || rules.DentMaxDepth <= 0 || rules.DentMaxDepth > 0.5f)
+            throw new InvalidDataException("Invalid visual dent limits.");
         if (rules.CollisionTreeVisits is < 1 or > 1000000 || rules.CollisionBoxTests is < 1 or > 1000000 || rules.CollisionContacts is < 1 or > FlightRules.MaxCollisionContacts || rules.CollisionStrides is < 1 or > 1024)
             throw new InvalidDataException($"{path}: invalid collision budgets");
         if (!float.IsFinite(rules.ShieldContactSpeed) || rules.ShieldContactSpeed <= 0)
@@ -556,7 +568,7 @@ public sealed class HullDesign
     /// A shield that is down is no damage to the hull. The server decides a repair by this, and a client asks
     /// the same of the hull it was sent to know whether a repair would be taken.
     /// </summary>
-    public bool NeedsRepair(uint revision, float hullPoints) => revision > 0 || hullPoints < Flight.HullPoints;
+    public bool NeedsRepair(uint revision, float hullPoints, int dentCount = 0) => revision > 0 || hullPoints < Flight.HullPoints || dentCount > 0;
 
     /// <summary>The hit points a block of this design has when intact, in the world the design was evaluated for.</summary>
     public float BlockHitPoints(int block) => _hitPoints[block];

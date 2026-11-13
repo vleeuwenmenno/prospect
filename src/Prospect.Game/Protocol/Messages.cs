@@ -54,6 +54,8 @@ public enum MessageId : byte
     BlockAck = 14,
     /// <summary>A bounded chunk of a complete alive block set, on the bulk channel.</summary>
     BlockState = 15,
+    /// <summary>Bounded visual state using the block transfer envelope.</summary>
+    VisualState = 26,
     /// <summary>Admission catalogue or canonical design chunk on the shared bulk lane.</summary>
     DesignData = 16,
     /// <summary>Admission request for a missing canonical design.</summary>
@@ -151,7 +153,7 @@ public static class ProtocolInfo
     /// index in a list both ends generate for themselves, so two builds that generate differently would mean
     /// different rocks by the same number. Client and server must match exactly.
     /// </summary>
-    public const uint Version = 30;
+    public const uint Version = 33;
 
     public const ushort DefaultPort = 27420;
     public const int MaxNameBytes = 48;

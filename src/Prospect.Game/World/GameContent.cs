@@ -213,6 +213,9 @@ public sealed class GameContent
 public ref struct HullBody
 {
     public HullDesign Design;
+    internal Span<VisualDamageState> Visual;
+    internal ReadOnlySpan<VisualContact> Contacts;
+    internal long ContactTick;
 
     /// <summary>
     /// The blocks the hull still has: a <see cref="BlockSet"/>. For a body that takes damage it is the set of
@@ -455,10 +458,10 @@ public static class HullSim
     }
 
     /// <summary>Steps a hull with nothing to run into.</summary>
-    public static void Step(ref HullState state, ref HullOrder order, in FlightInput pilot, in FlightParams flight)
+    public static void Step(ref HullState state, ref HullOrder order, in FlightInput pilot, in FlightParams flight, long tick = 0)
     {
         var body = default(HullBody);
-        Step(ref state, ref order, pilot, flight, ref body);
+        Step(ref state, ref order, pilot, flight, ref body, tick: tick);
     }
 
     /// <summary>
@@ -579,6 +582,12 @@ public static class HullSim
             normalSum += direction;
             armSum += arm;
             shieldPointSum += arm + point;
+            Scratch(body).OwnContacts[touchCount] = new VisualContact
+            {
+                Block = b,
+                Point = Vector3.Transform(arm + point, Quaternion.Conjugate(state.Orientation)),
+                Normal = Vector3.Transform(-direction, Quaternion.Conjugate(state.Orientation))
+            };
             BlockSet.Add(touching, b);
             touchCount++;
         }
@@ -608,6 +617,7 @@ public static class HullSim
             };
         }
 
+        body.Contacts = Scratch(body).OwnContacts.AsSpan(0, touchCount);
         var shieldPoint = Vector3.Transform(shieldPointSum / touchCount, Quaternion.Conjugate(state.Orientation));
         ShieldContact(ref state, flight, body.Design, touching, closing, shieldPoint);
         var damage = ImpactDamage(closing, flight.Mass, flight);
@@ -628,9 +638,10 @@ public static class HullSim
         var scratch = Scratch(body);
         var touchMine = scratch.Mine.AsSpan(0, body.Alive.Length);
 
-        for (var j = 0; j < store.Slots; j++)
+        for (var candidate = 0; candidate < field.CandidateCount; candidate++)
         {
-            if (j == field.Self || !store.IsAliveAt(j))
+            var j = field.Candidate(candidate);
+            if (j < 0 || j == field.Self || !store.IsAliveAt(j))
                 continue;
 
             // With nowhere left to write the other hull's share, the rest wait for the next step rather than
@@ -765,6 +776,7 @@ public static class HullSim
                     touchTheirs
                 );
 
+                body.Contacts = Scratch(body).OwnContacts.AsSpan(0, Scratch(body).ContactCount);
                 var shieldPoint = touch.ShieldMineSum / touch.Weight;
                 ShieldContact(ref state, flight, body.Design, touchMine, closing, shieldPoint);
                 var damage = harmless ? 0f : ImpactDamage(closing, involved, flight);
@@ -822,6 +834,7 @@ public static class HullSim
     {
         touch = default;
         touchMine.Clear(); touchTheirs.Clear();
+        scratch.ContactCount = 0;
         var rules = design.CollisionRules;
         var visits = rules.CollisionTreeVisits;
         var tests = rules.CollisionBoxTests;
@@ -848,8 +861,23 @@ public static class HullSim
                 // The visual event uses each box's surface; the impulse keeps its existing manifold point.
                 var middle = (block + other.BlockOffsets[b]) * 0.5f;
                 var minePoint = Vector3.Transform(middle - centre, inverse) - design.BlockOffsets[a];
-                touch.ShieldMineSum += (design.BlockOffsets[a] + BoxSurface(minePoint, design.BlockHalfExtents[a], Vector3.Transform(-normal, inverse), design.Boxes[a].Shape)) * depth;
-                touch.ShieldTheirsSum += (other.BlockOffsets[b] + BoxSurface(middle - other.BlockOffsets[b], other.BlockHalfExtents[b], normal, other.Boxes[b].Shape)) * depth;
+                var ownSurface = design.BlockOffsets[a] + BoxSurface(minePoint, design.BlockHalfExtents[a], Vector3.Transform(-normal, inverse), design.Boxes[a].Shape);
+                var otherSurface = other.BlockOffsets[b] + BoxSurface(middle - other.BlockOffsets[b], other.BlockHalfExtents[b], normal, other.Boxes[b].Shape);
+                touch.ShieldMineSum += ownSurface * depth;
+                touch.ShieldTheirsSum += otherSurface * depth;
+                scratch.OwnContacts[touch.Pairs] = new VisualContact
+                {
+                    Block = a,
+                    Point = ownSurface,
+                    Normal = Vector3.Transform(-normal, inverse)
+                };
+                scratch.OtherContacts[touch.Pairs] = new VisualContact
+                {
+                    Block = b,
+                    Point = otherSurface,
+                    Normal = normal
+                };
+                scratch.ContactCount = touch.Pairs + 1;
                 scratch.PairA[touch.Pairs] = a; scratch.PairB[touch.Pairs] = b;
                 BlockSet.Add(touchMine, a); BlockSet.Add(touchTheirs, b); touch.Pairs++;
             }
@@ -988,6 +1016,14 @@ public static class HullSim
             states.Hit(body.State, b, share);
         }
 
+        if (!body.Visual.IsEmpty)
+        {
+            ref var visual = ref body.Visual[0];
+            visual.Prune(states.Alive(body.State));
+            foreach (var contact in body.Contacts)
+                if ((uint)contact.Block < blocks)
+                    visual.Hit(body.Design, contact.Block, share, contact.Point, contact.Normal, body.ContactTick, BlockSet.Has(states.Alive(body.State), contact.Block));
+        }
         state.Hull = (float)states.HitTotal(body.State);
 
         // Whether anything is left is counted, not read off the total: the total is kept by subtraction, and

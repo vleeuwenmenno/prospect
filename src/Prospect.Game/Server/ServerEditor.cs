@@ -378,7 +378,7 @@ public sealed partial class ServerHost
     private bool NeedsRepair(Connection connection)
     {
         var index = connection.EditHull.Index;
-        return _content.Designs[_hulls.Info(index).Design].NeedsRepair(_hulls.Revision(index), _hulls.State(index).Hull);
+        return _content.Designs[_hulls.Info(index).Design].NeedsRepair(_hulls.Revision(index), _hulls.State(index).Hull, _hulls.Info(index).Visual.Count);
     }
 
     /// <summary>Takes the result of a check and, for a design that passed, gives it its place in the catalogue.</summary>
@@ -543,7 +543,7 @@ public sealed partial class ServerHost
 
         // Inputs that were queued were for the old hull.
         connection.Hull = next;
-        connection.InputHead = connection.InputCount = 0;
+        ResetControl(connection);
 
         connection.EditPhase = EditorPhase.Closed;
         connection.EditReply = new EditorStateMessage

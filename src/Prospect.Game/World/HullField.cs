@@ -60,6 +60,9 @@ public sealed class ContactScratch
     public int Blocks { get; }
 
     // Fixed room for the largest allowed contact budget, independent of a design's block count.
+    internal readonly VisualContact[] OwnContacts = new VisualContact[FlightRules.MaxCollisionContacts];
+    internal readonly VisualContact[] OtherContacts = new VisualContact[FlightRules.MaxCollisionContacts];
+    internal int ContactCount;
     internal int[] PairA { get; }
     internal int[] PairB { get; }
 
@@ -80,8 +83,8 @@ public sealed class ContactScratch
 /// The hulls that can run into each other, and the one step that moves any of them. The server's field is its
 /// hull store. A predicting client keeps a field of its own hull and the hulls near it as it last heard of them,
 /// and steps that with the same code, so what it shows is what the server will most likely decide. The client's
-/// field is not authoritative: it does not know how many hull points each block has left, so there damage only
-/// shows in a hull's totals and no block is lost until the server says so. Used from one thread.
+/// field is not authoritative: complete server health permits speculative damage only on independent block
+/// states restored during reconciliation. Without health, damage changes totals only. Used from one thread.
 /// </summary>
 public sealed class HullField
 {
@@ -95,6 +98,8 @@ public sealed class HullField
 
     // The blocks each recorded impulse touched: one set per impulse, each with room for the largest design the
     // field has room for. Replaced only by SetDesigns, between steps.
+    private readonly VisualContact[] _visualContacts = new VisualContact[MaxContacts * FlightRules.MaxCollisionContacts];
+    private readonly int[] _visualCounts = new int[MaxContacts];
     private int _touchWords;
     private ulong[] _touching;
     private ContactScratch _scratch;
@@ -103,6 +108,24 @@ public sealed class HullField
     private int _lostCount;
     private bool _collecting;
     private long _round;
+    private readonly HullHandle[] _participants = new HullHandle[HullStore.MaxHulls];
+    private readonly int[] _traversal = new int[HullStore.MaxHulls];
+    private bool _mapped;
+    private int _traversalCount;
+    internal int CandidateCount => !_mapped ? _hulls.Slots : _traversalCount;
+    internal int Candidate(int at)
+    {
+        var index = !_mapped ? at : _traversal[at];
+        return _round == 0 || _hulls.HandleAt(index) == _participants[index] ? index : -1;
+    }
+
+    /// <summary>Retains authoritative candidate order for a client whose own hull occupies local slot zero.</summary>
+    public void SetTraversal(ReadOnlySpan<int> slots)
+    {
+        _mapped = true;
+        slots.CopyTo(_traversal);
+        _traversalCount = slots.Length;
+    }
 
     /// <summary>
     /// A field over <paramref name="hulls"/> of the given designs. <paramref name="reserveBlocks"/> takes working
@@ -162,8 +185,8 @@ public sealed class HullField
     /// after another, so halfway through a round some have flown this tick and some have not; the round is how a
     /// stepping hull tells them apart, and meets each of them where the end of the tick will find it. A field
     /// whose rounds are never started steps each hull against the others exactly where they stand.
-    /// This also owns the cosmetic clock: call exactly once per world tick, even when hulls are held or take
-    /// several input steps, and before any step can hit another hull.
+    /// This also owns the shield clock: call exactly once per world interval before any hull steps.
+    /// Generation-tagged participants exclude hulls created during the round from collision candidates.
     /// </summary>
     public void BeginRound()
     {
@@ -171,6 +194,7 @@ public sealed class HullField
         // Age every hull before contacts: held hulls and hulls struck before their own step share this clock.
         for (var i = 0; i < _hulls.Slots; i++)
         {
+            _participants[i] = _hulls.HandleAt(i);
             if (_hulls.IsAliveAt(i))
                 HullSim.AdvanceShieldClock(ref _hulls.State(i));
         }
@@ -218,6 +242,8 @@ public sealed class HullField
         if (!_collecting || _impulseCount >= _impulses.Length)
             return;
         touching.CopyTo(_touching.AsSpan(_impulseCount * _touchWords, _touchWords));
+        _scratch.OtherContacts.AsSpan(0, _scratch.ContactCount).CopyTo(_visualContacts.AsSpan(_impulseCount * FlightRules.MaxCollisionContacts));
+        _visualCounts[_impulseCount] = _scratch.ContactCount;
         _impulses[_impulseCount++] = impulse;
     }
 
@@ -240,6 +266,7 @@ public sealed class HullField
         var from = own.Position;
         IsFirstStep = info.Round != _round;
         var body = Body(index);
+        body.ContactTick = (long)tick;
         var destroyed = HullSim.Step(ref own, ref info.Order, input, _hulls.Flight(index), ref body, rocks, tick, impulses, this);
         if (body.Damaged)
             info.DamageTick = (long)tick;
@@ -266,6 +293,8 @@ public sealed class HullField
             state.Velocity += impulse.Velocity;
             state.AngularVelocity += impulse.AngularVelocity;
             var struck = Body(impulse.Hull);
+            struck.ContactTick = (long)tick;
+            struck.Contacts = _visualContacts.AsSpan(i * FlightRules.MaxCollisionContacts, _visualCounts[i]);
             var touching = _touching.AsSpan(i * _touchWords, struck.Alive.Length);
             HullSim.ShieldContact(ref state, _hulls.Flight(impulse.Hull), struck.Design, touching, impulse.ContactSpeed, impulse.ShieldPoint);
             if (impulse.Damage <= 0)
@@ -287,8 +316,9 @@ public sealed class HullField
         return new HullBody
         {
             Design = _designs[info.Design],
+            Visual = _authoritative ? System.Runtime.InteropServices.MemoryMarshal.CreateSpan(ref info.Visual, 1) : default,
             Alive = _hulls.Blocks(index),
-            States = _authoritative ? _hulls.BlockStates : null,
+            States = _authoritative || info.PredictDamage ? _hulls.BlockStates : null,
             State = info.BlockState,
             Scratch = _scratch,
             CollisionCounts = _hulls.BlockStates.CollisionCounts(info.BlockState),

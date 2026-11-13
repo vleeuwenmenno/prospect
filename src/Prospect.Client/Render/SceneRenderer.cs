@@ -199,6 +199,12 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private readonly VkPipeline _shieldMaskPipeline;
     private ShieldLookConstants _shieldLook;
     private readonly VkDescriptorSet _shieldSet;
+    // At most 48 MB of triangle vertices per frame slot, independent of catalogue size.
+    private readonly int DamageVertices = CollisionDetail.Load().FrameVertices;
+    private readonly GpuBuffer[] _damageVertices = new GpuBuffer[FrameRenderer.FramesInFlight];
+    private readonly GpuBuffer[] _damageInstances = new GpuBuffer[FrameRenderer.FramesInFlight];
+    private readonly MeshRange[] _damageRanges = new MeshRange[65];
+    private int _damageCount, _damageUsed;
     private readonly GpuBuffer[] _shieldVertexBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
     private readonly GpuBuffer[] _shieldIndexBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
     private readonly GpuBuffer[] _shieldInstanceBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
@@ -287,6 +293,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
                 _frameBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.UniformBufferBit, sizeof(FrameConstants));
                 _instanceBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshInstance) * MaxInstances);
                 _ftlBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(FtlMark) * MaxFtlMarks);
+                _damageVertices[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshVertex) * DamageVertices);
+                _damageInstances[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshInstance) * 65);
                 _shieldVertexBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshVertex) * ShieldVisuals.MaxVertices);
                 _shieldIndexBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.IndexBufferBit, sizeof(ushort) * ShieldVisuals.MaxIndices);
                 _shieldInstanceBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(ShieldInstance) * ShieldVisuals.MaxShields);
@@ -653,6 +661,15 @@ internal sealed unsafe class SceneRenderer : IDisposable
         if (lensing)
             KeepScene(commands, _rocksImage, true, ref color, ref depth);
         DrawMeshes(commands, frameIndex, hulls, _hullPipeline);
+        if (_damageCount > 0)
+        {
+            Span<VkBuffer> damageBuffers = [_damageVertices[frameIndex].Buffer, _damageInstances[frameIndex].Buffer];
+            Span<ByteSize64> damageOffsets = [zero, zero];
+            commands.BindPipeline(VkPipelineBindPoint.Graphics, _hullPipeline);
+            commands.BindVertexBuffers(0, damageBuffers, damageOffsets);
+            for (var i = 0; i < _damageCount; i++)
+                commands.Draw(_damageRanges[i].IndexCount, 1, _damageRanges[i].FirstIndex, i);
+        }
 
         commands.BindPipeline(VkPipelineBindPoint.Graphics, _dustPipeline);
         commands.Draw(6, DustCount, 0, 0);
@@ -722,6 +739,35 @@ internal sealed unsafe class SceneRenderer : IDisposable
         _shipVertices = newVertices;
         _shipIndices = newIndices;
         _shipMeshes = ranges;
+    }
+
+    /// <summary>Called after the current frame fence, before any dynamic triangle uploads.</summary>
+    public void BeginDamage() { _damageCount = 0; _damageUsed = 0; }
+
+    /// <summary>Refuses the whole mesh before touching mapped memory when its budget is exhausted.</summary>
+    public bool AddDamage(int frame, DamageMesh mesh, in MeshInstance instance, float fade)
+    {
+        var n = mesh.Dented.Length;
+        if (_damageCount >= 64 || n > DamageVertices - _damageUsed) return false;
+        var destination = new Span<MeshVertex>((void*)_damageVertices[frame].Mapped, DamageVertices).Slice(_damageUsed, n);
+        mesh.CopyTo(destination, fade);
+        FinishDamage(frame, n, instance);
+        return true;
+    }
+
+    public void AddSparks(int frame, ReadOnlySpan<MeshVertex> vertices)
+    {
+        if (vertices.IsEmpty || vertices.Length > DamageVertices - _damageUsed || _damageCount == 65) return;
+        vertices.CopyTo(new Span<MeshVertex>((void*)_damageVertices[frame].Mapped, DamageVertices).Slice(_damageUsed));
+        var instance = WorldView.MeshTransform(System.Numerics.Vector3.Zero, System.Numerics.Quaternion.Identity, System.Numerics.Vector3.One, new System.Numerics.Vector3(7, 2, 0.2f), -1, 1);
+        FinishDamage(frame, vertices.Length, instance);
+    }
+
+    private void FinishDamage(int frame, int count, in MeshInstance instance)
+    {
+        new Span<MeshInstance>((void*)_damageInstances[frame].Mapped, 65)[_damageCount] = instance;
+        _damageRanges[_damageCount++] = new MeshRange(_damageUsed, count, 0);
+        _damageUsed += count;
     }
 
     private void DrawMeshes(CommandBuffer commands, int frameIndex, ReadOnlySpan<DrawBatch> batches, VkPipeline pipeline)
@@ -1001,6 +1047,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
             _frameBuffers[i].Destroy(_gpu);
             _instanceBuffers[i].Destroy(_gpu);
             _ftlBuffers[i].Destroy(_gpu);
+            _damageVertices[i].Destroy(_gpu);
+            _damageInstances[i].Destroy(_gpu);
             _shieldVertexBuffers[i].Destroy(_gpu);
             _shieldIndexBuffers[i].Destroy(_gpu);
             _shieldInstanceBuffers[i].Destroy(_gpu);

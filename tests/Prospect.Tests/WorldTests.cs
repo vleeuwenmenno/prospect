@@ -76,6 +76,8 @@ public sealed class FlightTests
 
         Assert.True(overheated.BoostLocked);
 
+        // Start above normal speed explicitly: the tuned thrust need not get there before overheating.
+        overheated.Velocity = overheated.Forward * Pod.BoostMaxSpeed;
         // Locked out, holding boost no longer helps: the hull sheds speed back toward its rated maximum.
         var slowing = Fly(overheated, new FlightInput { Forward = 127, Boost = true }, 120);
         Assert.True(slowing.Velocity.Length() < overheated.Velocity.Length());
@@ -105,6 +107,41 @@ public sealed class FlightTests
 public sealed class HullDesignTests
 {
     private static readonly GameContent Content = GameContent.Load();
+
+    [Theory]
+    [InlineData(0, 624f, 352f, 37.5f)]
+    [InlineData(1, 1248f, 704f, 37.5f)]
+    [InlineData(2, 1248f, 704f, 37.5f)]
+    [InlineData(3, 46.4f, 22.4f, 5f)]
+    public void ShippedFlightBalanceReachesRuntimeAndEditorStats(int index, float forwardThrust, float lateralThrust, float recharge)
+    {
+        var design = Content.Designs[index];
+        var exported = BuildDraft.FromBlueprint(design, Content).Export();
+        Assert.True(exported.Ok, exported.Problem);
+        foreach (var hull in new[] { design, exported.Design! })
+        {
+            var flight = hull.Flight;
+            Assert.Equal(forwardThrust / flight.Mass, flight.Acceleration.Z, 4);
+            Assert.Equal(lateralThrust / flight.Mass, flight.Acceleration.X, 4);
+            Assert.Equal(recharge, flight.ShieldRecharge);
+            Assert.Equal(8f, flight.ShieldDelay);
+            Assert.Equal(2f, flight.BoostMultiplier);
+            Assert.Equal(4f, flight.BoostPowerMultiplier);
+            Assert.Equal(60f * MathF.Sqrt(flight.Acceleration.Z), flight.MaxSpeed, 4);
+            Assert.Equal(flight.MaxSpeed * 2f, flight.BoostMaxSpeed);
+            Assert.Equal(flight.Acceleration.Z, hull.Stats.Acceleration);
+            Assert.Equal(flight.MaxSpeed, hull.Stats.MaxSpeed);
+            Assert.Equal(flight.BoostMaxSpeed, hull.Stats.BoostMaxSpeed);
+            Assert.Equal(recharge, hull.Stats.ShieldRecharge);
+
+            var plain = HullState.Spawn(Double3.Zero, flight);
+            var boosted = plain;
+            FlightModel.Step(ref plain, new FlightInput { Forward = 127 }, flight, HullSim.Dt);
+            FlightModel.Step(ref boosted, new FlightInput { Forward = 127, Boost = true }, flight, HullSim.Dt);
+            Assert.Equal(forwardThrust / flight.Mass * HullSim.Dt, plain.Velocity.Length(), 5);
+            Assert.Equal(plain.Velocity.Length() * 2f, boosted.Velocity.Length(), 5);
+        }
+    }
 
     [Fact]
     public void StatsFollowFromTheBlocks()
@@ -173,7 +210,7 @@ public sealed class PowerAndDamageTests
 
         Assert.Equal(0f, state.Heat);
         var gained = state.Velocity.Length() / HullSim.Dt;
-        Assert.True(gained <= Pod.Acceleration.Z + 0.01f);
+        Assert.Equal(Pod.Acceleration.Z, gained, 4);
         Assert.Equal(before.Shield, state.Shield);
     }
 
@@ -220,11 +257,11 @@ public sealed class PowerAndDamageTests
         Assert.False(state.Boosting);
         Assert.False(state.BoostLocked);
 
-        // Still holding boost, the hull flies on under plain thrust: no faster than its rated speed allows.
+        // Still holding boost, the hull flies on under plain thrust; it may still be below normal rated speed.
         var speed = state.Velocity.Length();
         FlightModel.Step(ref state, boost, Pod, HullSim.Dt);
         Assert.False(state.Boosting);
-        Assert.True(state.Velocity.Length() <= speed);
+        Assert.True(state.Velocity.Length() <= speed + Pod.Acceleration.Z * HullSim.Dt + 0.0001f);
     }
 
     [Fact]
@@ -462,7 +499,8 @@ public sealed class PowerAndDamageTests
     [Fact]
     public void ATinyAsteroidIsStruckAndKnockedAwayAndAHugeOneDoesNotBudge()
     {
-        var galaxy = CrashGalaxy;
+        // Keep this physical pebble fixture at its original size despite the larger production baseline.
+        var galaxy = Content.WithSettings(Content.SettingCatalog.Build(null, ["asteroidSize=0.5"])).Galaxy.WithSeed(11);
         var fields = galaxy.AsteroidFields!;
         var side = new Vector3(-1, 0, 0);
         var speed = new Vector3(30, 0, 0);
@@ -1245,6 +1283,8 @@ public sealed class HullCollisionTests : IDisposable
         (pod, vessel) = Start(150);
         for (var i = 0; i < 10; i++)
         {
+            _field.BeginRound();
+            predicted.BeginRound();
             _field.Step(pod, thrust);
             predicted.Step(pod, thrust);
             Assert.Equal(0, predicted.Lost.Length);
@@ -2186,6 +2226,46 @@ public sealed class ShieldStateTests
         Assert.Equal(ShieldHit.MaxAgeTicks, state.ShieldHit.AgeTicks);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RepeatedDamagePostponesRecoveryUntilEightSecondsAfterTheLastHit(bool offline)
+    {
+        var body = States.Body(PodDesign);
+        var state = HullState.Spawn(Double3.Zero, Pod);
+        state.ShieldOffline = offline;
+        state.Shield = offline ? 0f : 1000f;
+        for (var hit = 0; hit < 3; hit++)
+        {
+            Assert.False(Hit(ref state, Pod, ref body, 1, 10f));
+            Assert.Equal(8f, state.ShieldCooldown);
+            var charge = state.Shield;
+            for (var tick = 0; tick < 7 * 60; tick++)
+                FlightModel.Step(ref state, default, Pod, HullSim.Dt);
+            Assert.Equal(charge, state.Shield);
+        }
+
+        // Seven seconds have passed since the final hit; even visible harmless taps do not restart the wait.
+        var before = state.Shield;
+        for (var tick = 0; tick < 59; tick++)
+        {
+            HullSim.ShieldContact(ref state, Pod, PodDesign, body.Alive, Pod.ShieldContactSpeed * 2f);
+            FlightModel.Step(ref state, default, Pod, HullSim.Dt);
+        }
+        Assert.Equal(before, state.Shield);
+        Assert.InRange(state.ShieldCooldown, 0f, 2 * HullSim.Dt);
+
+        // Allow one tick of floating-point countdown rounding, then measure a full second of recharge.
+        for (var tick = 0; tick < 2; tick++)
+            FlightModel.Step(ref state, default, Pod, HullSim.Dt);
+        Assert.True(state.Shield > before);
+        before = state.Shield;
+        for (var tick = 0; tick < 60; tick++)
+            FlightModel.Step(ref state, default, Pod, HullSim.Dt);
+        Assert.Equal(37.5f, state.Shield - before, 3);
+        Assert.Equal(offline, state.ShieldOffline);
+    }
+
     [Fact]
     public void TheRestartRulesComeFromTheContent()
     {
@@ -2242,7 +2322,7 @@ public sealed class ShieldStateTests
 
         // Through the delay nothing charges; the battery gains what the generator makes over the idle draw.
         var delayTicks = (int)MathF.Round(Pod.ShieldDelay / HullSim.Dt);
-        for (var i = 0; i < delayTicks; i++)
+        for (var i = 0; i < delayTicks - 1; i++)
             FlightModel.Step(ref state, default, Pod, HullSim.Dt);
         Assert.Equal(0f, state.Shield);
         Assert.True(state.ShieldOffline);

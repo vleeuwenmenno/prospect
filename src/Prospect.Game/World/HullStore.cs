@@ -14,6 +14,9 @@ public readonly record struct HullHandle(int Index, int Generation)
 /// <summary>Per-hull data that is not part of its motion.</summary>
 public struct HullInfo
 {
+    /// <summary>Authoritative visual damage, independent of physical block loss.</summary>
+    public VisualDamageState Visual;
+
     public int Generation;
     public bool Alive;
 
@@ -25,6 +28,8 @@ public struct HullInfo
 
     /// <summary>True while a player flies the hull directly; the rest are flown by the server under their orders.</summary>
     public bool Piloted;
+    /// <summary>Prediction has a complete authoritative health baseline and may speculate on an isolated copy.</summary>
+    public bool PredictDamage;
 
     /// <summary>True for a temporary escape drone, even after editing gives it a new design.</summary>
     public bool EscapeDrone;

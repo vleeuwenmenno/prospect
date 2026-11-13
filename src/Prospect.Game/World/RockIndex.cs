@@ -84,7 +84,8 @@ public sealed class RockIndex
 
     private int Cell(float coordinate, int level)
     {
-        var cell = (int)MathF.Floor((coordinate + _half) / (level == 0 ? FineCell : CoarseCell));
+        // Negative cells clamp to zero, so truncation and floor give the same clamped index.
+        var cell = (int)((coordinate + _half) / (level == 0 ? FineCell : CoarseCell));
         return Math.Clamp(cell, 0, AxisMax);
     }
 
@@ -97,6 +98,74 @@ public sealed class RockIndex
     /// the sector's centre. It may return a few that do not touch; it never misses one that does.
     /// </summary>
     public Query Near(Vector3 center, float radius) => new(this, center, radius);
+
+    private struct CellRange
+    {
+        public int MinX, MaxX, MinY, MaxY, MinZ, MaxZ;
+        public readonly long Visits => (long)(MaxX - MinX + 1) * (MaxY - MinY + 1) * (MaxZ - MinZ + 1);
+    }
+
+    private CellRange Cells(Vector3 center, float radius, int level)
+    {
+        var reach = radius + (level == 0 ? FineCell : CoarseCell) * 0.5f;
+        return new CellRange
+        {
+            MinX = Cell(center.X - reach, level),
+            MaxX = Cell(center.X + reach, level),
+            MinY = Cell(center.Y - reach, level),
+            MaxY = Cell(center.Y + reach, level),
+            MinZ = Cell(center.Z - reach, level),
+            MaxZ = Cell(center.Z + reach, level),
+        };
+    }
+
+    /// <summary>Full grid-cell visits before candidate chains, for choosing a cheaper placement overlap search.</summary>
+    internal long QueryCellVisits(Vector3 center, float radius) => Cells(center, radius, 0).Visits + Cells(center, radius, 1).Visits;
+
+    /// <summary>Placement-only existence query; avoids iterator state transitions for every empty cell.</summary>
+    internal bool PlacementOverlaps(Asteroid[] placed, int count, Vector3 center, float radius)
+    {
+        if (count == 0)
+            return false;
+        // Reuse these bounds for the search instead of calculating twelve cell coordinates twice.
+        var fine = Cells(center, radius, 0);
+        var coarse = Cells(center, radius, 1);
+        var scan = fine.Visits + coarse.Visits > count;
+        var prefix = scan ? count : GiantCount;
+        for (var i = 0; i < prefix; i++)
+            if (Touches(placed[i], center, radius))
+                return true;
+        if (scan)
+            return false;
+
+        for (var level = 0; level < Levels; level++)
+        {
+            var cells = level == 0 ? fine : coarse;
+            for (var z = cells.MinZ; z <= cells.MaxZ; z++)
+                for (var y = cells.MinY; y <= cells.MaxY; y++)
+                    for (var x = cells.MinX; x <= cells.MaxX; x++)
+                    {
+                        var key = level << AxisBits * 3 | z << AxisBits * 2 | y << AxisBits | x;
+                        var bucket = (int)((uint)key * 2654435761u >> _shift);
+                        for (var entry = _heads[bucket]; entry != 0; entry = _next[entry - 1])
+                        {
+                            var other = entry - 1;
+                            if (_keys[other] == key && Touches(placed[other], center, radius))
+                                return true;
+                        }
+                    }
+        }
+        return false;
+    }
+
+    private static bool Touches(in Asteroid rock, Vector3 position, float reach)
+    {
+        var dx = position.X - rock.LocalPosition.X;
+        var dy = position.Y - rock.LocalPosition.Y;
+        var dz = position.Z - rock.LocalPosition.Z;
+        var apart = reach + rock.Radius;
+        return dx * dx + dy * dy + dz * dz < apart * apart;
+    }
 
     /// <summary>The walk started by <see cref="Near"/>. Lives on the stack; nothing is allocated.</summary>
     public struct Query

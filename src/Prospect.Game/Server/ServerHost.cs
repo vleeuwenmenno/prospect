@@ -100,18 +100,6 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     /// <summary>Refused connections are reported in one line at most this often, however many there are.</summary>
     private const int RefusalLogSeconds = 5;
 
-    /// <summary>Inputs a client may have waiting; more than this means it is running ahead and the oldest are dropped.</summary>
-    private const int InputQueueSize = 16;
-
-    /// <summary>
-    /// Inputs a client may have simulated in one server tick. One per tick on average, with room to absorb a late
-    /// packet followed by a burst; a client sending faster than real time gains nothing.
-    /// </summary>
-    private const int MaxInputCredit = 4;
-
-    /// <summary>After this many ticks without input the server flies the hull itself until input resumes.</summary>
-    private const int InputStarvedTicks = 15;
-
     /// <summary>Other players' hulls are sent every this many ticks; a client's own hull goes every tick.</summary>
     private const int RemoteHullInterval = 3;
 
@@ -139,6 +127,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public BlockSender? Blocks;
         public bool CatalogueReady;
         public long CatalogueDeadline;
+
+        /// <summary>Unsent remote slots in the current snapshot sweep; drained before starting another.</summary>
+        public int SnapshotCursor, SnapshotRemaining;
 
         /// <summary>
         /// How many designs the manifest this client was sent lists; zero until it has asked for one. Designs from
@@ -206,15 +197,10 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public bool Pending => State is ConnectionState.AwaitingHello or ConnectionState.AwaitingProof;
 
         public HullHandle Hull;
-        public readonly InputRecord[] Inputs = new InputRecord[InputQueueSize];
-        public int InputHead;
-        public int InputCount;
-        public uint LastQueuedSequence;
+        public readonly InputTimeline Inputs = new();
+        public uint ControlEpoch = 1;
         public uint LastSimulatedSequence;
-        public int InputCredit;
-        public int StarvedTicks;
-        public FlightInput LastInput;
-
+        public FlightInput PreparedInput;
         /// <summary>The newest order definition the client has sent, and the counter value it belongs to.</summary>
         public ushort OrderId;
         public HullOrder Order;
@@ -228,6 +214,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             SocialFailed = false;
             Blocks = null;
             CatalogueReady = false;
+            SnapshotCursor = SnapshotRemaining = 0;
             ManifestDesigns = NoticedDesigns = 0;
             Array.Clear(ReadyDesigns);
             Array.Clear(FailedDesigns);
@@ -252,10 +239,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             Origin = 0;
             Array.Clear(Challenge);
             Hull = default;
-            InputHead = InputCount = 0;
-            LastQueuedSequence = LastSimulatedSequence = 0;
-            InputCredit = StarvedTicks = 0;
-            LastInput = new FlightInput { Dampeners = true };
+            Inputs.Clear();
+            ControlEpoch = 1;
+            LastSimulatedSequence = 0;
             OrderId = 0;
             Order = default;
         }
@@ -314,6 +300,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     private int _budgetTicks;
     private long _nextRefusalLog;
 
+    private readonly HullHandle[] _participants = new HullHandle[HullStore.MaxHulls];
+    internal long LateInputs { get; private set; }
+    internal long FallbackIntervals { get; private set; }
     private long _tick;
     private uint _nextPlayerId = 1;
     private int _playerCount;
@@ -518,6 +507,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
     void ITickHandler.Tick(long tick)
     {
+        _tick = tick;
         // First what must happen whatever arrives: handshakes that have run out of time end, by the clock, and
         // players who keep sending far more than a client does are removed. Network input is read after this
         // and within a budget, so no amount of it can put either off or keep the simulation from its turn.
@@ -558,33 +548,26 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             _budgetTicks++;
         ReportRefusals(now);
 
+        foreach (var connection in _connections)
+            if (connection.State == ConnectionState.Active) PreparePlayer(connection);
+
         // Edits move on before the hulls step, so a hull that is replaced steps as the new one this tick.
         TickEditor(tick);
 
-        // From here every hull steps for this tick: the piloted ones first, by the inputs that arrived, then the rest.
+        // Capture generations before the round: replacement drones wait until the next interval.
+        var participantCount = _hulls.Slots;
+        for (var i = 0; i < participantCount; i++)
+            _participants[i] = _hulls.IsAliveAt(i) ? _hulls.HandleAt(i) : default;
         _field.BeginRound();
-
-        // A hull whose pilot's input has not arrived stays where it is this tick, though its velocity says
-        // otherwise. The others must know before they step, or they would meet it a tick's flight ahead.
-        foreach (var connection in _connections)
+        for (var i = 0; i < participantCount; i++)
         {
-            if (connection.State == ConnectionState.Active && connection.InputCount == 0 && connection.StarvedTicks < InputStarvedTicks && _hulls.IsAlive(connection.Hull))
-                _field.Hold(connection.Hull.Index);
-        }
-
-        foreach (var connection in _connections)
-        {
-            if (connection.State == ConnectionState.Active)
-                SimulatePlayer(connection);
-        }
-
-        // Hulls nobody is flying carry out their standing orders, or hold position. A step can destroy other
-        // hulls and put their pilots in new ones, so nothing read here is kept across it.
-        var hold = new FlightInput { Dampeners = true };
-        for (var i = 0; i < _hulls.Slots; i++)
-        {
-            if (_hulls.IsAliveAt(i) && !_hulls.Info(i).Piloted && StepHull(i, hold))
-                _hulls.Destroy(_hulls.HandleAt(i));
+            var handle = _participants[i];
+            if (!_hulls.IsAlive(handle)) continue;
+            var pilot = PilotOf(handle);
+            if (pilot is not null)
+                SimulatePlayer(pilot);
+            else if (StepHull(i, InputTimeline.Fallback))
+                _hulls.Destroy(handle);
         }
 
         // Asteroids that were hit this tick take their new motion, and every client is told.
@@ -844,29 +827,13 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     private void ReceiveInput(Connection connection, ref NetReader reader)
     {
         Span<InputRecord> records = stackalloc InputRecord[InputMessage.MaxRecords];
-        if (!InputMessage.TryRead(ref reader, records, out var count, out var orderId, out var order))
+        if (!InputMessage.TryRead(ref reader, records, out var count, out var epoch) || epoch != connection.ControlEpoch)
             return;
-
-        connection.OrderId = orderId;
-        connection.Order = order;
-
-        // Packets repeat recent inputs; queue only the ones not seen before, oldest first.
-        for (var i = 0; i < count; i++)
-        {
-            ref var record = ref records[i];
-            if (record.Sequence <= connection.LastQueuedSequence)
-                continue;
-
-            if (connection.InputCount == InputQueueSize)
-            {
-                connection.InputHead = (connection.InputHead + 1) % InputQueueSize;
-                connection.InputCount--;
-            }
-
-            connection.Inputs[(connection.InputHead + connection.InputCount) % InputQueueSize] = record;
-            connection.InputCount++;
-            connection.LastQueuedSequence = record.Sequence;
-        }
+        if (!connection.Inputs.Accept(records[..count], _tick))
+            connection.OverAllowance = true;
+        else
+            for (var i = 0; i < count; i++)
+                if (records[i].TargetTick < _tick) LateInputs++;
     }
 
     /// <summary>
@@ -926,7 +893,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         info.Order = default;
         info.OrderId = connection.OrderId;
         connection.Hull = next;
-        connection.InputHead = connection.InputCount = 0;
+        ResetControl(connection);
     }
 
     private void ReceiveFleetOrders(Connection connection, ref NetReader reader)
@@ -949,53 +916,44 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     }
 
     /// <summary>
-    /// Advances a player's hull by the inputs that have arrived. The hull steps once per client input, so the
-    /// server reproduces the client's prediction exactly; a credit limit keeps that from outrunning real time.
+    /// Advances the pilot exactly once for this world interval, using its record or the shared fallback.
     /// </summary>
+    private void PreparePlayer(Connection connection)
+    {
+        if (!_hulls.IsAlive(connection.Hull)) return;
+        var index = connection.Hull.Index;
+        var input = InputTimeline.Fallback;
+        if (connection.Inputs.Take(_tick, out var record))
+        {
+            ref var info = ref _hulls.Info(index);
+            if (InputTimeline.Newer(record.OrderId, info.OrderId))
+            {
+                HullSim.SetOrder(ref _hulls.State(index), ref info.Order, record.Order);
+                info.OrderId = record.OrderId;
+                connection.OrderId = record.OrderId;
+                connection.Order = record.Order;
+            }
+            input = record.Input;
+            connection.LastSimulatedSequence = record.Sequence;
+        }
+        else FallbackIntervals++;
+        connection.PreparedInput = input;
+    }
+
     private void SimulatePlayer(Connection connection)
     {
-        if (!_hulls.IsAlive(connection.Hull))
-            return;
-
-        var index = connection.Hull.Index;
-        connection.InputCredit = Math.Min(connection.InputCredit + 1, MaxInputCredit);
-
-        var simulated = false;
-        while (connection.InputCount > 0 && connection.InputCredit > 0)
-        {
-            var record = connection.Inputs[connection.InputHead];
-            connection.InputHead = (connection.InputHead + 1) % InputQueueSize;
-            connection.InputCount--;
-            connection.InputCredit--;
-
-            // Looked up for each input: the step before may have created a hull and moved the storage.
-            ref var info = ref _hulls.Info(index);
-            if (record.OrderId != info.OrderId && record.OrderId == connection.OrderId)
-            {
-                HullSim.SetOrder(ref _hulls.State(index), ref info.Order, connection.Order);
-                info.OrderId = record.OrderId;
-            }
-
-            var destroyed = StepHull(index, record.Input);
-            connection.LastSimulatedSequence = record.Sequence;
-            connection.LastInput = record.Input;
-            simulated = true;
-            if (destroyed)
-            {
-                LoseHull(connection);
-                return;
-            }
-        }
-
-        if (simulated)
-        {
-            connection.StarvedTicks = 0;
-            return;
-        }
-
-        // The client has gone quiet. Keep the hull safe: carry on with its order, or brake to a stop.
-        if (++connection.StarvedTicks > InputStarvedTicks && StepHull(index, new FlightInput { Dampeners = true }))
+        if (_hulls.IsAlive(connection.Hull) && StepHull(connection.Hull.Index, connection.PreparedInput))
             LoseHull(connection);
+    }
+
+    private void ResetControl(Connection connection)
+    {
+        connection.ControlEpoch++;
+        connection.Inputs.Clear();
+        connection.PreparedInput = InputTimeline.Fallback;
+        connection.Order = default;
+        connection.OrderId = 0;
+        _hulls.Info(connection.Hull.Index).OrderId = 0;
     }
 
     /// <summary>
@@ -1060,7 +1018,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             escaped.Velocity = state.Velocity * 0.5f;
         }
 
-        connection.InputHead = connection.InputCount = 0;
+        ResetControl(connection);
         Logs.Sim.Info($"{connection.Name} lost a hull and is in a drone");
     }
 
@@ -1080,11 +1038,19 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     {
         connection.Blocks!.Send(connection.Transport, connection.Peer, _sendBuffer, tick);
         if (!connection.CatalogueReady) return;
-        var includeRemote = (tick + connection.PlayerId) % RemoteHullInterval == 0;
+        var remaining = Math.Min(connection.SnapshotRemaining, _hulls.Slots);
+        var cursor = remaining > 0 ? connection.SnapshotCursor % _hulls.Slots : 0;
+        var candidates = remaining > 0 ? remaining : _hulls.Slots;
+        // Overflow continues on intervening ticks so large health records do not age out of prediction.
+        var includeRemote = remaining > 0 || (tick + connection.PlayerId) % RemoteHullInterval == 0;
+        var nextCursor = 0;
+        var nextRemaining = 0;
         var writer = new NetWriter(_sendBuffer);
         var header = new SnapshotHeader
         {
             ServerTick = tick,
+            ControlEpoch = connection.ControlEpoch,
+            AppliedOrderId = _hulls.Info(connection.Hull.Index).OrderId,
             AckedInput = connection.LastSimulatedSequence,
             OwnHull = connection.Hull.Packed,
         };
@@ -1097,14 +1063,14 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         // The count is not known until the hulls are written; reserve the header and fill it in afterwards.
         header.Write(ref writer);
         var count = 0;
-        for (var i = 0; i < _hulls.Slots && count < byte.MaxValue; i++)
+        for (var pass = 0; pass <= candidates; pass++)
         {
+            var i = pass == 0 ? connection.Hull.Index : (cursor + pass - 1) % _hulls.Slots;
+            if (pass != 0 && i == connection.Hull.Index) continue;
             if (!_hulls.IsAliveAt(i))
                 continue;
             if (!includeRemote && i != connection.Hull.Index && !(inContact && _hulls.Info(i).ContactTick > recent))
                 continue;
-            if (writer.Length + HullRecord.MaxWireSize > _sendBuffer.Length)
-                break;
 
             // A hull of a design this client cannot show yet is left out until the client says it can.
             ref var info = ref _hulls.Info(i);
@@ -1116,6 +1082,8 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 Owner = info.Owner,
                 Design = info.Design,
                 Revision = _hulls.Revision(i),
+                VisualVersion = info.Visual.Version,
+                Spark = info.Visual.Spark,
                 State = _hulls.State(i),
                 Order = info.Order,
             };
@@ -1123,6 +1091,22 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             var losses = _hulls.BlockStates.Losses(info.BlockState);
             record.LossCount = (byte)Math.Min(HullRecord.MaxLosses, record.Revision - record.LossStart);
             for (var loss = 0; loss < record.LossCount; loss++) record.Losses[loss] = losses[(int)record.LossStart + loss];
+            record.HasHealth = true;
+            var health = _hulls.BlockStates.HitPoints(info.BlockState);
+            var intact = _content.Designs[info.Design].IntactHitPoints;
+            for (var b = 0; b < health.Length; b++)
+            {
+                if (health[b] <= 0 || health[b] == intact[b]) continue;
+                var at = record.HealthCount++;
+                record.DamagedBlocks[at] = (ushort)b;
+                record.RemainingHealth[at] = health[b];
+            }
+            if (count == byte.MaxValue || writer.Length + record.WireBound > _sendBuffer.Length)
+            {
+                nextCursor = i;
+                nextRemaining = candidates - pass + 1;
+                break;
+            }
             record.Write(ref writer);
             count++;
         }
@@ -1131,7 +1115,11 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         header.HullCount = (byte)count;
         var rewrite = new NetWriter(_sendBuffer);
         header.Write(ref rewrite);
-        connection.Transport.Send(connection.Peer, NetChannel.Unreliable, _sendBuffer.AsSpan(0, length));
+        if (connection.Transport.Send(connection.Peer, NetChannel.Unreliable, _sendBuffer.AsSpan(0, length)))
+        {
+            connection.SnapshotCursor = nextCursor;
+            connection.SnapshotRemaining = nextRemaining;
+        }
     }
 
     /// <summary>

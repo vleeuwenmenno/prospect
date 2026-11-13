@@ -15,12 +15,15 @@ internal sealed class BlockReplica : IDisposable
         internal BlockStateHandle State;
         internal bool Request;
         internal long Seen;
+        internal VisualDamageState Visual;
+        internal uint WantedVisual, SparkBaseline;
+        internal CollisionSpark Spark;
     }
     private readonly Entry[] _entries = new Entry[256];
     private readonly BlockStateStore _states = new(256);
     private readonly BlockTransfer[] _transfers;
     private GameContent _content;
-    private readonly byte[] _acks = new byte[2 + 256 * 9];
+    private readonly byte[] _acks = new byte[2 + 256 * 13];
     private int _cursor;
 
     internal BlockReplica(GameContent content)
@@ -47,14 +50,25 @@ internal sealed class BlockReplica : IDisposable
 
     internal bool Accept(in HullRecord record, long tick)
     {
-        if (record.Id == 0 || record.Design >= _content.Designs.Length) return false;
+        if (record.Id == 0 || record.Design >= _content.Designs.Length || record.HealthCount > HullRecord.MaxHealth
+            || (!record.HasHealth && record.HealthCount != 0)) return false;
         var design = _content.Designs[record.Design];
+        if (record.Spark.Sequence != 0 && (!record.Spark.Contact.Valid(design) || record.Spark.Tick < 0)) return false;
         if (record.Revision > design.BlockCount || record.LossCount > HullRecord.MaxLosses
             || record.LossStart > record.Revision || record.LossCount > record.Revision - record.LossStart) return false;
         for (var j = 0; j < record.LossCount; j++)
         {
             if ((uint)record.Losses[j] >= design.BlockCount) return false;
             for (var k = 0; k < j; k++) if (record.Losses[j] == record.Losses[k]) return false;
+        }
+        for (var h = 0; h < record.HealthCount; h++)
+        {
+            var block = record.DamagedBlocks[h];
+            if (block >= design.BlockCount || !float.IsFinite(record.RemainingHealth[h]) || record.RemainingHealth[h] <= 0
+                || record.RemainingHealth[h] >= design.IntactHitPoints[block]
+                || (h > 0 && block <= record.DamagedBlocks[h - 1])) return false;
+            for (var loss = 0; loss < record.LossCount; loss++)
+                if (record.Losses[loss] == block) return false;
         }
         var slot = Find(record.Id);
         if (slot < 0)
@@ -64,7 +78,7 @@ internal sealed class BlockReplica : IDisposable
                 if (_entries[i].Id != 0 && tick - _entries[i].Seen <= _content.BlockTransfers.TransferTicks) continue;
                 slot = i;
                 if (_entries[i].Id != 0) _states.Release(_entries[i].State);
-                _entries[i] = new Entry { Id = record.Id, Design = record.Design, State = _states.Create(design, false) };
+                _entries[i] = new Entry { Id = record.Id, Design = record.Design, State = _states.Create(design, false), SparkBaseline = record.Spark.Sequence };
                 break;
             }
         }
@@ -72,6 +86,12 @@ internal sealed class BlockReplica : IDisposable
         ref var entry = ref _entries[slot];
         if (entry.Design != record.Design) return false;
         entry.Seen = tick;
+        entry.WantedVisual = Math.Max(entry.WantedVisual, record.VisualVersion);
+        if (record.Spark.Sequence > entry.SparkBaseline && (record.Spark.Sequence > entry.Spark.Sequence || (record.Spark.Sequence == entry.Spark.Sequence && record.Spark.Tick == entry.Spark.Tick && record.Spark.Contact.Depth > entry.Spark.Contact.Depth))
+            && record.Spark.Contact.Valid(design) && record.Spark.Tick >= 0)
+            entry.Spark = record.Spark;
+        for (var h = 0; h < record.HealthCount; h++)
+            if (!BlockSet.Has(_states.Alive(entry.State), record.DamagedBlocks[h])) return false;
         var revision = _states.Revision(entry.State);
         if (record.Revision < revision) return false;
         if (record.LossStart <= revision && record.LossStart + record.LossCount >= revision)
@@ -93,13 +113,14 @@ internal sealed class BlockReplica : IDisposable
         writer.WriteByte(0);
         byte count = 0;
         // At most one small datagram per tick leaves input and reliable gameplay budgets intact.
-        for (var n = 0; n < _entries.Length && count < 64; n++)
+        for (var n = 0; n < _entries.Length && count < 32; n++)
         {
             ref var e = ref _entries[_cursor++ % _entries.Length];
             if (e.Id == 0 || tick - e.Seen > _content.BlockTransfers.TransferTicks) continue;
             writer.WriteUInt32(e.Id);
             writer.WriteUInt32(_states.Revision(e.State));
-            writer.WriteByte(e.Request ? (byte)1 : (byte)0);
+            writer.WriteByte((byte)((e.Request ? 1 : 0) | (e.Visual.Version < e.WantedVisual ? 2 : 0)));
+            writer.WriteUInt32(e.Visual.Version);
             count++;
         }
         _cursor %= _entries.Length;
@@ -107,7 +128,7 @@ internal sealed class BlockReplica : IDisposable
         if (count != 0) transport.Send(0, NetChannel.Unreliable, writer.Written);
     }
 
-    internal void Receive(ref NetReader reader, long tick)
+    internal void Receive(ref NetReader reader, long tick, bool visual = false)
     {
         var id = reader.ReadUInt32();
         var design = reader.ReadByte();
@@ -116,29 +137,49 @@ internal sealed class BlockReplica : IDisposable
         var offset = reader.ReadInt32();
         var count = reader.ReadUInt16();
         var slot = Find(id);
-        if (!reader.IsValid || slot < 0 || design != _entries[slot].Design) return;
+        if (!reader.IsValid || reader.Remaining != count * 8 || slot < 0 || design != _entries[slot].Design) return;
         var blocks = _content.Designs[design].BlockCount;
-        if (revision > blocks || total != BlockSet.WordCount(blocks) || total > _content.BlockTransfers.MaxBytes / 8
+        if ((!visual && (revision > blocks || total != BlockSet.WordCount(blocks))) || (visual && (total != 21 || revision == 0)) || total > _content.BlockTransfers.MaxBytes / 8
             || offset < 0 || offset >= total || count == 0 || count > total - offset) return;
+        if (visual && (revision <= _entries[slot].Visual.Version || revision > _entries[slot].WantedVisual)) return;
         BlockTransfer? transfer = null;
-        foreach (var candidate in _transfers) if (candidate.Hull == id) transfer = candidate;
+        foreach (var candidate in _transfers) if (candidate.Hull == id && candidate.Visual == visual) transfer = candidate;
         if (transfer is not null && tick > transfer.Deadline)
         {
             transfer.Clear();
             transfer = null;
         }
+        if (transfer is not null && revision < transfer.Revision) return;
         if (offset == 0)
         {
             if (transfer is null) foreach (var candidate in _transfers) if (candidate.Hull == 0) { transfer = candidate; break; }
+            if (transfer is null && !visual) foreach (var candidate in _transfers) if (candidate.Visual) { candidate.Clear(); transfer = candidate; break; }
             if (transfer is null) return;
-            transfer.Hull = id; transfer.Design = design; transfer.Revision = revision; transfer.Count = total; transfer.Offset = 0;
+            transfer.Visual = visual; transfer.Hull = id; transfer.Design = design; transfer.Revision = revision; transfer.Count = total; transfer.Offset = 0;
             transfer.Deadline = tick + _content.BlockTransfers.TransferTicks;
         }
         if (transfer is null || transfer.Design != design || transfer.Count != total || transfer.Revision != revision || transfer.Offset != offset) return;
-        for (var i = 0; i < count; i++) transfer.Words[offset + i] = reader.ReadUInt64();
+        if (visual) reader.ReadBytes(count * 8).CopyTo(System.Runtime.InteropServices.MemoryMarshal.AsBytes(transfer.Words.AsSpan(offset, count)));
+        else for (var i = 0; i < count; i++) transfer.Words[offset + i] = reader.ReadUInt64();
         if (!reader.IsValid) { transfer.Clear(); return; }
         transfer.Offset += count;
         if (transfer.Offset != total) return;
+        if (visual)
+        {
+            ref var e = ref _entries[slot];
+            var bytes = System.Runtime.InteropServices.MemoryMarshal.AsBytes(transfer.Words.AsSpan(0, total));
+            var visualReader = new NetReader(bytes);
+            if (revision > e.Visual.Version && revision <= e.WantedVisual
+                && VisualDamageState.Read(ref visualReader, _content.Designs[design], revision, out var state))
+            {
+                var length = 1 + state.Count * 10;
+                var valid = true;
+                for (var i = length; i < bytes.Length; i++) if (bytes[i] != 0) valid = false;
+                if (valid) e.Visual = state;
+            }
+            transfer.Clear();
+            return;
+        }
         var words = transfer.Words.AsSpan(0, total);
         var alive = 0;
         foreach (var word in words) alive += BitOperations.PopCount(word);
@@ -157,6 +198,15 @@ internal sealed class BlockReplica : IDisposable
             entry.Request = false;
         }
         transfer.Clear();
+    }
+
+    internal VisualDamageState Visual(uint id)
+    {
+        var slot = Find(id);
+        if (slot < 0) return default;
+        var visual = _entries[slot].Visual;
+        visual.Spark = _entries[slot].Spark;
+        return visual;
     }
 
     public void Dispose() => _states.Dispose();
