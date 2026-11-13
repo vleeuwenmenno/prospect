@@ -158,8 +158,21 @@ The client opens a real window on the developer's desktop, and they are usually 
 
 - Only launch it with `--capture <file.png>` or `--bench <seconds>`. Both mute every input device, so the window
   cannot grab the pointer or react to their typing. Never start it any other way from an agent session.
-- Such a run titles its window `PROSPECT capture` (`App.ScriptedWindowTitle`). The developer's Hyprland sends
-  that title to a hidden special workspace, where it still renders and captures normally. Keep the title.
+- Such a run titles its window `PROSPECT capture` (`App.ScriptedWindowTitle`); a manual run stays `PROSPECT`.
+  Keep the title: the developer's compositor matches it to keep agent windows off their screen.
+- **Before the first capture on a machine, check the window is hidden.** Without a rule, every capture and
+  benchmark flashes a window on the developer's screen. Hyprland (Omarchy): put this in
+  `~/.config/hypr/prospect-capture.lua` and add `require("hypr.prospect-capture")` to `hyprland.lua`:
+
+  ```lua
+  o.window({ title = "^PROSPECT capture$" }, { workspace = "special:prospect-capture silent", no_initial_focus = true })
+  ```
+
+  Then `hyprctl reload` and `hyprctl configerrors`. A window on a hidden special workspace still renders, and a
+  capture still saves its image (scripted runs present without vsync). `Super+S` shows the special workspace.
+  Sway: `for_window [title="^PROSPECT capture$"] move scratchpad`. Do not use a headless output: a monitor
+  manager such as hyprmoncfg adopts it and moves the developer's workspaces onto it. On a compositor with no
+  such rule (GNOME, macOS, Windows), tell the developer windows will appear before running captures.
 - `make run ARGS="--start local --open <view> --capture /path/shot.png --capture-after 2.5"` saves a screenshot
   and exits. Views: `command`, `edit` (asks to edit the own ship; the editor opens on the grant), `map`, `map-hover` (the map with the pointer on your own sector), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,
   `players`, `social`, `friends`, `chat`, `hud` (the world with the party list and recent chat only). The social views and
