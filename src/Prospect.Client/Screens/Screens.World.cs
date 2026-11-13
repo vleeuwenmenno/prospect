@@ -236,7 +236,7 @@ internal sealed partial class ScreenHost
             draw.AddLine(new float2(ruleLeft, min.Y + Kit.Px(101)), new float2(ruleRight, min.Y + Kit.Px(101)), rule, 1f);
 
         var star = world.Galaxy!.StarClasses[world.Sector.StarClass];
-        var countPrefix = world.Galaxy.AsteroidFields?.EstimatesCounts == true ? "UP TO " : "";
+        var countPrefix = world.Galaxy.AsteroidFields?.EstimatesCounts == true ? "ABOUT " : "";
         var text = min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3));
         if (compact)
         {
@@ -1464,7 +1464,7 @@ internal sealed partial class ScreenHost
                 Theme.FontCaption,
                 text + new float2(0, y),
                 Theme.TextDim,
-                summary.AsteroidCount > 0 ? Kit.F($"ASTEROIDS     {(galaxy.AsteroidFields?.EstimatesCounts == true ? "UP TO " : "")}{summary.AsteroidCount} IN {summary.FieldCount} {(galaxy.AsteroidFields?.EstimatesCounts == true ? "PLANNED " : "")}{(summary.FieldCount == 1 ? "FIELD" : "FIELDS")}") : "ASTEROIDS     none"u8
+                summary.AsteroidCount > 0 ? Kit.F($"ASTEROIDS     {(galaxy.AsteroidFields?.EstimatesCounts == true ? "ABOUT " : "")}{summary.AsteroidCount} IN {summary.FieldCount} {(summary.FieldCount == 1 ? "FIELD" : "FIELDS")}") : "ASTEROIDS     none"u8
             );
             y += line;
             if (hasRock)

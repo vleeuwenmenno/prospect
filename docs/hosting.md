@@ -485,7 +485,7 @@ alongside `FlightRules.Under`; repeated applications never compound and other se
 - Controls and ranges: [World settings](../README.md#world-settings). They also work through `--set` and settings files.
 - Missing entries in older settings files use catalogue defaults. The shared content identity covers this catalogue.
 - The cap never raises the content's `maxPerSector`; settings do not raise placement attempts or field budgets.
-- Changed geometry uses bounded placement: failed placements are omitted. Map planning counts are upper counts;
+- Changed geometry uses bounded placement: failed placements are omitted. Map counts are estimates;
   generated sector summaries use actual counts. Arrival clearance and resource availability remain enforced.
 - Live defaults use the former maximum asteroid multiplier preset as 1×; seven multipliers accept up to 5×.
   Content and the absolute count maximum now allow 20,480 rocks per sector. Dense defaults may exceed old clipping.
@@ -499,11 +499,12 @@ Shared sanitization bounds every endpoint and lowers a crossed minimum to its ma
 The paired ranges and per-material rules are listed in the README. Material abundance weights only existing availability;
 zero removes the material consistently from sector character and asteroid picks.
 
-Protocol 35 and generation version 3 identify the irregular field algorithm; older saved generation identities are refused.
+Protocol 36 and generation version 4 identify fields and clouds in world space; saves of older generation versions are refused, untouched.
+The rules are in [world generation](world-generation.md): a field is anchored in the sector its centre lies in and reaches the sectors around it.
 Field support follows four seeded transverse sections with smooth bends, varying widths and tapered ends.
 Sparse outskirts follow that support rather than filling an enclosing ellipsoid.
-`distribution.outskirts`, `distribution.width` and `distribution.bend` tune this shape in galaxy content.
-Field envelopes may overlap, but every candidate passes sector bounds, arrival clearance and spacing against all previously placed rocks.
+`distribution.outskirts`, `width`, `bend`, `fade` and `jitter` tune this shape in galaxy content; `density` and `inGas` tune thinning and rocks in gas.
+Field envelopes may overlap, but every rock passes its sector's bounds, arrival clearance and spacing against all rocks placed before it in that sector.
 No rock is moved after acceptance. The frozen generation hash and live retuning hashes record this algorithm.
 
 ## Visual collision damage backend (protocol 33)

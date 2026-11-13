@@ -161,13 +161,26 @@ exists.
 - **One seed makes the whole world.** Same seed, same world, on the server and on every client.
 - **Asteroid baseline:** the former maximum asteroid multipliers are the new 1× defaults, with controls up to 5×.
   This includes ore share and grade, not material abundance or paired minima. The per-sector ceiling is 20,480;
-  bounded placement can omit rocks. Frequency and ore saturate at 100%; geometry must fit the sector.
-- **Sectors are filled by modules.** Each module makes one kind of thing: asteroid fields first, stations and gas
-  fields later. Adding a module does not change what the others make.
+  bounded placement can omit rocks. Frequency and ore saturate at 100%; a field reaches at most one sector
+  from its centre.
+- **Sectors are filled by modules.** Each module makes one kind of thing: asteroid fields and gas clouds now,
+  stations later. Each draws from its own streams. One may read what another anchors: rocks in gas do.
 - **Every sector has a character:** how rich it is and which resources can occur there. Some have every
   resource, some have none, some never have a given one.
 - **Asteroids come in all sizes.** Many tiny ones, a few huge ones, in dense fields.
   An asteroid with ore looks slightly different from bare rock: noticeable, not loud.
+
+## Decided: fields and clouds in world space
+
+How it is built: [world generation](world-generation.md).
+
+- **No seams.** Asteroid fields and gas clouds lie across sector borders and run through them unbroken.
+- **Density is noise in world space:** from very few rocks, through some, up to a field's full density. A field
+  sits where it falls, not around a sector's centre, and fades in and out at its edge.
+- **Rocks in gas.** Some gas clouds hold asteroids. How often and how dense is content.
+- **Gas clouds are mostly the size they were, and now and then huge:** up to a sector across, about 40 km.
+- **A sector is still generated alone,** the same on every machine, and an asteroid is still named by its index
+  in its sector.
 
 ## Decided: world settings
 

@@ -105,10 +105,13 @@ public struct SectorSummary
     /// <summary>How rich the sector is and which resources occur in it.</summary>
     public SectorCharacter Character;
 
-    /// <summary>Written by the asteroid field module: planned upper counts on the map; actual counts after generation.</summary>
+    /// <summary>
+    /// Written by the asteroid field module: an estimate on the map, the actual counts after generation. A field
+    /// counts for every sector it has rocks in, so neighbouring sectors can count the same field.
+    /// </summary>
     public int AsteroidCount;
     public int FieldCount;
-    /// <summary>Number of decorative gas volumes, zero or one.</summary>
+    /// <summary>Number of decorative gas volumes whose centre lies in the sector, zero or one.</summary>
     public int GasCloudCount;
 }
 
@@ -199,7 +202,11 @@ public sealed class GalaxyShape
 public sealed class SectorContent
 {
     public SectorSummary Summary;
-    /// <summary>The sector's sole optional gas descriptor.</summary>
+    /// <summary>
+    /// The gas cloud whose centre lies in the sector, if <see cref="SectorSummary.GasCloudCount"/> is one. It may
+    /// reach into neighbouring sectors; <see cref="GasCloudModule.Intersecting(Galaxy, SectorCoord, Span{GasCloudPlacement})"/>
+    /// lists every cloud that reaches a sector, also those centred elsewhere.
+    /// </summary>
     public GasCloud GasCloud;
 
     /// <summary>
@@ -216,21 +223,34 @@ public sealed class SectorContent
     public Vector3 BoundsCenter;
     public float BoundsRadius;
 
-    /// <summary>Working space for the asteroid field module.</summary>
+    /// <summary>Working space for the asteroid field module: one key per candidate rock of the sector.</summary>
     internal ulong[] SortKeys = [];
+
+    /// <summary>Working space for the asteroid field module: the fields that reach the sector, and their contours.</summary>
+    internal AsteroidFieldsModule.Field[] Fields = [];
+    internal AsteroidFieldsModule.RibbonKnot[] Knots = [];
+
+    /// <summary>Working space for the asteroid field module: the share of candidates kept, on a lattice over the sector.</summary>
+    internal float[] Thinning = [];
 
     /// <summary>When a <see cref="RockField"/> last handed this sector out, for choosing which to drop.</summary>
     internal long LastUsed;
 
-    internal void Reserve(int asteroids)
+    /// <summary>Makes room for a sector's asteroids and for the candidates they are chosen from.</summary>
+    internal void Reserve(int asteroids, int candidates)
     {
-        if (Asteroids.Length >= asteroids)
-            return;
-        var size = 64;
-        while (size < asteroids)
-            size *= 2;
-        Asteroids = new Asteroid[size];
-        SortKeys = new ulong[size];
+        if (Asteroids.Length < asteroids)
+            Asteroids = new Asteroid[Grown(asteroids)];
+        if (SortKeys.Length < candidates)
+            SortKeys = new ulong[Grown(candidates)];
+
+        static int Grown(int count)
+        {
+            var size = 64;
+            while (size < count)
+                size *= 2;
+            return size;
+        }
     }
 }
 
@@ -247,13 +267,13 @@ public sealed class Galaxy
     /// <summary>
     /// The version of what a seed generates: which asteroids a sector has, in which order, and where. A saved
     /// world names a pushed asteroid by its index in its sector's generated list, so a save made under one
-    /// version is refused under another. Bump it whenever the same seed, settings and content files would
-    /// generate anything else: a change to a module's arithmetic, its order of draws or the order of the list.
-    /// Retuning <c>galaxy.json</c> needs no bump: the file is part of the content identity, which a save is
-    /// held to as well. It is not the network protocol's version, which changes for reasons a save does not
-    /// care about.
+    /// version is refused under another, untouched: there is no migration. Bump it whenever the same seed,
+    /// settings and content files would generate anything else: a change to a module's arithmetic, its order
+    /// of draws or the order of the list. Retuning <c>galaxy.json</c> needs no bump: the file is part of the
+    /// content identity, which a save is held to as well. It is not the network protocol's version, which
+    /// changes for reasons a save does not care about.
     /// </summary>
-    public const int GenerationVersion = 3;
+    public const int GenerationVersion = 4;
 
     /// <summary>The most resources the content may define: a sector's resources travel as one bit each.</summary>
     public const int MaxResources = 16;
@@ -533,9 +553,7 @@ public sealed class Galaxy
 
         var sun = Vector3.Normalize(new Vector3(random.NextSigned(), random.NextSigned() * 0.6f + 0.25f, random.NextSigned()) + new Vector3(0, 0, 0.001f));
 
-        // Matter follows the galaxy's spiral: dense in the arms and the core, thin between them, almost none
-        // outside the disc.
-        var density = Shape.Density(coord.X, coord.Z) * Shape.LayerFalloff(coord.Y);
+        var density = MatterAt(coord);
         var summary = new SectorSummary
         {
             Coord = coord,
@@ -550,6 +568,12 @@ public sealed class Galaxy
             module.Summarize(sector, ref summary);
         return summary;
     }
+
+    /// <summary>
+    /// How much matter the galaxy's shape puts in a sector, from 0 (void) to about 1 (core, arm). Matter follows
+    /// the galaxy's spiral: dense in the arms and the core, thin between them, almost none outside the disc.
+    /// </summary>
+    public float MatterAt(SectorCoord coord) => Shape.Density(coord.X, coord.Z) * Shape.LayerFalloff(coord.Y);
 
     /// <summary>Generates a sector's contents into <paramref name="content"/>, reusing its buffers.</summary>
     public void Generate(SectorCoord coord, SectorContent content)
@@ -676,6 +700,16 @@ public struct SectorRandom
         _state = Mix(_state ^ (uint)coord.Z);
         _state = Mix(_state ^ stream);
     }
+
+    /// <summary>
+    /// A stream of its own for one numbered thing under a key, such as one rock of a field. Whatever is drawn
+    /// for one number never changes what another draws, so the things can be made in any order and by anyone.
+    /// </summary>
+    internal static SectorRandom Numbered(ulong key, uint number) => new() { _state = Mix(key + number * 0xD1342543DE82EF95) };
+
+    /// <summary>A value in [0, 1) for a point of an integer lattice under a key.</summary>
+    internal static float Lattice(ulong key, int x, int y, int z) =>
+        (Mix(key + (ulong)x * 0xA0761D6478BD642F + (ulong)y * 0xE7037ED1A0B428DB + (ulong)z * 0x8EBC6AF09C88C6E3) >> 40) * (1f / (1 << 24));
 
     /// <summary>
     /// A stream number from a name, the same on every machine and in every build. Streams named differently are

@@ -114,6 +114,9 @@ public sealed class OwnerClaimTests
         Assert.Equal(default, rig.Owners[0].Account);
         if (outcome == CommitOutcome.Failed)
         {
+            // The worker reports a commit before it gives the buffer back. A claim staged in between is
+            // captured one callback later: right for a server, and one callback more than is run here.
+            rig.WaitIdle();
             Assert.Equal(ServerHost.ClaimState.Pending, rig.Server.StageVerifiedLocalClaim(Account));
             rig.Tick();
             rig.WaitIdle();

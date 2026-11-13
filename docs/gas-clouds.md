@@ -6,11 +6,13 @@ Measured results are in the refinement report. Visual acceptance is the develope
 
 ## Placement and ownership
 
-- `gas-clouds` is an independent `SectorModule` in shared `galaxy.json`; its stream never changes asteroid bytes.
-- At most one descriptor per sector; 4% presence, including outside the galaxy disc. Placement does not depend on asteroid settings.
-- Descriptor and count live in worker-owned `SectorContent`; the renderer reads only Ready slots for its galaxy.
+Clouds are things in world space; see [world generation](world-generation.md) for the rules and the query API.
+
+- `gas-clouds` is a `SectorModule` in shared `galaxy.json` with its own streams. A sector anchors at most one cloud: 4% presence, including outside the galaxy disc.
+- A cloud is centred anywhere in its anchor sector and may lie across its walls. Most have an x half-extent of 4 to 5.6 km; 8% are huge, 10 to 20 km.
+- The anchor's `SectorContent` holds the descriptor and count; the renderer reads only Ready slots for its galaxy. `GasCloudModule.Intersecting` lists clouds centred elsewhere.
 - Positions become camera-relative only after double-precision sector translation. Density coordinates stay local to the cloud.
-- No `ProtocolInfo.Version` or `Galaxy.GenerationVersion` bump: gas adds no wire field and draws from its own streams, so no asteroid list changes. The `galaxy.json` module is covered by the content identity. The frozen asteroid fixture/hash remains unchanged.
+- Some clouds hold asteroids (`inGas` in the asteroid module): gas now changes asteroid lists near those clouds. Generation version 4 and protocol 36 cover it; the frozen fixture holds a copy of the gas rules.
 
 ## Rendering
 
@@ -67,9 +69,13 @@ Sample-count boundaries add zero weight initially, and light probes use fixed st
 An occupied sample uses at most three density lookups and four lighting lookups. Across a full 64-step march, lighting uses at most 96 lookups before density-based skips.
 CPU distance/frustum rejection precedes submission. Zero submitted clouds make no gas copy or raymarch draw.
 
-Centers differ by at least 0.9 sector edges; each visibility radius is at most 0.4.
+A cloud shows up to its x half-extent plus 28% of a sector edge from its centre, fading over the last 10%.
+Generation keeps any two clouds further apart than both of those reaches together: where two could show at once, the larger stays.
 Thus at most one cloud has positive visibility at any camera. The eight-record queue is conservative; deferred frame data needs only one record.
-Clouds fade from 30% to 40% of a sector edge, before streaming retirement.
+A cloud of today's usual size fades from 30% to 40% of a sector edge, as before; a huge one from 68% to 78%. Both are inside the streamed block of sectors.
+Extinction per metre falls with size above the standard 4.8 km half-extent, so a huge cloud is as deep to look through as an ordinary one.
+A huge cloud keeps the content's sample count over a longer path: its steps are up to four times as long.
+First captures of huge clouds (`133,0,-77` and `-66,1,37`, outside, edge and pilot) render without errors: a bright, soft mass with less inner structure than an ordinary cloud. Not tuned, and not run with validation layers.
 
 Deferred tone mapping uses at most thirteen segment calls: six intervals, up to six shield attenuation calls, and own-shield lift.
 A shield uses at most two refraction segments in its light pass, skipped when the bend is zero.
@@ -89,12 +95,18 @@ The new immutable texture still requires those same validation checks.
 
 ## Reproducible muted inspection
 
-Default seed `0x50524F5350454354`, sector `-3,0,5` has a cloud.
-Half extents: `(4800,3120,4080)` m. Center approximately `(-536.49,1066.86,-257.67)` m relative to the sector.
+Default seed `0x50524F5350454354`, sector `-3,0,5` anchors an ordinary cloud.
+Half extents: `(4071,2646,3461)` m. Center approximately `(-5364.91,10668.58,-2576.74)` m relative to the sector: well off the arrival point.
 `--gas-view` is refused unless `--capture` or `--bench` is present, and WorldView checks muted devices again.
 It moves only the inspection camera; it never creates a fake cloud or moves ships/asteroids.
 
-- `outside` / `absent`: same camera, 2.4 z half-extents from cloud center; absent disables gas submission.
+Sectors with the default seed whose arrival point is inside a cloud, for the pilot views:
+
+- `127,-1,-127`: an ordinary cloud, half extents `(5256,3416,4468)` m, centred about 1.1 km from arrival, with rocks in it.
+- `133,0,-77`: a huge cloud, half extents `(19616,12750,16674)` m, centred about 1.9 km from arrival. It reaches all 26 sectors around.
+- `-66,1,37`: a huge cloud with rocks in it, half extents `(19967,12978,16972)` m, centred about 7.4 km from arrival.
+
+- `outside` / `absent`: same camera, 2.4 z half-extents from cloud center, or nearer for a huge cloud: no further than it still shows in full. Absent disables gas submission.
 - `inside` / `inside-absent`: same camera at cloud center, looking -z; full-screen volume stress.
 - `edge`: camera at 92% of x half-extent; `offscreen`: outside camera facing away.
 - `pilot` / `pilot-absent`: normal ship camera for opaque hull, shield and jump inspection; `--look` still works.
@@ -126,7 +138,7 @@ Capture 00 renders the ordinary pass; only after its image is saved does an unre
 Each saved image has a JSON sidecar recording its actual rendered mode, gas presence, shield count, run identity and image SHA-256. `tools/check_gas_overlay.py` requires a successful ordinary/deferred pair from one run before checking pixels. Missing or stale evidence fails. It also fails if any pixel outside the menu bar and right-hand panels differs by more than 8/255. Run `make gas-overlay-tests` for evidence-rejection tests.
 
 ```fish
-make run ARGS="--start local --listing off --sector -3,0,5 --open command --gas-fixture 13 --validation --capture /tmp/overlay.png --capture-after 5 --capture-count 2 --capture-every 2"
+make run ARGS="--start local --listing off --sector 127,-1,-127 --open command --gas-fixture 13 --validation --capture /tmp/overlay.png --capture-after 5 --capture-count 2 --capture-every 2"
 python3 tools/check_gas_overlay.py /tmp/overlay-00.png /tmp/overlay-01.png
 ```
 
@@ -135,8 +147,8 @@ Jump marks are not covered: they follow the simulated jump stage, which the froz
 
 Staged visual checks (muted captures, validation on):
 
-- Arrival into gas: `--sector -3,0,4 --gas-view pilot --open jump-rift --jump-to -3,0,5 --capture-after 8 --capture-count 30 --capture-every 1` (arrival about 19 s; also `--open jump`).
-- Overlapping openings in gas: `--sector -3,0,5 --gas-view pilot --open jump-fleet-ahead --capture-after 13.5 --capture-count 8 --capture-every 0.85`.
+- Arrival into gas: `--sector 127,-1,-128 --gas-view pilot --open jump-rift --jump-to 127,-1,-127 --capture-after 8 --capture-count 30 --capture-every 1` (arrival about 19 s; also `--open jump`).
+- Overlapping openings in gas: `--sector 127,-1,-127 --gas-view pilot --open jump-fleet-ahead --capture-after 13.5 --capture-count 8 --capture-every 0.85`.
 - Camera motion: `--gas-view pilot --open hud --look -30 --look-to 30 --capture-after 4 --capture-count 24 --capture-every 1`. At 5096x1390 a capture takes about 0.8 s to save, so intervals under 1 s bunch up.
 All twelve pass with the noise texture and the refined density at 5096x1390 on an RTX 5070 Ti with validation on.
 The same shield pixel matched with/without the unrelated portal; both pruning cases entered one nonempty segment.
