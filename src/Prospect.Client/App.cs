@@ -289,6 +289,11 @@ internal sealed class App : IDisposable
         // A scripted run carries its own title so the developer's compositor can keep it off their screen
         // (see "Checking the client without a person at the screen" in AGENTS.md).
         _window = Glfw.CreateWindow(new GlfwWindow.CreateInfo { Title = scripted ? ScriptedWindowTitle : "PROSPECT", Size = _windowedSize });
+        // BRUTAL's refresh handler reads every window property back from GLFW, the title too, and marshalling the
+        // title makes a new string each time the compositor asks for a redraw (an expose, a resize, a change of
+        // focus). The game draws every frame anyway, and size, position, focus and closing have callbacks of their
+        // own, so the window takes no refresh callback at all.
+        Glfw.PInvoke.SetWindowRefreshCallback(_window, null!);
         _window.SetSizeLimits(new int2(960, 540), new int2(-1, -1));
         if (Settings.Fullscreen && options.WindowSize is null)
             EnterFullscreen();
@@ -300,6 +305,10 @@ internal sealed class App : IDisposable
         _renderer = new FrameRenderer(_gpu, _swapchain);
         Devices = new InputDevices(_window) { Muted = options.BenchSeconds > 0 || options.CapturePath is not null };
         _ui = new UiContext(_window, Devices, _gpu, _swapchain, Settings.UiScale);
+        // Input events reach GLFW and Dear ImGui functions nothing else calls (the pointer leaving the window, a
+        // change of focus); bound now, their first call costs the frame loop nothing. See NativeBindings.
+        var prelinked = NativeBindings.Prelink(typeof(Glfw).Assembly, typeof(ImGui).Assembly);
+        Logs.App.Debug($"Bound {prelinked} native imports of GLFW and Dear ImGui ahead of use");
         GpuLabel = _gpu.DeviceName.ToUpperInvariant();
 
         Jobs.CompleteAll();
