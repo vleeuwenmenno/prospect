@@ -42,6 +42,8 @@ internal static class Program
                                   lists of hostile names), failed or off
           --gas-fixture <1..13>    With --capture only: controlled production-shader regression inputs (13: real-source overlay check)
           --gas-view <view>       Muted cloud camera: outside, inside, edge, offscreen, absent, inside-absent, pilot-absent, pilot
+          --gas-distance <radii>  With --gas-view outside or absent: the camera's distance in largest half-extents of the cloud
+          --gas-distance-to <radii>  Move from --gas-distance to this distance over the captures, in equal ratios
           --sector <x>,<y>,<z>    With --start local or --bench: start in this sector instead of the home sector
           --jump-to <x>,<y>,<z>   With --open jump, jump-wormhole or jump-rift: jump to this sector's centre instead of 12,0,-7
           --size <W>x<H>          Start windowed at this size
@@ -202,6 +204,17 @@ internal static class Program
                     if (options.GasView is not ("outside" or "inside" or "edge" or "offscreen" or "absent" or "inside-absent" or "pilot-absent" or "pilot"))
                         return Fail("Invalid --gas-view: outside, inside, edge, offscreen, absent, inside-absent, pilot-absent, pilot.");
                     break;
+                case "--gas-distance" when hasValue:
+                case "--gas-distance-to" when hasValue:
+                    {
+                        var option = args[i];
+                        var to = option == "--gas-distance-to";
+                        if (!float.TryParse(args[++i], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var radii) || !(radii is >= 0.1f and <= 200f))
+                            return Fail($"Invalid {option}: a distance of 0.1 to 200 cloud radii.");
+                        if (to) options.GasDistanceTo = radii;
+                        else options.GasDistance = radii;
+                        break;
+                    }
                 case "--jump-to" when hasValue:
                     {
                         var parts = args[++i].Split(',');
@@ -302,6 +315,10 @@ internal static class Program
         if (options.GasFixture > 0 && (options.CapturePath is null || options.BenchSeconds > 0))
             return Fail("--gas-fixture works only with --capture, without --bench.");
 
+        if ((options.GasDistance is not null || options.GasDistanceTo is not null) && options.GasView is not ("outside" or "absent"))
+            return Fail("--gas-distance works only with --gas-view outside or absent.");
+        if (options.GasDistanceTo is not null && options.GasDistance is null)
+            return Fail("--gas-distance-to needs --gas-distance.");
         if (options.GasView is not null && (options.CapturePath is null && options.BenchSeconds <= 0))
             return Fail("--gas-view works only with --capture or --bench.");
 

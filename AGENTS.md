@@ -238,6 +238,7 @@ The client opens a real window on the developer's desktop, and they are usually 
 
 - See `docs/gas-clouds.md` for the bounded visual pass and muted capture scenarios. Gas changes no wire field and no asteroid list: no protocol or generation-version bump.
 - Gas uses its RGB-only pass without portals or shields; frames with either defer bounded gas segments to HDR composition. Preserve the gas-free shield copies, frame.glsl layout, and per-sample own-passage checks. The fixed 1 MiB noise lattice is renderer-owned, immutable, and independent of resize.
+- Far gas: three levels of detail by distance in cloud radii, figures in `content/visuals/gas.json` (`GasTiers`). Which clouds exist comes from `IGasCloudSource` only (today `GeneratedGasClouds` over the shared `GasCloudQuery`); never read clouds from sector slots. Composition takes one cloud, the primary (`GasQueue`); every other draw is in the scene or, at the far level, in the sky. A new level or draw order needs a case in `GasLevelsTests` and a `--gas-distance` sweep capture.
 
 ## Known limits to design around
 

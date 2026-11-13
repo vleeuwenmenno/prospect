@@ -1,0 +1,12 @@
+{
+  "viewRangeSectors": 5,
+  "rangeFade": 0.3,
+  "nearEnd": 3.0,
+  "nearFade": 1.0,
+  "midEnd": 9.0,
+  "midFade": 3.0,
+  "midSamples": 24,
+  "farSamples": 10,
+  "farDetail": 1,
+  "maxDraws": 32
+}

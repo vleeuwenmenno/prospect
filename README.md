@@ -11,7 +11,7 @@ or that local game opened to other players. There is one simulation and one code
 
 ## Status
 
-Rare decorative volumetric gas clouds are generated: lopsided, self-shadowed, with billowy edges and wisps. Full-screen views reach 144 FPS at 5096x1390 except a pilot view in dense asteroids; visual acceptance is pending. See [gas clouds](docs/gas-clouds.md).
+Rare decorative volumetric gas clouds are generated: lopsided, self-shadowed, with billowy edges and wisps. They are seen from up to five sectors away, at three levels of detail that hand over without a step. Full-screen views reach 144 FPS at 5096x1390 except a pilot view in dense asteroids; visual acceptance is pending. See [gas clouds](docs/gas-clouds.md).
 
 Explicit private local claims have a nonvisual API backed by account-service tickets and an exact durable save commit. No player-facing claim UI exists; remote saved-world admission remains missing. Linked local owners still play offline. Save layout 2 refuses older layouts without migration.
 
