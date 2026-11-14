@@ -62,6 +62,13 @@ Asteroids carry a main ore (`Resource`, `Grade`) and up to two mix-ins (`Mix1`, 
 Every share is a share of the asteroid's mass; `Asteroid.Ore` is their sum and never exceeds `ore.maxOre` (0.7).
 Bare rock has resource -1 and no mix-in; ice is the existing ice resource and takes none.
 
+## Composition readout
+
+- Target panel: one stacked bar (main ore, mix-ins, rock), then one row per resource: share and ore mass, then ROCK.
+- A trace shows as "TRACE", a thin sliver in the bar and no mass.
+- Rock is a figure ("45 %") only when every share is resolved; with a trace it reads "UP TO 45 %".
+- Bare rock is one "Bare rock" row. The data sheet's Grade, Mixed in and Rock rows use the same words.
+
 ## Generated asteroid composition
 
 Content, all in `galaxy/galaxy.json`:

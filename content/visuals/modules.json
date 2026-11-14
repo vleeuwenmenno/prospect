@@ -58,6 +58,10 @@
   "gasWindowWidth": 460,
   "gasWindowHeight": 440,
   "unresolvedPercent": 0.5,
-  "targetPanelExtra": 54,
+  "rockColor": "8E959E",
+  "traceMarkPixels": 2,
+  "compositionBarHeight": 10,
+  "compositionRowHeight": 16,
+  "targetPanelFooter": 18,
   "targetPanelUnknownExtra": 28
 }

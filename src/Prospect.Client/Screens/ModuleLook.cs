@@ -56,8 +56,26 @@ internal sealed class ModuleLook
     /// <summary>A share left unresolved by the scanner is only shown when it is at least this many percentage points.</summary>
     public float UnresolvedPercent { get; init; }
 
-    /// <summary>Height, in unscaled pixels, the target panel grows by to hold an asteroid analysis, and by for the line that says it is unscanned.</summary>
-    public float TargetPanelExtra { get; init; }
+    /// <summary>The composition bar's neutral rock colour, six hex digits.</summary>
+    [JsonPropertyName("rockColor")]
+    public string RockColorFile { get; init; } = "";
+
+    /// <summary>The rock's colour in the composition bar and its row.</summary>
+    public uint RockRgb { get; private set; }
+
+    /// <summary>Width, height of the composition bar and of a composition row, and the width of a trace's sliver, in unscaled pixels.</summary>
+    public float TraceMarkPixels { get; init; }
+
+    public float CompositionBarHeight { get; init; }
+
+    public float CompositionRowHeight { get; init; }
+
+    /// <summary>The line under the rows: quality, mass and age of the scan, in unscaled pixels.</summary>
+    public float TargetPanelFooter { get; init; }
+
+    /// <summary>The height an asteroid analysis takes in the target panel, in unscaled pixels: the bar, the rows, the footer.</summary>
+    public float AnalysisHeight(in RockComposition composition) =>
+        CompositionBarHeight + 6 + CompositionRowHeight * Math.Max(1, composition.Rows) + TargetPanelFooter;
 
     public float TargetPanelUnknownExtra { get; init; }
 
@@ -191,8 +209,11 @@ internal sealed class ModuleLook
             throw new InvalidDataException($"{path}: strip chip width is 60 to 300, height 24 to 80, gap 0 to 32, resultSeconds 0 to 60, alphas 0 to 1");
         if (!(CardBarWidth is >= 40 and <= 240) || !(GasWindowWidth is >= 300 and <= 900) || !(GasWindowHeight is >= 200 and <= 1200))
             throw new InvalidDataException($"{path}: cardBarWidth is 40 to 240, gasWindowWidth 300 to 900, gasWindowHeight 200 to 1200");
-        if (!(UnresolvedPercent is >= 0 and <= 20) || !(TargetPanelExtra is >= 0 and <= 300) || !(TargetPanelUnknownExtra is >= 0 and <= 300))
-            throw new InvalidDataException($"{path}: unresolvedPercent is 0 to 20, targetPanelExtra and targetPanelUnknownExtra 0 to 300");
+        RockRgb = Rgb(path, "the rock", RockColorFile);
+        if (!(TraceMarkPixels is >= 1 and <= 8) || !(CompositionBarHeight is >= 4 and <= 30) || !(CompositionRowHeight is >= 10 and <= 40) || !(TargetPanelFooter is >= 10 and <= 60))
+            throw new InvalidDataException($"{path}: traceMarkPixels is 1 to 8, compositionBarHeight 4 to 30, compositionRowHeight 10 to 40, targetPanelFooter 10 to 60");
+        if (!(UnresolvedPercent is >= 0 and <= 20) || !(TargetPanelUnknownExtra is >= 0 and <= 300))
+            throw new InvalidDataException($"{path}: unresolvedPercent is 0 to 20, targetPanelUnknownExtra 0 to 300");
     }
 
     private static bool Unit(float value) => value is >= 0 and <= 1;
