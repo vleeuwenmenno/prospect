@@ -322,6 +322,9 @@ public sealed class WorldSettingEffectTests
         {
             var flight = World($"shieldRecharge={factor}").Pod.Flight;
             Assert.Equal(plain.ShieldRecharge * factor, flight.ShieldRecharge, 3);
+            Assert.Equal(plain.ShieldPower * factor, flight.ShieldPower, 3);
+            Assert.Equal(plain.ShieldRestartPower * factor, flight.ShieldRestartPower, 3);
+            Assert.Equal(plain.ShieldPower / plain.ShieldRecharge, flight.ShieldPower / flight.ShieldRecharge, 5);
             Assert.Equal(plain.ShieldRecharge * factor, World($"shieldRecharge={factor}").Pod.Stats.ShieldRecharge, 3);
             Assert.Equal(normal * factor, RechargedInOneSecond(flight), 1);
 

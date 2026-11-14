@@ -328,26 +328,35 @@ public static class FlightModel
 
         // Power: what the hull wants this tick against what the generator makes. The battery covers a shortfall
         // and takes the surplus; with the battery flat, thrust is cut back to what the generator alone can feed.
-        // A broken shield charges at its usual rate but draws its restart power until it is back online.
+        // Propulsion has priority over shield recovery; only the remaining energy can restore shield points.
         state.ShieldCooldown = Math.Max(0f, state.ShieldCooldown - dt);
         if (p.ShieldCapacity <= 0f)
             state.ShieldOffline = false;
         var thrustUse = Math.Max(MathF.Abs(thrust.X), Math.Max(MathF.Abs(thrust.Y), MathF.Abs(thrust.Z)));
         var thrustDemand = p.ThrustPower * thrustUse * (boosting ? p.BoostPowerMultiplier : 1f);
-        var recharging = state.Shield < p.ShieldCapacity && state.ShieldCooldown <= 0f && state.Energy > 0f;
-        var demand = p.IdlePower + thrustDemand + (recharging ? state.ShieldOffline ? p.ShieldRestartPower : p.ShieldPower : 0f);
-        state.Energy = Math.Clamp(state.Energy + (p.PowerGenerated - demand) * dt, 0f, p.EnergyStorage);
-        state.Boosting = boosting && state.Energy > 0f;
+        var demand = p.IdlePower + thrustDemand;
+        var available = Math.Max(0f, state.Energy + (p.PowerGenerated - demand) * dt);
+        state.Boosting = boosting && available > 0f;
 
         var thrustScale = 1f;
-        if (state.Energy <= 0f && demand > p.PowerGenerated)
-        {
-            recharging = false;
+        if (available <= 0f && demand > p.PowerGenerated)
             thrustScale = thrustDemand > 0f ? Math.Clamp((p.PowerGenerated - p.IdlePower) / thrustDemand, 0f, 1f) : 1f;
-        }
 
-        if (recharging)
-            state.Shield = Math.Min(p.ShieldCapacity, state.Shield + p.ShieldRecharge * dt);
+        if (state.ShieldCooldown <= 0f && p.ShieldRecharge > 0f)
+        {
+            // Stop the expensive phase exactly at the existing restart threshold. No extra phase state is needed.
+            var ceiling = state.ShieldOffline ? p.ShieldCapacity * p.ShieldRestartFraction : p.ShieldCapacity;
+            var restored = Math.Min(Math.Max(0f, ceiling - state.Shield), p.ShieldRecharge * dt);
+            var power = state.ShieldOffline ? p.ShieldRestartPower : p.ShieldPower;
+            var energyPerPoint = power / p.ShieldRecharge;
+            if (energyPerPoint > 0f)
+            {
+                restored = Math.Min(restored, available / energyPerPoint);
+                available = Math.Max(0f, available - restored * energyPerPoint);
+            }
+            state.Shield += restored;
+        }
+        state.Energy = Math.Min(available, p.EnergyStorage);
 
         // Outside the recharge so that a shield whose capacity shrank under its charge still comes back.
         if (state.ShieldOffline && state.ShieldCooldown <= 0f && state.Shield >= p.ShieldCapacity * p.ShieldRestartFraction)

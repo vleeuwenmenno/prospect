@@ -785,3 +785,11 @@ Snapshots already replicate sparse block HP. Prediction receives authoritative d
 PlotJump is 30 bytes (id, hull id, present flag, XYZ doubles); Navigation is 35 bytes, adding result hull and refusal.
 Both use existing admitted-connection receive budgets. Only the currently controlled hull may be plotted.
 Neither schema changes saved state. Existing WorldView NAV consumption and UI feedback are work for the UI worker.
+
+## Shield recharge energy (evaluator 6)
+
+- Shared `HullSim.Step` spends remaining energy on shield points after FTL and propulsion; see
+  [provisional recharge rules](direction.md#decided-provisional-tunable-shield-recharge-energy).
+- Evaluator 6 scales shield power with the world recharge multiplier, preserving MJ/point.
+- Existing `blocks/blocks.json` identity covers emitter draw, recharge and restart multiplier (now 4).
+- No message or saved-state layout changed. Offline state, shield charge and battery already carry recovery progress.

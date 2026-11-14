@@ -335,6 +335,131 @@ public sealed class PowerAndDamageTests
         Assert.Equal(Pod.ShieldCapacity, state.Shield);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ShieldRecoverySpendsOnlyEnergyForPointsRestored(bool offline)
+    {
+        var flight = Pod;
+        flight.PowerGenerated = flight.IdlePower;
+        var state = HullState.Spawn(Double3.Zero, flight);
+        state.Shield = offline ? 0f : flight.ShieldCapacity - 100f;
+        state.ShieldOffline = offline;
+        var before = state;
+        var order = default(HullOrder);
+        HullSim.Step(ref state, ref order, default, flight);
+        var cost = (offline ? flight.ShieldRestartPower : flight.ShieldPower) / flight.ShieldRecharge;
+        Assert.Equal(flight.ShieldRecharge * HullSim.Dt, state.Shield - before.Shield, 4);
+        Assert.Equal((state.Shield - before.Shield) * cost, before.Energy - state.Energy, 4);
+        Assert.True(cost > 0f);
+
+        // A fractional last top-up pays only for the missing points.
+        state.ShieldOffline = false;
+        state.Shield = flight.ShieldCapacity - 0.125f;
+        before = state;
+        HullSim.Step(ref state, ref order, default, flight);
+        Assert.Equal(flight.ShieldCapacity, state.Shield);
+        Assert.Equal(0.125f * flight.ShieldPower / flight.ShieldRecharge, before.Energy - state.Energy, 4);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ShieldRecoveryUsesPartialEnergyThenWaitsWithoutGoingNegative(bool offline)
+    {
+        var flight = Pod;
+        flight.PowerGenerated = flight.IdlePower;
+        var state = HullState.Spawn(Double3.Zero, flight);
+        state.Shield = 0f;
+        state.ShieldOffline = offline;
+        var cost = (offline ? flight.ShieldRestartPower : flight.ShieldPower) / flight.ShieldRecharge;
+        state.Energy = cost * flight.ShieldRecharge * HullSim.Dt / 4f;
+        var order = default(HullOrder);
+        HullSim.Step(ref state, ref order, default, flight);
+        Assert.Equal(flight.ShieldRecharge * HullSim.Dt / 4f, state.Shield, 5);
+        Assert.Equal(0f, state.Energy);
+        var shield = state.Shield;
+        for (var i = 0; i < 120; i++)
+        {
+            HullSim.Step(ref state, ref order, default, flight);
+            Assert.Equal(0f, state.Energy);
+            Assert.Equal(shield, state.Shield);
+        }
+    }
+
+    [Fact]
+    public void BoostAndFtlTakeEnergyBeforeShieldRecovery()
+    {
+        var flight = Pod;
+        flight.PowerGenerated = flight.IdlePower;
+        flight.BoostEnergyFloor = 0;
+        var state = HullState.Spawn(Double3.Zero, flight);
+        state.Shield = 0;
+        state.Energy = flight.ThrustPower * flight.BoostPowerMultiplier * HullSim.Dt + flight.ShieldPower * HullSim.Dt / 2f;
+        var order = default(HullOrder);
+        HullSim.Step(ref state, ref order, new FlightInput { Forward = 127, Boost = true }, flight);
+        Assert.True(state.Boosting);
+        Assert.Equal(flight.ShieldRecharge * HullSim.Dt / 2f, state.Shield, 4);
+        Assert.InRange(state.Energy, 0f, 0.00001f);
+
+        state = HullState.Spawn(Double3.Zero, flight);
+        state.Shield = 0;
+        state.Energy = flight.FtlPower * HullSim.Dt / 2f;
+        var energy = state.Energy;
+        order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -220000) };
+        HullSim.Step(ref state, ref order, default, flight);
+        Assert.Equal(JumpPhase.Charge, state.Jump);
+        Assert.Equal(energy, state.JumpTimer);
+        Assert.Equal(0f, state.Energy);
+        Assert.Equal(0f, state.Shield);
+    }
+
+    [Fact]
+    public void RecoveryAtTheRestartThresholdPaysNoPremiumForOnlinePoints()
+    {
+        var flight = Pod;
+        flight.PowerGenerated = flight.IdlePower;
+        var state = HullState.Spawn(Double3.Zero, flight);
+        state.ShieldOffline = true;
+        var threshold = flight.ShieldCapacity * flight.ShieldRestartFraction;
+        state.Shield = threshold - 0.125f;
+        var before = state.Energy;
+        var order = default(HullOrder);
+        HullSim.Step(ref state, ref order, default, flight);
+        Assert.False(state.ShieldOffline);
+        Assert.Equal(threshold, state.Shield);
+        Assert.Equal(0.125f * flight.ShieldRestartPower / flight.ShieldRecharge, before - state.Energy, 4);
+    }
+
+    [Fact]
+    public void ShieldRecoveryIsDeterministicAndTakesNoTickMemory()
+    {
+        var authority = HullState.Spawn(Double3.Zero, Pod);
+        authority.Shield = 0;
+        authority.ShieldOffline = true;
+        var predicted = authority;
+        var authoritativeOrder = default(HullOrder);
+        var predictedOrder = authoritativeOrder;
+        var probe = new AllocationProbe();
+        for (var i = 0; i < 2400; i++)
+        {
+            var input = new FlightInput { Forward = (sbyte)(i % 240 < 60 ? 127 : 0), Boost = i % 240 < 60 };
+            var before = authority;
+            var orderBefore = authoritativeOrder;
+            while (probe.Measuring())
+            {
+                authority = before;
+                authoritativeOrder = orderBefore;
+                HullSim.Step(ref authority, ref authoritativeOrder, input, Pod);
+            }
+            HullSim.Step(ref predicted, ref predictedOrder, input, Pod);
+            Assert.Equal(predicted, authority);
+            Assert.InRange(authority.Energy, 0f, Pod.EnergyStorage);
+        }
+        Assert.Equal(0, probe.Bytes);
+        Assert.True(authority.Shield > 0f);
+    }
+
     /// <summary>The galaxy the crash tests fly in, and in its home sector an ordinary rock with room around it.</summary>
     private static readonly Galaxy CrashGalaxy = Content.Galaxy.WithSeed(11);
     private static readonly RockRef OrdinaryRock = ClearRock(CrashGalaxy, default, 80f, 260f, new Vector3(-1, 0, 0), new Vector3(0, 1, 0));
@@ -2342,8 +2467,8 @@ public sealed class ShieldStateTests
     public void TheRestartRulesComeFromTheContent()
     {
         Assert.Equal(0.25f, Content.Rules.ShieldRestartFraction);
-        Assert.Equal(2f, Content.Rules.ShieldRestartPowerMultiplier);
-        Assert.Equal(Pod.ShieldPower * 2f, Pod.ShieldRestartPower);
+        Assert.Equal(4f, Content.Rules.ShieldRestartPowerMultiplier);
+        Assert.Equal(Pod.ShieldPower * 4f, Pod.ShieldRestartPower);
         Assert.Equal(0.25f, Pod.ShieldRestartFraction);
     }
 
@@ -2399,7 +2524,7 @@ public sealed class ShieldStateTests
         Assert.Equal(0f, state.Shield);
         Assert.True(state.ShieldOffline);
 
-        // Charging back costs the restart draw, twice the online top-up.
+        // Charging back costs the restart draw, four times the online top-up.
         state.Energy = Pod.EnergyStorage * 0.5f;
         var before = state.Energy;
         FlightModel.Step(ref state, default, Pod, HullSim.Dt);
@@ -2431,13 +2556,13 @@ public sealed class ShieldStateTests
     public void WithoutPowerABrokenShieldGainsNothingAndTheBatteryNeverGoesNegative()
     {
         var starved = Pod;
-        starved.PowerGenerated = starved.IdlePower + starved.ShieldPower;
+        starved.PowerGenerated = starved.IdlePower;
         var state = HullState.Spawn(Double3.Zero, starved);
         state.Shield = 0f;
         state.ShieldOffline = true;
         state.Energy = 0f;
 
-        // The generator would cover an online top-up but not the restart draw: the flat battery gives nothing.
+        // Idle systems consume all generation, leaving no energy for recovery.
         for (var i = 0; i < 60 * 30; i++)
         {
             FlightModel.Step(ref state, default, starved, HullSim.Dt);
@@ -2694,7 +2819,7 @@ public sealed class ShieldStateTests
     [InlineData(0.5f)]
     [InlineData(11f)]
     public void ContentRejectsARestartPowerOutsideItsRange(float multiplier) =>
-        Assert.Throws<InvalidDataException>(() => LoadWith("\"shieldRestartPowerMultiplier\": 2", $"\"shieldRestartPowerMultiplier\": {Json(multiplier)}"));
+        Assert.Throws<InvalidDataException>(() => LoadWith("\"shieldRestartPowerMultiplier\": 4", $"\"shieldRestartPowerMultiplier\": {Json(multiplier)}"));
 
     private static string Json(float value) => value.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
