@@ -104,7 +104,7 @@ internal static class ConsoleTip
             sink.Line("DELAY"u8, Kit.F($"{flight.ShieldDelay:0.#} S AFTER DAMAGE"), Theme.Text);
             sink.Line("RESTART DRAW"u8, Power(flight.ShieldRestartPower), FlightConsole.DrawColor);
             if (Starved(own, flight))
-                sink.Note("BATTERY EMPTY: NOT CHARGING"u8, Theme.Bad);
+                sink.Note("BATTERY EMPTY: CHARGING ON SPARE POWER ONLY"u8, Theme.Bad);
             sink.Note("NO PROTECTION UNTIL IT RESTARTS"u8, Theme.Bad);
             return;
         }
@@ -117,7 +117,7 @@ internal static class ConsoleTip
         if (mark > 0f)
             sink.Line("IF BROKEN"u8, Kit.F($"RESTARTS AT {mark * 100f:0} %"), Theme.TextDim);
         if (Starved(own, flight))
-            sink.Note("BATTERY EMPTY: NOT CHARGING"u8, Theme.Bad);
+            sink.Note("BATTERY EMPTY: CHARGING ON SPARE POWER ONLY"u8, Theme.Bad);
     }
 
     private static void Hull<T>(ref T sink, in HullView own, in FlightParams flight)
