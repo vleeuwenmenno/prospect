@@ -45,6 +45,46 @@ void main()
     vec3 view = normalize(-worldPosition);
     vec3 albedo = color.rgb;
 
+    // Ice (material 0.25, WorldView.MaterialIce): an asteroid to everything that reads the scene, lit as a clear,
+    // faceted crystal: flat faces, light wrapping into it and shining through where the star is behind it, streaks
+    // along the shard, a sharp glint and a bright rim.
+    if (color.a > 0.125 && color.a < 0.5)
+    {
+        vec3 facet = normalize(cross(dFdx(worldPosition), dFdy(worldPosition)));
+        if (dot(facet, n) < 0.0)
+            facet = -facet;
+        vec3 sun = frame.sunDirection.xyz;
+        // Streaks run along the shard (its local x): long and thin in the noise, so they read as grain in clear ice.
+        float streak = noise(localPosition * vec3(2.5, 38.0, 38.0)) * 0.6 + noise(localPosition * vec3(7.0, 90.0, 90.0)) * 0.4;
+        vec3 body = albedo * (0.8 + 0.4 * streak);
+        float facing = max(dot(facet, view), 0.0);
+        float wrap = max((dot(facet, sun) + 0.4) / 1.4, 0.0);
+        // Seen against the star, light comes through the ice, bluer than it went in.
+        float through = pow(max(dot(-view, sun), 0.0), 6.0) * (0.35 + 0.65 * (1.0 - facing));
+        vec3 halfway = normalize(sun + view);
+        float glint = pow(max(dot(facet, halfway), 0.0), 220.0) * step(0.0, dot(facet, sun));
+        float fresnel = 0.04 + 0.96 * pow(1.0 - facing, 5.0);
+        // Light scattered inside the crystal reaches its shaded side too, bluer than it went in, so a shard in shadow
+        // still reads as ice rather than as a dark rock.
+        vec3 inside = vec3(0.45, 0.68, 1.0) * frame.sunColor.rgb * (0.16 + 0.1 * streak) * (1.0 - 0.5 * wrap);
+        vec3 ice = body * (frame.sunColor.rgb * wrap * 0.8 + vec3(0.03, 0.045, 0.07)) + body * inside
+            + vec3(0.35, 0.6, 0.85) * frame.sunColor.rgb * through * 1.2 * (0.6 + 0.4 * streak)
+            + frame.sunColor.rgb * glint * 2.0
+            + vec3(0.4, 0.62, 0.9) * fresnel * (0.25 + 0.6 * wrap);
+        vec3 passageIce = frame.ftl.x > 2.5 ? vec3(0.16, 0.06, 0.015) : vec3(0.05, 0.08, 0.14);
+        ice += body * passageIce * frame.ftlShape.w;
+        if (frame.gridPlane.z > 0.01)
+        {
+            float toPlane = abs(worldPosition.y - frame.gridPlane.x);
+            float width = max(fwidth(worldPosition.y) * 1.6, 0.03);
+            float cutLine = 1.0 - smoothstep(width, width * 2.0, toPlane);
+            float below = worldPosition.y < frame.gridPlane.x ? 0.55 : 1.0;
+            ice = mix(ice * mix(1.0, below, frame.gridPlane.z), vec3(1.0, 0.69, 0.13) * 1.8, cutLine * frame.gridPlane.z);
+        }
+        outColor = vec4(ice, 0.25);
+        return;
+    }
+
     if (color.a < 0.5)
     {
         // Rock: mottled, with the facets of the mesh showing through for a rough, broken surface.

@@ -521,6 +521,7 @@ internal sealed class WorldView
     /// <summary>Whether the last rendered frame deferred gas to composition, and how many shields it queued.</summary>
     public (bool Deferred, int Shields, bool HasGas) LastGasMode => _scene.LastGasMode;
     private GasCloudPlacement _gasCapture;
+    private (Double3 Position, float Radius)? _gasCaptureIce;
     // Far gas: how it is levelled, and the clouds around the camera, which a worker keeps current.
     private readonly GasTiers _gasTiers = GasTiers.Load();
     private readonly ScanPulseLook _pulseLook = ScanPulseLook.Load();
@@ -531,6 +532,19 @@ internal sealed class WorldView
     private const float GasMinShare = 1f / 512f;
     /// <summary>How many gas draws the last frame queued at the full, the middle and the far level.</summary>
     public (int Full, int Middle, int Far) GasDraws { get; private set; }
+    /// <summary>How many overlapping pairs the last frame drew together, and how many lightning clouds were lit.</summary>
+    public (int Pairs, int Flashes, int Bolts) GasKinds { get; private set; }
+    private readonly LightningBolts _bolts = new();
+    /// <summary>
+    /// Muted captures only: seconds into the burst every lightning cloud is held at, so a still shows a stroke
+    /// whenever it is taken. Null in play: flashes follow the server's clock.
+    /// </summary>
+    public float? LightningPin { get; set; }
+    /// <summary>
+    /// The overlay check holds lightning here, long after any burst: lightning runs on the server's clock, which the
+    /// check's two captures cannot hold still.
+    /// </summary>
+    private const float OverlayLightning = 60f;
     private Galaxy? _gasCaptureGalaxy;
     private SectorCoord _gasCaptureCoord;
 
@@ -925,17 +939,60 @@ internal sealed class WorldView
                 if (galaxy.GasClouds?.TryGetCloud(galaxy, gasCoord, out captured) != true)
                     throw new InvalidDataException("--gas-view needs a sector that anchors a cloud: use --sector -3,0,5 with the default seed.");
                 _gasCapture = new GasCloudPlacement(gasCoord, captured);
+                _gasCaptureIce = null;
                 Console.WriteLine($"Gas scenario: seed={galaxy.Seed}, sector={gasCoord}, cloud={captured}");
             }
 
             var cloud = _gasCapture.Cloud;
-            var offset = gasView is "inside" or "inside-absent" ? Vector3.Zero : gasView == "edge" ? new Vector3(cloud.HalfSize.X * 0.92f, 0, 0) : new Vector3(0, 0, cloud.HalfSize.Z * 2.4f);
-            if (GasDistance is { } radii && gasView is "outside" or "absent")
-                offset = new Vector3(0, 0, MathF.Max(cloud.HalfSize.X, MathF.Max(cloud.HalfSize.Y, cloud.HalfSize.Z)) * radii);
-            CameraPosition = GasCloudQuery.CenterOf(galaxy, _gasCapture) + offset;
-            _forward = gasView == "offscreen" ? Vector3.UnitZ : -Vector3.UnitZ;
-            _right = gasView == "offscreen" ? -Vector3.UnitX : Vector3.UnitX;
-            _up = Vector3.UnitY;
+            if (gasView == "ice")
+            {
+                // The largest ice shard the anchored sector holds, from a few of its lengths away and a little above,
+                // with the shards behind it in view. The sector is generated once for this capture view only.
+                if (_gasCaptureIce is null)
+                {
+                    var content = new SectorContent();
+                    galaxy.Generate(_gasCapture.Anchor, content);
+                    for (var i = 0; i < content.AsteroidCount && _gasCaptureIce is null; i++)
+                        if (content.Asteroids[i].Shape == AsteroidShape.Icicle)
+                            _gasCaptureIce = (galaxy.CenterOf(_gasCapture.Anchor) + content.Asteroids[i].LocalPosition, content.Asteroids[i].Radius);
+                    if (_gasCaptureIce is null)
+                        throw new InvalidDataException("--gas-view ice needs a sector with ice shards: try --sector 43,0,38 with the default seed.");
+                }
+                var (rock, radius) = _gasCaptureIce.Value;
+                var toward = Vector3.Normalize(new Vector3(0.35f, -0.25f, -1f));
+                CameraPosition = rock - toward * (radius * (GasDistance ?? 3.2f));
+                _forward = toward;
+                _up = Vector3.Normalize(Vector3.Cross(Vector3.Cross(_forward, Vector3.UnitY), _forward));
+                _right = Vector3.Normalize(Vector3.Cross(_forward, _up));
+            }
+            else if (gasView == "pair")
+            {
+                // The anchored cloud and the cloud of the other kind it overlaps, seen side on: the camera looks at the
+                // middle of the two centres across the line between them.
+                if (!TryGasPartner(galaxy, _gasCapture, out var partner))
+                    throw new InvalidDataException("--gas-view pair needs a sector whose cloud overlaps one of the other kind: try --set sectorSize=20 --sector -7,2,4 with the default seed.");
+                var from = GasCloudQuery.CenterOf(galaxy, _gasCapture);
+                var to = GasCloudQuery.CenterOf(galaxy, partner);
+                var middle = from + (to - from) * 0.5;
+                var line = Vector3.Normalize(new Vector3((float)(to.X - from.X), (float)(to.Y - from.Y), (float)(to.Z - from.Z)));
+                var across = Vector3.Cross(line, Vector3.UnitY);
+                across = across.LengthSquared() < 1e-4f ? Vector3.UnitZ : Vector3.Normalize(across);
+                var size = MathF.Max(cloud.HalfSize.X, partner.Cloud.HalfSize.X) + (float)(to - from).Length * 0.5f;
+                CameraPosition = middle + across * (size * (GasDistance ?? 1.6f));
+                _forward = -across;
+                _up = Vector3.Normalize(Vector3.Cross(Vector3.Cross(_forward, Vector3.UnitY), _forward));
+                _right = Vector3.Normalize(Vector3.Cross(_forward, _up));
+            }
+            else
+            {
+                var offset = gasView is "inside" or "inside-absent" ? Vector3.Zero : gasView == "edge" ? new Vector3(cloud.HalfSize.X * 0.92f, 0, 0) : new Vector3(0, 0, cloud.HalfSize.Z * 2.4f);
+                if (GasDistance is { } radii && gasView is "outside" or "absent")
+                    offset = new Vector3(0, 0, MathF.Max(cloud.HalfSize.X, MathF.Max(cloud.HalfSize.Y, cloud.HalfSize.Z)) * radii);
+                CameraPosition = GasCloudQuery.CenterOf(galaxy, _gasCapture) + offset;
+                _forward = gasView == "offscreen" ? Vector3.UnitZ : -Vector3.UnitZ;
+                _right = gasView == "offscreen" ? -Vector3.UnitX : Vector3.UnitX;
+                _up = Vector3.UnitY;
+            }
         }
         // Which side of the opening the camera is on, from where the camera is this frame.
         UpdateThrough(dt);
@@ -1116,14 +1173,15 @@ internal sealed class WorldView
         FillOwnJump(ref constants, camera);
         _scene.BeginGas(_gasTiers.MaxDraws);
         GasDraws = default;
+        GasKinds = default;
         if (GasView is not ("absent" or "inside-absent" or "pilot-absent") && galaxy.GasClouds is { } gas)
-            QueueGas(galaxy, gas, camera, aspect, time);
+            QueueGas(galaxy, gas, camera, aspect, time, snapshot, ref constants, overlayCheck ? OverlayLightning : LightningPin);
 
         if (_devices.Muted && GasFixture is > 0 and <= GasShaderFixture.Count)
         {
             var fixtureGas = GasShaderFixture.Apply(GasFixture, ref constants, ref composite);
             _scene.BeginGas();
-            _scene.AddGas(fixtureGas, SceneRenderer.WholeView);
+            _scene.AddGas(fixtureGas, SceneRenderer.WholeView, 0);
             GasDraws = (1, 0, 0);
         }
 
@@ -1186,40 +1244,81 @@ internal sealed class WorldView
     /// <summary>
     /// Queues every known cloud in view, once for each level of detail it shows at: one, or two while it crosses
     /// from a level to the next. Far first, so of a cloud's two draws the cheaper one is under the other.
+    ///
+    /// A cold and a normal cloud whose boxes overlap (<see cref="GasCloudField.Partners"/>) are one draw: the first
+    /// is pushed, the second goes to <see cref="FrameConstants.GasPartners"/>, and the shader integrates both along
+    /// each ray. The pair takes its levels from the sphere around both, so both change level together. A lightning
+    /// cloud in a burst takes a slot of <see cref="FrameConstants.GasFlashes"/> for its stroke and bolt.
     /// </summary>
-    private void QueueGas(Galaxy galaxy, GasCloudModule gas, Double3 camera, float aspect, float time)
+    private void QueueGas(Galaxy galaxy, GasCloudModule gas, Double3 camera, float aspect, float time, SessionSnapshot snapshot, ref FrameConstants constants, float? lightningPin)
     {
         var sectorSize = (float)galaxy.SectorSize;
         var full = 0;
         var middle = 0;
         var distant = 0;
-        foreach (ref readonly var placed in _gasField.Clouds(galaxy))
+        var pairs = 0;
+        var flashes = 0;
+        var clouds = _gasField.Clouds(galaxy);
+        var partners = _gasField.Partners(galaxy);
+        var tick = snapshot.ServerTickPrecise + _frameAlpha;
+        _bolts.Begin();
+        for (var i = 0; i < clouds.Length; i++)
         {
+            ref readonly var placed = ref clouds[i];
+            var partner = partners[i];
+            // The pair is queued once, by whichever of the two comes first in the list.
+            if (partner >= 0 && partner < i) continue;
             var cloud = placed.Cloud;
             var center = GasCloudQuery.CenterOf(galaxy, placed).RelativeTo(camera);
-            var distance = center.Length();
             var largest = MathF.Max(cloud.HalfSize.X, MathF.Max(cloud.HalfSize.Y, cloud.HalfSize.Z));
-            _gasTiers.Shares(distance, largest, sectorSize, out var near, out var mid, out var far);
             var reach = cloud.HalfSize.Length();
+            var draw = GasRecord(gas, cloud, center, sectorSize, time);
+            // Levels follow the sphere around both clouds of a pair, so neither changes level without the other.
+            var levelCenter = center;
+            var levelRadius = largest;
+            if (partner >= 0)
+            {
+                var other = clouds[partner].Cloud;
+                var otherCenter = GasCloudQuery.CenterOf(galaxy, clouds[partner]).RelativeTo(camera);
+                Enclose(ref levelCenter, ref levelRadius, otherCenter, MathF.Max(other.HalfSize.X, MathF.Max(other.HalfSize.Y, other.HalfSize.Z)));
+                var reachCenter = center;
+                Enclose(ref reachCenter, ref reach, otherCenter, other.HalfSize.Length());
+                center = reachCenter;
+            }
+            var distance = levelCenter.Length();
+            _gasTiers.Shares(distance, levelRadius, sectorSize, out var near, out var mid, out var far);
             if (near + mid + far < GasMinShare || !Visible(center, reach, aspect, out _)) continue;
+            if (partner >= 0)
+            {
+                // A pair past the limit is left out whole: drawing one cloud of it alone would cut the mixture open.
+                if (pairs == GasPartners.Capacity) continue;
+                var other = clouds[partner];
+                constants.GasPartners[pairs] = GasRecord(gas, other.Cloud, GasCloudQuery.CenterOf(galaxy, other).RelativeTo(camera), sectorSize, time);
+                draw.Motion.W = GasConstants.KindCode(cloud.Kind, pairs++);
+            }
+            else if (cloud.Kind == GasCloudKind.Lightning && flashes < GasFlashes.Capacity)
+            {
+                // The deep stroke that lights the cloud from inside, and the bolts lit now; the slot is taken only
+                // when either is.
+                var rules = snapshot.Content.Exploration;
+                var seconds = LightningBolts.Clock(cloud, rules, tick, lightningPin, out var cycle);
+                var lit = Flash(_gasTiers.Lightning, cloud, rules, tick, lightningPin, out var stroke);
+                var burst = rules.LightningBurstTicks / (float)TickLoop.SimulationHz;
+                var bolts = _bolts.Collect(_gasTiers.Lightning, cloud, center, seconds, cycle, burst, flashes, gas.Shape.X);
+                if (lit || bolts > 0)
+                {
+                    constants.GasFlashes[flashes] = lit ? stroke : default;
+                    draw.Motion.W = GasConstants.KindCode(cloud.Kind, flashes++);
+                }
+            }
             var view = new Vector3(Vector3.Dot(center, _right), Vector3.Dot(center, _up), Vector3.Dot(center, _forward));
             var bounds = SphereBounds(view, reach, _tanHalfFov, aspect);
-            var draw = new GasConstants
-            {
-                Center = new float4(center.X, center.Y, center.Z, cloud.Seed),
-                HalfSize = new float4(cloud.HalfSize.X, cloud.HalfSize.Y, cloud.HalfSize.Z, gas.ExtinctionOf(cloud, sectorSize)),
-                Tint = new float4(gas.Tint.X, gas.Tint.Y, gas.Tint.Z, 0),
-                Motion = new float4(time * gas.Motion, 0, gas.WispinessOf(cloud), distance),
-                Shape = new float4(gas.Shape.X, gas.Shape.Y, gas.Shape.Z, gas.Shape.W),
-                Look = new float4(gas.Look.X, gas.Look.Y, gas.Look.Z, gas.Look.W),
-                Fine = _gasTiers.CloseUpFor(cloud.HalfSize.X),
-            };
             if (far >= GasMinShare)
             {
                 draw.Motion.Y = far;
                 draw.Budget = new float4(_gasTiers.FarSamples, GasConstants.Far, 0, 0);
                 draw.Tint.W = 2 - _gasTiers.FarDetail;
-                _scene.AddGas(draw, bounds);
+                _scene.AddGas(draw, bounds, distance);
                 distant++;
             }
             if (mid >= GasMinShare)
@@ -1227,7 +1326,7 @@ internal sealed class WorldView
                 draw.Motion.Y = mid;
                 draw.Budget = new float4(_gasTiers.MidSamples, GasConstants.Middle, 0, 0);
                 draw.Tint.W = 0;
-                _scene.AddGas(draw, bounds);
+                _scene.AddGas(draw, bounds, distance);
                 middle++;
             }
             if (near >= GasMinShare)
@@ -1235,11 +1334,135 @@ internal sealed class WorldView
                 draw.Motion.Y = near;
                 draw.Budget = new float4(gas.Samples, GasConstants.Full, 0, 0);
                 draw.Tint.W = 0;
-                _scene.AddGas(draw, bounds);
+                _scene.AddGas(draw, bounds, distance);
                 full++;
             }
         }
+        _bolts.Write(_gasTiers.Lightning, ref constants);
         GasDraws = (full, middle, distant);
+        GasKinds = (pairs, flashes, _bolts.Drawn);
+
+        var cold = _gasTiers.Cold;
+        var lightning = _gasTiers.Lightning;
+        constants.GasCold = new float4(cold.Sparkle, cold.SparkleCell, cold.SparkleShare, cold.SparkleSize);
+        constants.GasFlashLight = new float4(lightning.FlashColor[0], lightning.FlashColor[1], lightning.FlashColor[2], lightning.FlashRadius);
+        constants.GasBoltLight = new float4(lightning.BoltColor[0], lightning.BoltColor[1], lightning.BoltColor[2], lightning.BoltWidth);
+        constants.GasBoltShape = new float4(lightning.BoltGlowWidth, lightning.BoltGlow, lightning.BoltLightRadius, lightning.BoltTip);
+        constants.GasFlashReach = new float4(lightning.FlashReach, 0, 0, 0);
+        constants.GasKindTime = new float4(time, lightning.FarFlash, cold.Halo, _bolts.Drawn);
+
+        // The smallest sphere around two spheres; centres are relative to the camera.
+        static void Enclose(ref Vector3 center, ref float radius, Vector3 otherCenter, float otherRadius)
+        {
+            var apart = otherCenter - center;
+            var length = apart.Length();
+            if (radius >= length + otherRadius) return;
+            if (otherRadius >= length + radius)
+            {
+                center = otherCenter;
+                radius = otherRadius;
+                return;
+            }
+            var enclosing = (length + radius + otherRadius) * 0.5f;
+            center += apart * ((enclosing - radius) / length);
+            radius = enclosing;
+        }
+    }
+
+    /// <summary>For the pair capture view: the first cloud of the other kind whose box overlaps this one, if any.</summary>
+    private static bool TryGasPartner(Galaxy galaxy, in GasCloudPlacement cloud, out GasCloudPlacement partner)
+    {
+        Span<GasCloudPlacement> near = stackalloc GasCloudPlacement[64];
+        var center = GasCloudQuery.CenterOf(galaxy, cloud);
+        var count = galaxy.GasClouds!.Intersecting(galaxy, center, cloud.Cloud.HalfSize.Length(), near);
+        Span<GasCloudPlacement> pair = stackalloc GasCloudPlacement[2];
+        Span<int> partners = stackalloc int[2];
+        pair[0] = cloud;
+        foreach (var other in near[..count])
+        {
+            pair[1] = other;
+            GasCloudField.Pair(galaxy, pair, partners);
+            if (partners[0] != 1) continue;
+            partner = other;
+            return true;
+        }
+        partner = default;
+        return false;
+    }
+
+    /// <summary>
+    /// One cloud's shader record before its level is chosen: shared figures from <c>galaxy.json</c>, changed by its
+    /// kind's look from <c>content/visuals/gas.json</c>. <see cref="GasConstants.Motion"/>.w holds the kind alone.
+    /// </summary>
+    private GasConstants GasRecord(GasCloudModule gas, in GasCloud cloud, Vector3 center, float sectorSize, float time)
+    {
+        var draw = new GasConstants
+        {
+            Center = new float4(center.X, center.Y, center.Z, cloud.Seed),
+            HalfSize = new float4(cloud.HalfSize.X, cloud.HalfSize.Y, cloud.HalfSize.Z, gas.ExtinctionOf(cloud, sectorSize)),
+            Tint = new float4(gas.Tint.X, gas.Tint.Y, gas.Tint.Z, 0),
+            Motion = new float4(time * gas.Motion, 0, gas.WispinessOf(cloud), GasConstants.KindCode(cloud.Kind, -1)),
+            Shape = new float4(gas.Shape.X, gas.Shape.Y, gas.Shape.Z, gas.Shape.W),
+            Look = new float4(gas.Look.X, gas.Look.Y, gas.Look.Z, gas.Look.W),
+            Fine = _gasTiers.CloseUpFor(cloud.HalfSize.X),
+        };
+        if (cloud.Kind == GasCloudKind.Cold)
+        {
+            var cold = _gasTiers.Cold;
+            draw.Tint = new float4(Math.Min(1f, gas.Tint.X * cold.Tint[0]), Math.Min(1f, gas.Tint.Y * cold.Tint[1]), Math.Min(1f, gas.Tint.Z * cold.Tint[2]), 0);
+            draw.Look = new float4(gas.Look.X * cold.Edge, gas.Look.Y * cold.Knots, gas.Look.Z * cold.Wisps, gas.Look.W * cold.Veil);
+            draw.HalfSize.W *= cold.Extinction;
+        }
+        else if (cloud.Kind == GasCloudKind.Lightning)
+        {
+            var lightning = _gasTiers.Lightning;
+            draw.Tint = new float4(Math.Min(1f, gas.Tint.X * lightning.Tint[0]), Math.Min(1f, gas.Tint.Y * lightning.Tint[1]), Math.Min(1f, gas.Tint.Z * lightning.Tint[2]), 0);
+        }
+        return draw;
+    }
+
+    /// <summary>
+    /// The deep stroke of a lightning cloud at server tick <paramref name="tick"/> (fractional, as hulls are drawn): the
+    /// brightest stroke's place in box units and its light. False while nothing is lit. Strokes fall within the burst
+    /// <see cref="GasSensors.LightningCycle"/> times, the same burst that takes the sensors, and where each falls is
+    /// seeded by the cloud and the cycle. Bolts are <see cref="LightningBolts"/>.
+    /// </summary>
+    internal static bool Flash(GasLightningLook look, in GasCloud cloud, ExplorationRules rules, double tick, float? pin, out float4 stroke)
+    {
+        stroke = default;
+        var seconds = LightningBolts.Clock(cloud, rules, tick, pin, out var cycle);
+        var burst = rules.LightningBurstTicks / (float)TickLoop.SimulationHz;
+        // Past the burst only the last stroke's fading light is left; a few decays on, nothing.
+        if (seconds > burst + 6 * look.StrokeDecay) return false;
+        var seed = BitConverter.SingleToInt32Bits(cloud.Seed);
+        var best = 0f;
+        var strongest = -1;
+        for (var k = 0; k < look.Strokes; k++)
+        {
+            var light = Stroke(seconds - Unit(seed, cycle, k, 0) * burst * 0.85f, look.StrokeDecay, look.Flicker, k);
+            if (light > best) { best = light; strongest = k; }
+        }
+        if (strongest < 0 || best < 0.002f) return false;
+        var at = new Vector3(Signed(seed, cycle, strongest, 1), Signed(seed, cycle, strongest, 2), Signed(seed, cycle, strongest, 3)) * look.FlashSpread;
+        stroke = new float4(at.X, at.Y, at.Z, best);
+        return true;
+
+        // A stroke's light, 0 before it and 1 at its start, falling to a third every decay; it flickers as it fades,
+        // as a return stroke does.
+        static float Stroke(float since, float decay, float flicker, int k)
+        {
+            if (since < 0) return 0;
+            var fade = MathF.Exp(-1.0986f * since / decay);
+            var flick = 1f - flicker * 0.5f * (1f - MathF.Cos(since * (70f + 23f * (k % 3))));
+            return fade * flick;
+        }
+        static float Signed(int seed, long cycle, int k, int lane) => Unit(seed, cycle, k, lane) * 2f - 1f;
+        static float Unit(int seed, long cycle, int k, int lane)
+        {
+            var h = unchecked((ulong)seed * 0x9E3779B97F4A7C15UL ^ (ulong)cycle * 0xBF58476D1CE4E5B9UL ^ (ulong)(k * 16 + lane) * 0x94D049BB133111EBUL);
+            h ^= h >> 30; h *= 0xBF58476D1CE4E5B9UL; h ^= h >> 27; h *= 0x94D049BB133111EBUL; h ^= h >> 31;
+            return (h >> 40) / (float)(1UL << 24);
+        }
     }
 
     /// <summary>
@@ -1463,6 +1686,9 @@ internal sealed class WorldView
         }
     }
 
+    /// <summary>The instance material mesh.frag draws as ice: a rock (below 0.5), marked apart from bare rock (0).</summary>
+    internal const float MaterialIce = 0.25f;
+
     private void AddRock(SectorSlot slot, int i, float pixels, Galaxy galaxy, ref int candidateCount)
     {
         ref var rock = ref slot.Content.Asteroids[i];
@@ -1479,11 +1705,19 @@ internal sealed class WorldView
         // Bare rock is grey; ore shows through in its own colour, more strongly the richer the rock.
         var shade = 0.2f + 0.05f * (rock.Shape % 4);
         var tint = new Vector3(shade, shade * 0.95f, shade * 0.88f);
+        var material = 0f;
+        if (rock.Shape == AsteroidShape.Icicle)
+        {
+            // Ice: pale blue, a little brighter or darker by the rock's place in its list; mesh.frag draws it as ice.
+            var ice = 0.55f + 0.08f * (i % 5);
+            tint = new Vector3(ice * 0.78f, ice * 0.9f, ice);
+            material = MaterialIce;
+        }
         if (rock.Resource >= 0)
-            tint = Vector3.Lerp(tint, galaxy.Resources[rock.Resource].Color * 0.55f, 0.25f + 0.5f * rock.Grade);
+            tint = Vector3.Lerp(tint, galaxy.Resources[rock.Resource].Color * 0.55f, (0.25f + 0.5f * rock.Grade) * (material == MaterialIce ? 0.4f : 1f));
         VisibleRocks++;
         _scanWaves.Offer(position, rock.Radius, pixels);
-        Add(ref candidateCount, _asteroidMeshBase + detail * Galaxy.AsteroidShapes + rock.Shape, position, rock.Rotation, rock.Radius, tint, 0f);
+        Add(ref candidateCount, _asteroidMeshBase + detail * Galaxy.AsteroidShapes + rock.Shape, position, rock.Rotation, rock.Radius, tint, material);
     }
 
     /// <summary>

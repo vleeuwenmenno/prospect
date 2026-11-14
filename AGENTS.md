@@ -386,6 +386,12 @@ The client opens a real window on the developer's desktop, and they are usually 
 - Joining (`--join`) and hosting unlisted or public (`--host`) need a real Discord sign-in, which a capture
   cannot make: such a capture stops on Join Server or New Game with the sign-in shown. `--account-sample
   signed-in` never counts as one. Private local games are unaffected.
+- Cloud kinds, default seed (80 km sectors): `-15,-1,3` anchors a lightning cloud (`--gas-view outside|inside`, add
+  `--gas-flash 0 --gas-flash-to 1.3 --capture-count 27 --capture-every 0.6` to step through a burst); `43,0,38` a cold
+  cloud with an ice-shard field (`--gas-view inside|outside|ice`); `--set gasLightningChance=1 --sector 133,0,-77`
+  makes the huge cloud there lightning (`inside`, `outside --gas-distance 0.6` for its surface, `1.1` just outside).
+  Cold/normal overlaps need small sectors: `--set sectorSize=20 --sector -21,2,35 --gas-view pair` (deep overlap) or
+  `-7,2,4` (fringes touching); `--gas-view inside` there is inside the cold cloud with shards.
 - `--sector x,y,z` starts the local game in that sector instead of the home sector; it works with `--capture`
   and `--bench`. With the default seed: `-40,0,-29` is dense (about 6,800 rocks of five fields), `8,0,-8`
   is very rich with five resources, a large field lies across the wall between `2,0,1` and `3,0,1`, and `3,0,1`
@@ -412,7 +418,9 @@ The client opens a real window on the developer's desktop, and they are usually 
 
 - See `docs/gas-clouds.md` for the bounded visual pass and muted capture scenarios. Gas has no wire field. Some clouds hold asteroids, so a change to where clouds are changes asteroid lists: bump as for any generation change.
 - A cloud is anchored in the sector its centre lies in and may reach the sectors around it. `SectorContent.GasCloud` is the anchored one; `GasCloudModule.Intersecting` lists every cloud that reaches a sector or a sphere.
-- Generation keeps all pairs apart (`GasCloudModule.SeparationMargin`) except cold/normal pairs. These may overlap in generation 6. The non-visual implementation requires the renderer integration documented in `docs/gas-clouds.md` before release: jointly integrate overlapping volumes, including shield/opening composition; the old single-primary path is insufficient.
+- Generation keeps all pairs apart (`GasCloudModule.SeparationMargin`) except cold/normal pairs, which may overlap. The renderer pairs them (`GasCloudField.Pair`) and integrates both along each ray in every pass, composition and shield refraction included; see "Drawing the kinds" in `docs/gas-clouds.md`.
+- Every gas consumer calls `gasSegment`, which makes exactly one `gasMarch` call: a second call site, or a second copy of the march, multiplies the driver's compile time of `tonemap.frag` (it hung startup for minutes once). The fixtures are compiled into the tone mapper only with `--gas-fixture` (`GasFixtures` specialization constant). Check `glslc -O` time of `tonemap.frag` after touching `gas.glsl`.
+- Lightning follows `GasSensors.LightningCycle` on the snapshot clock; bolts are `LightningBolts` (CPU, no allocation), seeded by cloud, cycle and cell, never by wall time. `GasKindVisualTests` holds the timing, determinism and allocation rules.
 - Gas uses its RGB-only pass without portals or shields; frames with either defer bounded gas segments to HDR composition. Preserve the gas-free shield copies, frame.glsl layout, and per-sample own-passage checks. The fixed 1 MiB noise lattice is renderer-owned, immutable, and independent of resize.
 - Far gas: three levels of detail by distance in cloud radii, figures in `content/visuals/gas.json` (`GasTiers`). Which clouds exist comes from `IGasCloudSource` only (today `GeneratedGasClouds`: `GasCloudQuery.Collect` over `GasCloudModule.TryGetCloud`, by anchor sector); never read clouds from sector slots. Composition takes one cloud, the primary (`GasQueue`); every other draw is in the scene or, at the far level, in the sky. A new level or draw order needs a case in `GasLevelsTests` and a `--gas-distance` sweep capture. Large clouds (x half-extent over 7 km) gain strands, bent steps and clearing near the camera (`closeUp` in the same file, `gasStrands` in `gas.glsl`); an ordinary cloud must keep taking the unbent expressions exactly, so check fixtures 1–13 after touching the march.
 

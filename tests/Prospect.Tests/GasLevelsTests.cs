@@ -212,24 +212,24 @@ public sealed class GasLevelsTests
     }
 
     private static GasConstants Draw(float distance, float level, float seed = 0) =>
-        new() { Center = new float4(0, 0, 0, seed), Motion = new float4(0, 1, 0, distance), Budget = new float4(24, level, 0, 0) };
+        new() { Center = new float4(0, 0, 0, seed), Motion = new float4(0, 1, 0, 0), Budget = new float4(24, level, 0, 0) };
 
     [Fact]
     public void QueueDrawsFarthestFirstWithTheNearestFullCloudLast()
     {
         var queue = new GasQueue();
         queue.Begin();
-        queue.Add(Draw(9000, GasConstants.Full, 1), SceneRenderer.WholeView);
-        queue.Add(Draw(60000, GasConstants.Far, 2), SceneRenderer.WholeView);
-        queue.Add(Draw(30000, GasConstants.Middle, 3), SceneRenderer.WholeView);
-        queue.Add(Draw(150000, GasConstants.Far, 4), SceneRenderer.WholeView);
+        queue.Add(Draw(9000, GasConstants.Full, 1), SceneRenderer.WholeView, 9000);
+        queue.Add(Draw(60000, GasConstants.Far, 2), SceneRenderer.WholeView, 60000);
+        queue.Add(Draw(30000, GasConstants.Middle, 3), SceneRenderer.WholeView, 30000);
+        queue.Add(Draw(150000, GasConstants.Far, 4), SceneRenderer.WholeView, 150000);
         // One cloud crossing from the middle to the far level: the cheaper draw is queued first and stays under.
-        queue.Add(Draw(50000, GasConstants.Far, 5), SceneRenderer.WholeView);
-        queue.Add(Draw(50000, GasConstants.Middle, 6), SceneRenderer.WholeView);
+        queue.Add(Draw(50000, GasConstants.Far, 5), SceneRenderer.WholeView, 50000);
+        queue.Add(Draw(50000, GasConstants.Middle, 6), SceneRenderer.WholeView, 50000);
         // A second full cloud, nearer: it becomes the primary and the first one joins the order.
-        queue.Add(Draw(4000, GasConstants.Full, 7), new float4(0.25f, 0.25f, 0.5f, 0.5f));
+        queue.Add(Draw(4000, GasConstants.Full, 7), new float4(0.25f, 0.25f, 0.5f, 0.5f), 4000);
         // A far draw that is nearer than another cloud is not sky: it must be drawn over that cloud.
-        queue.Add(Draw(20000, GasConstants.Far, 8), SceneRenderer.WholeView);
+        queue.Add(Draw(20000, GasConstants.Far, 8), SceneRenderer.WholeView, 20000);
 
         Assert.True(queue.HasPrimary);
         Assert.Equal(7, queue.Primary.Center.W);
@@ -249,18 +249,18 @@ public sealed class GasLevelsTests
     {
         var queue = new GasQueue();
         queue.Begin(4);
-        for (var i = 1; i <= 10; i++) queue.Add(Draw(i * 1000, GasConstants.Far, i), SceneRenderer.WholeView);
-        queue.Add(Draw(99000, GasConstants.Far, 99), SceneRenderer.WholeView);
+        for (var i = 1; i <= 10; i++) queue.Add(Draw(i * 1000, GasConstants.Far, i), SceneRenderer.WholeView, i * 1000);
+        queue.Add(Draw(99000, GasConstants.Far, 99), SceneRenderer.WholeView, 99000);
         Assert.Equal(4, queue.Count);
         Assert.Equal([4f, 3f, 2f, 1f], Enumerable.Range(0, queue.Count).Select(i => queue[i].Center.W));
         Assert.Equal(4, queue.SkyCount);
 
         var before = GC.GetAllocatedBytesForCurrentThread();
         queue.Begin(GasQueue.Capacity + 100);
-        for (var i = 0; i < 200; i++) queue.Add(Draw((i * 37 % 101) * 500, i % 3, i), SceneRenderer.WholeView);
+        for (var i = 0; i < 200; i++) queue.Add(Draw((i * 37 % 101) * 500, i % 3, i), SceneRenderer.WholeView, (i * 37 % 101) * 500);
         Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
         Assert.Equal(GasQueue.Capacity, queue.Count);
-        for (var i = 1; i < queue.Count; i++) Assert.True(queue[i - 1].Motion.W >= queue[i].Motion.W);
+        for (var i = 1; i < queue.Count; i++) Assert.True(queue.Distance(i - 1) >= queue.Distance(i));
     }
 
     [Fact]

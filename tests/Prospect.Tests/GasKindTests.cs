@@ -77,6 +77,27 @@ public sealed class GasKindTests
     }
 
     [Fact]
+    public void LightningCycleAgreesWithDisruptionOnEveryTick()
+    {
+        var rules = Content.Exploration;
+        var period = rules.LightningPeriodTicks;
+        foreach (var seed in new[] { 0f, 17f, 63.9f, 127.99f })
+        {
+            var cloud = new GasCloud(Vector3.Zero, new Vector3(1000), seed, GasCloudKind.Lightning);
+            var previous = GasSensors.LightningCycle(cloud, rules, -3L * period - 1, out _);
+            for (var tick = -3L * period; tick < 5L * period; tick++)
+            {
+                var cycle = GasSensors.LightningCycle(cloud, rules, tick, out var into);
+                Assert.InRange(into, 0, period - 1);
+                Assert.Equal(GasSensors.Disrupted(cloud, rules, tick), into < rules.LightningBurstTicks);
+                // The cycle advances by one exactly where a new burst begins.
+                Assert.Equal(into == 0 ? previous + 1 : previous, cycle);
+                previous = cycle;
+            }
+        }
+    }
+
+    [Fact]
     public void IcicleSurfaceAndCollisionRadiusAgreeAndStayBounded()
     {
         for (var x = -10; x <= 10; x++)

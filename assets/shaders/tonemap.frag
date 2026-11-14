@@ -557,10 +557,13 @@ vec3 gasComposite(GasData gas, GasEvent events[5], int count, vec2 pos, float as
 }
 
 #include "gas_fixture.glsl"
+// On only for a muted --gas-fixture run (SceneRenderer): everywhere else the driver drops the fixtures' second copy of
+// composition before compiling.
+layout(constant_id = 2) const bool GasFixtures = false;
 
 void main()
 {
-    if(frame.gas.budget.z>0.0) {
+    if(GasFixtures && frame.gas.budget.z>0.0) {
         outColor=gasFixtureResult();
         return;
     }
@@ -579,7 +582,10 @@ void main()
     int ownKind = int(frame.ftl.x + 0.5);
     int ownStage = int(frame.ftl.y + 0.5);
     GasData composeGas=frame.gas;
-    if(ownHull && ownKind==1) composeGas.halfSize.w*=1.0-clamp(frame.ftlUp.w,0.0,1.0);
+    if(ownHull && ownKind==1) {
+        gasThin=1.0-clamp(frame.ftlUp.w,0.0,1.0);
+        composeGas.halfSize.w*=gasThin;
+    }
     bool ownPassageOn = ownStage > 0 && (ownKind == 2 || ownKind == 3);
     // Lens fallbacks need the sky/rock copies; deferred gas with shields also reads the final scene depth.
     bool lensing = count > 0 || ownPassageOn;

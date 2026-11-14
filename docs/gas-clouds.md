@@ -50,10 +50,10 @@ Why these three:
 - A light from the smooth envelope alone (no lookups) was tried for far and rejected: it shaded the cloud visibly more than the probes.
 - A half-resolution target was rejected again: it needs new depth, lens and shield edge reconstruction and a resize path.
 
-Current renderer order (must change for cold/normal overlap; see integration contract below):
+Renderer order:
 
 - A frame queues at most 32 draws (`maxDraws`, 64 at most) plus the primary. When full, the farthest is left out.
-- Whole clouds are laid over each other, farthest centre first. Gas of two overlapping clouds is not interleaved along a ray.
+- Whole clouds are laid over each other, farthest centre first. The only clouds that can overlap, a cold and a normal one, are one draw and are integrated together along each ray (see "Drawing the kinds").
 - The primary is the nearest cloud at the full level. It is always drawn last, and it is the one cloud composition takes over.
 
 Many clouds at once, where each is drawn:
@@ -216,8 +216,7 @@ CPU distance/frustum rejection precedes submission. Zero submitted clouds make n
 Far clouds alone make no copy either: they are drawn into the sky.
 
 Several clouds can be in view; see "Seen from far away" for the queue and the order.
-Deferred frame data still holds one record: the primary cloud. Every other draw is part of the scene the composition reads.
-Generation 6 retains this separation for every pair except cold/normal. Deferred data must handle both overlapping volumes before this branch ships; see the integration contract below.
+Deferred frame data holds the primary draw; when it is a cold/normal pair, its second cloud is in `gasPartners`, so composition integrates both. Every other draw is part of the scene the composition reads.
 Extinction per metre falls with size above the standard 4.8 km half-extent (`GasCloudModule.ExtinctionOf`), so a huge cloud is as deep to look through as an ordinary one.
 A huge cloud keeps the content's sample count over a longer path: its even steps are up to four times as long. Close to the camera they are bent shorter; see "Large clouds close up".
 
@@ -354,13 +353,13 @@ Generation 6, protocol 44, evaluator 9. This non-visual implementation requires 
 - Only cold/normal pairs bypass rivalry. Positions do not move to force a mixture: independently seeded envelopes mix wherever they intersect. Cold/cold, normal/normal and every lightning pair retain the old separation margin and tie break.
 - Clouds still have one anchor, one descriptor per anchor, and reach at most its 26 neighbours. There can be at most one cold and one normal at a point; neither can share that point with lightning.
 
-Renderer contract (not implemented by the non-visual worker):
+Renderer contract (implemented; see "Drawing the kinds"):
 
 - Carry `Kind` with every queued cloud, including distant tiers. Do not infer it from tint or repeat probability logic.
 - Overlapping cold/normal volumes require joint front-to-back integration along each ray: split at both volumes' entry/exit and every opaque, shield or portal boundary. At each sample sum extinction and extinction-weighted source light from every active volume, then apply one transmittance update. Whole-cloud alpha sorting is incorrect.
 - Both active volumes must participate in deferred HDR shield/opening composition. The single-primary assumption must be removed; preserve gas-free shield copies and per-sample own-passage checks. A hard limit must keep the pair together rather than silently dropping one.
 - Lightning visuals may use `GasSensors.Disrupted(cloud, rules, snapshotTick)` to align flashes with gameplay. Keep visual-only density noise separate from gameplay membership.
-- Cold shading and icicle meshes remain unimplemented here. `AsteroidShape.Icicle` is a fixed six-tip elongated octahedron: unit x tips and y/z tips at 1/6. Use its six axial vertices and eight triangular faces (24 indices), or a subdivision of those faces within the existing mesh budget; a generic sphere sampling can miss the sharp tips. Server and client collision already use its `Point`/`RadiusAlong` definitions.
+- `AsteroidShape.Icicle` is a fixed six-tip elongated octahedron: unit x tips and y/z tips at 1/6. Use its six axial vertices and eight triangular faces (24 indices), or a subdivision of those faces within the existing mesh budget; a generic sphere sampling can miss the sharp tips. Server and client collision already use its `Point`/`RadiusAlong` definitions.
 
 Gameplay envelopes and UI contract:
 
@@ -396,7 +395,7 @@ Ice and gas fields:
 - `make bench`: passed at 5096×1390, 982 fps normal and 1,012 fps resizing; zero managed allocations, 12 measured swapchain/target rebuilds. Validation layers were not active.
 - Generation budget: 10,166 rocks at 80 km in 13.047 ms; 6,450 at 20 km in 9.526 ms, both below 15 ms. Frozen generation hash: `16723476013675883020`, recorded on Linux x64; other architectures remain unverified.
 - Gas stress in Debug: 192 hulls, 32 clients, 17.989 ms/server tick, zero measured managed allocations. This was measured by Debug `make check`, not Release; see the same-configuration comparison below.
-- No visual acceptance or mining-yield test: renderer/UI integration and the absent mining system remain outstanding.
+- No mining-yield test: the mining system is absent. Renderer integration is in "Drawing the kinds"; UI status flags remain outstanding.
 
 Gas-kind changes relative to the integrated generation optimization:
 
@@ -441,3 +440,74 @@ Integrated verification:
 - `make bench`: passed, 897 fps normal and 965 fps resizing at 5096×1390; zero managed allocations and 12 measured swapchain/target rebuilds. Validation layers were not active.
 - Debug generation at 20/80/160 km: 8.203/10.724/11.555 ms, all below 15 ms. All fifteen selectable sizes passed.
 - Client/rendering sources, `RockIndex`, shared jump input and scan-message/server sources match `wip/integration`; gas-specific shared state is retained alongside them.
+
+## Drawing the kinds
+
+Decided (provisional, tunable). Normal clouds are drawn exactly as before. Figures are client data in `content/visuals/gas.json`
+(`cold`, `lightning`; `GasTiers`), bounded on load.
+
+How a draw names its kind:
+
+- `GasConstants.Motion.w` is `KindCode`: the kind plus four times one more than a slot. Draw order uses a distance kept beside the draw in `GasQueue`.
+- A lightning cloud's slot is its entry in `gasFlashes`; a cold or normal cloud's slot is its partner in `gasPartners`.
+- Every consumer integrates through `gasSegment`, which marches one cloud or a pair. Its single `gasMarch` call keeps the driver's compile time down; the tone mapper compiles the fixtures only with `--gas-fixture` (specialization constant `GasFixtures`).
+
+Cold clouds:
+
+- Tint, edge, knots, wisps, veil and extinction are factors on the shared figures: bluish white, crisper billows, clearer gaps.
+- A faint 22° ice halo around the star is added to the phase (`halo`); it costs nothing per sample.
+- Glints: a few cells of a fixed grid hold a glint, drawn about a pixel across, full level only (`sparkle*`).
+
+Cold and normal overlap:
+
+- `GasCloudField.Pair` pairs every cold cloud with the first normal cloud whose box overlaps its own, on the worker. Each cloud has at most one partner.
+- The pair is one draw, levelled by the sphere around both, so both change level together. At most 8 pairs a frame; a pair past that is left out whole.
+- Along a ray the pair is cut at both boxes' ends into at most three stretches: one cloud alone (the ordinary march), both jointly, one alone.
+- Joint stretch: even steps, both clouds sampled each step with their own light probes, extinctions summed, light weighted by extinction, one transmission update. A cloud does not shade the other.
+- Deferred composition, shield refraction, the own-hull hyperspace thinning (`gasThin`) and own-passage checks all go through the same `gasSegment`.
+
+Lightning:
+
+- Timing: `GasSensors.LightningCycle` on the snapshot clock (`ServerTickPrecise` plus the frame's tick fraction), the same burst the sensors lose. Strokes start in the first 80% of the burst.
+- Deep strokes light the cloud from inside (`strokes`, `flash*`); their reach is a share of the cloud but at most `flashReach` metres. Middle and far levels multiply them by `farFlash`, so a burst shows from afar.
+- Bolts (`LightningBolts`, CPU, no allocation): `bolts` in the cloud's outer shell each burst, and strikes in a lattice of `boltCell` cells around the camera, or around the nearest part of the envelope when the camera is outside within `boltNear`.
+- If none of those cells strikes in a burst, the one nearest to striking does, so a viewer in or near a cloud sees a bolt every burst. Clients looking at the same cells see the same bolts.
+- Each bolt is seeded by the cloud, the cycle and its number or cell: a jagged main channel and forks off forks to `boltDepth`, breadth first, at most 128 segments; at most 6 bolts a frame, nearest first.
+- A bolt grows along its path (`boltGrow`), holds and flickers (`boltHold`, `boltFlicker`), fades (`boltFade`), and the main channel keeps an afterglow (`boltAfterglow`).
+- Drawn in the march at its own depth, so gas in front dims it: a core about a pixel or two wide at any distance (fainter when narrower than a pixel), segments covering many pixels kinked further in the shader, and a glow that is a smooth union of the segments' glows, added at the bolt's centre depth.
+- The two brightest bolts of a cloud also light the gas around them (`boltLight`, `boltLightRadius`). Far-level draws take the light but not the lines.
+
+Ice shards:
+
+- `MeshBuilder.Icicle`: the exact octahedron the simulation collides with, eight flat faces, 24 vertices; one mesh for every level of detail.
+- Instance material 0.25 (`WorldView.MaterialIce`): pale blue, light wrapping into the crystal and through it against the star, streaks along the shard, a sharp glint and a bright rim. It writes the asteroid mark (0.25) like any rock.
+
+Muted captures:
+
+- `--gas-flash <s>` holds every lightning cloud at that moment of a burst; `--gas-flash-to <s>` moves it evenly over the captures.
+- `--gas-view pair` looks across the anchored cloud and its overlapping partner; `--gas-view ice` frames the anchored sector's largest ice shard. `--gas-distance` scales both.
+- Each capture prints the pairs drawn together, the lightning clouds lit and the bolts drawn.
+
+Kind costs, at 5096x1390 on an RTX 5070 Ti, Release, best of three 4 s benchmarks each, other work running on the machine (medians up to twice as high):
+
+| View | Before the kinds | With them |
+| --- | --- | --- |
+| Normal `127,-1,-127`, inside / 2 / 6 / 14 radii | 9.55 / 1.70 / 1.00 / 0.87 ms | 10.39 / 1.72 / 1.15 / 0.90 ms |
+| Lightning `-15,-1,3`, inside: quiet / in a burst | | 10.2 / 11.0 ms |
+| Lightning, 2 / 6 radii in a burst | | 2.15 / 0.95 ms |
+| Huge lightning `133,0,-77` (`gasLightningChance=1`), inside: quiet / bolts nearby | | 10.6 / 13.8 ms |
+| Cold `43,0,38`, inside / 2 radii | | 11.1 / 2.2 ms |
+| Cold/normal pair (`sectorSize=20`, `-21,2,35`): side view / inside the cold one / inside the overlap | | 5.0 / 21.8 / 33.8 ms |
+
+- With no cold, lightning or pair in view nothing extra runs; the normal-cloud figures above are that case.
+- A pair's stretches share one step length, so together they take about the content's budget; each joint step still evaluates both clouds' density and light probes.
+- Bolts reject far segments before the exact test; a frame of near bolts still adds about 3 ms inside a huge cloud.
+- First start after a shader change: the driver compiles the tone mapper; about 12 s to the menu here, against about 14 s before.
+
+Open:
+
+- Normal clouds cost up to 15% more at the middle level and about 9% more inside than before the kinds, though a normal draw never takes the joint or lightning paths; the larger shader is the likely cause, unproven.
+- Inside a cold/normal overlap a frame costs two to three times a single cloud's.
+- A cold cloud does not shade its normal partner or the other way round; a joint stretch takes even steps (no close-up step bend).
+- Flash strength and bolt look are the product owner's call; motion (growth, flicker, glints) has only been seen in stills.
+- The sensor outline does not yet follow bursts, and the hull environment flags are not shown in the interface.
