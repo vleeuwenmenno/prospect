@@ -92,6 +92,7 @@ internal sealed partial class ScreenHost
         _mapTime += _ui.DeltaTime;
         var fade = Kit.EaseOut(_mapTime / Theme.ScreenEnter);
         Kit.Fade = fade;
+        CoversWorld = WorldCover.MapHides(fade);
         var display = _ui.DisplaySize;
         var io = ImGui.GetIO();
 

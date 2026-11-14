@@ -64,6 +64,7 @@ internal static class Program
           --capture-count <n>     Take n numbered screenshots instead of one (file-00.png, file-01.png, ...)
           --capture-every <sec>   Time between numbered screenshots (default 0.25)
           --map-cell <pixels>     With --capture or --bench and a map view: open the map at this many pixels per sector (1.4 to 190)
+          --close-map-at <sec>    With --capture or --bench and a map view: close the map at this time after the splash (captures of the first frames back in the world)
           --map-tilt, --map-hover With --open scan and --capture or --bench: tilt the map, or rest the pointer on its centre
           --look <degrees>        Pilot view: hold the camera this many degrees to the right of the hull's nose
           --look-to <degrees>     With --look and --capture: turn the camera from --look to this angle, evenly
@@ -296,6 +297,10 @@ internal static class Program
                     options.MapCell = mapCell;
                     i++;
                     break;
+                case "--close-map-at" when hasValue && float.TryParse(args[i + 1], out var closeMapAt) && closeMapAt >= 0:
+                    options.CloseMapAt = closeMapAt;
+                    i++;
+                    break;
                 case "--map-tilt":
                     options.MapTilt = true;
                     break;
@@ -344,6 +349,9 @@ internal static class Program
 
         if (options.MapCell is not null && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--map-cell works only with --capture or --bench.");
+
+        if (options.CloseMapAt is not null && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--close-map-at works only with --capture or --bench.");
 
         if (options.GasFixture > 0 && (options.CapturePath is null || options.BenchSeconds > 0))
             return Fail("--gas-fixture works only with --capture, without --bench.");

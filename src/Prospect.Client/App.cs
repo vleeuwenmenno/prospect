@@ -108,6 +108,9 @@ internal sealed class AppOptions
     /// <summary>Opens the galaxy map this many pixels per sector instead of the default zoom; for captures.</summary>
     public float? MapCell { get; set; }
 
+    /// <summary>Closes the galaxy map at this many seconds after the splash, as Escape would; for captures across the close.</summary>
+    public float? CloseMapAt { get; set; }
+
     /// <summary>Opens the galaxy map tilted, and with the pointer resting on its centre; for captures.</summary>
     public bool MapTilt { get; set; }
     public bool MapHover { get; set; }
@@ -199,6 +202,7 @@ internal sealed class App : IDisposable
     private long _lastFrameTimestamp;
     private bool _viewOpened;
     private bool _tipsSampled;
+    private bool _mapClosed;
     private readonly CatalogueMeshes _catalogueMeshes;
 
     /// <summary>Whether the acquired catalogue can be drawn safely.</summary>
@@ -427,6 +431,9 @@ internal sealed class App : IDisposable
     public InputDevices Devices { get; }
     public ActionMap Actions { get; }
     public FrameStats Stats { get; } = new();
+
+    /// <summary>Frames in space that left the 3D world undrawn because the interface hid all of it; see <see cref="WorldCover"/>.</summary>
+    public int WorldFramesSkipped { get; private set; }
     public Texture2D BrutalLogo { get; }
     public ImTextureRef BrutalLogoRef { get; }
 
@@ -850,16 +857,23 @@ internal sealed class App : IDisposable
             if (!_screens.WorldInputEnabled)
                 _pointer.SurfaceOpened();
 
+            // The galaxy map hides the whole window behind an opaque backdrop: its frames skip the scene, gas, shields
+            // and tone mapping, which are the frame's cost. Nothing else changes: the simulation, prediction and
+            // sector streaming above ran, and the world's next draw starts from scratch (Render transitions every
+            // target from undefined and queues nothing across frames).
+            var drawWorld = WorldCover.Draws(inSpace, _screens.CoversWorld);
+            if (inSpace && !drawWorld)
+                WorldFramesSkipped++;
             var worldDrawn = false;
             if (_renderer.Begin(out var commands))
             {
-                if (inSpace)
+                if (drawWorld)
                 {
                     World.Draw(commands, _renderer.FrameIndex, snapshot!, _ui.Time);
                     worldDrawn = true;
                 }
                 _renderer.BeginPresentPass(ClearColor);
-                if (inSpace)
+                if (drawWorld)
                     _scene.Present(commands, World.ExposureValue);
                 _ui.Render(commands);
                 _renderer.End();
@@ -1004,6 +1018,12 @@ internal sealed class App : IDisposable
                 _benchmarkRepairRequested = true;
                 Session.Client.Input.RepairEdit(snapshot.Editor.Token);
             }
+        }
+
+        if (_options.CloseMapAt is { } closeMap && _viewOpened && !_mapClosed && _sinceSplash >= closeMap)
+        {
+            _mapClosed = true;
+            _screens.CloseMap();
         }
 
         if (_options.OpenView is { } view && !_viewOpened && Session is not null && _sinceSplash > 0.6f)
@@ -1236,7 +1256,11 @@ internal sealed class App : IDisposable
         }
 
         if (_populated is null)
+        {
             ExitCode = _benchmark.Report(_gpu, _swapchain) ? 0 : 1;
+            Console.WriteLine($"  World drawing        skipped in {WorldFramesSkipped} frames since the start (the map hid it)");
+            Console.WriteLine();
+        }
         EndDiagnosticRun();
     }
 
