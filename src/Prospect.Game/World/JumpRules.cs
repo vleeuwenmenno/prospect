@@ -35,6 +35,20 @@ public static class JumpRules
         return new(reason, charted, distance, risk, risk * rules.BlindMaxDamage);
     }
 
+    /// <summary>
+    /// The figures <see cref="Evaluate"/> reads for a hull whose data sheet the client has but not its flight
+    /// figures: the content-wide jump timings of <paramref name="basis"/> (every hull of a world shares them) with
+    /// this hull's drive, its power and its range. A hull flown by the player passes its own flight figures instead.
+    /// </summary>
+    public static FlightParams DriveOf(in FlightParams basis, in HullStats stats)
+    {
+        var flight = basis;
+        flight.Ftl = stats.Ftl;
+        flight.FtlPower = stats.FtlPower;
+        flight.FtlMaxDistance = stats.FtlMaxDistance;
+        return flight;
+    }
+
     /// <summary>Stable per-jump roll. Risk is probability; a hit takes the reported maximum fraction.</summary>
     public static float DamageFraction(in JumpEligibility eligibility, ulong seed, uint hull, long tick)
     {

@@ -346,6 +346,9 @@ public struct HullStats
     /// <summary>Megajoules one jump takes, and megawatts the drive draws while charging.</summary>
     public float FtlEnergy;
     public float FtlPower;
+
+    /// <summary>The longest jump the selected surviving drive block allows, in metres; zero without a working drive.</summary>
+    public float FtlMaxDistance;
 }
 
 /// <summary>What kind of thing a hull is. It decides how the hull is shown and, later, what it can do.</summary>

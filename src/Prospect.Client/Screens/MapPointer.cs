@@ -308,16 +308,16 @@ internal static class MapUnitList
 }
 
 /// <summary>
-/// The interactive part of the map's course menu: where it opens, where it is while it drops in, its window and
+/// The interactive part of the course menu, which the map and the command view both open: where it opens, where it is while it drops in, its window and
 /// its rows. The look and what a row orders are <c>ScreenHost</c>'s; this part has no fonts, so the frame order
 /// tests run it as it is. The map blocks exactly <see cref="Shown"/>, the rectangle the window is drawn at.
 /// </summary>
 internal static class MapCourseMenu
 {
     // Unscaled pixels.
-    public const float HeaderHeight = 84f;
+    public const float HeaderHeight = 100f;
     public const float RowHeight = 48f;
-    private const float Width = 300f;
+    private const float Width = 340f;
     private const float Gap = 6f;
     private const float Drop = 6f;
     private const float AppearSeconds = 0.12f;
@@ -366,6 +366,20 @@ internal static class MapCourseMenu
         if (ImGui.IsWindowAppearing())
             ImGui.Internal.BringWindowToDisplayFront(ImGui.Internal.GetCurrentWindow());
         map.Claim();
+    }
+
+    /// <summary>
+    /// Opens the menu's window at <paramref name="min"/> in a view with no map: the command view's menu. The
+    /// pointer there is the interface's own, so a press on the window is already kept from the world. Pair with
+    /// <see cref="End"/>.
+    /// </summary>
+    public static void BeginFree(ImString name, float2 min, float2 size)
+    {
+        ImGui.SetNextWindowPos(min);
+        ImGui.SetNextWindowSize(size);
+        ImGui.Begin(name, Flags);
+        if (ImGui.IsWindowAppearing())
+            ImGui.Internal.BringWindowToDisplayFront(ImGui.Internal.GetCurrentWindow());
     }
 
     /// <summary>One row's button. A disabled row still takes the click, so the menu stays open.</summary>

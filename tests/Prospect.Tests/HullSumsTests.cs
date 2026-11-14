@@ -248,6 +248,7 @@ internal static class Figures
             Ftl = ftl,
             FtlEnergy = flight.FtlEnergy,
             FtlPower = flight.FtlPower,
+            FtlMaxDistance = flight.FtlMaxDistance,
         };
     }
 }

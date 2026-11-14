@@ -323,7 +323,7 @@ internal sealed partial class ScreenHost
         if (_mapCard.Pinned)
             DrawPinnedCard(snapshot, world, galaxy, cardMin, cardSize, fade);
         if (_mapMenuOpen)
-            DrawMapMenu(world, galaxy, fade);
+            DrawMapMenu(snapshot, world, galaxy, fade);
         Kit.Fade = 1f;
     }
 

@@ -111,7 +111,7 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   helpers (`MapExploration.cs`: `MapCardState`, `MapSectorCard`, `MapLayerBar`, `MapNavigation`,
   `MapProjection`), which `FrameOrderTests` drives with the production `MapPointer`; a window over the map
   blocks its rectangle before `MapPointer.Begin` and calls `Claim`. A hover preview card is never a window.
-  Figures are in `content/visuals/map.json` (`MapTuning`). Check with `--open map-card`, `map-tilt`, `scan`
+  Figures are in `content/visuals/map.json` (`MapTuning`). Check with `--open map-card`, `map-card-near`, `map-card-far`, `map-tilt`, `scan`
   and `command-fog`.
 - **The ship editor:** the limits are in `EditorRules`, `content/net/editor.json` and `docs/hosting.md`;
   change all three. A design reaches the catalogue only through `DesignBytes.Decode` on a worker, the catalogue
@@ -157,6 +157,13 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   still makes is closed by its own cleanup. `--save-fault slow|fail|unknown|degraded` with `--open leave`,
   `--capture` and a scratch `--worlds` captures the saving screen and the reports. `SavedWorldPlayTests`
   runs it against real servers on a temporary folder.
+- **A jump offered anywhere in the interface:** the command view's right-click menu (`WorldView.CourseMenu`),
+  the map's course menu and the pinned sector card all read one `JumpPlan` (`WorldView.PlanJump`, which calls
+  `JumpRules.Evaluate` per selected ship) and one set of rows (`ScreenHost.DrawCourseRows`); never work out range or
+  risk a second way. The ship being flown is only plotted (`PlotJump`, answered through
+  `Exploration.Navigation`); other owned ships get `IssueFleetOrder`. A right click in the command view opens the
+  menu and orders nothing; Escape (`ScreenHost.NextBackStep`) and a press elsewhere close it. `FrameOrderTests` runs
+  it. Do not build text inside another `Kit.F`: build the inner figures first.
 - **A new per-tick system:** add a unit test in `tests/Prospect.Tests/WorldTests.cs` and, if it crosses the
   network, a session test that runs a real server and client.
 - **A new sector module** (stations): derive from `SectorModule` in `Prospect.Game/World`, name its
@@ -196,7 +203,7 @@ The client opens a real window on the developer's desktop, and they are usually 
   Do not create a headless output: a monitor manager such as hyprmoncfg adopts it and moves the developer's
   workspaces. Without such a rule (GNOME, macOS, Windows), tell the developer windows will appear first.
 - `make run ARGS="--start local --open <view> --capture /path/shot.png --capture-after 2.5"` saves a screenshot
-  and exits. Views: `command`, `edit` (asks to edit the own ship; the editor opens on the grant), `map`, `map-hover` (the map with the pointer on your own sector, a preview card), `map-card` (your own sector's card pinned), `map-tilt` (the same, tilted), `scan` (pinned card and a scan started: capture after 2.5 s for progress, after 7 s for the charted result), `command-fog` (the command view pulled back to show sensor rings and fog), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,
+  and exits. Views: `command`, `edit` (asks to edit the own ship; the editor opens on the grant), `map`, `map-hover` (the map with the pointer on your own sector, a preview card), `map-card` (your own sector's card pinned), `map-card-near` (a sector 144 km away: a blind jump with risk) and `map-card-far` (460 km: out of drive range), `command-menu` (the command view's right-click menu on a blind jump 60 km ahead for the ship being flown: Plot jump), `command-menu-fleet` (the same for the other ships: Jump here), `command-menu-close` (3 km, too close) and `command-menu-far` (450 km, too far), `map-tilt` (the same, tilted), `scan` (pinned card and a scan started: capture after 2.5 s for progress, after 7 s for the charted result), `command-fog` (the command view pulled back to show sensor rings and fog), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,
   `players`, `social`, `friends`, `chat`, `hud` (the world with the party list and recent chat only). The social views and
   `hud` leave the performance overlay off. Screens
   without a session: `--start menu|join|settings|newgame|credits|account|load`; `--set id=value` shows on `newgame`, and so

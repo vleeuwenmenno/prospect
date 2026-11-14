@@ -59,6 +59,13 @@ internal sealed class MapTuning
     public float CommandFogAlpha { get; init; }
     public float CommandFogReach { get; init; }
 
+    /// <summary>
+    /// A blind jump's hit chance, 0 to 1, from which the course menu and the sector card draw it in the warning
+    /// colour instead of amber, and how many seconds the server's refusal of a plot or a jump stays on screen.
+    /// </summary>
+    public float CourseRiskDanger { get; init; }
+    public float CourseRefusalSeconds { get; init; }
+
     public static MapTuning Load() => Load(AppPaths.Content("visuals", "map.json"));
 
     /// <summary>Reads and checks the tuning; anything out of range is refused.</summary>
@@ -77,7 +84,7 @@ internal sealed class MapTuning
 
         static bool Unit(float value) => value is >= 0f and <= 1f;
         if (!Unit(tuning.FogAlpha) || !Unit(tuning.ChartedAlpha) || !Unit(tuning.LiveFillAlpha) || !Unit(tuning.LiveRingAlpha)
-            || !Unit(tuning.StaleFade) || !Unit(tuning.CommandFogAlpha))
+            || !Unit(tuning.StaleFade) || !Unit(tuning.CommandFogAlpha) || !Unit(tuning.CourseRiskDanger))
             throw new InvalidDataException($"{path}: alphas and fades are 0 to 1");
         if (!(tuning.MinCoveragePixels is >= 0 and <= 64))
             throw new InvalidDataException($"{path}: minCoveragePixels is 0 to 64");
@@ -92,6 +99,8 @@ internal sealed class MapTuning
             throw new InvalidDataException($"{path}: fieldDetailCell is 20 to 400, fieldSectorsPerFrame 1 to 64");
         if (!(tuning.ScanResultSeconds is >= 0 and <= 120) || !(tuning.CommandFogReach is >= 1 and <= 20))
             throw new InvalidDataException($"{path}: scanResultSeconds is 0 to 120, commandFogReach 1 to 20");
+        if (!(tuning.CourseRefusalSeconds is >= 0 and <= 60))
+            throw new InvalidDataException($"{path}: courseRefusalSeconds is 0 to 60");
         return tuning;
     }
 }

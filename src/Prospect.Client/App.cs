@@ -997,6 +997,12 @@ internal sealed class App : IDisposable
                 World.SelectAllOwned();
                 World.SetCommandCapturePose(World.OwnPosition, 14000f, 0.6f, -0.95f);
             }
+            else if (view.StartsWith("command-menu", StringComparison.Ordinal))
+            {
+                // The command view's right-click menu, opened by the harness since the pointer is muted: the ship
+                // being flown (or with -fleet the others) selected, and a point 60 km ahead, 3 km or 450 km away.
+                World.PrepareCourseMenuCapture(view, Session.Client.Input);
+            }
             else if (view == "controls")
                 _screens.OpenControls();
             else if (view == "edit" && snapshot is { OwnHull: >= 0 })
@@ -1030,6 +1036,10 @@ internal sealed class App : IDisposable
                 _screens.OpenMapHover();
             else if (view == "map-card")
                 _screens.OpenMapCard();
+            else if (view == "map-card-near")
+                _screens.OpenMapCard(3, 2);
+            else if (view == "map-card-far")
+                _screens.OpenMapCard(11, 3);
             else if (view == "map-tilt")
                 _screens.OpenMapTilt();
             else if (view == "scan")

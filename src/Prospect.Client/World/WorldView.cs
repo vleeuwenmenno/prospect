@@ -543,8 +543,36 @@ internal sealed class WorldView
     /// <summary>Whether a jump ordered from the map now goes to the hull being flown alone, which only plots it.</summary>
     public bool JumpPlotsOwnOnly => _selectedCount == 1 && _selected[0] == Own.Id;
 
+    /// <summary>
+    /// The context menu the command view's right click opens. Its rows come from <see cref="PlanJump"/>; choosing
+    /// one goes through <see cref="OrderMoveSelected"/> or <see cref="OrderJump"/>.
+    /// </summary>
+    internal CourseMenu CourseMenu { get; } = new();
+
+    /// <summary>
+    /// What a jump to <paramref name="target"/> would do for the selected ships: who can go, who plots and who
+    /// jumps by themselves, the distance against the drive's range, and the blind-jump risk. The same figures the
+    /// server checks the jump with, worked out once for every screen that offers one.
+    /// </summary>
+    internal JumpPlan PlanJump(Double3 target) =>
+        _snapshot is { } snapshot ? JumpPlan.Evaluate(snapshot, this, _selected.AsSpan(0, _selectedCount), target) : default;
+
     /// <summary>Whether the nose of the hull being flown is on <see cref="NavTarget"/>, close enough to jump.</summary>
     public bool NavAimed { get; private set; }
+
+    /// <summary>
+    /// The server's refusal of the hull being flown's last plot or jump start, while it is news (see
+    /// <see cref="NavRefusalAt"/>); <see cref="JumpRefusal.None"/> otherwise.
+    /// </summary>
+    public JumpRefusal NavRefusal { get; private set; }
+
+    /// <summary>When <see cref="NavRefusal"/> arrived, in seconds on <see cref="Time"/>.</summary>
+    public float NavRefusalAt { get; private set; } = -100f;
+
+    // A plot sent to the server and not yet answered, and the server's last navigation state as it was seen, to
+    // tell a new answer from the same one repeated.
+    private Double3? _plotPending;
+    private NavigationView _seenNavigation;
 
     /// <summary>When the boost key last asked for a jump while the nose was off the nav target, in seconds.</summary>
     public float NavRefusedAt { get; private set; } = -10f;
@@ -588,6 +616,7 @@ internal sealed class WorldView
             _devices.CameraDrag = false;
         }
         _leftDragging = _rightDragging = false;
+        CourseMenu.Close();
         Mode = mode;
         _lookDirection = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
         if (mode == ViewMode.Command)
@@ -703,6 +732,7 @@ internal sealed class WorldView
                 _chaseInitialised = false;
                 TargetHull = 0;
                 NavTarget = null;
+                _plotPending = null;
                 _jumpChord.Clear();
             }
 
@@ -719,6 +749,7 @@ internal sealed class WorldView
         }
 
         UpdateNav();
+        ReconcileNavigation(snapshot);
         // Read whether or not the world has the controls: a menu over them is not the pilot letting go.
         var forwardPressed = _jumpChord.Observe(
             _actions.Axis(_devices, InputAxis.Forward, true) > 0f,
@@ -1291,6 +1322,28 @@ internal sealed class WorldView
         }
     }
 
+    /// <summary>
+    /// Muted capture harness hook for <c>--open command-menu*</c>: the command view looking down on the player's
+    /// sector, the course menu open on a point ahead of the ship being flown, and the ship (or its fleet) selected.
+    /// </summary>
+    internal bool PrepareCourseMenuCapture(string view, PlayerInputBridge bridge)
+    {
+        if (!_devices.Muted || _snapshot is not { } snapshot)
+            return false;
+        var distance = view.EndsWith("close", StringComparison.Ordinal) ? 3000.0 : view.EndsWith("far", StringComparison.Ordinal) ? 450000.0 : 60000.0;
+        SetCommandCapturePose(OwnPosition, distance < 10000 ? 7000f : 90000f, 0f, -0.95f);
+        ClearSelection();
+        for (var i = 0; i < snapshot.HullCount; i++)
+        {
+            ref var hull = ref snapshot.Hulls[i];
+            if (hull.Owner == snapshot.PlayerId && (view.EndsWith("fleet", StringComparison.Ordinal) ? !hull.IsOwn : hull.IsOwn))
+                AddToSelection(hull.Id);
+        }
+
+        CourseMenu.Open(_screen * new float2(0.5f, 0.32f), OwnPosition + new Double3(0, 0, -distance), _time);
+        return true;
+    }
+
     /// <summary>Muted capture harness hook; angles are radians. Call before Update, never from ordinary input.</summary>
     internal bool SetCommandCapturePose(Double3 focus, float distance, float yaw, float pitch)
     {
@@ -1752,12 +1805,53 @@ internal sealed class WorldView
         _jumpOffset *= inside;
     }
 
+    /// <summary>
+    /// Follows the server's answer to the plots and jump starts sent for the hull being flown. A new refusal is
+    /// news for <see cref="NavRefusalAt"/>; a plot the server turned down gives the point back that it kept, so
+    /// the NAV marker never shows a course the server does not hold. The server sends a state only when it
+    /// changes, so a plot refused exactly as the last one was is not answered again; the screens check range
+    /// before they plot, which keeps that to a point that moved after the check.
+    /// </summary>
+    private void ReconcileNavigation(SessionSnapshot snapshot)
+    {
+        var nav = snapshot.Exploration.Navigation;
+        var changed = nav.ResultHull != _seenNavigation.ResultHull || nav.Refusal != _seenNavigation.Refusal
+            || nav.HasPlot != _seenNavigation.HasPlot || nav.Target != _seenNavigation.Target || nav.Hull != _seenNavigation.Hull;
+        _seenNavigation = nav;
+        if (!changed)
+            return;
+        if (nav.ResultHull == Own.Id && nav.Refusal != JumpRefusal.None)
+        {
+            NavRefusal = nav.Refusal;
+            NavRefusalAt = _time;
+        }
+        else if (nav.Refusal == JumpRefusal.None)
+        {
+            NavRefusal = JumpRefusal.None;
+        }
+
+        if (_plotPending is not { } pending)
+            return;
+        if (nav.HasPlot && nav.Hull == Own.Id && nav.Target == pending)
+        {
+            _plotPending = null;
+            return;
+        }
+
+        if (nav.ResultHull == Own.Id && nav.Refusal != JumpRefusal.None)
+        {
+            _plotPending = null;
+            NavTarget = nav.HasPlot && nav.Hull == Own.Id ? nav.Target : null;
+        }
+    }
+
     /// <summary>Keeps the plotted jump current: gone once the hull is there, and whether the nose is on it.</summary>
     private void UpdateNav()
     {
         if (NavTarget is not { } nav || InSectorOf(Own, nav) || !HasJumpDrive(Own))
         {
             NavTarget = null;
+            _plotPending = null;
             NavAimed = false;
             return;
         }
@@ -2120,32 +2214,11 @@ internal sealed class WorldView
     public void OrderJump(PlayerInputBridge bridge, Double3 target) => OrderSelection(bridge, target, true, true);
 
     /// <summary>
-    /// Counts the hulls a jump order would apply to, the selected ones: how many there are, how many can jump to
-    /// <paramref name="target"/>, and how many are already in its sector.
+    /// True when a hull can be sent on a jump to <paramref name="target"/> now: it has a working drive, is not in
+    /// transit, the point is within the drive's range and not too close, and lies outside its sector.
     /// </summary>
-    public void CountJumpReady(Double3 target, out int ships, out int ready, out int inSector)
-    {
-        ships = 0;
-        ready = 0;
-        inSector = 0;
-        for (var i = 0; i < _selectedCount; i++)
-        {
-            if (TryGetHull(_selected[i], out var hull))
-                Count(hull, target, ref ships, ref ready, ref inSector);
-        }
-    }
-
-    private void Count(in HullView hull, Double3 target, ref int ships, ref int ready, ref int inSector)
-    {
-        ships++;
-        if (InSectorOf(hull, target))
-            inSector++;
-        else if (HasJumpDrive(hull))
-            ready++;
-    }
-
-    /// <summary>True when a hull has a working jump drive and is not already in the target's sector.</summary>
-    public bool CanJumpTo(in HullView hull, Double3 target) => HasJumpDrive(hull) && !InSectorOf(hull, target);
+    public bool CanJumpTo(in HullView hull, Double3 target) =>
+        _snapshot is { } snapshot && JumpPlan.Check(snapshot, this, hull, target, out _) == JumpBlock.None;
 
     /// <summary>True when the hull still has a working faster-than-light drive; losing the drive block loses it.</summary>
     private static bool HasJumpDrive(in HullView hull) => hull.Stats.Ftl != FtlKind.None;
@@ -2303,9 +2376,13 @@ internal sealed class WorldView
             }
 
             // The hull being flown takes its orders through the input stream; the rest go to the server directly.
-            // Its jump is only plotted: the pilot starts it.
+            // Its jump is only plotted, with the server told so it can check the range and answer: the pilot starts it.
             if (_selected[i] == Own.Id && jump)
+            {
                 NavTarget = order.Target;
+                _plotPending = order.Target;
+                bridge.PlotJump(Own.Id, order.Target);
+            }
             else if (_selected[i] == Own.Id)
                 bridge.IssueOrder(order);
             else
@@ -2538,6 +2615,21 @@ internal sealed class WorldView
         if (!pointerOverUi && _devices.Scroll != 0)
             _commandDistance = Math.Clamp(_commandDistance * MathF.Pow(0.86f, _devices.Scroll), MinCommandDistance, MaxCommandDistance);
 
+        // A press outside the open course menu closes it. A left or middle press only closes it, and so reaches
+        // nothing else; a right press goes on to begin the camera drag or a menu of its own at the new point.
+        if (CourseMenu.IsOpen && !pointerOverUi)
+        {
+            if (_devices.MousePressed(GlfwMouseButton.Left) || _devices.MousePressed(GlfwMouseButton.Middle))
+            {
+                CourseMenu.Close();
+                pointerOverUi = true;
+            }
+            else if (_devices.MousePressed(GlfwMouseButton.Right))
+            {
+                CourseMenu.Close();
+            }
+        }
+
         // Left button: click picks a hull, drag draws a selection box, Shift and drag slides the plane up and down.
         if (_devices.MousePressed(GlfwMouseButton.Left) && !pointerOverUi)
         {
@@ -2570,7 +2662,7 @@ internal sealed class WorldView
             }
         }
 
-        // Right button: drag to rotate the view, click to send the selection to the point under the pointer.
+        // Right button: drag to rotate the view, click to open the course menu at the point under the pointer.
         if (_devices.MousePressed(GlfwMouseButton.Right) && !pointerOverUi)
         {
             _rightDragging = true;
@@ -2592,8 +2684,8 @@ internal sealed class WorldView
             if (!_devices.MouseDown(GlfwMouseButton.Right))
             {
                 _rightDragging = false;
-                if (!_rightMoved && _selectedCount > 0 && GroundPoint(_devices.MousePosition, out var target))
-                    OrderSelection(bridge, target, true, false);
+                if (!_rightMoved && GroundPoint(_devices.MousePosition, out var target))
+                    CourseMenu.Open(_devices.MousePosition, target, _time);
             }
         }
 

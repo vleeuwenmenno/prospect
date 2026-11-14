@@ -17,5 +17,7 @@
   "staleFade": 0.45,
   "scanResultSeconds": 6,
   "commandFogAlpha": 0.42,
-  "commandFogReach": 3
+  "commandFogReach": 3,
+  "courseRiskDanger": 0.5,
+  "courseRefusalSeconds": 6
 }

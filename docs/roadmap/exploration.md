@@ -117,6 +117,17 @@ This protection applies only to blind-jump damage; other damage remains dangerou
 - Plotting and starting use the same server range checks; starting checks again from the current position.
 - Taking control still requires the same XYZ sector. Fleet orders remain unrestricted by control range.
 
+### Built: the course menus and the card
+
+- The command view's right click opens a menu at the cursor: Move here, and Plot jump or Jump here. Escape or a click elsewhere closes it.
+- The menu, the map's course menu and the pinned card read one plan (`JumpPlan`, `WorldView.PlanJump`): `JumpRules.Evaluate` per selected ship.
+- Too close, too far, driveless, in transit, or in the ship's own sector: the row is disabled and says why.
+- The jump line says charted, or blind with hit chance and damage; its warning colour is `courseRiskDanger` in `content/visuals/map.json`.
+- The label says who acts: Plot jump when only the ship being flown can go, Jump here when other ships go by themselves.
+- A mixed selection plots the ship being flown and orders the rest.
+- A refusal from `Exploration.Navigation` shows for `courseRefusalSeconds`: on the jump strip, and under the command view's status.
+- Open: a jump inside the ship's own sector (5 km or more) is legal for the server but held back by the UI, which clears a NAV point once the hull is in its sector.
+
 ## Required technical boundary
 
 The server owns visibility, scan completion, charts, range checks and damage.

@@ -562,6 +562,7 @@ public sealed class FrameOrderTests : IDisposable
         }
 
         DrawFloating();
+        DrawCommandCourseMenu();
         // As the editor screen does before its panels: a press on one ends a turn, keeping it.
         _world.EndPartRotationOnPanelPress();
         DrawPalette();
@@ -575,6 +576,50 @@ public sealed class FrameOrderTests : IDisposable
             _buttonClicks++;
         ImGui.End();
         ImGui.Render();
+    }
+
+    // The command view's course menu as ScreenHost draws it, without the drawing: the same window, rows and
+    // actions, from the world's own menu state and plan, and what its rows did.
+    private bool _courseMenuShown;
+    private int _courseMoves;
+    private int _courseJumps;
+
+    private void DrawCommandCourseMenu()
+    {
+        var menu = _world.CourseMenu;
+        if (!_courseMenuShown || !menu.IsOpen)
+            return;
+        var size = MapCourseMenu.Size(1f);
+        var shown = MapCourseMenu.Shown(MapCourseMenu.Place(menu.At, size, Screen, 1f), _world.Time - menu.OpenedAt, 1f);
+        MapCourseMenu.BeginFree("##coursemenu"u8, shown, size);
+        var rowSize = MapCourseMenu.RowSize(size, 1f);
+        var plan = _world.PlanJump(menu.Target);
+        var acted = false;
+        if (MapCourseMenu.Item("Move here"u8, MapCourseMenu.RowMin(shown, 0, 1f), rowSize) && plan.Ships > 0)
+        {
+            _world.OrderMoveSelected(Bridge, menu.Target);
+            _courseMoves++;
+            acted = true;
+        }
+
+        if (MapCourseMenu.Item("Jump here"u8, MapCourseMenu.RowMin(shown, 1, 1f), rowSize) && plan.Ready > 0)
+        {
+            _world.OrderJump(Bridge, menu.Target);
+            _courseJumps++;
+            acted = true;
+        }
+
+        MapCourseMenu.End();
+        if (acted)
+            menu.Close();
+    }
+
+    private float2 CourseRow(int row)
+    {
+        var menu = _world.CourseMenu;
+        var size = MapCourseMenu.Size(1f);
+        var shown = MapCourseMenu.Shown(MapCourseMenu.Place(menu.At, size, Screen, 1f), _world.Time - menu.OpenedAt, 1f);
+        return MapCourseMenu.RowMin(shown, row, 1f) + MapCourseMenu.RowSize(size, 1f) * 0.5f;
     }
 
     // A part card of the editor's part list, submitted with the production helper after the world as ScreenHost
@@ -2435,6 +2480,335 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal(!alt, _router.Captured);
         var aim = Sent().Aim;
         Assert.True(Vector3.Distance(aim, Nose) < 1e-4f, $"aim {aim} nose {Nose}");
+    }
+
+    private uint OwnId => _snapshot.Hulls[_snapshot.OwnHull].Id;
+
+    private uint RemoteOwnedId()
+    {
+        for (var i = 0; i < _snapshot.HullCount; i++)
+            if (!_snapshot.Hulls[i].IsOwn && _snapshot.Hulls[i].Owner == _snapshot.PlayerId)
+                return _snapshot.Hulls[i].Id;
+        throw new InvalidOperationException("no other owned hull");
+    }
+
+    /// <summary>Opens the command view's menu at an empty place with the pointer there, settled and drawn.</summary>
+    private void OpenCourseMenu(Double3 target)
+    {
+        CommandView();
+        _courseMenuShown = true;
+        Frame(() => Move(EmptySpace));
+        _world.CourseMenu.Open(EmptySpace, target, _world.Time);
+        for (var i = 0; i < 10; i++)
+            Frame();
+        Assert.True(_world.CourseMenu.IsOpen);
+        Bridge.Consume(out _, out _);
+        Span<FleetOrder> drain = stackalloc FleetOrder[FleetOrdersMessage.MaxOrders];
+        Bridge.ConsumeFleetOrders(drain);
+        Bridge.ConsumePlot(out _);
+    }
+
+    private Double3 Ahead(double metres) => _world.OwnPosition + new Double3(0, 0, -metres);
+
+    private int FleetOrdersSent(Span<FleetOrder> into) => Bridge.ConsumeFleetOrders(into);
+
+    [Fact]
+    public void ARightClickInTheCommandViewOpensTheCourseMenuAndOrdersNothing()
+    {
+        CommandView();
+        _courseMenuShown = true;
+        Frame(() =>
+        {
+            Move(EmptySpace);
+            Button(GlfwMouseButton.Right, true);
+        });
+        Frame(() => Button(GlfwMouseButton.Right, false));
+        Frame();
+        Assert.True(_world.CourseMenu.IsOpen);
+        Assert.Equal(EmptySpace, _world.CourseMenu.At);
+        // The point is on the command plane, where the pointer was when the button came up.
+        Assert.InRange(Math.Abs(_world.CourseMenu.Target.Y - _world.CommandFocus.Y), 0.0, 1.0);
+        Span<FleetOrder> fleet = stackalloc FleetOrder[FleetOrdersMessage.MaxOrders];
+        Bridge.Consume(out var hasOrder, out _);
+        Assert.False(hasOrder);
+        Assert.Equal(0, Bridge.ConsumeFleetOrders(fleet));
+        Assert.False(Bridge.ConsumePlot(out _));
+        Assert.Null(_world.NavTarget);
+    }
+
+    [Fact]
+    public void ARightDragInTheCommandViewStillOnlyTurnsTheCamera()
+    {
+        CommandView();
+        _courseMenuShown = true;
+        Frame(() => Button(GlfwMouseButton.Right, true));
+        Frame(() => Move(EmptySpace + new float2(120, -30)));
+        Frame(() => Button(GlfwMouseButton.Right, false));
+        Frame();
+        Assert.False(_world.CourseMenu.IsOpen);
+    }
+
+    [Fact]
+    public void AClickElsewhereClosesTheCourseMenuAndOnlyCloses()
+    {
+        OpenCourseMenu(Ahead(100000));
+        Assert.Equal(1, _world.Selection.Length);
+        Frame(() =>
+        {
+            Move(EmptySpace + new float2(500, -300));
+            Click();
+        });
+        Frame();
+        Assert.False(_world.CourseMenu.IsOpen);
+        // A plain click on empty space clears the selection; this one was only the menu's.
+        Assert.Equal(1, _world.Selection.Length);
+        Assert.Equal(0, _courseMoves + _courseJumps);
+
+        // A right click elsewhere closes it and opens another at the new point.
+        OpenCourseMenu(Ahead(100000));
+        var elsewhere = EmptySpace + new float2(500, -300);
+        Frame(() =>
+        {
+            Move(elsewhere);
+            Button(GlfwMouseButton.Right, true);
+        });
+        Assert.False(_world.CourseMenu.IsOpen);
+        Frame(() => Button(GlfwMouseButton.Right, false));
+        Frame();
+        Assert.True(_world.CourseMenu.IsOpen);
+        Assert.Equal(elsewhere, _world.CourseMenu.At);
+    }
+
+    [Fact]
+    public void EscapeClosesTheCourseMenuBeforeTheCommandViewAndLeavesTheViewAlone()
+    {
+        OpenCourseMenu(Ahead(100000));
+        Assert.Equal(ScreenHost.BackStep.CourseMenu, ScreenHost.NextBackStep(false, false, false, _world.CourseMenu.IsOpen, ViewMode.Command));
+        Assert.Equal(ScreenHost.BackStep.SessionMenu, ScreenHost.NextBackStep(false, false, true, true, ViewMode.Command));
+        Assert.Equal(ScreenHost.BackStep.PilotView, ScreenHost.NextBackStep(false, false, false, false, ViewMode.Command));
+        Assert.Equal(ScreenHost.BackStep.OpenMenu, ScreenHost.NextBackStep(false, false, false, false, ViewMode.Pilot));
+        Assert.True(_world.CourseMenu.Close());
+        Frame();
+        Assert.Equal(ViewMode.Command, _world.Mode);
+        Assert.False(_world.CourseMenu.Close());
+
+        // Leaving the command view takes the menu with it.
+        _world.CourseMenu.Open(EmptySpace, Ahead(100000), _world.Time);
+        _world.SetMode(ViewMode.Pilot);
+        Assert.False(_world.CourseMenu.IsOpen);
+    }
+
+    [Fact]
+    public void MoveHereInTheCourseMenuIssuesTheMoveAndClosesIt()
+    {
+        OpenCourseMenu(Ahead(100000));
+        Frame(() =>
+        {
+            Move(CourseRow(0));
+            Click();
+        });
+        for (var i = 0; i < 3; i++)
+            Frame();
+        Assert.Equal(1, _courseMoves);
+        Assert.False(_world.CourseMenu.IsOpen);
+        Bridge.Consume(out var hasOrder, out var order);
+        Assert.True(hasOrder);
+        Assert.Equal(OrderKind.MoveTo, order.Kind);
+        Assert.Equal(1, _world.Selection.Length);
+    }
+
+    [Fact]
+    public void JumpHerePlotsTheShipBeingFlownAndOrdersTheOthers()
+    {
+        var far = Ahead(100000);
+        OpenCourseMenu(far);
+
+        // The ship being flown: only plotted. The pilot starts it with NAV and boost.
+        var plan = _world.PlanJump(far);
+        Assert.Equal(JumpBlock.None, plan.Block);
+        Assert.Equal(1, plan.Ready);
+        Assert.True(plan.PlotsOnly);
+        Assert.True(plan.Reference.Blind);
+        Assert.InRange(plan.Reference.Risk, 0.16f, 0.17f);
+        Frame(() =>
+        {
+            Move(CourseRow(1));
+            Click();
+        });
+        for (var i = 0; i < 3; i++)
+            Frame();
+        Assert.Equal(1, _courseJumps);
+        Assert.False(_world.CourseMenu.IsOpen);
+        Span<FleetOrder> fleet = stackalloc FleetOrder[FleetOrdersMessage.MaxOrders];
+        Bridge.Consume(out var hasOrder, out _);
+        Assert.False(hasOrder);
+        Assert.Equal(0, Bridge.ConsumeFleetOrders(fleet));
+        Assert.True(Bridge.ConsumePlot(out var plot));
+        Assert.Equal(OwnId, plot.Hull);
+        Assert.Equal(far, plot.Target);
+        Assert.Equal(far, _world.NavTarget);
+
+        // A ship nobody flies: an order it carries out by itself, and no plot.
+        var remote = RemoteOwnedId();
+        _world.ClearSelection();
+        _world.Select(remote, false);
+        _world.CourseMenu.Open(EmptySpace, far, _world.Time);
+        for (var i = 0; i < 10; i++)
+            Frame();
+        plan = _world.PlanJump(far);
+        Assert.Equal(1, plan.ReadyRemote);
+        Assert.False(plan.PlotsOnly);
+        Frame(() =>
+        {
+            Move(CourseRow(1));
+            Click();
+        });
+        for (var i = 0; i < 3; i++)
+            Frame();
+        Assert.Equal(2, _courseJumps);
+        Assert.Equal(1, Bridge.ConsumeFleetOrders(fleet));
+        Assert.Equal(remote, fleet[0].Hull);
+        Assert.Equal(OrderKind.Jump, fleet[0].Order.Kind);
+        Assert.Equal(far, fleet[0].Order.Target);
+        Assert.False(Bridge.ConsumePlot(out _));
+        Bridge.Consume(out hasOrder, out _);
+        Assert.False(hasOrder);
+    }
+
+    [Fact]
+    public void ASelectionOfBothPlotsTheOwnShipAndOrdersTheRest()
+    {
+        var far = Ahead(100000);
+        CommandView();
+        _world.SelectAllOwned();
+        var plan = _world.PlanJump(far);
+        Assert.Equal(3, plan.Ready);
+        Assert.Equal(1, plan.ReadyPiloted);
+        Assert.Equal(2, plan.ReadyRemote);
+        Assert.True(plan.Mixed);
+        Assert.False(plan.PlotsOnly);
+        _world.OrderJump(Bridge, far);
+        Span<FleetOrder> fleet = stackalloc FleetOrder[FleetOrdersMessage.MaxOrders];
+        Assert.Equal(2, Bridge.ConsumeFleetOrders(fleet));
+        Assert.True(Bridge.ConsumePlot(out var plot));
+        Assert.Equal(OwnId, plot.Hull);
+        Bridge.Consume(out var hasOrder, out _);
+        Assert.False(hasOrder);
+    }
+
+    [Theory]
+    [InlineData(3000.0, "TooClose")]
+    [InlineData(10000.0, "SameSector")]
+    [InlineData(500000.0, "TooFar")]
+    public void ATargetOutOfRangeLeavesTheJumpRowDisabledWithItsReason(double metres, string reason)
+    {
+        var target = Ahead(metres);
+        OpenCourseMenu(target);
+        var plan = _world.PlanJump(target);
+        Assert.Equal(Enum.Parse<JumpBlock>(reason), plan.Block);
+        Assert.Equal(0, plan.Ready);
+        Assert.Equal(metres, plan.Reference.Distance, 1.0);
+        Assert.Equal(400000.0, plan.MaxDistance);
+        Assert.Equal(5000.0, plan.MinDistance);
+
+        // The row takes the click and does nothing: the menu stays open and nothing is sent.
+        Frame(() =>
+        {
+            Move(CourseRow(1));
+            Click();
+        });
+        for (var i = 0; i < 3; i++)
+            Frame();
+        Assert.Equal(0, _courseJumps);
+        Assert.True(_world.CourseMenu.IsOpen);
+        Span<FleetOrder> fleet = stackalloc FleetOrder[FleetOrdersMessage.MaxOrders];
+        Assert.Equal(0, Bridge.ConsumeFleetOrders(fleet));
+        Assert.False(Bridge.ConsumePlot(out _));
+        Bridge.Consume(out var hasOrder, out _);
+        Assert.False(hasOrder);
+        Assert.Null(_world.NavTarget);
+
+        // Move here still works from the same menu: it has no range.
+        Frame(() =>
+        {
+            Move(CourseRow(0));
+            Click();
+        });
+        Frame();
+        Assert.Equal(1, _courseMoves);
+    }
+
+    [Fact]
+    public void WithNothingSelectedBothRowsAreOffAndTheFiguresAreTheShipBeingFlowns()
+    {
+        var far = Ahead(100000);
+        OpenCourseMenu(far);
+        _world.ClearSelection();
+        var plan = _world.PlanJump(far);
+        Assert.Equal(JumpBlock.NoShips, plan.Block);
+        Assert.Equal(0, plan.Ships);
+        Assert.True(plan.HasReference);
+        Assert.InRange(plan.Reference.Risk, 0.16f, 0.17f);
+        Frame(() =>
+        {
+            Move(CourseRow(0));
+            Click();
+        });
+        Frame(() =>
+        {
+            Move(CourseRow(1));
+            Click();
+        });
+        Frame();
+        Assert.Equal(0, _courseMoves + _courseJumps);
+        Assert.True(_world.CourseMenu.IsOpen);
+    }
+
+    [Fact]
+    public void AChartedDestinationHasNoBlindRisk()
+    {
+        var far = Ahead(100000);
+        CommandView();
+        var blind = _world.PlanJump(far);
+        Assert.True(blind.Reference.Blind);
+        Assert.True(blind.Reference.Risk > 0f);
+        _snapshot.Exploration.Charts[_snapshot.Exploration.ChartCount++] = new SectorChart(_snapshot.PlayerId, _snapshot.Galaxy!.SectorOf(far), 1);
+        Frame();
+        var charted = _world.PlanJump(far);
+        Assert.False(charted.Reference.Blind);
+        Assert.Equal(0f, charted.Reference.Risk);
+        Assert.Equal(JumpBlock.None, charted.Block);
+    }
+
+    [Fact]
+    public void AnAnsweredPlotKeepsTheNavPointAndARefusedOneGivesBackTheServersOwn()
+    {
+        var far = Ahead(100000);
+        CommandView();
+        var own = OwnId;
+        _world.OrderJump(Bridge, far);
+        Assert.Equal(far, _world.NavTarget);
+
+        // Accepted: the server's answer holds the point, and nothing changes.
+        _snapshot.Exploration.Navigation = new NavigationView { Hull = own, ResultHull = own, HasPlot = true, Target = far };
+        Frame();
+        Assert.Equal(far, _world.NavTarget);
+        Assert.Equal(JumpRefusal.None, _world.NavRefusal);
+
+        // Refused: the marker returns to what the server holds, and the refusal is news.
+        _world.OrderJump(Bridge, Ahead(250000));
+        Assert.NotEqual(far, _world.NavTarget);
+        _snapshot.Exploration.Navigation = new NavigationView { Hull = own, ResultHull = own, HasPlot = true, Target = far, Refusal = JumpRefusal.TooFar };
+        Frame();
+        Assert.Equal(far, _world.NavTarget);
+        Assert.Equal(JumpRefusal.TooFar, _world.NavRefusal);
+        Assert.True(_world.Time - _world.NavRefusalAt < 0.5f);
+
+        // A refusal of a jump start (the hull drifted) is news too, with no plot waiting.
+        _snapshot.Exploration.Navigation = new NavigationView { Hull = own, ResultHull = own, HasPlot = true, Target = far, Refusal = JumpRefusal.TooClose };
+        Frame();
+        Assert.Equal(JumpRefusal.TooClose, _world.NavRefusal);
+        Assert.Equal(far, _world.NavTarget);
     }
 
     [Fact]

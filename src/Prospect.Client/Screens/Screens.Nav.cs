@@ -25,10 +25,10 @@ internal sealed partial class ScreenHost
     private string _navName = "";
 
     /// <summary>The strip's state for the hull being flown.</summary>
-    private static JumpPrompt PromptFor(WorldView world)
+    private JumpPrompt PromptFor(WorldView world)
     {
         var own = world.Own;
-        return HudLayout.Prompt(
+        var prompt = HudLayout.Prompt(
             world.NavTarget is not null,
             world.NavAimed,
             world.Time - world.NavRefusedAt < NavRefusedSeconds,
@@ -36,6 +36,10 @@ internal sealed partial class ScreenHost
             own.Order.Kind == OrderKind.Jump,
             own.Order.Kind == OrderKind.MoveTo
         );
+
+        // The server's refusal of a plot or a start is news for a few seconds, over a plot or an idle strip.
+        var news = world.NavRefusal != JumpRefusal.None && world.Time - world.NavRefusalAt < MapLook.CourseRefusalSeconds;
+        return news && prompt is JumpPrompt.None or JumpPrompt.OffCourse or JumpPrompt.Refused or JumpPrompt.Aligned ? JumpPrompt.Denied : prompt;
     }
 
     private string NavName(WorldView world, Double3 nav)
@@ -189,7 +193,7 @@ internal sealed partial class ScreenHost
         var tone = prompt switch
         {
             JumpPrompt.Aligned => Theme.Good,
-            JumpPrompt.Refused => Theme.Bad,
+            JumpPrompt.Refused or JumpPrompt.Denied => Theme.Bad,
             JumpPrompt.Autopilot => Theme.Accent,
             _ => Theme.Info,
         };
@@ -205,7 +209,7 @@ internal sealed partial class ScreenHost
         Kit.ClippedText(draw, _ui.SansMedium, Theme.FontSmall, new float2(statusLeft, strip.Top + Kit.Px(4)), tone, HudLayout.PromptWord(prompt, calculation >= 1f), statusWidth);
         ReadOnlySpan<byte> under = prompt switch
         {
-            JumpPrompt.OffCourse or JumpPrompt.Refused or JumpPrompt.Aligned when world.NavTarget is { } nav => Kit.F($"{NavName(world, nav)}"),
+            JumpPrompt.OffCourse or JumpPrompt.Refused or JumpPrompt.Aligned or JumpPrompt.Denied when world.NavTarget is { } nav => Kit.F($"{NavName(world, nav)}"),
             JumpPrompt.Aligning or JumpPrompt.Working => "THRUST CANCELS"u8,
             JumpPrompt.Autopilot => "MOVE ORDER"u8,
             _ => DriveName(flight.Ftl),
@@ -236,6 +240,9 @@ internal sealed partial class ScreenHost
                     DrawDriveCost(draw, flight, x, actionRight, line);
                     break;
                 }
+            case JumpPrompt.Denied:
+                Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, new float2(actionLeft, line), Theme.Bad, RefusalWords(snapshot, world.NavRefusal), room);
+                break;
             case JumpPrompt.Ordered:
                 break;
             case JumpPrompt.Aligning:
