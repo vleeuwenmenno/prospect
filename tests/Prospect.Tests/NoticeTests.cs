@@ -426,4 +426,70 @@ public sealed class NoticeTests
 
         Assert.Equal(0, allocation.Bytes);
     }
+
+    private static FuelFlow Tank(float nitrogen, float capacity = 100f) => new()
+    {
+        Amount = new FuelTanks { Nitrogen = nitrogen },
+        Capacity = new FuelTanks { Nitrogen = capacity },
+    };
+
+    [Fact]
+    public void TheTrackerPostsOnceWhenAnOwnTankDropsLowAndOnceWhenItRunsOut()
+    {
+        var board = Board();
+        var tracker = new NoticeTracker();
+        var none = default(ModuleScanView);
+        var sector = default(ScanView);
+        var ship = default(NewShipView);
+        const uint own = 7;
+
+        // The first look, and a hull seen for the first time, are not news, even when already low.
+        tracker.Update(board, none, sector, ship, own, Tank(50f));
+        tracker.Update(board, none, sector, ship, own, Tank(50f));
+        Assert.Equal(0, board.Count);
+
+        tracker.Update(board, none, sector, ship, own, Tank(19f));
+        tracker.Update(board, none, sector, ship, own, Tank(10f));
+        Assert.Equal(1, board.Count);
+        Assert.Equal(NoticeKinds.FuelLowNitrogen, board.NoticeAt(0).Id);
+
+        tracker.Update(board, none, sector, ship, own, Tank(0f));
+        tracker.Update(board, none, sector, ship, own, Tank(0f));
+        Assert.Equal(2, board.Count);
+        Assert.Equal(NoticeKinds.FuelEmptyNitrogen, board.NoticeAt(0).Id);
+
+        // Another hull starts afresh: its low tank posts nothing, and no tank at all is quiet.
+        board.Clear();
+        tracker.Update(board, none, sector, ship, 8, Tank(5f));
+        tracker.Update(board, none, sector, ship, 8, default);
+        Assert.Equal(0, board.Count);
+
+        // A tank that falls straight to empty says only that it is empty.
+        tracker.Update(board, none, sector, ship, 8, Tank(60f));
+        tracker.Update(board, none, sector, ship, 8, Tank(0f));
+        Assert.Equal(1, board.Count);
+        Assert.Equal(NoticeKinds.FuelEmptyNitrogen, board.NoticeAt(0).Id);
+    }
+
+    [Fact]
+    public void FuelNoticesTakeNoMemory()
+    {
+        var board = Board();
+        var tracker = new NoticeTracker();
+        var none = default(ModuleScanView);
+        var sector = default(ScanView);
+        var ship = default(NewShipView);
+        tracker.Update(board, none, sector, ship, 7, Tank(90f));
+        var allocation = new AllocationProbe();
+        while (allocation.Measuring())
+        {
+            for (var i = 0; i < 100; i++)
+            {
+                tracker.Update(board, none, sector, ship, 7, Tank(i % 2 == 0 ? 10f : 90f));
+                board.Clear();
+            }
+        }
+
+        Assert.Equal(0, allocation.Bytes);
+    }
 }

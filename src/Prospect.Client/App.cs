@@ -148,6 +148,12 @@ internal sealed class AppOptions
     public bool MapTilt { get; set; }
     public bool MapHover { get; set; }
 
+    /// <summary>
+    /// Scripted runs only (<c>--hold-thrust</c>, -1 to 1): holds the forward axis at this value in the pilot view, as a
+    /// held key would, so a capture shows the fuel burning. Input devices are muted there, so nothing else sets it.
+    /// </summary>
+    public float? HoldThrust { get; set; }
+
     /// <summary>In the pilot view, holds the camera this many degrees to the side of the hull's nose; for captures.</summary>
     public float? LookDegrees { get; set; }
 
@@ -1342,6 +1348,7 @@ internal sealed class App : IDisposable
         // Advance only after the first image is saved, never from elapsed capture time.
         World.GasOverlayOpening = _options.GasFixture == GasShaderFixture.OverlayCheck
             && Volatile.Read(ref _screenshotJob.Saved) > 0;
+        World.ScriptedForward = Devices.Muted && Session is not null ? _options.HoldThrust : null;
         if (_options.LookDegrees is { } look && Session is not null)
         {
             if (_options.LookToDegrees is { } lookTo)

@@ -29,7 +29,7 @@ public sealed class FlightConsoleTests
         // On screen, inside the side margins, and resting on the bottom margin.
         Assert.True(layout.LeftX >= Px(FlightConsole.Side));
         Assert.True(layout.Right <= width - Px(FlightConsole.Side));
-        Assert.Equal(height - Px(FlightConsole.Bottom), layout.Top + layout.Height);
+        Assert.Equal(height - Px(FlightConsole.Bottom), layout.FuelTop + layout.FuelRow);
 
         // The two groups clear the speed readout between them, and mirror each other about it.
         var half = Px(FlightConsole.Center) * 0.5f;
@@ -293,5 +293,54 @@ public sealed class FlightConsoleTests
         {
             File.Delete(scratch);
         }
+    }
+
+    private static FuelFlow Tanks(float amount, float capacity, float burn) => new()
+    {
+        Amount = new FuelTanks { Nitrogen = amount, Hydrazine = amount },
+        Capacity = new FuelTanks { Nitrogen = capacity, Hydrazine = capacity },
+        Burn = new FuelTanks { Nitrogen = burn, Hydrazine = 0f },
+    };
+
+    [Fact]
+    public void TheFuelReadoutShowsOnlyTanksThereAreAndSignsTheFlowNegativeWhileBurning()
+    {
+        var fuel = Tanks(50f, 100f, 0.2f);
+        Assert.Equal(2, ConsoleFuel.Count(fuel));
+        Assert.Equal(0f, ConsoleFuel.Capacity(fuel, FuelKind.Bipropellant));
+        Assert.Equal(FuelLevel.None, ConsoleFuel.Level(fuel, FuelKind.Bipropellant));
+        Assert.Equal(-0.2f, ConsoleFuel.Flow(fuel, FuelKind.Nitrogen), 4);
+
+        // A burn smoothed towards zero is rest, and rest has no time left.
+        Assert.Equal(0f, ConsoleFuel.Flow(fuel, FuelKind.Hydrazine));
+        Assert.True(float.IsNaN(ConsoleFuel.MinutesLeft(fuel, FuelKind.Hydrazine)));
+        Assert.Equal(50f / 0.2f / 60f, ConsoleFuel.MinutesLeft(fuel, FuelKind.Nitrogen), 3);
+        Assert.Equal(-1, MathF.Sign(ConsoleFuel.Flow(fuel, FuelKind.Nitrogen)));
+        Assert.Equal("-0.20 KG/S", Encoding(ConsoleFuel.FlowText(-0.2f)));
+        Assert.Equal("—", Encoding(ConsoleFuel.FlowText(0f)));
+        Assert.Equal("+0.25 KG/S", Encoding(ConsoleFuel.FlowText(0.25f)));
+    }
+
+    private static string Encoding(ReadOnlySpan<byte> utf8) => System.Text.Encoding.UTF8.GetString(utf8);
+
+    [Theory]
+    [InlineData(100f, 1)]
+    [InlineData(20f, 1)]
+    [InlineData(19.9f, 2)]
+    [InlineData(0.1f, 2)]
+    [InlineData(0f, 3)]
+    [InlineData(float.NaN, 3)]
+    public void ATankIsLowUnderTheContentsMarkAndEmptyAtZero(float amount, int level) =>
+        Assert.Equal((FuelLevel)level, ConsoleFuel.Level(Tanks(amount, 100f, 0f), FuelKind.Nitrogen));
+
+    [Fact]
+    public void TheFuelRowIsPartOfTheConsoleAndAnswersTheHover()
+    {
+        var layout = FlightConsole.Layout(new float2(1280f, 720f), 1f);
+        var row = FlightConsole.BarRect(layout, ConsoleBar.Fuel);
+        Assert.True(row.Top >= layout.Top + layout.Height);
+        Assert.Equal(layout.LeftX, row.Left);
+        Assert.Equal(layout.Right, row.Right);
+        Assert.Equal(ConsoleBar.Fuel, FlightConsole.Hovered(layout, new float2(layout.CenterX, row.Top + 2f), true, false));
     }
 }

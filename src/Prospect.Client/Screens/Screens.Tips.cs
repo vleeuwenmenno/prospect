@@ -218,7 +218,7 @@ internal sealed partial class ScreenHost
     internal static HudRect ConsoleArea(float2 display, float scale, int modules, ModuleLook.StripLook strip)
     {
         var console = FlightConsole.Layout(display, scale);
-        var area = new HudRect(console.LeftX, console.Top, console.Right, console.Top + console.Height);
+        var area = new HudRect(console.LeftX, console.Top, console.Right, console.FuelTop + console.FuelRow);
         if (modules <= 0)
             return area;
         var chips = StripRect(display, scale, modules, strip);

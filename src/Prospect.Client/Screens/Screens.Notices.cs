@@ -44,7 +44,7 @@ internal sealed partial class ScreenHost
     {
         if (!_notices.Enabled)
             return;
-        _noticeTracker.Update(_notices, snapshot.Modules.Scan, snapshot.Exploration.Scan, snapshot.NewShip, world.Own.Id);
+        _noticeTracker.Update(_notices, snapshot.Modules.Scan, snapshot.Exploration.Scan, snapshot.NewShip, world.Own.Id, world.Own.Fuel);
         _editorNotices.Update(_notices, world.Editor, RefusalSentence);
         // Only while they can be read: a notice does not run out behind a menu.
         if (NoticesVisible)

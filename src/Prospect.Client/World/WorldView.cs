@@ -443,6 +443,9 @@ internal sealed class WorldView
     /// </summary>
     public float? LookDegrees { get; set; }
 
+    /// <summary>Scripted runs only: the forward axis held in the pilot view, as a held key would.</summary>
+    public float? ScriptedForward { get; set; }
+
     /// <summary>The flight figures of the hull the player is flying.</summary>
     public FlightParams OwnFlight => _designs[Math.Min(Own.Design, _designs.Length - 1)].Flight;
 
@@ -929,6 +932,14 @@ internal sealed class WorldView
 
         // A jump never takes the view: the pilot looks wherever they like through all of it. The server holds the
         // hull's nose on the destination while the drive works; the camera keeps its normal orbit and zoom.
+
+        // A scripted run's window is never focused, so the keys above are off: the held axis is set here instead.
+        if (ScriptedForward is { } scriptedForward && !editing && Mode == ViewMode.Pilot)
+        {
+            controls.Forward = scriptedForward;
+            controls.Aim = _lookDirection;
+            controls.Align = scriptedForward != 0f;
+        }
 
         bridge.Submit(controls);
         UpdateJump(dt);

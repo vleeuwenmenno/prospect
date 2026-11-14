@@ -4,7 +4,8 @@
 
 - **Built:** the simulation. Blocks face one of six ways, thrust is per direction, three fuels are burnt and saved.
 - **Built:** the editor turns a part's facing with `R` and warns about a missing direction or tank.
-- **Not built:** the models and plumes, and the fuel readout in the pilot console. Both have what they need (below).
+- **Built:** the fuel readout in the pilot console (a fuel row under the two groups, a tooltip, low and empty notices).
+- **Not built:** the models and plumes. They have what they need (below).
 - Protocol 50, save layout 6, design encoding 3, design file version 4, evaluator 11.
 
 ## Decided: parts
@@ -51,6 +52,13 @@
 
 - Fuel shows like energy: each fuel's amount, capacity and net flow per second.
 - Flow is negative while burning. Nothing adds fuel yet. Ship refineries may later make it positive.
+- The console's fuel row sits under the two groups and spans them: one cell per fuel the hull has a tank for.
+  - Each cell: name, amount / capacity, net flow in kg/s with an arrow ("—" at rest), a strip of how full.
+  - A narrow cell drops the capacity, then the name.
+  - Hover shows the tooltip: per fuel, amount, burn, minutes left at that burn ("—" at rest).
+- Low is under `fuelLowFraction` of capacity (`content/visuals/power.json`). The cell turns red and a notice posts once.
+  Empty posts its own notice. Both are own hull only, once per crossing, one kind per fuel in `notices.json`.
+- The editor's stats already list tank capacity per fuel.
 
 ## Decided: models and effects
 

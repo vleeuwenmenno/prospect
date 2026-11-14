@@ -269,6 +269,12 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `content/visuals/power.json` (`PowerReadout`). A shield emitter's `powerDraw` and `shieldRestartPowerMultiplier` are
   tuning (`docs/direction.md`, "shield power must be felt and seen"); `PowerFlowTests` holds the rules every shipped
   design must meet, so retuning a design or the content runs them. Check with `--break-shield` (below).
+- **The fuel readout:** `ConsoleFuel` (font-free) reads `HullView.Fuel` only: tank present, level (`FuelLevel`, low mark
+  `fuelLowFraction` in `content/visuals/power.json`), signed flow (negative while burning, zero under
+  `fuelSteadyKgPerSecond`), minutes left. The row is `ScreenHost.DrawFuelRow`, part of `FlightConsoleLayout`
+  (`FuelTop`, `FuelRow`; `ConsoleTop` includes it) and a hover target (`ConsoleBar.Fuel`, tooltip `ConsoleTip.Fuel`).
+  Low and empty notices come from `NoticeTracker` (own hull, once per crossing; six kinds in `notices.json`). Check with
+  `--hold-thrust 1` (scripted runs only: holds the forward axis, as the window is never focused) at `"UiScale": 1` and `2`.
 - **Thrust, facing and fuel:** a thrust part pushes the hull the opposite way to its `DesignBox.Facing` and burns
   its `BlockType.Fuel`; `BoxHullSums` keeps thrust and burn per push direction and fuel (`ThrustTable`), tank room
   and pump power per fuel, and `FlightModel.Step` is the one place that moves a hull and spends fuel

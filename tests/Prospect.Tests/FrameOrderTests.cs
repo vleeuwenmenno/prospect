@@ -1095,6 +1095,8 @@ public sealed class FrameOrderTests : IDisposable
         var seen = new List<string> { board.Current.Id };
         for (var i = 0; i < 3; i++)
         {
+            // Cards differ in height, and on a short display the panel is held at the top, so the Next button moves.
+            Frame();
             ClickAt(TipPoint(TipRows().Next));
             seen.Add(board.Current.Id);
         }
