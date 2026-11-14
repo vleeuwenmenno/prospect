@@ -99,6 +99,8 @@ internal sealed partial class ScreenHost
         if (own.BoostLocked)
             ConsoleBars.Marker(draw, track, FlightModel.BoostUnlockHeat, 0.7f);
 
+        DrawFuelRow(draw, layout, own, hovered == ConsoleBar.Fuel);
+
         // Centre: speed and its unit in a hexagon with a quiet outline; the dampeners are said in the heat row.
         var cx = layout.CenterX;
         var top = layout.Top;
@@ -122,6 +124,7 @@ internal sealed partial class ScreenHost
                 ConsoleBar.Shield => offline ? Theme.Bad : hasShield ? Theme.Info : Theme.LineStrong,
                 ConsoleBar.Hull => hullColor,
                 ConsoleBar.Energy => energyColor,
+                ConsoleBar.Fuel => ConsoleTip.FuelTone(own.Fuel),
                 _ => heatColor,
             };
             ConsoleTip.Draw(ImGui.GetForegroundDrawList(), _ui.Mono, _ui.SansMedium, Kit.Scale, rect, tone, hovered, own, flight);
@@ -395,6 +398,9 @@ internal enum ConsoleBar
     Hull,
     Energy,
     Heat,
+
+    /// <summary>The fuel row under both groups.</summary>
+    Fuel,
 }
 
 /// <summary>Where the pilot console sits on a screen of a given size and interface scale.</summary>
@@ -405,13 +411,18 @@ internal enum ConsoleBar
 /// <param name="GroupWidth">The width of each group of two rows, slant included.</param>
 /// <param name="Row">The height of one row.</param>
 /// <param name="RowGap">The space between a group's two rows.</param>
+/// <param name="FuelRow">The height of the fuel row under the two groups, which spans the whole console.</param>
+/// <param name="FuelGap">The space between the two groups and the fuel row, tighter than a row gap to keep the console low.</param>
 /// <param name="Compact">
 /// True when the groups are too narrow for label, bar and reading side by side: each row then puts label and
 /// reading on a line above its bar and drops its icon.
 /// </param>
-internal readonly record struct FlightConsoleLayout(float Top, float LeftX, float RightX, float CenterX, float GroupWidth, float Row, float RowGap, bool Compact)
+internal readonly record struct FlightConsoleLayout(float Top, float LeftX, float RightX, float CenterX, float GroupWidth, float Row, float RowGap, float FuelRow, float FuelGap, bool Compact)
 {
     public float Height => Row * 2 + RowGap;
+
+    /// <summary>The fuel row's top edge: a short gap under the two groups.</summary>
+    public float FuelTop => Top + Height + FuelGap;
 
     /// <summary>The console's right edge.</summary>
     public float Right => RightX + GroupWidth;
@@ -425,6 +436,10 @@ internal static class FlightConsole
 {
     public const float Row = 36f;
     public const float RowGap = 6f;
+
+    /// <summary>The fuel row under the two groups.</summary>
+    public const float FuelRow = 20f;
+    public const float FuelGap = 3f;
     public const float Bottom = 20f;
     public const float Side = 16f;
 
@@ -499,6 +514,8 @@ internal static class FlightConsole
     /// </summary>
     public static HudRect BarRect(in FlightConsoleLayout layout, ConsoleBar bar)
     {
+        if (bar == ConsoleBar.Fuel)
+            return new HudRect(layout.LeftX, layout.FuelTop, layout.Right, layout.FuelTop + layout.FuelRow);
         var left = bar is ConsoleBar.Shield or ConsoleBar.Hull ? layout.LeftX : layout.RightX;
         var top = bar is ConsoleBar.Shield or ConsoleBar.Energy ? layout.Top : layout.Top + layout.Row + layout.RowGap;
         return new HudRect(left, top, left + layout.GroupWidth, top + layout.Row);
@@ -514,7 +531,7 @@ internal static class FlightConsole
     {
         if (!shown || overInterface)
             return ConsoleBar.None;
-        for (var bar = ConsoleBar.Shield; bar <= ConsoleBar.Heat; bar++)
+        for (var bar = ConsoleBar.Shield; bar <= ConsoleBar.Fuel; bar++)
         {
             if (BarRect(layout, bar).Contains(pointer))
                 return bar;
@@ -533,7 +550,7 @@ internal static class FlightConsole
         var side = MathF.Round(Side * scale);
         var width = Math.Min(size.X, Math.Max(0f, display.X - 2 * side));
         var row = BarRect(layout, bar);
-        var left = bar is ConsoleBar.Shield or ConsoleBar.Hull ? row.Left : row.Right - width;
+        var left = bar is ConsoleBar.Shield or ConsoleBar.Hull or ConsoleBar.Fuel ? row.Left : row.Right - width;
         left = Math.Clamp(left, side, Math.Max(side, display.X - side - width));
         var top = Math.Max(side, layout.Top - MathF.Round(Theme.Space2 * scale) - size.Y);
         return new HudRect(left, top, left + width, top + size.Y);
@@ -562,10 +579,12 @@ internal static class FlightConsole
         var group = Math.Max(0f, Math.Min(Px(GroupMax), room));
         var row = Px(Row);
         var rowGap = Px(RowGap);
-        var top = display.Y - Px(Bottom) - (row * 2 + rowGap);
+        var fuelRow = Px(FuelRow);
+        var fuelGap = Px(FuelGap);
+        var top = display.Y - Px(Bottom) - fuelRow - fuelGap - (row * 2 + rowGap);
         var cx = MathF.Round(display.X * 0.5f);
         var half = center * 0.5f;
-        return new FlightConsoleLayout(top, cx - half - gap - group, cx + half + gap, cx, group, row, rowGap, group < Px(FullMin));
+        return new FlightConsoleLayout(top, cx - half - gap - group, cx + half + gap, cx, group, row, rowGap, fuelRow, fuelGap, group < Px(FullMin));
     }
 
     /// <summary>

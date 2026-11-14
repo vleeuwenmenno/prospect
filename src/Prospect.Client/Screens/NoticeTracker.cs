@@ -16,6 +16,10 @@ internal sealed class NoticeTracker
     private ModuleScanState _moduleState;
     private ScanState _sectorState;
     private uint _newShipSerial;
+    private uint _fuelHull;
+    private FuelLevel _nitrogen;
+    private FuelLevel _hydrazine;
+    private FuelLevel _bipropellant;
 
     /// <summary>Forgets what was last seen: a new game starts fresh.</summary>
     public void Reset() => _primed = false;
@@ -24,7 +28,7 @@ internal sealed class NoticeTracker
     /// Follows one frame's scans and new-ship answer, posting to <paramref name="board"/>. <paramref name="ownHull"/> is
     /// the packed id of the hull flown, zero when none.
     /// </summary>
-    public void Update(NoticeBoard board, in ModuleScanView module, in ScanView sector, in NewShipView newShip, uint ownHull)
+    public void Update(NoticeBoard board, in ModuleScanView module, in ScanView sector, in NewShipView newShip, uint ownHull, in FuelFlow fuel = default)
     {
         var moduleChanged = module.Serial != _moduleSerial || module.State != _moduleState;
         var sectorChanged = sector.State != _sectorState;
@@ -35,6 +39,9 @@ internal sealed class NoticeTracker
         _sectorState = sector.State;
         _newShipSerial = newShip.Serial;
         _primed = true;
+        var fuelPrimed = primed && ownHull != 0 && ownHull == _fuelHull;
+        _fuelHull = ownHull;
+        TrackFuel(board, fuel, fuelPrimed);
         if (!primed)
             return;
 
@@ -63,5 +70,29 @@ internal sealed class NoticeTracker
 
         if (shipChanged && newShip.Status == NewShipStatus.Created && newShip.Hull != 0)
             board.Post(NoticeKinds.ShipBuilt);
+    }
+
+    /// <summary>
+    /// Posts when an own tank drops under the low mark or runs empty, once for each crossing: a tank that stays low
+    /// posts nothing more, one that is filled past the mark may post again. A hull seen for the first time, such as
+    /// a new ship, is taken as it is.
+    /// </summary>
+    private void TrackFuel(NoticeBoard board, in FuelFlow fuel, bool primed)
+    {
+        Step(board, FuelKind.Nitrogen, ref _nitrogen, ConsoleFuel.Level(fuel, FuelKind.Nitrogen), primed, NoticeKinds.FuelLowNitrogen, NoticeKinds.FuelEmptyNitrogen);
+        Step(board, FuelKind.Hydrazine, ref _hydrazine, ConsoleFuel.Level(fuel, FuelKind.Hydrazine), primed, NoticeKinds.FuelLowHydrazine, NoticeKinds.FuelEmptyHydrazine);
+        Step(board, FuelKind.Bipropellant, ref _bipropellant, ConsoleFuel.Level(fuel, FuelKind.Bipropellant), primed, NoticeKinds.FuelLowBipropellant, NoticeKinds.FuelEmptyBipropellant);
+    }
+
+    private static void Step(NoticeBoard board, FuelKind kind, ref FuelLevel seen, FuelLevel now, bool primed, string low, string empty)
+    {
+        var before = seen;
+        seen = now;
+        if (!primed || before == FuelLevel.None || now == before)
+            return;
+        if (now == FuelLevel.Empty)
+            board.Post(empty);
+        else if (now == FuelLevel.Low && before == FuelLevel.Ok)
+            board.Post(low);
     }
 }

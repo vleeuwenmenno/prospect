@@ -101,13 +101,14 @@ public sealed class HudLayoutTests
         Assert.False(column.Compact);
         Assert.False(column.Cards);
         var rows = HudLayout.PartyRows(column.Bottom, limit, column.Cards, false, 7, scale);
-        Assert.Equal(6, rows.Count);
+        // The console's fuel row costs this short, large-scale display one member row, and one when the panel is open.
+        Assert.Equal(5, rows.Count);
         Assert.True(rows.Bottom <= limit);
 
         var open = SectorInfoToggle.Column(scale, true, Px(116, scale), Px(64, scale), partyHeight, limit);
         Assert.True(open.Compact);
         Assert.False(open.Cards);
-        Assert.Equal(4, HudLayout.PartyRows(open.Bottom, limit, open.Cards, false, 7, scale).Count);
+        Assert.Equal(3, HudLayout.PartyRows(open.Bottom, limit, open.Cards, false, 7, scale).Count);
 
         // Where the full cards fit, opening or closing the sector panel keeps the full party readouts.
         foreach (var expanded in new[] { false, true })

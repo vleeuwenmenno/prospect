@@ -52,6 +52,9 @@ internal static class ConsoleTip
             case ConsoleBar.Heat:
                 Heat(ref sink, own, flight);
                 break;
+            case ConsoleBar.Fuel:
+                Fuel(ref sink, own.Fuel);
+                break;
         }
     }
 
@@ -129,6 +132,35 @@ internal static class ConsoleTip
         sink.Line("MASS"u8, Kit.F($"{FlightConsole.Shown(flight.Mass, float.MaxValue):0} T"), Theme.Text);
         if (flight.CollisionSafeSpeed > 0f)
             sink.Line("SAFE IMPACT"u8, Kit.F($"BELOW {flight.CollisionSafeSpeed:0} M/S"), Theme.Text);
+    }
+
+    /// <summary>The tooltip's accent for the fuel row: the warning colour when any tank is low, the accent otherwise.</summary>
+    public static uint FuelTone(in FuelFlow fuel) => ConsoleFuel.Worst(fuel) >= FuelLevel.Low ? Theme.Bad : Theme.Accent;
+
+    private static void Fuel<T>(ref T sink, in FuelFlow fuel)
+        where T : struct, IConsoleTipSink
+    {
+        var worst = ConsoleFuel.Worst(fuel);
+        if (worst == FuelLevel.None)
+        {
+            sink.Title("FUEL"u8, "NONE"u8, Theme.TextMute);
+            sink.Note("NO FUEL TANK ON THIS HULL"u8, Theme.TextDim);
+            return;
+        }
+
+        sink.Title("FUEL"u8, worst == FuelLevel.Empty ? "EMPTY"u8 : worst == FuelLevel.Low ? "LOW"u8 : "OK"u8, worst >= FuelLevel.Low ? Theme.Bad : Theme.Accent);
+        for (var i = 0; i < ConsoleFuel.Kinds; i++)
+        {
+            var kind = ConsoleFuel.KindAt(i);
+            var capacity = ConsoleFuel.Capacity(fuel, kind);
+            if (!(capacity > 0f))
+                continue;
+            var amount = ConsoleFuel.Amount(fuel, kind);
+            var flow = ConsoleFuel.Flow(fuel, kind);
+            sink.Line(ConsoleFuel.FullName(kind), ConsoleFuel.Stored(amount, capacity), ConsoleFuel.Color(fuel, kind));
+            sink.Line("  BURN"u8, ConsoleFuel.FlowText(flow), flow < 0f ? FlightConsole.DrawColor : flow > 0f ? FlightConsole.ChargeColor : Theme.TextMute);
+            sink.Line("  LEFT AT THIS BURN"u8, ConsoleFuel.MinutesText(ConsoleFuel.MinutesLeft(fuel, kind)), Theme.Text);
+        }
     }
 
     private static void Energy<T>(ref T sink, in HullView own, in FlightParams flight)

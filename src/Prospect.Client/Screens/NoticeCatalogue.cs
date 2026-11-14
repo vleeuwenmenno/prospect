@@ -53,8 +53,20 @@ internal static class NoticeKinds
     /// <summary>The request to edit is with the server; withdrawn when it answers.</summary>
     public const string EditAsking = "editAsking";
 
+    /// <summary>A tank of the own hull dropped under the low mark, one kind for each fuel.</summary>
+    public const string FuelLowNitrogen = "fuelLowNitrogen";
+
+    public const string FuelLowHydrazine = "fuelLowHydrazine";
+    public const string FuelLowBipropellant = "fuelLowBipropellant";
+
+    /// <summary>A tank of the own hull ran empty, one kind for each fuel.</summary>
+    public const string FuelEmptyNitrogen = "fuelEmptyNitrogen";
+
+    public const string FuelEmptyHydrazine = "fuelEmptyHydrazine";
+    public const string FuelEmptyBipropellant = "fuelEmptyBipropellant";
+
     /// <summary>Every kind, for validation.</summary>
-    public static readonly string[] All = [GasResults, AsteroidResults, LocatorResults, ModuleNoPower, ModuleCancelled, SectorCharted, ShipBuilt, ShipRebuilt, ShipFlown, EditRefused, FollowOutOfSector, FollowMissing, EditAsking];
+    public static readonly string[] All = [GasResults, AsteroidResults, LocatorResults, ModuleNoPower, ModuleCancelled, SectorCharted, ShipBuilt, ShipRebuilt, ShipFlown, EditRefused, FollowOutOfSector, FollowMissing, EditAsking, FuelLowNitrogen, FuelLowHydrazine, FuelLowBipropellant, FuelEmptyNitrogen, FuelEmptyHydrazine, FuelEmptyBipropellant];
 }
 
 /// <summary>What a click on a notice's body does. Named in the file, like a tip's trigger; an unknown name is refused.</summary>

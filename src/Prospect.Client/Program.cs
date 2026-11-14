@@ -355,6 +355,10 @@ internal static class Program
                     options.LookDegrees = look;
                     i++;
                     break;
+                case "--hold-thrust" when hasValue && float.TryParse(args[i + 1], out var holdThrust) && holdThrust is >= -1f and <= 1f:
+                    options.HoldThrust = holdThrust;
+                    i++;
+                    break;
                 case "--break-shield" when hasValue && float.TryParse(args[i + 1], out var breakAt) && breakAt is >= 0f and <= 600f:
                     options.BreakShieldSeconds = breakAt;
                     i++;
@@ -455,6 +459,9 @@ internal static class Program
 
         if (options.BenchResizes > 0 && (options.BenchSeconds <= 0 || options.VisualBenchmark is not null))
             return Fail("--bench-resize works only with --bench, without --visual-scene.");
+
+        if (options.HoldThrust is not null && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--hold-thrust works only with --capture or --bench: it replaces the pilot's forward key.");
 
         if (options.BreakShieldSeconds is not null && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
             return Fail("--break-shield works only with --capture or --bench, in an unsaved private local game.");

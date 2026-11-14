@@ -15,6 +15,12 @@
     { "id": "editRefused", "text": "The edit ended.", "accent": "bad", "seconds": 8 },
     { "id": "followOutOfSector", "text": "The new ship is outside your sector. Travel there and press {SwitchHull} to take control.", "accent": "bad", "seconds": 8 },
     { "id": "followMissing", "text": "The new ship is no longer there. You are still in the drone.", "accent": "bad", "seconds": 8 },
-    { "id": "editAsking", "text": "Asking the server to edit this ship...", "accent": "info", "seconds": 20 }
+    { "id": "editAsking", "text": "Asking the server to edit this ship...", "accent": "info", "seconds": 20 },
+    { "id": "fuelLowNitrogen", "text": "Nitrogen is low.", "accent": "bad", "seconds": 8 },
+    { "id": "fuelLowHydrazine", "text": "Hydrazine is low.", "accent": "bad", "seconds": 8 },
+    { "id": "fuelLowBipropellant", "text": "Bipropellant is low.", "accent": "bad", "seconds": 8 },
+    { "id": "fuelEmptyNitrogen", "text": "Out of nitrogen. Cold gas thrusters stop.", "accent": "bad", "seconds": 10 },
+    { "id": "fuelEmptyHydrazine", "text": "Out of hydrazine. Hot thrusters stop.", "accent": "bad", "seconds": 10 },
+    { "id": "fuelEmptyBipropellant", "text": "Out of bipropellant. Engines stop.", "accent": "bad", "seconds": 10 }
   ]
 }

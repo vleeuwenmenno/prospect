@@ -40,6 +40,29 @@ internal sealed class PowerReadout
     /// <summary><see cref="ModuleMarkColor"/> as 0xRRGGBB; checked when the figures load.</summary>
     public uint ModuleMarkRgb => uint.Parse(ModuleMarkColor, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture);
 
+    /// <summary>A fuel tank turns to the warning colour, and posts its notice, below this share of its capacity.</summary>
+    public float FuelLowFraction { get; init; }
+
+    /// <summary>Kilograms a second of burn below which a fuel reads as steady, so a burn smoothed towards zero shows no flow.</summary>
+    public float FuelSteadyKgPerSecond { get; init; }
+
+    /// <summary>The three fuels' accent colours as six hex digits: nitrogen, hydrazine, bipropellant.</summary>
+    public string FuelNitrogenColor { get; init; } = "";
+
+    public string FuelHydrazineColor { get; init; } = "";
+    public string FuelBipropellantColor { get; init; } = "";
+
+    /// <summary>The accent colour of one fuel as 0xRRGGBB; checked when the figures load.</summary>
+    public uint FuelRgb(Prospect.Game.World.FuelKind kind) => uint.Parse(
+        kind switch
+        {
+            Prospect.Game.World.FuelKind.Nitrogen => FuelNitrogenColor,
+            Prospect.Game.World.FuelKind.Hydrazine => FuelHydrazineColor,
+            _ => FuelBipropellantColor,
+        },
+        NumberStyles.AllowHexSpecifier,
+        CultureInfo.InvariantCulture);
+
     /// <summary>The shipped figures, read once.</summary>
     public static PowerReadout Current => _current ??= Load(AppPaths.Content("visuals", "power.json"));
 
@@ -58,6 +81,14 @@ internal sealed class PowerReadout
             throw new InvalidDataException($"{path}: moduleMarkColor is six hex digits");
         if (!(look.ModuleMarkAlpha is >= 0f and <= 1f) || !(look.ModuleMarkThickness is >= 1f and <= 8f) || !(look.ModuleMarkTick is >= 1f and <= 8f))
             throw new InvalidDataException($"{path}: moduleMarkAlpha is 0 to 1, moduleMarkThickness and moduleMarkTick 1 to 8");
+        if (!(look.FuelLowFraction is > 0f and < 1f) || !(look.FuelSteadyKgPerSecond is > 0f and <= 1f))
+            throw new InvalidDataException($"{path}: fuelLowFraction is above 0 and below 1, fuelSteadyKgPerSecond above 0 to 1");
+        foreach (var color in (ReadOnlySpan<string>)[look.FuelNitrogenColor, look.FuelHydrazineColor, look.FuelBipropellantColor])
+        {
+            if (color.Length != 6 || !uint.TryParse(color, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out _))
+                throw new InvalidDataException($"{path}: the fuel colours are six hex digits");
+        }
+
         return look;
     }
 }
