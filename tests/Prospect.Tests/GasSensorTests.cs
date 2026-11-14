@@ -10,6 +10,30 @@ public sealed class GasSensorTests
     private static readonly GasCloudPlacement[] Clouds = [new(default, new(Vector3.Zero, new Vector3(1000), 0))];
     private static readonly Double3[] Directions = [new(1, 0, 0), new(-1, 0, 0), new(0, 1, 0), new(0, -1, 0), new(0, 0, 1), new(0, 0, -1)];
 
+    [Theory]
+    [InlineData(20)]
+    [InlineData(80)]
+    public void CacheCoversSensorsAtSectorCornersAtBothSizeLimits(int km)
+    {
+        var world = Content.WithSettings(Content.SettingCatalog.Build(null, [$"sectorSize={km}"]));
+        var galaxy = world.Galaxy.WithSeed(0x50524F5350454354);
+        var cache = new SensorGasCache(galaxy, world.Exploration.SensorRadius);
+        var expected = new GasCloudPlacement[125];
+        var seen = 0;
+        foreach (var sector in new SectorCoord[] { new(-3, 0, 5), new(133, 0, -77), new(-66, 1, 37) })
+            for (var x = -1; x <= 1; x++)
+                for (var y = -1; y <= 1; y++)
+                    for (var z = -1; z <= 1; z++)
+                    {
+                        var position = galaxy.CenterOf(sector) + new Double3(x, y, z) * (galaxy.SectorSize * 0.499);
+                        var count = galaxy.GasClouds!.Intersecting(galaxy, position, world.Exploration.SensorRadius, expected);
+                        var cached = cache.At(position).ToArray();
+                        foreach (var placement in expected.AsSpan(0, count)) Assert.Contains(placement, cached);
+                        seen += count;
+                    }
+        Assert.True(seen > 0);
+    }
+
     [Fact]
     public void ClearSpaceIsSphereAndInsideShrinksEveryDirection()
     {

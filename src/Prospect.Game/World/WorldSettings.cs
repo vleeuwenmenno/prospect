@@ -429,7 +429,7 @@ public sealed class WorldSettingCatalog
     {
         try
         {
-            return JsonDocument.Parse(json);
+            return JsonDocument.Parse(json, new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
         }
         catch (JsonException e)
         {

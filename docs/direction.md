@@ -366,5 +366,5 @@ After that:
 
 - A player flying their escape drone may name and create a free ship, then edit its single core block.
 - The drone remains controlled, including when Apply replaces the new ship.
-- Server limits, clearance and client contract are in [hosting](hosting.md#new-ships-from-a-drone-protocol-40).
+- Server limits, clearance and client contract are in [hosting](hosting.md#new-ships-from-a-drone-protocol-41).
 - The server/session foundation is built; dialog and key handling are separate client work.

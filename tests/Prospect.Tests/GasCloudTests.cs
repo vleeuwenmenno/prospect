@@ -17,8 +17,8 @@ public sealed class GasCloudTests
         var sector = new SectorContent();
         galaxy.Generate(new(-3, 0, 5), sector);
         Assert.Equal(1, sector.Summary.GasCloudCount);
-        Assert.Equal(new Vector3(4071.2756f, 2646.329f, 3460.5845f), sector.GasCloud.HalfSize);
-        Assert.Equal(new Vector3(-5364.9116f, 10668.583f, -2576.735f), sector.GasCloud.Center);
+        Assert.Equal(new Vector3(8142.5513f, 5292.658f, 6921.169f), sector.GasCloud.HalfSize);
+        Assert.Equal(new Vector3(-10729.823f, 21337.166f, -5153.47f), sector.GasCloud.Center);
         Assert.Equal(73.74375f, sector.GasCloud.Seed);
         Assert.True(galaxy.GasClouds!.TryGetCloud(galaxy, new(-3, 0, 5), out var cloud));
         Assert.Equal(sector.GasCloud, cloud);

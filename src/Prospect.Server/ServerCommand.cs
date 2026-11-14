@@ -19,7 +19,7 @@ internal sealed class ServerCommand
     private readonly Option<string?> _password = new("--password") { Description = "Join password. Prefer PROSPECT_PASSWORD: arguments show in process lists. An empty argument clears the password." };
     private readonly Option<string?> _listing = new("--listing") { HelpName = "url|off", Description = "Listing URL or off (default: content/net/listing.json)." };
     private readonly Option<ulong?> _seed = new("--seed") { Description = $"Galaxy seed, 0..{ulong.MaxValue} (default: {new ServerConfig().GalaxySeed})." };
-    private readonly Option<string?> _settings = new("--settings") { HelpName = "file", Description = "JSON object of world setting ids and values; optional server object: name, visibility, port, maxPlayers, password, listing, limits." };
+    private readonly Option<string?> _settings = new("--settings") { HelpName = "file", Description = "JSONC object (comments and trailing commas allowed) of world setting ids and values; optional server object: name, visibility, port, maxPlayers, password, listing, limits." };
     private readonly Option<string[]> _set = new("--set")
     {
         HelpName = "id=value",

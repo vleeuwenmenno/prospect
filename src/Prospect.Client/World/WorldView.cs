@@ -1132,7 +1132,7 @@ internal sealed class WorldView
                 Center = new float4(center.X, center.Y, center.Z, cloud.Seed),
                 HalfSize = new float4(cloud.HalfSize.X, cloud.HalfSize.Y, cloud.HalfSize.Z, gas.ExtinctionOf(cloud, sectorSize)),
                 Tint = new float4(gas.Tint.X, gas.Tint.Y, gas.Tint.Z, 0),
-                Motion = new float4(time * gas.Motion, 0, gas.Wispiness, distance),
+                Motion = new float4(time * gas.Motion, 0, gas.WispinessOf(cloud), distance),
                 Shape = new float4(gas.Shape.X, gas.Shape.Y, gas.Shape.Z, gas.Shape.W),
                 Look = new float4(gas.Look.X, gas.Look.Y, gas.Look.Z, gas.Look.W),
                 Fine = _gasTiers.CloseUpFor(cloud.HalfSize.X),

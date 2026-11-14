@@ -112,7 +112,8 @@ public sealed class GalaxyTests
         // separately and must name the same ones. If generation is changed on purpose, bump ProtocolInfo.Version
         // and record the new hash here; if this fails without such a change, something in generation depends on
         // the machine.
-        var galaxy = Galaxy.Load(Path.Combine(AppContext.BaseDirectory, "fixtures", "galaxy.json"), 0x50524F5350454354);
+        var galaxy = Galaxy.Load(Path.Combine(AppContext.BaseDirectory, "fixtures", "galaxy.json"), 0x50524F5350454354)
+            .Under(Content.SettingCatalog, Content.SettingCatalog.Defaults);
         var content = new SectorContent();
         var hash = 0xCBF29CE484222325;
         var rocks = 0;
@@ -155,7 +156,7 @@ public sealed class GalaxyTests
         Assert.Equal(RecordedHash, hash);
     }
 
-    private const ulong RecordedHash = 9277006589864951221;
+    private const ulong RecordedHash = 3414107568006400618;
 
     /// <summary>A second module, for the tests only: it draws from its own stream and remembers what came out.</summary>
     private sealed class ProbeModule(string id, int draws) : SectorModule(id)
@@ -665,14 +666,16 @@ public sealed class GalaxyTests
         Assert.True(returned / probes < content.AsteroidCount / 8, $"{returned / probes} of {content.AsteroidCount} asteroids per probe");
     }
 
-    [Fact]
-    public void GeneratingTheDensestSectorStaysWithinBudget()
+    [Theory]
+    [InlineData(80)]
+    [InlineData(20)]
+    public void GeneratingDenseSectorsAtBothSizeLimitsStaysWithinBudget(int km)
     {
         // The budget: the fullest sector a galaxy can hold is generated in under 15 ms in a debug build, a few
         // milliseconds in release. The client does this on a streaming job; the server does it on the tick that
         // first touches a sector, once, and a tick is 16.7 ms long.
         const double budgetMilliseconds = 15;
-        var galaxy = Content.Galaxy.WithSeed(11);
+        var galaxy = Content.WithSettings(Content.SettingCatalog.Build(null, [$"sectorSize={km}"])).Galaxy.WithSeed(11);
         var dense = Sectors.Densest(galaxy);
         var content = new SectorContent();
         var best = double.MaxValue;
@@ -684,7 +687,7 @@ public sealed class GalaxyTests
         }
 
         Assert.True(content.AsteroidCount > 2500);
-        TestContext.Current.SendDiagnosticMessage($"generating a sector of {content.AsteroidCount}: {best:0.000} ms");
+        Console.WriteLine($"Sector {km} km: generating {content.AsteroidCount} rocks in {best:0.000} ms (budget {budgetMilliseconds} ms)");
         Assert.True(best < budgetMilliseconds, $"generating {content.AsteroidCount} asteroids took {best:0.00} ms; the budget is {budgetMilliseconds} ms");
 
         // A summary costs next to nothing, so the map can ask for thousands.

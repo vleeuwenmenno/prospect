@@ -18,6 +18,39 @@ namespace Prospect.Tests;
 /// </summary>
 public sealed class EditorSessionTests
 {
+    [Theory]
+    [InlineData(20, false)]
+    [InlineData(20, true)]
+    [InlineData(80, false)]
+    [InlineData(80, true)]
+    public void NewShipClearanceUsesTheAppliedSectorBoundary(int km, bool outside)
+    {
+        using var rig = new Rig(clients: 1, joined: 1, peerWait: 0, sectorKm: km);
+        var own = rig.Own(0);
+        rig.Input(0).RequestControl(0);
+        Assert.True(rig.Until(() => rig.Own(0) != own));
+        ref var drone = ref rig.Hulls.State(Rig.Index(rig.Own(0)));
+        drone.Orientation = Quaternion.Identity;
+        drone.Position = new Double3(0, 0, -rig.Server.Galaxy.SectorSize / 2 + (outside ? 1 : 100));
+        drone.Velocity = Vector3.Zero;
+        var designs = rig.Content.Designs.Length;
+        Assert.True(rig.Input(0).RequestNewShip("Boundary ship"));
+        if (outside)
+        {
+            Assert.True(rig.Until(() => rig.Snap(0).NewShip.Status == NewShipStatus.Refused, settle: true));
+            Assert.Equal(EditorReason.NoClearSpot, rig.Snap(0).NewShip.Reason);
+        }
+        else
+        {
+            Assert.True(rig.Until(() => rig.Snap(0).Content.Designs.Length == designs + 1, settle: true));
+            rig.Input(0).ReportInstalledDesigns(designs + 1);
+            Assert.True(rig.Until(() => rig.Snap(0).NewShip.Status == NewShipStatus.Created));
+            var position = rig.Hulls.State(Rig.Index(rig.Snap(0).NewShip.Hull)).Position;
+            Assert.Equal(default(SectorCoord), rig.Server.Galaxy.SectorOf(position));
+        }
+        Assert.Null(rig.Server.Fault);
+    }
+
     [Fact]
     public void NewShipWaitsForDesignReadyGrantsRemoteEditAndApplyKeepsTheDrone()
     {
@@ -207,7 +240,7 @@ public sealed class EditorSessionTests
         internal long Tick;
 
         /// <summary>A server with a link for every client; the first <paramref name="joined"/> join at once.</summary>
-        internal Rig(int clients = 2, int joined = 2, int quiet = 1, int peerWait = 1, int ready = 5, int commit = 0, int uploads = 2, int? catalogueSpare = null, int maxShips = 16)
+        internal Rig(int clients = 2, int joined = 2, int quiet = 1, int peerWait = 1, int ready = 5, int commit = 0, int uploads = 2, int? catalogueSpare = null, int maxShips = 16, int? sectorKm = null)
         {
             _files.Write("net/editor.json", $$"""{ "maxOwnedShips": {{maxShips}}, "quietSeconds": {{quiet}}, "uploads": {{uploads}}, "uploadSeconds": 5, "readySeconds": {{ready}}, "peerWaitSeconds": {{peerWait}}, "commitSeconds": {{commit}} }""");
             if (catalogueSpare is { } spare)
@@ -218,6 +251,7 @@ public sealed class EditorSessionTests
             }
             _files.Replace("rules/exploration.json", "5e3", "5");
             Content = _files.Load();
+            if (sectorKm is { } km) Content = Content.WithSettings(Content.SettingCatalog.Build(null, [$"sectorSize={km}", "asteroidAmount=0"]));
             _links = new LoopbackLink[clients];
             Wires = new Wire[clients];
             Clients = new ClientSession?[clients];

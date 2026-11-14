@@ -15,7 +15,7 @@ public sealed class FieldDistributionTests
         var content = GameContent.Load();
         foreach (var factor in new[] { 1, 5 })
         {
-            var assignments = new[] { "asteroidAmount", "asteroidSize", "asteroidFieldSize", "asteroidFrequency", "asteroidSpacing", "asteroidOreShare", "asteroidOreGrade" }.Select(id => $"{id}={factor}").ToArray();
+            var assignments = new[] { "asteroidAmount", "asteroidSize", "asteroidFieldSize", "asteroidFrequency", "asteroidSpacing", "asteroidOreShare", "asteroidOreGrade" }.Select(id => $"{id}={factor}").Concat(["sectorSize=40", "gasSizeMin=8", "gasSizeMax=11.2", "gasHugeSizeMin=20", "gasHugeSizeMax=40"]).ToArray();
             var galaxy = content.WithSettings(content.SettingCatalog.Build(null, assignments)).Galaxy.WithSeed(42);
             var sector = new SectorContent();
             int[] baseline = factor == 1 ? [2278, 507, 734, 1805, 8704] : [5400, 1678, 2715, 4108, 5077];

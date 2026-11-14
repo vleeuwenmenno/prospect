@@ -396,6 +396,12 @@ No pending roll or extra snapshot field is needed; snapshot codec remains 3.
 Navigation plots and last refusal feedback are transient connection state and start empty on load.
 The new content and evaluator identity require a compatible save; no migration is provided.
 
+## Sector-size generation update
+
+Generation version 5 stores sector size and gas ranges through the existing setting-id/value snapshot fields.
+Loading reapplies them through shared content before restoring sector-addressed state.
+Older generation/content identities are refused without migration; the snapshot codec layout is unchanged.
+
 ### New ships from a drone
 
 New root-block ships use CreateHull, the existing owner and durable entity id, and an appended canonical design.

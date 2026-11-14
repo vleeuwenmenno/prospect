@@ -93,7 +93,7 @@ public sealed class AsteroidRetuningTests
     public void PlacementOptimizationKeepsRecordedSectorBytes(int amount, bool all, int x, int z, string expected)
     {
         // Recorded with generation version 4: fields in world space, a stream for each rock and density noise.
-        var assignments = new List<string> { $"asteroidAmount={amount}" };
+        var assignments = new List<string> { $"asteroidAmount={amount}", "sectorSize=40", "gasSizeMin=8", "gasSizeMax=11.2", "gasHugeSizeMin=20", "gasHugeSizeMax=40" };
         if (all) assignments.AddRange(["asteroidSize=5", "asteroidFieldSize=5", "asteroidFrequency=5", "asteroidSpacing=5", "asteroidOreShare=5", "asteroidOreGrade=5"]);
         var galaxy = World(assignments.ToArray());
         var sector = new SectorContent();
@@ -223,7 +223,7 @@ public sealed class AsteroidRetuningTests
     [Fact]
     public void DebugBudgetSectorKeepsItsRecordedBytes()
     {
-        var galaxy = Content.Galaxy.WithSeed(11);
+        var galaxy = World("sectorSize=40", "gasSizeMin=8", "gasSizeMax=11.2", "gasHugeSizeMin=20", "gasHugeSizeMax=40").WithSeed(11);
         var coord = Sectors.Densest(galaxy);
         var sector = new SectorContent();
         galaxy.Generate(coord, sector);

@@ -47,8 +47,8 @@ public sealed class BlockType
 
     /// <summary>Megawatts the drive can take while charging for a jump.</summary>
     public float FtlPower { get; init; }
-    /// <summary>Maximum XYZ jump distance in metres; neither block size nor duplicates increase it.</summary>
-    public float FtlMaxDistance { get; init; }
+    /// <summary>Maximum XYZ jump distance in sectors; hull evaluation converts to metres. Neither block size nor duplicates increase it.</summary>
+    public float FtlMaxSectors { get; init; }
 
     /// <summary>Kilonewton-metres of turning effort.</summary>
     public float Torque { get; init; }
@@ -151,6 +151,7 @@ public sealed record FlightRules
     public float HullStrength { get; init; } = 1f;
     public float ShieldRechargeMultiplier { get; init; } = 1f;
     public float FtlChargeMultiplier { get; init; } = 1f;
+    public float SectorSize { get; init; } = 80000f;
 
     /// <summary>
     /// These rules as one world plays by them. This is the one place a world setting takes effect: to add a
@@ -164,6 +165,7 @@ public sealed record FlightRules
             ShieldRechargeMultiplier = catalog.Number(settings, "shieldRecharge"),
             FtlChargeMultiplier = catalog.Number(settings, "jumpChargeSpeed"),
             HullStrength = catalog.Number(settings, "hullStrength"),
+            SectorSize = catalog.Number(settings, "sectorSize") * 1000,
         };
 }
 
@@ -284,7 +286,7 @@ public sealed class BlockCatalog
                     }
                     : FtlKind.None,
                 FtlPower = Number(block, "ftlPower"u8),
-                FtlMaxDistance = Number(block, "ftlMaxDistance"u8),
+                FtlMaxSectors = Number(block, "ftlMaxSectors"u8),
                 Torque = Number(block, "torque"u8),
                 PowerOutput = Number(block, "powerOutput"u8),
                 PowerDraw = Number(block, "powerDraw"u8),
@@ -297,8 +299,8 @@ public sealed class BlockCatalog
         }
 
         foreach (var type in types.Values)
-            if (type.Ftl != FtlKind.None && (!float.IsFinite(type.FtlMaxDistance) || type.FtlMaxDistance <= 0))
-                throw new InvalidDataException($"{path}: a drive needs a positive finite ftlMaxDistance");
+            if (type.Ftl != FtlKind.None && (!float.IsFinite(type.FtlMaxSectors) || type.FtlMaxSectors <= 0))
+                throw new InvalidDataException($"{path}: a drive needs a positive finite ftlMaxSectors");
 
         // A dictionary does not promise an order; the file's is kept apart for whoever lists the types.
         var listed = new List<BlockType>(types.Count);

@@ -2,7 +2,7 @@
 
 Asteroid fields and gas clouds are things in world space, not contents of a sector.
 A sector is still generated alone, from the seed, without generating its neighbours.
-Generation version 4, protocol 36. The code is `AsteroidFieldsModule` and `GasCloudModule` in `Prospect.Game/World`.
+Generation version 5, protocol 41. The code is `AsteroidFieldsModule` and `GasCloudModule` in `Prospect.Game/World`.
 
 ## Decided: what the player gets
 
@@ -14,8 +14,8 @@ Generation version 4, protocol 36. The code is `AsteroidFieldsModule` and `GasCl
 
 Gas clouds:
 
-- Most are the size they were, about 8 to 11 km long.
-- A few are huge: 20 to 40 km long, up to a sector across.
+- Most are the size they were, about 16 to 22.4 km long by default.
+- A few are huge: 40 to 80 km long by default, up to a sector across.
 - Any cloud can lie across a wall.
 
 ## Decided: anchors
@@ -127,7 +127,7 @@ Size, spacing, radius, ore and material settings are unchanged.
 
 - A save names a pushed asteroid by its index, so it is held to `Galaxy.GenerationVersion`.
 - A world saved under another version is refused, untouched: `OpenOutcome.Incompatible`, "OTHER VERSION" in the list.
-- There is no migration. Worlds saved under version 3 do not open in this build.
+- There is no migration. Worlds saved under versions 3 or 4 do not open in this build.
 - `galaxy.json` is in the content identity: retuning it refuses older saves the same way.
 
 ## Limits
@@ -161,3 +161,23 @@ Development machine, default content. Before is generation version 3.
 - Whether the map should show a field as one shape across sectors rather than a count per sector.
 - Whether the current sector's readout should switch to the actual count once the sector is generated.
 - Broad regions of dense and empty space beyond the galaxy's arms: a third, sector-scale noise is not there.
+
+## Decided: variable sector and cloud sizes
+
+- `sectorSize` is 20–80 km, default 80 km, step 10 km; `Galaxy.Under` owns its applied metre value.
+- Ordinary and huge cloud diameters each have a minimum/maximum pair in km; huge chance is 0–1.
+- Both endpoints are capped at the applied sector width before sampling. The cloud remains within one neighbour of its anchor; the 27-sector query remains complete.
+- Anchors, gas queries, field density, exploration, maps and saved positions use the same applied `Galaxy.SectorSize`.
+- Saved settings already store ids and values. No snapshot codec change is needed; generation and content identity refuse older saves.
+
+### Sector-size budget and supported range
+
+The selectable range is capped at 20–80 km; the default stays 80 km.
+The former 160 km endpoint took 15.233 ms in Debug, exceeding the unchanged 15 ms budget.
+Best of 20 generations of the densest sampled sector, seed 11, after integration:
+
+- 20 km: 6,450 rocks, 9.811 ms Debug.
+- 80 km: 10,166 rocks, 14.446 ms Debug.
+
+Both supported endpoints enforce the 15 ms regression budget; no endpoint is exempt.
+The generation hash and version stay unchanged because the default world's generation is unchanged.

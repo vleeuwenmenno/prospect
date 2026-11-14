@@ -1,6 +1,6 @@
 {
   "jumpMinimum": 5e3,
-  "blindSafeDistance": 40000,
+  "blindSafeSectors": 1,
   "blindMaxDamage": 0.9,
   "gasOpticalPenalty": 1.0,
   "sensorRadius": 5000,

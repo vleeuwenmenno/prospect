@@ -45,6 +45,31 @@ public sealed class MapFootprintTests
     }
 
     [Fact]
+    public void ChangingSectorSizeReplacesCachedGeometryWithTheNewWorldsOutlines()
+    {
+        var cache = Cache();
+        Vector2[] previous = [];
+        foreach (var km in new[] { 20, 80 })
+        {
+            var galaxy = Content.WithSettings(Content.SettingCatalog.Build(null, [$"sectorSize={km}"])).Galaxy.WithSeed(DefaultSeed);
+            var sector = new SectorCoord(-3, 0, 5);
+            cache.Update(galaxy);
+            Assert.False(cache.TryGet(galaxy, sector, out _));
+            cache.Update(galaxy);
+            Assert.True(cache.TryGet(galaxy, sector, out var slot));
+            var fresh = Cache();
+            var freshSlot = fresh.BuildNow(galaxy, sector);
+            Assert.NotEmpty(cache.Features(slot).ToArray());
+            Assert.Equal(fresh.Features(freshSlot).Length, cache.Features(slot).Length);
+            for (var i = 0; i < cache.Features(slot).Length; i++)
+                Assert.Equal(fresh.Outer(freshSlot, i).ToArray(), cache.Outer(slot, i).ToArray());
+            var current = cache.Outer(slot, 0).ToArray();
+            if (previous.Length > 0) Assert.NotEqual(previous, current);
+            previous = current;
+        }
+    }
+
+    [Fact]
     public void AFieldsOutlineIsTheSameEveryTimeBoundedAndInsideItsOwnReach()
     {
         var fields = FieldsOf(WallWest);

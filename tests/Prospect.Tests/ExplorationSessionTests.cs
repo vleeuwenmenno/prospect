@@ -209,7 +209,7 @@ public sealed class ExplorationSessionTests
         rig.Step(30);
         Assert.Equal(JumpRefusal.TooClose, rig.Snap(0).Exploration.Navigation.Refusal);
         Assert.Equal(JumpPhase.None, rig.Hulls.State(slot).Jump);
-        rig.Clients[0].Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = target + new Double3(0, 500000, 0) });
+        rig.Clients[0].Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = target + new Double3(0, 900000, 0) });
         rig.Step(30);
         Assert.Equal(JumpRefusal.TooFar, rig.Snap(0).Exploration.Navigation.Refusal);
         Assert.Equal(JumpPhase.None, rig.Hulls.State(slot).Jump);
@@ -223,7 +223,7 @@ public sealed class ExplorationSessionTests
         using var rig = new Rig();
         var slot = (int)(rig.Own(0) & 65535);
         var start = rig.Hulls.State(slot).Position;
-        var target = start + new Double3(0, 0, -400000);
+        var target = start + new Double3(0, 0, -800000);
         if (charted) Assert.True(rig.Server.RecordChart(rig.Owner(0), rig.Server.Galaxy.SectorOf(target), rig.Tick));
         var intact = rig.Hulls.State(slot).Hull;
         rig.Clients[0].Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = target });
@@ -244,7 +244,7 @@ public sealed class ExplorationSessionTests
         var own = (int)(rig.Own(0) & 65535);
         var handle = rig.Hulls.Create(rig.Owner(0), (byte)Content.PodDesign, Content.Pod,
             rig.Hulls.State(own).Position + new Double3(0, 100000, 0));
-        var target = rig.Hulls.State(handle.Index).Position + new Double3(0, 0, -500000);
+        var target = rig.Hulls.State(handle.Index).Position + new Double3(0, 0, -900000);
         rig.Clients[0].Input.IssueFleetOrder(handle.Packed, new HullOrder { Kind = OrderKind.Jump, Target = target });
         rig.Step(15);
         Assert.Equal(JumpRefusal.TooFar, rig.Snap(0).Exploration.Navigation.Refusal);

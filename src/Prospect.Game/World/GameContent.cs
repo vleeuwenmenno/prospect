@@ -24,7 +24,7 @@ public sealed class GameContent
         ExplorationRules exploration
     )
     {
-        Exploration = exploration;
+        Exploration = exploration.ForSectorSize(galaxy.SectorSize);
         Editor = editor;
         BlockTransfers = blockTransfers;
         Identity = identity;

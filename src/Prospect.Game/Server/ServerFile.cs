@@ -40,7 +40,7 @@ public sealed record ServerFile(string? Name, ServerVisibility? Visibility, usho
         JsonDocument document;
         try
         {
-            document = JsonDocument.Parse(json);
+            document = JsonDocument.Parse(json, new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
         }
         catch (JsonException e)
         {

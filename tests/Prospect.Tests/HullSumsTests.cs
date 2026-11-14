@@ -144,7 +144,7 @@ internal static class Figures
             if (ftl == FtlKind.None)
             {
                 ftl = type.Ftl;
-                ftlMaxDistance = type.FtlMaxDistance;
+                ftlMaxDistance = type.FtlMaxSectors * rules.SectorSize;
             }
             if (type.Ftl == ftl && ftl != FtlKind.None)
                 ftlPower += Scaled(type, "ftlPower", type.FtlPower, volume);

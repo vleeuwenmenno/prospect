@@ -452,7 +452,7 @@ The replacement:
 - The time without damage carries over, also into a drone a player steps out in. Editing an escape drone
   preserves its temporary identity: no further ejection, cleanup on leaving, and respawn at the spawn point.
 
-Sizes (protocol 40): `Editor` 135 B at most (a repair is 6 B), `EditorData` 11 B and its chunk, `EditorState` 18 B, `DesignNotice` 38 B,
+Sizes (protocol 41): `Editor` 135 B at most (a repair is 6 B), `EditorData` 11 B and its chunk, `EditorState` 18 B, `DesignNotice` 38 B,
 `DesignReady` 3 B. A client sends one editor request and one `DesignReady` a tick; both are reserved in its
 reliable allowance.
 
@@ -795,6 +795,17 @@ Neither schema changes saved state. Existing WorldView NAV consumption and UI fe
 - Existing `blocks/blocks.json` identity covers emitter draw, recharge and restart multiplier (now 4).
 - No message or saved-state layout changed. Offline state, shield charge and battery already carry recovery progress.
 
+## Commented default settings
+
+Copy `content/server/server-settings.jsonc` and pass `--settings <copy>`.
+Both world values and the `server` object accept JSON comments and trailing commas.
+The example lists every catalogue setting, unit, range and default, plus all supported server-file options.
+A test checks every world default and parses the server options without warnings.
+The container ships it at `/app/content/server/server-settings.jsonc`; use an explicit `--settings` argument to opt in.
+CLI-only startup options are documented at the top; passwords are better supplied through `PROSPECT_PASSWORD`.
+Sector size and gas ranges are saved world settings; they cannot change when reopening a world.
+Drive blocks specify range in sectors, converted to metres by the shared hull evaluator (version 8).
+
 ## Decided (provisional, tunable): gas sensor contract
 
 - Shared `GasSensors.Covers(galaxy, clouds, rules, sensor, target, equipped)` is the server test for live coverage.
@@ -805,8 +816,8 @@ Neither schema changes saved state. Existing WorldView NAV consumption and UI fe
 - The integral is analytic, with scalar double arithmetic and square roots; no shader noise, warp, lean, motion,
   or `gasWispiness`. Gas beyond the target costs nothing. This is a smooth gameplay envelope, not the visible fringe.
 - `rules/exploration.json` sets `gasOpticalPenalty` to 1.0 (allowed 0–10), base range 5,000 m, proximity 250 m.
-  The file already participates in shared content identity. Wire protocol stays 39; generation and save codec are unchanged.
-  Content evaluator becomes 7, so an older executable with these files cannot claim the same sensor arithmetic.
+  The file already participates in shared content identity. The combined build uses protocol 41, generation 5 and unchanged save codec 3.
+  Content evaluator is 8 (gas sensors plus sector-scaled drives), so an older executable with these files cannot claim the same sensor arithmetic.
   Existing content identities, including saved-world identities, change.
 - `GasSensors.Reach` returns metres along any nonzero direction; `SampleReach` fills caller-owned doubles for
   caller-owned `Double3` directions (ring or elevations). It uses the same cost test, 24 bisections, keeping
@@ -818,7 +829,7 @@ Cloud inputs and costs:
   another cache call; do not retain it. The galaxy and range are immutable for the cache's lifetime.
 - The server uses a 256-entry direct-mapped sector cache; entries collect anchors through `GasCloudQuery`,
   ultimately `GasCloudModule.TryGetCloud`. No generated sector slots are read. Hits generate nothing.
-- At 5 km range / 40 km sectors each miss queries 125 anchors, enough for every sensor position in the sector,
+- At 5 km range / 20–80 km sectors each miss queries 125 anchors, enough for every sensor position in the sector,
   including neighbours' clouds. Cache collisions regenerate deterministically. Provisioning allocates; hits and misses do not.
 - Range is supported through eight sector widths. Storage is bounded by 256 times the full anchor cube, so
   cloud lists cannot truncate. The production cube has 125 slots per entry (about 1.3 MiB of placement storage).
@@ -832,7 +843,7 @@ These include collision, replication and all other tick systems, not gas integra
 thousands-of-sensors guarantee. Final empty-scene/resize benchmarks passed at 239/268 FPS with zero process allocations
 while other tests were running; earlier runs reached 1,456/885 FPS. Vulkan validation layers were inactive.
 
-## New ships from a drone (protocol 40)
+## New ships from a drone (protocol 41)
 
 ### Decided (provisional, tunable)
 

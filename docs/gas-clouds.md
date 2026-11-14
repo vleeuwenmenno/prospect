@@ -335,3 +335,11 @@ Cached lighting would need invalidation for cloud motion, light and scale change
 Half-resolution rendering would require new depth/portal/shield boundary reconstruction; it was not added.
 The twelve composition fixtures use homogeneous input, so their rerun alone cannot validate texture quality or speed.
 `GasNoiseLatticeTests` checks the actual CPU payload, packing, nondegenerate values and allocation after provisioning, not GLSL execution.
+
+## Per-cloud wispiness
+
+`gasWispiness` stays 1 by default. `gasWispinessMin`/`gasWispinessMax` default to 0.75–1.25.
+`GasCloudModule.WispinessOf(cloud)` interpolates the multiplier using `cloud.Seed / 128`, then clamps the product to 0–2.
+This is render-only and consumes no generation draws; changing it never moves clouds or rocks.
+`WorldView.QueueGas` packs it into `GasConstants.Motion.z` for every tier; shaders stay unchanged.
+Larger ordinary clouds can now enter the existing close-up treatment above 7 km half-extent.

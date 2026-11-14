@@ -273,7 +273,7 @@ public sealed class Galaxy
     /// content identity, which a save is held to as well. It is not the network protocol's version, which
     /// changes for reasons a save does not care about.
     /// </summary>
-    public const int GenerationVersion = 4;
+    public const int GenerationVersion = 5;
 
     /// <summary>The most resources the content may define: a sector's resources travel as one bit each.</summary>
     public const int MaxResources = 16;
@@ -363,15 +363,19 @@ public sealed class Galaxy
     public Galaxy Under(WorldSettingCatalog catalog, in WorldSettings settings)
     {
         var clean = catalog.Sanitize(settings);
+        var sectorSize = catalog.Number(clean, "sectorSize") * 1000.0;
         var modules = new SectorModule[_modules.Length];
         for (var i = 0; i < modules.Length; i++)
             modules[i] = _modules[i] switch
             {
                 AsteroidFieldsModule fields => fields.Under(catalog, clean, Resources),
-                GasCloudModule gas => gas.Under(catalog, clean),
+                GasCloudModule gas => gas.Under((float)sectorSize, catalog.Number(clean, "gasSizeMin"), catalog.Number(clean, "gasSizeMax"),
+                    catalog.Number(clean, "gasHugeSizeMin"), catalog.Number(clean, "gasHugeSizeMax"), catalog.Number(clean, "gasHugeChance"),
+                    catalog.Number(clean, "gasWispiness"), catalog.Number(clean, "gasWispinessMin"), catalog.Number(clean, "gasWispinessMax")),
                 var module => module,
             };
         var copy = WithModules(modules);
+        copy.SectorSize = sectorSize;
         copy._richnessMin = catalog.Number(clean, "oreRichnessMin");
         copy._richnessMax = catalog.Number(clean, "oreRichnessMax");
         copy._materialAbundance = new float[Resources.Length];

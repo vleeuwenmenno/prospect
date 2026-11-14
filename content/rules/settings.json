@@ -486,6 +486,97 @@
       "minimum": 0,
       "maximum": 2,
       "step": 0.25
+    },
+    {
+      "id": "sectorSize",
+      "name": "Sector size",
+      "description": "Sector edge length. Drive range and the blind-safe band scale with it; minimum jump distance stays fixed.",
+      "kind": "multiplier",
+      "default": 80,
+      "minimum": 20,
+      "maximum": 80,
+      "step": 10,
+      "unit": "km"
+    },
+    {
+      "id": "gasSizeMin",
+      "name": "Ordinary cloud diameter",
+      "description": "Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries.",
+      "kind": "multiplier",
+      "default": 16,
+      "minimum": 1,
+      "maximum": 80,
+      "step": 0.2,
+      "unit": "km",
+      "rangeMax": "gasSizeMax"
+    },
+    {
+      "id": "gasSizeMax",
+      "name": "Ordinary cloud diameter maximum",
+      "description": "Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries.",
+      "kind": "multiplier",
+      "default": 22.4,
+      "minimum": 1,
+      "maximum": 80,
+      "step": 0.2,
+      "unit": "km"
+    },
+    {
+      "id": "gasHugeSizeMin",
+      "name": "Huge cloud diameter",
+      "description": "Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries.",
+      "kind": "multiplier",
+      "default": 40,
+      "minimum": 1,
+      "maximum": 160,
+      "step": 0.2,
+      "unit": "km",
+      "rangeMax": "gasHugeSizeMax"
+    },
+    {
+      "id": "gasHugeSizeMax",
+      "name": "Huge cloud diameter maximum",
+      "description": "Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries.",
+      "kind": "multiplier",
+      "default": 80,
+      "minimum": 1,
+      "maximum": 160,
+      "step": 0.2,
+      "unit": "km"
+    },
+    {
+      "id": "gasHugeChance",
+      "name": "Huge cloud chance",
+      "description": "Chance a candidate cloud uses the huge size range; separation can remove candidates.",
+      "kind": "multiplier",
+      "default": 0.08,
+      "minimum": 0,
+      "maximum": 1,
+      "step": 0.01,
+      "unit": "0\u20131"
+    },
+    {
+      "id": "gasWispinessMin",
+      "name": "Per-cloud wispiness",
+      "description": "Deterministic per-cloud multiplier on gasWispiness. Drawing only; final wispiness capped at 2.",
+      "kind": "multiplier",
+      "default": 0.75,
+      "minimum": 0,
+      "maximum": 2,
+      "step": 0.05,
+      "unit": "x",
+      "rangeMax": "gasWispinessMax"
+    },
+    {
+      "id": "gasWispinessMax",
+      "name": "Per-cloud wispiness maximum",
+      "description": "Deterministic per-cloud multiplier on gasWispiness. Drawing only; final wispiness capped at 2.",
+      "kind": "multiplier",
+      "default": 1.25,
+      "minimum": 0,
+      "maximum": 2,
+      "step": 0.05,
+      "unit": "x"
     }
   ]
 }

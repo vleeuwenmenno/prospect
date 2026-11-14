@@ -3,6 +3,7 @@
 # Run: docker run -p 27420:27420/udp prospect-server --name "My server" --set <id>=<value>
 # Public, with a password: add -e PROSPECT_PASSWORD=... before the image and --visibility public after it.
 # Everything after the image name goes to the server (see `--help`).
+# Commented defaults ship at /app/content/server/server-settings.jsonc; opt in with --settings <file>.
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
