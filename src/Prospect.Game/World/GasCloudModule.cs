@@ -61,6 +61,11 @@ public sealed class GasCloudModule : SectorModule
     /// (the thin gas between knots).
     /// </summary>
     public Vector4 Look { get; }
+    /// <summary>
+    /// How soft and frayed clouds are drawn, from the world setting <c>gasWispiness</c>: 0 dense with a hard outline,
+    /// 1 as shipped, 2 the most. Only the renderer reads it; no cloud is placed or shaped differently.
+    /// </summary>
+    public float Wispiness { get; private set; } = 1;
     /// <summary>The cloud's y and z half-extents as shares of its x half-extent.</summary>
     public static readonly Vector3 Proportions = new(1, 0.65f, 0.85f);
     /// <summary>
@@ -128,6 +133,17 @@ public sealed class GasCloudModule : SectorModule
         return new GasCloudModule(id, Number("chance", 0, 1), Number("centerReach", 0, 1), Shares(json, "halfSizeShare"),
             Bounded(huge, "chance", 0, 1), Shares(huge, "halfSizeShare"), Number("extinction", 0.00001f, 0.01f), samples, color,
             Number("motion", 0, 0.01f), shape, look);
+    }
+
+    /// <summary>
+    /// The same clouds drawn under a world's settings. Generation reads nothing set here, so a world's clouds and
+    /// the asteroids in them are the same whatever the settings say.
+    /// </summary>
+    public GasCloudModule Under(WorldSettingCatalog catalog, in WorldSettings settings)
+    {
+        var copy = (GasCloudModule)MemberwiseClone();
+        copy.Wispiness = catalog.Number(settings, "gasWispiness");
+        return copy;
     }
 
     /// <summary>Counts the cloud the sector anchors, by the same rule as generation.</summary>

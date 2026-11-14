@@ -12,7 +12,7 @@ internal struct GasConstants
     public float4 Tint;
     /// <summary>
     /// X is the noise drift; y the weight of this draw, 1 for a whole cloud and less while a level of detail or the
-    /// view range fades it; w the distance to the centre, which orders the draws and which no shader reads.
+    /// view range fades it; z the world's wispiness (<c>gasWispiness</c>), 0 for solid clouds; w the distance to the centre, which orders the draws and which no shader reads.
     /// </summary>
     public float4 Motion;
     /// <summary>

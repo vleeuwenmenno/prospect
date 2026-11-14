@@ -225,7 +225,8 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   before the drive fires cancels the jump and loses the charge. The client generates the destination while the
   drive charges.
 - **World settings.** A world has settings, chosen when a server or a local game starts: collision damage,
-  shields against collisions (full, weak, none), shield recharge, jump charge speed, hull strength and asteroid generation. The
+  shields against collisions (full, weak, none), shield recharge, jump charge speed, hull strength, asteroid generation
+  and how wispy gas clouds look. The
   server owns them and tells each client on joining; the client predicts by the server's figures, and the data
   sheet and the readouts show the numbers in force. The New game screen sets them for a local game; in a game,
   the menu's World Settings shows the ones in force. See [World settings](#world-settings).
@@ -463,6 +464,7 @@ the generation cap does not mean every rock in every visible sector draws simult
 | `oreGradeMin`, `oreGradeMax` | 0 to 1 | 0, 1 | Clamp ore grade after the grade multiplier; 1 means 100%. |
 | `<material>Abundance` | 0 to 4 | 1 | Relative share among already available materials. Zero removes that material from the sector character and rocks. |
 | `<material>GradeMin`, `<material>GradeMax` | 0 to 1 | 0, 1 | Per-material grade clamp, applied after the global grade range. |
+| `gasWispiness` | 0 to 2 | 1 | How soft and frayed gas clouds are drawn: 0 dense with a hard outline (the look before this setting), 1 thin outer gas broken into strands and gaps, 2 the most. Drawing only: where clouds are and what is in them stays the same. |
 
 Materials come from galaxy content: `iron`, `copper`, `nickel`, `titanium`, `silver`, `gold`.
 New Game has collapsible Asteroids and Resources / Materials sections, and one expandable section per material.
@@ -472,6 +474,7 @@ A count minimum never creates fields; amount or cap zero disables rocks. Frequen
 Requested minimum counts can fail to fit. Radius minimums that cannot fit a field omit the rock rather than shrink below the minimum.
 
 Generation settings are shared gameplay rules, not local graphics settings.
+`gasWispiness` changes only how clouds are drawn, but it is the server's too, so every player of a world sees the same clouds.
 Counts are requests: changed amount, size, field size or spacing uses bounded placement and can produce fewer rocks.
 The map and sector readouts mark counts as "ABOUT": they are estimates made without placing a rock. Generated sector summaries report actual counts.
 Default settings preserve the original generated world, including its crowded-field placement fallback.

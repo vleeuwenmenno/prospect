@@ -49,13 +49,34 @@ GasShape gasShape(GasData gas) {
     shape.skip=reach*reach;
     return shape;
 }
+// Wispiness (motion.z): the world setting gasWispiness, 0 for solid clouds with a hard outline, 1 as shipped, 2 the
+// most. At 0 every expression below is exactly 1 or 0 and the cloud is what it was before the setting existed.
+// The shell: the outer part of the body is thin gas that grades into the dense core, so the outline is where the
+// gas becomes too thin to see rather than where a wall starts. Without it even the outermost gas was optically thick
+// over a few hundred metres, which made a cloud a cotton ball. `n` is noise (0 to 1, about 0.5 on average) that makes
+// the shell deeper in some places than others, so the thinning is lumpy, not a smooth halo.
+float gasShell(GasData gas, float body, float n) {
+    float wisp=gas.motion.z;
+    if(wisp<=0.0) return 1.0;
+    // The gas is optically thick: a shell a tenth as dense is still opaque edge on. So the thinning is steep, a power
+    // of the ramp, and reaches far into the body.
+    float r=smoothstep(-0.45,0.3+0.35*wisp,body+1.6*(n-0.5)*min(wisp,1.0));
+    return mix(1.0,pow(r,1.0+0.75*wisp),min(wisp,1.0));
+}
+// Gaps: near the surface the gas survives only where a mixed medium and fine octave is above a threshold that rises
+// toward the outside, so the shell breaks into strands with clear sky between them. Zero deep inside. It depends on
+// the body alone, so the levels and probes without the fine octave can take the same gaps by their average.
+float gasGapThreshold(GasData gas, float body) {
+    // Capped at 1: a higher threshold empties a whole band, and the core inside it shows a cut edge.
+    return min(gas.motion.z,1.0)*0.5*(1.0-smoothstep(0.0,0.75+0.15*gas.motion.z,body));
+}
 // The noiseless envelope's coarse density: what the farthest light probe uses, at no lookup cost.
 float gasEnvelope(GasData gas, GasShape shape, vec3 p) {
     if(gas.budget.z>0.0) return 1.0;
     vec3 box=1.0-smoothstep(vec3(0.86),vec3(1.0),abs(p));
     vec3 e=(p-shape.lean)*shape.scale;
     float cover=clamp(0.4+0.6*(1.0-dot(e,e)),0.0,1.0);
-    return box.x*box.y*box.z*cover*cover*0.75;
+    return box.x*box.y*box.z*cover*cover*0.75*gasShell(gas,1.0-dot(e,e),0.5);
 }
 // Detail 0 is the coarse field used by far light probes (one lookup), 1 adds the medium octave, 2 is full detail.
 // Detail 3 is the far level's view of the cloud: full detail with the finest octave at its mean, so its outline is
@@ -81,36 +102,55 @@ float gasDensity(GasData gas, GasShape shape, vec3 p, int detail) {
     // The envelope does not fill the cloud; it sets how much of the multi-octave field survives. Deep inside nearly
     // all of it, near the surface only its peaks, so edges break into billows and islands instead of a smooth blob.
     float cover=clamp(0.4+0.6*body,0.0,1.0);
-    if(detail==0) return fade*cover*cover*(0.2+1.1*large.a);
+    // The far light probe has the broad octave only: it takes the shell thinned by that, and the gaps by the share of
+    // the gas they leave on average.
+    float shell=gasShell(gas,body,large.a);
+    float open=1.0-gasGapThreshold(gas,body);
+    if(detail==0) return fade*cover*cover*(0.2+1.1*large.a)*shell*open;
     // Medium: domain-warped octave with a slow drift; the silhouette stays still while the interior evolves.
     vec3 drift=vec3(gas.motion.x,gas.motion.x*0.37,-gas.motion.x*0.21);
     vec4 medium=gasNoise(GasOctave*(u*3.4)+(large.rgb-0.5)*0.9+shape.offset+drift);
+    // With the medium octave the shell's depth varies at a finer scale, so the dense part's own outline is lumpy.
+    shell=gasShell(gas,body,0.4*large.a+0.6*medium.a);
     // Two octaves of amount, so dense knots and thin regions have no single straight-edged scale.
     float knots=0.55*large.a+0.45*medium.g;
     // Dense knots against thin veils: the knots are optically thick, so their sunward sides light and the rest shade.
     float amount=gas.look.w+gas.look.y*knots*knots*knots;
     float edge=gas.look.x;
-    if(detail==1) return fade*smoothstep(1.0-edge-cover,1.0+edge-cover,0.35*large.a+0.65*medium.a+0.15)*amount;
+    // The gaps as the fine octave averages them, from the medium one alone. The near light probe takes them, so
+    // the gas around a gap is lit on one side and shaded on the other, which is what shows it inside the body.
+    float gap=gasGapThreshold(gas,body);
+    float gaps=gap>0.0 ? smoothstep(gap-0.18,gap+0.18,0.55*medium.a+0.225) : 1.0;
+    if(detail==1) return fade*smoothstep(1.0-edge-cover,1.0+edge-cover,0.35*large.a+0.65*medium.a+0.15)*amount*shell*gaps;
     // Fine: a third octave warped by the medium field; its ridges give curved strands, not straight streaks.
     // Where the coverage step is already saturated whatever the fine octave says, and there is no fringe, the result
     // is exactly the same without it, so the lookup is skipped (most of a cloud's deep interior).
     // The edge follows the medium and fine octaves more than the broad one, so it breaks into billows, not arcs.
     float partial=0.3*large.a+0.4*medium.a+0.15;
     float low=1.0-edge-cover, high=1.0+edge-cover;
+    // The fringe strands are as dense as the core, so on their own they draw the whole outline as a solid rim.
+    // Wispy, they thin out toward the fringe's outer end, so the outline fades rather than stops, and they are
+    // sparser, so what lies behind shows between them.
+    float wisp=min(gas.motion.z,1.0), fall=smoothstep(-0.8,0.25,body);
+    float thread=mix(1.0,0.35*fall*fall,wisp)/(1.0+2.0*max(gas.motion.z-1.0,0.0));
+    float sparse=0.2*wisp;
     if(detail==3) {
         // What the finest octave does on average: it widens the coverage step by its spread and fills the fringe
-        // with a share of its strands. Without that the far level's outline would be the smaller one.
+        // with a share of its strands. Without that the far level's outline would be the smaller one. The gaps
+        // follow the medium octave alone over a wider step, which is what the fine one averages to.
         float haze=smoothstep(-0.8,-0.35,body)*(1.0-smoothstep(-0.1,0.25,body));
-        return fade*(smoothstep(low-0.1,high+0.1,partial+0.15)*amount+haze*0.25*(0.3+0.5*medium.a)*gas.look.z);
+        return fade*(smoothstep(low-0.1,high+0.1,partial+0.15)*amount*shell*gaps+haze*(0.25-0.3*sparse)*(0.3+0.5*medium.a)*gas.look.z*thread);
     }
-    bool needsFine=body<0.25 || (partial<high && partial+0.3>low);
-    if(!needsFine) return fade*(partial>=high ? amount : 0.0);
+    // Gaps need the fine octave wherever their threshold is above zero.
+    bool needsFine=body<0.25 || gap>0.0 || (partial<high && partial+0.3>low);
+    if(!needsFine) return fade*(partial>=high ? amount*shell : 0.0);
     vec4 fine=gasNoise(GasOctave*(GasOctave*(u*8.7))+(medium.rgb-0.5)*1.5+shape.offset+drift*1.7);
-    float core=smoothstep(low,high,partial+0.3*fine.r)*amount;
+    float core=smoothstep(low,high,partial+0.3*fine.r)*amount*shell;
+    if(gap>0.0) core*=smoothstep(gap-0.06,gap+0.06,0.55*medium.a+0.45*fine.g);
     // Wisps and tendrils just outside the body, where nothing hides them.
-    float strands=smoothstep(0.6,0.95,1.0-abs(2.0*fine.a-1.0));
+    float strands=smoothstep(0.6+sparse,0.95,1.0-abs(2.0*fine.a-1.0));
     float fringe=smoothstep(-0.8,-0.35,body)*(1.0-smoothstep(-0.1,0.25,body));
-    return fade*(core+fringe*strands*(0.3+0.5*medium.a)*gas.look.z);
+    return fade*(core+fringe*strands*(0.3+0.5*medium.a)*gas.look.z*thread);
 }
 
 // A large cloud seen from inside or close by: its octaves are as many times larger as it is, so what would be

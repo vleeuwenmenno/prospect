@@ -333,6 +333,50 @@ public sealed class WorldSettingEffectTests
 }
 
 /// <summary>World settings coming in from the content file, a values file, the command line and the network.</summary>
+/// <summary>The gas clouds' look: a world setting the renderer reads, which generation never does.</summary>
+public sealed class GasWispinessSettingTests
+{
+    private static readonly GameContent Content = GameContent.Load();
+
+    private static GameContent World(params string[] assignments) => Content.WithSettings(Content.SettingCatalog.Build(null, assignments));
+
+    [Fact]
+    public void WispinessReachesTheGasModuleInRangeAndNeverStacks()
+    {
+        Assert.Equal(1f, Content.Galaxy.GasClouds!.Wispiness);
+        Assert.Equal(0f, World("gasWispiness=0").Galaxy.GasClouds!.Wispiness);
+        Assert.Equal(1.5f, World("gasWispiness=1.5").Galaxy.GasClouds!.Wispiness);
+        Assert.Equal(2f, World("gasWispiness=9").Galaxy.GasClouds!.Wispiness);
+
+        // A world made from another world's content takes its own value, not one on top of the other's.
+        var back = World("gasWispiness=0").WithSettings(Content.SettingCatalog.Defaults);
+        Assert.Equal(1f, back.Galaxy.GasClouds!.Wispiness);
+        Assert.Equal(1f, Content.Galaxy.GasClouds!.Wispiness);
+    }
+
+    [Fact]
+    public void WispinessChangesNoCloudAndNoAsteroidInOne()
+    {
+        // The default world seed, under which docs/gas-clouds.md lists these sectors.
+        const ulong seed = 0x50524F5350454354;
+        var solid = World("gasWispiness=0").Galaxy.WithSeed(seed);
+        var most = World("gasWispiness=2").Galaxy.WithSeed(seed);
+        var a = new SectorContent();
+        var b = new SectorContent();
+        // An ordinary cloud with rocks in it, two huge ones (one with rocks) and an ordinary one off the arrival point.
+        foreach (var coord in new SectorCoord[] { new(127, -1, -127), new(133, 0, -77), new(-66, 1, 37), new(-3, 0, 5) })
+        {
+            Assert.True(solid.GasClouds!.TryGetCloud(solid, coord, out var cloud));
+            Assert.True(most.GasClouds!.TryGetCloud(most, coord, out var same));
+            Assert.Equal(cloud, same);
+            solid.Generate(coord, a);
+            most.Generate(coord, b);
+            Assert.Equal(Sectors.Hash(a), Sectors.Hash(b));
+            Assert.Equal(1, b.Summary.GasCloudCount);
+        }
+    }
+}
+
 public sealed class WorldSettingParsingTests
 {
     private static readonly WorldSettingCatalog Catalog = GameContent.Load().SettingCatalog;
@@ -364,7 +408,7 @@ public sealed class WorldSettingParsingTests
     public void TheShippedSettingsHaveTheirRangesAndDefaults()
     {
         Assert.Equal(["collisionDamage", "collisionShields", "shieldRecharge", "jumpChargeSpeed", "hullStrength", "asteroidAmount", "asteroidCap", "asteroidSize", "asteroidFieldSize", "asteroidFrequency", "asteroidSpacing", "asteroidOreShare", "asteroidOreGrade"], Catalog.Definitions.ToArray().Take(13).Select(d => d.Id));
-        Assert.Equal(38, Catalog.Definitions.Length);
+        Assert.Equal(39, Catalog.Definitions.Length);
         Assert.Equal(10, Catalog.Definitions.ToArray().Count(d => d.Upper is not null));
 
         var damage = Catalog.Find("collisionDamage")!;
@@ -713,7 +757,7 @@ public sealed class WorldSettingSessionTests
     public void AClientPlaysByTheSettingsOfTheServerItJoinsAndNotByItsOwnFiles()
     {
         var catalog = Content.SettingCatalog;
-        var settings = catalog.Build(null, ["collisionDamage=0.5", "collisionShields=Weak", "shieldRecharge=0.5", "jumpChargeSpeed=4", "hullStrength=2", "asteroidAmount=0.5", "asteroidCap=128", "asteroidSize=2", "asteroidFieldSize=0.5", "asteroidFrequency=2", "asteroidSpacing=2", "asteroidOreShare=2", "asteroidOreGrade=0.5", "asteroidCountMin=100", "asteroidRadiusMin=6", "asteroidRadiusMax=80", "oreRichnessMin=0.5", "oreRichnessMax=0.9", "oreGradeMin=0.2", "oreGradeMax=0.8", "ironAbundance=0", "copperGradeMin=0.6", "copperGradeMax=0.7"]);
+        var settings = catalog.Build(null, ["collisionDamage=0.5", "collisionShields=Weak", "shieldRecharge=0.5", "jumpChargeSpeed=4", "hullStrength=2", "asteroidAmount=0.5", "asteroidCap=128", "asteroidSize=2", "asteroidFieldSize=0.5", "asteroidFrequency=2", "asteroidSpacing=2", "asteroidOreShare=2", "asteroidOreGrade=0.5", "asteroidCountMin=100", "asteroidRadiusMin=6", "asteroidRadiusMax=80", "oreRichnessMin=0.5", "oreRichnessMax=0.9", "oreGradeMin=0.2", "oreGradeMax=0.8", "ironAbundance=0", "copperGradeMin=0.6", "copperGradeMax=0.7", "gasWispiness=0.5"]);
         var port = (ushort)(51000 + Environment.ProcessId % 2000);
         using var server = new ServerHost(new ServerConfig { MaxPlayers = 2, Settings = settings }, Content, RakNetTransport.Listen(port, 8));
         server.Start();
@@ -744,6 +788,10 @@ public sealed class WorldSettingSessionTests
             Assert.Equal(serverSector.Summary.AsteroidCount, clientSector.Summary.AsteroidCount);
             Assert.InRange(clientSector.AsteroidCount, 0, 128);
         }
+
+        // The look of the gas clouds is the server's as well, so every player of a world sees the same clouds.
+        Assert.Equal(0.5f, snapshot.Galaxy!.GasClouds!.Wispiness);
+        Assert.Equal(1f, Content.Galaxy.GasClouds!.Wispiness);
 
         // The figures the client predicts its own hull with, and the hull the server gave it.
         Assert.Equal(world.Pod.Flight, snapshot.Flight);
