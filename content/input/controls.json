@@ -48,6 +48,8 @@
     { "tab": "Galaxy map", "action": "MapLayerUp", "label": "Map layer up", "scope": ["Map"] },
     { "tab": "Galaxy map", "action": "MapLayerDown", "label": "Map layer down", "scope": ["Map"] },
     { "tab": "Galaxy map", "action": "MapTilt", "label": "Map flat / tilted view", "scope": ["Map"] },
+    { "tab": "Galaxy map", "action": "ResetMapPanels", "label": "Reset the map's panels to their default places", "scope": ["Map"] },
+    { "tab": "Galaxy map", "label": "Move the units list, map index or layers bar", "binding": "Left drag its title; the place is kept for next time" },
     { "tab": "Galaxy map", "label": "Select ship / box select", "binding": "Left mouse button on a ship / left drag; Shift or Ctrl adds" },
     { "tab": "Galaxy map", "label": "Sector card: preview / pin / close", "binding": "Hover a sector / left click it / left click outside the galaxy or Escape" },
     { "tab": "Galaxy map", "label": "Pan / zoom", "binding": "Middle drag / mouse wheel; Strafe + Yaw and Forward + Pitch axes" },

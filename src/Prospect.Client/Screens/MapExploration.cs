@@ -476,6 +476,9 @@ internal static class MapLayerBar
         new(display.X - MathF.Round((MapUnitList.HoverRight + Width) * scale),
             Math.Max(top, display.Y - MathF.Round(MapUnitList.HoverRight * scale) - Size(scale).Y));
 
+    /// <summary>The bar's title strip, which it is dragged by: the whole header, as nothing else sits in it.</summary>
+    public static float2 GripSize(float scale) => new(MathF.Round(Width * scale), MathF.Round(Header * scale));
+
     public static float2 UpMin(float2 min, float scale) => min + new float2(MathF.Round(Pad * scale), MathF.Round(Header * scale));
 
     public static float2 ButtonSize(float scale) => new(MathF.Round((Width - Pad * 2) * scale), MathF.Round(ButtonHeight * scale));
@@ -719,8 +722,8 @@ internal readonly record struct MapLegendLayout(float2 Min, float2 Size, float H
 /// <summary>
 /// The map's legend: a vertical index on the left, under the unit list. Its rows are listed from the most to the
 /// least important, so where the screen is short the last (the star types) are the ones left out. Where even the
-/// features do not fit under the unit list it sits beside it. It is a surface over the map: the map blocks its
-/// rectangle, so a press on it picks nothing.
+/// features do not fit under the unit list it sits beside it. It is a window over the map: the map blocks its
+/// rectangle, so a press on it picks nothing, and its header drags it (<see cref="MapPanels"/>).
 /// </summary>
 internal static class MapLegend
 {
@@ -760,4 +763,23 @@ internal static class MapLegend
         var shown = Math.Clamp(fit, 0, rows);
         return new MapLegendLayout(min, new float2(width, header + row * shown + pad), header, row, shown);
     }
+
+    // Like the unit list: no title bar, no move, never raised by a click, and the wheel scrolls nothing.
+    private const ImGuiWindowFlags Flags = ScreenHost.RootFlags | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
+
+    /// <summary>The legend's title strip, which it is dragged by: the whole header, as nothing else sits in it.</summary>
+    public static float2 GripSize(in MapLegendLayout layout) => new(layout.Size.X, layout.Header);
+
+    /// <summary>Opens the legend's window over the map. Pair with <see cref="End"/>.</summary>
+    public static void Begin(in MapLegendLayout layout, MapPointer map)
+    {
+        ImGui.SetNextWindowPos(layout.Min);
+        ImGui.SetNextWindowSize(layout.Size);
+        ImGui.Begin("##maplegend"u8, Flags);
+        if (ImGui.IsWindowAppearing())
+            ImGui.Internal.BringWindowToDisplayFront(ImGui.Internal.GetCurrentWindow());
+        map.Claim();
+    }
+
+    public static void End() => ImGui.End();
 }

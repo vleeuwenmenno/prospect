@@ -30,6 +30,7 @@ internal enum InputAction
     MapLayerDown,
     MapTilt,
     ScanSector,
+    ResetMapPanels,
     Count,
 }
 

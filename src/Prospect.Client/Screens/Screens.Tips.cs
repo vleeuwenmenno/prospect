@@ -305,6 +305,8 @@ internal sealed partial class ScreenHost
                 Kit.Label(_ui.Sans, Theme.FontSmall, Theme.Good, words.Done);
             }
         }
+
+        DrawPanelSettings(rowWidth);
     }
 
     /// <summary>

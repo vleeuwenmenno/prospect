@@ -83,6 +83,8 @@ public sealed class FrameOrderTests : IDisposable
     // The map with its unit list, drawn instead of the quick buttons while set, and what the map took from it.
     private bool _mapShown;
     private readonly MapPointer _map = new();
+    private ClientSettings _mapSettings = new();
+    private MapPanels _mapPanels;
     private readonly uint[] _units = new uint[64];
     private int _unitCount;
     private int _mapRowLimit = int.MaxValue;
@@ -133,6 +135,7 @@ public sealed class FrameOrderTests : IDisposable
     private SectorCoord _cardShownSector;
     private float _cardScroll;
     private int _mapCloses;
+    private int _mapPanelSaves;
     private int _cardCloses;
     private MapUnitHover _unitHover = new(0f);
 
@@ -172,6 +175,7 @@ public sealed class FrameOrderTests : IDisposable
         _actions = actions;
         _router = new PointerRouter(_devices, actions, _ui);
         _world = new WorldView(_devices, actions, new ClientSettings(), _jobs, null!, content.Designs);
+        _mapPanels = new MapPanels(_mapSettings);
         Frame();
         Frame();
     }
@@ -1502,11 +1506,40 @@ public sealed class FrameOrderTests : IDisposable
 
     private static readonly float2 MapSpot = new(820, 420);
 
+    // Where the unit list is this frame, as ScreenHost places it: its default place, then the player's shift.
+    private MapUnitLayout PlacedUnits
+    {
+        get
+        {
+            var home = Units;
+            return home with { Min = PanelShift.Place(home.Min, home.Size, Screen, 1f, _mapPanels.ShiftOf(MapPanel.Units)) };
+        }
+    }
+
+    // The unit list's All and Clear buttons need fonts to measure; the test puts them in the right 90 pixels of the header.
+    private const float UnitControlsWidth = 90f;
+
+    private MapLegendLayout LegendHome => MapLegend.Layout(Screen, 1f, Units, LegendRows, LegendRowHeight);
+
+    private MapLegendLayout PlacedLegend
+    {
+        get
+        {
+            var home = LegendHome;
+            return home with { Min = PanelShift.Place(home.Min, home.Size, Screen, 1f, _mapPanels.ShiftOf(MapPanel.Legend)) };
+        }
+    }
+
+    private float2 LayersHome => MapLayerBar.Min(Screen, HudLayout.TopBarBottom(1f), 1f);
+
+    private float2 PlacedLayers => PanelShift.Place(LayersHome, MapLayerBar.Size(1f), Screen, 1f, _mapPanels.ShiftOf(MapPanel.Layers));
+
     /// <summary>The map and its unit list as <c>ScreenHost.DrawMap</c> submits them, without the drawing.</summary>
     private void DrawMapSurface()
     {
         _unitCount = MapUnitList.Collect(_snapshot, _units);
-        var units = Units;
+        var home = Units;
+        var units = home with { Min = _mapPanels.Place(MapPanel.Units, home.Min, home.Size, Screen, 1f) };
         _map.Block(units.Min, units.Size);
         if (_barShown)
             _map.Block(float2.Zero, new float2(Screen.X, HudLayout.TopBarBottom(1f)));
@@ -1516,14 +1549,20 @@ public sealed class FrameOrderTests : IDisposable
             _map.Block(MenuShown, MenuSize);
         }
 
+        MapLegendLayout legend = default;
+        var barMin = float2.Zero;
         if (_exploreMap)
         {
-            _map.Block(MapLayerBar.Min(Screen, HudLayout.TopBarBottom(1f), 1f), MapLayerBar.Size(1f));
+            barMin = _mapPanels.Place(MapPanel.Layers, LayersHome, MapLayerBar.Size(1f), Screen, 1f);
+            _map.Block(barMin, MapLayerBar.Size(1f));
             if (_card.Pinned)
                 _map.Block(PinnedCardMin, PinnedCardSize);
-            var legend = MapLegend.Layout(Screen, 1f, units, LegendRows, LegendRowHeight);
+            legend = LegendHome;
             if (legend.Shown)
+            {
+                legend = legend with { Min = _mapPanels.Place(MapPanel.Legend, legend.Min, legend.Size, Screen, 1f) };
                 _map.Block(legend.Min, legend.Size);
+            }
         }
 
         _map.Begin(Screen);
@@ -1545,6 +1584,7 @@ public sealed class FrameOrderTests : IDisposable
         ImGui.End();
 
         MapUnitList.Begin(units, _map);
+        _mapPanels.Grip(MapPanel.Units, units.Min, MapUnitList.GripSize(units, units.Min.X + units.Size.X - UnitControlsWidth));
         MapUnitList.BeginRows(units, _map);
         for (var i = 0; i < Math.Min(_unitCount, _mapRowLimit); i++)
             MapUnitList.Row(_world, _units[i], units.Row);
@@ -1560,7 +1600,10 @@ public sealed class FrameOrderTests : IDisposable
         }
 
         if (_exploreMap)
-            ExploreMapWindows();
+            ExploreMapWindows(barMin, legend);
+
+        if (_mapPanels.TakeChanged())
+            _mapPanelSaves++;
 
         if (!_menuOpen)
             return;
@@ -1598,6 +1641,7 @@ public sealed class FrameOrderTests : IDisposable
         if (_nav.HandleKeys(_actions, _devices, true) && _card.Pinned)
             _nav.Layer = _card.Sector.Y;
         _nav.Advance(1f / 60f, 0f);
+        _mapPanels.HandleKey(_actions, _devices, !ImGui.GetIO().WantTextInput);
         if (_actions.Pressed(_devices, InputAction.Pause, true) && !_card.Dismiss())
             _mapCloses++;
         var view = NavView;
@@ -1621,10 +1665,17 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     /// <summary>The layer bar and the pinned card, as windows over the map.</summary>
-    private void ExploreMapWindows()
+    private void ExploreMapWindows(float2 barMin, MapLegendLayout legend)
     {
-        var barMin = MapLayerBar.Min(Screen, HudLayout.TopBarBottom(1f), 1f);
+        if (legend.Shown)
+        {
+            MapLegend.Begin(legend, _map);
+            _mapPanels.Grip(MapPanel.Legend, legend.Min, MapLegend.GripSize(legend));
+            MapLegend.End();
+        }
+
         MapLayerBar.Begin(barMin, MapLayerBar.Size(1f), _map);
+        _mapPanels.Grip(MapPanel.Layers, barMin, MapLayerBar.GripSize(1f));
         var up = MapLayerBar.Button("##layerup"u8, MapLayerBar.UpMin(barMin, 1f), MapLayerBar.ButtonSize(1f));
         var down = MapLayerBar.Button("##layerdown"u8, MapLayerBar.DownMin(barMin, 1f), MapLayerBar.ButtonSize(1f));
         var flat = MapLayerBar.Button("##mapflat"u8, MapLayerBar.FlatMin(barMin, 1f), MapLayerBar.ToggleSize(1f));
@@ -1690,11 +1741,290 @@ public sealed class FrameOrderTests : IDisposable
 
     private float2 RowCenter(int row)
     {
-        var units = Units;
+        var units = PlacedUnits;
         return units.RowsMin + new float2(units.Size.X * 0.5f, units.Row * (row + 0.5f));
     }
 
     private SectorCoord OwnSector => _snapshot.Content.Galaxy.SectorOf(_snapshot.Hulls[_snapshot.OwnHull].Position);
+
+    // The galaxy map's movable panels, as ScreenHost runs them with the production helper: a panel's place, its grip
+    // in the title strip and the saved shift. The fixed size of the unit list's buttons stands in for the measured one.
+    private float2 PanelMin(MapPanel panel) => panel switch
+    {
+        MapPanel.Units => PlacedUnits.Min,
+        MapPanel.Legend => PlacedLegend.Min,
+        _ => PlacedLayers,
+    };
+
+    private float2 PanelSize(MapPanel panel) => panel switch
+    {
+        MapPanel.Units => Units.Size,
+        MapPanel.Legend => LegendHome.Size,
+        _ => MapLayerBar.Size(1f),
+    };
+
+    private float2 PanelHome(MapPanel panel) => panel switch
+    {
+        MapPanel.Units => Units.Min,
+        MapPanel.Legend => LegendHome.Min,
+        _ => LayersHome,
+    };
+
+    /// <summary>A point on the panel's title strip clear of its controls.</summary>
+    private float2 PanelGrab(MapPanel panel) => PanelMin(panel) + new float2(40, 12);
+
+    private void OpenMapForPanels()
+    {
+        OpenExploreMap();
+        Assert.True(LegendHome.Shown);
+        _mapPanelSaves = 0;
+    }
+
+    private void DragOnMap(float2 from, float2 to)
+    {
+        Frame(() => Move(from));
+        Frame();
+        Frame(() => Button(GlfwMouseButton.Left, true));
+        for (var i = 1; i <= 6; i++)
+        {
+            var at = from + (to - from) * (i / 6f);
+            Frame(() => Move(at));
+            // While a panel is held, the map takes no press, box, pan or wheel and shows no card.
+            Assert.Equal(0, _mapPresses);
+            Assert.False(_map.Hovered);
+            Assert.False(_card.Pinned);
+        }
+
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        Frame();
+        Frame();
+    }
+
+    private float2 TowardCentreOf(MapPanel panel, float length)
+    {
+        var middle = PanelMin(panel) + PanelSize(panel) * 0.5f;
+        return new float2(middle.X < Screen.X * 0.5f ? length : -length, middle.Y < Screen.Y * 0.5f ? length * 0.5f : -length * 0.5f);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void AMapPanelIsDraggedByItsHeaderWithoutTheMapTakingAnyOfIt(int index)
+    {
+        var panel = (MapPanel)index;
+        OpenMapForPanels();
+        var before = PanelMin(panel);
+        var delta = TowardCentreOf(panel, 160);
+        var grab = PanelGrab(panel);
+
+        DragOnMap(grab, grab + delta);
+
+        var after = PanelMin(panel);
+        Assert.Equal(before.X + delta.X, after.X, 1f);
+        Assert.True(MathF.Abs(after.Y - before.Y) <= MathF.Abs(delta.Y) + 1f);
+        // The press, the drag and the release were the panel's, not a box, a click that pins a card or a pan.
+        Assert.Equal(0, _mapPresses);
+        Assert.Equal(0, _mapReleases);
+        Assert.False(_card.Pinned);
+        Assert.Equal(float2.Zero, _mapPan);
+
+        // The place is saved under the panel's name, once, when the grip is let go; the others are not moved.
+        Assert.Equal((after - before) / 1f, _mapPanels.ShiftOf(panel));
+        Assert.Single(_mapSettings.PanelPositions);
+        Assert.True(_mapSettings.PanelPositions.ContainsKey(MapPanels.KeyOf(panel)));
+        Assert.Equal(1, _mapPanelSaves);
+        for (var other = MapPanel.Units; other < MapPanel.Count; other++)
+        {
+            if (other != panel)
+                Assert.Equal(PanelHome(other), PanelMin(other));
+        }
+
+        // The old place is the map's again.
+        Frame(() => Move(grab));
+        Frame(() => Click());
+        Frame();
+        Assert.Equal(1, _mapPresses);
+    }
+
+    [Fact]
+    public void APressOnAMapPanelsControlsOrBodyIsNeverADrag()
+    {
+        OpenMapForPanels();
+        var far = new float2(Screen.X * 0.5f, Screen.Y * 0.5f);
+
+        // The unit list: the buttons' end of the header, and a row.
+        var units = PlacedUnits;
+        DragOnMap(units.Min + new float2(units.Size.X - 40, 12), far);
+        DragOnMap(RowCenter(0), far);
+        Assert.Equal(float2.Zero, _mapPanels.ShiftOf(MapPanel.Units));
+
+        // The layer bar: the buttons, and the flat and tilt halves.
+        var bar = PlacedLayers;
+        DragOnMap(MapLayerBar.UpMin(bar, 1f) + MapLayerBar.ButtonSize(1f) * 0.5f, far);
+        DragOnMap(MapLayerBar.DownMin(bar, 1f) + MapLayerBar.ButtonSize(1f) * 0.5f, far);
+        DragOnMap(MapLayerBar.FlatMin(bar, 1f) + MapLayerBar.ToggleSize(1f) * 0.5f, far);
+        DragOnMap(MapLayerBar.TiltMin(bar, 1f) + MapLayerBar.ToggleSize(1f) * 0.5f, far);
+        Assert.Equal(float2.Zero, _mapPanels.ShiftOf(MapPanel.Layers));
+
+        // The legend below its header.
+        var legend = PlacedLegend;
+        DragOnMap(legend.Min + new float2(40, legend.Header + 10), far);
+        Assert.Equal(float2.Zero, _mapPanels.ShiftOf(MapPanel.Legend));
+
+        Assert.Empty(_mapSettings.PanelPositions);
+        Assert.Equal(0, _mapPanelSaves);
+        // Nor did any of those presses reach the map: they were on panels.
+        Assert.Equal(0, _mapPresses);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void ADraggedMapPanelStopsInsideTheScreenAndStaysThereWhenTheWindowOrScaleChanges(int index)
+    {
+        var panel = (MapPanel)index;
+        OpenMapForPanels();
+        var size = PanelSize(panel);
+        var top = HudLayout.TopBarBottom(1f) + FloatingWindow.Margin;
+        DragOnMap(PanelGrab(panel), new float2(-4000, -4000));
+        var min = PanelMin(panel);
+        Assert.True(min.X >= FloatingWindow.Margin - 0.5f && min.Y >= top - 0.5f);
+        DragOnMap(PanelGrab(panel), new float2(9000, 9000));
+        min = PanelMin(panel);
+        Assert.True(min.X + size.X <= Screen.X - FloatingWindow.Margin + 0.5f && min.Y + size.Y <= Screen.Y - FloatingWindow.Margin + 0.5f);
+
+        // What is saved is what stays on screen, not the pointer's distance.
+        var shift = _mapPanels.ShiftOf(panel);
+        Assert.True(MathF.Abs(shift.X) < Screen.X && MathF.Abs(shift.Y) < Screen.Y);
+
+        // The same shift in a smaller window and at twice the interface scale is still wholly on screen.
+        foreach (var (display, scale) in new[] { (new float2(900, 520), 1f), (new float2(1280, 720), 2f), (new float2(960, 540), 2f) })
+        {
+            var scaled = new float2(MathF.Round(size.X * scale), MathF.Round(size.Y * scale));
+            scaled = FloatingWindow.Fit(scaled, display, scale);
+            var at = PanelShift.Place(PanelHome(panel) * scale, scaled, display, scale, shift);
+            var margin = MathF.Round(FloatingWindow.Margin * scale);
+            Assert.True(at.X >= margin - 0.5f && at.Y >= HudLayout.TopBarBottom(scale) + margin - 0.5f);
+            Assert.True(at.X + scaled.X <= display.X - margin + 0.5f && at.Y + scaled.Y <= display.Y - margin + 0.5f);
+        }
+    }
+
+    [Fact]
+    public void MapPanelPositionsSurviveClosingTheMapAndANewSessionAndAHandEditedFileCannotBreakThem()
+    {
+        OpenMapForPanels();
+        var moved = new Dictionary<MapPanel, float2>();
+        for (var panel = MapPanel.Units; panel < MapPanel.Count; panel++)
+        {
+            var delta = TowardCentreOf(panel, 90 + 20 * (int)panel);
+            DragOnMap(PanelGrab(panel), PanelGrab(panel) + delta);
+            moved[panel] = PanelMin(panel);
+            Assert.NotEqual(PanelHome(panel), moved[panel]);
+        }
+
+        Assert.Equal(3, _mapSettings.PanelPositions.Count);
+
+        // Closed and opened again in the same game.
+        _mapShown = false;
+        Frame();
+        Frame();
+        OpenMap();
+        for (var panel = MapPanel.Units; panel < MapPanel.Count; panel++)
+            Assert.Equal(moved[panel], PanelMin(panel));
+
+        // Quit and load: the settings file, read by a new client, places the panels where they were.
+        var folder = Path.Combine(Path.GetTempPath(), "prospect-panels-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var path = Path.Combine(folder, "settings.json");
+            _mapSettings.Save(path);
+            var loaded = ClientSettings.Load(path);
+            _mapSettings = loaded;
+            _mapPanels = new MapPanels(loaded);
+            Frame();
+            Frame();
+            for (var panel = MapPanel.Units; panel < MapPanel.Count; panel++)
+                Assert.Equal(moved[panel], PanelMin(panel));
+
+            // A file that says anything: not a number, far off screen, too many names, a name too long.
+            var text = "{\"PanelPositions\": {\"Map.Units\": {\"X\": 1e30, \"Y\": -1e30}, \"Map.Legend\": {\"X\": 0, \"Y\": 0}, \"" + new string('x', 200) + "\": {\"X\": 1, \"Y\": 1}";
+            for (var i = 0; i < 40; i++)
+                text += ", \"extra" + i + "\": {\"X\": 1, \"Y\": 1}";
+            File.WriteAllText(path, text + "}}");
+            var odd = ClientSettings.Load(path);
+            Assert.True(odd.PanelPositions.Count <= ClientSettings.MaxPanelPositions);
+            Assert.All(odd.PanelPositions, entry => Assert.True(entry.Key.Length <= ClientSettings.MaxTipPositionKeyLength && MathF.Abs(entry.Value.X) <= ClientSettings.MaxTipShift && MathF.Abs(entry.Value.Y) <= ClientSettings.MaxTipShift));
+            _mapPanels = new MapPanels(odd);
+            Frame();
+            Frame();
+            var size = PanelSize(MapPanel.Units);
+            var min = PanelMin(MapPanel.Units);
+            Assert.True(min.X >= 0 && min.Y >= 0 && min.X + size.X <= Screen.X && min.Y + size.Y <= Screen.Y);
+        }
+        finally
+        {
+            Directory.Delete(folder, true);
+        }
+    }
+
+    [Fact]
+    public void TheResetKeyAndTheSettingsButtonPutEveryMapPanelBackAtItsDefaultPlace()
+    {
+        OpenMapForPanels();
+        for (var panel = MapPanel.Units; panel < MapPanel.Count; panel++)
+            DragOnMap(PanelGrab(panel), PanelGrab(panel) + TowardCentreOf(panel, 120));
+        Assert.Equal(3, _mapSettings.PanelPositions.Count);
+        _mapPanelSaves = 0;
+
+        // The key: it is rebindable, and a text field keeps it.
+        Assert.False(_mapPanels.HandleKey(_actions, _devices, false));
+        Frame(() => Key(GlfwKey.L, true));
+        Frame(() => Key(GlfwKey.L, false));
+        Frame();
+        for (var panel = MapPanel.Units; panel < MapPanel.Count; panel++)
+            Assert.Equal(PanelHome(panel), PanelMin(panel));
+        Assert.Empty(_mapSettings.PanelPositions);
+        Assert.Equal(1, _mapPanelSaves);
+
+        // The button: the same reset, and with nothing moved it changes and saves nothing.
+        DragOnMap(PanelGrab(MapPanel.Layers), PanelGrab(MapPanel.Layers) + TowardCentreOf(MapPanel.Layers, 100));
+        Assert.NotEqual(LayersHome, PlacedLayers);
+        _mapPanelSaves = 0;
+        _mapPanels.Reset();
+        Frame();
+        Assert.Equal(LayersHome, PlacedLayers);
+        Assert.Empty(_mapSettings.PanelPositions);
+        Assert.Equal(1, _mapPanelSaves);
+        _mapPanels.Reset();
+        Frame();
+        Assert.Equal(1, _mapPanelSaves);
+    }
+
+    [Fact]
+    public void TheMapPanelResetKeyIsFreeOfEveryOtherBindingAndShownInTheControls()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "content", "input", "bindings.json");
+        var keys = _actions.Bindings(InputAction.ResetMapPanels).ToArray();
+        Assert.Equal([new InputBinding(InputBinding.Source.Key, (int)GlfwKey.L)], keys);
+        for (var i = 0; i < (int)InputAction.Count; i++)
+        {
+            if ((InputAction)i == InputAction.ResetMapPanels)
+                continue;
+            Assert.DoesNotContain(keys[0], _actions.Bindings((InputAction)i).ToArray());
+        }
+
+        for (var i = 0; i < (int)InputAxis.Count; i++)
+        {
+            foreach (var axis in _actions.Bindings((InputAxis)i))
+                Assert.True(axis.Negative != keys[0] && axis.Positive != keys[0], path);
+        }
+
+        var rows = new ControlsCatalog(_actions).Rows;
+        Assert.Contains(rows, row => row.Category == "Galaxy map" && row.Binding == "L" && row.Action.Contains("Reset"));
+    }
 
     [Fact]
     public void AHoveredSectorShowsAPreviewAClickPinsItAndAnotherClickReplacesIt()

@@ -27,6 +27,7 @@ In-game tips: the first time the map, the command view or the ship editor opens,
 battery runs low, a small panel explains it. Several at once stack with a counter and Next; Close shows the tip again
 next time, "Don't show this again" hides it on this client, and Settings, Tips, **Reset tips** shows all again and puts panels back in place.
 Drag a tip by its title bar (hold Shift in flight) and the next tip at that spot appears where you left it.
+Settings, Tips and panels, **Reset panel positions** (or `L` on the map) puts the galaxy map's panels back too.
 Tips are data in `content/visuals/tips.json`. Every press of `B` in the escape drone opens the New ship dialog and
 brings up the "edit the drone with Ctrl+B" tip beside it, unless you hid that tip.
 
@@ -290,7 +291,10 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   `Page Up` / `Page Down` change layer; things on other layers show as up and down chevrons. The tilted view (`V`
   or **Tilt**) shows three layers above and below with their charted sectors and ships on stalks; the chosen
   layer stays fully interactive. The galaxy edge ring marks where the disc ends; nothing stops flight there yet. A
-  unit list on the left shows every ship you own; click a row to add or remove that ship. A plotted jump shows as a
+  unit list on the left shows every ship you own; click a row to add or remove that ship. The unit list, the map
+  index and the layer bar are dragged by their title strip (not by their buttons or rows) and stay on screen at any
+  window size or interface scale; where you leave them is kept in this client's settings for every game, and `L` or
+  Settings, **Reset panel positions** puts them back. A plotted jump shows as a
   dotted route from the ship you fly to its NAV point until the jump is made, replaced or cleared.
 - **Scanning.** Press `K` (D-pad left; rebindable) in the flight or command view, or pin your own sector's card and
   press **Scan sector**: 5 seconds, flight continues. Leaving the sector, switching ship or losing the charting block
@@ -483,6 +487,8 @@ Galaxy map:
 | Scan your sector | `K` or D-pad left, or pin your own sector's card, then **Scan sector** (10 s wait before the same sector again) |
 | Change layer, centre on your ship | `Page Up` / `Page Down` or the layer bar, `Space` |
 | Flat or tilted view | `V`, or **Flat** / **Tilt** on the layer bar; flattening shows the pinned card's layer |
+| Move the unit list, map index or layer bar | Left-drag its title strip; the place is kept for next time |
+| Put the map's panels back | `L` (rebindable), or Settings, **Reset panel positions** |
 
 Map orders go to exactly the selected ships. Opening the map with nothing selected selects the ship you fly.
 After **Clear**, **Move here** and **Jump here** are greyed out and nothing is ordered. Jumps also require a

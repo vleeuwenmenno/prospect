@@ -279,6 +279,12 @@ internal static class MapUnitList
         map.Claim();
     }
 
+    /// <summary>
+    /// The part of the header the list is dragged by: from the left edge up to <paramref name="controlsLeft"/>, where
+    /// the All and Clear buttons start, so a press on either is never a drag.
+    /// </summary>
+    public static float2 GripSize(in MapUnitLayout layout, float controlsLeft) => new(Math.Max(1f, controlsLeft - layout.Min.X), layout.Header);
+
     /// <summary>Opens the scrolling area for the rows. Pair with <see cref="EndRows"/>.</summary>
     public static void BeginRows(in MapUnitLayout layout, MapPointer map)
     {

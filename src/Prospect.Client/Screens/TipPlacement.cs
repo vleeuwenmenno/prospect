@@ -21,7 +21,11 @@ internal static class TipPlacement
     /// the caller found it this frame; <paramref name="known"/> is false when it is not there (an editor panel with
     /// no editor open, a target that is gone), and the tip then takes the top right of the screen.
     /// </summary>
-    public static float2 Place(in TipAnchor anchor, bool known, in HudRect area, float2 size, float2 display, float scale, float2 shift = default)
+    public static float2 Place(in TipAnchor anchor, bool known, in HudRect area, float2 size, float2 display, float scale, float2 shift = default) =>
+        PanelShift.Place(Home(anchor, known, area, size, display, scale), size, display, scale, new float2(anchor.OffsetX + shift.X, anchor.OffsetY + shift.Y));
+
+    /// <summary>Where the anchor puts the tip before its own offset and the player's shift: not yet clamped to the screen.</summary>
+    private static float2 Home(in TipAnchor anchor, bool known, in HudRect area, float2 size, float2 display, float scale)
     {
         float Px(float design) => MathF.Round(design * scale);
         var margin = Px(FloatingWindow.Margin);
@@ -53,10 +57,7 @@ internal static class TipPlacement
                 at = Outside(area, Mirror(side, false), size, gap);
         }
 
-        at += new float2(Px(anchor.OffsetX + shift.X), Px(anchor.OffsetY + shift.Y));
-        return new float2(
-            Math.Clamp(at.X, screen.Left, Math.Max(screen.Left, screen.Right - size.X)),
-            Math.Clamp(at.Y, screen.Top, Math.Max(screen.Top, screen.Bottom - size.Y)));
+        return at;
     }
 
     private static readonly int SideCount = Enum.GetValues<TipSide>().Length;
@@ -78,16 +79,10 @@ internal static class TipPlacement
 
     /// <summary>
     /// The shift, in unscaled pixels, that carries a tip now at <paramref name="shift"/> by
-    /// <paramref name="delta"/> screen pixels: worked out through <see cref="Place"/>, so what is saved is what
-    /// stays on screen after the clamp, never a position past an edge.
+    /// <paramref name="delta"/> screen pixels, by the rule every draggable panel shares (<see cref="PanelShift"/>).
     /// </summary>
-    public static float2 Dragged(in TipAnchor anchor, bool known, in HudRect area, float2 size, float2 display, float scale, float2 shift, float2 delta)
-    {
-        var home = Place(anchor, known, area, size, display, scale);
-        var wanted = shift + delta / scale;
-        var at = Place(anchor, known, area, size, display, scale, wanted);
-        return (at - home) / scale;
-    }
+    public static float2 Dragged(in TipAnchor anchor, bool known, in HudRect area, float2 size, float2 display, float scale, float2 shift, float2 delta) =>
+        PanelShift.Dragged(Home(anchor, known, area, size, display, scale), size, display, scale, shift, delta, new float2(anchor.OffsetX, anchor.OffsetY));
 
     private static float2 Inside(in HudRect area, TipSide side, float2 size)
     {

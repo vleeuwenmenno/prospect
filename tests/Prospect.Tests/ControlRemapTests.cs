@@ -180,7 +180,7 @@ public sealed class ControlRemapTests
         var rig = new Rig();
         rig.Remapper.Propose(ControlSlot.Of(InputAction.Boost), 0, Key(GlfwKey.J));
         rig.Remapper.Propose(ControlSlot.Of(InputAction.MapTilt), 0, Key(GlfwKey.G));
-        rig.Remapper.Propose(ControlSlot.Of(InputAxis.Yaw, true), 0, Key(GlfwKey.L));
+        rig.Remapper.Propose(ControlSlot.Of(InputAxis.Yaw, true), 0, Key(GlfwKey.X));
         Assert.True(rig.Remapper.AnyChanged());
         Assert.Equal(3, rig.Settings.ControlOverrides.Count);
 

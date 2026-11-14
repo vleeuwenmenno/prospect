@@ -49,6 +49,8 @@ internal sealed partial class ScreenHost
         var right = min.X + size.X - Kit.Px(Theme.Space2);
         var allX = right - clearWidth - Kit.Px(Theme.Space1) - allWidth;
         var countAt = line + new float2(caption + Kit.Px(Theme.Space3), 0);
+        // The list is dragged by its header, up to the buttons.
+        _mapPanels.Grip(MapPanel.Units, min, MapUnitList.GripSize(layout, allX - Kit.Px(Theme.Space1)));
         var count = selected == 0 ? "NONE SELECTED"u8 : Kit.F($"{selected} OF {_mapUnitCount} SELECTED");
         if (Kit.Measure(_ui.Mono, Theme.FontCaption, count).X > allX - countAt.X - Kit.Px(Theme.Space2))
             count = Kit.F($"{selected}/{_mapUnitCount}");

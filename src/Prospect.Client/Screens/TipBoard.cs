@@ -205,27 +205,13 @@ internal sealed class TipBoard
     /// the player chose.
     /// </summary>
     public float2 Shift(in TipAnchor anchor, bool known) =>
-        known && _settings.TipPositions.TryGetValue(TipPlacement.KeyOf(anchor), out var offset) ? new float2(offset.X, offset.Y) : default;
+        known ? PanelOffsets.Get(_settings.TipPositions, TipPlacement.KeyOf(anchor)) : default;
 
     /// <summary>Remembers where panels at <paramref name="anchor"/> now go. Allocates only the first time an anchor is moved.</summary>
     public void SetShift(in TipAnchor anchor, bool known, float2 shift)
     {
-        if (!known)
-            return;
-        var key = TipPlacement.KeyOf(anchor);
-        var positions = _settings.TipPositions;
-        if (!positions.TryGetValue(key, out var offset))
-        {
-            if (positions.Count >= ClientSettings.MaxTipPositions)
-                return;
-            positions[key] = offset = new TipOffset();
-        }
-
-        if (offset.X == shift.X && offset.Y == shift.Y)
-            return;
-        offset.X = shift.X;
-        offset.Y = shift.Y;
-        _shiftDirty = true;
+        if (known && PanelOffsets.Set(_settings.TipPositions, TipPlacement.KeyOf(anchor), shift, ClientSettings.MaxTipPositions))
+            _shiftDirty = true;
     }
 
     /// <summary>Shows every tip again and puts panels back where their anchors place them. A stack already waiting stays.</summary>

@@ -46,6 +46,7 @@ These are suggested layouts, not a settled control scheme.
 - The card lists own ships, then live contacts, then lost ones (faded, with their age). It scrolls when pinned and turns compact on short screens.
 - Layer bar and Page Up/Page Down change layer; `V` or the bar tilts the map (orthographic, chosen layer stays clickable).
 - Flattening shows the pinned card's layer. Other layers' items show as up/down chevrons in the flat view.
+- The unit list, map index and layer bar are windows dragged by their title strip (`MapPanels`; the grip leaves out their buttons and rows). Where they are is a client preference: `ClientSettings.PanelPositions`, a shift from the default place in unscaled pixels, saved when the grip is let go. The place is clamped on screen every frame (`PanelShift`, shared with the tips), so a resize or a new interface scale never strands a panel. The heading and the map index's default place follow the unit list's default, not where it was dragged. `ResetMapPanels` (`L`, rebindable) and Settings, **Reset panel positions** empty the list.
 - Figures live in `content/visuals/map.json`. The galaxy edge drawn is where the disc's matter ends; nothing enforces it.
 
 ### Built: what a chart draws on the map

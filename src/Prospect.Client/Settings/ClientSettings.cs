@@ -44,12 +44,23 @@ internal sealed class ClientSettings
     /// shift from the place the anchor gives, in unscaled pixels, so it follows a resize and a change of interface
     /// scale. "Reset tips" empties it.
     /// </summary>
-    public Dictionary<string, TipOffset> TipPositions { get; set; } = [];
+    public Dictionary<string, PanelOffset> TipPositions { get; set; } = [];
 
     /// <summary>The most anchors kept, the longest key and the largest shift: a hand-edited file cannot grow or throw a panel away.</summary>
     public const int MaxTipPositions = 32;
     public const int MaxTipPositionKeyLength = 48;
     public const float MaxTipShift = 16384f;
+
+    /// <summary>
+    /// Where the player dragged the galaxy map's panels to (<c>MapPanels.KeyOf</c>, such as "Map.Units"), by the
+    /// same rule as <see cref="TipPositions"/>: the shift from the panel's default place in unscaled pixels. Window
+    /// layout is a preference of this client, like the tips, not of a world or a server, so it is kept here and
+    /// follows the player into every game. "Reset panel positions" empties it.
+    /// </summary>
+    public Dictionary<string, PanelOffset> PanelPositions { get; set; } = [];
+
+    /// <summary>The most panels kept: three today, with room for the next ones.</summary>
+    public const int MaxPanelPositions = 16;
 
     /// <summary>
     /// The controls the player changed from the shipped bindings, kept per client: an action by its name
@@ -135,17 +146,8 @@ internal sealed class ClientSettings
 
         HiddenTips = kept;
 
-        TipPositions ??= [];
-        var positions = new Dictionary<string, TipOffset>(Math.Min(TipPositions.Count, MaxTipPositions));
-        foreach (var (key, offset) in TipPositions)
-        {
-            if (offset is null || string.IsNullOrWhiteSpace(key) || key.Length > MaxTipPositionKeyLength || positions.Count >= MaxTipPositions)
-                continue;
-            if (float.IsFinite(offset.X) && float.IsFinite(offset.Y))
-                positions[key] = new TipOffset { X = Math.Clamp(offset.X, -MaxTipShift, MaxTipShift), Y = Math.Clamp(offset.Y, -MaxTipShift, MaxTipShift) };
-        }
-
-        TipPositions = positions;
+        TipPositions = PanelOffsets.Clean(TipPositions, MaxTipPositions);
+        PanelPositions = PanelOffsets.Clean(PanelPositions, MaxPanelPositions);
 
         ControlOverrides ??= [];
         var overrides = new Dictionary<string, List<string>>(Math.Min(ControlOverrides.Count, MaxControlOverrides));
@@ -164,8 +166,8 @@ internal sealed class ClientSettings
     }
 }
 
-/// <summary>A saved shift of a tip panel from where its anchor puts it, in unscaled pixels.</summary>
-internal sealed class TipOffset
+/// <summary>A saved shift of a panel from where the game puts it, in unscaled pixels.</summary>
+internal sealed class PanelOffset
 {
     public float X { get; set; }
     public float Y { get; set; }
