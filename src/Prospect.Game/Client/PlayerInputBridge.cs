@@ -226,6 +226,20 @@ public sealed class PlayerInputBridge
     internal int InstalledDesigns => Volatile.Read(ref _installedDesigns);
     internal int FailedDesigns => Volatile.Read(ref _failedDesigns);
 
+    private bool _hasPlot;
+    private NavigationView _plot;
+
+    /// <summary>Plot a destination for the controlled hull without starting its jump. Zero target is a valid point.</summary>
+    public void PlotJump(uint hull, Double3 target)
+    {
+        lock (_lock) { _plot = new NavigationView { Hull = hull, HasPlot = true, Target = target }; _hasPlot = true; }
+    }
+
+    internal bool ConsumePlot(out NavigationView plot)
+    {
+        lock (_lock) { plot = _plot; var pending = _hasPlot; _hasPlot = false; return pending; }
+    }
+
     private PlayerControls _controls;
     private bool _hasOrder;
     private HullOrder _order;

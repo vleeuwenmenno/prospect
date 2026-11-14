@@ -91,6 +91,7 @@ and keep the YOU label tied to the authoritative controlled hull. Visibility is 
 
 ## Decided: jump limits and blind risk
 
+- Every jump has a minimum distance to prevent micro-jumps.
 - Drives impose a maximum jump distance in every direction, whether the destination is charted or not.
 - Short blind jumps have a safe distance band so ordinary exploration need not cause damage.
 - Longer blind jumps carry a damage risk increasing with distance, within the drive's range limit.
@@ -100,6 +101,13 @@ and keep the YOU label tied to the authoritative controlled hull. Visibility is 
 Blind-jump damage can leave a ship at 10% health, but cannot destroy it or reduce it below that floor.
 A ship already below 10% takes no additional blind-jump damage.
 This protection applies only to blind-jump damage; other damage remains dangerous.
+
+### Decided: Jump here follows who flies the ship
+
+- For the ship the player controls, Jump here plots; the pilot starts the jump through NAV/boost.
+- For an owned unpiloted ship, Jump here issues an autonomous jump order.
+- Plotting and starting use the same server range checks; starting checks again from the current position.
+- Taking control still requires the same XYZ sector. Fleet orders remain unrestricted by control range.
 
 ## Required technical boundary
 
@@ -119,13 +127,26 @@ Shared deterministic generation code can remain shared even when its secret inpu
 - A scan cancels on sector change, control change or loss of the last live charting block; flight remains available.
 - Loading discards transient scans and ship markers. Permanent charts survive.
 - Each owner retains at most 4,096 charts. At capacity, refuse new sectors without evicting knowledge.
-- This foundation filters dynamic live information only. Seed secrecy and blind-jump risk remain unfinished.
+- This foundation filters dynamic live information only. Seed secrecy remains unfinished.
+
+### Decided (provisional, tunable): jump figures
+
+- Minimum 5,000 m; blind-safe band through 40,000 m (one sector width).
+- Every current drive block has a 400,000 m maximum (ten sector widths), including the drone drive.
+- The selected live drive block supplies range; extra blocks and block size do not multiply it.
+- Beyond the safe band, hit probability rises linearly from 0 to 100% at maximum range.
+- A hit removes the same linear fraction times 90% of current remaining HP, capped at the floor.
+
+The floor is 10% of the intact design's total HP, including blocks already lost.
+Damage scales all surviving blocks proportionally; it loses no additional block, core or propulsion.
+Already below the floor means no blind damage. Shields and ordinary damage rules are unchanged.
+The server rolls once at entry into transit, using galaxy seed, hull identity and world tick.
+Chart ownership is checked there too; cancelled charging has no blind damage.
+UI estimates use the same curve, not knowledge of the future departure tick.
 
 ## Open: product and tuning
 
 - Default thickness, boundary coordinates and ordinary-flight behaviour at the floor/ceiling; reconcile with the continuous-space direction.
-- Jump range, safe band, risk curve and damage distribution; define whether range differs among existing drive kinds.
-- What 10% health means for per-block damage; preserve core/survival and decide whether propulsion may be lost.
 - Card ship-row detail, map tilt controls and exact flat/tilted selection transitions.
 
 ## Open: implementation constraints

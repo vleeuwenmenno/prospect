@@ -82,6 +82,7 @@ public sealed class EditorSessionTests
                 foreach (var design in GameContent.Load().Designs) shipped += DesignBytes.Encode(design).Length;
                 _files.Replace("net/blocks.json", "\"catalogueBytes\": 196608", $"\"catalogueBytes\": {shipped + spare}");
             }
+            _files.Replace("rules/exploration.json", "5e3", "5");
             Content = _files.Load();
             _links = new LoopbackLink[clients];
             Wires = new Wire[clients];

@@ -47,6 +47,8 @@ public sealed class BlockType
 
     /// <summary>Megawatts the drive can take while charging for a jump.</summary>
     public float FtlPower { get; init; }
+    /// <summary>Maximum XYZ jump distance in metres; neither block size nor duplicates increase it.</summary>
+    public float FtlMaxDistance { get; init; }
 
     /// <summary>Kilonewton-metres of turning effort.</summary>
     public float Torque { get; init; }
@@ -282,6 +284,7 @@ public sealed class BlockCatalog
                     }
                     : FtlKind.None,
                 FtlPower = Number(block, "ftlPower"u8),
+                FtlMaxDistance = Number(block, "ftlMaxDistance"u8),
                 Torque = Number(block, "torque"u8),
                 PowerOutput = Number(block, "powerOutput"u8),
                 PowerDraw = Number(block, "powerDraw"u8),
@@ -292,6 +295,10 @@ public sealed class BlockCatalog
                 Crew = (int)Number(block, "crew"u8),
             };
         }
+
+        foreach (var type in types.Values)
+            if (type.Ftl != FtlKind.None && (!float.IsFinite(type.FtlMaxDistance) || type.FtlMaxDistance <= 0))
+                throw new InvalidDataException($"{path}: a drive needs a positive finite ftlMaxDistance");
 
         // A dictionary does not promise an order; the file's is kept apart for whoever lists the types.
         var listed = new List<BlockType>(types.Count);

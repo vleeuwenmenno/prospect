@@ -145,6 +145,7 @@ public struct FlightParams
 
     /// <summary>Megawatts the drive draws while charging, and megajoules it must take in before it can fire.</summary>
     public float FtlPower;
+    public float FtlMaxDistance;
     public float FtlEnergy;
 
     /// <summary>Cosine of the largest angle between nose and destination at which the drive will charge.</summary>
@@ -391,7 +392,7 @@ public enum OrderKind : byte
     /// <summary>Fly to a point and hold there.</summary>
     MoveTo = 1,
 
-    /// <summary>Jump faster than light to a point, however far, and hold there.</summary>
+    /// <summary>Jump faster than light to an eligible point and hold there.</summary>
     Jump = 2,
 }
 

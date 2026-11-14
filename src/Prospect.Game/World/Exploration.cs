@@ -6,6 +6,10 @@ namespace Prospect.Game.World;
 /// <summary>Shared, content-owned exploration tuning. Additional equipment gives redundancy only.</summary>
 public sealed record ExplorationRules(double SensorRadius, int ScanTicks, int ContactTicks, int ChartsPerOwner)
 {
+    public double JumpMinimum { get; init; }
+    public double BlindSafeDistance { get; init; }
+    public float BlindMaxDamage { get; init; }
+
     public bool Covers(Double3 sensor, Double3 position)
     {
         var d = position - sensor;
@@ -24,8 +28,15 @@ public sealed record ExplorationRules(double SensorRadius, int ScanTicks, int Co
             || !double.IsFinite(contact) || contact <= 0 || scan * TickLoop.SimulationHz > int.MaxValue
             || contact * TickLoop.SimulationHz > int.MaxValue || charts <= 0 || charts > ushort.MaxValue)
             throw new InvalidDataException("Invalid exploration rules.");
+        var minimum = root.GetProperty("jumpMinimum"u8).GetDouble();
+        var safe = root.GetProperty("blindSafeDistance"u8).GetDouble();
+        var damage = root.GetProperty("blindMaxDamage"u8).GetSingle();
+        if (!double.IsFinite(minimum) || minimum <= 0 || !double.IsFinite(safe) || safe < minimum
+            || !float.IsFinite(damage) || damage <= 0 || damage > 1)
+            throw new InvalidDataException("Invalid jump rules.");
         return new(radius, (int)Math.Ceiling(scan * TickLoop.SimulationHz),
-            (int)Math.Ceiling(contact * TickLoop.SimulationHz), charts);
+            (int)Math.Ceiling(contact * TickLoop.SimulationHz), charts)
+        { JumpMinimum = minimum, BlindSafeDistance = safe, BlindMaxDamage = damage };
     }
 }
 

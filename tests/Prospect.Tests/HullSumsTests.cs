@@ -112,6 +112,7 @@ internal static class Figures
         var blocks = 0;
         var ftl = FtlKind.None;
         var ftlPower = 0.0;
+        var ftlMaxDistance = 0f;
         var boxes = design.Boxes;
         for (var i = 0; i < boxes.Length; i++)
         {
@@ -141,7 +142,10 @@ internal static class Figures
             cargo += Scaled(type, "cargo", type.Cargo, volume);
             crew += Math.Floor(Scaled(type, "crew", type.Crew, volume));
             if (ftl == FtlKind.None)
+            {
                 ftl = type.Ftl;
+                ftlMaxDistance = type.FtlMaxDistance;
+            }
             if (type.Ftl == ftl && ftl != FtlKind.None)
                 ftlPower += Scaled(type, "ftlPower", type.FtlPower, volume);
 
@@ -212,6 +216,7 @@ internal static class Figures
             CollisionShieldCost = rules.CollisionShieldCost,
             Ftl = ftl,
             FtlPower = (float)(ftlPower * rules.FtlChargeMultiplier),
+            FtlMaxDistance = ftlMaxDistance,
             FtlEnergy = (float)(rules.FtlEnergyPerTonne * massFloor),
             FtlAlignCosine = MathF.Cos(rules.FtlAlignDegrees * MathF.PI / 180f),
             FtlCalculateSeconds = rules.FtlCalculateSeconds,

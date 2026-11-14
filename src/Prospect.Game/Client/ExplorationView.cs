@@ -21,10 +21,12 @@ public sealed class ExplorationView(int chartCapacity)
     public int ChartFields(Galaxy galaxy, SectorCoord sector, Span<ChartField> destination) =>
         IsCharted(sector) ? galaxy.AsteroidFields?.ChartFields(galaxy, sector, destination) ?? 0 : 0;
 
-    /// <summary>Existing drive eligibility only. Blind risk and maximum drive range are not implemented.</summary>
-    public JumpEligibility JumpEligibility(Galaxy galaxy, Double3 from, Double3 target, in FlightParams flight) =>
-        new(flight.Ftl != FtlKind.None && flight.FtlPower > 0 && float.IsFinite(HullSim.JumpTravelSeconds(from, target, flight)),
-            IsCharted(galaxy.SectorOf(target)), false);
-}
+    /// <summary>Shared preview; pass the current live flight figures, not the intact design.</summary>
+    public JumpEligibility JumpEligibility(Galaxy galaxy, Double3 from, Double3 target, in FlightParams flight, ExplorationRules rules) =>
+        JumpRules.Evaluate(from, target, flight, rules, IsCharted(galaxy.SectorOf(target)));
 
-public readonly record struct JumpEligibility(bool CanIssueOrder, bool Charted, bool BlindRiskImplemented);
+    public JumpEligibility JumpEligibility(Galaxy galaxy, Double3 from, SectorCoord sector, in FlightParams flight, ExplorationRules rules) =>
+        JumpEligibility(galaxy, from, galaxy.CenterOf(sector), flight, rules);
+
+    public NavigationView Navigation;
+}

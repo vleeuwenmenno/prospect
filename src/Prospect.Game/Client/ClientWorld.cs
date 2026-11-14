@@ -356,6 +356,13 @@ internal sealed partial class ClientWorld : IDisposable
     public void Tick(PlayerInputBridge bridge, ITransport transport, double serverTick, bool sendCommands = true, long clientTick = -1, float roundTripMs = 0)
     {
 
+        if (sendCommands && bridge.ConsumePlot(out var plot))
+        {
+            Span<byte> bytes = stackalloc byte[NavigationMessage.RequestWireSize];
+            var writer = new NetWriter(bytes);
+            NavigationMessage.Write(ref writer, MessageId.PlotJump, plot);
+            if (!transport.Send(0, NetChannel.Reliable, writer.Written)) bridge.PlotJump(plot.Hull, plot.Target);
+        }
         if (sendCommands && bridge.ConsumeScan())
         {
             Span<byte> request = stackalloc byte[ExplorationMessage.ScanWireSize];

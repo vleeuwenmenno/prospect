@@ -63,8 +63,8 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
 - **The world advances only while someone is connected.** With nobody online it pauses.
 - **Travel.** Sublight inside a sector, faster-than-light between them. Three drive kinds (hyperspace, wormhole,
   rift). Transit takes base time plus straight-line distance divided by content speed: initially 3 s plus 1 s per 40 km.
-  Preparation and arrival stay unchanged. The current implementation has no distance energy cost or gameplay range limit.
-  Planned: a drive range limit, a safe band for blind jumps and nonfatal risk beyond it; destination charts remove
+  Preparation and arrival stay unchanged; there is no distance energy cost.
+  Server-enforced minimum and drive maximum distances apply, with a safe band and nonfatal blind risk beyond it; destination charts remove
   blind-jump risk. See [exploration](roadmap/exploration.md) for the agreed rules and open tuning.
   Durations beyond 2^40 seconds are rejected to keep elapsed time precise; this is a numerical bound, not drive range.
 - **Jump looks.** Physical, not an overlay: effects sit in the world around the hull, laid out around its nose,

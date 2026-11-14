@@ -14,6 +14,11 @@ internal sealed partial class ClientWorld
     private SectorChart[] _charts = [];
     private int _chartCount;
     private ScanView _scan;
+    private NavigationView _navigation;
+    public void OnNavigation(ref NetReader reader)
+    {
+        if (NavigationMessage.Read(ref reader, true, out var navigation)) _navigation = navigation;
+    }
 
     public void OnExploration(ref NetReader reader)
     {
@@ -89,6 +94,7 @@ internal sealed partial class ClientWorld
     public void CopyExploration(ExplorationView view, long tick)
     {
         view.Scan = _scan;
+        view.Navigation = _navigation;
         _charts.AsSpan(0, _chartCount).CopyTo(view.Charts);
         view.ChartCount = _chartCount;
         view.ContactCount = 0;

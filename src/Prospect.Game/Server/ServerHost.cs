@@ -219,6 +219,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public bool Pending => State is ConnectionState.AwaitingHello or ConnectionState.AwaitingProof;
 
         public HullHandle Hull;
+        public NavigationView Navigation;
         public ScanView Scan;
         public uint ScanHull;
         public int ChartCursor;
@@ -241,6 +242,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             Array.Clear(Visible);
             VisibilitySent = false;
             RockCursor = 0;
+            Navigation = default;
             Scan = default;
             ScanHull = 0;
             ChartCursor = 0;
@@ -982,6 +984,17 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         }
         switch ((MessageId)payload[0])
         {
+            case MessageId.PlotJump when channel == NetChannel.Reliable:
+                if (NavigationMessage.Read(ref reader, false, out var plot) && plot.HasPlot
+                    && plot.Hull == connection.Hull.Packed && _hulls.IsAlive(connection.Hull))
+                {
+                    if (ValidateJump(connection, connection.Hull.Index, plot.Target))
+                    {
+                        plot.ResultHull = plot.Hull;
+                        connection.Navigation = plot;
+                    }
+                }
+                break;
             case MessageId.Scan when channel == NetChannel.Reliable && reader.Remaining == 0:
                 StartScan(connection);
                 break;
@@ -1125,7 +1138,8 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             if (!_hulls.IsAlive(handle))
                 continue;
             ref var info = ref _hulls.Info(handle.Index);
-            if (info.Owner == connection.PlayerId && !info.Piloted)
+            if (info.Owner == connection.PlayerId && !info.Piloted
+                && (orders[i].Order.Kind != OrderKind.Jump || ValidateJump(connection, handle.Index, orders[i].Order.Target)))
                 HullSim.SetOrder(ref _hulls.State(handle.Index), ref info.Order, orders[i].Order);
         }
     }
@@ -1143,7 +1157,8 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             ref var info = ref _hulls.Info(index);
             if (InputTimeline.Newer(record.OrderId, info.OrderId))
             {
-                HullSim.SetOrder(ref _hulls.State(index), ref info.Order, record.Order);
+                if (record.Order.Kind != OrderKind.Jump || ValidateJump(connection, index, record.Order.Target))
+                    HullSim.SetOrder(ref _hulls.State(index), ref info.Order, record.Order);
                 info.OrderId = record.OrderId;
                 connection.OrderId = record.OrderId;
                 connection.Order = record.Order;
@@ -1163,6 +1178,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
     private void ResetControl(Connection connection)
     {
+        connection.Navigation = default;
         if (connection.Scan.State == ScanState.Scanning) connection.Scan.State = ScanState.Cancelled;
         connection.ControlEpoch++;
         connection.Inputs.Clear();
@@ -1180,7 +1196,31 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     /// </summary>
     private bool StepHull(int index, in FlightInput input)
     {
+        ref var state = ref _hulls.State(index);
+        ref var info = ref _hulls.Info(index);
+        var before = state.Jump;
+        var preparing = before is JumpPhase.None or JumpPhase.Align or JumpPhase.Charge && info.Order.Kind == OrderKind.Jump;
+        var eligibility = preparing ? JumpEligibility(index, info.Order.Target) : default;
+        if (preparing && !eligibility.CanIssueOrder)
+        {
+            HullSim.SetOrder(ref state, ref info.Order, default);
+            foreach (var connection in _connections)
+                if (connection.State == ConnectionState.Active && connection.PlayerId == info.Owner)
+                {
+                    connection.Navigation.Refusal = eligibility.Reason;
+                    connection.Navigation.ResultHull = _hulls.HandleAt(index).Packed;
+                }
+        }
         var destroyed = _field.Step(index, input, _rocks, _tick, _impulses);
+        if (!destroyed && preparing && state.Jump == JumpPhase.Tunnel)
+        {
+            var fraction = JumpRules.DamageFraction(eligibility, Galaxy.Seed, _hulls.HandleAt(index).Packed, _tick);
+            var oldHealth = _hulls.BlockStates.HitTotal(info.BlockState);
+            JumpRules.ApplyDamage(_hulls.BlockStates, info.BlockState, _content.Designs[info.Design], fraction);
+            var health = _hulls.BlockStates.HitTotal(info.BlockState);
+            state.Hull = (float)health;
+            if (health < oldHealth) info.DamageTick = _tick;
+        }
         var lost = _field.Lost;
         for (var i = 0; i < lost.Length; i++)
         {

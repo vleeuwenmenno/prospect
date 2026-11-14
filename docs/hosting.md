@@ -666,7 +666,7 @@ This status is an observation at open, not hosting authorization. Saved multipla
 - Move or copy the complete stopped folder, preserving key permissions, to retain identity. A bare database is insufficient.
 - Independent Claude security review remains required. No admission, TLS, key rotation or destructive recovery is included.
 
-## Exploration foundation (protocol 37)
+## Exploration foundation (protocol 38)
 
 The server owns scans and charts and filters dynamic live state by personal sensor coverage.
 `rules/exploration.json` is shared content and participates in content identity.
@@ -696,12 +696,13 @@ Field envelopes can cross the surveyed sector's walls; this does not chart those
 - `Charts[0..ChartCount]`: owner, sector and recorded world tick. Chart delivery is incremental; it never implies live coverage.
 - `Contacts[0..ContactCount]`: hull, owner, design, last observed position/tick, live flag and loss tick.
 - A lost ship marker freezes and expires after the content lifetime. It is not present in `SessionSnapshot.Hulls` or collision prediction.
-- `JumpEligibility` reports existing drive/order eligibility, chart ownership and `BlindRiskImplemented=false`.
-  It does not invent a maximum range or claim an uncharted jump is safe.
+- `ExplorationView.JumpEligibility(galaxy, from, target, flight, rules)` accepts a point or sector (its center).
+  Pass the current hull position and live `FlightParams`, with `GameContent.Exploration`.
+  It returns `Reason`, `CanIssueOrder`, `Charted`, `Blind`, distance, hit probability `Risk` and `MaximumDamageFraction`.
 
 A station-class hull uses an indefinite stale marker; this repository has no generated station gameplay system.
 The map worker still needs scan controls/feedback, authoritative chart styling, field markers, contact rows,
-stale presentation and blind-risk-unfinished feedback. Existing map discovery is not this new chart API.
+stale presentation and blind-risk feedback. Existing map discovery is not this new chart API.
 No screen, HUD or renderer implementation is included here.
 
 ### Visibility and disclosure
@@ -723,7 +724,7 @@ Global player roster/count remain social information. The catalogue does not est
 This is dynamic-state filtering, not secure natural-data secrecy.
 Collision prediction still generates baseline asteroids from the seed and can extrapolate already-disclosed asteroid motion.
 No hidden hull is disclosed solely to improve prediction; unknown collisions and unseen later asteroid changes require correction.
-Blind-jump risk, drive range tuning and galaxy vertical limits remain unfinished.
+Galaxy vertical limits remain unfinished.
 
 ### Wire sizes and bounded work
 
@@ -744,3 +745,32 @@ Measured on this Linux machine in Debug: 128 hulls and two clients averaged 1.62
 with zero managed allocations across 120 measured rounds after warmup. This does not establish a thousands-of-hulls budget.
 Release client benchmark passed at 1,097 fps normal and 999 fps during resize, zero render/process allocations.
 Validation layers were inactive; Windows/macOS and interactive map behavior remain unverified.
+
+### Jump navigation contract (protocol 38)
+
+`JumpRules.Evaluate` in Prospect.Game is the shared range/risk function; the server checks every pilot and fleet jump.
+Bounds are inclusive Euclidean XYZ distances, independent of sector walls and chart ownership.
+`FlightParams.FtlMaxDistance` comes from the selected surviving drive block, following existing drive selection.
+`rules/exploration.json` holds minimum, safe band and maximum blind damage; both files already participate in content identity.
+Content evaluator version is 5. Snapshot codec stays 3: existing per-block HP stores damage; plots are transient.
+
+- `PlayerInputBridge.PlotJump(ownHullId, point)` sends a bounded reliable intent, never a standing order.
+- Read `SessionSnapshot.Exploration.Navigation`: `Hull`, `HasPlot`, accepted `Target`, and last `Refusal` with `ResultHull` identifying the affected ship.
+  A failed plot retains the prior accepted target. A control change clears it; consume a plot only when `Hull` matches the current own hull. Feedback repeats with exploration updates.
+- The UI worker should replace WorldView's local-only NAV assignment with this intent and consume the acknowledged target.
+  On the existing NAV/boost chord, issue the existing `HullOrder { Kind = Jump, Target = acceptedTarget }` through `IssueOrder`.
+  The server revalidates at that input's world interval; moving after plotting can make it too close or too far. Charging also cancels if drift or drive loss invalidates range.
+- Owned unpiloted ships use existing `IssueFleetOrder`; ownership and piloted-state checks remain authoritative.
+  Same-sector restrictions apply to taking control, not fleet orders (docs/direction.md).
+- Refusal enum: None, InvalidTarget, NoDrive, TooClose, TooFar, Busy.
+  Busy means already in transit/arrival; changing a charging order keeps existing cancel-and-restart behavior.
+
+The risk roll uses `JumpRules.DamageFraction` once on transition into transit; no extra pending damage is saved.
+`Risk` is probability, `MaximumDamageFraction` is damage on a hit before the 10% intact-design floor.
+Chart ownership is personal and checked at departure; sensor coverage does not count.
+Damage is proportional across surviving blocks and never loses a block; other damage remains unrestricted.
+Snapshots already replicate sparse block HP. Prediction receives authoritative damage normally; the UI shows an estimate.
+
+PlotJump is 30 bytes (id, hull id, present flag, XYZ doubles); Navigation is 35 bytes, adding result hull and refusal.
+Both use existing admitted-connection receive budgets. Only the currently controlled hull may be plotted.
+Neither schema changes saved state. Existing WorldView NAV consumption and UI feedback are work for the UI worker.

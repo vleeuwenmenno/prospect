@@ -12,7 +12,7 @@ or that local game opened to other players. There is one simulation and one code
 ## Status
 
 Exploration has a server/client backend: personal saved charts, manual scan intent, owned-ship sensors and dynamic visibility filtering.
-The map UI and scan controls are not wired yet. Seed secrecy and blind-jump risk remain unfinished.
+The map UI and scan controls are not wired yet. Seed secrecy remain unfinished.
 See [exploration contract](docs/hosting.md#exploration-foundation-protocol-37) for the map API and disclosure limits.
 
 Rare decorative volumetric gas clouds are generated: lopsided, self-shadowed, with billowy edges and wisps. Most are 8 to 11 km long; a few are huge, up to a sector across, and any of them can lie across sector borders. Some hold asteroids. They are seen from up to five sectors away, at three levels of detail that hand over without a step. A huge cloud seen from inside or close by is broken into strands with depth. Full-screen views reach 144 FPS at 5096x1390 except a pilot view in dense asteroids and the inside of a huge cloud (about 110); visual acceptance is pending. See [gas clouds](docs/gas-clouds.md).
@@ -225,7 +225,10 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   Both must finish; jump charge speed affects charging only. A bigger ship needs more energy, and a weak or
   drained battery charges slower. Once ready, the hull is
   in transit for three seconds plus one second per 40 km of straight-line distance.
-  Base time and speed are content tuning; preparation and arrival are unchanged, with no distance energy cost or gameplay range limit. Taking the controls
+  Base time and speed are content tuning; there is no distance energy cost.
+  The server requires 5–400 km with current drives. Blind jumps through 40 km are safe; farther ones risk
+  proportional block damage, never below 10% intact hull HP. Personal destination charts remove blind risk.
+  Shared range/risk previews and server-validated plot feedback exist; the map/RTS UI does not consume them yet. Taking the controls
   before the drive fires cancels the jump and loses the charge. The client generates the destination while the
   drive charges.
 - **World settings.** A world has settings, chosen when a server or a local game starts: collision damage,

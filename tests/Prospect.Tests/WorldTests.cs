@@ -20,6 +20,20 @@ public sealed class FlightTests
     }
 
     [Fact]
+    public void JumpPreviewAndRollTakeNoTickMemory()
+    {
+        var content = GameContent.Load();
+        var probe = new AllocationProbe();
+        for (var i = 0; i < 100; i++)
+            while (probe.Measuring())
+            {
+                var eligibility = JumpRules.Evaluate(default, new Double3(0, 0, -220000), Pod, content.Exploration, false);
+                _ = JumpRules.DamageFraction(eligibility, 1, 1, i);
+            }
+        Assert.Equal(0, probe.Bytes);
+    }
+
+    [Fact]
     public void ControlsMoveTheHullTheWayThePilotExpects()
     {
         var start = HullState.Spawn(Double3.Zero, Pod);

@@ -35,7 +35,10 @@ public sealed class JumpCameraTests : IDisposable
 
     public JumpCameraTests()
     {
-        var content = GameContent.Load();
+        // These visual fixtures exercise long transit independently of production drive range tuning.
+        using var files = new ContentCopy();
+        files.Write("blocks/blocks.json", files.Read("blocks/blocks.json").Replace("400000", "2000000"));
+        var content = files.Load();
         _client = new ClientSession(_link.Client, content, "Pilot");
         _server = new ServerHost(new ServerConfig { MaxPlayers = 1 }, content, [_link.Server]);
         var actions = ActionMap.Load(Path.Combine(AppContext.BaseDirectory, "content", "input", "bindings.json"));

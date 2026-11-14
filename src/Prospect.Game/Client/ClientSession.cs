@@ -483,6 +483,9 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                     _social.Apply(social);
                 break;
 
+            case MessageId.Navigation when _state == SessionState.Active && channel == NetChannel.Reliable:
+                _world.OnNavigation(ref reader);
+                break;
             case MessageId.Exploration when _state == SessionState.Active && channel == NetChannel.Reliable:
                 _world.OnExploration(ref reader);
                 break;

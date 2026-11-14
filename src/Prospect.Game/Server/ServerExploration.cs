@@ -58,6 +58,9 @@ public sealed partial class ServerHost
     private void SendExploration(Connection connection)
     {
         if (!connection.CatalogueReady) return;
+        var navigationWriter = new NetWriter(_sendBuffer);
+        NavigationMessage.Write(ref navigationWriter, MessageId.Navigation, connection.Navigation);
+        connection.Transport.Send(connection.Peer, NetChannel.Reliable, navigationWriter.Written);
         Span<SectorChart> charts = stackalloc SectorChart[ExplorationMessage.MaxCharts];
         var count = 0;
         var cursor = _chartCount == 0 ? 0 : connection.ChartCursor % _chartCount;

@@ -50,7 +50,8 @@ The goal and the block model are in `direction.md` under "Decided: building".
   hull has left into `FlightParams` and `HullStats`. World multipliers apply when figures are read.
 - Inertia uses solid rectangular boxes and the parallel-axis theorem about the intact centre.
   Damage changes mass, bounds and inertia, but never moves the pivot. The first surviving drive in file
-  order selects the kind; only drives of that kind supply jump power.
+  order selects the kind and fixed `ftlMaxDistance`; only drives of that kind supply jump power.
+  Range does not scale with volume or duplicate drives.
 - Running sums use doubles in a binary tree of fixed shape, one leaf per group of 32 blocks. Losing a block
   adds its group up again and redoes the leaf's ancestors: no allocation, no full scan. Reading figures is O(1).
 - Figures are a pure function of the blocks left: any order of losses, and sums built afresh, agree to the

@@ -357,3 +357,11 @@ This is an engineering decoder/storage ceiling, not a gameplay chart allowance.
 
 The decoder checks chart owner references, uniqueness and world-clock timestamps before writable store open.
 `MaxDecodedBytes` conservatively includes 128 extra bytes per chart for bounded temporary validation sets.
+
+### Blind-jump damage and navigation
+
+Blind damage is applied once when the hull enters transit, directly to the existing saved per-block HP and total.
+A saved transit therefore already contains its damage; resuming it never rolls again.
+No pending roll or extra snapshot field is needed; snapshot codec remains 3.
+Navigation plots and last refusal feedback are transient connection state and start empty on load.
+The new content and evaluator identity require a compatible save; no migration is provided.

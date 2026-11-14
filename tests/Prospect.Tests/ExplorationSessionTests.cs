@@ -97,6 +97,69 @@ public sealed class ExplorationSessionTests
     }
 
     [Fact]
+    public void PlotDoesNotJumpAndManualStartRechecksMovedHull()
+    {
+        using var rig = new Rig();
+        var id = rig.Own(0);
+        var slot = (int)(id & 65535);
+        var target = rig.Hulls.State(slot).Position + new Double3(0, 0, -20000);
+        rig.Clients[0].Input.PlotJump(id, target);
+        rig.Step(30);
+        Assert.True(rig.Snap(0).Exploration.Navigation.HasPlot);
+        Assert.Equal(target, rig.Snap(0).Exploration.Navigation.Target);
+        Assert.Equal(JumpPhase.None, rig.Hulls.State(slot).Jump);
+        rig.Hulls.State(slot).Position = target;
+        rig.Clients[0].Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = target });
+        rig.Step(30);
+        Assert.Equal(JumpRefusal.TooClose, rig.Snap(0).Exploration.Navigation.Refusal);
+        Assert.Equal(JumpPhase.None, rig.Hulls.State(slot).Jump);
+        rig.Clients[0].Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = target + new Double3(0, 500000, 0) });
+        rig.Step(30);
+        Assert.Equal(JumpRefusal.TooFar, rig.Snap(0).Exploration.Navigation.Refusal);
+        Assert.Equal(JumpPhase.None, rig.Hulls.State(slot).Jump);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LongBlindJumpDamagesOnceAndChartRemovesRisk(bool charted)
+    {
+        using var rig = new Rig();
+        var slot = (int)(rig.Own(0) & 65535);
+        var start = rig.Hulls.State(slot).Position;
+        var target = start + new Double3(0, 0, -400000);
+        if (charted) Assert.True(rig.Server.RecordChart(rig.Owner(0), rig.Server.Galaxy.SectorOf(target), rig.Tick));
+        var intact = rig.Hulls.State(slot).Hull;
+        rig.Clients[0].Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = target });
+        for (var i = 0; i < 1600 && rig.Hulls.State(slot).Jump != JumpPhase.Tunnel; i++) rig.Step();
+        Assert.Equal(JumpPhase.Tunnel, rig.Hulls.State(slot).Jump);
+        var after = rig.Hulls.State(slot).Hull;
+        if (charted) Assert.Equal(intact, after);
+        else Assert.InRange(after, intact * 0.1f, intact * 0.10001f);
+        rig.Step(30);
+        Assert.Equal(after, rig.Hulls.State(slot).Hull);
+        Assert.InRange(rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Hull, after - 0.1f, after + 0.1f);
+    }
+
+    [Fact]
+    public void FleetJumpStartsAutonomouslyAndOutOfRangeIsRefused()
+    {
+        using var rig = new Rig();
+        var own = (int)(rig.Own(0) & 65535);
+        var handle = rig.Hulls.Create(rig.Owner(0), (byte)Content.PodDesign, Content.Pod,
+            rig.Hulls.State(own).Position + new Double3(0, 100000, 0));
+        var target = rig.Hulls.State(handle.Index).Position + new Double3(0, 0, -500000);
+        rig.Clients[0].Input.IssueFleetOrder(handle.Packed, new HullOrder { Kind = OrderKind.Jump, Target = target });
+        rig.Step(15);
+        Assert.Equal(JumpRefusal.TooFar, rig.Snap(0).Exploration.Navigation.Refusal);
+        Assert.Equal(JumpPhase.None, rig.Hulls.State(handle.Index).Jump);
+        target = rig.Hulls.State(handle.Index).Position + new Double3(0, 0, -20000);
+        rig.Clients[0].Input.IssueFleetOrder(handle.Packed, new HullOrder { Kind = OrderKind.Jump, Target = target });
+        rig.Step(15);
+        Assert.Equal(JumpPhase.Charge, rig.Hulls.State(handle.Index).Jump);
+    }
+
+    [Fact]
     public void ReusingAHullSlotDoesNotEraseItsLostContact()
     {
         using var rig = new Rig();
