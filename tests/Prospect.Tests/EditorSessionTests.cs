@@ -18,6 +18,140 @@ namespace Prospect.Tests;
 /// </summary>
 public sealed class EditorSessionTests
 {
+    [Fact]
+    public void NewShipWaitsForDesignReadyGrantsRemoteEditAndApplyKeepsTheDrone()
+    {
+        using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);
+        var ship = rig.Own(0);
+        rig.Input(0).RequestControl(0);
+        Assert.True(rig.Until(() => rig.Own(0) != ship));
+        var drone = rig.Own(0);
+        var count = rig.Hulls.Count;
+        var designs = rig.Content.Designs.Length;
+        Assert.True(rig.Input(0).RequestNewShip("  New ship  "));
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, settle: true));
+        Assert.Equal(NewShipStatus.Pending, rig.Snap(0).NewShip.Status);
+        Assert.Equal(count, rig.Hulls.Count);
+        Assert.Equal(drone, rig.Own(0));
+        Assert.True(rig.Until(() => rig.Snap(0).Content.Designs.Length == designs + 1, settle: true));
+        var root = rig.Snap(0).Content.Designs[designs];
+        Assert.Equal("New ship", root.Name);
+        Assert.Equal(1, root.BlockCount);
+        Assert.Equal("core", root.Boxes[0].Type.Id);
+        Assert.Equal(DesignBytes.Encode(root), DesignBytes.Encode(DesignBytes.Decode(DesignBytes.Encode(root), SHA256.HashData(DesignBytes.Encode(root)), rig.Content)));
+        rig.Input(0).ReportInstalledDesigns(designs + 1);
+        Assert.True(rig.Until(() => rig.Snap(0).NewShip.Status == NewShipStatus.Created));
+        var created = rig.Snap(0).NewShip.Hull;
+        Assert.Equal((EditorPhase.Open, created), (rig.Editor(0).Phase, rig.Editor(0).Hull));
+        Assert.Equal(count + 1, rig.Hulls.Count);
+        Assert.Equal(drone, rig.Own(0));
+        Assert.False(rig.Hulls.Info(Rig.Index(created)).Piloted);
+        Assert.False(rig.Hulls.Info(Rig.Index(created)).EscapeDrone);
+        Assert.True(rig.Until(() => Enumerable.Range(0, rig.Snap(0).HullCount).Any(i => rig.Snap(0).Hulls[i].Id == created)));
+        var draft = BuildDraft.FromBlueprint(root, rig.Server.Content);
+        Place(draft, rig.Content.Blocks.Get("hull"));
+        var export = draft.Export();
+        Assert.True(export.Ok, export.Problem);
+        Assert.True(rig.Input(0).CommitEdit(rig.Editor(0).Token, export.Bytes));
+        rig.Input(0).ReportInstalledDesigns(designs + 2);
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied, settle: true));
+        Assert.Equal(drone, rig.Own(0));
+        Assert.Equal(created, rig.Editor(0).ReplacedHull);
+        Assert.False(rig.Hulls.Info(Rig.Index(rig.Editor(0).Hull)).Piloted);
+        Assert.True(rig.Input(0).RequestNewShip("new SHIP"));
+        Assert.True(rig.Until(() => rig.Snap(0).NewShip.Status == NewShipStatus.Refused));
+        Assert.Equal(EditorReason.DuplicateName, rig.Snap(0).NewShip.Reason);
+        rig.Step(240);
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 120; i++) while (allocation.Measuring()) rig.Step();
+        Assert.Equal(0, allocation.Bytes);
+    }
+
+    [Fact]
+    public void NewShipRejectsAnAsteroidAndRechecksClearanceAfterReadiness()
+    {
+        using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);
+        var old = rig.Own(0);
+        rig.Input(0).RequestControl(0);
+        Assert.True(rig.Until(() => rig.Own(0) != old));
+        var drone = Rig.Index(rig.Own(0));
+        var state = rig.Hulls.State(drone);
+        var target = state.Position + Vector3.Transform(-Vector3.UnitZ, state.Orientation) * 50;
+        var rocks = rig.Field<RockField>("_rocks");
+        var sector = rig.Server.Galaxy.SectorOf(target);
+        var contents = rocks.Sector(sector);
+        var original = contents.AsteroidCount;
+        var originalRocks = contents.Asteroids;
+        contents.Asteroids = new Asteroid[original + 1];
+        originalRocks.AsSpan(0, original).CopyTo(contents.Asteroids);
+        contents.Asteroids[original] = new Asteroid { LocalPosition = target.RelativeTo(rig.Server.Galaxy.CenterOf(sector)), Radius = 2, Rotation = Quaternion.Identity };
+        contents.AsteroidCount = original + 1;
+        contents.Rocks.Reset(original + 1, rig.Server.Galaxy.SectorSize);
+        for (var i = 0; i < contents.AsteroidCount; i++) contents.Rocks.Add(i, contents.Asteroids[i].LocalPosition, contents.Asteroids[i].Radius);
+        Assert.True(rig.Input(0).RequestNewShip("Rock blocked"));
+        Assert.True(rig.Until(() => rig.Snap(0).NewShip.Status == NewShipStatus.Refused, settle: true));
+        Assert.Equal(EditorReason.NoClearSpot, rig.Snap(0).NewShip.Reason);
+        contents.Asteroids = originalRocks;
+        contents.AsteroidCount = original;
+        contents.Rocks.Reset(original, rig.Server.Galaxy.SectorSize);
+        for (var i = 0; i < original; i++) contents.Rocks.Add(i, contents.Asteroids[i].LocalPosition, contents.Asteroids[i].Radius);
+        var count = rig.Hulls.Count;
+        Assert.True(rig.Input(0).RequestNewShip("Late obstacle"));
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Publishing, settle: true));
+        rig.Hulls.State(Rig.Index(old)).Position = target;
+        rig.Input(0).ReportInstalledDesigns(rig.Server.Content.Designs.Length);
+        Assert.True(rig.Until(() => rig.Snap(0).NewShip.Status == NewShipStatus.Refused, settle: true));
+        Assert.Equal(EditorReason.NoClearSpot, rig.Snap(0).NewShip.Reason);
+        Assert.Equal(count, rig.Hulls.Count);
+    }
+
+    [Theory]
+    [InlineData(false, 16, null, false, EditorReason.NotPiloting)]
+    [InlineData(true, 1, null, false, EditorReason.ShipLimit)]
+    [InlineData(true, 16, 0, false, EditorReason.CatalogueFull)]
+    [InlineData(true, 16, null, true, EditorReason.NoClearSpot)]
+    public void NewShipRefusesWithoutMutatingHulls(bool drone, int maxShips, int? spare, bool blocked, EditorReason expected)
+    {
+        using var rig = new Rig(clients: 1, joined: 1, peerWait: 0, maxShips: maxShips, catalogueSpare: spare);
+        var own = rig.Own(0);
+        if (drone)
+        {
+            rig.Input(0).RequestControl(0);
+            Assert.True(rig.Until(() => rig.Own(0) != own));
+        }
+        if (blocked)
+        {
+            var state = rig.Hulls.State(Rig.Index(rig.Own(0)));
+            rig.Hulls.State(Rig.Index(own)).Position = state.Position + Vector3.Transform(-Vector3.UnitZ, state.Orientation) * 50;
+        }
+        var count = rig.Hulls.Count;
+        Assert.True(rig.Input(0).RequestNewShip("New ship"));
+        Assert.True(rig.Until(() => rig.Snap(0).NewShip.Status == NewShipStatus.Refused, settle: true));
+        Assert.Equal(expected, rig.Snap(0).NewShip.Reason);
+        Assert.Equal(count, rig.Hulls.Count);
+        Assert.Null(rig.Server.Fault);
+    }
+
+    [Fact]
+    public void NewShipNamesAreBoundedAndRawBadNamesGetAReason()
+    {
+        ShipName name = default;
+        Assert.True(name.Set("  Prospect  "));
+        Assert.Equal("Prospect", new string(name.Text[..name.Length]));
+        Assert.True(name.Set(new string('x', 32)));
+        Assert.False(name.Set(new string('x', 33)));
+        Assert.False(name.Set("   "));
+        Assert.False(name.Set("bad\nname"));
+        Assert.False(name.Set("bad\u200bname"));
+        using var rig = new Rig(clients: 1, joined: 1);
+        var own = rig.Own(0);
+        rig.Input(0).RequestControl(0);
+        Assert.True(rig.Until(() => rig.Own(0) != own));
+        rig.Raw(0, NetChannel.Reliable, Request(EditorRequestKind.NewShip, 0));
+        Assert.True(rig.Until(() => rig.Snap(0).NewShip.Status == NewShipStatus.Refused));
+        Assert.Equal(EditorReason.BadName, rig.Snap(0).NewShip.Reason);
+    }
+
     /// <summary>The server's end of a link, able to hold a client back, refuse sends and count what passes.</summary>
     private sealed class Wire(ITransport inner) : ITransport, ITransportHandler
     {
@@ -73,9 +207,9 @@ public sealed class EditorSessionTests
         internal long Tick;
 
         /// <summary>A server with a link for every client; the first <paramref name="joined"/> join at once.</summary>
-        internal Rig(int clients = 2, int joined = 2, int quiet = 1, int peerWait = 1, int ready = 5, int commit = 0, int uploads = 2, int? catalogueSpare = null)
+        internal Rig(int clients = 2, int joined = 2, int quiet = 1, int peerWait = 1, int ready = 5, int commit = 0, int uploads = 2, int? catalogueSpare = null, int maxShips = 16)
         {
-            _files.Write("net/editor.json", $$"""{ "quietSeconds": {{quiet}}, "uploads": {{uploads}}, "uploadSeconds": 5, "readySeconds": {{ready}}, "peerWaitSeconds": {{peerWait}}, "commitSeconds": {{commit}} }""");
+            _files.Write("net/editor.json", $$"""{ "maxOwnedShips": {{maxShips}}, "quietSeconds": {{quiet}}, "uploads": {{uploads}}, "uploadSeconds": 5, "readySeconds": {{ready}}, "peerWaitSeconds": {{peerWait}}, "commitSeconds": {{commit}} }""");
             if (catalogueSpare is { } spare)
             {
                 long shipped = 0;

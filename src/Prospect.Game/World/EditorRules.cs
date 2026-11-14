@@ -12,6 +12,11 @@ public sealed class EditorRules
 {
     /// <summary>Seconds a hull must have gone without damage before it can be edited.</summary>
     public int QuietSeconds { get; init; }
+    public int NewShipNameChars { get; init; } = 32;
+    public int MaxOwnedShips { get; init; } = 16;
+    public float NewShipDistance { get; init; } = 50;
+    public float NewShipClearance { get; init; } = 5;
+    public string NewShipRoot { get; init; } = "core";
 
     /// <summary>Designs the server holds at once while they are received and checked, over all players.</summary>
     public int Uploads { get; init; }
@@ -60,7 +65,9 @@ public sealed class EditorRules
         }
         catch (JsonException error) { throw new InvalidDataException($"{path}: invalid JSON: {error.Message}", error); }
 
-        if (rules.QuietSeconds is < 0 or > 3600 || rules.Uploads is < 1 or > 16 || (long)rules.Uploads * transfers.MaxBytes > transfers.HeldBytes
+        if (rules.NewShipNameChars is < 1 or > 32 || rules.MaxOwnedShips is < 1 or > 128 || !float.IsFinite(rules.NewShipDistance) || rules.NewShipDistance is < 10 or > 1000
+            || !float.IsFinite(rules.NewShipClearance) || rules.NewShipClearance is < 1 or > 100 || string.IsNullOrWhiteSpace(rules.NewShipRoot)
+            || rules.QuietSeconds is < 0 or > 3600 || rules.Uploads is < 1 or > 16 || (long)rules.Uploads * transfers.MaxBytes > transfers.HeldBytes
             || rules.UploadSeconds is < 1 or > 600 || rules.ReadySeconds is < 1 or > 600 || rules.PeerWaitSeconds is < 0 or > 60
             || rules.PeerWaitSeconds > rules.ReadySeconds || rules.CommitSeconds is < 0 or > 600)
             throw new InvalidDataException($"{path}: invalid editor limits");

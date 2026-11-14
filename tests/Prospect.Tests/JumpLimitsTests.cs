@@ -17,7 +17,7 @@ public sealed class JumpLimitsTests
     {
         var ids = Enum.GetValues<MessageId>();
         Assert.Equal(ids.Length, ids.Distinct().Count());
-        Assert.Equal(39u, ProtocolInfo.Version);
+        Assert.Equal(40u, ProtocolInfo.Version);
         Span<byte> bytes = stackalloc byte[ExplorationMessage.MaxWireSize];
         Span<SectorChart> charts = stackalloc SectorChart[ExplorationMessage.MaxCharts];
         for (var i = 0; i < charts.Length; i++) charts[i] = new(1, new(i, 0, 0), 0);

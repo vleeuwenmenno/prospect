@@ -452,7 +452,7 @@ The replacement:
 - The time without damage carries over, also into a drone a player steps out in. Editing an escape drone
   preserves its temporary identity: no further ejection, cleanup on leaving, and respawn at the spawn point.
 
-Sizes: `Editor` 42 B at most (a repair is 6 B), `EditorData` 11 B and its chunk, `EditorState` 17 B, `DesignNotice` 38 B,
+Sizes (protocol 40): `Editor` 135 B at most (a repair is 6 B), `EditorData` 11 B and its chunk, `EditorState` 18 B, `DesignNotice` 38 B,
 `DesignReady` 3 B. A client sends one editor request and one `DesignReady` a tick; both are reserved in its
 reliable allowance.
 
@@ -793,3 +793,43 @@ Neither schema changes saved state. Existing WorldView NAV consumption and UI fe
 - Evaluator 6 scales shield power with the world recharge multiplier, preserving MJ/point.
 - Existing `blocks/blocks.json` identity covers emitter draw, recharge and restart multiplier (now 4).
 - No message or saved-state layout changed. Offline state, shield charge and battery already carry recovery progress.
+
+## New ships from a drone (protocol 40)
+
+### Decided (provisional, tunable)
+
+- Only an active player's controlled escape drone may request a new ship. The player stays in that drone.
+- Building is free. `content/net/editor.json` sets `maxOwnedShips` to 16 (excluding escape drones),
+  `newShipNameChars` to 32, `newShipDistance` to 50 m and `newShipClearance` to 5 m.
+- Names are trimmed, 1–32 printable Unicode scalar values, unique among the owner's living ships,
+  compared ordinally without case. Controls, formatting characters, invalid Unicode and unassigned characters are refused.
+- The initial blueprint contains one unit-sized `newShipRoot` (`core`), with the pod's class, cell size and colour.
+- One candidate is tested 50 m ahead of the drone. It must fit wholly within the current sector and clear
+  hull and asteroid bounding spheres by 5 m, including displaced rocks. No clear spot means refusal.
+
+### Contract
+
+`PlayerInputBridge.RequestNewShip(ReadOnlySpan<char> name)` returns false for invalid text; true queues an intent.
+`SessionSnapshot.NewShip` exposes `Status` (None/Pending/Created/Refused), `Reason`, `Hull`, and `Serial`.
+Created gives the new hull id and an ordinary Open grant in `SessionSnapshot.Editor`, with a fresh token.
+The hull snapshot may follow the reliable grant: the UI must wait until that hull is present before opening its draft.
+The UI must track the granted hull, not OwnHull; Apply replaces the edited ship while leaving drone control unchanged.
+Cancellation closes the edit but does not remove the created ship. Editing never protects it from damage.
+Switching control, losing the drone or ship, damage to the edited ship, or a jump ends the grant.
+
+The request shares the editor envelope and receive/rate budgets; it is admitted only after the normal handshake.
+A bounded editor worker constructs canonical bytes and checks them through `DesignBytes.Decode`.
+Creation shares upload slots and commit cooldowns. Catalogue, ship and save capacity are checked before creation;
+conditions and clearance are checked again after loading. Full catalogues refuse even a reusable design.
+The catalogue only grows, including an unused entry if creation is cancelled after publication.
+DesignReady still gates hull publication; CatalogueReady is never repurposed. Failed readiness creates no hull.
+`CreateHull` gives the new ship its durable entity; its existing snapshot representation saves it normally.
+
+Protocol 40 sizes: Editor at most 135 B (64 UTF-16 units for 32 Unicode scalars), EditorState 18 B.
+EditorState adds a creation status byte; other editor and design transfer sizes are unchanged.
+Refusals include NotPiloting, BadName, DuplicateName, ShipLimit, NoClearSpot, CatalogueFull,
+HullLimit, Busy, TooSoon, Jumping and the existing client-readiness/check failure reasons.
+
+### Open
+
+- Resource costs, shipyards, alternative spawn candidates, renaming, and remote reopening after cancelling the initial grant.
