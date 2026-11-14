@@ -482,6 +482,10 @@ The client opens a real window on the developer's desktop, and they are usually 
 - `Brutal.ImGuiApi.Backends.GlfwBackend` allocates every frame. The client uses its own `UiPlatform`.
 - `ImString` interpolation (`ImGui.Text($"...")`) allocates. Use `Kit.F`.
 - `ShaderStages` destroys its modules when disposed: create a fresh module per pipeline.
+- Idle thread-pool workers exit after 20 s, and the runtime takes 64 bytes of managed memory as one leaves (a bare
+  console app shows it). A measurement of "no allocation on any thread" that spans that moment failed at random
+  (`make bench-scans`). `Directory.Build.props` sets `System.Threading.ThreadPool.ThreadsToKeepAlive` to -1 so
+  workers never exit; keep it, and `ThreadPoolConfigurationTests` reads it back.
 - `JobScheduler` only accepts work while idle. `JobSystem` in `Prospect.Engine` adds dependencies and
   per-runner dispatch on top; schedule through that.
 - The framework source is the documentation. Clone `https://github.com/ahwootech/BRUTAL` and grep it rather than
