@@ -1202,7 +1202,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     private void ResetControl(Connection connection)
     {
         connection.Navigation = default;
-        if (connection.Scan.State == ScanState.Scanning) connection.Scan.State = ScanState.Cancelled;
+        if (connection.Scan.State == ScanState.Scanning) EndScan(connection, ScanState.Cancelled, _tick);
         connection.ControlEpoch++;
         connection.Inputs.Clear();
         connection.PreparedInput = InputTimeline.Fallback;

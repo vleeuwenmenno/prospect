@@ -53,6 +53,11 @@ internal sealed class MapTuning
     /// <summary>Seconds a finished, cancelled or refused scan stays on the flight display.</summary>
     public float ScanResultSeconds { get; init; }
 
+    /// <summary>The scan readout on the flight and command displays: width in unscaled pixels, strength of the running scan and result, and of the muted cooldown line under them, 0 to 1.</summary>
+    public float ScanStripWidth { get; init; }
+    public float ScanStripAlpha { get; init; }
+    public float ScanCooldownAlpha { get; init; }
+
     /// <summary>How dark the command view's fog outside sensor coverage is, and how far out it reaches in sensor radii.</summary>
     public float CommandFogAlpha { get; init; }
     public float CommandFogReach { get; init; }
@@ -174,6 +179,8 @@ internal sealed class MapTuning
             throw new InvalidDataException($"{path}: commandRingWidth is 0.5 to 8, commandFadeRings 1 to 16, commandFadeWidth 1 to 64");
         if (!Unit(tuning.LinkLineAlpha) || !Unit(tuning.GasTintAlpha) || !(tuning.RadarLinkMeters is >= 0 and <= 200000))
             throw new InvalidDataException($"{path}: linkLineAlpha and gasTintAlpha are 0 to 1, radarLinkMeters 0 to 200000");
+        if (!(tuning.ScanStripWidth is >= 120 and <= 600) || !Unit(tuning.ScanStripAlpha) || !Unit(tuning.ScanCooldownAlpha))
+            throw new InvalidDataException($"{path}: scanStripWidth is 120 to 600, scanStripAlpha and scanCooldownAlpha 0 to 1");
         if (!(tuning.CourseRefusalSeconds is >= 0 and <= 60))
             throw new InvalidDataException($"{path}: courseRefusalSeconds is 0 to 60");
         static bool Hex(string value) => value.Length == 6 && uint.TryParse(value, System.Globalization.NumberStyles.AllowHexSpecifier, null, out _);

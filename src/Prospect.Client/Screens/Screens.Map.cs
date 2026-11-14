@@ -296,7 +296,7 @@ internal sealed partial class ScreenHost
             DrawTargetMarker(draw, destination, Theme.Accent);
         }
 
-        // The sector under the pointer, and the card: a click pins it, outside the galaxy dismisses it.
+        // The sector under the pointer, and the card: a left click pins that sector (in place of any pinned one), a click outside the galaxy or a right click dismisses it.
         var hover = view.SectorAt(mouse);
         var pointerOnMap = _mapHoverPinned || pointer.Hovered;
         var inBounds = MapBounds.Contains(shape, look.EdgeFalloff, hover);
@@ -304,7 +304,12 @@ internal sealed partial class ScreenHost
         {
             SectorBrackets(draw, view, hover, Kit.Color(Theme.Text, _mapCard.Pinned ? 0.45f : 0.85f), 7f);
             if (pointer.RightClicked)
+            {
+                // A right click anywhere on the map closes a pinned card, as any click outside it does, and opens the
+                // course menu for the sector under it.
+                _mapCard.RightClick();
                 OpenMapMenu(galaxy, hover, mouse);
+            }
         }
 
         if (boxReleased && !pointer.BoxMoved && !menuOpen)

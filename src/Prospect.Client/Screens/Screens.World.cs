@@ -129,6 +129,11 @@ internal sealed partial class ScreenHost
         if (!editing && !asking && !_sessionMenuOpen && !_mapOpen && !SocialSurfaceOpen && _app.Actions.Pressed(_app.Devices, InputAction.ShipInfo, !_ui.WantsTextInput))
             _shipInfoOpen = !_shipInfoOpen;
 
+        // The scan key works in the flight and command views and on the map, never over the editor, a dialog, a menu
+        // or while typing.
+        if (!editing && !asking && !_sessionMenuOpen && !SocialSurfaceOpen && !_controlsOpen && Bridge is { } scanBridge)
+            ScanRules.HandleKey(_app.Actions, _app.Devices, !_ui.WantsTextInput, snapshot.Exploration.Scan, world.Sector.Coord, snapshot.ServerTick, scanBridge);
+
         // Everything shown over the world goes on ImGui's background layer, which is drawn beneath every window.
         // Menus, the world settings, the map and the fleet list are windows, so they always cover it, and a menu's
         // dim, drawn on the same layer afterwards, dims it too. Measure the passive chat feed before placing
@@ -167,7 +172,7 @@ internal sealed partial class ScreenHost
                 DrawCommandOverlay(draw, snapshot, world, world.CommandBlend);
             }
 
-            DrawScanStrip(draw, snapshot, world, 1f);
+            DrawScanStrip(draw, snapshot, world, 1f, WorldInputEnabled && (world.Mode == ViewMode.Command || (world.Mode == ViewMode.Pilot && _app.PointerReleased)));
             if (pilot > 0.01f)
                 DrawTargetReadout(draw, snapshot, world, pilot);
             if (_sectorInfo.Open)

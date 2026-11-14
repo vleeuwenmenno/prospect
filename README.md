@@ -287,9 +287,13 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   layer stays fully interactive. The galaxy edge ring marks where the disc ends; nothing stops flight there yet. A
   unit list on the left shows every ship you own; click a row to add or remove that ship. A plotted jump shows as a
   dotted route from the ship you fly to its NAV point until the jump is made, replaced or cleared.
-- **Scanning.** Pin your own sector's card and press **Scan sector**: 5 seconds, flight continues. Leaving the
-  sector, switching ship or losing the charting block cancels it; the card and the top of the flight view say
-  which (the reason is inferred on the client, the server only says cancelled). The command view shows the gas-shaped
+- **Scanning.** Press `K` (D-pad left; rebindable) in the flight or command view, or pin your own sector's card and
+  press **Scan sector**: 5 seconds, flight continues. Leaving the sector, switching ship or losing the charting block
+  cancels it; the card and the top of the flight view say which (the reason is inferred on the client, the server only
+  says cancelled). A small muted readout under the top of the flight and command views shows the bar, the result and
+  then "NEXT SCAN IN n S". The server keeps a 10 s cooldown on the sector after a scan ends, completed or cancelled
+  (a request in it is refused); the key and the button wait it out and say how long is left. Resting the cursor on
+  the readout or the button names the key. In an uncharted sector, a tip names the key. The command view shows the gas-shaped
   sensor boundary of the selected ships (the flown one when none is selected), darkens space beyond it, and merges ships
   within 10 km of each other into one outline; lost contacts show at their last position.
 - **Renderer.** Floating-point scene target and tone mapping, camera-relative rendering from double-precision
@@ -382,6 +386,7 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Boost | `Space` | Left stick click |
 | Show the cursor (pilot view) | Hold `Shift`; with it, right-drag over space turns the camera, and pointing at a console bar shows its figures | |
 | Dampeners on / off | `Z` | `X` |
+| Scan the sector you are in (flight, command view, map) | `K` | D-pad left |
 | Command view | `N` or `F9` | `Back` |
 | Galaxy map | `M` | `Y` |
 | Halt (cancel order) | `H` or `Backspace` | `B` |
@@ -453,8 +458,8 @@ Galaxy map:
 | Close the menu | Left-click elsewhere, or `Esc` (then `Esc` closes a pinned card, then the map) |
 | Take control of a ship | Select exactly one other ship of yours in the sector you are in, then `T`; the map stays open. Another sector: travel there first |
 | Pan / zoom | `W` `A` `S` `D`, arrow keys or middle-drag / mouse wheel |
-| Sector card | Hover a sector to preview; left-click to pin; its **X**, left-click outside the galaxy or `Esc` closes it |
-| Scan your sector | Pin your own sector's card, then **Scan sector** |
+| Sector card | Hover a sector to preview; left-click a sector to pin it (in place of any pinned card). Any click on the map outside the card closes it: a right click only closes it (and opens the course menu), a left click pins what it hits, outside the galaxy it closes. Clicks on the card's own controls never close it; its **X** or `Esc` does |
+| Scan your sector | `K` or D-pad left, or pin your own sector's card, then **Scan sector** (10 s wait before the same sector again) |
 | Change layer, centre on your ship | `Page Up` / `Page Down` or the layer bar, `Space` |
 | Flat or tilted view | `V`, or **Flat** / **Tilt** on the layer bar; flattening shows the pinned card's layer |
 

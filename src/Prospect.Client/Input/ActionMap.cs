@@ -29,6 +29,7 @@ internal enum InputAction
     MapLayerUp,
     MapLayerDown,
     MapTilt,
+    ScanSector,
     Count,
 }
 

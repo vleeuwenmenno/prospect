@@ -24,16 +24,38 @@ public sealed partial class ServerHost
     private void StartScan(Connection connection)
     {
         if (connection.Scan.State == ScanState.Scanning) return;
-        connection.Scan = new ScanView { State = ScanState.NoEquipment };
+
+        // A refusal changes only the state: the cooldown from the last scan is kept, so a refused request never
+        // shortens or lengthens it.
+        var scan = new ScanView { State = ScanState.NoEquipment, CooldownSector = connection.Scan.CooldownSector, CooldownUntilTick = connection.Scan.CooldownUntilTick };
+        connection.Scan = scan;
         if (!_hulls.IsAlive(connection.Hull) || !Equipped(connection.Hull.Index, true)) return;
-        connection.ScanHull = connection.Hull.Packed;
-        connection.Scan = new ScanView
+        var sector = Galaxy.SectorOf(_hulls.State(connection.Hull.Index).Position);
+        if (scan.CoolingDown(sector, _tick))
         {
-            State = ScanState.Scanning,
-            Sector = Galaxy.SectorOf(_hulls.State(connection.Hull.Index).Position),
-            StartedTick = _tick,
-            CompletesTick = _tick + _content.Exploration.ScanTicks,
-        };
+            connection.Scan.State = ScanState.Cooldown;
+            connection.Scan.Sector = sector;
+            return;
+        }
+
+        connection.ScanHull = connection.Hull.Packed;
+        scan.State = ScanState.Scanning;
+        scan.Sector = sector;
+        scan.StartedTick = _tick;
+        scan.CompletesTick = _tick + _content.Exploration.ScanTicks;
+        connection.Scan = scan;
+    }
+
+    /// <summary>
+    /// Ends a running scan in <paramref name="state"/> and starts its sector's cooldown, whichever way it ended: a
+    /// cancelled scan costs the wait too, so starting and cancelling is no way round it.
+    /// </summary>
+    private void EndScan(Connection connection, ScanState state, long tick)
+    {
+        ref var scan = ref connection.Scan;
+        scan.State = state;
+        scan.CooldownSector = scan.Sector;
+        scan.CooldownUntilTick = tick + _content.Exploration.ScanCooldownTicks;
     }
 
     private void TickExploration(long tick)
@@ -46,11 +68,11 @@ public sealed partial class ServerHost
                 || Galaxy.SectorOf(_hulls.State(connection.Hull.Index).Position) != scan.Sector
                 || !Equipped(connection.Hull.Index, true))
             {
-                scan.State = ScanState.Cancelled;
+                EndScan(connection, ScanState.Cancelled, tick);
                 continue;
             }
             if (tick < scan.CompletesTick) continue;
-            scan.State = RecordChart(connection.PlayerId, scan.Sector, tick) ? ScanState.Completed : ScanState.ChartLimit;
+            EndScan(connection, RecordChart(connection.PlayerId, scan.Sector, tick) ? ScanState.Completed : ScanState.ChartLimit, tick);
         }
     }
 
@@ -79,7 +101,8 @@ public sealed partial class ServerHost
         var scan = connection.Scan;
         var previous = connection.SentScan;
         if (connection.ExplorationSent && count == 0 && scan.State == previous.State && scan.Sector == previous.Sector
-            && scan.StartedTick == previous.StartedTick && scan.CompletesTick == previous.CompletesTick)
+            && scan.StartedTick == previous.StartedTick && scan.CompletesTick == previous.CompletesTick
+            && scan.CooldownSector == previous.CooldownSector && scan.CooldownUntilTick == previous.CooldownUntilTick)
         { connection.ChartCursor = cursor; return; }
         var writer = new NetWriter(_sendBuffer);
         ExplorationMessage.Write(ref writer, scan, charts[..count]);
