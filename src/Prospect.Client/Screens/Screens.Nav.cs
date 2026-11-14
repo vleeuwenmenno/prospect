@@ -263,7 +263,16 @@ internal sealed partial class ScreenHost
                     var remaining = MathF.Max(0f, (1f - calculation) * flight.FtlCalculateSeconds);
                     var calc = calculation >= 1f ? "CALCULATED"u8 : Kit.F($"CALC {MathF.Ceiling(remaining):0} S");
                     StripGauge(draw, actionLeft, column, strip, calc, calculation);
-                    var charged = charge >= 1f ? Kit.F($"CHARGED {Energy(own.JumpTimer, flight.FtlEnergy)}") : Kit.F($"CHARGE {Energy(own.JumpTimer, flight.FtlEnergy)}");
+                    // Kit.F reuses one buffer, so the energy figures are formatted here rather than through
+                    // Energy(), whose text would be overwritten by the outer format.
+                    var capacity = FlightConsole.Shown(flight.FtlEnergy, float.MaxValue);
+                    var stored = FlightConsole.Shown(own.JumpTimer, capacity);
+                    var giga = FlightConsole.Thousands(capacity);
+                    var scale = giga ? 1000f : 1f;
+                    var head = charge >= 1f ? "CHARGED" : "CHARGE";
+                    var charged = giga
+                        ? Kit.F($"{head} {stored / scale:0} / {capacity / scale:0} GJ")
+                        : Kit.F($"{head} {stored:0} / {capacity:0} MJ");
                     StripGauge(draw, actionLeft + column + gap, column, strip, charged, charge);
                     break;
                 }
