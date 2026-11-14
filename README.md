@@ -33,6 +33,12 @@ Settings, Tips and panels, **Reset panel positions** (or `L` on the map) puts th
 Tips are data in `content/visuals/tips.json`. Every press of `B` in the escape drone opens the New ship dialog and
 brings up the "edit the drone with Ctrl+B" tip beside it, unless you hid that tip.
 
+Notices: small, muted messages stack at the top right (newest on top, four at a time, more wait their turn) for
+things like a finished module scan, a scan with no power, a charted sector or a ship you built. Each fades after
+about six seconds; the pointer over one holds it, its X closes it, and a click on one with an action (gas results:
+the Gas window; a charted sector: Charts) runs it. Kinds, words, colours and durations are data in
+`content/visuals/notices.json`. Not there yet: a notice with a number or name in it (credits, ship names).
+
 Chat, the player roster and parties work end to end: the server decides, the client shows them.
 
 - **Navigation bar** along the top. In a game: Fleet (command view; press it again for the pilot view), Map,
@@ -415,6 +421,8 @@ The cursor is hidden only in the pilot view. The command view, the map and every
   gets no controls while it is open. A press on a panel never reaches the ship, with one exception: a part card
   dragged out of the part list. When the editor closes, flight keys still held from it do nothing until they are
   let go.
+
+Notices take no key. In the pilot view they take no input either: hold `Shift` to click one's X or body.
 
 Tips: `Esc` closes a tip before anything else. In the pilot view a tip takes no input, so flight is not
 interrupted: hold `Shift` to click its Next, Close and "Don't show this again".

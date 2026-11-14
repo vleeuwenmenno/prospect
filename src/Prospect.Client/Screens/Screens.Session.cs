@@ -59,7 +59,9 @@ internal sealed partial class ScreenHost
                 TrackSocial(snapshot);
                 UpdateNewShip(snapshot);
                 TrackTips(snapshot, _app.World);
+                TrackNotices(snapshot, _app.World);
                 PlanTip(_app.World);
+                PlanNotices(snapshot, _app.World);
                 DrawWorldInterface(snapshot);
                 DrawSaveWarning();
                 // The social windows over the world but under the map and the menu, which close them first.
@@ -70,6 +72,7 @@ internal sealed partial class ScreenHost
                 if (!_mapOpen && !_sessionMenuOpen)
                     DrawNewShip(snapshot);
                 DrawTip();
+                DrawNotices();
 
                 // Escape backs out one level at a time: the map closes itself, chat and the social windows close
                 // (never a pinned one), the command view returns to the pilot view, and only from the pilot view

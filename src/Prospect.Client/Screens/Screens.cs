@@ -51,6 +51,8 @@ internal sealed partial class ScreenHost
         InitializeSocial();
         _claimTipForMap = () => _mapPointer.Claim();
         InitializeTips();
+        _claimNoticesForMap = () => _mapPointer.Claim();
+        InitializeNotices();
         _mapPanels = new MapPanels(app.Settings);
         _app.Actions.Changed += OnBindingsChanged;
     }
@@ -67,6 +69,7 @@ internal sealed partial class ScreenHost
             _sectorInfo.Reset();
             ResetSocial();
             ResetTipTracking();
+            ResetNotices();
             _newShip.Reset();
         }
         _screen = screen;

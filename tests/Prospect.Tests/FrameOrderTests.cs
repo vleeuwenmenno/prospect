@@ -562,6 +562,7 @@ public sealed class FrameOrderTests : IDisposable
         pointerFrame.CommandView = _world.PointerView;
         _router.RefreshCapture(pointerFrame);
 
+        PlanNotices();
         if (_mapShown)
         {
             DrawMapSurface();
@@ -572,6 +573,7 @@ public sealed class FrameOrderTests : IDisposable
         DrawFloating();
         _drawOver?.Invoke();
         DrawTipPanel();
+        DrawNoticePanel();
         DrawCommandCourseMenu();
         // As the editor screen does before its panels: a press on one ends a turn, keeping it.
         _world.EndPartRotationOnPanelPress();
@@ -760,6 +762,172 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     private bool _tipDragging;
+
+    // The notice stack as ScreenHost draws it with the production helpers: laid out from the board, drawn, and its
+    // presses applied, taking input unless the pointer is hidden for flight.
+    private NoticeBoard? _noticeBoard;
+    private readonly float[] _noticeHeights = new float[NoticeBoard.MaxVisible];
+    private HudRect _noticeRect;
+    private int _noticeGasOpens;
+    private int _noticeChartsOpens;
+
+    private void UseNotices(float scale = 1f)
+    {
+        UseTips(scale);
+        _noticeBoard = new NoticeBoard(NoticeCatalogue.Load(Path.Combine(AppContext.BaseDirectory, "content", "visuals", "notices.json"), _actions));
+    }
+
+    private void PlanNotices()
+    {
+        _noticeRect = default;
+        if (_noticeBoard is not { } board)
+            return;
+        board.Update(1f / 60f);
+        if (board.Visible == 0)
+            return;
+        Kit.BeginFrame(_tipKit!);
+        _noticeRect = NoticePanel.Layout(board, Screen.X - Kit.Px(Theme.Space5), HudLayout.Top(_tipScale), Screen.Y, _noticeHeights);
+    }
+
+    private void DrawNoticePanel(bool overMap = false)
+    {
+        if (_noticeBoard is not { Visible: > 0 } board)
+            return;
+        Kit.BeginFrame(_tipKit!);
+        var result = NoticePanel.Draw(board, _noticeRect, _noticeHeights, !_router.Captured, overMap ? () => _map.Claim() : null);
+        if (result.ClosedRow >= 0)
+        {
+            board.Close(result.ClosedRow);
+        }
+        else if (result.ActionRow >= 0)
+        {
+            var action = board.NoticeAt(result.ActionRow).Action;
+            board.Close(result.ActionRow);
+            _noticeGasOpens += action == NoticeAction.OpenGasWindow ? 1 : 0;
+            _noticeChartsOpens += action == NoticeAction.OpenChartsWindow ? 1 : 0;
+        }
+    }
+
+    /// <summary>The middle of a notice's body, and of its X, in the row <paramref name="row"/> from the top.</summary>
+    private float2 NoticeBody(int row)
+    {
+        var top = _noticeRect.Top;
+        for (var i = 0; i < row; i++)
+            top += _noticeHeights[i] + 8f * _tipScale;
+        return new float2(_noticeRect.Left + 40f * _tipScale, top + _noticeHeights[row] * 0.5f);
+    }
+
+    private float2 NoticeClose(int row) => NoticeBody(row) with { X = _noticeRect.Right - 14f * _tipScale };
+
+    [Theory]
+    [InlineData(1f)]
+    [InlineData(2f)]
+    public void APressOnANoticeRunsItsActionOrClosesItAndNeverReachesTheWorld(float scale)
+    {
+        UseNotices(scale);
+        _world.SetMode(ViewMode.Command);
+        _world.SelectAllOwned();
+        Frame();
+        Frame();
+        var owned = _world.Selection.Length;
+        Assert.True(owned > 0);
+        var board = _noticeBoard!;
+
+        // The gas notice's body runs its action and closes it; the selection is untouched.
+        board.Post(NoticeKinds.GasResults);
+        Frame();
+        Frame();
+        ClickAt(NoticeBody(0));
+        Assert.Equal(1, _noticeGasOpens);
+        Assert.Equal(owned, _world.Selection.Length);
+        for (var i = 0; i < 40; i++)
+            Frame();
+        Assert.Equal(0, board.Count);
+
+        // A notice with no action: its body does nothing, its X closes it. Newest on top, so row 0.
+        board.Post(NoticeKinds.AsteroidResults);
+        board.Post(NoticeKinds.SectorCharted);
+        Frame();
+        Frame();
+        Assert.Equal(NoticeKinds.SectorCharted, board.NoticeAt(0).Id);
+        ClickAt(NoticeBody(1));
+        Assert.Equal(2, board.Count);
+        Assert.Equal(owned, _world.Selection.Length);
+        ClickAt(NoticeClose(0));
+        Assert.Equal(0, _noticeChartsOpens);
+        Assert.Equal(owned, _world.Selection.Length);
+        for (var i = 0; i < 40; i++)
+            Frame();
+        Assert.Equal(1, board.Count);
+        Assert.Equal(NoticeKinds.AsteroidResults, board.NoticeAt(0).Id);
+
+        // The panel gone, the same spot is the world's again.
+        ClickAt(NoticeClose(0));
+        for (var i = 0; i < 40; i++)
+            Frame();
+        Assert.Equal(0, board.Count);
+        ClickAt(EmptySpace);
+        Assert.Equal(0, _world.Selection.Length);
+    }
+
+    [Fact]
+    public void ANoticeHeldByThePointerStaysAndOneLeftAloneLeaves()
+    {
+        UseNotices();
+        _world.SetMode(ViewMode.Command);
+        Frame();
+        var board = _noticeBoard!;
+        board.Post(NoticeKinds.ModuleCancelled);
+        Frame();
+        Frame();
+        Frame(() => Move(NoticeBody(0)));
+        for (var i = 0; i < 480; i++)
+            Frame();
+        Assert.Equal(1, board.Count);
+        Assert.True(board.AgeAt(0) < 0.2f);
+        Frame(() => Move(EmptySpace));
+        for (var i = 0; i < 480; i++)
+            Frame();
+        Assert.Equal(0, board.Count);
+    }
+
+    [Fact]
+    public void InFlightANoticeTakesNothingAndTheHullStillFlies()
+    {
+        UseNotices();
+        var board = _noticeBoard!;
+        board.Post(NoticeKinds.GasResults);
+        Frame();
+        Frame();
+        Assert.True(_router.Captured);
+        Assert.False(ImGui.GetIO().WantCaptureMouse);
+        Bridge.Consume(out _, out _);
+        Frame(() => Key(GlfwKey.W, true));
+        Assert.True(Sent().Forward > 0);
+        Assert.False(ImGui.GetIO().WantCaptureKeyboard);
+        Assert.Equal(1, board.Count);
+
+        // It times out as it was: nothing held it, and a press never reached it.
+        for (var i = 0; i < 480; i++)
+            Frame();
+        Assert.Equal(0, board.Count);
+        Assert.Equal(0, _noticeGasOpens);
+    }
+
+    [Fact]
+    public void ANoticeOverTheMapTakesThePressAndTheMapNeverSeesIt()
+    {
+        UseNotices();
+        OpenMap();
+        var board = _noticeBoard!;
+        board.Post(NoticeKinds.GasResults);
+        Frame();
+        Frame();
+        ClickAt(NoticeBody(0));
+        Assert.Equal(1, _noticeGasOpens);
+        Assert.Equal(0, _mapPresses);
+        Assert.Equal(0, _mapReleases);
+    }
 
     /// <summary>Presses at <paramref name="from"/>, moves to <paramref name="to"/> in steps and lets go.</summary>
     private void DragTip(float2 from, float2 to)
@@ -1567,6 +1735,8 @@ public sealed class FrameOrderTests : IDisposable
             }
         }
 
+        if (_noticeRect.Width > 0)
+            _map.Block(new float2(_noticeRect.Left, _noticeRect.Top), new float2(_noticeRect.Width, _noticeRect.Height));
         _map.Begin(Screen);
         _mapPresses += _map.Pressed ? 1 : 0;
         _mapReleases += _map.BoxReleased ? 1 : 0;
@@ -1607,6 +1777,7 @@ public sealed class FrameOrderTests : IDisposable
         if (_mapPanels.TakeChanged())
             _mapPanelSaves++;
 
+        DrawNoticePanel(true);
         if (!_menuOpen)
             return;
         var shown = MenuShown;

@@ -224,6 +224,21 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `Exploration.Navigation`); other owned ships get `IssueFleetOrder`. A right click in the command view opens the
   menu and orders nothing; Escape (`ScreenHost.NextBackStep`) and a press elsewhere close it. `FrameOrderTests` runs
   it. Do not build text inside another `Kit.F`: build the inner figures first.
+- **Notices** (snackbar messages at the top right): kinds, text, accent, duration and click action are data in
+  `content/visuals/notices.json` (`NoticeCatalogue`: refuses an unknown kind, action, accent or action key, a repeated
+  id, a kind of `NoticeKinds` with no entry). Code posts through one call, `ScreenHost.Notify(NoticeKinds.X)` (or
+  `NoticeBoard.Post`); new message = new `NoticeKinds` constant, an entry in the file, and a case in
+  `NoticeTracker` or a `Notify` call. A new click action is a `NoticeAction` plus its case in
+  `ScreenHost.RunNoticeAction`. `NoticeBoard` (font-free) is one fixed ring of 32: four shown newest on top, the rest
+  wait and start their timer only when shown; the oldest waiting is dropped when full, a shown one never. Hover holds
+  a notice, the X or an action click fades it out at once. `NoticeTracker` turns snapshot changes into posts, once
+  each and only for the own hull (`ModuleScanView` Completed, NoPower, Cancelled; `ScanView` Completed; `NewShip`
+  Created); it never reads cooldown fields. The panel is `NoticePanel`: one window, placed by `PlanNotices` under the
+  bar, the performance overlay and the command view's fleet list, left of the editor's details panel. It takes no
+  input while the pilot pointer is captured, never changes `PointerFrame`, and the map blocks its rectangle
+  (`BlockMapForNotices`, `Claim`). Posting, updating and drawing take no memory. A scripted run shows none unless
+  `--notices-sample on|stack` (`stack` posts six at once). `NoticeTests` and the notice tests in `FrameOrderTests`
+  hold the rules.
 - **In-game tips:** text, anchor and trigger of every tip are data in `content/visuals/tips.json` (`TipCatalogue`:
   refuses unknown triggers, actions, repeated ids and a trigger with no tip). Key names in text are `{InputAction}`
   placeholders, resolved from the loaded bindings. A tip belongs to its surface: `TipSurfaces` fires the map's, command view's and editor's tips when each opens and

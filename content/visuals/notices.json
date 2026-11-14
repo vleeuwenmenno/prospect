@@ -1,0 +1,14 @@
+{
+  "width": 320,
+  "defaultSeconds": 6,
+  "fadeSeconds": 0.4,
+  "notices": [
+    { "id": "gasResults", "text": "Gas results are in. Press {ToggleGas} to read them.", "accent": "good", "action": "openGasWindow" },
+    { "id": "asteroidResults", "text": "Asteroid analysis is done. It is on the target panel.", "accent": "good" },
+    { "id": "locatorResults", "text": "Locator pulse is done. Its marks are in view.", "accent": "good" },
+    { "id": "moduleNoPower", "text": "Not enough energy to run the module.", "accent": "bad", "seconds": 8 },
+    { "id": "moduleCancelled", "text": "The scan was cancelled.", "accent": "dim" },
+    { "id": "sectorCharted", "text": "Sector charted. Fields and star are recorded.", "accent": "good", "action": "openChartsWindow" },
+    { "id": "shipBuilt", "text": "New ship built. Edit its blocks, then Apply.", "accent": "info" }
+  ]
+}

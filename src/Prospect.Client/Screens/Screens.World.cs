@@ -502,13 +502,10 @@ internal sealed partial class ScreenHost
         Kit.Fade = previousFade;
     }
 
-    /// <summary>
-    /// The list of the player's hulls at the right edge of the command view. Click a row to select the hull,
-    /// Shift-click to add it, double-click to send the camera to it.
-    /// </summary>
-    private void DrawFleetList(SessionSnapshot snapshot, WorldView world, float alpha)
+    /// <summary>The fleet list's size, and how many hulls it lists; the notices read it too, to sit under it.</summary>
+    private float2 FleetListSize(SessionSnapshot snapshot, out int owned)
     {
-        var owned = 0;
+        owned = 0;
         var rowHeight = Kit.Px(44);
         var statusExtra = Kit.Px(StatusLook.FleetRowExtra);
         var rowsHeight = 0f;
@@ -520,10 +517,26 @@ internal sealed partial class ScreenHost
             rowsHeight += HullStatus.FleetRowHeight(snapshot.Hulls[i].Environment, rowHeight, statusExtra);
         }
 
-        var size = new float2(Kit.Px(300), Kit.Px(54) + rowsHeight);
-        // Under the navigation bar, and under the performance overlay when it is shown.
+        return new float2(Kit.Px(300), Kit.Px(54) + rowsHeight);
+    }
+
+    /// <summary>The fleet list's top left: under the navigation bar, and under the performance overlay when it is shown.</summary>
+    private float2 FleetListMin(float2 size)
+    {
         var top = HudTop + (_app.ShowPerformance ? Kit.Px(PerformanceHeight + Theme.Space2) : 0f);
-        var min = new float2(_ui.DisplaySize.X - size.X - Kit.Px(Theme.Space5), top);
+        return new float2(_ui.DisplaySize.X - size.X - Kit.Px(Theme.Space5), top);
+    }
+
+    /// <summary>
+    /// The list of the player's hulls at the right edge of the command view. Click a row to select the hull,
+    /// Shift-click to add it, double-click to send the camera to it.
+    /// </summary>
+    private void DrawFleetList(SessionSnapshot snapshot, WorldView world, float alpha)
+    {
+        var rowHeight = Kit.Px(44);
+        var statusExtra = Kit.Px(StatusLook.FleetRowExtra);
+        var size = FleetListSize(snapshot, out var owned);
+        var min = FleetListMin(size);
         ImGui.SetNextWindowPos(min);
         ImGui.SetNextWindowSize(size);
         ImGui.Begin("##fleet"u8, RootFlags | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoFocusOnAppearing);
