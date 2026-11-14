@@ -335,13 +335,14 @@ The client opens a real window on the developer's desktop, and they are usually 
 
 Delegate by default. The main model plans, writes the brief, reviews what comes back and integrates it; it does
 not do work a cheaper model can do. Pick the lowest tier that fits the task, never a stronger one "to be safe".
+Be conservative: Sonnet is very capable and is the default; reach for Opus or Fable only when the table says so.
 This adds to the roles in the global instructions (scouting, second opinions); it does not replace them.
 
 | Tier | Model | Effort | Use for |
 | --- | --- | --- | --- |
 | Scout | Pi DeepSeek Flash, else `claude-haiku-5-5` | low | Finding code, reading BRUTAL source for a signature, gathering context. Read-only. |
-| Easy | `claude-sonnet-5-5` | medium (low for one-line changes) | Content JSON and tuning numbers, interface text and layout tweaks, key bindings, README and docs, tests for behaviour that already exists, a contained fix in one file. |
-| Medium to hard | `claude-opus-5-5` | high (medium for the smaller end) | A new screen or HUD element, a gameplay feature that follows an existing pattern (a new order, a map feature, a new block type with its stats), shader effects, multi-file refactors that do not change threading or the wire format. |
+| Default | `claude-sonnet-5-5` | medium; high when the task has safety rules (deleting files, saved worlds) | Most work: content JSON and tuning numbers, interface text and layouts, a new screen, HUD element or menu, a gameplay feature that follows an existing pattern (a new order, a map feature, a new block type with its stats), key bindings, README and docs, tests, contained fixes. |
+| Hard | `claude-opus-5-5` | high | Only what Sonnet cannot do well: shader effects judged by subtle visual quality, large multi-file refactors that do not change threading or the wire format, or a task Sonnet failed twice. |
 | Tough and core | `claude-fable-5-2` | high (xhigh when hard to reverse) | Networking: protocol, prediction, reconciliation, snapshots, interest management. Engine core: threading, the job graph, lock-free hand-off, unmanaged memory. Renderer core: Vulkan resources, frame flow, synchronisation. Simulation determinism. Architecture decisions and anything where a mistake is a desync, a crash or corrupted memory. |
 
 Codex `gpt-6-astra` may take work from any tier that is not graphics or interface, and should when Claude is
