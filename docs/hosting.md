@@ -941,3 +941,18 @@ Content identity evaluator is 10; protocol stays 45 until scan messages are adde
 The resulting `HullStats` equipment is shared by editor decoding and live hull evaluation.
 Module standby power is 0.1 MW per surviving block; active scan draw is a separate rated figure.
 Full figures and integration status: [modules](roadmap/modules.md).
+
+## Phase 2 contract: generated gas composition
+
+`Galaxy.GasComposition.Sample(galaxy, placement, worldPosition)` returns a value-only `GasSample`.
+Its eight `Shares` follow `GasComposition.Names`; they sum to one, independent of `Purity` and `Density` (both 0–1).
+Gas names, kind weights and purity bounds live in shared `galaxy/galaxy.json.gasComposition`.
+Cold mixtures favor water vapour/ammonia; lightning mixtures favor ionised hydrogen/xenon.
+Eight anchor-frame octants have independent seeded mixes and purity. Density follows the smooth sensor envelope.
+An outside point has zero density; the scanner will choose an in-cloud sample point for a nearby scan.
+
+Composition adds generated natural data, so generation is now 7 and protocol 46.
+The frozen galaxy hash includes mixture shares, purity and density: `15907186463901216483` on Linux x64.
+Placement streams, cloud geometry and asteroid ordering are unchanged; the version change is deliberately conservative.
+Old saves are refused by existing compatibility checks, with no migration or write to them.
+Sampling allocates nothing; no generated composition is saved, only future observations.

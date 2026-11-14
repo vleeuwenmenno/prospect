@@ -276,7 +276,7 @@ public sealed class Galaxy
     /// content identity, which a save is held to as well. It is not the network protocol's version, which
     /// changes for reasons a save does not care about.
     /// </summary>
-    public const int GenerationVersion = 6;
+    public const int GenerationVersion = 7;
 
     /// <summary>The most resources the content may define: a sector's resources travel as one bit each.</summary>
     public const int MaxResources = 16;
@@ -337,6 +337,9 @@ public sealed class Galaxy
     public AsteroidFieldsModule? AsteroidFields { get; private set; }
     /// <summary>The optional decorative gas module.</summary>
     public GasCloudModule? GasClouds { get; private set; }
+
+    /// <summary>Seeded local gas mixtures; absent only in legacy test fixtures.</summary>
+    public GasComposition? GasComposition { get; private set; }
 
     /// <summary>The asteroid count at which a sector shows at full strength on the map.</summary>
     public float MapFullSignalAsteroids { get; private set; }
@@ -496,6 +499,7 @@ public sealed class Galaxy
         var galaxy = new Galaxy
         {
             Seed = seed,
+            GasComposition = root.TryGetProperty("gasComposition"u8, out var gases) ? GasComposition.Read(gases) : null,
             SectorSize = sectorSize,
             StarClasses = [.. stars],
             _syllables = [.. syllables],

@@ -145,6 +145,11 @@ public sealed class GalaxyTests
             hash = (hash ^ (ulong)summary.GasCloudCount) * 0x100000001B3;
             foreach (var placement in placements[..listed])
             {
+                var mixture = galaxy.GasComposition!.Sample(galaxy, placement, GasCloudQuery.CenterOf(galaxy, placement));
+                for (var gas = 0; gas < GasComposition.Capacity; gas++)
+                    hash = (hash ^ BitConverter.SingleToUInt32Bits(mixture.Shares[gas])) * 0x100000001B3;
+                hash = (hash ^ BitConverter.SingleToUInt32Bits(mixture.Purity)) * 0x100000001B3;
+                hash = (hash ^ BitConverter.SingleToUInt32Bits(mixture.Density)) * 0x100000001B3;
                 foreach (var value in (ReadOnlySpan<float>)[placement.Anchor.X, placement.Anchor.Y, placement.Anchor.Z, placement.Cloud.Center.X, placement.Cloud.Center.Y,
                     placement.Cloud.Center.Z, placement.Cloud.HalfSize.X, placement.Cloud.HalfSize.Y, placement.Cloud.HalfSize.Z, placement.Cloud.Seed, (float)placement.Cloud.Kind])
                     hash = (hash ^ BitConverter.SingleToUInt32Bits(value)) * 0x100000001B3;
@@ -156,7 +161,7 @@ public sealed class GalaxyTests
         Assert.Equal(RecordedHash, hash);
     }
 
-    private const ulong RecordedHash = 16723476013675883020;
+    private const ulong RecordedHash = 15907186463901216483;
 
     /// <summary>A second module, for the tests only: it draws from its own stream and remembers what came out.</summary>
     private sealed class ProbeModule(string id, int draws) : SectorModule(id)

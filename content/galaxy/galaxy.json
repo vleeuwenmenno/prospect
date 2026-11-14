@@ -1,4 +1,5 @@
 {
+  "gasComposition": {"gases": ["Hydrogen", "Helium", "Methane", "Ammonia", "Neon", "Xenon", "Water vapour", "Ionised hydrogen"], "normal": [65, 20, 5, 2, 2, 1, 4, 1], "cold": [5, 3, 5, 35, 1, 1, 49, 1], "lightning": [8, 5, 1, 1, 10, 15, 1, 59], "purityMin": 0.35, "purityMax": 0.95},
   "sectorSize": 80000,
   "shape": {
     "radiusSectors": 400,
