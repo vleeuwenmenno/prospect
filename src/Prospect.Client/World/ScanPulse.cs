@@ -26,53 +26,50 @@ internal sealed class ScanPulseLook
     /// <summary>How fast the pulse dims over its life: its strength is <c>(1 − t)^fade</c>.</summary>
     public float Fade { get; init; }
 
-    /// <summary>The front's width as a share of its radius, and at least this many metres.</summary>
-    public float FrontShare { get; init; }
+    /// <summary>
+    /// How deep the band behind the front is, in which surfaces show the grid: a share of the front's radius, and at
+    /// least <see cref="BandMinimum"/> metres.
+    /// </summary>
+    public float BandShare { get; init; }
 
-    public float FrontMinimum { get; init; }
+    public float BandMinimum { get; init; }
 
     /// <summary>The pulse's colour, added to the displayed image.</summary>
     public float[] Color { get; init; } = [];
 
-    /// <summary>Light added where a view ray crosses the front face on, before the rim brightens it.</summary>
-    public float ShellLight { get; init; }
-
-    /// <summary>The most the rim, where the front is seen edge on, is brightened over the face.</summary>
-    public float RimLimit { get; init; }
-
-    /// <summary>How many cells the faint lattice on the front has over the whole sphere.</summary>
-    public float PatternCells { get; init; }
-
-    /// <summary>The lattice's line width, as a share of a cell.</summary>
-    public float PatternLine { get; init; }
-
-    /// <summary>How much of the front's light is in the lattice's lines rather than spread over the cells, 0 to 1.</summary>
-    public float PatternLight { get; init; }
-
-    /// <summary>Light added to asteroids and hulls where the front passes over them.</summary>
-    public float SurfaceLight { get; init; }
-
-    /// <summary>How far behind the front a surface keeps a faint glow, as a share of the radius, and how bright.</summary>
-    public float SurfaceTrailShare { get; init; }
-
-    public float SurfaceTrailLight { get; init; }
+    /// <summary>The width of the front's edge and of the grid's lines, in pixels.</summary>
+    public float LineWidth { get; init; }
 
     /// <summary>
-    /// How strongly gas hides the pulse, times the cloud's own extinction over the smooth envelope the sensors
-    /// use; 0 shows the pulse through gas undimmed.
+    /// The grid's finest spacing in metres. Farther away it doubles, so its cells are never under
+    /// <see cref="GridPixels"/> pixels across.
     /// </summary>
+    public float GridMinimum { get; init; }
+
+    public float GridPixels { get; init; }
+
+    /// <summary>Light of the front's edge where it crosses a surface.</summary>
+    public float EdgeLight { get; init; }
+
+    /// <summary>Light of the grid's lines on surfaces in the band behind the front, at its front.</summary>
+    public float GridLight { get; init; }
+
+    /// <summary>Light spread evenly over the band on surfaces, under the grid.</summary>
+    public float FillLight { get; init; }
+
+    /// <summary>
+    /// Light of the grid on the front where it passes through gas, and spread evenly there, both times the gas's
+    /// density on the smooth envelope the sensors use (1 at a cloud's core).
+    /// </summary>
+    public float GasLight { get; init; }
+
+    public float GasFill { get; init; }
+
+    /// <summary>The grid's finest spacing in gas, in metres: coarser than on surfaces, so the fog holds a few clear lines.</summary>
+    public float GasGrid { get; init; }
+
+    /// <summary>How strongly gas in front hides the pulse, times the cloud's own extinction; 0 shows it undimmed.</summary>
     public float GasDimming { get; init; }
-
-    /// <summary>
-    /// The faint pings while a scan runs: one every <see cref="ScanningInterval"/> seconds, each lasting
-    /// <see cref="ScanningSeconds"/> and reaching <see cref="ScanningReach"/> metres, at
-    /// <see cref="ScanningStrength"/> of the completed pulse's light. A strength of 0 leaves them out.
-    /// </summary>
-    public float ScanningInterval { get; init; }
-
-    public float ScanningSeconds { get; init; }
-    public float ScanningReach { get; init; }
-    public float ScanningStrength { get; init; }
 
     public static ScanPulseLook Load() => Load(AppPaths.Content("visuals", "scan.json"));
 
@@ -85,33 +82,32 @@ internal sealed class ScanPulseLook
             throw new InvalidDataException($"{path}: seconds is 0.3 to 10, reach 100 to 100000 m, ease 1 to 6");
         if (!(look.FadeIn >= 0f && look.FadeIn < look.Seconds) || !(look.Fade is >= 0.2f and <= 6f))
             throw new InvalidDataException($"{path}: fadeIn is 0 to under seconds, fade 0.2 to 6");
-        if (!(look.FrontShare is > 0f and <= 0.5f) || !(look.FrontMinimum is > 0f and <= 1000f))
-            throw new InvalidDataException($"{path}: frontShare is above 0 to 0.5, frontMinimum above 0 to 1000 m");
+        if (!(look.BandShare is > 0f and <= 1f) || !(look.BandMinimum is > 0f and <= 5000f))
+            throw new InvalidDataException($"{path}: bandShare is above 0 to 1, bandMinimum above 0 to 5000 m");
         if (look.Color.Length != 3 || !(look.Color[0] is >= 0f and <= 1f) || !(look.Color[1] is >= 0f and <= 1f) || !(look.Color[2] is >= 0f and <= 1f))
             throw new InvalidDataException($"{path}: color is three numbers from 0 to 1");
-        if (!(look.ShellLight is >= 0f and <= 1f) || !(look.RimLimit is >= 1f and <= 50f) || !(look.SurfaceLight is >= 0f and <= 1f)
-            || !(look.SurfaceTrailLight is >= 0f and <= 1f) || !(look.SurfaceTrailShare is > 0f and <= 1f))
-            throw new InvalidDataException($"{path}: lights are 0 to 1, rimLimit 1 to 50, surfaceTrailShare above 0 to 1");
-        if (!(look.PatternCells is >= 12f and <= 20_000f) || !(look.PatternLine is > 0f and <= 1f) || !(look.PatternLight is >= 0f and <= 1f))
-            throw new InvalidDataException($"{path}: patternCells is 12 to 20000, patternLine above 0 to 1, patternLight 0 to 1");
+        if (!(look.LineWidth is >= 0.5f and <= 6f) || !(look.GridMinimum is >= 0.5f and <= 1000f) || !(look.GridPixels is >= 4f and <= 200f))
+            throw new InvalidDataException($"{path}: lineWidth is 0.5 to 6 px, gridMinimum 0.5 to 1000 m, gridPixels 4 to 200");
+        if (!(look.EdgeLight is >= 0f and <= 2f) || !(look.GridLight is >= 0f and <= 2f) || !(look.FillLight is >= 0f and <= 2f)
+            || !(look.GasLight is >= 0f and <= 2f) || !(look.GasFill is >= 0f and <= 2f))
+            throw new InvalidDataException($"{path}: lights are 0 to 2");
+        if (!(look.GasGrid is >= 1f and <= 5000f))
+            throw new InvalidDataException($"{path}: gasGrid is 1 to 5000 m");
         if (!(look.GasDimming is >= 0f and <= 10f))
             throw new InvalidDataException($"{path}: gasDimming is 0 to 10");
-        if (!(look.ScanningInterval is >= 0.3f and <= 10f) || !(look.ScanningSeconds > 0f && look.ScanningSeconds <= look.ScanningInterval)
-            || !(look.ScanningReach is >= 10f and <= 100_000f) || !(look.ScanningStrength is >= 0f and <= 1f))
-            throw new InvalidDataException($"{path}: scanningInterval is 0.3 to 10, scanningSeconds above 0 to the interval, scanningReach 10 to 100000 m, scanningStrength 0 to 1");
         return look;
     }
 }
 
-/// <summary>One frame's shell of the scan pulse: where it starts, how far its front is and how strong it is.</summary>
+/// <summary>One frame's front of the scan pulse: where it starts, how far it is and how strong it is.</summary>
 internal readonly record struct ScanShell(Double3 Origin, float Radius, float Strength);
 
 /// <summary>
 /// When the scan pulse shows. A pulse starts when the snapshot's scan goes from running to completed, once for each
 /// completed scan, at the place the ship being flown is at that moment, and stays there while it spreads. A
 /// cancelled or refused scan starts none, and neither does a completed scan this client never saw running (one
-/// already over when the session was joined). While a scan runs, fainter pings follow the ship. Font-free and
-/// allocation-free; <see cref="WorldView"/> drives it from its update.
+/// already over when the session was joined). Nothing shows while a scan runs. Font-free and allocation-free;
+/// <see cref="WorldView"/> drives it from its update.
 /// </summary>
 internal sealed class ScanPulse
 {
@@ -120,7 +116,6 @@ internal sealed class ScanPulse
     private readonly ScanPulseLook _look;
     private long _running = None;
     private long _pulsed = None;
-    private float _scanning = -1f;
 
     public ScanPulse(ScanPulseLook look) => _look = look;
 
@@ -140,7 +135,6 @@ internal sealed class ScanPulse
     public void Reset()
     {
         _running = _pulsed = None;
-        _scanning = -1f;
         Active = false;
         Age = 0f;
         Started = 0;
@@ -161,16 +155,10 @@ internal sealed class ScanPulse
 
         if (scan.State == ScanState.Scanning)
         {
-            // A new scan (a different start) begins its pings again.
-            if (_running != scan.StartedTick)
-                _scanning = 0f;
-            else
-                _scanning += dt;
             _running = scan.StartedTick;
             return;
         }
 
-        _scanning = -1f;
         if (scan.State == ScanState.Completed && _running == scan.StartedTick && _pulsed != scan.StartedTick)
         {
             _pulsed = scan.StartedTick;
@@ -183,44 +171,23 @@ internal sealed class ScanPulse
         _running = None;
     }
 
-    /// <summary>
-    /// The shell to draw this frame, if any: the completed scan's pulse, else a ping of a running scan around
-    /// <paramref name="own"/>.
-    /// </summary>
-    public bool Shell(Double3 own, out ScanShell shell)
+    /// <summary>The pulse's front this frame, if one shows.</summary>
+    public bool Shell(out ScanShell shell)
     {
-        if (Active)
+        if (!Active)
         {
-            var t = Math.Clamp(Age / _look.Seconds, 0f, 1f);
-            shell = new ScanShell(Origin, Radius(t, _look.Reach), Strength(Age, t, 1f));
-            return shell.Strength > 0f;
+            shell = default;
+            return false;
         }
 
-        if (_scanning >= 0f && _look.ScanningStrength > 0f)
-        {
-            var age = _scanning % _look.ScanningInterval;
-            if (age < _look.ScanningSeconds)
-            {
-                var t = age / _look.ScanningSeconds;
-                shell = new ScanShell(own, Radius(t, _look.ScanningReach), Strength(age, t, _look.ScanningStrength));
-                return shell.Strength > 0f;
-            }
-        }
-
-        shell = default;
-        return false;
+        var t = Math.Clamp(Age / _look.Seconds, 0f, 1f);
+        var rise = _look.FadeIn > 0f ? Math.Clamp(Age / _look.FadeIn, 0f, 1f) : 1f;
+        shell = new ScanShell(Origin, _look.Reach * (1f - MathF.Pow(1f - t, _look.Ease)), rise * MathF.Pow(1f - t, _look.Fade));
+        return shell.Strength > 0f;
     }
 
-    private float Radius(float t, float reach) => reach * (1f - MathF.Pow(1f - t, _look.Ease));
-
-    private float Strength(float age, float t, float scale)
-    {
-        var rise = _look.FadeIn > 0f ? Math.Clamp(age / _look.FadeIn, 0f, 1f) : 1f;
-        return scale * rise * MathF.Pow(1f - t, _look.Fade);
-    }
-
-    /// <summary>The front's width in metres at <paramref name="radius"/>.</summary>
-    public float FrontWidth(float radius) => MathF.Max(_look.FrontMinimum, radius * _look.FrontShare);
+    /// <summary>How deep the band behind the front is, in metres, at <paramref name="radius"/>.</summary>
+    public float Band(float radius) => MathF.Max(_look.BandMinimum, radius * _look.BandShare);
 }
 
 /// <summary>The scan pulse pass's push constants. Matches <c>scan_pulse.frag</c>.</summary>
@@ -229,18 +196,21 @@ internal struct ScanPulseConstants
     /// <summary>The pulse's origin relative to the camera, and its front's radius in metres.</summary>
     public float4 Shell;
 
-    /// <summary>The front's width in metres, the pulse's strength from 0 to 1, how far behind the front surfaces keep a glow, and how many lattice cells the sphere has.</summary>
-    public float4 Shape;
+    /// <summary>The band's depth in metres, the pulse's strength from 0 to 1, the grid's finest spacing in metres and its smallest cell in pixels.</summary>
+    public float4 Band;
 
-    /// <summary>The colour, and the light where a view ray crosses the front face on.</summary>
+    /// <summary>The colour, and the line width in pixels.</summary>
     public float4 Color;
 
-    /// <summary>The light of the front on surfaces, of the glow behind it, how much is in the lattice's lines, and the rim's limit.</summary>
+    /// <summary>The light of the front's edge, of the grid in the band, of the band's even fill, and of the grid in gas.</summary>
     public float4 Light;
 
-    /// <summary>The nearest cloud's centre relative to the camera, and its extinction times the dimming; 0 for none.</summary>
+    /// <summary>The nearest cloud's centre relative to the camera, and its extinction times the dimming.</summary>
     public float4 Cloud;
 
-    /// <summary>One over the radii of that cloud's smooth envelope, and the lattice's line width as a share of a cell.</summary>
+    /// <summary>One over the radii of that cloud's smooth envelope, zero for no cloud.</summary>
     public float4 CloudRadii;
+
+    /// <summary>The grid's spacing in gas in metres, and the even light in gas.</summary>
+    public float4 Gas;
 }

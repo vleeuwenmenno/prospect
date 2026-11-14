@@ -1137,13 +1137,14 @@ internal sealed class WorldView
 
     /// <summary>
     /// Queues this frame's scan pulse, if one shows. Not inside the pilot's own jump, whose tunnel it would sit over
-    /// unbent. Gas dims it through the smooth envelope of the cloud nearest the camera; clouds never overlap, so
-    /// that is the one the camera is in whenever it is in one.
+    /// unbent. The pulse lights the gas of one cloud, through the smooth envelope the sensors use, and is dimmed by
+    /// it: the cloud nearest the pulse's origin or the camera. Clouds never overlap, so that is the one either is in
+    /// whenever it is in one.
     /// </summary>
     private void QueueScanPulse(Galaxy galaxy, Double3 camera)
     {
         PulseShown = default;
-        if ((_jumpStage > 0f && _ownInside) || !_scanPulse.Shell(OwnPosition, out var shell))
+        if ((_jumpStage > 0f && _ownInside) || !_scanPulse.Shell(out var shell))
             return;
         PulseShown = shell;
         var origin = shell.Origin.RelativeTo(camera);
@@ -1151,24 +1152,25 @@ internal sealed class WorldView
         var pulse = new ScanPulseConstants
         {
             Shell = new float4(origin.X, origin.Y, origin.Z, shell.Radius),
-            Shape = new float4(_scanPulse.FrontWidth(shell.Radius), shell.Strength, MathF.Max(shell.Radius * look.SurfaceTrailShare, 1f), look.PatternCells),
-            Color = new float4(look.Color[0], look.Color[1], look.Color[2], look.ShellLight),
-            Light = new float4(look.SurfaceLight, look.SurfaceTrailLight, look.PatternLight, look.RimLimit),
-            CloudRadii = new float4(0, 0, 0, look.PatternLine),
+            Band = new float4(_scanPulse.Band(shell.Radius), shell.Strength, look.GridMinimum, look.GridPixels),
+            Color = new float4(look.Color[0], look.Color[1], look.Color[2], look.LineWidth),
+            Light = new float4(look.EdgeLight, look.GridLight, look.FillLight, look.GasLight),
+            Gas = new float4(look.GasGrid, look.GasFill, 0, 0),
         };
-        if (look.GasDimming > 0f && galaxy.GasClouds is { } gas && GasView is not ("absent" or "inside-absent" or "pilot-absent"))
+        if (galaxy.GasClouds is { } gas && GasView is not ("absent" or "inside-absent" or "pilot-absent"))
         {
             var best = float.MaxValue;
             foreach (ref readonly var placed in _gasField.Clouds(galaxy))
             {
                 var envelope = placed.Cloud.HalfSize * gas.Shape.X;
                 var center = GasCloudQuery.CenterOf(galaxy, placed).RelativeTo(camera);
-                var outside = center.Length() - MathF.Max(envelope.X, MathF.Max(envelope.Y, envelope.Z));
+                var largest = MathF.Max(envelope.X, MathF.Max(envelope.Y, envelope.Z));
+                var outside = MathF.Min(center.Length(), Vector3.Distance(center, origin)) - largest;
                 if (outside >= best || envelope.X <= 0f || envelope.Y <= 0f || envelope.Z <= 0f)
                     continue;
                 best = outside;
                 pulse.Cloud = new float4(center.X, center.Y, center.Z, gas.ExtinctionOf(placed.Cloud, (float)galaxy.SectorSize) * look.GasDimming);
-                pulse.CloudRadii = new float4(1f / envelope.X, 1f / envelope.Y, 1f / envelope.Z, look.PatternLine);
+                pulse.CloudRadii = new float4(1f / envelope.X, 1f / envelope.Y, 1f / envelope.Z, 0);
             }
         }
         _scene.QueuePulse(pulse);

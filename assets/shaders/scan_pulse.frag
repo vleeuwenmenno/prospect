@@ -1,9 +1,10 @@
 #version 450
-// The scan pulse: a thin spherical front that spreads from where the scanning ship was, added to the displayed image
-// after tone mapping. Its own pass, drawn only while a pulse shows, over the finished scene and under the interface:
-// gas, shields and jump openings are composed before it and are not changed by it. It reads the scene's depth to
-// stop at what is solid and to light the asteroids and hulls the front passes over. Gas dims it through the smooth
-// envelope of the nearest cloud, the one the sensors use (hosting.md), not the visible noise.
+// The scan pulse: a front that spreads from where the scanning ship was, and shows only where it touches something.
+// Asteroids and hulls get a crisp edge where the front crosses them and a grid in a band behind it; gas lights up
+// with the same grid where the front passes through it. Empty space shows nothing. Added to the displayed image
+// after tone mapping, in its own pass, drawn only while a pulse shows: gas, shields and jump openings are composed
+// before it and are not changed by it. Gas is the smooth envelope of one cloud, the one the sensors use (hosting.md),
+// not the visible noise: it lights the front inside the cloud and dims what lies behind gas.
 #include "frame.glsl"
 
 // Set 1 is the tone mapper's; of it only the scene's depth is read. Reverse depth: 0 is the sky.
@@ -13,68 +14,57 @@ layout(set = 1, binding = 3) uniform sampler2D sceneDepth;
 layout(push_constant) uniform Pulse
 {
     vec4 shell;      // xyz: origin relative to the camera; w: the front's radius in metres
-    vec4 shape;      // x: front width in metres; y: strength 0..1; z: surface glow length behind the front; w: lattice cells
-    vec4 color;      // rgb: colour; w: light where a ray crosses the front face on
-    vec4 light;      // x: front light on surfaces; y: glow behind it; z: share of the light in the lattice's lines; w: rim limit
-    vec4 cloud;      // xyz: nearest cloud's centre relative to the camera; w: extinction per metre times dimming, 0 none
-    vec4 cloudRadii; // xyz: one over the envelope's radii; w: lattice line width as a share of a cell
+    vec4 band;       // x: band depth behind the front in metres; y: strength 0..1; z: finest grid spacing in metres;
+                     // w: smallest grid cell in pixels
+    vec4 color;      // rgb: colour; w: line width in pixels
+    vec4 light;      // x: front edge on surfaces; y: grid in the band; z: even band fill; w: grid in gas
+    vec4 cloud;      // xyz: the cloud's centre relative to the camera; w: extinction per metre times dimming
+    vec4 cloudRadii; // xyz: one over its envelope's radii, zero for no cloud; w: unused
+    vec4 gas;        // x: the grid's spacing in gas in metres; y: even light in gas
 } pulse;
 
 layout(location = 0) in vec2 ndc;
 layout(location = 0) out vec4 outColor;
 
-const float Tau = 6.28318530718;
-const float GoldenRatio = 1.61803398875;
 const float Sky = 1e30;
 
-// The nearest and the second nearest of a spherical Fibonacci lattice of `cells` points to the unit direction p, as
-// chord lengths (Keinert et al. 2015, "Spherical Fibonacci Mapping"). The lattice's cells are close to hexagons, with
-// no seam or pole, so their edges, where the two are equal, draw a faint even net over the front.
-vec2 latticeDistances(vec3 p, float cells)
+// A thin line where the field f crosses a whole number, `pixels` wide whatever the distance.
+float lineAt(float distance, float perPixel)
 {
-    float k = max(2.0, floor(log2(cells * Tau * 0.5 * sqrt(5.0) * (1.0 - p.z * p.z)) / log2(GoldenRatio + 1.0)));
-    float fk = pow(GoldenRatio, k) / sqrt(5.0);
-    vec2 f = vec2(round(fk), round(fk * GoldenRatio));
-    vec2 ka = 2.0 * f / cells;
-    vec2 kb = Tau * (fract((f + 1.0) * GoldenRatio) - (GoldenRatio - 1.0));
-    mat2 inverseBasis = mat2(ka.y, -ka.x, kb.y, -kb.x) / (ka.y * kb.x - ka.x * kb.y);
-    vec2 corner = floor(inverseBasis * vec2(atan(p.y, p.x), p.z - 1.0 + 1.0 / cells));
-    float nearest = 8.0;
-    float second = 8.0;
-    for (int s = 0; s < 4; s++)
+    float half_ = 0.5 * pulse.color.w * perPixel;
+    return 1.0 - smoothstep(half_, half_ + perPixel, distance);
+}
+
+// The grid of planes a spacing apart along each world axis, anchored at the pulse's origin, at p (metres from the
+// origin) whose change across a pixel is `step`. Where a cell would be under the smallest size on screen the spacing
+// doubles, the finer lines fading out as it does, so the grid stays crisp near and far. The planes lie half the
+// finest spacing off the origin, so none runs through the scanning ship (where it would sit on the view's centre
+// like a crosshair); coarser planes stay among the finer ones.
+float grid(vec3 p, vec3 step, float finest)
+{
+    float metres = max(length(step) * 0.7071 * pulse.band.w, 1e-4);
+    float level = max(log2(metres / finest), 0.0);
+    float coarse = floor(level);
+    float share = level - coarse;
+    float spacing = finest * exp2(coarse);
+    float lines = 0.0;
+    for (int k = 0; k < 2; k++)
     {
-        float id = clamp(dot(f, vec2(s & 1, s >> 1) + corner), 0.0, cells - 1.0);
-        float phi = Tau * fract(id * GoldenRatio);
-        float cosTheta = 1.0 - (2.0 * id + 1.0) / cells;
-        float sinTheta = sqrt(max(1.0 - cosTheta * cosTheta, 0.0));
-        vec3 q = vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
-        float d = dot(q - p, q - p);
-        if (d < nearest) { second = nearest; nearest = d; }
-        else if (d < second) second = d;
+        float s = spacing * float(1 + k);
+        vec3 u = (p + 0.5 * finest) / s;
+        vec3 d = abs(fract(u - 0.5) - 0.5);
+        vec3 w = step / s;
+        float l = max(lineAt(d.x, w.x), max(lineAt(d.y, w.y), lineAt(d.z, w.z)));
+        lines = max(lines, k == 0 ? l * (1.0 - share) : l);
     }
-    return sqrt(vec2(nearest, second));
+    return lines;
 }
 
-// How much of the front's light falls on the net at the unit direction p from the origin: 1 on a line, the rest of
-// the light spread evenly over the cells. Fades to even where the net would be finer than the pixels can show.
-float lattice(vec3 p)
-{
-    vec2 d = latticeDistances(p, pulse.shape.w);
-    float edge = d.y - d.x;
-    float cell = 3.5449 / sqrt(pulse.shape.w); // sqrt(4 pi / cells): a cell's width as a chord
-    float width = cell * pulse.cloudRadii.w;
-    float blur = fwidth(edge);
-    float line = 1.0 - smoothstep(width, width + 1.5 * blur, edge);
-    float shown = clamp(1.0 - blur / (cell * 0.35), 0.0, 1.0);
-    float share = pulse.light.z * shown;
-    return mix(1.0, line * 2.2, share);
-}
-
-// The share of light that comes through the nearest cloud's smooth envelope from the camera to t metres along v:
+// The share of light that comes through the cloud's smooth envelope from the camera to t metres along v:
 // extinction times max(0, 1 - ellipsoid radius squared), integrated exactly.
 float throughGas(vec3 v, float t)
 {
-    if (pulse.cloud.w <= 0.0) return 1.0;
+    if (pulse.cloud.w <= 0.0 || pulse.cloudRadii.x <= 0.0) return 1.0;
     vec3 a = -pulse.cloud.xyz * pulse.cloudRadii.xyz;
     vec3 b = v * pulse.cloudRadii.xyz;
     float qa = dot(b, b);
@@ -90,16 +80,23 @@ float throughGas(vec3 v, float t)
     return exp(-pulse.cloud.w * max(depth, 0.0));
 }
 
-// The light of the front where the ray v crosses it t metres out: brighter where it is seen edge on, as a thin
-// glowing shell is, up to the rim limit, and laid out over the net.
-float crossing(vec3 v, float t, float scene)
+// The envelope's density at x relative to the camera: 1 at the core, 0 at its edge and beyond.
+float gasAt(vec3 x)
 {
-    vec3 out_ = v * t - pulse.shell.xyz;
-    vec3 normal = out_ / max(pulse.shell.w, 1e-3);
-    float facing = abs(dot(v, normal));
-    float rim = min(1.0 / max(facing, 1e-3), pulse.light.w);
-    float net = lattice(normalize(out_));
-    return t > 0.0 && t < scene ? rim * net * throughGas(v, t) : 0.0;
+    if (pulse.cloudRadii.x <= 0.0) return 0.0;
+    vec3 q = (x - pulse.cloud.xyz) * pulse.cloudRadii.xyz;
+    return max(1.0 - dot(q, q), 0.0);
+}
+
+// The front where the ray v crosses it t metres out, in gas: a coarser grid on the front, whose planes cut the
+// sphere in circles like lines of latitude and longitude, and a faint even glow, both by density.
+// Computed for every pixel and dropped after, so the grid's derivatives stay in uniform control flow.
+float gasCrossing(vec3 v, float t, bool crosses, float scene)
+{
+    vec3 x = v * t;
+    vec3 p = x - pulse.shell.xyz;
+    float lit = (pulse.light.w * grid(p, fwidth(p), pulse.gas.x) + pulse.gas.y) * gasAt(x);
+    return crosses && t > 0.0 && t < scene ? lit * throughGas(v, t) : 0.0;
 }
 
 void main()
@@ -107,31 +104,29 @@ void main()
     vec3 v = normalize(frame.cameraForward.xyz + frame.cameraRight.xyz * ndc.x * frame.lens.x * frame.lens.y - frame.cameraUp.xyz * ndc.y * frame.lens.x);
     float z = texelFetch(sceneDepth, ivec2(gl_FragCoord.xy), 0).r;
     float scene = z > 0.0 ? frame.viewProjection[3][2] / z / dot(v, frame.cameraForward.xyz) : Sky;
-
-    vec3 c = pulse.shell.xyz;
     float radius = pulse.shell.w;
-    float width = pulse.shape.x;
 
-    // Where the ray crosses the front's sphere; just outside it, a ray that misses still catches the rim's edge,
-    // softly, so the outline is never a hard step.
+    // Asteroids and hulls: a crisp edge where the front crosses them, and behind it a band that shows the grid,
+    // brightest at the front and gone at the band's depth.
+    // A pixel across an outline, where neighbours lie at very different depths, takes none: its derivatives are
+    // not the surface's, and would light the whole outline.
+    vec3 p = v * min(scene, 1e7) - pulse.shell.xyz;
+    vec3 change = fwidth(p);
+    float r = length(p);
+    float pixel = 2.0 * frame.lens.x / frame.lens.w;
+    bool outline = length(change) > 24.0 * pixel * min(scene, 1e7);
+    float edge = lineAt(abs(r - radius), fwidth(r));
+    float behind = (radius - r) / pulse.band.x;
+    float fade = behind >= 0.0 && behind <= 1.0 ? 1.0 - behind : 0.0;
+    float surface = (pulse.light.x * edge + (pulse.light.y * grid(p, change, pulse.band.z) + pulse.light.z) * fade) * throughGas(v, scene);
+    float light = scene < Sky && !outline ? surface : 0.0;
+
+    // Gas: where the front passes through the cloud, nearer than anything solid.
+    vec3 c = pulse.shell.xyz;
     float along = dot(v, c);
-    float closest2 = max(dot(c, c) - along * along, 0.0);
-    float h = radius * radius - closest2;
+    float h = radius * radius - max(dot(c, c) - along * along, 0.0);
     float root = sqrt(max(h, 0.0));
-    float front = crossing(v, along - root, scene) + crossing(v, along + root, scene);
-    float miss = sqrt(closest2) - radius;
-    float edge = h < 0.0 && along > 0.0 && along < scene ? pulse.light.w * exp(-miss * miss / (0.25 * width * width)) * throughGas(v, along) : 0.0;
-    float shellLight = pulse.color.w * (h >= 0.0 ? front : edge);
+    light += gasCrossing(v, along - root, h > 0.0, scene) + gasCrossing(v, along + root, h > 0.0, scene);
 
-    // Asteroids and hulls: a band where the front passes over them, laid out over the net, and a faint glow behind.
-    // Worked out for the sky too and then dropped, so the net's derivatives stay in uniform control flow.
-    vec3 at = v * min(scene, 1e7) - c;
-    float r = length(at);
-    float off = (r - radius) / width;
-    float band = exp(-off * off);
-    float behind = r < radius ? exp(-(radius - r) / max(pulse.shape.z, 1e-3)) : 0.0;
-    float surface = (pulse.light.x * band * lattice(at / max(r, 1e-3)) + pulse.light.y * behind) * throughGas(v, scene);
-    float surfaceLight = scene < Sky ? surface : 0.0;
-
-    outColor = vec4(pulse.color.rgb * (shellLight + surfaceLight) * pulse.shape.y, 0.0);
+    outColor = vec4(pulse.color.rgb * light * pulse.band.y, 0.0);
 }

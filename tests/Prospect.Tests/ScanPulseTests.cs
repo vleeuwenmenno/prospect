@@ -37,11 +37,11 @@ public sealed class ScanPulseTests
 
         // The pulse stays where the scan completed while the ship flies on, and its front grows. It comes up from
         // nothing over its fade-in, so its first frame shows nothing.
-        Assert.False(pulse.Shell(new Double3(5000, 0, 0), out _));
+        Assert.False(pulse.Shell(out _));
         pulse.Observe(Scan(ScanState.Completed), new Double3(5000, 0, 0), Frame);
-        Assert.True(pulse.Shell(new Double3(5000, 0, 0), out var first));
+        Assert.True(pulse.Shell(out var first));
         for (var i = 0; i < 30; i++) pulse.Observe(Scan(ScanState.Completed), new Double3(5000, 0, 0), Frame);
-        Assert.True(pulse.Shell(new Double3(5000, 0, 0), out var later));
+        Assert.True(pulse.Shell(out var later));
         Assert.Equal(moved, later.Origin);
         Assert.True(later.Radius > first.Radius);
         Assert.True(later.Radius <= Look.Reach);
@@ -57,7 +57,7 @@ public sealed class ScanPulseTests
             pulse.Observe(Scan(ScanState.Completed), Here, Frame);
         Assert.Equal(1, pulse.Started);
         Assert.False(pulse.Active);
-        Assert.False(pulse.Shell(Here, out _));
+        Assert.False(pulse.Shell(out _));
     }
 
     [Fact]
@@ -126,18 +126,13 @@ public sealed class ScanPulseTests
     }
 
     [Fact]
-    public void ARunningScanPingsFaintlyAroundTheShip()
+    public void NothingShowsWhileAScanRuns()
     {
         var pulse = new ScanPulse(Look);
-        pulse.Observe(Scan(ScanState.Scanning), Here, Frame);
-        pulse.Observe(Scan(ScanState.Scanning), Here, Frame);
-        var ship = new Double3(42, 0, 0);
-        Assert.Equal(Look.ScanningStrength > 0, pulse.Shell(ship, out var ping));
-        if (Look.ScanningStrength > 0)
+        for (var i = 0; i < 400; i++)
         {
-            Assert.Equal(ship, ping.Origin);
-            Assert.True(ping.Strength <= Look.ScanningStrength);
-            Assert.True(ping.Radius <= Look.ScanningReach);
+            pulse.Observe(Scan(ScanState.Scanning), Here, Frame);
+            Assert.False(pulse.Shell(out _));
         }
     }
 
@@ -148,7 +143,7 @@ public sealed class ScanPulseTests
         var scanning = Scan(ScanState.Scanning);
         var completed = Scan(ScanState.Completed);
         pulse.Observe(scanning, Here, Frame);
-        pulse.Shell(Here, out _);
+        pulse.Shell(out _);
         var probe = new AllocationProbe();
         for (var i = 0; i < 200; i++)
         {
@@ -156,7 +151,7 @@ public sealed class ScanPulseTests
             while (probe.Measuring())
             {
                 pulse.Observe(scan, Here, Frame);
-                pulse.Shell(Here, out _);
+                pulse.Shell(out _);
             }
         }
 
@@ -173,7 +168,7 @@ public sealed class ScanPulseTests
             var text = File.ReadAllText(AppPaths.Content("visuals", "scan.json"));
             File.WriteAllText(path, text.Replace("\"seconds\": 2.6", "\"seconds\": 40"));
             Assert.Throws<InvalidDataException>(() => ScanPulseLook.Load(path));
-            File.WriteAllText(path, text.Replace("\"scanningSeconds\": 1.3", "\"scanningSeconds\": 9"));
+            File.WriteAllText(path, text.Replace("\"lineWidth\": 1.2", "\"lineWidth\": 0"));
             Assert.Throws<InvalidDataException>(() => ScanPulseLook.Load(path));
         }
         finally

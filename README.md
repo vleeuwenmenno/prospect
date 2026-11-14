@@ -307,10 +307,11 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   under the top of the flight and command views shows its bar, then "SCAN CANCELLED" or the result, then
   "NEXT SCAN IN n S", and only while you fly that ship, also after you leave the map. The server keeps a 10 s cooldown
   on the sector after a scan ends, completed or cancelled (a request in it is refused); the key and the button wait
-  it out and say how long is left. Resting the cursor on the readout or the button names the key. In an uncharted sector, a tip names the key. A completed scan sends a
-  muted blue pulse out from where your ship was: a thin front with a faint hex net that spreads to sensor range in
-  about 2.6 s and lights the asteroids and hulls it passes, dimmed by gas. Faint short pings show while a scan runs.
-  Only you see it, in the flight and command views (`content/visuals/scan.json`). The command view shows the gas-shaped
+  it out and say how long is left. Resting the cursor on the readout or the button names the key. In an uncharted sector, a tip names the key. A completed scan sends one
+  blue pulse out from where your ship was, to sensor range in about 2.6 s. It shows only where it touches something:
+  asteroids and hulls get a crisp edge and a grid as the front passes over them, and gas lights up with a coarser
+  globe-like grid where the front passes through it. Empty space shows nothing. Only you see it, in the flight and
+  command views (`content/visuals/scan.json`). The command view shows the gas-shaped
   sensor boundary of the selected ships (the flown one when none is selected), darkens space beyond it, and merges ships
   within 10 km of each other into one outline; lost contacts show at their last position.
 - **Renderer.** Floating-point scene target and tone mapping, camera-relative rendering from double-precision
