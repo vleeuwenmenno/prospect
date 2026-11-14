@@ -248,6 +248,8 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public NavigationView Navigation, SentNavigation;
         public bool NavigationSent;
         public ScanView Scan;
+        public ModuleScanView ModuleScan;
+        public ModuleEquipment ModuleEquipment;
         public int ChartCursor;
         public ScanView SentScan;
         public bool ExplorationSent;
@@ -284,6 +286,8 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             Navigation = SentNavigation = default;
             NavigationSent = false;
             Scan = default;
+            ModuleScan = default;
+            ModuleEquipment = default;
             ChartCursor = 0;
             SentScan = default;
             ExplorationSent = false;
@@ -534,6 +538,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 _connections[i].Reset();
             }
 
+            InitializeModules(world is null ? _maxPlayers : _saveLimits.MaxOwners);
             _loop = new TickLoop("Server", TickLoop.SimulationHz, this);
 
             // Last, so that everything above can still refuse the world: the worker owns the store from here.
@@ -549,6 +554,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         {
             if (_passwordKey is not null)
                 CryptographicOperations.ZeroMemory(_passwordKey);
+            _moduleWorker?.Dispose();
             try { listener?.Dispose(); }
             finally
             {
@@ -616,6 +622,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         _loop.Stop();
         StopLocalClaim();
         StopEditor();
+        _moduleWorker?.Dispose();
         StopSaving();
         // Clear secrets before any external cleanup can throw.
         if (_passwordKey is not null)
@@ -827,6 +834,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             _impulses.Count = 0;
         }
 
+        TickModules(tick);
         foreach (var connection in _connections)
         {
             if (connection.State == ConnectionState.Active)

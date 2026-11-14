@@ -956,3 +956,31 @@ The frozen galaxy hash includes mixture shares, purity and density: `15907186463
 Placement streams, cloud geometry and asteroid ordering are unchanged; the version change is deliberately conservative.
 Old saves are refused by existing compatibility checks, with no migration or write to them.
 Sampling allocates nothing; no generated composition is saved, only future observations.
+
+## Phase 3 contract: authoritative execution
+
+The server supports gas scan, targeted asteroid scan and locator preparation/execution.
+Generation runs on one dedicated worker with a preallocated mailbox per connection; the tick never generates survey sectors.
+`Preparing` has no progress timer or active draw. Once prepared, `Scanning` lasts the equipment's rounded-up tick duration.
+Each active interval consumes the module's additional MW / 60 from stored energy after ordinary flight/shield spending.
+Generators replenish that pool through ordinary simulation; no battery/energy means `NoPower`.
+Jumping, control change or loss/change of the selected module cancels a running operation.
+
+All families share an owner cooldown. Completion, cancellation, target/range failure after preparation and power failure start it.
+Pre-dispatch refusals do not change cooldown. Repeating a running request keeps progress and reports `Busy` separately.
+States/refusals: Idle, Preparing, Scanning, Completed, Cancelled, NoEquipment, NoPower, OutOfRange, Cooldown,
+InvalidTarget, Busy, KnowledgeLimit, Unavailable.
+
+Gas targets identify a cloud anchor; the sample is at the starting hull position or the nearest radial point at 95% of its smooth envelope.
+Range is checked against that fixed sample every tick. Asteroid range uses its current displaced surface, including at completion.
+The locator's sphere stays at its starting origin. Maximum supported range is one applied sector width; preparation visits at most 27 sectors.
+Locator output is bounded to 256 candidates; `Partial` explicitly reports truncation or moved-rock candidate incompleteness.
+Moved candidates are filtered against the sphere again before publication; no current out-of-range position is disclosed.
+
+Owner knowledge has 1024 slots, keyed by family + sector + index. Gas index is octant; asteroid index is generated identity.
+Capacity refuses an entire completion before growth, without evicting older knowledge.
+`RecordedTick` is observation age. `ContentRevision` is zero until mining implements revision/invalidation.
+Asteroids currently have one resource and grade: the resource-bearing host material has share one; grade is ore fraction.
+Bare rock has resource -1. Ice is the existing ice resource. Locator reveals only the dominant resource and sampled position.
+Common percentage detail is 5 percentage points, improving with content accuracy; unreported gas share remains unresolved, not renormalized.
+No client intent/publication contract is available until phase 4; persistence follows in phase 5.
