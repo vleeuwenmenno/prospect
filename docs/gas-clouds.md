@@ -297,11 +297,15 @@ What it costs, Release, RTX 5070 Ti, 5096x1390, median of three 6 s benchmarks r
 - A first run after a build can read far lower (High 46 fps once); repeat before believing a number.
 - Low also speeds up cold clouds and pairs (133 and 65 fps against 94 and 46) through the step count alone.
 
+Decided:
+
+- Medium is the default: the sharper full-resolution look is not worth its frame rate for most players.
+- High and Ultra are offered as they are, at any window size. A player who wants the sharper gas chooses it.
+
 Open:
 
 - Quarter resolution has not been reviewed in motion; grain at 4 px may shimmer more than at 2 px.
 - The Low noise fade shows as slightly softer gas at a distance in stills; whether that reads well in flight is not judged.
-- High and Ultra miss 144 fps at this window size. Whether they should be offered as is, or limited by window size, is not decided.
 
 ## Budgets and limits
 
