@@ -166,7 +166,7 @@ internal sealed partial class ScreenHost
         var height = Kit.Px(HudLayout.ChipHeight);
         var left = layout.LeftX;
         var top = layout.Top - Kit.Px(Theme.Space2) - height;
-        var room = _jumpPrompt != JumpPrompt.None ? HudLayout.Strip(_ui.DisplaySize, Kit.Scale).Left - Kit.Px(HudLayout.Gap) - left : _ui.DisplaySize.X - left;
+        var room = _ui.DisplaySize.X - left;
         var wording = StatusLineWidth(environment) + pad * 2;
         var wordsFit = wording <= room;
         var inner = wordsFit ? wording : HullStatus.IconsWidth(environment, Kit.Px(look.IconSize), Kit.Px(look.IconGap)) + pad * 2;

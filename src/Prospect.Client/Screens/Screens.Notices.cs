@@ -73,6 +73,11 @@ internal sealed partial class ScreenHost
         }
 
         var right = display.X - Kit.Px(Theme.Space5);
+        // The jump strip owns the top centre (last frame's place; the stack is planned before this frame's is). A
+        // stack that would reach under it, on a narrow window, starts below it.
+        if (_jumpPrompt != JumpPrompt.None && !_mapOpen && world.CommandBlend < 0.5f && !world.Editor.Shown
+            && right - NoticePanel.Width(_notices.Catalogue, right) < _jumpStrip.Right + Kit.Px(Theme.Space2))
+            top = Math.Max(top, _jumpStrip.Bottom + Kit.Px(Theme.Space2));
         if (world.Editor.Shown)
         {
             // The editor's details panel takes the right edge; the stack stays left of it.

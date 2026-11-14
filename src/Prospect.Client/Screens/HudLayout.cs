@@ -19,7 +19,7 @@ internal readonly record struct HudRect(float Left, float Top, float Right, floa
     public bool Overlaps(in HudRect other) => Spans(other.Left, other.Right) && Top < other.Bottom && Bottom > other.Top;
 }
 
-/// <summary>What the jump strip above the pilot console says, from the most to the least urgent.</summary>
+/// <summary>What the jump strip at the top centre says, from the most to the least urgent.</summary>
 internal enum JumpPrompt : byte
 {
     /// <summary>Nothing to say: the strip is not drawn and reserves no room.</summary>
@@ -55,7 +55,7 @@ internal enum JumpPrompt : byte
 
 /// <summary>
 /// Where the heads-up display's pieces sit, apart from drawing so tests can check them without fonts: the left
-/// column (sector panel, party, chat), the jump strip above the pilot console and the NAV card beside its marker.
+/// column (sector panel, party, chat), the jump strip at the top centre and the NAV card beside its marker.
 /// Every piece takes its clearances from here, so none can grow into another. Sizes are in unscaled pixels.
 /// </summary>
 internal static class HudLayout
@@ -94,9 +94,8 @@ internal static class HudLayout
     /// <summary>How far a cue's label sits from the cue's point, to the label's middle.</summary>
     public const float CueLabel = 34f;
 
-    /// <summary>The jump strip: its height, the gap under it and its widest.</summary>
+    /// <summary>The jump strip: its height and its widest. The gap above it is content (<c>jumpStripGap</c> in map.json).</summary>
     public const float StripHeight = 40f;
-    public const float StripGap = 8f;
     public const float StripMax = 480f;
 
     /// <summary>How far each pointed end of the strip and the NAV card reaches in.</summary>
@@ -131,27 +130,23 @@ internal static class HudLayout
     /// <summary>The top of the pilot console.</summary>
     public static float ConsoleTop(float2 display, float scale) => FlightConsole.Layout(display, scale).Top;
 
-    /// <summary>The jump strip, centred over the pilot console. It reserves room only while it is drawn.</summary>
-    public static HudRect Strip(float2 display, float scale)
+    /// <summary>The jump strip at the top centre, its top edge at <paramref name="top"/>. It reserves room only while it is drawn.</summary>
+    public static HudRect Strip(float2 display, float scale, float top)
     {
         var width = Math.Min(Px(StripMax, scale), display.X - 2 * Px(FlightConsole.Side, scale));
-        var cx = MathF.Round(display.X * 0.5f);
-        var bottom = ConsoleTop(display, scale) - Px(StripGap, scale);
-        var left = MathF.Round(cx - width * 0.5f);
-        return new HudRect(left, bottom - Px(StripHeight, scale), left + width, bottom);
+        var left = MathF.Round(MathF.Round(display.X * 0.5f) - width * 0.5f);
+        return new HudRect(left, top, left + width, top + Px(StripHeight, scale));
     }
 
     /// <summary>
-    /// The lowest a column from <paramref name="left"/> to <paramref name="right"/> may reach over the pilot
-    /// console: the console's top, or the strip's while the strip is drawn and the column shares its width.
+    /// Where the jump strip's top edge goes: <paramref name="gap"/> (pixels) under whatever else holds the top centre.
+    /// That is the target readout while a target is shown and the scan strip while it is drawn
+    /// (<paramref name="scanBottom"/>, zero when it is not), so the three never share a pixel.
     /// </summary>
-    public static float ReservedTop(float2 display, float scale, float left, float right, bool strip)
+    public static float StripTop(float scale, bool targetShown, float scanBottom, float gap)
     {
-        var top = ConsoleTop(display, scale);
-        if (!strip)
-            return top;
-        var rect = Strip(display, scale);
-        return rect.Spans(left, right) ? Math.Min(top, rect.Top) : top;
+        var below = Top(scale) + (targetShown ? Px(TargetReadoutHeight, scale) : 0f);
+        return Math.Max(below, scanBottom) + gap;
     }
 
     /// <summary>The left edge of the middle kept clear: the left column and the recent chat stop short of it.</summary>
@@ -182,25 +177,16 @@ internal static class HudLayout
     public static float ChatWidth(float2 display, float scale, float left, float width) => Math.Min(width, MiddleLeft(display, scale) - left);
 
     /// <summary>
-    /// The recent chat lines' width: as wide as asked, narrowed to stay beside the strip when it can keep at least
-    /// <paramref name="least"/>, so the lines do not move when the strip comes and goes.
-    /// </summary>
-    public static float FeedWidth(float2 display, float scale, float left, float width, float least)
-    {
-        var strip = Strip(display, scale);
-        var beside = strip.Left - Px(Gap, scale) - left;
-        return left + width > strip.Left - Px(Gap, scale) && beside >= least ? beside : width;
-    }
-
-    /// <summary>
     /// Where the NAV card may go: right of the left column, under the navigation bar (and the target readout when a
-    /// target is shown), inside the right margin and above the jump strip.
+    /// target is shown, and the jump strip while it is drawn), inside the right margin and above the console.
     /// </summary>
-    public static HudRect NavFree(float2 display, float scale, bool targetShown)
+    public static HudRect NavFree(float2 display, float scale, bool targetShown, in HudRect strip = default)
     {
         // A small step under the readout, as under the bar: on a short screen at a large scale the card needs it.
         var top = Top(scale) + (targetShown ? Px(TargetReadoutHeight, scale) + Px(Theme.Space2, scale) : 0f);
-        return new HudRect(ColumnRight(display, scale) + Px(Gap, scale), top, display.X - Px(Margin, scale), Strip(display, scale).Top - Px(Gap, scale));
+        if (strip.Height > 0f)
+            top = Math.Max(top, strip.Bottom + Px(Gap, scale));
+        return new HudRect(ColumnRight(display, scale) + Px(Gap, scale), top, display.X - Px(Margin, scale), ConsoleTop(display, scale) - Px(Gap, scale));
     }
 
     /// <summary>
@@ -309,7 +295,7 @@ internal readonly struct HudCueRoom
     /// </summary>
     public readonly float2 Start;
 
-    public HudCueRoom(float2 display, float scale, float columnBottom, bool targetShown, bool strip, HudRect chat = default, HudRect[]? panels = null, int panelCount = 0)
+    public HudCueRoom(float2 display, float scale, float columnBottom, bool targetShown, HudRect strip, HudRect chat = default, HudRect[]? panels = null, int panelCount = 0)
     {
         float Px(float design) => MathF.Round(design * scale);
 
@@ -319,7 +305,7 @@ internal readonly struct HudCueRoom
         Column = new HudRect(0f, 0f, HudLayout.ColumnRight(display, scale), columnBottom);
         var half = Px(HudLayout.TargetReadoutWidth) * 0.5f;
         Readout = targetShown ? new HudRect(display.X * 0.5f - half, 0f, display.X * 0.5f + half, HudLayout.Top(scale) + Px(HudLayout.TargetReadoutHeight)) : default;
-        Strip = strip ? HudLayout.Strip(display, scale) : default;
+        Strip = strip;
         Chat = chat;
         Panels = panels;
         PanelCount = panels is null ? 0 : Math.Clamp(panelCount, 0, panels.Length);
@@ -334,7 +320,7 @@ internal readonly struct HudCueRoom
         if (Readout.Spans(middle.X - pad, middle.X + pad))
             top = Math.Max(top, Readout.Bottom + pad);
         if (Strip.Spans(middle.X - pad, middle.X + pad))
-            bottom = Math.Min(bottom, Strip.Top - pad);
+            top = Math.Max(top, Strip.Bottom + pad);
         // With no height to fit a cue between them, it goes halfway; that only happens on screens far shorter than
         // any the interface is laid out for.
         Start = new float2(middle.X, top <= bottom ? Math.Clamp(middle.Y, top, bottom) : MathF.Round((top + bottom) * 0.5f));

@@ -915,13 +915,6 @@ internal sealed partial class ScreenHost
     // ---------------------------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// The lowest a column from <paramref name="left"/> to <paramref name="right"/> may reach over the pilot
-    /// console and, while it is drawn, the jump strip.
-    /// </summary>
-    private float ReservedTop(float left, float right) =>
-        HudLayout.ReservedTop(_ui.DisplaySize, Kit.Scale, left, right, _jumpPrompt != JumpPrompt.None);
-
-    /// <summary>
     /// The height the party list takes as full cards: the invitation, the caption and one card per other member.
     /// Zero when there is neither a party nor an invitation.
     /// </summary>
@@ -1083,12 +1076,10 @@ internal sealed partial class ScreenHost
         var x = Kit.Px(Theme.Space5);
         var width = HudLayout.ChatWidth(display, Kit.Scale, x, Math.Min(Kit.Px(440), display.X - Kit.Px(48)));
         // Never into the middle of the view. Beside the flight readouts at the bottom when there is room; above them
-        // when not, narrowed to stay beside the jump strip where that leaves a readable line.
+        // when not.
         var readoutsLeft = FlightConsole.Layout(display, Kit.Scale).LeftX;
         var beside = x + width + Kit.Px(Theme.Space3) < readoutsLeft;
-        if (!beside)
-            width = HudLayout.FeedWidth(display, Kit.Scale, x, width, Kit.Px(300));
-        var bottom = beside ? display.Y - Kit.Px(Theme.Space5) : ReservedTop(x, x + width) - Kit.Px(Theme.Space3);
+        var bottom = beside ? display.Y - Kit.Px(Theme.Space5) : HudLayout.ConsoleTop(display, Kit.Scale) - Kit.Px(Theme.Space3);
 
         ImGui.PushFont(_ui.Sans, Theme.FontSmall);
         var fontSize = ImGui.GetFontSize();

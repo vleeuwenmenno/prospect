@@ -236,7 +236,7 @@ public sealed class FrameOrderTests : IDisposable
         {
             float Px(float design) => MathF.Round(design * scale);
             float Chip(ReadOnlySpan<byte> key) => Kit.Measure(mono, Theme.FontCaption, key).X + Px(Theme.Space2) * 2;
-            var strip = HudLayout.Strip(new float2(width, height), scale);
+            var strip = HudLayout.Strip(new float2(width, height), scale, HudLayout.Top(scale));
             HudLayout.StripColumns(strip, scale, out var statusLeft, out var divider, out var actionLeft, out var actionRight);
             var room = actionRight - actionLeft;
 
@@ -3824,6 +3824,35 @@ public sealed class FrameOrderTests : IDisposable
         Bridge.Consume(out var cancelled, out var halt);
         Assert.True(cancelled);
         Assert.Equal(OrderKind.None, halt.Kind);
+    }
+
+    [Fact]
+    public void StartingAJumpClearsTheTargetButPlottingItDoesNot()
+    {
+        var destination = Ahead(100000);
+        CommandView();
+        _world.OrderJump(Bridge, destination);
+        for (var i = 0; i < 3; i++)
+            Frame();
+        _world.SetMode(ViewMode.Pilot);
+        Frame();
+        _world.TargetNearestHull();
+        Assert.NotEqual(0u, _world.TargetHull);
+
+        // A plotted course is a route: the target stays.
+        Frame();
+        Assert.NotEqual(0u, _world.TargetHull);
+
+        // The drive starting on it takes the target away, and it stays gone for the rest of the jump.
+        ref var own = ref _snapshot.Hulls[_snapshot.OwnHull];
+        own.Jump = JumpPhase.Align;
+        own.Order = new HullOrder { Kind = OrderKind.Jump, Target = destination };
+        Frame();
+        Assert.Equal(0u, _world.TargetHull);
+        Assert.Null(_world.TargetRock);
+        own.Jump = JumpPhase.Charge;
+        Frame();
+        Assert.Equal(0u, _world.TargetHull);
     }
 
     [Fact]

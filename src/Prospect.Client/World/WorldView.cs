@@ -2014,6 +2014,10 @@ internal sealed class WorldView
                 || own.JumpCalculation + 0.5f < _jumpCalculated);
         if (fresh)
         {
+            // A started jump takes the target with it: the panel and the target-bound module chips would only clutter
+            // the drive's readout. A plotted course alone is a route, not a start, and keeps it.
+            TargetHull = 0;
+            TargetRock = null;
             _jumpChaseLatched = false;
             _carryOffset = _jumpOffset;
             _carryOpen = _jumpEntryOpen;

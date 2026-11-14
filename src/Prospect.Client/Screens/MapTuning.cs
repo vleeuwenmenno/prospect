@@ -58,6 +58,9 @@ internal sealed class MapTuning
     public float ScanStripAlpha { get; init; }
     public float ScanCooldownAlpha { get; init; }
 
+    /// <summary>Unscaled pixels between the jump strip at the top centre and the target readout or scan strip above it.</summary>
+    public float JumpStripGap { get; init; }
+
     /// <summary>How dark the command view's fog outside sensor coverage is, and how far out it reaches in sensor radii.</summary>
     public float CommandFogAlpha { get; init; }
     public float CommandFogReach { get; init; }
@@ -181,6 +184,8 @@ internal sealed class MapTuning
             throw new InvalidDataException($"{path}: linkLineAlpha and gasRangeAlpha are 0 to 1, radarLinkMeters 0 to 200000");
         if (!(tuning.ScanStripWidth is >= 120 and <= 600) || !Unit(tuning.ScanStripAlpha) || !Unit(tuning.ScanCooldownAlpha))
             throw new InvalidDataException($"{path}: scanStripWidth is 120 to 600, scanStripAlpha and scanCooldownAlpha 0 to 1");
+        if (!(tuning.JumpStripGap is >= 0 and <= 64))
+            throw new InvalidDataException($"{path}: jumpStripGap is 0 to 64");
         if (!(tuning.CourseRefusalSeconds is >= 0 and <= 60))
             throw new InvalidDataException($"{path}: courseRefusalSeconds is 0 to 60");
         static bool Hex(string value) => value.Length == 6 && uint.TryParse(value, System.Globalization.NumberStyles.AllowHexSpecifier, null, out _);

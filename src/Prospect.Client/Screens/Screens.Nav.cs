@@ -19,6 +19,9 @@ internal sealed partial class ScreenHost
     /// <summary>What the strip says this frame; <see cref="JumpPrompt.None"/> when it is not drawn.</summary>
     private JumpPrompt _jumpPrompt;
 
+    /// <summary>Where the jump strip sits this frame, at the top centre under the target readout and scan strip; empty when not drawn.</summary>
+    private HudRect _jumpStrip;
+
     // The plotted destination's name, made once per destination: naming a sector allocates.
     private SectorCoord _navCoord;
     private Galaxy? _navGalaxy;
@@ -158,7 +161,7 @@ internal sealed partial class ScreenHost
         var width = Math.Clamp(Math.Max(tag + nameWidth, detailWidth) + pad * 2 + Kit.Px(4), Kit.Px(HudLayout.NavCardMin), Kit.Px(HudLayout.NavCardMax));
         // Rounded up, so a line measured to a fraction of a pixel is never cut by the rounding.
         var size = new float2(MathF.Ceiling(width), Kit.Px(HudLayout.NavCardHeight));
-        var free = HudLayout.NavFree(_ui.DisplaySize, Kit.Scale, world.TargetHull != 0 || world.TargetRock is not null);
+        var free = HudLayout.NavFree(_ui.DisplaySize, Kit.Scale, world.TargetHull != 0 || world.TargetRock is not null, _jumpStrip);
         if (!HudLayout.PlaceNavCard(marker, size, free, room, Kit.Scale, out var min))
             return false;
 
@@ -179,7 +182,7 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
-    /// The jump strip above the pilot console, drawn only while there is something to say: a plotted course, the
+    /// The jump strip at the top centre of the pilot view, under the target readout and the scan strip, drawn only while there is something to say: a plotted course, the
     /// drive at work, or a move order. Left of its divider, the state and a line under it; right of it, the one
     /// action the pilot can take with the loaded key, or the drive's calculation and charge, which run together.
     /// </summary>
@@ -189,7 +192,7 @@ internal sealed partial class ScreenHost
             return;
         var own = world.Own;
         var flight = snapshot.Flight;
-        var strip = HudLayout.Strip(_ui.DisplaySize, Kit.Scale);
+        var strip = _jumpStrip;
         var tone = prompt switch
         {
             JumpPrompt.Aligned => Theme.Good,

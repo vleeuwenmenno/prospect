@@ -18,6 +18,7 @@
   "scanStripWidth": 300,
   "scanStripAlpha": 0.85,
   "scanCooldownAlpha": 0.85,
+  "jumpStripGap": 8,
   "commandFogAlpha": 0.16,
   "commandFogReach": 1.5,
   "commandRingAlpha": 0.4,

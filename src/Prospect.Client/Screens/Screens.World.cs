@@ -148,11 +148,13 @@ internal sealed partial class ScreenHost
         {
             var pilot = 1f - world.CommandBlend;
             _jumpPrompt = pilot > 0.01f ? PromptFor(world) : JumpPrompt.None;
+            _jumpStrip = _jumpPrompt == JumpPrompt.None ? default : HudLayout.Strip(_ui.DisplaySize, Kit.Scale,
+                HudLayout.StripTop(Kit.Scale, world.TargetHull != 0 || world.TargetRock is not null, ScanStripBottom(snapshot, world), Kit.Px(MapLook.JumpStripGap)));
             // The party list must keep at least one member on screen above the flight readouts, and above the
             // jump strip while it is drawn and shares the list's width. When the full sector panel leaves no room
             // for the whole list, the panel drops its ore and server lines (they are on the map and in the menu),
             // and if that is still not enough the list turns into one-line rows. A closed panel takes no room.
-            var limit = pilot > 0.01f ? ReservedTop(Kit.Px(HudLayout.Margin), HudLayout.ColumnRight(_ui.DisplaySize, Kit.Scale)) : _ui.DisplaySize.Y - Kit.Px(Theme.Space5);
+            var limit = pilot > 0.01f ? HudLayout.ConsoleTop(_ui.DisplaySize, Kit.Scale) : _ui.DisplaySize.Y - Kit.Px(Theme.Space5);
             var (sectorBottom, compactSector, cards) = SectorInfoToggle.Column(Kit.Scale, _sectorInfo.Open,
                 SectorPanelHeight(world, false), SectorPanelHeight(world, true), PartyHudCardsHeight(snapshot), limit);
             _columnBottom = HudLayout.PartyRows(sectorBottom, limit, cards, snapshot.Social.Invitation.Player != 0,
@@ -341,7 +343,7 @@ internal sealed partial class ScreenHost
         }
 
         // One clear room for every marker that moves with the world: the target's and the plotted jump's.
-        var room = new HudCueRoom(display, Kit.Scale, _columnBottom, world.TargetHull != 0 || world.TargetRock is not null, _jumpPrompt != JumpPrompt.None, _chatFeedBounds, _paneRects, _paneRectCount);
+        var room = new HudCueRoom(display, Kit.Scale, _columnBottom, world.TargetHull != 0 || world.TargetRock is not null, _jumpStrip, _chatFeedBounds, _paneRects, _paneRectCount);
         DrawTargetMarkers(draw, snapshot, world, room);
         DrawNavTarget(draw, world, room, _jumpPrompt);
 
@@ -357,8 +359,8 @@ internal sealed partial class ScreenHost
             Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, middle + new float2(-free.X * 0.5f, Kit.Px(22)), Theme.Info, "FREE LOOK"u8);
         }
 
-        // Speed in the middle; what keeps the hull alive on the left, what drives it on the right. Above it, the
-        // jump strip: what the drive is doing and what the pilot can do, kept off the middle of the view.
+        // Speed in the middle; what keeps the hull alive on the left, what drives it on the right. The jump strip
+        // (what the drive is doing and what the pilot can do) sits at the top centre, off the middle of the view.
         DrawFlightConsole(draw, snapshot, own, speed, world.Mode == ViewMode.Pilot && WorldInputEnabled && _app.PointerReleased);
         DrawJumpStrip(draw, snapshot, world, _jumpPrompt);
         DrawOwnStatusChip(draw, own, alpha, world.Mode == ViewMode.Pilot && WorldInputEnabled && _app.PointerReleased);

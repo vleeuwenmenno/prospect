@@ -25,6 +25,10 @@ public sealed class HudLayoutTests
 
     private static float Px(float design, float scale) => MathF.Round(design * scale);
 
+    /// <summary>The jump strip where the screen puts it with only the bar above it (or the target readout too).</summary>
+    private static HudRect TopStrip(float2 display, float scale, bool target = false) =>
+        HudLayout.Strip(display, scale, HudLayout.StripTop(scale, target, 0f, Px(8, scale)));
+
     [Theory]
     [MemberData(nameof(Screens))]
     public void TheConsoleAndTheStripStayOnScreenAndClearOfEachOther(float width, float height, float scale)
@@ -37,10 +41,12 @@ public sealed class HudLayoutTests
         Assert.True(console.Right < width);
         Assert.Equal(console.Top, HudLayout.ConsoleTop(display, scale));
 
-        // The strip sits above them with its gap, inside the side margins, centred on the speed readout.
-        var strip = HudLayout.Strip(display, scale);
-        Assert.Equal(HudLayout.ConsoleTop(display, scale) - Px(HudLayout.StripGap, scale), strip.Bottom);
+        // The strip sits at the top centre, inside the side margins, centred on the speed readout, and the
+        // console is the only thing above the bottom edge: the module chips over it have the whole width.
+        var strip = TopStrip(display, scale);
+        Assert.Equal(HudLayout.Top(scale) + Px(8, scale), strip.Top);
         Assert.Equal(Px(HudLayout.StripHeight, scale), strip.Height);
+        Assert.True(strip.Bottom < HudLayout.ConsoleTop(display, scale));
         Assert.True(strip.Left >= Px(FlightConsole.Side, scale) && strip.Right <= width - Px(FlightConsole.Side, scale));
         Assert.InRange(strip.Left + strip.Width * 0.5f - console.CenterX, -1f, 1f);
 
@@ -50,43 +56,38 @@ public sealed class HudLayoutTests
         Assert.True(actionRight - actionLeft >= Px(260, scale), $"action {actionRight - actionLeft}");
 
         // And the middle of the view, where the hull flies, stays clear of it.
-        Assert.True(strip.Top > height * 0.5f + Px(20, scale), $"strip top {strip.Top}");
+        Assert.True(strip.Bottom < height * 0.5f - Px(20, scale), $"strip bottom {strip.Bottom}");
     }
 
     [Theory]
     [MemberData(nameof(Screens))]
-    public void TheLeftColumnAndTheRecentChatStayAboveEveryReservation(float width, float height, float scale)
+    public void TheJumpStripStacksUnderTheTargetReadoutAndTheScanStripAndNeverOverTheConsole(float width, float height, float scale)
     {
         var display = new float2(width, height);
-        var strip = HudLayout.Strip(display, scale);
-        var left = Px(HudLayout.Margin, scale);
-        var right = HudLayout.ColumnRight(display, scale);
+        var gap = Px(8, scale);
+        var bar = HudLayout.TopBarBottom(scale);
 
-        // With the strip hidden only the console counts; with it drawn, a column that shares its width stops above
-        // it too, and one that does not is not pushed up for nothing.
-        Assert.Equal(HudLayout.ConsoleTop(display, scale), HudLayout.ReservedTop(display, scale, left, right, false));
-        var reserved = HudLayout.ReservedTop(display, scale, left, right, true);
-        Assert.True(reserved <= HudLayout.ConsoleTop(display, scale));
-        Assert.Equal(strip.Spans(left, right) ? strip.Top : HudLayout.ConsoleTop(display, scale), reserved);
+        // Alone it sits one gap under the top pieces; a target pushes it under the readout; a scan strip under
+        // that, whichever is lower; each time with the gap and never above the bar.
+        var alone = HudLayout.StripTop(scale, false, 0f, gap);
+        var withTarget = HudLayout.StripTop(scale, true, 0f, gap);
+        var scanBottom = HudLayout.Top(scale) + Px(Theme.Space2 + 32, scale);
+        var withScan = HudLayout.StripTop(scale, false, scanBottom, gap);
+        var both = HudLayout.StripTop(scale, true, scanBottom, gap);
+        Assert.True(alone >= bar + gap);
+        Assert.Equal(HudLayout.Top(scale) + Px(HudLayout.TargetReadoutHeight, scale) + gap, withTarget);
+        Assert.Equal(scanBottom + gap, withScan);
+        Assert.True(both >= withTarget && both >= withScan);
 
-        // At the interface's own scale the column and the strip sit side by side, so plotting a jump never
-        // shuffles the party list.
-        if (scale == 1f)
-            Assert.False(strip.Spans(left, right));
-
-        // The recent chat is narrowed to stay beside the strip where a readable line remains; otherwise it keeps
-        // its width and stops above the strip while it is drawn.
-        var feed = HudLayout.FeedWidth(display, scale, left, Px(440, scale), Px(300, scale));
-        if (feed < Px(440, scale))
-        {
-            Assert.True(feed >= Px(300, scale));
-            Assert.True(left + feed <= strip.Left - Px(HudLayout.Gap, scale));
-            Assert.Equal(HudLayout.ConsoleTop(display, scale), HudLayout.ReservedTop(display, scale, left, left + feed, true));
-        }
-        else
-        {
-            Assert.True(HudLayout.ReservedTop(display, scale, left, left + feed, true) <= strip.Top || !strip.Spans(left, left + feed));
-        }
+        // The room it takes is kept off by the NAV card and the cues, and the console below stays whole.
+        var strip = HudLayout.Strip(display, scale, withScan);
+        Assert.Equal(withScan, strip.Top);
+        var free = HudLayout.NavFree(display, scale, false, strip);
+        Assert.True(free.Top >= strip.Bottom + Px(HudLayout.Gap, scale));
+        Assert.Equal(HudLayout.ConsoleTop(display, scale) - Px(HudLayout.Gap, scale), free.Bottom);
+        var room = new HudCueRoom(display, scale, Px(260, scale), false, strip);
+        Assert.False(room.Clear(new float2(display.X * 0.5f, strip.Top + strip.Height * 0.5f), 0f));
+        Assert.True(room.Start.Y >= strip.Bottom);
     }
 
     [Fact]
@@ -94,19 +95,19 @@ public sealed class HudLayoutTests
     {
         var display = new float2(1655, 688);
         const float scale = 2f;
-        var limit = HudLayout.ReservedTop(display, scale, Px(HudLayout.Margin, scale), HudLayout.ColumnRight(display, scale), true);
+        var limit = HudLayout.ConsoleTop(display, scale);
         var partyHeight = Px(18, scale) + 7 * (Px(58, scale) + Px(Theme.Space1, scale));
         var column = SectorInfoToggle.Column(scale, false, Px(116, scale), Px(64, scale), partyHeight, limit);
         Assert.False(column.Compact);
         Assert.False(column.Cards);
         var rows = HudLayout.PartyRows(column.Bottom, limit, column.Cards, false, 7, scale);
-        Assert.Equal(4, rows.Count);
+        Assert.Equal(6, rows.Count);
         Assert.True(rows.Bottom <= limit);
 
         var open = SectorInfoToggle.Column(scale, true, Px(116, scale), Px(64, scale), partyHeight, limit);
         Assert.True(open.Compact);
         Assert.False(open.Cards);
-        Assert.Equal(2, HudLayout.PartyRows(open.Bottom, limit, open.Cards, false, 7, scale).Count);
+        Assert.Equal(4, HudLayout.PartyRows(open.Bottom, limit, open.Cards, false, 7, scale).Count);
 
         // Where the full cards fit, opening or closing the sector panel keeps the full party readouts.
         foreach (var expanded in new[] { false, true })
@@ -131,15 +132,15 @@ public sealed class HudLayoutTests
         var open = SectorInfoToggle.Bottom(scale, true, Px(116, scale));
 
         // What goes under it moves up when the panel is closed: the party rows and the room kept for the cues.
-        var limit = HudLayout.ReservedTop(display, scale, Px(HudLayout.Margin, scale), HudLayout.ColumnRight(display, scale), true);
+        var limit = HudLayout.ConsoleTop(display, scale);
         var closedRows = HudLayout.PartyRows(closed, limit, true, true, 3, scale);
         var openRows = HudLayout.PartyRows(open, limit, true, true, 3, scale);
         Assert.True(closedRows.Top < openRows.Top);
         Assert.True(closedRows.Count >= openRows.Count && closedRows.Count >= 1);
         Assert.True(closedRows.Bottom <= limit || closedRows.Count == 1);
 
-        var closedRoom = new HudCueRoom(display, scale, closed + Px(Theme.Space3, scale), true, true);
-        var openRoom = new HudCueRoom(display, scale, open + Px(Theme.Space3, scale), true, true);
+        var closedRoom = new HudCueRoom(display, scale, closed + Px(Theme.Space3, scale), true, TopStrip(display, scale));
+        var openRoom = new HudCueRoom(display, scale, open + Px(Theme.Space3, scale), true, TopStrip(display, scale));
         var under = new float2(Px(HudLayout.Margin, scale) + Px(80, scale), MathF.Round((closed + open) * 0.5f) + Px(40, scale));
         Assert.False(openRoom.Clear(under, openRoom.Pad(false)));
         Assert.True(closedRoom.Clear(under, closedRoom.Pad(false)), $"{under}");
@@ -163,17 +164,18 @@ public sealed class HudLayoutTests
     public void TheNavCardStaysInItsRoomAndNeverCoversItsMarker(float width, float height, float scale)
     {
         var display = new float2(width, height);
-        var strip = HudLayout.Strip(display, scale);
+        var strip = TopStrip(display, scale);
         foreach (var cardWidth in new[] { HudLayout.NavCardMin, HudLayout.NavCardMax })
         {
             var size = new float2(Px(cardWidth, scale), Px(HudLayout.NavCardHeight, scale));
             foreach (var target in new[] { false, true })
             {
-                var free = HudLayout.NavFree(display, scale, target);
-                var room = new HudCueRoom(display, scale, Px(260, scale), target, false);
+                var free = HudLayout.NavFree(display, scale, target, strip);
+                var room = new HudCueRoom(display, scale, Px(260, scale), target, strip);
                 Assert.True(free.Left >= HudLayout.ColumnRight(display, scale) + Px(HudLayout.Gap, scale));
                 Assert.True(free.Right <= width - Px(HudLayout.Margin, scale));
-                Assert.True(free.Bottom <= strip.Top - Px(HudLayout.Gap, scale));
+                Assert.True(free.Bottom <= HudLayout.ConsoleTop(display, scale) - Px(HudLayout.Gap, scale));
+                Assert.True(free.Top >= strip.Bottom + Px(HudLayout.Gap, scale));
                 // Under the navigation bar, and under the target readout when it is shown.
                 Assert.True(free.Top >= HudLayout.Top(scale));
                 Assert.True(free.Top >= room.Readout.Bottom);
@@ -272,14 +274,14 @@ public sealed class HudLayoutTests
 
     [Theory]
     [MemberData(nameof(Screens))]
-    public void TheClearRoomLeavesTheMiddleToTheCuesAboveTheStripWhileItIsDrawn(float width, float height, float scale)
+    public void TheClearRoomLeavesTheMiddleToTheCuesUnderTheStripWhileItIsDrawn(float width, float height, float scale)
     {
         var display = new float2(width, height);
         foreach (var strip in new[] { false, true })
         {
             foreach (var target in new[] { false, true })
             {
-                var room = new HudCueRoom(display, scale, Px(24 + 116, scale), target, strip);
+                var room = new HudCueRoom(display, scale, Px(24 + 116, scale), target, strip ? TopStrip(display, scale) : default);
 
                 // A cue fits where its directions are measured from, and every arrow drawn straight out from there,
                 // ring included, stays clear of every piece and on screen.
@@ -291,39 +293,39 @@ public sealed class HudLayoutTests
                     Assert.True(Clear(room, edge, ArrowRing(scale)), $"strip {strip} target {target} angle {a}: {edge}");
                 }
 
-                // The strip only pushes the cues up while it is drawn: with it hidden, an arrow straight down sits
-                // over the console instead.
+                // An arrow straight down always stops above the console. The strip pushes the cues down from the top
+                // only while it is drawn; with it hidden, an arrow straight up sits under the bar instead.
                 var down = Edge(room, room.Start, new float2(0, 1));
-                var limit = strip ? HudLayout.Strip(display, scale).Top : HudLayout.ConsoleTop(display, scale);
-                Assert.True(down.Y + ArrowRing(scale) + room.Gap <= limit + 0.5f, $"down {down.Y} limit {limit}");
+                Assert.True(down.Y + ArrowRing(scale) + room.Gap <= HudLayout.ConsoleTop(display, scale) + 0.5f, $"down {down.Y}");
+                var up = Edge(room, room.Start, new float2(0, -1));
+                var floor = strip ? TopStrip(display, scale).Bottom : HudLayout.Top(scale);
+                Assert.True(up.Y - ArrowRing(scale) - room.Gap >= floor - 0.5f, $"up {up.Y} floor {floor}");
             }
         }
     }
 
     [Fact]
-    public void ATargetBelowTheMiddleOfAShortScaledScreenIsMarkedAboveTheStripRingIncluded()
+    public void ATargetAboveTheMiddleOfAShortScaledScreenIsMarkedUnderTheStripRingIncluded()
     {
-        // 1655 x 688 at twice the scale: the strip runs from 396 to 476 (386 to 466 while the console had its end
-        // brackets), barely 50 px under the middle of the view. The old ellipse put the arrow's point at 424 and
-        // its ring down to 459, under the strip either way.
+        // 1655 x 688 at twice the scale: the strip sits at the top centre, 80 px tall, and the middle of the view
+        // is under it. A target rising into it must be marked clear of it, ring included.
         var display = new float2(1655, 688);
         const float scale = 2f;
-        var strip = HudLayout.Strip(display, scale);
-        Assert.Equal(396f, strip.Top);
-        Assert.True(424f + ArrowRing(scale) > strip.Top);
+        var strip = TopStrip(display, scale);
+        Assert.True(strip.Bottom < 344f);
 
-        var room = new HudCueRoom(display, scale, Px(24 + 116, scale), true, true);
+        var room = new HudCueRoom(display, scale, Px(24 + 116, scale), true, strip);
         var cue = new TargetCue();
         var middle = new float2(827.5f, 344f);
 
-        // In view in the middle, then dropping under the strip, then behind and below: every frame of the morph,
+        // In view in the middle, then rising under the strip, then behind and above: every frame of the morph,
         // the marker is either on its target or wholly clear of every piece.
         var frames = 0;
-        for (var y = 344f; frames < 90; frames++, y += 3f)
+        for (var y = 344f; frames < 90; frames++, y -= 3f)
         {
             var behind = frames >= 60;
             var screen = new float2(middle.X, y);
-            var morph = cue.Step(room, frames == 0, !behind, screen, new float2(0, 1), true, scale, 1f / 60f);
+            var morph = cue.Step(room, frames == 0, !behind, screen, new float2(0, -1), true, scale, 1f / 60f);
             if (frames == 0)
                 Assert.False(cue.Out);
             if (cue.Out)
@@ -332,11 +334,11 @@ public sealed class HudLayoutTests
                 Assert.True(room.Clear(screen, room.Pad(true)) || morph > 0f);
         }
 
-        // Settled: an arrow pointing down, its ring clear of the strip by the gap.
+        // Settled: an arrow pointing up, its ring clear of the strip by the gap.
         Assert.True(cue.Out);
         Assert.Equal(1f, cue.Morph);
-        Assert.InRange(cue.Angle, MathF.PI * 0.5f - 0.01f, MathF.PI * 0.5f + 0.01f);
-        Assert.True(cue.At.Y + ArrowRing(scale) + room.Gap <= strip.Top, $"ring bottom {cue.At.Y + ArrowRing(scale)}");
+        Assert.InRange(cue.Angle, -MathF.PI * 0.5f - 0.01f, -MathF.PI * 0.5f + 0.01f);
+        Assert.True(cue.At.Y - ArrowRing(scale) - room.Gap >= strip.Bottom, $"ring top {cue.At.Y - ArrowRing(scale)}");
     }
 
     [Theory]
@@ -344,7 +346,7 @@ public sealed class HudLayoutTests
     public void ATargetLeavingAndReturningKeepsItsMarkerOnItOrClearAtEveryMorph(float width, float height, float scale)
     {
         var display = new float2(width, height);
-        var room = new HudCueRoom(display, scale, Px(24 + 116, scale), true, true);
+        var room = new HudCueRoom(display, scale, Px(24 + 116, scale), true, TopStrip(display, scale));
         var cue = new TargetCue();
         var middle = room.Start;
 
@@ -376,28 +378,28 @@ public sealed class HudLayoutTests
     {
         var display = new float2(1655, 688);
         const float scale = 2f;
-        var room = new HudCueRoom(display, scale, Px(24 + 116, scale), false, true);
-        var strip = HudLayout.Strip(display, scale);
+        var room = new HudCueRoom(display, scale, Px(24 + 116, scale), false, TopStrip(display, scale));
+        var strip = TopStrip(display, scale);
 
-        // The projected point from the review passes the old 40 px edge margins yet lies under the strip.
-        var projected = new float2(827.5f, 426f);
+        // A projected point inside the strip is obstructed however far it is from the screen's edges.
+        var projected = new float2(827.5f, strip.Top + strip.Height * 0.5f);
         Assert.True(strip.Contains(projected));
         Assert.False(room.Clear(projected, room.Pad(true)));
 
-        // The arrow points at it from above the strip, and the old ellipse's clamped tip (392) is no longer used.
+        // The arrow points at it from under the strip.
         var toward = projected - room.Start;
         var direction = toward / MathF.Sqrt(toward.X * toward.X + toward.Y * toward.Y);
         var at = Edge(room, room.Start, direction);
-        Assert.True(direction.Y > 0.99f);
+        Assert.True(direction.Y < -0.99f);
         Assert.True(Clear(room, at, ArrowRing(scale)));
-        Assert.True(at.Y + Px(11, scale) < strip.Top);
+        Assert.True(at.Y - Px(11, scale) > strip.Bottom);
 
         // The label goes beside the arrow, clear too, on whichever side has room.
         var label = Px(HudLayout.CueLabel, scale);
         Assert.True(room.Clear(at + new float2(label, 0), room.Pad(true)) || room.Clear(at - new float2(label, 0), room.Pad(true)));
 
-        // A NAV point off the bottom of the view gives the same arrow.
-        var off = Edge(room, room.Start, new float2(0, 1));
+        // A NAV point off the top of the view gives the same arrow.
+        var off = Edge(room, room.Start, new float2(0, -1));
         Assert.Equal(at.Y, off.Y, 0.5f);
     }
 
@@ -405,13 +407,14 @@ public sealed class HudLayoutTests
     public void AStripAppearingUnderTheTargetMovesItsCueClearInThatFrame()
     {
         var display = new float2(1655, 688);
-        var before = new HudCueRoom(display, 2f, 280f, true, false);
-        var after = new HudCueRoom(display, 2f, 280f, true, true);
-        var point = new float2(827.5f, 426f);
+        var before = new HudCueRoom(display, 2f, 280f, false, default);
+        var after = new HudCueRoom(display, 2f, 280f, false, TopStrip(display, 2f));
+        var strip = TopStrip(display, 2f);
+        var point = new float2(827.5f, strip.Top + strip.Height * 0.5f);
         var cue = new TargetCue();
-        cue.Step(before, true, true, point, new float2(0, 1), true, 2f, 1f / 60f);
+        cue.Step(before, true, true, point, new float2(0, -1), true, 2f, 1f / 60f);
         Assert.False(cue.Out);
-        cue.Step(after, false, true, point, new float2(0, 1), true, 2f, 1f / 60f);
+        cue.Step(after, false, true, point, new float2(0, -1), true, 2f, 1f / 60f);
         Assert.True(cue.Out);
         Assert.True(after.Clear(cue.At, ArrowRing(2f)), $"cue {cue.At}");
     }
@@ -420,8 +423,8 @@ public sealed class HudLayoutTests
     public void AColumnGrowingUnderTheTargetMovesItsCueClearInThatFrame()
     {
         var display = new float2(1920, 1080);
-        var before = new HudCueRoom(display, 1f, 140f, true, false);
-        var after = new HudCueRoom(display, 1f, 650f, true, false);
+        var before = new HudCueRoom(display, 1f, 140f, true, default);
+        var after = new HudCueRoom(display, 1f, 650f, true, default);
         var point = new float2(250, 500);
         var cue = new TargetCue();
         cue.Step(before, true, true, point, new float2(-1, 0), true, 1f, 1f / 60f);
@@ -437,7 +440,7 @@ public sealed class HudLayoutTests
     [InlineData(1920f, 1080f, 1f, 100f, 220f, true, true)]
     public void CloseTargetsStayMarkedAtTheirCentre(float width, float height, float scale, float radius, float distance, bool rock, bool strip)
     {
-        var room = new HudCueRoom(new float2(width, height), scale, 280f, true, strip);
+        var room = new HudCueRoom(new float2(width, height), scale, 280f, true, strip ? TopStrip(new float2(width, height), scale) : default);
         var pixels = radius / distance * height * 0.5f / MathF.Tan(31f * MathF.PI / 180f);
         var cue = new TargetCue();
         for (var frame = 0; frame < 30; frame++)
@@ -456,17 +459,19 @@ public sealed class HudLayoutTests
     }
 
     [Theory]
-    [InlineData(false, 355f)]
-    [InlineData(true, 360f)]
-    public void TheSmallestTargetMarkerMustFitBeforeItCanStayAnchored(bool rock, float y)
+    [InlineData(false, 41f)]
+    [InlineData(true, 36f)]
+    public void TheSmallestTargetMarkerMustFitBeforeItCanStayAnchored(bool rock, float under)
     {
-        var room = new HudCueRoom(new float2(1655, 688), 2f, 280f, true, true);
-        var point = new float2(827.5f, y);
+        var display = new float2(1655, 688);
+        var strip = TopStrip(display, 2f);
+        var room = new HudCueRoom(display, 2f, 280f, false, strip);
+        var point = new float2(827.5f, strip.Bottom + under);
         Assert.True(room.Clear(point, room.Reach));
         var reach = TargetCue.MinimumReach(rock, 2f);
         Assert.False(room.Clear(point, reach));
         var cue = new TargetCue();
-        cue.Step(room, true, true, point, new float2(0, 1), true, 2f, 1f / 60f, rock);
+        cue.Step(room, true, true, point, new float2(0, -1), true, 2f, 1f / 60f, rock);
         Assert.True(cue.Out);
         Assert.True(room.Clear(cue.At, ArrowRing(2f)));
     }
@@ -477,7 +482,7 @@ public sealed class HudLayoutTests
     {
         foreach (var strip in new[] { false, true })
         {
-            var room = new HudCueRoom(new float2(width, height), scale, height * 0.55f, true, strip);
+            var room = new HudCueRoom(new float2(width, height), scale, height * 0.55f, true, strip ? TopStrip(new float2(width, height), scale) : default);
             for (var x = -20f; x < width + 20f; x += 17f)
             {
                 for (var y = -20f; y < height + 20f; y += 19f)
@@ -511,7 +516,7 @@ public sealed class HudLayoutTests
         Assert.Equal(rows.Top + rows.Step * rows.Count, rows.Bottom);
         Assert.True(rows.Bottom <= 700f);
         Assert.True(rows.Bottom > empty.Bottom);
-        var room = new HudCueRoom(new float2(1920, 1080), 1f, rows.Bottom, false, false);
+        var room = new HudCueRoom(new float2(1920, 1080), 1f, rows.Bottom, false, default);
         Assert.False(room.Clear(new float2(250, rows.Bottom - 10f), room.Reach));
     }
 
@@ -519,9 +524,9 @@ public sealed class HudLayoutTests
     public void RecentChatMovesTargetAndNavCuesClearUntilTheFeedDisappears()
     {
         var display = new float2(1920, 1080);
-        var empty = new HudCueRoom(display, 1f, 140f, true, false);
+        var empty = new HudCueRoom(display, 1f, 140f, true, default);
         var chat = new HudRect(24f, 850f, 464f, 970f);
-        var room = new HudCueRoom(display, 1f, 140f, true, false, chat);
+        var room = new HudCueRoom(display, 1f, 140f, true, default, chat);
         var point = new float2(200, 900);
         Assert.True(empty.Clear(point, TargetCue.MinimumReach(false, 1f)));
         Assert.False(room.Clear(point, room.Reach));
@@ -547,13 +552,13 @@ public sealed class HudLayoutTests
     public void TheNavCardCannotCoverChatEvenWhenItsTieMissesTheFeed()
     {
         var display = new float2(1920, 1080);
-        var empty = new HudCueRoom(display, 1f, 140f, false, false);
+        var empty = new HudCueRoom(display, 1f, 140f, false, default);
         var marker = new float2(700, 700);
         var size = new float2(250, HudLayout.NavCardHeight);
         var free = HudLayout.NavFree(display, 1f, false);
         Assert.True(HudLayout.PlaceNavCard(marker, size, free, empty, 1f, out var min));
         var chat = new HudRect(min.X + size.X * 0.5f, min.Y, min.X + size.X, min.Y + size.Y);
-        var room = new HudCueRoom(display, 1f, 140f, false, false, chat);
+        var room = new HudCueRoom(display, 1f, 140f, false, default, chat);
         Assert.False(room.Crosses(marker, HudLayout.NavTieAnchor(marker, min, size)));
         Assert.False(HudLayout.PlaceNavCard(marker, size, free, room, 1f, out _));
     }
@@ -563,8 +568,8 @@ public sealed class HudLayoutTests
     {
         var display = new float2(1280, 720);
         const float scale = 2f;
-        var room = new HudCueRoom(display, scale, 400f, false, false);
-        var marker = new float2(120, 470);
+        var room = new HudCueRoom(display, scale, 400f, false, default);
+        var marker = new float2(120, 440);
         Assert.True(room.Clear(marker, room.Pad(true)));
 
         var size = new float2(Px(HudLayout.NavCardMin, scale), Px(HudLayout.NavCardHeight, scale));
@@ -573,7 +578,7 @@ public sealed class HudLayoutTests
         Assert.True(room.Crosses(marker, HudLayout.NavTieAnchor(marker, min, size)));
 
         // The same card with no column in the way is placed.
-        var open = new HudCueRoom(display, scale, 0f, false, false);
+        var open = new HudCueRoom(display, scale, 0f, false, default);
         Assert.True(HudLayout.PlaceNavCard(new float2(700, 360), size, free, open, scale, out _));
     }
 
@@ -606,7 +611,7 @@ public sealed class HudLayoutTests
         Assert.True(HudLayout.ColumnWidth(display, 2f) >= Px(200, 2f), "the column keeps room for a name and its bars");
 
         // With the column reaching down to the strip, a marker at the mock-up's NAV point is still in view.
-        var room = new HudCueRoom(display, 2f, HudLayout.Strip(display, 2f).Top, false, true);
+        var room = new HudCueRoom(display, 2f, TopStrip(display, 2f).Top, false, TopStrip(display, 2f));
         Assert.True(room.Clear(new float2(640f, 331.2f), room.Pad(true)));
     }
 
@@ -642,7 +647,7 @@ public sealed class HudLayoutTests
         Assert.True(HudLayout.Top(scale) - Px(HudLayout.Margin, scale) <= Px(8, scale));
         foreach (var target in new[] { false, true })
         {
-            var room = new HudCueRoom(display, scale, Px(140, scale), target, true);
+            var room = new HudCueRoom(display, scale, Px(140, scale), target, TopStrip(display, scale));
             Assert.True(room.Screen.Top >= bar);
             Assert.True(HudLayout.NavFree(display, scale, target).Top >= bar);
             if (target)
@@ -683,8 +688,8 @@ public sealed class HudLayoutTests
     {
         var display = new float2(1920, 1080);
         var panel = new HudRect(1200, 300, 1560, 640);
-        var empty = new HudCueRoom(display, 1f, 140f, false, false);
-        var room = new HudCueRoom(display, 1f, 140f, false, false, default, [panel], 1);
+        var empty = new HudCueRoom(display, 1f, 140f, false, default);
+        var room = new HudCueRoom(display, 1f, 140f, false, default, default, [panel], 1);
         var inside = new float2(1380, 470);
         Assert.True(empty.Clear(inside, empty.Reach));
         Assert.False(room.Clear(inside, room.Reach));
@@ -704,7 +709,7 @@ public sealed class HudLayoutTests
             Assert.False(panel.Overlaps(new HudRect(min.X, min.Y, min.X + size.X, min.Y + size.Y)));
 
         // Counted panels only: an array with room for more is read up to its count.
-        var counted = new HudCueRoom(display, 1f, 140f, false, false, default, [default, panel], 1);
+        var counted = new HudCueRoom(display, 1f, 140f, false, default, default, [default, panel], 1);
         Assert.True(counted.Clear(inside, counted.Reach));
     }
     [Theory]
@@ -719,7 +724,7 @@ public sealed class HudLayoutTests
         {
             foreach (var strip in new[] { false, true })
             {
-                var room = new HudCueRoom(display, scale, Px(140, scale), target, strip, default, [panel], 1);
+                var room = new HudCueRoom(display, scale, Px(140, scale), target, strip ? TopStrip(display, scale) : default, default, [panel], 1);
                 Assert.False(room.Clear(room.Start, room.Reach));
                 for (var a = 0; a < 64; a++)
                 {
@@ -747,7 +752,7 @@ public sealed class HudLayoutTests
     {
         var display = new float2(1920, 1080);
         var panel = new HudRect(730, 240, 1190, 840);
-        var room = new HudCueRoom(display, 1f, 140f, false, false, default, [panel], 1);
+        var room = new HudCueRoom(display, 1f, 140f, false, default, default, [panel], 1);
 
         // A target behind and to the right: the arrow sits right of the window, on the bearing, ring clear.
         var cue = new TargetCue();
@@ -769,7 +774,7 @@ public sealed class HudLayoutTests
         }
 
         // A window over the whole view leaves no clear point: nothing is drawn, for the target and the NAV arrow.
-        var full = new HudCueRoom(display, 1f, 140f, false, false, default, [new HudRect(0, 0, 1920, 1080)], 1);
+        var full = new HudCueRoom(display, 1f, 140f, false, default, default, [new HudRect(0, 0, 1920, 1080)], 1);
         for (var a = 0; a < 16; a++)
             Assert.False(full.Edge(full.Start, new float2(MathF.Cos(a * MathF.Tau / 16f), MathF.Sin(a * MathF.Tau / 16f)), out _));
         var hidden = new TargetCue();
@@ -786,7 +791,7 @@ public sealed class HudLayoutTests
 
         // A target on a clear point keeps its bracket on it whatever the arrow's side would be.
         var anchored = new TargetCue();
-        var half = new HudCueRoom(display, 1f, 140f, false, false, default, [new HudRect(960, 0, 1920, 1080)], 1);
+        var half = new HudCueRoom(display, 1f, 140f, false, default, default, [new HudRect(960, 0, 1920, 1080)], 1);
         anchored.Step(half, true, true, new float2(500, 540), new float2(1, 0), true, 1f, 1f / 60f);
         Assert.False(anchored.Out);
         Assert.False(anchored.Hidden);

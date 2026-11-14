@@ -135,6 +135,29 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
+    /// The bottom edge of the scan strip as <see cref="DrawScanStrip"/> will draw it in the flight view (its lines
+    /// are the same ones), or zero when nothing is drawn, so the jump strip can stack under it.
+    /// </summary>
+    private float ScanStripBottom(SessionSnapshot snapshot, WorldView world)
+    {
+        var look = MapLook;
+        var scan = snapshot.Exploration.Scan;
+        var show = ScanRules.Strip(scan, world.Own.Id, world.Sector.Coord, snapshot.ServerTick, _scan.SinceResult, look.ScanResultSeconds);
+        var lines = 0f;
+        if (show.Running)
+            lines = 22f;
+        else
+        {
+            if (show.ResultWindow && ScanResult(scan, scan.Sector, out _).Length > 0)
+                lines += 16f;
+            if (show.CooldownSeconds > 0)
+                lines += 16f;
+        }
+
+        return lines == 0f ? 0f : HudTop + Kit.Px(Theme.Space2) + Kit.Px(lines);
+    }
+
+    /// <summary>
     /// A tooltip for the scan, under a control or readout: its key, and in a line what it does now (ready, running and
     /// cancelled by the key again, cooling down, or no charting block). It takes no input and is drawn over everything.
     /// </summary>
