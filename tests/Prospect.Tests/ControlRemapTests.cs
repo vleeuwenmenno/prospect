@@ -167,7 +167,7 @@ public sealed class ControlRemapTests
         Assert.DoesNotContain("Strafe.Negative", rig.Settings.ControlOverrides.Keys);
 
         // Roll keeps its bumpers whatever its keys do, and an axis half clashes with an action in a shared view.
-        Assert.Null(rig.Remapper.Propose(ControlSlot.Of(InputAxis.Roll, true), 0, Key(GlfwKey.X)));
+        Assert.Null(rig.Remapper.Propose(ControlSlot.Of(InputAxis.Roll, true), 0, Key(GlfwKey.F8)));
         Assert.Contains(rig.Map.Bindings(InputAxis.Roll).ToArray(), b => b.DisplayName.Contains("Bumper"));
         var proposal = rig.Remapper.Propose(ControlSlot.Of(InputAxis.Roll, true), 0, Key(GlfwKey.H));
         Assert.NotNull(proposal);

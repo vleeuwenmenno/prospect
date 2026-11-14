@@ -4,7 +4,7 @@
 
 The non-visual implementation is complete: placeable blocks, derived equipment, generated gas composition,
 server scans, private session publication and saved knowledge.
-Scan buttons/keys, palette polish, analysis panels and locator drawing remain the UI workers' task.
+The interface is built (see UI below). Mining, inventory installation and knowledge sharing remain open.
 
 ## Decided: equipment
 
@@ -111,6 +111,17 @@ Capture copies into a preallocated buffer; the save worker alone writes it.
 Loading checks owner, uniqueness, capacity, finite values, observation tick, resource catalogue and generated target existence.
 Active scans and cooldowns are transient and reset on load. Generated mixtures are recomputed; observed values are retained unchanged.
 Evaluator version is 10; protocol 47; generation 7; save codec 4. Older incompatible saves are refused untouched, without migration.
+
+## Decided: interface
+
+- Editor: a Module tab (`PartRole.Module`); cards show family, quality badge (tier colour), mark, range, scan time, draw, cooldown.
+- Keys: `X` asteroid scan on the target, `C` gas scan, `Y` locator pulse, `F4` Gas window. All rebindable. They work in flight and the command view.
+- Chips over the console, only for modules the ship flown has; click or key does the same. A known no (no target, no cloud, out of range) is said on the chip and sends nothing.
+- Target panel: analysis from `SessionSnapshot.Modules` only. Unscanned asteroids show size and distance, never generated ore or mass.
+- Gas: window, map card section and Charts mark come from `GasLedger`, a mean over the regions sampled. Unresolved share stays unresolved.
+- Locator: screen-space marks by class (`content/visuals/modules.json`). Fresh marks fade; the command view keeps a faint mark. Classes are in the map index.
+- Tier colours, classes, gas colours and strip figures are content (`content/visuals/modules.json`).
+- Captures: `--open modules|gas|pinned-gas|module-command`, `--target-rock`, `--module gas|asteroid|locator [--module-at s]`, on a copy of the client build whose pod carries modules.
 
 ## Open
 

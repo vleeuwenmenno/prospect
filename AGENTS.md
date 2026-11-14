@@ -254,6 +254,14 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `ChartCatalogue` (font-free, allocation-free); its jump goes through `ChartActions` and `JumpPlan`, never a
   second range check. Rules in `docs/windows.md`; `InterfaceWindowTests` and the interface tests in
   `FrameOrderTests` hold them.
+- **Module interface:** what the player sees of a scan is `SessionSnapshot.Modules` and nothing generated: the target panel
+  never reads ore or mass from the sector (`FindAnalysis`), gas shows only resolved shares (`GasLedger`), the locator draws
+  observations (`DrawLocatorVision`), never live positions. A key or chip asks through `ModuleRules.Request`, which sends
+  only when `ModuleRules.Gate` says Ready; the server still decides. The gas scanner's target is `GasTargeting`, which uses
+  the server's own `GasCloudQuery.SamplePoint`. Tier colours, locator classes, gas colours and strip figures live in
+  `content/visuals/modules.json` (`ModuleLook`). A new module family needs a `ModuleFamily` slot in `ModuleRules`, an action,
+  a chip, a tip and a `ModuleInterfaceTests` case. Check with `--open modules|gas|module-command`, `--target-rock`, `--module`
+  on a copy of the client build whose `command_pod.json` carries module blocks (no shipped ship has any).
 - **A new action or key:** add it to `content/input/bindings.json` and to `content/input/controls.json` (tab, label,
   scope; a fixed mouse or chord row goes there too). Loading refuses an action the catalogue lacks. Read it through
   `ActionMap` only; never cache a key name without rebuilding it on `ActionMap.Changed`. Anything that reads input

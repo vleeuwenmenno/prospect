@@ -1137,7 +1137,7 @@ internal sealed class App : IDisposable
             {
                 // The editor on the part list's Modules tab.
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
-                _screens.SelectEditorTab("Modules");
+                _screens.SelectEditorTab("Module");
             }
             else if (view == "module-command")
             {

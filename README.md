@@ -11,7 +11,7 @@ or that local game opened to other players. There is one simulation and one code
 
 ## Status
 
-Scanning modules have a non-visual backend: three placeable Common Mk I blocks, gas composition, targeted asteroid analysis, bounded locator pulses and personal saved observations. Scan controls, analysis panels and locator drawing are not wired into the UI yet. See [module contract](docs/roadmap/modules.md).
+Scanning modules have a non-visual backend: three placeable Common Mk I blocks, gas composition, targeted asteroid analysis, bounded locator pulses and personal saved observations. The interface is wired: a **Module** tab in the ship editor, keys and chips for the three scanners, the asteroid analysis on the target panel, the **Gas** window and the locator's vision over the flight and command views (see *Ship modules* below). No ship in the shipped fleet carries a module: build one in the editor. Mining, upgrades and sharing knowledge are not there. See [module contract](docs/roadmap/modules.md).
 
 New ships from a drone: server/session creation, remote editor grant, persistence, the New ship dialog and its keys are implemented. Closing the editor of a ship just built puts you in control of it.
 
@@ -436,6 +436,10 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Show the cursor (pilot view) | Hold `Shift`; with it, right-drag over space turns the camera, and pointing at a console bar shows its figures | |
 | Dampeners on / off | `Z` | `X` |
 | Scan the sector you are in; again to cancel (flight, command view, map) | `K` | D-pad left |
+| Asteroid scanner: scan the targeted asteroid (flight, command view) | `X` | |
+| Gas scanner: sample the gas cloud you are in or beside | `C` | |
+| Asteroid locator: pulse | `Y` | |
+| Gas window: clouds you have sampled | `F4` | |
 | Command view | `N` or `F9` | `Back` |
 | Galaxy map | `M` | `Y` |
 | Halt (cancel order; the only way to cancel a started jump) | `H` or `Backspace` | `B` |
@@ -543,6 +547,34 @@ keys: `F` is still down and Follow. `F3` shows the
 performance overlay, `F11` toggles fullscreen, `F12` takes a screenshot. Bindings live in
 `content/input/bindings.json` and their tabs and labels in `content/input/controls.json`; block types and flight rules in `content/blocks`, hull designs in `content/ships`,
 galaxy rules in `content/galaxy`, world settings in `content/rules`, the listing server's address in `content/net`.
+
+## Ship modules
+
+Three modules exist, each a block you place in the ship editor (**Module** tab; a card shows the family, the quality
+as a coloured badge, the mark, range, scan time, power draw and cooldown). All are Common Mk I today; the six
+qualities (Common, Uncommon, Rare, Epic, Legendary, Alien Tech) and their colours are content
+(`content/visuals/modules.json`, `moduleTiers` in `content/blocks/blocks.json`).
+
+- **Chips.** Over the flight console, one chip for each module the ship you fly carries (none otherwise): its key,
+  name, tier colour and what it would do now: READY, the seconds left while it runs, COOL while the shared
+  cooldown runs, or why not (NO TARGET, NO CLOUD, OUT OF RANGE, NO POWER). Resting the pointer on a chip shows
+  its figures. Clicking a chip does what the key does; in flight hold `Shift` first. The three share one cooldown and take one request at a time.
+- **Asteroid scanner (`X`).** Scans the asteroid you target (middle mouse, or the first one selected in the command
+  view). The target panel then shows the ore with its grade as a bar, the host rock's share, mass, how good the
+  scanner was and how long ago. Until then it says *Unscanned - press X to scan* and shows only the asteroid's
+  size and distance; the ore and mass the sector generated are not read off it. The panel has a **Scan** button.
+- **Gas scanner (`C`).** Samples the cloud you are in or beside, if its envelope is within the scanner's reach.
+  The **Gas** window (`F4`, pinnable like Charts) lists every cloud you sampled, newest first: its kind, how many
+  of its eight regions you sampled and how long ago, each resolved gas as a bar with its share, the unresolved
+  remainder, purity and density. A better scanner resolves more gases; what it could not resolve stays
+  unresolved, never spread over the rest. The cloud's sector card on the map shows the same, the Charts window
+  marks the sector *sampled*.
+- **Asteroid locator (`Y`).** One pulse. Every asteroid within its range (at most 256 listed; the readout says
+  PARTIAL when more may be there) gets a mark in the colour of its class: ice, common metal, rare metal, precious
+  metal or bare rock. Marks appear nearest first, stay for about nine seconds and fade; in the command view they
+  fade to a faint mark and stay as your knowledge, in flight they go. A mark is where the asteroid was
+  observed, not a live track. The map index lists the classes once you have a locator or a mark.
+- **Tips.** Each module has a tip the first time it can be used.
 
 ## World settings
 

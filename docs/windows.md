@@ -5,7 +5,7 @@
 - `Tab` (`ToggleInterface`, rebindable) toggles interface mode. `Tab` again or `Esc` leaves it.
 - In it: the pointer is free and stays free; flight input is off; a click never reaches the world.
 - In it every window that is open and not pinned is shown. Leaving hides them and recaptures the pointer in the pilot view.
-- Windows: Social (navigator, Friends, Party, Players, Chat, card), Charts, Inventory, Player.
+- Windows: Social (navigator, Friends, Party, Players, Chat, card), Charts, Gas, Inventory, Player.
 - Each window has a pin. A pinned window stays on screen outside interface mode. It takes nothing in flight; hold `Shift` to click it.
 - The window's X closes it and unpins it. The top bar button, or its key, opens it again.
 - Charts, Inventory and Player start open. Keys: `G`, `U`, `J` (`ToggleCharts`, `ToggleInventory`, `TogglePlayerInfo`).
@@ -26,10 +26,18 @@
 - Plot jump: `JumpPlan` for the selected ships, or for the ship flown when none is selected; `WorldView.OrderJump`. The row says why when it cannot.
 - No allocation: `ChartCatalogue` makes its arrays once for the chart limit. A row's star, fields and gas are worked out three rows a frame.
 
+## Gas window
+
+- Key `F4` (`ToggleGas`). Starts closed; no top bar tab. Pinnable like Charts.
+- Lists the clouds the player sampled (`SessionSnapshot.Modules`), newest first. Nothing about an unsampled cloud.
+- Per cloud: kind, best scanner quality, regions sampled of eight, age; each resolved gas as a bar with its share; unresolved share; purity and density (means over the regions).
+- Show on map: the same as Charts.
+- No allocation: `GasLedger` makes its arrays once and rebuilds only when the records change.
+
 ## Checks
 
 - `--charted <n>` (with `--capture` or `--bench`, no `--worlds`) charts every sector within n of the start, for captures.
-- `--open interface`, `charts`, `pinned-charts`, `inventory`.
+- `--open interface`, `charts`, `pinned-charts`, `inventory`, `gas`, `pinned-gas`.
 
 ## Open
 
