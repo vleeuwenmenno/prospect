@@ -16,5 +16,13 @@
   "gasLight": 0.75,
   "gasFill": 0.04,
   "gasGrid": 250,
-  "gasDimming": 0.2
+  "gasDimming": 0.2,
+  "waveSeconds": 1.1,
+  "waveReference": 200,
+  "waveSizeExponent": 0.35,
+  "waveMinSeconds": 0.5,
+  "waveMaxSeconds": 2.4,
+  "waveBand": 0.6,
+  "waveMinPixels": 24,
+  "waveLight": 1.0
 }

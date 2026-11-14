@@ -1,7 +1,8 @@
 #version 450
 // The scan pulse: a front that spreads from where the scanning ship was, and shows only where it touches something.
-// Asteroids and hulls get a crisp edge where the front crosses them and a grid in a band behind it; gas lights up
-// with the same grid where the front passes through it. Empty space shows nothing. Added to the displayed image
+// Asteroids and hulls get a crisp edge where the front crosses them and a grid in a band behind it; the larger ones
+// on screen instead get a ripple of the same look that starts where the front touched them and crawls over them to
+// their far side. Gas lights up with the grid where the front passes through it. Empty space shows nothing. Added to the displayed image
 // after tone mapping, in its own pass, drawn only while a pulse shows: gas, shields and jump openings are composed
 // before it and are not changed by it. Gas is the smooth envelope of one cloud, the one the sensors use (hosting.md),
 // not the visible noise: it lights the front inside the cloud and dims what lies behind gas.
@@ -20,8 +21,19 @@ layout(push_constant) uniform Pulse
     vec4 light;      // x: front edge on surfaces; y: grid in the band; z: even band fill; w: grid in gas
     vec4 cloud;      // xyz: the cloud's centre relative to the camera; w: extinction per metre times dimming
     vec4 cloudRadii; // xyz: one over its envelope's radii, zero for no cloud; w: unused
-    vec4 gas;        // x: the grid's spacing in gas in metres; y: even light in gas
+    vec4 gas;        // x: the grid's spacing in gas in metres; y: even light in gas; z: how many ripples
 } pulse;
+
+// The surface ripples (ScanWaves): objects the front has touched, the largest on screen first. Matches
+// ScanWaveObject in ScanPulse.cs; MaxWaves matches ScanWaves.Capacity.
+const int MaxWaves = 32;
+struct WaveObject
+{
+    vec4 sphere; // xyz: centre relative to the camera; w: radius in metres
+    vec4 wave;   // x: how far the ripple has crawled over the surface from the point touched; y: its band's width,
+                 // both in metres; z: its strength
+};
+layout(set = 2, binding = 0) uniform Waves { WaveObject objects[MaxWaves]; } waves;
 
 layout(location = 0) in vec2 ndc;
 layout(location = 0) out vec4 outColor;
@@ -118,15 +130,42 @@ void main()
     float edge = lineAt(abs(r - radius), fwidth(r));
     float behind = (radius - r) / pulse.band.x;
     float fade = behind >= 0.0 && behind <= 1.0 ? 1.0 - behind : 0.0;
-    float surface = (pulse.light.x * edge + (pulse.light.y * grid(p, change, pulse.band.z) + pulse.light.z) * fade) * throughGas(v, scene);
-    float light = scene < Sky && !outline ? surface : 0.0;
+    float lines = grid(p, change, pulse.band.z);
+    float surface = pulse.band.y * (pulse.light.x * edge + (pulse.light.y * lines + pulse.light.z) * fade);
+
+    // An object with a ripple: the ripple, not the front's band, crawls over it from the point the front touched
+    // first (the surface point nearest the origin) to its far side. Its distance over the surface is the angle
+    // around the object's centre times its radius. A pixel belongs to the object whose sphere it lies deepest in.
+    vec3 at = v * min(scene, 1e7);
+    int owner = -1;
+    float deepest = 1.69; // within 1.3 radii: rocks are lumpy, and stand out of their nominal sphere
+    int count = min(int(pulse.gas.z), MaxWaves);
+    for (int i = 0; i < count; i++)
+    {
+        vec4 sphere = waves.objects[i].sphere;
+        vec3 d = at - sphere.xyz;
+        float depth = dot(d, d) / (sphere.w * sphere.w);
+        if (depth < deepest) { deepest = depth; owner = i; }
+    }
+    WaveObject object = waves.objects[max(owner, 0)];
+    vec3 outward = normalize(at - object.sphere.xyz);
+    vec3 touched = normalize(pulse.shell.xyz - object.sphere.xyz);
+    float over = object.sphere.w * acos(clamp(dot(outward, touched), -1.0, 1.0));
+    float crawl = object.wave.x;
+    float ring = lineAt(abs(over - crawl), fwidth(over)) * step(over, crawl + 1.0);
+    float trail = (crawl - over) / object.wave.y;
+    float wake = trail >= 0.0 && trail <= 1.0 ? 1.0 - trail : 0.0;
+    float ripple = object.wave.z * (pulse.light.x * ring + (pulse.light.y * lines + pulse.light.z) * wake);
+    surface = owner >= 0 ? ripple : surface;
+
+    float light = scene < Sky && !outline ? surface * throughGas(v, scene) : 0.0;
 
     // Gas: where the front passes through the cloud, nearer than anything solid.
     vec3 c = pulse.shell.xyz;
     float along = dot(v, c);
     float h = radius * radius - max(dot(c, c) - along * along, 0.0);
     float root = sqrt(max(h, 0.0));
-    light += gasCrossing(v, along - root, h > 0.0, scene) + gasCrossing(v, along + root, h > 0.0, scene);
+    light += pulse.band.y * (gasCrossing(v, along - root, h > 0.0, scene) + gasCrossing(v, along + root, h > 0.0, scene));
 
-    outColor = vec4(pulse.color.rgb * light * pulse.band.y, 0.0);
+    outColor = vec4(pulse.color.rgb * light, 0.0);
 }
