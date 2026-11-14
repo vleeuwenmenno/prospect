@@ -21,7 +21,7 @@ internal static class TipPlacement
     /// the caller found it this frame; <paramref name="known"/> is false when it is not there (an editor panel with
     /// no editor open, a target that is gone), and the tip then takes the top right of the screen.
     /// </summary>
-    public static float2 Place(in TipAnchor anchor, bool known, in HudRect area, float2 size, float2 display, float scale)
+    public static float2 Place(in TipAnchor anchor, bool known, in HudRect area, float2 size, float2 display, float scale, float2 shift = default)
     {
         float Px(float design) => MathF.Round(design * scale);
         var margin = Px(FloatingWindow.Margin);
@@ -53,10 +53,40 @@ internal static class TipPlacement
                 at = Outside(area, Mirror(side, false), size, gap);
         }
 
-        at += new float2(Px(anchor.OffsetX), Px(anchor.OffsetY));
+        at += new float2(Px(anchor.OffsetX + shift.X), Px(anchor.OffsetY + shift.Y));
         return new float2(
             Math.Clamp(at.X, screen.Left, Math.Max(screen.Left, screen.Right - size.X)),
             Math.Clamp(at.Y, screen.Top, Math.Max(screen.Top, screen.Bottom - size.Y)));
+    }
+
+    private static readonly int SideCount = Enum.GetValues<TipSide>().Length;
+    private static readonly string[] Keys = BuildKeys();
+
+    private static string[] BuildKeys()
+    {
+        var keys = new string[Enum.GetValues<TipRegion>().Length * SideCount];
+        for (var i = 0; i < keys.Length; i++)
+            keys[i] = $"{(TipRegion)(i / SideCount)}.{(TipSide)(i % SideCount)}";
+        return keys;
+    }
+
+    /// <summary>
+    /// The name a dragged position is saved under: the anchor's region and side, such as "Screen.TopRight". Tips
+    /// that share an anchor share where the player put them. Built once; a lookup never allocates.
+    /// </summary>
+    public static string KeyOf(in TipAnchor anchor) => Keys[(int)anchor.Region * SideCount + (int)anchor.Side];
+
+    /// <summary>
+    /// The shift, in unscaled pixels, that carries a tip now at <paramref name="shift"/> by
+    /// <paramref name="delta"/> screen pixels: worked out through <see cref="Place"/>, so what is saved is what
+    /// stays on screen after the clamp, never a position past an edge.
+    /// </summary>
+    public static float2 Dragged(in TipAnchor anchor, bool known, in HudRect area, float2 size, float2 display, float scale, float2 shift, float2 delta)
+    {
+        var home = Place(anchor, known, area, size, display, scale);
+        var wanted = shift + delta / scale;
+        var at = Place(anchor, known, area, size, display, scale, wanted);
+        return (at - home) / scale;
     }
 
     private static float2 Inside(in HudRect area, TipSide side, float2 size)

@@ -27,6 +27,7 @@ internal sealed partial class ScreenHost
     private bool _tipBack;
 
     private bool _tipShown;
+    private bool _tipDragging;
     private HudRect _tipRect;
 
     // A tip placed against a point keeps the point it first showed at, so it does not run from the pointer that
@@ -138,13 +139,24 @@ internal sealed partial class ScreenHost
         if (!_tipShown)
         {
             _tipPlacedId = null;
+            _tipDragging = false;
+            _tips.Dragging = false;
             return;
         }
 
         var tip = _tips.Current;
         var size = TipPanel.Measure(_tipCatalogue, tip, _ui.DisplaySize.X);
         var known = TipArea(tip.Anchor, world, out var area);
-        var at = TipPlacement.Place(tip.Anchor, known, area, size, _ui.DisplaySize, Kit.Scale);
+        var shift = _tips.Shift(tip.Anchor, known);
+        // The title bar was held last frame: this frame's pointer movement moves the panel, so it keeps up with the
+        // pointer instead of a frame behind. The result is what stays on screen, and is what is remembered.
+        if (_tipDragging && ImGui.IsMouseDown(ImGuiMouseButton.Left))
+        {
+            shift = TipPlacement.Dragged(tip.Anchor, known, area, size, _ui.DisplaySize, Kit.Scale, shift, ImGui.GetIO().MouseDelta);
+            _tips.SetShift(tip.Anchor, known, shift);
+        }
+
+        var at = TipPlacement.Place(tip.Anchor, known, area, size, _ui.DisplaySize, Kit.Scale, shift);
         _tipRect = new HudRect(at.X, at.Y, at.X + size.X, at.Y + size.Y);
     }
 
@@ -215,7 +227,8 @@ internal sealed partial class ScreenHost
         if (!_tipShown || !_tips.Active)
             return;
         // While the pointer is hidden for flight the panel takes no input; otherwise it is a window like any other.
-        TipPanel.Draw(_tips, _tipCatalogue, _tipRect, !_app.PointerCaptured, _mapOpen ? _claimTipForMap : null);
+        _tipDragging = TipPanel.Draw(_tips, _tipCatalogue, _tipRect, !_app.PointerCaptured, _mapOpen ? _claimTipForMap : null);
+        _tips.Dragging = _tipDragging;
         SaveTips();
     }
 
@@ -234,6 +247,8 @@ internal sealed partial class ScreenHost
     {
         _tips.Clear();
         _tipShown = false;
+        _tipDragging = false;
+        _tips.Dragging = false;
         _tipPlacedId = null;
         _tipSawMap = _tipSawCommand = _tipSawEditor = _tipSawScan = _tipSawShield = _tipEnergyLow = false;
     }

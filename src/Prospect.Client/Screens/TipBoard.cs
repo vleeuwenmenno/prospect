@@ -1,3 +1,4 @@
+using Brutal.Numerics;
 using Prospect.Client.Settings;
 
 namespace Prospect.Client.Screens;
@@ -11,6 +12,7 @@ namespace Prospect.Client.Screens;
 /// <item><see cref="Next"/> goes to the following tip and wraps. <see cref="Close"/> closes the whole stack.</item>
 /// <item>"Don't show this again" is ticked for the tip shown. When that tip is left, by Next or Close, it is saved
 /// as hidden and never fires again on this client. A tip closed without it fires again with its next trigger.</item>
+/// <item>Where the player dragged panels to is kept per anchor in <see cref="ClientSettings.TipPositions"/>.</item>
 /// <item>Hidden tips live in <see cref="ClientSettings.HiddenTips"/>; <see cref="Reset"/> empties them.</item>
 /// </list>
 /// Nothing here allocates once built, so it may run in the frame loop.
@@ -23,6 +25,7 @@ internal sealed class TipBoard
     private int _count;
     private int _index;
     private bool _changed;
+    private bool _shiftDirty;
 
     public TipBoard(TipCatalogue catalogue, ClientSettings settings)
     {
@@ -139,18 +142,63 @@ internal sealed class TipBoard
         DontShowAgain = false;
     }
 
-    /// <summary>Shows every tip again: forgets which were hidden. A stack already waiting stays.</summary>
-    public void Reset()
+    /// <summary>True while the player holds a panel's title bar: a moved position is saved once it is let go, not every frame.</summary>
+    public bool Dragging { get; set; }
+
+    /// <summary>
+    /// The shift, in unscaled pixels, the player dragged panels at <paramref name="anchor"/> to. Zero when none
+    /// was, and for a tip whose anchor is not found (<paramref name="known"/> false): its fallback place is not one
+    /// the player chose.
+    /// </summary>
+    public float2 Shift(in TipAnchor anchor, bool known) =>
+        known && _settings.TipPositions.TryGetValue(TipPlacement.KeyOf(anchor), out var offset) ? new float2(offset.X, offset.Y) : default;
+
+    /// <summary>Remembers where panels at <paramref name="anchor"/> now go. Allocates only the first time an anchor is moved.</summary>
+    public void SetShift(in TipAnchor anchor, bool known, float2 shift)
     {
-        if (_settings.HiddenTips.Count == 0)
+        if (!known)
             return;
-        _settings.HiddenTips.Clear();
-        _changed = true;
+        var key = TipPlacement.KeyOf(anchor);
+        var positions = _settings.TipPositions;
+        if (!positions.TryGetValue(key, out var offset))
+        {
+            if (positions.Count >= ClientSettings.MaxTipPositions)
+                return;
+            positions[key] = offset = new TipOffset();
+        }
+
+        if (offset.X == shift.X && offset.Y == shift.Y)
+            return;
+        offset.X = shift.X;
+        offset.Y = shift.Y;
+        _shiftDirty = true;
     }
 
-    /// <summary>True once after the hidden list changed, so the caller can save the settings.</summary>
+    /// <summary>Shows every tip again and puts panels back where their anchors place them. A stack already waiting stays.</summary>
+    public void Reset()
+    {
+        if (_settings.HiddenTips.Count > 0)
+        {
+            _settings.HiddenTips.Clear();
+            _changed = true;
+        }
+
+        if (_settings.TipPositions.Count > 0)
+        {
+            _settings.TipPositions.Clear();
+            _changed = true;
+        }
+    }
+
+    /// <summary>True once after the hidden list or a panel's position changed, so the caller can save the settings.</summary>
     public bool TakeChanged()
     {
+        if (_shiftDirty && !Dragging)
+        {
+            _shiftDirty = false;
+            _changed = true;
+        }
+
         var changed = _changed;
         _changed = false;
         return changed;

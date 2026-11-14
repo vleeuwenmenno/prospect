@@ -200,6 +200,9 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `ScreenHost.FireTip(TipTriggers.X)` (or `TipBoard.Fire`); new moment = new constant, new tip entry. The rules
   (stack, Next, Close, tick) are `TipBoard`, font-free; the panel is `TipPanel`, placed by `TipPlacement` before the
   map and panels are laid out. Hidden ids are `ClientSettings.HiddenTips`, saved by the client when they change.
+  The title bar drags the panel (`TipPanel.Draw` returns true while held; only with the pointer free): the shift from
+  the anchor's place, in unscaled pixels, is saved per anchor (`TipPlacement.KeyOf`, `ClientSettings.TipPositions`,
+  `TipBoard.Shift`/`SetShift`) once the bar is let go, kept on screen by `TipPlacement.Place`, and cleared by Reset tips.
   The panel is one window without keyboard navigation and takes no input while the pilot pointer is captured; it
   must never change `PointerFrame`. A surface under it that does its own pointer routing blocks its rectangle (the
   map: `BlockMapForTip`, `Claim`). Escape goes to `HandleTipShortcut` first; every other Escape reads

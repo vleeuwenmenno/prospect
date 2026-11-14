@@ -25,7 +25,8 @@ Explicit private local claims have a nonvisual API backed by account-service tic
 
 In-game tips: the first time the map, the command view or the ship editor opens, or a shield goes down or the
 battery runs low, a small panel explains it. Several at once stack with a counter and Next; Close shows the tip again
-next time, "Don't show this again" hides it on this client, and Settings, Tips, **Reset tips** shows all again.
+next time, "Don't show this again" hides it on this client, and Settings, Tips, **Reset tips** shows all again and puts panels back in place.
+Drag a tip by its title bar (hold Shift in flight) and the next tip at that spot appears where you left it.
 Tips are data in `content/visuals/tips.json`. Every press of `B` in the escape drone opens the New ship dialog and
 brings up the "edit the drone with Ctrl+B" tip beside it, unless you hid that tip.
 

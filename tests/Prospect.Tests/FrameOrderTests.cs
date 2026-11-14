@@ -738,9 +738,154 @@ public sealed class FrameOrderTests : IDisposable
         var size = TipPanel.Measure(_tipCatalogue!, tip, Screen.X);
         var onDialog = tip.Anchor.Region == TipRegion.NewShipDialog && _newShip.Open;
         var known = tip.Anchor.Region == TipRegion.Screen || onDialog;
-        var at = TipPlacement.Place(tip.Anchor, known, onDialog ? NewShipDialog.Panel(Screen, _tipScale) : default, size, Screen, _tipScale);
+        var area = onDialog ? NewShipDialog.Panel(Screen, _tipScale) : default;
+        var shift = board.Shift(tip.Anchor, known);
+        // As ScreenHost.PlanTip: a title bar held last frame moves the panel by this frame's pointer movement.
+        if (_tipDragging && ImGui.IsMouseDown(ImGuiMouseButton.Left))
+        {
+            shift = TipPlacement.Dragged(tip.Anchor, known, area, size, Screen, _tipScale, shift, ImGui.GetIO().MouseDelta);
+            board.SetShift(tip.Anchor, known, shift);
+        }
+
+        var at = TipPlacement.Place(tip.Anchor, known, area, size, Screen, _tipScale, shift);
         _tipRect = new HudRect(at.X, at.Y, at.X + size.X, at.Y + size.Y);
-        TipPanel.Draw(board, _tipCatalogue!, _tipRect, !_router.Captured);
+        _tipDragging = TipPanel.Draw(board, _tipCatalogue!, _tipRect, !_router.Captured);
+        board.Dragging = _tipDragging;
+    }
+
+    private bool _tipDragging;
+
+    /// <summary>Presses at <paramref name="from"/>, moves to <paramref name="to"/> in steps and lets go.</summary>
+    private void DragTip(float2 from, float2 to)
+    {
+        Frame(() => Move(from));
+        Frame();
+        Frame(() => Button(GlfwMouseButton.Left, true));
+        for (var i = 1; i <= 6; i++)
+        {
+            var at = from + (to - from) * (i / 6f);
+            Frame(() => Move(at));
+        }
+
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        Frame();
+    }
+
+    /// <summary>A step of <paramref name="length"/> pixels from the panel toward the middle of the screen, where there is room to go.</summary>
+    private float2 TowardCentre(float length) => new(
+        (_tipRect.Left + _tipRect.Right) * 0.5f < Screen.X * 0.5f ? length : -length,
+        (_tipRect.Top + _tipRect.Bottom) * 0.5f < Screen.Y * 0.5f ? length : -length);
+
+    private float2 TipGrip => new(TipPoint(_tipRect).X, _tipRect.Top + 8f * _tipScale);
+
+    [Theory]
+    [InlineData(1f)]
+    [InlineData(2f)]
+    public void DraggingATipsTitleBarMovesItKeepsItOnScreenAndRemembersWhereItWent(float scale)
+    {
+        UseTips(scale);
+        _surfaceOpen = true;
+        Frame(() => Move(EmptySpace));
+        var board = _tipBoard!;
+        board.Fire(TipTriggers.CommandViewOpened);
+        Frame();
+        Frame();
+        var home = new float2(_tipRect.Left, _tipRect.Top);
+        var count = board.Count;
+
+        DragTip(TipGrip, TipGrip + TowardCentre(80));
+        var moved = new float2(_tipRect.Left, _tipRect.Top);
+        Assert.True(MathF.Abs(moved.X - home.X) > 60);
+        Assert.True(MathF.Abs(moved.Y - home.Y) > 60);
+        // A drag is not a press on a button: the stack and the tick are as they were.
+        Assert.Equal(count, board.Count);
+        Assert.Equal(0, board.Index);
+        Assert.False(board.DontShowAgain);
+        Assert.True(board.Active);
+
+        // The place is saved once the title bar is let go, under the anchor.
+        Assert.Single(_tipSettings!.TipPositions);
+        Assert.True(board.TakeChanged());
+
+        // Another tip at the same anchor shows where the player put it.
+        board.Close();
+        board.Fire(TipTriggers.CommandViewOpened);
+        Frame();
+        Frame();
+        Assert.Equal(moved, new float2(_tipRect.Left, _tipRect.Top));
+
+        // Dragged far past every edge it stops inside the screen.
+        DragTip(TipGrip, new float2(-4000, -4000));
+        Assert.True(_tipRect.Left >= 0 && _tipRect.Top >= 0);
+        DragTip(TipGrip, new float2(9000, 9000));
+        Assert.True(_tipRect.Right <= Screen.X && _tipRect.Bottom <= Screen.Y);
+
+        // A smaller window keeps the saved shift on screen.
+        var tip = board.Current;
+        var shift = board.Shift(tip.Anchor, true);
+        var size = new float2(_tipRect.Width, _tipRect.Height);
+        var small = size + new float2(160, 240) * _tipScale;
+        var placed = TipPlacement.Place(tip.Anchor, true, default, size, small, _tipScale, shift);
+        Assert.True(placed.X >= 0 && placed.Y >= 0 && placed.X + size.X <= small.X && placed.Y + size.Y <= small.Y);
+
+        // Reset tips puts it back.
+        board.Reset();
+        Assert.Empty(_tipSettings.TipPositions);
+        Assert.True(board.TakeChanged());
+        Frame();
+        Frame();
+        Assert.Equal(home, new float2(_tipRect.Left, _tipRect.Top));
+    }
+
+    [Fact]
+    public void ADragOfTheButtonsOrTheTickMovesNothingAndTheWorldNeverSeesATitleDrag()
+    {
+        UseTips();
+        _world.SetMode(ViewMode.Command);
+        _world.SelectAllOwned();
+        Frame();
+        Frame();
+        var owned = _world.Selection.Length;
+        var board = _tipBoard!;
+        board.Fire(TipTriggers.CommandViewOpened);
+        Frame();
+        Frame();
+        var home = new float2(_tipRect.Left, _tipRect.Top);
+        var count = board.Count;
+
+        DragTip(TipPoint(TipRows().Close), TipPoint(TipRows().Close) + new float2(-200, -150));
+        Assert.Equal(home, new float2(_tipRect.Left, _tipRect.Top));
+        Assert.True(board.Active);
+        DragTip(TipPoint(TipRows().Next), TipPoint(TipRows().Next) + new float2(-200, -150));
+        DragTip(TipPoint(TipRows().Check), TipPoint(TipRows().Check) + new float2(-200, -150));
+        Assert.Equal(home, new float2(_tipRect.Left, _tipRect.Top));
+        Assert.Equal(count, board.Count);
+        Assert.False(board.DontShowAgain);
+        Assert.Empty(_tipSettings!.TipPositions);
+
+        // A drag from the title bar across the world neither box-selects nor clears the selection.
+        DragTip(TipGrip, EmptySpace);
+        Assert.Equal(owned, _world.Selection.Length);
+        Assert.True(board.Active);
+    }
+
+    [Fact]
+    public void InFlightTheTitleBarCannotBeDraggedUntilThePointerIsShown()
+    {
+        UseTips();
+        var board = _tipBoard!;
+        board.Fire(TipTriggers.CommandViewOpened);
+        Frame();
+        Frame();
+        Assert.True(_router.Captured);
+        var home = new float2(_tipRect.Left, _tipRect.Top);
+        DragTip(TipGrip, TipGrip + TowardCentre(80));
+        Assert.Equal(home, new float2(_tipRect.Left, _tipRect.Top));
+        Assert.Empty(_tipSettings!.TipPositions);
+
+        Frame(() => Key(GlfwKey.LeftShift, true));
+        DragTip(TipGrip, TipGrip + TowardCentre(80));
+        Assert.True(MathF.Abs(_tipRect.Left - home.X) > 60);
     }
 
     private float2 TipPoint(in HudRect rect) => new((rect.Left + rect.Right) * 0.5f, (rect.Top + rect.Bottom) * 0.5f);

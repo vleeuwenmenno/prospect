@@ -39,6 +39,18 @@ internal sealed class ClientSettings
     public const int MaxHiddenTips = 256;
     public const int MaxTipIdLength = 64;
 
+    /// <summary>
+    /// Where the player dragged tip panels to, by anchor (<c>TipPlacement.KeyOf</c>, such as "Screen.TopRight"): the
+    /// shift from the place the anchor gives, in unscaled pixels, so it follows a resize and a change of interface
+    /// scale. "Reset tips" empties it.
+    /// </summary>
+    public Dictionary<string, TipOffset> TipPositions { get; set; } = [];
+
+    /// <summary>The most anchors kept, the longest key and the largest shift: a hand-edited file cannot grow or throw a panel away.</summary>
+    public const int MaxTipPositions = 32;
+    public const int MaxTipPositionKeyLength = 48;
+    public const float MaxTipShift = 16384f;
+
     private static string FilePath => AppPaths.UserConfig("settings.json");
 
     /// <summary>Loads the settings file. A missing or unreadable file yields defaults; it is never fatal.</summary>
@@ -108,7 +120,26 @@ internal sealed class ClientSettings
         }
 
         HiddenTips = kept;
+
+        TipPositions ??= [];
+        var positions = new Dictionary<string, TipOffset>(Math.Min(TipPositions.Count, MaxTipPositions));
+        foreach (var (key, offset) in TipPositions)
+        {
+            if (offset is null || string.IsNullOrWhiteSpace(key) || key.Length > MaxTipPositionKeyLength || positions.Count >= MaxTipPositions)
+                continue;
+            if (float.IsFinite(offset.X) && float.IsFinite(offset.Y))
+                positions[key] = new TipOffset { X = Math.Clamp(offset.X, -MaxTipShift, MaxTipShift), Y = Math.Clamp(offset.Y, -MaxTipShift, MaxTipShift) };
+        }
+
+        TipPositions = positions;
     }
+}
+
+/// <summary>A saved shift of a tip panel from where its anchor puts it, in unscaled pixels.</summary>
+internal sealed class TipOffset
+{
+    public float X { get; set; }
+    public float Y { get; set; }
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true)]
