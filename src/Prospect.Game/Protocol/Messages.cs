@@ -87,6 +87,8 @@ public enum MessageId : byte
     PlotJump = 30,
     /// <summary>Server to owner: accepted navigation plot and jump refusal feedback.</summary>
     Navigation = 31,
+    /// <summary>Client to server: cancel the sender's running sector scan.</summary>
+    CancelScan = 32,
 }
 
 public enum RejectReason : byte
@@ -163,7 +165,7 @@ public static class ProtocolInfo
     /// index in a list both ends generate for themselves, so two builds that generate differently would mean
     /// different rocks by the same number. Client and server must match exactly.
     /// </summary>
-    public const uint Version = 44;
+    public const uint Version = 45;
 
     public const ushort DefaultPort = 27420;
     public const int MaxNameBytes = 48;

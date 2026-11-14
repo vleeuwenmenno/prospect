@@ -68,8 +68,14 @@ These are suggested layouts, not a settled control scheme.
   the flight view, the command view and on the map. It is the card button's request: same server rules.
 - A ship with no charting block still asks, so the server's refusal is shown. A running scan or a known cooldown makes
   the key do nothing.
+- The key again while a scan runs **cancels** it (progress lost): the same for the card's button, which reads
+  "Cancel scan" with the time left while scanning. The server cancels only the sender's own running scan; with none
+  running the request is ignored. A cancel starts the cooldown like any other end.
+- A scan belongs to the ship that began it (`ScanView.Hull`). The readout shows only while that ship is flown, on
+  the map or off it. Switching ship ends the scan on the server as `Idle`, still with the cooldown, so nothing
+  shows for it.
 - Readout: a small muted strip under the top of the flight and command views (`scanStrip*` in `content/visuals/map.json`):
-  bar and time left while it runs, then the result or cancellation reason for `scanResultSeconds`, then
+  bar and time left while it runs, then the result or cancellation ("SCAN CANCELLED" when the player did it) for `scanResultSeconds`, then
   "NEXT SCAN IN n S" until the cooldown ends. The cursor over it, or over the card's button, names the key.
 - Tip `scan-key` (trigger `unchartedSector`): fired when the ship being flown has a charting block and its sector has no
   chart, in the flight or command view.

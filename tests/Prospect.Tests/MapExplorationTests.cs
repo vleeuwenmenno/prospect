@@ -145,7 +145,7 @@ public sealed class MapExplorationTests
     public void TheScanCooldownIsReadFromTheSnapshotPerSectorAndRoundsUp()
     {
         var here = new SectorCoord(2, 0, 2);
-        var scan = new ScanView { State = ScanState.Completed, Sector = here, CooldownSector = here, CooldownUntilTick = 1000 };
+        var scan = new ScanView { State = ScanState.Completed, Hull = 7, Sector = here, CooldownSector = here, CooldownUntilTick = 1000 };
         Assert.Equal(ScanGate.Cooling, ScanRules.Gate(scan, here, 400));
         Assert.Equal(10, ScanRules.CooldownSeconds(scan, here, 400));
         Assert.Equal(1, ScanRules.CooldownSeconds(scan, here, 999));
@@ -158,13 +158,32 @@ public sealed class MapExplorationTests
         Assert.Equal(ScanGate.Running, ScanRules.Gate(scan, here, 400));
 
         // The strip: the bar while it runs; afterwards the result inside its window and the cooldown under it.
-        Assert.Equal(new ScanStrip(true, false, 0), ScanRules.Strip(scan, here, 400, 0f, 6f));
+        Assert.Equal(new ScanStrip(true, false, 0), ScanRules.Strip(scan, 7, here, 400, 0f, 6f));
         scan.State = ScanState.Cancelled;
-        var strip = ScanRules.Strip(scan, here, 400, 2f, 6f);
+        var strip = ScanRules.Strip(scan, 7, here, 400, 2f, 6f);
         Assert.True(strip.ResultWindow);
         Assert.Equal(10, strip.CooldownSeconds);
-        Assert.False(ScanRules.Strip(scan, here, 1000, float.MaxValue, 6f).Any);
-        Assert.True(ScanRules.Strip(scan, here, 400, float.MaxValue, 6f).Any);
+        Assert.False(ScanRules.Strip(scan, 7, here, 1000, float.MaxValue, 6f).Any);
+        Assert.True(ScanRules.Strip(scan, 7, here, 400, float.MaxValue, 6f).Any);
+    }
+
+    [Fact]
+    public void TheStripBelongsToTheShipThatBeganTheScanAndShowsNothingForAnother()
+    {
+        var here = new SectorCoord(2, 0, 2);
+        var scan = new ScanView { State = ScanState.Scanning, Hull = 7, Sector = here, StartedTick = 0, CompletesTick = 300 };
+        Assert.True(ScanRules.Strip(scan, 7, here, 100, float.MaxValue, 6f).Running);
+
+        // Another hull flown: no bar, no result, no cooldown, however the scan ended.
+        Assert.Equal(ScanStrip.None, ScanRules.Strip(scan, 8, here, 100, 0f, 6f));
+        scan.State = ScanState.Cancelled;
+        scan.CooldownSector = here;
+        scan.CooldownUntilTick = 700;
+        Assert.Equal(ScanStrip.None, ScanRules.Strip(scan, 8, here, 100, 0f, 6f));
+        Assert.True(ScanRules.Strip(scan, 7, here, 100, 0f, 6f).Any);
+
+        // No hull flown yet (before the first snapshot) shows nothing either.
+        Assert.Equal(ScanStrip.None, ScanRules.Strip(scan, 0, here, 100, 0f, 6f));
     }
 
     [Fact]
@@ -172,7 +191,7 @@ public sealed class MapExplorationTests
     {
         var here = new SectorCoord(1, 0, 1);
         var tracker = new ScanTracker();
-        tracker.Update(new ScanView { State = ScanState.Cooldown, Sector = here, CooldownSector = here, CooldownUntilTick = 600 }, 7, here, true, 0.1f);
+        tracker.Update(new ScanView { State = ScanState.Cooldown, Sector = here, CooldownSector = here, CooldownUntilTick = 600 }, here, true, 0.1f);
         Assert.Equal(0f, tracker.SinceResult);
         Assert.Equal(ScanStop.None, tracker.Stop);
     }
@@ -192,19 +211,18 @@ public sealed class MapExplorationTests
     public void ACancelledScanIsExplainedByWhatChangedSinceItStarted()
     {
         var here = new SectorCoord(1, 0, 1);
-        ScanStop Cancel(uint hull, SectorCoord sector, bool canChart)
+        ScanStop Cancel(SectorCoord sector, bool canChart)
         {
             var tracker = new ScanTracker();
-            tracker.Update(new ScanView { State = ScanState.Scanning, Sector = here, StartedTick = 0, CompletesTick = 300 }, 7, here, true, 0.1f);
-            tracker.Update(new ScanView { State = ScanState.Cancelled, Sector = here }, hull, sector, canChart, 0.1f);
+            tracker.Update(new ScanView { State = ScanState.Scanning, Sector = here, StartedTick = 0, CompletesTick = 300 }, here, true, 0.1f);
+            tracker.Update(new ScanView { State = ScanState.Cancelled, Sector = here }, sector, canChart, 0.1f);
             Assert.Equal(0f, tracker.SinceResult);
             return tracker.Stop;
         }
 
-        Assert.Equal(ScanStop.LeftSector, Cancel(7, here.Offset(1, 0, 0), true));
-        Assert.Equal(ScanStop.ControlChanged, Cancel(8, here, true));
-        Assert.Equal(ScanStop.ChartingLost, Cancel(7, here, false));
-        Assert.Equal(ScanStop.Unknown, Cancel(7, here, true));
+        Assert.Equal(ScanStop.LeftSector, Cancel(here.Offset(1, 0, 0), true));
+        Assert.Equal(ScanStop.ChartingLost, Cancel(here, false));
+        Assert.Equal(ScanStop.Requested, Cancel(here, true));
 
         var scan = new ScanView { State = ScanState.Scanning, StartedTick = 100, CompletesTick = 400 };
         Assert.Equal(0.5f, ScanTracker.Progress(scan, 250));

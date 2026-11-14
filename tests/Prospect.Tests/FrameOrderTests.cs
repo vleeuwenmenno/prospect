@@ -1695,7 +1695,13 @@ public sealed class FrameOrderTests : IDisposable
         }
 
         if (MapSectorCard.Button("##scan"u8, CardScanCenter - new float2(150, 14), new float2(300, 28)))
-            Bridge.RequestScan();
+        {
+            // As the real card: the button is the bar while a scan runs, and cancels it.
+            if (_snapshot.Exploration.Scan.State == ScanState.Scanning)
+                Bridge.CancelScan();
+            else
+                Bridge.RequestScan();
+        }
         MapSectorCard.BeginList(CardListMin, CardListSize, _map);
         for (var i = 0; i < CardRows; i++)
             MapSectorCard.Row(i, 36);
@@ -2145,15 +2151,11 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal(ScanState.Scanning, scan().State);
         Assert.Equal(ScanGate.Running, ScanRules.Gate(scan(), here(), _snapshot.ServerTick));
 
-        // Pressed again while it runs: nothing is asked.
-        Press();
-        Assert.Equal(1, asked);
-
         Tick(_snapshot.Content.Exploration.ScanTicks + 10);
         Assert.Equal(ScanState.Completed, scan().State);
         Assert.Equal(ScanGate.Cooling, ScanRules.Gate(scan(), here(), _snapshot.ServerTick));
         Assert.True(ScanRules.CooldownSeconds(scan(), here(), _snapshot.ServerTick) > 0);
-        var strip = ScanRules.Strip(scan(), here(), _snapshot.ServerTick, 0f, 6f);
+        var strip = ScanRules.Strip(scan(), _snapshot.Hulls[_snapshot.OwnHull].Id, here(), _snapshot.ServerTick, 0f, 6f);
         Assert.True(strip.Any && strip.ResultWindow && strip.CooldownSeconds > 0 && !strip.Running);
 
         // During the cooldown the key does nothing: no request goes out, so no refusal comes back either.
@@ -2168,6 +2170,82 @@ public sealed class FrameOrderTests : IDisposable
         Press();
         Assert.Equal(2, asked);
         Assert.Equal(ScanState.Scanning, scan().State);
+    }
+
+    [Fact]
+    public void TheScanKeyAgainCancelsTheRunningScanOnTheRealServerAndTheCooldownHoldsIt()
+    {
+        var scan = () => _snapshot.Exploration.Scan;
+        var here = () => _snapshot.Content.Galaxy.SectorOf(_snapshot.Hulls[_snapshot.OwnHull].Position);
+        var asked = 0;
+        void Press()
+        {
+            Frame(() => Key(GlfwKey.K, true), () =>
+            {
+                if (ScanRules.HandleKey(_actions, _devices, true, _snapshot.Exploration.Scan, here(), _snapshot.ServerTick, Bridge))
+                    asked++;
+                return false;
+            });
+            Frame(() => Key(GlfwKey.K, false));
+            Tick(8);
+        }
+
+        // The first press starts it; the second, while it runs, cancels it and loses the progress.
+        Press();
+        Assert.Equal(ScanState.Scanning, scan().State);
+        Press();
+        Assert.Equal(2, asked);
+        Assert.Equal(ScanState.Cancelled, scan().State);
+        Tick(_snapshot.Content.Exploration.ScanTicks + 10);
+        Assert.Equal(ScanState.Cancelled, scan().State);
+        Assert.Equal(0, _snapshot.Exploration.ChartCount);
+
+        // The strip tells of it, and of the cooldown a cancel starts; the key waits that out like after any scan.
+        var own = _snapshot.Hulls[_snapshot.OwnHull].Id;
+        var strip = ScanRules.Strip(scan(), own, here(), _snapshot.ServerTick, 0f, 6f);
+        Assert.True(strip.ResultWindow && strip.CooldownSeconds > 0 && !strip.Running);
+        Press();
+        Assert.Equal(2, asked);
+        Tick(_snapshot.Content.Exploration.ScanCooldownTicks + 5);
+        Press();
+        Assert.Equal(3, asked);
+        Assert.Equal(ScanState.Scanning, scan().State);
+    }
+
+    [Fact]
+    public void TheStripFollowsTheScanOfTheShipFlownAcrossTheMapAndNothingShowsAfterASwitch()
+    {
+        var here = () => _snapshot.Content.Galaxy.SectorOf(_snapshot.Hulls[_snapshot.OwnHull].Position);
+        var own = () => _snapshot.Hulls[_snapshot.OwnHull].Id;
+        var strip = () => ScanRules.Strip(_snapshot.Exploration.Scan, own(), here(), _snapshot.ServerTick, float.MaxValue, 6f);
+
+        // Started from the map card's request, as the button sends it.
+        OpenExploreMap();
+        Bridge.RequestScan();
+        Tick(8);
+        Assert.True(strip().Running);
+        Assert.Equal(own(), _snapshot.Exploration.Scan.Hull);
+
+        // Leaving the map with the same ship at the controls: the same scan, still running, strip still there.
+        _surfaceOpen = false;
+        _mapShown = false;
+        Frame();
+        Tick(8);
+        Assert.True(strip().Running);
+
+        // Another ship: the server ends the scan, the new hull is not the scan's, and no strip shows, neither bar,
+        // result nor cooldown.
+        var began = own();
+        Bridge.RequestControl(0);
+        for (var i = 0; i < 3000 && !_snapshot.OwnIsDrone; i++)
+            Tick(1, sleep: true);
+        Assert.True(_snapshot.OwnIsDrone);
+        Tick(5);
+        Assert.NotEqual(began, own());
+        Assert.Equal(began, _snapshot.Exploration.Scan.Hull);
+        Assert.Equal(ScanState.Idle, _snapshot.Exploration.Scan.State);
+        Assert.Equal(ScanStrip.None, strip());
+        Assert.Equal(ScanStrip.None, ScanRules.Strip(_snapshot.Exploration.Scan, own(), here(), _snapshot.ServerTick, 0f, 6f));
     }
 
     [Fact]
@@ -2355,10 +2433,25 @@ public sealed class FrameOrderTests : IDisposable
         });
         Frame();
         Frame();
-        Assert.True(Bridge.ConsumeScan());
+        Assert.Equal(ScanIntent.Start, Bridge.ConsumeScan());
         Assert.Equal(0, _mapPresses);
         Assert.Equal(0, _mapReleases);
         Assert.Equal(OwnSector, _card.Sector);
+
+        // The same button, with the scan running, asks the server to cancel it instead, and the server does.
+        Bridge.RequestScan();
+        Tick(8);
+        Assert.Equal(ScanState.Scanning, _snapshot.Exploration.Scan.State);
+        Frame(() =>
+        {
+            Move(CardScanCenter);
+            Click();
+        });
+        Frame();
+        Frame();
+        Tick(8);
+        Assert.Equal(ScanState.Cancelled, _snapshot.Exploration.Scan.State);
+        Assert.Equal(0, _mapPresses);
 
         Frame(() => Move(CardListMin + CardListSize * 0.5f));
         Frame(() => Wheel(-2));

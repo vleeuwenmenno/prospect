@@ -231,7 +231,6 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public NavigationView Navigation, SentNavigation;
         public bool NavigationSent;
         public ScanView Scan;
-        public uint ScanHull;
         public int ChartCursor;
         public ScanView SentScan;
         public bool ExplorationSent;
@@ -268,7 +267,6 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             Navigation = SentNavigation = default;
             NavigationSent = false;
             Scan = default;
-            ScanHull = 0;
             ChartCursor = 0;
             SentScan = default;
             ExplorationSent = false;
@@ -1036,6 +1034,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             case MessageId.Scan when channel == NetChannel.Reliable && reader.Remaining == 0:
                 StartScan(connection);
                 break;
+            case MessageId.CancelScan when channel == NetChannel.Reliable && reader.Remaining == 0:
+                CancelScan(connection);
+                break;
             case MessageId.BlockAck when channel == NetChannel.Unreliable:
                 connection.Blocks!.Receive(ref reader, _hulls, _tick, connection.Visible);
                 break;
@@ -1217,7 +1218,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     private void ResetControl(Connection connection)
     {
         connection.Navigation = default;
-        if (connection.Scan.State == ScanState.Scanning) EndScan(connection, ScanState.Cancelled, _tick);
+        if (connection.Scan.State == ScanState.Scanning) EndScan(connection, ScanState.Idle, _tick);
         connection.ControlEpoch++;
         connection.Inputs.Clear();
         connection.PreparedInput = InputTimeline.Fallback;

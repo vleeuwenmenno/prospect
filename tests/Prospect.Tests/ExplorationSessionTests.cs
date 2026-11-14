@@ -470,7 +470,7 @@ public sealed class ExplorationSessionTests
     }
 
     [Fact]
-    public void LosingChartingEquipmentOrChangingControlCancelsScan()
+    public void LosingChartingEquipmentCancelsAScanAndChangingControlEndsItQuietly()
     {
         using var rig = new Rig();
         rig.Clients[0].Input.RequestScan();
@@ -485,7 +485,8 @@ public sealed class ExplorationSessionTests
         rig.Step(10);
         rig.Clients[1].Input.RequestControl(0);
         rig.Step(5);
-        Assert.Equal(ScanState.Cancelled, rig.Snap(1).Exploration.Scan.State);
+        Assert.Equal(ScanState.Idle, rig.Snap(1).Exploration.Scan.State);
+        Assert.Equal(0, rig.Snap(1).Exploration.ChartCount);
     }
 
     [Fact]
@@ -629,23 +630,104 @@ public sealed class ExplorationSessionTests
     }
 
     [Fact]
-    public void SwitchingShipCancelsAScanAndCoolsItsSectorDown()
+    public void SwitchingShipEndsAScanWithoutAResultAndCoolsItsSectorDown()
     {
         using var rig = new Rig();
         rig.Clients[1].Input.RequestScan();
         rig.Step(10);
+        var began = rig.Own(1);
+        var running = rig.Snap(1).Exploration.Scan;
+        Assert.Equal(ScanState.Scanning, running.State);
+        Assert.Equal(began, running.Hull);
         rig.Clients[1].Input.RequestControl(0);
         rig.Step(5);
+
+        // Idle, not Cancelled: a client shows nothing for a ship the player no longer flies. The scan still names
+        // its own hull, which is no longer the flown one, and the cooldown stands.
         var scan = rig.Snap(1).Exploration.Scan;
-        Assert.Equal(ScanState.Cancelled, scan.State);
+        Assert.Equal(ScanState.Idle, scan.State);
+        Assert.Equal(began, scan.Hull);
+        Assert.NotEqual(rig.Own(1), scan.Hull);
         Assert.Equal(scan.Sector, scan.CooldownSector);
         Assert.True(scan.CooldownUntilTick > rig.Tick);
     }
 
     [Fact]
+    public void CancellingOwnRunningScanLosesItAndStartsTheCooldown()
+    {
+        using var rig = new Rig();
+        rig.Step(20);
+        rig.Clients[0].Input.RequestScan();
+        rig.Step(10);
+        Assert.Equal(ScanState.Scanning, rig.Snap(0).Exploration.Scan.State);
+        rig.Clients[0].Input.CancelScan();
+        rig.Step(5);
+        var scan = rig.Snap(0).Exploration.Scan;
+        Assert.Equal(ScanState.Cancelled, scan.State);
+        Assert.Equal(rig.Own(0), scan.Hull);
+        Assert.Equal(scan.Sector, scan.CooldownSector);
+        Assert.True(scan.CooldownUntilTick > rig.Tick);
+
+        // Nothing is charted, even once the five seconds would have run out.
+        rig.Step(Content.Exploration.ScanTicks + 10);
+        Assert.Equal(ScanState.Cancelled, rig.Snap(0).Exploration.Scan.State);
+        Assert.Equal(0, rig.Snap(0).Exploration.ChartCount);
+
+        // The cooldown holds: starting again at once is refused, and a refusal keeps the cooldown where it was.
+        var until = rig.Snap(0).Exploration.Scan.CooldownUntilTick;
+        rig.Clients[0].Input.RequestScan();
+        rig.Step(10);
+        var refused = rig.Snap(0).Exploration.Scan;
+        Assert.Equal(ScanState.Cooldown, refused.State);
+        Assert.Equal(until, refused.CooldownUntilTick);
+    }
+
+    [Fact]
+    public void ACancelCannotReachAnotherPlayersScan()
+    {
+        using var rig = new Rig();
+        rig.Step(20);
+        rig.Clients[0].Input.RequestScan();
+        rig.Step(10);
+        rig.Clients[1].Input.CancelScan();
+        rig.Step(10);
+        Assert.Equal(ScanState.Scanning, rig.Snap(0).Exploration.Scan.State);
+
+        // The other player's own scan is untouched by it too, and the first still completes.
+        rig.Step(Content.Exploration.ScanTicks + 10);
+        Assert.Equal(ScanState.Completed, rig.Snap(0).Exploration.Scan.State);
+        Assert.Equal(1, rig.Snap(0).Exploration.ChartCount);
+        Assert.Equal(ScanState.Idle, rig.Snap(1).Exploration.Scan.State);
+    }
+
+    [Fact]
+    public void ACancelWithNoScanRunningIsIgnoredWhateverTheStateIs()
+    {
+        using var rig = new Rig();
+        rig.Step(20);
+        rig.Clients[0].Input.CancelScan();
+        rig.Step(10);
+        var idle = rig.Snap(0).Exploration.Scan;
+        Assert.Equal(ScanState.Idle, idle.State);
+        Assert.Equal(0, idle.CooldownUntilTick);
+
+        // After a completed scan a stray cancel keeps the result and leaves the cooldown where the scan put it.
+        rig.Clients[0].Input.RequestScan();
+        rig.Step(Content.Exploration.ScanTicks + 10);
+        var done = rig.Snap(0).Exploration.Scan;
+        Assert.Equal(ScanState.Completed, done.State);
+        rig.Clients[0].Input.CancelScan();
+        rig.Step(10);
+        var after = rig.Snap(0).Exploration.Scan;
+        Assert.Equal(ScanState.Completed, after.State);
+        Assert.Equal(done.CooldownUntilTick, after.CooldownUntilTick);
+        Assert.Equal(1, rig.Snap(0).Exploration.ChartCount);
+    }
+
+    [Fact]
     public void TheScanWireCarriesTheCooldownAndRefusesANegativeTick()
     {
-        var scan = new ScanView { State = ScanState.Cooldown, Sector = new SectorCoord(3, -1, 4), CooldownSector = new SectorCoord(3, -1, 4), CooldownUntilTick = 1234 };
+        var scan = new ScanView { State = ScanState.Cooldown, Hull = 0x01020304, Sector = new SectorCoord(3, -1, 4), CooldownSector = new SectorCoord(3, -1, 4), CooldownUntilTick = 1234 };
         Span<byte> bytes = stackalloc byte[ExplorationMessage.MaxWireSize];
         var writer = new NetWriter(bytes);
         ExplorationMessage.Write(ref writer, scan, default);
@@ -654,6 +736,7 @@ public sealed class ExplorationSessionTests
         Assert.True(ExplorationMessage.Read(ref reader, charts, out var read, out var count));
         Assert.Equal(0, count);
         Assert.Equal(ScanState.Cooldown, read.State);
+        Assert.Equal(0x01020304u, read.Hull);
         Assert.Equal(scan.CooldownSector, read.CooldownSector);
         Assert.Equal(1234, read.CooldownUntilTick);
 

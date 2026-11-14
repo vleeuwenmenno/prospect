@@ -6,10 +6,11 @@ namespace Prospect.Game.Protocol;
 /// <summary>Bounded personal scan and chart publication.</summary>
 public static class ExplorationMessage
 {
+    /// <summary>The start request and the cancel request are each one id byte.</summary>
     public const int ScanWireSize = 1;
     public const int MaxCharts = 32;
     public const int ChartWireSize = 24;
-    public const int MaxWireSize = 51 + MaxCharts * ChartWireSize;
+    public const int MaxWireSize = 55 + MaxCharts * ChartWireSize;
     public const int MaxDestroyed = 32;
     public const int VisibilityMaxWireSize = 13 + HullStore.MaxHulls / 8 + MaxDestroyed * sizeof(uint);
 
@@ -17,6 +18,7 @@ public static class ExplorationMessage
     {
         writer.WriteByte((byte)MessageId.Exploration);
         writer.WriteByte((byte)scan.State);
+        writer.WriteUInt32(scan.Hull);
         Sector(ref writer, scan.Sector);
         writer.WriteInt64(scan.StartedTick);
         writer.WriteInt64(scan.CompletesTick);
@@ -36,6 +38,7 @@ public static class ExplorationMessage
         scan = new ScanView
         {
             State = (ScanState)reader.ReadByte(),
+            Hull = reader.ReadUInt32(),
             Sector = Sector(ref reader),
             StartedTick = reader.ReadInt64(),
             CompletesTick = reader.ReadInt64(),

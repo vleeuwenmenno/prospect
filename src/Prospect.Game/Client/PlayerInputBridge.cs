@@ -33,7 +33,7 @@ public struct PlayerControls
 public sealed class PlayerInputBridge
 {
     private readonly Lock _lock = new();
-    private bool _scan;
+    private ScanIntent _scan;
     private bool _newShip;
     private ShipName _shipName;
     /// <summary>Queues creation. False means the name is invalid; server feedback is in SessionSnapshot.NewShip.</summary>
@@ -48,8 +48,14 @@ public sealed class PlayerInputBridge
     {
         lock (_lock) { name = _shipName; var pending = _newShip; _newShip = false; return pending; }
     }
-    public void RequestScan() { lock (_lock) _scan = true; }
-    internal bool ConsumeScan() { lock (_lock) { var pending = _scan; _scan = false; return pending; } }
+    /// <summary>Asks the server to scan the sector the controlled hull is in. Replaces a cancel not yet sent.</summary>
+    public void RequestScan() { lock (_lock) _scan = ScanIntent.Start; }
+
+    /// <summary>Asks the server to cancel the player's own running scan. Replaces a request not yet sent.</summary>
+    public void CancelScan() { lock (_lock) _scan = ScanIntent.Cancel; }
+
+    /// <summary>Takes the one scan intent queued since the last call; a start and a cancel never both go out in one tick.</summary>
+    internal ScanIntent ConsumeScan() { lock (_lock) { var pending = _scan; _scan = ScanIntent.None; return pending; } }
     private readonly SocialMessage[] _social = new SocialMessage[16];
     private int _socialHead, _socialCount;
 
@@ -353,3 +359,6 @@ public sealed class PlayerInputBridge
         }
     }
 }
+
+/// <summary>What the player asked of their scan since the last tick.</summary>
+public enum ScanIntent : byte { None, Start, Cancel }

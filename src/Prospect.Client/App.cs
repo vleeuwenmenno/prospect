@@ -123,6 +123,9 @@ internal sealed class AppOptions
     /// <summary>Closes the galaxy map at this many seconds after the splash, as Escape would; for captures across the close.</summary>
     public float? CloseMapAt { get; set; }
 
+    /// <summary>Cancels the running scan at this many seconds after the splash, as the scan key again does; for captures of the cancelled readout.</summary>
+    public float? CancelScanAt { get; set; }
+
     /// <summary>Opens the galaxy map tilted, and with the pointer resting on its centre; for captures.</summary>
     public bool MapTilt { get; set; }
     public bool MapHover { get; set; }
@@ -218,6 +221,7 @@ internal sealed class App : IDisposable
     private string? _newShipView;
     private bool _tipsSampled;
     private bool _mapClosed;
+    private bool _scanCancelled;
     private readonly CatalogueMeshes _catalogueMeshes;
 
     /// <summary>Whether the acquired catalogue can be drawn safely.</summary>
@@ -1044,6 +1048,12 @@ internal sealed class App : IDisposable
         {
             _mapClosed = true;
             _screens.CloseMap();
+        }
+
+        if (_options.CancelScanAt is { } cancelScan && _viewOpened && !_scanCancelled && _sinceSplash >= cancelScan)
+        {
+            _scanCancelled = true;
+            Session?.Client.Input.CancelScan();
         }
 
         if (_newShipView is { } newShip && Session is not null && snapshot is { OwnHull: >= 0, OwnIsDrone: true })

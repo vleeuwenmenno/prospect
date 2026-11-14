@@ -380,11 +380,15 @@ internal sealed partial class ClientWorld : IDisposable
             NavigationMessage.Write(ref writer, MessageId.PlotJump, plot);
             if (!transport.Send(0, NetChannel.Reliable, writer.Written)) bridge.PlotJump(plot.Hull, plot.Target);
         }
-        if (sendCommands && bridge.ConsumeScan())
+        if (sendCommands && bridge.ConsumeScan() is var scanIntent && scanIntent != ScanIntent.None)
         {
             Span<byte> request = stackalloc byte[ExplorationMessage.ScanWireSize];
-            request[0] = (byte)MessageId.Scan;
-            if (!transport.Send(0, NetChannel.Reliable, request)) bridge.RequestScan();
+            request[0] = (byte)(scanIntent == ScanIntent.Start ? MessageId.Scan : MessageId.CancelScan);
+            if (!transport.Send(0, NetChannel.Reliable, request))
+            {
+                if (scanIntent == ScanIntent.Start) bridge.RequestScan();
+                else bridge.CancelScan();
+            }
         }
         _replica.SendAcks(transport, clientTick < 0 ? (long)serverTick : clientTick);
         var controls = bridge.Consume(out var hasOrder, out var order);

@@ -55,7 +55,7 @@ internal sealed partial class ScreenHost
         _charts.Refresh(exploration);
         _exploration = exploration;
         _coverage.Collect(snapshot, world);
-        _scan.Update(exploration.Scan, world.Own.Id, world.Sector.Coord, _coverage.OwnCanChart, _ui.DeltaTime);
+        _scan.Update(exploration.Scan, world.Sector.Coord, _coverage.OwnCanChart, _ui.DeltaTime);
     }
 
     private int _chartsCapacity;
