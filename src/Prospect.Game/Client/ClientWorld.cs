@@ -430,8 +430,8 @@ internal sealed partial class ClientWorld : IDisposable
             Dampeners = _dampeners,
         };
 
-        // Taking the controls ends a standing order.
-        if (_order.Kind != OrderKind.None && (input.Strafe != 0 || input.Vertical != 0 || input.Forward != 0 || input.Roll != 0))
+        // Taking the controls ends a standing move order. A jump order is not ended by input: only halt cancels it.
+        if (HullSim.InputEndsOrder(_order, input))
             SetOrder(default);
 
         var lead = Math.Clamp((int)Math.Ceiling(Math.Max(0, roundTripMs) / 2000 / HullSim.Dt) + 3, 3, 16);

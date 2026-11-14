@@ -164,7 +164,7 @@ public sealed class JumpCalculationSessionTests
     }
 
     [Fact]
-    public void OwnRemoteAndAutomaticFleetCarryCalculationAndThrustRestartsIt()
+    public void OwnRemoteAndAutomaticFleetCarryCalculationThrustLeavesItAndHaltRestartsIt()
     {
         var content = ReplicationContent();
         using var link = new LoopbackLink();
@@ -208,7 +208,13 @@ public sealed class JumpCalculationSessionTests
         Assert.InRange(Seen(observer, own.Id).JumpCalculation, 1.7f, 2.1f);
         Assert.InRange(Seen(client, fleet.Id).JumpCalculation, 1.7f, 2.1f);
 
-        client.Input.Submit(new PlayerControls { Forward = 1 });
+        // Thrust and boost are not the cancel: the calculation carries on, on the server and in prediction.
+        client.Input.Submit(new PlayerControls { Forward = 1, Boost = true });
+        Step(12);
+        Assert.Equal(JumpPhase.Charge, Own().Jump);
+        Assert.InRange(Own().JumpCalculation, 2.0f, 2.4f);
+        client.Input.Submit(default);
+        client.Input.IssueOrder(default);
         Step(12);
         Assert.Equal(JumpPhase.None, Own().Jump);
         Assert.Equal(0, Own().JumpCalculation);

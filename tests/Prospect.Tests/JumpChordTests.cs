@@ -17,7 +17,7 @@ namespace Prospect.Tests;
 /// <summary>
 /// Starting a plotted jump with forward and boost together: a real server and client joined in process, the real
 /// <see cref="WorldView"/> reading real <see cref="InputDevices"/> through the loaded bindings, keys held and let go
-/// as a pilot would. Forward thrust held as part of the start must not cancel the jump; fresh manual input must.
+/// as a pilot would. No key but halt cancels a started jump: boost and thrust, pressed, held, tapped or let go, do not.
 /// </summary>
 public sealed class JumpChordTests : IDisposable
 {
@@ -207,60 +207,132 @@ public sealed class JumpChordTests : IDisposable
     }
 
     [Fact]
-    public void FreshForwardAfterLettingGoOfBothCancels()
+    public void FreshForwardAfterLettingGoOfBothDoesNotCancel()
     {
         Plot();
         _down.Add(Forward);
         _down.Add(Boost);
         HoldsTheJump(30);
         _down.Clear();
-        Step();
-        Step();
-        Assert.Equal(OrderKind.Jump, Own.Order.Kind);
+        HoldsTheJump(5);
 
         _down.Add(Forward);
-        Step();
-        Step();
-        Assert.NotEqual(OrderKind.Jump, Own.Order.Kind);
-        Assert.Equal(JumpPhase.None, Own.Jump);
+        HoldsTheJump(TickLoop.SimulationHz);
     }
 
-    [Fact]
-    public void ReverseCancelsWhileBoostIsStillHeld()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ReverseOrStrafeNeverCancelsWhetherOrNotBoostIsHeld(bool reverse)
     {
         Plot();
         _down.Add(Forward);
         _down.Add(Boost);
         HoldsTheJump(30);
         _down.Remove(Forward);
-        _down.Add(Reverse);
-        Step();
-        Step();
-        Assert.NotEqual(OrderKind.Jump, Own.Order.Kind);
-        Assert.Equal(JumpPhase.None, Own.Jump);
+        _down.Add(reverse ? Reverse : Strafe);
+        HoldsTheJump(TickLoop.SimulationHz);
+        _down.Remove(Boost);
+        HoldsTheJump(TickLoop.SimulationHz);
+        _down.Clear();
+        HoldsTheJump(5);
+        _down.Add(reverse ? Reverse : Strafe);
+        HoldsTheJump(TickLoop.SimulationHz);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void StrafeOrHaltCancelsWhileTheChordIsHeld(bool halt)
+    [Fact]
+    public void HaltCancelsWhileTheChordIsHeld()
     {
         Plot();
         _down.Add(Forward);
         _down.Add(Boost);
         HoldsTheJump(30);
-        _down.Add(halt ? Halt : Strafe);
+        _down.Add(Halt);
         Step();
         Step();
         Assert.NotEqual(OrderKind.Jump, Own.Order.Kind);
         Assert.Equal(JumpPhase.None, Own.Jump);
 
         // With the jump gone, forward still held flies the hull again.
-        _down.Remove(halt ? Halt : Strafe);
+        _down.Remove(Halt);
         var speed = ForwardSpeed;
         for (var i = 0; i < 20; i++)
             Step();
         Assert.True(ForwardSpeed > speed + 1f, $"forward speed {speed} then {ForwardSpeed}");
+    }
+
+    /// <summary>
+    /// Boost pressed, held, tapped and let go through the whole jump, calculation to arrival, with a real server and the
+    /// real view: the order stands, the drive's calculation never goes back, the hull lands on the plotted point, and the
+    /// boost key held on arrival starts no second jump.
+    /// </summary>
+    [Fact]
+    public void BoostPressedHeldTappedAndLetGoNeverCancelsAnyStageOfTheJump()
+    {
+        var target = Plot();
+        _down.Add(Boost);
+        Step();
+        var calculation = 0f;
+        var started = false;
+        var tunnelSeen = false;
+        var arriveSeen = false;
+        for (var i = 0; i < TickLoop.SimulationHz * 60; i++)
+        {
+            // Held for 7 ticks, let go for 5, tapped, let go, a short hold, let go: a different edge every tick.
+            switch (i % 24)
+            {
+                case 0 or 8 or 17:
+                    _down.Add(Boost);
+                    break;
+                case 7 or 13 or 18 or 20:
+                    _down.Remove(Boost);
+                    break;
+            }
+
+            Step();
+            var own = Own;
+            started |= own.Jump != JumpPhase.None;
+            tunnelSeen |= own.Jump == JumpPhase.Tunnel;
+            arriveSeen |= own.Jump == JumpPhase.Arrive;
+            if (started && own.Jump == JumpPhase.None)
+                break;
+            if (own.Jump is JumpPhase.Align or JumpPhase.Charge)
+            {
+                Assert.True(own.Order.Kind == OrderKind.Jump, $"tick {i}: cancelled in {own.Jump}");
+                Assert.True(own.JumpCalculation >= calculation, $"tick {i}: calculation went from {calculation} to {own.JumpCalculation}");
+                calculation = own.JumpCalculation;
+            }
+        }
+
+        Assert.True(tunnelSeen && arriveSeen);
+        Assert.True(Own.Position.RelativeTo(target).Length() < 1f, $"arrived {Own.Position}, plotted {target}");
+        _down.Add(Boost);
+        for (var i = 0; i < 30; i++)
+        {
+            Step();
+            Assert.Equal(JumpPhase.None, Own.Jump);
+            Assert.NotEqual(OrderKind.Jump, Own.Order.Kind);
+        }
+    }
+
+    [Fact]
+    public void BoostPressedAgainWhileTheJumpIsOrderedIsNotARefusal()
+    {
+        Plot();
+        _down.Add(Boost);
+        Step();
+        _down.Remove(Boost);
+        HoldsTheJump(TickLoop.SimulationHz);
+        var shown = _world.NavRefusedAt;
+        for (var i = 0; i < 6; i++)
+        {
+            _down.Add(Boost);
+            HoldsTheJump(2);
+            _down.Remove(Boost);
+            HoldsTheJump(2);
+        }
+
+        Assert.Equal(shown, _world.NavRefusedAt);
     }
 
     [Fact]
@@ -333,9 +405,7 @@ public sealed class JumpChordTests : IDisposable
         Step();
         Assert.Equal(OrderKind.Jump, Own.Order.Kind);
         _down.Add(Forward);
-        Step();
-        Step();
-        Assert.NotEqual(OrderKind.Jump, Own.Order.Kind);
+        HoldsTheJump(TickLoop.SimulationHz);
     }
 
     [Fact]

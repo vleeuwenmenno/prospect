@@ -92,9 +92,12 @@ Open: flight feel and balance approval; these numbers remain content tuning, not
   arrives with a pulse that reaches further and brighter for bigger, heavier hulls, within a bound. Wormhole: a sphere with gravitational lensing, subtle colour. Rift: an orange,
   crisp, ragged window with lensing. With both, the hull visibly flies in through one opening and out of another.
 - **The pilot starts their own jump.** The map only plots it: a NAV marker in the pilot view, aim at it, boost to
-  start. The hull then brakes and holds its nose on it while the drive calculates and charges; thrust cancels.
+  start. The hull then brakes and holds its nose on it while the drive calculates and charges.
+- **Only halt cancels a started jump.** Boost (press, hold, tap, release) and thrust never do; the shared step
+  ignores the pilot's input while the drive works and `HullSim.InputEndsOrder` never ends a jump order. Halt
+  (`H`, `Backspace`, `B` on a pad) works until the drive fires; in the tunnel it cannot bring the hull back.
 - **Forward and boost together also start it.** Either order, from the bindings. Forward held from that start is
-  part of it and does not cancel. Once forward and boost are both let go, fresh thrust cancels again.
+  not sent until forward and boost are both let go, so it does not fly the hull out of its arrival.
   Ships flown by the server still jump straight from an order.
 - **The jump has one prompt, off the middle of the view.** A strip above the pilot console says the state and
   the one action, with keys from the bindings. Aimed is "course aligned", never "ready": calculation and

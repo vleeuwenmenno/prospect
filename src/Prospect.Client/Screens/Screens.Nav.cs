@@ -210,7 +210,7 @@ internal sealed partial class ScreenHost
         ReadOnlySpan<byte> under = prompt switch
         {
             JumpPrompt.OffCourse or JumpPrompt.Refused or JumpPrompt.Aligned or JumpPrompt.Denied when world.NavTarget is { } nav => Kit.F($"{NavName(world, nav)}"),
-            JumpPrompt.Aligning or JumpPrompt.Working => "THRUST CANCELS"u8,
+            JumpPrompt.Aligning or JumpPrompt.Working => "HALT CANCELS"u8,
             JumpPrompt.Autopilot => "MOVE ORDER"u8,
             _ => DriveName(flight.Ftl),
         };

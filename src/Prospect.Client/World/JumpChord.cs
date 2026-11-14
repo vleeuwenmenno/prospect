@@ -5,8 +5,9 @@ namespace Prospect.Client.World;
 
 /// <summary>
 /// The forward and boost controls that started the pilot's own plotted jump. Forward thrust held as part of that
-/// start belongs to the jump, not to the pilot taking the controls back, so the view holds it off until forward and
-/// boost have both been let go. After that, forward thrust cancels the jump as any other manual input always does.
+/// start belongs to the jump, so the view holds it off until forward and boost have both been let go and, through the
+/// jump's arrival, so thrust held all the way does not carry the hull out of it. No input cancels a jump, so the
+/// chord is not about cancelling: letting go, tapping or pressing boost or forward ends nothing. Only halt does.
 /// It reads the controls as they physically are, so a menu that hides them from the world is not a release.
 /// </summary>
 internal struct JumpChord
