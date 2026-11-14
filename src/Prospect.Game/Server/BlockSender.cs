@@ -50,7 +50,7 @@ internal sealed class BlockSender
         return 0;
     }
 
-    internal void Receive(ref NetReader reader, HullStore hulls, long tick)
+    internal void Receive(ref NetReader reader, HullStore hulls, long tick, ReadOnlySpan<ulong> visible = default)
     {
         var count = reader.ReadByte();
         if (!reader.IsValid || count > 32 || reader.Remaining != count * 13) return;
@@ -67,7 +67,7 @@ internal sealed class BlockSender
                 var visualRevision = reader.ReadUInt32();
                 var index = (int)(id & 65535);
                 if (!reader.IsValid) return;
-                if (request > 3 || !hulls.IsAlive(new HullHandle(index, (int)(id >> 16))) || revision > hulls.Revision(index)) continue;
+                if ((!visible.IsEmpty && !BlockSet.Has(visible, index)) || request > 3 || !hulls.IsAlive(new HullHandle(index, (int)(id >> 16))) || revision > hulls.Revision(index)) continue;
                 var slot = -1;
                 for (var i = 0; i < _ids.Length; i++) if (_ids[i] == id) { slot = i; break; }
                 if (slot < 0) { slot = _replace++ % _ids.Length; _replace %= _ids.Length; _ids[slot] = id; _revisions[slot] = 0; }
@@ -117,12 +117,13 @@ internal sealed class BlockSender
         }
     }
 
-    internal void Send(ITransport transport, int peer, Span<byte> buffer, long tick)
+    internal void Send(ITransport transport, int peer, Span<byte> buffer, long tick, ReadOnlySpan<ulong> visible = default)
     {
         var budget = _rules.BytesPerTick;
         foreach (var transfer in _transfers)
         {
             if (transfer.Hull != 0 && tick > transfer.Deadline) transfer.Clear();
+            if (transfer.Hull is not (0 or uint.MaxValue) && !visible.IsEmpty && !BlockSet.Has(visible, (int)(transfer.Hull & 65535))) transfer.Clear();
             transfer.Send(transport, peer, buffer, ref budget);
         }
     }

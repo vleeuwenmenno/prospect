@@ -61,6 +61,7 @@ public sealed class RockField(Galaxy galaxy, int maxDeltas = int.MaxValue, int m
     // A field with a budget takes room for all of it now, so recording a push never resizes these.
     private RockDelta[] _deltas = new RockDelta[maxDeltas == int.MaxValue ? 64 : maxDeltas];
     private float[] _reach = new float[maxDeltas == int.MaxValue ? 64 : maxDeltas];
+    private Double3[] _origins = new Double3[maxDeltas == int.MaxValue ? 64 : maxDeltas];
     private int _deltaCount;
     private SectorContent? _last;
     private long _clock;
@@ -129,6 +130,13 @@ public sealed class RockField(Galaxy galaxy, int maxDeltas = int.MaxValue, int m
     /// is right now.
     /// </summary>
     public float ReachAt(int entry) => _reach[entry];
+
+    public Double3 PositionOf(RockRef rock, long tick)
+    {
+        var entry = _moved[rock.Sector].Entries[rock.Index] - 1;
+        _deltas[entry].Evaluate(tick, galaxy.DriftDecay, out var offset, out _);
+        return _origins[entry] + offset;
+    }
 
     /// <summary>Where an asteroid is relative to its generated position at a tick, and how fast it is drifting.</summary>
     public void Displacement(RockRef rock, double tick, out Vector3 offset, out Vector3 velocity)
@@ -223,11 +231,13 @@ public sealed class RockField(Galaxy galaxy, int maxDeltas = int.MaxValue, int m
             {
                 Array.Resize(ref _deltas, _deltas.Length * 2);
                 Array.Resize(ref _reach, _reach.Length * 2);
+                Array.Resize(ref _origins, _origins.Length * 2);
             }
 
             if (moved.Count == moved.Indices.Length)
                 Array.Resize(ref moved.Indices, moved.Indices.Length * 2);
             entry = _deltaCount++;
+            _origins[entry] = galaxy.CenterOf(delta.Rock.Sector) + Sector(delta.Rock.Sector).Asteroids[delta.Rock.Index].LocalPosition;
             moved.Entries[delta.Rock.Index] = entry + 1;
             moved.Indices[moved.Count++] = delta.Rock.Index;
         }

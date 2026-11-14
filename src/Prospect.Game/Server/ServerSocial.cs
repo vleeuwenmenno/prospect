@@ -180,6 +180,7 @@ public sealed partial class ServerHost
             {
                 if (member.State != ConnectionState.Active || member.Party != leader || !_hulls.IsAlive(member.Hull)) continue;
                 var index = member.Hull.Index;
+                if (member.PlayerId != recipient.PlayerId && !Covered(recipient.PlayerId, _hulls.State(index).Position)) continue;
                 ref var state = ref _hulls.State(index);
                 ref var flight = ref _hulls.Flight(index);
                 var built = _content.Designs[_hulls.Info(index).Design].Flight.HullPoints;

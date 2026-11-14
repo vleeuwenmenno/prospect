@@ -222,6 +222,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public ScanView Scan;
         public uint ScanHull;
         public int ChartCursor;
+        public int RockCursor;
+        public bool VisibilitySent;
+        public readonly ulong[] Visible = new ulong[BlockSet.WordCount(HullStore.MaxHulls)];
 
         /// <summary>The slot of the durable owner this connection was let in as; -1 in a world that is not saved.</summary>
         public int OwnerSlot = -1;
@@ -235,6 +238,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
         public void Reset()
         {
+            Array.Clear(Visible);
+            VisibilitySent = false;
+            RockCursor = 0;
             Scan = default;
             ScanHull = 0;
             ChartCursor = 0;
@@ -669,6 +675,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         // The host's own client, in this process, is read to the end. A network transport is read until its
         // budget is used up: room for every player's allowance and a fixed amount besides. What is still
         // waiting then stays in the transport's queue, in order, and is read in the next tick.
+        GatherSensors();
         var budget = new ReceiveBudget(SparePacketsPerTick + _maxPlayers * PlayerMessagesPerTick, SpareBytesPerTick + _maxPlayers * PlayerBytesPerTick);
         var carriedOver = false;
         foreach (var transport in _transports)
@@ -718,6 +725,10 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 _hulls.Destroy(handle);
         }
 
+        GatherSensors();
+        foreach (var connection in _connections)
+            if (connection.State == ConnectionState.Active && connection.CatalogueReady) UpdateVisibility(connection, tick);
+
         // Contacts with an asteroid the world could not move were settled where they happened, against an
         // asteroid that does not give way: nothing of them is pending, they are only counted.
         if (_impulses.Refused > 0)
@@ -754,10 +765,15 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         foreach (var connection in _connections)
         {
             if (connection.State == ConnectionState.Active)
+            {
                 SendSnapshot(connection, tick);
+                SendRockDeltas(connection, _rocks.Deltas);
+            }
         }
 
         TickExploration(tick);
+        foreach (var connection in _connections)
+            if (connection.State == ConnectionState.Active) SendExploration(connection);
         TickSocial(tick);
         Volatile.Write(ref _tick, tick + 1);
 
@@ -966,8 +982,11 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         }
         switch ((MessageId)payload[0])
         {
+            case MessageId.Scan when channel == NetChannel.Reliable && reader.Remaining == 0:
+                StartScan(connection);
+                break;
             case MessageId.BlockAck when channel == NetChannel.Unreliable:
-                connection.Blocks!.Receive(ref reader, _hulls, _tick);
+                connection.Blocks!.Receive(ref reader, _hulls, _tick, connection.Visible);
                 break;
             case MessageId.Social when channel == NetChannel.Reliable:
                 ReceiveSocial(connection, ref reader);
@@ -1222,19 +1241,27 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
     private void SendRockDeltas(Connection connection, ReadOnlySpan<RockDelta> deltas)
     {
-        while (!deltas.IsEmpty)
+        if (deltas.IsEmpty || !connection.CatalogueReady) return;
+        Span<RockDelta> visible = stackalloc RockDelta[RockDeltasMessage.MaxDeltas];
+        var count = 0;
+        var visit = Math.Min(deltas.Length, visible.Length);
+        for (var i = 0; i < visit; i++)
         {
-            var chunk = deltas[..Math.Min(deltas.Length, RockDeltasMessage.MaxDeltas)];
-            var writer = new NetWriter(_sendBuffer);
-            RockDeltasMessage.Write(ref writer, chunk);
-            connection.Transport.Send(connection.Peer, NetChannel.Reliable, writer.Written);
-            deltas = deltas[chunk.Length..];
+            var delta = deltas[(connection.RockCursor + i) % deltas.Length];
+            if (Covered(connection.PlayerId, _rocks.PositionOf(delta.Rock, _tick))) visible[count++] = delta;
         }
+        if (count > 0)
+        {
+            var writer = new NetWriter(_sendBuffer);
+            RockDeltasMessage.Write(ref writer, visible[..count]);
+            if (!connection.Transport.Send(connection.Peer, NetChannel.Reliable, writer.Written)) return;
+        }
+        connection.RockCursor = (connection.RockCursor + visit) % deltas.Length;
     }
 
     private void SendSnapshot(Connection connection, long tick)
     {
-        connection.Blocks!.Send(connection.Transport, connection.Peer, _sendBuffer, tick);
+        connection.Blocks!.Send(connection.Transport, connection.Peer, _sendBuffer, tick, connection.Visible);
         if (!connection.CatalogueReady) return;
         var remaining = Math.Min(connection.SnapshotRemaining, _hulls.Slots);
         var cursor = remaining > 0 ? connection.SnapshotCursor % _hulls.Slots : 0;
@@ -1265,7 +1292,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         {
             var i = pass == 0 ? connection.Hull.Index : (cursor + pass - 1) % _hulls.Slots;
             if (pass != 0 && i == connection.Hull.Index) continue;
-            if (!_hulls.IsAliveAt(i))
+            if (!_hulls.IsAliveAt(i) || !BlockSet.Has(connection.Visible, i))
                 continue;
             if (!includeRemote && i != connection.Hull.Index && !(inContact && _hulls.Info(i).ContactTick > recent))
                 continue;

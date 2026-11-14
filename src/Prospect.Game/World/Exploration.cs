@@ -35,3 +35,15 @@ public struct ScanView
     public long StartedTick;
     public long CompletesTick;
 }
+
+/// <summary>Known contact. A stale position is never extrapolated and is not a live target.</summary>
+public struct SensorContact
+{
+    public uint Hull;
+    public uint Owner;
+    public byte Design;
+    public Double3 Position;
+    public long ObservedTick;
+    public long LostTick;
+    public bool Live;
+}

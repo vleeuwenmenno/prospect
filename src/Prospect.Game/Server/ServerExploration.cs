@@ -1,4 +1,6 @@
 using Prospect.Game.Persistence;
+using Prospect.Engine.Net;
+using Prospect.Game.Protocol;
 using Prospect.Game.World;
 
 namespace Prospect.Game.Server;
@@ -51,6 +53,25 @@ public sealed partial class ServerHost
             scan.State = RecordChart(connection.PlayerId, scan.Sector, tick) ? ScanState.Completed : ScanState.ChartLimit;
             connection.ChartCursor = 0;
         }
+    }
+
+    private void SendExploration(Connection connection)
+    {
+        if (!connection.CatalogueReady) return;
+        Span<SectorChart> charts = stackalloc SectorChart[ExplorationMessage.MaxCharts];
+        var count = 0;
+        var cursor = _chartCount == 0 ? 0 : connection.ChartCursor % _chartCount;
+        var visit = 0;
+        while (visit < _chartCount && visit < _content.Exploration.ChartsPerOwner && count < charts.Length)
+        {
+            var chart = _charts[cursor];
+            if (chart.Owner == connection.PlayerId) charts[count++] = chart;
+            cursor = (cursor + 1) % _chartCount;
+            visit++;
+        }
+        var writer = new NetWriter(_sendBuffer);
+        ExplorationMessage.Write(ref writer, connection.Scan, charts[..count]);
+        if (connection.Transport.Send(connection.Peer, NetChannel.Reliable, writer.Written)) connection.ChartCursor = cursor;
     }
 
     internal bool RecordChart(uint owner, SectorCoord sector, long tick)
