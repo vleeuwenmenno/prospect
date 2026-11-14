@@ -2743,6 +2743,10 @@ internal sealed class WorldView
                 _navJumpMade = false;
                 _plotPending = order.Target;
                 bridge.PlotJump(Own.Id, order.Target);
+
+                // A plotted course takes the strip and the pilot's attention, so the target panel gives way to it.
+                TargetHull = 0;
+                TargetRock = null;
             }
             else if (_selected[i] == Own.Id)
                 bridge.IssueOrder(order);
