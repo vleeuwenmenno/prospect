@@ -91,6 +91,17 @@
   - A cold gas puff starts with a burst that settles to a faint steady jet.
 - Check with `--thrust` and `--zoom` captures (`AGENTS.md`); `PropulsionVisualTests` holds the rules.
 
+## Decided: second pass (look and mounting)
+
+- **Thrusters mount on faces.** Cold gas and hot thrusters clip onto the face of any block and take no grid cell.
+  - They stick out about 0.2 block. A hot thruster is a bit bigger than a cold gas one.
+  - Several can share one face. The ghost shows only the thruster, on the face under the pointer.
+  - Engines stay sized blocks that scale with their size.
+- **Models are low poly.** Faceted, chunky panels, flat shading. Our own shapes, no other game's art.
+- **No gaps.** A model fills the cells it sits in and meets its neighbours flush.
+- **The editor shows the models.** The ghost and every placed part show the real model at once.
+- **Plumes are vacuum-realistic.** Wide, soft, faint and bell-shaped; few or no shock diamonds.
+
 ## Decided: provisional figures
 
 All in `content/blocks/blocks.json`. Tunable; change them there, never in code.
