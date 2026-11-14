@@ -199,6 +199,9 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private ScanPulseConstants _pulse;
     private bool _pulseQueuedOn;
     private bool _pulseOn;
+    private readonly DescriptorSetLayoutEx _pulseLayout;
+    private readonly GpuBuffer[] _pulseWaveBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
+    private readonly VkDescriptorSet[] _pulseSets = new VkDescriptorSet[FrameRenderer.FramesInFlight];
 
     // Shields: their own pipeline and per-frame vertex and instance memory, and the scene as it was just before
     // they were drawn, colour and depth, copied into images of their own that nothing else reads or writes.
@@ -314,6 +317,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
                 _shieldVertexBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshVertex) * ShieldVisuals.MaxVertices);
                 _shieldIndexBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.IndexBufferBit, sizeof(ushort) * ShieldVisuals.MaxIndices);
                 _shieldInstanceBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(ShieldInstance) * ShieldVisuals.MaxShields);
+                _pulseWaveBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.UniformBufferBit, sizeof(ScanWaveObject) * ScanWaves.Capacity);
             }
         }
         catch
@@ -326,11 +330,11 @@ internal sealed unsafe class SceneRenderer : IDisposable
         // scene before anything solid and before any hull was drawn, the scene's depth and the depth before hulls.
         Span<VkDescriptorPoolSize> poolSizes =
         [
-            new VkDescriptorPoolSize { Type = VkDescriptorType.UniformBuffer, DescriptorCount = FrameRenderer.FramesInFlight },
+            new VkDescriptorPoolSize { Type = VkDescriptorType.UniformBuffer, DescriptorCount = 2 * FrameRenderer.FramesInFlight },
             new VkDescriptorPoolSize { Type = VkDescriptorType.CombinedImageSampler, DescriptorCount = 8 + 2 + 2 + FrameRenderer.FramesInFlight },
         ];
         _descriptorPool = device.CreateDescriptorPool(
-            new DescriptorPoolEx.CreateInfo { MaxSets = FrameRenderer.FramesInFlight + 3, PoolSizes = poolSizes },
+            new DescriptorPoolEx.CreateInfo { MaxSets = 2 * FrameRenderer.FramesInFlight + 3, PoolSizes = poolSizes },
             null
         );
 
@@ -447,8 +451,20 @@ internal sealed unsafe class SceneRenderer : IDisposable
             null
         );
         // The scan pulse reads the tone mapper's sets (the camera, and of the scene only its depth) with its own push range.
+        // Set 2 of the scan pulse: this frame's surface ripples (ScanWaves).
+        Span<VkDescriptorSetLayoutBinding> pulseBindings =
+        [
+            new VkDescriptorSetLayoutBinding
+            {
+                Binding = 0,
+                DescriptorType = VkDescriptorType.UniformBuffer,
+                DescriptorCount = 1,
+                StageFlags = VkShaderStageFlags.FragmentBit,
+            },
+        ];
+        _pulseLayout = device.CreateDescriptorSetLayout(new DescriptorSetLayoutEx.CreateInfo { Bindings = pulseBindings }, null);
         _pulsePipelineLayout = device.CreatePipelineLayout(
-            [_frameLayout.Handle, _sceneLayout.Handle],
+            [_frameLayout.Handle, _sceneLayout.Handle, _pulseLayout.Handle],
             [new VkPushConstantRange { StageFlags = VkShaderStageFlags.FragmentBit, Offset = (ByteSize32)0, Size = (ByteSize32)sizeof(ScanPulseConstants) }],
             null
         );
@@ -478,6 +494,20 @@ internal sealed unsafe class SceneRenderer : IDisposable
         }
 
         _sceneSet = device.AllocateDescriptorSet(_descriptorPool, _sceneLayout);
+        for (var i = 0; i < FrameRenderer.FramesInFlight; i++)
+        {
+            _pulseSets[i] = device.AllocateDescriptorSet(_descriptorPool, _pulseLayout);
+            var waveInfo = new VkDescriptorBufferInfo
+            {
+                Buffer = _pulseWaveBuffers[i].Buffer,
+                Offset = new ByteSize64(0),
+                Range = new ByteSize64((ulong)(sizeof(ScanWaveObject) * ScanWaves.Capacity)),
+            };
+            device.UpdateDescriptorSets(
+                [new VkWriteDescriptorSet { DstSet = _pulseSets[i], DstBinding = 0, DescriptorCount = 1, DescriptorType = VkDescriptorType.UniformBuffer, BufferInfo = &waveInfo }],
+                []
+            );
+        }
         _shieldSet = device.AllocateDescriptorSet(_descriptorPool, _shieldLayout);
         _gasDepthSet = device.AllocateDescriptorSet(_descriptorPool, _shieldLayout);
         _sampler = device.CreateSampler(Presets.Sampler.SamplerLinearClamped, null);
@@ -693,6 +723,12 @@ internal sealed unsafe class SceneRenderer : IDisposable
         _pulseQueued = pulse;
         _pulseQueuedOn = true;
     }
+
+    /// <summary>
+    /// This frame's surface ripples for the scan pulse; fill the first <c>Gas.Z</c> of the queued constants before
+    /// <see cref="Render"/>. Each frame slot has its own, so this frame's writes never reach a frame still drawing.
+    /// </summary>
+    public Span<ScanWaveObject> PulseWaves(int frameIndex) => new((void*)_pulseWaveBuffers[frameIndex].Mapped, ScanWaves.Capacity);
 
     /// <summary>For muted capture diagnostics: whether the last frame drew the scan pulse.</summary>
     public bool LastPulse => _pulseOn;
@@ -1307,7 +1343,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
             return;
         var pulse = _pulse;
         commands.BindPipeline(VkPipelineBindPoint.Graphics, _pulsePipeline);
-        commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _pulsePipelineLayout, 0, sets, []);
+        Span<VkDescriptorSet> pulseSets = [_frameSets[_frameIndex], _sceneSet, _pulseSets[_frameIndex]];
+        commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _pulsePipelineLayout, 0, pulseSets, []);
         commands.PushConstants(_pulsePipelineLayout, VkShaderStageFlags.FragmentBit, 0, new ReadOnlySpan<byte>(&pulse, sizeof(ScanPulseConstants)));
         commands.Draw(3, 1, 0, 0);
     }
@@ -1328,6 +1365,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         device.DestroyPipeline(_shieldMaskPipeline, null);
         device.DestroyPipeline(_pulsePipeline, null);
         device.DestroyPipelineLayout(_pulsePipelineLayout, null);
+        _pulseLayout.Dispose();
         device.DestroyPipelineLayout(_shieldPipelineLayout, null);
         _shieldLayout.Dispose();
         device.DestroyPipelineLayout(_scenePipelineLayout, null);
@@ -1357,6 +1395,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
             _shieldVertexBuffers[i].Destroy(_gpu);
             _shieldIndexBuffers[i].Destroy(_gpu);
             _shieldInstanceBuffers[i].Destroy(_gpu);
+            _pulseWaveBuffers[i].Destroy(_gpu);
         }
 
         var (stars, vertices, indices) = (_starBuffer, _vertexBuffer, _indexBuffer);

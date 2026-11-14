@@ -71,6 +71,40 @@ internal sealed class ScanPulseLook
     /// <summary>How strongly gas in front hides the pulse, times the cloud's own extinction; 0 shows it undimmed.</summary>
     public float GasDimming { get; init; }
 
+    /// <summary>
+    /// The surface wave: when the front first touches an asteroid or a hull, a ripple starts at the point it touched
+    /// and crawls over that object to its far side. It takes <see cref="WaveSeconds"/> to cross an object of
+    /// <see cref="WaveReference"/> metres radius, times (radius / reference)^<see cref="WaveSizeExponent"/>, kept
+    /// between <see cref="WaveMinSeconds"/> and <see cref="WaveMaxSeconds"/>: larger rocks are crossed faster in
+    /// metres, a little slower in time.
+    /// </summary>
+    public float WaveSeconds { get; init; }
+
+    public float WaveReference { get; init; }
+    public float WaveSizeExponent { get; init; }
+    public float WaveMinSeconds { get; init; }
+    public float WaveMaxSeconds { get; init; }
+
+    /// <summary>The ripple band's width over the surface, as a share of the object's radius.</summary>
+    public float WaveBand { get; init; }
+
+    /// <summary>The fewest pixels across an object must be to get a ripple; smaller ones keep the front's band.</summary>
+    public float WaveMinPixels { get; init; }
+
+    /// <summary>The ripple's light, times the front's edge, grid and fill lights.</summary>
+    public float WaveLight { get; init; }
+
+    /// <summary>How long a ripple lasts at the most, from touch to its band leaving the far side.</summary>
+    public float WaveLongest => WaveMaxSeconds * (1f + WaveBand / MathF.PI);
+
+    /// <summary>The share of <see cref="Seconds"/> at which the front's radius is <paramref name="radius"/>; above 1 when it never gets there.</summary>
+    public float ShareAt(float radius) =>
+        radius <= 0f ? 0f : radius >= Reach ? 2f : 1f - MathF.Pow(1f - radius / Reach, 1f / Ease);
+
+    /// <summary>Seconds a ripple takes to cross an object of <paramref name="radius"/> metres to its far side.</summary>
+    public float CrossingSeconds(float radius) =>
+        Math.Clamp(WaveSeconds * MathF.Pow(MathF.Max(radius, 0.01f) / WaveReference, WaveSizeExponent), WaveMinSeconds, WaveMaxSeconds);
+
     public static ScanPulseLook Load() => Load(AppPaths.Content("visuals", "scan.json"));
 
     /// <summary>Reads and checks a look; anything out of range is refused.</summary>
@@ -95,6 +129,11 @@ internal sealed class ScanPulseLook
             throw new InvalidDataException($"{path}: gasGrid is 1 to 5000 m");
         if (!(look.GasDimming is >= 0f and <= 10f))
             throw new InvalidDataException($"{path}: gasDimming is 0 to 10");
+        if (!(look.WaveMinSeconds is >= 0.05f and <= 10f) || !(look.WaveMaxSeconds >= look.WaveMinSeconds && look.WaveMaxSeconds <= 10f)
+            || !(look.WaveSeconds is >= 0.05f and <= 10f) || !(look.WaveReference is >= 1f and <= 10_000f) || !(look.WaveSizeExponent is >= 0f and <= 1f))
+            throw new InvalidDataException($"{path}: waveSeconds and waveMinSeconds are 0.05 to 10 s with waveMaxSeconds from the minimum to 10, waveReference 1 to 10000 m, waveSizeExponent 0 to 1");
+        if (!(look.WaveBand is > 0f and <= 3f) || !(look.WaveMinPixels is >= 1f and <= 1000f) || !(look.WaveLight is >= 0f and <= 4f))
+            throw new InvalidDataException($"{path}: waveBand is above 0 to 3, waveMinPixels 1 to 1000, waveLight 0 to 4");
         return look;
     }
 }
@@ -149,7 +188,7 @@ internal sealed class ScanPulse
         if (Active)
         {
             Age += dt;
-            if (Age >= _look.Seconds)
+            if (Age >= _look.Seconds + _look.WaveLongest)
                 Active = false;
         }
 
@@ -171,7 +210,10 @@ internal sealed class ScanPulse
         _running = None;
     }
 
-    /// <summary>The pulse's front this frame, if one shows.</summary>
+    /// <summary>
+    /// The pulse's front this frame, while the pulse shows. Once the front has reached its end its strength is
+    /// zero, and the pulse goes on only for the ripples still crawling over what it touched last.
+    /// </summary>
     public bool Shell(out ScanShell shell)
     {
         if (!Active)
@@ -183,7 +225,7 @@ internal sealed class ScanPulse
         var t = Math.Clamp(Age / _look.Seconds, 0f, 1f);
         var rise = _look.FadeIn > 0f ? Math.Clamp(Age / _look.FadeIn, 0f, 1f) : 1f;
         shell = new ScanShell(Origin, _look.Reach * (1f - MathF.Pow(1f - t, _look.Ease)), rise * MathF.Pow(1f - t, _look.Fade));
-        return shell.Strength > 0f;
+        return true;
     }
 
     /// <summary>How deep the band behind the front is, in metres, at <paramref name="radius"/>.</summary>
@@ -213,4 +255,117 @@ internal struct ScanPulseConstants
 
     /// <summary>The grid's spacing in gas in metres, and the even light in gas.</summary>
     public float4 Gas;
+}
+
+/// <summary>One object's ripple as the scan pulse pass reads it. Matches <c>WaveObject</c> in <c>scan_pulse.frag</c>.</summary>
+internal struct ScanWaveObject
+{
+    /// <summary>The object's centre relative to the camera, and its radius in metres.</summary>
+    public float4 Sphere;
+
+    /// <summary>How far the ripple has crawled over the surface from the point touched, its band's width, both in metres, and its strength.</summary>
+    public float4 Wave;
+}
+
+/// <summary>
+/// The ripples of one frame: the objects the pulse's front has touched whose ripple is still crawling over them,
+/// or whose surface the front's own band would still cross, at most <see cref="Capacity"/>, the largest on screen
+/// first. Smaller ones, and any beyond the capacity, keep the front's band. Fixed storage: offering takes no memory.
+/// </summary>
+internal sealed class ScanWaves
+{
+    /// <summary>The most objects with a ripple in one frame; matches <c>MaxWaves</c> in <c>scan_pulse.frag</c>.</summary>
+    public const int Capacity = 32;
+
+    private readonly ScanPulseLook _look;
+    private readonly ScanWaveObject[] _items = new ScanWaveObject[Capacity];
+    private readonly float[] _pixels = new float[Capacity];
+    private bool _on;
+    private float _age;
+    private System.Numerics.Vector3 _origin;
+
+    public ScanWaves(ScanPulseLook look) => _look = look;
+
+    /// <summary>How many objects have a ripple this frame.</summary>
+    public int Count { get; private set; }
+
+    /// <summary>This frame's ripples, largest on screen first.</summary>
+    public ReadOnlySpan<ScanWaveObject> Items => _items.AsSpan(0, Count);
+
+    /// <summary>
+    /// Starts a frame: with <paramref name="on"/>, a pulse <paramref name="age"/> seconds old from
+    /// <paramref name="origin"/>, relative to the camera; without, every offer is refused.
+    /// </summary>
+    public void Begin(bool on, float age, System.Numerics.Vector3 origin)
+    {
+        _on = on;
+        _age = age;
+        _origin = origin;
+        Count = 0;
+    }
+
+    /// <summary>
+    /// Offers an object drawn this frame: its centre relative to the camera, its radius and how many pixels it
+    /// takes up. One the front has not touched, or whose ripple and band are over, is left out; so is one the
+    /// pulse started inside (the scanning ship itself), which has no point of contact.
+    /// </summary>
+    public void Offer(System.Numerics.Vector3 center, float radius, float pixels)
+    {
+        if (!_on || pixels < _look.WaveMinPixels || radius <= 0f || (Count == Capacity && pixels <= _pixels[Count - 1]))
+            return;
+        var distance = System.Numerics.Vector3.Distance(center, _origin);
+        if (!Wave(distance, radius, _age, out var wave))
+            return;
+
+        // Insertion into the short list, largest first; the smallest falls off a full list.
+        var at = Math.Min(Count, Capacity - 1);
+        while (at > 0 && _pixels[at - 1] < pixels)
+        {
+            if (at < Capacity)
+            {
+                _items[at] = _items[at - 1];
+                _pixels[at] = _pixels[at - 1];
+            }
+            at--;
+        }
+
+        _items[at] = new ScanWaveObject { Sphere = new float4(center.X, center.Y, center.Z, radius), Wave = wave };
+        _pixels[at] = pixels;
+        if (Count < Capacity)
+            Count++;
+    }
+
+    /// <summary>
+    /// The ripple over an object whose centre is <paramref name="distance"/> metres from the pulse's origin,
+    /// <paramref name="age"/> seconds into the pulse: how far it has crawled from the point touched, its band's
+    /// width and its strength. False before the front touches it, once both the ripple and the front's band have
+    /// left it, and for an object the origin is inside.
+    /// </summary>
+    public bool Wave(float distance, float radius, float age, out float4 wave)
+    {
+        wave = default;
+        var near = distance - radius;
+        if (near <= 0f || near >= _look.Reach)
+            return false;
+        var touched = _look.ShareAt(near);
+        var since = age - touched * _look.Seconds;
+        if (since < 0f)
+            return false;
+        var crossing = _look.CrossingSeconds(radius);
+        var band = radius * _look.WaveBand;
+        var travelled = MathF.PI * radius * since / crossing;
+        var end = MathF.PI * radius + band;
+
+        // The front's band reaches the object's far side when the front, less its band, has passed it; until then
+        // the object keeps its ripple slot, so the front's band never slices through it again behind the ripple.
+        var far = distance + radius;
+        var bandShare = _look.BandShare;
+        var cleared = Math.Max(far + _look.BandMinimum, far / (1f - Math.Min(bandShare, 0.95f)));
+        var frontGone = cleared >= _look.Reach ? _look.Seconds : _look.ShareAt(cleared) * _look.Seconds;
+        if (travelled > end && age > frontGone)
+            return false;
+        var strength = MathF.Pow(1f - touched, _look.Fade) * (1f - 0.5f * Math.Clamp(travelled / end, 0f, 1f));
+        wave = new float4(Math.Min(travelled, end), band, travelled > end ? 0f : strength * _look.WaveLight, 0f);
+        return true;
+    }
 }

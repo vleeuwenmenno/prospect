@@ -83,7 +83,10 @@ These are suggested layouts, not a settled control scheme.
   completed (`ScanPulse`), once per completed scan; a cancelled or refused scan, or a completion never seen running,
   starts none. Nothing shows while a scan runs. Its front spreads from where the flown ship was then.
 - It shows only where it touches something, never in empty space: on asteroids and hulls a crisp edge and a
-  world-axis grid in a band behind the front; in gas, a coarser grid on the front (circles like latitude and
+  world-axis grid in a band behind the front. The largest on screen (`ScanWaves`, at most 32 a frame, at least
+  `waveMinPixels`) get a ripple of the same look instead: it starts when the front reaches the object's nearest
+  point, at that point, and crawls over the surface (angle around the centre times the radius) to the far side, then
+  ends. Its crossing time and band scale with the object's size (`wave*` in `scan.json`); in gas, a coarser grid on the front (circles like latitude and
   longitude), by the density of the sensors' smooth envelope of one cloud, which also dims what lies behind it.
 - All figures in `content/visuals/scan.json`; its own pass (`scan_pulse.frag`) after tone mapping, so it changes no
   gas, shield or opening composition. Not on the map, and not inside the pilot's own jump.

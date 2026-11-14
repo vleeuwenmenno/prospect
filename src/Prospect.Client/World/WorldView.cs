@@ -348,6 +348,7 @@ internal sealed class WorldView
         // Every cloud the seed generates is known. Fog of war would hand a narrower source in here.
         _gasField = new GasCloudField(jobs, new GeneratedGasClouds(), _gasTiers.ViewRangeSectors);
         _scanPulse = new ScanPulse(_pulseLook);
+        _scanWaves = new ScanWaves(_pulseLook);
         _asteroidMeshBase = AsteroidMesh(0, 0);
         _meshCount = MeshCount();
         _cubeMesh = CubeMesh();
@@ -524,6 +525,7 @@ internal sealed class WorldView
     private readonly GasTiers _gasTiers = GasTiers.Load();
     private readonly ScanPulseLook _pulseLook = ScanPulseLook.Load();
     private readonly ScanPulse _scanPulse;
+    private readonly ScanWaves _scanWaves;
     private readonly GasCloudField _gasField;
     /// <summary>The share of a cloud below which a level of detail is not worth a draw.</summary>
     private const float GasMinShare = 1f / 512f;
@@ -969,6 +971,9 @@ internal sealed class WorldView
         var shieldVertices = _scene.ShieldVertices(frameIndex);
         var shieldIndices = _scene.ShieldIndices(frameIndex);
         _shields.Begin(_scene.ShieldDraws);
+        // Surface ripples of the scan pulse: rocks and hulls drawn this frame offer themselves as they are added.
+        var waving = _scanPulse.Active && !(_jumpStage > 0f && _ownInside);
+        _scanWaves.Begin(waving, _scanPulse.Age, waving ? _scanPulse.Origin.RelativeTo(camera) : Vector3.Zero);
 
         // Hulls, where the update has them drawn this frame.
         var visuals = _visuals.Hulls;
@@ -1011,6 +1016,7 @@ internal sealed class WorldView
             // The shield goes where the hull goes, drawn out and cut with it by the same material.
             _shields.Add(hull.Id, position, orientation, stretch, material, shieldInstances, shieldVertices, shieldIndices);
             var pixels = design.Flight.Radius * _viewport.Y / (Math.Max(position.Length(), 1f) * _tanHalfFov);
+            _scanWaves.Offer(position, design.Flight.Radius * stretch, pixels);
             var detail = _collision.Fade(position, design.Flight.Radius * stretch, pixels);
             if (detail > 0 && hull.Visual.Count > 0)
             {
@@ -1126,7 +1132,7 @@ internal sealed class WorldView
         // The overlay check needs the ordinary gas pass, which any queued shield (even off screen) replaces, so it
         // queues none in either capture; hulls in view are drawn without shields in both.
         _scene.QueueShields(overlayCheck ? 0 : _shields.Draws.Length, _shields.Look.Constants);
-        QueueScanPulse(galaxy, camera);
+        QueueScanPulse(galaxy, camera, frameIndex);
         _scene.Render(commands, frameIndex, constants, composite, _batches.AsSpan(0, rockBatches), _batches.AsSpan(rockBatches, batchCount - rockBatches), _commandBlend > 0.01f, markCount, lensing);
     }
 
@@ -1141,7 +1147,7 @@ internal sealed class WorldView
     /// it: the cloud nearest the pulse's origin or the camera. Clouds never overlap, so that is the one either is in
     /// whenever it is in one.
     /// </summary>
-    private void QueueScanPulse(Galaxy galaxy, Double3 camera)
+    private void QueueScanPulse(Galaxy galaxy, Double3 camera, int frameIndex)
     {
         PulseShown = default;
         if ((_jumpStage > 0f && _ownInside) || !_scanPulse.Shell(out var shell))
@@ -1155,8 +1161,9 @@ internal sealed class WorldView
             Band = new float4(_scanPulse.Band(shell.Radius), shell.Strength, look.GridMinimum, look.GridPixels),
             Color = new float4(look.Color[0], look.Color[1], look.Color[2], look.LineWidth),
             Light = new float4(look.EdgeLight, look.GridLight, look.FillLight, look.GasLight),
-            Gas = new float4(look.GasGrid, look.GasFill, 0, 0),
+            Gas = new float4(look.GasGrid, look.GasFill, _scanWaves.Count, 0),
         };
+        _scanWaves.Items.CopyTo(_scene.PulseWaves(frameIndex));
         if (galaxy.GasClouds is { } gas && GasView is not ("absent" or "inside-absent" or "pilot-absent"))
         {
             var best = float.MaxValue;
@@ -1475,6 +1482,7 @@ internal sealed class WorldView
         if (rock.Resource >= 0)
             tint = Vector3.Lerp(tint, galaxy.Resources[rock.Resource].Color * 0.55f, 0.25f + 0.5f * rock.Grade);
         VisibleRocks++;
+        _scanWaves.Offer(position, rock.Radius, pixels);
         Add(ref candidateCount, _asteroidMeshBase + detail * Galaxy.AsteroidShapes + rock.Shape, position, rock.Rotation, rock.Radius, tint, 0f);
     }
 

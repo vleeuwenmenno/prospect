@@ -148,7 +148,8 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `content/visuals/scan.json`) and `scan_pulse.frag`, its own pass after tone mapping in `SceneRenderer.Present`. It
   reads the scene's depth, which is kept only on frames with a pulse, and stays out of the gas, shield and lens
   passes. It draws only on surfaces (scene depth) and in gas (the sensors' envelope), never on empty space, and is
-  one pulse per completed scan, none while a scan runs. `ScanPulseTests` holds when it starts. Check with
+  one pulse per completed scan, none while a scan runs. Surface ripples come from `ScanWaves` (fixed 32, offered by
+  `AddRock` and the hull loop, largest on screen kept), uploaded per frame slot to set 2 of the pulse pass. `ScanPulseTests` holds when it starts. Check with
   `--open scan-pilot` (pulse about 6 s in; also with `--sector 127,-1,-127` and `133,0,-77` for gas) and
   `--open scan-command` (the command view pulled back over the ship).
 - **The ship editor:** the limits are in `EditorRules`, `content/net/editor.json` and `docs/hosting.md`;
