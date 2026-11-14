@@ -389,6 +389,23 @@ public sealed class SqliteWorldStore : IWorldStore
             using var lease = Lease.TryTake(folder, out var busy, out var leaseError);
             if (lease is null)
                 return Without(busy ? OpenOutcome.Busy : OpenOutcome.Failed, leaseError);
+            return SummarizeLeased(database);
+        }
+        catch (Exception e) when (e is SqliteException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return Without(OpenOutcome.Failed, e.Message);
+        }
+    }
+
+    /// <summary>The look <see cref="Summarize"/> takes, for a caller that already holds the world's lease (<see cref="TakeLease"/>).</summary>
+    internal static WorldSummary SummarizeLeased(string database)
+    {
+        static WorldSummary Without(OpenOutcome outcome, string? error) => new(outcome, Guid.Empty, "", 0, 0, 0, 0, false, default, error);
+
+        if (RuntimeProblem.Value is { } problem)
+            return Without(OpenOutcome.Failed, problem);
+        try
+        {
             var look = Inspect(database, SaveLimits.Default, null, materialize: false);
             return look.Outcome is OpenOutcome.Opened or OpenOutcome.Incompatible
                 ? new WorldSummary(look.Outcome, look.WorldId, look.Name, look.CreatedMs, look.SavedMs, look.Generation, look.CapturedTick, look.Clean, look.Compatibility, look.Error)
@@ -399,6 +416,12 @@ public sealed class SqliteWorldStore : IWorldStore
             return Without(OpenOutcome.Failed, e.Message);
         }
     }
+
+    /// <summary>
+    /// Takes a world folder's lease the way an open does, for <see cref="WorldDeletion"/>: null with
+    /// <paramref name="busy"/> when someone holds it. The caller disposes it, and nothing is opened.
+    /// </summary>
+    internal static IDisposable? TakeLease(string folder, out bool busy, out string error) => Lease.TryTake(Path.GetFullPath(folder), out busy, out error);
 
     /// <inheritdoc/>
     public CommitResult Commit(WorldSnapshot snapshot, long expectedGeneration, bool final)

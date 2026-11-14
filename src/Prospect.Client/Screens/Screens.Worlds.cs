@@ -1,3 +1,4 @@
+using System.Globalization;
 using Brutal.ImGuiApi;
 using Brutal.Numerics;
 using Prospect.Client.Ui;
@@ -19,6 +20,8 @@ internal sealed partial class ScreenHost
     public void OpenLoadWorld()
     {
         _loadError = "";
+        _deleteAsk = DeleteAsk.None;
+        _deleteNotice = "";
         Show(Screen.LoadWorld);
     }
 
@@ -36,11 +39,168 @@ internal sealed partial class ScreenHost
         _menuError = error;
     }
 
+    /// <summary>What a confirmation on the Load World screen is about to delete.</summary>
+    private enum DeleteAsk : byte
+    {
+        None,
+        One,
+        Incompatible,
+    }
+
+    /// <summary>The most world names a confirmation lists; the rest are counted.</summary>
+    private const int DeleteNamesShown = 5;
+
+    private DeleteAsk _deleteAsk;
+    private string[] _deleteIds = [];
+    private string[] _deleteNames = [];
+    private bool _deleteFocus;
+
+    // The worlds the delete that runs, or that just ran, was asked for, so its report can name them.
+    private string[] _askedIds = [];
+    private string[] _askedNames = [];
+    private string _deleteNotice = "";
+    private uint _deleteNoticeColor = Theme.Good;
+
+    // A capture's request (--open delete-world|delete-incompatible|deleted-incompatible), applied once the list is read.
+    private string? _previewDelete;
+
+    /// <summary>Asks the Load World screen to open a confirmation, or run one, once the list is read: for captures only.</summary>
+    public void PreviewDelete(string? view)
+    {
+        if (view is "delete-world" or "delete-incompatible" or "deleted-incompatible")
+            _previewDelete = view;
+    }
+
+    /// <summary>Asks before deleting one world.</summary>
+    private void AskDeleteWorld(WorldEntry world)
+    {
+        _deleteIds = [world.FolderId];
+        _deleteNames = [world.Name];
+        _deleteAsk = DeleteAsk.One;
+        _deleteFocus = true;
+    }
+
+    /// <summary>Asks before deleting every world in the list that this version of the game cannot open. Does nothing when there are none.</summary>
+    private void AskDeleteIncompatible(WorldList list)
+    {
+        var count = 0;
+        foreach (var world in list.Worlds)
+        {
+            if (world.Availability == WorldAvailability.Incompatible)
+                count++;
+        }
+
+        if (count == 0)
+            return;
+        _deleteIds = new string[count];
+        _deleteNames = new string[count];
+        count = 0;
+        foreach (var world in list.Worlds)
+        {
+            if (world.Availability != WorldAvailability.Incompatible)
+                continue;
+            _deleteIds[count] = world.FolderId;
+            _deleteNames[count++] = world.Name;
+        }
+
+        _deleteAsk = DeleteAsk.Incompatible;
+        _deleteFocus = true;
+    }
+
+    /// <summary>Starts the delete the player confirmed, on a worker, and shows nothing of its result until it reports.</summary>
+    private void ConfirmDelete()
+    {
+        var incompatible = _deleteAsk == DeleteAsk.Incompatible;
+        _deleteAsk = DeleteAsk.None;
+        _deleteNotice = "";
+        if (_app.Worlds.Delete(_deleteIds, incompatible))
+        {
+            _askedIds = _deleteIds;
+            _askedNames = _deleteNames;
+        }
+    }
+
+    private string NameOfAsked(string folderId)
+    {
+        for (var i = 0; i < _askedIds.Length; i++)
+        {
+            if (_askedIds[i] == folderId)
+                return _askedNames[i];
+        }
+
+        return "A world";
+    }
+
+    /// <summary>Turns a finished delete's report into the line or lines under the list: what went, and for each world that stayed, why.</summary>
+    private void TakeDeleteReport()
+    {
+        if (_app.Worlds.TakeReport() is not { } report)
+            return;
+        var total = report.Results.Count;
+        var deleted = report.Deleted;
+        if (report.Complete)
+        {
+            _deleteNotice = total == 1 ? $"Deleted {NameOfAsked(report.Results[0].FolderId)}." : $"Deleted {total} worlds.";
+            _deleteNoticeColor = Theme.Good;
+            return;
+        }
+
+        var text = new System.Text.StringBuilder();
+        text.Append(CultureInfo.InvariantCulture, $"Deleted {deleted} of {total}.");
+        var shown = 0;
+        var more = 0;
+        foreach (var result in report.Results)
+        {
+            if (result.Message.Length == 0)
+                continue;
+            if (shown == 4)
+            {
+                more++;
+                continue;
+            }
+
+            shown++;
+            text.Append('\n').Append(NameOfAsked(result.FolderId)).Append(": ").Append(result.Message);
+        }
+
+        if (more > 0)
+            text.Append(CultureInfo.InvariantCulture, $"\nand {more} more; the log has the rest.");
+        _deleteNotice = text.ToString();
+        _deleteNoticeColor = deleted == total ? Theme.Accent : Theme.Bad;
+    }
+
     /// <summary>The list of saved worlds: each one with when it was saved, and why it cannot be opened when it cannot.</summary>
     private void DrawLoadWorld(float fade)
     {
-        BeginRoot("##loadworld"u8);
         var worlds = _app.Worlds;
+        TakeDeleteReport();
+        if (_previewDelete is { } preview && worlds.Loaded && !worlds.Deleting && _deleteAsk == DeleteAsk.None)
+        {
+            _previewDelete = null;
+            if (preview == "delete-world")
+            {
+                foreach (var world in worlds.List.Worlds)
+                {
+                    if (world.Availability != WorldAvailability.Busy)
+                    {
+                        AskDeleteWorld(world);
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                AskDeleteIncompatible(worlds.List);
+                if (preview == "deleted-incompatible" && _deleteAsk != DeleteAsk.None)
+                    ConfirmDelete();
+            }
+        }
+
+        var modal = _deleteAsk != DeleteAsk.None;
+        var locked = modal || worlds.Deleting;
+        BeginRoot("##loadworld"u8);
+        if (modal)
+            ImGui.BeginDisabled();
         var width = Math.Min(680, _ui.DisplaySize.X / Kit.Scale - 32);
         var size = new float2(Kit.Px(width), Math.Min(Kit.Px(900), _ui.DisplaySize.Y * 0.92f - Kit.Px(72)));
         var min = new float2(Math.Min(Kit.Px(96), Math.Max(Kit.Px(8), (_ui.DisplaySize.X - size.X) * 0.5f)), _ui.DisplaySize.Y * 0.06f + Slide(fade));
@@ -64,16 +224,18 @@ internal sealed partial class ScreenHost
         var inner = ImGui.GetContentRegionAvail().X;
         var errorHeight = 0f;
         var error = _loadError.Length > 0 ? _loadError : worlds.List.Error ?? "";
+        ImGui.PushFont(_ui.Sans, Theme.FontSmall);
         if (error.Length > 0)
-        {
-            ImGui.PushFont(_ui.Sans, Theme.FontSmall);
             errorHeight = ImGui.CalcTextSize(error, false, inner).Y + Kit.Px(Theme.Space2);
-            ImGui.PopFont();
-        }
+        var notice = worlds.Deleting ? "Deleting..." : _deleteNotice;
+        if (notice.Length > 0)
+            errorHeight += ImGui.CalcTextSize(notice, false, inner).Y + Kit.Px(Theme.Space2);
+        ImGui.PopFont();
 
         var footer = Kit.Px(Theme.ControlHeight + Theme.Space4) + errorHeight;
         var listHeight = Math.Max(Kit.Px(60), ImGui.GetContentRegionAvail().Y - footer);
         ImGui.BeginChild("##worldlist"u8, new float2(0, listHeight), ImGuiChildFlags.NavFlattened, ImGuiWindowFlags.NoBackground);
+        var incompatible = 0;
         if (worlds.Library is null)
             Kit.Paragraph(_ui.Sans, Theme.FontBody, Theme.TextDim, "Saved worlds are off for this run."u8, inner / Kit.Scale);
         else if (worlds.Loading)
@@ -85,11 +247,16 @@ internal sealed partial class ScreenHost
             var list = worlds.List.Worlds;
             for (var i = 0; i < list.Count; i++)
             {
-                if (WorldRow(list[i], i, list[i].FolderId == worlds.List.LastWorld))
+                if (list[i].Availability == WorldAvailability.Incompatible)
+                    incompatible++;
+                if (WorldRow(list[i], i, list[i].FolderId == worlds.List.LastWorld, locked, out var delete))
                 {
                     _loadError = "";
                     _app.LoadWorld(list[i]);
                 }
+
+                if (delete)
+                    AskDeleteWorld(list[i]);
             }
         }
 
@@ -102,22 +269,119 @@ internal sealed partial class ScreenHost
             Kit.Space(Theme.Space2);
         }
 
-        if (Kit.Button("Back"u8, ButtonKind.Secondary, 120) || BackPressed())
+        if (notice.Length > 0)
+        {
+            Kit.Paragraph(_ui.Sans, Theme.FontSmall, worlds.Deleting ? Theme.TextDim : _deleteNoticeColor, notice, inner / Kit.Scale);
+            Kit.Space(Theme.Space2);
+        }
+
+        if ((Kit.Button("Back"u8, ButtonKind.Secondary, 120) || BackPressed()) && !modal)
             Show(Screen.MainMenu);
         ImGui.SameLine(0, Kit.Px(Theme.Space3));
-        if (Kit.Button("Refresh"u8, ButtonKind.Secondary, 140, worlds.Library is not null))
+        if (Kit.Button("Refresh"u8, ButtonKind.Secondary, 140, worlds.Library is not null && !locked))
         {
             _loadError = "";
             worlds.Refresh();
         }
 
+        ImGui.SameLine(0, Kit.Px(Theme.Space3));
+        if (Kit.Button("Delete Incompatible"u8, ButtonKind.Secondary, 220, incompatible > 0 && !locked))
+            AskDeleteIncompatible(worlds.List);
+
         EndPanel();
+        if (modal)
+            ImGui.EndDisabled();
         DrawHints(back: true);
+        EndRoot();
+
+        if (_deleteAsk != DeleteAsk.None)
+            DrawDeleteConfirm();
+    }
+
+    /// <summary>
+    /// The confirmation before worlds are deleted, over the list: says plainly which worlds go and that it cannot
+    /// be undone, and starts on Cancel so a stray Enter deletes nothing.
+    /// </summary>
+    private void DrawDeleteConfirm()
+    {
+        var one = _deleteAsk == DeleteAsk.One;
+        var count = _deleteIds.Length;
+
+        // A full-window surface over the list: it dims what is under it and takes the pointer from it.
+        ImGui.SetNextWindowPos(float2.Zero);
+        ImGui.SetNextWindowSize(_ui.DisplaySize);
+        ImGui.Begin("##deleteworld"u8, RootFlags & ~ImGuiWindowFlags.NoBringToFrontOnFocus);
+        ImGui.GetWindowDrawList().AddRectFilled(float2.Zero, _ui.DisplaySize, Kit.Opaque(Theme.Void, 0.6f));
+        var shown = Math.Min(count, Compact ? 3 : DeleteNamesShown);
+        var listed = one ? 0 : shown + (count > shown ? 1 : 0);
+        var size = new float2(Math.Min(Kit.Px(560), _ui.DisplaySize.X - Kit.Px(24)), Math.Min(Kit.Px(one ? 262 : 340 + listed * 22), _ui.DisplaySize.Y - Kit.Px(24)));
+        var min = (_ui.DisplaySize - size) * 0.5f;
+        Kit.ChamferFill(ImGui.GetWindowDrawList(), min, min + size, Kit.Opaque(Theme.Panel), Kit.Px(Theme.Chamfer));
+        BeginPanel("##deleteworldpanel"u8, min, size);
+        var width = ImGui.GetContentRegionAvail().X / Kit.Scale;
+
+        Kit.Caption(one ? "DELETE WORLD"u8 : "DELETE INCOMPATIBLE WORLDS"u8, Theme.Bad);
+        Kit.Space(Theme.Space1);
+        var draw = ImGui.GetWindowDrawList();
+        var at = ImGui.GetCursorScreenPos();
+        var available = ImGui.GetContentRegionAvail().X;
+        if (one)
+            Kit.ClippedText(draw, _ui.SansBold, Theme.FontHeading, at, Theme.Text, _deleteNames[0], available);
+        else
+            Kit.Text(draw, _ui.SansBold, Theme.FontHeading, at, Theme.Text, Kit.F($"{count} {(count == 1 ? "world" : "worlds")}"));
+        ImGui.Dummy(new float2(available, Kit.Px(Theme.FontHeading) * 1.3f));
+        Kit.Space(Theme.Space2);
+
+        if (one)
+        {
+            Kit.Paragraph(_ui.Sans, Theme.FontBody, Theme.Text, "This permanently deletes the world: its save, its recovery copies and its identity key (world.key)."u8, width);
+        }
+        else
+        {
+            Kit.Paragraph(
+                _ui.Sans,
+                Theme.FontBody,
+                Theme.Text,
+                "This version of the game cannot open these worlds: they were saved by another version or with other game files. This permanently deletes each one: its save, its recovery copies and its identity key (world.key)."u8,
+                width
+            );
+            Kit.Space(Theme.Space3);
+            for (var i = 0; i < shown; i++)
+            {
+                var line = ImGui.GetCursorScreenPos();
+                Kit.ClippedText(draw, _ui.Sans, Theme.FontBody, line, Theme.TextDim, _deleteNames[i], available);
+                ImGui.Dummy(new float2(available, Kit.Px(22)));
+            }
+
+            if (count > shown)
+                Kit.Label(_ui.Sans, Theme.FontBody, Theme.TextDim, Kit.F($"and {count - shown} more"));
+        }
+
+        Kit.Space(Theme.Space3);
+        Kit.Paragraph(_ui.SansMedium, Theme.FontBody, Theme.Bad, "This cannot be undone."u8, width);
+        Kit.Space(Theme.Space4);
+
+        if (_deleteFocus)
+        {
+            ImGui.SetKeyboardFocusHere();
+            _deleteFocus = false;
+        }
+
+        if (Kit.Button("Cancel"u8, ButtonKind.Secondary, 140) || BackPressed())
+            _deleteAsk = DeleteAsk.None;
+        ImGui.SameLine(0, Kit.Px(Theme.Space3));
+        if (Kit.Button(one ? "Delete World"u8 : "Delete All"u8, ButtonKind.Primary, 180) && _deleteAsk != DeleteAsk.None)
+            ConfirmDelete();
+
+        EndPanel();
         EndRoot();
     }
 
-    /// <summary>One saved world in the list. Returns true when a world that can be opened was chosen.</summary>
-    private bool WorldRow(WorldEntry world, int index, bool last)
+    /// <summary>
+    /// One saved world in the list. Returns true when a world that can be opened was chosen; <paramref name="delete"/>
+    /// is true when the player asked to delete it. A world in use cannot be deleted, so it has no such button.
+    /// </summary>
+    private bool WorldRow(WorldEntry world, int index, bool last, bool locked, out bool delete)
     {
         Kit.PushId((ulong)index);
         var draw = ImGui.GetWindowDrawList();
@@ -133,10 +397,38 @@ internal sealed partial class ScreenHost
         if (!world.Ready)
             ImGui.EndDisabled();
 
+        // Over the row, so a press on it never opens the world.
+        delete = false;
+        var after = ImGui.GetCursorScreenPos();
+        var deleteWidth = Kit.Measure(_ui.SansMedium, Theme.FontCaption, "DELETE"u8).X + Kit.Px(Theme.Space4);
+        var deleteMin = position + new float2(size.X - Kit.Px(Theme.Space3) - deleteWidth, Kit.Px(26));
+        var deleteSize = new float2(deleteWidth, Kit.Px(24));
+        var canDelete = world.Availability != WorldAvailability.Busy;
+        var deleteHot = false;
+        if (canDelete)
+        {
+            ImGui.SetCursorScreenPos(deleteMin);
+            if (locked)
+                ImGui.BeginDisabled();
+            delete = ImGui.InvisibleButton("##delete"u8, deleteSize) && !locked;
+            deleteHot = !locked && Kit.IsHot();
+            if (locked)
+                ImGui.EndDisabled();
+            ImGui.SetCursorScreenPos(after);
+        }
+
         if (t > 0.01f)
         {
             draw.AddRectFilled(position, position + size, Kit.Color(Theme.PanelRaised, 0.9f * t));
             draw.AddRectFilled(position, position + new float2(Kit.Px(3), size.Y), Kit.Color(Theme.Accent, t));
+        }
+
+        if (canDelete)
+        {
+            if (deleteHot)
+                draw.AddRect(deleteMin, deleteMin + deleteSize, Kit.Color(Theme.Bad, 0.8f));
+            var label = Kit.Measure(_ui.SansMedium, Theme.FontCaption, "DELETE"u8);
+            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, deleteMin + (deleteSize - label) * 0.5f, deleteHot ? Theme.Bad : Theme.TextMute, "DELETE"u8);
         }
 
         var pad = Kit.Px(Theme.Space3);
@@ -163,7 +455,7 @@ internal sealed partial class ScreenHost
         }
         draw.AddLine(position + new float2(0, size.Y - 0.5f), position + new float2(size.X, size.Y - 0.5f), Kit.Color(Theme.Line, 0.6f));
         Kit.PopId();
-        return pressed && world.Ready;
+        return pressed && world.Ready && !locked;
     }
 
     /// <summary>

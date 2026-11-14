@@ -699,7 +699,10 @@ internal sealed class App : IDisposable
         else if (_options.StartScreen == Screen.NewGame)
             _screens.OpenNewGame();
         else if (_options.StartScreen == Screen.LoadWorld)
+        {
             _screens.OpenLoadWorld();
+            _screens.PreviewDelete(_options.OpenView);
+        }
         else
             _screens.Show(_options.StartScreen);
     }

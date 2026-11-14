@@ -34,7 +34,9 @@ internal static class Program
           --listing <url|off>     The listing server for public games and the server browser (default: content/net/listing.json)
           --set <id>=<value>      A world setting for local games started in this run; repeat for more (ids and ranges: content/rules/settings.json)
           --open <view>           With --start local or --join: open the command view, the map or the ship data sheet (command, map, map-menu, map-hover, galaxy, info), the map with the own sector's card pinned (map-card), tilted (map-tilt) or with a scan of the own sector started (scan), the command view pulled back to show sensor rings and fog (command-fog), start a jump (jump, jump-wormhole, jump-rift), send the rest of the fleet on short jumps 6 km along -x for another client to watch (jump-fleet) or straight ahead of the camera so their openings overlap (jump-fleet-ahead), or show Controls (controls), ask to edit the own ship in the ship editor (edit), the in-game menu (menu), the world settings in force (world-settings), the player list (players), the party
-                                  panel (social), the Friends tab (friends), chat (chat) or the world with only the always-shown party and chat (hud)
+                                  panel (social), the Friends tab (friends), chat (chat) or the world with only the always-shown party and chat (hud).
+                                  With --start load, for captures with --worlds: the confirmation before deleting the first world (delete-world) or every
+                                  incompatible one (delete-incompatible), or the list after the incompatible ones are deleted (deleted-incompatible)
           --browser-sample <s>    The server browser shows a fixed sample instead of asking the listing server, for captures:
                                   ready, loading, failed, empty, off, or password (the sample with the password prompt open)
           --account-sample <s>    With --capture or --bench: the account and friends show a fixed sample instead of the
@@ -177,7 +179,7 @@ internal static class Program
                 case "--set" when hasValue:
                     options.WorldSettingArgs.Add(args[++i]);
                     break;
-                case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "map-hover" or "map-card" or "map-tilt" or "scan" or "command-fog" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "leave":
+                case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "map-hover" or "map-card" or "map-tilt" or "scan" or "command-fog" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
                     options.OpenView = args[++i];
                     break;
                 case "--browser-sample" when hasValue:
@@ -342,6 +344,11 @@ internal static class Program
         // A sample stands in for the account service only where nobody can act on it.
         if (options.AccountSample is not null && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--account-sample works only with --capture or --bench.");
+
+        // The delete views act on a folder of worlds of the capture's own, never on the player's.
+        if (options.OpenView is "delete-world" or "delete-incompatible" or "deleted-incompatible"
+            && (options.StartScreen != Screen.LoadWorld || options.CapturePath is null || options.WorldsRoot is null))
+            return Fail("--open delete-world, delete-incompatible and deleted-incompatible work only with --start load, --capture and --worlds.");
 
         // A broken store is for captures of what the player is told, in a folder of the capture's own.
         if (options.SaveFault != StoreFault.None && (options.CapturePath is null || options.WorldsRoot is null))
