@@ -59,7 +59,7 @@ internal sealed partial class ScreenHost
         var hasShield = flight.ShieldCapacity > 0f;
         var offline = hasShield && own.ShieldOffline;
         var restart = offline ? FlightConsole.RestartMark(flight) : 0f;
-        ConsoleRow(draw, layout, layout.LeftX, layout.Top, ConsoleIcon.Shield, "SHIELD"u8, offline ? Theme.Bad : hasShield ? Theme.Info : Theme.LineStrong, out var track, hot: hovered == ConsoleBar.Shield);
+        ConsoleRow(draw, layout, layout.LeftX, layout.Top, ConsoleIcon.Shield, "SHIELD"u8, FlightConsole.ShieldColor(hasShield, offline), out var track, hot: hovered == ConsoleBar.Shield);
         if (restart > 0f)
             DrawShieldRestart(draw, layout, FlightConsole.RestartProgress(own.Shield, flight), track);
         else if (offline)
@@ -68,36 +68,36 @@ internal sealed partial class ScreenHost
             ConsoleReading(draw, layout, layout.LeftX, layout.Top, Points(own.Shield, flight.ShieldCapacity), _ui.Mono, Theme.Text, track);
         else
             ConsoleReading(draw, layout, layout.LeftX, layout.Top, "NONE"u8, _ui.SansMedium, Theme.TextMute, track);
-        ConsoleSegments(draw, track, shield, _trailShield, offline ? Theme.LineStrong : Theme.Info, false);
+        ConsoleBars.Segments(draw, track, shield, _trailShield, offline ? Theme.LineStrong : Theme.Info, false);
         if (restart > 0f)
-            ConsoleMarker(draw, track, restart, 0.85f);
+            ConsoleBars.Marker(draw, track, restart, 0.85f);
 
-        var hullColor = hull < 0.3f ? Theme.Bad : Theme.Good;
+        var hullColor = FlightConsole.HullColor(hull);
         ConsoleRow(draw, layout, layout.LeftX, second, ConsoleIcon.Hull, "HULL"u8, hullColor, out track, hot: hovered == ConsoleBar.Hull);
-        ConsoleReading(draw, layout, layout.LeftX, second, Points(own.Hull, flight.HullPoints), _ui.Mono, hull < 0.3f ? Theme.Bad : Theme.Text, track);
-        ConsoleSegments(draw, track, hull, _trailHull, hullColor, false);
+        ConsoleReading(draw, layout, layout.LeftX, second, Points(own.Hull, flight.HullPoints), _ui.Mono, hull < FlightConsole.HullLow ? Theme.Bad : Theme.Text, track);
+        ConsoleBars.Segments(draw, track, hull, _trailHull, hullColor, false);
 
         // Right: the battery, and the boost drive's heat.
         var energyColor = energy < 0.15f ? Theme.Bad : Theme.Accent;
         ConsoleRow(draw, layout, layout.RightX, layout.Top, ConsoleIcon.Energy, "ENERGY"u8, energyColor, out track, hot: hovered == ConsoleBar.Energy);
         DrawEnergyReadings(draw, layout, own, flight, energy, track);
-        ConsoleSegments(draw, track, energy, _trailEnergy, energyColor, false);
+        ConsoleBars.Segments(draw, track, energy, _trailEnergy, energyColor, false);
 
         // The battery's boost floor: below the mark boost will not start, though boost already running carries on
         // until the battery is empty.
         if (flight.EnergyStorage > 0f)
-            ConsoleMarker(draw, track, FlightConsole.Fraction(flight.BoostEnergyFloor, flight.EnergyStorage), 0.85f);
+            ConsoleBars.Marker(draw, track, FlightConsole.Fraction(flight.BoostEnergyFloor, flight.EnergyStorage), 0.85f);
 
         // Why boost is unavailable, when it is: the drive overheated and is cooling, or the battery is below its floor.
         var noEnergy = FlightConsole.BoostStarved(own, flight);
         var heatColor = own.BoostLocked || noEnergy ? Theme.Bad : FlightConsole.HeatColor(heat);
         ConsoleRow(draw, layout, layout.RightX, second, ConsoleIcon.Heat, own.Boosting ? "BOOSTING"u8 : "BOOST HEAT"u8, heatColor, out track, own.Boosting, hovered == ConsoleBar.Heat);
         DrawHeatReadings(draw, layout, second, own.BoostLocked ? "OVERHEAT"u8 : noEnergy ? "NO ENERGY"u8 : Kit.F($"{heat * 100f:0} %"), own.BoostLocked || noEnergy, heatColor, snapshot.Dampeners, ref track);
-        ConsoleSegments(draw, track, heat, heat, own.BoostLocked ? Theme.Bad : heatColor, !own.BoostLocked);
+        ConsoleBars.Segments(draw, track, heat, heat, own.BoostLocked ? Theme.Bad : heatColor, !own.BoostLocked);
 
         // While locked, the mark is where the drive has cooled enough to boost again.
         if (own.BoostLocked)
-            ConsoleMarker(draw, track, FlightModel.BoostUnlockHeat, 0.7f);
+            ConsoleBars.Marker(draw, track, FlightModel.BoostUnlockHeat, 0.7f);
 
         // Centre: speed and its unit in a hexagon with a quiet outline; the dampeners are said in the heat row.
         var cx = layout.CenterX;
@@ -317,17 +317,6 @@ internal sealed partial class ScreenHost
             : Kit.F($"{shown:0} / {capacity:0} MJ");
     }
 
-    private enum ConsoleIcon
-    {
-        Shield,
-        Hull,
-        Energy,
-        Heat,
-    }
-
-    /// <summary>Where a row's segments go, and where its label ends.</summary>
-    private readonly record struct ConsoleTrack(float Left, float Right, float Top, float Bottom, float LabelEnd);
-
     /// <summary>
     /// One slanted row: its frame, icon and label, and where its segments go. A <paramref name="hot"/> row, under
     /// the pointer, is raised a shade and has its border lit.
@@ -352,7 +341,7 @@ internal sealed partial class ScreenHost
         draw.PushClipRect(new float2(x, y), new float2(x + w, y + h), true);
         if (!layout.Compact)
         {
-            ConsoleGlyph(draw, icon, new float2(inner, y + h * 0.5f - Kit.Px(7)), rgb);
+            ConsoleBars.Glyph(draw, icon, new float2(inner, y + h * 0.5f - Kit.Px(7)), rgb);
             var labelX = inner + Kit.Px(14 + 8);
             labelEnd = labelX + Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, new float2(labelX, y + Kit.Px(11)), lit ? rgb : Theme.TextDim, label).X;
             var left = x + s * 0.5f + pad + Kit.Px(FlightConsole.LabelColumn + FlightConsole.ColumnGap);
@@ -377,111 +366,6 @@ internal sealed partial class ScreenHost
         draw.PushClipRect(new float2(left, y), new float2(right + 1f, y + layout.Row), true);
         Kit.Text(draw, font, Theme.FontSmall, new float2(right - size.X, y + Kit.Px(layout.Compact ? 3 : 11)), rgb, reading);
         draw.PopClipRect();
-    }
-
-    /// <summary>
-    /// The bar: <see cref="FlightConsole.Segments"/> slanted segments. Lit up to <paramref name="fraction"/>, the
-    /// leading segment partly; from there to <paramref name="trail"/> the charge just lost, fading as it catches up.
-    /// Heat colours each segment by where it sits on the scale, so a hotter drive reaches into amber and red.
-    /// </summary>
-    private static void ConsoleSegments(ImDrawListPtr draw, in ConsoleTrack track, float fraction, float trail, uint rgb, bool heat)
-    {
-        const int count = FlightConsole.Segments;
-        var gap = Kit.Px(3);
-        var height = track.Bottom - track.Top;
-        var skew = height * FlightConsole.Slant / FlightConsole.Row;
-        var width = (track.Right - skew - track.Left - gap * (count - 1)) / count;
-        if (width <= 0f)
-            return;
-
-        var off = Kit.Color(Theme.Line, 0.85f);
-        var lost = Kit.Color(Kit.Mix(rgb, Theme.Text, 0.45f), 0.5f);
-        for (var i = 0; i < count; i++)
-        {
-            var x = track.Left + i * (width + gap);
-            var lit = Math.Clamp(fraction * count - i, 0f, 1f);
-            var trailed = Math.Clamp(trail * count - i, 0f, 1f);
-            // The hues stay, a shade towards the panel so the bars read without shouting.
-            var color = Kit.Color(Kit.Mix(heat ? FlightConsole.HeatColor((i + 0.5f) / count) : rgb, Theme.Panel, FlightConsole.Mute));
-            if (lit > 0f)
-                SegmentPart(draw, x, x + width * lit, track.Top, track.Bottom, skew, color);
-            if (trailed > lit)
-                SegmentPart(draw, x + width * lit, x + width * trailed, track.Top, track.Bottom, skew, lost);
-            if (lit < 1f && trailed < 1f)
-                SegmentPart(draw, x + width * Math.Max(lit, trailed), x + width, track.Top, track.Bottom, skew, off);
-        }
-    }
-
-    private static void SegmentPart(ImDrawListPtr draw, float from, float to, float top, float bottom, float skew, ImColor8 color) =>
-        draw.AddQuadFilled(new float2(from + skew, top), new float2(to + skew, top), new float2(to, bottom), new float2(from, bottom), color);
-
-    /// <summary>A slanted tick across the bar at a fraction of it: the boost floor, or where boost unlocks.</summary>
-    private static void ConsoleMarker(ImDrawListPtr draw, in ConsoleTrack track, float fraction, float alpha)
-    {
-        var height = track.Bottom - track.Top;
-        var skew = height * FlightConsole.Slant / FlightConsole.Row;
-        var reach = Kit.Px(3);
-        var x = track.Left + (track.Right - skew - track.Left) * Math.Clamp(fraction, 0f, 1f);
-        var rise = reach * FlightConsole.Slant / FlightConsole.Row;
-        draw.AddLine(
-            new float2(x - rise, track.Bottom + reach),
-            new float2(x + skew + rise, track.Top - reach),
-            Kit.Color(Theme.Text, alpha),
-            Kit.Px(1.5f)
-        );
-    }
-
-    /// <summary>A row's icon in a 14 by 14 design-pixel box at <paramref name="at"/>.</summary>
-    private static void ConsoleGlyph(ImDrawListPtr draw, ConsoleIcon icon, float2 at, uint rgb)
-    {
-        var u = Kit.Scale;
-        var color = Kit.Color(rgb, 0.95f);
-        var thickness = Kit.Px(1.5f);
-        Span<float2> points = stackalloc float2[7];
-        switch (icon)
-        {
-            case ConsoleIcon.Shield:
-                points[0] = at + new float2(7, 0.5f) * u;
-                points[1] = at + new float2(13, 2.5f) * u;
-                points[2] = at + new float2(12.5f, 8) * u;
-                points[3] = at + new float2(7, 13.5f) * u;
-                points[4] = at + new float2(1.5f, 8) * u;
-                points[5] = at + new float2(1, 2.5f) * u;
-                draw.AddPolyline(points[..6], color, ImDrawFlags.Closed, thickness);
-                break;
-            case ConsoleIcon.Hull:
-                points[0] = at + new float2(7, 0.5f) * u;
-                points[1] = at + new float2(13, 4) * u;
-                points[2] = at + new float2(13, 10) * u;
-                points[3] = at + new float2(7, 13.5f) * u;
-                points[4] = at + new float2(1, 10) * u;
-                points[5] = at + new float2(1, 4) * u;
-                draw.AddPolyline(points[..6], color, ImDrawFlags.Closed, thickness);
-                draw.AddCircleFilled(at + new float2(7, 7) * u, 1.8f * u, color, 8);
-                break;
-            case ConsoleIcon.Energy:
-                points[0] = at + new float2(8.5f, 0.5f) * u;
-                points[1] = at + new float2(2.5f, 8) * u;
-                points[2] = at + new float2(6.5f, 8) * u;
-                points[3] = at + new float2(5, 13.5f) * u;
-                points[4] = at + new float2(11.5f, 5.5f) * u;
-                points[5] = at + new float2(7.5f, 5.5f) * u;
-                points[6] = at + new float2(9.5f, 0.5f) * u;
-                draw.AddPolyline(points, color, ImDrawFlags.Closed, thickness);
-                break;
-            default:
-                for (var i = 0; i < 3; i++)
-                {
-                    var x = 2.5f + i * 4f;
-                    points[0] = at + new float2(x, 13.5f) * u;
-                    points[1] = at + new float2(x + 1.5f, 9.5f) * u;
-                    points[2] = at + new float2(x, 5) * u;
-                    points[3] = at + new float2(x + 1.5f, 0.5f) * u;
-                    draw.AddPolyline(points[..4], color, ImDrawFlags.None, thickness);
-                }
-
-                break;
-        }
     }
 }
 
@@ -571,6 +455,15 @@ internal static class FlightConsole
 
     /// <summary>How fast a bar's trail of lost charge catches up, as an exponential rate per second.</summary>
     public const float TrailRate = 3f;
+
+    /// <summary>A hull bar turns red below this share of the blueprint's strength.</summary>
+    public const float HullLow = 0.3f;
+
+    /// <summary>The hull bar's colour: green, red once the hull is low. Shared with the target panel.</summary>
+    public static uint HullColor(float fraction) => fraction < HullLow ? Theme.Bad : Theme.Good;
+
+    /// <summary>The shield bar's accent: red while broken, blue with a shield, a dull line with none.</summary>
+    public static uint ShieldColor(bool hasShield, bool offline) => offline && hasShield ? Theme.Bad : hasShield ? Theme.Info : Theme.LineStrong;
 
     /// <summary>How far a bar's colour is taken towards the panel, so the hues read without shouting.</summary>
     public const float Mute = 0.18f;

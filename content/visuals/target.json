@@ -1,0 +1,11 @@
+{
+  "segments": 10,
+  "rowHeight": 12,
+  "barHeight": 8,
+  "gap": 2,
+  "slant": 0.28,
+  "rowGap": 4,
+  "iconSize": 10,
+  "iconGap": 6,
+  "readingGap": 8
+}

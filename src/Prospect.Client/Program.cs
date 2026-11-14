@@ -324,6 +324,14 @@ internal static class Program
                     options.BreakShieldSeconds = breakAt;
                     i++;
                     break;
+                case "--hurt-fleet" when hasValue && float.TryParse(args[i + 1], out var hurtAt) && hurtAt is >= 0f and <= 600f:
+                    options.HurtFleetSeconds = hurtAt;
+                    i++;
+                    break;
+                case "--hurt-kind" when hasValue && (args[i + 1] is "damaged" or "broken"):
+                    options.HurtFleetBroken = args[i + 1] == "broken";
+                    i++;
+                    break;
                 case "--look-to" when hasValue && float.TryParse(args[i + 1], out var lookTo):
                     options.LookToDegrees = lookTo;
                     i++;
@@ -381,6 +389,9 @@ internal static class Program
 
         if (options.BreakShieldSeconds is not null && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
             return Fail("--break-shield works only with --capture or --bench, in an unsaved private local game.");
+
+        if (options.HurtFleetSeconds is not null && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
+            return Fail("--hurt-fleet works only with --capture or --bench, in an unsaved private local game.");
 
         if (options.RtsSeed is not null && options.RtsScript is null) return Fail("--rts-seed requires --rts-script.");
         if (options.RtsScript is not null && (options.CapturePath is null || options.BenchSeconds > 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private))
