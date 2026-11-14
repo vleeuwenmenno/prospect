@@ -48,7 +48,7 @@ Why these three:
 - Middle keeps every density octave. At 3–9 radii the finest octave is still 15–45 pixels wide; dropping it there would show.
 - Far uses the same density with its finest octave replaced by its average. The outline stays the same shape, so the hand-over does not morph.
 - A light from the smooth envelope alone (no lookups) was tried for far and rejected: it shaded the cloud visibly more than the probes.
-- A half-resolution target was rejected again: it needs new depth, lens and shield edge reconstruction and a resize path.
+- The primary cloud alone is marched at half resolution; see "Half-resolution march". The other levels already cost little.
 
 Renderer order:
 
@@ -199,6 +199,57 @@ The gas passes push the same 128 bytes, all that Vulkan guarantees; the shield p
 The noise cache adds one immutable image/sampler and one sampled descriptor per frame slot; no render graph or history.
 The ordinary pass retains its guarded pipeline module acquisition and RGB-only blend.
 
+## Half-resolution march
+
+Decided. The primary cloud is marched for one pixel in four, then read back per pixel. Inside a cloud the march was
+most of the frame (GPU-bound: about 10 ms of 11 at 5096x1390), and gas changes slowly from pixel to pixel.
+
+How it works (`gas_half.frag`, `gas_half.glsl`):
+
+- A target of half the size each way (`SceneRenderer`, rebuilt with the other targets on resize). Each texel covers two by
+  two pixels and is marched along the ray through their centre, to the farthest of their opaque depths (the copy kept
+  behind the shields).
+- The four texels of a two-by-two block take one quarter of the step each, in an order and shift drawn from the block.
+  Their offsets then average out when read; with an independent offset per texel the read-back showed blotches.
+- A pixel reads the four by four texels around it with tent weights two texels wide, each only where it was marched to
+  the pixel's own depth (within 1%). Where none was, the pixel marches itself, exactly as before.
+- The ordinary pass (`gas.frag`) and composition (`tonemap.frag`) read the same target, so they still agree. Composition
+  reads it only for the interval from the camera to the pixel's own opaque depth on an unbent ray; lenses, shields in front
+  of the opaque depth and the own-hull tunnel march as before.
+- `GasConstants.Budget.w` is `HalfMarched` (-1) on a draw, or on the deferred `frame.gas`, whose cloud the target holds.
+
+What marches at full resolution, as before:
+
+- Pixels near a bolt (the half march leaves bolt lines out; their light on the gas stays in).
+- The pilot's own hull while hyperspace thins the gas there, and every frame while the pilot's own rift or wormhole is open.
+- Cold clouds and cold/normal pairs: their ice glints are dots a pixel across.
+- The gas fixtures (`--gas-fixture 1..12`), which must take the exact march. Fixture 13 uses the target in both captures.
+- Every draw other than the primary (middle and far levels, a second full cloud).
+
+What it costs and saves, Release, RTX 5070 Ti, mean of 5 s benchmarks, other GPU work on the machine (±15%):
+
+| View | 5096x1390 before | after | 5096x688 before | after |
+| --- | --- | --- | --- | --- |
+| Ordinary `127,-1,-127`, inside | 84 fps | 235 fps | 193 fps | 434 fps |
+| Ordinary, pilot (composed, own shield) | 91 fps | 191 fps | 172 fps | 373 fps |
+| Ordinary, command view (`--open command-fog`) | 94 fps | 355 fps | 278 fps | 827 fps |
+| Huge `133,0,-77`, inside | 77 fps | 215 fps | 178 fps | 417 fps |
+| Lightning `-15,-1,3`, inside | 49 fps | 204 fps | 185 fps | 415 fps |
+
+- Cold clouds and pairs are unchanged: about 90 fps inside a cold cloud and 46 fps inside a pair at 5096x1390.
+- `make bench-gas` runs these views and fails under 144 fps or on a managed allocation; cold and pair are reported only.
+
+How it looks:
+
+- The same at hull, shield, rock and bolt edges (in-process captures with the clock held, half off and on in turn).
+- Slightly cleaner: the per-pixel grain of the jitter is gone, and thin gas in front of a rock is its mean, not speckle.
+
+Open:
+
+- Glints for cold clouds and pairs at half resolution: a pixel would need the transmission at the glint's depth.
+- Motion has not been reviewed: the read-back is stable from frame to frame (no history), but grain at 2 px may shimmer
+  differently from the old 1 px grain.
+
 ## Budgets and limits
 
 Shared content controls presence, dimensions, extinction, tint, motion, samples and shape (`gas-clouds.shape` in `galaxy.json`).
@@ -331,7 +382,7 @@ One lookup replaces twelve corner hashes.
 - Repeat addressing makes the lattice continuous at its 64-cell boundary. The highest octave spans about 25 cells across a cloud, inside one period.
 
 Cached lighting would need invalidation for cloud motion, light and scale changes; it was not added.
-Half-resolution rendering would require new depth/portal/shield boundary reconstruction; it was not added.
+Half-resolution rendering of the primary cloud is described in "Half-resolution march".
 The twelve composition fixtures use homogeneous input, so their rerun alone cannot validate texture quality or speed.
 `GasNoiseLatticeTests` checks the actual CPU payload, packing, nondegenerate values and allocation after provisioning, not GLSL execution.
 

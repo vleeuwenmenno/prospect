@@ -520,6 +520,9 @@ internal sealed class WorldView
     public bool GasOverlayOpening { get; set; }
     /// <summary>Whether the last rendered frame deferred gas to composition, and how many shields it queued.</summary>
     public (bool Deferred, int Shields, bool HasGas) LastGasMode => _scene.LastGasMode;
+
+    /// <summary>For muted capture diagnostics: whether the last frame marched its primary cloud at half resolution.</summary>
+    public bool LastGasHalf => _scene.LastGasHalf;
     private GasCloudPlacement _gasCapture;
     private (Double3 Position, float Radius)? _gasCaptureIce;
     // Far gas: how it is levelled, and the clouds around the camera, which a worker keeps current.

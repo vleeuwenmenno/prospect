@@ -37,6 +37,13 @@ int gasSlotOf(GasData gas) { return (int(gas.motion.w+0.5)>>2)-1; }
 // What the pilot's own hyperspace tunnel leaves of the extinction of a pair's second cloud, as the passes that thin the
 // pushed cloud for the pilot's own hull set it; 1 everywhere else.
 float gasThin=1.0;
+// False only in the half-resolution march (gas_half.frag): bolt lines are a pixel or two wide, so pixels near a bolt
+// march at full resolution instead and every other pixel takes the half-resolution result without them. Their light on
+// the gas around them is volume light and stays in.
+bool gasBoltLines=true;
+// Where in its step each sample is taken, 0 to 1, when the pass chooses it (the half-resolution march); below zero, an
+// integer hash of the pixel.
+float gasJitter=-1.0;
 GasShape gasShape(GasData gas) {
     GasShape shape;
     float seed=gas.center.w;
@@ -437,7 +444,7 @@ vec4 gasMarch(GasData gas, GasData other, bool joint, vec3 ray, float fromDepth,
     uvec2 pixel=uvec2(gl_FragCoord.xy);
     uint mixed=pixel.x*1664525u+pixel.y*1013904223u;
     mixed^=mixed>>16; mixed*=0x7feb352du; mixed^=mixed>>15; mixed*=0x846ca68bu; mixed^=mixed>>16;
-    float jitter=float(mixed>>8)*(1.0/16777216.0);
+    float jitter=gasJitter>=0.0 ? gasJitter : float(mixed>>8)*(1.0/16777216.0);
     int kind=int(frame.ftl.x+0.5);
     bool passage=frame.ftl.y>0.0 && (kind==2 || kind==3);
     FtlOwnRay ownRay=ftlOwnRay(ray,pixelAngle);
@@ -458,7 +465,7 @@ vec4 gasMarch(GasData gas, GasData other, bool joint, vec3 ray, float fromDepth,
         stroke=frame.gasFlashes[slot];
         if(level>0) stroke.w*=frame.gasKindTime.y;
         // Bolts are lines a few metres wide: the far level is too small on screen for them, but not for their light.
-        boltLight=gasBolts(gas,shape,slot,level<2,ray,pixelAngle,lampA,lampB);
+        boltLight=gasBolts(gas,shape,slot,level<2 && gasBoltLines,ray,pixelAngle,lampA,lampB);
         boltPending=boltLight.x>=enter && boltLight.x<=leave && boltLight.yzw!=vec3(0);
     }
     if(!joint) {

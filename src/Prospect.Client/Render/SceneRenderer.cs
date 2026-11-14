@@ -320,6 +320,16 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private VmaAllocation _ownBehindAllocation;
     private VkImageView _ownBehindView;
     private bool _ownBehindReady;
+    // The primary cloud marched at half resolution (gas_half.frag): RGB its light, alpha its transmission. Written on
+    // frames whose primary it holds, read by the ordinary gas pass (set 1, binding 2 of the shield layout) or by the tone
+    // mapper (set 1, binding 8), and statically bound by both, so it is moved to the layout they read before any frame
+    // uses it. Shared by both frame slots like the scene images: a frame writing it waits for the last frame's reads.
+    private VkImage _gasHalfImage;
+    private VmaAllocation _gasHalfAllocation;
+    private VkImageView _gasHalfView;
+    private VkExtent2D _gasHalfExtent;
+    private bool _gasHalfReady;
+    private readonly VkPipeline _gasHalfPipeline;
     private readonly GpuBuffer[] _ftlBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
     private readonly VkSampler _sampler;
     private readonly VkSampler _pointSampler;
@@ -408,7 +418,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         Span<VkDescriptorPoolSize> poolSizes =
         [
             new VkDescriptorPoolSize { Type = VkDescriptorType.UniformBuffer, DescriptorCount = 2 * FrameRenderer.FramesInFlight },
-            new VkDescriptorPoolSize { Type = VkDescriptorType.CombinedImageSampler, DescriptorCount = 8 + 2 + 2 + FrameRenderer.FramesInFlight },
+            new VkDescriptorPoolSize { Type = VkDescriptorType.CombinedImageSampler, DescriptorCount = 9 + 3 + 3 + FrameRenderer.FramesInFlight },
         ];
         _descriptorPool = device.CreateDescriptorPool(
             new DescriptorPoolEx.CreateInfo { MaxSets = 2 * FrameRenderer.FramesInFlight + 3, PoolSizes = poolSizes },
@@ -492,12 +502,20 @@ internal sealed unsafe class SceneRenderer : IDisposable
                 DescriptorCount = 1,
                 StageFlags = VkShaderStageFlags.FragmentBit,
             },
+            new VkDescriptorSetLayoutBinding
+            {
+                Binding = 8,
+                DescriptorType = VkDescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                StageFlags = VkShaderStageFlags.FragmentBit,
+            },
         ];
         _sceneLayout = device.CreateDescriptorSetLayout(new DescriptorSetLayoutEx.CreateInfo { Bindings = sceneBindings }, null);
 
         _scenePipelineLayout = device.CreatePipelineLayout([_frameLayout.Handle], [], null);
 
-        // Set 1 of the shield shader: what was behind the shields, colour and depth.
+        // Set 1 of the shield shader: what was behind the shields, colour and depth. The gas passes share the layout;
+        // binding 2, the half-resolution march of the primary cloud, is read by the ordinary gas pass alone.
         Span<VkDescriptorSetLayoutBinding> shieldBindings =
         [
             new VkDescriptorSetLayoutBinding
@@ -510,6 +528,13 @@ internal sealed unsafe class SceneRenderer : IDisposable
             new VkDescriptorSetLayoutBinding
             {
                 Binding = 1,
+                DescriptorType = VkDescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                StageFlags = VkShaderStageFlags.FragmentBit,
+            },
+            new VkDescriptorSetLayoutBinding
+            {
+                Binding = 2,
                 DescriptorType = VkDescriptorType.CombinedImageSampler,
                 DescriptorCount = 1,
                 StageFlags = VkShaderStageFlags.FragmentBit,
@@ -748,6 +773,19 @@ internal sealed unsafe class SceneRenderer : IDisposable
                 throw;
             }
             _gasScenePipeline = Pipeline(sceneVertex, sceneFragment, noInput, Presets.Rasterization.Fill.CullNone, &depthOff, &gasBlend, _shieldPipelineLayout, VkRenderPass.NullHandle);
+            // The primary cloud at half resolution: its own colour target, no depth, written over.
+            var halfVertex = Module(shaders, "fullscreen.vert");
+            VkShaderModule halfFragment;
+            try
+            {
+                halfFragment = Module(shaders, "gas_half.frag");
+            }
+            catch
+            {
+                _gpu.Device.DestroyShaderModule(halfVertex, null);
+                throw;
+            }
+            _gasHalfPipeline = Pipeline(halfVertex, halfFragment, noInput, Presets.Rasterization.Fill.CullNone, &depthOff, Presets.BlendState.BlendNone, _shieldPipelineLayout, VkRenderPass.NullHandle, depthAttachment: false);
         }
         catch
         {
@@ -846,8 +884,12 @@ internal sealed unsafe class SceneRenderer : IDisposable
         var skyGas = _gas.SkyCount;
         var sceneGas = _gas.Count > skyGas || (_gas.HasPrimary && !deferredGas);
         LastGasMode = (deferredGas, _shieldCount, _gas.HasPrimary);
+        var halfGas = HalfMarches(constants);
+        LastGasHalf = halfGas;
         var frame = constants;
         frame.Gas = deferredGas ? _gas.Primary : default;
+        if (deferredGas && halfGas)
+            frame.Gas.Budget.W = GasConstants.HalfMarched;
         if (constants.Gas.Budget.Z > 0)
         {
             frame.Gas.Budget.Z = constants.Gas.Budget.Z;
@@ -875,6 +917,11 @@ internal sealed unsafe class SceneRenderer : IDisposable
             Transition(commands, _behindImage, VkImageAspectFlags.ColorBit, VkImageLayout.Undefined, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.FragmentShaderBit);
             Transition(commands, _behindDepthImage, VkImageAspectFlags.DepthBit, VkImageLayout.Undefined, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.FragmentShaderBit);
             _behindReady = true;
+        }
+        if (!_gasHalfReady)
+        {
+            Transition(commands, _gasHalfImage, VkImageAspectFlags.ColorBit, VkImageLayout.Undefined, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.FragmentShaderBit);
+            _gasHalfReady = true;
         }
         if (!_ownBehindReady)
         {
@@ -971,16 +1018,19 @@ internal sealed unsafe class SceneRenderer : IDisposable
         }
 
         // Both gas paths include these overlays, so unrelated portals cannot change their attenuation.
-        if (sceneGas) DrawGas(commands, frameIndex, skyGas, !deferredGas, ref color, ref depth);
+        if (sceneGas) DrawGas(commands, frameIndex, skyGas, !deferredGas, halfGas, ref color, ref depth);
 
         // Last, so the dust, the command grid and the jump marks are in what the shields bend and stay seen
         // through their transparent margins.
         // Deferred composition needs the opaque scene without the primary cloud even when no shield is drawn.
         if (deferredGas && _shieldCount == 0) KeepBehindShields(commands, ref color, ref depth);
         DrawShields(commands, frameIndex, constants, ref color, ref depth);
+        var primary = _gas.Primary;
         _gas.Begin();
 
         commands.EndRendering();
+        // Composition reads the primary at half resolution; the opaque scene it marches to was kept above.
+        if (deferredGas && halfGas) MarchHalf(commands, frameIndex, primary);
         Transition(commands, _colorImage, VkImageAspectFlags.ColorBit, VkImageLayout.ColorAttachmentOptimal, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.FragmentShaderBit);
         // The tone mapper reads depth for lenses and deferred gas/shields; otherwise it is only bound.
         Barrier(
@@ -1173,7 +1223,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
     /// primary when composition does not take it. A cloud at the full level reads the pilot's own hull's mask and
     /// depth from a copy of the scene, taken once; the other levels read the scene's own depth and copy nothing.
     /// </summary>
-    private void DrawGas(CommandBuffer commands, int frameIndex, int first, bool primary, ref VkRenderingAttachmentInfo color, ref VkRenderingAttachmentInfo depth)
+    private void DrawGas(CommandBuffer commands, int frameIndex, int first, bool primary, bool half, ref VkRenderingAttachmentInfo color, ref VkRenderingAttachmentInfo depth)
     {
         var copied = false;
         var reading = false;
@@ -1183,6 +1233,24 @@ internal sealed unsafe class SceneRenderer : IDisposable
             ref readonly var gas = ref (i < _gas.Count ? ref _gas[i] : ref _gas.Primary);
             ref readonly var bounds = ref (i < _gas.Count ? ref _gas.Bounds(i) : ref _gas.PrimaryBounds);
             var masked = gas.Budget.Y == GasConstants.Full;
+            if (i >= _gas.Count && half)
+            {
+                // The primary, marched at half resolution once the opaque scene is kept, then read back here.
+                if (reading) EndDepthRead(commands, ref color, ref depth);
+                reading = false;
+                if (!copied) KeepBehindShields(commands, ref color, ref depth);
+                copied = true;
+                commands.EndRendering();
+                MarchHalf(commands, frameIndex, gas);
+                ResumeScene(commands, ref color, ref depth);
+                Span<VkDescriptorSet> halfSets = [_frameSets[frameIndex], _shieldSet];
+                commands.BindPipeline(VkPipelineBindPoint.Graphics, _gasPipeline);
+                commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _shieldPipelineLayout, 0, halfSets, []);
+                var marked = gas;
+                marked.Budget.W = GasConstants.HalfMarched;
+                DrawGasQuad(commands, marked, bounds);
+                continue;
+            }
             if (masked && (reading || !copied))
             {
                 if (reading) EndDepthRead(commands, ref color, ref depth);
@@ -1205,6 +1273,70 @@ internal sealed unsafe class SceneRenderer : IDisposable
         }
 
         if (reading) EndDepthRead(commands, ref color, ref depth);
+        SetViewport(commands, _extent);
+    }
+
+    /// <summary>
+    /// Whether this frame's primary cloud is marched at half resolution (gas_half.glsl). Not for the gas fixtures, which
+    /// must take the exact march; not for a cold cloud or a cold and normal pair, whose ice glints are dots a pixel
+    /// across; not while the pilot's own rift or wormhole is open, whose passage is tested at every sample and would
+    /// be blurred along its outline.
+    /// </summary>
+    private bool HalfMarches(in FrameConstants constants)
+    {
+        if (!_gas.HasPrimary || constants.Gas.Budget.Z > 0 || _gas.Primary.Budget.Z > 0)
+            return false;
+        var code = (int)(_gas.Primary.Motion.W + 0.5f);
+        var kind = code & 3;
+        var paired = (code >> 2) > 0 && kind != (int)Prospect.Game.World.GasCloudKind.Lightning;
+        if (kind == (int)Prospect.Game.World.GasCloudKind.Cold || paired)
+            return false;
+        var ownKind = (int)(constants.Ftl.X + 0.5f);
+        return !(constants.Ftl.Y > 0 && (ownKind == 2 || ownKind == 3));
+    }
+
+    /// <summary>For muted capture diagnostics: whether the last frame marched its primary cloud at half resolution.</summary>
+    public bool LastGasHalf { get; private set; }
+
+    /// <summary>
+    /// Marches <paramref name="gas"/> at half resolution into its own target, to the opaque depth kept behind the
+    /// shields, and leaves the target for the fragment shaders to read. Call outside any rendering, after that copy.
+    /// </summary>
+    private void MarchHalf(CommandBuffer commands, int frameIndex, in GasConstants gas)
+    {
+        // Every texel is written, so what was there is dropped; the last frame's reads finish first.
+        Barrier(commands, _gasHalfImage, VkImageLayout.Undefined, VkImageLayout.ColorAttachmentOptimal, VkAccessFlags.ShaderReadBit, VkAccessFlags.ColorAttachmentWriteBit,
+            VkPipelineStageFlags.FragmentShaderBit, VkPipelineStageFlags.ColorAttachmentOutputBit);
+        var target = new VkRenderingAttachmentInfo
+        {
+            ImageView = _gasHalfView,
+            ImageLayout = VkImageLayout.ColorAttachmentOptimal,
+            LoadOp = VkAttachmentLoadOp.DontCare,
+            StoreOp = VkAttachmentStoreOp.Store,
+        };
+        commands.BeginRendering(new VkRenderingInfo { RenderArea = new VkRect2D(_gasHalfExtent), LayerCount = 1, ColorAttachmentCount = 1, ColorAttachments = &target });
+        // The whole target, not the cloud's outline: a pixel at the outline reads the texels beside it, and a texel
+        // whose ray misses the box costs only the box test.
+        SetViewport(commands, _gasHalfExtent);
+        Span<VkDescriptorSet> sets = [_frameSets[frameIndex], _shieldSet];
+        commands.BindPipeline(VkPipelineBindPoint.Graphics, _gasHalfPipeline);
+        commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _shieldPipelineLayout, 0, sets, []);
+        var pushed = gas;
+        commands.PushConstants(_shieldPipelineLayout, VkShaderStageFlags.FragmentBit, 0, new ReadOnlySpan<byte>(&pushed, sizeof(GasConstants)));
+        commands.Draw(3, 1, 0, 0);
+        commands.EndRendering();
+        Barrier(commands, _gasHalfImage, VkImageLayout.ColorAttachmentOptimal, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.ColorAttachmentWriteBit, VkAccessFlags.ShaderReadBit,
+            VkPipelineStageFlags.ColorAttachmentOutputBit, VkPipelineStageFlags.FragmentShaderBit);
+    }
+
+    /// <summary>Carries on drawing the scene, its colour and depth kept, after a pass outside it.</summary>
+    private void ResumeScene(CommandBuffer commands, ref VkRenderingAttachmentInfo color, ref VkRenderingAttachmentInfo depth)
+    {
+        color.LoadOp = VkAttachmentLoadOp.Load;
+        depth.LoadOp = VkAttachmentLoadOp.Load;
+        var colorInfo = color;
+        var depthInfo = depth;
+        commands.BeginRendering(new VkRenderingInfo { RenderArea = new VkRect2D(_extent), LayerCount = 1, ColorAttachmentCount = 1, ColorAttachments = &colorInfo, DepthAttachment = &depthInfo });
         SetViewport(commands, _extent);
     }
 
@@ -1443,6 +1575,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         device.DestroyPipeline(_gasPipeline, null);
         device.DestroyPipeline(_gasSkyPipeline, null);
         device.DestroyPipeline(_gasScenePipeline, null);
+        device.DestroyPipeline(_gasHalfPipeline, null);
         device.DestroyPipeline(_shieldPipeline, null);
         device.DestroyPipeline(_shieldMaskPipeline, null);
         device.DestroyPipeline(_pulsePipeline, null);
@@ -1508,7 +1641,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
         VkPipelineColorBlendStateCreateInfo* blend,
         VkPipelineLayout layout,
         VkRenderPass renderPass,
-        VkSpecializationInfo* fragmentConstants = null
+        VkSpecializationInfo* fragmentConstants = null,
+        bool depthAttachment = true
     )
     {
         // The stages object owns both modules and destroys them once the pipeline exists.
@@ -1524,7 +1658,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         {
             ColorAttachmentCount = 1,
             ColorAttachmentFormats = &colorFormat,
-            DepthAttachmentFormat = DepthFormat,
+            DepthAttachmentFormat = depthAttachment ? DepthFormat : VkFormat.Undefined,
         };
 
         return _gpu.Device.CreateGraphicsPipeline(
@@ -1564,6 +1698,10 @@ internal sealed unsafe class SceneRenderer : IDisposable
         (_ownBehindImage, _ownBehindAllocation, _ownBehindView) = CreateTarget(ColorFormat, VkImageUsageFlags.TransferDstBit | VkImageUsageFlags.SampledBit, VkImageAspectFlags.ColorBit);
         _ownBehindReady = false;
         _behindReady = false;
+        // Half the size, rounded up, so every pixel has a texel.
+        _gasHalfExtent = new VkExtent2D((extent.Width + 1) / 2, (extent.Height + 1) / 2);
+        (_gasHalfImage, _gasHalfAllocation, _gasHalfView) = CreateTarget(ColorFormat, VkImageUsageFlags.ColorAttachmentBit | VkImageUsageFlags.SampledBit, VkImageAspectFlags.ColorBit, _gasHalfExtent);
+        _gasHalfReady = false;
 
         var imageInfo = new VkDescriptorImageInfo
         {
@@ -1581,6 +1719,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         var behindInfo = imageInfo with { ImageView = _behindView };
         var behindDepthInfo = depthInfo with { ImageView = _behindDepthView };
         var attachedDepthInfo = depthInfo with { ImageLayout = VkImageLayout.DepthStencilReadOnlyOptimal };
+        var halfInfo = depthInfo with { ImageView = _gasHalfView };
         _gpu.Device.UpdateDescriptorSets(
             [
                 new VkWriteDescriptorSet
@@ -1649,6 +1788,30 @@ internal sealed unsafe class SceneRenderer : IDisposable
                 },
                 new VkWriteDescriptorSet
                 {
+                    DstSet = _sceneSet,
+                    DstBinding = 8,
+                    DescriptorCount = 1,
+                    DescriptorType = VkDescriptorType.CombinedImageSampler,
+                    ImageInfo = &halfInfo,
+                },
+                new VkWriteDescriptorSet
+                {
+                    DstSet = _shieldSet,
+                    DstBinding = 2,
+                    DescriptorCount = 1,
+                    DescriptorType = VkDescriptorType.CombinedImageSampler,
+                    ImageInfo = &halfInfo,
+                },
+                new VkWriteDescriptorSet
+                {
+                    DstSet = _gasDepthSet,
+                    DstBinding = 2,
+                    DescriptorCount = 1,
+                    DescriptorType = VkDescriptorType.CombinedImageSampler,
+                    ImageInfo = &halfInfo,
+                },
+                new VkWriteDescriptorSet
+                {
                     DstSet = _shieldSet,
                     DstBinding = 0,
                     DescriptorCount = 1,
@@ -1685,14 +1848,16 @@ internal sealed unsafe class SceneRenderer : IDisposable
         );
     }
 
-    private (VkImage, VmaAllocation, VkImageView) CreateTarget(VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect)
+    private (VkImage, VmaAllocation, VkImageView) CreateTarget(VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect) => CreateTarget(format, usage, aspect, _extent);
+
+    private (VkImage, VmaAllocation, VkImageView) CreateTarget(VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect, VkExtent2D extent)
     {
         _gpu.Allocator.CreateImage(
             new VkImageCreateInfo
             {
                 ImageType = VkImageType._2D,
                 Format = format,
-                Extent = new VkExtent3D(_extent.Width, _extent.Height, 1),
+                Extent = new VkExtent3D(extent.Width, extent.Height, 1),
                 MipLevels = 1,
                 ArrayLayers = 1,
                 Samples = VkSampleCountFlags._1Bit,
@@ -1736,6 +1901,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
         _gpu.Allocator.DestroyImage(_behindImage, _behindAllocation);
         _gpu.Allocator.DestroyImage(_behindDepthImage, _behindDepthAllocation);
         _gpu.Device.DestroyImageView(_ownBehindView, null);
+        _gpu.Device.DestroyImageView(_gasHalfView, null);
+        _gpu.Allocator.DestroyImage(_gasHalfImage, _gasHalfAllocation);
         _gpu.Allocator.DestroyImage(_ownBehindImage, _ownBehindAllocation);
         _gpu.Allocator.DestroyImage(_colorImage, _colorAllocation);
         _gpu.Allocator.DestroyImage(_skyImage, _skyAllocation);

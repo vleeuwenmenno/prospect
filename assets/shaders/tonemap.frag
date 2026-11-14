@@ -3,6 +3,7 @@
 #include "ftl.glsl"
 #include "ftl_own.glsl"
 #include "gas.glsl"
+#include "gas_half.glsl"
 
 // Set 0 is the frame constants, for the camera and the jumps in view; set 1 the scene and, on frames with a lens,
 // the scene as it was before anything solid was drawn (the sky) and before any hull was (the sky and asteroids).
@@ -18,6 +19,9 @@ layout(set = 1, binding = 5) uniform sampler2D ownBehind;
 // Gas-free scene before shields, kept on every deferred gas frame. The ordinary fallbacks remain gas-free too.
 layout(set = 1, binding = 6) uniform sampler2D beforeShields;
 layout(set = 1, binding = 7) uniform sampler2D opaqueDepth;
+// The deferred cloud marched at half resolution to opaqueDepth, when frame.gas.budget.w is below zero
+// (GasConstants.HalfMarched); see gas_half.glsl.
+layout(set = 1, binding = 8) uniform sampler2D halfGas;
 
 // Bit of bentBy for the pilot's own opening; bits 0 to 3 are frame.openings.
 const int OwnBit = 16;
@@ -529,9 +533,17 @@ vec3 gasComposite(GasData gas, GasEvent events[5], int count, vec2 pos, float as
             occludes=cutoff<boundary;
             stop=min(stop,boundary);
         }
-        vec4 volume=gasSegment(gas,ray,start,stop,pixelAngle);
+        // The interval from the camera to this pixel's own opaque depth, on an unbent ray, is what the half-resolution
+        // march holds; everywhere else, and where it holds nothing at this depth, the pixel marches itself.
+        vec4 volume;
+        bool fromHalf=frame.gas.budget.w<0.0 && gasThin>=1.0 && masks[stage]==0 && bends[stage]==vec2(0) && start<=0.0
+            && stop==cutoff && !gasNearBolt(gas,ray,pixelAngle);
+        if(!fromHalf || !gasHalfRead(halfGas,opaqueDepth,ivec2(gl_FragCoord.xy),cutoff,volume))
+            volume=gasSegment(gas,ray,start,stop,pixelAngle);
         if(stage==count || occludes) {
-            float front=delta!=vec3(0) ? gasSegment(gas,ray,start,min(shieldAt,cutoff),pixelAngle).a : 1.0;
+            // Here the interval ends at the opaque depth, so a shield at or behind it is attenuated by the whole
+            // interval: the volume above.
+            float front=delta==vec3(0) ? 1.0 : shieldAt>=cutoff ? volume.a : gasSegment(gas,ray,start,shieldAt,pixelAngle).a;
             surface=volume.a*base+front*delta;
             if(occludes && ownIndex>=stage)
                 surface=gasOwnSurface(surface,ray,cutoff,ownSource,pixelAngle);

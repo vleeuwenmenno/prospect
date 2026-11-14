@@ -14,7 +14,7 @@ with tempfile.TemporaryDirectory(prefix="prospect-gas-spirv-") as scratch:
     for shader in files:
         subprocess.run(["glslc", "-I", str(shaders), str(shader), "-o", str(output / (shader.name + ".spv"))], check=True)
     # Check compiled production modules, not source strings: the 3D explicit-LOD lookup must survive.
-    for name in ["gas.frag", "gas_scene.frag", "gas_sky.frag", "shield.frag", "tonemap.frag"]:
+    for name in ["gas.frag", "gas_half.frag", "gas_scene.frag", "gas_sky.frag", "shield.frag", "tonemap.frag"]:
         production = subprocess.check_output(["spirv-dis", str(output / (name + ".spv"))], text=True)
         if not re.search(r"OpTypeImage\s+%\S+\s+3D\b", production) or "OpImageSampleExplicitLod" not in production:
             raise SystemExit(f"{name} is missing the compiled 3D noise lookup")
@@ -28,6 +28,6 @@ with tempfile.TemporaryDirectory(prefix="prospect-gas-spirv-") as scratch:
     loops = len(re.findall(r"\bOpLoopMerge\b", assembly))
     if samples != 0 or kills == 0 or loops != 0:
         raise SystemExit(f"Mask specialization retained {samples} texture operations, {kills} discard sites, {loops} loops")
-    print(json.dumps({"compiled_shaders": len(files), "noise_consumers_checked": 5, "mask_texture_operations": samples,
+    print(json.dumps({"compiled_shaders": len(files), "noise_consumers_checked": 6, "mask_texture_operations": samples,
                       "mask_discard_sites": kills, "mask_loops": loops, "mask_spirv_bytes": mask.stat().st_size,
                       "runtime_execution": False}, indent=2))

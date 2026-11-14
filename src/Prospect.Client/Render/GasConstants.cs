@@ -18,7 +18,8 @@ internal struct GasConstants
     public float4 Motion;
     /// <summary>
     /// X is the view sample count; y the level of detail (<see cref="Full"/>, <see cref="Middle"/> or
-    /// <see cref="Far"/>); z a fixture's number, zero in the world; w, in a fixture, how many shields it queued.
+    /// <see cref="Far"/>); z a fixture's number, zero in the world; w, in a fixture, how many shields it queued, and
+    /// in the world <see cref="HalfMarched"/> when the cloud was marched at half resolution this frame, else zero.
     /// </summary>
     public float4 Budget;
     /// <summary>Fill, lumpiness, warp and lean; see <c>GasCloudModule.Shape</c>.</summary>
@@ -39,6 +40,12 @@ internal struct GasConstants
     /// <see cref="FrameConstants.GasPartners"/>, which the shader integrates together with it along every ray.
     /// </summary>
     public static float KindCode(Prospect.Game.World.GasCloudKind kind, int slot) => (float)kind + 4 * (slot + 1);
+
+    /// <summary>
+    /// What <see cref="Budget"/>.w holds when the renderer marched this cloud at half resolution this frame, so the
+    /// pass that draws it reads that march back (gas_half.glsl) wherever it stands for the pixel.
+    /// </summary>
+    public const float HalfMarched = -1;
 
     /// <summary>The full march, as a cloud is drawn with the camera in or near it.</summary>
     public const float Full = 0;

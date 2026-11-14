@@ -141,7 +141,8 @@ public sealed class GasCompositionTests
         var shader = Shader("tonemap.frag");
         Assert.Contains("hdr - shieldInHdr", shader);
         Assert.Contains("mix(shieldInHdr, ownShield, tunnel)", shader);
-        Assert.Contains("start,min(shieldAt,cutoff)", shader);
+        // A shield in front of the opaque depth takes the gas in front of it alone; one at or behind it, the whole interval.
+        Assert.Contains("shieldAt>=cutoff ? volume.a : gasSegment(gas,ray,start,shieldAt,pixelAngle).a", shader);
         var shield = Shader("shield.frag");
         Assert.Contains("gasRay(there),at,gasViewDepth", shield);
         Assert.Contains("gasRay(here),at,gasViewDepth", shield);
@@ -175,7 +176,7 @@ public sealed class GasCompositionTests
         Assert.Contains($"vec4 gasBoltSegments[{2 * LightningBolts.MaxBolts * LightningBolts.MaxSegments}];", Shader("frame.glsl"));
         Assert.EndsWith("} frame;\n", Shader("frame.glsl"));
         Assert.Contains("GasData gas;", Shader("frame.glsl"));
-        foreach (var name in new[] { "gas.frag", "gas_scene.frag", "gas_sky.frag", "tonemap.frag", "shield.frag" })
+        foreach (var name in new[] { "gas.frag", "gas_half.frag", "gas_scene.frag", "gas_sky.frag", "tonemap.frag", "shield.frag" })
         {
             var shader = Shader(name);
             Assert.Contains("#include \"gas.glsl\"", shader);
@@ -187,7 +188,15 @@ public sealed class GasCompositionTests
         // Composition takes the primary cloud only; every other draw, and the primary without composition, is in the scene.
         Assert.Contains("var deferredGas = _gas.HasPrimary && (lensing || _shieldCount > 0);", renderer);
         Assert.Contains("frame.Gas = deferredGas ? _gas.Primary : default;", renderer);
-        Assert.Contains("if (sceneGas) DrawGas(commands, frameIndex, skyGas, !deferredGas, ref color, ref depth);", renderer);
+        Assert.Contains("if (sceneGas) DrawGas(commands, frameIndex, skyGas, !deferredGas, halfGas, ref color, ref depth);", renderer);
+        // The half-resolution march of the primary is read back by the pass that draws it, ordinary or composed, and
+        // never by the fixtures, which must take the exact march.
+        Assert.Contains("if (deferredGas && halfGas) MarchHalf(commands, frameIndex, primary);", renderer);
+        Assert.Contains("constants.Gas.Budget.Z > 0 || _gas.Primary.Budget.Z > 0", renderer);
+        Assert.Contains("DstBinding = 8,", renderer);
+        Assert.Contains("DestroyShaderModule(halfVertex, null)", renderer);
+        foreach (var name in new[] { "gas.frag", "tonemap.frag" })
+            Assert.Contains("gasHalfRead(halfGas,opaqueDepth,", Shader(name));
         Assert.Contains("if (deferredGas && _shieldCount == 0) KeepBehindShields", renderer);
         Assert.Contains("DstBinding = 6,", renderer);
         Assert.Contains("DstBinding = 7,", renderer);
