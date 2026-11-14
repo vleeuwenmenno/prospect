@@ -4468,6 +4468,14 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Contains("SHIELD RESTART: 3 MW", Tip(ConsoleBar.Energy, own, flight));
         own.ShieldOffline = false;
 
+        // A scan's draw has its own row while it runs, from the power flow, and none while no scan takes power.
+        own.Power = new PowerFlow { Generated = 6f, Idle = 1f, Modules = 9f };
+        var scanning = Tip(ConsoleBar.Energy, own, flight);
+        Assert.Contains("MODULES: 9 MW", scanning);
+        Assert.Contains("NET FLOW: -4.0 MW", scanning);
+        own.Power = new PowerFlow { Generated = 6f, Idle = 1f };
+        Assert.DoesNotContain(Tip(ConsoleBar.Energy, own, flight), line => line.StartsWith("MODULES", StringComparison.Ordinal));
+
         // A full battery turns the surplus away, and the flow still says what the shield takes.
         own.Energy = flight.EnergyStorage;
         own.EnergyRate = 0f;

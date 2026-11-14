@@ -160,6 +160,9 @@ internal static class ConsoleTip
         sink.Line(own.Boosting ? "BOOST DRAW"u8 : "THRUST DRAW"u8, Draw(flow.Thrust), DrawTone(flow.Thrust));
         if (flight.ShieldCapacity > 0f)
             sink.Line(own.ShieldOffline ? "SHIELD RESTART"u8 : "SHIELD RECHARGE"u8, Draw(flow.Shield), DrawTone(flow.Shield));
+        // Only while a scan takes power: the module draw is zero the rest of the time, whatever is fitted.
+        if (flow.Modules >= FlightConsole.SteadyRate)
+            sink.Line("MODULES"u8, Draw(flow.Modules), DrawTone(flow.Modules));
         if (flow.Ftl > 0f || flight.FtlPower > 0f)
             sink.Line("JUMP DRIVE"u8, Draw(flow.Ftl), DrawTone(flow.Ftl));
         var net = FlightConsole.NetPower(own);

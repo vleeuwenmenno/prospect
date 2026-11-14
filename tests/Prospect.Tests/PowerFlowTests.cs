@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Prospect.Game.World;
 using Xunit;
 
@@ -228,4 +229,79 @@ public sealed class PowerFlowTests
         FlightModel.Step(ref boost, new FlightInput { Forward = 127, Boost = true }, flight, HullSim.Dt);
         Assert.True(boost.Boosting);
     }
+
+    /// <summary>The shipped command pod with all three scan modules added, at one quality, as the module tests fit it.</summary>
+    private static GameContent PodWithModules(string quality)
+    {
+        using var copy = new ContentCopy();
+        var pod = JsonNode.Parse(copy.Read("ships/command_pod.json"))!;
+        var blocks = pod["blocks"]!.AsArray();
+        var ids = new[] { "gasScanner", "asteroidScanner", "asteroidLocator" };
+        for (var i = 0; i < ids.Length; i++) blocks.Add(new JsonObject { ["at"] = new JsonArray(-3 - i, 0, 0), ["type"] = ids[i] });
+        copy.Write("ships/command_pod.json", pod.ToJsonString());
+        var catalogue = JsonNode.Parse(copy.Read("blocks/blocks.json"))!;
+        foreach (var id in ids) catalogue["blocks"]![id]!["module"]!["quality"] = quality;
+        copy.Write("blocks/blocks.json", catalogue.ToJsonString());
+        return copy.Load();
+    }
+
+    [Theory]
+    [InlineData(ModuleFamily.GasScanner)]
+    [InlineData(ModuleFamily.AsteroidScanner)]
+    [InlineData(ModuleFamily.AsteroidLocator)]
+    public void AScanTurnsTheNetFlowNegativeOnThePodWithoutEmptyingItsBattery(ModuleFamily family)
+    {
+        var content = PodWithModules("Common");
+        var flight = content.Pod.Flight;
+        var equipment = content.Pod.Stats.Module(family);
+        var state = HullState.Spawn(Double3.Zero, flight);
+        FlightModel.Step(ref state, default, flight, HullSim.Dt, out var quiet);
+        Assert.Equal(0f, quiet.Modules);
+        Assert.True(quiet.Net > 0f);
+
+        // The draw is a clear share of what the generator has to spare, so the net figure shows it.
+        var share = equipment.PowerDraw / (quiet.Generated - quiet.Idle);
+        Assert.InRange(share, 1.1, 2.5);
+
+        state = HullState.Spawn(Double3.Zero, flight);
+        var lowest = state.Energy;
+        for (var tick = 0; tick < ModuleScanRules.Ticks(equipment.ScanSeconds); tick++)
+        {
+            FlightModel.Step(ref state, default, flight, HullSim.Dt, out var flow);
+            Assert.True(ModuleScanRules.Spend(ref state.Energy, equipment, ref flow), $"{family}: the pod's battery ran dry after {tick} ticks");
+            Assert.Equal((float)equipment.PowerDraw, flow.Modules);
+            Assert.Equal(quiet.Net - (float)equipment.PowerDraw, flow.Net, 4);
+            Assert.True(flow.Net < -FlightConsoleSteady, $"{family}: net {flow.Net} MW does not read as a draw");
+            lowest = Math.Min(lowest, state.Energy);
+        }
+
+        Assert.True(lowest >= flight.EnergyStorage * 0.5f, $"{family}: one scan took the battery down to {lowest} of {flight.EnergyStorage} MJ");
+    }
+
+    [Theory]
+    [InlineData("Common")]
+    [InlineData("Uncommon")]
+    [InlineData("Rare")]
+    [InlineData("Epic")]
+    [InlineData("Legendary")]
+    [InlineData("Alien Tech")]
+    public void EveryQualityCanScanOnAFullPodBatteryInTurn(string quality)
+    {
+        var content = PodWithModules(quality);
+        var flight = content.Pod.Flight;
+        var state = HullState.Spawn(Double3.Zero, flight);
+        foreach (var family in new[] { ModuleFamily.GasScanner, ModuleFamily.AsteroidScanner, ModuleFamily.AsteroidLocator })
+        {
+            var equipment = content.Pod.Stats.Module(family);
+            for (var tick = 0; tick < ModuleScanRules.Ticks(equipment.ScanSeconds); tick++)
+            {
+                FlightModel.Step(ref state, default, flight, HullSim.Dt, out var flow);
+                Assert.True(ModuleScanRules.Spend(ref state.Energy, equipment, ref flow), $"{quality} {family}: no power at tick {tick}");
+            }
+        }
+
+        Assert.True(state.Energy > 0f);
+    }
+
+    private const float FlightConsoleSteady = 0.05f;
 }

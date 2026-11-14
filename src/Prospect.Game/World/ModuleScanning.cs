@@ -21,9 +21,35 @@ public struct ModuleScanView
     public ModuleQuality Quality;
     public SectorCoord Sector;
     public int Index;
-    public long StartedTick, CompletesTick, CooldownUntilTick;
+    public long StartedTick, CompletesTick;
+    /// <summary>Each family cools on its own: the owner's cooldown for one never blocks the others.</summary>
+    public long GasCooldownUntilTick, AsteroidCooldownUntilTick, LocatorCooldownUntilTick;
     public Double3 Origin;
     public bool Partial;
+}
+
+/// <summary>Cooldown access by family, so a caller never picks the field by hand.</summary>
+public static class ModuleScanViewExtensions
+{
+    /// <summary>The tick at which <paramref name="family"/> may scan again; zero for an unknown family.</summary>
+    public static long CooldownUntil(this in ModuleScanView scan, ModuleFamily family) => family switch
+    {
+        ModuleFamily.GasScanner => scan.GasCooldownUntilTick,
+        ModuleFamily.AsteroidScanner => scan.AsteroidCooldownUntilTick,
+        ModuleFamily.AsteroidLocator => scan.LocatorCooldownUntilTick,
+        _ => 0,
+    };
+
+    /// <summary>Sets one family's cooldown; an unknown family is ignored.</summary>
+    public static void SetCooldown(this ref ModuleScanView scan, ModuleFamily family, long tick)
+    {
+        switch (family)
+        {
+            case ModuleFamily.GasScanner: scan.GasCooldownUntilTick = tick; break;
+            case ModuleFamily.AsteroidScanner: scan.AsteroidCooldownUntilTick = tick; break;
+            case ModuleFamily.AsteroidLocator: scan.LocatorCooldownUntilTick = tick; break;
+        }
+    }
 }
 
 /// <summary>A retained observation, not a live object. Gas index is its octant; asteroid index is generated identity.</summary>

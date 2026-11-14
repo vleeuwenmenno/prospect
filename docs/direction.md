@@ -88,7 +88,10 @@ energy readout showed nothing while a shield recovered.
   shields recover slowly while the engines run: the pod under full forward thrust needs about a minute to restart.
 - The readout shows live flow: generation less idle, thrust or boost, shield and jump-drive draw, in MW, with an
   arrow, even while a full battery turns the surplus away. The tooltip lists each draw and the battery's own rate.
-  A muted blue mark on the energy strip is the shield's share. Figures live in `content/visuals/power.json`.
+  A muted blue mark on the energy strip is the shield's share; an amber one, continuing from it, is a running scan's.
+  The tooltip has a MODULES row while a scan draws. Figures live in `content/visuals/power.json`.
+- Scan modules follow the same rule: Common Mk I draws 6, 9 and 12 MW (was 0.5, 0.75, 1) so a scan turns the pod's net flow
+  negative. `moduleTiers` and `ContentIdentity.EvaluatorVersion` are unchanged. See `docs/roadmap/modules.md`.
 
 Open: whether the pod's thrust-while-restarting slowness is too harsh; whether vessels need a second battery.
 

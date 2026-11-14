@@ -8,7 +8,7 @@ public sealed partial class ServerHost
     {
         internal uint Owner;
         internal int Count;
-        internal long CooldownUntilTick;
+        internal long GasCooldownUntilTick, AsteroidCooldownUntilTick, LocatorCooldownUntilTick;
         internal readonly ModuleObservation[] Records = new ModuleObservation[ModuleScanRules.KnowledgePerOwner];
     }
 
@@ -60,8 +60,13 @@ public sealed partial class ServerHost
         if (scan.State is ModuleScanState.Preparing or ModuleScanState.Scanning)
         { scan.Refusal = ModuleScanState.Busy; return; }
         var serial = unchecked(scan.Serial + 1);
+        // A refusal before the owner is found must not publish zero cooldowns, so the last known ones carry over.
+        var previous = scan;
         scan = new ModuleScanView
         {
+            GasCooldownUntilTick = previous.GasCooldownUntilTick,
+            AsteroidCooldownUntilTick = previous.AsteroidCooldownUntilTick,
+            LocatorCooldownUntilTick = previous.LocatorCooldownUntilTick,
             Serial = serial,
             Hull = connection.Hull.Packed,
             Family = request.Family,
@@ -72,8 +77,8 @@ public sealed partial class ServerHost
         if (request.Family is < ModuleFamily.GasScanner or > ModuleFamily.AsteroidLocator || request.Index < 0) return;
         var owner = ModuleOwnerFor(connection.PlayerId, true);
         if (owner is null) { scan.State = ModuleScanState.KnowledgeLimit; return; }
-        scan.CooldownUntilTick = owner.CooldownUntilTick;
-        if (_tick < scan.CooldownUntilTick) { scan.State = ModuleScanState.Cooldown; return; }
+        CopyCooldowns(owner, ref scan);
+        if (_tick < scan.CooldownUntil(request.Family)) { scan.State = ModuleScanState.Cooldown; return; }
         var equipment = InstalledModule(connection, request.Family);
         if (equipment.Block == 0) { scan.State = ModuleScanState.NoEquipment; return; }
         ref var state = ref _hulls.State(connection.Hull.Index);
@@ -104,8 +109,27 @@ public sealed partial class ServerHost
         ref var scan = ref connection.ModuleScan;
         scan.State = state;
         var owner = ModuleOwnerFor(connection.PlayerId);
-        scan.CooldownUntilTick = tick + ModuleScanRules.Ticks(connection.ModuleEquipment.CooldownSeconds);
-        if (owner is not null) owner.CooldownUntilTick = scan.CooldownUntilTick;
+        var until = tick + ModuleScanRules.Ticks(connection.ModuleEquipment.CooldownSeconds);
+        // The scan's own family cools; the other two keep whatever they had.
+        if (owner is not null)
+        {
+            switch (scan.Family)
+            {
+                case ModuleFamily.GasScanner: owner.GasCooldownUntilTick = until; break;
+                case ModuleFamily.AsteroidScanner: owner.AsteroidCooldownUntilTick = until; break;
+                case ModuleFamily.AsteroidLocator: owner.LocatorCooldownUntilTick = until; break;
+            }
+            CopyCooldowns(owner, ref scan);
+        }
+        else scan.SetCooldown(scan.Family, until);
+    }
+
+    /// <summary>Puts the owner's three cooldowns into a connection's published scan view.</summary>
+    private static void CopyCooldowns(ModuleOwner owner, ref ModuleScanView scan)
+    {
+        scan.GasCooldownUntilTick = owner.GasCooldownUntilTick;
+        scan.AsteroidCooldownUntilTick = owner.AsteroidCooldownUntilTick;
+        scan.LocatorCooldownUntilTick = owner.LocatorCooldownUntilTick;
     }
 
     private void TickModules(long tick)
@@ -189,7 +213,11 @@ public sealed partial class ServerHost
                 if (owner.Owner == 0) continue;
                 var active = false;
                 foreach (var connection in _connections) active |= connection.State == ConnectionState.Active && connection.PlayerId == owner.Owner;
-                if (!active) { owner.Owner = 0; owner.Count = 0; owner.CooldownUntilTick = 0; }
+                if (!active)
+                {
+                    owner.Owner = 0; owner.Count = 0;
+                    owner.GasCooldownUntilTick = owner.AsteroidCooldownUntilTick = owner.LocatorCooldownUntilTick = 0;
+                }
             }
     }
 

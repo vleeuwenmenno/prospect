@@ -95,7 +95,7 @@ internal static class ModuleRules
 
     /// <summary>
     /// What a request for <paramref name="family"/> would meet. A running scan belongs to the hull that began it, so
-    /// with another hull flown nothing counts as running; the cooldown belongs to the owner and counts for any hull.
+    /// with another hull flown nothing counts as running; each family's cooldown belongs to the owner and counts for any hull.
     /// </summary>
     public static ModuleGate Gate(ModuleFamily family, in ModuleEquipment equipment, in ModuleScanView scan, uint ownHull, long serverTick, in ModuleTargets targets)
     {
@@ -103,7 +103,7 @@ internal static class ModuleRules
             return ModuleGate.Absent;
         if (scan.Hull == ownHull && scan.State is ModuleScanState.Preparing or ModuleScanState.Scanning)
             return scan.Family == family ? ModuleGate.Running : ModuleGate.Waiting;
-        if (scan.CooldownUntilTick > serverTick)
+        if (scan.CooldownUntil(family) > serverTick)
             return ModuleGate.Cooling;
         switch (family)
         {
@@ -116,9 +116,12 @@ internal static class ModuleRules
         }
     }
 
-    /// <summary>Whole seconds of the shared cooldown left, rounded up so it never reads 0 while cooling; 0 when none.</summary>
-    public static int CooldownSeconds(in ModuleScanView scan, long serverTick) =>
-        scan.CooldownUntilTick > serverTick ? (int)((scan.CooldownUntilTick - serverTick + TickLoop.SimulationHz - 1) / TickLoop.SimulationHz) : 0;
+    /// <summary>Whole seconds of <paramref name="family"/>'s own cooldown left, rounded up so it never reads 0 while cooling; 0 when none.</summary>
+    public static int CooldownSeconds(in ModuleScanView scan, ModuleFamily family, long serverTick)
+    {
+        var until = scan.CooldownUntil(family);
+        return until > serverTick ? (int)((until - serverTick + TickLoop.SimulationHz - 1) / TickLoop.SimulationHz) : 0;
+    }
 
     /// <summary>How far a running scan is, 0 to 1; zero while the server is still preparing it.</summary>
     public static float Progress(in ModuleScanView scan, long serverTick)
@@ -184,7 +187,7 @@ internal static class ModuleRules
         ModuleNotice.Cancelled => "The scan stopped: the ship jumped, changed hands or lost the module."u8,
         ModuleNotice.NoPower => "Not enough energy to run the module. Generation refills the battery."u8,
         ModuleNotice.OutOfRange => "The target is beyond the module's range."u8,
-        ModuleNotice.Cooldown => "The modules share one cooldown, which has not run out."u8,
+        ModuleNotice.Cooldown => "This module is still cooling down. The others are not affected."u8,
         ModuleNotice.InvalidTarget => "There is nothing there to scan."u8,
         ModuleNotice.NoEquipment => "The ship no longer has this module."u8,
         ModuleNotice.Busy => "Another scan is running; the modules take one request at a time."u8,

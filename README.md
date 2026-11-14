@@ -556,9 +556,11 @@ qualities (Common, Uncommon, Rare, Epic, Legendary, Alien Tech) and their colour
 (`content/visuals/modules.json`, `moduleTiers` in `content/blocks/blocks.json`).
 
 - **Chips.** Over the flight console, one chip for each module the ship you fly carries (none otherwise): its key,
-  name, tier colour and what it would do now: READY, the seconds left while it runs, COOL while the shared
-  cooldown runs, or why not (NO TARGET, NO CLOUD, OUT OF RANGE, NO POWER). Resting the pointer on a chip shows
-  its figures. Clicking a chip does what the key does; in flight hold `Shift` first. The three share one cooldown and take one request at a time.
+  name, tier colour and what it would do now: READY, the seconds left while it runs, COOL while that module's
+  own cooldown runs, or why not (NO TARGET, NO CLOUD, OUT OF RANGE, NO POWER). Resting the pointer on a chip shows
+  its figures. Clicking a chip does what the key does; in flight hold `Shift` first. Each module cools down on its own, so a gas scan never holds back a locator pulse; they take one request at a time.
+  A scan draws 6 MW (gas), 9 MW (asteroid) or 12 MW (locator) while it runs: the energy readout's net figure drops by that
+  much, an amber mark on the flow strip shows the share, and the energy tooltip has a MODULES row.
 - **Asteroid scanner (`X`).** Scans the asteroid you target (middle mouse, or the first one selected in the command
   view). The target panel then shows the ore with its grade as a bar, the host rock's share, mass, how good the
   scanner was and how long ago. Until then it says *Unscanned - press X to scan* and shows only the asteroid's

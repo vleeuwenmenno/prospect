@@ -143,11 +143,15 @@ public sealed class ModuleInterfaceTests
         Assert.Equal(ModuleGate.Running, ModuleRules.Gate(ModuleFamily.GasScanner, Equipment(), running, 7, 100, cloud));
         Assert.Equal(ModuleGate.Waiting, ModuleRules.Gate(ModuleFamily.AsteroidLocator, Equipment(), running, 7, 100, none));
         Assert.Equal(ModuleGate.Ready, ModuleRules.Gate(ModuleFamily.AsteroidLocator, Equipment(), running, 8, 100, none));
-        var cooling = new ModuleScanView { CooldownUntilTick = 700 };
+        var cooling = new ModuleScanView { LocatorCooldownUntilTick = 700 };
         Assert.Equal(ModuleGate.Cooling, ModuleRules.Gate(ModuleFamily.AsteroidLocator, Equipment(), cooling, 8, 100, none));
-        Assert.Equal(10, ModuleRules.CooldownSeconds(cooling, 100));
-        Assert.Equal(1, ModuleRules.CooldownSeconds(cooling, 640));
-        Assert.Equal(0, ModuleRules.CooldownSeconds(cooling, 700));
+        Assert.Equal(10, ModuleRules.CooldownSeconds(cooling, ModuleFamily.AsteroidLocator, 100));
+        Assert.Equal(1, ModuleRules.CooldownSeconds(cooling, ModuleFamily.AsteroidLocator, 640));
+        Assert.Equal(0, ModuleRules.CooldownSeconds(cooling, ModuleFamily.AsteroidLocator, 700));
+        // Another family's chip does not cool with it.
+        Assert.Equal(ModuleGate.Ready, ModuleRules.Gate(ModuleFamily.GasScanner, Equipment(), cooling, 8, 100, new ModuleTargets { HasCloud = true, CloudInRange = true }));
+        Assert.Equal(0, ModuleRules.CooldownSeconds(cooling, ModuleFamily.GasScanner, 100));
+        Assert.Equal(0, ModuleRules.CooldownSeconds(cooling, ModuleFamily.AsteroidScanner, 100));
         Assert.Equal(ModuleGate.Ready, ModuleRules.Gate(ModuleFamily.AsteroidLocator, Equipment(), cooling, 8, 700, none));
     }
 

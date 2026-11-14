@@ -25,7 +25,8 @@ public sealed partial class ServerHost
         var scan = connection.ModuleScan;
         var sent = connection.ModuleSentScan;
         if (connection.ModulesSent && count == 0 && scan.Serial == sent.Serial && scan.State == sent.State && scan.Refusal == sent.Refusal
-            && scan.StartedTick == sent.StartedTick && scan.CompletesTick == sent.CompletesTick && scan.CooldownUntilTick == sent.CooldownUntilTick
+            && scan.StartedTick == sent.StartedTick && scan.CompletesTick == sent.CompletesTick && scan.GasCooldownUntilTick == sent.GasCooldownUntilTick
+            && scan.AsteroidCooldownUntilTick == sent.AsteroidCooldownUntilTick && scan.LocatorCooldownUntilTick == sent.LocatorCooldownUntilTick
             && scan.Partial == sent.Partial)
         { connection.ModuleCursor = cursor; return; }
         var writer = new NetWriter(_sendBuffer);

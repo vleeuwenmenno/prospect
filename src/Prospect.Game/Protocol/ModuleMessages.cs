@@ -9,7 +9,7 @@ public static class ModuleMessage
     public const int RequestWireSize = 18;
     public const int ObservationWireSize = 115;
     public const int MaxObservations = 8;
-    public const int HeaderWireSize = 79;
+    public const int HeaderWireSize = 95;
     public const int MaxWireSize = HeaderWireSize + MaxObservations * ObservationWireSize;
 
     public static void WriteRequest(ref NetWriter writer, in ModuleScanRequest request)
@@ -32,7 +32,8 @@ public static class ModuleMessage
         writer.WriteUInt32(scan.Serial); writer.WriteUInt32(scan.Hull);
         writer.WriteByte((byte)scan.Family); writer.WriteByte((byte)scan.State); writer.WriteByte((byte)scan.Refusal); writer.WriteByte((byte)scan.Quality);
         Sector(ref writer, scan.Sector); writer.WriteInt32(scan.Index);
-        writer.WriteInt64(scan.StartedTick); writer.WriteInt64(scan.CompletesTick); writer.WriteInt64(scan.CooldownUntilTick);
+        writer.WriteInt64(scan.StartedTick); writer.WriteInt64(scan.CompletesTick);
+        writer.WriteInt64(scan.GasCooldownUntilTick); writer.WriteInt64(scan.AsteroidCooldownUntilTick); writer.WriteInt64(scan.LocatorCooldownUntilTick);
         Position(ref writer, scan.Origin); writer.WriteBool(scan.Partial); writer.WriteByte((byte)records.Length);
         foreach (var record in records) WriteObservation(ref writer, record);
     }
@@ -51,7 +52,9 @@ public static class ModuleMessage
             Index = reader.ReadInt32(),
             StartedTick = reader.ReadInt64(),
             CompletesTick = reader.ReadInt64(),
-            CooldownUntilTick = reader.ReadInt64(),
+            GasCooldownUntilTick = reader.ReadInt64(),
+            AsteroidCooldownUntilTick = reader.ReadInt64(),
+            LocatorCooldownUntilTick = reader.ReadInt64(),
             Origin = Position(ref reader)
         };
         var partial = reader.ReadByte(); scan.Partial = partial != 0;
@@ -59,7 +62,8 @@ public static class ModuleMessage
         if (!reader.IsValid || count > MaxObservations || count > records.Length || partial > 1
             || scan.Family > ModuleFamily.AsteroidLocator || scan.State > ModuleScanState.Unavailable || scan.Refusal > ModuleScanState.Unavailable
             || scan.Quality > ModuleQuality.AlienTech || scan.Index < 0 || scan.StartedTick < 0
-            || scan.CompletesTick < scan.StartedTick || scan.CooldownUntilTick < 0 || !Finite(scan.Origin)) return false;
+            || scan.CompletesTick < scan.StartedTick || scan.GasCooldownUntilTick < 0
+            || scan.AsteroidCooldownUntilTick < 0 || scan.LocatorCooldownUntilTick < 0 || !Finite(scan.Origin)) return false;
         for (var i = 0; i < count; i++) if (!ReadObservation(ref reader, out records[i])) return false;
         return reader.IsValid && reader.Remaining == 0;
     }

@@ -259,7 +259,7 @@ internal sealed partial class ScreenHost
                 draw.AddRectFilled(track, new float2(track.X + (max.X - Kit.Px(1) - track.X) * progress, max.Y - Kit.Px(1)), Kit.Color(Theme.Info));
                 break;
             case ModuleGate.Cooling:
-                Kit.Text(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.TextDim, Kit.F($"COOL {ModuleRules.CooldownSeconds(scan, snapshot.ServerTick)} S"));
+                Kit.Text(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.TextDim, Kit.F($"COOL {ModuleRules.CooldownSeconds(scan, family, snapshot.ServerTick)} S"));
                 break;
             case ModuleGate.Waiting:
                 Kit.Text(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.TextMute, "WAITING"u8);
@@ -399,7 +399,7 @@ internal sealed partial class ScreenHost
                 Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(0, Kit.Px(18)), Theme.Bad, ModuleRules.Words(notice), width);
             else if (scannerGate is ModuleGate.Cooling or ModuleGate.OutOfRange or ModuleGate.Running)
                 Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(0, Kit.Px(18)), Theme.TextMute,
-                    scannerGate == ModuleGate.Cooling ? Kit.F($"COOLING {ModuleRules.CooldownSeconds(snapshot.Modules.Scan, snapshot.ServerTick)} S")
+                    scannerGate == ModuleGate.Cooling ? Kit.F($"COOLING {ModuleRules.CooldownSeconds(snapshot.Modules.Scan, ModuleFamily.AsteroidScanner, snapshot.ServerTick)} S")
                     : scannerGate == ModuleGate.Running ? Kit.F($"{ModuleRules.SecondsLeft(snapshot.Modules.Scan, snapshot.ServerTick):0.0} S LEFT")
                     : "OUT OF RANGE"u8, width);
             return Kit.Px(34);

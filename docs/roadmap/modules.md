@@ -38,9 +38,14 @@ The editor's All list already enumerates these block types. Designs still pass t
 
 | Common Mk I block id | Mass t | HP/cell | Range m | Scan s | Active MW | Cooldown s |
 | --- | --- | --- | --- | --- | --- | --- |
-| gasScanner | 2 | 200 | 1500 | 4 | 0.5 | 10 |
-| asteroidScanner | 2.5 | 200 | 3000 | 5 | 0.75 | 10 |
-| asteroidLocator | 3 | 200 | 5000 | 2 | 1 | 15 |
+| gasScanner | 2 | 200 | 1500 | 4 | 6 | 10 |
+| asteroidScanner | 2.5 | 200 | 3000 | 5 | 9 | 10 |
+| asteroidLocator | 3 | 200 | 5000 | 2 | 12 | 15 |
+
+Active draw is large on purpose: the command pod's generator makes 6 MW and its idle draw with all three modules is about 1 MW,
+so a scan must move the net energy figure, as shield recovery does (`docs/direction.md`, "shield power must be felt and seen").
+On the pod a gas scan nets about -1 MW, an asteroid scan -4 MW, a locator pulse -7 MW; one scan costs at most about a third of the battery.
+`PowerFlowTests` holds this for every quality (the multiplier takes Alien Tech to 24 MW for a 0.5 s pulse).
 
 Base accuracy is 0.2: percentage observations resolve 5 percentage points; Alien Tech resolves one point.
 All six tier multipliers are content data, not hard-coded quality tables.
@@ -70,11 +75,15 @@ so the first scan takes no memory and neither does any later one. Only a sector 
 worker, the tick and the interface.
 Preparing takes no active energy; Scanning runs for the equipment duration rounded up to simulation ticks.
 Each scanning interval consumes active MW / 60 from stored energy after ordinary flight/shield spending.
-Active module spending is shared with client prediction through `ModuleScanRules.Spend`; `PowerFlow.Modules` contributes to total draw/net flow. The existing net energy readout includes it; a separate module tooltip row is UI follow-up.
+Active module spending is shared with client prediction through `ModuleScanRules.Spend`; `PowerFlow.Modules` contributes to total draw/net flow. The net energy readout includes it; the Energy tooltip has a MODULES row
+while a scan draws, and the flow strip an amber mark (after the shield's) from the flow to the flow without scans. Both read `PowerFlow` only;
+look and colour are in `content/visuals/power.json` (`moduleMark*`).
 Generators replenish through ordinary simulation. Insufficient energy refuses/cancels as NoPower without partial-interval spending.
 A jump, control change or selected module loss/change cancels the operation.
 
-All families share one owner cooldown. Completion and any end after worker dispatch start it; pre-dispatch refusals preserve it.
+Each family has its own owner cooldown (gas, asteroid, locator): a scan of one never blocks another family's request, and the
+sector scan's cooldown (`K`) is separate again. Completion and any end after worker dispatch start the scanning family's cooldown;
+pre-dispatch refusals preserve it. One scan still runs per owner at a time; a request meanwhile reports Busy.
 Repeating a running request preserves progress and reports Busy in Refusal.
 States: Idle, Preparing, Scanning, Completed, Cancelled, NoEquipment, NoPower, OutOfRange, Cooldown,
 InvalidTarget, Busy, KnowledgeLimit, Unavailable.
@@ -90,15 +99,15 @@ Candidates are checked at their current positions before publication, so out-of-
 - `PlayerInputBridge.StartGasScan(SectorCoord anchor)`.
 - `PlayerInputBridge.StartAsteroidScan(RockRef target)`.
 - `PlayerInputBridge.PulseAsteroidLocator()`.
-- `SessionSnapshot.Modules.Scan`: state, Refusal, Serial, Hull, quality, start/end ticks, cooldown, origin, Partial.
+- `SessionSnapshot.Modules.Scan`: state, Refusal, Serial, Hull, quality, start/end ticks, one cooldown tick per family (`CooldownUntil(family)`), origin, Partial.
 - `SessionSnapshot.Modules.Records[0..Count]`: retained observations; `Find(family, sector, index)` locates one.
 
 Progress uses authoritative world tick and StartedTick/CompletesTick only while Scanning.
 Gas shares omitted by accuracy remain unresolved; do not renormalize them or infer missing gas names.
 Locator records deliberately contain zero radius/mass/grade. Their positions are observations, not live tracking.
 
-Protocol 47: ModuleScan (33), reliable, 18 bytes; ModuleSurvey (34), reliable, at most 999 bytes.
-The publication is a 79-byte header plus at most eight 115-byte observations.
+Protocol 48: ModuleScan (33), reliable, 18 bytes; ModuleSurvey (34), reliable, at most 1015 bytes.
+The publication is a 95-byte header (three cooldown ticks, one per family) plus at most eight 115-byte observations.
 Admission, catalogue readiness and normal receive/rate budgets precede request decoding.
 Only the receiving owner's records are sent; the client rejects a packet containing a foreign owner.
 Snapshot buffers are copied, not shared with simulation state. Publication and active ticks allocate nothing.
@@ -115,7 +124,7 @@ WorldSnapshot holds the counted ModuleObservations prefix. Save codec 4 owns its
 Capture copies into a preallocated buffer; the save worker alone writes it.
 Loading checks owner, uniqueness, capacity, finite values, observation tick, resource catalogue and generated target existence.
 Active scans and cooldowns are transient and reset on load. Generated mixtures are recomputed; observed values are retained unchanged.
-Evaluator version is 10; protocol 47; generation 7; save codec 4. Older incompatible saves are refused untouched, without migration.
+Evaluator version is 10; protocol 48; generation 7; save codec 4. Older incompatible saves are refused untouched, without migration.
 
 ## Decided: interface
 

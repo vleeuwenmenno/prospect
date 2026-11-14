@@ -238,6 +238,15 @@ public sealed class FlightConsoleTests
         Assert.Equal(0f, FlightConsole.ShieldDraw(own));
         own.Power = new PowerFlow { Shield = -2f };
         Assert.Equal(0f, FlightConsole.ShieldDraw(own));
+
+        // The scan modules' draw is read the same way.
+        own.Power = new PowerFlow { Generated = 6f, Idle = 1f, Modules = 9f };
+        Assert.Equal(9f, FlightConsole.ModuleDraw(own));
+        Assert.Equal(-4f, FlightConsole.NetPower(own), 4);
+        own.Power = new PowerFlow { Modules = float.NaN };
+        Assert.Equal(0f, FlightConsole.ModuleDraw(own));
+        own.Power = new PowerFlow { Modules = -1f };
+        Assert.Equal(0f, FlightConsole.ModuleDraw(own));
     }
 
     [Fact]
@@ -259,6 +268,8 @@ public sealed class FlightConsoleTests
         var shipped = PowerReadout.Load(AppPaths.Content("visuals", "power.json"));
         Assert.Equal(shipped.SteadyMegawatts, FlightConsole.SteadyRate);
         Assert.InRange(shipped.ShieldMarkAlpha, 0f, 1f);
+        Assert.InRange(shipped.ModuleMarkAlpha, 0f, 1f);
+        Assert.NotEqual(0xFF7A2Eu, shipped.ModuleMarkRgb);
 
         var text = File.ReadAllText(AppPaths.Content("visuals", "power.json"));
         var scratch = Path.Combine(Path.GetTempPath(), "power-" + Guid.NewGuid().ToString("N") + ".json");
@@ -269,6 +280,8 @@ public sealed class FlightConsoleTests
                 ("\"steadyMegawatts\": 0.05", "\"steadyMegawatts\": 0"),
                 ("\"arrowHeight\": 6", "\"arrowHeight\": 40"),
                 ("\"shieldMarkAlpha\": 0.8", "\"shieldMarkAlpha\": 1.5"),
+                ("\"moduleMarkColor\": \"E8A33D\"", "\"moduleMarkColor\": \"nothex\""),
+                ("\"moduleMarkAlpha\": 0.85", "\"moduleMarkAlpha\": 2"),
             })
             {
                 Assert.Contains(from, text);

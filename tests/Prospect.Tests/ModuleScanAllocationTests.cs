@@ -132,7 +132,7 @@ public sealed class ModuleScanAllocationTests
 
                 completed++;
                 // The cooldown, then a few ticks the client takes the result in.
-                while (rig.Tick <= rig.Scan().CooldownUntilTick) { probe.Start(); rig.Step(); probe.Stop(); }
+                while (rig.Tick <= rig.Scan().CooldownUntil(family)) { probe.Start(); rig.Step(); probe.Stop(); }
             }
         }
 

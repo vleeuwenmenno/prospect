@@ -5,5 +5,9 @@
   "arrowGap": 4,
   "shieldMarkAlpha": 0.8,
   "shieldMarkThickness": 3,
-  "shieldMarkTick": 3
+  "shieldMarkTick": 3,
+  "moduleMarkColor": "E8A33D",
+  "moduleMarkAlpha": 0.85,
+  "moduleMarkThickness": 3,
+  "moduleMarkTick": 3
 }

@@ -194,7 +194,7 @@ internal sealed partial class ScreenHost
     /// less everything drawn, as the simulation split it, with an arrow for its direction: a shield recharging
     /// off a full battery shows here though the battery does not move. Empty says so in words; steady says
     /// full or steady. Under the segments a strip draws the flow against the most this hull can draw or gain, and
-    /// marks how much of it the shield accounts for.
+    /// marks how much of it the shield and, while one runs, a scan account for.
     /// </summary>
     private void DrawEnergyReadings(ImDrawListPtr draw, in FlightConsoleLayout layout, in HullView own, in FlightParams flight, float energy, in ConsoleTrack track)
     {
@@ -255,7 +255,8 @@ internal sealed partial class ScreenHost
 
         // The flow strip under the segments: a notch at zero, draw growing left the way the charge is going and
         // charge growing right, each against the most this hull can draw or gain. The shield's share is a muted
-        // blue line from where the flow is to where it would be without the shield's draw, ending in a tick.
+        // blue line from where the flow is to where it would be without the shield's draw, ending in a tick; a scan's
+        // share is an amber one that carries on from the end of it.
         var flowFraction = FlightConsole.Flow(net, flight);
         var stripTop = track.Bottom + Kit.Px(layout.Compact ? 2 : 4);
         var stripBottom = stripTop + Kit.Px(2);
@@ -268,19 +269,36 @@ internal sealed partial class ScreenHost
             draw.AddRectFilled(new float2(middle, stripTop), new float2(middle + half * flowFraction, stripBottom), Kit.Color(FlightConsole.ChargeColor));
         draw.AddRectFilled(new float2(middle - Kit.Px(0.5f), stripTop - Kit.Px(2)), new float2(middle + Kit.Px(1), stripBottom + Kit.Px(2)), Kit.Color(Theme.TextDim, 0.9f));
 
+        // Each share continues from where the one before it ended, so the marks never overlap and the last end is
+        // where the flow would be with neither the shield nor a scan taking power.
         var shield = FlightConsole.ShieldDraw(own);
+        var modules = FlightConsole.ModuleDraw(own);
+        var centre = (stripTop + stripBottom) * 0.5f;
+        var markFrom = middle + half * flowFraction;
+        var removed = net;
         if (flight.EnergyStorage > 0f && shield >= FlightConsole.SteadyRate)
         {
-            var without = FlightConsole.Flow(net + shield, flight);
-            var from = middle + half * flowFraction;
-            var to = middle + half * without;
-            var line = Kit.Px(tuning.ShieldMarkThickness);
-            var centre = (stripTop + stripBottom) * 0.5f;
-            var mark = Kit.Color(Theme.Info, tuning.ShieldMarkAlpha);
-            draw.AddRectFilled(new float2(Math.Min(from, to), centre - line * 0.5f), new float2(Math.Max(from, to), centre + line * 0.5f), mark);
-            var tick = Kit.Px(tuning.ShieldMarkTick);
-            draw.AddRectFilled(new float2(to - Kit.Px(0.5f), stripTop - tick), new float2(to + Kit.Px(1), stripBottom + tick), mark);
+            removed += shield;
+            var to = middle + half * FlightConsole.Flow(removed, flight);
+            DrawFlowMark(draw, markFrom, to, stripTop, stripBottom, centre, Kit.Color(Theme.Info, tuning.ShieldMarkAlpha), tuning.ShieldMarkThickness, tuning.ShieldMarkTick);
+            markFrom = to;
         }
+
+        if (flight.EnergyStorage > 0f && modules >= FlightConsole.SteadyRate)
+        {
+            removed += modules;
+            var to = middle + half * FlightConsole.Flow(removed, flight);
+            DrawFlowMark(draw, markFrom, to, stripTop, stripBottom, centre, Kit.Color(tuning.ModuleMarkRgb, tuning.ModuleMarkAlpha), tuning.ModuleMarkThickness, tuning.ModuleMarkTick);
+        }
+    }
+
+    /// <summary>One share of the flow on the strip: a line from <paramref name="from"/> to <paramref name="to"/> ending in a tick.</summary>
+    private static void DrawFlowMark(ImDrawListPtr draw, float from, float to, float stripTop, float stripBottom, float centre, uint mark, float thickness, float tickSize)
+    {
+        var line = Kit.Px(thickness);
+        draw.AddRectFilled(new float2(Math.Min(from, to), centre - line * 0.5f), new float2(Math.Max(from, to), centre + line * 0.5f), mark);
+        var tick = Kit.Px(tickSize);
+        draw.AddRectFilled(new float2(to - Kit.Px(0.5f), stripTop - tick), new float2(to + Kit.Px(1), stripBottom + tick), mark);
     }
 
     /// <summary>A small filled triangle before the net figure: up for power coming in, down for power going out.</summary>
@@ -452,6 +470,9 @@ internal static class FlightConsole
 
     /// <summary>The shield's draw, finite and never negative.</summary>
     public static float ShieldDraw(in HullView own) => float.IsFinite(own.Power.Shield) ? Math.Max(0f, own.Power.Shield) : 0f;
+
+    /// <summary>The scan modules' draw while one runs, finite and never negative; read from the power flow like every other draw.</summary>
+    public static float ModuleDraw(in HullView own) => float.IsFinite(own.Power.Modules) ? Math.Max(0f, own.Power.Modules) : 0f;
 
     /// <summary>How fast a bar's trail of lost charge catches up, as an exponential rate per second.</summary>
     public const float TrailRate = 3f;

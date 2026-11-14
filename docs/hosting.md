@@ -935,8 +935,8 @@ All new tuning is in existing shared files (`galaxy/galaxy.json`, `rules/setting
 
 ## Scanning modules
 
-Protocol 47 adds reliable ModuleScan (33, 18 bytes) and ModuleSurvey (34, at most 999 bytes).
-The publication holds a 79-byte scan header and up to eight 115-byte observations.
+Protocol 47 added reliable ModuleScan (33, 18 bytes) and ModuleSurvey (34). Protocol 48 gives each family its own cooldown tick,
+so ModuleSurvey is at most 1015 bytes: a 95-byte scan header and up to eight 115-byte observations.
 Requests pass admission, catalogue readiness and the normal receive/rate budgets before decoding.
 Client reliable budgets reserve one module request; newer queued intents survive retries.
 
@@ -947,10 +947,10 @@ No party sharing, live tracking or additional generated-data disclosure is impli
 
 Shared `blocks/blocks.json` contains all six tier multipliers and the three Common Mk I blocks.
 `BoxHullSums` selects surviving equipment by quality, mark and block index; evaluator version is 10.
-Each block draws 0.1 MW standby. Active scan power consumes stored energy after ordinary flight and shield spending.
+Each block draws 0.1 MW standby. Active scan power (6, 9 and 12 MW for Common Mk I) consumes stored energy after ordinary flight and shield spending.
 Preparation/generation runs on a worker; active ticks, publication and capture allocate no managed memory.
 
-One operation and cooldown per owner; loss/control change/jump/power failure can cancel it.
+One operation per owner and one cooldown per owner and family; loss/control change/jump/power failure can cancel it.
 A pulse prepares at most 27 sectors within one sector-width radius and returns at most 256 candidates.
 Partial explicitly means truncation or possible missing displaced rocks; candidates are range-checked at publication.
 Each owner retains at most 1024 records; capacity refuses a whole completion without eviction.

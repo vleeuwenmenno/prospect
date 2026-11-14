@@ -128,7 +128,7 @@ public sealed class ModuleScanTests
         Assert.Empty(rig.Server.ModuleKnowledge(rig.Owner(1)).ToArray());
         rig.Server.RequestModuleScan(rig.Owner(), new(ModuleFamily.AsteroidScanner, rock.Sector, rock.Index));
         Assert.Equal(ModuleScanState.Cooldown, rig.Scan().State);
-        rig.Until(() => rig.Tick > rig.Scan().CooldownUntilTick);
+        rig.Until(() => rig.Tick > rig.Scan().CooldownUntil(ModuleFamily.AsteroidScanner));
         rig.Hulls.State(rig.Hull()).Position += new Double3(10000, 0, 0);
         rig.Server.RequestModuleScan(rig.Owner(), new(ModuleFamily.AsteroidScanner, rock.Sector, rock.Index));
         rig.Until(() => rig.Scan().State == ModuleScanState.OutOfRange);
@@ -197,12 +197,87 @@ public sealed class ModuleScanTests
         Assert.True(record.Gas.Density > 0);
         rig.Server.RequestModuleScan(rig.Owner(), new(ModuleFamily.GasScanner, placement.Anchor));
         Assert.Equal(ModuleScanState.Cooldown, rig.Scan().State);
-        rig.Until(() => rig.Tick > rig.Scan().CooldownUntilTick);
+        rig.Until(() => rig.Tick > rig.Scan().CooldownUntil(ModuleFamily.GasScanner));
         rig.Server.RequestModuleScan(rig.Owner(), new(ModuleFamily.GasScanner, placement.Anchor));
         rig.Until(() => rig.Scan().State == ModuleScanState.Scanning);
         rig.Hulls.State(rig.Hull()).Position += new Double3(10000, 0, 0);
         rig.Until(() => rig.Scan().State == ModuleScanState.OutOfRange);
         Assert.Equal(record.RecordedTick, rig.Server.ModuleKnowledge(rig.Owner())[0].RecordedTick);
+    }
+
+    private static GasCloudPlacement FindCloud(Rig rig)
+    {
+        var galaxy = rig.Server.Galaxy;
+        for (var x = -150; x < 150; x++)
+            if (galaxy.GasClouds!.TryGetCloud(galaxy, new(x, 0, -77), out var cloud))
+                return new(new(x, 0, -77), cloud);
+        Assert.Fail("no cloud on the test row");
+        return default;
+    }
+
+    [Fact]
+    public void EachFamilyCoolsOnItsOwnSoGasAndLocatorNeverBlockEachOther()
+    {
+        using var rig = new Rig();
+        var placement = FindCloud(rig);
+        rig.Hulls.State(rig.Hull()).Position = GasCloudQuery.CenterOf(rig.Server.Galaxy, placement);
+        var gas = new ModuleScanRequest(ModuleFamily.GasScanner, placement.Anchor);
+        var pulse = new ModuleScanRequest(ModuleFamily.AsteroidLocator, default);
+
+        // Gas first: its cooldown is set, the other two are untouched and the locator runs at once.
+        rig.Server.RequestModuleScan(rig.Owner(), gas);
+        rig.Until(() => rig.Scan().State == ModuleScanState.Completed);
+        var after = rig.Scan();
+        Assert.True(after.GasCooldownUntilTick > rig.Tick);
+        Assert.Equal(0, after.AsteroidCooldownUntilTick);
+        Assert.Equal(0, after.LocatorCooldownUntilTick);
+        rig.Server.RequestModuleScan(rig.Owner(), pulse);
+        Assert.Equal(ModuleScanState.Preparing, rig.Scan().State);
+        Assert.Equal(after.GasCooldownUntilTick, rig.Scan().GasCooldownUntilTick);
+        rig.Until(() => rig.Scan().State == ModuleScanState.Completed);
+        Assert.True(rig.Scan().LocatorCooldownUntilTick > rig.Tick);
+        Assert.Equal(after.GasCooldownUntilTick, rig.Scan().GasCooldownUntilTick);
+
+        // Both cool now; a refusal names the family asked and changes neither countdown.
+        var before = rig.Scan();
+        rig.Server.RequestModuleScan(rig.Owner(), gas);
+        Assert.Equal(ModuleScanState.Cooldown, rig.Scan().State);
+        Assert.Equal(before.GasCooldownUntilTick, rig.Scan().GasCooldownUntilTick);
+        Assert.Equal(before.LocatorCooldownUntilTick, rig.Scan().LocatorCooldownUntilTick);
+        rig.Server.RequestModuleScan(rig.Owner(), pulse);
+        Assert.Equal(ModuleScanState.Cooldown, rig.Scan().State);
+
+        // Gas cools for 10 s and the locator for 15, so gas is free first while the locator still cools.
+        rig.Until(() => rig.Tick > rig.Scan().GasCooldownUntilTick);
+        Assert.True(rig.Scan().LocatorCooldownUntilTick > rig.Tick);
+        rig.Server.RequestModuleScan(rig.Owner(), pulse);
+        Assert.Equal(ModuleScanState.Cooldown, rig.Scan().State);
+        rig.Server.RequestModuleScan(rig.Owner(), gas);
+        Assert.Equal(ModuleScanState.Preparing, rig.Scan().State);
+    }
+
+    [Fact]
+    public void ALocatorPulseDoesNotBlockGasAndTheSnapshotCarriesAllThreeCountdowns()
+    {
+        using var rig = new Rig();
+        var placement = FindCloud(rig);
+        rig.Hulls.State(rig.Hull()).Position = GasCloudQuery.CenterOf(rig.Server.Galaxy, placement);
+        rig.Server.RequestModuleScan(rig.Owner(), new(ModuleFamily.AsteroidLocator, default));
+        rig.Until(() => rig.Scan().State == ModuleScanState.Completed);
+        rig.Server.RequestModuleScan(rig.Owner(), new(ModuleFamily.GasScanner, placement.Anchor));
+        Assert.Equal(ModuleScanState.Preparing, rig.Scan().State);
+        rig.Until(() => rig.Scan().State == ModuleScanState.Completed);
+        var server = rig.Scan();
+        Assert.True(server.LocatorCooldownUntilTick > 0);
+        Assert.True(server.GasCooldownUntilTick > 0);
+        Assert.Equal(0, server.AsteroidCooldownUntilTick);
+        rig.Until(() => rig.Clients[0].AcquireSnapshot().Modules.Scan.GasCooldownUntilTick == server.GasCooldownUntilTick);
+        var seen = rig.Clients[0].AcquireSnapshot().Modules.Scan;
+        Assert.Equal(server.LocatorCooldownUntilTick, seen.LocatorCooldownUntilTick);
+        Assert.Equal(0, seen.AsteroidCooldownUntilTick);
+        // The other player's cooldowns are their own.
+        Assert.Equal(0, rig.Scan(1).GasCooldownUntilTick);
+        Assert.Equal(0, rig.Scan(1).LocatorCooldownUntilTick);
     }
 
     [Fact]
@@ -243,7 +318,7 @@ public sealed class ModuleScanTests
         var block = design.Stats.AsteroidScanner.Block - 1;
         Assert.True(rig.Hulls.BlockStates.Hit(info.BlockState, block, 1e9f));
         rig.Until(() => rig.Scan().State == ModuleScanState.Cancelled);
-        Assert.True(rig.Scan().CooldownUntilTick > rig.Tick);
+        Assert.True(rig.Scan().CooldownUntil(ModuleFamily.AsteroidScanner) > rig.Tick);
         Assert.Equal(0, rig.Clients[0].AcquireSnapshot().Modules.Count);
     }
 
