@@ -101,6 +101,21 @@ public sealed class EditorSessionTests
     }
 
     [Fact]
+    public void TheSnapshotSaysWhenTheOwnHullIsTheDroneAndNotWhenItIsAShip()
+    {
+        using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);
+        var ship = rig.Own(0);
+        Assert.False(rig.Snap(0).OwnIsDrone);
+        rig.Input(0).RequestControl(0);
+        Assert.True(rig.Until(() => rig.Own(0) != ship && rig.Snap(0).OwnIsDrone));
+
+        // Back in the ship, the drone is gone and the flag with it.
+        rig.Input(0).RequestControl(ship);
+        Assert.True(rig.Until(() => rig.Own(0) == ship));
+        Assert.False(rig.Snap(0).OwnIsDrone);
+    }
+
+    [Fact]
     public void NewShipRejectsAnAsteroidAndRechecksClearanceAfterReadiness()
     {
         using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);

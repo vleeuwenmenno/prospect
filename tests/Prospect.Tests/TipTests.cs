@@ -74,7 +74,7 @@ public sealed class TipTests
     [InlineData("\"id\": \"map-fog\"", "\"id\": \"map-layers\"")]
     [InlineData("{MapTilt}", "{NotAnAction}")]
     [InlineData("{MapTilt}", "{MapTilt")]
-    [InlineData("\"offset\": [0, 56]", "\"offset\": [0]")]
+    [InlineData("\"offset\": [0, 40]", "\"offset\": [0]")]
     [InlineData("\"region\": \"editorParts\"", "\"region\": \"moon\"")]
     [InlineData("\"panelWidth\": 340", "\"panelWidth\": 20")]
     [InlineData("\"trigger\": \"droneEditHint\"", "\"trigger\": \"mapOpened\"")]

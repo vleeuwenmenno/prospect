@@ -321,7 +321,7 @@ public struct HullRecord
 /// </summary>
 public struct SnapshotHeader
 {
-    public const int MaxWireSize = 24;
+    public const int MaxWireSize = 25;
     public long ServerTick;
     public uint ControlEpoch;
     public ushort AppliedOrderId;
@@ -333,6 +333,12 @@ public struct SnapshotHeader
     public uint OwnHull;
     public byte HullCount;
 
+    /// <summary>
+    /// True while the receiving client's own hull is its escape drone, even after the drone was edited into
+    /// another design. Only a drone may ask for a new ship, so the interface offers that only then.
+    /// </summary>
+    public bool OwnIsDrone;
+
     public readonly void Write(ref NetWriter writer)
     {
         writer.WriteByte((byte)MessageId.Snapshot);
@@ -342,6 +348,7 @@ public struct SnapshotHeader
         writer.WriteUInt32(AckedInput);
         writer.WriteUInt32(OwnHull);
         writer.WriteByte(HullCount);
+        writer.WriteByte(OwnIsDrone ? (byte)1 : (byte)0);
     }
 
     public static bool TryRead(ref NetReader reader, out SnapshotHeader header)
@@ -352,7 +359,9 @@ public struct SnapshotHeader
         header.AckedInput = reader.ReadUInt32();
         header.OwnHull = reader.ReadUInt32();
         header.HullCount = reader.ReadByte();
-        return reader.IsValid && header.ServerTick >= 0 && header.ServerTick <= long.MaxValue - 256;
+        var flags = reader.ReadByte();
+        header.OwnIsDrone = flags == 1;
+        return reader.IsValid && flags <= 1 && header.ServerTick >= 0 && header.ServerTick <= long.MaxValue - 256;
     }
 }
 

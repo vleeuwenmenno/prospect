@@ -9,7 +9,7 @@ internal sealed class ControlsCatalog
         "Menu / back", "Performance overlay", "Fullscreen", "Screenshot", "Boost", "Dampeners on / off",
         "Command view", "Galaxy map", "Halt (cancel order)", "Focus on selection (command view)", "Ship data sheet", "Take control of target / leave in drone",
         "Controls / help", "Hold to show cursor", "Players on this server", "Party (social)", "Chat", "Sector information (show / hide)",
-        "Ship editor (open / cancel)", "Map layer up", "Map layer down", "Map flat / tilted view",
+        "Ship editor (open / cancel); in the drone: New ship, with Ctrl held edits the drone", "Map layer up", "Map layer down", "Map flat / tilted view",
     ];
 
 

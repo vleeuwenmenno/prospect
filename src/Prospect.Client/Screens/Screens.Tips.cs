@@ -176,6 +176,11 @@ internal sealed partial class ScreenHost
                 var console = FlightConsole.Layout(display, Kit.Scale);
                 area = new HudRect(console.LeftX, console.Top, console.Right, console.Top + console.Height);
                 return true;
+            case TipRegion.NewShipDialog:
+                if (!_newShip.Open)
+                    return false;
+                area = NewShipDialog.Panel(display, Kit.Scale);
+                return true;
             default:
                 if (!world.Editor.Shown)
                     return false;

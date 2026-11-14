@@ -44,8 +44,9 @@ internal sealed partial class ScreenHost
 
     /// <summary>
     /// The editor's key opens a request to edit the flown ship, or cancels the edit at any stage; Escape cancels
-    /// too. Read before flight, and only with nothing else open: the menu, the map, a data sheet, Controls or the
-    /// social workspace keep their own keys, and a text field keeps its letters.
+    /// too. In the escape drone the plain key opens the New ship dialog and Ctrl with it edits the drone
+    /// (<see cref="NewShipDialog.HandleKeys"/>). Read before flight, and only with nothing else open: the menu, the
+    /// map, a data sheet, Controls or the social workspace keep their own keys, and a text field keeps its letters.
     /// </summary>
     public void HandleEditorShortcut(bool active, SessionSnapshot? snapshot, PlayerInputBridge? bridge)
     {
@@ -55,11 +56,11 @@ internal sealed partial class ScreenHost
             return;
         if (_controlsHandled || _controlsOpen || _sessionMenuOpen || _mapOpen || _shipInfoOpen || SocialSurfaceOpen || _socialHandled)
             return;
-        _editorHandled = _app.World.Editor.HandleKeys(_app.Actions, _app.Devices, snapshot.Hulls[snapshot.OwnHull], bridge, _ui.WantsTextInput, _ui.PointerOverInterface);
+        _editorHandled = _newShip.HandleKeys(_app.Actions, _app.Devices, snapshot, _app.World.Editor, bridge, _tips, _newShipName, _ui.WantsTextInput, _ui.PointerOverInterface);
     }
 
     /// <summary>The waiting request, or what became of the last edit, under the bar while the editor is not shown.</summary>
-    private void DrawEditorNotice(ImDrawListPtr draw, ShipEditor editor)
+    private void DrawEditorNotice(ImDrawListPtr draw, ShipEditor editor, string switchKey)
     {
         var requesting = editor.Stage == EditorStage.Requesting;
         var recent = editor.Time - editor.NoticeAt < ShipEditor.NoticeSeconds && (editor.NoticeApplied || editor.Notice is not (EditorReason.None or EditorReason.Cancelled));
@@ -75,7 +76,9 @@ internal sealed partial class ScreenHost
         }
         else if (editor.NoticeApplied)
         {
-            text = Kit.F($"Ship rebuilt. You are flying the new design.");
+            text = editor.NoticeBuilt
+                ? Kit.F($"Ship built. Target it and press {switchKey} to take control; you are still in the drone.")
+                : Kit.F($"Ship rebuilt. You are flying the new design.");
             tone = Theme.Good;
         }
         else

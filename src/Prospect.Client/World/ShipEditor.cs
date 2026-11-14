@@ -99,6 +99,11 @@ internal sealed class ShipEditor(JobSystem jobs)
     private float _requestedAt;
     private uint _seenSerial;
     private uint _askedSerial;
+
+    // The hull the player flew when the edit began, and for a new ship the hull the grant is awaited for: the edit
+    // follows the granted hull, which is not the flown one when the player is in the drone.
+    private uint _pilotHull;
+    private uint _awaitedHull;
     private uint _commitSerial;
 
     // The hull the draft was made from, as it was then: a kept draft is only reused for exactly that hull.
@@ -178,6 +183,9 @@ internal sealed class ShipEditor(JobSystem jobs)
 
     /// <summary>With <see cref="Notice"/>: true when the ship was rebuilt rather than an edit refused.</summary>
     public bool NoticeApplied { get; private set; }
+
+    /// <summary>With <see cref="NoticeApplied"/>: true when the applied edit built a new ship beside the drone, which keeps flying.</summary>
+    public bool NoticeBuilt { get; private set; }
 
     /// <summary>With <see cref="Notice"/>: the seconds the server asked to wait, and when the notice was given.</summary>
     public int NoticeWait { get; private set; }
@@ -350,7 +358,26 @@ internal sealed class ShipEditor(JobSystem jobs)
             return;
         bridge.RequestEdit(own.Id);
         Stage = EditorStage.Requesting;
+        _pilotHull = own.Id;
+        _awaitedHull = 0;
         _askedSerial = Server.Serial;
+        _requestedAt = _time;
+        Notice = EditorReason.None;
+        NoticeApplied = false;
+    }
+
+    /// <summary>
+    /// Waits for the server's grant to edit a ship it has just created for the player, who stays in the drone
+    /// <paramref name="pilot"/>. The grant comes with the creation answer; the draft opens only once the new hull is
+    /// in the snapshot, as <see cref="Track"/> finds it.
+    /// </summary>
+    public void AwaitCreated(uint pilot, uint hull)
+    {
+        if (Stage != EditorStage.Closed || hull == 0)
+            return;
+        Stage = EditorStage.Requesting;
+        _pilotHull = pilot;
+        _awaitedHull = hull;
         _requestedAt = _time;
         Notice = EditorReason.None;
         NoticeApplied = false;
@@ -424,6 +451,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         _clipCount = 0;
         Server = default;
         _seenSerial = _askedSerial = _commitSerial = 0;
+        _pilotHull = _awaitedHull = 0;
         Notice = Refusal = EditorReason.None;
         DraftKept = DraftRestarted = false;
         _replacedFrom = _replacedTo = 0;
@@ -457,6 +485,31 @@ internal sealed class ShipEditor(JobSystem jobs)
 
         switch (Stage)
         {
+            case EditorStage.Requesting when _awaitedHull != 0:
+                // A new ship: the grant arrived with the creation answer, and the hull may follow it a moment
+                // later. The draft opens only once the hull is here; the player stays in the drone throughout.
+                if (own.Id != _pilotHull)
+                {
+                    bridge.CancelEdit();
+                    Close(EditorReason.HullChanged, 0, false);
+                }
+                else if (view.Phase == EditorPhase.Open && view.Hull == _awaitedHull && view.Token != 0)
+                {
+                    var at = FindHull(snapshot, _awaitedHull);
+                    if (at >= 0)
+                        Enter(snapshot, snapshot.Hulls[at], view);
+                }
+                else if (view.Phase is EditorPhase.Closed or EditorPhase.Applied && view.Reason != EditorReason.Cancelled)
+                    Close(view.Reason, view.WaitSeconds, false);
+
+                if (Stage == EditorStage.Requesting && _time - _requestedAt > RequestTimeout)
+                {
+                    bridge.CancelEdit();
+                    Close(EditorReason.Unavailable, 0, false);
+                }
+
+                break;
+
             case EditorStage.Requesting:
                 if (view.Serial != _askedSerial && !view.Pending)
                 {
@@ -483,14 +536,18 @@ internal sealed class ShipEditor(JobSystem jobs)
                 break;
 
             case EditorStage.Editing:
-                if (own.Id == Hull)
+                // The edited hull is the granted one: the flown ship for an own edit, a ship made from the drone
+                // otherwise. Its figures are read from its own record, never the flown hull's.
+                var edited = FindHull(snapshot, Hull);
+                if (edited >= 0)
                 {
-                    _ownHull = own.Hull;
-                    _ownRevision = own.Revision;
-                    _ownDents = own.Visual.Count;
+                    ref var hull = ref snapshot.Hulls[edited];
+                    _ownHull = hull.Hull;
+                    _ownRevision = hull.Revision;
+                    _ownDents = hull.Visual.Count;
                 }
 
-                if (own.Id != Hull)
+                if (own.Id != _pilotHull || edited < 0)
                 {
                     bridge.CancelEdit();
                     Close(EditorReason.HullChanged, 0, false);
@@ -519,6 +576,7 @@ internal sealed class ShipEditor(JobSystem jobs)
                     ClearSelection();
                     Notice = EditorReason.None;
                     NoticeApplied = true;
+                    NoticeBuilt = Hull != _pilotHull;
                     NoticeAt = _time;
                     _generation++;
                 }
@@ -540,6 +598,15 @@ internal sealed class ShipEditor(JobSystem jobs)
         if ((SizingPart || RotatingPart) && !CanEdit)
             CancelPartGestures();
         PumpCheck();
+    }
+
+    /// <summary>The index of a hull in the snapshot, or -1 while the snapshot does not have it.</summary>
+    private static int FindHull(SessionSnapshot snapshot, uint id)
+    {
+        for (var i = 0; i < snapshot.HullCount; i++)
+            if (snapshot.Hulls[i].Id == id)
+                return i;
+        return -1;
     }
 
     /// <summary>The token of the open edit, which a commit carries.</summary>
@@ -1333,6 +1400,8 @@ internal sealed class ShipEditor(JobSystem jobs)
         NoticeWait = wait;
         NoticeAt = _time;
         NoticeApplied = false;
+        // A new ship cannot be reopened from the drone, so its unsaved draft is never kept for "press the key to go on".
+        keep &= Hull == _pilotHull;
         DraftKept = keep && Draft is not null && Dirty;
         if (!keep)
             Draft = null;

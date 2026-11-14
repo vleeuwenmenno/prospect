@@ -596,6 +596,22 @@ internal sealed class WorldView
     /// <summary>Where the player's hull is drawn: where the simulation has it, moved along its own jump.</summary>
     public Double3 OwnDrawnPosition => OwnPosition + _jumpAxis * _jumpOffset;
 
+    // Where the edited hull is when it is not the flown one: a new ship the drone's player is building. The camera,
+    // the pointer ray and the draft all work from this pose, never the drone's.
+    private bool _editedRemote;
+    private Double3 _editedPosition;
+    private Quaternion _editedRotation = Quaternion.Identity;
+    private byte _editedDesign;
+
+    /// <summary>Where the hull being edited is drawn this frame: the flown ship, or the new ship beside the drone.</summary>
+    public Double3 EditedPosition => _editedRemote ? _editedPosition : OwnDrawnPosition;
+
+    /// <summary>The orientation of the hull being edited this frame.</summary>
+    public Quaternion EditedOrientation => _editedRemote ? _editedRotation : OwnOrientation;
+
+    /// <summary>The design the edited hull has now, for the radius its camera works within.</summary>
+    public byte EditedDesign => _editedRemote ? _editedDesign : Own.Design;
+
     /// <summary>True while the player holds the free-look button.</summary>
     public bool FreeLook => _freeLook && Mode == ViewMode.Pilot;
 
@@ -709,6 +725,7 @@ internal sealed class WorldView
 
         // The editor follows the server before anything reads input, so a grant or an end shows this frame.
         Editor.Track(snapshot, bridge, dt);
+        UpdateEditedPose(snapshot);
         if (Editor.TakeReplacement(out var replaced, out var replacement))
             ReplaceHull(replaced, replacement);
         if (Editor.Shown != _editShown)
@@ -2790,8 +2807,8 @@ internal sealed class WorldView
         var edit = Smooth(_editBlend);
         if (edit > 0f)
         {
-            var editOrientation = Quaternion.Concatenate(Quaternion.CreateFromYawPitchRoll(_editYaw, _editPitch, 0f), OwnOrientation);
-            var focus = OwnDrawnPosition + Vector3.Transform(_editPan, OwnOrientation);
+            var editOrientation = Quaternion.Concatenate(Quaternion.CreateFromYawPitchRoll(_editYaw, _editPitch, 0f), EditedOrientation);
+            var focus = EditedPosition + Vector3.Transform(_editPan, EditedOrientation);
             CameraPosition = Double3.Lerp(CameraPosition, focus + Vector3.Transform(new Vector3(0f, 0f, _editDistance), editOrientation), edit);
             orientation = Quaternion.Slerp(orientation, editOrientation, edit);
         }
@@ -2842,7 +2859,7 @@ internal sealed class WorldView
     /// </summary>
     private float EditRadius()
     {
-        var radius = _designs[Math.Min(Own.Design, _designs.Length - 1)].Flight.Radius;
+        var radius = _designs[Math.Min(EditedDesign, _designs.Length - 1)].Flight.Radius;
         if (Editor.Draft is not { } draft || Editor.Source is not { } source)
             return radius;
         if (!ReferenceEquals(draft, _editReachDraft) || draft.Version != _editReachVersion)
@@ -2890,8 +2907,34 @@ internal sealed class WorldView
                 _selected[i] = to;
         if (_followId == from)
             _followId = to;
+        // Only the flown ship's replacement is flown next; a new ship built from the drone leaves the pilot where they are.
+        if (from != Own.Id)
+            return;
         _carryFrom = from;
         _carryTo = to;
+    }
+
+    /// <summary>
+    /// Finds where the edited hull is when it is not the one flown, from the same visuals that draw it, so the draft
+    /// and the camera stay on it as it drifts.
+    /// </summary>
+    private void UpdateEditedPose(SessionSnapshot snapshot)
+    {
+        _editedRemote = false;
+        // The pose is kept while the camera eases out of the editor, so it does not jump to the flown ship.
+        if ((Editor.Stage == EditorStage.Closed && _editBlend <= 0f) || Editor.Hull == 0 || Editor.Hull == Own.Id)
+            return;
+        var visuals = _visuals.Hulls;
+        for (var i = 0; i < Math.Min(snapshot.HullCount, visuals.Length); i++)
+        {
+            if (snapshot.Hulls[i].Id != Editor.Hull)
+                continue;
+            _editedRemote = true;
+            _editedPosition = DrawnPosition(visuals[i]);
+            _editedRotation = visuals[i].Orientation;
+            _editedDesign = snapshot.Hulls[i].Design;
+            return;
+        }
     }
 
     /// <summary>
@@ -2989,7 +3032,7 @@ internal sealed class WorldView
                 _editFocusing = false;
                 var metresPerPixel = _editDistance * 2f * _tanHalfFov / Math.Max(_screen.Y, 1f);
                 var delta = (-_right * _devices.MouseDelta.X + _up * _devices.MouseDelta.Y) * metresPerPixel;
-                _editPan += Vector3.Transform(delta, Quaternion.Conjugate(OwnOrientation));
+                _editPan += Vector3.Transform(delta, Quaternion.Conjugate(EditedOrientation));
                 var reach = radius * 2f + 10f;
                 if (_editPan.Length() > reach)
                     _editPan = Vector3.Normalize(_editPan) * reach;
@@ -3125,8 +3168,8 @@ internal sealed class WorldView
     private void PointerInGrid(out Vector3 origin, out Vector3 direction)
     {
         var source = Editor.Source!;
-        var inverse = Quaternion.Conjugate(OwnOrientation);
-        origin = EditorGeometry.ToGrid(Vector3.Transform(CameraPosition.RelativeTo(OwnDrawnPosition), inverse), source.Pivot, source.BlockSize);
+        var inverse = Quaternion.Conjugate(EditedOrientation);
+        origin = EditorGeometry.ToGrid(Vector3.Transform(CameraPosition.RelativeTo(EditedPosition), inverse), source.Pivot, source.BlockSize);
         direction = Vector3.Transform(PointerRay(_devices.MousePosition), inverse);
     }
 
@@ -3636,8 +3679,8 @@ internal sealed class WorldView
     /// <summary>Adds the draft's blocks in their own shapes where the hull is, each tinted for its role.</summary>
     private void AddDraft(ref int count, BuildDraft draft, HullDesign source, Double3 camera)
     {
-        var hull = OwnDrawnPosition.RelativeTo(camera);
-        var orientation = OwnOrientation;
+        var hull = EditedPosition.RelativeTo(camera);
+        var orientation = EditedOrientation;
         var boxes = draft.Boxes;
         var material = Material(false, -1);
         for (var i = 0; i < boxes.Length && count < _candidates.Length; i++)
@@ -3660,7 +3703,7 @@ internal sealed class WorldView
     public Double3 EditorPoint(Vector3 grid)
     {
         var source = Editor.Source;
-        return source is null ? OwnDrawnPosition : OwnDrawnPosition + Vector3.Transform(EditorGeometry.ToHull(grid, source.Pivot, source.BlockSize), OwnOrientation);
+        return source is null ? EditedPosition : EditedPosition + Vector3.Transform(EditorGeometry.ToHull(grid, source.Pivot, source.BlockSize), EditedOrientation);
     }
 
     /// <summary>The direction of the view ray under a window position.</summary>

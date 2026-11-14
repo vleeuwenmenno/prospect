@@ -218,6 +218,7 @@ internal sealed partial class ClientWorld : IDisposable
     private int _lastViewCount;
 
     private uint _ownHullId;
+    private bool _ownIsDrone;
     private bool _hasOwnState;
     private HullState _predicted;
     private Vector3 _correction;
@@ -345,6 +346,9 @@ internal sealed partial class ClientWorld : IDisposable
     public FlightParams Flight => _flight;
 
     public void SetOwnHull(uint id) => _ownHullId = id;
+
+    /// <summary>True while the hull the player flies is their escape drone, as the newest snapshot says.</summary>
+    public bool OwnIsDrone => _ownIsDrone;
 
     /// <summary>Gives the world the server's galaxy, whose asteroids the prediction collides with.</summary>
     public void SetGalaxy(Galaxy galaxy) => _rocks = new RockField(galaxy);
@@ -537,6 +541,7 @@ internal sealed partial class ClientWorld : IDisposable
         if (header.ServerTick <= _snapshotTick)
             return;
         _snapshotTick = header.ServerTick;
+        _ownIsDrone = header.OwnIsDrone;
         _lastSnapshotClientTick = clientTick;
 
         if (own.Id != _ownHullId || !_hasOwnState || header.ControlEpoch != _controlEpoch)

@@ -66,6 +66,7 @@ internal sealed partial class ScreenHost
             _sectorInfo.Reset();
             ResetSocial();
             ResetTipTracking();
+            _newShip.Reset();
         }
         _screen = screen;
         _screenTime = 0;

@@ -54,7 +54,7 @@ internal sealed partial class ScreenHost
     /// True while the player is in space with nothing open over it, so input belongs to the world. Pinned social
     /// windows are not open surfaces: they never take flight's input.
     /// </summary>
-    public bool WorldInputEnabled => _screen == Screen.Session && !_sessionMenuOpen && !_mapOpen && !_shipInfoOpen && !_controlsOpen && !_socialOpen && !_chatOpen;
+    public bool WorldInputEnabled => _screen == Screen.Session && !_sessionMenuOpen && !_mapOpen && !_shipInfoOpen && !_controlsOpen && !_socialOpen && !_chatOpen && !_newShip.Open;
 
     public void OpenShipInfo() => _shipInfoOpen = true;
 
@@ -117,7 +117,8 @@ internal sealed partial class ScreenHost
         UpdateExploration(snapshot, world);
         // While the ship editor is shown its own keys apply: the map and the data sheet wait until it closes.
         var editing = world.Editor.Shown;
-        if (!editing && !_sessionMenuOpen && !SocialSurfaceOpen && _app.Actions.Pressed(_app.Devices, InputAction.ToggleMap, !_ui.WantsTextInput))
+        var asking = _newShip.Open;
+        if (!editing && !asking && !_sessionMenuOpen && !SocialSurfaceOpen && _app.Actions.Pressed(_app.Devices, InputAction.ToggleMap, !_ui.WantsTextInput))
         {
             if (_mapOpen)
                 _mapOpen = false;
@@ -125,7 +126,7 @@ internal sealed partial class ScreenHost
                 OpenMap();
         }
 
-        if (!editing && !_sessionMenuOpen && !_mapOpen && !SocialSurfaceOpen && _app.Actions.Pressed(_app.Devices, InputAction.ShipInfo, !_ui.WantsTextInput))
+        if (!editing && !asking && !_sessionMenuOpen && !_mapOpen && !SocialSurfaceOpen && _app.Actions.Pressed(_app.Devices, InputAction.ShipInfo, !_ui.WantsTextInput))
             _shipInfoOpen = !_shipInfoOpen;
 
         // Everything shown over the world goes on ImGui's background layer, which is drawn beneath every window.
@@ -182,7 +183,7 @@ internal sealed partial class ScreenHost
                 DrawCommandCourseMenu(snapshot, world, world.CommandBlend);
             }
 
-            DrawEditorNotice(draw, world.Editor);
+            DrawEditorNotice(draw, world.Editor, world.SwitchKeyName);
             if (world.ControlOutOfSector)
             {
                 var notice = Kit.F($"Outside your sector - travel there to take control ({world.SwitchKeyName})");

@@ -57,6 +57,7 @@ internal sealed partial class ScreenHost
                     break;
                 var mapWasOpen = _mapOpen;
                 TrackSocial(snapshot);
+                UpdateNewShip(snapshot);
                 TrackTips(snapshot, _app.World);
                 PlanTip(_app.World);
                 DrawWorldInterface(snapshot);
@@ -66,6 +67,8 @@ internal sealed partial class ScreenHost
                     DrawSocialWindows(snapshot);
                 if (!_sessionMenuOpen)
                     DrawTopBar(snapshot);
+                if (!_mapOpen && !_sessionMenuOpen)
+                    DrawNewShip(snapshot);
                 DrawTip();
 
                 // Escape backs out one level at a time: the map closes itself, chat and the social windows close

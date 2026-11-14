@@ -2,7 +2,7 @@
 
 Asteroid fields and gas clouds are things in world space, not contents of a sector.
 A sector is still generated alone, from the seed, without generating its neighbours.
-Generation version 5, protocol 41. The code is `AsteroidFieldsModule` and `GasCloudModule` in `Prospect.Game/World`.
+Generation version 5, protocol 42. The code is `AsteroidFieldsModule` and `GasCloudModule` in `Prospect.Game/World`.
 
 ## Decided: what the player gets
 

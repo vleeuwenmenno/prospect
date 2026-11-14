@@ -816,7 +816,7 @@ Drive blocks specify range in sectors, converted to metres by the shared hull ev
 - The integral is analytic, with scalar double arithmetic and square roots; no shader noise, warp, lean, motion,
   or `gasWispiness`. Gas beyond the target costs nothing. This is a smooth gameplay envelope, not the visible fringe.
 - `rules/exploration.json` sets `gasOpticalPenalty` to 1.0 (allowed 0–10), base range 5,000 m, proximity 250 m.
-  The file already participates in shared content identity. The combined build uses protocol 41, generation 5 and unchanged save codec 3.
+  The file already participates in shared content identity. The combined build uses protocol 42, generation 5 and unchanged save codec 3.
   Content evaluator is 8 (gas sensors plus sector-scaled drives), so an older executable with these files cannot claim the same sensor arithmetic.
   Existing content identities, including saved-world identities, change.
 - `GasSensors.Reach` returns metres along any nonzero direction; `SampleReach` fills caller-owned doubles for
@@ -843,7 +843,7 @@ These include collision, replication and all other tick systems, not gas integra
 thousands-of-sensors guarantee. Final empty-scene/resize benchmarks passed at 239/268 FPS with zero process allocations
 while other tests were running; earlier runs reached 1,456/885 FPS. Vulkan validation layers were inactive.
 
-## New ships from a drone (protocol 41)
+## New ships from a drone (protocol 42)
 
 ### Decided (provisional, tunable)
 
@@ -875,6 +875,21 @@ DesignReady still gates hull publication; CatalogueReady is never repurposed. Fa
 `CreateHull` gives the new ship its durable entity; its existing snapshot representation saves it normally.
 
 Protocol 40 sizes: Editor at most 135 B (64 UTF-16 units for 32 Unicode scalars), EditorState 18 B.
+
+Protocol 42 adds one flags byte to the snapshot header (25 B): bit 0 is set while the receiving client's own hull
+is its escape drone, also after the drone was edited into another design. Only a drone may ask for a new ship, so
+the client offers the New ship dialog only then (`SessionSnapshot.OwnIsDrone`). Other bits must be zero.
+
+### Interface (decided)
+
+- In the drone, the editor key (`B`) opens the New ship dialog and the key with Ctrl held edits the drone itself.
+  In a ship the key edits that ship as before. Both are one binding (`ToggleEditor`).
+- The dialog checks the name as it is typed with the server's rules and shows the server's refusal reason.
+  Enter builds, Esc and Cancel close it; while the server works neither does, so a grant is never left unclaimed.
+- Each press of the key in the drone brings up the `drone-edit` tip beside the dialog (hidden for good only if the
+  player ticked "Don't show this again").
+- Once created, the editor opens on the new hull (one root block) when that hull is in the snapshot. Apply rebuilds
+  it; the player stays in the drone.
 EditorState adds a creation status byte; other editor and design transfer sizes are unchanged.
 Refusals include NotPiloting, BadName, DuplicateName, ShipLimit, NoClearSpot, CatalogueFull,
 HullLimit, Busy, TooSoon, Jumping and the existing client-readiness/check failure reasons.
