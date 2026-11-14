@@ -172,5 +172,5 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>True when the player asked to go back (Escape or the pad's Start button).</summary>
-    private bool BackPressed() => _screenTime > 0.1f && _app.Actions.Pressed(_app.Devices, InputAction.Pause, true);
+    private bool BackPressed() => _screenTime > 0.1f && !_tipBack && _app.Actions.Pressed(_app.Devices, InputAction.Pause, true);
 }

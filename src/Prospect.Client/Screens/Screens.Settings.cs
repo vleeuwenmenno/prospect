@@ -52,6 +52,7 @@ internal sealed partial class ScreenHost
 
     private void LeaveSettings()
     {
+        _tipResetAsk = _tipResetDone = false;
         _app.Settings.PlayerName = PlayerNames.Sanitize(_settingsName.ToString());
         _app.Settings.Save();
         InitializeJoin();
@@ -146,6 +147,9 @@ internal sealed partial class ScreenHost
         Kit.TextField("CALLSIGN"u8, "##callsign"u8, _settingsName, 300);
 
         Kit.Space(Theme.Space5);
+        DrawTipSettings(rowWidth);
+
+        Kit.Space(Theme.Space5);
         Kit.Caption("CONTROLS"u8);
         Kit.Space(Theme.Space2);
         BindingRow("Look around", "Pointer", rowWidth);
@@ -159,7 +163,17 @@ internal sealed partial class ScreenHost
         DrawGamepadStatus(rowWidth);
 
         Kit.Space(Theme.Space5);
-        if (Kit.Button("Back"u8, ButtonKind.Secondary, 120) || BackPressed())
+        // Escape answers an open question first: it is "keep them hidden" before it is "leave".
+        var back = Kit.Button("Back"u8, ButtonKind.Secondary, 120);
+        if (BackPressed())
+        {
+            if (_tipResetAsk)
+                _tipResetAsk = false;
+            else
+                back = true;
+        }
+
+        if (back)
             Show(_settingsReturn);
 
         EndPanel();

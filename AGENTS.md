@@ -167,6 +167,17 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `Exploration.Navigation`); other owned ships get `IssueFleetOrder`. A right click in the command view opens the
   menu and orders nothing; Escape (`ScreenHost.NextBackStep`) and a press elsewhere close it. `FrameOrderTests` runs
   it. Do not build text inside another `Kit.F`: build the inner figures first.
+- **In-game tips:** text, anchor and trigger of every tip are data in `content/visuals/tips.json` (`TipCatalogue`:
+  refuses unknown triggers, actions, repeated ids and a trigger with no tip). Key names in text are `{InputAction}`
+  placeholders, resolved from the loaded bindings. Code only fires a trigger from `TipTriggers`: one call,
+  `ScreenHost.FireTip(TipTriggers.X)` (or `TipBoard.Fire`); new moment = new constant, new tip entry. The rules
+  (stack, Next, Close, tick) are `TipBoard`, font-free; the panel is `TipPanel`, placed by `TipPlacement` before the
+  map and panels are laid out. Hidden ids are `ClientSettings.HiddenTips`, saved by the client when they change.
+  The panel is one window without keyboard navigation and takes no input while the pilot pointer is captured; it
+  must never change `PointerFrame`. A surface under it that does its own pointer routing blocks its rectangle (the
+  map: `BlockMapForTip`, `Claim`). Escape goes to `HandleTipShortcut` first; every other Escape reads
+  `BackPressed()`, which stays quiet on that press, and the editor's shortcut skips the frame. A scripted run shows
+  no tips unless given `--tips-sample`. `TipTests` and the tip tests in `FrameOrderTests` hold the rules.
 - **A new per-tick system:** add a unit test in `tests/Prospect.Tests/WorldTests.cs` and, if it crosses the
   network, a session test that runs a real server and client.
 - **A new sector module** (stations): derive from `SectorModule` in `Prospect.Game/World`, name its
@@ -213,6 +224,10 @@ The client opens a real window on the developer's desktop, and they are usually 
   does `--host public --host-name ... --password ...` (with `--start newgame` it fills the hosting section
   instead of starting a game; the password shows masked). `--open menu` opens the in-game menu, which says
   whether a hosted public game is listed.
+- Tips in a capture: a scripted run hides them. `--tips-sample on` lets them fire as in play (`--open map`,
+  `--open command`, `--open edit`, `scan`, show their tips); `stack` also fires the command view's three at once
+  (use with `--open command`); `reset` with `--start settings` opens the Reset tips question, scrolled into view. Point
+  `XDG_CONFIG_HOME` at a scratch copy: hiding a tip saves settings.
 - Accounts without the network or a browser: `--account-sample <state>` (`signed-out`, `waiting`, `signed-in`,
   `friends` with full lists of hostile names, `failed`, `off`), with `--start account` for the Friends screen or
   `--open friends` in a game. Only with `--capture` or `--bench`; a scripted run never opens a browser.

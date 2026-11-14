@@ -28,16 +28,30 @@ internal sealed class ClientSettings
     /// <summary>Seconds between automatic saves of a world this game runs, from 10 to 600. Read when a world is opened.</summary>
     public int AutosaveSeconds { get; set; } = 30;
 
+    /// <summary>
+    /// The ids of the in-game tips this client will not show again, because the player ticked "Don't show this
+    /// again". Kept per client, not per world: a tip is about the game, not about a save. Unknown ids are kept so a
+    /// newer build's choices survive an older one; "Reset tips" empties the list.
+    /// </summary>
+    public List<string> HiddenTips { get; set; } = [];
+
+    /// <summary>The most tip ids kept, and the longest one: a hand-edited file cannot grow the list without limit.</summary>
+    public const int MaxHiddenTips = 256;
+    public const int MaxTipIdLength = 64;
+
     private static string FilePath => AppPaths.UserConfig("settings.json");
 
     /// <summary>Loads the settings file. A missing or unreadable file yields defaults; it is never fatal.</summary>
-    public static ClientSettings Load()
+    public static ClientSettings Load() => Load(FilePath);
+
+    /// <summary>Loads the settings from <paramref name="path"/>, with the same fallbacks as <see cref="Load()"/>.</summary>
+    public static ClientSettings Load(string path)
     {
         try
         {
-            if (File.Exists(FilePath))
+            if (File.Exists(path))
             {
-                var loaded = JsonSerializer.Deserialize(File.ReadAllBytes(FilePath), SettingsJson.Default.ClientSettings);
+                var loaded = JsonSerializer.Deserialize(File.ReadAllBytes(path), SettingsJson.Default.ClientSettings);
                 if (loaded is not null)
                 {
                     loaded.Sanitize();
@@ -47,23 +61,26 @@ internal sealed class ClientSettings
         }
         catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
         {
-            Logs.App.Warning($"Could not read {FilePath} ({e.Message}); using default settings");
+            Logs.App.Warning($"Could not read {path} ({e.Message}); using default settings");
         }
 
         return new ClientSettings();
     }
 
     /// <summary>Writes the settings file atomically, so an interrupted save never corrupts it.</summary>
-    public void Save()
+    public void Save() => Save(FilePath);
+
+    /// <summary>Writes the settings to <paramref name="path"/>, atomically.</summary>
+    public void Save(string path)
     {
         try
         {
             Sanitize();
-            AtomicFile.Write(FilePath, JsonSerializer.SerializeToUtf8Bytes(this, SettingsJson.Default.ClientSettings));
+            AtomicFile.Write(path, JsonSerializer.SerializeToUtf8Bytes(this, SettingsJson.Default.ClientSettings));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            Logs.App.Warning($"Could not save {FilePath}: {e.Message}");
+            Logs.App.Warning($"Could not save {path}: {e.Message}");
         }
     }
 
@@ -78,6 +95,19 @@ internal sealed class ClientSettings
         LastHost = string.IsNullOrWhiteSpace(LastHost) ? "127.0.0.1" : LastHost.Trim();
         LastPort = LastPort is > 0 and <= ushort.MaxValue ? LastPort : ProtocolInfo.DefaultPort;
         AutosaveSeconds = Math.Clamp(AutosaveSeconds, 10, 600);
+
+        // A file can say anything: keep sane, distinct ids, in the order they were hidden.
+        HiddenTips ??= [];
+        var kept = new List<string>(Math.Min(HiddenTips.Count, MaxHiddenTips));
+        foreach (var id in HiddenTips)
+        {
+            if (string.IsNullOrWhiteSpace(id) || id.Length > MaxTipIdLength || kept.Contains(id))
+                continue;
+            if (kept.Count < MaxHiddenTips)
+                kept.Add(id);
+        }
+
+        HiddenTips = kept;
     }
 }
 
