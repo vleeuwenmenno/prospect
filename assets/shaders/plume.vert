@@ -4,7 +4,8 @@
 // Per plume (PlumeInstance): the nozzle's exit, camera-relative, and its radius; the axis the plume runs along and
 // its length; core colour and brightness; edge colour and kind (0 flame, 1 puff); spark colour and seconds since
 // ignition; spread, shock diamonds, their spacing in metres and a seed; time, flicker, spark seconds and spark speed;
-// how far back into the nozzle it starts, turbulence, spark count and the half width of the box it is drawn in.
+// how far back into the nozzle it starts, turbulence, spark count and the half width of the box it is drawn in;
+// seconds since the part stopped (negative while it fires), how fast the gas streams, the core's reach and the opening.
 layout(location = 0) in vec4 exitRadius;
 layout(location = 1) in vec4 axisLength;
 layout(location = 2) in vec4 coreBright;
@@ -13,6 +14,7 @@ layout(location = 4) in vec4 sparkAge;
 layout(location = 5) in vec4 shape;
 layout(location = 6) in vec4 motion;
 layout(location = 7) in vec4 extent;
+layout(location = 8) in vec4 flow;
 
 layout(location = 0) out vec3 worldPosition;
 layout(location = 1) flat out vec3 faceNormal;
@@ -25,6 +27,7 @@ layout(location = 7) flat out vec4 plumeShape;
 layout(location = 8) flat out vec4 plumeMotion;
 layout(location = 9) flat out vec4 plumeExtent;
 layout(location = 10) flat out vec2 box;
+layout(location = 11) flat out vec4 plumeFlow;
 
 // The box's six faces, two triangles each, as corners of the unit cube (bit 0: x, bit 1: y, bit 2: z).
 const int corners[36] = int[](
@@ -66,6 +69,7 @@ void main()
     plumeShape = shape;
     plumeMotion = motion;
     plumeExtent = extent;
+    plumeFlow = flow;
     box = vec2(front, inside);
     gl_Position = frame.viewProjection * vec4(worldPosition, 1.0);
 }

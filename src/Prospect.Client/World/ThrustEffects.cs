@@ -9,8 +9,9 @@ namespace Prospect.Client.World;
 /// <summary>
 /// Turns what each hull's thrust parts fire (<see cref="HullView.Thrust"/>) into this frame's plumes, and remembers
 /// when each group of parts ignited, so an engine that starts throws its sparks and grows its plume once. A group is
-/// the parts of one fuel and one facing: they fire together (<see cref="ThrustState.Firing"/>). Fixed tables, no
-/// memory taken in a frame; past the plume budget the largest on screen are kept.
+/// the parts of one fuel and one facing: they fire together (<see cref="ThrustState.Firing"/>). It also remembers when
+/// a group stopped and how hard it fired, so its last gas can fly off and clear (<see cref="PlumeLook.FadeSeconds"/>).
+/// Fixed tables, no memory taken in a frame; past the plume budget the largest on screen are kept.
 /// </summary>
 internal sealed class ThrustEffects
 {
@@ -22,6 +23,8 @@ internal sealed class ThrustEffects
     private readonly bool[] _seen = new bool[Slots];
     private readonly double[] _ignited = new double[Slots * Groups];
     private readonly bool[] _firing = new bool[Slots * Groups];
+    private readonly double[] _stopped = new double[Slots * Groups];
+    private readonly float[] _throttle = new float[Slots * Groups];
     private readonly float[] _scores = new float[PropulsionLook.PlumeCapacity];
     private readonly PropulsionLook _look;
     private int _count;
@@ -34,6 +37,7 @@ internal sealed class ThrustEffects
     {
         _look = look;
         Array.Fill(_ignited, double.NegativeInfinity);
+        Array.Fill(_stopped, double.NegativeInfinity);
     }
 
     /// <summary>Plumes written this frame.</summary>
@@ -45,7 +49,9 @@ internal sealed class ThrustEffects
         Array.Clear(_ids);
         Array.Clear(_seen);
         Array.Clear(_firing);
+        Array.Clear(_throttle);
         Array.Fill(_ignited, double.NegativeInfinity);
+        Array.Fill(_stopped, double.NegativeInfinity);
         _count = 0;
     }
 
@@ -99,11 +105,20 @@ internal sealed class ThrustEffects
         var thrust = hull.Thrust;
         for (var g = 0; g < Groups; g++)
         {
-            var on = thrust.Firing((FuelKind)(g / Facings.Count + 1), (BlockFacing)(g % Facings.Count)) > 0f;
+            var throttle = thrust.Firing((FuelKind)(g / Facings.Count + 1), (BlockFacing)(g % Facings.Count));
+            var on = throttle > 0f;
             ref var was = ref _firing[slot * Groups + g];
             // A hull first seen while it fires is not shown igniting: it lit before it came into view.
             if (on && !was)
                 _ignited[slot * Groups + g] = fresh ? double.NegativeInfinity : _seconds;
+            // A group that stops keeps how hard it fired, for the gas that clears after it.
+            if (!on && was)
+                _stopped[slot * Groups + g] = _seconds;
+            if (on)
+            {
+                _throttle[slot * Groups + g] = throttle;
+                _stopped[slot * Groups + g] = double.NegativeInfinity;
+            }
             was = on;
         }
         return slot;
@@ -120,7 +135,9 @@ internal sealed class ThrustEffects
                 for (var g = 0; g < Groups; g++)
                 {
                     _firing[i * Groups + g] = false;
+                    _throttle[i * Groups + g] = 0f;
                     _ignited[i * Groups + g] = double.NegativeInfinity;
+                    _stopped[i * Groups + g] = double.NegativeInfinity;
                 }
             }
         }
@@ -140,13 +157,25 @@ internal sealed class ThrustEffects
         var time = (float)(_seconds % 1000.0);
         foreach (ref readonly var nozzle in nozzles)
         {
-            var throttle = thrust.Firing(nozzle.Fuel, nozzle.Facing);
-            if (throttle <= 0f || nozzle.Plume < 0 || !BlockSet.Has(alive, nozzle.Block))
+            if (nozzle.Plume < 0 || !BlockSet.Has(alive, nozzle.Block))
                 continue;
             var look = _look.PlumeOrder[nozzle.Plume];
             var group = (((int)nozzle.Fuel - 1) * Facings.Count) + (int)nozzle.Facing;
             if ((uint)group >= Groups)
                 continue;
+            var throttle = thrust.Firing(nozzle.Fuel, nozzle.Facing);
+            // A part that has just stopped still shows its last gas, flying off down the plume, for the fade seconds.
+            var released = -1f;
+            if (throttle <= 0f)
+            {
+                var since = (float)(_seconds - _stopped[slot * Groups + group]);
+                if (!(since >= 0f && since < look.FadeSeconds))
+                    continue;
+                throttle = _throttle[slot * Groups + group];
+                released = since;
+                if (throttle <= 0f)
+                    continue;
+            }
             var age = (float)Math.Min(_seconds - _ignited[slot * Groups + group], 1000.0);
 
             var radius = nozzle.ExitRadius;
@@ -160,11 +189,25 @@ internal sealed class ThrustEffects
             // A flame grows out of its sparks; a puff opens almost at once.
             var grow = puff ? Smooth(0f, look.GrowSeconds, age) : Smooth(look.SparkSeconds * 0.4f, look.SparkSeconds + look.GrowSeconds, age);
             var length = radius * look.Length * (look.MinLength + (1f - look.MinLength) * throttle) * MathF.Max(grow, 0.02f) * (boost ? _look.BoostLength : 1f);
-            var brightness = look.Brightness * (0.4f + 0.6f * throttle) * (boost ? _look.BoostBrightness : 1f);
-            brightness *= puff ? 1f + look.Burst * MathF.Exp(-age / look.BurstSeconds) : 0.3f + 0.7f * grow;
-            var sparking = look.Sparks > 0 && age < look.SparkSeconds;
+            // The cap on brightness: boost raises it a little, never past what the compression in the shader holds.
+            var brightness = look.Brightness * (0.55f + 0.45f * throttle) * (boost ? _look.BoostBrightness : 1f);
+            var spread = look.Spread;
+            if (puff)
+            {
+                // A valve opening throws a denser, wider burst that settles to a steady jet.
+                var burst = look.Burst * MathF.Exp(-age / look.BurstSeconds);
+                brightness *= 1f + burst;
+                spread *= 1f + 0.25f * burst;
+            }
+            else
+            {
+                brightness *= 0.3f + 0.7f * grow;
+            }
+            if (released >= 0f)
+                brightness *= 1f - released / MathF.Max(look.FadeSeconds, 1e-3f);
+            var sparking = look.Sparks > 0 && age < look.SparkSeconds && released < 0f;
             var sparkSpeed = look.SparkSpeed * radius;
-            var width = radius * (1f + look.Spread) * 1.2f;
+            var width = radius * (1f + spread) * 1.15f;
             if (sparking)
                 width = MathF.Max(width, sparkSpeed * look.SparkSeconds * 0.5f + radius);
             var reach = MathF.Max(length * 1.1f, sparking ? sparkSpeed * look.SparkSeconds : 0f) + width;
@@ -193,9 +236,10 @@ internal sealed class ThrustEffects
                 CoreBright = new float4(look.Core[0], look.Core[1], look.Core[2], brightness),
                 EdgeKind = new float4(look.Edge[0], look.Edge[1], look.Edge[2], puff ? 1f : 0f),
                 SparkAge = new float4(look.Spark[0], look.Spark[1], look.Spark[2], age),
-                Shape = new float4(look.Spread, boost ? look.Diamonds * 1.3f : look.Diamonds, look.DiamondSpacing * radius, seed),
+                Shape = new float4(spread, boost ? look.Diamonds * 1.2f : look.Diamonds, look.DiamondSpacing * radius, seed),
                 Motion = new float4(time, look.Flicker, look.SparkSeconds, sparkSpeed),
                 Extent = new float4(puff ? 0.02f * radius : nozzle.Depth * 0.6f, look.Turbulence, sparking ? look.Sparks : 0f, width),
+                Flow = new float4(released, look.FlowSpeed * radius, look.CoreLength * radius * (boost ? 1.3f : 1f), look.Opening * radius),
             };
         }
     }

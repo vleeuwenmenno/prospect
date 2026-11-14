@@ -290,9 +290,12 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `blocks.json` (`BoxDesign.MaxSide`). Figures and rules in `docs/roadmap/propulsion.md`; `PropulsionTests` holds
   them, and `PowerFlowTests` the electric side, so retuning a design or the content runs both.
 - **Thrust part models and plumes:** look and proportions are `content/visuals/propulsion.json` (`PropulsionLook`),
-  keyed by block type id. Models are built with the hull mesh (`MeshBuilder.Hull`, `DamageMesh.Build`, both on
-  workers) by `PropulsionModels`, which also lists each design's nozzles (`MeshData.Nozzles`); never build them in a
-  frame. Plumes read only `HullView.Thrust` and the hull's blocks (`ThrustEffects`, fixed tables, no memory in a
+  keyed by block type id. A model is a pure function of the part's box (`PartBox`: centre, half extents, facing,
+  cell size), so a cell part and a thin face-mounted one take the same code (`PropulsionModels.Build`). It is built
+  with the hull mesh (`MeshBuilder.Hull`, `DamageMesh.Build`, both on workers), which also lists each design's nozzles
+  (`MeshData.Nozzles`); the editor's draft and ghost and far hulls drawn block by block take single part models from
+  `PartModels` (worker-built, fixed table, drawn through `SceneRenderer.AddTriangles`). Never build one in a frame.
+  Plumes read only `HullView.Thrust` and the hull's blocks (`ThrustEffects`, fixed tables, no memory in a
   frame) and are drawn by `plume.vert`/`plume.frag` after the solid scene, nothing when nothing fires. Rules in
   `docs/roadmap/propulsion.md`; `PropulsionVisualTests` holds them. Check with `--thrust` captures (below).
 - **Interface mode and the windows:** `InterfaceMode` is the latch and its key; `ScreenHost` treats it as the old

@@ -5,7 +5,8 @@
 - **Built:** the simulation. Blocks face one of six ways, thrust is per direction, three fuels are burnt and saved.
 - **Built:** the editor turns a part's facing with `R` and warns about a missing direction or tank.
 - **Built:** the fuel readout in the pilot console (a fuel row under the two groups, a tooltip, low and empty notices).
-- **Built:** the models of engines and both thruster kinds, and their plumes and puffs (below).
+- **Built:** low-poly models of engines and both thruster kinds, in flight and in the editor, and their vacuum plumes
+  and cold gas puffs (below).
 - Protocol 50, save layout 6, design encoding 3, design file version 4, evaluator 11.
 
 ## Decided: parts
@@ -64,31 +65,41 @@
 
 - Engines and both thruster kinds have a model of our own design. It adapts to the block's size by itself; the player
   never edits it.
-- An idle engine is dark. When thrust starts it ignites with sparks, then shoots a plume, with shock diamonds if they
-  can be made to look right.
-- Cold gas thrusters vent a short, pale, cold puff.
-- Hot thrusters show a small hot plume, a miniature engine.
+- An idle engine is dark. When thrust starts it ignites with subtle sparks, then opens a vacuum plume: wide, soft,
+  faint, bell-shaped, hot only at the exit, at most one faint shock node. Bipropellant is pale blue-violet.
+- Cold gas thrusters vent a fast, short-lived jet of expanding vapour, lit by the star, never glowing.
+- Hot thrusters show a small version of the engine's plume with a faint orange core.
 
 ## Decided: how the models and plumes are made
 
 - Every figure is in `content/visuals/propulsion.json`, keyed by block type id. A part without an entry stays a plain
   block and shows no plume. A wedge-shaped part is always a plain block.
-- **Models** (`PropulsionModels`): built with the hull's mesh on a worker, never in a frame.
-  - A housing at the back, a collar, then the nozzles at the face the part faces.
+- **Models** (`PropulsionModels`): low poly, built on a worker, never in a frame.
+  - A pure function of the part's box (`PartBox`), its facing and the cell size. A thin face mount works the same way.
+  - A square mount block covers the whole mounting face and the box's sides: neighbours meet it flush.
+  - Engines and hot thrusters: an octagonal housing with panel seams, corner pipes and a bevelled front, then a collar
+    with four gusset brackets, a throat ring and a faceted bell (10 to 12 sides, 3 to 4 rings).
+  - Cold gas thrusters: a bevelled RCS block with small faceted nozzles, two per cell a side.
   - The face is split into nozzles: an engine or hot thruster into squares of its shorter side (a 2 by 1 face has two
-    bells), a cold gas thruster two per cell a side (a quad on a plate).
-  - A nozzle's exit follows its share of the face; its length follows its exit, capped by a share of the depth. A
-    deeper block grows its housing, never its bell.
-  - Nozzles are bare metal: the shade rides in the length of the mesh normal, which `mesh.vert` reads.
-  - A hull drawn block by block (far and damaged) still shows plain blocks; near damaged hulls show the models.
+    bells). A nozzle's exit follows its share of the face; its length follows its exit, capped by a share of the
+    depth. A deeper box grows its body, never its bell.
+  - Every facet has vertices of its own: flat shading. Bare metal rides in the length of the normal (`mesh.vert`).
+- **Where models show:** a design's mesh; a near damaged hull's mesh; and from `PartModels` (single part models,
+  worker-built, a fixed table) the editor's placed parts, its placement ghost and far hulls drawn block by block. A
+  part model not built yet shows its plain block for a frame or two.
 - **Plumes** (`ThrustEffects`, `plume.vert`, `plume.frag`): one instance per firing nozzle, at most `maxPlumes` (256 in
   the buffer); past it the largest on screen stay. Drawn after hulls and rocks, tested against their depth.
   - Each plume marches 16 steps through a box around it. Nothing fires, nothing is drawn.
   - Flicker and the gas's flow come from the snapshot clock and a per-nozzle seed: smooth, no shimmer.
-  - Ignition is when a part group (fuel and facing) goes from idle to firing: sparks for `sparkSeconds`, then the
-    plume grows over `growSeconds`. A hull first seen while it fires shows no ignition.
-  - Shock diamonds: bright nodes in the core over the first half of the plume. Kept; `diamonds` 0 turns them off.
-  - A cold gas puff starts with a burst that settles to a faint steady jet.
+  - Ignition is when a part group (fuel and facing) goes from idle to firing: a few faint sparks for `sparkSeconds`,
+    then the plume grows over `growSeconds`. A hull first seen while it fires shows no ignition.
+  - A flame is a vacuum plume: it opens within `opening` exit radii into a wide bell, its gas thinning as the square
+    of its width. The bright core reaches `coreLength` exit radii. At most one faint shock node (`diamonds`).
+  - A flame's colour is a density-weighted mix of core and edge; its density is compressed against `brightness`, so
+    a view straight into it (boost included) stays tinted and graded, never flat white.
+  - A cold gas puff has no light of its own: lit by the star. A tight jet opens into a cone of turbulent vapour that
+    streams out at `flowSpeed`. A valve opening bursts denser and wider (`burst`, `burstSeconds`).
+  - When a group stops, its last gas flies off down the plume and clears over `fadeSeconds`.
 - Check with `--thrust` and `--zoom` captures (`AGENTS.md`); `PropulsionVisualTests` holds the rules.
 
 ## Decided: second pass (look and mounting)
@@ -97,10 +108,11 @@
   - They stick out about 0.2 block. A hot thruster is a bit bigger than a cold gas one.
   - Several can share one face. The ghost shows only the thruster, on the face under the pointer.
   - Engines stay sized blocks that scale with their size.
-- **Models are low poly.** Faceted, chunky panels, flat shading. Our own shapes, no other game's art.
-- **No gaps.** A model fills the cells it sits in and meets its neighbours flush.
-- **The editor shows the models.** The ghost and every placed part show the real model at once.
-- **Plumes are vacuum-realistic.** Wide, soft, faint and bell-shaped; few or no shock diamonds.
+- **Models are low poly.** Faceted, chunky panels, flat shading. Our own shapes, no other game's art. Built.
+- **No gaps.** A model fills the cells it sits in and meets its neighbours flush. Built.
+- **The editor shows the models.** The ghost and every placed part show the real model at once. Built.
+- **Plumes are vacuum-realistic.** Wide, soft, faint and bell-shaped; few or no shock diamonds. Built.
+- Still to do here: face-mounted thrusters (another change).
 
 ## Decided: provisional figures
 
