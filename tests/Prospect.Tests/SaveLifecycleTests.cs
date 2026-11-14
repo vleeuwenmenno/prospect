@@ -38,6 +38,23 @@ public sealed class SaveLifecycleTests
     private static MemoryWorld PopulatedWorld() => new() { Bytes = Populated.Value, Generation = 7 };
 
     [Fact]
+    public void ChartsKeepTheirOwnerSectorAndSurveyTickAcrossSaveLoad()
+    {
+        var folder = SaveRig.NewWorld(Shipped);
+        SectorChart expected;
+        using (var rig = new SaveRig(folder, Shipped))
+        {
+            rig.Join();
+            expected = new SectorChart(rig.Hulls.Info(0).Owner, new SectorCoord(4, -2, 7), rig.WorldTick);
+            Assert.True(rig.Server.RecordChart(expected.Owner, expected.Sector, expected.RecordedTick));
+            rig.Tick();
+            Assert.True(rig.Close().Clean);
+        }
+        using var loaded = new SaveRig(folder, Shipped);
+        Assert.Equal(expected, Assert.Single(loaded.Server.Charts.ToArray()));
+    }
+
+    [Fact]
     public void ReorderedSettingsKeepTheirValuesAcrossLoadCloseAndReload()
     {
         var folder = SaveRig.NewWorld(Shipped);
@@ -114,6 +131,7 @@ public sealed class SaveLifecycleTests
         var hulls = rig.Hulls;
         var states = hulls.BlockStates;
         var tick = rig.WorldTick;
+        Assert.True(rig.Server.RecordChart(hulls.Info(0).Owner, new SectorCoord(3, -2, 1), tick - 1));
         Assert.Equal(6, hulls.Count);
 
         var custom = rig.Server.Content.Designs[hulls.Info(3).Design];

@@ -33,6 +33,8 @@
     "ftlArrivalPulseMass": 100.0
   },
   "blocks": {
+    "sensor": { "name": "Passive sensor", "mass": 1, "hull": 150, "sensor": true },
+    "charting": { "name": "Sector scanner", "mass": 1, "hull": 150, "charting": true },
     "hull": { "name": "Hull plating", "mass": 2.0, "hull": 400 },
     "core": { "name": "Computer core", "mass": 3.0, "hull": 300, "powerDraw": 0.2, "core": true, "sizeRules": { "powerDraw": { "volumeExponent": 0 } } },
     "generator": { "name": "Generator", "mass": 4.0, "hull": 200, "powerOutput": 6.0, "sizeRules": { "powerOutput": { "volumeExponent": 1.25 } } },

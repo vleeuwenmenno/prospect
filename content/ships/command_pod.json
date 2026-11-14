@@ -5,8 +5,8 @@
   "color": [0.34, 0.37, 0.42],
   "blocks": [
     { "at": [0, 0, 0], "type": "core" },
-    { "at": [0, 0, -1], "type": "hull" },
-    { "at": [0, 0, -2], "type": "hull" },
+    { "at": [0, 0, -1], "type": "sensor" },
+    { "at": [0, 0, -2], "type": "charting" },
     { "at": [0, 0, 1], "type": "engine" },
     { "at": [1, 0, 0], "type": "thruster" },
     { "at": [-1, 0, 0], "type": "thruster" },

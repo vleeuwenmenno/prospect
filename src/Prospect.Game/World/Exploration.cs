@@ -10,10 +10,10 @@ public sealed record ExplorationRules(double SensorRadius, int ScanTicks, int Co
     {
         using var document = JsonDocument.Parse(bytes);
         var root = document.RootElement;
-        var radius = root.GetProperty("sensorRadius").GetDouble();
-        var scan = root.GetProperty("scanSeconds").GetDouble();
-        var contact = root.GetProperty("contactSeconds").GetDouble();
-        var charts = root.GetProperty("chartsPerOwner").GetInt32();
+        var radius = root.GetProperty("sensorRadius"u8).GetDouble();
+        var scan = root.GetProperty("scanSeconds"u8).GetDouble();
+        var contact = root.GetProperty("contactSeconds"u8).GetDouble();
+        var charts = root.GetProperty("chartsPerOwner"u8).GetInt32();
         if (!double.IsFinite(radius) || radius <= 0 || !double.IsFinite(scan) || scan <= 0
             || !double.IsFinite(contact) || contact <= 0 || scan * TickLoop.SimulationHz > int.MaxValue
             || contact * TickLoop.SimulationHz > int.MaxValue || charts <= 0 || charts > ushort.MaxValue)

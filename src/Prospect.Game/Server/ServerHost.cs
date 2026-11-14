@@ -219,6 +219,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public bool Pending => State is ConnectionState.AwaitingHello or ConnectionState.AwaitingProof;
 
         public HullHandle Hull;
+        public ScanView Scan;
+        public uint ScanHull;
+        public int ChartCursor;
 
         /// <summary>The slot of the durable owner this connection was let in as; -1 in a world that is not saved.</summary>
         public int OwnerSlot = -1;
@@ -232,6 +235,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
         public void Reset()
         {
+            Scan = default;
+            ScanHull = 0;
+            ChartCursor = 0;
             Generation++;
             Party = Inviter = 0;
             InvitationId = 0;
@@ -431,6 +437,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 _lastCapture = _clock.GetTimestamp();
             }
 
+            _charts = new SectorChart[checked((world is null ? _maxPlayers : _saveLimits.MaxOwners) * _content.Exploration.ChartsPerOwner)];
             _catalogue = new DesignCatalogue(_content);
             _startupDesigns = _catalogue.Count;
             _uploads = new EditUpload[_content.Editor.Uploads];
@@ -465,7 +472,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 if ((long)_saveLimits.MaxOwners * _content.Designs[_content.DroneDesign].BlockCount >= _saveLimits.MaxBlocks)
                     throw new InvalidDataException("A saved world's limits leave it no room.");
                 RestoreWorld(world.World);
-                _save = new SaveWorker(world, _clock);
+                _save = new SaveWorker(world, _clock, _charts.Length);
             }
         }
         catch
@@ -750,6 +757,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 SendSnapshot(connection, tick);
         }
 
+        TickExploration(tick);
         TickSocial(tick);
         Volatile.Write(ref _tick, tick + 1);
 
@@ -1136,6 +1144,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
     private void ResetControl(Connection connection)
     {
+        if (connection.Scan.State == ScanState.Scanning) connection.Scan.State = ScanState.Cancelled;
         connection.ControlEpoch++;
         connection.Inputs.Clear();
         connection.PreparedInput = InputTimeline.Fallback;
@@ -1610,6 +1619,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     {
         CloseEdit(connection);
         LeaveSocial(connection);
+        if (_save is null)
+            for (var i = _chartCount - 1; i >= 0; i--)
+                if (_charts[i].Owner == connection.PlayerId) _charts[i] = _charts[--_chartCount];
         for (var i = 0; _save is null && i < _hulls.Slots; i++)
         {
             if (_hulls.IsAliveAt(i) && _hulls.Info(i).Owner == connection.PlayerId)

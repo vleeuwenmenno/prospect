@@ -43,8 +43,11 @@ public sealed record SaveLimits
     public const int MaxNameBytes = 255;
 
     /// <summary>The most bytes an encoded save can be: every count at its limit, every hull with every dent.</summary>
+    public long MaxCharts => (long)MaxOwners * ushort.MaxValue;
+
     public long MaxEncodedBytes =>
         WorldSnapshotCodec.HeaderBound
+        + MaxCharts * WorldSnapshotCodec.ChartBytes
         + MaxCatalogueBytes
         + (long)MaxDesigns * (4 + SHA256.HashSizeInBytes)
         + (long)MaxOwners * WorldSnapshotCodec.OwnerBytes
@@ -58,7 +61,8 @@ public sealed record SaveLimits
     /// the hull and block stores, and <see cref="MaxMovedSectors"/> tables of a sector's asteroid limit.
     /// </summary>
     public long MaxDecodedBytes =>
-        MaxCatalogueBytes
+        MaxCharts * System.Runtime.CompilerServices.Unsafe.SizeOf<SectorChart>()
+        + MaxCatalogueBytes
         + (long)MaxDesigns * (SHA256.HashSizeInBytes + 64)
         + (long)MaxOwners * System.Runtime.CompilerServices.Unsafe.SizeOf<SavedOwner>()
         + (long)MaxHulls * System.Runtime.CompilerServices.Unsafe.SizeOf<SavedHull>()

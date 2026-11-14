@@ -340,3 +340,13 @@ Protection assumes the same user and root are trusted and permissions remain sta
 Private fallback preserves gameplay, not a recoverable signing identity. Database and lease protection are unchanged.
 Real Windows/macOS storage and power-loss behavior remain unverified.
 Independent Claude security review is pending; saved multiplayer is not unlocked.
+
+## Exploration charts (snapshot codec 3)
+
+Owner, sector and survey world tick are retained for every chart. Natural geography is reconstructed
+from the save's immutable seed, generation version and content; charts grant no live activity or mineral survey.
+Loading rejects duplicate owner/sector pairs, unknown owners, future survey ticks and content-limit violations.
+The tick checks chart room before insertion; no chart is evicted. Scans and temporary ship markers start empty.
+The capture reserves content's charts-per-owner times the owner budget; charts use 24 encoded bytes each.
+The format ceiling is ushort.MaxValue charts per owner, distinct from the content's gameplay limit.
+Codec 2 saves are refused untouched; no migration is included.

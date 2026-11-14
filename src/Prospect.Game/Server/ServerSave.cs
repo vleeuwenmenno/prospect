@@ -317,6 +317,7 @@ public sealed partial class ServerHost
         world.Owners.AsSpan(0, world.OwnerCount).CopyTo(_owners);
 
         _ownerCount = world.OwnerCount;
+        RestoreCharts(world);
 
         var entities = new HashSet<ulong>(world.HullCount);
         var blocks = 0;
@@ -455,9 +456,11 @@ public sealed partial class ServerHost
     private bool Capture(WorldSnapshot buffer)
     {
         if (_ownerCount > buffer.Owners.Length || _hulls.Count > buffer.Hulls.Length || _hulls.BlockTotal > buffer.HitPoints.Length
-            || _rocks.Deltas.Length > buffer.Rocks.Length)
+            || _rocks.Deltas.Length > buffer.Rocks.Length || _chartCount > buffer.Charts.Length)
             return false;
 
+        _charts.AsSpan(0, _chartCount).CopyTo(buffer.Charts);
+        buffer.ChartCount = _chartCount;
         buffer.Compatibility = _compatibility;
         buffer.WorldId = _worldId;
         buffer.Name = _worldName;

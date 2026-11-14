@@ -39,6 +39,8 @@ public sealed class BlockType
 
     /// <summary>True for the block a hull cannot exist without; losing it destroys the hull.</summary>
     public bool Core { get; init; }
+    public bool Sensor { get; init; }
+    public bool Charting { get; init; }
 
     /// <summary>The faster-than-light drive this block provides, if any.</summary>
     public FtlKind Ftl { get; init; }
@@ -267,6 +269,8 @@ public sealed class BlockCatalog
                 Hull = block.GetProperty("hull"u8).GetSingle(),
                 Thrust = Number(block, "thrust"u8),
                 ForwardOnly = block.TryGetProperty("forwardOnly"u8, out var forwardOnly) && forwardOnly.GetBoolean(),
+                Sensor = block.TryGetProperty("sensor"u8, out var sensor) && sensor.GetBoolean(),
+                Charting = block.TryGetProperty("charting"u8, out var charting) && charting.GetBoolean(),
                 Core = block.TryGetProperty("core"u8, out var core) && core.GetBoolean(),
                 Ftl = block.TryGetProperty("ftl"u8, out var ftl)
                     ? ftl.GetString() switch

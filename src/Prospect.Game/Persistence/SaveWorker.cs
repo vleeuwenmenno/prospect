@@ -94,10 +94,10 @@ internal sealed class SaveWorker
     /// A worker over a store and a capture buffer of the world's limits, taken here, once. Its thread starts at
     /// once and waits; it costs nothing until a capture is handed to it.
     /// </summary>
-    public SaveWorker(WorldPersistence world, TimeProvider clock)
+    public SaveWorker(WorldPersistence world, TimeProvider clock, int charts = 0)
     {
         _store = world.Store;
-        _buffer = new WorldSnapshot(world.Limits);
+        _buffer = new WorldSnapshot(world.Limits, charts);
         _clock = clock;
         _generation = world.Generation;
         _finalAttempts = Math.Max(1, world.FinalAttempts);

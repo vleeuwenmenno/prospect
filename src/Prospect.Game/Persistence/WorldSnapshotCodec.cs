@@ -26,7 +26,8 @@ namespace Prospect.Game.Persistence;
 public static class WorldSnapshotCodec
 {
     /// <summary>The layout's version. A save with any other is refused; there are no migrations yet.</summary>
-    public const int Version = 2;
+    public const int Version = 3;
+    internal const int ChartBytes = 4 + 12 + 8;
 
     /// <summary>"PWS1": tells a save from any other bytes before its version is believed.</summary>
     private const uint Magic = 0x31535750;
@@ -50,7 +51,7 @@ public static class WorldSnapshotCodec
         + 1 + WorldSettings.Capacity * (1 + WorldSettingCatalog.MaxIdLength + 4)
         + 8 + 8 + 4 + 8
         + 4 + byte.MaxValue
-        + 5 * 4;
+        + 6 * 4;
 
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
@@ -60,14 +61,14 @@ public static class WorldSnapshotCodec
         long size = 4 + 4 + 4 + 4 + ContentIdentity.WireSize + 16 + 1 + Utf8.GetByteCount(snapshot.Name) + 8 + 8 + 12 + 1;
         for (var i = 0; i < snapshot.SettingCount; i++)
             size += 1 + snapshot.SettingIds[i].Length + 4;
-        size += 8 + 8 + 4 + 8 + 4 + snapshot.StartingFleet.Length + 5 * 4;
+        size += 8 + 8 + 4 + 8 + 4 + snapshot.StartingFleet.Length + 6 * 4;
         for (var i = 0; i < snapshot.DesignCount; i++)
             size += 4 + SHA256.HashSizeInBytes + snapshot.Designs[i].Length;
         size += (long)snapshot.OwnerCount * OwnerBytes;
         for (var i = 0; i < snapshot.HullCount; i++)
             size += HullFixedBytes + snapshot.Hulls[i].Visual.Count * DentBytes;
         size += (long)snapshot.LossCount * sizeof(int) + (long)snapshot.BlockCount * sizeof(float);
-        return size + (long)snapshot.RockCount * RockBytes;
+        return size + (long)snapshot.RockCount * RockBytes + (long)snapshot.ChartCount * ChartBytes;
     }
 
     /// <summary>Encodes a snapshot into an array of exactly its size.</summary>
@@ -138,6 +139,7 @@ public static class WorldSnapshotCodec
         writer.WriteInt32(snapshot.BlockCount);
         writer.WriteInt32(snapshot.LossCount);
         writer.WriteInt32(snapshot.RockCount);
+        writer.WriteInt32(snapshot.ChartCount);
 
         for (var i = 0; i < snapshot.DesignCount; i++)
         {
@@ -197,6 +199,13 @@ public static class WorldSnapshotCodec
             Write(ref writer, rock.Offset);
             Write(ref writer, rock.Velocity);
             writer.WriteInt64(rock.StartTick);
+        }
+
+        foreach (var chart in snapshot.Charts.AsSpan(0, snapshot.ChartCount))
+        {
+            writer.WriteUInt32(chart.Owner);
+            Write(ref writer, chart.Sector);
+            writer.WriteInt64(chart.RecordedTick);
         }
 
         if (writer.Length != size)
@@ -315,6 +324,7 @@ public static class WorldSnapshotCodec
         var blocks = reader.ReadInt32();
         var losses = reader.ReadInt32();
         var rocks = reader.ReadInt32();
+        var charts = reader.ReadInt32();
         if (!reader.IsValid)
         {
             error = "the save ends inside its header";
@@ -330,14 +340,14 @@ public static class WorldSnapshotCodec
         // Every count against its limit and against the bytes left, before a single array is taken for it.
         if (designCount < 1 || pod >= designCount || drone >= designCount
             || (uint)owners > (uint)limits.MaxOwners || (uint)hulls > (uint)limits.MaxHulls || (uint)blocks > (uint)limits.MaxBlocks
-            || (uint)losses > (uint)blocks || (uint)rocks > (uint)limits.MaxRocks)
+            || (uint)losses > (uint)blocks || (uint)rocks > (uint)limits.MaxRocks || charts < 0 || charts > limits.MaxCharts)
         {
             error = "the save names more than a world may hold";
             return false;
         }
 
         var promised = (long)designCount * (4 + SHA256.HashSizeInBytes) + (long)owners * OwnerBytes + (long)hulls * HullFixedBytes
-            + (long)losses * sizeof(int) + (long)blocks * sizeof(float) + (long)rocks * RockBytes;
+            + (long)losses * sizeof(int) + (long)blocks * sizeof(float) + (long)rocks * RockBytes + (long)charts * ChartBytes;
         if (promised > reader.Remaining)
         {
             error = "the save names more than it holds";
@@ -373,7 +383,7 @@ public static class WorldSnapshotCodec
             designs[i] = reader.ReadBytes(length).ToArray();
         }
 
-        var result = new WorldSnapshot(owners, hulls, blocks, rocks)
+        var result = new WorldSnapshot(owners, hulls, blocks, rocks, charts)
         {
             Compatibility = compatibility,
             WorldId = worldId,
@@ -396,6 +406,7 @@ public static class WorldSnapshotCodec
             OwnerCount = owners,
             HullCount = hulls,
             RockCount = rocks,
+            ChartCount = charts,
         };
         settingValues[..settingCount].CopyTo(result.SettingValues);
 
@@ -484,6 +495,9 @@ public static class WorldSnapshotCodec
             rock.Velocity = ReadVector3(ref reader);
             rock.StartTick = reader.ReadInt64();
         }
+
+        for (var i = 0; i < charts; i++)
+            result.Charts[i] = new SectorChart(reader.ReadUInt32(), ReadSector(ref reader), reader.ReadInt64());
 
         if (!reader.IsValid || reader.Remaining != 0 || result.BlockCount != blocks || result.LossCount != losses)
         {
