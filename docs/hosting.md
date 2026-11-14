@@ -864,6 +864,7 @@ Created gives the new hull id and an ordinary Open grant in `SessionSnapshot.Edi
 The hull snapshot may follow the reliable grant: the UI must wait until that hull is present before opening its draft.
 The UI must track the granted hull, not OwnHull; Apply replaces the edited ship while leaving drone control unchanged.
 Cancellation closes the edit but does not remove the created ship. Editing never protects it from damage.
+The server has no special case: the client follows the closed edit with an ordinary control request (see Interface).
 Switching control, losing the drone or ship, damage to the edited ship, or a jump ends the grant.
 
 The request shares the editor envelope and receive/rate budgets; it is admitted only after the normal handshake.
@@ -889,7 +890,14 @@ the client offers the New ship dialog only then (`SessionSnapshot.OwnIsDrone`). 
 - Each press of the key in the drone brings up the `drone-edit` tip beside the dialog (hidden for good only if the
   player ticked "Don't show this again").
 - Once created, the editor opens on the new hull (one root block) when that hull is in the snapshot. Apply rebuilds
-  it; the player stays in the drone.
+  it.
+- **Control after closing (decided).** When the player closes the edit of a ship just built, by Apply or by Cancel
+  (editor key, Esc or the Cancel button), the client asks for control of that ship with the usual `Control` message:
+  after Apply the replacement hull, after Cancel the ship as it was made. The same rules apply as to any switch: the
+  hull is the player's and in the drone's sector, and the drone is removed. The request waits up to 3 s for the hull
+  to appear in the snapshot. If it cannot be made the editor shows why (gone, or outside the sector) and the player
+  stays in the drone. Only the New ship flow does this: an ordinary edit or a `Ctrl`+`B` drone edit never moves the
+  player, and an edit the server ended (damage, jump, timeout) or that a change of ship ended does not either.
 EditorState adds a creation status byte; other editor and design transfer sizes are unchanged.
 Refusals include NotPiloting, BadName, DuplicateName, ShipLimit, NoClearSpot, CatalogueFull,
 HullLimit, Busy, TooSoon, Jumping and the existing client-readiness/check failure reasons.

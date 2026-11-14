@@ -64,7 +64,8 @@ internal sealed partial class ScreenHost
     {
         var requesting = editor.Stage == EditorStage.Requesting;
         var recent = editor.Time - editor.NoticeAt < ShipEditor.NoticeSeconds && (editor.NoticeApplied || editor.Notice is not (EditorReason.None or EditorReason.Cancelled));
-        if (!requesting && !recent)
+        var followRefused = editor.FollowNotice != FollowRefusal.None && editor.Time - editor.FollowNoticeAt < ShipEditor.NoticeSeconds;
+        if (!requesting && !recent && !followRefused)
             return;
 
         ReadOnlySpan<byte> text;
@@ -74,10 +75,18 @@ internal sealed partial class ScreenHost
             text = Kit.F($"Asking the server to edit this ship...");
             tone = Theme.Info;
         }
+        else if (followRefused)
+        {
+            // The ship was built or left as made, but the switch into it was not possible: say why, and how to do it by hand.
+            text = editor.FollowNotice == FollowRefusal.OutOfSector
+                ? Kit.F($"The new ship is outside your sector. Travel there and press {switchKey} to take control.")
+                : Kit.F($"The new ship is no longer there. You are still in the drone.");
+            tone = Theme.Bad;
+        }
         else if (editor.NoticeApplied)
         {
             text = editor.NoticeBuilt
-                ? Kit.F($"Ship built. Target it and press {switchKey} to take control; you are still in the drone.")
+                ? Kit.F($"Ship built. You are flying it now.")
                 : Kit.F($"Ship rebuilt. You are flying the new design.");
             tone = Theme.Good;
         }

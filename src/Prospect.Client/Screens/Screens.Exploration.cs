@@ -90,8 +90,8 @@ internal sealed partial class ScreenHost
     /// nothing is selected). Ships within the content's radar link distance of each other, directly or through a
     /// chain, share a picture: their gas-shaped reach is drawn as one merged outline with no line inside it, and
     /// ships farther apart each get their own. A thin line is the boundary and a few faint strokes follow it
-    /// outward, darkening gently, so unseen space reads as unseen without hiding what lies behind. A very faint tint
-    /// shows where gas cut the range. Lost contacts show at their last position, hollow and fading. The sector's
+    /// outward, darkening gently, so unseen space reads as unseen without hiding what lies behind. A faint amber
+    /// line marks the plain range where gas cut it short. Lost contacts show at their last position, hollow and fading. The sector's
     /// knowledge state sits under the view's title.
     /// </summary>
     private void DrawCommandFog(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, float alpha)
@@ -112,13 +112,17 @@ internal sealed partial class ScreenHost
             for (var other = 0; other < _coverage.ActiveCount && alone; other++)
                 alone = other == s || _coverage.GroupOf(other) != _coverage.GroupOf(s);
 
-            // A ship on its own keeps the sphere's silhouette as its volume; linked ships show the outline only.
-            if (alone && world.ProjectDisc(_coverage.Positions[i], (float)radius, out var sphere, out var pixels, out _))
-                draw.AddCircle(sphere, pixels, Kit.Color(Theme.Good, look.CommandRingAlpha * 0.5f * alpha), 64, Kit.Px(1f));
             if (!_coverage.Ring(i, out var x, out var z, out var nominal, out var samples))
                 continue;
-            if (look.GasTintAlpha > 0)
-                DrawGasTint(draw, world, i, x, z, nominal, samples, plane, Kit.Color(Theme.Accent, look.GasTintAlpha * alpha));
+
+            // A ship on its own keeps the sphere's silhouette as its volume; linked ships show the outline only. Where
+            // gas cut the reach the amber plain-range line already shows how far it would reach, so a second, differently
+            // projected circle for the same range is left out.
+            var cut = false;
+            for (var k = 0; k < samples.Length && !cut; k++)
+                cut = samples[k] < nominal * 0.995;
+            if (alone && !(cut && look.GasRangeAlpha > 0) && world.ProjectDisc(_coverage.Positions[i], (float)radius, out var sphere, out var pixels, out _))
+                draw.AddCircle(sphere, pixels, Kit.Color(Theme.Good, look.CommandRingAlpha * 0.5f * alpha), 64, Kit.Px(1f));
             if (!labelled && world.Project(new Double3(x, plane, z - samples[samples.Length * 3 / 4]), out var labelAt))
             {
                 labelled = true;
@@ -143,6 +147,21 @@ internal sealed partial class ScreenHost
                     continue;
                 if (world.ProjectSegment(new Double3(piece.AX + ox, plane, piece.AZ + oz), new Double3(piece.BX + ox, plane, piece.BZ + oz), out var s0, out var s1))
                     draw.AddLine(s0, s1, color, fadeWidth);
+            }
+        }
+
+        // Where gas cut a sensor short, a faint amber line marks how far it would have seen: the plain range, outlined
+        // once where such circles overlap. It is a line and not a fill, so it can never cover more than a pixel's width
+        // of the view however thick the gas.
+        if (look.GasRangeAlpha > 0)
+        {
+            var lost = _coverage.LostRange(true);
+            var amber = Kit.Color(Theme.Accent, look.GasRangeAlpha * alpha);
+            for (var k = 0; k < lost.Length; k++)
+            {
+                ref readonly var piece = ref lost[k];
+                if (world.ProjectSegment(new Double3(piece.AX, plane, piece.AZ), new Double3(piece.BX, plane, piece.BZ), out var s0, out var s1))
+                    draw.AddLine(s0, s1, amber, Kit.Px(1f));
             }
         }
 
@@ -190,34 +209,5 @@ internal sealed partial class ScreenHost
         var width = Kit.Measure(_ui.Mono, Theme.FontCaption, state).X;
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(MathF.Round((_ui.DisplaySize.X - width) * 0.5f), HudTop + Kit.Px(40)),
             _coverage.ActiveCount == 0 ? Theme.Bad : charted ? Theme.Info : Theme.Accent, state, alpha);
-    }
-
-    /// <summary>
-    /// Fills, very faintly, the sliver between a sensor's plain sphere and its gas-shaped boundary where gas cut the
-    /// range, so a short side reads as lost range rather than as nothing. Left out where another shown sensor covers
-    /// the sliver, and drawn once where the slivers of several sensors overlap.
-    /// </summary>
-    private void DrawGasTint(ImDrawListPtr draw, WorldView world, int index, double x, double z, double nominal, ReadOnlySpan<double> samples, double plane, uint color)
-    {
-        var n = samples.Length;
-        var tolerance = nominal * 0.005;
-        for (var k = 0; k < n; k++)
-        {
-            var next = k + 1 == n ? 0 : k + 1;
-            if (samples[k] >= nominal - tolerance && samples[next] >= nominal - tolerance)
-                continue;
-            var a0 = k * (Math.Tau / n);
-            var a1 = next * (Math.Tau / n);
-            double c0 = Math.Cos(a0), s0 = Math.Sin(a0), c1 = Math.Cos(a1), s1 = Math.Sin(a1);
-            var mx = x + (nominal + (samples[k] + samples[next]) * 0.5) * 0.5 * (c0 + c1) * 0.5;
-            var mz = z + (nominal + (samples[k] + samples[next]) * 0.5) * 0.5 * (s0 + s1) * 0.5;
-            if (_coverage.InsideShown(mx, mz, index) || _coverage.InsideEarlierDisc(mx, mz, index))
-                continue;
-            if (world.Project(new Double3(x + nominal * c0, plane, z + nominal * s0), out var p0)
-                && world.Project(new Double3(x + nominal * c1, plane, z + nominal * s1), out var p1)
-                && world.Project(new Double3(x + samples[next] * c1, plane, z + samples[next] * s1), out var p2)
-                && world.Project(new Double3(x + samples[k] * c0, plane, z + samples[k] * s0), out var p3))
-                draw.AddQuadFilled(p0, p1, p2, p3, color);
-        }
     }
 }

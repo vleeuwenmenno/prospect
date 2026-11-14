@@ -101,6 +101,54 @@ public sealed class EditorSessionTests
     }
 
     [Fact]
+    public void ThePlayerInTheDroneTakesControlOfAShipJustBuiltAfterCancellingOrApplyingItsEdit()
+    {
+        foreach (var apply in new[] { false, true })
+        {
+            using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);
+            rig.Input(0).RequestControl(0);
+            var ship = rig.Own(0);
+            Assert.True(rig.Until(() => rig.Own(0) != ship && rig.Snap(0).OwnIsDrone));
+            var drone = rig.Own(0);
+            var designs = rig.Content.Designs.Length;
+            Assert.True(rig.Input(0).RequestNewShip("Scout"));
+            Assert.True(rig.Until(() => rig.Snap(0).Content.Designs.Length == designs + 1, settle: true));
+            rig.Input(0).ReportInstalledDesigns(designs + 1);
+            Assert.True(rig.Until(() => rig.Snap(0).NewShip.Status == NewShipStatus.Created));
+            var created = rig.Snap(0).NewShip.Hull;
+            Assert.True(rig.Until(() => Enumerable.Range(0, rig.Snap(0).HullCount).Any(i => rig.Snap(0).Hulls[i].Id == created)));
+            var target = created;
+            if (apply)
+            {
+                var draft = BuildDraft.FromBlueprint(rig.Snap(0).Content.Designs[designs], rig.Server.Content);
+                Place(draft, rig.Content.Blocks.Get("hull"));
+                var export = draft.Export();
+                Assert.True(export.Ok, export.Problem);
+                Assert.True(rig.Input(0).CommitEdit(rig.Editor(0).Token, export.Bytes));
+                rig.Input(0).ReportInstalledDesigns(designs + 2);
+                Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied, settle: true));
+                target = rig.Editor(0).Hull;
+                Assert.NotEqual(created, target);
+                Assert.Equal(drone, rig.Own(0));
+            }
+            else
+            {
+                rig.Input(0).CancelEdit();
+                Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Closed, settle: true));
+                Assert.Equal(drone, rig.Own(0));
+            }
+
+            Assert.True(rig.Until(() => Enumerable.Range(0, rig.Snap(0).HullCount).Any(i => rig.Snap(0).Hulls[i].Id == target)));
+            rig.Input(0).RequestControl(target);
+            Assert.True(rig.Until(() => rig.Own(0) == target), $"apply={apply}");
+            Assert.True(rig.Hulls.Info(Rig.Index(target)).Piloted);
+            Assert.False(rig.Snap(0).OwnIsDrone);
+            // The drone the player left is removed with the switch.
+            Assert.False(rig.Hulls.IsAlive(new HullHandle((int)(drone & 0xFFFF), (int)(drone >> 16))));
+        }
+    }
+
+    [Fact]
     public void TheSnapshotSaysWhenTheOwnHullIsTheDroneAndNotWhenItIsAShip()
     {
         using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);
