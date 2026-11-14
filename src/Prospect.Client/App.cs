@@ -198,6 +198,9 @@ internal sealed class App : IDisposable
     private readonly Texture2D _galaxyImage;
     private long _lastFrameTimestamp;
     private bool _viewOpened;
+
+    // A capture of the New ship dialog first leaves the pod in the drone, then opens the dialog once it flies it.
+    private string? _newShipView;
     private bool _tipsSampled;
     private readonly CatalogueMeshes _catalogueMeshes;
 
@@ -1006,6 +1009,12 @@ internal sealed class App : IDisposable
             }
         }
 
+        if (_newShipView is { } newShip && Session is not null && snapshot is { OwnHull: >= 0, OwnIsDrone: true })
+        {
+            _newShipView = null;
+            _screens.PreviewNewShip(newShip, snapshot, Session.Client.Input);
+        }
+
         if (_options.OpenView is { } view && !_viewOpened && Session is not null && _sinceSplash > 0.6f)
         {
             _viewOpened = true;
@@ -1032,6 +1041,11 @@ internal sealed class App : IDisposable
                 _screens.OpenControls();
             else if (view == "edit" && snapshot is { OwnHull: >= 0 })
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
+            else if (view.StartsWith("new-ship", StringComparison.Ordinal))
+            {
+                _newShipView = view;
+                Session.Client.Input.RequestControl(0);
+            }
             else if (view == "info")
                 _screens.OpenShipInfo();
             else if (view == "world-settings")

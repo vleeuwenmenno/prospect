@@ -26,8 +26,8 @@ Explicit private local claims have a nonvisual API backed by account-service tic
 In-game tips: the first time the map, the command view or the ship editor opens, or a shield goes down or the
 battery runs low, a small panel explains it. Several at once stack with a counter and Next; Close shows the tip again
 next time, "Don't show this again" hides it on this client, and Settings, Tips, **Reset tips** shows all again.
-Tips are data in `content/visuals/tips.json`. The "edit the drone with Ctrl+B" tip exists and waits for the New ship
-dialog to fire it; nothing fires it yet.
+Tips are data in `content/visuals/tips.json`. Every press of `B` in the escape drone opens the New ship dialog and
+brings up the "edit the drone with Ctrl+B" tip beside it, unless you hid that tip.
 
 Chat, the player roster and parties work end to end: the server decides, the client shows them.
 
@@ -71,7 +71,15 @@ network transfer, collision and drawing. Shared resource budgets replace the old
 See [docs/blocks-at-scale.md](docs/blocks-at-scale.md#final-admission-evidence-and-limits) for current limits,
 measurements and the remaining stages.
 
-**Ship editor (second slice).** `B` asks the server to edit the ship you fly; it opens only when the server says
+**New ships from the drone.** In the escape drone, `B` opens a **New ship** dialog: type a name (1 to 32
+characters, different from your other ships; the field checks it as you type), then `Enter` or Build ship. The
+server places a one-block ship just ahead of the drone and the ship editor opens on it; you stay in the drone, and
+Apply rebuilds the new ship from your design. Cancel, `Esc` or `B` in the editor leaves the ship as a single block.
+If the server refuses (name already used, ship limit, no clear space ahead, full design catalogue, ...) the dialog
+says why and you can try another name. Cancel is off while the server is working. `Ctrl`+`B` in the drone edits the
+drone itself.
+
+**Ship editor (second slice).** In a ship, `B` asks the server to edit the ship you fly; it opens only when the server says
 yes (no damage for 30 seconds, no jump ordered or running). The world keeps running around you and other players
 are never blocked. The editor works in space, around your ship:
 
@@ -384,7 +392,8 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Social: Party window | `O` | |
 | Chat: open, send, close | `Enter`; `Enter` sends, `Esc` closes | |
 | Close the focused social window, then Social | `Esc` (never a pinned window) | |
-| Ship editor: ask to edit / cancel | `B`; `Esc` also cancels | |
+| Ship editor: ask to edit / cancel (in the drone: `B` is New ship, `Ctrl`+`B` edits the drone) | `B`; `Esc` also cancels | |
+| New ship dialog (drone only): build / close | `Enter` / `Esc` | |
 
 On menu screens the arrow keys or the D-pad move between rows, left and right change the focused setting, and
 `Enter` or `A` selects. The mouse works too: click a row's arrows, or drag a slider. In the server browser, the
@@ -417,7 +426,7 @@ Command view (the cursor is always shown):
 | Focus the camera on the selection | `Space` or `F`, or double-click a row in the fleet list |
 | Halt the selection | `H` or `Backspace` |
 
-Ship editor (`B`; the cursor is always shown):
+Ship editor (`B` in a ship, `Ctrl`+`B` in the drone, or the New ship dialog's `Enter`; the cursor is always shown):
 
 | | |
 | --- | --- |

@@ -564,6 +564,7 @@ public sealed class FrameOrderTests : IDisposable
         }
 
         DrawFloating();
+        _drawOver?.Invoke();
         DrawTipPanel();
         DrawCommandCourseMenu();
         // As the editor screen does before its panels: a press on one ends a turn, keeping it.
@@ -735,8 +736,9 @@ public sealed class FrameOrderTests : IDisposable
         Kit.BeginFrame(_tipKit!);
         var tip = board.Current;
         var size = TipPanel.Measure(_tipCatalogue!, tip, Screen.X);
-        var known = tip.Anchor.Region == TipRegion.Screen;
-        var at = TipPlacement.Place(tip.Anchor, known, default, size, Screen, _tipScale);
+        var onDialog = tip.Anchor.Region == TipRegion.NewShipDialog && _newShip.Open;
+        var known = tip.Anchor.Region == TipRegion.Screen || onDialog;
+        var at = TipPlacement.Place(tip.Anchor, known, onDialog ? NewShipDialog.Panel(Screen, _tipScale) : default, size, Screen, _tipScale);
         _tipRect = new HudRect(at.X, at.Y, at.X + size.X, at.Y + size.Y);
         TipPanel.Draw(board, _tipCatalogue!, _tipRect, !_router.Captured);
     }
@@ -3936,6 +3938,379 @@ public sealed class FrameOrderTests : IDisposable
         Assert.True(editor.Draft.CanUndo);
         Assert.False(editor.DraftRestarted);
         Assert.NotEqual(token, editor.Token);
+    }
+
+
+    // The New ship dialog as ScreenHost wires it: the production keys (NewShipDialog.HandleKeys, after a tip's
+    // Escape), the production panel content inside the one window ScreenHost opens, and its surface rule: the
+    // pointer is shown and the world reads no input while it is open.
+    private readonly NewShipDialog _newShip = new();
+    private readonly ImInputString _newShipName = new(NewShipDialog.NameBytes);
+    private Action? _drawOver;
+
+    private void DrawNewShipDialog()
+    {
+        _newShip.Update(_snapshot, _world.Editor, _snapshot.Hulls[_snapshot.OwnHull].Id);
+        if (!_newShip.Open)
+            return;
+        Kit.BeginFrame(_tipKit!);
+        var panel = NewShipDialog.Panel(Screen, _tipScale);
+        ImGui.SetNextWindowPos(float2.Zero);
+        ImGui.SetNextWindowSize(Screen);
+        ImGui.Begin("##newship"u8, ScreenHost.RootFlags);
+        var pad = new float2(Kit.Px(Theme.Space6));
+        ImGui.SetCursorScreenPos(new float2(panel.Left, panel.Top) + pad);
+        ImGui.BeginChild("##newshippanel"u8, new float2(panel.Width, panel.Height) - pad * 2f, ImGuiChildFlags.None, ImGuiWindowFlags.NoBackground);
+        NewShipPanel.DrawBody(_newShip, _newShipName, _snapshot, Bridge, _tipKit!);
+        ImGui.EndChild();
+        ImGui.End();
+    }
+
+    /// <summary>One frame as <c>App.Run</c> orders it with the dialog: a tip's Escape first, then the dialog's and the editor's keys.</summary>
+    private void DroneFrame(Action? poll = null)
+    {
+        _jobs.Pump();
+        _surfaceOpen = _newShip.Open;
+        Frame(poll, () =>
+        {
+            var tipBack = _tipBoard is { Active: true } tips && tips.Escape(true, _actions.Pressed(_devices, InputAction.Pause, true));
+            var used = tipBack || _newShip.HandleKeys(_actions, _devices, _snapshot, _world.Editor, Bridge, _tipBoard!, _newShipName, ImGui.GetIO().WantTextInput, _router.PointerOverInterface);
+            _surfaceOpen = _newShip.Open;
+            return used;
+        });
+    }
+
+    /// <summary>Simulates and draws with the dialog until a condition holds; the renderer reports every design installed.</summary>
+    private bool PlayDroneUntil(Func<bool> condition, int steps = 3000)
+    {
+        for (var i = 0; i < steps && !condition(); i++)
+        {
+            Tick(1, sleep: true);
+            Bridge.ReportInstalledDesigns(_snapshot.Content.Designs.Length);
+            DroneFrame();
+        }
+
+        return condition();
+    }
+
+    /// <summary>Leaves the pod in the drone, with tips and the dialog's drawing set up, and settles a few frames.</summary>
+    private uint UseDrone()
+    {
+        UseTips();
+        _drawOver = DrawNewShipDialog;
+        Bridge.RequestControl(0);
+        Assert.True(PlayUntil(() => _snapshot.OwnIsDrone), "the player should be in the drone");
+        DroneFrame();
+        DroneFrame();
+        return _snapshot.Hulls[_snapshot.OwnHull].Id;
+    }
+
+    private void PressKey(GlfwKey key)
+    {
+        DroneFrame(() => Key(key, true));
+        DroneFrame(() => Key(key, false));
+    }
+
+    private void Type(string text)
+    {
+        DroneFrame(() =>
+        {
+            foreach (var c in text)
+                ImGui.GetIO().AddInputCharacter(c);
+        });
+    }
+
+    private void OpenNewShipDialog()
+    {
+        PressKey(GlfwKey.B);
+        DroneFrame();
+        DroneFrame();
+        Assert.Equal(NewShipStage.Naming, _newShip.Stage);
+        Assert.True(ImGui.GetIO().WantTextInput, "the caret should be in the name field");
+    }
+
+    private int HullIndex(uint id)
+    {
+        for (var i = 0; i < _snapshot.HullCount; i++)
+            if (_snapshot.Hulls[i].Id == id)
+                return i;
+        return -1;
+    }
+
+    [Fact]
+    public void TheEditorKeyInTheDroneOpensTheNewShipDialogWithTheTipBesideItAndNotTheEditor()
+    {
+        var drone = UseDrone();
+        var board = _tipBoard!;
+        Assert.True(_router.Captured);
+        PressKey(GlfwKey.B);
+        DroneFrame();
+        DroneFrame();
+        Assert.Equal(NewShipStage.Naming, _newShip.Stage);
+        Assert.Equal(EditorStage.Closed, _world.Editor.Stage);
+        Assert.Equal(EditorPhase.Closed, _snapshot.Editor.Phase);
+        Assert.False(_router.Captured);
+        Assert.True(ImGui.GetIO().WantTextInput, "the caret should be in the name field");
+        Assert.Equal("drone-edit", board.Current.Id);
+        Assert.False(_tipRect.Overlaps(NewShipDialog.Panel(Screen, 1f)), $"tip {_tipRect} over the dialog");
+        Assert.Equal(drone, _snapshot.Hulls[_snapshot.OwnHull].Id);
+
+        // Escape closes the tip first and the dialog next; the pointer goes back to flight.
+        PressKey(GlfwKey.Escape);
+        Assert.False(board.Active);
+        Assert.True(_newShip.Open);
+        PressKey(GlfwKey.Escape);
+        Assert.False(_newShip.Open);
+        DroneFrame();
+        Assert.True(_router.Captured);
+
+        // Every press of the key brings the tip back, and a tick for good ends it: the dialog still opens.
+        PressKey(GlfwKey.B);
+        Assert.True(_newShip.Open);
+        Assert.Equal("drone-edit", board.Current.Id);
+        board.DontShowAgain = true;
+        board.Close();
+        Assert.Equal(["drone-edit"], _tipSettings!.HiddenTips);
+        PressKey(GlfwKey.Escape);
+        Assert.False(_newShip.Open);
+        PressKey(GlfwKey.B);
+        Assert.True(_newShip.Open);
+        Assert.False(board.Active);
+    }
+
+    [Fact]
+    public void ControlBInTheDroneEditsTheDroneItselfWithNoDialogAndNoTip()
+    {
+        var drone = UseDrone();
+        DroneFrame(() =>
+        {
+            Key(GlfwKey.LeftControl, true);
+            Key(GlfwKey.B, true);
+        });
+        DroneFrame(() =>
+        {
+            Key(GlfwKey.B, false);
+            Key(GlfwKey.LeftControl, false);
+        });
+        Assert.False(_newShip.Open);
+        Assert.False(_tipBoard!.Active);
+        Assert.True(PlayDroneUntil(() => _world.Editor.Shown), $"{_world.Editor.Stage} {_snapshot.Editor.Phase}/{_snapshot.Editor.Reason}");
+        Assert.Equal(drone, _world.Editor.Hull);
+        Assert.Equal(drone, _snapshot.Hulls[_snapshot.OwnHull].Id);
+        Assert.False(_world.EditedPosition.RelativeTo(_world.OwnDrawnPosition).Length() > 0.01f);
+
+        // B again cancels, as it does for every edit.
+        PressKey(GlfwKey.B);
+        Assert.True(PlayDroneUntil(() => _world.Editor.Stage == EditorStage.Closed));
+        Assert.False(_newShip.Open);
+    }
+
+    [Fact]
+    public void TheEditorKeyInAShipEditsTheShipAsBeforeWithNoDialogAndNoTip()
+    {
+        UseTips();
+        _drawOver = DrawNewShipDialog;
+        Assert.False(_snapshot.OwnIsDrone);
+        var ship = _snapshot.Hulls[_snapshot.OwnHull].Id;
+        PressKey(GlfwKey.B);
+        Assert.False(_newShip.Open);
+        Assert.False(_tipBoard!.Active);
+        Assert.True(PlayDroneUntil(() => _world.Editor.Shown), $"{_world.Editor.Stage} {_snapshot.Editor.Phase}/{_snapshot.Editor.Reason}");
+        Assert.Equal(ship, _world.Editor.Hull);
+        // Ctrl does not change that in a ship.
+        PressKey(GlfwKey.B);
+        Assert.True(PlayDroneUntil(() => _world.Editor.Stage == EditorStage.Closed));
+        DroneFrame(() =>
+        {
+            Key(GlfwKey.LeftControl, true);
+            Key(GlfwKey.B, true);
+        });
+        DroneFrame(() =>
+        {
+            Key(GlfwKey.B, false);
+            Key(GlfwKey.LeftControl, false);
+        });
+        Assert.False(_newShip.Open);
+        Assert.True(PlayDroneUntil(() => _world.Editor.Shown));
+    }
+
+    [Fact]
+    public void EnterBuildsAGoodNameWaitsForTheHullAndOpensTheEditorOnTheNewShipWhileTheDroneStaysFlown()
+    {
+        var drone = UseDrone();
+        var hulls = _snapshot.HullCount;
+        OpenNewShipDialog();
+
+        // Nothing typed: Enter does nothing, and Build is off.
+        PressKey(GlfwKey.Enter);
+        Assert.Equal(NewShipStage.Naming, _newShip.Stage);
+        Assert.Equal(NewShipStatus.None, _snapshot.NewShip.Status);
+
+        Type("  Scout ");
+        Assert.Equal("  Scout ", _newShipName.ToString());
+        Assert.Equal(NameProblem.None, NewShipDialog.Check(_newShipName.ToString()));
+        DroneFrame(() => Key(GlfwKey.Enter, true));
+        DroneFrame(() => Key(GlfwKey.Enter, false));
+        Assert.Equal(NewShipStage.Waiting, _newShip.Stage);
+        Assert.True(_newShip.Busy);
+
+        // While the server works neither Escape nor Cancel closes the dialog, so no grant is left unclaimed.
+        PressKey(GlfwKey.Escape);
+        Assert.True(_newShip.Open);
+
+        // The creation answer comes with the grant, and the hull follows it in the snapshot: until it is there the
+        // editor waits instead of opening on nothing, however many frames are drawn.
+        for (var i = 0; i < 3000 && _snapshot.NewShip.Status != NewShipStatus.Created; i++)
+        {
+            Tick(1, sleep: true);
+            Bridge.ReportInstalledDesigns(_snapshot.Content.Designs.Length);
+            DroneFrame();
+        }
+
+        Assert.Equal(NewShipStatus.Created, _snapshot.NewShip.Status);
+        var created = _snapshot.NewShip.Hull;
+        var kept = _snapshot.HullCount;
+        var gap = HullIndex(created);
+        if (gap >= 0)
+        {
+            // The hull came with the answer: hide it, as a snapshot that came later would have it.
+            Assert.Equal(kept - 1, gap);
+            _snapshot.HullCount = gap;
+        }
+
+        DroneFrame();
+        DroneFrame();
+        DroneFrame();
+        Assert.Equal(EditorStage.Requesting, _world.Editor.Stage);
+        Assert.False(_world.Editor.Shown);
+        Assert.Equal(NewShipStage.Building, _newShip.Stage);
+        Assert.Equal(EditorPhase.Open, _snapshot.Editor.Phase);
+        if (gap >= 0)
+            _snapshot.HullCount = kept;
+        Assert.True(PlayDroneUntil(() => _world.Editor.Shown));
+        DroneFrame();
+
+        Assert.True(_world.Editor.Shown, $"{_world.Editor.Stage} {_snapshot.Editor.Phase}");
+        Assert.False(_newShip.Open);
+        Assert.Equal(created, _world.Editor.Hull);
+        Assert.Equal(drone, _snapshot.Hulls[_snapshot.OwnHull].Id);
+        Assert.Equal(hulls + 1, _snapshot.HullCount);
+        Assert.True(HullIndex(created) >= 0);
+        Assert.Equal(1, _world.Editor.Draft!.Boxes.Length);
+        Assert.Equal("Scout", _world.Editor.Source!.Name);
+        var apart = _world.EditedPosition.RelativeTo(_world.OwnDrawnPosition).Length();
+        Assert.InRange(apart, 30f, 80f);
+        Assert.True(_world.Project(_world.EditedPosition, out _));
+    }
+
+    [Fact]
+    public void ABuiltShipIsEditedWhereItIsAppliedByTheServerAndTheDroneKeepsFlying()
+    {
+        var drone = UseDrone();
+        OpenNewShipDialog();
+        Type("Scout");
+        PressKey(GlfwKey.Enter);
+        Assert.True(PlayDroneUntil(() => _world.Editor.Shown), $"{_newShip.Stage} {_world.Editor.Stage} {_snapshot.NewShip.Status}/{_snapshot.NewShip.Reason}");
+        var editor = _world.Editor;
+        var created = editor.Hull;
+        var designs = _snapshot.Content.Designs.Length;
+        for (var i = 0; i < 30; i++)
+            DroneFrame();
+
+        // The pointer finds the new ship where it is, not the drone, and a click places a block on it.
+        Assert.True(_world.Project(_world.EditedPosition, out var middle));
+        DroneFrame(() => Move(middle));
+        Assert.True(editor.HasHover, "the pointer should be over the new ship");
+        DroneFrame(() => Click());
+        Assert.Equal(2, editor.Draft!.Boxes.Length);
+        for (var i = 0; i < 600 && !(editor.Check == DraftCheck.Ready && editor.CheckedVersion == editor.Draft.Version); i++)
+        {
+            FinishJobs();
+            DroneFrame();
+        }
+
+        Assert.True(editor.CanApply);
+        // Creating a ship starts the server's commit cooldown; Apply before it ends is refused and the edit stays open.
+        Tick((int)(_snapshot.Content.Editor.CommitSeconds + 1) * TickLoop.SimulationHz);
+        Assert.True(editor.Apply(Bridge));
+        Assert.True(PlayDroneUntil(() => editor.Stage == EditorStage.Closed), $"{_snapshot.Editor.Phase}/{_snapshot.Editor.Reason}");
+        Assert.True(editor.NoticeApplied);
+        Assert.True(editor.NoticeBuilt);
+        Assert.Equal(drone, _snapshot.Hulls[_snapshot.OwnHull].Id);
+        Assert.Equal(-1, HullIndex(created));
+        Assert.True(PlayDroneUntil(() => _snapshot.Editor.Hull != created && HullIndex(_snapshot.Editor.Hull) >= 0));
+        var built = _snapshot.Hulls[HullIndex(_snapshot.Editor.Hull)];
+        Assert.Equal(designs, built.Design);
+        Assert.Equal(2, BlockSet.Count(built.Blocks.Span));
+        DroneFrame();
+        Assert.True(_router.Captured);
+        Assert.False(_world.Editor.Shown);
+    }
+
+    [Fact]
+    public void ARefusalFromTheServerIsShownInTheDialogAndAnotherNameBuilds()
+    {
+        UseDrone();
+        var other = Enumerable.Range(0, _snapshot.HullCount).Select(i => _snapshot.Hulls[i]).First(h => !h.IsOwn && h.Owner == _snapshot.PlayerId);
+        var name = _snapshot.Content.Designs[other.Design].Name;
+        OpenNewShipDialog();
+        Type(name.ToLowerInvariant());
+        PressKey(GlfwKey.Enter);
+        Assert.True(PlayDroneUntil(() => _newShip.Stage == NewShipStage.Naming && _newShip.Refusal != EditorReason.None), $"{_newShip.Stage}");
+        Assert.Equal(EditorReason.DuplicateName, _newShip.Refusal);
+        Assert.Equal(NewShipStatus.Refused, _snapshot.NewShip.Status);
+        Assert.Contains("already", Encoding.UTF8.GetString(NewShipPanel.Reason(EditorReason.DuplicateName)));
+        // The dialog is still there with the name as typed; another name builds.
+        Assert.True(_newShip.Open);
+        Type("2");
+        PressKey(GlfwKey.Enter);
+        Assert.True(PlayDroneUntil(() => _world.Editor.Shown), $"{_newShip.Stage} {_snapshot.NewShip.Status}/{_snapshot.NewShip.Reason}");
+        Assert.Equal(name.ToLowerInvariant() + "2", _world.Editor.Source!.Name);
+    }
+
+    [Fact]
+    public void ATooLongNameIsRefusedBeforeTheServerIsAskedAndAnEditedNameBuilds()
+    {
+        UseDrone();
+        OpenNewShipDialog();
+        var serial = _snapshot.NewShip.Serial;
+        Type(new string('a', 33));
+        Assert.Equal(NameProblem.TooLong, NewShipDialog.Check(_newShipName.ToString()));
+        PressKey(GlfwKey.Enter);
+        DroneFrame();
+        Assert.Equal(NewShipStage.Naming, _newShip.Stage);
+        Assert.Equal(serial, _snapshot.NewShip.Serial);
+        Assert.Equal(NewShipStatus.None, _snapshot.NewShip.Status);
+        // One Backspace later it is a good name.
+        DroneFrame(() => ImGui.GetIO().AddKeyEvent(ImGuiKey.Backspace, true));
+        DroneFrame(() => ImGui.GetIO().AddKeyEvent(ImGuiKey.Backspace, false));
+        Assert.Equal(NameProblem.None, NewShipDialog.Check(_newShipName.ToString()));
+        PressKey(GlfwKey.Enter);
+        Assert.True(PlayDroneUntil(() => _world.Editor.Shown), $"{_newShip.Stage} {_snapshot.NewShip.Status}/{_snapshot.NewShip.Reason}");
+        Assert.Equal(new string('a', 32), _world.Editor.Source!.Name);
+    }
+
+    [Fact]
+    public void APressOnTheDialogNeverReachesTheWorldAndFlightKeysAreNotRead()
+    {
+        UseDrone();
+        OpenNewShipDialog();
+        var panel = NewShipDialog.Panel(Screen, 1f);
+        var middle = new float2((panel.Left + panel.Right) * 0.5f, (panel.Top + panel.Bottom) * 0.5f);
+        DroneFrame(() => Move(middle));
+        DroneFrame();
+        Assert.True(_router.PointerOverInterface);
+        Bridge.Consume(out _, out _);
+        DroneFrame(() => Key(GlfwKey.W, true));
+        DroneFrame();
+        Assert.Equal(0f, Sent().Forward);
+        // The same key flies the drone once the dialog is closed: Escape closes the tip, then the dialog.
+        PressKey(GlfwKey.Escape);
+        PressKey(GlfwKey.Escape);
+        Assert.False(_newShip.Open);
+        DroneFrame(() => Key(GlfwKey.W, true));
+        DroneFrame();
+        Assert.True(Sent().Forward > 0);
     }
 
     private int DraftBlocks => _world.Editor.Draft!.Boxes.Length;

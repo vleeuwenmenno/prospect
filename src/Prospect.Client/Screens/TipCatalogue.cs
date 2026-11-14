@@ -33,8 +33,8 @@ internal static class TipTriggers
     public const string EnergyLow = "energyLow";
 
     /// <summary>
-    /// The player edited the drone with the plain editor key, which is the New ship dialog's now; fired by that
-    /// dialog's code with <c>ScreenHost.FireTip(TipTriggers.DroneEditHint)</c>.
+    /// The player pressed the plain editor key in the drone, which opens the New ship dialog; fired each time by
+    /// <c>ScreenHost.FireTip(TipTriggers.DroneEditHint)</c>, so the tip points to Ctrl plus the key for the drone itself.
     /// </summary>
     public const string DroneEditHint = "droneEditHint";
 
@@ -61,6 +61,9 @@ internal enum TipRegion : byte
     EditorParts,
     EditorDetails,
     EditorBar,
+
+    /// <summary>The New ship dialog's panel; the tip is placed beside it while it is open.</summary>
+    NewShipDialog,
 }
 
 /// <summary>

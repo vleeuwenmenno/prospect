@@ -72,6 +72,9 @@ public sealed class SessionSnapshot(GameContent content)
     /// </summary>
     public EditorView Editor;
     public NewShipView NewShip;
+
+    /// <summary>True while the player flies their escape drone: the one hull that may ask for a new ship.</summary>
+    public bool OwnIsDrone;
     public readonly ExplorationView Exploration = new(content.Exploration.ChartsPerOwner);
 
     public SessionState State;
@@ -355,6 +358,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         snapshot.HullCount = _state == SessionState.Active ? _world.BuildViews(snapshot.Hulls, ref snapshot.BlockWords, serverTick, tick, out snapshot.OwnHull) : 0;
         if (snapshot.HullCount == 0)
             snapshot.OwnHull = -1;
+        snapshot.OwnIsDrone = _state == SessionState.Active && snapshot.HullCount > 0 && _world.OwnIsDrone;
         snapshot.Dampeners = _world.Dampeners;
         snapshot.PredictionError = _world.PredictionError;
         snapshot.Flight = _world.Flight;

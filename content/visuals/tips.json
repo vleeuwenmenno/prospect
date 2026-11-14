@@ -89,7 +89,7 @@
       "trigger": "droneEditHint",
       "title": "Edit the drone",
       "text": "You can also edit the drone: press Ctrl+{ToggleEditor}.",
-      "anchor": { "region": "screen", "side": "top", "offset": [0, 56] }
+      "anchor": { "region": "newShipDialog", "side": "bottom", "offset": [0, 0] }
     }
   ]
 }
