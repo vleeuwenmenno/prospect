@@ -78,6 +78,12 @@ internal sealed class AppOptions
     public string? TipsSample { get; set; }
 
     /// <summary>
+    /// Notices in a scripted run (<c>--notices-sample</c>), which shows none otherwise: <c>on</c> lets them post as in
+    /// play, <c>stack</c> also posts six at once (four shown, two waiting).
+    /// </summary>
+    public string? NoticesSample { get; set; }
+
+    /// <summary>
     /// For captures of the Controls screens: <c>--controls-search</c> fills the search box, <c>--controls-tab</c> opens a
     /// tab by the start of its name, <c>--controls-sample capture|conflict</c> shows the Settings page waiting for a
     /// control or asking about a clash.
@@ -247,6 +253,7 @@ internal sealed class App : IDisposable
     // A capture of the New ship dialog first leaves the pod in the drone, then opens the dialog once it flies it.
     private string? _newShipView;
     private bool _tipsSampled;
+    private bool _noticesSampled;
     private bool _mapClosed;
     private bool _scanCancelled;
     private bool _moduleRan;
@@ -443,6 +450,9 @@ internal sealed class App : IDisposable
 
     /// <summary>True when a scripted run asked for tips; a capture or benchmark shows none otherwise.</summary>
     public bool TipsInScriptedRuns => _options.TipsSample is not null;
+
+    /// <summary>True when a scripted run asked for notices (<c>--notices-sample</c>); a capture or benchmark shows none otherwise.</summary>
+    public bool NoticesInScriptedRuns => _options.NoticesSample is not null;
 
     /// <summary>
     /// The world settings the next local game starts with: the content's defaults with whatever <c>--set</c>
@@ -1294,6 +1304,13 @@ internal sealed class App : IDisposable
         {
             _tipsSampled = true;
             _screens.FireTip(TipTriggers.CommandViewOpened);
+        }
+
+        // The notices, all at once: a stack with some waiting behind it.
+        if (_options.NoticesSample == "stack" && !_noticesSampled && Session is not null && _sinceSplash > 1.2f)
+        {
+            _noticesSampled = true;
+            _screens.PostSampleNotices();
         }
 
         World.GasView = Devices.Muted ? _options.GasView : null;

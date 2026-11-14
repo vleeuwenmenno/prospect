@@ -33,6 +33,8 @@ internal sealed partial class ScreenHost
         _editorHints = null;
         _tipCatalogue = _tipCatalogue.Rebind(_app.Actions);
         _tips.ReplaceCatalogue(_tipCatalogue);
+        _noticeCatalogue = _noticeCatalogue.Rebind(_app.Actions);
+        _notices.ReplaceCatalogue(_noticeCatalogue);
     }
 
     /// <summary>Consumes opening and closing shortcuts before flight reads this frame's input.</summary>

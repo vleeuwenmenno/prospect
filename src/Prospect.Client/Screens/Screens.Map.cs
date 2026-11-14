@@ -117,6 +117,7 @@ internal sealed partial class ScreenHost
         var layerMin = _mapPanels.Place(MapPanel.Layers, MapLayerBar.Min(display, HudTop, Kit.Scale), layerSize, display, Kit.Scale);
         _mapPointer.Block(layerMin, layerSize);
         BlockMapForTip();
+        BlockMapForNotices();
         if (_mapMenuOpen)
         {
             _mapMenuTime += _ui.DeltaTime;

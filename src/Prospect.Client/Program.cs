@@ -42,6 +42,7 @@ internal static class Program
           --account-sample <s>    With --capture or --bench: the account and friends show a fixed sample instead of the
                                   account service, and nothing signs in: signed-out, waiting, signed-in, friends (full
                                   lists of hostile names), failed or off
+          --notices-sample <s>    With --capture or --bench: show notices (on, or stack: six at once), which a scripted run hides otherwise.
           --tips-sample <s>       With --capture or --bench: show the in-game tips, which a scripted run hides otherwise.
                                   on lets them fire as in play (--open map shows the map's tips), stack fires the command
                                   view's three at once, and reset (with --start settings) opens the Reset tips question
@@ -219,6 +220,9 @@ internal static class Program
                     break;
                 case "--tips-sample" when hasValue && args[i + 1] is "on" or "stack" or "reset":
                     options.TipsSample = args[++i];
+                    break;
+                case "--notices-sample" when hasValue && args[i + 1] is "on" or "stack":
+                    options.NoticesSample = args[++i];
                     break;
                 case "--account-sample" when hasValue && args[i + 1] is "signed-out" or "waiting" or "signed-in" or "friends" or "failed" or "off":
                     options.AccountSample = args[++i];
@@ -471,6 +475,8 @@ internal static class Program
         // Tips show in a scripted run only where the run asks for them; the reset question lives on Settings.
         if (options.TipsSample is not null && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--tips-sample works only with --capture or --bench.");
+        if (options.NoticesSample is not null && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--notices-sample works only with --capture or --bench.");
         if (options.TipsSample == "reset" && options.StartScreen != Screen.Settings)
             return Fail("--tips-sample reset works only with --start settings.");
 
