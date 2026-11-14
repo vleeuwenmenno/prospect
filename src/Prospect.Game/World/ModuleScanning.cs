@@ -64,9 +64,21 @@ public struct ModuleObservation
     /// <summary>Reserved for future mining mutations. Zero is today's immutable composition revision.</summary>
     public uint ContentRevision;
     public Double3 Position;
+    /// <summary>Grade is the share of the asteroid's mass that is its main ore, as far as the equipment resolved it.</summary>
     public float Radius, Mass, Grade;
-    /// <summary>One resource per generated asteroid, or -1 for bare rock. Its host-rock share is one; Grade is ore fraction.</summary>
+    /// <summary>The asteroid's main ore, or -1 for bare rock. A named resource with a zero share is a trace.</summary>
     public int Resource;
+    /// <summary>
+    /// Resources mixed in with the main ore, or -1 for none; never a second without a first. A locator and a gas
+    /// sample name none.
+    /// </summary>
+    public int Mix1, Mix2;
+    /// <summary>
+    /// The share of the asteroid's mass each mix-in makes up, a whole number of the equipment's steps. Zero with a
+    /// named resource is a trace: it is there, below what the equipment resolves, and no figure is claimed for it.
+    /// The ore mass of a resource is Mass times its share; what the three shares leave of one is rock and traces.
+    /// </summary>
+    public float Mix1Share, Mix2Share;
     public GasSample Gas;
 
     /// <summary>Stable knowledge key; locator and detailed analysis are distinct observations.</summary>
@@ -113,14 +125,36 @@ public static class ModuleScanRules
     public static float Rounded(float value, double accuracy) =>
         (float)(Math.Round(value / (0.01 / accuracy), MidpointRounding.AwayFromZero) * (0.01 / accuracy));
 
+    /// <summary>
+    /// A share of an asteroid as the equipment resolves it: whole steps of its resolution, never more than is there.
+    /// A share under one step comes out as zero, which beside a named resource means a trace. The small allowance
+    /// keeps a share that is a whole number of steps, as stored in single precision, from losing its last step.
+    /// </summary>
+    public static float Resolved(float share, double accuracy)
+    {
+        var step = 0.01 / accuracy;
+        return (float)Math.Clamp(Math.Floor(share / step + 1e-4) * step, 0, 1);
+    }
+
     /// <summary>Copies only detail allowed by the equipment; locator never publishes detailed composition or mass.</summary>
     public static void Disclose(ref ModuleObservation observation, in ModuleEquipment equipment)
     {
         observation.Quality = equipment.Quality;
         if (observation.Family == ModuleFamily.AsteroidLocator)
-        { observation.Grade = 0; observation.Mass = 0; observation.Radius = 0; observation.Gas = default; return; }
-        observation.Grade = Math.Clamp(Rounded(observation.Grade, equipment.Accuracy), 0, 1);
-        if (observation.Family != ModuleFamily.GasScanner) return;
+        {
+            observation.Grade = 0; observation.Mass = 0; observation.Radius = 0; observation.Gas = default;
+            observation.Mix1 = observation.Mix2 = -1; observation.Mix1Share = observation.Mix2Share = 0;
+            return;
+        }
+        if (observation.Family != ModuleFamily.GasScanner)
+        {
+            // Every resource in the asteroid keeps its name; only a share the equipment resolves gets a figure.
+            observation.Grade = Resolved(observation.Grade, equipment.Accuracy);
+            observation.Mix1Share = observation.Mix1 < 0 ? 0 : Resolved(observation.Mix1Share, equipment.Accuracy);
+            observation.Mix2Share = observation.Mix2 < 0 ? 0 : Resolved(observation.Mix2Share, equipment.Accuracy);
+            return;
+        }
+        observation.Grade = 0; observation.Mix1 = observation.Mix2 = -1; observation.Mix1Share = observation.Mix2Share = 0;
         // Omitted gases stay unnamed with a zero share; the UI shows the remainder as unresolved, never renormalized.
         var threshold = (float)(0.01 / equipment.Accuracy);
         for (var i = 0; i < GasComposition.Capacity; i++)
@@ -142,7 +176,7 @@ public static class ModuleObservationRules
             || record.RecordedTick < 0 || record.ContentRevision != 0 || !Finite(record.Position)
             || !float.IsFinite(record.Radius) || record.Radius < 0 || !float.IsFinite(record.Mass) || record.Mass < 0
             || !Unit(record.Grade) || record.Resource is < -1 or >= 32 || record.Gas.Region >= 8
-            || !Unit(record.Gas.Purity) || !Unit(record.Gas.Density)) return false;
+            || !Unit(record.Gas.Purity) || !Unit(record.Gas.Density) || !ValidMix(record)) return false;
         var sum = 0f;
         for (var i = 0; i < GasComposition.Capacity; i++)
         { if (!Unit(record.Gas.Shares[i])) return false; sum += record.Gas.Shares[i]; }
@@ -150,7 +184,21 @@ public static class ModuleObservationRules
         if (record.Family == ModuleFamily.GasScanner)
             return record.Index == record.Gas.Region && record.Resource == -1 && record.Radius == 0 && record.Mass == 0 && record.Grade == 0;
         if (sum != 0 || record.Gas.Purity != 0 || record.Gas.Density != 0 || record.Gas.Region != 0) return false;
-        return record.Family != ModuleFamily.AsteroidLocator || record.Radius == 0 && record.Mass == 0 && record.Grade == 0;
+        return record.Family != ModuleFamily.AsteroidLocator || record.Radius == 0 && record.Mass == 0 && record.Grade == 0 && record.Mix1 == -1;
+    }
+
+    /// <summary>
+    /// Mix-ins are named only beside a main ore, each once, a second only after a first, and no share is larger
+    /// than the one before it; together with the main ore they never make up more than the asteroid.
+    /// </summary>
+    private static bool ValidMix(in ModuleObservation record)
+    {
+        if (record.Mix1 is < -1 or >= 32 || record.Mix2 is < -1 or >= 32 || !Unit(record.Mix1Share) || !Unit(record.Mix2Share)) return false;
+        if (record.Mix1 < 0) return record.Mix2 < 0 && record.Mix1Share == 0 && record.Mix2Share == 0;
+        if (record.Resource < 0 || record.Mix1 == record.Resource || record.Mix1Share > record.Grade) return false;
+        if (record.Mix2 < 0) { if (record.Mix2Share != 0) return false; }
+        else if (record.Mix2 == record.Resource || record.Mix2 == record.Mix1 || record.Mix2Share > record.Mix1Share) return false;
+        return record.Grade + record.Mix1Share + record.Mix2Share <= 1.00001f;
     }
 
     private static bool Unit(float value) => float.IsFinite(value) && value >= 0 && value <= 1;

@@ -31,6 +31,15 @@ public sealed class Resource
 
     /// <summary>The chance, from 0 to 1, that a sector far from the core has the resource at all.</summary>
     public required float Presence { get; init; }
+
+    /// <summary>
+    /// The resources that turn up beside this one in an asteroid it is the main ore of, as indices into
+    /// <see cref="Galaxy.Resources"/> in the order the content lists them. Empty for a resource that is found alone.
+    /// </summary>
+    public int[] Partners { get; internal set; } = [];
+
+    /// <summary>How likely each of <see cref="Partners"/> is, relative to the others.</summary>
+    public float[] PartnerWeights { get; internal set; } = [];
 }
 
 /// <summary>A word for how much ore a sector carries, and the richness at which it starts to apply.</summary>
@@ -125,11 +134,26 @@ public struct Asteroid
     /// <summary>Which of the shared rock shapes this one uses.</summary>
     public int Shape;
 
-    /// <summary>Index of the resource the asteroid carries, or -1 for bare rock.</summary>
+    /// <summary>Index of the asteroid's main ore, or -1 for bare rock.</summary>
     public int Resource;
 
-    /// <summary>How rich the asteroid is in its resource, from 0 to 1.</summary>
+    /// <summary>The share of the asteroid that is its main ore, from 0 to 1. No other share is larger.</summary>
     public float Grade;
+
+    /// <summary>Index of the first resource mixed in with the main ore, or -1 for none.</summary>
+    public int Mix1;
+
+    /// <summary>The share of the asteroid that is <see cref="Mix1"/>; zero without one.</summary>
+    public float Mix1Share;
+
+    /// <summary>Index of the second resource mixed in, or -1 for none. There is never a second without a first.</summary>
+    public int Mix2;
+
+    /// <summary>The share of the asteroid that is <see cref="Mix2"/>; zero without one, and never above the first's.</summary>
+    public float Mix2Share;
+
+    /// <summary>The share of the asteroid that is ore of any kind. The rest is rock, and there is always some.</summary>
+    public readonly float Ore => Grade + Mix1Share + Mix2Share;
 }
 
 /// <summary>
@@ -276,7 +300,7 @@ public sealed class Galaxy
     /// content identity, which a save is held to as well. It is not the network protocol's version, which
     /// changes for reasons a save does not care about.
     /// </summary>
-    public const int GenerationVersion = 7;
+    public const int GenerationVersion = 8;
 
     /// <summary>The most resources the content may define: a sector's resources travel as one bit each.</summary>
     public const int MaxResources = 16;
@@ -468,6 +492,30 @@ public sealed class Galaxy
             throw new InvalidDataException($"{path}: needs at least one star class and one name syllable");
         if (resources.Count > MaxResources)
             throw new InvalidDataException($"{path}: at most {MaxResources} resources");
+
+        // Partners name other resources, which may be listed later, so they are resolved once all are known.
+        var listed = 0;
+        foreach (var resource in root.GetProperty("resources"u8).EnumerateArray())
+        {
+            var owner = resources[listed++];
+            var partners = new List<int>();
+            var weights = new List<float>();
+            foreach (var partner in resource.GetProperty("partners"u8).EnumerateArray())
+            {
+                var id = partner.GetProperty("id"u8).GetString();
+                var index = resources.FindIndex(r => r.Id == id);
+                var weight = partner.GetProperty("weight"u8).GetSingle();
+                if (index < 0 || ReferenceEquals(resources[index], owner) || partners.Contains(index))
+                    throw new InvalidDataException($"{path}: {owner.Id}: partner '{id}' must be another resource, named once");
+                if (!float.IsFinite(weight) || weight <= 0)
+                    throw new InvalidDataException($"{path}: {owner.Id}: partner '{id}' needs a positive weight");
+                partners.Add(index);
+                weights.Add(weight);
+            }
+
+            owner.Partners = [.. partners];
+            owner.PartnerWeights = [.. weights];
+        }
 
         var sectorSize = root.GetProperty("sectorSize"u8).GetDouble();
         if (sectorSize > RockIndex.MaxSectorSize)

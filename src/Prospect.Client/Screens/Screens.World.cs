@@ -902,8 +902,15 @@ internal sealed partial class ScreenHost
         }
         else if (snapshot.Modules.Records[analysis].Resource is >= 0 and var resource && resource < galaxy.Resources.Length)
         {
+            ref var found = ref snapshot.Modules.Records[analysis];
             Row("Resource"u8, galaxy.Resources[resource].Name);
-            Row("Grade"u8, Kit.F($"{snapshot.Modules.Records[analysis].Grade * 100:0} %"));
+            Row("Grade"u8, found.Grade > 0 ? Kit.F($"{found.Grade * 100:0} %") : "Trace"u8);
+            var first = MixText(galaxy, found.Mix1, found.Mix1Share);
+            var second = MixText(galaxy, found.Mix2, found.Mix2Share);
+            if (second.Length != 0)
+                Row("Mixed in"u8, Kit.F($"{first}, {second}"));
+            else if (first.Length != 0)
+                Row("Mixed in"u8, first);
         }
         else
         {

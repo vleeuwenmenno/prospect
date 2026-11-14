@@ -416,15 +416,16 @@ Environment flags and cloud kinds are derived, not persisted. Lightning phase us
 Save codec remains 3: settings already encode a variable count of id/value pairs; its admitted capacity is now 64.
 Ice retains a stable appended resource index. Mining inventory is not yet implemented or saved.
 
-## Module observations (codec 4)
+## Module observations (codec 5)
 
 WorldSnapshot.ModuleObservations retains personal gas samples, asteroid analysis and locator observations.
 ModuleObservationCount selects the valid prefix; capacity is MaxOwners × 1024, reserved before the server starts.
 The server checks capacity before adding knowledge and captures without allocation; only SaveWorker touches the store.
 The save layout is separate from ModuleSurvey network messages.
 
-The decoder refuses foreign/missing owners, duplicate family/sector/index keys, future timestamps, invalid finite ranges,
+An asteroid analysis stores its main ore and up to two mix-ins with their shares, 131 bytes an observation.
+The decoder refuses foreign/missing owners, duplicate family/sector/index keys, future timestamps, invalid finite ranges, impossible mixes,
 unsupported content revisions and excessive counts before accepting the snapshot.
 Server restoration additionally validates resource ids and that each named cloud/asteroid exists under the saved generator.
 Observation timestamps and reported values survive unchanged; operation progress and cooldowns reset.
-Generation 7, evaluator 10 and codec 4 make older worlds incompatible; they are refused without writes or migration.
+Generation 8, evaluator 10 and codec 5 make older worlds incompatible; they are refused without writes or migration.

@@ -1042,8 +1042,8 @@ public sealed class AsteroidSettingTests
         foreach (var resource in Content.Galaxy.Resources)
         {
             assignments.Add(resource.Id + "Abundance=" + (resource.Id == "copper" ? "4" : "0"));
-            assignments.Add(resource.Id + "GradeMin=0.75");
-            assignments.Add(resource.Id + "GradeMax=0.75");
+            assignments.Add(resource.Id + "GradeMin=0.6");
+            assignments.Add(resource.Id + "GradeMax=0.6");
         }
         var world = World(assignments.ToArray());
         var galaxy = world.Galaxy.WithSeed(42);
@@ -1064,7 +1064,7 @@ public sealed class AsteroidSettingTests
                 if (rock.Resource < 0) continue;
                 ores++;
                 Assert.Equal(copper, rock.Resource);
-                Assert.Equal(0.75f, rock.Grade);
+                Assert.Equal(0.6f, rock.Grade);
                 Assert.True(available.Summarize(coord).Character.Has(copper));
             }
         }
@@ -1212,7 +1212,7 @@ public sealed class AsteroidSettingTests
             galaxy.Generate(coord, sector);
             foreach (var rock in sector.Asteroids.Take(sector.AsteroidCount))
             {
-                Assert.InRange(rock.Grade, 0, 1);
+                Assert.InRange(rock.Ore, 0, galaxy.AsteroidFields!.MaxOre + 1e-6f);
                 if (rock.Resource >= 0) Assert.True(sector.Summary.Character.Has(rock.Resource));
             }
         }

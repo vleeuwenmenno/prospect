@@ -165,11 +165,16 @@ public sealed class SaveLifecycleTests
                 Position = rig.Server.Galaxy.CenterOf(sector) + rock.LocalPosition,
                 Radius = rock.Radius,
                 Mass = rig.Rocks.Mass(rock.Radius),
-                Resource = rock.Resource,
-                Grade = rock.Grade
+                // A full composition: a main ore, a mix-in with a resolved share and one that is only a trace.
+                Resource = 0,
+                Grade = 0.4f,
+                Mix1 = 2,
+                Mix1Share = 0.1f,
+                Mix2 = 1,
+                Mix2Share = 0
             }));
             Assert.True(rig.Server.RecordModuleObservation(new ModuleObservation
-            { Owner = owner, Family = ModuleFamily.AsteroidLocator, Sector = sector, Index = 0, Resource = rock.Resource, RecordedTick = rig.WorldTick - 1 }));
+            { Mix1 = -1, Mix2 = -1, Owner = owner, Family = ModuleFamily.AsteroidLocator, Sector = sector, Index = 0, Resource = rock.Resource, RecordedTick = rig.WorldTick - 1 }));
             var galaxy = rig.Server.Galaxy;
             var found = false;
             for (var x = -150; x < 150 && !found; x++)
@@ -180,6 +185,8 @@ public sealed class SaveLifecycleTests
                     var gas = galaxy.GasComposition!.Sample(galaxy, placement, position);
                     Assert.True(rig.Server.RecordModuleObservation(new ModuleObservation
                     {
+                        Mix1 = -1,
+                        Mix2 = -1,
                         Owner = owner,
                         Family = ModuleFamily.GasScanner,
                         Sector = placement.Anchor,
@@ -206,6 +213,8 @@ public sealed class SaveLifecycleTests
             Assert.Equal(expected[i].Position, actual[i].Position);
             Assert.Equal(expected[i].Mass, actual[i].Mass);
             Assert.Equal(expected[i].Grade, actual[i].Grade);
+            Assert.Equal(expected[i].Resource, actual[i].Resource);
+            Assert.Equal((expected[i].Mix1, expected[i].Mix1Share, expected[i].Mix2, expected[i].Mix2Share), (actual[i].Mix1, actual[i].Mix1Share, actual[i].Mix2, actual[i].Mix2Share));
             Assert.Equal(expected[i].Gas.Purity, actual[i].Gas.Purity);
             for (var gas = 0; gas < GasComposition.Capacity; gas++) Assert.Equal(expected[i].Gas.Shares[gas], actual[i].Gas.Shares[gas]);
         }
@@ -217,6 +226,15 @@ public sealed class SaveLifecycleTests
         snapshot.ModuleObservations[0] = record;
         snapshot.ModuleObservations[0].RecordedTick = snapshot.NextWorldTick;
         Assert.False(WorldSnapshotCodec.TryDecode(WorldSnapshotCodec.Encode(snapshot), SaveLimits.Default, out _, out _));
+        // A mix that cannot be: the main ore named again, and a second share above the first.
+        Assert.Equal((ModuleFamily.AsteroidScanner, 0, 2, 1), (record.Family, record.Resource, record.Mix1, record.Mix2));
+        snapshot.ModuleObservations[0] = record;
+        snapshot.ModuleObservations[0].Mix1 = record.Resource;
+        Assert.False(WorldSnapshotCodec.TryDecode(WorldSnapshotCodec.Encode(snapshot), SaveLimits.Default, out _, out _));
+        snapshot.ModuleObservations[0] = record;
+        snapshot.ModuleObservations[0].Mix2Share = 0.2f;
+        Assert.False(WorldSnapshotCodec.TryDecode(WorldSnapshotCodec.Encode(snapshot), SaveLimits.Default, out _, out _));
+
         snapshot.ModuleObservations[0] = record;
         snapshot.ModuleObservations[1] = record;
         Assert.False(WorldSnapshotCodec.TryDecode(WorldSnapshotCodec.Encode(snapshot), SaveLimits.Default, out _, out _));
@@ -338,7 +356,7 @@ public sealed class SaveLifecycleTests
 
         var sector = SaveRig.RockySector(rig.Rocks);
         Assert.True(rig.Server.RecordModuleObservation(new ModuleObservation
-        { Owner = hulls.Info(0).Owner, Family = ModuleFamily.AsteroidLocator, Sector = sector, Index = 0, Resource = -1, RecordedTick = tick - 1 }));
+        { Mix1 = -1, Mix2 = -1, Owner = hulls.Info(0).Owner, Family = ModuleFamily.AsteroidLocator, Sector = sector, Index = 0, Resource = -1, RecordedTick = tick - 1 }));
         Assert.True(rig.Rocks.Set(new RockDelta { Rock = new RockRef(sector, 0), Offset = new Vector3(1, 2, 3), Velocity = new Vector3(0.5f, 0, -0.25f), StartTick = tick - 3 }));
         Assert.True(rig.Rocks.Set(new RockDelta { Rock = new RockRef(sector, 3), Offset = new Vector3(-4, 0, 9), Velocity = new Vector3(0, 0.75f, 0), StartTick = tick - 2 }));
     }
@@ -1211,6 +1229,8 @@ public sealed class SaveLifecycleTests
     [InlineData("fleet role")]
     [InlineData("dent")]
     [InlineData("clock")]
+    [InlineData("mix-in outside the catalogue")]
+    [InlineData("mix-in named twice")]
     public void ASaveThatDoesNotHoldTogetherIsRefusedWholeAndItsStoreReleased(string what)
     {
         var folder = PopulatedWorld();
@@ -1270,6 +1290,13 @@ public sealed class SaveLifecycleTests
                     break;
                 case "rock from the future":
                     world.Rocks[0].StartTick = world.NextWorldTick + 5;
+                    break;
+                case "mix-in outside the catalogue":
+                    // Well formed, so the codec takes it; the world it names has no such resource.
+                    world.ModuleObservations[0] = world.ModuleObservations[0] with { Family = ModuleFamily.AsteroidScanner, Resource = 0, Grade = 0.4f, Mix1 = 31, Mix1Share = 0.1f };
+                    break;
+                case "mix-in named twice":
+                    world.ModuleObservations[0] = world.ModuleObservations[0] with { Family = ModuleFamily.AsteroidScanner, Resource = 0, Grade = 0.4f, Mix1 = 2, Mix1Share = 0.1f, Mix2 = 2 };
                     break;
                 case "rock that is no number":
                     world.Rocks[0].Velocity = new Vector3(float.PositiveInfinity, 0, 0);

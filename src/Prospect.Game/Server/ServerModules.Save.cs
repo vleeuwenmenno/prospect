@@ -30,7 +30,8 @@ public sealed partial class ServerHost
         foreach (var record in world.ModuleObservations.AsSpan(0, world.ModuleObservationCount))
         {
             if (!ModuleObservationRules.Valid(record) || OwnerSlot(record.Owner) < 0
-                || record.RecordedTick >= world.NextWorldTick || record.Resource >= Galaxy.Resources.Length)
+                || record.RecordedTick >= world.NextWorldTick || record.Resource >= Galaxy.Resources.Length
+                || record.Mix1 >= Galaxy.Resources.Length || record.Mix2 >= Galaxy.Resources.Length)
                 throw new InvalidDataException("Invalid saved module observation.");
             if (record.Family == ModuleFamily.GasScanner)
             {

@@ -135,6 +135,54 @@ public sealed class ModuleScanTests
     }
 
     [Theory]
+    [InlineData("Common")]
+    [InlineData("Alien Tech")]
+    public void AnAsteroidScanPublishesTheMixAsFarAsTheScannerResolvesIt(string quality)
+    {
+        using var rig = new Rig(quality: quality);
+        var galaxy = rig.Server.Galaxy;
+        var accuracy = rig.Content.Pod.Stats.AsteroidScanner.Accuracy;
+
+        // An asteroid with two mix-ins, the second of them under five points: a trace for a Common scanner.
+        var sector = new SectorContent();
+        RockRef? found = null;
+        Asteroid rock = default;
+        for (var x = 0; x < 40 && found is null; x++)
+        {
+            var coord = new SectorCoord(x, 0, 0);
+            galaxy.Generate(coord, sector);
+            for (var i = 0; i < sector.AsteroidCount && found is null; i++)
+                if (sector.Asteroids[i].Mix2 >= 0 && sector.Asteroids[i].Mix2Share < 0.045f && sector.Asteroids[i].Mix1Share > 0.055f)
+                { rock = sector.Asteroids[i]; found = new RockRef(coord, i); }
+        }
+        Assert.NotNull(found);
+        var target = found.Value;
+        rig.Hulls.State(rig.Hull()).Position = galaxy.CenterOf(target.Sector) + rock.LocalPosition + new Double3(0, rock.Radius + 200, 0);
+        rig.Server.RequestModuleScan(rig.Owner(), new(ModuleFamily.AsteroidScanner, target.Sector, target.Index));
+        rig.Until(() => rig.Scan().State == ModuleScanState.Completed);
+        var record = rig.Server.ModuleKnowledge(rig.Owner())[0];
+
+        // Every resource in the rock is named; a figure is whole steps of the scanner's resolution and never above the truth.
+        Assert.Equal((rock.Resource, rock.Mix1, rock.Mix2), (record.Resource, record.Mix1, record.Mix2));
+        Assert.Equal(ModuleScanRules.Resolved(rock.Grade, accuracy), record.Grade);
+        Assert.Equal(ModuleScanRules.Resolved(rock.Mix1Share, accuracy), record.Mix1Share);
+        Assert.Equal(ModuleScanRules.Resolved(rock.Mix2Share, accuracy), record.Mix2Share);
+        Assert.True(record.Grade <= rock.Grade + 1e-6f && record.Mix1Share <= rock.Mix1Share + 1e-6f && record.Mix2Share <= rock.Mix2Share + 1e-6f);
+        Assert.True(record.Grade > 0 && record.Mix1Share > 0);
+        if (quality == "Common")
+            Assert.Equal(0f, record.Mix2Share);
+        else
+            Assert.True(record.Mix2Share > 0);
+
+        // The owner's client is sent the same observation, mix and all.
+        rig.Until(() => rig.Clients[0].AcquireSnapshot().Modules.Count == 1);
+        var seen = rig.Clients[0].AcquireSnapshot().Modules.Records[0];
+        Assert.Equal((record.Resource, record.Grade, record.Mix1, record.Mix1Share, record.Mix2, record.Mix2Share, record.Mass),
+            (seen.Resource, seen.Grade, seen.Mix1, seen.Mix1Share, seen.Mix2, seen.Mix2Share, seen.Mass));
+        Assert.Equal(0, rig.Wires[0].Leaks + rig.Wires[1].Leaks);
+    }
+
+    [Theory]
     [InlineData(ModuleFamily.GasScanner)]
     [InlineData(ModuleFamily.AsteroidScanner)]
     [InlineData(ModuleFamily.AsteroidLocator)]
@@ -345,7 +393,7 @@ public sealed class ModuleScanTests
     {
         var equipment = GameContent.Load().Blocks.Get("gasScanner").Module;
         var selected = ModuleEquipment.Of(1, equipment);
-        var record = new ModuleObservation { Family = ModuleFamily.GasScanner };
+        var record = new ModuleObservation { Mix1 = -1, Mix2 = -1, Family = ModuleFamily.GasScanner };
         record.Gas.Shares[0] = .92f; record.Gas.Shares[1] = .08f;
         var probe = new AllocationProbe();
         while (probe.Measuring())

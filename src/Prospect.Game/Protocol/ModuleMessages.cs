@@ -7,7 +7,7 @@ namespace Prospect.Game.Protocol;
 public static class ModuleMessage
 {
     public const int RequestWireSize = 18;
-    public const int ObservationWireSize = 115;
+    public const int ObservationWireSize = 131;
     public const int MaxObservations = 8;
     public const int HeaderWireSize = 95;
     public const int MaxWireSize = HeaderWireSize + MaxObservations * ObservationWireSize;
@@ -73,6 +73,7 @@ public static class ModuleMessage
         writer.WriteUInt32(record.Owner); writer.WriteByte((byte)record.Family); writer.WriteByte((byte)record.Quality);
         Sector(ref writer, record.Sector); writer.WriteInt32(record.Index); writer.WriteInt64(record.RecordedTick); writer.WriteUInt32(record.ContentRevision);
         Position(ref writer, record.Position); writer.WriteSingle(record.Radius); writer.WriteSingle(record.Mass); writer.WriteSingle(record.Grade); writer.WriteInt32(record.Resource);
+        writer.WriteInt32(record.Mix1); writer.WriteSingle(record.Mix1Share); writer.WriteInt32(record.Mix2); writer.WriteSingle(record.Mix2Share);
         for (var i = 0; i < GasComposition.Capacity; i++) writer.WriteSingle(record.Gas.Shares[i]);
         writer.WriteSingle(record.Gas.Purity); writer.WriteSingle(record.Gas.Density); writer.WriteByte(record.Gas.Region);
     }
@@ -92,7 +93,11 @@ public static class ModuleMessage
             Radius = reader.ReadSingle(),
             Mass = reader.ReadSingle(),
             Grade = reader.ReadSingle(),
-            Resource = reader.ReadInt32()
+            Resource = reader.ReadInt32(),
+            Mix1 = reader.ReadInt32(),
+            Mix1Share = reader.ReadSingle(),
+            Mix2 = reader.ReadInt32(),
+            Mix2Share = reader.ReadSingle()
         };
         for (var i = 0; i < GasComposition.Capacity; i++) record.Gas.Shares[i] = reader.ReadSingle();
         record.Gas.Purity = reader.ReadSingle(); record.Gas.Density = reader.ReadSingle(); record.Gas.Region = reader.ReadByte();
