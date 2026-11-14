@@ -777,11 +777,15 @@ public sealed partial class ServerHost
     /// <summary>
     /// Creates a hull and gives it its durable name: a new one, or <paramref name="entity"/> for the hull that
     /// replaces another in a repair or an edit and is still that ship. Creating a hull can move the hull
-    /// storage: hold no reference into it across this call.
+    /// storage: hold no reference into it across this call. Tanks start full or empty as the caller says: a
+    /// first spawn and an escape drone are full; a ship built new and a hull that replaces another start empty
+    /// and the caller sets what the old one held.
     /// </summary>
-    private HullHandle CreateHull(uint owner, byte design, Double3 position, ulong entity = 0)
+    private HullHandle CreateHull(uint owner, byte design, Double3 position, bool fullTanks, ulong entity = 0)
     {
         var handle = _hulls.Create(owner, design, _content.Designs[design], position);
+        if (!fullTanks)
+            _hulls.State(handle.Index).Fuel = default;
         _hulls.Info(handle.Index).Entity = entity != 0 ? entity : _nextEntityId++;
         return handle;
     }
@@ -806,7 +810,7 @@ public sealed partial class ServerHost
         var hull = owner.Controlled != 0 ? FindEntity(owner.Controlled, owner.Id) : default;
         if (!hull.IsValid)
         {
-            hull = CreateHull(owner.Id, (byte)_content.DroneDesign, SpawnPoint);
+            hull = CreateHull(owner.Id, (byte)_content.DroneDesign, SpawnPoint, fullTanks: true);
             ref var drone = ref _hulls.Info(hull.Index);
             drone.EscapeDrone = true;
             drone.DamageTick = _tick;

@@ -154,7 +154,6 @@ internal sealed class ShipEditor(JobSystem jobs)
     private float _ownHull;
     private uint _ownRevision;
     private int _ownDents;
-    private FuelFlow _ownFuel;
 
     // The merge the details panel offers, worked out again only when the draft or the selection changes.
     private int _mergeDraftVersion = -1;
@@ -346,19 +345,11 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// <summary>True when the ship has lost or worn blocks, or was repaired before, so its blueprint can rebuild it.</summary>
     public bool Damaged => Source is { } source && source.NeedsRepair(_ownRevision, _ownHull, _ownDents);
 
-    /// <summary>
-    /// True when the ship's tanks hold less than they can: rebuilding it fills them, which is the only way to
-    /// refuel for now. No damage: the ship can still be edited. An intact ship's tanks are its design's, so this
-    /// is what the server asks with <see cref="HullDesign.NeedsRefuel"/>.
-    /// </summary>
-    public bool LowOnFuel =>
-        _ownFuel.Amount.Nitrogen < _ownFuel.Capacity.Nitrogen || _ownFuel.Amount.Hydrazine < _ownFuel.Capacity.Hydrazine || _ownFuel.Amount.Bipropellant < _ownFuel.Capacity.Bipropellant;
-
     /// <summary>Why the ship cannot be repaired from the blueprint now, or <see cref="RepairBlock.None"/>.</summary>
     public RepairBlock RepairState =>
         Stage != EditorStage.Editing || Draft is null || Source is null || Server.Phase != EditorPhase.Open || Server.Pending || Server.Token == 0 || Server.Hull != Hull
             ? RepairBlock.Busy
-            : !Damaged && !LowOnFuel ? RepairBlock.NotDamaged
+            : !Damaged ? RepairBlock.NotDamaged
             : Dirty ? RepairBlock.Unsaved
             : RepairBlock.None;
 
@@ -607,7 +598,6 @@ internal sealed class ShipEditor(JobSystem jobs)
                     _ownHull = hull.Hull;
                     _ownRevision = hull.Revision;
                     _ownDents = hull.Visual.Count;
-                    _ownFuel = hull.Fuel;
                 }
 
                 if (own.Id != _pilotHull || edited < 0)
@@ -1452,7 +1442,6 @@ internal sealed class ShipEditor(JobSystem jobs)
         _ownHull = own.Hull;
         _ownRevision = own.Revision;
         _ownDents = own.Visual.Count;
-        _ownFuel = own.Fuel;
         Notice = Refusal = EditorReason.None;
         NoticeApplied = false;
         Carry = EditorCarry.None;

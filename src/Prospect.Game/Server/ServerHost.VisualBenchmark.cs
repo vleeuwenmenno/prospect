@@ -55,7 +55,7 @@ public sealed partial class ServerHost
                 var index = (byte)(scene.Large ? _content.Designs.Length - 1 : _content.StartingFleet[i % _content.StartingFleet.Length]);
                 var design = _content.Designs[index];
                 var position = SpawnPoint + new Double3((i % 7 - 3) * (scene.Large ? 40 : 16), (i / 7 - 2) * (scene.Large ? 32 : 14), scene.View == "far" ? -1200 : scene.View == "behind" ? 200 : scene.Large ? -260 : -100);
-                var h = CreateHull(0, index, position);
+                var h = CreateHull(0, index, position, fullTanks: true);
                 _benchmarkHulls[i] = h;
                 if (scene.Activity is "clean" or "repair" or "jump") continue;
                 for (var b = 0; b < design.BlockCount && _hulls.Info(h.Index).Visual.Count < 16; b++)
@@ -71,7 +71,7 @@ public sealed partial class ServerHost
             {
                 if (_hulls.IsAlive(_benchmarkHulls[i])) _hulls.Destroy(_benchmarkHulls[i]);
                 var index = (byte)(scene.Large ? _content.Designs.Length - 1 : _content.StartingFleet[i % _content.StartingFleet.Length]);
-                _benchmarkHulls[i] = CreateHull(0, index, SpawnPoint + new Double3(i * 30 - 15, 0, -35));
+                _benchmarkHulls[i] = CreateHull(0, index, SpawnPoint + new Double3(i * 30 - 15, 0, -35), fullTanks: true);
             }
         // Re-stage two existing bodies, then let the ordinary collision solver decide the contact and damage.
         if (scene.Activity != "impacts" || tick % 60 != 30) return;

@@ -172,8 +172,8 @@ public sealed class HullDesignTests
             Assert.Equal(recharge, flight.ShieldRecharge);
             Assert.Equal(8f, flight.ShieldDelay);
             Assert.Equal(2f, flight.BoostMultiplier);
-            Assert.Equal(9.4f, flight.BoostPowerMultiplier);
-            Assert.Equal(2.5f, flight.BoostFuelMultiplier);
+            Assert.Equal(4.5f, flight.BoostPowerMultiplier);
+            Assert.Equal(4.5f, flight.BoostFuelMultiplier);
             Assert.Equal(60f * MathF.Sqrt(flight.Acceleration.Z), flight.MaxSpeed, 4);
             Assert.Equal(flight.MaxSpeed * 2f, flight.BoostMaxSpeed);
             Assert.Equal(flight.Acceleration.Z, hull.Stats.Acceleration);
@@ -235,10 +235,13 @@ public sealed class PowerAndDamageTests
     {
         var state = HullState.Spawn(Double3.Zero, Pod);
         var boost = new FlightInput { Forward = 127, Boost = true };
-        for (var i = 0; i < 120; i++)
+
+        // Boost drains the battery, but no longer in seconds: five seconds of it take a visible share, not all.
+        for (var i = 0; i < 300; i++)
             FlightModel.Step(ref state, boost, Pod, HullSim.Dt);
         var drained = state.Energy;
-        Assert.True(drained < Pod.EnergyStorage * 0.8f);
+        Assert.True(drained < Pod.EnergyStorage * 0.85f);
+        Assert.True(drained > Pod.EnergyStorage * 0.5f);
 
         // Coasting, the surplus of generation over idle draw goes back into the battery at exactly that rate.
         for (var i = 0; i < 60; i++)
@@ -291,7 +294,10 @@ public sealed class PowerAndDamageTests
     [Fact]
     public void RunningBoostCarriesOnBelowTheFloorAndCutsOutWhenTheBatteryIsEmpty()
     {
+        // Boost takes a share of the generator's output and then the battery: from a low battery the energy
+        // runs out well before the drive's heat does.
         var state = HullState.Spawn(Double3.Zero, Pod);
+        state.Energy = Pod.EnergyStorage * 0.1f;
         var boost = new FlightInput { Forward = 127, Boost = true };
         var belowFloorWhileBoosting = false;
         var ticks = 0;
@@ -1959,6 +1965,22 @@ public sealed class FlightSessionTests
     {
         using var session = GameSession.StartLocal(new ServerConfig { MaxPlayers = 1 }, Content, "Pilot");
         WaitForOwnHull(session);
+
+        // Boost draws less than the generator and battery can give for tens of seconds and the drive overheats
+        // sooner, so start from a nearly flat battery: the server's, until the client has heard of it.
+        var nonPublic = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var host = (ServerHost)typeof(GameSession).GetField("_server", nonPublic)!.GetValue(session)!;
+        var hulls = (HullStore)typeof(ServerHost).GetField("_hulls", nonPublic)!.GetValue(host)!;
+        var low = Content.Pod.Flight.EnergyStorage * 0.1f;
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            var current = session.Client.AcquireSnapshot();
+            if (current.OwnHull >= 0 && current.Hulls[current.OwnHull].Energy <= low * 1.5f)
+                break;
+            if (current.OwnHull >= 0)
+                hulls.State((int)(current.Hulls[current.OwnHull].Id & 0xFFFF)).Energy = low;
+            Thread.Sleep(20);
+        }
 
         // Boost with the nose swinging until the battery runs dry, and keep holding it: boost cuts out at empty
         // and comes back only once the battery has climbed over its floor, on both sides alike.

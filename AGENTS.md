@@ -283,8 +283,10 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   which kinds of part fire), which every hull record carries, so effects read it for any hull and never work
   thrust out a second way. Only the own hull's tanks are sent (`SnapshotHeader.OwnFuel`): a record has four bytes
   to spare before 255 of them no longer fit a snapshot (`ProtocolTests`). A fuel a hull has none of gives no
-  thrust; never add thrust that skips the tanks. Nothing refuels but a rebuild (`HullState.Spawn` fills the tanks;
-  `HullDesign.NeedsRefuel` lets a repair through for that alone). A new facing-dependent figure goes through
+  thrust; never add thrust that skips the tanks. Nothing refuels. `ServerHost.CreateHull` says whether tanks start
+  full: a first spawn (`SpawnFleet`) and an escape drone are full; a ship built new from the drone starts empty; a
+  hull that replaces another (edit or repair, `ReplaceHull`) keeps the old hull's fuel per fuel, clamped to the new
+  design's capacity, so new tanks add room, not fuel, and a repair restores blocks, never fuel. A new facing-dependent figure goes through
   `ScaledFigures` and bumps `ContentIdentity.EvaluatorVersion`; a new fuel needs a `FuelKind`, a slot in
   `FuelTanks` and `ThrustTable`, the wire, the save codec and a load rule. Size limits per type are `maxSide` in
   `blocks.json` (`BoxDesign.MaxSide`). Figures and rules in `docs/roadmap/propulsion.md`; `PropulsionTests` holds

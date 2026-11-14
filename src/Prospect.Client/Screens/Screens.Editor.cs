@@ -782,28 +782,14 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
-    /// Repair, for a damaged ship: rebuilds it as built, and says why it cannot when it cannot. A whole ship with
-    /// room in its tanks gets the same rebuild under the name Refuel, since nothing else fills a tank yet.
+    /// Repair, for a damaged ship: rebuilds it as built, and says why it cannot when it cannot. A repair restores
+    /// blocks, never fuel.
     /// </summary>
     private void DrawRepair(ShipEditor editor, PlayerInputBridge bridge, float width)
     {
         var state = editor.RepairState;
         if (!editor.Damaged)
-        {
-            if (!editor.LowOnFuel)
-                return;
-            Kit.Space(Theme.Space2);
-            if (EditorButton("##refuel"u8, "Refuel ship"u8, new float2(width, Kit.Px(28)), state == RepairBlock.None))
-                editor.Repair(bridge);
-            Kit.Space(Theme.Space1);
-            Paragraph(state == RepairBlock.Busy ? Theme.Bad : Theme.TextDim, state switch
-            {
-                RepairBlock.None => "Rebuilds the ship as built, with every tank full. Nothing else refuels a ship yet."u8,
-                RepairBlock.Unsaved => "Applying your changes fills every tank too."u8,
-                _ => "Waiting for the server."u8,
-            }, width);
             return;
-        }
 
         Kit.Space(Theme.Space2);
         Paragraph(Theme.Bad, "Repair first: a damaged ship cannot be edited. You can still look around and select blocks."u8, width);
@@ -823,7 +809,7 @@ internal sealed partial class ScreenHost
 
         Paragraph(state == RepairBlock.None ? Theme.TextDim : Theme.Bad, state switch
         {
-            RepairBlock.None => "Rebuilds every lost or worn block as the ship was built, with every tank full. Shield and battery charge stay as they are."u8,
+            RepairBlock.None => "Rebuilds every lost or worn block as the ship was built. Fuel, shield and battery charge stay as they are."u8,
             _ => "Waiting for the server."u8,
         }, width);
     }

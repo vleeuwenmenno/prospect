@@ -117,7 +117,7 @@ public sealed partial class ServerHost
         if (reason != EditorReason.None) { EndEdit(connection, reason); return; }
         // Recheck after DesignReady: both the drone and obstacles may have moved while the client loaded.
         if (!NewShipPosition(connection, shape, out var position)) { EndEdit(connection, EditorReason.NoClearSpot); return; }
-        var next = CreateHull(connection.PlayerId, design, position);
+        var next = CreateHull(connection.PlayerId, design, position, fullTanks: false);
         _hulls.State(next.Index).Orientation = _hulls.State(connection.Hull.Index).Orientation;
         connection.CreatingShip = false;
         connection.RemoteEdit = true;
