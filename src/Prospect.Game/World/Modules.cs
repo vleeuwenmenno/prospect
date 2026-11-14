@@ -55,3 +55,12 @@ public readonly record struct ModuleSpec(ModuleFamily Family, ModuleQuality Qual
             Figure("powerDraw"), Figure("cooldownSeconds"));
     }
 }
+
+/// <summary>The chosen live block of one module family and its content-derived figures. Block is one-based; zero means absent.</summary>
+public readonly record struct ModuleEquipment(int Block, ModuleQuality Quality, int Mark, double Range,
+    double Accuracy, double ScanSeconds, double PowerDraw, double CooldownSeconds)
+{
+    /// <summary>Copies the selected block's evaluated specification without allocating.</summary>
+    internal static ModuleEquipment Of(int block, in ModuleSpec spec) => block == 0 ? default :
+        new(block, spec.Quality, spec.Mark, spec.Range, spec.Accuracy, spec.ScanSeconds, spec.PowerDraw, spec.CooldownSeconds);
+}

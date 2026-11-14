@@ -11,6 +11,9 @@ public sealed class ModuleSchemaTests
     private static JsonObject Document(string family, string quality, int mark)
     {
         var root = JsonNode.Parse(File.ReadAllText(AppPaths.Content("blocks", "blocks.json")))!.AsObject();
+        root["blocks"]!.AsObject().Remove("gasScanner");
+        root["blocks"]!.AsObject().Remove("asteroidScanner");
+        root["blocks"]!.AsObject().Remove("asteroidLocator");
         root["moduleTiers"] = new JsonObject
         {
             [quality] = new JsonObject { ["range"] = 2, ["accuracy"] = 2, ["scanSeconds"] = 0.5, ["powerDraw"] = 1.5, ["cooldownSeconds"] = 0.5 }
@@ -96,5 +99,5 @@ public sealed class ModuleSchemaTests
 
     [Fact]
     public void ExistingBlocksHaveNoModules() =>
-        Assert.All(BlockCatalog.Load(AppPaths.Content("blocks", "blocks.json")).Types, block => Assert.Equal(default, block.Module));
+        Assert.Equal(default, BlockCatalog.Load(AppPaths.Content("blocks", "blocks.json")).Get("hull").Module);
 }

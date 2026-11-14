@@ -32,7 +32,54 @@
     "ftlArrivalReach": 6.0,
     "ftlArrivalPulseMass": 100.0
   },
+  "moduleTiers": {
+      "Common": {
+          "range": 1,
+          "accuracy": 1,
+          "scanSeconds": 1,
+          "powerDraw": 1,
+          "cooldownSeconds": 1
+      },
+      "Uncommon": {
+          "range": 1.25,
+          "accuracy": 1.5,
+          "scanSeconds": 0.85,
+          "powerDraw": 1.1,
+          "cooldownSeconds": 0.9
+      },
+      "Rare": {
+          "range": 1.5,
+          "accuracy": 2,
+          "scanSeconds": 0.7,
+          "powerDraw": 1.2,
+          "cooldownSeconds": 0.8
+      },
+      "Epic": {
+          "range": 2,
+          "accuracy": 3,
+          "scanSeconds": 0.55,
+          "powerDraw": 1.4,
+          "cooldownSeconds": 0.65
+      },
+      "Legendary": {
+          "range": 2.5,
+          "accuracy": 4,
+          "scanSeconds": 0.4,
+          "powerDraw": 1.6,
+          "cooldownSeconds": 0.5
+      },
+      "Alien Tech": {
+          "range": 3,
+          "accuracy": 5,
+          "scanSeconds": 0.25,
+          "powerDraw": 2,
+          "cooldownSeconds": 0.3
+      }
+  },
   "blocks": {
+    "gasScanner": {"name": "Gas scanner Common Mk I", "mass": 2, "hull": 200, "powerDraw": 0.1, "sizeRules": {"powerDraw": {"volumeExponent": 0}}, "module": {"family": "gasScanner", "quality": "Common", "mark": 1, "variant": "standard", "range": 1500, "accuracy": 0.2, "scanSeconds": 4, "powerDraw": 0.5, "cooldownSeconds": 10}},
+    "asteroidScanner": {"name": "Asteroid scanner Common Mk I", "mass": 2.5, "hull": 200, "powerDraw": 0.1, "sizeRules": {"powerDraw": {"volumeExponent": 0}}, "module": {"family": "asteroidScanner", "quality": "Common", "mark": 1, "variant": "standard", "range": 3000, "accuracy": 0.2, "scanSeconds": 5, "powerDraw": 0.75, "cooldownSeconds": 10}},
+    "asteroidLocator": {"name": "Asteroid locator Common Mk I", "mass": 3, "hull": 200, "powerDraw": 0.1, "sizeRules": {"powerDraw": {"volumeExponent": 0}}, "module": {"family": "asteroidLocator", "quality": "Common", "mark": 1, "variant": "standard", "range": 5000, "accuracy": 0.2, "scanSeconds": 2, "powerDraw": 1, "cooldownSeconds": 15}},
     "hull": { "name": "Hull plating", "mass": 2.0, "hull": 400 },
     "core": { "name": "Computer core", "mass": 3.0, "hull": 300, "powerDraw": 0.2, "core": true, "sizeRules": { "powerDraw": { "volumeExponent": 0 } } },
     "generator": { "name": "Generator", "mass": 4.0, "hull": 200, "powerOutput": 6.0, "sizeRules": { "powerOutput": { "volumeExponent": 1.25 } } },

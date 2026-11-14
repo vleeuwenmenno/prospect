@@ -932,3 +932,12 @@ Generation 6 and content evaluator 9 cover cloud kinds, icicles and lightning se
 See [the gas contract](gas-clouds.md#decided-provisional-tunable-kinds-and-renderer-integration) for flags, timing and renderer duties.
 Settings capacity increases from 48 to 64; handshake and save bounds derive from that constant.
 All new tuning is in existing shared files (`galaxy/galaxy.json`, `rules/settings.json`, `rules/exploration.json`).
+
+## Scanning modules: phase 1
+
+Shared `blocks/blocks.json` now contains module tiers and the three Common Mk I scanner/locator blocks.
+Content identity evaluator is 10; protocol stays 45 until scan messages are added.
+`BoxHullSums` selects the highest live quality, then mark, then lowest block index for each family.
+The resulting `HullStats` equipment is shared by editor decoding and live hull evaluation.
+Module standby power is 0.1 MW per surviving block; active scan draw is a separate rated figure.
+Full figures and integration status: [modules](roadmap/modules.md).

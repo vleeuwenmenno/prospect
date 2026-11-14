@@ -2,8 +2,8 @@
 
 ## Implementation status
 
-Only the block metadata decoder is implemented on this branch.
-No scanner blocks, scan service, knowledge records, protocol messages or persistence are shipped yet.
+Phase 1 is implemented: three Common Mk I blocks, metadata decoding and live hull stats.
+Scan execution, knowledge, protocol publication and persistence are not implemented yet.
 UI workers must not treat this document as an available scan API.
 
 ## Decided: equipment
@@ -55,12 +55,12 @@ Marks are positive integers up to 255; variants are nonblank strings up to 32 ch
 `moduleTiers` lives alongside `blocks` in the existing shared `blocks.json` schema.
 Each quality entry multiplies range, accuracy, scanSeconds, powerDraw and cooldownSeconds.
 The decoder refuses unknown identities, invalid marks/variants, nonpositive/nonfinite figures and accuracy above one.
-No shipped content declares module metadata yet.
+The shipped block ids are `gasScanner`, `asteroidScanner` and `asteroidLocator`.
 
 ## Open: integration and tuning
 
 - Concrete ranges, power costs, durations, cooldowns, sample capacity and quality detail thresholds.
-- Selecting among duplicate modules, block resizing effects and power priority.
+- Active scan power priority. Duplicate selection and resizing are specified in the phase 1 contract.
 - Gas sample identity, spatial variation and whether composition extends the frozen generation hash.
 - Bounded sector preparation for locator scans and invalidation of remembered asteroid data after mining.
 - Final scan intent/result API, storage budgets and wire/save layouts.
@@ -68,3 +68,22 @@ No shipped content declares module metadata yet.
 Existing asteroid data has one resource index and one grade per asteroid, not a resource-share vector.
 The scanner must document that interpretation or extend generated composition deliberately.
 Existing clients receive the galaxy seed; owner-filtered results alone do not provide seed secrecy.
+
+## Phase 1 contract: installed equipment
+
+`HullStats.GasScanner`, `AsteroidScanner`, `AsteroidLocator` contain `ModuleEquipment`.
+`HullStats.Module(family)` selects one; `Block == 0` means absent, otherwise one-based design block index.
+All figures come from `BoxHullSums`, including live loss updates. Evaluator version is 10.
+The highest quality wins, then highest mark, then lowest block index. Extra blocks provide redundancy only.
+Size changes mass/hull normally, but not module performance or its 0.1 MW standby draw per block.
+`ModuleEquipment.PowerDraw` is additional active scan MW, to be consumed by the server in phase 3.
+
+| Common Mk I | Mass t | HP per cell | Range m | Scan s | Active MW | Cooldown s |
+| --- | --- | --- | --- | --- | --- | --- |
+| Gas scanner | 2 | 200 | 1500 | 4 | 0.5 | 10 |
+| Asteroid scanner | 2.5 | 200 | 3000 | 5 | 0.75 | 10 |
+| Asteroid locator | 3 | 200 | 5000 | 2 | 1 | 15 |
+
+Base accuracy is 0.2. All six tier multipliers are in `blocks/blocks.json.moduleTiers`.
+The editor's existing All list enumerates `BlockCatalog.Types`, so these blocks are placeable there.
+Palette grouping and labels remain the UI worker's task.

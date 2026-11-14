@@ -317,6 +317,18 @@ public sealed class BlockCatalog
 /// <summary>The figures on a hull's data sheet. All of them follow from its blocks.</summary>
 public struct HullStats
 {
+    /// <summary>The selected surviving equipment for each family; duplicates provide redundancy, not stacking.</summary>
+    public ModuleEquipment GasScanner, AsteroidScanner, AsteroidLocator;
+
+    /// <summary>Reads one family from the shared block evaluator.</summary>
+    public readonly ModuleEquipment Module(ModuleFamily family) => family switch
+    {
+        ModuleFamily.GasScanner => GasScanner,
+        ModuleFamily.AsteroidScanner => AsteroidScanner,
+        ModuleFamily.AsteroidLocator => AsteroidLocator,
+        _ => default
+    };
+
     public float HullPoints;
     public float ShieldCapacity;
     public float ShieldRecharge;

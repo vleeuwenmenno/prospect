@@ -29,7 +29,7 @@ public readonly struct ContentIdentity : IEquatable<ContentIdentity>
     /// what comes out while the content files stay as they are, so that two builds which would evaluate the same
     /// files differently do not pass for the same content.
     /// </summary>
-    public const uint EvaluatorVersion = 9;
+    public const uint EvaluatorVersion = 10;
 
     private readonly ulong _low;
     private readonly ulong _high;

@@ -28,6 +28,7 @@ public struct HullSum
 
     /// <summary>One more than the lowest id of a drive block under the node, or zero when there is none.</summary>
     internal int Drive;
+    internal int GasScanner, AsteroidScanner, AsteroidLocator;
 }
 
 /// <summary>
@@ -255,6 +256,12 @@ public sealed class BoxHullSums
             (sum.MaxX, sum.MaxY, sum.MaxZ) = (Math.Max(sum.MaxX, box.At.X + box.Size.X), Math.Max(sum.MaxY, box.At.Y + box.Size.Y), Math.Max(sum.MaxZ, box.At.Z + box.Size.Z));
         }
 
+        switch (box.Type.Module.Family)
+        {
+            case ModuleFamily.GasScanner: sum.GasScanner = SelectModule(sum.GasScanner, block + 1); break;
+            case ModuleFamily.AsteroidScanner: sum.AsteroidScanner = SelectModule(sum.AsteroidScanner, block + 1); break;
+            case ModuleFamily.AsteroidLocator: sum.AsteroidLocator = SelectModule(sum.AsteroidLocator, block + 1); break;
+        }
         sum.Count++;
 
         // Blocks are added in rising order, so the first drive seen is the lowest.
@@ -263,7 +270,7 @@ public sealed class BoxHullSums
     }
 
     /// <summary>Makes a node the sum of its two children.</summary>
-    private static void Merge(Span<HullSum> sums, int node)
+    private void Merge(Span<HullSum> sums, int node)
     {
         ref readonly var a = ref sums[node * 2 - 1];
         ref readonly var b = ref sums[node * 2];
@@ -271,6 +278,9 @@ public sealed class BoxHullSums
         for (var j = 0; j < Totals; j++)
             sum.Values[j] = a.Values[j] + b.Values[j];
         sum.Count = a.Count + b.Count;
+        sum.GasScanner = SelectModule(a.GasScanner, b.GasScanner);
+        sum.AsteroidScanner = SelectModule(a.AsteroidScanner, b.AsteroidScanner);
+        sum.AsteroidLocator = SelectModule(a.AsteroidLocator, b.AsteroidLocator);
         ref readonly var low = ref (a.Count == 0 ? ref b : ref a);
         ref readonly var high = ref (b.Count == 0 ? ref a : ref b);
         (sum.MinX, sum.MinY, sum.MinZ) = (Math.Min(low.MinX, high.MinX), Math.Min(low.MinY, high.MinY), Math.Min(low.MinZ, high.MinZ));
@@ -279,6 +289,19 @@ public sealed class BoxHullSums
         // The tree's shape does not keep the groups in file order from left to right, so the lowest id decides.
         sum.Drive = a.Drive == 0 ? b.Drive : b.Drive == 0 ? a.Drive : Math.Min(a.Drive, b.Drive);
     }
+
+    private int SelectModule(int a, int b)
+    {
+        if (a == 0) return b;
+        if (b == 0) return a;
+        var first = _boxes[a - 1].Type.Module;
+        var second = _boxes[b - 1].Type.Module;
+        if (first.Quality != second.Quality) return first.Quality > second.Quality ? a : b;
+        if (first.Mark != second.Mark) return first.Mark > second.Mark ? a : b;
+        return Math.Min(a, b);
+    }
+
+    private ModuleEquipment Equipment(int block) => block == 0 ? default : ModuleEquipment.Of(block, _boxes[block - 1].Type.Module);
 
     /// <summary>What a block of a type that fills this many cells adds, by the type's size rules.</summary>
     internal static HullSum.Numbers ScaledFigures(BlockType type, long cells, out bool drive, bool half = false)
@@ -398,6 +421,9 @@ public sealed class BoxHullSums
 
         stats = new HullStats
         {
+            GasScanner = Equipment(sum.GasScanner),
+            AsteroidScanner = Equipment(sum.AsteroidScanner),
+            AsteroidLocator = Equipment(sum.AsteroidLocator),
             HullPoints = hull,
             ShieldCapacity = shield,
             ShieldRecharge = recharge,
