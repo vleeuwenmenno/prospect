@@ -560,6 +560,9 @@ internal sealed class WorldView
     /// <summary>Whether the nose of the hull being flown is on <see cref="NavTarget"/>, close enough to jump.</summary>
     public bool NavAimed { get; private set; }
 
+    /// <summary>True once the hull has left on the plotted jump, so landing clears the NAV point.</summary>
+    private bool _navJumpMade;
+
     /// <summary>
     /// The server's refusal of the hull being flown's last plot or jump start, while it is news (see
     /// <see cref="NavRefusalAt"/>); <see cref="JumpRefusal.None"/> otherwise.
@@ -1845,13 +1848,19 @@ internal sealed class WorldView
         }
     }
 
-    /// <summary>Keeps the plotted jump current: gone once the hull is there, and whether the nose is on it.</summary>
+    /// <summary>
+    /// Keeps the plotted jump current: gone once the hull has made the jump (it left and has landed), never
+    /// merely because the hull already is in the destination's sector, and whether the nose is on it.
+    /// </summary>
     private void UpdateNav()
     {
-        if (NavTarget is not { } nav || InSectorOf(Own, nav) || !HasJumpDrive(Own))
+        if (NavTarget is not null && Own.Jump is JumpPhase.Tunnel or JumpPhase.Arrive)
+            _navJumpMade = true;
+        if (NavTarget is not { } nav || !HasJumpDrive(Own) || (_navJumpMade && Own.Jump == JumpPhase.None))
         {
             NavTarget = null;
             _plotPending = null;
+            _navJumpMade = false;
             NavAimed = false;
             return;
         }
@@ -2215,15 +2224,13 @@ internal sealed class WorldView
 
     /// <summary>
     /// True when a hull can be sent on a jump to <paramref name="target"/> now: it has a working drive, is not in
-    /// transit, the point is within the drive's range and not too close, and lies outside its sector.
+    /// transit, the point is within the drive's range and not too close, and the destination is inside or outside its sector.
     /// </summary>
     public bool CanJumpTo(in HullView hull, Double3 target) =>
         _snapshot is { } snapshot && JumpPlan.Check(snapshot, this, hull, target, out _) == JumpBlock.None;
 
     /// <summary>True when the hull still has a working faster-than-light drive; losing the drive block loses it.</summary>
     private static bool HasJumpDrive(in HullView hull) => hull.Stats.Ftl != FtlKind.None;
-
-    private bool InSectorOf(in HullView hull, Double3 target) => _galaxy is not null && _galaxy.SectorOf(HullPosition(hull)) == _galaxy.SectorOf(target);
 
     /// <summary>
     /// Sends exactly the selected hulls to a point in formation, and nothing when none is selected: unlike
@@ -2380,6 +2387,7 @@ internal sealed class WorldView
             if (_selected[i] == Own.Id && jump)
             {
                 NavTarget = order.Target;
+                _navJumpMade = false;
                 _plotPending = order.Target;
                 bridge.PlotJump(Own.Id, order.Target);
             }

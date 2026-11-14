@@ -56,9 +56,6 @@ internal sealed partial class ScreenHost
             case JumpBlock.Invalid:
                 color = Theme.Bad;
                 return "NOT A VALID DESTINATION"u8;
-            case JumpBlock.SameSector:
-                color = Theme.TextMute;
-                return Words(Distance((float)figures.Distance), "SAME SECTOR", "", default);
         }
 
         // A destination the drive can reach: what is known of it, and what a blind arrival could cost.
@@ -106,7 +103,6 @@ internal sealed partial class ScreenHost
             JumpBlock.NoShips => "NO SHIPS SELECTED"u8,
             JumpBlock.NoDrive => "NO WORKING JUMP DRIVE"u8,
             JumpBlock.Busy => "SHIP IN TRANSIT"u8,
-            JumpBlock.SameSector => "ALREADY IN THIS SECTOR"u8,
             JumpBlock.TooClose => Words(default, "TOO CLOSE:", "MINIMUM", Distance((float)rules.JumpMinimum)),
             JumpBlock.TooFar => Words(default, "TOO FAR:", "MAXIMUM", Distance(plan.MaxDistance)),
             _ => "NOT A VALID DESTINATION"u8,

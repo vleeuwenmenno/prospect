@@ -52,7 +52,7 @@
     "microbattery": { "name": "Drone battery", "mass": 0.3, "hull": 30, "energyStorage": 8 },
     "microengine": { "name": "Drone engine", "mass": 0.3, "hull": 30, "thrust": 24, "powerDraw": 0.3, "forwardOnly": true },
     "microthruster": { "name": "Drone thruster", "mass": 0.2, "hull": 30, "thrust": 11.2, "powerDraw": 0.15 },
-    "microgyro": { "name": "Drone gyro", "mass": 0.3, "hull": 30, "torque": 1.2, "powerDraw": 0.05 },
+    "microgyro": { "name": "Drone gyro", "mass": 0.3, "hull": 30, "torque": 0.3, "powerDraw": 0.05 },
     "microshield": { "name": "Drone shield", "mass": 0.3, "hull": 30, "shield": 120, "shieldRecharge": 5, "powerDraw": 0.2 },
     "sensor": { "name": "Passive sensor", "mass": 2, "hull": 400, "sensor": true },
     "charting": { "name": "Sector scanner", "mass": 2, "hull": 400, "charting": true }
