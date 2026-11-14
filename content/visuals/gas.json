@@ -9,5 +9,15 @@
   "farSamples": 10,
   "farDetail": 1,
   "maxDraws": 32,
-  "closeUp": { "fromHalfSize": 7000, "fullHalfSize": 10000, "strands": 0.9, "stepBend": 0.95, "reach": 0.8, "clearing": 0.6 }
+  "closeUp": { "fromHalfSize": 7000, "fullHalfSize": 10000, "strands": 0.9, "stepBend": 0.95, "reach": 0.8, "clearing": 0.6 },
+  "cold": { "tint": [0.74, 1.0, 1.5], "edge": 0.7, "knots": 1.15, "wisps": 1.25, "veil": 0.6, "extinction": 1.0, "halo": 0.8,
+            "sparkle": 3.0, "sparkleCell": 140, "sparkleShare": 0.05, "sparkleSize": 4 },
+  "lightning": { "tint": [0.82, 0.82, 0.9], "flashColor": [0.8, 0.92, 1.4], "flashRadius": 0.3, "flashReach": 3500, "flashSpread": 0.32,
+                 "strokes": 3, "strokeDecay": 0.14, "flicker": 0.5, "farFlash": 2.5,
+                 "bolts": 3, "boltCell": 2500, "boltCellChance": 0.1, "boltNear": 30000,
+                 "boltLengthMin": 900, "boltLengthMax": 2600, "boltSegment": 35, "boltJagged": 0.9,
+                 "boltBranch": 0.45, "boltDepth": 3,
+                 "boltColor": [30, 34, 45], "boltBrightness": 1.0, "boltWidth": 5, "boltGlowWidth": 70, "boltGlow": 0.015, "boltTip": 2,
+                 "boltGrow": 0.16, "boltHold": 0.14, "boltFade": 0.1, "boltAfterglow": 0.25, "boltFlicker": 0.6,
+                 "boltLight": 0.3, "boltLightRadius": 700 }
 }

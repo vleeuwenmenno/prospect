@@ -51,6 +51,8 @@ internal sealed class GasCloudField : IJob
     // The frame owns the front list always, and the back list except while a job is working on it.
     private GasCloudPlacement[] _front = new GasCloudPlacement[Capacity];
     private GasCloudPlacement[] _back = new GasCloudPlacement[Capacity];
+    private int[] _frontPartners = new int[Capacity];
+    private int[] _backPartners = new int[Capacity];
     private int _frontCount;
     private int _backCount;
     private Galaxy? _galaxy;
@@ -79,12 +81,21 @@ internal sealed class GasCloudField : IJob
     public ReadOnlySpan<GasCloudPlacement> Clouds(Galaxy galaxy) =>
         ReferenceEquals(galaxy, _galaxy) ? _front.AsSpan(0, _frontCount) : default;
 
+    /// <summary>
+    /// For each cloud of <see cref="Clouds"/>, the index of the cloud it is drawn together with, or -1. Only a cold
+    /// and a normal cloud can share space; where their boxes overlap, the two are integrated jointly along each ray
+    /// instead of laid one over the other. Each cloud has at most one partner: the first in the list's order.
+    /// </summary>
+    public ReadOnlySpan<int> Partners(Galaxy galaxy) =>
+        ReferenceEquals(galaxy, _galaxy) ? _frontPartners.AsSpan(0, _frontCount) : default;
+
     /// <summary>Called once a frame: takes over a finished list and asks for a new one when the camera changed sector.</summary>
     public void Update(Galaxy galaxy, SectorCoord center)
     {
         if (_state == Finished)
         {
             (_front, _back) = (_back, _front);
+            (_frontPartners, _backPartners) = (_backPartners, _frontPartners);
             _frontCount = _backCount;
             _galaxy = _jobGalaxy;
             _center = _jobCenter;
@@ -104,6 +115,32 @@ internal sealed class GasCloudField : IJob
     public void Run()
     {
         _backCount = _source.Collect(_jobGalaxy!, _jobCenter, _radius, _back);
+        Pair(_jobGalaxy!, _back.AsSpan(0, _backCount), _backPartners);
         _state = Finished;
+    }
+
+    /// <summary>
+    /// Pairs every cold cloud with the first normal cloud whose box overlaps its own, and the other way round; a cloud
+    /// already paired is skipped. Generation keeps every other pair of kinds apart, so these are the only volumes
+    /// that can share a point. Takes no memory.
+    /// </summary>
+    internal static void Pair(Galaxy galaxy, ReadOnlySpan<GasCloudPlacement> clouds, Span<int> partners)
+    {
+        partners[..clouds.Length].Fill(-1);
+        for (var i = 0; i < clouds.Length; i++)
+        {
+            if (partners[i] >= 0 || clouds[i].Cloud.Kind == GasCloudKind.Lightning) continue;
+            var center = GasCloudQuery.CenterOf(galaxy, clouds[i]);
+            for (var j = i + 1; j < clouds.Length; j++)
+            {
+                if (partners[j] >= 0 || !GasCloudModule.MayOverlap(clouds[i].Cloud.Kind, clouds[j].Cloud.Kind)) continue;
+                var apart = GasCloudQuery.CenterOf(galaxy, clouds[j]) - center;
+                var reach = clouds[i].Cloud.HalfSize + clouds[j].Cloud.HalfSize;
+                if (Math.Abs(apart.X) >= reach.X || Math.Abs(apart.Y) >= reach.Y || Math.Abs(apart.Z) >= reach.Z) continue;
+                partners[i] = j;
+                partners[j] = i;
+                break;
+            }
+        }
     }
 }

@@ -18,6 +18,8 @@ internal sealed class GasQueue
 
     private readonly GasConstants[] _draws = new GasConstants[Capacity];
     private readonly float4[] _bounds = new float4[Capacity];
+    private readonly float[] _distances = new float[Capacity];
+    private float _primaryDistance;
     private int _limit = Capacity;
 
     /// <summary>How many draws are queued, not counting the primary.</summary>
@@ -50,6 +52,9 @@ internal sealed class GasQueue
     /// </summary>
     public ref readonly float4 Bounds(int index) => ref _bounds[index];
 
+    /// <summary>The distance draw <paramref name="index"/> was queued at, which orders it.</summary>
+    public float Distance(int index) => _distances[index];
+
     /// <summary>
     /// How many draws at the start of the order are at the far level. They are behind every other cloud, so they
     /// can be drawn into the sky before anything solid without changing the order.
@@ -65,14 +70,15 @@ internal sealed class GasQueue
     }
 
     /// <summary>
-    /// Queues a draw. Its distance (<c>Motion.W</c>) places it; of two at the same distance the one queued first is
-    /// drawn first. When the queue is full the farthest draw makes room.
+    /// Queues a draw. Its <paramref name="distance"/> places it; of two at the same distance the one queued first is
+    /// drawn first. When the queue is full the farthest draw makes room. An overlapping pair is one draw, so it is
+    /// kept or left out whole.
     /// </summary>
-    public void Add(in GasConstants gas, in float4 bounds)
+    public void Add(in GasConstants gas, in float4 bounds, float distance)
     {
         if (gas.Budget.Y != GasConstants.Full)
         {
-            Insert(gas, bounds);
+            Insert(gas, bounds, distance);
             return;
         }
 
@@ -81,23 +87,26 @@ internal sealed class GasQueue
             HasPrimary = true;
             Primary = gas;
             PrimaryBounds = bounds;
+            _primaryDistance = distance;
             return;
         }
 
-        if (gas.Motion.W < Primary.Motion.W)
+        if (distance < _primaryDistance)
         {
             var passed = Primary;
             var passedBounds = PrimaryBounds;
+            var passedDistance = _primaryDistance;
             Primary = gas;
             PrimaryBounds = bounds;
-            Insert(passed, passedBounds);
+            _primaryDistance = distance;
+            Insert(passed, passedBounds, passedDistance);
             return;
         }
 
-        Insert(gas, bounds);
+        Insert(gas, bounds, distance);
     }
 
-    private void Insert(in GasConstants gas, in float4 bounds)
+    private void Insert(in GasConstants gas, in float4 bounds, float distance)
     {
         int index;
         if (Count < _limit)
@@ -106,22 +115,25 @@ internal sealed class GasQueue
         }
         else
         {
-            if (gas.Motion.W >= _draws[0].Motion.W) return;
+            if (distance >= _distances[0]) return;
             for (var i = 1; i < Count; i++)
             {
                 _draws[i - 1] = _draws[i];
                 _bounds[i - 1] = _bounds[i];
+                _distances[i - 1] = _distances[i];
             }
             index = Count - 1;
         }
 
-        while (index > 0 && _draws[index - 1].Motion.W < gas.Motion.W)
+        while (index > 0 && _distances[index - 1] < distance)
         {
             _draws[index] = _draws[index - 1];
             _bounds[index] = _bounds[index - 1];
+            _distances[index] = _distances[index - 1];
             index--;
         }
         _draws[index] = gas;
         _bounds[index] = bounds;
+        _distances[index] = distance;
     }
 }

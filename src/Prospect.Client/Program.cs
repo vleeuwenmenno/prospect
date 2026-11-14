@@ -215,9 +215,19 @@ internal static class Program
                     break;
                 case "--gas-view" when hasValue:
                     options.GasView = args[++i];
-                    if (options.GasView is not ("outside" or "inside" or "edge" or "offscreen" or "absent" or "inside-absent" or "pilot-absent" or "pilot"))
-                        return Fail("Invalid --gas-view: outside, inside, edge, offscreen, absent, inside-absent, pilot-absent, pilot.");
+                    if (options.GasView is not ("outside" or "inside" or "edge" or "offscreen" or "absent" or "inside-absent" or "pilot-absent" or "pilot" or "pair" or "ice"))
+                        return Fail("Invalid --gas-view: outside, inside, edge, offscreen, absent, inside-absent, pilot-absent, pilot, pair, ice.");
                     break;
+                case "--gas-flash" when hasValue:
+                case "--gas-flash-to" when hasValue:
+                    {
+                        var option = args[i];
+                        if (!float.TryParse(args[++i], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var seconds) || !(seconds is >= 0f and <= 60f))
+                            return Fail($"Invalid {option}: 0 to 60 seconds into a lightning burst.");
+                        if (option == "--gas-flash-to") options.GasFlashTo = seconds;
+                        else options.GasFlash = seconds;
+                        break;
+                    }
                 case "--gas-distance" when hasValue:
                 case "--gas-distance-to" when hasValue:
                     {
@@ -356,8 +366,12 @@ internal static class Program
         if (options.GasFixture > 0 && (options.CapturePath is null || options.BenchSeconds > 0))
             return Fail("--gas-fixture works only with --capture, without --bench.");
 
-        if ((options.GasDistance is not null || options.GasDistanceTo is not null) && options.GasView is not ("outside" or "absent"))
-            return Fail("--gas-distance works only with --gas-view outside or absent.");
+        if ((options.GasDistance is not null || options.GasDistanceTo is not null) && options.GasView is not ("outside" or "absent" or "pair" or "ice"))
+            return Fail("--gas-distance works only with --gas-view outside, absent, pair or ice.");
+        if ((options.GasFlash is not null || options.GasFlashTo is not null) && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--gas-flash works only with --capture or --bench.");
+        if (options.GasFlashTo is not null && options.GasFlash is null)
+            return Fail("--gas-flash-to needs --gas-flash.");
         if (options.GasDistanceTo is not null && options.GasDistance is null)
             return Fail("--gas-distance-to needs --gas-distance.");
         if (options.GasView is not null && (options.CapturePath is null && options.BenchSeconds <= 0))

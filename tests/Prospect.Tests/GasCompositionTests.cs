@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Prospect.Client.Render;
+using Prospect.Client.World;
 using Prospect.Engine.IO;
 using Prospect.Game.World;
 using Xunit;
@@ -160,7 +161,18 @@ public sealed class GasCompositionTests
     [Fact]
     public void FrameAndResourceContractHasOneDensityImplementationAndNoGasDepthWrites()
     {
-        Assert.Equal(Marshal.SizeOf<FrameConstants>() - Marshal.SizeOf<GasConstants>(), Marshal.OffsetOf<FrameConstants>(nameof(FrameConstants.Gas)).ToInt32());
+        // The gas block closes the frame: the deferred record, the pair partners, the flashes and four kind vectors,
+        // laid out as frame.glsl declares them.
+        var gas = Marshal.OffsetOf<FrameConstants>(nameof(FrameConstants.Gas)).ToInt32();
+        var record = Marshal.SizeOf<GasConstants>();
+        Assert.Equal(gas + record, Marshal.OffsetOf<FrameConstants>(nameof(FrameConstants.GasPartners)).ToInt32());
+        Assert.Equal(gas + record * (1 + GasPartners.Capacity), Marshal.OffsetOf<FrameConstants>(nameof(FrameConstants.GasFlashes)).ToInt32());
+        var bolts = 16 * (3 * LightningBolts.MaxBolts + 2 * LightningBolts.MaxBolts * LightningBolts.MaxSegments);
+        Assert.Equal(gas + record * (1 + GasPartners.Capacity) + 16 * GasFlashes.Capacity + bolts + 16 * 6, Marshal.SizeOf<FrameConstants>());
+        Assert.Contains($"GasData gasPartners[{GasPartners.Capacity}];", Shader("frame.glsl"));
+        Assert.Contains($"vec4 gasFlashes[{GasFlashes.Capacity}];", Shader("frame.glsl"));
+        Assert.Contains($"vec4 gasBoltHeads[{3 * LightningBolts.MaxBolts}];", Shader("frame.glsl"));
+        Assert.Contains($"vec4 gasBoltSegments[{2 * LightningBolts.MaxBolts * LightningBolts.MaxSegments}];", Shader("frame.glsl"));
         Assert.EndsWith("} frame;\n", Shader("frame.glsl"));
         Assert.Contains("GasData gas;", Shader("frame.glsl"));
         foreach (var name in new[] { "gas.frag", "gas_scene.frag", "gas_sky.frag", "tonemap.frag", "shield.frag" })

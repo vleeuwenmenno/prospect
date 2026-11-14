@@ -84,6 +84,10 @@ internal sealed class AppOptions
     /// <summary>With the outside cloud camera: its distance in the cloud's largest half-extents, and where it moves to.</summary>
     public float? GasDistance { get; set; }
     public float? GasDistanceTo { get; set; }
+    /// <summary>Muted only: seconds into its burst every lightning cloud is held at, instead of the server's clock.</summary>
+    public float? GasFlash { get; set; }
+    /// <summary>With <see cref="GasFlash"/>: where the held moment has moved to by the last capture, evenly.</summary>
+    public float? GasFlashTo { get; set; }
     /// <summary>Muted production-shader regression fixture, zero when disabled.</summary>
     public int GasFixture { get; set; }
     public float BenchSeconds { get; set; }
@@ -378,7 +382,7 @@ internal sealed class App : IDisposable
         var emptyShipSlot = new MeshData();
         for (var i = 0; i < meshes.Length; i++)
             meshes[i] = meshJobs[i]?.Result ?? emptyShipSlot;
-        _scene = new SceneRenderer(_gpu, _swapchain, shaders, meshes);
+        _scene = new SceneRenderer(_gpu, _swapchain, shaders, meshes, _options.GasFixture > 0);
         World = new WorldView(Devices, Actions, Settings, Jobs, _scene, Content.Designs);
 
         _screens = new ScreenHost(this, _ui);
@@ -1214,6 +1218,12 @@ internal sealed class App : IDisposable
             var span = Math.Max(_options.CaptureEvery * (_options.CaptureCount - 1), 1e-3f);
             World.GasDistance = gasFrom * MathF.Pow(gasTo / gasFrom, Math.Clamp((_sinceSplash - _options.CaptureAfter) / span, 0f, 1f));
         }
+        World.LightningPin = Devices.Muted ? _options.GasFlash : null;
+        if (World.LightningPin is { } flashFrom && _options.GasFlashTo is { } flashTo)
+        {
+            var span = Math.Max(_options.CaptureEvery * (_options.CaptureCount - 1), 1e-3f);
+            World.LightningPin = flashFrom + (flashTo - flashFrom) * Math.Clamp((_sinceSplash - _options.CaptureAfter) / span, 0f, 1f);
+        }
         // Advance only after the first image is saved, never from elapsed capture time.
         World.GasOverlayOpening = _options.GasFixture == GasShaderFixture.OverlayCheck
             && Volatile.Read(ref _screenshotJob.Saved) > 0;
@@ -1266,7 +1276,7 @@ internal sealed class App : IDisposable
                 // What the gas levels of detail drew in the frame before this capture; read by scripted checks.
                 var gasDraws = World.GasDraws;
                 if (gasDraws != default)
-                    Console.WriteLine($"capture {_capturesTaken:D2} gas draws: full {gasDraws.Full}, middle {gasDraws.Middle}, far {gasDraws.Far}; composed {World.LastGasMode.Deferred}");
+                    Console.WriteLine($"capture {_capturesTaken:D2} gas draws: full {gasDraws.Full}, middle {gasDraws.Middle}, far {gasDraws.Far}; pairs {World.GasKinds.Pairs}, lit {World.GasKinds.Flashes}, bolts {World.GasKinds.Bolts}; composed {World.LastGasMode.Deferred}");
                 _capturesTaken++;
                 _captureRequested = true;
                 RequestScreenshot(file);

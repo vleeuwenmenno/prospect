@@ -81,6 +81,8 @@ internal static class MeshBuilder
     /// </summary>
     public static MeshData Asteroid(int shape, int subdivisions)
     {
+        if (shape == AsteroidShape.Icicle)
+            return Icicle();
         var sphere = Spheres[subdivisions].Value;
         var positions = new Vector3[sphere.Points.Length];
         for (var i = 0; i < positions.Length; i++)
@@ -102,6 +104,40 @@ internal static class MeshBuilder
         for (var i = 0; i < positions.Length; i++)
             mesh.Vertices.Add(new MeshVertex { Position = ToFloat3(positions[i]), Normal = ToFloat3(Vector3.Normalize(normals[i])) });
         mesh.Indices.AddRange(indices);
+        return mesh;
+    }
+
+    /// <summary>
+    /// The ice shard exactly as the simulation collides with it (<see cref="AsteroidShape.RadiusAlong"/>): an
+    /// octahedron with its tips on the axes, at 1 along x and 1/6 along y and z. Eight flat faces with their own
+    /// normals, so the edges stay sharp; sampling a sphere would cut the tips off. One mesh for every level of
+    /// detail: it is already cheaper than the coarsest rock.
+    /// </summary>
+    public static MeshData Icicle()
+    {
+        const float Thin = 1f / 6f;
+        var mesh = new MeshData { BoundingRadius = 1f };
+        for (var face = 0; face < 8; face++)
+        {
+            var sx = (face & 1) == 0 ? 1f : -1f;
+            var sy = (face & 2) == 0 ? 1f : -1f;
+            var sz = (face & 4) == 0 ? 1f : -1f;
+            var a = new Vector3(sx, 0, 0);
+            var b = new Vector3(0, sy * Thin, 0);
+            var c = new Vector3(0, 0, sz * Thin);
+            var normal = Vector3.Normalize(Vector3.Cross(b - a, c - a));
+            // Wind every face outward, whatever the signs did to its order.
+            if (Vector3.Dot(normal, a) < 0)
+            {
+                (b, c) = (c, b);
+                normal = -normal;
+            }
+            var first = (uint)mesh.Vertices.Count;
+            mesh.Vertices.Add(new MeshVertex { Position = ToFloat3(a), Normal = ToFloat3(normal) });
+            mesh.Vertices.Add(new MeshVertex { Position = ToFloat3(b), Normal = ToFloat3(normal) });
+            mesh.Vertices.Add(new MeshVertex { Position = ToFloat3(c), Normal = ToFloat3(normal) });
+            mesh.Indices.AddRange([first, first + 1, first + 2]);
+        }
         return mesh;
     }
 

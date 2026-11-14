@@ -68,6 +68,22 @@ public static class GasSensors
             % rules.LightningPeriodTicks < rules.LightningBurstTicks;
     }
 
+    /// <summary>
+    /// Which lightning cycle a server tick falls in for this cloud, and how many ticks into that cycle it is. The
+    /// burst is the first <see cref="ExplorationRules.LightningBurstTicks"/> of a cycle, so
+    /// <c>into &lt; LightningBurstTicks</c> exactly when <see cref="Disrupted"/> is true. The renderer times its
+    /// flashes by this, so what a player sees and what their sensors lose happen together; the cycle number seeds
+    /// where the strokes fall.
+    /// </summary>
+    public static long LightningCycle(in GasCloud cloud, ExplorationRules rules, long tick, out long into)
+    {
+        var period = (long)rules.LightningPeriodTicks;
+        var phase = (long)(cloud.Seed / 128.0 * period);
+        into = ((tick % period + phase) % period + period) % period;
+        // tick + phase - into is a whole number of periods, so the division is exact for any sign.
+        return (tick + phase - into) / period;
+    }
+
     /// <summary>Flags at a hull centre, using server snapshot time, without allocation.</summary>
     public static HullEnvironment EnvironmentAt(Galaxy galaxy, ReadOnlySpan<GasCloudPlacement> clouds,
         ExplorationRules rules, Double3 point, long tick)

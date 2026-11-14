@@ -9,7 +9,10 @@ layout(location = 0) out vec4 outColor;
 void main() {
     GasData gas=pushGas.gas;
     float ownMask=texelFetch(opaqueColor,ivec2(gl_FragCoord.xy),0).a;
-    if(int(frame.ftl.x+0.5)==1 && ownMask>=0.5) gas.halfSize.w*=1.0-clamp(frame.ftlUp.w,0.0,1.0);
+    if(int(frame.ftl.x+0.5)==1 && ownMask>=0.5) {
+        gasThin=1.0-clamp(frame.ftlUp.w,0.0,1.0);
+        gas.halfSize.w*=gasThin;
+    }
     vec4 volume=gasSegment(gas,gasRay(ndc*0.5+0.5),0.0,gasViewDepth(texelFetch(opaqueDepth,ivec2(gl_FragCoord.xy),0).r),2.0*frame.lens.x/frame.lens.w);
     outColor=vec4(volume.rgb,1.0-volume.a);
 }

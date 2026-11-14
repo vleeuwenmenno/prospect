@@ -747,7 +747,10 @@ This status is an observation at open, not hosting authorization. Saved multipla
 The commented default server file is `content/server/server-settings.jsonc`; copy it and pass `--settings <file>`. JSON comments and trailing commas are accepted.
 
 Gas-kind simulation is present: cold/normal mixtures, shared icicle shapes and lightning sensor bursts.
-Renderer composition, cold/lightning visuals and fleet/RTS status indicators await integration; mining and cargo inventory remain absent.
+The renderer draws the kinds: lightning clouds flash and throw branching bolts on the server's burst clock, cold clouds are bluish
+white with an ice halo and glints, overlapping cold and normal clouds are integrated together along each ray, and icicles are drawn
+as the exact ice shard. Fleet/RTS status indicators for the environment flags and the sensor outline's tracking of bursts await
+integration; mining and cargo inventory remain absent.
 
 | New world setting | Range | Default |
 | --- | --- | --- |

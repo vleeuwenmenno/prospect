@@ -63,6 +63,83 @@ internal struct FrameConstants
 
     /// <summary>Deferred gas, matching the final GasData in frame.glsl.</summary>
     public GasConstants Gas;
+
+    /// <summary>The second cloud of each overlapping cold and normal pair queued this frame; see <see cref="GasConstants.KindCode"/>.</summary>
+    public GasPartners GasPartners;
+
+    /// <summary>One vector per lightning cloud queued this frame; see <see cref="GasFlashes"/>.</summary>
+    public GasFlashes GasFlashes;
+
+    /// <summary>Three vectors per bolt drawn this frame; see <see cref="GasBoltHeads"/>.</summary>
+    public GasBoltHeads GasBoltHeads;
+
+    /// <summary>Two vectors per bolt segment; see <see cref="GasBoltSegments"/>.</summary>
+    public GasBoltSegments GasBoltSegments;
+
+    /// <summary>Cold glints: brightness, cell edge in metres, share of cells that glint, glint radius in metres.</summary>
+    public float4 GasCold;
+
+    /// <summary>Lightning flash colour, and in w the flash's reach in x half-extents.</summary>
+    public float4 GasFlashLight;
+
+    /// <summary>Lightning bolt colour, and in w the bolt's width in metres.</summary>
+    public float4 GasBoltLight;
+
+    /// <summary>Bolts: glow width in metres, glow amount, how far a bolt lights the gas in metres, tip brightness.</summary>
+    public float4 GasBoltShape;
+
+    /// <summary>X is the most a deep stroke's light reaches, in metres.</summary>
+    public float4 GasFlashReach;
+
+    /// <summary>
+    /// X is the time in seconds for glints to twinkle by; y multiplies flashes at the middle and far levels; z the cold
+    /// halo's strength; w how many bolts <see cref="GasBoltHeads"/> holds.
+    /// </summary>
+    public float4 GasKindTime;
+}
+
+/// <summary>The second cloud of each overlapping pair, <see cref="Capacity"/> at most; matches <c>frame.glsl</c>.</summary>
+[InlineArray(Capacity)]
+internal struct GasPartners
+{
+    /// <summary>The most overlapping pairs a frame draws together; a pair past it is left out whole, never split.</summary>
+    public const int Capacity = 8;
+
+    private GasConstants _element;
+}
+
+/// <summary>
+/// Per lightning cloud, its deep stroke: its place in box units and its light (0: none). <see cref="Capacity"/>
+/// clouds at most; matches <c>frame.glsl</c>.
+/// </summary>
+[InlineArray(Capacity)]
+internal struct GasFlashes
+{
+    /// <summary>The most lightning clouds a frame flashes; any further one is drawn without its flashes.</summary>
+    public const int Capacity = 8;
+
+    private float4 _element;
+}
+
+/// <summary>
+/// Per bolt, three vectors: the centre of its bounds relative to the camera and their radius; its first segment, its
+/// segment count, how far along its path in metres it has grown, and its cloud's flash slot; the light of its main
+/// channel, of its forks, and of what it sheds on the gas. Matches <c>frame.glsl</c>.
+/// </summary>
+[InlineArray(World.LightningBolts.MaxBolts * 3)]
+internal struct GasBoltHeads
+{
+    private float4 _element;
+}
+
+/// <summary>
+/// Per bolt segment, two vectors: its start relative to the camera and the path length from the bolt's root to it,
+/// then its end and its fork depth (0 the main channel). Matches <c>frame.glsl</c>.
+/// </summary>
+[InlineArray(World.LightningBolts.MaxBolts * World.LightningBolts.MaxSegments * 2)]
+internal struct GasBoltSegments
+{
+    private float4 _element;
 }
 
 /// <summary>Four vectors per opening for <see cref="FrameConstants.Openings"/>; matches <c>frame.glsl</c>.</summary>
@@ -274,7 +351,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private CompositeConstants _composite;
     private int _frameIndex;
 
-    public SceneRenderer(GraphicsDevice gpu, Swapchain swapchain, IReadOnlyDictionary<string, byte[]> shaders, IReadOnlyList<MeshData> meshes)
+    public SceneRenderer(GraphicsDevice gpu, Swapchain swapchain, IReadOnlyDictionary<string, byte[]> shaders, IReadOnlyList<MeshData> meshes, bool gasFixtures = false)
     {
         _gpu = gpu;
         var device = gpu.Device;
@@ -529,7 +606,12 @@ internal sealed unsafe class SceneRenderer : IDisposable
         var cutInfo = new VkSpecializationInfo { MapEntryCount = 1, MapEntries = &cutEntry, DataSize = new ByteSize64(sizeof(uint)), Data = &cutHulls };
         _hullPipeline = ScenePipeline(Module(shaders, "mesh.vert"), Module(shaders, "mesh.frag"), meshInput, &cullBack, &depthWrite, Presets.BlendState.BlendNone, &cutInfo);
         _gridPipeline = ScenePipeline(Module(shaders, "grid.vert"), Module(shaders, "grid.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthRead, &translucent);
-        _tonemapPipeline = Pipeline(Module(shaders, "fullscreen.vert"), Module(shaders, "tonemap.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthOff, Presets.BlendState.BlendNone, _tonemapPipelineLayout, swapchain.RenderPass);
+        // The gas fixtures run a second copy of composition; only a muted --gas-fixture run compiles them in, which
+        // halves the work the driver does on the tone mapper the first time a build starts.
+        var fixtures = gasFixtures ? 1u : 0u;
+        var fixtureEntry = new VkSpecializationMapEntry { ConstantID = 2, Offset = (ByteSize32)0, Size = new ByteSize64(sizeof(uint)) };
+        var fixtureInfo = new VkSpecializationInfo { MapEntryCount = 1, MapEntries = &fixtureEntry, DataSize = new ByteSize64(sizeof(uint)), Data = &fixtures };
+        _tonemapPipeline = Pipeline(Module(shaders, "fullscreen.vert"), Module(shaders, "tonemap.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthOff, Presets.BlendState.BlendNone, _tonemapPipelineLayout, swapchain.RenderPass, &fixtureInfo);
 
         // Shields are drawn last, in two passes whose results do not depend on the order of the shells. The first adds
         // each shell's light and bend, tested against the scene's depth but writing none, so overlapping shells all
@@ -982,7 +1064,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
     /// Queues one level of detail of a visible cloud; see <see cref="GasQueue"/> for the order. Nothing of it shows
     /// outside <paramref name="bounds"/>: left, top, right and bottom as shares of the view.
     /// </summary>
-    public void AddGas(in GasConstants gas, in float4 bounds) => _gas.Add(gas, bounds);
+    public void AddGas(in GasConstants gas, in float4 bounds, float distance) => _gas.Add(gas, bounds, distance);
 
     /// <summary>Limits drawing to a draw's bounds, a pixel wider; false when they are wholly off screen.</summary>
     private bool GasScissor(CommandBuffer commands, in float4 bounds)

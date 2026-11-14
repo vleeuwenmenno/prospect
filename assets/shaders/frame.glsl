@@ -4,7 +4,9 @@
 // detail (0 full, 1 middle, 2 far), z: fixture; tint.w: 1 when the far level leaves out the finest octave. fine: what
 // a large cloud gains close to the camera (GasTiers), all zero for a cloud of ordinary size: x how strongly two
 // further octaves break it into strands, y how far its steps are drawn toward the camera, z how far from the camera
-// both reach, in x half-extents, w how much the nearest gas is thinned.
+// both reach, in x half-extents, w how much the nearest gas is thinned. motion.w: kind (0 normal, 1 cold, 2 lightning)
+// plus four times one more than a slot: a lightning cloud's flash in gasFlashes, or the cloud a cold or normal one
+// overlaps in gasPartners (GasConstants.KindCode).
 struct GasData { vec4 center; vec4 halfSize; vec4 tint; vec4 motion; vec4 budget; vec4 shape; vec4 look; vec4 fine; };
 // Per-frame constants shared by every scene shader. Positions are relative to the camera: the world is
 // rebased around it every frame so single precision never has to represent a galactic coordinate.
@@ -36,4 +38,16 @@ layout(set = 0, binding = 0) uniform Frame
     vec4 clips[64];    // per followed jump (passage slot), two vectors: xyz a camera-relative point on the plane its
                        // opening cuts its own hull at, and xyz the plane's normal toward the hidden side (zero: none)
     GasData gas; // Nonzero sample budget only when gas is deferred to HDR portal composition.
+    GasData gasPartners[8]; // The second cloud of each overlapping cold/normal pair (GasPartners).
+    vec4 gasFlashes[8];     // Per lightning cloud: its deep stroke's place (box units) and light.
+    vec4 gasBoltHeads[18];  // Per bolt (LightningBolts): bounds centre and radius; first segment, count, growth, slot;
+                            // main channel light, fork light, light shed on the gas.
+    vec4 gasBoltSegments[1536]; // Per segment: start and path length to it; end and fork depth.
+    vec4 gasCold;           // Glints: brightness, cell edge in metres, share of cells, radius in metres.
+    vec4 gasFlashLight;     // Flash colour; w its reach in x half-extents.
+    vec4 gasBoltLight;      // Bolt colour; w its width in metres.
+    vec4 gasBoltShape;      // Glow width in metres, glow amount, light reach in metres, tip brightness.
+    vec4 gasFlashReach;     // x: the most a deep stroke's light reaches, in metres.
+    vec4 gasKindTime;       // x: seconds, for glints to twinkle by; y: flash factor at the middle and far levels;
+                            // z: cold halo strength; w: bolts in gasBoltHeads.
 } frame;
