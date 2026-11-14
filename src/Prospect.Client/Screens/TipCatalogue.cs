@@ -118,6 +118,11 @@ internal sealed class TipSettingsText
     public required byte[] ConfirmYes { get; init; }
     public required byte[] ConfirmNo { get; init; }
     public required byte[] Done { get; init; }
+
+    /// <summary>The panel positions part of the same section: what it is, its button and the line shown after it.</summary>
+    public required byte[] PanelsDescription { get; init; }
+    public required byte[] PanelsReset { get; init; }
+    public required byte[] PanelsDone { get; init; }
 }
 
 /// <summary>
@@ -214,7 +219,7 @@ internal sealed class TipCatalogue
                 throw new InvalidDataException($"{path}: no tip for the trigger \"{trigger}\"");
 
         var s = file.Settings;
-        foreach (var word in new[] { s.Caption, s.Description, s.Reset, s.Confirm, s.ConfirmYes, s.ConfirmNo, s.Done })
+        foreach (var word in new[] { s.Caption, s.Description, s.Reset, s.Confirm, s.ConfirmYes, s.ConfirmNo, s.Done, s.PanelsDescription, s.PanelsReset, s.PanelsDone })
             if (string.IsNullOrWhiteSpace(word) || word.Length > 240)
                 throw new InvalidDataException($"{path}: every settings line is 1 to 240 characters");
 
@@ -235,6 +240,9 @@ internal sealed class TipCatalogue
                 ConfirmYes = Bytes(s.ConfirmYes),
                 ConfirmNo = Bytes(s.ConfirmNo),
                 Done = Bytes(s.Done),
+                PanelsDescription = Bytes(Resolve(s.PanelsDescription, actions, path, "panelsDescription")),
+                PanelsReset = Bytes(s.PanelsReset),
+                PanelsDone = Bytes(s.PanelsDone),
             },
             Tips = tips,
         };
@@ -326,6 +334,9 @@ internal sealed class TipCatalogue
         public string ConfirmYes { get; init; } = "";
         public string ConfirmNo { get; init; } = "";
         public string Done { get; init; } = "";
+        public string PanelsDescription { get; init; } = "";
+        public string PanelsReset { get; init; } = "";
+        public string PanelsDone { get; init; } = "";
     }
 
     private sealed class TipEntry

@@ -99,14 +99,22 @@ internal sealed partial class ScreenHost
         // Everything drawn over the map is placed before any input is read, so the map never takes a press, wheel
         // or drag that lands on it, even on the frame it first appears.
         world.PruneSelection();
+        // The panels are placed where the player left them: each default place, then the shift dragged to. The
+        // heading and the legend's default place follow the unit list's default, never its dragged place, so
+        // moving one panel moves only that one.
         var units = LayoutMapUnits(snapshot, world);
-        _mapPointer.Block(units.Min, units.Size);
+        var unitsPlaced = units with { Min = _mapPanels.Place(MapPanel.Units, units.Min, units.Size, display, Kit.Scale) };
+        _mapPointer.Block(unitsPlaced.Min, unitsPlaced.Size);
         _mapPointer.Block(float2.Zero, new float2(display.X, HudLayout.TopBarBottom(Kit.Scale)));
         var legend = MapLegend.Layout(display, Kit.Scale, units, MapLegend.FeatureRows + galaxy.StarClasses.Length, look.LegendRowHeight);
         if (legend.Shown)
+        {
+            legend = legend with { Min = _mapPanels.Place(MapPanel.Legend, legend.Min, legend.Size, display, Kit.Scale) };
             _mapPointer.Block(legend.Min, legend.Size);
-        var layerMin = MapLayerBar.Min(display, HudTop, Kit.Scale);
+        }
+
         var layerSize = MapLayerBar.Size(Kit.Scale);
+        var layerMin = _mapPanels.Place(MapPanel.Layers, MapLayerBar.Min(display, HudTop, Kit.Scale), layerSize, display, Kit.Scale);
         _mapPointer.Block(layerMin, layerSize);
         BlockMapForTip();
         if (_mapMenuOpen)
@@ -329,8 +337,6 @@ internal sealed partial class ScreenHost
         if (_sectorInfo.Open)
             DrawSectorPanel(draw, snapshot, world);
         DrawMapHeading(draw, world, units, display, size);
-        if (legend.Shown)
-            DrawMapLegend(draw, galaxy, legend, look);
 
         if (world.ControlOutOfSector)
         {
@@ -348,13 +354,16 @@ internal sealed partial class ScreenHost
 
         EndRoot();
 
-        DrawMapUnits(snapshot, world, galaxy, units, fade);
+        DrawMapUnits(snapshot, world, galaxy, unitsPlaced, fade);
+        if (legend.Shown)
+            DrawMapLegend(galaxy, legend, look, fade);
         DrawMapLayerBar(world, galaxy, layerMin, layerSize, lowLayer, highLayer, fade);
         if (_mapCard.Pinned)
             DrawPinnedCard(snapshot, world, galaxy, cardMin, cardSize, fade);
         if (_mapMenuOpen)
             DrawMapMenu(snapshot, world, galaxy, fade);
         Kit.Fade = 1f;
+        SaveMapPanels();
     }
 
     /// <summary>Pans and zooms from the keyboard and the map's own middle drag and wheel; changes layer and tilt.</summary>
@@ -380,6 +389,7 @@ internal sealed partial class ScreenHost
 
         if (_mapNav.HandleKeys(actions, devices, keyboard))
             Flattened();
+        _mapPanels.HandleKey(actions, devices, keyboard);
         if (ImGui.IsKeyPressed(ImGuiKey.Space, false))
         {
             var size = world.Galaxy!.SectorSize;
@@ -870,10 +880,14 @@ internal sealed partial class ScreenHost
     /// live sensor coverage, uncharted, a lost contact, asteroid fields, gas clouds, then the star types. Rows
     /// that do not fit are left off the end, so the star types go first.
     /// </summary>
-    private void DrawMapLegend(ImDrawListPtr draw, Galaxy galaxy, in MapLegendLayout legend, MapTuning look)
+    private void DrawMapLegend(Galaxy galaxy, in MapLegendLayout legend, MapTuning look, float fade)
     {
+        MapLegend.Begin(legend, _mapPointer);
+        Kit.Fade = fade;
+        var draw = ImGui.GetWindowDrawList();
         var min = legend.Min;
         Kit.PanelFrame(draw, min, min + legend.Size);
+        _mapPanels.Grip(MapPanel.Legend, min, MapLegend.GripSize(legend));
         Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3)), Theme.Accent, "MAP INDEX"u8);
         var swatch = new float2(Kit.Px(14), Kit.Px(10));
         var left = min.X + Kit.Px(Theme.Space4);
@@ -938,6 +952,8 @@ internal sealed partial class ScreenHost
                     }
             }
         }
+
+        MapLegend.End();
     }
 
     /// <summary>The layer bar's look and its buttons, which do what Page Up, Page Down and the tilt key do.</summary>
@@ -948,6 +964,7 @@ internal sealed partial class ScreenHost
         var draw = ImGui.GetWindowDrawList();
         Kit.PanelFrame(draw, min, min + size);
         var scale = Kit.Scale;
+        _mapPanels.Grip(MapPanel.Layers, min, MapLayerBar.GripSize(scale));
         var layer = _mapNav.Layer;
         var here = world.Sector.Coord.Y;
         var text = min + new float2(Kit.Px(Theme.Space3), Kit.Px(Theme.Space2));

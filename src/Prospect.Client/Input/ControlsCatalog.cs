@@ -10,7 +10,7 @@ internal sealed class ControlsCatalog
         "Command view", "Galaxy map", "Halt (cancel order)", "Focus on selection (command view)", "Ship data sheet", "Take control of target / leave in drone",
         "Controls / help", "Hold to show cursor", "Players on this server", "Party (social)", "Chat", "Sector information (show / hide)",
         "Ship editor (open / cancel); in the drone: New ship, with Ctrl held edits the drone", "Map layer up", "Map layer down", "Map flat / tilted view",
-        "Scan the sector you are in",
+        "Scan the sector you are in", "Reset the map's panels to their default places",
     ];
 
 
@@ -38,7 +38,7 @@ internal sealed class ControlsCatalog
                 InputAction.Follow => "Command",
                 InputAction.TogglePlayers or InputAction.ToggleSocial or InputAction.ToggleChat => "Social",
                 InputAction.ToggleEditor => "Editor",
-                InputAction.MapLayerUp or InputAction.MapLayerDown or InputAction.MapTilt => "Map",
+                InputAction.MapLayerUp or InputAction.MapLayerDown or InputAction.MapTilt or InputAction.ResetMapPanels => "Map",
                 _ => "General",
             };
             rows.Add(new Row(category, ActionLabels[i], names.Count == 0 ? "Unbound" : string.Join(" / ", names)));
@@ -87,6 +87,7 @@ internal sealed class ControlsCatalog
             new("Map", "Sector card: preview / pin / close", "Hover a sector / left click it / left click outside the galaxy or Escape"),
             new("Map", "Pan / zoom", "Middle drag / mouse wheel; Strafe + Yaw and Forward + Pitch axes"),
             new("Map", "Move or jump course menu", "Right click sector"),
+            new("Map", "Move the units list, map index or layers bar", "Left drag its title; the place is kept for next time"),
             new("Map", "Centre on own ship and its layer", "Space"),
             new("Editor", "Place part", "Left click on a block face, or drag a part card onto the ship"),
             new("Editor", "Size the part to place", "Hold S over a face, left drag a highlighted ghost face (opposite face stays); click again to place, Esc puts back"),

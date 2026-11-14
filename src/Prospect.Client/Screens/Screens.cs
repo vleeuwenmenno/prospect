@@ -52,6 +52,7 @@ internal sealed partial class ScreenHost
         InitializeSocial();
         _claimTipForMap = () => _mapPointer.Claim();
         InitializeTips();
+        _mapPanels = new MapPanels(app.Settings);
     }
 
     public Screen Current => _screen;

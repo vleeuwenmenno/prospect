@@ -5,13 +5,16 @@
   "dontShowAgain": "Don't show this again",
   "capturedHint": "Hold {ReleasePointer} to click. {Pause} closes.",
   "settings": {
-    "caption": "TIPS",
+    "caption": "TIPS AND PANELS",
     "description": "Short hints that appear the first time a screen or a warning comes up. Tips you hid stay hidden until you reset them.",
     "reset": "Reset tips",
     "confirm": "Show every tip again?",
     "confirmYes": "Reset",
     "confirmNo": "Keep hidden",
-    "done": "Every tip will show again."
+    "done": "Every tip will show again.",
+    "panelsDescription": "Panels on the galaxy map can be dragged by their title. This puts the units list, the map index and the layers bar back where they started. {ResetMapPanels} does the same on the map.",
+    "panelsReset": "Reset panel positions",
+    "panelsDone": "Panels are back where they started."
   },
   "tips": [
     {

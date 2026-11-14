@@ -126,6 +126,14 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   sector's cell); the legend is `MapLegend`, a surface the map blocks; the hull name label is `MapUnitHover`;
   the pinned card's X is `MapSectorCard.Close`. Rules in `docs/roadmap/exploration.md`. Check with `--open map-card`, `map-card-near`, `map-card-far`, `map-tilt`, `scan`
   and `command-fog`.
+- **Movable map panels** (unit list, map index, layer bar): each is a window with a `MapPanels.Grip` over its title
+  strip, never over a control in it; `MapPanels.Place` applies last frame's held drag before the frame is laid
+  out and the map blocks exactly that rectangle. Positions are a client preference (`ClientSettings.PanelPositions`,
+  a shift from the default place in unscaled pixels), clamped every frame by `PanelShift` (the tips use it too),
+  saved when the grip is let go (`MapPanels.TakeChanged`). Defaults of other things (heading, the index's default)
+  follow the unit list's default place, never its dragged one. A new movable panel gets a `MapPanel` entry and key,
+  a grip, a place and a block in `ScreenHost.DrawMap` and in `FrameOrderTests.DrawMapSurface`; `ResetMapPanels`
+  (`L`) and Settings, Reset panel positions clear them all. `FrameOrderTests` holds the rules.
 - **Scans:** the server owns the cooldown (`scanCooldownSeconds`, `ScanView.CooldownSector`/`CooldownUntilTick`,
   `ScanState.Cooldown`); the client only reads it through `ScanRules` (`Gate`, `CooldownSeconds`, `Strip`,
   `HandleKey`), so the `ScanSector` key, the card's button and the flight readout (`DrawScanStrip`) agree. A change
