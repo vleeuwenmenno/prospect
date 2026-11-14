@@ -132,25 +132,42 @@ public sealed class RockIndex
     /// <summary>Placement-only existence query; avoids iterator state transitions for every empty cell.</summary>
     internal bool PlacementOverlaps(Asteroid[] placed, int count, Vector3 center, float radius)
     {
+        var blocker = -1;
+        return PlacementOverlaps(placed, count, center, radius, ref blocker);
+    }
+
+    internal bool PlacementOverlaps(Asteroid[] placed, int count, Vector3 center, float radius, ref int blocker)
+    {
+        // Nearby retries commonly hit the same larger rock; avoid repeating the grid query.
+        if (blocker >= 0 && Touches(placed[blocker], center, radius))
+            return true;
         if (count == 0)
             return false;
-        // Reuse these bounds for the search instead of calculating twelve cell coordinates twice.
-        var fine = Cells(center, radius, 0);
-        var coarse = Cells(center, radius, 1);
-        var scan = fine.Visits + coarse.Visits > count;
-        var prefix = scan ? count : GiantCount;
-        for (var i = 0; i < prefix; i++)
+        for (var i = 0; i < GiantCount; i++)
             if (Touches(placed[i], center, radius))
+            {
+                blocker = i;
                 return true;
-        if (scan)
-            return false;
+            }
 
-        for (var level = 0; level < Levels; level++)
+        for (var level = Levels - 1; level >= 0; level--)
         {
             // Largest-first placement leaves the fine grid empty while large rocks are being placed.
-            if ((level == 0 ? _fineFiled : _coarseFiled) == 0)
+            var filed = level == 0 ? _fineFiled : _coarseFiled;
+            if (filed == 0)
                 continue;
-            var cells = level == 0 ? fine : coarse;
+            var cells = Cells(center, radius, level);
+            if (cells.Visits > filed)
+            {
+                var first = level == 0 ? GiantCount + _coarseFiled : GiantCount;
+                for (var i = first; i < first + filed; i++)
+                    if (Touches(placed[i], center, radius))
+                    {
+                        blocker = i;
+                        return true;
+                    }
+                continue;
+            }
             for (var z = cells.MinZ; z <= cells.MaxZ; z++)
                 for (var y = cells.MinY; y <= cells.MaxY; y++)
                     for (var x = cells.MinX; x <= cells.MaxX; x++)
@@ -169,7 +186,10 @@ public sealed class RockIndex
                             var dz = center.Z - rock.LocalPosition.Z;
                             var apart = radius + rock.Radius;
                             if (dx * dx + dy * dy + dz * dz < apart * apart)
+                            {
+                                blocker = other;
                                 return true;
+                            }
                         }
                     }
         }

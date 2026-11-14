@@ -829,7 +829,7 @@ Cloud inputs and costs:
   another cache call; do not retain it. The galaxy and range are immutable for the cache's lifetime.
 - The server uses a 256-entry direct-mapped sector cache; entries collect anchors through `GasCloudQuery`,
   ultimately `GasCloudModule.TryGetCloud`. No generated sector slots are read. Hits generate nothing.
-- At 5 km range / 20–80 km sectors each miss queries 125 anchors, enough for every sensor position in the sector,
+- At 5 km range / 20–160 km sectors each miss queries 125 anchors, enough for every sensor position in the sector,
   including neighbours' clouds. Cache collisions regenerate deterministically. Provisioning allocates; hits and misses do not.
 - Range is supported through eight sector widths. Storage is bounded by 256 times the full anchor cube, so
   cloud lists cannot truncate. The production cube has 125 slots per entry (about 1.3 MiB of placement storage).
