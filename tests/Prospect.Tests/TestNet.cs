@@ -20,11 +20,42 @@ namespace Prospect.Tests;
 /// <summary>Waiting and port numbers shared by the tests that run real servers and clients.</summary>
 internal static class TestNet
 {
+    /// <summary>First port of the test range: below Linux' ephemeral range (32768 and up), where any outgoing socket may sit.</summary>
+    public const int PortBase = 16384;
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, ushort> Ports = new();
+
     /// <summary>
     /// A UDP port for one test. Every test process has its own block of 32, so two runs on one machine (two
-    /// worktrees, say) do not meet, and every test in a run has its own slot in the block.
+    /// worktrees, say) do not meet, and every test in a run has its own slot in the block. The range lies below
+    /// the operating system's ephemeral ports, which clients and HTTP connections take at random, and a port
+    /// something already holds is skipped by whole blocks. The same slot always gives the same port in a run.
     /// </summary>
-    public static ushort Port(int slot) => (ushort)(45000 + Environment.ProcessId % 500 * 32 + slot);
+    public static ushort Port(int slot) => Ports.GetOrAdd(slot, static s =>
+    {
+        for (var attempt = 0; attempt < 500; attempt++)
+        {
+            var port = (ushort)(PortBase + (Environment.ProcessId + attempt) % 500 * 32 + s);
+            if (IsFree(port)) return port;
+        }
+
+        throw new IOException($"No free UDP port for test slot {s}");
+    });
+
+    /// <summary>True when nothing holds the UDP port on any address, as RakNet binds it.</summary>
+    public static bool IsFree(ushort port)
+    {
+        try
+        {
+            using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            probe.Bind(new IPEndPoint(IPAddress.Any, port));
+            return true;
+        }
+        catch (SocketException)
+        {
+            return false;
+        }
+    }
 
     public static SessionSnapshot WaitFor(GameSession session, Func<SessionSnapshot, bool> condition, int seconds = 15)
     {
