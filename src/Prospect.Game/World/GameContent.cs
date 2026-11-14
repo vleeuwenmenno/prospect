@@ -333,6 +333,18 @@ public static class HullSim
         return double.IsFinite(seconds) && seconds <= MaxJumpTravelSeconds ? (float)seconds : float.NaN;
     }
 
+    /// <summary>
+    /// True when a pilot's input takes the controls back and so ends the standing <paramref name="order"/>: any
+    /// strafe, vertical, forward or roll input ends a move order. A jump order is never ended by input: once it is
+    /// given, boost (pressed, held, tapped or let go) and thrust alike are ignored until the jump is over, and only
+    /// an explicit order (halt, which sends <see cref="OrderKind.None"/>) cancels it. The server never reads input to
+    /// cancel an order, it applies the orders in the pilot's records; the client calls this once per tick to decide
+    /// whether to send a cancel, so prediction and authority cannot disagree about a jump.
+    /// </summary>
+    public static bool InputEndsOrder(in HullOrder order, in FlightInput input) =>
+        order.Kind is not (OrderKind.None or OrderKind.Jump)
+        && (input.Strafe != 0 || input.Vertical != 0 || input.Forward != 0 || input.Roll != 0);
+
     /// <summary>Replaces an order, discarding unfinished jump work when its destination or kind changes.</summary>
     public static void SetOrder(ref HullState state, ref HullOrder current, in HullOrder next)
     {

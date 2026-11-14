@@ -2836,6 +2836,74 @@ public sealed class FrameOrderTests : IDisposable
         Assert.True(_router.Captured);
     }
 
+    [Theory]
+    [InlineData(JumpPhase.Align)]
+    [InlineData(JumpPhase.Charge)]
+    [InlineData(JumpPhase.Tunnel)]
+    [InlineData(JumpPhase.Arrive)]
+    public void BoostPressedHeldTappedOrLetGoDuringAJumpSendsNoOrderAndKeepsThePrompt(JumpPhase phase)
+    {
+        var destination = Ahead(100000);
+        CommandView();
+        _world.OrderJump(Bridge, destination);
+        for (var i = 0; i < 3; i++)
+            Frame();
+        Assert.Equal(destination, _world.NavTarget);
+        _world.SetMode(ViewMode.Pilot);
+        Frame();
+        Assert.Equal(ViewMode.Pilot, _world.Mode);
+        Bridge.Consume(out _, out _);
+
+        // The hull is part way through the jump the pilot started.
+        ref var own = ref _snapshot.Hulls[_snapshot.OwnHull];
+        own.Jump = phase;
+        own.Order = phase == JumpPhase.Arrive ? default : new HullOrder { Kind = OrderKind.Jump, Target = destination };
+        var expected = phase switch
+        {
+            JumpPhase.Align => JumpPrompt.Aligning,
+            JumpPhase.Charge => JumpPrompt.Working,
+            JumpPhase.Tunnel => JumpPrompt.Transit,
+            _ => JumpPrompt.None,
+        };
+        var refusedAt = _world.NavRefusedAt;
+
+        void Settled(string what)
+        {
+            var sent = Bridge.Consume(out var hasOrder, out var order);
+            Assert.False(hasOrder, $"{what} sent order {order.Kind}");
+            Assert.Equal(expected, HudLayout.Prompt(_world.NavTarget is not null, _world.NavAimed, false, _snapshot.Hulls[_snapshot.OwnHull].Jump, _snapshot.Hulls[_snapshot.OwnHull].Order.Kind == OrderKind.Jump, false));
+            Assert.Equal(refusedAt, _world.NavRefusedAt);
+            _ = sent;
+        }
+
+        // Pressed, held, released, then tapped within one poll.
+        Frame(() => Key(GlfwKey.Space, true));
+        Settled("press");
+        for (var i = 0; i < 5; i++)
+        {
+            Frame();
+            Settled("hold");
+        }
+
+        Frame(() => Key(GlfwKey.Space, false));
+        Settled("release");
+        Frame(() =>
+        {
+            Key(GlfwKey.Space, true);
+            Key(GlfwKey.Space, false);
+        });
+        Settled("tap");
+        Frame(() => Key(GlfwKey.Space, true));
+        Frame(() => Key(GlfwKey.Space, false));
+        Settled("tap over frames");
+
+        // Halt is the cancel: it sends the empty order.
+        Frame(() => Key(GlfwKey.H, true));
+        Bridge.Consume(out var cancelled, out var halt);
+        Assert.True(cancelled);
+        Assert.Equal(OrderKind.None, halt.Kind);
+    }
+
     [Fact]
     public void AClickHeldThroughTheCommandKeyNeverBecomesACommandAction()
     {

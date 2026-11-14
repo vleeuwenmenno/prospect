@@ -251,8 +251,9 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   The map card, the map's course menu and the command view's right-click menu show the distance against the
   drive's range, charted or blind, and a blind jump's hit chance and damage, from the same function the server checks
   with; too close, too far or driveless is greyed out with the reason, and the server's refusal of a plot or a jump
-  start shows for a few seconds. Taking the controls
-  before the drive fires cancels the jump and loses the charge. The client generates the destination while the
+  start shows for a few seconds. Once started, a jump
+  is ended only by Halt (`H`, `Backspace`, `B` on a gamepad), before the drive fires, which loses the charge: boost
+  (pressed, held, tapped or let go) and thrust do nothing to it. The client generates the destination while the
   drive charges.
 - **World settings.** A world has settings, chosen when a server or a local game starts: collision damage,
   shields against collisions (full, weak, none), shield recharge, jump charge speed, hull strength, asteroid generation
@@ -384,7 +385,7 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Dampeners on / off | `Z` | `X` |
 | Command view | `N` or `F9` | `Back` |
 | Galaxy map | `M` | `Y` |
-| Halt (cancel order) | `H` or `Backspace` | `B` |
+| Halt (cancel order; the only way to cancel a started jump) | `H` or `Backspace` | `B` |
 | Ship data sheet | `I` | D-pad up |
 | Target the ship under the reticle, or the asteroid if there is no ship | Middle mouse button | |
 | Take control of the target (same sector only), or leave in a drone | `T` | D-pad down |
@@ -464,11 +465,12 @@ working drive, a destination between the drive's minimum and maximum distance an
 ineligible ships keep their orders.
 The ship you fly gets a plotted course instead: a NAV marker, or an arrow at the edge of the view, shows the way.
 Turn its nose onto the marker and press boost (`Space`) to start the jump. Forward (`W`) and boost pressed together,
-in either order, start it too, and forward held from that start does not cancel it; once both are let go, any
-thrust does. Off the marker, boost works as usual
+in either order, start it too. From then on boost and thrust are ignored by the jump, whatever you do with them;
+`H` or `Backspace` (`B`) is the only cancel. Forward held from the start is also not sent until it and boost are
+both let go, so it does not fly the ship out of its own arrival. Off the marker, boost works as usual
 and the HUD says to aim first. A card beside the marker names the destination and its distance. A strip above
 the pilot console says what to do: `OFF COURSE` with the boost key to press once aimed, `COURSE ALIGNED` with
-what the drive will need, then calculation and charge as two gauges filling together, and that thrust cancels.
+what the drive will need, then calculation and charge as two gauges filling together, and that halt cancels.
 It shows only while a course is plotted, a jump is under way or the ship flies a move order. The course clears
 on arrival. Outside the map, a move with nothing selected
 still goes to the ship you fly.

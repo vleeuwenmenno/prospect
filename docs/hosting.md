@@ -774,6 +774,10 @@ Content evaluator version is 5. Snapshot codec stays 3: existing per-block HP st
   The server revalidates at that input's world interval; moving after plotting can make it too close or too far. Charging also cancels if drift or drive loss invalidates range.
 - Owned unpiloted ships use existing `IssueFleetOrder`; ownership and piloted-state checks remain authoritative.
   Same-sector restrictions apply to taking control, not fleet orders (docs/direction.md).
+- A jump order is never cancelled by input. `HullSim.InputEndsOrder` (shared) is the one test the client uses to
+  send a cancel when thrust is present: it is true for a move order, never for a jump. The server reads no input
+  for this, it applies the orders in the pilot records; only an explicit empty order (halt) cancels a jump before
+  the drive fires. No wire change.
 - Refusal enum: None, InvalidTarget, NoDrive, TooClose, TooFar, Busy.
   Busy means already in transit/arrival; changing a charging order keeps existing cancel-and-restart behavior.
 

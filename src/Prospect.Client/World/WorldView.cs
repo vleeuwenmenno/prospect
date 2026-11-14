@@ -852,21 +852,15 @@ internal sealed class WorldView
                 controls.Boost = false;
                 _jumpChord.Start(snapshot.ClientTick);
             }
-            else if (NavTarget is not null && Own.Jump == JumpPhase.None && boostPressed)
+            else if (NavTarget is not null && Own.Jump == JumpPhase.None && Own.Order.Kind != OrderKind.Jump && boostPressed)
             {
                 NavRefusedAt = _time;
             }
 
-            // Forward thrust held from the start of the jump is not the pilot taking the controls, so it is not sent.
-            // Any other manual input is, and the simulation cancels the jump on it as before.
+            // Forward thrust held from the start of the jump is not sent, so it does not fly the hull out of its own
+            // arrival. No input cancels a jump (HullSim.InputEndsOrder); only halt does, and it clears the chord above.
             if (_jumpChord.Active)
-            {
-                if (FlightInput.Quantize(controls.Strafe) != 0 || FlightInput.Quantize(controls.Vertical) != 0
-                    || FlightInput.Quantize(controls.Roll) != 0 || FlightInput.Quantize(controls.Forward) < 0)
-                    _jumpChord.Clear();
-                else
-                    controls.Forward = 0f;
-            }
+                controls.Forward = 0f;
 
             var thrusting = controls.Strafe != 0 || controls.Vertical != 0 || controls.Forward != 0;
             controls.Aim = _lookDirection;
