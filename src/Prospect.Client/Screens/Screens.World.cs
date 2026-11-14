@@ -88,6 +88,9 @@ internal sealed partial class ScreenHost
         _mapHoverPinned |= hover;
     }
 
+    /// <summary>Closes the map as Escape does. Used by <c>--close-map-at</c>, for captures across the close.</summary>
+    public void CloseMap() => _mapOpen = false;
+
     public void OpenMap()
     {
         _mapOpen = true;

@@ -79,8 +79,15 @@ internal sealed partial class ScreenHost
         }
     }
 
+    /// <summary>
+    /// True when this frame's interface hides the whole world behind opaque pixels (the map once it has faded in),
+    /// so the application skips the 3D passes for it. Set while drawing; false until a frame says otherwise.
+    /// </summary>
+    public bool CoversWorld { get; private set; }
+
     public void Draw(SessionSnapshot? snapshot)
     {
+        CoversWorld = false;
         _screenTime += _ui.DeltaTime;
         var fade = Kit.EaseOut(_screenTime / Theme.ScreenEnter);
         Kit.Fade = fade;

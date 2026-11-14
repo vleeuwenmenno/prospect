@@ -106,6 +106,16 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   change the view there; `UiPointerInput` is what Dear ImGui is told. Only the pilot view captures the pointer.
   `FrameOrderTests` runs that frame headless: real devices, router, `WorldView` and a Dear ImGui context, events fed as a poll delivers them. Dear ImGui has one
   global context, so keep every test that uses it in that class.
+- **Anything that covers the whole window with opaque interface** (today only the galaxy map, once its fade-in
+  ends): `ScreenHost.CoversWorld` is set by the surface itself (`WorldCover.MapHides`), and `App.Run` then skips
+  `WorldView.Draw` and `SceneRenderer.Present` (`WorldCover.Draws`), so scene, gas, shields and tone mapping cost
+  nothing while it is open. Only drawing is skipped: the update, prediction, streaming and snapshots run. Keep
+  everything the world needs from a frame in `WorldView.Update`, never in `Draw` (shield ripples and the rock
+  frame already are). A surface that dims the world instead (menus, controls, world settings) must not set it.
+  A covering surface must be opaque over the whole display from the first frame it sets the flag. Check with
+  `--bench 8 --open map --sector -66,1,37` (the report names the frames skipped) and
+  `--open map --close-map-at 2.0 --capture f.png --capture-after 1.5 --capture-count 12 --capture-every 0.12`, which
+  captures the map and then the first frames back in the world. `WorldCoverTests` holds the rule.
 - **The galaxy map and exploration display:** it shows only what `SessionSnapshot.Exploration` and the owned
   hulls say; never draw an uncharted sector's name, star, fields or resources. Its rules live in font-free
   helpers (`MapExploration.cs`: `MapCardState`, `MapSectorCard`, `MapLayerBar`, `MapNavigation`,
