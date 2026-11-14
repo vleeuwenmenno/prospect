@@ -202,6 +202,15 @@ internal static class Program
                     if (options.BrowserSample == BrowserSample.None)
                         return Fail($"Unknown browser sample: {args[i]}");
                     break;
+                case "--controls-search" when hasValue:
+                    options.ControlsSearch = args[++i];
+                    break;
+                case "--controls-tab" when hasValue:
+                    options.ControlsTab = args[++i];
+                    break;
+                case "--controls-sample" when hasValue && args[i + 1] is "capture" or "conflict":
+                    options.ControlsSample = args[++i];
+                    break;
                 case "--tips-sample" when hasValue && args[i + 1] is "on" or "stack" or "reset":
                     options.TipsSample = args[++i];
                     break;
@@ -376,6 +385,13 @@ internal static class Program
         // A sample stands in for the account service only where nobody can act on it.
         if (options.AccountSample is not null && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--account-sample works only with --capture or --bench.");
+
+        // The Controls screens take their search, tab and sample from the command line only in a scripted run.
+        if ((options.ControlsSearch is not null || options.ControlsTab is not null || options.ControlsSample is not null)
+            && (options.OpenView != "controls" || (options.CapturePath is null && options.BenchSeconds <= 0)))
+            return Fail("--controls-search, --controls-tab and --controls-sample work only with --open controls and --capture or --bench.");
+        if (options.ControlsSample is not null && options.StartScreen != Screen.Settings)
+            return Fail("--controls-sample works only with --start settings.");
 
         // Tips show in a scripted run only where the run asks for them; the reset question lives on Settings.
         if (options.TipsSample is not null && options.CapturePath is null && options.BenchSeconds <= 0)

@@ -101,6 +101,9 @@ internal sealed class Tip
 
     /// <summary>The text with each <c>{Action}</c> replaced by the key that action is bound to.</summary>
     public required string Text { get; init; }
+
+    /// <summary>The text as the file has it, with its <c>{Action}</c> placeholders, to resolve again after a remap.</summary>
+    public string Template { get; init; } = "";
     public required TipAnchor Anchor { get; init; }
 
     /// <summary>Title and text as UTF-8, encoded once at load, so drawing allocates nothing.</summary>
@@ -146,8 +149,47 @@ internal sealed class TipCatalogue
     /// <summary>The line shown in place of the buttons while the pointer is hidden for flight.</summary>
     public byte[] CapturedHint { get; private init; } = [];
 
+    private string _capturedHintTemplate = "";
+
     public TipSettingsText Settings { get; private init; } = null!;
     public Tip[] Tips { get; private init; } = [];
+
+    /// <summary>
+    /// The same tips with each key name resolved again from <paramref name="actions"/>, for after the player remapped a
+    /// control. Nothing is read from disk.
+    /// </summary>
+    public TipCatalogue Rebind(ActionMap actions)
+    {
+        var tips = new Tip[Tips.Length];
+        for (var i = 0; i < tips.Length; i++)
+        {
+            var tip = Tips[i];
+            var text = Resolve(tip.Template, actions, "tips", tip.Id);
+            tips[i] = new Tip
+            {
+                Id = tip.Id,
+                Trigger = tip.Trigger,
+                Title = tip.Title,
+                Text = text,
+                Template = tip.Template,
+                Anchor = tip.Anchor,
+                TitleBytes = tip.TitleBytes,
+                TextBytes = Encoding.UTF8.GetBytes(text),
+            };
+        }
+
+        return new TipCatalogue
+        {
+            PanelWidth = PanelWidth,
+            Next = Next,
+            Close = Close,
+            DontShowAgain = DontShowAgain,
+            CapturedHint = Encoding.UTF8.GetBytes(Resolve(_capturedHintTemplate, actions, "tips", "capturedHint")),
+            _capturedHintTemplate = _capturedHintTemplate,
+            Settings = Settings,
+            Tips = tips,
+        };
+    }
 
     /// <summary>Reads the shipped file and resolves key names from <paramref name="actions"/>.</summary>
     public static TipCatalogue Load(ActionMap actions) => Load(AppPaths.Content("visuals", "tips.json"), actions);
@@ -203,6 +245,7 @@ internal sealed class TipCatalogue
                 Trigger = raw.Trigger,
                 Title = raw.Title,
                 Text = text,
+                Template = raw.Text,
                 Anchor = new TipAnchor(raw.Anchor.Region, raw.Anchor.Side, offset[0], offset[1]),
                 TitleBytes = Encoding.UTF8.GetBytes(raw.Title),
                 TextBytes = Encoding.UTF8.GetBytes(text),
@@ -226,6 +269,7 @@ internal sealed class TipCatalogue
             Close = Bytes(file.Close),
             DontShowAgain = Bytes(file.DontShowAgain),
             CapturedHint = Bytes(Resolve(file.CapturedHint, actions, path, "capturedHint")),
+            _capturedHintTemplate = file.CapturedHint,
             Settings = new TipSettingsText
             {
                 Caption = Bytes(s.Caption),

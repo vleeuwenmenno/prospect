@@ -51,6 +51,20 @@ internal sealed class ClientSettings
     public const int MaxTipPositionKeyLength = 48;
     public const float MaxTipShift = 16384f;
 
+    /// <summary>
+    /// The controls the player changed from the shipped bindings, kept per client: an action by its name
+    /// (<c>Boost</c>), the keys of an axis as <c>Strafe.Negative</c> and <c>Strafe.Positive</c>. Each value is a list of
+    /// controls written as in <c>content/input/bindings.json</c> (<c>Key:Space</c>, <c>Mouse:Right</c>,
+    /// <c>Pad:A</c>); an empty list means the player cleared it. Only what differs from the defaults is stored, so a
+    /// later change to a default reaches everyone who never touched it. Unknown names are kept for a newer build.
+    /// </summary>
+    public Dictionary<string, List<string>> ControlOverrides { get; set; } = [];
+
+    /// <summary>The most remaps kept, controls per remap and the longest name: a hand-edited file cannot grow the list without limit.</summary>
+    public const int MaxControlOverrides = 96;
+    public const int MaxControlOverrideBindings = 4;
+    public const int MaxControlNameLength = 48;
+
     private static string FilePath => AppPaths.UserConfig("settings.json");
 
     /// <summary>Loads the settings file. A missing or unreadable file yields defaults; it is never fatal.</summary>
@@ -132,6 +146,21 @@ internal sealed class ClientSettings
         }
 
         TipPositions = positions;
+
+        ControlOverrides ??= [];
+        var overrides = new Dictionary<string, List<string>>(Math.Min(ControlOverrides.Count, MaxControlOverrides));
+        foreach (var (name, values) in ControlOverrides)
+        {
+            if (values is null || string.IsNullOrWhiteSpace(name) || name.Length > MaxControlNameLength || overrides.Count >= MaxControlOverrides)
+                continue;
+            var controls = new List<string>(MaxControlOverrideBindings);
+            foreach (var text in values)
+                if (!string.IsNullOrWhiteSpace(text) && text.Length <= 32 && controls.Count < MaxControlOverrideBindings && !controls.Contains(text))
+                    controls.Add(text);
+            overrides[name] = controls;
+        }
+
+        ControlOverrides = overrides;
     }
 }
 

@@ -353,8 +353,21 @@ Full-scale geometry and performance remain stages 3–5.
 
 ## Controls
 
-`F1` opens searchable Controls from pilot, command or map view. Search current bindings by action, key,
-button or category. `F1`, `Esc` or Close returns to the previous view; the session keeps running.
+`F1` opens the Controls quick reference from pilot, command or map view. It is read-only and shows the
+bindings as they are now, remaps included, in tabs: Flight, Camera, Jump & navigation, Command view, Galaxy map,
+Scanning & exploration, Ship editor, Social and Interface. The search box looks through every tab by action, key,
+button or category: a tab with no match is greyed (and can still be opened), a tab with matches shows how many, and
+the matching rows are lit. `F1`, `Esc` or Close returns to the previous view; the session keeps running.
+
+**Changing controls:** Settings, Controls (or "Change controls" in `F1`) has the same tabs and search, with every
+action remappable. Click a control, press the new key, mouse button or gamepad button (Escape or a left click
+cancels); `x` removes one, `+` adds one (up to four), Reset puts a row back, Reset all controls puts everything back.
+A control another action already uses in the same view asks: Swap, Clear the other, or Cancel. Changes apply at
+once and are saved per client in `settings.json` (`ControlOverrides`, only what differs from the defaults).
+Limits: mouse gestures, Ctrl chords and the editor's `S` and `R` are fixed; Escape and the left mouse button cannot
+be bound; Menu / back always keeps one control; sticks, triggers and the roll bumpers stay as they are (invert
+pitch is its own setting); one capture takes one control, so a chord cannot be bound. A gamepad-only player cannot
+cancel a capture with the pad. Rules: `docs/controls.md`.
 The cursor is hidden only in the pilot view. The command view, the map and every menu show it.
 
 - **Pilot view:** the hidden cursor steers the view. Hold either `Shift` to show it: mouse flight and targeting
@@ -493,7 +506,7 @@ coordinates, rocks, server, players, richness and resources) in the pilot, comma
 game closed and stays as set when switching views. No closed-state hint is drawn. It takes no flight
 keys: `F` is still down and Follow. `F3` shows the
 performance overlay, `F11` toggles fullscreen, `F12` takes a screenshot. Bindings live in
-`content/input/bindings.json`; block types and flight rules in `content/blocks`, hull designs in `content/ships`,
+`content/input/bindings.json` and their tabs and labels in `content/input/controls.json`; block types and flight rules in `content/blocks`, hull designs in `content/ships`,
 galaxy rules in `content/galaxy`, world settings in `content/rules`, the listing server's address in `content/net`.
 
 ## World settings

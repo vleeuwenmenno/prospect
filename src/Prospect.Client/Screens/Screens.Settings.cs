@@ -17,35 +17,12 @@ internal sealed partial class ScreenHost
     private static readonly float[] SensitivityValues = [0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f];
     private static readonly string[] AutosaveLabels = ["15 s", "30 s", "1 min", "2 min", "5 min"];
     private static readonly int[] AutosaveValues = [15, 30, 60, 120, 300];
-    private static readonly string[] AxisLabels = ControlsCatalog.AxisLabels;
-    private static readonly string[] ActionLabels = ControlsCatalog.ActionLabels;
-
     private readonly ImInputString _settingsName = new(ProtocolInfo.MaxNameBytes);
-    private readonly string[] _bindingText = new string[(int)InputAction.Count];
-    private readonly string[] _axisText = new string[(int)InputAxis.Count];
-
-    private void InitializeSettings()
-    {
-        for (var i = 0; i < _bindingText.Length; i++)
-        {
-            var names = new List<string>();
-            foreach (var binding in _app.Actions.Bindings((InputAction)i))
-                names.Add(binding.DisplayName);
-            _bindingText[i] = names.Count > 0 ? string.Join("  /  ", names) : "Unbound";
-        }
-
-        for (var i = 0; i < _axisText.Length; i++)
-        {
-            var names = new List<string>();
-            foreach (var binding in _app.Actions.Bindings((InputAxis)i))
-                names.Add(binding.DisplayName);
-            _axisText[i] = names.Count > 0 ? string.Join("  /  ", names) : "Unbound";
-        }
-    }
 
     public void OpenSettings(Screen returnTo)
     {
         _settingsReturn = returnTo;
+        _settingsControlsPage = false;
         _settingsName.SetValue(_app.Settings.PlayerName);
         Show(Screen.Settings);
     }
@@ -53,6 +30,7 @@ internal sealed partial class ScreenHost
     private void LeaveSettings()
     {
         _tipResetAsk = _tipResetDone = false;
+        LeaveSettingsControls();
         _app.Settings.PlayerName = PlayerNames.Sanitize(_settingsName.ToString());
         _app.Settings.Save();
         InitializeJoin();
@@ -60,6 +38,12 @@ internal sealed partial class ScreenHost
 
     private void DrawSettings(float fade)
     {
+        if (_settingsControlsPage)
+        {
+            DrawSettingsControls(fade);
+            return;
+        }
+
         BeginRoot("##settings"u8);
         var settings = _app.Settings;
         const float rowWidth = 520;
@@ -152,13 +136,15 @@ internal sealed partial class ScreenHost
         Kit.Space(Theme.Space5);
         Kit.Caption("CONTROLS"u8);
         Kit.Space(Theme.Space2);
-        BindingRow("Look around", "Pointer", rowWidth);
-        BindingRow("Free look (hold)", "Mouse Right", rowWidth);
-        BindingRow("Target the ship under the reticle", "Mouse Middle", rowWidth);
-        for (var i = 0; i < AxisLabels.Length; i++)
-            BindingRow(AxisLabels[i], _axisText[i], rowWidth);
-        for (var i = 0; i < ActionLabels.Length; i++)
-            BindingRow(ActionLabels[i], _bindingText[i], rowWidth);
+        Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, "Every action and its keys, mouse buttons and gamepad buttons, with search. Change any of them there."u8, rowWidth - 24);
+        Kit.Space(Theme.Space2);
+        if (Kit.Button("Change controls"u8, ButtonKind.Secondary, 190))
+        {
+            _settingsControlsPage = true;
+            _settingsControlsSearch.Clear();
+            _settingsBrowser.Reset();
+        }
+
         Kit.Space(Theme.Space3);
         DrawGamepadStatus(rowWidth);
 
@@ -179,18 +165,6 @@ internal sealed partial class ScreenHost
         EndPanel();
         DrawHints(back: true);
         EndRoot();
-    }
-
-    private void BindingRow(string action, string controls, float width)
-    {
-        var draw = ImGui.GetWindowDrawList();
-        var position = ImGui.GetCursorScreenPos();
-        var size = new float2(Kit.Px(width), Kit.Px(30));
-        var controlsSize = Kit.Measure(_ui.Mono, Theme.FontSmall, controls);
-        Kit.Text(draw, _ui.Sans, Theme.FontBody, position + new float2(Kit.Px(Theme.Space3), Kit.Px(5)), Theme.TextDim, action);
-        Kit.Text(draw, _ui.Mono, Theme.FontSmall, position + new float2(size.X - controlsSize.X - Kit.Px(Theme.Space3), Kit.Px(7)), Theme.Text, controls);
-        draw.AddLine(position + new float2(0, size.Y - 0.5f), position + new float2(size.X, size.Y - 0.5f), Kit.Color(Theme.Line, 0.6f));
-        ImGui.Dummy(size);
     }
 
     /// <summary>Shows whether a gamepad is connected and, live, what its sticks and triggers report.</summary>

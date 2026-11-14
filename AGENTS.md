@@ -14,6 +14,7 @@ to work.
 - `docs/hosting.md`: visibility, hosting a local game, the password handshake, the game's side of the listing server.
 - `docs/releasing.md`: release tags, the workflow, the container images and how to run them.
 - `docs/save-foundation.md`: saved worlds: the snapshot, the store contract, limits, the world clock, closing.
+- `docs/controls.md`: the Controls screens, tabs, search, remapping, clashes and their limits.
 - `docs/world-generation.md`: fields and clouds in world space: anchors, which sector takes a rock, the gas query.
 - An item under "Open" is not decided. Ask; do not guess and build.
 - When a decision is made in conversation, move it from "Open" to "Decided" in the same change.
@@ -217,6 +218,11 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   map: `BlockMapForTip`, `Claim`). Escape goes to `HandleTipShortcut` first; every other Escape reads
   `BackPressed()`, which stays quiet on that press, and the editor's shortcut skips the frame. A scripted run shows
   no tips unless given `--tips-sample`. `TipTests` and the tip tests in `FrameOrderTests` hold the rules.
+- **A new action or key:** add it to `content/input/bindings.json` and to `content/input/controls.json` (tab, label,
+  scope; a fixed mouse or chord row goes there too). Loading refuses an action the catalogue lacks. Read it through
+  `ActionMap` only; never cache a key name without rebuilding it on `ActionMap.Changed`. Anything that reads input
+  while the Controls page may be capturing must go through `ActionMap` (`Suspended`), not raw `InputDevices`.
+  Contract in `docs/controls.md`; `ControlsCatalogueTests`, `ControlRemapTests` and the capture tests in `FrameOrderTests`.
 - **A new per-tick system:** add a unit test in `tests/Prospect.Tests/WorldTests.cs` and, if it crosses the
   network, a session test that runs a real server and client.
 - **A new sector module** (stations): derive from `SectorModule` in `Prospect.Game/World`, name its

@@ -77,6 +77,15 @@ internal sealed class AppOptions
     /// </summary>
     public string? TipsSample { get; set; }
 
+    /// <summary>
+    /// For captures of the Controls screens: <c>--controls-search</c> fills the search box, <c>--controls-tab</c> opens a
+    /// tab by the start of its name, <c>--controls-sample capture|conflict</c> shows the Settings page waiting for a
+    /// control or asking about a clash.
+    /// </summary>
+    public string? ControlsSearch { get; set; }
+    public string? ControlsTab { get; set; }
+    public string? ControlsSample { get; set; }
+
     /// <summary>Open the command view or the map once in space; for scripted screenshots.</summary>
     public string? OpenView { get; set; }
     /// <summary>Muted deterministic camera placement around a generated cloud.</summary>
@@ -365,6 +374,8 @@ internal sealed class App : IDisposable
 
         Jobs.CompleteAll();
         Actions = bindingsJob.Result!;
+        // The player's remaps sit on top of the shipped bindings and are applied before anything reads them.
+        Actions.ApplyOverrides(Settings.ControlOverrides);
         _pointer = new PointerRouter(Devices, Actions, _ui);
         BrutalLogo = Texture2D.FromRgba(_gpu, logoJob.Width, logoJob.Height, logoJob.Pixels);
         BrutalLogoRef = _ui.Register(BrutalLogo);
@@ -724,6 +735,8 @@ internal sealed class App : IDisposable
         else if (_options.StartScreen == Screen.Settings)
         {
             _screens.OpenSettings(Screen.MainMenu);
+            if (_options.OpenView == "controls")
+                _screens.PreviewSettingsControls(_options.ControlsSample, _options.ControlsSearch, _options.ControlsTab);
             if (_options.TipsSample == "reset")
                 _screens.PreviewTipReset();
         }
@@ -1078,7 +1091,11 @@ internal sealed class App : IDisposable
                 World.PrepareCourseMenuCapture(view, Session.Client.Input);
             }
             else if (view == "controls")
+            {
                 _screens.OpenControls();
+                if (_options.ControlsSearch is not null || _options.ControlsTab is not null)
+                    _screens.PreviewControlsSearch(_options.ControlsSearch ?? "", _options.ControlsTab);
+            }
             else if (view == "edit" && snapshot is { OwnHull: >= 0 })
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
             else if (view == "drone")
