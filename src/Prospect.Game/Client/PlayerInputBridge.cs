@@ -34,6 +34,20 @@ public sealed class PlayerInputBridge
 {
     private readonly Lock _lock = new();
     private bool _scan;
+    private bool _newShip;
+    private ShipName _shipName;
+    /// <summary>Queues creation. False means the name is invalid; server feedback is in SessionSnapshot.NewShip.</summary>
+    public bool RequestNewShip(ReadOnlySpan<char> name)
+    {
+        ShipName text = default;
+        if (!text.Set(name)) return false;
+        lock (_lock) { _shipName = text; _newShip = true; }
+        return true;
+    }
+    internal bool ConsumeNewShip(out ShipName name)
+    {
+        lock (_lock) { name = _shipName; var pending = _newShip; _newShip = false; return pending; }
+    }
     public void RequestScan() { lock (_lock) _scan = true; }
     internal bool ConsumeScan() { lock (_lock) { var pending = _scan; _scan = false; return pending; } }
     private readonly SocialMessage[] _social = new SocialMessage[16];

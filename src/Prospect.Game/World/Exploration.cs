@@ -6,6 +6,7 @@ namespace Prospect.Game.World;
 /// <summary>Shared, content-owned exploration tuning. Additional equipment gives redundancy only.</summary>
 public sealed record ExplorationRules(double SensorRadius, int ScanTicks, int ContactTicks, int ChartsPerOwner)
 {
+    public double GasOpticalPenalty { get; init; }
     public double JumpMinimum { get; init; }
     public double BlindSafeDistance { get; init; }
     public double BlindSafeSectors { get; init; }
@@ -40,11 +41,13 @@ public sealed record ExplorationRules(double SensorRadius, int ScanTicks, int Co
         if (!double.IsFinite(minimum) || minimum <= 0 || !double.IsFinite(safe) || safe <= 0
             || !float.IsFinite(damage) || damage <= 0 || damage > 1)
             throw new InvalidDataException("Invalid jump rules.");
+        var gasPenalty = root.GetProperty("gasOpticalPenalty"u8).GetDouble();
+        if (!double.IsFinite(gasPenalty) || gasPenalty < 0 || gasPenalty > 10) throw new InvalidDataException("Invalid gas optical penalty.");
         var proximity = root.GetProperty("proximityRadius"u8).GetDouble();
         if (!double.IsFinite(proximity) || proximity <= 0 || proximity > radius) throw new InvalidDataException("Invalid proximity radius.");
         return new(radius, (int)Math.Ceiling(scan * TickLoop.SimulationHz),
             (int)Math.Ceiling(contact * TickLoop.SimulationHz), charts)
-        { ProximityRadius = proximity, JumpMinimum = minimum, BlindSafeSectors = safe, BlindSafeDistance = safe * 80000, BlindMaxDamage = damage };
+        { GasOpticalPenalty = gasPenalty, ProximityRadius = proximity, JumpMinimum = minimum, BlindSafeSectors = safe, BlindSafeDistance = safe * 80000, BlindMaxDamage = damage };
     }
 }
 
@@ -74,5 +77,24 @@ public struct SensorContact
     public bool Live;
 }
 
-/// <summary>Immutable surveyed field envelope, without mineral composition or current asteroid mutations.</summary>
-public readonly record struct ChartField(Double3 Center, System.Numerics.Vector3 HalfExtents, System.Numerics.Vector3 Along);
+/// <summary>
+/// Immutable surveyed field envelope, without mineral composition or current asteroid mutations. The contour is the
+/// seeded ribbon the field's rocks lie in, which is what a chart shows of its shape.
+/// </summary>
+public readonly record struct ChartField(Double3 Center, System.Numerics.Vector3 HalfExtents, System.Numerics.Vector3 Along, FieldContour Contour = default);
+
+/// <summary>
+/// The four transverse sections of a field's ribbon, along its length from one end to the other: where each lies
+/// across the field's axis and how wide it is, both as shares of the field's half-width.
+/// </summary>
+public readonly record struct FieldContour(float Center0, float Width0, float Center1, float Width1, float Center2, float Width2, float Center3, float Width3)
+{
+    /// <summary>The number of sections.</summary>
+    public const int Knots = 4;
+
+    /// <summary>Where section <paramref name="knot"/> lies across the axis.</summary>
+    public float CenterAt(int knot) => knot switch { 0 => Center0, 1 => Center1, 2 => Center2, _ => Center3 };
+
+    /// <summary>How wide section <paramref name="knot"/> is.</summary>
+    public float WidthAt(int knot) => knot switch { 0 => Width0, 1 => Width1, 2 => Width2, _ => Width3 };
+}

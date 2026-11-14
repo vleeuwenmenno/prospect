@@ -1,5 +1,10 @@
 {
   "quietSeconds": 30,
+  "newShipNameChars": 32,
+  "maxOwnedShips": 16,
+  "newShipDistance": 50,
+  "newShipClearance": 5,
+  "newShipRoot": "core",
   "uploads": 2,
   "uploadSeconds": 20,
   "readySeconds": 20,

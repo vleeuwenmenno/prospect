@@ -38,6 +38,56 @@ public sealed class SaveLifecycleTests
     private static MemoryWorld PopulatedWorld() => new() { Bytes = Populated.Value, Generation = 7 };
 
     [Fact]
+    public void NewShipKeepsItsOwnerRootNameAndEntityAcrossSaveLoad()
+    {
+        var folder = SaveRig.NewWorld(Shipped);
+        ulong entity;
+        uint owner;
+        Double3 position;
+        using (var rig = new SaveRig(folder, Shipped))
+        {
+            rig.Join();
+            rig.Link.Control(0);
+            rig.Tick();
+            ShipName name = default;
+            Assert.True(name.Set("Saved new ship"));
+            var bytes = new byte[EditorRequestMessage.MaxWireSize];
+            var writer = new NetWriter(bytes);
+            new EditorRequestMessage { Kind = EditorRequestKind.NewShip, Name = name }.Write(ref writer, default);
+            rig.Link.Deliver(writer.Written.ToArray());
+            rig.Tick();
+            TestWorkers.Settle(rig.Server);
+            rig.Tick(2);
+            Assert.Equal(EditorPhase.Publishing, rig.Link.Editor.Phase);
+            writer = new NetWriter(bytes);
+            DesignReadyMessage.Write(ref writer, (byte)(rig.Server.Content.Designs.Length - 1), true);
+            rig.Link.Deliver(writer.Written.ToArray());
+            rig.Tick();
+            Assert.Equal(NewShipStatus.Created, rig.Link.Editor.NewShip);
+            var index = (int)(rig.Link.Editor.Hull & 0xffff);
+            entity = rig.Hulls.Info(index).Entity;
+            owner = rig.Hulls.Info(index).Owner;
+            position = rig.Hulls.State(index).Position;
+            Assert.True(rig.Close().Clean);
+        }
+        using var loaded = new SaveRig(folder, Shipped);
+        var found = false;
+        for (var i = 0; i < loaded.Hulls.Slots; i++)
+        {
+            if (!loaded.Hulls.IsAliveAt(i) || loaded.Hulls.Info(i).Entity != entity) continue;
+            found = true;
+            Assert.Equal(owner, loaded.Hulls.Info(i).Owner);
+            Assert.False(loaded.Hulls.Info(i).EscapeDrone);
+            Assert.Equal(position, loaded.Hulls.State(i).Position);
+            var design = loaded.Server.Content.Designs[loaded.Hulls.Info(i).Design];
+            Assert.Equal("Saved new ship", design.Name);
+            Assert.Equal(1, design.BlockCount);
+            Assert.Equal("core", design.Boxes[0].Type.Id);
+        }
+        Assert.True(found);
+    }
+
+    [Fact]
     public void MalformedChartsAreRefusedByDecoderBeforeWritableStoreOpen()
     {
         var folder = PopulatedWorld();

@@ -71,6 +71,12 @@ internal sealed class AppOptions
     /// <summary>A fixed account view instead of the account service (<c>--account-sample</c>); captures and benchmarks only.</summary>
     public string? AccountSample { get; set; }
 
+    /// <summary>
+    /// Tips in a scripted run (<c>--tips-sample</c>), which shows none otherwise: <c>on</c> lets them fire as in play,
+    /// <c>stack</c> also fires the command view's three at once, <c>reset</c> opens the Settings reset question.
+    /// </summary>
+    public string? TipsSample { get; set; }
+
     /// <summary>Open the command view or the map once in space; for scripted screenshots.</summary>
     public string? OpenView { get; set; }
     /// <summary>Muted deterministic camera placement around a generated cloud.</summary>
@@ -98,6 +104,13 @@ internal sealed class AppOptions
     /// <summary>With more than one capture, the screenshots are numbered and taken this many seconds apart.</summary>
     public int CaptureCount { get; set; } = 1;
     public float CaptureEvery { get; set; } = 0.25f;
+
+    /// <summary>Opens the galaxy map this many pixels per sector instead of the default zoom; for captures.</summary>
+    public float? MapCell { get; set; }
+
+    /// <summary>Opens the galaxy map tilted, and with the pointer resting on its centre; for captures.</summary>
+    public bool MapTilt { get; set; }
+    public bool MapHover { get; set; }
 
     /// <summary>In the pilot view, holds the camera this many degrees to the side of the hull's nose; for captures.</summary>
     public float? LookDegrees { get; set; }
@@ -185,6 +198,7 @@ internal sealed class App : IDisposable
     private readonly Texture2D _galaxyImage;
     private long _lastFrameTimestamp;
     private bool _viewOpened;
+    private bool _tipsSampled;
     private readonly CatalogueMeshes _catalogueMeshes;
 
     /// <summary>Whether the acquired catalogue can be drawn safely.</summary>
@@ -371,6 +385,9 @@ internal sealed class App : IDisposable
 
     public ClientSettings Settings { get; }
     public GameContent Content { get; }
+
+    /// <summary>True when a scripted run asked for tips; a capture or benchmark shows none otherwise.</summary>
+    public bool TipsInScriptedRuns => _options.TipsSample is not null;
 
     /// <summary>
     /// The world settings the next local game starts with: the content's defaults with whatever <c>--set</c>
@@ -695,7 +712,11 @@ internal sealed class App : IDisposable
             }
         }
         else if (_options.StartScreen == Screen.Settings)
+        {
             _screens.OpenSettings(Screen.MainMenu);
+            if (_options.TipsSample == "reset")
+                _screens.PreviewTipReset();
+        }
         else if (_options.StartScreen == Screen.NewGame)
             _screens.OpenNewGame();
         else if (_options.StartScreen == Screen.LoadWorld)
@@ -788,6 +809,8 @@ internal sealed class App : IDisposable
                 CommandView = World.PointerView,
             };
             _pointer.Update(pointerFrame);
+            // Escape closes a tip before any other surface takes it.
+            _screens.HandleTipShortcut(inSpace && focused);
             _screens.HandleControlsShortcut(inSpace && focused);
             _screens.HandleSocialShortcuts(inSpace && focused);
             _screens.HandleSectorInfoShortcut(inSpace && focused);
@@ -986,6 +1009,8 @@ internal sealed class App : IDisposable
         if (_options.OpenView is { } view && !_viewOpened && Session is not null && _sinceSplash > 0.6f)
         {
             _viewOpened = true;
+            if (_options.MapCell is { } mapCell && view != "galaxy")
+                _screens.SetMapCell(mapCell);
             if (view == "command")
             {
                 World.SetMode(ViewMode.Command);
@@ -1007,6 +1032,11 @@ internal sealed class App : IDisposable
                 _screens.OpenControls();
             else if (view == "edit" && snapshot is { OwnHull: >= 0 })
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
+            else if (view == "drone")
+            {
+                // Steps out of the hull into an escape drone, so a capture shows the drone from behind.
+                Session.Client.Input.RequestControl(0);
+            }
             else if (view == "info")
                 _screens.OpenShipInfo();
             else if (view == "world-settings")
@@ -1043,7 +1073,10 @@ internal sealed class App : IDisposable
             else if (view == "map-tilt")
                 _screens.OpenMapTilt();
             else if (view == "scan")
+            {
                 _screens.OpenScan();
+                _screens.SetMapPresentation(_options.MapTilt, _options.MapHover);
+            }
             else if (view == "jump-fleet-ahead" && snapshot is { OwnHull: >= 0 })
             {
                 // The player's other hulls jump to points ahead of and above the camera, 6 km and 10 km away along
@@ -1105,6 +1138,13 @@ internal sealed class App : IDisposable
             }
             else
                 _screens.OpenMap();
+        }
+
+        // The command view's tips, all at once, in whatever view was opened: a stack to look at.
+        if (_options.TipsSample == "stack" && !_tipsSampled && Session is not null && _sinceSplash > 1.2f)
+        {
+            _tipsSampled = true;
+            _screens.FireTip(TipTriggers.CommandViewOpened);
         }
 
         World.GasView = Devices.Muted ? _options.GasView : null;

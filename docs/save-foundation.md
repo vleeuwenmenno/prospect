@@ -401,3 +401,10 @@ The new content and evaluator identity require a compatible save; no migration i
 Generation version 5 stores sector size and gas ranges through the existing setting-id/value snapshot fields.
 Loading reapplies them through shared content before restoring sector-addressed state.
 Older generation/content identities are refused without migration; the snapshot codec layout is unchanged.
+
+### New ships from a drone
+
+New root-block ships use CreateHull, the existing owner and durable entity id, and an appended canonical design.
+Capture and restore keep their name, blocks, position and ownership through the existing hull/catalogue fields.
+The drone remains the controlled hull; creation feedback and the remote editor grant are transient.
+No new saved field is needed; WorldSnapshotCodec remains version 3.

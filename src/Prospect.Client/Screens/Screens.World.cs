@@ -77,6 +77,17 @@ internal sealed partial class ScreenHost
         _mapHoverPinned = true;
     }
 
+    /// <summary>Sets the map's zoom in pixels per sector. Used by <c>--map-cell</c>, for captures.</summary>
+    public void SetMapCell(float cell) => _mapCell = Math.Clamp(cell, MapMinCell, MapMaxCell);
+
+    /// <summary>Tilts the map and rests the pointer on its centre, as asked. Used by <c>--map-tilt</c> and <c>--map-hover</c>, for captures.</summary>
+    public void SetMapPresentation(bool tilt, bool hover)
+    {
+        _mapNav.Tilt |= tilt;
+        _mapNav.TiltBlend = _mapNav.Tilt ? 1f : _mapNav.TiltBlend;
+        _mapHoverPinned |= hover;
+    }
+
     public void OpenMap()
     {
         _mapOpen = true;

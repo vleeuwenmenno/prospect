@@ -494,7 +494,7 @@
       "kind": "multiplier",
       "default": 80,
       "minimum": 20,
-      "maximum": 160,
+      "maximum": 80,
       "step": 10,
       "unit": "km"
     },

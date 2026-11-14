@@ -137,7 +137,7 @@ public sealed class ProtocolTests
             reader = new NetReader(writer.Written[..length]);
             Assert.False(HullRecord.TryRead(ref reader, out _));
         }
-        Assert.Equal(40u, ProtocolInfo.Version);
+        Assert.Equal(41u, ProtocolInfo.Version);
     }
 
     [Fact]
@@ -148,11 +148,11 @@ public sealed class ProtocolTests
         Span<byte> read = stackalloc byte[32];
         for (var i = 0; i < hash.Length; i++) hash[i] = (byte)(i + 1);
 
-        // Requests: a commit is the longest, and a begin, cancel or repair carries nothing after its number.
+        // A commit is 42 bytes; the Unicode new-ship name now defines the maximum request.
         var writer = new NetWriter(buffer);
         new EditorRequestMessage { Kind = EditorRequestKind.Commit, Token = 7, Total = 1234 }.Write(ref writer, hash);
-        Assert.Equal(42, EditorRequestMessage.MaxWireSize);
-        Assert.Equal(EditorRequestMessage.MaxWireSize, writer.Length);
+        Assert.Equal(135, EditorRequestMessage.MaxWireSize);
+        Assert.Equal(42, writer.Length);
         var reader = new NetReader(writer.Written[1..]);
         Assert.True(EditorRequestMessage.TryRead(ref reader, read, out var request));
         Assert.Equal((EditorRequestKind.Commit, 7u, 1234), (request.Kind, request.Token, request.Total));
@@ -173,7 +173,7 @@ public sealed class ProtocolTests
             reader = new NetReader([.. writer.Written[1..], 0]);
             Assert.False(EditorRequestMessage.TryRead(ref reader, read, out _));
         }
-        reader = new NetReader([4, 0, 0, 0, 0]);
+        reader = new NetReader([5, 0, 0, 0, 0]);
         Assert.False(EditorRequestMessage.TryRead(ref reader, read, out _));
 
         // Chunks: the header, then exactly the bytes it counts, one to a chunk's worth.
@@ -196,7 +196,7 @@ public sealed class ProtocolTests
         // The answer.
         writer = new NetWriter(buffer);
         new EditorStateMessage { Phase = EditorPhase.Applied, Reason = EditorReason.HullLimit, Token = 3, Hull = 0x00020005, ReplacedHull = 0x00010004, WaitSeconds = 30 }.Write(ref writer);
-        Assert.Equal(17, EditorStateMessage.WireSize);
+        Assert.Equal(18, EditorStateMessage.WireSize);
         Assert.Equal(EditorStateMessage.WireSize, writer.Length);
         reader = new NetReader(writer.Written[1..]);
         Assert.True(EditorStateMessage.TryRead(ref reader, out var state));

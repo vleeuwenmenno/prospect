@@ -1,6 +1,7 @@
 # Gas clouds
 
-Decorative, deterministic bounded gas volumes. No extraction or gameplay effects.
+Deterministic bounded gas volumes. Gas attenuates passive sensors through a shared smooth envelope; see
+[the sensor contract](hosting.md#decided-provisional-tunable-gas-sensor-contract). No extraction.
 The shape refinement replaces the stretched, box-faded blob with a lopsided envelope, billowy edges, dense knots and real self-shadowing.
 Measured results are in the refinement report. Visual acceptance is the developer's call; this is not yet an accepted milestone.
 

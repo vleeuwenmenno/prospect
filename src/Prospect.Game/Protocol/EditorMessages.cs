@@ -95,6 +95,10 @@ public enum EditorReason : byte
 
     /// <summary>Set by the client alone, never sent: the session cannot take the request now.</summary>
     Unavailable = 20,
+    BadName = 21,
+    DuplicateName = 22,
+    ShipLimit = 23,
+    NoClearSpot = 24,
 }
 
 /// <summary>What a client asks of the editor, reliable. The server answers every one with an <see cref="EditorStateMessage"/>.</summary>
@@ -114,15 +118,17 @@ public enum EditorRequestKind : byte
     /// sent but the token; the server has the design.
     /// </summary>
     Repair = 3,
+    NewShip = 4,
 }
 
 /// <summary>Client to server, reliable: one editor request.</summary>
 public struct EditorRequestMessage
 {
-    /// <summary>Message id, kind, token, size and hash: the longest request, a commit.</summary>
-    public const int MaxWireSize = 1 + 1 + 4 + 4 + SHA256.HashSizeInBytes;
+    /// <summary>Message id, kind, reserved token, length and at most 64 UTF-16 units: a new ship name.</summary>
+    public const int MaxWireSize = 1 + 1 + 4 + 1 + ShipName.MaxUnits * 2;
 
     public EditorRequestKind Kind;
+    public ShipName Name;
 
     /// <summary>With <see cref="EditorRequestKind.Begin"/>: the hull to edit.</summary>
     public uint Hull;
@@ -138,6 +144,7 @@ public struct EditorRequestMessage
         writer.WriteByte((byte)MessageId.Editor);
         writer.WriteByte((byte)Kind);
         writer.WriteUInt32(Kind == EditorRequestKind.Begin ? Hull : Token);
+        if (Kind == EditorRequestKind.NewShip) { Name.Write(ref writer); return; }
         if (Kind != EditorRequestKind.Commit)
             return;
         writer.WriteInt32(Total);
@@ -150,13 +157,14 @@ public struct EditorRequestMessage
         message = default;
         var kind = reader.ReadByte();
         var value = reader.ReadUInt32();
-        if (!reader.IsValid || kind > (byte)EditorRequestKind.Repair)
+        if (!reader.IsValid || kind > (byte)EditorRequestKind.NewShip)
             return false;
         message.Kind = (EditorRequestKind)kind;
         if (message.Kind == EditorRequestKind.Begin)
             message.Hull = value;
         else
             message.Token = value;
+        if (message.Kind == EditorRequestKind.NewShip) return ShipName.Read(ref reader, out message.Name);
         if (message.Kind == EditorRequestKind.Commit)
         {
             message.Total = reader.ReadInt32();
@@ -203,9 +211,10 @@ public static class EditorDataMessage
 /// <summary>Server to client, reliable: where the client's edit stands. Sent in answer to every request and at every change.</summary>
 public struct EditorStateMessage
 {
-    public const int WireSize = 1 + 1 + 1 + 4 + 4 + 4 + 2;
+    public const int WireSize = 1 + 1 + 1 + 4 + 4 + 4 + 2 + 1;
 
     public EditorPhase Phase;
+    public NewShipStatus NewShip;
     public EditorReason Reason;
 
     /// <summary>The edit this is about, as the server named it; zero when a request to begin was refused.</summary>
@@ -229,6 +238,7 @@ public struct EditorStateMessage
         writer.WriteUInt32(Hull);
         writer.WriteUInt32(ReplacedHull);
         writer.WriteUInt16(WaitSeconds);
+        writer.WriteByte((byte)NewShip);
     }
 
     public static bool TryRead(ref NetReader reader, out EditorStateMessage message)
@@ -240,7 +250,8 @@ public struct EditorStateMessage
         message.Hull = reader.ReadUInt32();
         message.ReplacedHull = reader.ReadUInt32();
         message.WaitSeconds = reader.ReadUInt16();
-        if (!reader.IsValid || reader.Remaining != 0 || phase > (byte)EditorPhase.Applied || reason > (byte)EditorReason.RepairFirst)
+        message.NewShip = (NewShipStatus)reader.ReadByte();
+        if (!reader.IsValid || reader.Remaining != 0 || phase > (byte)EditorPhase.Applied || reason > (byte)EditorReason.NoClearSpot || reason == (byte)EditorReason.Unavailable || message.NewShip > NewShipStatus.Refused)
             return false;
         message.Phase = (EditorPhase)phase;
         message.Reason = (EditorReason)reason;

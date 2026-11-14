@@ -22,7 +22,6 @@ public sealed class WorldSettingEffectTests
     [Theory]
     [InlineData(20)]
     [InlineData(80)]
-    [InlineData(160)]
     public void SectorSizeScalesDerivedDriveRangeButNotMinimum(int km)
     {
         var world = World($"sectorSize={km}");
@@ -40,8 +39,8 @@ public sealed class WorldSettingEffectTests
     [Theory]
     [InlineData(20, 0)]
     [InlineData(20, 1)]
-    [InlineData(160, 0)]
-    [InlineData(160, 1)]
+    [InlineData(80, 0)]
+    [InlineData(80, 1)]
     public void GasSizeRangesAndChanceRespectSectorWalls(int km, int huge)
     {
         var world = World($"sectorSize={km}", $"gasHugeChance={huge}", "gasSizeMin=8", "gasSizeMax=8",
@@ -77,7 +76,7 @@ public sealed class WorldSettingEffectTests
 
     [Theory]
     [InlineData(20)]
-    [InlineData(160)]
+    [InlineData(80)]
     public void RocksAtSectorSizeExtremesAreDeterministicAndStayInsideTheirOwner(int km)
     {
         var galaxy = World($"sectorSize={km}").Galaxy.WithSeed(42);

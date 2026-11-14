@@ -12,8 +12,6 @@ namespace Prospect.Client.Screens;
 
 internal sealed partial class ScreenHost
 {
-    private const int FieldCacheSize = 64;
-
     private MapTuning? _mapTuning;
     private readonly MapNavigation _mapNav = new();
     private readonly MapCardState _mapCard = new();
@@ -21,13 +19,23 @@ internal sealed partial class ScreenHost
     private readonly SensorCoverage _coverage = new();
     private readonly ScanTracker _scan = new();
 
-    // Charted asteroid fields, worked out a few sectors a frame and kept: the chart is of immutable geography.
-    private readonly SectorCoord[] _fieldSectors = new SectorCoord[FieldCacheSize];
-    private readonly int[] _fieldCounts = new int[FieldCacheSize];
-    private readonly bool[] _fieldValid = new bool[FieldCacheSize];
-    private readonly ChartField[] _fields = new ChartField[FieldCacheSize * AsteroidFieldsModule.MaxFieldsInReach];
-    private Galaxy? _fieldGalaxy;
-    private int _fieldBudget;
+    // What a charted sector shows of the natural world: field and cloud outlines, worked out on a worker.
+    private MapFeatureCache? _featureCache;
+
+    // The legend names the star types in capitals; made once per galaxy, never per frame.
+    private string[] _starNamesUpper = [];
+    private Galaxy? _starNamesGalaxy;
+
+    private string StarNameUpper(Galaxy galaxy, int index)
+    {
+        if (!ReferenceEquals(galaxy, _starNamesGalaxy))
+        {
+            _starNamesGalaxy = galaxy;
+            _starNamesUpper = [.. galaxy.StarClasses.Select(star => star.Name.ToUpperInvariant())];
+        }
+
+        return _starNamesUpper[index];
+    }
 
     private MapTuning MapLook => _mapTuning ??= MapTuning.Load();
 
@@ -86,7 +94,6 @@ internal sealed partial class ScreenHost
         Kit.Fade = fade;
         var display = _ui.DisplaySize;
         var io = ImGui.GetIO();
-        _fieldBudget = look.FieldSectorsPerFrame;
 
         // Everything drawn over the map is placed before any input is read, so the map never takes a press, wheel
         // or drag that lands on it, even on the frame it first appears.
@@ -94,9 +101,13 @@ internal sealed partial class ScreenHost
         var units = LayoutMapUnits(snapshot, world);
         _mapPointer.Block(units.Min, units.Size);
         _mapPointer.Block(float2.Zero, new float2(display.X, HudLayout.TopBarBottom(Kit.Scale)));
+        var legend = MapLegend.Layout(display, Kit.Scale, units, MapLegend.FeatureRows + galaxy.StarClasses.Length, look.LegendRowHeight);
+        if (legend.Shown)
+            _mapPointer.Block(legend.Min, legend.Size);
         var layerMin = MapLayerBar.Min(display, HudTop, Kit.Scale);
         var layerSize = MapLayerBar.Size(Kit.Scale);
         _mapPointer.Block(layerMin, layerSize);
+        BlockMapForTip();
         if (_mapMenuOpen)
         {
             _mapMenuTime += _ui.DeltaTime;
@@ -181,6 +192,7 @@ internal sealed partial class ScreenHost
             world.ClearSelection();
         var clicked = 0u;
         var clickedDistance = Kit.Px(14) * Kit.Px(14);
+        var unitHover = new MapUnitHover(Kit.Px(look.UnitHoverPixels));
         for (var i = 0; i < snapshot.HullCount; i++)
         {
             ref var hull = ref snapshot.Hulls[i];
@@ -203,6 +215,7 @@ internal sealed partial class ScreenHost
                 continue;
             }
 
+            unitHover.Consider(hull.Id, at, mouse);
             if (boxReleased && pointer.BoxMoved && at.X >= boxMin.X && at.X <= boxMax.X && at.Y >= boxMin.Y && at.Y <= boxMax.Y)
                 world.AddToSelection(hull.Id);
             var offset = at - mouse;
@@ -227,6 +240,16 @@ internal sealed partial class ScreenHost
         }
 
         DrawLostContacts(draw, snapshot, view, galaxy, look);
+
+        // The unit under the pointer is named beside it, small and muted, with no box. The sector's preview card
+        // stays away while it is: the pointer is on the unit, not asking about the sector beneath it.
+        var overUnit = unitHover.Hit && (_mapHoverPinned || pointer.Hovered) && !menuOpen && !pointer.Boxing;
+        if (overUnit && world.TryGetHull(unitHover.Hull, out var named))
+        {
+            var designs = snapshot.Content.Designs;
+            var label = Kit.F($"{designs[Math.Min(named.Design, designs.Length - 1)].Name} {(named.Id & 0xFFFF) + 1}");
+            Kit.Text(draw, _ui.Sans, Theme.FontCaption, unitHover.At + new float2(Kit.Px(12), -Kit.Px(7)), Theme.TextDim, label, look.UnitLabelAlpha);
+        }
 
         // The plotted jump: a dotted route underneath the hull's arrow, visible before its order starts.
         var player = new float2((float)(world.OwnPosition.X / size), (float)(world.OwnPosition.Z / size));
@@ -300,7 +323,8 @@ internal sealed partial class ScreenHost
         if (_sectorInfo.Open)
             DrawSectorPanel(draw, snapshot, world);
         DrawMapHeading(draw, world, units, display, size);
-        DrawMapLegend(draw, display, units, layerMin, look);
+        if (legend.Shown)
+            DrawMapLegend(draw, galaxy, legend, look);
 
         if (world.ControlOutOfSector)
         {
@@ -310,7 +334,7 @@ internal sealed partial class ScreenHost
         }
 
         // A preview while nothing is pinned. It is drawn on the map, not as a window, so the pointer cannot take it.
-        if (!_mapCard.Pinned && pointerOnMap && !_mapMenuOpen && _mapCard.Shown(true, hover, out var previewSector, out _))
+        if (!_mapCard.Pinned && pointerOnMap && !overUnit && !_mapMenuOpen && _mapCard.Shown(true, hover, out var previewSector, out _))
         {
             var previewSize = CardSize(snapshot, world, galaxy, previewSector, true);
             DrawSectorCard(draw, snapshot, world, galaxy, previewSector, PlaceCard(view, previewSector, previewSize), previewSize, true);
@@ -517,8 +541,11 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
-    /// What a charted sector of the chosen layer holds, as surveyed: its star, its name, and close in its asteroid
-    /// fields' envelopes. Nothing is drawn for an uncharted sector: it is an anonymous destination.
+    /// What a charted sector of the chosen layer holds, as surveyed: its name, a small muted star icon in the
+    /// corner, and close in the real outlines of the asteroid fields and gas clouds that reach it. Nothing is drawn
+    /// for an uncharted sector: it is an anonymous destination. A field or cloud is drawn only inside charted
+    /// sectors: the part of one that lies across a wall in a sector the player has not charted stays hidden until
+    /// that sector is charted, and a feature across two charted sectors is drawn whole, each sector its own half.
     /// </summary>
     private void DrawChartedSectors(ImDrawListPtr draw, in MapProjection view, Galaxy galaxy, float2 topLeft, float2 bottomRight, MapTuning look)
     {
@@ -527,7 +554,8 @@ internal sealed partial class ScreenHost
         var firstZ = (int)MathF.Floor(topLeft.Y + 0.5f);
         var lastZ = (int)MathF.Floor(bottomRight.Y + 0.5f);
         var cell = view.Cell;
-        var size = (float)galaxy.SectorSize;
+        _featureCache ??= new MapFeatureCache(job => _app.Jobs.Schedule(job), look.FieldCoreShare);
+        _featureCache.Update(galaxy);
         for (var z = firstZ; z <= lastZ; z++)
             for (var x = firstX; x <= lastX; x++)
             {
@@ -536,26 +564,15 @@ internal sealed partial class ScreenHost
                     continue;
                 ref var summary = ref MapSummary(galaxy, coord);
                 var position = view.ToScreen(x, z);
-                var star = StarColor(galaxy.StarClasses[summary.StarClass].Color);
-                var glow = Math.Min(cell * 0.18f, 26f);
-                draw.AddCircleFilled(position, glow, Kit.Color(star, 0.1f), 16);
-                draw.AddCircleFilled(position, Math.Max(1.5f, glow * 0.3f), Kit.Color(star, 0.95f), 8);
+                var half = new float2(view.Cell * 0.5f, view.CellZ * 0.5f);
 
-                if (cell >= look.FieldDetailCell && TryChartFields(galaxy, coord, out var fields))
-                {
-                    foreach (ref readonly var field in fields)
-                    {
-                        // The envelope's footprint on the layer: its long axis along the field's direction.
-                        var at = view.ToScreen((float)(field.Center.X / size), (float)(field.Center.Z / size));
-                        var along = new float2(field.Along.X, field.Along.Z * view.Cos);
-                        var across = new float2(-field.Along.Z, field.Along.X * view.Cos);
-                        var length = field.HalfExtents.X / size * cell;
-                        var width = field.HalfExtents.Z / size * cell;
-                        Span<float2> quad = [at + along * length + across * width, at + along * length - across * width, at - along * length - across * width, at - along * length + across * width];
-                        draw.AddConvexPolyFilled(quad, Kit.Color(Theme.Accent, 0.07f));
-                        draw.AddPolyline(quad, Kit.Color(Theme.Accent, 0.45f), ImDrawFlags.Closed, Kit.Px(1f));
-                    }
-                }
+                if (cell >= look.FieldDetailCell && _featureCache.TryGet(galaxy, coord, out var slot))
+                    DrawSectorFeatures(draw, view, galaxy, coord, slot, position - half, position + half, look);
+
+                var radius = Math.Min(Kit.Px(look.StarIconSize), cell * 0.12f);
+                var iconAt = position + new float2(half.X - radius - Kit.Px(7), -half.Y + radius + Kit.Px(7));
+                ref readonly var starClass = ref galaxy.StarClasses[summary.StarClass];
+                DrawStarIcon(draw, iconAt, radius, look.ShapeOf(starClass.Name), StarColor(starClass.Color), look);
 
                 if (cell >= 118f)
                 {
@@ -567,31 +584,122 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
-    /// A charted sector's asteroid fields from the cache, worked out now if this frame's budget allows. False for a
-    /// sector without a chart or while it waits its turn.
+    /// A charted sector's gas clouds, then its asteroid fields, as their real outlines from the cache, clipped to the
+    /// sector's cell: the cloud's fringe and denser body, the field's support and denser core. Each outline point is
+    /// projected here, so the tilted view squashes them like everything else on the layer.
     /// </summary>
-    private bool TryChartFields(Galaxy galaxy, SectorCoord sector, out ReadOnlySpan<ChartField> fields)
+    private void DrawSectorFeatures(ImDrawListPtr draw, in MapProjection view, Galaxy galaxy, SectorCoord sector, int slot, float2 clipMin, float2 clipMax, MapTuning look)
     {
-        fields = default;
-        if (!ReferenceEquals(galaxy, _fieldGalaxy))
+        var cache = _featureCache!;
+        var features = cache.Features(slot);
+        var size = (float)galaxy.SectorSize;
+        Span<float2> outer = stackalloc float2[MapFootprint.MaxVertices];
+        Span<float2> inner = stackalloc float2[MapFootprint.MaxVertices];
+        var line = Kit.Px(1f);
+        draw.PushClipRect(clipMin, clipMax, true);
+        for (var pass = 0; pass < 2; pass++)
+            for (var i = 0; i < features.Length; i++)
+            {
+                var cloud = features[i].Kind == MapFeatureKind.Cloud;
+                if (cloud != (pass == 0))
+                    continue;
+                var whole = Project(view, sector, size, cache.Outer(slot, i), outer);
+                var core = Project(view, sector, size, cache.Inner(slot, i), inner);
+                if (cloud)
+                {
+                    var rgb = look.CloudRgb;
+                    if (whole.Length >= 3)
+                    {
+                        draw.AddConvexPolyFilled(whole, Kit.Color(rgb, look.CloudFringeAlpha));
+                        draw.AddPolyline(whole, Kit.Color(rgb, look.CloudLineAlpha * 0.4f), ImDrawFlags.Closed, line);
+                    }
+
+                    if (core.Length >= 3)
+                    {
+                        draw.AddConvexPolyFilled(core, Kit.Color(rgb, look.CloudBodyAlpha));
+                        draw.AddPolyline(core, Kit.Color(rgb, look.CloudLineAlpha), ImDrawFlags.Closed, line);
+                    }
+                }
+                else
+                {
+                    var rgb = look.FieldRgb;
+                    if (whole.Length < 3)
+                        continue;
+                    draw.AddConcavePolyFilled(whole, Kit.Color(rgb, look.FieldFillAlpha));
+                    if (core.Length >= 3)
+                        draw.AddConcavePolyFilled(core, Kit.Color(rgb, look.FieldCoreAlpha));
+                    draw.AddPolyline(whole, Kit.Color(rgb, look.FieldLineAlpha), ImDrawFlags.Closed, line);
+                }
+            }
+
+        draw.PopClipRect();
+    }
+
+    /// <summary>Turns outline points (metres from the sector's centre) into screen points on the chosen layer.</summary>
+    private static Span<float2> Project(in MapProjection view, SectorCoord sector, float sectorSize, ReadOnlySpan<System.Numerics.Vector2> points, Span<float2> into)
+    {
+        for (var i = 0; i < points.Length; i++)
+            into[i] = view.ToScreen(sector.X + points[i].X / sectorSize, sector.Z + points[i].Y / sectorSize);
+        return into[..points.Length];
+    }
+
+    /// <summary>
+    /// A star's icon: its class's shape in a muted outline, and a small dot in the star's colour at its centre. Small
+    /// and quiet on purpose: it is a note on the sector, not a thing to look at.
+    /// </summary>
+    private static void DrawStarIcon(ImDrawListPtr draw, float2 at, float r, StarIconShape shape, uint rgb, MapTuning look)
+    {
+        var color = Kit.Color(Theme.TextDim, look.StarIconAlpha);
+        var thickness = Kit.Px(1f);
+        switch (shape)
         {
-            _fieldGalaxy = galaxy;
-            Array.Clear(_fieldValid);
+            case StarIconShape.Square:
+                draw.AddRect(at - new float2(r * 0.85f, r * 0.85f), at + new float2(r * 0.85f, r * 0.85f), color, 0f, ImDrawFlags.None, thickness);
+                break;
+            case StarIconShape.Diamond:
+                draw.AddQuad(at + new float2(0, -r * 1.15f), at + new float2(r * 1.15f, 0), at + new float2(0, r * 1.15f), at + new float2(-r * 1.15f, 0), color, thickness);
+                break;
+            case StarIconShape.Sparkle:
+                {
+                    var tip = r * 1.3f;
+                    var waist = r * 0.38f;
+                    Span<float2> points =
+                    [
+                        at + new float2(0, -tip), at + new float2(waist, -waist), at + new float2(tip, 0), at + new float2(waist, waist),
+                    at + new float2(0, tip), at + new float2(-waist, waist), at + new float2(-tip, 0), at + new float2(-waist, -waist),
+                ];
+                    draw.AddPolyline(points, color, ImDrawFlags.Closed, thickness);
+                    break;
+                }
+
+            case StarIconShape.Asterisk:
+                {
+                    var across = r * 1.15f;
+                    var slant = new float2(across * 0.866f, across * 0.5f);
+                    draw.AddLine(at + new float2(0, -across), at + new float2(0, across), color, thickness);
+                    draw.AddLine(at - slant, at + slant, color, thickness);
+                    draw.AddLine(at + new float2(-slant.X, slant.Y), at + new float2(slant.X, -slant.Y), color, thickness);
+                    break;
+                }
+
+            default:
+                draw.AddCircle(at, r, color, 16, thickness);
+                break;
         }
 
-        var slot = (int)((uint)(sector.X * 73856093 ^ sector.Y * 19349663 ^ sector.Z * 83492791) % FieldCacheSize);
-        var buffer = _fields.AsSpan(slot * AsteroidFieldsModule.MaxFieldsInReach, AsteroidFieldsModule.MaxFieldsInReach);
-        if (!_fieldValid[slot] || _fieldSectors[slot] != sector)
-        {
-            if (_fieldBudget <= 0 || _exploration is not { } exploration || !Charted(sector))
-                return false;
-            _fieldBudget--;
-            _fieldCounts[slot] = exploration.ChartFields(galaxy, sector, buffer);
-            _fieldSectors[slot] = sector;
-            _fieldValid[slot] = true;
-        }
+        draw.AddCircleFilled(at, Math.Max(1.2f, r * 0.34f), Kit.Color(rgb, look.StarDotAlpha), 8);
+    }
 
-        fields = buffer[.._fieldCounts[slot]];
+    /// <summary>
+    /// How many asteroid fields reach a charted sector, once the worker has its outlines; false while it has not.
+    /// </summary>
+    private bool TryFieldCount(Galaxy galaxy, SectorCoord sector, out int count)
+    {
+        count = 0;
+        if (_featureCache is not { } cache || !Charted(sector) || !cache.TryGet(galaxy, sector, out var slot))
+            return false;
+        foreach (var feature in cache.Features(slot))
+            count += feature.Kind == MapFeatureKind.Field ? 1 : 0;
         return true;
     }
 
@@ -717,36 +825,78 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
-    /// What the map's shades mean, in one row at the bottom middle: charted, live sensor coverage, uncharted, a lost
-    /// contact. Left out where the unit list or the layer bar would cover it.
+    /// The map's index on the left, under the unit list: what the shades and shapes mean, one row each: charted,
+    /// live sensor coverage, uncharted, a lost contact, asteroid fields, gas clouds, then the star types. Rows
+    /// that do not fit are left off the end, so the star types go first.
     /// </summary>
-    private void DrawMapLegend(ImDrawListPtr draw, float2 display, in MapUnitLayout units, float2 layerMin, MapTuning look)
+    private void DrawMapLegend(ImDrawListPtr draw, Galaxy galaxy, in MapLegendLayout legend, MapTuning look)
     {
-        var item = Kit.Px(136);
-        var height = Kit.Px(24);
-        var width = item * 4 + Kit.Px(Theme.Space2) * 2;
-        var min = new float2(MathF.Round((display.X - width) * 0.5f), display.Y - Kit.Px(HudLayout.Margin) - height);
-        if (min.X < units.Min.X + units.Size.X + Kit.Px(Theme.Space2) || min.X + width > layerMin.X - Kit.Px(Theme.Space2))
-            return;
-        draw.AddRectFilled(min, min + new float2(width, height), Kit.Color(Theme.Panel, 0.75f));
-        var swatch = new float2(Kit.Px(12), Kit.Px(10));
-        var at = min + new float2(Kit.Px(Theme.Space2), MathF.Round((height - swatch.Y) * 0.5f));
-        var text = new float2(Kit.Px(18), -Kit.Px(2));
+        var min = legend.Min;
+        Kit.PanelFrame(draw, min, min + legend.Size);
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3)), Theme.Accent, "MAP INDEX"u8);
+        var swatch = new float2(Kit.Px(14), Kit.Px(10));
+        var left = min.X + Kit.Px(Theme.Space4);
+        var textX = left + Kit.Px(24);
+        var rowTop = min.Y + legend.Header;
+        for (var row = 0; row < legend.Rows; row++)
+        {
+            var middle = new float2(left + swatch.X * 0.5f, rowTop + legend.Row * (row + 0.5f));
+            var swatchMin = middle - swatch * 0.5f;
+            var textAt = new float2(textX, middle.Y - Kit.Px(7));
+            switch (row)
+            {
+                case 0:
+                    draw.AddRectFilled(swatchMin, swatchMin + swatch, Kit.Color(Theme.Info, look.ChartedAlpha + 0.2f));
+                    draw.AddRect(swatchMin, swatchMin + swatch, Kit.Color(Theme.Info, 0.6f));
+                    Kit.Text(draw, _ui.Mono, Theme.FontCaption, textAt, Theme.TextDim, "CHARTED"u8);
+                    break;
+                case 1:
+                    draw.AddCircleFilled(middle, swatch.Y * 0.5f, Kit.Color(Theme.Good, look.LiveFillAlpha + 0.15f), 12);
+                    draw.AddCircle(middle, swatch.Y * 0.5f, Kit.Color(Theme.Good, look.LiveRingAlpha), 12, Kit.Px(1.2f));
+                    Kit.Text(draw, _ui.Mono, Theme.FontCaption, textAt, Theme.TextDim, "LIVE SENSORS"u8);
+                    break;
+                case 2:
+                    draw.AddRectFilled(swatchMin, swatchMin + swatch, Kit.Color(0x10151C, 1f));
+                    draw.AddRect(swatchMin, swatchMin + swatch, Kit.Color(Theme.LineStrong, 0.8f));
+                    Kit.Text(draw, _ui.Mono, Theme.FontCaption, textAt, Theme.TextDim, "UNEXPLORED"u8);
+                    break;
+                case 3:
+                    DrawContactMarker(draw, middle, swatch.Y * 0.45f, Theme.TextDim, 0.9f, false, HullClass.Ship);
+                    Kit.Text(draw, _ui.Mono, Theme.FontCaption, textAt, Theme.TextDim, "LOST CONTACT"u8);
+                    break;
+                case 4:
+                    {
+                        // A bent ribbon, as a field is drawn: its support, its denser core and its outline.
+                        Span<float2> ribbon =
+                        [
+                            middle + new float2(-swatch.X * 0.5f, swatch.Y * 0.1f), middle + new float2(-swatch.X * 0.15f, -swatch.Y * 0.5f), middle + new float2(swatch.X * 0.5f, -swatch.Y * 0.2f),
+                        middle + new float2(swatch.X * 0.15f, swatch.Y * 0.5f),
+                    ];
+                        var rgb = look.FieldRgb;
+                        draw.AddConcavePolyFilled(ribbon, Kit.Color(rgb, look.FieldFillAlpha + 0.25f));
+                        draw.AddPolyline(ribbon, Kit.Color(rgb, Math.Max(look.FieldLineAlpha, 0.7f)), ImDrawFlags.Closed, Kit.Px(1f));
+                        Kit.Text(draw, _ui.Mono, Theme.FontCaption, textAt, Theme.TextDim, "ASTEROID FIELD"u8);
+                        break;
+                    }
 
-        draw.AddRectFilled(at, at + swatch, Kit.Color(Theme.Info, look.ChartedAlpha + 0.2f));
-        draw.AddRect(at, at + swatch, Kit.Color(Theme.Info, 0.6f));
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, at + text, Theme.TextDim, "CHARTED"u8);
-        at.X += item;
-        draw.AddCircleFilled(at + swatch * 0.5f, swatch.Y * 0.5f, Kit.Color(Theme.Good, look.LiveFillAlpha + 0.15f), 12);
-        draw.AddCircle(at + swatch * 0.5f, swatch.Y * 0.5f, Kit.Color(Theme.Good, look.LiveRingAlpha), 12, Kit.Px(1.2f));
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, at + text, Theme.TextDim, "LIVE SENSORS"u8);
-        at.X += item;
-        draw.AddRectFilled(at, at + swatch, Kit.Color(0x10151C, 1f));
-        draw.AddRect(at, at + swatch, Kit.Color(Theme.LineStrong, 0.8f));
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, at + text, Theme.TextDim, "UNEXPLORED"u8);
-        at.X += item;
-        DrawContactMarker(draw, at + swatch * 0.5f, swatch.Y * 0.45f, Theme.TextDim, 0.9f, false, HullClass.Ship);
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, at + text, Theme.TextDim, "LOST CONTACT"u8);
+                case 5:
+                    {
+                        var rgb = look.CloudRgb;
+                        Ellipse(draw, middle, swatch.X * 0.5f, swatch.Y * 0.5f, rgb, look.CloudBodyAlpha + 0.2f, rgb, Math.Max(look.CloudLineAlpha, 0.7f), Kit.Px(1f));
+                        Kit.Text(draw, _ui.Mono, Theme.FontCaption, textAt, Theme.TextDim, "GAS CLOUD"u8);
+                        break;
+                    }
+
+                default:
+                    {
+                        var star = row - MapLegend.FeatureRows;
+                        ref readonly var starClass = ref galaxy.StarClasses[star];
+                        DrawStarIcon(draw, middle, Math.Min(Kit.Px(look.StarIconSize), swatch.Y * 0.6f), look.ShapeOf(starClass.Name), StarColor(starClass.Color), look);
+                        Kit.Text(draw, _ui.Mono, Theme.FontCaption, textAt, Theme.TextDim, Kit.F($"{StarNameUpper(galaxy, star)}"));
+                        break;
+                    }
+            }
+        }
     }
 
     /// <summary>The layer bar's look and its buttons, which do what Page Up, Page Down and the tilt key do.</summary>

@@ -20,6 +20,15 @@ public sealed class FlightTests
     }
 
     [Fact]
+    public void GasCoverageTickUsesSharedRangeBudget()
+    {
+        var content = GameContent.Load();
+        var cache = new SensorGasCache(content.Galaxy, content.Exploration.SensorRadius);
+        Assert.True(GasSensors.Covers(content.Galaxy, cache.At(default), content.Exploration, default, new Double3(250, 0, 0), false));
+        Assert.False(GasSensors.Covers(content.Galaxy, cache.At(default), content.Exploration, default, new Double3(5001, 0, 0)));
+    }
+
+    [Fact]
     public void JumpPreviewAndRollTakeNoTickMemory()
     {
         var content = GameContent.Load();
@@ -3703,5 +3712,38 @@ public sealed class ExplorationWorldTests
         var probe = new AllocationProbe();
         while (probe.Measuring()) _ = content.Exploration.Covers(origin, origin + new Double3(1, 1, 1));
         Assert.Equal(0, probe.Bytes);
+    }
+}
+
+
+public sealed class NewShipProtocolTests
+{
+    [Fact]
+    public void NamesRoundTripAtTheUnicodeLimitWithoutAllocatingAndTruncationIsRejected()
+    {
+        var text = string.Concat(Enumerable.Repeat("🚀", 32));
+        Prospect.Game.Protocol.ShipName name = default;
+        Assert.True(name.Set(text));
+        Assert.False(name.Set(text + "x"));
+        var buffer = new byte[Prospect.Game.Protocol.EditorRequestMessage.MaxWireSize];
+        var writer = new Prospect.Engine.Net.NetWriter(buffer);
+        new Prospect.Game.Protocol.EditorRequestMessage { Kind = Prospect.Game.Protocol.EditorRequestKind.NewShip, Name = name }.Write(ref writer, default);
+        Assert.Equal(buffer.Length, writer.Length);
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 100; i++)
+        {
+            while (allocation.Measuring())
+            {
+                var reader = new Prospect.Engine.Net.NetReader(buffer.AsSpan(1));
+                if (!Prospect.Game.Protocol.EditorRequestMessage.TryRead(ref reader, default, out var parsed) || parsed.Name.Length != 64)
+                    throw new InvalidOperationException("Name did not round trip.");
+            }
+        }
+        Assert.Equal(0, allocation.Bytes);
+        for (var size = 1; size < buffer.Length; size++)
+        {
+            var reader = new Prospect.Engine.Net.NetReader(buffer.AsSpan(1, size - 1));
+            Assert.False(Prospect.Game.Protocol.EditorRequestMessage.TryRead(ref reader, default, out _));
+        }
     }
 }

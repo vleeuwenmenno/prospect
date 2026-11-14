@@ -175,6 +175,8 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         /// <summary>The edit's name, the hull it is of, and the tick it was allowed in: damage from then on ends it.</summary>
         public uint EditToken;
         public HullHandle EditHull;
+        public HullHandle EditPilot;
+        public bool CreatingShip, RemoteEdit;
         public long EditStartTick;
 
         /// <summary>When the upload, the owner's client or the other clients run out of time, by stage.</summary>
@@ -278,7 +280,8 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             Array.Clear(FailedDesigns);
             EditPhase = EditorPhase.Closed;
             EditToken = 0;
-            EditHull = default;
+            EditHull = EditPilot = default;
+            CreatingShip = RemoteEdit = false;
             EditStartTick = EditDeadline = EditNextCommit = 0;
             EditUpload = null;
             EditDesign = 0;
@@ -471,6 +474,8 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             for (var i = 0; i < _uploads.Length; i++)
                 _uploads[i] = new EditUpload(_content.BlockTransfers.MaxBytes);
             Galaxy = _content.Galaxy.WithSeed(_galaxySeed);
+            _sensorGas = _content.Exploration.GasOpticalPenalty == 0 || Galaxy.GasClouds is null
+                ? null : new SensorGasCache(Galaxy, _content.Exploration.SensorRadius);
 
             // A saved world's asteroids are bounded before they are pushed, never when they are saved.
             _rocks = world is null ? new RockField(Galaxy) : new RockField(Galaxy, _saveLimits.MaxRocks, _saveLimits.MaxMovedSectors);

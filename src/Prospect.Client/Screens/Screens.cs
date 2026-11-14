@@ -50,6 +50,8 @@ internal sealed partial class ScreenHost
         InitializeControls();
         InitializeNewGame();
         InitializeSocial();
+        _claimTipForMap = () => _mapPointer.Claim();
+        InitializeTips();
     }
 
     public Screen Current => _screen;
@@ -63,6 +65,7 @@ internal sealed partial class ScreenHost
             _controlsOpen = _mapOpen = _shipInfoOpen = _sessionMenuOpen = false;
             _sectorInfo.Reset();
             ResetSocial();
+            ResetTipTracking();
         }
         _screen = screen;
         _screenTime = 0;

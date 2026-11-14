@@ -2,7 +2,7 @@
 
 Asteroid fields and gas clouds are things in world space, not contents of a sector.
 A sector is still generated alone, from the seed, without generating its neighbours.
-Generation version 5, protocol 40. The code is `AsteroidFieldsModule` and `GasCloudModule` in `Prospect.Game/World`.
+Generation version 5, protocol 41. The code is `AsteroidFieldsModule` and `GasCloudModule` in `Prospect.Game/World`.
 
 ## Decided: what the player gets
 
@@ -164,17 +164,20 @@ Development machine, default content. Before is generation version 3.
 
 ## Decided: variable sector and cloud sizes
 
-- `sectorSize` is 20–160 km, default 80 km, step 10 km; `Galaxy.Under` owns its applied metre value.
+- `sectorSize` is 20–80 km, default 80 km, step 10 km; `Galaxy.Under` owns its applied metre value.
 - Ordinary and huge cloud diameters each have a minimum/maximum pair in km; huge chance is 0–1.
 - Both endpoints are capped at the applied sector width before sampling. The cloud remains within one neighbour of its anchor; the 27-sector query remains complete.
 - Anchors, gas queries, field density, exploration, maps and saved positions use the same applied `Galaxy.SectorSize`.
 - Saved settings already store ids and values. No snapshot codec change is needed; generation and content identity refuse older saves.
 
-### Sector-size measurements (Linux x64 development machine)
+### Sector-size budget and supported range
 
-Best of 20 generations after selecting the densest sampled sector, seed 11.
-At 160 km, the densest sampled sector holds 11,109 rocks: 6.261 ms in Release.
-The serial Debug suite measured 13.856 ms at 80 km and 15.233 ms at 160 km against the existing 15 ms budget.
-Concurrent-worker Debug measurements at 160 km ranged from 15.07 to 19.37 ms.
-The default 80 km sample holds 10,166 rocks and took 7.186 ms in Release.
-The default-world 15 ms regression gate remains; maximum-size timing is reported separately, not given a larger passing budget.
+The selectable range is capped at 20–80 km; the default stays 80 km.
+The former 160 km endpoint took 15.233 ms in Debug, exceeding the unchanged 15 ms budget.
+Best of 20 generations of the densest sampled sector, seed 11, after integration:
+
+- 20 km: 6,450 rocks, 9.811 ms Debug.
+- 80 km: 10,166 rocks, 14.446 ms Debug.
+
+Both supported endpoints enforce the 15 ms regression budget; no endpoint is exempt.
+The generation hash and version stay unchanged because the default world's generation is unchanged.

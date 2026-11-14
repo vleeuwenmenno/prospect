@@ -452,7 +452,7 @@ The replacement:
 - The time without damage carries over, also into a drone a player steps out in. Editing an escape drone
   preserves its temporary identity: no further ejection, cleanup on leaving, and respawn at the spawn point.
 
-Sizes: `Editor` 42 B at most (a repair is 6 B), `EditorData` 11 B and its chunk, `EditorState` 17 B, `DesignNotice` 38 B,
+Sizes (protocol 41): `Editor` 135 B at most (a repair is 6 B), `EditorData` 11 B and its chunk, `EditorState` 18 B, `DesignNotice` 38 B,
 `DesignReady` 3 B. A client sends one editor request and one `DesignReady` a tick; both are reserved in its
 reliable allowance.
 
@@ -708,7 +708,8 @@ The client draws coverage from owned hulls in `SessionSnapshot.Hulls` only: owne
 
 ### Visibility and disclosure
 
-Every owned hull contributes a spherical volume in double-precision world coordinates, across XYZ walls.
+Every owned hull contributes coverage in double-precision world coordinates, across XYZ walls.
+Gas reduces equipped sensor reach by direction; the proximity sphere is unaffected.
 Working sensors cover 5,000 m; even a sensorless hull covers the content-owned 250 m proximity radius.
 Actual hull contacts remain visible for three ticks, keyed by full hull identity.
 Ownership always discloses the owner's own ships, including remote ones without sensors.
@@ -803,4 +804,81 @@ A test checks every world default and parses the server options without warnings
 The container ships it at `/app/content/server/server-settings.jsonc`; use an explicit `--settings` argument to opt in.
 CLI-only startup options are documented at the top; passwords are better supplied through `PROSPECT_PASSWORD`.
 Sector size and gas ranges are saved world settings; they cannot change when reopening a world.
-Drive blocks specify range in sectors, converted to metres by the shared hull evaluator (version 7).
+Drive blocks specify range in sectors, converted to metres by the shared hull evaluator (version 8).
+
+## Decided (provisional, tunable): gas sensor contract
+
+- Shared `GasSensors.Covers(galaxy, clouds, rules, sensor, target, equipped)` is the server test for live coverage.
+  All existing coverage-gated channels use it. Ownership and recent collision contacts keep their exceptions.
+- A target spends `distance + baseRange * gasOpticalPenalty * opticalDepth` of its base range.
+  `opticalDepth` integrates `ExtinctionOf * max(0, 1 - ellipsoidRadiusSquared)` along the segment to the target.
+  Each ellipsoid is centered at the generated cloud center, with radii `HalfSize * Shape.X` (content fill).
+- The integral is analytic, with scalar double arithmetic and square roots; no shader noise, warp, lean, motion,
+  or `gasWispiness`. Gas beyond the target costs nothing. This is a smooth gameplay envelope, not the visible fringe.
+- `rules/exploration.json` sets `gasOpticalPenalty` to 1.0 (allowed 0–10), base range 5,000 m, proximity 250 m.
+  The file already participates in shared content identity. The combined build uses protocol 41, generation 5 and unchanged save codec 3.
+  Content evaluator is 8 (gas sensors plus sector-scaled drives), so an older executable with these files cannot claim the same sensor arithmetic.
+  Existing content identities, including saved-world identities, change.
+- `GasSensors.Reach` returns metres along any nonzero direction; `SampleReach` fills caller-owned doubles for
+  caller-owned `Double3` directions (ring or elevations). It uses the same cost test, 24 bisections, keeping
+  the covered endpoint (within 0.3 mm at 5 km). Apply the gas-free proximity sphere even without equipment.
+
+Cloud inputs and costs:
+
+- Own a `SensorGasCache(galaxy, baseRange)` per reader. Call `At(sensorPosition)` and consume its span before
+  another cache call; do not retain it. The galaxy and range are immutable for the cache's lifetime.
+- The server uses a 256-entry direct-mapped sector cache; entries collect anchors through `GasCloudQuery`,
+  ultimately `GasCloudModule.TryGetCloud`. No generated sector slots are read. Hits generate nothing.
+- At 5 km range / 20–80 km sectors each miss queries 125 anchors, enough for every sensor position in the sector,
+  including neighbours' clouds. Cache collisions regenerate deterministically. Provisioning allocates; hits and misses do not.
+- Range is supported through eight sector widths. Storage is bounded by 256 times the full anchor cube, so
+  cloud lists cannot truncate. The production cube has 125 slots per entry (about 1.3 MiB of placement storage).
+- Coverage rejects distance first and integrates only the target segment. Reach sampling is intended for display
+  contours, not repeated inside the tick. Renderer/HUD integration is separate work.
+
+Measured on the development machine with 192 sensor hulls around a huge generated cloud and 32 real in-process
+clients: Release averaged 1.9641 ms/server tick, 3.0470 ms/full server-and-clients round, zero managed allocations.
+The same crowded fixture under the parallel Debug suite averaged 21.7703 ms/server tick and 26.7547 ms/full round.
+These include collision, replication and all other tick systems, not gas integration alone; they are not a
+thousands-of-sensors guarantee. Final empty-scene/resize benchmarks passed at 239/268 FPS with zero process allocations
+while other tests were running; earlier runs reached 1,456/885 FPS. Vulkan validation layers were inactive.
+
+## New ships from a drone (protocol 41)
+
+### Decided (provisional, tunable)
+
+- Only an active player's controlled escape drone may request a new ship. The player stays in that drone.
+- Building is free. `content/net/editor.json` sets `maxOwnedShips` to 16 (excluding escape drones),
+  `newShipNameChars` to 32, `newShipDistance` to 50 m and `newShipClearance` to 5 m.
+- Names are trimmed, 1–32 printable Unicode scalar values, unique among the owner's living ships,
+  compared ordinally without case. Controls, formatting characters, invalid Unicode and unassigned characters are refused.
+- The initial blueprint contains one unit-sized `newShipRoot` (`core`), with the pod's class, cell size and colour.
+- One candidate is tested 50 m ahead of the drone. It must fit wholly within the current sector and clear
+  hull and asteroid bounding spheres by 5 m, including displaced rocks. No clear spot means refusal.
+
+### Contract
+
+`PlayerInputBridge.RequestNewShip(ReadOnlySpan<char> name)` returns false for invalid text; true queues an intent.
+`SessionSnapshot.NewShip` exposes `Status` (None/Pending/Created/Refused), `Reason`, `Hull`, and `Serial`.
+Created gives the new hull id and an ordinary Open grant in `SessionSnapshot.Editor`, with a fresh token.
+The hull snapshot may follow the reliable grant: the UI must wait until that hull is present before opening its draft.
+The UI must track the granted hull, not OwnHull; Apply replaces the edited ship while leaving drone control unchanged.
+Cancellation closes the edit but does not remove the created ship. Editing never protects it from damage.
+Switching control, losing the drone or ship, damage to the edited ship, or a jump ends the grant.
+
+The request shares the editor envelope and receive/rate budgets; it is admitted only after the normal handshake.
+A bounded editor worker constructs canonical bytes and checks them through `DesignBytes.Decode`.
+Creation shares upload slots and commit cooldowns. Catalogue, ship and save capacity are checked before creation;
+conditions and clearance are checked again after loading. Full catalogues refuse even a reusable design.
+The catalogue only grows, including an unused entry if creation is cancelled after publication.
+DesignReady still gates hull publication; CatalogueReady is never repurposed. Failed readiness creates no hull.
+`CreateHull` gives the new ship its durable entity; its existing snapshot representation saves it normally.
+
+Protocol 40 sizes: Editor at most 135 B (64 UTF-16 units for 32 Unicode scalars), EditorState 18 B.
+EditorState adds a creation status byte; other editor and design transfer sizes are unchanged.
+Refusals include NotPiloting, BadName, DuplicateName, ShipLimit, NoClearSpot, CatalogueFull,
+HullLimit, Busy, TooSoon, Jumping and the existing client-readiness/check failure reasons.
+
+### Open
+
+- Resource costs, shipyards, alternative spawn candidates, renaming, and remote reopening after cancelling the initial grant.

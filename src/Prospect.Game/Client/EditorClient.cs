@@ -50,6 +50,7 @@ internal sealed class EditorClient
     private readonly byte[] _hash = new byte[SHA256.HashSizeInBytes];
     private EditorStateMessage _state;
     private uint _serial;
+    internal NewShipView NewShip { get; private set; }
     private bool _pending, _wantCancel, _uploading;
 
     // The committed design. Never written to: the bridge copied it from the caller, and it is only read here.
@@ -84,6 +85,8 @@ internal sealed class EditorClient
         if (!EditorStateMessage.TryRead(ref reader, out var state))
             return;
         _state = state;
+        if (state.NewShip != NewShipStatus.None)
+            NewShip = new(state.NewShip, state.Reason, state.NewShip == NewShipStatus.Created ? state.Hull : 0, NewShip.Serial + 1);
         _serial++;
         _pending = false;
 
@@ -106,6 +109,14 @@ internal sealed class EditorClient
         if (!send)
             return;
 
+        if (bridge.ConsumeNewShip(out var name))
+        {
+            if (_pending || _state.Phase is not (EditorPhase.Closed or EditorPhase.Applied))
+            { NewShip = new(NewShipStatus.Refused, EditorReason.Busy, 0, NewShip.Serial + 1); return; }
+            Request(transport, new EditorRequestMessage { Kind = EditorRequestKind.NewShip, Name = name });
+            NewShip = new(_pending ? NewShipStatus.Pending : NewShipStatus.Refused, _pending ? EditorReason.None : EditorReason.Unavailable, 0, NewShip.Serial + 1);
+            return;
+        }
         switch (bridge.ConsumeEdit(out var value, out var bytes))
         {
             case PlayerInputBridge.EditIntent.Begin:
@@ -175,6 +186,7 @@ internal sealed class EditorClient
     internal void Clear()
     {
         _state = default;
+        NewShip = default;
         _bytes = null;
         _pending = _wantCancel = _uploading = false;
     }

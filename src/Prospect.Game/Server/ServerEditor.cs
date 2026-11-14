@@ -58,6 +58,9 @@ public sealed partial class ServerHost
 
         switch (request.Kind)
         {
+            case EditorRequestKind.NewShip:
+                BeginNewShip(connection, request.Name);
+                break;
             case EditorRequestKind.Begin:
                 BeginEdit(connection, request.Hull);
                 break;
@@ -124,6 +127,7 @@ public sealed partial class ServerHost
         }
 
         connection.EditPhase = EditorPhase.Closed;
+        connection.RemoteEdit = false;
         if (!_hulls.IsAlive(connection.Hull) || connection.Hull.Packed != hull)
         {
             RefuseEdit(connection, hull, EditorReason.NotPiloting, 0);
@@ -356,7 +360,10 @@ public sealed partial class ServerHost
             if (connection.EditPhase == EditorPhase.Receiving && tick > connection.EditDeadline)
                 FailUpload(connection, EditorReason.UploadTimedOut);
             if (connection.EditPhase == EditorPhase.Checking && connection.EditUpload!.Worker!.IsCompleted)
-                Decide(connection);
+            {
+                if (connection.CreatingShip) DecideNewShip(connection);
+                else Decide(connection);
+            }
             if (connection.EditPhase == EditorPhase.Publishing)
                 TryReplace(connection, tick);
         }
@@ -368,14 +375,14 @@ public sealed partial class ServerHost
     /// </summary>
     private EditorReason EditInvalid(Connection connection)
     {
-        if (!_hulls.IsAlive(connection.EditHull) || connection.Hull != connection.EditHull)
+        if (!_hulls.IsAlive(connection.EditHull) || (connection.RemoteEdit ? connection.Hull != connection.EditPilot || !_hulls.IsAlive(connection.Hull) || !_hulls.Info(connection.Hull.Index).EscapeDrone || _hulls.Info(connection.EditHull.Index).Owner != connection.PlayerId : connection.Hull != connection.EditHull))
             return EditorReason.HullChanged;
         ref var info = ref _hulls.Info(connection.EditHull.Index);
 
         // Compared, never subtracted: a hull that was never damaged carries the lowest tick there is.
         if (info.DamageTick >= connection.EditStartTick)
             return EditorReason.Damaged;
-        if (_hulls.State(connection.EditHull.Index).Jump != JumpPhase.None || info.Order.Kind == OrderKind.Jump || (connection.Order.Kind == OrderKind.Jump && connection.OrderId != info.OrderId))
+        if ((connection.RemoteEdit && _hulls.State(connection.Hull.Index).Jump != JumpPhase.None) || _hulls.State(connection.EditHull.Index).Jump != JumpPhase.None || info.Order.Kind == OrderKind.Jump || (connection.Order.Kind == OrderKind.Jump && connection.OrderId != info.OrderId))
             return EditorReason.Jumping;
         return EditorReason.None;
     }
@@ -499,7 +506,8 @@ public sealed partial class ServerHost
             }
         }
 
-        ReplaceHull(connection, design);
+        if (connection.CreatingShip) CreateNewShip(connection, design);
+        else ReplaceHull(connection, design);
     }
 
     /// <summary>
@@ -553,15 +561,18 @@ public sealed partial class ServerHost
         state.ShieldOffline = oldState.ShieldOffline && flight.ShieldCapacity > 0f;
 
         ref var info = ref _hulls.Info(next.Index);
-        info.Piloted = true;
+        info.Piloted = oldInfo.Piloted;
         info.OrderId = connection.OrderId;
         info.DamageTick = oldInfo.DamageTick;
         info.EscapeDrone = oldInfo.EscapeDrone;
         _hulls.Destroy(old);
 
         // Inputs that were queued were for the old hull.
-        SetHull(connection, next);
-        ResetControl(connection);
+        if (!connection.RemoteEdit)
+        {
+            SetHull(connection, next);
+            ResetControl(connection);
+        }
 
         connection.EditPhase = EditorPhase.Closed;
         connection.EditReply = new EditorStateMessage
@@ -595,6 +606,7 @@ public sealed partial class ServerHost
         ReleaseUpload(connection);
         connection.EditPhase = EditorPhase.Closed;
         ReplyEdit(connection, reason);
+        connection.CreatingShip = false;
     }
 
     /// <summary>Ends an edit without a word, for a player who is leaving.</summary>
@@ -602,6 +614,7 @@ public sealed partial class ServerHost
     {
         ReleaseUpload(connection);
         connection.EditPhase = EditorPhase.Closed;
+        connection.CreatingShip = connection.RemoteEdit = false;
     }
 
     /// <summary>
@@ -637,6 +650,7 @@ public sealed partial class ServerHost
         connection.EditReply = new EditorStateMessage
         {
             Phase = connection.EditPhase,
+            NewShip = connection.CreatingShip ? (connection.EditPhase == EditorPhase.Closed ? NewShipStatus.Refused : NewShipStatus.Pending) : NewShipStatus.None,
             Reason = reason,
             Token = connection.EditToken,
             Hull = connection.EditHull.Packed,

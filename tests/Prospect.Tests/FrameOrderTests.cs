@@ -133,6 +133,8 @@ public sealed class FrameOrderTests : IDisposable
     private SectorCoord _cardShownSector;
     private float _cardScroll;
     private int _mapCloses;
+    private int _cardCloses;
+    private MapUnitHover _unitHover = new(0f);
 
     // The course menu as the map opens it on a right click, and what its rows ordered.
     private static readonly float2 MenuSize = MapCourseMenu.Size(1f);
@@ -562,6 +564,7 @@ public sealed class FrameOrderTests : IDisposable
         }
 
         DrawFloating();
+        DrawTipPanel();
         DrawCommandCourseMenu();
         // As the editor screen does before its panels: a press on one ends a turn, keeping it.
         _world.EndPartRotationOnPanelPress();
@@ -696,6 +699,221 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     private float2 FieldOf(FloatingWindow window) => window.Min + new float2(40, FloatingWindow.TitleHeight + 10);
+
+    // The tip panel as ScreenHost draws it with the production helpers: placed from its anchor, then drawn, taking
+    // input unless the pointer is hidden for flight.
+    private TipBoard? _tipBoard;
+    private TipCatalogue? _tipCatalogue;
+    private ClientSettings? _tipSettings;
+    private UiContext? _tipKit;
+    private float _tipScale = 1f;
+    private HudRect _tipRect;
+
+    private void UseTips(float scale = 1f)
+    {
+        var fonts = ShippedFonts();
+        var kit = (UiContext)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(UiContext));
+        void Field(string name, object value) => typeof(UiContext).GetField("<" + name + ">k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(kit, value);
+        Field("Sans", fonts.Sans);
+        Field("SansMedium", fonts.SansMedium);
+        Field("SansBold", fonts.SansBold);
+        Field("Mono", fonts.Mono);
+        Field("Scale", scale);
+        Field("DeltaTime", 1f / 60f);
+        ImGui.GetStyle().FontScaleMain = scale;
+        _tipKit = kit;
+        _tipScale = scale;
+        _tipSettings = new ClientSettings();
+        _tipCatalogue = TipCatalogue.Load(Path.Combine(AppContext.BaseDirectory, "content", "visuals", "tips.json"), _actions);
+        _tipBoard = new TipBoard(_tipCatalogue, _tipSettings);
+    }
+
+    private void DrawTipPanel()
+    {
+        if (_tipBoard is not { Active: true } board)
+            return;
+        Kit.BeginFrame(_tipKit!);
+        var tip = board.Current;
+        var size = TipPanel.Measure(_tipCatalogue!, tip, Screen.X);
+        var known = tip.Anchor.Region == TipRegion.Screen;
+        var at = TipPlacement.Place(tip.Anchor, known, default, size, Screen, _tipScale);
+        _tipRect = new HudRect(at.X, at.Y, at.X + size.X, at.Y + size.Y);
+        TipPanel.Draw(board, _tipCatalogue!, _tipRect, !_router.Captured);
+    }
+
+    private float2 TipPoint(in HudRect rect) => new((rect.Left + rect.Right) * 0.5f, (rect.Top + rect.Bottom) * 0.5f);
+
+    private TipPanel.Rows TipRows() => TipPanel.RowsOf(_tipCatalogue!, _tipBoard!.Count > 1, _tipRect);
+
+    private void ClickAt(float2 point)
+    {
+        Frame(() => Move(point));
+        Frame();
+        Frame(() => Click());
+        Frame();
+    }
+
+    [Theory]
+    [InlineData(1f)]
+    [InlineData(2f)]
+    public void ATipStackShowsOneAtATimeNextGoesRoundAndClosingWithoutTheTickBringsItBack(float scale)
+    {
+        UseTips(scale);
+        _surfaceOpen = true;
+        Frame(() => Move(EmptySpace));
+        var board = _tipBoard!;
+        Assert.Equal(3, board.Fire(TipTriggers.CommandViewOpened));
+        Frame();
+        Frame();
+        Assert.Equal(0, board.Index);
+        Assert.True(_tipRect.Width > 0);
+
+        var seen = new List<string> { board.Current.Id };
+        for (var i = 0; i < 3; i++)
+        {
+            ClickAt(TipPoint(TipRows().Next));
+            seen.Add(board.Current.Id);
+        }
+
+        Assert.Equal(["command-select", "command-jump", "command-fog", "command-select"], seen);
+
+        ClickAt(TipPoint(TipRows().Close));
+        Assert.False(board.Active);
+        Assert.Empty(_tipSettings!.HiddenTips);
+        Assert.Equal(3, board.Fire(TipTriggers.CommandViewOpened));
+    }
+
+    [Fact]
+    public void TheTickHidesATipForeverAndResetBringsItBack()
+    {
+        UseTips();
+        _surfaceOpen = true;
+        Frame(() => Move(EmptySpace));
+        var board = _tipBoard!;
+        board.Fire(TipTriggers.EnergyLow);
+        Frame();
+        Frame();
+        ClickAt(TipPoint(TipRows().Check));
+        Assert.True(board.DontShowAgain);
+        ClickAt(TipPoint(TipRows().Check));
+        Assert.False(board.DontShowAgain);
+        ClickAt(TipPoint(TipRows().Check));
+        ClickAt(TipPoint(TipRows().Close));
+        Assert.False(board.Active);
+        Assert.Equal(["energy-low"], _tipSettings!.HiddenTips);
+        Assert.Equal(0, board.Fire(TipTriggers.EnergyLow));
+
+        board.Reset();
+        Assert.Equal(1, board.Fire(TipTriggers.EnergyLow));
+    }
+
+    [Fact]
+    public void InFlightATipTakesNothingUntilThePointerIsShownAndNeverStopsTheHull()
+    {
+        UseTips();
+        var board = _tipBoard!;
+        board.Fire(TipTriggers.ShieldOffline);
+        Frame();
+        Frame();
+        Assert.True(_router.Captured);
+        Assert.False(ImGui.GetIO().WantCaptureMouse);
+        Bridge.Consume(out _, out _);
+
+        // Hidden pointer: W and boost fly the hull and the panel takes no press.
+        Frame(() =>
+        {
+            Key(GlfwKey.W, true);
+            Key(GlfwKey.Space, true);
+        });
+        Assert.True(Sent().Forward > 0);
+        Assert.False(ImGui.GetIO().WantCaptureKeyboard);
+        Assert.True(board.Active);
+
+        // Shift shows the pointer: Close works, and the flight keys still reach the hull afterwards.
+        Frame(() => Key(GlfwKey.LeftShift, true));
+        ClickAt(TipPoint(TipRows().Close));
+        Assert.False(_router.Captured);
+        Assert.False(board.Active);
+        Bridge.Consume(out _, out _);
+        Frame();
+        Assert.True(Sent().Forward > 0);
+        Assert.False(ImGui.GetIO().WantCaptureKeyboard);
+
+        // Letting go of Shift gives the pointer back to flight: the tip never kept it.
+        Frame(() => Key(GlfwKey.LeftShift, false));
+        Frame();
+        Assert.True(_router.Captured);
+    }
+
+    [Fact]
+    public void APressOnATipNeverReachesTheWorld()
+    {
+        UseTips();
+        _world.SetMode(ViewMode.Command);
+        _world.SelectAllOwned();
+        Frame();
+        Frame();
+        var owned = _world.Selection.Length;
+        Assert.True(owned > 0);
+
+        // Control: a click on empty space in the command view clears the selection.
+        ClickAt(EmptySpace);
+        Assert.Equal(0, _world.Selection.Length);
+        _world.SelectAllOwned();
+        Assert.Equal(owned, _world.Selection.Length);
+
+        // With a tip there, a click on its text, its tick, Next and Close leaves it alone.
+        var board = _tipBoard!;
+        board.Fire(TipTriggers.CommandViewOpened);
+        Frame();
+        Frame();
+        ClickAt(new float2(TipPoint(_tipRect).X, _tipRect.Top + 12));
+        Assert.Equal(owned, _world.Selection.Length);
+        ClickAt(TipPoint(TipRows().Check));
+        Assert.Equal(owned, _world.Selection.Length);
+        ClickAt(TipPoint(TipRows().Next));
+        Assert.Equal(owned, _world.Selection.Length);
+        // The tick was set, so Next hid that tip and went on to the one after it.
+        Assert.Equal(2, board.Count);
+        ClickAt(TipPoint(TipRows().Close));
+        Assert.Equal(owned, _world.Selection.Length);
+        Assert.False(board.Active);
+
+        // The panel gone, the same click is the world's again.
+        ClickAt(EmptySpace);
+        Assert.Equal(0, _world.Selection.Length);
+    }
+
+    [Fact]
+    public void EscapeClosesTheTipBeforeAnythingElseTakesIt()
+    {
+        UseTips();
+        _surfaceOpen = true;
+        var board = _tipBoard!;
+        board.Fire(TipTriggers.MapOpened);
+        Frame();
+        Frame();
+        var others = 0;
+
+        // As App.Run and ScreenHost order it: the tip reads Escape first, the rest only when it did not take it.
+        bool Shortcut()
+        {
+            if (board.Escape(board.Active, _actions.Pressed(_devices, InputAction.Pause, true)))
+                return true;
+            if (_actions.Pressed(_devices, InputAction.Pause, true))
+                others++;
+            return false;
+        }
+
+        Frame(() => Key(GlfwKey.Escape, true), Shortcut);
+        Assert.False(board.Active);
+        Assert.Equal(0, others);
+        Frame(() => Key(GlfwKey.Escape, false));
+
+        // With nothing shown the same press is the next surface's.
+        Frame(() => Key(GlfwKey.Escape, true), Shortcut);
+        Assert.Equal(1, others);
+    }
 
     [Fact]
     public void PickingDropsRetainedMaskWhenCameraAdvancedWithoutARender()
@@ -1156,6 +1374,9 @@ public sealed class FrameOrderTests : IDisposable
             _map.Block(MapLayerBar.Min(Screen, HudLayout.TopBarBottom(1f), 1f), MapLayerBar.Size(1f));
             if (_card.Pinned)
                 _map.Block(PinnedCardMin, PinnedCardSize);
+            var legend = MapLegend.Layout(Screen, 1f, units, LegendRows, LegendRowHeight);
+            if (legend.Shown)
+                _map.Block(legend.Min, legend.Size);
         }
 
         _map.Begin(Screen);
@@ -1210,6 +1431,10 @@ public sealed class FrameOrderTests : IDisposable
         MapCourseMenu.End();
     }
 
+    private const int LegendRows = MapLegend.FeatureRows + 5;
+    private const float LegendRowHeight = 20f;
+    private const float UnitHoverPixels = 14f;
+
     private MapProjection NavView => new(Screen * 0.5f, _navCenter, NavCell, _nav.Layer, _nav.TiltBlend * 58f * (MathF.PI / 180f), 2.2f);
 
     private float2 PinnedCardMin => MapSectorCard.Place(NavView.ToScreen(_card.Sector.X, _card.Sector.Y, _card.Sector.Z), NavCell * 0.5f, PinnedCardSize, Screen, HudLayout.TopBarBottom(1f), 14f, 16f);
@@ -1232,7 +1457,17 @@ public sealed class FrameOrderTests : IDisposable
         var hover = view.SectorAt(ImGui.GetIO().MousePos);
         if (_map.BoxReleased && !_map.BoxMoved)
             _card.Click(hover, MapBounds.Contains(_snapshot.Content.Galaxy.Shape, 0.01f, hover));
-        _cardShown = _card.Shown(_map.Hovered, hover, out _cardShownSector, out _cardPreview);
+        // As ScreenHost's hull loop: the own hull nearest the pointer, within its radius, keeps the preview card away.
+        _unitHover = new MapUnitHover(UnitHoverPixels);
+        var size = _snapshot.Content.Galaxy.SectorSize;
+        for (var i = 0; i < _snapshot.HullCount; i++)
+        {
+            ref var hull = ref _snapshot.Hulls[i];
+            if (hull.Owner == _snapshot.PlayerId)
+                _unitHover.Consider(hull.Id, view.ToScreen((float)(hull.Position.X / size), (float)(hull.Position.Y / size), (float)(hull.Position.Z / size)), ImGui.GetIO().MousePos);
+        }
+
+        _cardShown = _card.Shown(_map.Hovered && !_unitHover.Hit, hover, out _cardShownSector, out _cardPreview);
     }
 
     /// <summary>The layer bar and the pinned card, as windows over the map.</summary>
@@ -1252,6 +1487,12 @@ public sealed class FrameOrderTests : IDisposable
             return;
         var min = PinnedCardMin;
         MapSectorCard.Begin(min, PinnedCardSize, _map);
+        if (MapSectorCard.Close(min, PinnedCardSize, 1f))
+        {
+            _card.Dismiss();
+            _cardCloses++;
+        }
+
         if (MapSectorCard.Button("##scan"u8, CardScanCenter - new float2(150, 14), new float2(300, 28)))
             Bridge.RequestScan();
         MapSectorCard.BeginList(CardListMin, CardListSize, _map);
@@ -1358,6 +1599,117 @@ public sealed class FrameOrderTests : IDisposable
         Frame(() => Move(bar + new float2(40, 60)));
         Frame();
         Assert.False(_cardShown);
+    }
+
+    private static float2 CloseSpot(float2 cardMin) =>
+        MapSectorCard.CloseMin(cardMin, PinnedCardSize, 1f) + MapSectorCard.CloseExtent(1f) * 0.5f;
+
+    [Fact]
+    public void TheCardsCloseButtonUnpinsItLikeEscapeAndItsPressNeverReachesTheMap()
+    {
+        OpenExploreMap();
+        _world.Select(_snapshot.Hulls[_snapshot.OwnHull].Id, false);
+        var a = OwnSector.Offset(3, 0, 1);
+        Frame(() => Move(SectorSpot(a)));
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+        var selected = _world.Selection.Length;
+        Assert.True(selected > 0);
+        _mapPresses = _mapReleases = 0;
+
+        // A click on the card beside the button does not close it.
+        var closeSize = MapSectorCard.CloseExtent(1f);
+        Frame(() => Move(CloseSpot(PinnedCardMin) - new float2(closeSize.X + 4f, 0)));
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+        Assert.Equal(0, _cardCloses);
+
+        // On the button: pinned no more, the map saw no press and no release, the selection and the map stand.
+        Frame(() => Move(CloseSpot(PinnedCardMin)));
+        Frame(() => Click());
+        Frame();
+        Assert.False(_card.Pinned);
+        Assert.Equal(1, _cardCloses);
+        Assert.Equal(0, _mapPresses);
+        Assert.Equal(0, _mapReleases);
+        Assert.Equal(selected, _world.Selection.Length);
+        Assert.Equal(0, _mapCloses);
+    }
+
+    [Fact]
+    public void TheCloseButtonSitsInTheCardsTopRightCornerInsideItAndClearOfItsLabel()
+    {
+        var min = new float2(100, 100);
+        foreach (var scale in new[] { 1f, 2f })
+        {
+            var size = new float2(340 * scale, 320 * scale);
+            var corner = MapSectorCard.CloseMin(min, size, scale);
+            var extent = MapSectorCard.CloseExtent(scale);
+            Assert.True(corner.X >= min.X + size.X - 40f * scale && corner.X + extent.X <= min.X + size.X);
+            Assert.True(corner.Y >= min.Y && corner.Y + extent.Y <= min.Y + 36f * scale);
+        }
+    }
+
+    [Fact]
+    public void AnOwnUnitUnderThePointerKeepsThePreviewCardAwayAndThePinnedCardStays()
+    {
+        OpenExploreMap();
+        ref var own = ref _snapshot.Hulls[_snapshot.OwnHull];
+        var size = _snapshot.Content.Galaxy.SectorSize;
+        var unit = NavView.ToScreen((float)(own.Position.X / size), (float)(own.Position.Y / size), (float)(own.Position.Z / size));
+
+        Frame(() => Move(unit + new float2(4, 3)));
+        Frame();
+        Assert.True(_unitHover.Hit);
+        Assert.False(_cardShown);
+
+        // Off every unit, in the same map: the sector's card is back.
+        var away = OwnSector.Offset(3, 0, 2);
+        Frame(() => Move(SectorSpot(away)));
+        Frame();
+        Assert.False(_unitHover.Hit);
+        Assert.True(_cardShown);
+        Assert.True(_cardPreview);
+        Assert.Equal(away, _cardShownSector);
+
+        // A card pinned stays shown while the pointer is on a unit.
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+        Frame(() => Move(unit));
+        Frame();
+        Assert.True(_unitHover.Hit);
+        Assert.True(_cardShown);
+        Assert.False(_cardPreview);
+        Assert.Equal(away, _cardShownSector);
+    }
+
+    [Fact]
+    public void ThePointerJustOutsideTheUnitRadiusIsNotOnTheUnit()
+    {
+        var hover = new MapUnitHover(UnitHoverPixels);
+        hover.Consider(7, new float2(100, 100), new float2(100 + UnitHoverPixels + 1, 100));
+        Assert.False(hover.Hit);
+        hover.Consider(8, new float2(100, 100), new float2(100 + UnitHoverPixels - 1, 100));
+        hover.Consider(9, new float2(130, 100), new float2(100 + UnitHoverPixels - 1, 100));
+        Assert.Equal(8u, hover.Hull);
+    }
+
+    [Fact]
+    public void APressOnTheLegendNeverReachesTheMap()
+    {
+        OpenExploreMap();
+        var legend = MapLegend.Layout(Screen, 1f, Units, LegendRows, LegendRowHeight);
+        Assert.True(legend.Shown);
+        _mapPresses = _mapReleases = 0;
+        Frame(() => Move(legend.Min + legend.Size * 0.5f));
+        Frame(() => Click());
+        Frame();
+        Assert.Equal(0, _mapPresses);
+        Assert.Equal(0, _mapReleases);
+        Assert.False(_card.Pinned);
     }
 
     [Fact]
@@ -2698,7 +3050,6 @@ public sealed class FrameOrderTests : IDisposable
 
     [Theory]
     [InlineData(3000.0, "TooClose")]
-    [InlineData(10000.0, "SameSector")]
     [InlineData(900000.0, "TooFar")]
     public void ATargetOutOfRangeLeavesTheJumpRowDisabledWithItsReason(double metres, string reason)
     {
@@ -2736,6 +3087,58 @@ public sealed class FrameOrderTests : IDisposable
         });
         Frame();
         Assert.Equal(1, _courseMoves);
+    }
+
+    [Fact]
+    public void ADestinationInTheOwnSectorCanBePlottedAndOrdered()
+    {
+        var near = Ahead(10000);
+        Assert.Equal(_snapshot.Galaxy!.SectorOf(_world.OwnPosition), _snapshot.Galaxy.SectorOf(near));
+        OpenCourseMenu(near);
+        var plan = _world.PlanJump(near);
+        Assert.Equal(JumpBlock.None, plan.Block);
+        Assert.Equal(1, plan.Ready);
+        Assert.True(plan.PlotsOnly);
+        Frame(() =>
+        {
+            Move(CourseRow(1));
+            Click();
+        });
+        for (var i = 0; i < 3; i++)
+            Frame();
+        Assert.Equal(1, _courseJumps);
+        Assert.True(Bridge.ConsumePlot(out var plot));
+        Assert.Equal(near, plot.Target);
+        Assert.Equal(near, _world.NavTarget);
+
+        // The other ships are ordered to jump inside the sector too.
+        _world.SelectAllOwned();
+        var all = _world.PlanJump(near);
+        Assert.Equal(3, all.Ready);
+        Assert.Equal(2, all.ReadyRemote);
+    }
+
+    [Fact]
+    public void AnAnsweredNavPointInTheHullsOwnSectorIsNotClearedUntilTheJumpLands()
+    {
+        var near = Ahead(10000);
+        CommandView();
+        _world.OrderJump(Bridge, near);
+        for (var i = 0; i < 5; i++)
+            Frame();
+        Assert.Equal(near, _world.NavTarget);
+
+        // Leaving and being in transit keeps it; landing clears it.
+        ref var own = ref _snapshot.Hulls[_snapshot.OwnHull];
+        own.Jump = JumpPhase.Tunnel;
+        Frame();
+        Assert.Equal(near, _world.NavTarget);
+        own.Jump = JumpPhase.Arrive;
+        Frame();
+        Assert.Equal(near, _world.NavTarget);
+        own.Jump = JumpPhase.None;
+        Frame();
+        Assert.Null(_world.NavTarget);
     }
 
     [Fact]

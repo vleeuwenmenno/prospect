@@ -42,6 +42,9 @@ internal static class Program
           --account-sample <s>    With --capture or --bench: the account and friends show a fixed sample instead of the
                                   account service, and nothing signs in: signed-out, waiting, signed-in, friends (full
                                   lists of hostile names), failed or off
+          --tips-sample <s>       With --capture or --bench: show the in-game tips, which a scripted run hides otherwise.
+                                  on lets them fire as in play (--open map shows the map's tips), stack fires the command
+                                  view's three at once, and reset (with --start settings) opens the Reset tips question
           --gas-fixture <1..13>    With --capture only: controlled production-shader regression inputs (13: real-source overlay check)
           --gas-view <view>       Muted cloud camera: outside, inside, edge, offscreen, absent, inside-absent, pilot-absent, pilot
           --gas-distance <radii>  With --gas-view outside or absent: the camera's distance in largest half-extents of the cloud
@@ -60,6 +63,8 @@ internal static class Program
           --capture-after <sec>   Delay for --capture, counted from the end of the splash (default 1.5)
           --capture-count <n>     Take n numbered screenshots instead of one (file-00.png, file-01.png, ...)
           --capture-every <sec>   Time between numbered screenshots (default 0.25)
+          --map-cell <pixels>     With --capture or --bench and a map view: open the map at this many pixels per sector (1.4 to 190)
+          --map-tilt, --map-hover With --open scan and --capture or --bench: tilt the map, or rest the pointer on its centre
           --look <degrees>        Pilot view: hold the camera this many degrees to the right of the hull's nose
           --look-to <degrees>     With --look and --capture: turn the camera from --look to this angle, evenly
                                   over the time the captures take
@@ -179,7 +184,7 @@ internal static class Program
                 case "--set" when hasValue:
                     options.WorldSettingArgs.Add(args[++i]);
                     break;
-                case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "map-hover" or "map-card" or "map-card-near" or "map-card-far" or "map-tilt" or "scan" or "command-fog" or "command-menu" or "command-menu-fleet" or "command-menu-close" or "command-menu-far" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
+                case "--open" when hasValue && args[i + 1] is "command" or "map" or "map-menu" or "map-hover" or "map-card" or "map-card-near" or "map-card-far" or "map-tilt" or "scan" or "command-fog" or "command-menu" or "command-menu-fleet" or "command-menu-close" or "command-menu-far" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "drone" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
                     options.OpenView = args[++i];
                     break;
                 case "--browser-sample" when hasValue:
@@ -195,6 +200,9 @@ internal static class Program
                     };
                     if (options.BrowserSample == BrowserSample.None)
                         return Fail($"Unknown browser sample: {args[i]}");
+                    break;
+                case "--tips-sample" when hasValue && args[i + 1] is "on" or "stack" or "reset":
+                    options.TipsSample = args[++i];
                     break;
                 case "--account-sample" when hasValue && args[i + 1] is "signed-out" or "waiting" or "signed-in" or "friends" or "failed" or "off":
                     options.AccountSample = args[++i];
@@ -284,6 +292,16 @@ internal static class Program
                     options.RtsSeed = rtsSeed; i++; break;
                 case "--rts-script" when hasValue:
                     options.RtsScript = args[++i]; break;
+                case "--map-cell" when hasValue && float.TryParse(args[i + 1], out var mapCell) && mapCell is >= 1.4f and <= 190f:
+                    options.MapCell = mapCell;
+                    i++;
+                    break;
+                case "--map-tilt":
+                    options.MapTilt = true;
+                    break;
+                case "--map-hover":
+                    options.MapHover = true;
+                    break;
                 case "--look" when hasValue && float.TryParse(args[i + 1], out var look):
                     options.LookDegrees = look;
                     i++;
@@ -321,6 +339,12 @@ internal static class Program
         if ((options.JumpTo is not null || options.OpenView == "jump-fleet-ahead") && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--jump-to and --open jump-fleet-ahead work only with --capture or --bench.");
 
+        if ((options.MapTilt || options.MapHover) && (options.OpenView != "scan" || (options.CapturePath is null && options.BenchSeconds <= 0)))
+            return Fail("--map-tilt and --map-hover work only with --open scan and --capture or --bench.");
+
+        if (options.MapCell is not null && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--map-cell works only with --capture or --bench.");
+
         if (options.GasFixture > 0 && (options.CapturePath is null || options.BenchSeconds > 0))
             return Fail("--gas-fixture works only with --capture, without --bench.");
 
@@ -344,6 +368,12 @@ internal static class Program
         // A sample stands in for the account service only where nobody can act on it.
         if (options.AccountSample is not null && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--account-sample works only with --capture or --bench.");
+
+        // Tips show in a scripted run only where the run asks for them; the reset question lives on Settings.
+        if (options.TipsSample is not null && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--tips-sample works only with --capture or --bench.");
+        if (options.TipsSample == "reset" && options.StartScreen != Screen.Settings)
+            return Fail("--tips-sample reset works only with --start settings.");
 
         // The delete views act on a folder of worlds of the capture's own, never on the player's.
         if (options.OpenView is "delete-world" or "delete-incompatible" or "deleted-incompatible"

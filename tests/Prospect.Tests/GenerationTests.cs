@@ -668,8 +668,8 @@ public sealed class GalaxyTests
 
     [Theory]
     [InlineData(80)]
-    [InlineData(160)]
-    public void GeneratingDenseSectorsMeasuresTheBudgetAndEnforcesItAtDefaultSize(int km)
+    [InlineData(20)]
+    public void GeneratingDenseSectorsAtBothSizeLimitsStaysWithinBudget(int km)
     {
         // The budget: the fullest sector a galaxy can hold is generated in under 15 ms in a debug build, a few
         // milliseconds in release. The client does this on a streaming job; the server does it on the tick that
@@ -688,9 +688,7 @@ public sealed class GalaxyTests
 
         Assert.True(content.AsteroidCount > 2500);
         Console.WriteLine($"Sector {km} km: generating {content.AsteroidCount} rocks in {best:0.000} ms (budget {budgetMilliseconds} ms)");
-        // Preserve the default-world regression gate; the new largest-size case reports against that budget.
-        if (km == 80)
-            Assert.True(best < budgetMilliseconds, $"generating {content.AsteroidCount} asteroids took {best:0.00} ms; the budget is {budgetMilliseconds} ms");
+        Assert.True(best < budgetMilliseconds, $"generating {content.AsteroidCount} asteroids took {best:0.00} ms; the budget is {budgetMilliseconds} ms");
 
         // A summary costs next to nothing, so the map can ask for thousands.
         var started = System.Diagnostics.Stopwatch.GetTimestamp();

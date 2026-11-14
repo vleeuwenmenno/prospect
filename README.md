@@ -11,6 +11,8 @@ or that local game opened to other players. There is one simulation and one code
 
 ## Status
 
+New ships from a drone: server/session creation, remote editor grant and persistence are implemented. The creation dialog and key handling are not wired yet.
+
 Exploration has a server/client backend: personal saved charts, manual scan intent, owned-ship sensors and dynamic visibility filtering.
 The galaxy map shows it: fog over uncharted space, charted sectors, live sensor coverage, lost contacts, a sector card
 with the scan control, layer navigation and a tilted view. The card and the course menus show a jump's distance
@@ -20,6 +22,12 @@ See [exploration contract](docs/hosting.md#exploration-foundation-protocol-37) f
 Rare decorative volumetric gas clouds are generated: lopsided, self-shadowed, with billowy edges and wisps. Most are 8 to 11 km long; a few are huge, up to a sector across, and any of them can lie across sector borders. Some hold asteroids. They are seen from up to five sectors away, at three levels of detail that hand over without a step. A huge cloud seen from inside or close by is broken into strands with depth. Full-screen views reach 144 FPS at 5096x1390 except a pilot view in dense asteroids and the inside of a huge cloud (about 110); visual acceptance is pending. See [gas clouds](docs/gas-clouds.md).
 
 Explicit private local claims have a nonvisual API backed by account-service tickets and an exact durable save commit. No player-facing claim UI exists; remote saved-world admission remains missing. Linked local owners still play offline. Save layout 3 refuses older layouts without migration.
+
+In-game tips: the first time the map, the command view or the ship editor opens, or a shield goes down or the
+battery runs low, a small panel explains it. Several at once stack with a counter and Next; Close shows the tip again
+next time, "Don't show this again" hides it on this client, and Settings, Tips, **Reset tips** shows all again.
+Tips are data in `content/visuals/tips.json`. The "edit the drone with Ctrl+B" tip exists and waits for the New ship
+dialog to fire it; nothing fires it yet.
 
 Chat, the player roster and parties work end to end: the server decides, the client shows them.
 
@@ -127,7 +135,7 @@ restarts; the editor then says so. The editor has not been checked on screen by 
 
 Milestone 1 (skeleton) is complete. On top of it, the first slice of the world is in:
 
-- **Sectors.** The galaxy is a grid of 20–160 km cells (80 km by default) generated from the server's seed: name, star, character and
+- **Sectors.** The galaxy is a grid of 20–80 km cells (80 km by default) generated from the server's seed: name, star, character and
   contents. Nothing is stored or sent, and nothing stops at a sector's edge. The client keeps the sectors around
   the camera generated on worker threads.
 - **World generation.** Space is filled by a list of modules named in `content/galaxy/galaxy.json`, each
@@ -256,8 +264,12 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 - **Galaxy.** A spiral disc 800 sectors across. Asteroid fields follow its arms and core; between the arms and
   outside the disc space is nearly empty.
 - **Galaxy map.** Every grid cell is a sector of the chosen layer. Uncharted space lies under a veil and is an
-  anonymous destination; a sector you scanned is charted and shows its star, name and asteroid fields as surveyed,
-  never later changes. Green rings are live sensor coverage, cut through the layer; ships inside them are live,
+  anonymous destination; a sector you scanned is charted and shows its name, a small muted icon in its top right
+  corner for its star (a shape for the class, a dot in the star's colour) and the real outlines of the asteroid
+  fields (amber, a denser core inside) and gas clouds (violet) that reach it, as surveyed, never later changes. A
+  field or cloud that runs across a wall is drawn only inside charted sectors: its part in a sector you have not
+  charted stays hidden. A map index on the left, under the unit list, names the shades, shapes and star types.
+  Resting the pointer on one of your own ships names it beside it; the sector card stays away while it does. Green rings show nominal sensor range, cut through the layer; gas can hide ships within them,
   and a lost contact stays as a fading hollow marker for 15 seconds (a station's indefinitely). Hover a sector for
   its card beside it; click to pin the card (coordinates, distance, sensor state, what the chart holds, the jump
   warning, the scan control in your own sector, Move here and Jump here, and a scrolling list of your ships, then
@@ -311,7 +323,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 Not there yet: NAT traversal or automatic port forwarding (a host needs a UDP port others can reach), encryption of game traffic, IPv6, mining, taking control of ships owned by other players (permissions), jump range and cost, gates,
 saving hosted games (an unlisted or public game is not saved: a saved world cannot yet tell who a returning player
 is), playable saved multiplayer, deleting or renaming a world from the game, restoring a recovery copy
-from the game. Stations are not generated yet; gas has no gameplay effects; asteroids do not crack into pieces, and ore shows only as
+from the game. Stations are not generated yet; gas reduces passive sensor reach (directional contour rendering is pending); asteroids do not crack into pieces, and ore shows only as
 a tint. Asteroids come in a shared set of shapes until mining gives each one its own body. Mixed-size designs of hundreds of blocks now load, transfer, fly and take replicated damage.
 Shared admission bounds geometry work, the intact shield shell and total catalogue resources before play.
 The default shell budget is 32,768 vertices and 196,608 indices per hull, and at most 910 blocks. A separate
@@ -341,6 +353,9 @@ The cursor is hidden only in the pilot view. The command view, the map and every
   gets no controls while it is open. A press on a panel never reaches the ship, with one exception: a part card
   dragged out of the part list. When the editor closes, flight keys still held from it do nothing until they are
   let go.
+
+Tips: `Esc` closes a tip before anything else. In the pilot view a tip takes no input, so flight is not
+interrupted: hold `Shift` to click its Next, Close and "Don't show this again".
 
 Gameplay has no bottom-left keybind strip. Bindings come from `content/input/bindings.json`.
 
@@ -428,7 +443,7 @@ Galaxy map:
 | Close the menu | Left-click elsewhere, or `Esc` (then `Esc` closes a pinned card, then the map) |
 | Take control of a ship | Select exactly one other ship of yours in the sector you are in, then `T`; the map stays open. Another sector: travel there first |
 | Pan / zoom | `W` `A` `S` `D`, arrow keys or middle-drag / mouse wheel |
-| Sector card | Hover a sector to preview; left-click to pin; left-click outside the galaxy or `Esc` closes it |
+| Sector card | Hover a sector to preview; left-click to pin; its **X**, left-click outside the galaxy or `Esc` closes it |
 | Scan your sector | Pin your own sector's card, then **Scan sector** |
 | Change layer, centre on your ship | `Page Up` / `Page Down` or the layer bar, `Space` |
 | Flat or tilted view | `V`, or **Flat** / **Tilt** on the layer bar; flattening shows the pinned card's layer |
@@ -494,7 +509,7 @@ the generation cap does not mean every rock in every visible sector draws simult
 | `oreGradeMin`, `oreGradeMax` | 0 to 1 | 0, 1 | Clamp ore grade after the grade multiplier; 1 means 100%. |
 | `<material>Abundance` | 0 to 4 | 1 | Relative share among already available materials. Zero removes that material from the sector character and rocks. |
 | `<material>GradeMin`, `<material>GradeMax` | 0 to 1 | 0, 1 | Per-material grade clamp, applied after the global grade range. |
-| `sectorSize` | 20 to 160 km | 80 | Sector edge length. Drive range and the blind-safe band scale with it; minimum jump distance stays fixed. |
+| `sectorSize` | 20 to 80 km | 80 | Sector edge length. Drive range and the blind-safe band scale with it; minimum jump distance stays fixed. |
 | `gasSizeMin` | 1 to 80 km | 16 | Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. |
 | `gasSizeMax` | 1 to 80 km | 22.4 | Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. |
 | `gasHugeSizeMin` | 1 to 160 km | 40 | Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. |

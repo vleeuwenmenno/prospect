@@ -50,7 +50,8 @@ internal sealed partial class ScreenHost
     public void HandleEditorShortcut(bool active, SessionSnapshot? snapshot, PlayerInputBridge? bridge)
     {
         _editorHandled = false;
-        if (!active || _screen != Screen.Session || snapshot is not { OwnHull: >= 0 } || bridge is null)
+        // Escape that closed a tip was the tip's.
+        if (!active || _tipBack || _screen != Screen.Session || snapshot is not { OwnHull: >= 0 } || bridge is null)
             return;
         if (_controlsHandled || _controlsOpen || _sessionMenuOpen || _mapOpen || _shipInfoOpen || SocialSurfaceOpen || _socialHandled)
             return;

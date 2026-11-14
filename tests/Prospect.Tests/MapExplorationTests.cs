@@ -1,5 +1,6 @@
 using Brutal.Numerics;
 using Prospect.Client.Screens;
+using Prospect.Client.Ui;
 using Prospect.Game.Client;
 using Prospect.Game.World;
 using Xunit;
@@ -179,5 +180,70 @@ public sealed class MapExplorationTests
         {
             File.Delete(bad);
         }
+    }
+
+    [Fact]
+    public void EveryStarClassHasItsOwnIconShapeAndTheFeatureColoursAreDistinct()
+    {
+        var look = MapTuning.Load();
+        var galaxy = GameContent.Load().Galaxy;
+        var shapes = new HashSet<StarIconShape>();
+        foreach (var star in galaxy.StarClasses)
+        {
+            Assert.Contains(look.StarIcons, icon => icon.Star == star.Name);
+            Assert.True(shapes.Add(look.ShapeOf(star.Name)), $"{star.Name} shares its shape");
+        }
+
+        Assert.Equal(StarIconShape.Circle, look.ShapeOf("A star the file does not name"));
+        Assert.NotEqual(look.CloudRgb, look.FieldRgb);
+        Assert.NotEqual(Theme.Info, look.CloudRgb);
+    }
+
+    [Fact]
+    public void TheMapFileRefusesAFeatureColourThatIsNotSixHexDigits()
+    {
+        var folder = Directory.CreateTempSubdirectory("map-tuning");
+        try
+        {
+            var path = Path.Combine(folder.FullName, "map.json");
+            File.WriteAllText(path, File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "content", "visuals", "map.json")).Replace("\"cloudColor\": \"B78CF0\"", "\"cloudColor\": \"purple\""));
+            Assert.Throws<InvalidDataException>(() => MapTuning.Load(path));
+        }
+        finally
+        {
+            folder.Delete(true);
+        }
+    }
+
+    [Fact]
+    public void TheLegendSitsUnderTheUnitListAndMovesBesideItWhereThatIsTooShort()
+    {
+        const int rows = MapLegend.FeatureRows + 5;
+        var display = new float2(1920, 1080);
+        var few = MapUnitList.Layout(display, 1f, 3, 140f, 400f);
+        var under = MapLegend.Layout(display, 1f, few, rows, 20f);
+        Assert.Equal(rows, under.Rows);
+        Assert.Equal(few.Min.X, under.Min.X);
+        Assert.True(under.Min.Y >= few.Min.Y + few.Size.Y);
+        Assert.True(under.Min.Y + under.Size.Y <= display.Y);
+
+        // A unit list that reaches the bottom leaves no room under it: the legend goes beside it, level with its top.
+        var many = MapUnitList.Layout(display, 1f, 60, 140f, 400f);
+        var beside = MapLegend.Layout(display, 1f, many, rows, 20f);
+        Assert.True(beside.Shown);
+        Assert.Equal(many.Min.Y, beside.Min.Y);
+        Assert.True(beside.Min.X >= many.Min.X + many.Size.X);
+
+        // On a short screen the star types are the first rows to go, the feature rows the last.
+        var short_ = new float2(1920, 520);
+        var shortUnits = MapUnitList.Layout(short_, 1f, 3, 140f, 400f);
+        var shortLegend = MapLegend.Layout(short_, 1f, shortUnits, rows, 20f);
+        Assert.InRange(shortLegend.Rows, 0, rows - 1);
+        Assert.True(!shortLegend.Shown || shortLegend.Min.Y + shortLegend.Size.Y <= short_.Y);
+
+        // A twice-scaled interface keeps the same promise.
+        var big = MapUnitList.Layout(display, 2f, 3, 280f, 800f);
+        var bigLegend = MapLegend.Layout(display, 2f, big, rows, 20f);
+        Assert.True(!bigLegend.Shown || bigLegend.Min.Y + bigLegend.Size.Y <= display.Y);
     }
 }

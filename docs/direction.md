@@ -361,3 +361,10 @@ After that:
 - Dents are visual only. Hull and asteroid collision shapes stay unchanged; asteroids do not deform.
 - Repair restores the original blueprint. Far clients may skip drawing detail but retain state for returning nearby.
 - The client draws nearby inward dent meshes and short contact sparks from replicated state, with distance and projected-size fading. Physics and picking keep the original surfaces. GPU appearance remains unchecked.
+
+## Decided (provisional, tunable): new ships from a drone
+
+- A player flying their escape drone may name and create a free ship, then edit its single core block.
+- The drone remains controlled, including when Apply replaces the new ship.
+- Server limits, clearance and client contract are in [hosting](hosting.md#new-ships-from-a-drone-protocol-41).
+- The server/session foundation is built; dialog and key handling are separate client work.
