@@ -121,6 +121,29 @@ public sealed class SaveLifecycleTests
     }
 
     [Fact]
+    public void DisconnectingAnActiveModuleScanKeepsTheOwnersCooldown()
+    {
+        GameContent content;
+        using (var source = new ModuleScanTests.Rig()) content = source.Content;
+        var folder = SaveRig.NewWorld(content);
+        using var rig = new SaveRig(folder, content);
+        rig.Join();
+        var owner = rig.Hulls.Info(0).Owner;
+        var sector = SaveRig.RockySector(rig.Rocks);
+        var rock = rig.Rocks.Sector(sector).Asteroids[0];
+        rig.Hulls.State(0).Position = rig.Server.Galaxy.CenterOf(sector) + rock.LocalPosition + new Double3(0, rock.Radius + 200, 0);
+        rig.Server.RequestModuleScan(owner, new(ModuleFamily.AsteroidScanner, sector, 0));
+        for (var i = 0; i < 2000 && rig.Link.ModuleScan.State != ModuleScanState.Scanning; i++) { rig.Tick(); Thread.Sleep(1); }
+        Assert.Equal(ModuleScanState.Scanning, rig.Link.ModuleScan.State);
+        rig.Leave(); rig.Join();
+        Assert.Equal(owner, rig.Link.Welcome.PlayerId);
+        rig.Server.RequestModuleScan(owner, new(ModuleFamily.AsteroidScanner, sector, 0));
+        rig.Tick();
+        Assert.Equal(ModuleScanState.Cooldown, rig.Link.ModuleScan.State);
+        Assert.Empty(rig.Server.ModuleKnowledge(owner).ToArray());
+    }
+
+    [Fact]
     public void ModuleKnowledgeKeepsEveryFamilyOwnerAndAgeAcrossSaveLoad()
     {
         var folder = SaveRig.NewWorld(Shipped);

@@ -1792,6 +1792,8 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     /// </summary>
     private void RemovePlayer(Connection connection)
     {
+        if (connection.ModuleScan.State is ModuleScanState.Preparing or ModuleScanState.Scanning)
+            EndModuleScan(connection, ModuleScanState.Cancelled, _tick);
         CloseEdit(connection);
         LeaveSocial(connection);
         if (_save is null)

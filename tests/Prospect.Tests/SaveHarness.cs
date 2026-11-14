@@ -190,6 +190,7 @@ internal sealed class OwnerLink(GameContent content, bool inProcess = true) : IT
     public WelcomeMessage Welcome;
     public SnapshotHeader LastSnapshot;
     public EditorStateMessage Editor;
+    public ModuleScanView ModuleScan;
 
     /// <summary>True if two snapshots in a row ever named the same interval, or one went back.</summary>
     public bool SnapshotRepeated;
@@ -286,6 +287,10 @@ internal sealed class OwnerLink(GameContent content, bool inProcess = true) : IT
         var reader = new NetReader(payload[1..]);
         switch ((MessageId)payload[0])
         {
+            case MessageId.ModuleSurvey:
+                Span<ModuleObservation> records = stackalloc ModuleObservation[ModuleMessage.MaxObservations];
+                if (ModuleMessage.Read(ref reader, records, out var scan, out _)) ModuleScan = scan;
+                break;
             case MessageId.Welcome when WelcomeMessage.TryRead(ref reader, content.SettingCatalog, out var welcome):
                 Welcomes++;
                 Welcome = welcome;

@@ -77,9 +77,6 @@
       }
   },
   "blocks": {
-    "gasScanner": {"name": "Gas scanner Common Mk I", "mass": 2, "hull": 200, "powerDraw": 0.1, "sizeRules": {"powerDraw": {"volumeExponent": 0}}, "module": {"family": "gasScanner", "quality": "Common", "mark": 1, "variant": "standard", "range": 1500, "accuracy": 0.2, "scanSeconds": 4, "powerDraw": 0.5, "cooldownSeconds": 10}},
-    "asteroidScanner": {"name": "Asteroid scanner Common Mk I", "mass": 2.5, "hull": 200, "powerDraw": 0.1, "sizeRules": {"powerDraw": {"volumeExponent": 0}}, "module": {"family": "asteroidScanner", "quality": "Common", "mark": 1, "variant": "standard", "range": 3000, "accuracy": 0.2, "scanSeconds": 5, "powerDraw": 0.75, "cooldownSeconds": 10}},
-    "asteroidLocator": {"name": "Asteroid locator Common Mk I", "mass": 3, "hull": 200, "powerDraw": 0.1, "sizeRules": {"powerDraw": {"volumeExponent": 0}}, "module": {"family": "asteroidLocator", "quality": "Common", "mark": 1, "variant": "standard", "range": 5000, "accuracy": 0.2, "scanSeconds": 2, "powerDraw": 1, "cooldownSeconds": 15}},
     "hull": { "name": "Hull plating", "mass": 2.0, "hull": 400 },
     "core": { "name": "Computer core", "mass": 3.0, "hull": 300, "powerDraw": 0.2, "core": true, "sizeRules": { "powerDraw": { "volumeExponent": 0 } } },
     "generator": { "name": "Generator", "mass": 4.0, "hull": 200, "powerOutput": 6.0, "sizeRules": { "powerOutput": { "volumeExponent": 1.25 } } },
@@ -102,6 +99,9 @@
     "microgyro": { "name": "Drone gyro", "mass": 0.3, "hull": 30, "torque": 0.3, "powerDraw": 0.05 },
     "microshield": { "name": "Drone shield", "mass": 0.3, "hull": 30, "shield": 120, "shieldRecharge": 5, "powerDraw": 0.4 },
     "sensor": { "name": "Passive sensor", "mass": 2, "hull": 400, "sensor": true },
-    "charting": { "name": "Sector scanner", "mass": 2, "hull": 400, "charting": true }
+    "charting": { "name": "Sector scanner", "mass": 2, "hull": 400, "charting": true },
+    "gasScanner": {"name": "Gas scanner Common Mk I", "mass": 2, "hull": 200, "powerDraw": 0.1, "sizeRules": {"powerDraw": {"volumeExponent": 0}}, "module": {"family": "gasScanner", "quality": "Common", "mark": 1, "variant": "standard", "range": 1500, "accuracy": 0.2, "scanSeconds": 4, "powerDraw": 0.5, "cooldownSeconds": 10}},
+    "asteroidScanner": {"name": "Asteroid scanner Common Mk I", "mass": 2.5, "hull": 200, "powerDraw": 0.1, "sizeRules": {"powerDraw": {"volumeExponent": 0}}, "module": {"family": "asteroidScanner", "quality": "Common", "mark": 1, "variant": "standard", "range": 3000, "accuracy": 0.2, "scanSeconds": 5, "powerDraw": 0.75, "cooldownSeconds": 10}},
+    "asteroidLocator": {"name": "Asteroid locator Common Mk I", "mass": 3, "hull": 200, "powerDraw": 0.1, "sizeRules": {"powerDraw": {"volumeExponent": 0}}, "module": {"family": "asteroidLocator", "quality": "Common", "mark": 1, "variant": "standard", "range": 5000, "accuracy": 0.2, "scanSeconds": 2, "powerDraw": 1, "cooldownSeconds": 15}}
   }
 }
