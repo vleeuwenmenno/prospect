@@ -357,3 +357,5 @@ This is an engineering decoder/storage ceiling, not a gameplay chart allowance.
 
 The decoder checks chart owner references, uniqueness and world-clock timestamps before writable store open.
 `MaxDecodedBytes` conservatively includes 128 extra bytes per chart for bounded temporary validation sets.
+
+Exploration storage caps each owner at 4,096 charts, including encoded-size and decode-cache bounds.

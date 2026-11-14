@@ -740,7 +740,8 @@ internal sealed partial class ScreenHost
             var age = SocialView.SecondsSince(status.Tick, snapshot.ServerTick);
             var here = _app.World.Sector.Coord;
             Kit.Label(_ui.Mono, Theme.FontCaption, age > PartyStaleSeconds ? Theme.Bad : Theme.TextDim,
-                age > PartyStaleSeconds ? Kit.F($"{design.Name}   NO SIGNAL FOR {age:0} S")
+                status.Unknown ? "UNKNOWN — OUTSIDE SENSOR COVERAGE"u8
+                : age > PartyStaleSeconds ? Kit.F($"{design.Name}   NO SIGNAL FOR {age:0} S")
                 : status.X == here.X && status.Y == here.Y && status.Z == here.Z ? Kit.F($"{design.Name}   YOUR SECTOR")
                 : Kit.F($"{design.Name}   SECTOR {status.X} {status.Y} {status.Z}"));
             Kit.Space(Theme.Space2);
@@ -891,7 +892,8 @@ internal sealed partial class ScreenHost
                 var nameAt = min + new float2(pad, (rowHeight - Kit.Measure(_ui.SansMedium, Theme.FontSmall, "Ag"u8).Y) * 0.5f);
                 Kit.ClippedText(draw, _ui.SansMedium, Theme.FontSmall, nameAt, stale ? Theme.Bad : Theme.Text, nameText, width - barWidth - pad * 3);
                 var gaugeAt = new float2(max.X - pad - barWidth, min.Y + rowHeight * 0.5f - Kit.Px(4));
-                Gauge(draw, gaugeAt, new float2(barWidth, Kit.Px(3)), member.Shield, Theme.Info);
+                if (member.Unknown) Kit.Text(draw, _ui.Mono, Theme.FontCaption, gaugeAt, Theme.TextDim, "UNKNOWN"u8);
+                else Gauge(draw, gaugeAt, new float2(barWidth, Kit.Px(3)), member.Shield, Theme.Info);
                 Gauge(draw, gaugeAt + new float2(0, Kit.Px(5)), new float2(barWidth, Kit.Px(3)), member.Hull, Theme.Good);
                 y += step;
                 continue;
@@ -909,7 +911,9 @@ internal sealed partial class ScreenHost
             var design = designs[Math.Min((int)member.Value, designs.Length - 1)];
             var status = text + new float2(0, Kit.Px(19));
             ReadOnlySpan<byte> where;
-            if (stale)
+            if (member.Unknown)
+                where = "UNKNOWN — OUTSIDE SENSOR COVERAGE"u8;
+            else if (stale)
                 where = Kit.F($"{design.Name}   NO SIGNAL {age:0} S");
             else if (member.X == here.X && member.Y == here.Y && member.Z == here.Z)
                 where = Kit.F($"{design.Name}   YOUR SECTOR");
@@ -1151,7 +1155,8 @@ internal sealed partial class ScreenHost
             var design = designs[Math.Min((int)member.Value, designs.Length - 1)];
             var age = SocialView.SecondsSince(member.Tick, snapshot.ServerTick);
             ReadOnlySpan<byte> where =
-                age > PartyStaleSeconds ? Kit.F($"{design.Name}   NO SIGNAL FOR {age:0} S")
+                member.Unknown ? "UNKNOWN — OUTSIDE SENSOR COVERAGE"u8
+                : age > PartyStaleSeconds ? Kit.F($"{design.Name}   NO SIGNAL FOR {age:0} S")
                 : member.X == here.X && member.Y == here.Y && member.Z == here.Z ? Kit.F($"{design.Name}   YOUR SECTOR")
                 : Kit.F($"{design.Name}   SECTOR {member.X} {member.Y} {member.Z}");
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(24)), age > PartyStaleSeconds ? Theme.Bad : Theme.TextDim, where, textWidth);

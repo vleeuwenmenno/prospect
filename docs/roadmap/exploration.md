@@ -115,7 +115,7 @@ Shared deterministic generation code can remain shared even when its secret inpu
 
 ## Decided (provisional, tunable)
 
-- Shared content sets sensor radius to 5,000 m, scan duration to 5 s and lost ship-contact lifetime to 15 s.
+- Shared content sets sensor radius to 5,000 m, sensorless collision proximity to 250 m, scan duration to 5 s and lost ship-contact lifetime to 15 s.
 - A scan cancels on sector change, control change or loss of the last live charting block; flight remains available.
 - Loading discards transient scans and ship markers. Permanent charts survive.
 - Each owner retains at most 4,096 charts. At capacity, refuse new sectors without evicting knowledge.

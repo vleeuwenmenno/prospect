@@ -42,9 +42,10 @@ public sealed record SaveLimits
     /// <summary>The bytes of a world's name in a save.</summary>
     public const int MaxNameBytes = 255;
 
-    /// <summary>The most bytes an encoded save can be: every count at its limit, every hull with every dent.</summary>
-    public long MaxCharts => (long)MaxOwners * ushort.MaxValue;
+    /// <summary>All owners at the hard per-owner chart limit.</summary>
+    public long MaxCharts => (long)MaxOwners * ExplorationRules.MaxChartsPerOwner;
 
+    /// <summary>The most bytes an encoded save can be: every count at its limit, every hull with every dent.</summary>
     public long MaxEncodedBytes =>
         WorldSnapshotCodec.HeaderBound
         + MaxCharts * WorldSnapshotCodec.ChartBytes

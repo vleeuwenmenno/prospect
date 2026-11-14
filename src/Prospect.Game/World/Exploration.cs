@@ -6,6 +6,11 @@ namespace Prospect.Game.World;
 /// <summary>Shared, content-owned exploration tuning. Additional equipment gives redundancy only.</summary>
 public sealed record ExplorationRules(double SensorRadius, int ScanTicks, int ContactTicks, int ChartsPerOwner)
 {
+    /// <summary>Hard per-owner storage bound.</summary>
+    public const int MaxChartsPerOwner = 4096;
+    /// <summary>Collision prediction coverage even without working sensors.</summary>
+    public double ProximityRadius { get; init; }
+
     public bool Covers(Double3 sensor, Double3 position)
     {
         var d = position - sensor;
@@ -22,10 +27,13 @@ public sealed record ExplorationRules(double SensorRadius, int ScanTicks, int Co
         var charts = root.GetProperty("chartsPerOwner"u8).GetInt32();
         if (!double.IsFinite(radius) || radius <= 0 || !double.IsFinite(scan) || scan <= 0
             || !double.IsFinite(contact) || contact <= 0 || scan * TickLoop.SimulationHz > int.MaxValue
-            || contact * TickLoop.SimulationHz > int.MaxValue || charts <= 0 || charts > ushort.MaxValue)
+            || contact * TickLoop.SimulationHz > int.MaxValue || charts <= 0 || charts > MaxChartsPerOwner)
             throw new InvalidDataException("Invalid exploration rules.");
+        var proximity = root.GetProperty("proximityRadius"u8).GetDouble();
+        if (!double.IsFinite(proximity) || proximity <= 0 || proximity > radius) throw new InvalidDataException("Invalid proximity radius.");
         return new(radius, (int)Math.Ceiling(scan * TickLoop.SimulationHz),
-            (int)Math.Ceiling(contact * TickLoop.SimulationHz), charts);
+            (int)Math.Ceiling(contact * TickLoop.SimulationHz), charts)
+        { ProximityRadius = proximity };
     }
 }
 
@@ -34,6 +42,7 @@ public readonly record struct SectorChart(uint Owner, SectorCoord Sector, long R
 
 public enum ScanState : byte { Idle, Scanning, Completed, Cancelled, NoEquipment, ChartLimit }
 
+/// <summary>Authoritative progress and result of a sector scan.</summary>
 public struct ScanView
 {
     public ScanState State;

@@ -178,9 +178,13 @@ public sealed partial class ServerHost
             SocialSend(recipient, new SocialMessage { Kind = SocialKind.PartyBegin, Leader = leader, Value = (byte)PartyCount(leader) });
             foreach (var member in _connections)
             {
-                if (member.State != ConnectionState.Active || member.Party != leader || !_hulls.IsAlive(member.Hull)) continue;
+                if (member.State != ConnectionState.Active || member.Party != leader) continue;
                 var index = member.Hull.Index;
-                if (member.PlayerId != recipient.PlayerId && !Covered(recipient.PlayerId, _hulls.State(index).Position)) continue;
+                if (!_hulls.IsAlive(member.Hull) || (member.PlayerId != recipient.PlayerId && !Covered(recipient.PlayerId, _hulls.State(index).Position)))
+                {
+                    SocialSend(recipient, new SocialMessage { Kind = SocialKind.Member, Player = member.PlayerId, Leader = leader, Tick = _tick, Unknown = true });
+                    continue;
+                }
                 ref var state = ref _hulls.State(index);
                 ref var flight = ref _hulls.Flight(index);
                 var built = _content.Designs[_hulls.Info(index).Design].Flight.HullPoints;

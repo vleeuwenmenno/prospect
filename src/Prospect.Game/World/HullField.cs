@@ -247,6 +247,8 @@ public sealed class HullField
         _impulses[_impulseCount++] = impulse;
     }
 
+    internal Action<int, int, long>? ContactObserved;
+
     /// <summary>
     /// Advances the stored hull in a slot one tick: it collides block by block with asteroids and with the other
     /// stored hulls, and every hull it strikes takes its share of the impulse and its damage before this returns,
@@ -288,6 +290,7 @@ public sealed class HullField
             ref var state = ref _hulls.State(impulse.Hull);
             ref var struckInfo = ref _hulls.Info(impulse.Hull);
             struckInfo.ContactTick = (long)tick;
+            ContactObserved?.Invoke(index, impulse.Hull, (long)tick);
             Moved(ref struckInfo, impulse.Shift);
             state.Position += impulse.Shift;
             state.Velocity += impulse.Velocity;

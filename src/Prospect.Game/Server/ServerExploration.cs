@@ -16,8 +16,8 @@ public sealed partial class ServerHost
     {
         var design = _content.Designs[_hulls.Info(slot).Design];
         var alive = _hulls.Blocks(slot);
-        for (var b = 0; b < design.BlockCount; b++)
-            if ((charting ? design.Types[b].Charting : design.Types[b].Sensor) && BlockSet.Has(alive, b)) return true;
+        foreach (var b in charting ? design.ChartingBlocks : design.SensorBlocks)
+            if (BlockSet.Has(alive, b)) return true;
         return false;
     }
 
@@ -51,7 +51,6 @@ public sealed partial class ServerHost
             }
             if (tick < scan.CompletesTick) continue;
             scan.State = RecordChart(connection.PlayerId, scan.Sector, tick) ? ScanState.Completed : ScanState.ChartLimit;
-            connection.ChartCursor = 0;
         }
     }
 
@@ -60,18 +59,25 @@ public sealed partial class ServerHost
         if (!connection.CatalogueReady) return;
         Span<SectorChart> charts = stackalloc SectorChart[ExplorationMessage.MaxCharts];
         var count = 0;
-        var cursor = _chartCount == 0 ? 0 : connection.ChartCursor % _chartCount;
-        var visit = 0;
-        while (visit < _chartCount && visit < _content.Exploration.ChartsPerOwner && count < charts.Length)
+        var cursor = connection.ChartCursor;
+        var visits = 0;
+        while (cursor < _chartCount && count < charts.Length && visits++ < _content.Exploration.ChartsPerOwner)
         {
-            var chart = _charts[cursor];
-            if (chart.Owner == connection.PlayerId) charts[count++] = chart;
-            cursor = (cursor + 1) % _chartCount;
-            visit++;
+            var chart = _charts[cursor++];
+            if (chart.Owner == connection.PlayerId && (!connection.SentCharts.TryGetValue(chart.Sector, out var sent) || sent != chart.RecordedTick)) charts[count++] = chart;
         }
+        var scan = connection.Scan;
+        var previous = connection.SentScan;
+        if (connection.ExplorationSent && count == 0 && scan.State == previous.State && scan.Sector == previous.Sector
+            && scan.StartedTick == previous.StartedTick && scan.CompletesTick == previous.CompletesTick)
+        { connection.ChartCursor = cursor; return; }
         var writer = new NetWriter(_sendBuffer);
-        ExplorationMessage.Write(ref writer, connection.Scan, charts[..count]);
-        if (connection.Transport.Send(connection.Peer, NetChannel.Reliable, writer.Written)) connection.ChartCursor = cursor;
+        ExplorationMessage.Write(ref writer, scan, charts[..count]);
+        if (connection.Transport.Send(connection.Peer, NetChannel.Reliable, writer.Written))
+        {
+            connection.ChartCursor = cursor; connection.SentScan = scan; connection.ExplorationSent = true;
+            foreach (var chart in charts[..count]) connection.SentCharts[chart.Sector] = chart.RecordedTick;
+        }
     }
 
     internal bool RecordChart(uint owner, SectorCoord sector, long tick)
@@ -83,6 +89,8 @@ public sealed partial class ServerHost
             owned++;
             if (_charts[i].Sector != sector) continue;
             _charts[i] = new(owner, sector, tick);
+            foreach (var c in _connections)
+                if (c.PlayerId == owner) c.ChartCursor = Math.Min(c.ChartCursor, i);
             _touched = true;
             return true;
         }

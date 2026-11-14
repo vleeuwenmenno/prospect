@@ -131,6 +131,9 @@ public sealed class RockField(Galaxy galaxy, int maxDeltas = int.MaxValue, int m
     /// </summary>
     public float ReachAt(int entry) => _reach[entry];
 
+    /// <summary>The immutable generated position of a moved asteroid.</summary>
+    public Double3 GeneratedPositionOf(RockRef rock) => _origins[_moved[rock.Sector].Entries[rock.Index] - 1];
+
     public Double3 PositionOf(RockRef rock, long tick)
     {
         var entry = _moved[rock.Sector].Entries[rock.Index] - 1;
