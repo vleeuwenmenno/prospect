@@ -2698,7 +2698,6 @@ public sealed class FrameOrderTests : IDisposable
 
     [Theory]
     [InlineData(3000.0, "TooClose")]
-    [InlineData(10000.0, "SameSector")]
     [InlineData(500000.0, "TooFar")]
     public void ATargetOutOfRangeLeavesTheJumpRowDisabledWithItsReason(double metres, string reason)
     {
@@ -2736,6 +2735,58 @@ public sealed class FrameOrderTests : IDisposable
         });
         Frame();
         Assert.Equal(1, _courseMoves);
+    }
+
+    [Fact]
+    public void ADestinationInTheOwnSectorCanBePlottedAndOrdered()
+    {
+        var near = Ahead(10000);
+        Assert.Equal(_snapshot.Galaxy!.SectorOf(_world.OwnPosition), _snapshot.Galaxy.SectorOf(near));
+        OpenCourseMenu(near);
+        var plan = _world.PlanJump(near);
+        Assert.Equal(JumpBlock.None, plan.Block);
+        Assert.Equal(1, plan.Ready);
+        Assert.True(plan.PlotsOnly);
+        Frame(() =>
+        {
+            Move(CourseRow(1));
+            Click();
+        });
+        for (var i = 0; i < 3; i++)
+            Frame();
+        Assert.Equal(1, _courseJumps);
+        Assert.True(Bridge.ConsumePlot(out var plot));
+        Assert.Equal(near, plot.Target);
+        Assert.Equal(near, _world.NavTarget);
+
+        // The other ships are ordered to jump inside the sector too.
+        _world.SelectAllOwned();
+        var all = _world.PlanJump(near);
+        Assert.Equal(3, all.Ready);
+        Assert.Equal(2, all.ReadyRemote);
+    }
+
+    [Fact]
+    public void AnAnsweredNavPointInTheHullsOwnSectorIsNotClearedUntilTheJumpLands()
+    {
+        var near = Ahead(10000);
+        CommandView();
+        _world.OrderJump(Bridge, near);
+        for (var i = 0; i < 5; i++)
+            Frame();
+        Assert.Equal(near, _world.NavTarget);
+
+        // Leaving and being in transit keeps it; landing clears it.
+        ref var own = ref _snapshot.Hulls[_snapshot.OwnHull];
+        own.Jump = JumpPhase.Tunnel;
+        Frame();
+        Assert.Equal(near, _world.NavTarget);
+        own.Jump = JumpPhase.Arrive;
+        Frame();
+        Assert.Equal(near, _world.NavTarget);
+        own.Jump = JumpPhase.None;
+        Frame();
+        Assert.Null(_world.NavTarget);
     }
 
     [Fact]

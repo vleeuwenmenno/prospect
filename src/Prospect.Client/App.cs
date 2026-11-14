@@ -1007,6 +1007,11 @@ internal sealed class App : IDisposable
                 _screens.OpenControls();
             else if (view == "edit" && snapshot is { OwnHull: >= 0 })
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
+            else if (view == "drone")
+            {
+                // Steps out of the hull into an escape drone, so a capture shows the drone from behind.
+                Session.Client.Input.RequestControl(0);
+            }
             else if (view == "info")
                 _screens.OpenShipInfo();
             else if (view == "world-settings")

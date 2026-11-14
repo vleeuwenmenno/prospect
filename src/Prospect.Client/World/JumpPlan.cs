@@ -14,12 +14,6 @@ internal enum JumpBlock : byte
     /// <summary>The ship is in transit or arriving; the server refuses a new jump until it has landed.</summary>
     Busy,
 
-    /// <summary>
-    /// The point lies in the ship's own sector. Under <see cref="JumpRules"/> a jump of 5 km or more inside a
-    /// sector is legal; the plotted NAV point clears itself once the hull is in its sector, so a same-sector jump
-    /// is held back here until that is decided.
-    /// </summary>
-    SameSector,
     TooClose,
     TooFar,
     Invalid,
@@ -82,7 +76,6 @@ internal struct JumpPlan
         {
             JumpRefusal.TooClose => JumpBlock.TooClose,
             JumpRefusal.TooFar => JumpBlock.TooFar,
-            JumpRefusal.None when galaxy is not null && galaxy.SectorOf(from) == galaxy.SectorOf(target) => JumpBlock.SameSector,
             JumpRefusal.None => JumpBlock.None,
             _ => JumpBlock.Invalid,
         };

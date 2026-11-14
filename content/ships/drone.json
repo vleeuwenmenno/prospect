@@ -1,7 +1,7 @@
 {
   "name": "Drone",
   "class": "fighter",
-  "blockSize": 0.5,
+  "blockSize": 0.25,
   "color": [0.2, 0.42, 0.46],
   "blocks": [
     { "at": [0, 0, 0], "type": "microcore" },
