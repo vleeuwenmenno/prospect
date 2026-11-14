@@ -60,6 +60,8 @@ internal static class Program
           --capture-after <sec>   Delay for --capture, counted from the end of the splash (default 1.5)
           --capture-count <n>     Take n numbered screenshots instead of one (file-00.png, file-01.png, ...)
           --capture-every <sec>   Time between numbered screenshots (default 0.25)
+          --map-cell <pixels>     With --capture or --bench and a map view: open the map at this many pixels per sector (1.4 to 190)
+          --map-tilt, --map-hover With --open scan and --capture or --bench: tilt the map, or rest the pointer on its centre
           --look <degrees>        Pilot view: hold the camera this many degrees to the right of the hull's nose
           --look-to <degrees>     With --look and --capture: turn the camera from --look to this angle, evenly
                                   over the time the captures take
@@ -284,6 +286,16 @@ internal static class Program
                     options.RtsSeed = rtsSeed; i++; break;
                 case "--rts-script" when hasValue:
                     options.RtsScript = args[++i]; break;
+                case "--map-cell" when hasValue && float.TryParse(args[i + 1], out var mapCell) && mapCell is >= 1.4f and <= 190f:
+                    options.MapCell = mapCell;
+                    i++;
+                    break;
+                case "--map-tilt":
+                    options.MapTilt = true;
+                    break;
+                case "--map-hover":
+                    options.MapHover = true;
+                    break;
                 case "--look" when hasValue && float.TryParse(args[i + 1], out var look):
                     options.LookDegrees = look;
                     i++;
@@ -320,6 +332,12 @@ internal static class Program
 
         if ((options.JumpTo is not null || options.OpenView == "jump-fleet-ahead") && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--jump-to and --open jump-fleet-ahead work only with --capture or --bench.");
+
+        if ((options.MapTilt || options.MapHover) && (options.OpenView != "scan" || (options.CapturePath is null && options.BenchSeconds <= 0)))
+            return Fail("--map-tilt and --map-hover work only with --open scan and --capture or --bench.");
+
+        if (options.MapCell is not null && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--map-cell works only with --capture or --bench.");
 
         if (options.GasFixture > 0 && (options.CapturePath is null || options.BenchSeconds > 0))
             return Fail("--gas-fixture works only with --capture, without --bench.");

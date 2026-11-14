@@ -111,7 +111,10 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   helpers (`MapExploration.cs`: `MapCardState`, `MapSectorCard`, `MapLayerBar`, `MapNavigation`,
   `MapProjection`), which `FrameOrderTests` drives with the production `MapPointer`; a window over the map
   blocks its rectangle before `MapPointer.Begin` and calls `Claim`. A hover preview card is never a window.
-  Figures are in `content/visuals/map.json` (`MapTuning`). Check with `--open map-card`, `map-card-near`, `map-card-far`, `map-tilt`, `scan`
+  Figures are in `content/visuals/map.json` (`MapTuning`). Field and cloud outlines come from `MapFootprint`
+  (shared) through `MapFeatureCache` (worker, cached; the frame only projects and draws, clipped to the charted
+  sector's cell); the legend is `MapLegend`, a surface the map blocks; the hull name label is `MapUnitHover`;
+  the pinned card's X is `MapSectorCard.Close`. Rules in `docs/roadmap/exploration.md`. Check with `--open map-card`, `map-card-near`, `map-card-far`, `map-tilt`, `scan`
   and `command-fog`.
 - **The ship editor:** the limits are in `EditorRules`, `content/net/editor.json` and `docs/hosting.md`;
   change all three. A design reaches the catalogue only through `DesignBytes.Decode` on a worker, the catalogue
@@ -203,7 +206,7 @@ The client opens a real window on the developer's desktop, and they are usually 
   Do not create a headless output: a monitor manager such as hyprmoncfg adopts it and moves the developer's
   workspaces. Without such a rule (GNOME, macOS, Windows), tell the developer windows will appear first.
 - `make run ARGS="--start local --open <view> --capture /path/shot.png --capture-after 2.5"` saves a screenshot
-  and exits. Views: `command`, `edit` (asks to edit the own ship; the editor opens on the grant), `map`, `map-hover` (the map with the pointer on your own sector, a preview card), `map-card` (your own sector's card pinned), `map-card-near` (a sector 144 km away: a blind jump with risk) and `map-card-far` (460 km: out of drive range), `command-menu` (the command view's right-click menu on a blind jump 60 km ahead for the ship being flown: Plot jump), `command-menu-fleet` (the same for the other ships: Jump here), `command-menu-close` (3 km, too close) and `command-menu-far` (450 km, too far), `map-tilt` (the same, tilted), `scan` (pinned card and a scan started: capture after 2.5 s for progress, after 7 s for the charted result), `command-fog` (the command view pulled back to show sensor rings and fog), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,
+  and exits. Views: `command`, `edit` (asks to edit the own ship; the editor opens on the grant), `map`, `map-hover` (the map with the pointer on your own sector, a preview card), `map-card` (your own sector's card pinned), `map-card-near` (a sector 144 km away: a blind jump with risk) and `map-card-far` (460 km: out of drive range), `command-menu` (the command view's right-click menu on a blind jump 60 km ahead for the ship being flown: Plot jump), `command-menu-fleet` (the same for the other ships: Jump here), `command-menu-close` (3 km, too close) and `command-menu-far` (450 km, too far), `map-tilt` (the same, tilted), `scan` (pinned card and a scan started: capture after 2.5 s for progress, after 7 s for the charted result; add `--map-cell 190` to see field and cloud outlines, `--map-tilt`, `--map-hover` to rest the pointer on the own ship), `command-fog` (the command view pulled back to show sensor rings and fog), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,
   `players`, `social`, `friends`, `chat`, `hud` (the world with the party list and recent chat only). The social views and
   `hud` leave the performance overlay off. Screens
   without a session: `--start menu|join|settings|newgame|credits|account|load`; `--set id=value` shows on `newgame`, and so

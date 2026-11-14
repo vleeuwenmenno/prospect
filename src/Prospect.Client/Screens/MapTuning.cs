@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Prospect.Engine.IO;
 
 namespace Prospect.Client.Screens;
@@ -43,11 +44,8 @@ internal sealed class MapTuning
     public int CardListRows { get; init; }
     public float CardGap { get; init; }
 
-    /// <summary>Cells at least this many pixels wide show a charted sector's asteroid fields.</summary>
+    /// <summary>Cells at least this many pixels wide show a charted sector's asteroid fields and gas clouds.</summary>
     public float FieldDetailCell { get; init; }
-
-    /// <summary>At most this many charted sectors have their fields worked out in one frame; the rest wait.</summary>
-    public int FieldSectorsPerFrame { get; init; }
 
     /// <summary>How bright a stale contact is drawn relative to a live one, 0 to 1.</summary>
     public float StaleFade { get; init; }
@@ -73,6 +71,60 @@ internal sealed class MapTuning
     /// </summary>
     public float CourseRiskDanger { get; init; }
     public float CourseRefusalSeconds { get; init; }
+
+    /// <summary>The colour of asteroid fields and of gas clouds on the map, as six hex digits (RRGGBB).</summary>
+    public string FieldColor { get; init; } = "FFB020";
+    public string CloudColor { get; init; } = "B78CF0";
+
+    /// <summary>How strongly a field is filled (its whole support, then its denser core) and outlined, 0 to 1.</summary>
+    public float FieldFillAlpha { get; init; }
+    public float FieldCoreAlpha { get; init; }
+    public float FieldLineAlpha { get; init; }
+
+    /// <summary>How much of a field's width its core outline keeps, 0.1 to 1.</summary>
+    public float FieldCoreShare { get; init; }
+
+    /// <summary>How strongly a gas cloud's fringe and its body are filled, and its body outlined, 0 to 1.</summary>
+    public float CloudFringeAlpha { get; init; }
+    public float CloudBodyAlpha { get; init; }
+    public float CloudLineAlpha { get; init; }
+
+    /// <summary>The star icon's radius in unscaled pixels, how strongly its shape and its colour dot are drawn.</summary>
+    public float StarIconSize { get; init; }
+    public float StarIconAlpha { get; init; }
+    public float StarDotAlpha { get; init; }
+
+    /// <summary>The icon shape of each star class, by the class's name in <c>galaxy.json</c>: circle, square, diamond, sparkle or asterisk.</summary>
+    public List<StarIconStyle> StarIcons { get; init; } = [];
+
+    /// <summary>How near, in unscaled pixels, the pointer must be to one of the player's hulls on the map to name it, and how strong the label is.</summary>
+    public float UnitHoverPixels { get; init; }
+    public float UnitLabelAlpha { get; init; }
+
+    /// <summary>The map legend's row height in unscaled pixels.</summary>
+    public float LegendRowHeight { get; init; }
+
+    /// <summary>The colour of asteroid fields as 0xRRGGBB.</summary>
+    [JsonIgnore]
+    public uint FieldRgb => Rgb(FieldColor);
+
+    /// <summary>The colour of gas clouds as 0xRRGGBB.</summary>
+    [JsonIgnore]
+    public uint CloudRgb => Rgb(CloudColor);
+
+    /// <summary>The shape the map draws for a star class, a circle for one the file does not name.</summary>
+    public StarIconShape ShapeOf(string starClass)
+    {
+        foreach (var icon in StarIcons)
+        {
+            if (icon.Star == starClass)
+                return icon.ParsedShape;
+        }
+
+        return StarIconShape.Circle;
+    }
+
+    private static uint Rgb(string hex) => uint.TryParse(hex, System.Globalization.NumberStyles.AllowHexSpecifier, null, out var value) && hex.Length == 6 ? value : 0xFFFFFF;
 
     public static MapTuning Load() => Load(AppPaths.Content("visuals", "map.json"));
 
@@ -103,14 +155,51 @@ internal sealed class MapTuning
             throw new InvalidDataException($"{path}: tilt is 10 to 80 degrees, spacing 0.25 to 8, 0 to 8 layers, 0 to 2 s");
         if (!(tuning.CardWidth is >= 240 and <= 640) || tuning.CardListRows is < 2 or > 32 || !(tuning.CardGap is >= 0 and <= 64))
             throw new InvalidDataException($"{path}: card is 240 to 640 wide, 2 to 32 rows, gap 0 to 64");
-        if (!(tuning.FieldDetailCell is >= 20 and <= 400) || tuning.FieldSectorsPerFrame is < 1 or > 64)
-            throw new InvalidDataException($"{path}: fieldDetailCell is 20 to 400, fieldSectorsPerFrame 1 to 64");
+        if (!(tuning.FieldDetailCell is >= 20 and <= 400))
+            throw new InvalidDataException($"{path}: fieldDetailCell is 20 to 400");
         if (!(tuning.ScanResultSeconds is >= 0 and <= 120) || !(tuning.CommandFogReach is >= 1 and <= 20))
             throw new InvalidDataException($"{path}: scanResultSeconds is 0 to 120, commandFogReach 1 to 20");
         if (!(tuning.CommandRingWidth is >= 0.5f and <= 8) || tuning.CommandFadeRings is < 1 or > 16 || !(tuning.CommandFadeWidth is >= 1 and <= 64))
             throw new InvalidDataException($"{path}: commandRingWidth is 0.5 to 8, commandFadeRings 1 to 16, commandFadeWidth 1 to 64");
         if (!(tuning.CourseRefusalSeconds is >= 0 and <= 60))
             throw new InvalidDataException($"{path}: courseRefusalSeconds is 0 to 60");
+        static bool Hex(string value) => value.Length == 6 && uint.TryParse(value, System.Globalization.NumberStyles.AllowHexSpecifier, null, out _);
+        if (!Hex(tuning.FieldColor) || !Hex(tuning.CloudColor))
+            throw new InvalidDataException($"{path}: fieldColor and cloudColor are six hex digits");
+        if (!Unit(tuning.FieldFillAlpha) || !Unit(tuning.FieldCoreAlpha) || !Unit(tuning.FieldLineAlpha) || !Unit(tuning.CloudFringeAlpha)
+            || !Unit(tuning.CloudBodyAlpha) || !Unit(tuning.CloudLineAlpha) || !Unit(tuning.StarIconAlpha) || !Unit(tuning.StarDotAlpha) || !Unit(tuning.UnitLabelAlpha))
+            throw new InvalidDataException($"{path}: feature, star icon and label strengths are 0 to 1");
+        if (!(tuning.FieldCoreShare is >= 0.1f and <= 1f))
+            throw new InvalidDataException($"{path}: fieldCoreShare is 0.1 to 1");
+        if (!(tuning.StarIconSize is >= 2 and <= 16) || !(tuning.UnitHoverPixels is >= 4 and <= 64) || !(tuning.LegendRowHeight is >= 12 and <= 40))
+            throw new InvalidDataException($"{path}: starIconSize is 2 to 16, unitHoverPixels 4 to 64, legendRowHeight 12 to 40");
+        foreach (var icon in tuning.StarIcons)
+        {
+            if (string.IsNullOrWhiteSpace(icon.Star) || !Enum.TryParse<StarIconShape>(icon.Shape, true, out _))
+                throw new InvalidDataException($"{path}: every star icon names a star class and a shape (circle, square, diamond, sparkle, asterisk)");
+        }
+
         return tuning;
     }
+}
+
+/// <summary>The shapes a star class's icon can take on the map.</summary>
+internal enum StarIconShape : byte
+{
+    Circle,
+    Square,
+    Diamond,
+    Sparkle,
+    Asterisk,
+}
+
+/// <summary>One star class's icon: the class's name in the galaxy content and the shape's name.</summary>
+internal sealed class StarIconStyle
+{
+    public string Star { get; init; } = "";
+    public string Shape { get; init; } = "";
+
+    /// <summary>The shape, a circle where the name is not one.</summary>
+    [JsonIgnore]
+    public StarIconShape ParsedShape => Enum.TryParse<StarIconShape>(Shape, true, out var shape) ? shape : StarIconShape.Circle;
 }

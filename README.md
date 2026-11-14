@@ -258,8 +258,12 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 - **Galaxy.** A spiral disc 800 sectors across. Asteroid fields follow its arms and core; between the arms and
   outside the disc space is nearly empty.
 - **Galaxy map.** Every grid cell is a sector of the chosen layer. Uncharted space lies under a veil and is an
-  anonymous destination; a sector you scanned is charted and shows its star, name and asteroid fields as surveyed,
-  never later changes. Green rings show nominal sensor range, cut through the layer; gas can hide ships within them,
+  anonymous destination; a sector you scanned is charted and shows its name, a small muted icon in its top right
+  corner for its star (a shape for the class, a dot in the star's colour) and the real outlines of the asteroid
+  fields (amber, a denser core inside) and gas clouds (violet) that reach it, as surveyed, never later changes. A
+  field or cloud that runs across a wall is drawn only inside charted sectors: its part in a sector you have not
+  charted stays hidden. A map index on the left, under the unit list, names the shades, shapes and star types.
+  Resting the pointer on one of your own ships names it beside it; the sector card stays away while it does. Green rings show nominal sensor range, cut through the layer; gas can hide ships within them,
   and a lost contact stays as a fading hollow marker for 15 seconds (a station's indefinitely). Hover a sector for
   its card beside it; click to pin the card (coordinates, distance, sensor state, what the chart holds, the jump
   warning, the scan control in your own sector, Move here and Jump here, and a scrolling list of your ships, then
@@ -430,7 +434,7 @@ Galaxy map:
 | Close the menu | Left-click elsewhere, or `Esc` (then `Esc` closes a pinned card, then the map) |
 | Take control of a ship | Select exactly one other ship of yours in the sector you are in, then `T`; the map stays open. Another sector: travel there first |
 | Pan / zoom | `W` `A` `S` `D`, arrow keys or middle-drag / mouse wheel |
-| Sector card | Hover a sector to preview; left-click to pin; left-click outside the galaxy or `Esc` closes it |
+| Sector card | Hover a sector to preview; left-click to pin; its **X**, left-click outside the galaxy or `Esc` closes it |
 | Scan your sector | Pin your own sector's card, then **Scan sector** |
 | Change layer, centre on your ship | `Page Up` / `Page Down` or the layer bar, `Space` |
 | Flat or tilted view | `V`, or **Flat** / **Tilt** on the layer bar; flattening shows the pinned card's layer |
