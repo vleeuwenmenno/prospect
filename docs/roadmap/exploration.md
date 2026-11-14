@@ -113,20 +113,26 @@ Snapshot filtering alone therefore cannot make generated field locations or mine
 Before claiming secure fog, design a bounded way to disclose needed sector data without exposing all generation secrets.
 Shared deterministic generation code can remain shared even when its secret inputs are server-owned.
 
+## Decided (provisional, tunable)
+
+- Shared content sets sensor radius to 5,000 m, scan duration to 5 s and lost ship-contact lifetime to 15 s.
+- A scan cancels on sector change, control change or loss of the last live charting block; flight remains available.
+- Loading discards transient scans and ship markers. Permanent charts survive.
+- Each owner retains at most 4,096 charts. At capacity, refuse new sectors without evicting knowledge.
+- This foundation filters dynamic live information only. Seed secrecy and blind-jump risk remain unfinished.
+
 ## Open: product and tuning
 
 - Default thickness, boundary coordinates and ordinary-flight behaviour at the floor/ceiling; reconcile with the continuous-space direction.
 - Jump range, safe band, risk curve and damage distribution; define whether range differs among existing drive kinds.
-- Sensor radius, scan duration, loss-of-contact lifetime and scan cancellation/interruption conditions.
 - What 10% health means for per-block damage; preserve core/survival and decide whether propulsion may be lost.
 - Card ship-row detail, map tilt controls and exact flat/tilted selection transitions.
 
 ## Open: implementation constraints
 
 - Delivery of undiscovered natural data without seed leakage, and the minimum data needed for local collision prediction.
-- Bounds for retained charts, stale station records and live contact sets; no unbounded tick work.
+- Bounds for stale station records and live contact sets; no unbounded tick work.
 - Shared intelligence beyond owned ships, including future alliance sensor access.
-- Whether transient scans and fading ship markers resume after loading; permanent charts must survive.
 
 ## Deferred
 

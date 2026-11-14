@@ -20,9 +20,11 @@ public sealed class GameContent
         SocialRules social,
         ContentIdentity identity,
         BlockTransferRules blockTransfers,
-        EditorRules editor
+        EditorRules editor,
+        ExplorationRules exploration
     )
     {
+        Exploration = exploration;
         Editor = editor;
         BlockTransfers = blockTransfers;
         Identity = identity;
@@ -52,6 +54,7 @@ public sealed class GameContent
     /// what it refused and how long to wait, so they are not part of <see cref="Identity"/>.
     /// </summary>
     public EditorRules Editor { get; }
+    public ExplorationRules Exploration { get; }
 
     /// <summary>
     /// Social limits as this machine's files have them. A server enforces its own; a client's only shape what
@@ -113,12 +116,12 @@ public sealed class GameContent
         var designs = new HullDesign[Designs.Length];
         for (var i = 0; i < designs.Length; i++)
             designs[i] = Designs[i].WithRules(rules);
-        return new GameContent(Galaxy.Under(SettingCatalog, clean), Blocks, SettingCatalog, clean, rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor);
+        return new GameContent(Galaxy.Under(SettingCatalog, clean), Blocks, SettingCatalog, clean, rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration);
     }
 
     internal GameContent WithCatalogue(HullDesign[] designs, int pod, int drone, int[] fleet) =>
         new(Galaxy, Blocks, SettingCatalog, Settings, Rules, (HullDesign[])designs.Clone(), pod, drone,
-            (int[])fleet.Clone(), Social, Identity, BlockTransfers, Editor);
+            (int[])fleet.Clone(), Social, Identity, BlockTransfers, Editor, Exploration);
 
     /// <summary>
     /// This content with one more design at the end of the catalogue. Every design it had keeps its number and is
@@ -130,7 +133,7 @@ public sealed class GameContent
         var designs = new HullDesign[Designs.Length + 1];
         Designs.CopyTo(designs, 0);
         designs[^1] = design;
-        return new GameContent(Galaxy, Blocks, SettingCatalog, Settings, Rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor);
+        return new GameContent(Galaxy, Blocks, SettingCatalog, Settings, Rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration);
     }
 
     /// <summary>Loads the content shipped beside the executable.</summary>
@@ -151,6 +154,7 @@ public sealed class GameContent
 
         var blocks = BlockCatalog.Parse(Shared("blocks", "blocks.json"), At("blocks", "blocks.json"));
         var settingCatalog = WorldSettingCatalog.Parse(Shared("rules", "settings.json"), At("rules", "settings.json"));
+        var exploration = ExplorationRules.Parse(Shared("rules", "exploration.json"));
         var settings = settingCatalog.Defaults;
         var rules = blocks.Rules.Under(settingCatalog, settings);
         using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(At("ships", "fleet.json")));
@@ -204,7 +208,8 @@ public sealed class GameContent
             social,
             identity.Build(),
             transfers,
-            editor
+            editor,
+            exploration
         );
     }
 }

@@ -66,6 +66,14 @@ public sealed class ContentIdentityTests
     private static readonly GameContent Content = GameContent.Load();
 
     [Fact]
+    public void ExplorationRulesAreSharedContent()
+    {
+        using var copy = new ContentCopy();
+        copy.Replace("rules/exploration.json", "5000", "6000");
+        Assert.NotEqual(Content.Identity, copy.Load().Identity);
+    }
+
+    [Fact]
     public void GeometryAndAggregateAdmissionBudgetsAreShared()
     {
         using var geometry = new ContentCopy();
@@ -106,7 +114,7 @@ public sealed class ContentIdentityTests
             return;
 
         using var copy = new ContentCopy();
-        string[] shared = ["blocks/blocks.json", "rules/settings.json", "ships/fleet.json", "ships/command_pod.json", "ships/drone.json", "galaxy/galaxy.json", "net/blocks.json"];
+        string[] shared = ["blocks/blocks.json", "rules/settings.json", "rules/exploration.json", "ships/fleet.json", "ships/command_pod.json", "ships/drone.json", "galaxy/galaxy.json", "net/blocks.json"];
         var writers = new List<Task>();
         foreach (var file in shared)
         {

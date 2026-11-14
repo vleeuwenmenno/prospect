@@ -665,3 +665,17 @@ This status is an observation at open, not hosting authorization. Saved multipla
 - Automatic database copies are gameplay-only: they cannot recover a lost private key. Protected identity recovery artifacts are not implemented.
 - Move or copy the complete stopped folder, preserving key permissions, to retain identity. A bare database is insufficient.
 - Independent Claude security review remains required. No admission, TLS, key rotation or destructive recovery is included.
+
+## Exploration foundation contract (implementation in progress)
+
+Shared `rules/exploration.json` participates in content identity.
+The provisional values and scan interruption rules are decided in `roadmap/exploration.md`.
+`SectorChart` records owner, sector and authoritative survey tick. Its natural geography is immutable
+under the saved seed, generation version and content identity; it never records live occupants or ore surveys.
+A repeated chart refreshes its recorded tick; a new sector at the owner limit is refused.
+
+Visibility must be checked on hull snapshots, asteroid delta admission/replay and live updates,
+and block/damage recovery admission and continued transfers. Lost contacts must freeze before publication.
+The seed and shared generation remain disclosed for asteroid collision prediction. This does not secure natural
+field locations or mineral contents. Blind-jump risk, travel range and galaxy-bound decisions remain unfinished.
+No hidden hull is disclosed solely to improve prediction; collisions against undisclosed hulls require correction.
