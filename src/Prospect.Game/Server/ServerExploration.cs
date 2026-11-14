@@ -135,6 +135,17 @@ public sealed partial class ServerHost
         }
     }
 
+    /// <summary>Charts the sectors around the spawn sector for a new owner; see <see cref="ServerConfig.ChartedRadius"/>.</summary>
+    private void ChartAroundSpawn(uint owner)
+    {
+        if (_chartedRadius <= 0)
+            return;
+        for (var dy = -_chartedRadius; dy <= _chartedRadius; dy++)
+            for (var dz = -_chartedRadius; dz <= _chartedRadius; dz++)
+                for (var dx = -_chartedRadius; dx <= _chartedRadius; dx++)
+                    RecordChart(owner, _spawnSector.Offset(dx, dy, dz), 0);
+    }
+
     internal bool RecordChart(uint owner, SectorCoord sector, long tick)
     {
         var owned = 0;

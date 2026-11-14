@@ -21,7 +21,29 @@ internal enum PaneClose : byte
 /// </summary>
 internal sealed class SocialPanes
 {
-    private readonly FloatingWindow[] _windows = [new(), new(), new(), new(), new(), new()];
+    // Charts, Inventory and Player start open: interface mode shows every window that is open and not pinned.
+    private readonly FloatingWindow[] _windows =
+    [
+        new(), new(), new(), new(), new(), new(),
+        new() { Open = true }, new() { Open = true }, new() { Open = true },
+    ];
+
+    /// <summary>The names windows are saved under in the client settings.</summary>
+    public static string NameOf(SocialPane pane) => pane switch
+    {
+        SocialPane.Navigator => "Social",
+        SocialPane.Friends => "Friends",
+        SocialPane.Party => "Party",
+        SocialPane.Players => "Players",
+        SocialPane.Chat => "Chat",
+        SocialPane.Detail => "Detail",
+        SocialPane.Charts => "Charts",
+        SocialPane.Inventory => "Inventory",
+        _ => "Player",
+    };
+
+    /// <summary>The number of windows.</summary>
+    public const int Count = 9;
 
     public FloatingWindow this[SocialPane pane] => _windows[(int)pane];
 
@@ -39,15 +61,8 @@ internal sealed class SocialPanes
     }
 
     /// <summary>
-    /// What Escape closes in the workspace: the focused window when it is open and not pinned, else null for the
-    /// workspace itself. Escape never closes a pinned window.
-    /// </summary>
-    public SocialPane? BackTarget(SocialPane focused) =>
-        focused != SocialPane.Navigator && this[focused].Open && !this[focused].Pinned ? focused : null;
-
-    /// <summary>
     /// True when the window is drawn: the navigator while the workspace is; any other open window in the workspace,
-    /// pinned, or chat while it is being typed in. Party, Players and Chat need a game; the card needs something to show.
+    /// pinned, or chat while it is being typed in. Party, Players, Chat, Charts, Inventory and Player need a game; the card needs something to show.
     /// </summary>
     public bool Shown(SocialPane pane, bool workspace, bool inGame, bool chatTyping, SocialDetail detail)
     {
@@ -58,7 +73,7 @@ internal sealed class SocialPanes
             return false;
         switch (pane)
         {
-            case SocialPane.Party or SocialPane.Players or SocialPane.Chat when !inGame:
+            case SocialPane.Party or SocialPane.Players or SocialPane.Chat or SocialPane.Charts or SocialPane.Inventory or SocialPane.Player when !inGame:
                 return false;
             case SocialPane.Detail when !(detail.ShowsFriend || (inGame && detail.ShowsPlayer)):
                 return false;

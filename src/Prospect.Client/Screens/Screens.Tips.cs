@@ -100,7 +100,7 @@ internal sealed partial class ScreenHost
         if (!_tips.Enabled)
             return;
         _tipSurfaces.Track(_tips, _mapOpen, world.Mode == ViewMode.Command, world.Editor.Shown,
-            _mapOpen && _mapCard.Pinned && _mapCard.Sector == world.Sector.Coord);
+            _mapOpen && _mapCard.Pinned && _mapCard.Sector == world.Sector.Coord, InterfaceModeOn);
 
         var own = world.Own;
         var flight = world.OwnFlight;

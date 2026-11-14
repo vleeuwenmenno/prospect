@@ -11,21 +11,23 @@ internal sealed class TipSurfaces
     private bool _command;
     private bool _editor;
     private bool _scan;
+    private bool _interface;
 
     /// <summary>
     /// Brings the stack in step with what is on screen this frame: a surface that just opened fires its trigger, one
     /// that just closed withdraws its tips. Called once a frame, before anything is laid out.
     /// </summary>
-    public void Track(TipBoard tips, bool mapOpen, bool commandView, bool editorShown, bool scanAvailable)
+    public void Track(TipBoard tips, bool mapOpen, bool commandView, bool editorShown, bool scanAvailable, bool interfaceMode = false)
     {
         Edge(tips, mapOpen, ref _map, TipTriggers.MapOpened);
         Edge(tips, commandView, ref _command, TipTriggers.CommandViewOpened);
         Edge(tips, editorShown, ref _editor, TipTriggers.EditorOpened);
         Edge(tips, scanAvailable, ref _scan, TipTriggers.ScanAvailable);
+        Edge(tips, interfaceMode, ref _interface, TipTriggers.InterfaceOpened);
     }
 
     /// <summary>Forgets what each surface last showed, so the next session fires them on their own changes.</summary>
-    public void Reset() => _map = _command = _editor = _scan = false;
+    public void Reset() => _map = _command = _editor = _scan = _interface = false;
 
     private static void Edge(TipBoard tips, bool now, ref bool before, string trigger)
     {

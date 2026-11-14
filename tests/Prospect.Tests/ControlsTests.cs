@@ -155,7 +155,6 @@ public sealed class ControlsTests
     }
 
     [Theory]
-    [InlineData("TogglePlayers", GlfwKey.Tab)]
     [InlineData("TogglePlayers", GlfwKey.P)]
     [InlineData("ToggleSocial", GlfwKey.O)]
     [InlineData("ToggleChat", GlfwKey.Enter)]
@@ -169,6 +168,23 @@ public sealed class ControlsTests
         Assert.False(map.InterfaceShortcutPressed(devices, action, true, false));
         var help = new ControlsCatalog(map);
         Assert.Contains(help.Rows, r => r.Category == "Social" && r.Matches(key.ToString()) && r.Action == help.LabelOf(action));
+    }
+
+    [Theory]
+    [InlineData("ToggleInterface", GlfwKey.Tab)]
+    [InlineData("ToggleCharts", GlfwKey.G)]
+    [InlineData("ToggleInventory", GlfwKey.U)]
+    [InlineData("TogglePlayerInfo", GlfwKey.J)]
+    public void InterfaceModeAndTheWindowKeysAreBoundAndListedUnderInterface(string name, GlfwKey key)
+    {
+        var action = Enum.Parse<InputAction>(name);
+        var map = ActionMap.Load(Path.Combine(AppContext.BaseDirectory, "content", "input", "bindings.json"));
+        var devices = new InputDevices();
+        devices.OnKey(key, GlfwKeyAction.Press);
+        Assert.True(map.InterfaceShortcutPressed(devices, action, false, false));
+        Assert.False(map.InterfaceShortcutPressed(devices, action, true, false));
+        var help = new ControlsCatalog(map);
+        Assert.Contains(help.Rows, r => r.Category == "Interface" && r.Matches(key.ToString()) && r.Action == help.LabelOf(action));
     }
 
     [Fact]

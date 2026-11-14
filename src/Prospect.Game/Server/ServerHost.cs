@@ -79,6 +79,13 @@ public sealed class ServerConfig
     public SectorCoord SpawnSector { get; init; }
 
     /// <summary>
+    /// For scripted captures only: every sector within this many sectors of the spawn sector is charted for each new
+    /// owner as the owner arrives, so the Charts window can be looked at without scanning for minutes. Zero in play.
+    /// Refused with a saved world, which keeps only what the player did.
+    /// </summary>
+    public int ChartedRadius { get; init; }
+
+    /// <summary>
     /// The saved world this server runs, or null for a game that is not saved. With it the server begins from
     /// the world's state and keeps saving it; the world's seed, settings and spawn sector are the saved ones, and
     /// setting <see cref="GalaxySeed"/>, <see cref="Settings"/> or <see cref="SpawnSector"/> to anything else is
@@ -348,6 +355,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     private readonly ServerVisibility _visibility;
     private readonly ulong _galaxySeed;
     private readonly SectorCoord _spawnSector;
+    private readonly int _chartedRadius;
     private readonly string? _listingHost;
     private readonly ConnectionLimits _limits;
     private readonly TimeProvider _clock;
@@ -423,6 +431,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             _accountAuthority = config.AccountAuthority ?? config.Listing;
             _galaxySeed = world?.World.Seed ?? config.GalaxySeed;
             _spawnSector = world?.World.SpawnSector ?? config.SpawnSector;
+            _chartedRadius = world is null ? Math.Clamp(config.ChartedRadius, 0, 4) : 0;
             _listingHost = config.Listing?.Url.Host;
             _limits = config.Limits;
             _clock = config.Clock;
@@ -1629,7 +1638,10 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
         // A new owner's lane is their place in the owner table, which is bounded; a player number is not.
         if (_save is null)
+        {
             SpawnFleet(connection, (int)(connection.PlayerId - 1));
+            ChartAroundSpawn(connection.PlayerId);
+        }
         else if (created)
             SpawnFleet(connection, ownerSlot);
         else

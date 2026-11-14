@@ -50,6 +50,7 @@ internal static class Program
           --gas-distance <radii>  With --gas-view outside or absent: the camera's distance in largest half-extents of the cloud
           --gas-distance-to <radii>  Move from --gas-distance to this distance over the captures, in equal ratios
           --sector <x>,<y>,<z>    With --start local or --bench: start in this sector instead of the home sector
+          --charted <n>           With --capture or --bench and a new local game: every sector within n sectors (0 to 4) of the start is charted, to look at the Charts window
           --jump-to <x>,<y>,<z>   With --open jump, jump-wormhole or jump-rift: jump to this sector's centre instead of current sector + (6,0,-4); normal jump limits apply
           --size <W>x<H>          Start windowed at this size
           --validation            Enable Vulkan validation layers (default in debug builds)
@@ -186,7 +187,7 @@ internal static class Program
                 case "--set" when hasValue:
                     options.WorldSettingArgs.Add(args[++i]);
                     break;
-                case "--open" when hasValue && args[i + 1] is "command" or "drone" or "map" or "map-menu" or "map-hover" or "map-card" or "map-card-near" or "map-card-far" or "map-tilt" or "map-reach" or "map-reach-tilt" or "scan" or "command-fog" or "command-fog-one" or "command-fog-pair" or "command-fog-far" or "command-menu" or "command-menu-fleet" or "command-menu-close" or "command-menu-far" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "new-ship" or "new-ship-refused" or "new-ship-editor" or "new-ship-closed" or "scan-pilot" or "scan-command" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
+                case "--open" when hasValue && args[i + 1] is "command" or "drone" or "map" or "map-menu" or "map-hover" or "map-card" or "map-card-near" or "map-card-far" or "map-tilt" or "map-reach" or "map-reach-tilt" or "scan" or "command-fog" or "command-fog-one" or "command-fog-pair" or "command-fog-far" or "command-menu" or "command-menu-fleet" or "command-menu-close" or "command-menu-far" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "new-ship" or "new-ship-refused" or "new-ship-editor" or "new-ship-closed" or "scan-pilot" or "scan-command" or "interface" or "charts" or "pinned-charts" or "inventory" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
                     options.OpenView = args[++i];
                     break;
                 case "--browser-sample" when hasValue:
@@ -247,6 +248,11 @@ internal static class Program
                         options.JumpTo = new Prospect.Game.World.SectorCoord(x, y, z);
                         break;
                     }
+                case "--charted" when hasValue:
+                    if (!int.TryParse(args[++i], out var charted) || charted is < 0 or > 4)
+                        return Fail($"Invalid --charted: {args[i]} (expected 0 to 4)");
+                    options.ChartedRadius = charted;
+                    break;
                 case "--sector" when hasValue:
                     {
                         var parts = args[++i].Split(',');
@@ -444,6 +450,9 @@ internal static class Program
         if (diagnostic && (options.WorldsRoot is not null || options.ContinueWorld || options.SaveFault != StoreFault.None || options.OpenView == "leave"
             || options.StartScreen != Screen.MainMenu || (!options.StartLocalGame && options.BenchSeconds <= 0)))
             return Fail("--rts-script and --visual-scene need a new private local game (--start local or --bench), without --worlds, --save-fault, --start continue, load or newgame, or --open leave.");
+
+        if (options.ChartedRadius > 0 && ((options.CapturePath is null && options.BenchSeconds <= 0) || options.WorldsRoot is not null))
+            return Fail("--charted works only with --capture or --bench, without --worlds.");
 
         // The password may come from the environment instead, where a process list does not show it.
         if (options.Password is null && Environment.GetEnvironmentVariable("PROSPECT_PASSWORD") is { Length: > 0 } fromEnvironment)

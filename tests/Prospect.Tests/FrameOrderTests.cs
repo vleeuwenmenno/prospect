@@ -324,15 +324,17 @@ public sealed class FrameOrderTests : IDisposable
             var font = shipped.SansMedium;
             var bar = HudLayout.TopBarBottom(scale);
             Assert.True(Kit.Measure(font, Theme.FontSmall, "Agメノ"u8).Y <= bar - 2 * scale);
-            Span<float> left = stackalloc float[5];
-            Span<float> tabWidth = stackalloc float[5];
-            Span<float> measured = stackalloc float[5];
-            ReadOnlySpan<string> game = ["PLAY", "FLEET", "MAP", "SOCIAL", "SETTINGS"];
-            foreach (var count in new[] { 5, 3 })
+            Span<float> left = stackalloc float[8];
+            Span<float> tabWidth = stackalloc float[8];
+            Span<float> measured = stackalloc float[8];
+            // In a game: no Play; the three windows are tabs. Out of one: Play, Social and Settings.
+            string[] game = ["FLEET", "MAP", "CHARTS", "INVENTORY", "PLAYER", "SOCIAL", "SETTINGS"];
+            string[] menu = ["PLAY", "SOCIAL", "SETTINGS"];
+            foreach (var count in new[] { 7, 3 })
             {
                 var labels = measured[..count];
                 for (var i = 0; i < count; i++)
-                    labels[i] = Kit.Measure(font, Theme.FontSmall, Encoding.UTF8.GetBytes(count == 5 ? game[i] : game[i == 0 ? 0 : i + 2])).X;
+                    labels[i] = Kit.Measure(font, Theme.FontSmall, Encoding.UTF8.GetBytes(count == 7 ? game[i] : menu[i])).X;
                 // The Japanese name, the longest a name may be, and the sign-in prompt.
                 foreach (var name in new[] { "メノ", "WWWWWWWWWWWWWWWWWWWWWWWW", "SIGN IN WITH DISCORD" })
                 {
@@ -7199,5 +7201,128 @@ public sealed class FrameOrderTests : IDisposable
         {
             ImGui.Render();
         }
+    }
+
+    // Interface mode as ScreenHost runs it with the production latch and key: the key flips it after the interface
+    // frame started, and while it is on the frame counts as an open surface.
+    private readonly InterfaceMode _mode = new();
+
+    private bool InterfaceKey()
+    {
+        var handled = _mode.HandleKey(_actions, _devices, ImGui.GetIO().WantTextInput, _router.PointerOverInterface);
+        _surfaceOpen = _mode.Active;
+        _floatingFull = _mode.Active;
+        return handled;
+    }
+
+    [Fact]
+    public void TabLatchesThePointerFreeAndTabAgainTakesFlightBack()
+    {
+        Frame(shortcut: InterfaceKey);
+        Assert.True(_router.Captured);
+
+        Frame(() => Key(GlfwKey.Tab, true), InterfaceKey);
+        Assert.True(_mode.Active);
+        Assert.False(_router.Captured);
+        Frame(() => Key(GlfwKey.Tab, false), InterfaceKey);
+
+        // Latched: nothing is held, and the pointer stays free frame after frame, which Shift alone does not do.
+        for (var i = 0; i < 5; i++)
+        {
+            Frame(shortcut: InterfaceKey);
+            Assert.False(_router.Captured);
+        }
+
+        // Flight input is off while it is on, as it is with the social windows open: W reaches no hull.
+        Bridge.Consume(out _, out _);
+        Frame(() => Key(GlfwKey.W, true), InterfaceKey);
+        Assert.Equal(0f, Sent().Forward);
+        Frame(() => Key(GlfwKey.W, false), InterfaceKey);
+
+        Frame(() => Key(GlfwKey.Tab, true), InterfaceKey);
+        Assert.False(_mode.Active);
+        Assert.True(_router.Captured);
+        Frame(() => Key(GlfwKey.Tab, false), InterfaceKey);
+        Assert.True(_router.Captured);
+    }
+
+    [Fact]
+    public void AClickInInterfaceModeNeverReachesTheWorldAndTheWindowsPinAndCloseAsInTheWorkspace()
+    {
+        _world.SetMode(ViewMode.Command);
+        Frame();
+        // A ship is selected in the command view; a click on empty space would clear it.
+        _world.Select(_snapshot.Hulls[_snapshot.OwnHull].Id, false);
+        var window = new FloatingWindow { Open = true };
+        _floating = window;
+        Frame(() => Key(GlfwKey.Tab, true), InterfaceKey);
+        Frame(() => Key(GlfwKey.Tab, false), InterfaceKey);
+        Assert.True(_mode.Active);
+
+        // Space is the world's in the command view with the mode off; with it on the click is not.
+        Frame(() => Move(EmptySpace), InterfaceKey);
+        Frame(() => Click(), InterfaceKey);
+        Frame(shortcut: InterfaceKey);
+        Assert.Equal(1, _world.Selection.Length);
+
+        // The pin takes its click as the workspace's windows do.
+        Frame(() => Move(PinOf(window)), InterfaceKey);
+        Frame(() => Click(), InterfaceKey);
+        Frame(shortcut: InterfaceKey);
+        Assert.True(window.Pinned);
+        Assert.Equal(1, _world.Selection.Length);
+        Assert.Equal(0, _buttonClicks);
+    }
+
+    [Fact]
+    public void APinnedWindowStaysWhenInterfaceModeEndsAndAnUnpinnedOneGoes()
+    {
+        var pinned = new FloatingWindow { Open = true, Pinned = true };
+        var plain = new FloatingWindow { Open = true };
+        Frame(() => Key(GlfwKey.Tab, true), InterfaceKey);
+        Frame(() => Key(GlfwKey.Tab, false), InterfaceKey);
+        Assert.True(_mode.Shows(pinned.Open, pinned.Pinned) && _mode.Shows(plain.Open, plain.Pinned));
+        Frame(() => Key(GlfwKey.Tab, true), InterfaceKey);
+        Assert.False(_mode.Active);
+        Assert.True(_mode.Shows(pinned.Open, pinned.Pinned));
+        Assert.False(_mode.Shows(plain.Open, plain.Pinned));
+
+        // The pinned one is shown but, with the pointer captured again, takes nothing: flight keeps W and Space.
+        _floating = pinned;
+        Frame(() => Key(GlfwKey.Tab, false), InterfaceKey);
+        Frame(shortcut: InterfaceKey);
+        Assert.True(_router.Captured);
+        Bridge.Consume(out _, out _);
+        Frame(() => Key(GlfwKey.W, true), InterfaceKey);
+        Assert.True(Sent().Forward > 0);
+        Assert.False(ImGui.GetIO().WantCaptureMouse);
+    }
+
+    [Fact]
+    public void TheChartsWindowsJumpPlotsForTheShipFlownWithNothingSelectedThroughTheOnePlan()
+    {
+        var galaxy = _snapshot.Galaxy!;
+        var target = galaxy.CenterOf(_world.Sector.Coord.Offset(1, 0, 0));
+        Assert.Equal(0, _world.Selection.Length);
+
+        // The plan is the flown ship's alone, and says it plots: the pilot aims and boosts.
+        var plan = ChartActions.Plan(_snapshot, _world, target);
+        Assert.Equal(1, plan.Ships);
+        Assert.Equal(1, plan.Ready);
+        Assert.True(plan.PlotsOnly);
+
+        Bridge.Consume(out _, out _);
+        ChartActions.Jump(_world, Bridge, target);
+        Assert.Equal(target, _world.NavTarget);
+        Assert.Equal(1, _world.Selection.Length);
+
+        // With another selection the plan is for that selection, as the menus' plan is.
+        _world.ClearSelection();
+        _world.Select(_snapshot.Hulls[_snapshot.OwnHull].Id, false);
+        Assert.Equal(_world.PlanJump(target).Ready, ChartActions.Plan(_snapshot, _world, target).Ready);
+
+        // Too close is refused by the plan, so no order is sent for it.
+        var near = galaxy.CenterOf(_world.Sector.Coord);
+        Assert.Equal(0, ChartActions.Plan(_snapshot, _world, near).Ready);
     }
 }

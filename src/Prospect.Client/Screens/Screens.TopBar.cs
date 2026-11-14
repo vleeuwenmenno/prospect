@@ -11,18 +11,22 @@ internal sealed partial class ScreenHost
 {
     private enum BarTab : byte
     {
+        /// <summary>The main menu: only out of a game, where it is the way back to the menu.</summary>
         Play,
         Fleet,
         Map,
+        Charts,
+        Inventory,
+        Player,
         Social,
         Settings,
     }
 
-    private static readonly BarTab[] SessionTabs = [BarTab.Play, BarTab.Fleet, BarTab.Map, BarTab.Social, BarTab.Settings];
+    private static readonly BarTab[] SessionTabs = [BarTab.Fleet, BarTab.Map, BarTab.Charts, BarTab.Inventory, BarTab.Player, BarTab.Social, BarTab.Settings];
     private static readonly BarTab[] MenuTabs = [BarTab.Play, BarTab.Social, BarTab.Settings];
-    private readonly float[] _tabLabels = new float[5];
-    private readonly float[] _tabLeft = new float[5];
-    private readonly float[] _tabWidth = new float[5];
+    private readonly float[] _tabLabels = new float[8];
+    private readonly float[] _tabLeft = new float[8];
+    private readonly float[] _tabWidth = new float[8];
 
     /// <summary>True when the bar's tabs are those of a game: the game screen, or Settings opened from it.</summary>
     private bool BarInGame => _screen == Screen.Session || (_screen == Screen.Settings && _settingsReturn == Screen.Session);
@@ -32,6 +36,9 @@ internal sealed partial class ScreenHost
         BarTab.Play => "PLAY"u8,
         BarTab.Fleet => "FLEET"u8,
         BarTab.Map => "MAP"u8,
+        BarTab.Charts => "CHARTS"u8,
+        BarTab.Inventory => "INVENTORY"u8,
+        BarTab.Player => "PLAYER"u8,
         BarTab.Social => "SOCIAL"u8,
         _ => "SETTINGS"u8,
     };
@@ -47,14 +54,22 @@ internal sealed partial class ScreenHost
             return BarTab.Play;
         if (_mapOpen)
             return BarTab.Map;
-        if (_socialOpen)
-            return BarTab.Social;
+        // In interface mode the tab of the window in front is lit; with none in front the social windows' is.
+        if (InterfaceModeOn)
+            return _focusedPane switch
+            {
+                SocialPane.Charts => BarTab.Charts,
+                SocialPane.Inventory => BarTab.Inventory,
+                SocialPane.Player => BarTab.Player,
+                _ => BarTab.Social,
+            };
         return _app.World.Mode == ViewMode.Command ? BarTab.Fleet : BarTab.Play;
     }
 
     /// <summary>
-    /// The navigation bar along the top. In a game: Play (the pilot view), Fleet (the command view), Map, Social and
-    /// Settings; out of one: Play (the main menu), Social (Friends) and Settings. No tab starts or leaves a game.
+    /// The navigation bar along the top. In a game: Fleet (the command view, again to return to the pilot view), Map,
+    /// Charts, Inventory, Player (windows that open in interface mode), Social and Settings; out of one: Play (the main
+    /// menu), Social (Friends) and Settings. No tab starts or leaves a game.
     /// At the right, the Discord account's display name as the account service gives it, or the way to sign in.
     /// While flight has the pointer it is drawn dimmed: the interface cannot see a captured pointer at all.
     /// </summary>
@@ -209,17 +224,12 @@ internal sealed partial class ScreenHost
         var world = _app.World;
         switch (tab)
         {
-            case BarTab.Play:
-                _mapOpen = false;
-                if (_socialOpen)
-                    CloseWorkspace();
-                world.SetMode(ViewMode.Pilot);
-                break;
             case BarTab.Fleet:
                 _mapOpen = false;
-                if (_socialOpen)
+                if (InterfaceModeOn)
                     CloseWorkspace();
-                world.SetMode(ViewMode.Command);
+                // The tab that is lit is the way back: pressing it again returns to the pilot view.
+                world.SetMode(world.Mode == ViewMode.Command ? ViewMode.Pilot : ViewMode.Command);
                 break;
             case BarTab.Map:
                 if (SocialSurfaceOpen)
@@ -227,12 +237,30 @@ internal sealed partial class ScreenHost
                 if (!_mapOpen && world.Galaxy is not null)
                     OpenMap();
                 break;
+            case BarTab.Charts:
+                _mapOpen = false;
+                OpenWindow(SocialPane.Charts, true);
+                break;
+            case BarTab.Inventory:
+                _mapOpen = false;
+                OpenWindow(SocialPane.Inventory, true);
+                break;
+            case BarTab.Player:
+                _mapOpen = false;
+                OpenWindow(SocialPane.Player, true);
+                break;
             case BarTab.Social:
                 _mapOpen = false;
-                if (_socialOpen)
+                if (InterfaceModeOn && _focusedPane is not (SocialPane.Charts or SocialPane.Inventory or SocialPane.Player))
                     CloseWorkspace();
                 else
+                {
                     OpenWorkspace(snapshot);
+                    // The Social tab lights for the window in front, so bring the social ones forward from the player's own.
+                    if (_focusedPane is SocialPane.Charts or SocialPane.Inventory or SocialPane.Player)
+                        Raise(SocialPane.Navigator);
+                }
+
                 break;
         }
     }
