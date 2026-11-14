@@ -399,22 +399,35 @@ Gas-kind changes relative to the integrated generation optimization:
 Ordinary shape draws use `Galaxy.RockShapes` (12); total `Galaxy.AsteroidShapes` is 13 including the icicle.
 The generation and placement fixture hashes changed intentionally for the appended ice resource and cloud kinds; optimization must preserve the new bytes.
 
-## Integration and like-for-like performance
+## Integration and deferred performance baseline
 
 The branch merges `wip/integration` at `0f745cc`, including optimized placement, 20–160 km sectors and scan cooldown.
 Protocol 44 combines the cooldown envelope and hull environment byte; generation stays 6 and evaluator stays 9.
 The only conflict was `ExplorationRules`: both cooldown and lightning fields and parsers are retained.
+Performance optimization is deferred by the product owner; no gas hot-path or cache-invalidation rewrite was attempted.
 
-`ManySensorsNearGasHaveMeasuredTickCost`, 192 hulls and 32 clients, run alone with the Makefile GC settings:
+Before/after the gas-kind change on the same integration base:
 
-- Before this merge (`8e7aaf7`), Release: 1.8425 ms/server tick, 2.9613 ms/full server/client round, zero allocated bytes.
-- After this merge, Release: 1.9105 ms/server tick, 2.9687 ms/full round, zero allocated bytes.
-- The previously reported 17.989 ms was Debug, from `make check`. It must not be compared to the earlier 1.96 ms Release baseline.
-- Release remains near that baseline. No gas hot-path rewrite or cache invalidation change was needed for this integration.
+- Before: `0f745cc`, without gas kinds, built from an isolated source archive.
+- After: `7590134`, the merged gas-kind branch.
+- `ManySensorsNearGasHaveMeasuredTickCost`: 192 hulls, 32 clients, generated gas at anchor `(133,0,-77)`.
+- Three separate standalone test processes per build and revision, run serially on the same Linux x64 machine. Every run measured zero allocated bytes.
 
-Build both measurements with `make build CONFIG=Release`, then run the test binary with
-`-method '*ManySensorsNearGasHaveMeasuredTickCost' -parallel none` and the Makefile's `TEST_ENV`.
-These are individual warm stress runs, not a statistical latency guarantee; the test measures generated gas at anchor `(133,0,-77)`.
+Server tick time in milliseconds; median of three, with the observed range:
+
+| Build | Before gas kinds | After gas kinds |
+| --- | --- | --- |
+| Debug | 17.7079 (17.2712–17.8719) | 18.0626 (18.0113–18.5177) |
+| Release | 1.8690 (1.8284–1.8814) | 1.9949 (1.9569–2.0849) |
+
+The previously reported 17.989 ms was Debug, from `make check`, not Release.
+The earlier 1.96 ms comparison was Release; these build configurations must not be compared as a regression.
+These are warm stress samples for the later performance pass, not a statistical latency guarantee or coverage of every cloud kind/layout.
+
+Build each revision with `make build CONFIG=Debug` and `make build CONFIG=Release`.
+Run the corresponding test binary with `-method '*ManySensorsNearGasHaveMeasuredTickCost' -parallel none`,
+under `DOTNET_GCgen0size=0x10000000` and `DOTNET_GCgen0MaxBudget=0x10000000`, matching the Makefile's `TEST_ENV`.
+Mining/inventory and the joint ship-turret brainstorming session are [deferred](direction.md#deferred) until the environment work is complete.
 
 Integrated verification:
 

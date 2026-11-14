@@ -340,6 +340,13 @@ After that:
 4. Mining and the loop it feeds: mine, haul, refine, sell, build. Shipyards.
 5. Factions: strategic model first, then their ships and stations in occupied sectors.
 
+## Deferred
+
+- Mining and inventory wait until the environment work is complete.
+- Before implementation, hold a brainstorming session with the product owner covering mining/inventory together with ship turrets.
+- Ice currently exists only as a generated resource; there is no extraction, cargo inventory or mining yield.
+- Gas-stress performance optimization is deferred to a later pass; retain same-build measurements for that work.
+
 ## Open
 
 - **Shield room for many separate non-box parts.** A separate part that is not a box (a wedge, an L) is sampled
