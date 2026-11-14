@@ -251,6 +251,87 @@ public sealed class WorldLibrary
         }
     }
 
+    /// <summary>
+    /// Deletes worlds of the library: each one's save, its identity key and its recovery copies, for good. A world
+    /// that is open anywhere (this game's own session, one still being released, another process) is refused, a
+    /// folder that is a link or holds one is refused, and nothing outside the library's folders is touched. With
+    /// <paramref name="onlyIfIncompatibleWith"/> a world is deleted only if that compatibility cannot open it,
+    /// judged under the world's own lease. Every world gets a result; a failure for one does not stop the others.
+    /// A world's folder is first made not a world (see <see cref="WorldDeletion"/>), so a crash half way never
+    /// leaves one the library would list. Run it on a worker.
+    /// </summary>
+    /// <exception cref="ArgumentException">More than <see cref="MaxWorlds"/> worlds were asked for.</exception>
+    public DeleteReport Delete(IReadOnlyList<string> folderIds, SaveCompatibility? onlyIfIncompatibleWith = null)
+    {
+        ArgumentNullException.ThrowIfNull(folderIds);
+        if (folderIds.Count > MaxWorlds)
+            throw new ArgumentException($"At most {MaxWorlds} worlds are deleted at once.", nameof(folderIds));
+        var results = new List<DeleteResult>(folderIds.Count);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        lock (_gate)
+        {
+            var last = LastWorld();
+            foreach (var id in folderIds)
+            {
+                if (!seen.Add(id))
+                    continue;
+                var result = WorldDeletion.Run(Root, id, onlyIfIncompatibleWith);
+                results.Add(result);
+
+                // The world played last is gone: Continue says so rather than trying a folder that is not there.
+                if (result.Outcome is DeleteOutcome.Deleted or DeleteOutcome.Partial && id == last)
+                    ForgetLastWorld();
+            }
+        }
+
+        return new DeleteReport(results);
+    }
+
+    /// <summary>
+    /// Finishes the deletions a crash or a failure interrupted: a folder that holds the tombstone of
+    /// <see cref="WorldDeletion"/> and no database. Never touches a folder that still has a world in it.
+    /// Returns how many it finished. Run it on a worker, before reading the list.
+    /// </summary>
+    public int RecoverDeletions()
+    {
+        lock (_gate)
+        {
+            if (!Directory.Exists(Root))
+                return 0;
+            var finished = 0;
+            try
+            {
+                foreach (var folder in Directory.EnumerateDirectories(Root))
+                {
+                    var id = Path.GetFileName(folder);
+                    if (!IsFolderId(id) || File.Exists(Path.Combine(folder, SqliteWorldStore.DatabaseFile)) || !File.Exists(Path.Combine(folder, WorldDeletion.Tombstone)))
+                        continue;
+                    var result = WorldDeletion.Run(Root, id, null);
+                    if (result.Outcome == DeleteOutcome.Deleted)
+                        finished++;
+                }
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                Logs.App.Warning($"Could not look for interrupted deletions: {e.Message}");
+            }
+
+            return finished;
+        }
+    }
+
+    private void ForgetLastWorld()
+    {
+        try
+        {
+            File.Delete(Path.Combine(Root, LastWorldFile));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Logs.App.Warning($"Could not forget the last world: {e.Message}");
+        }
+    }
+
     /// <summary>Takes the library's gate, giving up when <paramref name="cancel"/> is cancelled: a list being read never traps an open that is no longer wanted.</summary>
     private void EnterGate(CancellationToken cancel)
     {

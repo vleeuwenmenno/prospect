@@ -270,6 +270,34 @@ CloseStatus Close { get; }  // any thread, takes no memory
 - A close that is not `Committed`, or is degraded, is shown to the player before anything else happens.
 - Autosave is a client setting, 15 s to 5 min, default 30 s, read when a world is opened.
 
+## Deleting worlds
+
+Decided. The Load World screen deletes one world, or every incompatible one, after a confirmation.
+
+- The confirmation names each world (the first five, then a count) and says it is permanent. It lists the save,
+  the recovery copies and the identity key (`world.key`). It starts on Cancel.
+- "Incompatible" is what the list shows as OTHER VERSION. A damaged or unreadable world is never swept up; it is
+  deleted only by name, from its own row. A world in use has no Delete.
+- The sweep deletes the worlds the player was shown, by folder id, and checks each again under its lease: one
+  this build can open since is kept and reported.
+- `WorldLibrary.Delete(ids, onlyIfIncompatibleWith)` runs on a worker (`WorldShelf.Delete`) and returns one
+  `DeleteResult` per world: `Deleted`, `Busy`, `Missing`, `Kept`, `Unsafe`, `Failed` or `Partial`. A failure for
+  one world never stops the rest and is never hidden: the screen names each world that stayed and why.
+- Order, per world: (1) the lease, so a world open here or in another process is refused as `Busy`;
+  (2) `world.db` is renamed to `world.db.deleting` and the folder synced: from then on the folder is no world to a
+  list, an open or a copy; (3) log, key, recovery copies, then the tombstone; (4) lease released, then
+  `world.lock` and the folder.
+- A crash or a failure after (2) leaves a tombstone and no `world.db`. `WorldLibrary.RecoverDeletions` finishes
+  it, before every list is read. It never touches a folder that still has a `world.db`.
+- Paths: only a checked folder id directly under the library. A world folder that is a link, or holds a link
+  (directly or in `backups/`), is `Unsafe`: refused whole, nothing followed, nothing touched. A folder with no
+  `world.db` is not a world and is left alone. Files the game did not make are left, and the result says so.
+- The world played last is forgotten (`last-world` removed) when it is deleted.
+- Verified on Linux (`WorldDeletionTests`). Not run: the rename and delete semantics on macOS and Windows,
+  power loss, and a network share.
+
+Open: moving deleted worlds to a trash for undo; deleting by age.
+
 ## Open
 
 - Player-facing local claim UI and remote account admission.

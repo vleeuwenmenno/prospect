@@ -265,7 +265,8 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   and it saves itself every 30 seconds while it changes (Settings, Saved worlds: 15 s to 5 min) and when you
   leave or quit. There is no save button. The main menu's Continue opens the world played last; Load World lists
   every world with when it was saved, and keeps one that is in use, damaged or from another version in the list
-  with the reason. Leaving shows the save in progress; a save that failed or could not be confirmed is reported,
+  with the reason. Each world can be deleted from its row, and every OTHER VERSION world at once with Delete
+  Incompatible; both ask first and cannot be undone. Leaving shows the save in progress; a save that failed or could not be confirmed is reported,
   never passed over. Worlds live in the user data folder (`~/.local/share/prospect/worlds` on Linux,
   `%APPDATA%\prospect\worlds` on Windows); see [docs/save-foundation.md](docs/save-foundation.md).
 - **Dedicated saves.** `--world <folder>` loads an existing world; add `--create-world` to create if absent.

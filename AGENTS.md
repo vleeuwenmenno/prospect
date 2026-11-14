@@ -137,6 +137,11 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   connection, `Failed` only when it knows nothing changed, and nothing after a commit may report it undone.
   A new SQLite package means reading what changed and updating `AuditedSqliteVersion` and its source id
   together; `SqliteWorldStoreTests` runs on a real disk and in a second process, so keep it passing there.
+- **Deleting saved worlds:** only `WorldLibrary.Delete` (via `WorldShelf.Delete`, on a worker); the contract is
+  "Deleting worlds" in `docs/save-foundation.md`. Take the lease, rename `world.db` to its tombstone, then remove
+  files, so a crash never leaves a world the library lists; `RecoverDeletions` finishes the rest. Never follow a
+  link, never delete a folder without a `world.db` or tombstone, never delete a leased world. `WorldDeletionTests`
+  holds the rules; its `WorldDeletion.Trace` hook makes a step fail.
 - **Opening, leaving or replacing a session:** only through `SessionLifecycle` (`App.Lifecycle`): close with
   `BeginClose`, stop reading the session, dispose it on a worker, and open the next only after that, so a world's
   lease is free. Disk and network work for it runs on workers (`LocalWorlds`, `WorldShelf`), never on the frame.
@@ -229,6 +234,12 @@ The client opens a real window on the developer's desktop, and they are usually 
   camera evenly from one angle to the other over the captures: `--target --look 40 --look-to 130
   --capture-count 16 --capture-every 0.12` brings the target into view from the right edge, and `--look -90
   --look-to -30` sweeps it past straight behind.
+- Deleting worlds in a capture: `--start load --worlds <scratch copy> --capture ...` with `--open delete-world`
+  (confirmation for the first world listed), `--open delete-incompatible` (confirmation for every OTHER VERSION
+  world) or `--open deleted-incompatible` (confirms it, shows the list after). They need `--capture` and
+  `--worlds`, and really delete: always use a scratch copy. Make an incompatible world by playing one into the
+  scratch folder, then `sqlite3 <folder>/world.db "update world set generator_version=generator_version+1"`
+  (or `pragma user_version=999`); a damaged one is a folder whose `world.db` holds garbage.
 - Saved worlds in a capture: a capture or a benchmark saves nothing and lists no world unless given
   `--worlds <scratch folder>`; never point it at the player's own. With one, `--start local` creates a world there
   (named by `--host-name`), `--start continue` opens the one played last and `--start load` shows the list. A
