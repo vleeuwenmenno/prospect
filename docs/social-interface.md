@@ -48,15 +48,15 @@ the state, the card's selection, the windows' lifecycle and the route to the bri
 
 - `FloatingWindow` is one Dear ImGui window with a title bar it lays out: drag area, pin, close. The drag is
   the title item's active press; it is applied before `Begin`, so the frame's rectangle is where it is drawn.
-- Windows: navigator, Friends, Party, Players, Chat, card. The navigator is open exactly while the workspace is.
-- A window is clamped under the bar and inside the screen every frame. Place and pin last for the process.
+- Windows: navigator, Friends, Party, Players, Chat, card, and the player's own Charts, Inventory and Player ([windows](windows.md)). The navigator is open exactly while the workspace (interface mode) is.
+- A window is clamped under the bar and inside the screen every frame. Place, pin and open state are saved per client ([windows](windows.md)).
 - Pin keeps a window on screen when the workspace closes. Explicit close (X) unpins it too.
 - Out of a game the workspace is the Friends screen: navigator, Friends and the card. Party, Players and Chat
   need a game.
 
 ### Input and actions
 
-- Players (`Tab`/`P`), Social (`O`) and Chat (`Enter`) are actions in `content/input/bindings.json`. They are
+- Players (`P`), Social (`O`) and Chat (`Enter`) are actions in `content/input/bindings.json`. They are
   consumed before flight reads input. A focused text field keeps letter keys, Enter and Tab; F-keys and Escape
   still work, as with Controls.
 - What a window may take (`FloatingInput`): Full on a surface the player opened (the workspace, chat while
@@ -65,7 +65,7 @@ the state, the card's selection, the windows' lifecycle and the route to the bri
 - Pinned windows are not surfaces: `WorldInputEnabled` ignores them and they never show the cursor.
 - A pinned window shows no text field. Closing the workspace, or ending chat typing outside it, calls
   `FloatingWindow.ReleaseKeyboard`, so nothing it left focused holds keys into the next frame.
-- Escape: chat typing first, then the focused window if it is not pinned, then the workspace.
+- Escape: chat typing first, then interface mode (the workspace). It no longer closes the focused window one at a time; X does.
 - A refusal is noticed by `SocialState.RefusalCount` (client-only, not on the wire), so the same reason twice
   is still new. Rate-limited requests get no reply and so show nothing.
 - Invite is offered to connected players who are not in your party and not your inviter, while you are solo or

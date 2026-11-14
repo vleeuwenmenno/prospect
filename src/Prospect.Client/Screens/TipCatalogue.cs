@@ -44,8 +44,11 @@ internal static class TipTriggers
     /// </summary>
     public const string DroneEditHint = "droneEditHint";
 
+    /// <summary>Interface mode began: the pointer is free and every window that is not pinned appeared. Withdrawn when it ends.</summary>
+    public const string InterfaceOpened = "interfaceOpened";
+
     /// <summary>Every trigger, for validation.</summary>
-    public static readonly string[] All = [MapOpened, CommandViewOpened, EditorOpened, ScanAvailable, UnchartedSector, ShieldOffline, EnergyLow, DroneEditHint];
+    public static readonly string[] All = [MapOpened, CommandViewOpened, EditorOpened, ScanAvailable, UnchartedSector, ShieldOffline, EnergyLow, DroneEditHint, InterfaceOpened];
 }
 
 /// <summary>What a tip is placed against: the screen, a panel the editor or flight view draws, or a point.</summary>

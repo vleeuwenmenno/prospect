@@ -97,6 +97,13 @@
       "title": "Edit the drone",
       "text": "You can also edit the drone: press Ctrl+{ToggleEditor}.",
       "anchor": { "region": "newShipDialog", "side": "bottom", "offset": [0, 0] }
+    },
+    {
+      "id": "interface-mode",
+      "trigger": "interfaceOpened",
+      "title": "Interface mode",
+      "text": "{ToggleInterface} shows every window and frees the pointer; {ToggleInterface} or {Pause} leaves. Pin a window with the pin in its title bar to keep it on screen in flight: hold {ReleasePointer} to click it.",
+      "anchor": { "region": "screen", "side": "bottom", "offset": [0, -24] }
     }
   ]
 }

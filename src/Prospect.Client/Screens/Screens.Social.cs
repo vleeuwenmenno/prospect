@@ -12,7 +12,10 @@ using Prospect.Game.World;
 
 namespace Prospect.Client.Screens;
 
-/// <summary>The windows of the social workspace.</summary>
+/// <summary>
+/// The windows of the interface: the social ones (a navigator, Friends, Party, Players, Chat, a detail card) and the
+/// player's own (Charts, Inventory, Player). All are drawn, pinned and placed the same way.
+/// </summary>
 internal enum SocialPane : byte
 {
     /// <summary>The narrow list that opens the others; open exactly while the workspace is.</summary>
@@ -24,11 +27,23 @@ internal enum SocialPane : byte
 
     /// <summary>One account or one player, chosen in Friends, Players or Party.</summary>
     Detail,
+
+    /// <summary>The charts the player owns.</summary>
+    Charts,
+
+    /// <summary>What the player carries. Coming soon: it arrives with mining.</summary>
+    Inventory,
+
+    /// <summary>Who the player is in the game. Coming soon.</summary>
+    Player,
 }
 
 /// <summary>
-/// The social interface: the workspace of movable windows (a navigator, Friends, Party, Players, Chat and a detail
-/// card), the party list at the top left and the recent chat lines. A window can be pinned, which keeps it on
+/// The interface windows and interface mode. Interface mode (Tab, or any window's key or top bar button) frees the
+/// pointer until it is left again with Tab or Escape and shows every window that is open and not pinned: the social
+/// ones (a navigator, Friends, Party, Players, Chat and a detail card) and the player's own (Charts, Inventory,
+/// Player). Pinned windows are shown the rest of the time too. The party list at the top left and the recent chat
+/// lines are part of the same interface. A window can be pinned, which keeps it on
 /// screen when the workspace closes and the player flies on; a pinned window then takes the pointer only while the
 /// pointer is out (release key, command view) and never keyboard navigation, so W and Space still fly the hull.
 /// Session state is read from <see cref="SessionSnapshot.Social"/> and every request goes through
@@ -46,10 +61,22 @@ internal sealed partial class ScreenHost
     /// <summary>Seconds a notice (a refusal, a failed send, a request sent) stays readable.</summary>
     private const float NoticeSeconds = 6f;
 
-    private const int PaneCount = 6;
+    private const int PaneCount = 9;
 
-    /// <summary>The workspace is open: the navigator and every open window, with the pointer shown.</summary>
-    private bool _socialOpen;
+    /// <summary>
+    /// Interface mode: the navigator and every open window are shown, the pointer is free and flight input is off,
+    /// until Tab or Escape ends it.
+    /// </summary>
+    private readonly InterfaceMode _mode = new();
+
+    private bool InterfaceModeOn
+    {
+        get => _mode.Active;
+        set => _mode.Active = value;
+    }
+
+    // Where the windows were left, and the saved state they start from; restored on the first frame that knows the scale.
+    private WindowLayout? _windowLayout;
 
     /// <summary>Chat has the keyboard: opened with its key, it closes again after a line is sent.</summary>
     private bool _chatOpen;
@@ -83,15 +110,16 @@ internal sealed partial class ScreenHost
     /// <summary>True when a social shortcut was consumed this frame, so the world must not read it.</summary>
     public bool SocialHandled => _socialHandled;
 
-    private bool SocialSurfaceOpen => _socialOpen || _chatOpen;
+    private bool SocialSurfaceOpen => InterfaceModeOn || _chatOpen;
 
     /// <summary>The workspace is drawn: open in a game, or the Friends screen out of one.</summary>
-    private bool Workspace => _socialOpen || _screen == Screen.Account;
+    private bool Workspace => InterfaceModeOn || _screen == Screen.Account;
 
     private FloatingWindow Pane(SocialPane pane) => _panes[pane];
 
     private void InitializeSocial()
     {
+        _windowLayout = new WindowLayout(_app.Settings, _panes, _app.Settings.Save);
         _chatInput = new ImInputString(_app.Content.Social.ChatBytes + 1);
         _playersKey = KeyName(InputAction.TogglePlayers);
         _socialKey = KeyName(InputAction.ToggleSocial);
@@ -108,6 +136,25 @@ internal sealed partial class ScreenHost
     /// <summary>Opens the workspace on the Players window, or with <paramref name="party"/> the Party window.</summary>
     public void OpenSocial(bool party) => OpenPane(party ? SocialPane.Party : SocialPane.Players);
 
+    /// <summary>Enters interface mode as Tab does. Used by <c>--open interface</c>, for captures.</summary>
+    public void OpenInterfaceMode() => OpenInterface();
+
+    /// <summary>
+    /// Opens the Charts window in interface mode, or with <paramref name="pinned"/> pins it and leaves interface mode,
+    /// so a capture shows a pinned window over the flight view. Used by <c>--open charts</c> and <c>pinned-charts</c>.
+    /// </summary>
+    public void OpenChartsWindow(bool pinned)
+    {
+        OpenPane(SocialPane.Charts);
+        if (!pinned)
+            return;
+        Pane(SocialPane.Charts).Pinned = true;
+        CloseWorkspace();
+    }
+
+    /// <summary>Opens the Inventory window in interface mode. Used by <c>--open inventory</c>, for captures.</summary>
+    public void OpenInventoryWindow() => OpenPane(SocialPane.Inventory);
+
     /// <summary>Opens the workspace on the Friends window.</summary>
     public void OpenFriends()
     {
@@ -118,7 +165,7 @@ internal sealed partial class ScreenHost
     /// <summary>Opens the workspace, with <paramref name="pane"/> open and in front.</summary>
     private void OpenPane(SocialPane pane)
     {
-        _socialOpen = true;
+        InterfaceModeOn = true;
         Pane(pane).Open = true;
         Raise(pane);
     }
@@ -126,7 +173,7 @@ internal sealed partial class ScreenHost
     /// <summary>Opens the workspace as the Social tab does: on what needs an answer, else as it was left.</summary>
     private void OpenWorkspace(SessionSnapshot? snapshot)
     {
-        _socialOpen = true;
+        InterfaceModeOn = true;
         if (snapshot is { Social.Invitation.Player: not 0 })
             OpenPane(SocialPane.Party);
         else if (_app.Accounts.View.Incoming.Length > 0)
@@ -134,6 +181,34 @@ internal sealed partial class ScreenHost
         else if (!Pane(SocialPane.Friends).Open && !Pane(SocialPane.Party).Open && !Pane(SocialPane.Players).Open && !Pane(SocialPane.Chat).Open && !Pane(SocialPane.Detail).Open)
             OpenPane(SocialPane.Friends);
         if (Pane(SocialPane.Friends).Open)
+            EnterAccount();
+    }
+
+    /// <summary>
+    /// Enters interface mode as Tab does: every open window that is not pinned appears, the pointer is free. What was
+    /// open stays open; the windows of the player's own are open until they close them.
+    /// </summary>
+    private void OpenInterface()
+    {
+        InterfaceModeOn = true;
+        if (Pane(SocialPane.Friends).Open)
+            EnterAccount();
+    }
+
+    /// <summary>
+    /// Opens a window and interface mode with it, in front: what a top bar button or a window's key does. When the
+    /// window is already the one in front the same call again leaves interface mode (a key toggles).
+    /// </summary>
+    private void OpenWindow(SocialPane pane, bool toggle)
+    {
+        if (toggle && InterfaceModeOn && Pane(pane).Open && _focusedPane == pane)
+        {
+            CloseWorkspace();
+            return;
+        }
+
+        OpenPane(pane);
+        if (pane == SocialPane.Friends)
             EnterAccount();
     }
 
@@ -167,10 +242,10 @@ internal sealed partial class ScreenHost
         var typing = _chatOpen;
         _chatOpen = false;
         _chatFocus = false;
-        if (!_socialOpen && !Pane(SocialPane.Chat).Pinned)
+        if (!InterfaceModeOn && !Pane(SocialPane.Chat).Pinned)
             Pane(SocialPane.Chat).Open = false;
         // Back to flight: a pinned chat left on screen must not keep keyboard focus into the next frame.
-        if (typing && !_socialOpen)
+        if (typing && !InterfaceModeOn)
             FloatingWindow.ReleaseKeyboard();
     }
 
@@ -180,7 +255,7 @@ internal sealed partial class ScreenHost
     /// </summary>
     private void CloseWorkspace()
     {
-        _socialOpen = false;
+        InterfaceModeOn = false;
         EndChatTyping();
         FloatingWindow.ReleaseKeyboard();
     }
@@ -206,8 +281,9 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
-    /// Escape in a game: chat typing first, then the focused window if it is not pinned, then the workspace.
-    /// Returns false when there was nothing social to close. Pinned windows are never closed by Escape.
+    /// Escape in a game: chat typing first, then interface mode, which hides every window that is not pinned and
+    /// gives the pointer back to flight. Windows stay open, so Tab brings them back as they were; pinned windows are
+    /// never touched by Escape. Returns false when there was nothing of the interface to leave.
     /// </summary>
     private bool SocialBack()
     {
@@ -217,12 +293,9 @@ internal sealed partial class ScreenHost
             return true;
         }
 
-        if (!_socialOpen)
+        if (!InterfaceModeOn)
             return false;
-        if (_panes.BackTarget(_focusedPane) is { } focused)
-            ClosePane(focused);
-        else
-            CloseWorkspace();
+        CloseWorkspace();
         return true;
     }
 
@@ -232,7 +305,7 @@ internal sealed partial class ScreenHost
     /// </summary>
     private void ResetSocial()
     {
-        _socialOpen = _chatOpen = _chatFocus = false;
+        InterfaceModeOn = _chatOpen = _chatFocus = false;
         _chatInput.Clear();
         _chatChannel = ChatChannel.Everyone;
         _chatSeenTick = long.MinValue;
@@ -257,7 +330,33 @@ internal sealed partial class ScreenHost
         var pointerOwned = SocialSurfaceOpen || _ui.PointerOverInterface;
         var actions = _app.Actions;
         var devices = _app.Devices;
-        if (actions.InterfaceShortcutPressed(devices, InputAction.TogglePlayers, typing, pointerOwned))
+        var wasOn = InterfaceModeOn;
+        if (_mode.HandleKey(actions, devices, typing, pointerOwned))
+        {
+            // The key flipped the latch; leaving also lets go of the keyboard, entering refreshes the account lists.
+            InterfaceModeOn = wasOn;
+            if (wasOn)
+                CloseWorkspace();
+            else
+                OpenInterface();
+            _socialHandled = true;
+        }
+        else if (actions.InterfaceShortcutPressed(devices, InputAction.ToggleCharts, typing, pointerOwned))
+        {
+            TogglePane(SocialPane.Charts);
+            _socialHandled = true;
+        }
+        else if (actions.InterfaceShortcutPressed(devices, InputAction.ToggleInventory, typing, pointerOwned))
+        {
+            TogglePane(SocialPane.Inventory);
+            _socialHandled = true;
+        }
+        else if (actions.InterfaceShortcutPressed(devices, InputAction.TogglePlayerInfo, typing, pointerOwned))
+        {
+            TogglePane(SocialPane.Player);
+            _socialHandled = true;
+        }
+        else if (actions.InterfaceShortcutPressed(devices, InputAction.TogglePlayers, typing, pointerOwned))
         {
             TogglePane(SocialPane.Players);
             _socialHandled = true;
@@ -276,14 +375,8 @@ internal sealed partial class ScreenHost
         }
     }
 
-    /// <summary>A window's key: opens the workspace on it, or closes the workspace when it is open there.</summary>
-    private void TogglePane(SocialPane pane)
-    {
-        if (_socialOpen && Pane(pane).Open && _focusedPane == pane)
-            CloseWorkspace();
-        else
-            OpenPane(pane);
-    }
+    /// <summary>A window's key: opens interface mode on it, or leaves interface mode when it is the window in front.</summary>
+    private void TogglePane(SocialPane pane) => OpenWindow(pane, true);
 
     /// <summary>Notices refusals that arrived since the last frame and keeps the chat channel valid.</summary>
     private void TrackSocial(SessionSnapshot snapshot)
@@ -368,6 +461,9 @@ internal sealed partial class ScreenHost
         SocialPane.Party => new float2(Kit.Px(400), Kit.Px(420)),
         SocialPane.Players => new float2(Kit.Px(440), Kit.Px(480)),
         SocialPane.Chat => new float2(Kit.Px(540), Kit.Px(340)),
+        SocialPane.Charts => new float2(Kit.Px(520), Kit.Px(580)),
+        SocialPane.Inventory => new float2(Kit.Px(300), Kit.Px(220)),
+        SocialPane.Player => new float2(Kit.Px(240), Kit.Px(190)),
         _ => new float2(Kit.Px(360), Kit.Px(420)),
     };
 
@@ -386,6 +482,9 @@ internal sealed partial class ScreenHost
             SocialPane.Players => new float2(beside + Kit.Px(Theme.Space6), top + Kit.Px(Theme.Space6)),
             SocialPane.Party => new float2(MathF.Round(display.X * 0.5f), display.Y - size.Y - left),
             SocialPane.Chat => new float2(left, display.Y - size.Y - left),
+            SocialPane.Charts => new float2(display.X - size.X - left, top),
+            SocialPane.Inventory => new float2(display.X - size.X - left, display.Y - size.Y - left),
+            SocialPane.Player => new float2(left, top + PaneSize(SocialPane.Navigator).Y + Kit.Px(Theme.Space4)),
             _ => new float2(display.X - size.X - left, top),
         };
     }
@@ -399,7 +498,7 @@ internal sealed partial class ScreenHost
     /// nothing while flight has the pointer.
     /// </summary>
     private FloatingInput PaneInput(SocialPane pane) =>
-        _screen != Screen.Session || _socialOpen || (pane == SocialPane.Chat && _chatOpen) ? FloatingInput.Full
+        _screen != Screen.Session || InterfaceModeOn || (pane == SocialPane.Chat && _chatOpen) ? FloatingInput.Full
         : _app.PointerCaptured ? FloatingInput.Passive : FloatingInput.Pointer;
 
     /// <summary>
@@ -408,6 +507,7 @@ internal sealed partial class ScreenHost
     /// </summary>
     private void CollectPaneRects()
     {
+        EnsureWindowLayout();
         _paneRectCount = 0;
         for (var i = 0; i < PaneCount; i++)
         {
@@ -423,12 +523,19 @@ internal sealed partial class ScreenHost
     /// </summary>
     private void DrawSocialWindows(SessionSnapshot? snapshot)
     {
+        EnsureWindowLayout();
         ScrubAccount();
         if (_detail.Scrub(_app.Accounts.View, _app.Session) || (!_detail.ShowsFriend && !_detail.ShowsPlayer))
             Pane(SocialPane.Detail).Open = false;
 
         if (snapshot is not null)
         {
+            if (PaneShown(SocialPane.Charts))
+                DrawChartsPane(snapshot);
+            if (PaneShown(SocialPane.Inventory))
+                DrawPlaceholderPane(SocialPane.Inventory, "##inventory"u8, "Inventory"u8, "Your cargo and stores will be listed here once there is mining."u8);
+            if (PaneShown(SocialPane.Player))
+                DrawPlaceholderPane(SocialPane.Player, "##playerinfo"u8, "Player"u8, "Who you are in the game. Nothing to show yet."u8);
             if (PaneShown(SocialPane.Chat))
                 DrawChatPane(snapshot);
             if (PaneShown(SocialPane.Party))
@@ -443,7 +550,20 @@ internal sealed partial class ScreenHost
             DrawDetailPane(snapshot);
         if (PaneShown(SocialPane.Navigator))
             DrawNavigator(snapshot);
+        // Written once the player lets go of a drag, so a window dragged across the screen is one save, not hundreds.
+        _windowLayout?.Track(Kit.Scale, ImGui.IsMouseDown(ImGuiMouseButton.Left));
     }
+
+    /// <summary>Applies the saved windows once, on the first frame that has a scale to unscale them by.</summary>
+    private void EnsureWindowLayout()
+    {
+        if (_windowLayoutRestored || _windowLayout is null)
+            return;
+        _windowLayoutRestored = true;
+        _windowLayout.Restore(Kit.Scale);
+    }
+
+    private bool _windowLayoutRestored;
 
     /// <summary>
     /// Begins a window with its frame and title bar, and a body under the title. False when the window was closed
@@ -1215,20 +1335,20 @@ internal sealed partial class ScreenHost
         if (ChannelButton("##everyone"u8, "EVERYONE"u8, _chatChannel == ChatChannel.Everyone, true))
         {
             _chatChannel = ChatChannel.Everyone;
-            _chatFocus = _chatOpen || _socialOpen;
+            _chatFocus = _chatOpen || InterfaceModeOn;
         }
 
         ImGui.SameLine(0, Kit.Px(Theme.Space2));
         if (ChannelButton("##party"u8, "PARTY"u8, _chatChannel == ChatChannel.Party, social.PartyCount > 0))
         {
             _chatChannel = ChatChannel.Party;
-            _chatFocus = _chatOpen || _socialOpen;
+            _chatFocus = _chatOpen || InterfaceModeOn;
         }
 
         ImGui.PopItemFlag();
         ImGui.SetCursorScreenPos(headerAt + new float2(0, Kit.Px(30)));
 
-        var typing = _chatOpen || _socialOpen;
+        var typing = _chatOpen || InterfaceModeOn;
         var lineHeight = Kit.Measure(_ui.Sans, Theme.FontSmall, "Ag"u8).Y;
         var inputHeight = typing ? Kit.Px(Theme.ControlHeight) + Kit.Px(Theme.Space1) : 0f;
         var logHeight = Math.Max(Kit.Px(40), ImGui.GetContentRegionAvail().Y - inputHeight - lineHeight - Kit.Px(Theme.Space2));

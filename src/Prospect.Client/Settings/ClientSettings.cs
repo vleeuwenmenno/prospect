@@ -52,6 +52,18 @@ internal sealed class ClientSettings
     public const float MaxTipShift = 16384f;
 
     /// <summary>
+    /// The interface windows (Social's, Charts, Inventory, Player) by name: whether each is open and pinned, and
+    /// where the player left it, in unscaled pixels so it follows a change of interface scale. Kept per client.
+    /// A window with no entry takes its first place and defaults.
+    /// </summary>
+    public Dictionary<string, WindowState> Windows { get; set; } = [];
+
+    /// <summary>The most windows kept, the longest name and the largest corner: a hand-edited file cannot grow the list or throw a window off screen for good.</summary>
+    public const int MaxWindows = 16;
+    public const int MaxWindowNameLength = 24;
+    public const float MaxWindowCoordinate = 16384f;
+
+    /// <summary>
     /// The controls the player changed from the shipped bindings, kept per client: an action by its name
     /// (<c>Boost</c>), the keys of an axis as <c>Strafe.Negative</c> and <c>Strafe.Positive</c>. Each value is a list of
     /// controls written as in <c>content/input/bindings.json</c> (<c>Key:Space</c>, <c>Mouse:Right</c>,
@@ -147,6 +159,25 @@ internal sealed class ClientSettings
 
         TipPositions = positions;
 
+        Windows ??= [];
+        var windows = new Dictionary<string, WindowState>(Math.Min(Windows.Count, MaxWindows));
+        foreach (var (name, state) in Windows)
+        {
+            if (state is null || string.IsNullOrWhiteSpace(name) || name.Length > MaxWindowNameLength || windows.Count >= MaxWindows)
+                continue;
+            var placed = state.Placed && float.IsFinite(state.X) && float.IsFinite(state.Y);
+            windows[name] = new WindowState
+            {
+                Open = state.Open,
+                Pinned = state.Pinned,
+                Placed = placed,
+                X = placed ? Math.Clamp(state.X, -MaxWindowCoordinate, MaxWindowCoordinate) : 0f,
+                Y = placed ? Math.Clamp(state.Y, -MaxWindowCoordinate, MaxWindowCoordinate) : 0f,
+            };
+        }
+
+        Windows = windows;
+
         ControlOverrides ??= [];
         var overrides = new Dictionary<string, List<string>>(Math.Min(ControlOverrides.Count, MaxControlOverrides));
         foreach (var (name, values) in ControlOverrides)
@@ -167,6 +198,18 @@ internal sealed class ClientSettings
 /// <summary>A saved shift of a tip panel from where its anchor puts it, in unscaled pixels.</summary>
 internal sealed class TipOffset
 {
+    public float X { get; set; }
+    public float Y { get; set; }
+}
+
+/// <summary>What the client keeps of one interface window.</summary>
+internal sealed class WindowState
+{
+    public bool Open { get; set; }
+    public bool Pinned { get; set; }
+
+    /// <summary>True when the player has put the window somewhere: <see cref="X"/> and <see cref="Y"/> are its top left corner, unscaled.</summary>
+    public bool Placed { get; set; }
     public float X { get; set; }
     public float Y { get; set; }
 }

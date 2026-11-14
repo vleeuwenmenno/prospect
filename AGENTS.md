@@ -14,6 +14,7 @@ to work.
 - `docs/hosting.md`: visibility, hosting a local game, the password handshake, the game's side of the listing server.
 - `docs/releasing.md`: release tags, the workflow, the container images and how to run them.
 - `docs/save-foundation.md`: saved worlds: the snapshot, the store contract, limits, the world clock, closing.
+- `docs/windows.md`: interface mode (`Tab`), the windows and their pins, the Charts window.
 - `docs/controls.md`: the Controls screens, tabs, search, remapping, clashes and their limits.
 - `docs/world-generation.md`: fields and clouds in world space: anchors, which sector takes a rock, the gas query.
 - An item under "Open" is not decided. Ask; do not guess and build.
@@ -223,6 +224,14 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   map: `BlockMapForTip`, `Claim`). Escape goes to `HandleTipShortcut` first; every other Escape reads
   `BackPressed()`, which stays quiet on that press, and the editor's shortcut skips the frame. A scripted run shows
   no tips unless given `--tips-sample`. `TipTests` and the tip tests in `FrameOrderTests` hold the rules.
+- **Interface mode and the windows:** `InterfaceMode` is the latch and its key; `ScreenHost` treats it as the old
+  social workspace (a surface: pointer shown, `WorldInputEnabled` false). Every window is a `SocialPane` drawn
+  through `BeginPane`, pinned and placed by `FloatingWindow`, kept in `SocialPanes` and saved by `WindowLayout`
+  (`ClientSettings.Windows`, unscaled). A new window: add a `SocialPane`, its name in `SocialPanes.NameOf`, its
+  size and fallback place, a top bar tab, an action in `controls.json`/`bindings.json`. The Charts list is
+  `ChartCatalogue` (font-free, allocation-free); its jump goes through `ChartActions` and `JumpPlan`, never a
+  second range check. Rules in `docs/windows.md`; `InterfaceWindowTests` and the interface tests in
+  `FrameOrderTests` hold them.
 - **A new action or key:** add it to `content/input/bindings.json` and to `content/input/controls.json` (tab, label,
   scope; a fixed mouse or chord row goes there too). Loading refuses an action the catalogue lacks. Read it through
   `ActionMap` only; never cache a key name without rebuilding it on `ActionMap.Changed`. Anything that reads input

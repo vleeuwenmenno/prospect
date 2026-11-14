@@ -311,7 +311,7 @@ public sealed class SocialInterfaceTests
     }
 
     [Fact]
-    public void TheNavigatorAndEscapeCloseTheWorkspaceButNeverAPinnedWindow()
+    public void TheNavigatorClosesInterfaceModeButNeverAPinnedWindow()
     {
         var panes = new SocialPanes();
         var detail = new SocialDetail();
@@ -319,11 +319,6 @@ public sealed class SocialInterfaceTests
         var party = panes[SocialPane.Party];
         friends.Open = friends.Pinned = true;
         party.Open = true;
-
-        // Escape: the focused window when it is not pinned, else the workspace.
-        Assert.Equal(SocialPane.Party, panes.BackTarget(SocialPane.Party));
-        Assert.Null(panes.BackTarget(SocialPane.Friends));
-        Assert.Null(panes.BackTarget(SocialPane.Navigator));
 
         // The navigator's close: in a game it closes the workspace, on the Friends screen it leaves it. Neither
         // touches a window: the pinned one stays on screen in flight, the unpinned one waits for the workspace.

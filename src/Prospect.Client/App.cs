@@ -141,6 +141,9 @@ internal sealed class AppOptions
 
     /// <summary>The sector a local game starts in; for scripted screenshots and benchmarks of a particular sector.</summary>
     public SectorCoord SpawnSector { get; set; }
+
+    /// <summary>For captures: chart every sector this near the start sector (<c>--charted</c>); 0 charts none.</summary>
+    public int ChartedRadius { get; set; }
     /// <summary>The sector whose centre the scripted own jumps (<c>--open jump*</c>) aim at; offset (6, 0, -4) from the current sector when unset.</summary>
     public SectorCoord? JumpTo { get; set; }
 
@@ -547,6 +550,7 @@ internal sealed class App : IDisposable
                 GalaxySeed = _options.RtsSeed ?? new ServerConfig().GalaxySeed,
                 VisualBenchmark = _options.VisualBenchmark,
                 SpawnSector = spawn,
+                ChartedRadius = _options.ChartedRadius,
                 Visibility = hosting.Visibility,
                 Password = hosted && hosting.Password.Length > 0 ? hosting.Password : null,
                 Port = hosting.Port,
@@ -1116,6 +1120,14 @@ internal sealed class App : IDisposable
                 _screens.OpenSessionMenu();
             else if (view == "leave")
                 LeaveSession();
+            else if (view == "interface")
+                _screens.OpenInterfaceMode();
+            else if (view == "charts")
+                _screens.OpenChartsWindow(false);
+            else if (view == "pinned-charts")
+                _screens.OpenChartsWindow(true);
+            else if (view == "inventory")
+                _screens.OpenInventoryWindow();
             else if (view == "players")
                 _screens.OpenSocial(false);
             else if (view == "social")
@@ -1278,7 +1290,7 @@ internal sealed class App : IDisposable
             var due = _options.CaptureAfter + _capturesTaken * _options.CaptureEvery;
             if (_capturesTaken < count && rtsReady && _sinceSplash >= due && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
             {
-                ShowPerformance |= Session is not null && _options.OpenView is not ("controls" or "players" or "social" or "friends" or "chat" or "hud");
+                ShowPerformance |= Session is not null && _options.OpenView is not ("controls" or "players" or "social" or "friends" or "chat" or "hud" or "interface" or "charts" or "pinned-charts" or "inventory");
                 var file = Path.GetFullPath(path);
                 if (count > 1)
                 {

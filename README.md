@@ -32,16 +32,30 @@ brings up the "edit the drone with Ctrl+B" tip beside it, unless you hid that ti
 
 Chat, the player roster and parties work end to end: the server decides, the client shows them.
 
-- **Navigation bar** along the top. In a game: Play (pilot view), Fleet (command view), Map, Social and
-  Settings. Out of a game: Play (main menu), Social (Friends) and Settings. At the right, your Discord display
-  name; signed out, Sign in with Discord. An amber dot on Social means a friend request or a party invitation is
-  waiting. No tab starts or leaves a game. In the pilot view hold `Shift` to click it.
-- **Social workspace** (Social, `Tab`/`P`, `O`): a navigator and separate windows for Friends, Party, Players,
-  Chat and a card for one account or player. Drag a window by its title bar, close it with its X. Windows keep
-  their place for as long as the game runs and stay on screen when the window or scale changes.
-- **Pinned windows** stay over the view after Social closes. In flight they take nothing: W, Space and the mouse
-  still fly. Hold `Shift` to drag or click one. `Esc` never closes a pinned window; its X does.
-- **Players** (`Tab` or `P`): everyone on this server and who left this session, with Invite and a pending
+- **Navigation bar** along the top. In a game: Fleet (command view; press it again for the pilot view), Map,
+  Charts, Inventory, Player, Social and Settings. Out of a game: Play (main menu), Social (Friends) and
+  Settings. At the right, your Discord display name; signed out, Sign in with Discord. An amber dot on Social
+  means a friend request or a party invitation is waiting. No tab starts or leaves a game. Charts, Inventory,
+  Player and Social open their window in interface mode.
+- **Interface mode** (`Tab`): the pointer is freed and stays free, and every window that is open and not
+  pinned appears. `Tab` or `Esc` ends it: unpinned windows hide, the pointer is captured again. While it is on,
+  flight keys are off (as with the old social workspace) and a click never reaches the world. Hold `Shift`
+  instead to click a pinned window and keep flying.
+- **Windows**: Social (a navigator and separate windows for Friends, Party, Players, Chat and a card for one
+  account or player), Charts, Inventory and Player. Drag a window by its title bar, close it with its X; its
+  pin keeps it on screen outside interface mode. Which windows are open and pinned, and where they are, are
+  saved per client (`settings.json`, `Windows`) and kept on screen when the window or scale changes.
+- **Pinned windows** stay over the view after interface mode ends. In flight they take nothing: W, Space and
+  the mouse still fly. Hold `Shift` to drag or click one. `Esc` never closes a pinned window; its X does.
+- **Charts** (`G`): every chart you own, with its name, coordinates and layer, distance, star, fields, gas
+  (normal, cold or lightning) and how long ago it was surveyed. It is your knowledge: no ship or station holds it.
+  Sort by nearest, newest or name (the same button turns it round), filter by name. *Show on map* opens the
+  galaxy map centred on the sector with its card pinned; *Plot jump* plots a course for the ship you fly (or,
+  with ships selected, orders them) through the same plan the course menus use. The title shows how many of the
+  limit you hold.
+- **Inventory** (`U`) and **Player** (`L`) are placeholders: a "Coming soon" window each. Inventory arrives
+  with mining; Player later.
+- **Players** (`P`): everyone on this server and who left this session, with Invite and a pending
   invitation's Accept and Decline. These are session names, not accounts. **Party** (`O`): your party, Remove
   for the leader, Leave Party.
 - **Chat** (`Enter`): everyone or party channel, the last 64 lines, typed lines checked before sending.
@@ -54,7 +68,8 @@ Chat, the player roster and parties work end to end: the server decides, the cli
   card. The list belongs to your account and lasts across games and restarts. It needs the account service
   beside the listing server ([accounts](docs/accounts.md)); with `--listing off` there are no accounts.
 - **Not there:** whether a friend is online or in a game, avatars, direct messages, joining a friend, blocking,
-  voice or video calls, an inventory tab.
+  voice or video calls, an inventory (the Inventory window is a placeholder), player information (the Player
+  window is a placeholder).
 - **Sign-in for playing with others.** Join Server and hosting an unlisted or public game ask for a Discord
   sign-in first, on the same screen; a private game never does, offline included. Servers do not check the
   account yet: in a game, names and ids are still the session's, not verified accounts.
@@ -415,10 +430,12 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Target the ship under the reticle, or the asteroid if there is no ship | Middle mouse button | |
 | Take control of the target (same sector only), or leave in a drone | `T` | D-pad down |
 | Menu or back | `Esc` | `Start` |
-| Social: Players window | `Tab` or `P` | |
+| Interface mode: free pointer, show every window that is not pinned (`Tab` or `Esc` leaves) | `Tab` | |
+| Charts window / Inventory window (coming soon) / Player window (coming soon) | `G` / `U` / `L` | |
+| Social: Players window | `P` | |
 | Social: Party window | `O` | |
 | Chat: open, send, close | `Enter`; `Enter` sends, `Esc` closes | |
-| Close the focused social window, then Social | `Esc` (never a pinned window) | |
+| Leave interface mode (hides the windows that are not pinned) | `Esc` (never closes a pinned window) | |
 | Ship editor: ask to edit / cancel (in the drone: `B` is New ship, `Ctrl`+`B` edits the drone) | `B`; `Esc` also cancels | |
 | New ship dialog (drone only): build / close | `Enter` / `Esc` | |
 

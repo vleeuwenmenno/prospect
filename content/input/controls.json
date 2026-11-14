@@ -79,6 +79,12 @@
     { "tab": "Social", "label": "Quick buttons (players, party, chat)", "binding": "Click; in the pilot view hold {ReleasePointer} first" },
 
     { "tab": "Interface", "action": "Pause", "label": "Menu / back", "scope": ["All"], "required": true },
+    { "tab": "Interface", "action": "ToggleInterface", "label": "Interface mode: free pointer, show every window not pinned", "scope": ["All"] },
+    { "tab": "Interface", "action": "ToggleCharts", "label": "Charts window", "scope": ["All"] },
+    { "tab": "Interface", "action": "ToggleInventory", "label": "Inventory window (coming soon)", "scope": ["All"] },
+    { "tab": "Interface", "action": "TogglePlayerInfo", "label": "Player window (coming soon)", "scope": ["All"] },
+    { "tab": "Interface", "label": "Leave interface mode", "binding": "{ToggleInterface} again, or Escape; pinned windows stay on screen" },
+    { "tab": "Interface", "label": "Pin a window", "binding": "The pin in its title bar; a pinned window stays over the view after interface mode ends (hold {ReleasePointer} to click it)" },
     { "tab": "Interface", "action": "ToggleControls", "label": "Controls / help", "scope": ["All"] },
     { "tab": "Interface", "action": "ShipInfo", "label": "Ship data sheet", "scope": ["Pilot", "Command", "Map"] },
     { "tab": "Interface", "action": "TogglePerformance", "label": "Performance overlay", "scope": ["All"] },
