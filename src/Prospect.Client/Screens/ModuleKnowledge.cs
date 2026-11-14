@@ -25,7 +25,11 @@ internal sealed class GasLedger
     private readonly float[] _density = new float[MaxClouds];
     private readonly GasCloudKind[] _kind = new GasCloudKind[MaxClouds];
     private readonly int[] _order = new int[MaxClouds];
-    private readonly Dictionary<SectorCoord, GasCloudKind> _kinds = [];
+    // The kind of each cloud looked up so far, in fixed arrays: a Dictionary would grow, and so allocate, in the frame
+    // that first learns of a cloud. A lookup beyond the capacity is worked out again each time instead of kept.
+    private readonly SectorCoord[] _knownAnchor = new SectorCoord[MaxClouds];
+    private readonly GasCloudKind[] _knownKind = new GasCloudKind[MaxClouds];
+    private int _knownCount;
     private ulong _signature = ulong.MaxValue;
     private Galaxy? _galaxy;
     private int _count;
@@ -53,7 +57,7 @@ internal sealed class GasLedger
             return;
         _signature = signature;
         if (!ReferenceEquals(galaxy, _galaxy))
-            _kinds.Clear();
+            _knownCount = 0;
         _galaxy = galaxy;
         Rebuild(view);
     }
@@ -130,12 +134,18 @@ internal sealed class GasLedger
 
     private GasCloudKind KindOf(SectorCoord anchor)
     {
-        if (_kinds.TryGetValue(anchor, out var known))
-            return known;
+        for (var i = 0; i < _knownCount; i++)
+            if (_knownAnchor[i] == anchor)
+                return _knownKind[i];
         var kind = GasCloudKind.Normal;
         if (_galaxy?.GasClouds is { } gas && gas.TryGetCloud(_galaxy, anchor, out var cloud))
             kind = cloud.Kind;
-        _kinds[anchor] = kind;
+        if (_knownCount < MaxClouds)
+        {
+            _knownAnchor[_knownCount] = anchor;
+            _knownKind[_knownCount++] = kind;
+        }
+
         return kind;
     }
 

@@ -746,6 +746,7 @@ make run ARGS="--join 127.0.0.1"           # join it, after a Discord sign-in
 make run ARGS="--host unlisted"            # a local game others can join by address (sign-in first)
 make check                                 # formatting, warnings-as-errors build, tests
 make bench                                 # release benchmark, also while resizing; fails under 144 fps or on any per-frame allocation
+make bench-scans                           # the same with the gas scanner, asteroid scanner and locator each repeating; fails on any allocation
 make listing                               # the listing server on http://127.0.0.1:8080
 make listing-image                         # its container image (docker/listing.Dockerfile)
 make server-image                          # the dedicated server's container image (docker/server.Dockerfile)

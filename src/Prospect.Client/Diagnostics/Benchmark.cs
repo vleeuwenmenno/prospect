@@ -6,9 +6,15 @@ namespace Prospect.Client.Diagnostics;
 /// Measures steady-state frame pacing and allocation for a fixed time and judges them against the project's
 /// targets: at least 144 frames per second and no managed allocation in the frame loop.
 /// </summary>
-internal sealed class Benchmark(float seconds, int resizes)
+internal sealed class Benchmark(float seconds, int resizes, int moduleScansWanted = 0, bool fpsNotJudged = false)
 {
     private const float TargetFps = 144f;
+
+    /// <summary>
+    /// How many module scans a <c>--module-repeat</c> run must complete. Without the count a scan that never started
+    /// (no target, no cloud in reach, no module on the ship) would leave a run that measured nothing and passed.
+    /// </summary>
+    public const int ModuleScansRequired = 5;
 
     private readonly float[] _frameMs = new float[(int)(seconds * 20000)];
     private int _frames;
@@ -73,7 +79,7 @@ internal sealed class Benchmark(float seconds, int resizes)
     }
 
     /// <summary>Prints the result and returns whether both targets were met.</summary>
-    public bool Report(GraphicsDevice gpu, Swapchain swapchain)
+    public bool Report(GraphicsDevice gpu, Swapchain swapchain, int moduleScans = 0)
     {
         var processBytes = GC.GetTotalAllocatedBytes(precise: true) - _processBytesAtStart;
         var times = _frameMs.AsSpan(0, _frames);
@@ -82,9 +88,10 @@ internal sealed class Benchmark(float seconds, int resizes)
         var fps = 1000.0 / average;
         var p99 = times[Math.Min(_frames - 1, (int)(_frames * 0.99))];
         var worst = times[^1];
-        var fpsOk = fps >= TargetFps;
+        var fpsOk = fpsNotJudged || fps >= TargetFps;
         var allocOk = _threadBytes == 0 && processBytes == 0;
         var validationOk = GraphicsDevice.ValidationErrorCount == 0;
+        var scansOk = moduleScans >= moduleScansWanted;
         // The forced rebuilds always happen, so a run that asked for them and did not measure them has failed. The
         // resizes are the window system's to grant: how many it granted is reported, not required.
         var resizeOk = _resizesAsked == resizes && _rebuildsAsked == resizes && _swapchainRebuilds >= resizes && _targetRebuilds >= resizes;
@@ -95,7 +102,7 @@ internal sealed class Benchmark(float seconds, int resizes)
         Console.WriteLine($"  GPU                  {gpu.DeviceName}");
         Console.WriteLine($"  Resolution           {swapchain.Extent.Width}x{swapchain.Extent.Height}, {swapchain.PresentMode}");
         Console.WriteLine($"  Frames               {_frames} in {_elapsedMs / 1000.0:F1} s");
-        Console.WriteLine($"  Average              {fps:F0} fps ({average:F3} ms)   target >= {TargetFps:F0}   {(fpsOk ? "PASS" : "FAIL")}");
+        Console.WriteLine($"  Average              {fps:F0} fps ({average:F3} ms){(fpsNotJudged ? "   (not judged)" : $"   target >= {TargetFps:F0}   {(fpsOk ? "PASS" : "FAIL")}")}");
         Console.WriteLine($"  99th percentile      {p99:F3} ms ({1000.0 / p99:F0} fps)");
         Console.WriteLine($"  Worst frame          {worst:F3} ms");
         Console.WriteLine($"  Allocated, render    {_threadBytes} bytes in {_allocatingFrames} frames");
@@ -104,8 +111,10 @@ internal sealed class Benchmark(float seconds, int resizes)
         Console.WriteLine($"  Rebuilt, measured    swapchain {_swapchainRebuilds}, render targets {_targetRebuilds}{(resizes > 0 ? $"   target >= {resizes} each (forced)   {(resizeOk ? "PASS" : "FAIL")}" : "")}");
         if (resizes > 0)
             Console.WriteLine($"  Resized, measured    {resized} times for {resizes} asked{(resized < resizes ? "   (the window manager kept the window's size)" : "")}");
+        if (moduleScansWanted > 0)
+            Console.WriteLine($"  Module scans         {moduleScans} completed   target >= {moduleScansWanted}   {(scansOk ? "PASS" : "FAIL")}");
         Console.WriteLine($"  Validation           {(gpu.ValidationEnabled ? $"{GraphicsDevice.ValidationErrorCount} errors" : "layers not active")}   {(validationOk ? "PASS" : "FAIL")}");
         Console.WriteLine();
-        return fpsOk && allocOk && validationOk && resizeOk;
+        return fpsOk && allocOk && validationOk && resizeOk && scansOk;
     }
 }

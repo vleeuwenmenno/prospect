@@ -149,7 +149,7 @@ ifneq ($(wildcard $(VVL)/usr/lib/libVkLayer_khronos_validation.so),)
 endif
 
 .PHONY: help setup setup-system setup-dotnet restore doctor tools \
-        build run server listing listing-image test bench fmt check clean need-dotnet
+        build run server listing listing-image test bench bench-scans fmt check clean need-dotnet
 
 ##@ Getting started
 
@@ -313,6 +313,25 @@ bench: need-dotnet ## Release benchmark: frame rate and per-frame allocation, al
 	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 10 --size 1920x1080
 	$(call step,Benchmarking the same scene while the window is resized)
 	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 6 --bench-resize 6 --size 1920x1080
+
+# The shipped pod has no scanner, so this runs a copy of the Release build whose pod has all three, with short scans.
+# Each run asks again the moment its cooldown ends; it fails on a single managed allocation (render thread or any other)
+# and on fewer than five completed scans, so a scan that never started cannot pass. Gas needs a cloud near arrival, and
+# the inside of a cloud is slower than 144 fps at the window's size, so that run reports its frame rate without judging it.
+SCAN_BENCH := $(BIN)/scan-bench
+SCAN_BENCH_RUN = $(RUN_ENV) "$(DOTNET)" $(SCAN_BENCH)/prospect.dll --bench 20 --size 1920x1080 --module-repeat
+
+bench-scans: need-dotnet ## Release benchmark with each scan type repeating: fails on any managed allocation or under five completed scans
+	$(call step,Building the client (Release))
+	$(Q)"$(DOTNET)" build $(CLIENT) -c Release $(QUIET)
+	$(call step,Fitting a copy of the build with the three scanners)
+	$(Q)python3 tools/prepare_scan_bench.py $(BIN)/Prospect.Client/release $(SCAN_BENCH)
+	$(call step,Benchmarking the asteroid scanner)
+	$(Q)$(SCAN_BENCH_RUN) --module asteroid --target-rock
+	$(call step,Benchmarking the asteroid locator)
+	$(Q)$(SCAN_BENCH_RUN) --module locator
+	$(call step,Benchmarking the gas scanner)
+	$(Q)$(SCAN_BENCH_RUN) --module gas --sector 127,-1,-127 --bench-no-fps-target
 
 ##@ Quality
 

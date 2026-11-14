@@ -23,10 +23,6 @@ internal sealed class ModuleLook
     private ModuleClass[] _classes = [];
     private ModuleKind[] _kinds = [];
     private Dictionary<string, uint> _gasColors = [];
-    private uint[] _gasColorCache = [];
-    private IReadOnlyList<string>? _gasColorNames;
-    private int[] _classOf = [];
-    private Resource[]? _classOfResources;
 
     [JsonPropertyName("tiers")]
     public TierJson[] TierFile { get; init; } = [];
@@ -84,15 +80,9 @@ internal sealed class ModuleLook
     /// <summary>The colour a gas is drawn in, by its position in the composition's names; grey for one the file does not colour.</summary>
     public uint GasColor(IReadOnlyList<string> names, int index)
     {
-        if (!ReferenceEquals(names, _gasColorNames))
-        {
-            _gasColorCache = new uint[names.Count];
-            for (var i = 0; i < names.Count; i++)
-                _gasColorCache[i] = _gasColors.TryGetValue(names[i], out var rgb) ? rgb : 0x9AA3AE;
-            _gasColorNames = names;
-        }
-
-        return (uint)index < (uint)_gasColorCache.Length ? _gasColorCache[index] : 0x9AA3AE;
+        // Looked up each call: a cache per composition would be built by the first frame that draws a gas bar, which is
+        // a frame-loop allocation, and the dictionary holds a handful of entries.
+        return (uint)index < (uint)names.Count && _gasColors.TryGetValue(names[index], out var rgb) ? rgb : 0x9AA3AE;
     }
 
     /// <summary>
@@ -101,24 +91,18 @@ internal sealed class ModuleLook
     /// </summary>
     public int ClassOf(Galaxy galaxy, int resource)
     {
+        // Looked up each call rather than cached per galaxy: a cache would be built by the first frame that draws a
+        // mark, which is a frame-loop allocation, and a few string comparisons per mark cost nothing.
         var resources = galaxy.Resources;
-        if (!ReferenceEquals(resources, _classOfResources))
+        if ((uint)resource < (uint)resources.Length)
         {
-            _classOf = new int[resources.Length];
-            for (var r = 0; r < resources.Length; r++)
-            {
-                _classOf[r] = -1;
-                for (var c = 0; c < _classes.Length && _classOf[r] < 0; c++)
-                    foreach (var id in _classes[c].Resources)
-                        if (id == resources[r].Id)
-                            _classOf[r] = c;
-            }
-
-            _classOfResources = resources;
+            var wanted = resources[resource].Id;
+            for (var c = 0; c < _classes.Length; c++)
+                foreach (var id in _classes[c].Resources)
+                    if (id == wanted)
+                        return c;
         }
 
-        if ((uint)resource < (uint)_classOf.Length && _classOf[resource] >= 0)
-            return _classOf[resource];
         for (var c = 0; c < _classes.Length; c++)
             if (_classes[c].Bare)
                 return c;

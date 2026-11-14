@@ -70,6 +70,8 @@ internal static class Program
           --map-tilt, --map-hover With --open scan and --capture or --bench: tilt the map, or rest the pointer on its centre
           --target-rock           With --capture or --bench: target the asteroid nearest the ship once its sector has loaded
           --module <gas|asteroid|locator> With --capture or --bench: run that module as its key would (asteroid needs --target-rock); --module-at <sec> says when (default 1)
+          --bench-no-fps-target   With --bench: report the frame rate but do not fail below 144 fps; for a scene whose cost is not what the run measures (allocation still must be zero)
+          --module-repeat         With --bench and --module: run it again each time its cooldown ends, and fail the run if fewer than 5 scans completed
           --look <degrees>        Pilot view: hold the camera this many degrees to the right of the hull's nose
           --look-to <degrees>     With --look and --capture: turn the camera from --look to this angle, evenly
                                   over the time the captures take
@@ -377,6 +379,12 @@ internal static class Program
                 case "--module" when hasValue && args[i + 1] is "gas" or "asteroid" or "locator":
                     options.ModuleRun = args[++i];
                     break;
+                case "--bench-no-fps-target":
+                    options.BenchNoFpsTarget = true;
+                    break;
+                case "--module-repeat":
+                    options.ModuleRepeat = true;
+                    break;
                 case "--module-at" when hasValue && float.TryParse(args[i + 1], out var moduleAt) && moduleAt >= 0:
                     options.ModuleAt = moduleAt;
                     i++;
@@ -412,6 +420,12 @@ internal static class Program
 
         if ((options.TargetRock || options.ModuleRun is not null) && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--target-rock and --module work only with --capture or --bench.");
+
+        if (options.BenchNoFpsTarget && options.BenchSeconds <= 0)
+            return Fail("--bench-no-fps-target works only with --bench.");
+
+        if (options.ModuleRepeat && (options.ModuleRun is null || options.BenchSeconds <= 0))
+            return Fail("--module-repeat works only with --bench and --module.");
 
         if (options.GasFixture > 0 && (options.CapturePath is null || options.BenchSeconds > 0))
             return Fail("--gas-fixture works only with --capture, without --bench.");

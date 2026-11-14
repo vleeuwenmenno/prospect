@@ -60,6 +60,18 @@ public readonly record struct ModuleSpec(ModuleFamily Family, ModuleQuality Qual
 public readonly record struct ModuleEquipment(int Block, ModuleQuality Quality, int Mark, double Range,
     double Accuracy, double ScanSeconds, double PowerDraw, double CooldownSeconds)
 {
+    /// <summary>
+    /// Field-wise equality written by hand: the synthesized one goes through <c>EqualityComparer&lt;T&gt;.Default</c>,
+    /// whose first use for each field type allocates its comparer, and the server compares equipment on the tick.
+    /// </summary>
+    public bool Equals(ModuleEquipment other) =>
+        Block == other.Block && Quality == other.Quality && Mark == other.Mark && Range == other.Range
+        && Accuracy == other.Accuracy && ScanSeconds == other.ScanSeconds && PowerDraw == other.PowerDraw
+        && CooldownSeconds == other.CooldownSeconds;
+
+    /// <inheritdoc/>
+    public override int GetHashCode() => HashCode.Combine(Block, (int)Quality, Mark, Range, Accuracy, HashCode.Combine(ScanSeconds, PowerDraw, CooldownSeconds));
+
     /// <summary>Copies the selected block's evaluated specification without allocating.</summary>
     internal static ModuleEquipment Of(int block, in ModuleSpec spec) => block == 0 ? default :
         new(block, spec.Quality, spec.Mark, spec.Range, spec.Accuracy, spec.ScanSeconds, spec.PowerDraw, spec.CooldownSeconds);

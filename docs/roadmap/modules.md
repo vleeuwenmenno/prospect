@@ -63,6 +63,11 @@ Cross-platform execution of the new hash remains unverified.
 ## Server execution
 
 Generation runs on a dedicated worker with preallocated connection mailboxes, never on the tick thread.
+The worker's sector buffer is sized for the largest sector when the server is made (`Galaxy.Reserve`, about 2.4 MB),
+so the first scan takes no memory and neither does any later one. Only a sector whose candidate rocks exceed twice
+`maxPerSector` would grow the key buffer, once.
+`make bench-scans` runs each family repeating and fails on any managed allocation; `ModuleScanAllocationTests` covers the
+worker, the tick and the interface.
 Preparing takes no active energy; Scanning runs for the equipment duration rounded up to simulation ticks.
 Each scanning interval consumes active MW / 60 from stored energy after ordinary flight/shield spending.
 Active module spending is shared with client prediction through `ModuleScanRules.Spend`; `PowerFlow.Modules` contributes to total draw/net flow. The existing net energy readout includes it; a separate module tooltip row is UI follow-up.

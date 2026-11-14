@@ -36,6 +36,7 @@ Use the Makefile, not raw `dotnet` commands.
 | `make setup` | First run on a machine: system packages for the OS (Vulkan; MoltenVK on macOS), the .NET SDK into `~/.dotnet`, restore. `make doctor` checks the toolchain and GPU. |
 | `make check` | Formatting, warnings-as-errors build and all tests. Must pass before work is called done. Takes about two minutes. |
 | `make bench` | Release benchmark, twice: an empty scene, then the same scene while the window is resized (`--bench-resize`). Fails under 144 fps or on any managed allocation in the frame loop. Run it after touching anything that executes every frame or every tick. |
+| `make bench-scans` | Release benchmark with each module scan type repeating (gas, asteroid, locator), on a copy of the build whose pod carries the scanners (`tools/prepare_scan_bench.py`). Fails on any managed allocation on any thread, or under five completed scans. Run it after touching module scans, their server worker or the module interface. |
 | `make run ARGS="..."` | The client. `make server` is the dedicated server. |
 | `make listing` | The listing server on 127.0.0.1:8080. `make listing-image` builds its container. |
 | `make server-image` | The dedicated server's container image. |
@@ -260,7 +261,12 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   only when `ModuleRules.Gate` says Ready; the server still decides. The gas scanner's target is `GasTargeting`, which uses
   the server's own `GasCloudQuery.SamplePoint`. Tier colours, locator classes, gas colours and strip figures live in
   `content/visuals/modules.json` (`ModuleLook`). A new module family needs a `ModuleFamily` slot in `ModuleRules`, an action,
-  a chip, a tip and a `ModuleInterfaceTests` case. Check with `--open modules|gas|module-command`, `--target-rock`, `--module`
+  a chip, a tip and a `ModuleInterfaceTests` case. Scans take no memory, the first one included: the survey worker's sector
+  buffer is sized for the largest sector in its constructor (`Galaxy.Reserve`), the tick compares equipment by hand
+  (`ModuleEquipment.Equals`) and finds a connection by reference, and the interface keeps no cache that the first mark or
+  gas bar would build (`ModuleLook.ClassOf`, `GasColor`, `GasLedger`'s fixed kind table). Do not add a `Dictionary`, a
+  lazy table or an `EqualityComparer`-backed compare to these paths; `ModuleScanAllocationTests` and `make bench-scans`
+  hold it. Check with `--open modules|gas|module-command`, `--target-rock`, `--module`
   on a copy of the client build whose `command_pod.json` carries module blocks (no shipped ship has any).
 - **A new action or key:** add it to `content/input/bindings.json` and to `content/input/controls.json` (tab, label,
   scope; a fixed mouse or chord row goes there too). Loading refuses an action the catalogue lacks. Read it through
