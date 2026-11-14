@@ -153,11 +153,16 @@ public struct HullRecord
 {
     /// <summary>
     /// Id, owner, design, block revision and losses, position, velocity, orientation, spin, heat, flags, the jump's four figures,
-    /// energy, shield, hull and shield delay, the shield's newest hit and the age of its last change, and the
-    /// order's target.
+    /// energy, shield, hull and shield delay, the shield's newest hit and the age of its last change, what the
+    /// thrust parts did, and the order's target. A hull's tanks are not here: 255 records without health must fit
+    /// one snapshot, which leaves a record four bytes to spare, so the receiver's own hull has its tanks in the
+    /// <see cref="SnapshotHeader"/> and no other hull's are sent.
     /// </summary>
     public const int MaxHealth = GeometryAdmission.MaxBlocks;
-    public const int MaxWireSize = 1 + 26 + 3 + MaxHealth * 6 + 4 + 4 + 1 + 4 + 4 + 1 + 4 * MaxLosses + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 4 + 4 + 8 + 16 + 6 + 1 + 24;
+    public const int MaxWireSize = 1 + 26 + 3 + MaxHealth * 6 + 4 + 4 + 1 + 4 + 4 + 1 + 4 * MaxLosses + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 4 + 4 + 8 + 16 + 6 + 1 + ThrustBytes + 24;
+
+    /// <summary>A hull's <see cref="ThrustState"/>: three throttles and a byte of flags, in every record.</summary>
+    public const int ThrustBytes = 4;
 
     public uint Id;
     public uint Owner;
@@ -188,6 +193,12 @@ public struct HullRecord
     public struct HealthValues { private float _element0; }
     public HealthIds DamagedBlocks;
     public HealthValues RemainingHealth;
+
+
+    /// <summary>
+    /// The hull's motion and charge. <see cref="HullState.Fuel"/> does not travel in a record and reads empty:
+    /// the receiver's own hull takes its tanks from <see cref="SnapshotHeader.OwnFuel"/>.
+    /// </summary>
     public HullState State;
     /// <summary>Environment flags sampled at this record’s server tick.</summary>
     public HullEnvironment Environment;
@@ -238,6 +249,10 @@ public struct HullRecord
         writer.WriteByte((byte)State.ShieldHit.Z);
         writer.WriteByte(State.ShieldHit.AgeTicks);
         writer.WriteByte(State.ShieldChangeTicks);
+        writer.WriteByte((byte)State.Thrust.X);
+        writer.WriteByte((byte)State.Thrust.Y);
+        writer.WriteByte((byte)State.Thrust.Z);
+        writer.WriteByte(State.Thrust.Flags);
         if (Order.Kind != OrderKind.None)
             WorldWire.WritePosition(ref writer, Order.Target);
     }
@@ -308,6 +323,11 @@ public struct HullRecord
         record.State.ShieldHit.AgeTicks = reader.ReadByte();
         record.State.ShieldChangeTicks = reader.ReadByte();
         ok &= record.State.ShieldHit.AgeTicks <= ShieldHit.MaxAgeTicks && record.State.ShieldChangeTicks <= ShieldHit.MaxAgeTicks;
+        record.State.Thrust.X = (sbyte)reader.ReadByte();
+        record.State.Thrust.Y = (sbyte)reader.ReadByte();
+        record.State.Thrust.Z = (sbyte)reader.ReadByte();
+        record.State.Thrust.Flags = reader.ReadByte();
+        ok &= record.State.Thrust.IsValid;
         var kind = flags >> 1 & 3;
         ok &= kind <= (int)OrderKind.Jump;
         if (kind != 0 && ok)
@@ -326,7 +346,7 @@ public struct HullRecord
 /// </summary>
 public struct SnapshotHeader
 {
-    public const int MaxWireSize = 25;
+    public const int MaxWireSize = 25 + 12;
     public long ServerTick;
     public uint ControlEpoch;
     public ushort AppliedOrderId;
@@ -344,6 +364,12 @@ public struct SnapshotHeader
     /// </summary>
     public bool OwnIsDrone;
 
+    /// <summary>
+    /// What the tanks of <see cref="OwnHull"/> hold, in kilograms. The receiver predicts that hull with the
+    /// server's own flight code, which spends fuel, so it has the figures exactly; no other hull's are sent.
+    /// </summary>
+    public FuelTanks OwnFuel;
+
     public readonly void Write(ref NetWriter writer)
     {
         writer.WriteByte((byte)MessageId.Snapshot);
@@ -354,6 +380,9 @@ public struct SnapshotHeader
         writer.WriteUInt32(OwnHull);
         writer.WriteByte(HullCount);
         writer.WriteByte(OwnIsDrone ? (byte)1 : (byte)0);
+        writer.WriteSingle(OwnFuel.Nitrogen);
+        writer.WriteSingle(OwnFuel.Hydrazine);
+        writer.WriteSingle(OwnFuel.Bipropellant);
     }
 
     public static bool TryRead(ref NetReader reader, out SnapshotHeader header)
@@ -366,7 +395,9 @@ public struct SnapshotHeader
         header.HullCount = reader.ReadByte();
         var flags = reader.ReadByte();
         header.OwnIsDrone = flags == 1;
-        return reader.IsValid && flags <= 1 && header.ServerTick >= 0 && header.ServerTick <= long.MaxValue - 256;
+        header.OwnFuel = new FuelTanks { Nitrogen = reader.ReadSingle(), Hydrazine = reader.ReadSingle(), Bipropellant = reader.ReadSingle() };
+        return reader.IsValid && flags <= 1 && header.ServerTick >= 0 && header.ServerTick <= long.MaxValue - 256
+            && header.OwnFuel.IsFinite && header.OwnFuel.Nitrogen >= 0 && header.OwnFuel.Hydrazine >= 0 && header.OwnFuel.Bipropellant >= 0;
     }
 }
 

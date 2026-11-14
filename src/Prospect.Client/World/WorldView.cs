@@ -3300,6 +3300,46 @@ internal sealed class WorldView
         }
     }
 
+    private bool _captureGhost;
+    private bool _captureGhostTurned;
+
+    /// <summary>
+    /// For a capture, whose pointer is muted (<c>--open edit-turn</c>): from now on the editor holds the ghost of a
+    /// cold gas thruster on top of the ship's thruster that faces right, turned a quarter about y so that it faces
+    /// right too, as the pointer and <c>R</c> would leave it.
+    /// </summary>
+    internal void HoldGhostForCapture() => _captureGhost = true;
+
+    private void HoldCaptureGhost()
+    {
+        if (!Editor.CanEdit || Editor.Draft is not { } draft || Editor.Content is not { } content)
+            return;
+        var types = content.Blocks.Types;
+        for (var i = 0; !_captureGhostTurned && i < types.Count; i++)
+        {
+            if (types[i].Fuel != FuelKind.Nitrogen || EditorTuningCompact(types[i]))
+                continue;
+            Editor.ChoosePart(i);
+            break;
+        }
+
+        var boxes = draft.Boxes;
+        for (var i = 0; i < boxes.Length; i++)
+        {
+            if (boxes[i].Type.Thrust <= 0 || boxes[i].Facing != BlockFacing.Right)
+                continue;
+            Editor.SetHover(new DraftHit(i, 2, boxes[i].At, 0f));
+            break;
+        }
+
+        if (_captureGhostTurned || !Editor.HasGhost)
+            return;
+        Editor.RotatePart(1);
+        _captureGhostTurned = true;
+    }
+
+    private bool EditorTuningCompact(BlockType type) => _editTuning?.Compact(type) ?? false;
+
     /// <summary>
     /// The editor's mouse and keys. Right drag orbits and a right click stops placing (or drops what is carried);
     /// middle drag pans and a middle click selects (Shift adds or removes); the wheel zooms. A left click places,
@@ -3311,6 +3351,13 @@ internal sealed class WorldView
     private void UpdateEditorControls(bool inputEnabled, bool pointerOverUi, float dt)
     {
         _ghostMotion.Step(dt);
+        if (_captureGhost)
+        {
+            HoldCaptureGhost();
+            GlideEditorCamera(dt);
+            return;
+        }
+
         if (!inputEnabled)
         {
             _editLeftDown = _editRightDown = _editMiddleDown = false;
@@ -3653,7 +3700,7 @@ internal sealed class WorldView
     {
         var moved = _devices.MousePosition - _sizeStart;
         var cells = (moved.X * _sizeCell.X + moved.Y * _sizeCell.Y) / (_sizeCell.X * _sizeCell.X + _sizeCell.Y * _sizeCell.Y);
-        var limit = Editor.Content!.Blocks.Limits.MaxBoxSide;
+        var limit = Editor.PartMaxSide;
         var length = _sizeBase + cells;
         // Past a limit the movement is dropped, so turning back answers at once.
         if (length > limit)

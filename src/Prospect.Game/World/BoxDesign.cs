@@ -6,8 +6,11 @@ namespace Prospect.Game.World;
 /// <summary>Whole grid coordinates or extents. The position is the centre of the minimum occupied cell.</summary>
 public readonly record struct GridSize(int X, int Y, int Z);
 
-/// <summary>A whole block; its index in the design is its permanent identity.</summary>
-public readonly record struct DesignBox(GridSize At, GridSize Size, BlockType Type, BlockShape Shape = BlockShape.Box);
+/// <summary>
+/// A whole block; its index in the design is its permanent identity. <paramref name="Facing"/> is the way it faces:
+/// a thrust part pushes the hull the opposite way, and for any other block it only says how the block sits.
+/// </summary>
+public readonly record struct DesignBox(GridSize At, GridSize Size, BlockType Type, BlockShape Shape = BlockShape.Box, BlockFacing Facing = BlockFacing.Back);
 
 /// <summary>Content-owned bounds on design complexity and dimensions.</summary>
 public sealed record DesignLimits(int MaxBoxSide, int MaxDesignSide, int MaxBlocks)
@@ -54,7 +57,7 @@ public sealed class BoxDesign
     public Vector3 Color { get; }
     /// <summary>Original centre in grid coordinates, retained after damage.</summary>
     public Double3 Center { get; }
-    internal static readonly string[] StatNames = ["mass", "hull", "thrust", "torque", "powerOutput", "powerDraw", "energyStorage", "shield", "shieldRecharge", "cargo", "crew", "ftlPower"];
+    internal static readonly string[] StatNames = ["mass", "hull", "thrust", "torque", "powerOutput", "powerDraw", "energyStorage", "shield", "shieldRecharge", "cargo", "crew", "ftlPower", "fuelBurn", "fuelCapacity"];
 
     /// <summary>
     /// Scales a numeric stat; material multiplication can be applied after this result. The power is taken with
@@ -125,7 +128,13 @@ public sealed class BoxDesign
         return new System.Collections.ObjectModel.ReadOnlyDictionary<string, double>(result);
     }
 
-    /// <summary>Loads legacy unit cells, version 2 boxes or version 3 shapes, with source-labelled validation.</summary>
+    /// <summary>The version <see cref="Write"/> writes: 2 added sizes, 3 shapes and 4 facings.</summary>
+    public const int FormatVersion = 4;
+
+    /// <summary>
+    /// Loads legacy unit cells, version 2 boxes, version 3 shapes or version 4 facings, with source-labelled
+    /// validation. A block of an older version, or one that names no facing, faces <see cref="BlockFacing.Back"/>.
+    /// </summary>
     public static BoxDesign Load(string path, BlockCatalog catalog)
     {
         try
@@ -142,7 +151,7 @@ public sealed class BoxDesign
         try
         {
             var version = root.TryGetProperty("version"u8, out var v) ? v.GetInt32() : 1;
-            if (version is not (1 or 2 or 3)) throw new InvalidDataException($"{source}: unsupported design version {version}");
+            if (version is < 1 or > FormatVersion) throw new InvalidDataException($"{source}: unsupported design version {version}");
             var list = new List<DesignBox>();
             foreach (var entry in root.GetProperty("blocks"u8).EnumerateArray())
             {
@@ -164,7 +173,14 @@ public sealed class BoxDesign
                     try { shape = BlockShapes.Parse(sh.GetString()); }
                     catch (InvalidDataException e) { throw new InvalidDataException($"{source}: block {index}: {e.Message}", e); }
                 }
-                list.Add(new DesignBox(Grid(entry.GetProperty("at"u8)), size, type, shape));
+                var facing = BlockFacing.Back;
+                if (entry.TryGetProperty("facing"u8, out var fc))
+                {
+                    if (version < 4) throw new InvalidDataException($"{source}: block {index}: Facing requires version 4.");
+                    try { facing = Facings.Parse(fc.GetString()); }
+                    catch (InvalidDataException e) { throw new InvalidDataException($"{source}: block {index}: {e.Message}", e); }
+                }
+                list.Add(new DesignBox(Grid(entry.GetProperty("at"u8)), size, type, shape, facing));
             }
             RequireOneDriveKind(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(list), source);
             var c = root.GetProperty("color"u8);
@@ -232,9 +248,15 @@ public sealed class BoxDesign
         {
             var b = blocks[i];
             if (!BlockShapes.IsValid(b.Shape)) throw new InvalidDataException($"{source}: block {i}: Unknown block shape.");
+            if (!Facings.IsValid(b.Facing)) throw new InvalidDataException($"{source}: block {i}: Unknown block facing.");
+            var side = MaxSide(b.Type, limits);
             foreach (var (at, size) in new[] { (b.At.X, b.Size.X), (b.At.Y, b.Size.Y), (b.At.Z, b.Size.Z) })
+            {
                 if (size < 1 || size > limits.MaxBoxSide || at < -limits.MaxDesignSide || (long)at + size > limits.MaxDesignSide)
                     throw new InvalidDataException($"{source}: block {i}: position or size outside limits");
+                if (size > side)
+                    throw new InvalidDataException($"{source}: block {i}: a {b.Type.Name} is at most {side} cells a side");
+            }
             min = Vector3.Min(min, Low(b)); max = Vector3.Max(max, High(b));
             if (Vector3.Max(max - min, Vector3.Zero) is var extent && (extent.X > limits.MaxDesignSide || extent.Y > limits.MaxDesignSide || extent.Z > limits.MaxDesignSide))
                 throw new InvalidDataException($"{source}: block {i}: design extent exceeds {limits.MaxDesignSide}");
@@ -260,6 +282,10 @@ public sealed class BoxDesign
         }
     }
 
+    /// <summary>The most cells a block of a type may measure along a side: the type's own limit, or the content's.</summary>
+    public static int MaxSide(BlockType? type, DesignLimits limits) =>
+        type is { MaxSide: > 0 } ? Math.Min(type.MaxSide, limits.MaxBoxSide) : limits.MaxBoxSide;
+
     /// <summary>The blocks as the array they are kept in, for the evaluator's inner loops. Never written to.</summary>
     internal DesignBox[] Boxes => _blocks;
 
@@ -273,17 +299,18 @@ public sealed class BoxDesign
     /// <summary>Half of a block's width, height and length, in metres.</summary>
     internal Vector3 HalfExtents(in DesignBox b) => new Vector3(b.Size.X, b.Size.Y, b.Size.Z) * (BlockSize * 0.5f);
 
-    /// <summary>Writes version 3, preserving block identity and metadata.</summary>
+    /// <summary>Writes version 4, preserving block identity and metadata.</summary>
     public void Write(Stream stream)
     {
         using var w = new Utf8JsonWriter(stream);
-        w.WriteStartObject(); w.WriteNumber("version"u8, 3); w.WriteString("name"u8, Name); w.WriteString("class"u8, Class.ToString().ToLowerInvariant()); w.WriteNumber("blockSize"u8, BlockSize);
+        w.WriteStartObject(); w.WriteNumber("version"u8, FormatVersion); w.WriteString("name"u8, Name); w.WriteString("class"u8, Class.ToString().ToLowerInvariant()); w.WriteNumber("blockSize"u8, BlockSize);
         w.WriteStartArray("color"u8); w.WriteNumberValue(Color.X); w.WriteNumberValue(Color.Y); w.WriteNumberValue(Color.Z); w.WriteEndArray();
         w.WriteStartArray("blocks"u8);
         foreach (var b in _blocks)
         {
             w.WriteStartObject(); w.WriteString("type"u8, b.Type.Id);
             w.WriteString("shape"u8, BlockShapes.Name(b.Shape));
+            w.WriteString("facing"u8, Facings.Name(b.Facing));
             WriteGrid(w, "at", b.At); WriteGrid(w, "size", b.Size); w.WriteEndObject();
         }
         w.WriteEndArray(); w.WriteEndObject();

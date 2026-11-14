@@ -26,7 +26,7 @@ namespace Prospect.Game.Persistence;
 public static partial class WorldSnapshotCodec
 {
     /// <summary>The layout's version. A save with any other is refused; there are no migrations yet.</summary>
-    public const int Version = 4;
+    public const int Version = 5;
     internal const int ChartBytes = 4 + 12 + 8;
 
     /// <summary>"PWS1": tells a save from any other bytes before its version is believed.</summary>
@@ -39,7 +39,7 @@ public static partial class WorldSnapshotCodec
     /// <summary>A hull's record without its dents, lost blocks and hit points.</summary>
     internal const int HullFixedBytes =
         8 + 4 + 1 + 1 + 8 // entity, owner, design, flags, damage tick
-        + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 4 + 4 + 4 + 6 + 1 + 1 + 4 + 4 + 4 + 8 // motion state
+        + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 12 + 4 + 4 + 4 + 4 + 6 + 1 + 1 + 4 + 4 + 4 + 8 // motion state; the three tanks and what the thrust parts did follow the battery
         + 1 + 24 // order
         + 4 + 1 + 4 + 8 + DentBytes // dent version and count, spark
         + 4 + 4 + 8; // blocks, losses, hit total
@@ -559,6 +559,13 @@ public static partial class WorldSnapshotCodec
         writer.WriteSingle(state.Heat);
         writer.WriteByte((byte)((state.BoostLocked ? 1 : 0) | (state.Boosting ? 2 : 0) | (state.ShieldOffline ? 4 : 0)));
         writer.WriteSingle(state.Energy);
+        writer.WriteSingle(state.Fuel.Nitrogen);
+        writer.WriteSingle(state.Fuel.Hydrazine);
+        writer.WriteSingle(state.Fuel.Bipropellant);
+        writer.WriteByte((byte)state.Thrust.X);
+        writer.WriteByte((byte)state.Thrust.Y);
+        writer.WriteByte((byte)state.Thrust.Z);
+        writer.WriteByte(state.Thrust.Flags);
         writer.WriteSingle(state.Shield);
         writer.WriteSingle(state.Hull);
         writer.WriteSingle(state.ShieldCooldown);
@@ -576,7 +583,7 @@ public static partial class WorldSnapshotCodec
         writer.WriteDouble(state.JumpTunnelElapsed);
     }
 
-    /// <summary>Reads a motion state. False for flags or a jump stage that no state has; numbers are judged at restore.</summary>
+    /// <summary>Reads a motion state. False for flags, thrust bits or a jump stage that no state has; numbers are judged at restore.</summary>
     private static bool TryReadState(ref NetReader reader, out HullState state)
     {
         state = default;
@@ -590,6 +597,8 @@ public static partial class WorldSnapshotCodec
         state.Boosting = (flags & 2) != 0;
         state.ShieldOffline = (flags & 4) != 0;
         state.Energy = reader.ReadSingle();
+        state.Fuel = new FuelTanks { Nitrogen = reader.ReadSingle(), Hydrazine = reader.ReadSingle(), Bipropellant = reader.ReadSingle() };
+        state.Thrust = new ThrustState { X = (sbyte)reader.ReadByte(), Y = (sbyte)reader.ReadByte(), Z = (sbyte)reader.ReadByte(), Flags = reader.ReadByte() };
         state.Shield = reader.ReadSingle();
         state.Hull = reader.ReadSingle();
         state.ShieldCooldown = reader.ReadSingle();
@@ -606,7 +615,7 @@ public static partial class WorldSnapshotCodec
         state.JumpCalculation = reader.ReadSingle();
         state.JumpTunnelSeconds = reader.ReadSingle();
         state.JumpTunnelElapsed = reader.ReadDouble();
-        return flags <= 7 && jump <= (byte)JumpPhase.Arrive;
+        return flags <= 7 && jump <= (byte)JumpPhase.Arrive && state.Thrust.IsValid;
     }
 
     private static void Write(ref NetWriter writer, in DentProfile dent)

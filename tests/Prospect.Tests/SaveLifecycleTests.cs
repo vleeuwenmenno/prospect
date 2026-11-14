@@ -330,6 +330,13 @@ public sealed class SaveLifecycleTests
         Assert.Equal(1, info.Visual.Count);
         info.Order = new HullOrder { Kind = OrderKind.MoveTo, Target = damaged.Position + new Vector3(0, 300, 0) };
 
+        // Tanks part empty, each by another share, and thrust parts caught firing: both come back as they were saved.
+        ref var flown = ref hulls.State(0);
+        var tanks = hulls.Flight(0).FuelCapacity;
+        Assert.True(tanks.Nitrogen > 0f && tanks.Bipropellant > 0f);
+        flown.Fuel = new FuelTanks { Nitrogen = tanks.Nitrogen * 0.25f, Hydrazine = tanks.Hydrazine * 0.5f, Bipropellant = tanks.Bipropellant * 0.75f };
+        flown.Thrust = new ThrustState { X = -40, Y = 127, Z = -127, Flags = 5 };
+
         Jumping(hulls, 0, JumpPhase.Charge);
         Jumping(hulls, 1, JumpPhase.Align);
         Jumping(hulls, 2, JumpPhase.Charge);
@@ -1202,6 +1209,10 @@ public sealed class SaveLifecycleTests
     [InlineData("position")]
     [InlineData("orientation")]
     [InlineData("shield")]
+    [InlineData("fuel above the tanks")]
+    [InlineData("fuel that is no number")]
+    [InlineData("fuel below nothing")]
+    [InlineData("thrust bits")]
     [InlineData("jump")]
     [InlineData("design number")]
     [InlineData("block count")]
@@ -1282,6 +1293,18 @@ public sealed class SaveLifecycleTests
                     break;
                 case "shield":
                     world.Hulls[0].State.Shield = 1e9f;
+                    break;
+                case "fuel above the tanks":
+                    world.Hulls[0].State.Fuel.Bipropellant *= 2f;
+                    break;
+                case "fuel that is no number":
+                    world.Hulls[0].State.Fuel.Nitrogen = float.NaN;
+                    break;
+                case "fuel below nothing":
+                    world.Hulls[1].State.Fuel.Hydrazine = -1f;
+                    break;
+                case "thrust bits":
+                    world.Hulls[0].State.Thrust.Flags = 16;
                     break;
                 case "jump":
                     world.Hulls[4].State.JumpTunnelElapsed = double.NegativeInfinity;

@@ -13,7 +13,7 @@ public enum DraftEdit : byte
     Unchanged,
     /// <summary>No block has that index.</summary>
     NoSuchBlock,
-    /// <summary>A side is below one cell or above the content's largest box side.</summary>
+    /// <summary>A side is below one cell, above the content's largest box side or above the largest side of the block's type.</summary>
     BadSize,
     /// <summary>The box, or the design with it, would reach past the content's coordinate or extent limits.</summary>
     OutsideLimits,
@@ -160,12 +160,13 @@ public sealed class BuildDraft
         return new GridSize(at[0], at[1], at[2]);
     }
 
-    /// <summary>Adds a box at the end of the draft.</summary>
-    public DraftEdit Add(GridSize at, GridSize size, BlockType type, BlockShape shape = BlockShape.Box)
+    /// <summary>Adds a box at the end of the draft, facing <paramref name="facing"/>.</summary>
+    public DraftEdit Add(GridSize at, GridSize size, BlockType type, BlockShape shape = BlockShape.Box, BlockFacing facing = BlockFacing.Back)
     {
         ArgumentNullException.ThrowIfNull(type);
-        var box = new DesignBox(at, size, type, shape);
+        var box = new DesignBox(at, size, type, shape, facing);
         if (!BlockShapes.IsValid(shape)) throw new ArgumentOutOfRangeException(nameof(shape));
+        if (!Facings.IsValid(facing)) throw new ArgumentOutOfRangeException(nameof(facing));
         var check = CanAdd(at, size, type);
         if (check != DraftEdit.Done) return check;
         Record([new Step(_boxes.Count, default, box)]);
@@ -175,14 +176,14 @@ public sealed class BuildDraft
     /// <summary>
     /// What <see cref="Add"/> would answer for a box here, without changing the draft, its version or its history:
     /// for showing whether a placement fits before it is made. With a <paramref name="type"/>, also whether its
-    /// drive is of the draft's kind. One pass over the boxes; allocates nothing.
+    /// drive is of the draft's kind and the size is one the type allows. One pass over the boxes; allocates nothing.
     /// </summary>
     public DraftEdit CanAdd(GridSize at, GridSize size, BlockType? type = null)
     {
         // The same count bound GeometryAdmission.Count applies, checked here so the editor stops at it; Export runs the real one.
         if (!CountFits(_boxes.Count + 1L))
             return DraftEdit.TooManyBlocks;
-        var check = Check(new DesignBox(at, size, null!), -1);
+        var check = Check(new DesignBox(at, size, type!), -1);
         if (check != DraftEdit.Done || type is null)
             return check;
         var box = new DesignBox(at, size, type);
@@ -328,7 +329,7 @@ public sealed class BuildDraft
 
         var size = new GridSize(high[0] - low[0], high[1] - low[1], high[2] - low[2]);
         if (volume != (long)size.X * size.Y * size.Z) return DraftEdit.NotABox;
-        var limit = _content.Blocks.Limits.MaxBoxSide;
+        var limit = BoxDesign.MaxSide(first.Type, _content.Blocks.Limits);
         if (size.X > limit || size.Y > limit || size.Z > limit) return DraftEdit.BadSize;
         merged = first with { At = new GridSize(low[0], low[1], low[2]), Size = size };
         return DraftEdit.Done;
@@ -362,7 +363,10 @@ public sealed class BuildDraft
         return Check(changed, block);
     }
 
-    /// <summary>Rotates one block by a positive quarter turn, keeping its low corner fixed; one undo step.</summary>
+    /// <summary>
+    /// Rotates one block by a positive quarter turn, keeping its low corner fixed; one undo step. Its size, shape
+    /// and facing turn together, so a thrust part turned this way pushes another way.
+    /// </summary>
     public DraftEdit Rotate(int block, int axis)
     {
         var check = CanRotate(block, axis, out var changed);
@@ -380,7 +384,7 @@ public sealed class BuildDraft
         ArgumentOutOfRangeException.ThrowIfGreaterThan((uint)axis, 2u);
         var box = _boxes[block]; var u = (axis + 1) % 3; var v = (axis + 2) % 3;
         var size = With(With(box.Size, u, Of(box.Size, v)), v, Of(box.Size, u));
-        changed = box with { Size = size, Shape = BlockShapes.Rotate(box.Shape, axis) };
+        changed = box with { Size = size, Shape = BlockShapes.Rotate(box.Shape, axis), Facing = Facings.Rotate(box.Facing, axis) };
         if (changed == box) return DraftEdit.Unchanged;
         return Check(changed, block);
     }
@@ -505,7 +509,7 @@ public sealed class BuildDraft
             {
                 // In 64 bits: a move far enough to wrap around would otherwise look like one that fits.
                 long at = (long)Of(box.At, axis) + Of(by, axis), size = Of(box.Size, axis);
-                if (size < 1 || size > limits.MaxBoxSide) return DraftEdit.BadSize;
+                if (size < 1 || size > BoxDesign.MaxSide(box.Type, limits)) return DraftEdit.BadSize;
                 if (at < -limits.MaxDesignSide || at + size > limits.MaxDesignSide) return DraftEdit.OutsideLimits;
                 low[axis] = Math.Min(low[axis], (int)at); high[axis] = Math.Max(high[axis], (int)(at + size));
             }
@@ -564,7 +568,7 @@ public sealed class BuildDraft
         for (var axis = 0; axis < 3; axis++)
         {
             int at = Of(box.At, axis), size = Of(box.Size, axis);
-            if (size < 1 || size > limits.MaxBoxSide) return DraftEdit.BadSize;
+            if (size < 1 || size > BoxDesign.MaxSide(box.Type, limits)) return DraftEdit.BadSize;
             if (at < -limits.MaxDesignSide || (long)at + size > limits.MaxDesignSide) return DraftEdit.OutsideLimits;
             low[axis] = unionLow[axis] = at; high[axis] = unionHigh[axis] = at + size;
         }

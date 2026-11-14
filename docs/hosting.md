@@ -388,9 +388,13 @@ What a design need not have:
 
 - **Thrust, torque or power.** A design needs a core. Without thrusters it lies still, without a gyro it does not
   turn, without a generator nothing runs. The server builds it all the same; the editor warns.
+- **Thrust every way, or a tank for every part.** A direction no part faces away from cannot be pushed, and a part
+  with no tank of its fuel never fires. Built all the same; the editor warns of both.
 - **A shield with nothing to feed it** has a capacity and no charge. Nothing makes energy or shield from no power.
 - **An FTL drive.** Without one the hull does not jump. Any number of drives of one kind (hyperspace, wormhole,
   rift) is fine, normal and compact alike; drives of two kinds are refused, in design files and the editor too.
+- **A size the part's type allows** is required: `maxSide` in `content/blocks/blocks.json` (cold gas thrusters 2
+  cells a side, hot thrusters 4). A larger one is refused like any size over the limits.
 - Shipped design files still must fly (`HullDesign.Parse`): that check is for content, not for players.
 
 Repair:
@@ -966,3 +970,21 @@ The galaxy seed still reaches clients, so owner filtering does not claim seed se
 Full API, figures and limitations: [modules](roadmap/modules.md).
 
 Active module spending is shared with client prediction through `ModuleScanRules.Spend`; `PowerFlow.Modules` contributes to total draw/net flow. The existing net energy readout includes it; a separate module tooltip row is UI follow-up.
+
+## Propulsion and fuel (protocol 49)
+
+- Every hull record carries four more bytes: the hull's `ThrustState` (three throttles from -127 to 127 along the
+  hull's right, up and back axes, and a byte with a bit per fuel firing and a boost bit). A record without health is
+  252 bytes; 255 of them still fit one snapshot. Bits no step writes, or a throttle of -128, refuse the record.
+- The snapshot header carries the receiving player's own tanks: three floats, 12 bytes, 37 in all. Not numbers or
+  below nothing refuse the snapshot.
+- **What is disclosed:** every viewer sees which way a hull in view is pushed and which kinds of part fire, as it
+  sees its position. Nobody is sent another hull's tanks, not even the owner's other hulls.
+- The client predicts its own hull with the server's flight code on the server's tanks. Its other hulls are flown
+  forward as if their tanks were full.
+- Canonical design bytes are version 3: a facing byte per block. `DesignBytes.Decode` refuses a facing above 5 and
+  a block larger than its type's `maxSide`.
+- Content identity: evaluator 11. The figures are in `blocks/blocks.json`, which is hashed already.
+- Refuelling is a repair: `Repair` on a whole hull is taken when a tank holds less than the design's
+  (`HullDesign.NeedsRefuel`), and still answers `NoChange` when every tank is full. Tanks never hold back a commit.
+- Rules and figures: [propulsion](roadmap/propulsion.md).

@@ -127,7 +127,7 @@ public sealed class ProtocolTests
             record.RemainingHealth[block] = 1;
         }
         record.Write(ref writer);
-        Assert.Equal(5708, HullRecord.MaxWireSize);
+        Assert.Equal(5712, HullRecord.MaxWireSize);
         Assert.Equal(HullRecord.MaxWireSize, writer.Length);
         var reader = new NetReader(writer.Written);
         Assert.Equal(valid, HullRecord.TryRead(ref reader, out var copy));
@@ -137,7 +137,7 @@ public sealed class ProtocolTests
             reader = new NetReader(writer.Written[..length]);
             Assert.False(HullRecord.TryRead(ref reader, out _));
         }
-        Assert.Equal(48u, ProtocolInfo.Version);
+        Assert.Equal(49u, ProtocolInfo.Version);
     }
 
     [Fact]
@@ -417,6 +417,7 @@ public sealed class ClientPredictionTests : IDisposable
             AckedInput = acked,
             OwnHull = hulls[0].Id,
             HullCount = (byte)hulls.Length,
+            OwnFuel = hulls[0].State.Fuel,
         }.Write(ref writer);
         foreach (var hull in hulls)
             hull.Write(ref writer);

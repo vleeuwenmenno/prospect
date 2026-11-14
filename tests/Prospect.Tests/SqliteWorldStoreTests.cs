@@ -442,7 +442,9 @@ public sealed class SqliteWorldStoreTests : IDisposable
                 break;
             case "damaged page":
                 var bytes = File.ReadAllBytes(Db(folder));
-                Array.Fill(bytes, (byte)0xA5, 4096 + 16, 2000);
+                // From the page's first byte: its header if it is a table page, the link to the next page if it
+                // carries the overflow of a save too long for one, so the damage is found whichever it is.
+                Array.Fill(bytes, (byte)0xA5, 4096, 2000);
                 File.WriteAllBytes(Db(folder), bytes);
                 break;
         }

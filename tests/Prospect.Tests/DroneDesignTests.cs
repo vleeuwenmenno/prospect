@@ -15,20 +15,26 @@ public sealed class DroneDesignTests
         var drone = Shipped.Designs[Shipped.DroneDesign];
         var flight = drone.Flight;
 
-        // Half the former 0.5 block edge, so the hull is half as long and wide and half the radius.
+        // Half the former 0.5 block edge, so the hull is half as long and wide and half the radius. Its thrusters
+        // and tanks fill corners of the same three by three by three cells, so it is no larger than it was.
         Assert.Equal(0.25f, drone.BlockSize);
-        Assert.Equal(0.55f, flight.Radius, 0.01f);
+        Assert.Equal(0.6f, flight.Radius, 0.01f);
+        Assert.Equal(new Vector3(0.75f), drone.Stats.Size);
 
-        // Figures that do not come from size are what they were: mass, thrust, shield, hull and power.
-        Assert.Equal(2.8f, flight.Mass, 0.001f);
-        Assert.Equal(16.571428f, flight.Acceleration.Z, 0.001f);
-        Assert.Equal(8f, flight.Acceleration.X, 0.001f);
+        // Figures that do not come from size: mass, thrust in each direction, shield, hull and power. Six
+        // thrusters and two tanks came with directional thrust and fuel.
+        Assert.Equal(3.6f, flight.Mass, 0.001f);
+        Assert.Equal(16.666666f, flight.Acceleration.Z, 0.001f);
+        Assert.Equal(8.333333f, flight.Acceleration.X, 0.001f);
+        Assert.Equal(8.333333f, flight.Acceleration.Y, 0.001f);
+        Assert.Equal(16.666666f, flight.ReverseAcceleration, 0.001f);
         Assert.Equal(120f, flight.ShieldCapacity, 0.001f);
-        Assert.Equal(310f, flight.HullPoints, 0.001f);
+        Assert.Equal(490f, flight.HullPoints, 0.001f);
         Assert.Equal(1.2f, flight.PowerGenerated, 0.001f);
+        Assert.Equal(new FuelTanks { Nitrogen = 24f, Bipropellant = 90f }, flight.FuelCapacity);
 
-        // Inertia falls with the square of the size, so the gyro's torque was cut to match and the drone turns as before.
-        Assert.Equal(new Vector3(0.66627f, 0.81834f, 0.75911f), flight.TurnRate, new VectorTolerance());
+        // The gyro's torque was raised with the mass the thrusters and tanks added, so the drone turns about as before.
+        Assert.Equal(new Vector3(0.67531f, 0.74611f, 0.78999f), flight.TurnRate, new VectorTolerance());
     }
 
     private sealed class VectorTolerance : IEqualityComparer<Vector3>

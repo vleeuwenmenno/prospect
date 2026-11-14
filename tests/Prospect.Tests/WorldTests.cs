@@ -95,7 +95,7 @@ public sealed class FlightTests
     {
         var moving = Fly(HullState.Spawn(Double3.Zero, Pod), new FlightInput { Forward = 127 }, 120);
         var speed = moving.Velocity.Length();
-        Assert.True(speed > 40);
+        Assert.True(speed > 35);
 
         var coasting = Fly(moving, default, 300);
         Assert.Equal(speed, coasting.Velocity.Length(), 3);
@@ -155,10 +155,10 @@ public sealed class HullDesignTests
     private static readonly GameContent Content = GameContent.Load();
 
     [Theory]
-    [InlineData(0, 624f, 352f, 37.5f)]
-    [InlineData(1, 1248f, 704f, 37.5f)]
-    [InlineData(2, 1248f, 704f, 37.5f)]
-    [InlineData(3, 46.4f, 22.4f, 5f)]
+    [InlineData(0, 800f, 400f, 37.5f)]
+    [InlineData(1, 1600f, 800f, 37.5f)]
+    [InlineData(2, 1600f, 800f, 37.5f)]
+    [InlineData(3, 60f, 30f, 5f)]
     public void ShippedFlightBalanceReachesRuntimeAndEditorStats(int index, float forwardThrust, float lateralThrust, float recharge)
     {
         var design = Content.Designs[index];
@@ -172,7 +172,8 @@ public sealed class HullDesignTests
             Assert.Equal(recharge, flight.ShieldRecharge);
             Assert.Equal(8f, flight.ShieldDelay);
             Assert.Equal(2f, flight.BoostMultiplier);
-            Assert.Equal(4f, flight.BoostPowerMultiplier);
+            Assert.Equal(9.4f, flight.BoostPowerMultiplier);
+            Assert.Equal(2.5f, flight.BoostFuelMultiplier);
             Assert.Equal(60f * MathF.Sqrt(flight.Acceleration.Z), flight.MaxSpeed, 4);
             Assert.Equal(flight.MaxSpeed * 2f, flight.BoostMaxSpeed);
             Assert.Equal(flight.Acceleration.Z, hull.Stats.Acceleration);
@@ -207,11 +208,13 @@ public sealed class HullDesignTests
         Assert.Equal(hull, stats.HullPoints, 3);
         Assert.Equal(new Vector3(5, 2, 4), stats.Size);
 
-        // Main engines only push forward, so the pod accelerates harder than it brakes or strafes.
-        var thrusters = Content.Blocks.Get("thruster").Thrust * 2;
+        // The engine faces back and pushes forward; one cold gas thruster faces each other way, so the pod
+        // accelerates harder than it brakes or strafes.
+        var thruster = Content.Blocks.Get("coldGasThruster").Thrust;
         var engine = Content.Blocks.Get("engine").Thrust;
-        Assert.Equal(thrusters / mass, stats.Deceleration, 3);
-        Assert.Equal((thrusters + engine) / mass, stats.Acceleration, 3);
+        Assert.Equal(thruster / mass, stats.Deceleration, 3);
+        Assert.Equal(thruster / mass, stats.LateralAcceleration, 3);
+        Assert.Equal(engine / mass, stats.Acceleration, 3);
         Assert.True(stats.Acceleration > stats.Deceleration);
 
         // Rolling turns the least mass about the shortest lever, so it is the quickest axis.
@@ -820,10 +823,11 @@ public sealed class PowerAndDamageTests
     public void ATickInsideTheDensestFieldStaysWithinBudget()
     {
         // The budget: one hull's step in the thick of the densest field, asteroids being shoved about included,
-        // takes under 100 microseconds in a debug build. A release build is several times faster; either way a
+        // takes under 150 microseconds in a debug build. A release build is several times faster; either way a
         // thousand hulls in such a field fit in a tick with room to spare. Before the index a step looked at
-        // every asteroid of the sector, and this field has thousands.
-        const double budgetMicroseconds = 100;
+        // every asteroid of the sector, and this field has thousands. The step costs by the block: the pod was
+        // 13 blocks and 79 microseconds under a budget of 100, and with its thrusters and tanks is 18 and 110.
+        const double budgetMicroseconds = 150;
         var galaxy = CrashGalaxy;
         var sector = Sectors.Densest(galaxy);
         var rocks = new RockField(galaxy);
@@ -2015,8 +2019,9 @@ public sealed class FlightSessionTests
 
         pilot.Client.Input.Submit(new PlayerControls { Forward = 1 });
         Thread.Sleep(2000);
+        // Long enough for the dampeners to bring the pod to rest: two seconds of engine against one thruster's braking.
         pilot.Client.Input.Submit(default);
-        Thread.Sleep(2500);
+        Thread.Sleep(5500);
 
         // The watcher's interpolated view of the pilot ends where the pilot's own prediction ended.
         var after = WaitForValue(Other);
@@ -3418,7 +3423,7 @@ public sealed class LargeHullTests
                 {
                     Core => "core",
                     151 or 152 => "generator",
-                    >= 153 and <= 156 => "thruster",
+                    >= 153 and <= 156 => "coldGasThruster",
                     >= 157 and <= 160 => "gyro",
                     161 or 162 => "shield",
                     _ => "hull",
@@ -3463,7 +3468,7 @@ public sealed class LargeHullTests
         Directory.CreateDirectory(dir);
         try
         {
-            var blocks = string.Join(",", Enumerable.Range(0, 65).Select(i => $"{{ \"at\": [{i}, 0, 0], \"type\": \"{(i switch { 0 => "core", 1 => "thruster", 2 => "gyro", 3 => "generator", _ => "hull" })}\" }}"));
+            var blocks = string.Join(",", Enumerable.Range(0, 65).Select(i => $"{{ \"at\": [{i}, 0, 0], \"type\": \"{(i switch { 0 => "core", 1 => "coldGasThruster", 2 => "gyro", 3 => "generator", _ => "hull" })}\" }}"));
             var path = Path.Combine(dir, "slab.json");
             File.WriteAllText(path, $"{{ \"name\": \"T\", \"class\": \"ship\", \"blockSize\": 1.0, \"color\": [0.5, 0.5, 0.5], \"blocks\": [{blocks}] }}");
             Assert.Equal(65, HullDesign.Load(path, Content.Blocks, Content.Rules).BlockCount);

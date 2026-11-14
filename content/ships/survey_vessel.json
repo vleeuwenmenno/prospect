@@ -1,4 +1,5 @@
 {
+  "version": 4,
   "name": "Surveyor",
   "class": "ship",
   "blockSize": 1.0,
@@ -25,12 +26,22 @@
     { "at": [0, 1, 2], "type": "gyro" },
     { "at": [0, 1, -1], "type": "gyro" },
     { "at": [0, 1, -2], "type": "shield" },
-    { "at": [1, 0, 3], "type": "engine" },
-    { "at": [-1, 0, 3], "type": "engine" },
-    { "at": [2, 0, 0], "type": "thruster" },
-    { "at": [-2, 0, 0], "type": "thruster" },
-    { "at": [2, 0, 2], "type": "thruster" },
-    { "at": [-2, 0, 2], "type": "thruster" },
-    { "at": [0, 1, -3], "type": "riftcutter" }
+    { "at": [1, 0, 3], "type": "engine", "facing": "back" },
+    { "at": [-1, 0, 3], "type": "engine", "facing": "back" },
+    { "at": [2, 0, 0], "type": "coldGasThruster", "facing": "right" },
+    { "at": [-2, 0, 0], "type": "coldGasThruster", "facing": "left" },
+    { "at": [2, 0, 2], "type": "coldGasThruster", "facing": "right" },
+    { "at": [-2, 0, 2], "type": "coldGasThruster", "facing": "left" },
+    { "at": [0, 1, -3], "type": "riftcutter" },
+    { "at": [1, 1, 1], "type": "coldGasThruster", "facing": "up" },
+    { "at": [-1, 1, 1], "type": "coldGasThruster", "facing": "up" },
+    { "at": [2, 0, 1], "type": "coldGasThruster", "facing": "down" },
+    { "at": [-2, 0, 1], "type": "coldGasThruster", "facing": "down" },
+    { "at": [1, 0, -2], "type": "coldGasThruster", "facing": "front" },
+    { "at": [-1, 0, -2], "type": "coldGasThruster", "facing": "front" },
+    { "at": [1, 1, -1], "type": "nitrogenTank" },
+    { "at": [-1, 1, -1], "type": "nitrogenTank" },
+    { "at": [1, 1, 2], "type": "bipropellantTank" },
+    { "at": [-1, 1, 2], "type": "bipropellantTank" }
   ]
 }

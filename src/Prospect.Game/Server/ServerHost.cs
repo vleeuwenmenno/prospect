@@ -1421,6 +1421,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             AckedInput = connection.LastSimulatedSequence,
             OwnHull = connection.Hull.Packed,
             OwnIsDrone = _hulls.IsAlive(connection.Hull) && _hulls.Info(connection.Hull.Index).EscapeDrone,
+            OwnFuel = _hulls.IsAlive(connection.Hull) ? _hulls.State(connection.Hull.Index).Fuel : default,
         };
 
         // While the player's hull is knocking against others, those go out every tick as well: the client

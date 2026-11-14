@@ -11,6 +11,9 @@ internal struct PartFigures
 {
     public float Mass, Hull, Thrust, Torque, PowerOutput, PowerDraw, Energy, Shield, Recharge, Cargo, Crew, FtlPower;
 
+    /// <summary>Kilograms of fuel a thrust part burns a second at full thrust, and kilograms a tank holds.</summary>
+    public float FuelBurn, FuelCapacity;
+
     /// <summary>
     /// The figures of one block of <paramref name="type"/> whose box holds <paramref name="cells"/> cells. A wedge
     /// fills half of its box and is worked out as the design is (<see cref="BoxDesign.ScaleHalf"/>), crew rounded
@@ -35,6 +38,8 @@ internal struct PartFigures
             Cargo = Scaled("cargo", type.Cargo),
             Crew = type.Crew == 0 ? 0f : WholeCrew(type, cells, half),
             FtlPower = Scaled("ftlPower", type.FtlPower),
+            FuelBurn = Scaled("fuelBurn", type.FuelBurn),
+            FuelCapacity = Scaled("fuelCapacity", type.FuelCapacity),
         };
     }
 
@@ -61,6 +66,8 @@ internal struct PartFigures
         Cargo = a.Cargo + b.Cargo,
         Crew = a.Crew + b.Crew,
         FtlPower = a.FtlPower + b.FtlPower,
+        FuelBurn = a.FuelBurn + b.FuelBurn,
+        FuelCapacity = a.FuelCapacity + b.FuelCapacity,
     };
 
     /// <summary>The figure a part of a role is chosen for, which the merge preview compares.</summary>
@@ -74,6 +81,7 @@ internal struct PartFigures
         PartRole.Cargo => Cargo,
         PartRole.Crew => Crew,
         PartRole.Drive => FtlPower,
+        PartRole.Tank => FuelCapacity,
         _ => Mass,
     };
 }
@@ -99,6 +107,12 @@ internal enum DesignWarning : byte
     /// <summary>No forward thrust at all.</summary>
     NoForward,
 
+    /// <summary>Some direction other than forward has no part pushing that way: the ship cannot brake, or cannot move sideways, up or down.</summary>
+    NoDirection,
+
+    /// <summary>Thrust parts burn a fuel the ship has no tank for: they never fire.</summary>
+    NoTank,
+
     /// <summary>Forward acceleration below the editor's threshold.</summary>
     SlowForward,
 
@@ -115,7 +129,7 @@ internal enum DesignWarning : byte
 /// <summary>Works out the warnings for a checked design's figures. Allocates nothing.</summary>
 internal static class DesignWarnings
 {
-    public const int Count = 10;
+    public const int Count = 12;
 
     /// <summary>
     /// Writes the warnings that apply to <paramref name="flight"/> into <paramref name="warnings"/> and returns how
@@ -144,6 +158,10 @@ internal static class DesignWarnings
             Add(warnings, DesignWarning.NoForward);
         else if (flight.Acceleration.Z < tuning.LowForwardAcceleration)
             Add(warnings, DesignWarning.SlowForward);
+        if (MissingDirections(flight) != 0)
+            Add(warnings, DesignWarning.NoDirection);
+        if (HullDesign.MissingTank(flight) != FuelKind.None)
+            Add(warnings, DesignWarning.NoTank);
         if (flight.Acceleration.Z > 0f && flight.MaxSpeed < tuning.LowTopSpeed)
             Add(warnings, DesignWarning.SlowTop);
         var slowest = MathF.Min(flight.TurnRate.X, MathF.Min(flight.TurnRate.Y, flight.TurnRate.Z));
@@ -152,5 +170,18 @@ internal static class DesignWarnings
         else if (slowest * (180f / MathF.PI) < tuning.LowTurnDegrees)
             Add(warnings, DesignWarning.SlowTurn);
         return count;
+    }
+
+    /// <summary>
+    /// The directions other than forward the ship cannot be pushed in, as a set: bit <c>(int)direction</c> of
+    /// <see cref="BlockFacing"/>. Forward has a warning of its own.
+    /// </summary>
+    public static int MissingDirections(in FlightParams flight)
+    {
+        var missing = 0;
+        for (var direction = 0; direction < Facings.Count; direction++)
+            if ((BlockFacing)direction != BlockFacing.Front && !(flight.Push((BlockFacing)direction) > 0f))
+                missing |= 1 << direction;
+        return missing;
     }
 }

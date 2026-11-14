@@ -164,6 +164,8 @@ internal sealed partial class ScreenHost
         {
             ref readonly var box = ref boxes[editor.Selected];
             DrawFace(draw, world, box, editor.Face, Kit.Color(SelectionBlue, 0.25f), Kit.Color(SelectionBlue));
+            if (box.Type.Thrust > 0)
+                DrawFacing(draw, world, box, Quaternion.Identity, Vector3.Zero);
         }
 
         DrawSizingNote(world, editor);
@@ -196,10 +198,13 @@ internal sealed partial class ScreenHost
         {
             var ok = editor.GhostCheck == DraftEdit.Done;
             var tone = ok ? Theme.Good : Theme.Bad;
-            var ghost = new DesignBox(editor.GhostAt, editor.PartSize, null!, editor.PartShape);
+            var ghost = new DesignBox(editor.GhostAt, editor.PartSize, null!, editor.PartShape, editor.PartFacing);
             // While it glides into a turn the whole ghost, faces and all, is drawn turned the same way.
             world.GhostPose(out var turn, out var shift);
             DrawBlockEdges(draw, world, ghost, Kit.Color(tone), Kit.Px(2), turn, shift);
+            // A thrust part shows where its nozzle points, so a turn that only changes that can be seen.
+            if (editor.Content is { } parts && (uint)editor.Part < (uint)parts.Blocks.Types.Count && parts.Blocks.Types[editor.Part].Thrust > 0)
+                DrawFacing(draw, world, ghost, turn, shift);
             // The ghost's face against the hull, filled, shows where it attaches; a wedge being turned shows its slant.
             DrawFace(draw, world, ghost, editor.Hover.Side ^ 1, Kit.Color(tone, 0.22f), Kit.Color(tone, 0.6f), turn, shift);
             if (editor.RotatingPart && editor.PartShape != BlockShape.Box)
@@ -263,7 +268,7 @@ internal sealed partial class ScreenHost
             return;
         var size = editor.PartSize;
         var face = world.PartSizingFace;
-        var limit = content.Blocks.Limits.MaxBoxSide;
+        var limit = editor.PartMaxSide;
         if (face < 0)
             PointerNote(Kit.F($"SIZE X {size.X}  Y {size.Y}  Z {size.Z}: point at a face of the ghost, then drag it"), Theme.Info, -Kit.Px(28));
         else if (world.PartSizingEdgeOn)
@@ -300,6 +305,31 @@ internal sealed partial class ScreenHost
         var color = Kit.Color(Theme.Info);
         draw.AddLine(a, b, color, Kit.Px(2.5f));
         draw.AddCircleFilled(b, Kit.Px(4), color);
+    }
+
+    /// <summary>The colour of a thrust part's exhaust mark: where its nozzle points, the opposite of the way it pushes.</summary>
+    private const uint ExhaustOrange = 0xFF8A3D;
+
+    /// <summary>
+    /// Where a thrust part's nozzle points: the side it faces, filled, and a line out of its middle that widens to
+    /// a bar, as an exhaust would leave it. The part pushes the ship the other way.
+    /// </summary>
+    private static void DrawFacing(ImDrawListPtr draw, WorldView world, in DesignBox box, Quaternion turn, Vector3 shift)
+    {
+        var side = (int)box.Facing;
+        DrawFace(draw, world, box, side, Kit.Color(ExhaustOrange, 0.3f), Kit.Color(ExhaustOrange), turn, shift);
+        var axis = side >> 1;
+        var normal = EditorGeometry.Normal(side);
+        var half = new Vector3(box.Size.X, box.Size.Y, box.Size.Z) * 0.5f;
+        var middle = new Vector3(box.At.X - 0.5f, box.At.Y - 0.5f, box.At.Z - 0.5f) + half + shift;
+        var from = middle + Vector3.Transform(normal * half[axis], turn);
+        var to = middle + Vector3.Transform(normal * (half[axis] + 1.2f), turn);
+        if (!world.ProjectSegment(world.EditorPoint(from), world.EditorPoint(to), out var a, out var b))
+            return;
+        var color = Kit.Color(ExhaustOrange);
+        draw.AddLine(a, b, color, Kit.Px(3f));
+        draw.AddCircleFilled(a, Kit.Px(4), color);
+        draw.AddCircle(b, Kit.Px(6), color, 0, Kit.Px(2f));
     }
 
     /// <summary>A short line beside the pointer, on a dark backing: red by default, for a refusal.</summary>
@@ -509,6 +539,8 @@ internal sealed partial class ScreenHost
         var size = editor.PartSize;
         ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, Kit.F($"{size.X} x {size.Y} x {size.Z} CELLS"), width);
         ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, ShapeText(editor.PartShape), width);
+        if ((uint)editor.Part < (uint)content.Blocks.Types.Count && content.Blocks.Types[editor.Part].Thrust > 0)
+            ClippedLine(_ui.Mono, Theme.FontCaption, ExhaustOrange, FacingText(editor.PartFacing), width);
         Kit.Space(Theme.Space1);
         var pair = MathF.Floor((width - gap) * 0.5f);
         if (EditorPalette.HandBack(EditorButton("##shapebox"u8, "Box"u8, new float2(pair, Kit.Px(26)), editor.CanEdit, false, editor.PartShape == BlockShape.Box)))
@@ -607,7 +639,8 @@ internal sealed partial class ScreenHost
     /// <summary>The figures a part of a role is chosen for, on one line: what it gives, then what it draws.</summary>
     private static ReadOnlySpan<byte> MainFigures(PartRole role, in PartFigures f) => role switch
     {
-        PartRole.Engine or PartRole.Thruster => Kit.F($"{f.Thrust:0.#} KN   DRAWS {f.PowerDraw:0.##} MW"),
+        PartRole.Engine or PartRole.Thruster => Kit.F($"{f.Thrust:0.#} KN   {f.FuelBurn:0.###} KG/S   {f.PowerDraw:0.##} MW"),
+        PartRole.Tank => Kit.F($"HOLDS {f.FuelCapacity:0.#} KG"),
         PartRole.Gyro => Kit.F($"{f.Torque:0.#} KNM   DRAWS {f.PowerDraw:0.##} MW"),
         PartRole.Power => Kit.F($"MAKES {f.PowerOutput:0.##} MW"),
         PartRole.Storage => Kit.F($"STORES {f.Energy:0.#} MJ"),
@@ -791,12 +824,30 @@ internal sealed partial class ScreenHost
             editor.DeleteSelected();
     }
 
-    /// <summary>Repair, for a damaged ship: rebuilds it as built, and says why it cannot when it cannot.</summary>
+    /// <summary>
+    /// Repair, for a damaged ship: rebuilds it as built, and says why it cannot when it cannot. A whole ship with
+    /// room in its tanks gets the same rebuild under the name Refuel, since nothing else fills a tank yet.
+    /// </summary>
     private void DrawRepair(ShipEditor editor, PlayerInputBridge bridge, float width)
     {
-        if (!editor.Damaged)
-            return;
         var state = editor.RepairState;
+        if (!editor.Damaged)
+        {
+            if (!editor.LowOnFuel)
+                return;
+            Kit.Space(Theme.Space2);
+            if (EditorButton("##refuel"u8, "Refuel ship"u8, new float2(width, Kit.Px(28)), state == RepairBlock.None))
+                editor.Repair(bridge);
+            Kit.Space(Theme.Space1);
+            Paragraph(state == RepairBlock.Busy ? Theme.Bad : Theme.TextDim, state switch
+            {
+                RepairBlock.None => "Rebuilds the ship as built, with every tank full. Nothing else refuels a ship yet."u8,
+                RepairBlock.Unsaved => "Applying your changes fills every tank too."u8,
+                _ => "Waiting for the server."u8,
+            }, width);
+            return;
+        }
+
         Kit.Space(Theme.Space2);
         Paragraph(Theme.Bad, "Repair first: a damaged ship cannot be edited. You can still look around and select blocks."u8, width);
         Kit.Space(Theme.Space1);
@@ -815,7 +866,7 @@ internal sealed partial class ScreenHost
 
         Paragraph(state == RepairBlock.None ? Theme.TextDim : Theme.Bad, state switch
         {
-            RepairBlock.None => "Rebuilds every lost or worn block as the ship was built. Shield and battery charge stay as they are."u8,
+            RepairBlock.None => "Rebuilds every lost or worn block as the ship was built, with every tank full. Shield and battery charge stay as they are."u8,
             _ => "Waiting for the server."u8,
         }, width);
     }
@@ -850,6 +901,14 @@ internal sealed partial class ScreenHost
         StatRow("MASS"u8, Kit.F($"{now.Mass:0.#} T (WAS {was.Mass:0.#})"), Tone(false), width);
         StatRow("TOP SPEED"u8, Kit.F($"{now.MaxSpeed:0} M/S (WAS {was.MaxSpeed:0})"), Tone(Has(warnings, DesignWarning.SlowTop)), width);
         StatRow("FORWARD"u8, Kit.F($"{now.Acceleration.Z:0.0} M/S2 (WAS {was.Acceleration.Z:0.0})"), Tone(Has(warnings, DesignWarning.NoForward) || Has(warnings, DesignWarning.SlowForward)), width);
+        var missing = current ? DesignWarnings.MissingDirections(now) : 0;
+        StatRow("BRAKING"u8, Kit.F($"{now.ReverseAcceleration:0.0} M/S2 (WAS {was.ReverseAcceleration:0.0})"), Tone((missing & 1 << (int)BlockFacing.Back) != 0), width);
+        StatRow("SIDEWAYS"u8, Kit.F($"{now.Acceleration.X:0.0} M/S2 (WAS {was.Acceleration.X:0.0})"), Tone((missing & (1 << (int)BlockFacing.Right | 1 << (int)BlockFacing.Left)) != 0), width);
+        StatRow("UP AND DOWN"u8, Kit.F($"{now.Acceleration.Y:0.0} M/S2 (WAS {was.Acceleration.Y:0.0})"), Tone((missing & (1 << (int)BlockFacing.Up | 1 << (int)BlockFacing.Down)) != 0), width);
+        var noTank = Has(warnings, DesignWarning.NoTank);
+        StatRow("NITROGEN"u8, Kit.F($"{now.FuelCapacity.Nitrogen:0} KG (WAS {was.FuelCapacity.Nitrogen:0})"), Tone(noTank && now.Burns(FuelKind.Nitrogen) && !(now.FuelCapacity.Nitrogen > 0f)), width);
+        StatRow("HYDRAZINE"u8, Kit.F($"{now.FuelCapacity.Hydrazine:0} KG (WAS {was.FuelCapacity.Hydrazine:0})"), Tone(noTank && now.Burns(FuelKind.Hydrazine) && !(now.FuelCapacity.Hydrazine > 0f)), width);
+        StatRow("BIPROPELLANT"u8, Kit.F($"{now.FuelCapacity.Bipropellant:0} KG (WAS {was.FuelCapacity.Bipropellant:0})"), Tone(noTank && now.Burns(FuelKind.Bipropellant) && !(now.FuelCapacity.Bipropellant > 0f)), width);
         StatRow("TURN"u8, Kit.F($"{SlowestTurn(now):0} DEG/S (WAS {SlowestTurn(was):0})"), Tone(Has(warnings, DesignWarning.NoTurn) || Has(warnings, DesignWarning.SlowTurn)), width);
         StatRow("POWER"u8, Kit.F($"{now.PowerGenerated:0.#} MW, IDLE {now.IdlePower:0.#}"), Tone(power), width);
         StatRow("BATTERY"u8, Kit.F($"{now.EnergyStorage:0} MJ (WAS {was.EnergyStorage:0})"), Tone(Has(warnings, DesignWarning.NoBattery)), width);
@@ -867,6 +926,38 @@ internal sealed partial class ScreenHost
 
     private static bool Has(ReadOnlySpan<DesignWarning> warnings, DesignWarning warning) => warnings.Contains(warning);
 
+    /// <summary>
+    /// Which ways the ship cannot be pushed, for the set <see cref="DesignWarnings.MissingDirections"/> gives: a part
+    /// pushes away from the way it faces, so the cure is a part facing the other way.
+    /// </summary>
+    internal static ReadOnlySpan<byte> MissingText(int missing)
+    {
+        var back = (missing & 1 << (int)BlockFacing.Back) != 0;
+        var side = (missing & (1 << (int)BlockFacing.Right | 1 << (int)BlockFacing.Left)) != 0;
+        var vertical = (missing & (1 << (int)BlockFacing.Up | 1 << (int)BlockFacing.Down)) != 0;
+        return (back, side, vertical) switch
+        {
+            (true, false, false) => "No thruster faces front, so nothing brakes: the ship cannot slow down or reverse."u8,
+            (false, true, false) => "No thruster faces left or none faces right: the ship cannot move sideways both ways."u8,
+            (false, false, true) => "No thruster faces up or none faces down: the ship cannot move up and down both ways."u8,
+            (true, true, false) => "Nothing brakes and the ship cannot move sideways both ways: it needs thrusters facing front, left and right."u8,
+            (true, false, true) => "Nothing brakes and the ship cannot move up and down both ways: it needs thrusters facing front, up and down."u8,
+            (false, true, true) => "The ship cannot move sideways or up and down both ways: it needs thrusters facing left, right, up and down."u8,
+            _ => "Nothing brakes and the ship cannot move sideways or up and down: it needs thrusters facing every way but back."u8,
+        };
+    }
+
+    /// <summary>Where a thrust part to place points its nozzle, and so which way it pushes.</summary>
+    internal static ReadOnlySpan<byte> FacingText(BlockFacing facing) => facing switch
+    {
+        BlockFacing.Right => "FACES RIGHT: PUSHES LEFT"u8,
+        BlockFacing.Left => "FACES LEFT: PUSHES RIGHT"u8,
+        BlockFacing.Up => "FACES UP: PUSHES DOWN"u8,
+        BlockFacing.Down => "FACES DOWN: PUSHES UP"u8,
+        BlockFacing.Back => "FACES BACK: PUSHES FORWARD"u8,
+        _ => "FACES FRONT: BRAKES"u8,
+    };
+
     private static float SlowestTurn(in FlightParams flight) => MathF.Min(flight.TurnRate.X, MathF.Min(flight.TurnRate.Y, flight.TurnRate.Z)) * 57.29578f;
 
     /// <summary>What a warning means for the ship, with its figures.</summary>
@@ -877,10 +968,17 @@ internal sealed partial class ScreenHost
         DesignWarning.ThrustOverload => Kit.F($"Full normal thrust needs {f.ThrustPower:0.##} MW; generators supply {Math.Max(0f, f.PowerGenerated - f.IdlePower):0.##} MW after idle. The battery covers the shortfall. Empty battery: {100f * Math.Clamp((f.PowerGenerated - f.IdlePower) / Math.Max(f.ThrustPower, float.Epsilon), 0f, 1f):0}% normal thrust at full throttle. Boost draws {f.BoostPowerMultiplier:0.#} times as much."),
         DesignWarning.ShieldOverload => Kit.F($"A recharging shield draws {f.ShieldPower:0.##} MW ({f.ShieldRestartPower:0.##} MW to restart), more than the {Math.Max(0f, f.PowerGenerated - f.IdlePower):0.##} MW left after idle: it recharges off the battery."),
         DesignWarning.NoBattery => "No battery: a shield only recharges from stored energy, so this shield never recharges once hit. Boost needs a battery too."u8,
-        DesignWarning.NoForward => "No engine or thruster pushes forward: the ship cannot move ahead."u8,
+        DesignWarning.NoForward => "No engine or thruster faces back, so nothing pushes forward: the ship cannot move ahead."u8,
+        DesignWarning.NoDirection => MissingText(DesignWarnings.MissingDirections(f)),
+        DesignWarning.NoTank => HullDesign.MissingTank(f) switch
+        {
+            FuelKind.Nitrogen => "Cold gas thrusters burn nitrogen and the ship has no nitrogen tank: they never fire."u8,
+            FuelKind.Hydrazine => "Hot thrusters burn hydrazine and the ship has no hydrazine tank: they never fire."u8,
+            _ => "Engines burn bipropellant and the ship has no bipropellant tank: they never fire."u8,
+        },
         DesignWarning.SlowForward => Kit.F($"Forward acceleration is only {f.Acceleration.Z:0.0} m/s2."),
         DesignWarning.SlowTop => Kit.F($"Top speed is only {f.MaxSpeed:0} m/s."),
-        DesignWarning.NoTurn => "No gyro or thruster turns the ship on every axis: it cannot turn freely."u8,
+        DesignWarning.NoTurn => "No gyro turns the ship on every axis: it cannot turn freely."u8,
         _ => Kit.F($"The ship turns at only {SlowestTurn(f):0.#} deg/s at its slowest."),
     };
 
@@ -1175,8 +1273,9 @@ internal sealed partial class ScreenHost
     {
         PartRole.Core => "Core: the ship cannot exist without one"u8,
         PartRole.Drive => "Jump drive"u8,
-        PartRole.Engine => "Main engine: pushes forward only"u8,
-        PartRole.Thruster => "Thruster: pushes every way"u8,
+        PartRole.Engine => "Main engine: pushes away from where it faces, burns bipropellant"u8,
+        PartRole.Thruster => "Thruster: pushes away from where it faces"u8,
+        PartRole.Tank => "Fuel tank"u8,
         PartRole.Gyro => "Gyro: turns the ship"u8,
         PartRole.Power => "Generator: makes power"u8,
         PartRole.Storage => "Battery: stores energy"u8,
@@ -1190,6 +1289,7 @@ internal sealed partial class ScreenHost
     private static ReadOnlySpan<byte> MainLabel(PartRole role) => role switch
     {
         PartRole.Engine or PartRole.Thruster => "THRUST KN"u8,
+        PartRole.Tank => "HOLDS KG"u8,
         PartRole.Gyro => "TORQUE KNM"u8,
         PartRole.Power => "MAKES MW"u8,
         PartRole.Storage => "STORES MJ"u8,

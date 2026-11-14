@@ -377,8 +377,8 @@ public sealed class WorldSettingEffectTests
 
         // Fixed geometry keeps the struck blocks the same when galaxy generation changes.
         // A stronger hull keeps a block that a plain one loses to the same impact.
-        Crash(Content, 60, out var plainLeft, fixedRock: true);
-        Crash(World("hullStrength=4"), 60, out var strongLeft, fixedRock: true);
+        Crash(Content, 55, out var plainLeft, fixedRock: true);
+        Crash(World("hullStrength=4"), 55, out var strongLeft, fixedRock: true);
         Assert.NotEqual(plain.FullMask(), plainLeft);
         Assert.Equal(plain.FullMask(), strongLeft);
     }

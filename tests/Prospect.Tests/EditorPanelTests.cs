@@ -41,7 +41,11 @@ public sealed class EditorPanelTests
         var palette = new EditorPalette { Category = Array.IndexOf(Tuning.Categories, Tab("Move")) };
         string[] Shown() => Content.Blocks.Types.Where(t => palette.Shows(Tuning, t)).Select(t => t.Id).ToArray();
 
-        Assert.Equal(["engine", "thruster", "gyro"], Shown());
+        Assert.Equal(["engine", "hotThruster", "coldGasThruster", "bipropellantTank", "hydrazineTank", "nitrogenTank", "gyro"], Shown());
+        palette.Query = "nitrogen";
+        Assert.Equal(["coldGasThruster", "nitrogenTank", "microthruster", "microNitrogenTank"], Shown());
+        palette.Query = "tank";
+        Assert.Equal(["bipropellantTank", "hydrazineTank", "nitrogenTank", "microBipropellantTank", "microNitrogenTank"], Shown());
         palette.Query = "shield";
         Assert.Equal(["shield", "microshield"], Shown());
         palette.Query = "drone";
@@ -97,7 +101,25 @@ public sealed class EditorPanelTests
 
         // A core alone: no power, no movement, no turning; nothing about shields it does not have.
         var lone = new FlightParams { IdlePower = 0.2f, MaxSpeed = 0f };
-        Assert.Equal([DesignWarning.NoPower, DesignWarning.NoForward, DesignWarning.NoTurn], Of(lone));
+        Assert.Equal([DesignWarning.NoPower, DesignWarning.NoForward, DesignWarning.NoDirection, DesignWarning.NoTurn], Of(lone));
+
+        // Every shipped design can be pushed all six ways and feeds every part it has.
+        foreach (var design in Content.Designs)
+            Assert.Empty(Of(design.Flight));
+
+        // The pod without its thruster facing front cannot brake; without its nitrogen tank no thruster fires.
+        var draft = BuildDraft.FromBlueprint(Content.Pod, Content);
+        var brake = draft.Boxes.ToArray().ToList().FindIndex(box => box.Type.Thrust > 0 && box.Facing == BlockFacing.Front);
+        Assert.Equal(DraftEdit.Done, draft.Delete(brake));
+        var noBrake = draft.Export().Design!.Flight;
+        Assert.Equal([DesignWarning.NoDirection], Of(noBrake));
+        Assert.Equal(1 << (int)BlockFacing.Back, DesignWarnings.MissingDirections(noBrake));
+        Assert.True(draft.Undo());
+        var tank = draft.Boxes.ToArray().ToList().FindIndex(box => box.Type.Tank == FuelKind.Nitrogen);
+        Assert.Equal(DraftEdit.Done, draft.Delete(tank));
+        var dry = draft.Export().Design!.Flight;
+        Assert.Equal([DesignWarning.NoTank], Of(dry));
+        Assert.Equal(FuelKind.Nitrogen, HullDesign.MissingTank(dry));
 
         // A shield without a battery never recharges under the rules; with too small a generator it drains it.
         var flight = Content.Pod.Flight;
@@ -114,7 +136,8 @@ public sealed class EditorPanelTests
 
         // Below the content's thresholds: slow, but able to move.
         flight = Content.Pod.Flight;
-        flight.Acceleration = flight.Acceleration with { Z = Tuning.LowForwardAcceleration * 0.5f };
+        for (var fuel = FuelKind.Nitrogen; fuel <= FuelKind.Bipropellant; fuel++)
+            flight.Thrust[ThrustTable.Index(BlockFacing.Front, fuel)] = fuel == FuelKind.Bipropellant ? Tuning.LowForwardAcceleration * 0.5f : 0f;
         flight.MaxSpeed = Tuning.LowTopSpeed * 0.5f;
         flight.TurnRate = new Vector3(Tuning.LowTurnDegrees * 0.5f * MathF.PI / 180f);
         Assert.Equal([DesignWarning.SlowForward, DesignWarning.SlowTop, DesignWarning.SlowTurn], Of(flight));

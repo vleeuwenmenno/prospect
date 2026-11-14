@@ -1,4 +1,5 @@
 {
+  "version": 4,
   "name": "Command Pod",
   "class": "ship",
   "blockSize": 1.0,
@@ -7,15 +8,20 @@
     { "at": [0, 0, 0], "type": "core" },
     { "at": [0, 0, -1], "type": "sensor" },
     { "at": [0, 0, -2], "type": "charting" },
-    { "at": [0, 0, 1], "type": "engine" },
-    { "at": [1, 0, 0], "type": "thruster" },
-    { "at": [-1, 0, 0], "type": "thruster" },
+    { "at": [0, 0, 1], "type": "engine", "facing": "back" },
+    { "at": [1, 0, 0], "type": "coldGasThruster", "facing": "right" },
+    { "at": [-1, 0, 0], "type": "coldGasThruster", "facing": "left" },
     { "at": [1, 0, 1], "type": "generator" },
     { "at": [-1, 0, 1], "type": "battery" },
     { "at": [0, 1, 0], "type": "quarters" },
     { "at": [0, 1, 1], "type": "gyro" },
     { "at": [2, 0, 1], "type": "shield" },
     { "at": [-2, 0, 1], "type": "cargo" },
-    { "at": [0, 1, -1], "type": "hyperdrive" }
+    { "at": [0, 1, -1], "type": "hyperdrive" },
+    { "at": [-1, 0, -1], "type": "coldGasThruster", "facing": "up" },
+    { "at": [1, 0, -1], "type": "coldGasThruster", "facing": "down" },
+    { "at": [0, 1, -2], "type": "coldGasThruster", "facing": "front" },
+    { "at": [1, 1, 1], "type": "bipropellantTank" },
+    { "at": [-1, 1, 1], "type": "nitrogenTank" }
   ]
 }

@@ -421,6 +421,10 @@ public sealed partial class ServerHost
         if (!(state.Heat >= 0f && state.Heat <= 1f) || !(state.Energy >= 0f && state.Energy <= flight.EnergyStorage)
             || !(state.Shield >= 0f && state.Shield <= flight.ShieldCapacity) || !(state.ShieldCooldown >= 0f) || !float.IsFinite(state.ShieldCooldown))
             return "its charge is outside what the hull holds";
+        if (!state.Fuel.Within(flight.FuelCapacity))
+            return "its fuel is outside what its tanks hold";
+        if (!state.Thrust.IsValid)
+            return "its thrust is not one a hull has";
         var intact = Math.Max(design.Flight.HullPoints, (float)design.IntactHitTotal);
         if (!(state.Hull >= 0f && state.Hull <= intact * 1.0001f))
             return "its hull points are outside what the design has";

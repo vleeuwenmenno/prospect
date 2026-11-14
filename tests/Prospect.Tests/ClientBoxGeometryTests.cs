@@ -46,7 +46,7 @@ public sealed class ClientBoxGeometryTests
     {
         var content = TestDesigns.Content;
         GridSize[] sizes = [new(1, 1, 1), new(2, 1, 1), new(1, 1, 2), new(2, 2, 1), new(1, 2, 1), new(3, 1, 2), new(2, 2, 2)];
-        string[] types = ["hull", "hull", "hull", "cargo", "thruster", "generator", "battery", "shield", "gyro", "engine"];
+        string[] types = ["hull", "hull", "hull", "cargo", "coldGasThruster", "generator", "battery", "shield", "gyro", "engine"];
         var taken = new bool[region.X, region.Y, region.Z];
         var boxes = new List<DesignBox>();
         var random = new Random((int)seed);

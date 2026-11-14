@@ -34,12 +34,24 @@ The goal and the block model are in `direction.md` under "Decided: building".
 - Boxes cannot overlap; touching faces are allowed. At least one core is required, matching existing rules.
   A median spatial tree validates overlap without expanding boxes into cells or scanning all pairs.
 
+## Decided: facing and per-type size (design file version 4)
+
+- Version 4 adds optional `"facing"` per block: `right`, `left`, `up`, `down`, `back`, `front`. Omitted is `back`.
+  Versions 1 to 3 still load, every block facing `back`.
+- A thrust part pushes the hull the opposite way to its facing. For other blocks it only says how the block sits.
+- A block type may have `"maxSide"`: the most cells along any side of a block of that type. Omitted, the content's
+  `maxBoxSide` applies. `BoxDesign`, `BuildDraft` and `DesignBytes.Decode` all hold a design to it.
+- Canonical design bytes version 3 append one facing byte (0 to 5) after each block's shape byte. The minimum block
+  record is 28 bytes. Version 2 bytes are not read: the protocol and the save layout moved with it.
+- Rules and figures: `docs/roadmap/propulsion.md`.
+
 ## Decided: size rule notation
 
 - Each block type may have `"sizeRules": { "powerOutput": { "volumeExponent": 1.25 } }`.
   The result is `base * cells^volumeExponent`. Missing rules mean exponent 1; 0 is constant,
   values below 1 grow slower, values above 1 grow faster. Accepted exponents are 0 through 2.
-- All twelve numeric BlockType stats support rules. Core, forward-only and drive kind remain categories.
+- All fourteen numeric BlockType stats support rules (`fuelBurn` and `fuelCapacity` came with fuel). Core, fuel
+  and drive kind remain categories.
   Crew rounds down per block. One-cell blocks return the original number directly, under every exponent.
 - Content examples: constant core power draw, generator power exponent 1.25, crew exponent 0.5.
   Materials will multiply the scaled result separately; the rule object leaves room for that extension.
@@ -62,14 +74,19 @@ The goal and the block model are in `direction.md` under "Decided: building".
 
 ## Sum memory
 
-A node is 200 B. A hull has two nodes per 32 blocks, less one. Its design keeps the same amount once.
+A node is 528 B: sixty doubles and the bounds. It was 216 B before thrust and fuel burn were kept per direction and
+per fuel (18 numbers each), with tank room and pump power per fuel. A hull has two nodes per 32 blocks, less one.
+Its design keeps the same amount once.
 
 | Blocks | Sums per hull | Block state, client | Block state, server |
 | --- | --- | --- | --- |
-| 64 | 600 B | 1,404 B | 1,660 B |
-| 300 | 3,800 B | 7,468 B | 8,668 B |
-| 4,096 | 51,000 B | 100,692 B | 117,076 B |
-| 150,000 | 1,875,000 B | 3,693,780 B | 4,293,780 B |
+| 64 | 1,584 B | 2,388 B | 2,644 B |
+| 300 | 10,032 B | 13,700 B | 14,900 B |
+| 4,096 | 134,640 B | 184,332 B | 200,716 B |
+| 150,000 | 4,950,000 B | 6,768,780 B | 7,368,780 B |
+
+- The cost of per-part burn rates: a station's state grew from 4.4 MB to 7.4 MB on the server. Burn tied to thrust by
+  one figure per fuel would save the 18 burn numbers (144 B a node). Not done: a part's efficiency is its own figure.
 
 - A block state is a header, alive words, sums, a 4-B-per-block loss journal and live collision branch counts. The server and client authority baseline add hit points (4 B/block). Prediction owns another restorable block state.
 - The client keeps a receive state and a published state separately while recovery can be incomplete.

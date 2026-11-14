@@ -108,11 +108,11 @@ public sealed class PowerFlowTests
         Assert.Equal(flight.ThrustPower * flight.BoostPowerMultiplier, flow.Thrust, 4);
 
         // A flat battery leaves only what the generator makes beyond idle for thrust, and the flow says so.
-        flight.PowerGenerated = flight.IdlePower + 2f;
+        flight.PowerGenerated = flight.IdlePower + 1f;
         state = HullState.Spawn(Double3.Zero, flight);
         state.Energy = 0f;
         FlightModel.Step(ref state, new FlightInput { Forward = 127 }, flight, HullSim.Dt, out flow);
-        Assert.Equal(2f, flow.Thrust, 3);
+        Assert.Equal(1f, flow.Thrust, 3);
         Assert.Equal(0f, flow.Net, 3);
     }
 

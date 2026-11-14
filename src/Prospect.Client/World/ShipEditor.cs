@@ -154,6 +154,7 @@ internal sealed class ShipEditor(JobSystem jobs)
     private float _ownHull;
     private uint _ownRevision;
     private int _ownDents;
+    private FuelFlow _ownFuel;
 
     // The merge the details panel offers, worked out again only when the draft or the selection changes.
     private int _mergeDraftVersion = -1;
@@ -318,6 +319,16 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// <summary>The shape the next part is placed in: a box, or a wedge filling half of <see cref="PartSize"/>.</summary>
     public BlockShape PartShape { get; private set; } = BlockShape.Box;
 
+    /// <summary>
+    /// The way the next part faces. It turns with the part (<see cref="RotatePart"/>): a thrust part pushes the ship
+    /// the opposite way, so this is where its nozzle points.
+    /// </summary>
+    public BlockFacing PartFacing { get; private set; } = BlockFacing.Back;
+
+    /// <summary>The most cells the chosen part may measure along a side: its type's limit, or the content's.</summary>
+    public int PartMaxSide =>
+        Content is { } content ? BoxDesign.MaxSide((uint)Part < (uint)content.Blocks.Types.Count ? content.Blocks.Types[Part] : null, content.Blocks.Limits) : 1;
+
     /// <summary>The block face under the pointer this frame, if any.</summary>
     public bool HasHover { get; private set; }
     public DraftHit Hover { get; private set; }
@@ -335,11 +346,19 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// <summary>True when the ship has lost or worn blocks, or was repaired before, so its blueprint can rebuild it.</summary>
     public bool Damaged => Source is { } source && source.NeedsRepair(_ownRevision, _ownHull, _ownDents);
 
+    /// <summary>
+    /// True when the ship's tanks hold less than they can: rebuilding it fills them, which is the only way to
+    /// refuel for now. No damage: the ship can still be edited. An intact ship's tanks are its design's, so this
+    /// is what the server asks with <see cref="HullDesign.NeedsRefuel"/>.
+    /// </summary>
+    public bool LowOnFuel =>
+        _ownFuel.Amount.Nitrogen < _ownFuel.Capacity.Nitrogen || _ownFuel.Amount.Hydrazine < _ownFuel.Capacity.Hydrazine || _ownFuel.Amount.Bipropellant < _ownFuel.Capacity.Bipropellant;
+
     /// <summary>Why the ship cannot be repaired from the blueprint now, or <see cref="RepairBlock.None"/>.</summary>
     public RepairBlock RepairState =>
         Stage != EditorStage.Editing || Draft is null || Source is null || Server.Phase != EditorPhase.Open || Server.Pending || Server.Token == 0 || Server.Hull != Hull
             ? RepairBlock.Busy
-            : !Damaged ? RepairBlock.NotDamaged
+            : !Damaged && !LowOnFuel ? RepairBlock.NotDamaged
             : Dirty ? RepairBlock.Unsaved
             : RepairBlock.None;
 
@@ -588,6 +607,7 @@ internal sealed class ShipEditor(JobSystem jobs)
                     _ownHull = hull.Hull;
                     _ownRevision = hull.Revision;
                     _ownDents = hull.Visual.Count;
+                    _ownFuel = hull.Fuel;
                 }
 
                 if (own.Id != _pilotHull || edited < 0)
@@ -725,7 +745,7 @@ internal sealed class ShipEditor(JobSystem jobs)
 
         if (!HasGhost)
             return;
-        var result = Draft!.Add(GhostAt, PartSize, Content!.Blocks.Types[Part], PartShape);
+        var result = Draft!.Add(GhostAt, PartSize, Content!.Blocks.Types[Part], PartShape, PartFacing);
         Record(result);
     }
 
@@ -908,7 +928,7 @@ internal sealed class ShipEditor(JobSystem jobs)
             Carry = EditorCarry.None;
             if (HasGhost && GhostCheck == DraftEdit.Done)
             {
-                var placed = Draft!.Add(GhostAt, PartSize, Content!.Blocks.Types[Part], PartShape);
+                var placed = Draft!.Add(GhostAt, PartSize, Content!.Blocks.Types[Part], PartShape, PartFacing);
                 Record(placed);
             }
 
@@ -949,6 +969,10 @@ internal sealed class ShipEditor(JobSystem jobs)
         GhostPinned = false;
         Part = part;
         Placing = true;
+
+        // A part that may not be as large as the last one was sized comes down to what its type allows.
+        var limit = PartMaxSide;
+        PartSize = new GridSize(Math.Min(PartSize.X, limit), Math.Min(PartSize.Y, limit), Math.Min(PartSize.Z, limit));
         UpdateGhost();
     }
 
@@ -962,12 +986,12 @@ internal sealed class ShipEditor(JobSystem jobs)
     }
 
     /// <summary>
-    /// Sets one axis of the size parts are placed at, within the content's largest box side; the ghost snaps to its
-    /// face again.
+    /// Sets one axis of the size parts are placed at, within the largest side the chosen part may have; the ghost
+    /// snaps to its face again.
     /// </summary>
     public void SetPartSize(int axis, int length)
     {
-        var limit = Content?.Blocks.Limits.MaxBoxSide ?? 1;
+        var limit = PartMaxSide;
         PartSize = EditorGeometry.With(PartSize, axis, Math.Clamp(length, 1, limit));
         GhostPinned = false;
         UpdateGhost();
@@ -1010,7 +1034,7 @@ internal sealed class ShipEditor(JobSystem jobs)
 
     /// <summary>
     /// Moves one face of the ghost being sized to make it <paramref name="length"/> whole cells along that face's
-    /// axis, from one to the content's largest box side. The opposite face stays where it is in the grid: moving a
+    /// axis, from one to the largest side the chosen part may have. The opposite face stays where it is in the grid: moving a
     /// minus face moves the ghost's low corner with it. A wedge stays the same wedge, its slope stretched.
     /// </summary>
     public void SizePartFace(int side, int length)
@@ -1018,7 +1042,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         if (!SizingPart || (uint)side > 5u)
             return;
         var axis = side >> 1;
-        var limit = Content?.Blocks.Limits.MaxBoxSide ?? 1;
+        var limit = PartMaxSide;
         length = Math.Clamp(length, 1, limit);
         var old = EditorGeometry.Of(PartSize, axis);
         if (length == old)
@@ -1073,7 +1097,7 @@ internal sealed class ShipEditor(JobSystem jobs)
 
     /// <summary>
     /// Turns the part to place a quarter turn about a grid axis, as <see cref="BuildDraft.Rotate"/> turns a placed
-    /// block: its shape turns and its size swaps the other two axes.
+    /// block: its shape and its facing turn and its size swaps the other two axes.
     /// </summary>
     public void RotatePart(int axis)
     {
@@ -1083,18 +1107,20 @@ internal sealed class ShipEditor(JobSystem jobs)
         var v = (axis + 2) % 3;
         PartSize = EditorGeometry.With(EditorGeometry.With(PartSize, u, EditorGeometry.Of(PartSize, v)), v, EditorGeometry.Of(PartSize, u));
         PartShape = BlockShapes.Rotate(PartShape, axis);
+        PartFacing = Facings.Rotate(PartFacing, axis);
         UpdateGhost();
     }
 
     /// <summary>
     /// True while the part to place is being turned with the rotation rings around its ghost. Nothing on the draft
     /// changes: each turn counts at once, <see cref="EndPartRotation"/> keeps it with nothing to confirm, and
-    /// <see cref="CancelPartRotation"/> puts back the shape and size from before.
+    /// <see cref="CancelPartRotation"/> puts back the shape, size and facing from before.
     /// </summary>
     public bool RotatingPart { get; private set; }
 
     private GridSize _rotateSize;
     private BlockShape _rotateShape;
+    private BlockFacing _rotateFacing;
     private GridSize _rotateAt;
 
     /// <summary>
@@ -1107,6 +1133,7 @@ internal sealed class ShipEditor(JobSystem jobs)
             return false;
         _rotateSize = PartSize;
         _rotateShape = PartShape;
+        _rotateFacing = PartFacing;
         _rotateAt = GhostAt;
         RotatingPart = true;
         return true;
@@ -1114,7 +1141,7 @@ internal sealed class ShipEditor(JobSystem jobs)
 
     /// <summary>
     /// Turns the part being turned by whole quarter turns about a grid axis, negative the other way, as
-    /// <see cref="RotatePart"/> turns it: its shape turns and its size swaps the other two axes.
+    /// <see cref="RotatePart"/> turns it: its shape and its facing turn and its size swaps the other two axes.
     /// </summary>
     public void TurnPart(int axis, int turns)
     {
@@ -1143,7 +1170,7 @@ internal sealed class ShipEditor(JobSystem jobs)
             GhostPinned = false;
     }
 
-    /// <summary>Puts back the part's shape and size from before it was turned. Nothing when no part is being turned.</summary>
+    /// <summary>Puts back the part's shape, size and facing from before it was turned. Nothing when no part is being turned.</summary>
     public void CancelPartRotation()
     {
         if (!RotatingPart)
@@ -1152,6 +1179,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         RotationCancels++;
         PartSize = _rotateSize;
         PartShape = _rotateShape;
+        PartFacing = _rotateFacing;
         // A held ghost goes back to where it was held, not to where the turn re-laid it.
         if (GhostPinned)
             Pin(_rotateAt, _rotateSize);
@@ -1424,6 +1452,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         _ownHull = own.Hull;
         _ownRevision = own.Revision;
         _ownDents = own.Visual.Count;
+        _ownFuel = own.Fuel;
         Notice = Refusal = EditorReason.None;
         NoticeApplied = false;
         Carry = EditorCarry.None;
