@@ -85,7 +85,8 @@ public sealed partial class AccountClient : IDisposable
     // This boundary reproduces cancellation after Waiting is published but before the opener is called.
     internal Func<Task>? BeforeBrowserLaunch { get; init; }
 
-    // The monotonic clock a session's lifetime is measured on; tests move it instead of waiting a day.
+    // The monotonic clock a session's lifetime is measured on, and the timers the wait for the browser runs on;
+    // tests move it instead of waiting a day, and fire the browser wait by hand instead of racing a real timer.
     internal TimeProvider Time { get; init; } = TimeProvider.System;
 
     /// <summary>The account service's host name, for display; empty when turned off.</summary>
@@ -373,7 +374,7 @@ public sealed partial class AccountClient : IDisposable
             try
             {
                 var wait = TimeSpan.FromSeconds(expires) < _signinTimeout ? TimeSpan.FromSeconds(expires) : _signinTimeout;
-                result = await receiver.Result.WaitAsync(wait, op.Cancel).ConfigureAwait(false);
+                result = await receiver.Result.WaitAsync(wait, Time, op.Cancel).ConfigureAwait(false);
             }
             catch (TimeoutException)
             {

@@ -496,14 +496,21 @@ public sealed class AccountClientTests
             Assert.True(await Closed(local.Port));
         }
 
-        // The tab is closed and nothing comes back: the wait ends on its own.
+        // The tab is closed and nothing comes back: the wait ends on its own. The timer is the test's, so the
+        // port is certainly open until it fires, however busy the machine is.
         using (var browser = new FakeBrowser())
-        using (var client = new AccountClient(service.Config, browser.Open, TimeSpan.FromSeconds(1.5)))
         {
+            var timers = new FiredByHand();
+            using var client = new AccountClient(service.Config, browser.Open) { Time = timers };
             Assert.True(client.SignIn());
             var local = await browser.ConsentAsync(service, await browser.Opened);
+            await timers.Armed.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            Assert.True(await PortOpen(local.Port));
+            Assert.True(client.View.Busy);
+            timers.Fire();
             await Until(client, v => v.State == AccountState.SignedOut && !v.Busy, "the sign-in to time out");
             Assert.Equal(AccountNotice.SigninTimedOut, client.View.Notice);
+            Assert.False(client.HasCurrentSession());
             Assert.True(await Closed(local.Port));
         }
 
@@ -588,6 +595,34 @@ public sealed class AccountClientTests
         Assert.Equal(HttpStatusCode.OK, status);
         await Until(client, v => v.State == AccountState.SignedIn && !v.Busy, "sign-in");
         return (fake, client, browser);
+    }
+
+    /// <summary>A clock whose one timer, the sign-in wait, runs only when the test fires it.</summary>
+    private sealed class FiredByHand : TimeProvider
+    {
+        private readonly TaskCompletionSource _armed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private volatile Handle? _timer;
+
+        /// <summary>Completes once the code under test has started its timer.</summary>
+        public Task Armed => _armed.Task;
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new Handle(callback, state);
+            _timer = timer;
+            _armed.TrySetResult();
+            return timer;
+        }
+
+        public void Fire() => _timer!.Run();
+
+        private sealed class Handle(TimerCallback callback, object? state) : ITimer
+        {
+            public void Run() => callback(state);
+            public bool Change(TimeSpan dueTime, TimeSpan period) => true;
+            public void Dispose() { }
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
     }
 
     /// <summary>A monotonic clock the test moves by hand, in milliseconds.</summary>
