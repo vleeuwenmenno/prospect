@@ -129,7 +129,10 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   and `command-fog`.
 - **Scans:** the server owns the cooldown (`scanCooldownSeconds`, `ScanView.CooldownSector`/`CooldownUntilTick`,
   `ScanState.Cooldown`); the client only reads it through `ScanRules` (`Gate`, `CooldownSeconds`, `Strip`,
-  `HandleKey`), so the `ScanSector` key, the card's button and the flight readout (`DrawScanStrip`) agree. A change
+  `HandleKey`), so the `ScanSector` key, the card's button and the flight readout (`DrawScanStrip`) agree. The key or
+  button again while scanning sends `CancelScan` (`PlayerInputBridge.CancelScan`), which the server honours only for the
+  sender's running scan. A scan is bound to its hull (`ScanView.Hull`): `Strip` shows nothing for another hull, and a
+  control change ends the scan as `Idle`, so no result is shown for it. A change
   to the wire bumps `ProtocolInfo.Version`. The card closes on any click outside it (`MapCardState.Click`,
   `RightClick`); rules in `docs/roadmap/exploration.md`. Check with `--open scan-pilot` and `--open scan`.
   The scan pulse is `ScanPulse` (when it shows, driven from `WorldView.Update`; figures in
@@ -309,6 +312,8 @@ The client opens a real window on the developer's desktop, and they are usually 
   use `--sector` to start within range. An invalid explicit destination is logged and not ordered, never silently replaced.
   `--open jump-fleet-ahead` targets points 6 km and 10 km ahead of and above the camera; `jump-fleet` targets 6 km along -x.
   These replace the old sub-minimum-distance capture jumps. Their openings are farther from the watcher.
+- Scan across the map and a cancel: `--open scan --close-map-at 0.8 --capture-after 0.5 --capture-count 4 --capture-every 1.2` shows the strip
+  after leaving the map mid-scan; add `--cancel-scan-at 2.5` for the "SCAN CANCELLED" readout and its cooldown line.
 - `--look <degrees>` holds the pilot camera that far to the right of the hull's nose, as free look would (`0`
   looks along the nose, `150` nearly back). Use it to check that an effect follows the hull, not the view.
 - `--target` targets the nearest other hull once in space (in a local game the Prospector, about 120 degrees to

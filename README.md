@@ -293,12 +293,14 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   unit list on the left shows every ship you own; click a row to add or remove that ship. A plotted jump shows as a
   dotted route from the ship you fly to its NAV point until the jump is made, replaced or cleared.
 - **Scanning.** Press `K` (D-pad left; rebindable) in the flight or command view, or pin your own sector's card and
-  press **Scan sector**: 5 seconds, flight continues. Leaving the sector, switching ship or losing the charting block
-  cancels it; the card and the top of the flight view say which (the reason is inferred on the client, the server only
-  says cancelled). A small muted readout under the top of the flight and command views shows the bar, the result and
-  then "NEXT SCAN IN n S". The server keeps a 10 s cooldown on the sector after a scan ends, completed or cancelled
-  (a request in it is refused); the key and the button wait it out and say how long is left. Resting the cursor on
-  the readout or the button names the key. In an uncharted sector, a tip names the key. A completed scan sends a
+  press **Scan sector**: 5 seconds, flight continues. Press `K` again, or the card's button (it reads **Cancel scan**
+  while scanning), to cancel: the progress is lost. Leaving the sector or losing the charting block cancels it too;
+  the card and the top of the flight view say which (the reason is inferred on the client, the server only says
+  cancelled). Switching ship ends it without a word. A scan belongs to the ship that began it: a small muted readout
+  under the top of the flight and command views shows its bar, then "SCAN CANCELLED" or the result, then
+  "NEXT SCAN IN n S", and only while you fly that ship, also after you leave the map. The server keeps a 10 s cooldown
+  on the sector after a scan ends, completed or cancelled (a request in it is refused); the key and the button wait
+  it out and say how long is left. Resting the cursor on the readout or the button names the key. In an uncharted sector, a tip names the key. A completed scan sends a
   muted blue pulse out from where your ship was: a thin front with a faint hex net that spreads to sensor range in
   about 2.6 s and lights the asteroids and hulls it passes, dimmed by gas. Faint short pings show while a scan runs.
   Only you see it, in the flight and command views (`content/visuals/scan.json`). The command view shows the gas-shaped
@@ -407,7 +409,7 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Boost | `Space` | Left stick click |
 | Show the cursor (pilot view) | Hold `Shift`; with it, right-drag over space turns the camera, and pointing at a console bar shows its figures | |
 | Dampeners on / off | `Z` | `X` |
-| Scan the sector you are in (flight, command view, map) | `K` | D-pad left |
+| Scan the sector you are in; again to cancel (flight, command view, map) | `K` | D-pad left |
 | Command view | `N` or `F9` | `Back` |
 | Galaxy map | `M` | `Y` |
 | Halt (cancel order; the only way to cancel a started jump) | `H` or `Backspace` | `B` |
@@ -480,7 +482,7 @@ Galaxy map:
 | Take control of a ship | Select exactly one other ship of yours in the sector you are in, then `T`; the map stays open. Another sector: travel there first |
 | Pan / zoom | `W` `A` `S` `D`, arrow keys or middle-drag / mouse wheel |
 | Sector card | Hover a sector to preview; left-click a sector to pin it (in place of any pinned card). Any click on the map outside the card closes it: a right click only closes it (and opens the course menu), a left click pins what it hits, outside the galaxy it closes. Clicks on the card's own controls never close it; its **X** or `Esc` does |
-| Scan your sector | `K` or D-pad left, or pin your own sector's card, then **Scan sector** (10 s wait before the same sector again) |
+| Scan your sector | `K` or D-pad left, or pin your own sector's card, then **Scan sector** (again to cancel; 10 s wait before the same sector again) |
 | Change layer, centre on your ship | `Page Up` / `Page Down` or the layer bar, `Space` |
 | Flat or tilted view | `V`, or **Flat** / **Tilt** on the layer bar; flattening shows the pinned card's layer |
 

@@ -204,7 +204,7 @@ public sealed class ControlsTests
         var map = Defaults();
         var names = map.Bindings(InputAction.ScanSector).ToArray().Select(b => b.DisplayName).ToArray();
         Assert.Equal(["K", "Pad DpadLeft"], names);
-        Assert.Contains(new ControlsCatalog(map).Rows, r => r.Category == "Scanning & exploration" && r.Action == "Scan the sector you are in" && r.Binding == "K / Pad DpadLeft");
+        Assert.Contains(new ControlsCatalog(map).Rows, r => r.Category == "Scanning & exploration" && r.Action == "Scan the sector you are in (again to cancel)" && r.Binding == "K / Pad DpadLeft");
         var devices = new InputDevices();
         devices.OnKey(GlfwKey.K, GlfwKeyAction.Press);
         for (var action = (InputAction)0; action < InputAction.Count; action++)

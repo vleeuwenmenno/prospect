@@ -320,12 +320,19 @@ internal sealed partial class ScreenHost
             var enabled = gate == ScanGate.Ready && _coverage.OwnCanChart;
             var pressed = MapSectorCard.Button("##scan"u8, buttonMin, buttonSize);
             var hovered = ImGui.IsItemHovered();
-            if (!scanning)
-                ScanButton(draw, buttonMin, buttonSize, enabled, Charted(sector), ScanRules.CooldownSeconds(snapshot.Exploration.Scan, world.Sector.Coord, snapshot.ServerTick));
+            // While a scan runs the button is the bar and cancels it; its progress and time left are drawn in it.
+            var progress = scanning ? ScanTracker.Progress(snapshot.Exploration.Scan, snapshot.ServerTick) : -1f;
+            ScanButton(draw, buttonMin, buttonSize, enabled, Charted(sector), ScanRules.CooldownSeconds(snapshot.Exploration.Scan, world.Sector.Coord, snapshot.ServerTick),
+                progress, (1f - progress) * snapshot.Content.Exploration.ScanTicks / TickLoop.SimulationHz);
             if (hovered)
                 DrawScanTip(ImGui.GetForegroundDrawList(), snapshot, world, buttonMin, buttonSize);
-            if (pressed && enabled && Bridge is { } bridge)
-                bridge.RequestScan();
+            if (pressed && Bridge is { } bridge)
+            {
+                if (scanning)
+                    bridge.CancelScan();
+                else if (enabled)
+                    bridge.RequestScan();
+            }
         }
 
         if (parts.Course >= 0)
@@ -364,20 +371,19 @@ internal sealed partial class ScreenHost
         var seconds = snapshot.Content.Exploration.ScanTicks / (float)TickLoop.SimulationHz;
         if (scan.State == ScanState.Scanning)
         {
+            // The pinned card's button is the bar (it cancels); only the hover preview draws a bar of its own.
+            if (!preview)
+            {
+                Kit.ClippedText(draw, _ui.Sans, Theme.FontCaption, at + new float2(0, Kit.Px(32)), Theme.TextMute, "Flight continues. Leaving the sector or switching ship cancels."u8, width);
+                return;
+            }
+
             var progress = ScanTracker.Progress(scan, snapshot.ServerTick);
-            var barHeight = Kit.Px(preview ? 6 : 28);
+            var barHeight = Kit.Px(6);
             draw.AddRectFilled(at, at + new float2(width, barHeight), Kit.Color(Theme.PanelRaised));
             draw.AddRectFilled(at, at + new float2(width * progress, barHeight), Kit.Color(Theme.Info, 0.85f));
             var left = (1f - progress) * seconds;
-            var label = Kit.F($"SCANNING {progress * 100f:0}%   {left:0.0} S LEFT");
-            if (preview)
-                Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(0, Kit.Px(8)), Theme.Info, label, width);
-            else
-            {
-                Kit.Text(draw, _ui.Mono, Theme.FontCaption, at + new float2(Kit.Px(Theme.Space2), Kit.Px(7)), Theme.Text, label);
-                Kit.ClippedText(draw, _ui.Sans, Theme.FontCaption, at + new float2(0, Kit.Px(32)), Theme.TextMute, "Flight continues. Leaving the sector or switching ship cancels."u8, width);
-            }
-
+            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(0, Kit.Px(8)), Theme.Info, Kit.F($"SCANNING {progress * 100f:0}%   {left:0.0} S LEFT"), width);
             return;
         }
 
@@ -410,9 +416,8 @@ internal sealed partial class ScreenHost
                 return _scan.Stop switch
                 {
                     ScanStop.LeftSector => "CANCELLED: LEFT THE SECTOR"u8,
-                    ScanStop.ControlChanged => "CANCELLED: SWITCHED SHIP"u8,
                     ScanStop.ChartingLost => "CANCELLED: CHARTING BLOCK LOST"u8,
-                    _ => "CANCELLED"u8,
+                    _ => "SCAN CANCELLED"u8,
                 };
             case ScanState.NoEquipment:
                 color = Theme.Bad;
@@ -427,8 +432,24 @@ internal sealed partial class ScreenHost
         }
     }
 
-    private void ScanButton(ImDrawListPtr draw, float2 min, float2 size, bool enabled, bool charted, int cooldown)
+    /// <summary>
+    /// The card's scan button. While a scan runs (<paramref name="progress"/> from 0 to 1, otherwise negative) it is the
+    /// progress bar and reads CANCEL SCAN with the time left.
+    /// </summary>
+    private void ScanButton(ImDrawListPtr draw, float2 min, float2 size, bool enabled, bool charted, int cooldown, float progress, float secondsLeft)
     {
+        if (progress >= 0f)
+        {
+            var hover = Kit.Animate(ImGui.GetItemID(), ImGui.IsItemHovered() ? 1f : 0f);
+            draw.AddRectFilled(min, min + size, Kit.Color(Theme.PanelRaised));
+            draw.AddRectFilled(min, min + new float2(size.X * progress, size.Y), Kit.Color(Theme.Info, 0.5f + 0.2f * hover));
+            draw.AddRect(min, min + size, Kit.Color(Kit.Mix(Theme.Info, Theme.Accent, hover)));
+            var running = Kit.F($"CANCEL SCAN   {secondsLeft:0.0} S");
+            var runningWidth = Kit.Measure(_ui.SansMedium, Theme.FontSmall, running).X;
+            Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, min + new float2((size.X - runningWidth) * 0.5f, (size.Y - Kit.Px(17)) * 0.5f), Theme.Text, running);
+            return;
+        }
+
         var hot = Kit.Animate(ImGui.GetItemID(), enabled && ImGui.IsItemHovered() ? 1f : 0f);
         draw.AddRectFilled(min, min + size, Kit.Color(enabled ? Kit.Mix(Theme.PanelRaised, Theme.Accent, 0.25f + 0.75f * hot) : Theme.PanelRaised, enabled ? 1f : 0.6f));
         draw.AddRect(min, min + size, Kit.Color(enabled ? Theme.Accent : Theme.Line));

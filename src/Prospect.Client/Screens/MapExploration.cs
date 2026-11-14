@@ -558,32 +558,36 @@ internal static class MapBounds
     }
 }
 
-/// <summary>Why a scan stopped, as far as the client can tell: the server sends only that it was cancelled.</summary>
+/// <summary>
+/// Why a scan stopped, as far as the client can tell: the server sends only that it was cancelled. A change of the
+/// controlled hull is not here: the server reports that as no scan at all, and the readout is not shown for it.
+/// </summary>
 internal enum ScanStop : byte
 {
     None,
     LeftSector,
-    ControlChanged,
     ChartingLost,
-    Unknown,
+
+    /// <summary>Nothing else changed, so the player cancelled it (the scan key again, or the card's button).</summary>
+    Requested,
 }
 
 /// <summary>
 /// The scan's readout: how far it is, and when it stops why. The server reports a cancelled scan without a reason,
-/// so the reason is inferred from what changed since it started: the sector, the hull flown, then its charting block.
+/// so the reason is inferred from what changed since it started: the sector, then its charting block; with neither
+/// changed the player cancelled it.
 /// </summary>
 internal sealed class ScanTracker
 {
     private ScanState _seen;
-    private uint _hull;
 
     /// <summary>Seconds since the scan last finished, was cancelled or refused; large while none has.</summary>
     public float SinceResult { get; private set; } = float.MaxValue;
 
     public ScanStop Stop { get; private set; }
 
-    /// <summary>Follows the snapshot's scan, recording the hull it started on and inferring a cancellation's reason.</summary>
-    public void Update(in ScanView scan, uint ownHull, SectorCoord ownSector, bool ownCanChart, float deltaTime)
+    /// <summary>Follows the snapshot's scan, inferring a cancellation's reason.</summary>
+    public void Update(in ScanView scan, SectorCoord ownSector, bool ownCanChart, float deltaTime)
     {
         if (SinceResult < float.MaxValue)
             SinceResult += deltaTime;
@@ -591,7 +595,6 @@ internal sealed class ScanTracker
             return;
         if (scan.State == ScanState.Scanning)
         {
-            _hull = ownHull;
             Stop = ScanStop.None;
         }
         else if (scan.State is ScanState.Completed or ScanState.Cancelled or ScanState.NoEquipment or ScanState.ChartLimit or ScanState.Cooldown)
@@ -599,9 +602,8 @@ internal sealed class ScanTracker
             SinceResult = 0f;
             Stop = scan.State != ScanState.Cancelled ? ScanStop.None
                 : ownSector != scan.Sector ? ScanStop.LeftSector
-                : _hull != 0 && ownHull != _hull ? ScanStop.ControlChanged
                 : !ownCanChart ? ScanStop.ChartingLost
-                : ScanStop.Unknown;
+                : ScanStop.Requested;
         }
 
         _seen = scan.State;
@@ -631,6 +633,9 @@ internal enum ScanGate : byte
 /// <summary>What the scan readout on the flight and command displays has to show this frame.</summary>
 internal readonly record struct ScanStrip(bool Running, bool ResultWindow, int CooldownSeconds)
 {
+    /// <summary>Nothing to draw: no scan of the hull flown.</summary>
+    public static readonly ScanStrip None = new(false, false, 0);
+
     /// <summary>True when anything may be drawn: a bar, a result still in its window, or a cooldown.</summary>
     public bool Any => Running || ResultWindow || CooldownSeconds > 0;
 }
@@ -648,22 +653,37 @@ internal static class ScanRules
         : ScanGate.Ready;
 
     /// <summary>
-    /// The scan key: when pressed, asks the server to scan the sector the ship being flown is in, unless a scan is
-    /// running or the sector is cooling down, which the snapshot already says. A ship with no charting block still
-    /// asks, so the server's refusal is what the readout tells. The same request as the map card's button. True when
-    /// a request went out.
+    /// The scan key: when pressed, asks the server to scan the sector the ship being flown is in, unless the sector is
+    /// cooling down, which the snapshot already says; pressed while a scan runs it asks the server to cancel it
+    /// instead. A ship with no charting block still asks, so the server's refusal is what the readout tells. The same
+    /// requests as the map card's button. True when a request went out.
     /// </summary>
     public static bool HandleKey(ActionMap actions, InputDevices devices, bool keyboardAvailable, in ScanView scan, SectorCoord here, long serverTick, PlayerInputBridge bridge)
     {
-        if (!actions.Pressed(devices, InputAction.ScanSector, keyboardAvailable) || Gate(scan, here, serverTick) != ScanGate.Ready)
+        if (!actions.Pressed(devices, InputAction.ScanSector, keyboardAvailable))
             return false;
-        bridge.RequestScan();
-        return true;
+        switch (Gate(scan, here, serverTick))
+        {
+            case ScanGate.Running:
+                bridge.CancelScan();
+                return true;
+            case ScanGate.Ready:
+                bridge.RequestScan();
+                return true;
+            default:
+                return false;
+        }
     }
 
-    /// <summary>What the strip shows: the bar while a scan runs, else a result for <paramref name="resultSeconds"/> after it ended, and the cooldown while there is one.</summary>
-    public static ScanStrip Strip(in ScanView scan, SectorCoord here, long serverTick, float sinceResult, float resultSeconds) =>
-        scan.State == ScanState.Scanning ? new ScanStrip(true, false, 0) : new ScanStrip(false, sinceResult <= resultSeconds, CooldownSeconds(scan, here, serverTick));
+    /// <summary>
+    /// What the strip shows: the bar while a scan runs, else a result for <paramref name="resultSeconds"/> after it
+    /// ended, and the cooldown while there is one. Only for the hull flown: a scan is bound to the ship that began it,
+    /// so with another hull controlled (<paramref name="ownHull"/>) nothing shows.
+    /// </summary>
+    public static ScanStrip Strip(in ScanView scan, uint ownHull, SectorCoord here, long serverTick, float sinceResult, float resultSeconds) =>
+        ownHull == 0 || scan.Hull != ownHull ? ScanStrip.None
+        : scan.State == ScanState.Scanning ? new ScanStrip(true, false, 0)
+        : new ScanStrip(false, sinceResult <= resultSeconds, CooldownSeconds(scan, here, serverTick));
 
     /// <summary>Whole seconds of cooldown left for <paramref name="here"/>, rounded up so it never reads 0 while still cooling; 0 when none.</summary>
     public static int CooldownSeconds(in ScanView scan, SectorCoord here, long serverTick) =>

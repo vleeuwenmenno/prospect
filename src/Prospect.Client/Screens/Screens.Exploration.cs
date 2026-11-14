@@ -70,14 +70,15 @@ internal sealed partial class ScreenHost
     /// <summary>
     /// The scan on the flight and command displays, small and muted under the top of the view: a bar while it runs,
     /// then for a few seconds what came of it, and under that the time until the sector can be scanned again. Flight
-    /// goes on throughout. With the pointer shown, resting it on the strip names the scan key.
+    /// goes on throughout. It belongs to the ship that began the scan and shows only while that ship is flown. With the
+    /// pointer shown, resting it on the strip names the scan key.
     /// </summary>
     private void DrawScanStrip(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, float alpha, bool pointable)
     {
         var look = MapLook;
         var scan = snapshot.Exploration.Scan;
         var here = world.Sector.Coord;
-        var show = ScanRules.Strip(scan, here, snapshot.ServerTick, _scan.SinceResult, look.ScanResultSeconds);
+        var show = ScanRules.Strip(scan, world.Own.Id, here, snapshot.ServerTick, _scan.SinceResult, look.ScanResultSeconds);
         var running = show.Running;
         var cooldown = show.CooldownSeconds;
         var result = show.ResultWindow ? ScanResult(scan, scan.Sector, out _) : default;
@@ -134,18 +135,18 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
-    /// A tooltip for the scan, under a control or readout: its key, and in a line what it does now (ready, running,
-    /// cooling down, or no charting block). It takes no input and is drawn over everything.
+    /// A tooltip for the scan, under a control or readout: its key, and in a line what it does now (ready, running and
+    /// cancelled by the key again, cooling down, or no charting block). It takes no input and is drawn over everything.
     /// </summary>
     private void DrawScanTip(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, float2 anchorMin, float2 anchorSize)
     {
         var scan = snapshot.Exploration.Scan;
         var gate = ScanRules.Gate(scan, world.Sector.Coord, snapshot.ServerTick);
         var seconds = snapshot.Content.Exploration.ScanTicks / (float)TickLoop.SimulationHz;
-        var title = Kit.F($"SCAN SECTOR   {ScanKeyName()}");
+        var title = gate == ScanGate.Running ? Kit.F($"CANCEL SCAN   {ScanKeyName()}") : Kit.F($"SCAN SECTOR   {ScanKeyName()}");
         var note = gate switch
         {
-            ScanGate.Running => "Flight goes on. Leaving the sector or switching ship cancels."u8,
+            ScanGate.Running => "Press again to cancel: progress is lost. Leaving the sector or switching ship cancels too."u8,
             ScanGate.Cooling => Kit.F($"Cooling down: ready in {ScanRules.CooldownSeconds(scan, world.Sector.Coord, snapshot.ServerTick)} s."),
             _ => !_coverage.OwnCanChart ? "This ship has no charting block."u8 : Kit.F($"Charts the sector you are in in {seconds:0} s. Flight goes on."),
         };

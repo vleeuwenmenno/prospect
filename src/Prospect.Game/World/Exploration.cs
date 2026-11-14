@@ -83,6 +83,13 @@ public struct ScanView
 {
     public ScanState State;
     public SectorCoord Sector;
+
+    /// <summary>
+    /// The hull the request, running scan or result belongs to (its packed id); zero before any request. A scan is
+    /// bound to the ship that began it, so a client shows it only while it flies that hull. A scan ended by a change
+    /// of the controlled hull is reported as <see cref="ScanState.Idle"/>, still with this hull and the cooldown.
+    /// </summary>
+    public uint Hull;
     public long StartedTick;
     public long CompletesTick;
 

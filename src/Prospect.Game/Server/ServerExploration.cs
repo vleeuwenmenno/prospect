@@ -27,7 +27,13 @@ public sealed partial class ServerHost
 
         // A refusal changes only the state: the cooldown from the last scan is kept, so a refused request never
         // shortens or lengthens it.
-        var scan = new ScanView { State = ScanState.NoEquipment, CooldownSector = connection.Scan.CooldownSector, CooldownUntilTick = connection.Scan.CooldownUntilTick };
+        var scan = new ScanView
+        {
+            State = ScanState.NoEquipment,
+            Hull = connection.Hull.Packed,
+            CooldownSector = connection.Scan.CooldownSector,
+            CooldownUntilTick = connection.Scan.CooldownUntilTick,
+        };
         connection.Scan = scan;
         if (!_hulls.IsAlive(connection.Hull) || !Equipped(connection.Hull.Index, true)) return;
         var sector = Galaxy.SectorOf(_hulls.State(connection.Hull.Index).Position);
@@ -38,12 +44,21 @@ public sealed partial class ServerHost
             return;
         }
 
-        connection.ScanHull = connection.Hull.Packed;
         scan.State = ScanState.Scanning;
         scan.Sector = sector;
         scan.StartedTick = _tick;
         scan.CompletesTick = _tick + _content.Exploration.ScanTicks;
         connection.Scan = scan;
+    }
+
+    /// <summary>
+    /// The player's own request to stop the scan it started. Only the sender's running scan is touched: a scan is held
+    /// per connection, so another player's cannot be reached, and with none running the request changes nothing, not
+    /// even the state a client shows. The cooldown starts as for any other cancellation.
+    /// </summary>
+    private void CancelScan(Connection connection)
+    {
+        if (connection.Scan.State == ScanState.Scanning) EndScan(connection, ScanState.Cancelled, _tick);
     }
 
     /// <summary>
@@ -64,8 +79,15 @@ public sealed partial class ServerHost
         {
             if (connection.State != ConnectionState.Active || connection.Scan.State != ScanState.Scanning) continue;
             ref var scan = ref connection.Scan;
-            if (!_hulls.IsAlive(connection.Hull) || connection.Hull.Packed != connection.ScanHull
-                || Galaxy.SectorOf(_hulls.State(connection.Hull.Index).Position) != scan.Sector
+            // A scan belongs to the ship that began it: when another hull is controlled (normally ResetControl has
+            // already ended it) it stops without a result, because there is nothing to tell the player about a ship
+            // they no longer fly.
+            if (!_hulls.IsAlive(connection.Hull) || connection.Hull.Packed != scan.Hull)
+            {
+                EndScan(connection, ScanState.Idle, tick);
+                continue;
+            }
+            if (Galaxy.SectorOf(_hulls.State(connection.Hull.Index).Position) != scan.Sector
                 || !Equipped(connection.Hull.Index, true))
             {
                 EndScan(connection, ScanState.Cancelled, tick);
@@ -100,7 +122,7 @@ public sealed partial class ServerHost
         }
         var scan = connection.Scan;
         var previous = connection.SentScan;
-        if (connection.ExplorationSent && count == 0 && scan.State == previous.State && scan.Sector == previous.Sector
+        if (connection.ExplorationSent && count == 0 && scan.State == previous.State && scan.Hull == previous.Hull && scan.Sector == previous.Sector
             && scan.StartedTick == previous.StartedTick && scan.CompletesTick == previous.CompletesTick
             && scan.CooldownSector == previous.CooldownSector && scan.CooldownUntilTick == previous.CooldownUntilTick)
         { connection.ChartCursor = cursor; return; }

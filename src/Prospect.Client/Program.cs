@@ -65,6 +65,7 @@ internal static class Program
           --capture-every <sec>   Time between numbered screenshots (default 0.25)
           --map-cell <pixels>     With --capture or --bench and a map view: open the map at this many pixels per sector (1.4 to 190)
           --close-map-at <sec>    With --capture or --bench and a map view: close the map at this time after the splash (captures of the first frames back in the world)
+          --cancel-scan-at <sec>  With --capture or --bench and a scan view (scan, scan-pilot): cancel the scan at this time after the splash, as the scan key pressed again would
           --map-tilt, --map-hover With --open scan and --capture or --bench: tilt the map, or rest the pointer on its centre
           --look <degrees>        Pilot view: hold the camera this many degrees to the right of the hull's nose
           --look-to <degrees>     With --look and --capture: turn the camera from --look to this angle, evenly
@@ -310,6 +311,10 @@ internal static class Program
                     options.CloseMapAt = closeMapAt;
                     i++;
                     break;
+                case "--cancel-scan-at" when hasValue && float.TryParse(args[i + 1], out var cancelScanAt) && cancelScanAt >= 0:
+                    options.CancelScanAt = cancelScanAt;
+                    i++;
+                    break;
                 case "--map-tilt":
                     options.MapTilt = true;
                     break;
@@ -361,6 +366,9 @@ internal static class Program
 
         if (options.CloseMapAt is not null && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--close-map-at works only with --capture or --bench.");
+
+        if (options.CancelScanAt is not null && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--cancel-scan-at works only with --capture or --bench.");
 
         if (options.GasFixture > 0 && (options.CapturePath is null || options.BenchSeconds > 0))
             return Fail("--gas-fixture works only with --capture, without --bench.");

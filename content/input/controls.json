@@ -54,7 +54,7 @@
     { "tab": "Galaxy map", "label": "Move or jump course menu", "binding": "Right click sector" },
     { "tab": "Galaxy map", "label": "Centre on own ship and its layer", "binding": "Space" },
 
-    { "tab": "Scanning & exploration", "action": "ScanSector", "label": "Scan the sector you are in", "scope": ["Pilot", "Map"] },
+    { "tab": "Scanning & exploration", "action": "ScanSector", "label": "Scan the sector you are in (again to cancel)", "scope": ["Pilot", "Map"] },
     { "tab": "Scanning & exploration", "label": "Scan from the galaxy map", "binding": "Pin the card of the sector you are in, then press its Scan button" },
     { "tab": "Scanning & exploration", "action": "ToggleSectorInfo", "label": "Sector information (show / hide)", "scope": ["All"] },
 
