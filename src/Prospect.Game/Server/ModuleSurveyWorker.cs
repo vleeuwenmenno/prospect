@@ -21,6 +21,9 @@ internal sealed class ModuleSurveyWorker : IDisposable
 
     internal readonly Slot[] Slots;
     private readonly Galaxy _galaxy;
+    // The one sector buffer the worker generates into. It is sized for the largest sector here, in the constructor,
+    // so a scan never grows it: the first scan of a world takes no more memory than the thousandth.
+    private readonly SectorContent _sector = new();
     private readonly AutoResetEvent _wake = new(false);
     private readonly Thread _thread;
     private bool _stop;
@@ -29,6 +32,7 @@ internal sealed class ModuleSurveyWorker : IDisposable
     internal ModuleSurveyWorker(Galaxy galaxy, int connections)
     {
         _galaxy = galaxy;
+        galaxy.Reserve(_sector);
         Slots = new Slot[connections];
         for (var i = 0; i < connections; i++) Slots[i] = new();
         _thread = new Thread(Run) { IsBackground = true, Name = "Module surveys" };
@@ -47,7 +51,6 @@ internal sealed class ModuleSurveyWorker : IDisposable
 
     private void Run()
     {
-        var sector = new SectorContent();
         while (!Volatile.Read(ref _stop))
         {
             _wake.WaitOne();
@@ -55,12 +58,22 @@ internal sealed class ModuleSurveyWorker : IDisposable
             {
                 if (Volatile.Read(ref _stop)) return;
                 if (Interlocked.CompareExchange(ref slot.State, 2, 1) != 1) continue;
-                slot.Count = 0; slot.Partial = false; slot.Failure = ModuleScanState.Idle;
-                try { Prepare(slot, sector); }
-                catch (Exception) { slot.Count = 0; slot.Failure = ModuleScanState.Unavailable; }
+                Execute(slot);
                 Volatile.Write(ref slot.State, 3);
             }
         }
+    }
+
+    /// <summary>
+    /// Runs the request in <paramref name="slot"/> on the calling thread, into the worker's own sector buffer. The thread
+    /// of the worker calls it for each queued slot; a test calls it directly, with the thread idle, to measure what a
+    /// scan takes.
+    /// </summary>
+    internal void Execute(Slot slot)
+    {
+        slot.Count = 0; slot.Partial = false; slot.Failure = ModuleScanState.Idle;
+        try { Prepare(slot, _sector); }
+        catch (Exception) { slot.Count = 0; slot.Failure = ModuleScanState.Unavailable; }
     }
 
     private void Prepare(Slot slot, SectorContent sector)

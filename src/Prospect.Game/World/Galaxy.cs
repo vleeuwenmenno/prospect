@@ -619,6 +619,13 @@ public sealed class Galaxy
     /// </summary>
     public float MatterAt(SectorCoord coord) => Shape.Density(coord.X, coord.Z) * Shape.LayerFalloff(coord.Y);
 
+    /// <summary>
+    /// Sizes <paramref name="content"/> for the largest sector this galaxy can generate, so that generating into it
+    /// afterwards, sector after sector, takes no managed memory. For holders that generate repeatedly off the tick
+    /// and the frame and would otherwise grow their buffers on the first scan.
+    /// </summary>
+    public void Reserve(SectorContent content) => AsteroidFields?.Reserve(content, SectorSize);
+
     /// <summary>Generates a sector's contents into <paramref name="content"/>, reusing its buffers.</summary>
     public void Generate(SectorCoord coord, SectorContent content)
     {

@@ -156,6 +156,12 @@ internal sealed class AppOptions
 
     public float ModuleAt { get; set; } = 1f;
 
+    /// <summary>With <c>--bench</c> and <see cref="ModuleRun"/>: run the module again whenever its cooldown has ended, so the benchmark measures many scans, not one.</summary>
+    public bool ModuleRepeat { get; set; }
+
+    /// <summary>With <c>--bench</c>: the frame rate is reported but not judged. For a scene, such as the inside of a gas cloud, whose cost is not what the run is about.</summary>
+    public bool BenchNoFpsTarget { get; set; }
+
     /// <summary>With <c>--capture</c>: accept party invitations as they arrive; for captures of the party interface.</summary>
     public bool AcceptInvites { get; set; }
 
@@ -240,6 +246,8 @@ internal sealed class App : IDisposable
     private bool _mapClosed;
     private bool _scanCancelled;
     private bool _moduleRan;
+    private uint _moduleSerialSeen;
+    private int _moduleScansDone;
     private readonly CatalogueMeshes _catalogueMeshes;
 
     /// <summary>Whether the acquired catalogue can be drawn safely.</summary>
@@ -423,7 +431,7 @@ internal sealed class App : IDisposable
         if (options.BrowserSample != BrowserSample.None)
             _screens.UseBrowserSample(options.BrowserSample);
         if (options.BenchSeconds > 0)
-            _benchmark = new Benchmark(options.BenchSeconds, options.BenchResizes);
+            _benchmark = new Benchmark(options.BenchSeconds, options.BenchResizes, options.ModuleRepeat ? Benchmark.ModuleScansRequired : 0, options.BenchNoFpsTarget);
     }
 
     public ClientSettings Settings { get; }
@@ -1313,8 +1321,25 @@ internal sealed class App : IDisposable
             World.TargetNearestRock();
         // A scripted module request goes through the very path the key takes, so a module that cannot run says so on its
         // chip and the script tries again on the next frame until the gate is open.
-        if (_options.ModuleRun is { } moduleRun && !_moduleRan && Session is not null && _sinceSplash >= _options.ModuleAt)
-            _moduleRan = _screens.RunModuleScript(moduleRun);
+        if (_options.ModuleRun is { } moduleRun && Session is not null)
+        {
+            // With --module-repeat a scan that has ended, whatever way, lets the script ask again, and the gate on the
+            // chip says when that is. Completed scans are counted, so a run whose scans never ran does not pass.
+            if (_moduleRan && _options.ModuleRepeat && snapshot is { State: SessionState.Active })
+            {
+                var scan = snapshot.Modules.Scan;
+                if (scan.Serial != _moduleSerialSeen && scan.State is not (ModuleScanState.Idle or ModuleScanState.Preparing or ModuleScanState.Scanning))
+                {
+                    _moduleSerialSeen = scan.Serial;
+                    if (scan.State == ModuleScanState.Completed)
+                        _moduleScansDone++;
+                    _moduleRan = false;
+                }
+            }
+
+            if (!_moduleRan && _sinceSplash >= _options.ModuleAt)
+                _moduleRan = _screens.RunModuleScript(moduleRun);
+        }
 
         // Scripted captures of the party interface answer an invitation the way a click on Accept does: with the
         // identity of the invitation shown in this frame's snapshot.
@@ -1382,7 +1407,7 @@ internal sealed class App : IDisposable
 
         if (_populated is null)
         {
-            ExitCode = _benchmark.Report(_gpu, _swapchain) ? 0 : 1;
+            ExitCode = _benchmark.Report(_gpu, _swapchain, _moduleScansDone) ? 0 : 1;
             Console.WriteLine($"  World drawing        skipped in {WorldFramesSkipped} frames since the start (the map hid it)");
             Console.WriteLine();
         }

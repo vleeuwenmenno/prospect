@@ -89,7 +89,10 @@ public sealed partial class ServerHost
             { scan.State = ModuleScanState.OutOfRange; return; }
         }
         if (equipment.Range > Galaxy.SectorSize) { scan.State = ModuleScanState.OutOfRange; return; }
-        var index = Array.IndexOf(_connections, connection);
+        // By hand: Array.IndexOf builds the type's default equality comparer on first use, which allocates, and this
+        // runs on the tick.
+        var index = 0;
+        while (!ReferenceEquals(_connections[index], connection)) index++;
         if (!_moduleWorker!.Start(index, request, state.Position, equipment.Range, connection.PlayerId))
         { scan.State = ModuleScanState.Busy; return; }
         connection.ModuleEquipment = equipment;

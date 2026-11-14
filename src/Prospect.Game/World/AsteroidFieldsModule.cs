@@ -459,11 +459,7 @@ public sealed class AsteroidFieldsModule : SectorModule
         if (_amount == 0 || MaxPerSector == 0)
             return;
 
-        if (content.Fields.Length == 0)
-        {
-            content.Fields = new Field[MaxFieldsInReach];
-            content.Knots = new RibbonKnot[MaxFieldsInReach * KnotsPerField];
-        }
+        ReserveFields(content);
 
         var fields = content.Fields.AsSpan();
         var knots = content.Knots.AsSpan();
@@ -618,6 +614,35 @@ public sealed class AsteroidFieldsModule : SectorModule
             content.Summary.FieldCount += BitOperations.PopCount(bits);
         content.BoundsCenter = (low + high) * 0.5f;
         content.BoundsRadius = ((high - low) * 0.5f).Length();
+    }
+
+    /// <summary>The field and contour buffers every generation of a sector needs, made once.</summary>
+    private static void ReserveFields(SectorContent content)
+    {
+        if (content.Fields.Length != 0)
+            return;
+        content.Fields = new Field[MaxFieldsInReach];
+        content.Knots = new RibbonKnot[MaxFieldsInReach * KnotsPerField];
+    }
+
+    /// <summary>
+    /// Sizes every buffer <see cref="Generate"/> uses for the largest sector it can make, so that a holder of
+    /// <paramref name="content"/> that generates again and again, such as the module survey worker, takes no managed
+    /// memory after this call. A sector holds at most <see cref="MaxPerSector"/> rocks, which bounds the asteroid
+    /// list and the index exactly. The candidates it chooses them from are not bounded that tightly; twice the cap
+    /// is room for the densest sector of the shipped galaxy with its candidates well under it, and a sector beyond
+    /// that grows the key buffer once, as any sector slot does.
+    /// </summary>
+    internal void Reserve(SectorContent content, double sectorSize)
+    {
+        if (_amount == 0 || MaxPerSector == 0)
+            return;
+        ReserveFields(content);
+        content.Reserve(MaxPerSector, MaxPerSector * 2);
+        content.Rocks.Reset(MaxPerSector, sectorSize);
+        var side = _thinCells + 1;
+        if (content.Thinning.Length < side * side * side)
+            content.Thinning = new float[side * side * side];
     }
 
     /// <summary>
