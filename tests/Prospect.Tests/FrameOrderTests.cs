@@ -2798,7 +2798,7 @@ public sealed class FrameOrderTests : IDisposable
 
         // A flat battery stops the charge, and the details say so.
         own.Energy = 0f;
-        Assert.Contains("BATTERY EMPTY: NOT CHARGING", Tip(ConsoleBar.Shield, own, flight));
+        Assert.Contains("BATTERY EMPTY: CHARGING ON SPARE POWER ONLY", Tip(ConsoleBar.Shield, own, flight));
 
         // No emitter: no threshold and no stored charge to speak of.
         flight.ShieldCapacity = 0f;
