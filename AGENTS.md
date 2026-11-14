@@ -265,8 +265,9 @@ The client opens a real window on the developer's desktop, and they are usually 
 
 - See `docs/gas-clouds.md` for the bounded visual pass and muted capture scenarios. Gas has no wire field. Some clouds hold asteroids, so a change to where clouds are changes asteroid lists: bump as for any generation change.
 - A cloud is anchored in the sector its centre lies in and may reach the sectors around it. `SectorContent.GasCloud` is the anchored one; `GasCloudModule.Intersecting` lists every cloud that reaches a sector or a sphere.
-- Generation keeps clouds apart so that only one shows at a time: the renderer composes one. Lift that rule in `GasCloudModule.TryGetCloud` only together with the renderer.
+- Generation keeps clouds apart (`GasCloudModule.SeparationMargin`), so none overlap and a camera is never in two. Many show at once from afar, but composition with shields and openings takes only the nearest. Lift the rule in `GasCloudModule.TryGetCloud` only together with the renderer's ordering of overlapping clouds.
 - Gas uses its RGB-only pass without portals or shields; frames with either defer bounded gas segments to HDR composition. Preserve the gas-free shield copies, frame.glsl layout, and per-sample own-passage checks. The fixed 1 MiB noise lattice is renderer-owned, immutable, and independent of resize.
+- Far gas: three levels of detail by distance in cloud radii, figures in `content/visuals/gas.json` (`GasTiers`). Which clouds exist comes from `IGasCloudSource` only (today `GeneratedGasClouds`: `GasCloudQuery.Collect` over `GasCloudModule.TryGetCloud`, by anchor sector); never read clouds from sector slots. Composition takes one cloud, the primary (`GasQueue`); every other draw is in the scene or, at the far level, in the sky. A new level or draw order needs a case in `GasLevelsTests` and a `--gas-distance` sweep capture. Large clouds (x half-extent over 7 km) gain strands, bent steps and clearing near the camera (`closeUp` in the same file, `gasStrands` in `gas.glsl`); an ordinary cloud must keep taking the unbent expressions exactly, so check fixtures 1–13 after touching the march.
 
 ## Known limits to design around
 

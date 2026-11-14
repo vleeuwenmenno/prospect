@@ -60,7 +60,9 @@ internal static class GasShaderFixture
             Center = new float4(0, 0, -20, 73.74375f),
             HalfSize = new float4(40, 40, 40, id is 3 or 4 or 5 or 6 or 7 or 11 or 12 ? 0.04f : 0),
             Tint = new float4(0.42f, 0.48f, 0.52f, 0),
-            Budget = new float4(48, 0, id, 0),
+            // The whole cloud at the full level of detail, as composition takes it.
+            Motion = new float4(0, 1, 0, 0),
+            Budget = new float4(48, GasConstants.Full, id, 0),
             // Homogeneous fixture density ignores these; they only keep the frame data well formed.
             Shape = new float4(0.56f, 1.8f, 0.1f, 0.24f),
             Look = new float4(0.14f, 2.2f, 1.5f, 0.03f),

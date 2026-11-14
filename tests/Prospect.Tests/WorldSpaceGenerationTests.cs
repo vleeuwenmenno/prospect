@@ -357,14 +357,13 @@ public sealed class WorldSpaceGenerationTests
         Assert.InRange(huge / (float)clouds.Count, 0.03f, 0.2f);
         Assert.True(largest > edge * 0.45f, $"the largest cloud is {largest * 2:0} m across");
 
-        // The renderer composes one cloud at a time: nowhere do two show at once.
+        // Clouds stand apart: no camera is inside or close to two at once, so composing the nearest is enough.
         for (var i = 0; i < clouds.Count; i++)
             for (var j = 0; j < i; j++)
             {
-                // A cloud shows up to its reach and the margin from its centre, so both would show somewhere
-                // between two that are closer than both together.
+                // Each keeps its reach and the margin clear around its centre.
                 var apart = (clouds[i].Center - clouds[j].Center).Length;
-                Assert.True(apart >= clouds[i].Reach + clouds[j].Reach + 2 * GasCloudModule.VisibilityMargin * edge - 1.0, $"two clouds {apart:0} m apart can both be seen at once");
+                Assert.True(apart >= clouds[i].Reach + clouds[j].Reach + 2 * GasCloudModule.SeparationMargin * edge - 1.0, $"two clouds {apart:0} m apart stand too close");
             }
     }
 }

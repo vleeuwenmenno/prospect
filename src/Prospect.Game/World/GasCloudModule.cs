@@ -22,14 +22,13 @@ public sealed class GasCloudModule : SectorModule
 {
     /// <summary>The content discriminator.</summary>
     public const string TypeName = "gasClouds";
-    /// <summary>The most clouds the renderer queues in a frame.</summary>
-    public const int MaxActive = 8;
     /// <summary>The most clouds that can reach one sector: one for each sector around it, and its own.</summary>
     public const int MaxPerSector = 27;
-    /// <summary>How far outside its x half-extent a cloud is drawn, as a share of the sector edge.</summary>
-    public const float VisibilityMargin = 0.28f;
-    /// <summary>The width of the band a cloud fades in over, as a share of the sector edge.</summary>
-    public const float VisibilityFade = 0.1f;
+    /// <summary>
+    /// The clear space generation keeps around a cloud beyond its x half-extent, as a share of the sector edge.
+    /// Two clouds' centres are never closer than both half-extents and both margins together.
+    /// </summary>
+    public const float SeparationMargin = 0.28f;
     /// <summary>The x half-extent, as a share of the sector edge, that <see cref="Extinction"/> is tuned for.</summary>
     public const float StandardHalfSizeShare = 0.12f;
 
@@ -84,10 +83,10 @@ public sealed class GasCloudModule : SectorModule
         Shape = shape;
         Look = look;
 
-        // Two clouds are rivals when a camera could see both. Their centres are then closer than both reaches
-        // together, and each centre is within half a sector of its anchor's.
+        // Two clouds are rivals when they would stand closer than both reaches together. Each centre is within
+        // half a sector of its anchor's, which bounds how far a rival's anchor can be.
         var largest = Math.Max(size.Max, hugeChance > 0 ? hugeSize.Max : 0);
-        _rivalReach = Math.Max(1, (int)MathF.Ceiling(2 * (largest + VisibilityMargin) + centerReach) - 1);
+        _rivalReach = Math.Max(1, (int)MathF.Ceiling(2 * (largest + SeparationMargin) + centerReach) - 1);
     }
 
     /// <summary>Reads bounded generation and rendering budgets from shared galaxy content.</summary>
@@ -151,11 +150,12 @@ public sealed class GasCloudModule : SectorModule
         if (!Candidate(galaxy, anchor, out cloud))
             return false;
 
-        // A camera sees one cloud at a time, which is all the renderer composes. Where two could be seen at once
-        // the larger stays. A rival counts even when a third outranks it in turn: the rule never has to look
-        // further than this, and only ever removes a cloud too many.
+        // Clouds stand apart: no two overlap, and a camera inside or close to one is never inside another. The
+        // renderer shows many at once from afar but composes only the nearest with shields and jump openings.
+        // Where two would stand too close the larger stays. A rival counts even when a third outranks it in
+        // turn: the rule never has to look further than this, and only ever removes a cloud too many.
         var edge = (float)galaxy.SectorSize;
-        var reach = cloud.HalfSize.X + VisibilityMargin * edge;
+        var reach = cloud.HalfSize.X + SeparationMargin * edge;
         for (var dz = -_rivalReach; dz <= _rivalReach; dz++)
             for (var dy = -_rivalReach; dy <= _rivalReach; dy++)
                 for (var dx = -_rivalReach; dx <= _rivalReach; dx++)
@@ -171,7 +171,7 @@ public sealed class GasCloudModule : SectorModule
                     var x = dx * edge + rival.Center.X - cloud.Center.X;
                     var y = dy * edge + rival.Center.Y - cloud.Center.Y;
                     var z = dz * edge + rival.Center.Z - cloud.Center.Z;
-                    var apart = reach + rival.HalfSize.X + VisibilityMargin * edge;
+                    var apart = reach + rival.HalfSize.X + SeparationMargin * edge;
                     if (x * x + y * y + z * z < apart * apart)
                     {
                         cloud = default;
@@ -273,17 +273,6 @@ public sealed class GasCloudModule : SectorModule
 
     /// <summary>The largest radius, in sector edges, <see cref="Intersecting(Galaxy, Double3, double, Span{GasCloudPlacement})"/> looks over.</summary>
     public const int MaxQueryRadiusSectors = 8;
-
-    /// <summary>
-    /// How much of a cloud shows from <paramref name="distance"/> metres off its centre: all of it close by,
-    /// fading to nothing <see cref="VisibilityMargin"/> of a sector edge beyond its x half-extent
-    /// <paramref name="reach"/>. Clouds are kept far enough apart that only one shows at a time.
-    /// </summary>
-    public static float Visibility(float distance, float reach, float sectorSize) =>
-        Math.Clamp((reach + sectorSize * VisibilityMargin - distance) / (sectorSize * VisibilityFade), 0, 1);
-
-    /// <summary>The same for a cloud of the standard size.</summary>
-    public static float Visibility(float distance, float sectorSize) => Visibility(distance, sectorSize * StandardHalfSizeShare, sectorSize);
 
     /// <summary>
     /// Extinction per metre for a cloud. A cloud larger than the standard one is thinner by as much, so that a

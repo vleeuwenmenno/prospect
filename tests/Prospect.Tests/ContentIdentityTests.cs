@@ -176,6 +176,7 @@ public sealed class ContentIdentityTests
     [Theory]
     // What only the client draws with and what only one player's keys do.
     [InlineData("visuals/shields.json", "\"rippleSeconds\": 0.85", "\"rippleSeconds\": 1.3")]
+    [InlineData("visuals/gas.json", "\"viewRangeSectors\": 5", "\"viewRangeSectors\": 3")]
     [InlineData("input/bindings.json", "\"Key:F3\"", "\"Key:F4\"")]
     // Where the list of games is, which a host may change for their own.
     [InlineData("net/listing.json", "\"refreshSeconds\": 30", "\"refreshSeconds\": 31")]

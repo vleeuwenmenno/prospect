@@ -199,9 +199,12 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private readonly DescriptorSetLayoutEx _shieldLayout;
     private readonly VkPipelineLayout _shieldPipelineLayout;
     private readonly VkPipeline _gasPipeline;
+    private readonly VkPipeline _gasSkyPipeline;
+    private readonly VkPipeline _gasScenePipeline;
+    // The scene's own depth as the middle and far gas levels read it while it is attached read-only.
+    private readonly VkDescriptorSet _gasDepthSet;
     private readonly GasNoiseTexture? _gasNoise;
-    private readonly GasConstants[] _gas = new GasConstants[GasCloudModule.MaxActive];
-    private int _gasCount;
+    private readonly GasQueue _gas = new();
     private readonly VkPipeline _shieldPipeline;
     private readonly VkPipeline _shieldMaskPipeline;
     private ShieldLookConstants _shieldLook;
@@ -318,10 +321,10 @@ internal sealed unsafe class SceneRenderer : IDisposable
         Span<VkDescriptorPoolSize> poolSizes =
         [
             new VkDescriptorPoolSize { Type = VkDescriptorType.UniformBuffer, DescriptorCount = FrameRenderer.FramesInFlight },
-            new VkDescriptorPoolSize { Type = VkDescriptorType.CombinedImageSampler, DescriptorCount = 8 + 2 + FrameRenderer.FramesInFlight },
+            new VkDescriptorPoolSize { Type = VkDescriptorType.CombinedImageSampler, DescriptorCount = 8 + 2 + 2 + FrameRenderer.FramesInFlight },
         ];
         _descriptorPool = device.CreateDescriptorPool(
-            new DescriptorPoolEx.CreateInfo { MaxSets = FrameRenderer.FramesInFlight + 2, PoolSizes = poolSizes },
+            new DescriptorPoolEx.CreateInfo { MaxSets = FrameRenderer.FramesInFlight + 3, PoolSizes = poolSizes },
             null
         );
 
@@ -464,6 +467,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
 
         _sceneSet = device.AllocateDescriptorSet(_descriptorPool, _sceneLayout);
         _shieldSet = device.AllocateDescriptorSet(_descriptorPool, _shieldLayout);
+        _gasDepthSet = device.AllocateDescriptorSet(_descriptorPool, _shieldLayout);
         _sampler = device.CreateSampler(Presets.Sampler.SamplerLinearClamped, null);
         _pointSampler = device.CreateSampler(Presets.Sampler.SamplerPointClamped, null);
 
@@ -588,6 +592,32 @@ internal sealed unsafe class SceneRenderer : IDisposable
                 throw;
             }
             _gasPipeline = Pipeline(gasVertex, gasFragment, noInput, Presets.Rasterization.Fill.CullNone, &depthOff, &gasBlend, _shieldPipelineLayout, VkRenderPass.NullHandle);
+            // Far clouds in the sky: the same blend and push range, and of the layout's sets only the frame's.
+            var skyVertex = Module(shaders, "fullscreen.vert");
+            VkShaderModule skyFragment;
+            try
+            {
+                skyFragment = Module(shaders, "gas_sky.frag");
+            }
+            catch
+            {
+                _gpu.Device.DestroyShaderModule(skyVertex, null);
+                throw;
+            }
+            _gasSkyPipeline = Pipeline(skyVertex, skyFragment, noInput, Presets.Rasterization.Fill.CullNone, &depthOff, &gasBlend, _shieldPipelineLayout, VkRenderPass.NullHandle);
+            // Middle and far clouds in the scene: depth is neither tested nor written, only read by the shader.
+            var sceneVertex = Module(shaders, "fullscreen.vert");
+            VkShaderModule sceneFragment;
+            try
+            {
+                sceneFragment = Module(shaders, "gas_scene.frag");
+            }
+            catch
+            {
+                _gpu.Device.DestroyShaderModule(sceneVertex, null);
+                throw;
+            }
+            _gasScenePipeline = Pipeline(sceneVertex, sceneFragment, noInput, Presets.Rasterization.Fill.CullNone, &depthOff, &gasBlend, _shieldPipelineLayout, VkRenderPass.NullHandle);
         }
         catch
         {
@@ -658,11 +688,14 @@ internal sealed unsafe class SceneRenderer : IDisposable
     {
         _composite = composite;
         _frameIndex = frameIndex;
-        var deferredGas = _gasCount > 0 && (lensing || _shieldCount > 0);
-        LastGasMode = (deferredGas, _shieldCount, _gasCount > 0);
+        // Composition takes over one cloud, the primary. Every other draw is in the scene before the shields and
+        // the lenses see it, as part of what is behind them.
+        var deferredGas = _gas.HasPrimary && (lensing || _shieldCount > 0);
+        var skyGas = _gas.SkyCount;
+        var sceneGas = _gas.Count > skyGas || (_gas.HasPrimary && !deferredGas);
+        LastGasMode = (deferredGas, _shieldCount, _gas.HasPrimary);
         var frame = constants;
-        // Visibility spheres cannot overlap: centers are >= .9 sector edges apart, radii <= .4 each.
-        frame.Gas = deferredGas ? _gas[0] : default;
+        frame.Gas = deferredGas ? _gas.Primary : default;
         if (constants.Gas.Budget.Z > 0)
         {
             frame.Gas.Budget.Z = constants.Gas.Budget.Z;
@@ -717,7 +750,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
             ImageLayout = VkImageLayout.DepthAttachmentOptimal,
             LoadOp = VkAttachmentLoadOp.Clear,
             // Kept when the lenses read it, or when the shields copy it before they are drawn.
-            StoreOp = lensing || _shieldCount > 0 || _gasCount > 0 ? VkAttachmentStoreOp.Store : VkAttachmentStoreOp.DontCare,
+            StoreOp = lensing || _shieldCount > 0 || sceneGas || deferredGas ? VkAttachmentStoreOp.Store : VkAttachmentStoreOp.DontCare,
             ClearValue = new VkClearValue { DepthStencil = new VkClearDepthStencilValue { Depth = 0f } },
         };
         commands.BeginRendering(
@@ -743,6 +776,13 @@ internal sealed unsafe class SceneRenderer : IDisposable
         commands.BindPipeline(VkPipelineBindPoint.Graphics, _starPipeline);
         commands.BindVertexBuffers(0, new ReadOnlySpan<VkBuffer>(in stars), new ReadOnlySpan<ByteSize64>(in zero));
         commands.Draw(6, StarCount, 0, 0);
+
+        // Far clouds are part of the sky: over the stars, under everything solid, and in the sky the lenses keep.
+        if (skyGas > 0)
+        {
+            DrawSkyGas(commands, frameIndex, skyGas);
+            commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _scenePipelineLayout, 0, new ReadOnlySpan<VkDescriptorSet>(in set), []);
+        }
 
         if (lensing)
             KeepScene(commands, _skyImage, false, ref color, ref depth);
@@ -779,14 +819,14 @@ internal sealed unsafe class SceneRenderer : IDisposable
         }
 
         // Both gas paths include these overlays, so unrelated portals cannot change their attenuation.
-        if (!deferredGas) DrawGas(commands, frameIndex, ref color, ref depth);
+        if (sceneGas) DrawGas(commands, frameIndex, skyGas, !deferredGas, ref color, ref depth);
 
         // Last, so the dust, the command grid and the jump marks are in what the shields bend and stay seen
         // through their transparent margins.
-        // Deferred composition needs the gas-free opaque scene even when no shield is drawn.
+        // Deferred composition needs the opaque scene without the primary cloud even when no shield is drawn.
         if (deferredGas && _shieldCount == 0) KeepBehindShields(commands, ref color, ref depth);
         DrawShields(commands, frameIndex, constants, ref color, ref depth);
-        _gasCount = 0;
+        _gas.Begin();
 
         commands.EndRendering();
         Transition(commands, _colorImage, VkImageAspectFlags.ColorBit, VkImageLayout.ColorAttachmentOptimal, VkImageLayout.ShaderReadOnlyOptimal, VkAccessFlags.ShaderReadBit, VkPipelineStageFlags.FragmentShaderBit);
@@ -929,36 +969,122 @@ internal sealed unsafe class SceneRenderer : IDisposable
         DrawShieldPass(commands, _shieldMaskPipeline, order[others..count]);
     }
 
-    /// <summary>Starts the bounded cloud list for this frame.</summary>
-    public void BeginGas() => _gasCount = 0;
+    /// <summary>Starts the bounded cloud list for this frame, holding at most <paramref name="limit"/> draws.</summary>
+    public void BeginGas(int limit = GasQueue.Capacity) => _gas.Begin(limit);
 
     /// <summary>For muted capture diagnostics: whether the last frame deferred gas, and how many shields it queued.</summary>
     public (bool Deferred, int Shields, bool HasGas) LastGasMode { get; private set; }
 
-    /// <summary>Queues a visible cloud, farthest first; sector bounds make the cap sufficient.</summary>
-    public void AddGas(in GasConstants gas)
+    /// <summary>The whole view, as the bounds of a draw that may show anywhere.</summary>
+    public static readonly float4 WholeView = new(0, 0, 1, 1);
+
+    /// <summary>
+    /// Queues one level of detail of a visible cloud; see <see cref="GasQueue"/> for the order. Nothing of it shows
+    /// outside <paramref name="bounds"/>: left, top, right and bottom as shares of the view.
+    /// </summary>
+    public void AddGas(in GasConstants gas, in float4 bounds) => _gas.Add(gas, bounds);
+
+    /// <summary>Limits drawing to a draw's bounds, a pixel wider; false when they are wholly off screen.</summary>
+    private bool GasScissor(CommandBuffer commands, in float4 bounds)
     {
-        if (_gasCount == _gas.Length) return;
-        var index = _gasCount++;
-        while (index > 0 && _gas[index - 1].Motion.W < gas.Motion.W)
-        { _gas[index] = _gas[index - 1]; index--; }
-        _gas[index] = gas;
+        var left = Math.Clamp((int)MathF.Floor(bounds.X * _extent.Width) - 1, 0, (int)_extent.Width);
+        var top = Math.Clamp((int)MathF.Floor(bounds.Y * _extent.Height) - 1, 0, (int)_extent.Height);
+        var right = Math.Clamp((int)MathF.Ceiling(bounds.Z * _extent.Width) + 1, 0, (int)_extent.Width);
+        var bottom = Math.Clamp((int)MathF.Ceiling(bounds.W * _extent.Height) + 1, 0, (int)_extent.Height);
+        if (right <= left || bottom <= top) return false;
+        var scissor = new VkRect2D { Offset = new VkOffset2D { X = left, Y = top }, Extent = new VkExtent2D(right - left, bottom - top) };
+        commands.SetScissor(0, new ReadOnlySpan<VkRect2D>(in scissor));
+        return true;
     }
 
-    private void DrawGas(CommandBuffer commands, int frameIndex, ref VkRenderingAttachmentInfo color, ref VkRenderingAttachmentInfo depth)
+    private void DrawGasQuad(CommandBuffer commands, in GasConstants gas, in float4 bounds)
     {
-        if (_gasCount == 0) return;
-        KeepBehindShields(commands, ref color, ref depth);
-        Span<VkDescriptorSet> sets = [_frameSets[frameIndex], _shieldSet];
-        commands.BindPipeline(VkPipelineBindPoint.Graphics, _gasPipeline);
-        commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _shieldPipelineLayout, 0, sets, []);
-        for (var i = 0; i < _gasCount; i++)
+        if (!GasScissor(commands, bounds)) return;
+        var pushed = gas;
+        commands.PushConstants(_shieldPipelineLayout, VkShaderStageFlags.FragmentBit, 0, new ReadOnlySpan<byte>(&pushed, sizeof(GasConstants)));
+        commands.Draw(3, 1, 0, 0);
+    }
+
+    /// <summary>The first <paramref name="count"/> draws, all at the far level, straight over the sky and the stars.</summary>
+    private void DrawSkyGas(CommandBuffer commands, int frameIndex, int count)
+    {
+        var set = _frameSets[frameIndex];
+        commands.BindPipeline(VkPipelineBindPoint.Graphics, _gasSkyPipeline);
+        commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _shieldPipelineLayout, 0, new ReadOnlySpan<VkDescriptorSet>(in set), []);
+        for (var i = 0; i < count; i++)
+            DrawGasQuad(commands, _gas[i], _gas.Bounds(i));
+        SetViewport(commands, _extent);
+    }
+
+    /// <summary>
+    /// The draws from <paramref name="first"/> on, each stopping at what is solid in front of it, and last the
+    /// primary when composition does not take it. A cloud at the full level reads the pilot's own hull's mask and
+    /// depth from a copy of the scene, taken once; the other levels read the scene's own depth and copy nothing.
+    /// </summary>
+    private void DrawGas(CommandBuffer commands, int frameIndex, int first, bool primary, ref VkRenderingAttachmentInfo color, ref VkRenderingAttachmentInfo depth)
+    {
+        var copied = false;
+        var reading = false;
+        var count = _gas.Count + (primary && _gas.HasPrimary ? 1 : 0);
+        for (var i = first; i < count; i++)
         {
-            var gas = _gas[i];
-            commands.PushConstants(_shieldPipelineLayout, VkShaderStageFlags.FragmentBit, 0, new ReadOnlySpan<byte>(&gas, sizeof(GasConstants)));
-            commands.Draw(3, 1, 0, 0);
+            ref readonly var gas = ref (i < _gas.Count ? ref _gas[i] : ref _gas.Primary);
+            ref readonly var bounds = ref (i < _gas.Count ? ref _gas.Bounds(i) : ref _gas.PrimaryBounds);
+            var masked = gas.Budget.Y == GasConstants.Full;
+            if (masked && (reading || !copied))
+            {
+                if (reading) EndDepthRead(commands, ref color, ref depth);
+                reading = false;
+                if (!copied) KeepBehindShields(commands, ref color, ref depth);
+                copied = true;
+                Span<VkDescriptorSet> sets = [_frameSets[frameIndex], _shieldSet];
+                commands.BindPipeline(VkPipelineBindPoint.Graphics, _gasPipeline);
+                commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _shieldPipelineLayout, 0, sets, []);
+            }
+            else if (!masked && !reading)
+            {
+                BeginDepthRead(commands, ref color, ref depth);
+                reading = true;
+                Span<VkDescriptorSet> sets = [_frameSets[frameIndex], _gasDepthSet];
+                commands.BindPipeline(VkPipelineBindPoint.Graphics, _gasScenePipeline);
+                commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _shieldPipelineLayout, 0, sets, []);
+            }
+            DrawGasQuad(commands, gas, bounds);
         }
-        _gasCount = 0;
+
+        if (reading) EndDepthRead(commands, ref color, ref depth);
+        SetViewport(commands, _extent);
+    }
+
+    /// <summary>
+    /// Carries on drawing with the scene's depth attached read-only, so a shader can read it meanwhile. Nothing
+    /// drawn until <see cref="EndDepthRead"/> may test or write depth.
+    /// </summary>
+    private void BeginDepthRead(CommandBuffer commands, ref VkRenderingAttachmentInfo color, ref VkRenderingAttachmentInfo depth)
+    {
+        const VkPipelineStageFlags depthTests = VkPipelineStageFlags.EarlyFragmentTestsBit | VkPipelineStageFlags.LateFragmentTestsBit;
+        commands.EndRendering();
+        Barrier(commands, _depthImage, VkImageLayout.DepthAttachmentOptimal, VkImageLayout.DepthStencilReadOnlyOptimal, VkAccessFlags.DepthStencilAttachmentWriteBit,
+            VkAccessFlags.DepthStencilAttachmentReadBit | VkAccessFlags.ShaderReadBit, depthTests, depthTests | VkPipelineStageFlags.FragmentShaderBit, VkImageAspectFlags.DepthBit);
+        color.LoadOp = VkAttachmentLoadOp.Load;
+        depth.LoadOp = VkAttachmentLoadOp.Load;
+        var colorInfo = color;
+        var depthInfo = depth with { ImageLayout = VkImageLayout.DepthStencilReadOnlyOptimal };
+        commands.BeginRendering(new VkRenderingInfo { RenderArea = new VkRect2D(_extent), LayerCount = 1, ColorAttachmentCount = 1, ColorAttachments = &colorInfo, DepthAttachment = &depthInfo });
+        SetViewport(commands, _extent);
+    }
+
+    /// <summary>Gives the scene's depth back to the passes that test and write it.</summary>
+    private void EndDepthRead(CommandBuffer commands, ref VkRenderingAttachmentInfo color, ref VkRenderingAttachmentInfo depth)
+    {
+        const VkPipelineStageFlags depthTests = VkPipelineStageFlags.EarlyFragmentTestsBit | VkPipelineStageFlags.LateFragmentTestsBit;
+        commands.EndRendering();
+        Barrier(commands, _depthImage, VkImageLayout.DepthStencilReadOnlyOptimal, VkImageLayout.DepthAttachmentOptimal, VkAccessFlags.DepthStencilAttachmentReadBit | VkAccessFlags.ShaderReadBit,
+            VkAccessFlags.DepthStencilAttachmentReadBit | VkAccessFlags.DepthStencilAttachmentWriteBit, depthTests | VkPipelineStageFlags.FragmentShaderBit, depthTests, VkImageAspectFlags.DepthBit);
+        var colorInfo = color;
+        var depthInfo = depth;
+        commands.BeginRendering(new VkRenderingInfo { RenderArea = new VkRect2D(_extent), LayerCount = 1, ColorAttachmentCount = 1, ColorAttachments = &colorInfo, DepthAttachment = &depthInfo });
+        SetViewport(commands, _extent);
     }
 
     private void BindShields(CommandBuffer commands, int frameIndex)
@@ -1155,6 +1281,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
         foreach (var pipeline in (ReadOnlySpan<VkPipeline>)[_backgroundPipeline, _starPipeline, _dustPipeline, _meshPipeline, _hullPipeline, _gridPipeline, _tonemapPipeline, _ftlMarkPipeline])
             device.DestroyPipeline(pipeline, null);
         device.DestroyPipeline(_gasPipeline, null);
+        device.DestroyPipeline(_gasSkyPipeline, null);
+        device.DestroyPipeline(_gasScenePipeline, null);
         device.DestroyPipeline(_shieldPipeline, null);
         device.DestroyPipeline(_shieldMaskPipeline, null);
         device.DestroyPipelineLayout(_shieldPipelineLayout, null);
@@ -1288,6 +1416,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         var ownBehindInfo = depthInfo with { ImageView = _ownBehindView };
         var behindInfo = imageInfo with { ImageView = _behindView };
         var behindDepthInfo = depthInfo with { ImageView = _behindDepthView };
+        var attachedDepthInfo = depthInfo with { ImageLayout = VkImageLayout.DepthStencilReadOnlyOptimal };
         _gpu.Device.UpdateDescriptorSets(
             [
                 new VkWriteDescriptorSet
@@ -1369,6 +1498,23 @@ internal sealed unsafe class SceneRenderer : IDisposable
                     DescriptorCount = 1,
                     DescriptorType = VkDescriptorType.CombinedImageSampler,
                     ImageInfo = &behindDepthInfo,
+                },
+                // The middle and far gas levels read the scene's depth itself; their shader never reads binding 0.
+                new VkWriteDescriptorSet
+                {
+                    DstSet = _gasDepthSet,
+                    DstBinding = 0,
+                    DescriptorCount = 1,
+                    DescriptorType = VkDescriptorType.CombinedImageSampler,
+                    ImageInfo = &behindInfo,
+                },
+                new VkWriteDescriptorSet
+                {
+                    DstSet = _gasDepthSet,
+                    DstBinding = 1,
+                    DescriptorCount = 1,
+                    DescriptorType = VkDescriptorType.CombinedImageSampler,
+                    ImageInfo = &attachedDepthInfo,
                 },
             ],
             []

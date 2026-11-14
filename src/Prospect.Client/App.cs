@@ -75,6 +75,9 @@ internal sealed class AppOptions
     public string? OpenView { get; set; }
     /// <summary>Muted deterministic camera placement around a generated cloud.</summary>
     public string? GasView { get; set; }
+    /// <summary>With the outside cloud camera: its distance in the cloud's largest half-extents, and where it moves to.</summary>
+    public float? GasDistance { get; set; }
+    public float? GasDistanceTo { get; set; }
     /// <summary>Muted production-shader regression fixture, zero when disabled.</summary>
     public int GasFixture { get; set; }
     public float BenchSeconds { get; set; }
@@ -1060,6 +1063,13 @@ internal sealed class App : IDisposable
 
         World.GasView = Devices.Muted ? _options.GasView : null;
         World.GasFixture = Devices.Muted ? _options.GasFixture : 0;
+        World.GasDistance = Devices.Muted ? _options.GasDistance : null;
+        if (World.GasDistance is { } gasFrom && _options.GasDistanceTo is { } gasTo)
+        {
+            // Equal ratios per capture, so a sweep spends as many captures on each level of detail's hand-over.
+            var span = Math.Max(_options.CaptureEvery * (_options.CaptureCount - 1), 1e-3f);
+            World.GasDistance = gasFrom * MathF.Pow(gasTo / gasFrom, Math.Clamp((_sinceSplash - _options.CaptureAfter) / span, 0f, 1f));
+        }
         // Advance only after the first image is saved, never from elapsed capture time.
         World.GasOverlayOpening = _options.GasFixture == GasShaderFixture.OverlayCheck
             && Volatile.Read(ref _screenshotJob.Saved) > 0;
@@ -1109,6 +1119,10 @@ internal sealed class App : IDisposable
                     Console.WriteLine($"capture {_capturesTaken:D2} at {_sinceSplash:F2}s: {World.Own.Jump} {WorldView.JumpProgress(World.Own, World.OwnFlight):F3}");
                 }
 
+                // What the gas levels of detail drew in the frame before this capture; read by scripted checks.
+                var gasDraws = World.GasDraws;
+                if (gasDraws != default)
+                    Console.WriteLine($"capture {_capturesTaken:D2} gas draws: full {gasDraws.Full}, middle {gasDraws.Middle}, far {gasDraws.Far}; composed {World.LastGasMode.Deferred}");
                 _capturesTaken++;
                 _captureRequested = true;
                 RequestScreenshot(file);

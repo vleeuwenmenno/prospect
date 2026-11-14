@@ -77,7 +77,8 @@ What stays per sector:
 
 - A sector anchors a cloud with chance `chance` (4%), centred anywhere in it (`centerReach`).
 - Size: `halfSizeShare` of the sector edge; with chance `huge.chance` the range `huge.halfSizeShare` instead.
-- A camera sees one cloud at a time: the renderer composes one. Where two could show at once, the larger stays.
+- Clouds stand apart: any two centres are further apart than both x half-extents plus 56% of a sector edge. Where two would stand closer, the larger stays.
+- So clouds never overlap, and a camera in or close to one is never in another. Many show at once from afar; see [gas clouds](gas-clouds.md).
 - That rule looks at candidates two sectors around, never further, and only ever removes a cloud.
 - A huge cloud is thinner by as much as it is larger (`GasCloudModule.ExtinctionOf`), so it is not a wall.
 
@@ -90,7 +91,6 @@ public readonly record struct GasCloudPlacement(SectorCoord Anchor, GasCloud Clo
 bool TryGetCloud(Galaxy galaxy, SectorCoord anchor, out GasCloud cloud);
 int Intersecting(Galaxy galaxy, SectorCoord sector, Span<GasCloudPlacement> output);
 int Intersecting(Galaxy galaxy, Double3 center, double radius, Span<GasCloudPlacement> output);
-static float Visibility(float distance, float reach, float sectorSize);
 float ExtinctionOf(in GasCloud cloud, float sectorSize);
 ```
 
@@ -157,7 +157,7 @@ Development machine, default content. Before is generation version 3.
 
 ## Open
 
-- Whether clouds may overlap and merge with each other. It needs the renderer to compose more than one.
+- Whether clouds may overlap and merge with each other. The renderer draws many clouds but lays whole clouds over each other and composes only the nearest; overlapping ones need their gas interleaved along a ray.
 - Whether the map should show a field as one shape across sectors rather than a count per sector.
 - Whether the current sector's readout should switch to the actual count once the sector is generated.
 - Broad regions of dense and empty space beyond the galaxy's arms: a third, sector-scale noise is not there.

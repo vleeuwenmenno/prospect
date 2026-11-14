@@ -58,6 +58,8 @@ float gasEnvelope(GasData gas, GasShape shape, vec3 p) {
     return box.x*box.y*box.z*cover*cover*0.75;
 }
 // Detail 0 is the coarse field used by far light probes (one lookup), 1 adds the medium octave, 2 is full detail.
+// Detail 3 is the far level's view of the cloud: full detail with the finest octave at its mean, so its outline is
+// the full outline smoothed rather than another shape, for two lookups and no wisps.
 float gasDensity(GasData gas, GasShape shape, vec3 p, int detail) {
     // Homogeneous fixture input isolates composition from procedural appearance; only --gas-fixture sets this.
     if(gas.budget.z>0.0) return 1.0;
@@ -95,6 +97,12 @@ float gasDensity(GasData gas, GasShape shape, vec3 p, int detail) {
     // The edge follows the medium and fine octaves more than the broad one, so it breaks into billows, not arcs.
     float partial=0.3*large.a+0.4*medium.a+0.15;
     float low=1.0-edge-cover, high=1.0+edge-cover;
+    if(detail==3) {
+        // What the finest octave does on average: it widens the coverage step by its spread and fills the fringe
+        // with a share of its strands. Without that the far level's outline would be the smaller one.
+        float haze=smoothstep(-0.8,-0.35,body)*(1.0-smoothstep(-0.1,0.25,body));
+        return fade*(smoothstep(low-0.1,high+0.1,partial+0.15)*amount+haze*0.25*(0.3+0.5*medium.a)*gas.look.z);
+    }
     bool needsFine=body<0.25 || (partial<high && partial+0.3>low);
     if(!needsFine) return fade*(partial>=high ? amount : 0.0);
     vec4 fine=gasNoise(GasOctave*(GasOctave*(u*8.7))+(medium.rgb-0.5)*1.5+shape.offset+drift*1.7);
@@ -103,6 +111,35 @@ float gasDensity(GasData gas, GasShape shape, vec3 p, int detail) {
     float strands=smoothstep(0.6,0.95,1.0-abs(2.0*fine.a-1.0));
     float fringe=smoothstep(-0.8,-0.35,body)*(1.0-smoothstep(-0.1,0.25,body));
     return fade*(core+fringe*strands*(0.3+0.5*medium.a)*gas.look.z);
+}
+
+// A large cloud seen from inside or close by: its octaves are as many times larger as it is, so what would be
+// billows and wisps on an ordinary cloud are walls kilometres across. Near the camera one further octave, about half
+// the body's finest, breaks the gas into strands with clear gaps between them: there is structure at the scale the
+// camera is at, and the eye passes through the gaps, so the cloud is deep rather than a surface. The strands average
+// out to one, so the amount of gas, the far view and the light probes stay as they are. The octave counts only where
+// a step is short enough to follow it (see the bent steps in gasSegment) and fades with distance from the camera.
+// A second, finer octave was tried as well: it cost a lookup a sample and could hardly be told apart.
+// x is what the gas at p is multiplied by; y, times the gas there, is how much more (or, toward a gap, less) of it
+// lies between p and the star within a strand's width, so each strand has a lit and a shaded side.
+vec2 gasStrands(GasData gas, GasShape shape, vec3 p, float width, float along) {
+    float close=1.0-smoothstep(0.5,1.0,along/(gas.fine.z*gas.halfSize.x));
+    // The gas nearest the camera is thinned as well (fine.w), so the eye reaches a few strands deep instead of
+    // stopping at the first: without it the inside of a dense part is one flat colour however it is broken up.
+    float clear=1.0-gas.fine.w*close;
+    // The finest octave of the body has 8.7 waves to the x half-extent.
+    float wave=gas.halfSize.x/18.3;
+    float first=gas.fine.x*close*clamp(1.5*wave/width-1.0,0.0,1.0);
+    if(first<=0.0) return vec2(clear,0.0);
+    vec3 u=shape.basis*(p*shape.iso);
+    vec3 drift=vec3(gas.motion.x,gas.motion.x*0.37,-gas.motion.x*0.21)*2.4;
+    vec3 at=GasOctave*(u*18.3)+shape.offset*1.9+drift;
+    // Six tenths of the volume is gaps and the rest holds the gas.
+    float strands=2.5*smoothstep(0.44,0.64,gasNoise(at).a);
+    // A third of a wave toward the star, in the octave's own coordinates; not worth a lookup where strands are faint.
+    float ahead=1.0;
+    if(first>0.3) ahead=2.5*smoothstep(0.44,0.64,gasNoise(at+GasOctave*(shape.basis*frame.sunDirection.xyz)*0.35).a);
+    return vec2(clear*mix(1.0,strands,first),(ahead-1.0)*first*(1.0/18.3));
 }
 
 // Dual-lobe Henyey-Greenstein: a forward lobe silvers the edges toward the star, a weak back lobe keeps the far
@@ -128,9 +165,22 @@ vec3 gasRay(vec2 uv) {
 float gasViewDepth(float z) { return z>0.0 ? frame.viewProjection[3][2]/z : Far; }
 // RGB is integrated scattering; alpha is remaining transmission. Bounds are view depths, not ray distances.
 // The sample point of step `index`: jittered within the step, the last step cut at the interval's end.
-vec3 gasStepPoint(vec3 origin, vec3 direction, float enter, float stepLength, float leave, float jitter, int index) {
-    float from=enter+float(index)*stepLength;
-    return origin+direction*(from+jitter*clamp(leave-from,0.0,stepLength));
+// Where step `index` starts. Unbent, the steps are equal. Bent (a large cloud near the camera), step `index` is
+// drawn toward the start of the interval by a share that falls from `bend` at the first step to none at the last
+// but one, so the first steps are a fraction of the even length and the last nearly twice it.
+float gasStepStart(float enter, float stepLength, float bend, int budget, int index) {
+    float even=float(index)*stepLength;
+    if(bend<=0.0) return enter+even;
+    return enter+even*(1.0-bend+bend*float(index)/float(budget));
+}
+// How long step `index` is before it is cut at the interval's end: exactly the even length when unbent.
+float gasStepLength(float stepLength, float bend, int budget, int index) {
+    if(bend<=0.0) return stepLength;
+    return gasStepStart(0.0,stepLength,bend,budget,index+1)-gasStepStart(0.0,stepLength,bend,budget,index);
+}
+vec3 gasStepPoint(vec3 origin, vec3 direction, float enter, float stepLength, float bend, int budget, float leave, float jitter, int index) {
+    float from=gasStepStart(enter,stepLength,bend,budget,index);
+    return origin+direction*(from+jitter*clamp(leave-from,0.0,gasStepLength(stepLength,bend,budget,index)));
 }
 vec4 gasSegment(GasData gas, vec3 ray, float fromDepth, float toDepth, float pixelAngle) {
     if(gas.budget.x<1.0 || toDepth<=fromDepth) return vec4(0,0,0,1);
@@ -152,10 +202,23 @@ vec4 gasSegment(GasData gas, vec3 ray, float fromDepth, float toDepth, float pix
     // rather than the count rounding the step: a rounded count re-placed every sample when the length moved by a
     // rounding error, so the ordinary pass and composition, which derive the same ray slightly differently, could
     // disagree by a whole sample at a pixel. Cut this way, the result follows the length continuously.
-    int budget=clamp(int(gas.budget.x),16,64);
+    // Level of detail (budget.y): 0 is the full march and the only one with a camera in or near the cloud. 1, the
+    // middle level, keeps the full density but takes fewer steps, replaces the near light probe by the sample's own
+    // density and takes the probes over the star's chord once per pair of steps. 2, the far level, is lit the same way
+    // over a handful of steps and can leave out the finest octave (tint.w). A light worked out from the smooth
+    // envelope alone was tried for it and shaded the cloud visibly more than the probes do, so the hand-over showed.
+    // The renderer crossfades two levels of one cloud by their weights (motion.y).
+    int level=int(gas.budget.y+0.5);
+    int detail=level==2 && gas.tint.w>0.5 ? 3 : 2;
+    int budget=clamp(int(gas.budget.x),level==0 ? 16 : 4,64);
     float smallest=min(gas.halfSize.x,min(gas.halfSize.y,gas.halfSize.z));
     float stepLength=max(leave-enter,smallest)/float(budget);
     int count=min(int(ceil((leave-enter)/stepLength)),budget);
+    // A large cloud whose gas begins close to the camera spends its steps where the eye can tell them apart: short
+    // ones first, growing with distance. Its even steps are hundreds of metres long, far too coarse for the gas a
+    // few hundred metres ahead. An interval that begins far off keeps even steps.
+    float bend=level==0 && gas.fine.y>0.0 ? gas.fine.y*clamp(1.0-2.0*enter/(gas.fine.z*gas.halfSize.x),0.0,1.0) : 0.0;
+    if(bend>0.0) count=budget;
     // An integer hash of the pixel: neighbours get unrelated offsets, so banding becomes fine grain, without the
     // radial streaks a direction hash gave where ray.xy barely changes or the hatching of a gradient pattern.
     uvec2 pixel=uvec2(gl_FragCoord.xy);
@@ -167,7 +230,10 @@ vec4 gasSegment(GasData gas, vec3 ray, float fromDepth, float toDepth, float pix
     FtlOwnRay ownRay=ftlOwnRay(ray,pixelAngle);
     GasShape shape=gasShape(gas);
     vec3 light=vec3(0); float transmission=1.0;
-    float extinction=gas.halfSize.w;
+    // The weight thins the cloud to the view only. Its own light still crosses the whole cloud, so a level that is
+    // fading in or out keeps the shading of the full cloud, and two levels with weights adding to one take the same
+    // light away from what is behind them as either would alone.
+    float extinction=gas.halfSize.w*gas.motion.y;
     float phase=gasPhase(dot(ray,frame.sunDirection.xyz));
     // Light probes march toward the star: a near one for local self-shadow, three over the chord for the bulk.
     vec3 sunStep=frame.sunDirection.xyz*gas.halfSize.x/gas.halfSize.xyz;
@@ -178,14 +244,40 @@ vec4 gasSegment(GasData gas, vec3 ray, float fromDepth, float toDepth, float pix
     float sunReach=dot(sunEnvelope,sunEnvelope);
     for(int i=0;i<64;i++) {
         if(i>=count || transmission<0.01) break;
-        float from=enter+float(i)*stepLength, width=clamp(leave-from,0.0,stepLength);
+        float from=gasStepStart(enter,stepLength,bend,budget,i);
+        if(bend>0.0 && from>=leave) break;
+        float width=clamp(leave-from,0.0,gasStepLength(stepLength,bend,budget,i));
         float t=from+jitter*width;
         // Test the actual sample, including own-hull pixels that the surface compositor protects.
         float real=passage ? ftlOwnReal(ownRay,t*forward) : 1.0;
         if(real<=0.0) continue;
         vec3 p=origin+direction*t;
-        float d=gasDensity(gas,shape,p,2)*real;
+        float d=gasDensity(gas,shape,p,detail)*real;
         if(d<0.001) continue;
+        float relief=0.0;
+        if(level==0 && gas.fine.x>0.0) {
+            vec2 strands=gasStrands(gas,shape,p,width,t);
+            relief=d*strands.y;
+            d*=strands.x;
+            if(d<0.001) continue;
+        }
+        if(level>0) {
+            // Local self-shadow follows the sample's own density, which is what the near probe finds on average.
+            near=d*0.07;
+            vec3 e=(p-shape.lean)*shape.scale;
+            float b=dot(e,sunEnvelope), c=dot(e,e)-3.6;
+            float chord=gas.budget.z>0.0 ? 1.0 : clamp((-b+sqrt(max(b*b-sunReach*c,0.0)))/sunReach,0.1,2.0);
+            int pair=i&~1;
+            if(pair!=farAt) {
+                farAt=pair;
+                far=(gasDensity(gas,shape,p+sunStep*(chord*0.2),0)+gasDensity(gas,shape,p+sunStep*(chord*0.5),0)
+                    +gasEnvelope(gas,shape,p+sunStep*(chord*0.8)))*(chord*0.33);
+            }
+            float seen=1.0-exp(-d*extinction*width);
+            light+=transmission*seen*gasSampleLight(gas,phase,near+far);
+            transmission*=1.0-seen;
+            continue;
+        }
         // One near probe resolves local self-shadow. The others are spread over the sun's chord through the outer
         // envelope, so a thick core really shades the far side wherever the sample is. Light changes slowly along
         // the view ray, so the near probe belongs to each pair of steps and the chord to each group of four, both
@@ -196,11 +288,11 @@ vec4 gasSegment(GasData gas, vec3 ray, float fromDepth, float toDepth, float pix
         int pair=i&~1, quad=i&~3;
         if(pair!=nearAt) {
             nearAt=pair;
-            near=gasDensity(gas,shape,gasStepPoint(origin,direction,enter,stepLength,leave,jitter,pair)+sunStep*0.035,1)*0.07;
+            near=gasDensity(gas,shape,gasStepPoint(origin,direction,enter,stepLength,bend,budget,leave,jitter,pair)+sunStep*0.035,1)*0.07;
         }
         if(quad!=farAt) {
             farAt=quad;
-            vec3 q=gasStepPoint(origin,direction,enter,stepLength,leave,jitter,quad);
+            vec3 q=gasStepPoint(origin,direction,enter,stepLength,bend,budget,leave,jitter,quad);
             vec3 e=(q-shape.lean)*shape.scale;
             float b=dot(e,sunEnvelope), c=dot(e,e)-3.6;
             // Homogeneous fixture gas has no envelope; a unit chord keeps its light the same everywhere.
@@ -209,7 +301,7 @@ vec4 gasSegment(GasData gas, vec3 ray, float fromDepth, float toDepth, float pix
                 +gasDensity(gas,shape,q+sunStep*(chord*0.5),0)
                 +gasEnvelope(gas,shape,q+sunStep*(chord*0.8)))*(chord*0.33);
         }
-        float depth=near+far;
+        float depth=max(near+far+relief,0.0);
         float absorbed=1.0-exp(-d*extinction*width);
         light+=transmission*absorbed*gasSampleLight(gas,phase,depth);
         transmission*=1.0-absorbed;

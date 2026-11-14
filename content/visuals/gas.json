@@ -1,0 +1,13 @@
+{
+  "viewRangeSectors": 5,
+  "rangeFade": 0.3,
+  "nearEnd": 3.0,
+  "nearFade": 1.0,
+  "midEnd": 9.0,
+  "midFade": 3.0,
+  "midSamples": 24,
+  "farSamples": 10,
+  "farDetail": 1,
+  "maxDraws": 32,
+  "closeUp": { "fromHalfSize": 7000, "fullHalfSize": 10000, "strands": 0.9, "stepBend": 0.95, "reach": 0.8, "clearing": 0.6 }
+}

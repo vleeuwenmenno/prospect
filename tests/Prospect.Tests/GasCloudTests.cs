@@ -164,21 +164,13 @@ public sealed class GasCloudTests
     }
 
     [Fact]
-    public void VisibilityFadesBeforeSupportCanReachANonNeighbourAndPushFitsLayout()
+    public void LargerCloudsAreThinnerAndPushFitsLayout()
     {
-        Assert.Equal(1, GasCloudModule.Visibility(12000, 40000));
-        Assert.Equal(0.5f, GasCloudModule.Visibility(14000, 40000));
-        Assert.Equal(0, GasCloudModule.Visibility(16000, 40000));
-        Assert.Equal(0, GasCloudModule.Visibility(1e20f, 40000));
-
-        // A larger cloud shows from as far outside itself, and is thinner by as much as it is larger.
-        Assert.Equal(GasCloudModule.Visibility(14000, 40000), GasCloudModule.Visibility(14000, 4800, 40000));
-        Assert.Equal(0.5f, GasCloudModule.Visibility(29200, 20000, 40000));
-        Assert.Equal(0, GasCloudModule.Visibility(31200, 20000, 40000));
+        // A larger cloud is thinner by as much as it is larger. How far a cloud shows is the client's (GasTiers).
         var gas = Content.Galaxy.GasClouds!;
         Assert.Equal(gas.Extinction, gas.ExtinctionOf(new GasCloud(default, new Vector3(4000, 2600, 3400), 0), 40000));
         Assert.Equal(gas.Extinction * 0.25f, gas.ExtinctionOf(new GasCloud(default, new Vector3(19200, 12480, 16320), 0), 40000), 1e-9f);
-        Assert.Equal(112, Marshal.SizeOf<GasConstants>());
+        Assert.Equal(128, Marshal.SizeOf<GasConstants>());
         Assert.Equal(64, Marshal.OffsetOf<GasConstants>(nameof(GasConstants.Budget)).ToInt32());
         Assert.Equal(80, Marshal.OffsetOf<GasConstants>(nameof(GasConstants.Shape)).ToInt32());
         Assert.Equal(96, Marshal.OffsetOf<GasConstants>(nameof(GasConstants.Look)).ToInt32());

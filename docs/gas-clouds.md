@@ -10,9 +10,109 @@ Clouds are things in world space; see [world generation](world-generation.md) fo
 
 - `gas-clouds` is a `SectorModule` in shared `galaxy.json` with its own streams. A sector anchors at most one cloud: 4% presence, including outside the galaxy disc.
 - A cloud is centred anywhere in its anchor sector and may lie across its walls. Most have an x half-extent of 4 to 5.6 km; 8% are huge, 10 to 20 km.
-- The anchor's `SectorContent` holds the descriptor and count; the renderer reads only Ready slots for its galaxy. `GasCloudModule.Intersecting` lists clouds centred elsewhere.
+- The anchor's `SectorContent` holds the descriptor and count. The renderer does not read them from there: it reads the cloud list below, which names every cloud by its anchor.
 - Positions become camera-relative only after double-precision sector translation. Density coordinates stay local to the cloud.
 - Some clouds hold asteroids (`inGas` in the asteroid module): gas now changes asteroid lists near those clouds. Generation version 4 and protocol 36 cover it; the frozen fixture holds a copy of the gas rules.
+
+## Seen from far away
+
+Decided. A cloud is seen from several sectors away, at one of three levels of detail, with no step between them.
+
+Which clouds exist:
+
+- `IGasCloudSource` answers "which clouds are known around this sector". It is the one place fog of war will narrow.
+- `GeneratedGasClouds` is the only source today: every cloud the seed generates.
+- It asks `GasCloudModule.TryGetCloud` for each anchor sector, nearest first (`GasCloudQuery.Collect`). No generation rule is repeated, no asteroid is generated and nothing is sent.
+- A cloud is listed once, by its anchor, whatever its size: a huge one that lies across sector walls is found like any other.
+- `GasCloudField` keeps the list on a worker, one job at a time, and remakes it when the camera changes sector. The frame never waits.
+- The list reaches two sectors past the view range, measured to a cloud's centre, and holds at most 512 clouds, nearest sectors first.
+
+Levels, by distance in radii (distance to the centre over the largest half-extent), so a cloud of any size changes level at the same size on screen:
+
+| Level | Radii, shipped | Work per pixel | Where it is drawn |
+| --- | --- | --- | --- |
+| Full | up to 3, gone by 4 | today's march: 48 steps, at most 216 lookups | in the scene, or composed (one cloud) |
+| Middle | to 9, gone by 12 | 24 steps of the full density, light probes once per pair: at most 96 lookups | in the scene, stopping at what is solid, no copy |
+| Far | to the view range | 10 steps, finest octave smoothed away, same light: at most 30 lookups | in the sky, before anything solid |
+
+- Hand-over: both levels are drawn, each with a weight; the weights add to one. The weight thins the cloud to the view only, never to its own light, so shading does not change during a hand-over.
+- View range: 5 sectors (200 km), fading over its last 30%. The old fade at 30–40% of a sector is gone.
+- Every draw is cut to the cloud's outline on screen (scissor), so a far cloud costs its own pixels, not the screen.
+- All figures are client data in `content/visuals/gas.json` (`GasTiers`), bounded on load. The full level's sample count stays in `galaxy.json`.
+- The full level reaches at least 2 radii (`nearEnd`): the other levels assume a camera outside the cloud's box.
+
+Why these three:
+
+- Full is unchanged, so the near look is exactly what it was.
+- Middle keeps every density octave. At 3–9 radii the finest octave is still 15–45 pixels wide; dropping it there would show.
+- Far uses the same density with its finest octave replaced by its average. The outline stays the same shape, so the hand-over does not morph.
+- A light from the smooth envelope alone (no lookups) was tried for far and rejected: it shaded the cloud visibly more than the probes.
+- A half-resolution target was rejected again: it needs new depth, lens and shield edge reconstruction and a resize path.
+
+Many clouds at once, the order:
+
+- A frame queues at most 32 draws (`maxDraws`, 64 at most) plus the primary. When full, the farthest is left out.
+- Whole clouds are laid over each other, farthest centre first. Gas of two overlapping clouds is not interleaved along a ray.
+- The primary is the nearest cloud at the full level. It is always drawn last, and it is the one cloud composition takes over.
+
+Many clouds at once, where each is drawn:
+
+- Far draws that are behind every other cloud go into the sky: over the stars, under rocks and hulls. The lens's sky copy and the scene behind the shields hold them, at no extra copy.
+- Any other draw is in the scene after the overlays, before the shields.
+- Middle and far draws there read the scene's own depth, attached read-only meanwhile (`gas_scene.frag`): nothing is copied for them. A full cloud needs the pilot's hull mask, so it reads a scene copy, taken once a frame.
+
+Huge clouds (x half-extent 10 to 20 km) go through the same levels: levels, bounds and step lengths are relative to the cloud, positions are camera-relative.
+The view range is the same 5 sectors for every size, so a huge cloud is at the full or the middle level for as long as it shows.
+
+## Large clouds close up
+
+Decided. A large cloud seen from inside or close by keeps structure and depth; it is not a flat wall.
+
+The cause of the wall: a cloud's octaves and its steps scale with its size.
+In a cloud four times larger the finest feature is 2.3 km and a step is up to 800 m, so the gas near the camera has no detail and no depth.
+Its extinction (`GasCloudModule.ExtinctionOf`) is not the cause: it makes a huge cloud as deep as an ordinary one, which looks right from outside.
+
+What a large cloud gains, near the camera only and at the full level only:
+
+- Strands: one further octave (18.3 waves to the x half-extent, about 1 km in the largest cloud) breaks the gas into strands and gaps. It counts only where a step is short enough to follow it.
+- Relief: one more lookup a third of a wave toward the star gives each strand a lit and a shaded side. Without it the strands are there but flat.
+- Bent steps: the march's first steps are a fraction of the even length and grow with distance, the last nearly twice it. The count stays the content's.
+- Clearing: the gas nearest the camera is thinned, so the eye reaches a few strands deep.
+- All of it fades out between half the reach and the reach (0.8 x half-extents) from the camera; beyond that the cloud is exactly what it was.
+
+How it is bounded:
+
+- Figures are client data: `closeUp` in `content/visuals/gas.json`. Nothing below `fromHalfSize` (7 km), all of it from `fullHalfSize` (10 km).
+- Every ordinary cloud is below 7 km: its march takes the same expressions as before, and fixtures 1–13 run unchanged.
+- The middle and far levels take none of it. They start at 3 radii, far past the reach.
+- `GasData` carries the figures in an eighth vector (`fine`). At most two more lookups per near sample.
+
+What it costs, at 5096x1390 on an RTX 5070 Ti, wall clock, one quiet run of two each:
+
+| View of the huge cloud at `133,0,-77` | Without | With |
+| --- | --- | --- |
+| Inside, at its centre | 5.4 ms | 8.7 ms |
+| Inside, halfway out (`--gas-distance 0.5`) | 4.9 ms | 9.3 ms |
+| At its surface (`0.8`) | 4.9 ms | 6.1 ms |
+| Edge | 2.9 ms | 4.0 ms |
+
+- So inside a huge cloud this resolution drops under 144 fps (about 110). Setting `strands`, `stepBend` and `clearing` to 0 gives the old cost and the old wall back.
+- Most of the cost is the bent steps: more of the samples fall inside the gas, and thinned gas is marched deeper before it is opaque.
+
+Tried and dropped:
+
+- A second, finer octave: a lookup a sample, hardly visible.
+- Splitting the nearest even steps instead of bending them: as costly, and blurrier.
+- Reusing a step's density and light for its neighbour where steps are short: cheaper, but it drew arcs at the distance where the reuse stopped.
+- A reach of 0.4: strands only within a few kilometres, so the surface seen from just outside was a wall again.
+
+Open:
+
+- Clearing thins gas as the camera comes near it. Seen in motion this may read as fog drawing back; stills cannot show it.
+- Deep inside a dense part the light is the same everywhere, so the view is soft and low in contrast even with strands.
+- Strands and relief are not in the light probes: a strand does not shade the gas behind it.
+- A segment that begins at a shield or between two openings bends its own steps from its own start.
+- Whether the cost inside a huge cloud is acceptable at 5096x1390, or the figures should be lowered.
 
 ## Rendering
 
@@ -48,9 +148,9 @@ A portal elsewhere cannot switch the shield equation at an unaffected pixel:
 
 The existing behind-shield colour/depth views are also tone-map bindings 6/7.
 A deferred frame copies them even when no shield is drawn. Their layouts are initialized before any static descriptor use.
-FrameConstants/frame.glsl append matching 112-byte gas data; only deferred frames have a nonzero budget there.
-Composition uses two extra sampled descriptors and 112 additional uniform bytes per frame slot.
-The ordinary pass pushes the same 112 bytes; the shield pipeline layout's push range is the larger of the two users (Vulkan guarantees 128).
+FrameConstants/frame.glsl append matching 128-byte gas data; only deferred frames have a nonzero budget there.
+Composition uses two extra sampled descriptors and 128 additional uniform bytes per frame slot.
+The gas passes push the same 128 bytes, all that Vulkan guarantees; the shield pipeline layout's push range is the larger of the two users.
 The noise cache adds one immutable image/sampler and one sampled descriptor per frame slot; no render graph or history.
 The ordinary pass retains its guarded pipeline module acquisition and RGB-only blend.
 
@@ -68,14 +168,13 @@ The content budget (16–64, 48 shipped) is the sample count for an interval at 
 Sample-count boundaries add zero weight initially, and light probes use fixed step groups rather than the previous occupied step. This avoids those rounding-sensitive jumps between ordinary and deferred rays; the density cutoff and early termination still introduce discontinuities.
 An occupied sample uses at most three density lookups and four lighting lookups. Across a full 64-step march, lighting uses at most 96 lookups before density-based skips.
 CPU distance/frustum rejection precedes submission. Zero submitted clouds make no gas copy or raymarch draw.
+Far clouds alone make no copy either: they are drawn into the sky.
 
-A cloud shows up to its x half-extent plus 28% of a sector edge from its centre, fading over the last 10%.
-Generation keeps any two clouds further apart than both of those reaches together: where two could show at once, the larger stays.
-Thus at most one cloud has positive visibility at any camera. The eight-record queue is conservative; deferred frame data needs only one record.
-A cloud of today's usual size fades from 30% to 40% of a sector edge, as before; a huge one from 68% to 78%. Both are inside the streamed block of sectors.
-Extinction per metre falls with size above the standard 4.8 km half-extent, so a huge cloud is as deep to look through as an ordinary one.
-A huge cloud keeps the content's sample count over a longer path: its steps are up to four times as long.
-First captures of huge clouds (`133,0,-77` and `-66,1,37`, outside, edge and pilot) render without errors: a bright, soft mass with less inner structure than an ordinary cloud. Not tuned, and not run with validation layers.
+Several clouds can be in view; see "Seen from far away" for the queue and the order.
+Deferred frame data still holds one record: the primary cloud. Every other draw is part of the scene the composition reads.
+Generation keeps any two clouds apart by both x half-extents plus 56% of a sector edge, so none overlap and a camera in or close to one is never in another.
+Extinction per metre falls with size above the standard 4.8 km half-extent (`GasCloudModule.ExtinctionOf`), so a huge cloud is as deep to look through as an ordinary one.
+A huge cloud keeps the content's sample count over a longer path: its even steps are up to four times as long. Close to the camera they are bent shorter; see "Large clouds close up".
 
 Deferred tone mapping uses at most thirteen segment calls: six intervals, up to six shield attenuation calls, and own-shield lift.
 A shield uses at most two refraction segments in its light pass, skipped when the bend is zero.
@@ -88,6 +187,19 @@ Portal intervals accumulate screen-space deflections in depth order; each select
 This is still screen-space lensing, with mirrored offscreen lookups and reference layer depths for parallel bent rays, not physical multi-lens ray tracing.
 Overlapping mouths and crossing shield silhouettes still require GPU inspection.
 Overlapping shields retain the shared-background approximation; summed deltas use the nearest shield depth for gas attenuation.
+Open limits of far gas, layering:
+
+- A rock inside or behind a cloud drawn into the sky is not dimmed by it. Rocks are small or not drawn at those distances.
+- A shield or an opening inside a cloud at the middle or far level, or inside a second full cloud, is drawn over that cloud's gas, not through it.
+- A lens's sky and rock fallbacks hold far gas but not middle gas or a second full cloud.
+- When the nearest full cloud changes, two overlapping thick clouds swap order at once.
+
+Open limits of far gas, look:
+
+- Far and middle levels show more grain at thin edges: fewer steps, the same per-pixel jitter, no accumulation over frames.
+- Every cloud is lit by the star of the camera's sector, whatever sector the cloud is in.
+- Motion shimmer of the far and middle levels has not been reviewed.
+
 These are open visual limits, not certified acceptance. Real captures showed dense haze and visible structure,
 but motion/shimmer and fallback silhouettes still need acceptance review. Close-up, the gas is soft: the finest octave is about 550 m.
 V3 runtime validation reported no warnings/errors through captures and automatic compositor resize.
@@ -103,10 +215,13 @@ It moves only the inspection camera; it never creates a fake cloud or moves ship
 Sectors with the default seed whose arrival point is inside a cloud, for the pilot views:
 
 - `127,-1,-127`: an ordinary cloud, half extents `(5256,3416,4468)` m, centred about 1.1 km from arrival, with rocks in it.
-- `133,0,-77`: a huge cloud, half extents `(19616,12750,16674)` m, centred about 1.9 km from arrival. It reaches all 26 sectors around.
+- `133,0,-77`: a huge cloud, half extents `(19616,12750,16674)` m, centred about 1.9 km from arrival. Its box lies across the wall to sector `132,0,-77`.
 - `-66,1,37`: a huge cloud with rocks in it, half extents `(19967,12978,16972)` m, centred about 7.4 km from arrival.
 
-- `outside` / `absent`: same camera, 2.4 z half-extents from cloud center, or nearer for a huge cloud: no further than it still shows in full. Absent disables gas submission.
+- `outside` / `absent`: same camera, 2.4 z half-extents from cloud center; absent disables gas submission.
+- `--gas-distance <radii>` with either: the camera's distance in largest half-extents, 0.1 to 200. `--gas-distance-to <radii>` moves it there over the captures in equal ratios: `--gas-distance 2.6 --gas-distance-to 30 --capture-count 12 --capture-every 0.7` crosses both hand-overs.
+- Each capture prints how many draws the frame queued at each level and whether the primary was composed.
+- A huge cloud close up: `--sector 133,0,-77 --gas-view outside --gas-distance 0.5` (inside, halfway out), `0.8` (at its surface), `1.2` (just outside); `2`, `4` and `6` are one, two and three sectors away.
 - `inside` / `inside-absent`: same camera at cloud center, looking -z; full-screen volume stress.
 - `edge`: camera at 92% of x half-extent; `offscreen`: outside camera facing away.
 - `pilot` / `pilot-absent`: normal ship camera for opaque hull, shield and jump inspection; `--look` still works.

@@ -345,6 +345,8 @@ internal sealed class WorldView
         Editor = new ShipEditor(jobs);
         // Damaged shells are built on a worker, one at a time; nothing builds one in the frame.
         _shields = new ShieldVisuals(ShieldLook.Load(), jobs);
+        // Every cloud the seed generates is known. Fog of war would hand a narrower source in here.
+        _gasField = new GasCloudField(jobs, new GeneratedGasClouds(), _gasTiers.ViewRangeSectors);
         _asteroidMeshBase = AsteroidMesh(0, 0);
         _meshCount = MeshCount();
         _cubeMesh = CubeMesh();
@@ -505,6 +507,8 @@ internal sealed class WorldView
     public Vector3 CameraRight => _right;
     /// <summary>Muted capture camera only; never creates or changes generated cloud descriptors.</summary>
     public string? GasView { get; set; }
+    /// <summary>With the outside cloud camera: its distance from the cloud's centre, in the cloud's largest half-extents.</summary>
+    public float? GasDistance { get; set; }
     /// <summary>Controlled shader inputs, applied only while devices are muted.</summary>
     public int GasFixture { get; set; }
     /// <summary>
@@ -514,7 +518,14 @@ internal sealed class WorldView
     public bool GasOverlayOpening { get; set; }
     /// <summary>Whether the last rendered frame deferred gas to composition, and how many shields it queued.</summary>
     public (bool Deferred, int Shields, bool HasGas) LastGasMode => _scene.LastGasMode;
-    private readonly SectorContent _gasCapture = new();
+    private GasCloudPlacement _gasCapture;
+    // Far gas: how it is levelled, and the clouds around the camera, which a worker keeps current.
+    private readonly GasTiers _gasTiers = GasTiers.Load();
+    private readonly GasCloudField _gasField;
+    /// <summary>The share of a cloud below which a level of detail is not worth a draw.</summary>
+    private const float GasMinShare = 1f / 512f;
+    /// <summary>How many gas draws the last frame queued at the full, the middle and the far level.</summary>
+    public (int Full, int Middle, int Far) GasDraws { get; private set; }
     private Galaxy? _gasCaptureGalaxy;
     private SectorCoord _gasCaptureCoord;
 
@@ -846,26 +857,24 @@ internal sealed class WorldView
             var gasCoord = galaxy.SectorOf(OwnPosition);
             if (!ReferenceEquals(_gasCaptureGalaxy, galaxy) || _gasCaptureCoord != gasCoord)
             {
-                // Only the gas module is needed; the asteroid worker remains untouched.
-                _gasCapture.Summary = galaxy.Summarize(gasCoord);
-                galaxy.GasClouds?.Generate(new SectorContext(galaxy, gasCoord, _gasCapture.Summary.Density), _gasCapture);
+                // The cloud the own hull's sector anchors, as generation names it; nothing else is generated.
                 _gasCaptureGalaxy = galaxy;
                 _gasCaptureCoord = gasCoord;
-                if (_gasCapture.Summary.GasCloudCount == 0)
-                    throw new InvalidDataException("--gas-view needs a generated cloud: use --sector -3,0,5 with the default seed.");
-                Console.WriteLine($"Gas scenario: seed={galaxy.Seed}, sector={gasCoord}, cloud={_gasCapture.GasCloud}");
+                GasCloud captured = default;
+                if (galaxy.GasClouds?.TryGetCloud(galaxy, gasCoord, out captured) != true)
+                    throw new InvalidDataException("--gas-view needs a sector that anchors a cloud: use --sector -3,0,5 with the default seed.");
+                _gasCapture = new GasCloudPlacement(gasCoord, captured);
+                Console.WriteLine($"Gas scenario: seed={galaxy.Seed}, sector={gasCoord}, cloud={captured}");
             }
-            if (_gasCapture.Summary.GasCloudCount != 0)
-            {
-                var cloud = _gasCapture.GasCloud;
-                // Outside, but no further than a cloud shows in full: a huge one fades out within a few kilometres of itself.
-                var outside = Math.Min(cloud.HalfSize.Z * 2.4f, cloud.HalfSize.X + (float)galaxy.SectorSize * (GasCloudModule.VisibilityMargin - GasCloudModule.VisibilityFade) * 0.8f);
-                var offset = gasView is "inside" or "inside-absent" ? Vector3.Zero : gasView == "edge" ? new Vector3(cloud.HalfSize.X * 0.92f, 0, 0) : new Vector3(0, 0, outside);
-                CameraPosition = galaxy.CenterOf(gasCoord) + cloud.Center + offset;
-                _forward = gasView == "offscreen" ? Vector3.UnitZ : -Vector3.UnitZ;
-                _right = gasView == "offscreen" ? -Vector3.UnitX : Vector3.UnitX;
-                _up = Vector3.UnitY;
-            }
+
+            var cloud = _gasCapture.Cloud;
+            var offset = gasView is "inside" or "inside-absent" ? Vector3.Zero : gasView == "edge" ? new Vector3(cloud.HalfSize.X * 0.92f, 0, 0) : new Vector3(0, 0, cloud.HalfSize.Z * 2.4f);
+            if (GasDistance is { } radii && gasView is "outside" or "absent")
+                offset = new Vector3(0, 0, MathF.Max(cloud.HalfSize.X, MathF.Max(cloud.HalfSize.Y, cloud.HalfSize.Z)) * radii);
+            CameraPosition = GasCloudQuery.CenterOf(galaxy, _gasCapture) + offset;
+            _forward = gasView == "offscreen" ? Vector3.UnitZ : -Vector3.UnitZ;
+            _right = gasView == "offscreen" ? -Vector3.UnitX : Vector3.UnitX;
+            _up = Vector3.UnitY;
         }
         // Which side of the opening the camera is on, from where the camera is this frame.
         UpdateThrough(dt);
@@ -1040,35 +1049,17 @@ internal sealed class WorldView
         };
 
         FillOwnJump(ref constants, camera);
-        _scene.BeginGas();
+        _scene.BeginGas(_gasTiers.MaxDraws);
+        GasDraws = default;
         if (GasView is not ("absent" or "inside-absent" or "pilot-absent") && galaxy.GasClouds is { } gas)
-        {
-            foreach (var slot in _slots)
-            {
-                if (slot.State != SectorSlot.Ready || !ReferenceEquals(slot.Galaxy, galaxy) || slot.Content.Summary.GasCloudCount == 0) continue;
-                var cloud = slot.Content.GasCloud;
-                var center = (galaxy.CenterOf(slot.Coord) + cloud.Center).RelativeTo(camera);
-                var distance = center.Length();
-                var fade = GasCloudModule.Visibility(distance, cloud.HalfSize.X, (float)galaxy.SectorSize);
-                if (fade <= 0 || !Visible(center, cloud.HalfSize.Length(), aspect, out _)) continue;
-                _scene.AddGas(new GasConstants
-                {
-                    Center = new float4(center.X, center.Y, center.Z, cloud.Seed),
-                    HalfSize = new float4(cloud.HalfSize.X, cloud.HalfSize.Y, cloud.HalfSize.Z, gas.ExtinctionOf(cloud, (float)galaxy.SectorSize) * fade),
-                    Tint = new float4(gas.Tint.X, gas.Tint.Y, gas.Tint.Z, 0),
-                    Motion = new float4(time * gas.Motion, 0, 0, distance),
-                    Budget = new float4(gas.Samples, 0, 0, 0),
-                    Shape = new float4(gas.Shape.X, gas.Shape.Y, gas.Shape.Z, gas.Shape.W),
-                    Look = new float4(gas.Look.X, gas.Look.Y, gas.Look.Z, gas.Look.W),
-                });
-            }
-        }
+            QueueGas(galaxy, gas, camera, aspect, time);
 
         if (_devices.Muted && GasFixture is > 0 and <= GasShaderFixture.Count)
         {
             var fixtureGas = GasShaderFixture.Apply(GasFixture, ref constants, ref composite);
             _scene.BeginGas();
-            _scene.AddGas(fixtureGas);
+            _scene.AddGas(fixtureGas, SceneRenderer.WholeView);
+            GasDraws = (1, 0, 0);
         }
 
         // The lenses need the sky kept apart while a rift or a wormhole is in view, from outside or the pilot's own.
@@ -1080,6 +1071,101 @@ internal sealed class WorldView
     }
 
     public float ExposureValue => Exposure;
+
+    /// <summary>
+    /// Queues every known cloud in view, once for each level of detail it shows at: one, or two while it crosses
+    /// from a level to the next. Far first, so of a cloud's two draws the cheaper one is under the other.
+    /// </summary>
+    private void QueueGas(Galaxy galaxy, GasCloudModule gas, Double3 camera, float aspect, float time)
+    {
+        var sectorSize = (float)galaxy.SectorSize;
+        var full = 0;
+        var middle = 0;
+        var distant = 0;
+        foreach (ref readonly var placed in _gasField.Clouds(galaxy))
+        {
+            var cloud = placed.Cloud;
+            var center = GasCloudQuery.CenterOf(galaxy, placed).RelativeTo(camera);
+            var distance = center.Length();
+            var largest = MathF.Max(cloud.HalfSize.X, MathF.Max(cloud.HalfSize.Y, cloud.HalfSize.Z));
+            _gasTiers.Shares(distance, largest, sectorSize, out var near, out var mid, out var far);
+            var reach = cloud.HalfSize.Length();
+            if (near + mid + far < GasMinShare || !Visible(center, reach, aspect, out _)) continue;
+            var view = new Vector3(Vector3.Dot(center, _right), Vector3.Dot(center, _up), Vector3.Dot(center, _forward));
+            var bounds = SphereBounds(view, reach, _tanHalfFov, aspect);
+            var draw = new GasConstants
+            {
+                Center = new float4(center.X, center.Y, center.Z, cloud.Seed),
+                HalfSize = new float4(cloud.HalfSize.X, cloud.HalfSize.Y, cloud.HalfSize.Z, gas.ExtinctionOf(cloud, sectorSize)),
+                Tint = new float4(gas.Tint.X, gas.Tint.Y, gas.Tint.Z, 0),
+                Motion = new float4(time * gas.Motion, 0, 0, distance),
+                Shape = new float4(gas.Shape.X, gas.Shape.Y, gas.Shape.Z, gas.Shape.W),
+                Look = new float4(gas.Look.X, gas.Look.Y, gas.Look.Z, gas.Look.W),
+                Fine = _gasTiers.CloseUpFor(cloud.HalfSize.X),
+            };
+            if (far >= GasMinShare)
+            {
+                draw.Motion.Y = far;
+                draw.Budget = new float4(_gasTiers.FarSamples, GasConstants.Far, 0, 0);
+                draw.Tint.W = 2 - _gasTiers.FarDetail;
+                _scene.AddGas(draw, bounds);
+                distant++;
+            }
+            if (mid >= GasMinShare)
+            {
+                draw.Motion.Y = mid;
+                draw.Budget = new float4(_gasTiers.MidSamples, GasConstants.Middle, 0, 0);
+                draw.Tint.W = 0;
+                _scene.AddGas(draw, bounds);
+                middle++;
+            }
+            if (near >= GasMinShare)
+            {
+                draw.Motion.Y = near;
+                draw.Budget = new float4(gas.Samples, GasConstants.Full, 0, 0);
+                draw.Tint.W = 0;
+                _scene.AddGas(draw, bounds);
+                full++;
+            }
+        }
+        GasDraws = (full, middle, distant);
+    }
+
+    /// <summary>
+    /// The part of the view a sphere can show in: left, top, right and bottom as shares of the view, which reach
+    /// past its edges when the sphere does. <paramref name="view"/> is the sphere's centre along the camera's
+    /// right, up and forward. Never smaller than the sphere's outline, so a draw cut to it loses nothing.
+    /// </summary>
+    internal static float4 SphereBounds(Vector3 view, float radius, float tanHalfFov, float aspect)
+    {
+        Span(view.X, view.Z, radius, out var left, out var right);
+        Span(view.Y, view.Z, radius, out var low, out var high);
+        var x = 0.5f / (tanHalfFov * aspect);
+        var y = 0.5f / tanHalfFov;
+        // Up on screen is down in the view's shares.
+        return new float4(Limit(left * x + 0.5f), Limit(0.5f - high * y), Limit(right * x + 0.5f), Limit(0.5f - low * y));
+
+        static float Limit(float share) => Math.Clamp(share, -1f, 2f);
+
+        // The tangents of the two lines through the camera that touch the sphere, in the plane of one screen axis
+        // and the view direction. A side the sphere reaches behind the camera on is open.
+        static void Span(float across, float ahead, float radius, out float from, out float to)
+        {
+            const float Open = 1e6f;
+            const float Side = 1.55f;
+            var squared = across * across + ahead * ahead;
+            from = -Open;
+            to = Open;
+            if (squared <= radius * radius * 1.0001f) return;
+            var middle = MathF.Atan2(across, ahead);
+            var half = MathF.Asin(MathF.Min(radius / MathF.Sqrt(squared), 1f));
+            // Wholly to one side and behind: nothing of it is in front of the camera.
+            if (middle - half >= Side) { from = to = Open; return; }
+            if (middle + half <= -Side) { from = to = -Open; return; }
+            if (middle - half > -Side) from = MathF.Tan(middle - half);
+            if (middle + half < Side) to = MathF.Tan(middle + half);
+        }
+    }
 
     /// <summary>
     /// The player's own jump, seen from the inside in the pilot view, as the frame constants give it to the
@@ -3533,6 +3619,7 @@ internal sealed class WorldView
             _streamDirty = true;
         }
 
+        _gasField.Update(galaxy, center);
         var focus = Mode == ViewMode.Command || _commandBlend > 0f ? galaxy.SectorOf(_commandFocus) : (SectorCoord?)null;
         if (_sectorRequests.Update(center, focus)) _streamDirty = true;
         if (!_streamDirty) return;

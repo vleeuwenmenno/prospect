@@ -163,7 +163,7 @@ public sealed class GasCompositionTests
         Assert.Equal(Marshal.SizeOf<FrameConstants>() - Marshal.SizeOf<GasConstants>(), Marshal.OffsetOf<FrameConstants>(nameof(FrameConstants.Gas)).ToInt32());
         Assert.EndsWith("} frame;\n", Shader("frame.glsl"));
         Assert.Contains("GasData gas;", Shader("frame.glsl"));
-        foreach (var name in new[] { "gas.frag", "tonemap.frag", "shield.frag" })
+        foreach (var name in new[] { "gas.frag", "gas_scene.frag", "gas_sky.frag", "tonemap.frag", "shield.frag" })
         {
             var shader = Shader(name);
             Assert.Contains("#include \"gas.glsl\"", shader);
@@ -171,11 +171,18 @@ public sealed class GasCompositionTests
             Assert.DoesNotContain("gl_FragDepth", shader);
         }
         var renderer = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "src", "Prospect.Client", "Render", "SceneRenderer.cs"));
-        Assert.Contains("lensing || _shieldCount > 0 || _gasCount > 0", renderer);
-        Assert.Contains("if (!deferredGas) DrawGas", renderer);
+        Assert.Contains("lensing || _shieldCount > 0 || sceneGas || deferredGas", renderer);
+        // Composition takes the primary cloud only; every other draw, and the primary without composition, is in the scene.
+        Assert.Contains("var deferredGas = _gas.HasPrimary && (lensing || _shieldCount > 0);", renderer);
+        Assert.Contains("frame.Gas = deferredGas ? _gas.Primary : default;", renderer);
+        Assert.Contains("if (sceneGas) DrawGas(commands, frameIndex, skyGas, !deferredGas, ref color, ref depth);", renderer);
         Assert.Contains("if (deferredGas && _shieldCount == 0) KeepBehindShields", renderer);
         Assert.Contains("DstBinding = 6,", renderer);
         Assert.Contains("DstBinding = 7,", renderer);
         Assert.Contains("DestroyShaderModule(gasVertex, null)", renderer);
+        Assert.Contains("DestroyShaderModule(skyVertex, null)", renderer);
+        Assert.Contains("DestroyShaderModule(sceneVertex, null)", renderer);
+        // Only a cloud at the full level takes the scene copy; the other levels read the attached depth.
+        Assert.Contains("if (!copied) KeepBehindShields(commands, ref color, ref depth);", renderer);
     }
 }
