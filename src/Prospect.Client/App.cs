@@ -1152,6 +1152,12 @@ internal sealed class App : IDisposable
             }
             else if (view == "scan-pilot")
                 _screens.OpenScanPilot();
+            else if (view == "scan-command")
+            {
+                // The command view pulled back over the flown ship, so the scan pulse's front is seen from outside.
+                World.SetCommandCapturePose(World.OwnPosition, 9000f, 0.6f, -0.95f);
+                _screens.OpenScanPilot();
+            }
             else if (view == "jump-fleet-ahead" && snapshot is { OwnHull: >= 0 })
             {
                 // The player's other hulls jump to points ahead of and above the camera, 6 km and 10 km away along
@@ -1284,6 +1290,8 @@ internal sealed class App : IDisposable
                 var gasDraws = World.GasDraws;
                 if (gasDraws != default)
                     Console.WriteLine($"capture {_capturesTaken:D2} gas draws: full {gasDraws.Full}, middle {gasDraws.Middle}, far {gasDraws.Far}; composed {World.LastGasMode.Deferred}");
+                if (World.PulseShown.Strength > 0f)
+                    Console.WriteLine($"capture {_capturesTaken:D2} scan pulse: radius {World.PulseShown.Radius:F0} m, strength {World.PulseShown.Strength:F2}");
                 _capturesTaken++;
                 _captureRequested = true;
                 RequestScreenshot(file);
