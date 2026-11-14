@@ -342,6 +342,7 @@ internal sealed partial class ClientWorld : IDisposable
     public void SetPlayer(uint playerId)
     {
         _playerId = playerId;
+        _modules.Count = 0; _modules.Scan = default;
         _charts = new SectorChart[_content.Exploration.ChartsPerOwner];
     }
 
@@ -373,6 +374,13 @@ internal sealed partial class ClientWorld : IDisposable
     public void Tick(PlayerInputBridge bridge, ITransport transport, double serverTick, bool sendCommands = true, long clientTick = -1, float roundTripMs = 0)
     {
 
+        if (sendCommands && bridge.ConsumeModuleScan(out var moduleRequest))
+        {
+            Span<byte> bytes = stackalloc byte[ModuleMessage.RequestWireSize];
+            var writer = new NetWriter(bytes);
+            ModuleMessage.WriteRequest(ref writer, moduleRequest);
+            if (!transport.Send(0, NetChannel.Reliable, writer.Written)) bridge.RetryModuleScan(moduleRequest);
+        }
         if (sendCommands && bridge.ConsumePlot(out var plot))
         {
             Span<byte> bytes = stackalloc byte[NavigationMessage.RequestWireSize];

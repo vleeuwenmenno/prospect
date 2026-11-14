@@ -75,6 +75,8 @@ public sealed class SessionSnapshot(GameContent content)
 
     /// <summary>True while the player flies their escape drone: the one hull that may ask for a new ship.</summary>
     public bool OwnIsDrone;
+    /// <summary>Personal retained module surveys and active operation feedback.</summary>
+    public readonly ModuleKnowledgeView Modules = new();
     public readonly ExplorationView Exploration = new(content.Exploration.ChartsPerOwner);
 
     public SessionState State;
@@ -159,8 +161,8 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     // Reserve the full fleet message, one five-byte Control, one editor request and one design acknowledgement
     // before allowing any social traffic.
     internal const int EditorBytesPerTick = EditorRequestMessage.MaxWireSize + DesignReadyMessage.WireSize;
-    internal const int SocialBytesPerTick = ServerHost.PlayerBytesPerTick - FleetOrdersMessage.MaxWireSize - 5 - EditorBytesPerTick - ExplorationMessage.ScanWireSize;
-    internal static readonly int SocialMessagesPerTick = Math.Min(ServerHost.PlayerMessagesPerTick - 5, SocialBytesPerTick / SocialMessage.MaxWireSize);
+    internal const int SocialBytesPerTick = ServerHost.PlayerBytesPerTick - FleetOrdersMessage.MaxWireSize - 5 - EditorBytesPerTick - ExplorationMessage.ScanWireSize - ModuleMessage.RequestWireSize;
+    internal static readonly int SocialMessagesPerTick = Math.Min(ServerHost.PlayerMessagesPerTick - 6, SocialBytesPerTick / SocialMessage.MaxWireSize);
     private long _receivedSnapshotTick = -1;
     private long _clientTick;
     private long _sentReliableTick = -1;
@@ -350,6 +352,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         snapshot.ClientTick = tick;
         var serverTick = _state == SessionState.Active ? EstimateServerTick(now) : 0;
         snapshot.ServerTick = (long)serverTick;
+        _world.CopyModules(snapshot.Modules);
         _world.CopyExploration(snapshot.Exploration, (long)serverTick);
         snapshot.ServerTickPrecise = serverTick;
         snapshot.RockCount = _state == SessionState.Active ? _world.CopyRockDeltas(snapshot.Rocks) : 0;
@@ -491,6 +494,9 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
 
             case MessageId.Navigation when _state == SessionState.Active && channel == NetChannel.Reliable:
                 _world.OnNavigation(ref reader);
+                break;
+            case MessageId.ModuleSurvey when _state == SessionState.Active && channel == NetChannel.Reliable:
+                _world.OnModuleSurvey(ref reader);
                 break;
             case MessageId.Exploration when _state == SessionState.Active && channel == NetChannel.Reliable:
                 _world.OnExploration(ref reader);

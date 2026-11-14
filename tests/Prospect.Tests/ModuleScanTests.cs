@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using Prospect.Engine.Net;
 using Prospect.Engine.Time;
 using Prospect.Game.Client;
+using Prospect.Game.Protocol;
 using Prospect.Game.Server;
 using Prospect.Game.World;
 using Xunit;
@@ -11,12 +12,42 @@ namespace Prospect.Tests;
 
 public sealed class ModuleScanTests
 {
+    internal sealed class Wire(ITransport inner) : ITransport, ITransportHandler
+    {
+        internal uint Owner;
+        internal int Leaks, Surveys;
+        private ITransportHandler? _handler;
+        public string Description => inner.Description;
+        public int MaxPayloadSize => inner.MaxPayloadSize;
+        public bool IsInProcess => inner.IsInProcess;
+        public bool Poll(ITransportHandler handler, ReceiveBudget budget) { _handler = handler; return inner.Poll(this, budget); }
+        public void OnConnected(ITransport transport, int peer) => _handler!.OnConnected(this, peer);
+        public void OnDisconnected(ITransport transport, int peer, DisconnectReason reason) => _handler!.OnDisconnected(this, peer, reason);
+        public void OnMessage(ITransport transport, int peer, NetChannel channel, ReadOnlySpan<byte> payload) => _handler!.OnMessage(this, peer, channel, payload);
+        public bool Send(int peer, NetChannel channel, ReadOnlySpan<byte> payload)
+        {
+            if (payload[0] == (byte)MessageId.ModuleSurvey)
+            {
+                Span<ModuleObservation> records = stackalloc ModuleObservation[ModuleMessage.MaxObservations];
+                var reader = new NetReader(payload[1..]);
+                if (!ModuleMessage.Read(ref reader, records, out _, out var count)) Leaks++;
+                else for (var i = 0; i < count; i++) { Surveys++; if (records[i].Owner != Owner) Leaks++; }
+            }
+            return inner.Send(peer, channel, payload);
+        }
+        public void Disconnect(int peer) => inner.Disconnect(peer);
+        public int GetRoundTripMs(int peer) => inner.GetRoundTripMs(peer);
+        public ulong GetPeerOrigin(int peer) => inner.GetPeerOrigin(peer);
+        public void Dispose() { }
+    }
+
     internal sealed class Rig : IDisposable
     {
         internal readonly GameContent Content;
         internal readonly ServerHost Server;
         internal readonly ClientSession[] Clients;
         internal readonly HullStore Hulls;
+        internal readonly Wire[] Wires;
         private readonly ManualTime _clock = new();
         internal long Tick;
         internal Rig(bool equipped = true, string quality = "Common")
@@ -34,10 +65,12 @@ public sealed class ModuleScanTests
             }
             Content = copy.Load();
             var links = new[] { new LoopbackLink(), new LoopbackLink() };
-            Server = new ServerHost(new ServerConfig { MaxPlayers = 2, Clock = _clock }, Content, links[0].Server, links[1].Server);
+            Wires = links.Select(l => new Wire(l.Server)).ToArray();
+            Server = new ServerHost(new ServerConfig { MaxPlayers = 2, Clock = _clock }, Content, Wires[0], Wires[1]);
             Clients = links.Select((l, i) => new ClientSession(l.Client, Content, $"Module{i}", clock: _clock)).ToArray();
             Hulls = (HullStore)typeof(ServerHost).GetField("_hulls", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(Server)!;
             Until(() => Clients.All(c => c.AcquireSnapshot().OwnHull >= 0));
+            for (var i = 0; i < Wires.Length; i++) Wires[i].Owner = Owner(i);
         }
         internal uint Owner(int i = 0) => Clients[i].AcquireSnapshot().PlayerId;
         internal int Hull(int i = 0)
@@ -150,6 +183,28 @@ public sealed class ModuleScanTests
         Assert.Equal(placement.Anchor, record.Sector);
         Assert.InRange(record.Gas.Purity, 0, 1);
         Assert.True(record.Gas.Density > 0);
+    }
+
+    [Fact]
+    public void BridgePublishesOnlyTheOwnersObservationsAcrossTwoRealSessions()
+    {
+        using var rig = new Rig();
+        var rock = rig.PlaceNearRock();
+        rig.Clients[0].Input.StartAsteroidScan(rock);
+        rig.Until(() => rig.Clients[0].AcquireSnapshot().Modules.Scan.State == ModuleScanState.Scanning);
+        for (var i = 0; i < 10; i++) rig.Step();
+        var probe = new AllocationProbe();
+        while (probe.Measuring()) rig.Step();
+        Assert.Equal(0, probe.Bytes);
+        rig.Until(() => rig.Clients[0].AcquireSnapshot().Modules.Count > 0);
+        var modules = rig.Clients[0].AcquireSnapshot().Modules;
+        Assert.Equal(ModuleScanState.Completed, modules.Scan.State);
+        Assert.Equal(rig.Owner(), modules.Records[0].Owner);
+        Assert.Equal(0, rig.Clients[1].AcquireSnapshot().Modules.Count);
+        Assert.Equal(0, rig.Wires[0].Leaks);
+        Assert.Equal(0, rig.Wires[1].Leaks);
+        Assert.True(rig.Wires[0].Surveys > 0);
+        Assert.Equal(0, rig.Wires[1].Surveys);
     }
 
     [Fact]

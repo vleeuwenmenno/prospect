@@ -34,6 +34,22 @@ public sealed class PlayerInputBridge
 {
     private readonly Lock _lock = new();
     private ScanIntent _scan;
+    private bool _modulePending;
+    private ModuleScanRequest _moduleRequest;
+
+    /// <summary>Requests local composition of the cloud identified by its anchor sector.</summary>
+    public void StartGasScan(SectorCoord anchor) => QueueModuleScan(new(ModuleFamily.GasScanner, anchor));
+    /// <summary>Requests analysis of the targeted asteroid's stable sector/index identity.</summary>
+    public void StartAsteroidScan(RockRef target) => QueueModuleScan(new(ModuleFamily.AsteroidScanner, target.Sector, target.Index));
+    /// <summary>Requests a locator pulse centered on the controlled hull.</summary>
+    public void PulseAsteroidLocator() => QueueModuleScan(new(ModuleFamily.AsteroidLocator, default));
+    private void QueueModuleScan(ModuleScanRequest request)
+    { lock (_lock) { _moduleRequest = request; _modulePending = true; } }
+    internal bool ConsumeModuleScan(out ModuleScanRequest request)
+    { lock (_lock) { request = _moduleRequest; var pending = _modulePending; _modulePending = false; return pending; } }
+    internal void RetryModuleScan(ModuleScanRequest request)
+    { lock (_lock) { if (!_modulePending) { _moduleRequest = request; _modulePending = true; } } }
+
     private bool _newShip;
     private ShipName _shipName;
     /// <summary>Queues creation. False means the name is invalid; server feedback is in SessionSnapshot.NewShip.</summary>

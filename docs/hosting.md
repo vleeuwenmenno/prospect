@@ -984,3 +984,22 @@ Asteroids currently have one resource and grade: the resource-bearing host mater
 Bare rock has resource -1. Ice is the existing ice resource. Locator reveals only the dominant resource and sampled position.
 Common percentage detail is 5 percentage points, improving with content accuracy; unreported gas share remains unresolved, not renormalized.
 No client intent/publication contract is available until phase 4; persistence follows in phase 5.
+
+## Phase 4 contract: client integration and privacy
+
+Protocol is 47. `ModuleScan` (33) is an 18-byte reliable intent; `ModuleSurvey` (34) is a bounded reliable publication.
+`ModuleMessage.MaxWireSize` is 999 bytes: 79-byte header and at most eight 115-byte observations.
+Requests are decoded only after admission, catalogue readiness and normal receive/rate budgets.
+Client reliable budgets reserve one module request; retries retain a newer queued intent.
+
+Call `PlayerInputBridge.StartGasScan(anchor)`, `StartAsteroidScan(RockRef)` or `PulseAsteroidLocator()`.
+Read `SessionSnapshot.Modules.Scan` for state, serial, hull, quality, start/end ticks, cooldown, origin and Partial.
+`Refusal` reports Busy without replacing an operation already running.
+Progress is derived from authoritative world tick against StartedTick/CompletesTick, only while Scanning.
+Read only `Modules.Records[0..Count]`; `Find(family, sector, index)` locates retained knowledge.
+Gas percentages omitted by accuracy are an unresolved remainder. Locator records deliberately carry zero mass/radius/grade.
+
+The server sends only the receiving owner's records, incrementally, and the client rejects a packet containing any foreign owner.
+Publication uses caller-owned buffers and counted prefixes; snapshot copies never expose server-owned arrays.
+No automatic party sharing, live tracking or uncharted-data regeneration is granted by an observation.
+Seed secrecy remains a separate unfinished problem: ordinary clients still receive the galaxy seed.

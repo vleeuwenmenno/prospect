@@ -249,6 +249,10 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public bool NavigationSent;
         public ScanView Scan;
         public ModuleScanView ModuleScan;
+        public ModuleScanView ModuleSentScan;
+        public bool ModulesSent;
+        public int ModuleCursor;
+        public readonly long[] ModuleSentRecords = new long[ModuleScanRules.KnowledgePerOwner];
         public ModuleEquipment ModuleEquipment;
         public int ChartCursor;
         public ScanView SentScan;
@@ -287,6 +291,8 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             NavigationSent = false;
             Scan = default;
             ModuleScan = default;
+            ModuleSentScan = default; ModulesSent = false; ModuleCursor = 0;
+            Array.Fill(ModuleSentRecords, -1);
             ModuleEquipment = default;
             ChartCursor = 0;
             SentScan = default;
@@ -846,7 +852,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
         TickExploration(tick);
         foreach (var connection in _connections)
-            if (connection.State == ConnectionState.Active) SendExploration(connection);
+            if (connection.State == ConnectionState.Active) { SendExploration(connection); SendModules(connection); }
         TickSocial(tick);
         Volatile.Write(ref _tick, tick + 1);
 
@@ -1065,6 +1071,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                         connection.Navigation = plot;
                     }
                 }
+                break;
+            case MessageId.ModuleScan when channel == NetChannel.Reliable:
+                if (ModuleMessage.ReadRequest(ref reader, out var moduleRequest)) StartModuleScan(connection, moduleRequest);
                 break;
             case MessageId.Scan when channel == NetChannel.Reliable && reader.Remaining == 0:
                 StartScan(connection);
