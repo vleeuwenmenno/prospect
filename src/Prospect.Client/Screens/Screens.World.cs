@@ -758,9 +758,11 @@ internal sealed partial class ScreenHost
         {
             // What the player has scanned decides how much the panel says: an unscanned rock shows only what can be seen
             // (its size and distance) and how to scan it; the generated ore and mass are not read off the sector.
-            var analysed = FindAnalysis(snapshot, targetRock) >= 0;
+            var analysis = FindAnalysis(snapshot, targetRock);
             var look = ModuleStyle;
-            var extra = analysed ? look.TargetPanelExtra : look.TargetPanelUnknownExtra;
+            var extra = look.TargetPanelUnknownExtra;
+            if (analysis >= 0)
+                extra = look.AnalysisHeight(RockComposition.From(snapshot.Modules.Records[analysis], snapshot.Galaxy!.Resources.Length));
             var size = new float2(Kit.Px(HudLayout.TargetReadoutWidth), Kit.Px(92 + extra));
             var min = new float2((display.X - size.X) * 0.5f, HudTop);
             Kit.PanelFrame(draw, min, min + size);
@@ -872,7 +874,7 @@ internal sealed partial class ScreenHost
 
         var galaxy = world.Galaxy!;
         var line = Kit.Px(21);
-        var size = new float2(Kit.Px(400), Kit.Px(Theme.Space5 * 2 + 46) + line * 10);
+        var size = new float2(Kit.Px(400), Kit.Px(Theme.Space5 * 2 + 46) + line * 11);
         var min = new float2(_ui.DisplaySize.X - size.X - Kit.Px(300 + Theme.Space5 * 2), Math.Max(HudLayout.TopBarBottom(Kit.Scale), (_ui.DisplaySize.Y - size.Y) * 0.5f));
         Kit.PanelFrame(draw, min, min + size);
 
@@ -903,13 +905,14 @@ internal sealed partial class ScreenHost
         {
             ref var found = ref snapshot.Modules.Records[analysis];
             Row("Resource"u8, galaxy.Resources[resource].Name);
-            Row("Grade"u8, found.Grade > 0 ? Kit.F($"{found.Grade * 100:0} %") : "Trace"u8);
+            Row("Grade"u8, ShareText(found.Grade));
             var first = MixText(galaxy, found.Mix1, found.Mix1Share);
             var second = MixText(galaxy, found.Mix2, found.Mix2Share);
             if (second.Length != 0)
                 Row("Mixed in"u8, Kit.F($"{first}, {second}"));
             else if (first.Length != 0)
                 Row("Mixed in"u8, first);
+            Row("Rock"u8, RockShareText(RockComposition.From(found, galaxy.Resources.Length)));
         }
         else
         {

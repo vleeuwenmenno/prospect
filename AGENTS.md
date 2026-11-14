@@ -318,6 +318,11 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   its draws come from `MixDraws` alone, so they never move a rock. A scan publishes each share rounded down to the
   scanner's resolution (`ModuleScanRules.Resolved`); a named resource with share zero is a trace, never shown as a
   figure. `-1` means none, and a record built by hand must set `Mix1` and `Mix2` to it.
+  The target panel and the data sheet read it through `RockComposition` (font-free): one stacked bar (main ore, mix-ins,
+  rock; a trace is a thin sliver), then a row per resource with share and ore mass, then ROCK. Wording, used everywhere:
+  a resolved share is "40 %", a trace is "TRACE" with no mass, and rock is "45 %" only when every share is resolved,
+  "UP TO 45 %" while a trace exists (the remainder is then rock and traces). Colours and sizes are in
+  `content/visuals/modules.json` (`rockColor`, `traceMarkPixels`, `composition*`). `RockCompositionTests` holds it.
   `ModuleObservationRules.Valid` holds the shape for the wire and the save. Rules in `docs/roadmap/modules.md`;
   `AsteroidCompositionTests` holds them.
 - **A new hull design:** add it to `content/ships/fleet.json`. Stats are derived from blocks; do not add stat

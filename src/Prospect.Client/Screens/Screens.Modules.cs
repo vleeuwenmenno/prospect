@@ -382,13 +382,13 @@ internal sealed partial class ScreenHost
         tonnes >= 1e6f ? Kit.F($"{tonnes / 1e6f:0.00} MT") : Kit.F($"{tonnes / 1e3f:0.0} KT");
 
     /// <summary>
-    /// A resource mixed in with an asteroid's main ore as a scan found it: its name and share, or its name and
-    /// "trace" when the scanner did not resolve a figure. Empty when there is none.
+    /// A resource mixed in with an asteroid's main ore as a scan found it: its name and share, or its name and TRACE when
+    /// the scanner did not resolve a figure. Empty when there is none.
     /// </summary>
     private static ReadOnlySpan<byte> MixText(Galaxy galaxy, int resource, float share) =>
         resource < 0 || resource >= galaxy.Resources.Length ? default
         : share > 0 ? Kit.F($"{galaxy.Resources[resource].Name} {share * 100f:0} %")
-        : Kit.F($"{galaxy.Resources[resource].Name} trace");
+        : Kit.F($"{galaxy.Resources[resource].Name} TRACE");
 
     /// <summary>
     /// What the target panel says of an asteroid below its title: what the player's scan found (ore and its grade as a
@@ -430,53 +430,99 @@ internal sealed partial class ScreenHost
         }
 
         ref var record = ref snapshot.Modules.Records[index];
-        var y = at.Y;
-        var rowHeight = Kit.Px(18);
+        var composition = RockComposition.From(record, galaxy.Resources.Length);
         var tier = look.Tier(record.Quality);
+        var rowHeight = Kit.Px(look.CompositionRowHeight);
+        var y = at.Y;
 
-        // A named resource with no share is a trace: it is there, below what the scanner resolves. What the shares
-        // leave of the asteroid is then rock and traces together, so it is not called rock.
-        var oreShare = record.Grade + record.Mix1Share + record.Mix2Share;
-        var traces = record.Resource >= 0 && record.Grade <= 0 || record.Mix1 >= 0 && record.Mix1Share <= 0 || record.Mix2 >= 0 && record.Mix2Share <= 0;
-        if (record.Resource >= 0 && record.Resource < galaxy.Resources.Length)
+        DrawCompositionBar(draw, galaxy, composition, new float2(at.X, y), width, Kit.Px(look.CompositionBarHeight), look);
+        y += Kit.Px(look.CompositionBarHeight + 6);
+
+        var shareColumn = Kit.Measure(_ui.Mono, Theme.FontCaption, "UP TO 100 %"u8).X;
+        var massColumn = Kit.Measure(_ui.Mono, Theme.FontCaption, "0000.00 MT"u8).X;
+        var massRight = at.X + width;
+        var shareRight = massRight - massColumn - Kit.Px(Theme.Space2);
+        if (composition.Count == 0)
         {
-            var resource = galaxy.Resources[record.Resource];
-            var dot = at + new float2(Kit.Px(4), Kit.Px(8));
-            draw.AddCircleFilled(dot, Kit.Px(4), Kit.Color(StarColor(resource.Color)), 12);
-            var name = Kit.Measure(_ui.SansMedium, Theme.FontCaption, resource.Name).X;
-            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(at.X + Kit.Px(14), y + Kit.Px(1)), Theme.Text, resource.Name);
-            var barLeft = at.X + Kit.Px(14) + name + Kit.Px(Theme.Space2);
-            var reading = record.Grade <= 0 ? "TRACE"u8
-                : traces ? Kit.F($"{record.Grade * 100f:0} % ORE   REST {(1f - oreShare) * 100f:0} %")
-                : Kit.F($"{record.Grade * 100f:0} % ORE   ROCK {(1f - oreShare) * 100f:0} %");
-            var readingWidth = Kit.Measure(_ui.Mono, Theme.FontCaption, reading).X;
-            var barRight = Math.Max(barLeft + Kit.Px(24), at.X + width - readingWidth - Kit.Px(Theme.Space2));
-            DrawFractionBar(draw, new float2(barLeft, y + Kit.Px(5)), barRight - barLeft, Kit.Px(7), record.Grade, StarColor(resource.Color));
-            Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(at.X + width - readingWidth, y + Kit.Px(1)), Theme.TextDim, reading);
+            CompositionRow(draw, "Bare rock"u8, look.RockRgb, default, MassText(record.Mass), new float2(at.X, y), width, shareRight, massRight);
+            y += rowHeight;
         }
         else
         {
-            draw.AddCircleFilled(at + new float2(Kit.Px(4), Kit.Px(8)), Kit.Px(4), Kit.Color(Theme.TextMute), 12);
-            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(at.X + Kit.Px(14), y + Kit.Px(1)), Theme.TextDim, "Bare rock: no ore"u8);
+            for (var part = 0; part < composition.Count; part++)
+            {
+                var resource = galaxy.Resources[composition.ResourceOf(part)];
+                var share = composition.ShareOf(part);
+                // A trace is named but has no figure and no mass: it would claim more than the scanner resolved.
+                CompositionRow(draw, Kit.F($"{resource.Name}"), StarColor(resource.Color), ShareText(share),
+                    share > 0f ? MassText(record.Mass * share) : default, new float2(at.X, y), width, shareRight, massRight);
+                y += rowHeight;
+            }
+
+            var rockMass = composition.RockIsCeiling ? default : MassText(record.Mass * composition.Remainder);
+            CompositionRow(draw, "Rock"u8, look.RockRgb, RockShareText(composition), rockMass, new float2(at.X, y), width, shareRight, massRight);
+            y += rowHeight;
         }
 
-        y += rowHeight;
-        var mass = MassText(record.Mass);
-        var ore = MassText(record.Mass * oreShare);
-        var first = MixText(galaxy, record.Mix1, record.Mix1Share);
-        var second = MixText(galaxy, record.Mix2, record.Mix2Share);
-        var masses = second.Length != 0 ? Kit.F($"MASS {mass}   ORE {ore}   + {first}, {second}")
-            : first.Length != 0 ? Kit.F($"MASS {mass}   ORE {ore}   + {first}")
-            : Kit.F($"MASS {mass}   ORE {ore}");
-        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, new float2(at.X, y), Theme.TextDim, masses, width);
-        y += rowHeight;
         var age = ModuleAge.Seconds(record.RecordedTick, snapshot.ServerTick);
-        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(at.X, y), tier.Rgb, tier.Label);
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(at.X, y + Kit.Px(2)), tier.Rgb, tier.Label);
         var tierWidth = Kit.Measure(_ui.SansMedium, Theme.FontCaption, tier.Label).X;
-        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, new float2(at.X + tierWidth + Kit.Px(Theme.Space2), y), Theme.TextMute,
-            Kit.F($"SCANNED {ModuleAge.Value(age):0} {ModuleAge.Unit(age)} AGO"), Math.Max(0f, width - tierWidth - Kit.Px(Theme.Space2)));
-        return rowHeight * 3;
+        var total = MassText(record.Mass);
+        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, new float2(at.X + tierWidth + Kit.Px(Theme.Space2), y + Kit.Px(2)), Theme.TextMute,
+            Kit.F($"MASS {total}   SCANNED {ModuleAge.Value(age):0} {ModuleAge.Unit(age)} AGO"), Math.Max(0f, width - tierWidth - Kit.Px(Theme.Space2)));
+        return Kit.Px(look.AnalysisHeight(composition));
     }
+
+    /// <summary>
+    /// The one stacked bar: main ore, mix-ins, then rock, each in its colour. A trace is a thin sliver, never a share-sized
+    /// segment; rock takes what is left of the bar, which with a trace is rock and traces together.
+    /// </summary>
+    private static void DrawCompositionBar(ImDrawListPtr draw, Galaxy galaxy, in RockComposition composition, float2 at, float width, float height, ModuleLook look)
+    {
+        draw.AddRectFilled(at, at + new float2(width, height), Kit.Color(look.RockRgb, 0.95f));
+        var x = at.X;
+        var sliver = Math.Min(Kit.Px(look.TraceMarkPixels), width * 0.05f);
+        for (var part = 0; part < composition.Count; part++)
+        {
+            var share = composition.ShareOf(part);
+            var segment = share > 0f ? Math.Min(width * share, at.X + width - x) : sliver;
+            draw.AddRectFilled(new float2(x, at.Y), new float2(x + segment, at.Y + height), Kit.Color(StarColor(galaxy.Resources[composition.ResourceOf(part)].Color), 0.95f));
+            x += segment;
+        }
+
+        draw.AddRect(at, at + new float2(width, height), Kit.Color(Theme.Line, 0.9f));
+    }
+
+    /// <summary>One composition row: swatch, name, share and ore mass, the last two right-aligned in their columns.</summary>
+    private void CompositionRow(ImDrawListPtr draw, ReadOnlySpan<byte> name, uint rgb, ReadOnlySpan<byte> share, ReadOnlySpan<byte> mass, float2 at, float width, float shareRight, float massRight)
+    {
+        var top = Kit.Px(1);
+        var side = Kit.Px(8);
+        draw.AddRectFilled(at + new float2(0, Kit.Px(3)), at + new float2(side, Kit.Px(3) + side), Kit.Color(rgb));
+        Kit.ClippedText(draw, _ui.SansMedium, Theme.FontCaption, at + new float2(Kit.Px(14), top), Theme.Text, name, Math.Max(0f, shareRight - at.X - Kit.Px(14)));
+        if (share.Length != 0)
+        {
+            var shareSize = Kit.Measure(_ui.Mono, Theme.FontCaption, share).X;
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(shareRight - shareSize, at.Y + top), Theme.TextDim, share);
+        }
+
+        if (mass.Length != 0)
+        {
+            var massSize = Kit.Measure(_ui.Mono, Theme.FontCaption, mass).X;
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(massRight - massSize, at.Y + top), Theme.TextDim, mass);
+        }
+    }
+
+    /// <summary>A resolved share as a whole percentage, or TRACE when the scanner named the resource without resolving a figure.</summary>
+    private static ReadOnlySpan<byte> ShareText(float share) =>
+        share > 0f ? Kit.F($"{share * 100f:0} %") : "TRACE"u8;
+
+    /// <summary>
+    /// The rock's share in the one wording every readout uses: a figure when every share is resolved, "UP TO x %" while a
+    /// trace exists, because the remainder is then rock and traces together.
+    /// </summary>
+    private static ReadOnlySpan<byte> RockShareText(in RockComposition composition) =>
+        composition.RockIsCeiling ? Kit.F($"UP TO {composition.Remainder * 100f:0} %") : Kit.F($"{composition.Remainder * 100f:0} %");
 
     /// <summary>A flat bar: the track and a fill to <paramref name="fraction"/>.</summary>
     private static void DrawFractionBar(ImDrawListPtr draw, float2 at, float width, float height, float fraction, uint rgb)
