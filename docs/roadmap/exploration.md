@@ -34,6 +34,14 @@ Scroll long lists within the pinned card. Unknown or stale activity must not loo
 Use above/below markers in flat view; when returning from tilt, show the selected sector's layer.
 These are suggested layouts, not a settled control scheme.
 
+### Built: first map version (tunable, not a settled control scheme)
+
+- Hover previews a card; a click pins it; another sector's click replaces it; Escape or a click outside the galaxy edge dismisses it.
+- The card lists own ships, then live contacts, then lost ones (faded, with their age). It scrolls when pinned and turns compact on short screens.
+- Layer bar and Page Up/Page Down change layer; `V` or the bar tilts the map (orthographic, chosen layer stays clickable).
+- Flattening shows the pinned card's layer. Other layers' items show as up/down chevrons in the flat view.
+- Figures live in `content/visuals/map.json`. The galaxy edge drawn is where the disc's matter ends; nothing enforces it.
+
 ## Decided: exploration knowledge
 
 - **Unexplored:** an anonymous destination, without surveyed contents.

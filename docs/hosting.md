@@ -701,9 +701,10 @@ Field envelopes can cross the surveyed sector's walls; this does not chart those
   It returns `Reason`, `CanIssueOrder`, `Charted`, `Blind`, distance, hit probability `Risk` and `MaximumDamageFraction`.
 
 A station-class hull uses an indefinite stale marker; this repository has no generated station gameplay system.
-The map worker still needs scan controls/feedback, authoritative chart styling, field markers, contact rows,
-stale presentation and blind-risk feedback. Existing map discovery is not this new chart API.
-No screen, HUD or renderer implementation is included here.
+The client map reads only this contract: charts (`ChartIndex`), contacts, scan state and owned hulls' sensor blocks.
+The old session-local neighbour discovery is gone; a sector's name, star and fields show only from a chart.
+The server reports a cancelled scan without its reason; the client infers it (sector, controlled hull, charting block).
+The client draws coverage from owned hulls in `SessionSnapshot.Hulls` only: owned hulls past the 64 views are missed.
 
 ### Visibility and disclosure
 

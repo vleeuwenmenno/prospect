@@ -119,6 +119,21 @@ public sealed class FrameOrderTests : IDisposable
     private readonly SectorInfoToggle _sector = new();
     private static readonly float2 OverSector = new(84f, 44f);
 
+    // The exploration map's sector card, layer bar and navigation, as ScreenHost runs them with the production
+    // helpers: a fixed card size stands in for the measured one, which needs fonts.
+    private bool _exploreMap;
+    private readonly MapCardState _card = new();
+    private readonly MapNavigation _nav = new();
+    private float2 _navCenter;
+    private const float NavCell = 44f;
+    private static readonly float2 PinnedCardSize = new(340, 320);
+    private const int CardRows = 20;
+    private bool _cardShown;
+    private bool _cardPreview;
+    private SectorCoord _cardShownSector;
+    private float _cardScroll;
+    private int _mapCloses;
+
     // The course menu as the map opens it on a right click, and what its rows ordered.
     private static readonly float2 MenuSize = MapCourseMenu.Size(1f);
     private bool _menuOpen;
@@ -1091,6 +1106,13 @@ public sealed class FrameOrderTests : IDisposable
             _map.Block(MenuShown, MenuSize);
         }
 
+        if (_exploreMap)
+        {
+            _map.Block(MapLayerBar.Min(Screen, HudLayout.TopBarBottom(1f), 1f), MapLayerBar.Size(1f));
+            if (_card.Pinned)
+                _map.Block(PinnedCardMin, PinnedCardSize);
+        }
+
         _map.Begin(Screen);
         _mapPresses += _map.Pressed ? 1 : 0;
         _mapReleases += _map.BoxReleased ? 1 : 0;
@@ -1103,6 +1125,9 @@ public sealed class FrameOrderTests : IDisposable
             _menuTime = 0;
             _menuOpen = true;
         }
+
+        if (_exploreMap)
+            ExploreMapInput();
 
         ImGui.End();
 
@@ -1121,6 +1146,9 @@ public sealed class FrameOrderTests : IDisposable
             TopBar.End();
         }
 
+        if (_exploreMap)
+            ExploreMapWindows();
+
         if (!_menuOpen)
             return;
         var shown = MenuShown;
@@ -1136,6 +1164,73 @@ public sealed class FrameOrderTests : IDisposable
         MapCourseMenu.Item("Jump here"u8, MapCourseMenu.RowMin(shown, 1, 1f), rowSize);
         MapCourseMenu.End();
     }
+
+    private MapProjection NavView => new(Screen * 0.5f, _navCenter, NavCell, _nav.Layer, _nav.TiltBlend * 58f * (MathF.PI / 180f), 2.2f);
+
+    private float2 PinnedCardMin => MapSectorCard.Place(NavView.ToScreen(_card.Sector.X, _card.Sector.Y, _card.Sector.Z), NavCell * 0.5f, PinnedCardSize, Screen, HudLayout.TopBarBottom(1f), 14f, 16f);
+
+    private float2 CardListMin => PinnedCardMin + new float2(8, 120);
+
+    private static readonly float2 CardListSize = new(324, 36 * 4);
+
+    private float2 CardScanCenter => PinnedCardMin + new float2(170, 100);
+
+    /// <summary>As ScreenHost after the map's surface: keys, Escape, the card's click rule and what it shows.</summary>
+    private void ExploreMapInput()
+    {
+        if (_nav.HandleKeys(_actions, _devices, true) && _card.Pinned)
+            _nav.Layer = _card.Sector.Y;
+        _nav.Advance(1f / 60f, 0f);
+        if (_actions.Pressed(_devices, InputAction.Pause, true) && !_card.Dismiss())
+            _mapCloses++;
+        var view = NavView;
+        var hover = view.SectorAt(ImGui.GetIO().MousePos);
+        if (_map.BoxReleased && !_map.BoxMoved)
+            _card.Click(hover, MapBounds.Contains(_snapshot.Content.Galaxy.Shape, 0.01f, hover));
+        _cardShown = _card.Shown(_map.Hovered, hover, out _cardShownSector, out _cardPreview);
+    }
+
+    /// <summary>The layer bar and the pinned card, as windows over the map.</summary>
+    private void ExploreMapWindows()
+    {
+        var barMin = MapLayerBar.Min(Screen, HudLayout.TopBarBottom(1f), 1f);
+        MapLayerBar.Begin(barMin, MapLayerBar.Size(1f), _map);
+        var up = MapLayerBar.Button("##layerup"u8, MapLayerBar.UpMin(barMin, 1f), MapLayerBar.ButtonSize(1f));
+        var down = MapLayerBar.Button("##layerdown"u8, MapLayerBar.DownMin(barMin, 1f), MapLayerBar.ButtonSize(1f));
+        var flat = MapLayerBar.Button("##mapflat"u8, MapLayerBar.FlatMin(barMin, 1f), MapLayerBar.ToggleSize(1f));
+        var tilt = MapLayerBar.Button("##maptilt"u8, MapLayerBar.TiltMin(barMin, 1f), MapLayerBar.ToggleSize(1f));
+        if (MapLayerBar.Apply(_nav, up, down, flat, tilt) && _card.Pinned)
+            _nav.Layer = _card.Sector.Y;
+        MapLayerBar.End();
+
+        if (!_card.Pinned)
+            return;
+        var min = PinnedCardMin;
+        MapSectorCard.Begin(min, PinnedCardSize, _map);
+        if (MapSectorCard.Button("##scan"u8, CardScanCenter - new float2(150, 14), new float2(300, 28)))
+            Bridge.RequestScan();
+        MapSectorCard.BeginList(CardListMin, CardListSize, _map);
+        for (var i = 0; i < CardRows; i++)
+            MapSectorCard.Row(i, 36);
+        _cardScroll = ImGui.GetScrollY();
+        MapSectorCard.EndList();
+        MapSectorCard.End();
+    }
+
+    /// <summary>Opens the exploration map centred on the own sector, the pointer resting on the map.</summary>
+    private void OpenExploreMap()
+    {
+        _exploreMap = true;
+        var galaxy = _snapshot.Content.Galaxy;
+        var own = _snapshot.Hulls[_snapshot.OwnHull].Position;
+        _navCenter = new float2((float)(own.X / galaxy.SectorSize), (float)(own.Z / galaxy.SectorSize));
+        _nav.Reset(galaxy.SectorOf(own).Y);
+        _card.Dismiss();
+        OpenMap();
+    }
+
+    /// <summary>The screen point at the centre of a sector of the chosen layer.</summary>
+    private float2 SectorSpot(SectorCoord sector) => NavView.ToScreen(sector.X, sector.Y, sector.Z);
 
     private float2 MenuShown => MapCourseMenu.Shown(_menuMin, _menuTime, 1f);
 
@@ -1161,6 +1256,215 @@ public sealed class FrameOrderTests : IDisposable
     {
         var units = Units;
         return units.RowsMin + new float2(units.Size.X * 0.5f, units.Row * (row + 0.5f));
+    }
+
+    private SectorCoord OwnSector => _snapshot.Content.Galaxy.SectorOf(_snapshot.Hulls[_snapshot.OwnHull].Position);
+
+    [Fact]
+    public void AHoveredSectorShowsAPreviewAClickPinsItAndAnotherClickReplacesIt()
+    {
+        OpenExploreMap();
+        var a = OwnSector.Offset(3, 0, 1);
+        var b = OwnSector.Offset(-2, 0, -3);
+
+        Frame(() => Move(SectorSpot(a)));
+        Frame();
+        Assert.True(_cardShown);
+        Assert.True(_cardPreview);
+        Assert.Equal(a, _cardShownSector);
+        Assert.False(_card.Pinned);
+
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+        Assert.Equal(a, _card.Sector);
+        Assert.False(_cardPreview);
+
+        Frame(() => Move(SectorSpot(b)));
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+        Assert.Equal(b, _card.Sector);
+        Assert.Equal(b, _cardShownSector);
+    }
+
+    [Fact]
+    public void HoveringAnotherSectorWhileACardIsPinnedShowsNoSecondPreviewAndLeavesItAlone()
+    {
+        OpenExploreMap();
+        var a = OwnSector.Offset(3, 0, 1);
+        Frame(() => Move(SectorSpot(a)));
+        Frame(() => Click());
+        Frame();
+        Assert.Equal(a, _card.Sector);
+
+        Frame(() => Move(SectorSpot(OwnSector.Offset(-2, 0, -3))));
+        Frame();
+        Assert.True(_cardShown);
+        Assert.False(_cardPreview);
+        Assert.Equal(a, _cardShownSector);
+        Assert.Equal(a, _card.Sector);
+
+        // A pointer on the layer bar is not on the map: with nothing pinned, no preview shows there.
+        Frame(() => Key(GlfwKey.Escape, true));
+        Frame(() => Key(GlfwKey.Escape, false));
+        Assert.False(_card.Pinned);
+        var bar = MapLayerBar.Min(Screen, HudLayout.TopBarBottom(1f), 1f);
+        Frame(() => Move(bar + new float2(40, 60)));
+        Frame();
+        Assert.False(_cardShown);
+    }
+
+    [Fact]
+    public void EscapeClosesThePinnedCardBeforeTheMapAndAClickOutsideTheGalaxyDismissesIt()
+    {
+        OpenExploreMap();
+        Frame(() => Move(SectorSpot(OwnSector.Offset(3, 0, 1))));
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+
+        Frame(() => Key(GlfwKey.Escape, true));
+        Frame(() => Key(GlfwKey.Escape, false));
+        Assert.False(_card.Pinned);
+        Assert.Equal(0, _mapCloses);
+        Frame(() => Key(GlfwKey.Escape, true));
+        Frame(() => Key(GlfwKey.Escape, false));
+        Assert.Equal(1, _mapCloses);
+
+        // Pinned again, then a click on a sector beyond the galaxy's edge: empty space dismisses the card.
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+        var shape = _snapshot.Content.Galaxy.Shape;
+        _navCenter = new float2(shape.Center.X + MapBounds.EdgeRadius(shape) + 30f, shape.Center.Z);
+        Frame(() => Click());
+        Frame();
+        Assert.False(_card.Pinned);
+        Assert.False(MapBounds.Contains(shape, 0.01f, NavView.SectorAt(MapSpot)));
+    }
+
+    [Fact]
+    public void TheCardsScanButtonRequestsAScanAndTheWheelScrollsItsShipsNotTheMap()
+    {
+        OpenExploreMap();
+        Frame(() => Move(SectorSpot(OwnSector)));
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+        Bridge.ConsumeScan();
+        _mapPresses = _mapReleases = 0;
+
+        Frame(() =>
+        {
+            Move(CardScanCenter);
+            Click();
+        });
+        Frame();
+        Frame();
+        Assert.True(Bridge.ConsumeScan());
+        Assert.Equal(0, _mapPresses);
+        Assert.Equal(0, _mapReleases);
+        Assert.Equal(OwnSector, _card.Sector);
+
+        Frame(() => Move(CardListMin + CardListSize * 0.5f));
+        Frame(() => Wheel(-2));
+        Frame();
+        Frame();
+        Assert.True(_cardScroll > 0f);
+        Assert.Equal(0f, _mapWheel);
+        Assert.True(_card.Pinned);
+    }
+
+    [Fact]
+    public void WithTheBarTheMenuTheLayerBarAndAPinnedCardAllShownAPressOnTheCardNeverReachesTheMap()
+    {
+        _barShown = true;
+        OpenExploreMap();
+        Frame(() => Move(SectorSpot(OwnSector.Offset(-3, 0, -3))));
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+        Frame(() => Move(SectorSpot(OwnSector.Offset(6, 0, 4))));
+        Frame(() => Click(GlfwMouseButton.Right));
+        Frame();
+        Assert.True(_menuOpen);
+        _mapPresses = _mapReleases = 0;
+
+        // Every surface the map can show at once is up: the unit list, the bar, the layer bar, the menu and the card.
+        Frame(() => Move(CardListMin + new float2(20, 10)));
+        Frame(() => Button(GlfwMouseButton.Left, true));
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        Frame();
+        Assert.Equal(0, _mapPresses);
+        Assert.Equal(0, _mapReleases);
+        Assert.True(_card.Pinned);
+    }
+
+    [Fact]
+    public void PageKeysAndTheLayerBarChangeLayerAndTheTiltedViewPicksOnTheChosenLayer()
+    {
+        OpenExploreMap();
+        var start = _nav.Layer;
+        Frame(() => Key(GlfwKey.PageUp, true));
+        Frame(() => Key(GlfwKey.PageUp, false));
+        Assert.Equal(start + 1, _nav.Layer);
+        Frame(() => Key(GlfwKey.PageDown, true));
+        Frame(() => Key(GlfwKey.PageDown, false));
+        Frame(() => Key(GlfwKey.PageDown, true));
+        Frame(() => Key(GlfwKey.PageDown, false));
+        Assert.Equal(start - 1, _nav.Layer);
+
+        var bar = MapLayerBar.Min(Screen, HudLayout.TopBarBottom(1f), 1f);
+        Frame(() =>
+        {
+            Move(MapLayerBar.UpMin(bar, 1f) + MapLayerBar.ButtonSize(1f) * 0.5f);
+            Click();
+        });
+        Frame();
+        Frame();
+        Assert.Equal(start, _nav.Layer);
+        Assert.Equal(0, _mapPresses);
+
+        // Tilt by key: the point clicked names the sector of the chosen layer under it in the tilted projection.
+        Frame(() => Key(GlfwKey.V, true));
+        Frame(() => Key(GlfwKey.V, false));
+        Frame();
+        Assert.True(_nav.Tilt);
+        Assert.Equal(1f, _nav.TiltBlend);
+        var spot = new float2(800, 250);
+        var flat = new MapProjection(Screen * 0.5f, _navCenter, NavCell, _nav.Layer, 0f, 2.2f).SectorAt(spot);
+        Frame(() => Move(spot));
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+        Assert.Equal(NavView.SectorAt(spot), _card.Sector);
+        Assert.NotEqual(flat, _card.Sector);
+        Assert.Equal(_nav.Layer, _card.Sector.Y);
+
+        // Page away, then flatten with the bar: the flat view shows the pinned sector's layer.
+        Frame(() => Key(GlfwKey.PageUp, true));
+        Frame(() => Key(GlfwKey.PageUp, false));
+        Assert.Equal(start + 1, _nav.Layer);
+        Frame(() =>
+        {
+            Move(MapLayerBar.FlatMin(bar, 1f) + MapLayerBar.ToggleSize(1f) * 0.5f);
+            Click();
+        });
+        Frame();
+        Frame();
+        Assert.False(_nav.Tilt);
+        Assert.Equal(start, _nav.Layer);
+        Assert.Equal(_card.Sector.Y, _nav.Layer);
+
+        Frame(() =>
+        {
+            Move(MapLayerBar.TiltMin(bar, 1f) + MapLayerBar.ToggleSize(1f) * 0.5f);
+            Click();
+        });
+        Frame();
+        Frame();
+        Assert.True(_nav.Tilt);
     }
 
     [Fact]

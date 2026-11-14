@@ -12,7 +12,9 @@ or that local game opened to other players. There is one simulation and one code
 ## Status
 
 Exploration has a server/client backend: personal saved charts, manual scan intent, owned-ship sensors and dynamic visibility filtering.
-The map UI and scan controls are not wired yet. Seed secrecy remain unfinished.
+The galaxy map shows it: fog over uncharted space, charted sectors, live sensor coverage, lost contacts, a sector card
+with the scan control, layer navigation and a tilted view. Seed secrecy remains unfinished, and the map card does not
+yet show the server's jump range and blind-jump risk. The map's galaxy edge is drawn, not enforced.
 See [exploration contract](docs/hosting.md#exploration-foundation-protocol-37) for the map API and disclosure limits.
 
 Rare decorative volumetric gas clouds are generated: lopsided, self-shadowed, with billowy edges and wisps. Most are 8 to 11 km long; a few are huge, up to a sector across, and any of them can lie across sector borders. Some hold asteroids. They are seen from up to five sectors away, at three levels of detail that hand over without a step. A huge cloud seen from inside or close by is broken into strands with depth. Full-screen views reach 144 FPS at 5096x1390 except a pilot view in dense asteroids and the inside of a huge cloud (about 110); visual acceptance is pending. See [gas clouds](docs/gas-clouds.md).
@@ -135,7 +137,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   [world generation](docs/world-generation.md).
 - **Sector character.** Every sector has a richness, from barren to very rich, and a set of resources that can
   occur there. Rich and poor space come in regions. Some sectors have every resource, some none, most a few; the
-  sector panel and the map (for a discovered sector) show both. The sector panel is closed by default: `F2` shows it.
+  sector panel shows both; the map card never shows resources or shares, as no mineral scan exists yet. The sector panel is closed by default: `F2` shows it.
   There is no closed-state hint or reserved row.
 - **Asteroid fields.** Thin scatters, clusters, dense belts and great fields, tens of kilometres long at most,
   wherever they fall: a sector holds parts of none, one or several, up to 20,480 asteroids. Density follows
@@ -246,13 +248,22 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   selects and focuses too.
 - **Galaxy.** A spiral disc 800 sectors across. Asteroid fields follow its arms and core; between the arms and
   outside the disc space is nearly empty.
-- **Galaxy map.** Every grid cell is a sector. Zoomed out it shows the whole galaxy; closer, the sector grid; closest,
-  each sector's star, asteroids and name. A sector's contents are shown only after one of your ships has been
-  within a sector of it. Right-click a sector to choose how to get there: move under engines, or jump with the
-  faster-than-light drive (only ships that have a working drive jump). A unit list on the left shows every ship you
-  own, which are selected, its sector and what it is doing; click a row to add or remove that ship. A plotted
-  jump shows as a dotted route from the ship you fly to its NAV point, on the layer both are on, until the jump
-  is made, replaced or cleared. The card for the sector under the pointer sits in the top right corner.
+- **Galaxy map.** Every grid cell is a sector of the chosen layer. Uncharted space lies under a veil and is an
+  anonymous destination; a sector you scanned is charted and shows its star, name and asteroid fields as surveyed,
+  never later changes. Green rings are live sensor coverage, cut through the layer; ships inside them are live,
+  and a lost contact stays as a fading hollow marker for 15 seconds (a station's indefinitely). Hover a sector for
+  its card beside it; click to pin the card (coordinates, distance, sensor state, what the chart holds, the jump
+  warning, the scan control in your own sector, Move here and Jump here, and a scrolling list of your ships, then
+  live and lost contacts). Right-click a sector for the same course in a menu. The layer bar (bottom right) and
+  `Page Up` / `Page Down` change layer; things on other layers show as up and down chevrons. The tilted view (`V`
+  or **Tilt**) shows three layers above and below with their charted sectors and ships on stalks; the chosen
+  layer stays fully interactive. The galaxy edge ring marks where the disc ends; nothing stops flight there yet. A
+  unit list on the left shows every ship you own; click a row to add or remove that ship. A plotted jump shows as a
+  dotted route from the ship you fly to its NAV point until the jump is made, replaced or cleared.
+- **Scanning.** Pin your own sector's card and press **Scan sector**: 5 seconds, flight continues. Leaving the
+  sector, switching ship or losing the charting block cancels it; the card and the top of the flight view say
+  which (the reason is inferred on the client, the server only says cancelled). The command view shows sensor
+  rings and darkens space beyond them, with lost contacts at their last position.
 - **Renderer.** Floating-point scene target and tone mapping, camera-relative rendering from double-precision
   positions, a star field and sky, instanced hull and asteroid meshes. Asteroids have five levels of detail, from
   a speck in the distance to a giant seen from its surface.
@@ -402,13 +413,16 @@ Galaxy map:
 
 | | |
 | --- | --- |
-| Select ships | Left-click a ship, or drag a box; `Shift` or `Ctrl` adds to the selection |
+| Select ships | Left-click a ship, or drag a box; `Shift` or `Ctrl` adds to the selection; a click on empty space keeps the selection |
 | Add or remove one ship | Click its row in the unit list; **All** and **Clear** change the whole list |
 | Set course | Right-click a sector, then pick **Move here**, or **Plot jump** (the ship you fly) / **Jump here** (selected fleet ships) in the menu |
-| Close the menu | Left-click elsewhere, or `Esc` (a second `Esc` closes the map) |
+| Close the menu | Left-click elsewhere, or `Esc` (then `Esc` closes a pinned card, then the map) |
 | Take control of a ship | Select exactly one other ship of yours in the sector you are in, then `T`; the map stays open. Another sector: travel there first |
 | Pan / zoom | `W` `A` `S` `D`, arrow keys or middle-drag / mouse wheel |
-| Change layer, centre on your ship | `Page Up` / `Page Down`, `Space` |
+| Sector card | Hover a sector to preview; left-click to pin; left-click outside the galaxy or `Esc` closes it |
+| Scan your sector | Pin your own sector's card, then **Scan sector** |
+| Change layer, centre on your ship | `Page Up` / `Page Down` or the layer bar, `Space` |
+| Flat or tilted view | `V`, or **Flat** / **Tilt** on the layer bar; flattening shows the pinned card's layer |
 
 Map orders go to exactly the selected ships. Opening the map with nothing selected selects the ship you fly.
 After **Clear**, **Move here** and **Jump here** are greyed out and nothing is ordered. Jumps also require a

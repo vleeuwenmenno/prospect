@@ -9,7 +9,7 @@ internal sealed class ControlsCatalog
         "Menu / back", "Performance overlay", "Fullscreen", "Screenshot", "Boost", "Dampeners on / off",
         "Command view", "Galaxy map", "Halt (cancel order)", "Focus on selection (command view)", "Ship data sheet", "Take control of target / leave in drone",
         "Controls / help", "Hold to show cursor", "Players on this server", "Party (social)", "Chat", "Sector information (show / hide)",
-        "Ship editor (open / cancel)",
+        "Ship editor (open / cancel)", "Map layer up", "Map layer down", "Map flat / tilted view",
     ];
 
 
@@ -37,6 +37,7 @@ internal sealed class ControlsCatalog
                 InputAction.Follow => "Command",
                 InputAction.TogglePlayers or InputAction.ToggleSocial or InputAction.ToggleChat => "Social",
                 InputAction.ToggleEditor => "Editor",
+                InputAction.MapLayerUp or InputAction.MapLayerDown or InputAction.MapTilt => "Map",
                 _ => "General",
             };
             rows.Add(new Row(category, ActionLabels[i], names.Count == 0 ? "Unbound" : string.Join(" / ", names)));
@@ -81,10 +82,11 @@ internal sealed class ControlsCatalog
             new("Command", "Pan / zoom", "Strafe + Yaw and Forward + Pitch axes; middle drag / mouse wheel"),
             new("Command", "Raise / lower plane", "Roll axis; Shift + left drag"),
             new("Command", "Focus fleet ship", "Double-click fleet row"),
-            new("Map", "Select / box select", "Left mouse button / left drag; Shift or Ctrl adds"),
+            new("Map", "Select ship / box select", "Left mouse button on a ship / left drag; Shift or Ctrl adds"),
+            new("Map", "Sector card: preview / pin / close", "Hover a sector / left click it / left click outside the galaxy or Escape"),
             new("Map", "Pan / zoom", "Middle drag / mouse wheel; Strafe + Yaw and Forward + Pitch axes"),
             new("Map", "Move or jump course menu", "Right click sector"),
-            new("Map", "Change layer / centre on own ship", "PageUp / PageDown / Space"),
+            new("Map", "Centre on own ship and its layer", "Space"),
             new("Editor", "Place part", "Left click on a block face, or drag a part card onto the ship"),
             new("Editor", "Size the part to place", "Hold S over a face, left drag a highlighted ghost face (opposite face stays); click again to place, Esc puts back"),
             new("Editor", "Turn the part to place", "R over a face, then drag a ring round (90-degree steps), or wheel or click it (Shift + click back); click the ghost to place it, R keeps the turn, Esc puts it back"),

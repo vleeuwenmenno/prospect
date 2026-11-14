@@ -25,7 +25,9 @@ namespace Prospect.Client.Screens;
 /// </summary>
 internal sealed class MapPointer
 {
-    private const int MaxBlocked = 4;
+    // The map blocks at most five areas a frame (unit list, bar, layer bar, course menu, pinned card); a block past
+    // the limit would be dropped silently, so the limit keeps room to spare.
+    private const int MaxBlocked = 8;
     private readonly float2[] _blockedMin = new float2[MaxBlocked];
     private readonly float2[] _blockedMax = new float2[MaxBlocked];
     private int _blockedCount;

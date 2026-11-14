@@ -1,0 +1,21 @@
+{
+  "fogAlpha": 0.62,
+  "chartedAlpha": 0.16,
+  "liveFillAlpha": 0.14,
+  "liveRingAlpha": 0.85,
+  "minCoveragePixels": 3,
+  "edgeFalloff": 0.01,
+  "tiltDegrees": 58,
+  "tiltLayerSpacing": 2.2,
+  "tiltLayers": 3,
+  "tiltSeconds": 0.28,
+  "cardWidth": 340,
+  "cardListRows": 6,
+  "cardGap": 14,
+  "fieldDetailCell": 64,
+  "fieldSectorsPerFrame": 2,
+  "staleFade": 0.45,
+  "scanResultSeconds": 6,
+  "commandFogAlpha": 0.42,
+  "commandFogReach": 3
+}

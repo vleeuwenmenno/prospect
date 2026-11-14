@@ -18,7 +18,10 @@
     "ToggleSocial": ["Key:O"],
     "ToggleChat": ["Key:Enter", "Key:KpEnter"],
     "ToggleSectorInfo": ["Key:F2"],
-    "ToggleEditor": ["Key:B"]
+    "ToggleEditor": ["Key:B"],
+    "MapLayerUp": ["Key:PageUp"],
+    "MapLayerDown": ["Key:PageDown"],
+    "MapTilt": ["Key:V"]
   },
   "axes": {
     "Strafe": [{ "negative": "Key:A", "positive": "Key:D" }, { "axis": "Pad:LeftX" }],
