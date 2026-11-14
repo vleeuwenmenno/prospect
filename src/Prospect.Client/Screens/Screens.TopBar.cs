@@ -58,7 +58,7 @@ internal sealed partial class ScreenHost
         if (InterfaceModeOn)
             return _focusedPane switch
             {
-                SocialPane.Charts => BarTab.Charts,
+                SocialPane.Charts or SocialPane.Gas => BarTab.Charts,
                 SocialPane.Inventory => BarTab.Inventory,
                 SocialPane.Player => BarTab.Player,
                 _ => BarTab.Social,
@@ -251,13 +251,13 @@ internal sealed partial class ScreenHost
                 break;
             case BarTab.Social:
                 _mapOpen = false;
-                if (InterfaceModeOn && _focusedPane is not (SocialPane.Charts or SocialPane.Inventory or SocialPane.Player))
+                if (InterfaceModeOn && _focusedPane is not (SocialPane.Charts or SocialPane.Inventory or SocialPane.Player or SocialPane.Gas))
                     CloseWorkspace();
                 else
                 {
                     OpenWorkspace(snapshot);
                     // The Social tab lights for the window in front, so bring the social ones forward from the player's own.
-                    if (_focusedPane is SocialPane.Charts or SocialPane.Inventory or SocialPane.Player)
+                    if (_focusedPane is SocialPane.Charts or SocialPane.Inventory or SocialPane.Player or SocialPane.Gas)
                         Raise(SocialPane.Navigator);
                 }
 

@@ -148,6 +148,14 @@ internal sealed class AppOptions
     /// <summary>Target the nearest other hull once in space; for captures of the target's markers.</summary>
     public bool TargetNearest { get; set; }
 
+    /// <summary>Target the asteroid nearest the ship once its sector has loaded; for captures of the target panel.</summary>
+    public bool TargetRock { get; set; }
+
+    /// <summary>Run this module (gas, asteroid or locator) as its key would at <see cref="ModuleAt"/> seconds after the splash; for captures of the module interface.</summary>
+    public string? ModuleRun { get; set; }
+
+    public float ModuleAt { get; set; } = 1f;
+
     /// <summary>With <c>--capture</c>: accept party invitations as they arrive; for captures of the party interface.</summary>
     public bool AcceptInvites { get; set; }
 
@@ -231,6 +239,7 @@ internal sealed class App : IDisposable
     private bool _tipsSampled;
     private bool _mapClosed;
     private bool _scanCancelled;
+    private bool _moduleRan;
     private readonly CatalogueMeshes _catalogueMeshes;
 
     /// <summary>Whether the acquired catalogue can be drawn safely.</summary>
@@ -1124,6 +1133,19 @@ internal sealed class App : IDisposable
             }
             else if (view == "edit" && snapshot is { OwnHull: >= 0 })
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
+            else if (view == "modules" && snapshot is { OwnHull: >= 0 })
+            {
+                // The editor on the part list's Modules tab.
+                World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
+                _screens.SelectEditorTab("Modules");
+            }
+            else if (view == "module-command")
+            {
+                // The command view pulled back over the flown ship, so the locator's marks are seen as the fleet's picture.
+                World.SetCommandCapturePose(World.OwnPosition, 9000f, 0.6f, -0.95f);
+            }
+            else if (view is "gas" or "pinned-gas")
+                _screens.OpenGasWindow(view == "pinned-gas");
             else if (view == "drone")
             {
                 // Steps out of the hull into an escape drone, so a capture shows the drone from behind.
@@ -1287,6 +1309,12 @@ internal sealed class App : IDisposable
 
         if (_options.TargetNearest && Session is not null && _sinceSplash > 0.6f && World.TargetHull == 0)
             World.TargetNearestHull();
+        if (_options.TargetRock && Session is not null && _sinceSplash > 0.6f && World.TargetRock is null)
+            World.TargetNearestRock();
+        // A scripted module request goes through the very path the key takes, so a module that cannot run says so on its
+        // chip and the script tries again on the next frame until the gate is open.
+        if (_options.ModuleRun is { } moduleRun && !_moduleRan && Session is not null && _sinceSplash >= _options.ModuleAt)
+            _moduleRan = _screens.RunModuleScript(moduleRun);
 
         // Scripted captures of the party interface answer an invitation the way a click on Accept does: with the
         // identity of the invitation shown in this frame's snapshot.

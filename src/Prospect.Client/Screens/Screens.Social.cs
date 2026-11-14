@@ -36,6 +36,9 @@ internal enum SocialPane : byte
 
     /// <summary>Who the player is in the game. Coming soon.</summary>
     Player,
+
+    /// <summary>The gas clouds the player has sampled with a gas scanner.</summary>
+    Gas,
 }
 
 /// <summary>
@@ -61,7 +64,7 @@ internal sealed partial class ScreenHost
     /// <summary>Seconds a notice (a refusal, a failed send, a request sent) stays readable.</summary>
     private const float NoticeSeconds = 6f;
 
-    private const int PaneCount = 9;
+    private const int PaneCount = 10;
 
     /// <summary>
     /// Interface mode: the navigator and every open window are shown, the pointer is free and flight input is off,
@@ -346,6 +349,11 @@ internal sealed partial class ScreenHost
             TogglePane(SocialPane.Charts);
             _socialHandled = true;
         }
+        else if (actions.InterfaceShortcutPressed(devices, InputAction.ToggleGas, typing, pointerOwned))
+        {
+            TogglePane(SocialPane.Gas);
+            _socialHandled = true;
+        }
         else if (actions.InterfaceShortcutPressed(devices, InputAction.ToggleInventory, typing, pointerOwned))
         {
             TogglePane(SocialPane.Inventory);
@@ -464,6 +472,7 @@ internal sealed partial class ScreenHost
         SocialPane.Charts => new float2(Kit.Px(520), Kit.Px(580)),
         SocialPane.Inventory => new float2(Kit.Px(300), Kit.Px(220)),
         SocialPane.Player => new float2(Kit.Px(240), Kit.Px(190)),
+        SocialPane.Gas => new float2(Kit.Px(ModuleLook.Current.GasWindowWidth), Kit.Px(ModuleLook.Current.GasWindowHeight)),
         _ => new float2(Kit.Px(360), Kit.Px(420)),
     };
 
@@ -485,6 +494,7 @@ internal sealed partial class ScreenHost
             SocialPane.Charts => new float2(display.X - size.X - left, top),
             SocialPane.Inventory => new float2(display.X - size.X - left, display.Y - size.Y - left),
             SocialPane.Player => new float2(left, top + PaneSize(SocialPane.Navigator).Y + Kit.Px(Theme.Space4)),
+            SocialPane.Gas => new float2(display.X - size.X - left, Math.Max(top, display.Y - size.Y - left - PaneSize(SocialPane.Inventory).Y - Kit.Px(Theme.Space4))),
             _ => new float2(display.X - size.X - left, top),
         };
     }
@@ -532,6 +542,8 @@ internal sealed partial class ScreenHost
         {
             if (PaneShown(SocialPane.Charts))
                 DrawChartsPane(snapshot);
+            if (PaneShown(SocialPane.Gas))
+                DrawGasPane(snapshot);
             if (PaneShown(SocialPane.Inventory))
                 DrawPlaceholderPane(SocialPane.Inventory, "##inventory"u8, "Inventory"u8, "Your cargo and stores will be listed here once there is mining."u8);
             if (PaneShown(SocialPane.Player))

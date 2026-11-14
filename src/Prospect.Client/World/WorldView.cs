@@ -2421,6 +2421,36 @@ internal sealed class WorldView
         }
     }
 
+    /// <summary>
+    /// Targets the asteroid whose surface is nearest the ship being flown, once the sectors around it have loaded. Used
+    /// by <c>--target-rock</c>, for captures of the target panel; a scripted run only.
+    /// </summary>
+    public void TargetNearestRock()
+    {
+        var best = double.MaxValue;
+        RockRef? found = null;
+        foreach (var slot in _slots)
+        {
+            if (slot.State != SectorSlot.Ready || !ReferenceEquals(slot.Galaxy, _galaxy))
+                continue;
+            var center = _galaxy!.CenterOf(slot.Coord);
+            for (var i = 0; i < slot.Content.AsteroidCount; i++)
+            {
+                ref var asteroid = ref slot.Content.Asteroids[i];
+                var surface = (center + asteroid.LocalPosition - OwnPosition).Length - asteroid.Radius;
+                if (surface < 5 || surface >= best)
+                    continue;
+                best = surface;
+                found = new RockRef(slot.Coord, i);
+            }
+        }
+
+        if (found is null)
+            return;
+        TargetRock = found;
+        TargetHull = 0;
+    }
+
     /// <summary>Finds a hull in this frame's snapshot by id.</summary>
     public bool TryGetHull(uint id, out HullView hull)
     {

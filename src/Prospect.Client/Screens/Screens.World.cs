@@ -115,6 +115,7 @@ internal sealed partial class ScreenHost
     {
         var world = _app.World;
         UpdateExploration(snapshot, world);
+        UpdateModules(snapshot, world);
         // While the ship editor is shown its own keys apply: the map and the data sheet wait until it closes.
         var editing = world.Editor.Shown;
         var asking = _newShip.Open;
@@ -133,6 +134,10 @@ internal sealed partial class ScreenHost
         // or while typing.
         if (!editing && !asking && !_sessionMenuOpen && !SocialSurfaceOpen && !_controlsOpen && Bridge is { } scanBridge)
             ScanRules.HandleKey(_app.Actions, _app.Devices, !_ui.WantsTextInput, snapshot.Exploration.Scan, world.Sector.Coord, snapshot.ServerTick, scanBridge);
+
+        // The module keys work in the flight and command views only, under the same limits.
+        if (!editing && !asking && !_sessionMenuOpen && !SocialSurfaceOpen && !_controlsOpen && !_mapOpen && Bridge is { } moduleBridge)
+            HandleModuleKeys(moduleBridge);
 
         // Everything shown over the world goes on ImGui's background layer, which is drawn beneath every window.
         // Menus, the world settings, the map and the fleet list are windows, so they always cover it, and a menu's
@@ -164,6 +169,7 @@ internal sealed partial class ScreenHost
                 return;
             }
 
+            DrawLocatorVision(draw, snapshot, world, 1f, world.CommandBlend > 0.5f);
             if (pilot > 0.01f)
                 DrawFlightReadouts(draw, snapshot, world, pilot);
             if (world.CommandBlend > 0.01f)
@@ -173,6 +179,7 @@ internal sealed partial class ScreenHost
             }
 
             DrawScanStrip(draw, snapshot, world, 1f, WorldInputEnabled && (world.Mode == ViewMode.Command || (world.Mode == ViewMode.Pilot && _app.PointerReleased)));
+            DrawModuleStrip(draw, snapshot, world, 1f);
             if (pilot > 0.01f)
                 DrawTargetReadout(draw, snapshot, world, pilot);
             if (_sectorInfo.Open)
@@ -210,7 +217,7 @@ internal sealed partial class ScreenHost
     {
         if (world.Mode == ViewMode.Command && world.Selection.Length == 0 && world.SelectedRocks.Length > 0)
         {
-            DrawRockInfo(draw, world, world.SelectedRocks[0]);
+            DrawRockInfo(draw, snapshot, world, world.SelectedRocks[0]);
             return;
         }
 
@@ -446,15 +453,17 @@ internal sealed partial class ScreenHost
             Brackets(draw, rockScreen - reach, rockScreen + reach, Kit.Px(8), Kit.Color(Theme.Info));
 
             var label = rockScreen + new float2(ring + Kit.Px(12), -Kit.Px(14));
-            var mass = world.Galaxy!.AsteroidDensity * 4.18879f * MathF.Pow(radius * RockField.SolidFraction, 3);
-            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, label, Theme.Text, RockTitle(world, rock));
+            // Only what the player's scan found: an unscanned rock shows its size, which anyone can see.
+            var analysis = FindAnalysis(snapshot, rock);
+            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, label, Theme.Text, RockTitle(snapshot, rock, analysis));
+            var massText = analysis >= 0 ? MassText(snapshot.Modules.Records[analysis].Mass) : default;
             Kit.Text(
                 draw,
                 _ui.Mono,
                 Theme.FontCaption,
                 label + new float2(0, Kit.Px(15)),
                 Theme.TextDim,
-                mass >= 1e6f ? Kit.F($"R {radius:0} M   {mass / 1e6f:0.00} MT") : Kit.F($"R {radius:0} M   {mass / 1e3f:0.0} KT")
+                analysis >= 0 ? Kit.F($"R {radius:0} M   {massText}") : Kit.F($"R {radius:0} M   UNSCANNED")
             );
             var drift = world.RockDrift(rock);
             if (drift > 0.005f)
@@ -733,18 +742,23 @@ internal sealed partial class ScreenHost
         }
         else if (world.TargetRock is { } targetRock && world.TryGetRock(targetRock, out var rockPosition, out var rockRadius))
         {
-            var size = new float2(Kit.Px(HudLayout.TargetReadoutWidth), Kit.Px(92));
+            // What the player has scanned decides how much the panel says: an unscanned rock shows only what can be seen
+            // (its size and distance) and how to scan it; the generated ore and mass are not read off the sector.
+            var analysed = FindAnalysis(snapshot, targetRock) >= 0;
+            var look = ModuleStyle;
+            var extra = analysed ? look.TargetPanelExtra : look.TargetPanelUnknownExtra;
+            var size = new float2(Kit.Px(HudLayout.TargetReadoutWidth), Kit.Px(92 + extra));
             var min = new float2((display.X - size.X) * 0.5f, HudTop);
             Kit.PanelFrame(draw, min, min + size);
             var text = min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3));
-            var mass = world.Galaxy!.AsteroidDensity * 4.18879f * MathF.Pow(rockRadius * RockField.SolidFraction, 3);
             var range = rockPosition.RelativeTo(world.OwnPosition).Length();
             Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, text, Theme.Info, "TARGET"u8);
-            Kit.Text(draw, _ui.SansMedium, Theme.FontBody, text + new float2(0, Kit.Px(16)), Theme.Text, RockTitle(world, targetRock));
-            Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(44)), Theme.TextDim, mass >= 1e6f ? Kit.F($"DIAMETER {rockRadius * 2:0} M   {mass / 1e6f:0.00} MT") : Kit.F($"DIAMETER {rockRadius * 2:0} M   {mass / 1e3f:0.0} KT"));
+            Kit.Text(draw, _ui.SansMedium, Theme.FontBody, text + new float2(0, Kit.Px(16)), Theme.Text, "Asteroid"u8);
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(44)), Theme.TextDim, Kit.F($"DIAMETER {rockRadius * 2:0} M"));
             var rangeText = range >= 1000f ? Kit.F($"{range / 1000f:0.00} KM") : Kit.F($"{range:0} M");
             var rangeSize = Kit.Measure(_ui.Mono, Theme.FontCaption, rangeText);
             Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(min.X + size.X - rangeSize.X - Kit.Px(Theme.Space4), text.Y + Kit.Px(20)), Theme.TextDim, rangeText);
+            DrawRockAnalysis(draw, snapshot, world, targetRock, text + new float2(0, Kit.Px(64)), size.X - Kit.Px(Theme.Space4 * 2));
         }
 
         if (world.ControlDenied)
@@ -825,14 +839,19 @@ internal sealed partial class ScreenHost
         return lines;
     }
 
-    /// <summary>What to call an asteroid in a readout.</summary>
-    private static ReadOnlySpan<byte> RockTitle(WorldView world, RockRef rock) =>
-        world.TryGetRockOre(rock, out var resource, out var grade) && resource >= 0
-            ? Kit.F($"{world.Galaxy!.Resources[resource].Name} asteroid   {grade * 100:0}% grade")
+    /// <summary>What to call an asteroid in a readout: by what the player's scan found, never by what the sector generated.</summary>
+    private ReadOnlySpan<byte> RockTitle(SessionSnapshot snapshot, RockRef rock, int analysis)
+    {
+        if (analysis < 0)
+            return "Asteroid"u8;
+        ref var record = ref snapshot.Modules.Records[analysis];
+        return record.Resource >= 0 && record.Resource < snapshot.Galaxy!.Resources.Length
+            ? Kit.F($"{snapshot.Galaxy.Resources[record.Resource].Name} asteroid   {record.Grade * 100:0}% grade")
             : "Bare rock asteroid"u8;
+    }
 
     /// <summary>An asteroid's data sheet.</summary>
-    private void DrawRockInfo(ImDrawListPtr draw, WorldView world, RockRef rock)
+    private void DrawRockInfo(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, RockRef rock)
     {
         if (!world.TryGetRock(rock, out var position, out var radius))
             return;
@@ -850,20 +869,26 @@ internal sealed partial class ScreenHost
         Kit.Text(draw, _ui.SansBold, Theme.FontHeading, new float2(left, y + Kit.Px(16)), Theme.Text, "Asteroid"u8);
         y += Kit.Px(60);
 
-        void Row(ImString label, ImString value)
+        void Row(ImString label, ImString value, uint rgb = Theme.Text)
         {
             Kit.Text(draw, _ui.Sans, Theme.FontSmall, new float2(left, y), Theme.TextDim, label);
             var valueSize = Kit.Measure(_ui.Mono, Theme.FontSmall, value);
-            Kit.Text(draw, _ui.Mono, Theme.FontSmall, new float2(right - valueSize.X, y), Theme.Text, value);
+            Kit.Text(draw, _ui.Mono, Theme.FontSmall, new float2(right - valueSize.X, y), rgb, value);
             y += line;
         }
 
-        var mass = galaxy.AsteroidDensity * 4.18879f * MathF.Pow(radius * RockField.SolidFraction, 3);
         var range = position.RelativeTo(world.OwnPosition).Length();
-        if (world.TryGetRockOre(rock, out var resource, out var grade) && resource >= 0)
+        // Ore, grade and mass are what the player's scan found; an unscanned rock does not give them away.
+        var analysis = FindAnalysis(snapshot, rock);
+        if (analysis < 0)
+        {
+            Row("Resource"u8, "Unscanned"u8, Theme.TextMute);
+            Row("Grade"u8, "Unscanned"u8, Theme.TextMute);
+        }
+        else if (snapshot.Modules.Records[analysis].Resource is >= 0 and var resource && resource < galaxy.Resources.Length)
         {
             Row("Resource"u8, galaxy.Resources[resource].Name);
-            Row("Grade"u8, Kit.F($"{grade * 100:0} %"));
+            Row("Grade"u8, Kit.F($"{snapshot.Modules.Records[analysis].Grade * 100:0} %"));
         }
         else
         {
@@ -875,7 +900,10 @@ internal sealed partial class ScreenHost
         if (galaxy.AsteroidFields is { } fields)
             Row("Size"u8, fields.SizeName(radius));
         Row("Diameter"u8, radius >= 500f ? Kit.F($"{radius * 2 / 1000f:0.00} km") : Kit.F($"{radius * 2:0} m"));
-        Row("Mass"u8, mass >= 1e6f ? Kit.F($"{mass / 1e6f:0.00} Mt") : Kit.F($"{mass / 1e3f:0.0} kt"));
+        if (analysis < 0)
+            Row("Mass"u8, "Unscanned"u8, Theme.TextMute);
+        else
+            Row("Mass"u8, MassText(snapshot.Modules.Records[analysis].Mass));
         Row("Drift"u8, Kit.F($"{world.RockDrift(rock):0.00} m/s"));
         Row("Distance from pod"u8, range >= 1000f ? Kit.F($"{range / 1000f:0.00} km") : Kit.F($"{range:0} m"));
     }

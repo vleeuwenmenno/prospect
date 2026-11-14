@@ -106,7 +106,7 @@ internal sealed partial class ScreenHost
         var unitsPlaced = units with { Min = _mapPanels.Place(MapPanel.Units, units.Min, units.Size, display, Kit.Scale) };
         _mapPointer.Block(unitsPlaced.Min, unitsPlaced.Size);
         _mapPointer.Block(float2.Zero, new float2(display.X, HudLayout.TopBarBottom(Kit.Scale)));
-        var legend = MapLegend.Layout(display, Kit.Scale, units, MapLegend.FeatureRows + galaxy.StarClasses.Length, look.LegendRowHeight);
+        var legend = MapLegend.Layout(display, Kit.Scale, units, MapLegend.FeatureRows + galaxy.StarClasses.Length + LocatorLegendRows(snapshot), look.LegendRowHeight);
         if (legend.Shown)
         {
             legend = legend with { Min = _mapPanels.Place(MapPanel.Legend, legend.Min, legend.Size, display, Kit.Scale) };
@@ -956,6 +956,16 @@ internal sealed partial class ScreenHost
                 default:
                     {
                         var star = row - MapLegend.FeatureRows;
+                        if (star >= galaxy.StarClasses.Length)
+                        {
+                            // The locator's classes, as its marks are coloured in the flight and command views.
+                            var cls = ModuleStyle.Classes[star - galaxy.StarClasses.Length];
+                            draw.AddCircleFilled(middle, swatch.Y * 0.4f, Kit.Color(cls.Rgb, 0.95f), 12);
+                            draw.AddCircle(middle, swatch.Y * 0.55f, Kit.Color(cls.Rgb, 0.6f), 16, Kit.Px(1f));
+                            Kit.Text(draw, _ui.Mono, Theme.FontCaption, textAt, Theme.TextDim, cls.Label);
+                            break;
+                        }
+
                         ref readonly var starClass = ref galaxy.StarClasses[star];
                         DrawStarIcon(draw, middle, Math.Min(Kit.Px(look.StarIconSize), swatch.Y * 0.6f), look.ShapeOf(starClass.Name), StarColor(starClass.Color), look);
                         Kit.Text(draw, _ui.Mono, Theme.FontCaption, textAt, Theme.TextDim, Kit.F($"{StarNameUpper(galaxy, star)}"));

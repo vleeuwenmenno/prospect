@@ -231,6 +231,7 @@ internal static class EditorGeometry
         : type.Shield > 0 ? PartRole.Shield
         : type.Cargo > 0 ? PartRole.Cargo
         : type.Crew > 0 ? PartRole.Crew
+        : type.Module.Family != ModuleFamily.None ? PartRole.Module
         : PartRole.Structure;
 
     /// <summary>The faint tint a part of a role adds to the hull colour in the editor, so parts can be told apart.</summary>
@@ -246,6 +247,7 @@ internal static class EditorGeometry
         PartRole.Shield => new Vector3(0.30f, 0.75f, 1.00f),
         PartRole.Cargo => new Vector3(0.70f, 0.55f, 0.40f),
         PartRole.Crew => new Vector3(0.90f, 0.90f, 0.95f),
+        PartRole.Module => new Vector3(0.35f, 0.90f, 0.85f),
         _ => Vector3.Zero,
     };
 
@@ -271,4 +273,5 @@ internal enum PartRole : byte
     Shield,
     Cargo,
     Crew,
+    Module,
 }

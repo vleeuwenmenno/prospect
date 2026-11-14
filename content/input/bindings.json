@@ -27,7 +27,11 @@
     "MapLayerDown": ["Key:PageDown"],
     "MapTilt": ["Key:V"],
     "ScanSector": ["Key:K", "Pad:DpadLeft"],
-    "ResetMapPanels": ["Key:L"]
+    "ResetMapPanels": ["Key:L"],
+    "ScanGas": ["Key:C"],
+    "ScanAsteroid": ["Key:X"],
+    "PulseLocator": ["Key:Y"],
+    "ToggleGas": ["Key:F4"]
   },
   "axes": {
     "Strafe": [{ "negative": "Key:A", "positive": "Key:D" }, { "axis": "Pad:LeftX" }],

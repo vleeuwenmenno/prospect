@@ -53,6 +53,7 @@ internal sealed class EditorPalette
         PartRole.Shield => "shield",
         PartRole.Cargo => "cargo",
         PartRole.Crew => "crew quarters",
+        PartRole.Module => "module scanner locator gas asteroid survey",
         _ => "structure armour hull",
     };
 

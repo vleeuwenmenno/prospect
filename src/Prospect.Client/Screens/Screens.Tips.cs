@@ -109,6 +109,12 @@ internal sealed partial class ScreenHost
         Edge(own.Id != 0 && !_mapOpen && !world.Editor.Shown && _coverage.OwnCanChart && !Charted(world.Sector.Coord), ref _tipSawUncharted, TipTriggers.UnchartedSector);
         Edge(own.Id != 0 && flight.ShieldCapacity > 0f && own.ShieldOffline, ref _tipSawShield, TipTriggers.ShieldOffline);
 
+        // The modules' tips: each on the change into its state, only in the flight and command views.
+        var inSpace = own.Id != 0 && !_mapOpen && !world.Editor.Shown;
+        Edge(inSpace && _moduleGate[0] is ModuleGate.Ready or ModuleGate.OutOfRange, ref _tipSawGasScanner, TipTriggers.GasScannerReady);
+        Edge(inSpace && _moduleGate[1] != ModuleGate.Absent && _moduleTargets.Rock is { } tipRock && FindAnalysis(snapshot, tipRock) < 0, ref _tipSawAsteroidTarget, TipTriggers.AsteroidScannerReady);
+        Edge(inSpace && _moduleGate[2] != ModuleGate.Absent, ref _tipSawLocator, TipTriggers.LocatorReady);
+
         // The battery is low below one level and not again until it has recovered past a higher one, so a battery
         // hovering at the line does not bring the tip back every few seconds.
         if (own.Id != 0 && flight.EnergyStorage > 0f)
@@ -251,6 +257,9 @@ internal sealed partial class ScreenHost
         _tipPlacedId = null;
         _tipSurfaces.Reset();
         _tipSawUncharted = _tipSawShield = _tipEnergyLow = false;
+        _tipSawGasScanner = _tipSawAsteroidTarget = _tipSawLocator = false;
+        _moduleTrack.Reset();
+        _gasTarget.Reset();
     }
 
     /// <summary>

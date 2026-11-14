@@ -72,13 +72,7 @@ internal sealed class ModuleSurveyWorker : IDisposable
                 || !gas.TryGetCloud(_galaxy, request.Sector, out var cloud))
             { slot.Failure = ModuleScanState.InvalidTarget; return; }
             var placement = new GasCloudPlacement(request.Sector, cloud);
-            var center = GasCloudQuery.CenterOf(_galaxy, placement);
-            var d = slot.Origin - center;
-            var x = d.X / (cloud.HalfSize.X * (double)gas.Shape.X);
-            var y = d.Y / (cloud.HalfSize.Y * (double)gas.Shape.X);
-            var z = d.Z / (cloud.HalfSize.Z * (double)gas.Shape.X);
-            var length = Math.Sqrt(x * x + y * y + z * z);
-            var position = length > 0.95 ? center + d * (0.95 / length) : slot.Origin;
+            var position = GasCloudQuery.SamplePoint(_galaxy, placement, slot.Origin);
             var sample = mixtures.Sample(_galaxy, placement, position);
             slot.Results[slot.Count++] = new ModuleObservation
             {

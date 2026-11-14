@@ -7,6 +7,7 @@
     { "name": "Move", "roles": ["engine", "thruster", "gyro"], "compact": false },
     { "name": "Shield", "roles": ["shield"], "compact": false },
     { "name": "Jump", "roles": ["drive"], "compact": false },
+    { "name": "Modules", "roles": ["module"], "compact": false },
     { "name": "Drone", "compact": true }
   ],
   "lowForwardAcceleration": 2.0,

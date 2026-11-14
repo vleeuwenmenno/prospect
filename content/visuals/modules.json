@@ -1,0 +1,63 @@
+{
+  "tiers": [
+    { "quality": "Common", "label": "COMMON", "color": "B9C2CE" },
+    { "quality": "Uncommon", "label": "UNCOMMON", "color": "5FD48A" },
+    { "quality": "Rare", "label": "RARE", "color": "4F9DFF" },
+    { "quality": "Epic", "label": "EPIC", "color": "B46BFF" },
+    { "quality": "Legendary", "label": "LEGENDARY", "color": "FFAE2B" },
+    { "quality": "Alien Tech", "label": "ALIEN TECH", "color": "2EF2D0" }
+  ],
+  "families": [
+    { "family": "gasScanner", "label": "GAS SCANNER", "short": "GAS" },
+    { "family": "asteroidScanner", "label": "ASTEROID SCANNER", "short": "ASTEROID" },
+    { "family": "asteroidLocator", "label": "ASTEROID LOCATOR", "short": "LOCATOR" }
+  ],
+  "gases": [
+    { "gas": "Hydrogen", "color": "C9D6E8" },
+    { "gas": "Helium", "color": "F2D9A0" },
+    { "gas": "Methane", "color": "8FD39A" },
+    { "gas": "Ammonia", "color": "D9B8F0" },
+    { "gas": "Neon", "color": "FF8A6B" },
+    { "gas": "Xenon", "color": "8F9CFF" },
+    { "gas": "Water vapour", "color": "7FD4F5" },
+    { "gas": "Ionised hydrogen", "color": "FF6BD6" }
+  ],
+  "cloudKinds": [
+    { "kind": "Normal", "label": "NORMAL", "color": "B78CF0" },
+    { "kind": "Cold", "label": "COLD", "color": "7FD4F5" },
+    { "kind": "Lightning", "label": "LIGHTNING", "color": "FFD34D" }
+  ],
+  "locatorClasses": [
+    { "name": "Ice", "color": "9EDBFF", "resources": ["ice"] },
+    { "name": "Common metal", "color": "E0884F", "resources": ["iron", "copper", "nickel"] },
+    { "name": "Rare metal", "color": "7C9CFF", "resources": ["titanium"] },
+    { "name": "Precious metal", "color": "FFD34D", "resources": ["silver", "gold"] },
+    { "name": "Bare rock", "color": "8E959E", "bare": true }
+  ],
+  "locator": {
+    "visionSeconds": 9,
+    "fadeSeconds": 4,
+    "waveSeconds": 1.6,
+    "markerPixels": 4.5,
+    "ringPixels": 10,
+    "minPixels": 3,
+    "visionAlpha": 0.95,
+    "retainedAlpha": 0.38,
+    "retainedMarkerPixels": 3,
+    "labelNearest": 5
+  },
+  "strip": {
+    "chipWidth": 124,
+    "chipHeight": 38,
+    "gap": 6,
+    "resultSeconds": 6,
+    "readyAlpha": 0.9,
+    "idleAlpha": 0.55
+  },
+  "cardBarWidth": 96,
+  "gasWindowWidth": 460,
+  "gasWindowHeight": 440,
+  "unresolvedPercent": 0.5,
+  "targetPanelExtra": 54,
+  "targetPanelUnknownExtra": 28
+}

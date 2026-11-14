@@ -494,7 +494,7 @@ internal sealed partial class ScreenHost
             if (!_palette.Shows(tuning, type))
                 continue;
             shown++;
-            DrawPartCard(i, type, figures[i], tuning.Compact(type), cardHeight, hull, editor);
+            DrawPartCard(i, type, figures[i], tuning.Compact(type), type.Module.Family != ModuleFamily.None ? Kit.Px(ModuleCardHeight) : cardHeight, hull, editor);
             Kit.Space(Theme.Space1);
         }
 
@@ -563,12 +563,45 @@ internal sealed partial class ScreenHost
         }
 
         Kit.ClippedText(draw, _ui.SansMedium, Theme.FontSmall, at + new float2(left, Kit.Px(4)), chosen ? Theme.Text : Theme.TextDim, Kit.F($"{type.Name}"), room);
+        if (role == PartRole.Module)
+        {
+            DrawModuleCard(draw, at, type.Module, figures, left, room, max.X);
+            ImGui.PopID();
+            return;
+        }
+
         Kit.ClippedText(draw, _ui.Sans, Theme.FontCaption, at + new float2(left, Kit.Px(22)), Theme.TextMute, RoleText(role), room - tag);
         Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(left, Kit.Px(38)), Theme.TextDim, Kit.F($"{figures.Mass:0.##} T   {figures.Hull:0} HP"), room);
         var main = MainFigures(role, figures);
         if (!main.IsEmpty)
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(left, Kit.Px(53)), Theme.Text, main, room);
         ImGui.PopID();
+    }
+
+    /// <summary>Height of a module's part card, in unscaled pixels: two more lines than another part's, for the figures.</summary>
+    internal const float ModuleCardHeight = 100f;
+
+    /// <summary>
+    /// A module's card below its name: the family, its quality as a badge in the tier's colour with its mark, the
+    /// mass and hull, and the figures it is chosen for (reach, scan time, power draw, cooldown). Every figure is the
+    /// block's own from the content, at its quality.
+    /// </summary>
+    private void DrawModuleCard(ImDrawListPtr draw, float2 at, in ModuleSpec spec, in PartFigures figures, float left, float room, float right)
+    {
+        var look = ModuleLook.Current;
+        var tier = look.Tier(spec.Quality);
+        Kit.ClippedText(draw, _ui.Sans, Theme.FontCaption, at + new float2(left, Kit.Px(21)), Theme.TextMute, look.Family(spec.Family).Label, room);
+        var badge = Kit.Measure(_ui.SansMedium, Theme.FontCaption, tier.Label);
+        var badgeMin = at + new float2(left, Kit.Px(36));
+        var badgeMax = badgeMin + badge + new float2(Kit.Px(8), Kit.Px(2));
+        draw.AddRectFilled(badgeMin, badgeMax, Kit.Color(tier.Rgb, 0.18f));
+        draw.AddRect(badgeMin, badgeMax, Kit.Color(tier.Rgb, 0.9f));
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, badgeMin + new float2(Kit.Px(4), Kit.Px(1)), tier.Rgb, tier.Label);
+        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, new float2(badgeMax.X + Kit.Px(8), badgeMin.Y + Kit.Px(1)), Theme.Text, Kit.F($"MK {spec.Mark}"), Math.Max(0f, right - badgeMax.X - Kit.Px(14)));
+        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(left, Kit.Px(55)), Theme.TextDim, Kit.F($"{figures.Mass:0.##} T   {figures.Hull:0} HP"), room);
+        var reach = spec.Range >= 1000 ? Kit.F($"RANGE {spec.Range / 1000:0.##} KM   SCAN {spec.ScanSeconds:0.#} S") : Kit.F($"RANGE {spec.Range:0} M   SCAN {spec.ScanSeconds:0.#} S");
+        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(left, Kit.Px(70)), Theme.Text, reach, room);
+        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(left, Kit.Px(85)), Theme.Text, Kit.F($"DRAWS {spec.PowerDraw:0.##} MW   COOLDOWN {spec.CooldownSeconds:0.#} S"), room);
     }
 
     /// <summary>The figures a part of a role is chosen for, on one line: what it gives, then what it draws.</summary>

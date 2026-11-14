@@ -166,6 +166,9 @@ internal sealed partial class ScreenHost
                 : detail.Lightning ? "GAS LIGHTNING"
                 : detail.Cold ? "GAS COLD"
                 : "GAS";
+            // A cloud centred here that the player has sampled says so; the GAS window and the sector card have its mixture.
+            if (_gasLedger.Find(sector) >= 0)
+                gas = detail.Lightning ? "GAS LIGHTNING, SAMPLED" : detail.Cold ? "GAS COLD, SAMPLED" : "GAS, SAMPLED";
             var fields = Kit.F($"{detail.Fields} {(detail.Fields == 1 ? "FIELD" : "FIELDS")}");
             var fieldsWidth = Kit.Measure(_ui.Mono, Theme.FontCaption, fields).X;
             Kit.Text(draw, _ui.Mono, Theme.FontCaption, line2, detail.Fields > 0 ? Theme.Accent : Theme.TextMute, fields);

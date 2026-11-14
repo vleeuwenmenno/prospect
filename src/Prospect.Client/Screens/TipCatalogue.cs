@@ -47,8 +47,17 @@ internal static class TipTriggers
     /// <summary>Interface mode began: the pointer is free and every window that is not pinned appeared. Withdrawn when it ends.</summary>
     public const string InterfaceOpened = "interfaceOpened";
 
+    /// <summary>The ship being flown has a gas scanner and a gas cloud is within its reach: fired each time it comes to be so.</summary>
+    public const string GasScannerReady = "gasScannerReady";
+
+    /// <summary>An asteroid the player has not scanned is targeted, in a ship with an asteroid scanner: fired each time one is.</summary>
+    public const string AsteroidScannerReady = "asteroidScannerReady";
+
+    /// <summary>The ship being flown has an asteroid locator, in the flight or command view: fired when it first comes to have one.</summary>
+    public const string LocatorReady = "locatorReady";
+
     /// <summary>Every trigger, for validation.</summary>
-    public static readonly string[] All = [MapOpened, CommandViewOpened, EditorOpened, ScanAvailable, UnchartedSector, ShieldOffline, EnergyLow, DroneEditHint, InterfaceOpened];
+    public static readonly string[] All = [MapOpened, CommandViewOpened, EditorOpened, ScanAvailable, UnchartedSector, ShieldOffline, EnergyLow, DroneEditHint, InterfaceOpened, GasScannerReady, AsteroidScannerReady, LocatorReady];
 }
 
 /// <summary>What a tip is placed against: the screen, a panel the editor or flight view draws, or a point.</summary>

@@ -43,6 +43,7 @@ internal sealed partial class ScreenHost
     {
         public int InfoLines;
         public float Scan;
+        public float Gas;
         public float Course;
         public float ShipsTop;
         public int VisibleRows;
@@ -71,20 +72,22 @@ internal sealed partial class ScreenHost
     {
         CollectCardShips(snapshot, world, galaxy, sector);
         var room = _ui.DisplaySize.Y - HudTop - Kit.Px(HudLayout.Margin);
-        var parts = LayOutCard(world, galaxy, sector, preview, false, preview ? CardPreviewRows : MapLook.CardListRows);
+        // The gas the player sampled in the cloud anchored here takes a section of its own; a compact card drops it.
+        var gas = GasCardHeight(snapshot, sector);
+        var parts = LayOutCard(world, galaxy, sector, preview, false, preview ? CardPreviewRows : MapLook.CardListRows, gas);
         if (parts.Height > room)
-            parts = LayOutCard(world, galaxy, sector, preview, true, preview ? CardPreviewRows : MapLook.CardListRows);
+            parts = LayOutCard(world, galaxy, sector, preview, true, preview ? CardPreviewRows : MapLook.CardListRows, 0f);
         if (parts.Height > room)
         {
             var spare = (parts.Height - room) / Kit.Px(CardShipRow);
-            parts = LayOutCard(world, galaxy, sector, preview, true, Math.Max(1, parts.VisibleRows - (int)MathF.Ceiling(spare)));
+            parts = LayOutCard(world, galaxy, sector, preview, true, Math.Max(1, parts.VisibleRows - (int)MathF.Ceiling(spare)), 0f);
         }
 
         parts.Height = Math.Min(parts.Height, MathF.Round(room));
         return parts;
     }
 
-    private CardParts LayOutCard(WorldView world, Galaxy galaxy, SectorCoord sector, bool preview, bool compact, int rows)
+    private CardParts LayOutCard(WorldView world, Galaxy galaxy, SectorCoord sector, bool preview, bool compact, int rows, float gas = 0f)
     {
         var parts = new CardParts { Compact = compact };
         var charted = Charted(sector);
@@ -92,6 +95,13 @@ internal sealed partial class ScreenHost
         // none; and the jump line. Compact, coordinates and distance share a line.
         parts.InfoLines = (compact ? 2 : 3) + (charted ? 3 + (MapSummary(galaxy, sector).GasCloudCount > 0 ? 1 : 0) : 1) + 1;
         var y = Kit.Px(Theme.Space4) + Kit.Px(CardCaption) + Kit.Px(CardName) + Kit.Px(CardLine) * parts.InfoLines + Kit.Px(Theme.Space2);
+        parts.Gas = -1;
+        if (gas > 0f)
+        {
+            parts.Gas = y;
+            y += gas;
+        }
+
         parts.Scan = -1;
         if (sector == world.Sector.Coord)
         {
@@ -252,6 +262,8 @@ internal sealed partial class ScreenHost
         var jump = JumpSummary(snapshot, world.PlanJump(galaxy.CenterOf(sector)), out var jumpColor);
         Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at, jumpColor, Kit.F($"JUMP         {jump}"), inner);
 
+        if (parts.Gas >= 0)
+            DrawGasCard(draw, snapshot, sector, new float2(text.X, min.Y + parts.Gas), inner);
         if (parts.Scan >= 0)
             DrawScanReadout(draw, snapshot, world, new float2(text.X, min.Y + parts.Scan), inner, preview, charted);
 

@@ -13,6 +13,24 @@ public static class GasCloudQuery
     public static Double3 CenterOf(Galaxy galaxy, in GasCloudPlacement placement) => galaxy.CenterOf(placement.Anchor) + placement.Cloud.Center;
 
     /// <summary>
+    /// Where a gas scan from <paramref name="origin"/> samples a cloud: the origin itself inside the smooth envelope,
+    /// otherwise the point on the way to the cloud's centre at 95 % of the envelope. The server's survey and the
+    /// client's range check both call this, so what the interface calls reachable is what the server samples.
+    /// </summary>
+    public static Double3 SamplePoint(Galaxy galaxy, in GasCloudPlacement placement, Double3 origin)
+    {
+        var cloud = placement.Cloud;
+        var fill = galaxy.GasClouds!.Shape.X;
+        var center = CenterOf(galaxy, placement);
+        var d = origin - center;
+        var x = d.X / (cloud.HalfSize.X * (double)fill);
+        var y = d.Y / (cloud.HalfSize.Y * (double)fill);
+        var z = d.Z / (cloud.HalfSize.Z * (double)fill);
+        var length = Math.Sqrt(x * x + y * y + z * z);
+        return length > 0.95 ? center + d * (0.95 / length) : origin;
+    }
+
+    /// <summary>
     /// Writes the clouds anchored in every sector at most <paramref name="radius"/> sectors from
     /// <paramref name="center"/> on each axis, nearest shell of sectors first, and returns how many. A cloud of any
     /// size is listed by its anchor, so one that reaches across sector walls is found like any other. When

@@ -102,6 +102,27 @@
       "anchor": { "region": "newShipDialog", "side": "bottom", "offset": [0, 0] }
     },
     {
+      "id": "gas-scanner",
+      "trigger": "gasScannerReady",
+      "title": "Gas scanner",
+      "text": "{ScanGas} samples the gas cloud you are in or beside: about 4 seconds, flight goes on. The GAS window ({ToggleGas}) lists what you have sampled; the better the scanner, the more gases it resolves.",
+      "anchor": { "region": "console", "side": "top", "offset": [0, -64] }
+    },
+    {
+      "id": "asteroid-scanner",
+      "trigger": "asteroidScannerReady",
+      "title": "Asteroid scanner",
+      "text": "{ScanAsteroid} analyses the targeted asteroid: its ore and grade, mass and size. The result stays on the target panel. The modules share one cooldown.",
+      "anchor": { "region": "screen", "side": "top", "offset": [0, 190] }
+    },
+    {
+      "id": "asteroid-locator",
+      "trigger": "locatorReady",
+      "title": "Asteroid locator",
+      "text": "{PulseLocator} sends a pulse that marks every asteroid in range by what it probably holds: ice, common, rare or precious metal, or bare rock. The marks fade in flight and stay faintly in the command view.",
+      "anchor": { "region": "console", "side": "top", "offset": [0, -64] }
+    },
+    {
       "id": "interface-mode",
       "trigger": "interfaceOpened",
       "title": "Interface mode",

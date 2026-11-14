@@ -35,6 +35,10 @@ internal enum InputAction
     MapTilt,
     ScanSector,
     ResetMapPanels,
+    ScanGas,
+    ScanAsteroid,
+    PulseLocator,
+    ToggleGas,
     Count,
 }
 

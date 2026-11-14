@@ -68,6 +68,8 @@ internal static class Program
           --close-map-at <sec>    With --capture or --bench and a map view: close the map at this time after the splash (captures of the first frames back in the world)
           --cancel-scan-at <sec>  With --capture or --bench and a scan view (scan, scan-pilot): cancel the scan at this time after the splash, as the scan key pressed again would
           --map-tilt, --map-hover With --open scan and --capture or --bench: tilt the map, or rest the pointer on its centre
+          --target-rock           With --capture or --bench: target the asteroid nearest the ship once its sector has loaded
+          --module <gas|asteroid|locator> With --capture or --bench: run that module as its key would (asteroid needs --target-rock); --module-at <sec> says when (default 1)
           --look <degrees>        Pilot view: hold the camera this many degrees to the right of the hull's nose
           --look-to <degrees>     With --look and --capture: turn the camera from --look to this angle, evenly
                                   over the time the captures take
@@ -187,7 +189,7 @@ internal static class Program
                 case "--set" when hasValue:
                     options.WorldSettingArgs.Add(args[++i]);
                     break;
-                case "--open" when hasValue && args[i + 1] is "command" or "drone" or "map" or "map-menu" or "map-hover" or "map-card" or "map-card-near" or "map-card-far" or "map-tilt" or "map-reach" or "map-reach-tilt" or "scan" or "command-fog" or "command-fog-one" or "command-fog-pair" or "command-fog-far" or "command-menu" or "command-menu-fleet" or "command-menu-close" or "command-menu-far" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "new-ship" or "new-ship-refused" or "new-ship-editor" or "new-ship-closed" or "scan-pilot" or "scan-command" or "interface" or "charts" or "pinned-charts" or "inventory" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
+                case "--open" when hasValue && args[i + 1] is "command" or "drone" or "map" or "map-menu" or "map-hover" or "map-card" or "map-card-near" or "map-card-far" or "map-tilt" or "map-reach" or "map-reach-tilt" or "scan" or "command-fog" or "command-fog-one" or "command-fog-pair" or "command-fog-far" or "command-menu" or "command-menu-fleet" or "command-menu-close" or "command-menu-far" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "new-ship" or "new-ship-refused" or "new-ship-editor" or "new-ship-closed" or "scan-pilot" or "scan-command" or "interface" or "charts" or "pinned-charts" or "inventory" or "modules" or "module-command" or "gas" or "pinned-gas" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
                     options.OpenView = args[++i];
                     break;
                 case "--browser-sample" when hasValue:
@@ -359,6 +361,16 @@ internal static class Program
                     socialScript.Invite.Add(args[++i]); break;
                 case "--accept-invites":
                     socialScript.Accept = true; options.AcceptInvites = true; break;
+                case "--target-rock":
+                    options.TargetRock = true;
+                    break;
+                case "--module" when hasValue && args[i + 1] is "gas" or "asteroid" or "locator":
+                    options.ModuleRun = args[++i];
+                    break;
+                case "--module-at" when hasValue && float.TryParse(args[i + 1], out var moduleAt) && moduleAt >= 0:
+                    options.ModuleAt = moduleAt;
+                    i++;
+                    break;
                 case "--target":
                     options.TargetNearest = true;
                     break;
@@ -387,6 +399,9 @@ internal static class Program
 
         if (options.CancelScanAt is not null && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--cancel-scan-at works only with --capture or --bench.");
+
+        if ((options.TargetRock || options.ModuleRun is not null) && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--target-rock and --module work only with --capture or --bench.");
 
         if (options.GasFixture > 0 && (options.CapturePath is null || options.BenchSeconds > 0))
             return Fail("--gas-fixture works only with --capture, without --bench.");

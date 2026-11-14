@@ -58,6 +58,11 @@
 
     { "tab": "Scanning & exploration", "action": "ScanSector", "label": "Scan the sector you are in (again to cancel)", "scope": ["Pilot", "Map"] },
     { "tab": "Scanning & exploration", "label": "Scan from the galaxy map", "binding": "Pin the card of the sector you are in, then press its Scan button" },
+    { "tab": "Scanning & exploration", "action": "ScanAsteroid", "label": "Asteroid scanner: scan the targeted asteroid", "scope": ["Pilot", "Command"] },
+    { "tab": "Scanning & exploration", "action": "ScanGas", "label": "Gas scanner: sample the gas cloud you are in or beside", "scope": ["Pilot", "Command"] },
+    { "tab": "Scanning & exploration", "action": "PulseLocator", "label": "Asteroid locator: pulse to class the asteroids around you", "scope": ["Pilot", "Command"] },
+    { "tab": "Scanning & exploration", "label": "Module buttons", "binding": "The chips over the console (hold {ReleasePointer} in flight to click), and Scan on the target panel; only for modules the ship flown has" },
+    { "tab": "Scanning & exploration", "label": "Module cooldown", "binding": "The three modules share one cooldown and take one request at a time" },
     { "tab": "Scanning & exploration", "action": "ToggleSectorInfo", "label": "Sector information (show / hide)", "scope": ["All"] },
 
     { "tab": "Ship editor", "action": "ToggleEditor", "label": "Ship editor: open / cancel", "scope": ["Pilot", "Editor"] },
@@ -83,6 +88,7 @@
     { "tab": "Interface", "action": "Pause", "label": "Menu / back", "scope": ["All"], "required": true },
     { "tab": "Interface", "action": "ToggleInterface", "label": "Interface mode: free pointer, show every window not pinned", "scope": ["All"] },
     { "tab": "Interface", "action": "ToggleCharts", "label": "Charts window", "scope": ["All"] },
+    { "tab": "Interface", "action": "ToggleGas", "label": "Gas window: clouds you have sampled", "scope": ["All"] },
     { "tab": "Interface", "action": "ToggleInventory", "label": "Inventory window (coming soon)", "scope": ["All"] },
     { "tab": "Interface", "action": "TogglePlayerInfo", "label": "Player window (coming soon)", "scope": ["All"] },
     { "tab": "Interface", "label": "Leave interface mode", "binding": "{ToggleInterface} again, or Escape; pinned windows stay on screen" },
