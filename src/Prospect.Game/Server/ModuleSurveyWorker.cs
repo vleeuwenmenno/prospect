@@ -108,6 +108,12 @@ internal sealed class ModuleSurveyWorker : IDisposable
                 {
                     if (Volatile.Read(ref _stop)) return;
                     var coord = origin.Offset(x, y, z);
+                    var center = _galaxy.CenterOf(coord) - slot.Origin;
+                    var half = _galaxy.SectorSize * 0.5;
+                    var dx = Math.Max(0, Math.Abs(center.X) - half);
+                    var dy = Math.Max(0, Math.Abs(center.Y) - half);
+                    var dz = Math.Max(0, Math.Abs(center.Z) - half);
+                    if (dx * dx + dy * dy + dz * dz > slot.Range * slot.Range) continue;
                     _galaxy.Generate(coord, sector);
                     for (var i = 0; i < sector.AsteroidCount; i++)
                     {

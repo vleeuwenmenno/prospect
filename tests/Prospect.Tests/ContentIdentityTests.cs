@@ -66,6 +66,21 @@ public sealed class ContentIdentityTests
     private static readonly GameContent Content = GameContent.Load();
 
     [Fact]
+    public void ModuleTiersAndGasMixturesAreSharedContent()
+    {
+        using var copy = new ContentCopy();
+        var blocks = System.Text.Json.Nodes.JsonNode.Parse(copy.Read("blocks/blocks.json"))!;
+        blocks["moduleTiers"]!["Rare"]!["range"] = 1.75;
+        copy.Write("blocks/blocks.json", blocks.ToJsonString());
+        var changed = copy.Load();
+        Assert.NotEqual(Content.Identity, changed.Identity);
+        var galaxy = System.Text.Json.Nodes.JsonNode.Parse(copy.Read("galaxy/galaxy.json"))!;
+        galaxy["gasComposition"]!["purityMin"] = .4;
+        copy.Write("galaxy/galaxy.json", galaxy.ToJsonString());
+        Assert.NotEqual(changed.Identity, copy.Load().Identity);
+    }
+
+    [Fact]
     public void GasSensorPenaltyIsSharedContent()
     {
         using var copy = new ContentCopy();

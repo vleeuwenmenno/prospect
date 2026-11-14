@@ -95,3 +95,29 @@ public static class ModuleScanRules
         observation.Gas.Density = Math.Clamp(Rounded(observation.Gas.Density, equipment.Accuracy), 0, 1);
     }
 }
+
+/// <summary>Shared validation for retained observations, independent of transport and save layout.</summary>
+public static class ModuleObservationRules
+{
+    /// <summary>Structural validation independent of a world's resource catalogue.</summary>
+    public static bool Valid(in ModuleObservation record)
+    {
+        if (record.Owner == 0 || record.Family is < ModuleFamily.GasScanner or > ModuleFamily.AsteroidLocator
+            || record.Quality > ModuleQuality.AlienTech || record.Index < 0 || record.Index > ushort.MaxValue
+            || record.RecordedTick < 0 || record.ContentRevision != 0 || !Finite(record.Position)
+            || !float.IsFinite(record.Radius) || record.Radius < 0 || !float.IsFinite(record.Mass) || record.Mass < 0
+            || !Unit(record.Grade) || record.Resource is < -1 or >= 32 || record.Gas.Region >= 8
+            || !Unit(record.Gas.Purity) || !Unit(record.Gas.Density)) return false;
+        var sum = 0f;
+        for (var i = 0; i < GasComposition.Capacity; i++)
+        { if (!Unit(record.Gas.Shares[i])) return false; sum += record.Gas.Shares[i]; }
+        if (sum > 1.00001f) return false;
+        if (record.Family == ModuleFamily.GasScanner)
+            return record.Index == record.Gas.Region && record.Resource == -1 && record.Radius == 0 && record.Mass == 0 && record.Grade == 0;
+        if (sum != 0 || record.Gas.Purity != 0 || record.Gas.Density != 0 || record.Gas.Region != 0) return false;
+        return record.Family != ModuleFamily.AsteroidLocator || record.Radius == 0 && record.Mass == 0 && record.Grade == 0;
+    }
+
+    private static bool Unit(float value) => float.IsFinite(value) && value >= 0 && value <= 1;
+    private static bool Finite(Double3 value) => double.IsFinite(value.X) && double.IsFinite(value.Y) && double.IsFinite(value.Z);
+}

@@ -121,6 +121,85 @@ public sealed class SaveLifecycleTests
     }
 
     [Fact]
+    public void ModuleKnowledgeKeepsEveryFamilyOwnerAndAgeAcrossSaveLoad()
+    {
+        var folder = SaveRig.NewWorld(Shipped);
+        ModuleObservation[] expected;
+        uint owner;
+        using (var rig = new SaveRig(folder, Shipped))
+        {
+            rig.Join(); rig.Tick(5);
+            owner = rig.Hulls.Info(0).Owner;
+            var sector = SaveRig.RockySector(rig.Rocks);
+            var rock = rig.Rocks.Sector(sector).Asteroids[0];
+            Assert.True(rig.Server.RecordModuleObservation(new ModuleObservation
+            {
+                Owner = owner,
+                Family = ModuleFamily.AsteroidScanner,
+                Sector = sector,
+                Index = 0,
+                RecordedTick = rig.WorldTick - 1,
+                Position = rig.Server.Galaxy.CenterOf(sector) + rock.LocalPosition,
+                Radius = rock.Radius,
+                Mass = rig.Rocks.Mass(rock.Radius),
+                Resource = rock.Resource,
+                Grade = rock.Grade
+            }));
+            Assert.True(rig.Server.RecordModuleObservation(new ModuleObservation
+            { Owner = owner, Family = ModuleFamily.AsteroidLocator, Sector = sector, Index = 0, Resource = rock.Resource, RecordedTick = rig.WorldTick - 1 }));
+            var galaxy = rig.Server.Galaxy;
+            var found = false;
+            for (var x = -150; x < 150 && !found; x++)
+                if (galaxy.GasClouds!.TryGetCloud(galaxy, new(x, 0, -77), out var cloud))
+                {
+                    var placement = new GasCloudPlacement(new(x, 0, -77), cloud);
+                    var position = GasCloudQuery.CenterOf(galaxy, placement);
+                    var gas = galaxy.GasComposition!.Sample(galaxy, placement, position);
+                    Assert.True(rig.Server.RecordModuleObservation(new ModuleObservation
+                    {
+                        Owner = owner,
+                        Family = ModuleFamily.GasScanner,
+                        Sector = placement.Anchor,
+                        Index = gas.Region,
+                        Position = position,
+                        Resource = -1,
+                        Gas = gas,
+                        RecordedTick = rig.WorldTick - 1
+                    }));
+                    found = true;
+                }
+            Assert.True(found);
+            expected = rig.Server.ModuleKnowledge(owner).ToArray();
+            Assert.Equal(3, expected.Length);
+            Assert.True(rig.Close().Clean);
+        }
+        using var loaded = new SaveRig(folder, Shipped);
+        var actual = loaded.Server.ModuleKnowledge(owner);
+        Assert.Equal(expected.Length, actual.Length);
+        for (var i = 0; i < expected.Length; i++)
+        {
+            Assert.Equal(expected[i].Owner, actual[i].Owner);
+            Assert.Equal(expected[i].RecordedTick, actual[i].RecordedTick);
+            Assert.Equal(expected[i].Position, actual[i].Position);
+            Assert.Equal(expected[i].Mass, actual[i].Mass);
+            Assert.Equal(expected[i].Grade, actual[i].Grade);
+            Assert.Equal(expected[i].Gas.Purity, actual[i].Gas.Purity);
+            for (var gas = 0; gas < GasComposition.Capacity; gas++) Assert.Equal(expected[i].Gas.Shares[gas], actual[i].Gas.Shares[gas]);
+        }
+        var snapshot = folder.Decode();
+        Assert.Equal(3, snapshot.ModuleObservationCount);
+        var record = snapshot.ModuleObservations[0];
+        snapshot.ModuleObservations[0].Owner = uint.MaxValue;
+        Assert.False(WorldSnapshotCodec.TryDecode(WorldSnapshotCodec.Encode(snapshot), SaveLimits.Default, out _, out _));
+        snapshot.ModuleObservations[0] = record;
+        snapshot.ModuleObservations[0].RecordedTick = snapshot.NextWorldTick;
+        Assert.False(WorldSnapshotCodec.TryDecode(WorldSnapshotCodec.Encode(snapshot), SaveLimits.Default, out _, out _));
+        snapshot.ModuleObservations[0] = record;
+        snapshot.ModuleObservations[1] = record;
+        Assert.False(WorldSnapshotCodec.TryDecode(WorldSnapshotCodec.Encode(snapshot), SaveLimits.Default, out _, out _));
+    }
+
+    [Fact]
     public void ReorderedSettingsKeepTheirValuesAcrossLoadCloseAndReload()
     {
         var folder = SaveRig.NewWorld(Shipped);
@@ -235,6 +314,8 @@ public sealed class SaveLifecycleTests
         Jumping(hulls, 5, JumpPhase.Arrive);
 
         var sector = SaveRig.RockySector(rig.Rocks);
+        Assert.True(rig.Server.RecordModuleObservation(new ModuleObservation
+        { Owner = hulls.Info(0).Owner, Family = ModuleFamily.AsteroidLocator, Sector = sector, Index = 0, Resource = -1, RecordedTick = tick - 1 }));
         Assert.True(rig.Rocks.Set(new RockDelta { Rock = new RockRef(sector, 0), Offset = new Vector3(1, 2, 3), Velocity = new Vector3(0.5f, 0, -0.25f), StartTick = tick - 3 }));
         Assert.True(rig.Rocks.Set(new RockDelta { Rock = new RockRef(sector, 3), Offset = new Vector3(-4, 0, 9), Velocity = new Vector3(0, 0.75f, 0), StartTick = tick - 2 }));
     }

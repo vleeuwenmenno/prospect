@@ -318,6 +318,7 @@ public sealed partial class ServerHost
 
         _ownerCount = world.OwnerCount;
         RestoreCharts(world);
+        RestoreModules(world);
 
         var entities = new HashSet<ulong>(world.HullCount);
         var blocks = 0;
@@ -459,6 +460,7 @@ public sealed partial class ServerHost
             || _rocks.Deltas.Length > buffer.Rocks.Length || _chartCount > buffer.Charts.Length)
             return false;
 
+        if (!CaptureModules(buffer)) return false;
         _charts.AsSpan(0, _chartCount).CopyTo(buffer.Charts);
         buffer.ChartCount = _chartCount;
         buffer.Compatibility = _compatibility;

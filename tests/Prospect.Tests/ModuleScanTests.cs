@@ -208,6 +208,41 @@ public sealed class ModuleScanTests
     }
 
     [Fact]
+    public void LosingTheModuleCancelsWithoutPublishingAndStartsCooldown()
+    {
+        using var rig = new Rig();
+        var rock = rig.PlaceNearRock();
+        rig.Clients[0].Input.StartAsteroidScan(rock);
+        rig.Until(() => rig.Scan().State == ModuleScanState.Scanning);
+        var hull = rig.Hull();
+        ref var info = ref rig.Hulls.Info(hull);
+        var design = rig.Content.Designs[info.Design];
+        var block = design.Stats.AsteroidScanner.Block - 1;
+        Assert.True(rig.Hulls.BlockStates.Hit(info.BlockState, block, 1e9f));
+        rig.Until(() => rig.Scan().State == ModuleScanState.Cancelled);
+        Assert.True(rig.Scan().CooldownUntilTick > rig.Tick);
+        Assert.Equal(0, rig.Clients[0].AcquireSnapshot().Modules.Count);
+    }
+
+    [Theory]
+    [InlineData(ModuleFamily.GasScanner)]
+    [InlineData(ModuleFamily.AsteroidScanner)]
+    [InlineData(ModuleFamily.AsteroidLocator)]
+    public void AllFamiliesRequirePowerAndHonorQualityFigures(ModuleFamily family)
+    {
+        using var rig = new Rig(quality: "Alien Tech");
+        var equipment = rig.Content.Pod.Stats.Module(family);
+        Assert.Equal(ModuleQuality.AlienTech, equipment.Quality);
+        Assert.Equal(1, equipment.Accuracy);
+        rig.Hulls.State(rig.Hull()).Energy = 0;
+        rig.Server.RequestModuleScan(rig.Owner(), new(family, default));
+        Assert.Equal(ModuleScanState.NoPower, rig.Scan().State);
+        var energy = (float)(equipment.PowerDraw / 60);
+        Assert.True(ModuleScanRules.Spend(ref energy, equipment));
+        Assert.Equal(0, energy);
+    }
+
+    [Fact]
     public void SharedPowerAndDisclosureRulesAllocateNothing()
     {
         var equipment = GameContent.Load().Blocks.Get("gasScanner").Module;

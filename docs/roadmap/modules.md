@@ -1,151 +1,118 @@
-# Placeable scanning modules
+# Scanning modules
 
-## Implementation status
+## Status
 
-Phases 1–4 are implemented: blocks/stats, gas composition, server execution and private client publication.
-Persistence is not implemented yet.
-The phase 4 contract is available to non-rendering callers and future UI integration.
+The non-visual implementation is complete: placeable blocks, derived equipment, generated gas composition,
+server scans, private session publication and saved knowledge.
+Scan buttons/keys, palette polish, analysis panels and locator drawing remain the UI workers' task.
 
 ## Decided: equipment
 
-- Modules are damageable, placeable blocks with size, mass and power draw.
-- Installation uses the ship editor now; inventory installation and upgrades come later.
-- Family, quality and mark/variant are independent axes. Initial blocks are Common Mk I only.
-- Initial families are gasScanner, asteroidScanner and asteroidLocator; future families can extend the schema.
-- Quality order is Common, Uncommon, Rare, Epic, Legendary, Alien Tech.
+- Modules are damageable, sized blocks with mass and power draw, installed through the ship editor now.
+- Family, quality and mark/variant are independent axes. Only Common Mk I blocks ship now.
+- Families: gasScanner, asteroidScanner, asteroidLocator; future families extend the schema and server behavior.
+- Quality order: Common, Uncommon, Rare, Epic, Legendary, Alien Tech.
+- Inventory installation and upgrades come later; mining remains deferred.
 
-## Decided: tuning
+## Decided: surveys
 
-- Range, accuracy/detail, scan time, power draw and cooldown tier multipliers are content data.
-- Figures derive from installed blocks through the shared hull arithmetic, including block loss.
-- Server validation requires a present, powered module and enforces range, timing and cooldown.
+- A gas scan reveals local cloud composition, purity and density, with detail determined by equipment quality.
+- An asteroid scan targets sector + generated index and reveals resource/grade, mass and size.
+- A locator pulse reveals coarse dominant-resource classifications and sampled positions in its sphere.
+- Knowledge belongs to its owner, ages by observation tick, survives saves and is never automatically shared.
+- Future mining must increment asteroid content revisions and invalidate observed analysis when that change is learned.
 
-## Decided: gas scanner
+## Equipment contract and provisional figures
 
-- Each cloud has a deterministic seeded mixture of named gases, percentage shares and local purity/density.
-- Mixtures vary across a cloud. Candidate gases include hydrogen, helium, methane, ammonia, neon, xenon and water vapour.
-- Cold clouds lean toward water vapour/ammonia; lightning clouds toward ionised/exotic gases.
-- Scanning inside or near a cloud reveals composition and purity at the sample location, with detail governed by quality.
-- Composition is derived rather than stored as generated world state. Learned samples are stored separately.
+`BlockType.Module` is a `ModuleSpec`; Family None means absent.
+Its family, quality, positive mark (1–255), nonblank variant (up to 32 characters) and figures come from `blocks.json`.
+`moduleTiers` multiplies range, accuracy, scanSeconds, powerDraw and cooldownSeconds.
+The decoder rejects unknown identities, nonfinite/nonpositive figures and accuracy above one.
 
-## Decided: asteroid scanner and locator
+`HullStats.GasScanner`, `AsteroidScanner`, `AsteroidLocator` contain `ModuleEquipment`; `Module(family)` selects one.
+Block is a one-based design index; zero means absent.
+`BoxHullSums` selects highest surviving quality, then mark, then lowest block index; duplicates provide redundancy only.
+Size affects mass/hull normally, but not range/detail/time or the 0.1 MW standby draw per block.
+The editor's All list already enumerates these block types. Designs still pass through `DesignBytes.Decode`.
 
-- A targeted asteroid scan reveals resource shares/grades, ice, mass and size, with detail governed by quality.
-- Asteroid identity is sector plus generated index. Analysis must be invalidated when future mining changes that asteroid.
-- Locator is a one-shot regional pulse reporting coarse dominant-resource classification, not detailed analysis.
-- Locator observations are retained knowledge and feed the future vision overlay.
-- Mining remains deferred.
-
-## Decided: personal knowledge and threading
-
-- Knowledge belongs to an owner, survives world saves, carries observation age and is never automatically shared.
-- Intents go through PlayerInputBridge; states, progress, refusal reasons and results through SessionSnapshot.
-- Server publication filters each owner's results before transmission, not merely in the UI.
-- Persistence must extend WorldSnapshot, its codec, capture, restoration and SaveLifecycleTests.
-- Tick work and capture allocate no managed memory; allocation tests use AllocationProbe.
-
-## Available metadata API
-
-`BlockType.Module` is an optional `ModuleSpec`; `Family == None` means absent.
-`ModuleSpec` contains Family, Quality, Mark, Variant, Range, Accuracy, ScanSeconds, PowerDraw and CooldownSeconds.
-The block's `module` object has camelCase fields with the same names.
-Quality names use the exact strings above; family names use the camelCase names above.
-Marks are positive integers up to 255; variants are nonblank strings up to 32 characters.
-
-`moduleTiers` lives alongside `blocks` in the existing shared `blocks.json` schema.
-Each quality entry multiplies range, accuracy, scanSeconds, powerDraw and cooldownSeconds.
-The decoder refuses unknown identities, invalid marks/variants, nonpositive/nonfinite figures and accuracy above one.
-The shipped block ids are `gasScanner`, `asteroidScanner` and `asteroidLocator`.
-
-## Open: integration and tuning
-
-- Concrete ranges, power costs, durations, cooldowns, sample capacity and quality detail thresholds.
-- Active scan power priority. Duplicate selection and resizing are specified in the phase 1 contract.
-- Gas sample identity, spatial variation and whether composition extends the frozen generation hash.
-- Bounded sector preparation for locator scans and invalidation of remembered asteroid data after mining.
-- Final scan intent/result API, storage budgets and wire/save layouts.
-
-Existing asteroid data has one resource index and one grade per asteroid, not a resource-share vector.
-The scanner must document that interpretation or extend generated composition deliberately.
-Existing clients receive the galaxy seed; owner-filtered results alone do not provide seed secrecy.
-
-## Phase 1 contract: installed equipment
-
-`HullStats.GasScanner`, `AsteroidScanner`, `AsteroidLocator` contain `ModuleEquipment`.
-`HullStats.Module(family)` selects one; `Block == 0` means absent, otherwise one-based design block index.
-All figures come from `BoxHullSums`, including live loss updates. Evaluator version is 10.
-The highest quality wins, then highest mark, then lowest block index. Extra blocks provide redundancy only.
-Size changes mass/hull normally, but not module performance or its 0.1 MW standby draw per block.
-`ModuleEquipment.PowerDraw` is additional active scan MW, to be consumed by the server in phase 3.
-
-| Common Mk I | Mass t | HP per cell | Range m | Scan s | Active MW | Cooldown s |
+| Common Mk I block id | Mass t | HP/cell | Range m | Scan s | Active MW | Cooldown s |
 | --- | --- | --- | --- | --- | --- | --- |
-| Gas scanner | 2 | 200 | 1500 | 4 | 0.5 | 10 |
-| Asteroid scanner | 2.5 | 200 | 3000 | 5 | 0.75 | 10 |
-| Asteroid locator | 3 | 200 | 5000 | 2 | 1 | 15 |
+| gasScanner | 2 | 200 | 1500 | 4 | 0.5 | 10 |
+| asteroidScanner | 2.5 | 200 | 3000 | 5 | 0.75 | 10 |
+| asteroidLocator | 3 | 200 | 5000 | 2 | 1 | 15 |
 
-Base accuracy is 0.2. All six tier multipliers are in `blocks/blocks.json.moduleTiers`.
-The editor's existing All list enumerates `BlockCatalog.Types`, so these blocks are placeable there.
-Palette grouping and labels remain the UI worker's task.
+Base accuracy is 0.2: percentage observations resolve 5 percentage points; Alien Tech resolves one point.
+All six tier multipliers are content data, not hard-coded quality tables.
+Asteroids currently carry one resource index and grade: the resource-bearing host material has share one and grade is ore fraction.
+Bare rock has resource -1; ice is the existing ice resource. No invented multi-resource composition is published.
 
-## Phase 2 contract: generated gas composition
+## Generated gas contract
 
 `Galaxy.GasComposition.Sample(galaxy, placement, worldPosition)` returns a value-only `GasSample`.
-Its eight `Shares` follow `GasComposition.Names`; they sum to one, independent of `Purity` and `Density` (both 0–1).
-Gas names, kind weights and purity bounds live in shared `galaxy/galaxy.json.gasComposition`.
-Cold mixtures favor water vapour/ammonia; lightning mixtures favor ionised hydrogen/xenon.
-Eight anchor-frame octants have independent seeded mixes and purity. Density follows the smooth sensor envelope.
-An outside point has zero density; the scanner will choose an in-cloud sample point for a nearby scan.
+Eight Shares follow `GasComposition.Names`; full generated shares sum to one.
+Purity and Density are separate 0–1 figures. Eight anchor-frame octants have independent seeded mixtures and purity.
+Density follows the smooth sensor envelope; outside samples have zero density.
+Named gases, weights by kind and purity bounds are shared content in `galaxy/galaxy.json.gasComposition`.
+Cold favors water vapour/ammonia; lightning favors ionised hydrogen/xenon. Sampling allocates nothing.
 
-Composition adds generated natural data, so generation is now 7 and protocol 46.
+Composition adds generated natural data, so generation is 7 even though placement and asteroid ordering are unchanged.
 The frozen galaxy hash includes mixture shares, purity and density: `15907186463901216483` on Linux x64.
-Placement streams, cloud geometry and asteroid ordering are unchanged; the version change is deliberately conservative.
-Old saves are refused by existing compatibility checks, with no migration or write to them.
-Sampling allocates nothing; no generated composition is saved, only future observations.
+Cross-platform execution of the new hash remains unverified.
 
-## Phase 3 contract: authoritative execution
+## Server execution
 
-The server supports gas scan, targeted asteroid scan and locator preparation/execution.
-Generation runs on one dedicated worker with a preallocated mailbox per connection; the tick never generates survey sectors.
-`Preparing` has no progress timer or active draw. Once prepared, `Scanning` lasts the equipment's rounded-up tick duration.
-Each active interval consumes the module's additional MW / 60 from stored energy after ordinary flight/shield spending.
-Generators replenish that pool through ordinary simulation; no battery/energy means `NoPower`.
-Jumping, control change or loss/change of the selected module cancels a running operation.
+Generation runs on a dedicated worker with preallocated connection mailboxes, never on the tick thread.
+Preparing takes no active energy; Scanning runs for the equipment duration rounded up to simulation ticks.
+Each scanning interval consumes active MW / 60 from stored energy after ordinary flight/shield spending.
+Generators replenish through ordinary simulation. Insufficient energy refuses/cancels as NoPower without partial-interval spending.
+A jump, control change or selected module loss/change cancels the operation.
 
-All families share an owner cooldown. Completion, cancellation, target/range failure after preparation and power failure start it.
-Pre-dispatch refusals do not change cooldown. Repeating a running request keeps progress and reports `Busy` separately.
-States/refusals: Idle, Preparing, Scanning, Completed, Cancelled, NoEquipment, NoPower, OutOfRange, Cooldown,
+All families share one owner cooldown. Completion and any end after worker dispatch start it; pre-dispatch refusals preserve it.
+Repeating a running request preserves progress and reports Busy in Refusal.
+States: Idle, Preparing, Scanning, Completed, Cancelled, NoEquipment, NoPower, OutOfRange, Cooldown,
 InvalidTarget, Busy, KnowledgeLimit, Unavailable.
 
-Gas targets identify a cloud anchor; the sample is at the starting hull position or the nearest radial point at 95% of its smooth envelope.
-Range is checked against that fixed sample every tick. Asteroid range uses its current displaced surface, including at completion.
-The locator's sphere stays at its starting origin. Maximum supported range is one applied sector width; preparation visits at most 27 sectors.
-Locator output is bounded to 256 candidates; `Partial` explicitly reports truncation or moved-rock candidate incompleteness.
-Moved candidates are filtered against the sphere again before publication; no current out-of-range position is disclosed.
+A gas request names a cloud anchor. Its sample is the starting hull position or a radial point at 95% of the smooth envelope.
+Range is checked against that sample each tick. Asteroid range uses its current displaced surface, including at completion.
+Locator origin stays at the starting hull position. Range is bounded to one applied sector width; at most 27 sectors are prepared.
+There are at most 256 locator candidates. Partial explicitly reports truncation or possible omissions from displaced asteroids.
+Candidates are checked at their current positions before publication, so out-of-range current positions are not disclosed.
 
-Owner knowledge has 1024 slots, keyed by family + sector + index. Gas index is octant; asteroid index is generated identity.
-Capacity refuses an entire completion before growth, without evicting older knowledge.
-`RecordedTick` is observation age. `ContentRevision` is zero until mining implements revision/invalidation.
-Asteroids currently have one resource and grade: the resource-bearing host material has share one; grade is ore fraction.
-Bare rock has resource -1. Ice is the existing ice resource. Locator reveals only the dominant resource and sampled position.
-Common percentage detail is 5 percentage points, improving with content accuracy; unreported gas share remains unresolved, not renormalized.
-No client intent/publication contract is available until phase 4; persistence follows in phase 5.
+## Client API and wire
 
-## Phase 4 contract: client integration and privacy
+- `PlayerInputBridge.StartGasScan(SectorCoord anchor)`.
+- `PlayerInputBridge.StartAsteroidScan(RockRef target)`.
+- `PlayerInputBridge.PulseAsteroidLocator()`.
+- `SessionSnapshot.Modules.Scan`: state, Refusal, Serial, Hull, quality, start/end ticks, cooldown, origin, Partial.
+- `SessionSnapshot.Modules.Records[0..Count]`: retained observations; `Find(family, sector, index)` locates one.
 
-Protocol is 47. `ModuleScan` (33) is an 18-byte reliable intent; `ModuleSurvey` (34) is a bounded reliable publication.
-`ModuleMessage.MaxWireSize` is 999 bytes: 79-byte header and at most eight 115-byte observations.
-Requests are decoded only after admission, catalogue readiness and normal receive/rate budgets.
-Client reliable budgets reserve one module request; retries retain a newer queued intent.
+Progress uses authoritative world tick and StartedTick/CompletesTick only while Scanning.
+Gas shares omitted by accuracy remain unresolved; do not renormalize them or infer missing gas names.
+Locator records deliberately contain zero radius/mass/grade. Their positions are observations, not live tracking.
 
-Call `PlayerInputBridge.StartGasScan(anchor)`, `StartAsteroidScan(RockRef)` or `PulseAsteroidLocator()`.
-Read `SessionSnapshot.Modules.Scan` for state, serial, hull, quality, start/end ticks, cooldown, origin and Partial.
-`Refusal` reports Busy without replacing an operation already running.
-Progress is derived from authoritative world tick against StartedTick/CompletesTick, only while Scanning.
-Read only `Modules.Records[0..Count]`; `Find(family, sector, index)` locates retained knowledge.
-Gas percentages omitted by accuracy are an unresolved remainder. Locator records deliberately carry zero mass/radius/grade.
+Protocol 47: ModuleScan (33), reliable, 18 bytes; ModuleSurvey (34), reliable, at most 999 bytes.
+The publication is a 79-byte header plus at most eight 115-byte observations.
+Admission, catalogue readiness and normal receive/rate budgets precede request decoding.
+Only the receiving owner's records are sent; the client rejects a packet containing a foreign owner.
+Snapshot buffers are copied, not shared with simulation state. Publication and active ticks allocate nothing.
+Existing clients receive the galaxy seed; this does not solve seed secrecy.
 
-The server sends only the receiving owner's records, incrementally, and the client rejects a packet containing any foreign owner.
-Publication uses caller-owned buffers and counted prefixes; snapshot copies never expose server-owned arrays.
-No automatic party sharing, live tracking or uncharted-data regeneration is granted by an observation.
-Seed secrecy remains a separate unfinished problem: ordinary clients still receive the galaxy seed.
+## Knowledge and persistence
+
+Each owner has 1024 observation slots, keyed by family + sector + index.
+Gas index is octant; asteroid index is its generated identity. Locator and detailed analysis have distinct keys.
+Capacity is checked before growth; a completion that does not fit is refused without evicting old knowledge.
+RecordedTick preserves age. ContentRevision is zero while composition is immutable; mining must supply revision/invalidation rules.
+
+WorldSnapshot holds the counted ModuleObservations prefix. Save codec 4 owns its layout independently of network messages.
+Capture copies into a preallocated buffer; the save worker alone writes it.
+Loading checks owner, uniqueness, capacity, finite values, observation tick, resource catalogue and generated target existence.
+Active scans and cooldowns are transient and reset on load. Generated mixtures are recomputed; observed values are retained unchanged.
+Evaluator version is 10; protocol 47; generation 7; save codec 4. Older incompatible saves are refused untouched, without migration.
+
+## Open
+
+- Gameplay balance of the provisional figures and quality multipliers.
+- UI controls, presentation and locator overlay treatment of partial/stale observations.
+- Inventory, upgrades, mining revisions and explicit knowledge sharing/trading.
+- Exhaustive locator coverage of displaced asteroids beyond the bounded generated candidate set.

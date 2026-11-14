@@ -174,9 +174,7 @@ public sealed partial class ServerHost
                 if (record.Owner == 0) continue;
                 record.RecordedTick = tick;
                 ModuleScanRules.Disclose(ref record, connection.ModuleEquipment);
-                var at = FindObservation(owner, record);
-                owner.Records[at] = record;
-                if (at == owner.Count) owner.Count++;
+                RecordModuleObservation(record);
             }
             _touched = true;
             EndModuleScan(connection, ModuleScanState.Completed, tick);
@@ -190,6 +188,20 @@ public sealed partial class ServerHost
                 foreach (var connection in _connections) active |= connection.State == ConnectionState.Active && connection.PlayerId == owner.Owner;
                 if (!active) { owner.Owner = 0; owner.Count = 0; owner.CooldownUntilTick = 0; }
             }
+    }
+
+    /// <summary>Retains one authoritative observation; capacity and identity are checked before growth.</summary>
+    internal bool RecordModuleObservation(in ModuleObservation record)
+    {
+        if (!ModuleObservationRules.Valid(record)) return false;
+        var owner = ModuleOwnerFor(record.Owner, true);
+        if (owner is null) return false;
+        var index = FindObservation(owner, record);
+        if (index == owner.Count && !HasRoomForModuleKnowledge(owner, 1)) return false;
+        owner.Records[index] = record;
+        if (index == owner.Count) owner.Count++;
+        _touched = true;
+        return true;
     }
 
     private bool HasRoomForModuleKnowledge(ModuleOwner owner, int needed)

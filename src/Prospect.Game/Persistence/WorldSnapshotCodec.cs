@@ -23,10 +23,10 @@ namespace Prospect.Game.Persistence;
 /// world state encode to the same bytes but for <see cref="WorldSnapshot.CapturedUnixMs"/>.
 /// </para>
 /// </summary>
-public static class WorldSnapshotCodec
+public static partial class WorldSnapshotCodec
 {
     /// <summary>The layout's version. A save with any other is refused; there are no migrations yet.</summary>
-    public const int Version = 3;
+    public const int Version = 4;
     internal const int ChartBytes = 4 + 12 + 8;
 
     /// <summary>"PWS1": tells a save from any other bytes before its version is believed.</summary>
@@ -51,7 +51,7 @@ public static class WorldSnapshotCodec
         + 1 + WorldSettings.Capacity * (1 + WorldSettingCatalog.MaxIdLength + 4)
         + 8 + 8 + 4 + 8
         + 4 + byte.MaxValue
-        + 6 * 4;
+        + 7 * 4;
 
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
@@ -61,14 +61,14 @@ public static class WorldSnapshotCodec
         long size = 4 + 4 + 4 + 4 + ContentIdentity.WireSize + 16 + 1 + Utf8.GetByteCount(snapshot.Name) + 8 + 8 + 12 + 1;
         for (var i = 0; i < snapshot.SettingCount; i++)
             size += 1 + snapshot.SettingIds[i].Length + 4;
-        size += 8 + 8 + 4 + 8 + 4 + snapshot.StartingFleet.Length + 6 * 4;
+        size += 8 + 8 + 4 + 8 + 4 + snapshot.StartingFleet.Length + 7 * 4;
         for (var i = 0; i < snapshot.DesignCount; i++)
             size += 4 + SHA256.HashSizeInBytes + snapshot.Designs[i].Length;
         size += (long)snapshot.OwnerCount * OwnerBytes;
         for (var i = 0; i < snapshot.HullCount; i++)
             size += HullFixedBytes + snapshot.Hulls[i].Visual.Count * DentBytes;
         size += (long)snapshot.LossCount * sizeof(int) + (long)snapshot.BlockCount * sizeof(float);
-        return size + (long)snapshot.RockCount * RockBytes + (long)snapshot.ChartCount * ChartBytes;
+        return size + (long)snapshot.RockCount * RockBytes + (long)snapshot.ChartCount * ChartBytes + (long)snapshot.ModuleObservationCount * ModuleObservationBytes;
     }
 
     /// <summary>Encodes a snapshot into an array of exactly its size.</summary>
@@ -140,6 +140,7 @@ public static class WorldSnapshotCodec
         writer.WriteInt32(snapshot.LossCount);
         writer.WriteInt32(snapshot.RockCount);
         writer.WriteInt32(snapshot.ChartCount);
+        writer.WriteInt32(snapshot.ModuleObservationCount);
 
         for (var i = 0; i < snapshot.DesignCount; i++)
         {
@@ -207,6 +208,8 @@ public static class WorldSnapshotCodec
             Write(ref writer, chart.Sector);
             writer.WriteInt64(chart.RecordedTick);
         }
+
+        foreach (var record in snapshot.ModuleObservations.AsSpan(0, snapshot.ModuleObservationCount)) WriteModule(ref writer, record);
 
         if (writer.Length != size)
             throw new InvalidDataException("The snapshot's counts do not describe its records.");
@@ -325,6 +328,7 @@ public static class WorldSnapshotCodec
         var losses = reader.ReadInt32();
         var rocks = reader.ReadInt32();
         var charts = reader.ReadInt32();
+        var observations = reader.ReadInt32();
         if (!reader.IsValid)
         {
             error = "the save ends inside its header";
@@ -340,14 +344,15 @@ public static class WorldSnapshotCodec
         // Every count against its limit and against the bytes left, before a single array is taken for it.
         if (designCount < 1 || pod >= designCount || drone >= designCount
             || (uint)owners > (uint)limits.MaxOwners || (uint)hulls > (uint)limits.MaxHulls || (uint)blocks > (uint)limits.MaxBlocks
-            || (uint)losses > (uint)blocks || (uint)rocks > (uint)limits.MaxRocks || charts < 0 || charts > limits.MaxCharts)
+            || (uint)losses > (uint)blocks || (uint)rocks > (uint)limits.MaxRocks || charts < 0 || charts > limits.MaxCharts
+            || observations < 0 || observations > limits.MaxModuleObservations)
         {
             error = "the save names more than a world may hold";
             return false;
         }
 
         var promised = (long)designCount * (4 + SHA256.HashSizeInBytes) + (long)owners * OwnerBytes + (long)hulls * HullFixedBytes
-            + (long)losses * sizeof(int) + (long)blocks * sizeof(float) + (long)rocks * RockBytes + (long)charts * ChartBytes;
+            + (long)losses * sizeof(int) + (long)blocks * sizeof(float) + (long)rocks * RockBytes + (long)charts * ChartBytes + (long)observations * ModuleObservationBytes;
         if (promised > reader.Remaining)
         {
             error = "the save names more than it holds";
@@ -383,7 +388,7 @@ public static class WorldSnapshotCodec
             designs[i] = reader.ReadBytes(length).ToArray();
         }
 
-        var result = new WorldSnapshot(owners, hulls, blocks, rocks, charts)
+        var result = new WorldSnapshot(owners, hulls, blocks, rocks, charts, observations)
         {
             Compatibility = compatibility,
             WorldId = worldId,
@@ -407,6 +412,7 @@ public static class WorldSnapshotCodec
             HullCount = hulls,
             RockCount = rocks,
             ChartCount = charts,
+            ModuleObservationCount = observations,
         };
         settingValues[..settingCount].CopyTo(result.SettingValues);
 
@@ -512,6 +518,22 @@ public static class WorldSnapshotCodec
             }
             chartCounts[chart.Owner] = ownerCharts + 1;
             result.Charts[i] = chart;
+        }
+
+        var observationKeys = new HashSet<(uint, ModuleFamily, SectorCoord, int)>();
+        var observationCounts = new Dictionary<uint, int>();
+        for (var i = 0; i < observations; i++)
+        {
+            if (!ReadModule(ref reader, out var record))
+            { error = "invalid saved module observation"; return false; }
+            var known = false;
+            foreach (var owner in result.Owners) known |= owner.Id == record.Owner;
+            observationCounts.TryGetValue(record.Owner, out var owned);
+            if (!known || record.RecordedTick >= nextTick || owned >= ModuleScanRules.KnowledgePerOwner
+                || !observationKeys.Add((record.Owner, record.Family, record.Sector, record.Index)))
+            { error = "invalid module observation owner, key or time"; return false; }
+            observationCounts[record.Owner] = owned + 1;
+            result.ModuleObservations[i] = record;
         }
 
         if (!reader.IsValid || reader.Remaining != 0 || result.BlockCount != blocks || result.LossCount != losses)

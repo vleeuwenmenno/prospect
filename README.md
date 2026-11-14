@@ -11,7 +11,7 @@ or that local game opened to other players. There is one simulation and one code
 
 ## Status
 
-Scanning modules: block family/quality/mark metadata decoding is available; gas scans, asteroid analysis, locator pulses and saved module knowledge are not implemented. See [module decisions](docs/roadmap/modules.md).
+Scanning modules have a non-visual backend: three placeable Common Mk I blocks, gas composition, targeted asteroid analysis, bounded locator pulses and personal saved observations. Scan controls, analysis panels and locator drawing are not wired into the UI yet. See [module contract](docs/roadmap/modules.md).
 
 New ships from a drone: server/session creation, remote editor grant, persistence, the New ship dialog and its keys are implemented. Closing the editor of a ship just built puts you in control of it.
 

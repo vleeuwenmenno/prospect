@@ -43,11 +43,15 @@ public sealed record SaveLimits
     public const int MaxNameBytes = 255;
 
     /// <summary>All owners at the hard per-owner chart limit.</summary>
+    /// <summary>Bounded retained module results across all durable owners.</summary>
+    public long MaxModuleObservations => (long)MaxOwners * ModuleScanRules.KnowledgePerOwner;
+
     public long MaxCharts => (long)MaxOwners * ExplorationRules.MaxChartsPerOwner;
 
     /// <summary>The most bytes an encoded save can be: every count at its limit, every hull with every dent.</summary>
     public long MaxEncodedBytes =>
         WorldSnapshotCodec.HeaderBound
+        + MaxModuleObservations * WorldSnapshotCodec.ModuleObservationBytes
         + MaxCharts * WorldSnapshotCodec.ChartBytes
         + MaxCatalogueBytes
         + (long)MaxDesigns * (4 + SHA256.HashSizeInBytes)
@@ -62,7 +66,8 @@ public sealed record SaveLimits
     /// the hull and block stores, and <see cref="MaxMovedSectors"/> tables of a sector's asteroid limit.
     /// </summary>
     public long MaxDecodedBytes =>
-        MaxCharts * (System.Runtime.CompilerServices.Unsafe.SizeOf<SectorChart>() + 128)
+        MaxModuleObservations * (System.Runtime.CompilerServices.Unsafe.SizeOf<ModuleObservation>() + 128)
+        + MaxCharts * (System.Runtime.CompilerServices.Unsafe.SizeOf<SectorChart>() + 128)
         + MaxCatalogueBytes
         + (long)MaxDesigns * (SHA256.HashSizeInBytes + 64)
         + (long)MaxOwners * System.Runtime.CompilerServices.Unsafe.SizeOf<SavedOwner>()

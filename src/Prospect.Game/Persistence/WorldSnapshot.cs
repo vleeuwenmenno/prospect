@@ -186,7 +186,7 @@ public struct SavedHull
 public sealed class WorldSnapshot
 {
     /// <summary>A snapshot with room for exactly these counts.</summary>
-    public WorldSnapshot(int owners, int hulls, int blocks, int rocks, int charts = 0)
+    public WorldSnapshot(int owners, int hulls, int blocks, int rocks, int charts = 0, int moduleObservations = 0)
     {
         Owners = new SavedOwner[owners];
         Hulls = new SavedHull[hulls];
@@ -194,11 +194,12 @@ public sealed class WorldSnapshot
         Losses = new int[blocks];
         Rocks = new RockDelta[rocks];
         Charts = new SectorChart[charts];
+        ModuleObservations = new ModuleObservation[moduleObservations];
     }
 
     /// <summary>A snapshot with room for the most a world under <paramref name="limits"/> can hold: a capture buffer.</summary>
     public WorldSnapshot(SaveLimits limits, int charts = 0)
-        : this(limits.MaxOwners, limits.MaxHulls, limits.MaxBlocks, limits.MaxRocks, charts) { }
+        : this(limits.MaxOwners, limits.MaxHulls, limits.MaxBlocks, limits.MaxRocks, charts, checked(limits.MaxOwners * ModuleScanRules.KnowledgePerOwner)) { }
 
     /// <summary>What the save was made with; compared before anything else is believed.</summary>
     public SaveCompatibility Compatibility;
@@ -279,6 +280,10 @@ public sealed class WorldSnapshot
     public int RockCount;
     public readonly SectorChart[] Charts;
     public int ChartCount;
+
+    /// <summary>Personal module surveys with their original observed values and age; active scans are transient.</summary>
+    public readonly ModuleObservation[] ModuleObservations;
+    public int ModuleObservationCount;
 
     /// <summary>
     /// The first state of a new world: the content's own catalogue and roles, no owner, no hull, no pushed

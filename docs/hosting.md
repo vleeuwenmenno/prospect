@@ -933,73 +933,34 @@ See [the gas contract](gas-clouds.md#decided-provisional-tunable-kinds-and-rende
 Settings capacity increases from 48 to 64; handshake and save bounds derive from that constant.
 All new tuning is in existing shared files (`galaxy/galaxy.json`, `rules/settings.json`, `rules/exploration.json`).
 
-## Scanning modules: phase 1
+## Scanning modules
 
-Shared `blocks/blocks.json` now contains module tiers and the three Common Mk I scanner/locator blocks.
-Content identity evaluator is 10; protocol stays 45 until scan messages are added.
-`BoxHullSums` selects the highest live quality, then mark, then lowest block index for each family.
-The resulting `HullStats` equipment is shared by editor decoding and live hull evaluation.
-Module standby power is 0.1 MW per surviving block; active scan draw is a separate rated figure.
-Full figures and integration status: [modules](roadmap/modules.md).
+Protocol 47 adds reliable ModuleScan (33, 18 bytes) and ModuleSurvey (34, at most 999 bytes).
+The publication holds a 79-byte scan header and up to eight 115-byte observations.
+Requests pass admission, catalogue readiness and the normal receive/rate budgets before decoding.
+Client reliable budgets reserve one module request; newer queued intents survive retries.
 
-## Phase 2 contract: generated gas composition
+`PlayerInputBridge.StartGasScan(anchor)`, `StartAsteroidScan(RockRef)` and `PulseAsteroidLocator()` target the controlled hull.
+`SessionSnapshot.Modules` carries progress/refusals and personal retained observations; only Records[0..Count] is valid.
+Each publication is filtered by owner on the server; clients also reject any foreign-owner record.
+No party sharing, live tracking or additional generated-data disclosure is implied by retained knowledge.
 
-`Galaxy.GasComposition.Sample(galaxy, placement, worldPosition)` returns a value-only `GasSample`.
-Its eight `Shares` follow `GasComposition.Names`; they sum to one, independent of `Purity` and `Density` (both 0–1).
-Gas names, kind weights and purity bounds live in shared `galaxy/galaxy.json.gasComposition`.
-Cold mixtures favor water vapour/ammonia; lightning mixtures favor ionised hydrogen/xenon.
-Eight anchor-frame octants have independent seeded mixes and purity. Density follows the smooth sensor envelope.
-An outside point has zero density; the scanner will choose an in-cloud sample point for a nearby scan.
+Shared `blocks/blocks.json` contains all six tier multipliers and the three Common Mk I blocks.
+`BoxHullSums` selects surviving equipment by quality, mark and block index; evaluator version is 10.
+Each block draws 0.1 MW standby. Active scan power consumes stored energy after ordinary flight and shield spending.
+Preparation/generation runs on a worker; active ticks, publication and capture allocate no managed memory.
 
-Composition adds generated natural data, so generation is now 7 and protocol 46.
-The frozen galaxy hash includes mixture shares, purity and density: `15907186463901216483` on Linux x64.
-Placement streams, cloud geometry and asteroid ordering are unchanged; the version change is deliberately conservative.
-Old saves are refused by existing compatibility checks, with no migration or write to them.
-Sampling allocates nothing; no generated composition is saved, only future observations.
+One operation and cooldown per owner; loss/control change/jump/power failure can cancel it.
+A pulse prepares at most 27 sectors within one sector-width radius and returns at most 256 candidates.
+Partial explicitly means truncation or possible missing displaced rocks; candidates are range-checked at publication.
+Each owner retains at most 1024 records; capacity refuses a whole completion without eviction.
 
-## Phase 3 contract: authoritative execution
+Gas mixtures come from shared `galaxy/galaxy.json.gasComposition`: eight named gases, kind weights and purity bounds.
+Eight local octants have seeded mixtures; cold favors water/ammonia, lightning ionised hydrogen/xenon.
+Generation 7 adds this natural data without changing placement/order. Frozen extended hash: `15907186463901216483`.
 
-The server supports gas scan, targeted asteroid scan and locator preparation/execution.
-Generation runs on one dedicated worker with a preallocated mailbox per connection; the tick never generates survey sectors.
-`Preparing` has no progress timer or active draw. Once prepared, `Scanning` lasts the equipment's rounded-up tick duration.
-Each active interval consumes the module's additional MW / 60 from stored energy after ordinary flight/shield spending.
-Generators replenish that pool through ordinary simulation; no battery/energy means `NoPower`.
-Jumping, control change or loss/change of the selected module cancels a running operation.
-
-All families share an owner cooldown. Completion, cancellation, target/range failure after preparation and power failure start it.
-Pre-dispatch refusals do not change cooldown. Repeating a running request keeps progress and reports `Busy` separately.
-States/refusals: Idle, Preparing, Scanning, Completed, Cancelled, NoEquipment, NoPower, OutOfRange, Cooldown,
-InvalidTarget, Busy, KnowledgeLimit, Unavailable.
-
-Gas targets identify a cloud anchor; the sample is at the starting hull position or the nearest radial point at 95% of its smooth envelope.
-Range is checked against that fixed sample every tick. Asteroid range uses its current displaced surface, including at completion.
-The locator's sphere stays at its starting origin. Maximum supported range is one applied sector width; preparation visits at most 27 sectors.
-Locator output is bounded to 256 candidates; `Partial` explicitly reports truncation or moved-rock candidate incompleteness.
-Moved candidates are filtered against the sphere again before publication; no current out-of-range position is disclosed.
-
-Owner knowledge has 1024 slots, keyed by family + sector + index. Gas index is octant; asteroid index is generated identity.
-Capacity refuses an entire completion before growth, without evicting older knowledge.
-`RecordedTick` is observation age. `ContentRevision` is zero until mining implements revision/invalidation.
-Asteroids currently have one resource and grade: the resource-bearing host material has share one; grade is ore fraction.
-Bare rock has resource -1. Ice is the existing ice resource. Locator reveals only the dominant resource and sampled position.
-Common percentage detail is 5 percentage points, improving with content accuracy; unreported gas share remains unresolved, not renormalized.
-No client intent/publication contract is available until phase 4; persistence follows in phase 5.
-
-## Phase 4 contract: client integration and privacy
-
-Protocol is 47. `ModuleScan` (33) is an 18-byte reliable intent; `ModuleSurvey` (34) is a bounded reliable publication.
-`ModuleMessage.MaxWireSize` is 999 bytes: 79-byte header and at most eight 115-byte observations.
-Requests are decoded only after admission, catalogue readiness and normal receive/rate budgets.
-Client reliable budgets reserve one module request; retries retain a newer queued intent.
-
-Call `PlayerInputBridge.StartGasScan(anchor)`, `StartAsteroidScan(RockRef)` or `PulseAsteroidLocator()`.
-Read `SessionSnapshot.Modules.Scan` for state, serial, hull, quality, start/end ticks, cooldown, origin and Partial.
-`Refusal` reports Busy without replacing an operation already running.
-Progress is derived from authoritative world tick against StartedTick/CompletesTick, only while Scanning.
-Read only `Modules.Records[0..Count]`; `Find(family, sector, index)` locates retained knowledge.
-Gas percentages omitted by accuracy are an unresolved remainder. Locator records deliberately carry zero mass/radius/grade.
-
-The server sends only the receiving owner's records, incrementally, and the client rejects a packet containing any foreign owner.
-Publication uses caller-owned buffers and counted prefixes; snapshot copies never expose server-owned arrays.
-No automatic party sharing, live tracking or uncharted-data regeneration is granted by an observation.
-Seed secrecy remains a separate unfinished problem: ordinary clients still receive the galaxy seed.
+Save codec 4 stores observation owner, key, age, revision and observed values; generated composition is not stored.
+Load rejects invalid/duplicate keys, owners, times, values, unknown resources and nonexistent generated targets.
+Active scans/cooldowns reset on load. Old incompatible saves are refused untouched; no migration is provided.
+The galaxy seed still reaches clients, so owner filtering does not claim seed secrecy.
+Full API, figures and limitations: [modules](roadmap/modules.md).
