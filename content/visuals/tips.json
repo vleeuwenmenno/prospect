@@ -50,21 +50,21 @@
       "trigger": "commandViewOpened",
       "title": "Command view",
       "text": "Left-click selects a ship, drag draws a box, Ctrl adds to the selection. Right-click a place for the course menu. {Follow} puts the camera on the selection, {Halt} stops it.",
-      "anchor": { "region": "screen", "side": "bottom", "offset": [0, -24] }
+      "anchor": { "region": "screen", "side": "bottom", "offset": [0, -150] }
     },
     {
       "id": "command-jump",
       "trigger": "commandViewOpened",
       "title": "Plot jump or Jump here",
       "text": "In the menu, Plot jump sets a course for the ship you fly: aim at the NAV marker and boost. Jump here orders the other selected ships to jump at once. Move here flies without a jump.",
-      "anchor": { "region": "screen", "side": "bottom", "offset": [0, -24] }
+      "anchor": { "region": "screen", "side": "bottom", "offset": [0, -150] }
     },
     {
       "id": "command-fog",
       "trigger": "commandViewOpened",
       "title": "Sensors and fog",
       "text": "Green rings are sensor range and space beyond them is dark. A ship in a ring is live; one outside it shows where it was last seen.",
-      "anchor": { "region": "screen", "side": "bottom", "offset": [0, -24] }
+      "anchor": { "region": "screen", "side": "bottom", "offset": [0, -150] }
     },
     {
       "id": "editor-place",
@@ -127,7 +127,7 @@
       "trigger": "interfaceOpened",
       "title": "Interface mode",
       "text": "{ToggleInterface} shows every window and frees the pointer; {ToggleInterface} or {Pause} leaves. Pin a window with the pin in its title bar to keep it on screen in flight: hold {ReleasePointer} to click it.",
-      "anchor": { "region": "screen", "side": "bottom", "offset": [0, -24] }
+      "anchor": { "region": "screen", "side": "bottom", "offset": [0, -150] }
     }
   ]
 }
