@@ -23,6 +23,16 @@ public sealed class ServerConfig
     public float? ScriptedShieldBreakSeconds { get; init; }
 
     /// <summary>
+    /// Scripted captures only (<c>--hurt-fleet</c>): seconds into the run at which the player's other hulls are hurt, one
+    /// with a half shield and hull, one with a broken shield and a low hull, so the target panel can be checked.
+    /// The same rules as <see cref="ScriptedShieldBreakSeconds"/> apply, and no wire command can enable it.
+    /// </summary>
+    public float? ScriptedFleetHurtSeconds { get; init; }
+
+    /// <summary>With <see cref="ScriptedFleetHurtSeconds"/>: break the shields and leave the hulls low instead of half.</summary>
+    public bool ScriptedFleetHurtBroken { get; init; }
+
+    /// <summary>
     /// The name the host chose, shown to players and on the list. It must pass
     /// <see cref="ServerNames.TryNormalize"/>: 1 to 48 characters once cleaned, as the listing server demands.
     /// </summary>
@@ -400,6 +410,13 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                     throw new InvalidDataException("A scripted shield break needs an unsaved private in-process server and a time of 0 to 600 s.");
                 _scriptedShieldBreakTick = (long)MathF.Ceiling(breakAt / HullSim.Dt);
             }
+            if (config.ScriptedFleetHurtSeconds is { } hurtAt)
+            {
+                if (!(hurtAt >= 0f && hurtAt <= 600f) || config.Visibility != ServerVisibility.Private || world is not null || transports.Any(t => !t.IsInProcess))
+                    throw new InvalidDataException("A scripted fleet hurt needs an unsaved private in-process server and a time of 0 to 600 s.");
+                _scriptedFleetHurtBroken = config.ScriptedFleetHurtBroken;
+                _scriptedFleetHurtTick = (long)MathF.Ceiling(hurtAt / HullSim.Dt);
+            }
             _visualBenchmark = config.VisualBenchmark;
             _maxPlayers = config.MaxPlayers;
             _visibility = config.Visibility;
@@ -746,6 +763,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         TickEditor(tick);
         TickVisualBenchmark(tick);
         TickScriptedShieldBreak(tick);
+        TickScriptedFleetHurt(tick);
 
         // Capture generations before the round: replacement drones wait until the next interval.
         var participantCount = _hulls.Slots;

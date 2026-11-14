@@ -110,6 +110,12 @@ internal sealed class AppOptions
 
     /// <summary>Scripted runs only (<c>--break-shield</c>): seconds into the run at which the own shield is broken.</summary>
     public float? BreakShieldSeconds { get; set; }
+
+    /// <summary>Scripted runs only (<c>--hurt-fleet</c>): seconds into the run at which the other owned hulls are hurt.</summary>
+    public float? HurtFleetSeconds { get; set; }
+
+    /// <summary>With <c>--hurt-fleet</c>, <c>--hurt-kind broken</c> breaks the shields instead of half-charging them.</summary>
+    public bool HurtFleetBroken { get; set; }
     public string? CapturePath { get; set; }
     public float CaptureAfter { get; set; } = 1.5f;
 
@@ -554,6 +560,8 @@ internal sealed class App : IDisposable
                 GalaxySeed = _options.RtsSeed ?? new ServerConfig().GalaxySeed,
                 VisualBenchmark = _options.VisualBenchmark,
                 ScriptedShieldBreakSeconds = _options.BreakShieldSeconds,
+                ScriptedFleetHurtSeconds = _options.HurtFleetSeconds,
+                ScriptedFleetHurtBroken = _options.HurtFleetBroken,
                 SpawnSector = spawn,
                 Visibility = hosting.Visibility,
                 Password = hosted && hosting.Password.Length > 0 ? hosting.Password : null,

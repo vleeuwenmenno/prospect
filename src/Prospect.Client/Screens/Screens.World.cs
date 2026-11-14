@@ -727,15 +727,9 @@ internal sealed partial class ScreenHost
             var rangeSize = Kit.Measure(_ui.Mono, Theme.FontCaption, rangeText);
             Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(min.X + size.X - rangeSize.X - Kit.Px(Theme.Space4), text.Y + Kit.Px(20)), Theme.TextDim, rangeText);
 
-            var flight = design.Flight;
-            var gauge = new float2(size.X - Kit.Px(Theme.Space4 * 2), Kit.Px(5));
-            var gaugeMin = text + new float2(0, Kit.Px(48));
-            draw.AddRectFilled(gaugeMin, gaugeMin + gauge, Kit.Color(Theme.Void));
-            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * FlightConsole.Fraction(target.Shield, flight.ShieldCapacity), gauge.Y), Kit.Color(target.ShieldOffline ? Theme.LineStrong : Theme.Info));
-            gaugeMin.Y += Kit.Px(10);
-            draw.AddRectFilled(gaugeMin, gaugeMin + gauge, Kit.Color(Theme.Void));
-            draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * FlightConsole.Fraction(target.Hull, flight.HullPoints), gauge.Y), Kit.Color(Theme.Good));
-            Kit.Text(draw, _ui.Sans, Theme.FontCaption, gaugeMin + new float2(0, Kit.Px(10)), Theme.TextMute, mine ? "T takes control"u8 : "Not yours: cannot take control"u8);
+            var sheet = TargetGauges.Sheet(target, design);
+            var rowsEnd = DrawTargetGauges(draw, target, sheet, text.X, text.Y + Kit.Px(44), size.X - Kit.Px(Theme.Space4 * 2));
+            Kit.Text(draw, _ui.Sans, Theme.FontCaption, new float2(text.X, rowsEnd), Theme.TextMute, mine ? "T takes control"u8 : "Not yours: cannot take control"u8);
         }
         else if (world.TargetRock is { } targetRock && world.TryGetRock(targetRock, out var rockPosition, out var rockRadius))
         {
