@@ -149,7 +149,7 @@ ifneq ($(wildcard $(VVL)/usr/lib/libVkLayer_khronos_validation.so),)
 endif
 
 .PHONY: help setup setup-system setup-dotnet restore doctor tools \
-        build run server listing listing-image test bench bench-scans fmt check clean need-dotnet
+        build run server listing listing-image test bench bench-scans bench-gas fmt check clean need-dotnet
 
 ##@ Getting started
 
@@ -313,6 +313,30 @@ bench: need-dotnet ## Release benchmark: frame rate and per-frame allocation, al
 	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 10 --size 1920x1080
 	$(call step,Benchmarking the same scene while the window is resized)
 	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 6 --bench-resize 6 --size 1920x1080
+
+# Inside gas clouds, where the primary cloud is marched at half resolution (assets/shaders/gas_half.glsl): an ordinary
+# cloud from inside, from the pilot's seat (composed with the shields) and from the command view, a huge one and a
+# lightning one. Each fails under 144 fps or on a managed allocation. A cold cloud and a cold and normal pair keep the
+# full-resolution march (their ice glints are a pixel across), so those two report their frame rate without judging it.
+GAS_BENCH = $(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 8 --size 1920x1080
+
+bench-gas: need-dotnet ## Release benchmark inside gas clouds: fails under 144 fps or on any managed allocation
+	$(call step,Building the client (Release))
+	$(Q)"$(DOTNET)" build $(CLIENT) -c Release $(QUIET)
+	$(call step,Inside an ordinary cloud)
+	$(Q)$(GAS_BENCH) --sector 127,-1,-127 --gas-view inside
+	$(call step,The pilot's view inside the same cloud)
+	$(Q)$(GAS_BENCH) --sector 127,-1,-127
+	$(call step,The command view at its fringe)
+	$(Q)$(GAS_BENCH) --sector 127,-1,-127 --open command-fog
+	$(call step,Inside a huge cloud)
+	$(Q)$(GAS_BENCH) --sector 133,0,-77 --gas-view inside
+	$(call step,Inside a lightning cloud)
+	$(Q)$(GAS_BENCH) --sector -15,-1,3 --gas-view inside
+	$(call step,Inside a cold cloud (not judged))
+	$(Q)$(GAS_BENCH) --sector 43,0,38 --gas-view inside --bench-no-fps-target
+	$(call step,Inside a cold and normal pair (not judged))
+	$(Q)$(GAS_BENCH) --set sectorSize=20 --sector -21,2,35 --gas-view inside --bench-no-fps-target
 
 # The shipped pod has no scanner, so this runs a copy of the Release build whose pod has all three, with short scans.
 # Each run asks again the moment its cooldown ends; it fails on a single managed allocation (render thread or any other)
