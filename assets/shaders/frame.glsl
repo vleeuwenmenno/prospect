@@ -50,4 +50,7 @@ layout(set = 0, binding = 0) uniform Frame
     vec4 gasFlashReach;     // x: the most a deep stroke's light reaches, in metres.
     vec4 gasKindTime;       // x: seconds, for glints to twinkle by; y: flash factor at the middle and far levels;
                             // z: cold halo strength; w: bolts in gasBoltHeads.
+    vec4 gasQuality;        // The player's gas quality: x: pixels along a side one half-resolution texel covers (2 or 4);
+                            // y: multiplies the full level's step count; z, w: x half-extents from the camera where the
+                            // finest noise octave starts and ends fading out (equal: it never does).
 } frame;

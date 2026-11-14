@@ -318,7 +318,7 @@ bench: need-dotnet ## Release benchmark: frame rate and per-frame allocation, al
 # cloud from inside, from the pilot's seat (composed with the shields) and from the command view, a huge one and a
 # lightning one. Each fails under 144 fps or on a managed allocation. A cold cloud and a cold and normal pair keep the
 # full-resolution march (their ice glints are a pixel across), so those two report their frame rate without judging it.
-GAS_BENCH = $(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 8 --size 1920x1080
+GAS_BENCH = $(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 8 --size 1920x1080 $(ARGS)
 
 bench-gas: need-dotnet ## Release benchmark inside gas clouds: fails under 144 fps or on any managed allocation
 	$(call step,Building the client (Release))

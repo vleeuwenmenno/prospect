@@ -48,6 +48,9 @@ internal sealed class GasTiers
     /// <summary>The most cloud draws in one frame; the farthest are left out first.</summary>
     public int MaxDraws { get; init; }
 
+    /// <summary>What each graphics quality preset sets: march resolution, steps and noise detail. See <see cref="Render.GasQualityFigures"/>.</summary>
+    public Render.GasQualityTable Quality { get; init; } = new();
+
     /// <summary>What a large cloud gains close to the camera, so that it is not a flat wall from inside.</summary>
     public GasCloseUp CloseUp { get; init; } = new();
 
@@ -76,6 +79,7 @@ internal sealed class GasTiers
             throw new InvalidDataException($"{path}: midSamples is 8 to 64, farSamples 4 to 32, farDetail 1 or 2");
         if (tiers.MaxDraws is < 4 or > DrawCapacity)
             throw new InvalidDataException($"{path}: maxDraws is 4 to {DrawCapacity}");
+        tiers.Quality.Validate(path);
         var close = tiers.CloseUp;
         if (!(close.FromHalfSize is >= 1000 and <= 1e6f) || !(close.FullHalfSize > close.FromHalfSize && close.FullHalfSize <= 2e6f))
             throw new InvalidDataException($"{path}: closeUp.fromHalfSize is 1000 to 1000000 m and below fullHalfSize");

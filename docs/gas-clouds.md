@@ -250,6 +250,59 @@ Open:
 - Motion has not been reviewed: the read-back is stable from frame to frame (no history), but grain at 2 px may shimmer
   differently from the old 1 px grain.
 
+## Graphics quality
+
+Decided. A client preference, Settings, Video, Gas cloud quality: Low, Medium (default), High, Ultra. Nothing on the wire,
+nothing in a saved world (`ClientSettings.GasQuality`). It applies on the next frame: the figures travel in one vector
+of the frame constants (`frame.gasQuality`), so no pipeline, target or shader is rebuilt, and nothing allocates.
+
+Figures per preset, client data in `content/visuals/gas.json` (`quality`, `GasQualityTable`, refused on load if wrong):
+
+| Preset | `resolution` | `steps` | Noise fade (x half-extents) |
+| --- | --- | --- | --- |
+| Low | 4: one ray per 4x4 pixels | 0.6 | 0.5 to 1.1 |
+| Medium | 2: one per 2x2, as before | 1.0 | none |
+| High | 1: every pixel | 1.0 | none |
+| Ultra | 1: every pixel | 1.5 | none |
+
+What each figure does:
+
+- `resolution` 2 or 4 uses the half-resolution march; 1 does not, and every pixel marches itself as it did before that
+  march existed. A quarter marches into the corner of the same target (allocated for half), so a change of quality
+  reallocates nothing. `gas_half.glsl` reads the texel size from `gasQuality.x`; the block of four strata, the depth
+  test and the fall-back to a pixel's own march are unchanged. At 4 a texel's depth is the farthest of 16 pixels.
+- `steps` multiplies the content's sample count of the full level (48 for an ordinary cloud) in `gasMarch`, and the
+  step length follows, so more steps are finer ones. Kept between 16 and 128 (`GasMaxSteps`, `GasQualityRules.MaxSteps`).
+  It applies to every full-level march, so a cold cloud or a pair, which always march every pixel, still follow it.
+- The noise fade, Low only: from `noiseFrom` to `noiseTo` x half-extents from the camera the finest octave blends into
+  what it averages to (`gasDensity` detail 3, one lookup less). Single clouds only; the paired march keeps all of it.
+- The fixtures (`--gas-fixture`) always take the exact march: the renderer sends `GasQualityFigures.Exact` for them.
+
+Rules the figures keep: Medium is what shipped before the setting, so its figures are fixed (resolution 2, steps 1, no
+fade). Presets must not get cheaper from Low to Ultra. `GasQualityTests` holds both, and the settings round trip.
+
+Check with `--gas-quality low|medium|high|ultra` (only with `--capture` or `--bench`; it overrides the setting and never
+saves it). `make bench-gas ARGS="--gas-quality high --bench-no-fps-target"`: High and Ultra are not held to 144 fps.
+
+What it costs, Release, RTX 5070 Ti, 5096x1390, median of three 6 s benchmarks run in turn, no managed allocation in any:
+
+| View | Low | Medium | High | Ultra |
+| --- | --- | --- | --- | --- |
+| Ordinary `127,-1,-127`, inside | 396 fps | 243 | 95 | 66 |
+| Ordinary, pilot (composed, own shield) | 356 | 215 | 97 | 66 |
+| Ordinary, command view (`--open command-fog`) | 454 | 366 | 249 | 183 |
+| Huge `133,0,-77`, inside | 341 | 209 | 80 | 56 |
+| Lightning `-15,-1,3`, inside | 349 | 210 | 79 | 54 |
+
+- A first run after a build can read far lower (High 46 fps once); repeat before believing a number.
+- Low also speeds up cold clouds and pairs (133 and 65 fps against 94 and 46) through the step count alone.
+
+Open:
+
+- Quarter resolution has not been reviewed in motion; grain at 4 px may shimmer more than at 2 px.
+- The Low noise fade shows as slightly softer gas at a distance in stills; whether that reads well in flight is not judged.
+- High and Ultra miss 144 fps at this window size. Whether they should be offered as is, or limited by window size, is not decided.
+
 ## Budgets and limits
 
 Shared content controls presence, dimensions, extinction, tint, motion, samples and shape (`gas-clouds.shape` in `galaxy.json`).

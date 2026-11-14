@@ -96,6 +96,8 @@ internal sealed class AppOptions
     public string? OpenView { get; set; }
     /// <summary>Muted deterministic camera placement around a generated cloud.</summary>
     public string? GasView { get; set; }
+    /// <summary>Muted run only: the gas quality to draw with, in place of the setting (which is neither read nor saved over).</summary>
+    public GasQuality? GasQuality { get; set; }
     /// <summary>With the outside cloud camera: its distance in the cloud's largest half-extents, and where it moves to.</summary>
     public float? GasDistance { get; set; }
     public float? GasDistanceTo { get; set; }
@@ -1314,6 +1316,7 @@ internal sealed class App : IDisposable
         }
 
         World.GasView = Devices.Muted ? _options.GasView : null;
+        World.GasQualityOverride = Devices.Muted ? _options.GasQuality : null;
         World.GasFixture = Devices.Muted ? _options.GasFixture : 0;
         World.GasDistance = Devices.Muted ? _options.GasDistance : null;
         if (World.GasDistance is { } gasFrom && _options.GasDistanceTo is { } gasTo)

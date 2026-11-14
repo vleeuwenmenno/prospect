@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Prospect.Client.Render;
 using Prospect.Engine.Diagnostics;
 using Prospect.Engine.IO;
 using Prospect.Game.Protocol;
@@ -17,6 +18,14 @@ internal sealed class ClientSettings
     public int WindowWidth { get; set; } = 1600;
     public int WindowHeight { get; set; } = 900;
     public float UiScale { get; set; } = 1.0f;
+
+    /// <summary>
+    /// How finely gas clouds are drawn: Low for weak graphics cards, Medium (the default), High and Ultra for strong
+    /// ones. A preference of this client: nothing about it reaches a server or a saved world. Applies at once. The
+    /// figures of each preset are in <c>content/visuals/gas.json</c>.
+    /// </summary>
+    [JsonConverter(typeof(JsonStringEnumConverter<GasQuality>))]
+    public GasQuality GasQuality { get; set; } = GasQuality.Medium;
 
     /// <summary>Pointer sensitivity for steering, as a multiplier of the default.</summary>
     public float MouseSensitivity { get; set; } = 1.0f;
@@ -138,6 +147,7 @@ internal sealed class ClientSettings
         FrameCap = FrameCap <= 0 ? 0 : Math.Clamp(FrameCap, 30, 1000);
         WindowWidth = Math.Clamp(WindowWidth, 960, 16384);
         WindowHeight = Math.Clamp(WindowHeight, 540, 16384);
+        if (!Enum.IsDefined(GasQuality)) GasQuality = GasQuality.Medium;
         UiScale = float.IsFinite(UiScale) ? Math.Clamp(UiScale, 0.75f, 2.0f) : 1.0f;
         MouseSensitivity = float.IsFinite(MouseSensitivity) ? Math.Clamp(MouseSensitivity, 0.25f, 3.0f) : 1.0f;
         PlayerName = PlayerNames.Sanitize(PlayerName);

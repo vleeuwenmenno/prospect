@@ -3,6 +3,8 @@
 #define GAS_GLSL
 // Diagnostics only for explicitly muted fixtures. No normal-world counter writes.
 int gasFixtureMarches = 0;
+// The most steps a march takes, whatever the content and the quality say (GasQualityRules.MaxSteps).
+const int GasMaxSteps=128;
 #include "ftl.glsl"
 #include "ftl_own.glsl"
 float gasHash(vec3 p) {
@@ -427,7 +429,10 @@ vec4 gasMarch(GasData gas, GasData other, bool joint, vec3 ray, float fromDepth,
     // The renderer crossfades two levels of one cloud by their weights (motion.y).
     int level=int(gas.budget.y+0.5);
     int detail=level==2 && gas.tint.w>0.5 ? 3 : 2;
-    int budget=clamp(int(gas.budget.x),level==0 ? 16 : 4,64);
+    // The player's quality scales the full level's steps (gasQuality.y) and never a fixture's, which takes the exact march.
+    // The step count and the length of a step follow it together, so more steps are finer ones.
+    float quality=level==0 && gas.budget.z<=0.0 ? frame.gasQuality.y : 1.0;
+    int budget=clamp(int(gas.budget.x*quality+0.5),level==0 ? 16 : 4,GasMaxSteps);
     float smallest=min(gas.halfSize.x,min(gas.halfSize.y,gas.halfSize.z));
     if(joint) smallest=min(smallest,min(other.halfSize.x,min(other.halfSize.y,other.halfSize.z)));
     // A stretch of a pair takes its steps at the length the whole pair's span would, so the stretches together spend
@@ -480,7 +485,7 @@ vec4 gasMarch(GasData gas, GasData other, bool joint, vec3 ray, float fromDepth,
     // The sun direction in envelope space, for the chord to where the fringe ends (|e|^2 = 3.6).
     vec3 sunEnvelope=sunStep*shape.scale;
     float sunReach=dot(sunEnvelope,sunEnvelope);
-    for(int i=0;i<64;i++) {
+    for(int i=0;i<GasMaxSteps;i++) {
         if(i>=count || transmission<0.01) break;
         float from=gasStepStart(enter,stepLength,bend,budget,i);
         if(bend>0.0 && from>=leave) break;
@@ -492,7 +497,13 @@ vec4 gasMarch(GasData gas, GasData other, bool joint, vec3 ray, float fromDepth,
         float real=passage ? ftlOwnReal(ownRay,t*forward) : 1.0;
         if(real<=0.0) continue;
         vec3 p=origin+direction*t;
-        float d=gasDensity(gas,shape,p,detail)*real;
+        // Low quality: the finest octave fades out with distance from the camera, into what it averages to
+        // (detail 3), which costs a lookup less. Only the full level, only a single cloud, never a fixture.
+        float kept=level==0 && gas.budget.z<=0.0 && frame.gasQuality.w>frame.gasQuality.z
+            ? 1.0-smoothstep(frame.gasQuality.z,frame.gasQuality.w,t/gas.halfSize.x) : 1.0;
+        float d=gasDensity(gas,shape,p,kept>0.0 ? detail : 3);
+        if(kept>0.0 && kept<1.0) d=mix(gasDensity(gas,shape,p,3),d,kept);
+        d*=real;
         if(d<0.001) continue;
         float relief=0.0;
         if(level==0 && gas.fine.x>0.0) {
@@ -570,7 +581,7 @@ vec4 gasMarch(GasData gas, GasData other, bool joint, vec3 ray, float fromDepth,
     vec2 sunReaches=vec2(dot(sunEnvelopes[0],sunEnvelopes[0]),dot(sunEnvelopes[1],sunEnvelopes[1]));
     vec2 phases=vec2(phase,gasKindPhase(other,dot(ray,frame.sunDirection.xyz)));
     vec2 extinctions=vec2(extinction,other.halfSize.w*other.motion.y);
-    for(int i=0;i<64;i++) {
+    for(int i=0;i<GasMaxSteps;i++) {
         if(i>=count || transmission<0.01) break;
         float from=gasStepStart(enter,stepLength,bend,budget,i);
         if(bend>0.0 && from>=leave) break;

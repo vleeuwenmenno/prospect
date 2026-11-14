@@ -509,6 +509,9 @@ internal sealed class WorldView
     public Vector3 CameraRight => _right;
     /// <summary>Muted capture camera only; never creates or changes generated cloud descriptors.</summary>
     public string? GasView { get; set; }
+
+    /// <summary>For a muted run: the gas quality to draw with instead of the setting, which a capture must not save over.</summary>
+    public GasQuality? GasQualityOverride { get; set; }
     /// <summary>With the outside cloud camera: its distance from the cloud's centre, in the cloud's largest half-extents.</summary>
     public float? GasDistance { get; set; }
     /// <summary>Controlled shader inputs, applied only while devices are muted.</summary>
@@ -1175,6 +1178,7 @@ internal sealed class WorldView
 
         FillOwnJump(ref constants, camera);
         _scene.BeginGas(_gasTiers.MaxDraws);
+        _scene.SetGasQuality(_gasTiers.Quality.For(GasQualityOverride ?? _settings.GasQuality));
         GasDraws = default;
         GasKinds = default;
         if (GasView is not ("absent" or "inside-absent" or "pilot-absent") && galaxy.GasClouds is { } gas)

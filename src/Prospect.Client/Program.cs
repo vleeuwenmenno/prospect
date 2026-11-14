@@ -47,6 +47,7 @@ internal static class Program
                                   on lets them fire as in play (--open map shows the map's tips), stack fires the command
                                   view's three at once, and reset (with --start settings) opens the Reset tips question
           --gas-fixture <1..13>    With --capture only: controlled production-shader regression inputs (13: real-source overlay check)
+          --gas-quality <q>       With --capture or --bench: draw gas at low, medium, high or ultra instead of the setting
           --gas-view <view>       Muted cloud camera: outside, inside, edge, offscreen, absent, inside-absent, pilot-absent, pilot
           --gas-distance <radii>  With --gas-view outside or absent: the camera's distance in largest half-extents of the cloud
           --gas-distance-to <radii>  Move from --gas-distance to this distance over the captures, in equal ratios
@@ -231,6 +232,11 @@ internal static class Program
                     if (!int.TryParse(args[++i], out var gasFixture) || gasFixture < 1 || gasFixture > Prospect.Client.Render.GasShaderFixture.OverlayCheck)
                         return Fail("Invalid --gas-fixture: expected 1..13.");
                     options.GasFixture = gasFixture;
+                    break;
+                case "--gas-quality" when hasValue:
+                    if (!Prospect.Client.Render.GasQualityTable.TryParse(args[++i], out var gasQuality))
+                        return Fail("Invalid --gas-quality: low, medium, high, ultra.");
+                    options.GasQuality = gasQuality;
                     break;
                 case "--gas-view" when hasValue:
                     options.GasView = args[++i];
@@ -442,6 +448,8 @@ internal static class Program
             return Fail("--gas-flash-to needs --gas-flash.");
         if (options.GasDistanceTo is not null && options.GasDistance is null)
             return Fail("--gas-distance-to needs --gas-distance.");
+        if (options.GasQuality is not null && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--gas-quality works only with --capture or --bench.");
         if (options.GasView is not null && (options.CapturePath is null && options.BenchSeconds <= 0))
             return Fail("--gas-view works only with --capture or --bench.");
 

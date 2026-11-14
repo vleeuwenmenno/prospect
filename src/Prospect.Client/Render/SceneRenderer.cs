@@ -96,6 +96,13 @@ internal struct FrameConstants
     /// halo's strength; w how many bolts <see cref="GasBoltHeads"/> holds.
     /// </summary>
     public float4 GasKindTime;
+
+    /// <summary>
+    /// The graphics quality for gas (<see cref="GasQualityFigures.ToConstants"/>): x how many pixels along a side one
+    /// marched ray of the half-resolution target covers, y what the full level's step count is multiplied by, z and w
+    /// where, in x half-extents from the camera, the finest noise octave fades out. The renderer sets it every frame.
+    /// </summary>
+    public float4 GasQuality;
 }
 
 /// <summary>The second cloud of each overlapping pair, <see cref="Capacity"/> at most; matches <c>frame.glsl</c>.</summary>
@@ -887,6 +894,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
         var halfGas = HalfMarches(constants);
         LastGasHalf = halfGas;
         var frame = constants;
+        // The gas fixtures take the exact march; everything else takes the player's quality, live.
+        frame.GasQuality = constants.Gas.Budget.Z > 0 ? GasQualityFigures.Exact : _gasQuality.ToConstants();
         frame.Gas = deferredGas ? _gas.Primary : default;
         if (deferredGas && halfGas)
             frame.Gas.Budget.W = GasConstants.HalfMarched;
@@ -1276,15 +1285,24 @@ internal sealed unsafe class SceneRenderer : IDisposable
         SetViewport(commands, _extent);
     }
 
+    private GasQualityFigures _gasQuality = new() { Resolution = 2, Steps = 1 };
+
     /// <summary>
-    /// Whether this frame's primary cloud is marched at half resolution (gas_half.glsl). Not for the gas fixtures, which
+    /// Sets the gas quality the next frame draws with. Plain figures, copied into the frame constants: nothing is
+    /// rebuilt or allocated, so it can change on any frame.
+    /// </summary>
+    public void SetGasQuality(GasQualityFigures figures) => _gasQuality = figures;
+
+    /// <summary>
+    /// Whether this frame's primary cloud is marched at half resolution (gas_half.glsl), or at a quarter when the
+    /// quality says so. Not at all at the high qualities, where every pixel marches itself. Not for the gas fixtures, which
     /// must take the exact march; not for a cold cloud or a cold and normal pair, whose ice glints are dots a pixel
     /// across; not while the pilot's own rift or wormhole is open, whose passage is tested at every sample and would
     /// be blurred along its outline.
     /// </summary>
     private bool HalfMarches(in FrameConstants constants)
     {
-        if (!_gas.HasPrimary || constants.Gas.Budget.Z > 0 || _gas.Primary.Budget.Z > 0)
+        if (!_gas.HasPrimary || constants.Gas.Budget.Z > 0 || _gas.Primary.Budget.Z > 0 || !GasQualityRules.Marches(_gasQuality))
             return false;
         var code = (int)(_gas.Primary.Motion.W + 0.5f);
         var kind = code & 3;
@@ -1314,10 +1332,14 @@ internal sealed unsafe class SceneRenderer : IDisposable
             LoadOp = VkAttachmentLoadOp.DontCare,
             StoreOp = VkAttachmentStoreOp.Store,
         };
-        commands.BeginRendering(new VkRenderingInfo { RenderArea = new VkRect2D(_gasHalfExtent), LayerCount = 1, ColorAttachmentCount = 1, ColorAttachments = &target });
+        // The target is allocated for the half resolution; a quarter takes its top left corner, so a change of quality
+        // reallocates nothing. The shaders ask the frame constants how many pixels a texel covers.
+        var (marchWidth, marchHeight) = GasQualityRules.TargetSize((int)_extent.Width, (int)_extent.Height, (int)_gasQuality.Resolution);
+        var marchExtent = new VkExtent2D(Math.Min(marchWidth, (int)_gasHalfExtent.Width), Math.Min(marchHeight, (int)_gasHalfExtent.Height));
+        commands.BeginRendering(new VkRenderingInfo { RenderArea = new VkRect2D(marchExtent), LayerCount = 1, ColorAttachmentCount = 1, ColorAttachments = &target });
         // The whole target, not the cloud's outline: a pixel at the outline reads the texels beside it, and a texel
         // whose ray misses the box costs only the box test.
-        SetViewport(commands, _gasHalfExtent);
+        SetViewport(commands, marchExtent);
         Span<VkDescriptorSet> sets = [_frameSets[frameIndex], _shieldSet];
         commands.BindPipeline(VkPipelineBindPoint.Graphics, _gasHalfPipeline);
         commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _shieldPipelineLayout, 0, sets, []);

@@ -13,6 +13,7 @@ internal sealed partial class ScreenHost
     private static readonly int[] FrameCapValues = [0, 60, 120, 144, 240];
     private static readonly string[] UiScaleLabels = ["75%", "100%", "125%", "150%", "200%"];
     private static readonly float[] UiScaleValues = [0.75f, 1f, 1.25f, 1.5f, 2f];
+    private static readonly string[] GasQualityLabels = ["Low", "Medium", "High", "Ultra"];
     private static readonly string[] SensitivityLabels = ["50%", "75%", "100%", "125%", "150%", "200%"];
     private static readonly float[] SensitivityValues = [0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f];
     private static readonly string[] AutosaveLabels = ["15 s", "30 s", "1 min", "2 min", "5 min"];
@@ -90,6 +91,18 @@ internal sealed partial class ScreenHost
             settings.UiScale = UiScaleValues[scaleIndex];
             _app.ApplyVideoSettings();
         }
+
+        var gasIndex = Math.Clamp((int)settings.GasQuality, 0, GasQualityLabels.Length - 1);
+        if (Kit.Choice("Gas cloud quality"u8, GasQualityLabels, ref gasIndex, rowWidth))
+        {
+            settings.GasQuality = (Prospect.Client.Render.GasQuality)gasIndex;
+            settings.Save();
+        }
+
+        Kit.Space(Theme.Space1);
+        ImGui.Indent(Kit.Px(Theme.Space3));
+        Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, "Low suits weak graphics cards, Ultra strong ones. Applies at once."u8, rowWidth - 24);
+        ImGui.Unindent(Kit.Px(Theme.Space3));
 
         Kit.Space(Theme.Space5);
         Kit.Caption("STEERING"u8);
