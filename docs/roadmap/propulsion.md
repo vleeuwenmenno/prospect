@@ -41,8 +41,10 @@
 - Tanks hold a balanced but fairly long supply.
 - Fuel is the main cost of thrust. A small electric draw stays (pumps, valves, ignition), so thrust still slows shield
   recovery, more softly than before. Boost still empties the battery in seconds.
-- No refuelling exists yet. Applying an edit or a repair refills every tank, as a repair restores blocks.
-  - A whole ship with room in its tanks can be repaired for that alone. The editor calls it Refuel.
+- No refuelling exists yet. Only a ship's first spawn starts with full tanks.
+  - An edit keeps the fuel the ship had, per fuel, up to the new capacity. New tanks add room, not fuel.
+  - A repair restores blocks, not fuel. There is no Refuel button.
+  - A ship built new from the drone starts with empty tanks.
   - Tanks run down are no damage: they never hold back an edit.
 - Fuel is simulation state: shared flight code, predicted by the client, saved with the world.
 - Dampeners fire the same parts and burn the same fuel. At rest they burn nothing.
@@ -122,8 +124,8 @@ All in `content/blocks/blocks.json`. Tunable; change them there, never in code.
 | `microBipropellantTank` | 90 kg | 0.15 t |
 | `microNitrogenTank` | 24 kg | 0.15 t |
 
-- `boostFuelMultiplier` 2.5: boost doubles thrust for two and a half times the fuel.
-- `boostPowerMultiplier` 4 → 9.4, so boost draws what it drew before (pod 16.5 MW) while plain thrust draws far less.
+- Boost costs fuel more than power: it must draw clearly less electricity than the 9.4 multiplier did (pod 16.5 MW)
+  and burn clearly more fuel than 2.5 times. The rebalanced figures are in the table of the change that made them.
 - Size limits are a per-block field, `maxSide`: the most cells along any side. Left out, the content's limit applies.
 - `fuelBurn` and `fuelCapacity` take size rules like any other figure.
 - Why engines stay the main drive: best thrust per cell and per tonne, and a bipropellant tank carries twice
