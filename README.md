@@ -147,7 +147,7 @@ restarts; the editor then says so. The editor has not been checked on screen by 
 
 Milestone 1 (skeleton) is complete. On top of it, the first slice of the world is in:
 
-- **Sectors.** The galaxy is a grid of 20–80 km cells (80 km by default) generated from the server's seed: name, star, character and
+- **Sectors.** The galaxy is a grid of 20–160 km cells (80 km by default) generated from the server's seed: name, star, character and
   contents. Nothing is stored or sent, and nothing stops at a sector's edge. The client keeps the sectors around
   the camera generated on worker threads.
 - **World generation.** Space is filled by a list of modules named in `content/galaxy/galaxy.json`, each
@@ -530,7 +530,7 @@ the generation cap does not mean every rock in every visible sector draws simult
 | `oreGradeMin`, `oreGradeMax` | 0 to 1 | 0, 1 | Clamp ore grade after the grade multiplier; 1 means 100%. |
 | `<material>Abundance` | 0 to 4 | 1 | Relative share among already available materials. Zero removes that material from the sector character and rocks. |
 | `<material>GradeMin`, `<material>GradeMax` | 0 to 1 | 0, 1 | Per-material grade clamp, applied after the global grade range. |
-| `sectorSize` | 20 to 80 km | 80 | Sector edge length. Drive range and the blind-safe band scale with it; minimum jump distance stays fixed. |
+| `sectorSize` | 20 to 160 km | 80 | Sector edge length. Drive range and the blind-safe band scale with it; minimum jump distance stays fixed. |
 | `gasSizeMin` | 1 to 80 km | 16 | Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. |
 | `gasSizeMax` | 1 to 80 km | 22.4 | Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. |
 | `gasHugeSizeMin` | 1 to 160 km | 40 | Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. |

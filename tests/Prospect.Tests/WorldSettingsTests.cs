@@ -22,6 +22,7 @@ public sealed class WorldSettingEffectTests
     [Theory]
     [InlineData(20)]
     [InlineData(80)]
+    [InlineData(160)]
     public void SectorSizeScalesDerivedDriveRangeButNotMinimum(int km)
     {
         var world = World($"sectorSize={km}");
@@ -41,6 +42,8 @@ public sealed class WorldSettingEffectTests
     [InlineData(20, 1)]
     [InlineData(80, 0)]
     [InlineData(80, 1)]
+    [InlineData(160, 0)]
+    [InlineData(160, 1)]
     public void GasSizeRangesAndChanceRespectSectorWalls(int km, int huge)
     {
         var world = World($"sectorSize={km}", $"gasHugeChance={huge}", "gasSizeMin=8", "gasSizeMax=8",
@@ -77,6 +80,7 @@ public sealed class WorldSettingEffectTests
     [Theory]
     [InlineData(20)]
     [InlineData(80)]
+    [InlineData(160)]
     public void RocksAtSectorSizeExtremesAreDeterministicAndStayInsideTheirOwner(int km)
     {
         var galaxy = World($"sectorSize={km}").Galaxy.WithSeed(42);
@@ -127,6 +131,9 @@ public sealed class WorldSettingEffectTests
         Assert.Equal(Content.SettingCatalog.Defaults, settings);
         Assert.Equal((ushort)27420, server.Port!.Value);
         Assert.Empty(warnings);
+        var example = File.ReadAllText(path);
+        Assert.Contains("range: 20–160; default: 80.", example);
+        Assert.Equal(160000, World("sectorSize=160").Galaxy.SectorSize);
         using var json = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(path), new System.Text.Json.JsonDocumentOptions
         { CommentHandling = System.Text.Json.JsonCommentHandling.Skip, AllowTrailingCommas = true });
         foreach (var definition in Content.SettingCatalog.Definitions)

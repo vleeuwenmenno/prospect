@@ -220,6 +220,46 @@ public sealed class AsteroidRetuningTests
         }
     }
 
+    [Theory]
+    [InlineData(20, "B0C0A787B7DD74F9")]
+    [InlineData(80, "A8A0731E9509607F")]
+    [InlineData(160, "5B1B6DB1E90784F2")]
+    public void SectorSizeOptimizationKeepsRecordedBytes(int km, string expected)
+    {
+        var galaxy = World($"sectorSize={km}").WithSeed(11);
+        var sector = new SectorContent();
+        galaxy.Generate(new SectorCoord(-39, 0, -19), sector);
+        Assert.Equal(expected, Sectors.Hash(sector).ToString("X16"));
+    }
+
+    [Fact]
+    public void CachedPlacementBlockerAgreesWithFreshSearch()
+    {
+        var galaxy = World("sectorSize=160").WithSeed(11);
+        var sector = new SectorContent();
+        galaxy.Generate(new SectorCoord(-39, 0, -19), sector);
+        var random = new Random(329);
+        var blocker = -1;
+        for (var i = 0; i < 10000; i++)
+        {
+            var rock = sector.Asteroids[random.Next(sector.AsteroidCount)];
+            var point = rock.LocalPosition + new Vector3(random.NextSingle() * 4000 - 2000,
+                random.NextSingle() * 4000 - 2000, random.NextSingle() * 4000 - 2000);
+            var reach = random.NextSingle() * 6000;
+            var expected = false;
+            foreach (var other in sector.Asteroids.AsSpan(0, sector.AsteroidCount))
+            {
+                var dx = point.X - other.LocalPosition.X;
+                var dy = point.Y - other.LocalPosition.Y;
+                var dz = point.Z - other.LocalPosition.Z;
+                var apart = reach + other.Radius;
+                expected |= dx * dx + dy * dy + dz * dz < apart * apart;
+            }
+            Assert.Equal(expected, sector.Rocks.PlacementOverlaps(sector.Asteroids,
+                sector.AsteroidCount, point, reach, ref blocker));
+        }
+    }
+
     [Fact]
     public void DebugBudgetSectorKeepsItsRecordedBytes()
     {

@@ -81,7 +81,7 @@
   "goldGradeMax": 1,
   // How soft and frayed gas clouds look: 0 is dense with a hard outline, 1 thins their outer gas into strands and gaps, 2 is the most. Changes only how clouds are drawn, never where they are. Unit: multiplier; range: 0–2; default: 1.
   "gasWispiness": 1,
-  // Sector edge length. Drive range and the blind-safe band scale with it; minimum jump distance stays fixed. Unit: km; range: 20–80; default: 80.
+  // Sector edge length. Drive range and the blind-safe band scale with it; minimum jump distance stays fixed. Unit: km; range: 20–160; default: 80.
   "sectorSize": 80,
   // Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. Unit: km; range: 1–80; default: 16.
   "gasSizeMin": 16,
