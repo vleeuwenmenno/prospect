@@ -325,11 +325,11 @@ public sealed partial class ServerHost
             var required = connection.NoticedDesigns;
             for (var slot = 0; slot < _hulls.Slots; slot++)
                 if (_hulls.IsAliveAt(slot) && (_hulls.Info(slot).Owner == connection.PlayerId
-                    || Covered(connection.PlayerId, _hulls.State(slot).Position)))
+                    || BlockSet.Has(connection.Visible, slot)))
                     required = Math.Max(required, _hulls.Info(slot).Design + 1);
             foreach (var editing in _connections)
                 if (editing.EditPhase == EditorPhase.Publishing && _hulls.IsAlive(editing.EditHull)
-                    && (editing.PlayerId == connection.PlayerId || Covered(connection.PlayerId, _hulls.State(editing.EditHull.Index).Position)))
+                    && (editing.PlayerId == connection.PlayerId || BlockSet.Has(connection.Visible, editing.EditHull.Index)))
                     required = Math.Max(required, editing.EditDesign + 1);
             while (connection.NoticedDesigns < required)
             {

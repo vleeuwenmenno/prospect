@@ -7,11 +7,6 @@ namespace Prospect.Game.Protocol;
 public enum MessageId : byte
 {
     /// <summary>Client to server: the first message on a connection.</summary>
-    PlotJump = 30,
-    Navigation = 31,
-    Scan = 27,
-    Exploration = 28,
-    Visibility = 29,
     Hello = 1,
 
     /// <summary>Server to client: the connection is accepted.</summary>
@@ -82,6 +77,16 @@ public enum MessageId : byte
 
     /// <summary>Client to server, reliable: the client can show hulls of an announced design, or cannot.</summary>
     DesignReady = 23,
+    /// <summary>Request a sector scan.</summary>
+    Scan = 27,
+    /// <summary>Personal scan progress and charts.</summary>
+    Exploration = 28,
+    /// <summary>Personal visibility and observed destruction.</summary>
+    Visibility = 29,
+    /// <summary>Client to server: plot the controlled hull's jump destination without starting.</summary>
+    PlotJump = 30,
+    /// <summary>Server to owner: accepted navigation plot and jump refusal feedback.</summary>
+    Navigation = 31,
 }
 
 public enum RejectReason : byte
@@ -158,7 +163,7 @@ public static class ProtocolInfo
     /// index in a list both ends generate for themselves, so two builds that generate differently would mean
     /// different rocks by the same number. Client and server must match exactly.
     /// </summary>
-    public const uint Version = 38;
+    public const uint Version = 39;
 
     public const ushort DefaultPort = 27420;
     public const int MaxNameBytes = 48;

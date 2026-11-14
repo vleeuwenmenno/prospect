@@ -11,6 +11,7 @@ internal sealed partial class ClientWorld
     private readonly uint[] _contactSlots = new uint[HullStore.MaxHulls];
     private bool _contactsComplete = true;
     private long _visibilityTick = -1;
+    private readonly uint[] _destroyedContacts = new uint[HullStore.MaxHulls];
     private SectorChart[] _charts = [];
     private int _chartCount;
     private ScanView _scan;
@@ -40,10 +41,22 @@ internal sealed partial class ClientWorld
     {
         var tick = reader.ReadInt64();
         var words = reader.ReadUInt16();
-        if (!reader.IsValid || tick < 0 || tick <= _visibilityTick || words > _visible.Length || reader.Remaining != words * sizeof(ulong)) return;
+        if (!reader.IsValid || tick < 0 || tick <= _visibilityTick || words > _visible.Length || reader.Remaining < words * sizeof(ulong) + 2) return;
+        var validate = reader;
+        for (var i = 0; i < words; i++) validate.ReadUInt64();
+        var deaths = validate.ReadUInt16();
+        if (!validate.IsValid || deaths > ExplorationMessage.MaxDestroyed || validate.Remaining != deaths * sizeof(uint)) return;
         _visibilityTick = tick;
         for (var i = 0; i < words; i++) _visible[i] = reader.ReadUInt64();
         _visible.AsSpan(words).Clear();
+        reader.ReadUInt16();
+        for (var i = 0; i < deaths; i++)
+        {
+            var id = reader.ReadUInt32();
+            _destroyedContacts[(int)(id & 65535)] = id;
+            _contacts.Remove(id);
+            ClearHeld(id);
+        }
         foreach (var pair in _contacts)
         {
             var contact = pair.Value;
@@ -57,7 +70,8 @@ internal sealed partial class ClientWorld
             if (_remotes[i].Used && !BlockSet.Has(_visible, (int)(_remotes[i].Id & 65535))) Forget(ref _remotes[i]);
     }
 
-    private bool Visible(uint id, long tick) => _visibilityTick < 0 || (tick >= _visibilityTick && BlockSet.Has(_visible, (int)(id & 65535)));
+    private bool Visible(uint id, long tick) => _destroyedContacts[(int)(id & 65535)] != id
+        && (_visibilityTick < 0 || tick >= _visibilityTick || BlockSet.Has(_visible, (int)(id & 65535)));
 
     private bool Observe(in HullRecord record, long tick)
     {

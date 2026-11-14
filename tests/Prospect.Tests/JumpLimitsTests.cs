@@ -1,3 +1,4 @@
+using Prospect.Client;
 using Prospect.Engine.Net;
 using Prospect.Game.Protocol;
 using Prospect.Game.World;
@@ -10,6 +11,41 @@ public sealed class JumpLimitsTests
     private static readonly GameContent Content = GameContent.Load();
     private static JumpEligibility Evaluate(double distance, bool charted = false) =>
         JumpRules.Evaluate(default, new Double3(0, distance, 0), Content.Pod.Flight, Content.Exploration, charted);
+
+    [Fact]
+    public void CombinedProtocolIdsAreUniqueAndChartEnvelopeFitsExactly()
+    {
+        var ids = Enum.GetValues<MessageId>();
+        Assert.Equal(ids.Length, ids.Distinct().Count());
+        Assert.Equal(39u, ProtocolInfo.Version);
+        Span<byte> bytes = stackalloc byte[ExplorationMessage.MaxWireSize];
+        Span<SectorChart> charts = stackalloc SectorChart[ExplorationMessage.MaxCharts];
+        for (var i = 0; i < charts.Length; i++) charts[i] = new(1, new(i, 0, 0), 0);
+        var writer = new NetWriter(bytes);
+        ExplorationMessage.Write(ref writer, default, charts);
+        Assert.Equal(ExplorationMessage.MaxWireSize, writer.Written.Length);
+        var reader = new NetReader(writer.Written[1..]);
+        Assert.True(ExplorationMessage.Read(ref reader, charts, out _, out var count));
+        Assert.Equal(ExplorationMessage.MaxCharts, count);
+        Assert.Equal(8333, ExplorationMessage.VisibilityMaxWireSize);
+    }
+
+    [Theory]
+    [InlineData(0, 0, 0)]
+    [InlineData(127, -1, -127)]
+    [InlineData(-66, 1, 37)]
+    public void ScriptedDefaultJumpStaysInRangeFromAnyStartSector(int x, int y, int z)
+    {
+        var options = new AppOptions();
+        var position = Content.Galaxy.CenterOf(new(x, y, z));
+        var target = options.JumpTarget(Content.Galaxy, position);
+        Assert.Equal(Content.Galaxy.CenterOf(new(x + 6, y, z - 4)), target);
+        foreach (var offset in new[] { -19999, 0, 19999 })
+            Assert.True(JumpRules.Evaluate(position + new Double3(offset, offset, offset), target,
+                Content.Pod.Flight, Content.Exploration, false).CanIssueOrder);
+        options.JumpTo = new(x, y, z - 1);
+        Assert.Equal(Content.Galaxy.CenterOf(options.JumpTo.Value), options.JumpTarget(Content.Galaxy, position));
+    }
 
     [Theory]
     [InlineData(false)]

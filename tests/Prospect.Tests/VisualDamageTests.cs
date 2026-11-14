@@ -224,16 +224,16 @@ public sealed class VisualDamageTests
                 writer.WriteByte(lossRecovery ? (byte)1 : (byte)2); writer.WriteUInt32(0);
             }
             var reader = new NetReader(writer.Written);
-            sender.Receive(ref reader, hulls, tick);
+            sender.Receive(ref reader, hulls, tick, new ulong[] { ulong.MaxValue });
         }
         if (activeCosmetic)
         {
             Request(false, 0);
-            sender.Send(wire, 0, buffer, 0);
+            sender.Send(wire, 0, buffer, 0, new ulong[] { ulong.MaxValue });
             Assert.Equal([a.Packed], wire.VisualAttempts);
         }
         Request(true, Content.BlockTransfers.RequestTicks);
-        sender.Send(wire, 0, buffer, Content.BlockTransfers.RequestTicks);
+        sender.Send(wire, 0, buffer, Content.BlockTransfers.RequestTicks, new ulong[] { ulong.MaxValue });
         if (lossRecovery)
         {
             Assert.Equal(b.Packed, wire.LastBlockHull);

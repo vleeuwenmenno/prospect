@@ -18,7 +18,8 @@ public sealed class ExplorationSessionTests
     {
         internal uint ForbiddenOwner;
         internal Action<uint>? Welcomed;
-        internal int LeakedHulls, RockMessages, Recoveries;
+        internal int LeakedHulls, RockMessages, Recoveries, ExplorationBytes, RockBytes, TargetLeaks, NavigationBytes;
+        internal bool RefuseNavigation;
         public string Description => inner.Description;
         public int MaxPayloadSize => inner.MaxPayloadSize;
         public bool IsInProcess => inner.IsInProcess;
@@ -34,8 +35,15 @@ public sealed class ExplorationSessionTests
             reader = new NetReader(payload[1..]);
             if (payload[0] == (byte)MessageId.Snapshot && SnapshotHeader.TryRead(ref reader, out var header))
                 for (var i = 0; i < header.HullCount; i++)
-                    if (HullRecord.TryRead(ref reader, out var record) && record.Owner == ForbiddenOwner) LeakedHulls++;
-            if (payload[0] == (byte)MessageId.RockDeltas) RockMessages++;
+                    if (HullRecord.TryRead(ref reader, out var record) && record.Owner == ForbiddenOwner)
+                    { LeakedHulls++; if (record.Order.Target != default) TargetLeaks++; }
+            if (payload[0] == (byte)MessageId.RockDeltas) { RockMessages++; RockBytes += payload.Length; }
+            if (payload[0] == (byte)MessageId.Exploration) ExplorationBytes += payload.Length;
+            if (payload[0] == (byte)MessageId.Navigation)
+            {
+                NavigationBytes += payload.Length;
+                if (RefuseNavigation) return false;
+            }
             if (payload[0] is (byte)MessageId.BlockState or (byte)MessageId.VisualState) Recoveries++;
             return inner.Send(peer, channel, payload);
         }
@@ -47,19 +55,20 @@ public sealed class ExplorationSessionTests
 
     private sealed class Rig : IDisposable
     {
-        internal readonly LoopbackLink[] Links = [new(), new()];
+        internal readonly LoopbackLink[] Links;
         internal readonly Wire[] Wires;
         internal readonly ClientSession[] Clients;
         internal readonly ServerHost Server;
         internal readonly HullStore Hulls;
         internal readonly ManualTime Clock = new();
         internal long Tick;
-        internal Rig(bool hideSecondInitially = false)
+        internal Rig(bool hideSecondInitially = false, int players = 2)
         {
-            Wires = [new(Links[0].Server), new(Links[1].Server)];
-            Server = new ServerHost(new ServerConfig { Clock = Clock }, Content, [.. Wires]);
+            Links = Enumerable.Range(0, players).Select(_ => new LoopbackLink()).ToArray();
+            Wires = Links.Select(l => new Wire(l.Server)).ToArray();
+            Server = new ServerHost(new ServerConfig { Clock = Clock, MaxPlayers = players }, Content, [.. Wires]);
             // Intercept at the transport boundary while retaining the same identity for callbacks.
-            Clients = [new(Links[0].Client, Content, "One", clock: Clock), new(Links[1].Client, Content, "Two", clock: Clock)];
+            Clients = Links.Select((l, i) => new ClientSession(l.Client, Content, $"Player{i}", clock: Clock)).ToArray();
             Hulls = Get<HullStore>("_hulls");
             if (hideSecondInitially)
                 Wires[1].Welcomed = owner =>
@@ -71,7 +80,7 @@ public sealed class ExplorationSessionTests
                     var sector = SaveRig.RockySector(rocks);
                     Assert.True(rocks.Set(new RockDelta { Rock = new RockRef(sector, 0), Offset = new Vector3(0, 1_000_000, 0), StartTick = Tick }));
                 };
-            for (var i = 0; i < 600 && (Snap(0).OwnHull < 0 || Snap(1).OwnHull < 0); i++) { Step(); Thread.Yield(); }
+            for (var i = 0; i < 600 && Clients.Any(c => c.AcquireSnapshot().OwnHull < 0); i++) { Step(); Thread.Yield(); }
             Assert.True(Snap(0).OwnHull >= 0 && Snap(1).OwnHull >= 0);
         }
         internal T Get<T>(string field) => (T)typeof(ServerHost).GetField(field, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(Server)!;
@@ -94,6 +103,34 @@ public sealed class ExplorationSessionTests
                 if (Hulls.IsAliveAt(i) && Hulls.Info(i).Owner == Owner(client)) Hulls.State(i).Position += delta;
         }
         public void Dispose() { foreach (var client in Clients) client.Dispose(); Server.Dispose(); }
+    }
+
+    [Fact]
+    public void NavigationRetriesOnlyToItsOwnerAndDoesNotDiscloseJumpTargets()
+    {
+        using var rig = new Rig();
+        var id = rig.Own(0);
+        var target = rig.Hulls.State((int)(id & 65535)).Position + new Double3(0, 0, -20000);
+        rig.Wires[1].ForbiddenOwner = rig.Owner(0);
+        rig.Wires[0].RefuseNavigation = true;
+        rig.Clients[0].Input.PlotJump(id, target);
+        rig.Step(15);
+        Assert.False(rig.Snap(0).Exploration.Navigation.HasPlot);
+        rig.Wires[0].RefuseNavigation = false;
+        rig.Step(15);
+        Assert.Equal(target, rig.Snap(0).Exploration.Navigation.Target);
+        Assert.True(rig.Snap(0).Exploration.Navigation.HasPlot);
+        Assert.False(rig.Snap(1).Exploration.Navigation.HasPlot);
+        Assert.Equal(default, rig.Snap(1).Exploration.Navigation.Target);
+        rig.Clients[0].Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = target });
+        rig.Step(30);
+        Assert.Equal(JumpPhase.Charge, rig.Hulls.State((int)(id & 65535)).Jump);
+        Assert.True(rig.Wires[1].LeakedHulls > 0);
+        Assert.Equal(0, rig.Wires[1].TargetLeaks);
+        Assert.Equal(target, rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Order.Target);
+        rig.Wires[0].NavigationBytes = 0;
+        rig.Step(30);
+        Assert.Equal(0, rig.Wires[0].NavigationBytes);
     }
 
     [Fact]
@@ -160,6 +197,150 @@ public sealed class ExplorationSessionTests
     }
 
     [Fact]
+    public void OtherOwnersOrdersKeepKindWithoutDestination()
+    {
+        using var rig = new Rig();
+        var position = rig.Hulls.State((int)(rig.Own(0) & 65535)).Position + new Vector3(0, 1000, 0);
+        var hull = rig.Hulls.Create(rig.Owner(1), (byte)Content.PodDesign, Content.Pod, position);
+        rig.Hulls.Info(hull.Index).Order = new HullOrder { Kind = OrderKind.MoveTo, Target = position + new Vector3(0, 1000, 0) };
+        rig.Wires[0].ForbiddenOwner = rig.Owner(1);
+        rig.Step(20);
+        Assert.True(rig.Wires[0].LeakedHulls > 0);
+        Assert.Equal(0, rig.Wires[0].TargetLeaks);
+    }
+
+    [Fact]
+    public void OldSnapshotsStillAcceptRetainedSlots()
+    {
+        using var rig = new Rig();
+        rig.Step(10);
+        var world = typeof(ClientSession).GetField("_world", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(rig.Clients[0])!;
+        var visible = world.GetType().GetMethod("Visible", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var maskTick = (long)world.GetType().GetField("_visibilityTick", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(world)!;
+        Assert.True((bool)visible.Invoke(world, [rig.Own(0), maskTick - 1])!);
+        rig.MoveOwner(1, new Double3(0, 10000, 0));
+        rig.Step(10);
+        maskTick = (long)world.GetType().GetField("_visibilityTick", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(world)!;
+        Assert.False((bool)visible.Invoke(world, [rig.Own(1), maskTick - 1])!);
+        Assert.True((bool)visible.Invoke(world, [rig.Own(1), maskTick + 1])!);
+    }
+
+    [Fact]
+    public void GeneratedAndPreviouslyDisclosedRockPositionsReceiveChanges()
+    {
+        using var rig = new Rig();
+        var rocks = rig.Get<RockField>("_rocks");
+        var rock = new RockRef(SaveRig.RockySector(rocks), 0);
+        Assert.True(rocks.Set(new RockDelta { Rock = rock, Offset = new Vector3(0, 10000, 0), StartTick = rig.Tick }));
+        var slot = (int)(rig.Own(0) & 65535);
+        var origin = rocks.GeneratedPositionOf(rock);
+        rig.Hulls.State(slot).Position = origin + new Vector3(0, -4000, 0);
+        rig.Step(30);
+        Assert.True(rig.Wires[0].RockMessages > 0);
+        rig.Hulls.State(slot).Position = origin + new Vector3(0, 10000, 0);
+        Assert.True(rocks.Set(new RockDelta { Rock = rock, Offset = new Vector3(0, 20000, 0), StartTick = rig.Tick }));
+        rig.Wires[0].RockMessages = 0;
+        rig.Step(30);
+        Assert.True(rig.Wires[0].RockMessages > 0);
+    }
+
+    [Fact]
+    public void ThirtyTwoOwnersWith192SensorHullsHaveMeasuredTickCost()
+    {
+        using var rig = new Rig(players: 32);
+        var origin = new Double3(1e9, 1e9, 1e9);
+        for (var owner = 0; owner < 32; owner++)
+        {
+            rig.MoveOwner(owner, origin + new Double3(0, owner * 20000, 0));
+            for (var i = 0; i < 3; i++)
+                rig.Hulls.Create(rig.Owner(owner), (byte)Content.PodDesign, Content.Pod, origin + new Vector3(i * 100, owner * 20000 + 1000, 0));
+        }
+        rig.Step(60);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var probe = new AllocationProbe();
+        for (var i = 0; i < 60; i++) while (probe.Measuring()) rig.Step();
+        watch.Stop();
+        Console.WriteLine($"Exploration scale: {rig.Hulls.Count} hulls, 32 clients, {watch.Elapsed.TotalMilliseconds / 60:F4} ms/full round; {probe.Bytes} allocated bytes.");
+        Assert.Equal(192, rig.Hulls.Count);
+        Assert.Equal(0, probe.Bytes);
+    }
+
+    [Fact]
+    public void PartyOutsideSensorsPublishesCompleteUnknownBatchAndRecovers()
+    {
+        using var rig = new Rig();
+        void Send(int i, SocialKind kind, uint player = 0)
+        {
+            Span<byte> bytes = stackalloc byte[SocialMessage.MaxWireSize];
+            var writer = new NetWriter(bytes);
+            new SocialMessage { Kind = kind, Player = player, InvitationId = rig.Snap(i).Social.Invitation.InvitationId }.Write(ref writer);
+            rig.Links[i].Client.Send(0, NetChannel.Reliable, writer.Written);
+            rig.Step(65);
+        }
+        Send(0, SocialKind.Invite, rig.Owner(1));
+        Send(1, SocialKind.Accept);
+        rig.MoveOwner(1, new Double3(0, 10000, 0));
+        rig.Step(120);
+        var social = rig.Snap(0).Social;
+        Assert.Equal(2, social.PartyCount);
+        var member = social.Party.Take(social.PartyCount).Single(m => m.Player == rig.Owner(1));
+        Assert.True(member.Unknown);
+        Assert.Equal(0, member.X); Assert.Equal(0, member.Y); Assert.Equal(0, member.Z);
+        Assert.Equal(0, member.Value); Assert.Equal(0, member.Hull); Assert.Equal(0, member.Shield);
+        rig.MoveOwner(1, new Double3(0, -10000, 0));
+        rig.Step(120);
+        Assert.False(rig.Snap(0).Social.Party.Take(2).Single(m => m.Player == rig.Owner(1)).Unknown);
+    }
+
+    [Fact]
+    public void IdleChartsAndRocksStopSendingReliableBytes()
+    {
+        using var rig = new Rig();
+        for (var i = 0; i < 40; i++) Assert.True(rig.Server.RecordChart(rig.Owner(0), new(i, 0, 0), rig.Tick));
+        var rocks = rig.Get<RockField>("_rocks");
+        var rock = new RockRef(SaveRig.RockySector(rocks), 0);
+        Assert.True(rocks.Set(new RockDelta { Rock = rock, StartTick = rig.Tick }));
+        var own = (int)(rig.Own(0) & 65535);
+        rig.Hulls.State(own).Position = rocks.GeneratedPositionOf(rock) + new Vector3(0, 4000, 0);
+        rig.Step(90);
+        Assert.Equal(40, rig.Snap(0).Exploration.ChartCount);
+        Assert.True(rig.Wires[0].RockBytes > 0);
+        rig.Wires[0].ExplorationBytes = rig.Wires[0].RockBytes = rig.Wires[0].NavigationBytes = 0;
+        rig.Step(120);
+        Assert.Equal(0, rig.Wires[0].ExplorationBytes);
+        Assert.Equal(0, rig.Wires[0].NavigationBytes);
+        Assert.Equal(0, rig.Wires[0].RockBytes);
+    }
+
+    [Fact]
+    public void SensorlessHullRetainsNearbyCollisionContacts()
+    {
+        using var rig = new Rig();
+        rig.MoveOwner(0, new Double3(1e9, 0, 0));
+        var position = rig.Hulls.State((int)(rig.Own(0) & 65535)).Position;
+        var drone = rig.Hulls.Create(rig.Owner(1), (byte)Content.DroneDesign, Content.Designs[Content.DroneDesign], position + new Vector3(100, 0, 0));
+        rig.Step(20);
+        Assert.True(rig.Server.Covered(rig.Owner(1), position));
+        Assert.Contains(rig.Snap(1).Exploration.Contacts.Take(rig.Snap(1).Exploration.ContactCount), c => c.Hull == rig.Own(0) && c.Live);
+        rig.Hulls.State(drone.Index).Position += new Double3(0, 1000, 0);
+        rig.Step(20);
+        Assert.False(rig.Server.Covered(rig.Owner(1), position));
+    }
+
+    [Fact]
+    public void ObservedDestructionRemovesContactImmediately()
+    {
+        using var rig = new Rig();
+        var position = rig.Hulls.State((int)(rig.Own(0) & 65535)).Position + new Vector3(0, 1000, 0);
+        var hull = rig.Hulls.Create(rig.Owner(1), (byte)Content.PodDesign, Content.Pod, position);
+        rig.Step(20);
+        Assert.Contains(rig.Snap(0).Exploration.Contacts.Take(rig.Snap(0).Exploration.ContactCount), c => c.Hull == hull.Packed);
+        rig.Hulls.Destroy(hull);
+        rig.Step(1);
+        Assert.DoesNotContain(rig.Snap(0).Exploration.Contacts.Take(rig.Snap(0).Exploration.ContactCount), c => c.Hull == hull.Packed);
+    }
+
+    [Fact]
     public void ReusingAHullSlotDoesNotEraseItsLostContact()
     {
         using var rig = new Rig();
@@ -195,7 +376,7 @@ public sealed class ExplorationSessionTests
         rig.Step(10);
         var other = rig.Own(1);
         var position = rig.Hulls.State((int)(other & 65535)).Position;
-        var scout = rig.Hulls.Create(rig.Owner(0), (byte)Content.PodDesign, Content.Pod, position + new Vector3(100, 0, 0));
+        var scout = rig.Hulls.Create(rig.Owner(0), (byte)Content.PodDesign, Content.Pod, position + new Vector3(1000, 0, 0));
         rig.Step(10);
         Assert.Contains(rig.Snap(0).Exploration.Contacts.Take(rig.Snap(0).Exploration.ContactCount), c => c.Hull == other && c.Live);
         Assert.Equal(0, rig.Snap(0).Exploration.ChartCount);

@@ -89,9 +89,9 @@ public struct SocialText
 public struct SocialMessage
 {
     /// <summary>Maximum encoded envelope, including the message id and UTF-8 length prefix.</summary>
-    public const int MaxWireSize = 47 + 2 + 768;
+    public const int MaxWireSize = 48 + 2 + 768;
     /// <summary>Fixed envelope bytes before the text length prefix.</summary>
-    public const int FixedWireSize = 47;
+    public const int FixedWireSize = 48;
     /// <summary>Operation or event.</summary>
     public SocialKind Kind;
     /// <summary>Target on requests; authoritative player id on events.</summary>
@@ -104,6 +104,8 @@ public struct SocialMessage
     public ulong InvitationId;
     /// <summary>Channel, connected flag, design index or refusal, according to kind.</summary>
     public byte Value;
+    /// <summary>Party telemetry is outside personal coverage.</summary>
+    public bool Unknown;
     /// <summary>Shield fraction.</summary>
     public float Shield;
     /// <summary>Hull fraction.</summary>
@@ -134,6 +136,7 @@ public struct SocialMessage
         writer.WriteInt64(Tick);
         writer.WriteUInt64(InvitationId);
         writer.WriteByte(Value);
+        writer.WriteByte(Unknown ? (byte)1 : (byte)0);
         writer.WriteSingle(Shield);
         writer.WriteSingle(Hull);
         writer.WriteInt32(X); writer.WriteInt32(Y); writer.WriteInt32(Z);
@@ -147,6 +150,9 @@ public struct SocialMessage
         message.Kind = (SocialKind)reader.ReadByte();
         message.Player = reader.ReadUInt32(); message.Leader = reader.ReadUInt32();
         message.Tick = reader.ReadInt64(); message.InvitationId = reader.ReadUInt64(); message.Value = reader.ReadByte();
+        var unknown = reader.ReadByte();
+        if (unknown > 1) return false;
+        message.Unknown = unknown != 0;
         message.Shield = reader.ReadSingle(); message.Hull = reader.ReadSingle();
         message.X = reader.ReadInt32(); message.Y = reader.ReadInt32(); message.Z = reader.ReadInt32();
         message.Length = reader.ReadString(message.Text, 768);

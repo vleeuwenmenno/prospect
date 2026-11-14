@@ -367,6 +367,8 @@ public enum HullClass : byte
 /// </summary>
 public sealed class HullDesign
 {
+    internal readonly int[] SensorBlocks;
+    internal readonly int[] ChartingBlocks;
     private readonly BoxDesign _boxes;
     private FlightRules _rules = null!;
     internal BoxCollision Collision { get; }
@@ -400,6 +402,9 @@ public sealed class HullDesign
             if (box.Type.Core)
                 BlockSet.Add(_coreSet, i);
         }
+
+        SensorBlocks = Enumerable.Range(0, Types.Length).Where(i => Types[i].Sensor).ToArray();
+        ChartingBlocks = Enumerable.Range(0, Types.Length).Where(i => Types[i].Charting).ToArray();
 
         UsesRoundedUnitShell = true;
         foreach (var box in blocks) UsesRoundedUnitShell &= box.Shape == BlockShape.Box && box.Size == new GridSize(1, 1, 1);

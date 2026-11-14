@@ -666,7 +666,7 @@ This status is an observation at open, not hosting authorization. Saved multipla
 - Move or copy the complete stopped folder, preserving key permissions, to retain identity. A bare database is insufficient.
 - Independent Claude security review remains required. No admission, TLS, key rotation or destructive recovery is included.
 
-## Exploration foundation (protocol 38)
+## Exploration foundation (protocol 39)
 
 The server owns scans and charts and filters dynamic live state by personal sensor coverage.
 `rules/exploration.json` is shared content and participates in content identity.
@@ -707,46 +707,56 @@ No screen, HUD or renderer implementation is included here.
 
 ### Visibility and disclosure
 
-Every owned, equipped hull contributes a spherical volume in double-precision world coordinates, across XYZ walls.
+Every owned hull contributes a spherical volume in double-precision world coordinates, across XYZ walls.
+Working sensors cover 5,000 m; even a sensorless hull covers the content-owned 250 m proximity radius.
+Actual hull contacts remain visible for three ticks, keyed by full hull identity.
 Ownership always discloses the owner's own ships, including remote ones without sensors.
 Detection uses object centers. Visibility grants no remote-control permission and never charts a sector.
 
 - Hull snapshots require visibility; block/dent recovery checks it at request admission and before each continued transfer.
-- Initial asteroid deltas, repeated sweeps and immediate changes require coverage of the asteroid's current center.
-- Party live sector/health messages require visibility too; roster membership alone grants no coverage.
-- A reliable visibility mask removes lost hulls independently of sparse snapshot scheduling. Old poses cannot revive them.
+- Asteroid changes require coverage of the current, generated or previously disclosed extrapolated center.
+- Each party batch includes every member. Outside coverage, an explicit unknown flag accompanies zero design/sector/health.
+- A reliable visibility mask removes lost hulls independently of sparse snapshots. Observed destruction removes the marker immediately.
+  Older snapshots still update slots retained by the latest mask; newer snapshots may introduce newly visible slots.
 - Newly visible asteroid changes arrive on a bounded repeated sweep. Losing coverage sends no later mutations.
 
 The galaxy seed, deterministic natural geometry, mineral generation and admission-time immutable design catalogue remain disclosed.
 During play, new designs are announced only when needed by a visible hull or visible pending edit.
+A visible edit can wait for other clients to acknowledge publication; that wait exposes a timing side channel.
 Catalogue indices are contiguous: revealing a later design also discloses preceding historical designs, not their live owners or locations.
 Global player roster/count remain social information. The catalogue does not establish a hull's current existence or position.
 This is dynamic-state filtering, not secure natural-data secrecy.
 Collision prediction still generates baseline asteroids from the seed and can extrapolate already-disclosed asteroid motion.
-No hidden hull is disclosed solely to improve prediction; unknown collisions and unseen later asteroid changes require correction.
+Proximity and recent-contact coverage preserve collision prediction without working sensors.
+Unseen later asteroid changes still require correction.
 Galaxy vertical limits remain unfinished.
 
 ### Wire sizes and bounded work
 
 Scan is 1 byte. Exploration is at most 799 bytes: scan state/times and up to 32 chart records of 24 bytes.
-Visibility is 11 bytes plus one 64-bit word per group through the highest visible slot; maximum 8,203 bytes.
+Visibility is 13 bytes plus mask words and up to 32 destroyed full hull IDs; maximum 8,333 bytes.
+Social envelopes add one validated unknown byte; the maximum is 818 bytes. Hello=1 and Reject=3 and their first fields remain unchanged.
 Invisible tail capacity is omitted. Requests use existing admission/rate budgets; the client reserves one scan request per tick.
 
-- Sensor gathering walks live hulls and their block types. Coverage checks scan owned sensor centers; no spatial index yet.
-- Visibility costs O(hulls × sensors × active clients), plus equipment checks. Each client retains an 8 KiB mask.
-- One asteroid sweep visits at most 32 deltas per client/tick; immediate collision updates use at most two 32-record packets.
-  At the saved-world limit of 16,384 deltas, a new observer's complete sweep takes 512 ticks without refused sends.
-- Chart delivery visits at most the content chart limit per tick and sends at most 32 matching records. Refused sends retry.
+- Gather once after simulation; group coverage by owner. Equipment checks use precomputed design block indices.
+  Editor announcements consume the previous mask. No spatial index yet.
+- Visibility checks only the recipient’s owned hull volumes, plus recent contacts. Each client retains an 8 KiB mask and bounded per-slot identity/contact arrays.
+- One asteroid sweep visits at most 32 deltas every 15 ticks (4 Hz); immediate collision updates retain their existing packet bound.
+  Per connection, up to 16,384 rock identities and last-sent deltas suppress unchanged repeats. Unsaved overflow entries still replay.
+  At 16,384 deltas a full sweep takes 7,680 ticks; immediate new impulses do not wait for it.
+- Chart delivery walks once after admission and resumes for additions/refreshes; scan changes send once. Idle sends nothing.
+  Each tick visits at most the content chart limit and sends at most 32 matching records. Refused sends retry.
 - Contact storage is bounded to 65,536 records (the existing hull-slot ceiling), keyed by full hull identity so slot reuse preserves stale markers.
   At capacity new markers are refused and `ContactsComplete` stays false for the session; live hull replication continues. The existing 64 rendered/predicted hull-view limit remains;
   chart/contact publication is separate, and packet/sweep limits still delay observations of large fleets.
 
-Measured on this Linux machine in Debug: 128 hulls and two clients averaged 1.6261 ms per complete server/client round,
-with zero managed allocations across 120 measured rounds after warmup. This does not establish a thousands-of-hulls budget.
-Release client benchmark passed at 1,097 fps normal and 999 fps during resize, zero render/process allocations.
-Validation layers were inactive; Windows/macOS and interactive map behavior remain unverified.
+Measured in Debug: 192 sensor-equipped hulls and 32 clients averaged 4.7690 ms per complete server/client round,
+with zero managed allocations. Reinstating only the old gathering, equipment and editor-coverage paths measured 8.0873 ms.
+The 128-hull/two-client case averaged 1.4640 ms with zero allocations. These are local measurements, not a thousands-of-hulls budget.
+Release benchmark passed at 953 fps normal and 1,069 fps during resize, with zero process allocations.
+Validation layers were inactive; Windows/macOS and interactive party presentation remain unverified.
 
-### Jump navigation contract (protocol 38)
+### Jump navigation contract (protocol 39)
 
 `JumpRules.Evaluate` in Prospect.Game is the shared range/risk function; the server checks every pilot and fleet jump.
 Bounds are inclusive Euclidean XYZ distances, independent of sector walls and chart ownership.
@@ -756,7 +766,7 @@ Content evaluator version is 5. Snapshot codec stays 3: existing per-block HP st
 
 - `PlayerInputBridge.PlotJump(ownHullId, point)` sends a bounded reliable intent, never a standing order.
 - Read `SessionSnapshot.Exploration.Navigation`: `Hull`, `HasPlot`, accepted `Target`, and last `Refusal` with `ResultHull` identifying the affected ship.
-  A failed plot retains the prior accepted target. A control change clears it; consume a plot only when `Hull` matches the current own hull. Feedback repeats with exploration updates.
+  A failed plot retains the prior accepted target. A control change clears it; consume a plot only when `Hull` matches the current own hull. Feedback is sent only when changed; refused transport sends retry. It is sent only to that connection, never to observers.
 - The UI worker should replace WorldView's local-only NAV assignment with this intent and consume the acknowledged target.
   On the existing NAV/boost chord, issue the existing `HullOrder { Kind = Jump, Target = acceptedTarget }` through `IssueOrder`.
   The server revalidates at that input's world interval; moving after plotting can make it too close or too far. Charging also cancels if drift or drive loss invalidates range.

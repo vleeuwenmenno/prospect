@@ -205,21 +205,23 @@ The client opens a real window on the developer's desktop, and they are usually 
 - A short window: point `XDG_CONFIG_HOME` at a copy of the settings with `"UiScale": 2`; every layout must still
   hold.
 - A sequence: add `--capture-count <n> --capture-every <sec>` for numbered stills (`shot-00.png`, ...); each one
-  prints the own hull's jump stage and progress. The pod charges for about 7.5 s after a jump order, then 3 s of
-  tunnel and 1.5 s of arrival, so `--open jump --capture-after 6 --capture-count 28 --capture-every 0.3` covers
-  a whole jump.
+  prints the own hull's jump stage and progress. Preparation takes at least 12 s, the default transit about 10.2 s,
+  then 1.5 s of arrival. `--open jump --capture-after 6 --capture-count 70 --capture-every 0.3` covers the default jump.
 - Another player's jump: run a dedicated server with `--listing off`, join it with a capturing client, then join a
   second client with `--open jump-fleet` (and a late `--capture` to keep it connected): its mining vessel and
-  survey vessel jump 600 m along -x, so the first client sees a wormhole and a rift leave and arrive from the
-  server's snapshots. The second player starts 160 m along -x of the first; `--look` points the watcher at them.
+  survey vessel jump 6 km along -x. An observer needs sensor coverage at each endpoint to see departure and arrival;
+  the default 5 km sensor at the starting pod cannot see the arrival. The second player starts 160 m along -x
+  of the first; `--look` points the watcher at them.
 - Social data for a capture: run a dedicated server with `--listing off`, join it with the capturing client,
   and run headless clients against it (`--social-run 40 --join ... --player <name>` with `--invite <name>`
   (repeatable), `--accept-invites`, `--say`, `--party-say`). `--accept-invites` on the capturing client makes it
   accept, so the party list fills. Point `XDG_CONFIG_HOME` at a scratch copy of the settings: a capture saves
   them on exit.
-- Own jumps aim at the centre of sector 12,0,-7; `--jump-to x,y,z` aims at another sector's centre (with `--sector` to
-  start next to it, e.g. into a known gas cloud). `--open jump-fleet-ahead` sends the rest of the fleet to points
-  160 m and 280 m ahead of and above the camera, so their exit openings overlap in view (about 13–16 s after start).
+- Own scripted jumps aim at the centre of the current sector plus (6,0,-4), about 288 km from its centre,
+  within the production 5–400 km range even with `--sector`. `--jump-to x,y,z` selects an absolute sector centre;
+  use `--sector` to start within range. An invalid explicit destination is logged and not ordered, never silently replaced.
+  `--open jump-fleet-ahead` targets points 6 km and 10 km ahead of and above the camera; `jump-fleet` targets 6 km along -x.
+  These replace the old sub-minimum-distance capture jumps. Their openings are farther from the watcher.
 - `--look <degrees>` holds the pilot camera that far to the right of the hull's nose, as free look would (`0`
   looks along the nose, `150` nearly back). Use it to check that an effect follows the hull, not the view.
 - `--target` targets the nearest other hull once in space (in a local game the Prospector, about 120 degrees to

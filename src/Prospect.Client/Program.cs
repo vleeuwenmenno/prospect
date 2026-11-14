@@ -33,7 +33,7 @@ internal static class Program
           --account-authority <url|off>  Account service (defaults to --listing); local claims require an HTTPS origin
           --listing <url|off>     The listing server for public games and the server browser (default: content/net/listing.json)
           --set <id>=<value>      A world setting for local games started in this run; repeat for more (ids and ranges: content/rules/settings.json)
-          --open <view>           With --start local or --join: open the command view, the map or the ship data sheet (command, map, map-menu, map-hover, galaxy, info), start a jump (jump, jump-wormhole, jump-rift), send the rest of the fleet on short jumps 600 m along -x for another client to watch (jump-fleet) or straight ahead of the camera so their openings overlap (jump-fleet-ahead), or show Controls (controls), ask to edit the own ship in the ship editor (edit), the in-game menu (menu), the world settings in force (world-settings), the player list (players), the party
+          --open <view>           With --start local or --join: open the command view, the map or the ship data sheet (command, map, map-menu, map-hover, galaxy, info), start a jump (jump, jump-wormhole, jump-rift), send the rest of the fleet on short jumps 6 km along -x for another client to watch (jump-fleet) or straight ahead of the camera so their openings overlap (jump-fleet-ahead), or show Controls (controls), ask to edit the own ship in the ship editor (edit), the in-game menu (menu), the world settings in force (world-settings), the player list (players), the party
                                   panel (social), the Friends tab (friends), chat (chat) or the world with only the always-shown party and chat (hud)
           --browser-sample <s>    The server browser shows a fixed sample instead of asking the listing server, for captures:
                                   ready, loading, failed, empty, off, or password (the sample with the password prompt open)
@@ -45,7 +45,7 @@ internal static class Program
           --gas-distance <radii>  With --gas-view outside or absent: the camera's distance in largest half-extents of the cloud
           --gas-distance-to <radii>  Move from --gas-distance to this distance over the captures, in equal ratios
           --sector <x>,<y>,<z>    With --start local or --bench: start in this sector instead of the home sector
-          --jump-to <x>,<y>,<z>   With --open jump, jump-wormhole or jump-rift: jump to this sector's centre instead of 12,0,-7
+          --jump-to <x>,<y>,<z>   With --open jump, jump-wormhole or jump-rift: jump to this sector's centre instead of current sector + (6,0,-4); normal jump limits apply
           --size <W>x<H>          Start windowed at this size
           --validation            Enable Vulkan validation layers (default in debug builds)
           --no-validation         Disable Vulkan validation layers

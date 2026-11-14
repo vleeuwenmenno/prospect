@@ -3,13 +3,15 @@ using Prospect.Game.World;
 
 namespace Prospect.Game.Protocol;
 
+/// <summary>Bounded personal scan and chart publication.</summary>
 public static class ExplorationMessage
 {
-    public const int MaxCharts = 32;
     public const int ScanWireSize = 1;
+    public const int MaxCharts = 32;
     public const int ChartWireSize = 24;
-    public const int MaxWireSize = 1 + 1 + 12 + 8 + 8 + 1 + MaxCharts * ChartWireSize;
-    public const int VisibilityMaxWireSize = 1 + 8 + 2 + HullStore.MaxHulls / 8;
+    public const int MaxWireSize = 31 + MaxCharts * ChartWireSize;
+    public const int MaxDestroyed = 32;
+    public const int VisibilityMaxWireSize = 13 + HullStore.MaxHulls / 8 + MaxDestroyed * sizeof(uint);
 
     public static void Write(ref NetWriter writer, in ScanView scan, scoped ReadOnlySpan<SectorChart> charts)
     {

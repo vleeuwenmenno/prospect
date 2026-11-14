@@ -116,8 +116,14 @@ internal sealed class AppOptions
 
     /// <summary>The sector a local game starts in; for scripted screenshots and benchmarks of a particular sector.</summary>
     public SectorCoord SpawnSector { get; set; }
-    /// <summary>The sector whose centre the scripted own jumps (<c>--open jump*</c>) aim at; (12, 0, -7) when unset.</summary>
+    /// <summary>The sector whose centre the scripted own jumps (<c>--open jump*</c>) aim at; offset (6, 0, -4) from the current sector when unset.</summary>
     public SectorCoord? JumpTo { get; set; }
+
+    internal Double3 JumpTarget(Galaxy galaxy, Double3 position)
+    {
+        var from = galaxy.SectorOf(position);
+        return galaxy.CenterOf(JumpTo ?? new SectorCoord(from.X + 6, from.Y, from.Z - 4));
+    }
     public int2? WindowSize { get; set; }
 }
 
@@ -1015,7 +1021,7 @@ internal sealed class App : IDisposable
                 _screens.OpenMapHover();
             else if (view == "jump-fleet-ahead" && snapshot is { OwnHull: >= 0 })
             {
-                // The player's other hulls jump to points ahead of and above the camera, 160 m and 280 m away along
+                // The player's other hulls jump to points ahead of and above the camera, 6 km and 10 km away along
                 // nearly the same line of sight, so the pilot sees their exit openings overlap.
                 var forward = World.CameraForward;
                 var up = World.CameraUp;
@@ -1026,14 +1032,14 @@ internal sealed class App : IDisposable
                     ref var hull = ref snapshot.Hulls[i];
                     if (hull.IsOwn || hull.Owner != snapshot.PlayerId)
                         continue;
-                    var distance = 160f + 120f * lane;
+                    var distance = 6000f + 4000f * lane;
                     var offset = forward * distance + up * (distance * 0.3f) + right * (4f * lane++);
                     Session.Client.Input.IssueFleetOrder(hull.Id, new HullOrder { Kind = OrderKind.Jump, Target = World.CameraPosition + new Double3(offset.X, offset.Y, offset.Z) });
                 }
             }
             else if (view == "jump-fleet" && snapshot is { OwnHull: >= 0 })
             {
-                // The player's other hulls make short jumps side by side to 600 m along -x from the pod, so another
+                // The player's other hulls make short jumps side by side to 6 km along -x from the pod, so another
                 // player's client can watch them leave and arrive from the server's snapshots. The second player
                 // to join a server starts 160 m along -x of the first.
                 var from = snapshot.Hulls[snapshot.OwnHull].Position;
@@ -1043,7 +1049,7 @@ internal sealed class App : IDisposable
                     ref var hull = ref snapshot.Hulls[i];
                     if (hull.IsOwn || hull.Owner != snapshot.PlayerId)
                         continue;
-                    var target = from + new Double3(-600, 0, -60 + 120 * lane++);
+                    var target = from + new Double3(-6000, 0, -60 + 120 * lane++);
                     Session.Client.Input.IssueFleetOrder(hull.Id, new HullOrder { Kind = OrderKind.Jump, Target = target });
                 }
             }
@@ -1055,7 +1061,22 @@ internal sealed class App : IDisposable
                     "jump-rift" => FtlKind.Rift,
                     _ => FtlKind.None,
                 };
-                Session.Client.Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = World.Galaxy!.CenterOf(_options.JumpTo ?? new SectorCoord(12, 0, -7)) });
+                if (snapshot is { OwnHull: >= 0 })
+                {
+                    var position = snapshot.Hulls[snapshot.OwnHull].Position;
+                    var target = _options.JumpTarget(snapshot.Galaxy!, position);
+                    var eligibility = snapshot.Exploration.JumpEligibility(snapshot.Galaxy!, position, target, snapshot.Flight, snapshot.Content.Exploration);
+                    if (eligibility.CanIssueOrder)
+                        Session.Client.Input.IssueOrder(new HullOrder { Kind = OrderKind.Jump, Target = target });
+                    else
+                        Logs.App.Warning(eligibility.Reason switch
+                        {
+                            JumpRefusal.TooClose => "Scripted jump refused: destination is too close",
+                            JumpRefusal.TooFar => "Scripted jump refused: destination is too far",
+                            JumpRefusal.NoDrive => "Scripted jump refused: no working drive",
+                            _ => "Scripted jump refused: invalid destination",
+                        });
+                }
             }
             else
                 _screens.OpenMap();

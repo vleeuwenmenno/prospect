@@ -219,11 +219,19 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public bool Pending => State is ConnectionState.AwaitingHello or ConnectionState.AwaitingProof;
 
         public HullHandle Hull;
-        public NavigationView Navigation;
+        public NavigationView Navigation, SentNavigation;
+        public bool NavigationSent;
         public ScanView Scan;
         public uint ScanHull;
         public int ChartCursor;
+        public ScanView SentScan;
+        public bool ExplorationSent;
+        public readonly Dictionary<SectorCoord, long> SentCharts = new(ExplorationRules.MaxChartsPerOwner);
         public int RockCursor;
+        public int SensorHead = -1;
+        public readonly uint[] ContactIds = new uint[HullStore.MaxHulls], VisibleIds = new uint[HullStore.MaxHulls], Destroyed = new uint[HullStore.MaxHulls];
+        public readonly long[] ContactUntil = new long[HullStore.MaxHulls];
+        public readonly Dictionary<RockRef, RockDelta> SentRocks = new(SaveLimits.Default.MaxRocks);
         public bool VisibilitySent;
         public readonly ulong[] Visible = new ulong[BlockSet.WordCount(HullStore.MaxHulls)];
 
@@ -240,12 +248,22 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public void Reset()
         {
             Array.Clear(Visible);
+            Array.Clear(ContactIds);
+            Array.Clear(ContactUntil);
+            Array.Clear(VisibleIds);
+            Array.Clear(Destroyed);
+            SensorHead = -1;
+            SentRocks.Clear();
             VisibilitySent = false;
             RockCursor = 0;
-            Navigation = default;
+            Navigation = SentNavigation = default;
+            NavigationSent = false;
             Scan = default;
             ScanHull = 0;
             ChartCursor = 0;
+            SentScan = default;
+            ExplorationSent = false;
+            SentCharts.Clear();
             Generation++;
             Party = Inviter = 0;
             InvitationId = 0;
@@ -386,6 +404,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 throw new InvalidDataException($"A server's password must be 1 to {Passwords.MaxChars} characters, without control characters.");
             if (config.MaxPlayers is < 1 or > ushort.MaxValue)
                 throw new InvalidDataException($"A server has 1 to {ushort.MaxValue} player slots.");
+            _sensorConnections.EnsureCapacity(_maxPlayers);
 
             if (config.Password is not null)
             {
@@ -457,7 +476,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             _rocks = world is null ? new RockField(Galaxy) : new RockField(Galaxy, _saveLimits.MaxRocks, _saveLimits.MaxMovedSectors);
 
             // Room for the largest design the editor can add, taken now: a new design costs the tick no memory.
-            _field = new HullField(_hulls, _content.Designs, reserveBlocks: Math.Min(_content.Blocks.Limits.MaxBlocks, GeometryAdmission.MaxBlocks));
+            _field = new HullField(_hulls, _content.Designs, reserveBlocks: Math.Min(_content.Blocks.Limits.MaxBlocks, GeometryAdmission.MaxBlocks)) { ContactObserved = RememberContact };
 
             // A slot for every player, and apart from those one for every connection that may be pending: however
             // many stand at the door, there is a slot for whoever is let in. The in-process links are not counted
@@ -677,7 +696,6 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         // The host's own client, in this process, is read to the end. A network transport is read until its
         // budget is used up: room for every player's allowance and a fixed amount besides. What is still
         // waiting then stays in the transport's queue, in order, and is read in the next tick.
-        GatherSensors();
         var budget = new ReceiveBudget(SparePacketsPerTick + _maxPlayers * PlayerMessagesPerTick, SpareBytesPerTick + _maxPlayers * PlayerBytesPerTick);
         var carriedOver = false;
         foreach (var transport in _transports)
@@ -1281,7 +1299,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
     private void SendRockDeltas(Connection connection, ReadOnlySpan<RockDelta> deltas, bool incremental = false)
     {
-        if (deltas.IsEmpty || !connection.CatalogueReady) return;
+        if (deltas.IsEmpty || !connection.CatalogueReady || (!incremental && _tick % 15 != 0)) return;
         Span<RockDelta> visible = stackalloc RockDelta[RockDeltasMessage.MaxDeltas];
         var cursor = incremental ? 0 : connection.RockCursor % deltas.Length;
         var remaining = incremental ? deltas.Length : Math.Min(deltas.Length, visible.Length);
@@ -1292,13 +1310,25 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             for (var i = 0; i < visit; i++)
             {
                 var delta = deltas[(cursor + i) % deltas.Length];
-                if (Covered(connection.PlayerId, _rocks.PositionOf(delta.Rock, _tick))) visible[count++] = delta;
+                var sent = connection.SentRocks.TryGetValue(delta.Rock, out var previous);
+                if (sent && previous.StartTick == delta.StartTick) continue;
+                var origin = _rocks.GeneratedPositionOf(delta.Rock);
+                previous.Evaluate(_tick, Galaxy.DriftDecay, out var oldOffset, out _);
+                if (Covered(connection.PlayerId, _rocks.PositionOf(delta.Rock, _tick))
+                    || Covered(connection.PlayerId, origin) || (sent && Covered(connection.PlayerId, origin + oldOffset)))
+                    visible[count++] = delta;
             }
             if (count > 0)
             {
                 var writer = new NetWriter(_sendBuffer);
                 RockDeltasMessage.Write(ref writer, visible[..count]);
                 if (!connection.Transport.Send(connection.Peer, NetChannel.Reliable, writer.Written)) return;
+                foreach (var delta in visible[..count])
+                {
+                    // Unsaved worlds can exceed the cache; those entries retain bounded periodic replay.
+                    if (connection.SentRocks.Count < SaveLimits.Default.MaxRocks || connection.SentRocks.ContainsKey(delta.Rock))
+                        connection.SentRocks[delta.Rock] = delta;
+                }
             }
             cursor = (cursor + visit) % deltas.Length;
             remaining -= visit;
@@ -1359,6 +1389,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 State = _hulls.State(i),
                 Order = info.Order,
             };
+            if (info.Owner != connection.PlayerId) record.Order.Target = default;
             record.LossStart = Math.Min(record.Revision, connection.Blocks.Acknowledged(record.Id));
             var losses = _hulls.BlockStates.Losses(info.BlockState);
             record.LossCount = (byte)Math.Min(HullRecord.MaxLosses, record.Revision - record.LossStart);
