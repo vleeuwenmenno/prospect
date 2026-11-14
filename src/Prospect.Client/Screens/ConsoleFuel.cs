@@ -123,17 +123,17 @@ internal static class ConsoleFuel
         _ => "BIPROPELLANT"u8,
     };
 
-    /// <summary>Kilograms, or tonnes once they no longer fit three digits.</summary>
+    /// <summary>Kilograms, or tonnes from ten tonnes up: below that a tonne figure hides minutes of burn.</summary>
     public static ReadOnlySpan<byte> Mass(float kilograms) =>
-        kilograms >= 1000f ? Kit.F($"{kilograms / 1000f:0.##} T") : Kit.F($"{kilograms:0.#} KG");
+        kilograms >= 10000f ? Kit.F($"{kilograms / 1000f:0.##} T") : Kit.F($"{kilograms:0} KG");
 
     /// <summary>Amount out of capacity in one unit, the capacity's.</summary>
     public static ReadOnlySpan<byte> Stored(float amount, float capacity) =>
-        capacity >= 1000f ? Kit.F($"{amount / 1000f:0.##} / {capacity / 1000f:0.##} T") : Kit.F($"{amount:0.#} / {capacity:0.#} KG");
+        capacity >= 10000f ? Kit.F($"{amount / 1000f:0.##} / {capacity / 1000f:0.##} T") : Kit.F($"{amount:0} / {capacity:0} KG");
 
     /// <summary>Amount alone in the capacity's unit, for a cell too narrow for both.</summary>
     public static ReadOnlySpan<byte> Held(float amount, float capacity) =>
-        capacity >= 1000f ? Kit.F($"{amount / 1000f:0.##} T") : Kit.F($"{amount:0.#} KG");
+        capacity >= 10000f ? Kit.F($"{amount / 1000f:0.##} T") : Kit.F($"{amount:0} KG");
 
     /// <summary>A flow in kilograms a second, signed; "—" at rest.</summary>
     public static ReadOnlySpan<byte> FlowText(float flow)
