@@ -897,3 +897,11 @@ HullLimit, Busy, TooSoon, Jumping and the existing client-readiness/check failur
 ### Open
 
 - Resource costs, shipyards, alternative spawn candidates, renaming, and remote reopening after cancelling the initial grant.
+
+## Gas kinds and environment (protocol 43)
+
+Generation 6 and content evaluator 9 cover cloud kinds, icicles and lightning sensing.
+`HullRecord` gains one environment byte; its wire bounds grow by one.
+See [the gas contract](gas-clouds.md#decided-provisional-tunable-kinds-and-renderer-integration) for flags, timing and renderer duties.
+Settings capacity increases from 48 to 64; handshake and save bounds derive from that constant.
+All new tuning is in existing shared files (`galaxy/galaxy.json`, `rules/settings.json`, `rules/exploration.json`).

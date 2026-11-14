@@ -106,6 +106,30 @@ public sealed class ExplorationSessionTests
     }
 
     [Fact]
+    public void LightningEnvironmentReachesOwnAndRemoteHullViews()
+    {
+        using var rig = new Rig();
+        var galaxy = rig.Server.Galaxy;
+        GasCloudPlacement found = default;
+        var have = false;
+        for (var x = -100; x < 100 && !have; x++)
+            for (var z = -100; z < 100 && !have; z++)
+            {
+                var anchor = new SectorCoord(x, 0, z);
+                if (galaxy.GasClouds!.TryGetCloud(galaxy, anchor, out var cloud) && cloud.Kind == GasCloudKind.Lightning)
+                { found = new(anchor, cloud); have = true; }
+            }
+        Assert.True(have);
+        var center = GasCloudQuery.CenterOf(galaxy, found);
+        for (var i = 0; i < rig.Hulls.Slots; i++)
+            if (rig.Hulls.IsAliveAt(i)) rig.Hulls.State(i).Position = center + new Double3(i * 40, 0, 0);
+        rig.Step(30);
+        var snap = rig.Snap(0);
+        Assert.True((snap.Hulls[snap.OwnHull].Environment & HullEnvironment.InLightningCloud) != 0);
+        Assert.Contains(snap.Hulls.ToArray(), h => !h.IsOwn && (h.Environment & HullEnvironment.InLightningCloud) != 0);
+    }
+
+    [Fact]
     public void GasHidesHullOnWireAndProximityStillDisclosesIt()
     {
         using var rig = new Rig();

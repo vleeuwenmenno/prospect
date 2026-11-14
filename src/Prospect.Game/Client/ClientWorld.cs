@@ -8,6 +8,8 @@ namespace Prospect.Game.Client;
 /// <summary>A hull as the render thread should draw it this tick, with last tick's pose for interpolation.</summary>
 public struct HullView
 {
+    /// <summary>Latest authoritative gas status, never predicted from rendered positions.</summary>
+    public HullEnvironment Environment;
     public uint Id;
     public uint Owner;
 
@@ -161,8 +163,11 @@ internal sealed partial class ClientWorld : IDisposable
         public InputRecord Record;
     }
 
+    private HullEnvironment _ownEnvironment;
+
     private struct Sample
     {
+        public HullEnvironment Environment;
         public long Tick;
         public HullState State;
         public HullOrder Order;
@@ -541,6 +546,7 @@ internal sealed partial class ClientWorld : IDisposable
         if (header.ServerTick <= _snapshotTick)
             return;
         _snapshotTick = header.ServerTick;
+        _ownEnvironment = own.Environment;
         _ownIsDrone = header.OwnIsDrone;
         _lastSnapshotClientTick = clientTick;
 
@@ -622,6 +628,7 @@ internal sealed partial class ClientWorld : IDisposable
             views[count++] = new HullView
             {
                 Id = _ownHullId,
+                Environment = _ownEnvironment,
                 Owner = _playerId,
                 Design = _ownDesign,
                 Blocks = Publish(_ownBlocks, blockWords, ref used),
@@ -937,6 +944,7 @@ internal sealed partial class ClientWorld : IDisposable
         {
             Tick = serverTick,
             State = record.State,
+            Environment = record.Environment,
             Order = record.Order,
         };
     }
@@ -1041,6 +1049,7 @@ internal sealed partial class ClientWorld : IDisposable
         var view = new HullView
         {
             Id = remote.Id,
+            Environment = newest.Environment,
             Owner = remote.Owner,
             Design = remote.Design,
             Position = newest.State.Position,

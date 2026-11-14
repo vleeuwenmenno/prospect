@@ -222,3 +222,10 @@ UI estimates use the same curve, not knowledge of the future departure tick.
 - Nothing on the server changes: every owned ship still reports what it sees, so a remote scout keeps working.
   Real relay limits, and what a link may carry, come later with relay stations.
 - The galaxy map keeps showing every owned sensor, whatever is selected, each as its own gas-shaped region.
+
+## Decided: lightning sensor disruption
+
+Lightning at the sensor centre intermittently cuts its range budget, using shared `GasSensors` and server time.
+Hull snapshots carry cold/lightning/disrupted flags. Proximity and ownership disclosure remain unchanged.
+The renderer must consume snapshot time and invalidate stationary outlines at burst edges.
+Numbers and integration contract: [gas kinds](../gas-clouds.md#decided-provisional-tunable-kinds-and-renderer-integration).

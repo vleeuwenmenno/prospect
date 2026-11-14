@@ -7,5 +7,10 @@
   "proximityRadius": 250,
   "scanSeconds": 5,
   "contactSeconds": 15,
-  "chartsPerOwner": 4096
+  "chartsPerOwner": 4096,
+  "lightning": {
+    "periodTicks": 480,
+    "burstTicks": 60,
+    "reachShare": 0.15
+  }
 }

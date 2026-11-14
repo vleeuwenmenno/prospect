@@ -50,7 +50,7 @@ Why these three:
 - A light from the smooth envelope alone (no lookups) was tried for far and rejected: it shaded the cloud visibly more than the probes.
 - A half-resolution target was rejected again: it needs new depth, lens and shield edge reconstruction and a resize path.
 
-Many clouds at once, the order:
+Current renderer order (must change for cold/normal overlap; see integration contract below):
 
 - A frame queues at most 32 draws (`maxDraws`, 64 at most) plus the primary. When full, the farthest is left out.
 - Whole clouds are laid over each other, farthest centre first. Gas of two overlapping clouds is not interleaved along a ray.
@@ -217,7 +217,7 @@ Far clouds alone make no copy either: they are drawn into the sky.
 
 Several clouds can be in view; see "Seen from far away" for the queue and the order.
 Deferred frame data still holds one record: the primary cloud. Every other draw is part of the scene the composition reads.
-Generation keeps any two clouds apart by both x half-extents plus 56% of a sector edge, so none overlap and a camera in or close to one is never in another.
+Generation 6 retains this separation for every pair except cold/normal. Deferred data must handle both overlapping volumes before this branch ships; see the integration contract below.
 Extinction per metre falls with size above the standard 4.8 km half-extent (`GasCloudModule.ExtinctionOf`), so a huge cloud is as deep to look through as an ordinary one.
 A huge cloud keeps the content's sample count over a longer path: its even steps are up to four times as long. Close to the camera they are bent shorter; see "Large clouds close up".
 
@@ -343,3 +343,58 @@ The twelve composition fixtures use homogeneous input, so their rerun alone cann
 This is render-only and consumes no generation draws; changing it never moves clouds or rocks.
 `WorldView.QueueGas` packs it into `GasConstants.Motion.z` for every tier; shaders stay unchanged.
 Larger ordinary clouds can now enter the existing close-up treatment above 7 km half-extent.
+
+## Decided (provisional, tunable): kinds and renderer integration
+
+Generation 6, protocol 43, evaluator 9. This non-visual implementation requires the renderer changes below before release.
+
+- `GasCloud.Kind` is `Normal=0`, `Cold=1`, or `Lightning=2`. It is generated, never sent independently.
+- `seed / 128` selects cold below `coldChance` (0.20); among the remainder, `lightningChance` (0.10) selects lightning. Candidate proportions are 20% cold, 8% lightning, 72% normal. Separation biases surviving proportions.
+- `gasColdChance` and `gasLightningChance` apply through `Galaxy.Under`, each 0–1 in steps of 0.01. Values in `galaxy.json` also apply when loading an unapplied galaxy.
+- Only cold/normal pairs bypass rivalry. Positions do not move to force a mixture: independently seeded envelopes mix wherever they intersect. Cold/cold, normal/normal and every lightning pair retain the old separation margin and tie break.
+- Clouds still have one anchor, one descriptor per anchor, and reach at most its 26 neighbours. There can be at most one cold and one normal at a point; neither can share that point with lightning.
+
+Renderer contract (not implemented by the non-visual worker):
+
+- Carry `Kind` with every queued cloud, including distant tiers. Do not infer it from tint or repeat probability logic.
+- Overlapping cold/normal volumes require joint front-to-back integration along each ray: split at both volumes' entry/exit and every opaque, shield or portal boundary. At each sample sum extinction and extinction-weighted source light from every active volume, then apply one transmittance update. Whole-cloud alpha sorting is incorrect.
+- Both active volumes must participate in deferred HDR shield/opening composition. The single-primary assumption must be removed; preserve gas-free shield copies and per-sample own-passage checks. A hard limit must keep the pair together rather than silently dropping one.
+- Lightning visuals may use `GasSensors.Disrupted(cloud, rules, snapshotTick)` to align flashes with gameplay. Keep visual-only density noise separate from gameplay membership.
+- Cold shading and icicle meshes remain unimplemented here. `AsteroidShape.Icicle` is a fixed six-tip elongated octahedron: unit x tips and y/z tips at 1/6. Use its six axial vertices and eight triangular faces (24 indices), or a subdivision of those faces within the existing mesh budget; a generic sphere sampling can miss the sharp tips. Server and client collision already use its `Point`/`RadiusAlong` definitions.
+
+Gameplay envelopes and UI contract:
+
+- `GasSensors.Contains` uses the smooth ellipsoid `HalfSize * Shape.X`, centred on the cloud. Cold membership wins wherever it intersects normal gas. Membership is at the hull/asteroid centre, not the noisy visible fringe.
+- `rules/exploration.json.lightning`: period 480 ticks (8 seconds at 60 Hz), burst 60 ticks (1 second), remaining sensor range 0.15. Period allowed 1–36000; burst 1–period; share 0–1.
+- Burst phase is `floor(seed / 128 * period)` plus the saved server tick modulo period. No mutable timer or RNG; reload continues the same phase.
+- `Covers`, `Reach` and `SampleReach` accept the same optional `long tick`; production callers must pass snapshot/server time, never wall time. A burst reduces the range budget to max(proximity, base range × share), then applies ordinary gas attenuation. Proximity remains clear. Optical penalties from overlapping clouds add.
+- `HullRecord.Environment` is one validated byte, propagated to `SessionSnapshot.Hulls[].Environment`: `InColdCloud=1`, `InLightningCloud=2`, `SensorsDisrupted=4`. Unknown bits and disruption without lightning are rejected. UI displays these authoritative flags for each visible hull, including fleet rows and RTS markers; do not derive flags from interpolated poses.
+
+Coverage renderer follow-up:
+
+- `SensorCoverage.Compute` must pass the latest authoritative snapshot tick to `GasSensors.Reach`.
+- Invalidate cached sensor shapes when disruption state changes, even for stationary ships; use the same sampled time for an entire outline. Cache creation must not depend on `GasOpticalPenalty != 0`, since lightning works with zero optical attenuation.
+- This branch intentionally leaves that rendering integration to the renderer worker. Until integrated, displayed reach does not track lightning bursts.
+
+Ice and gas fields:
+
+- Cloud fields use 90% probability above x half-size 20 km, otherwise the existing 50%; content owns both threshold and probability. No additional slider is needed.
+- Every generated asteroid whose final centre lies inside a cold gameplay envelope uses the icicle shape, including ordinary fields and the part of normal-cloud fields mixed with cold.
+- Ice is appended to the resource catalogue, preserving existing indices. It has weight 2, presence 1, core bias 0; ordinary rocks may also carry ice ore. A sector without ice can still contain bare icicle shapes.
+- `iceAbundance` and `iceGradeMin`/`iceGradeMax` use the existing abundance and grade paths. Grade uses the same global ore tuning before the per-material clamp. The commented server example is covered by the existing catalogue drift test.
+- Mining and cargo inventory do not exist in this repository. No extraction, cargo transfer or mining yield is claimed by this change; only the resource identity and asteroid grade are ready for that future system.
+
+## Non-visual implementation verification
+
+- `timeout 900 make check TEST_ARGS="-parallel none"`: passed, 1,874 game tests and 354 listing tests.
+- `make bench`: passed at 5096×1390, 982 fps normal and 1,012 fps resizing; zero managed allocations, 12 measured swapchain/target rebuilds. Validation layers were not active.
+- Generation budget: 10,166 rocks at 80 km in 13.047 ms; 6,450 at 20 km in 9.526 ms, both below 15 ms. Frozen generation hash: `16723476013675883020`, recorded on Linux x64; other architectures remain unverified.
+- Gas stress: 192 hulls, 32 clients, 17.989 ms/server tick, zero measured managed allocations. This exceeds a 60 Hz tick duration under that stress; it is a measurement, not a claim of 60 Hz at this population.
+- No visual acceptance or mining-yield test: renderer/UI integration and the absent mining system remain outstanding.
+
+Merge footprint for the concurrent generation optimization:
+
+`AsteroidFieldsModule` changes only its constructor (huge-field tuning), `Generate` (one cloud query, cold membership and final shape/resource/grade), and `Anchored` (huge-field probability).
+`Settle`, `Gather`, `Reaches`, thinning, sort keys, placement streams and `RockIndex` are unchanged.
+Ordinary shape draws use `Galaxy.RockShapes` (12); total `Galaxy.AsteroidShapes` is 13 including the icicle.
+The generation and placement fixture hashes changed intentionally for the appended ice resource and cloud kinds; optimization must preserve the new bytes.

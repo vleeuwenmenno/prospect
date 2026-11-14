@@ -889,8 +889,18 @@ public sealed class PowerAndDamageTests
                 Assert.Equal(point.Length(), AsteroidShape.RadiusAlong(shape, Vector3.Normalize(point)), 3);
             }
 
-            Assert.InRange(largest, 0.9f, 1.03f);
-            Assert.True(smallest > 0.25f);
+            if (shape == AsteroidShape.Icicle)
+            {
+                // Sharp tips need an axial sample; arbitrary directions do not approach them closely.
+                Assert.Equal(Vector3.UnitX, AsteroidShape.Point(shape, Vector3.UnitX));
+                Assert.InRange(largest, 0.1f, 1.000001f);
+                Assert.True(smallest > 0.1f);
+            }
+            else
+            {
+                Assert.InRange(largest, 0.9f, 1.03f);
+                Assert.True(smallest > 0.25f);
+            }
         }
     }
 }
@@ -3745,5 +3755,23 @@ public sealed class NewShipProtocolTests
             var reader = new Prospect.Engine.Net.NetReader(buffer.AsSpan(1, size - 1));
             Assert.False(Prospect.Game.Protocol.EditorRequestMessage.TryRead(ref reader, default, out _));
         }
+    }
+}
+
+public sealed class GasEnvironmentWorldTests
+{
+    [Fact]
+    public void LightningWorksWithoutOpticalPenaltyAndColdDoesNotDisrupt()
+    {
+        var content = GameContent.Load();
+        var rules = content.Exploration with { GasOpticalPenalty = 0 };
+        GasCloudPlacement[] clouds = [new(default, new(Vector3.Zero, new Vector3(1000), 0, GasCloudKind.Lightning))];
+        Assert.Equal(HullEnvironment.InLightningCloud | HullEnvironment.SensorsDisrupted,
+            GasSensors.EnvironmentAt(content.Galaxy, clouds, rules, default, 0));
+        Assert.False(GasSensors.Covers(content.Galaxy, clouds, rules, default, new Double3(1000, 0, 0), tick: 0));
+        Assert.True(GasSensors.Covers(content.Galaxy, clouds, rules, default, new Double3(1000, 0, 0), tick: rules.LightningBurstTicks));
+        clouds[0] = clouds[0] with { Cloud = clouds[0].Cloud with { Kind = GasCloudKind.Cold } };
+        Assert.Equal(HullEnvironment.InColdCloud, GasSensors.EnvironmentAt(content.Galaxy, clouds, rules, default, 0));
+        Assert.True(GasSensors.Covers(content.Galaxy, clouds, rules, default, new Double3(1000, 0, 0), tick: 0));
     }
 }

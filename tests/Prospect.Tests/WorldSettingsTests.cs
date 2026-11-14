@@ -528,8 +528,8 @@ public sealed class WorldSettingParsingTests
     public void TheShippedSettingsHaveTheirRangesAndDefaults()
     {
         Assert.Equal(["collisionDamage", "collisionShields", "shieldRecharge", "jumpChargeSpeed", "hullStrength", "asteroidAmount", "asteroidCap", "asteroidSize", "asteroidFieldSize", "asteroidFrequency", "asteroidSpacing", "asteroidOreShare", "asteroidOreGrade"], Catalog.Definitions.ToArray().Take(13).Select(d => d.Id));
-        Assert.Equal(47, Catalog.Definitions.Length);
-        Assert.Equal(13, Catalog.Definitions.ToArray().Count(d => d.Upper is not null));
+        Assert.Equal(52, Catalog.Definitions.Length);
+        Assert.Equal(14, Catalog.Definitions.ToArray().Count(d => d.Upper is not null));
 
         var damage = Catalog.Find("collisionDamage")!;
         Assert.Equal((SettingKind.Multiplier, 1f, 0f, 4f), (damage.Kind, damage.Default, damage.Minimum, damage.Maximum));

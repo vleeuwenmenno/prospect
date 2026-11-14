@@ -41,7 +41,7 @@ public sealed partial class ServerHost
             if (!(distanceSquared <= _sensorRadius[i] * _sensorRadius[i])) continue;
             if (_sensorGas is null || distanceSquared <= _content.Exploration.ProximityRadius * _content.Exploration.ProximityRadius) return true;
             if (GasSensors.Covers(Galaxy, _sensorGas.At(_hulls.State(i).Position), _content.Exploration,
-                _hulls.State(i).Position, position, _sensorRadius[i] > _content.Exploration.ProximityRadius)) return true;
+                _hulls.State(i).Position, position, _sensorRadius[i] > _content.Exploration.ProximityRadius, _tick)) return true;
         }
         return false;
     }

@@ -86,7 +86,7 @@ public sealed class PredictionDamageTests
         Assert.Equal(1, read.RemainingHealth[record.HealthCount - 1]);
         reader = new NetReader(writer.Written[..^1]);
         Assert.False(HullRecord.TryRead(ref reader, out _));
-        BitConverter.TryWriteBytes(bytes.AsSpan(5, 4), float.NaN);
+        BitConverter.TryWriteBytes(bytes.AsSpan(6, 4), float.NaN);
         reader = new NetReader(writer.Written);
         Assert.False(HullRecord.TryRead(ref reader, out _));
     }

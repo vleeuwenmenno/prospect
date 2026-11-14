@@ -408,3 +408,10 @@ New root-block ships use CreateHull, the existing owner and durable entity id, a
 Capture and restore keep their name, blocks, position and ownership through the existing hull/catalogue fields.
 The drone remains the controlled hull; creation feedback and the remote editor grant are transient.
 No new saved field is needed; WorldSnapshotCodec remains version 3.
+
+## Gas kinds compatibility
+
+Generation 6 and evaluator 9 reject older worlds before mutation; there is no migration.
+Environment flags and cloud kinds are derived, not persisted. Lightning phase uses the saved world tick.
+Save codec remains 3: settings already encode a variable count of id/value pairs; its admitted capacity is now 64.
+Ice retains a stable appended resource index. Mining inventory is not yet implemented or saved.

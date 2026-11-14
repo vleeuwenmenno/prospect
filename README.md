@@ -734,3 +734,13 @@ This status is an observation at open, not hosting authorization. Saved multipla
 - Independent Claude security review remains required. No admission, TLS, key rotation or destructive recovery is included.
 
 The commented default server file is `content/server/server-settings.jsonc`; copy it and pass `--settings <file>`. JSON comments and trailing commas are accepted.
+
+Gas-kind simulation is present: cold/normal mixtures, shared icicle shapes and lightning sensor bursts.
+Renderer composition, cold/lightning visuals and fleet/RTS status indicators await integration; mining and cargo inventory remain absent.
+
+| New world setting | Range | Default |
+| --- | --- | --- |
+| `gasColdChance` | 0–1 | 0.20 |
+| `gasLightningChance` (among non-cold candidates) | 0–1 | 0.10 |
+| `iceAbundance` | 0–4 | 1 |
+| `iceGradeMin` / `iceGradeMax` | 0–1 | 0 / 1 |

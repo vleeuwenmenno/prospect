@@ -146,7 +146,7 @@ public sealed class GalaxyTests
             foreach (var placement in placements[..listed])
             {
                 foreach (var value in (ReadOnlySpan<float>)[placement.Anchor.X, placement.Anchor.Y, placement.Anchor.Z, placement.Cloud.Center.X, placement.Cloud.Center.Y,
-                    placement.Cloud.Center.Z, placement.Cloud.HalfSize.X, placement.Cloud.HalfSize.Y, placement.Cloud.HalfSize.Z, placement.Cloud.Seed])
+                    placement.Cloud.Center.Z, placement.Cloud.HalfSize.X, placement.Cloud.HalfSize.Y, placement.Cloud.HalfSize.Z, placement.Cloud.Seed, (float)placement.Cloud.Kind])
                     hash = (hash ^ BitConverter.SingleToUInt32Bits(value)) * 0x100000001B3;
             }
         }
@@ -156,7 +156,7 @@ public sealed class GalaxyTests
         Assert.Equal(RecordedHash, hash);
     }
 
-    private const ulong RecordedHash = 3414107568006400618;
+    private const ulong RecordedHash = 16723476013675883020;
 
     /// <summary>A second module, for the tests only: it draws from its own stream and remembers what came out.</summary>
     private sealed class ProbeModule(string id, int draws) : SectorModule(id)
@@ -320,7 +320,7 @@ public sealed class GalaxyTests
 
         // Every resource is simply not there in a good share of sectors, the common ones included, and is there in others.
         for (var i = 0; i < absent.Length; i++)
-            Assert.InRange(absent[i] / (float)sectors, 0.2f, 0.9f);
+            Assert.InRange(absent[i] / (float)sectors, galaxy.Resources[i].Presence == 1 ? 0.05f : 0.2f, 0.9f);
 
         // Rich space and poor space come in regions: a sector's richness says a lot about its neighbour's and
         // nothing about a sector far away.

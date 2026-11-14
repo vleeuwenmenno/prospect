@@ -24,7 +24,8 @@
     { "id": "nickel", "name": "Nickel", "color": [0.55, 0.6, 0.52], "weight": 5, "coreBias": 0.4, "presence": 0.5 },
     { "id": "titanium", "name": "Titanium", "color": [0.52, 0.6, 0.72], "weight": 3, "coreBias": 1.5, "presence": 0.3 },
     { "id": "silver", "name": "Silver", "color": [0.8, 0.82, 0.86], "weight": 1.5, "coreBias": 2.5, "presence": 0.18 },
-    { "id": "gold", "name": "Gold", "color": [0.92, 0.74, 0.28], "weight": 0.8, "coreBias": 4.0, "presence": 0.1 }
+    { "id": "gold", "name": "Gold", "color": [0.92, 0.74, 0.28], "weight": 0.8, "coreBias": 4.0, "presence": 0.1 },
+    { "id": "ice", "name": "Ice", "color": [0.65, 0.85, 1.0], "weight": 2, "coreBias": 0.0, "presence": 1.0 }
   ],
   "sectorCharacter": {
     "regionSectors": 6,
@@ -64,7 +65,7 @@
       "placementAttempts": 10,
       "distribution": { "outskirts": 0.3, "width": [0.65, 1.0], "bend": 0.85, "fade": 0.6, "jitter": 6 },
       "density": { "cells": 16, "broadCells": 4, "broadShare": 0.6, "sparse": 0.05, "from": 0.3, "to": 0.6 },
-      "inGas": { "chance": 0.5, "perCubicKm": 0.8, "fill": 0.8, "max": 6000 },
+      "inGas": { "chance": 0.5, "hugeChance": 0.9, "hugeFromHalfSize": 20000, "perCubicKm": 0.8, "fill": 0.8, "max": 6000 },
       "largestShareOfField": 0.35,
       "kinds": [
         { "name": "Scatter", "weight": 6, "asteroids": [30, 264], "length": [3200, 8400], "width": [2500, 6300], "height": [800, 2100] },
@@ -84,6 +85,7 @@
       "home": { "asteroids": 750, "length": 4800, "width": 3400, "height": 1300, "offset": [0, -60, -1500] }
     },
     { "id": "gas-clouds", "type": "gasClouds", "chance": 0.04, "centerReach": 1.0, "halfSizeShare": [0.1, 0.14],
+      "coldChance": 0.2, "lightningChance": 0.1,
       "huge": { "chance": 0.08, "halfSizeShare": [0.25, 0.5] },
       "extinction": 0.0025, "samples": 48, "tint": [0.42, 0.48, 0.52], "motion": 0.001,
       "shape": { "fill": 0.56, "lumpiness": 1.8, "warp": 0.1, "lean": 0.24,

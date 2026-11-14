@@ -1,34 +1,40 @@
 namespace Prospect.Game.World;
 
+/// <summary>Authoritative instantaneous environment at the hull centre; derived, never saved.</summary>
+[Flags]
+public enum HullEnvironment : byte { None = 0, InColdCloud = 1, InLightningCloud = 2, SensorsDisrupted = 4 }
+
 /// <summary>Deterministic passive sensing through smooth gas envelopes, independent of shader noise.</summary>
 public static class GasSensors
 {
     /// <summary>Tests a center against range spent on distance and gas. Proximity is always clear.</summary>
     public static bool Covers(Galaxy galaxy, ReadOnlySpan<GasCloudPlacement> clouds, ExplorationRules rules,
-        Double3 sensor, Double3 target, bool equipped = true)
+        Double3 sensor, Double3 target, bool equipped = true, long tick = 0)
     {
         var delta = target - sensor;
         var distance = delta.Length;
         if (distance <= rules.ProximityRadius) return true;
-        if (!equipped || !(distance <= rules.SensorRadius)) return false;
-        return Cost(galaxy, clouds, rules, sensor, delta * (1 / distance), distance) <= rules.SensorRadius;
+        var budget = Budget(galaxy, clouds, rules, sensor, tick);
+        if (!equipped || !(distance <= budget)) return false;
+        return Cost(galaxy, clouds, rules, sensor, delta * (1 / distance), distance) <= budget;
     }
 
     /// <summary>Reach in a nonzero direction (normalized here). Caller supplies every cloud in base range.</summary>
     public static double Reach(Galaxy galaxy, ReadOnlySpan<GasCloudPlacement> clouds, ExplorationRules rules,
-        Double3 sensor, Double3 direction)
+        Double3 sensor, Double3 direction, long tick = 0)
     {
         var length = direction.Length;
         if (!(length > 0) || !double.IsFinite(length)) return 0;
         direction *= 1 / length;
         var low = rules.ProximityRadius;
-        var high = rules.SensorRadius;
+        var budget = Budget(galaxy, clouds, rules, sensor, tick);
+        var high = budget;
         if (Cost(galaxy, clouds, rules, sensor, direction, high) <= high) return high;
         // The integral is nonnegative and monotone. Keep the covered side, within 0.3 mm at 5 km.
         for (var i = 0; i < 24; i++)
         {
             var middle = (low + high) * 0.5;
-            if (Cost(galaxy, clouds, rules, sensor, direction, middle) <= rules.SensorRadius) low = middle;
+            if (Cost(galaxy, clouds, rules, sensor, direction, middle) <= budget) low = middle;
             else high = middle;
         }
         return low;
@@ -36,11 +42,51 @@ public static class GasSensors
 
     /// <summary>Samples any caller-owned ring/elevations; outputs metres, with no allocation.</summary>
     public static void SampleReach(Galaxy galaxy, ReadOnlySpan<GasCloudPlacement> clouds, ExplorationRules rules,
-        Double3 sensor, ReadOnlySpan<Double3> directions, Span<double> reaches)
+        Double3 sensor, ReadOnlySpan<Double3> directions, Span<double> reaches, long tick = 0)
     {
         if (reaches.Length < directions.Length) throw new ArgumentException("Reach buffer is too short.", nameof(reaches));
-        for (var i = 0; i < directions.Length; i++) reaches[i] = Reach(galaxy, clouds, rules, sensor, directions[i]);
+        for (var i = 0; i < directions.Length; i++) reaches[i] = Reach(galaxy, clouds, rules, sensor, directions[i], tick);
     }
+
+    /// <summary>Membership in the same smooth ellipsoid used by sensor attenuation.</summary>
+    public static bool Contains(Galaxy galaxy, in GasCloudPlacement placement, Double3 point)
+    {
+        if (galaxy.GasClouds is not { } gas) return false;
+        var offset = point - GasCloudQuery.CenterOf(galaxy, placement);
+        var cloud = placement.Cloud;
+        var x = offset.X / (cloud.HalfSize.X * (double)gas.Shape.X);
+        var y = offset.Y / (cloud.HalfSize.Y * (double)gas.Shape.X);
+        var z = offset.Z / (cloud.HalfSize.Z * (double)gas.Shape.X);
+        return x * x + y * y + z * z <= 1;
+    }
+
+    /// <summary>Seeded burst phase on the saved server clock; no random draws or mutable state.</summary>
+    public static bool Disrupted(in GasCloud cloud, ExplorationRules rules, long tick)
+    {
+        var phase = (long)(cloud.Seed / 128.0 * rules.LightningPeriodTicks);
+        return ((tick % rules.LightningPeriodTicks + phase) % rules.LightningPeriodTicks + rules.LightningPeriodTicks)
+            % rules.LightningPeriodTicks < rules.LightningBurstTicks;
+    }
+
+    /// <summary>Flags at a hull centre, using server snapshot time, without allocation.</summary>
+    public static HullEnvironment EnvironmentAt(Galaxy galaxy, ReadOnlySpan<GasCloudPlacement> clouds,
+        ExplorationRules rules, Double3 point, long tick)
+    {
+        var status = HullEnvironment.None;
+        foreach (var placement in clouds)
+        {
+            if (placement.Cloud.Kind == GasCloudKind.Normal || !Contains(galaxy, placement, point)) continue;
+            if (placement.Cloud.Kind == GasCloudKind.Cold) status |= HullEnvironment.InColdCloud;
+            if (placement.Cloud.Kind != GasCloudKind.Lightning) continue;
+            status |= HullEnvironment.InLightningCloud;
+            if (Disrupted(placement.Cloud, rules, tick)) status |= HullEnvironment.SensorsDisrupted;
+        }
+        return status;
+    }
+
+    private static double Budget(Galaxy galaxy, ReadOnlySpan<GasCloudPlacement> clouds, ExplorationRules rules, Double3 point, long tick) =>
+        (EnvironmentAt(galaxy, clouds, rules, point, tick) & HullEnvironment.SensorsDisrupted) != 0
+            ? Math.Max(rules.ProximityRadius, rules.SensorRadius * rules.LightningReachShare) : rules.SensorRadius;
 
     private static double Cost(Galaxy galaxy, ReadOnlySpan<GasCloudPlacement> clouds, ExplorationRules rules,
         Double3 origin, Double3 direction, double distance)
