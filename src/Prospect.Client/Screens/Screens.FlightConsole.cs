@@ -190,8 +190,11 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
-    /// The battery's readings: stored charge out of capacity, and what the charge is doing now. The flow is the
-    /// measured net rate (generation less everything drawn), never a forecast; full and empty say so in words.
+    /// The battery's readings: stored charge out of capacity, and the power flowing now. The flow is generation
+    /// less everything drawn, as the simulation split it, with an arrow for its direction: a shield recharging
+    /// off a full battery shows here though the battery does not move. Empty says so in words; steady says
+    /// full or steady. Under the segments a strip draws the flow against the most this hull can draw or gain, and
+    /// marks how much of it the shield accounts for.
     /// </summary>
     private void DrawEnergyReadings(ImDrawListPtr draw, in FlightConsoleLayout layout, in HullView own, in FlightParams flight, float energy, in ConsoleTrack track)
     {
@@ -200,17 +203,19 @@ internal sealed partial class ScreenHost
         var stored = flight.EnergyStorage > 0f
             ? Energy(own.Energy, flight.EnergyStorage)
             : "NONE"u8;
-        var rate = float.IsFinite(own.EnergyRate) ? own.EnergyRate : 0f;
-        var steady = MathF.Abs(rate) < FlightConsole.SteadyRate;
-        var flowColor = steady ? Theme.TextMute : rate < 0f ? FlightConsole.DrawColor : FlightConsole.ChargeColor;
+        var net = FlightConsole.NetPower(own);
+        var steady = MathF.Abs(net) < FlightConsole.SteadyRate;
+        var flowColor = steady ? Theme.TextMute : net < 0f ? FlightConsole.DrawColor : FlightConsole.ChargeColor;
+        var empty = flight.EnergyStorage > 0f && energy <= 0f && net < FlightConsole.SteadyRate;
         ReadOnlySpan<byte> flow = flight.EnergyStorage <= 0f ? default
-            : energy <= 0f && steady ? "EMPTY"u8
-            : energy >= 1f && steady ? "FULL"u8
-            : steady ? "STEADY"u8
-            : MathF.Abs(rate) >= 1000f ? Kit.F($"{(rate < 0f ? "DRAW" : "CHARGE")} {MathF.Abs(rate) / 1000f:0.0} GW")
-            : Kit.F($"{(rate < 0f ? "DRAW" : "CHARGE")} {MathF.Abs(rate):0.0} MW");
-        var flowTone = energy <= 0f && steady ? Theme.Bad : flowColor;
+            : empty ? "EMPTY"u8
+            : steady ? energy >= 1f ? "FULL"u8 : "STEADY"u8
+            : MathF.Abs(net) >= 1000f ? Kit.F($"{net / 1000f:+0.0;-0.0} GW")
+            : Kit.F($"{net:+0.0;-0.0} MW");
+        var arrow = !flow.IsEmpty && !steady && !empty;
+        var flowTone = empty ? Theme.Bad : flowColor;
         var readingColor = energy < 0.15f ? Theme.Bad : Theme.Text;
+        var tuning = PowerReadout.Current;
 
         var right = x + layout.GroupWidth - Kit.Px(FlightConsole.Slant * 0.5f + FlightConsole.Pad);
         draw.PushClipRect(new float2(x, y), new float2(x + layout.GroupWidth, y + layout.Row), true);
@@ -223,6 +228,8 @@ internal sealed partial class ScreenHost
             {
                 var flowSize = Kit.Measure(_ui.Mono, Theme.FontCaption, flow);
                 Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(right - flowSize.X, y + Kit.Px(20)), flowTone, flow);
+                if (arrow)
+                    DrawTrendArrow(draw, tuning, right - flowSize.X, y + Kit.Px(20), flowSize.Y, net > 0f, flowTone);
             }
         }
         else
@@ -234,16 +241,22 @@ internal sealed partial class ScreenHost
             {
                 var labelEnd = track.LabelEnd + Kit.Px(FlightConsole.ColumnGap);
                 var flowSize = Kit.Measure(_ui.Mono, Theme.FontCaption, flow);
-                if (labelEnd + flowSize.X + Kit.Px(FlightConsole.ColumnGap) <= right - storedSize.X)
-                    Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(labelEnd, y + Kit.Px(5)), flowTone, flow);
+                var arrowRoom = arrow ? Kit.Px(tuning.ArrowWidth + tuning.ArrowGap) : 0f;
+                if (labelEnd + arrowRoom + flowSize.X + Kit.Px(FlightConsole.ColumnGap) <= right - storedSize.X)
+                {
+                    Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(labelEnd + arrowRoom, y + Kit.Px(5)), flowTone, flow);
+                    if (arrow)
+                        DrawTrendArrow(draw, tuning, labelEnd + arrowRoom, y + Kit.Px(5), flowSize.Y, net > 0f, flowTone);
+                }
             }
         }
 
         draw.PopClipRect();
 
         // The flow strip under the segments: a notch at zero, draw growing left the way the charge is going and
-        // charge growing right, each against the most this hull can draw or gain.
-        var flowFraction = FlightConsole.Flow(rate, flight);
+        // charge growing right, each against the most this hull can draw or gain. The shield's share is a muted
+        // blue line from where the flow is to where it would be without the shield's draw, ending in a tick.
+        var flowFraction = FlightConsole.Flow(net, flight);
         var stripTop = track.Bottom + Kit.Px(layout.Compact ? 2 : 4);
         var stripBottom = stripTop + Kit.Px(2);
         var middle = MathF.Round((track.Left + track.Right) * 0.5f);
@@ -254,6 +267,34 @@ internal sealed partial class ScreenHost
         else if (flowFraction > 0f)
             draw.AddRectFilled(new float2(middle, stripTop), new float2(middle + half * flowFraction, stripBottom), Kit.Color(FlightConsole.ChargeColor));
         draw.AddRectFilled(new float2(middle - Kit.Px(0.5f), stripTop - Kit.Px(2)), new float2(middle + Kit.Px(1), stripBottom + Kit.Px(2)), Kit.Color(Theme.TextDim, 0.9f));
+
+        var shield = FlightConsole.ShieldDraw(own);
+        if (flight.EnergyStorage > 0f && shield >= FlightConsole.SteadyRate)
+        {
+            var without = FlightConsole.Flow(net + shield, flight);
+            var from = middle + half * flowFraction;
+            var to = middle + half * without;
+            var line = Kit.Px(tuning.ShieldMarkThickness);
+            var centre = (stripTop + stripBottom) * 0.5f;
+            var mark = Kit.Color(Theme.Info, tuning.ShieldMarkAlpha);
+            draw.AddRectFilled(new float2(Math.Min(from, to), centre - line * 0.5f), new float2(Math.Max(from, to), centre + line * 0.5f), mark);
+            var tick = Kit.Px(tuning.ShieldMarkTick);
+            draw.AddRectFilled(new float2(to - Kit.Px(0.5f), stripTop - tick), new float2(to + Kit.Px(1), stripBottom + tick), mark);
+        }
+    }
+
+    /// <summary>A small filled triangle before the net figure: up for power coming in, down for power going out.</summary>
+    private static void DrawTrendArrow(ImDrawListPtr draw, PowerReadout tuning, float textLeft, float textTop, float textHeight, bool up, uint color)
+    {
+        var width = Kit.Px(tuning.ArrowWidth);
+        var height = Kit.Px(tuning.ArrowHeight);
+        var centreX = textLeft - Kit.Px(tuning.ArrowGap) - width * 0.5f;
+        var centreY = textTop + textHeight * 0.5f;
+        var col = Kit.Color(color);
+        if (up)
+            draw.AddTriangleFilled(new float2(centreX - width * 0.5f, centreY + height * 0.5f), new float2(centreX + width * 0.5f, centreY + height * 0.5f), new float2(centreX, centreY - height * 0.5f), col);
+        else
+            draw.AddTriangleFilled(new float2(centreX - width * 0.5f, centreY - height * 0.5f), new float2(centreX + width * 0.5f, centreY - height * 0.5f), new float2(centreX, centreY + height * 0.5f), col);
     }
 
     /// <summary>Shield or hull points out of the most the hull holds, in thousands once they no longer fit.</summary>
@@ -515,8 +556,18 @@ internal static class FlightConsole
     public const float SpeedTop = 4f;
     public const float UnitTop = 48f;
 
-    /// <summary>Net megawatts below which the battery reads as steady.</summary>
-    public const float SteadyRate = 0.05f;
+    /// <summary>Net megawatts below which the battery reads as steady; data in <c>content/visuals/power.json</c>.</summary>
+    public static float SteadyRate => PowerReadout.Current.SteadyMegawatts;
+
+    /// <summary>
+    /// What the hull makes less everything it draws, in megawatts: the figure the readout shows. It is the
+    /// simulation's own power split, not the battery's change, so it stays visible while a full battery turns
+    /// the surplus away.
+    /// </summary>
+    public static float NetPower(in HullView own) => float.IsFinite(own.Power.Net) ? own.Power.Net : 0f;
+
+    /// <summary>The shield's draw, finite and never negative.</summary>
+    public static float ShieldDraw(in HullView own) => float.IsFinite(own.Power.Shield) ? Math.Max(0f, own.Power.Shield) : 0f;
 
     /// <summary>How fast a bar's trail of lost charge catches up, as an exponential rate per second.</summary>
     public const float TrailRate = 3f;

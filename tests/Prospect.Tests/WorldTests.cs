@@ -2486,8 +2486,8 @@ public sealed class ShieldStateTests
     public void TheRestartRulesComeFromTheContent()
     {
         Assert.Equal(0.25f, Content.Rules.ShieldRestartFraction);
-        Assert.Equal(4f, Content.Rules.ShieldRestartPowerMultiplier);
-        Assert.Equal(Pod.ShieldPower * 4f, Pod.ShieldRestartPower);
+        Assert.Equal(4.5f, Content.Rules.ShieldRestartPowerMultiplier);
+        Assert.Equal(Pod.ShieldPower * 4.5f, Pod.ShieldRestartPower);
         Assert.Equal(0.25f, Pod.ShieldRestartFraction);
     }
 
@@ -2530,45 +2530,48 @@ public sealed class ShieldStateTests
     [Fact]
     public void ABrokenShieldWaitsOutTheDelayThenChargesOnRestartPowerToItsThreshold()
     {
-        var state = HullState.Spawn(Double3.Zero, Pod);
+        // A battery big enough to carry the whole restart, so the draw and the recovery time are the rule's own.
+        var flight = Pod;
+        flight.EnergyStorage = 300f;
+        var state = HullState.Spawn(Double3.Zero, flight);
         state.Shield = 0f;
         state.ShieldOffline = true;
-        state.ShieldCooldown = Pod.ShieldDelay;
-        state.Energy = Pod.EnergyStorage * 0.5f;
+        state.ShieldCooldown = flight.ShieldDelay;
+        state.Energy = flight.EnergyStorage * 0.5f;
 
         // Through the delay nothing charges; the battery gains what the generator makes over the idle draw.
-        var delayTicks = (int)MathF.Round(Pod.ShieldDelay / HullSim.Dt);
+        var delayTicks = (int)MathF.Round(flight.ShieldDelay / HullSim.Dt);
         for (var i = 0; i < delayTicks - 1; i++)
-            FlightModel.Step(ref state, default, Pod, HullSim.Dt);
+            FlightModel.Step(ref state, default, flight, HullSim.Dt);
         Assert.Equal(0f, state.Shield);
         Assert.True(state.ShieldOffline);
 
-        // Charging back costs the restart draw, four times the online top-up.
-        state.Energy = Pod.EnergyStorage * 0.5f;
+        // Charging back costs the restart draw, a multiple of the online top-up set by the content.
+        state.Energy = flight.EnergyStorage * 0.5f;
         var before = state.Energy;
-        FlightModel.Step(ref state, default, Pod, HullSim.Dt);
-        Assert.Equal((Pod.PowerGenerated - Pod.IdlePower - Pod.ShieldRestartPower) * HullSim.Dt, state.Energy - before, 4);
+        FlightModel.Step(ref state, default, flight, HullSim.Dt);
+        Assert.Equal((flight.PowerGenerated - flight.IdlePower - flight.ShieldRestartPower) * HullSim.Dt, state.Energy - before, 4);
         Assert.True(state.Shield > 0f && state.ShieldOffline, "one tick of charge must not bring the shield back");
 
         // It stays offline right up to the threshold and comes online on reaching it.
-        var threshold = Pod.ShieldCapacity * Pod.ShieldRestartFraction;
+        var threshold = flight.ShieldCapacity * flight.ShieldRestartFraction;
         var ticks = 1;
         while (state.ShieldOffline && ticks < 60 * 60)
         {
             Assert.True(state.Shield < threshold);
-            FlightModel.Step(ref state, default, Pod, HullSim.Dt);
+            FlightModel.Step(ref state, default, flight, HullSim.Dt);
             ticks++;
         }
 
         Assert.False(state.ShieldOffline);
-        Assert.InRange(state.Shield, threshold, threshold + Pod.ShieldRecharge * HullSim.Dt);
-        Assert.InRange(ticks * HullSim.Dt, threshold / Pod.ShieldRecharge - HullSim.Dt, threshold / Pod.ShieldRecharge + 2 * HullSim.Dt);
+        Assert.InRange(state.Shield, threshold, threshold + flight.ShieldRecharge * HullSim.Dt);
+        Assert.InRange(ticks * HullSim.Dt, threshold / flight.ShieldRecharge - HullSim.Dt, threshold / flight.ShieldRecharge + 2 * HullSim.Dt);
 
         // Online, the top-up draws the ordinary shield power again.
-        state.Energy = Pod.EnergyStorage * 0.5f;
+        state.Energy = flight.EnergyStorage * 0.5f;
         before = state.Energy;
-        FlightModel.Step(ref state, default, Pod, HullSim.Dt);
-        Assert.Equal((Pod.PowerGenerated - Pod.IdlePower - Pod.ShieldPower) * HullSim.Dt, state.Energy - before, 4);
+        FlightModel.Step(ref state, default, flight, HullSim.Dt);
+        Assert.Equal((flight.PowerGenerated - flight.IdlePower - flight.ShieldPower) * HullSim.Dt, state.Energy - before, 4);
     }
 
     [Fact]
@@ -2816,14 +2819,17 @@ public sealed class ShieldStateTests
     [InlineData(1000f)]
     public void ALongStepStaysWithinTheShieldsLimits(float dt)
     {
-        var state = HullState.Spawn(Double3.Zero, Pod);
+        // Enough power that two long steps do bring the shield back; the point is that nothing leaves its limits.
+        var flight = Pod;
+        flight.PowerGenerated = flight.IdlePower + flight.ShieldRestartPower;
+        var state = HullState.Spawn(Double3.Zero, flight);
         state.Shield = 0f;
         state.ShieldOffline = true;
-        state.Energy = Pod.EnergyStorage;
-        FlightModel.Step(ref state, default, Pod, dt);
-        FlightModel.Step(ref state, default, Pod, dt);
-        Assert.InRange(state.Shield, 0f, Pod.ShieldCapacity);
-        Assert.InRange(state.Energy, 0f, Pod.EnergyStorage);
+        state.Energy = flight.EnergyStorage;
+        FlightModel.Step(ref state, default, flight, dt);
+        FlightModel.Step(ref state, default, flight, dt);
+        Assert.InRange(state.Shield, 0f, flight.ShieldCapacity);
+        Assert.InRange(state.Energy, 0f, flight.EnergyStorage);
         Assert.False(state.ShieldOffline);
     }
 
@@ -2838,7 +2844,7 @@ public sealed class ShieldStateTests
     [InlineData(0.5f)]
     [InlineData(11f)]
     public void ContentRejectsARestartPowerOutsideItsRange(float multiplier) =>
-        Assert.Throws<InvalidDataException>(() => LoadWith("\"shieldRestartPowerMultiplier\": 4", $"\"shieldRestartPowerMultiplier\": {Json(multiplier)}"));
+        Assert.Throws<InvalidDataException>(() => LoadWith("\"shieldRestartPowerMultiplier\": 4.5", $"\"shieldRestartPowerMultiplier\": {Json(multiplier)}"));
 
     private static string Json(float value) => value.ToString(System.Globalization.CultureInfo.InvariantCulture);
 

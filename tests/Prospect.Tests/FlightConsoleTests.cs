@@ -1,6 +1,8 @@
 using Brutal.Numerics;
 using Prospect.Client.Screens;
 using Prospect.Client.Ui;
+using Prospect.Engine.IO;
+using Prospect.Game.Client;
 using Prospect.Game.World;
 using Xunit;
 
@@ -221,5 +223,62 @@ public sealed class FlightConsoleTests
         var flight = new FlightParams { ShieldCapacity = capacity, ShieldRestartFraction = fraction };
         Assert.Equal(mark, FlightConsole.RestartMark(flight));
         Assert.Equal(progress, FlightConsole.RestartProgress(stored, flight), 5);
+    }
+
+    [Fact]
+    public void TheNetFigureIsTheSimulationsOwnSplitAndSurvivesNonsense()
+    {
+        var own = new HullView { Power = new PowerFlow { Generated = 6f, Idle = 0.7f, Thrust = 0f, Shield = 3f } };
+        Assert.Equal(2.3f, FlightConsole.NetPower(own), 4);
+        Assert.Equal(3f, FlightConsole.ShieldDraw(own));
+
+        // A figure that is not a number reads as nothing rather than breaking the console.
+        own.Power = new PowerFlow { Generated = float.NaN, Shield = float.PositiveInfinity };
+        Assert.Equal(0f, FlightConsole.NetPower(own));
+        Assert.Equal(0f, FlightConsole.ShieldDraw(own));
+        own.Power = new PowerFlow { Shield = -2f };
+        Assert.Equal(0f, FlightConsole.ShieldDraw(own));
+    }
+
+    [Fact]
+    public void TheShieldsShareOnTheStripSitsBetweenTheFlowAndTheFlowWithoutIt()
+    {
+        var pod = Pod();
+        const float shield = 3f;
+
+        // With the shield taking 3 MW the net is 2.3 MW; without it, 5.3 MW: the mark spans the two.
+        var withShield = FlightConsole.Flow(pod.PowerGenerated - pod.IdlePower - shield, pod);
+        var without = FlightConsole.Flow(pod.PowerGenerated - pod.IdlePower, pod);
+        Assert.True(withShield > 0f && without > withShield);
+        Assert.Equal(1f, without, 4);
+    }
+
+    [Fact]
+    public void ThePowerReadoutFiguresLoadAndRefuseWhatIsOutOfRange()
+    {
+        var shipped = PowerReadout.Load(AppPaths.Content("visuals", "power.json"));
+        Assert.Equal(shipped.SteadyMegawatts, FlightConsole.SteadyRate);
+        Assert.InRange(shipped.ShieldMarkAlpha, 0f, 1f);
+
+        var text = File.ReadAllText(AppPaths.Content("visuals", "power.json"));
+        var scratch = Path.Combine(Path.GetTempPath(), "power-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            foreach (var (from, to) in new[]
+            {
+                ("\"steadyMegawatts\": 0.05", "\"steadyMegawatts\": 0"),
+                ("\"arrowHeight\": 6", "\"arrowHeight\": 40"),
+                ("\"shieldMarkAlpha\": 0.8", "\"shieldMarkAlpha\": 1.5"),
+            })
+            {
+                Assert.Contains(from, text);
+                File.WriteAllText(scratch, text.Replace(from, to));
+                Assert.Throws<InvalidDataException>(() => PowerReadout.Load(scratch));
+            }
+        }
+        finally
+        {
+            File.Delete(scratch);
+        }
     }
 }

@@ -107,6 +107,9 @@ internal sealed class AppOptions
     public ulong? RtsSeed { get; set; }
     public string? RtsScript { get; set; }
     public VisualBenchmarkScene? VisualBenchmark { get; set; }
+
+    /// <summary>Scripted runs only (<c>--break-shield</c>): seconds into the run at which the own shield is broken.</summary>
+    public float? BreakShieldSeconds { get; set; }
     public string? CapturePath { get; set; }
     public float CaptureAfter { get; set; } = 1.5f;
 
@@ -546,6 +549,7 @@ internal sealed class App : IDisposable
                 Settings = chosen,
                 GalaxySeed = _options.RtsSeed ?? new ServerConfig().GalaxySeed,
                 VisualBenchmark = _options.VisualBenchmark,
+                ScriptedShieldBreakSeconds = _options.BreakShieldSeconds,
                 SpawnSector = spawn,
                 Visibility = hosting.Visibility,
                 Password = hosted && hosting.Password.Length > 0 ? hosting.Password : null,

@@ -71,6 +71,58 @@ public sealed class ShieldSessionTests
     }
 
     [Fact]
+    public void ThePilotsPowerFlowShowsTheRestartWhileAFullBatteryHidesIt()
+    {
+        var content = GameContent.Load();
+        using var link = new LoopbackLink();
+        using var server = new ServerHost(new ServerConfig { MaxPlayers = 1 }, content, link.Server);
+        using var client = new ClientSession(link.Client, content, "Pilot");
+        long tick = 0;
+        void Step()
+        {
+            ((ITickHandler)server).Tick(tick++);
+            ((ITickHandler)client).Tick(0);
+        }
+        HullView Own()
+        {
+            var snapshot = client.AcquireSnapshot();
+            return snapshot.Hulls[snapshot.OwnHull];
+        }
+        for (var i = 0; i < 20; i++) Step();
+
+        // Settled with the shield full: only the base draw, and the surplus is turned away by the full battery.
+        var pod = content.Pod.Flight;
+        for (var i = 0; i < 60; i++) Step();
+        var settled = Own();
+        Assert.Equal(pod.IdlePower, settled.Power.Idle, 2);
+        Assert.Equal(0f, settled.Power.Shield, 3);
+        Assert.Equal(pod.PowerGenerated - pod.IdlePower, settled.Power.Net, 2);
+
+        // Break the shield on the server and top the battery up each tick: the restart draw is in the flow though
+        // the battery never moves, and the net turns negative because the restart outruns the generators.
+        var store = (HullStore)typeof(ServerHost).GetField("_hulls", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(server)!;
+        var slot = -1;
+        for (var i = 0; i < store.Slots; i++)
+            if (store.IsAliveAt(i) && store.HandleAt(i).Packed == Own().Id) slot = i;
+        Assert.True(slot >= 0);
+        ref var state = ref store.State(slot);
+        state.Shield = 0;
+        state.ShieldOffline = true;
+        state.ShieldCooldown = 0;
+        var seen = 0f;
+        for (var i = 0; i < 120; i++)
+        {
+            store.State(slot).Energy = pod.EnergyStorage;
+            Step();
+            seen = Math.Max(seen, Own().Power.Shield);
+        }
+
+        Assert.True(seen > 0.9f * pod.ShieldRestartPower, $"the restart draw reached only {seen} MW of {pod.ShieldRestartPower}");
+        Assert.True(Own().Power.Net < 0f || !Own().ShieldOffline);
+        Assert.Null(server.Fault);
+    }
+
+    [Fact]
     public void ABrokenShieldStaysOfflineUntilItsThresholdAndEveryClientAgrees()
     {
         // Weak shields break in one pass; stronger blocks keep the emitter alive so it can recharge.

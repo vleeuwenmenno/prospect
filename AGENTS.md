@@ -223,6 +223,14 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   map: `BlockMapForTip`, `Claim`). Escape goes to `HandleTipShortcut` first; every other Escape reads
   `BackPressed()`, which stays quiet on that press, and the editor's shortcut skips the frame. A scripted run shows
   no tips unless given `--tips-sample`. `TipTests` and the tip tests in `FrameOrderTests` hold the rules.
+- **Power and the energy readout:** the draws are `FlightModel.Step`'s, which also fills `PowerFlow` (generation, idle,
+  thrust, shield, jump drive; gross, so a full battery does not hide it). `HullSim.Step` keeps it in `HullBody.Power`,
+  `HullField.Step` in `HullInfo.Power`, and `ClientWorld` smooths the own hull's into `HullView.Power`. Never work a
+  draw out a second way for the interface: the net figure, its arrow, the strip's shield mark (`FlightConsole.NetPower`,
+  `ShieldDraw`, `Flow`) and the Energy tooltip (`ConsoleTip.Energy`) all read it. Look and thresholds are in
+  `content/visuals/power.json` (`PowerReadout`). A shield emitter's `powerDraw` and `shieldRestartPowerMultiplier` are
+  tuning (`docs/direction.md`, "shield power must be felt and seen"); `PowerFlowTests` holds the rules every shipped
+  design must meet, so retuning a design or the content runs them. Check with `--break-shield` (below).
 - **A new action or key:** add it to `content/input/bindings.json` and to `content/input/controls.json` (tab, label,
   scope; a fixed mouse or chord row goes there too). Loading refuses an action the catalogue lacks. Read it through
   `ActionMap` only; never cache a key name without rebuilding it on `ActionMap.Changed`. Anything that reads input
@@ -266,6 +274,13 @@ The client opens a real window on the developer's desktop, and they are usually 
   special workspace still renders, and a capture still saves its image (scripted runs present without vsync).
   Do not create a headless output: a monitor manager such as hyprmoncfg adopts it and moves the developer's
   workspaces. Without such a rule (GNOME, macOS, Windows), tell the developer windows will appear first.
+- `--break-shield <seconds>` (0 to 600) makes the server break the own shield that many seconds into the run, as a
+  hit that empties it would (`ServerConfig.ScriptedShieldBreakSeconds`): only with `--capture` or `--bench`, in an
+  unsaved private local game (refused with `--worlds`, `--join`, `--host`). The pod restarts after the 8 s delay and
+  takes about 12 s with the battery draining: `--start local --break-shield 1 --capture f.png --capture-after 11
+  --capture-count 4 --capture-every 7` shows the energy readout while the restart drains the battery (about 11 s),
+  runs it dry (18 s) and recharges the shield (25 s and later); a `"UiScale": 2` settings copy checks the console at
+  scale 2.
 - `make run ARGS="--start local --open <view> --capture /path/shot.png --capture-after 2.5"` saves a screenshot
   and exits. Views: `command`, `edit` (asks to edit the own ship; the editor opens on the grant), `drone` (steps out of the hull into the escape drone), `map`, `map-hover` (the map with the pointer on your own sector, a preview card), `map-card` (your own sector's card pinned), `map-card-near` (a sector 144 km away: a blind jump with risk) and `map-card-far` (460 km: out of drive range), `command-menu` (the command view's right-click menu on a blind jump 60 km ahead for the ship being flown: Plot jump), `command-menu-fleet` (the same for the other ships: Jump here), `command-menu-close` (3 km, too close) and `command-menu-far` (450 km, too far), `new-ship` (leaves the pod in the drone and opens the New ship dialog empty; `--tips-sample on` shows the drone-edit tip beside it), `new-ship-refused` (the same with a refusal shown, put there by the hook rather than sent by a server) `new-ship-editor` (builds a ship through the real dialog and server: the editor opens on its single block, drone still flown; capture after 4 s) and `new-ship-closed` (the same, then cancels that edit: you fly the new ship; capture after 6 s), `map-tilt` (the same, tilted), `map-reach` and `map-reach-tilt` (zoomed in on the own position to show the shape of sensor reach), `scan` (pinned card and a scan started: capture after 2.5 s for progress, after 7 s for the charted result; add `--map-cell 190` to see field and cloud outlines, `scan-command` (the command view 9 km back with a scan started: the pulse from outside, capture after 6.2 s), `scan-pilot` (the flight view with a scan started: capture after 2.5 s for the bar, 6.5 s for result and cooldown, 12 s for the cooldown alone; `--tips-sample on` shows the scan tip), `--map-tilt`, `--map-hover` to rest the pointer on the own ship), `command-fog` (the command view pulled back to show sensor rings and fog, all owned ships selected), `command-fog-one` (only the flown ship selected), `command-fog-pair` and `command-fog-far` (it and another ship that jumps 6 km or 14 km away along -x, selected; capture after 28 s), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,
   `players`, `social`, `friends`, `chat`, `hud` (the world with the party list and recent chat only). The social views and
