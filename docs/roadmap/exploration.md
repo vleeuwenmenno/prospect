@@ -112,7 +112,7 @@ These are suggested layouts, not a settled control scheme.
 
 Nearby asteroids can be discovered through normal scouting before the scan completes.
 Targeting an asteroid does not reveal detailed contents.
-Scanning individual asteroids or fields for mining is deferred.
+Individual asteroid analysis is decided in [modules](modules.md); implementation and mining remain unfinished.
 
 ## Decided: charts as knowledge
 
@@ -230,9 +230,9 @@ UI estimates use the same curve, not knowledge of the future departure tick.
 
 ## Deferred
 
-- Mining scans and detailed mineral surveying.
+- Mining and extraction; the scanner module decisions are recorded in [modules](modules.md).
 - Alliance chart-sharing UI, chart trading/selling and an economy around it.
-- Equipment tiers, material scaling, modules and diminishing-return upgrades.
+- Material scaling and diminishing-return upgrades. Module families and quality tiers are decided in [modules](modules.md).
 - Stations as relays, remote-control range and its coverage visualization.
 
 ### Decided (provisional, tunable): gas disturbs passive sensors

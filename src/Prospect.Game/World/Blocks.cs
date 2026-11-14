@@ -42,6 +42,9 @@ public sealed class BlockType
     public bool Sensor { get; init; }
     public bool Charting { get; init; }
 
+    /// <summary>Optional module identity and evaluated content figures.</summary>
+    public ModuleSpec Module { get; init; }
+
     /// <summary>The faster-than-light drive this block provides, if any.</summary>
     public FtlKind Ftl { get; init; }
 
@@ -268,6 +271,7 @@ public sealed class BlockCatalog
             {
                 SizeRules = BoxDesign.ReadSizeRules(block, path + ": " + entry.Name),
                 Id = entry.Name,
+                Module = ModuleSpec.Read(block, root),
                 Name = block.GetProperty("name"u8).GetString()!,
                 Mass = block.GetProperty("mass"u8).GetSingle(),
                 Hull = block.GetProperty("hull"u8).GetSingle(),
