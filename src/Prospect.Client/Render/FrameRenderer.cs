@@ -37,7 +37,10 @@ internal sealed unsafe class FrameRenderer : IDisposable
     private readonly GraphicsDevice _gpu;
     private readonly Swapchain _swapchain;
     private readonly Frame[] _frames = new Frame[FramesInFlight];
+    // One per swapchain image, the first _renderFinishedCount of them made. The array is as long as the swapchain
+    // has room for images and outlives a rebuild, which runs in the frame loop and may allocate nothing.
     private VkSemaphore[] _renderFinished = [];
+    private int _renderFinishedCount;
     private int _frameIndex;
     private int _imageIndex;
     private bool _needsRecreate;
@@ -108,8 +111,7 @@ internal sealed unsafe class FrameRenderer : IDisposable
     public void Recreate(int2 framebufferSize, bool vsync)
     {
         _swapchain.Recreate(framebufferSize, vsync);
-        foreach (var semaphore in _renderFinished)
-            _gpu.Device.DestroySemaphore(semaphore, null);
+        DestroyImageSemaphores();
         CreateImageSemaphores();
         _needsRecreate = false;
     }
@@ -234,8 +236,7 @@ internal sealed unsafe class FrameRenderer : IDisposable
         _gpu.Device.WaitIdle();
         if (!_readback.IsNull())
             _gpu.Allocator.DestroyBuffer(_readback, _readbackAllocation);
-        foreach (var semaphore in _renderFinished)
-            _gpu.Device.DestroySemaphore(semaphore, null);
+        DestroyImageSemaphores();
         foreach (var frame in _frames)
         {
             _gpu.Device.DestroyFence(frame.InFlight, null);
@@ -336,8 +337,23 @@ internal sealed unsafe class FrameRenderer : IDisposable
 
     private void CreateImageSemaphores()
     {
-        _renderFinished = new VkSemaphore[_swapchain.ImageCount];
-        for (var i = 0; i < _renderFinished.Length; i++)
+        // Grows only when the swapchain's own arrays did: see Swapchain.ImageCapacity.
+        if (_renderFinished.Length < _swapchain.ImageCapacity)
+            _renderFinished = new VkSemaphore[_swapchain.ImageCapacity];
+        _renderFinishedCount = _swapchain.ImageCount;
+        for (var i = 0; i < _renderFinishedCount; i++)
             _renderFinished[i] = _gpu.Device.CreateSemaphore(new VkSemaphoreCreateInfo(), null);
+    }
+
+    /// <summary>Only once the device is idle: a semaphore a submitted frame still signals must not be destroyed.</summary>
+    private void DestroyImageSemaphores()
+    {
+        for (var i = 0; i < _renderFinishedCount; i++)
+        {
+            _gpu.Device.DestroySemaphore(_renderFinished[i], null);
+            _renderFinished[i] = default;
+        }
+
+        _renderFinishedCount = 0;
     }
 }

@@ -51,6 +51,9 @@ internal static class Program
           --no-validation         Disable Vulkan validation layers
           --visual-scene <spec>  With --bench/--capture: 30|50,clean|dents|impacts|repair|jump,near|far|behind[,large]
           --bench <seconds>       Start a local game, measure frame pacing and allocation, print a report and exit
+          --bench-resize <n>      With --bench: resize the window n times while measuring, and rebuild the swapchain
+                                  and the render targets at the same size after each, so rebuilding them is
+                                  measured too; fails unless they were rebuilt n times
           --capture <file.png>    Save a screenshot after --capture-after seconds, then exit
           --capture-after <sec>   Delay for --capture, counted from the end of the splash (default 1.5)
           --capture-count <n>     Take n numbered screenshots instead of one (file-00.png, file-01.png, ...)
@@ -256,6 +259,10 @@ internal static class Program
                     options.BenchSeconds = seconds;
                     i++;
                     break;
+                case "--bench-resize" when hasValue && int.TryParse(args[i + 1], out var resizes) && resizes is > 0 and <= 64:
+                    options.BenchResizes = resizes;
+                    i++;
+                    break;
                 case "--capture" when hasValue:
                     options.CapturePath = args[++i];
                     break;
@@ -321,6 +328,9 @@ internal static class Program
             return Fail("--gas-distance-to needs --gas-distance.");
         if (options.GasView is not null && (options.CapturePath is null && options.BenchSeconds <= 0))
             return Fail("--gas-view works only with --capture or --bench.");
+
+        if (options.BenchResizes > 0 && (options.BenchSeconds <= 0 || options.VisualBenchmark is not null))
+            return Fail("--bench-resize works only with --bench, without --visual-scene.");
 
         if (options.RtsSeed is not null && options.RtsScript is null) return Fail("--rts-seed requires --rts-script.");
         if (options.RtsScript is not null && (options.CapturePath is null || options.BenchSeconds > 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private))

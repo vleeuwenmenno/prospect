@@ -16,8 +16,13 @@ Dedicated startup and packaging are integrated. The Linux nonroot container crea
 The internal owner-binding and claim-save fence is integrated, including private-world enforcement; private service verification now has an explicit nonvisual API, while UI wiring remains missing.
 Independent cross-family review remains pending for generation, dedicated startup and the claim foundation.
 Immutable world identity is implemented with schema version 2. Its Linux tests pass; independent security review remains pending.
-Windows/macOS world creation is currently refused by this identity slice and must be resolved before cross-platform acceptance.
+Private world creation now falls back to a public-only identity when protected key creation is unavailable.
+Windows/macOS report Unsafe; real platform storage behavior remains unverified.
 Automatic backups remain gameplay-only; they cannot recover a missing private world key.
+
+The false claim-success race now has deterministic pending-commit and later refused/expired-proof coverage.
+Dedicated disk-world tests use explicit isolated ports, including failed server construction.
+Hosted owner-claim refusal tests use OS-assigned ports; failed-claim retries wait for the worker to return its buffer.
 
 ## Current acceptance blockers
 
@@ -139,7 +144,18 @@ Missing, malformed, mismatched or unsafe keys never regenerate; private gameplay
 This status is an observation at open, not hosting authorization. Saved multiplayer remains locked.
 
 - Key creation uses mode 0600 from the first byte, file flush and durable publication before database publication.
-- Only Linux protection is supported. Windows and macOS creation are refused; copied worlds can open privately with status Unsafe.
+- Only Linux key protection is implemented. Windows/macOS create and open privately with status Unsafe and no newly written private key.
+- New Unix directories use 0700 regardless of umask. Linux verifies inode ownership and both sides of symlinked parent paths.
+  Shared writable paths fall back to a private, non-hostable world without a secret; keys are never regenerated.
 - Automatic database copies are gameplay-only: they cannot recover a lost private key. Protected identity recovery artifacts are not implemented.
 - Move or copy the complete stopped folder, preserving key permissions, to retain identity. A bare database is insufficient.
 - Independent Claude security review remains required. No admission, TLS, key rotation or destructive recovery is included.
+
+## Identity blocker fix validation
+
+Linux `make check` passes: formatting, build, 1,605 game tests and 354 listing tests.
+All 23 identity tests also pass under umask 002.
+Intermediate runs exposed transient allocation assertions in unchanged hull tests; their budgets remain unchanged.
+The claim retry test now waits for buffer release, and hosted refusal tests no longer bind the default port.
+Real Windows/macOS behavior, power-loss durability and independent security review remain unverified.
+No frame/tick implementation changed, so this slice did not rerun the benchmark.

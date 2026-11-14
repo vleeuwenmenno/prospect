@@ -1,7 +1,7 @@
 using Brutal.Numerics;
 namespace Prospect.Client.Render;
 
-/// <summary>Seven vectors matching GasData in frame.glsl and the gas passes' push range.</summary>
+/// <summary>Eight vectors matching GasData in frame.glsl and the gas passes' push range.</summary>
 internal struct GasConstants
 {
     /// <summary>The cloud's centre relative to the camera, and its seed.</summary>
@@ -24,6 +24,12 @@ internal struct GasConstants
     public float4 Shape;
     /// <summary>Edge softness, knot density, wisp strength and veil density; see <c>GasCloudModule.Look</c>.</summary>
     public float4 Look;
+    /// <summary>
+    /// What a large cloud gains close to the camera, all zero for a cloud of ordinary size: x how strongly two
+    /// further octaves break it into strands, y how far its steps are drawn toward the camera, z how far from the
+    /// camera both reach, in x half-extents, w how much the gas nearest the camera is thinned. See <c>GasTiers</c>.
+    /// </summary>
+    public float4 Fine;
 
     /// <summary>The full march, as a cloud is drawn with the camera in or near it.</summary>
     public const float Full = 0;

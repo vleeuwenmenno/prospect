@@ -38,7 +38,7 @@ public sealed class DedicatedWorldTests : IDisposable
     private static ServerConfig Build(out ServerCommand command, params string[] args)
     {
         command = new ServerCommand();
-        var result = command.Parse(["--listing", "off", .. args], TextWriter.Null, TextWriter.Null, out var code);
+        var result = command.Parse(["--listing", "off", "--port", TestNet.Port(30).ToString(System.Globalization.CultureInfo.InvariantCulture), .. args], TextWriter.Null, TextWriter.Null, out var code);
         Assert.Equal(0, code);
         Assert.NotNull(result);
         return command.BuildConfig(result, Shipped, null, _ => { });
@@ -255,6 +255,7 @@ public sealed class DedicatedWorldTests : IDisposable
         Assert.Throws<InvalidDataException>(() => new ServerHost(new ServerConfig
         {
             World = config.World,
+            Port = TestNet.Port(30),
             GalaxySeed = config.World!.World.Seed + 1,
         }, Shipped));
         var reopened = SqliteWorldStore.Open(folder, Compatible);

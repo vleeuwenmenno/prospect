@@ -17,8 +17,9 @@ public sealed class OwnerClaimTests
     [InlineData(Prospect.Game.Protocol.ServerVisibility.Public)]
     public void HostedWorldRefusesLocalClaim(Prospect.Game.Protocol.ServerVisibility visibility)
     {
+        // No remote client joins this listener, so the OS can choose its isolated port.
         using var rig = new SaveRig(SaveRig.NewWorld(Content), Content, limits: Limits,
-            config: new ServerConfig { Visibility = visibility });
+            config: new ServerConfig { Visibility = visibility, Port = 0 });
         rig.Join();
         Assert.Equal(ServerHost.ClaimState.Refused, rig.Server.StageVerifiedLocalClaim(Account));
         Assert.Equal(default, rig.Owners[0].Account);
@@ -114,6 +115,9 @@ public sealed class OwnerClaimTests
         Assert.Equal(default, rig.Owners[0].Account);
         if (outcome == CommitOutcome.Failed)
         {
+            // The worker reports a commit before it gives the buffer back. A claim staged in between is
+            // captured one callback later: right for a server, and one callback more than is run here.
+            rig.WaitIdle();
             Assert.Equal(ServerHost.ClaimState.Pending, rig.Server.StageVerifiedLocalClaim(Account));
             rig.Tick();
             rig.WaitIdle();

@@ -12,20 +12,22 @@ namespace Prospect.Client.World;
 internal interface IGasCloudSource
 {
     /// <summary>
-    /// Writes the known clouds of the sectors at most <paramref name="radius"/> sectors from
-    /// <paramref name="center"/> on each axis, nearest first, and returns how many. Called on a worker, one call at
+    /// Writes the known clouds anchored in the sectors at most <paramref name="radius"/> sectors from
+    /// <paramref name="center"/> on each axis, nearest first, and returns how many. A cloud is named by its anchor
+    /// whatever its size, so one that lies across sector walls is listed once. Called on a worker, one call at
     /// a time, and must take no memory once warm.
     /// </summary>
-    int Collect(Galaxy galaxy, SectorCoord center, int radius, Span<PlacedGasCloud> into);
+    int Collect(Galaxy galaxy, SectorCoord center, int radius, Span<GasCloudPlacement> into);
 }
 
-/// <summary>Every cloud the seed generates, worked out by the shared generation code; no asteroid is generated.</summary>
+/// <summary>
+/// Every cloud the seed generates, as the generation module names them, by the sector that anchors each; no
+/// asteroid is generated.
+/// </summary>
 internal sealed class GeneratedGasClouds : IGasCloudSource
 {
-    private readonly SectorContent _scratch = new();
-
-    public int Collect(Galaxy galaxy, SectorCoord center, int radius, Span<PlacedGasCloud> into) =>
-        GasCloudQuery.Collect(galaxy, center, radius, _scratch, into);
+    public int Collect(Galaxy galaxy, SectorCoord center, int radius, Span<GasCloudPlacement> into) =>
+        GasCloudQuery.Collect(galaxy, center, radius, into);
 }
 
 /// <summary>
@@ -47,8 +49,8 @@ internal sealed class GasCloudField : IJob
     private readonly int _radius;
 
     // The frame owns the front list always, and the back list except while a job is working on it.
-    private PlacedGasCloud[] _front = new PlacedGasCloud[Capacity];
-    private PlacedGasCloud[] _back = new PlacedGasCloud[Capacity];
+    private GasCloudPlacement[] _front = new GasCloudPlacement[Capacity];
+    private GasCloudPlacement[] _back = new GasCloudPlacement[Capacity];
     private int _frontCount;
     private int _backCount;
     private Galaxy? _galaxy;
@@ -58,9 +60,10 @@ internal sealed class GasCloudField : IJob
     private volatile int _state;
 
     /// <summary>
-    /// A field for clouds seen up to <paramref name="viewRangeSectors"/> sector edges away. The list is made two
-    /// sectors wider than that: one for the camera's and the cloud's places within their sectors, one for the list
-    /// being a sector behind while its successor is worked out.
+    /// A field for clouds seen up to <paramref name="viewRangeSectors"/> sector edges away, measured to a cloud's
+    /// centre. The list is made two sectors wider than that: one for the camera's and the centre's places within
+    /// their sectors (a centre lies in its anchor), one for the list being a sector behind while its successor is
+    /// worked out.
     /// </summary>
     public GasCloudField(JobSystem jobs, IGasCloudSource source, float viewRangeSectors)
     {
@@ -73,7 +76,7 @@ internal sealed class GasCloudField : IJob
     public int Radius => _radius;
 
     /// <summary>The clouds known around the camera, nearest sectors first; empty until the first list is ready.</summary>
-    public ReadOnlySpan<PlacedGasCloud> Clouds(Galaxy galaxy) =>
+    public ReadOnlySpan<GasCloudPlacement> Clouds(Galaxy galaxy) =>
         ReferenceEquals(galaxy, _galaxy) ? _front.AsSpan(0, _frontCount) : default;
 
     /// <summary>Called once a frame: takes over a finished list and asks for a new one when the camera changed sector.</summary>

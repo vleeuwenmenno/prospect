@@ -1,8 +1,10 @@
 // shape: fill, lumpiness, warp, lean; look: edge softness, knot density, wisp strength, veil density (GasCloudModule).
 // halfSize.w: extinction per metre; motion.x: drift, y: weight of this draw (1: the whole cloud), w: distance (unused
 // here); budget.x: view samples, y: level of detail (0 full, 1 middle, 2 far), z: fixture; tint.w: 1 when the far
-// level leaves out the finest octave.
-struct GasData { vec4 center; vec4 halfSize; vec4 tint; vec4 motion; vec4 budget; vec4 shape; vec4 look; };
+// level leaves out the finest octave. fine: what a large cloud gains close to the camera (GasTiers), all zero for a
+// cloud of ordinary size: x how strongly two further octaves break it into strands, y how far its steps are drawn
+// toward the camera, z how far from the camera both reach, in x half-extents, w how much the nearest gas is thinned.
+struct GasData { vec4 center; vec4 halfSize; vec4 tint; vec4 motion; vec4 budget; vec4 shape; vec4 look; vec4 fine; };
 // Per-frame constants shared by every scene shader. Positions are relative to the camera: the world is
 // rebased around it every frame so single precision never has to represent a galactic coordinate.
 layout(set = 0, binding = 0) uniform Frame

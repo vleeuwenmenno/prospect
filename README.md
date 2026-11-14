@@ -11,7 +11,7 @@ or that local game opened to other players. There is one simulation and one code
 
 ## Status
 
-Rare decorative volumetric gas clouds are generated: lopsided, self-shadowed, with billowy edges and wisps. They are seen from up to five sectors away, at three levels of detail that hand over without a step. Full-screen views reach 144 FPS at 5096x1390 except a pilot view in dense asteroids; visual acceptance is pending. See [gas clouds](docs/gas-clouds.md).
+Rare decorative volumetric gas clouds are generated: lopsided, self-shadowed, with billowy edges and wisps. Most are 8 to 11 km long; a few are huge, up to a sector across, and any of them can lie across sector borders. Some hold asteroids. They are seen from up to five sectors away, at three levels of detail that hand over without a step. A huge cloud seen from inside or close by is broken into strands with depth. Full-screen views reach 144 FPS at 5096x1390 except a pilot view in dense asteroids and the inside of a huge cloud (about 110); visual acceptance is pending. See [gas clouds](docs/gas-clouds.md).
 
 Explicit private local claims have a nonvisual API backed by account-service tickets and an exact durable save commit. No player-facing claim UI exists; remote saved-world admission remains missing. Linked local owners still play offline. Save layout 2 refuses older layouts without migration.
 
@@ -124,17 +124,21 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 - **Sectors.** The galaxy is a grid of 40 km cells generated from the server's seed: name, star, character and
   contents. Nothing is stored or sent, and nothing stops at a sector's edge. The client keeps the sectors around
   the camera generated on worker threads.
-- **World generation.** A sector is filled by a list of modules named in `content/galaxy/galaxy.json`, each
-  drawing from its own random stream, so adding or retuning one never changes what another makes. Asteroid fields
-  are the only module so far. The same seed gives the same world to the last bit on every machine.
+- **World generation.** Space is filled by a list of modules named in `content/galaxy/galaxy.json`, each
+  drawing from its own random streams: asteroid fields and gas clouds. Both are things in world space: a field or
+  a cloud is centred anywhere in a sector and lies across its walls without a seam, and every sector is still
+  generated alone. The same seed gives the same world to the last bit on every machine. See
+  [world generation](docs/world-generation.md).
 - **Sector character.** Every sector has a richness, from barren to very rich, and a set of resources that can
   occur there. Rich and poor space come in regions. Some sectors have every resource, some none, most a few; the
   sector panel and the map (for a discovered sector) show both. The sector panel is closed by default: `F2` shows it.
   There is no closed-state hint or reserved row.
-- **Asteroid fields.** A sector has no field, a thin scatter, a cluster or a dense belt: up to 20,480 asteroids.
-  Counts are planned upper bounds; crowded placements are omitted. The default size table runs from pebbles
-  12 m across to giants 12 km across, limited by field fit; most are tiny and a giant is rare. The middle of every
-  sector, where ships arrive, is kept clear.
+- **Asteroid fields.** Thin scatters, clusters, dense belts and great fields, tens of kilometres long at most,
+  wherever they fall: a sector holds parts of none, one or several, up to 20,480 asteroids. Density follows
+  noise in world space, from almost empty to full, and a field fades out toward its edge. Some gas clouds hold
+  asteroids too. The map's counts are estimates; crowded placements are omitted. The default size table runs
+  from pebbles 12 m across to giants 12 km across, limited by field fit; most are tiny and a giant is rare. The
+  middle of every sector, where ships arrive, is kept clear.
 - **Hulls from blocks.** A hull is a list of typed blocks (engine, thruster, gyro, generator, battery, shield
   emitter, cargo, quarters, plating). Mass, moments of inertia, acceleration, turn rates, top speed, hull and
   shield points and the power budget are all computed from them and shown on the ship's data sheet.
@@ -448,12 +452,12 @@ the generation cap does not mean every rock in every visible sector draws simult
 | `asteroidAmount` | 0 to 5 | 1 | Requested asteroid counts, including home; 0 disables rocks. |
 | `asteroidCap` | 0 to 20480, integer | 20480 | Per-sector upper count limit, never above shared content. |
 | `asteroidSize` | 0.25 to 5 | 1 | Radius multiplier, limited by field fit. |
-| `asteroidFieldSize` | 0.5 to 5 | 1 | Field dimension multiplier, including home, bounded by sector walls. |
+| `asteroidFieldSize` | 0.5 to 5 | 1 | Field dimension multiplier, including home. A field reaches at most one sector from its centre. |
 | `asteroidFrequency` | 0 to 5 | 1 | Field occurrence probability multiplier, capped at 100%; home is exempt. |
 | `asteroidSpacing` | 0.5 to 5 | 1 | Spacing multiplier, with a nonoverlap minimum. |
 | `asteroidOreShare` | 0 to 5 | 1 | Ore-bearing fraction multiplier, capped at 100%; no new resource kinds. |
 | `asteroidOreGrade` | 0.25 to 5 | 1 | Grade multiplier within ore-bearing rocks, capped at 100%. |
-| `asteroidCountMin` | 0 to 20480, integer | 0 | Lower requested count per sector with fields; pairs with `asteroidCap`. |
+| `asteroidCountMin` | 0 to 20480, integer | 0 | Lower requested count for the fields a sector anchors, which may land next door; pairs with `asteroidCap`. |
 | `asteroidRadiusMin`, `asteroidRadiusMax` | 0.75 to 6000 metres | 0.75, 6000 | Clamp sampled radii after the size multiplier. Diameter is twice radius. Rocks that cannot fit are omitted. |
 | `oreRichnessMin`, `oreRichnessMax` | 0 to 1 | 0, 1 | Clamp sector richness after the home floor; affects map character, ore-bearing fraction and grade. |
 | `oreGradeMin`, `oreGradeMax` | 0 to 1 | 0, 1 | Clamp ore grade after the grade multiplier; 1 means 100%. |
@@ -469,7 +473,7 @@ Requested minimum counts can fail to fit. Radius minimums that cannot fit a fiel
 
 Generation settings are shared gameplay rules, not local graphics settings.
 Counts are requests: changed amount, size, field size or spacing uses bounded placement and can produce fewer rocks.
-The map and sector readouts mark custom placement counts as "UP TO" and fields as planned; generated sector summaries report actual counts.
+The map and sector readouts mark counts as "ABOUT": they are estimates made without placing a rock. Generated sector summaries report actual counts.
 Default settings preserve the original generated world, including its crowded-field placement fallback.
 
 How to set them:
@@ -584,7 +588,7 @@ make server ARGS="--set hullStrength=2"    # the same, in a world with its own s
 make run ARGS="--join 127.0.0.1"           # join it, after a Discord sign-in
 make run ARGS="--host unlisted"            # a local game others can join by address (sign-in first)
 make check                                 # formatting, warnings-as-errors build, tests
-make bench                                 # release benchmark; fails under 144 fps or on any per-frame allocation
+make bench                                 # release benchmark, also while resizing; fails under 144 fps or on any per-frame allocation
 make listing                               # the listing server on http://127.0.0.1:8080
 make listing-image                         # its container image (docker/listing.Dockerfile)
 make server-image                          # the dedicated server's container image (docker/server.Dockerfile)

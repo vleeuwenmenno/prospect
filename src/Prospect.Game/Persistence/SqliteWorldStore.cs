@@ -256,11 +256,12 @@ public sealed class SqliteWorldStore : IWorldStore
             }
 
             DurableFiles.SyncFile(staging);
-            DurableFiles.Publish(keyStaging, Path.Combine(folder, WorldIdentity.KeyFile));
-            keyPublished = true;
+            if (ownKey)
+            {
+                DurableFiles.Publish(keyStaging, Path.Combine(folder, WorldIdentity.KeyFile));
+                keyPublished = true;
+            }
             var identity = WorldIdentity.Read(folder, initial.WorldId, publicKey);
-            if (identity.KeyStatus != WorldKeyStatus.Present)
-                throw new IOException("The new world key could not be verified as protected.");
             DurableFiles.Publish(staging, database);
 
             connection = OpenWriter(database, limits);
@@ -271,10 +272,10 @@ public sealed class SqliteWorldStore : IWorldStore
             try
             {
                 connection?.Dispose();
-                if (ownKey && !HasWorldFiles(Path.Combine(folder, DatabaseFile)))
+                if ((ownKey || ownDatabase) && !HasWorldFiles(Path.Combine(folder, DatabaseFile)))
                 {
                     if (ownDatabase) DeleteDatabase(Path.Combine(folder, Staging));
-                    File.Delete(keyStaging!);
+                    if (ownKey) File.Delete(keyStaging!);
                     if (keyPublished) File.Delete(Path.Combine(folder, WorldIdentity.KeyFile));
                 }
             }

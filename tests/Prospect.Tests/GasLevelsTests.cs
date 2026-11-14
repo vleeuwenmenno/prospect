@@ -23,8 +23,8 @@ public sealed class GasLevelsTests
     public void QueryAgreesWithFullGenerationNearestSectorsFirst()
     {
         var center = new SectorCoord(-3, 0, 7);
-        var found = new PlacedGasCloud[GasCloudField.Capacity];
-        var count = GasCloudQuery.Collect(Galaxy, center, 3, new SectorContent(), found);
+        var found = new GasCloudPlacement[GasCloudField.Capacity];
+        var count = GasCloudQuery.Collect(Galaxy, center, 3, found);
 
         var full = new SectorContent();
         var expected = 0;
@@ -34,35 +34,34 @@ public sealed class GasLevelsTests
                 {
                     var coord = center.Offset(x, y, z);
                     Galaxy.Generate(coord, full);
-                    var index = Array.FindIndex(found, 0, count, placed => placed.Sector == coord);
+                    var index = Array.FindIndex(found, 0, count, placed => placed.Anchor == coord);
                     Assert.Equal(full.Summary.GasCloudCount != 0, index >= 0);
                     if (index < 0) continue;
                     expected++;
                     Assert.Equal(full.GasCloud, found[index].Cloud);
-                    Assert.Equal(Galaxy.CenterOf(coord) + full.GasCloud.Center, found[index].CenterIn(Galaxy));
+                    Assert.Equal(Galaxy.CenterOf(coord) + full.GasCloud.Center, GasCloudQuery.CenterOf(Galaxy, found[index]));
                 }
 
         Assert.Equal(expected, count);
-        Assert.Contains(new SectorCoord(-3, 0, 5), found.Take(count).Select(placed => placed.Sector));
-        var shells = found.Take(count).Select(placed => Shell(placed.Sector, center)).ToArray();
+        Assert.Contains(new SectorCoord(-3, 0, 5), found.Take(count).Select(placed => placed.Anchor));
+        var shells = found.Take(count).Select(placed => Shell(placed.Anchor, center)).ToArray();
         Assert.Equal(shells.Order(), shells);
     }
 
     [Fact]
     public void QueryKeepsTheNearestWhenFullAndTakesNoMemory()
     {
-        var scratch = new SectorContent();
-        var all = new PlacedGasCloud[GasCloudField.Capacity];
-        var count = GasCloudQuery.Collect(Galaxy, default, 7, scratch, all);
+        var all = new GasCloudPlacement[GasCloudField.Capacity];
+        var count = GasCloudQuery.Collect(Galaxy, default, 7, all);
         Assert.InRange(count, 8, GasCloudField.Capacity - 1);
 
-        var few = new PlacedGasCloud[5];
-        Assert.Equal(5, GasCloudQuery.Collect(Galaxy, default, 7, scratch, few));
+        var few = new GasCloudPlacement[5];
+        Assert.Equal(5, GasCloudQuery.Collect(Galaxy, default, 7, few));
         Assert.Equal(all.Take(5), few);
-        Assert.Equal(0, GasCloudQuery.Collect(Galaxy.WithModules(Galaxy.AsteroidFields!), default, 2, scratch, all));
+        Assert.Equal(0, GasCloudQuery.Collect(Galaxy.WithModules(Galaxy.AsteroidFields!), default, 2, all));
 
         var before = GC.GetAllocatedBytesForCurrentThread();
-        GasCloudQuery.Collect(Galaxy, new(4, -1, 9), 7, scratch, all);
+        GasCloudQuery.Collect(Galaxy, new(4, -1, 9), 7, all);
         Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
     }
 
@@ -122,6 +121,11 @@ public sealed class GasLevelsTests
                 ("\"farSamples\": 10", "\"farSamples\": 3"),
                 ("\"farDetail\": 1", "\"farDetail\": 3"),
                 ("\"maxDraws\": 32", "\"maxDraws\": 65"),
+                ("\"fromHalfSize\": 7000", "\"fromHalfSize\": 12000"),
+                ("\"strands\": 0.9", "\"strands\": 1.5"),
+                ("\"stepBend\": 0.95", "\"stepBend\": 1"),
+                ("\"reach\": 0.8", "\"reach\": 0"),
+                ("\"clearing\": 0.6", "\"clearing\": 1"),
             })
             {
                 Assert.Contains(old, shipped);
@@ -133,6 +137,77 @@ public sealed class GasLevelsTests
         {
             File.Delete(path);
         }
+    }
+
+    [Fact]
+    public void SourceNamesHugeCloudsAndCloudsThatReachInFromOtherSectors()
+    {
+        var gas = Galaxy.GasClouds!;
+        var edge = (float)Galaxy.SectorSize;
+        var found = new GasCloudPlacement[GasCloudField.Capacity];
+        var reaching = new GasCloudPlacement[GasCloudModule.MaxPerSector];
+
+        // A huge cloud is listed by its anchor from every sector around, whether or not its box reaches that one.
+        var anchor = new SectorCoord(133, 0, -77);
+        Assert.True(gas.TryGetCloud(Galaxy, anchor, out var huge));
+        Assert.True(huge.HalfSize.X > 0.4f * edge);
+        foreach (var beside in new[] { anchor.Offset(-1, 0, 0), anchor.Offset(1, 1, 0), anchor.Offset(0, -1, 1) })
+            Assert.Contains(new GasCloudPlacement(anchor, huge), found.AsSpan(0, new GeneratedGasClouds().Collect(Galaxy, beside, 1, found)).ToArray());
+        // Its box lies across the wall to the sector at -x, where the module lists it too.
+        Assert.Contains(new GasCloudPlacement(anchor, huge), reaching.AsSpan(0, gas.Intersecting(Galaxy, anchor.Offset(-1, 0, 0), reaching)).ToArray());
+
+        // Whatever the generation module says reaches a sector or a sphere, the source has listed by its anchor.
+        var crossing = 0;
+        for (var i = 0; i < 12 * 3 * 12; i++)
+        {
+            var sector = new SectorCoord(126 + i % 12, i / 12 % 3 - 1, -82 + i / 36);
+            var listed = found.AsSpan(0, GasCloudQuery.Collect(Galaxy, sector, 1, found)).ToArray();
+            foreach (var placement in reaching.AsSpan(0, gas.Intersecting(Galaxy, sector, reaching)))
+            {
+                Assert.Contains(placement, listed);
+                if (placement.Anchor != sector) crossing++;
+            }
+
+            var wide = found.AsSpan(0, GasCloudQuery.Collect(Galaxy, sector, 4, found)).ToArray();
+            var near = new GasCloudPlacement[64];
+            foreach (var placement in near.AsSpan(0, gas.Intersecting(Galaxy, Galaxy.CenterOf(sector), 2.5 * edge, near)))
+                Assert.Contains(placement, wide);
+        }
+        Assert.True(crossing > 0, "no cloud in the sample reaches a sector it is not anchored in");
+    }
+
+    [Fact]
+    public void OnlyLargeCloudsTakeTheCloseUpFigures()
+    {
+        // Every ordinary cloud the seed makes is left exactly as it was; every huge one takes the figures in full.
+        var gas = Galaxy.GasClouds!;
+        var found = new GasCloudPlacement[GasCloudField.Capacity];
+        var count = GasCloudQuery.Collect(Galaxy, new(130, 0, -80), 9, found);
+        var ordinary = 0;
+        var huge = 0;
+        foreach (var placement in found.AsSpan(0, count))
+        {
+            var figures = Tiers.CloseUpFor(placement.Cloud.HalfSize.X);
+            if (placement.Cloud.HalfSize.X < 0.2f * (float)Galaxy.SectorSize)
+            {
+                Assert.Equal(default, figures);
+                ordinary++;
+            }
+            else
+            {
+                Assert.Equal(new float4(Tiers.CloseUp.Strands, Tiers.CloseUp.StepBend, Tiers.CloseUp.Reach, Tiers.CloseUp.Clearing), figures);
+                huge++;
+            }
+        }
+        Assert.True(ordinary > 20 && huge > 0, $"{ordinary} ordinary and {huge} huge clouds in the sample");
+
+        // Between the two sizes the figures rise evenly; the reach does not, it is a distance.
+        var half = Tiers.CloseUpFor((Tiers.CloseUp.FromHalfSize + Tiers.CloseUp.FullHalfSize) / 2);
+        Assert.Equal(Tiers.CloseUp.Strands / 2, half.X, 1e-5f);
+        Assert.Equal(Tiers.CloseUp.StepBend / 2, half.Y, 1e-5f);
+        Assert.Equal(Tiers.CloseUp.Reach, half.Z);
+        Assert.Equal(Tiers.CloseUp.Clearing / 2, half.W, 1e-5f);
+        Assert.Equal(default, Tiers.CloseUpFor(Tiers.CloseUp.FromHalfSize));
     }
 
     private static GasConstants Draw(float distance, float level, float seed = 0) =>
@@ -227,11 +302,11 @@ public sealed class GasLevelsTests
         public readonly ManualResetEventSlim Release = new(true);
         public int Calls;
 
-        public int Collect(Galaxy galaxy, SectorCoord center, int radius, Span<PlacedGasCloud> into)
+        public int Collect(Galaxy galaxy, SectorCoord center, int radius, Span<GasCloudPlacement> into)
         {
             Release.Wait();
             Interlocked.Increment(ref Calls);
-            into[0] = new PlacedGasCloud(center, new GasCloud(Vector3.Zero, new Vector3(radius), 1));
+            into[0] = new GasCloudPlacement(center, new GasCloud(Vector3.Zero, new Vector3(radius), 1));
             return 1;
         }
     }
@@ -259,7 +334,7 @@ public sealed class GasLevelsTests
 
         var first = new SectorCoord(2, 0, -1);
         Frames(first, () => !field.Clouds(Galaxy).IsEmpty);
-        Assert.Equal(first, field.Clouds(Galaxy)[0].Sector);
+        Assert.Equal(first, field.Clouds(Galaxy)[0].Anchor);
         Assert.Equal(field.Radius, field.Clouds(Galaxy)[0].Cloud.HalfSize.X);
         Assert.Equal(1, source.Calls);
         // Staying in the sector asks for nothing more.
@@ -270,9 +345,9 @@ public sealed class GasLevelsTests
         var second = new SectorCoord(3, 0, -1);
         source.Release.Reset();
         for (var i = 0; i < 20; i++) { field.Update(Galaxy, second); jobs.Pump(); }
-        Assert.Equal(first, field.Clouds(Galaxy)[0].Sector);
+        Assert.Equal(first, field.Clouds(Galaxy)[0].Anchor);
         source.Release.Set();
-        Frames(second, () => field.Clouds(Galaxy)[0].Sector == second);
+        Frames(second, () => field.Clouds(Galaxy)[0].Anchor == second);
         Assert.Equal(2, source.Calls);
 
         // Another galaxy's clouds are never shown as this one's, and its own list replaces them.
@@ -288,12 +363,12 @@ public sealed class GasLevelsTests
     [Fact]
     public void GeneratedSourceIsTheSharedQuery()
     {
-        var expected = new PlacedGasCloud[GasCloudField.Capacity];
-        var actual = new PlacedGasCloud[GasCloudField.Capacity];
-        var count = GasCloudQuery.Collect(Galaxy, new(-3, 0, 5), 7, new SectorContent(), expected);
+        var expected = new GasCloudPlacement[GasCloudField.Capacity];
+        var actual = new GasCloudPlacement[GasCloudField.Capacity];
+        var count = GasCloudQuery.Collect(Galaxy, new(-3, 0, 5), 7, expected);
         Assert.Equal(count, new GeneratedGasClouds().Collect(Galaxy, new(-3, 0, 5), 7, actual));
         Assert.Equal(expected, actual);
-        Assert.Equal(new SectorCoord(-3, 0, 5), actual[0].Sector);
+        Assert.Equal(new SectorCoord(-3, 0, 5), actual[0].Anchor);
     }
 
     private static int Shell(SectorCoord a, SectorCoord b) => Math.Max(Math.Abs(a.X - b.X), Math.Max(Math.Abs(a.Y - b.Y), Math.Abs(a.Z - b.Z)));

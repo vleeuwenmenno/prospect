@@ -56,7 +56,8 @@ internal static partial class DurableFiles
             if (made)
             {
                 Trace?.Invoke("create-directory", next);
-                Directory.CreateDirectory(next);
+                if (OperatingSystem.IsWindows()) Directory.CreateDirectory(next);
+                else Directory.CreateDirectory(next, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             }
 
             if (Path.GetDirectoryName(next) is { } parent && (made || MayHoldOurNames(parent)))

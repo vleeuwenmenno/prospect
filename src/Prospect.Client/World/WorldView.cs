@@ -518,7 +518,7 @@ internal sealed class WorldView
     public bool GasOverlayOpening { get; set; }
     /// <summary>Whether the last rendered frame deferred gas to composition, and how many shields it queued.</summary>
     public (bool Deferred, int Shields, bool HasGas) LastGasMode => _scene.LastGasMode;
-    private readonly SectorContent _gasCapture = new();
+    private GasCloudPlacement _gasCapture;
     // Far gas: how it is levelled, and the clouds around the camera, which a worker keeps current.
     private readonly GasTiers _gasTiers = GasTiers.Load();
     private readonly GasCloudField _gasField;
@@ -857,26 +857,24 @@ internal sealed class WorldView
             var gasCoord = galaxy.SectorOf(OwnPosition);
             if (!ReferenceEquals(_gasCaptureGalaxy, galaxy) || _gasCaptureCoord != gasCoord)
             {
-                // Only the gas module is needed; the asteroid worker remains untouched.
-                _gasCapture.Summary = galaxy.Summarize(gasCoord);
-                galaxy.GasClouds?.Generate(new SectorContext(galaxy, gasCoord, _gasCapture.Summary.Density), _gasCapture);
+                // The cloud the own hull's sector anchors, as generation names it; nothing else is generated.
                 _gasCaptureGalaxy = galaxy;
                 _gasCaptureCoord = gasCoord;
-                if (_gasCapture.Summary.GasCloudCount == 0)
-                    throw new InvalidDataException("--gas-view needs a generated cloud: use --sector -3,0,5 with the default seed.");
-                Console.WriteLine($"Gas scenario: seed={galaxy.Seed}, sector={gasCoord}, cloud={_gasCapture.GasCloud}");
+                GasCloud captured = default;
+                if (galaxy.GasClouds?.TryGetCloud(galaxy, gasCoord, out captured) != true)
+                    throw new InvalidDataException("--gas-view needs a sector that anchors a cloud: use --sector -3,0,5 with the default seed.");
+                _gasCapture = new GasCloudPlacement(gasCoord, captured);
+                Console.WriteLine($"Gas scenario: seed={galaxy.Seed}, sector={gasCoord}, cloud={captured}");
             }
-            if (_gasCapture.Summary.GasCloudCount != 0)
-            {
-                var cloud = _gasCapture.GasCloud;
-                var offset = gasView is "inside" or "inside-absent" ? Vector3.Zero : gasView == "edge" ? new Vector3(cloud.HalfSize.X * 0.92f, 0, 0) : new Vector3(0, 0, cloud.HalfSize.Z * 2.4f);
-                if (GasDistance is { } radii && gasView is "outside" or "absent")
-                    offset = new Vector3(0, 0, MathF.Max(cloud.HalfSize.X, MathF.Max(cloud.HalfSize.Y, cloud.HalfSize.Z)) * radii);
-                CameraPosition = galaxy.CenterOf(gasCoord) + cloud.Center + offset;
-                _forward = gasView == "offscreen" ? Vector3.UnitZ : -Vector3.UnitZ;
-                _right = gasView == "offscreen" ? -Vector3.UnitX : Vector3.UnitX;
-                _up = Vector3.UnitY;
-            }
+
+            var cloud = _gasCapture.Cloud;
+            var offset = gasView is "inside" or "inside-absent" ? Vector3.Zero : gasView == "edge" ? new Vector3(cloud.HalfSize.X * 0.92f, 0, 0) : new Vector3(0, 0, cloud.HalfSize.Z * 2.4f);
+            if (GasDistance is { } radii && gasView is "outside" or "absent")
+                offset = new Vector3(0, 0, MathF.Max(cloud.HalfSize.X, MathF.Max(cloud.HalfSize.Y, cloud.HalfSize.Z)) * radii);
+            CameraPosition = GasCloudQuery.CenterOf(galaxy, _gasCapture) + offset;
+            _forward = gasView == "offscreen" ? Vector3.UnitZ : -Vector3.UnitZ;
+            _right = gasView == "offscreen" ? -Vector3.UnitX : Vector3.UnitX;
+            _up = Vector3.UnitY;
         }
         // Which side of the opening the camera is on, from where the camera is this frame.
         UpdateThrough(dt);
@@ -1087,7 +1085,7 @@ internal sealed class WorldView
         foreach (ref readonly var placed in _gasField.Clouds(galaxy))
         {
             var cloud = placed.Cloud;
-            var center = placed.CenterIn(galaxy).RelativeTo(camera);
+            var center = GasCloudQuery.CenterOf(galaxy, placed).RelativeTo(camera);
             var distance = center.Length();
             var largest = MathF.Max(cloud.HalfSize.X, MathF.Max(cloud.HalfSize.Y, cloud.HalfSize.Z));
             _gasTiers.Shares(distance, largest, sectorSize, out var near, out var mid, out var far);
@@ -1098,11 +1096,12 @@ internal sealed class WorldView
             var draw = new GasConstants
             {
                 Center = new float4(center.X, center.Y, center.Z, cloud.Seed),
-                HalfSize = new float4(cloud.HalfSize.X, cloud.HalfSize.Y, cloud.HalfSize.Z, gas.Extinction),
+                HalfSize = new float4(cloud.HalfSize.X, cloud.HalfSize.Y, cloud.HalfSize.Z, gas.ExtinctionOf(cloud, sectorSize)),
                 Tint = new float4(gas.Tint.X, gas.Tint.Y, gas.Tint.Z, 0),
                 Motion = new float4(time * gas.Motion, 0, 0, distance),
                 Shape = new float4(gas.Shape.X, gas.Shape.Y, gas.Shape.Z, gas.Shape.W),
                 Look = new float4(gas.Look.X, gas.Look.Y, gas.Look.Z, gas.Look.W),
+                Fine = _gasTiers.CloseUpFor(cloud.HalfSize.X),
             };
             if (far >= GasMinShare)
             {

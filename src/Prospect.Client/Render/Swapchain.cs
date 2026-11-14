@@ -7,15 +7,26 @@ namespace Prospect.Client.Render;
 
 /// <summary>
 /// The window's swapchain with a render pass and one framebuffer per image. Rebuilt whenever the window changes
-/// size or the present mode changes.
+/// size or the present mode changes, which happens inside the frame loop: a rebuild takes no managed memory unless
+/// the new swapchain has more images than any before it.
 /// </summary>
 internal sealed unsafe class Swapchain : IDisposable
 {
     private readonly GraphicsDevice _gpu;
     private VkSwapchainKHR _swapchain;
-    private VkImage[] _images = [];
-    private VkImageView[] _views = [];
-    private VkFramebuffer[] _framebuffers = [];
+    /// <summary>
+    /// Room for this many images from the start. A swapchain is asked for three (or one more than the surface's
+    /// minimum) and drivers hand out a few more at most, so the arrays below are not expected to grow at all.
+    /// </summary>
+    private const int InitialImageSlots = 16;
+
+    // One slot per image, the first _imageCount of them in use. The arrays outlive a rebuild and are only replaced
+    // by longer ones: a rebuild runs in the frame loop, where nothing may be allocated.
+    private VkImage[] _images = new VkImage[InitialImageSlots];
+    private VkImageView[] _views = new VkImageView[InitialImageSlots];
+    private VkFramebuffer[] _framebuffers = new VkFramebuffer[InitialImageSlots];
+    private int _imageCount;
+    private bool _reported;
 
     public Swapchain(GraphicsDevice gpu, int2 framebufferSize, bool vsync)
     {
@@ -46,7 +57,13 @@ internal sealed unsafe class Swapchain : IDisposable
     public VkSurfaceFormatKHR SurfaceFormat { get; }
     public VkRenderPass RenderPass { get; }
     public VkExtent2D Extent { get; private set; }
-    public int ImageCount => _views.Length;
+    public int ImageCount => _imageCount;
+
+    /// <summary>
+    /// How many images there is room for without allocating. It only grows; whoever keeps something per image
+    /// sizes it by this, so that it grows on the same rare occasion and never otherwise.
+    /// </summary>
+    public int ImageCapacity => _images.Length;
     public int MinImageCount { get; private set; }
     public VkPresentModeKHR PresentMode { get; private set; }
     public VkSwapchainKHR Handle => _swapchain;
@@ -58,9 +75,13 @@ internal sealed unsafe class Swapchain : IDisposable
 
     public VkImage Image(int imageIndex) => _images[imageIndex];
 
+    /// <summary>How many times the swapchain has been replaced since it was made.</summary>
+    public int Rebuilds { get; private set; }
+
     /// <summary>Replaces the swapchain after a resize or a present-mode change. The device must be idle.</summary>
     public void Recreate(int2 framebufferSize, bool vsync)
     {
+        Rebuilds++;
         _gpu.Device.WaitIdle();
         Create(framebufferSize, vsync);
     }
@@ -134,16 +155,25 @@ internal sealed unsafe class Swapchain : IDisposable
             null
         );
 
+        var previousCount = _imageCount;
         DestroyImages();
         if (!old.IsNull())
             gpu.Device.DestroySwapchainKHR(old, null);
 
-        var images = new VkImage[gpu.Device.GetSwapchainImagesKHR_Count(_swapchain)];
-        gpu.Device.GetSwapchainImagesKHR_Write(_swapchain, images);
+        var count = gpu.Device.GetSwapchainImagesKHR_Count(_swapchain);
+        if (count > _images.Length)
+        {
+            // More images than any swapchain before: the one case in which a rebuild takes memory. The capacity
+            // never shrinks, so this happens at most once for each larger count a driver ever reports.
+            var capacity = Math.Max(count, _images.Length * 2);
+            _images = new VkImage[capacity];
+            _views = new VkImageView[capacity];
+            _framebuffers = new VkFramebuffer[capacity];
+        }
 
-        _images = images;
-        _views = new VkImageView[images.Length];
-        _framebuffers = new VkFramebuffer[images.Length];
+        var images = _images.AsSpan(0, count);
+        gpu.Device.GetSwapchainImagesKHR_Write(_swapchain, images);
+        _imageCount = count;
         for (var i = 0; i < images.Length; i++)
         {
             _views[i] = gpu.Device.CreateImageView(
@@ -177,10 +207,18 @@ internal sealed unsafe class Swapchain : IDisposable
             );
         }
 
+        // Writing a line takes memory, and a rebuild for another size is routine while a window's edge is dragged or
+        // a tiling compositor rearranges: those are only reported in a verbose run. The first swapchain, and one
+        // with another image count or present mode, is reported always.
+        var routine = _reported && count == previousCount && presentMode == PresentMode;
         Extent = extent;
         MinImageCount = Math.Max(2, capabilities.MinImageCount);
         PresentMode = presentMode;
-        Logs.Render.Info($"Swapchain {extent.Width}x{extent.Height}, {images.Length} images, {presentMode}");
+        _reported = true;
+        if (routine)
+            Logs.Render.Debug($"Swapchain {extent.Width}x{extent.Height}, {count} images, {presentMode}");
+        else
+            Logs.Render.Info($"Swapchain {extent.Width}x{extent.Height}, {count} images, {presentMode}");
     }
 
     private VkPresentModeKHR ChoosePresentMode(bool vsync)
@@ -247,11 +285,15 @@ internal sealed unsafe class Swapchain : IDisposable
 
     private void DestroyImages()
     {
-        foreach (var framebuffer in _framebuffers)
-            _gpu.Device.DestroyFramebuffer(framebuffer, null);
-        foreach (var view in _views)
-            _gpu.Device.DestroyImageView(view, null);
-        _framebuffers = [];
-        _views = [];
+        for (var i = 0; i < _imageCount; i++)
+        {
+            _gpu.Device.DestroyFramebuffer(_framebuffers[i], null);
+            _gpu.Device.DestroyImageView(_views[i], null);
+            _framebuffers[i] = default;
+            _views[i] = default;
+            _images[i] = default;
+        }
+
+        _imageCount = 0;
     }
 }

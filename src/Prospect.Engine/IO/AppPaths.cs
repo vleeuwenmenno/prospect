@@ -21,6 +21,16 @@ public static class AppPaths
     public static string UserData(params ReadOnlySpan<string> parts) =>
         Combine(UserRoot("XDG_DATA_HOME", Path.Combine(".local", "share")), parts);
 
+    /// <summary>
+    /// Creates a per-user folder (and any missing parents) readable only by the user where the platform has Unix
+    /// modes, so a later saved world's key protection is not lost to a group-writable folder made by a looser umask.
+    /// </summary>
+    public static void CreatePrivateDirectory(string path)
+    {
+        if (OperatingSystem.IsWindows()) Directory.CreateDirectory(path);
+        else Directory.CreateDirectory(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+    }
+
     private static string UserRoot(string xdgVariable, string homeFallback)
     {
         if (OperatingSystem.IsWindows())

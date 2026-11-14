@@ -18,6 +18,7 @@ Saved multiplayer and moving a world between machines stay undelivered until ver
 - One capture buffer, taken once at the world's limits. Nothing queues behind a slow save.
 - A saved world keeps its own clock, apart from the scheduler's count of callbacks.
 - A save is refused unless content identity, generator version, design encoding and save layout all match.
+  Refused means left untouched and shown as "OTHER VERSION": there is no migration between generator versions.
 - Owners and entities are durable. Connections, handles and input queues are not saved.
 
 ## The pieces
@@ -282,7 +283,8 @@ CloseStatus Close { get; }  // any thread, takes no memory
 - `SavedOwner.Kind` remains `Local` after linking. Private reconnect always finds that local character.
 - `SavedAccount` stores an account UUID and canonical HTTPS authority, never tokens. Authority uses a lower-case DNS host, optional non-default decimal port, and a trailing slash; paths, credentials and IP literals in brackets are refused.
 - Account bindings are unique across Local and Account owners. At most one owner is Local.
-- Layout 2 is deliberately incompatible with layout 1; old saves are refused untouched. Generator compatibility remains 2.
+- Layout 2 is deliberately incompatible with layout 1; old saves are refused untouched. The generator version
+  is `Galaxy.GenerationVersion`, now 4: a saved asteroid is named by its index in a sector's generated list.
 
 `ServerHost.StageVerifiedLocalClaim` is internal, tick-thread only, and requires a private world with an active in-process local owner.
 It is a trusted integration seam, not an authentication API: no network or UI handler calls it.
@@ -297,6 +299,8 @@ See docs/accounts.md for the explicit nonvisual API; player-facing claims remain
 
 Close before submission discards the pending claim. Close after submission waits for its exact result before final capture.
 An unknown commit, including a thrown store call, permits no final overwrite; reopen determines the durable binding.
+Deterministic regression tests hold the candidate commit pending and reject a second request; after commitment,
+a later refused or expired proof cannot inherit the earlier success. Gates and a manual clock establish the ordering.
 Disconnect and backup failure never undo a claim. A tick fault never captures a partially advanced world.
 No network admission, hosting authorization, keys, protection, alliances or owner merging are added here.
 
@@ -312,10 +316,19 @@ Older database layouts are refused untouched; there is no migration.
 This is diagnostic state, not a capability to host: future hosting must revalidate protection and possession.
 All identity work occurs during create/open on workers, never during capture or ticks.
 
-- Only Linux supports protected creation. Windows/macOS creation fails closed; private open reports Unsafe.
+- Private creation works without protected-key support: Windows/macOS store only the public identity and report Unsafe.
+  No private key is written there until platform protection is implemented; these worlds cannot later host under this identity.
 - The key is one PKCS8 PEM block, with no trailing non-whitespace, bounded to 4096 bytes. Other algorithms and curves are refused.
 - Creation writes mode 0600 from its first byte, flushes, then publishes and syncs its name before publishing the database.
-- Group/other writable directories are refused (sticky ancestors such as /tmp are allowed); symbolic links are unsafe.
+
+Path protection and fallback:
+
+- New Unix directories use mode 0700 even with umask 002. Existing permissions are never changed.
+- Linux checks filesystem owners and modes, including the opened key inode. Ancestors must belong to this user or root;
+  group/other writable ancestors require the sticky bit. The world directory itself must not be shared writable.
+- Symlinked parents are supported: link ownership and both link and target ancestor chains are checked. Key symlinks and hard links are unsafe.
+- Unsafe paths or unavailable Linux ownership checks create a private world without writing a secret. Status is Unsafe
+  while the path is unsafe, or Missing once protection is restored. No open ever generates the absent key.
 - A failed creation cleans only its own key files before releasing the lease if no final database exists. Unknown key staging is preserved and refused, including ambiguous crash leftovers.
 
 Missing, corrupt or mismatched keys do not block private gameplay and are never silently replaced.
@@ -323,4 +336,7 @@ Database recovery copies are gameplay-only, even though their public metadata re
 No protected private-key recovery artifact is implemented. Back up the entire stopped folder separately with equivalent permissions.
 Copying the stopped complete folder preserves identity; copying only the database cannot recover a missing key.
 No commit outcome is changed by identity diagnostics or backup degradation.
+Protection assumes the same user and root are trusted and permissions remain stable during create/open.
+Private fallback preserves gameplay, not a recoverable signing identity. Database and lease protection are unchanged.
+Real Windows/macOS storage and power-loss behavior remain unverified.
 Independent Claude security review is pending; saved multiplayer is not unlocked.

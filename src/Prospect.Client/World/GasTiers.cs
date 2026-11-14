@@ -48,6 +48,9 @@ internal sealed class GasTiers
     /// <summary>The most cloud draws in one frame; the farthest are left out first.</summary>
     public int MaxDraws { get; init; }
 
+    /// <summary>What a large cloud gains close to the camera, so that it is not a flat wall from inside.</summary>
+    public GasCloseUp CloseUp { get; init; } = new();
+
     public static GasTiers Load() => Load(AppPaths.Content("visuals", "gas.json"));
 
     /// <summary>Reads and checks the levels; anything out of range is refused.</summary>
@@ -67,6 +70,11 @@ internal sealed class GasTiers
             throw new InvalidDataException($"{path}: midSamples is 8 to 64, farSamples 4 to 32, farDetail 1 or 2");
         if (tiers.MaxDraws is < 4 or > DrawCapacity)
             throw new InvalidDataException($"{path}: maxDraws is 4 to {DrawCapacity}");
+        var close = tiers.CloseUp;
+        if (!(close.FromHalfSize is >= 1000 and <= 1e6f) || !(close.FullHalfSize > close.FromHalfSize && close.FullHalfSize <= 2e6f))
+            throw new InvalidDataException($"{path}: closeUp.fromHalfSize is 1000 to 1000000 m and below fullHalfSize");
+        if (!(close.Strands is >= 0 and <= 1) || !(close.StepBend is >= 0 and <= 0.98f) || !(close.Reach is >= 0.1f and <= 4) || !(close.Clearing is >= 0 and <= 0.9f))
+            throw new InvalidDataException($"{path}: closeUp.strands is 0 to 1, stepBend 0 to 0.98, reach 0.1 to 4 half-extents, clearing 0 to 0.9");
         return tiers;
     }
 
@@ -90,9 +98,44 @@ internal sealed class GasTiers
         far = visible * pastMid;
     }
 
+    /// <summary>
+    /// The close-up figures for a cloud with this x half-extent, as the shader takes them: nothing at or below
+    /// <see cref="GasCloseUp.FromHalfSize"/>, rising evenly to the full figures at <see cref="GasCloseUp.FullHalfSize"/>.
+    /// </summary>
+    public Brutal.Numerics.float4 CloseUpFor(float halfSize)
+    {
+        var share = Math.Clamp((halfSize - CloseUp.FromHalfSize) / (CloseUp.FullHalfSize - CloseUp.FromHalfSize), 0f, 1f);
+        return share <= 0 ? default : new Brutal.Numerics.float4(CloseUp.Strands * share, CloseUp.StepBend * share, CloseUp.Reach, CloseUp.Clearing * share);
+    }
+
     private static float Smooth(float from, float to, float value)
     {
         var t = Math.Clamp((value - from) / (to - from), 0f, 1f);
         return t * t * (3f - 2f * t);
     }
+}
+
+/// <summary>
+/// Close to the camera a large cloud's own octaves are kilometres across, so it reads as a wall. These figures add
+/// finer strands there and shorten the first steps of the march to follow them. A cloud of ordinary size takes none.
+/// </summary>
+internal sealed class GasCloseUp
+{
+    /// <summary>The x half-extent in metres above which a cloud starts to take the close-up figures.</summary>
+    public float FromHalfSize { get; init; } = 7000;
+
+    /// <summary>The x half-extent in metres from which it takes them in full.</summary>
+    public float FullHalfSize { get; init; } = 10000;
+
+    /// <summary>How strongly the gas near the camera is broken into strands and gaps, 0 to 1.</summary>
+    public float Strands { get; init; }
+
+    /// <summary>How far the march's steps are drawn toward the camera, 0 (even) to 0.98.</summary>
+    public float StepBend { get; init; }
+
+    /// <summary>How far from the camera all of it reaches, in x half-extents.</summary>
+    public float Reach { get; init; } = 1;
+
+    /// <summary>How much the gas nearest the camera is thinned, 0 (not) to 0.9, so the eye reaches into it.</summary>
+    public float Clearing { get; init; }
 }

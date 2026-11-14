@@ -4,6 +4,7 @@ using Brutal.ImGuiApi;
 using Brutal.Numerics;
 using Brutal.StbApi;
 using Brutal.VulkanApi;
+using Brutal.VulkanApi.Vma;
 using Prospect.Client.Diagnostics;
 using Prospect.Client.Input;
 using Prospect.Client.Platform;
@@ -80,6 +81,13 @@ internal sealed class AppOptions
     /// <summary>Muted production-shader regression fixture, zero when disabled.</summary>
     public int GasFixture { get; set; }
     public float BenchSeconds { get; set; }
+
+    /// <summary>
+    /// With a benchmark: how many times the window is resized while it measures (<c>--bench-resize</c>), and how
+    /// many times the swapchain and the render targets are rebuilt at the size they have in between, so that
+    /// rebuilding them is held to the same targets as any other frame.
+    /// </summary>
+    public int BenchResizes { get; set; }
     /// <summary>Opt-in private populated diagnostic, restricted to muted scripted runs.</summary>
     public ulong? RtsSeed { get; set; }
     public string? RtsScript { get; set; }
@@ -148,6 +156,9 @@ internal sealed class HostingOptions
 internal sealed class App : IDisposable
 {
     public const string VersionLabel = "PROSPECT 0.1.0";
+
+    /// <summary>The window title of a capture or benchmark run, which a compositor rule can match to hide it.</summary>
+    public const string ScriptedWindowTitle = "PROSPECT capture";
     private const float BenchWarmupSeconds = 2f;
     private static readonly float4 ClearColor = new(0.0196f, 0.0275f, 0.0392f, 1f);
 
@@ -173,6 +184,7 @@ internal sealed class App : IDisposable
     private int2 _framebufferSize;
     private int2 _windowedSize;
     private bool _swapchainDirty;
+    private bool _targetsDirty;
     private bool _quit;
     private long _frameStart;
     private readonly SessionPump _pump;
@@ -186,6 +198,8 @@ internal sealed class App : IDisposable
     private bool _captureRequested;
     private int _capturesTaken;
     private Benchmark? _benchmark;
+    private int2 _benchmarkSize;
+    private int _benchmarkResizes;
     private PopulatedMeasurement? _populated;
     private readonly RtsCapture? _rts;
     private bool _benchmarkEditRequested, _benchmarkRepairRequested;
@@ -286,7 +300,14 @@ internal sealed class App : IDisposable
         _vsync = options.BenchSeconds <= 0 && options.CapturePath is null && Settings.VSync;
         _windowedSize = options.WindowSize ?? new int2(Settings.WindowWidth, Settings.WindowHeight);
         Glfw.WindowHint(GlfwWindowHint.ClientApi, Glfw.Constants.GLFW_NO_API);
-        _window = Glfw.CreateWindow(new GlfwWindow.CreateInfo { Title = "PROSPECT", Size = _windowedSize });
+        // A scripted run carries its own title so the developer's compositor can keep it off their screen
+        // (see "Checking the client without a person at the screen" in AGENTS.md).
+        _window = Glfw.CreateWindow(new GlfwWindow.CreateInfo { Title = scripted ? ScriptedWindowTitle : "PROSPECT", Size = _windowedSize });
+        // BRUTAL's refresh handler reads every window property back from GLFW, the title too, and marshalling the
+        // title makes a new string each time the compositor asks for a redraw (an expose, a resize, a change of
+        // focus). The game draws every frame anyway, and size, position, focus and closing have callbacks of their
+        // own, so the window takes no refresh callback at all.
+        Glfw.PInvoke.SetWindowRefreshCallback(_window, null!);
         _window.SetSizeLimits(new int2(960, 540), new int2(-1, -1));
         if (Settings.Fullscreen && options.WindowSize is null)
             EnterFullscreen();
@@ -298,6 +319,11 @@ internal sealed class App : IDisposable
         _renderer = new FrameRenderer(_gpu, _swapchain);
         Devices = new InputDevices(_window) { Muted = options.BenchSeconds > 0 || options.CapturePath is not null };
         _ui = new UiContext(_window, Devices, _gpu, _swapchain, Settings.UiScale);
+        // Input events reach GLFW and Dear ImGui functions nothing else calls (the pointer leaving the window, a
+        // change of focus), and the first resize is the first time a render target is freed through the memory
+        // allocator; bound now, their first call costs the frame loop nothing. See NativeBindings.
+        var prelinked = NativeBindings.Prelink(typeof(Glfw).Assembly, typeof(ImGui).Assembly, typeof(VkDevice).Assembly, typeof(VmaAllocation).Assembly);
+        Logs.App.Debug($"Bound {prelinked} native imports of GLFW, Dear ImGui, Vulkan and its memory allocator ahead of use");
         GpuLabel = _gpu.DeviceName.ToUpperInvariant();
 
         Jobs.CompleteAll();
@@ -324,7 +350,7 @@ internal sealed class App : IDisposable
         if (options.BrowserSample != BrowserSample.None)
             _screens.UseBrowserSample(options.BrowserSample);
         if (options.BenchSeconds > 0)
-            _benchmark = new Benchmark(options.BenchSeconds);
+            _benchmark = new Benchmark(options.BenchSeconds, options.BenchResizes);
     }
 
     public ClientSettings Settings { get; }
@@ -691,9 +717,10 @@ internal sealed class App : IDisposable
             if (framebuffer != _framebufferSize || _renderer.NeedsRecreate || _swapchainDirty)
             {
                 _renderer.Recreate(framebuffer, _vsync);
-                _scene.Resize(_swapchain.Extent);
+                _scene.Resize(_swapchain.Extent, _targetsDirty);
                 _framebufferSize = framebuffer;
                 _swapchainDirty = false;
+                _targetsDirty = false;
                 if (!_window.IsFullscreen)
                     _windowedSize = _window.Size;
             }
@@ -872,7 +899,7 @@ internal sealed class App : IDisposable
         if (Actions.Pressed(Devices, InputAction.Screenshot, keyboard))
         {
             var directory = AppPaths.UserData("screenshots");
-            Directory.CreateDirectory(directory);
+            AppPaths.CreatePrivateDirectory(directory);
             RequestScreenshot(Path.Combine(directory, $"prospect-{DateTime.Now:yyyyMMdd-HHmmss-fff}.png"));
         }
     }
@@ -1102,13 +1129,44 @@ internal sealed class App : IDisposable
         if (_sinceSplash < BenchWarmupSeconds)
             return;
 
-        _benchmark.Record(Stats);
+        _benchmark.Record(Stats, _swapchain.Rebuilds, _scene.TargetRebuilds);
         if (!_benchmark.Finished)
+        {
+            if (_benchmark.ResizeDue())
+                ResizeForBenchmark();
+            else if (_benchmark.RebuildDue())
+                _swapchainDirty = _targetsDirty = true;
             return;
+        }
 
         if (_populated is null)
             ExitCode = _benchmark.Report(_gpu, _swapchain) ? 0 : 1;
         EndDiagnosticRun();
+    }
+
+    /// <summary>
+    /// Gives the window another size, as a compositor or a drag of its edge would. The next frame finds a
+    /// framebuffer of another size and rebuilds the swapchain and the render targets, inside the measurement. A
+    /// window manager may keep the window as it is (a tiled window under X11); the benchmark counts what happened.
+    /// </summary>
+    private void ResizeForBenchmark()
+    {
+        if (_benchmarkResizes == 0)
+            _benchmarkSize = _window.Size;
+        var size = _benchmarkSize;
+        // Never the size it has: the last resize returns to the first size, the others take two smaller ones in
+        // turn (or larger ones, at the smallest size a window may have).
+        var last = ++_benchmarkResizes == _options.BenchResizes && _benchmarkResizes > 1;
+        if (!last)
+        {
+            var step = _benchmarkResizes % 2 == 1 ? 2 : 1;
+            var grow = size.X - 128 < 960 || size.Y - 72 < 540 ? 1 : -1;
+            size = new int2(size.X + grow * 64 * step, size.Y + grow * 36 * step);
+        }
+
+        // Not through GlfwWindow.Size: it skips a size equal to the one it remembers, and on Wayland it remembers
+        // the size before the last one set here, since GLFW reports no size for a resize the program asked for.
+        Glfw.PInvoke.SetWindowSize(_window, size.X, size.Y);
     }
 
     /// <summary>

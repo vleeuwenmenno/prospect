@@ -131,6 +131,80 @@ public sealed class LocalClaimProofTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EarlierCommitCannotPublishSuccessForANewProof(bool expire)
+    {
+        await using var service = await AccountService.StartAsync();
+        var route = new Route(service.Url);
+        using var account = await SignIn(service, route);
+        using var gate = new ManualResetEventSlim(false);
+        var world = SaveRig.NewWorld(Content);
+        using var rig = new SaveRig(world, Content, limits: Limits, config: new ServerConfig { AccountAuthority = route.Config });
+        rig.Join();
+        world.Gate = gate;
+        Assert.True(rig.Server.RequestLocalClaim(account));
+        try
+        {
+            rig.Tick();
+            await ProofDone(rig);
+            rig.Tick();
+            Assert.Equal(LocalClaimState.Pending, rig.Server.LocalClaim);
+            Assert.False(rig.Server.RequestLocalClaim(account));
+            Assert.Equal(default, rig.Owners[0].Account);
+        }
+        finally { gate.Set(); }
+        await YieldUntil(() => rig.Get<SaveWorker>("_save").Latest.Outcome == CommitOutcome.Committed);
+        rig.Tick();
+        Assert.Equal(LocalClaimState.Committed, rig.Server.LocalClaim);
+        var binding = rig.Owners[0].Account;
+        Assert.NotEqual(default, binding);
+
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        route.Before = async (request, _) =>
+        {
+            if (!request.RequestUri!.AbsolutePath.EndsWith("/redeem", StringComparison.Ordinal)) return null;
+            entered.SetResult();
+            await release.Task;
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        };
+        Assert.True(rig.Server.RequestLocalClaim(account));
+        rig.Tick();
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            rig.Tick(3);
+            Assert.Equal(LocalClaimState.Proving, rig.Server.LocalClaim);
+            if (expire) rig.Clock.AdvanceSeconds(31);
+        }
+        finally { release.TrySetResult(); }
+        await ProofDone(rig);
+        rig.Tick();
+        Assert.Equal(expire ? LocalClaimState.Cancelled : LocalClaimState.Refused, rig.Server.LocalClaim);
+        rig.Tick(3);
+        Assert.Equal(expire ? LocalClaimState.Cancelled : LocalClaimState.Refused, rig.Server.LocalClaim);
+        Assert.Equal(binding, rig.Owners[0].Account);
+    }
+
+    private static Task ProofDone(SaveRig rig)
+    {
+        var proof = rig.Get<object>("_localProof");
+        var done = proof.GetType().GetField("Done", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        return YieldUntil(() => (bool)done.GetValue(proof)!);
+    }
+
+    private static async Task YieldUntil(Func<bool> done)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (!done())
+        {
+            timeout.Token.ThrowIfCancellationRequested();
+            await Task.Yield();
+        }
+    }
+
+    [Theory]
     [InlineData(CommitOutcome.Failed, LocalClaimState.Failed)]
     [InlineData(CommitOutcome.Unknown, LocalClaimState.Unknown)]
     public async Task VerifiedDoesNotMeanDurablyClaimed(CommitOutcome failure, LocalClaimState expected)

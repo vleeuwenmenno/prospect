@@ -31,6 +31,100 @@ public sealed class WorldIdentityTests : IDisposable
     }
 
     [Fact]
+    public void PrivateCreationAndReopenWorkOnEveryPlatform()
+    {
+        WorldIdentity identity;
+        using (var store = Create()) identity = store.Identity;
+        using var opened = Open();
+        Assert.Equal(identity, opened.Identity);
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Equal(WorldKeyStatus.Unsafe, identity.KeyStatus);
+            Assert.False(File.Exists(Key));
+        }
+    }
+
+    [Fact]
+    public void SharedParentAllowsPrivateCreationWithoutExposingAKey()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        Directory.CreateDirectory(_root);
+        File.SetUnixFileMode(_root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute);
+        WorldIdentity identity;
+        using (var store = Create()) identity = store.Identity;
+        Assert.Equal(WorldKeyStatus.Unsafe, identity.KeyStatus);
+        Assert.False(File.Exists(Key));
+        using (var reopened = Open()) Assert.Equal(identity, reopened.Identity);
+        // Tightening permissions later must not silently mint a new signing identity.
+        File.SetUnixFileMode(_root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        using var protectedPath = Open();
+        Assert.Equal(WorldKeyStatus.Missing, protectedPath.Identity.KeyStatus);
+        Assert.Equal(identity.PublicKey, protectedPath.Identity.PublicKey);
+        Assert.False(File.Exists(Key));
+    }
+
+    [Fact]
+    public void SymlinkedParentRetainsProtectedIdentity()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        DurableFiles.CreateDirectory(Path.Combine(_root, "real"));
+        Directory.CreateSymbolicLink(Path.Combine(_root, "link"), Path.Combine(_root, "real"));
+        var folder = Path.Combine(_root, "link", "world");
+        var created = SqliteWorldStore.Create(folder, Initial());
+        Assert.Equal(CreateOutcome.Created, created.Outcome);
+        WorldIdentity identity;
+        using (var store = (SqliteWorldStore)created.Store!) identity = store.Identity;
+        Assert.Equal(WorldKeyStatus.Present, identity.KeyStatus);
+        using var opened = Open(Path.Combine(_root, "real", "world"));
+        Assert.Equal(identity, opened.Identity);
+    }
+
+    [Fact]
+    public void SymlinkCannotHideASharedWritableTargetAncestor()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        var shared = Path.Combine(_root, "shared");
+        var target = Path.Combine(shared, "target");
+        DurableFiles.CreateDirectory(target);
+        File.SetUnixFileMode(shared, File.GetUnixFileMode(shared) | UnixFileMode.GroupWrite);
+        Directory.CreateSymbolicLink(Path.Combine(_root, "link"), target);
+        Assert.False(WorldIdentity.SafeDirectory(Path.Combine(_root, "link")));
+        // A trailing separator (shell completion adds one) must not let the final link go unchecked.
+        Assert.False(WorldIdentity.SafeDirectory(Path.Combine(_root, "link") + Path.DirectorySeparatorChar));
+    }
+
+    [Fact]
+    public void FailedPrivateOnlyCreationCleansItsDatabaseAndCanRetry()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        DurableFiles.CreateDirectory(Folder);
+        File.SetUnixFileMode(Folder, File.GetUnixFileMode(Folder) | UnixFileMode.GroupWrite);
+        try
+        {
+            DurableFiles.Trace = (step, path) =>
+            {
+                if (step == "sync-file" && path == Path.Combine(Folder, "world.db.creating")) throw new IOException("injected");
+            };
+            Assert.Equal(CreateOutcome.Failed, SqliteWorldStore.Create(Folder, Initial()).Outcome);
+        }
+        finally { DurableFiles.Trace = null; }
+        Assert.False(File.Exists(Key));
+        Assert.False(File.Exists(Path.Combine(Folder, "world.db.creating")));
+        using var created = Create();
+        Assert.Equal(WorldKeyStatus.Unsafe, created.Identity.KeyStatus);
+    }
+
+    [Fact]
+    public void NewDirectoriesAreOwnerOnlyRegardlessOfUmask()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        DurableFiles.CreateDirectory(Folder);
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(Folder));
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(_root));
+    }
+
+    [Fact]
     public void IdentityIsStableProtectedAndMovesWithStoppedFolder()
     {
         if (!OperatingSystem.IsLinux()) return;
@@ -48,12 +142,12 @@ public sealed class WorldIdentityTests : IDisposable
         }
         using (var store = Open()) Assert.Equal(identity, store.Identity);
         var moved = Path.Combine(_root, "moved");
-        Directory.CreateDirectory(moved);
+        DurableFiles.CreateDirectory(moved);
         foreach (var file in Directory.GetFiles(Folder)) File.Copy(file, Path.Combine(moved, Path.GetFileName(file)));
         File.SetUnixFileMode(Path.Combine(moved, WorldIdentity.KeyFile), WorldIdentity.SecretMode);
         using (var store = Open(moved)) Assert.Equal(identity, store.Identity);
         var recovered = Path.Combine(_root, "gameplay-only");
-        Directory.CreateDirectory(recovered);
+        DurableFiles.CreateDirectory(recovered);
         File.Copy(Directory.GetFiles(Path.Combine(Folder, "backups"), "*.db").Single(), Path.Combine(recovered, "world.db"));
         using var backup = Open(recovered);
         Assert.Equal(identity.Fingerprint, backup.Identity.Fingerprint);
@@ -157,7 +251,7 @@ public sealed class WorldIdentityTests : IDisposable
     public void UnknownKeyStagingIsNeverDeletedAndFailureLeavesLeaseFree()
     {
         if (!OperatingSystem.IsLinux()) return;
-        Directory.CreateDirectory(Folder);
+        DurableFiles.CreateDirectory(Folder);
         var staging = Key + ".creating";
         File.WriteAllText(staging, "not ours");
         for (var i = 0; i < 2; i++)

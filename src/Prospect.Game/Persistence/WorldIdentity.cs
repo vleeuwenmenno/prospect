@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -19,7 +20,7 @@ public enum WorldKeyStatus
 }
 
 /// <summary>Public immutable disk identity and the key condition at open, not a hosting authorization.</summary>
-public sealed record WorldIdentity(Guid WorldId, string PublicKey, string Fingerprint, WorldKeyStatus KeyStatus)
+public sealed partial record WorldIdentity(Guid WorldId, string PublicKey, string Fingerprint, WorldKeyStatus KeyStatus)
 {
     /// <summary>The only private key file. Database recovery copies do not contain it.</summary>
     public const string KeyFile = "world.key";
@@ -57,7 +58,7 @@ public sealed record WorldIdentity(Guid WorldId, string PublicKey, string Finger
             if (!SafeDirectory(folder) || new FileInfo(path).LinkTarget is not null)
                 return WorldKeyStatus.Unsafe;
             using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-            if (File.GetUnixFileMode(file.SafeFileHandle) != SecretMode)
+            if (!OwnedFile(file))
                 return WorldKeyStatus.Unsafe;
             if (file.Length is < 1 or > MaxKeyBytes)
                 return WorldKeyStatus.Unreadable;
@@ -97,7 +98,7 @@ public sealed record WorldIdentity(Guid WorldId, string PublicKey, string Finger
             finally { CryptographicOperations.ZeroMemory(bytes); }
         }
         catch (FileNotFoundException) { return WorldKeyStatus.Missing; }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or CryptographicException or ArgumentException or FormatException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or CryptographicException or ArgumentException or FormatException or TypeLoadException)
         {
             return WorldKeyStatus.Unreadable;
         }
@@ -105,25 +106,60 @@ public sealed record WorldIdentity(Guid WorldId, string PublicKey, string Finger
 
     internal static bool SafeDirectory(string folder)
     {
-        if (!OperatingSystem.IsLinux())
-            return false;
-        // Ancestors must not allow replacement by another user. Sticky shared roots (such as /tmp) are allowed.
-        for (var at = new DirectoryInfo(folder); at is not null; at = at.Parent)
-        {
-            if (at.LinkTarget is not null)
-                return false;
-            var mode = File.GetUnixFileMode(at.FullName);
-            if ((mode & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0 && (at.FullName == Path.GetFullPath(folder) || (mode & UnixFileMode.StickyBit) == 0))
-                return false;
-        }
-        return true;
+        if (!OperatingSystem.IsLinux()) return false;
+        // A trailing separator makes statx follow a final link while readlink refuses it, which would skip the
+        // target's ancestors; every checked path is therefore trimmed first.
+        try { return SafePath(Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder)), true, 0); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or TypeLoadException)
+        { return false; }
     }
+
+    private static bool SafePath(string path, bool leaf, int links)
+    {
+        if (links > 40) return false;
+        var directory = new DirectoryInfo(path);
+        if (directory.Parent is { } parent && !SafePath(parent.FullName, false, links)) return false;
+        // AT_SYMLINK_NOFOLLOW checks the link owner too: a sticky parent alone cannot protect another user's link.
+        if (Statx(-100, path, 0x100, 0x0b, out var stat) != 0 || (stat.Mask & 0x0b) != 0x0b
+            || (stat.Uid != GetEuid() && stat.Uid != 0)) return false;
+        // Validate both the link's containing path and the target's containing path.
+        if (directory.ResolveLinkTarget(false) is { } target)
+            return SafePath(Path.TrimEndingDirectorySeparator(target.FullName), leaf, links + 1);
+        if ((stat.Mode & 0xf000) != 0x4000) return false;
+        var mode = (UnixFileMode)(stat.Mode & 0xfff);
+        return (mode & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) == 0
+            || (!leaf && (mode & UnixFileMode.StickyBit) != 0);
+    }
+
+    private static bool OwnedFile(FileStream file)
+    {
+        // AT_EMPTY_PATH checks the opened inode, not a path another writer could replace.
+        return Statx(file.SafeFileHandle.DangerousGetHandle().ToInt32(), "", 0x1000, 0x0f, out var stat) == 0
+            && (stat.Mask & 0x0f) == 0x0f && stat.Uid == GetEuid() && stat.Links == 1
+            && stat.Mode == (0x8000 | (int)SecretMode);
+    }
+
+    // Linux statx has a fixed ABI on all architectures; unused fields still need their reserved space.
+    [StructLayout(LayoutKind.Explicit, Size = 256)]
+    private struct FileStat
+    {
+        [FieldOffset(0)] internal uint Mask;
+        [FieldOffset(16)] internal uint Links;
+        [FieldOffset(20)] internal uint Uid;
+        [FieldOffset(28)] internal ushort Mode;
+    }
+
+    [LibraryImport("libc", EntryPoint = "statx", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int Statx(int directory, string path, int flags, uint mask, out FileStat stat);
+
+    [LibraryImport("libc", EntryPoint = "geteuid")]
+    private static partial uint GetEuid();
 
     internal static byte[] CreateKey(string folder, string staging, Action acquired)
     {
-        if (!OperatingSystem.IsLinux() || !SafeDirectory(folder))
-            throw new IOException("World identity protection is unsupported or the folder permissions are unsafe.");
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        // Without proven protection retain only the public identity. Private play needs no signing key.
+        if (!OperatingSystem.IsLinux() || !SafeDirectory(folder)) return key.ExportSubjectPublicKeyInfo();
         var secret = key.ExportPkcs8PrivateKey();
         try
         {
@@ -140,6 +176,14 @@ public sealed record WorldIdentity(Guid WorldId, string PublicKey, string Finger
                         Share = FileShare.None,
                         UnixCreateMode = SecretMode,
                     });
+                    // A create mode narrowed by the umask, an ACL or the file system leaves an unprotected file. It
+                    // was created exclusively in a checked folder, so it is removed before anyone is told it exists.
+                    if (!OwnedFile(file))
+                    {
+                        file.Dispose();
+                        File.Delete(staging);
+                        return key.ExportSubjectPublicKeyInfo();
+                    }
                     acquired();
                     file.Write(bytes);
                     file.Flush(flushToDisk: true);

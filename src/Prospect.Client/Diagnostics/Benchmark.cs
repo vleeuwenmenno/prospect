@@ -6,7 +6,7 @@ namespace Prospect.Client.Diagnostics;
 /// Measures steady-state frame pacing and allocation for a fixed time and judges them against the project's
 /// targets: at least 144 frames per second and no managed allocation in the frame loop.
 /// </summary>
-internal sealed class Benchmark(float seconds)
+internal sealed class Benchmark(float seconds, int resizes)
 {
     private const float TargetFps = 144f;
 
@@ -17,10 +17,38 @@ internal sealed class Benchmark(float seconds)
     private int _allocatingFrames;
     private long _processBytesAtStart = -1;
     private readonly int _gen0AtStart = GC.CollectionCount(0);
+    private int _resizesAsked, _rebuildsAsked;
+    private int _swapchainRebuildsAtStart, _swapchainRebuilds;
+    private int _targetRebuildsAtStart, _targetRebuilds;
 
     public bool Finished => _elapsedMs >= seconds * 1000.0 || _frames == _frameMs.Length;
 
-    public void Record(FrameStats stats)
+    /// <summary>
+    /// True once for each resize the run was asked to make (<c>--bench-resize</c>), evenly spaced over the
+    /// measurement and never in its last frames, so that the rebuilding a resize causes is measured whole.
+    /// </summary>
+    public bool ResizeDue() => Due(ref _resizesAsked, 0.25);
+
+    /// <summary>
+    /// True once after each of those resizes, halfway to the next: the swapchain and the render targets are then
+    /// rebuilt at the size they have. That is the rebuild of a swapchain that went out of date or changed present
+    /// mode, and it measures a resize's work on a machine whose window manager will not resize the window.
+    /// </summary>
+    public bool RebuildDue() => Due(ref _rebuildsAsked, 0.75);
+
+    private bool Due(ref int asked, double phase)
+    {
+        if (asked >= resizes || _processBytesAtStart < 0 || _elapsedMs < (asked + phase) * seconds * 1000.0 / resizes)
+            return false;
+        asked++;
+        return true;
+    }
+
+    /// <summary>
+    /// Adds the frame that just ended. <paramref name="swapchainRebuilds"/> and <paramref name="targetRebuilds"/>
+    /// are the renderer's running counts; the report says how many fell inside the measurement.
+    /// </summary>
+    public void Record(FrameStats stats, int swapchainRebuilds, int targetRebuilds)
     {
         if (Finished)
             return;
@@ -29,8 +57,13 @@ internal sealed class Benchmark(float seconds)
         {
             // An exact process-wide count pauses every thread, so it is taken only at the two ends of the run.
             _processBytesAtStart = GC.GetTotalAllocatedBytes(precise: true);
+            _swapchainRebuildsAtStart = swapchainRebuilds;
+            _targetRebuildsAtStart = targetRebuilds;
             return;
         }
+
+        _swapchainRebuilds = swapchainRebuilds - _swapchainRebuildsAtStart;
+        _targetRebuilds = targetRebuilds - _targetRebuildsAtStart;
 
         _frameMs[_frames++] = stats.LastFrameMs;
         _elapsedMs += stats.LastFrameMs;
@@ -52,6 +85,10 @@ internal sealed class Benchmark(float seconds)
         var fpsOk = fps >= TargetFps;
         var allocOk = _threadBytes == 0 && processBytes == 0;
         var validationOk = GraphicsDevice.ValidationErrorCount == 0;
+        // The forced rebuilds always happen, so a run that asked for them and did not measure them has failed. The
+        // resizes are the window system's to grant: how many it granted is reported, not required.
+        var resizeOk = _resizesAsked == resizes && _rebuildsAsked == resizes && _swapchainRebuilds >= resizes && _targetRebuilds >= resizes;
+        var resized = Math.Max(0, _targetRebuilds - _rebuildsAsked);
 
         Console.WriteLine();
         Console.WriteLine("PROSPECT benchmark");
@@ -64,8 +101,11 @@ internal sealed class Benchmark(float seconds)
         Console.WriteLine($"  Allocated, render    {_threadBytes} bytes in {_allocatingFrames} frames");
         Console.WriteLine($"  Allocated, process   {processBytes} bytes (all threads)   target 0   {(allocOk ? "PASS" : "FAIL")}");
         Console.WriteLine($"  Gen-0 collections    {GC.CollectionCount(0) - _gen0AtStart}");
+        Console.WriteLine($"  Rebuilt, measured    swapchain {_swapchainRebuilds}, render targets {_targetRebuilds}{(resizes > 0 ? $"   target >= {resizes} each (forced)   {(resizeOk ? "PASS" : "FAIL")}" : "")}");
+        if (resizes > 0)
+            Console.WriteLine($"  Resized, measured    {resized} times for {resizes} asked{(resized < resizes ? "   (the window manager kept the window's size)" : "")}");
         Console.WriteLine($"  Validation           {(gpu.ValidationEnabled ? $"{GraphicsDevice.ValidationErrorCount} errors" : "layers not active")}   {(validationOk ? "PASS" : "FAIL")}");
         Console.WriteLine();
-        return fpsOk && allocOk && validationOk;
+        return fpsOk && allocOk && validationOk && resizeOk;
     }
 }
