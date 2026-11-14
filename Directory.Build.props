@@ -20,6 +20,13 @@
     <Version>0.1.0</Version>
     <Product>PROSPECT</Product>
   </PropertyGroup>
+  <!-- Thread-pool threads never time out. An idle worker exits after 20 s and the runtime then takes a few bytes of
+       managed memory on its way out (64 bytes, seen in a bare console app with no game code), so a long measurement of
+       "no allocation on any thread" failed at random when the pool built up at startup expired inside it. Keeping the
+       threads costs only the idle threads the pool already made. Tests read it back in ThreadPoolConfigurationTests. -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.Threading.ThreadPool.ThreadsToKeepAlive" Value="-1" />
+  </ItemGroup>
   <!-- Apple Silicon builds natively: BRUTAL ships osx-arm64 libraries and Vulkan comes from MoltenVK. -->
   <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('OSX')) And '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'Arm64'">
     <RuntimeIdentifiers>$(RuntimeIdentifiers);osx-arm64</RuntimeIdentifiers>
