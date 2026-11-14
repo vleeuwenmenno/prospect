@@ -215,7 +215,7 @@
     {
       "id": "oreGradeMin",
       "name": "Ore grade",
-      "description": "Clamps grade within ore-bearing rocks after the grade multiplier. 0\u20131 means 0\u2013100%; this does not change how many rocks carry ore. Material grade limits apply afterwards.",
+      "description": "Clamps a rock's ore, all its resources together, after the grade multiplier. 0\u20131 means 0\u2013100%, but a rock always keeps some rock (at most 70% ore); this does not change how many rocks carry ore. Material grade limits apply afterwards.",
       "kind": "multiplier",
       "default": 0,
       "minimum": 0,

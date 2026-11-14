@@ -382,6 +382,15 @@ internal sealed partial class ScreenHost
         tonnes >= 1e6f ? Kit.F($"{tonnes / 1e6f:0.00} MT") : Kit.F($"{tonnes / 1e3f:0.0} KT");
 
     /// <summary>
+    /// A resource mixed in with an asteroid's main ore as a scan found it: its name and share, or its name and
+    /// "trace" when the scanner did not resolve a figure. Empty when there is none.
+    /// </summary>
+    private static ReadOnlySpan<byte> MixText(Galaxy galaxy, int resource, float share) =>
+        resource < 0 || resource >= galaxy.Resources.Length ? default
+        : share > 0 ? Kit.F($"{galaxy.Resources[resource].Name} {share * 100f:0} %")
+        : Kit.F($"{galaxy.Resources[resource].Name} trace");
+
+    /// <summary>
     /// What the target panel says of an asteroid below its title: what the player's scan found (ore and its grade as a
     /// bar, the host rock's share, mass and size, who scanned it and how long ago) or that it is unscanned, with the
     /// key. A detail the scanner's quality did not resolve is not shown. Returns the height used, unscaled pixels
@@ -424,6 +433,11 @@ internal sealed partial class ScreenHost
         var y = at.Y;
         var rowHeight = Kit.Px(18);
         var tier = look.Tier(record.Quality);
+
+        // A named resource with no share is a trace: it is there, below what the scanner resolves. What the shares
+        // leave of the asteroid is then rock and traces together, so it is not called rock.
+        var oreShare = record.Grade + record.Mix1Share + record.Mix2Share;
+        var traces = record.Resource >= 0 && record.Grade <= 0 || record.Mix1 >= 0 && record.Mix1Share <= 0 || record.Mix2 >= 0 && record.Mix2Share <= 0;
         if (record.Resource >= 0 && record.Resource < galaxy.Resources.Length)
         {
             var resource = galaxy.Resources[record.Resource];
@@ -432,7 +446,9 @@ internal sealed partial class ScreenHost
             var name = Kit.Measure(_ui.SansMedium, Theme.FontCaption, resource.Name).X;
             Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(at.X + Kit.Px(14), y + Kit.Px(1)), Theme.Text, resource.Name);
             var barLeft = at.X + Kit.Px(14) + name + Kit.Px(Theme.Space2);
-            var reading = Kit.F($"{record.Grade * 100f:0} % ORE   ROCK {(1f - record.Grade) * 100f:0} %");
+            var reading = record.Grade <= 0 ? "TRACE"u8
+                : traces ? Kit.F($"{record.Grade * 100f:0} % ORE   REST {(1f - oreShare) * 100f:0} %")
+                : Kit.F($"{record.Grade * 100f:0} % ORE   ROCK {(1f - oreShare) * 100f:0} %");
             var readingWidth = Kit.Measure(_ui.Mono, Theme.FontCaption, reading).X;
             var barRight = Math.Max(barLeft + Kit.Px(24), at.X + width - readingWidth - Kit.Px(Theme.Space2));
             DrawFractionBar(draw, new float2(barLeft, y + Kit.Px(5)), barRight - barLeft, Kit.Px(7), record.Grade, StarColor(resource.Color));
@@ -446,8 +462,13 @@ internal sealed partial class ScreenHost
 
         y += rowHeight;
         var mass = MassText(record.Mass);
-        var ore = MassText(record.Mass * record.Grade);
-        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, new float2(at.X, y), Theme.TextDim, Kit.F($"MASS {mass}   ORE {ore}"), width);
+        var ore = MassText(record.Mass * oreShare);
+        var first = MixText(galaxy, record.Mix1, record.Mix1Share);
+        var second = MixText(galaxy, record.Mix2, record.Mix2Share);
+        var masses = second.Length != 0 ? Kit.F($"MASS {mass}   ORE {ore}   + {first}, {second}")
+            : first.Length != 0 ? Kit.F($"MASS {mass}   ORE {ore}   + {first}")
+            : Kit.F($"MASS {mass}   ORE {ore}");
+        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, new float2(at.X, y), Theme.TextDim, masses, width);
         y += rowHeight;
         var age = ModuleAge.Seconds(record.RecordedTick, snapshot.ServerTick);
         Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(at.X, y), tier.Rgb, tier.Label);

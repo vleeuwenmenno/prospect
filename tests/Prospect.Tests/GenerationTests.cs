@@ -161,7 +161,7 @@ public sealed class GalaxyTests
         Assert.Equal(RecordedHash, hash);
     }
 
-    private const ulong RecordedHash = 15907186463901216483;
+    private const ulong RecordedHash = 14592807372771131472;
 
     /// <summary>A second module, for the tests only: it draws from its own stream and remembers what came out.</summary>
     private sealed class ProbeModule(string id, int draws) : SectorModule(id)
@@ -403,7 +403,8 @@ public sealed class GalaxyTests
                         continue;
                     ore++;
                     Assert.True(summary.Character.Has(rock.Resource), $"sector {coord} has a rock of a resource it does not have");
-                    Assert.InRange(rock.Grade, 0.05f, 1f);
+                    Assert.InRange(rock.Ore, 0.05f, Fields(galaxy).MaxOre + 1e-6f);
+                    Assert.InRange(rock.Grade, 0.025f, rock.Ore);
                 }
 
                 if (summary.Character.Level == 0)
@@ -450,7 +451,7 @@ public sealed class GalaxyTests
                     if (content.Asteroids[i].Resource < 0)
                         continue;
                     ore++;
-                    grade += content.Asteroids[i].Grade;
+                    grade += content.Asteroids[i].Ore;
                 }
 
                 if (summary.Character.Level == 1)
@@ -469,7 +470,7 @@ public sealed class GalaxyTests
 
         Assert.True(poor > 10 && rich > 10, $"{poor} poor and {rich} very rich sectors");
         Assert.True(richShare / rich > poorShare / poor, "rich sectors should carry more ore even when the share saturates at 100%");
-        Assert.True(richGrade / rich > poorGrade / poor + 0.15, "and of a better grade");
+        Assert.True(richGrade / rich > poorGrade / poor + 0.1, $"and of a better grade: {richGrade / rich} against {poorGrade / poor}");
     }
 
     [Fact]

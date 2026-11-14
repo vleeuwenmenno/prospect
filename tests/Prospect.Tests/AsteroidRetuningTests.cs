@@ -82,14 +82,14 @@ public sealed class AsteroidRetuningTests
     }
 
     [Theory]
-    [InlineData(1, false, 0, 0, "8F2D633D2E399158")]
-    [InlineData(2, false, 0, 0, "EA4340D7658DCAC9")]
-    [InlineData(5, false, 0, 0, "79135253ED01588D")]
-    [InlineData(5, true, 0, 0, "DCEBD9305F098398")]
-    [InlineData(1, false, -26, -31, "A7EDE866BA60F8A3")]
-    [InlineData(2, false, -26, -31, "0C4CC40B74AE0B95")]
-    [InlineData(5, false, -26, -31, "2335622FB5772AC6")]
-    [InlineData(5, true, -26, -31, "9C73B0E19B1AAB34")]
+    [InlineData(1, false, 0, 0, "315A7D01B3DCCB14")]
+    [InlineData(2, false, 0, 0, "2F29E0FD7EA3D71E")]
+    [InlineData(5, false, 0, 0, "11FE3811AE831F4D")]
+    [InlineData(5, true, 0, 0, "C0AC1C1DBFAA9C8D")]
+    [InlineData(1, false, -26, -31, "48325B560DACD0C3")]
+    [InlineData(2, false, -26, -31, "F84AAB51E8FF5D5D")]
+    [InlineData(5, false, -26, -31, "AFDC8D1F15DF78DE")]
+    [InlineData(5, true, -26, -31, "7961CB83218C4F6C")]
     public void PlacementOptimizationKeepsRecordedSectorBytes(int amount, bool all, int x, int z, string expected)
     {
         // Recorded with generation version 4: fields in world space, a stream for each rock and density noise.
@@ -221,9 +221,9 @@ public sealed class AsteroidRetuningTests
     }
 
     [Theory]
-    [InlineData(20, "86A13E900A92B076")]
-    [InlineData(80, "9030D0483872B74C")]
-    [InlineData(160, "7ADDD50EB8C590C0")]
+    [InlineData(20, "0C3D3225F40FE1E2")]
+    [InlineData(80, "9CC4F18FD845EAB9")]
+    [InlineData(160, "3A555DF7127927DC")]
     public void SectorSizeOptimizationKeepsRecordedBytes(int km, string expected)
     {
         var galaxy = World($"sectorSize={km}").WithSeed(11);
@@ -269,7 +269,7 @@ public sealed class AsteroidRetuningTests
         galaxy.Generate(coord, sector);
         Assert.Equal(new SectorCoord(-39, 0, -19), coord);
         Assert.Equal(8711, sector.AsteroidCount);
-        Assert.Equal("1173DCB7646A496B", Sectors.Hash(sector).ToString("X16"));
+        Assert.Equal("6FB3FDAD0D214BA9", Sectors.Hash(sector).ToString("X16"));
     }
 
     [Fact]

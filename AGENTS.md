@@ -306,6 +306,14 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   name asteroids by index) and record the new hash in
   `GalaxyTests.GenerationMatchesTheRecordedGalaxyOnEveryMachine`. Retuning `galaxy.json` needs neither: that test
   runs on a frozen copy in `tests/Prospect.Tests/fixtures`.
+- **What an asteroid is made of:** a main ore (`Resource`, `Grade`), up to two mix-ins (`Mix1`, `Mix2` and their
+  shares) and always rock; every share is a share of the rock's mass. Figures are content (`resources[].partners`,
+  `ore.maxOre`, `ore.mixIns` in `galaxy.json`); a mix-in is only ever a partner the sector's character carries, and
+  its draws come from `MixDraws` alone, so they never move a rock. A scan publishes each share rounded down to the
+  scanner's resolution (`ModuleScanRules.Resolved`); a named resource with share zero is a trace, never shown as a
+  figure. `-1` means none, and a record built by hand must set `Mix1` and `Mix2` to it.
+  `ModuleObservationRules.Valid` holds the shape for the wire and the save. Rules in `docs/roadmap/modules.md`;
+  `AsteroidCompositionTests` holds them.
 - **A new hull design:** add it to `content/ships/fleet.json`. Stats are derived from blocks; do not add stat
   fields to the design file.
 - **A new world setting:** one entry in `content/rules/settings.json`, its number applied in `FlightRules.Under` (flight) or `Galaxy.Under` / `AsteroidFieldsModule.Under` (generation),

@@ -1428,6 +1428,8 @@ public sealed class SqliteWorldStoreTests : IDisposable
         for (var i = 0; i < snapshot.ModuleObservations.Length; i++)
             snapshot.ModuleObservations[snapshot.ModuleObservationCount++] = new ModuleObservation
             {
+                Mix1 = -1,
+                Mix2 = -1,
                 Owner = (uint)(i % limits.MaxOwners + 1),
                 Family = ModuleFamily.AsteroidLocator,
                 Sector = new SectorCoord(i / limits.MaxOwners, 0, 0),

@@ -5,14 +5,15 @@ namespace Prospect.Game.Persistence;
 
 public static partial class WorldSnapshotCodec
 {
-    // Save version 4 owns this layout; it is deliberately not an alias for a network message.
-    internal const int ModuleObservationBytes = 115;
+    // Save version 5 owns this layout; it is deliberately not an alias for a network message.
+    internal const int ModuleObservationBytes = 131;
 
     private static void WriteModule(ref NetWriter writer, in ModuleObservation record)
     {
         writer.WriteUInt32(record.Owner); writer.WriteByte((byte)record.Family); writer.WriteByte((byte)record.Quality);
         Write(ref writer, record.Sector); writer.WriteInt32(record.Index); writer.WriteInt64(record.RecordedTick); writer.WriteUInt32(record.ContentRevision);
         Write(ref writer, record.Position); writer.WriteSingle(record.Radius); writer.WriteSingle(record.Mass); writer.WriteSingle(record.Grade); writer.WriteInt32(record.Resource);
+        writer.WriteInt32(record.Mix1); writer.WriteSingle(record.Mix1Share); writer.WriteInt32(record.Mix2); writer.WriteSingle(record.Mix2Share);
         for (var i = 0; i < GasComposition.Capacity; i++) writer.WriteSingle(record.Gas.Shares[i]);
         writer.WriteSingle(record.Gas.Purity); writer.WriteSingle(record.Gas.Density); writer.WriteByte(record.Gas.Region);
     }
@@ -32,7 +33,11 @@ public static partial class WorldSnapshotCodec
             Radius = reader.ReadSingle(),
             Mass = reader.ReadSingle(),
             Grade = reader.ReadSingle(),
-            Resource = reader.ReadInt32()
+            Resource = reader.ReadInt32(),
+            Mix1 = reader.ReadInt32(),
+            Mix1Share = reader.ReadSingle(),
+            Mix2 = reader.ReadInt32(),
+            Mix2Share = reader.ReadSingle()
         };
         for (var i = 0; i < GasComposition.Capacity; i++) record.Gas.Shares[i] = reader.ReadSingle();
         record.Gas.Purity = reader.ReadSingle(); record.Gas.Density = reader.ReadSingle(); record.Gas.Region = reader.ReadByte();

@@ -95,6 +95,8 @@ internal sealed class ModuleSurveyWorker : IDisposable
                 Index = sample.Region,
                 Position = position,
                 Resource = -1,
+                Mix1 = -1,
+                Mix2 = -1,
                 Gas = sample
             };
             return;
@@ -137,6 +139,9 @@ internal sealed class ModuleSurveyWorker : IDisposable
     private void Add(Slot slot, SectorCoord sector, int index, in Asteroid rock)
     {
         var solid = rock.Radius * RockField.SolidFraction;
+        // A mix-in is one with a share: bare rock has none, and a second is only named after a first.
+        var first = rock.Resource >= 0 && rock.Mix1 >= 0 && rock.Mix1Share > 0;
+        var second = first && rock.Mix2 >= 0 && rock.Mix2Share > 0;
         slot.Results[slot.Count++] = new ModuleObservation
         {
             Owner = slot.Owner,
@@ -147,7 +152,11 @@ internal sealed class ModuleSurveyWorker : IDisposable
             Radius = rock.Radius,
             Mass = _galaxy.AsteroidDensity * 4.18879f * solid * solid * solid,
             Resource = rock.Resource,
-            Grade = rock.Grade
+            Grade = rock.Grade,
+            Mix1 = first ? rock.Mix1 : -1,
+            Mix1Share = first ? rock.Mix1Share : 0,
+            Mix2 = second ? rock.Mix2 : -1,
+            Mix2Share = second ? rock.Mix2Share : 0
         };
     }
 

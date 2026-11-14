@@ -20,13 +20,20 @@
     "Mor", "Pra", "Lun", "Sig", "Var", "Ke", "Ond", "Rhe", "Ty", "Ulm", "Gan", "Fen", "Yar", "Qua"
   ],
   "resources": [
-    { "id": "iron", "name": "Iron", "color": [0.62, 0.36, 0.26], "weight": 10, "coreBias": 0.0, "presence": 0.8 },
-    { "id": "copper", "name": "Copper", "color": [0.78, 0.47, 0.25], "weight": 6, "coreBias": 0.2, "presence": 0.6 },
-    { "id": "nickel", "name": "Nickel", "color": [0.55, 0.6, 0.52], "weight": 5, "coreBias": 0.4, "presence": 0.5 },
-    { "id": "titanium", "name": "Titanium", "color": [0.52, 0.6, 0.72], "weight": 3, "coreBias": 1.5, "presence": 0.3 },
-    { "id": "silver", "name": "Silver", "color": [0.8, 0.82, 0.86], "weight": 1.5, "coreBias": 2.5, "presence": 0.18 },
-    { "id": "gold", "name": "Gold", "color": [0.92, 0.74, 0.28], "weight": 0.8, "coreBias": 4.0, "presence": 0.1 },
-    { "id": "ice", "name": "Ice", "color": [0.65, 0.85, 1.0], "weight": 2, "coreBias": 0.0, "presence": 1.0 }
+    { "id": "iron", "name": "Iron", "color": [0.62, 0.36, 0.26], "weight": 10, "coreBias": 0.0, "presence": 0.8,
+      "partners": [{ "id": "nickel", "weight": 4 }, { "id": "titanium", "weight": 1 }] },
+    { "id": "copper", "name": "Copper", "color": [0.78, 0.47, 0.25], "weight": 6, "coreBias": 0.2, "presence": 0.6,
+      "partners": [{ "id": "silver", "weight": 2 }, { "id": "gold", "weight": 1 }] },
+    { "id": "nickel", "name": "Nickel", "color": [0.55, 0.6, 0.52], "weight": 5, "coreBias": 0.4, "presence": 0.5,
+      "partners": [{ "id": "iron", "weight": 2 }, { "id": "copper", "weight": 1 }] },
+    { "id": "titanium", "name": "Titanium", "color": [0.52, 0.6, 0.72], "weight": 3, "coreBias": 1.5, "presence": 0.3,
+      "partners": [{ "id": "iron", "weight": 1 }] },
+    { "id": "silver", "name": "Silver", "color": [0.8, 0.82, 0.86], "weight": 1.5, "coreBias": 2.5, "presence": 0.18,
+      "partners": [{ "id": "copper", "weight": 1 }, { "id": "gold", "weight": 1 }] },
+    { "id": "gold", "name": "Gold", "color": [0.92, 0.74, 0.28], "weight": 0.8, "coreBias": 4.0, "presence": 0.1,
+      "partners": [{ "id": "silver", "weight": 1 }, { "id": "copper", "weight": 1 }] },
+    { "id": "ice", "name": "Ice", "color": [0.65, 0.85, 1.0], "weight": 2, "coreBias": 0.0, "presence": 1.0,
+      "partners": [] }
   ],
   "sectorCharacter": {
     "regionSectors": 6,
@@ -82,7 +89,8 @@
         { "name": "Huge", "weight": 0.2, "radius": [500, 1400] },
         { "name": "Giant", "weight": 0.04, "radius": [1400, 3000] }
       ],
-      "ore": { "share": [0.1, 0.85], "grade": [0.1, 1.0], "gradeFromRichness": 0.5 },
+      "ore": { "share": [0.1, 0.85], "grade": [0.07, 0.7], "gradeFromRichness": 0.5, "maxOre": 0.7,
+               "mixIns": { "firstChance": 0.6, "secondChance": 0.4, "firstShare": [0.12, 0.35], "secondShare": [0.02, 0.12] } },
       "home": { "asteroids": 750, "length": 4800, "width": 3400, "height": 1300, "offset": [0, -60, -1500] }
     },
     { "id": "gas-clouds", "type": "gasClouds", "chance": 0.04, "centerReach": 1.0, "halfSizeShare": [0.1, 0.14],

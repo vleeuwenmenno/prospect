@@ -12,7 +12,7 @@ public sealed class ModuleProtocolTests
     {
         var records = new ModuleObservation[ModuleMessage.MaxObservations];
         for (var i = 0; i < records.Length; i++) records[i] = new()
-        { Owner = 3, Family = ModuleFamily.AsteroidScanner, Sector = new(1, 2, 3), Index = i, RecordedTick = 9, Radius = 10, Mass = 100, Resource = 2, Grade = .5f };
+        { Owner = 3, Family = ModuleFamily.AsteroidScanner, Sector = new(1, 2, 3), Index = i, RecordedTick = 9, Radius = 10, Mass = 100, Resource = 2, Grade = .5f, Mix1 = 0, Mix1Share = .15f, Mix2 = 4, Mix2Share = 0 };
         var bytes = new byte[ModuleMessage.MaxWireSize];
         var writer = new NetWriter(bytes);
         var scan = new ModuleScanView { Serial = 4, Family = ModuleFamily.AsteroidScanner, State = ModuleScanState.Completed, StartedTick = 1, CompletesTick = 5, GasCooldownUntilTick = 10, AsteroidCooldownUntilTick = 20, LocatorCooldownUntilTick = 30 };
@@ -30,6 +30,7 @@ public sealed class ModuleProtocolTests
         Assert.Equal((10, 20, 30), (actual.GasCooldownUntilTick, actual.AsteroidCooldownUntilTick, actual.LocatorCooldownUntilTick));
         Assert.Equal(records[0].Position, decoded[0].Position);
         Assert.Equal(records[0].Grade, decoded[0].Grade);
+        Assert.Equal((0, .15f, 4, 0f), (decoded[0].Mix1, decoded[0].Mix1Share, decoded[0].Mix2, decoded[0].Mix2Share));
         records[0].Mass = float.NaN;
         writer = new NetWriter(bytes); ModuleMessage.Write(ref writer, scan, records);
         reader = new NetReader(bytes.AsSpan(1));

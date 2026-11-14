@@ -17,7 +17,7 @@ The interface is built (see UI below). Mining, inventory installation and knowle
 ## Decided: surveys
 
 - A gas scan reveals local cloud composition, purity and density, with detail determined by equipment quality.
-- An asteroid scan targets sector + generated index and reveals resource/grade, mass and size.
+- An asteroid scan targets sector + generated index and reveals main ore, mix-ins and their shares, mass and size.
 - A locator pulse reveals coarse dominant-resource classifications and sampled positions in its sphere.
 - Knowledge belongs to its owner, ages by observation tick, survives saves and is never automatically shared.
 - Future mining must increment asteroid content revisions and invalidate observed analysis when that change is learned.
@@ -58,8 +58,27 @@ On the pod a gas scan nets about -1 MW, an asteroid scan -4 MW, a locator pulse 
 
 Base accuracy is 0.2: percentage observations resolve 5 percentage points; Alien Tech resolves one point.
 All six tier multipliers are content data, not hard-coded quality tables.
-Asteroids currently carry one resource index and grade (ore fraction); multi-resource composition is decided
-(see "Decided: asteroid composition") and not yet built. Bare rock has resource -1; ice is the existing ice resource.
+Asteroids carry a main ore (`Resource`, `Grade`) and up to two mix-ins (`Mix1`, `Mix1Share`, `Mix2`, `Mix2Share`).
+Every share is a share of the asteroid's mass; `Asteroid.Ore` is their sum and never exceeds `ore.maxOre` (0.7).
+Bare rock has resource -1 and no mix-in; ice is the existing ice resource and takes none.
+
+## Generated asteroid composition
+
+Content, all in `galaxy/galaxy.json`:
+
+- `resources[].partners`: `[{ "id", "weight" }]`, the resources that may be mixed in when this one is the main ore.
+- `ore.maxOre`: the most of a rock that is ore. No world setting lifts it; grade settings clamp below it.
+- `ore.mixIns`: `firstChance`, `secondChance` (a second only after a first), `firstShare`, `secondShare`.
+- The two shares are parts of the rock's ore. `secondShare` lies under `firstShare` and their maxima stay under 0.5,
+  so shares always run main ≥ first ≥ second. Loading refuses content that breaks this.
+
+Rules:
+
+- A rock's ore is drawn as before (richness, its own draw, grade settings), capped at `maxOre`, then split.
+- A mix-in is one of the main ore's partners that the sector's character carries (`character.Has`), by weight.
+  A resource a sector does not have is never found there, mixed in or not; setting its abundance to zero removes it.
+- Mix-ins use their own stream (`MixDraws`), six draws a rock: placement, shape, order and main ore are unchanged.
+- Measured, seed 42, default settings: 36 % of ore rocks have a mix-in, 6 % have two; 18 % of ore sectors have none.
 
 ## Generated gas contract
 
@@ -70,14 +89,14 @@ Density follows the smooth sensor envelope; outside samples have zero density.
 Named gases, weights by kind and purity bounds are shared content in `galaxy/galaxy.json.gasComposition`.
 Cold favors water vapour/ammonia; lightning favors ionised hydrogen/xenon. Sampling allocates nothing.
 
-Composition adds generated natural data, so generation is 7 even though placement and asteroid ordering are unchanged.
-The frozen galaxy hash includes mixture shares, purity and density: `15907186463901216483` on Linux x64.
+Gas composition and asteroid mix-ins add generated natural data, so generation is 8 even though placement and asteroid ordering are unchanged.
+The frozen galaxy hash includes asteroid mixes, mixture shares, purity and density: `14592807372771131472` on Linux x64.
 Cross-platform execution of the new hash remains unverified.
 
 ## Server execution
 
 Generation runs on a dedicated worker with preallocated connection mailboxes, never on the tick thread.
-The worker's sector buffer is sized for the largest sector when the server is made (`Galaxy.Reserve`, about 2.4 MB),
+The worker's sector buffer is sized for the largest sector when the server is made (`Galaxy.Reserve`, about 2.7 MB),
 so the first scan takes no memory and neither does any later one. Only a sector whose candidate rocks exceed twice
 `maxPerSector` would grow the key buffer, once.
 `make bench-scans` runs each family repeating and fails on any managed allocation; `ModuleScanAllocationTests` covers the
@@ -113,10 +132,14 @@ Candidates are checked at their current positions before publication, so out-of-
 
 Progress uses authoritative world tick and StartedTick/CompletesTick only while Scanning.
 Gas shares omitted by accuracy remain unresolved; do not renormalize them or infer missing gas names.
-Locator records deliberately contain zero radius/mass/grade. Their positions are observations, not live tracking.
+An asteroid analysis names every resource in the rock: `Resource`, `Mix1`, `Mix2` (-1 for none).
+Each share (`Grade`, `Mix1Share`, `Mix2Share`) is whole steps of the scanner's resolution, rounded down (`ModuleScanRules.Resolved`).
+A named resource with share zero is a trace: present, under one step, no figure claimed. Never show it as 0 % or guess.
+Ore mass of a resource is `Mass` times its share. What the shares leave of one is rock plus traces, not rock alone.
+Locator records deliberately contain zero radius/mass/grade and no mix-in. Their positions are observations, not live tracking.
 
-Protocol 48: ModuleScan (33), reliable, 18 bytes; ModuleSurvey (34), reliable, at most 1015 bytes.
-The publication is a 95-byte header (three cooldown ticks, one per family) plus at most eight 115-byte observations.
+Protocol 49: ModuleScan (33), reliable, 18 bytes; ModuleSurvey (34), reliable, at most 1143 bytes.
+The publication is a 95-byte header (three cooldown ticks, one per family) plus at most eight 131-byte observations.
 Admission, catalogue readiness and normal receive/rate budgets precede request decoding.
 Only the receiving owner's records are sent; the client rejects a packet containing a foreign owner.
 Snapshot buffers are copied, not shared with simulation state. Publication and active ticks allocate nothing.
@@ -129,11 +152,11 @@ Gas index is octant; asteroid index is its generated identity. Locator and detai
 Capacity is checked before growth; a completion that does not fit is refused without evicting old knowledge.
 RecordedTick preserves age. ContentRevision is zero while composition is immutable; mining must supply revision/invalidation rules.
 
-WorldSnapshot holds the counted ModuleObservations prefix. Save codec 4 owns its layout independently of network messages.
+WorldSnapshot holds the counted ModuleObservations prefix. Save codec 5 owns its layout (131 bytes an observation) independently of network messages.
 Capture copies into a preallocated buffer; the save worker alone writes it.
-Loading checks owner, uniqueness, capacity, finite values, observation tick, resource catalogue and generated target existence.
+Loading checks owner, uniqueness, capacity, finite values, a possible mix, observation tick, resource catalogue (mix-ins too) and generated target existence.
 Active scans and cooldowns are transient and reset on load. Generated mixtures are recomputed; observed values are retained unchanged.
-Evaluator version is 10; protocol 48; generation 7; save codec 4. Older incompatible saves are refused untouched, without migration.
+Evaluator version is 10; protocol 49; generation 8; save codec 5. Older incompatible saves are refused untouched, without migration.
 
 ## Decided: interface
 

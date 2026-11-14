@@ -489,7 +489,7 @@ alongside `FlightRules.Under`; repeated applications never compound and other se
   generated sector summaries use actual counts. Arrival clearance and resource availability remain enforced.
 - Live defaults use the former maximum asteroid multiplier preset as 1×; seven multipliers accept up to 5×.
   Content and the absolute count maximum now allow 20,480 rocks per sector. Dense defaults may exceed old clipping.
-  Radius stays within 0.75–6,000 m controls and field fit; occurrence, ore share and grade cap at 100%.
+  Radius stays within 0.75–6,000 m controls and field fit; occurrence and ore share cap at 100%, a rock's ore at `ore.maxOre` (70%).
   Placement has ten attempts per rock and can omit crowded rocks, even below the requested minimum.
   Protocol 33 separates this retuning; the frozen legacy fixture and block evaluator are unchanged.
 
@@ -936,7 +936,8 @@ All new tuning is in existing shared files (`galaxy/galaxy.json`, `rules/setting
 ## Scanning modules
 
 Protocol 47 added reliable ModuleScan (33, 18 bytes) and ModuleSurvey (34). Protocol 48 gives each family its own cooldown tick,
-so ModuleSurvey is at most 1015 bytes: a 95-byte scan header and up to eight 115-byte observations.
+and protocol 49 adds an asteroid's mix-ins to an observation,
+so ModuleSurvey is at most 1143 bytes: a 95-byte scan header and up to eight 131-byte observations.
 Requests pass admission, catalogue readiness and the normal receive/rate budgets before decoding.
 Client reliable budgets reserve one module request; newer queued intents survive retries.
 
@@ -957,9 +958,11 @@ Each owner retains at most 1024 records; capacity refuses a whole completion wit
 
 Gas mixtures come from shared `galaxy/galaxy.json.gasComposition`: eight named gases, kind weights and purity bounds.
 Eight local octants have seeded mixtures; cold favors water/ammonia, lightning ionised hydrogen/xenon.
-Generation 7 adds this natural data without changing placement/order. Frozen extended hash: `15907186463901216483`.
+Generation 7 added this natural data without changing placement/order.
+Generation 8 adds asteroid mix-ins the same way: `resources[].partners`, `ore.maxOre` and `ore.mixIns` in `galaxy/galaxy.json`.
+Frozen extended hash: `14592807372771131472`.
 
-Save codec 4 stores observation owner, key, age, revision and observed values; generated composition is not stored.
+Save codec 5 stores observation owner, key, age, revision and observed values, mix-ins included; generated composition is not stored.
 Load rejects invalid/duplicate keys, owners, times, values, unknown resources and nonexistent generated targets.
 Active scans/cooldowns reset on load. Old incompatible saves are refused untouched; no migration is provided.
 The galaxy seed still reaches clients, so owner filtering does not claim seed secrecy.

@@ -284,7 +284,7 @@ public sealed class ModuleInterfaceTests
 
     private static ModuleObservation Gas(int sector, int region, float purity, float density, long tick, ModuleQuality quality, params float[] shares)
     {
-        var record = new ModuleObservation { Owner = 1, Family = ModuleFamily.GasScanner, Quality = quality, Sector = new SectorCoord(sector, 0, 0), Index = region, RecordedTick = tick, Resource = -1 };
+        var record = new ModuleObservation { Mix1 = -1, Mix2 = -1, Owner = 1, Family = ModuleFamily.GasScanner, Quality = quality, Sector = new SectorCoord(sector, 0, 0), Index = region, RecordedTick = tick, Resource = -1 };
         record.Gas.Region = (byte)region;
         record.Gas.Purity = purity;
         record.Gas.Density = density;
@@ -300,7 +300,7 @@ public sealed class ModuleInterfaceTests
         view.Records[view.Count++] = Gas(5, 0, 0.5f, 0.8f, 100, ModuleQuality.Common, 0.5f, 0.25f, 0.05f);
         view.Records[view.Count++] = Gas(5, 3, 0.7f, 0.4f, 300, ModuleQuality.Rare, 0.3f, 0.35f, 0.05f);
         view.Records[view.Count++] = Gas(9, 1, 0.9f, 1f, 200, ModuleQuality.Epic, 1f);
-        view.Records[view.Count++] = new ModuleObservation { Owner = 1, Family = ModuleFamily.AsteroidScanner, Sector = new SectorCoord(5, 0, 0), Index = 2, Resource = 0, Radius = 10, Mass = 5 };
+        view.Records[view.Count++] = new ModuleObservation { Mix1 = -1, Mix2 = -1, Owner = 1, Family = ModuleFamily.AsteroidScanner, Sector = new SectorCoord(5, 0, 0), Index = 2, Resource = 0, Radius = 10, Mass = 5 };
         var ledger = new GasLedger();
         ledger.Update(view, null);
         Assert.Equal(2, ledger.Count);
@@ -432,7 +432,7 @@ public sealed class ModuleInterfaceTests
         var view = new ModuleKnowledgeView();
         for (var i = 0; i < 40; i++)
             view.Records[view.Count++] = Gas(i, i & 7, 0.5f, 0.5f, 10 + i, ModuleQuality.Common, 0.5f, 0.25f);
-        view.Records[view.Count++] = new ModuleObservation { Owner = 1, Family = ModuleFamily.AsteroidLocator, Resource = 1, Position = inside };
+        view.Records[view.Count++] = new ModuleObservation { Mix1 = -1, Mix2 = -1, Owner = 1, Family = ModuleFamily.AsteroidLocator, Resource = 1, Position = inside };
         var ledger = new GasLedger();
         var target = new GasTargeting();
         var track = new ModuleTracker();

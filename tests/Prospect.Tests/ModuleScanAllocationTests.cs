@@ -166,7 +166,7 @@ public sealed class ModuleScanAllocationTests
             // A cloud at a time, each a rebuild that meets a kind it has not looked up.
             for (var i = 0; i < found; i++)
             {
-                var record = new ModuleObservation { Owner = 1, Family = ModuleFamily.GasScanner, Sector = anchors[i], Index = i & 7, RecordedTick = 10 + i, Quality = ModuleQuality.Common };
+                var record = new ModuleObservation { Mix1 = -1, Mix2 = -1, Owner = 1, Family = ModuleFamily.GasScanner, Sector = anchors[i], Index = i & 7, RecordedTick = 10 + i, Quality = ModuleQuality.Common };
                 record.Gas.Shares[0] = 0.5f;
                 record.Gas.Purity = 0.5f;
                 record.Gas.Density = 0.5f;

@@ -294,7 +294,9 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   the menu's World Settings shows the ones in force. See [World settings](#world-settings).
 - **Resources.** Asteroids carry iron, copper, nickel, titanium, silver or gold, or are bare rock. Which of them
   a sector has, and in what shares, is part of its character; the rarer ones grow more common toward the core, and
-  a richer sector has ore in more of its rocks and at a better grade. Nothing can be mined yet.
+  a richer sector has ore in more of its rocks and at a better grade. An ore-bearing asteroid has one main ore and
+  up to two others mixed in (nickel or titanium in iron, silver or gold in copper), only ones its sector has, and
+  at least 30 % of every asteroid is rock. Nothing can be mined yet.
 - **Fleet.** Each player starts with the command pod (hyperspace drive), a mining vessel (wormhole) and a survey vessel (rift). Hulls nobody is flying are flown by
   the server under their standing orders.
 - **Command view.** One key pulls the camera back from the pod into a free orbiting view over the same space.
@@ -570,8 +572,10 @@ qualities (Common, Uncommon, Rare, Epic, Legendary, Alien Tech) and their colour
   A scan draws 6 MW (gas), 9 MW (asteroid) or 12 MW (locator) while it runs: the energy readout's net figure drops by that
   much, an amber mark on the flow strip shows the share, and the energy tooltip has a MODULES row.
 - **Asteroid scanner (`X`).** Scans the asteroid you target (middle mouse, or the first one selected in the command
-  view). The target panel then shows the ore with its grade as a bar, the host rock's share, mass, how good the
-  scanner was and how long ago. Until then it says *Unscanned - press X to scan* and shows only the asteroid's
+  view). The target panel then shows the main ore with its grade as a bar, what is left of the rock, mass, the ore
+  mass, the resources mixed in with their shares, how good the scanner was and how long ago. A share below what
+  the scanner resolves (five points for a Common one) is named as a *trace* with no figure. The mix-ins are one
+  plain line of text for now; the panel is not laid out for them yet. Until then it says *Unscanned - press X to scan* and shows only the asteroid's
   size and distance; the ore and mass the sector generated are not read off it. The panel has a **Scan** button.
 - **Gas scanner (`C`).** Samples the cloud you are in or beside, if its envelope is within the scanner's reach.
   The **Gas** window (`F4`, pinnable like Charts) lists every cloud you sampled, newest first: its kind, how many
@@ -613,13 +617,13 @@ the generation cap does not mean every rock in every visible sector draws simult
 | `asteroidFrequency` | 0 to 5 | 1 | Field occurrence probability multiplier, capped at 100%; home is exempt. |
 | `asteroidSpacing` | 0.5 to 5 | 1 | Spacing multiplier, with a nonoverlap minimum. |
 | `asteroidOreShare` | 0 to 5 | 1 | Ore-bearing fraction multiplier, capped at 100%; no new resource kinds. |
-| `asteroidOreGrade` | 0.25 to 5 | 1 | Grade multiplier within ore-bearing rocks, capped at 100%. |
+| `asteroidOreGrade` | 0.25 to 5 | 1 | Grade multiplier within ore-bearing rocks. A rock is never more than 70 % ore, mix-ins included. |
 | `asteroidCountMin` | 0 to 20480, integer | 0 | Lower requested count for the fields a sector anchors, which may land next door; pairs with `asteroidCap`. |
 | `asteroidRadiusMin`, `asteroidRadiusMax` | 0.75 to 6000 metres | 0.75, 6000 | Clamp sampled radii after the size multiplier. Diameter is twice radius. Rocks that cannot fit are omitted. |
 | `oreRichnessMin`, `oreRichnessMax` | 0 to 1 | 0, 1 | Clamp sector richness after the home floor; affects map character, ore-bearing fraction and grade. |
-| `oreGradeMin`, `oreGradeMax` | 0 to 1 | 0, 1 | Clamp ore grade after the grade multiplier; 1 means 100%. |
+| `oreGradeMin`, `oreGradeMax` | 0 to 1 | 0, 1 | Clamp a rock's ore (all its resources together) after the grade multiplier; 1 means 100%, and the 70 % limit still applies. |
 | `<material>Abundance` | 0 to 4 | 1 | Relative share among already available materials. Zero removes that material from the sector character and rocks. |
-| `<material>GradeMin`, `<material>GradeMax` | 0 to 1 | 0, 1 | Per-material grade clamp, applied after the global grade range. |
+| `<material>GradeMin`, `<material>GradeMax` | 0 to 1 | 0, 1 | Per-material clamp for rocks with that main ore, applied after the global grade range. |
 | `sectorSize` | 20 to 160 km | 80 | Sector edge length. Drive range and the blind-safe band scale with it; minimum jump distance stays fixed. |
 | `gasSizeMin` | 1 to 80 km | 16 | Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. |
 | `gasSizeMax` | 1 to 80 km | 22.4 | Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. |

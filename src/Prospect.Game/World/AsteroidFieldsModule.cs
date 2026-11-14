@@ -46,6 +46,7 @@ public sealed class AsteroidFieldsModule : SectorModule
     private const ulong PlaceDraws = 0x5851F42D4C957F2D;
     private const ulong LookDraws = 0x14057B7EF767814F;
     private const ulong OreDraws = 0x2545F4914F6CDD1D;
+    private const ulong MixDraws = 0x9FB21C651E98DF25;
 
     private const int KnotsPerField = 4;
 
@@ -148,6 +149,14 @@ public sealed class AsteroidFieldsModule : SectorModule
     private readonly Range _oreShare;
     private readonly Range _grade;
     private readonly float _gradeFromRichness;
+
+    // What an ore-bearing rock holds beside its main ore: the most of it that may be ore at all, how often a first
+    // and then a second partner of the main ore is mixed in, and the part of the rock's ore each takes.
+    private readonly float _maxOre;
+    private readonly float _mixFirstChance;
+    private readonly float _mixSecondChance;
+    private readonly Range _mixFirstShare;
+    private readonly Range _mixSecondShare;
     private readonly Field _home;
     private readonly float _outskirts;
     private readonly Range _ribbonWidth;
@@ -283,6 +292,22 @@ public sealed class AsteroidFieldsModule : SectorModule
         _oreShare = ReadRange(ore.GetProperty("share"u8));
         _grade = ReadRange(ore.GetProperty("grade"u8));
         _gradeFromRichness = ore.GetProperty("gradeFromRichness"u8).GetSingle();
+        _maxOre = ore.GetProperty("maxOre"u8).GetSingle();
+        var mixIns = ore.GetProperty("mixIns"u8);
+        _mixFirstChance = mixIns.GetProperty("firstChance"u8).GetSingle();
+        _mixSecondChance = mixIns.GetProperty("secondChance"u8).GetSingle();
+        _mixFirstShare = ReadRange(mixIns.GetProperty("firstShare"u8));
+        _mixSecondShare = ReadRange(mixIns.GetProperty("secondShare"u8));
+        if (!float.IsFinite(_maxOre) || _maxOre <= 0 || _maxOre >= 1)
+            throw new InvalidDataException($"{path}: {id}: ore maxOre must lie above 0 and below 1, so that every asteroid keeps rock");
+        if (!(_mixFirstChance >= 0 && _mixFirstChance <= 1) || !(_mixSecondChance >= 0 && _mixSecondChance <= 1))
+            throw new InvalidDataException($"{path}: {id}: ore mixIns chances must lie between 0 and 1");
+
+        // The main ore stays the largest share and the first mix-in is never smaller than the second: the shares
+        // are parts of the rock's ore, the second range lies under the first and together they stay under half.
+        if (!(_mixSecondShare.Min > 0) || !(_mixSecondShare.Min <= _mixSecondShare.Max) || !(_mixSecondShare.Max <= _mixFirstShare.Min) ||
+            !(_mixFirstShare.Min <= _mixFirstShare.Max) || !(_mixFirstShare.Max + _mixSecondShare.Max < 0.5f))
+            throw new InvalidDataException($"{path}: {id}: ore mixIns shares must be positive, secondShare no larger than firstShare, and their largest values together under 0.5");
 
         var home = json.GetProperty("home"u8);
         var offset = home.GetProperty("offset"u8);
@@ -367,6 +392,9 @@ public sealed class AsteroidFieldsModule : SectorModule
 
     /// <summary>The most asteroids one sector can hold.</summary>
     public int MaxPerSector { get; private set; }
+
+    /// <summary>The most of an asteroid that can be ore, all its resources together. The rest is always rock.</summary>
+    public float MaxOre => _maxOre;
 
     /// <summary>
     /// Whether a summary's counts are estimates. They are: a summary weighs the fields that reach a sector
@@ -517,6 +545,7 @@ public sealed class AsteroidFieldsModule : SectorModule
         var ice = -1;
         for (var r = 0; r < sector.Galaxy.Resources.Length; r++) if (sector.Galaxy.Resources[r].Id == "ice") ice = r;
         var asteroids = content.Asteroids;
+        var resources = sector.Galaxy.Resources;
         var character = content.Summary.Character;
         var oreShare = character.Resources == 0 ? 0f : Math.Min(1f, _oreShare.At(character.Richness) * _oreShareScale);
         var low = new Vector3(float.MaxValue);
@@ -572,10 +601,7 @@ public sealed class AsteroidFieldsModule : SectorModule
             if (roll < oreShare)
             {
                 resource = character.Pick(pick);
-                grade = Math.Min(1f, _grade.At(_gradeFromRichness * character.Richness + (1f - _gradeFromRichness) * quality * quality) * _gradeScale);
-                grade = Math.Clamp(grade, _gradeLimits.Min, _gradeLimits.Max);
-                if (_materialGrades.Length != 0)
-                    grade = Math.Clamp(grade, _materialGrades[resource].Min, _materialGrades[resource].Max);
+                grade = OreIn(resource, character.Richness, quality);
             }
 
             if (ice >= 0)
@@ -585,11 +611,19 @@ public sealed class AsteroidFieldsModule : SectorModule
                     if (cloud.Cloud.Kind != GasCloudKind.Cold || !GasSensors.Contains(sector.Galaxy, cloud, sector.Galaxy.CenterOf(sector.Coord) + position)) continue;
                     shape = AsteroidShape.Icicle;
                     resource = character.Has(ice) ? ice : -1;
-                    grade = resource < 0 ? 0 : Math.Clamp(Math.Min(1f, _grade.At(_gradeFromRichness * character.Richness + (1f - _gradeFromRichness) * quality * quality) * _gradeScale), _gradeLimits.Min, _gradeLimits.Max);
-                    if (resource >= 0 && _materialGrades.Length != 0) grade = Math.Clamp(grade, _materialGrades[ice].Min, _materialGrades[ice].Max);
+                    grade = resource < 0 ? 0 : OreIn(ice, character.Richness, quality);
                     break;
                 }
             }
+
+            // The mix-ins come out of the rock's ore, from a stream of their own: the draws above, and so which
+            // rocks there are and what their main ore is, do not depend on them.
+            var mix1 = -1;
+            var mix2 = -1;
+            var share1 = 0f;
+            var share2 = 0f;
+            if (resource >= 0 && resources[resource].Partners.Length != 0)
+                MixIn(SectorRandom.Numbered(field.Key ^ MixDraws, number), resources[resource], character, ref grade, out mix1, out share1, out mix2, out share2);
 
             occupied[f >> 6] |= 1UL << (f & 63);
             asteroids[placed] = new Asteroid
@@ -600,6 +634,10 @@ public sealed class AsteroidFieldsModule : SectorModule
                 Shape = shape,
                 Resource = resource,
                 Grade = grade,
+                Mix1 = mix1,
+                Mix1Share = share1,
+                Mix2 = mix2,
+                Mix2Share = share2,
             };
             content.Rocks.Add(placed++, position, radius);
             low = Vector3.Min(low, position - new Vector3(radius));
@@ -614,6 +652,81 @@ public sealed class AsteroidFieldsModule : SectorModule
             content.Summary.FieldCount += BitOperations.PopCount(bits);
         content.BoundsCenter = (low + high) * 0.5f;
         content.BoundsRadius = ((high - low) * 0.5f).Length();
+    }
+
+    /// <summary>
+    /// The share of a rock that is ore, for a rock whose main ore is <paramref name="resource"/>: the sector's
+    /// richness and the rock's own draw, then the world's grade settings, and last the most a rock may hold, which
+    /// no setting lifts.
+    /// </summary>
+    private float OreIn(int resource, float richness, float quality)
+    {
+        var grade = Math.Min(1f, _grade.At(_gradeFromRichness * richness + (1f - _gradeFromRichness) * quality * quality) * _gradeScale);
+        grade = Math.Clamp(grade, _gradeLimits.Min, _gradeLimits.Max);
+        if (_materialGrades.Length != 0)
+            grade = Math.Clamp(grade, _materialGrades[resource].Min, _materialGrades[resource].Max);
+        return Math.Min(grade, _maxOre);
+    }
+
+    /// <summary>
+    /// Splits a rock's ore between its main ore and up to two of that ore's partners. Six numbers are drawn whatever
+    /// comes of them. On entry <paramref name="grade"/> is all the rock's ore; on return it is the main ore's share,
+    /// and the three shares add up to what it was.
+    /// </summary>
+    private void MixIn(SectorRandom draws, Resource main, in SectorCharacter character, ref float grade, out int mix1, out float share1, out int mix2, out float share2)
+    {
+        var firstRoll = draws.NextSingle();
+        var firstPick = draws.NextSingle();
+        var firstSize = draws.NextSingle();
+        var secondRoll = draws.NextSingle();
+        var secondPick = draws.NextSingle();
+        var secondSize = draws.NextSingle();
+        mix1 = mix2 = -1;
+        share1 = share2 = 0f;
+        if (firstRoll >= _mixFirstChance)
+            return;
+        mix1 = Partner(main, character, firstPick, -1);
+        if (mix1 < 0)
+            return;
+        var total = grade;
+        share1 = total * _mixFirstShare.At(firstSize);
+        if (secondRoll < _mixSecondChance)
+        {
+            mix2 = Partner(main, character, secondPick, mix1);
+            if (mix2 >= 0)
+                share2 = total * _mixSecondShare.At(secondSize);
+        }
+
+        grade = total - share1 - share2;
+    }
+
+    /// <summary>
+    /// One of the main ore's partners that the sector carries, by weight, leaving <paramref name="taken"/> out.
+    /// Returns -1 when the sector carries none: a resource a sector does not have is never found in it, mixed in or not.
+    /// </summary>
+    private static int Partner(Resource main, in SectorCharacter character, float roll, int taken)
+    {
+        var partners = main.Partners;
+        var weights = main.PartnerWeights;
+        var total = 0f;
+        for (var i = 0; i < partners.Length; i++)
+            if (partners[i] != taken && character.Has(partners[i]))
+                total += weights[i];
+        if (total <= 0f)
+            return -1;
+        roll *= total;
+        var last = -1;
+        for (var i = 0; i < partners.Length; i++)
+        {
+            if (partners[i] == taken || !character.Has(partners[i]))
+                continue;
+            last = partners[i];
+            roll -= weights[i];
+            if (roll < 0f)
+                return last;
+        }
+
+        return last;
     }
 
     /// <summary>The field and contour buffers every generation of a sector needs, made once.</summary>

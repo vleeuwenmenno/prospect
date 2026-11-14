@@ -122,6 +122,14 @@ They apply through `Galaxy.Under` and `AsteroidFieldsModule.Under`, as before.
 | `asteroidCountMin` | Least the fields a sector anchors propose together. They may land next door. |
 
 Size, spacing, radius, ore and material settings are unchanged.
+Grade settings clamp a rock's whole ore, mix-ins included, and never lift it over `ore.maxOre`.
+
+## Decided: what a rock is made of
+
+- One main ore, zero to two mix-ins, and always rock: all ore together is at most `ore.maxOre` (0.7).
+- Mix-ins are partners of the main ore (`resources[].partners`) that the sector's character carries.
+- They are drawn from the rock's own `MixDraws` stream, so they change no position, size, shape, order or main ore.
+- Ice takes none. Figures and the scan rules are in [modules](roadmap/modules.md).
 
 ## Decided: saved worlds
 
