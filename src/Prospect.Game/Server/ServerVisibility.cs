@@ -6,6 +6,7 @@ namespace Prospect.Game.Server;
 
 public sealed partial class ServerHost
 {
+    private readonly SensorGasCache? _sensorGas;
     private readonly int[] _sensorNext = new int[HullStore.MaxHulls];
     private readonly double[] _sensorRadius = new double[HullStore.MaxHulls];
 
@@ -36,7 +37,11 @@ public sealed partial class ServerHost
         {
             if (!_hulls.IsAliveAt(i) || _hulls.Info(i).Owner != owner) continue;
             var d = position - _hulls.State(i).Position;
-            if (d.X * d.X + d.Y * d.Y + d.Z * d.Z <= _sensorRadius[i] * _sensorRadius[i]) return true;
+            var distanceSquared = d.X * d.X + d.Y * d.Y + d.Z * d.Z;
+            if (!(distanceSquared <= _sensorRadius[i] * _sensorRadius[i])) continue;
+            if (_sensorGas is null || distanceSquared <= _content.Exploration.ProximityRadius * _content.Exploration.ProximityRadius) return true;
+            if (GasSensors.Covers(Galaxy, _sensorGas.At(_hulls.State(i).Position), _content.Exploration,
+                _hulls.State(i).Position, position, _sensorRadius[i] > _content.Exploration.ProximityRadius)) return true;
         }
         return false;
     }

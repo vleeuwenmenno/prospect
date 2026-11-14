@@ -66,6 +66,14 @@ public sealed class ContentIdentityTests
     private static readonly GameContent Content = GameContent.Load();
 
     [Fact]
+    public void GasSensorPenaltyIsSharedContent()
+    {
+        using var copy = new ContentCopy();
+        copy.Replace("rules/exploration.json", "\"gasOpticalPenalty\": 1.0", "\"gasOpticalPenalty\": 0.5");
+        Assert.NotEqual(Content.Identity, copy.Load().Identity);
+    }
+
+    [Fact]
     public void ExplorationRulesAreSharedContent()
     {
         using var copy = new ContentCopy();

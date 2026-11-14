@@ -257,7 +257,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   outside the disc space is nearly empty.
 - **Galaxy map.** Every grid cell is a sector of the chosen layer. Uncharted space lies under a veil and is an
   anonymous destination; a sector you scanned is charted and shows its star, name and asteroid fields as surveyed,
-  never later changes. Green rings are live sensor coverage, cut through the layer; ships inside them are live,
+  never later changes. Green rings show nominal sensor range, cut through the layer; gas can hide ships within them,
   and a lost contact stays as a fading hollow marker for 15 seconds (a station's indefinitely). Hover a sector for
   its card beside it; click to pin the card (coordinates, distance, sensor state, what the chart holds, the jump
   warning, the scan control in your own sector, Move here and Jump here, and a scrolling list of your ships, then
@@ -311,7 +311,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 Not there yet: NAT traversal or automatic port forwarding (a host needs a UDP port others can reach), encryption of game traffic, IPv6, mining, taking control of ships owned by other players (permissions), jump range and cost, gates,
 saving hosted games (an unlisted or public game is not saved: a saved world cannot yet tell who a returning player
 is), playable saved multiplayer, deleting or renaming a world from the game, restoring a recovery copy
-from the game. Stations are not generated yet; gas has no gameplay effects; asteroids do not crack into pieces, and ore shows only as
+from the game. Stations are not generated yet; gas reduces passive sensor reach (directional contour rendering is pending); asteroids do not crack into pieces, and ore shows only as
 a tint. Asteroids come in a shared set of shapes until mining gives each one its own body. Mixed-size designs of hundreds of blocks now load, transfer, fly and take replicated damage.
 Shared admission bounds geometry work, the intact shield shell and total catalogue resources before play.
 The default shell budget is 32,768 vertices and 196,608 indices per hull, and at most 910 blocks. A separate

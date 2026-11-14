@@ -708,7 +708,8 @@ The client draws coverage from owned hulls in `SessionSnapshot.Hulls` only: owne
 
 ### Visibility and disclosure
 
-Every owned hull contributes a spherical volume in double-precision world coordinates, across XYZ walls.
+Every owned hull contributes coverage in double-precision world coordinates, across XYZ walls.
+Gas reduces equipped sensor reach by direction; the proximity sphere is unaffected.
 Working sensors cover 5,000 m; even a sensorless hull covers the content-owned 250 m proximity radius.
 Actual hull contacts remain visible for three ticks, keyed by full hull identity.
 Ownership always discloses the owner's own ships, including remote ones without sensors.
@@ -793,3 +794,40 @@ Neither schema changes saved state. Existing WorldView NAV consumption and UI fe
 - Evaluator 6 scales shield power with the world recharge multiplier, preserving MJ/point.
 - Existing `blocks/blocks.json` identity covers emitter draw, recharge and restart multiplier (now 4).
 - No message or saved-state layout changed. Offline state, shield charge and battery already carry recovery progress.
+
+## Decided (provisional, tunable): gas sensor contract
+
+- Shared `GasSensors.Covers(galaxy, clouds, rules, sensor, target, equipped)` is the server test for live coverage.
+  All existing coverage-gated channels use it. Ownership and recent collision contacts keep their exceptions.
+- A target spends `distance + baseRange * gasOpticalPenalty * opticalDepth` of its base range.
+  `opticalDepth` integrates `ExtinctionOf * max(0, 1 - ellipsoidRadiusSquared)` along the segment to the target.
+  Each ellipsoid is centered at the generated cloud center, with radii `HalfSize * Shape.X` (content fill).
+- The integral is analytic, with scalar double arithmetic and square roots; no shader noise, warp, lean, motion,
+  or `gasWispiness`. Gas beyond the target costs nothing. This is a smooth gameplay envelope, not the visible fringe.
+- `rules/exploration.json` sets `gasOpticalPenalty` to 1.0 (allowed 0–10), base range 5,000 m, proximity 250 m.
+  The file already participates in shared content identity. Wire protocol stays 39; generation and save codec are unchanged.
+  Content evaluator becomes 7, so an older executable with these files cannot claim the same sensor arithmetic.
+  Existing content identities, including saved-world identities, change.
+- `GasSensors.Reach` returns metres along any nonzero direction; `SampleReach` fills caller-owned doubles for
+  caller-owned `Double3` directions (ring or elevations). It uses the same cost test, 24 bisections, keeping
+  the covered endpoint (within 0.3 mm at 5 km). Apply the gas-free proximity sphere even without equipment.
+
+Cloud inputs and costs:
+
+- Own a `SensorGasCache(galaxy, baseRange)` per reader. Call `At(sensorPosition)` and consume its span before
+  another cache call; do not retain it. The galaxy and range are immutable for the cache's lifetime.
+- The server uses a 256-entry direct-mapped sector cache; entries collect anchors through `GasCloudQuery`,
+  ultimately `GasCloudModule.TryGetCloud`. No generated sector slots are read. Hits generate nothing.
+- At 5 km range / 40 km sectors each miss queries 125 anchors, enough for every sensor position in the sector,
+  including neighbours' clouds. Cache collisions regenerate deterministically. Provisioning allocates; hits and misses do not.
+- Range is supported through eight sector widths. Storage is bounded by 256 times the full anchor cube, so
+  cloud lists cannot truncate. The production cube has 125 slots per entry (about 1.3 MiB of placement storage).
+- Coverage rejects distance first and integrates only the target segment. Reach sampling is intended for display
+  contours, not repeated inside the tick. Renderer/HUD integration is separate work.
+
+Measured on the development machine with 192 sensor hulls around a huge generated cloud and 32 real in-process
+clients: Release averaged 1.9641 ms/server tick, 3.0470 ms/full server-and-clients round, zero managed allocations.
+The same crowded fixture under the parallel Debug suite averaged 21.7703 ms/server tick and 26.7547 ms/full round.
+These include collision, replication and all other tick systems, not gas integration alone; they are not a
+thousands-of-sensors guarantee. Final empty-scene/resize benchmarks passed at 239/268 FPS with zero process allocations
+while other tests were running; earlier runs reached 1,456/885 FPS. Vulkan validation layers were inactive.

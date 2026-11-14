@@ -14,6 +14,8 @@ public sealed class JumpCalculationSessionTests
     {
         using var files = new ContentCopy();
         files.Replace("rules/exploration.json", "5000", "2000000");
+        // These replication fixtures deliberately see across the whole jump, independent of gas.
+        files.Replace("rules/exploration.json", "\"gasOpticalPenalty\": 1.0", "\"gasOpticalPenalty\": 0.0");
         var blocks = Path.Combine(files.Root, "blocks", "blocks.json");
         File.WriteAllText(blocks, File.ReadAllText(blocks).Replace("400000", "2000000"));
         return files.Load();
