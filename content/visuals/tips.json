@@ -50,21 +50,21 @@
       "trigger": "commandViewOpened",
       "title": "Command view",
       "text": "Left-click selects a ship, drag draws a box, Ctrl adds to the selection. Right-click a place for the course menu. {Follow} puts the camera on the selection, {Halt} stops it.",
-      "anchor": { "region": "screen", "side": "bottom", "offset": [0, -24] }
+      "anchor": { "region": "console", "side": "top", "offset": [0, 0] }
     },
     {
       "id": "command-jump",
       "trigger": "commandViewOpened",
       "title": "Plot jump or Jump here",
       "text": "In the menu, Plot jump sets a course for the ship you fly: aim at the NAV marker and boost. Jump here orders the other selected ships to jump at once. Move here flies without a jump.",
-      "anchor": { "region": "screen", "side": "bottom", "offset": [0, -24] }
+      "anchor": { "region": "console", "side": "top", "offset": [0, 0] }
     },
     {
       "id": "command-fog",
       "trigger": "commandViewOpened",
       "title": "Sensors and fog",
       "text": "Green rings are sensor range and space beyond them is dark. A ship in a ring is live; one outside it shows where it was last seen.",
-      "anchor": { "region": "screen", "side": "bottom", "offset": [0, -24] }
+      "anchor": { "region": "console", "side": "top", "offset": [0, 0] }
     },
     {
       "id": "editor-place",
@@ -85,14 +85,14 @@
       "trigger": "shieldOffline",
       "title": "Shield down",
       "text": "A broken shield takes no hits until its charge builds back to the restart level. It starts to recharge after a delay without damage and draws energy to do so. Point at the shield bar for the figures.",
-      "anchor": { "region": "console", "side": "top", "offset": [0, -8] }
+      "anchor": { "region": "console", "side": "top", "offset": [0, 0] }
     },
     {
       "id": "energy-low",
       "trigger": "energyLow",
       "title": "Energy is low",
       "text": "With an empty battery the shield charges on spare power only and boost will not start. Generation refills the battery; point at the energy bar for the flow.",
-      "anchor": { "region": "console", "side": "top", "offset": [0, -8] }
+      "anchor": { "region": "console", "side": "top", "offset": [0, 0] }
     },
     {
       "id": "drone-edit",
@@ -106,7 +106,7 @@
       "trigger": "gasScannerReady",
       "title": "Gas scanner",
       "text": "{ScanGas} samples the gas cloud you are in or beside: about 4 seconds, flight goes on. The GAS window ({ToggleGas}) lists what you have sampled; the better the scanner, the more gases it resolves.",
-      "anchor": { "region": "console", "side": "top", "offset": [0, -64] }
+      "anchor": { "region": "console", "side": "top", "offset": [0, 0] }
     },
     {
       "id": "asteroid-scanner",
@@ -120,14 +120,14 @@
       "trigger": "locatorReady",
       "title": "Asteroid locator",
       "text": "{PulseLocator} sends a pulse that marks every asteroid in range by what it probably holds: ice, common, rare or precious metal, or bare rock. The marks fade in flight and stay faintly in the command view.",
-      "anchor": { "region": "console", "side": "top", "offset": [0, -64] }
+      "anchor": { "region": "console", "side": "top", "offset": [0, 0] }
     },
     {
       "id": "interface-mode",
       "trigger": "interfaceOpened",
       "title": "Interface mode",
       "text": "{ToggleInterface} shows every window and frees the pointer; {ToggleInterface} or {Pause} leaves. Pin a window with the pin in its title bar to keep it on screen in flight: hold {ReleasePointer} to click it.",
-      "anchor": { "region": "screen", "side": "bottom", "offset": [0, -24] }
+      "anchor": { "region": "console", "side": "top", "offset": [0, 0] }
     }
   ]
 }

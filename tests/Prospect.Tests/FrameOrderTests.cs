@@ -745,8 +745,11 @@ public sealed class FrameOrderTests : IDisposable
         var tip = board.Current;
         var size = TipPanel.Measure(_tipCatalogue!, tip, Screen.X);
         var onDialog = tip.Anchor.Region == TipRegion.NewShipDialog && _newShip.Open;
-        var known = tip.Anchor.Region == TipRegion.Screen || onDialog;
-        var area = onDialog ? NewShipDialog.Panel(Screen, _tipScale) : default;
+        var onConsole = tip.Anchor.Region == TipRegion.Console;
+        var known = tip.Anchor.Region == TipRegion.Screen || onDialog || onConsole;
+        // The console's cluster with all three module chips, as the production host works it out.
+        var strip = ModuleLook.Load(Path.Combine(AppContext.BaseDirectory, "content", "visuals", "modules.json")).Strip;
+        var area = onDialog ? NewShipDialog.Panel(Screen, _tipScale) : onConsole ? ScreenHost.ConsoleArea(Screen, _tipScale, 3, strip) : default;
         var shift = board.Shift(tip.Anchor, known);
         // As ScreenHost.PlanTip: a title bar held last frame moves the panel by this frame's pointer movement.
         if (_tipDragging && ImGui.IsMouseDown(ImGuiMouseButton.Left))

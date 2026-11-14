@@ -20,15 +20,15 @@ internal static class PanelShift
 
     /// <summary>
     /// The shift that carries a panel now at <paramref name="shift"/> by <paramref name="delta"/> screen pixels.
-    /// It is worked out through <see cref="Place"/>, so what is saved is what stays on screen after the clamp, never
-    /// a position past an edge. <paramref name="fixedOffset"/> is a part of the place that is not the player's (a
-    /// tip anchor's own offset).
+    /// The move starts from where the panel is drawn (after the clamp), so a panel pressed against an edge follows
+    /// the pointer at once instead of first working off a home place that lies past the edge. What is saved is
+    /// the shift from home that gives the clamped result, never a position past an edge. <paramref name="fixedOffset"/>
+    /// is a part of the place that is not the player's (a tip anchor's own offset).
     /// </summary>
     public static float2 Dragged(float2 home, float2 size, float2 display, float scale, float2 shift, float2 delta, float2 fixedOffset = default)
     {
-        var start = Place(home, size, display, scale, fixedOffset);
-        var wanted = shift + delta / scale;
-        var at = Place(home, size, display, scale, fixedOffset + wanted);
-        return (at - start) / scale;
+        var now = Place(home, size, display, scale, fixedOffset + shift);
+        var at = FloatingWindow.Clamp(now + delta, size, display, scale);
+        return (at - home) / scale - fixedOffset;
     }
 }

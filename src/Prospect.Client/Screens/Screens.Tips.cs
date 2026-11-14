@@ -188,10 +188,9 @@ internal sealed partial class ScreenHost
                 area = new HudRect(_tipPoint.X, _tipPoint.Y, _tipPoint.X, _tipPoint.Y);
                 return true;
             case TipRegion.Console:
-                if (world.Mode != ViewMode.Pilot || _mapOpen || world.Editor.Shown)
+                if (_mapOpen || world.Editor.Shown || world.Mode is not (ViewMode.Pilot or ViewMode.Command))
                     return false;
-                var console = FlightConsole.Layout(display, Kit.Scale);
-                area = new HudRect(console.LeftX, console.Top, console.Right, console.Top + console.Height);
+                area = ConsoleArea(display, Kit.Scale, ModulesPresent(), ModuleStyle.Strip);
                 return true;
             case TipRegion.NewShipDialog:
                 if (!_newShip.Open)
@@ -210,6 +209,20 @@ internal sealed partial class ScreenHost
                 };
                 return true;
         }
+    }
+
+    /// <summary>
+    /// The console's cluster as a tip sees it: the console, and the chip row over it when the ship has modules.
+    /// Pure, so a test can check a tip clears both at any size and scale.
+    /// </summary>
+    internal static HudRect ConsoleArea(float2 display, float scale, int modules, ModuleLook.StripLook strip)
+    {
+        var console = FlightConsole.Layout(display, scale);
+        var area = new HudRect(console.LeftX, console.Top, console.Right, console.Top + console.Height);
+        if (modules <= 0)
+            return area;
+        var chips = StripRect(display, scale, modules, strip);
+        return new HudRect(Math.Min(area.Left, chips.Left), chips.Top, Math.Max(area.Right, chips.Right), area.Bottom);
     }
 
     private bool PointFor(TipRegion region, WorldView world, out float2 point)

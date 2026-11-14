@@ -166,6 +166,22 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
+    /// Where the chip row is for <paramref name="present"/> modules: centred over the console. The chips and the
+    /// tips that keep clear of them (<see cref="TipRegion.Console"/>) both read it, so they cannot disagree.
+    /// </summary>
+    internal static HudRect StripRect(float2 display, float scale, int present, ModuleLook.StripLook strip)
+    {
+        float Px(float design) => MathF.Round(design * scale);
+        var layout = FlightConsole.Layout(display, scale);
+        var width = Px(strip.ChipWidth);
+        var height = Px(strip.ChipHeight);
+        var total = width * present + Px(strip.Gap) * (present - 1);
+        var left = MathF.Round(layout.CenterX - total * 0.5f);
+        var top = layout.Top - height - Px(Theme.Space3);
+        return new HudRect(left, top, left + total, top + height);
+    }
+
+    /// <summary>
     /// A chip for each module the ship being flown carries, in a row over the console's speed readout: the key, the
     /// module, its tier colour, and what it would do now (ready, running with its time left, cooling, or why not).
     /// Clicking a chip does what the key does, where the pointer is free. Nothing is drawn for a module the ship does
@@ -178,13 +194,12 @@ internal sealed partial class ScreenHost
             return;
         var look = ModuleStyle;
         var strip = look.Strip;
-        var layout = FlightConsole.Layout(_ui.DisplaySize, Kit.Scale);
         var width = Kit.Px(strip.ChipWidth);
         var height = Kit.Px(strip.ChipHeight);
         var gap = Kit.Px(strip.Gap);
-        var total = width * present + gap * (present - 1);
-        var origin = new float2(MathF.Round(layout.CenterX - total * 0.5f), layout.Top - height - Kit.Px(Theme.Space3));
-        var size = new float2(total, height);
+        var rect = StripRect(_ui.DisplaySize, Kit.Scale, present, strip);
+        var origin = new float2(rect.Left, rect.Top);
+        var size = new float2(rect.Width, rect.Height);
         ImGui.SetNextWindowPos(origin);
         ImGui.SetNextWindowSize(size);
         ImGui.Begin("##modulestrip"u8, RootFlags | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);

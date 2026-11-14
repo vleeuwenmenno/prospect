@@ -53,7 +53,8 @@ internal static class TipPlacement
             // covering what it points at.
             if (at.X < screen.Left || at.X + size.X > screen.Right)
                 at = Outside(area, Mirror(side, true), size, gap);
-            if (at.Y < screen.Top || at.Y + size.Y > screen.Bottom)
+            // The console's cluster is the exception: below it would cover the console, so the clamp takes over.
+            if (region != TipRegion.Console && (at.Y < screen.Top || at.Y + size.Y > screen.Bottom))
                 at = Outside(area, Mirror(side, false), size, gap);
         }
 

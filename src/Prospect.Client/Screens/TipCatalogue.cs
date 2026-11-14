@@ -72,7 +72,10 @@ internal enum TipRegion : byte
     /// <summary>The ship being targeted, where it is on screen; falls back to the screen when there is none.</summary>
     Target,
 
-    /// <summary>The pilot console along the bottom of the flight view.</summary>
+    /// <summary>
+    /// The bottom cluster of the flight and command views: the pilot console and, over it, the module chips when the
+    /// ship has any. A tip on its Top side sits above all of it; on a short screen it is pushed up, never down over it.
+    /// </summary>
     Console,
 
     /// <summary>The editor's part list, its selection and figures panel, and its bottom bar.</summary>

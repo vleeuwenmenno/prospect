@@ -298,6 +298,47 @@ public sealed class TipTests
         Assert.True(beside.X + size.X <= point.Left);
     }
 
+    [Theory]
+    [InlineData(1f, 1280f, 720f)]
+    [InlineData(2f, 1280f, 720f)]
+    [InlineData(1f, 1920f, 1080f)]
+    [InlineData(2f, 1920f, 1080f)]
+    public void ATipAtTheConsoleClearsTheChipRowAndTheConsole(float scale, float width, float height)
+    {
+        var display = new float2(width, height);
+        var strip = ModuleLook.Load(Path.Combine(Content, "visuals", "modules.json")).Strip;
+        var size = new float2(380 * scale, 90 * scale);
+        foreach (var modules in new[] { 0, 1, 3 })
+        {
+            var area = ScreenHost.ConsoleArea(display, scale, modules, strip);
+            var at = TipPlacement.Place(new TipAnchor(TipRegion.Console, TipSide.Top, 0, 0), true, area, size, display, scale);
+            Assert.True(at.Y + size.Y <= area.Top, $"{modules} modules at scale {scale}: tip bottom {at.Y + size.Y} over {area.Top}");
+        }
+
+        // The shipped bottom tips all use that region, so none can sit over the chips.
+        foreach (var tip in TipCatalogue.Load(Shipped, Actions()).Tips)
+            Assert.False(tip.Anchor is { Region: TipRegion.Screen, Side: TipSide.Bottom }, tip.Id);
+    }
+
+    [Theory]
+    [InlineData(1f)]
+    [InlineData(2f)]
+    public void APanelPressedAgainstAnEdgeFollowsTheFirstDrag(float scale)
+    {
+        // A home past the top of a short screen: the panel is clamped, and a drag down must move it at once.
+        var display = new float2(1280, 400);
+        var size = new float2(300 * scale, 120 * scale);
+        var home = new float2(500, -200);
+        var fixedOffset = new float2(0, -24);
+        var before = PanelShift.Place(home, size, display, scale, fixedOffset);
+        var shift = PanelShift.Dragged(home, size, display, scale, default, new float2(0, 40), fixedOffset);
+        var after = PanelShift.Place(home, size, display, scale, fixedOffset + shift);
+        Assert.Equal(before.Y + 40, after.Y, 1f);
+        // A drag back up, past the edge, stays clamped and is remembered as the edge, not beyond it.
+        var again = PanelShift.Dragged(home, size, display, scale, shift, new float2(0, -500), fixedOffset);
+        Assert.Equal(before.Y, PanelShift.Place(home, size, display, scale, fixedOffset + again).Y, 1f);
+    }
+
     private static string[] Stack(TipBoard board)
     {
         var ids = new string[board.Count];
