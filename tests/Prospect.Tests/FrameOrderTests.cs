@@ -5063,10 +5063,20 @@ public sealed class FrameOrderTests : IDisposable
         // A hit while the edit is open: the server ends it, the editor says why and keeps the player's changes.
         var hulls = (HullStore)typeof(ServerHost).GetField("_hulls", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(_server)!;
         var own = (int)(_snapshot.Hulls[_snapshot.OwnHull].Id & 0xFFFF);
+        var board = new NoticeBoard(NoticeCatalogue.Load(Path.Combine(AppContext.BaseDirectory, "content", "visuals", "notices.json"), _actions));
+        var tracker = new EditorNoticeTracker();
+        tracker.Update(board, editor, static (_, _, _) => default);
         hulls.Info(own).DamageTick = _tick;
         Assert.True(PlayUntil(() => editor.Stage == EditorStage.Closed));
         Assert.Equal(EditorReason.Damaged, editor.Notice);
         Assert.True(editor.DraftKept);
+        // The server's refusal is one notice that says the reason it was given.
+        tracker.Update(board, editor, static (reason, _, kept) => kept && reason == EditorReason.Damaged ? "closed, kept"u8 : "wrong"u8);
+        Assert.Equal(1, board.Count);
+        Assert.Equal(NoticeKinds.EditRefused, board.NoticeAt(0).Id);
+        Assert.Equal("closed, kept", System.Text.Encoding.UTF8.GetString(board.TextAt(0)));
+        tracker.Update(board, editor, static (_, _, _) => "again"u8);
+        Assert.Equal(1, board.Count);
         Assert.False(_world.Editor.Shown);
         Assert.True(_router.Captured);
 
@@ -5386,8 +5396,19 @@ public sealed class FrameOrderTests : IDisposable
         Assert.True(editor.CanApply);
         // Creating a ship starts the server's commit cooldown; Apply before it ends is refused and the edit stays open.
         Tick((int)(_snapshot.Content.Editor.CommitSeconds + 1) * TickLoop.SimulationHz);
+        var board = new NoticeBoard(NoticeCatalogue.Load(Path.Combine(AppContext.BaseDirectory, "content", "visuals", "notices.json"), _actions));
+        var tracker = new EditorNoticeTracker();
+        tracker.Update(board, editor, static (_, _, _) => default);
         Assert.True(editor.Apply(Bridge));
-        Assert.True(PlayDroneUntil(() => editor.Stage == EditorStage.Closed), $"{_snapshot.Editor.Phase}/{_snapshot.Editor.Reason}");
+        Assert.True(PlayDroneUntil(() =>
+        {
+            tracker.Update(board, editor, static (_, _, _) => default);
+            return editor.Stage == EditorStage.Closed;
+        }), $"{_snapshot.Editor.Phase}/{_snapshot.Editor.Reason}");
+        // The outcome is one notice, and no waiting notice is left behind.
+        var kinds = Enumerable.Range(0, board.Visible).Select(r => board.NoticeAt(r).Id).ToArray();
+        Assert.Equal(1, kinds.Count(k => k == NoticeKinds.ShipFlown));
+        Assert.DoesNotContain(NoticeKinds.EditAsking, kinds);
         Assert.True(editor.NoticeApplied);
         Assert.True(editor.NoticeBuilt);
         Assert.Equal(-1, HullIndex(created));

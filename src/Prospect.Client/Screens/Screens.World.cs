@@ -197,7 +197,6 @@ internal sealed partial class ScreenHost
                 DrawCommandCourseMenu(snapshot, world, world.CommandBlend);
             }
 
-            DrawEditorNotice(draw, world.Editor, world.SwitchKeyName);
             if (world.ControlOutOfSector)
             {
                 var notice = Kit.F($"Outside your sector - travel there to take control ({world.SwitchKeyName})");

@@ -49,7 +49,7 @@ internal static class NoticePanel
             total = 0f;
             for (var row = 0; row < rows; row++)
             {
-                var text = TextHeight(Kit.Ui.Sans, board.NoticeAt(row).TextBytes, wrap);
+                var text = TextHeight(Kit.Ui.Sans, board.TextAt(row), wrap);
                 heights[row] = Math.Max(Kit.Px(MinHeight), text + Kit.Px(Pad) * 2);
                 total += heights[row] + (row > 0 ? gap : 0f);
             }
@@ -130,7 +130,7 @@ internal static class NoticePanel
 
             var textMin = new float2(MathF.Round(rowMin.X + Kit.Px(BarWidth) + pad), MathF.Round(rowMin.Y + pad));
             ImGui.PushFont(ui.Sans, Theme.FontSmall);
-            draw.AddText(ui.Sans, ImGui.GetFontSize(), textMin, Kit.Color(hovered ? Theme.Text : Theme.TextDim), notice.TextBytes, TextWrap(rect.Width));
+            draw.AddText(ui.Sans, ImGui.GetFontSize(), textMin, Kit.Color(hovered ? Theme.Text : Theme.TextDim), board.TextAt(row), TextWrap(rect.Width));
             ImGui.PopFont();
 
             // The X, in the zone at the right: two strokes, brighter while the pointer is over the notice.

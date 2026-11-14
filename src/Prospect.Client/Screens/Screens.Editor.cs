@@ -59,57 +59,14 @@ internal sealed partial class ScreenHost
         _editorHandled = _newShip.HandleKeys(_app.Actions, _app.Devices, snapshot, _app.World.Editor, bridge, _tips, _newShipName, _ui.WantsTextInput, _ui.PointerOverInterface);
     }
 
-    /// <summary>The waiting request, or what became of the last edit, under the bar while the editor is not shown.</summary>
-    private void DrawEditorNotice(ImDrawListPtr draw, ShipEditor editor, string switchKey)
+    private readonly EditorNoticeTracker _editorNotices = new();
+
+    /// <summary>The sentence for a refused or ended edit, with what is kept; the tracker asks for it only when it posts.</summary>
+    private ReadOnlySpan<byte> RefusalSentence(EditorReason reason, int wait, bool kept)
     {
-        var requesting = editor.Stage == EditorStage.Requesting;
-        var recent = editor.Time - editor.NoticeAt < ShipEditor.NoticeSeconds && (editor.NoticeApplied || editor.Notice is not (EditorReason.None or EditorReason.Cancelled));
-        var followRefused = editor.FollowNotice != FollowRefusal.None && editor.Time - editor.FollowNoticeAt < ShipEditor.NoticeSeconds;
-        if (!requesting && !recent && !followRefused)
-            return;
-
-        ReadOnlySpan<byte> text;
-        uint tone;
-        if (requesting)
-        {
-            text = Kit.F($"Asking the server to edit this ship...");
-            tone = Theme.Info;
-        }
-        else if (followRefused)
-        {
-            // The ship was built or left as made, but the switch into it was not possible: say why, and how to do it by hand.
-            text = editor.FollowNotice == FollowRefusal.OutOfSector
-                ? Kit.F($"The new ship is outside your sector. Travel there and press {switchKey} to take control.")
-                : Kit.F($"The new ship is no longer there. You are still in the drone.");
-            tone = Theme.Bad;
-        }
-        else if (editor.NoticeApplied)
-        {
-            text = editor.NoticeBuilt
-                ? Kit.F($"Ship built. You are flying it now.")
-                : Kit.F($"Ship rebuilt. You are flying the new design.");
-            tone = Theme.Good;
-        }
-        else
-        {
-            // Formatted first: one Kit.F inside another would write into the same arena while it is being filled.
-            var reason = ReasonText(editor.Notice, editor.NoticeWait);
-            text = editor.DraftKept ? Kit.F($"{reason} Your changes are kept: press {EditorKey} to go on.") : reason;
-            tone = Theme.Bad;
-        }
-
-        var width = Math.Min(_ui.DisplaySize.X - Kit.Px(Theme.Space5) * 2, Kit.Px(620));
-        var min = new float2(MathF.Round((_ui.DisplaySize.X - width) * 0.5f), HudTop + Kit.Px(Theme.Space6) * 2);
-        var height = Kit.Px(34);
-        Hud.Plate(draw, min, min + new float2(width, height), tone);
-        var left = Kit.Px(Theme.Space4);
-        if (requesting)
-        {
-            Kit.Spinner(draw, min + new float2(Kit.Px(Theme.Space4) + Kit.Px(6), height * 0.5f), Kit.Px(6));
-            left += Kit.Px(20);
-        }
-
-        Kit.ClippedText(draw, _ui.SansMedium, Theme.FontSmall, min + new float2(left, Kit.Px(8)), tone == Theme.Bad ? Theme.Text : tone, text, width - left - Kit.Px(Theme.Space4));
+        // Formatted first: one Kit.F inside another would write into the same arena while it is being filled.
+        var text = ReasonText(reason, wait);
+        return kept ? Kit.F($"{text} Your changes are kept: press {EditorKey} to go on.") : text;
     }
 
     /// <summary>The blue every selected block is outlined in, apart from the amber of acting and the red of loss.</summary>
