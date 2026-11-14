@@ -22,6 +22,15 @@ The interface is built (see UI below). Mining, inventory installation and knowle
 - Knowledge belongs to its owner, ages by observation tick, survives saves and is never automatically shared.
 - Future mining must increment asteroid content revisions and invalidate observed analysis when that change is learned.
 
+## Decided: asteroid composition
+
+- An ore-bearing asteroid holds one main ore plus zero to two mix-ins, e.g. iron 40 %, nickel 12 %, copper 3 %, rock 45 %.
+- Mix-ins come from affinities in content (`galaxy.json`): each resource lists its likely partners (iron with nickel,
+  copper with silver or gold, titanium with iron). Ice takes none.
+- Every asteroid keeps rock: total ore never exceeds a content figure, 0.7 at first. Bare-rock asteroids stay.
+- Scanner accuracy decides what is seen: a share below the scanner's resolution shows as trace or unresolved, as gas
+  shares do. Better scanners reveal more of the mix.
+
 ## Equipment contract and provisional figures
 
 `BlockType.Module` is a `ModuleSpec`; Family None means absent.
@@ -49,8 +58,8 @@ On the pod a gas scan nets about -1 MW, an asteroid scan -4 MW, a locator pulse 
 
 Base accuracy is 0.2: percentage observations resolve 5 percentage points; Alien Tech resolves one point.
 All six tier multipliers are content data, not hard-coded quality tables.
-Asteroids currently carry one resource index and grade: the resource-bearing host material has share one and grade is ore fraction.
-Bare rock has resource -1; ice is the existing ice resource. No invented multi-resource composition is published.
+Asteroids currently carry one resource index and grade (ore fraction); multi-resource composition is decided
+(see "Decided: asteroid composition") and not yet built. Bare rock has resource -1; ice is the existing ice resource.
 
 ## Generated gas contract
 
