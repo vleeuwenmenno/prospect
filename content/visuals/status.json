@@ -1,0 +1,12 @@
+{
+  "iconSize": 11,
+  "iconGap": 4,
+  "lightningColor": "E6D36E",
+  "coldColor": "BFE3F7",
+  "cloudAlpha": 0.75,
+  "coldAlpha": 0.85,
+  "burstPulseHz": 2.5,
+  "burstMinAlpha": 0.5,
+  "burstRingAlpha": 0.55,
+  "fleetRowExtra": 16
+}

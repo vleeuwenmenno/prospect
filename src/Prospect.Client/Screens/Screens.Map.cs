@@ -928,6 +928,17 @@ internal sealed partial class ScreenHost
                         break;
                     }
 
+                case 6:
+                case 7:
+                    {
+                        // The unit list's status icons, drawn as they are on a unit that is in the cloud.
+                        var cold = row == 7;
+                        var environment = cold ? HullEnvironment.InColdCloud : HullEnvironment.InLightningCloud;
+                        DrawStatusIcon(draw, environment, 0, middle, swatch.Y + Kit.Px(2), StatusLook);
+                        Kit.Text(draw, _ui.Mono, Theme.FontCaption, textAt, Theme.TextDim, cold ? "UNIT IN COLD CLOUD"u8 : "UNIT IN LIGHTNING"u8);
+                        break;
+                    }
+
                 default:
                     {
                         var star = row - MapLegend.FeatureRows;

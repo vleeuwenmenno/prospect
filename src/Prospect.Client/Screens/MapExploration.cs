@@ -724,8 +724,8 @@ internal readonly record struct MapLegendLayout(float2 Min, float2 Size, float H
 /// </summary>
 internal static class MapLegend
 {
-    /// <summary>Rows before the star types: charted, live sensors, unexplored, lost contact, asteroid field, gas cloud.</summary>
-    public const int FeatureRows = 6;
+    /// <summary>Rows before the star types: charted, live sensors, unexplored, lost contact, asteroid field, gas cloud, and the two unit status icons (lightning, cold).</summary>
+    public const int FeatureRows = 8;
 
     private const float Width = 200f;
     private const float HeaderHeight = 26f;

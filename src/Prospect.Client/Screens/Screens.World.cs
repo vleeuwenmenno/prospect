@@ -354,6 +354,7 @@ internal sealed partial class ScreenHost
         // jump strip: what the drive is doing and what the pilot can do, kept off the middle of the view.
         DrawFlightConsole(draw, snapshot, own, speed, world.Mode == ViewMode.Pilot && WorldInputEnabled && _app.PointerReleased);
         DrawJumpStrip(draw, snapshot, world, _jumpPrompt);
+        DrawOwnStatusChip(draw, own, alpha, world.Mode == ViewMode.Pilot && WorldInputEnabled && _app.PointerReleased);
 
         if (own.Order.Kind == OrderKind.MoveTo && world.Project(own.Order.Target, out var target))
             DrawTargetMarker(draw, target, Theme.Accent);
@@ -369,6 +370,7 @@ internal sealed partial class ScreenHost
         var display = _ui.DisplaySize;
         var planeHeight = world.CommandFocus.Y;
         var designs = snapshot.Content.Designs;
+        var statusTipShown = false;
 
         for (var i = 0; i < snapshot.HullCount; i++)
         {
@@ -412,10 +414,18 @@ internal sealed partial class ScreenHost
             }
 
             var label = screen + new float2(Kit.Px(24), -Kit.Px(14));
-            if (mine)
-                Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, label, selected ? Theme.Text : color, Kit.F($"{design.Name} {(hull.Id & 0xFFFF) + 1}"));
-            else
-                Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, label, color, Kit.F($"PLAYER {hull.Owner}  {design.Name}"));
+            var nameWidth = mine
+                ? Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, label, selected ? Theme.Text : color, Kit.F($"{design.Name} {(hull.Id & 0xFFFF) + 1}")).X
+                : Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, label, color, Kit.F($"PLAYER {hull.Owner}  {design.Name}")).X;
+            if (HullStatus.Count(hull.Environment) > 0)
+            {
+                // Status icons after the name; resting the pointer on one says what it means.
+                var iconsLeft = label.X + nameWidth + Kit.Px(Theme.Space2);
+                var iconsMiddle = label.Y + Kit.Px(7);
+                DrawStatusIcons(draw, hull.Environment, iconsLeft, iconsMiddle);
+                if (!statusTipShown)
+                    statusTipShown = DrawStatusTip(hull.Environment, iconsLeft, iconsMiddle, WorldInputEnabled);
+            }
             Kit.Text(draw, _ui.Mono, Theme.FontCaption, label + new float2(0, Kit.Px(15)), Theme.TextDim, Kit.F($"{hull.Velocity.Length():0} M/S"));
 
             if (mine && hull.Order.Kind == OrderKind.MoveTo && world.Project(hull.Order.Target, out var target))
@@ -490,14 +500,18 @@ internal sealed partial class ScreenHost
     private void DrawFleetList(SessionSnapshot snapshot, WorldView world, float alpha)
     {
         var owned = 0;
+        var rowHeight = Kit.Px(44);
+        var statusExtra = Kit.Px(StatusLook.FleetRowExtra);
+        var rowsHeight = 0f;
         for (var i = 0; i < snapshot.HullCount; i++)
         {
-            if (snapshot.Hulls[i].Owner == snapshot.PlayerId)
-                owned++;
+            if (snapshot.Hulls[i].Owner != snapshot.PlayerId)
+                continue;
+            owned++;
+            rowsHeight += HullStatus.FleetRowHeight(snapshot.Hulls[i].Environment, rowHeight, statusExtra);
         }
 
-        var rowHeight = Kit.Px(44);
-        var size = new float2(Kit.Px(300), Kit.Px(54) + rowHeight * owned);
+        var size = new float2(Kit.Px(300), Kit.Px(54) + rowsHeight);
         // Under the navigation bar, and under the performance overlay when it is shown.
         var top = HudTop + (_app.ShowPerformance ? Kit.Px(PerformanceHeight + Theme.Space2) : 0f);
         var min = new float2(_ui.DisplaySize.X - size.X - Kit.Px(Theme.Space5), top);
@@ -520,8 +534,9 @@ internal sealed partial class ScreenHost
             if (hull.Owner != snapshot.PlayerId)
                 continue;
 
+            var thisRow = HullStatus.FleetRowHeight(hull.Environment, rowHeight, statusExtra);
             var rowMin = new float2(min.X + Kit.Px(6), y);
-            var rowSize = new float2(size.X - Kit.Px(12), rowHeight - Kit.Px(4));
+            var rowSize = new float2(size.X - Kit.Px(12), thisRow - Kit.Px(4));
             ImGui.SetCursorScreenPos(rowMin);
             ImGui.PushID((int)hull.Id);
             if (ImGui.InvisibleButton("##hull"u8, rowSize))
@@ -577,7 +592,14 @@ internal sealed partial class ScreenHost
             gaugeMin.Y += Kit.Px(6);
             draw.AddRectFilled(gaugeMin, gaugeMin + gauge, Kit.Color(Theme.Void));
             draw.AddRectFilled(gaugeMin, gaugeMin + new float2(gauge.X * FlightConsole.Fraction(hull.Hull, flight.HullPoints), gauge.Y), Kit.Color(Theme.Good));
-            y += rowHeight;
+            if (HullStatus.Count(hull.Environment) > 0)
+            {
+                // What the hull is in, under its readings: icon and words.
+                var statusMiddle = rowMin.Y + rowHeight - Kit.Px(4) + statusExtra * 0.5f - Kit.Px(2);
+                DrawStatusLine(draw, hull.Environment, text.X, statusMiddle, rowMin.X + rowSize.X - Kit.Px(Theme.Space3));
+            }
+
+            y += thisRow;
         }
 
         Kit.Fade = 1f;

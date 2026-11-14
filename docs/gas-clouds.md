@@ -370,6 +370,12 @@ Gameplay envelopes and UI contract:
 - `Covers`, `Reach` and `SampleReach` accept the same optional `long tick`; production callers must pass snapshot/server time, never wall time. A burst reduces the range budget to max(proximity, base range × share), then applies ordinary gas attenuation. Proximity remains clear. Optical penalties from overlapping clouds add.
 - `HullRecord.Environment` is one validated byte, propagated to `SessionSnapshot.Hulls[].Environment`: `InColdCloud=1`, `InLightningCloud=2`, `SensorsDisrupted=4`. Unknown bits and disruption without lightning are rejected. UI displays these authoritative flags for each visible hull, including fleet rows and RTS markers; do not derive flags from interpolated poses.
 
+Status icons (decided, built):
+
+- `HullStatus` (client, font-free) maps the flags to icons: bolt for a lightning cloud, pulsing with a ring while `SensorsDisrupted` is set; snowflake for a cold cloud. Look and colours: `content/visuals/status.json` (`StatusTuning`).
+- Shown after the hull's name in the command view (hover for a tooltip), as icon plus words ("SENSORS DISRUPTED", "LIGHTNING CLOUD", "COLD CLOUD") on a third line of the fleet list row, in the map's UNITS rows, and as a chip above the pilot console. The map index has a row for each icon.
+- Capture seeds: sector centres inside a cloud are rare. Use `--sector 133,0,-77 --set gasLightningChance=1 --set gasColdChance=0` (or the reverse); a burst shows about 8.3 s after the world starts. Natural: cold at `97,0,-60`.
+
 Coverage renderer follow-up:
 
 - `SensorCoverage.Compute` must pass the latest authoritative snapshot tick to `GasSensors.Reach`.
