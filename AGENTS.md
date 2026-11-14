@@ -135,7 +135,9 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   The scan pulse is `ScanPulse` (when it shows, driven from `WorldView.Update`; figures in
   `content/visuals/scan.json`) and `scan_pulse.frag`, its own pass after tone mapping in `SceneRenderer.Present`. It
   reads the scene's depth, which is kept only on frames with a pulse, and stays out of the gas, shield and lens
-  passes. `ScanPulseTests` holds when it starts. Check with `--open scan-pilot` (pulse about 6 s in) and
+  passes. It draws only on surfaces (scene depth) and in gas (the sensors' envelope), never on empty space, and is
+  one pulse per completed scan, none while a scan runs. `ScanPulseTests` holds when it starts. Check with
+  `--open scan-pilot` (pulse about 6 s in; also with `--sector 127,-1,-127` and `133,0,-77` for gas) and
   `--open scan-command` (the command view pulled back over the ship).
 - **The ship editor:** the limits are in `EditorRules`, `content/net/editor.json` and `docs/hosting.md`;
   change all three. A design reaches the catalogue only through `DesignBytes.Decode` on a worker, the catalogue
