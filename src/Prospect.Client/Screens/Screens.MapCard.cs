@@ -190,9 +190,11 @@ internal sealed partial class ScreenHost
         // Header: what kind of sector, and whether the card is pinned.
         var kind = sector == here ? "YOU ARE HERE"u8 : charted ? "CHARTED"u8 : "UNEXPLORED"u8;
         Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, text, sector == here ? Theme.Accent : charted ? Theme.Info : Theme.TextMute, kind);
+        // The pinned card's close button takes the top right corner, so its label sits to the left of it.
         var state = preview ? "CLICK TO PIN"u8 : "PINNED"u8;
         var stateWidth = Kit.Measure(_ui.Mono, Theme.FontCaption, state).X;
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(min.X + size.X - Kit.Px(Theme.Space4) - stateWidth, text.Y), Theme.TextMute, state);
+        var stateRight = min.X + size.X - Kit.Px(Theme.Space4) - (preview ? 0f : Kit.Px(MapSectorCard.CloseSize));
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(stateRight - stateWidth, text.Y), Theme.TextMute, state);
         var nameAt = text + new float2(0, Kit.Px(CardCaption));
         if (charted)
             Kit.ClippedText(draw, _ui.SansBold, Theme.FontHeading, nameAt, Theme.Text, MapName(galaxy, sector), inner);
@@ -227,7 +229,7 @@ internal sealed partial class ScreenHost
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at, Theme.TextDim, Kit.F($"STAR         {galaxy.StarClasses[summary.StarClass].Name}"), inner);
             at.Y += line;
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at, Theme.TextDim,
-                TryChartFields(galaxy, sector, out var fields) ? Kit.F($"FIELDS       {fields.Length} IN REACH") : "FIELDS       READING CHART"u8, inner);
+                TryFieldCount(galaxy, sector, out var fields) ? Kit.F($"FIELDS       {fields} IN REACH") : "FIELDS       READING CHART"u8, inner);
             at.Y += line;
             if (summary.GasCloudCount > 0)
             {
@@ -279,7 +281,7 @@ internal sealed partial class ScreenHost
                 preview ? Kit.F($"+{_cardTotal - CardPreviewRows} MORE, PIN TO SCROLL") : Kit.F($"+{_cardTotal - _cardCount} MORE NOT LISTED"));
         if (!parts.Compact)
             Kit.ClippedText(draw, _ui.Sans, Theme.FontCaption, new float2(text.X, bottom), Theme.TextMute,
-                preview ? "Click to pin. Right-click to move or jump here."u8 : "Escape or a click outside the galaxy closes."u8, inner);
+                preview ? "Click to pin. Right-click to move or jump here."u8 : "Escape, the X or a click outside the galaxy closes."u8, inner);
         draw.PopClipRect();
         return parts;
     }
@@ -294,6 +296,20 @@ internal sealed partial class ScreenHost
         var parts = DrawSectorCard(draw, snapshot, world, galaxy, sector, min, size, false);
         var inner = size.X - Kit.Px(Theme.Space4) * 2;
         var left = min.X + Kit.Px(Theme.Space4);
+
+        // Close: the same as Escape. Drawn over the header, which keeps clear of it.
+        var closeMin = MapSectorCard.CloseMin(min, size, Kit.Scale);
+        var closeSize = MapSectorCard.CloseExtent(Kit.Scale);
+        var close = MapSectorCard.Close(min, size, Kit.Scale);
+        var closeHot = Kit.Animate(ImGui.GetItemID(), ImGui.IsItemHovered() ? 1f : 0f);
+        draw.AddRectFilled(closeMin, closeMin + closeSize, Kit.Color(Theme.PanelRaised, 0.9f * closeHot));
+        var cross = closeSize * 0.3f;
+        var crossColor = Kit.Color(Kit.Mix(Theme.TextMute, Theme.Text, closeHot));
+        var crossMid = closeMin + closeSize * 0.5f;
+        draw.AddLine(crossMid - cross, crossMid + cross, crossColor, Kit.Px(1.4f));
+        draw.AddLine(crossMid + new float2(-cross.X, cross.Y), crossMid + new float2(cross.X, -cross.Y), crossColor, Kit.Px(1.4f));
+        if (close)
+            _mapCard.Dismiss();
 
         if (parts.Scan >= 0)
         {

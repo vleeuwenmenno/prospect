@@ -42,6 +42,19 @@ These are suggested layouts, not a settled control scheme.
 - Flattening shows the pinned card's layer. Other layers' items show as up/down chevrons in the flat view.
 - Figures live in `content/visuals/map.json`. The galaxy edge drawn is where the disc's matter ends; nothing enforces it.
 
+### Built: what a chart draws on the map
+
+- A charted sector shows its name, a small muted star icon in the top right corner of its cell, and the outlines of the fields and clouds that reach it. No large star disc.
+- Star icon: one shape per star class (circle, square, diamond, sparkle, asterisk) plus a dot in the star's colour. Shapes, colours, strengths: `content/visuals/map.json` (`starIcons`, `starIconSize`).
+- Field outline: the real ribbon the rocks lie in (`MapFootprint.Field`: the four seeded sections, smoothstepped, tapered ends), a denser core at half the width inside it. Amber (`fieldColor`).
+- Cloud outline: the envelope's fill share of the cloud's box, cut across the layer's slab, with the thin fringe round it. Violet (`cloudColor`), apart from fields and from the charted teal. The lumps are a seeded bulge: the renderer's noise is not shared, size and fill are the cloud's own.
+- Rule for a feature across a wall: it is drawn only inside charted sectors. Each charted sector clips what it draws to its own cell, so the part in an uncharted neighbour stays hidden until that sector is charted, and across two charted sectors it is one whole outline.
+- Outlines are worked out on a worker (`MapFeatureCache`, one job at a time, 64 sectors kept, at most 48 features of at most 24 vertices each) when a charted sector comes into view. A chart never changes, so an entry stays until its slot is needed or the galaxy changes. The frame projects the cached points, so the tilted view squashes them like everything else.
+- Shown from `fieldDetailCell` (64 px a sector) up.
+- The map index on the left sits under the unit list: charted, live sensors, unexplored, lost contact, asteroid field, gas cloud, the star types. Short screens drop the last rows first; where nothing fits under the unit list it sits beside it.
+- Resting the pointer on one of the player's own ships (within `unitHoverPixels`) names it beside it, small and muted, no box. The sector's preview card stays away meanwhile; a pinned card is unaffected.
+- The pinned card has an X in its top right corner that does what `Esc` does; its label reads PINNED to the left of it. A press on it never reaches the map.
+
 ## Decided: exploration knowledge
 
 - **Unexplored:** an anonymous destination, without surveyed contents.

@@ -99,6 +99,13 @@ internal sealed class AppOptions
     public int CaptureCount { get; set; } = 1;
     public float CaptureEvery { get; set; } = 0.25f;
 
+    /// <summary>Opens the galaxy map this many pixels per sector instead of the default zoom; for captures.</summary>
+    public float? MapCell { get; set; }
+
+    /// <summary>Opens the galaxy map tilted, and with the pointer resting on its centre; for captures.</summary>
+    public bool MapTilt { get; set; }
+    public bool MapHover { get; set; }
+
     /// <summary>In the pilot view, holds the camera this many degrees to the side of the hull's nose; for captures.</summary>
     public float? LookDegrees { get; set; }
 
@@ -986,6 +993,8 @@ internal sealed class App : IDisposable
         if (_options.OpenView is { } view && !_viewOpened && Session is not null && _sinceSplash > 0.6f)
         {
             _viewOpened = true;
+            if (_options.MapCell is { } mapCell && view != "galaxy")
+                _screens.SetMapCell(mapCell);
             if (view == "command")
             {
                 World.SetMode(ViewMode.Command);
@@ -1043,7 +1052,10 @@ internal sealed class App : IDisposable
             else if (view == "map-tilt")
                 _screens.OpenMapTilt();
             else if (view == "scan")
+            {
                 _screens.OpenScan();
+                _screens.SetMapPresentation(_options.MapTilt, _options.MapHover);
+            }
             else if (view == "jump-fleet-ahead" && snapshot is { OwnHull: >= 0 })
             {
                 // The player's other hulls jump to points ahead of and above the camera, 6 km and 10 km away along

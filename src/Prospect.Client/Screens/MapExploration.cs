@@ -368,6 +368,24 @@ internal static class MapSectorCard
         return new float2(MathF.Round(min.X), MathF.Round(min.Y));
     }
 
+    /// <summary>The close button's side, in unscaled pixels.</summary>
+    public const float CloseSize = 22f;
+
+    private const float ClosePad = 8f;
+
+    /// <summary>The close button's top left corner: the card's top right corner, inside its padding.</summary>
+    public static float2 CloseMin(float2 min, float2 size, float scale) =>
+        new(min.X + size.X - MathF.Round((CloseSize + ClosePad) * scale), min.Y + MathF.Round(ClosePad * scale * 0.75f));
+
+    /// <summary>The close button's size.</summary>
+    public static float2 CloseExtent(float scale) => new(MathF.Round(CloseSize * scale), MathF.Round(CloseSize * scale));
+
+    /// <summary>
+    /// The pinned card's close button, in the card's window. True on the frame it is pressed and released on, which
+    /// does what Escape does. A press on it starts in the card's window, so the map beneath never sees it.
+    /// </summary>
+    public static bool Close(float2 min, float2 size, float scale) => Button("##cardclose"u8, CloseMin(min, size, scale), CloseExtent(scale));
+
     /// <summary>Opens the pinned card's window. Pair with <see cref="End"/>.</summary>
     public static void Begin(float2 min, float2 size, MapPointer map)
     {
@@ -572,5 +590,97 @@ internal sealed class ScanTracker
     {
         var span = scan.CompletesTick - scan.StartedTick;
         return span <= 0 ? 1f : Math.Clamp((float)(serverTick - scan.StartedTick) / span, 0f, 1f);
+    }
+}
+
+/// <summary>
+/// Which of the player's own hulls on the map the pointer is on, for the name label beside it. The hull nearest the
+/// pointer within a radius wins. While one does, the sector's preview card stays away: the pointer is on a unit,
+/// not asking about the sector under it. A pinned card is not affected.
+/// </summary>
+internal struct MapUnitHover
+{
+    private float _best;
+
+    /// <summary>The hull the pointer is on, 0 for none.</summary>
+    public uint Hull { get; private set; }
+
+    /// <summary>Where that hull is drawn.</summary>
+    public float2 At { get; private set; }
+
+    /// <summary>Starts a frame's search with the radius in pixels the pointer must be within.</summary>
+    public MapUnitHover(float radius)
+    {
+        _best = radius * radius;
+        Hull = 0;
+        At = default;
+    }
+
+    /// <summary>Offers an own hull drawn at <paramref name="at"/>.</summary>
+    public void Consider(uint hull, float2 at, float2 mouse)
+    {
+        var offset = at - mouse;
+        var distance = offset.X * offset.X + offset.Y * offset.Y;
+        if (distance > _best)
+            return;
+        _best = distance;
+        Hull = hull;
+        At = at;
+    }
+
+    /// <summary>True when a hull is under the pointer.</summary>
+    public readonly bool Hit => Hull != 0;
+}
+
+/// <summary>Where the map's legend goes and how many of its rows fit; the look is <c>ScreenHost</c>'s.</summary>
+internal readonly record struct MapLegendLayout(float2 Min, float2 Size, float Header, float Row, int Rows)
+{
+    /// <summary>True when there is room for at least one row.</summary>
+    public bool Shown => Rows > 0;
+}
+
+/// <summary>
+/// The map's legend: a vertical index on the left, under the unit list. Its rows are listed from the most to the
+/// least important, so where the screen is short the last (the star types) are the ones left out. Where even the
+/// features do not fit under the unit list it sits beside it. It is a surface over the map: the map blocks its
+/// rectangle, so a press on it picks nothing.
+/// </summary>
+internal static class MapLegend
+{
+    /// <summary>Rows before the star types: charted, live sensors, unexplored, lost contact, asteroid field, gas cloud.</summary>
+    public const int FeatureRows = 6;
+
+    private const float Width = 200f;
+    private const float HeaderHeight = 26f;
+    private const float Gap = 8f;
+    private const float PadBelow = 6f;
+
+    /// <summary>
+    /// Lays the legend out for <paramref name="rows"/> rows under the unit list, or beside it where the room below
+    /// is under the feature rows, and drops what does not fit.
+    /// </summary>
+    public static MapLegendLayout Layout(float2 display, float scale, in MapUnitLayout units, int rows, float rowHeight)
+    {
+        float Px(float value) => MathF.Round(value * scale);
+        var row = Px(rowHeight);
+        var header = Px(HeaderHeight);
+        var pad = Px(PadBelow);
+        var bottom = display.Y - Px(HudLayout.Margin);
+        var width = Px(Width);
+
+        var top = units.Min.Y + units.Size.Y + Px(Gap);
+        var fit = (int)MathF.Floor((bottom - top - header - pad) / row);
+        var min = new float2(units.Min.X, top);
+        if (fit < Math.Min(rows, FeatureRows))
+        {
+            // Beside the unit list, top level with it, where the whole column is there for it.
+            min = new float2(units.Min.X + units.Size.X + Px(Gap), units.Min.Y);
+            fit = (int)MathF.Floor((bottom - min.Y - header - pad) / row);
+            if (min.X + width > display.X - Px(HudLayout.Margin))
+                fit = 0;
+        }
+
+        var shown = Math.Clamp(fit, 0, rows);
+        return new MapLegendLayout(min, new float2(width, header + row * shown + pad), header, row, shown);
     }
 }

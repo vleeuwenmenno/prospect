@@ -72,5 +72,24 @@ public struct SensorContact
     public bool Live;
 }
 
-/// <summary>Immutable surveyed field envelope, without mineral composition or current asteroid mutations.</summary>
-public readonly record struct ChartField(Double3 Center, System.Numerics.Vector3 HalfExtents, System.Numerics.Vector3 Along);
+/// <summary>
+/// Immutable surveyed field envelope, without mineral composition or current asteroid mutations. The contour is the
+/// seeded ribbon the field's rocks lie in, which is what a chart shows of its shape.
+/// </summary>
+public readonly record struct ChartField(Double3 Center, System.Numerics.Vector3 HalfExtents, System.Numerics.Vector3 Along, FieldContour Contour = default);
+
+/// <summary>
+/// The four transverse sections of a field's ribbon, along its length from one end to the other: where each lies
+/// across the field's axis and how wide it is, both as shares of the field's half-width.
+/// </summary>
+public readonly record struct FieldContour(float Center0, float Width0, float Center1, float Width1, float Center2, float Width2, float Center3, float Width3)
+{
+    /// <summary>The number of sections.</summary>
+    public const int Knots = 4;
+
+    /// <summary>Where section <paramref name="knot"/> lies across the axis.</summary>
+    public float CenterAt(int knot) => knot switch { 0 => Center0, 1 => Center1, 2 => Center2, _ => Center3 };
+
+    /// <summary>How wide section <paramref name="knot"/> is.</summary>
+    public float WidthAt(int knot) => knot switch { 0 => Width0, 1 => Width1, 2 => Width2, _ => Width3 };
+}

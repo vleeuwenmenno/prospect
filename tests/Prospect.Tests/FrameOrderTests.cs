@@ -133,6 +133,8 @@ public sealed class FrameOrderTests : IDisposable
     private SectorCoord _cardShownSector;
     private float _cardScroll;
     private int _mapCloses;
+    private int _cardCloses;
+    private MapUnitHover _unitHover = new(0f);
 
     // The course menu as the map opens it on a right click, and what its rows ordered.
     private static readonly float2 MenuSize = MapCourseMenu.Size(1f);
@@ -1156,6 +1158,9 @@ public sealed class FrameOrderTests : IDisposable
             _map.Block(MapLayerBar.Min(Screen, HudLayout.TopBarBottom(1f), 1f), MapLayerBar.Size(1f));
             if (_card.Pinned)
                 _map.Block(PinnedCardMin, PinnedCardSize);
+            var legend = MapLegend.Layout(Screen, 1f, units, LegendRows, LegendRowHeight);
+            if (legend.Shown)
+                _map.Block(legend.Min, legend.Size);
         }
 
         _map.Begin(Screen);
@@ -1210,6 +1215,10 @@ public sealed class FrameOrderTests : IDisposable
         MapCourseMenu.End();
     }
 
+    private const int LegendRows = MapLegend.FeatureRows + 5;
+    private const float LegendRowHeight = 20f;
+    private const float UnitHoverPixels = 14f;
+
     private MapProjection NavView => new(Screen * 0.5f, _navCenter, NavCell, _nav.Layer, _nav.TiltBlend * 58f * (MathF.PI / 180f), 2.2f);
 
     private float2 PinnedCardMin => MapSectorCard.Place(NavView.ToScreen(_card.Sector.X, _card.Sector.Y, _card.Sector.Z), NavCell * 0.5f, PinnedCardSize, Screen, HudLayout.TopBarBottom(1f), 14f, 16f);
@@ -1232,7 +1241,17 @@ public sealed class FrameOrderTests : IDisposable
         var hover = view.SectorAt(ImGui.GetIO().MousePos);
         if (_map.BoxReleased && !_map.BoxMoved)
             _card.Click(hover, MapBounds.Contains(_snapshot.Content.Galaxy.Shape, 0.01f, hover));
-        _cardShown = _card.Shown(_map.Hovered, hover, out _cardShownSector, out _cardPreview);
+        // As ScreenHost's hull loop: the own hull nearest the pointer, within its radius, keeps the preview card away.
+        _unitHover = new MapUnitHover(UnitHoverPixels);
+        var size = _snapshot.Content.Galaxy.SectorSize;
+        for (var i = 0; i < _snapshot.HullCount; i++)
+        {
+            ref var hull = ref _snapshot.Hulls[i];
+            if (hull.Owner == _snapshot.PlayerId)
+                _unitHover.Consider(hull.Id, view.ToScreen((float)(hull.Position.X / size), (float)(hull.Position.Y / size), (float)(hull.Position.Z / size)), ImGui.GetIO().MousePos);
+        }
+
+        _cardShown = _card.Shown(_map.Hovered && !_unitHover.Hit, hover, out _cardShownSector, out _cardPreview);
     }
 
     /// <summary>The layer bar and the pinned card, as windows over the map.</summary>
@@ -1252,6 +1271,12 @@ public sealed class FrameOrderTests : IDisposable
             return;
         var min = PinnedCardMin;
         MapSectorCard.Begin(min, PinnedCardSize, _map);
+        if (MapSectorCard.Close(min, PinnedCardSize, 1f))
+        {
+            _card.Dismiss();
+            _cardCloses++;
+        }
+
         if (MapSectorCard.Button("##scan"u8, CardScanCenter - new float2(150, 14), new float2(300, 28)))
             Bridge.RequestScan();
         MapSectorCard.BeginList(CardListMin, CardListSize, _map);
@@ -1358,6 +1383,117 @@ public sealed class FrameOrderTests : IDisposable
         Frame(() => Move(bar + new float2(40, 60)));
         Frame();
         Assert.False(_cardShown);
+    }
+
+    private static float2 CloseSpot(float2 cardMin) =>
+        MapSectorCard.CloseMin(cardMin, PinnedCardSize, 1f) + MapSectorCard.CloseExtent(1f) * 0.5f;
+
+    [Fact]
+    public void TheCardsCloseButtonUnpinsItLikeEscapeAndItsPressNeverReachesTheMap()
+    {
+        OpenExploreMap();
+        _world.Select(_snapshot.Hulls[_snapshot.OwnHull].Id, false);
+        var a = OwnSector.Offset(3, 0, 1);
+        Frame(() => Move(SectorSpot(a)));
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+        var selected = _world.Selection.Length;
+        Assert.True(selected > 0);
+        _mapPresses = _mapReleases = 0;
+
+        // A click on the card beside the button does not close it.
+        var closeSize = MapSectorCard.CloseExtent(1f);
+        Frame(() => Move(CloseSpot(PinnedCardMin) - new float2(closeSize.X + 4f, 0)));
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+        Assert.Equal(0, _cardCloses);
+
+        // On the button: pinned no more, the map saw no press and no release, the selection and the map stand.
+        Frame(() => Move(CloseSpot(PinnedCardMin)));
+        Frame(() => Click());
+        Frame();
+        Assert.False(_card.Pinned);
+        Assert.Equal(1, _cardCloses);
+        Assert.Equal(0, _mapPresses);
+        Assert.Equal(0, _mapReleases);
+        Assert.Equal(selected, _world.Selection.Length);
+        Assert.Equal(0, _mapCloses);
+    }
+
+    [Fact]
+    public void TheCloseButtonSitsInTheCardsTopRightCornerInsideItAndClearOfItsLabel()
+    {
+        var min = new float2(100, 100);
+        foreach (var scale in new[] { 1f, 2f })
+        {
+            var size = new float2(340 * scale, 320 * scale);
+            var corner = MapSectorCard.CloseMin(min, size, scale);
+            var extent = MapSectorCard.CloseExtent(scale);
+            Assert.True(corner.X >= min.X + size.X - 40f * scale && corner.X + extent.X <= min.X + size.X);
+            Assert.True(corner.Y >= min.Y && corner.Y + extent.Y <= min.Y + 36f * scale);
+        }
+    }
+
+    [Fact]
+    public void AnOwnUnitUnderThePointerKeepsThePreviewCardAwayAndThePinnedCardStays()
+    {
+        OpenExploreMap();
+        ref var own = ref _snapshot.Hulls[_snapshot.OwnHull];
+        var size = _snapshot.Content.Galaxy.SectorSize;
+        var unit = NavView.ToScreen((float)(own.Position.X / size), (float)(own.Position.Y / size), (float)(own.Position.Z / size));
+
+        Frame(() => Move(unit + new float2(4, 3)));
+        Frame();
+        Assert.True(_unitHover.Hit);
+        Assert.False(_cardShown);
+
+        // Off every unit, in the same map: the sector's card is back.
+        var away = OwnSector.Offset(3, 0, 2);
+        Frame(() => Move(SectorSpot(away)));
+        Frame();
+        Assert.False(_unitHover.Hit);
+        Assert.True(_cardShown);
+        Assert.True(_cardPreview);
+        Assert.Equal(away, _cardShownSector);
+
+        // A card pinned stays shown while the pointer is on a unit.
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+        Frame(() => Move(unit));
+        Frame();
+        Assert.True(_unitHover.Hit);
+        Assert.True(_cardShown);
+        Assert.False(_cardPreview);
+        Assert.Equal(away, _cardShownSector);
+    }
+
+    [Fact]
+    public void ThePointerJustOutsideTheUnitRadiusIsNotOnTheUnit()
+    {
+        var hover = new MapUnitHover(UnitHoverPixels);
+        hover.Consider(7, new float2(100, 100), new float2(100 + UnitHoverPixels + 1, 100));
+        Assert.False(hover.Hit);
+        hover.Consider(8, new float2(100, 100), new float2(100 + UnitHoverPixels - 1, 100));
+        hover.Consider(9, new float2(130, 100), new float2(100 + UnitHoverPixels - 1, 100));
+        Assert.Equal(8u, hover.Hull);
+    }
+
+    [Fact]
+    public void APressOnTheLegendNeverReachesTheMap()
+    {
+        OpenExploreMap();
+        var legend = MapLegend.Layout(Screen, 1f, Units, LegendRows, LegendRowHeight);
+        Assert.True(legend.Shown);
+        _mapPresses = _mapReleases = 0;
+        Frame(() => Move(legend.Min + legend.Size * 0.5f));
+        Frame(() => Click());
+        Frame();
+        Assert.Equal(0, _mapPresses);
+        Assert.Equal(0, _mapReleases);
+        Assert.False(_card.Pinned);
     }
 
     [Fact]

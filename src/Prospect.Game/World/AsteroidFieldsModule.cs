@@ -628,8 +628,11 @@ public sealed class AsteroidFieldsModule : SectorModule
         for (var i = 0; i < count; i++)
         {
             ref var field = ref fields[i];
+            var contour = knots.Slice(i * KnotsPerField, KnotsPerField);
             destination[i] = new ChartField(galaxy.CenterOf(coord) + field.Shift + field.Center,
-                new Vector3(field.Length, field.Height, field.Width), new Vector3(field.AlongX, 0, field.AlongZ));
+                new Vector3(field.Length, field.Height, field.Width), new Vector3(field.AlongX, 0, field.AlongZ),
+                new FieldContour(contour[0].Center, contour[0].Width, contour[1].Center, contour[1].Width,
+                    contour[2].Center, contour[2].Width, contour[3].Center, contour[3].Width));
         }
         return count;
     }
