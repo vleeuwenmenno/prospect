@@ -48,6 +48,9 @@ internal enum JumpPrompt : byte
 
     /// <summary>The hull has left and is between sectors.</summary>
     Transit,
+
+    /// <summary>The server refused the last plot or jump start; shown for a few seconds, over the states of a plot.</summary>
+    Denied,
 }
 
 /// <summary>
@@ -253,6 +256,7 @@ internal static class HudLayout
             JumpPrompt.Aligning => "ALIGNING"u8,
             JumpPrompt.Working => calculated ? "CHARGING"u8 : "CALCULATING"u8,
             JumpPrompt.Transit => "IN TRANSIT"u8,
+            JumpPrompt.Denied => "JUMP REFUSED"u8,
             _ => default,
         };
 

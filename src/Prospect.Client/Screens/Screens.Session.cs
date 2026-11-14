@@ -71,16 +71,27 @@ internal sealed partial class ScreenHost
                 // Escape that cancelled the ship editor this frame was its, not the menu's.
                 if (!_editorHandled && !mapWasOpen && !_mapOpen && BackPressed() && !SocialBack())
                 {
-                    if (_shipInfoOpen)
-                        _shipInfoOpen = false;
-                    else if (_worldSettingsOpen)
-                        _worldSettingsOpen = false;
-                    else if (_sessionMenuOpen)
-                        _sessionMenuOpen = false;
-                    else if (_app.World.Mode == World.ViewMode.Command)
-                        _app.World.SetMode(World.ViewMode.Pilot);
-                    else
-                        _sessionMenuOpen = true;
+                    switch (NextBackStep(_shipInfoOpen, _worldSettingsOpen, _sessionMenuOpen, _app.World.CourseMenu.IsOpen, _app.World.Mode))
+                    {
+                        case BackStep.ShipInfo:
+                            _shipInfoOpen = false;
+                            break;
+                        case BackStep.WorldSettings:
+                            _worldSettingsOpen = false;
+                            break;
+                        case BackStep.SessionMenu:
+                            _sessionMenuOpen = false;
+                            break;
+                        case BackStep.CourseMenu:
+                            _app.World.CourseMenu.Close();
+                            break;
+                        case BackStep.PilotView:
+                            _app.World.SetMode(World.ViewMode.Pilot);
+                            break;
+                        default:
+                            _sessionMenuOpen = true;
+                            break;
+                    }
                 }
                 if (_worldSettingsRequested)
                     OpenWorldSettings(snapshot);
@@ -91,6 +102,30 @@ internal sealed partial class ScreenHost
                 break;
         }
     }
+
+    /// <summary>What one press of Escape closes in the world, from the innermost surface outwards.</summary>
+    internal enum BackStep : byte
+    {
+        ShipInfo,
+        WorldSettings,
+        SessionMenu,
+
+        /// <summary>The command view's course menu: the view stays.</summary>
+        CourseMenu,
+        PilotView,
+
+        /// <summary>Nothing is open in the pilot view: the menu opens.</summary>
+        OpenMenu,
+    }
+
+    /// <summary>The step Escape takes: it backs out one level at a time, and the course menu goes before the command view does.</summary>
+    internal static BackStep NextBackStep(bool shipInfo, bool worldSettings, bool sessionMenu, bool courseMenu, World.ViewMode mode) =>
+        shipInfo ? BackStep.ShipInfo
+        : worldSettings ? BackStep.WorldSettings
+        : sessionMenu ? BackStep.SessionMenu
+        : courseMenu ? BackStep.CourseMenu
+        : mode == World.ViewMode.Command ? BackStep.PilotView
+        : BackStep.OpenMenu;
 
     private void DrawConnecting(float fade)
     {

@@ -246,9 +246,9 @@ internal sealed partial class ScreenHost
             at.Y += line;
         }
 
-        // The jump: a charted destination, or a blind one, whose risk the server does not model yet.
-        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at, charted ? Theme.Info : Theme.Accent,
-            charted ? "JUMP         CHARTED DESTINATION"u8 : "JUMP         BLIND, RISK NOT YET MODELLED"u8, inner);
+        // The jump, in the words the course menus use: charted or blind, the range, and a blind jump's risk.
+        var jump = JumpSummary(snapshot, world.PlanJump(galaxy.CenterOf(sector)), out var jumpColor);
+        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at, jumpColor, Kit.F($"JUMP         {jump}"), inner);
 
         if (parts.Scan >= 0)
             DrawScanReadout(draw, snapshot, world, new float2(text.X, min.Y + parts.Scan), inner, preview, charted);
@@ -313,7 +313,7 @@ internal sealed partial class ScreenHost
             var target = galaxy.CenterOf(sector);
             var rowsMin = new float2(min.X, min.Y + parts.Course);
             var rowSize = MapCourseMenu.RowSize(new float2(size.X, 0), Kit.Scale);
-            DrawCourseRows(draw, world, target, rowsMin, rowSize, false);
+            DrawCourseRows(draw, snapshot, world, target, rowsMin, rowSize);
         }
 
         var listTop = parts.ShipsTop + Kit.Px(CardShipHeader);
@@ -335,38 +335,6 @@ internal sealed partial class ScreenHost
         }
 
         MapSectorCard.End();
-    }
-
-    /// <summary>The two course rows, shared by the course menu and the pinned card: move the selection here, or jump or plot the jump.</summary>
-    private bool DrawCourseRows(ImDrawListPtr draw, WorldView world, Double3 target, float2 min, float2 rowSize, bool menu)
-    {
-        world.CountJumpReady(target, out var ships, out var ready, out var inSector);
-        var none = ships == 0;
-        var session = _app.Session;
-        var acted = false;
-        var row = MathF.Round(MapCourseMenu.RowHeight * Kit.Scale);
-        var first = min + new float2(Kit.Px(6), Kit.Px(Theme.Space1));
-        var moveCount = ships == 1 ? "1 ship"u8 : Kit.F($"{ships} ships");
-        if (MapMenuItem(draw, first, rowSize, "Move here"u8, none ? "NO SHIPS SELECTED"u8 : "UNDER OWN ENGINES"u8, moveCount, !none) && session is not null)
-        {
-            world.OrderMoveSelected(session.Client.Input, target);
-            acted = true;
-        }
-
-        // The ship being flown is only given the course; its pilot starts the jump with NAV and boost.
-        var canJump = ready > 0;
-        var plotOnly = world.JumpPlotsOwnOnly;
-        var reason = !canJump ? ships == 0 ? "NO SHIPS SELECTED"u8 : inSector == ships ? "ALREADY IN THIS SECTOR"u8 : "NO WORKING JUMP DRIVE"u8
-            : plotOnly ? Kit.F($"SET NAV TARGET, THEN AIM AND {world.BoostKeyName}")
-            : "FASTER THAN LIGHT"u8;
-        var jumpCount = ships == 1 ? Kit.F($"{ready} of 1 ship") : Kit.F($"{ready} of {ships} ships");
-        if (MapMenuItem(draw, first + new float2(0, row), rowSize, plotOnly ? "Plot jump"u8 : "Jump here"u8, reason, jumpCount, canJump) && session is not null)
-        {
-            world.OrderJump(session.Client.Input, target);
-            acted = true;
-        }
-
-        return acted;
     }
 
     /// <summary>The scan's readout in the card: progress while it runs, otherwise the last result for this sector or what a scan does.</summary>

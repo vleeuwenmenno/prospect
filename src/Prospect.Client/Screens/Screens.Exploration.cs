@@ -10,11 +10,14 @@ namespace Prospect.Client.Screens;
 
 internal sealed partial class ScreenHost
 {
-    /// <summary>Opens the map with the card of the player's own sector pinned. Used by <c>--open map-card</c>.</summary>
-    public void OpenMapCard()
+    /// <summary>
+    /// Opens the map with the card of the player's own sector, or the sector offset from it, pinned. Used by
+    /// <c>--open map-card</c>, <c>map-card-near</c> and <c>map-card-far</c>.
+    /// </summary>
+    public void OpenMapCard(int dx = 0, int dz = 0)
     {
         OpenMap();
-        _mapCard.Pin(_app.World.Sector.Coord);
+        _mapCard.Pin(_app.World.Sector.Coord.Offset(dx, 0, dz));
     }
 
     /// <summary>Opens the map tilted, with the own sector's card pinned. Used by <c>--open map-tilt</c>.</summary>

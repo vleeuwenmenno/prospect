@@ -419,6 +419,7 @@ public sealed class BoxHullSums
             Ftl = ftl,
             FtlEnergy = rules.FtlEnergyPerTonne * mass,
             FtlPower = ftlPower,
+            FtlMaxDistance = flight.FtlMaxDistance,
         };
     }
 }

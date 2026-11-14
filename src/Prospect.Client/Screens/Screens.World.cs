@@ -163,7 +163,11 @@ internal sealed partial class ScreenHost
             if (_shipInfoOpen)
                 DrawSheet(draw, snapshot, world);
             if (world.CommandBlend > 0.5f)
+            {
                 DrawFleetList(snapshot, world, world.CommandBlend);
+                DrawCommandCourseMenu(snapshot, world, world.CommandBlend);
+            }
+
             DrawEditorNotice(draw, world.Editor);
             if (world.ControlOutOfSector)
             {
@@ -453,6 +457,8 @@ internal sealed partial class ScreenHost
             : Kit.F($"{world.Selection.Length + world.SelectedRocks.Length} SELECTED   FREE CAMERA   RANGE {world.CommandDistance / 1000f:0.00} KM");
         var statusSize = Kit.Measure(_ui.Mono, Theme.FontCaption, status);
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, top + new float2(-statusSize.X * 0.5f, Kit.Px(22)), Theme.TextDim, status);
+        DrawCommandRefusal(draw, snapshot, world, top);
+        DrawCourseMenuTarget(draw, snapshot, world);
 
         Kit.Fade = previousFade;
     }
@@ -955,7 +961,7 @@ internal sealed partial class ScreenHost
     /// unit list. Moving needs a selection; jumping also needs a selected ship with a working drive that is not
     /// already in that sector. With nothing selected both are off, and nothing is ordered.
     /// </summary>
-    private void DrawMapMenu(WorldView world, Galaxy galaxy, float fade)
+    private void DrawMapMenu(SessionSnapshot snapshot, WorldView world, Galaxy galaxy, float fade)
     {
         // Where the map blocked it this frame.
         var appear = MapCourseMenu.Appear(_mapMenuTime);
@@ -966,21 +972,9 @@ internal sealed partial class ScreenHost
         var draw = ImGui.GetWindowDrawList();
         Kit.PanelFrame(draw, min, min + size);
 
-        var sector = _mapMenuSector;
-        var target = galaxy.CenterOf(sector);
-        var known = Charted(sector);
-        var text = min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3));
-        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, text, Theme.Accent, "SET COURSE"u8);
-        var coords = Kit.F($"{sector.X} : {sector.Z}   LAYER {sector.Y:+0;-0;0}");
-        var coordsWidth = Kit.Measure(_ui.Mono, Theme.FontCaption, coords).X;
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(min.X + size.X - Kit.Px(Theme.Space4) - coordsWidth, text.Y), Theme.TextMute, coords);
-        Kit.Text(draw, _ui.SansMedium, Theme.FontBody, text + new float2(0, Kit.Px(20)), known ? Theme.Text : Theme.TextDim, known ? MapName(galaxy, sector) : "Uncharted sector"u8);
-        var range = target.RelativeTo(world.OwnPosition).Length() / 1000f;
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(46)), Theme.TextDim, Kit.F($"DISTANCE   {range:0.0} KM"));
-        var divider = min.Y + Kit.Px(MapCourseMenu.HeaderHeight) - 0.5f;
-        draw.AddLine(new float2(min.X + Kit.Px(6), divider), new float2(min.X + size.X - Kit.Px(6), divider), Kit.Color(Theme.Line));
-
-        if (DrawCourseRows(draw, world, target, new float2(min.X, min.Y + MathF.Round(MapCourseMenu.HeaderHeight * Kit.Scale)), MapCourseMenu.RowSize(size, Kit.Scale), true))
+        var target = galaxy.CenterOf(_mapMenuSector);
+        DrawCourseHeader(draw, snapshot, world, galaxy, target, world.PlanJump(target), min, size);
+        if (DrawCourseRows(draw, snapshot, world, target, new float2(min.X, min.Y + MathF.Round(MapCourseMenu.HeaderHeight * Kit.Scale)), MapCourseMenu.RowSize(size, Kit.Scale)))
             _mapMenuOpen = false;
 
         MapCourseMenu.End();
@@ -990,7 +984,7 @@ internal sealed partial class ScreenHost
     /// One row of the course menu: a label with a short line under it and a count at the right. A disabled row is
     /// drawn muted, does not light up and cannot be chosen, though it still takes the click so the menu stays open.
     /// </summary>
-    private bool MapMenuItem(ImDrawListPtr draw, float2 rowMin, float2 rowSize, ImString label, ImString detail, ImString count, bool enabled)
+    private bool MapMenuItem(ImDrawListPtr draw, float2 rowMin, float2 rowSize, ImString label, ReadOnlySpan<byte> detail, ImString count, bool enabled)
     {
         var pressed = MapCourseMenu.Item(label, rowMin, rowSize);
         var hot = Kit.Animate(ImGui.GetItemID(), enabled && ImGui.IsItemHovered() ? 1f : 0f);
@@ -1002,8 +996,8 @@ internal sealed partial class ScreenHost
 
         var text = rowMin + new float2(Kit.Px(Theme.Space3) + Kit.Px(6) * hot, Kit.Px(5));
         Kit.Text(draw, _ui.SansMedium, Theme.FontBody, text, enabled ? Kit.Mix(Theme.TextDim, Theme.Text, 0.55f + 0.45f * hot) : Theme.TextMute, label, enabled ? 1f : 0.7f);
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(22)), enabled ? Theme.TextMute : Theme.Bad, detail, enabled ? 1f : 0.75f);
         var countWidth = Kit.Measure(_ui.Mono, Theme.FontCaption, count).X;
+        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(22)), enabled ? Theme.TextMute : Theme.Bad, detail, Math.Max(0f, rowSize.X - Kit.Px(Theme.Space3) * 2 - Kit.Px(6) - Kit.Px(Theme.Space2)));
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(rowMin.X + rowSize.X - Kit.Px(Theme.Space3) - countWidth, rowMin.Y + Kit.Px(8)), enabled ? Kit.Mix(Theme.TextDim, Theme.Accent, hot) : Theme.TextMute, count, enabled ? 1f : 0.7f);
         return pressed && enabled;
     }

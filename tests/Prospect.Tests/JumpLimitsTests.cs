@@ -30,6 +30,24 @@ public sealed class JumpLimitsTests
         Assert.Equal(8333, ExplorationMessage.VisibilityMaxWireSize);
     }
 
+    [Fact]
+    public void AHullsDataSheetCarriesItsDriveRangeSoAnotherShipsJumpCanBeCheckedFromIt()
+    {
+        foreach (var design in Content.Designs)
+        {
+            var flight = design.Flight;
+            var stats = design.Stats;
+            Assert.Equal(flight.FtlMaxDistance, stats.FtlMaxDistance);
+            Assert.Equal(flight.Ftl, stats.Ftl);
+
+            // The server's own check, and the one a client makes from the data sheet, agree for every design.
+            var target = new Double3(0, 0, -120000);
+            var server = JumpRules.Evaluate(default, target, flight, Content.Exploration, false);
+            var client = JumpRules.Evaluate(default, target, JumpRules.DriveOf(Content.Pod.Flight, stats), Content.Exploration, false);
+            Assert.Equal(server, client);
+        }
+    }
+
     [Theory]
     [InlineData(0, 0, 0)]
     [InlineData(127, -1, -127)]

@@ -13,8 +13,8 @@ or that local game opened to other players. There is one simulation and one code
 
 Exploration has a server/client backend: personal saved charts, manual scan intent, owned-ship sensors and dynamic visibility filtering.
 The galaxy map shows it: fog over uncharted space, charted sectors, live sensor coverage, lost contacts, a sector card
-with the scan control, layer navigation and a tilted view. Seed secrecy remains unfinished, and the map card does not
-yet show the server's jump range and blind-jump risk. The map's galaxy edge is drawn, not enforced.
+with the scan control, layer navigation and a tilted view. The card and the course menus show a jump's distance
+against the drive's range and a blind jump's risk. Seed secrecy remains unfinished. The map's galaxy edge is drawn, not enforced.
 See [exploration contract](docs/hosting.md#exploration-foundation-protocol-37) for the map API and disclosure limits.
 
 Rare decorative volumetric gas clouds are generated: lopsided, self-shadowed, with billowy edges and wisps. Most are 8 to 11 km long; a few are huge, up to a sector across, and any of them can lie across sector borders. Some hold asteroids. They are seen from up to five sectors away, at three levels of detail that hand over without a step. A huge cloud seen from inside or close by is broken into strands with depth. Full-screen views reach 144 FPS at 5096x1390 except a pilot view in dense asteroids and the inside of a huge cloud (about 110); visual acceptance is pending. See [gas clouds](docs/gas-clouds.md).
@@ -220,7 +220,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   a jumping hull where it is drawn, and targeting takes its shape as drawn: what is cut off at an opening cannot be
   targeted, what still shows can, and a drawn-out hull can along its whole length. Only faces on screen count:
   looking into an opening shows the hull hollow, with nothing drawn across the cut, and nothing there is a target. A hull between the ends of its
-  jump cannot be targeted. The pilot plots a jump on the map
+  jump cannot be targeted. The pilot plots a jump on the map or from the command view's right-click menu
   (**Plot jump**), which shows a NAV marker in the pilot view; aimed at it, the boost key starts the jump. Ships
   flown by the server jump as soon as they are ordered. A started jump is a standing order: the hull brakes and
   turns its nose to the destination, then calculates for 12 seconds while charging from the hull's power.
@@ -230,7 +230,10 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   Base time and speed are content tuning; there is no distance energy cost.
   The server requires 5–400 km with current drives. Blind jumps through 40 km are safe; farther ones risk
   proportional block damage, never below 10% intact hull HP. Personal destination charts remove blind risk.
-  Shared range/risk previews and server-validated plot feedback exist; the map/RTS UI does not consume them yet. Taking the controls
+  The map card, the map's course menu and the command view's right-click menu show the distance against the
+  drive's range, charted or blind, and a blind jump's hit chance and damage, from the same function the server checks
+  with; too close, too far or driveless is greyed out with the reason, and the server's refusal of a plot or a jump
+  start shows for a few seconds. Taking the controls
   before the drive fires cancels the jump and loses the charge. The client generates the destination while the
   drive charges.
 - **World settings.** A world has settings, chosen when a server or a local game starts: collision damage,
@@ -244,7 +247,8 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 - **Fleet.** Each player starts with the command pod (hyperspace drive), a mining vessel (wormhole) and a survey vessel (rift). Hulls nobody is flying are flown by
   the server under their standing orders.
 - **Command view.** One key pulls the camera back from the pod into a free orbiting view over the same space.
-  Click or drag a box to select hulls, right-click to send them somewhere in formation; a fleet list on the right
+  Click or drag a box to select hulls, right-click a point for a menu: **Move here** (in formation), and **Plot jump**
+  (the ship you fly) or **Jump here** (ships nobody flies) with the range and blind risk shown; a fleet list on the right
   selects and focuses too.
 - **Galaxy.** A spiral disc 800 sectors across. Asteroid fields follow its arms and core; between the arms and
   outside the disc space is nearly empty.
@@ -385,7 +389,8 @@ Command view (the cursor is always shown):
 | --- | --- |
 | Select a hull or an asteroid | Left-click it; hulls also by their row in the fleet list |
 | Select several | Drag a box (your hulls first; asteroids if the box holds no hull); `Ctrl` + drag adds to the selection; `Shift` + click adds or removes one; `Ctrl` + `A` selects all |
-| Move the selection | Right-click the destination |
+| Move or jump the selection | Right-click the destination, then pick **Move here** or **Plot jump** / **Jump here** |
+| Close the menu | `Esc` (the view stays), or click anywhere else |
 | Rotate the view | Right-drag |
 | Zoom | Mouse wheel |
 | Pan | `W` `A` `S` `D`, arrow keys, or middle-drag |
@@ -426,7 +431,8 @@ Galaxy map:
 
 Map orders go to exactly the selected ships. Opening the map with nothing selected selects the ship you fly.
 After **Clear**, **Move here** and **Jump here** are greyed out and nothing is ordered. Jumps also require a
-working drive and a destination outside the current sector; ineligible ships keep their orders.
+working drive, a destination between the drive's minimum and maximum distance and outside the current sector;
+ineligible ships keep their orders.
 The ship you fly gets a plotted course instead: a NAV marker, or an arrow at the edge of the view, shows the way.
 Turn its nose onto the marker and press boost (`Space`) to start the jump. Forward (`W`) and boost pressed together,
 in either order, start it too, and forward held from that start does not cancel it; once both are let go, any
