@@ -2,6 +2,7 @@
   "jumpMinimum": 5e3,
   "blindSafeDistance": 40000,
   "blindMaxDamage": 0.9,
+  "gasOpticalPenalty": 1.0,
   "sensorRadius": 5000,
   "proximityRadius": 250,
   "scanSeconds": 5,

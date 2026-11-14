@@ -4,8 +4,8 @@ using System.Text.Json;
 namespace Prospect.Game.World;
 
 /// <summary>
-/// A decorative volume in world space. <see cref="Center"/> is relative to the centre of the sector that anchors
-/// the cloud, the sector its centre lies in; the box may reach into the sectors around it. No simulation or
+/// A generated gas volume in world space. <see cref="Center"/> is relative to the centre of the sector that anchors
+/// the cloud, the sector its centre lies in; the box may reach into the sectors around it. No mutable simulation or
 /// network state.
 /// </summary>
 public readonly record struct GasCloud(Vector3 Center, Vector3 HalfSize, float Seed);

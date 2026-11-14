@@ -106,6 +106,65 @@ public sealed class ExplorationSessionTests
     }
 
     [Fact]
+    public void GasHidesHullOnWireAndProximityStillDisclosesIt()
+    {
+        using var rig = new Rig();
+        var galaxy = rig.Server.Galaxy;
+        var anchor = new SectorCoord(127, -1, -127);
+        Assert.True(galaxy.GasClouds!.TryGetCloud(galaxy, anchor, out var cloud));
+        var center = GasCloudQuery.CenterOf(galaxy, new(anchor, cloud));
+        // Put every contributing ship on its owner's side of the cloud.
+        for (var i = 0; i < rig.Hulls.Slots; i++)
+            if (rig.Hulls.IsAliveAt(i))
+                rig.Hulls.State(i).Position = center + new Double3(0, rig.Hulls.Info(i).Owner == rig.Owner(0) ? -2300 : 2300, i * 30);
+        rig.Step(20);
+        rig.Wires[0].ForbiddenOwner = rig.Owner(1);
+        rig.Wires[0].LeakedHulls = 0;
+        rig.Step(20);
+        Assert.Equal(0, rig.Wires[0].LeakedHulls);
+        var target = rig.Hulls.State((int)(rig.Own(1) & 65535)).Position;
+        Assert.False(rig.Server.Covered(rig.Owner(0), target));
+        rig.Hulls.State((int)(rig.Own(1) & 65535)).Position = rig.Hulls.State((int)(rig.Own(0) & 65535)).Position + new Double3(100, 0, 0);
+        rig.Step(20);
+        Assert.True(rig.Wires[0].LeakedHulls > 0);
+    }
+
+    [Fact]
+    public void ManySensorsNearGasHaveMeasuredTickCost()
+    {
+        using var rig = new Rig(players: 32);
+        var anchor = new SectorCoord(133, 0, -77);
+        Assert.True(rig.Server.Galaxy.GasClouds!.TryGetCloud(rig.Server.Galaxy, anchor, out var cloud));
+        var center = GasCloudQuery.CenterOf(rig.Server.Galaxy, new(anchor, cloud));
+        for (var i = 0; i < rig.Hulls.Slots; i++)
+            if (rig.Hulls.IsAliveAt(i)) rig.Hulls.State(i).Position = center + new Double3(i % 12 * 400 - 2000, i / 12 * 400 - 1000, 0);
+        for (var owner = 0; owner < 32; owner++)
+            for (var j = 0; j < 3; j++)
+                rig.Hulls.Create(rig.Owner(owner), (byte)Content.PodDesign, Content.Pod,
+                    center + new Double3(owner % 8 * 400 - 1500, owner / 8 * 400 - 600, 500 + j * 400));
+        rig.Step(150);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var probe = new AllocationProbe();
+        long serverTime = 0;
+        var rounds = 0;
+        for (var i = 0; i < 60; i++)
+            while (probe.Measuring())
+            {
+                rig.Clock.Advance(ManualTime.Tick);
+                var started = System.Diagnostics.Stopwatch.GetTimestamp();
+                ((ITickHandler)rig.Server).Tick(rig.Tick);
+                serverTime += System.Diagnostics.Stopwatch.GetTimestamp() - started;
+                foreach (var client in rig.Clients) ((ITickHandler)client).Tick(rig.Tick);
+                rig.Tick++;
+                rounds++;
+            }
+        watch.Stop();
+        Console.WriteLine($"Gas sensors: {rig.Hulls.Count} hulls, 32 clients, {watch.Elapsed.TotalMilliseconds / rounds:F4} ms/full round, {serverTime * 1000.0 / System.Diagnostics.Stopwatch.Frequency / rounds:F4} ms/server tick; {probe.Bytes} allocated bytes.");
+        Assert.Equal(192, rig.Hulls.Count);
+        Assert.Equal(0, probe.Bytes);
+    }
+
+    [Fact]
     public void NavigationRetriesOnlyToItsOwnerAndDoesNotDiscloseJumpTargets()
     {
         using var rig = new Rig();

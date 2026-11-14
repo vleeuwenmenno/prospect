@@ -6,6 +6,7 @@ namespace Prospect.Game.World;
 /// <summary>Shared, content-owned exploration tuning. Additional equipment gives redundancy only.</summary>
 public sealed record ExplorationRules(double SensorRadius, int ScanTicks, int ContactTicks, int ChartsPerOwner)
 {
+    public double GasOpticalPenalty { get; init; }
     public double JumpMinimum { get; init; }
     public double BlindSafeDistance { get; init; }
     public float BlindMaxDamage { get; init; }
@@ -38,11 +39,13 @@ public sealed record ExplorationRules(double SensorRadius, int ScanTicks, int Co
         if (!double.IsFinite(minimum) || minimum <= 0 || !double.IsFinite(safe) || safe < minimum
             || !float.IsFinite(damage) || damage <= 0 || damage > 1)
             throw new InvalidDataException("Invalid jump rules.");
+        var gasPenalty = root.GetProperty("gasOpticalPenalty"u8).GetDouble();
+        if (!double.IsFinite(gasPenalty) || gasPenalty < 0 || gasPenalty > 10) throw new InvalidDataException("Invalid gas optical penalty.");
         var proximity = root.GetProperty("proximityRadius"u8).GetDouble();
         if (!double.IsFinite(proximity) || proximity <= 0 || proximity > radius) throw new InvalidDataException("Invalid proximity radius.");
         return new(radius, (int)Math.Ceiling(scan * TickLoop.SimulationHz),
             (int)Math.Ceiling(contact * TickLoop.SimulationHz), charts)
-        { ProximityRadius = proximity, JumpMinimum = minimum, BlindSafeDistance = safe, BlindMaxDamage = damage };
+        { GasOpticalPenalty = gasPenalty, ProximityRadius = proximity, JumpMinimum = minimum, BlindSafeDistance = safe, BlindMaxDamage = damage };
     }
 }
 

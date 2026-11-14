@@ -20,6 +20,15 @@ public sealed class FlightTests
     }
 
     [Fact]
+    public void GasCoverageTickUsesSharedRangeBudget()
+    {
+        var content = GameContent.Load();
+        var cache = new SensorGasCache(content.Galaxy, content.Exploration.SensorRadius);
+        Assert.True(GasSensors.Covers(content.Galaxy, cache.At(default), content.Exploration, default, new Double3(250, 0, 0), false));
+        Assert.False(GasSensors.Covers(content.Galaxy, cache.At(default), content.Exploration, default, new Double3(5001, 0, 0)));
+    }
+
+    [Fact]
     public void JumpPreviewAndRollTakeNoTickMemory()
     {
         var content = GameContent.Load();

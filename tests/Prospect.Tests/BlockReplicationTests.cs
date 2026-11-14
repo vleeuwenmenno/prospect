@@ -16,6 +16,8 @@ public sealed class BlockReplicationTests
     {
         using var files = new ContentCopy();
         files.Replace("rules/exploration.json", "5000", "2000000");
+        // These replication fixtures deliberately see across the whole jump, independent of gas.
+        files.Replace("rules/exploration.json", "\"gasOpticalPenalty\": 1.0", "\"gasOpticalPenalty\": 0.0");
         return files.Load();
     }
 

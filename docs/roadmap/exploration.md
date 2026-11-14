@@ -72,7 +72,7 @@ Scanning individual asteroids or fields for mining is deferred.
 
 ## Decided: passive sensors
 
-- A separate sensor block automatically detects nearby ships, stations and asteroids in a 3D radius.
+- A separate sensor block automatically detects nearby ships, stations and asteroids within directional 3D coverage.
 - Every owned ship contributes coverage, including ships in other sectors.
 - Coverage crosses sector borders seamlessly according to actual distance.
 - Detecting something in a neighbouring sector does not chart that sector.
@@ -180,3 +180,14 @@ UI estimates use the same curve, not knowledge of the future departure tick.
 - Alliance chart-sharing UI, chart trading/selling and an economy around it.
 - Equipment tiers, material scaling, modules and diminishing-return upgrades.
 - Stations as relays, remote-control range and its coverage visualization.
+
+### Decided (provisional, tunable): gas disturbs passive sensors
+
+- Gas spends sensor range according to the column between sensor and target: reduced in every direction inside,
+  further outward than inward at an edge, and shorter behind an intervening cloud.
+- Shared `GasSensors.Covers` and `SampleReach` use the same smooth generated ellipsoid and exact density integral.
+  The drawable contract and cache lifetime are documented in [hosting](../hosting.md#decided-provisional-tunable-gas-sensor-contract).
+- `gasOpticalPenalty` in shared `rules/exploration.json` is 1.0; base range stays 5,000 m.
+  These are provisional tuning numbers. Shader noise and the render-only `gasWispiness` setting never affect sensing.
+- The 250 m collision proximity sphere is unaffected, with or without sensors. Own ships remain disclosed.
+- Charting and generation remain unchanged. Directional contour rendering is a separate client task.

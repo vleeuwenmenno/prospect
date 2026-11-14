@@ -24,12 +24,12 @@ public readonly struct ContentIdentity : IEquatable<ContentIdentity>
     public const int WireSize = 16;
 
     /// <summary>
-    /// The version of the arithmetic that turns blocks into figures: <see cref="BoxHullSums"/>, the size rules,
+    /// The version of shared simulation arithmetic, including gas sensor coverage and block figures: <see cref="BoxHullSums"/>, the size rules,
     /// <see cref="FlightRules.Under"/> and what a design derives from them. Bump it when that arithmetic changes
     /// what comes out while the content files stay as they are, so that two builds which would evaluate the same
     /// files differently do not pass for the same content.
     /// </summary>
-    public const uint EvaluatorVersion = 6;
+    public const uint EvaluatorVersion = 7;
 
     private readonly ulong _low;
     private readonly ulong _high;
