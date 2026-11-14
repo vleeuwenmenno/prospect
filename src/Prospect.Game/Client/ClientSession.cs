@@ -71,6 +71,7 @@ public sealed class SessionSnapshot(GameContent content)
     /// what was refused and why, how long to wait, and after a rebuild the old and the new hull.
     /// </summary>
     public EditorView Editor;
+    public NewShipView NewShip;
     public readonly ExplorationView Exploration = new(content.Exploration.ChartsPerOwner);
 
     public SessionState State;
@@ -332,6 +333,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         var now = _clock.GetTimestamp();
         _social.CopyTo(snapshot.Social);
         snapshot.Editor = _editor.View;
+        snapshot.NewShip = _editor.NewShip;
         snapshot.State = _state;
         snapshot.EndReason = _endReason;
         snapshot.PlayerId = _playerId;

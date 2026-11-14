@@ -3714,3 +3714,36 @@ public sealed class ExplorationWorldTests
         Assert.Equal(0, probe.Bytes);
     }
 }
+
+
+public sealed class NewShipProtocolTests
+{
+    [Fact]
+    public void NamesRoundTripAtTheUnicodeLimitWithoutAllocatingAndTruncationIsRejected()
+    {
+        var text = string.Concat(Enumerable.Repeat("🚀", 32));
+        Prospect.Game.Protocol.ShipName name = default;
+        Assert.True(name.Set(text));
+        Assert.False(name.Set(text + "x"));
+        var buffer = new byte[Prospect.Game.Protocol.EditorRequestMessage.MaxWireSize];
+        var writer = new Prospect.Engine.Net.NetWriter(buffer);
+        new Prospect.Game.Protocol.EditorRequestMessage { Kind = Prospect.Game.Protocol.EditorRequestKind.NewShip, Name = name }.Write(ref writer, default);
+        Assert.Equal(buffer.Length, writer.Length);
+        var allocation = new AllocationProbe();
+        for (var i = 0; i < 100; i++)
+        {
+            while (allocation.Measuring())
+            {
+                var reader = new Prospect.Engine.Net.NetReader(buffer.AsSpan(1));
+                if (!Prospect.Game.Protocol.EditorRequestMessage.TryRead(ref reader, default, out var parsed) || parsed.Name.Length != 64)
+                    throw new InvalidOperationException("Name did not round trip.");
+            }
+        }
+        Assert.Equal(0, allocation.Bytes);
+        for (var size = 1; size < buffer.Length; size++)
+        {
+            var reader = new Prospect.Engine.Net.NetReader(buffer.AsSpan(1, size - 1));
+            Assert.False(Prospect.Game.Protocol.EditorRequestMessage.TryRead(ref reader, default, out _));
+        }
+    }
+}

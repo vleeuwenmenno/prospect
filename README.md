@@ -11,6 +11,8 @@ or that local game opened to other players. There is one simulation and one code
 
 ## Status
 
+New ships from a drone: server/session creation, remote editor grant and persistence are implemented. The creation dialog and key handling are not wired yet.
+
 Exploration has a server/client backend: personal saved charts, manual scan intent, owned-ship sensors and dynamic visibility filtering.
 The galaxy map shows it: fog over uncharted space, charted sectors, live sensor coverage, lost contacts, a sector card
 with the scan control, layer navigation and a tilted view. The card and the course menus show a jump's distance

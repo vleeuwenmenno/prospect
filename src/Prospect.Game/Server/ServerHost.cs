@@ -175,6 +175,8 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         /// <summary>The edit's name, the hull it is of, and the tick it was allowed in: damage from then on ends it.</summary>
         public uint EditToken;
         public HullHandle EditHull;
+        public HullHandle EditPilot;
+        public bool CreatingShip, RemoteEdit;
         public long EditStartTick;
 
         /// <summary>When the upload, the owner's client or the other clients run out of time, by stage.</summary>
@@ -278,7 +280,8 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             Array.Clear(FailedDesigns);
             EditPhase = EditorPhase.Closed;
             EditToken = 0;
-            EditHull = default;
+            EditHull = EditPilot = default;
+            CreatingShip = RemoteEdit = false;
             EditStartTick = EditDeadline = EditNextCommit = 0;
             EditUpload = null;
             EditDesign = 0;
