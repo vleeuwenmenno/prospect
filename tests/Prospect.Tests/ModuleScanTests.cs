@@ -134,18 +134,21 @@ public sealed class ModuleScanTests
         rig.Until(() => rig.Scan().State == ModuleScanState.OutOfRange);
     }
 
-    [Fact]
-    public void NoEquipmentAndNoPowerAreExplicitRefusals()
+    [Theory]
+    [InlineData(ModuleFamily.GasScanner)]
+    [InlineData(ModuleFamily.AsteroidScanner)]
+    [InlineData(ModuleFamily.AsteroidLocator)]
+    public void NoEquipmentAndNoPowerAreExplicitRefusals(ModuleFamily family)
     {
         using (var rig = new Rig(false))
         {
-            rig.Server.RequestModuleScan(rig.Owner(), new(ModuleFamily.AsteroidLocator, default));
+            rig.Server.RequestModuleScan(rig.Owner(), new(family, default));
             Assert.Equal(ModuleScanState.NoEquipment, rig.Scan().State);
         }
         using (var rig = new Rig())
         {
             rig.Hulls.State(rig.Hull()).Energy = 0;
-            rig.Server.RequestModuleScan(rig.Owner(), new(ModuleFamily.AsteroidLocator, default));
+            rig.Server.RequestModuleScan(rig.Owner(), new(family, default));
             Assert.Equal(ModuleScanState.NoPower, rig.Scan().State);
         }
     }
@@ -162,7 +165,13 @@ public sealed class ModuleScanTests
         var records = rig.Server.ModuleKnowledge(rig.Owner());
         Assert.True(records.Length > 0);
         foreach (var record in records)
-        { Assert.Equal(0, record.Grade); Assert.Equal(0, record.Mass); Assert.Equal(0, record.Radius); }
+        {
+            Assert.Equal(0, record.Grade); Assert.Equal(0, record.Mass); Assert.Equal(0, record.Radius);
+            Assert.Equal(ModuleQuality.Rare, record.Quality);
+            Assert.True(ModuleScanRules.InRange(rig.Scan().Origin, record.Position, 0, rig.Content.Pod.Stats.AsteroidLocator.Range));
+        }
+        rig.Server.RequestModuleScan(rig.Owner(), new(ModuleFamily.AsteroidLocator, default));
+        Assert.Equal(ModuleScanState.Cooldown, rig.Scan().State);
     }
 
     [Fact]
@@ -178,11 +187,22 @@ public sealed class ModuleScanTests
         Assert.True(found);
         rig.Hulls.State(rig.Hull()).Position = GasCloudQuery.CenterOf(galaxy, placement);
         rig.Server.RequestModuleScan(rig.Owner(), new(ModuleFamily.GasScanner, placement.Anchor));
+        rig.Until(() => rig.Scan().State == ModuleScanState.Scanning);
+        Assert.Equal(240, rig.Scan().CompletesTick - rig.Scan().StartedTick);
+        Assert.Empty(rig.Server.ModuleKnowledge(rig.Owner()).ToArray());
         rig.Until(() => rig.Scan().State == ModuleScanState.Completed);
         var record = rig.Server.ModuleKnowledge(rig.Owner())[0];
         Assert.Equal(placement.Anchor, record.Sector);
         Assert.InRange(record.Gas.Purity, 0, 1);
         Assert.True(record.Gas.Density > 0);
+        rig.Server.RequestModuleScan(rig.Owner(), new(ModuleFamily.GasScanner, placement.Anchor));
+        Assert.Equal(ModuleScanState.Cooldown, rig.Scan().State);
+        rig.Until(() => rig.Tick > rig.Scan().CooldownUntilTick);
+        rig.Server.RequestModuleScan(rig.Owner(), new(ModuleFamily.GasScanner, placement.Anchor));
+        rig.Until(() => rig.Scan().State == ModuleScanState.Scanning);
+        rig.Hulls.State(rig.Hull()).Position += new Double3(10000, 0, 0);
+        rig.Until(() => rig.Scan().State == ModuleScanState.OutOfRange);
+        Assert.Equal(record.RecordedTick, rig.Server.ModuleKnowledge(rig.Owner())[0].RecordedTick);
     }
 
     [Fact]

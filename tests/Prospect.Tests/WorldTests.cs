@@ -20,6 +20,29 @@ public sealed class FlightTests
     }
 
     [Fact]
+    public void ModuleTickSpendsOnlyWholeIntervalsAndReportsTheSamePowerWithoutAllocation()
+    {
+        var equipment = ModuleEquipment.Of(1, GameContent.Load().Blocks.Get("gasScanner").Module);
+        var cost = (float)(equipment.PowerDraw / 60);
+        var energy = cost * .5f;
+        var flow = default(PowerFlow);
+        Assert.False(ModuleScanRules.Spend(ref energy, equipment, ref flow));
+        Assert.Equal(cost * .5f, energy);
+        Assert.Equal(0, flow.Modules);
+        var probe = new AllocationProbe();
+        while (probe.Measuring())
+        {
+            energy = cost;
+            flow = default;
+            ModuleScanRules.Spend(ref energy, equipment, ref flow);
+        }
+        Assert.Equal(0, probe.Bytes);
+        Assert.Equal(0, energy);
+        Assert.Equal((float)equipment.PowerDraw, flow.Modules);
+        Assert.Equal(flow.Modules, flow.Drawn);
+    }
+
+    [Fact]
     public void GasCoverageTickUsesSharedRangeBudget()
     {
         var content = GameContent.Load();
