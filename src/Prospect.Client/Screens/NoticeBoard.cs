@@ -21,8 +21,17 @@ internal sealed class NoticeBoard
     /// <summary>The most notices held, shown and waiting.</summary>
     public const int Capacity = 32;
 
+    /// <summary>Room for one notice's own text, copied in at post time so the queue holds it without allocating.</summary>
+    [System.Runtime.CompilerServices.InlineArray(NoticeCatalogue.MaxText)]
+    private struct TextBuffer
+    {
+        private byte _first;
+    }
+
     private struct Entry
     {
+        public TextBuffer Text;
+        public int TextLength;
         public int Kind;
         public float Age;
         public float Duration;
@@ -80,7 +89,15 @@ internal sealed class NoticeBoard
     /// Posts a notice of <paramref name="kind"/>. False, with nothing held, while notices are off or for a kind the
     /// file does not have.
     /// </summary>
-    public bool Post(string kind)
+    public bool Post(string kind) => Post(kind, default);
+
+    /// <summary>
+    /// Posts a notice of <paramref name="kind"/> that says <paramref name="text"/> (UTF-8, at most
+    /// <see cref="NoticeCatalogue.MaxText"/> bytes, the rest cut) instead of the file's text, for a message whose words
+    /// are only known when it happens. Colour, duration and action stay the file's. The text is copied; nothing is
+    /// allocated. An empty <paramref name="text"/> means the file's own.
+    /// </summary>
+    public bool Post(string kind, ReadOnlySpan<byte> text)
     {
         if (!Enabled)
             return false;
@@ -95,8 +112,41 @@ internal sealed class NoticeBoard
             Dropped++;
         }
 
-        _entries[_count++] = new Entry { Kind = index, Duration = _catalogue.Notices[index].Seconds };
+        ref var entry = ref _entries[_count++];
+        entry = default;
+        entry.Kind = index;
+        entry.Duration = _catalogue.Notices[index].Seconds;
+        var length = Math.Min(text.Length, NoticeCatalogue.MaxText);
+        text[..length].CopyTo(entry.Text);
+        entry.TextLength = length;
         return true;
+    }
+
+    /// <summary>
+    /// Takes back the oldest notice of <paramref name="kind"/>, for a message about something that is over: a shown one
+    /// fades out at once, a waiting one just leaves. False when there is none.
+    /// </summary>
+    public bool Withdraw(string kind)
+    {
+        var index = _catalogue.IndexOf(kind);
+        for (var i = 0; i < _count; i++)
+        {
+            if (_entries[i].Kind != index)
+                continue;
+            if (i < Visible)
+            {
+                Close(Visible - 1 - i);
+            }
+            else
+            {
+                Array.Copy(_entries, i + 1, _entries, i, _count - i - 1);
+                _count--;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>The entry shown in <paramref name="row"/>, counted from the top: the newest shown is row zero.</summary>
@@ -107,6 +157,13 @@ internal sealed class NoticeBoard
 
     /// <summary>The notice in <paramref name="row"/>, as the file defines it.</summary>
     public Notice NoticeAt(int row) => _catalogue.Notices[_entries[EntryOf(row)].Kind];
+
+    /// <summary>The words of the notice in <paramref name="row"/>: the text it was posted with, else the file's.</summary>
+    public ReadOnlySpan<byte> TextAt(int row)
+    {
+        ref var entry = ref _entries[EntryOf(row)];
+        return entry.TextLength > 0 ? ((ReadOnlySpan<byte>)entry.Text)[..entry.TextLength] : _catalogue.Notices[entry.Kind].TextBytes;
+    }
 
     /// <summary>Seconds the notice in <paramref name="row"/> has been shown.</summary>
     public float AgeAt(int row) => _entries[EntryOf(row)].Age;

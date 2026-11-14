@@ -234,7 +234,13 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   wait and start their timer only when shown; the oldest waiting is dropped when full, a shown one never. Hover holds
   a notice, the X or an action click fades it out at once. `NoticeTracker` turns snapshot changes into posts, once
   each and only for the own hull (`ModuleScanView` Completed, NoPower, Cancelled; `ScanView` Completed; `NewShip`
-  Created); it never reads cooldown fields. The panel is `NoticePanel`: one window, placed by `PlanNotices` under the
+  Created); it never reads cooldown fields. The ship editor's outcomes post through `EditorNoticeTracker` (font-free,
+  fed `ShipEditor`'s stamps, `NoticeAt`/`FollowNoticeAt`, once each): `shipFlown` (built ship applied), `shipRebuilt`,
+  `editRefused` (a server refusal or end, posted with its reason as the text), `followOutOfSector`, `followMissing`, and
+  `editAsking`, a waiting notice posted after 0.4 s of waiting and withdrawn (`NoticeBoard.Withdraw`) when the server
+  answers. A message whose words are only known when it happens passes them to `NoticeBoard.Post(kind, text)`: UTF-8,
+  copied into the entry, at most `NoticeCatalogue.MaxText` bytes, read back through `TextAt`. Nothing is drawn at the
+  top centre for these any more. The panel is `NoticePanel`: one window, placed by `PlanNotices` under the
   bar, the performance overlay and the command view's fleet list, left of the editor's details panel. It takes no
   input while the pilot pointer is captured, never changes `PointerFrame`, and the map blocks its rectangle
   (`BlockMapForNotices`, `Claim`). Posting, updating and drawing take no memory. A scripted run shows none unless

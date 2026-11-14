@@ -35,8 +35,26 @@ internal static class NoticeKinds
     /// <summary>A new ship was built in the New ship flow.</summary>
     public const string ShipBuilt = "shipBuilt";
 
+    /// <summary>An edit was applied to the ship being flown: the new design is flown now.</summary>
+    public const string ShipRebuilt = "shipRebuilt";
+
+    /// <summary>The edit of a just-built ship was applied and the player now flies it.</summary>
+    public const string ShipFlown = "shipFlown";
+
+    /// <summary>An edit was refused or ended by the server; posted with the reason as its text.</summary>
+    public const string EditRefused = "editRefused";
+
+    /// <summary>The built ship is in another sector, so control could not be taken.</summary>
+    public const string FollowOutOfSector = "followOutOfSector";
+
+    /// <summary>The built ship was gone when control was to be taken.</summary>
+    public const string FollowMissing = "followMissing";
+
+    /// <summary>The request to edit is with the server; withdrawn when it answers.</summary>
+    public const string EditAsking = "editAsking";
+
     /// <summary>Every kind, for validation.</summary>
-    public static readonly string[] All = [GasResults, AsteroidResults, LocatorResults, ModuleNoPower, ModuleCancelled, SectorCharted, ShipBuilt];
+    public static readonly string[] All = [GasResults, AsteroidResults, LocatorResults, ModuleNoPower, ModuleCancelled, SectorCharted, ShipBuilt, ShipRebuilt, ShipFlown, EditRefused, FollowOutOfSector, FollowMissing, EditAsking];
 }
 
 /// <summary>What a click on a notice's body does. Named in the file, like a tip's trigger; an unknown name is refused.</summary>

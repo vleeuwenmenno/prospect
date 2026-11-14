@@ -109,6 +109,61 @@ public sealed class NoticeTests
     }
 
     [Fact]
+    public void APostedTextReplacesTheFilesAndIsCopiedAndCut()
+    {
+        var board = Board();
+        var text = "Try again in 7 s."u8.ToArray();
+        board.Post(NoticeKinds.EditRefused, text);
+        text.AsSpan().Clear();
+        Assert.Equal("Try again in 7 s.", System.Text.Encoding.UTF8.GetString(board.TextAt(0)));
+        Assert.Equal(NoticeKinds.EditRefused, board.NoticeAt(0).Id);
+
+        board.Post(NoticeKinds.EditRefused);
+        Assert.Equal(board.NoticeAt(0).TextBytes, board.TextAt(0).ToArray());
+
+        board.Clear();
+        board.Post(NoticeKinds.EditRefused, new byte[NoticeCatalogue.MaxText + 40]);
+        Assert.Equal(NoticeCatalogue.MaxText, board.TextAt(0).Length);
+    }
+
+    [Fact]
+    public void PostingATextTakesNoMemory()
+    {
+        var board = Board();
+        var text = "The ship took damage too recently. Try again in 7 s."u8.ToArray();
+        board.Post(NoticeKinds.EditRefused, text);
+        Run(board, 20);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 100; i++)
+        {
+            board.Post(NoticeKinds.EditRefused, text);
+            board.Withdraw(NoticeKinds.EditRefused);
+            board.Update(0.1f);
+            _ = board.TextAt(0);
+        }
+
+        Assert.True(GC.GetAllocatedBytesForCurrentThread() - before < 8192);
+    }
+
+    [Fact]
+    public void WithdrawingFadesAShownNoticeOutAndRemovesAWaitingOne()
+    {
+        var board = Board();
+        board.Post(NoticeKinds.EditAsking);
+        Assert.True(board.Withdraw(NoticeKinds.EditAsking));
+        Assert.False(board.Withdraw(NoticeKinds.GasResults));
+        Run(board, 1);
+        Assert.Equal(0, board.Count);
+
+        for (var i = 0; i < NoticeBoard.MaxVisible; i++)
+            board.Post(NoticeKinds.ModuleCancelled);
+        board.Post(NoticeKinds.EditAsking);
+        Assert.Equal(NoticeBoard.MaxVisible + 1, board.Count);
+        Assert.True(board.Withdraw(NoticeKinds.EditAsking));
+        Assert.Equal(NoticeBoard.MaxVisible, board.Count);
+    }
+
+    [Fact]
     public void AWaitingNoticeAppearsWhenAnOlderOneLeavesAndStartsItsOwnTimer()
     {
         var board = Board();
