@@ -185,7 +185,7 @@ internal static class Program
                 case "--set" when hasValue:
                     options.WorldSettingArgs.Add(args[++i]);
                     break;
-                case "--open" when hasValue && args[i + 1] is "command" or "drone" or "map" or "map-menu" or "map-hover" or "map-card" or "map-card-near" or "map-card-far" or "map-tilt" or "map-reach" or "map-reach-tilt" or "scan" or "command-fog" or "command-fog-one" or "command-fog-pair" or "command-fog-far" or "command-menu" or "command-menu-fleet" or "command-menu-close" or "command-menu-far" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "new-ship" or "new-ship-refused" or "new-ship-editor" or "new-ship-closed" or "scan-pilot" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
+                case "--open" when hasValue && args[i + 1] is "command" or "drone" or "map" or "map-menu" or "map-hover" or "map-card" or "map-card-near" or "map-card-far" or "map-tilt" or "map-reach" or "map-reach-tilt" or "scan" or "command-fog" or "command-fog-one" or "command-fog-pair" or "command-fog-far" or "command-menu" or "command-menu-fleet" or "command-menu-close" or "command-menu-far" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "new-ship" or "new-ship-refused" or "new-ship-editor" or "new-ship-closed" or "scan-pilot" or "scan-command" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
                     options.OpenView = args[++i];
                     break;
                 case "--browser-sample" when hasValue:
@@ -201,6 +201,15 @@ internal static class Program
                     };
                     if (options.BrowserSample == BrowserSample.None)
                         return Fail($"Unknown browser sample: {args[i]}");
+                    break;
+                case "--controls-search" when hasValue:
+                    options.ControlsSearch = args[++i];
+                    break;
+                case "--controls-tab" when hasValue:
+                    options.ControlsTab = args[++i];
+                    break;
+                case "--controls-sample" when hasValue && args[i + 1] is "capture" or "conflict":
+                    options.ControlsSample = args[++i];
                     break;
                 case "--tips-sample" when hasValue && args[i + 1] is "on" or "stack" or "reset":
                     options.TipsSample = args[++i];
@@ -376,6 +385,13 @@ internal static class Program
         // A sample stands in for the account service only where nobody can act on it.
         if (options.AccountSample is not null && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--account-sample works only with --capture or --bench.");
+
+        // The Controls screens take their search, tab and sample from the command line only in a scripted run.
+        if ((options.ControlsSearch is not null || options.ControlsTab is not null || options.ControlsSample is not null)
+            && (options.OpenView != "controls" || (options.CapturePath is null && options.BenchSeconds <= 0)))
+            return Fail("--controls-search, --controls-tab and --controls-sample work only with --open controls and --capture or --bench.");
+        if (options.ControlsSample is not null && options.StartScreen != Screen.Settings)
+            return Fail("--controls-sample works only with --start settings.");
 
         // Tips show in a scripted run only where the run asks for them; the reset question lives on Settings.
         if (options.TipsSample is not null && options.CapturePath is null && options.BenchSeconds <= 0)

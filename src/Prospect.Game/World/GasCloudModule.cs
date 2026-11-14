@@ -8,7 +8,10 @@ namespace Prospect.Game.World;
 /// the cloud, the sector its centre lies in; the box may reach into the sectors around it. No mutable simulation or
 /// network state.
 /// </summary>
-public readonly record struct GasCloud(Vector3 Center, Vector3 HalfSize, float Seed);
+public readonly record struct GasCloud(Vector3 Center, Vector3 HalfSize, float Seed, GasCloudKind Kind = GasCloudKind.Normal);
+
+/// <summary>Immutable generated cloud kind.</summary>
+public enum GasCloudKind : byte { Normal, Cold, Lightning }
 
 /// <summary>A cloud together with the sector that anchors it, which is what its centre is relative to.</summary>
 public readonly record struct GasCloudPlacement(SectorCoord Anchor, GasCloud Cloud);
@@ -38,6 +41,17 @@ public sealed class GasCloudModule : SectorModule
     }
 
     private readonly float _chance;
+    private float _coldChance, _lightningChance;
+    /// <summary>Kind from the cloud seed: cold first, lightning among the remainder.</summary>
+    public GasCloudKind KindOf(float seed)
+    {
+        var roll = seed / 128f;
+        return roll < _coldChance ? GasCloudKind.Cold
+            : roll < _coldChance + (1 - _coldChance) * _lightningChance ? GasCloudKind.Lightning : GasCloudKind.Normal;
+    }
+    /// <summary>Only cold and normal volumes may share space.</summary>
+    public static bool MayOverlap(GasCloudKind a, GasCloudKind b) =>
+        a == GasCloudKind.Cold && b == GasCloudKind.Normal || a == GasCloudKind.Normal && b == GasCloudKind.Cold;
     private readonly float _centerReach;
     private readonly Range _size;
     private readonly float _hugeChance;
@@ -136,17 +150,21 @@ public sealed class GasCloudModule : SectorModule
         var huge = json.GetProperty("huge"u8);
         return new GasCloudModule(id, Number("chance", 0, 1), Number("centerReach", 0, 1), Shares(json, "halfSizeShare"),
             Bounded(huge, "chance", 0, 1), Shares(huge, "halfSizeShare"), Number("extinction", 0.00001f, 0.01f), samples, color,
-            Number("motion", 0, 0.01f), shape, look);
+            Number("motion", 0, 0.01f), shape, look)
+        {
+            _coldChance = json.TryGetProperty("coldChance"u8, out _) ? Number("coldChance", 0, 1) : 0,
+            _lightningChance = json.TryGetProperty("lightningChance"u8, out _) ? Number("lightningChance", 0, 1) : 0,
+        };
     }
 
     /// <summary>Applies bounded sizes and render-only variation supplied by Galaxy.Under.</summary>
     public GasCloudModule Under(float sectorSize, float min, float max, float hugeMin, float hugeMax,
-        float hugeChance, float wispiness, float wispinessMin, float wispinessMax)
+        float hugeChance, float wispiness, float wispinessMin, float wispinessMax, float coldChance = 0, float lightningChance = 0)
     {
         Range Size(float low, float high) => new(Math.Min(0.5f, low * 500 / sectorSize), Math.Min(0.5f, high * 500 / sectorSize));
         return new GasCloudModule(Id, _chance, _centerReach, Size(min, max), hugeChance, Size(hugeMin, hugeMax),
             Extinction, Samples, Tint, Motion, Shape, Look)
-        { Wispiness = wispiness, _wispinessMin = wispinessMin, _wispinessMax = wispinessMax };
+        { _coldChance = coldChance, _lightningChance = lightningChance, Wispiness = wispiness, _wispinessMin = wispinessMin, _wispinessMax = wispinessMax };
     }
 
     /// <summary>Counts the cloud the sector anchors, by the same rule as generation.</summary>
@@ -169,8 +187,8 @@ public sealed class GasCloudModule : SectorModule
         if (!Candidate(galaxy, anchor, out cloud))
             return false;
 
-        // Clouds stand apart: no two overlap, and a camera inside or close to one is never inside another. The
-        // renderer shows many at once from afar but composes only the nearest with shields and jump openings.
+        // Only cold/normal pairs may overlap; the renderer must jointly integrate those volumes.
+        // Every other pair retains its clear margin, including every lightning cloud.
         // Where two would stand too close the larger stays. A rival counts even when a third outranks it in
         // turn: the rule never has to look further than this, and only ever removes a cloud too many.
         var edge = (float)galaxy.SectorSize;
@@ -183,6 +201,7 @@ public sealed class GasCloudModule : SectorModule
                         continue;
                     if (!Candidate(galaxy, anchor.Offset(dx, dy, dz), out var rival))
                         continue;
+                    if (MayOverlap(cloud.Kind, rival.Kind)) continue;
                     if (rival.HalfSize.X < cloud.HalfSize.X || (rival.HalfSize.X == cloud.HalfSize.X && !Before(dx, dy, dz)))
                         continue;
 
@@ -221,7 +240,7 @@ public sealed class GasCloudModule : SectorModule
         var huge = random.NextSingle() < _hugeChance;
         var size = random.NextSingle();
         var half = edge * (huge ? _hugeSize : _size).At(size);
-        cloud = new GasCloud(center, new Vector3(Proportions.X * half, Proportions.Y * half, Proportions.Z * half), seed);
+        cloud = new GasCloud(center, new Vector3(Proportions.X * half, Proportions.Y * half, Proportions.Z * half), seed, KindOf(seed));
         return true;
     }
 

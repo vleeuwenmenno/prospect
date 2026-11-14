@@ -577,6 +577,68 @@
       "maximum": 2,
       "step": 0.05,
       "unit": "x"
+    },
+    {
+      "id": "gasColdChance",
+      "name": "Cold cloud chance",
+      "description": "Cold share of candidate clouds; separation can remove candidates.",
+      "kind": "multiplier",
+      "default": 0.2,
+      "minimum": 0,
+      "maximum": 1,
+      "step": 0.01,
+      "unit": "0\u20131"
+    },
+    {
+      "id": "gasLightningChance",
+      "name": "Lightning cloud chance",
+      "description": "Lightning share of candidates that are not cold; separation can remove candidates.",
+      "kind": "multiplier",
+      "default": 0.1,
+      "minimum": 0,
+      "maximum": 1,
+      "step": 0.01,
+      "unit": "0\u20131"
+    },
+    {
+      "id": "iceAbundance",
+      "name": "Relative abundance",
+      "description": "Weights this material among resources already available in the sector. Zero removes its share; never adds it to an unavailable sector.",
+      "kind": "multiplier",
+      "default": 1,
+      "minimum": 0,
+      "maximum": 4,
+      "step": 0.25,
+      "group": "Resources",
+      "unit": "x",
+      "material": "ice"
+    },
+    {
+      "id": "iceGradeMin",
+      "name": "Ore grade",
+      "description": "Clamps grade after the global grade range. Applies only to rocks carrying this material; 0\u20131 is 0\u2013100%.",
+      "kind": "multiplier",
+      "default": 0,
+      "minimum": 0,
+      "maximum": 1,
+      "step": 0.01,
+      "group": "Resources",
+      "unit": "0\u20131",
+      "material": "ice",
+      "rangeMax": "iceGradeMax"
+    },
+    {
+      "id": "iceGradeMax",
+      "name": "Ore grade maximum",
+      "description": "Clamps the existing sampled distribution; does not replace it with uniform randomness.",
+      "kind": "multiplier",
+      "default": 1,
+      "minimum": 0,
+      "maximum": 1,
+      "step": 0.01,
+      "group": "Resources",
+      "unit": "0\u20131",
+      "material": "ice"
     }
   ]
 }

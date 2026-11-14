@@ -14,6 +14,7 @@ to work.
 - `docs/hosting.md`: visibility, hosting a local game, the password handshake, the game's side of the listing server.
 - `docs/releasing.md`: release tags, the workflow, the container images and how to run them.
 - `docs/save-foundation.md`: saved worlds: the snapshot, the store contract, limits, the world clock, closing.
+- `docs/controls.md`: the Controls screens, tabs, search, remapping, clashes and their limits.
 - `docs/world-generation.md`: fields and clouds in world space: anchors, which sector takes a rock, the gas query.
 - An item under "Open" is not decided. Ask; do not guess and build.
 - When a decision is made in conversation, move it from "Open" to "Decided" in the same change.
@@ -139,6 +140,11 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `HandleKey`), so the `ScanSector` key, the card's button and the flight readout (`DrawScanStrip`) agree. A change
   to the wire bumps `ProtocolInfo.Version`. The card closes on any click outside it (`MapCardState.Click`,
   `RightClick`); rules in `docs/roadmap/exploration.md`. Check with `--open scan-pilot` and `--open scan`.
+  The scan pulse is `ScanPulse` (when it shows, driven from `WorldView.Update`; figures in
+  `content/visuals/scan.json`) and `scan_pulse.frag`, its own pass after tone mapping in `SceneRenderer.Present`. It
+  reads the scene's depth, which is kept only on frames with a pulse, and stays out of the gas, shield and lens
+  passes. `ScanPulseTests` holds when it starts. Check with `--open scan-pilot` (pulse about 6 s in) and
+  `--open scan-command` (the command view pulled back over the ship).
 - **The ship editor:** the limits are in `EditorRules`, `content/net/editor.json` and `docs/hosting.md`;
   change all three. A design reaches the catalogue only through `DesignBytes.Decode` on a worker, the catalogue
   only grows (`DesignCatalogue.Append`, `GameContent.WithDesign`), and a hull never changes design: it is
@@ -225,6 +231,11 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   map: `BlockMapForTip`, `Claim`). Escape goes to `HandleTipShortcut` first; every other Escape reads
   `BackPressed()`, which stays quiet on that press, and the editor's shortcut skips the frame. A scripted run shows
   no tips unless given `--tips-sample`. `TipTests` and the tip tests in `FrameOrderTests` hold the rules.
+- **A new action or key:** add it to `content/input/bindings.json` and to `content/input/controls.json` (tab, label,
+  scope; a fixed mouse or chord row goes there too). Loading refuses an action the catalogue lacks. Read it through
+  `ActionMap` only; never cache a key name without rebuilding it on `ActionMap.Changed`. Anything that reads input
+  while the Controls page may be capturing must go through `ActionMap` (`Suspended`), not raw `InputDevices`.
+  Contract in `docs/controls.md`; `ControlsCatalogueTests`, `ControlRemapTests` and the capture tests in `FrameOrderTests`.
 - **A new per-tick system:** add a unit test in `tests/Prospect.Tests/WorldTests.cs` and, if it crosses the
   network, a session test that runs a real server and client.
 - **A new sector module** (stations): derive from `SectorModule` in `Prospect.Game/World`, name its
@@ -264,7 +275,7 @@ The client opens a real window on the developer's desktop, and they are usually 
   Do not create a headless output: a monitor manager such as hyprmoncfg adopts it and moves the developer's
   workspaces. Without such a rule (GNOME, macOS, Windows), tell the developer windows will appear first.
 - `make run ARGS="--start local --open <view> --capture /path/shot.png --capture-after 2.5"` saves a screenshot
-  and exits. Views: `command`, `edit` (asks to edit the own ship; the editor opens on the grant), `drone` (steps out of the hull into the escape drone), `map`, `map-hover` (the map with the pointer on your own sector, a preview card), `map-card` (your own sector's card pinned), `map-card-near` (a sector 144 km away: a blind jump with risk) and `map-card-far` (460 km: out of drive range), `command-menu` (the command view's right-click menu on a blind jump 60 km ahead for the ship being flown: Plot jump), `command-menu-fleet` (the same for the other ships: Jump here), `command-menu-close` (3 km, too close) and `command-menu-far` (450 km, too far), `new-ship` (leaves the pod in the drone and opens the New ship dialog empty; `--tips-sample on` shows the drone-edit tip beside it), `new-ship-refused` (the same with a refusal shown, put there by the hook rather than sent by a server) `new-ship-editor` (builds a ship through the real dialog and server: the editor opens on its single block, drone still flown; capture after 4 s) and `new-ship-closed` (the same, then cancels that edit: you fly the new ship; capture after 6 s), `map-tilt` (the same, tilted), `map-reach` and `map-reach-tilt` (zoomed in on the own position to show the shape of sensor reach), `scan` (pinned card and a scan started: capture after 2.5 s for progress, after 7 s for the charted result; add `--map-cell 190` to see field and cloud outlines, `scan-pilot` (the flight view with a scan started: capture after 2.5 s for the bar, 6.5 s for result and cooldown, 12 s for the cooldown alone; `--tips-sample on` shows the scan tip), `--map-tilt`, `--map-hover` to rest the pointer on the own ship), `command-fog` (the command view pulled back to show sensor rings and fog, all owned ships selected), `command-fog-one` (only the flown ship selected), `command-fog-pair` and `command-fog-far` (it and another ship that jumps 6 km or 14 km away along -x, selected; capture after 28 s), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,
+  and exits. Views: `command`, `edit` (asks to edit the own ship; the editor opens on the grant), `drone` (steps out of the hull into the escape drone), `map`, `map-hover` (the map with the pointer on your own sector, a preview card), `map-card` (your own sector's card pinned), `map-card-near` (a sector 144 km away: a blind jump with risk) and `map-card-far` (460 km: out of drive range), `command-menu` (the command view's right-click menu on a blind jump 60 km ahead for the ship being flown: Plot jump), `command-menu-fleet` (the same for the other ships: Jump here), `command-menu-close` (3 km, too close) and `command-menu-far` (450 km, too far), `new-ship` (leaves the pod in the drone and opens the New ship dialog empty; `--tips-sample on` shows the drone-edit tip beside it), `new-ship-refused` (the same with a refusal shown, put there by the hook rather than sent by a server) `new-ship-editor` (builds a ship through the real dialog and server: the editor opens on its single block, drone still flown; capture after 4 s) and `new-ship-closed` (the same, then cancels that edit: you fly the new ship; capture after 6 s), `map-tilt` (the same, tilted), `map-reach` and `map-reach-tilt` (zoomed in on the own position to show the shape of sensor reach), `scan` (pinned card and a scan started: capture after 2.5 s for progress, after 7 s for the charted result; add `--map-cell 190` to see field and cloud outlines, `scan-command` (the command view 9 km back with a scan started: the pulse from outside, capture after 6.2 s), `scan-pilot` (the flight view with a scan started: capture after 2.5 s for the bar, 6.5 s for result and cooldown, 12 s for the cooldown alone; `--tips-sample on` shows the scan tip), `--map-tilt`, `--map-hover` to rest the pointer on the own ship), `command-fog` (the command view pulled back to show sensor rings and fog, all owned ships selected), `command-fog-one` (only the flown ship selected), `command-fog-pair` and `command-fog-far` (it and another ship that jumps 6 km or 14 km away along -x, selected; capture after 28 s), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,
   `players`, `social`, `friends`, `chat`, `hud` (the world with the party list and recent chat only). The social views and
   `hud` leave the performance overlay off. Screens
   without a session: `--start menu|join|settings|newgame|credits|account|load`; `--set id=value` shows on `newgame`, and so
@@ -357,7 +368,7 @@ The client opens a real window on the developer's desktop, and they are usually 
 
 - See `docs/gas-clouds.md` for the bounded visual pass and muted capture scenarios. Gas has no wire field. Some clouds hold asteroids, so a change to where clouds are changes asteroid lists: bump as for any generation change.
 - A cloud is anchored in the sector its centre lies in and may reach the sectors around it. `SectorContent.GasCloud` is the anchored one; `GasCloudModule.Intersecting` lists every cloud that reaches a sector or a sphere.
-- Generation keeps clouds apart (`GasCloudModule.SeparationMargin`), so none overlap and a camera is never in two. Many show at once from afar, but composition with shields and openings takes only the nearest. Lift the rule in `GasCloudModule.TryGetCloud` only together with the renderer's ordering of overlapping clouds.
+- Generation keeps all pairs apart (`GasCloudModule.SeparationMargin`) except cold/normal pairs. These may overlap in generation 6. The non-visual implementation requires the renderer integration documented in `docs/gas-clouds.md` before release: jointly integrate overlapping volumes, including shield/opening composition; the old single-primary path is insufficient.
 - Gas uses its RGB-only pass without portals or shields; frames with either defer bounded gas segments to HDR composition. Preserve the gas-free shield copies, frame.glsl layout, and per-sample own-passage checks. The fixed 1 MiB noise lattice is renderer-owned, immutable, and independent of resize.
 - Far gas: three levels of detail by distance in cloud radii, figures in `content/visuals/gas.json` (`GasTiers`). Which clouds exist comes from `IGasCloudSource` only (today `GeneratedGasClouds`: `GasCloudQuery.Collect` over `GasCloudModule.TryGetCloud`, by anchor sector); never read clouds from sector slots. Composition takes one cloud, the primary (`GasQueue`); every other draw is in the scene or, at the far level, in the sky. A new level or draw order needs a case in `GasLevelsTests` and a `--gas-distance` sweep capture. Large clouds (x half-extent over 7 km) gain strands, bent steps and clearing near the camera (`closeUp` in the same file, `gasStrands` in `gas.glsl`); an ordinary cloud must keep taking the unbent expressions exactly, so check fixtures 1–13 after touching the march.
 
@@ -391,7 +402,7 @@ The client opens a real window on the developer's desktop, and they are usually 
   toward walls. Spacing is kept within a sector only, and a sector over its cap drops its smallest rocks while
   its neighbour keeps them.
 - A sector's summary estimates its asteroids without placing one. It knows nothing of crowding; the map says
-  "ABOUT". Clouds never overlap one another.
+  "ABOUT". Only cold/normal cloud pairs may overlap.
 - The client draws at most 32,768 instances a frame and shows at most 512 pushed asteroids out of place.
 - A pushed asteroid still belongs to the sector it was generated in. One that drifts across the sector's edge is
   not hit by a hull that is wholly in the next sector.

@@ -8,10 +8,15 @@ namespace Prospect.Game.World;
 /// </summary>
 public static class AsteroidShape
 {
+    /// <summary>Elongated octahedral ice shard, inside the unit sphere.</summary>
+    public const int Icicle = Galaxy.RockShapes;
+
     private static readonly float[] Scales = ComputeScales();
 
     /// <summary>The surface point of a shape in a direction, for a rock of unit radius.</summary>
-    public static Vector3 Point(int shape, Vector3 direction) => direction * Squash(shape) * (Lumps(shape, direction) * Scales[shape]);
+    public static Vector3 Point(int shape, Vector3 direction) => shape == Icicle
+        ? direction * RadiusAlong(shape, direction)
+        : direction * Squash(shape) * (Lumps(shape, direction) * Scales[shape]);
 
     /// <summary>
     /// How far the surface is from the centre along a unit direction given in the rock's own frame, as a fraction
@@ -19,6 +24,7 @@ public static class AsteroidShape
     /// </summary>
     public static float RadiusAlong(int shape, Vector3 direction)
     {
+        if (shape == Icicle) return 1f / (MathF.Abs(direction.X) + 6f * MathF.Abs(direction.Y) + 6f * MathF.Abs(direction.Z));
         // The shape is defined before squashing; undo the squash to find which part of it lies this way.
         var unsquashed = direction / Squash(shape);
         var length = unsquashed.Length();
@@ -46,7 +52,7 @@ public static class AsteroidShape
         const int samples = 4000;
         var scales = new float[Galaxy.AsteroidShapes];
         var golden = MathF.PI * (3f - MathF.Sqrt(5f));
-        for (var shape = 0; shape < scales.Length; shape++)
+        for (var shape = 0; shape < Galaxy.RockShapes; shape++)
         {
             var largest = 0f;
             for (var i = 0; i < samples; i++)

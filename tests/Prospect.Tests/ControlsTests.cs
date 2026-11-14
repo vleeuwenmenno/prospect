@@ -84,15 +84,15 @@ public sealed class ControlsTests
             Assert.True(controls.Matches("f2"));
             Assert.False(controls.Matches("F1"));
             Assert.True(controls.Matches("controls"));
-            Assert.True(controls.Matches("general"));
+            Assert.True(controls.Matches("interface"));
             Assert.Contains(help.Rows, r => r.Matches("RightY") && r.Binding.Contains("inverted"));
             Assert.Contains(help.Rows, r => r.Action == "Boost" && r.Binding == "Pad A (Cross)");
             Assert.Equal(2, map.Bindings(InputAction.ReleasePointer).Length);
-            Assert.Contains(help.Rows, r => r.Category == "Pilot" && r.Action.StartsWith("Show cursor") && r.Binding.StartsWith("Hold LeftAlt or RightAlt"));
-            Assert.Contains(help.Rows, r => r.Category == "Pilot" && r.Action.StartsWith("Turn the camera") && r.Binding.Contains("right drag"));
+            Assert.Contains(help.Rows, r => r.Category == "Camera" && r.Action.StartsWith("Show cursor") && r.Binding.StartsWith("Hold LeftAlt or RightAlt"));
+            Assert.Contains(help.Rows, r => r.Category == "Camera" && r.Action.StartsWith("Turn the camera") && r.Binding.Contains("right drag"));
             // The command view needs no key held to use the mouse.
-            Assert.DoesNotContain(help.Rows, r => r.Category == "Command" && r.Binding.Contains("Hold"));
-            Assert.Contains(help.Rows, r => r.Matches("mouse") && r.Matches("pilot"));
+            Assert.DoesNotContain(help.Rows, r => r.Category == "Command view" && r.Binding.Contains("Hold"));
+            Assert.Contains(help.Rows, r => r.Matches("mouse") && r.Matches("camera"));
             Assert.DoesNotContain(help.Rows, r => r.Matches("no-such-control"));
         }
         finally
@@ -114,7 +114,7 @@ public sealed class ControlsTests
         Assert.True(map.Held(devices, InputAction.ReleasePointer, true));
         Assert.False(map.Held(devices, InputAction.Boost, true));
         Assert.Equal(0f, map.Axis(devices, InputAxis.Vertical, true));
-        Assert.Contains(new ControlsCatalog(map).Rows, r => r.Category == "Pilot" && r.Action.StartsWith("Show cursor")
+        Assert.Contains(new ControlsCatalog(map).Rows, r => r.Category == "Camera" && r.Action.StartsWith("Show cursor")
             && r.Binding.StartsWith("Hold LeftShift or RightShift"));
     }
 
@@ -141,7 +141,7 @@ public sealed class ControlsTests
         Assert.False(map.Held(devices, InputAction.Boost, true));
         // F and Space also focus the camera, which only the command view reads.
         Assert.True(map.Pressed(devices, InputAction.Follow, true));
-        Assert.Contains(new ControlsCatalog(map).Rows, r => r.Category == "Command" && r.Action.StartsWith("Focus on selection"));
+        Assert.Contains(new ControlsCatalog(map).Rows, r => r.Category == "Command view" && r.Action.StartsWith("Focus on selection"));
 
         // Left Ctrl is free for the command view's selection modifiers.
         devices.BeginFrame();
@@ -168,7 +168,7 @@ public sealed class ControlsTests
         Assert.True(map.InterfaceShortcutPressed(devices, action, false, false));
         Assert.False(map.InterfaceShortcutPressed(devices, action, true, false));
         var help = new ControlsCatalog(map);
-        Assert.Contains(help.Rows, r => r.Category == "Social" && r.Matches(key.ToString()) && r.Action == ControlsCatalog.ActionLabels[(int)action]);
+        Assert.Contains(help.Rows, r => r.Category == "Social" && r.Matches(key.ToString()) && r.Action == help.LabelOf(action));
     }
 
     [Fact]
@@ -204,7 +204,7 @@ public sealed class ControlsTests
         var map = Defaults();
         var names = map.Bindings(InputAction.ScanSector).ToArray().Select(b => b.DisplayName).ToArray();
         Assert.Equal(["K", "Pad DpadLeft"], names);
-        Assert.Contains(new ControlsCatalog(map).Rows, r => r.Category == "Pilot" && r.Action == ControlsCatalog.ActionLabels[(int)InputAction.ScanSector] && r.Binding == "K / Pad DpadLeft");
+        Assert.Contains(new ControlsCatalog(map).Rows, r => r.Category == "Scanning & exploration" && r.Action == "Scan the sector you are in" && r.Binding == "K / Pad DpadLeft");
         var devices = new InputDevices();
         devices.OnKey(GlfwKey.K, GlfwKeyAction.Press);
         for (var action = (InputAction)0; action < InputAction.Count; action++)
@@ -223,8 +223,7 @@ public sealed class ControlsTests
         var map = Defaults();
         var binding = Assert.Single(map.Bindings(InputAction.ToggleSectorInfo).ToArray());
         Assert.Equal("F2", binding.DisplayName);
-        Assert.Contains(new ControlsCatalog(map).Rows, r => r.Action == ControlsCatalog.ActionLabels[(int)InputAction.ToggleSectorInfo] && r.Binding == "F2");
-        Assert.Equal((int)InputAction.Count, ControlsCatalog.ActionLabels.Length);
+        Assert.Contains(new ControlsCatalog(map).Rows, r => r.Action == "Sector information (show / hide)" && r.Binding == "F2");
 
         // F is still the vertical axis's downward key and Follow's key, and does not touch the sector panel.
         var devices = new InputDevices();
@@ -285,8 +284,8 @@ public sealed class ControlsTests
             Assert.Equal(0f, map.Axis(devices, axis, true));
 
         var rows = new ControlsCatalog(map).Rows;
-        Assert.Contains(rows, r => r.Category == "Editor" && r.Action == ControlsCatalog.ActionLabels[(int)InputAction.ToggleEditor] && r.Binding == "B");
-        Assert.Contains(rows, r => r.Category == "Editor" && r.Action == "Cancel the edit" && r.Binding.Contains('B') && r.Binding.Contains("Escape"));
-        Assert.Contains(rows, r => r.Category == "Editor" && r.Action.StartsWith("Undo"));
+        Assert.Contains(rows, r => r.Category == "Ship editor" && r.Action.StartsWith("Ship editor: open") && r.Binding == "B");
+        Assert.Contains(rows, r => r.Category == "Ship editor" && r.Action == "Cancel the edit" && r.Binding.Contains('B') && r.Binding.Contains("Escape"));
+        Assert.Contains(rows, r => r.Category == "Ship editor" && r.Action.StartsWith("Undo"));
     }
 }

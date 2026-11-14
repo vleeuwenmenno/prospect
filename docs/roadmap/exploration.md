@@ -73,6 +73,12 @@ These are suggested layouts, not a settled control scheme.
   "NEXT SCAN IN n S" until the cooldown ends. The cursor over it, or over the card's button, names the key.
 - Tip `scan-key` (trigger `unchartedSector`): fired when the ship being flown has a charting block and its sector has no
   chart, in the flight or command view.
+- Scan pulse: purely visual and only the scanning player's. It starts when the snapshot's scan goes from running to
+  completed (`ScanPulse`), once per completed scan; a cancelled or refused scan, or a completion never seen running,
+  starts none. Its front spreads from where the flown ship was then. Faint short pings follow the ship while a scan
+  runs. All figures in `content/visuals/scan.json`; its own pass (`scan_pulse.frag`) after tone mapping, so it changes
+  no gas, shield or opening composition. Gas dims it through the sensors' smooth envelope of the nearest cloud. Not on
+  the map, and not inside the pilot's own jump.
 - Cooldown: 10 s (`scanCooldownSeconds` in `rules/exploration.json`) on the sector a scan ended in, enforced by the
   server, starting when the scan completes or is cancelled (cancelling is no way round it). A request in it is refused
   with a reason (`ScanState.Cooldown`). Other sectors are not held. One entry per owner, not saved.
@@ -246,3 +252,10 @@ UI estimates use the same curve, not knowledge of the future departure tick.
 - Nothing on the server changes: every owned ship still reports what it sees, so a remote scout keeps working.
   Real relay limits, and what a link may carry, come later with relay stations.
 - The galaxy map keeps showing every owned sensor, whatever is selected, each as its own gas-shaped region.
+
+## Decided: lightning sensor disruption
+
+Lightning at the sensor centre intermittently cuts its range budget, using shared `GasSensors` and server time.
+Hull snapshots carry cold/lightning/disrupted flags. Proximity and ownership disclosure remain unchanged.
+The renderer must consume snapshot time and invalidate stationary outlines at burst edges.
+Numbers and integration contract: [gas kinds](../gas-clouds.md#decided-provisional-tunable-kinds-and-renderer-integration).

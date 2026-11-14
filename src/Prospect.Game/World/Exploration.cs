@@ -7,8 +7,13 @@ namespace Prospect.Game.World;
 public sealed record ExplorationRules(double SensorRadius, int ScanTicks, int ContactTicks, int ChartsPerOwner)
 {
     public double GasOpticalPenalty { get; init; }
+    /// <summary>Seeded lightning cycle length, burst duration and remaining range share.</summary>
+    public int LightningPeriodTicks { get; init; } = 480;
+    public int LightningBurstTicks { get; init; } = 60;
+    public double LightningReachShare { get; init; } = 0.15;
     /// <summary>Ticks after a scan of a sector ends, completed, refused for capacity or cancelled, before that sector can be scanned again by the same owner. Zero turns it off.</summary>
     public int ScanCooldownTicks { get; init; }
+
     public double JumpMinimum { get; init; }
     public double BlindSafeDistance { get; init; }
     public double BlindSafeSectors { get; init; }
@@ -52,9 +57,15 @@ public sealed record ExplorationRules(double SensorRadius, int ScanTicks, int Co
         if (!double.IsFinite(gasPenalty) || gasPenalty < 0 || gasPenalty > 10) throw new InvalidDataException("Invalid gas optical penalty.");
         var proximity = root.GetProperty("proximityRadius"u8).GetDouble();
         if (!double.IsFinite(proximity) || proximity <= 0 || proximity > radius) throw new InvalidDataException("Invalid proximity radius.");
+        var lightning = root.GetProperty("lightning"u8);
+        var period = lightning.GetProperty("periodTicks"u8).GetInt32();
+        var burst = lightning.GetProperty("burstTicks"u8).GetInt32();
+        var share = lightning.GetProperty("reachShare"u8).GetDouble();
+        if (period < 1 || period > 36000 || burst < 1 || burst > period || !double.IsFinite(share) || share < 0 || share > 1)
+            throw new InvalidDataException("Invalid lightning sensor rules.");
         return new(radius, (int)Math.Ceiling(scan * TickLoop.SimulationHz),
             (int)Math.Ceiling(contact * TickLoop.SimulationHz), charts)
-        { ScanCooldownTicks = (int)Math.Ceiling(cooldown * TickLoop.SimulationHz), GasOpticalPenalty = gasPenalty, ProximityRadius = proximity, JumpMinimum = minimum, BlindSafeSectors = safe, BlindSafeDistance = safe * 80000, BlindMaxDamage = damage };
+        { ScanCooldownTicks = (int)Math.Ceiling(cooldown * TickLoop.SimulationHz), LightningPeriodTicks = period, LightningBurstTicks = burst, LightningReachShare = share, GasOpticalPenalty = gasPenalty, ProximityRadius = proximity, JumpMinimum = minimum, BlindSafeSectors = safe, BlindSafeDistance = safe * 80000, BlindMaxDamage = damage };
     }
 }
 

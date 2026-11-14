@@ -666,7 +666,7 @@ This status is an observation at open, not hosting authorization. Saved multipla
 - Move or copy the complete stopped folder, preserving key permissions, to retain identity. A bare database is insufficient.
 - Independent Claude security review remains required. No admission, TLS, key rotation or destructive recovery is included.
 
-## Exploration foundation (protocol 43)
+## Exploration foundation (protocol 44)
 
 The server owns scans and charts and filters dynamic live state by personal sensor coverage.
 `rules/exploration.json` is shared content and participates in content identity.
@@ -829,8 +829,8 @@ Drive blocks specify range in sectors, converted to metres by the shared hull ev
 - The integral is analytic, with scalar double arithmetic and square roots; no shader noise, warp, lean, motion,
   or `gasWispiness`. Gas beyond the target costs nothing. This is a smooth gameplay envelope, not the visible fringe.
 - `rules/exploration.json` sets `gasOpticalPenalty` to 1.0 (allowed 0–10), base range 5,000 m, proximity 250 m.
-  The file already participates in shared content identity. The combined build uses protocol 42, generation 5 and unchanged save codec 3.
-  Content evaluator is 8 (gas sensors plus sector-scaled drives), so an older executable with these files cannot claim the same sensor arithmetic.
+  The file already participates in shared content identity. The combined build uses protocol 44, generation 6 and unchanged save codec 3.
+  Content evaluator is 9 (gas sensors plus sector-scaled drives), so an older executable with these files cannot claim the same sensor arithmetic.
   Existing content identities, including saved-world identities, change.
 - `GasSensors.Reach` returns metres along any nonzero direction; `SampleReach` fills caller-owned doubles for
   caller-owned `Double3` directions (ring or elevations). It uses the same cost test, 24 bisections, keeping
@@ -918,3 +918,11 @@ HullLimit, Busy, TooSoon, Jumping and the existing client-readiness/check failur
 ### Open
 
 - Resource costs, shipyards, alternative spawn candidates, renaming, and remote reopening after cancelling the initial grant.
+
+## Gas kinds and environment (protocol 44)
+
+Generation 6 and content evaluator 9 cover cloud kinds, icicles and lightning sensing.
+`HullRecord` gains one environment byte; its wire bounds grow by one.
+See [the gas contract](gas-clouds.md#decided-provisional-tunable-kinds-and-renderer-integration) for flags, timing and renderer duties.
+Settings capacity increases from 48 to 64; handshake and save bounds derive from that constant.
+All new tuning is in existing shared files (`galaxy/galaxy.json`, `rules/settings.json`, `rules/exploration.json`).

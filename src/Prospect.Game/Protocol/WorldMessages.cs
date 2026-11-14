@@ -157,7 +157,7 @@ public struct HullRecord
     /// order's target.
     /// </summary>
     public const int MaxHealth = GeometryAdmission.MaxBlocks;
-    public const int MaxWireSize = 26 + 3 + MaxHealth * 6 + 4 + 4 + 1 + 4 + 4 + 1 + 4 * MaxLosses + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 4 + 4 + 8 + 16 + 6 + 1 + 24;
+    public const int MaxWireSize = 1 + 26 + 3 + MaxHealth * 6 + 4 + 4 + 1 + 4 + 4 + 1 + 4 * MaxLosses + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 4 + 4 + 8 + 16 + 6 + 1 + 24;
 
     public uint Id;
     public uint Owner;
@@ -189,12 +189,15 @@ public struct HullRecord
     public HealthIds DamagedBlocks;
     public HealthValues RemainingHealth;
     public HullState State;
+    /// <summary>Environment flags sampled at this record’s server tick.</summary>
+    public HullEnvironment Environment;
     public HullOrder Order;
     /// <summary>Conservative actual record bound, excluding unused health entries.</summary>
     public readonly int WireBound => MaxWireSize - (MaxHealth - HealthCount) * 6;
 
     public readonly void Write(ref NetWriter writer)
     {
+        writer.WriteByte((byte)Environment);
         writer.WriteByte(HasHealth ? (byte)1 : (byte)0);
         writer.WriteUInt16(HealthCount);
         for (var i = 0; i < HealthCount; i++)
@@ -242,6 +245,8 @@ public struct HullRecord
     public static bool TryRead(ref NetReader reader, out HullRecord record)
     {
         record = default;
+        record.Environment = (HullEnvironment)reader.ReadByte();
+        if (((byte)record.Environment & ~7) != 0 || (record.Environment & HullEnvironment.SensorsDisrupted) != 0 && (record.Environment & HullEnvironment.InLightningCloud) == 0) return false;
         var health = reader.ReadByte();
         record.HasHealth = health == 1;
         record.HealthCount = reader.ReadUInt16();

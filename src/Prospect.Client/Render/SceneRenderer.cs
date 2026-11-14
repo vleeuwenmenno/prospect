@@ -193,6 +193,12 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private readonly VkPipeline _gridPipeline;
     private readonly VkPipeline _tonemapPipeline;
     private readonly VkPipeline _ftlMarkPipeline;
+    private readonly VkPipelineLayout _pulsePipelineLayout;
+    private readonly VkPipeline _pulsePipeline;
+    private ScanPulseConstants _pulseQueued;
+    private ScanPulseConstants _pulse;
+    private bool _pulseQueuedOn;
+    private bool _pulseOn;
 
     // Shields: their own pipeline and per-frame vertex and instance memory, and the scene as it was just before
     // they were drawn, colour and depth, copied into images of their own that nothing else reads or writes.
@@ -440,6 +446,12 @@ internal sealed unsafe class SceneRenderer : IDisposable
             [new VkPushConstantRange { StageFlags = VkShaderStageFlags.FragmentBit, Offset = (ByteSize32)0, Size = (ByteSize32)sizeof(CompositeConstants) }],
             null
         );
+        // The scan pulse reads the tone mapper's sets (the camera, and of the scene only its depth) with its own push range.
+        _pulsePipelineLayout = device.CreatePipelineLayout(
+            [_frameLayout.Handle, _sceneLayout.Handle],
+            [new VkPushConstantRange { StageFlags = VkShaderStageFlags.FragmentBit, Offset = (ByteSize32)0, Size = (ByteSize32)sizeof(ScanPulseConstants) }],
+            null
+        );
 
         for (var i = 0; i < FrameRenderer.FramesInFlight; i++)
         {
@@ -565,6 +577,12 @@ internal sealed unsafe class SceneRenderer : IDisposable
         var markInput = new VertexInput(1, 3).AddBindingWithAttributes<FtlMark>(0, 0, VkVertexInputRate.Instance);
         _ftlMarkPipeline = ScenePipeline(Module(shaders, "ftl_mark.vert"), Module(shaders, "ftl_mark.frag"), markInput, Presets.Rasterization.Fill.CullNone, &depthRead, &additive);
 
+        // The scan pulse is light added to the displayed image after tone mapping, in the present pass, under the
+        // interface. Its alpha is left as the tone mapper wrote it.
+        var pulseAttachment = additiveAttachment with { SrcAlphaBlendFactor = VkBlendFactor.Zero, DstAlphaBlendFactor = VkBlendFactor.One };
+        var pulseBlend = new VkPipelineColorBlendStateCreateInfo { AttachmentCount = 1, Attachments = &pulseAttachment };
+        _pulsePipeline = Pipeline(Module(shaders, "fullscreen.vert"), Module(shaders, "scan_pulse.frag"), noInput, Presets.Rasterization.Fill.CullNone, &depthOff, &pulseBlend, _pulsePipelineLayout, swapchain.RenderPass);
+
         CreateTargets(swapchain.Extent);
         // The immutable gas lattice is created last so every later failure can retire the completed renderer.
         try
@@ -666,6 +684,19 @@ internal sealed unsafe class SceneRenderer : IDisposable
         _shieldLook = look;
     }
 
+    /// <summary>
+    /// The scan pulse the next <see cref="Render"/> and <see cref="Present"/> draw, for that one frame only. A frame
+    /// without one draws no pulse pass and keeps no depth for it.
+    /// </summary>
+    public void QueuePulse(in ScanPulseConstants pulse)
+    {
+        _pulseQueued = pulse;
+        _pulseQueuedOn = true;
+    }
+
+    /// <summary>For muted capture diagnostics: whether the last frame drew the scan pulse.</summary>
+    public bool LastPulse => _pulseOn;
+
     /// <summary>The instance memory for this frame. Fill it, then describe it to <see cref="Render"/> as batches.</summary>
     public Span<MeshInstance> Instances(int frameIndex) => new((void*)_instanceBuffers[frameIndex].Mapped, MaxInstances);
 
@@ -688,6 +719,9 @@ internal sealed unsafe class SceneRenderer : IDisposable
     {
         _composite = composite;
         _frameIndex = frameIndex;
+        _pulse = _pulseQueued;
+        _pulseOn = _pulseQueuedOn;
+        _pulseQueuedOn = false;
         // Composition takes over one cloud, the primary. Every other draw is in the scene before the shields and
         // the lenses see it, as part of what is behind them.
         var deferredGas = _gas.HasPrimary && (lensing || _shieldCount > 0);
@@ -749,8 +783,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
             ImageView = _depthView,
             ImageLayout = VkImageLayout.DepthAttachmentOptimal,
             LoadOp = VkAttachmentLoadOp.Clear,
-            // Kept when the lenses read it, or when the shields copy it before they are drawn.
-            StoreOp = lensing || _shieldCount > 0 || sceneGas || deferredGas ? VkAttachmentStoreOp.Store : VkAttachmentStoreOp.DontCare,
+            // Kept when the lenses read it, when the shields copy it before they are drawn, or for the scan pulse.
+            StoreOp = lensing || _shieldCount > 0 || sceneGas || deferredGas || _pulseOn ? VkAttachmentStoreOp.Store : VkAttachmentStoreOp.DontCare,
             ClearValue = new VkClearValue { DepthStencil = new VkClearDepthStencilValue { Depth = 0f } },
         };
         commands.BeginRendering(
@@ -1256,8 +1290,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
     }
 
     /// <summary>
-    /// Draws the tone-mapped scene to the screen, bent by the jump lenses given to the last <see cref="Render"/>.
-    /// Call inside the present pass, before the interface.
+    /// Draws the tone-mapped scene to the screen, bent by the jump lenses given to the last <see cref="Render"/>, and
+    /// over it the scan pulse when one was queued. Call inside the present pass, before the interface.
     /// </summary>
     public void Present(CommandBuffer commands, float exposure)
     {
@@ -1268,6 +1302,13 @@ internal sealed unsafe class SceneRenderer : IDisposable
         commands.BindPipeline(VkPipelineBindPoint.Graphics, _tonemapPipeline);
         commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _tonemapPipelineLayout, 0, sets, []);
         commands.PushConstants(_tonemapPipelineLayout, VkShaderStageFlags.FragmentBit, 0, new ReadOnlySpan<byte>(&push, sizeof(CompositeConstants)));
+        commands.Draw(3, 1, 0, 0);
+        if (!_pulseOn)
+            return;
+        var pulse = _pulse;
+        commands.BindPipeline(VkPipelineBindPoint.Graphics, _pulsePipeline);
+        commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _pulsePipelineLayout, 0, sets, []);
+        commands.PushConstants(_pulsePipelineLayout, VkShaderStageFlags.FragmentBit, 0, new ReadOnlySpan<byte>(&pulse, sizeof(ScanPulseConstants)));
         commands.Draw(3, 1, 0, 0);
     }
 
@@ -1285,6 +1326,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
         device.DestroyPipeline(_gasScenePipeline, null);
         device.DestroyPipeline(_shieldPipeline, null);
         device.DestroyPipeline(_shieldMaskPipeline, null);
+        device.DestroyPipeline(_pulsePipeline, null);
+        device.DestroyPipelineLayout(_pulsePipelineLayout, null);
         device.DestroyPipelineLayout(_shieldPipelineLayout, null);
         _shieldLayout.Dispose();
         device.DestroyPipelineLayout(_scenePipelineLayout, null);

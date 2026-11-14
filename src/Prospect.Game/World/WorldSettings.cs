@@ -163,7 +163,7 @@ public sealed class SettingDefinition
 public struct WorldSettings : IEquatable<WorldSettings>
 {
     /// <summary>The most settings a world can have.</summary>
-    public const int Capacity = 48;
+    public const int Capacity = 64;
 
     [InlineArray(Capacity)]
     private struct Slots

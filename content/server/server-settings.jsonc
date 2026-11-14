@@ -123,4 +123,13 @@
       "handshakeSeconds": 5,
     },
   },
+  // Cold share of candidates, 0–1.
+  "gasColdChance": 0.2,
+  // Lightning share of non-cold candidates, 0–1.
+  "gasLightningChance": 0.1,
+  // Relative ice abundance, 0–4; default 1.
+  "iceAbundance": 1,
+  // Ice grade minimum and maximum, 0–1.
+  "iceGradeMin": 0,
+  "iceGradeMax": 1
 }

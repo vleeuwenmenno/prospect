@@ -127,7 +127,7 @@ public sealed class ProtocolTests
             record.RemainingHealth[block] = 1;
         }
         record.Write(ref writer);
-        Assert.Equal(5707, HullRecord.MaxWireSize);
+        Assert.Equal(5708, HullRecord.MaxWireSize);
         Assert.Equal(HullRecord.MaxWireSize, writer.Length);
         var reader = new NetReader(writer.Written);
         Assert.Equal(valid, HullRecord.TryRead(ref reader, out var copy));
@@ -137,7 +137,7 @@ public sealed class ProtocolTests
             reader = new NetReader(writer.Written[..length]);
             Assert.False(HullRecord.TryRead(ref reader, out _));
         }
-        Assert.Equal(43u, ProtocolInfo.Version);
+        Assert.Equal(44u, ProtocolInfo.Version);
     }
 
     [Fact]

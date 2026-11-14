@@ -474,8 +474,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             for (var i = 0; i < _uploads.Length; i++)
                 _uploads[i] = new EditUpload(_content.BlockTransfers.MaxBytes);
             Galaxy = _content.Galaxy.WithSeed(_galaxySeed);
-            _sensorGas = _content.Exploration.GasOpticalPenalty == 0 || Galaxy.GasClouds is null
-                ? null : new SensorGasCache(Galaxy, _content.Exploration.SensorRadius);
+            _sensorGas = Galaxy.GasClouds is null
+                ? null : new SensorGasCache(Galaxy, _content.Exploration.GasOpticalPenalty == 0
+                    ? Math.Min(_content.Exploration.SensorRadius, Galaxy.SectorSize) : _content.Exploration.SensorRadius);
 
             // A saved world's asteroids are bounded before they are pushed, never when they are saved.
             _rocks = world is null ? new RockField(Galaxy) : new RockField(Galaxy, _saveLimits.MaxRocks, _saveLimits.MaxMovedSectors);
@@ -1393,6 +1394,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 VisualVersion = info.Visual.Version,
                 Spark = info.Visual.Spark,
                 State = _hulls.State(i),
+                Environment = _sensorGas is null ? HullEnvironment.None : GasSensors.EnvironmentAt(Galaxy, _sensorGas.At(_hulls.State(i).Position), _content.Exploration, _hulls.State(i).Position, tick),
                 Order = info.Order,
             };
             if (info.Owner != connection.PlayerId) record.Order.Target = default;

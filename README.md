@@ -302,7 +302,10 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   says cancelled). A small muted readout under the top of the flight and command views shows the bar, the result and
   then "NEXT SCAN IN n S". The server keeps a 10 s cooldown on the sector after a scan ends, completed or cancelled
   (a request in it is refused); the key and the button wait it out and say how long is left. Resting the cursor on
-  the readout or the button names the key. In an uncharted sector, a tip names the key. The command view shows the gas-shaped
+  the readout or the button names the key. In an uncharted sector, a tip names the key. A completed scan sends a
+  muted blue pulse out from where your ship was: a thin front with a faint hex net that spreads to sensor range in
+  about 2.6 s and lights the asteroids and hulls it passes, dimmed by gas. Faint short pings show while a scan runs.
+  Only you see it, in the flight and command views (`content/visuals/scan.json`). The command view shows the gas-shaped
   sensor boundary of the selected ships (the flown one when none is selected), darkens space beyond it, and merges ships
   within 10 km of each other into one outline; lost contacts show at their last position.
 - **Renderer.** Floating-point scene target and tone mapping, camera-relative rendering from double-precision
@@ -357,8 +360,21 @@ Full-scale geometry and performance remain stages 3–5.
 
 ## Controls
 
-`F1` opens searchable Controls from pilot, command or map view. Search current bindings by action, key,
-button or category. `F1`, `Esc` or Close returns to the previous view; the session keeps running.
+`F1` opens the Controls quick reference from pilot, command or map view. It is read-only and shows the
+bindings as they are now, remaps included, in tabs: Flight, Camera, Jump & navigation, Command view, Galaxy map,
+Scanning & exploration, Ship editor, Social and Interface. The search box looks through every tab by action, key,
+button or category: a tab with no match is greyed (and can still be opened), a tab with matches shows how many, and
+the matching rows are lit. `F1`, `Esc` or Close returns to the previous view; the session keeps running.
+
+**Changing controls:** Settings, Controls (or "Change controls" in `F1`) has the same tabs and search, with every
+action remappable. Click a control, press the new key, mouse button or gamepad button (Escape or a left click
+cancels); `x` removes one, `+` adds one (up to four), Reset puts a row back, Reset all controls puts everything back.
+A control another action already uses in the same view asks: Swap, Clear the other, or Cancel. Changes apply at
+once and are saved per client in `settings.json` (`ControlOverrides`, only what differs from the defaults).
+Limits: mouse gestures, Ctrl chords and the editor's `S` and `R` are fixed; Escape and the left mouse button cannot
+be bound; Menu / back always keeps one control; sticks, triggers and the roll bumpers stay as they are (invert
+pitch is its own setting); one capture takes one control, so a chord cannot be bound. A gamepad-only player cannot
+cancel a capture with the pad. Rules: `docs/controls.md`.
 The cursor is hidden only in the pilot view. The command view, the map and every menu show it.
 
 - **Pilot view:** the hidden cursor steers the view. Hold either `Shift` to show it: mouse flight and targeting
@@ -499,7 +515,7 @@ coordinates, rocks, server, players, richness and resources) in the pilot, comma
 game closed and stays as set when switching views. No closed-state hint is drawn. It takes no flight
 keys: `F` is still down and Follow. `F3` shows the
 performance overlay, `F11` toggles fullscreen, `F12` takes a screenshot. Bindings live in
-`content/input/bindings.json`; block types and flight rules in `content/blocks`, hull designs in `content/ships`,
+`content/input/bindings.json` and their tabs and labels in `content/input/controls.json`; block types and flight rules in `content/blocks`, hull designs in `content/ships`,
 galaxy rules in `content/galaxy`, world settings in `content/rules`, the listing server's address in `content/net`.
 
 ## World settings
@@ -751,3 +767,13 @@ This status is an observation at open, not hosting authorization. Saved multipla
 - Independent Claude security review remains required. No admission, TLS, key rotation or destructive recovery is included.
 
 The commented default server file is `content/server/server-settings.jsonc`; copy it and pass `--settings <file>`. JSON comments and trailing commas are accepted.
+
+Gas-kind simulation is present: cold/normal mixtures, shared icicle shapes and lightning sensor bursts.
+Renderer composition, cold/lightning visuals and fleet/RTS status indicators await integration; mining and cargo inventory remain absent.
+
+| New world setting | Range | Default |
+| --- | --- | --- |
+| `gasColdChance` | 0–1 | 0.20 |
+| `gasLightningChance` (among non-cold candidates) | 0–1 | 0.10 |
+| `iceAbundance` | 0–4 | 1 |
+| `iceGradeMin` / `iceGradeMax` | 0–1 | 0 / 1 |

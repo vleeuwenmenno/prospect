@@ -262,7 +262,10 @@ public sealed class SectorContent
 /// </summary>
 public sealed class Galaxy
 {
-    public const int AsteroidShapes = 12;
+    /// <summary>The ordinary rock variants, excluding icicles.</summary>
+    public const int RockShapes = 12;
+    /// <summary>Rock variants plus one bounded ice shard.</summary>
+    public const int AsteroidShapes = 13;
 
     /// <summary>
     /// The version of what a seed generates: which asteroids a sector has, in which order, and where. A saved
@@ -273,7 +276,7 @@ public sealed class Galaxy
     /// content identity, which a save is held to as well. It is not the network protocol's version, which
     /// changes for reasons a save does not care about.
     /// </summary>
-    public const int GenerationVersion = 5;
+    public const int GenerationVersion = 6;
 
     /// <summary>The most resources the content may define: a sector's resources travel as one bit each.</summary>
     public const int MaxResources = 16;
@@ -371,7 +374,7 @@ public sealed class Galaxy
                 AsteroidFieldsModule fields => fields.Under(catalog, clean, Resources),
                 GasCloudModule gas => gas.Under((float)sectorSize, catalog.Number(clean, "gasSizeMin"), catalog.Number(clean, "gasSizeMax"),
                     catalog.Number(clean, "gasHugeSizeMin"), catalog.Number(clean, "gasHugeSizeMax"), catalog.Number(clean, "gasHugeChance"),
-                    catalog.Number(clean, "gasWispiness"), catalog.Number(clean, "gasWispinessMin"), catalog.Number(clean, "gasWispinessMax")),
+                    catalog.Number(clean, "gasWispiness"), catalog.Number(clean, "gasWispinessMin"), catalog.Number(clean, "gasWispinessMax"), catalog.Number(clean, "gasColdChance"), catalog.Number(clean, "gasLightningChance")),
                 var module => module,
             };
         var copy = WithModules(modules);

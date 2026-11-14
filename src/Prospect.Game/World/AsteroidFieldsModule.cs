@@ -170,6 +170,7 @@ public sealed class AsteroidFieldsModule : SectorModule
 
     // Rocks in gas: how often a cloud holds a field, how dense it is and how much of the cloud it fills.
     private readonly float _gasChance;
+    private readonly float _gasHugeChance, _gasHugeFromHalfSize;
     private readonly float _gasPerCubicKm;
     private readonly float _gasFill;
     private readonly int _gasMax;
@@ -341,6 +342,10 @@ public sealed class AsteroidFieldsModule : SectorModule
         if (json.TryGetProperty("inGas"u8, out var inGas))
         {
             _gasChance = inGas.GetProperty("chance"u8).GetSingle();
+            _gasHugeChance = inGas.TryGetProperty("hugeChance"u8, out var hugeChance) ? hugeChance.GetSingle() : _gasChance;
+            _gasHugeFromHalfSize = inGas.TryGetProperty("hugeFromHalfSize"u8, out var hugeSize) ? hugeSize.GetSingle() : float.MaxValue;
+            if (!float.IsFinite(_gasHugeChance) || _gasHugeChance < 0 || _gasHugeChance > 1 || !float.IsFinite(_gasHugeFromHalfSize) || _gasHugeFromHalfSize <= 0)
+                throw new InvalidDataException($"{path}: invalid huge gas field tuning");
             _gasPerCubicKm = inGas.GetProperty("perCubicKm"u8).GetSingle();
             _gasFill = inGas.GetProperty("fill"u8).GetSingle();
             _gasMax = inGas.GetProperty("max"u8).GetInt32();
@@ -511,6 +516,10 @@ public sealed class AsteroidFieldsModule : SectorModule
         keys = keys[..drawn];
         keys.Sort();
 
+        Span<GasCloudPlacement> coldClouds = stackalloc GasCloudPlacement[GasCloudModule.MaxPerSector];
+        var coldCount = sector.Galaxy.GasClouds?.Intersecting(sector.Galaxy, sector.Coord, coldClouds) ?? 0;
+        var ice = -1;
+        for (var r = 0; r < sector.Galaxy.Resources.Length; r++) if (sector.Galaxy.Resources[r].Id == "ice") ice = r;
         var asteroids = content.Asteroids;
         var character = content.Summary.Character;
         var oreShare = character.Resources == 0 ? 0f : Math.Min(1f, _oreShare.At(character.Richness) * _oreShareScale);
@@ -555,7 +564,7 @@ public sealed class AsteroidFieldsModule : SectorModule
 
             var look = SectorRandom.Numbered(field.Key ^ LookDraws, number);
             var rotation = Rotation(ref look);
-            var shape = look.NextInt(Galaxy.AsteroidShapes);
+            var shape = look.NextInt(Galaxy.RockShapes);
 
             // What the rock is made of. Three numbers are drawn whether it turns out to carry ore or not.
             var ore = SectorRandom.Numbered(field.Key ^ OreDraws, number);
@@ -571,6 +580,19 @@ public sealed class AsteroidFieldsModule : SectorModule
                 grade = Math.Clamp(grade, _gradeLimits.Min, _gradeLimits.Max);
                 if (_materialGrades.Length != 0)
                     grade = Math.Clamp(grade, _materialGrades[resource].Min, _materialGrades[resource].Max);
+            }
+
+            if (ice >= 0)
+            {
+                foreach (var cloud in coldClouds[..coldCount])
+                {
+                    if (cloud.Cloud.Kind != GasCloudKind.Cold || !GasSensors.Contains(sector.Galaxy, cloud, sector.Galaxy.CenterOf(sector.Coord) + position)) continue;
+                    shape = AsteroidShape.Icicle;
+                    resource = character.Has(ice) ? ice : -1;
+                    grade = resource < 0 ? 0 : Math.Clamp(Math.Min(1f, _grade.At(_gradeFromRichness * character.Richness + (1f - _gradeFromRichness) * quality * quality) * _gradeScale), _gradeLimits.Min, _gradeLimits.Max);
+                    if (resource >= 0 && _materialGrades.Length != 0) grade = Math.Clamp(grade, _materialGrades[ice].Min, _materialGrades[ice].Max);
+                    break;
+                }
             }
 
             occupied[f >> 6] |= 1UL << (f & 63);
@@ -717,7 +739,7 @@ public sealed class AsteroidFieldsModule : SectorModule
         {
             // Some clouds hold rocks: a field that fills the cloud's middle, as dense as the content says.
             var random = Stream(anchor, GasStream);
-            if (random.NextSingle() < _gasChance * Math.Min(1f, _frequency))
+            if (random.NextSingle() < (cloud.HalfSize.X >= _gasHugeFromHalfSize ? _gasHugeChance : _gasChance) * Math.Min(1f, _frequency))
             {
                 ref var field = ref fields[count];
                 field = new Field

@@ -339,14 +339,15 @@ internal sealed class WorldView
         _jobs = jobs;
         _damage = new DamageMeshes(jobs, _collision.MeshVertices);
         _scene = scene;
-        var boost = actions.Bindings(InputAction.Boost);
-        BoostKeyName = boost.IsEmpty ? "BOOST" : boost[0].DisplayName.ToUpperInvariant();
+        RefreshKeyNames();
+        actions.Changed += RefreshKeyNames;
         _designs = designs;
         Editor = new ShipEditor(jobs);
         // Damaged shells are built on a worker, one at a time; nothing builds one in the frame.
         _shields = new ShieldVisuals(ShieldLook.Load(), jobs);
         // Every cloud the seed generates is known. Fog of war would hand a narrower source in here.
         _gasField = new GasCloudField(jobs, new GeneratedGasClouds(), _gasTiers.ViewRangeSectors);
+        _scanPulse = new ScanPulse(_pulseLook);
         _asteroidMeshBase = AsteroidMesh(0, 0);
         _meshCount = MeshCount();
         _cubeMesh = CubeMesh();
@@ -521,6 +522,8 @@ internal sealed class WorldView
     private GasCloudPlacement _gasCapture;
     // Far gas: how it is levelled, and the clouds around the camera, which a worker keeps current.
     private readonly GasTiers _gasTiers = GasTiers.Load();
+    private readonly ScanPulseLook _pulseLook = ScanPulseLook.Load();
+    private readonly ScanPulse _scanPulse;
     private readonly GasCloudField _gasField;
     /// <summary>The share of a cloud below which a level of detail is not worth a draw.</summary>
     private const float GasMinShare = 1f / 512f;
@@ -581,7 +584,15 @@ internal sealed class WorldView
     public float NavRefusedAt { get; private set; } = -10f;
 
     /// <summary>The first key or button bound to boost, as the HUD names it.</summary>
-    public string BoostKeyName { get; }
+    public string BoostKeyName { get; private set; } = "BOOST";
+
+    /// <summary>Builds the names the HUD shows for boost and for taking control again, after the bindings changed.</summary>
+    private void RefreshKeyNames()
+    {
+        var boost = _actions.Bindings(InputAction.Boost);
+        BoostKeyName = boost.IsEmpty ? "BOOST" : boost[0].DisplayName.ToUpperInvariant();
+        _switchKeyName = null;
+    }
 
     /// <summary>Seconds since this view started, on the same clock as <see cref="NavRefusedAt"/>.</summary>
     public float Time => _time;
@@ -686,6 +697,7 @@ internal sealed class WorldView
             _shields.Clear();
             _damage.Clear();
             _sparks.Clear();
+            _scanPulse.Reset();
             _ownId = 0;
             ResetOwnJump();
             _commandCycle.Reset();
@@ -721,6 +733,7 @@ internal sealed class WorldView
         // their own jump from inside until the command view has mostly taken over.
         _ownInside = _commandBlend < 0.5f;
         _visuals.Update(snapshot.Hulls.AsSpan(0, snapshot.HullCount), _designs, alpha, dt, _ownInside, FtlPreview);
+        _scanPulse.Observe(snapshot.Exploration.Scan, OwnPosition, dt);
         _shields.Update(snapshot.Hulls.AsSpan(0, snapshot.HullCount), _designs, snapshot.PublishedAt, dt);
 
         // The editor follows the server before anything reads input, so a grant or an end shows this frame.
@@ -1113,10 +1126,53 @@ internal sealed class WorldView
         // The overlay check needs the ordinary gas pass, which any queued shield (even off screen) replaces, so it
         // queues none in either capture; hulls in view are drawn without shields in both.
         _scene.QueueShields(overlayCheck ? 0 : _shields.Draws.Length, _shields.Look.Constants);
+        QueueScanPulse(galaxy, camera);
         _scene.Render(commands, frameIndex, constants, composite, _batches.AsSpan(0, rockBatches), _batches.AsSpan(rockBatches, batchCount - rockBatches), _commandBlend > 0.01f, markCount, lensing);
     }
 
     public float ExposureValue => Exposure;
+
+    /// <summary>The scan pulse the last drawn frame queued; a strength of zero when none. Read by scripted captures.</summary>
+    public ScanShell PulseShown { get; private set; }
+
+    /// <summary>
+    /// Queues this frame's scan pulse, if one shows. Not inside the pilot's own jump, whose tunnel it would sit over
+    /// unbent. Gas dims it through the smooth envelope of the cloud nearest the camera; clouds never overlap, so
+    /// that is the one the camera is in whenever it is in one.
+    /// </summary>
+    private void QueueScanPulse(Galaxy galaxy, Double3 camera)
+    {
+        PulseShown = default;
+        if ((_jumpStage > 0f && _ownInside) || !_scanPulse.Shell(OwnPosition, out var shell))
+            return;
+        PulseShown = shell;
+        var origin = shell.Origin.RelativeTo(camera);
+        var look = _pulseLook;
+        var pulse = new ScanPulseConstants
+        {
+            Shell = new float4(origin.X, origin.Y, origin.Z, shell.Radius),
+            Shape = new float4(_scanPulse.FrontWidth(shell.Radius), shell.Strength, MathF.Max(shell.Radius * look.SurfaceTrailShare, 1f), look.PatternCells),
+            Color = new float4(look.Color[0], look.Color[1], look.Color[2], look.ShellLight),
+            Light = new float4(look.SurfaceLight, look.SurfaceTrailLight, look.PatternLight, look.RimLimit),
+            CloudRadii = new float4(0, 0, 0, look.PatternLine),
+        };
+        if (look.GasDimming > 0f && galaxy.GasClouds is { } gas && GasView is not ("absent" or "inside-absent" or "pilot-absent"))
+        {
+            var best = float.MaxValue;
+            foreach (ref readonly var placed in _gasField.Clouds(galaxy))
+            {
+                var envelope = placed.Cloud.HalfSize * gas.Shape.X;
+                var center = GasCloudQuery.CenterOf(galaxy, placed).RelativeTo(camera);
+                var outside = center.Length() - MathF.Max(envelope.X, MathF.Max(envelope.Y, envelope.Z));
+                if (outside >= best || envelope.X <= 0f || envelope.Y <= 0f || envelope.Z <= 0f)
+                    continue;
+                best = outside;
+                pulse.Cloud = new float4(center.X, center.Y, center.Z, gas.ExtinctionOf(placed.Cloud, (float)galaxy.SectorSize) * look.GasDimming);
+                pulse.CloudRadii = new float4(1f / envelope.X, 1f / envelope.Y, 1f / envelope.Z, look.PatternLine);
+            }
+        }
+        _scene.QueuePulse(pulse);
+    }
 
     /// <summary>
     /// Queues every known cloud in view, once for each level of detail it shows at: one, or two while it crosses

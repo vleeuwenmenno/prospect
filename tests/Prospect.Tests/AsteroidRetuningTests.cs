@@ -82,10 +82,10 @@ public sealed class AsteroidRetuningTests
     }
 
     [Theory]
-    [InlineData(1, false, 0, 0, "9B7DEFB34F193715")]
-    [InlineData(2, false, 0, 0, "FD7C002C8CEC9A9C")]
-    [InlineData(5, false, 0, 0, "A534856E8E06A506")]
-    [InlineData(5, true, 0, 0, "F3F04DA071F09CFE")]
+    [InlineData(1, false, 0, 0, "8F2D633D2E399158")]
+    [InlineData(2, false, 0, 0, "EA4340D7658DCAC9")]
+    [InlineData(5, false, 0, 0, "79135253ED01588D")]
+    [InlineData(5, true, 0, 0, "DCEBD9305F098398")]
     [InlineData(1, false, -26, -31, "A7EDE866BA60F8A3")]
     [InlineData(2, false, -26, -31, "0C4CC40B74AE0B95")]
     [InlineData(5, false, -26, -31, "2335622FB5772AC6")]
@@ -221,9 +221,9 @@ public sealed class AsteroidRetuningTests
     }
 
     [Theory]
-    [InlineData(20, "B0C0A787B7DD74F9")]
-    [InlineData(80, "A8A0731E9509607F")]
-    [InlineData(160, "5B1B6DB1E90784F2")]
+    [InlineData(20, "86A13E900A92B076")]
+    [InlineData(80, "9030D0483872B74C")]
+    [InlineData(160, "7ADDD50EB8C590C0")]
     public void SectorSizeOptimizationKeepsRecordedBytes(int km, string expected)
     {
         var galaxy = World($"sectorSize={km}").WithSeed(11);
@@ -269,7 +269,7 @@ public sealed class AsteroidRetuningTests
         galaxy.Generate(coord, sector);
         Assert.Equal(new SectorCoord(-39, 0, -19), coord);
         Assert.Equal(8711, sector.AsteroidCount);
-        Assert.Equal("D2C1ED381858C02C", Sectors.Hash(sector).ToString("X16"));
+        Assert.Equal("1173DCB7646A496B", Sectors.Hash(sector).ToString("X16"));
     }
 
     [Fact]

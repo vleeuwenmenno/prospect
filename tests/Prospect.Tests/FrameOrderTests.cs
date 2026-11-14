@@ -2023,7 +2023,7 @@ public sealed class FrameOrderTests : IDisposable
         }
 
         var rows = new ControlsCatalog(_actions).Rows;
-        Assert.Contains(rows, row => row.Category == "Map" && row.Binding == "L" && row.Action.Contains("Reset"));
+        Assert.Contains(rows, row => row.Category == "Galaxy map" && row.Binding == "L" && row.Action.Contains("Reset"));
     }
 
     [Fact]
@@ -3318,6 +3318,67 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal(ViewMode.Command, _world.Mode);
         Assert.Equal(150f, _world.CommandDistance);
         Assert.Equal(1, _world.Selection.Length);
+    }
+
+    /// <summary>
+    /// A control being captured on the Controls page is taken before the world reads anything: the key reaches
+    /// neither the command-view toggle nor flight, held keys steer nothing, and the key is only let go at the end of
+    /// the frame the capture finished in, so the press that ended it is not read by anything after it either.
+    /// </summary>
+    [Fact]
+    public void ACapturedKeyIsSwallowedAndNothingReachesTheWorldUntilTheFrameAfter()
+    {
+        Frame(() => Move(EmptySpace));
+        Assert.Equal(ViewMode.Pilot, _world.Mode);
+        Sent();
+        var capture = new ControlCapture(_actions);
+        capture.Begin(ControlSlot.Of(InputAction.Boost), 0);
+        Assert.True(_actions.Suspended);
+
+        // W is held for thrust and N, which opens the command view, goes down in the same poll.
+        var result = CaptureResult.Waiting;
+        Frame(() => Key(GlfwKey.W, true));
+        Assert.Equal(0f, Sent().Forward);
+        Frame(() => Key(GlfwKey.N, true), () => (result = capture.Update(_devices)) != CaptureResult.Waiting);
+        Assert.Equal(CaptureResult.Captured, result);
+        Assert.Equal(new InputBinding(InputBinding.Source.Key, (int)GlfwKey.N), capture.Binding);
+        Assert.Equal(ViewMode.Pilot, _world.Mode);
+        var sent = Sent();
+        Assert.Equal(0f, sent.Forward);
+        Assert.False(sent.Boost);
+        Assert.False(sent.ToggleDampeners);
+
+        // Nothing after the capture in the same frame sees the press either: Escape and the command key read as up.
+        Assert.False(_actions.Pressed(_devices, InputAction.ToggleCommand, true));
+        capture.EndFrame();
+        Assert.False(_actions.Suspended);
+
+        // Released and pressed again, the key is the world's once more.
+        Frame(() => Key(GlfwKey.N, false));
+        Frame(() => Key(GlfwKey.N, true));
+        Assert.Equal(ViewMode.Command, _world.Mode);
+    }
+
+    [Fact]
+    public void EscapeCancelsACaptureWithoutBeingTheBackPressOrTheMenu()
+    {
+        Frame(() => Move(EmptySpace));
+        var capture = new ControlCapture(_actions);
+        capture.Begin(ControlSlot.Of(InputAction.Boost), -1);
+        var result = CaptureResult.Waiting;
+        var backSeen = false;
+        Frame(() => Key(GlfwKey.Escape, true), () =>
+        {
+            result = capture.Update(_devices);
+            // The page reads Escape as "back" after the capture; with the map suspended it must not.
+            backSeen = _actions.Pressed(_devices, InputAction.Pause, true) || _actions.InterfaceShortcutPressed(_devices, InputAction.Pause, false, false);
+            return true;
+        });
+        Assert.Equal(CaptureResult.Cancelled, result);
+        Assert.False(backSeen);
+        capture.EndFrame();
+        Assert.False(_actions.Suspended);
+        Assert.Equal(ViewMode.Pilot, _world.Mode);
     }
 
     [Fact]

@@ -329,12 +329,12 @@ public sealed class WorldSpaceGenerationTests
     }
 
     [Fact]
-    public void CloudsAreMostlySmallSometimesHugeAndNeverTwoInView()
+    public void CloudsAreMostlySmallAndOnlyColdNormalPairsMayOverlap()
     {
         var galaxy = Content.Galaxy.WithSeed(DefaultSeed);
         var gas = galaxy.GasClouds!;
         var edge = (float)galaxy.SectorSize;
-        var clouds = new List<(Double3 Center, float Reach)>();
+        var clouds = new List<(Double3 Center, float Reach, GasCloudKind Kind)>();
         var huge = 0;
         var largest = 0f;
         for (var x = -40; x <= 40; x++)
@@ -344,7 +344,7 @@ public sealed class WorldSpaceGenerationTests
                     var anchor = new SectorCoord(x, y, z);
                     if (!gas.TryGetCloud(galaxy, anchor, out var cloud))
                         continue;
-                    clouds.Add((galaxy.CenterOf(anchor) + cloud.Center, cloud.HalfSize.X));
+                    clouds.Add((galaxy.CenterOf(anchor) + cloud.Center, cloud.HalfSize.X, cloud.Kind));
                     largest = Math.Max(largest, cloud.HalfSize.X);
                     if (cloud.HalfSize.X >= edge * 0.25f)
                         huge++;
@@ -358,10 +358,11 @@ public sealed class WorldSpaceGenerationTests
         Assert.InRange(huge / (float)clouds.Count, 0.03f, 0.2f);
         Assert.True(largest > edge * 0.45f, $"the largest cloud is {largest * 2:0} m across");
 
-        // Clouds stand apart: no camera is inside or close to two at once, so composing the nearest is enough.
+        // Every pair except cold/normal retains the separation margin.
         for (var i = 0; i < clouds.Count; i++)
             for (var j = 0; j < i; j++)
             {
+                if (GasCloudModule.MayOverlap(clouds[i].Kind, clouds[j].Kind)) continue;
                 // Each keeps its reach and the margin clear around its centre.
                 var apart = (clouds[i].Center - clouds[j].Center).Length;
                 Assert.True(apart >= clouds[i].Reach + clouds[j].Reach + 2 * GasCloudModule.SeparationMargin * edge - 1.0, $"two clouds {apart:0} m apart stand too close");

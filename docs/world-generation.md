@@ -2,7 +2,7 @@
 
 Asteroid fields and gas clouds are things in world space, not contents of a sector.
 A sector is still generated alone, from the seed, without generating its neighbours.
-Generation version 5, protocol 42. The code is `AsteroidFieldsModule` and `GasCloudModule` in `Prospect.Game/World`.
+Generation version 6, protocol 44. The code is `AsteroidFieldsModule` and `GasCloudModule` in `Prospect.Game/World`.
 
 ## Decided: what the player gets
 
@@ -70,22 +70,22 @@ What stays per sector:
 - `inGas.chance` of clouds hold a field, drawn from the asteroid module's own stream.
 - The field fills `inGas.fill` of the cloud's box at `inGas.perCubicKm` rocks, at most `inGas.max`.
 - It is a field like any other: thinned, spaced, capped, scaled by the amount setting.
-- With no gas module, or a chance of 0, gas changes no asteroid.
+- With no gas module, gas changes no asteroid. A field chance of 0 removes gas fields; cold envelopes can still turn ordinary-field rocks into icicles.
 - A sector no cloud reaches has the same asteroids with and without the gas module.
 
 ## Decided: gas clouds
 
 - A sector anchors a cloud with chance `chance` (4%), centred anywhere in it (`centerReach`).
 - Size: `halfSizeShare` of the sector edge; with chance `huge.chance` the range `huge.halfSizeShare` instead.
-- Clouds stand apart: any two centres are further apart than both x half-extents plus 56% of a sector edge. Where two would stand closer, the larger stays.
-- So clouds never overlap, and a camera in or close to one is never in another. Many show at once from afar; see [gas clouds](gas-clouds.md).
+- Except cold/normal pairs, clouds stand apart: any two centres are further apart than both x half-extents plus 56% of a sector edge. Where two would stand closer, the larger stays.
+- Cold/normal pairs alone bypass separation and can mix. All other pairs remain separated; see [gas clouds](gas-clouds.md).
 - That rule looks at candidates two sectors around, never further, and only ever removes a cloud.
 - A huge cloud is thinner by as much as it is larger (`GasCloudModule.ExtinctionOf`), so it is not a wall.
 
 ## The API for gas
 
 ```csharp
-public readonly record struct GasCloud(Vector3 Center, Vector3 HalfSize, float Seed);   // unchanged fields
+public readonly record struct GasCloud(Vector3 Center, Vector3 HalfSize, float Seed, GasCloudKind Kind = GasCloudKind.Normal);
 public readonly record struct GasCloudPlacement(SectorCoord Anchor, GasCloud Cloud);
 
 bool TryGetCloud(Galaxy galaxy, SectorCoord anchor, out GasCloud cloud);
@@ -136,7 +136,7 @@ Size, spacing, radius, ore and material settings are unchanged.
 - Spacing is kept between rocks of one sector only. Two rocks either side of a wall can be closer.
 - A sector over its cap loses its smallest rocks. Its neighbour keeps them: a step in pebbles at that wall.
 - `asteroidCountMin` is per anchoring sector, so a sector's own count can be under it.
-- Two clouds never show at once, so clouds do not overlap or merge with each other.
+- Cold/normal mixtures require joint ray integration in the renderer (pending integration).
 
 ## Measured
 
@@ -157,7 +157,7 @@ Development machine, default content. Before is generation version 3.
 
 ## Open
 
-- Whether clouds may overlap and merge with each other. The renderer draws many clouds but lays whole clouds over each other and composes only the nearest; overlapping ones need their gas interleaved along a ray.
+- Cold/normal overlap is decided; see the renderer integration contract in gas-clouds.md. Visual integration is still required.
 - Whether the map should show a field as one shape across sectors rather than a count per sector.
 - Whether the current sector's readout should switch to the actual count once the sector is generated.
 - Broad regions of dense and empty space beyond the galaxy's arms: a third, sector-scale noise is not there.
@@ -205,3 +205,20 @@ Serial measurements on the development machine (milliseconds, best of 20; other 
 
 The 160 km result has 3.245 ms of budget headroom; the approximately 11 ms optimization target was not fully reached.
 The full serial check independently measured 11.856 ms there.
+
+### Generation 6 after integration
+
+The placement optimization above preserves generation 5's output by itself.
+The combined gas-kind branch uses generation 6 and protocol 44; ice and cloud kinds intentionally change the recorded bytes.
+The frozen whole-galaxy hash remains `16723476013675883020` after merging the optimization.
+
+Debug, best of 20 on seed 11, dense sector `(-39,0,-19)`, gas kinds enabled:
+
+| Sector edge | Rocks | Generation time | Generation 6 hash |
+| --- | ---: | ---: | --- |
+| 20 km | 6,450 | 8.203 ms | `86A13E900A92B076` |
+| 80 km | 10,166 | 10.724 ms | `9030D0483872B74C` |
+| 160 km | 11,109 | 11.555 ms | `7ADDD50EB8C590C0` |
+
+All fifteen supported 10 km steps passed the 15 ms Debug budget.
+`AsteroidRetuningTests.SectorSizeOptimizationKeepsRecordedBytes` pins the new 20/80/160 km hashes.
