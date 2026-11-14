@@ -1,0 +1,9 @@
+{
+  "steadyMegawatts": 0.05,
+  "arrowHeight": 6,
+  "arrowWidth": 7,
+  "arrowGap": 4,
+  "shieldMarkAlpha": 0.8,
+  "shieldMarkThickness": 3,
+  "shieldMarkTick": 3
+}

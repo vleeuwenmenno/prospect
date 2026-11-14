@@ -222,6 +222,9 @@ public ref struct HullBody
     internal ReadOnlySpan<VisualContact> Contacts;
     internal long ContactTick;
 
+    /// <summary>Where the hull's power went in its last step; written by the hull's step.</summary>
+    public PowerFlow Power;
+
     /// <summary>
     /// The blocks the hull still has: a <see cref="BlockSet"/>. For a body that takes damage it is the set of
     /// <see cref="State"/> itself, so a block that is destroyed is gone from it at once.
@@ -292,10 +295,18 @@ public static class HullSim
                 order.Kind = OrderKind.None;
         }
 
+        var energyBefore = state.Energy;
         if (Jump(ref state, ref order, ref input, flight))
+        {
+            // In the tunnel nothing flies and nothing generates; the drive may still have taken its last charge.
+            body.Power = new PowerFlow { Ftl = (energyBefore - state.Energy) / Dt };
             return false;
+        }
 
-        FlightModel.Step(ref state, input, flight, Dt);
+        var ftl = (energyBefore - state.Energy) / Dt;
+        FlightModel.Step(ref state, input, flight, Dt, out var flow);
+        flow.Ftl = ftl;
+        body.Power = flow;
 
         // How far the hull came this tick, for finding what it would otherwise have flown straight through.
         var travel = state.Velocity * Dt;

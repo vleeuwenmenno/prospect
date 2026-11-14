@@ -4346,12 +4346,42 @@ public sealed class FrameOrderTests : IDisposable
         Assert.DoesNotContain(none, line => line.StartsWith("RESTARTS AT", StringComparison.Ordinal) || line.StartsWith("STORED", StringComparison.Ordinal));
         Assert.Equal(0f, FlightConsole.RestartMark(flight));
 
-        // The battery's flow is read again each time it is asked for.
+        // The battery's own rate is read again each time it is asked for.
         own.Energy = flight.EnergyStorage * 0.5f;
         own.EnergyRate = -12.5f;
-        Assert.Contains("NET FLOW: -12.5 MW", Tip(ConsoleBar.Energy, own, flight));
+        Assert.Contains("BATTERY: -12.5 MW", Tip(ConsoleBar.Energy, own, flight));
         own.EnergyRate = 3f;
-        Assert.Contains("NET FLOW: +3.0 MW", Tip(ConsoleBar.Energy, own, flight));
+        Assert.Contains("BATTERY: +3.0 MW", Tip(ConsoleBar.Energy, own, flight));
+
+        // The power flow lists each draw and sums to the net figure: a shield recharging, thrust, and the base draw.
+        flight.ShieldCapacity = 3000f;
+        own.ShieldOffline = false;
+        own.Power = new PowerFlow { Generated = 6f, Idle = 0.7f, Thrust = 4.1f, Shield = 3f };
+        flight.PowerGenerated = 6f;
+        var flow = Tip(ConsoleBar.Energy, own, flight);
+        Assert.Contains("GENERATION: 6 MW", flow);
+        Assert.Contains("IDLE DRAW: 0.7 MW", flow);
+        Assert.Contains("THRUST DRAW: 4.1 MW", flow);
+        Assert.Contains("SHIELD RECHARGE: 3 MW", flow);
+        Assert.Contains("NET FLOW: -1.8 MW", flow);
+        flight.FtlPower = 0f;
+        Assert.DoesNotContain(Tip(ConsoleBar.Energy, own, flight), line => line.StartsWith("JUMP DRIVE", StringComparison.Ordinal));
+        own.Power = new PowerFlow { Generated = 6f, Idle = 0.7f, Thrust = 4.1f, Shield = 3f, Ftl = 2f };
+        Assert.Contains("JUMP DRIVE: 2 MW", Tip(ConsoleBar.Energy, own, flight));
+        own.Power = new PowerFlow { Generated = 6f, Idle = 0.7f, Thrust = 4.1f, Shield = 3f };
+        own.ShieldOffline = true;
+        Assert.Contains("SHIELD RESTART: 3 MW", Tip(ConsoleBar.Energy, own, flight));
+        own.ShieldOffline = false;
+
+        // A full battery turns the surplus away, and the flow still says what the shield takes.
+        own.Energy = flight.EnergyStorage;
+        own.EnergyRate = 0f;
+        own.Power = new PowerFlow { Generated = 6f, Idle = 0.7f, Shield = 3f };
+        var full = Tip(ConsoleBar.Energy, own, flight);
+        Assert.Contains("BATTERY: FULL", full);
+        Assert.Contains("SHIELD RECHARGE: 3 MW", full);
+        Assert.Contains("NET FLOW: +2.3 MW", full);
+        Assert.Contains("BATTERY FULL: SPARE POWER IS NOT STORED", full);
 
         // Hull points, and the heat at which an overheated drive unlocks.
         own.Hull = flight.HullPoints * 0.25f;
@@ -4398,6 +4428,7 @@ public sealed class FrameOrderTests : IDisposable
             own.Shield = 99_999f;
             own.Hull = 99_999f;
             own.EnergyRate = -9_999f;
+            own.Power = new PowerFlow { Generated = 9_999f, Idle = 999.9f, Thrust = 9_999f, Shield = 999.9f, Ftl = 9_999f };
             foreach (var state in new[] { 0, 1, 2 })
             {
                 own.ShieldOffline = state == 1;

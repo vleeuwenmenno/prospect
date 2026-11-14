@@ -174,13 +174,16 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   surplus. Boost needs the battery above 5% to start (`boostEnergyFloor` in `content/blocks/blocks.json`), runs
   until the battery is empty, then waits for the battery to pass 5% again; a hull without a battery cannot
   boost. The pilot console at the bottom shows shield and hull on the left, energy and boost heat on the right
-  and speed with its unit in a hexagon between them, as slanted segmented bars. The energy bar marks the 5%, a
-  strip under it shows the battery's live net draw or recharge, and the heat bar turns from cyan to red and says
+  and speed with its unit in a hexagon between them, as slanted segmented bars. The energy bar marks the 5%. Under the
+  energy figure the console shows the live power flow in MW with an arrow: what the generators make less everything
+  drawn (idle, thrust and boost, shield recharge or restart, the jump drive). It reads out even while a full battery
+  turns the surplus away, so a shield recharging off spare power is visible. A strip under the bar draws that flow,
+  with a muted blue mark for the shield's share. The heat bar turns from cyan to red and says
   when boost is overheated (with the mark where it unlocks) or out of energy. The boost heat row also says
   whether the dampeners are on; off is amber. With `Shift` held in the pilot view, the bar under the cursor is
   lit and its live figures show above the console: shield charge, recharge rate, delay after damage, draw and
-  restart rule; hull points, mass and safe impact speed; stored energy, net flow, generation, base draw and boost
-  floor; heat, heating and cooling rates, boost draw and why boost is unavailable. A window covering a bar keeps
+  restart rule; hull points, mass and safe impact speed; stored energy, the battery's own rate, generation, each draw (idle, thrust or boost, shield
+  recharge or restart, jump drive), net flow and boost floor; heat, heating and cooling rates, boost draw and why boost is unavailable. A window covering a bar keeps
   it from the cursor. Heads-up panels share the unit list's look: a muted dark panel, a
   thin quiet border and a small tick in the colour of their state. Nothing glows.
 - **Collisions and damage.** Hulls collide block by block against each asteroid's real surface, and block
@@ -189,7 +192,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   flies on what is left. Losing the core destroys the hull; its pilot gets out in a drone.
 - **Shields break and restart.** A shield that pays out everything it had breaks and goes offline. Offline it
   takes no hits, even with charge in it: every hit lands on the blocks. After 8 s without damaging hits it
-  charges back at its normal rate on four times its normal power, and comes online only at 25% of its capacity
+  charges back at its normal rate on 4.5 times its normal power, and comes online only at 25% of its capacity
   (`shieldRestartFraction` and `shieldRestartPowerMultiplier` in `content/blocks/blocks.json`). Online it tops up
   using energy proportional to points restored. FTL and propulsion take priority; insufficient energy slows or
   stops recovery. The world recharge multiplier changes speed and power together, keeping MJ/point fixed.

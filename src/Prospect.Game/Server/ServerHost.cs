@@ -16,6 +16,13 @@ public sealed class ServerConfig
     public VisualBenchmarkScene? VisualBenchmark { get; init; }
 
     /// <summary>
+    /// Scripted captures only: this many seconds into the run the server breaks the shield of every hull a player
+    /// flies, exactly as a hit that empties it would. Null for never. Like <see cref="VisualBenchmark"/> it needs
+    /// an unsaved private in-process game, and no wire command can enable it.
+    /// </summary>
+    public float? ScriptedShieldBreakSeconds { get; init; }
+
+    /// <summary>
     /// The name the host chose, shown to players and on the list. It must pass
     /// <see cref="ServerNames.TryNormalize"/>: 1 to 48 characters once cleaned, as the listing server demands.
     /// </summary>
@@ -389,6 +396,12 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             if (config.VisualBenchmark is not null && (config.Visibility != ServerVisibility.Private || world is not null || transports.Any(t => !t.IsInProcess)))
                 throw new InvalidDataException("Visual benchmark requires an unsaved private in-process server.");
             config.VisualBenchmark?.Validate();
+            if (config.ScriptedShieldBreakSeconds is { } breakAt)
+            {
+                if (!(breakAt >= 0f && breakAt <= 600f) || config.Visibility != ServerVisibility.Private || world is not null || transports.Any(t => !t.IsInProcess))
+                    throw new InvalidDataException("A scripted shield break needs an unsaved private in-process server and a time of 0 to 600 s.");
+                _scriptedShieldBreakTick = (long)MathF.Ceiling(breakAt / HullSim.Dt);
+            }
             _visualBenchmark = config.VisualBenchmark;
             _maxPlayers = config.MaxPlayers;
             _visibility = config.Visibility;
@@ -734,6 +747,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         // Edits move on before the hulls step, so a hull that is replaced steps as the new one this tick.
         TickEditor(tick);
         TickVisualBenchmark(tick);
+        TickScriptedShieldBreak(tick);
 
         // Capture generations before the round: replacement drones wait until the next interval.
         var participantCount = _hulls.Slots;

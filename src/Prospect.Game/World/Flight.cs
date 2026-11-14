@@ -297,7 +297,14 @@ public static class FlightModel
     public const float BoostUnlockHeat = 0.35f;
     private const float AxisScale = 1f / 127f;
 
-    public static void Step(ref HullState state, in FlightInput input, in FlightParams p, float dt)
+    public static void Step(ref HullState state, in FlightInput input, in FlightParams p, float dt) =>
+        Step(ref state, input, p, dt, out _);
+
+    /// <summary>
+    /// Advances the hull one tick and reports where its power went in <paramref name="flow"/>, worked out by the
+    /// same lines that move the battery. The jump drive's draw is not here: it is taken before flight steps.
+    /// </summary>
+    public static void Step(ref HullState state, in FlightInput input, in FlightParams p, float dt, out PowerFlow flow)
     {
         // Rotation: the commanded rate is approached at a limited angular acceleration.
         var target = new Vector3(input.Pitch * p.TurnRate.X, -input.Yaw * p.TurnRate.Y, -input.Roll * p.TurnRate.Z) * AxisScale;
@@ -337,10 +344,12 @@ public static class FlightModel
         var demand = p.IdlePower + thrustDemand;
         var available = Math.Max(0f, state.Energy + (p.PowerGenerated - demand) * dt);
         state.Boosting = boosting && available > 0f;
+        flow = new PowerFlow { Generated = p.PowerGenerated, Idle = p.IdlePower };
 
         var thrustScale = 1f;
         if (available <= 0f && demand > p.PowerGenerated)
             thrustScale = thrustDemand > 0f ? Math.Clamp((p.PowerGenerated - p.IdlePower) / thrustDemand, 0f, 1f) : 1f;
+        flow.Thrust = thrustDemand * thrustScale;
 
         if (state.ShieldCooldown <= 0f && p.ShieldRecharge > 0f)
         {
@@ -353,6 +362,7 @@ public static class FlightModel
             {
                 restored = Math.Min(restored, available / energyPerPoint);
                 available = Math.Max(0f, available - restored * energyPerPoint);
+                flow.Shield = restored * energyPerPoint / dt;
             }
             state.Shield += restored;
         }

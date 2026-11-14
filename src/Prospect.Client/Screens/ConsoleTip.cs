@@ -145,14 +145,31 @@ internal static class ConsoleTip
         var energy = FlightConsole.Fraction(own.Energy, flight.EnergyStorage);
         sink.Title("ENERGY"u8, Kit.F($"{energy * 100f:0} %"), energy < 0.15f ? Theme.Bad : Theme.Accent);
         sink.Line("STORED"u8, ScreenHost.Energy(own.Energy, flight.EnergyStorage), Theme.Text);
+
+        // What the battery itself is doing, measured: zero while it is full or empty whatever the hull draws.
         var rate = float.IsFinite(own.EnergyRate) ? own.EnergyRate : 0f;
         if (MathF.Abs(rate) < FlightConsole.SteadyRate)
+            sink.Line("BATTERY"u8, energy >= 1f ? "FULL"u8 : energy <= 0f ? "EMPTY"u8 : "STEADY"u8, Theme.TextMute);
+        else
+            sink.Line("BATTERY"u8, Power(rate, true), rate < 0f ? FlightConsole.DrawColor : FlightConsole.ChargeColor);
+
+        // Where the power goes: the simulation's own split of this tick, the same one the net figure sums.
+        var flow = own.Power;
+        sink.Line("GENERATION"u8, Power(flight.PowerGenerated), Theme.Text);
+        sink.Line("IDLE DRAW"u8, Draw(flow.Idle), DrawTone(flow.Idle));
+        sink.Line(own.Boosting ? "BOOST DRAW"u8 : "THRUST DRAW"u8, Draw(flow.Thrust), DrawTone(flow.Thrust));
+        if (flight.ShieldCapacity > 0f)
+            sink.Line(own.ShieldOffline ? "SHIELD RESTART"u8 : "SHIELD RECHARGE"u8, Draw(flow.Shield), DrawTone(flow.Shield));
+        if (flow.Ftl > 0f || flight.FtlPower > 0f)
+            sink.Line("JUMP DRIVE"u8, Draw(flow.Ftl), DrawTone(flow.Ftl));
+        var net = FlightConsole.NetPower(own);
+        if (MathF.Abs(net) < FlightConsole.SteadyRate)
             sink.Line("NET FLOW"u8, "STEADY"u8, Theme.TextMute);
         else
-            sink.Line("NET FLOW"u8, Power(rate, true), rate < 0f ? FlightConsole.DrawColor : FlightConsole.ChargeColor);
-        sink.Line("GENERATION"u8, Power(flight.PowerGenerated), Theme.Text);
-        sink.Line("BASE DRAW"u8, Power(flight.IdlePower), Theme.Text);
+            sink.Line("NET FLOW"u8, Power(net, true), net < 0f ? FlightConsole.DrawColor : FlightConsole.ChargeColor);
         sink.Line("BOOST FLOOR"u8, FlightConsole.Thousands(flight.EnergyStorage) ? Kit.F($"{flight.BoostEnergyFloor / 1000f:0.0} GJ") : Kit.F($"{flight.BoostEnergyFloor:0} MJ"), Theme.Text);
+        if (energy >= 1f && net >= FlightConsole.SteadyRate)
+            sink.Note("BATTERY FULL: SPARE POWER IS NOT STORED"u8, Theme.TextDim);
     }
 
     private static void Heat<T>(ref T sink, in HullView own, in FlightParams flight)
@@ -184,6 +201,12 @@ internal static class ConsoleTip
             return signed ? Kit.F($"{shown / 1000f:+0.0;-0.0} GW") : Kit.F($"{shown / 1000f:0.0} GW");
         return signed ? Kit.F($"{shown:+0.0;-0.0} MW") : Kit.F($"{shown:0.#} MW");
     }
+
+    /// <summary>A draw in megawatts, as the size of what is taken.</summary>
+    private static ReadOnlySpan<byte> Draw(float megawatts) => Power(float.IsFinite(megawatts) ? Math.Max(0f, megawatts) : 0f);
+
+    /// <summary>A draw in the draw colour while it is taking power, muted while it is not.</summary>
+    private static uint DrawTone(float megawatts) => megawatts >= FlightConsole.SteadyRate ? FlightConsole.DrawColor : Theme.TextMute;
 
     /// <summary>Takes the widest of each kind of line, to size the box.</summary>
     private struct Measurer(ImFontPtr mono, ImFontPtr sans) : IConsoleTipSink

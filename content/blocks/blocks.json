@@ -11,7 +11,7 @@
     "coolSeconds": 9,
     "shieldRechargeDelaySeconds": 8,
     "shieldRestartFraction": 0.25,
-    "shieldRestartPowerMultiplier": 4,
+    "shieldRestartPowerMultiplier": 4.5,
     "shieldContactSpeed": 0.1,
     "collisionTreeVisits": 8192,
     "collisionBoxTests": 2048,
@@ -40,7 +40,7 @@
     "engine": { "name": "Engine", "mass": 3.5, "hull": 200, "thrust": 272, "powerDraw": 2.5, "forwardOnly": true },
     "thruster": { "name": "Thruster", "mass": 1.5, "hull": 150, "thrust": 176, "powerDraw": 0.8 },
     "gyro": { "name": "Gyro", "mass": 2.0, "hull": 150, "torque": 520, "powerDraw": 0.5 },
-    "shield": { "name": "Shield emitter", "mass": 2.5, "hull": 120, "shield": 1500, "shieldRecharge": 37.5, "powerDraw": 1.5 },
+    "shield": { "name": "Shield emitter", "mass": 2.5, "hull": 120, "shield": 1500, "shieldRecharge": 37.5, "powerDraw": 3.0 },
     "cargo": { "name": "Cargo hold", "mass": 1.0, "hull": 150, "cargo": 0.8 },
     "quarters": { "name": "Crew quarters", "mass": 1.5, "hull": 150, "crew": 2, "sizeRules": { "crew": { "volumeExponent": 0.5 } } },
     "hyperdrive": { "name": "Hyperspace drive", "mass": 3.0, "hull": 180, "ftl": "hyperspace", "ftlPower": 8, "ftlMaxSectors": 10 },
@@ -53,7 +53,7 @@
     "microengine": { "name": "Drone engine", "mass": 0.3, "hull": 30, "thrust": 24, "powerDraw": 0.3, "forwardOnly": true },
     "microthruster": { "name": "Drone thruster", "mass": 0.2, "hull": 30, "thrust": 11.2, "powerDraw": 0.15 },
     "microgyro": { "name": "Drone gyro", "mass": 0.3, "hull": 30, "torque": 0.3, "powerDraw": 0.05 },
-    "microshield": { "name": "Drone shield", "mass": 0.3, "hull": 30, "shield": 120, "shieldRecharge": 5, "powerDraw": 0.2 },
+    "microshield": { "name": "Drone shield", "mass": 0.3, "hull": 30, "shield": 120, "shieldRecharge": 5, "powerDraw": 0.4 },
     "sensor": { "name": "Passive sensor", "mass": 2, "hull": 400, "sensor": true },
     "charting": { "name": "Sector scanner", "mass": 2, "hull": 400, "charting": true }
   }

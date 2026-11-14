@@ -71,6 +71,13 @@ public struct HullView
     /// <summary>Stored energy in megajoules, and how fast it is changing in megawatts.</summary>
     public float Energy;
     public float EnergyRate;
+
+    /// <summary>
+    /// Where the hull's power is going now, in megawatts, smoothed over a few ticks: generation against idle,
+    /// thrust, shield and jump-drive draws. Unlike <see cref="EnergyRate"/> it does not read zero while a full
+    /// battery turns the surplus away.
+    /// </summary>
+    public PowerFlow Power;
     public float Shield;
     public float Hull;
 
@@ -245,6 +252,7 @@ internal sealed partial class ClientWorld : IDisposable
     private int _assignmentPause;
     private long _lastSnapshotClientTick;
     private float _energyRate;
+    private PowerFlow _power;
 
     public ClientWorld(GameContent content)
     {
@@ -501,6 +509,7 @@ internal sealed partial class ClientWorld : IDisposable
         StepNear(ref _order, input);
         _predicted = _near.State(0);
         _energyRate += ((_predicted.Energy - energyBefore) / HullSim.Dt - _energyRate) * 0.2f;
+        _power.Blend(_near.Info(0).Power, 0.2f);
         Send(transport);
     }
 
@@ -649,6 +658,7 @@ internal sealed partial class ClientWorld : IDisposable
                 JumpTunnelElapsed = _predicted.JumpTunnelElapsed,
                 Energy = _predicted.Energy,
                 EnergyRate = _energyRate,
+                Power = _power,
                 Shield = _predicted.Shield,
                 Hull = _predicted.Hull,
                 ShieldOffline = _predicted.ShieldOffline,

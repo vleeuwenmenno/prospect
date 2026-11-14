@@ -270,6 +270,7 @@ public sealed class HullField
         var body = Body(index);
         body.ContactTick = (long)tick;
         var destroyed = HullSim.Step(ref own, ref info.Order, input, _hulls.Flight(index), ref body, rocks, tick, impulses, this);
+        info.Power = body.Power;
         if (body.Damaged)
             info.DamageTick = (long)tick;
         Refit(index);
