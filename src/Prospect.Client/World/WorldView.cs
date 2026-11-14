@@ -117,6 +117,8 @@ internal sealed class WorldView
     private readonly ClientSettings _settings;
     private readonly JobSystem _jobs;
     private readonly DamageMeshes _damage;
+    // Models of single thrust parts, for the editor's draft and ghost and for far hulls drawn block by block.
+    private readonly PartModels _partModels;
     public int VisibleHulls { get; private set; }
     public int DrawnDents { get; private set; }
     public int DamageFallbacks { get; private set; }
@@ -348,6 +350,7 @@ internal sealed class WorldView
         _settings = settings;
         _jobs = jobs;
         _damage = new DamageMeshes(jobs, _collision.MeshVertices);
+        _partModels = new PartModels(jobs, PropulsionLook.Shared);
         _scene = scene;
         RefreshKeyNames();
         actions.Changed += RefreshKeyNames;
@@ -1058,6 +1061,7 @@ internal sealed class WorldView
         var candidateCount = 0;
         Array.Clear(_meshCounts);
         _damage.Begin(snapshot.Hulls.AsSpan(0, snapshot.HullCount));
+        _partModels.Begin();
         _scene.BeginDamage();
         VisibleHulls = DrawnDents = DamageFallbacks = GeneratedRocks = VisibleRocks = 0;
         foreach (var slot in _slots)
@@ -1093,7 +1097,7 @@ internal sealed class WorldView
             // While the editor is open the draft is drawn in the ship's place, block by block, without its shield.
             if (_editShown && hull.Id == Editor.Hull && Editor.Draft is { } draft && Editor.Source is { } source)
             {
-                AddDraft(ref candidateCount, draft, source, camera);
+                AddDraft(ref candidateCount, frameIndex, draft, source, camera);
                 continue;
             }
 
@@ -1138,7 +1142,8 @@ internal sealed class WorldView
                 continue;
             }
 
-            // A hull that has lost blocks is drawn from the ones it still has, each as its own cube or prism.
+            // A hull that has lost blocks is drawn from the ones it still has, each as its own cube or prism, a thrust
+            // part as its model once that is built.
             var alive = hull.Blocks.Span;
             for (var b = 0; b < design.BlockOffsets.Length && candidateCount < _candidates.Length; b++)
             {
@@ -1146,10 +1151,14 @@ internal sealed class WorldView
                     continue;
                 var block = design.BlockOffsets[b];
                 block.Z *= stretch;
+                if (_partModels.TryGet(design.Types[b], design.Shapes[b], design.BlockHalfExtents[b], design.Boxes[b].Facing, design.BlockSize, out var model)
+                    && _scene.AddTriangles(frameIndex, model, MeshTransform(position + Vector3.Transform(block, orientation), orientation, Vector3.One, design.Color, material, stretch)))
+                    continue;
                 Add(ref candidateCount, _cubeMesh + (int)design.Shapes[b], position + Vector3.Transform(block, orientation), orientation, design.BlockHalfExtents[b] * 2f, design.Color, material, stretch);
             }
         }
 
+        _partModels.Flush();
         DrawnPlumes = _thrust.End();
         _scene.QueuePlumes(DrawnPlumes);
         AddOpenings(camera, aspect, marks, ref markCount, ref composite, ref openings, ref clips);
@@ -4137,7 +4146,7 @@ internal sealed class WorldView
     }
 
     /// <summary>Adds the draft's blocks in their own shapes where the hull is, each tinted for its role.</summary>
-    private void AddDraft(ref int count, BuildDraft draft, HullDesign source, Double3 camera)
+    private void AddDraft(ref int count, int frameIndex, BuildDraft draft, HullDesign source, Double3 camera)
     {
         var hull = EditedPosition.RelativeTo(camera);
         var orientation = EditedOrientation;
@@ -4155,8 +4164,38 @@ internal sealed class WorldView
                 color = Vector3.Lerp(color, new Vector3(0.45f, 0.08f, 0.06f), 0.7f);
             if (Editor.IsSelected(i))
                 color = Vector3.Lerp(color, new Vector3(0.6f, 0.8f, 1f), 0.4f);
-            Add(ref count, _cubeMesh + (int)box.Shape, hull + Vector3.Transform(middle, orientation), orientation, size, color, material);
+            var at = hull + Vector3.Transform(middle, orientation);
+            // A thrust part shows its model, as the ship will; its plain block only until the model is built.
+            if (_partModels.TryGet(box.Type, box.Shape, size * 0.5f, box.Facing, source.BlockSize, out var model)
+                && _scene.AddTriangles(frameIndex, model, MeshTransform(at, orientation, Vector3.One, color, material, 1f)))
+                continue;
+            Add(ref count, _cubeMesh + (int)box.Shape, at, orientation, size, color, material);
         }
+
+        AddGhostModel(frameIndex, source, hull, orientation, material);
+    }
+
+    /// <summary>
+    /// The ghost of a thrust part about to be placed, as its model in the colour of the hull's part, a little toward
+    /// the outline's good or bad tone; turned and moved with the ghost while it glides into a turn. Other parts keep
+    /// their outline alone.
+    /// </summary>
+    private void AddGhostModel(int frameIndex, HullDesign source, Vector3 hull, Quaternion orientation, float material)
+    {
+        if (!Editor.HasGhost || Editor.Content is not { } content || (uint)Editor.Part >= (uint)content.Blocks.Types.Count)
+            return;
+        var type = content.Blocks.Types[Editor.Part];
+        var size = Editor.PartSize;
+        var half = new Vector3(size.X, size.Y, size.Z) * (0.5f * source.BlockSize);
+        if (!_partModels.TryGet(type, Editor.PartShape, half, Editor.PartFacing, source.BlockSize, out var model))
+            return;
+        GhostPose(out var turn, out var shift);
+        var at = Editor.GhostAt;
+        var middle = new Vector3(at.X - 0.5f, at.Y - 0.5f, at.Z - 0.5f) + new Vector3(size.X, size.Y, size.Z) * 0.5f + shift;
+        var position = hull + Vector3.Transform(EditorGeometry.ToHull(middle, source.Pivot, source.BlockSize), orientation);
+        var tone = Editor.GhostCheck == DraftEdit.Done ? new Vector3(0.35f, 0.85f, 0.45f) : new Vector3(0.9f, 0.3f, 0.25f);
+        var color = Vector3.Lerp(EditorGeometry.BlockColor(source.Color, type), tone, 0.35f);
+        _scene.AddTriangles(frameIndex, model, MeshTransform(position, Quaternion.Concatenate(turn, orientation), Vector3.One, color, material, 1f));
     }
 
     /// <summary>A point of the draft's grid in the world, where the edited hull is drawn this frame.</summary>

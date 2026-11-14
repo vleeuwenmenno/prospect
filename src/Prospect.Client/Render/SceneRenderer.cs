@@ -219,10 +219,6 @@ internal struct FtlMark
     public float4 Axis;
 }
 
-/// <summary>
-/// One drawn mesh: a camera-relative 3x4 transform and a colour. Alpha 0 is rock, 1 is hull plating, 2 the pilot's
-/// own hull; a hull cut by a jump's opening adds four times its passage slot plus one.
-/// </summary>
 /// <summary>One thrust plume, matching <c>plume.vert</c>: see there for what each vector holds.</summary>
 internal struct PlumeInstance
 {
@@ -234,8 +230,13 @@ internal struct PlumeInstance
     public float4 Shape;
     public float4 Motion;
     public float4 Extent;
+    public float4 Flow;
 }
 
+/// <summary>
+/// One drawn mesh: a camera-relative 3x4 transform and a colour. Alpha 0 is rock, 1 is hull plating, 2 the pilot's
+/// own hull; a hull cut by a jump's opening adds four times its passage slot plus one.
+/// </summary>
 internal struct MeshInstance
 {
     public float4 Row0;
@@ -322,8 +323,14 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private readonly int DamageVertices = CollisionDetail.Load().FrameVertices;
     private readonly GpuBuffer[] _damageVertices = new GpuBuffer[FrameRenderer.FramesInFlight];
     private readonly GpuBuffer[] _damageInstances = new GpuBuffer[FrameRenderer.FramesInFlight];
-    private readonly MeshRange[] _damageRanges = new MeshRange[65];
-    private int _damageCount, _damageUsed;
+    /// <summary>
+    /// Draws of triangles uploaded each frame: up to 64 damaged hulls, the sparks, and thrust part models drawn one at a
+    /// time (the editor's draft and ghost, far hulls that have lost blocks; <see cref="AddTriangles"/>).
+    /// </summary>
+    private const int DynamicDraws = 448;
+    private const int DamageDrawLimit = 64;
+    private readonly MeshRange[] _damageRanges = new MeshRange[DynamicDraws];
+    private int _damageCount, _damageUsed, _damageMeshes, _modelDraws;
     private readonly GpuBuffer[] _shieldVertexBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
     private readonly GpuBuffer[] _shieldIndexBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
     private readonly GpuBuffer[] _shieldInstanceBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
@@ -424,7 +431,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
                 _ftlBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(FtlMark) * MaxFtlMarks);
                 _plumeBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(PlumeInstance) * PropulsionLook.PlumeCapacity);
                 _damageVertices[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshVertex) * DamageVertices);
-                _damageInstances[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshInstance) * 65);
+                _damageInstances[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshInstance) * DynamicDraws);
                 _shieldVertexBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshVertex) * ShieldVisuals.MaxVertices);
                 _shieldIndexBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.IndexBufferBit, sizeof(ushort) * ShieldVisuals.MaxIndices);
                 _shieldInstanceBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(ShieldInstance) * ShieldVisuals.MaxShields);
@@ -738,7 +745,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         var markInput = new VertexInput(1, 3).AddBindingWithAttributes<FtlMark>(0, 0, VkVertexInputRate.Instance);
         _ftlMarkPipeline = ScenePipeline(Module(shaders, "ftl_mark.vert"), Module(shaders, "ftl_mark.frag"), markInput, Presets.Rasterization.Fill.CullNone, &depthRead, &additive);
         // Plumes are light added in the scene, tested against what is solid, and march only the pixels of their boxes.
-        var plumeInput = new VertexInput(1, 8).AddBindingWithAttributes<PlumeInstance>(0, 0, VkVertexInputRate.Instance);
+        var plumeInput = new VertexInput(1, 9).AddBindingWithAttributes<PlumeInstance>(0, 0, VkVertexInputRate.Instance);
         _plumePipeline = ScenePipeline(Module(shaders, "plume.vert"), Module(shaders, "plume.frag"), plumeInput, Presets.Rasterization.Fill.CullNone, &depthRead, &additive);
 
         // The scan pulse is light added to the displayed image after tone mapping, in the present pass, under the
@@ -1128,25 +1135,43 @@ internal sealed unsafe class SceneRenderer : IDisposable
     }
 
     /// <summary>Called after the current frame fence, before any dynamic triangle uploads.</summary>
-    public int DamageDraws => _damageCount - (SparkVertices > 0 ? 1 : 0);
+    public int DamageDraws => _damageMeshes;
+
+    /// <summary>Thrust part models drawn from uploaded triangles this frame.</summary>
+    public int ModelDraws => _modelDraws;
     public int SparkVertices { get; private set; }
     public int DynamicBytes => _damageUsed * sizeof(MeshVertex) + _damageCount * sizeof(MeshInstance);
-    public void BeginDamage() { _damageCount = 0; _damageUsed = 0; SparkVertices = 0; }
+    public void BeginDamage() { _damageCount = 0; _damageUsed = 0; _damageMeshes = 0; _modelDraws = 0; SparkVertices = 0; }
 
     /// <summary>Refuses the whole mesh before touching mapped memory when its budget is exhausted.</summary>
     public bool AddDamage(int frame, DamageMesh mesh, in MeshInstance instance, float fade)
     {
         var n = mesh.Dented.Length;
-        if (_damageCount >= 64 || n > DamageVertices - _damageUsed) return false;
+        if (_damageMeshes >= DamageDrawLimit || _damageCount >= DynamicDraws - 1 || n > DamageVertices - _damageUsed) return false;
         var destination = new Span<MeshVertex>((void*)_damageVertices[frame].Mapped, DamageVertices).Slice(_damageUsed, n);
         mesh.CopyTo(destination, fade);
         FinishDamage(frame, n, instance);
+        _damageMeshes++;
+        return true;
+    }
+
+    /// <summary>
+    /// Draws a triangle list (three vertices a triangle, no indices) with the hull pipeline this frame: a thrust part's
+    /// model where no design mesh holds it. Refuses, touching nothing, when the frame's draws or vertices are used up;
+    /// one draw is always kept for the sparks.
+    /// </summary>
+    public bool AddTriangles(int frame, ReadOnlySpan<MeshVertex> vertices, in MeshInstance instance)
+    {
+        if (vertices.IsEmpty || _damageCount >= DynamicDraws - 1 || vertices.Length > DamageVertices - _damageUsed) return false;
+        vertices.CopyTo(new Span<MeshVertex>((void*)_damageVertices[frame].Mapped, DamageVertices).Slice(_damageUsed));
+        FinishDamage(frame, vertices.Length, instance);
+        _modelDraws++;
         return true;
     }
 
     public void AddSparks(int frame, ReadOnlySpan<MeshVertex> vertices)
     {
-        if (vertices.IsEmpty || vertices.Length > DamageVertices - _damageUsed || _damageCount == 65) return;
+        if (vertices.IsEmpty || vertices.Length > DamageVertices - _damageUsed || _damageCount == DynamicDraws) return;
         SparkVertices = vertices.Length;
         vertices.CopyTo(new Span<MeshVertex>((void*)_damageVertices[frame].Mapped, DamageVertices).Slice(_damageUsed));
         var instance = WorldView.MeshTransform(System.Numerics.Vector3.Zero, System.Numerics.Quaternion.Identity, System.Numerics.Vector3.One, new System.Numerics.Vector3(7, 2, 0.2f), -1, 1);
@@ -1155,7 +1180,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
 
     private void FinishDamage(int frame, int count, in MeshInstance instance)
     {
-        new Span<MeshInstance>((void*)_damageInstances[frame].Mapped, 65)[_damageCount] = instance;
+        new Span<MeshInstance>((void*)_damageInstances[frame].Mapped, DynamicDraws)[_damageCount] = instance;
         _damageRanges[_damageCount++] = new MeshRange(_damageUsed, count, 0);
         _damageUsed += count;
     }

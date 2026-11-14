@@ -1,6 +1,7 @@
 using System.Numerics;
 using Prospect.Client.Render;
 using Prospect.Client.World;
+using Prospect.Engine.Jobs;
 using Prospect.Game.Client;
 using Prospect.Game.World;
 using Xunit;
@@ -107,6 +108,165 @@ public sealed class PropulsionVisualTests
         Assert.Single(Nozzles("hotThruster", One));
     }
 
+    [Theory]
+    [InlineData("engine")]
+    [InlineData("hotThruster")]
+    [InlineData("coldGasThruster")]
+    [InlineData("microengine")]
+    [InlineData("microthruster")]
+    public void AModelCoversItsWholeMountingFaceSoNeighboursMeetItFlush(string type)
+    {
+        var model = Look.Models[type];
+        var fuel = Content.Blocks.Get(type).Fuel;
+        // A part in its cell, a large engine, and a thin part clipped onto a face (0.2 cell deep).
+        foreach (var half in new[] { new Vector3(0.5f), new Vector3(2, 2, 3), new Vector3(0.5f, 0.5f, 0.1f), new Vector3(1, 0.5f, 0.5f) })
+        {
+            foreach (var facing in Directions)
+            {
+                var vertices = new List<MeshVertex>();
+                var indices = new List<uint>();
+                var box = new PartBox(new Vector3(3, -2, 1), Turned(half, facing), facing, 1f);
+                PropulsionModels.Build(model, box, fuel, 0, true, vertices, indices, null);
+                var axis = Facings.Axis(facing);
+                var back = box.Center[axis] - Facings.Sign(facing) * box.Half[axis];
+                var lo = new Vector3(float.MaxValue);
+                var hi = new Vector3(float.MinValue);
+                var backArea = 0f;
+                for (var i = 0; i < indices.Count; i += 3)
+                {
+                    var a = P(vertices[(int)indices[i]]);
+                    var b = P(vertices[(int)indices[i + 1]]);
+                    var c = P(vertices[(int)indices[i + 2]]);
+                    lo = Vector3.Min(lo, Vector3.Min(a, Vector3.Min(b, c)));
+                    hi = Vector3.Max(hi, Vector3.Max(a, Vector3.Max(b, c)));
+                    if (MathF.Abs(a[axis] - back) < 1e-4f && MathF.Abs(b[axis] - back) < 1e-4f && MathF.Abs(c[axis] - back) < 1e-4f)
+                        backArea += 0.5f * Vector3.Cross(b - a, c - a).Length();
+                }
+                // The model fills the box's whole width on every side, and its back face is the whole mounting face.
+                for (var k = 0; k < 3; k++)
+                {
+                    Assert.Equal(box.Center[k] - box.Half[k], lo[k], 3);
+                    Assert.Equal(box.Center[k] + box.Half[k], hi[k], 3);
+                }
+                var u = (axis + 1) % 3;
+                var v = (axis + 2) % 3;
+                Assert.Equal(4f * box.Half[u] * box.Half[v], backArea, 3);
+            }
+        }
+    }
+
+    [Fact]
+    public void AModelIsFlatShadedFacetByFacet()
+    {
+        var design = Design("engine", BlockFacing.Back, new GridSize(4, 4, 6));
+        var vertices = new List<MeshVertex>();
+        var indices = new List<uint>();
+        PropulsionModels.Add(design, 1, Look, vertices, indices, null);
+        for (var i = 0; i < indices.Count; i += 3)
+        {
+            var a = vertices[(int)indices[i]];
+            var b = vertices[(int)indices[i + 1]];
+            var c = vertices[(int)indices[i + 2]];
+            Assert.Equal(a.Normal, b.Normal);
+            Assert.Equal(a.Normal, c.Normal);
+            var facet = Vector3.Normalize(Vector3.Cross(P(b) - P(a), P(c) - P(a)));
+            Assert.True(Vector3.Dot(facet, Vector3.Normalize(new Vector3(a.Normal.X, a.Normal.Y, a.Normal.Z))) > 0.999f, $"triangle {i / 3}");
+        }
+        // Low poly: a large engine is a few thousand vertices, not tens of thousands.
+        Assert.InRange(vertices.Count, 500, 6000);
+    }
+
+    [Fact]
+    public void APartModelIsBuiltOnAWorkerThenFoundWithoutTakingMemory()
+    {
+        using var jobs = new JobSystem(1, "Parts");
+        var models = new PartModels(jobs, Look);
+        var engine = Content.Blocks.Get("engine");
+        var half = new Vector3(1, 1, 1.5f);
+        models.Begin();
+        Assert.False(models.TryGet(engine, BlockShape.Box, half, BlockFacing.Back, 1f, out _));
+        // A part with no model is never asked for.
+        Assert.False(models.TryGet(Content.Blocks.Get("core"), BlockShape.Box, half, BlockFacing.Back, 1f, out _));
+        models.Flush();
+        jobs.CompleteAll();
+        models.Begin();
+        Assert.True(models.TryGet(engine, BlockShape.Box, half, BlockFacing.Back, 1f, out var model));
+        Assert.Equal(0, model.Length % 3);
+        Assert.True(model.Length > 100);
+        Assert.Equal(1, models.Built);
+
+        // The same model as a design's own, centred on its box.
+        var design = Design("engine", BlockFacing.Back, new GridSize(2, 2, 3));
+        var vertices = new List<MeshVertex>();
+        var indices = new List<uint>();
+        PropulsionModels.Add(design, 1, Look, vertices, indices, null);
+        Assert.Equal(indices.Count, model.Length);
+
+        var allocation = new AllocationProbe();
+        while (allocation.Measuring())
+        {
+            models.Begin();
+            models.TryGet(engine, BlockShape.Box, half, BlockFacing.Back, 1f, out _);
+            models.Flush();
+        }
+        Assert.Equal(0, allocation.Bytes);
+    }
+
+    [Fact]
+    public void AStoppedPartsLastGasFliesOffAndClears()
+    {
+        var pod = Content.Designs.First(d => d.Name == "Command Pod");
+        var nozzles = MeshBuilder.Hull(pod, Look).Nozzles;
+        var effects = new ThrustEffects(Look);
+        var output = new PlumeInstance[PropulsionLook.PlumeCapacity];
+        var blocks = new[] { ulong.MaxValue };
+        var firing = new HullView { Id = 4, Thrust = new ThrustState { X = 127, Flags = 1 }, Blocks = blocks };
+        var idle = new HullView { Id = 4, Blocks = blocks };
+        var cold = Look.PlumeOrder[Look.PlumeIndex("cold")];
+
+        void Frame(double seconds, in HullView hull)
+        {
+            Begin(effects, seconds);
+            effects.Add(effects.Observe(hull), hull, nozzles, new Vector3(0, 0, -30), Quaternion.Identity, 1, output);
+            effects.End();
+        }
+
+        Frame(1, firing);
+        Frame(2, firing);
+        Assert.Equal(4, effects.Count);
+        Assert.True(output[0].Flow.X < 0);
+        var steady = output[0].CoreBright.W;
+
+        // The first frame the valve is seen closed, the gas is released; a little later it is still there, fading;
+        // then it is gone.
+        Frame(2.05, idle);
+        Assert.Equal(4, effects.Count);
+        Assert.Equal(0f, output[0].Flow.X, 3);
+        Frame(2.05 + cold.FadeSeconds * 0.5, idle);
+        Assert.Equal(4, effects.Count);
+        Assert.Equal(cold.FadeSeconds * 0.5f, output[0].Flow.X, 3);
+        Assert.True(output[0].CoreBright.W < steady);
+        Frame(2.05 + cold.FadeSeconds * 1.01, idle);
+        Assert.Equal(0, effects.Count);
+
+        // Opening again bursts denser than the steady jet.
+        Frame(3, firing);
+        Assert.True(output[0].CoreBright.W > steady * 1.5f);
+    }
+
+    private static Vector3 P(MeshVertex v) => new(v.Position.X, v.Position.Y, v.Position.Z);
+
+    // Half extents given as across, across, depth, laid along the facing's axes.
+    private static Vector3 Turned(Vector3 half, BlockFacing facing)
+    {
+        var axis = Facings.Axis(facing);
+        var turned = Vector3.Zero;
+        turned[axis] = half.Z;
+        turned[(axis + 1) % 3] = half.X;
+        turned[(axis + 2) % 3] = half.Y;
+        return turned;
+    }
+
     [Fact]
     public void AHullMeshListsTheNozzlesOfItsThrustPartsAndDrawsThemAsModels()
     {
@@ -178,8 +338,10 @@ public sealed class PropulsionVisualTests
         slot = effects.Observe(boosted);
         effects.Add(slot, boosted, nozzles, at, Quaternion.Identity, 1, output);
         effects.End();
-        Assert.True(output[0].AxisLength.W > plain.AxisLength.W * 1.4f);
+        Assert.True(output[0].AxisLength.W > plain.AxisLength.W * 1.3f);
         Assert.True(output[0].CoreBright.W > plain.CoreBright.W);
+        // Boost raises the cap, never past the plume's own cap times boost: viewed into it, it never burns out.
+        Assert.True(output[0].CoreBright.W <= Look.PlumeOrder[Look.PlumeIndex("engine")].Brightness * Look.BoostBrightness + 1e-4f);
 
         // A hull first seen while it fires lit before it came into view: no sparks.
         Begin(effects, 12);

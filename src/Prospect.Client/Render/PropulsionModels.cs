@@ -7,10 +7,11 @@ using Prospect.Game.World;
 namespace Prospect.Client.Render;
 
 /// <summary>
-/// The proportions of one thrust part's model, from <c>content/visuals/propulsion.json</c>. Every length is a share
-/// of something the block already has, so one entry fits the part at any size: a face is divided into nozzles, each
-/// nozzle's exit follows the face it sits on, and the nozzle's length follows its exit, never the block's depth. A
-/// deeper block gets a longer housing behind the same nozzle.
+/// The proportions of one thrust part's low-poly model, from <c>content/visuals/propulsion.json</c>. Every length is
+/// a share of something the part's box already has, so one entry fits the part at any size: the face is divided into
+/// nozzles, each nozzle's exit follows its share of the face, and its length follows its exit, never the box's depth.
+/// A deeper box gets a longer body behind the same nozzle. The body always covers the whole mounting face and runs
+/// out to the box's sides, so neighbours meet it flush; only the nozzles are narrower than the box.
 /// </summary>
 internal sealed class PropulsionModelLook
 {
@@ -23,8 +24,23 @@ internal sealed class PropulsionModelLook
     /// </summary>
     public float PerCell { get; init; }
 
-    /// <summary>The housing's width as a share of the face.</summary>
-    public float HousingShare { get; init; }
+    /// <summary>The square mount block at the back, as a share of the body's depth; the rest of the body is housing.</summary>
+    public float MountDepth { get; init; }
+
+    /// <summary>How far the housing's corners are cut, as a share of the smaller half side: 0 keeps it square, above 0 makes it an octagon.</summary>
+    public float HousingChamfer { get; init; }
+
+    /// <summary>The chamfer round the body's front edges, as a share of the smaller half side.</summary>
+    public float Bevel { get; init; }
+
+    /// <summary>Panel seams: shallow grooves round the housing (0 to 3).</summary>
+    public int Seams { get; init; }
+
+    /// <summary>Pipes along the housing's cut corners (0 to 4); they need a chamfer.</summary>
+    public int Pipes { get; init; }
+
+    /// <summary>Gusset brackets round each nozzle's collar (0 or 4); they need a collar.</summary>
+    public int Brackets { get; init; }
 
     /// <summary>A nozzle's exit radius as a share of half its square of the face.</summary>
     public float ExitShare { get; init; }
@@ -32,26 +48,22 @@ internal sealed class PropulsionModelLook
     /// <summary>The throat's radius as a share of the exit's.</summary>
     public float ThroatShare { get; init; }
 
-    /// <summary>The nozzle's length in exit radii, and the most of the block's depth it may take.</summary>
+    /// <summary>The nozzle's length in exit radii, and the most of the box's depth it may take.</summary>
     public float NozzleLength { get; init; }
     public float MaxNozzleDepth { get; init; }
 
     /// <summary>How fast the bell opens: 1 is a straight cone, above 1 opens quickly from the throat, then runs straight.</summary>
     public float BellCurve { get; init; }
 
-    /// <summary>The collar between housing and nozzle: its length in exit radii and its radius in throat radii.</summary>
+    /// <summary>The collar between body and nozzle: its length in exit radii and its radius in throat radii.</summary>
     public float CollarLength { get; init; }
     public float CollarRadius { get; init; }
 
     /// <summary>The thickness of the nozzle's wall, in exit radii.</summary>
     public float Lip { get; init; }
 
-    /// <summary>A mounting plate the nozzles stand on: its thickness as a share of the block's depth (0 for none) and its width as a share of the face.</summary>
-    public float PlateThickness { get; init; }
-    public float PlateShare { get; init; }
-
-    /// <summary>Sides around a nozzle and rings along it.</summary>
-    public int Segments { get; init; }
+    /// <summary>Facets around a nozzle, and rings along its bell: kept low, the model is low poly.</summary>
+    public int Sides { get; init; }
     public int Rings { get; init; }
 
     /// <summary>
@@ -61,17 +73,24 @@ internal sealed class PropulsionModelLook
     public float HousingShade { get; init; }
     public float NozzleShade { get; init; }
     public float ThroatShade { get; init; }
+    public float DetailShade { get; init; }
+
+    /// <summary>The index of <see cref="Plume"/> in <see cref="PropulsionLook.PlumeOrder"/>, set when the look loads.</summary>
+    internal int PlumeSlot { get; set; } = -1;
 
     internal void Check(string path, string id)
     {
         static bool Share(float v) => v > 0 && v <= 1;
         static bool Shade(float v) => v is >= 0 and < 1;
-        if (!(PerCell is >= 0 and <= 4) || !Share(HousingShare) || !Share(ExitShare) || !(ThroatShare > 0 && ThroatShare < 1)
-            || !(NozzleLength is > 0 and <= 8) || !Share(MaxNozzleDepth) || !(BellCurve is >= 1 and <= 6)
+        if (!(PerCell is >= 0 and <= 4) || !(MountDepth is >= 0 and <= 1) || !(HousingChamfer is >= 0 and <= 0.45f)
+            || !(Bevel is >= 0 and <= 0.3f) || Seams is < 0 or > 3 || Pipes is < 0 or > 4 || Brackets is not (0 or 4)
+            || !Share(ExitShare) || !(ThroatShare > 0 && ThroatShare < 1) || !(NozzleLength is > 0 and <= 8)
+            || !Share(MaxNozzleDepth) || MaxNozzleDepth > 0.9f || !(BellCurve is >= 1 and <= 6)
             || !(CollarLength is >= 0 and <= 2) || !(CollarRadius is >= 1 and <= 2.5f) || !(Lip is >= 0 and <= 0.3f)
-            || !(PlateThickness is >= 0 and <= 0.5f) || !(PlateShare is >= 0 and <= 1) || (PlateThickness > 0 && PlateShare <= 0)
-            || MaxNozzleDepth + PlateThickness > 0.85f || Segments is < 6 or > 48 || Rings is < 1 or > 24
-            || !Shade(HousingShade) || !Shade(NozzleShade) || !Shade(ThroatShade))
+            // The throat ring and the brackets reach 1.6 collar radii, which must stay inside the nozzle's square.
+            || ThroatShare * CollarRadius * 1.6f > 1f
+            || Sides is < 6 or > 24 || Rings is < 1 or > 12
+            || !Shade(HousingShade) || !Shade(NozzleShade) || !Shade(ThroatShade) || !Shade(DetailShade))
             throw new InvalidDataException($"{path}: model {id} is out of range");
     }
 }
@@ -79,15 +98,15 @@ internal sealed class PropulsionModelLook
 /// <summary>How one kind of plume looks and moves, from <c>content/visuals/propulsion.json</c>; lengths are in exit radii.</summary>
 internal sealed class PlumeLook
 {
-    /// <summary><c>flame</c>: a hot, glowing plume; <c>puff</c>: cold gas, pale and quickly gone.</summary>
+    /// <summary><c>flame</c>: hot exhaust, light of its own; <c>puff</c>: cold gas, lit only by the star.</summary>
     public string Kind { get; init; } = "";
 
-    /// <summary>Colours of the hot core, the edge and ignition sparks, in scene light per unit of brightness.</summary>
+    /// <summary>Colours of the core, the edge and ignition sparks.</summary>
     public float[] Core { get; init; } = [];
     public float[] Edge { get; init; } = [];
     public float[] Spark { get; init; } = [];
 
-    /// <summary>The most scene light the plume reaches.</summary>
+    /// <summary>The most scene light the plume reaches, however long the view runs through it: a flame never burns out to flat white.</summary>
     public float Brightness { get; init; }
 
     /// <summary>Length at full throttle in exit radii, and the share of it shown at the smallest throttle.</summary>
@@ -97,11 +116,20 @@ internal sealed class PlumeLook
     /// <summary>How much wider than the exit the plume is at its end, in exit radii.</summary>
     public float Spread { get; init; }
 
+    /// <summary>A flame's opening: the exit radii in which it reaches most of its spread. A vacuum plume opens at once.</summary>
+    public float Opening { get; init; }
+
+    /// <summary>How far the bright core reaches past the exit, in exit radii.</summary>
+    public float CoreLength { get; init; }
+
     /// <summary>How much the brightness flickers, and how strongly the plume's body is broken up, both 0 to 1.</summary>
     public float Flicker { get; init; }
     public float Turbulence { get; init; }
 
-    /// <summary>How bright the shock diamonds along the core are (0: none) and how far apart, in exit radii.</summary>
+    /// <summary>How fast the gas streams out along the plume, in exit radii a second.</summary>
+    public float FlowSpeed { get; init; }
+
+    /// <summary>How bright the first shock node is (0: none) and how far past the exit, in exit radii.</summary>
     public float Diamonds { get; init; }
     public float DiamondSpacing { get; init; }
 
@@ -113,9 +141,12 @@ internal sealed class PlumeLook
     public int Sparks { get; init; }
     public float SparkSpeed { get; init; }
 
-    /// <summary>A puff's extra strength the moment it starts, and the seconds it takes to settle to a steady jet.</summary>
+    /// <summary>A puff's extra density the moment its valve opens, and the seconds it takes to settle to a steady jet.</summary>
     public float Burst { get; init; }
     public float BurstSeconds { get; init; }
+
+    /// <summary>Seconds the last gas takes to clear once the part stops firing: it flies off down the plume.</summary>
+    public float FadeSeconds { get; init; }
 
     /// <summary>True for a cold gas puff.</summary>
     public bool IsPuff => Kind == "puff";
@@ -124,11 +155,12 @@ internal sealed class PlumeLook
     {
         static bool Colour(float[] c) => c.Length == 3 && c[0] is >= 0 and <= 4 && c[1] is >= 0 and <= 4 && c[2] is >= 0 and <= 4;
         if (Kind is not ("flame" or "puff") || !Colour(Core) || !Colour(Edge) || !Colour(Spark)
-            || !(Brightness is > 0 and <= 40) || !(Length is > 0 and <= 40) || !(MinLength is > 0 and <= 1) || !(Spread is >= 0 and <= 6)
+            || !(Brightness is > 0 and <= 40) || !(Length is > 0 and <= 40) || !(MinLength is > 0 and <= 1) || !(Spread is >= 0 and <= 8)
+            || !(Opening is > 0 and <= 20) || !(CoreLength is > 0 and <= 10) || !(FlowSpeed is >= 0 and <= 200)
             || !(Flicker is >= 0 and <= 1) || !(Turbulence is >= 0 and <= 1) || !(Diamonds is >= 0 and <= 4) || !(DiamondSpacing is > 0 and <= 10)
             || !(SparkSeconds is >= 0 and <= 1) || !(GrowSeconds is > 0 and <= 2) || Sparks is < 0 or > PropulsionLook.MaxSparks
             || !(SparkSpeed is >= 0 and <= 200) || (Sparks > 0 && !(SparkSeconds > 0 && SparkSpeed > 0))
-            || !(Burst is >= 0 and <= 10) || !(BurstSeconds is > 0 and <= 2))
+            || !(Burst is >= 0 and <= 10) || !(BurstSeconds is > 0 and <= 2) || !(FadeSeconds is >= 0 and <= 2))
             throw new InvalidDataException($"{path}: plume {id} is out of range");
     }
 }
@@ -148,7 +180,7 @@ internal sealed class PropulsionLook
     public Dictionary<string, PropulsionModelLook> Models { get; init; } = [];
     public Dictionary<string, PlumeLook> Plumes { get; init; } = [];
 
-    /// <summary>How much longer and brighter boost makes a plume.</summary>
+    /// <summary>How much longer and brighter boost makes a flame; the brightness still stays under the plume's cap times this.</summary>
     public float BoostLength { get; init; }
     public float BoostBrightness { get; init; }
 
@@ -175,16 +207,17 @@ internal sealed class PropulsionLook
             ?? throw new InvalidDataException($"{path}: empty");
         foreach (var (id, plume) in look.Plumes)
             plume.Check(path, id);
+        look.PlumeOrder = [.. look.Plumes.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => p.Value)];
         foreach (var (id, model) in look.Models)
         {
             model.Check(path, id);
             if (!look.Plumes.ContainsKey(model.Plume))
                 throw new InvalidDataException($"{path}: model {id} names plume {model.Plume}, which is not there");
+            model.PlumeSlot = look.PlumeIndex(model.Plume);
         }
         if (!(look.BoostLength is >= 1 and <= 4) || !(look.BoostBrightness is >= 1 and <= 4)
             || look.MaxPlumes is < 1 or > PlumeCapacity || !(look.MinPixels is >= 0 and <= 64))
             throw new InvalidDataException($"{path}: boost is 1 to 4, maxPlumes 1 to {PlumeCapacity}, minPixels 0 to 64");
-        look.PlumeOrder = [.. look.Plumes.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => p.Value)];
         return look;
     }
 
@@ -214,9 +247,18 @@ internal readonly record struct ThrustNozzle(
 );
 
 /// <summary>
-/// Builds the models of thrust parts from a block's box and facing: a housing, then a collar, then bell nozzles
-/// (engines and hot thrusters) or a plate of small cones (cold gas), the nozzles pointing along the facing. Runs where
-/// hull meshes are built, on a worker; never in a frame.
+/// The box a thrust part's model fills: its centre and half extents in the hull's (or the draft's) frame, the way its
+/// nozzles point and the size of one grid cell. A part in a grid cell and a thin part mounted on a face are both just
+/// a box here, so the model is the same function of the box for either.
+/// </summary>
+internal readonly record struct PartBox(Vector3 Center, Vector3 Half, BlockFacing Facing, float CellSize);
+
+/// <summary>
+/// Builds low-poly models of thrust parts from their box and facing: a square mount block covering the whole mounting
+/// face, an octagonal housing with panel seams, pipes and a bevelled front (engines, hot thrusters), or a bevelled RCS
+/// block (cold gas), then a collar with gusset brackets, a throat ring and faceted bell nozzles pointing along the
+/// facing. Every facet is flat shaded: it has vertices of its own. Runs where hull meshes are built, on a worker;
+/// never in a frame.
 /// </summary>
 internal static class PropulsionModels
 {
@@ -226,9 +268,13 @@ internal static class PropulsionModels
     /// </summary>
     public static float Tag(float shade) => shade <= 0 ? 1f : 2f + shade;
 
+    /// <summary>The model look of a block type, or null for a type drawn as its plain shape.</summary>
+    public static PropulsionModelLook? ModelOf(BlockType type, BlockShape shape, PropulsionLook look) =>
+        shape == BlockShape.Box && type.Thrust > 0 && look.Models.TryGetValue(type.Id, out var model) ? model : null;
+
     /// <summary>The model look of a block, or null for a block drawn as its plain shape.</summary>
     public static PropulsionModelLook? ModelOf(HullDesign design, int block, PropulsionLook look) =>
-        design.Shapes[block] == BlockShape.Box && design.Types[block].Thrust > 0 && look.Models.TryGetValue(design.Types[block].Id, out var model) ? model : null;
+        ModelOf(design.Types[block], design.Shapes[block], look);
 
     /// <summary>
     /// Adds the model of <paramref name="block"/> to the triangle lists, and its nozzles to <paramref name="nozzles"/>
@@ -239,17 +285,31 @@ internal static class PropulsionModels
         var model = ModelOf(design, block, look);
         if (model is null)
             return false;
-        var box = design.Boxes[block];
+        var facing = design.Boxes[block].Facing;
+        // The back face is left out where a neighbour covers it.
+        var back = (design.ExteriorFaces[block] & (1 << (byte)Facings.Opposite(facing))) != 0;
+        var box = new PartBox(design.BlockOffsets[block], design.BlockHalfExtents[block], facing, design.BlockSize > 0 ? design.BlockSize : 1f);
+        Build(model, box, design.Types[block].Fuel, block, back, vertices, indices, nozzles);
+        return true;
+    }
+
+    /// <summary>
+    /// Adds the model of one part filling <paramref name="box"/> to the triangle lists, and its nozzles, numbered on
+    /// from what <paramref name="nozzles"/> holds, when given. A pure function of the box, the look and the cell size.
+    /// </summary>
+    public static void Build(PropulsionModelLook model, in PartBox box, FuelKind fuel, int block, bool back, List<MeshVertex> vertices, List<uint> indices, List<ThrustNozzle>? nozzles)
+    {
         var facing = box.Facing;
         var axis = Facings.Axis(facing);
         var u = (axis + 1) % 3;
         var v = (axis + 2) % 3;
-        var half = design.BlockHalfExtents[block];
-        var frame = new Frame(design.BlockOffsets[block], Facings.Vector(facing), Unit(u), Unit(v), half[axis]);
+        var half = box.Half;
+        var g = new Geometry(vertices, indices, new Frame(box.Center, Facings.Vector(facing), Unit(u), Unit(v), half[axis]));
         var hu = half[u];
         var hv = half[v];
         var depth = 2f * half[axis];
-        var cells = design.BlockSize > 0 ? design.BlockSize : 1f;
+        var cells = box.CellSize > 0 ? box.CellSize : 1f;
+        var small = MathF.Min(hu, hv);
 
         // The face is split into nozzles: by cells for a cluster, otherwise into squares of the shorter side.
         int nu, nv;
@@ -260,55 +320,234 @@ internal static class PropulsionModels
         }
         else
         {
-            var side = MathF.Min(hu, hv);
-            nu = Math.Clamp((int)MathF.Round(hu / side), 1, 8);
-            nv = Math.Clamp((int)MathF.Round(hv / side), 1, 8);
+            nu = Math.Clamp((int)MathF.Round(hu / small), 1, 8);
+            nv = Math.Clamp((int)MathF.Round(hv / small), 1, 8);
         }
-        var share = model.PlateThickness > 0 ? MathF.Max(model.PlateShare, model.HousingShare) : model.HousingShare;
-        var pitchU = 2f * hu * share / nu;
-        var pitchV = 2f * hv * share / nv;
+        var pitchU = 2f * hu / nu;
+        var pitchV = 2f * hv / nv;
         var exit = 0.5f * MathF.Min(pitchU, pitchV) * model.ExitShare / (1f + model.Lip);
         var nozzleLength = MathF.Min(model.NozzleLength * exit, model.MaxNozzleDepth * depth);
-        var collar = MathF.Min(model.CollarLength * exit, 0.1f * depth);
-        var plate = model.PlateThickness * depth;
-        // Everything behind the nozzles is housing, so a deeper block grows its housing and keeps its nozzle.
+        var collar = MathF.Min(model.CollarLength * exit, 0.12f * depth);
+        // Everything behind the nozzles is body, so a deeper box grows its body and keeps its nozzle.
         var nozzleStart = depth - nozzleLength;
-        var plateStart = nozzleStart - collar - plate;
-        var housingEnd = MathF.Max(plateStart, 0.05f * depth);
+        var bodyEnd = MathF.Max(nozzleStart - collar, 0.05f * depth);
+        collar = nozzleStart - bodyEnd;
+        var mountEnd = MathF.Min(model.MountDepth * bodyEnd, bodyEnd);
+        // A housing too short to read is left out: the mount block runs on to the front.
+        var housing = model.HousingChamfer > 0 && bodyEnd - mountEnd > 0.12f * small;
+        if (!housing)
+            mountEnd = bodyEnd;
+        var bevel = MathF.Min(model.Bevel * small, 0.45f * (bodyEnd - (housing ? mountEnd : 0f)));
 
-        var housing = PropulsionModels.Tag(model.HousingShade);
-        var metal = PropulsionModels.Tag(model.NozzleShade);
-        var throat = PropulsionModels.Tag(model.ThroatShade);
-        var backCovered = (design.ExteriorFaces[block] & (1 << (byte)Facings.Opposite(facing))) == 0;
-        AddBox(vertices, indices, frame, hu * model.HousingShare, hv * model.HousingShare, 0, housingEnd, housing, !backCovered);
-        if (plate > 0)
-            AddBox(vertices, indices, frame, hu * model.PlateShare, hv * model.PlateShare, housingEnd, housingEnd + plate, housing, true);
+        var plating = Tag(model.HousingShade);
+        var metal = Tag(model.NozzleShade);
+        var dark = Tag(model.ThroatShade);
+        var detail = Tag(model.DetailShade);
 
-        var throatRadius = exit * model.ThroatShare;
+        // The mount block: the whole face, so it meets every neighbour flush.
+        Span<Vector2> rect = stackalloc Vector2[4];
+        Span<Vector2> inset = stackalloc Vector2[4];
+        Rectangle(rect, hu, hv);
+        if (back)
+            g.Cap(rect, Vector2.Zero, 0f, -1f, plating);
+        if (housing)
+        {
+            g.Loft(rect, 0f, rect, mountEnd, Vector2.Zero, plating, 1f);
+            g.Cap(rect, Vector2.Zero, mountEnd, 1f, plating);
+            AddHousing(ref g, model, hu, hv, small, mountEnd, bodyEnd, bevel, cells, plating, detail);
+        }
+        else
+        {
+            g.Loft(rect, 0f, rect, bodyEnd - bevel, Vector2.Zero, plating, 1f);
+            Rectangle(inset, hu - bevel, hv - bevel);
+            if (bevel > 0)
+                g.Loft(rect, bodyEnd - bevel, inset, bodyEnd, Vector2.Zero, plating, 1f);
+            g.Cap(inset, Vector2.Zero, bodyEnd, 1f, plating);
+        }
+
+        var throat = exit * model.ThroatShare;
         var wall = exit * model.Lip;
-        var plume = look.PlumeIndex(model.Plume);
-        var fuel = design.Types[block].Fuel;
+        var collarRadius = throat * model.CollarRadius;
         for (var i = 0; i < nu; i++)
         {
             for (var j = 0; j < nv; j++)
             {
-                var x = (i + 0.5f) * pitchU - hu * share;
-                var y = (j + 0.5f) * pitchV - hv * share;
-                if (collar > 0)
-                    AddCollar(vertices, indices, frame, x, y, housingEnd + plate, nozzleStart, throatRadius * model.CollarRadius, metal, model.Segments);
-                AddNozzle(vertices, indices, frame, x, y, nozzleStart, depth, throatRadius, exit, wall, model, metal, throat);
-                nozzles?.Add(new ThrustNozzle(block, fuel, facing, frame.At(x, y, depth), exit, nozzleLength, plume, nozzles.Count));
+                var at = new Vector2((i + 0.5f) * pitchU - hu, (j + 0.5f) * pitchV - hv);
+                if (collar > 1e-5f)
+                    AddCollar(ref g, model, at, bodyEnd, nozzleStart, collarRadius, throat, metal, detail);
+                AddNozzle(ref g, model, at, nozzleStart, depth, throat, exit, wall, collarRadius, collar > 1e-5f, metal, dark, detail);
+                nozzles?.Add(new ThrustNozzle(block, fuel, facing, g.F.At(at.X, at.Y, depth), exit, nozzleLength, model.PlumeSlot, nozzles.Count));
             }
         }
-        return true;
     }
 
-    /// <summary>A block's own frame: x and y across its nozzle face, z from its back face (0) out along its facing.</summary>
-    private readonly struct Frame(Vector3 center, Vector3 n, Vector3 u, Vector3 v, float halfDepth)
+    // The housing: an octagon from the mount block to the front, split by shallow seams, with pipes along its cut
+    // corners and a bevelled front edge.
+    private static void AddHousing(ref Geometry g, PropulsionModelLook model, float hu, float hv, float small, float z0, float z1, float bevel, float cells, float plating, float detail)
     {
-        public readonly Vector3 N = n, U = u, V = v;
-        public Vector3 At(float x, float y, float z) => center + U * x + V * y + N * (z - halfDepth);
-        public Vector3 Dir(float x, float y, float z) => U * x + V * y + N * z;
+        var chamfer = model.HousingChamfer * small;
+        Span<Vector2> outer = stackalloc Vector2[8];
+        Span<Vector2> groove = stackalloc Vector2[8];
+        Span<Vector2> front = stackalloc Vector2[8];
+        Octagon(outer, hu, hv, chamfer);
+        var depth = MathF.Min(0.03f * cells, 0.05f * small);
+        Octagon(groove, hu - depth, hv - depth, MathF.Max(chamfer - depth * (2f - MathF.Sqrt(2f)), 1e-4f));
+        Octagon(front, hu - bevel, hv - bevel, MathF.Max(chamfer - bevel * (2f - MathF.Sqrt(2f)), 1e-4f));
+
+        var end = z1 - bevel;
+        var length = end - z0;
+        var seams = model.Seams;
+        var width = MathF.Min(0.035f * cells, length / (4f * (seams + 1)));
+        var panel = (length - seams * width) / (seams + 1);
+        var z = z0;
+        for (var k = 0; k <= seams; k++)
+        {
+            g.Loft(outer, z, outer, z + panel, Vector2.Zero, plating, 1f);
+            z += panel;
+            if (k == seams)
+                break;
+            g.Annulus(outer, groove, Vector2.Zero, z, 1f, plating);
+            g.Loft(groove, z, groove, z + width, Vector2.Zero, plating, 1f);
+            g.Annulus(outer, groove, Vector2.Zero, z + width, -1f, plating);
+            z += width;
+        }
+        if (bevel > 0)
+            g.Loft(outer, end, front, z1, Vector2.Zero, plating, 1f);
+        g.Cap(front, Vector2.Zero, z1, 1f, plating);
+
+        // Pipes lie in the cut corners, on the chamfer, so they fill some of the corner and stay inside the box.
+        var pipe = 0.26f * chamfer;
+        var inward = 0.5f * (chamfer - pipe * MathF.Sqrt(2f));
+        Span<Vector2> ring = stackalloc Vector2[6];
+        for (var k = 0; k < model.Pipes; k++)
+        {
+            var sx = k is 0 or 2 ? 1f : -1f;
+            var sy = k is 0 or 3 ? 1f : -1f;
+            var centre = new Vector2(sx * (hu - inward), sy * (hv - inward));
+            Polygon(ring, centre, pipe, 0f);
+            g.Loft(ring, z0, ring, end, centre, detail, 1f);
+            g.Cap(ring, centre, end, 1f, detail);
+        }
+    }
+
+    // A faceted collar from the body to the nozzle's throat, closed round the throat, with four gusset brackets.
+    private static void AddCollar(ref Geometry g, PropulsionModelLook model, Vector2 at, float z0, float z1, float radius, float throat, float metal, float detail)
+    {
+        var sides = model.Sides;
+        Span<Vector2> outer = stackalloc Vector2[sides];
+        Span<Vector2> inner = stackalloc Vector2[sides];
+        Polygon(outer, at, radius, MathF.PI / sides);
+        Polygon(inner, at, throat, MathF.PI / sides);
+        g.Loft(outer, z0, outer, z1, at, metal, 1f);
+        g.Annulus(outer, inner, at, z1, 1f, metal);
+        if (model.Brackets == 0)
+            return;
+        // A gusset: a wedge standing on the body against the collar, deep at its foot, thin at its top.
+        Span<Vector2> foot = stackalloc Vector2[4];
+        Span<Vector2> top = stackalloc Vector2[4];
+        var w = 0.2f * radius;
+        var height = 0.8f * (z1 - z0);
+        for (var k = 0; k < 4; k++)
+        {
+            var dir = k switch { 0 => Vector2.UnitX, 1 => Vector2.UnitY, 2 => -Vector2.UnitX, _ => -Vector2.UnitY };
+            var across = new Vector2(-dir.Y, dir.X);
+            var near = at + dir * (0.9f * radius);
+            Gusset(foot, near, dir, across, 0.7f * radius, w);
+            Gusset(top, near, dir, across, 0.12f * radius, w);
+            var centre = near + dir * (0.35f * radius);
+            g.Loft(foot, z0, top, z0 + height, centre, detail, 1f);
+            g.Cap(top, centre, z0 + height, 1f, detail);
+        }
+    }
+
+    // A faceted bell: a throat ring round its narrow end, the outer and inner walls in a few rings, the lip, and the
+    // dark throat deep inside.
+    private static void AddNozzle(ref Geometry g, PropulsionModelLook model, Vector2 at, float z0, float z1, float throat, float exit, float wall, float collarRadius, bool onCollar, float metal, float dark, float detail)
+    {
+        var sides = model.Sides;
+        var rings = model.Rings;
+        var turn = MathF.PI / sides;
+        Span<Vector2> a = stackalloc Vector2[sides];
+        Span<Vector2> b = stackalloc Vector2[sides];
+        Span<Vector2> c = stackalloc Vector2[sides];
+        var length = z1 - z0;
+        for (var r = 0; r < rings; r++)
+        {
+            var t0 = (float)r / rings;
+            var t1 = (float)(r + 1) / rings;
+            var r0 = Bell(throat, exit, model.BellCurve, t0);
+            var r1 = Bell(throat, exit, model.BellCurve, t1);
+            Polygon(a, at, r0 + wall, turn);
+            Polygon(b, at, r1 + wall, turn);
+            g.Loft(a, z0 + length * t0, b, z0 + length * t1, at, metal, 1f);
+            Polygon(a, at, r0, turn);
+            Polygon(b, at, r1, turn);
+            // The inside of the bell is darker, scorched.
+            g.Loft(a, z0 + length * t0, b, z0 + length * t1, at, Tag(model.NozzleShade * 0.55f), -1f);
+        }
+        Polygon(a, at, exit + wall, turn);
+        Polygon(b, at, exit, turn);
+        g.Annulus(a, b, at, z1, 1f, metal);
+
+        // The throat: dark, a little way into the bell so it never meets the body's face.
+        var deep = 0.03f;
+        Polygon(a, at, Bell(throat, exit, model.BellCurve, deep), turn);
+        g.Cap(a, at, z0 + length * deep, 1f, dark);
+
+        // The throat ring: a heavier band round the bell's narrow end.
+        var reach = 0.1f;
+        var ring = MathF.Max(collarRadius * 1.12f, (Bell(throat, exit, model.BellCurve, reach) + wall) * 1.08f);
+        var ringStart = onCollar ? z0 - 0.3f * MathF.Min(length * reach * 2f, collarRadius) : z0;
+        var ringEnd = z0 + length * reach;
+        Polygon(a, at, ring, turn);
+        Polygon(b, at, Bell(throat, exit, model.BellCurve, reach) + wall, turn);
+        Polygon(c, at, onCollar ? collarRadius : throat + wall, turn);
+        g.Loft(a, ringStart, a, ringEnd, at, detail, 1f);
+        g.Annulus(a, b, at, ringEnd, 1f, detail);
+        if (onCollar)
+            g.Annulus(a, c, at, ringStart, -1f, detail);
+    }
+
+    private static float Bell(float throat, float exit, float curve, float t) =>
+        throat + (exit - throat) * (1f - MathF.Pow(1f - t, curve));
+
+    private static void Rectangle(Span<Vector2> points, float hu, float hv)
+    {
+        points[0] = new(hu, hv);
+        points[1] = new(-hu, hv);
+        points[2] = new(-hu, -hv);
+        points[3] = new(hu, -hv);
+    }
+
+    // An octagon: a rectangle with its corners cut by c, counter-clockwise from the right side's top.
+    private static void Octagon(Span<Vector2> points, float hu, float hv, float c)
+    {
+        points[0] = new(hu, hv - c);
+        points[1] = new(hu - c, hv);
+        points[2] = new(-hu + c, hv);
+        points[3] = new(-hu, hv - c);
+        points[4] = new(-hu, -hv + c);
+        points[5] = new(-hu + c, -hv);
+        points[6] = new(hu - c, -hv);
+        points[7] = new(hu, -hv + c);
+    }
+
+    private static void Polygon(Span<Vector2> points, Vector2 centre, float radius, float turn)
+    {
+        for (var s = 0; s < points.Length; s++)
+        {
+            var angle = turn + s * (MathF.Tau / points.Length);
+            points[s] = centre + new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * radius;
+        }
+    }
+
+    // A gusset's section: from near the collar out along dir by reach, w across.
+    private static void Gusset(Span<Vector2> points, Vector2 near, Vector2 dir, Vector2 across, float reach, float w)
+    {
+        points[0] = near - across * w;
+        points[1] = near + dir * reach - across * w;
+        points[2] = near + dir * reach + across * w;
+        points[3] = near + across * w;
     }
 
     private static Vector3 Unit(int axis)
@@ -318,154 +557,101 @@ internal static class PropulsionModels
         return vector;
     }
 
-    // A housing or plate: an axis-aligned box in the block's frame, from z0 to z1. Its back face is left out where a
-    // neighbour covers the block's back.
-    private static void AddBox(List<MeshVertex> vertices, List<uint> indices, in Frame f, float hx, float hy, float z0, float z1, float tag, bool back)
+    /// <summary>A part's own frame: x and y across its nozzle face, z from its back face (0) out along its facing.</summary>
+    private readonly struct Frame(Vector3 center, Vector3 n, Vector3 u, Vector3 v, float halfDepth)
     {
-        var zc = 0.5f * (z0 + z1);
-        var hz = 0.5f * (z1 - z0);
-        Quad(vertices, indices, f, tag, new(0, 0, 1), new(hx, 0, 0), new(0, hy, 0), new(0, 0, zc + hz));
-        if (back)
-            Quad(vertices, indices, f, tag, new(0, 0, -1), new(hx, 0, 0), new(0, hy, 0), new(0, 0, zc - hz));
-        Quad(vertices, indices, f, tag, new(1, 0, 0), new(0, hy, 0), new(0, 0, hz), new(hx, 0, zc));
-        Quad(vertices, indices, f, tag, new(-1, 0, 0), new(0, hy, 0), new(0, 0, hz), new(-hx, 0, zc));
-        Quad(vertices, indices, f, tag, new(0, 1, 0), new(hx, 0, 0), new(0, 0, hz), new(0, hy, zc));
-        Quad(vertices, indices, f, tag, new(0, -1, 0), new(hx, 0, 0), new(0, 0, hz), new(0, -hy, zc));
+        public readonly Vector3 N = n, U = u, V = v;
+        public Vector3 At(float x, float y, float z) => center + U * x + V * y + N * (z - halfDepth);
+        public Vector3 Dir(float x, float y, float z) => U * x + V * y + N * z;
     }
 
-    private static void Quad(List<MeshVertex> vertices, List<uint> indices, in Frame f, float tag, Vector3 normal, Vector3 a, Vector3 b, Vector3 center)
+    // Flat-shaded triangles in a part's frame: every facet has vertices of its own and the facet's normal.
+    private struct Geometry(List<MeshVertex> vertices, List<uint> indices, Frame frame)
     {
-        var first = (uint)vertices.Count;
-        var n = f.Dir(normal.X, normal.Y, normal.Z);
-        Put(vertices, f.At(center.X - a.X - b.X, center.Y - a.Y - b.Y, center.Z - a.Z - b.Z), n, tag);
-        Put(vertices, f.At(center.X + a.X - b.X, center.Y + a.Y - b.Y, center.Z + a.Z - b.Z), n, tag);
-        Put(vertices, f.At(center.X + a.X + b.X, center.Y + a.Y + b.Y, center.Z + a.Z + b.Z), n, tag);
-        Put(vertices, f.At(center.X - a.X + b.X, center.Y - a.Y + b.Y, center.Z - a.Z + b.Z), n, tag);
-        Triangle(vertices, indices, first, first + 1, first + 2, n);
-        Triangle(vertices, indices, first, first + 2, first + 3, n);
-    }
+        public readonly Frame F = frame;
 
-    // A short cylinder between the housing and the nozzle's throat, closed at its outer end.
-    private static void AddCollar(List<MeshVertex> vertices, List<uint> indices, in Frame f, float x, float y, float z0, float z1, float radius, float tag, int segments)
-    {
-        var first = (uint)vertices.Count;
-        for (var s = 0; s <= segments; s++)
+        // The side walls between two outlines of the same count, at za and zb: outward (side 1) or toward the
+        // centre line (side -1).
+        public readonly void Loft(ReadOnlySpan<Vector2> a, float za, ReadOnlySpan<Vector2> b, float zb, Vector2 centre, float tag, float side)
         {
-            var (c, sn) = Around(s, segments);
-            var n = f.Dir(c, sn, 0);
-            Put(vertices, f.At(x + c * radius, y + sn * radius, z0), n, tag);
-            Put(vertices, f.At(x + c * radius, y + sn * radius, z1), n, tag);
-        }
-        for (var s = 0; s < segments; s++)
-        {
-            var a = first + (uint)(2 * s);
-            Triangle(vertices, indices, a, a + 2, a + 3, vertices[(int)a].Normal);
-            Triangle(vertices, indices, a, a + 3, a + 1, vertices[(int)a].Normal);
-        }
-        Disc(vertices, indices, f, x, y, z1, 0, radius, tag, segments, 1);
-    }
-
-    // A nozzle: the outer wall, the lip at the exit, the inner wall facing the axis, and the dark plate at the throat.
-    private static void AddNozzle(List<MeshVertex> vertices, List<uint> indices, in Frame f, float x, float y, float z0, float z1, float throat, float exit, float wall, PropulsionModelLook model, float metal, float dark)
-    {
-        var rings = model.Rings;
-        var segments = model.Segments;
-        Span<float> radius = stackalloc float[rings + 1];
-        Span<float> z = stackalloc float[rings + 1];
-        for (var r = 0; r <= rings; r++)
-        {
-            var t = (float)r / rings;
-            // A bell opens quickly from the throat and runs nearly straight at the exit; a curve of 1 is a cone.
-            radius[r] = throat + (exit - throat) * (1f - MathF.Pow(1f - t, model.BellCurve));
-            z[r] = z0 + (z1 - z0) * t;
-        }
-        Surface(vertices, indices, f, x, y, radius, z, wall, 1f, metal, segments);
-        Surface(vertices, indices, f, x, y, radius, z, 0, -1f, metal, segments);
-        Disc(vertices, indices, f, x, y, z1, exit, exit + wall, metal, segments, 1);
-        Disc(vertices, indices, f, x, y, z0, 0, throat, dark, segments, 1);
-    }
-
-    // A surface of revolution about the nozzle's axis, its normals outward (side 1) or toward the axis (side -1).
-    private static void Surface(List<MeshVertex> vertices, List<uint> indices, in Frame f, float x, float y, ReadOnlySpan<float> radius, ReadOnlySpan<float> z, float offset, float side, float tag, int segments)
-    {
-        var first = (uint)vertices.Count;
-        var rings = radius.Length - 1;
-        for (var r = 0; r <= rings; r++)
-        {
-            var a = Math.Max(r - 1, 0);
-            var b = Math.Min(r + 1, rings);
-            // The profile's slope tilts the normal back toward the throat as the bell widens.
-            var slope = (radius[b] - radius[a]) / MathF.Max(z[b] - z[a], 1e-6f);
-            for (var s = 0; s <= segments; s++)
+            var n = a.Length;
+            for (var k = 0; k < n; k++)
             {
-                var (c, sn) = Around(s, segments);
-                var n = Vector3.Normalize(f.Dir(c, sn, -slope)) * side;
-                var rr = radius[r] + offset;
-                Put(vertices, f.At(x + c * rr, y + sn * rr, z[r]), n, tag);
+                var k1 = (k + 1) % n;
+                var p0 = new Vector3(a[k], za);
+                var p1 = new Vector3(a[k1], za);
+                var p2 = new Vector3(b[k1], zb);
+                var p3 = new Vector3(b[k], zb);
+                var normal = Vector3.Cross(p1 - p0, p3 - p0);
+                if (normal.LengthSquared() < 1e-14f)
+                    normal = Vector3.Cross(p2 - p3, p2 - p1);
+                if (normal.LengthSquared() < 1e-14f)
+                    continue;
+                var middle = 0.25f * (p0 + p1 + p2 + p3);
+                var radial = new Vector2(middle.X - centre.X, middle.Y - centre.Y);
+                if ((normal.X * radial.X + normal.Y * radial.Y) * side < 0)
+                    normal = -normal;
+                Quad(p0, p1, p2, p3, normal, tag);
             }
         }
-        var row = (uint)(segments + 1);
-        for (var r = 0; r < rings; r++)
+
+        // A flat outline across the axis at z, as a fan from its centre, facing +z (side 1) or -z.
+        public readonly void Cap(ReadOnlySpan<Vector2> outline, Vector2 centre, float z, float side, float tag)
         {
-            for (var s = 0; s < segments; s++)
+            var normal = F.Dir(0, 0, side);
+            var first = (uint)vertices.Count;
+            Put(F.At(centre.X, centre.Y, z), normal, tag);
+            foreach (var p in outline)
+                Put(F.At(p.X, p.Y, z), normal, tag);
+            var n = (uint)outline.Length;
+            for (uint k = 0; k < n; k++)
+                Triangle(first, first + 1 + k, first + 1 + (k + 1) % n, normal);
+        }
+
+        // The flat ring between two outlines of the same count at z, facing +z (side 1) or -z.
+        public readonly void Annulus(ReadOnlySpan<Vector2> outer, ReadOnlySpan<Vector2> inner, Vector2 centre, float z, float side, float tag)
+        {
+            var n = outer.Length;
+            for (var k = 0; k < n; k++)
             {
-                var a = first + (uint)r * row + (uint)s;
-                var n = vertices[(int)a].Normal;
-                Triangle(vertices, indices, a, a + 1, a + row + 1, n);
-                Triangle(vertices, indices, a, a + row + 1, a + row, n);
+                var k1 = (k + 1) % n;
+                Quad(new Vector3(outer[k], z), new Vector3(outer[k1], z), new Vector3(inner[k1], z), new Vector3(inner[k], z), new Vector3(0, 0, side), tag);
             }
         }
-    }
 
-    // A flat ring (or a disc, inner radius 0) across the axis at z, facing along it.
-    private static void Disc(List<MeshVertex> vertices, List<uint> indices, in Frame f, float x, float y, float z, float inner, float outer, float tag, int segments, float side)
-    {
-        var first = (uint)vertices.Count;
-        var n = f.Dir(0, 0, side);
-        for (var s = 0; s <= segments; s++)
+        private readonly void Quad(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3, Vector3 normal, float tag)
         {
-            var (c, sn) = Around(s, segments);
-            Put(vertices, f.At(x + c * inner, y + sn * inner, z), n, tag);
-            Put(vertices, f.At(x + c * outer, y + sn * outer, z), n, tag);
+            var n = F.Dir(normal.X, normal.Y, normal.Z);
+            var first = (uint)vertices.Count;
+            Put(F.At(p0.X, p0.Y, p0.Z), n, tag);
+            Put(F.At(p1.X, p1.Y, p1.Z), n, tag);
+            Put(F.At(p2.X, p2.Y, p2.Z), n, tag);
+            Put(F.At(p3.X, p3.Y, p3.Z), n, tag);
+            Triangle(first, first + 1, first + 2, n);
+            Triangle(first, first + 2, first + 3, n);
         }
-        for (var s = 0; s < segments; s++)
+
+        private readonly void Put(Vector3 position, Vector3 normal, float tag)
         {
-            var a = first + (uint)(2 * s);
-            Triangle(vertices, indices, a, a + 1, a + 3, n);
-            if (inner > 0)
-                Triangle(vertices, indices, a, a + 3, a + 2, n);
+            var n = Vector3.Normalize(normal) * tag;
+            vertices.Add(new MeshVertex { Position = new float3(position.X, position.Y, position.Z), Normal = new float3(n.X, n.Y, n.Z) });
+        }
+
+        // Winds every triangle counter-clockwise seen from the side its normal points to, whichever way the part's
+        // frame turns: a facing against its axis mirrors the frame, which would otherwise turn half the faces inside out.
+        private readonly void Triangle(uint a, uint b, uint c, Vector3 normal)
+        {
+            var pa = vertices[(int)a].Position;
+            var pb = vertices[(int)b].Position;
+            var pc = vertices[(int)c].Position;
+            var cross = Vector3.Cross(new Vector3(pb.X - pa.X, pb.Y - pa.Y, pb.Z - pa.Z), new Vector3(pc.X - pa.X, pc.Y - pa.Y, pc.Z - pa.Z));
+            if (cross.LengthSquared() < 1e-14f)
+                return;
+            if (Vector3.Dot(cross, normal) < 0)
+                (b, c) = (c, b);
+            indices.Add(a);
+            indices.Add(b);
+            indices.Add(c);
         }
     }
-
-    private static (float Cos, float Sin) Around(int s, int segments)
-    {
-        var angle = s % segments * (MathF.Tau / segments);
-        return (MathF.Cos(angle), MathF.Sin(angle));
-    }
-
-    private static void Put(List<MeshVertex> vertices, Vector3 position, Vector3 normal, float tag)
-    {
-        var n = Vector3.Normalize(normal) * tag;
-        vertices.Add(new MeshVertex { Position = new float3(position.X, position.Y, position.Z), Normal = new float3(n.X, n.Y, n.Z) });
-    }
-
-    // Winds every triangle counter-clockwise seen from the side its normal points to, whichever way the block's frame
-    // turns: a facing against its axis mirrors the frame, which would otherwise turn half the faces inside out.
-    private static void Triangle(List<MeshVertex> vertices, List<uint> indices, uint a, uint b, uint c, float3 normal)
-    {
-        var pa = vertices[(int)a].Position;
-        var pb = vertices[(int)b].Position;
-        var pc = vertices[(int)c].Position;
-        var cross = Vector3.Cross(new Vector3(pb.X - pa.X, pb.Y - pa.Y, pb.Z - pa.Z), new Vector3(pc.X - pa.X, pc.Y - pa.Y, pc.Z - pa.Z));
-        if (cross.LengthSquared() < 1e-14f)
-            return;
-        if (Vector3.Dot(cross, new Vector3(normal.X, normal.Y, normal.Z)) < 0)
-            (b, c) = (c, b);
-        indices.Add(a);
-        indices.Add(b);
-        indices.Add(c);
-    }
-
-    private static void Triangle(List<MeshVertex> vertices, List<uint> indices, uint a, uint b, uint c, Vector3 normal) =>
-        Triangle(vertices, indices, a, b, c, new float3(normal.X, normal.Y, normal.Z));
 }
