@@ -19,7 +19,7 @@ namespace Prospect.Client.Screens;
 /// </summary>
 internal sealed class TipBoard
 {
-    private readonly TipCatalogue _catalogue;
+    private TipCatalogue _catalogue;
     private readonly ClientSettings _settings;
     private readonly int[] _queue;
     private int _count;
@@ -32,6 +32,17 @@ internal sealed class TipBoard
         _catalogue = catalogue;
         _settings = settings;
         _queue = new int[catalogue.Tips.Length];
+    }
+
+    /// <summary>
+    /// Swaps in a catalogue built from the same file with its key names resolved again, after the player remapped a
+    /// control. Same tips in the same order, so the stack and the hidden ids stay as they are.
+    /// </summary>
+    public void ReplaceCatalogue(TipCatalogue catalogue)
+    {
+        if (catalogue.Tips.Length != _catalogue.Tips.Length)
+            throw new ArgumentException("A rebuilt catalogue has the tips it had.", nameof(catalogue));
+        _catalogue = catalogue;
     }
 
     /// <summary>

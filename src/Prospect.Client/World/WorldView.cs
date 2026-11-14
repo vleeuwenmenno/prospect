@@ -339,8 +339,8 @@ internal sealed class WorldView
         _jobs = jobs;
         _damage = new DamageMeshes(jobs, _collision.MeshVertices);
         _scene = scene;
-        var boost = actions.Bindings(InputAction.Boost);
-        BoostKeyName = boost.IsEmpty ? "BOOST" : boost[0].DisplayName.ToUpperInvariant();
+        RefreshKeyNames();
+        actions.Changed += RefreshKeyNames;
         _designs = designs;
         Editor = new ShipEditor(jobs);
         // Damaged shells are built on a worker, one at a time; nothing builds one in the frame.
@@ -581,7 +581,15 @@ internal sealed class WorldView
     public float NavRefusedAt { get; private set; } = -10f;
 
     /// <summary>The first key or button bound to boost, as the HUD names it.</summary>
-    public string BoostKeyName { get; }
+    public string BoostKeyName { get; private set; } = "BOOST";
+
+    /// <summary>Builds the names the HUD shows for boost and for taking control again, after the bindings changed.</summary>
+    private void RefreshKeyNames()
+    {
+        var boost = _actions.Bindings(InputAction.Boost);
+        BoostKeyName = boost.IsEmpty ? "BOOST" : boost[0].DisplayName.ToUpperInvariant();
+        _switchKeyName = null;
+    }
 
     /// <summary>Seconds since this view started, on the same clock as <see cref="NavRefusedAt"/>.</summary>
     public float Time => _time;

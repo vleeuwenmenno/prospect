@@ -46,12 +46,12 @@ internal sealed partial class ScreenHost
         _app = app;
         _ui = ui;
         InitializeJoin();
-        InitializeSettings();
         InitializeControls();
         InitializeNewGame();
         InitializeSocial();
         _claimTipForMap = () => _mapPointer.Claim();
         InitializeTips();
+        _app.Actions.Changed += OnBindingsChanged;
     }
 
     public Screen Current => _screen;

@@ -159,6 +159,43 @@ internal sealed unsafe class InputDevices
     /// <summary>True when the button went down since the last poll and no change of owner has masked that press.</summary>
     public bool FreshPress(GlfwMouseButton button) => _mousePressed[(int)button] && !_mouseBlocked[(int)button];
 
+    /// <summary>
+    /// The first control that went down since the last poll, for the Controls page to bind: keyboard keys first, then
+    /// mouse buttons, then gamepad buttons. Reads the raw edges, whatever masks the world's read of them.
+    /// </summary>
+    public bool TryFirstPress(out InputBinding binding)
+    {
+        for (var i = 0; i < KeyCount; i++)
+        {
+            if (_keysPressed[i])
+            {
+                binding = new InputBinding(InputBinding.Source.Key, i);
+                return true;
+            }
+        }
+
+        for (var i = 0; i < MouseButtonCount; i++)
+        {
+            if (_mousePressed[i])
+            {
+                binding = new InputBinding(InputBinding.Source.MouseButton, i);
+                return true;
+            }
+        }
+
+        for (var i = 0; i < PadButtonCount; i++)
+        {
+            if (_padPressed[i])
+            {
+                binding = new InputBinding(InputBinding.Source.PadButton, i);
+                return true;
+            }
+        }
+
+        binding = default;
+        return false;
+    }
+
     public bool PadConnected => _padId >= 0;
     public string PadName { get; private set; } = "";
 
