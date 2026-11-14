@@ -982,6 +982,12 @@ internal sealed class App : IDisposable
                 World.SetMode(ViewMode.Command);
                 World.SelectAllOwned();
             }
+            else if (view == "command-fog")
+            {
+                // The command view pulled back far enough to show the sensor rings and the fog beyond them.
+                World.SelectAllOwned();
+                World.SetCommandCapturePose(World.OwnPosition, 14000f, 0.6f, -0.95f);
+            }
             else if (view == "controls")
                 _screens.OpenControls();
             else if (view == "edit" && snapshot is { OwnHull: >= 0 })
@@ -1013,6 +1019,12 @@ internal sealed class App : IDisposable
                 _screens.OpenMapMenuNear(3, 2);
             else if (view == "map-hover")
                 _screens.OpenMapHover();
+            else if (view == "map-card")
+                _screens.OpenMapCard();
+            else if (view == "map-tilt")
+                _screens.OpenMapTilt();
+            else if (view == "scan")
+                _screens.OpenScan();
             else if (view == "jump-fleet-ahead" && snapshot is { OwnHull: >= 0 })
             {
                 // The player's other hulls jump to points ahead of and above the camera, 160 m and 280 m away along

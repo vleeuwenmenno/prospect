@@ -21,7 +21,6 @@ internal sealed partial class ScreenHost
 
     private readonly SectorSummary[] _mapCache = new SectorSummary[MapCacheSize];
     private readonly bool[] _mapCacheValid = new bool[MapCacheSize];
-    private readonly string?[] _mapNames = new string?[MapCacheSize];
     private Galaxy? _mapGalaxy;
     private bool _mapOpen;
     private bool _shipInfoOpen;
@@ -29,17 +28,9 @@ internal sealed partial class ScreenHost
     private float2 _mapCenter;
     private readonly MapPointer _mapPointer = new();
     private float _mapCell = 44f;
-    private readonly HashSet<SectorCoord> _discovered = [];
-    private readonly SectorCoord[] _discoveredFrom = new SectorCoord[256];
-    private Galaxy? _discoveredGalaxy;
-    private int _mapLayer;
-    private SectorCoord _mapHover;
-    private string _mapHoverName = "";
-    private bool _mapHasHover;
     private bool _mapHoverPinned;
     private bool _mapMenuOpen;
     private SectorCoord _mapMenuSector;
-    private string _mapMenuName = "";
     private float2 _mapMenuMin;
     private float2 _mapMenuSize;
     private float _mapMenuTime;
@@ -93,6 +84,7 @@ internal sealed partial class ScreenHost
         _mapMenuOpen = false;
         _mapTime = 0;
         _mapPointer.Reset();
+        _mapCard.Dismiss();
 
         // The map orders exactly the selected hulls. With nothing selected it starts on the hull being flown, as
         // its orders used to go there; clearing the list afterwards leaves nothing to order.
@@ -101,14 +93,14 @@ internal sealed partial class ScreenHost
         if (world.Selection.Length == 0 && world.Own.Id != 0)
             world.Select(world.Own.Id, false);
         _mapCenter = new float2((float)(_app.World.OwnPosition.X / _app.World.Galaxy!.SectorSize), (float)(_app.World.OwnPosition.Z / _app.World.Galaxy!.SectorSize));
-        _mapLayer = _app.World.Sector.Coord.Y;
+        _mapNav.Reset(_app.World.Sector.Coord.Y);
     }
 
     /// <summary>Everything drawn over the world while in space: flight readouts, command markers, the map.</summary>
     private void DrawWorldInterface(SessionSnapshot snapshot)
     {
         var world = _app.World;
-        UpdateDiscovery(snapshot, world);
+        UpdateExploration(snapshot, world);
         // While the ship editor is shown its own keys apply: the map and the data sheet wait until it closes.
         var editing = world.Editor.Shown;
         if (!editing && !_sessionMenuOpen && !SocialSurfaceOpen && _app.Actions.Pressed(_app.Devices, InputAction.ToggleMap, !_ui.WantsTextInput))
@@ -155,7 +147,12 @@ internal sealed partial class ScreenHost
             if (pilot > 0.01f)
                 DrawFlightReadouts(draw, snapshot, world, pilot);
             if (world.CommandBlend > 0.01f)
+            {
+                DrawCommandFog(draw, snapshot, world, world.CommandBlend);
                 DrawCommandOverlay(draw, snapshot, world, world.CommandBlend);
+            }
+
+            DrawScanStrip(draw, snapshot, world, 1f);
             if (pilot > 0.01f)
                 DrawTargetReadout(draw, snapshot, world, pilot);
             if (_sectorInfo.Open)
@@ -922,380 +919,6 @@ internal sealed partial class ScreenHost
         draw.AddLine(center + new float2(0, r * 0.5f), center + new float2(0, r * 1.7f), color, Kit.Px(1.5f));
     }
 
-    /// <summary>
-    /// The galaxy map. Every grid cell is a sector. Far out it shows the whole galaxy; closer in, the grid and the
-    /// individual sectors appear; closest, their stars, asteroid fields and names. What a sector holds is only
-    /// shown once one of the player's hulls has been near it. Drag to pan, wheel to zoom at the pointer, Page Up
-    /// and Page Down to change layer, Space to centre on the player, right-click a sector for the course menu.
-    /// </summary>
-    private void DrawMap(SessionSnapshot snapshot, WorldView world)
-    {
-        var galaxy = world.Galaxy!;
-        if (!ReferenceEquals(galaxy, _mapGalaxy))
-        {
-            _mapGalaxy = galaxy;
-            Array.Clear(_mapCacheValid);
-        }
-
-        _mapTime += _ui.DeltaTime;
-        var fade = Kit.EaseOut(_mapTime / Theme.ScreenEnter);
-        Kit.Fade = fade;
-        var display = _ui.DisplaySize;
-        var io = ImGui.GetIO();
-
-        // The unit list's place is decided before any input is read, so the map never takes a press, wheel or
-        // drag that lands on it, even on the frame it first appears.
-        world.PruneSelection();
-        var units = LayoutMapUnits(snapshot, world);
-        _mapPointer.Block(units.Min, units.Size);
-        // The navigation bar is drawn over the map and is never the map's.
-        _mapPointer.Block(float2.Zero, new float2(display.X, HudLayout.TopBarBottom(Kit.Scale)));
-        if (_mapMenuOpen)
-        {
-            _mapMenuTime += _ui.DeltaTime;
-            _mapPointer.Block(MapCourseMenu.Shown(_mapMenuMin, _mapMenuTime, Kit.Scale), _mapMenuSize);
-        }
-
-        _mapPointer.Begin(display);
-        var pointer = _mapPointer;
-        var draw = ImGui.GetWindowDrawList();
-        var shape = galaxy.Shape;
-        var here = world.Sector.Coord;
-        var size = galaxy.SectorSize;
-        var player = new float2((float)(world.OwnPosition.X / size), (float)(world.OwnPosition.Z / size));
-        var middle = display * 0.5f;
-        var mouse = _mapHoverPinned ? middle : io.MousePos;
-
-        // The course menu, while open, holds the map still and takes the clicks that land on it.
-        var menuOpen = _mapMenuOpen;
-
-        // Input. W A S D, the arrow keys and middle-drag pan; zooming keeps the sector under the pointer in place.
-        if (!menuOpen)
-            PanMap(pointer, middle, mouse, here, player);
-
-        // Left button: click picks one of the player's hulls, drag draws a selection box around several. With the
-        // menu open a click on the map only closes it; a click on the menu or the unit list is theirs.
-        if (pointer.Pressed && menuOpen)
-        {
-            _mapMenuOpen = false;
-            pointer.CancelBox();
-        }
-
-        var boxReleased = pointer.BoxReleased;
-
-        // Taking control of the one selected ship leaves the map open; the keyboard must be free of text fields.
-        if (Bridge is { } switchBridge)
-            world.SwitchToSelectedFromMap(switchBridge, WorldView.MapSwitchKeyAvailable(_sessionMenuOpen, SocialSurfaceOpen, _controlsOpen, _ui.WantsTextInput));
-
-        // Escape closes the menu first and the map only after that.
-        if (BackPressed())
-        {
-            if (_mapMenuOpen)
-                _mapMenuOpen = false;
-            else
-                _mapOpen = false;
-        }
-
-        var cell = _mapCell;
-        var center = _mapCenter;
-        float2 ToScreen(float sectorX, float sectorZ) => middle + new float2((sectorX - center.X) * cell, (sectorZ - center.Y) * cell);
-
-        // Backdrop: black, the galaxy, and a field of far stars that slides more slowly than the map.
-        draw.AddRectFilled(float2.Zero, display, Kit.Color(0x020305));
-        var reach = shape.Radius * Render.GalaxyImage.Extent;
-        var galaxyAlpha = Math.Clamp(1.1f - cell / 60f, 0.22f, 1f) * shape.LayerFalloff(_mapLayer);
-        draw.AddImage(
-            _app.GalaxyImageRef,
-            ToScreen(shape.Center.X - reach, shape.Center.Z - reach),
-            ToScreen(shape.Center.X + reach, shape.Center.Z + reach),
-            float2.Zero,
-            float2.One,
-            Kit.Color(0xFFFFFF, galaxyAlpha)
-        );
-
-        const float tile = 150f;
-        var slide = center * (cell * 0.3f);
-        var firstTileX = (int)MathF.Floor(slide.X / tile);
-        var firstTileY = (int)MathF.Floor(slide.Y / tile);
-        for (var ty = firstTileY; (ty - firstTileY) * tile < display.Y + tile; ty++)
-            for (var tx = firstTileX; (tx - firstTileX) * tile < display.X + tile; tx++)
-            {
-                var hash = (uint)(tx * 73856093 ^ ty * 19349663);
-                for (var n = 0; n < 2; n++)
-                {
-                    hash = (hash ^ hash >> 15) * 2246822519u + 0x9E3779B9u;
-                    var position = new float2((tx + (hash & 0xFFFF) / 65535f) * tile - slide.X, (ty + (hash >> 16) / 65535f) * tile - slide.Y);
-                    var glint = 0.15f + 0.45f * ((hash >> 8 & 0xFF) / 255f);
-                    draw.AddRectFilled(position, position + new float2(1.5f, 1.5f), Kit.Color(0xC8D6F0, glint));
-                }
-            }
-
-        // Grid. Sector lines fade in as the cells grow; every tenth and hundredth line is always the stronger.
-        var left = center.X - middle.X / cell;
-        var top = center.Y - middle.Y / cell;
-        var right = center.X + middle.X / cell;
-        var bottom = center.Y + middle.Y / cell;
-        DrawMapGrid(draw, display, left, top, right, bottom, 1, Math.Clamp((cell - 9f) / 26f, 0f, 1f) * 0.2f, ToScreen(0, 0), cell);
-        DrawMapGrid(draw, display, left, top, right, bottom, 10, Math.Clamp((cell * 10f - 30f) / 120f, 0f, 1f) * 0.34f, ToScreen(0, 0), cell);
-        DrawMapGrid(draw, display, left, top, right, bottom, 100, Math.Clamp((cell * 100f - 30f) / 200f, 0f, 1f) * 0.4f, ToScreen(0, 0), cell);
-
-        var layerFalloff = shape.LayerFalloff(_mapLayer);
-        var fullSignal = galaxy.MapFullSignalAsteroids;
-        if (cell >= MapSectorDetailCell)
-        {
-            // Close enough that every sector on screen can be drawn for what it is.
-            var firstX = (int)MathF.Floor(left + 0.5f);
-            var lastX = (int)MathF.Floor(right + 0.5f);
-            var firstZ = (int)MathF.Floor(top + 0.5f);
-            var lastZ = (int)MathF.Floor(bottom + 0.5f);
-            for (var z = firstZ; z <= lastZ; z++)
-                for (var x = firstX; x <= lastX; x++)
-                {
-                    var coord = new SectorCoord(x, _mapLayer, z);
-                    ref var summary = ref MapSummary(galaxy, coord);
-                    if (summary.AsteroidCount == 0)
-                        continue;
-
-                    var known = _discovered.Contains(coord);
-                    var signal = Math.Min(1f, summary.AsteroidCount / fullSignal);
-
-                    // Uncharted space shows only its stronger signals, and only once the cells are large enough.
-                    if (!known && (signal < 0.3f || (cell < 34f && signal < 0.55f)))
-                        continue;
-                    var position = ToScreen(x, z);
-                    var star = StarColor(galaxy.StarClasses[summary.StarClass].Color);
-
-                    // Something is there whether or not it has been visited; what it is shows only once discovered.
-                    var tint = known ? star : Kit.Mix(star, 0x66727F, 0.75f);
-                    var glow = Math.Min(cell * (0.12f + 0.5f * signal * signal), 52f);
-                    if (known)
-                    {
-                        draw.AddCircleFilled(position, glow, Kit.Color(tint, 0.08f), 16);
-                        draw.AddCircleFilled(position, glow * 0.5f, Kit.Color(tint, 0.16f), 12);
-                        draw.AddCircleFilled(position, Math.Max(1.5f, glow * 0.16f), Kit.Color(tint, 0.95f), 8);
-                    }
-                    else
-                    {
-                        draw.AddCircleFilled(position, glow, Kit.Color(tint, 0.06f), 16);
-                        draw.AddCircleFilled(position, Math.Max(1.2f, glow * 0.12f), Kit.Color(tint, 0.4f), 8);
-                    }
-
-                    if (!known || cell < 64f)
-                        continue;
-
-                    var sweep = MathF.Tau * Math.Clamp(signal, 0.08f, 1f);
-                    draw.PathArcTo(position, cell * 0.2f, -MathF.PI / 2, -MathF.PI / 2 + sweep, 28);
-                    draw.PathStroke(Kit.Color(Theme.Info, 0.75f), ImDrawFlags.None, 1.5f);
-                    if (cell >= 118f)
-                    {
-                        ref var name = ref MapName(galaxy, coord);
-                        var nameSize = Kit.Measure(_ui.Sans, Theme.FontCaption, name);
-                        Kit.Text(draw, _ui.Sans, Theme.FontCaption, new float2(position.X - nameSize.X * 0.5f, position.Y + cell * 0.27f), Theme.TextDim, name);
-                    }
-                }
-        }
-        else if (cell >= 2.5f)
-        {
-            // Too many sectors on screen to draw each: sample the galaxy's density instead, so the map still
-            // glitters where the rock is.
-            var step = (int)MathF.Ceiling(MapSectorDetailCell / cell);
-            var firstX = (int)MathF.Floor(left / step) * step;
-            var firstZ = (int)MathF.Floor(top / step) * step;
-            for (var z = firstZ; z <= bottom; z += step)
-                for (var x = firstX; x <= right; x += step)
-                {
-                    var density = shape.Density(x, z) * layerFalloff;
-                    var hash = (uint)(x * 73856093 ^ z * 19349663 ^ _mapLayer * 83492791);
-                    hash = (hash ^ hash >> 15) * 2246822519u;
-                    var chance = (hash >> 8 & 0xFFFF) / 65535f;
-                    if (chance > density * 0.8f)
-                        continue;
-
-                    var jitter = new float2(((hash & 0xFF) / 255f - 0.5f) * step, ((hash >> 24) / 255f - 0.5f) * step);
-                    var position = ToScreen(x + jitter.X, z + jitter.Y);
-                    var tint = Kit.Mix(0xFFD9A0, 0x9FC4FF, (hash >> 12 & 0xFF) / 255f);
-                    var glow = step * cell * (0.25f + 0.5f * density);
-                    draw.AddCircleFilled(position, glow, Kit.Color(tint, 0.08f), 10);
-                    draw.AddCircleFilled(position, Math.Max(1f, glow * 0.22f), Kit.Color(tint, 0.6f), 6);
-                }
-        }
-
-        // The player's hulls on this layer. Releasing the left button selects among them: the nearest to a click,
-        // or all inside a dragged box.
-        var boxMin = new float2(Math.Min(pointer.BoxStart.X, mouse.X), Math.Min(pointer.BoxStart.Y, mouse.Y));
-        var boxMax = new float2(Math.Max(pointer.BoxStart.X, mouse.X), Math.Max(pointer.BoxStart.Y, mouse.Y));
-        var additive = io.KeyShift || io.KeyCtrl;
-        if (boxReleased && !additive)
-            world.ClearSelection();
-        var clicked = 0u;
-        var clickedDistance = Kit.Px(14) * Kit.Px(14);
-        for (var i = 0; i < snapshot.HullCount; i++)
-        {
-            ref var hull = ref snapshot.Hulls[i];
-            var position = world.HullPosition(hull);
-            if (hull.Owner != snapshot.PlayerId || galaxy.SectorOf(position).Y != _mapLayer)
-                continue;
-
-            var at = ToScreen((float)(position.X / size), (float)(position.Z / size));
-            if (boxReleased && pointer.BoxMoved && at.X >= boxMin.X && at.X <= boxMax.X && at.Y >= boxMin.Y && at.Y <= boxMax.Y)
-                world.AddToSelection(hull.Id);
-            var offset = at - mouse;
-            if (boxReleased && !pointer.BoxMoved && offset.X * offset.X + offset.Y * offset.Y < clickedDistance)
-            {
-                clicked = hull.Id;
-                clickedDistance = offset.X * offset.X + offset.Y * offset.Y;
-            }
-
-            if (world.IsSelected(hull.Id))
-                draw.AddCircle(at, Kit.Px(9), Kit.Color(Theme.Text), 20, Kit.Px(1.5f));
-            if (!hull.IsOwn)
-                draw.AddCircleFilled(at, Kit.Px(3), Kit.Color(Theme.Accent, 0.9f), 10);
-        }
-
-        if (clicked != 0)
-            world.Select(clicked, additive);
-        if (pointer.Boxing && pointer.BoxMoved)
-        {
-            draw.AddRectFilled(boxMin, boxMax, Kit.Color(Theme.Accent, 0.08f));
-            draw.AddRect(boxMin, boxMax, Kit.Color(Theme.Accent, 0.9f));
-        }
-
-        // The plotted jump: a dotted route underneath the hull's arrow, visible before its order starts.
-        if (world.NavTarget is { } nav)
-        {
-            var navSector = galaxy.SectorOf(nav);
-            var end = ToScreen((float)(nav.X / size), (float)(nav.Z / size));
-            if (MapRoute.Shows(here.Y, navSector.Y, _mapLayer, out var line))
-            {
-                if (line)
-                    MapRoute.Dotted(draw, ToScreen(player.X, player.Y), end, new HudRect(0f, 0f, display.X, display.Y), Kit.Px(MapRoute.Dash), Kit.Px(MapRoute.Space), Kit.Color(Theme.Info, 0.8f), Kit.Px(1.5f));
-                DrawTargetMarker(draw, end, Theme.Info);
-                Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, end + new float2(Kit.Px(18), -Kit.Px(7)), Theme.Info, "NAV"u8);
-            }
-        }
-
-        // The hull being flown, as an arrow along its heading.
-        if (_mapLayer == here.Y)
-        {
-
-            var marker = ToScreen(player.X, player.Y);
-            var heading = Vector3.Transform(-Vector3.UnitZ, world.OwnOrientation);
-            var flat = new float2(heading.X, heading.Z);
-            var length = MathF.Sqrt(flat.X * flat.X + flat.Y * flat.Y);
-            flat = length > 0.01f ? flat / length : new float2(0, -1);
-            var side = new float2(-flat.Y, flat.X);
-            var s = Kit.Px(8);
-            draw.AddTriangleFilled(marker + flat * s * 1.4f, marker - flat * s * 0.7f + side * s * 0.8f, marker - flat * s * 0.7f - side * s * 0.8f, Kit.Color(Theme.Accent));
-            if (cell >= MapSectorDetailCell)
-            {
-                var corner = new float2(cell * 0.5f - 2, cell * 0.5f - 2);
-                var home = ToScreen(here.X, here.Z);
-                Brackets(draw, home - corner, home + corner, Math.Min(Kit.Px(10), cell * 0.3f), Kit.Color(Theme.Accent));
-            }
-        }
-
-        // A standing order's destination.
-        var order = world.Own.Order;
-        if (order.Kind != OrderKind.None && galaxy.SectorOf(order.Target).Y == _mapLayer)
-        {
-            var destination = ToScreen((float)(order.Target.X / size), (float)(order.Target.Z / size));
-            draw.AddLine(ToScreen(player.X, player.Y), destination, Kit.Color(Theme.Accent, 0.5f));
-            DrawTargetMarker(draw, destination, Theme.Accent);
-        }
-
-        // The sector under the pointer.
-        var hovered = _mapCenter + (mouse - middle) / cell;
-        var hover = new SectorCoord((int)MathF.Floor(hovered.X + 0.5f), _mapLayer, (int)MathF.Floor(hovered.Y + 0.5f));
-        var pointerOnMap = _mapHoverPinned || pointer.Hovered;
-        if (pointerOnMap)
-        {
-            var at = ToScreen(hover.X, hover.Z);
-            var corner = new float2(Math.Max(cell * 0.5f, 7f), Math.Max(cell * 0.5f, 7f));
-            Brackets(draw, at - corner, at + corner, Math.Clamp(cell * 0.3f, 3f, Kit.Px(10)), Kit.Color(Theme.Text, 0.85f));
-            if (!_mapMenuOpen)
-                Kit.Text(draw, _ui.Mono, Theme.FontCaption, mouse + new float2(Kit.Px(18), -Kit.Px(6)), Theme.Text, Kit.F($"{hover.X} : {hover.Z}"));
-
-            // Right-click opens the course menu on the sector, or moves it there if it is already open.
-            if (pointer.RightClicked)
-                OpenMapMenu(galaxy, hover, mouse);
-        }
-
-        // The sector the course menu is for.
-        if (_mapMenuOpen && _mapMenuSector.Y == _mapLayer)
-        {
-            var at = ToScreen(_mapMenuSector.X, _mapMenuSector.Z);
-            var corner = new float2(Math.Max(cell * 0.5f, 7f), Math.Max(cell * 0.5f, 7f));
-            Brackets(draw, at - corner, at + corner, Math.Clamp(cell * 0.3f, 3f, Kit.Px(10)), Kit.Color(Theme.Accent));
-        }
-
-        // The world interface is beneath the map, so the map shows the sector panel itself.
-        if (_sectorInfo.Open)
-            DrawSectorPanel(draw, snapshot, world);
-
-        // Title, layer and scale, clear of the sector panel above them. Where the unit list needs the room, only
-        // the layer and scale stay, on one line under the sector panel.
-        if (units.ShortHeading)
-        {
-            var line = new float2(units.Min.X + Kit.Px(Theme.Space4), units.Min.Y - Kit.Px(28));
-            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, line, Theme.TextDim, Kit.F($"LAYER {_mapLayer:+0;-0;0}   {display.X / cell:0} SECTORS ACROSS   {size / 1000:0} KM EACH"), units.Size.X - Kit.Px(Theme.Space4) * 2);
-        }
-        else
-        {
-            // In the column the sector panel and the unit list share, its text on their text's edge.
-            var at = new float2(Kit.Px(HudLayout.Margin + Theme.Space4), MapUnitList.HeadingTop(SectorColumnBottom(world, false), Kit.Scale));
-            var width = units.Size.X - Kit.Px(Theme.Space4) * 2;
-            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, at, Theme.Accent, "NAVIGATION"u8);
-            Kit.Text(draw, _ui.SansBold, Theme.FontHeading, at + new float2(0, Kit.Px(16)), Theme.Text, "Galaxy Map"u8);
-            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(0, Kit.Px(50)), Theme.TextDim, Kit.F($"LAYER {_mapLayer:+0;-0;0}   {display.X / cell:0} SECTORS ACROSS   {size / 1000:0} KM EACH"), width);
-            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(0, Kit.Px(68)), Theme.TextMute, Kit.F($"{_discovered.Count} SECTORS DISCOVERED   {world.Selection.Length} SHIPS SELECTED"), width);
-        }
-
-        if (world.ControlOutOfSector)
-        {
-            var notice = Kit.F($"Outside your sector - travel there to take control ({world.SwitchKeyName})");
-            var noticeSize = Kit.Measure(_ui.SansMedium, Theme.FontSmall, notice);
-            Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, new float2((display.X - noticeSize.X) * 0.5f, display.Y - Kit.Px(56)), Theme.Bad, notice);
-        }
-
-        if (pointerOnMap)
-            DrawMapHoverPanel(draw, snapshot, world, galaxy, hover, here);
-
-        EndRoot();
-
-        DrawMapUnits(snapshot, world, galaxy, units, fade);
-        if (_mapMenuOpen)
-            DrawMapMenu(world, galaxy, fade);
-        Kit.Fade = 1f;
-    }
-
-    /// <summary>Pans, zooms and changes layer from the keyboard, and from the map's own middle drag and wheel.</summary>
-    private void PanMap(MapPointer pointer, float2 middle, float2 mouse, SectorCoord here, float2 player)
-    {
-        var devices = _app.Devices;
-        var actions = _app.Actions;
-        var display = _ui.DisplaySize;
-        var panX = Math.Clamp(actions.Axis(devices, InputAxis.Strafe, true) + actions.Axis(devices, InputAxis.Yaw, true), -1f, 1f);
-        var panY = Math.Clamp(actions.Axis(devices, InputAxis.Forward, true) + actions.Axis(devices, InputAxis.Pitch, true), -1f, 1f);
-        _mapCenter += new float2(panX, -panY) * (display.Y * 0.9f / _mapCell * _ui.DeltaTime);
-        _mapCenter -= pointer.Pan / _mapCell;
-        if (pointer.Wheel != 0)
-        {
-            var under = _mapCenter + (mouse - middle) / _mapCell;
-            _mapCell = Math.Clamp(_mapCell * MathF.Pow(1.18f, pointer.Wheel), MapMinCell, MapMaxCell);
-            _mapCenter = under - (mouse - middle) / _mapCell;
-        }
-
-        if (ImGui.IsKeyPressed(ImGuiKey.PageUp))
-            _mapLayer++;
-        if (ImGui.IsKeyPressed(ImGuiKey.PageDown))
-            _mapLayer--;
-        if (ImGui.IsKeyPressed(ImGuiKey.Space, false))
-        {
-            _mapCenter = player;
-            _mapLayer = here.Y;
-        }
-    }
-
     /// <summary>Opens the course menu for a sector at a screen point, kept fully on screen.</summary>
     private void OpenMapMenu(Galaxy galaxy, SectorCoord sector, float2 at)
     {
@@ -1305,8 +928,6 @@ internal sealed partial class ScreenHost
         if (!_mapMenuOpen || _mapMenuSector != sector)
             _mapMenuTime = 0;
 
-        // The name is looked up once here, not every frame the menu is drawn.
-        _mapMenuName = _discovered.Contains(sector) ? MapName(galaxy, sector) : "Unexplored";
         _mapMenuMin = min;
         _mapMenuSector = sector;
         _mapMenuOpen = true;
@@ -1347,42 +968,20 @@ internal sealed partial class ScreenHost
 
         var sector = _mapMenuSector;
         var target = galaxy.CenterOf(sector);
-        var known = _discovered.Contains(sector);
+        var known = Charted(sector);
         var text = min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3));
         Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, text, Theme.Accent, "SET COURSE"u8);
         var coords = Kit.F($"{sector.X} : {sector.Z}   LAYER {sector.Y:+0;-0;0}");
         var coordsWidth = Kit.Measure(_ui.Mono, Theme.FontCaption, coords).X;
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(min.X + size.X - Kit.Px(Theme.Space4) - coordsWidth, text.Y), Theme.TextMute, coords);
-        Kit.Text(draw, _ui.SansMedium, Theme.FontBody, text + new float2(0, Kit.Px(20)), known ? Theme.Text : Theme.TextDim, _mapMenuName);
+        Kit.Text(draw, _ui.SansMedium, Theme.FontBody, text + new float2(0, Kit.Px(20)), known ? Theme.Text : Theme.TextDim, known ? MapName(galaxy, sector) : "Uncharted sector"u8);
         var range = target.RelativeTo(world.OwnPosition).Length() / 1000f;
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, Kit.Px(46)), Theme.TextDim, Kit.F($"DISTANCE   {range:0.0} KM"));
         var divider = min.Y + Kit.Px(MapCourseMenu.HeaderHeight) - 0.5f;
         draw.AddLine(new float2(min.X + Kit.Px(6), divider), new float2(min.X + size.X - Kit.Px(6), divider), Kit.Color(Theme.Line));
 
-        world.CountJumpReady(target, out var ships, out var ready, out var inSector);
-        var none = ships == 0;
-        var rowSize = MapCourseMenu.RowSize(size, Kit.Scale);
-        var session = _app.Session;
-
-        var moveCount = ships == 1 ? "1 ship"u8 : Kit.F($"{ships} ships");
-        if (MapMenuItem(draw, MapCourseMenu.RowMin(min, 0, Kit.Scale), rowSize, "Move here"u8, none ? "NO SHIPS SELECTED"u8 : "UNDER OWN ENGINES"u8, moveCount, !none) && session is not null)
-        {
-            world.OrderMoveSelected(session.Client.Input, target);
+        if (DrawCourseRows(draw, world, target, new float2(min.X, min.Y + MathF.Round(MapCourseMenu.HeaderHeight * Kit.Scale)), MapCourseMenu.RowSize(size, Kit.Scale), true))
             _mapMenuOpen = false;
-        }
-
-        var canJump = ready > 0;
-        // The ship being flown is only given the course; its pilot starts the jump.
-        var plotOnly = world.JumpPlotsOwnOnly;
-        var reason = !canJump ? ships == 0 ? "NO SHIPS SELECTED"u8 : inSector == ships ? "ALREADY IN THIS SECTOR"u8 : "NO WORKING JUMP DRIVE"u8
-            : plotOnly ? Kit.F($"SET NAV TARGET, THEN AIM AND {world.BoostKeyName}")
-            : "FASTER THAN LIGHT"u8;
-        var jumpCount = ships == 1 ? Kit.F($"{ready} of 1 ship") : Kit.F($"{ready} of {ships} ships");
-        if (MapMenuItem(draw, MapCourseMenu.RowMin(min, 1, Kit.Scale), rowSize, plotOnly ? "Plot jump"u8 : "Jump here"u8, reason, jumpCount, canJump) && session is not null)
-        {
-            world.OrderJump(session.Client.Input, target);
-            _mapMenuOpen = false;
-        }
 
         MapCourseMenu.End();
     }
@@ -1408,135 +1007,6 @@ internal sealed partial class ScreenHost
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(rowMin.X + rowSize.X - Kit.Px(Theme.Space3) - countWidth, rowMin.Y + Kit.Px(8)), enabled ? Kit.Mix(Theme.TextDim, Theme.Accent, hot) : Theme.TextMute, count, enabled ? 1f : 0.7f);
         return pressed && enabled;
     }
-
-    /// <summary>What is known about the sector under the pointer.</summary>
-    private void DrawMapHoverPanel(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, Galaxy galaxy, SectorCoord hover, SectorCoord here)
-    {
-        var display = _ui.DisplaySize;
-        var known = _discovered.Contains(hover);
-        // What a discovered sector with asteroids holds takes a few more lines: its richness and its resources.
-        var inner = Kit.Px(MapHoverWidth) - Kit.Px(Theme.Space4) * 2;
-        var hasRock = known && MapSummary(galaxy, hover).AsteroidCount > 0;
-        var characterHeight = hasRock ? SectorCharacterHeight(galaxy, MapSummary(galaxy, hover).Character, inner) : 0f;
-        // Its height follows its lines: the caption and name, two lines of place, three more for a discovered
-        // sector or one hint for an unexplored one, the sector's character, and the closing hint.
-        var line = Kit.Px(20);
-        var panelSize = new float2(Kit.Px(MapHoverWidth), Kit.Px(Theme.Space4 * 2 + 62 + 4 + 16) + line * (known ? 5 : 3) + characterHeight);
-        var panelMin = new float2(MapUnitList.HoverCardLeft(display.X, Kit.Scale, MapHoverWidth, MapUnitList.HoverRight), HudTop);
-        Kit.PanelFrame(draw, panelMin, panelMin + panelSize);
-        var text = panelMin + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space4));
-
-        if (!_mapHasHover || _mapHover != hover)
-        {
-            _mapHover = hover;
-            _mapHasHover = true;
-            _mapHoverName = known ? galaxy.NameOf(hover) : "Unexplored";
-        }
-        else if (known && _mapHoverName == "Unexplored")
-        {
-            _mapHoverName = galaxy.NameOf(hover);
-        }
-
-        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, text, hover == here ? Theme.Accent : known ? Theme.Info : Theme.TextMute, hover == here ? "YOU ARE HERE"u8 : known ? "DISCOVERED"u8 : "UNEXPLORED"u8);
-        Kit.Text(draw, _ui.SansBold, Theme.FontHeading, text + new float2(0, Kit.Px(18)), known ? Theme.Text : Theme.TextDim, _mapHoverName);
-        var y = Kit.Px(62);
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, y), Theme.TextDim, Kit.F($"COORDINATES   {hover.X} : {hover.Z}   LAYER {hover.Y:+0;-0;0}"));
-        y += line;
-        var range = galaxy.CenterOf(hover).RelativeTo(world.OwnPosition).Length() / 1000f;
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, y), Theme.TextDim, Kit.F($"DISTANCE      {range:0.0} KM"));
-        y += line;
-
-        if (known)
-        {
-            ref var summary = ref MapSummary(galaxy, hover);
-            var ships = 0;
-            for (var i = 0; i < snapshot.HullCount; i++)
-            {
-                if (snapshot.Hulls[i].Owner == snapshot.PlayerId && galaxy.SectorOf(world.HullPosition(snapshot.Hulls[i])) == hover)
-                    ships++;
-            }
-
-            Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, y), Theme.TextDim, Kit.F($"STAR          {galaxy.StarClasses[summary.StarClass].Name}"));
-            y += line;
-            Kit.Text(
-                draw,
-                _ui.Mono,
-                Theme.FontCaption,
-                text + new float2(0, y),
-                Theme.TextDim,
-                summary.AsteroidCount > 0 ? Kit.F($"ASTEROIDS     {(galaxy.AsteroidFields?.EstimatesCounts == true ? "ABOUT " : "")}{summary.AsteroidCount} IN {summary.FieldCount} {(summary.FieldCount == 1 ? "FIELD" : "FIELDS")}") : "ASTEROIDS     none"u8
-            );
-            y += line;
-            if (hasRock)
-            {
-                DrawSectorCharacter(draw, text + new float2(0, y), inner, galaxy, summary.Character);
-                y += characterHeight;
-            }
-
-            Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(0, y), ships > 0 ? Theme.Accent : Theme.TextDim, Kit.F($"YOUR SHIPS    {ships}"));
-            y += line;
-        }
-        else
-        {
-            Kit.Text(draw, _ui.Sans, Theme.FontCaption, text + new float2(0, y), Theme.TextMute, "Send a ship within one sector to chart it."u8);
-            y += line;
-        }
-
-        Kit.Text(draw, _ui.Sans, Theme.FontCaption, text + new float2(0, y + Kit.Px(4)), Theme.TextMute, "Right-click to move or jump here"u8);
-    }
-
-    /// <summary>Grid lines every <paramref name="every"/> sectors, drawn on sector boundaries.</summary>
-    private static void DrawMapGrid(ImDrawListPtr draw, float2 display, float left, float top, float right, float bottom, int every, float alpha, float2 origin, float cell)
-    {
-        if (alpha <= 0.01f)
-            return;
-
-        // Boundaries sit half a sector from the sector centres; stronger lines fall on multiples of the spacing.
-        var color = Kit.Color(0x8FB4C8, alpha);
-        for (var x = MathF.Ceiling((left - 0.5f) / every) * every; x - 0.5f <= right; x += every)
-        {
-            var sx = MathF.Round(origin.X + (x - 0.5f) * cell);
-            draw.AddLine(new float2(sx, 0), new float2(sx, display.Y), color);
-        }
-
-        for (var z = MathF.Ceiling((top - 0.5f) / every) * every; z - 0.5f <= bottom; z += every)
-        {
-            var sy = MathF.Round(origin.Y + (z - 0.5f) * cell);
-            draw.AddLine(new float2(0, sy), new float2(display.X, sy), color);
-        }
-    }
-
-    /// <summary>
-    /// Charts the sectors around the player's hulls: a hull's sensors reach the sectors next to the one it is in.
-    /// </summary>
-    private void UpdateDiscovery(SessionSnapshot snapshot, WorldView world)
-    {
-        var galaxy = world.Galaxy!;
-        if (!ReferenceEquals(galaxy, _discoveredGalaxy))
-        {
-            _discoveredGalaxy = galaxy;
-            _discovered.Clear();
-            Array.Fill(_discoveredFrom, new SectorCoord(int.MinValue, 0, 0));
-        }
-
-        for (var i = 0; i < snapshot.HullCount; i++)
-        {
-            ref var hull = ref snapshot.Hulls[i];
-            if (hull.Owner != snapshot.PlayerId)
-                continue;
-            var coord = galaxy.SectorOf(hull.Position);
-            var slot = (int)(hull.Id & 0xFFFF) % _discoveredFrom.Length;
-            if (_discoveredFrom[slot] == coord)
-                continue;
-
-            _discoveredFrom[slot] = coord;
-            for (var dx = -1; dx <= 1; dx++)
-                for (var dy = -1; dy <= 1; dy++)
-                    for (var dz = -1; dz <= 1; dz++)
-                        _discovered.Add(coord.Offset(dx, dy, dz));
-        }
-    }
-
     private ref SectorSummary MapSummary(Galaxy galaxy, SectorCoord coord)
     {
         var index = (int)((uint)(coord.X * 73856093 ^ coord.Y * 19349663 ^ coord.Z * 83492791) % MapCacheSize);
@@ -1544,19 +1014,44 @@ internal sealed partial class ScreenHost
         {
             _mapCache[index] = galaxy.Summarize(coord);
             _mapCacheValid[index] = true;
-            _mapNames[index] = null;
         }
 
         return ref _mapCache[index];
     }
 
-    /// <summary>A sector's name for the map, made the first time the sector is shown with labels.</summary>
-    private ref string MapName(Galaxy galaxy, SectorCoord coord)
+    private const int MapNameCacheSize = 256;
+    private const int MapNameBytes = 96;
+    private readonly byte[] _mapNameBytes = new byte[MapNameCacheSize * MapNameBytes];
+    private readonly int[] _mapNameLengths = new int[MapNameCacheSize];
+    private readonly SectorCoord[] _mapNameSectors = new SectorCoord[MapNameCacheSize];
+    private readonly bool[] _mapNameValid = new bool[MapNameCacheSize];
+    private Galaxy? _mapNameGalaxy;
+
+    /// <summary>
+    /// A sector's name for the map, as UTF-8, written the first time it is shown into a small cache made once, so a
+    /// newly charted sector's name takes no memory. Good until the end of the frame.
+    /// </summary>
+    private ReadOnlySpan<byte> MapName(Galaxy galaxy, SectorCoord coord)
     {
-        MapSummary(galaxy, coord);
-        var index = (int)((uint)(coord.X * 73856093 ^ coord.Y * 19349663 ^ coord.Z * 83492791) % MapCacheSize);
-        _mapNames[index] ??= galaxy.NameOf(coord);
-        return ref _mapNames[index]!;
+        if (!ReferenceEquals(galaxy, _mapNameGalaxy))
+        {
+            _mapNameGalaxy = galaxy;
+            Array.Clear(_mapNameValid);
+        }
+
+        var index = (int)((uint)(coord.X * 73856093 ^ coord.Y * 19349663 ^ coord.Z * 83492791) % MapNameCacheSize);
+        var bytes = _mapNameBytes.AsSpan(index * MapNameBytes, MapNameBytes);
+        if (!_mapNameValid[index] || _mapNameSectors[index] != coord)
+        {
+            Span<char> name = stackalloc char[Math.Max(galaxy.MaxNameLength, 8)];
+            var length = galaxy.NameOf(coord, name);
+            var chars = name[..Math.Min(length, MapNameBytes / 3)];
+            _mapNameLengths[index] = System.Text.Encoding.UTF8.GetBytes(chars, bytes);
+            _mapNameSectors[index] = coord;
+            _mapNameValid[index] = true;
+        }
+
+        return bytes[.._mapNameLengths[index]];
     }
 
     /// <summary>Corner brackets around a rectangle.</summary>

@@ -26,6 +26,9 @@ internal enum InputAction
     ToggleChat,
     ToggleSectorInfo,
     ToggleEditor,
+    MapLayerUp,
+    MapLayerDown,
+    MapTilt,
     Count,
 }
 

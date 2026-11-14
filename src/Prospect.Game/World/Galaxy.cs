@@ -529,10 +529,36 @@ public sealed class Galaxy
     /// <summary>The sector's name, for display. Allocates a string; ask only for sectors that are shown by name.</summary>
     public string NameOf(SectorCoord coord)
     {
+        Span<char> name = stackalloc char[MaxNameLength];
+        return new string(name[..NameOf(coord, name)]);
+    }
+
+    /// <summary>The longest name <see cref="NameOf(SectorCoord, Span{char})"/> writes.</summary>
+    public int MaxNameLength
+    {
+        get
+        {
+            var longest = 0;
+            foreach (var syllable in _syllables)
+                longest = Math.Max(longest, syllable.Length);
+            return longest * 2 + 4;
+        }
+    }
+
+    /// <summary>
+    /// Writes the sector's name into <paramref name="destination"/>, at least <see cref="MaxNameLength"/> long,
+    /// without allocating, and returns its length. The same name as <see cref="NameOf(SectorCoord)"/>.
+    /// </summary>
+    public int NameOf(SectorCoord coord, Span<char> destination)
+    {
         var random = new SectorRandom(Seed, coord, NameStream);
         var first = _syllables[random.NextInt(_syllables.Length)];
-        var second = _syllables[random.NextInt(_syllables.Length)].ToLowerInvariant();
-        return $"{first}{second} {random.NextInt(900) + 100}";
+        var second = _syllables[random.NextInt(_syllables.Length)];
+        first.AsSpan().CopyTo(destination);
+        var length = first.Length + second.AsSpan().ToLowerInvariant(destination[first.Length..]);
+        destination[length++] = ' ';
+        (random.NextInt(900) + 100).TryFormat(destination[length..], out var written, default, System.Globalization.CultureInfo.InvariantCulture);
+        return length + written;
     }
 
     /// <summary>
