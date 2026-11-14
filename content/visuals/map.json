@@ -1,8 +1,8 @@
 {
   "fogAlpha": 0.62,
   "chartedAlpha": 0.16,
-  "liveFillAlpha": 0.14,
-  "liveRingAlpha": 0.85,
+  "liveFillAlpha": 0.05,
+  "liveRingAlpha": 0.4,
   "minCoveragePixels": 3,
   "edgeFalloff": 0.01,
   "tiltDegrees": 58,
@@ -16,8 +16,12 @@
   "fieldSectorsPerFrame": 2,
   "staleFade": 0.45,
   "scanResultSeconds": 6,
-  "commandFogAlpha": 0.42,
-  "commandFogReach": 3,
+  "commandFogAlpha": 0.16,
+  "commandFogReach": 1.5,
+  "commandRingAlpha": 0.4,
+  "commandRingWidth": 1,
+  "commandFadeRings": 3,
+  "commandFadeWidth": 1.5,
   "courseRiskDanger": 0.5,
   "courseRefusalSeconds": 6
 }

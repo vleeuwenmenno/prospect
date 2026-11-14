@@ -459,7 +459,7 @@ internal sealed partial class ScreenHost
                 continue;
             var rx = Math.Max((float)(radius / size) * view.Cell, minimum);
             var ry = Math.Max((float)(radius / size) * view.CellZ, minimum * view.Cos);
-            Ellipse(draw, center, rx, ry, Theme.Good, look.LiveFillAlpha, Theme.Good, look.LiveRingAlpha, Kit.Px(1.5f));
+            Ellipse(draw, center, rx, ry, Theme.Good, look.LiveFillAlpha, Theme.Good, look.LiveRingAlpha, Kit.Px(1f));
         }
     }
 

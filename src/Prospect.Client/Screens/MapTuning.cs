@@ -59,6 +59,14 @@ internal sealed class MapTuning
     public float CommandFogAlpha { get; init; }
     public float CommandFogReach { get; init; }
 
+    /// <summary>The command view's sensor boundary line: strength, 0 to 1, and width in unscaled pixels.</summary>
+    public float CommandRingAlpha { get; init; }
+    public float CommandRingWidth { get; init; }
+
+    /// <summary>How many faint strokes make the fade outside the boundary, and how wide each is in unscaled pixels.</summary>
+    public int CommandFadeRings { get; init; }
+    public float CommandFadeWidth { get; init; }
+
     /// <summary>
     /// A blind jump's hit chance, 0 to 1, from which the course menu and the sector card draw it in the warning
     /// colour instead of amber, and how many seconds the server's refusal of a plot or a jump stays on screen.
@@ -84,7 +92,7 @@ internal sealed class MapTuning
 
         static bool Unit(float value) => value is >= 0f and <= 1f;
         if (!Unit(tuning.FogAlpha) || !Unit(tuning.ChartedAlpha) || !Unit(tuning.LiveFillAlpha) || !Unit(tuning.LiveRingAlpha)
-            || !Unit(tuning.StaleFade) || !Unit(tuning.CommandFogAlpha) || !Unit(tuning.CourseRiskDanger))
+            || !Unit(tuning.StaleFade) || !Unit(tuning.CommandFogAlpha) || !Unit(tuning.CommandRingAlpha) || !Unit(tuning.CourseRiskDanger))
             throw new InvalidDataException($"{path}: alphas and fades are 0 to 1");
         if (!(tuning.MinCoveragePixels is >= 0 and <= 64))
             throw new InvalidDataException($"{path}: minCoveragePixels is 0 to 64");
@@ -99,6 +107,8 @@ internal sealed class MapTuning
             throw new InvalidDataException($"{path}: fieldDetailCell is 20 to 400, fieldSectorsPerFrame 1 to 64");
         if (!(tuning.ScanResultSeconds is >= 0 and <= 120) || !(tuning.CommandFogReach is >= 1 and <= 20))
             throw new InvalidDataException($"{path}: scanResultSeconds is 0 to 120, commandFogReach 1 to 20");
+        if (!(tuning.CommandRingWidth is >= 0.5f and <= 8) || tuning.CommandFadeRings is < 1 or > 16 || !(tuning.CommandFadeWidth is >= 1 and <= 64))
+            throw new InvalidDataException($"{path}: commandRingWidth is 0.5 to 8, commandFadeRings 1 to 16, commandFadeWidth 1 to 64");
         if (!(tuning.CourseRefusalSeconds is >= 0 and <= 60))
             throw new InvalidDataException($"{path}: courseRefusalSeconds is 0 to 60");
         return tuning;

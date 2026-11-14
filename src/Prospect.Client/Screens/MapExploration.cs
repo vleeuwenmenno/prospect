@@ -191,6 +191,24 @@ internal sealed class SensorCoverage
         return reach;
     }
 
+    /// <summary>How many directions a sensor's boundary is sampled in, evenly round the horizontal plane.</summary>
+    public const int ReachSamples = 96;
+
+    /// <summary>
+    /// Fills <paramref name="reach"/> with how far sensor <paramref name="index"/> sees in each of its directions
+    /// on the horizontal plane at <paramref name="planeY"/>, direction k being angle k / n of a turn from +x towards
+    /// +z. Today every direction is the sphere's cross-section; the boundary is drawn from these samples so a
+    /// reach that varies by direction needs no change in the drawing. False when the plane misses the sensor.
+    /// </summary>
+    public bool SampleReach(int index, double planeY, Span<double> reach)
+    {
+        var r = CrossSection(index, planeY);
+        if (r <= 0)
+            return false;
+        reach.Fill(r);
+        return true;
+    }
+
     /// <summary>The radius of sensor <paramref name="index"/>'s circle on the horizontal plane at height <paramref name="planeY"/>, or 0.</summary>
     public double CrossSection(int index, double planeY)
     {

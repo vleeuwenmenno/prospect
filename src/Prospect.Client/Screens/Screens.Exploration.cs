@@ -77,56 +77,40 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
-    /// Fog of war in the command view, on the command plane: each sensor's sphere cut by the plane as a ring, the
-    /// sphere's outline as the volume, and outside the rings a darkening that deepens with distance, so unseen space
-    /// reads as unseen. Lost contacts show at their last position, hollow and fading. The sector's knowledge state
-    /// sits under the view's title.
+    /// Sensor coverage in the command view, on the command plane: a thin boundary line per sensor drawn from its
+    /// sampled reach in every direction, the sphere's outline as the volume, and outside the boundary a few faint
+    /// strokes that darken gently with distance, so unseen space reads as unseen without hiding what lies behind.
+    /// Lost contacts show at their last position, hollow and fading. The sector's knowledge state sits under the
+    /// view's title.
     /// </summary>
     private void DrawCommandFog(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, float alpha)
     {
         var look = MapLook;
         var plane = world.CommandFocus.Y;
         var radius = _coverage.Radius;
-        const int segments = 48;
-        const int bands = 4;
+        Span<double> reach = stackalloc double[SensorCoverage.ReachSamples];
         for (var i = 0; i < _coverage.Count; i++)
         {
             var p = _coverage.Positions[i];
             if (world.ProjectDisc(p, (float)radius, out var sphere, out var pixels, out _))
-                draw.AddCircle(sphere, pixels, Kit.Color(Theme.Good, look.LiveRingAlpha * 0.25f * alpha), 64, Kit.Px(1f));
+                draw.AddCircle(sphere, pixels, Kit.Color(Theme.Good, look.CommandRingAlpha * 0.5f * alpha), 64, Kit.Px(1f));
 
-            var r = _coverage.CrossSection(i, plane);
-            if (r <= 0)
+            if (!_coverage.SampleReach(i, plane, reach))
                 continue;
-            for (var k = 0; k < segments; k++)
-            {
-                var a0 = k * (MathF.Tau / segments);
-                var a1 = (k + 1) * (MathF.Tau / segments);
-                var c0 = new Double3(Math.Cos(a0), 0, Math.Sin(a0));
-                var c1 = new Double3(Math.Cos(a1), 0, Math.Sin(a1));
-                var center = new Double3(p.X, plane, p.Z);
-                if (world.ProjectSegment(center + c0 * r, center + c1 * r, out var s0, out var s1))
-                    draw.AddLine(s0, s1, Kit.Color(Theme.Good, look.LiveRingAlpha * alpha), Kit.Px(1.5f));
+            var center = new Double3(p.X, plane, p.Z);
 
-                // The fog outside: bands of growing darkness out to the configured reach, left out where another
-                // sensor's ring covers the band.
-                for (var band = 0; band < bands; band++)
-                {
-                    var inner = r * (1 + (look.CommandFogReach - 1) * band / bands);
-                    var outer = r * (1 + (look.CommandFogReach - 1) * (band + 1) / bands);
-                    var middle = center + (c0 + c1) * (0.25 * (inner + outer));
-                    if (CoveredOnPlane(middle, plane, i))
-                        continue;
-                    if (!world.Project(center + c0 * inner, out var q0) || !world.Project(center + c1 * inner, out var q1)
-                        || !world.Project(center + c1 * outer, out var q2) || !world.Project(center + c0 * outer, out var q3))
-                        continue;
-                    Span<float2> quad = [q0, q1, q2, q3];
-                    draw.AddConvexPolyFilled(quad, Kit.Color(0x020305, look.CommandFogAlpha * alpha * (band + 1) / bands));
-                }
+            // The fade outside: wide faint strokes at growing distance, each darker than the one inside it. Left
+            // out where another sensor covers the stroke, so overlapping coverage stays clear.
+            for (var ring = look.CommandFadeRings; ring >= 1; ring--)
+            {
+                var scale = 1 + (look.CommandFogReach - 1) * ring / look.CommandFadeRings;
+                var strength = look.CommandFogAlpha * alpha * ring / look.CommandFadeRings;
+                DrawReachLine(draw, world, center, reach, scale, Kit.Color(0x020305, strength), Kit.Px(look.CommandFadeWidth), plane, i);
             }
 
-            if (world.Project(new Double3(p.X, plane, p.Z - r), out var labelAt))
-                Kit.Text(draw, _ui.Mono, Theme.FontCaption, labelAt + new float2(Kit.Px(6), -Kit.Px(16)), Theme.Good, Kit.F($"SENSOR RANGE {radius / 1000:0.0} KM"), alpha);
+            DrawReachLine(draw, world, center, reach, 1, Kit.Color(Theme.Good, look.CommandRingAlpha * alpha), Kit.Px(look.CommandRingWidth), plane, -1);
+            if (world.Project(new Double3(p.X, plane, p.Z - reach[reach.Length * 3 / 4]), out var labelAt))
+                Kit.Text(draw, _ui.Mono, Theme.FontCaption, labelAt + new float2(Kit.Px(6), -Kit.Px(16)), Theme.Good, Kit.F($"SENSOR RANGE {radius / 1000:0.0} KM"), alpha * 0.7f);
         }
 
         // Lost contacts: last known position only, never a live target.
@@ -153,6 +137,28 @@ internal sealed partial class ScreenHost
         var width = Kit.Measure(_ui.Mono, Theme.FontCaption, state).X;
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(MathF.Round((_ui.DisplaySize.X - width) * 0.5f), HudTop + Kit.Px(40)),
             _coverage.Count == 0 ? Theme.Bad : charted ? Theme.Info : Theme.Accent, state, alpha);
+    }
+
+    /// <summary>
+    /// A closed line round <paramref name="center"/> through the sampled reach distances, each scaled by
+    /// <paramref name="scale"/>, so the boundary follows whatever the reach is in each direction. Segments whose
+    /// midpoint lies inside another sensor's ring (any sensor but <paramref name="except"/>) are skipped.
+    /// </summary>
+    private void DrawReachLine(ImDrawListPtr draw, WorldView world, Double3 center, ReadOnlySpan<double> reach, double scale, uint color, float thickness, double plane, int except)
+    {
+        var n = reach.Length;
+        for (var k = 0; k < n; k++)
+        {
+            var next = k + 1 == n ? 0 : k + 1;
+            var a0 = k * (Math.Tau / n);
+            var a1 = (k + 1) * (Math.Tau / n);
+            var from = center + new Double3(Math.Cos(a0), 0, Math.Sin(a0)) * (reach[k] * scale);
+            var to = center + new Double3(Math.Cos(a1), 0, Math.Sin(a1)) * (reach[next] * scale);
+            if (except >= 0 && CoveredOnPlane((from + to) * 0.5, plane, except))
+                continue;
+            if (world.ProjectSegment(from, to, out var s0, out var s1))
+                draw.AddLine(s0, s1, color, thickness);
+        }
     }
 
     /// <summary>Whether a point on the command plane lies inside the ring of any sensor other than <paramref name="except"/>.</summary>
