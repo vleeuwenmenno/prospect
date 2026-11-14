@@ -11,7 +11,7 @@
     "coolSeconds": 9,
     "shieldRechargeDelaySeconds": 8,
     "shieldRestartFraction": 0.25,
-    "shieldRestartPowerMultiplier": 2,
+    "shieldRestartPowerMultiplier": 4,
     "shieldContactSpeed": 0.1,
     "collisionTreeVisits": 8192,
     "collisionBoxTests": 2048,

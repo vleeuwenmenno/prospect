@@ -166,9 +166,11 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   flies on what is left. Losing the core destroys the hull; its pilot gets out in a drone.
 - **Shields break and restart.** A shield that pays out everything it had breaks and goes offline. Offline it
   takes no hits, even with charge in it: every hit lands on the blocks. After 8 s without damaging hits it
-  charges back at its normal rate on twice its normal power, and comes online only at 25% of its capacity
+  charges back at its normal rate on four times its normal power, and comes online only at 25% of its capacity
   (`shieldRestartFraction` and `shieldRestartPowerMultiplier` in `content/blocks/blocks.json`). Online it tops up
-  as before. The console says `OFFLINE` in red, dims the charge being rebuilt, marks the restart point on the bar
+  using energy proportional to points restored. FTL and propulsion take priority; insufficient energy slows or
+  stops recovery. The world recharge multiplier changes speed and power together, keeping MJ/point fixed.
+  The console says `OFFLINE` in red, dims the charge being rebuilt, marks the restart point on the bar
   (the hull's own `shieldRestartFraction`) and how far the charge is towards it (`RESTART 60 %`: 60% of the way). No
   countdown is shown: the delay after the last hit is not published. Target and fleet gauges dim too,
   and the party list shows a broken shield as empty. Snapshots carry the offline state and the newest shield contact

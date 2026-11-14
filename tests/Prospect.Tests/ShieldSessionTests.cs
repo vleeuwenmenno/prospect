@@ -1,3 +1,4 @@
+using System.Reflection;
 using Prospect.Engine.Net;
 using Prospect.Engine.Time;
 using Prospect.Game.Client;
@@ -13,6 +14,62 @@ namespace Prospect.Tests;
 /// </summary>
 public sealed class ShieldSessionTests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(4)]
+    public void EnergyLimitedRestartAgreesWithPredictionAcrossSnapshots(int lead)
+    {
+        var content = GameContent.Load();
+        using var link = new LoopbackLink();
+        using var server = new ServerHost(new ServerConfig { MaxPlayers = 1 }, content, link.Server);
+        using var client = new ClientSession(link.Client, content, "Pilot");
+        long tick = 0;
+        void Step()
+        {
+            ((ITickHandler)server).Tick(tick++);
+            ((ITickHandler)client).Tick(0);
+        }
+        HullView Own()
+        {
+            var snapshot = client.AcquireSnapshot();
+            return snapshot.Hulls[snapshot.OwnHull];
+        }
+        for (var i = 0; i < 20; i++) Step();
+        var store = (HullStore)typeof(ServerHost).GetField("_hulls", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(server)!;
+        var slot = -1;
+        for (var i = 0; i < store.Slots; i++)
+            if (store.IsAliveAt(i) && store.HandleAt(i).Packed == Own().Id) slot = i;
+        Assert.True(slot >= 0);
+        ref var state = ref store.State(slot);
+        state.Shield = 0;
+        state.ShieldOffline = true;
+        state.ShieldCooldown = 0;
+        state.Energy = 0;
+        for (var i = 0; i < lead; i++) ((ITickHandler)client).Tick(0);
+        var limited = false;
+        var restarted = false;
+        for (var i = 0; i < 1800; i++)
+        {
+            Step();
+            if (i < 20) continue; // Let the first authoritative break reach prediction.
+            var own = Own();
+            var expected = store.State(slot);
+            var order = store.Info(slot).Order;
+            var ahead = (int)Math.Round(own.ShownTick - (tick - 1));
+            Assert.InRange(ahead, 0, 16);
+            for (var j = 0; j < ahead; j++)
+                HullSim.Step(ref expected, ref order, default, store.Flight(slot));
+            Assert.Equal(expected.Energy, own.Energy, 4);
+            Assert.Equal(expected.Shield, own.Shield, 4);
+            Assert.Equal(expected.ShieldOffline, own.ShieldOffline);
+            limited |= own.ShieldOffline && own.Shield > 0 && own.Energy < 0.001f;
+            restarted |= !own.ShieldOffline;
+        }
+        Assert.True(limited, "recovery must exercise an energy-limited offline phase");
+        Assert.True(restarted);
+        Assert.Null(server.Fault);
+    }
+
     [Fact]
     public void ABrokenShieldStaysOfflineUntilItsThresholdAndEveryClientAgrees()
     {

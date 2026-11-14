@@ -48,9 +48,28 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
 - Standard and drone thrust is 20% lower. Boost gives 2× thrust and 2× rated speed, still drawing 4× thrust power.
 - Shield recharge is halved: 37.5 points/s per standard emitter, 5 points/s per drone emitter.
 - Every damaging hit resets an 8 s recharge delay, including hits while the shield is offline.
-  Harmless contact feedback does not delay recovery. Restart remains at 25% charge on twice normal shield power.
+  Harmless contact feedback does not delay recovery. Restart remains at 25% charge; its energy premium is defined below.
 - These are starting values, not final flight-feel approval. Capacity, mass, gyro, control rules and FTL stay unchanged.
   Power shortage can still slow recovery; the world shield-recharge multiplier still applies.
+
+## Decided (provisional, tunable): shield recharge energy
+
+- Recharge spends the shared ship energy pool for each point restored. Normal MJ/point is surviving emitters' summed
+  `powerDraw` divided by their summed base `shieldRecharge`, both evaluated with block size rules.
+  Standard and drone emitters currently cost 0.04 MJ/point: 1.5 MW / 37.5 points/s and 0.2 MW / 5 points/s.
+- Collapsed shields retain the existing offline state and 8 s damage delay. Recovery to 25% capacity costs 4× normal
+  MJ/point (`shieldRestartPowerMultiplier` in `content/blocks/blocks.json`). One standard emitter restarts for 60 MJ;
+  one drone emitter for 4.8 MJ. No separate restart fee or new phase state.
+- The last offline tick stops exactly at the threshold; normal recharge resumes next tick. Partial top-ups pay only
+  for points restored. Insufficient energy restores fewer points; zero available energy waits. Energy never goes negative.
+- Priority per shared step: FTL takes stored energy first under its existing charge gate, then generator output and
+  remaining battery feed idle/propulsion (including boost), then shields, then battery storage. FTL does not reserve next
+  tick's energy; shields may consume this tick's generator surplus. Transit still suspends flight and recharge.
+- `FlightRules.Under` applies the world's shield-recharge multiplier to both recharge rate and rated shield power,
+  including restart power. MJ/point and total recovery cost stay fixed. Generators, batteries and surviving emitters
+  still determine available power, storage, capacity and recharge. Existing energy and net-flow displays include this draw.
+
+Open: flight feel and balance approval; these numbers remain content tuning, not final balance.
 
 ## Decided: the world
 

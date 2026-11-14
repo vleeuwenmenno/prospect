@@ -341,7 +341,7 @@ public sealed class BoxHullSums
         var thrusterThrust = (float)sum.Values[ThrusterThrust];
         var idlePower = (float)sum.Values[IdlePower];
         var thrustPower = (float)sum.Values[ThrustPower];
-        var shieldPower = (float)sum.Values[ShieldPower];
+        var shieldPower = (float)sum.Values[ShieldPower] * rules.ShieldRechargeMultiplier;
         var blocks = sum.Count;
         var ftl = sum.Drive == 0 ? FtlKind.None : _boxes[sum.Drive - 1].Type.Ftl;
 
