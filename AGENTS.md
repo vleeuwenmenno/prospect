@@ -126,6 +126,11 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   sector's cell); the legend is `MapLegend`, a surface the map blocks; the hull name label is `MapUnitHover`;
   the pinned card's X is `MapSectorCard.Close`. Rules in `docs/roadmap/exploration.md`. Check with `--open map-card`, `map-card-near`, `map-card-far`, `map-tilt`, `scan`
   and `command-fog`.
+- **Scans:** the server owns the cooldown (`scanCooldownSeconds`, `ScanView.CooldownSector`/`CooldownUntilTick`,
+  `ScanState.Cooldown`); the client only reads it through `ScanRules` (`Gate`, `CooldownSeconds`, `Strip`,
+  `HandleKey`), so the `ScanSector` key, the card's button and the flight readout (`DrawScanStrip`) agree. A change
+  to the wire bumps `ProtocolInfo.Version`. The card closes on any click outside it (`MapCardState.Click`,
+  `RightClick`); rules in `docs/roadmap/exploration.md`. Check with `--open scan-pilot` and `--open scan`.
 - **The ship editor:** the limits are in `EditorRules`, `content/net/editor.json` and `docs/hosting.md`;
   change all three. A design reaches the catalogue only through `DesignBytes.Decode` on a worker, the catalogue
   only grows (`DesignCatalogue.Append`, `GameContent.WithDesign`), and a hull never changes design: it is
@@ -159,7 +164,10 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   while the server works (`Busy`), so a grant is never left unclaimed. A created ship is handed to the editor
   (`ShipEditor.AwaitCreated`), which opens only when that hull is in the snapshot, and then tracks the *granted*
   hull, not the flown one: `WorldView.EditedPosition`, `EditedOrientation` and `EditedDesign` are the pose and
-  design the camera, the pointer ray and the draft work from; never read `Own*` in editor code. A new ship's
+  design the camera, the pointer ray and the draft work from; never read `Own*` in editor code.
+  Closing the edit of a ship just built, by Apply or Cancel only, hands control to it (`ShipEditor.FollowHull`,
+  taken by `WorldView.FollowBuiltShip` with the usual control request; a refusal is `ShipEditor.FollowNotice`).
+  No other edit, and no edit the server ended, ever does. A new ship's
   draft is never kept for "press the key to go on". `FrameOrderTests` runs the dialog headless with the
   production keys and panel helper through a real server, and `EditorSessionTests` has the flag through a session.
   Check with `--open new-ship`, `new-ship-refused` and `new-ship-editor`.
@@ -196,10 +204,14 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   it. Do not build text inside another `Kit.F`: build the inner figures first.
 - **In-game tips:** text, anchor and trigger of every tip are data in `content/visuals/tips.json` (`TipCatalogue`:
   refuses unknown triggers, actions, repeated ids and a trigger with no tip). Key names in text are `{InputAction}`
-  placeholders, resolved from the loaded bindings. Code only fires a trigger from `TipTriggers`: one call,
+  placeholders, resolved from the loaded bindings. A tip belongs to its surface: `TipSurfaces` fires the map's, command view's and editor's tips when each opens and
+  withdraws them (`TipBoard.Withdraw`, nothing hidden) when it closes, so a map tip never waits behind the command view's. Code only fires a trigger from `TipTriggers`: one call,
   `ScreenHost.FireTip(TipTriggers.X)` (or `TipBoard.Fire`); new moment = new constant, new tip entry. The rules
   (stack, Next, Close, tick) are `TipBoard`, font-free; the panel is `TipPanel`, placed by `TipPlacement` before the
   map and panels are laid out. Hidden ids are `ClientSettings.HiddenTips`, saved by the client when they change.
+  The title bar drags the panel (`TipPanel.Draw` returns true while held; only with the pointer free): the shift from
+  the anchor's place, in unscaled pixels, is saved per anchor (`TipPlacement.KeyOf`, `ClientSettings.TipPositions`,
+  `TipBoard.Shift`/`SetShift`) once the bar is let go, kept on screen by `TipPlacement.Place`, and cleared by Reset tips.
   The panel is one window without keyboard navigation and takes no input while the pilot pointer is captured; it
   must never change `PointerFrame`. A surface under it that does its own pointer routing blocks its rectangle (the
   map: `BlockMapForTip`, `Claim`). Escape goes to `HandleTipShortcut` first; every other Escape reads
@@ -244,7 +256,7 @@ The client opens a real window on the developer's desktop, and they are usually 
   Do not create a headless output: a monitor manager such as hyprmoncfg adopts it and moves the developer's
   workspaces. Without such a rule (GNOME, macOS, Windows), tell the developer windows will appear first.
 - `make run ARGS="--start local --open <view> --capture /path/shot.png --capture-after 2.5"` saves a screenshot
-  and exits. Views: `command`, `edit` (asks to edit the own ship; the editor opens on the grant), `drone` (steps out of the hull into the escape drone), `map`, `map-hover` (the map with the pointer on your own sector, a preview card), `map-card` (your own sector's card pinned), `map-card-near` (a sector 144 km away: a blind jump with risk) and `map-card-far` (460 km: out of drive range), `command-menu` (the command view's right-click menu on a blind jump 60 km ahead for the ship being flown: Plot jump), `command-menu-fleet` (the same for the other ships: Jump here), `command-menu-close` (3 km, too close) and `command-menu-far` (450 km, too far), `new-ship` (leaves the pod in the drone and opens the New ship dialog empty; `--tips-sample on` shows the drone-edit tip beside it), `new-ship-refused` (the same with a refusal shown, put there by the hook rather than sent by a server) and `new-ship-editor` (builds a ship through the real dialog and server: the editor opens on its single block, drone still flown; capture after 4 s), `map-tilt` (the same, tilted), `map-reach` and `map-reach-tilt` (zoomed in on the own position to show the shape of sensor reach), `scan` (pinned card and a scan started: capture after 2.5 s for progress, after 7 s for the charted result; add `--map-cell 190` to see field and cloud outlines, `--map-tilt`, `--map-hover` to rest the pointer on the own ship), `command-fog` (the command view pulled back to show sensor rings and fog, all owned ships selected), `command-fog-one` (only the flown ship selected), `command-fog-pair` and `command-fog-far` (it and another ship that jumps 6 km or 14 km away along -x, selected; capture after 28 s), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,
+  and exits. Views: `command`, `edit` (asks to edit the own ship; the editor opens on the grant), `drone` (steps out of the hull into the escape drone), `map`, `map-hover` (the map with the pointer on your own sector, a preview card), `map-card` (your own sector's card pinned), `map-card-near` (a sector 144 km away: a blind jump with risk) and `map-card-far` (460 km: out of drive range), `command-menu` (the command view's right-click menu on a blind jump 60 km ahead for the ship being flown: Plot jump), `command-menu-fleet` (the same for the other ships: Jump here), `command-menu-close` (3 km, too close) and `command-menu-far` (450 km, too far), `new-ship` (leaves the pod in the drone and opens the New ship dialog empty; `--tips-sample on` shows the drone-edit tip beside it), `new-ship-refused` (the same with a refusal shown, put there by the hook rather than sent by a server) `new-ship-editor` (builds a ship through the real dialog and server: the editor opens on its single block, drone still flown; capture after 4 s) and `new-ship-closed` (the same, then cancels that edit: you fly the new ship; capture after 6 s), `map-tilt` (the same, tilted), `map-reach` and `map-reach-tilt` (zoomed in on the own position to show the shape of sensor reach), `scan` (pinned card and a scan started: capture after 2.5 s for progress, after 7 s for the charted result; add `--map-cell 190` to see field and cloud outlines, `scan-pilot` (the flight view with a scan started: capture after 2.5 s for the bar, 6.5 s for result and cooldown, 12 s for the cooldown alone; `--tips-sample on` shows the scan tip), `--map-tilt`, `--map-hover` to rest the pointer on the own ship), `command-fog` (the command view pulled back to show sensor rings and fog, all owned ships selected), `command-fog-one` (only the flown ship selected), `command-fog-pair` and `command-fog-far` (it and another ship that jumps 6 km or 14 km away along -x, selected; capture after 28 s), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,
   `players`, `social`, `friends`, `chat`, `hud` (the world with the party list and recent chat only). The social views and
   `hud` leave the performance overlay off. Screens
   without a session: `--start menu|join|settings|newgame|credits|account|load`; `--set id=value` shows on `newgame`, and so

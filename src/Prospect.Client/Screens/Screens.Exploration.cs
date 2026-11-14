@@ -1,5 +1,6 @@
 using Brutal.ImGuiApi;
 using Brutal.Numerics;
+using Prospect.Client.Input;
 using Prospect.Client.Ui;
 using Prospect.Client.World;
 using Prospect.Engine.Time;
@@ -44,22 +45,51 @@ internal sealed partial class ScreenHost
         Bridge?.RequestScan();
     }
 
-    /// <summary>
-    /// The scan on the flight and command displays: a bar while it runs, then for a few seconds what came of it,
-    /// under the top of the view. Flight goes on throughout.
-    /// </summary>
-    private void DrawScanStrip(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, float alpha)
+    /// <summary>Starts a scan of the own sector as the key would, in the flight view. Used by <c>--open scan-pilot</c>.</summary>
+    public void OpenScanPilot() => Bridge?.RequestScan();
+
+    // The scan key's name for drawing, kept until the binding changes so the frame never builds it again.
+    private InputBinding _scanKeyBinding;
+    private byte[] _scanKey = [];
+
+    /// <summary>The first control bound to the scan action, in capitals as UTF-8; "UNBOUND" when none is.</summary>
+    private ReadOnlySpan<byte> ScanKeyName()
     {
+        var bindings = _app.Actions.Bindings(InputAction.ScanSector);
+        if (bindings.IsEmpty)
+            return "UNBOUND"u8;
+        if (_scanKey.Length == 0 || bindings[0] != _scanKeyBinding)
+        {
+            _scanKeyBinding = bindings[0];
+            _scanKey = System.Text.Encoding.UTF8.GetBytes(bindings[0].DisplayName.ToUpperInvariant());
+        }
+
+        return _scanKey;
+    }
+
+    /// <summary>
+    /// The scan on the flight and command displays, small and muted under the top of the view: a bar while it runs,
+    /// then for a few seconds what came of it, and under that the time until the sector can be scanned again. Flight
+    /// goes on throughout. With the pointer shown, resting it on the strip names the scan key.
+    /// </summary>
+    private void DrawScanStrip(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, float alpha, bool pointable)
+    {
+        var look = MapLook;
         var scan = snapshot.Exploration.Scan;
-        var running = scan.State == ScanState.Scanning;
-        if (!running && _scan.SinceResult > MapLook.ScanResultSeconds)
+        var here = world.Sector.Coord;
+        var show = ScanRules.Strip(scan, here, snapshot.ServerTick, _scan.SinceResult, look.ScanResultSeconds);
+        var running = show.Running;
+        var cooldown = show.CooldownSeconds;
+        var result = show.ResultWindow ? ScanResult(scan, scan.Sector, out _) : default;
+        if (!running && cooldown == 0 && result.Length == 0)
             return;
         var display = _ui.DisplaySize;
-        var width = Math.Min(Kit.Px(300), display.X - Kit.Px(Theme.Space5) * 2);
+        var width = Math.Min(Kit.Px(look.ScanStripWidth), display.X - Kit.Px(Theme.Space5) * 2);
         var top = HudTop + (world.CommandBlend > 0.5f ? Kit.Px(62) : Kit.Px(Theme.Space2));
         var min = new float2(MathF.Round((display.X - width) * 0.5f), top);
         var previous = Kit.Fade;
-        Kit.Fade = alpha;
+        Kit.Fade = alpha * look.ScanStripAlpha;
+        var height = 0f;
         if (running)
         {
             var progress = ScanTracker.Progress(scan, snapshot.ServerTick);
@@ -70,19 +100,66 @@ internal sealed partial class ScreenHost
             var bar = min + new float2(0, Kit.Px(18));
             draw.AddRectFilled(bar, bar + new float2(width, Kit.Px(4)), Kit.Color(Theme.PanelRaised, 0.9f));
             draw.AddRectFilled(bar, bar + new float2(width * progress, Kit.Px(4)), Kit.Color(Theme.Info));
+            height = Kit.Px(22);
         }
         else
         {
-            var result = ScanResult(scan, scan.Sector, out var color);
+            var line = min.Y;
             if (result.Length > 0)
             {
+                ScanResult(scan, scan.Sector, out var color);
                 var resultWidth = Kit.Measure(_ui.Mono, Theme.FontCaption, result).X;
-                Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(MathF.Round((display.X - resultWidth) * 0.5f), min.Y), color, result,
-                    Math.Clamp(MapLook.ScanResultSeconds - _scan.SinceResult, 0f, 1f));
+                Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(MathF.Round((display.X - resultWidth) * 0.5f), line), color, result,
+                    Math.Clamp(look.ScanResultSeconds - _scan.SinceResult, 0f, 1f));
+                line += Kit.Px(16);
+                height = Kit.Px(16);
+            }
+
+            if (cooldown > 0)
+            {
+                var text = Kit.F($"NEXT SCAN IN {cooldown} S");
+                var textWidth = Kit.Measure(_ui.Mono, Theme.FontCaption, text).X;
+                Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(MathF.Round((display.X - textWidth) * 0.5f), line), Theme.TextDim, text, look.ScanCooldownAlpha / look.ScanStripAlpha);
+                height += Kit.Px(16);
             }
         }
 
         Kit.Fade = previous;
+        if (pointable && !_ui.PointerOverInterface)
+        {
+            var mouse = ImGui.GetIO().MousePos;
+            if (mouse.X >= min.X && mouse.X <= min.X + width && mouse.Y >= min.Y && mouse.Y <= min.Y + height)
+                DrawScanTip(ImGui.GetForegroundDrawList(), snapshot, world, min, new float2(width, height));
+        }
+    }
+
+    /// <summary>
+    /// A tooltip for the scan, under a control or readout: its key, and in a line what it does now (ready, running,
+    /// cooling down, or no charting block). It takes no input and is drawn over everything.
+    /// </summary>
+    private void DrawScanTip(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, float2 anchorMin, float2 anchorSize)
+    {
+        var scan = snapshot.Exploration.Scan;
+        var gate = ScanRules.Gate(scan, world.Sector.Coord, snapshot.ServerTick);
+        var seconds = snapshot.Content.Exploration.ScanTicks / (float)TickLoop.SimulationHz;
+        var title = Kit.F($"SCAN SECTOR   {ScanKeyName()}");
+        var note = gate switch
+        {
+            ScanGate.Running => "Flight goes on. Leaving the sector or switching ship cancels."u8,
+            ScanGate.Cooling => Kit.F($"Cooling down: ready in {ScanRules.CooldownSeconds(scan, world.Sector.Coord, snapshot.ServerTick)} s."),
+            _ => !_coverage.OwnCanChart ? "This ship has no charting block."u8 : Kit.F($"Charts the sector you are in in {seconds:0} s. Flight goes on."),
+        };
+        var pad = Kit.Px(Theme.Space2);
+        var titleSize = Kit.Measure(_ui.Mono, Theme.FontCaption, title);
+        var noteSize = Kit.Measure(_ui.Sans, Theme.FontCaption, note);
+        var size = new float2(Math.Max(titleSize.X, noteSize.X) + pad * 2, titleSize.Y + noteSize.Y + pad * 2 + Kit.Px(2));
+        var display = _ui.DisplaySize;
+        var min = new float2(Math.Clamp(anchorMin.X + (anchorSize.X - size.X) * 0.5f, Kit.Px(Theme.Space2), Math.Max(Kit.Px(Theme.Space2), display.X - size.X - Kit.Px(Theme.Space2))), anchorMin.Y + anchorSize.Y + Kit.Px(Theme.Space2));
+        if (min.Y + size.Y > display.Y - Kit.Px(Theme.Space2))
+            min.Y = Math.Max(Kit.Px(Theme.Space2), anchorMin.Y - size.Y - Kit.Px(Theme.Space2));
+        Hud.Plate(draw, min, min + size, Theme.Info, true);
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, min + new float2(pad, pad), Theme.Accent, title);
+        Kit.Text(draw, _ui.Sans, Theme.FontCaption, min + new float2(pad, pad + titleSize.Y + Kit.Px(2)), Theme.TextDim, note);
     }
 
     /// <summary>
@@ -90,8 +167,8 @@ internal sealed partial class ScreenHost
     /// nothing is selected). Ships within the content's radar link distance of each other, directly or through a
     /// chain, share a picture: their gas-shaped reach is drawn as one merged outline with no line inside it, and
     /// ships farther apart each get their own. A thin line is the boundary and a few faint strokes follow it
-    /// outward, darkening gently, so unseen space reads as unseen without hiding what lies behind. A very faint tint
-    /// shows where gas cut the range. Lost contacts show at their last position, hollow and fading. The sector's
+    /// outward, darkening gently, so unseen space reads as unseen without hiding what lies behind. A faint amber
+    /// line marks the plain range where gas cut it short. Lost contacts show at their last position, hollow and fading. The sector's
     /// knowledge state sits under the view's title.
     /// </summary>
     private void DrawCommandFog(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, float alpha)
@@ -112,13 +189,17 @@ internal sealed partial class ScreenHost
             for (var other = 0; other < _coverage.ActiveCount && alone; other++)
                 alone = other == s || _coverage.GroupOf(other) != _coverage.GroupOf(s);
 
-            // A ship on its own keeps the sphere's silhouette as its volume; linked ships show the outline only.
-            if (alone && world.ProjectDisc(_coverage.Positions[i], (float)radius, out var sphere, out var pixels, out _))
-                draw.AddCircle(sphere, pixels, Kit.Color(Theme.Good, look.CommandRingAlpha * 0.5f * alpha), 64, Kit.Px(1f));
             if (!_coverage.Ring(i, out var x, out var z, out var nominal, out var samples))
                 continue;
-            if (look.GasTintAlpha > 0)
-                DrawGasTint(draw, world, i, x, z, nominal, samples, plane, Kit.Color(Theme.Accent, look.GasTintAlpha * alpha));
+
+            // A ship on its own keeps the sphere's silhouette as its volume; linked ships show the outline only. Where
+            // gas cut the reach the amber plain-range line already shows how far it would reach, so a second, differently
+            // projected circle for the same range is left out.
+            var cut = false;
+            for (var k = 0; k < samples.Length && !cut; k++)
+                cut = samples[k] < nominal * 0.995;
+            if (alone && !(cut && look.GasRangeAlpha > 0) && world.ProjectDisc(_coverage.Positions[i], (float)radius, out var sphere, out var pixels, out _))
+                draw.AddCircle(sphere, pixels, Kit.Color(Theme.Good, look.CommandRingAlpha * 0.5f * alpha), 64, Kit.Px(1f));
             if (!labelled && world.Project(new Double3(x, plane, z - samples[samples.Length * 3 / 4]), out var labelAt))
             {
                 labelled = true;
@@ -143,6 +224,21 @@ internal sealed partial class ScreenHost
                     continue;
                 if (world.ProjectSegment(new Double3(piece.AX + ox, plane, piece.AZ + oz), new Double3(piece.BX + ox, plane, piece.BZ + oz), out var s0, out var s1))
                     draw.AddLine(s0, s1, color, fadeWidth);
+            }
+        }
+
+        // Where gas cut a sensor short, a faint amber line marks how far it would have seen: the plain range, outlined
+        // once where such circles overlap. It is a line and not a fill, so it can never cover more than a pixel's width
+        // of the view however thick the gas.
+        if (look.GasRangeAlpha > 0)
+        {
+            var lost = _coverage.LostRange(true);
+            var amber = Kit.Color(Theme.Accent, look.GasRangeAlpha * alpha);
+            for (var k = 0; k < lost.Length; k++)
+            {
+                ref readonly var piece = ref lost[k];
+                if (world.ProjectSegment(new Double3(piece.AX, plane, piece.AZ), new Double3(piece.BX, plane, piece.BZ), out var s0, out var s1))
+                    draw.AddLine(s0, s1, amber, Kit.Px(1f));
             }
         }
 
@@ -190,34 +286,5 @@ internal sealed partial class ScreenHost
         var width = Kit.Measure(_ui.Mono, Theme.FontCaption, state).X;
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(MathF.Round((_ui.DisplaySize.X - width) * 0.5f), HudTop + Kit.Px(40)),
             _coverage.ActiveCount == 0 ? Theme.Bad : charted ? Theme.Info : Theme.Accent, state, alpha);
-    }
-
-    /// <summary>
-    /// Fills, very faintly, the sliver between a sensor's plain sphere and its gas-shaped boundary where gas cut the
-    /// range, so a short side reads as lost range rather than as nothing. Left out where another shown sensor covers
-    /// the sliver, and drawn once where the slivers of several sensors overlap.
-    /// </summary>
-    private void DrawGasTint(ImDrawListPtr draw, WorldView world, int index, double x, double z, double nominal, ReadOnlySpan<double> samples, double plane, uint color)
-    {
-        var n = samples.Length;
-        var tolerance = nominal * 0.005;
-        for (var k = 0; k < n; k++)
-        {
-            var next = k + 1 == n ? 0 : k + 1;
-            if (samples[k] >= nominal - tolerance && samples[next] >= nominal - tolerance)
-                continue;
-            var a0 = k * (Math.Tau / n);
-            var a1 = next * (Math.Tau / n);
-            double c0 = Math.Cos(a0), s0 = Math.Sin(a0), c1 = Math.Cos(a1), s1 = Math.Sin(a1);
-            var mx = x + (nominal + (samples[k] + samples[next]) * 0.5) * 0.5 * (c0 + c1) * 0.5;
-            var mz = z + (nominal + (samples[k] + samples[next]) * 0.5) * 0.5 * (s0 + s1) * 0.5;
-            if (_coverage.InsideShown(mx, mz, index) || _coverage.InsideEarlierDisc(mx, mz, index))
-                continue;
-            if (world.Project(new Double3(x + nominal * c0, plane, z + nominal * s0), out var p0)
-                && world.Project(new Double3(x + nominal * c1, plane, z + nominal * s1), out var p1)
-                && world.Project(new Double3(x + samples[next] * c1, plane, z + samples[next] * s1), out var p2)
-                && world.Project(new Double3(x + samples[k] * c0, plane, z + samples[k] * s0), out var p3))
-                draw.AddQuadFilled(p0, p1, p2, p3, color);
-        }
     }
 }

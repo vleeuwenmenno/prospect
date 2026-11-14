@@ -53,6 +53,25 @@ public sealed class TipTests
     }
 
     [Fact]
+    public void TheUnchartedSectorTipNamesTheScanKeyAndFollowsARebinding()
+    {
+        var catalogue = TipCatalogue.Load(Shipped, ActionMap.Load(Path.Combine(Content, "input", "bindings.json")));
+        var tip = catalogue.Tips.Single(t => t.Id == "scan-key");
+        Assert.Equal(TipTriggers.UnchartedSector, tip.Trigger);
+        Assert.Contains("Press K to scan this sector", tip.Text);
+        Assert.Contains("K does the same", catalogue.Tips.Single(t => t.Id == "map-scan").Text);
+
+        var path = Scratch() + ".json";
+        File.WriteAllText(path, File.ReadAllText(Path.Combine(Content, "input", "bindings.json")).Replace("\"ScanSector\": [\"Key:K\", \"Pad:DpadLeft\"]", "\"ScanSector\": [\"Key:J\"]"));
+        Assert.Contains("Press J to scan this sector", TipCatalogue.Load(Shipped, ActionMap.Load(path)).Tips.Single(t => t.Id == "scan-key").Text);
+
+        // The board brings it up on its trigger, once until it is hidden.
+        var board = new TipBoard(catalogue, new ClientSettings());
+        Assert.Equal(1, board.Fire(TipTriggers.UnchartedSector));
+        Assert.Equal("scan-key", board.Current.Id);
+    }
+
+    [Fact]
     public void ARebindingChangesTheKeyATipNames()
     {
         var path = Scratch() + ".json";
@@ -277,5 +296,104 @@ public sealed class TipTests
         // Beside a point near the right edge the tip flips to the left of it, never over it.
         var beside = TipPlacement.Place(new TipAnchor(TipRegion.Cursor, TipSide.BottomRight, 0, 0), true, point, size, display, scale);
         Assert.True(beside.X + size.X <= point.Left);
+    }
+
+    private static string[] Stack(TipBoard board)
+    {
+        var ids = new string[board.Count];
+        var shown = board.Index;
+        for (var i = 0; i < ids.Length; i++)
+        {
+            ids[i] = board.Current.Id;
+            board.Next();
+        }
+
+        // Next wrapped a full turn, so the tip shown is the one that was.
+        Assert.Equal(shown, board.Index);
+        return ids;
+    }
+
+    [Fact]
+    public void MapTipsFireForTheMapAndAreWithdrawnWhenItClosesSoTheCommandViewShowsItsOwn()
+    {
+        var board = new TipBoard(Catalogue(), new ClientSettings());
+        var surfaces = new TipSurfaces();
+
+        // The map opens, with the own sector's card pinned: its tips, in file order, and none of the command view's.
+        surfaces.Track(board, mapOpen: true, commandView: false, editorShown: false, scanAvailable: true);
+        Assert.Equal(["map-layers", "map-fog", "map-scan"], Stack(board));
+        Assert.Equal("map-layers", board.Current.Id);
+
+        // Straight to the command view: the map's tips go with the map, and the first tip shown is the command view's.
+        surfaces.Track(board, mapOpen: false, commandView: true, editorShown: false, scanAvailable: false);
+        Assert.Equal(["command-select", "command-jump", "command-fog"], Stack(board));
+        Assert.Equal("command-select", board.Current.Id);
+        Assert.Equal(0, board.Index);
+
+        // Leaving the command view takes its tips away; coming back brings them again.
+        surfaces.Track(board, mapOpen: false, commandView: false, editorShown: false, scanAvailable: false);
+        Assert.False(board.Active);
+        surfaces.Track(board, mapOpen: false, commandView: true, editorShown: false, scanAvailable: false);
+        Assert.Equal(3, board.Count);
+    }
+
+    [Fact]
+    public void WithdrawingKeepsTheTipShownAndTheOtherTriggersTipsAndLeavesNothingHidden()
+    {
+        var settings = new ClientSettings();
+        var board = new TipBoard(Catalogue(), settings);
+        board.Fire(TipTriggers.MapOpened);
+        board.Fire(TipTriggers.ShieldOffline);
+        board.Fire(TipTriggers.CommandViewOpened);
+        Assert.Equal(["map-layers", "map-fog", "shield-offline", "command-select", "command-jump", "command-fog"], Stack(board));
+
+        // Show the shield tip, then the map closes: the shield tip stays shown, now first.
+        board.Next();
+        board.Next();
+        Assert.Equal("shield-offline", board.Current.Id);
+        Assert.Equal(2, board.Withdraw(TipTriggers.MapOpened));
+        Assert.Equal("shield-offline", board.Current.Id);
+        Assert.Equal(0, board.Index);
+        Assert.Equal(4, board.Count);
+        Assert.Equal(0, board.Withdraw(TipTriggers.MapOpened));
+        Assert.Empty(settings.HiddenTips);
+
+        // The tip shown goes with its surface: the next that stayed takes its place, and a tick it had is not carried over.
+        board.DontShowAgain = false;
+        Assert.Equal(1, board.Withdraw(TipTriggers.ShieldOffline));
+        Assert.Equal("command-select", board.Current.Id);
+        Assert.False(board.DontShowAgain);
+        Assert.Empty(settings.HiddenTips);
+    }
+
+    [Fact]
+    public void WithdrawingTheShownTipHidesItWhenThePlayerTickedDontShowAgain()
+    {
+        var settings = new ClientSettings();
+        var board = new TipBoard(Catalogue(), settings);
+        board.Fire(TipTriggers.MapOpened);
+        board.DontShowAgain = true;
+        Assert.Equal("map-layers", board.Current.Id);
+        Assert.Equal(2, board.Withdraw(TipTriggers.MapOpened));
+        Assert.False(board.Active);
+        Assert.Equal(["map-layers"], settings.HiddenTips);
+        Assert.True(board.TakeChanged());
+        // The other map tip was only withdrawn, not hidden: it fires again.
+        Assert.Equal(1, board.Fire(TipTriggers.MapOpened));
+        Assert.Equal("map-fog", board.Current.Id);
+    }
+
+    [Fact]
+    public void TheEditorsTipsFollowTheEditorAndTheShieldTipsOutliveEverySurface()
+    {
+        var board = new TipBoard(Catalogue(), new ClientSettings());
+        var surfaces = new TipSurfaces();
+        board.Fire(TipTriggers.ShieldOffline);
+        surfaces.Track(board, false, false, true, false);
+        Assert.Equal(["shield-offline", "editor-place", "editor-apply"], Stack(board));
+        surfaces.Track(board, true, false, false, false);
+        Assert.Equal(["shield-offline", "map-layers", "map-fog"], Stack(board));
+        surfaces.Track(board, false, false, false, false);
+        Assert.Equal(["shield-offline"], Stack(board));
     }
 }

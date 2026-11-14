@@ -6,6 +6,7 @@
   "sensorRadius": 5000,
   "proximityRadius": 250,
   "scanSeconds": 5,
+  "scanCooldownSeconds": 10,
   "contactSeconds": 15,
   "chartsPerOwner": 4096,
   "lightning": {

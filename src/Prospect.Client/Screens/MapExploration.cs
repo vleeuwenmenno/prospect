@@ -3,6 +3,7 @@ using Brutal.Numerics;
 using Prospect.Client.Input;
 using Prospect.Client.Ui;
 using Prospect.Client.World;
+using Prospect.Engine.Time;
 using Prospect.Game.Client;
 using Prospect.Game.World;
 
@@ -309,9 +310,13 @@ internal sealed class MapNavigation
 }
 
 /// <summary>
-/// The decided sector card's rules. Hovering shows a temporary card; a click pins the card of the sector clicked,
-/// replacing any other; a click outside the galaxy's bounds or Escape dismisses it; while one is pinned, hovering
-/// shows no second card and leaves the pinned one alone.
+/// The decided sector card's rules. Hovering shows a temporary card. Any click on the map outside the pinned card
+/// closes it: a left click on a sector then pins that sector's card in the same click (so a click on another sector
+/// replaces the card, on the pinned sector leaves it pinned, and outside the galaxy's bounds closes it), and a right
+/// click only closes it, since the right click opens the course menu. A click on the card itself, its X, its buttons
+/// or its list never gets here: the card is a window the map blocks. A click that only closes the course menu is the
+/// menu's and changes no card, and Escape closes the course menu, then the card. While one is pinned, hovering shows
+/// no second card and leaves the pinned one alone.
 /// </summary>
 internal sealed class MapCardState
 {
@@ -336,6 +341,9 @@ internal sealed class MapCardState
         Pinned = true;
         Sector = sector;
     }
+
+    /// <summary>A right click on the map outside the card: closes a pinned card and pins nothing.</summary>
+    public void RightClick() => Pinned = false;
 
     /// <summary>Escape: true when it closed a pinned card, so it closes nothing else.</summary>
     public bool Dismiss()
@@ -586,7 +594,7 @@ internal sealed class ScanTracker
             _hull = ownHull;
             Stop = ScanStop.None;
         }
-        else if (scan.State is ScanState.Completed or ScanState.Cancelled or ScanState.NoEquipment or ScanState.ChartLimit)
+        else if (scan.State is ScanState.Completed or ScanState.Cancelled or ScanState.NoEquipment or ScanState.ChartLimit or ScanState.Cooldown)
         {
             SinceResult = 0f;
             Stop = scan.State != ScanState.Cancelled ? ScanStop.None
@@ -605,6 +613,61 @@ internal sealed class ScanTracker
         var span = scan.CompletesTick - scan.StartedTick;
         return span <= 0 ? 1f : Math.Clamp((float)(serverTick - scan.StartedTick) / span, 0f, 1f);
     }
+}
+
+/// <summary>Whether the scan key and the card's button may ask for a scan now, by what the snapshot says.</summary>
+internal enum ScanGate : byte
+{
+    /// <summary>A request may go out; the server still decides.</summary>
+    Ready,
+
+    /// <summary>A scan is already running.</summary>
+    Running,
+
+    /// <summary>The sector was scanned, or a scan of it cancelled, too recently.</summary>
+    Cooling,
+}
+
+/// <summary>What the scan readout on the flight and command displays has to show this frame.</summary>
+internal readonly record struct ScanStrip(bool Running, bool ResultWindow, int CooldownSeconds)
+{
+    /// <summary>True when anything may be drawn: a bar, a result still in its window, or a cooldown.</summary>
+    public bool Any => Running || ResultWindow || CooldownSeconds > 0;
+}
+
+/// <summary>
+/// The client's reading of the server's scan cooldown. The server enforces it; this only keeps the key and the
+/// button from asking while the answer is known to be no, and says how long is left.
+/// </summary>
+internal static class ScanRules
+{
+    /// <summary>What a request for the sector the player is in would meet, at the snapshot's server tick.</summary>
+    public static ScanGate Gate(in ScanView scan, SectorCoord here, long serverTick) =>
+        scan.State == ScanState.Scanning ? ScanGate.Running
+        : scan.CoolingDown(here, serverTick) ? ScanGate.Cooling
+        : ScanGate.Ready;
+
+    /// <summary>
+    /// The scan key: when pressed, asks the server to scan the sector the ship being flown is in, unless a scan is
+    /// running or the sector is cooling down, which the snapshot already says. A ship with no charting block still
+    /// asks, so the server's refusal is what the readout tells. The same request as the map card's button. True when
+    /// a request went out.
+    /// </summary>
+    public static bool HandleKey(ActionMap actions, InputDevices devices, bool keyboardAvailable, in ScanView scan, SectorCoord here, long serverTick, PlayerInputBridge bridge)
+    {
+        if (!actions.Pressed(devices, InputAction.ScanSector, keyboardAvailable) || Gate(scan, here, serverTick) != ScanGate.Ready)
+            return false;
+        bridge.RequestScan();
+        return true;
+    }
+
+    /// <summary>What the strip shows: the bar while a scan runs, else a result for <paramref name="resultSeconds"/> after it ended, and the cooldown while there is one.</summary>
+    public static ScanStrip Strip(in ScanView scan, SectorCoord here, long serverTick, float sinceResult, float resultSeconds) =>
+        scan.State == ScanState.Scanning ? new ScanStrip(true, false, 0) : new ScanStrip(false, sinceResult <= resultSeconds, CooldownSeconds(scan, here, serverTick));
+
+    /// <summary>Whole seconds of cooldown left for <paramref name="here"/>, rounded up so it never reads 0 while still cooling; 0 when none.</summary>
+    public static int CooldownSeconds(in ScanView scan, SectorCoord here, long serverTick) =>
+        scan.CoolingDown(here, serverTick) ? (int)((scan.CooldownUntilTick - serverTick + TickLoop.SimulationHz - 1) / TickLoop.SimulationHz) : 0;
 }
 
 /// <summary>

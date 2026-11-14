@@ -199,6 +199,25 @@ public sealed class ControlsTests
     }
 
     [Fact]
+    public void TheScanKeyIsKOrDpadLeftNeedsNoModifierAndSharesNoControlWithAnotherAction()
+    {
+        var map = Defaults();
+        var names = map.Bindings(InputAction.ScanSector).ToArray().Select(b => b.DisplayName).ToArray();
+        Assert.Equal(["K", "Pad DpadLeft"], names);
+        Assert.Contains(new ControlsCatalog(map).Rows, r => r.Category == "Pilot" && r.Action == ControlsCatalog.ActionLabels[(int)InputAction.ScanSector] && r.Binding == "K / Pad DpadLeft");
+        var devices = new InputDevices();
+        devices.OnKey(GlfwKey.K, GlfwKeyAction.Press);
+        for (var action = (InputAction)0; action < InputAction.Count; action++)
+            Assert.Equal(action == InputAction.ScanSector, map.Pressed(devices, action, true));
+
+        // No other action or axis uses a control the scan key does.
+        foreach (var scan in map.Bindings(InputAction.ScanSector).ToArray())
+            for (var action = (InputAction)0; action < InputAction.Count; action++)
+                if (action != InputAction.ScanSector)
+                    Assert.DoesNotContain(scan, map.Bindings(action).ToArray());
+    }
+
+    [Fact]
     public void F2TogglesTheSectorPanelOnTheFrameItGoesDownAndFKeepsDownwardThrustAndFollow()
     {
         var map = Defaults();

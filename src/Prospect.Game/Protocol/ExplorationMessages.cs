@@ -9,7 +9,7 @@ public static class ExplorationMessage
     public const int ScanWireSize = 1;
     public const int MaxCharts = 32;
     public const int ChartWireSize = 24;
-    public const int MaxWireSize = 31 + MaxCharts * ChartWireSize;
+    public const int MaxWireSize = 51 + MaxCharts * ChartWireSize;
     public const int MaxDestroyed = 32;
     public const int VisibilityMaxWireSize = 13 + HullStore.MaxHulls / 8 + MaxDestroyed * sizeof(uint);
 
@@ -20,6 +20,8 @@ public static class ExplorationMessage
         Sector(ref writer, scan.Sector);
         writer.WriteInt64(scan.StartedTick);
         writer.WriteInt64(scan.CompletesTick);
+        Sector(ref writer, scan.CooldownSector);
+        writer.WriteInt64(scan.CooldownUntilTick);
         writer.WriteByte((byte)charts.Length);
         foreach (var chart in charts)
         {
@@ -36,11 +38,13 @@ public static class ExplorationMessage
             State = (ScanState)reader.ReadByte(),
             Sector = Sector(ref reader),
             StartedTick = reader.ReadInt64(),
-            CompletesTick = reader.ReadInt64()
+            CompletesTick = reader.ReadInt64(),
+            CooldownSector = Sector(ref reader),
+            CooldownUntilTick = reader.ReadInt64()
         };
         count = reader.ReadByte();
-        if ((byte)scan.State > (byte)ScanState.ChartLimit || count > charts.Length || count > MaxCharts
-            || scan.StartedTick < 0 || scan.CompletesTick < scan.StartedTick) return false;
+        if ((byte)scan.State > (byte)ScanState.Cooldown || count > charts.Length || count > MaxCharts
+            || scan.StartedTick < 0 || scan.CompletesTick < scan.StartedTick || scan.CooldownUntilTick < 0) return false;
         for (var i = 0; i < count; i++)
         {
             charts[i] = new(reader.ReadUInt32(), Sector(ref reader), reader.ReadInt64());

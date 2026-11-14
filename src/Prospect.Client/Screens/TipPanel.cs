@@ -77,9 +77,10 @@ internal static class TipPanel
     /// Draws the tip the board shows in <paramref name="rect"/> and applies a press on Next, Close or the tick to
     /// the board. <paramref name="interactive"/> is false while the pointer is hidden: the window then takes no
     /// input and shows the hint in place of the buttons. <paramref name="claim"/> is called after the window
-    /// begins, for a surface under it that must hand the pointer over (the map).
+    /// begins, for a surface under it that must hand the pointer over (the map). The title bar is a handle: the
+    /// result is true while it is held, and the caller moves the panel by the pointer's movement.
     /// </summary>
-    public static void Draw(TipBoard board, TipCatalogue catalogue, in HudRect rect, bool interactive, Action? claim = null)
+    public static bool Draw(TipBoard board, TipCatalogue catalogue, in HudRect rect, bool interactive, Action? claim = null)
     {
         var ui = Kit.Ui;
         var tip = board.Current;
@@ -107,6 +108,18 @@ internal static class TipPanel
             var counter = Kit.F($"{board.Index + 1}/{board.Count}");
             var counterSize = Kit.Measure(ui.Mono, Theme.FontCaption, counter);
             Kit.Text(draw, ui.Mono, Theme.FontCaption, new float2(max.X - pad - counterSize.X, y + (title.Y - counterSize.Y) * 0.5f), Theme.Accent, counter);
+        }
+
+        // The title bar, up to the gap under the title, is the handle the panel is dragged by. It is its own item, so
+        // a press on a button or the tick below is never a drag, and a drag let go over a button presses nothing.
+        var dragging = false;
+        if (interactive)
+        {
+            ImGui.SetCursorScreenPos(min);
+            ImGui.InvisibleButton("##tipdrag"u8, new float2(size.X, pad + title.Y + Kit.Px(Theme.Space2) * 0.5f));
+            dragging = ImGui.IsItemActive();
+            if (dragging || ImGui.IsItemHovered())
+                ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeAll);
         }
 
         y += title.Y + Kit.Px(Theme.Space2);
@@ -168,6 +181,7 @@ internal static class TipPanel
             board.Next();
         else if (pressedClose)
             board.Close();
+        return dragging;
     }
 
     /// <summary>One small button in <paramref name="area"/>.</summary>

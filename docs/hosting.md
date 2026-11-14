@@ -666,7 +666,7 @@ This status is an observation at open, not hosting authorization. Saved multipla
 - Move or copy the complete stopped folder, preserving key permissions, to retain identity. A bare database is insufficient.
 - Independent Claude security review remains required. No admission, TLS, key rotation or destructive recovery is included.
 
-## Exploration foundation (protocol 39)
+## Exploration foundation (protocol 44)
 
 The server owns scans and charts and filters dynamic live state by personal sensor coverage.
 `rules/exploration.json` is shared content and participates in content identity.
@@ -678,6 +678,11 @@ Equipment has the plating mass and hit points it replaces, preserving stock flig
 
 - A scan runs on the controlled hull while flight continues. Sector/control change or loss of its last charting block cancels it.
 - Completion records only that sector, its owner and authoritative survey tick. Repeat scans refresh that tick.
+- Cooldown: when a scan ends (completed, refused for chart capacity or cancelled) the server records the sector and
+  `scanCooldownSeconds` (`rules/exploration.json`, 10 s provisional, 0 turns it off, at most 3600) as `CooldownSector`
+  and `CooldownUntilTick` in that owner's scan. A request for the sector in that cooldown is refused with
+  `ScanState.Cooldown` and changes nothing else; it never moves the cooldown. One entry per owner: another sector can
+  be scanned at once, and the next scan to end replaces the entry. Transient: loading forgets it.
 - Permanent charts are bounded by content per owner; new sectors at capacity are refused, never evicted.
 - `SectorChart` describes immutable geography under the saved seed, generator version and content identity.
   `ExplorationView.ChartFields` reconstructs field centers, axes and envelope extents without mineral composition.
@@ -689,10 +694,14 @@ Field envelopes can cross the surveyed sector's walls; this does not chart those
 
 ### Client contract for the map worker
 
-`PlayerInputBridge.RequestScan()` queues a one-shot intent. The server refuses missing equipment or chart capacity.
+`PlayerInputBridge.RequestScan()` queues a one-shot intent. The server refuses missing equipment, chart capacity or
+a sector still cooling down (`ScanState.NoEquipment`, `ChartLimit`, `Cooldown`).
 `SessionSnapshot.Exploration` owns its buffers; read only counted prefixes, as with hull views.
 
-- `Scan`: state, sector, start and completion world ticks. Completed/refused/cancelled states remain until another request.
+- `Scan`: state, sector, start and completion world ticks, and the cooldown (`CooldownSector`, `CooldownUntilTick`).
+  Completed/refused/cancelled states remain until another request. `ScanView.CoolingDown(sector, tick)` is the one test.
+  The client (`ScanRules`) keeps the scan key and the card's button from asking while it is cooling, and shows the time
+  left; the server enforces it either way.
 - `Charts[0..ChartCount]`: owner, sector and recorded world tick. Chart delivery is incremental; it never implies live coverage.
 - `Contacts[0..ContactCount]`: hull, owner, design, last observed position/tick, live flag and loss tick.
 - A lost ship marker freezes and expires after the content lifetime. It is not present in `SessionSnapshot.Hulls` or collision prediction.
@@ -735,7 +744,7 @@ Galaxy vertical limits remain unfinished.
 
 ### Wire sizes and bounded work
 
-Scan is 1 byte. Exploration is at most 799 bytes: scan state/times and up to 32 chart records of 24 bytes.
+Scan is 1 byte. Exploration is at most 819 bytes: scan state/times, the cooldown sector and tick, and up to 32 chart records of 24 bytes.
 Visibility is 13 bytes plus mask words and up to 32 destroyed full hull IDs; maximum 8,333 bytes.
 Social envelopes add one validated unknown byte; the maximum is 818 bytes. Hello=1 and Reject=3 and their first fields remain unchanged.
 Invisible tail capacity is omitted. Requests use existing admission/rate budgets; the client reserves one scan request per tick.
@@ -774,6 +783,10 @@ Content evaluator version is 5. Snapshot codec stays 3: existing per-block HP st
   The server revalidates at that input's world interval; moving after plotting can make it too close or too far. Charging also cancels if drift or drive loss invalidates range.
 - Owned unpiloted ships use existing `IssueFleetOrder`; ownership and piloted-state checks remain authoritative.
   Same-sector restrictions apply to taking control, not fleet orders (docs/direction.md).
+- A jump order is never cancelled by input. `HullSim.InputEndsOrder` (shared) is the one test the client uses to
+  send a cancel when thrust is present: it is true for a move order, never for a jump. The server reads no input
+  for this, it applies the orders in the pilot records; only an explicit empty order (halt) cancels a jump before
+  the drive fires. No wire change.
 - Refusal enum: None, InvalidTarget, NoDrive, TooClose, TooFar, Busy.
   Busy means already in transit/arrival; changing a charging order keeps existing cancel-and-restart behavior.
 
@@ -816,8 +829,8 @@ Drive blocks specify range in sectors, converted to metres by the shared hull ev
 - The integral is analytic, with scalar double arithmetic and square roots; no shader noise, warp, lean, motion,
   or `gasWispiness`. Gas beyond the target costs nothing. This is a smooth gameplay envelope, not the visible fringe.
 - `rules/exploration.json` sets `gasOpticalPenalty` to 1.0 (allowed 0–10), base range 5,000 m, proximity 250 m.
-  The file already participates in shared content identity. The combined build uses protocol 42, generation 5 and unchanged save codec 3.
-  Content evaluator is 8 (gas sensors plus sector-scaled drives), so an older executable with these files cannot claim the same sensor arithmetic.
+  The file already participates in shared content identity. The combined build uses protocol 44, generation 6 and unchanged save codec 3.
+  Content evaluator is 9 (gas sensors plus sector-scaled drives), so an older executable with these files cannot claim the same sensor arithmetic.
   Existing content identities, including saved-world identities, change.
 - `GasSensors.Reach` returns metres along any nonzero direction; `SampleReach` fills caller-owned doubles for
   caller-owned `Double3` directions (ring or elevations). It uses the same cost test, 24 bisections, keeping
@@ -829,7 +842,7 @@ Cloud inputs and costs:
   another cache call; do not retain it. The galaxy and range are immutable for the cache's lifetime.
 - The server uses a 256-entry direct-mapped sector cache; entries collect anchors through `GasCloudQuery`,
   ultimately `GasCloudModule.TryGetCloud`. No generated sector slots are read. Hits generate nothing.
-- At 5 km range / 20–80 km sectors each miss queries 125 anchors, enough for every sensor position in the sector,
+- At 5 km range / 20–160 km sectors each miss queries 125 anchors, enough for every sensor position in the sector,
   including neighbours' clouds. Cache collisions regenerate deterministically. Provisioning allocates; hits and misses do not.
 - Range is supported through eight sector widths. Storage is bounded by 256 times the full anchor cube, so
   cloud lists cannot truncate. The production cube has 125 slots per entry (about 1.3 MiB of placement storage).
@@ -864,6 +877,7 @@ Created gives the new hull id and an ordinary Open grant in `SessionSnapshot.Edi
 The hull snapshot may follow the reliable grant: the UI must wait until that hull is present before opening its draft.
 The UI must track the granted hull, not OwnHull; Apply replaces the edited ship while leaving drone control unchanged.
 Cancellation closes the edit but does not remove the created ship. Editing never protects it from damage.
+The server has no special case: the client follows the closed edit with an ordinary control request (see Interface).
 Switching control, losing the drone or ship, damage to the edited ship, or a jump ends the grant.
 
 The request shares the editor envelope and receive/rate budgets; it is admitted only after the normal handshake.
@@ -889,7 +903,14 @@ the client offers the New ship dialog only then (`SessionSnapshot.OwnIsDrone`). 
 - Each press of the key in the drone brings up the `drone-edit` tip beside the dialog (hidden for good only if the
   player ticked "Don't show this again").
 - Once created, the editor opens on the new hull (one root block) when that hull is in the snapshot. Apply rebuilds
-  it; the player stays in the drone.
+  it.
+- **Control after closing (decided).** When the player closes the edit of a ship just built, by Apply or by Cancel
+  (editor key, Esc or the Cancel button), the client asks for control of that ship with the usual `Control` message:
+  after Apply the replacement hull, after Cancel the ship as it was made. The same rules apply as to any switch: the
+  hull is the player's and in the drone's sector, and the drone is removed. The request waits up to 3 s for the hull
+  to appear in the snapshot. If it cannot be made the editor shows why (gone, or outside the sector) and the player
+  stays in the drone. Only the New ship flow does this: an ordinary edit or a `Ctrl`+`B` drone edit never moves the
+  player, and an edit the server ended (damage, jump, timeout) or that a change of ship ended does not either.
 EditorState adds a creation status byte; other editor and design transfer sizes are unchanged.
 Refusals include NotPiloting, BadName, DuplicateName, ShipLimit, NoClearSpot, CatalogueFull,
 HullLimit, Busy, TooSoon, Jumping and the existing client-readiness/check failure reasons.
@@ -898,7 +919,7 @@ HullLimit, Busy, TooSoon, Jumping and the existing client-readiness/check failur
 
 - Resource costs, shipyards, alternative spawn candidates, renaming, and remote reopening after cancelling the initial grant.
 
-## Gas kinds and environment (protocol 43)
+## Gas kinds and environment (protocol 44)
 
 Generation 6 and content evaluator 9 cover cloud kinds, icicles and lightning sensing.
 `HullRecord` gains one environment byte; its wire bounds grow by one.

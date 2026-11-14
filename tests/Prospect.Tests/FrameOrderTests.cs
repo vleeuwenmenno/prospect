@@ -738,9 +738,154 @@ public sealed class FrameOrderTests : IDisposable
         var size = TipPanel.Measure(_tipCatalogue!, tip, Screen.X);
         var onDialog = tip.Anchor.Region == TipRegion.NewShipDialog && _newShip.Open;
         var known = tip.Anchor.Region == TipRegion.Screen || onDialog;
-        var at = TipPlacement.Place(tip.Anchor, known, onDialog ? NewShipDialog.Panel(Screen, _tipScale) : default, size, Screen, _tipScale);
+        var area = onDialog ? NewShipDialog.Panel(Screen, _tipScale) : default;
+        var shift = board.Shift(tip.Anchor, known);
+        // As ScreenHost.PlanTip: a title bar held last frame moves the panel by this frame's pointer movement.
+        if (_tipDragging && ImGui.IsMouseDown(ImGuiMouseButton.Left))
+        {
+            shift = TipPlacement.Dragged(tip.Anchor, known, area, size, Screen, _tipScale, shift, ImGui.GetIO().MouseDelta);
+            board.SetShift(tip.Anchor, known, shift);
+        }
+
+        var at = TipPlacement.Place(tip.Anchor, known, area, size, Screen, _tipScale, shift);
         _tipRect = new HudRect(at.X, at.Y, at.X + size.X, at.Y + size.Y);
-        TipPanel.Draw(board, _tipCatalogue!, _tipRect, !_router.Captured);
+        _tipDragging = TipPanel.Draw(board, _tipCatalogue!, _tipRect, !_router.Captured);
+        board.Dragging = _tipDragging;
+    }
+
+    private bool _tipDragging;
+
+    /// <summary>Presses at <paramref name="from"/>, moves to <paramref name="to"/> in steps and lets go.</summary>
+    private void DragTip(float2 from, float2 to)
+    {
+        Frame(() => Move(from));
+        Frame();
+        Frame(() => Button(GlfwMouseButton.Left, true));
+        for (var i = 1; i <= 6; i++)
+        {
+            var at = from + (to - from) * (i / 6f);
+            Frame(() => Move(at));
+        }
+
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        Frame();
+    }
+
+    /// <summary>A step of <paramref name="length"/> pixels from the panel toward the middle of the screen, where there is room to go.</summary>
+    private float2 TowardCentre(float length) => new(
+        (_tipRect.Left + _tipRect.Right) * 0.5f < Screen.X * 0.5f ? length : -length,
+        (_tipRect.Top + _tipRect.Bottom) * 0.5f < Screen.Y * 0.5f ? length : -length);
+
+    private float2 TipGrip => new(TipPoint(_tipRect).X, _tipRect.Top + 8f * _tipScale);
+
+    [Theory]
+    [InlineData(1f)]
+    [InlineData(2f)]
+    public void DraggingATipsTitleBarMovesItKeepsItOnScreenAndRemembersWhereItWent(float scale)
+    {
+        UseTips(scale);
+        _surfaceOpen = true;
+        Frame(() => Move(EmptySpace));
+        var board = _tipBoard!;
+        board.Fire(TipTriggers.CommandViewOpened);
+        Frame();
+        Frame();
+        var home = new float2(_tipRect.Left, _tipRect.Top);
+        var count = board.Count;
+
+        DragTip(TipGrip, TipGrip + TowardCentre(80));
+        var moved = new float2(_tipRect.Left, _tipRect.Top);
+        Assert.True(MathF.Abs(moved.X - home.X) > 60);
+        Assert.True(MathF.Abs(moved.Y - home.Y) > 60);
+        // A drag is not a press on a button: the stack and the tick are as they were.
+        Assert.Equal(count, board.Count);
+        Assert.Equal(0, board.Index);
+        Assert.False(board.DontShowAgain);
+        Assert.True(board.Active);
+
+        // The place is saved once the title bar is let go, under the anchor.
+        Assert.Single(_tipSettings!.TipPositions);
+        Assert.True(board.TakeChanged());
+
+        // Another tip at the same anchor shows where the player put it.
+        board.Close();
+        board.Fire(TipTriggers.CommandViewOpened);
+        Frame();
+        Frame();
+        Assert.Equal(moved, new float2(_tipRect.Left, _tipRect.Top));
+
+        // Dragged far past every edge it stops inside the screen.
+        DragTip(TipGrip, new float2(-4000, -4000));
+        Assert.True(_tipRect.Left >= 0 && _tipRect.Top >= 0);
+        DragTip(TipGrip, new float2(9000, 9000));
+        Assert.True(_tipRect.Right <= Screen.X && _tipRect.Bottom <= Screen.Y);
+
+        // A smaller window keeps the saved shift on screen.
+        var tip = board.Current;
+        var shift = board.Shift(tip.Anchor, true);
+        var size = new float2(_tipRect.Width, _tipRect.Height);
+        var small = size + new float2(160, 240) * _tipScale;
+        var placed = TipPlacement.Place(tip.Anchor, true, default, size, small, _tipScale, shift);
+        Assert.True(placed.X >= 0 && placed.Y >= 0 && placed.X + size.X <= small.X && placed.Y + size.Y <= small.Y);
+
+        // Reset tips puts it back.
+        board.Reset();
+        Assert.Empty(_tipSettings.TipPositions);
+        Assert.True(board.TakeChanged());
+        Frame();
+        Frame();
+        Assert.Equal(home, new float2(_tipRect.Left, _tipRect.Top));
+    }
+
+    [Fact]
+    public void ADragOfTheButtonsOrTheTickMovesNothingAndTheWorldNeverSeesATitleDrag()
+    {
+        UseTips();
+        _world.SetMode(ViewMode.Command);
+        _world.SelectAllOwned();
+        Frame();
+        Frame();
+        var owned = _world.Selection.Length;
+        var board = _tipBoard!;
+        board.Fire(TipTriggers.CommandViewOpened);
+        Frame();
+        Frame();
+        var home = new float2(_tipRect.Left, _tipRect.Top);
+        var count = board.Count;
+
+        DragTip(TipPoint(TipRows().Close), TipPoint(TipRows().Close) + new float2(-200, -150));
+        Assert.Equal(home, new float2(_tipRect.Left, _tipRect.Top));
+        Assert.True(board.Active);
+        DragTip(TipPoint(TipRows().Next), TipPoint(TipRows().Next) + new float2(-200, -150));
+        DragTip(TipPoint(TipRows().Check), TipPoint(TipRows().Check) + new float2(-200, -150));
+        Assert.Equal(home, new float2(_tipRect.Left, _tipRect.Top));
+        Assert.Equal(count, board.Count);
+        Assert.False(board.DontShowAgain);
+        Assert.Empty(_tipSettings!.TipPositions);
+
+        // A drag from the title bar across the world neither box-selects nor clears the selection.
+        DragTip(TipGrip, EmptySpace);
+        Assert.Equal(owned, _world.Selection.Length);
+        Assert.True(board.Active);
+    }
+
+    [Fact]
+    public void InFlightTheTitleBarCannotBeDraggedUntilThePointerIsShown()
+    {
+        UseTips();
+        var board = _tipBoard!;
+        board.Fire(TipTriggers.CommandViewOpened);
+        Frame();
+        Frame();
+        Assert.True(_router.Captured);
+        var home = new float2(_tipRect.Left, _tipRect.Top);
+        DragTip(TipGrip, TipGrip + TowardCentre(80));
+        Assert.Equal(home, new float2(_tipRect.Left, _tipRect.Top));
+        Assert.Empty(_tipSettings!.TipPositions);
+
+        Frame(() => Key(GlfwKey.LeftShift, true));
+        DragTip(TipGrip, TipGrip + TowardCentre(80));
+        Assert.True(MathF.Abs(_tipRect.Left - home.X) > 60);
     }
 
     private float2 TipPoint(in HudRect rect) => new((rect.Left + rect.Right) * 0.5f, (rect.Top + rect.Bottom) * 0.5f);
@@ -1457,6 +1602,9 @@ public sealed class FrameOrderTests : IDisposable
             _mapCloses++;
         var view = NavView;
         var hover = view.SectorAt(ImGui.GetIO().MousePos);
+        // A right click on the map closes a pinned card, as any click outside it does; the menu above still opens.
+        if (_map.RightClicked)
+            _card.RightClick();
         if (_map.BoxReleased && !_map.BoxMoved)
             _card.Click(hover, MapBounds.Contains(_snapshot.Content.Galaxy.Shape, 0.01f, hover));
         // As ScreenHost's hull loop: the own hull nearest the pointer, within its radius, keeps the preview card away.
@@ -1574,6 +1722,122 @@ public sealed class FrameOrderTests : IDisposable
         Assert.True(_card.Pinned);
         Assert.Equal(b, _card.Sector);
         Assert.Equal(b, _cardShownSector);
+    }
+
+    [Fact]
+    public void ARightClickAnywhereOnTheMapClosesAPinnedCardAndOpensTheMenuWhileClicksOnTheCardsControlsDoNot()
+    {
+        OpenExploreMap();
+        var a = OwnSector.Offset(3, 0, 1);
+        var b = OwnSector.Offset(-2, 0, -3);
+        Frame(() => Move(SectorSpot(a)));
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+
+        // The card's own surface, its list and its scan button take both buttons without closing it.
+        foreach (var button in new[] { GlfwMouseButton.Left, GlfwMouseButton.Right })
+        {
+            Frame(() => Move(CardListMin + CardListSize * 0.5f));
+            Frame(() => Click(button));
+            Frame();
+            Frame(() => Move(CardScanCenter));
+            Frame(() => Click(button));
+            Frame();
+            Assert.True(_card.Pinned);
+            Assert.Equal(a, _card.Sector);
+        }
+
+        Assert.Equal(0, _mapRightClicks);
+        Assert.False(_menuOpen);
+
+        // A right click on another sector closes it and opens the course menu there; it pins nothing.
+        Frame(() => Move(SectorSpot(b)));
+        Frame(() => Click(GlfwMouseButton.Right));
+        Frame();
+        Assert.False(_card.Pinned);
+        Assert.True(_menuOpen);
+        Assert.Equal(1, _mapRightClicks);
+
+        // The same on the pinned sector itself.
+        _menuOpen = false;
+        Frame(() => Move(SectorSpot(a)));
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+        Frame(() => Click(GlfwMouseButton.Right));
+        Frame();
+        Assert.False(_card.Pinned);
+    }
+
+    [Fact]
+    public void AnyLeftClickOutsideThePinnedCardPinsTheSectorClickedAndOnlyOutsideTheGalaxyLeavesNothing()
+    {
+        OpenExploreMap();
+        var a = OwnSector.Offset(3, 0, 1);
+        var b = OwnSector.Offset(-2, 0, -3);
+        Frame(() => Move(SectorSpot(a)));
+        Frame(() => Click());
+        Frame();
+        Frame(() => Move(SectorSpot(b)));
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+        Assert.Equal(b, _card.Sector);
+
+        // The pinned sector clicked again stays pinned.
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+        Assert.Equal(b, _card.Sector);
+    }
+
+    [Fact]
+    public void TheScanKeyAsksTheRealServerOnceAndTheCooldownDisablesItUntilItEnds()
+    {
+        var scan = () => _snapshot.Exploration.Scan;
+        var here = () => _snapshot.Content.Galaxy.SectorOf(_snapshot.Hulls[_snapshot.OwnHull].Position);
+        var asked = 0;
+        void Press()
+        {
+            Frame(() => Key(GlfwKey.K, true), () =>
+            {
+                if (ScanRules.HandleKey(_actions, _devices, true, _snapshot.Exploration.Scan, here(), _snapshot.ServerTick, Bridge))
+                    asked++;
+                return false;
+            });
+            Frame(() => Key(GlfwKey.K, false));
+            Tick(8);
+        }
+
+        Press();
+        Assert.Equal(1, asked);
+        Assert.Equal(ScanState.Scanning, scan().State);
+        Assert.Equal(ScanGate.Running, ScanRules.Gate(scan(), here(), _snapshot.ServerTick));
+
+        // Pressed again while it runs: nothing is asked.
+        Press();
+        Assert.Equal(1, asked);
+
+        Tick(_snapshot.Content.Exploration.ScanTicks + 10);
+        Assert.Equal(ScanState.Completed, scan().State);
+        Assert.Equal(ScanGate.Cooling, ScanRules.Gate(scan(), here(), _snapshot.ServerTick));
+        Assert.True(ScanRules.CooldownSeconds(scan(), here(), _snapshot.ServerTick) > 0);
+        var strip = ScanRules.Strip(scan(), here(), _snapshot.ServerTick, 0f, 6f);
+        Assert.True(strip.Any && strip.ResultWindow && strip.CooldownSeconds > 0 && !strip.Running);
+
+        // During the cooldown the key does nothing: no request goes out, so no refusal comes back either.
+        Press();
+        Assert.Equal(1, asked);
+        Assert.Equal(ScanState.Completed, scan().State);
+
+        // After it, the key scans again.
+        Tick(_snapshot.Content.Exploration.ScanCooldownTicks + 5);
+        Assert.Equal(ScanGate.Ready, ScanRules.Gate(scan(), here(), _snapshot.ServerTick));
+        Assert.Equal(0, ScanRules.CooldownSeconds(scan(), here(), _snapshot.ServerTick));
+        Press();
+        Assert.Equal(2, asked);
+        Assert.Equal(ScanState.Scanning, scan().State);
     }
 
     [Fact]
@@ -1780,14 +2044,15 @@ public sealed class FrameOrderTests : IDisposable
     {
         _barShown = true;
         OpenExploreMap();
-        Frame(() => Move(SectorSpot(OwnSector.Offset(-3, 0, -3))));
-        Frame(() => Click());
-        Frame();
-        Assert.True(_card.Pinned);
         Frame(() => Move(SectorSpot(OwnSector.Offset(6, 0, 4))));
         Frame(() => Click(GlfwMouseButton.Right));
         Frame();
         Assert.True(_menuOpen);
+
+        // A right click closes a pinned card, so the card is pinned afterwards (as a scripted view does) to have both up.
+        _card.Pin(OwnSector.Offset(-3, 0, -3));
+        Frame();
+        Assert.True(_card.Pinned);
         _mapPresses = _mapReleases = 0;
 
         // Every surface the map can show at once is up: the unit list, the bar, the layer bar, the menu and the card.
@@ -2834,6 +3099,74 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal(ViewMode.Pilot, _world.Mode);
         Assert.Equal(following, _world.CommandFollowing);
         Assert.True(_router.Captured);
+    }
+
+    [Theory]
+    [InlineData(JumpPhase.Align)]
+    [InlineData(JumpPhase.Charge)]
+    [InlineData(JumpPhase.Tunnel)]
+    [InlineData(JumpPhase.Arrive)]
+    public void BoostPressedHeldTappedOrLetGoDuringAJumpSendsNoOrderAndKeepsThePrompt(JumpPhase phase)
+    {
+        var destination = Ahead(100000);
+        CommandView();
+        _world.OrderJump(Bridge, destination);
+        for (var i = 0; i < 3; i++)
+            Frame();
+        Assert.Equal(destination, _world.NavTarget);
+        _world.SetMode(ViewMode.Pilot);
+        Frame();
+        Assert.Equal(ViewMode.Pilot, _world.Mode);
+        Bridge.Consume(out _, out _);
+
+        // The hull is part way through the jump the pilot started.
+        ref var own = ref _snapshot.Hulls[_snapshot.OwnHull];
+        own.Jump = phase;
+        own.Order = phase == JumpPhase.Arrive ? default : new HullOrder { Kind = OrderKind.Jump, Target = destination };
+        var expected = phase switch
+        {
+            JumpPhase.Align => JumpPrompt.Aligning,
+            JumpPhase.Charge => JumpPrompt.Working,
+            JumpPhase.Tunnel => JumpPrompt.Transit,
+            _ => JumpPrompt.None,
+        };
+        var refusedAt = _world.NavRefusedAt;
+
+        void Settled(string what)
+        {
+            var sent = Bridge.Consume(out var hasOrder, out var order);
+            Assert.False(hasOrder, $"{what} sent order {order.Kind}");
+            Assert.Equal(expected, HudLayout.Prompt(_world.NavTarget is not null, _world.NavAimed, false, _snapshot.Hulls[_snapshot.OwnHull].Jump, _snapshot.Hulls[_snapshot.OwnHull].Order.Kind == OrderKind.Jump, false));
+            Assert.Equal(refusedAt, _world.NavRefusedAt);
+            _ = sent;
+        }
+
+        // Pressed, held, released, then tapped within one poll.
+        Frame(() => Key(GlfwKey.Space, true));
+        Settled("press");
+        for (var i = 0; i < 5; i++)
+        {
+            Frame();
+            Settled("hold");
+        }
+
+        Frame(() => Key(GlfwKey.Space, false));
+        Settled("release");
+        Frame(() =>
+        {
+            Key(GlfwKey.Space, true);
+            Key(GlfwKey.Space, false);
+        });
+        Settled("tap");
+        Frame(() => Key(GlfwKey.Space, true));
+        Frame(() => Key(GlfwKey.Space, false));
+        Settled("tap over frames");
+
+        // Halt is the cancel: it sends the empty order.
+        Frame(() => Key(GlfwKey.H, true));
+        Bridge.Consume(out var cancelled, out var halt);
+        Assert.True(cancelled);
+        Assert.Equal(OrderKind.None, halt.Kind);
     }
 
     [Fact]
@@ -4189,6 +4522,13 @@ public sealed class FrameOrderTests : IDisposable
         PressKey(GlfwKey.B);
         Assert.True(PlayDroneUntil(() => _world.Editor.Stage == EditorStage.Closed));
         Assert.False(_newShip.Open);
+
+        // Not a ship just built: closing this edit never moves the player.
+        Assert.Equal(0u, _world.Editor.FollowHull);
+        for (var i = 0; i < 30; i++)
+            DroneFrame();
+        Assert.Equal(drone, _snapshot.Hulls[_snapshot.OwnHull].Id);
+        Assert.False(Bridge.ConsumeControlRequest(out _));
     }
 
     [Fact]
@@ -4290,7 +4630,7 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     [Fact]
-    public void ABuiltShipIsEditedWhereItIsAppliedByTheServerAndTheDroneKeepsFlying()
+    public void ABuiltShipIsEditedWhereItIsAppliedByTheServerAndThePlayerThenFliesIt()
     {
         var drone = UseDrone();
         OpenNewShipDialog();
@@ -4322,15 +4662,76 @@ public sealed class FrameOrderTests : IDisposable
         Assert.True(PlayDroneUntil(() => editor.Stage == EditorStage.Closed), $"{_snapshot.Editor.Phase}/{_snapshot.Editor.Reason}");
         Assert.True(editor.NoticeApplied);
         Assert.True(editor.NoticeBuilt);
-        Assert.Equal(drone, _snapshot.Hulls[_snapshot.OwnHull].Id);
         Assert.Equal(-1, HullIndex(created));
         Assert.True(PlayDroneUntil(() => _snapshot.Editor.Hull != created && HullIndex(_snapshot.Editor.Hull) >= 0));
         var built = _snapshot.Hulls[HullIndex(_snapshot.Editor.Hull)];
         Assert.Equal(designs, built.Design);
         Assert.Equal(2, BlockSet.Count(built.Blocks.Span));
+
+        // Closing the edit put the player in control of the ship they designed; the drone they left is gone.
+        Assert.True(PlayDroneUntil(() => _snapshot.Hulls[_snapshot.OwnHull].Id == built.Id), "the player should fly the built ship");
+        Assert.True(HullIndex(drone) < 0, "the drone is removed when its pilot takes a ship");
+        Assert.False(_snapshot.OwnIsDrone);
+        Assert.Equal(0u, editor.FollowHull);
+        Assert.Equal(FollowRefusal.None, editor.FollowNotice);
         DroneFrame();
         Assert.True(_router.Captured);
         Assert.False(_world.Editor.Shown);
+    }
+
+    [Fact]
+    public void CancellingTheEditOfABuiltShipLeavesItAsMadeAndPutsThePlayerInIt()
+    {
+        var drone = UseDrone();
+        OpenNewShipDialog();
+        Type("Scout");
+        PressKey(GlfwKey.Enter);
+        Assert.True(PlayDroneUntil(() => _world.Editor.Shown));
+        var editor = _world.Editor;
+        var created = editor.Hull;
+        var design = _snapshot.Hulls[HullIndex(created)].Design;
+
+        // The editor key cancels, as every edit; the ship stays exactly as it was made, and the player flies it.
+        PressKey(GlfwKey.B);
+        Assert.Equal(EditorStage.Closed, editor.Stage);
+        Assert.True(PlayDroneUntil(() => _snapshot.Hulls[_snapshot.OwnHull].Id == created), "the player should fly the ship they cancelled");
+        Assert.True(HullIndex(created) >= 0);
+        Assert.Equal(design, _snapshot.Hulls[_snapshot.OwnHull].Design);
+        Assert.Equal(1, BlockSet.Count(_snapshot.Hulls[_snapshot.OwnHull].Blocks.Span));
+        Assert.True(HullIndex(drone) < 0);
+        Assert.False(_snapshot.OwnIsDrone);
+        Assert.Equal(FollowRefusal.None, editor.FollowNotice);
+        Assert.Null(editor.Draft);
+    }
+
+    [Fact]
+    public void ABuiltShipThatIsNotThereWhenTheEditorClosesIsGivenUpAfterAWhileWithTheReasonAndTheDroneKeepsFlying()
+    {
+        var drone = UseDrone();
+        OpenNewShipDialog();
+        Type("Scout");
+        PressKey(GlfwKey.Enter);
+        Assert.True(PlayDroneUntil(() => _world.Editor.Shown));
+        var editor = _world.Editor;
+        var created = editor.Hull;
+
+        // The snapshot stops naming the ship, as one that was lost would: nothing is asked of the server.
+        var at = HullIndex(created);
+        var kept = _snapshot.HullCount;
+        Assert.Equal(kept - 1, at);
+        editor.Cancel(Bridge);
+        _snapshot.HullCount = at;
+        Bridge.ConsumeControlRequest(out _);
+        for (var i = 0; i < 60 * (int)ShipEditor.FollowTimeout - 30; i++)
+            DroneFrame();
+        Assert.Equal(created, editor.FollowHull);
+        Assert.False(Bridge.ConsumeControlRequest(out _));
+        for (var i = 0; i < 60; i++)
+            DroneFrame();
+        Assert.Equal(0u, editor.FollowHull);
+        Assert.Equal(FollowRefusal.Missing, editor.FollowNotice);
+        Assert.False(Bridge.ConsumeControlRequest(out _));
+        Assert.Equal(drone, _snapshot.Hulls[_snapshot.OwnHull].Id);
     }
 
     [Fact]

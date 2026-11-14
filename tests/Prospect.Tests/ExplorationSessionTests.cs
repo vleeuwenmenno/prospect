@@ -550,6 +550,121 @@ public sealed class ExplorationSessionTests
     }
 
     [Fact]
+    public void ACompletedScanStartsASectorCooldownTheServerEnforcesAndARefusalDoesNotMoveIt()
+    {
+        using var rig = new Rig();
+        rig.Step(20);
+        var sector = rig.Server.Galaxy.SectorOf(rig.Hulls.State((int)(rig.Own(0) & 65535)).Position);
+        Assert.Equal(600, Content.Exploration.ScanCooldownTicks);
+        rig.Clients[0].Input.RequestScan();
+        rig.Step(Content.Exploration.ScanTicks + 10);
+        var done = rig.Snap(0).Exploration.Scan;
+        Assert.Equal(ScanState.Completed, done.State);
+        Assert.Equal(sector, done.CooldownSector);
+        var until = done.CooldownUntilTick;
+        Assert.InRange(until - done.CompletesTick, Content.Exploration.ScanCooldownTicks, Content.Exploration.ScanCooldownTicks + 2);
+        var recorded = rig.Snap(0).Exploration.Charts[0].RecordedTick;
+
+        // The server refuses with a reason, charts nothing again and leaves the cooldown where it was.
+        rig.Clients[0].Input.RequestScan();
+        rig.Step(10);
+        var refused = rig.Snap(0).Exploration.Scan;
+        Assert.Equal(ScanState.Cooldown, refused.State);
+        Assert.Equal(sector, refused.Sector);
+        Assert.Equal(until, refused.CooldownUntilTick);
+        Assert.Equal(recorded, rig.Snap(0).Exploration.Charts[0].RecordedTick);
+
+        // After the cooldown the same sector can be scanned again, and refreshes its chart.
+        rig.Step((int)(until - rig.Tick) + 5);
+        rig.Clients[0].Input.RequestScan();
+        rig.Step(10);
+        Assert.Equal(ScanState.Scanning, rig.Snap(0).Exploration.Scan.State);
+        rig.Step(Content.Exploration.ScanTicks + 10);
+        Assert.Equal(ScanState.Completed, rig.Snap(0).Exploration.Scan.State);
+        Assert.True(rig.Snap(0).Exploration.Charts[0].RecordedTick > recorded);
+    }
+
+    [Fact]
+    public void ACancelledScanAlsoStartsTheCooldownButOnlyForItsOwnSector()
+    {
+        using var rig = new Rig();
+        rig.Step(20);
+        var home = rig.Server.Galaxy.SectorOf(rig.Hulls.State((int)(rig.Own(0) & 65535)).Position);
+        var hop = new Double3(0, Content.Galaxy.SectorSize * 2, 0);
+        rig.Clients[0].Input.RequestScan();
+        rig.Step(10);
+        rig.MoveOwner(0, hop);
+        rig.Step(5);
+        var cancelled = rig.Snap(0).Exploration.Scan;
+        Assert.Equal(ScanState.Cancelled, cancelled.State);
+        Assert.Equal(home, cancelled.CooldownSector);
+        Assert.True(cancelled.CooldownUntilTick > rig.Tick);
+
+        // The sector left behind stays cooling down.
+        rig.MoveOwner(0, new Double3(0, -hop.Y, 0));
+        rig.Step(5);
+        rig.Clients[0].Input.RequestScan();
+        rig.Step(10);
+        Assert.Equal(ScanState.Cooldown, rig.Snap(0).Exploration.Scan.State);
+        Assert.Equal(0, rig.Snap(0).Exploration.ChartCount);
+    }
+
+    [Fact]
+    public void AnotherSectorCanBeScannedAtOnceAfterACancelledScan()
+    {
+        using var rig = new Rig();
+        rig.Step(20);
+        var home = rig.Server.Galaxy.SectorOf(rig.Hulls.State((int)(rig.Own(0) & 65535)).Position);
+        rig.Clients[0].Input.RequestScan();
+        rig.Step(10);
+        rig.MoveOwner(0, new Double3(0, Content.Galaxy.SectorSize * 2, 0));
+        rig.Step(5);
+        Assert.Equal(ScanState.Cancelled, rig.Snap(0).Exploration.Scan.State);
+        rig.Clients[0].Input.RequestScan();
+        rig.Step(10);
+        var scan = rig.Snap(0).Exploration.Scan;
+        Assert.Equal(ScanState.Scanning, scan.State);
+        Assert.NotEqual(home, scan.Sector);
+        Assert.Equal(home, scan.CooldownSector);
+    }
+
+    [Fact]
+    public void SwitchingShipCancelsAScanAndCoolsItsSectorDown()
+    {
+        using var rig = new Rig();
+        rig.Clients[1].Input.RequestScan();
+        rig.Step(10);
+        rig.Clients[1].Input.RequestControl(0);
+        rig.Step(5);
+        var scan = rig.Snap(1).Exploration.Scan;
+        Assert.Equal(ScanState.Cancelled, scan.State);
+        Assert.Equal(scan.Sector, scan.CooldownSector);
+        Assert.True(scan.CooldownUntilTick > rig.Tick);
+    }
+
+    [Fact]
+    public void TheScanWireCarriesTheCooldownAndRefusesANegativeTick()
+    {
+        var scan = new ScanView { State = ScanState.Cooldown, Sector = new SectorCoord(3, -1, 4), CooldownSector = new SectorCoord(3, -1, 4), CooldownUntilTick = 1234 };
+        Span<byte> bytes = stackalloc byte[ExplorationMessage.MaxWireSize];
+        var writer = new NetWriter(bytes);
+        ExplorationMessage.Write(ref writer, scan, default);
+        var reader = new NetReader(writer.Written[1..]);
+        Span<SectorChart> charts = stackalloc SectorChart[ExplorationMessage.MaxCharts];
+        Assert.True(ExplorationMessage.Read(ref reader, charts, out var read, out var count));
+        Assert.Equal(0, count);
+        Assert.Equal(ScanState.Cooldown, read.State);
+        Assert.Equal(scan.CooldownSector, read.CooldownSector);
+        Assert.Equal(1234, read.CooldownUntilTick);
+
+        scan.CooldownUntilTick = -1;
+        writer = new NetWriter(bytes);
+        ExplorationMessage.Write(ref writer, scan, default);
+        reader = new NetReader(writer.Written[1..]);
+        Assert.False(ExplorationMessage.Read(ref reader, charts, out _, out _));
+    }
+
+    [Fact]
     public void HiddenShipsAndAsteroidChangesNeverReachOtherClientAndLostContactFreezes()
     {
         using var rig = new Rig();

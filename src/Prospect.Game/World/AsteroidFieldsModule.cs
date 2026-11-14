@@ -1022,6 +1022,7 @@ public sealed class AsteroidFieldsModule : SectorModule
         var reach = radius * Math.Max(1f, _spacing * _spacingScale);
         var drift = Math.Min(_jitter * reach, field.Height);
         var position = origin;
+        var blocker = -1;
         for (var attempt = 0; attempt < _placementAttempts; attempt++)
         {
             // Fields are flat, so a rock looks for room sideways more than up and down.
@@ -1031,7 +1032,7 @@ public sealed class AsteroidFieldsModule : SectorModule
                 continue;
             if (position.X * position.X + position.Y * position.Y + position.Z * position.Z < clear * clear)
                 continue;
-            if (!Overlaps(content, placed, position, reach))
+            if (!content.Rocks.PlacementOverlaps(content.Asteroids, placed, position, reach, ref blocker))
                 return position;
         }
 

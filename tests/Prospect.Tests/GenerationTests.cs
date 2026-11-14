@@ -667,9 +667,22 @@ public sealed class GalaxyTests
     }
 
     [Theory]
-    [InlineData(80)]
     [InlineData(20)]
-    public void GeneratingDenseSectorsAtBothSizeLimitsStaysWithinBudget(int km)
+    [InlineData(30)]
+    [InlineData(40)]
+    [InlineData(50)]
+    [InlineData(60)]
+    [InlineData(70)]
+    [InlineData(80)]
+    [InlineData(90)]
+    [InlineData(100)]
+    [InlineData(110)]
+    [InlineData(120)]
+    [InlineData(130)]
+    [InlineData(140)]
+    [InlineData(150)]
+    [InlineData(160)]
+    public void GeneratingDenseSectorsAtSupportedSizesStaysWithinBudget(int km)
     {
         // The budget: the fullest sector a galaxy can hold is generated in under 15 ms in a debug build, a few
         // milliseconds in release. The client does this on a streaming job; the server does it on the tick that
@@ -687,7 +700,7 @@ public sealed class GalaxyTests
         }
 
         Assert.True(content.AsteroidCount > 2500);
-        Console.WriteLine($"Sector {km} km: generating {content.AsteroidCount} rocks in {best:0.000} ms (budget {budgetMilliseconds} ms)");
+        Console.WriteLine($"Sector {km} km ({dense}, hash {Sectors.Hash(content):X16}): generating {content.AsteroidCount} rocks in {best:0.000} ms (budget {budgetMilliseconds} ms)");
         Assert.True(best < budgetMilliseconds, $"generating {content.AsteroidCount} asteroids took {best:0.00} ms; the budget is {budgetMilliseconds} ms");
 
         // A summary costs next to nothing, so the map can ask for thousands.

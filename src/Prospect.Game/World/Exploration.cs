@@ -11,6 +11,9 @@ public sealed record ExplorationRules(double SensorRadius, int ScanTicks, int Co
     public int LightningPeriodTicks { get; init; } = 480;
     public int LightningBurstTicks { get; init; } = 60;
     public double LightningReachShare { get; init; } = 0.15;
+    /// <summary>Ticks after a scan of a sector ends, completed, refused for capacity or cancelled, before that sector can be scanned again by the same owner. Zero turns it off.</summary>
+    public int ScanCooldownTicks { get; init; }
+
     public double JumpMinimum { get; init; }
     public double BlindSafeDistance { get; init; }
     public double BlindSafeSectors { get; init; }
@@ -18,6 +21,8 @@ public sealed record ExplorationRules(double SensorRadius, int ScanTicks, int Co
     public float BlindMaxDamage { get; init; }
     /// <summary>Hard per-owner storage bound.</summary>
     public const int MaxChartsPerOwner = 4096;
+    /// <summary>The longest scan cooldown content may ask for, in seconds.</summary>
+    public const double MaxScanCooldownSeconds = 3600;
     /// <summary>Collision prediction coverage even without working sensors.</summary>
     public double ProximityRadius { get; init; }
 
@@ -34,6 +39,9 @@ public sealed record ExplorationRules(double SensorRadius, int ScanTicks, int Co
         var radius = root.GetProperty("sensorRadius"u8).GetDouble();
         var scan = root.GetProperty("scanSeconds"u8).GetDouble();
         var contact = root.GetProperty("contactSeconds"u8).GetDouble();
+        var cooldown = root.GetProperty("scanCooldownSeconds"u8).GetDouble();
+        if (!double.IsFinite(cooldown) || cooldown < 0 || cooldown > MaxScanCooldownSeconds)
+            throw new InvalidDataException("Invalid scan cooldown.");
         var charts = root.GetProperty("chartsPerOwner"u8).GetInt32();
         if (!double.IsFinite(radius) || radius <= 0 || !double.IsFinite(scan) || scan <= 0
             || !double.IsFinite(contact) || contact <= 0 || scan * TickLoop.SimulationHz > int.MaxValue
@@ -57,14 +65,18 @@ public sealed record ExplorationRules(double SensorRadius, int ScanTicks, int Co
             throw new InvalidDataException("Invalid lightning sensor rules.");
         return new(radius, (int)Math.Ceiling(scan * TickLoop.SimulationHz),
             (int)Math.Ceiling(contact * TickLoop.SimulationHz), charts)
-        { LightningPeriodTicks = period, LightningBurstTicks = burst, LightningReachShare = share, GasOpticalPenalty = gasPenalty, ProximityRadius = proximity, JumpMinimum = minimum, BlindSafeSectors = safe, BlindSafeDistance = safe * 80000, BlindMaxDamage = damage };
+        { ScanCooldownTicks = (int)Math.Ceiling(cooldown * TickLoop.SimulationHz), LightningPeriodTicks = period, LightningBurstTicks = burst, LightningReachShare = share, GasOpticalPenalty = gasPenalty, ProximityRadius = proximity, JumpMinimum = minimum, BlindSafeSectors = safe, BlindSafeDistance = safe * 80000, BlindMaxDamage = damage };
     }
 }
 
 /// <summary>A permanent survey of immutable natural geography, under the saved world's generator and seed.</summary>
 public readonly record struct SectorChart(uint Owner, SectorCoord Sector, long RecordedTick);
 
-public enum ScanState : byte { Idle, Scanning, Completed, Cancelled, NoEquipment, ChartLimit }
+/// <summary>
+/// A scan's state. <c>NoEquipment</c>, <c>ChartLimit</c> and <c>Cooldown</c> are refusals: the request changed nothing
+/// but this state. <c>Cooldown</c> means the sector was scanned, or a scan of it was cancelled, too recently.
+/// </summary>
+public enum ScanState : byte { Idle, Scanning, Completed, Cancelled, NoEquipment, ChartLimit, Cooldown }
 
 /// <summary>Authoritative progress and result of a sector scan.</summary>
 public struct ScanView
@@ -73,6 +85,15 @@ public struct ScanView
     public SectorCoord Sector;
     public long StartedTick;
     public long CompletesTick;
+
+    /// <summary>The sector a scan last ended in; it cannot be scanned by this owner again before <see cref="CooldownUntilTick"/>.</summary>
+    public SectorCoord CooldownSector;
+
+    /// <summary>The world tick the cooldown ends; zero when no scan has ended.</summary>
+    public long CooldownUntilTick;
+
+    /// <summary>True while <paramref name="sector"/> is cooling down at <paramref name="tick"/>.</summary>
+    public readonly bool CoolingDown(SectorCoord sector, long tick) => CooldownUntilTick > tick && CooldownSector == sector;
 }
 
 /// <summary>Known contact. A stale position is never extrapolated and is not a live target.</summary>

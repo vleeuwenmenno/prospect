@@ -11,7 +11,7 @@ or that local game opened to other players. There is one simulation and one code
 
 ## Status
 
-New ships from a drone: server/session creation, remote editor grant and persistence are implemented. The creation dialog and key handling are not wired yet.
+New ships from a drone: server/session creation, remote editor grant, persistence, the New ship dialog and its keys are implemented. Closing the editor of a ship just built puts you in control of it.
 
 Exploration has a server/client backend: personal saved charts, manual scan intent, owned-ship sensors and dynamic visibility filtering.
 The galaxy map shows it: fog over uncharted space, charted sectors, live sensor coverage, lost contacts, a sector card
@@ -25,7 +25,8 @@ Explicit private local claims have a nonvisual API backed by account-service tic
 
 In-game tips: the first time the map, the command view or the ship editor opens, or a shield goes down or the
 battery runs low, a small panel explains it. Several at once stack with a counter and Next; Close shows the tip again
-next time, "Don't show this again" hides it on this client, and Settings, Tips, **Reset tips** shows all again.
+next time, "Don't show this again" hides it on this client, and Settings, Tips, **Reset tips** shows all again and puts panels back in place.
+Drag a tip by its title bar (hold Shift in flight) and the next tip at that spot appears where you left it.
 Tips are data in `content/visuals/tips.json`. Every press of `B` in the escape drone opens the New ship dialog and
 brings up the "edit the drone with Ctrl+B" tip beside it, unless you hid that tip.
 
@@ -73,8 +74,11 @@ measurements and the remaining stages.
 
 **New ships from the drone.** In the escape drone, `B` opens a **New ship** dialog: type a name (1 to 32
 characters, different from your other ships; the field checks it as you type), then `Enter` or Build ship. The
-server places a one-block ship just ahead of the drone and the ship editor opens on it; you stay in the drone, and
-Apply rebuilds the new ship from your design. Cancel, `Esc` or `B` in the editor leaves the ship as a single block.
+server places a one-block ship just ahead of the drone and the ship editor opens on it. When you close that editor
+you are put in control of the new ship, the way `T` takes control of a target (the drone is removed): Apply rebuilds
+the ship from your design and you fly the result; Cancel, `Esc` or `B` leaves the ship as a single block and you fly
+that. If the switch cannot be made (the ship is gone or in another sector) the editor's notice says why and you stay
+in the drone. Editing an ordinary ship, or the drone with `Ctrl`+`B`, never moves you.
 If the server refuses (name already used, ship limit, no clear space ahead, full design catalogue, ...) the dialog
 says why and you can try another name. Cancel is off while the server is working. `Ctrl`+`B` in the drone edits the
 drone itself.
@@ -143,7 +147,7 @@ restarts; the editor then says so. The editor has not been checked on screen by 
 
 Milestone 1 (skeleton) is complete. On top of it, the first slice of the world is in:
 
-- **Sectors.** The galaxy is a grid of 20–80 km cells (80 km by default) generated from the server's seed: name, star, character and
+- **Sectors.** The galaxy is a grid of 20–160 km cells (80 km by default) generated from the server's seed: name, star, character and
   contents. Nothing is stored or sent, and nothing stops at a sector's edge. The client keeps the sectors around
   the camera generated on worker threads.
 - **World generation.** Space is filled by a list of modules named in `content/galaxy/galaxy.json`, each
@@ -251,8 +255,9 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   The map card, the map's course menu and the command view's right-click menu show the distance against the
   drive's range, charted or blind, and a blind jump's hit chance and damage, from the same function the server checks
   with; too close, too far or driveless is greyed out with the reason, and the server's refusal of a plot or a jump
-  start shows for a few seconds. Taking the controls
-  before the drive fires cancels the jump and loses the charge. The client generates the destination while the
+  start shows for a few seconds. Once started, a jump
+  is ended only by Halt (`H`, `Backspace`, `B` on a gamepad), before the drive fires, which loses the charge: boost
+  (pressed, held, tapped or let go) and thrust do nothing to it. The client generates the destination while the
   drive charges.
 - **World settings.** A world has settings, chosen when a server or a local game starts: collision damage,
   shields against collisions (full, weak, none), shield recharge, jump charge speed, hull strength, asteroid generation
@@ -277,7 +282,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   fields (amber, a denser core inside) and gas clouds (violet) that reach it, as surveyed, never later changes. A
   field or cloud that runs across a wall is drawn only inside charted sectors: its part in a sector you have not
   charted stays hidden. A map index on the left, under the unit list, names the shades, shapes and star types.
-  Resting the pointer on one of your own ships names it beside it; the sector card stays away while it does. Green regions show sensor reach cut through the layer, shaped by gas (shorter inside and behind clouds, a faint amber tint where range was lost); gas can hide ships within them,
+  Resting the pointer on one of your own ships names it beside it; the sector card stays away while it does. Green regions show sensor reach cut through the layer, shaped by gas (shorter inside and behind clouds, a faint amber line at the plain range where gas cut it short); gas can hide ships within them,
   and a lost contact stays as a fading hollow marker for 15 seconds (a station's indefinitely). Hover a sector for
   its card beside it; click to pin the card (coordinates, distance, sensor state, what the chart holds, the jump
   warning, the scan control in your own sector, Move here and Jump here, and a scrolling list of your ships, then
@@ -287,9 +292,13 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   layer stays fully interactive. The galaxy edge ring marks where the disc ends; nothing stops flight there yet. A
   unit list on the left shows every ship you own; click a row to add or remove that ship. A plotted jump shows as a
   dotted route from the ship you fly to its NAV point until the jump is made, replaced or cleared.
-- **Scanning.** Pin your own sector's card and press **Scan sector**: 5 seconds, flight continues. Leaving the
-  sector, switching ship or losing the charting block cancels it; the card and the top of the flight view say
-  which (the reason is inferred on the client, the server only says cancelled). The command view shows the gas-shaped
+- **Scanning.** Press `K` (D-pad left; rebindable) in the flight or command view, or pin your own sector's card and
+  press **Scan sector**: 5 seconds, flight continues. Leaving the sector, switching ship or losing the charting block
+  cancels it; the card and the top of the flight view say which (the reason is inferred on the client, the server only
+  says cancelled). A small muted readout under the top of the flight and command views shows the bar, the result and
+  then "NEXT SCAN IN n S". The server keeps a 10 s cooldown on the sector after a scan ends, completed or cancelled
+  (a request in it is refused); the key and the button wait it out and say how long is left. Resting the cursor on
+  the readout or the button names the key. In an uncharted sector, a tip names the key. The command view shows the gas-shaped
   sensor boundary of the selected ships (the flown one when none is selected), darkens space beyond it, and merges ships
   within 10 km of each other into one outline; lost contacts show at their last position.
 - **Renderer.** Floating-point scene target and tone mapping, camera-relative rendering from double-precision
@@ -382,9 +391,10 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Boost | `Space` | Left stick click |
 | Show the cursor (pilot view) | Hold `Shift`; with it, right-drag over space turns the camera, and pointing at a console bar shows its figures | |
 | Dampeners on / off | `Z` | `X` |
+| Scan the sector you are in (flight, command view, map) | `K` | D-pad left |
 | Command view | `N` or `F9` | `Back` |
 | Galaxy map | `M` | `Y` |
-| Halt (cancel order) | `H` or `Backspace` | `B` |
+| Halt (cancel order; the only way to cancel a started jump) | `H` or `Backspace` | `B` |
 | Ship data sheet | `I` | D-pad up |
 | Target the ship under the reticle, or the asteroid if there is no ship | Middle mouse button | |
 | Take control of the target (same sector only), or leave in a drone | `T` | D-pad down |
@@ -453,8 +463,8 @@ Galaxy map:
 | Close the menu | Left-click elsewhere, or `Esc` (then `Esc` closes a pinned card, then the map) |
 | Take control of a ship | Select exactly one other ship of yours in the sector you are in, then `T`; the map stays open. Another sector: travel there first |
 | Pan / zoom | `W` `A` `S` `D`, arrow keys or middle-drag / mouse wheel |
-| Sector card | Hover a sector to preview; left-click to pin; its **X**, left-click outside the galaxy or `Esc` closes it |
-| Scan your sector | Pin your own sector's card, then **Scan sector** |
+| Sector card | Hover a sector to preview; left-click a sector to pin it (in place of any pinned card). Any click on the map outside the card closes it: a right click only closes it (and opens the course menu), a left click pins what it hits, outside the galaxy it closes. Clicks on the card's own controls never close it; its **X** or `Esc` does |
+| Scan your sector | `K` or D-pad left, or pin your own sector's card, then **Scan sector** (10 s wait before the same sector again) |
 | Change layer, centre on your ship | `Page Up` / `Page Down` or the layer bar, `Space` |
 | Flat or tilted view | `V`, or **Flat** / **Tilt** on the layer bar; flattening shows the pinned card's layer |
 
@@ -464,11 +474,12 @@ working drive, a destination between the drive's minimum and maximum distance an
 ineligible ships keep their orders.
 The ship you fly gets a plotted course instead: a NAV marker, or an arrow at the edge of the view, shows the way.
 Turn its nose onto the marker and press boost (`Space`) to start the jump. Forward (`W`) and boost pressed together,
-in either order, start it too, and forward held from that start does not cancel it; once both are let go, any
-thrust does. Off the marker, boost works as usual
+in either order, start it too. From then on boost and thrust are ignored by the jump, whatever you do with them;
+`H` or `Backspace` (`B`) is the only cancel. Forward held from the start is also not sent until it and boost are
+both let go, so it does not fly the ship out of its own arrival. Off the marker, boost works as usual
 and the HUD says to aim first. A card beside the marker names the destination and its distance. A strip above
 the pilot console says what to do: `OFF COURSE` with the boost key to press once aimed, `COURSE ALIGNED` with
-what the drive will need, then calculation and charge as two gauges filling together, and that thrust cancels.
+what the drive will need, then calculation and charge as two gauges filling together, and that halt cancels.
 It shows only while a course is plotted, a jump is under way or the ship flies a move order. The course clears
 on arrival. Outside the map, a move with nothing selected
 still goes to the ship you fly.
@@ -519,7 +530,7 @@ the generation cap does not mean every rock in every visible sector draws simult
 | `oreGradeMin`, `oreGradeMax` | 0 to 1 | 0, 1 | Clamp ore grade after the grade multiplier; 1 means 100%. |
 | `<material>Abundance` | 0 to 4 | 1 | Relative share among already available materials. Zero removes that material from the sector character and rocks. |
 | `<material>GradeMin`, `<material>GradeMax` | 0 to 1 | 0, 1 | Per-material grade clamp, applied after the global grade range. |
-| `sectorSize` | 20 to 80 km | 80 | Sector edge length. Drive range and the blind-safe band scale with it; minimum jump distance stays fixed. |
+| `sectorSize` | 20 to 160 km | 80 | Sector edge length. Drive range and the blind-safe band scale with it; minimum jump distance stays fixed. |
 | `gasSizeMin` | 1 to 80 km | 16 | Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. |
 | `gasSizeMax` | 1 to 80 km | 22.4 | Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. |
 | `gasHugeSizeMin` | 1 to 160 km | 40 | Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. |

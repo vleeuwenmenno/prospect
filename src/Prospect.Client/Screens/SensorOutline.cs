@@ -25,7 +25,12 @@ internal static class SensorOutline
     /// <summary>The most regions one build takes; more are ignored.</summary>
     public const int MaxRings = 64;
 
-    private const int MaxCuts = 8;
+    /// <summary>
+    /// The most places one outline piece is cut by other regions' boundaries. A piece is a short chord, but many
+    /// overlapping sensors can each cross it; a cut left out would leave a piece half inside another region judged by
+    /// its middle alone, so the room is generous.
+    /// </summary>
+    private const int MaxCuts = 64;
     private static readonly double[] Cos = Table(Math.Cos);
     private static readonly double[] Sin = Table(Math.Sin);
 
@@ -177,6 +182,70 @@ internal static class SensorOutline
                         Reach = (float)((ring[k] + ring[next]) * 0.5),
                     };
                 }
+            }
+        }
+
+        return written;
+    }
+
+    /// <summary>
+    /// The outline of the range gas took from the sensors: for each region, the pieces of the plain sphere's circle
+    /// (<paramref name="nominal"/> metres round its centre on the plane) that stand beside a direction whose reach
+    /// gas cut short, left out wherever another sphere's disc covers them, so the union of the discs is outlined
+    /// once. Every piece lies exactly on its sphere's circle and so never reaches past the sensor's plain range, however
+    /// the gas shaped the reach inside it, which may be concave. A sensor gas did not touch gives none. Returns how
+    /// many pieces were written; output beyond the span's length is dropped.
+    /// </summary>
+    public static int BuildLostRange(ReadOnlySpan<double> x, ReadOnlySpan<double> z, ReadOnlySpan<double> nominal, ReadOnlySpan<double> samples, int count, Span<OutlineSegment> output)
+    {
+        const int n = SensorCoverage.ReachSamples;
+        count = Math.Min(Math.Min(count, MaxRings), Math.Min(Math.Min(x.Length, z.Length), nominal.Length));
+        var written = 0;
+        for (var i = 0; i < count; i++)
+        {
+            var radius = nominal[i];
+            if (!(radius > 0))
+                continue;
+            var ring = samples.Slice(i * n, n);
+            var tolerance = radius * 0.005;
+            for (var k = 0; k < n; k++)
+            {
+                var next = k + 1 == n ? 0 : k + 1;
+                if (ring[k] >= radius - tolerance && ring[next] >= radius - tolerance)
+                    continue;
+
+                // The middle of the arc, on the circle itself, decides whether another disc covers the piece.
+                var middle = (k + 0.5) * (Math.Tau / n);
+                var ux = Math.Cos(middle);
+                var uz = Math.Sin(middle);
+                var mx = x[i] + radius * ux;
+                var mz = z[i] + radius * uz;
+                var covered = false;
+                for (var j = 0; j < count && !covered; j++)
+                {
+                    if (j == i || !(nominal[j] > 0))
+                        continue;
+                    var dx = mx - x[j];
+                    var dz = mz - z[j];
+                    var distance = Math.Sqrt(dx * dx + dz * dz);
+                    // A circle two sensors share is outlined by the lower one only.
+                    covered = distance < nominal[j] - 1e-3 || (j < i && distance <= nominal[j] + 1e-3);
+                }
+
+                if (covered)
+                    continue;
+                if (written == output.Length)
+                    return written;
+                output[written++] = new OutlineSegment
+                {
+                    AX = x[i] + radius * Cos[k],
+                    AZ = z[i] + radius * Sin[k],
+                    BX = x[i] + radius * Cos[next],
+                    BZ = z[i] + radius * Sin[next],
+                    NX = (float)ux,
+                    NZ = (float)uz,
+                    Reach = (float)radius,
+                };
             }
         }
 

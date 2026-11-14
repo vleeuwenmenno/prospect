@@ -8,6 +8,19 @@ using Prospect.Game.World;
 
 namespace Prospect.Client.World;
 
+/// <summary>Why the player could not be put in control of the ship they just built.</summary>
+internal enum FollowRefusal : byte
+{
+    /// <summary>Nothing to say: control was asked for, or there was nothing to ask for.</summary>
+    None,
+
+    /// <summary>The ship is not in the snapshot: it was lost or never arrived.</summary>
+    Missing,
+
+    /// <summary>The ship is in another sector than the drone, so the server would refuse the switch.</summary>
+    OutOfSector,
+}
+
 /// <summary>Where the player's edit stands on this client.</summary>
 internal enum EditorStage : byte
 {
@@ -106,6 +119,12 @@ internal sealed class ShipEditor(JobSystem jobs)
     private uint _awaitedHull;
     private uint _commitSerial;
 
+    // The ship a New ship just made, until its edit ends: closing that edit by the player's own hand puts them in
+    // control of it. An ordinary edit, and an edit ended by the server, never does.
+    private uint _createdHull;
+    private uint _followHull;
+    private float _followAt;
+
     // The hull the draft was made from, as it was then: a kept draft is only reused for exactly that hull.
     private uint _sourceHull;
     private byte _sourceDesign;
@@ -175,6 +194,24 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// <summary>The server's latest word on the edit.</summary>
     public EditorView Server { get; private set; }
 
+    /// <summary>
+    /// The ship the player is to be put in control of now that they closed the edit of a ship they just built, or
+    /// zero. The view takes it with <see cref="FinishFollow"/> as soon as the hull is in the snapshot.
+    /// </summary>
+    public uint FollowHull => _followHull;
+
+    /// <summary>Seconds a built ship may be missing from the snapshot before taking control of it is given up.</summary>
+    public const float FollowTimeout = 3f;
+
+    /// <summary>True when the hull to follow has been awaited longer than <see cref="FollowTimeout"/>.</summary>
+    public bool FollowTimedOut => _followHull != 0 && _time - _followAt > FollowTimeout;
+
+    /// <summary>Why the last attempt to take control of a built ship was refused, shown for a while after; none when there is nothing to say.</summary>
+    public FollowRefusal FollowNotice { get; private set; }
+
+    /// <summary>When <see cref="FollowNotice"/> was given, on <see cref="Time"/>'s clock.</summary>
+    public float FollowNoticeAt { get; private set; } = float.NegativeInfinity;
+
     /// <summary>Seconds since this editor started, the clock its notices are timed by.</summary>
     public float Time => _time;
 
@@ -184,7 +221,7 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// <summary>With <see cref="Notice"/>: true when the ship was rebuilt rather than an edit refused.</summary>
     public bool NoticeApplied { get; private set; }
 
-    /// <summary>With <see cref="NoticeApplied"/>: true when the applied edit built a new ship beside the drone, which keeps flying.</summary>
+    /// <summary>With <see cref="NoticeApplied"/>: true when the applied edit was of a ship just built, which the player then flies.</summary>
     public bool NoticeBuilt { get; private set; }
 
     /// <summary>With <see cref="Notice"/>: the seconds the server asked to wait, and when the notice was given.</summary>
@@ -360,6 +397,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         Stage = EditorStage.Requesting;
         _pilotHull = own.Id;
         _awaitedHull = 0;
+        _createdHull = 0;
         _askedSerial = Server.Serial;
         _requestedAt = _time;
         Notice = EditorReason.None;
@@ -378,6 +416,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         Stage = EditorStage.Requesting;
         _pilotHull = pilot;
         _awaitedHull = hull;
+        _createdHull = hull;
         _requestedAt = _time;
         Notice = EditorReason.None;
         NoticeApplied = false;
@@ -426,6 +465,8 @@ internal sealed class ShipEditor(JobSystem jobs)
         CancelPartGestures();
         GhostPinned = false;
         bridge.CancelEdit();
+        // Cancelling the edit of a ship just built leaves it as it was made, and the player goes to fly it.
+        StartFollow(_createdHull);
         Stage = EditorStage.Closed;
         _partPressUsed = false;
         Draft = null;
@@ -451,7 +492,9 @@ internal sealed class ShipEditor(JobSystem jobs)
         _clipCount = 0;
         Server = default;
         _seenSerial = _askedSerial = _commitSerial = 0;
-        _pilotHull = _awaitedHull = 0;
+        _pilotHull = _awaitedHull = _createdHull = _followHull = 0;
+        FollowNotice = FollowRefusal.None;
+        FollowNoticeAt = float.NegativeInfinity;
         Notice = Refusal = EditorReason.None;
         DraftKept = DraftRestarted = false;
         _replacedFrom = _replacedTo = 0;
@@ -569,6 +612,8 @@ internal sealed class ShipEditor(JobSystem jobs)
                 {
                     _replacedFrom = view.ReplacedHull;
                     _replacedTo = view.Hull;
+                    // The ship just built was replaced by the one the player designed: that is the one to fly.
+                    StartFollow(view.Hull);
                     Stage = EditorStage.Closed;
                     _partPressUsed = false;
                     Draft = null;
@@ -1393,6 +1438,8 @@ internal sealed class ShipEditor(JobSystem jobs)
 
     private void Close(EditorReason reason, int wait, bool keep)
     {
+        // The server or a change of ship ended the edit, not the player: they stay where they are.
+        _createdHull = 0;
         CancelPartGestures();
         Stage = EditorStage.Closed;
         _partPressUsed = false;
@@ -1408,6 +1455,28 @@ internal sealed class ShipEditor(JobSystem jobs)
         Carry = EditorCarry.None;
         ClearHover();
         _generation++;
+    }
+
+    /// <summary>Starts waiting to put the player in control of <paramref name="hull"/> when it is one just built; ends the built ship's edit.</summary>
+    private void StartFollow(uint hull)
+    {
+        if (_createdHull == 0 || hull == 0)
+            return;
+        _createdHull = 0;
+        _followHull = hull;
+        _followAt = _time;
+        FollowNotice = FollowRefusal.None;
+    }
+
+    /// <summary>
+    /// Ends the wait for the built ship's control: the view asked for it, or could not, and says why. Zero reason
+    /// means the request went out.
+    /// </summary>
+    public void FinishFollow(FollowRefusal reason)
+    {
+        _followHull = 0;
+        FollowNotice = reason;
+        FollowNoticeAt = _time;
     }
 
     private void Refuse(EditorReason reason, int wait)

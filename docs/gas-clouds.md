@@ -346,7 +346,7 @@ Larger ordinary clouds can now enter the existing close-up treatment above 7 km 
 
 ## Decided (provisional, tunable): kinds and renderer integration
 
-Generation 6, protocol 43, evaluator 9. This non-visual implementation requires the renderer changes below before release.
+Generation 6, protocol 44, evaluator 9. This non-visual implementation requires the renderer changes below before release.
 
 - `GasCloud.Kind` is `Normal=0`, `Cold=1`, or `Lightning=2`. It is generated, never sent independently.
 - `seed / 128` selects cold below `coldChance` (0.20); among the remainder, `lightningChance` (0.10) selects lightning. Candidate proportions are 20% cold, 8% lightning, 72% normal. Separation biases surviving proportions.
@@ -389,12 +389,36 @@ Ice and gas fields:
 - `timeout 900 make check TEST_ARGS="-parallel none"`: passed, 1,874 game tests and 354 listing tests.
 - `make bench`: passed at 5096×1390, 982 fps normal and 1,012 fps resizing; zero managed allocations, 12 measured swapchain/target rebuilds. Validation layers were not active.
 - Generation budget: 10,166 rocks at 80 km in 13.047 ms; 6,450 at 20 km in 9.526 ms, both below 15 ms. Frozen generation hash: `16723476013675883020`, recorded on Linux x64; other architectures remain unverified.
-- Gas stress: 192 hulls, 32 clients, 17.989 ms/server tick, zero measured managed allocations. This exceeds a 60 Hz tick duration under that stress; it is a measurement, not a claim of 60 Hz at this population.
+- Gas stress in Debug: 192 hulls, 32 clients, 17.989 ms/server tick, zero measured managed allocations. This was measured by Debug `make check`, not Release; see the same-configuration comparison below.
 - No visual acceptance or mining-yield test: renderer/UI integration and the absent mining system remain outstanding.
 
-Merge footprint for the concurrent generation optimization:
+Gas-kind changes relative to the integrated generation optimization:
 
 `AsteroidFieldsModule` changes only its constructor (huge-field tuning), `Generate` (one cloud query, cold membership and final shape/resource/grade), and `Anchored` (huge-field probability).
 `Settle`, `Gather`, `Reaches`, thinning, sort keys, placement streams and `RockIndex` are unchanged.
 Ordinary shape draws use `Galaxy.RockShapes` (12); total `Galaxy.AsteroidShapes` is 13 including the icicle.
 The generation and placement fixture hashes changed intentionally for the appended ice resource and cloud kinds; optimization must preserve the new bytes.
+
+## Integration and like-for-like performance
+
+The branch merges `wip/integration` at `0f745cc`, including optimized placement, 20–160 km sectors and scan cooldown.
+Protocol 44 combines the cooldown envelope and hull environment byte; generation stays 6 and evaluator stays 9.
+The only conflict was `ExplorationRules`: both cooldown and lightning fields and parsers are retained.
+
+`ManySensorsNearGasHaveMeasuredTickCost`, 192 hulls and 32 clients, run alone with the Makefile GC settings:
+
+- Before this merge (`8e7aaf7`), Release: 1.8425 ms/server tick, 2.9613 ms/full server/client round, zero allocated bytes.
+- After this merge, Release: 1.9105 ms/server tick, 2.9687 ms/full round, zero allocated bytes.
+- The previously reported 17.989 ms was Debug, from `make check`. It must not be compared to the earlier 1.96 ms Release baseline.
+- Release remains near that baseline. No gas hot-path rewrite or cache invalidation change was needed for this integration.
+
+Build both measurements with `make build CONFIG=Release`, then run the test binary with
+`-method '*ManySensorsNearGasHaveMeasuredTickCost' -parallel none` and the Makefile's `TEST_ENV`.
+These are individual warm stress runs, not a statistical latency guarantee; the test measures generated gas at anchor `(133,0,-77)`.
+
+Integrated verification:
+
+- `timeout 900 make check`: passed, 1,952 game tests and 354 listing tests, including scan cooldown, jump input, editor follow, tips and range-drawing regressions.
+- `make bench`: passed, 897 fps normal and 965 fps resizing at 5096×1390; zero managed allocations and 12 measured swapchain/target rebuilds. Validation layers were not active.
+- Debug generation at 20/80/160 km: 8.203/10.724/11.555 ms, all below 15 ms. All fifteen selectable sizes passed.
+- Client/rendering sources, `RockIndex`, shared jump input and scan-message/server sources match `wip/integration`; gas-specific shared state is retained alongside them.
