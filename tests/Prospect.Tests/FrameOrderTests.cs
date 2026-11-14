@@ -1602,6 +1602,9 @@ public sealed class FrameOrderTests : IDisposable
             _mapCloses++;
         var view = NavView;
         var hover = view.SectorAt(ImGui.GetIO().MousePos);
+        // A right click on the map closes a pinned card, as any click outside it does; the menu above still opens.
+        if (_map.RightClicked)
+            _card.RightClick();
         if (_map.BoxReleased && !_map.BoxMoved)
             _card.Click(hover, MapBounds.Contains(_snapshot.Content.Galaxy.Shape, 0.01f, hover));
         // As ScreenHost's hull loop: the own hull nearest the pointer, within its radius, keeps the preview card away.
@@ -1719,6 +1722,122 @@ public sealed class FrameOrderTests : IDisposable
         Assert.True(_card.Pinned);
         Assert.Equal(b, _card.Sector);
         Assert.Equal(b, _cardShownSector);
+    }
+
+    [Fact]
+    public void ARightClickAnywhereOnTheMapClosesAPinnedCardAndOpensTheMenuWhileClicksOnTheCardsControlsDoNot()
+    {
+        OpenExploreMap();
+        var a = OwnSector.Offset(3, 0, 1);
+        var b = OwnSector.Offset(-2, 0, -3);
+        Frame(() => Move(SectorSpot(a)));
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+
+        // The card's own surface, its list and its scan button take both buttons without closing it.
+        foreach (var button in new[] { GlfwMouseButton.Left, GlfwMouseButton.Right })
+        {
+            Frame(() => Move(CardListMin + CardListSize * 0.5f));
+            Frame(() => Click(button));
+            Frame();
+            Frame(() => Move(CardScanCenter));
+            Frame(() => Click(button));
+            Frame();
+            Assert.True(_card.Pinned);
+            Assert.Equal(a, _card.Sector);
+        }
+
+        Assert.Equal(0, _mapRightClicks);
+        Assert.False(_menuOpen);
+
+        // A right click on another sector closes it and opens the course menu there; it pins nothing.
+        Frame(() => Move(SectorSpot(b)));
+        Frame(() => Click(GlfwMouseButton.Right));
+        Frame();
+        Assert.False(_card.Pinned);
+        Assert.True(_menuOpen);
+        Assert.Equal(1, _mapRightClicks);
+
+        // The same on the pinned sector itself.
+        _menuOpen = false;
+        Frame(() => Move(SectorSpot(a)));
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+        Frame(() => Click(GlfwMouseButton.Right));
+        Frame();
+        Assert.False(_card.Pinned);
+    }
+
+    [Fact]
+    public void AnyLeftClickOutsideThePinnedCardPinsTheSectorClickedAndOnlyOutsideTheGalaxyLeavesNothing()
+    {
+        OpenExploreMap();
+        var a = OwnSector.Offset(3, 0, 1);
+        var b = OwnSector.Offset(-2, 0, -3);
+        Frame(() => Move(SectorSpot(a)));
+        Frame(() => Click());
+        Frame();
+        Frame(() => Move(SectorSpot(b)));
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+        Assert.Equal(b, _card.Sector);
+
+        // The pinned sector clicked again stays pinned.
+        Frame(() => Click());
+        Frame();
+        Assert.True(_card.Pinned);
+        Assert.Equal(b, _card.Sector);
+    }
+
+    [Fact]
+    public void TheScanKeyAsksTheRealServerOnceAndTheCooldownDisablesItUntilItEnds()
+    {
+        var scan = () => _snapshot.Exploration.Scan;
+        var here = () => _snapshot.Content.Galaxy.SectorOf(_snapshot.Hulls[_snapshot.OwnHull].Position);
+        var asked = 0;
+        void Press()
+        {
+            Frame(() => Key(GlfwKey.K, true), () =>
+            {
+                if (ScanRules.HandleKey(_actions, _devices, true, _snapshot.Exploration.Scan, here(), _snapshot.ServerTick, Bridge))
+                    asked++;
+                return false;
+            });
+            Frame(() => Key(GlfwKey.K, false));
+            Tick(8);
+        }
+
+        Press();
+        Assert.Equal(1, asked);
+        Assert.Equal(ScanState.Scanning, scan().State);
+        Assert.Equal(ScanGate.Running, ScanRules.Gate(scan(), here(), _snapshot.ServerTick));
+
+        // Pressed again while it runs: nothing is asked.
+        Press();
+        Assert.Equal(1, asked);
+
+        Tick(_snapshot.Content.Exploration.ScanTicks + 10);
+        Assert.Equal(ScanState.Completed, scan().State);
+        Assert.Equal(ScanGate.Cooling, ScanRules.Gate(scan(), here(), _snapshot.ServerTick));
+        Assert.True(ScanRules.CooldownSeconds(scan(), here(), _snapshot.ServerTick) > 0);
+        var strip = ScanRules.Strip(scan(), here(), _snapshot.ServerTick, 0f, 6f);
+        Assert.True(strip.Any && strip.ResultWindow && strip.CooldownSeconds > 0 && !strip.Running);
+
+        // During the cooldown the key does nothing: no request goes out, so no refusal comes back either.
+        Press();
+        Assert.Equal(1, asked);
+        Assert.Equal(ScanState.Completed, scan().State);
+
+        // After it, the key scans again.
+        Tick(_snapshot.Content.Exploration.ScanCooldownTicks + 5);
+        Assert.Equal(ScanGate.Ready, ScanRules.Gate(scan(), here(), _snapshot.ServerTick));
+        Assert.Equal(0, ScanRules.CooldownSeconds(scan(), here(), _snapshot.ServerTick));
+        Press();
+        Assert.Equal(2, asked);
+        Assert.Equal(ScanState.Scanning, scan().State);
     }
 
     [Fact]
@@ -1925,14 +2044,15 @@ public sealed class FrameOrderTests : IDisposable
     {
         _barShown = true;
         OpenExploreMap();
-        Frame(() => Move(SectorSpot(OwnSector.Offset(-3, 0, -3))));
-        Frame(() => Click());
-        Frame();
-        Assert.True(_card.Pinned);
         Frame(() => Move(SectorSpot(OwnSector.Offset(6, 0, 4))));
         Frame(() => Click(GlfwMouseButton.Right));
         Frame();
         Assert.True(_menuOpen);
+
+        // A right click closes a pinned card, so the card is pinned afterwards (as a scripted view does) to have both up.
+        _card.Pin(OwnSector.Offset(-3, 0, -3));
+        Frame();
+        Assert.True(_card.Pinned);
         _mapPresses = _mapReleases = 0;
 
         // Every surface the map can show at once is up: the unit list, the bar, the layer bar, the menu and the card.

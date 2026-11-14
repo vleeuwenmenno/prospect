@@ -18,6 +18,12 @@ Preserve the existing pilot NAV/boost jump flow unless separately changed; map i
 
 - Hover shows a temporary card beside the sector; clicking pins the same card for interaction.
 - Clicking another sector replaces the pinned card. Empty-space click or Escape dismisses it.
+- Decided: any click on the map outside the pinned card closes it. A left click on a sector then pins that sector in
+  the same click (another sector replaces the card; the pinned sector stays pinned; outside the galaxy nothing is
+  pinned). A right click only closes it, and opens the course menu as before.
+- Decided: clicks on the card itself (its X, scan button, course rows, ship list and scrollbar) never close it. The
+  legend, unit list, layer bar and top bar are surfaces the map blocks, so clicks there change no card.
+- Decided: a click that closes the course menu is the menu's and changes no card; Escape closes the menu first, then the card.
 - Hovering another sector while a card is pinned shows no second preview and leaves the pinned card alone.
 - Move the map's top-right sector information into this card, respecting what the player knows.
 - Include a readable ship list rather than only a ship count; show only contacts the player may know about.
@@ -54,6 +60,21 @@ These are suggested layouts, not a settled control scheme.
 - The map index on the left sits under the unit list: charted, live sensors, unexplored, lost contact, asteroid field, gas cloud, the star types. Short screens drop the last rows first; where nothing fits under the unit list it sits beside it.
 - Resting the pointer on one of the player's own ships (within `unitHoverPixels`) names it beside it, small and muted, no box. The sector's preview card stays away meanwhile; a pinned card is unaffected.
 - The pinned card has an X in its top right corner that does what `Esc` does; its label reads PINNED to the left of it. A press on it never reaches the map.
+
+### Decided (provisional, tunable): scan key, readout and cooldown
+
+- `K` (D-pad left; the `ScanSector` binding, rebindable) asks for a scan of the sector the ship being flown is in, in
+  the flight view, the command view and on the map. It is the card button's request: same server rules.
+- A ship with no charting block still asks, so the server's refusal is shown. A running scan or a known cooldown makes
+  the key do nothing.
+- Readout: a small muted strip under the top of the flight and command views (`scanStrip*` in `content/visuals/map.json`):
+  bar and time left while it runs, then the result or cancellation reason for `scanResultSeconds`, then
+  "NEXT SCAN IN n S" until the cooldown ends. The cursor over it, or over the card's button, names the key.
+- Tip `scan-key` (trigger `unchartedSector`): fired when the ship being flown has a charting block and its sector has no
+  chart, in the flight or command view.
+- Cooldown: 10 s (`scanCooldownSeconds` in `rules/exploration.json`) on the sector a scan ended in, enforced by the
+  server, starting when the scan completes or is cancelled (cancelling is no way round it). A request in it is refused
+  with a reason (`ScanState.Cooldown`). Other sectors are not held. One entry per owner, not saved.
 
 ## Decided: exploration knowledge
 

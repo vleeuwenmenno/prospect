@@ -315,11 +315,15 @@ internal sealed partial class ScreenHost
         {
             var buttonMin = new float2(left, min.Y + parts.Scan);
             var buttonSize = new float2(inner, Kit.Px(28));
-            var scanning = snapshot.Exploration.Scan.State == ScanState.Scanning;
-            var enabled = !scanning && _coverage.OwnCanChart;
+            var gate = ScanRules.Gate(snapshot.Exploration.Scan, world.Sector.Coord, snapshot.ServerTick);
+            var scanning = gate == ScanGate.Running;
+            var enabled = gate == ScanGate.Ready && _coverage.OwnCanChart;
             var pressed = MapSectorCard.Button("##scan"u8, buttonMin, buttonSize);
+            var hovered = ImGui.IsItemHovered();
             if (!scanning)
-                ScanButton(draw, buttonMin, buttonSize, enabled, Charted(sector));
+                ScanButton(draw, buttonMin, buttonSize, enabled, Charted(sector), ScanRules.CooldownSeconds(snapshot.Exploration.Scan, world.Sector.Coord, snapshot.ServerTick));
+            if (hovered)
+                DrawScanTip(ImGui.GetForegroundDrawList(), snapshot, world, buttonMin, buttonSize);
             if (pressed && enabled && Bridge is { } bridge)
                 bridge.RequestScan();
         }
@@ -382,8 +386,14 @@ internal sealed partial class ScreenHost
         if (result.Length > 0)
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, resultAt, color, result, width);
         else
-            Kit.ClippedText(draw, _ui.Sans, Theme.FontCaption, resultAt, Theme.TextMute,
-                !_coverage.OwnCanChart ? "This ship has no charting block."u8 : charted ? Kit.F($"Rescan refreshes the chart: {seconds:0} s, flight continues.") : Kit.F($"A scan charts this sector in {seconds:0} s; flight continues."), width);
+        {
+            var cooling = ScanRules.CooldownSeconds(scan, world.Sector.Coord, snapshot.ServerTick);
+            ReadOnlySpan<byte> hint = !_coverage.OwnCanChart ? "This ship has no charting block."u8
+                : cooling > 0 ? Kit.F($"Scanned a moment ago: ready again in {cooling} s.")
+                : charted ? Kit.F($"Rescan refreshes the chart: {seconds:0} s, flight continues.")
+                : Kit.F($"A scan charts this sector in {seconds:0} s; flight continues.");
+            Kit.ClippedText(draw, _ui.Sans, Theme.FontCaption, resultAt, Theme.TextMute, hint, width);
+        }
     }
 
     /// <summary>The last scan's result for the player's sector, or nothing; a cancellation with its inferred reason.</summary>
@@ -410,17 +420,19 @@ internal sealed partial class ScreenHost
             case ScanState.ChartLimit:
                 color = Theme.Bad;
                 return "REFUSED: CHART LIMIT REACHED"u8;
+            case ScanState.Cooldown:
+                return "REFUSED: SCANNED TOO RECENTLY"u8;
             default:
                 return default;
         }
     }
 
-    private void ScanButton(ImDrawListPtr draw, float2 min, float2 size, bool enabled, bool charted)
+    private void ScanButton(ImDrawListPtr draw, float2 min, float2 size, bool enabled, bool charted, int cooldown)
     {
         var hot = Kit.Animate(ImGui.GetItemID(), enabled && ImGui.IsItemHovered() ? 1f : 0f);
         draw.AddRectFilled(min, min + size, Kit.Color(enabled ? Kit.Mix(Theme.PanelRaised, Theme.Accent, 0.25f + 0.75f * hot) : Theme.PanelRaised, enabled ? 1f : 0.6f));
         draw.AddRect(min, min + size, Kit.Color(enabled ? Theme.Accent : Theme.Line));
-        var label = !enabled ? "SCAN UNAVAILABLE"u8 : charted ? "RESCAN SECTOR"u8 : "SCAN SECTOR"u8;
+        var label = cooldown > 0 ? Kit.F($"SCAN READY IN {cooldown} S") : !enabled ? "SCAN UNAVAILABLE"u8 : charted ? "RESCAN SECTOR"u8 : "SCAN SECTOR"u8;
         var width = Kit.Measure(_ui.SansMedium, Theme.FontSmall, label).X;
         Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, min + new float2((size.X - width) * 0.5f, (size.Y - Kit.Px(17)) * 0.5f), enabled ? Kit.Mix(Theme.Text, Theme.AccentInk, hot) : Theme.TextMute, label);
     }

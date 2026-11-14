@@ -666,7 +666,7 @@ This status is an observation at open, not hosting authorization. Saved multipla
 - Move or copy the complete stopped folder, preserving key permissions, to retain identity. A bare database is insufficient.
 - Independent Claude security review remains required. No admission, TLS, key rotation or destructive recovery is included.
 
-## Exploration foundation (protocol 39)
+## Exploration foundation (protocol 43)
 
 The server owns scans and charts and filters dynamic live state by personal sensor coverage.
 `rules/exploration.json` is shared content and participates in content identity.
@@ -678,6 +678,11 @@ Equipment has the plating mass and hit points it replaces, preserving stock flig
 
 - A scan runs on the controlled hull while flight continues. Sector/control change or loss of its last charting block cancels it.
 - Completion records only that sector, its owner and authoritative survey tick. Repeat scans refresh that tick.
+- Cooldown: when a scan ends (completed, refused for chart capacity or cancelled) the server records the sector and
+  `scanCooldownSeconds` (`rules/exploration.json`, 10 s provisional, 0 turns it off, at most 3600) as `CooldownSector`
+  and `CooldownUntilTick` in that owner's scan. A request for the sector in that cooldown is refused with
+  `ScanState.Cooldown` and changes nothing else; it never moves the cooldown. One entry per owner: another sector can
+  be scanned at once, and the next scan to end replaces the entry. Transient: loading forgets it.
 - Permanent charts are bounded by content per owner; new sectors at capacity are refused, never evicted.
 - `SectorChart` describes immutable geography under the saved seed, generator version and content identity.
   `ExplorationView.ChartFields` reconstructs field centers, axes and envelope extents without mineral composition.
@@ -689,10 +694,14 @@ Field envelopes can cross the surveyed sector's walls; this does not chart those
 
 ### Client contract for the map worker
 
-`PlayerInputBridge.RequestScan()` queues a one-shot intent. The server refuses missing equipment or chart capacity.
+`PlayerInputBridge.RequestScan()` queues a one-shot intent. The server refuses missing equipment, chart capacity or
+a sector still cooling down (`ScanState.NoEquipment`, `ChartLimit`, `Cooldown`).
 `SessionSnapshot.Exploration` owns its buffers; read only counted prefixes, as with hull views.
 
-- `Scan`: state, sector, start and completion world ticks. Completed/refused/cancelled states remain until another request.
+- `Scan`: state, sector, start and completion world ticks, and the cooldown (`CooldownSector`, `CooldownUntilTick`).
+  Completed/refused/cancelled states remain until another request. `ScanView.CoolingDown(sector, tick)` is the one test.
+  The client (`ScanRules`) keeps the scan key and the card's button from asking while it is cooling, and shows the time
+  left; the server enforces it either way.
 - `Charts[0..ChartCount]`: owner, sector and recorded world tick. Chart delivery is incremental; it never implies live coverage.
 - `Contacts[0..ContactCount]`: hull, owner, design, last observed position/tick, live flag and loss tick.
 - A lost ship marker freezes and expires after the content lifetime. It is not present in `SessionSnapshot.Hulls` or collision prediction.
@@ -735,7 +744,7 @@ Galaxy vertical limits remain unfinished.
 
 ### Wire sizes and bounded work
 
-Scan is 1 byte. Exploration is at most 799 bytes: scan state/times and up to 32 chart records of 24 bytes.
+Scan is 1 byte. Exploration is at most 819 bytes: scan state/times, the cooldown sector and tick, and up to 32 chart records of 24 bytes.
 Visibility is 13 bytes plus mask words and up to 32 destroyed full hull IDs; maximum 8,333 bytes.
 Social envelopes add one validated unknown byte; the maximum is 818 bytes. Hello=1 and Reject=3 and their first fields remain unchanged.
 Invisible tail capacity is omitted. Requests use existing admission/rate budgets; the client reserves one scan request per tick.

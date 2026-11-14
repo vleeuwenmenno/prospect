@@ -1133,6 +1133,8 @@ internal sealed class App : IDisposable
                 _screens.OpenScan();
                 _screens.SetMapPresentation(_options.MapTilt, _options.MapHover);
             }
+            else if (view == "scan-pilot")
+                _screens.OpenScanPilot();
             else if (view == "jump-fleet-ahead" && snapshot is { OwnHull: >= 0 })
             {
                 // The player's other hulls jump to points ahead of and above the camera, 6 km and 10 km away along

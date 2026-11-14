@@ -40,6 +40,7 @@ internal sealed partial class ScreenHost
     private bool _tipSawCommand;
     private bool _tipSawEditor;
     private bool _tipSawScan;
+    private bool _tipSawUncharted;
     private bool _tipSawShield;
     private bool _tipEnergyLow;
 
@@ -108,6 +109,9 @@ internal sealed partial class ScreenHost
 
         var own = world.Own;
         var flight = world.OwnFlight;
+
+        // In the flight or command view, in a sector with no chart, in a ship that can scan: the scan key's tip.
+        Edge(own.Id != 0 && !_mapOpen && !world.Editor.Shown && _coverage.OwnCanChart && !Charted(world.Sector.Coord), ref _tipSawUncharted, TipTriggers.UnchartedSector);
         Edge(own.Id != 0 && flight.ShieldCapacity > 0f && own.ShieldOffline, ref _tipSawShield, TipTriggers.ShieldOffline);
 
         // The battery is low below one level and not again until it has recovered past a higher one, so a battery
@@ -250,7 +254,7 @@ internal sealed partial class ScreenHost
         _tipDragging = false;
         _tips.Dragging = false;
         _tipPlacedId = null;
-        _tipSawMap = _tipSawCommand = _tipSawEditor = _tipSawScan = _tipSawShield = _tipEnergyLow = false;
+        _tipSawMap = _tipSawCommand = _tipSawEditor = _tipSawScan = _tipSawUncharted = _tipSawShield = _tipEnergyLow = false;
     }
 
     /// <summary>

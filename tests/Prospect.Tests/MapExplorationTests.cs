@@ -124,6 +124,71 @@ public sealed class MapExplorationTests
     }
 
     [Fact]
+    public void ARightClickClosesThePinnedCardAndPinsNothingWhileALeftClickPinsWhatItHits()
+    {
+        var card = new MapCardState();
+        var a = new SectorCoord(1, 0, 1);
+        card.Pin(a);
+        card.RightClick();
+        Assert.False(card.Pinned);
+        card.RightClick();
+        Assert.False(card.Pinned);
+
+        // A left click on a sector closes the pinned card and pins that sector in the same click.
+        card.Pin(a);
+        card.Click(a.Offset(1, 0, 0), true);
+        Assert.True(card.Pinned);
+        Assert.Equal(a.Offset(1, 0, 0), card.Sector);
+    }
+
+    [Fact]
+    public void TheScanCooldownIsReadFromTheSnapshotPerSectorAndRoundsUp()
+    {
+        var here = new SectorCoord(2, 0, 2);
+        var scan = new ScanView { State = ScanState.Completed, Sector = here, CooldownSector = here, CooldownUntilTick = 1000 };
+        Assert.Equal(ScanGate.Cooling, ScanRules.Gate(scan, here, 400));
+        Assert.Equal(10, ScanRules.CooldownSeconds(scan, here, 400));
+        Assert.Equal(1, ScanRules.CooldownSeconds(scan, here, 999));
+        Assert.Equal(ScanGate.Ready, ScanRules.Gate(scan, here, 1000));
+        Assert.Equal(0, ScanRules.CooldownSeconds(scan, here, 1000));
+
+        // Another sector is not cooling down, and a running scan says so first.
+        Assert.Equal(ScanGate.Ready, ScanRules.Gate(scan, here.Offset(1, 0, 0), 400));
+        scan.State = ScanState.Scanning;
+        Assert.Equal(ScanGate.Running, ScanRules.Gate(scan, here, 400));
+
+        // The strip: the bar while it runs; afterwards the result inside its window and the cooldown under it.
+        Assert.Equal(new ScanStrip(true, false, 0), ScanRules.Strip(scan, here, 400, 0f, 6f));
+        scan.State = ScanState.Cancelled;
+        var strip = ScanRules.Strip(scan, here, 400, 2f, 6f);
+        Assert.True(strip.ResultWindow);
+        Assert.Equal(10, strip.CooldownSeconds);
+        Assert.False(ScanRules.Strip(scan, here, 1000, float.MaxValue, 6f).Any);
+        Assert.True(ScanRules.Strip(scan, here, 400, float.MaxValue, 6f).Any);
+    }
+
+    [Fact]
+    public void ARefusedScanForCooldownIsAResultTheTrackerReportsOnce()
+    {
+        var here = new SectorCoord(1, 0, 1);
+        var tracker = new ScanTracker();
+        tracker.Update(new ScanView { State = ScanState.Cooldown, Sector = here, CooldownSector = here, CooldownUntilTick = 600 }, 7, here, true, 0.1f);
+        Assert.Equal(0f, tracker.SinceResult);
+        Assert.Equal(ScanStop.None, tracker.Stop);
+    }
+
+    [Fact]
+    public void TheShippedCooldownIsTenSecondsAndContentOutsideItsRangeIsRefused()
+    {
+        var bytes = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "content", "rules", "exploration.json"));
+        Assert.Equal(600, ExplorationRules.Parse(bytes).ScanCooldownTicks);
+        var text = System.Text.Encoding.UTF8.GetString(bytes);
+        Assert.Equal(0, ExplorationRules.Parse(System.Text.Encoding.UTF8.GetBytes(text.Replace("\"scanCooldownSeconds\": 10", "\"scanCooldownSeconds\": 0"))).ScanCooldownTicks);
+        foreach (var bad in new[] { "-1", "3601" })
+            Assert.Throws<InvalidDataException>(() => ExplorationRules.Parse(System.Text.Encoding.UTF8.GetBytes(text.Replace("\"scanCooldownSeconds\": 10", "\"scanCooldownSeconds\": " + bad))));
+    }
+
+    [Fact]
     public void ACancelledScanIsExplainedByWhatChangedSinceItStarted()
     {
         var here = new SectorCoord(1, 0, 1);

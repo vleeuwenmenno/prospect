@@ -21,7 +21,8 @@
     "ToggleEditor": ["Key:B"],
     "MapLayerUp": ["Key:PageUp"],
     "MapLayerDown": ["Key:PageDown"],
-    "MapTilt": ["Key:V"]
+    "MapTilt": ["Key:V"],
+    "ScanSector": ["Key:K", "Pad:DpadLeft"]
   },
   "axes": {
     "Strafe": [{ "negative": "Key:A", "positive": "Key:D" }, { "axis": "Pad:LeftX" }],

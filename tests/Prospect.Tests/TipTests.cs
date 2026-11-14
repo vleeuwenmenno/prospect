@@ -53,6 +53,25 @@ public sealed class TipTests
     }
 
     [Fact]
+    public void TheUnchartedSectorTipNamesTheScanKeyAndFollowsARebinding()
+    {
+        var catalogue = TipCatalogue.Load(Shipped, ActionMap.Load(Path.Combine(Content, "input", "bindings.json")));
+        var tip = catalogue.Tips.Single(t => t.Id == "scan-key");
+        Assert.Equal(TipTriggers.UnchartedSector, tip.Trigger);
+        Assert.Contains("Press K to scan this sector", tip.Text);
+        Assert.Contains("K does the same", catalogue.Tips.Single(t => t.Id == "map-scan").Text);
+
+        var path = Scratch() + ".json";
+        File.WriteAllText(path, File.ReadAllText(Path.Combine(Content, "input", "bindings.json")).Replace("\"ScanSector\": [\"Key:K\", \"Pad:DpadLeft\"]", "\"ScanSector\": [\"Key:J\"]"));
+        Assert.Contains("Press J to scan this sector", TipCatalogue.Load(Shipped, ActionMap.Load(path)).Tips.Single(t => t.Id == "scan-key").Text);
+
+        // The board brings it up on its trigger, once until it is hidden.
+        var board = new TipBoard(catalogue, new ClientSettings());
+        Assert.Equal(1, board.Fire(TipTriggers.UnchartedSector));
+        Assert.Equal("scan-key", board.Current.Id);
+    }
+
+    [Fact]
     public void ARebindingChangesTheKeyATipNames()
     {
         var path = Scratch() + ".json";

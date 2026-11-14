@@ -26,6 +26,12 @@ internal static class TipTriggers
     /// <summary>The map's sector card was pinned on the player's own sector, where Scan sector is.</summary>
     public const string ScanAvailable = "scanAvailable";
 
+    /// <summary>
+    /// The ship being flown, which has a charting block, is in a sector its owner has not charted, in the flight or
+    /// command view: fired each time it comes to be so, so the tip names the scan key.
+    /// </summary>
+    public const string UnchartedSector = "unchartedSector";
+
     /// <summary>The shield of the ship being flown went offline.</summary>
     public const string ShieldOffline = "shieldOffline";
 
@@ -39,7 +45,7 @@ internal static class TipTriggers
     public const string DroneEditHint = "droneEditHint";
 
     /// <summary>Every trigger, for validation.</summary>
-    public static readonly string[] All = [MapOpened, CommandViewOpened, EditorOpened, ScanAvailable, ShieldOffline, EnergyLow, DroneEditHint];
+    public static readonly string[] All = [MapOpened, CommandViewOpened, EditorOpened, ScanAvailable, UnchartedSector, ShieldOffline, EnergyLow, DroneEditHint];
 }
 
 /// <summary>What a tip is placed against: the screen, a panel the editor or flight view draws, or a point.</summary>

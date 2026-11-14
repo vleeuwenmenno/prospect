@@ -10,6 +10,7 @@ internal sealed class ControlsCatalog
         "Command view", "Galaxy map", "Halt (cancel order)", "Focus on selection (command view)", "Ship data sheet", "Take control of target / leave in drone",
         "Controls / help", "Hold to show cursor", "Players on this server", "Party (social)", "Chat", "Sector information (show / hide)",
         "Ship editor (open / cancel); in the drone: New ship, with Ctrl held edits the drone", "Map layer up", "Map layer down", "Map flat / tilted view",
+        "Scan the sector you are in",
     ];
 
 
@@ -32,7 +33,7 @@ internal sealed class ControlsCatalog
                 names.Add(binding.DisplayName);
             var category = (InputAction)i switch
             {
-                InputAction.Boost or InputAction.ToggleDampeners or InputAction.SwitchHull => "Pilot",
+                InputAction.Boost or InputAction.ToggleDampeners or InputAction.SwitchHull or InputAction.ScanSector => "Pilot",
                 InputAction.Halt => "Pilot / command",
                 InputAction.Follow => "Command",
                 InputAction.TogglePlayers or InputAction.ToggleSocial or InputAction.ToggleChat => "Social",

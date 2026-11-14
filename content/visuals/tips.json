@@ -32,8 +32,15 @@
       "id": "map-scan",
       "trigger": "scanAvailable",
       "title": "Scan the sector",
-      "text": "Scan sector charts the sector you are in. It takes 5 seconds and flight goes on, but leaving the sector or switching ship cancels it.",
+      "text": "Scan sector charts the sector you are in. It takes 5 seconds and flight goes on, but leaving the sector or switching ship cancels it. {ScanSector} does the same from the flight view.",
       "anchor": { "region": "cursor", "side": "bottomRight", "offset": [0, 0] }
+    },
+    {
+      "id": "scan-key",
+      "trigger": "unchartedSector",
+      "title": "Uncharted sector",
+      "text": "Press {ScanSector} to scan this sector: 5 seconds, flight goes on. Leaving the sector or switching ship cancels it, and a sector cannot be scanned again for a short while.",
+      "anchor": { "region": "screen", "side": "bottomRight", "offset": [0, -90] }
     },
     {
       "id": "command-select",
