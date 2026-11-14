@@ -33,6 +33,7 @@ The decoder rejects unknown identities, nonfinite/nonpositive figures and accura
 Block is a one-based design index; zero means absent.
 `BoxHullSums` selects highest surviving quality, then mark, then lowest block index; duplicates provide redundancy only.
 Size affects mass/hull normally, but not range/detail/time or the 0.1 MW standby draw per block.
+Short display names fit existing editor cards; quality and mark remain module metadata.
 The editor's All list already enumerates these block types. Designs still pass through `DesignBytes.Decode`.
 
 | Common Mk I block id | Mass t | HP/cell | Range m | Scan s | Active MW | Cooldown s |
@@ -64,6 +65,7 @@ Cross-platform execution of the new hash remains unverified.
 Generation runs on a dedicated worker with preallocated connection mailboxes, never on the tick thread.
 Preparing takes no active energy; Scanning runs for the equipment duration rounded up to simulation ticks.
 Each scanning interval consumes active MW / 60 from stored energy after ordinary flight/shield spending.
+Active module spending is shared with client prediction through `ModuleScanRules.Spend`; `PowerFlow.Modules` contributes to total draw/net flow. The existing net energy readout includes it; a separate module tooltip row is UI follow-up.
 Generators replenish through ordinary simulation. Insufficient energy refuses/cancels as NoPower without partial-interval spending.
 A jump, control change or selected module loss/change cancels the operation.
 
@@ -116,5 +118,3 @@ Evaluator version is 10; protocol 47; generation 7; save codec 4. Older incompat
 - UI controls, presentation and locator overlay treatment of partial/stale observations.
 - Inventory, upgrades, mining revisions and explicit knowledge sharing/trading.
 - Exhaustive locator coverage of displaced asteroids beyond the bounded generated candidate set.
-
-Active module spending is shared with client prediction through `ModuleScanRules.Spend`; `PowerFlow.Modules` contributes to total draw/net flow. The existing net energy readout includes it; a separate module tooltip row is UI follow-up.

@@ -100,8 +100,8 @@
     "microshield": { "name": "Drone shield", "mass": 0.3, "hull": 30, "shield": 120, "shieldRecharge": 5, "powerDraw": 0.4 },
     "sensor": { "name": "Passive sensor", "mass": 2, "hull": 400, "sensor": true },
     "charting": { "name": "Sector scanner", "mass": 2, "hull": 400, "charting": true },
-    "gasScanner": {"name": "Gas scanner Common Mk I", "mass": 2, "hull": 200, "powerDraw": 0.1, "sizeRules": {"powerDraw": {"volumeExponent": 0}}, "module": {"family": "gasScanner", "quality": "Common", "mark": 1, "variant": "standard", "range": 1500, "accuracy": 0.2, "scanSeconds": 4, "powerDraw": 0.5, "cooldownSeconds": 10}},
-    "asteroidScanner": {"name": "Asteroid scanner Common Mk I", "mass": 2.5, "hull": 200, "powerDraw": 0.1, "sizeRules": {"powerDraw": {"volumeExponent": 0}}, "module": {"family": "asteroidScanner", "quality": "Common", "mark": 1, "variant": "standard", "range": 3000, "accuracy": 0.2, "scanSeconds": 5, "powerDraw": 0.75, "cooldownSeconds": 10}},
-    "asteroidLocator": {"name": "Asteroid locator Common Mk I", "mass": 3, "hull": 200, "powerDraw": 0.1, "sizeRules": {"powerDraw": {"volumeExponent": 0}}, "module": {"family": "asteroidLocator", "quality": "Common", "mark": 1, "variant": "standard", "range": 5000, "accuracy": 0.2, "scanSeconds": 2, "powerDraw": 1, "cooldownSeconds": 15}}
+    "gasScanner": {"name": "Gas scanner", "mass": 2, "hull": 200, "powerDraw": 0.1, "sizeRules": {"powerDraw": {"volumeExponent": 0}}, "module": {"family": "gasScanner", "quality": "Common", "mark": 1, "variant": "standard", "range": 1500, "accuracy": 0.2, "scanSeconds": 4, "powerDraw": 0.5, "cooldownSeconds": 10}},
+    "asteroidScanner": {"name": "Asteroid scanner", "mass": 2.5, "hull": 200, "powerDraw": 0.1, "sizeRules": {"powerDraw": {"volumeExponent": 0}}, "module": {"family": "asteroidScanner", "quality": "Common", "mark": 1, "variant": "standard", "range": 3000, "accuracy": 0.2, "scanSeconds": 5, "powerDraw": 0.75, "cooldownSeconds": 10}},
+    "asteroidLocator": {"name": "Asteroid locator", "mass": 3, "hull": 200, "powerDraw": 0.1, "sizeRules": {"powerDraw": {"volumeExponent": 0}}, "module": {"family": "asteroidLocator", "quality": "Common", "mark": 1, "variant": "standard", "range": 5000, "accuracy": 0.2, "scanSeconds": 2, "powerDraw": 1, "cooldownSeconds": 15}}
   }
 }

@@ -553,13 +553,13 @@ public sealed class HullSumsTests
     [Fact]
     public void AHullsStateTakesTheMemoryItsDesignSaysAndTheDesignKeepsItsShareOnce()
     {
-        Assert.Equal(200, BoxHullSums.NodeBytes);
+        Assert.Equal(216, BoxHullSums.NodeBytes);
         (int Blocks, long Sums, long Predicted, long Decided)[] expected =
         [
-            (64, 600, 1_404, 1_660),
-            (300, 3_800, 7_468, 8_668),
-            (4_096, 51_000, 100_692, 117_076),
-            (150_000, 1_875_000, 3_693_780, 4_293_780),
+            (64, 648, 1_452, 1_708),
+            (300, 4_104, 7_772, 8_972),
+            (4_096, 55_080, 104_772, 121_156),
+            (150_000, 2_025_000, 3_843_780, 4_443_780),
         ];
         foreach (var (blocks, sumBytes, predicted, decided) in expected)
         {

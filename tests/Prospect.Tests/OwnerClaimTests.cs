@@ -269,14 +269,14 @@ public sealed class OwnerClaimTests
         var ownerOffset = original.Length - WorldSnapshotCodec.OwnerBytes;
         for (var i = 0; i < snapshot.HullCount; i++)
             ownerOffset -= WorldSnapshotCodec.HullFixedBytes + snapshot.Hulls[i].Visual.Count * WorldSnapshotCodec.DentBytes;
-        ownerOffset -= snapshot.BlockCount * 4 + snapshot.LossCount * 4 + snapshot.RockCount * WorldSnapshotCodec.RockBytes + snapshot.ChartCount * WorldSnapshotCodec.ChartBytes;
+        ownerOffset -= snapshot.BlockCount * 4 + snapshot.LossCount * 4 + snapshot.RockCount * WorldSnapshotCodec.RockBytes + snapshot.ChartCount * WorldSnapshotCodec.ChartBytes + snapshot.ModuleObservationCount * WorldSnapshotCodec.ModuleObservationBytes;
         var duplicate = new byte[original.Length + WorldSnapshotCodec.OwnerBytes];
         original.AsSpan(0, ownerOffset + WorldSnapshotCodec.OwnerBytes).CopyTo(duplicate);
         original.AsSpan(ownerOffset).CopyTo(duplicate.AsSpan(ownerOffset + WorldSnapshotCodec.OwnerBytes));
         var countsOffset = ownerOffset;
         for (var i = 0; i < snapshot.DesignCount; i++)
             countsOffset -= 4 + 32 + snapshot.Designs[i].Length;
-        countsOffset -= 24;
+        countsOffset -= 28;
         System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(duplicate.AsSpan(countsOffset), 2);
         var nextOwnerOffset = countsOffset - 4 - snapshot.StartingFleet.Length - 8 - 4;
         System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(duplicate.AsSpan(nextOwnerOffset), 3);
