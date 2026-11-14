@@ -37,19 +37,19 @@ public sealed class ControlRemapTests
         rig.Map.Changed += () => changes++;
         var before = rig.Map.Version;
 
-        Assert.Null(rig.Remapper.Propose(ControlSlot.Of(InputAction.Boost), 0, Key(GlfwKey.J)));
-        Assert.Equal(["J", "Pad LeftThumb"], rig.Map.Bindings(InputAction.Boost).ToArray().Select(b => b.DisplayName));
+        Assert.Null(rig.Remapper.Propose(ControlSlot.Of(InputAction.Boost), 0, Key(GlfwKey.F7)));
+        Assert.Equal(["F7", "Pad LeftThumb"], rig.Map.Bindings(InputAction.Boost).ToArray().Select(b => b.DisplayName));
         Assert.Equal(1, changes);
         Assert.True(rig.Map.Version > before);
         rig.Catalog.Refresh();
-        Assert.Contains(rig.Catalog.Rows, r => r.Action == "Boost" && r.Binding == "J / Pad LeftThumb");
-        Assert.Equal(["Key:J", "Pad:LeftThumb"], rig.Settings.ControlOverrides["Boost"]);
+        Assert.Contains(rig.Catalog.Rows, r => r.Action == "Boost" && r.Binding == "F7 / Pad LeftThumb");
+        Assert.Equal(["Key:F7", "Pad:LeftThumb"], rig.Settings.ControlOverrides["Boost"]);
 
         // The new key boosts and the old one no longer does.
         var devices = new InputDevices();
-        devices.OnKey(GlfwKey.J, GlfwKeyAction.Press);
+        devices.OnKey(GlfwKey.F7, GlfwKeyAction.Press);
         Assert.True(rig.Map.Held(devices, InputAction.Boost, true));
-        devices.OnKey(GlfwKey.J, GlfwKeyAction.Release);
+        devices.OnKey(GlfwKey.F7, GlfwKeyAction.Release);
         devices.OnKey(GlfwKey.Space, GlfwKeyAction.Press);
         Assert.False(rig.Map.Held(devices, InputAction.Boost, true));
         Assert.True(rig.Map.Pressed(devices, InputAction.Follow, true));
@@ -144,16 +144,16 @@ public sealed class ControlRemapTests
         var rig = new Rig();
         var left = ControlSlot.Of(InputAxis.Strafe, false);
         Assert.Equal(Key(GlfwKey.A), rig.Remapper.Get(left, 0));
-        Assert.Null(rig.Remapper.Propose(left, 0, Key(GlfwKey.J)));
-        Assert.Equal(["Key:J"], rig.Settings.ControlOverrides["Strafe.Negative"]);
+        Assert.Null(rig.Remapper.Propose(left, 0, Key(GlfwKey.F7)));
+        Assert.Equal(["Key:F7"], rig.Settings.ControlOverrides["Strafe.Negative"]);
         var devices = new InputDevices();
-        devices.OnKey(GlfwKey.J, GlfwKeyAction.Press);
+        devices.OnKey(GlfwKey.F7, GlfwKeyAction.Press);
         Assert.Equal(-1f, rig.Map.Axis(devices, InputAxis.Strafe, true));
-        devices.OnKey(GlfwKey.J, GlfwKeyAction.Release);
+        devices.OnKey(GlfwKey.F7, GlfwKeyAction.Release);
         devices.OnKey(GlfwKey.A, GlfwKeyAction.Press);
         Assert.Equal(0f, rig.Map.Axis(devices, InputAxis.Strafe, true));
         rig.Catalog.Refresh();
-        Assert.Equal("J - D / Pad LeftX", rig.Catalog.Rows.Single(r => r.Kind == RowKind.Axis && r.Index == (int)InputAxis.Strafe).Binding);
+        Assert.Equal("F7 - D / Pad LeftX", rig.Catalog.Rows.Single(r => r.Kind == RowKind.Axis && r.Index == (int)InputAxis.Strafe).Binding);
 
         // Clearing leaves the other key and the stick alone.
         Assert.True(rig.Remapper.Remove(left, 0));
@@ -178,7 +178,7 @@ public sealed class ControlRemapTests
     public void ResettingOneControlAndAllControlsPutsBackTheShippedBindingsAndEmptiesTheSettings()
     {
         var rig = new Rig();
-        rig.Remapper.Propose(ControlSlot.Of(InputAction.Boost), 0, Key(GlfwKey.J));
+        rig.Remapper.Propose(ControlSlot.Of(InputAction.Boost), 0, Key(GlfwKey.F7));
         rig.Remapper.Propose(ControlSlot.Of(InputAction.MapTilt), 0, Key(GlfwKey.F5));
         rig.Remapper.Propose(ControlSlot.Of(InputAxis.Yaw, true), 0, Key(GlfwKey.F6));
         Assert.True(rig.Remapper.AnyChanged());
@@ -202,7 +202,7 @@ public sealed class ControlRemapTests
     public void RemapsSurviveTheSettingsFileAndReachAFreshMapAtStartup()
     {
         var rig = new Rig();
-        rig.Remapper.Propose(ControlSlot.Of(InputAction.Boost), 0, Key(GlfwKey.J));
+        rig.Remapper.Propose(ControlSlot.Of(InputAction.Boost), 0, Key(GlfwKey.F7));
         rig.Remapper.Propose(ControlSlot.Of(InputAction.ScanSector), 1, new InputBinding(InputBinding.Source.PadButton, (int)GlfwGamepadButton.RightBumper));
         rig.Remapper.Propose(ControlSlot.Of(InputAction.MapTilt), 0, new InputBinding(InputBinding.Source.MouseButton, (int)GlfwMouseButton.Middle));
         rig.Remapper.Propose(ControlSlot.Of(InputAxis.Pitch, true), 0, Key(GlfwKey.I));
@@ -286,11 +286,11 @@ public sealed class ControlRemapTests
         var tips = TipCatalogue.Load(Path.Combine(Content, "visuals", "tips.json"), rig.Map);
         var scan = tips.Tips.First(t => t.Template.Contains("{ScanSector}"));
         Assert.Contains("K", scan.Text);
-        rig.Remapper.Propose(ControlSlot.Of(InputAction.ScanSector), 0, Key(GlfwKey.J));
+        rig.Remapper.Propose(ControlSlot.Of(InputAction.ScanSector), 0, Key(GlfwKey.F7));
         var rebound = tips.Rebind(rig.Map);
         Assert.Equal(tips.Tips.Length, rebound.Tips.Length);
         var after = rebound.Tips.First(t => t.Id == scan.Id);
-        Assert.Contains(" J ", after.Text.Replace(".", " ").Replace(",", " ") + " ");
+        Assert.Contains(" F7 ", after.Text.Replace(".", " ").Replace(",", " ") + " ");
         Assert.DoesNotContain("press K ", after.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(System.Text.Encoding.UTF8.GetString(after.TextBytes), after.Text);
     }
