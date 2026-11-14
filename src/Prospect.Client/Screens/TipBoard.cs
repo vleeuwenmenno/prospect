@@ -73,6 +73,49 @@ internal sealed class TipBoard
         return added;
     }
 
+    /// <summary>
+    /// Takes the tips of <paramref name="trigger"/> out of the stack because what they were about is gone from the
+    /// screen: a map tip has no place in the command view. Nothing is hidden for good, so the tips come again with
+    /// their next trigger, except that the one shown with "Don't show this again" ticked is hidden, as leaving it
+    /// by Next would. Returns how many were taken out.
+    /// </summary>
+    public int Withdraw(string trigger)
+    {
+        var kept = 0;
+        var removed = 0;
+        var atShown = 0;
+        var shownGone = false;
+        var tips = _catalogue.Tips;
+        for (var i = 0; i < _count; i++)
+        {
+            if (i == _index)
+                atShown = kept;
+            if (tips[_queue[i]].Trigger == trigger)
+            {
+                removed++;
+                if (i == _index)
+                {
+                    shownGone = true;
+                    if (DontShowAgain)
+                        Hide(tips[_queue[i]].Id);
+                }
+
+                continue;
+            }
+
+            _queue[kept++] = _queue[i];
+        }
+
+        if (removed == 0)
+            return 0;
+        _count = kept;
+        // The tip shown stays shown when it stays; when it went, the next one that stayed takes its place.
+        _index = atShown >= kept ? 0 : atShown;
+        if (shownGone)
+            DontShowAgain = false;
+        return removed;
+    }
+
     /// <summary>True when the player hid the tip for good.</summary>
     public bool IsHidden(string id)
     {

@@ -4522,6 +4522,13 @@ public sealed class FrameOrderTests : IDisposable
         PressKey(GlfwKey.B);
         Assert.True(PlayDroneUntil(() => _world.Editor.Stage == EditorStage.Closed));
         Assert.False(_newShip.Open);
+
+        // Not a ship just built: closing this edit never moves the player.
+        Assert.Equal(0u, _world.Editor.FollowHull);
+        for (var i = 0; i < 30; i++)
+            DroneFrame();
+        Assert.Equal(drone, _snapshot.Hulls[_snapshot.OwnHull].Id);
+        Assert.False(Bridge.ConsumeControlRequest(out _));
     }
 
     [Fact]
@@ -4623,7 +4630,7 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     [Fact]
-    public void ABuiltShipIsEditedWhereItIsAppliedByTheServerAndTheDroneKeepsFlying()
+    public void ABuiltShipIsEditedWhereItIsAppliedByTheServerAndThePlayerThenFliesIt()
     {
         var drone = UseDrone();
         OpenNewShipDialog();
@@ -4655,15 +4662,76 @@ public sealed class FrameOrderTests : IDisposable
         Assert.True(PlayDroneUntil(() => editor.Stage == EditorStage.Closed), $"{_snapshot.Editor.Phase}/{_snapshot.Editor.Reason}");
         Assert.True(editor.NoticeApplied);
         Assert.True(editor.NoticeBuilt);
-        Assert.Equal(drone, _snapshot.Hulls[_snapshot.OwnHull].Id);
         Assert.Equal(-1, HullIndex(created));
         Assert.True(PlayDroneUntil(() => _snapshot.Editor.Hull != created && HullIndex(_snapshot.Editor.Hull) >= 0));
         var built = _snapshot.Hulls[HullIndex(_snapshot.Editor.Hull)];
         Assert.Equal(designs, built.Design);
         Assert.Equal(2, BlockSet.Count(built.Blocks.Span));
+
+        // Closing the edit put the player in control of the ship they designed; the drone they left is gone.
+        Assert.True(PlayDroneUntil(() => _snapshot.Hulls[_snapshot.OwnHull].Id == built.Id), "the player should fly the built ship");
+        Assert.True(HullIndex(drone) < 0, "the drone is removed when its pilot takes a ship");
+        Assert.False(_snapshot.OwnIsDrone);
+        Assert.Equal(0u, editor.FollowHull);
+        Assert.Equal(FollowRefusal.None, editor.FollowNotice);
         DroneFrame();
         Assert.True(_router.Captured);
         Assert.False(_world.Editor.Shown);
+    }
+
+    [Fact]
+    public void CancellingTheEditOfABuiltShipLeavesItAsMadeAndPutsThePlayerInIt()
+    {
+        var drone = UseDrone();
+        OpenNewShipDialog();
+        Type("Scout");
+        PressKey(GlfwKey.Enter);
+        Assert.True(PlayDroneUntil(() => _world.Editor.Shown));
+        var editor = _world.Editor;
+        var created = editor.Hull;
+        var design = _snapshot.Hulls[HullIndex(created)].Design;
+
+        // The editor key cancels, as every edit; the ship stays exactly as it was made, and the player flies it.
+        PressKey(GlfwKey.B);
+        Assert.Equal(EditorStage.Closed, editor.Stage);
+        Assert.True(PlayDroneUntil(() => _snapshot.Hulls[_snapshot.OwnHull].Id == created), "the player should fly the ship they cancelled");
+        Assert.True(HullIndex(created) >= 0);
+        Assert.Equal(design, _snapshot.Hulls[_snapshot.OwnHull].Design);
+        Assert.Equal(1, BlockSet.Count(_snapshot.Hulls[_snapshot.OwnHull].Blocks.Span));
+        Assert.True(HullIndex(drone) < 0);
+        Assert.False(_snapshot.OwnIsDrone);
+        Assert.Equal(FollowRefusal.None, editor.FollowNotice);
+        Assert.Null(editor.Draft);
+    }
+
+    [Fact]
+    public void ABuiltShipThatIsNotThereWhenTheEditorClosesIsGivenUpAfterAWhileWithTheReasonAndTheDroneKeepsFlying()
+    {
+        var drone = UseDrone();
+        OpenNewShipDialog();
+        Type("Scout");
+        PressKey(GlfwKey.Enter);
+        Assert.True(PlayDroneUntil(() => _world.Editor.Shown));
+        var editor = _world.Editor;
+        var created = editor.Hull;
+
+        // The snapshot stops naming the ship, as one that was lost would: nothing is asked of the server.
+        var at = HullIndex(created);
+        var kept = _snapshot.HullCount;
+        Assert.Equal(kept - 1, at);
+        editor.Cancel(Bridge);
+        _snapshot.HullCount = at;
+        Bridge.ConsumeControlRequest(out _);
+        for (var i = 0; i < 60 * (int)ShipEditor.FollowTimeout - 30; i++)
+            DroneFrame();
+        Assert.Equal(created, editor.FollowHull);
+        Assert.False(Bridge.ConsumeControlRequest(out _));
+        for (var i = 0; i < 60; i++)
+            DroneFrame();
+        Assert.Equal(0u, editor.FollowHull);
+        Assert.Equal(FollowRefusal.Missing, editor.FollowNotice);
+        Assert.False(Bridge.ConsumeControlRequest(out _));
+        Assert.Equal(drone, _snapshot.Hulls[_snapshot.OwnHull].Id);
     }
 
     [Fact]

@@ -467,8 +467,8 @@ internal sealed partial class ScreenHost
 
     /// <summary>
     /// Live sensor coverage on the chosen layer: each owned sensor's gas-shaped reach cut by the layer's middle
-    /// plane (the same sampled reach as the command view), filled and ringed, with a faint tint where gas cut the
-    /// range. In the tilted view each sensor's plain sphere outline also shows, around the sensor at its own height.
+    /// plane (the same sampled reach as the command view), filled and ringed, with a faint amber line at the plain
+    /// range where gas cut it. In the tilted view each sensor's plain sphere outline also shows, around the sensor at its own height.
     /// The map shows every owned sensor, whatever is selected.
     /// </summary>
     private void DrawCoverage(ImDrawListPtr draw, in MapProjection view, Galaxy galaxy, MapTuning look)
@@ -479,7 +479,6 @@ internal sealed partial class ScreenHost
         _coverage.Refresh(plane, false);
         Span<float2> edge = stackalloc float2[SensorCoverage.ReachSamples];
         var fill = Kit.Color(Theme.Good, look.LiveFillAlpha);
-        var tint = Kit.Color(Theme.Accent, look.GasTintAlpha);
         for (var i = 0; i < _coverage.Count; i++)
         {
             var p = _coverage.Positions[i];
@@ -489,7 +488,7 @@ internal sealed partial class ScreenHost
                 draw.AddCircle(sphere, Math.Max((float)(_coverage.Radius / size) * view.Cell, minimum), Kit.Color(Theme.Good, look.LiveRingAlpha * 0.35f), 48, Kit.Px(1f));
             }
 
-            if (!_coverage.Ring(i, out var x, out var z, out var nominal, out var samples))
+            if (!_coverage.Ring(i, out var x, out var z, out _, out var samples))
                 continue;
             var center = view.ToScreen((float)(x / size), view.Layer, (float)(z / size));
 
@@ -504,24 +503,20 @@ internal sealed partial class ScreenHost
             for (var k = 0; k < edge.Length; k++)
                 draw.AddTriangleFilled(center, edge[k], edge[k + 1 == edge.Length ? 0 : k + 1], fill);
             draw.AddPolyline(edge, Kit.Color(Theme.Good, look.LiveRingAlpha), ImDrawFlags.Closed, Kit.Px(1f));
+        }
 
-            if (look.GasTintAlpha <= 0)
+        // Where gas cut a sensor short, a faint amber line marks the plain range, once where such circles overlap.
+        if (look.GasRangeAlpha <= 0)
+            return;
+        var lost = _coverage.LostRange(false);
+        var amber = Kit.Color(Theme.Accent, look.GasRangeAlpha);
+        for (var k = 0; k < lost.Length; k++)
+        {
+            ref readonly var piece = ref lost[k];
+            if (piece.Reach / size * view.Cell < minimum)
                 continue;
-            for (var k = 0; k < samples.Length; k++)
-            {
-                var next = k + 1 == samples.Length ? 0 : k + 1;
-                var tolerance = nominal * 0.005;
-                if (samples[k] >= nominal - tolerance && samples[next] >= nominal - tolerance)
-                    continue;
-                var a0 = k * (Math.Tau / samples.Length);
-                var a1 = next * (Math.Tau / samples.Length);
-                var middle = (nominal + (samples[k] + samples[next]) * 0.5) * 0.25;
-                var mx = x + middle * (Math.Cos(a0) + Math.Cos(a1));
-                var mz = z + middle * (Math.Sin(a0) + Math.Sin(a1));
-                if (_coverage.InsideShown(mx, mz, i, false) || _coverage.InsideEarlierDisc(mx, mz, i, false))
-                    continue;
-                draw.AddQuadFilled(CoveragePoint(view, center, k, nominal, size, sx, sy), CoveragePoint(view, center, next, nominal, size, sx, sy), edge[next], edge[k], tint);
-            }
+            draw.AddLine(view.ToScreen((float)(piece.AX / size), view.Layer, (float)(piece.AZ / size)),
+                view.ToScreen((float)(piece.BX / size), view.Layer, (float)(piece.BZ / size)), amber, Kit.Px(1f));
         }
     }
 

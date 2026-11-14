@@ -77,9 +77,9 @@ internal sealed class MapTuning
     /// </summary>
     public float RadarLinkMeters { get; init; }
 
-    /// <summary>How faint the line between linked ships is, and how faint the tint where gas cut a sensor's range is, 0 to 1.</summary>
+    /// <summary>How faint the line between linked ships is, and how faint the outline of the plain range where gas cut a sensor's reach is, 0 to 1.</summary>
     public float LinkLineAlpha { get; init; }
-    public float GasTintAlpha { get; init; }
+    public float GasRangeAlpha { get; init; }
 
     /// <summary>
     /// A blind jump's hit chance, 0 to 1, from which the course menu and the sector card draw it in the warning
@@ -177,8 +177,8 @@ internal sealed class MapTuning
             throw new InvalidDataException($"{path}: scanResultSeconds is 0 to 120, commandFogReach 1 to 20");
         if (!(tuning.CommandRingWidth is >= 0.5f and <= 8) || tuning.CommandFadeRings is < 1 or > 16 || !(tuning.CommandFadeWidth is >= 1 and <= 64))
             throw new InvalidDataException($"{path}: commandRingWidth is 0.5 to 8, commandFadeRings 1 to 16, commandFadeWidth 1 to 64");
-        if (!Unit(tuning.LinkLineAlpha) || !Unit(tuning.GasTintAlpha) || !(tuning.RadarLinkMeters is >= 0 and <= 200000))
-            throw new InvalidDataException($"{path}: linkLineAlpha and gasTintAlpha are 0 to 1, radarLinkMeters 0 to 200000");
+        if (!Unit(tuning.LinkLineAlpha) || !Unit(tuning.GasRangeAlpha) || !(tuning.RadarLinkMeters is >= 0 and <= 200000))
+            throw new InvalidDataException($"{path}: linkLineAlpha and gasRangeAlpha are 0 to 1, radarLinkMeters 0 to 200000");
         if (!(tuning.ScanStripWidth is >= 120 and <= 600) || !Unit(tuning.ScanStripAlpha) || !Unit(tuning.ScanCooldownAlpha))
             throw new InvalidDataException($"{path}: scanStripWidth is 120 to 600, scanStripAlpha and scanCooldownAlpha 0 to 1");
         if (!(tuning.CourseRefusalSeconds is >= 0 and <= 60))

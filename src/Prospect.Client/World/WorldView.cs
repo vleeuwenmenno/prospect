@@ -728,6 +728,7 @@ internal sealed class WorldView
         UpdateEditedPose(snapshot);
         if (Editor.TakeReplacement(out var replaced, out var replacement))
             ReplaceHull(replaced, replacement);
+        FollowBuiltShip(snapshot, bridge);
         if (Editor.Shown != _editShown)
         {
             _editShown = Editor.Shown;
@@ -2545,6 +2546,33 @@ internal sealed class WorldView
             return false;
         pixels = radius / (depth * _tanHalfFov) * _screen.Y * 0.5f;
         return true;
+    }
+
+    /// <summary>
+    /// Puts the player in control of the ship they just built once they closed its edit: the same switch as any other
+    /// (their own hull in their own sector), asked for as soon as the hull is in the snapshot. A ship that cannot be
+    /// taken is left alone and the editor says why for a moment.
+    /// </summary>
+    private void FollowBuiltShip(SessionSnapshot snapshot, PlayerInputBridge bridge)
+    {
+        var id = Editor.FollowHull;
+        if (id == 0)
+            return;
+        if (!TryGetHull(id, out var hull))
+        {
+            if (Editor.FollowTimedOut)
+                Editor.FinishFollow(FollowRefusal.Missing);
+            return;
+        }
+
+        if (!CanTakeControlOf(hull))
+        {
+            Editor.FinishFollow(hull.Owner == snapshot.PlayerId ? FollowRefusal.OutOfSector : FollowRefusal.Missing);
+            return;
+        }
+
+        bridge.RequestControl(id);
+        Editor.FinishFollow(FollowRefusal.None);
     }
 
     /// <summary>Brings every loaded sector's asteroid offsets up to date with the motion records in the snapshot.</summary>

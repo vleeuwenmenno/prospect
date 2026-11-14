@@ -36,10 +36,7 @@ internal sealed partial class ScreenHost
     private float2 _tipPoint;
 
     // What was true last frame, so a trigger fires on the change and not every frame it stays true.
-    private bool _tipSawMap;
-    private bool _tipSawCommand;
-    private bool _tipSawEditor;
-    private bool _tipSawScan;
+    private readonly TipSurfaces _tipSurfaces = new();
     private bool _tipSawUncharted;
     private bool _tipSawShield;
     private bool _tipEnergyLow;
@@ -102,10 +99,8 @@ internal sealed partial class ScreenHost
     {
         if (!_tips.Enabled)
             return;
-        Edge(_mapOpen, ref _tipSawMap, TipTriggers.MapOpened);
-        Edge(world.Mode == ViewMode.Command, ref _tipSawCommand, TipTriggers.CommandViewOpened);
-        Edge(world.Editor.Shown, ref _tipSawEditor, TipTriggers.EditorOpened);
-        Edge(_mapOpen && _mapCard.Pinned && _mapCard.Sector == world.Sector.Coord, ref _tipSawScan, TipTriggers.ScanAvailable);
+        _tipSurfaces.Track(_tips, _mapOpen, world.Mode == ViewMode.Command, world.Editor.Shown,
+            _mapOpen && _mapCard.Pinned && _mapCard.Sector == world.Sector.Coord);
 
         var own = world.Own;
         var flight = world.OwnFlight;
@@ -254,7 +249,8 @@ internal sealed partial class ScreenHost
         _tipDragging = false;
         _tips.Dragging = false;
         _tipPlacedId = null;
-        _tipSawMap = _tipSawCommand = _tipSawEditor = _tipSawScan = _tipSawUncharted = _tipSawShield = _tipEnergyLow = false;
+        _tipSurfaces.Reset();
+        _tipSawUncharted = _tipSawShield = _tipEnergyLow = false;
     }
 
     /// <summary>

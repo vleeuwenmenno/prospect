@@ -11,7 +11,7 @@ or that local game opened to other players. There is one simulation and one code
 
 ## Status
 
-New ships from a drone: server/session creation, remote editor grant and persistence are implemented. The creation dialog and key handling are not wired yet.
+New ships from a drone: server/session creation, remote editor grant, persistence, the New ship dialog and its keys are implemented. Closing the editor of a ship just built puts you in control of it.
 
 Exploration has a server/client backend: personal saved charts, manual scan intent, owned-ship sensors and dynamic visibility filtering.
 The galaxy map shows it: fog over uncharted space, charted sectors, live sensor coverage, lost contacts, a sector card
@@ -74,8 +74,11 @@ measurements and the remaining stages.
 
 **New ships from the drone.** In the escape drone, `B` opens a **New ship** dialog: type a name (1 to 32
 characters, different from your other ships; the field checks it as you type), then `Enter` or Build ship. The
-server places a one-block ship just ahead of the drone and the ship editor opens on it; you stay in the drone, and
-Apply rebuilds the new ship from your design. Cancel, `Esc` or `B` in the editor leaves the ship as a single block.
+server places a one-block ship just ahead of the drone and the ship editor opens on it. When you close that editor
+you are put in control of the new ship, the way `T` takes control of a target (the drone is removed): Apply rebuilds
+the ship from your design and you fly the result; Cancel, `Esc` or `B` leaves the ship as a single block and you fly
+that. If the switch cannot be made (the ship is gone or in another sector) the editor's notice says why and you stay
+in the drone. Editing an ordinary ship, or the drone with `Ctrl`+`B`, never moves you.
 If the server refuses (name already used, ship limit, no clear space ahead, full design catalogue, ...) the dialog
 says why and you can try another name. Cancel is off while the server is working. `Ctrl`+`B` in the drone edits the
 drone itself.
@@ -279,7 +282,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   fields (amber, a denser core inside) and gas clouds (violet) that reach it, as surveyed, never later changes. A
   field or cloud that runs across a wall is drawn only inside charted sectors: its part in a sector you have not
   charted stays hidden. A map index on the left, under the unit list, names the shades, shapes and star types.
-  Resting the pointer on one of your own ships names it beside it; the sector card stays away while it does. Green regions show sensor reach cut through the layer, shaped by gas (shorter inside and behind clouds, a faint amber tint where range was lost); gas can hide ships within them,
+  Resting the pointer on one of your own ships names it beside it; the sector card stays away while it does. Green regions show sensor reach cut through the layer, shaped by gas (shorter inside and behind clouds, a faint amber line at the plain range where gas cut it short); gas can hide ships within them,
   and a lost contact stays as a fading hollow marker for 15 seconds (a station's indefinitely). Hover a sector for
   its card beside it; click to pin the card (coordinates, distance, sensor state, what the chart holds, the jump
   warning, the scan control in your own sector, Move here and Jump here, and a scrolling list of your ships, then

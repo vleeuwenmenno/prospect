@@ -232,8 +232,10 @@ UI estimates use the same curve, not knowledge of the future departure tick.
 
 - Both views draw each sensor's boundary from the shared `GasSensors.Reach`, sampled in 96 directions on the view's
   plane (the command plane, or the chosen layer's middle plane on the map). A sensor is sampled again when it
-  moves 0.4 % of its range or the plane does; its gas comes from `SensorGasCache`. Where gas cuts range, a very
-  faint amber tint (`gasTintAlpha` in `content/visuals/map.json`) fills the gap to the plain sphere.
+  moves 0.4 % of its range or the plane does; its gas comes from `SensorGasCache`. Where gas cuts range, a faint
+  amber line (`gasRangeAlpha` in `content/visuals/map.json`) marks the plain range, on that sphere's circle only and
+  once where such circles overlap. It is never a fill: thick gas can leave a fifth of the range, so a fill of the gap
+  would cover most of the view. The fade outside the boundary is one faint stroke (`commandFadeRings`: 1).
 - The command view shows coverage of the **selected** ships only. With nothing selected it shows the ship being
   flown, or nothing if that ship has no sensor. Selected ships with no sensor show none.
 - **Radar link (display grouping only).** Selected ships whose centres are within `radarLinkMeters` (10,000 m) of

@@ -315,23 +315,39 @@ internal sealed partial class SensorCoverage
         return false;
     }
 
+    private OutlineSegment[]? _lost;
+    private double[] _lostX = [], _lostZ = [], _lostNominal = [], _lostSamples = [];
+
     /// <summary>
-    /// True when a point lies inside the plain sphere's circle of a sensor with a lower index than
-    /// <paramref name="index"/>, so a tint of range lost to gas, which is drawn where no sensor sees, is drawn once
-    /// by the lowest sensor reaching a point and not again by each.
+    /// The outline, on the plane last given to <see cref="Refresh"/>, of the range gas took from the shown (or
+    /// every) sensor: pieces of each plain sphere's circle beside a direction gas cut short, once where the discs
+    /// overlap. Built from the sampled rings each call and written into memory made on the first one.
     /// </summary>
-    public bool InsideEarlierDisc(double x, double z, int index, bool activeOnly = true)
+    public ReadOnlySpan<OutlineSegment> LostRange(bool activeOnly)
     {
-        var shown = activeOnly ? ActiveCount : Count;
-        for (var s = 0; s < shown; s++)
+        if (_lost is null)
         {
-            var i = activeOnly ? _active[s] : s;
-            if (i >= index || !Ring(i, out var cx, out var cz, out var nominal, out _))
-                continue;
-            if ((x - cx) * (x - cx) + (z - cz) * (z - cz) <= nominal * nominal)
-                return true;
+            _lost = new OutlineSegment[SensorOutline.MaxRings * ReachSamples];
+            _lostX = new double[SensorOutline.MaxRings];
+            _lostZ = new double[SensorOutline.MaxRings];
+            _lostNominal = new double[SensorOutline.MaxRings];
+            _lostSamples = new double[SensorOutline.MaxRings * ReachSamples];
         }
 
-        return false;
+        var rings = 0;
+        var shown = activeOnly ? ActiveCount : Count;
+        for (var s = 0; s < shown && rings < SensorOutline.MaxRings; s++)
+        {
+            var i = activeOnly ? _active[s] : s;
+            if (!Ring(i, out var x, out var z, out var nominal, out var samples))
+                continue;
+            _lostX[rings] = x;
+            _lostZ[rings] = z;
+            _lostNominal[rings] = nominal;
+            samples.CopyTo(_lostSamples.AsSpan(rings * ReachSamples, ReachSamples));
+            rings++;
+        }
+
+        return _lost.AsSpan(0, SensorOutline.BuildLostRange(_lostX, _lostZ, _lostNominal, _lostSamples, rings, _lost));
     }
 }
