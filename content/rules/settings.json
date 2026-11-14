@@ -476,6 +476,16 @@
       "group": "Resources",
       "unit": "0\u20131",
       "material": "gold"
+    },
+    {
+      "id": "gasWispiness",
+      "name": "Gas cloud wispiness",
+      "description": "How soft and frayed gas clouds look: 0 is dense with a hard outline, 1 thins their outer gas into strands and gaps, 2 is the most. Changes only how clouds are drawn, never where they are.",
+      "kind": "multiplier",
+      "default": 1,
+      "minimum": 0,
+      "maximum": 2,
+      "step": 0.25
     }
   ]
 }

@@ -357,13 +357,20 @@ public sealed class Galaxy
     private float _richnessMin, _richnessMax = 1;
     private float[] _materialAbundance = [];
 
-    /// <summary>Applies world generation settings without changing the seed or other modules.</summary>
+    /// <summary>
+    /// Applies world generation settings, and the gas clouds' look, without changing the seed or other modules.
+    /// </summary>
     public Galaxy Under(WorldSettingCatalog catalog, in WorldSettings settings)
     {
         var clean = catalog.Sanitize(settings);
         var modules = new SectorModule[_modules.Length];
         for (var i = 0; i < modules.Length; i++)
-            modules[i] = _modules[i] is AsteroidFieldsModule fields ? fields.Under(catalog, clean, Resources) : _modules[i];
+            modules[i] = _modules[i] switch
+            {
+                AsteroidFieldsModule fields => fields.Under(catalog, clean, Resources),
+                GasCloudModule gas => gas.Under(catalog, clean),
+                var module => module,
+            };
         var copy = WithModules(modules);
         copy._richnessMin = catalog.Number(clean, "oreRichnessMin");
         copy._richnessMax = catalog.Number(clean, "oreRichnessMax");

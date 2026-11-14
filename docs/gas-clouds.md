@@ -114,6 +114,50 @@ Open:
 - A segment that begins at a shield or between two openings bends its own steps from its own start.
 - Whether the cost inside a huge cloud is acceptable at 5096x1390, or the figures should be lowered.
 
+## Wispiness
+
+Decided. How soft and frayed clouds are drawn is a world setting, `gasWispiness`: 0 to 2, step 0.25, default 1.
+
+- 0 is the look before the setting: dense bodies, a hard outline. Eleven captures at 0 match the earlier build: no pixel off by more than 2%.
+- 1 thins the outer gas into strands and gaps; the outline fades instead of stopping. 2 is the most.
+- Drawing only. Where clouds are, their shape data and the asteroids in them do not change, so no generation or protocol bump.
+- The server owns it like every setting and sends it on joining, so all players of a world see the same clouds.
+- Applied in `Galaxy.Under` (`GasCloudModule.Under` sets `Wispiness`); the renderer passes it in `GasData.motion.z`, a lane nothing used.
+
+Why the clouds were cotton balls: gas at density 1 is about 12 optical depths per x half-extent.
+Even the fringe strands were as dense as the core, so they alone drew a solid rim around the cloud.
+
+What the setting does, all in `gasDensity`, so every level (full, middle, far) and the light probes take it:
+
+- Shell: the outer part of the body thins steeply toward the outside, its depth made uneven by noise.
+- Gaps: near the surface the gas survives only above a noise threshold that rises outward; strands with sky between.
+- Fringe: thinner toward its outer end and sparser, so stars and rocks show through.
+- Without the fine octave the gaps follow the medium octave alone (near light probe, far level); the far probe takes their average.
+- Above 1 the gap threshold stays at its value at 1: higher, it emptied a whole band and the core showed a cut edge.
+
+What it costs, at 5096x1390 on an RTX 5070 Ti, Release, mean frame of one 4 s benchmark each:
+
+| View (`--gas-view`, `--gas-distance`) | 0 | 1 | 2 |
+| --- | --- | --- | --- |
+| Huge cloud `133,0,-77`, inside | 8.9 ms | 9.7 ms | 10.3 ms |
+| Huge, edge | 4.1 ms | 4.3 ms | 4.1 ms |
+| Huge, at its surface (`outside 0.8`) | 6.2 ms | 6.1 ms | 6.0 ms |
+| Huge, `outside 2` / `7` | 1.7 / 1.0 ms | 1.8 / 1.0 ms | 1.8 / 1.1 ms |
+| Ordinary cloud `127,-1,-127`, inside | 6.5 ms | 7.2 ms | 7.1 ms |
+| Ordinary, edge | 3.4 ms | 3.5 ms | 3.7 ms |
+| Ordinary, `outside 2` / `6` / `14` (far level) | 1.8 / 1.1 / 0.9 ms | 1.9 / 1.2 / 0.9 ms | 1.8 / 1.1 / 0.9 ms |
+
+- The three values were measured one after the other per view; other work on the machine shifted absolute times between rounds by up to 40%.
+- Inside costs most: gaps need the fine octave deeper into the body, and thinner gas is marched further before it is opaque.
+- Inside a cloud the look stays close to before: the camera sits in the dense core, which the setting leaves alone.
+
+Open:
+
+- Middle-level fringes are grainy at 1 and 2: thin gas, 24 steps and per-pixel jitter. Motion shimmer is not reviewed.
+- Bodies seen from outside are still evenly bright: thin gas lets the light in, so the inside is lit flat.
+- The light probes see the gaps only at the medium octave or on average: a fine gap casts no shadow of its own.
+- Whether 1 is the right default, and how 2 reads in motion, is the developer's call.
+
 ## Rendering
 
 `gas.glsl` is the one density and bounded segment integration implementation.
