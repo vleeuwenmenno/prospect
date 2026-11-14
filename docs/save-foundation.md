@@ -220,7 +220,7 @@ A save is refused on load unless it leaves that drone room:
 ## What a load does
 
 - Rebuilt from the save: block sets, revisions, lost cores, collision counts, sums, flight figures.
-- Kept exactly: motion, charge, shield marks, jump stage and timers, orders, hit points, the hit total, dents.
+- Kept exactly: motion, charge, fuel, shield marks, jump stage and timers, orders, hit points, the hit total, dents.
 - Started over: contact ticks, order counters, control epochs, rounds, everything of a connection.
 - The catalogue and its roles (pod, drone, starting fleet) come from the save, in order. The files are not asked.
 - Hulls keep the order they are stepped in. The gaps between slots are not kept.
@@ -428,4 +428,15 @@ The decoder refuses foreign/missing owners, duplicate family/sector/index keys, 
 unsupported content revisions and excessive counts before accepting the snapshot.
 Server restoration additionally validates resource ids and that each named cloud/asteroid exists under the saved generator.
 Observation timestamps and reported values survive unchanged; operation progress and cooldowns reset.
-Generation 8, evaluator 10 and codec 5 make older worlds incompatible; they are refused without writes or migration.
+Generation 8 and codec 5 made older worlds incompatible; they are refused without writes or migration.
+
+## Fuel (codec 6)
+
+- Each saved hull holds its three tanks (nitrogen, hydrazine, bipropellant, in kg) after its battery charge, then
+  four bytes of what its thrust parts were doing (`ThrustState`). 16 bytes a hull.
+- Load rules: each tank is a number, not below nothing and not above what the hull's tanks hold after its losses.
+  Thrust bits no step writes are refused. A hull that breaks a rule refuses the whole save, as any other rule does.
+- Kept exactly, like charge. Capacity is not saved: it is read off the blocks the hull has left.
+- Design encoding 3 (a facing per block) is part of what a save must match. Codec 6, encoding 3 and evaluator 11 make
+  older worlds incompatible; they are refused untouched, without migration.
+- Rules and figures: `docs/roadmap/propulsion.md`.

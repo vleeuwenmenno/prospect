@@ -31,11 +31,21 @@ public sealed class BlockType
     public required float Mass { get; init; }
     public required float Hull { get; init; }
 
-    /// <summary>Kilonewtons. Engines push forward only; thrusters push in every direction.</summary>
+    /// <summary>Kilonewtons. A thrust part pushes the hull the opposite way to the block's facing, and no other.</summary>
     public float Thrust { get; init; }
 
-    /// <summary>True for main engines, whose thrust only acts forward.</summary>
-    public bool ForwardOnly { get; init; }
+    /// <summary>The fuel a thrust part burns; without it in the tanks the part gives no thrust.</summary>
+    public FuelKind Fuel { get; init; }
+
+    /// <summary>Kilograms of <see cref="Fuel"/> the part burns a second at full thrust, without boost.</summary>
+    public float FuelBurn { get; init; }
+
+    /// <summary>The fuel a tank holds, and how many kilograms of it.</summary>
+    public FuelKind Tank { get; init; }
+    public float FuelCapacity { get; init; }
+
+    /// <summary>The most cells a block of the type may measure along any side; zero for the content's general limit.</summary>
+    public int MaxSide { get; init; }
 
     /// <summary>True for the block a hull cannot exist without; losing it destroys the hull.</summary>
     public bool Core { get; init; }
@@ -82,6 +92,9 @@ public sealed record FlightRules
     public required float BoostThrustMultiplier { get; init; }
     public required float BoostSpeedMultiplier { get; init; }
     public required float BoostPowerMultiplier { get; init; }
+
+    /// <summary>How many times its normal rate thrust burns fuel while boosted, 1 to 100.</summary>
+    public float BoostFuelMultiplier { get; init; } = 1f;
 
     /// <summary>Share of the battery's capacity it must hold before boost will engage, from 0 to 1.</summary>
     public required float BoostEnergyFloor { get; init; }
@@ -209,6 +222,7 @@ public sealed class BlockCatalog
             BoostThrustMultiplier = r.GetProperty("boostThrustMultiplier"u8).GetSingle(),
             BoostSpeedMultiplier = r.GetProperty("boostSpeedMultiplier"u8).GetSingle(),
             BoostPowerMultiplier = r.GetProperty("boostPowerMultiplier"u8).GetSingle(),
+            BoostFuelMultiplier = r.GetProperty("boostFuelMultiplier"u8).GetSingle(),
             BoostEnergyFloor = Math.Clamp(r.GetProperty("boostEnergyFloor"u8).GetSingle(), 0f, 1f),
             BoostHeatSeconds = r.GetProperty("boostHeatSeconds"u8).GetSingle(),
             CoolSeconds = r.GetProperty("coolSeconds"u8).GetSingle(),
@@ -240,6 +254,8 @@ public sealed class BlockCatalog
             throw new InvalidDataException("Invalid visual dent limits.");
         if (rules.CollisionTreeVisits is < 1 or > 1000000 || rules.CollisionBoxTests is < 1 or > 1000000 || rules.CollisionContacts is < 1 or > FlightRules.MaxCollisionContacts || rules.CollisionStrides is < 1 or > 1024)
             throw new InvalidDataException($"{path}: invalid collision budgets");
+        if (!(rules.BoostFuelMultiplier >= 1 && rules.BoostFuelMultiplier <= 100))
+            throw new InvalidDataException($"{path}: boostFuelMultiplier must be from 1 to 100");
         if (!float.IsFinite(rules.ShieldContactSpeed) || rules.ShieldContactSpeed <= 0)
             throw new InvalidDataException($"{path}: shieldContactSpeed must be finite and positive");
         if (!float.IsFinite(rules.ShieldRechargeDelaySeconds) || rules.ShieldRechargeDelaySeconds < 0)
@@ -276,7 +292,11 @@ public sealed class BlockCatalog
                 Mass = block.GetProperty("mass"u8).GetSingle(),
                 Hull = block.GetProperty("hull"u8).GetSingle(),
                 Thrust = Number(block, "thrust"u8),
-                ForwardOnly = block.TryGetProperty("forwardOnly"u8, out var forwardOnly) && forwardOnly.GetBoolean(),
+                Fuel = block.TryGetProperty("fuel"u8, out var fuel) ? Fuels.Parse(fuel.GetString(), path + ": " + entry.Name) : FuelKind.None,
+                FuelBurn = Number(block, "fuelBurn"u8),
+                Tank = block.TryGetProperty("tank"u8, out var tank) ? Fuels.Parse(tank.GetString(), path + ": " + entry.Name) : FuelKind.None,
+                FuelCapacity = Number(block, "fuelCapacity"u8),
+                MaxSide = block.TryGetProperty("maxSide"u8, out var maxSide) ? maxSide.GetInt32() : 0,
                 Sensor = block.TryGetProperty("sensor"u8, out var sensor) && sensor.GetBoolean(),
                 Charting = block.TryGetProperty("charting"u8, out var charting) && charting.GetBoolean(),
                 Core = block.TryGetProperty("core"u8, out var core) && core.GetBoolean(),
@@ -302,15 +322,28 @@ public sealed class BlockCatalog
             };
         }
 
+        var limits = DesignLimits.Read(root.GetProperty("limits"u8), path);
         foreach (var type in types.Values)
+        {
             if (type.Ftl != FtlKind.None && (!float.IsFinite(type.FtlMaxSectors) || type.FtlMaxSectors <= 0))
                 throw new InvalidDataException($"{path}: a drive needs a positive finite ftlMaxSectors");
+
+            // Thrust and fuel go together: a part that pushes names what it burns and how fast, and nothing else does.
+            if (!float.IsFinite(type.Thrust) || type.Thrust < 0 || (type.Thrust > 0) != (type.Fuel != FuelKind.None))
+                throw new InvalidDataException($"{path}: {type.Id}: a block with thrust names its fuel, and only such a block does");
+            if (type.Fuel != FuelKind.None ? !(float.IsFinite(type.FuelBurn) && type.FuelBurn > 0) : type.FuelBurn != 0)
+                throw new InvalidDataException($"{path}: {type.Id}: a thrust part needs a positive finite fuelBurn, and only such a part has one");
+            if (type.Tank != FuelKind.None ? !(float.IsFinite(type.FuelCapacity) && type.FuelCapacity > 0) : type.FuelCapacity != 0)
+                throw new InvalidDataException($"{path}: {type.Id}: a tank needs a positive finite fuelCapacity, and only a tank has one");
+            if (type.MaxSide < 0 || type.MaxSide > limits.MaxBoxSide)
+                throw new InvalidDataException($"{path}: {type.Id}: maxSide must be from 1 to {limits.MaxBoxSide}, or left out");
+        }
 
         // A dictionary does not promise an order; the file's is kept apart for whoever lists the types.
         var listed = new List<BlockType>(types.Count);
         foreach (var entry in root.GetProperty("blocks"u8).EnumerateObject())
             if (!listed.Contains(types[entry.Name])) listed.Add(types[entry.Name]);
-        return new BlockCatalog(types, rules) { Limits = DesignLimits.Read(root.GetProperty("limits"u8), path), Types = listed.AsReadOnly() };
+        return new BlockCatalog(types, rules) { Limits = limits, Types = listed.AsReadOnly() };
     }
 }
 
@@ -347,6 +380,9 @@ public struct HullStats
     public float Acceleration;
     public float Deceleration;
     public float LateralAcceleration;
+
+    /// <summary>What the tanks the hull still has can hold of each fuel, in kilograms.</summary>
+    public FuelTanks FuelCapacity;
     public float MaxSpeed;
     public float BoostMaxSpeed;
 
@@ -575,9 +611,21 @@ public sealed class HullDesign
 
         var design = new HullDesign(boxes, rules);
         GeometryAdmission.Validate(design, catalog.Limits);
-        if (design.Flight.Acceleration.X <= 0 || design.Flight.TurnRate.X <= 0 || design.Flight.PowerGenerated <= 0 || !BlockSet.Any(design._coreSet))
+        if (design.Flight.StrongestPush <= 0 || design.Flight.TurnRate.X <= 0 || design.Flight.PowerGenerated <= 0 || !BlockSet.Any(design._coreSet))
             throw new InvalidDataException($"{path}: a hull needs a core, a thruster, a gyro and a generator to fly");
         return design;
+    }
+
+    /// <summary>
+    /// The first fuel that parts of a hull burn and none of its tanks holds, or <see cref="FuelKind.None"/> when
+    /// every thrust part can be fed. Such parts never fire: the editor warns of it, and no shipped design has it.
+    /// </summary>
+    public static FuelKind MissingTank(in FlightParams flight)
+    {
+        for (var kind = FuelKind.Nitrogen; kind <= FuelKind.Bipropellant; kind++)
+            if (flight.Burns(kind) && !(flight.FuelCapacity[kind] > 0f))
+                return kind;
+        return FuelKind.None;
     }
 
     /// <summary>
@@ -606,6 +654,14 @@ public sealed class HullDesign
     /// the same of the hull it was sent to know whether a repair would be taken.
     /// </summary>
     public bool NeedsRepair(uint revision, float hullPoints, int dentCount = 0) => revision > 0 || hullPoints < Flight.HullPoints || dentCount > 0;
+
+    /// <summary>
+    /// Whether a hull of this design has room in its tanks: it holds less of some fuel than the design as built
+    /// can. Nothing refuels a ship yet but rebuilding it, so a repair is taken for this alone; it is no damage,
+    /// and an edit is not held back for it. The server and a client ask the same of the hull they have.
+    /// </summary>
+    public bool NeedsRefuel(in FuelTanks fuel) =>
+        fuel.Nitrogen < Flight.FuelCapacity.Nitrogen || fuel.Hydrazine < Flight.FuelCapacity.Hydrazine || fuel.Bipropellant < Flight.FuelCapacity.Bipropellant;
 
     /// <summary>The hit points a block of this design has when intact, in the world the design was evaluated for.</summary>
     public float BlockHitPoints(int block) => _hitPoints[block];

@@ -4,7 +4,7 @@
     { "name": "All" },
     { "name": "Hull", "roles": ["structure", "cargo", "crew"], "compact": false },
     { "name": "Power", "roles": ["core", "power", "storage"], "compact": false },
-    { "name": "Move", "roles": ["engine", "thruster", "gyro"], "compact": false },
+    { "name": "Move", "roles": ["engine", "thruster", "tank", "gyro"], "compact": false },
     { "name": "Shield", "roles": ["shield"], "compact": false },
     { "name": "Jump", "roles": ["drive"], "compact": false },
     { "name": "Module", "roles": ["module"], "compact": false },

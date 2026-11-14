@@ -33,7 +33,7 @@ public sealed class ShieldShellTests
             var blocks = new List<string>();
             for (var i = 0; i < cells.Count; i++)
             {
-                var type = i switch { 0 => "core", 1 => "shield", 2 => "thruster", 3 => "gyro", 4 => "generator", _ => "hull" };
+                var type = i switch { 0 => "core", 1 => "shield", 2 => "coldGasThruster", 3 => "gyro", 4 => "generator", _ => "hull" };
                 blocks.Add($"{{ \"at\": [{cells[i].X}, {cells[i].Y}, {cells[i].Z}], \"type\": \"{type}\" }}");
             }
 
@@ -816,7 +816,7 @@ public sealed class ShieldVisualsTests
         try
         {
             var path = Path.Combine(dir, "two.json");
-            string[] types = ["core", "shield", "shield", "thruster", "gyro", "generator"];
+            string[] types = ["core", "shield", "shield", "coldGasThruster", "gyro", "generator"];
             var blocks = string.Join(",", types.Select((t, i) => $"{{ \"at\": [0, 0, {i}], \"type\": \"{t}\" }}"));
             File.WriteAllText(path, $"{{ \"name\": \"Two\", \"class\": \"ship\", \"blockSize\": 2.0, \"color\": [0.5, 0.5, 0.5], \"blocks\": [{blocks}] }}");
             var catalog = BlockCatalog.Load(AppPaths.Content("blocks", "blocks.json"));
@@ -836,7 +836,7 @@ public sealed class ShieldVisualsTests
         var cells = new List<string>();
         for (var i = 0; i < 64; i++)
         {
-            var type = i switch { 0 => "core", 1 => "shield", 2 => "thruster", 3 => "gyro", 4 => "generator", _ => "hull" };
+            var type = i switch { 0 => "core", 1 => "shield", 2 => "coldGasThruster", 3 => "gyro", 4 => "generator", _ => "hull" };
             cells.Add($"{{ \"at\": [{i % 8}, {i / 8 % 4 * 2 + (i % 8 + i / 32) % 2}, {i / 32}], \"type\": \"{type}\" }}");
         }
 

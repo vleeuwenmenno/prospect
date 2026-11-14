@@ -55,7 +55,7 @@ public sealed class BoxHullSums
     public const int GroupSize = 32;
 
     /// <summary>The numbers one node holds.</summary>
-    internal const int Totals = 21;
+    internal const int Totals = 60;
 
     private const int Mass = 0;
     private const int Hull = 1;
@@ -66,18 +66,33 @@ public sealed class BoxHullSums
     private const int ShieldRecharge = 6;
     private const int Cargo = 7;
     private const int Crew = 8;
-    private const int EngineThrust = 9;
-    private const int ThrusterThrust = 10;
-    private const int IdlePower = 11;
-    private const int ThrustPower = 12;
-    private const int ShieldPower = 13;
-    private const int Cells = 14;
-    private const int InertiaX = 15;
-    private const int InertiaY = 16;
-    private const int InertiaZ = 17;
+
+    /// <summary>
+    /// Thrust per push direction and fuel: this index plus <see cref="ThrustTable.Index"/>. Eighteen numbers, so a
+    /// hull's thrust in each direction and from each fuel is read off the sums like everything else.
+    /// </summary>
+    private const int Thrust = 9;
+
+    /// <summary>Fuel burnt at full thrust per push direction and fuel, laid out as <see cref="Thrust"/>.</summary>
+    private const int Burn = Thrust + Facings.Count * Fuels.Count;
+
+    /// <summary>Tank capacity per fuel: this index plus the fuel, less one.</summary>
+    private const int FuelCapacity = Burn + Facings.Count * Fuels.Count;
+
+    /// <summary>Power drawn at full thrust by the parts of each fuel: this index plus the fuel, less one.</summary>
+    private const int ThrustPower = FuelCapacity + Fuels.Count;
+    private const int IdlePower = ThrustPower + Fuels.Count;
+    private const int ShieldPower = IdlePower + 1;
+    private const int Cells = ShieldPower + 1;
+    private const int InertiaX = Cells + 1;
+    private const int InertiaY = InertiaX + 1;
+    private const int InertiaZ = InertiaY + 1;
 
     /// <summary>Jump power per kind of drive: this index plus the kind, less one.</summary>
-    private const int FtlPower = 18;
+    private const int FtlPower = InertiaZ + 1;
+
+    /// <summary>How fast a hull above its rated speed sheds the excess, as a share of its strongest acceleration.</summary>
+    internal const float ShedShare = 1.125f;
 
     /// <summary>What a block of one type and size adds, wherever it sits: every number but the inertia.</summary>
     private struct Kind
@@ -100,16 +115,18 @@ public sealed class BoxHullSums
         _boxes = design.Boxes;
         _kindOf = new int[_boxes.Length];
         var kinds = new List<Kind>();
-        var known = new Dictionary<(BlockType, GridSize, bool), int>();
+        var known = new Dictionary<(BlockType, GridSize, bool, BlockFacing), int>();
         var radius = 0f;
         for (var i = 0; i < _boxes.Length; i++)
         {
             ref readonly var box = ref _boxes[i];
-            if (!known.TryGetValue((box.Type, box.Size, box.Shape != BlockShape.Box), out var kind))
+            // Only a thrust part's figures depend on the way it faces; every other block shares one kind.
+            var facing = box.Type.Thrust > 0 ? box.Facing : BlockFacing.Back;
+            if (!known.TryGetValue((box.Type, box.Size, box.Shape != BlockShape.Box, facing), out var kind))
             {
                 kind = kinds.Count;
-                kinds.Add(KindOf(box.Type, BoxDesign.Volume(box), box.Shape != BlockShape.Box));
-                known.Add((box.Type, box.Size, box.Shape != BlockShape.Box), kind);
+                kinds.Add(KindOf(box.Type, BoxDesign.Volume(box), box.Shape != BlockShape.Box, facing));
+                known.Add((box.Type, box.Size, box.Shape != BlockShape.Box, facing), kind);
             }
 
             _kindOf[i] = kind;
@@ -303,8 +320,11 @@ public sealed class BoxHullSums
 
     private ModuleEquipment Equipment(int block) => block == 0 ? default : ModuleEquipment.Of(block, _boxes[block - 1].Type.Module);
 
-    /// <summary>What a block of a type that fills this many cells adds, by the type's size rules.</summary>
-    internal static HullSum.Numbers ScaledFigures(BlockType type, long cells, out bool drive, bool half = false)
+    /// <summary>
+    /// What a block of a type that fills this many cells adds, by the type's size rules. A thrust part adds its
+    /// thrust and burn to the direction opposite its <paramref name="facing"/>, under the fuel it burns.
+    /// </summary>
+    internal static HullSum.Numbers ScaledFigures(BlockType type, long cells, out bool drive, bool half = false, BlockFacing facing = BlockFacing.Back)
     {
         var values = default(HullSum.Numbers);
         double Scaled(string stat, double value) => half ? BoxDesign.ScaleHalf(type, stat, value, cells) : BoxDesign.Scale(type, stat, value, cells);
@@ -322,9 +342,21 @@ public sealed class BoxHullSums
         var crew = Scaled("crew", type.Crew);
         values[Crew] = Math.Floor(crew + Math.Abs(crew) * 1e-9);
 
-        // Engines push forward only; a block's power draw counts with what the block is for.
-        values[type.ForwardOnly ? EngineThrust : ThrusterThrust] = Scaled("thrust", type.Thrust);
-        values[type.Thrust > 0 ? ThrustPower : type.Shield > 0 ? ShieldPower : IdlePower] = Scaled("powerDraw", type.PowerDraw);
+        // A thrust part pushes the hull away from the way it faces; its power draw counts with what the block is for.
+        if (type.Thrust > 0 && type.Fuel != FuelKind.None)
+        {
+            var at = ThrustTable.Index(Facings.Opposite(facing), type.Fuel);
+            values[Thrust + at] = Scaled("thrust", type.Thrust);
+            values[Burn + at] = Scaled("fuelBurn", type.FuelBurn);
+            values[ThrustPower + (int)type.Fuel - 1] = Scaled("powerDraw", type.PowerDraw);
+        }
+        else
+        {
+            values[type.Shield > 0 ? ShieldPower : IdlePower] = Scaled("powerDraw", type.PowerDraw);
+        }
+
+        if (type.Tank != FuelKind.None)
+            values[FuelCapacity + (int)type.Tank - 1] = Scaled("fuelCapacity", type.FuelCapacity);
         values[Cells] = half ? cells * 0.5 : cells;
         drive = type.Ftl != FtlKind.None;
         if (drive)
@@ -332,16 +364,17 @@ public sealed class BoxHullSums
         return values;
     }
 
-    private static Kind KindOf(BlockType type, long cells, bool half)
+    private static Kind KindOf(BlockType type, long cells, bool half, BlockFacing facing)
     {
-        var kind = new Kind { Values = ScaledFigures(type, cells, out var drive, half) };
+        var kind = new Kind { Values = ScaledFigures(type, cells, out var drive, half, facing) };
         kind.Drive = drive;
         return kind;
     }
 
     /// <summary>
     /// Reads a hull's flight figures and data sheet off its sums, under a world's rules: mass and moments of
-    /// inertia, acceleration from thrust over mass, turning from gyro torque over inertia, and the power budget.
+    /// inertia, acceleration in each direction from that direction's thrust over mass, turning from gyro torque
+    /// over inertia, the tanks, and the power budget.
     /// Constant time. The first drive left in file order decides the kind of drive; only drives of that kind
     /// supply jump power.
     /// </summary>
@@ -360,26 +393,58 @@ public sealed class BoxHullSums
         var torque = (float)sum.Values[Torque];
         var generated = (float)sum.Values[PowerOutput];
         var storage = (float)sum.Values[EnergyStorage];
-        var engineThrust = (float)sum.Values[EngineThrust];
-        var thrusterThrust = (float)sum.Values[ThrusterThrust];
         var idlePower = (float)sum.Values[IdlePower];
-        var thrustPower = (float)sum.Values[ThrustPower];
+        var thrustPowerByFuel = new FuelTanks
+        {
+            Nitrogen = (float)sum.Values[ThrustPower],
+            Hydrazine = (float)sum.Values[ThrustPower + 1],
+            Bipropellant = (float)sum.Values[ThrustPower + 2],
+        };
+        var thrustPower = thrustPowerByFuel.Nitrogen + thrustPowerByFuel.Hydrazine + thrustPowerByFuel.Bipropellant;
+        var fuelCapacity = new FuelTanks
+        {
+            Nitrogen = (float)sum.Values[FuelCapacity],
+            Hydrazine = (float)sum.Values[FuelCapacity + 1],
+            Bipropellant = (float)sum.Values[FuelCapacity + 2],
+        };
         var shieldPower = (float)sum.Values[ShieldPower] * rules.ShieldRechargeMultiplier;
         var blocks = sum.Count;
         var ftl = sum.Drive == 0 ? FtlKind.None : _boxes[sum.Drive - 1].Type.Ftl;
 
         // A drive that takes power faster charges sooner; what a jump costs in all is the same.
         var ftlPower = ftl == FtlKind.None ? 0f : (float)sum.Values[FtlPower + (int)ftl - 1] * rules.FtlChargeMultiplier;
-        var lateral = thrusterThrust / mass;
-        var forward = (engineThrust + thrusterThrust) / mass;
+
+        // Acceleration per push direction and fuel. The rated speed follows the strongest direction, and a hull
+        // above it sheds the excess an eighth faster than that direction can add to it, so holding the throttle
+        // open never keeps a hull above its rating.
+        var thrust = default(ThrustTable);
+        var burn = default(ThrustTable);
+        var strongest = 0f;
+        for (var direction = 0; direction < Facings.Count; direction++)
+        {
+            var push = 0f;
+            for (var fuel = 0; fuel < Fuels.Count; fuel++)
+            {
+                var at = direction * Fuels.Count + fuel;
+                thrust[at] = (float)sum.Values[Thrust + at] / mass;
+                burn[at] = (float)sum.Values[Burn + at];
+                push += thrust[at];
+            }
+
+            strongest = Math.Max(strongest, push);
+        }
+
         var turnAcceleration = new Vector3(torque) / inertia;
         var turnRate = new Vector3(MathF.Sqrt(turnAcceleration.X), MathF.Sqrt(turnAcceleration.Y), MathF.Sqrt(turnAcceleration.Z)) * rules.TurnRatePerRootAcceleration;
-        var maxSpeed = rules.SpeedPerRootAcceleration * MathF.Sqrt(forward);
+        var maxSpeed = rules.SpeedPerRootAcceleration * MathF.Sqrt(strongest);
 
         flight = new FlightParams
         {
-            Acceleration = new Vector3(lateral, lateral, forward),
-            ReverseAcceleration = lateral,
+            Thrust = thrust,
+            Burn = burn,
+            FuelCapacity = fuelCapacity,
+            BoostFuelMultiplier = rules.BoostFuelMultiplier,
+            ShedAcceleration = strongest * ShedShare,
             BoostMultiplier = rules.BoostThrustMultiplier,
             MaxSpeed = maxSpeed,
             BoostMaxSpeed = maxSpeed * rules.BoostSpeedMultiplier,
@@ -397,6 +462,7 @@ public sealed class BoxHullSums
             PowerGenerated = generated,
             IdlePower = idlePower,
             ThrustPower = thrustPower,
+            ThrustPowerByFuel = thrustPowerByFuel,
             ShieldPower = shieldPower,
             ShieldRestartFraction = rules.ShieldRestartFraction,
             ShieldRestartPower = shieldPower * rules.ShieldRestartPowerMultiplier,
@@ -433,9 +499,10 @@ public sealed class BoxHullSums
             Blocks = blocks,
             CargoHold = (float)sum.Values[Cargo],
             Crew = checked((int)sum.Values[Crew]),
-            Acceleration = forward,
-            Deceleration = lateral,
-            LateralAcceleration = lateral,
+            Acceleration = flight.Push(BlockFacing.Front),
+            Deceleration = flight.Push(BlockFacing.Back),
+            LateralAcceleration = Math.Min(flight.Acceleration.X, flight.Acceleration.Y),
+            FuelCapacity = fuelCapacity,
             MaxSpeed = maxSpeed,
             BoostMaxSpeed = maxSpeed * rules.BoostSpeedMultiplier,
             TurnRate = turnRate,

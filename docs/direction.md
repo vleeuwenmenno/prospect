@@ -85,7 +85,8 @@ energy readout showed nothing while a shield recovered.
   more than the spare power of every shipped design, so it drains the battery: the pod's to empty, a vessel's by
   about 45%. Restart still takes about 10 s when the battery can carry it.
 - Propulsion and boost keep priority over shields, so flying is never slowed by a restart. The price is that
-  shields recover slowly while the engines run: the pod under full forward thrust needs about a minute to restart.
+  shields recover more slowly while the engines run. Since thrust burns fuel its electric draw is small (pod 1.75 MW,
+  was 4.1), so the price is softer than it was; boost still draws what it did (`docs/roadmap/propulsion.md`).
 - The readout shows live flow: generation less idle, thrust or boost, shield and jump-drive draw, in MW, with an
   arrow, even while a full battery turns the surplus away. The tooltip lists each draw and the battery's own rate.
   A muted blue mark on the energy strip is the shield's share; an amber one, continuing from it, is a running scan's.

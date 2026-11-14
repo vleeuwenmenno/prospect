@@ -60,7 +60,7 @@ public sealed class DesignTransferTests
         {
             at = new[] { i * 4, 0, 0 },
             size = new[] { i % 2 + 1, 1, 1 },
-            type = i switch { 0 => "core", 1 => "thruster", 2 => "gyro", 3 => "generator", 4 => "engine", _ => "hull" }
+            type = i switch { 0 => "core", 1 => "coldGasThruster", 2 => "gyro", 3 => "generator", 4 => "engine", 5 => "bipropellantTank", _ => "hull" }
         });
         files.Write("ships/command_pod.json", JsonSerializer.Serialize(new
         {

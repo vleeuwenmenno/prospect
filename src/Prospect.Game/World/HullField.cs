@@ -271,6 +271,7 @@ public sealed class HullField
         body.ContactTick = (long)tick;
         var destroyed = HullSim.Step(ref own, ref info.Order, input, _hulls.Flight(index), ref body, rocks, tick, impulses, this);
         info.Power = body.Power;
+        info.Fuel = body.Fuel;
         if (body.Damaged)
             info.DamageTick = (long)tick;
         Refit(index);
@@ -367,5 +368,8 @@ public sealed class HullField
             state.ShieldChangeTicks = 0;
         state.Shield = Math.Min(state.Shield, flight.ShieldCapacity);
         state.Energy = Math.Min(state.Energy, flight.EnergyStorage);
+
+        // A lost tank takes its share of the room: what the tanks left cannot hold is gone with it.
+        state.Fuel = state.Fuel.Clamped(flight.FuelCapacity);
     }
 }

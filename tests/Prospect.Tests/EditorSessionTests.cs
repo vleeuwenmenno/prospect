@@ -1034,7 +1034,7 @@ public sealed class EditorSessionTests
     [Fact]
     public void TheSameDesignAgainIsRefusedAKnownDesignIsNotSentAndAFullCatalogueSaysSo()
     {
-        using var rig = new Rig(catalogueSpare: 500);
+        using var rig = new Rig(catalogueSpare: 800);
         var catalogue = rig.Field<DesignCatalogue>("_catalogue");
         var startup = catalogue.Count;
         var pod = Rig.Index(rig.Own(0));
@@ -1066,7 +1066,7 @@ public sealed class EditorSessionTests
 
         // The whole ship with one block more: a new design.
         var bytes = Edited(rig.Snap(0));
-        Assert.True(bytes.Length <= 500);
+        Assert.True(bytes.Length <= 800);
         Assert.True(rig.Input(0).CommitEdit(token, bytes));
         rig.Input(0).ReportInstalledDesigns(startup + 1);
         rig.Input(1).ReportInstalledDesigns(startup + 1);
@@ -1609,6 +1609,46 @@ public sealed class EditorSessionTests
         return Rig.Index(rig.Editor(0).Hull);
     }
 
+    [Fact]
+    public void ARepairAndAnAppliedEditFillEveryTankAndAWholeFullShipHasNothingToRepair()
+    {
+        using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);
+        var startup = rig.Content.Designs.Length;
+        var pod = Rig.Index(rig.Own(0));
+        var full = rig.Hulls.Flight(pod).FuelCapacity;
+        Assert.True(full.Nitrogen > 0f && full.Bipropellant > 0f);
+        Assert.Equal(full, rig.Hulls.State(pod).Fuel);
+
+        // Whole and full: a repair has nothing to do.
+        var token = rig.Open(0);
+        var serial = rig.Editor(0).Serial;
+        rig.Input(0).RepairEdit(token);
+        Assert.Equal((EditorPhase.Open, EditorReason.NoChange), (rig.Answer(0, serial).Phase, rig.Editor(0).Reason));
+
+        // Tanks run down are no damage: an edit is not held back for them, and a repair is taken for them alone.
+        rig.Hulls.State(pod).Fuel = new FuelTanks { Nitrogen = full.Nitrogen * 0.5f };
+        Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Fuel.Amount.Bipropellant == 0f), "the client should hear of its tanks");
+        Assert.False(rig.Content.Pod.NeedsRepair(rig.Hulls.Revision(pod), rig.Hulls.State(pod).Hull));
+        Assert.True(rig.Content.Pod.NeedsRefuel(rig.Hulls.State(pod).Fuel));
+        rig.Input(0).RepairEdit(token);
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
+        Assert.True(rig.Until(() => rig.Own(0) == rig.Editor(0).Hull));
+        var rebuilt = Rig.Index(rig.Editor(0).Hull);
+        Assert.Equal(rig.Content.PodDesign, rig.Hulls.Info(rebuilt).Design);
+        Assert.Equal(full, rig.Hulls.State(rebuilt).Fuel);
+        Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Fuel.Amount.Equals(full)), "the client should see the tanks full");
+
+        // An applied edit fills the tanks of the new design: here one nitrogen tank more than the pod has.
+        rig.Hulls.State(rebuilt).Fuel = default;
+        var draft = BuildDraft.FromBlueprint(rig.Content.Pod, rig.Content);
+        Assert.Equal(DraftEdit.Done, draft.Add(new GridSize(0, 2, 0), new GridSize(1, 1, 1), rig.Content.Blocks.Get("nitrogenTank")));
+        var edited = Build(rig, draft, startup + 1);
+        var larger = rig.Hulls.Flight(edited).FuelCapacity;
+        Assert.Equal(full.Nitrogen * 2f, larger.Nitrogen);
+        Assert.Equal(larger, rig.Hulls.State(edited).Fuel);
+        Assert.Null(rig.Server.Fault);
+    }
+
     private static void AssertFinite(in HullState state)
     {
         Assert.True(double.IsFinite(state.Position.X) && double.IsFinite(state.Position.Y) && double.IsFinite(state.Position.Z));
@@ -1625,7 +1665,7 @@ public sealed class EditorSessionTests
 
         // The pod stripped to its core and two plates: nothing that pushes, turns, makes or holds power.
         var draft = BuildDraft.FromBlueprint(content.Pod, content);
-        Assert.Equal(DraftEdit.Done, draft.Delete([3, 4, 5, 6, 7, 8, 9, 10, 11, 12]));
+        Assert.Equal(DraftEdit.Done, draft.Delete([3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]));
         var hull = Build(rig, draft, startup + 1);
         var flight = rig.Hulls.Flight(hull);
         Assert.Equal((Vector3.Zero, Vector3.Zero, 0f, 0f, 0f, 0f), (flight.Acceleration, flight.TurnRate, flight.MaxSpeed, flight.PowerGenerated, flight.EnergyStorage, flight.ShieldCapacity));

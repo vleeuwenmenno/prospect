@@ -5617,7 +5617,7 @@ public sealed class FrameOrderTests : IDisposable
         OpenEditor();
         var editor = _world.Editor;
         var types = _snapshot.Content.Blocks.Types;
-        _palettePart = types.ToList().FindIndex(t => t.Id == "thruster");
+        _palettePart = types.ToList().FindIndex(t => t.Id == "coldGasThruster");
         Assert.NotEqual(editor.Part, _palettePart);
         _paletteShown = true;
         for (var i = 0; i < 30; i++)
@@ -5730,7 +5730,7 @@ public sealed class FrameOrderTests : IDisposable
         OpenEditor();
         var editor = _world.Editor;
         var types = _snapshot.Content.Blocks.Types;
-        _palettePart = types.ToList().FindIndex(t => t.Id == "thruster");
+        _palettePart = types.ToList().FindIndex(t => t.Id == "coldGasThruster");
         Assert.NotEqual(editor.Part, _palettePart);
         _paletteShown = true;
         for (var i = 0; i < 30; i++)
@@ -6458,6 +6458,10 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal(length + 1, EditorGeometry.Of(editor.PartSize, axis));
         Assert.Equal(side, _world.PartSizingFace);
         Assert.True(GhostFaceOnScreen(side, out _, out var turned));
+
+        // From where the camera stopped the face may point at it, and such a face is dragged up to grow.
+        if (_world.PartSizingEdgeOn)
+            turned = new float2(0f, -EditorTuning.Load().SizePixelsPerCell);
         pointer += new float2(-180, 120);
         EditorFrame(() => Move(pointer + turned * 1.2f));
         Assert.Equal(length + 2, EditorGeometry.Of(editor.PartSize, axis));
@@ -6805,7 +6809,7 @@ public sealed class FrameOrderTests : IDisposable
         var editor = _world.Editor;
         Assert.True(editor.RotatingPart);
         Assert.Equal(DraftEdit.Done, editor.GhostCheck);
-        var drawn = new DesignBox(editor.GhostAt, editor.PartSize, editor.Content!.Blocks.Types[editor.Part], editor.PartShape);
+        var drawn = new DesignBox(editor.GhostAt, editor.PartSize, editor.Content!.Blocks.Types[editor.Part], editor.PartShape, editor.PartFacing);
         OnTheGhost();
         Assert.Equal(drawn.At, editor.GhostAt);
         EditorFrame(() => Button(GlfwMouseButton.Left, true));

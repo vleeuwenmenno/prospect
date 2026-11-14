@@ -224,7 +224,8 @@ internal static class EditorGeometry
     public static PartRole Role(BlockType type) =>
         type.Core ? PartRole.Core
         : type.Ftl != FtlKind.None ? PartRole.Drive
-        : type.Thrust > 0 ? type.ForwardOnly ? PartRole.Engine : PartRole.Thruster
+        : type.Thrust > 0 ? type.Fuel == FuelKind.Bipropellant ? PartRole.Engine : PartRole.Thruster
+        : type.Tank != FuelKind.None ? PartRole.Tank
         : type.Torque > 0 ? PartRole.Gyro
         : type.PowerOutput > 0 ? PartRole.Power
         : type.EnergyStorage > 0 ? PartRole.Storage
@@ -241,6 +242,7 @@ internal static class EditorGeometry
         PartRole.Drive => new Vector3(0.62f, 0.45f, 1.00f),
         PartRole.Engine => new Vector3(1.00f, 0.45f, 0.20f),
         PartRole.Thruster => new Vector3(0.95f, 0.60f, 0.35f),
+        PartRole.Tank => new Vector3(0.55f, 0.70f, 0.75f),
         PartRole.Gyro => new Vector3(0.80f, 0.45f, 0.95f),
         PartRole.Power => new Vector3(0.95f, 0.90f, 0.30f),
         PartRole.Storage => new Vector3(0.35f, 0.85f, 0.45f),
@@ -274,4 +276,7 @@ internal enum PartRole : byte
     Cargo,
     Crew,
     Module,
+
+    /// <summary>A fuel tank.</summary>
+    Tank,
 }

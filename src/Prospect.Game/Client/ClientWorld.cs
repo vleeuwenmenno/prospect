@@ -78,6 +78,21 @@ public struct HullView
     /// battery turns the surplus away.
     /// </summary>
     public PowerFlow Power;
+
+    /// <summary>
+    /// What the hull's tanks hold and can hold of each fuel, and what its parts burn, in kilograms and kilograms a
+    /// second, the burn smoothed over a few ticks. Filled for the hull the player flies and for no other: the
+    /// server tells nobody of any other hull's tanks.
+    /// </summary>
+    public FuelFlow Fuel;
+
+    /// <summary>
+    /// What the hull's thrust parts are doing, for every hull in view: the throttle toward each direction and the
+    /// kinds of part firing, as the simulation's last step left it. <see cref="ThrustState.Firing"/> answers for
+    /// one part from the fuel its type burns and the way its box faces. The player's hull has it from prediction,
+    /// the others from the newest snapshot.
+    /// </summary>
+    public ThrustState Thrust;
     public float Shield;
     public float Hull;
 
@@ -253,6 +268,7 @@ internal sealed partial class ClientWorld : IDisposable
     private long _lastSnapshotClientTick;
     private float _energyRate;
     private PowerFlow _power;
+    private FuelFlow _fuel;
 
     public ClientWorld(GameContent content)
     {
@@ -522,6 +538,7 @@ internal sealed partial class ClientWorld : IDisposable
         _predicted = _near.State(0);
         _energyRate += ((_predicted.Energy - energyBefore) / HullSim.Dt - _energyRate) * 0.2f;
         _power.Blend(_near.Info(0).Power, 0.2f);
+        _fuel.Blend(_near.Info(0).Fuel, 0.2f);
         Send(transport);
     }
 
@@ -589,6 +606,9 @@ internal sealed partial class ClientWorld : IDisposable
 
         _ownHealth = own.HasHealth;
         ReadHealth(_ownBlocks, own);
+
+        // Records carry no tanks; the header has those of the hull the player flies.
+        own.State.Fuel = header.OwnFuel;
         Reconcile(own.State, own.Order, header.ServerTick, header.AppliedOrderId);
     }
 
@@ -671,6 +691,8 @@ internal sealed partial class ClientWorld : IDisposable
                 Energy = _predicted.Energy,
                 EnergyRate = _energyRate,
                 Power = _power,
+                Fuel = new FuelFlow { Amount = _predicted.Fuel, Capacity = _flight.FuelCapacity, Burn = _fuel.Burn },
+                Thrust = _predicted.Thrust,
                 Shield = _predicted.Shield,
                 Hull = _predicted.Hull,
                 ShieldOffline = _predicted.ShieldOffline,
@@ -788,6 +810,8 @@ internal sealed partial class ClientWorld : IDisposable
             _field.Refit(i);
             _near.State(i) = record.State;
             var mine = record.Owner == _playerId;
+            if (mine)
+                _near.State(i).Fuel = _near.Flight(i).FuelCapacity;
             _near.Info(i).Order = mine ? record.Order : default;
             var age = Math.Clamp(_predictionTick - serverTick, 0, NearStaleTicks);
             for (var step = 0; step < age; step++)
@@ -962,13 +986,19 @@ internal sealed partial class ClientWorld : IDisposable
         remote.Owner = record.Owner;
         remote.Newest = (remote.Newest + 1) % SamplesPerHull;
         remote.Count = Math.Min(remote.Count + 1, SamplesPerHull);
-        _samples[slot * SamplesPerHull + remote.Newest] = new Sample
+        ref var sample = ref _samples[slot * SamplesPerHull + remote.Newest];
+        sample = new Sample
         {
             Tick = serverTick,
             State = record.State,
             Environment = record.Environment,
             Order = record.Order,
         };
+
+        // The player's other hulls are flown forward here under their orders, and nothing says what their tanks
+        // hold: they are taken as full, which is wrong only for one that has run dry.
+        if (record.Owner == _playerId)
+            sample.State.Fuel = remote.Flight.FuelCapacity;
     }
 
     /// <summary>
@@ -1096,6 +1126,7 @@ internal sealed partial class ClientWorld : IDisposable
             JumpTunnelSeconds = newest.State.JumpTunnelSeconds,
             JumpTunnelElapsed = newest.State.JumpTunnelElapsed,
             Energy = newest.State.Energy,
+            Thrust = newest.State.Thrust,
             Shield = newest.State.Shield,
             Hull = newest.State.Hull,
             ShieldOffline = newest.State.ShieldOffline,

@@ -7,7 +7,11 @@ namespace Prospect.Game.World;
 /// <summary>Versioned canonical design data. Only catalogue names and box geometry cross this boundary.</summary>
 internal static class DesignBytes
 {
-    internal const int Version = 2;
+    /// <summary>Version 3 adds each block's facing, one byte after its shape.</summary>
+    internal const int Version = 3;
+
+    /// <summary>The fewest bytes a block takes: a one-byte name with its length, six integers, a shape and a facing.</summary>
+    private const int MinBlockBytes = 2 + 24 + 1 + 1;
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
     internal static byte[] Encode(HullDesign design)
@@ -24,7 +28,7 @@ internal static class DesignBytes
         {
             Text(writer, box.Type.Id);
             writer.Write(box.At.X); writer.Write(box.At.Y); writer.Write(box.At.Z);
-            writer.Write(box.Size.X); writer.Write(box.Size.Y); writer.Write(box.Size.Z); writer.Write((byte)box.Shape);
+            writer.Write(box.Size.X); writer.Write(box.Size.Y); writer.Write(box.Size.Z); writer.Write((byte)box.Shape); writer.Write((byte)box.Facing);
         }
         return stream.ToArray();
     }
@@ -45,7 +49,7 @@ internal static class DesignBytes
         var color = new System.Numerics.Vector3(reader.Float(), reader.Float(), reader.Float());
         var count = reader.Int();
         // Keep live geometry admission separate from the wire's representation.
-        if (count < 1 || count > content.Blocks.Limits.MaxBlocks || count > reader.Left / 27)
+        if (count < 1 || count > content.Blocks.Limits.MaxBlocks || count > reader.Left / MinBlockBytes)
             throw new InvalidDataException("Design block count exceeds live admission bounds.");
         GeometryAdmission.Count(count, content.Blocks.Limits);
         var boxes = new DesignBox[count];
@@ -54,7 +58,10 @@ internal static class DesignBytes
             var type = content.Blocks.Get(reader.Text());
             var at = new GridSize(reader.Int(), reader.Int(), reader.Int());
             var extent = new GridSize(reader.Int(), reader.Int(), reader.Int());
-            boxes[i] = new DesignBox(at, extent, type, (BlockShape)reader.Byte());
+            var shape = (BlockShape)reader.Byte();
+            var facing = (BlockFacing)reader.Byte();
+            if (!Facings.IsValid(facing)) throw new InvalidDataException("Unknown block facing.");
+            boxes[i] = new DesignBox(at, extent, type, shape, facing);
         }
         if (reader.Left != 0) throw new InvalidDataException("Trailing design bytes.");
         // Checked before the design is evaluated or its shield built: it costs one pass over the boxes.
@@ -79,7 +86,8 @@ internal static class DesignBytes
         {
             var item = field.GetValue(value);
             if (item is float f && !float.IsFinite(f) || item is double d && !double.IsFinite(d)
-                || item is System.Numerics.Vector3 v && (!float.IsFinite(v.X) || !float.IsFinite(v.Y) || !float.IsFinite(v.Z)))
+                || item is System.Numerics.Vector3 v && (!float.IsFinite(v.X) || !float.IsFinite(v.Y) || !float.IsFinite(v.Z))
+                || item is ThrustTable table && !table.IsFinite || item is FuelTanks tanks && !tanks.IsFinite)
                 throw new InvalidDataException("Nonfinite design figures.");
         }
     }

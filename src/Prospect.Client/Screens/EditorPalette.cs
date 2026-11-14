@@ -33,11 +33,13 @@ internal sealed class EditorPalette
         return (uint)Category >= (uint)tuning.Categories.Length || tuning.Lists(tuning.Categories[Category], type);
     }
 
-    /// <summary>Whether a search finds a part: by its name, its id, what it is for, or "drone" for a compact part.</summary>
+    /// <summary>Whether a search finds a part: by its name, its id, what it is for, its fuel, or "drone" for a compact part.</summary>
     public static bool Matches(EditorTuning tuning, BlockType type, string query) =>
         type.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
         || type.Id.Contains(query, StringComparison.OrdinalIgnoreCase)
         || RoleWord(EditorGeometry.Role(type)).Contains(query, StringComparison.OrdinalIgnoreCase)
+        || FuelWord(type.Fuel).Contains(query, StringComparison.OrdinalIgnoreCase)
+        || FuelWord(type.Tank).Contains(query, StringComparison.OrdinalIgnoreCase)
         || (tuning.Compact(type) && "drone compact".Contains(query, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>The words a search finds a role by.</summary>
@@ -47,6 +49,7 @@ internal sealed class EditorPalette
         PartRole.Drive => "jump drive ftl",
         PartRole.Engine => "engine thrust",
         PartRole.Thruster => "thruster thrust",
+        PartRole.Tank => "tank fuel",
         PartRole.Gyro => "gyro turn",
         PartRole.Power => "generator power",
         PartRole.Storage => "battery energy",
@@ -55,6 +58,15 @@ internal sealed class EditorPalette
         PartRole.Crew => "crew quarters",
         PartRole.Module => "module scanner locator gas asteroid survey",
         _ => "structure armour hull",
+    };
+
+    /// <summary>The word a search finds a part by for the fuel it burns or holds; nothing for a part with neither.</summary>
+    public static string FuelWord(FuelKind fuel) => fuel switch
+    {
+        FuelKind.Nitrogen => "nitrogen",
+        FuelKind.Hydrazine => "hydrazine",
+        FuelKind.Bipropellant => "bipropellant",
+        _ => "",
     };
 
     /// <summary>
