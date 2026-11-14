@@ -24,19 +24,27 @@ internal static class TestNet
     public const int PortBase = 16384;
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, ushort> Ports = new();
+    private static readonly PortBlocks Blocks = new(Path.Combine(Path.GetTempPath(), "prospect-test-ports"), PortBlocks.DefaultBlockCount);
+    private static readonly Lock Gate = new();
 
     /// <summary>
-    /// A UDP port for one test. Every test process has its own block of 32, so two runs on one machine (two
-    /// worktrees, say) do not meet, and every test in a run has its own slot in the block. The range lies below
-    /// the operating system's ephemeral ports, which clients and HTTP connections take at random, and a port
-    /// something already holds is skipped by whole blocks. The same slot always gives the same port in a run.
+    /// A UDP port for one test. Every test process claims blocks of 32 ports through an exclusive lock file it holds
+    /// until it exits (<see cref="PortBlocks"/>), so two runs on one machine (two worktrees, say) never share a
+    /// port, whatever their process ids; every test in a run has its own slot in the block. The range lies below
+    /// the operating system's ephemeral ports, which clients and HTTP connections take at random. A slot whose
+    /// port something else holds moves to a block of its own. The same slot always gives the same port in a run.
     /// </summary>
     public static ushort Port(int slot) => Ports.GetOrAdd(slot, static s =>
     {
-        for (var attempt = 0; attempt < 500; attempt++)
+        lock (Gate)
         {
-            var port = (ushort)(PortBase + (Environment.ProcessId + attempt) % 500 * 32 + s);
-            if (IsFree(port)) return port;
+            for (var attempt = 0; attempt < PortBlocks.DefaultBlockCount; attempt++)
+            {
+                // The first claim is the run's main block; later ones are only for slots whose port was taken.
+                var block = attempt == 0 ? Blocks.Main : Blocks.ClaimAnother();
+                var port = (ushort)(PortBase + block * PortBlocks.BlockSize + s);
+                if (IsFree(port)) return port;
+            }
         }
 
         throw new IOException($"No free UDP port for test slot {s}");
@@ -458,5 +466,69 @@ internal sealed class FakeListing : IDisposable
         }
 
         return new FakeRequest(start[0], start.Length > 1 ? start[1] : "", authorization, Encoding.UTF8.GetString(buffer, bodyStart, Math.Min(contentLength, length - bodyStart)));
+    }
+}
+
+/// <summary>
+/// Disjoint blocks of ports for concurrent test processes. A block is claimed by holding an exclusive lock on its
+/// file for as long as this object lives; the operating system drops the lock when the process dies, however it
+/// dies, so no cleanup is needed and a crashed run never blocks later ones.
+/// </summary>
+internal sealed class PortBlocks : IDisposable
+{
+    /// <summary>Ports per block: one slot for each test that listens.</summary>
+    public const int BlockSize = 32;
+
+    /// <summary>Blocks that fit between <see cref="TestNet.PortBase"/> and 32767.</summary>
+    public const int DefaultBlockCount = 500;
+
+    private readonly string _directory;
+    private readonly int _count;
+    private readonly List<FileStream> _held = [];
+    private int _next;
+
+    /// <summary>Claims a first block straight away, starting the search from the process id to spread processes out.</summary>
+    public PortBlocks(string directory, int count)
+    {
+        _directory = directory;
+        _count = count;
+        Directory.CreateDirectory(directory);
+        _next = Environment.ProcessId % count;
+        Main = ClaimAnother();
+    }
+
+    /// <summary>The block claimed when this object was made.</summary>
+    public int Main { get; }
+
+    /// <summary>Another block nobody else holds. Throws when every block is taken.</summary>
+    public int ClaimAnother()
+    {
+        lock (_held)
+        {
+            for (var tried = 0; tried < _count; tried++)
+            {
+                var block = (_next + tried) % _count;
+                try
+                {
+                    var file = new FileStream(Path.Combine(_directory, $"block-{block}.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                    _held.Add(file);
+                    _next = block + 1;
+                    return block;
+                }
+                catch (IOException) { }
+            }
+        }
+
+        throw new IOException("Every test port block is held by another run");
+    }
+
+    public void Dispose()
+    {
+        lock (_held)
+        {
+            foreach (var file in _held)
+                file.Dispose();
+            _held.Clear();
+        }
     }
 }
