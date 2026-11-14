@@ -7,6 +7,7 @@ layout(location = 1) in vec3 worldPosition;
 layout(location = 2) in vec3 localPosition;
 layout(location = 3) in vec4 color;
 layout(location = 4) flat in int cut;
+layout(location = 5) in float metal;
 layout(location = 0) out vec4 outColor;
 
 // On for the hull pipeline: a hull going through a jump's opening is cut away where it is past it, before anything
@@ -96,6 +97,11 @@ void main()
         float mottling = noise(localPosition * 9.0) * 0.6 + noise(localPosition * 31.0) * 0.4;
         albedo *= 0.55 + 0.75 * mottling;
     }
+    else if (metal >= 0.0)
+    {
+        // Bare metal of a nozzle or its collar: grey with a touch of the hull's colour, no panel lines.
+        albedo = mix(vec3(metal), albedo * metal * 1.6, 0.2);
+    }
     else
     {
         // Hull plating: panel lines every block.
@@ -108,7 +114,8 @@ void main()
     float diffuse = max(dot(n, sun), 0.0);
     float fill = 0.5 + 0.5 * dot(n, -sun);
     vec3 halfway = normalize(sun + view);
-    float specular = pow(max(dot(n, halfway), 0.0), 48.0) * (color.a < 0.5 ? 0.03 : 0.35);
+    float specular = metal >= 0.0 ? pow(max(dot(n, halfway), 0.0), 90.0) * 0.8
+        : pow(max(dot(n, halfway), 0.0), 48.0) * (color.a < 0.5 ? 0.03 : 0.35);
     float rim = pow(1.0 - max(dot(n, view), 0.0), 3.0);
 
     vec3 lit = albedo * (frame.sunColor.rgb * diffuse + vec3(0.012, 0.016, 0.026) * fill)

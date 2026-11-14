@@ -16,6 +16,9 @@ layout(location = 1) out vec3 worldPosition;
 layout(location = 2) out vec3 localPosition;
 layout(location = 3) out vec4 color;
 layout(location = 4) flat out int cut;
+// Bare metal of a thrust part's model, from 0 (black) to 1, or -1 for ordinary plating: carried in the length of
+// the mesh's normal, 2 plus the shade (PropulsionModels.Tag). Every other mesh has unit normals.
+layout(location = 5) out float metal;
 
 void main()
 {
@@ -29,6 +32,8 @@ void main()
     vec3 cz = vec3(row0.z, row1.z, row2.z);
     worldNormal = cross(cy, cz) * normal.x + cross(cz, cx) * normal.y + cross(cx, cy) * normal.z;
     localPosition = position;
+    float tag = length(normal);
+    metal = tag > 1.5 ? tag - 2.0 : -1.0;
     int slot = int((tint.a + 0.5) * 0.25);
     cut = slot - 1;
     color = vec4(tint.rgb, tint.a - 4.0 * float(slot));

@@ -223,6 +223,19 @@ internal struct FtlMark
 /// One drawn mesh: a camera-relative 3x4 transform and a colour. Alpha 0 is rock, 1 is hull plating, 2 the pilot's
 /// own hull; a hull cut by a jump's opening adds four times its passage slot plus one.
 /// </summary>
+/// <summary>One thrust plume, matching <c>plume.vert</c>: see there for what each vector holds.</summary>
+internal struct PlumeInstance
+{
+    public float4 ExitRadius;
+    public float4 AxisLength;
+    public float4 CoreBright;
+    public float4 EdgeKind;
+    public float4 SparkAge;
+    public float4 Shape;
+    public float4 Motion;
+    public float4 Extent;
+}
+
 internal struct MeshInstance
 {
     public float4 Row0;
@@ -277,6 +290,9 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private readonly VkPipeline _gridPipeline;
     private readonly VkPipeline _tonemapPipeline;
     private readonly VkPipeline _ftlMarkPipeline;
+    private readonly VkPipeline _plumePipeline;
+    private readonly GpuBuffer[] _plumeBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
+    private int _plumeCount;
     private readonly VkPipelineLayout _pulsePipelineLayout;
     private readonly VkPipeline _pulsePipeline;
     private ScanPulseConstants _pulseQueued;
@@ -406,6 +422,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
                 _frameBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.UniformBufferBit, sizeof(FrameConstants));
                 _instanceBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshInstance) * MaxInstances);
                 _ftlBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(FtlMark) * MaxFtlMarks);
+                _plumeBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(PlumeInstance) * PropulsionLook.PlumeCapacity);
                 _damageVertices[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshVertex) * DamageVertices);
                 _damageInstances[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshInstance) * 65);
                 _shieldVertexBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshVertex) * ShieldVisuals.MaxVertices);
@@ -720,6 +737,9 @@ internal sealed unsafe class SceneRenderer : IDisposable
 
         var markInput = new VertexInput(1, 3).AddBindingWithAttributes<FtlMark>(0, 0, VkVertexInputRate.Instance);
         _ftlMarkPipeline = ScenePipeline(Module(shaders, "ftl_mark.vert"), Module(shaders, "ftl_mark.frag"), markInput, Presets.Rasterization.Fill.CullNone, &depthRead, &additive);
+        // Plumes are light added in the scene, tested against what is solid, and march only the pixels of their boxes.
+        var plumeInput = new VertexInput(1, 8).AddBindingWithAttributes<PlumeInstance>(0, 0, VkVertexInputRate.Instance);
+        _plumePipeline = ScenePipeline(Module(shaders, "plume.vert"), Module(shaders, "plume.frag"), plumeInput, Presets.Rasterization.Fill.CullNone, &depthRead, &additive);
 
         // The scan pulse is light added to the displayed image after tone mapping, in the present pass, under the
         // interface. Its alpha is left as the tone mapper wrote it.
@@ -803,6 +823,15 @@ internal sealed unsafe class SceneRenderer : IDisposable
 
     /// <summary>The jump-mark memory for this frame; say how many were filled when calling <see cref="Render"/>.</summary>
     public Span<FtlMark> FtlMarks(int frameIndex) => new((void*)_ftlBuffers[frameIndex].Mapped, MaxFtlMarks);
+
+    /// <summary>This frame slot's plume instances, written by the world before <see cref="Render"/>.</summary>
+    public Span<PlumeInstance> Plumes(int frameIndex) => new((void*)_plumeBuffers[frameIndex].Mapped, PropulsionLook.PlumeCapacity);
+
+    /// <summary>How many of <see cref="Plumes"/> the next <see cref="Render"/> draws; cleared once drawn.</summary>
+    public void QueuePlumes(int count) => _plumeCount = Math.Clamp(count, 0, PropulsionLook.PlumeCapacity);
+
+    /// <summary>The plumes the last recorded frame drew, for the benchmark report.</summary>
+    public int LastPlumes { get; private set; }
 
     /// <summary>How many times the render targets have been rebuilt since they were made.</summary>
     public int TargetRebuilds { get; private set; }
@@ -1009,6 +1038,16 @@ internal sealed unsafe class SceneRenderer : IDisposable
         }
 
         commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _scenePipelineLayout, 0, new ReadOnlySpan<VkDescriptorSet>(in set), []);
+        // Thrust plumes, after everything solid so hulls and rocks hide them; nothing at all when nothing fires.
+        if (_plumeCount > 0)
+        {
+            var plumes = _plumeBuffers[frameIndex].Buffer;
+            commands.BindPipeline(VkPipelineBindPoint.Graphics, _plumePipeline);
+            commands.BindVertexBuffers(0, new ReadOnlySpan<VkBuffer>(in plumes), new ReadOnlySpan<ByteSize64>(in zero));
+            commands.Draw(36, _plumeCount, 0, 0);
+        }
+        LastPlumes = _plumeCount;
+        _plumeCount = 0;
         commands.BindPipeline(VkPipelineBindPoint.Graphics, _dustPipeline);
         commands.Draw(6, DustCount, 0, 0);
 
@@ -1592,7 +1631,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         DestroyTargets();
         device.DestroySampler(_sampler, null);
         device.DestroySampler(_pointSampler, null);
-        foreach (var pipeline in (ReadOnlySpan<VkPipeline>)[_backgroundPipeline, _starPipeline, _dustPipeline, _meshPipeline, _hullPipeline, _gridPipeline, _tonemapPipeline, _ftlMarkPipeline])
+        foreach (var pipeline in (ReadOnlySpan<VkPipeline>)[_backgroundPipeline, _starPipeline, _dustPipeline, _meshPipeline, _hullPipeline, _gridPipeline, _tonemapPipeline, _ftlMarkPipeline, _plumePipeline])
             device.DestroyPipeline(pipeline, null);
         device.DestroyPipeline(_gasPipeline, null);
         device.DestroyPipeline(_gasSkyPipeline, null);
@@ -1627,6 +1666,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
             _frameBuffers[i].Destroy(_gpu);
             _instanceBuffers[i].Destroy(_gpu);
             _ftlBuffers[i].Destroy(_gpu);
+            _plumeBuffers[i].Destroy(_gpu);
             _damageVertices[i].Destroy(_gpu);
             _damageInstances[i].Destroy(_gpu);
             _shieldVertexBuffers[i].Destroy(_gpu);

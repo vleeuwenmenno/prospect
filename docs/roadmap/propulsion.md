@@ -5,7 +5,7 @@
 - **Built:** the simulation. Blocks face one of six ways, thrust is per direction, three fuels are burnt and saved.
 - **Built:** the editor turns a part's facing with `R` and warns about a missing direction or tank.
 - **Built:** the fuel readout in the pilot console (a fuel row under the two groups, a tooltip, low and empty notices).
-- **Not built:** the models and plumes. They have what they need (below).
+- **Built:** the models of engines and both thruster kinds, and their plumes and puffs (below).
 - Protocol 50, save layout 6, design encoding 3, design file version 4, evaluator 11.
 
 ## Decided: parts
@@ -68,6 +68,28 @@
   can be made to look right.
 - Cold gas thrusters vent a short, pale, cold puff.
 - Hot thrusters show a small hot plume, a miniature engine.
+
+## Decided: how the models and plumes are made
+
+- Every figure is in `content/visuals/propulsion.json`, keyed by block type id. A part without an entry stays a plain
+  block and shows no plume. A wedge-shaped part is always a plain block.
+- **Models** (`PropulsionModels`): built with the hull's mesh on a worker, never in a frame.
+  - A housing at the back, a collar, then the nozzles at the face the part faces.
+  - The face is split into nozzles: an engine or hot thruster into squares of its shorter side (a 2 by 1 face has two
+    bells), a cold gas thruster two per cell a side (a quad on a plate).
+  - A nozzle's exit follows its share of the face; its length follows its exit, capped by a share of the depth. A
+    deeper block grows its housing, never its bell.
+  - Nozzles are bare metal: the shade rides in the length of the mesh normal, which `mesh.vert` reads.
+  - A hull drawn block by block (far and damaged) still shows plain blocks; near damaged hulls show the models.
+- **Plumes** (`ThrustEffects`, `plume.vert`, `plume.frag`): one instance per firing nozzle, at most `maxPlumes` (256 in
+  the buffer); past it the largest on screen stay. Drawn after hulls and rocks, tested against their depth.
+  - Each plume marches 16 steps through a box around it. Nothing fires, nothing is drawn.
+  - Flicker and the gas's flow come from the snapshot clock and a per-nozzle seed: smooth, no shimmer.
+  - Ignition is when a part group (fuel and facing) goes from idle to firing: sparks for `sparkSeconds`, then the
+    plume grows over `growSeconds`. A hull first seen while it fires shows no ignition.
+  - Shock diamonds: bright nodes in the core over the first half of the plume. Kept; `diamonds` 0 turns them off.
+  - A cold gas puff starts with a burst that settles to a faint steady jet.
+- Check with `--thrust` and `--zoom` captures (`AGENTS.md`); `PropulsionVisualTests` holds the rules.
 
 ## Decided: provisional figures
 

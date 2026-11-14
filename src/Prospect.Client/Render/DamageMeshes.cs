@@ -13,7 +13,7 @@ internal sealed class DamageMesh
     public MeshVertex[] Dented = [];
     private int[] _changed = [];
 
-    /// <summary>Builds whole live hulls, or refuses the whole hull before allocating output.</summary>
+    /// <summary>Builds whole live hulls, thrust parts as their models, or refuses the whole hull when it does not fit.</summary>
     public static DamageMesh? Build(HullDesign design, ReadOnlySpan<ulong> alive, in VisualDamageState state, int capacity, float maxDepth)
     {
         // Six quad faces, each at most two triangles, plus two extra triangles for each dent.
@@ -23,9 +23,25 @@ internal sealed class DamageMesh
         Span<int> corners = stackalloc int[4];
         Span<Vector3> vertices = stackalloc Vector3[8];
         var intact = BlockSet.Equal(alive, design.FullSet);
+        var look = PropulsionLook.Shared;
+        var modelVertices = new List<MeshVertex>();
+        var modelIndices = new List<uint>();
         for (var b = 0; b < design.BlockCount; b++)
         {
             if (!BlockSet.Has(alive, b)) continue;
+            // A thrust part is its model, as on an undamaged hull; dents on it are not drawn.
+            modelVertices.Clear();
+            modelIndices.Clear();
+            if (PropulsionModels.Add(design, b, look, modelVertices, modelIndices, null))
+            {
+                foreach (var index in modelIndices)
+                {
+                    original.Add(modelVertices[(int)index]);
+                    dented.Add(modelVertices[(int)index]);
+                }
+                if (original.Count > capacity) return null;
+                continue;
+            }
             var shape = design.Shapes[b]; var half = design.BlockHalfExtents[b]; var offset = design.BlockOffsets[b];
             var nv = BlockShapes.Vertices(shape, half, vertices);
             var centroid = Vector3.Zero;
@@ -56,6 +72,7 @@ internal sealed class DamageMesh
                     Triangle(point, offset + BlockShapes.Corner(corners[c], half), offset + BlockShapes.Corner(corners[(c + 1) % n], half), inward, normal);
             }
         }
+        if (original.Count > capacity) return null;
         var changes = new List<int>();
         for (var i = 0; i < original.Count; i++)
             if (!original[i].Position.Equals(dented[i].Position) || !original[i].Normal.Equals(dented[i].Normal)) changes.Add(i);

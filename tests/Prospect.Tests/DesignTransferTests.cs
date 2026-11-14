@@ -127,7 +127,8 @@ public sealed class DesignTransferTests
         design.Evaluate(alive, out var flight, out var stats);
         Assert.Equal(hulls.Flight(own), flight);
         Assert.True(stats.Blocks < 300);
-        var mesh = MeshBuilder.Hull(design);
+        // Without part models every block is its box: four corners on each of six faces.
+        var mesh = MeshBuilder.Hull(design, new PropulsionLook());
         Assert.Equal(300 * 24, mesh.Vertices.Count);
         Assert.Contains(mesh.Vertices, v => Math.Abs(v.Position.X - (design.BlockOffsets[299].X + 1)) < 0.001f);
         var shell = new ShieldSurface();

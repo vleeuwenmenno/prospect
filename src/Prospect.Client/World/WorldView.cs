@@ -125,6 +125,16 @@ internal sealed class WorldView
     public int VisibleRocks { get; private set; }
     public double DamageWorkerMs => _damage.LastBuildMs;
     private readonly CollisionSparks _sparks = new();
+    private readonly ThrustEffects _thrust = new(PropulsionLook.Shared);
+
+    /// <summary>Plumes drawn in the last frame.</summary>
+    public int DrawnPlumes { get; private set; }
+
+    /// <summary>
+    /// The installed catalogue's meshes, in design order, set with them by the application: the world reads only the
+    /// nozzles each was built with, for the plumes.
+    /// </summary>
+    public MeshData[]? ShipMeshes { get; set; }
     private readonly CollisionDetail _collision = CollisionDetail.Load();
     private readonly SceneRenderer _scene;
     // The designs as the session's world evaluates them; the meshes built from them are the same in every world.
@@ -446,6 +456,12 @@ internal sealed class WorldView
     /// <summary>Scripted runs only: the forward axis held in the pilot view, as a held key would.</summary>
     public float? ScriptedForward { get; set; }
 
+    /// <summary>Sets the pilot camera's distance as the scroll wheel would, 0.5 to 8 times the usual; for captures (<c>--zoom</c>).</summary>
+    public float ChaseZoom { set => _chaseZoom = Math.Clamp(value, 0.5f, 8f); }
+
+    /// <summary>Flight keys a scripted run holds in the pilot view (<c>--thrust</c>); null for none.</summary>
+    public ScriptedThrust? ScriptedThrust { get; set; }
+
     /// <summary>The flight figures of the hull the player is flying.</summary>
     public FlightParams OwnFlight => _designs[Math.Min(Own.Design, _designs.Length - 1)].Flight;
 
@@ -722,6 +738,7 @@ internal sealed class WorldView
             _shields.Clear();
             _damage.Clear();
             _sparks.Clear();
+            _thrust.Clear();
             _scanPulse.Reset();
             _ownId = 0;
             ResetOwnJump();
@@ -930,6 +947,16 @@ internal sealed class WorldView
             _lookDirection = Vector3.Transform(nose, Quaternion.CreateFromAxisAngle(hullUp, -look * MathF.PI / 180f));
         }
 
+        if (ScriptedThrust is { } held && Mode == ViewMode.Pilot && !editing)
+        {
+            controls.Strafe = held.Strafe;
+            controls.Vertical = held.Vertical;
+            controls.Forward = held.Forward;
+            controls.Boost = held.Boost;
+            // The hull holds its heading, so a camera held to the side does not turn it.
+            controls.Align = false;
+        }
+
         // A jump never takes the view: the pilot looks wherever they like through all of it. The server holds the
         // hull's nose on the destination while the drive works; the camera keeps its normal orbit and zoom.
 
@@ -1036,6 +1063,8 @@ internal sealed class WorldView
         foreach (var slot in _slots)
             if (slot.State == SectorSlot.Ready && ReferenceEquals(slot.Galaxy, galaxy)) GeneratedRocks += slot.Content.AsteroidCount;
         _sparks.Begin(snapshot.Hulls.AsSpan(0, snapshot.HullCount));
+        var plumes = _scene.Plumes(frameIndex);
+        _thrust.Begin((snapshot.ServerTickPrecise + alpha) / TickLoop.SimulationHz, _right, _up, _forward, _tanHalfFov, aspect, _viewport.Y);
         var marks = _scene.FtlMarks(frameIndex);
         var markCount = 0;
         var composite = new CompositeConstants { Setup = new float4(Exposure, aspect, time, 0) };
@@ -1060,6 +1089,7 @@ internal sealed class WorldView
             if (hull.Design >= InstalledDesigns || hull.Design >= _designs.Length)
                 continue;
             var design = _designs[hull.Design];
+            var thrustSlot = _thrust.Observe(hull);
             // While the editor is open the draft is drawn in the ship's place, block by block, without its shield.
             if (_editShown && hull.Id == Editor.Hull && Editor.Draft is { } draft && Editor.Source is { } source)
             {
@@ -1086,6 +1116,9 @@ internal sealed class WorldView
             // The material says what the mesh is and, above it in steps of four, which opening cuts it.
             // The pilot's own hull inside its jump takes no slot: its opening is cut from the frame's own jump.
             VisibleHulls++;
+            // Plumes of the parts that fire, whatever mesh the hull is drawn with below; a hull in a jump's tunnel fires none.
+            if (ShipMeshes is { } shipMeshes && hull.Design < shipMeshes.Length)
+                _thrust.Add(thrustSlot, hull, shipMeshes[hull.Design].Nozzles, position, orientation, stretch, plumes);
             var material = Material(visual.Inside, visual.Inside ? -1 : visual.Clip);
             // The shield goes where the hull goes, drawn out and cut with it by the same material.
             _shields.Add(hull.Id, position, orientation, stretch, material, shieldInstances, shieldVertices, shieldIndices);
@@ -1117,6 +1150,8 @@ internal sealed class WorldView
             }
         }
 
+        DrawnPlumes = _thrust.End();
+        _scene.QueuePlumes(DrawnPlumes);
         AddOpenings(camera, aspect, marks, ref markCount, ref composite, ref openings, ref clips);
         if (overlayCheck && GasOverlayOpening && composite.Setup.W < CompositeConstants.MaxLenses)
         {
