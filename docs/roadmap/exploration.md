@@ -203,4 +203,20 @@ UI estimates use the same curve, not knowledge of the future departure tick.
 - `gasOpticalPenalty` in shared `rules/exploration.json` is 1.0; base range stays 5,000 m.
   These are provisional tuning numbers. Shader noise and the render-only `gasWispiness` setting never affect sensing.
 - The 250 m collision proximity sphere is unaffected, with or without sensors. Own ships remain disclosed.
-- Charting and generation remain unchanged. Directional contour rendering is a separate client task.
+- Charting and generation remain unchanged.
+
+### Decided (provisional, tunable): how coverage is drawn
+
+- Both views draw each sensor's boundary from the shared `GasSensors.Reach`, sampled in 96 directions on the view's
+  plane (the command plane, or the chosen layer's middle plane on the map). A sensor is sampled again when it
+  moves 0.4 % of its range or the plane does; its gas comes from `SensorGasCache`. Where gas cuts range, a very
+  faint amber tint (`gasTintAlpha` in `content/visuals/map.json`) fills the gap to the plain sphere.
+- The command view shows coverage of the **selected** ships only. With nothing selected it shows the ship being
+  flown, or nothing if that ship has no sensor. Selected ships with no sensor show none.
+- **Radar link (display grouping only).** Selected ships whose centres are within `radarLinkMeters` (10,000 m) of
+  each other, directly or through a chain, share one picture: their reach is drawn as one merged outline with no
+  line inside it, and the faint fade outside follows that outline. Ships farther apart form separate groups, each
+  with its own outline, never merged across groups. A faint line (`linkLineAlpha`) joins linked ships.
+- Nothing on the server changes: every owned ship still reports what it sees, so a remote scout keeps working.
+  Real relay limits, and what a link may carry, come later with relay stations.
+- The galaxy map keeps showing every owned sensor, whatever is selected, each as its own gas-shaped region.

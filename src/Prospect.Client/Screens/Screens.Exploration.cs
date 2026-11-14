@@ -28,6 +28,15 @@ internal sealed partial class ScreenHost
         _mapNav.TiltBlend = 1f;
     }
 
+    /// <summary>The map zoomed in as far as it goes on the own position, to see the shape of sensor reach. Used by <c>--open map-reach</c> and <c>map-reach-tilt</c>.</summary>
+    public void OpenMapReach(bool tilt)
+    {
+        OpenMap();
+        _mapCell = MapMaxCell;
+        _mapNav.Tilt = tilt;
+        _mapNav.TiltBlend = tilt ? 1f : 0f;
+    }
+
     /// <summary>Starts a scan of the own sector and shows it on the pinned card. Used by <c>--open scan</c>.</summary>
     public void OpenScan()
     {
@@ -77,40 +86,82 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
-    /// Sensor coverage in the command view, on the command plane: a thin boundary line per sensor drawn from its
-    /// sampled reach in every direction, the sphere's outline as the volume, and outside the boundary a few faint
-    /// strokes that darken gently with distance, so unseen space reads as unseen without hiding what lies behind.
-    /// Lost contacts show at their last position, hollow and fading. The sector's knowledge state sits under the
-    /// view's title.
+    /// Sensor coverage in the command view, on the command plane, for the selected ships (the ship being flown when
+    /// nothing is selected). Ships within the content's radar link distance of each other, directly or through a
+    /// chain, share a picture: their gas-shaped reach is drawn as one merged outline with no line inside it, and
+    /// ships farther apart each get their own. A thin line is the boundary and a few faint strokes follow it
+    /// outward, darkening gently, so unseen space reads as unseen without hiding what lies behind. A very faint tint
+    /// shows where gas cut the range. Lost contacts show at their last position, hollow and fading. The sector's
+    /// knowledge state sits under the view's title.
     /// </summary>
     private void DrawCommandFog(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, float alpha)
     {
         var look = MapLook;
         var plane = world.CommandFocus.Y;
         var radius = _coverage.Radius;
-        Span<double> reach = stackalloc double[SensorCoverage.ReachSamples];
-        for (var i = 0; i < _coverage.Count; i++)
+        _coverage.LinkDistance = look.RadarLinkMeters;
+        _coverage.SelectActive(world.Selection);
+        _coverage.LinkActive();
+        _coverage.Refresh(plane, true);
+        var outline = _coverage.Outline();
+        var labelled = false;
+        for (var s = 0; s < _coverage.ActiveCount; s++)
         {
-            var p = _coverage.Positions[i];
-            if (world.ProjectDisc(p, (float)radius, out var sphere, out var pixels, out _))
+            var i = _coverage.ActiveIndex(s);
+            var alone = true;
+            for (var other = 0; other < _coverage.ActiveCount && alone; other++)
+                alone = other == s || _coverage.GroupOf(other) != _coverage.GroupOf(s);
+
+            // A ship on its own keeps the sphere's silhouette as its volume; linked ships show the outline only.
+            if (alone && world.ProjectDisc(_coverage.Positions[i], (float)radius, out var sphere, out var pixels, out _))
                 draw.AddCircle(sphere, pixels, Kit.Color(Theme.Good, look.CommandRingAlpha * 0.5f * alpha), 64, Kit.Px(1f));
-
-            if (!_coverage.SampleReach(i, plane, reach))
+            if (!_coverage.Ring(i, out var x, out var z, out var nominal, out var samples))
                 continue;
-            var center = new Double3(p.X, plane, p.Z);
-
-            // The fade outside: wide faint strokes at growing distance, each darker than the one inside it. Left
-            // out where another sensor covers the stroke, so overlapping coverage stays clear.
-            for (var ring = look.CommandFadeRings; ring >= 1; ring--)
+            if (look.GasTintAlpha > 0)
+                DrawGasTint(draw, world, i, x, z, nominal, samples, plane, Kit.Color(Theme.Accent, look.GasTintAlpha * alpha));
+            if (!labelled && world.Project(new Double3(x, plane, z - samples[samples.Length * 3 / 4]), out var labelAt))
             {
-                var scale = 1 + (look.CommandFogReach - 1) * ring / look.CommandFadeRings;
-                var strength = look.CommandFogAlpha * alpha * ring / look.CommandFadeRings;
-                DrawReachLine(draw, world, center, reach, scale, Kit.Color(0x020305, strength), Kit.Px(look.CommandFadeWidth), plane, i);
-            }
-
-            DrawReachLine(draw, world, center, reach, 1, Kit.Color(Theme.Good, look.CommandRingAlpha * alpha), Kit.Px(look.CommandRingWidth), plane, -1);
-            if (world.Project(new Double3(p.X, plane, p.Z - reach[reach.Length * 3 / 4]), out var labelAt))
+                labelled = true;
                 Kit.Text(draw, _ui.Mono, Theme.FontCaption, labelAt + new float2(Kit.Px(6), -Kit.Px(16)), Theme.Good, Kit.F($"SENSOR RANGE {radius / 1000:0.0} KM"), alpha * 0.7f);
+            }
+        }
+
+        // The fade outside: wide faint strokes standing off the boundary at growing distance, each darker than the
+        // one inside it. Left out where another sensor covers the stroke, so overlapping coverage stays clear.
+        for (var ring = look.CommandFadeRings; ring >= 1; ring--)
+        {
+            var strength = look.CommandFogAlpha * alpha * ring / look.CommandFadeRings;
+            var color = Kit.Color(0x020305, strength);
+            var fadeWidth = Kit.Px(look.CommandFadeWidth);
+            for (var k = 0; k < outline.Length; k++)
+            {
+                ref readonly var piece = ref outline[k];
+                var stand = (look.CommandFogReach - 1) * piece.Reach * ring / look.CommandFadeRings;
+                var ox = piece.NX * stand;
+                var oz = piece.NZ * stand;
+                if (_coverage.InsideShown((piece.AX + piece.BX) * 0.5 + ox, (piece.AZ + piece.BZ) * 0.5 + oz))
+                    continue;
+                if (world.ProjectSegment(new Double3(piece.AX + ox, plane, piece.AZ + oz), new Double3(piece.BX + ox, plane, piece.BZ + oz), out var s0, out var s1))
+                    draw.AddLine(s0, s1, color, fadeWidth);
+            }
+        }
+
+        var line = Kit.Color(Theme.Good, look.CommandRingAlpha * alpha);
+        for (var k = 0; k < outline.Length; k++)
+        {
+            ref readonly var piece = ref outline[k];
+            if (world.ProjectSegment(new Double3(piece.AX, plane, piece.AZ), new Double3(piece.BX, plane, piece.BZ), out var s0, out var s1))
+                draw.AddLine(s0, s1, line, Kit.Px(look.CommandRingWidth));
+        }
+
+        if (look.LinkLineAlpha > 0)
+        {
+            for (var l = 0; l < _coverage.LinkCount; l++)
+            {
+                var (a, b) = _coverage.Link(l);
+                if (world.ProjectSegment(_coverage.Positions[a], _coverage.Positions[b], out var s0, out var s1))
+                    draw.AddLine(s0, s1, Kit.Color(Theme.Good, look.LinkLineAlpha * alpha), Kit.Px(1f));
+            }
         }
 
         // Lost contacts: last known position only, never a live target.
@@ -133,48 +184,40 @@ internal sealed partial class ScreenHost
         // What the player knows of the sector the camera is in.
         var sector = world.Galaxy!.SectorOf(world.CommandFocus);
         var charted = Charted(sector);
-        var state = _coverage.Count == 0 ? "NO SENSOR COVERAGE"u8 : charted ? "SECTOR CHARTED   LIVE INSIDE THE RINGS"u8 : "SECTOR UNCHARTED   SCAN FROM THE MAP CARD"u8;
+        var state = _coverage.Count == 0 ? "NO SENSOR COVERAGE"u8
+            : _coverage.ActiveCount == 0 ? "NO SENSOR ON THE SELECTED SHIPS"u8
+            : charted ? "SECTOR CHARTED   LIVE INSIDE THE RINGS"u8 : "SECTOR UNCHARTED   SCAN FROM THE MAP CARD"u8;
         var width = Kit.Measure(_ui.Mono, Theme.FontCaption, state).X;
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(MathF.Round((_ui.DisplaySize.X - width) * 0.5f), HudTop + Kit.Px(40)),
-            _coverage.Count == 0 ? Theme.Bad : charted ? Theme.Info : Theme.Accent, state, alpha);
+            _coverage.ActiveCount == 0 ? Theme.Bad : charted ? Theme.Info : Theme.Accent, state, alpha);
     }
 
     /// <summary>
-    /// A closed line round <paramref name="center"/> through the sampled reach distances, each scaled by
-    /// <paramref name="scale"/>, so the boundary follows whatever the reach is in each direction. Segments whose
-    /// midpoint lies inside another sensor's ring (any sensor but <paramref name="except"/>) are skipped.
+    /// Fills, very faintly, the sliver between a sensor's plain sphere and its gas-shaped boundary where gas cut the
+    /// range, so a short side reads as lost range rather than as nothing. Left out where another shown sensor covers
+    /// the sliver, and drawn once where the slivers of several sensors overlap.
     /// </summary>
-    private void DrawReachLine(ImDrawListPtr draw, WorldView world, Double3 center, ReadOnlySpan<double> reach, double scale, uint color, float thickness, double plane, int except)
+    private void DrawGasTint(ImDrawListPtr draw, WorldView world, int index, double x, double z, double nominal, ReadOnlySpan<double> samples, double plane, uint color)
     {
-        var n = reach.Length;
+        var n = samples.Length;
+        var tolerance = nominal * 0.005;
         for (var k = 0; k < n; k++)
         {
             var next = k + 1 == n ? 0 : k + 1;
+            if (samples[k] >= nominal - tolerance && samples[next] >= nominal - tolerance)
+                continue;
             var a0 = k * (Math.Tau / n);
-            var a1 = (k + 1) * (Math.Tau / n);
-            var from = center + new Double3(Math.Cos(a0), 0, Math.Sin(a0)) * (reach[k] * scale);
-            var to = center + new Double3(Math.Cos(a1), 0, Math.Sin(a1)) * (reach[next] * scale);
-            if (except >= 0 && CoveredOnPlane((from + to) * 0.5, plane, except))
+            var a1 = next * (Math.Tau / n);
+            double c0 = Math.Cos(a0), s0 = Math.Sin(a0), c1 = Math.Cos(a1), s1 = Math.Sin(a1);
+            var mx = x + (nominal + (samples[k] + samples[next]) * 0.5) * 0.5 * (c0 + c1) * 0.5;
+            var mz = z + (nominal + (samples[k] + samples[next]) * 0.5) * 0.5 * (s0 + s1) * 0.5;
+            if (_coverage.InsideShown(mx, mz, index) || _coverage.InsideEarlierDisc(mx, mz, index))
                 continue;
-            if (world.ProjectSegment(from, to, out var s0, out var s1))
-                draw.AddLine(s0, s1, color, thickness);
+            if (world.Project(new Double3(x + nominal * c0, plane, z + nominal * s0), out var p0)
+                && world.Project(new Double3(x + nominal * c1, plane, z + nominal * s1), out var p1)
+                && world.Project(new Double3(x + samples[next] * c1, plane, z + samples[next] * s1), out var p2)
+                && world.Project(new Double3(x + samples[k] * c0, plane, z + samples[k] * s0), out var p3))
+                draw.AddQuadFilled(p0, p1, p2, p3, color);
         }
-    }
-
-    /// <summary>Whether a point on the command plane lies inside the ring of any sensor other than <paramref name="except"/>.</summary>
-    private bool CoveredOnPlane(Double3 point, double plane, int except)
-    {
-        for (var j = 0; j < _coverage.Count; j++)
-        {
-            if (j == except)
-                continue;
-            var r = _coverage.CrossSection(j, plane);
-            var dx = point.X - _coverage.Positions[j].X;
-            var dz = point.Z - _coverage.Positions[j].Z;
-            if (dx * dx + dz * dz < r * r)
-                return true;
-        }
-
-        return false;
     }
 }

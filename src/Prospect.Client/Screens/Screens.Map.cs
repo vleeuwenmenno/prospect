@@ -461,31 +461,71 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
-    /// Live sensor coverage on the chosen layer: each sensor's sphere cut by the layer's middle plane, filled and
-    /// ringed. In the tilted view each sphere's outline also shows, around the sensor at its own height.
+    /// Live sensor coverage on the chosen layer: each owned sensor's gas-shaped reach cut by the layer's middle
+    /// plane (the same sampled reach as the command view), filled and ringed, with a faint tint where gas cut the
+    /// range. In the tilted view each sensor's plain sphere outline also shows, around the sensor at its own height.
+    /// The map shows every owned sensor, whatever is selected.
     /// </summary>
     private void DrawCoverage(ImDrawListPtr draw, in MapProjection view, Galaxy galaxy, MapTuning look)
     {
         var size = galaxy.SectorSize;
         var plane = view.Layer * size;
         var minimum = Kit.Px(look.MinCoveragePixels);
+        _coverage.Refresh(plane, false);
+        Span<float2> edge = stackalloc float2[SensorCoverage.ReachSamples];
+        var fill = Kit.Color(Theme.Good, look.LiveFillAlpha);
+        var tint = Kit.Color(Theme.Accent, look.GasTintAlpha);
         for (var i = 0; i < _coverage.Count; i++)
         {
             var p = _coverage.Positions[i];
-            var center = view.ToScreen((float)(p.X / size), view.Layer, (float)(p.Z / size));
             if (view.Tilted)
             {
                 var sphere = view.ToScreen((float)(p.X / size), (float)(p.Y / size), (float)(p.Z / size));
                 draw.AddCircle(sphere, Math.Max((float)(_coverage.Radius / size) * view.Cell, minimum), Kit.Color(Theme.Good, look.LiveRingAlpha * 0.35f), 48, Kit.Px(1f));
             }
 
-            var radius = _coverage.CrossSection(i, plane);
-            if (radius <= 0)
+            if (!_coverage.Ring(i, out var x, out var z, out var nominal, out var samples))
                 continue;
-            var rx = Math.Max((float)(radius / size) * view.Cell, minimum);
-            var ry = Math.Max((float)(radius / size) * view.CellZ, minimum * view.Cos);
-            Ellipse(draw, center, rx, ry, Theme.Good, look.LiveFillAlpha, Theme.Good, look.LiveRingAlpha, Kit.Px(1f));
+            var center = view.ToScreen((float)(x / size), view.Layer, (float)(z / size));
+
+            // Far out, a small ring is still drawn at the least size, whatever shape it has.
+            var widest = 0.0;
+            for (var k = 0; k < samples.Length; k++)
+                widest = Math.Max(widest, samples[k]);
+            var sx = Math.Max(1f, minimum / Math.Max((float)(widest / size) * view.Cell, 1e-6f));
+            var sy = Math.Max(1f, minimum * view.Cos / Math.Max((float)(widest / size) * view.CellZ, 1e-6f));
+            for (var k = 0; k < samples.Length; k++)
+                edge[k] = CoveragePoint(view, center, k, samples[k], size, sx, sy);
+            for (var k = 0; k < edge.Length; k++)
+                draw.AddTriangleFilled(center, edge[k], edge[k + 1 == edge.Length ? 0 : k + 1], fill);
+            draw.AddPolyline(edge, Kit.Color(Theme.Good, look.LiveRingAlpha), ImDrawFlags.Closed, Kit.Px(1f));
+
+            if (look.GasTintAlpha <= 0)
+                continue;
+            for (var k = 0; k < samples.Length; k++)
+            {
+                var next = k + 1 == samples.Length ? 0 : k + 1;
+                var tolerance = nominal * 0.005;
+                if (samples[k] >= nominal - tolerance && samples[next] >= nominal - tolerance)
+                    continue;
+                var a0 = k * (Math.Tau / samples.Length);
+                var a1 = next * (Math.Tau / samples.Length);
+                var middle = (nominal + (samples[k] + samples[next]) * 0.5) * 0.25;
+                var mx = x + middle * (Math.Cos(a0) + Math.Cos(a1));
+                var mz = z + middle * (Math.Sin(a0) + Math.Sin(a1));
+                if (_coverage.InsideShown(mx, mz, i, false) || _coverage.InsideEarlierDisc(mx, mz, i, false))
+                    continue;
+                draw.AddQuadFilled(CoveragePoint(view, center, k, nominal, size, sx, sy), CoveragePoint(view, center, next, nominal, size, sx, sy), edge[next], edge[k], tint);
+            }
         }
+    }
+
+    /// <summary>Where a sensor's direction <paramref name="k"/> reaches <paramref name="distance"/> metres out, on the layer, in screen pixels.</summary>
+    private static float2 CoveragePoint(in MapProjection view, float2 center, int k, double distance, double size, float sx, float sy)
+    {
+        var angle = k * (MathF.Tau / SensorCoverage.ReachSamples);
+        var cells = (float)(distance / size);
+        return center + new float2(MathF.Cos(angle) * cells * view.Cell * sx, MathF.Sin(angle) * cells * view.CellZ * sy);
     }
 
     /// <summary>

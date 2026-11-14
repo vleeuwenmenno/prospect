@@ -66,6 +66,17 @@ internal sealed class MapTuning
     public float CommandFadeWidth { get; init; }
 
     /// <summary>
+    /// How far apart, in metres between hull centres, ships' radars link into one shared picture: selected ships
+    /// within this of each other, directly or through a chain, are drawn as one merged coverage outline. Display
+    /// only; every ship's own radar still reports to the server by itself.
+    /// </summary>
+    public float RadarLinkMeters { get; init; }
+
+    /// <summary>How faint the line between linked ships is, and how faint the tint where gas cut a sensor's range is, 0 to 1.</summary>
+    public float LinkLineAlpha { get; init; }
+    public float GasTintAlpha { get; init; }
+
+    /// <summary>
     /// A blind jump's hit chance, 0 to 1, from which the course menu and the sector card draw it in the warning
     /// colour instead of amber, and how many seconds the server's refusal of a plot or a jump stays on screen.
     /// </summary>
@@ -161,6 +172,8 @@ internal sealed class MapTuning
             throw new InvalidDataException($"{path}: scanResultSeconds is 0 to 120, commandFogReach 1 to 20");
         if (!(tuning.CommandRingWidth is >= 0.5f and <= 8) || tuning.CommandFadeRings is < 1 or > 16 || !(tuning.CommandFadeWidth is >= 1 and <= 64))
             throw new InvalidDataException($"{path}: commandRingWidth is 0.5 to 8, commandFadeRings 1 to 16, commandFadeWidth 1 to 64");
+        if (!Unit(tuning.LinkLineAlpha) || !Unit(tuning.GasTintAlpha) || !(tuning.RadarLinkMeters is >= 0 and <= 200000))
+            throw new InvalidDataException($"{path}: linkLineAlpha and gasTintAlpha are 0 to 1, radarLinkMeters 0 to 200000");
         if (!(tuning.CourseRefusalSeconds is >= 0 and <= 60))
             throw new InvalidDataException($"{path}: courseRefusalSeconds is 0 to 60");
         static bool Hex(string value) => value.Length == 6 && uint.TryParse(value, System.Globalization.NumberStyles.AllowHexSpecifier, null, out _);

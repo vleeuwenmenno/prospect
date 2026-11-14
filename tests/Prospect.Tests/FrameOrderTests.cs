@@ -2542,6 +2542,41 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     [Fact]
+    public void TheCommandViewShowsCoverageOfTheSelectedShipsOnlyAndTheFlownOneWhenNothingIsSelected()
+    {
+        CommandView();
+        var coverage = new SensorCoverage();
+        coverage.Collect(_snapshot, _world);
+        Assert.Equal(3, coverage.Count);
+
+        // CommandView leaves the flown ship selected; clearing it falls back to the flown ship's own sensor.
+        _world.ClearSelection();
+        coverage.SelectActive(_world.Selection);
+        Assert.Equal(1, coverage.ActiveCount);
+        Assert.True(coverage.Piloted[coverage.ActiveIndex(0)]);
+
+        _world.SelectAllOwned();
+        coverage.SelectActive(_world.Selection);
+        Assert.Equal(3, coverage.ActiveCount);
+
+        // Only the other ship selected: only its sensor shows, not the flown one's.
+        _world.ClearSelection();
+        for (var i = 0; i < _snapshot.HullCount; i++)
+        {
+            ref var hull = ref _snapshot.Hulls[i];
+            if (hull.Owner == _snapshot.PlayerId && !hull.IsOwn)
+            {
+                _world.AddToSelection(hull.Id);
+                break;
+            }
+        }
+
+        coverage.SelectActive(_world.Selection);
+        Assert.Equal(1, coverage.ActiveCount);
+        Assert.False(coverage.Piloted[coverage.ActiveIndex(0)]);
+    }
+
+    [Fact]
     public void WheelAndMiddleDragOverAQuickButtonLeaveTheCommandCameraAlone()
     {
         CommandView();

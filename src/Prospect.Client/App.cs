@@ -1042,6 +1042,26 @@ internal sealed class App : IDisposable
                 World.SelectAllOwned();
                 World.SetCommandCapturePose(World.OwnPosition, 14000f, 0.6f, -0.95f);
             }
+            else if (view.StartsWith("command-fog-", StringComparison.Ordinal) && snapshot is { OwnHull: >= 0 })
+            {
+                // Coverage of the selected ships only: just the flown one, or it and the first other ship, which
+                // jumps 6 km (linked with the flown ship) or 14 km (apart) along -x. The jump takes about 25 s.
+                var from = snapshot.Hulls[snapshot.OwnHull].Position;
+                var jump = view == "command-fog-far" ? 14000 : 6000;
+                World.ClearSelection();
+                World.AddToSelection(snapshot.Hulls[snapshot.OwnHull].Id);
+                for (var i = 0; view != "command-fog-one" && i < snapshot.HullCount; i++)
+                {
+                    ref var hull = ref snapshot.Hulls[i];
+                    if (hull.IsOwn || hull.Owner != snapshot.PlayerId)
+                        continue;
+                    World.AddToSelection(hull.Id);
+                    Session.Client.Input.IssueFleetOrder(hull.Id, new HullOrder { Kind = OrderKind.Jump, Target = from + new Double3(-jump, 0, 0) });
+                    break;
+                }
+
+                World.SetCommandCapturePose(World.OwnPosition + new Double3(view == "command-fog-one" ? 0 : -jump * 0.5, 0, 0), view == "command-fog-far" ? 26000f : 15000f, 0.6f, -0.95f);
+            }
             else if (view.StartsWith("command-menu", StringComparison.Ordinal))
             {
                 // The command view's right-click menu, opened by the harness since the pointer is muted: the ship
@@ -1080,6 +1100,8 @@ internal sealed class App : IDisposable
             }
             else if (view == "galaxy")
                 _screens.OpenGalaxyOverview();
+            else if (view is "map-reach" or "map-reach-tilt")
+                _screens.OpenMapReach(view == "map-reach-tilt");
             else if (view == "map-menu")
                 _screens.OpenMapMenuNear(3, 2);
             else if (view == "map-hover")
