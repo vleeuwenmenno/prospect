@@ -45,7 +45,7 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
 
 ## Decided: first flight and shield balance pass
 
-- Standard and drone thrust is 20% lower. Boost gives 2× thrust and 2× rated speed, still drawing 4× thrust power.
+- Standard and drone thrust is 20% lower. Boost gives 2× thrust and 2× rated speed, still drawing 4.5× thrust power and burning 4.5× the fuel.
 - Shield recharge is halved: 37.5 points/s per standard emitter, 5 points/s per drone emitter.
 - Every damaging hit resets an 8 s recharge delay, including hits while the shield is offline.
   Harmless contact feedback does not delay recovery. Restart remains at 25% charge; its energy premium is defined below.

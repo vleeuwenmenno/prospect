@@ -83,9 +83,8 @@ public sealed partial class ServerHost
     /// Rebuilds the edited hull as the design it has: the blueprint, which no loss changes. It goes the way of a
     /// committed design the catalogue already holds, so the same things end or refuse it: a stale token, damage
     /// since the edit began, a jump, leaving the hull, and the time between a player's commits. A hull that has
-    /// lost no block and no hull points and whose tanks are full is left alone; a shield that is down is not the
-    /// hull's damage. The new hull's tanks are full: nothing else refuels a ship yet. Repair is free for now, as
-    /// building is.
+    /// lost no block and no hull points is left alone; a shield that is down is not the hull's damage. A repair
+    /// restores blocks, not fuel: the new hull holds the tanks the old one had. Repair is free for now, as building is.
     /// </summary>
     private void RepairEdit(Connection connection, uint token)
     {
@@ -103,7 +102,7 @@ public sealed partial class ServerHost
         }
 
         var design = _hulls.Info(connection.EditHull.Index).Design;
-        if (!NeedsRepair(connection) && !_content.Designs[design].NeedsRefuel(_hulls.State(connection.EditHull.Index).Fuel))
+        if (!NeedsRepair(connection))
             ReplyEdit(connection, EditorReason.NoChange);
         else if (_tick < connection.EditNextCommit)
             ReplyEdit(connection, EditorReason.TooSoon, WaitSeconds(connection.EditNextCommit - _tick));
@@ -516,9 +515,10 @@ public sealed partial class ServerHost
     /// a new id: a hull never changes design, and a repaired hull is a new hull of the same one. It is still
     /// the same ship, so it keeps the old hull's durable name (<see cref="HullInfo.Entity"/>). It keeps the
     /// owner, the pilot, the heading and the motion, and the grid stays where it was in space, so a block that
-    /// was not touched does not move. Its blocks are new and whole, as building is free, and its tanks are full,
-    /// as nothing else refuels a ship yet; its shield and battery keep the charge they had, up to what the new
-    /// design holds. The old hull is removed only after the new one exists.
+    /// was not touched does not move. Its blocks are new and whole, as building is free. Its tanks keep the fuel
+    /// the old hull held, per fuel, up to what the new design holds: a new tank adds room, not fuel, and nothing
+    /// refuels a ship. Its shield and battery keep the charge they had, up to what the new design holds. The old
+    /// hull is removed only after the new one exists.
     /// </summary>
     private void ReplaceHull(Connection connection, byte design)
     {
@@ -547,7 +547,7 @@ public sealed partial class ServerHost
         // one moved by the difference of the centres, in the hull's own frame.
         var moved = (to.Pivot - from.Pivot) * to.BlockSize;
         var position = oldState.Position + Vector3.Transform(new Vector3((float)moved.X, (float)moved.Y, (float)moved.Z), oldState.Orientation);
-        var next = CreateHull(oldInfo.Owner, design, position, oldInfo.Entity);
+        var next = CreateHull(oldInfo.Owner, design, position, fullTanks: false, oldInfo.Entity);
 
         ref var state = ref _hulls.State(next.Index);
         ref var flight = ref _hulls.Flight(next.Index);
@@ -557,6 +557,7 @@ public sealed partial class ServerHost
         state.Heat = oldState.Heat;
         state.BoostLocked = oldState.BoostLocked;
         state.Energy = Math.Min(oldState.Energy, flight.EnergyStorage);
+        state.Fuel = oldState.Fuel.Clamped(flight.FuelCapacity);
         state.Shield = Math.Min(oldState.Shield, flight.ShieldCapacity);
         state.ShieldCooldown = oldState.ShieldCooldown;
         state.ShieldOffline = oldState.ShieldOffline && flight.ShieldCapacity > 0f;

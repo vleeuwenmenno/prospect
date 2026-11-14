@@ -988,6 +988,7 @@ Active module spending is shared with client prediction through `ModuleScanRules
 - Canonical design bytes are version 3: a facing byte per block. `DesignBytes.Decode` refuses a facing above 5 and
   a block larger than its type's `maxSide`.
 - Content identity: evaluator 11. The figures are in `blocks/blocks.json`, which is hashed already.
-- Refuelling is a repair: `Repair` on a whole hull is taken when a tank holds less than the design's
-  (`HullDesign.NeedsRefuel`), and still answers `NoChange` when every tank is full. Tanks never hold back a commit.
+- Nothing refuels. A first spawn and an escape drone start with full tanks; a ship built new from the drone starts
+  empty; a hull that replaces another (an edit or a `Repair`) holds the old hull's fuel per fuel, up to the new
+  design's capacity. `Repair` on a whole hull answers `NoChange` whatever the tanks hold. Tanks never hold back a commit.
 - Rules and figures: [propulsion](roadmap/propulsion.md).

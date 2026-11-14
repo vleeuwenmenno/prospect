@@ -14,8 +14,8 @@ or that local game opened to other players. There is one simulation and one code
 Propulsion burns fuel and is directional: engines, hot thrusters and cold gas thrusters each push the opposite way
 to the way they face, and burn bipropellant, hydrazine and nitrogen from tank blocks. A part with no fuel of its
 kind gives no thrust. Fuel is spent by the shared flight code, predicted by the client and saved with the world.
-Nothing refuels a ship yet but rebuilding it: applying an edit or a repair fills every tank, and the editor offers
-**Refuel ship** on a whole ship with room in its tanks. Engines and both thruster kinds have models of their own
+Nothing refuels a ship yet: only a first spawn starts with full tanks. An edit keeps the fuel the ship had, up to the
+new design's room; a repair restores blocks, not fuel; a ship built new from the drone starts empty. Engines and both thruster kinds have models of their own
 that fit any block size and facing, and show what they fire: an engine ignites with sparks and burns a blue plume
 with shock diamonds, a hot thruster a small orange one, a cold gas thruster a pale puff; boost makes plumes longer
 and brighter, for every hull in view. Not there: a fuel readout in the pilot console (the figures reach the client
@@ -161,8 +161,9 @@ are never blocked. The editor works in space, around your ship:
   repaired first: the editor opens on it to look, select and **Repair**, and nothing can be changed or applied
   until it is whole. The server refuses a design for a damaged hull too. **Repair** rebuilds the ship as built,
   for free. Changes kept from before the damage hold it back until **Discard changes** throws them away.
-- A whole ship whose tanks are not full shows **Refuel ship** in the right panel: the same rebuild, with every tank
-  full. Applying a change fills them too. Nothing else refuels a ship yet.
+- Fuel carries over: applying a change keeps the fuel the ship had, per fuel, up to the new tanks' room (a new tank
+  adds room, not fuel), and a repair leaves the tanks as they are. A ship built new from the drone starts with empty
+  tanks. Nothing refuels a ship yet.
 - The right panel shows the checked figures, with braking, sideways and vertical acceleration and the room in each
   kind of tank. Low power, no battery for the shield, low or no forward acceleration, a direction with no part
   pushing that way, thrust parts with no tank of their fuel, low top speed and slow turning show in red with the
@@ -218,7 +219,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 - **Flight.** A command pod with inertial flight: thrust on all three axes, roll, dampeners, and a boost that heats
   up and locks out. Each direction is pushed by the parts that face away from it: the engine faces back and pushes
   forward, and one cold gas thruster faces each other way, so the pod brakes and strafes at half its forward
-  acceleration. Thrust burns fuel, boost two and a half times as much, and the dampeners burn it while they brake;
+  acceleration. Thrust burns fuel, boost four and a half times as much, and the dampeners burn it while they brake;
   with a tank dry its parts give nothing, and with every tank dry the hull drifts and can still turn. The shipped
   ships carry about 83 minutes of full engine thrust, the drone 75. Thrust, boost and shield recharge also draw
   power; the generator refills the battery with the

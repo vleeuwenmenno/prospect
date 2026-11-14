@@ -655,14 +655,6 @@ public sealed class HullDesign
     /// </summary>
     public bool NeedsRepair(uint revision, float hullPoints, int dentCount = 0) => revision > 0 || hullPoints < Flight.HullPoints || dentCount > 0;
 
-    /// <summary>
-    /// Whether a hull of this design has room in its tanks: it holds less of some fuel than the design as built
-    /// can. Nothing refuels a ship yet but rebuilding it, so a repair is taken for this alone; it is no damage,
-    /// and an edit is not held back for it. The server and a client ask the same of the hull they have.
-    /// </summary>
-    public bool NeedsRefuel(in FuelTanks fuel) =>
-        fuel.Nitrogen < Flight.FuelCapacity.Nitrogen || fuel.Hydrazine < Flight.FuelCapacity.Hydrazine || fuel.Bipropellant < Flight.FuelCapacity.Bipropellant;
-
     /// <summary>The hit points a block of this design has when intact, in the world the design was evaluated for.</summary>
     public float BlockHitPoints(int block) => _hitPoints[block];
 

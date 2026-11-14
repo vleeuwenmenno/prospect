@@ -40,11 +40,14 @@
 - Thrusters burn far less than engines. Boost burns more. All rates are content figures.
 - Tanks hold a balanced but fairly long supply.
 - Fuel is the main cost of thrust. A small electric draw stays (pumps, valves, ignition), so thrust still slows shield
-  recovery, more softly than before. Boost still empties the battery in seconds.
+  recovery, more softly than before. Boost costs fuel more than electricity: it drains the battery over tens of seconds, not
+  seconds, and burns far more fuel for its extra speed.
 - No refuelling exists yet. Only a ship's first spawn starts with full tanks.
   - An edit keeps the fuel the ship had, per fuel, up to the new capacity. New tanks add room, not fuel.
   - A repair restores blocks, not fuel. There is no Refuel button.
   - A ship built new from the drone starts with empty tanks.
+  - The escape drone is made new each time a pilot steps out or loses a hull, and always starts with full tanks. It is
+    the pilot's spare, not a ship they built; it carries too little to refuel anything.
   - Tanks run down are no damage: they never hold back an edit.
 - Fuel is simulation state: shared flight code, predicted by the client, saved with the world.
 - Dampeners fire the same parts and burn the same fuel. At rest they burn nothing.
@@ -124,8 +127,9 @@ All in `content/blocks/blocks.json`. Tunable; change them there, never in code.
 | `microBipropellantTank` | 90 kg | 0.15 t |
 | `microNitrogenTank` | 24 kg | 0.15 t |
 
-- Boost costs fuel more than power: it must draw clearly less electricity than the 9.4 multiplier did (pod 16.5 MW)
-  and burn clearly more fuel than 2.5 times. The rebalanced figures are in the table of the change that made them.
+- Boost costs fuel more than power. `boostPowerMultiplier` 9.4 → 4.5 and `boostFuelMultiplier` 2.5 → 4.5.
+  Boost still gives 2× thrust and 2× rated speed, so on a full tank it covers about 0.44 times the distance per kg
+  that plain thrust does, and it lasts 41% as long (below). Boost heat still locks it out after about 6 s of use.
 - Size limits are a per-block field, `maxSide`: the most cells along any side. Left out, the content's limit applies.
 - `fuelBurn` and `fuelCapacity` take size rules like any other figure.
 - Why engines stay the main drive: best thrust per cell and per tonne, and a bipropellant tank carries twice
@@ -144,6 +148,16 @@ Shipped designs, tanks full, measured by `PropulsionTests`:
 | Surveyor | 20.4 m/s² | 10.2 m/s² | 83 min | 52 min | 83 min |
 | Drone | 16.7 m/s² | braking 16.7, others 8.3 m/s² | 75 min | 47 min | 133 min (braking 67 min) |
 
+Boost, measured with the battery full and the drive never overheating (`PropulsionTests`, `PowerFlowTests`):
+
+| Design | Boost draw (thrust, was) | Battery empty after (was) | Engines boosting whenever the drive allows (was) |
+| --- | --- | --- | --- |
+| Command Pod | 7.9 MW (16.5) | 23 s (5 s) | 34 min (52) |
+| Prospector, Surveyor | 15.8 MW (32.9) | 12 s (3 s) | 34 min (52) |
+| Drone | 1.35 MW (2.8) | 32 s (5 s) | 31 min (47) |
+
+- Battery time counts idle draw and generation. The old times are worked out from the old multiplier, not measured. A pod that boosts the 6 s heat allows keeps about three
+  quarters of its battery; the vessels about half.
 - Before: pod 20.5 and 11.5 m/s², vessels 21.9 and 12.4 m/s², drone 16.6 and 8.0 m/s².
 - Electric draw at full thrust: pod 4.1 → 1.75 MW, vessels 8.2 → 3.5 MW, drone 0.6 → 0.3 MW.
 

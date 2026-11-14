@@ -228,7 +228,7 @@ public sealed class PropulsionTests
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(3)]
-    public void ShippedTanksHoldMoreThanAnHourOfFullThrustAndBoostingWheneverItWillTakesTensOfMinutesOff(int index)
+    public void ShippedTanksHoldMoreThanAnHourOfFullThrustAndBoostingWheneverItBurnsThemInUnderThreeFifthsOfThatTime(int index)
     {
         var design = Content.Designs[index];
         var flight = design.Flight;
@@ -263,7 +263,7 @@ public sealed class PropulsionTests
         var plainMinutes = flight.FuelCapacity.Bipropellant / ((flight.FuelCapacity.Bipropellant - plain.Fuel.Bipropellant) / 10f);
         var boostMinutes = flight.FuelCapacity.Bipropellant / ((flight.FuelCapacity.Bipropellant - boosted.Fuel.Bipropellant) / 10f);
         Assert.InRange(plainMinutes, 60f, 120f);
-        Assert.InRange(boostMinutes, 35f, plainMinutes - 10f);
+        Assert.InRange(boostMinutes, 25f, plainMinutes * 0.6f);
         Console.WriteLine($"FUEL {design.Name}: engines {plainMinutes:0.0} min at full thrust, {boostMinutes:0.0} min boosting whenever the drive allows");
     }
 
@@ -298,7 +298,7 @@ public sealed class PropulsionTests
         Assert.True(boosted.Boosting);
         Assert.Equal(engine * Content.Rules.BoostFuelMultiplier, fuel.Burn.Bipropellant, 5);
         Assert.Equal(plain.Velocity.Length() * flight.BoostMultiplier, boosted.Velocity.Length(), 5);
-        Assert.Equal(2.5f, Content.Rules.BoostFuelMultiplier);
+        Assert.Equal(4.5f, Content.Rules.BoostFuelMultiplier);
 
         // At rest with nothing asked, nothing burns; the dampeners burn only while they brake, and only what the
         // braking takes: the last tick of a stop uses a share of the thrust and burns that share.

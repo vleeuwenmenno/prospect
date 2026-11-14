@@ -1610,43 +1610,120 @@ public sealed class EditorSessionTests
     }
 
     [Fact]
-    public void ARepairAndAnAppliedEditFillEveryTankAndAWholeFullShipHasNothingToRepair()
+    public void AFirstSpawnIsFullAndAnEditAndARepairKeepTheFuelWhileANewTankAddsRoomNotFuel()
     {
         using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);
         var startup = rig.Content.Designs.Length;
         var pod = Rig.Index(rig.Own(0));
         var full = rig.Hulls.Flight(pod).FuelCapacity;
         Assert.True(full.Nitrogen > 0f && full.Bipropellant > 0f);
+
+        // The first spawn: every tank full, and so the whole starting fleet.
         Assert.Equal(full, rig.Hulls.State(pod).Fuel);
 
-        // Whole and full: a repair has nothing to do.
+        // Whole: a repair has nothing to do, whatever the tanks hold.
+        rig.Hulls.State(pod).Fuel = new FuelTanks { Nitrogen = full.Nitrogen * 0.5f, Bipropellant = full.Bipropellant * 0.25f };
+        var held = rig.Hulls.State(pod).Fuel;
         var token = rig.Open(0);
         var serial = rig.Editor(0).Serial;
         rig.Input(0).RepairEdit(token);
         Assert.Equal((EditorPhase.Open, EditorReason.NoChange), (rig.Answer(0, serial).Phase, rig.Editor(0).Reason));
+        Assert.Equal(held, rig.Hulls.State(pod).Fuel);
 
-        // Tanks run down are no damage: an edit is not held back for them, and a repair is taken for them alone.
-        rig.Hulls.State(pod).Fuel = new FuelTanks { Nitrogen = full.Nitrogen * 0.5f };
-        Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Fuel.Amount.Bipropellant == 0f), "the client should hear of its tanks");
-        Assert.False(rig.Content.Pod.NeedsRepair(rig.Hulls.Revision(pod), rig.Hulls.State(pod).Hull));
-        Assert.True(rig.Content.Pod.NeedsRefuel(rig.Hulls.State(pod).Fuel));
+        // A repair restores blocks, not fuel: the rebuilt hull holds what the worn one did.
+        var hurt = FirstBoxOfType(rig.Content.Pod, "cargo");
+        var blockState = rig.Hulls.Info(pod).BlockState;
+        Assert.True(rig.Hulls.BlockStates.Lose(blockState, hurt));
+        rig.Hulls.State(pod).Hull = (float)rig.Hulls.BlockStates.HitTotal(blockState);
+        Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Revision > 0));
+        Assert.True(rig.Content.Pod.NeedsRepair(rig.Hulls.Revision(pod), rig.Hulls.State(pod).Hull));
         rig.Input(0).RepairEdit(token);
         Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
         Assert.True(rig.Until(() => rig.Own(0) == rig.Editor(0).Hull));
         var rebuilt = Rig.Index(rig.Editor(0).Hull);
         Assert.Equal(rig.Content.PodDesign, rig.Hulls.Info(rebuilt).Design);
-        Assert.Equal(full, rig.Hulls.State(rebuilt).Fuel);
-        Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Fuel.Amount.Equals(full)), "the client should see the tanks full");
+        Assert.Equal(held, rig.Hulls.State(rebuilt).Fuel);
+        Assert.Equal(0u, rig.Hulls.Revision(rebuilt));
+        Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Fuel.Amount.Equals(held)), "the client should see the same tanks");
 
-        // An applied edit fills the tanks of the new design: here one nitrogen tank more than the pod has.
-        rig.Hulls.State(rebuilt).Fuel = default;
+        // An applied edit keeps the fuel, per fuel: one nitrogen tank more gives room for twice as much, and
+        // none of the new room is filled.
         var draft = BuildDraft.FromBlueprint(rig.Content.Pod, rig.Content);
         Assert.Equal(DraftEdit.Done, draft.Add(new GridSize(0, 2, 0), new GridSize(1, 1, 1), rig.Content.Blocks.Get("nitrogenTank")));
         var edited = Build(rig, draft, startup + 1);
         var larger = rig.Hulls.Flight(edited).FuelCapacity;
         Assert.Equal(full.Nitrogen * 2f, larger.Nitrogen);
-        Assert.Equal(larger, rig.Hulls.State(edited).Fuel);
+        Assert.Equal(held, rig.Hulls.State(edited).Fuel);
+        Assert.True(rig.Hulls.State(edited).Fuel.Nitrogen < larger.Nitrogen);
+
+        // A smaller capacity clamps: with the tank above brimming, taking the new tank away again leaves the
+        // nitrogen the old capacity holds, and nothing the other fuels did not have.
+        rig.Hulls.State(edited).Fuel = new FuelTanks { Nitrogen = larger.Nitrogen, Bipropellant = held.Bipropellant };
+        var editedDesign = rig.Server.Content.Designs[rig.Hulls.Info(edited).Design];
+        var smaller = BuildDraft.FromBlueprint(editedDesign, rig.Server.Content);
+        Assert.Equal(DraftEdit.Done, smaller.Delete(LastBoxOfType(smaller.Boxes, "nitrogenTank")));
+        var back = Build(rig, smaller, startup + 1);
+        Assert.Equal(full, rig.Hulls.Flight(back).FuelCapacity);
+        Assert.Equal(new FuelTanks { Nitrogen = full.Nitrogen, Bipropellant = held.Bipropellant }, rig.Hulls.State(back).Fuel);
         Assert.Null(rig.Server.Fault);
+    }
+
+    [Fact]
+    public void AShipBuiltNewFromTheDroneStartsWithEmptyTanksAndTheDroneStartsFull()
+    {
+        using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);
+        var ship = rig.Own(0);
+        rig.Input(0).RequestControl(0);
+        Assert.True(rig.Until(() => rig.Own(0) != ship && rig.Snap(0).OwnIsDrone));
+        var drone = Rig.Index(rig.Own(0));
+        var droneTanks = rig.Hulls.Flight(drone).FuelCapacity;
+        Assert.True(droneTanks.Nitrogen > 0f);
+        Assert.Equal(droneTanks, rig.Hulls.State(drone).Fuel);
+
+        var designs = rig.Content.Designs.Length;
+        Assert.True(rig.Input(0).RequestNewShip("Empty tanks"));
+        Assert.True(rig.Until(() => rig.Snap(0).Content.Designs.Length == designs + 1, settle: true));
+        rig.Input(0).ReportInstalledDesigns(designs + 1);
+        Assert.True(rig.Until(() => rig.Snap(0).NewShip.Status == NewShipStatus.Created));
+        var created = Rig.Index(rig.Snap(0).NewShip.Hull);
+        Assert.Equal(default, rig.Hulls.State(created).Fuel);
+
+        // Built up with a tank, it still starts empty: the tank is room.
+        var draft = BuildDraft.FromBlueprint(rig.Snap(0).Content.Designs[designs], rig.Server.Content);
+        Assert.Equal(DraftEdit.Done, draft.Add(new GridSize(0, 1, 0), new GridSize(1, 1, 1), rig.Content.Blocks.Get("nitrogenTank")));
+        var export = draft.Export();
+        Assert.True(export.Ok, export.Problem);
+        Assert.True(rig.Input(0).CommitEdit(rig.Editor(0).Token, export.Bytes));
+        rig.Input(0).ReportInstalledDesigns(designs + 2);
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied, settle: true), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
+        var built = Rig.Index(rig.Editor(0).Hull);
+        Assert.True(rig.Hulls.Flight(built).FuelCapacity.Nitrogen > 0f);
+        Assert.Equal(default, rig.Hulls.State(built).Fuel);
+        Assert.Null(rig.Server.Fault);
+    }
+
+    private static int LastBoxOfType(ReadOnlySpan<DesignBox> boxes, string type)
+    {
+        for (var i = boxes.Length - 1; i >= 0; i--)
+        {
+            if (boxes[i].Type.Id == type)
+                return i;
+        }
+
+        Assert.Fail($"no {type} block");
+        return -1;
+    }
+
+    private static int FirstBoxOfType(HullDesign design, string type)
+    {
+        for (var i = 0; i < design.Boxes.Length; i++)
+        {
+            if (design.Boxes[i].Type.Id == type)
+                return i;
+        }
+
+        Assert.Fail($"{design.Name} has no {type} block");
+        return -1;
     }
 
     private static void AssertFinite(in HullState state)

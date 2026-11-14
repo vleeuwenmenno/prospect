@@ -1170,7 +1170,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             var from = _hulls.State(current.Index);
             var clearance = _content.Designs[currentInfo.Design].Flight.Radius + _content.Designs[drone].Flight.Radius + 4f;
             var above = from.Position + System.Numerics.Vector3.Transform(System.Numerics.Vector3.UnitY, from.Orientation) * clearance;
-            next = CreateHull(connection.PlayerId, drone, above);
+            next = CreateHull(connection.PlayerId, drone, above, fullTanks: true);
             ref var launched = ref _hulls.State(next.Index);
             launched.Orientation = from.Orientation;
             launched.Velocity = from.Velocity;
@@ -1343,7 +1343,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
         // A new hull with a new durable name. A saved world always has room for it: see HasRoom.
         var drone = (byte)_content.DroneDesign;
-        SetHull(connection, CreateHull(connection.PlayerId, drone, wasDrone ? SpawnPoint : state.Position));
+        SetHull(connection, CreateHull(connection.PlayerId, drone, wasDrone ? SpawnPoint : state.Position, fullTanks: true));
         ref var info = ref _hulls.Info(connection.Hull.Index);
         info.EscapeDrone = true;
         info.Piloted = true;
@@ -1697,14 +1697,14 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     private void SpawnFleet(Connection connection, int lane)
     {
         var origin = SpawnPoint + new Double3((lane + 1) / 2 * 160.0 * (lane % 2 == 0 ? 1 : -1), 0, 0);
-        SetHull(connection, CreateHull(connection.PlayerId, (byte)_content.PodDesign, origin));
+        SetHull(connection, CreateHull(connection.PlayerId, (byte)_content.PodDesign, origin, fullTanks: true));
         _hulls.Info(connection.Hull.Index).Piloted = true;
         // A diagnostic scene places its own population; only then is the ordinary fleet left out.
         for (var i = 0; i < (_visualBenchmark is null ? _content.StartingFleet.Length : 0); i++)
         {
             var side = (i / 2 + 1) * 45.0 * (i % 2 == 0 ? 1 : -1);
             var position = origin + new Double3(side, 0, 40.0 + 20.0 * (i / 2));
-            CreateHull(connection.PlayerId, (byte)_content.StartingFleet[i], position);
+            CreateHull(connection.PlayerId, (byte)_content.StartingFleet[i], position, fullTanks: true);
         }
     }
 
