@@ -144,7 +144,7 @@ public sealed partial class ServerHost
             }
             if (tick < scan.CompletesTick)
             {
-                if (!ModuleScanRules.Spend(ref hull.Energy, connection.ModuleEquipment))
+                if (!ModuleScanRules.Spend(ref hull.Energy, connection.ModuleEquipment, ref _hulls.Info(connection.Hull.Index).Power))
                 { EndModuleScan(connection, ModuleScanState.NoPower, tick); Volatile.Write(ref slot.State, 0); }
                 continue;
             }

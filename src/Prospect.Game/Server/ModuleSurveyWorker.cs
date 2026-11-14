@@ -24,6 +24,7 @@ internal sealed class ModuleSurveyWorker : IDisposable
     private readonly AutoResetEvent _wake = new(false);
     private readonly Thread _thread;
     private bool _stop;
+    private int _disposed;
 
     internal ModuleSurveyWorker(Galaxy galaxy, int connections)
     {
@@ -145,6 +146,7 @@ internal sealed class ModuleSurveyWorker : IDisposable
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         Volatile.Write(ref _stop, true); _wake.Set(); _thread.Join(); _wake.Dispose();
     }
 }

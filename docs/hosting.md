@@ -964,3 +964,5 @@ Load rejects invalid/duplicate keys, owners, times, values, unknown resources an
 Active scans/cooldowns reset on load. Old incompatible saves are refused untouched; no migration is provided.
 The galaxy seed still reaches clients, so owner filtering does not claim seed secrecy.
 Full API, figures and limitations: [modules](roadmap/modules.md).
+
+Active module spending is shared with client prediction through `ModuleScanRules.Spend`; `PowerFlow.Modules` contributes to total draw/net flow. The existing net energy readout includes it; a separate module tooltip row is UI follow-up.

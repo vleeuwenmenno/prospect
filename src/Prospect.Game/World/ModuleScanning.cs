@@ -68,9 +68,18 @@ public static class ModuleScanRules
     /// <summary>Consumes one full interval's active energy or refuses without spending a partial interval.</summary>
     public static bool Spend(ref float energy, in ModuleEquipment equipment)
     {
+        if (equipment.Block == 0 || !double.IsFinite(equipment.PowerDraw) || equipment.PowerDraw <= 0) return false;
         var cost = (float)(equipment.PowerDraw / TickLoop.SimulationHz);
         if (!float.IsFinite(energy) || energy < cost) return false;
         energy -= cost;
+        return true;
+    }
+
+    /// <summary>Spends and accounts for the very same active draw, shared by authority and prediction.</summary>
+    public static bool Spend(ref float energy, in ModuleEquipment equipment, ref PowerFlow flow)
+    {
+        if (!Spend(ref energy, equipment)) return false;
+        flow.Modules += (float)equipment.PowerDraw;
         return true;
     }
 

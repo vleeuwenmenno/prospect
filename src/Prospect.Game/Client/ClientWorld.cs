@@ -1061,6 +1061,15 @@ internal sealed partial class ClientWorld : IDisposable
             if (_near.IsAliveAt(i))
                 _field.Step(i, i == 0 ? input : _near.Info(i).Owner == _playerId ? Hold : Coast, _rocks, _predictionTick);
         }
+        var scan = _modules.Scan;
+        if (scan.State == ModuleScanState.Scanning && scan.Hull == _ownHullId
+            && _predictionTick >= scan.StartedTick && _predictionTick < scan.CompletesTick
+            && _near.State(0).Jump == JumpPhase.None)
+        {
+            ref var own = ref _near.Info(0);
+            OwnDesign.Figures(_near.BlockStates.Sums(own.BlockState), out _, out var stats);
+            ModuleScanRules.Spend(ref _near.State(0).Energy, stats.Module(scan.Family), ref own.Power);
+        }
         order = _near.Info(0).Order;
     }
 

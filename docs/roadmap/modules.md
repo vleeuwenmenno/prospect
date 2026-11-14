@@ -116,3 +116,5 @@ Evaluator version is 10; protocol 47; generation 7; save codec 4. Older incompat
 - UI controls, presentation and locator overlay treatment of partial/stale observations.
 - Inventory, upgrades, mining revisions and explicit knowledge sharing/trading.
 - Exhaustive locator coverage of displaced asteroids beyond the bounded generated candidate set.
+
+Active module spending is shared with client prediction through `ModuleScanRules.Spend`; `PowerFlow.Modules` contributes to total draw/net flow. The existing net energy readout includes it; a separate module tooltip row is UI follow-up.

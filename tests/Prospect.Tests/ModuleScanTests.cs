@@ -196,6 +196,9 @@ public sealed class ModuleScanTests
         var probe = new AllocationProbe();
         while (probe.Measuring()) rig.Step();
         Assert.Equal(0, probe.Bytes);
+        var live = rig.Clients[0].AcquireSnapshot();
+        Assert.True(live.Hulls[live.OwnHull].Power.Modules > 0);
+        Assert.True(rig.Hulls.Info(rig.Hull()).Power.Modules > 0);
         rig.Until(() => rig.Clients[0].AcquireSnapshot().Modules.Count > 0);
         var modules = rig.Clients[0].AcquireSnapshot().Modules;
         Assert.Equal(ModuleScanState.Completed, modules.Scan.State);

@@ -1425,6 +1425,16 @@ public sealed class SqliteWorldStoreTests : IDisposable
             };
         for (var i = 0; i < snapshot.Charts.Length; i++)
             snapshot.Charts[snapshot.ChartCount++] = new SectorChart((uint)(i % limits.MaxOwners + 1), new SectorCoord(i / limits.MaxOwners, 0, 0), 0);
+        for (var i = 0; i < snapshot.ModuleObservations.Length; i++)
+            snapshot.ModuleObservations[snapshot.ModuleObservationCount++] = new ModuleObservation
+            {
+                Owner = (uint)(i % limits.MaxOwners + 1),
+                Family = ModuleFamily.AsteroidLocator,
+                Sector = new SectorCoord(i / limits.MaxOwners, 0, 0),
+                Index = 0,
+                Resource = -1,
+                RecordedTick = 0
+            };
         var perHull = limits.MaxBlocks / limits.MaxHulls;
         var template = small.Hulls[3];
         for (var i = 0; i < limits.MaxHulls; i++)

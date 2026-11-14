@@ -5,7 +5,8 @@ namespace Prospect.Game.World;
 /// <see cref="FlightModel.Step"/> fills it from the same arithmetic that moves the battery, so the pilot's
 /// readout and the simulation cannot disagree. It is gross: a full battery clips the surplus it would store,
 /// but the flow here still shows it, which is why a shield recharging on a hull with spare generation is visible
-/// at all. Not simulation state: nothing is sent or saved.
+/// at all. Active module draw uses the same shared spending rule on the server and in prediction.
+/// Not simulation state: nothing is sent or saved.
 /// </summary>
 public struct PowerFlow
 {
@@ -24,8 +25,11 @@ public struct PowerFlow
     /// <summary>What the jump drive took from the battery this tick.</summary>
     public float Ftl;
 
+    /// <summary>Additional active scanner/locator draw after ordinary flight and shield spending.</summary>
+    public float Modules;
+
     /// <summary>Everything drawn.</summary>
-    public readonly float Drawn => Idle + Thrust + Shield + Ftl;
+    public readonly float Drawn => Idle + Thrust + Shield + Ftl + Modules;
 
     /// <summary>Generation less everything drawn: positive is surplus, negative comes out of the battery.</summary>
     public readonly float Net => Generated - Drawn;
@@ -38,5 +42,6 @@ public struct PowerFlow
         Thrust += (sample.Thrust - Thrust) * share;
         Shield += (sample.Shield - Shield) * share;
         Ftl += (sample.Ftl - Ftl) * share;
+        Modules += (sample.Modules - Modules) * share;
     }
 }
