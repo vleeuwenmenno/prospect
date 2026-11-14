@@ -21,6 +21,9 @@ internal sealed class MeshData
 
     /// <summary>Radius of the sphere around the origin that contains the mesh.</summary>
     public float BoundingRadius;
+
+    /// <summary>The nozzles of a hull's thrust parts, in the hull's frame, in block order; empty for every other mesh.</summary>
+    public ThrustNozzle[] Nozzles = [];
 }
 
 internal static class MeshBuilder
@@ -28,13 +31,27 @@ internal static class MeshBuilder
     /// <summary>
     /// Meshes a block hull: one polygon for every block face that is not covered by a neighbouring block, centred
     /// on the hull's centre of mass. A wedge's faces are its two full sides, two triangular caps and the slant, which
-    /// its exterior-face bit (u, +su) stands for; its bit (v, +sv) has no face.
+    /// its exterior-face bit (u, +su) stands for; its bit (v, +sv) has no face. A thrust part with a model in
+    /// <paramref name="look"/> is drawn as that model instead (<see cref="PropulsionModels"/>), and its nozzles are
+    /// listed in <see cref="MeshData.Nozzles"/> for the plumes.
     /// </summary>
-    public static MeshData Hull(HullDesign design)
+    public static MeshData Hull(HullDesign design, PropulsionLook? look = null)
     {
+        look ??= PropulsionLook.Shared;
         var mesh = new MeshData();
+        var nozzles = new List<ThrustNozzle>();
         for (var b = 0; b < design.BlockCount; b++)
         {
+            var first = mesh.Vertices.Count;
+            if (PropulsionModels.Add(design, b, look, mesh.Vertices, mesh.Indices, nozzles))
+            {
+                for (var i = first; i < mesh.Vertices.Count; i++)
+                {
+                    var p = mesh.Vertices[i].Position;
+                    mesh.BoundingRadius = Math.Max(mesh.BoundingRadius, new Vector3(p.X, p.Y, p.Z).Length());
+                }
+                continue;
+            }
             for (var side = 0; side < 6; side++)
             {
                 if ((design.ExteriorFaces[b] & (1 << side)) != 0)
@@ -42,6 +59,7 @@ internal static class MeshBuilder
             }
         }
 
+        mesh.Nozzles = [.. nozzles];
         return mesh;
     }
 

@@ -15,9 +15,12 @@ Propulsion burns fuel and is directional: engines, hot thrusters and cold gas th
 to the way they face, and burn bipropellant, hydrazine and nitrogen from tank blocks. A part with no fuel of its
 kind gives no thrust. Fuel is spent by the shared flight code, predicted by the client and saved with the world.
 Nothing refuels a ship yet but rebuilding it: applying an edit or a repair fills every tank, and the editor offers
-**Refuel ship** on a whole ship with room in its tanks. Not there: a fuel readout in the pilot console (the
-figures reach the client and nothing draws them), models and plumes for the parts (they are drawn as plain blocks),
-thruster torque, fuel transfer, refineries and stations. The figures are a first balance. See
+**Refuel ship** on a whole ship with room in its tanks. Engines and both thruster kinds have models of their own
+that fit any block size and facing, and show what they fire: an engine ignites with sparks and burns a blue plume
+with shock diamonds, a hot thruster a small orange one, a cold gas thruster a pale puff; boost makes plumes longer
+and brighter, for every hull in view. Not there: a fuel readout in the pilot console (the figures reach the client
+and nothing draws them), thruster torque, fuel transfer, refineries and stations. The ship editor still shows thrust
+parts as plain blocks. The figures are a first balance. See
 [propulsion](docs/roadmap/propulsion.md).
 
 Scanning modules have a non-visual backend: three placeable Common Mk I blocks, gas composition, targeted asteroid analysis, bounded locator pulses and personal saved observations. The interface is wired: a **Module** tab in the ship editor, keys and chips for the three scanners, the asteroid analysis on the target panel, the **Gas** window and the locator's vision over the flight and command views (see *Ship modules* below). No ship in the shipped fleet carries a module: build one in the editor. Mining, upgrades and sharing knowledge are not there. See [module contract](docs/roadmap/modules.md).

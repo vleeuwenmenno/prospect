@@ -77,6 +77,10 @@ internal static class Program
           --look <degrees>        Pilot view: hold the camera this many degrees to the right of the hull's nose
           --look-to <degrees>     With --look and --capture: turn the camera from --look to this angle, evenly
                                   over the time the captures take
+          --thrust <axes>         With --capture or --bench, pilot view: hold the flight keys, a comma list of forward,
+                                  back, left, right, up, down and boost; --thrust-at <sec> and --thrust-until <sec>
+                                  after the splash say when (default from 0, to the end)
+          --zoom <0.5..8>         With --capture or --bench, pilot view: the camera's distance, as the scroll wheel sets it
           --rts-script <json>     Private muted capture poses; --rts-seed <n> selects the diagnostic seed
           --target                Pilot view: target the nearest other hull once in space
           --social-run <seconds>  Run a headless client script, then exit; uses --join or a private local game
@@ -367,6 +371,22 @@ internal static class Program
                     options.HurtFleetBroken = args[i + 1] == "broken";
                     i++;
                     break;
+                case "--thrust" when hasValue && Prospect.Client.World.ScriptedThrust.TryParse(args[i + 1], out var thrust):
+                    options.Thrust = thrust;
+                    i++;
+                    break;
+                case "--zoom" when hasValue && float.TryParse(args[i + 1], out var zoom) && zoom is >= 0.5f and <= 8f:
+                    options.Zoom = zoom;
+                    i++;
+                    break;
+                case "--thrust-at" when hasValue && float.TryParse(args[i + 1], out var thrustAt) && thrustAt is >= 0f and <= 600f:
+                    options.ThrustAt = thrustAt;
+                    i++;
+                    break;
+                case "--thrust-until" when hasValue && float.TryParse(args[i + 1], out var thrustUntil) && thrustUntil is >= 0f and <= 600f:
+                    options.ThrustUntil = thrustUntil;
+                    i++;
+                    break;
                 case "--look-to" when hasValue && float.TryParse(args[i + 1], out var lookTo):
                     options.LookToDegrees = lookTo;
                     i++;
@@ -458,6 +478,9 @@ internal static class Program
 
         if (options.BreakShieldSeconds is not null && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
             return Fail("--break-shield works only with --capture or --bench, in an unsaved private local game.");
+
+        if ((options.Thrust is not null || options.Zoom is not null) && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--thrust and --zoom work only with --capture or --bench.");
 
         if (options.HurtFleetSeconds is not null && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
             return Fail("--hurt-fleet works only with --capture or --bench, in an unsaved private local game.");

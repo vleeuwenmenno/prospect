@@ -283,6 +283,12 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `FuelTanks` and `ThrustTable`, the wire, the save codec and a load rule. Size limits per type are `maxSide` in
   `blocks.json` (`BoxDesign.MaxSide`). Figures and rules in `docs/roadmap/propulsion.md`; `PropulsionTests` holds
   them, and `PowerFlowTests` the electric side, so retuning a design or the content runs both.
+- **Thrust part models and plumes:** look and proportions are `content/visuals/propulsion.json` (`PropulsionLook`),
+  keyed by block type id. Models are built with the hull mesh (`MeshBuilder.Hull`, `DamageMesh.Build`, both on
+  workers) by `PropulsionModels`, which also lists each design's nozzles (`MeshData.Nozzles`); never build them in a
+  frame. Plumes read only `HullView.Thrust` and the hull's blocks (`ThrustEffects`, fixed tables, no memory in a
+  frame) and are drawn by `plume.vert`/`plume.frag` after the solid scene, nothing when nothing fires. Rules in
+  `docs/roadmap/propulsion.md`; `PropulsionVisualTests` holds them. Check with `--thrust` captures (below).
 - **Interface mode and the windows:** `InterfaceMode` is the latch and its key; `ScreenHost` treats it as the old
   social workspace (a surface: pointer shown, `WorldInputEnabled` false). Every window is a `SocialPane` drawn
   through `BeginPane`, pinned and placed by `FloatingWindow`, kept in `SocialPanes` and saved by `WindowLayout`
@@ -416,6 +422,14 @@ The client opens a real window on the developer's desktop, and they are usually 
   These replace the old sub-minimum-distance capture jumps. Their openings are farther from the watcher.
 - Scan across the map and a cancel: `--open scan --close-map-at 0.8 --capture-after 0.5 --capture-count 4 --capture-every 1.2` shows the strip
   after leaving the map mid-scan; add `--cancel-scan-at 2.5` for the "SCAN CANCELLED" readout and its cooldown line.
+- `--thrust <keys>` (`forward`, `back`, `left`, `right`, `up`, `down`, `boost`, comma separated) holds those flight
+  keys in the pilot view from `--thrust-at <s>` to `--thrust-until <s>` after the splash, with the hull holding its
+  heading; each capture then prints the own hull's thrust and the plumes drawn. `--zoom <0.5..8>` sets the pilot
+  camera's distance as the scroll wheel does. Both only with `--capture` or `--bench`. The chase camera sits
+  opposite the look: `--look 75` shows the hull's left side and its back-facing plumes from the side, `--look 100
+  --thrust right` the left-facing puffs. Ignition sparks last 0.3 s: capture about 0.1 s after `--thrust-at`. No
+  shipped ship has a front-facing engine or a large one: put them in a copy of the build's `command_pod.json`
+  (with generators and a hydrazine tank, or the battery empties and throttle drops).
 - `--look <degrees>` holds the pilot camera that far to the right of the hull's nose, as free look would (`0`
   looks along the nose, `150` nearly back). Use it to check that an effect follows the hull, not the view.
 - `--target` targets the nearest other hull once in space (in a local game the Prospector, about 120 degrees to

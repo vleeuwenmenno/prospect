@@ -10,6 +10,9 @@ namespace Prospect.Tests;
 [Collection(TimingBudgets.Name)]
 public sealed class TargetPickingTests
 {
+    // Picking takes every block as its box: thrust parts are compared without their models, which lie inside it.
+    private static readonly PropulsionLook Boxes = new();
+
     private static Asteroid Rock(float radius, Vector3 position) => new() { Radius = radius, LocalPosition = position, Rotation = Quaternion.Identity };
     private static PickHull Hull(float x = 0, float z = 8000) => new(1, new Double3(x, 0, z), Quaternion.Identity, [Vector3.Zero], 2, BlockMasks.Set(1), 2);
     private static PickSector Sector(params Asteroid[] rocks) => new(default, default, rocks, rocks.Length, null);
@@ -281,9 +284,11 @@ public sealed class TargetPickingTests
     [Fact]
     public void ExteriorFacesAreTheFacesTheHullMeshHas()
     {
+        // Picking takes a thrust part as its block's box; its model lies inside that box (PropulsionVisualTests), so
+        // the faces are compared with the mesh as it is without the models.
         foreach (var design in GameContent.Load().Designs)
         {
-            var mesh = MeshBuilder.Hull(design);
+            var mesh = MeshBuilder.Hull(design, Boxes);
             var faces = new byte[design.BlockOffsets.Length];
             for (var q = 0; q < mesh.Vertices.Count; q += 4)
             {
@@ -342,7 +347,7 @@ public sealed class TargetPickingTests
             // The triangles as the mesh pass places them: one hull mesh, or a cube per block it has.
             triangles.Clear();
             if (kind == 1)
-                Add(MeshBuilder.Hull(design), Vector3.Zero, 1);
+                Add(MeshBuilder.Hull(design, Boxes), Vector3.Zero, 1);
             else
                 for (var b = 0; b < hull.Blocks.Length; b++)
                     if ((mask & 1UL << b) != 0)

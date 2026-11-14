@@ -151,6 +151,14 @@ internal sealed class AppOptions
     /// <summary>In the pilot view, holds the camera this many degrees to the side of the hull's nose; for captures.</summary>
     public float? LookDegrees { get; set; }
 
+    /// <summary>Flight keys held in the pilot view, from <see cref="ThrustAt"/> to <see cref="ThrustUntil"/> seconds after the splash; for captures of plumes.</summary>
+    public ScriptedThrust? Thrust { get; set; }
+
+    /// <summary>The pilot camera's distance as a multiple of the usual, set once in space; for captures.</summary>
+    public float? Zoom { get; set; }
+    public float ThrustAt { get; set; }
+    public float? ThrustUntil { get; set; }
+
     /// <summary>
     /// With <see cref="LookDegrees"/>, the angle the camera turns to, evenly over the time the captures take; for
     /// capturing how a marker moves as the view turns.
@@ -854,6 +862,7 @@ internal sealed class App : IDisposable
             if (prepared is not null)
             {
                 _scene.ReplaceShipMeshes(prepared);
+                World.ShipMeshes = prepared;
                 _catalogueMeshes.Accept(designs!, prepared);
             }
 
@@ -1353,6 +1362,10 @@ internal sealed class App : IDisposable
             World.LookDegrees = look;
         }
 
+        if (_options.Zoom is { } zoom && Session is not null)
+            World.ChaseZoom = zoom;
+        World.ScriptedThrust = _options.Thrust is { } held && Session is not null && _sinceSplash >= _options.ThrustAt
+            && (_options.ThrustUntil is not { } until || _sinceSplash < until) ? held : null;
         if (_options.TargetNearest && Session is not null && _sinceSplash > 0.6f && World.TargetHull == 0)
             World.TargetNearestHull();
         if (_options.TargetRock && Session is not null && _sinceSplash > 0.6f && World.TargetRock is null)
@@ -1415,6 +1428,12 @@ internal sealed class App : IDisposable
                 var gasDraws = World.GasDraws;
                 if (gasDraws != default)
                     Console.WriteLine($"capture {_capturesTaken:D2} gas draws: full {gasDraws.Full}, middle {gasDraws.Middle}, far {gasDraws.Far}; pairs {World.GasKinds.Pairs}, lit {World.GasKinds.Flashes}, bolts {World.GasKinds.Bolts}; composed {World.LastGasMode.Deferred}, half {World.LastGasHalf}");
+                // What the own hull fired and how many plumes were drawn; read by scripted checks of the plumes.
+                if (_options.Thrust is not null)
+                {
+                    var thrust = World.Own.Thrust;
+                    Console.WriteLine($"capture {_capturesTaken:D2} thrust: {thrust.X} {thrust.Y} {thrust.Z}, flags {thrust.Flags}; plumes {World.DrawnPlumes}");
+                }
                 if (World.PulseShown.Strength > 0f)
                     Console.WriteLine($"capture {_capturesTaken:D2} scan pulse: radius {World.PulseShown.Radius:F0} m, strength {World.PulseShown.Strength:F2}");
                 _capturesTaken++;
