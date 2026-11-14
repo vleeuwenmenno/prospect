@@ -257,7 +257,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   outside the disc space is nearly empty.
 - **Galaxy map.** Every grid cell is a sector of the chosen layer. Uncharted space lies under a veil and is an
   anonymous destination; a sector you scanned is charted and shows its star, name and asteroid fields as surveyed,
-  never later changes. Green rings show nominal sensor range, cut through the layer; gas can hide ships within them,
+  never later changes. Green regions show sensor reach cut through the layer, shaped by gas (shorter inside and behind clouds, a faint amber tint where range was lost); gas can hide ships within them,
   and a lost contact stays as a fading hollow marker for 15 seconds (a station's indefinitely). Hover a sector for
   its card beside it; click to pin the card (coordinates, distance, sensor state, what the chart holds, the jump
   warning, the scan control in your own sector, Move here and Jump here, and a scrolling list of your ships, then
@@ -269,8 +269,9 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   dotted route from the ship you fly to its NAV point until the jump is made, replaced or cleared.
 - **Scanning.** Pin your own sector's card and press **Scan sector**: 5 seconds, flight continues. Leaving the
   sector, switching ship or losing the charting block cancels it; the card and the top of the flight view say
-  which (the reason is inferred on the client, the server only says cancelled). The command view shows sensor
-  rings and darkens space beyond them, with lost contacts at their last position.
+  which (the reason is inferred on the client, the server only says cancelled). The command view shows the gas-shaped
+  sensor boundary of the selected ships (the flown one when none is selected), darkens space beyond it, and merges ships
+  within 10 km of each other into one outline; lost contacts show at their last position.
 - **Renderer.** Floating-point scene target and tone mapping, camera-relative rendering from double-precision
   positions, a star field and sky, instanced hull and asteroid meshes. Asteroids have five levels of detail, from
   a speck in the distance to a giant seen from its surface.
@@ -311,7 +312,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 Not there yet: NAT traversal or automatic port forwarding (a host needs a UDP port others can reach), encryption of game traffic, IPv6, mining, taking control of ships owned by other players (permissions), jump range and cost, gates,
 saving hosted games (an unlisted or public game is not saved: a saved world cannot yet tell who a returning player
 is), playable saved multiplayer, deleting or renaming a world from the game, restoring a recovery copy
-from the game. Stations are not generated yet; gas reduces passive sensor reach (directional contour rendering is pending); asteroids do not crack into pieces, and ore shows only as
+from the game. Stations are not generated yet; gas reduces passive sensor reach; asteroids do not crack into pieces, and ore shows only as
 a tint. Asteroids come in a shared set of shapes until mining gives each one its own body. Mixed-size designs of hundreds of blocks now load, transfer, fly and take replicated damage.
 Shared admission bounds geometry work, the intact shield shell and total catalogue resources before play.
 The default shell budget is 32,768 vertices and 196,608 indices per hull, and at most 910 blocks. A separate

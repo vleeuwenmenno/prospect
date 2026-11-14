@@ -78,7 +78,7 @@ internal sealed class ChartIndex
 /// can draw it; the server alone decides what is seen. Equipment is worked out again only when a hull's design or
 /// lost-block count changes.
 /// </summary>
-internal sealed class SensorCoverage
+internal sealed partial class SensorCoverage
 {
     private uint[] _ids = [];
     private uint[] _revisions = [];
@@ -88,6 +88,12 @@ internal sealed class SensorCoverage
 
     /// <summary>Sensor centres, in world metres; the first <see cref="Count"/> are meaningful.</summary>
     public Double3[] Positions = [];
+
+    /// <summary>The hull each sensor belongs to, parallel to <see cref="Positions"/>.</summary>
+    public uint[] Ids = [];
+
+    /// <summary>Whether each sensor is on the hull being flown, parallel to <see cref="Positions"/>.</summary>
+    public bool[] Piloted = [];
     public int Count;
     public double Radius;
 
@@ -109,7 +115,11 @@ internal sealed class SensorCoverage
             _sensor = new bool[capacity];
             _charting = new bool[capacity];
             Positions = new Double3[capacity];
+            Ids = new uint[capacity];
+            Piloted = new bool[capacity];
         }
+
+        Configure(world.Galaxy, snapshot.Content.Exploration);
 
         Radius = snapshot.Content.Exploration.SensorRadius;
         var designs = snapshot.Content.Designs;
@@ -129,7 +139,11 @@ internal sealed class SensorCoverage
             if (hull.IsOwn)
                 OwnCanChart = _charting[i];
             if (_sensor[i])
+            {
+                Ids[Count] = hull.Id;
+                Piloted[Count] = hull.IsOwn;
                 Positions[Count++] = world.HullPosition(hull);
+            }
         }
     }
 
@@ -189,24 +203,6 @@ internal sealed class SensorCoverage
         }
 
         return reach;
-    }
-
-    /// <summary>How many directions a sensor's boundary is sampled in, evenly round the horizontal plane.</summary>
-    public const int ReachSamples = 96;
-
-    /// <summary>
-    /// Fills <paramref name="reach"/> with how far sensor <paramref name="index"/> sees in each of its directions
-    /// on the horizontal plane at <paramref name="planeY"/>, direction k being angle k / n of a turn from +x towards
-    /// +z. Today every direction is the sphere's cross-section; the boundary is drawn from these samples so a
-    /// reach that varies by direction needs no change in the drawing. False when the plane misses the sensor.
-    /// </summary>
-    public bool SampleReach(int index, double planeY, Span<double> reach)
-    {
-        var r = CrossSection(index, planeY);
-        if (r <= 0)
-            return false;
-        reach.Fill(r);
-        return true;
     }
 
     /// <summary>The radius of sensor <paramref name="index"/>'s circle on the horizontal plane at height <paramref name="planeY"/>, or 0.</summary>
