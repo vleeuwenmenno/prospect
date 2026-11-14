@@ -6,7 +6,7 @@
   "blocks": [
     { "at": [0, 0, 0], "type": "core" },
     { "at": [0, 1, 0], "type": "quarters" },
-    { "at": [0, 0, -1], "type": "hull" },
+    { "at": [0, 0, -1], "type": "sensor" },
     { "at": [0, 0, -2], "type": "hull" },
     { "at": [0, 0, -3], "type": "hull" },
     { "at": [1, 0, -1], "type": "hull" },

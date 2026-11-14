@@ -10,12 +10,19 @@ namespace Prospect.Tests;
 /// <summary>Manual real-session ticks exercise the authoritative and predicted jump gates without windows.</summary>
 public sealed class JumpCalculationSessionTests
 {
+    private static GameContent ReplicationContent()
+    {
+        using var files = new ContentCopy();
+        files.Replace("rules/exploration.json", "5000", "2000000");
+        return files.Load();
+    }
+
     [Theory]
     [InlineData(3)]
     [InlineData(8)]
     public void PendingInputsPreserveCalculationAcrossReconciliationAndRetargetOnce(int lead)
     {
-        var content = GameContent.Load();
+        var content = ReplicationContent();
         using var link = new LoopbackLink();
         using var server = new ServerHost(new ServerConfig { MaxPlayers = 1 }, content, link.Server);
         using var client = new ClientSession(link.Client, content, "Pilot");
@@ -117,7 +124,7 @@ public sealed class JumpCalculationSessionTests
     [Fact]
     public void AuthoritativeSlowChargeWaitsForEnergyAfterCalculationFinishes()
     {
-        var content = GameContent.Load();
+        var content = ReplicationContent();
         content = content.WithSettings(content.SettingCatalog.Build(null, ["jumpChargeSpeed=0.25"]));
         using var link = new LoopbackLink();
         using var server = new ServerHost(new ServerConfig { MaxPlayers = 1, Settings = content.Settings }, content, link.Server);
@@ -155,7 +162,7 @@ public sealed class JumpCalculationSessionTests
     [Fact]
     public void OwnRemoteAndAutomaticFleetCarryCalculationAndThrustRestartsIt()
     {
-        var content = GameContent.Load();
+        var content = ReplicationContent();
         using var link = new LoopbackLink();
         using var observerLink = new LoopbackLink();
         using var lateLink = new LoopbackLink();

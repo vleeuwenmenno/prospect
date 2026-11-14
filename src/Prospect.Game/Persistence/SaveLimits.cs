@@ -61,7 +61,7 @@ public sealed record SaveLimits
     /// the hull and block stores, and <see cref="MaxMovedSectors"/> tables of a sector's asteroid limit.
     /// </summary>
     public long MaxDecodedBytes =>
-        MaxCharts * System.Runtime.CompilerServices.Unsafe.SizeOf<SectorChart>()
+        MaxCharts * (System.Runtime.CompilerServices.Unsafe.SizeOf<SectorChart>() + 128)
         + MaxCatalogueBytes
         + (long)MaxDesigns * (SHA256.HashSizeInBytes + 64)
         + (long)MaxOwners * System.Runtime.CompilerServices.Unsafe.SizeOf<SavedOwner>()

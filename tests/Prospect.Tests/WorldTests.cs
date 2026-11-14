@@ -3548,3 +3548,21 @@ public sealed class LocalClaimTickTests
         Assert.Equal(LocalClaimState.None, rig.Server.LocalClaim);
     }
 }
+
+public sealed class ExplorationWorldTests
+{
+    [Fact]
+    public void SensorVolumeCrossesEverySectorAxisWithoutChartingOrAllocating()
+    {
+        var content = GameContent.Load();
+        var radius = content.Exploration.SensorRadius;
+        var origin = new Double3(content.Galaxy.SectorSize / 2, content.Galaxy.SectorSize / 2, content.Galaxy.SectorSize / 2);
+        Assert.True(content.Exploration.Covers(origin, origin + new Double3(radius, 0, 0)));
+        Assert.True(content.Exploration.Covers(origin, origin + new Double3(0, radius, 0)));
+        Assert.True(content.Exploration.Covers(origin, origin + new Double3(0, 0, radius)));
+        Assert.False(content.Exploration.Covers(origin, origin + new Double3(radius, radius, radius)));
+        var probe = new AllocationProbe();
+        while (probe.Measuring()) _ = content.Exploration.Covers(origin, origin + new Double3(1, 1, 1));
+        Assert.Equal(0, probe.Bytes);
+    }
+}

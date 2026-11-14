@@ -756,7 +756,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             foreach (var connection in _connections)
             {
                 if (connection.State == ConnectionState.Active)
-                    SendRockDeltas(connection, hit);
+                    SendRockDeltas(connection, hit, true);
             }
 
             _impulses.Count = 0;
@@ -965,7 +965,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                     if (connection.Blocks!.QueueDesign(id, _catalogue.Manifest, _tick))
                         connection.ManifestDesigns = _catalogue.Count;
                 }
-                else if (id < _catalogue.Bytes.Length) connection.Blocks!.QueueDesign(id, _catalogue.Bytes[id], _tick);
+                else if (id < (connection.ManifestDesigns == 0 ? _startupDesigns : connection.ManifestDesigns)) connection.Blocks!.QueueDesign(id, _catalogue.Bytes[id], _tick);
             }
             else if (payload[0] == (byte)MessageId.CatalogueReady && channel == NetChannel.Reliable && payload.Length == 1)
             {
@@ -1239,24 +1239,31 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         Logs.Sim.Info($"{connection.Name} lost a hull and is in a drone");
     }
 
-    private void SendRockDeltas(Connection connection, ReadOnlySpan<RockDelta> deltas)
+    private void SendRockDeltas(Connection connection, ReadOnlySpan<RockDelta> deltas, bool incremental = false)
     {
         if (deltas.IsEmpty || !connection.CatalogueReady) return;
         Span<RockDelta> visible = stackalloc RockDelta[RockDeltasMessage.MaxDeltas];
-        var count = 0;
-        var visit = Math.Min(deltas.Length, visible.Length);
-        for (var i = 0; i < visit; i++)
+        var cursor = incremental ? 0 : connection.RockCursor % deltas.Length;
+        var remaining = incremental ? deltas.Length : Math.Min(deltas.Length, visible.Length);
+        while (remaining > 0)
         {
-            var delta = deltas[(connection.RockCursor + i) % deltas.Length];
-            if (Covered(connection.PlayerId, _rocks.PositionOf(delta.Rock, _tick))) visible[count++] = delta;
+            var count = 0;
+            var visit = Math.Min(remaining, visible.Length);
+            for (var i = 0; i < visit; i++)
+            {
+                var delta = deltas[(cursor + i) % deltas.Length];
+                if (Covered(connection.PlayerId, _rocks.PositionOf(delta.Rock, _tick))) visible[count++] = delta;
+            }
+            if (count > 0)
+            {
+                var writer = new NetWriter(_sendBuffer);
+                RockDeltasMessage.Write(ref writer, visible[..count]);
+                if (!connection.Transport.Send(connection.Peer, NetChannel.Reliable, writer.Written)) return;
+            }
+            cursor = (cursor + visit) % deltas.Length;
+            remaining -= visit;
         }
-        if (count > 0)
-        {
-            var writer = new NetWriter(_sendBuffer);
-            RockDeltasMessage.Write(ref writer, visible[..count]);
-            if (!connection.Transport.Send(connection.Peer, NetChannel.Reliable, writer.Written)) return;
-        }
-        connection.RockCursor = (connection.RockCursor + visit) % deltas.Length;
+        if (!incremental) connection.RockCursor = cursor;
     }
 
     private void SendSnapshot(Connection connection, long tick)

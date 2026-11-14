@@ -3366,6 +3366,8 @@ public sealed class FrameOrderTests : IDisposable
         OpenEditor();
         var editor = _world.Editor;
         var draft = editor.Draft!;
+        Assert.Equal(DraftEdit.Done, draft.Add(new GridSize(0, 2, 0), new GridSize(1, 1, 1), _snapshot.Content.Blocks.Get("hull")));
+        Assert.Equal(DraftEdit.Done, draft.Add(new GridSize(0, 3, 0), new GridSize(1, 1, 1), _snapshot.Content.Blocks.Get("hull")));
         var boxes = draft.Boxes.ToArray();
         int first = -1, second = -1, other = -1;
         for (var i = 0; i < boxes.Length && first < 0; i++)

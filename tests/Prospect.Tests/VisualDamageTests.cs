@@ -13,7 +13,14 @@ namespace Prospect.Tests;
 
 public sealed class VisualDamageTests
 {
-    private static readonly GameContent Content = GameContent.Load();
+    private static GameContent ReplicationContent()
+    {
+        using var files = new ContentCopy();
+        files.Replace("rules/exploration.json", "5000", "2000000");
+        return files.Load();
+    }
+
+    private static readonly GameContent Content = ReplicationContent();
     private static HullDesign Design(int count = 1, BlockShape shape = BlockShape.Box) => HullDesign.Of(new BoxDesign("Dent fixture", 1,
         Enumerable.Range(0, count).Select(i => new DesignBox(new(i * 3, 0, 0), new(2, 2, 2), new BlockType
         { Id = "dent", Name = "Hull", Core = i == 0, Mass = 10, Hull = 100, Shield = 10000 }, shape)).ToArray(), Content.Blocks.Limits, "dent"), Content.Rules);
@@ -127,7 +134,7 @@ public sealed class VisualDamageTests
     [Fact]
     public void BulkIsAtomicAndRejectsGapsMalformedStaleAndWrongIdentity()
     {
-        var content = GameContent.Load(); var design = content.Pod;
+        var content = ReplicationContent(); var design = content.Pod;
         using var replica = new BlockReplica(content);
         var record = new HullRecord { Id = 65536, Design = (byte)content.PodDesign, VisualVersion = 2 };
         Assert.True(replica.Accept(record, 0));
@@ -238,7 +245,7 @@ public sealed class VisualDamageTests
     [Fact]
     public void RealSessionReplicatesBothSidesAndLateJoinSuppressesSparks()
     {
-        var content = GameContent.Load(); var design = Design();
+        var content = ReplicationContent(); var design = Design();
         content.Designs[content.DroneDesign] = design;
         using var link = new LoopbackLink(); using var lateLink = new LoopbackLink(); using var observerLink = new LoopbackLink();
         var wire = new RefuseVisual(link.Server);
@@ -287,7 +294,7 @@ public sealed class VisualDamageTests
     [Fact]
     public void RockContactReplicatesWithoutDeformingAsteroid()
     {
-        var content = GameContent.Load(); var design = Design(); content.Designs[content.DroneDesign] = design;
+        var content = ReplicationContent(); var design = Design(); content.Designs[content.DroneDesign] = design;
         using var link = new LoopbackLink();
         using var server = new ServerHost(new ServerConfig { MaxPlayers = 1 }, content, link.Server);
         using var client = new ClientSession(link.Client, content, "Rock observer");

@@ -33,6 +33,9 @@ public struct PlayerControls
 public sealed class PlayerInputBridge
 {
     private readonly Lock _lock = new();
+    private bool _scan;
+    public void RequestScan() { lock (_lock) _scan = true; }
+    internal bool ConsumeScan() { lock (_lock) { var pending = _scan; _scan = false; return pending; } }
     private readonly SocialMessage[] _social = new SocialMessage[16];
     private int _socialHead, _socialCount;
 

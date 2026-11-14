@@ -26,7 +26,7 @@ Saved multiplayer and moving a world between machines stay undelivered until ver
 | Type | What it is |
 | --- | --- |
 | `WorldSnapshot` | The bounded state of a world between two intervals. A buffer, never live memory. |
-| `WorldSnapshotCodec` | The save's own byte layout, `Version` 2. Reading trusts nothing. |
+| `WorldSnapshotCodec` | The save's own byte layout, `Version` 3. Reading trusts nothing. |
 | `SaveLimits` | Aggregate bounds of a world and of a save: owners, hulls, blocks, asteroids, sectors. |
 | `IWorldStore` | A leased store: `Commit`, `Backup`, `Dispose`. One worker thread uses it. |
 | `SqliteWorldStore` | The store on disk: one SQLite database per world folder. |
@@ -161,9 +161,9 @@ Bounds at `SaveLimits.Default`:
 
 | What | Bound |
 | --- | --- |
-| One database file, live or copy | 24.5 MB (twice the largest save, plus 1 MiB) |
-| All files named as recovery copies, the one being made included | 98 MB |
-| The log: never written past it, and refused as damaged beyond it | 98 MB |
+| One database file, live or copy | 225.9 MB (twice the format ceiling, plus 1 MiB) |
+| All files named as recovery copies, the one being made included | 903.4 MB |
+| The log: never written past it, and refused as damaged beyond it | 903.4 MB |
 
 Measured on the development machine (Linux, NVMe, Debug build), the largest save there is, 10.7 MB encoded:
 commit 38 to 51 ms, recovery copy 63 to 67 ms, open and decode 50 ms, 4.6 KiB of managed memory a commit.
@@ -191,8 +191,8 @@ Engineering defaults in `SaveLimits.Default`, not host tuning.
 | Pushed asteroids | 16,384 |
 | Sectors with a pushed asteroid | 256 |
 
-- The capture buffer at these limits is about 11 MiB, taken once per saved server.
-- The largest encoded save is about 11.2 MiB; the catalogue is at most 1 MiB of it.
+- The base capture buffer at these limits is about 11 MiB; content-sized chart storage adds 8 MiB at 64 owners and 4,096 charts each. Both are taken once.
+- Base records encode at most about 11.2 MiB; shipped chart limits add 6 MiB. The format ceiling allows about 112.4 MB including charts; the catalogue is at most 1 MiB.
 - A world refuses to grow past them before it grows: see `ServerHost.HasRoom` and `RockField.CanMove`.
 - A refusal is counted in `SaveStatus.RefusedGrowth`. Nothing is dropped from a save.
 - One drone per owner is held back, so a pilot whose hull is destroyed always gets out.
@@ -350,3 +350,10 @@ The tick checks chart room before insertion; no chart is evicted. Scans and temp
 The capture reserves content's charts-per-owner times the owner budget; charts use 24 encoded bytes each.
 The format ceiling is ushort.MaxValue charts per owner, distinct from the content's gameplay limit.
 Codec 2 saves are refused untouched; no migration is included.
+
+The codec-ceiling storage test now includes 4,194,240 charts (65,535 per owner), beyond shipped gameplay tuning.
+Measured encoding: 111,346,609 bytes; disk commit median 435 ms, worst 554 ms; copy 3,318 ms; open/decode 1,907 ms.
+This is an engineering decoder/storage ceiling, not a gameplay chart allowance.
+
+The decoder checks chart owner references, uniqueness and world-clock timestamps before writable store open.
+`MaxDecodedBytes` conservatively includes 128 extra bytes per chart for bounded temporary validation sets.

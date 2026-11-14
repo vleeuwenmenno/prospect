@@ -496,8 +496,23 @@ public static class WorldSnapshotCodec
             rock.StartTick = reader.ReadInt64();
         }
 
+        var chartKeys = new HashSet<(uint, SectorCoord)>();
+        var chartCounts = new Dictionary<uint, int>();
         for (var i = 0; i < charts; i++)
-            result.Charts[i] = new SectorChart(reader.ReadUInt32(), ReadSector(ref reader), reader.ReadInt64());
+        {
+            var chart = new SectorChart(reader.ReadUInt32(), ReadSector(ref reader), reader.ReadInt64());
+            var known = false;
+            foreach (var owner in result.Owners) known |= owner.Id == chart.Owner;
+            chartCounts.TryGetValue(chart.Owner, out var ownerCharts);
+            if (!known || chart.RecordedTick < 0 || chart.RecordedTick >= nextTick
+                || !chartKeys.Add((chart.Owner, chart.Sector)) || ownerCharts >= ushort.MaxValue)
+            {
+                error = "the saved charts have invalid owners, sectors or survey times";
+                return false;
+            }
+            chartCounts[chart.Owner] = ownerCharts + 1;
+            result.Charts[i] = chart;
+        }
 
         if (!reader.IsValid || reader.Remaining != 0 || result.BlockCount != blocks || result.LossCount != losses)
         {

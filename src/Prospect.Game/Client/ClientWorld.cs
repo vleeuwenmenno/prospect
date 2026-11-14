@@ -325,7 +325,11 @@ internal sealed partial class ClientWorld : IDisposable
         _field.SetDesigns(content.Designs);
     }
 
-    public void SetPlayer(uint playerId) => _playerId = playerId;
+    public void SetPlayer(uint playerId)
+    {
+        _playerId = playerId;
+        _charts = new SectorChart[_content.Exploration.ChartsPerOwner];
+    }
 
     private HullDesign OwnDesign => _content.Designs[_ownDesign];
 
@@ -352,6 +356,12 @@ internal sealed partial class ClientWorld : IDisposable
     public void Tick(PlayerInputBridge bridge, ITransport transport, double serverTick, bool sendCommands = true, long clientTick = -1, float roundTripMs = 0)
     {
 
+        if (sendCommands && bridge.ConsumeScan())
+        {
+            Span<byte> request = stackalloc byte[ExplorationMessage.ScanWireSize];
+            request[0] = (byte)MessageId.Scan;
+            if (!transport.Send(0, NetChannel.Reliable, request)) bridge.RequestScan();
+        }
         _replica.SendAcks(transport, clientTick < 0 ? (long)serverTick : clientTick);
         var controls = bridge.Consume(out var hasOrder, out var order);
         _correction *= 0.86f;
@@ -491,6 +501,8 @@ internal sealed partial class ClientWorld : IDisposable
             if (!HullRecord.TryRead(ref reader, out var record))
                 break;
 
+            if (record.Id == 0 || record.Design >= _content.Designs.Length || !Visible(record.Id, header.ServerTick)) continue;
+            if (!Observe(record, header.ServerTick)) continue;
             if (!_replica.Accept(record, clientTick))
             {
                 HoldPose(record, header, clientTick);

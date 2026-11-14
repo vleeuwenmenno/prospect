@@ -216,6 +216,28 @@ public sealed class EditorSessionTests
     }
 
     [Fact]
+    public void HiddenConstructionIsNotAnnouncedUntilItsHullEntersCoverage()
+    {
+        using var rig = new Rig();
+        var owner = rig.Snap(1).PlayerId;
+        for (var i = 0; i < rig.Hulls.Slots; i++)
+            if (rig.Hulls.IsAliveAt(i) && rig.Hulls.Info(i).Owner == owner)
+                rig.Hulls.State(i).Position += new Double3(0, 1_000_000, 0);
+        rig.Step(10);
+        var noticed = rig.Wires[0].Sent[(byte)MessageId.DesignNotice];
+        var token = rig.Open(1);
+        Assert.True(rig.Input(1).CommitEdit(token, Edited(rig.Snap(1))));
+        rig.Input(1).ReportInstalledDesigns(rig.Content.Designs.Length + 1);
+        Assert.True(rig.Until(() => rig.Editor(1).Phase == EditorPhase.Applied, settle: true));
+        Assert.Equal(noticed, rig.Wires[0].Sent[(byte)MessageId.DesignNotice]);
+        for (var i = 0; i < rig.Hulls.Slots; i++)
+            if (rig.Hulls.IsAliveAt(i) && rig.Hulls.Info(i).Owner == owner)
+                rig.Hulls.State(i).Position -= new Double3(0, 1_000_000, 0);
+        rig.Step(5);
+        Assert.True(rig.Wires[0].Sent[(byte)MessageId.DesignNotice] > noticed);
+    }
+
+    [Fact]
     public void AFinishedJumpDoesNotBlockEditingWhileItsOldOrderIsStillBeingSent()
     {
         using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);

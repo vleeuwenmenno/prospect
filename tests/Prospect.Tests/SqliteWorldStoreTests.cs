@@ -1395,7 +1395,7 @@ public sealed class SqliteWorldStoreTests : IDisposable
     private static WorldSnapshot Sized(SaveLimits limits)
     {
         var small = Populated();
-        var snapshot = new WorldSnapshot(limits)
+        var snapshot = new WorldSnapshot(limits, checked((int)limits.MaxCharts))
         {
             Compatibility = small.Compatibility,
             WorldId = small.WorldId,
@@ -1423,6 +1423,8 @@ public sealed class SqliteWorldStoreTests : IDisposable
                 Kind = i == 0 ? OwnerKind.Local : OwnerKind.Account,
                 Account = new SavedAccount("https://accounts.example/", new Guid(i + 1, 0, 0, new byte[8])),
             };
+        for (var i = 0; i < snapshot.Charts.Length; i++)
+            snapshot.Charts[snapshot.ChartCount++] = new SectorChart((uint)(i % limits.MaxOwners + 1), new SectorCoord(i / limits.MaxOwners, 0, 0), 0);
         var perHull = limits.MaxBlocks / limits.MaxHulls;
         var template = small.Hulls[3];
         for (var i = 0; i < limits.MaxHulls; i++)

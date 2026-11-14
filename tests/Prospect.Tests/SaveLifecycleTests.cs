@@ -38,6 +38,22 @@ public sealed class SaveLifecycleTests
     private static MemoryWorld PopulatedWorld() => new() { Bytes = Populated.Value, Generation = 7 };
 
     [Fact]
+    public void MalformedChartsAreRefusedByDecoderBeforeWritableStoreOpen()
+    {
+        var folder = PopulatedWorld();
+        var snapshot = folder.Decode();
+        Assert.True(snapshot.ChartCount > 0);
+        var original = snapshot.Charts[0];
+        snapshot.Charts[0] = original with { Owner = uint.MaxValue };
+        Assert.False(WorldSnapshotCodec.TryDecode(WorldSnapshotCodec.Encode(snapshot), SaveLimits.Default, out _, out _));
+        snapshot.Charts[0] = original with { RecordedTick = snapshot.NextWorldTick };
+        Assert.False(WorldSnapshotCodec.TryDecode(WorldSnapshotCodec.Encode(snapshot), SaveLimits.Default, out _, out _));
+        snapshot.Charts[0] = original;
+        snapshot.Charts[1] = original;
+        Assert.False(WorldSnapshotCodec.TryDecode(WorldSnapshotCodec.Encode(snapshot), SaveLimits.Default, out _, out _));
+    }
+
+    [Fact]
     public void ChartsKeepTheirOwnerSectorAndSurveyTickAcrossSaveLoad()
     {
         var folder = SaveRig.NewWorld(Shipped);
@@ -132,6 +148,7 @@ public sealed class SaveLifecycleTests
         var states = hulls.BlockStates;
         var tick = rig.WorldTick;
         Assert.True(rig.Server.RecordChart(hulls.Info(0).Owner, new SectorCoord(3, -2, 1), tick - 1));
+        Assert.True(rig.Server.RecordChart(hulls.Info(0).Owner, new SectorCoord(4, -2, 1), tick - 1));
         Assert.Equal(6, hulls.Count);
 
         var custom = rig.Server.Content.Designs[hulls.Info(3).Design];
@@ -667,7 +684,7 @@ public sealed class SaveLifecycleTests
             Assert.Equal(2, rig.Rocks.Deltas.Length);
             Assert.Equal(1, rig.Rocks.MovedSectors);
             Assert.Equal(3, rig.Server.Save.RefusedGrowth);
-            Assert.Equal(1, rig.Link.RockMessages);
+            Assert.Equal(0, rig.Link.RockMessages); // No sensor covers these remote collisions.
             rig.Rocks.Displacement(new RockRef(sector, 2), rig.WorldTick + 600, out var offset, out _);
             Assert.Equal(Vector3.Zero, offset);
 

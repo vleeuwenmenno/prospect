@@ -276,8 +276,8 @@ The client opens a real window on the developer's desktop, and they are usually 
 - A server's design catalogue only grows: an edited ship takes a design number (255 at most) and catalogue
   bytes for as long as the server runs, and a full catalogue refuses every new design. The editor screen has no
   shapes other than boxes and wedges, mirror, stock parts or drag handle on a placed block yet; a placed block's resizing is numeric.
-- Snapshots are full state, not delta-compressed, and there is no interest management yet.
-- Sector discovery is kept by the client for the session; nothing is saved.
+- Snapshots are full state, not delta-compressed. Personal sensor filtering is the first interest management; see docs/hosting.md for disclosure and scale limits.
+- Server charts persist per owner. The existing map discovery UI remains session-local until it consumes SessionSnapshot.Exploration.
 - Asteroids do not collide with each other.
 - A shield shell is the smooth closing of the blocks (`ShieldSurface`), indexed, at most 32,768 vertices and
   196,608 indices; separate box-shaped parts use triangulated rounded boxes with analytic normals. Admission builds

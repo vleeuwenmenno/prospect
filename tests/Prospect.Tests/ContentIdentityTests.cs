@@ -54,7 +54,7 @@ internal static class OtherContent
     private static readonly Lazy<GameContent> Loaded = new(() =>
     {
         using var copy = new ContentCopy();
-        return copy.Replace("blocks/blocks.json", "\"hull\": 400", "\"hull\": 401").Load();
+        return copy.Replace("blocks/blocks.json", "\"Hull plating\", \"mass\": 2.0, \"hull\": 400", "\"Hull plating\", \"mass\": 2.0, \"hull\": 401").Load();
     });
 
     public static GameContent Value => Loaded.Value;
@@ -166,7 +166,7 @@ public sealed class ContentIdentityTests
 
     [Theory]
     // The block catalogue: a block's figure, a flight rule, a size rule, a design limit, a block's name.
-    [InlineData("blocks/blocks.json", "\"hull\": 400", "\"hull\": 401")]
+    [InlineData("blocks/blocks.json", "\"Hull plating\", \"mass\": 2.0, \"hull\": 400", "\"Hull plating\", \"mass\": 2.0, \"hull\": 401")]
     [InlineData("blocks/blocks.json", "\"collisionBounce\": 0.3", "\"collisionBounce\": 0.31")]
     [InlineData("blocks/blocks.json", "\"volumeExponent\": 1.25", "\"volumeExponent\": 1.5")]
     [InlineData("blocks/blocks.json", "\"maxBoxSide\": 64", "\"maxBoxSide\": 63")]

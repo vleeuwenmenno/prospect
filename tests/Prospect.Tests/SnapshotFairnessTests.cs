@@ -17,10 +17,12 @@ public sealed class SnapshotFairnessTests
     [InlineData(true)]
     public void FiftyDamagedShipsStayVisibleAndTheLastShipStaysInCollisionPrediction(bool contactAndRefusal)
     {
-        var content = GameContent.Load();
+        using var files = new ContentCopy();
+        files.Replace("rules/exploration.json", "5000", "20000");
+        var content = files.Load();
         var boxes = new DesignBox[HullRecord.MaxHealth];
         for (var i = 0; i < boxes.Length; i++)
-            boxes[i] = new DesignBox(new GridSize(i % 35 * 2, i / 35 * 2, 0), new GridSize(2, 2, 2), content.Blocks.Get(i == 0 ? "core" : "hull"));
+            boxes[i] = new DesignBox(new GridSize(i % 35 * 2, i / 35 * 2, 0), new GridSize(2, 2, 2), content.Blocks.Get(i == 0 ? "core" : i == 1 ? "sensor" : "hull"));
         var design = HullDesign.Of(new BoxDesign("Health snapshot fixture", 1, boxes, content.Blocks.Limits, "snapshot"), content.Rules);
         content.Designs[content.PodDesign] = design;
         using var rig = new ScriptedServer(content, maxPlayers: 1);

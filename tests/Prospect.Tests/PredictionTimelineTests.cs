@@ -70,7 +70,14 @@ public sealed class PredictionTimelineTests
     public void Replay(bool batch, bool oldBalance)
     {
         using var files = new ContentCopy();
-        if (oldBalance) files.Write("blocks/blocks.json", File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixtures", "prediction-old-blocks.json")));
+        if (oldBalance)
+        {
+            files.Write("blocks/blocks.json", File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixtures", "prediction-old-blocks.json")));
+            files.Replace("ships/command_pod.json", "\"sensor\"", "\"hull\"");
+            files.Replace("ships/command_pod.json", "\"charting\"", "\"hull\"");
+            files.Replace("ships/mining_vessel.json", "\"sensor\"", "\"hull\"");
+            files.Replace("ships/survey_vessel.json", "\"sensor\"", "\"hull\"");
+        }
         var content = files.Load();
         var settings = content.SettingCatalog.Build(null, ["collisionDamage=2", "collisionShields=Weak", "shieldRecharge=0.25", "hullStrength=2"]);
         using var link = new LoopbackLink();

@@ -159,3 +159,11 @@ Intermediate runs exposed transient allocation assertions in unchanged hull test
 The claim retry test now waits for buffer release, and hosted refusal tests no longer bind the default port.
 Real Windows/macOS behavior, power-loss durability and independent security review remain unverified.
 No frame/tick implementation changed, so this slice did not rerun the benchmark.
+
+## Exploration foundation implementation worktree
+
+Protocol 37 and snapshot codec 3 introduce personal charts, scan intent/status and sensor-filtered dynamic replication.
+The map integration contract and measurements are in `docs/hosting.md`; no visual implementation is included.
+Provisional tuning was approved by the product owner and moved to Decided in `exploration.md`.
+Seed secrecy and blind-jump risk remain unfinished. Persistent remote admission remains independently blocked.
+Full gate and independent review status must be checked before integration; this entry does not certify parent checkout acceptance.

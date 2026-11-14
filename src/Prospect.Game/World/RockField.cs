@@ -236,8 +236,9 @@ public sealed class RockField(Galaxy galaxy, int maxDeltas = int.MaxValue, int m
 
             if (moved.Count == moved.Indices.Length)
                 Array.Resize(ref moved.Indices, moved.Indices.Length * 2);
+            var generated = Sector(delta.Rock.Sector);
             entry = _deltaCount++;
-            _origins[entry] = galaxy.CenterOf(delta.Rock.Sector) + Sector(delta.Rock.Sector).Asteroids[delta.Rock.Index].LocalPosition;
+            _origins[entry] = galaxy.CenterOf(delta.Rock.Sector) + ((uint)delta.Rock.Index < (uint)generated.AsteroidCount ? generated.Asteroids[delta.Rock.Index].LocalPosition : Vector3.Zero);
             moved.Entries[delta.Rock.Index] = entry + 1;
             moved.Indices[moved.Count++] = delta.Rock.Index;
         }

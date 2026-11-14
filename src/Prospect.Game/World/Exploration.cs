@@ -6,6 +6,12 @@ namespace Prospect.Game.World;
 /// <summary>Shared, content-owned exploration tuning. Additional equipment gives redundancy only.</summary>
 public sealed record ExplorationRules(double SensorRadius, int ScanTicks, int ContactTicks, int ChartsPerOwner)
 {
+    public bool Covers(Double3 sensor, Double3 position)
+    {
+        var d = position - sensor;
+        return d.X * d.X + d.Y * d.Y + d.Z * d.Z <= SensorRadius * SensorRadius;
+    }
+
     internal static ExplorationRules Parse(ReadOnlyMemory<byte> bytes)
     {
         using var document = JsonDocument.Parse(bytes);
@@ -47,3 +53,6 @@ public struct SensorContact
     public long LostTick;
     public bool Live;
 }
+
+/// <summary>Immutable surveyed field envelope, without mineral composition or current asteroid mutations.</summary>
+public readonly record struct ChartField(Double3 Center, System.Numerics.Vector3 HalfExtents, System.Numerics.Vector3 Along);

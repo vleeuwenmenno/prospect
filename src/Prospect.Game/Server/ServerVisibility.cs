@@ -23,12 +23,10 @@ public sealed partial class ServerHost
 
     internal bool Covered(uint owner, Double3 position)
     {
-        var radius = _content.Exploration.SensorRadius;
         for (var i = 0; i < _sensorCount; i++)
         {
             if (_sensorOwners[i] != owner) continue;
-            var d = position - _sensorPositions[i];
-            if (d.X * d.X + d.Y * d.Y + d.Z * d.Z <= radius * radius) return true;
+            if (_content.Exploration.Covers(_sensorPositions[i], position)) return true;
         }
         return false;
     }
@@ -51,6 +49,7 @@ public sealed partial class ServerHost
             connection.Visible[word] = bits;
         }
         if (!changed) return;
+        while (words > 0 && connection.Visible[words - 1] == 0) words--;
         var writer = new NetWriter(_sendBuffer);
         writer.WriteByte((byte)MessageId.Visibility);
         writer.WriteInt64(tick);

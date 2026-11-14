@@ -33,8 +33,6 @@
     "ftlArrivalPulseMass": 100.0
   },
   "blocks": {
-    "sensor": { "name": "Passive sensor", "mass": 1, "hull": 150, "sensor": true },
-    "charting": { "name": "Sector scanner", "mass": 1, "hull": 150, "charting": true },
     "hull": { "name": "Hull plating", "mass": 2.0, "hull": 400 },
     "core": { "name": "Computer core", "mass": 3.0, "hull": 300, "powerDraw": 0.2, "core": true, "sizeRules": { "powerDraw": { "volumeExponent": 0 } } },
     "generator": { "name": "Generator", "mass": 4.0, "hull": 200, "powerOutput": 6.0, "sizeRules": { "powerOutput": { "volumeExponent": 1.25 } } },
@@ -55,6 +53,8 @@
     "microengine": { "name": "Drone engine", "mass": 0.3, "hull": 30, "thrust": 24, "powerDraw": 0.3, "forwardOnly": true },
     "microthruster": { "name": "Drone thruster", "mass": 0.2, "hull": 30, "thrust": 11.2, "powerDraw": 0.15 },
     "microgyro": { "name": "Drone gyro", "mass": 0.3, "hull": 30, "torque": 1.2, "powerDraw": 0.05 },
-    "microshield": { "name": "Drone shield", "mass": 0.3, "hull": 30, "shield": 120, "shieldRecharge": 5, "powerDraw": 0.2 }
+    "microshield": { "name": "Drone shield", "mass": 0.3, "hull": 30, "shield": 120, "shieldRecharge": 5, "powerDraw": 0.2 },
+    "sensor": { "name": "Passive sensor", "mass": 2, "hull": 400, "sensor": true },
+    "charting": { "name": "Sector scanner", "mass": 2, "hull": 400, "charting": true }
   }
 }

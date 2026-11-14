@@ -12,9 +12,16 @@ namespace Prospect.Tests;
 
 public sealed class BlockReplicationTests
 {
+    private static GameContent ReplicationContent()
+    {
+        using var files = new ContentCopy();
+        files.Replace("rules/exploration.json", "5000", "2000000");
+        return files.Load();
+    }
+
     private static GameContent LargeContent()
     {
-        var content = GameContent.Load();
+        var content = ReplicationContent();
         // Two-cell gaps keep separate rounded shells inside admission limits; these tests exercise recovery, not shield blending.
         var boxes = new DesignBox[300];
         for (var i = 0; i < boxes.Length; i++) boxes[i] = new DesignBox(new GridSize(i * 3, 0, 0), new GridSize(1, 1, 1), content.Blocks.Get(i == 0 ? "core" : "hull"));
@@ -113,7 +120,7 @@ public sealed class BlockReplicationTests
     [Fact]
     public void ZeroHullRecoveryCannotUseAnEmptyReplicaEntry()
     {
-        var content = GameContent.Load();
+        var content = ReplicationContent();
         using var replica = new BlockReplica(content);
         Span<byte> bytes = stackalloc byte[64];
         var writer = new NetWriter(bytes);

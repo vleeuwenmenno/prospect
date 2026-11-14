@@ -617,6 +617,23 @@ public sealed class AsteroidFieldsModule : SectorModule
     /// pieces reach it. Returns their number; <paramref name="candidates"/> is the most rocks they can land in
     /// the sector.
     /// </summary>
+    public int ChartFields(Galaxy galaxy, SectorCoord coord, Span<ChartField> destination)
+    {
+        Span<Field> fields = stackalloc Field[MaxFieldsInReach];
+        Span<RibbonKnot> knots = stackalloc RibbonKnot[MaxFieldsInReach * KnotsPerField];
+        var summary = galaxy.Summarize(coord);
+        var sector = new SectorContext(galaxy, coord, summary.Density);
+        var count = Gather(sector, fields, knots, out _);
+        if (destination.Length < count) throw new ArgumentException("Chart field buffer is too small.", nameof(destination));
+        for (var i = 0; i < count; i++)
+        {
+            ref var field = ref fields[i];
+            destination[i] = new ChartField(galaxy.CenterOf(coord) + field.Shift + field.Center,
+                new Vector3(field.Length, field.Height, field.Width), new Vector3(field.AlongX, 0, field.AlongZ));
+        }
+        return count;
+    }
+
     private int Gather(in SectorContext sector, Span<Field> fields, Span<RibbonKnot> knots, out int candidates)
     {
         Span<Field> anchored = stackalloc Field[MaxFields + 1];

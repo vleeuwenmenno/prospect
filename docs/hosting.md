@@ -666,16 +666,81 @@ This status is an observation at open, not hosting authorization. Saved multipla
 - Move or copy the complete stopped folder, preserving key permissions, to retain identity. A bare database is insufficient.
 - Independent Claude security review remains required. No admission, TLS, key rotation or destructive recovery is included.
 
-## Exploration foundation contract (implementation in progress)
+## Exploration foundation (protocol 37)
 
-Shared `rules/exploration.json` participates in content identity.
-The provisional values and scan interruption rules are decided in `roadmap/exploration.md`.
-`SectorChart` records owner, sector and authoritative survey tick. Its natural geography is immutable
-under the saved seed, generation version and content identity; it never records live occupants or ore surveys.
-A repeated chart refreshes its recorded tick; a new sector at the owner limit is refused.
+The server owns scans and charts and filters dynamic live state by personal sensor coverage.
+`rules/exploration.json` is shared content and participates in content identity.
+The provisional values are in `roadmap/exploration.md`; extra equipment gives redundancy only.
+The pod has separate sensor and charting blocks; both starting fleet ships have a sensor.
+Equipment has the plating mass and hit points it replaces, preserving stock flight figures and geometry.
 
-Visibility must be checked on hull snapshots, asteroid delta admission/replay and live updates,
-and block/damage recovery admission and continued transfers. Lost contacts must freeze before publication.
-The seed and shared generation remain disclosed for asteroid collision prediction. This does not secure natural
-field locations or mineral contents. Blind-jump risk, travel range and galaxy-bound decisions remain unfinished.
-No hidden hull is disclosed solely to improve prediction; collisions against undisclosed hulls require correction.
+### Simulation and save contract
+
+- A scan runs on the controlled hull while flight continues. Sector/control change or loss of its last charting block cancels it.
+- Completion records only that sector, its owner and authoritative survey tick. Repeat scans refresh that tick.
+- Permanent charts are bounded by content per owner; new sectors at capacity are refused, never evicted.
+- `SectorChart` describes immutable geography under the saved seed, generator version and content identity.
+  `ExplorationView.ChartFields` reconstructs field centers, axes and envelope extents without mineral composition.
+- Charts survive snapshot codec 3. Transient scans and ship markers start empty after loading.
+
+A chart never records a live occupant or later mining/construction/destruction.
+`ChartFields` requires a retained chart and a caller-owned span of `AsteroidFieldsModule.MaxFieldsInReach` entries.
+Field envelopes can cross the surveyed sector's walls; this does not chart those other sectors.
+
+### Client contract for the map worker
+
+`PlayerInputBridge.RequestScan()` queues a one-shot intent. The server refuses missing equipment or chart capacity.
+`SessionSnapshot.Exploration` owns its buffers; read only counted prefixes, as with hull views.
+
+- `Scan`: state, sector, start and completion world ticks. Completed/refused/cancelled states remain until another request.
+- `Charts[0..ChartCount]`: owner, sector and recorded world tick. Chart delivery is incremental; it never implies live coverage.
+- `Contacts[0..ContactCount]`: hull, owner, design, last observed position/tick, live flag and loss tick.
+- A lost ship marker freezes and expires after the content lifetime. It is not present in `SessionSnapshot.Hulls` or collision prediction.
+- `JumpEligibility` reports existing drive/order eligibility, chart ownership and `BlindRiskImplemented=false`.
+  It does not invent a maximum range or claim an uncharted jump is safe.
+
+A station-class hull uses an indefinite stale marker; this repository has no generated station gameplay system.
+The map worker still needs scan controls/feedback, authoritative chart styling, field markers, contact rows,
+stale presentation and blind-risk-unfinished feedback. Existing map discovery is not this new chart API.
+No screen, HUD or renderer implementation is included here.
+
+### Visibility and disclosure
+
+Every owned, equipped hull contributes a spherical volume in double-precision world coordinates, across XYZ walls.
+Ownership always discloses the owner's own ships, including remote ones without sensors.
+Detection uses object centers. Visibility grants no remote-control permission and never charts a sector.
+
+- Hull snapshots require visibility; block/dent recovery checks it at request admission and before each continued transfer.
+- Initial asteroid deltas, repeated sweeps and immediate changes require coverage of the asteroid's current center.
+- Party live sector/health messages require visibility too; roster membership alone grants no coverage.
+- A reliable visibility mask removes lost hulls independently of sparse snapshot scheduling. Old poses cannot revive them.
+- Newly visible asteroid changes arrive on a bounded repeated sweep. Losing coverage sends no later mutations.
+
+The galaxy seed, deterministic natural geometry, mineral generation and admission-time immutable design catalogue remain disclosed.
+During play, new designs are announced only when needed by a visible hull or visible pending edit.
+Catalogue indices are contiguous: revealing a later design also discloses preceding historical designs, not their live owners or locations.
+Global player roster/count remain social information. The catalogue does not establish a hull's current existence or position.
+This is dynamic-state filtering, not secure natural-data secrecy.
+Collision prediction still generates baseline asteroids from the seed and can extrapolate already-disclosed asteroid motion.
+No hidden hull is disclosed solely to improve prediction; unknown collisions and unseen later asteroid changes require correction.
+Blind-jump risk, drive range tuning and galaxy vertical limits remain unfinished.
+
+### Wire sizes and bounded work
+
+Scan is 1 byte. Exploration is at most 799 bytes: scan state/times and up to 32 chart records of 24 bytes.
+Visibility is 11 bytes plus one 64-bit word per group through the highest visible slot; maximum 8,203 bytes.
+Invisible tail capacity is omitted. Requests use existing admission/rate budgets; the client reserves one scan request per tick.
+
+- Sensor gathering walks live hulls and their block types. Coverage checks scan owned sensor centers; no spatial index yet.
+- Visibility costs O(hulls × sensors × active clients), plus equipment checks. Each client retains an 8 KiB mask.
+- One asteroid sweep visits at most 32 deltas per client/tick; immediate collision updates use at most two 32-record packets.
+  At the saved-world limit of 16,384 deltas, a new observer's complete sweep takes 512 ticks without refused sends.
+- Chart delivery visits at most the content chart limit per tick and sends at most 32 matching records. Refused sends retry.
+- Contact storage is bounded to 65,536 records (the existing hull-slot ceiling), keyed by full hull identity so slot reuse preserves stale markers.
+  At capacity new markers are refused and `ContactsComplete` stays false for the session; live hull replication continues. The existing 64 rendered/predicted hull-view limit remains;
+  chart/contact publication is separate, and packet/sweep limits still delay observations of large fleets.
+
+Measured on this Linux machine in Debug: 128 hulls and two clients averaged 1.6261 ms per complete server/client round,
+with zero managed allocations across 120 measured rounds after warmup. This does not establish a thousands-of-hulls budget.
+Release client benchmark passed at 1,097 fps normal and 999 fps during resize, zero render/process allocations.
+Validation layers were inactive; Windows/macOS and interactive map behavior remain unverified.

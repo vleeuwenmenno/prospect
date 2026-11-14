@@ -15,7 +15,13 @@ namespace Prospect.Tests;
 /// </summary>
 public sealed class ObserverPassageTests
 {
-    private static readonly GameContent Content = GameContent.Load();
+    private static readonly GameContent Content = WithCoverage();
+    private static GameContent WithCoverage()
+    {
+        using var files = new ContentCopy();
+        files.Replace("rules/exploration.json", "5000", "2000000");
+        return files.Load();
+    }
 
     private static FlightParams Flight(FtlKind drive)
     {

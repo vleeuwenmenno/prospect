@@ -321,8 +321,17 @@ public sealed partial class ServerHost
             if (connection.State != ConnectionState.Active || !connection.CatalogueReady)
                 continue;
 
-            // Designs are announced in order, each once. A send the transport refuses is tried again next tick.
-            while (connection.NoticedDesigns < _catalogue.Count)
+            // Preserve contiguous catalogue numbering, but do not announce hidden construction as it happens.
+            var required = connection.NoticedDesigns;
+            for (var slot = 0; slot < _hulls.Slots; slot++)
+                if (_hulls.IsAliveAt(slot) && (_hulls.Info(slot).Owner == connection.PlayerId
+                    || Covered(connection.PlayerId, _hulls.State(slot).Position)))
+                    required = Math.Max(required, _hulls.Info(slot).Design + 1);
+            foreach (var editing in _connections)
+                if (editing.EditPhase == EditorPhase.Publishing && _hulls.IsAlive(editing.EditHull)
+                    && (editing.PlayerId == connection.PlayerId || Covered(connection.PlayerId, _hulls.State(editing.EditHull.Index).Position)))
+                    required = Math.Max(required, editing.EditDesign + 1);
+            while (connection.NoticedDesigns < required)
             {
                 var id = connection.NoticedDesigns;
                 var writer = new NetWriter(_sendBuffer);
@@ -484,6 +493,7 @@ public sealed partial class ServerHost
             foreach (var other in _connections)
             {
                 if (other.State == ConnectionState.Active && other.CatalogueReady
+                    && (other.PlayerId == connection.PlayerId || Covered(other.PlayerId, _hulls.State(connection.EditHull.Index).Position))
                     && !BlockSet.Has(other.ReadyDesigns, design) && !BlockSet.Has(other.FailedDesigns, design))
                     return;
             }

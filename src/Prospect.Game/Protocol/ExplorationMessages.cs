@@ -11,7 +11,7 @@ public static class ExplorationMessage
     public const int MaxWireSize = 1 + 1 + 12 + 8 + 8 + 1 + MaxCharts * ChartWireSize;
     public const int VisibilityMaxWireSize = 1 + 8 + 2 + HullStore.MaxHulls / 8;
 
-    public static void Write(ref NetWriter writer, in ScanView scan, ReadOnlySpan<SectorChart> charts)
+    public static void Write(ref NetWriter writer, in ScanView scan, scoped ReadOnlySpan<SectorChart> charts)
     {
         writer.WriteByte((byte)MessageId.Exploration);
         writer.WriteByte((byte)scan.State);
@@ -27,10 +27,15 @@ public static class ExplorationMessage
         }
     }
 
-    public static bool Read(ref NetReader reader, Span<SectorChart> charts, out ScanView scan, out int count)
+    public static bool Read(ref NetReader reader, scoped Span<SectorChart> charts, out ScanView scan, out int count)
     {
-        scan = new ScanView { State = (ScanState)reader.ReadByte(), Sector = Sector(ref reader),
-            StartedTick = reader.ReadInt64(), CompletesTick = reader.ReadInt64() };
+        scan = new ScanView
+        {
+            State = (ScanState)reader.ReadByte(),
+            Sector = Sector(ref reader),
+            StartedTick = reader.ReadInt64(),
+            CompletesTick = reader.ReadInt64()
+        };
         count = reader.ReadByte();
         if ((byte)scan.State > (byte)ScanState.ChartLimit || count > charts.Length || count > MaxCharts
             || scan.StartedTick < 0 || scan.CompletesTick < scan.StartedTick) return false;
