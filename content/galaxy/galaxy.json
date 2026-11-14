@@ -1,5 +1,5 @@
 {
-  "sectorSize": 40000,
+  "sectorSize": 80000,
   "shape": {
     "radiusSectors": 400,
     "centerSector": [-150, 0, 100],

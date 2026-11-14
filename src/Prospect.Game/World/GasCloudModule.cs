@@ -66,6 +66,10 @@ public sealed class GasCloudModule : SectorModule
     /// 1 as shipped, 2 the most. Only the renderer reads it; no cloud is placed or shaped differently.
     /// </summary>
     public float Wispiness { get; private set; } = 1;
+    private float _wispinessMin = 1, _wispinessMax = 1;
+
+    /// <summary>Render-only variation from the cloud seed; never consumes a placement stream.</summary>
+    public float WispinessOf(in GasCloud cloud) => Math.Clamp(Wispiness * (_wispinessMin + (_wispinessMax - _wispinessMin) * (cloud.Seed / 128f)), 0, 2);
     /// <summary>The cloud's y and z half-extents as shares of its x half-extent.</summary>
     public static readonly Vector3 Proportions = new(1, 0.65f, 0.85f);
     /// <summary>
@@ -135,15 +139,14 @@ public sealed class GasCloudModule : SectorModule
             Number("motion", 0, 0.01f), shape, look);
     }
 
-    /// <summary>
-    /// The same clouds drawn under a world's settings. Generation reads nothing set here, so a world's clouds and
-    /// the asteroids in them are the same whatever the settings say.
-    /// </summary>
-    public GasCloudModule Under(WorldSettingCatalog catalog, in WorldSettings settings)
+    /// <summary>Applies bounded sizes and render-only variation supplied by Galaxy.Under.</summary>
+    public GasCloudModule Under(float sectorSize, float min, float max, float hugeMin, float hugeMax,
+        float hugeChance, float wispiness, float wispinessMin, float wispinessMax)
     {
-        var copy = (GasCloudModule)MemberwiseClone();
-        copy.Wispiness = catalog.Number(settings, "gasWispiness");
-        return copy;
+        Range Size(float low, float high) => new(Math.Min(0.5f, low * 500 / sectorSize), Math.Min(0.5f, high * 500 / sectorSize));
+        return new GasCloudModule(Id, _chance, _centerReach, Size(min, max), hugeChance, Size(hugeMin, hugeMax),
+            Extinction, Samples, Tint, Motion, Shape, Look)
+        { Wispiness = wispiness, _wispinessMin = wispinessMin, _wispinessMax = wispinessMax };
     }
 
     /// <summary>Counts the cloud the sector anchors, by the same rule as generation.</summary>

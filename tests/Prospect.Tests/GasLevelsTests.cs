@@ -179,7 +179,8 @@ public sealed class GasLevelsTests
     [Fact]
     public void OnlyLargeCloudsTakeTheCloseUpFigures()
     {
-        // Every ordinary cloud the seed makes is left exactly as it was; every huge one takes the figures in full.
+        // The historical small-cloud preset remains unchanged by close-up treatment.
+        var Galaxy = Content.WithSettings(Content.SettingCatalog.Build(null, ["sectorSize=40", "gasSizeMin=8", "gasSizeMax=11.2", "gasHugeSizeMin=20", "gasHugeSizeMax=40"])).Galaxy.WithSeed(0x50524F5350454354);
         var gas = Galaxy.GasClouds!;
         var found = new GasCloudPlacement[GasCloudField.Capacity];
         var count = GasCloudQuery.Collect(Galaxy, new(130, 0, -80), 9, found);
@@ -188,7 +189,7 @@ public sealed class GasLevelsTests
         foreach (var placement in found.AsSpan(0, count))
         {
             var figures = Tiers.CloseUpFor(placement.Cloud.HalfSize.X);
-            if (placement.Cloud.HalfSize.X < 0.2f * (float)Galaxy.SectorSize)
+            if (placement.Cloud.HalfSize.X <= Tiers.CloseUp.FromHalfSize)
             {
                 Assert.Equal(default, figures);
                 ordinary++;

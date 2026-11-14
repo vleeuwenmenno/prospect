@@ -19,6 +19,124 @@ public sealed class WorldSettingEffectTests
     /// <summary>The content as a world with these settings plays by it.</summary>
     private static GameContent World(params string[] assignments) => Content.WithSettings(Content.SettingCatalog.Build(null, assignments));
 
+    [Theory]
+    [InlineData(20)]
+    [InlineData(80)]
+    [InlineData(160)]
+    public void SectorSizeScalesDerivedDriveRangeButNotMinimum(int km)
+    {
+        var world = World($"sectorSize={km}");
+        Assert.Equal(km * 1000, world.Galaxy.SectorSize);
+        Assert.Equal(km * 10000, world.Pod.Stats.FtlMaxDistance);
+        Assert.Equal(world.Pod.Stats.FtlMaxDistance, world.Pod.Flight.FtlMaxDistance);
+        Assert.Equal(km * 1000, world.Exploration.BlindSafeDistance);
+        Assert.Equal(5000, world.Exploration.JumpMinimum);
+        var target = new Double3(5000, 0, 0);
+        Assert.Equal(world.Galaxy.SectorOf(default), world.Galaxy.SectorOf(target));
+        Assert.True(JumpRules.Evaluate(default, target, world.Pod.Flight, world.Exploration, false).CanIssueOrder);
+        Assert.Equal(JumpRefusal.TooFar, JumpRules.Evaluate(default, new Double3(km * 10000 + 1, 0, 0), world.Pod.Flight, world.Exploration, true).Reason);
+    }
+
+    [Theory]
+    [InlineData(20, 0)]
+    [InlineData(20, 1)]
+    [InlineData(160, 0)]
+    [InlineData(160, 1)]
+    public void GasSizeRangesAndChanceRespectSectorWalls(int km, int huge)
+    {
+        var world = World($"sectorSize={km}", $"gasHugeChance={huge}", "gasSizeMin=8", "gasSizeMax=8",
+            "gasHugeSizeMin=80", "gasHugeSizeMax=80", "gasWispinessMin=0.5", "gasWispinessMax=1.5");
+        var galaxy = world.Galaxy.WithSeed(42);
+        var gas = galaxy.GasClouds!;
+        var clouds = 0;
+        Span<GasCloudPlacement> neighbours = stackalloc GasCloudPlacement[27];
+        for (var x = -20; x <= 20; x++)
+            for (var z = -20; z <= 20; z++)
+            {
+                var anchor = new SectorCoord(x, 0, z);
+                if (!gas.TryGetCloud(galaxy, anchor, out var cloud)) continue;
+                clouds++;
+                Assert.Equal(Math.Min(km * 500, huge == 0 ? 4000 : 40000), cloud.HalfSize.X);
+                Assert.InRange(gas.WispinessOf(cloud), 0.5f, 1.5f);
+                var point = galaxy.CenterOf(anchor) + new Double3(cloud.Center.X, cloud.Center.Y, cloud.Center.Z);
+                Assert.Equal(anchor, galaxy.SectorOf(point));
+                for (var dx = -1; dx <= 1; dx++)
+                    for (var dz = -1; dz <= 1; dz++)
+                    {
+                        var sector = anchor.Offset(dx, 0, dz);
+                        var count = gas.Intersecting(galaxy, sector, neighbours);
+                        var expected = Math.Abs(dx * galaxy.SectorSize - cloud.Center.X) <= galaxy.SectorSize / 2 + cloud.HalfSize.X
+                            && Math.Abs(dz * galaxy.SectorSize - cloud.Center.Z) <= galaxy.SectorSize / 2 + cloud.HalfSize.Z;
+                        var found = false;
+                        foreach (var placed in neighbours[..count]) if (placed.Anchor == anchor) { Assert.Equal(cloud, placed.Cloud); found = true; }
+                        Assert.Equal(expected, found);
+                    }
+            }
+        Assert.True(clouds > 0);
+    }
+
+    [Theory]
+    [InlineData(20)]
+    [InlineData(160)]
+    public void RocksAtSectorSizeExtremesAreDeterministicAndStayInsideTheirOwner(int km)
+    {
+        var galaxy = World($"sectorSize={km}").Galaxy.WithSeed(42);
+        var a = new SectorContent();
+        var b = new SectorContent();
+        for (var x = -2; x <= 2; x++)
+        {
+            var coord = new SectorCoord(x, 0, 0);
+            galaxy.Generate(coord, a);
+            galaxy.Generate(coord, b);
+            Assert.Equal(Sectors.Hash(a), Sectors.Hash(b));
+            foreach (var rock in a.Asteroids.AsSpan(0, a.AsteroidCount))
+            {
+                var bound = (float)galaxy.SectorSize / 2 - rock.Radius;
+                Assert.InRange(rock.LocalPosition.X, -bound, bound);
+                Assert.InRange(rock.LocalPosition.Y, -bound, bound);
+                Assert.InRange(rock.LocalPosition.Z, -bound, bound);
+            }
+        }
+    }
+
+    [Fact]
+    public void CloudWispinessVariationChangesOnlyDrawing()
+    {
+        var plain = World("gasWispinessMin=1", "gasWispinessMax=1").Galaxy.WithSeed(42);
+        var varied = World("gasWispinessMin=0.5", "gasWispinessMax=1.5").Galaxy.WithSeed(42);
+        var a = new SectorContent();
+        var b = new SectorContent();
+        foreach (var coord in new SectorCoord[] { default, new(-3, 0, 5), new(133, 0, -77) })
+        {
+            plain.Generate(coord, a);
+            varied.Generate(coord, b);
+            Assert.Equal(Sectors.Hash(a), Sectors.Hash(b));
+            Assert.Equal(a.GasCloud, b.GasCloud);
+        }
+        Assert.Equal(0.5f, varied.GasClouds!.WispinessOf(new(default, default, 0)));
+        Assert.Equal(1.5f, varied.GasClouds.WispinessOf(new(default, default, 128)));
+        Assert.Equal(1, plain.GasClouds!.WispinessOf(new(default, default, 64)));
+    }
+
+    [Fact]
+    public void CommentedServerExampleCoversEveryDefaultWithoutWarnings()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "content", "server", "server-settings.jsonc");
+        var warnings = new List<string>();
+        var settings = Content.SettingCatalog.Build(path, [], warnings.Add);
+        var server = ServerFile.Read(path, warnings.Add);
+        Assert.Equal(Content.SettingCatalog.Defaults, settings);
+        Assert.Equal((ushort)27420, server.Port!.Value);
+        Assert.Empty(warnings);
+        using var json = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(path), new System.Text.Json.JsonDocumentOptions
+        { CommentHandling = System.Text.Json.JsonCommentHandling.Skip, AllowTrailingCommas = true });
+        foreach (var definition in Content.SettingCatalog.Definitions)
+            if (definition.Kind == SettingKind.Choice)
+                Assert.Equal(definition.Format(definition.Default), json.RootElement.GetProperty(definition.Id).GetString());
+            else
+                Assert.Equal(settings.Get(definition), json.RootElement.GetProperty(definition.Id).GetSingle());
+    }
+
     /// <summary>Flies a pod at an asteroid at a speed until it bounces back, is destroyed, or the ticks run out.</summary>
     private static HullState Crash(GameContent world, float speed, out ulong alive, bool verifyContactBounce = false, bool fixedRock = false)
     {
@@ -411,8 +529,8 @@ public sealed class WorldSettingParsingTests
     public void TheShippedSettingsHaveTheirRangesAndDefaults()
     {
         Assert.Equal(["collisionDamage", "collisionShields", "shieldRecharge", "jumpChargeSpeed", "hullStrength", "asteroidAmount", "asteroidCap", "asteroidSize", "asteroidFieldSize", "asteroidFrequency", "asteroidSpacing", "asteroidOreShare", "asteroidOreGrade"], Catalog.Definitions.ToArray().Take(13).Select(d => d.Id));
-        Assert.Equal(39, Catalog.Definitions.Length);
-        Assert.Equal(10, Catalog.Definitions.ToArray().Count(d => d.Upper is not null));
+        Assert.Equal(47, Catalog.Definitions.Length);
+        Assert.Equal(13, Catalog.Definitions.ToArray().Count(d => d.Upper is not null));
 
         var damage = Catalog.Find("collisionDamage")!;
         Assert.Equal((SettingKind.Multiplier, 1f, 0f, 4f), (damage.Kind, damage.Default, damage.Minimum, damage.Maximum));

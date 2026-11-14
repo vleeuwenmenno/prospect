@@ -17,7 +17,7 @@ public sealed class JumpLimitsTests
     {
         var ids = Enum.GetValues<MessageId>();
         Assert.Equal(ids.Length, ids.Distinct().Count());
-        Assert.Equal(39u, ProtocolInfo.Version);
+        Assert.Equal(40u, ProtocolInfo.Version);
         Span<byte> bytes = stackalloc byte[ExplorationMessage.MaxWireSize];
         Span<SectorChart> charts = stackalloc SectorChart[ExplorationMessage.MaxCharts];
         for (var i = 0; i < charts.Length; i++) charts[i] = new(1, new(i, 0, 0), 0);
@@ -94,8 +94,8 @@ public sealed class JumpLimitsTests
     {
         Assert.Equal(JumpRefusal.TooClose, Evaluate(4999).Reason);
         Assert.True(Evaluate(5000).CanIssueOrder);
-        Assert.True(Evaluate(400000).CanIssueOrder);
-        Assert.Equal(JumpRefusal.TooFar, Evaluate(400001).Reason);
+        Assert.True(Evaluate(800000).CanIssueOrder);
+        Assert.Equal(JumpRefusal.TooFar, Evaluate(800001).Reason);
         Assert.Equal(JumpRefusal.InvalidTarget, Evaluate(double.NaN).Reason);
         Assert.Equal(Evaluate(100000), JumpRules.Evaluate(default, new Double3(60000, 0, 80000), Content.Pod.Flight, Content.Exploration, false));
     }
@@ -103,11 +103,11 @@ public sealed class JumpLimitsTests
     [Fact]
     public void RiskIsMonotoneSafeNearAndRemovedByChart()
     {
-        Assert.Equal(0, Evaluate(40000).Risk);
-        Assert.Equal(0.5f, Evaluate(220000).Risk);
-        Assert.Equal(1, Evaluate(400000).Risk);
-        Assert.Equal(0, Evaluate(400000, true).Risk);
-        var trip = Evaluate(220000);
+        Assert.Equal(0, Evaluate(80000).Risk);
+        Assert.Equal(0.5f, Evaluate(440000).Risk);
+        Assert.Equal(1, Evaluate(800000).Risk);
+        Assert.Equal(0, Evaluate(800000, true).Risk);
+        var trip = Evaluate(440000);
         var hits = 0;
         for (var tick = 0; tick < 1000; tick++)
         {

@@ -793,3 +793,14 @@ Neither schema changes saved state. Existing WorldView NAV consumption and UI fe
 - Evaluator 6 scales shield power with the world recharge multiplier, preserving MJ/point.
 - Existing `blocks/blocks.json` identity covers emitter draw, recharge and restart multiplier (now 4).
 - No message or saved-state layout changed. Offline state, shield charge and battery already carry recovery progress.
+
+## Commented default settings
+
+Copy `content/server/server-settings.jsonc` and pass `--settings <copy>`.
+Both world values and the `server` object accept JSON comments and trailing commas.
+The example lists every catalogue setting, unit, range and default, plus all supported server-file options.
+A test checks every world default and parses the server options without warnings.
+The container ships it at `/app/content/server/server-settings.jsonc`; use an explicit `--settings` argument to opt in.
+CLI-only startup options are documented at the top; passwords are better supplied through `PROSPECT_PASSWORD`.
+Sector size and gas ranges are saved world settings; they cannot change when reopening a world.
+Drive blocks specify range in sectors, converted to metres by the shared hull evaluator (version 7).

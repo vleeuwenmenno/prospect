@@ -1,0 +1,126 @@
+// Copy this file and pass --settings <file>. CLI overrides these values.
+// CLI-only options: --seed (uint64, default 5787775690372105044), --world (folder, absent),
+// --settings (file path, absent), --set (repeatable id=value, catalogue ranges/defaults below; no overrides by default).
+// --create-world (boolean, false), --autosave (seconds, 1–3600, 30), --verbose (boolean, false).
+{
+  // How hard a collision hits. At 0 collisions push but never damage. Unit: multiplier; range: 0–4; default: 1.
+  "collisionDamage": 1,
+  // Full: the shield absorbs a collision. Weak: it absorbs it but drains four times as fast. None: collisions pass the shield and hit the blocks. Unit: choice; range: Full, Weak, None; default: Full.
+  "collisionShields": "Full",
+  // How fast shields recharge. Unit: multiplier; range: 0.25–4; default: 1.
+  "shieldRecharge": 1,
+  // How fast a jump drive charges. The energy a jump takes stays the same. Unit: multiplier; range: 0.25–4; default: 1.
+  "jumpChargeSpeed": 1,
+  // How many hit points every block has. Unit: multiplier; range: 0.25–4; default: 1.
+  "hullStrength": 1,
+  // 1x is the former maximum preset. Scales requested counts, including home. Zero removes all asteroids. Placement can fall short in crowded fields. Unit: multiplier; range: 0–5; default: 1.
+  "asteroidAmount": 1,
+  // Upper count limit, including home. Placement can produce fewer. Never exceeds 20480 or the shared content limit. Unit: integer; range: 0–20480; default: 20480.
+  "asteroidCap": 20480,
+  // Scales radii. Rocks are limited to fit their field and sector. Unit: multiplier; range: 0.25–5; default: 1.
+  "asteroidSize": 1,
+  // Scales field dimensions, including home, capped to the sector. Smaller fields may fit fewer rocks. Unit: multiplier; range: 0.5–5; default: 1.
+  "asteroidFieldSize": 1,
+  // Scales the chance a sector has fields, capped at 100%. Does not remove the guaranteed home field; use Asteroid amount for that. Unit: multiplier; range: 0–5; default: 1.
+  "asteroidFrequency": 1,
+  // Scales clearance between rocks. Never less than nonoverlap spacing. Crowded fields may fit fewer rocks. Unit: multiplier; range: 0.5–5; default: 1.
+  "asteroidSpacing": 1,
+  // Scales the fraction of rocks carrying ore, capped at 100%. Cannot add resources absent from a sector. Unit: multiplier; range: 0–5; default: 1.
+  "asteroidOreShare": 1,
+  // Scales grade within ore-bearing rocks, capped at 100%. Does not change which resources occur. Unit: multiplier; range: 0.25–5; default: 1.
+  "asteroidOreGrade": 1,
+  // Requested count per sector with fields, not per field. Clamps sampled counts. Placement may fall short. Amount/cap zero disables rocks; frequency zero never adds rocks to meet this minimum (home keeps its baseline field). Unit: count; range: 0–20480; default: 0.
+  "asteroidCountMin": 0,
+  // Clamps sampled radius after the size multiplier; diameter is twice radius. Existing size classes remain weighted, not uniformly sampled. Rocks that cannot fit at the minimum are omitted. Unit: m; range: 0.75–6000; default: 0.75.
+  "asteroidRadiusMin": 0.75,
+  // Clamps the existing sampled distribution; does not replace it with uniform randomness. Unit: m; range: 0.75–6000; default: 6000.
+  "asteroidRadiusMax": 6000,
+  // Clamps sampled sector richness (0–1), after the home minimum. Richness affects the map label, ore-bearing fraction and sampled grade; it does not directly add a material. Unit: 0–1; range: 0–1; default: 0.
+  "oreRichnessMin": 0,
+  // Clamps the existing sampled distribution; does not replace it with uniform randomness. Unit: 0–1; range: 0–1; default: 1.
+  "oreRichnessMax": 1,
+  // Clamps grade within ore-bearing rocks after the grade multiplier. 0–1 means 0–100%; this does not change how many rocks carry ore. Material grade limits apply afterwards. Unit: 0–1; range: 0–1; default: 0.
+  "oreGradeMin": 0,
+  // Clamps the existing sampled distribution; does not replace it with uniform randomness. Unit: 0–1; range: 0–1; default: 1.
+  "oreGradeMax": 1,
+  // Weights this material among resources already available in the sector. Zero removes its share; never adds it to an unavailable sector. Unit: x; range: 0–4; default: 1.
+  "ironAbundance": 1,
+  // Clamps grade after the global grade range. Applies only to rocks carrying this material; 0–1 is 0–100%. Unit: 0–1; range: 0–1; default: 0.
+  "ironGradeMin": 0,
+  // Clamps the existing sampled distribution; does not replace it with uniform randomness. Unit: 0–1; range: 0–1; default: 1.
+  "ironGradeMax": 1,
+  // Weights this material among resources already available in the sector. Zero removes its share; never adds it to an unavailable sector. Unit: x; range: 0–4; default: 1.
+  "copperAbundance": 1,
+  // Clamps grade after the global grade range. Applies only to rocks carrying this material; 0–1 is 0–100%. Unit: 0–1; range: 0–1; default: 0.
+  "copperGradeMin": 0,
+  // Clamps the existing sampled distribution; does not replace it with uniform randomness. Unit: 0–1; range: 0–1; default: 1.
+  "copperGradeMax": 1,
+  // Weights this material among resources already available in the sector. Zero removes its share; never adds it to an unavailable sector. Unit: x; range: 0–4; default: 1.
+  "nickelAbundance": 1,
+  // Clamps grade after the global grade range. Applies only to rocks carrying this material; 0–1 is 0–100%. Unit: 0–1; range: 0–1; default: 0.
+  "nickelGradeMin": 0,
+  // Clamps the existing sampled distribution; does not replace it with uniform randomness. Unit: 0–1; range: 0–1; default: 1.
+  "nickelGradeMax": 1,
+  // Weights this material among resources already available in the sector. Zero removes its share; never adds it to an unavailable sector. Unit: x; range: 0–4; default: 1.
+  "titaniumAbundance": 1,
+  // Clamps grade after the global grade range. Applies only to rocks carrying this material; 0–1 is 0–100%. Unit: 0–1; range: 0–1; default: 0.
+  "titaniumGradeMin": 0,
+  // Clamps the existing sampled distribution; does not replace it with uniform randomness. Unit: 0–1; range: 0–1; default: 1.
+  "titaniumGradeMax": 1,
+  // Weights this material among resources already available in the sector. Zero removes its share; never adds it to an unavailable sector. Unit: x; range: 0–4; default: 1.
+  "silverAbundance": 1,
+  // Clamps grade after the global grade range. Applies only to rocks carrying this material; 0–1 is 0–100%. Unit: 0–1; range: 0–1; default: 0.
+  "silverGradeMin": 0,
+  // Clamps the existing sampled distribution; does not replace it with uniform randomness. Unit: 0–1; range: 0–1; default: 1.
+  "silverGradeMax": 1,
+  // Weights this material among resources already available in the sector. Zero removes its share; never adds it to an unavailable sector. Unit: x; range: 0–4; default: 1.
+  "goldAbundance": 1,
+  // Clamps grade after the global grade range. Applies only to rocks carrying this material; 0–1 is 0–100%. Unit: 0–1; range: 0–1; default: 0.
+  "goldGradeMin": 0,
+  // Clamps the existing sampled distribution; does not replace it with uniform randomness. Unit: 0–1; range: 0–1; default: 1.
+  "goldGradeMax": 1,
+  // How soft and frayed gas clouds look: 0 is dense with a hard outline, 1 thins their outer gas into strands and gaps, 2 is the most. Changes only how clouds are drawn, never where they are. Unit: multiplier; range: 0–2; default: 1.
+  "gasWispiness": 1,
+  // Sector edge length. Drive range and the blind-safe band scale with it; minimum jump distance stays fixed. Unit: km; range: 20–160; default: 80.
+  "sectorSize": 80,
+  // Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. Unit: km; range: 1–80; default: 16.
+  "gasSizeMin": 16,
+  // Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. Unit: km; range: 1–80; default: 22.4.
+  "gasSizeMax": 22.4,
+  // Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. Unit: km; range: 1–160; default: 40.
+  "gasHugeSizeMin": 40,
+  // Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. Unit: km; range: 1–160; default: 80.
+  "gasHugeSizeMax": 80,
+  // Chance a candidate cloud uses the huge size range; separation can remove candidates. Unit: 0–1; range: 0–1; default: 0.08.
+  "gasHugeChance": 0.08,
+  // Deterministic per-cloud multiplier on gasWispiness. Drawing only; final wispiness capped at 2. Unit: x; range: 0–2; default: 0.75.
+  "gasWispinessMin": 0.75,
+  // Deterministic per-cloud multiplier on gasWispiness. Drawing only; final wispiness capped at 2. Unit: x; range: 0–2; default: 1.25.
+  "gasWispinessMax": 1.25,
+  "server": {
+    // Display name; text, 1–48 characters; default: PROSPECT server.
+    "name": "PROSPECT server",
+    // Admission/listing mode; unlisted or public; default: unlisted.
+    "visibility": "unlisted",
+    // UDP listening port; 1–65535; default: 27420.
+    "port": 27420,
+    // Player slots; 1–256; default: 16.
+    "maxPlayers": 16,
+    // Join secret; empty disables, otherwise 1–64 characters without controls; default: empty. Prefer PROSPECT_PASSWORD.
+    "password": "",
+    // Listing URL or off; default from content/net/listing.json.
+    "listing": "https://prospect.mvl.sh",
+    "limits": {
+      // Concurrent pending connections per address; 1–pendingTotal; default: 8.
+      "pendingPerAddress": 8,
+      // Total pending connections; 1–1024; default: 32,
+      "pendingTotal": 32,
+      // Connections per address in a burst; 1–10000; default: 20.
+      "connectionBurst": 20,
+      // Refill connections per second per address; 0.01–1000; default: 1.
+      "connectionsPerSecond": 1,
+      // Handshake deadline in seconds; 1–60; default: 5.
+      "handshakeSeconds": 5,
+    },
+  },
+}

@@ -17,7 +17,7 @@ public sealed class WorldSpaceGenerationTests
     [Fact]
     public void FieldsRunThroughSectorWallsWithoutASeam()
     {
-        var galaxy = Content.Galaxy.WithSeed(42);
+        var galaxy = Content.WithSettings(Content.SettingCatalog.Build(null, ["sectorSize=40", "gasSizeMin=8", "gasSizeMax=11.2", "gasHugeSizeMin=20", "gasHugeSizeMax=40"])).Galaxy.WithSeed(42);
         var half = (float)(galaxy.SectorSize / 2);
         const int reach = 12;
         const int side = reach * 2 + 1;
@@ -125,6 +125,7 @@ public sealed class WorldSpaceGenerationTests
     private static Galaxy EvenFields(ulong seed, float share, bool thinned = false)
     {
         var json = JsonNode.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "content", "galaxy", "galaxy.json")))!;
+        json["sectorSize"] = 40000; // This fixture counts fixed one-kilometre bands across a 40 km sector.
         var module = json["sectorModules"]![0]!.AsObject();
         module.Remove("baseline");
         if (!thinned)

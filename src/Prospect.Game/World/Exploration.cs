@@ -8,6 +8,8 @@ public sealed record ExplorationRules(double SensorRadius, int ScanTicks, int Co
 {
     public double JumpMinimum { get; init; }
     public double BlindSafeDistance { get; init; }
+    public double BlindSafeSectors { get; init; }
+    public ExplorationRules ForSectorSize(double size) => this with { BlindSafeDistance = BlindSafeSectors * size };
     public float BlindMaxDamage { get; init; }
     /// <summary>Hard per-owner storage bound.</summary>
     public const int MaxChartsPerOwner = 4096;
@@ -33,16 +35,16 @@ public sealed record ExplorationRules(double SensorRadius, int ScanTicks, int Co
             || contact * TickLoop.SimulationHz > int.MaxValue || charts <= 0 || charts > MaxChartsPerOwner)
             throw new InvalidDataException("Invalid exploration rules.");
         var minimum = root.GetProperty("jumpMinimum"u8).GetDouble();
-        var safe = root.GetProperty("blindSafeDistance"u8).GetDouble();
+        var safe = root.GetProperty("blindSafeSectors"u8).GetDouble();
         var damage = root.GetProperty("blindMaxDamage"u8).GetSingle();
-        if (!double.IsFinite(minimum) || minimum <= 0 || !double.IsFinite(safe) || safe < minimum
+        if (!double.IsFinite(minimum) || minimum <= 0 || !double.IsFinite(safe) || safe <= 0
             || !float.IsFinite(damage) || damage <= 0 || damage > 1)
             throw new InvalidDataException("Invalid jump rules.");
         var proximity = root.GetProperty("proximityRadius"u8).GetDouble();
         if (!double.IsFinite(proximity) || proximity <= 0 || proximity > radius) throw new InvalidDataException("Invalid proximity radius.");
         return new(radius, (int)Math.Ceiling(scan * TickLoop.SimulationHz),
             (int)Math.Ceiling(contact * TickLoop.SimulationHz), charts)
-        { ProximityRadius = proximity, JumpMinimum = minimum, BlindSafeDistance = safe, BlindMaxDamage = damage };
+        { ProximityRadius = proximity, JumpMinimum = minimum, BlindSafeSectors = safe, BlindSafeDistance = safe * 80000, BlindMaxDamage = damage };
     }
 }
 

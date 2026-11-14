@@ -388,7 +388,7 @@ public sealed class BoxHullSums
             Ftl = ftl,
             FtlPower = ftlPower,
             FtlEnergy = rules.FtlEnergyPerTonne * mass,
-            FtlMaxDistance = sum.Drive == 0 ? 0 : _boxes[sum.Drive - 1].Type.FtlMaxDistance,
+            FtlMaxDistance = sum.Drive == 0 ? 0 : _boxes[sum.Drive - 1].Type.FtlMaxSectors * rules.SectorSize,
             FtlAlignCosine = MathF.Cos(rules.FtlAlignDegrees * MathF.PI / 180f),
             FtlCalculateSeconds = rules.FtlCalculateSeconds,
             FtlTunnelSeconds = rules.FtlTunnelSeconds,

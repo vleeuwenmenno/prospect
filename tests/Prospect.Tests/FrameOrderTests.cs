@@ -724,11 +724,11 @@ public sealed class FrameOrderTests : IDisposable
         Assert.True(requests.Contains(default));
         _world.SetCommandCapturePose(focus, 90000, 0, -0.8f);
         Frame();
-        Assert.Equal(2, galaxy.SectorOf(_world.CameraPosition).Y);
+        Assert.Equal(1, galaxy.SectorOf(_world.CameraPosition).Y);
         Assert.True(requests.Contains(default));
         _world.SetCommandCapturePose(new Double3(400000, 0, 0), 90000, 0, -0.8f);
         Frame();
-        Assert.Equal(new SectorCoord(10, 0, 0), requests.Coordinates[0]);
+        Assert.Equal(new SectorCoord(5, 0, 0), requests.Coordinates[0]);
         _world.SetMode(ViewMode.Pilot);
         for (var i = 0; i < 30; i++) Frame();
         Assert.Equal(0, _world.CommandBlend);
@@ -2629,7 +2629,7 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal(1, plan.Ready);
         Assert.True(plan.PlotsOnly);
         Assert.True(plan.Reference.Blind);
-        Assert.InRange(plan.Reference.Risk, 0.16f, 0.17f);
+        Assert.InRange(plan.Reference.Risk, 0.027f, 0.028f);
         Frame(() =>
         {
             Move(CourseRow(1));
@@ -2699,7 +2699,7 @@ public sealed class FrameOrderTests : IDisposable
     [Theory]
     [InlineData(3000.0, "TooClose")]
     [InlineData(10000.0, "SameSector")]
-    [InlineData(500000.0, "TooFar")]
+    [InlineData(900000.0, "TooFar")]
     public void ATargetOutOfRangeLeavesTheJumpRowDisabledWithItsReason(double metres, string reason)
     {
         var target = Ahead(metres);
@@ -2708,7 +2708,7 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal(Enum.Parse<JumpBlock>(reason), plan.Block);
         Assert.Equal(0, plan.Ready);
         Assert.Equal(metres, plan.Reference.Distance, 1.0);
-        Assert.Equal(400000.0, plan.MaxDistance);
+        Assert.Equal(800000.0, plan.MaxDistance);
         Assert.Equal(5000.0, plan.MinDistance);
 
         // The row takes the click and does nothing: the menu stays open and nothing is sent.
@@ -2748,7 +2748,7 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal(JumpBlock.NoShips, plan.Block);
         Assert.Equal(0, plan.Ships);
         Assert.True(plan.HasReference);
-        Assert.InRange(plan.Reference.Risk, 0.16f, 0.17f);
+        Assert.InRange(plan.Reference.Risk, 0.027f, 0.028f);
         Frame(() =>
         {
             Move(CourseRow(0));

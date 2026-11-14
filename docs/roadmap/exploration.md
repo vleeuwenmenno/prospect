@@ -121,12 +121,12 @@ This protection applies only to blind-jump damage; other damage remains dangerou
 
 - The command view's right click opens a menu at the cursor: Move here, and Plot jump or Jump here. Escape or a click elsewhere closes it.
 - The menu, the map's course menu and the pinned card read one plan (`JumpPlan`, `WorldView.PlanJump`): `JumpRules.Evaluate` per selected ship.
-- Too close, too far, driveless, in transit, or in the ship's own sector: the row is disabled and says why.
+- Too close, too far, driveless, or in transit: the row is disabled and says why.
 - The jump line says charted, or blind with hit chance and damage; its warning colour is `courseRiskDanger` in `content/visuals/map.json`.
 - The label says who acts: Plot jump when only the ship being flown can go, Jump here when other ships go by themselves.
 - A mixed selection plots the ship being flown and orders the rest.
 - A refusal from `Exploration.Navigation` shows for `courseRefusalSeconds`: on the jump strip, and under the command view's status.
-- Open: a jump inside the ship's own sector (5 km or more) is legal for the server but held back by the UI, which clears a NAV point once the hull is in its sector.
+- Decided: same-sector jumps are allowed when they meet the fixed minimum; client navigation must preserve the target until arrival.
 
 ## Required technical boundary
 
@@ -150,8 +150,10 @@ Shared deterministic generation code can remain shared even when its secret inpu
 
 ### Decided (provisional, tunable): jump figures
 
-- Minimum 5,000 m; blind-safe band through 40,000 m (one sector width).
-- Every current drive block has a 400,000 m maximum (ten sector widths), including the drone drive.
+- min = fixed km; max = derived from drive blocks/modules. Minimum remains 5,000 m in content, independent of sector size.
+- Blind-safe band is one applied sector width (80 km by default).
+- Every current drive block has `ftlMaxSectors: 10`, including the drone drive. `BoxHullSums` converts the selected live block’s stat to metres using the world’s sector size (800 km by default).
+- Future modules may add to or modify the derived maximum in that same hull arithmetic; it is not a global range limit.
 - The selected live drive block supplies range; extra blocks and block size do not multiply it.
 - Beyond the safe band, hit probability rises linearly from 0 to 100% at maximum range.
 - A hit removes the same linear fraction times 90% of current remaining HP, capped at the floor.
