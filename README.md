@@ -21,6 +21,12 @@ Rare decorative volumetric gas clouds are generated: lopsided, self-shadowed, wi
 
 Explicit private local claims have a nonvisual API backed by account-service tickets and an exact durable save commit. No player-facing claim UI exists; remote saved-world admission remains missing. Linked local owners still play offline. Save layout 3 refuses older layouts without migration.
 
+In-game tips: the first time the map, the command view or the ship editor opens, or a shield goes down or the
+battery runs low, a small panel explains it. Several at once stack with a counter and Next; Close shows the tip again
+next time, "Don't show this again" hides it on this client, and Settings, Tips, **Reset tips** shows all again.
+Tips are data in `content/visuals/tips.json`. The "edit the drone with Ctrl+B" tip exists and waits for the New ship
+dialog to fire it; nothing fires it yet.
+
 Chat, the player roster and parties work end to end: the server decides, the client shows them.
 
 - **Navigation bar** along the top. In a game: Play (pilot view), Fleet (command view), Map, Social and
@@ -341,6 +347,9 @@ The cursor is hidden only in the pilot view. The command view, the map and every
   gets no controls while it is open. A press on a panel never reaches the ship, with one exception: a part card
   dragged out of the part list. When the editor closes, flight keys still held from it do nothing until they are
   let go.
+
+Tips: `Esc` closes a tip before anything else. In the pilot view a tip takes no input, so flight is not
+interrupted: hold `Shift` to click its Next, Close and "Don't show this again".
 
 Gameplay has no bottom-left keybind strip. Bindings come from `content/input/bindings.json`.
 

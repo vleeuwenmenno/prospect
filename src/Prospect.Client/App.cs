@@ -71,6 +71,12 @@ internal sealed class AppOptions
     /// <summary>A fixed account view instead of the account service (<c>--account-sample</c>); captures and benchmarks only.</summary>
     public string? AccountSample { get; set; }
 
+    /// <summary>
+    /// Tips in a scripted run (<c>--tips-sample</c>), which shows none otherwise: <c>on</c> lets them fire as in play,
+    /// <c>stack</c> also fires the command view's three at once, <c>reset</c> opens the Settings reset question.
+    /// </summary>
+    public string? TipsSample { get; set; }
+
     /// <summary>Open the command view or the map once in space; for scripted screenshots.</summary>
     public string? OpenView { get; set; }
     /// <summary>Muted deterministic camera placement around a generated cloud.</summary>
@@ -185,6 +191,7 @@ internal sealed class App : IDisposable
     private readonly Texture2D _galaxyImage;
     private long _lastFrameTimestamp;
     private bool _viewOpened;
+    private bool _tipsSampled;
     private readonly CatalogueMeshes _catalogueMeshes;
 
     /// <summary>Whether the acquired catalogue can be drawn safely.</summary>
@@ -371,6 +378,9 @@ internal sealed class App : IDisposable
 
     public ClientSettings Settings { get; }
     public GameContent Content { get; }
+
+    /// <summary>True when a scripted run asked for tips; a capture or benchmark shows none otherwise.</summary>
+    public bool TipsInScriptedRuns => _options.TipsSample is not null;
 
     /// <summary>
     /// The world settings the next local game starts with: the content's defaults with whatever <c>--set</c>
@@ -695,7 +705,11 @@ internal sealed class App : IDisposable
             }
         }
         else if (_options.StartScreen == Screen.Settings)
+        {
             _screens.OpenSettings(Screen.MainMenu);
+            if (_options.TipsSample == "reset")
+                _screens.PreviewTipReset();
+        }
         else if (_options.StartScreen == Screen.NewGame)
             _screens.OpenNewGame();
         else if (_options.StartScreen == Screen.LoadWorld)
@@ -788,6 +802,8 @@ internal sealed class App : IDisposable
                 CommandView = World.PointerView,
             };
             _pointer.Update(pointerFrame);
+            // Escape closes a tip before any other surface takes it.
+            _screens.HandleTipShortcut(inSpace && focused);
             _screens.HandleControlsShortcut(inSpace && focused);
             _screens.HandleSocialShortcuts(inSpace && focused);
             _screens.HandleSectorInfoShortcut(inSpace && focused);
@@ -1105,6 +1121,13 @@ internal sealed class App : IDisposable
             }
             else
                 _screens.OpenMap();
+        }
+
+        // The command view's tips, all at once, in whatever view was opened: a stack to look at.
+        if (_options.TipsSample == "stack" && !_tipsSampled && Session is not null && _sinceSplash > 1.2f)
+        {
+            _tipsSampled = true;
+            _screens.FireTip(TipTriggers.CommandViewOpened);
         }
 
         World.GasView = Devices.Muted ? _options.GasView : null;

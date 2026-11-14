@@ -42,6 +42,9 @@ internal static class Program
           --account-sample <s>    With --capture or --bench: the account and friends show a fixed sample instead of the
                                   account service, and nothing signs in: signed-out, waiting, signed-in, friends (full
                                   lists of hostile names), failed or off
+          --tips-sample <s>       With --capture or --bench: show the in-game tips, which a scripted run hides otherwise.
+                                  on lets them fire as in play (--open map shows the map's tips), stack fires the command
+                                  view's three at once, and reset (with --start settings) opens the Reset tips question
           --gas-fixture <1..13>    With --capture only: controlled production-shader regression inputs (13: real-source overlay check)
           --gas-view <view>       Muted cloud camera: outside, inside, edge, offscreen, absent, inside-absent, pilot-absent, pilot
           --gas-distance <radii>  With --gas-view outside or absent: the camera's distance in largest half-extents of the cloud
@@ -196,6 +199,9 @@ internal static class Program
                     if (options.BrowserSample == BrowserSample.None)
                         return Fail($"Unknown browser sample: {args[i]}");
                     break;
+                case "--tips-sample" when hasValue && args[i + 1] is "on" or "stack" or "reset":
+                    options.TipsSample = args[++i];
+                    break;
                 case "--account-sample" when hasValue && args[i + 1] is "signed-out" or "waiting" or "signed-in" or "friends" or "failed" or "off":
                     options.AccountSample = args[++i];
                     break;
@@ -344,6 +350,12 @@ internal static class Program
         // A sample stands in for the account service only where nobody can act on it.
         if (options.AccountSample is not null && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--account-sample works only with --capture or --bench.");
+
+        // Tips show in a scripted run only where the run asks for them; the reset question lives on Settings.
+        if (options.TipsSample is not null && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--tips-sample works only with --capture or --bench.");
+        if (options.TipsSample == "reset" && options.StartScreen != Screen.Settings)
+            return Fail("--tips-sample reset works only with --start settings.");
 
         // The delete views act on a folder of worlds of the capture's own, never on the player's.
         if (options.OpenView is "delete-world" or "delete-incompatible" or "deleted-incompatible"

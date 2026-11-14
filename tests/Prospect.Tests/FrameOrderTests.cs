@@ -562,6 +562,7 @@ public sealed class FrameOrderTests : IDisposable
         }
 
         DrawFloating();
+        DrawTipPanel();
         DrawCommandCourseMenu();
         // As the editor screen does before its panels: a press on one ends a turn, keeping it.
         _world.EndPartRotationOnPanelPress();
@@ -696,6 +697,221 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     private float2 FieldOf(FloatingWindow window) => window.Min + new float2(40, FloatingWindow.TitleHeight + 10);
+
+    // The tip panel as ScreenHost draws it with the production helpers: placed from its anchor, then drawn, taking
+    // input unless the pointer is hidden for flight.
+    private TipBoard? _tipBoard;
+    private TipCatalogue? _tipCatalogue;
+    private ClientSettings? _tipSettings;
+    private UiContext? _tipKit;
+    private float _tipScale = 1f;
+    private HudRect _tipRect;
+
+    private void UseTips(float scale = 1f)
+    {
+        var fonts = ShippedFonts();
+        var kit = (UiContext)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(UiContext));
+        void Field(string name, object value) => typeof(UiContext).GetField("<" + name + ">k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(kit, value);
+        Field("Sans", fonts.Sans);
+        Field("SansMedium", fonts.SansMedium);
+        Field("SansBold", fonts.SansBold);
+        Field("Mono", fonts.Mono);
+        Field("Scale", scale);
+        Field("DeltaTime", 1f / 60f);
+        ImGui.GetStyle().FontScaleMain = scale;
+        _tipKit = kit;
+        _tipScale = scale;
+        _tipSettings = new ClientSettings();
+        _tipCatalogue = TipCatalogue.Load(Path.Combine(AppContext.BaseDirectory, "content", "visuals", "tips.json"), _actions);
+        _tipBoard = new TipBoard(_tipCatalogue, _tipSettings);
+    }
+
+    private void DrawTipPanel()
+    {
+        if (_tipBoard is not { Active: true } board)
+            return;
+        Kit.BeginFrame(_tipKit!);
+        var tip = board.Current;
+        var size = TipPanel.Measure(_tipCatalogue!, tip, Screen.X);
+        var known = tip.Anchor.Region == TipRegion.Screen;
+        var at = TipPlacement.Place(tip.Anchor, known, default, size, Screen, _tipScale);
+        _tipRect = new HudRect(at.X, at.Y, at.X + size.X, at.Y + size.Y);
+        TipPanel.Draw(board, _tipCatalogue!, _tipRect, !_router.Captured);
+    }
+
+    private float2 TipPoint(in HudRect rect) => new((rect.Left + rect.Right) * 0.5f, (rect.Top + rect.Bottom) * 0.5f);
+
+    private TipPanel.Rows TipRows() => TipPanel.RowsOf(_tipCatalogue!, _tipBoard!.Count > 1, _tipRect);
+
+    private void ClickAt(float2 point)
+    {
+        Frame(() => Move(point));
+        Frame();
+        Frame(() => Click());
+        Frame();
+    }
+
+    [Theory]
+    [InlineData(1f)]
+    [InlineData(2f)]
+    public void ATipStackShowsOneAtATimeNextGoesRoundAndClosingWithoutTheTickBringsItBack(float scale)
+    {
+        UseTips(scale);
+        _surfaceOpen = true;
+        Frame(() => Move(EmptySpace));
+        var board = _tipBoard!;
+        Assert.Equal(3, board.Fire(TipTriggers.CommandViewOpened));
+        Frame();
+        Frame();
+        Assert.Equal(0, board.Index);
+        Assert.True(_tipRect.Width > 0);
+
+        var seen = new List<string> { board.Current.Id };
+        for (var i = 0; i < 3; i++)
+        {
+            ClickAt(TipPoint(TipRows().Next));
+            seen.Add(board.Current.Id);
+        }
+
+        Assert.Equal(["command-select", "command-jump", "command-fog", "command-select"], seen);
+
+        ClickAt(TipPoint(TipRows().Close));
+        Assert.False(board.Active);
+        Assert.Empty(_tipSettings!.HiddenTips);
+        Assert.Equal(3, board.Fire(TipTriggers.CommandViewOpened));
+    }
+
+    [Fact]
+    public void TheTickHidesATipForeverAndResetBringsItBack()
+    {
+        UseTips();
+        _surfaceOpen = true;
+        Frame(() => Move(EmptySpace));
+        var board = _tipBoard!;
+        board.Fire(TipTriggers.EnergyLow);
+        Frame();
+        Frame();
+        ClickAt(TipPoint(TipRows().Check));
+        Assert.True(board.DontShowAgain);
+        ClickAt(TipPoint(TipRows().Check));
+        Assert.False(board.DontShowAgain);
+        ClickAt(TipPoint(TipRows().Check));
+        ClickAt(TipPoint(TipRows().Close));
+        Assert.False(board.Active);
+        Assert.Equal(["energy-low"], _tipSettings!.HiddenTips);
+        Assert.Equal(0, board.Fire(TipTriggers.EnergyLow));
+
+        board.Reset();
+        Assert.Equal(1, board.Fire(TipTriggers.EnergyLow));
+    }
+
+    [Fact]
+    public void InFlightATipTakesNothingUntilThePointerIsShownAndNeverStopsTheHull()
+    {
+        UseTips();
+        var board = _tipBoard!;
+        board.Fire(TipTriggers.ShieldOffline);
+        Frame();
+        Frame();
+        Assert.True(_router.Captured);
+        Assert.False(ImGui.GetIO().WantCaptureMouse);
+        Bridge.Consume(out _, out _);
+
+        // Hidden pointer: W and boost fly the hull and the panel takes no press.
+        Frame(() =>
+        {
+            Key(GlfwKey.W, true);
+            Key(GlfwKey.Space, true);
+        });
+        Assert.True(Sent().Forward > 0);
+        Assert.False(ImGui.GetIO().WantCaptureKeyboard);
+        Assert.True(board.Active);
+
+        // Shift shows the pointer: Close works, and the flight keys still reach the hull afterwards.
+        Frame(() => Key(GlfwKey.LeftShift, true));
+        ClickAt(TipPoint(TipRows().Close));
+        Assert.False(_router.Captured);
+        Assert.False(board.Active);
+        Bridge.Consume(out _, out _);
+        Frame();
+        Assert.True(Sent().Forward > 0);
+        Assert.False(ImGui.GetIO().WantCaptureKeyboard);
+
+        // Letting go of Shift gives the pointer back to flight: the tip never kept it.
+        Frame(() => Key(GlfwKey.LeftShift, false));
+        Frame();
+        Assert.True(_router.Captured);
+    }
+
+    [Fact]
+    public void APressOnATipNeverReachesTheWorld()
+    {
+        UseTips();
+        _world.SetMode(ViewMode.Command);
+        _world.SelectAllOwned();
+        Frame();
+        Frame();
+        var owned = _world.Selection.Length;
+        Assert.True(owned > 0);
+
+        // Control: a click on empty space in the command view clears the selection.
+        ClickAt(EmptySpace);
+        Assert.Equal(0, _world.Selection.Length);
+        _world.SelectAllOwned();
+        Assert.Equal(owned, _world.Selection.Length);
+
+        // With a tip there, a click on its text, its tick, Next and Close leaves it alone.
+        var board = _tipBoard!;
+        board.Fire(TipTriggers.CommandViewOpened);
+        Frame();
+        Frame();
+        ClickAt(new float2(TipPoint(_tipRect).X, _tipRect.Top + 12));
+        Assert.Equal(owned, _world.Selection.Length);
+        ClickAt(TipPoint(TipRows().Check));
+        Assert.Equal(owned, _world.Selection.Length);
+        ClickAt(TipPoint(TipRows().Next));
+        Assert.Equal(owned, _world.Selection.Length);
+        // The tick was set, so Next hid that tip and went on to the one after it.
+        Assert.Equal(2, board.Count);
+        ClickAt(TipPoint(TipRows().Close));
+        Assert.Equal(owned, _world.Selection.Length);
+        Assert.False(board.Active);
+
+        // The panel gone, the same click is the world's again.
+        ClickAt(EmptySpace);
+        Assert.Equal(0, _world.Selection.Length);
+    }
+
+    [Fact]
+    public void EscapeClosesTheTipBeforeAnythingElseTakesIt()
+    {
+        UseTips();
+        _surfaceOpen = true;
+        var board = _tipBoard!;
+        board.Fire(TipTriggers.MapOpened);
+        Frame();
+        Frame();
+        var others = 0;
+
+        // As App.Run and ScreenHost order it: the tip reads Escape first, the rest only when it did not take it.
+        bool Shortcut()
+        {
+            if (board.Escape(board.Active, _actions.Pressed(_devices, InputAction.Pause, true)))
+                return true;
+            if (_actions.Pressed(_devices, InputAction.Pause, true))
+                others++;
+            return false;
+        }
+
+        Frame(() => Key(GlfwKey.Escape, true), Shortcut);
+        Assert.False(board.Active);
+        Assert.Equal(0, others);
+        Frame(() => Key(GlfwKey.Escape, false));
+
+        // With nothing shown the same press is the next surface's.
+        Frame(() => Key(GlfwKey.Escape, true), Shortcut);
+        Assert.Equal(1, others);
+    }
 
     [Fact]
     public void PickingDropsRetainedMaskWhenCameraAdvancedWithoutARender()
