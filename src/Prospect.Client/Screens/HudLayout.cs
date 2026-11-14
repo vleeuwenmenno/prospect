@@ -72,6 +72,9 @@ internal static class HudLayout
     /// <summary>The space kept between two neighbouring pieces.</summary>
     public const float Gap = 12f;
 
+    /// <summary>The height of the pilot's status chip above the flight console.</summary>
+    public const float ChipHeight = 26f;
+
     /// <summary>
     /// Height of the navigation bar along the top edge. Every piece under it starts at <see cref="Top"/>, so nothing
     /// is ever drawn under the bar.

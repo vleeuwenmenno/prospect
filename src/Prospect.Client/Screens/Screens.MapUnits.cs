@@ -147,14 +147,50 @@ internal sealed partial class ScreenHost
         var tagWidth = Kit.Measure(_ui.SansMedium, Theme.FontCaption, tag).X;
         Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(edge - tagWidth, top + Kit.Px(2)), tagColor, tag);
 
+        // A compact row has one line, so its status icons sit between the name and the tag; a full row keeps them
+        // for the second line.
+        var environment = hull.Environment;
+        var iconsWidth = compact ? HullStatus.IconsWidth(environment, Kit.Px(StatusLook.IconSize), Kit.Px(StatusLook.IconGap)) : 0f;
+        var iconsLeft = edge - tagWidth - Kit.Px(Theme.Space2) - iconsWidth;
+        var iconsMiddle = top + Kit.Px(9);
         var name = Kit.F($"{design.Name} {(hull.Id & 0xFFFF) + 1}");
-        Kit.ClippedText(draw, _ui.SansMedium, Theme.FontSmall, new float2(textX, top), on ? Theme.Text : Kit.Mix(Theme.TextDim, Theme.Text, hot), name, Math.Max(0f, edge - tagWidth - Kit.Px(Theme.Space2) - textX));
+        Kit.ClippedText(draw, _ui.SansMedium, Theme.FontSmall, new float2(textX, top), on ? Theme.Text : Kit.Mix(Theme.TextDim, Theme.Text, hot), name, Math.Max(0f, edge - tagWidth - Kit.Px(Theme.Space2) - textX - (iconsWidth > 0f ? iconsWidth + Kit.Px(Theme.Space2) : 0f)));
         if (compact)
+        {
+            if (iconsWidth > 0f)
+            {
+                DrawStatusIcons(draw, environment, iconsLeft, iconsMiddle);
+                DrawStatusTip(environment, iconsLeft, iconsMiddle, true);
+            }
+
             return;
+        }
 
         var sector = galaxy.SectorOf(world.HullPosition(hull));
         var second = new float2(textX, rowMin.Y + Kit.Px(24));
         var where = Kit.Text(draw, _ui.Mono, Theme.FontCaption, second, Theme.TextMute, Kit.F($"{sector.X} {sector.Y} {sector.Z}")).X;
-        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, second + new float2(where + Kit.Px(Theme.Space3), 0), statusColor, status, Math.Max(0f, edge - second.X - where - Kit.Px(Theme.Space3)));
+        var statusLeft = second.X + where + Kit.Px(Theme.Space3);
+        var statusRight = edge;
+        var middle = second.Y + Kit.Px(7);
+        if (HullStatus.Count(environment) > 0)
+        {
+            // Icons and words where the second line has room for them, the icons alone where it has not.
+            var statusWidth = Kit.Measure(_ui.Mono, Theme.FontCaption, status).X;
+            var words = StatusLineWidth(environment);
+            var icons = HullStatus.IconsWidth(environment, Kit.Px(StatusLook.IconSize), Kit.Px(StatusLook.IconGap));
+            if (statusLeft + statusWidth + Kit.Px(Theme.Space3) + words <= edge)
+            {
+                DrawStatusLine(draw, environment, edge - words, middle, edge);
+                statusRight = edge - words - Kit.Px(Theme.Space3);
+            }
+            else
+            {
+                DrawStatusIcons(draw, environment, edge - icons, middle);
+                DrawStatusTip(environment, edge - icons, middle, true);
+                statusRight = edge - icons - Kit.Px(Theme.Space2);
+            }
+        }
+
+        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, new float2(statusLeft, second.Y), statusColor, status, Math.Max(0f, statusRight - statusLeft));
     }
 }
