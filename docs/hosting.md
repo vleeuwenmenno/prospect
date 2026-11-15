@@ -400,6 +400,13 @@ What a design need not have:
   as a mount, is refused. Rules: [propulsion](roadmap/propulsion.md), "Face mounts".
 - Shipped design files still must fly (`HullDesign.Parse`): that check is for content, not for players.
 
+Saved designs (client only):
+
+- **Nothing on the wire.** A design saved on the player's computer is loaded into the draft and goes through Apply
+  and every check above as any draft does.
+- **Files are not trusted.** At most 8 MiB each, no links, at most 200 listed; anything wrong is "unreadable".
+- **Names** become file names through `DesignStore.FileStem` only; writes go to a temporary file, then a rename.
+
 Repair:
 
 - **`Repair` names an open edit by its token** and carries nothing else. The server has the design.

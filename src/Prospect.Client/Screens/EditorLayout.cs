@@ -26,6 +26,9 @@ internal readonly record struct EditorLayout(HudRect Parts, HudRect Details, Hud
 
     /// <summary>The bar's buttons, in design pixels: Undo, Redo, Cancel and Apply, with the gaps between them.</summary>
     public static ReadOnlySpan<float> ButtonWidths => [72f, 72f, 84f, 100f];
+
+    /// <summary>The two buttons before them, in design pixels: Save... and Load..., which open the saved designs dialogs.</summary>
+    public static ReadOnlySpan<float> DesignButtonWidths => [78f, 78f];
     public const float ButtonGap = 8f;
     public const float ButtonHeight = 34f;
     public const float Pad = 12f;
@@ -72,4 +75,20 @@ internal readonly record struct EditorLayout(HudRect Parts, HudRect Details, Hud
             width += MathF.Round(button * scale) + MathF.Round(ButtonGap * scale);
         return width + MathF.Round(Pad * scale);
     }
+
+    /// <summary>The design buttons' width with their gaps, at an interface scale.</summary>
+    public static float DesignButtonsWidth(float scale)
+    {
+        var width = 0f;
+        foreach (var button in DesignButtonWidths)
+            width += MathF.Round(button * scale) + MathF.Round(ButtonGap * scale);
+        return width;
+    }
+
+    /// <summary>
+    /// Whether the bar, <paramref name="barWidth"/> wide, has room for Save... and Load... as well: it keeps 200 design
+    /// pixels for the status line. A window too narrow for that shows the four editing buttons only.
+    /// </summary>
+    public static bool DesignButtonsFit(float barWidth, float scale) =>
+        ButtonsWidth(scale) + DesignButtonsWidth(scale) + MathF.Round(200f * scale) <= barWidth;
 }

@@ -56,6 +56,13 @@ internal sealed partial class ScreenHost
             return;
         if (_controlsHandled || _controlsOpen || _sessionMenuOpen || _mapOpen || _shipInfoOpen || SocialSurfaceOpen || _socialHandled)
             return;
+        // A saved designs dialog over the editor has the keyboard: Enter and Escape are its, and no editor key is read.
+        if (_designs.Open)
+        {
+            _editorHandled = _designs.HandleKeys(_app.Actions, _app.Devices, _app.Designs, _app.World.Editor, _notices, _designName, _ui.WantsTextInput, _ui.PointerOverInterface);
+            return;
+        }
+
         _editorHandled = _newShip.HandleKeys(_app.Actions, _app.Devices, snapshot, _app.World.Editor, bridge, _tips, _newShipName, _ui.WantsTextInput, _ui.PointerOverInterface);
     }
 
@@ -1220,7 +1227,8 @@ internal sealed partial class ScreenHost
         var draw = ImGui.GetWindowDrawList();
         var origin = ImGui.GetCursorScreenPos();
         var inner = ImGui.GetContentRegionAvail();
-        var buttons = EditorLayout.ButtonsWidth(Kit.Scale) - Kit.Px(EditorLayout.Pad);
+        var withDesigns = EditorLayout.DesignButtonsFit(rect.Width, Kit.Scale);
+        var buttons = EditorLayout.ButtonsWidth(Kit.Scale) + (withDesigns ? EditorLayout.DesignButtonsWidth(Kit.Scale) : 0f) - Kit.Px(EditorLayout.Pad);
         var statusWidth = Math.Max(0f, inner.X - buttons - Kit.Px(Theme.Space3));
 
         // What the edit is doing, then the keys.
@@ -1257,6 +1265,18 @@ internal sealed partial class ScreenHost
         var widths = EditorLayout.ButtonWidths;
         var gap = Kit.Px(EditorLayout.ButtonGap);
         ImGui.SetCursorScreenPos(new float2(x, y));
+        if (withDesigns)
+        {
+            var designs = EditorLayout.DesignButtonWidths;
+            var diskReady = editor.CanEdit && _app.Designs.Available;
+            if (EditorButton("##savedesign"u8, "Save..."u8, new float2(Kit.Px(designs[0]), height), diskReady))
+                OpenSaveDesign(editor);
+            ImGui.SameLine(0, gap);
+            if (EditorButton("##loaddesign"u8, "Load..."u8, new float2(Kit.Px(designs[1]), height), diskReady))
+                _designs.BeginLoad(_app.Designs, editor);
+            ImGui.SameLine(0, gap);
+        }
+
         if (EditorButton("##undo"u8, "Undo"u8, new float2(Kit.Px(widths[0]), height), editor.CanEdit && draft.CanUndo))
             editor.Undo();
         ImGui.SameLine(0, gap);

@@ -6148,6 +6148,96 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     [Fact]
+    public void ALoadedDesignReplacesTheDraftAsOneUndoStepAndOnlyOneOfTheShipsBlockSizeLoads()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        var draft = editor.Draft!;
+        var content = editor.Content!;
+        var board = new NoticeBoard(NoticeCatalogue.Load(Path.Combine(AppContext.BaseDirectory, "content", "visuals", "notices.json"), _actions));
+        var folder = Path.Combine(Path.GetTempPath(), "prospect-load-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var shelf = new Prospect.Client.Designs.DesignShelf(new Prospect.Client.Designs.DesignStore(folder, content));
+            var dialog = new DesignDialog();
+            var original = draft.Boxes.ToArray();
+            var originalMounts = draft.Mounts.ToArray();
+
+            void Pump(Func<bool> until)
+            {
+                for (var i = 0; i < 2000 && !until(); i++)
+                {
+                    dialog.Update(shelf, editor, board);
+                    Thread.Sleep(2);
+                }
+
+                Assert.True(until(), $"{dialog.Stage}");
+            }
+
+            // Save a ship with one block more, through the dialog, then take that block off the draft again.
+            Assert.Equal(DraftEdit.Done, draft.Add(draft.Snap(0, 0, new GridSize(1, 1, 1)), new GridSize(1, 1, 1), content.Blocks.Get("hull")));
+            var larger = draft.Boxes.ToArray();
+            Assert.True(dialog.BeginSave(shelf, editor));
+            Assert.True(dialog.Submit("Scout", shelf, editor, false));
+            Assert.Equal(DesignStage.Saving, dialog.Stage);
+            Pump(() => dialog.Stage == DesignStage.Closed);
+            Assert.True(draft.Undo());
+
+            // A second one on blocks of another size is saved by hand: listed, but it does not fit.
+            Assert.Equal(Prospect.Client.Designs.DesignSaveStatus.Saved, shelf.Store!.Save("Odd blocks", draft.BlockSize * 2f, draft.Class, draft.Color, original, originalMounts, false).Status);
+            File.WriteAllText(Path.Combine(folder, "broken.json"), "{ not json");
+
+            Assert.True(dialog.BeginLoad(shelf, editor));
+            Pump(() => shelf.Listed);
+            Assert.Equal(3, shelf.Entries.Length);
+            var scout = shelf.Entries.Single(e => e.File == "Scout.json");
+            var odd = shelf.Entries.Single(e => e.File == "Odd blocks.json");
+            var broken = shelf.Entries.Single(e => e.File == "broken.json");
+            Assert.True(DesignDialog.Fits(scout, editor));
+            Assert.False(DesignDialog.Fits(odd, editor));
+            Assert.False(DesignDialog.Fits(broken, editor));
+            Assert.False(dialog.Pick(odd, shelf, editor));
+            Assert.False(dialog.Pick(broken, shelf, editor));
+            Assert.Equal(DesignStage.Listing, dialog.Stage);
+
+            // The pick is read on a worker, then asks before replacing; Escape asks nothing more and changes nothing.
+            Assert.True(dialog.Pick(scout, shelf, editor));
+            Pump(() => dialog.Stage == DesignStage.ConfirmReplace);
+            Assert.Equal(original, draft.Boxes.ToArray());
+            Assert.True(dialog.Back(shelf));
+            Assert.Equal(DesignStage.Listing, dialog.Stage);
+            Assert.Equal(original, draft.Boxes.ToArray());
+            Assert.True(dialog.Pick(scout, shelf, editor));
+            Pump(() => dialog.Stage == DesignStage.ConfirmReplace);
+
+            // Replace is one step: the draft is the saved one, nothing is selected, the dialog is closed, and the ship is not touched.
+            editor.Select(0, false);
+            var hullBefore = _snapshot.Hulls[_snapshot.OwnHull].Id;
+            Assert.True(dialog.Replace(shelf, editor, board));
+            Assert.Equal(DesignStage.Closed, dialog.Stage);
+            Assert.Equal(larger, draft.Boxes.ToArray());
+            Assert.Empty(editor.Selection.ToArray());
+            Assert.True(editor.Dirty);
+            Assert.Equal(hullBefore, _snapshot.Hulls[_snapshot.OwnHull].Id);
+
+            // Ctrl+Z, once, brings back the whole previous draft, and redo the loaded one.
+            editor.Undo();
+            Assert.Equal(original, draft.Boxes.ToArray());
+            Assert.Equal(originalMounts, draft.Mounts.ToArray());
+            Assert.False(editor.Dirty);
+            editor.Redo();
+            Assert.Equal(larger, draft.Boxes.ToArray());
+
+            // The server still decides: the loaded draft goes through the usual check before Apply.
+            Assert.True(draft.Export().Ok);
+        }
+        finally
+        {
+            try { Directory.Delete(folder, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public void MergingTwoBlocksIsOneUndoAndTheSelectionNeverNamesAShiftedBlock()
     {
         OpenEditor();

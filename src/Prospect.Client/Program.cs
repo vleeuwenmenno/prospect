@@ -16,6 +16,8 @@ internal static class Program
                                   when saved worlds are on, see --worlds)
           --worlds <folder>       The folder of saved worlds instead of the player's own. Captures and benchmarks
                                   save nothing and list no world unless given one
+          --designs <folder>      The folder of saved ship designs instead of the player's own. Captures and benchmarks have none unless given
+                                  one, so Save and Load in the editor are off in them (--open edit-save, edit-load, edit-load-confirm).
           --save-fault <kind>     With --capture and --worlds: make a world's final save slow (8 s), fail, end
                                   unknown or degraded, to capture the saving screen and the close report. Pair with
                                   --open leave, which leaves the game once in space
@@ -188,6 +190,9 @@ internal static class Program
                 case "--worlds" when hasValue:
                     options.WorldsRoot = args[++i];
                     break;
+                case "--designs" when hasValue:
+                    options.DesignsRoot = args[++i];
+                    break;
                 case "--account-authority" when hasValue:
                     options.AccountAuthority = args[++i];
                     break;
@@ -197,7 +202,7 @@ internal static class Program
                 case "--set" when hasValue:
                     options.WorldSettingArgs.Add(args[++i]);
                     break;
-                case "--open" when hasValue && args[i + 1] is "command" or "drone" or "map" or "map-menu" or "map-hover" or "map-card" or "map-card-near" or "map-card-far" or "map-tilt" or "map-reach" or "map-reach-tilt" or "scan" or "command-fog" or "command-fog-one" or "command-fog-pair" or "command-fog-far" or "command-menu" or "command-menu-fleet" or "command-menu-close" or "command-menu-far" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "edit-turn" or "edit-mount" or "edit-mirror" or "new-ship" or "new-ship-refused" or "new-ship-editor" or "new-ship-closed" or "scan-pilot" or "scan-command" or "interface" or "charts" or "pinned-charts" or "inventory" or "modules" or "module-command" or "gas" or "pinned-gas" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
+                case "--open" when hasValue && args[i + 1] is "command" or "drone" or "map" or "map-menu" or "map-hover" or "map-card" or "map-card-near" or "map-card-far" or "map-tilt" or "map-reach" or "map-reach-tilt" or "scan" or "command-fog" or "command-fog-one" or "command-fog-pair" or "command-fog-far" or "command-menu" or "command-menu-fleet" or "command-menu-close" or "command-menu-far" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "edit-turn" or "edit-mount" or "edit-mirror" or "edit-save" or "edit-load" or "edit-load-confirm" or "new-ship" or "new-ship-refused" or "new-ship-editor" or "new-ship-closed" or "scan-pilot" or "scan-command" or "interface" or "charts" or "pinned-charts" or "inventory" or "modules" or "module-command" or "gas" or "pinned-gas" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
                     options.OpenView = args[++i];
                     break;
                 case "--browser-sample" when hasValue:
@@ -524,6 +529,10 @@ internal static class Program
             return Fail("--open delete-world, delete-incompatible and deleted-incompatible work only with --start load, --capture and --worlds.");
 
         // A broken store is for captures of what the player is told, in a folder of the capture's own.
+        if (options.DesignsRoot is not null && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--designs works only with --capture or --bench.");
+        if (options.OpenView is "edit-save" or "edit-load" or "edit-load-confirm" && (options.DesignsRoot is null || options.CapturePath is null))
+            return Fail("--open edit-save, edit-load and edit-load-confirm work only with --capture and --designs.");
         if (options.SaveFault != StoreFault.None && (options.CapturePath is null || options.WorldsRoot is null))
             return Fail("--save-fault works only with --capture and --worlds.");
 
