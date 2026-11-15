@@ -328,6 +328,15 @@ public sealed class EditorSessionTests
         public void Dispose() { }
     }
 
+    /// <summary>A clock that moves only when the test says so.</summary>
+    private sealed class StepClock : TimeProvider
+    {
+        private long _now = 1_000_000;
+        public override long TimestampFrequency => 1_000_000_000;
+        public override long GetTimestamp() => Volatile.Read(ref _now);
+        public void Advance(TimeSpan by) => Interlocked.Add(ref _now, (long)(by.TotalSeconds * TimestampFrequency));
+    }
+
     private sealed class Rig : IDisposable
     {
         private readonly ContentCopy _files = new();
@@ -339,6 +348,14 @@ public sealed class EditorSessionTests
         internal readonly ClientSession?[] Clients;
         internal readonly HullStore Hulls;
         internal long Tick;
+
+        /// <summary>
+        /// The time both ends read. A client works out the server's tick from its clock, and the rig steps far faster
+        /// (or slower) than real time, so on the wall clock a command's target tick depended on how warm the process
+        /// was: a test that ran alone and one that ran late in the full suite saw different thrust. One step is one
+        /// tick on this clock, so the result is the same however fast the machine runs.
+        /// </summary>
+        private readonly StepClock _time = new();
 
         /// <summary>A server with a link for every client; the first <paramref name="joined"/> join at once.</summary>
         internal Rig(int clients = 2, int joined = 2, int quiet = 1, int peerWait = 1, int ready = 5, int commit = 0, int uploads = 2, int? catalogueSpare = null, int maxShips = 16, int? sectorKm = null)
@@ -362,7 +379,7 @@ public sealed class EditorSessionTests
                 _links[i] = new LoopbackLink();
                 Wires[i] = new Wire(_links[i].Server) { Hold = i >= joined };
             }
-            Server = new ServerHost(new ServerConfig(), Content, [.. Wires]);
+            Server = new ServerHost(new ServerConfig { Clock = _time }, Content, [.. Wires]);
             Hulls = Field<HullStore>("_hulls");
             for (var i = 0; i < joined; i++) Join(i);
             Assert.True(Until(() => Enumerable.Range(0, joined).All(i => Snap(i).HullCount > 0), settle: true), "the clients should be in space");
@@ -373,7 +390,7 @@ public sealed class EditorSessionTests
         /// <summary>Starts a client whose link the server has not looked at yet.</summary>
         internal void Join(int client)
         {
-            Clients[client] = new ClientSession(_links[client].Client, Content, "Player " + client);
+            Clients[client] = new ClientSession(_links[client].Client, Content, "Player " + client, clock: _time);
             _joined[client] = Tick;
             Wires[client].Hold = false;
         }
@@ -386,6 +403,7 @@ public sealed class EditorSessionTests
                 for (var i = 0; i < Clients.Length; i++)
                     if (Clients[i] is { } client) ((ITickHandler)client).Tick(Tick - _joined[i]);
                 Tick++;
+                _time.Advance(TimeSpan.FromSeconds(1.0 / TickLoop.SimulationHz));
             }
         }
 
