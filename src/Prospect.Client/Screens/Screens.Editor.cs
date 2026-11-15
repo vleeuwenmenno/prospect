@@ -1477,7 +1477,7 @@ internal sealed partial class ScreenHost
     {
         PartRole.Core => "Core: the ship cannot exist without one"u8,
         PartRole.Drive => "Jump drive"u8,
-        PartRole.Engine => "Main engine: pushes away from where it faces, burns bipropellant"u8,
+        PartRole.Engine => "Main engine: pushes away from where it faces"u8,
         PartRole.Thruster => "Thruster: pushes away from where it faces"u8,
         PartRole.Tank => "Fuel tank"u8,
         PartRole.Gyro => "Gyro: turns the ship"u8,

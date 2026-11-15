@@ -15,12 +15,17 @@
 // burst lasts its front is a denser slug. Every moving part is driven by the plume's own clock and seed
 // (PlumeInstance), smooth in time, so nothing shimmers from frame to frame. Once the part stops, the last gas flies
 // off down the plume and clears.
+//
+// An ion glow is an ion part's exhaust: a faint blue-violet glow over the grid inside its ring, a soft column that
+// barely widens and fades along its length, and a thin straight beam down its axis. It is steady: no noise, no
+// flicker, no sparks, no shock node. The beam is worked out from the ray's closest approach to the axis rather than
+// marched, and never thinner than about a pixel, so it does not break up into steps or crawl as the view moves.
 layout(location = 0) in vec3 worldPosition;
 layout(location = 1) flat in vec3 faceNormal;
 layout(location = 2) flat in vec4 plumeExit;    // camera-relative exit centre, exit radius
 layout(location = 3) flat in vec4 plumeAxis;    // axis, plume length in metres
 layout(location = 4) flat in vec4 plumeCore;    // core colour, brightness cap
-layout(location = 5) flat in vec4 plumeEdge;    // edge colour, kind (0 flame, 1 puff)
+layout(location = 5) flat in vec4 plumeEdge;    // edge colour, kind (0 flame, 1 puff, 2 ion)
 layout(location = 6) flat in vec4 plumeSpark;   // spark colour, seconds since ignition
 layout(location = 7) flat in vec4 plumeShape;   // spread, first shock node (a puff: its valve burst), its distance in metres, seed
 layout(location = 8) flat in vec4 plumeMotion;  // seconds, flicker, spark seconds, spark speed in m/s
@@ -104,7 +109,8 @@ void main()
 
     float radius = plumeExit.w;
     float len = plumeAxis.w;
-    bool puff = plumeEdge.w > 0.5;
+    bool puff = plumeEdge.w > 0.5 && plumeEdge.w < 1.5;
+    bool ion = plumeEdge.w > 1.5;
     float time = plumeMotion.x;
     float seed = plumeShape.w;
     float spread = plumeShape.x;
@@ -138,6 +144,16 @@ void main()
             float z = p.z;
             if (z < 0.0)
             {
+                // Inside the ring an ion grid glows evenly over its face, seen past the ring's rim.
+                if (ion)
+                {
+                    if (released >= 0.0)
+                        continue;
+                    float g = exp(-r2 / (radius * radius) * 1.4) * 0.5;
+                    density += g * dt / radius;
+                    tint += mix(edge, core, 0.6) * g * dt / radius;
+                    continue;
+                }
                 // Inside the bell: a flame's throat glows, seen only looking into the nozzle; a puff has nothing there.
                 if (puff || released >= 0.0)
                     continue;
@@ -153,6 +169,22 @@ void main()
             float cleared = smoothstep(emptied, emptied + radius, z);
             if (cleared <= 0.0)
                 continue;
+            if (ion)
+            {
+                // A soft column of ions that barely widens, brightest over the grid and fading along its length.
+                float wideI = radius * (1.0 + spread * u);
+                float q2i = r2 / (wideI * wideI);
+                if (q2i > 4.0)
+                    continue;
+                float thinI = radius * radius / (wideI * wideI);
+                float fadeI = (1.0 - u) * (1.0 - u) * cleared;
+                float column = exp(-q2i * 1.8) * thinI * fadeI;
+                float grid = exp(-z / coreReach) * exp(-q2i * 1.2) * cleared;
+                float d = column * 0.45 + grid * 0.8;
+                density += d * dt / radius;
+                tint += mix(edge, core, clamp(grid * 1.5, 0.0, 1.0)) * d * dt / radius;
+                continue;
+            }
             if (puff)
             {
                 // A cold gas jet: a straight cone from the exit, its gas thinning as the square of its width, so it
@@ -224,6 +256,26 @@ void main()
         vec3 sun = frame.sunDirection.xyz;
         float forward = pow(max(dot(dir, sun), 0.0), 4.0);
         color *= frame.sunColor.rgb * (0.3 + 1.1 * forward) + vec3(0.02, 0.022, 0.026);
+    }
+
+    if (ion && len > 0.0)
+    {
+        // The beam: the ray's closest approach to the axis, never thinner than about a pixel, its light spread
+        // over that width so a far beam keeps what it has. It fades along its length and, once the part stops,
+        // empties from the grid outward with the rest.
+        vec3 a = plumeExit.xyz;
+        vec3 u = axis * len;
+        float uu = dot(u, u);
+        float ud = dot(u, dir);
+        float s = clamp((ud * dot(dir, a) - dot(u, a)) / max(uu - ud * ud, 1e-6), 0.0, 1.0);
+        vec3 q = a + u * s;
+        float t = max(dot(q, dir), 0.0);
+        float dist = length(q - dir * t);
+        float thin = radius * 0.07;
+        float w = max(thin, t * frame.lens.x * 2.4 / max(frame.lens.w, 1.0));
+        float along = (1.0 - s) * sqrt(1.0 - s);
+        float beam = exp(-(dist * dist) / (w * w)) * (thin / w) * along * smoothstep(emptied, emptied + radius, s * len);
+        color += mix(edge, core, 0.85) * beam * brightness * 0.9;
     }
 
     // Ignition: a few faint sparks thrown from the throat in a cone, gone after the spark seconds.

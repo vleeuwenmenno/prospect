@@ -149,6 +149,44 @@ public sealed class EditorSessionTests
     }
 
     [Fact]
+    public void TheElectricDroneFliesWithoutTanksAndItsPredictionIsTheServersToTheEnd()
+    {
+        using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);
+        var ship = rig.Own(0);
+        rig.Input(0).RequestControl(0);
+        Assert.True(rig.Until(() => rig.Own(0) != ship && rig.Snap(0).OwnIsDrone));
+        var drone = rig.Own(0);
+        var slot = Rig.Index(drone);
+        Assert.True(rig.Hulls.Flight(slot).HasIon);
+        Assert.Equal(default, rig.Hulls.Flight(slot).FuelCapacity);
+        var start = rig.Snap(0);
+        Assert.True(start.Hulls[start.OwnHull].Tanks.IsEmpty);
+        Assert.Equal(default, start.Hulls[start.OwnHull].Fuel.Capacity);
+
+        // Forward, then sideways and up with boost, then the dampeners braking it all: every way the ion parts
+        // spend power. The client predicts with the server's code and never needs correcting, and nothing burns.
+        var worst = 0f;
+        var sawIon = false;
+        for (var i = 0; i < 900; i++)
+        {
+            var controls = i < 300 ? new PlayerControls { Forward = 1 }
+                : i < 600 ? new PlayerControls { Strafe = 1, Vertical = 1, Boost = i < 400 }
+                : default;
+            rig.Input(0).Submit(controls);
+            rig.Step();
+            var own = rig.Snap(0);
+            worst = Math.Max(worst, own.PredictionError);
+            sawIon |= own.Hulls[own.OwnHull].Thrust.Firing(FuelKind.None, BlockFacing.Back) > 0.9f;
+        }
+
+        Assert.True(worst < 0.01f, $"prediction was off by up to {worst:0.000} m");
+        Assert.True(sawIon, "the drone's ion drive should have fired");
+        Assert.Equal(drone, rig.Own(0));
+        Assert.Equal(default, rig.Hulls.State(slot).Fuel);
+        Assert.True(rig.Hulls.State(slot).Energy < rig.Hulls.Flight(slot).EnergyStorage, "boost and three axes should have drawn on the battery");
+    }
+
+    [Fact]
     public void TheSnapshotSaysWhenTheOwnHullIsTheDroneAndNotWhenItIsAShip()
     {
         using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);
@@ -1772,16 +1810,16 @@ public sealed class EditorSessionTests
     }
 
     [Fact]
-    public void AShipBuiltNewFromTheDroneStartsWithEmptyTanksAndTheDroneStartsFull()
+    public void AShipBuiltNewFromTheDroneStartsWithEmptyTanksAndTheElectricDroneHasNone()
     {
         using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);
         var ship = rig.Own(0);
         rig.Input(0).RequestControl(0);
         Assert.True(rig.Until(() => rig.Own(0) != ship && rig.Snap(0).OwnIsDrone));
         var drone = Rig.Index(rig.Own(0));
-        var droneTanks = rig.Hulls.Flight(drone).FuelCapacity;
-        Assert.True(droneTanks.Nitrogen > 0f);
-        Assert.Equal(droneTanks, rig.Hulls.State(drone).Fuel);
+        Assert.Equal(default, rig.Hulls.Flight(drone).FuelCapacity);
+        Assert.Equal(default, rig.Hulls.State(drone).Fuel);
+        Assert.True(rig.Hulls.Flight(drone).HasIon);
 
         var designs = rig.Content.Designs.Length;
         Assert.True(rig.Input(0).RequestNewShip("Empty tanks"));

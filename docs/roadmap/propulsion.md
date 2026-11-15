@@ -9,7 +9,8 @@
   and cold gas puffs (below).
 - **Built:** thrusters mount on block faces ("Face mounts" below): data, simulation, editor, shipped ships.
 - **Built:** fuel is kept tank by tank ("Fuel per tank" below): simulation, wire, save. No interface for it yet.
-- Protocol 52, save layout 8, design encoding 4, design file version 5, evaluator 12.
+- **Built:** electric ion parts that burn no fuel ("Decided: ion propulsion" below). The escape drone is all ion.
+- Protocol 53, save layout 8, design encoding 4, design file version 5, evaluator 13.
 
 ## Decided: parts
 
@@ -23,7 +24,10 @@
   - A ship needs parts facing each way it wants to move. The editor warns when a direction has none; warnings never
     block Apply.
 - Gyros stay and still do the turning, on electricity.
-- The drone's parts are the same kinds, small: `microthruster` burns nitrogen, `microengine` bipropellant.
+- **Ion parts** burn no fuel, only power ("Decided: ion propulsion"): `ionDrive` (an engine block) and
+  `ionThruster` (a mount).
+- The drone is electric: `microIonDrive` and `microIonThruster`. The fuelled small parts (`microthruster` on
+  nitrogen, `microengine` on bipropellant) stay in the part list for ships built from the drone.
 
 ## Decided: facing
 
@@ -41,6 +45,7 @@
   - **Hydrazine** for hot thrusters.
   - **Bipropellant** (fuel and oxidiser in one tank) for engines.
 - A part burns only its own fuel. With that fuel gone, it gives no thrust and draws no power.
+- The one exception is an ion part: it burns no fuel and needs no tank ("Decided: ion propulsion").
 - Thrusters burn far less than engines. Boost burns more. All rates are content figures.
 - Tanks hold a balanced but fairly long supply.
 - Fuel is the main cost of thrust. A small electric draw stays (pumps, valves, ignition), so thrust still slows shield
@@ -50,8 +55,8 @@
   - An edit keeps each tank's fuel. A new tank starts empty: it adds room, not fuel.
   - A repair restores blocks, not fuel. A tank it builds again is empty. There is no Refuel button.
   - A ship built new from the drone starts with empty tanks.
-  - The escape drone is made new each time a pilot steps out or loses a hull, and always starts with full tanks. It is
-    the pilot's spare, not a ship they built; it carries too little to refuel anything.
+  - The escape drone is made new each time a pilot steps out or loses a hull. It has no tanks: it is electric, so
+    fuel can never strand it. The rule that it starts with full tanks stays in the code for a drone with tanks.
   - Tanks run down are no damage: they never hold back an edit.
 - Fuel is simulation state: shared flight code, predicted by the client, saved with the world.
 - Dampeners fire the same parts and burn the same fuel. At rest they burn nothing.
@@ -130,11 +135,69 @@ Built. Why: gas mining will later fill tanks to different levels. Rules live in 
 - It reads `SessionSnapshot.OwnTanks`, the snapshot's own memory.
 - `HullView.Fuel` (`FuelFlow`) still has amount, capacity and burn per fuel. The fuel row reads only that.
 
+## Decided: ion propulsion
+
+Built. Rules live in `FlightModel.Step`; `PropulsionTests`, `PowerFlowTests` and `EditorSessionTests` hold them.
+
+### What an ion part is
+
+- A thrust part that burns **no fuel** and runs on **power alone**: `"ion": true` in `blocks.json`.
+  - It names no fuel and no `fuelBurn`, and needs a positive `powerDraw`. Loading refuses anything else.
+  - It needs no tank. The editor's "no tank" warning never counts it.
+- It pushes the hull away from where it faces, like any thrust part.
+- Low thrust, high power per thrust: only light craft gain from it.
+
+### Simulation
+
+- Its thrust is a fourth column of `ThrustTable`, after the three fuels (`ThrustTable.IonIndex`).
+  - A fuel running out never takes it away: `Sum(push, fuel)` always adds it.
+- Its power is kept **per push direction** (`FlightParams.IonPower`).
+  - Why: power is all it spends, so a pilot pushing one way pays for that way only.
+  - The pilot's throttle in each direction is billed, and so is what the dampeners use to brake.
+  - Fuelled parts still draw by the largest throttle asked, over all of them (pumps and valves).
+- With the battery flat, all thrust is cut back to what the generator feeds beyond idle: ion parts like the rest.
+  - With no power at all an ion part gives nothing, and the dampeners brake no more than they can push.
+  - The dampeners' cut is new for every hull, fuelled ones too, but only shows with a flat battery.
+- Boost multiplies its draw like any thrust (`boostPowerMultiplier`). It burns nothing more: there is nothing to burn.
+- `ThrustState` has a bit for it (bit 4). `Firing(FuelKind.None, facing)` asks for ion parts.
+- `ThrustPower`, the most a hull's thrust can draw at once, counts ion parts along three axes: the larger of each
+  axis's two directions. The editor's thrust overload warning reads it.
+- Nothing on the wire or in a save is about fuel for it. The `ThrustState` bit is the only wire change.
+
+### Figures
+
+| Part | Kind | Thrust | Power at full thrust | MW per kN | Mass |
+| --- | --- | --- | --- | --- | --- |
+| `ionDrive` | block, per cell | 100 kN | 3.0 MW | 0.03 | 2.0 t |
+| `ionThruster` | mount | 12.5 kN | 0.375 MW | 0.03 | 0.3 t |
+| `microIonDrive` | block | 30 kN | 0.9 MW | 0.03 | 0.25 t |
+| `microIonThruster` | mount | 3.75 kN | 0.1125 MW | 0.03 | 0.03 t |
+
+- Against fuelled parts: half the thrust of the matching part, at about 8 times (drive) to 15 times (thrusters) its
+  power. An `engine` is 800 kN for 1.0 MW and 0.2 kg/s; a cold gas thruster 100 kN for 0.0375 MW.
+- Why ion is pointless as a Prospector's main drive: its two engines give 1,600 kN (20.3 m/s² on 79 t).
+  - Two ion drives in their place give 200 kN: 2.6 m/s², a top speed of 97 m/s against 270.
+  - Matching the engines takes sixteen ion drives: 48 MW, four times its 12 MW of generators, and 32 t of drives.
+
+### The electric drone
+
+- An ion drive behind the hull on its plate, where the engine was; twenty-four ion thrusters where the fuelled ones
+  were. The two tanks are drone plating now, so every mount keeps its block.
+- Mass 3.52 t (was 3.75). Forward 8.5 m/s², braking 8.5, sideways and up and down 4.3 (were 16, 16 and 8).
+- Power: generator 1.2 MW, core and gyro 0.1 MW, battery 8 MJ.
+  - Full forward draws 0.9 MW: the generator carries it with 0.2 MW to spare. The battery stays full.
+  - Forward and sideways: 1.45 MW, the battery runs down in about 32 s.
+  - Forward, sideways and the shield recharging: about 12 s. All three axes at once: about 11 s.
+  - Boosting forward: 4.05 MW, the battery is empty in about 2.7 s.
+- It turns a little faster: 36, 43, 42 deg/s (were 35, 40, 40). Hull points stay 340.
+- The editor warns it of thrust overload: all three axes need 1.8 MW, more than it makes. That is the design.
+
 ## Decided: readout
 
 - Fuel shows like energy: each fuel's amount, capacity and net flow per second.
 - Flow is negative while burning. Nothing adds fuel yet. Ship refineries may later make it positive.
 - The console's fuel row sits under the two groups and spans them: one cell per fuel the hull has a tank for.
+  - A hull with no tank (the electric drone) shows one cell, "FUEL NO TANKS", and posts no fuel notices.
   - Each cell: name, amount / capacity, net flow in kg/s with an arrow ("—" at rest), a strip of how full.
   - A narrow cell drops the capacity, then the name.
   - Hover shows the tooltip: per fuel, amount, burn, minutes left at that burn ("—" at rest).
@@ -152,6 +215,8 @@ Built. Why: gas mining will later fill tanks to different levels. Rules live in 
   translucent grey-white gas, lit by the star, never glowing. A short denser burst when the valve opens; it clears
   quickly when it closes.
 - Hot thrusters show a small version of the engine's plume with a faint orange core.
+- Ion parts are a flat grid in a short ring. Firing, they show a faint, steady blue-violet glow over the grid and a
+  thin straight beam: no sparks, no shock nodes, no flicker.
 
 ## Decided: how the models and plumes are made
 
@@ -170,7 +235,10 @@ Built. Why: gas mining will later fill tanks to different levels. Rules live in 
     - A small octagonal housing on the plate, with a valve box at its side.
     - One to four nozzles on the housing's front: `perCell` per cell of the footprint, at most two a side.
     - Cold gas: a quad of small nozzles. Microthruster: one. Hot thruster: one small engine (seam, pipes, collar with
-      brackets, bell).
+      brackets, bell). Ion thruster: one grid emitter.
+  - Ion parts (`grid` in the entry, bars each way) end in an emitter instead of a bell: a short faceted ring on the
+    body (`nozzleLength` exit radii high, `lip` thick), a dark disc a little below its rim and a grid of thin bars on
+    it. An ion drive's body is the engine's mount block and octagonal housing. No collar.
   - Every facet has vertices of its own: flat shading. Bare metal rides in the length of the normal (`mesh.vert`).
   - Housings are bare metal of mid grey (`housingShade` about 0.3), nozzles darker, throats near black. Metal shines
     with its shade, so a dark facet never flashes white.
@@ -196,6 +264,10 @@ Built. Why: gas mining will later fill tanks to different levels. Rules live in 
   - The gas only reaches as far as it has flown since the valve opened; its front is domed. While the valve's burst
     lasts (`burst`, `burstSeconds`) the gas is denser and the front a denser slug. It is faint: `brightness` 0.26.
   - When a group stops, its last gas flies off down the plume and clears over `fadeSeconds`.
+  - An ion glow (`kind` `ion`) has light of its own and no noise at all: a glow over the grid, a soft column that
+    barely widens (`spread`) and fades along its length, and a thin beam down the axis. The beam is worked out from
+    the ray's closest approach, never thinner than about a pixel, so it does not break into steps. Loading refuses
+    an ion glow with sparks, shock nodes, flicker or burst. Its parts are their own group per facing (the fourth).
 - Check with `--thrust` and `--zoom` captures (`AGENTS.md`); `PropulsionVisualTests` holds the rules.
 
 ## Decided: second pass (look and mounting)
@@ -216,7 +288,7 @@ Built. Rules live in `FaceMounts`; `PropulsionTests`, `BuildDraftTests` and `Edi
 
 ### What a mount is
 
-- A thruster (`coldGasThruster`, `hotThruster`, `microthruster`) is a **mount**: it sits on a block's face and
+- A thruster (`coldGasThruster`, `hotThruster`, `microthruster`, `ionThruster`, `microIonThruster`) is a **mount**: it sits on a block's face and
   fills no grid cell. A block type with `"mount"` in `blocks.json` is a mount and never a block; every other
   type is a block and never a mount.
 - A mount names **its block** (design index), **the face** (one of six) and **where on the face** it is.
@@ -358,7 +430,7 @@ Shipped designs, tanks full, measured by `PropulsionTests`:
 | Command Pod | 19.3 m/s² | 9.6 m/s² | 83 min | 52 min | 83 min |
 | Prospector | 20.3 m/s² | 10.1 m/s² | 83 min | 52 min | 83 min |
 | Surveyor | 20.4 m/s² | 10.2 m/s² | 83 min | 52 min | 83 min |
-| Drone | 16.7 m/s² | braking 16.7, others 8.3 m/s² | 75 min | 47 min | 133 min (braking 67 min) |
+| Drone | 8.5 m/s² | braking 8.5, others 4.3 m/s² | no tanks: electric | no tanks | no tanks |
 
 Boost, measured with the battery full and the drive never overheating (`PropulsionTests`, `PowerFlowTests`):
 
@@ -366,7 +438,7 @@ Boost, measured with the battery full and the drive never overheating (`Propulsi
 | --- | --- | --- | --- |
 | Command Pod | 7.9 MW (16.5) | 23 s (5 s) | 34 min (52) |
 | Prospector, Surveyor | 15.8 MW (32.9) | 12 s (3 s) | 34 min (52) |
-| Drone | 1.35 MW (2.8) | 32 s (5 s) | 31 min (47) |
+| Drone | 4.05 MW, ion (1.35 MW fuelled) | 2.7 s (32 s fuelled) | no tanks |
 
 - Battery time counts idle draw and generation. The old times are worked out from the old multiplier, not measured. A pod that boosts the 6 s heat allows keeps about three
   quarters of its battery; the vessels about half.
@@ -377,7 +449,7 @@ With mounts, same mass, thrust and burn as with thruster blocks, so the shipped 
 | --- | --- | --- | --- | --- |
 | Command Pod | 13 (was 18) | 20 | four each on the shield (right), cargo (left), quarters (up), core (down), charting (front) | 2,760 (was 3,510) |
 | Prospector, Surveyor | 28 (was 38) | 40 | eight each way: two cargo holds a side, two on top, two below, two plates at the front | 5,900 and 5,910 (were 7,400 and 7,410) |
-| Drone | 9 (was 15) | 24 | four each on the tanks, gyro (up) and generator (down), eight on the front of gyro and generator | 310 (was 490) |
+| Drone | 10 (was 15) | 24 ion thrusters | four each on the plates where the tanks were, gyro (up) and generator (down), eight on the front of gyro and generator | 340 (was 490) |
 
 - The ships are more compact, so they turn a little differently (drone 38, 45, 40 deg/s; was 39, 43, 45).
 
@@ -388,10 +460,12 @@ With mounts, same mass, thrust and burn as with thruster blocks, so the shipped 
 
 - **Per hull in view:** `HullView.Thrust` (`ThrustState`), for the own hull and every other hull.
   - Three throttles, -127 to 127, along the hull's right, up and back axes: which way it is pushed and how hard.
-  - A bit per fuel while parts of that fuel fire, and a bit while boost runs.
-  - `Thrust.Firing(fuel, facing)` answers for one part: 0 to 1. Zero when idle or out of fuel.
+  - A bit per fuel while parts of that fuel fire, a bit while boost runs, and a bit while ion parts push.
+  - `Thrust.Firing(fuel, facing)` answers for one part: 0 to 1. Zero when idle or out of fuel. `FuelKind.None`
+    asks for ion parts: zero when idle or without power.
   - Dampener braking is in it. A hull in the jump tunnel fires nothing.
-- **Per part:** its facing is `DesignBox.Facing`, its fuel `BlockType.Fuel`, both in `HullDesign.Boxes`.
+- **Per part:** its facing is `DesignBox.Facing`, its fuel `BlockType.Fuel` (none for an ion part, `BlockType.Ion`),
+  both in `HullDesign.Boxes`.
 - **Fuel, own hull only:** `HullView.Fuel` (`FuelFlow`): amount, capacity and burn per fuel in kg and kg/s. The burn
   is smoothed like `HullView.Power`. No other hull's tanks are sent to anyone.
 - **Tanks, own hull only:** `HullView.Tanks`: kilograms in each tank ("Fuel per tank").
@@ -408,9 +482,10 @@ With mounts, same mass, thrust and burn as with thruster blocks, so the shipped 
 - An engine's nozzle with a block in front of it still pushes. Nothing checks for it. A mounted thruster cannot
   have one: its box must be clear.
 - A mounted thruster is not hit, not picked and not collided with ("Face mounts").
-- The electric draw follows the largest throttle the pilot asks, over all fuelled parts, not each part's own use.
-- A node of the running sums grew from 216 to 528 bytes (thrust and burn for six directions and three fuels). See
-  "Sum memory" in `docs/blocks-at-scale.md`.
+- The electric draw of fuelled parts follows the largest throttle the pilot asks, over all of them, not each part's
+  own use, and the dampeners' braking with them draws nothing. Ion parts are billed per direction, dampeners included.
+- A node of the running sums grew from 216 to 528 bytes (thrust and burn for six directions and three fuels), then
+  to 624 (ion thrust and power for six directions). See "Sum memory" in `docs/blocks-at-scale.md`.
 
 ## Open
 

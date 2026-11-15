@@ -158,7 +158,7 @@ public sealed class HullDesignTests
     [InlineData(0, 800f, 400f, 37.5f)]
     [InlineData(1, 1600f, 800f, 37.5f)]
     [InlineData(2, 1600f, 800f, 37.5f)]
-    [InlineData(3, 60f, 30f, 5f)]
+    [InlineData(3, 30f, 15f, 5f)]
     public void ShippedFlightBalanceReachesRuntimeAndEditorStats(int index, float forwardThrust, float lateralThrust, float recharge)
     {
         var design = Content.Designs[index];

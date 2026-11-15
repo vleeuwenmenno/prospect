@@ -1353,7 +1353,7 @@ public sealed class SaveLifecycleTests
                     world.TankCount--;
                     break;
                 case "thrust bits":
-                    world.Hulls[0].State.Thrust.Flags = 16;
+                    world.Hulls[0].State.Thrust.Flags = 32;
                     break;
                 case "jump":
                     world.Hulls[4].State.JumpTunnelElapsed = double.NegativeInfinity;

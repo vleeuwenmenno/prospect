@@ -221,12 +221,17 @@ public static class TankFuel
 }
 
 /// <summary>
-/// One figure for each direction a hull can be pushed and each fuel that can push it: eighteen numbers. The direction
-/// is the way the hull is pushed, which is the opposite of the facing of the parts that do it.
+/// One figure for each direction a hull can be pushed and each kind of thrust part that can push it: three fuels and
+/// the ion parts, which burn no fuel and run on power alone (<see cref="BlockType.Ion"/>). Twenty-four numbers. The
+/// direction is the way the hull is pushed, which is the opposite of the facing of the parts that do it. A table of
+/// fuel burnt leaves the ion column at nothing.
 /// </summary>
-[InlineArray(Facings.Count * Fuels.Count)]
+[InlineArray(Facings.Count * Kinds)]
 public struct ThrustTable : IEquatable<ThrustTable>
 {
+    /// <summary>The kinds of thrust part a direction has a figure for: each fuel, then the ion parts.</summary>
+    public const int Kinds = Fuels.Count + 1;
+
     private float _first;
 
     /// <summary>True when every figure of the two tables has the same bits.</summary>
@@ -243,20 +248,26 @@ public struct ThrustTable : IEquatable<ThrustTable>
     }
 
     /// <summary>Where the figure of a push direction and a fuel sits in the table.</summary>
-    public static int Index(BlockFacing push, FuelKind fuel) => (byte)push * Fuels.Count + (byte)fuel - 1;
+    public static int Index(BlockFacing push, FuelKind fuel) => (byte)push * Kinds + (byte)fuel - 1;
 
-    /// <summary>The figures of every fuel in one direction, added.</summary>
+    /// <summary>Where the figure of the ion parts that push toward <paramref name="push"/> sits in the table.</summary>
+    public static int IonIndex(BlockFacing push) => (byte)push * Kinds + Fuels.Count;
+
+    /// <summary>The figures of every kind of part in one direction, added.</summary>
     public readonly float Sum(BlockFacing push)
     {
-        var at = (byte)push * Fuels.Count;
-        return this[at] + this[at + 1] + this[at + 2];
+        var at = (byte)push * Kinds;
+        return this[at] + this[at + 1] + this[at + 2] + this[at + 3];
     }
 
-    /// <summary>The figures in one direction of the fuels <paramref name="fuel"/> still has any of, added.</summary>
+    /// <summary>
+    /// The figures in one direction of the fuels <paramref name="fuel"/> still has any of, and of the ion parts, which
+    /// need no fuel, added.
+    /// </summary>
     public readonly float Sum(BlockFacing push, in FuelTanks fuel)
     {
-        var at = (byte)push * Fuels.Count;
-        return (fuel.Nitrogen > 0f ? this[at] : 0f) + (fuel.Hydrazine > 0f ? this[at + 1] : 0f) + (fuel.Bipropellant > 0f ? this[at + 2] : 0f);
+        var at = (byte)push * Kinds;
+        return (fuel.Nitrogen > 0f ? this[at] : 0f) + (fuel.Hydrazine > 0f ? this[at + 1] : 0f) + (fuel.Bipropellant > 0f ? this[at + 2] : 0f) + this[at + 3];
     }
 
     /// <summary>True when every figure is a finite number.</summary>
@@ -264,7 +275,48 @@ public struct ThrustTable : IEquatable<ThrustTable>
     {
         get
         {
-            for (var i = 0; i < Facings.Count * Fuels.Count; i++)
+            for (var i = 0; i < Facings.Count * Kinds; i++)
+                if (!float.IsFinite(this[i])) return false;
+            return true;
+        }
+    }
+}
+
+/// <summary>
+/// One figure for each of the six directions a hull can be pushed, indexed by <see cref="BlockFacing"/>: what the ion
+/// parts pushing that way draw at full thrust, in megawatts.
+/// </summary>
+[InlineArray(Facings.Count)]
+public struct DirectionFigures : IEquatable<DirectionFigures>
+{
+    private float _first;
+
+    /// <summary>True when every figure of the two have the same bits.</summary>
+    public readonly bool Equals(DirectionFigures other) =>
+        MemoryMarshal.AsBytes(new ReadOnlySpan<DirectionFigures>(in this)).SequenceEqual(MemoryMarshal.AsBytes(new ReadOnlySpan<DirectionFigures>(in other)));
+
+    public override readonly bool Equals(object? other) => other is DirectionFigures figures && Equals(figures);
+
+    public override readonly int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.AddBytes(MemoryMarshal.AsBytes(new ReadOnlySpan<DirectionFigures>(in this)));
+        return hash.ToHashCode();
+    }
+
+    /// <summary>The figure of one direction.</summary>
+    public readonly float this[BlockFacing push] => this[(int)push];
+
+    /// <summary>The most the six figures give at once: the larger of each axis's two directions, added.</summary>
+    public readonly float AtOnce =>
+        Math.Max(this[0], this[1]) + Math.Max(this[2], this[3]) + Math.Max(this[4], this[5]);
+
+    /// <summary>True when every figure is a finite number.</summary>
+    public readonly bool IsFinite
+    {
+        get
+        {
+            for (var i = 0; i < Facings.Count; i++)
                 if (!float.IsFinite(this[i])) return false;
             return true;
         }
@@ -280,6 +332,7 @@ public struct ThrustTable : IEquatable<ThrustTable>
 public struct ThrustState
 {
     private const byte BoostBit = 1 << 3;
+    private const byte IonBit = 1 << 4;
 
     /// <summary>
     /// The throttle along the hull's right, up and back axes, from -127 to 127: positive pushes the hull toward
@@ -289,17 +342,26 @@ public struct ThrustState
     public sbyte Y;
     public sbyte Z;
 
-    /// <summary>Bit <c>kind - 1</c> is set while parts burning that <see cref="FuelKind"/> push; bit 3 while boost runs.</summary>
+    /// <summary>
+    /// Bit <c>kind - 1</c> is set while parts burning that <see cref="FuelKind"/> push; bit 3 while boost runs; bit 4
+    /// while ion parts push.
+    /// </summary>
     public byte Flags;
 
     /// <summary>Whether the bits are ones a step can write.</summary>
-    public readonly bool IsValid => Flags < 16 && X != sbyte.MinValue && Y != sbyte.MinValue && Z != sbyte.MinValue;
+    public readonly bool IsValid => Flags < 32 && X != sbyte.MinValue && Y != sbyte.MinValue && Z != sbyte.MinValue;
 
     /// <summary>True while thrust is boosted.</summary>
     public readonly bool Boosted => (Flags & BoostBit) != 0;
 
-    /// <summary>True while any part burning <paramref name="fuel"/> pushes.</summary>
-    public readonly bool Burning(FuelKind fuel) => fuel != FuelKind.None && (Flags & 1 << ((byte)fuel - 1)) != 0;
+    /// <summary>True while ion parts push: they had the power to.</summary>
+    public readonly bool Ion => (Flags & IonBit) != 0;
+
+    /// <summary>
+    /// True while any part burning <paramref name="fuel"/> pushes. <see cref="FuelKind.None"/> names the ion parts,
+    /// the only thrust parts that burn no fuel: it answers <see cref="Ion"/>.
+    /// </summary>
+    public readonly bool Burning(FuelKind fuel) => fuel == FuelKind.None ? Ion : (Flags & 1 << ((byte)fuel - 1)) != 0;
 
     /// <summary>The throttle, from 0 to 1, of the parts that push the hull toward <paramref name="push"/>.</summary>
     public readonly float Throttle(BlockFacing push)
@@ -310,16 +372,17 @@ public struct ThrustState
 
     /// <summary>
     /// The throttle, from 0 to 1, of a part that burns <paramref name="fuel"/> and faces <paramref name="facing"/>:
-    /// zero while it is idle or its fuel is gone. A part pushes the hull the opposite way to its facing.
+    /// zero while it is idle or its fuel is gone. A part pushes the hull the opposite way to its facing. An ion part,
+    /// which burns no fuel, is asked for with <see cref="FuelKind.None"/>; it is zero while it has no power.
     /// </summary>
     public readonly float Firing(FuelKind fuel, BlockFacing facing) => Burning(fuel) ? Throttle(Facings.Opposite(facing)) : 0f;
 
-    internal static ThrustState Of(float x, float y, float z, bool nitrogen, bool hydrazine, bool bipropellant, bool boost) => new()
+    internal static ThrustState Of(float x, float y, float z, bool nitrogen, bool hydrazine, bool bipropellant, bool ion, bool boost) => new()
     {
         X = Quantize(x),
         Y = Quantize(y),
         Z = Quantize(z),
-        Flags = (byte)((nitrogen ? 1 : 0) | (hydrazine ? 2 : 0) | (bipropellant ? 4 : 0) | (boost ? BoostBit : 0)),
+        Flags = (byte)((nitrogen ? 1 : 0) | (hydrazine ? 2 : 0) | (bipropellant ? 4 : 0) | (boost ? BoostBit : 0) | (ion ? IonBit : 0)),
     };
 
     // A throttle too small for the scale still counts as firing.

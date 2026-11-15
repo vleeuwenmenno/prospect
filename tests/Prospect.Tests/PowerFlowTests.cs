@@ -117,6 +117,27 @@ public sealed class PowerFlowTests
     }
 
     [Fact]
+    public void TheElectricDronesIonDrawIsTheThrustShareAndEachDirectionPaysForItsOwn()
+    {
+        // The drone's ion parts spend only power: forward draws the drive's figure, which the generator carries, and
+        // pushing sideways as well adds the side thrusters' figure, which it does not.
+        var flight = Of(Content.DroneDesign);
+        var state = HullState.Spawn(Double3.Zero, flight);
+        FlightModel.Step(ref state, new FlightInput { Forward = 127 }, flight, HullSim.Dt, out var flow);
+        Assert.Equal(flight.IonPower[BlockFacing.Front], flow.Thrust, 4);
+        Assert.True(flow.Net > 0f, $"forward alone nets {flow.Net} MW");
+
+        state = HullState.Spawn(Double3.Zero, flight);
+        FlightModel.Step(ref state, new FlightInput { Forward = 127, Strafe = -127 }, flight, HullSim.Dt, out flow);
+        Assert.Equal(flight.IonPower[BlockFacing.Front] + flight.IonPower[BlockFacing.Left], flow.Thrust, 4);
+        Assert.True(flow.Net < 0f, $"forward and sideways nets {flow.Net} MW");
+
+        state = HullState.Spawn(Double3.Zero, flight);
+        FlightModel.Step(ref state, new FlightInput { Forward = 127, Boost = true }, flight, HullSim.Dt, out flow);
+        Assert.Equal(flight.IonPower[BlockFacing.Front] * flight.BoostPowerMultiplier, flow.Thrust, 4);
+    }
+
+    [Fact]
     public void TheJumpDrivesChargeIsInTheFlowAndNothingFlowsInTheTunnel()
     {
         var flight = Of(Content.PodDesign);

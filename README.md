@@ -16,7 +16,9 @@ to the way they face, and burn bipropellant, hydrazine and nitrogen from tank bl
 size; thrusters are small parts mounted on the faces of blocks, several to a face, that fill no cell and point out
 of the face they sit on. A thruster is lost with the block it sits on; it has no hit points of its own and is left
 out of collisions. A part with no fuel of its
-kind gives no thrust. Fuel is spent by the shared flight code, predicted by the client and saved with the world.
+kind gives no thrust. Ion parts (an ion drive block and ion thrusters) are the exception: they burn no fuel and push
+on power alone, weakly and at a high draw, so only light craft gain from them; with no power they give nothing. The
+escape drone is all ion and has no tanks, so fuel can never strand it. Fuel is spent by the shared flight code, predicted by the client and saved with the world.
 Fuel is kept tank by tank: thrust draws from every tank of its fuel in proportion to what each holds, and a tank
 that is destroyed loses what it held. Nothing refuels a ship yet: only a first spawn starts with full tanks. An edit
 keeps the fuel of every tank that is still there and a new tank starts empty; a repair restores blocks, not fuel,
@@ -24,7 +26,8 @@ so a tank it builds again is empty; a ship built new from the drone starts empty
 thruster kinds have low-poly models of their own: an engine fills its block flush, a thruster is a pod on a faceted plate
 (a cold gas pod has four nozzles), in flight and in the ship editor (placed parts and mounts, and the ghost). They show what they fire: an engine ignites with a few sparks and
 opens a wide, soft, blue-violet vacuum plume, a hot thruster a small one with an orange core, a cold gas pod a
-faint, streaked cone of expanding gas lit by the star that bursts as its valve opens and clears when it closes; boost makes plumes longer and
+faint, streaked cone of expanding gas lit by the star that bursts as its valve opens and clears when it closes, and an
+ion part (a flat grid in a short ring) a faint, steady blue-violet glow with a thin straight beam; boost makes plumes longer and
 brighter without burning out to white, for every hull in view. The pilot console shows each fuel's amount and flow.
 Not there: thruster torque, fuel transfer between tanks, a readout of each tank (the console shows each fuel's total),
 refineries and stations. The figures are a first balance. See
@@ -242,7 +245,9 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   forward, and four cold gas thrusters are mounted facing each other way, so the pod brakes and strafes at half
   its forward acceleration. Thrust burns fuel, boost four and a half times as much, and the dampeners burn it while they brake;
   with a tank dry its parts give nothing, and with every tank dry the hull drifts and can still turn. The shipped
-  ships carry about 83 minutes of full engine thrust, the drone 75. Once moving, the pilot view marks the direction of travel
+  ships carry about 83 minutes of full engine thrust. The drone is electric: its ion drive holds full forward thrust on
+  its generator, while pushing sideways too, or the shield recharging, runs its battery down in tens of seconds and
+  boost empties it in about three. Once moving, the pilot view marks the direction of travel
   (prograde: a circle with three ticks) and its opposite (retrograde: a circle with a cross), where to point the
   engine to stop; Settings, Steering turns both off. Thrust, boost and shield recharge also draw
   power; the generator refills the battery with the

@@ -65,8 +65,9 @@ public struct FlightInput
 public struct FlightParams
 {
     /// <summary>
-    /// Thrust acceleration in m/s² for each direction the hull can be pushed and each fuel that pushes it, at full
-    /// throttle. A direction's parts are those facing the other way; a fuel that has run out adds nothing.
+    /// Thrust acceleration in m/s² for each direction the hull can be pushed and each kind of part that pushes it (each
+    /// fuel, then ion), at full throttle. A direction's parts are those facing the other way; a fuel that has run out
+    /// adds nothing, and ion parts push only as far as there is power for them.
     /// </summary>
     public ThrustTable Thrust;
 
@@ -123,9 +124,18 @@ public struct FlightParams
     /// <summary>Generator output in megawatts.</summary>
     public float PowerGenerated;
 
-    /// <summary>Megawatts drawn all the time, by thrusters at full thrust, and by shields while recharging.</summary>
+    /// <summary>
+    /// Megawatts drawn all the time, by thrusters at full thrust, and by shields while recharging. The thrust figure
+    /// counts fuelled parts' pumps all at once and ion parts along three axes at once (<see cref="IonPower"/>).
+    /// </summary>
     public float IdlePower;
     public float ThrustPower;
+
+    /// <summary>
+    /// Megawatts the ion parts pushing each way draw at full thrust. Power is all they spend, so each direction pays
+    /// for its own throttle, the dampeners' included.
+    /// </summary>
+    public DirectionFigures IonPower;
 
     /// <summary>
     /// <see cref="ThrustPower"/> split by the fuel the parts burn: megawatts for pumps, valves and ignition at full
@@ -203,6 +213,17 @@ public struct FlightParams
     /// <summary>The strongest of the six directions' accelerations with full tanks, in m/s²; zero for a hull with no thrust.</summary>
     public readonly float StrongestPush =>
         Math.Max(Math.Max(Math.Max(Push(BlockFacing.Right), Push(BlockFacing.Left)), Math.Max(Push(BlockFacing.Up), Push(BlockFacing.Down))), Math.Max(Push(BlockFacing.Front), Push(BlockFacing.Back)));
+
+    /// <summary>True when the hull has ion parts in any direction.</summary>
+    public readonly bool HasIon
+    {
+        get
+        {
+            for (var direction = 0; direction < Facings.Count; direction++)
+                if (Thrust[ThrustTable.IonIndex((BlockFacing)direction)] > 0f) return true;
+            return false;
+        }
+    }
 
     /// <summary>True when the hull has parts burning <paramref name="fuel"/> in any direction.</summary>
     public readonly bool Burns(FuelKind fuel)
@@ -352,8 +373,8 @@ public struct HullState
 
 /// <summary>
 /// The rigid-body flight model. Space is frictionless: velocity persists until thrust changes it. Each thrust part
-/// pushes the hull the opposite way to its facing and burns its own fuel; a direction with no part facing away from
-/// it, or whose parts have run dry, cannot be pushed. Dampeners are the hull's computer firing those same parts
+/// pushes the hull the opposite way to its facing and burns its own fuel, or, an ion part, only power; a direction
+/// with no part facing away from it, or whose parts have run dry, cannot be pushed. Dampeners are the hull's computer firing those same parts
 /// against any drift the pilot is not commanding, and burn fuel as they do. Thrust, boost and shield recharge all
 /// draw power; the generator refills the battery with whatever is left over. This one function is the whole of
 /// flight; the server runs it for authority and the client runs it to predict.
@@ -436,16 +457,30 @@ public static class FlightModel
         var hydrazine = held.Hydrazine > 0f;
         var bipropellant = held.Bipropellant > 0f;
 
+        // What each direction can push with: the parts of the fuels left, and the ion parts, which need none.
+        var toLocal = Quaternion.Conjugate(state.Orientation);
+        var velocity = Vector3.Transform(state.Velocity, toLocal);
+        var pushRight = p.Push(BlockFacing.Right, held);
+        var pushLeft = p.Push(BlockFacing.Left, held);
+        var pushUp = p.Push(BlockFacing.Up, held);
+        var pushDown = p.Push(BlockFacing.Down, held);
+        var pushBack = p.Push(BlockFacing.Back, held);
+        var pushFront = p.Push(BlockFacing.Front, held);
+
         // Power: what the hull wants this tick against what the generator makes. The battery covers a shortfall
         // and takes the surplus; with the battery flat, thrust is cut back to what the generator alone can feed.
         // Propulsion has priority over shield recovery; only the remaining energy can restore shield points.
-        // Pumps and valves of parts with nothing left to pump draw nothing.
+        // Pumps and valves of parts with nothing left to pump draw nothing. Ion parts spend nothing but power, so
+        // each direction pays for the throttle it is asked for, the dampeners' braking included.
         state.ShieldCooldown = Math.Max(0f, state.ShieldCooldown - dt);
         if (p.ShieldCapacity <= 0f)
             state.ShieldOffline = false;
         var thrustUse = Math.Max(MathF.Abs(thrust.X), Math.Max(MathF.Abs(thrust.Y), MathF.Abs(thrust.Z)));
         var thrustPower = (nitrogen ? p.ThrustPowerByFuel.Nitrogen : 0f) + (hydrazine ? p.ThrustPowerByFuel.Hydrazine : 0f) + (bipropellant ? p.ThrustPowerByFuel.Bipropellant : 0f);
-        var thrustDemand = thrustPower * thrustUse * (boosting ? p.BoostPowerMultiplier : 1f);
+        var ionDemand = IonAsked(velocity.X, thrust.X, pushRight, pushLeft, input.Dampeners, dt, p.IonPower[BlockFacing.Right], p.IonPower[BlockFacing.Left])
+            + IonAsked(velocity.Y, thrust.Y, pushUp, pushDown, input.Dampeners, dt, p.IonPower[BlockFacing.Up], p.IonPower[BlockFacing.Down])
+            + IonAsked(velocity.Z, thrust.Z, pushBack, pushFront, input.Dampeners, dt, p.IonPower[BlockFacing.Back], p.IonPower[BlockFacing.Front]);
+        var thrustDemand = (thrustPower * thrustUse + ionDemand) * (boosting ? p.BoostPowerMultiplier : 1f);
         var demand = p.IdlePower + thrustDemand;
         var available = Math.Max(0f, state.Energy + (p.PowerGenerated - demand) * dt);
         state.Boosting = boosting && available > 0f;
@@ -482,12 +517,10 @@ public static class FlightModel
 
         // Translation, in the hull's frame so each direction uses the parts that push that way. Forward is -Z.
         // Each axis reports the throttle it used toward its plus and its minus direction, which is what burns fuel.
-        var toLocal = Quaternion.Conjugate(state.Orientation);
-        var velocity = Vector3.Transform(state.Velocity, toLocal);
         var gain = (boosting ? p.BoostMultiplier : 1f) * thrustScale;
-        Drive(ref velocity.X, thrust.X, p.Push(BlockFacing.Right, held), p.Push(BlockFacing.Left, held), input.Dampeners, gain, thrustScale, dt, out var right, out var left);
-        Drive(ref velocity.Y, thrust.Y, p.Push(BlockFacing.Up, held), p.Push(BlockFacing.Down, held), input.Dampeners, gain, thrustScale, dt, out var up, out var down);
-        Drive(ref velocity.Z, thrust.Z, p.Push(BlockFacing.Back, held), p.Push(BlockFacing.Front, held), input.Dampeners, gain, thrustScale, dt, out var back, out var front);
+        Drive(ref velocity.X, thrust.X, pushRight, pushLeft, input.Dampeners, gain, thrustScale, dt, out var right, out var left);
+        Drive(ref velocity.Y, thrust.Y, pushUp, pushDown, input.Dampeners, gain, thrustScale, dt, out var up, out var down);
+        Drive(ref velocity.Z, thrust.Z, pushBack, pushFront, input.Dampeners, gain, thrustScale, dt, out var back, out var front);
 
         // What the parts burnt: each direction's rate at the throttle it ran at. Boost burns more for the thrust
         // it adds; the dampeners never boost, but share the multiplier in a tick where the pilot does.
@@ -502,7 +535,10 @@ public static class FlightModel
         // Every tank of a fuel gives its share of what was burnt, and what is left is added up again.
         var burnt = new FuelTanks { Nitrogen = burn.Nitrogen * dt, Hydrazine = burn.Hydrazine * dt, Bipropellant = burn.Bipropellant * dt };
         state.Fuel = TankFuel.Drain(levels, tanks, sums, burnt);
-        state.Thrust = ThrustState.Of(right - left, up - down, back - front, burn.Nitrogen > 0f, burn.Hydrazine > 0f, burn.Bipropellant > 0f, state.Boosting);
+        var ion = p.Thrust[ThrustTable.IonIndex(BlockFacing.Right)] * right + p.Thrust[ThrustTable.IonIndex(BlockFacing.Left)] * left
+            + p.Thrust[ThrustTable.IonIndex(BlockFacing.Up)] * up + p.Thrust[ThrustTable.IonIndex(BlockFacing.Down)] * down
+            + p.Thrust[ThrustTable.IonIndex(BlockFacing.Back)] * back + p.Thrust[ThrustTable.IonIndex(BlockFacing.Front)] * front;
+        state.Thrust = ThrustState.Of(right - left, up - down, back - front, burn.Nitrogen > 0f, burn.Hydrazine > 0f, burn.Bipropellant > 0f, ion > 0f, state.Boosting);
         fuel = new FuelFlow { Amount = state.Fuel, Capacity = p.FuelCapacity, Burn = burn };
 
         // Above the hull's rated speed the drive sheds the excess rather than cutting it instantly.
@@ -513,6 +549,26 @@ public static class FlightModel
 
         state.Velocity = Vector3.Transform(velocity, state.Orientation);
         state.Position += state.Velocity * dt;
+    }
+
+    /// <summary>
+    /// The megawatts the ion parts along one axis are asked for this tick, before any cut for power: the pilot's
+    /// throttle toward the plus or minus direction, or, with no command, the share of one tick's thrust the dampeners
+    /// need to stop the drift, as <see cref="Drive"/> works it out.
+    /// </summary>
+    private static float IonAsked(float speed, float command, float plus, float minus, bool dampeners, float dt, float ionPlus, float ionMinus)
+    {
+        if (command > 0f)
+            return command * ionPlus;
+        if (command < 0f)
+            return -command * ionMinus;
+        if (!dampeners)
+            return 0f;
+        if (speed > 0f && minus > 0f)
+            return Math.Min(speed, minus * dt) / (minus * dt) * ionMinus;
+        if (speed < 0f && plus > 0f)
+            return Math.Min(-speed, plus * dt) / (plus * dt) * ionPlus;
+        return 0f;
     }
 
     /// <summary>
@@ -537,19 +593,21 @@ public static class FlightModel
         }
         else if (dampeners)
         {
+            // The dampeners are cut back with the rest of thrust when there is not the power for it, so a hull with
+            // no power left brakes no more than it can push.
             if (speed > 0f && minus > 0f)
             {
-                var reach = minus * dt;
+                var reach = minus * scale * dt;
                 var taken = Math.Min(speed, reach);
                 speed -= taken;
-                usedMinus = taken / reach;
+                usedMinus = taken / (minus * dt);
             }
             else if (speed < 0f && plus > 0f)
             {
-                var reach = plus * dt;
+                var reach = plus * scale * dt;
                 var taken = Math.Min(-speed, reach);
                 speed += taken;
-                usedPlus = taken / reach;
+                usedPlus = taken / (plus * dt);
             }
         }
     }

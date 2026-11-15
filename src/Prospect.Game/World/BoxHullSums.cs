@@ -55,7 +55,7 @@ public sealed class BoxHullSums
     public const int GroupSize = 32;
 
     /// <summary>The numbers one node holds.</summary>
-    internal const int Totals = 60;
+    internal const int Totals = 72;
 
     private const int Mass = 0;
     private const int Hull = 1;
@@ -68,20 +68,27 @@ public sealed class BoxHullSums
     private const int Crew = 8;
 
     /// <summary>
-    /// Thrust per push direction and fuel: this index plus <see cref="ThrustTable.Index"/>. Eighteen numbers, so a
-    /// hull's thrust in each direction and from each fuel is read off the sums like everything else.
+    /// Thrust per push direction and kind of part (three fuels, then ion): this index plus <see cref="ThrustTable.Index"/>
+    /// or <see cref="ThrustTable.IonIndex"/>. Twenty-four numbers, so a hull's thrust in each direction and from each
+    /// kind of part is read off the sums like everything else.
     /// </summary>
     private const int Thrust = 9;
 
-    /// <summary>Fuel burnt at full thrust per push direction and fuel, laid out as <see cref="Thrust"/>.</summary>
-    private const int Burn = Thrust + Facings.Count * Fuels.Count;
+    /// <summary>Fuel burnt at full thrust per push direction and fuel: this index plus <see cref="BurnIndex"/>. Ion parts burn none.</summary>
+    private const int Burn = Thrust + Facings.Count * ThrustTable.Kinds;
 
     /// <summary>Tank capacity per fuel: this index plus the fuel, less one.</summary>
     private const int FuelCapacity = Burn + Facings.Count * Fuels.Count;
 
     /// <summary>Power drawn at full thrust by the parts of each fuel: this index plus the fuel, less one.</summary>
     private const int ThrustPower = FuelCapacity + Fuels.Count;
-    private const int IdlePower = ThrustPower + Fuels.Count;
+
+    /// <summary>
+    /// Power drawn at full thrust by the ion parts of each push direction: this index plus the direction. Kept per
+    /// direction, since power is all an ion part spends, and a pilot pushing one way should pay for that way only.
+    /// </summary>
+    private const int IonPower = ThrustPower + Fuels.Count;
+    private const int IdlePower = IonPower + Facings.Count;
     private const int ShieldPower = IdlePower + 1;
     private const int Cells = ShieldPower + 1;
     private const int InertiaX = Cells + 1;
@@ -374,9 +381,13 @@ public sealed class BoxHullSums
 
     private ModuleEquipment Equipment(int block) => block == 0 ? default : ModuleEquipment.Of(block, _boxes[block - 1].Type.Module);
 
+    /// <summary>Where the burn of a push direction and a fuel sits after <see cref="Burn"/>.</summary>
+    private static int BurnIndex(BlockFacing push, FuelKind fuel) => (byte)push * Fuels.Count + (byte)fuel - 1;
+
     /// <summary>
     /// What a block of a type that fills this many cells adds, by the type's size rules. A thrust part adds its
-    /// thrust and burn to the direction opposite its <paramref name="facing"/>, under the fuel it burns.
+    /// thrust and burn to the direction opposite its <paramref name="facing"/>, under the fuel it burns; an ion part
+    /// adds its thrust and its power to that direction's ion figures.
     /// </summary>
     internal static HullSum.Numbers ScaledFigures(BlockType type, long cells, out bool drive, bool half = false, BlockFacing facing = BlockFacing.Back)
     {
@@ -399,10 +410,16 @@ public sealed class BoxHullSums
         // A thrust part pushes the hull away from the way it faces; its power draw counts with what the block is for.
         if (type.Thrust > 0 && type.Fuel != FuelKind.None)
         {
-            var at = ThrustTable.Index(Facings.Opposite(facing), type.Fuel);
-            values[Thrust + at] = Scaled("thrust", type.Thrust);
-            values[Burn + at] = Scaled("fuelBurn", type.FuelBurn);
+            var push = Facings.Opposite(facing);
+            values[Thrust + ThrustTable.Index(push, type.Fuel)] = Scaled("thrust", type.Thrust);
+            values[Burn + BurnIndex(push, type.Fuel)] = Scaled("fuelBurn", type.FuelBurn);
             values[ThrustPower + (int)type.Fuel - 1] = Scaled("powerDraw", type.PowerDraw);
+        }
+        else if (type.Thrust > 0 && type.Ion)
+        {
+            var push = Facings.Opposite(facing);
+            values[Thrust + ThrustTable.IonIndex(push)] = Scaled("thrust", type.Thrust);
+            values[IonPower + (int)push] = Scaled("powerDraw", type.PowerDraw);
         }
         else
         {
@@ -468,7 +485,13 @@ public sealed class BoxHullSums
             Hydrazine = (float)sum.Values[ThrustPower + 1],
             Bipropellant = (float)sum.Values[ThrustPower + 2],
         };
-        var thrustPower = thrustPowerByFuel.Nitrogen + thrustPowerByFuel.Hydrazine + thrustPowerByFuel.Bipropellant;
+        var ionPower = default(DirectionFigures);
+        for (var direction = 0; direction < Facings.Count; direction++)
+            ionPower[direction] = (float)sum.Values[IonPower + direction];
+
+        // Fuelled parts draw by the largest throttle asked; ion parts by each direction's own, so the most they
+        // ever draw at once is the larger of each axis's two directions.
+        var thrustPower = thrustPowerByFuel.Nitrogen + thrustPowerByFuel.Hydrazine + thrustPowerByFuel.Bipropellant + ionPower.AtOnce;
         var fuelCapacity = new FuelTanks
         {
             Nitrogen = (float)sum.Values[FuelCapacity],
@@ -482,8 +505,8 @@ public sealed class BoxHullSums
         // A drive that takes power faster charges sooner; what a jump costs in all is the same.
         var ftlPower = ftl == FtlKind.None ? 0f : (float)sum.Values[FtlPower + (int)ftl - 1] * rules.FtlChargeMultiplier;
 
-        // Acceleration per push direction and fuel. The rated speed follows the strongest direction, and a hull
-        // above it sheds the excess an eighth faster than that direction can add to it, so holding the throttle
+        // Acceleration per push direction and kind of part. The rated speed follows the strongest direction, and a
+        // hull above it sheds the excess an eighth faster than that direction can add to it, so holding the throttle
         // open never keeps a hull above its rating.
         var thrust = default(ThrustTable);
         var burn = default(ThrustTable);
@@ -491,14 +514,15 @@ public sealed class BoxHullSums
         for (var direction = 0; direction < Facings.Count; direction++)
         {
             var push = 0f;
-            for (var fuel = 0; fuel < Fuels.Count; fuel++)
+            for (var kind = 0; kind < ThrustTable.Kinds; kind++)
             {
-                var at = direction * Fuels.Count + fuel;
+                var at = direction * ThrustTable.Kinds + kind;
                 thrust[at] = (float)sum.Values[Thrust + at] / mass;
-                burn[at] = (float)sum.Values[Burn + at];
                 push += thrust[at];
             }
 
+            for (var fuel = 0; fuel < Fuels.Count; fuel++)
+                burn[direction * ThrustTable.Kinds + fuel] = (float)sum.Values[Burn + direction * Fuels.Count + fuel];
             strongest = Math.Max(strongest, push);
         }
 
@@ -531,6 +555,7 @@ public sealed class BoxHullSums
             IdlePower = idlePower,
             ThrustPower = thrustPower,
             ThrustPowerByFuel = thrustPowerByFuel,
+            IonPower = ionPower,
             ShieldPower = shieldPower,
             ShieldRestartFraction = rules.ShieldRestartFraction,
             ShieldRestartPower = shieldPower * rules.ShieldRestartPowerMultiplier,

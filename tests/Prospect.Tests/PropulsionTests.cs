@@ -98,6 +98,178 @@ public sealed class PropulsionTests
         Assert.Equal(BlockFacing.Back, new DesignBox(One, One, null!).Facing);
     }
 
+    /// <summary>A core, a gyro, a battery and the parts a test adds, with no tank at all.</summary>
+    private static HullDesign Tankless(params DesignBox[] parts) =>
+        TestDesigns.Of([Box("core", 0, 0, 0), Box("gyro", 0, 2, 0), Box("battery", 0, 3, 0), .. parts]);
+
+    [Fact]
+    public void AnIonPartPushesOnPowerAloneAndBurnsNoFuel()
+    {
+        var ion = Content.Blocks.Get("ionDrive");
+        Assert.True(ion.Ion);
+        Assert.Equal(FuelKind.None, ion.Fuel);
+        var design = Tankless(Box("generator", 0, 1, 0), Box("ionDrive", 1, 0, 0, BlockFacing.Back));
+        var flight = design.Flight;
+
+        // Its thrust sits in the ion column of the direction it pushes, its power under that direction, and it
+        // asks for no tank and burns nothing.
+        Assert.True(flight.HasIon);
+        Assert.Equal(ion.Thrust / flight.Mass, flight.Push(BlockFacing.Front), 4);
+        Assert.Equal(ion.Thrust / flight.Mass, flight.Thrust[ThrustTable.IonIndex(BlockFacing.Front)], 4);
+        Assert.Equal(ion.PowerDraw, flight.IonPower[BlockFacing.Front], 5);
+        Assert.Equal(0f, flight.IonPower[BlockFacing.Back]);
+        Assert.Equal(ion.PowerDraw, flight.ThrustPower, 5);
+        Assert.Equal(default, flight.FuelCapacity);
+        Assert.Equal(default, flight.ThrustPowerByFuel);
+        for (var i = 0; i < Facings.Count * ThrustTable.Kinds; i++)
+            Assert.Equal(0f, flight.Burn[i]);
+        Assert.Equal(FuelKind.None, HullDesign.MissingTank(flight));
+
+        // A second of full thrust: the full push, no fuel, its power drawn, the parts shown firing.
+        var state = HullState.Spawn(Double3.Zero, flight);
+        state = Fly(state, Toward(BlockFacing.Front), flight, 59);
+        FlightModel.Step(ref state, Toward(BlockFacing.Front), flight, HullSim.Dt, out var flow, out var fuel);
+        Assert.Equal(flight.Push(BlockFacing.Front), -state.Velocity.Z, 2);
+        Assert.Equal(default, state.Fuel);
+        Assert.Equal(default, fuel.Burn);
+        Assert.Equal(ion.PowerDraw, flow.Thrust, 5);
+        Assert.True(state.Thrust.Ion);
+        Assert.True(state.Thrust.Burning(FuelKind.None));
+        Assert.False(state.Thrust.Burning(FuelKind.Bipropellant));
+        Assert.Equal(1f, state.Thrust.Firing(FuelKind.None, BlockFacing.Back));
+        Assert.Equal(0f, state.Thrust.Firing(FuelKind.Bipropellant, BlockFacing.Back));
+        Assert.Equal(flight.EnergyStorage, state.Energy, 3);
+
+        // The dampeners brake with it and pay for what they use: a braking tick that needs part of the thrust
+        // draws that part of the power.
+        state = HullState.Spawn(Double3.Zero, flight);
+        state.Velocity = new Vector3(0, 0, 0.05f);
+        FlightModel.Step(ref state, new FlightInput { Dampeners = true }, flight, HullSim.Dt, out flow, out _);
+        Assert.Equal(0f, state.Velocity.Z, 5);
+        var share = 0.05f / (flight.Push(BlockFacing.Front) * HullSim.Dt);
+        Assert.Equal(ion.PowerDraw * share, flow.Thrust, 3);
+        Assert.True(state.Thrust.Ion);
+    }
+
+    [Fact]
+    public void AnIonPartWithoutPowerGivesNoThrustAndOneShortOfPowerIsCutBack()
+    {
+        // No generator: the battery runs flat, then neither the pilot nor the dampeners can push.
+        var design = Tankless(Box("ionDrive", 1, 0, 0, BlockFacing.Back));
+        var flight = design.Flight;
+        var state = HullState.Spawn(Double3.Zero, flight);
+        var ticks = 0;
+        while (state.Energy > 0f && ticks++ < 60 * 600)
+            FlightModel.Step(ref state, Toward(BlockFacing.Front), flight, HullSim.Dt);
+        Assert.Equal(0f, state.Energy);
+        var speed = state.Velocity;
+        state = Fly(state, Toward(BlockFacing.Front), flight, 60);
+        Assert.Equal(speed, state.Velocity);
+        Assert.False(state.Thrust.Ion);
+        Assert.Equal(0f, state.Thrust.Firing(FuelKind.None, BlockFacing.Back));
+        state = Fly(state, new FlightInput { Dampeners = true }, flight, 60);
+        Assert.Equal(speed, state.Velocity);
+        Assert.Equal(default, state.Fuel);
+
+        // A generator that cannot feed two drives: once the battery is flat, thrust is what it can feed.
+        var two = Tankless(Box("generator", 0, 1, 0), Box("ionDrive", 1, 0, 0, BlockFacing.Back), Box("ionDrive", 1, 1, 0, BlockFacing.Back)).Flight;
+        Assert.True(two.IonPower[BlockFacing.Front] + two.IdlePower > two.PowerGenerated);
+        state = HullState.Spawn(Double3.Zero, two);
+        ticks = 0;
+        while (state.Energy > 0f && ticks++ < 60 * 600)
+            FlightModel.Step(ref state, Toward(BlockFacing.Front), two, HullSim.Dt);
+        Assert.Equal(0f, state.Energy);
+        // From rest, so the rated speed does not cap the step.
+        state.Velocity = Vector3.Zero;
+        var before = state.Velocity.Z;
+        FlightModel.Step(ref state, Toward(BlockFacing.Front), two, HullSim.Dt, out var flow);
+        var scale = (two.PowerGenerated - two.IdlePower) / two.IonPower[BlockFacing.Front];
+        Assert.Equal(two.Push(BlockFacing.Front) * scale * HullSim.Dt, before - state.Velocity.Z, 4);
+        Assert.Equal(two.PowerGenerated - two.IdlePower, flow.Thrust, 3);
+        Assert.True(state.Thrust.Ion);
+    }
+
+    [Fact]
+    public void AHullWithoutTanksStepsTheSameWithItsOwnEmptyTankListAndWithThePerFuelFigures()
+    {
+        // The server steps a hull over its design's tanks, which for the drone are none; a client flying a hull it
+        // only knows the motion of steps it from the three per-fuel figures. The two must agree to the bit.
+        var drone = Content.Designs[Content.DroneDesign];
+        Assert.True(drone.Tanks.IsEmpty);
+        var flight = drone.Flight;
+        var a = HullState.Spawn(Double3.Zero, flight);
+        var b = a;
+        var inputs = new[]
+        {
+            new FlightInput { Forward = 127, Strafe = 90, Boost = true },
+            new FlightInput { Vertical = -127, Yaw = 40, Dampeners = true },
+            new FlightInput { Dampeners = true },
+        };
+        for (var tick = 0; tick < 60 * 30; tick++)
+        {
+            var input = inputs[tick / 600];
+            FlightModel.Step(ref a, input, flight, HullSim.Dt, out var flowA, out var fuelA);
+            FlightModel.Step(ref b, input, flight, HullSim.Dt, Span<double>.Empty, ReadOnlySpan<DesignTank>.Empty, out var flowB, out var fuelB);
+            Assert.Equal(a.Position, b.Position);
+            Assert.Equal(a.Velocity, b.Velocity);
+            Assert.Equal(a.Energy, b.Energy);
+            Assert.Equal(a.Thrust, b.Thrust);
+            Assert.Equal(flowA.Thrust, flowB.Thrust);
+            Assert.Equal(fuelA.Burn, fuelB.Burn);
+        }
+    }
+
+    [Fact]
+    public void TheDroneIsElectricHoldsForwardOnItsGeneratorAndRunsItsBatteryDownWithMore()
+    {
+        var drone = Content.Designs[Content.DroneDesign];
+        var flight = drone.Flight;
+        Assert.True(drone.Tanks.IsEmpty);
+        Assert.Equal(default, flight.FuelCapacity);
+        Assert.Equal(default, flight.ThrustPowerByFuel);
+        for (var kind = FuelKind.Nitrogen; kind <= FuelKind.Bipropellant; kind++)
+            Assert.False(flight.Burns(kind));
+        foreach (var push in Directions)
+        {
+            Assert.True(flight.Thrust[ThrustTable.IonIndex(push)] > 0f, $"no ion part pushes {push}");
+            Assert.Equal(flight.Thrust[ThrustTable.IonIndex(push)], flight.Push(push));
+        }
+
+        // Full forward thrust for a minute: the generator carries it and the battery stays full.
+        var state = HullState.Spawn(Double3.Zero, flight);
+        state = Fly(state, Toward(BlockFacing.Front), flight, 60 * 60);
+        Assert.Equal(flight.EnergyStorage, state.Energy, 3);
+        Assert.True(state.Velocity.Length() > 100f);
+
+        // Forward, sideways and up at once runs it down, faster still with the shield recharging, and boost
+        // empties it in seconds.
+        static float Empties(in FlightParams flight, FlightInput input, bool shield)
+        {
+            var state = HullState.Spawn(Double3.Zero, flight);
+            if (shield)
+                state.Shield = 0f;
+            for (var tick = 1; tick <= 60 * 600; tick++)
+            {
+                FlightModel.Step(ref state, input, flight, HullSim.Dt);
+                if (shield)
+                    state.Shield = 0f;
+                if (state.Energy <= 0f)
+                    return tick / 60f;
+            }
+            return float.PositiveInfinity;
+        }
+
+        var all = new FlightInput { Forward = 127, Strafe = 127, Vertical = 127 };
+        var three = Empties(flight, all, false);
+        var strafing = Empties(flight, new FlightInput { Forward = 127, Strafe = 127 }, true);
+        var boost = Empties(flight, new FlightInput { Forward = 127, Boost = true }, false);
+        Console.WriteLine($"DRONE ion: forward {flight.Push(BlockFacing.Front):0.00} m/s2, sideways {flight.Push(BlockFacing.Right):0.00}, braking {flight.Push(BlockFacing.Back):0.00}; three axes empty the battery in {three:0.0} s, forward and sideways with the shield recharging in {strafing:0.0} s, boost in {boost:0.0} s");
+        Assert.True(three is > 10f and < 120f, $"three axes: {three} s");
+        Assert.True(strafing is > 5f and < 60f, $"forward, sideways and shield: {strafing} s");
+        Assert.True(boost < 6f, $"boost: {boost} s");
+        Assert.True(Empties(flight, Toward(BlockFacing.Front), true) > 20f);
+    }
+
     [Fact]
     public void EveryPartPushesAwayFromWhereItFacesAndTheSumsKeepEachDirectionAndFuelApart()
     {
@@ -233,7 +405,6 @@ public sealed class PropulsionTests
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(2)]
-    [InlineData(3)]
     public void EveryShippedDesignFliesAllSixWaysOnItsOwnTanksAndHasFuelForEveryPart(int index)
     {
         var design = Content.Designs[index];
@@ -260,7 +431,6 @@ public sealed class PropulsionTests
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(2)]
-    [InlineData(3)]
     public void ShippedTanksHoldMoreThanAnHourOfFullThrustAndBoostingWheneverItBurnsThemInUnderThreeFifthsOfThatTime(int index)
     {
         var design = Content.Designs[index];
@@ -431,8 +601,8 @@ public sealed class PropulsionTests
         Assert.Equal(default, state.Thrust);
 
         // A throttle too small for the scale still reads as firing; a hull in the tunnel fires nothing.
-        Assert.Equal(1, ThrustState.Of(0.001f, 0, 0, true, false, false, false).X);
-        Assert.Equal(-1, ThrustState.Of(0, 0, -0.001f, true, false, false, false).Z);
+        Assert.Equal(1, ThrustState.Of(0.001f, 0, 0, true, false, false, false, false).X);
+        Assert.Equal(-1, ThrustState.Of(0, 0, -0.001f, true, false, false, false, false).Z);
         var order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -1e6) };
         var body = default(HullBody);
         var jumping = HullState.Spawn(Double3.Zero, flight);
@@ -1149,7 +1319,7 @@ public sealed class PropulsionTests
         // A record carries the thrust state and no tanks: the receiver reads them empty.
         var bytes = new byte[HullRecord.MaxWireSize];
         var record = new HullRecord { Id = 7, State = HullState.Spawn(Double3.Zero, Content.Pod.Flight) };
-        record.State.Thrust = new ThrustState { X = -127, Y = 5, Z = 127, Flags = 13 };
+        record.State.Thrust = new ThrustState { X = -127, Y = 5, Z = 127, Flags = 29 };
         writer = new NetWriter(bytes);
         record.Write(ref writer);
         reader = new NetReader(writer.Written);
@@ -1159,7 +1329,7 @@ public sealed class PropulsionTests
         Assert.Equal(4, HullRecord.ThrustBytes);
 
         // Bits no step writes, and a throttle beyond full, are refused.
-        foreach (var hostile in new[] { new ThrustState { Flags = 16 }, new ThrustState { X = sbyte.MinValue }, new ThrustState { Z = sbyte.MinValue } })
+        foreach (var hostile in new[] { new ThrustState { Flags = 32 }, new ThrustState { X = sbyte.MinValue }, new ThrustState { Z = sbyte.MinValue } })
         {
             record.State.Thrust = hostile;
             writer = new NetWriter(bytes);

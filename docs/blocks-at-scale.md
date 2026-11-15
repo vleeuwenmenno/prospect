@@ -90,18 +90,18 @@ The goal and the block model are in `direction.md` under "Decided: building".
 
 ## Sum memory
 
-A node is 528 B: sixty doubles and the bounds. It was 216 B before thrust and fuel burn were kept per direction and
-per fuel (18 numbers each), with tank room and pump power per fuel. A hull has two nodes per 32 blocks, less one.
-Its design keeps the same amount once.
+A node is 624 B: seventy-two doubles and the bounds. It was 216 B before thrust and fuel burn were kept per direction and
+per fuel (18 numbers each), with tank room and pump power per fuel; 528 B before ion parts added a thrust column and a
+power figure per direction (12 numbers). A hull has two nodes per 32 blocks, less one. Its design keeps the same amount once.
 
 | Blocks | Sums per hull | Block state, client | Block state, server |
 | --- | --- | --- | --- |
-| 64 | 1,584 B | 2,388 B | 2,644 B |
-| 300 | 10,032 B | 13,700 B | 14,900 B |
-| 4,096 | 134,640 B | 184,332 B | 200,716 B |
-| 150,000 | 4,950,000 B | 6,768,780 B | 7,368,780 B |
+| 64 | 1,872 B | 2,676 B | 2,932 B |
+| 300 | 11,856 B | 15,524 B | 16,724 B |
+| 4,096 | 159,120 B | 208,812 B | 225,196 B |
+| 150,000 | 5,850,000 B | 7,668,780 B | 8,268,780 B |
 
-- The cost of per-part burn rates: a station's state grew from 4.4 MB to 7.4 MB on the server. Burn tied to thrust by
+- The cost of per-part burn rates: a station's state grew from 4.4 MB to 7.4 MB on the server (8.3 MB with the ion figures). Burn tied to thrust by
   one figure per fuel would save the 18 burn numbers (144 B a node). Not done: a part's efficiency is its own figure.
 
 - A block state is a header, alive words, sums, a 4-B-per-block loss journal and live collision branch counts. The server and client authority baseline add hit points (4 B/block). Prediction owns another restorable block state.

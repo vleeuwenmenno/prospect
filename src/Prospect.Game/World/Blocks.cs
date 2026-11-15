@@ -34,8 +34,14 @@ public sealed class BlockType
     /// <summary>Kilonewtons. A thrust part pushes the hull the opposite way to the block's facing, and no other.</summary>
     public float Thrust { get; init; }
 
-    /// <summary>The fuel a thrust part burns; without it in the tanks the part gives no thrust.</summary>
+    /// <summary>The fuel a thrust part burns; without it in the tanks the part gives no thrust. None for an ion part.</summary>
     public FuelKind Fuel { get; init; }
+
+    /// <summary>
+    /// True for an ion part: a thrust part that burns no fuel and runs on power alone (<see cref="PowerDraw"/> at
+    /// full thrust). Without power it gives no thrust; it never needs a tank.
+    /// </summary>
+    public bool Ion { get; init; }
 
     /// <summary>Kilograms of <see cref="Fuel"/> the part burns a second at full thrust, without boost.</summary>
     public float FuelBurn { get; init; }
@@ -300,6 +306,7 @@ public sealed class BlockCatalog
                 Thrust = Number(block, "thrust"u8),
                 Fuel = block.TryGetProperty("fuel"u8, out var fuel) ? Fuels.Parse(fuel.GetString(), path + ": " + entry.Name) : FuelKind.None,
                 FuelBurn = Number(block, "fuelBurn"u8),
+                Ion = block.TryGetProperty("ion"u8, out var ion) && ion.GetBoolean(),
                 Tank = block.TryGetProperty("tank"u8, out var tank) ? Fuels.Parse(tank.GetString(), path + ": " + entry.Name) : FuelKind.None,
                 FuelCapacity = Number(block, "fuelCapacity"u8),
                 MaxSide = block.TryGetProperty("maxSide"u8, out var maxSide) ? maxSide.GetInt32() : 0,
@@ -338,8 +345,11 @@ public sealed class BlockCatalog
                 throw new InvalidDataException($"{path}: a drive needs a positive finite ftlMaxSectors");
 
             // Thrust and fuel go together: a part that pushes names what it burns and how fast, and nothing else does.
-            if (!float.IsFinite(type.Thrust) || type.Thrust < 0 || (type.Thrust > 0) != (type.Fuel != FuelKind.None))
-                throw new InvalidDataException($"{path}: {type.Id}: a block with thrust names its fuel, and only such a block does");
+            // An ion part is the one exception: it burns no fuel, so it names none and draws its power instead.
+            if (!float.IsFinite(type.Thrust) || type.Thrust < 0 || (type.Thrust > 0) != (type.Fuel != FuelKind.None || type.Ion))
+                throw new InvalidDataException($"{path}: {type.Id}: a block with thrust names its fuel or is an ion part, and only such a block does");
+            if (type.Ion && (type.Fuel != FuelKind.None || !(float.IsFinite(type.PowerDraw) && type.PowerDraw > 0)))
+                throw new InvalidDataException($"{path}: {type.Id}: an ion part burns no fuel and needs a positive finite powerDraw");
             if (type.Fuel != FuelKind.None ? !(float.IsFinite(type.FuelBurn) && type.FuelBurn > 0) : type.FuelBurn != 0)
                 throw new InvalidDataException($"{path}: {type.Id}: a thrust part needs a positive finite fuelBurn, and only such a part has one");
             if (type.Tank != FuelKind.None ? !(float.IsFinite(type.FuelCapacity) && type.FuelCapacity > 0) : type.FuelCapacity != 0)

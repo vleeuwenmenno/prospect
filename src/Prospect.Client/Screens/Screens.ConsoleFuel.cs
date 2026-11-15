@@ -12,7 +12,7 @@ internal sealed partial class ScreenHost
     /// The fuel row under the console: one cell for each fuel the hull has a tank for, side by side across the whole
     /// console. Each cell has the name, stored out of capacity, and the net flow a second with its arrow (negative
     /// while burning, a dash at rest), and a thin strip of how full the tank is. A narrow cell drops the capacity,
-    /// then the name, before it clips the flow. A hull with no tank gets one cell that says so.
+    /// then the name, before it clips the flow. A hull with no tank (the electric drone) gets one cell that says so.
     /// </summary>
     private void DrawFuelRow(ImDrawListPtr draw, in FlightConsoleLayout layout, in HullView own, bool hot)
     {
@@ -62,7 +62,7 @@ internal sealed partial class ScreenHost
         if (kind == FuelKind.None)
         {
             var none = Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(left, textTop), Theme.TextDim, "FUEL"u8);
-            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(left + none.X + Kit.Px(FlightConsole.ColumnGap), textTop), Theme.TextMute, "NONE"u8);
+            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(left + none.X + Kit.Px(FlightConsole.ColumnGap), textTop), Theme.TextMute, "NO TANKS"u8);
             draw.PopClipRect();
             return;
         }

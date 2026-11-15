@@ -3380,15 +3380,18 @@ internal sealed class WorldView
     /// For a capture, whose pointer is muted (<c>--open edit-turn</c>): from now on the editor holds the ghost of an
     /// engine on top of the ship's core, turned a quarter about y so that it faces right, as the pointer and
     /// <c>R</c> would leave it. With <paramref name="mount"/> (<c>--open edit-mount</c>) it holds the ghost of a
-    /// cold gas thruster mounted on that face instead.
+    /// cold gas thruster mounted on that face instead; with <paramref name="ion"/> (<c>--open edit-ion</c>) the engine
+    /// is an ion drive.
     /// </summary>
-    internal void HoldGhostForCapture(bool mount = false)
+    internal void HoldGhostForCapture(bool mount = false, bool ion = false)
     {
         _captureGhost = true;
         _captureMount = mount;
+        _captureIon = ion;
     }
 
     private bool _captureMount;
+    private bool _captureIon;
 
     private void HoldCaptureGhost()
     {
@@ -3430,7 +3433,7 @@ internal sealed class WorldView
 
         for (var i = 0; !_captureGhostTurned && i < types.Count; i++)
         {
-            if (types[i].Fuel != FuelKind.Bipropellant || types[i].Mount is not null || EditorTuningCompact(types[i]))
+            if ((_captureIon ? !types[i].Ion : types[i].Fuel != FuelKind.Bipropellant) || types[i].Thrust <= 0f || types[i].Mount is not null || EditorTuningCompact(types[i]))
                 continue;
             Editor.ChoosePart(i);
             break;

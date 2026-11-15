@@ -41,7 +41,9 @@ public sealed class EditorPanelTests
         var palette = new EditorPalette { Category = Array.IndexOf(Tuning.Categories, Tab("Move")) };
         string[] Shown() => Content.Blocks.Types.Where(t => palette.Shows(Tuning, t)).Select(t => t.Id).ToArray();
 
-        Assert.Equal(["engine", "hotThruster", "coldGasThruster", "bipropellantTank", "hydrazineTank", "nitrogenTank", "gyro"], Shown());
+        Assert.Equal(["engine", "hotThruster", "coldGasThruster", "ionDrive", "ionThruster", "bipropellantTank", "hydrazineTank", "nitrogenTank", "gyro"], Shown());
+        palette.Query = "ion";
+        Assert.Equal(["ionDrive", "ionThruster", "microIonDrive", "microIonThruster"], Shown());
         palette.Query = "nitrogen";
         Assert.Equal(["coldGasThruster", "nitrogenTank", "microthruster", "microNitrogenTank"], Shown());
         palette.Query = "tank";
@@ -103,9 +105,11 @@ public sealed class EditorPanelTests
         var lone = new FlightParams { IdlePower = 0.2f, MaxSpeed = 0f };
         Assert.Equal([DesignWarning.NoPower, DesignWarning.NoForward, DesignWarning.NoDirection, DesignWarning.NoTurn], Of(lone));
 
-        // Every shipped design can be pushed all six ways and feeds every part it has.
+        // Every shipped design can be pushed all six ways and feeds every part it has. The drone is the one that may
+        // ask for more power than it makes: its ion parts hold full forward thrust on the generator, but strafing,
+        // climbing and pushing forward at once runs the battery down, and the editor says so.
         foreach (var design in Content.Designs)
-            Assert.Empty(Of(design.Flight));
+            Assert.Equal(design.Name == "Drone" ? [DesignWarning.ThrustOverload] : [], Of(design.Flight));
 
         // The pod without its thrusters facing front cannot brake; without its nitrogen tank no thruster fires.
         var draft = BuildDraft.FromBlueprint(Content.Pod, Content);

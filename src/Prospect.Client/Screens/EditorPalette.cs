@@ -40,6 +40,7 @@ internal sealed class EditorPalette
         || RoleWord(EditorGeometry.Role(type)).Contains(query, StringComparison.OrdinalIgnoreCase)
         || FuelWord(type.Fuel).Contains(query, StringComparison.OrdinalIgnoreCase)
         || FuelWord(type.Tank).Contains(query, StringComparison.OrdinalIgnoreCase)
+        || (type.Ion && "ion electric".Contains(query, StringComparison.OrdinalIgnoreCase))
         || (tuning.Compact(type) && "drone compact".Contains(query, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>The words a search finds a role by.</summary>

@@ -306,7 +306,7 @@ internal static class EditorGeometry
     public static PartRole Role(BlockType type) =>
         type.Core ? PartRole.Core
         : type.Ftl != FtlKind.None ? PartRole.Drive
-        : type.Thrust > 0 ? type.Fuel == FuelKind.Bipropellant ? PartRole.Engine : PartRole.Thruster
+        : type.Thrust > 0 ? type.Mount is null ? PartRole.Engine : PartRole.Thruster
         : type.Tank != FuelKind.None ? PartRole.Tank
         : type.Torque > 0 ? PartRole.Gyro
         : type.PowerOutput > 0 ? PartRole.Power

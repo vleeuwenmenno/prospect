@@ -62,6 +62,13 @@ internal sealed class PropulsionModelLook
     /// <summary>The thickness of the nozzle's wall, in exit radii.</summary>
     public float Lip { get; init; }
 
+    /// <summary>
+    /// Bars each way across an ion part's emitter: above 0 the part ends in a flat grid in a short ring instead of a
+    /// bell (<see cref="PropulsionModels"/>); 0 for a bell nozzle. The ring's height is <see cref="NozzleLength"/>
+    /// exit radii and its wall <see cref="Lip"/>; the collar and the bell's figures are not used.
+    /// </summary>
+    public int Grid { get; init; }
+
     /// <summary>Facets around a nozzle, and rings along its bell: kept low, the model is low poly.</summary>
     public int Sides { get; init; }
     public int Rings { get; init; }
@@ -95,7 +102,7 @@ internal sealed class PropulsionModelLook
             || !(CollarLength is >= 0 and <= 2) || !(CollarRadius is >= 1 and <= 2.5f) || !(Lip is >= 0 and <= 0.3f)
             // The throat ring and the brackets reach 1.6 collar radii, which must stay inside the nozzle's square.
             || ThroatShare * CollarRadius * 1.6f > 1f
-            || Sides is < 6 or > 24 || Rings is < 1 or > 12
+            || Sides is < 6 or > 24 || Rings is < 1 or > 12 || Grid is < 0 or > 6
             || !Shade(HousingShade) || !Shade(NozzleShade) || !Shade(ThroatShade) || !Shade(DetailShade)
             || (Pod is not null && !Pod.Valid))
             throw new InvalidDataException($"{path}: model {id} is out of range");
@@ -138,7 +145,10 @@ internal sealed class PodLook
 /// <summary>How one kind of plume looks and moves, from <c>content/visuals/propulsion.json</c>; lengths are in exit radii.</summary>
 internal sealed class PlumeLook
 {
-    /// <summary><c>flame</c>: hot exhaust, light of its own; <c>puff</c>: cold gas, lit only by the star.</summary>
+    /// <summary>
+    /// <c>flame</c>: hot exhaust, light of its own; <c>puff</c>: cold gas, lit only by the star; <c>ion</c>: a faint,
+    /// steady glow of its own with a thin straight beam, never sparks, shock nodes or flicker.
+    /// </summary>
     public string Kind { get; init; } = "";
 
     /// <summary>Colours of the core, the edge and ignition sparks.</summary>
@@ -191,10 +201,16 @@ internal sealed class PlumeLook
     /// <summary>True for a cold gas puff.</summary>
     public bool IsPuff => Kind == "puff";
 
+    /// <summary>True for an ion part's glow and beam.</summary>
+    public bool IsIon => Kind == "ion";
+
+    /// <summary>What the plume shader is told the kind is: 0 a flame, 1 a puff, 2 an ion glow.</summary>
+    public float ShaderKind => IsPuff ? 1f : IsIon ? 2f : 0f;
+
     internal void Check(string path, string id)
     {
         static bool Colour(float[] c) => c.Length == 3 && c[0] is >= 0 and <= 4 && c[1] is >= 0 and <= 4 && c[2] is >= 0 and <= 4;
-        if (Kind is not ("flame" or "puff") || !Colour(Core) || !Colour(Edge) || !Colour(Spark)
+        if (Kind is not ("flame" or "puff" or "ion") || !Colour(Core) || !Colour(Edge) || !Colour(Spark)
             || !(Brightness is > 0 and <= 40) || !(Length is > 0 and <= 80) || !(MinLength is > 0 and <= 1) || !(Spread is >= 0 and <= 30)
             || !(Opening is > 0 and <= 20) || !(CoreLength is > 0 and <= 10) || !(FlowSpeed is >= 0 and <= 200)
             || !(Flicker is >= 0 and <= 1) || !(Turbulence is >= 0 and <= 1) || !(Diamonds is >= 0 and <= 4) || !(DiamondSpacing is > 0 and <= 10)
@@ -202,6 +218,9 @@ internal sealed class PlumeLook
             || !(SparkSpeed is >= 0 and <= 200) || (Sparks > 0 && !(SparkSeconds > 0 && SparkSpeed > 0))
             || !(Burst is >= 0 and <= 10) || !(BurstSeconds is > 0 and <= 2) || !(FadeSeconds is >= 0 and <= 2))
             throw new InvalidDataException($"{path}: plume {id} is out of range");
+        // An ion glow is steady: no sparks, no shock node, no flicker, no burst.
+        if (IsIon && (Sparks != 0 || Diamonds != 0 || Flicker != 0 || Burst != 0))
+            throw new InvalidDataException($"{path}: plume {id} is an ion glow and has no sparks, shock nodes, flicker or burst");
     }
 }
 
@@ -274,7 +293,10 @@ internal sealed class PropulsionLook
     }
 }
 
-/// <summary>One nozzle of a design: where its exit is in the hull's frame and what it fires. Built with the mesh.</summary>
+/// <summary>
+/// One nozzle of a design: where its exit is in the hull's frame and what it fires. Built with the mesh. An ion part's
+/// emitter is a nozzle whose fuel is <see cref="FuelKind.None"/>, the only thrust part that burns none.
+/// </summary>
 internal readonly record struct ThrustNozzle(
     int Block,
     FuelKind Fuel,
@@ -389,7 +411,7 @@ internal static class PropulsionModels
         var pitchV = 2f * hv / nv;
         var exit = 0.5f * MathF.Min(pitchU, pitchV) * model.ExitShare / (1f + model.Lip);
         var nozzleLength = MathF.Min(model.NozzleLength * exit, model.MaxNozzleDepth * depth);
-        var collar = MathF.Min(model.CollarLength * exit, 0.12f * depth);
+        var collar = model.Grid > 0 ? 0f : MathF.Min(model.CollarLength * exit, 0.12f * depth);
         // Everything behind the nozzles is body, so a deeper box grows its body and keeps its nozzle.
         var nozzleStart = depth - nozzleLength;
         var bodyEnd = MathF.Max(nozzleStart - collar, 0.05f * depth);
@@ -435,9 +457,16 @@ internal static class PropulsionModels
             for (var j = 0; j < nv; j++)
             {
                 var at = new Vector2((i + 0.5f) * pitchU - hu, (j + 0.5f) * pitchV - hv);
-                if (collar > 1e-5f)
-                    AddCollar(ref g, model, at, bodyEnd, nozzleStart, collarRadius, throat, metal, detail);
-                AddNozzle(ref g, model, at, nozzleStart, depth, throat, exit, wall, collarRadius, collar > 1e-5f, metal, dark, detail);
+                if (model.Grid > 0)
+                {
+                    AddGrid(ref g, model, at, nozzleStart, depth, exit, wall, metal, dark, detail);
+                }
+                else
+                {
+                    if (collar > 1e-5f)
+                        AddCollar(ref g, model, at, bodyEnd, nozzleStart, collarRadius, throat, metal, detail);
+                    AddNozzle(ref g, model, at, nozzleStart, depth, throat, exit, wall, collarRadius, collar > 1e-5f, metal, dark, detail);
+                }
                 nozzles?.Add(new ThrustNozzle(block, fuel, facing, g.F.At(at.X, at.Y, depth), exit, nozzleLength, model.PlumeSlot, nozzles.Count));
             }
         }
@@ -493,7 +522,7 @@ internal static class PropulsionModels
         var pitchV = 2f * bv / nv;
         var exit = 0.5f * MathF.Min(pitchU, pitchV) * model.ExitShare / (1f + model.Lip);
         var nozzleLength = MathF.Min(model.NozzleLength * exit, model.MaxNozzleDepth * depth);
-        var collar = MathF.Min(model.CollarLength * exit, 0.12f * depth);
+        var collar = model.Grid > 0 ? 0f : MathF.Min(model.CollarLength * exit, 0.12f * depth);
         // The housing keeps at least a sliver of height above the plate; the nozzle gives way first, then the collar.
         var bodyEnd = MathF.Max(depth - nozzleLength - collar, plateTop + 0.12f * depth);
         collar = MathF.Max(MathF.Min(collar, depth - nozzleLength - bodyEnd), 0f);
@@ -541,9 +570,16 @@ internal static class PropulsionModels
             for (var j = 0; j < nv; j++)
             {
                 var at = new Vector2((i + 0.5f) * pitchU - bu, (j + 0.5f) * pitchV - bv);
-                if (collar > 1e-5f)
-                    AddCollar(ref g, model, at, bodyEnd, nozzleStart, collarRadius, throat, metal, detail);
-                AddNozzle(ref g, model, at, nozzleStart, depth, throat, exit, wall, collarRadius, collar > 1e-5f, metal, dark, detail);
+                if (model.Grid > 0)
+                {
+                    AddGrid(ref g, model, at, nozzleStart, depth, exit, wall, metal, dark, detail);
+                }
+                else
+                {
+                    if (collar > 1e-5f)
+                        AddCollar(ref g, model, at, bodyEnd, nozzleStart, collarRadius, throat, metal, detail);
+                    AddNozzle(ref g, model, at, nozzleStart, depth, throat, exit, wall, collarRadius, collar > 1e-5f, metal, dark, detail);
+                }
                 nozzles?.Add(new ThrustNozzle(block, fuel, box.Facing, g.F.At(at.X, at.Y, depth), exit, nozzleLength, model.PlumeSlot, nozzles.Count));
             }
         }
@@ -674,6 +710,45 @@ internal static class PropulsionModels
         g.Annulus(a, b, at, ringEnd, 1f, detail);
         if (onCollar)
             g.Annulus(a, c, at, ringStart, -1f, detail);
+    }
+
+    // An ion emitter: a short faceted ring standing on the body, and inside it, a little below its rim, a flat dark
+    // disc crossed by a grid of thin bars each way. No bell: the beam leaves the grid straight.
+    private static void AddGrid(ref Geometry g, PropulsionModelLook model, Vector2 at, float z0, float z1, float exit, float wall, float metal, float dark, float detail)
+    {
+        var sides = model.Sides;
+        var turn = MathF.PI / sides;
+        Span<Vector2> outer = stackalloc Vector2[sides];
+        Span<Vector2> inner = stackalloc Vector2[sides];
+        Polygon(outer, at, exit + wall, turn);
+        Polygon(inner, at, exit, turn);
+        g.Loft(outer, z0, outer, z1, at, metal, 1f);
+        g.Annulus(outer, inner, at, z1, 1f, metal);
+        var recess = z1 - 0.45f * (z1 - z0);
+        g.Loft(inner, recess, inner, z1, at, Tag(model.NozzleShade * 0.7f), -1f);
+        g.Cap(inner, at, recess, 1f, dark);
+
+        // The bars stand a little proud of the disc and stop at the ring's inside, its flats included.
+        var reach = exit * MathF.Cos(turn);
+        var half = 0.045f * exit;
+        var height = 0.3f * (z1 - recess);
+        Span<Vector2> bar = stackalloc Vector2[4];
+        for (var across = 0; across < 2; across++)
+        {
+            for (var k = 0; k < model.Grid; k++)
+            {
+                var offset = ((k + 1f) / (model.Grid + 1f) * 2f - 1f) * reach;
+                var chord = MathF.Sqrt(MathF.Max(reach * reach - offset * offset, 0f)) - half;
+                if (chord <= half)
+                    continue;
+                var centre = at + (across == 0 ? new Vector2(offset, 0f) : new Vector2(0f, offset));
+                Rectangle(bar, across == 0 ? half : chord, across == 0 ? chord : half);
+                for (var c = 0; c < 4; c++)
+                    bar[c] += centre;
+                g.Loft(bar, recess, bar, recess + height, centre, detail, 1f);
+                g.Cap(bar, centre, recess + height, 1f, detail);
+            }
+        }
     }
 
     private static float Bell(float throat, float exit, float curve, float t) =>

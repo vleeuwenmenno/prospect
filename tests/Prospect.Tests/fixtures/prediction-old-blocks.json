@@ -58,6 +58,8 @@
     "microbattery": { "name": "Drone battery", "mass": 0.3, "hull": 30, "energyStorage": 8 },
     "microengine": { "name": "Drone engine", "mass": 0.3, "hull": 30, "thrust": 75, "powerDraw": 0.3, "fuel": "bipropellant", "fuelBurn": 0.02 },
     "microthruster": { "name": "Drone thruster", "mass": 0.05, "hull": 0, "thrust": 8.75, "powerDraw": 0.0375, "fuel": "nitrogen", "fuelBurn": 0.001, "mount": { "side": 4, "depth": 2, "legacyBlock": "microhull" } },
+    "microIonDrive": { "name": "Drone ion drive", "mass": 0.25, "hull": 30, "thrust": 30, "powerDraw": 0.9, "ion": true },
+    "microIonThruster": { "name": "Drone ion thruster", "mass": 0.03, "hull": 0, "thrust": 3.75, "powerDraw": 0.1125, "ion": true, "mount": { "side": 4, "depth": 2, "legacyBlock": "microhull" } },
     "microBipropellantTank": { "name": "Drone biprop tank", "mass": 0.2, "hull": 30, "tank": "bipropellant", "fuelCapacity": 90 },
     "microNitrogenTank": { "name": "Drone nitrogen tank", "mass": 0.2, "hull": 30, "tank": "nitrogen", "fuelCapacity": 40 },
     "microgyro": { "name": "Drone gyro", "mass": 0.3, "hull": 30, "torque": 1.2, "powerDraw": 0.05 },

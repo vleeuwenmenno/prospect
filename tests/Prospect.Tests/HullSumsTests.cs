@@ -76,6 +76,7 @@ internal static class Figures
                     && BitConverter.SingleToInt32Bits(x.Z) == BitConverter.SingleToInt32Bits(y.Z),
                 (ThrustTable x, ThrustTable y) => MemoryMarshal.AsBytes(new ReadOnlySpan<ThrustTable>(in x)).SequenceEqual(MemoryMarshal.AsBytes(new ReadOnlySpan<ThrustTable>(in y))),
                 (FuelTanks x, FuelTanks y) => MemoryMarshal.AsBytes(new ReadOnlySpan<FuelTanks>(in x)).SequenceEqual(MemoryMarshal.AsBytes(new ReadOnlySpan<FuelTanks>(in y))),
+                (DirectionFigures x, DirectionFigures y) => x.Equals(y),
                 _ => a.Equals(b),
             };
             Assert.True(same, $"{typeof(T).Name}.{field.Name}: expected {a}, got {b}");
@@ -90,7 +91,14 @@ internal static class Figures
 
         static bool CloseTables(ThrustTable x, ThrustTable y, double tolerance)
         {
-            for (var i = 0; i < Facings.Count * Fuels.Count; i++)
+            for (var i = 0; i < Facings.Count * ThrustTable.Kinds; i++)
+                if (!Close(x[i], y[i], tolerance)) return false;
+            return true;
+        }
+
+        static bool CloseDirections(DirectionFigures x, DirectionFigures y, double tolerance)
+        {
+            for (var i = 0; i < Facings.Count; i++)
                 if (!Close(x[i], y[i], tolerance)) return false;
             return true;
         }
@@ -104,6 +112,7 @@ internal static class Figures
                 (float x, float y) => Close(x, y, tolerance),
                 (Vector3 x, Vector3 y) => Close(x.X, y.X, tolerance) && Close(x.Y, y.Y, tolerance) && Close(x.Z, y.Z, tolerance),
                 (ThrustTable x, ThrustTable y) => CloseTables(x, y, tolerance),
+                (DirectionFigures x, DirectionFigures y) => CloseDirections(x, y, tolerance),
                 (FuelTanks x, FuelTanks y) => Close(x.Nitrogen, y.Nitrogen, tolerance) && Close(x.Hydrazine, y.Hydrazine, tolerance) && Close(x.Bipropellant, y.Bipropellant, tolerance),
                 _ => a.Equals(b),
             };
@@ -122,8 +131,10 @@ internal static class Figures
         double mass = 0, hull = 0, shield = 0, recharge = 0, torque = 0;
         double generated = 0, idlePower = 0, shieldPower = 0, storage = 0, cargo = 0, cells = 0, crew = 0;
 
-        // Thrust and burn by the direction the hull is pushed in and the fuel that pushes it, then tanks and pump power by fuel.
-        var thrust = new double[Facings.Count, Fuels.Count];
+        // Thrust and burn by the direction the hull is pushed in and the fuel that pushes it (thrust also by the ion
+        // parts, which burn nothing), then tanks and pump power by fuel, and ion power by direction.
+        var thrust = new double[Facings.Count, ThrustTable.Kinds];
+        var ions = new double[Facings.Count];
         var burn = new double[Facings.Count, Fuels.Count];
         var tanks = new double[Fuels.Count];
         var pumps = new double[Fuels.Count];
@@ -175,9 +186,17 @@ internal static class Figures
             {
                 // A part pushes the hull away from where it faces.
                 var push = (int)Facings.Opposite(box.Facing);
-                thrust[push, (int)type.Fuel - 1] += Scaled(type, "thrust", type.Thrust, volume);
-                burn[push, (int)type.Fuel - 1] += Scaled(type, "fuelBurn", type.FuelBurn, volume);
-                pumps[(int)type.Fuel - 1] += draw;
+                if (type.Ion)
+                {
+                    thrust[push, Fuels.Count] += Scaled(type, "thrust", type.Thrust, volume);
+                    ions[push] += draw;
+                }
+                else
+                {
+                    thrust[push, (int)type.Fuel - 1] += Scaled(type, "thrust", type.Thrust, volume);
+                    burn[push, (int)type.Fuel - 1] += Scaled(type, "fuelBurn", type.FuelBurn, volume);
+                    pumps[(int)type.Fuel - 1] += draw;
+                }
             }
             else if (type.Shield > 0)
                 shieldPower += draw;
@@ -210,9 +229,17 @@ internal static class Figures
                 double part = mount.Type.Mass;
                 mass += part;
                 var away = (int)Facings.Opposite(mount.Face);
-                thrust[away, (int)mount.Type.Fuel - 1] += mount.Type.Thrust;
-                burn[away, (int)mount.Type.Fuel - 1] += mount.Type.FuelBurn;
-                pumps[(int)mount.Type.Fuel - 1] += mount.Type.PowerDraw;
+                if (mount.Type.Ion)
+                {
+                    thrust[away, Fuels.Count] += mount.Type.Thrust;
+                    ions[away] += mount.Type.PowerDraw;
+                }
+                else
+                {
+                    thrust[away, (int)mount.Type.Fuel - 1] += mount.Type.Thrust;
+                    burn[away, (int)mount.Type.Fuel - 1] += mount.Type.FuelBurn;
+                    pumps[(int)mount.Type.Fuel - 1] += mount.Type.PowerDraw;
+                }
                 ix += part * (my * my + mz * mz + (wy * wy + wz * wz) / 12);
                 iy += part * (mx * mx + mz * mz + (wx * wx + wz * wz) / 12);
                 iz += part * (mx * mx + my * my + (wx * wx + wy * wy) / 12);
@@ -232,19 +259,24 @@ internal static class Figures
         var pushes = new double[Facings.Count];
         for (var direction = 0; direction < Facings.Count; direction++)
         {
-            for (var fuel = 0; fuel < Fuels.Count; fuel++)
+            for (var kind = 0; kind < ThrustTable.Kinds; kind++)
             {
-                thrustTable[direction * Fuels.Count + fuel] = (float)(thrust[direction, fuel] / massFloor);
-                burnTable[direction * Fuels.Count + fuel] = (float)burn[direction, fuel];
-                pushes[direction] += thrust[direction, fuel] / massFloor;
+                thrustTable[direction * ThrustTable.Kinds + kind] = (float)(thrust[direction, kind] / massFloor);
+                pushes[direction] += thrust[direction, kind] / massFloor;
             }
+
+            for (var fuel = 0; fuel < Fuels.Count; fuel++)
+                burnTable[direction * ThrustTable.Kinds + fuel] = (float)burn[direction, fuel];
         }
 
         var strongest = pushes.Max();
         var forward = pushes[(int)BlockFacing.Front];
         var reverse = pushes[(int)BlockFacing.Back];
         var lateral = Math.Min(Math.Min(pushes[(int)BlockFacing.Right], pushes[(int)BlockFacing.Left]), Math.Min(pushes[(int)BlockFacing.Up], pushes[(int)BlockFacing.Down]));
-        var thrustPower = pumps.Sum();
+        var ionPower = default(DirectionFigures);
+        for (var direction = 0; direction < Facings.Count; direction++)
+            ionPower[direction] = (float)ions[direction];
+        var thrustPower = pumps.Sum() + Math.Max(ions[0], ions[1]) + Math.Max(ions[2], ions[3]) + Math.Max(ions[4], ions[5]);
         var turnAcceleration = new Vector3((float)(torque / inertia.X), (float)(torque / inertia.Y), (float)(torque / inertia.Z));
         var turnRate = new Vector3(
             (float)(Math.Sqrt(torque / inertia.X) * rules.TurnRatePerRootAcceleration),
@@ -278,6 +310,7 @@ internal static class Figures
             IdlePower = (float)idlePower,
             ThrustPower = (float)thrustPower,
             ThrustPowerByFuel = new FuelTanks { Nitrogen = (float)pumps[0], Hydrazine = (float)pumps[1], Bipropellant = (float)pumps[2] },
+            IonPower = ionPower,
             ShieldPower = (float)(shieldPower * rules.ShieldRechargeMultiplier),
             ShieldRestartFraction = rules.ShieldRestartFraction,
             ShieldContactSpeed = rules.ShieldContactSpeed,
@@ -629,13 +662,13 @@ public sealed class HullSumsTests
     [Fact]
     public void AHullsStateTakesTheMemoryItsDesignSaysAndTheDesignKeepsItsShareOnce()
     {
-        Assert.Equal(528, BoxHullSums.NodeBytes);
+        Assert.Equal(624, BoxHullSums.NodeBytes);
         (int Blocks, long Sums, long Predicted, long Decided)[] expected =
         [
-            (64, 1_584, 2_388, 2_644),
-            (300, 10_032, 13_700, 14_900),
-            (4_096, 134_640, 184_332, 200_716),
-            (150_000, 4_950_000, 6_768_780, 7_368_780),
+            (64, 1_872, 2_676, 2_932),
+            (300, 11_856, 15_524, 16_724),
+            (4_096, 159_120, 208_812, 225_196),
+            (150_000, 5_850_000, 7_668_780, 8_268_780),
         ];
         foreach (var (blocks, sumBytes, predicted, decided) in expected)
         {

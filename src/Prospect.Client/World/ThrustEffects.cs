@@ -9,7 +9,8 @@ namespace Prospect.Client.World;
 /// <summary>
 /// Turns what each hull's thrust parts fire (<see cref="HullView.Thrust"/>) into this frame's plumes, and remembers
 /// when each group of parts ignited, so an engine that starts throws its sparks and grows its plume once. A group is
-/// the parts of one fuel and one facing: they fire together (<see cref="ThrustState.Firing"/>). It also remembers when
+/// the parts of one fuel and one facing, or the ion parts of one facing: they fire together
+/// (<see cref="ThrustState.Firing"/>, which names the ion parts by <see cref="FuelKind.None"/>). It also remembers when
 /// a group stopped and how hard it fired, so its last gas can fly off and clear (<see cref="PlumeLook.FadeSeconds"/>).
 /// Fixed tables, no memory taken in a frame; past the plume budget the largest on screen are kept.
 /// </summary>
@@ -18,7 +19,7 @@ internal sealed class ThrustEffects
     /// <summary>Hulls whose ignitions are remembered at once: every hull a snapshot can hold.</summary>
     public const int Slots = 256;
 
-    private const int Groups = 3 * Facings.Count;
+    private const int Groups = ThrustTable.Kinds * Facings.Count;
     private readonly uint[] _ids = new uint[Slots];
     private readonly bool[] _seen = new bool[Slots];
     private readonly double[] _ignited = new double[Slots * Groups];
@@ -105,7 +106,7 @@ internal sealed class ThrustEffects
         var thrust = hull.Thrust;
         for (var g = 0; g < Groups; g++)
         {
-            var throttle = thrust.Firing((FuelKind)(g / Facings.Count + 1), (BlockFacing)(g % Facings.Count));
+            var throttle = thrust.Firing(FuelOf(g), (BlockFacing)(g % Facings.Count));
             var on = throttle > 0f;
             ref var was = ref _firing[slot * Groups + g];
             // A hull first seen while it fires is not shown igniting: it lit before it came into view.
@@ -160,7 +161,7 @@ internal sealed class ThrustEffects
             if (nozzle.Plume < 0 || !BlockSet.Has(alive, nozzle.Block))
                 continue;
             var look = _look.PlumeOrder[nozzle.Plume];
-            var group = (((int)nozzle.Fuel - 1) * Facings.Count) + (int)nozzle.Facing;
+            var group = GroupOf(nozzle.Fuel, nozzle.Facing);
             if ((uint)group >= Groups)
                 continue;
             var throttle = thrust.Firing(nozzle.Fuel, nozzle.Facing);
@@ -185,6 +186,7 @@ internal sealed class ThrustEffects
             var axis = Vector3.Transform(Facings.Vector(nozzle.Facing), orientation);
 
             var puff = look.IsPuff;
+            var ion = look.IsIon;
             var boost = thrust.Boosted && !puff;
             // A flame grows out of its sparks; a puff opens almost at once.
             var grow = puff ? Smooth(0f, look.GrowSeconds, age) : Smooth(look.SparkSeconds * 0.4f, look.SparkSeconds + look.GrowSeconds, age);
@@ -236,15 +238,23 @@ internal sealed class ThrustEffects
                 ExitRadius = new float4(at.X, at.Y, at.Z, radius),
                 AxisLength = new float4(axis.X, axis.Y, axis.Z, length),
                 CoreBright = new float4(look.Core[0], look.Core[1], look.Core[2], brightness),
-                EdgeKind = new float4(look.Edge[0], look.Edge[1], look.Edge[2], puff ? 1f : 0f),
+                EdgeKind = new float4(look.Edge[0], look.Edge[1], look.Edge[2], look.ShaderKind),
                 SparkAge = new float4(look.Spark[0], look.Spark[1], look.Spark[2], age),
                 Shape = new float4(spread, puff ? burst : boost ? look.Diamonds * 1.2f : look.Diamonds, look.DiamondSpacing * radius, seed),
                 Motion = new float4(time, look.Flicker, look.SparkSeconds, sparkSpeed),
-                Extent = new float4(puff ? 0.02f * radius : nozzle.Depth * 0.6f, look.Turbulence, sparking ? look.Sparks : 0f, width),
+                // An ion glow starts at the grid, a little inside its ring; a puff at the nozzle; a flame in its bell.
+                Extent = new float4(puff ? 0.02f * radius : ion ? nozzle.Depth * 0.45f : nozzle.Depth * 0.6f, look.Turbulence, sparking ? look.Sparks : 0f, width),
                 Flow = new float4(released, look.FlowSpeed * radius, look.CoreLength * radius * (boost ? 1.3f : 1f), look.Opening * radius),
             };
         }
     }
+
+    // A group's fuel: the three fuels, then the ion parts, which burn none.
+    private static FuelKind FuelOf(int group) => group / Facings.Count < Fuels.Count ? (FuelKind)(group / Facings.Count + 1) : FuelKind.None;
+
+    // The group of the parts of a fuel (none for ion parts) facing one way.
+    private static int GroupOf(FuelKind fuel, BlockFacing facing) =>
+        (fuel == FuelKind.None ? Fuels.Count : (int)fuel - 1) * Facings.Count + (int)facing;
 
     // The index to write a plume of this size to, or -1 when the budget is full of larger ones.
     private int Place(float score)

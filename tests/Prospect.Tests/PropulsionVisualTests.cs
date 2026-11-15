@@ -27,7 +27,7 @@ public sealed class PropulsionVisualTests
     [Fact]
     public void EveryThrustPartShipsWithAModelAndAPlume()
     {
-        foreach (var type in new[] { "engine", "hotThruster", "coldGasThruster", "microengine", "microthruster" })
+        foreach (var type in new[] { "engine", "hotThruster", "coldGasThruster", "microengine", "microthruster", "ionDrive", "ionThruster", "microIonDrive", "microIonThruster" })
         {
             Assert.True(Content.Blocks.Get(type).Thrust > 0, type);
             Assert.True(Look.Models.TryGetValue(type, out var model), type);
@@ -35,6 +35,15 @@ public sealed class PropulsionVisualTests
         }
         Assert.True(Look.PlumeOrder[Look.PlumeIndex("cold")].IsPuff);
         Assert.False(Look.PlumeOrder[Look.PlumeIndex("engine")].IsPuff);
+
+        // Ion parts end in a grid and show the steady ion glow: no sparks, shock node, flicker or burst.
+        foreach (var type in new[] { "ionDrive", "ionThruster", "microIonDrive", "microIonThruster" })
+        {
+            Assert.True(Look.Models[type].Grid > 0, type);
+            var plume = Look.PlumeOrder[Look.PlumeIndex(Look.Models[type].Plume)];
+            Assert.True(plume.IsIon, type);
+            Assert.Equal((0, 0f, 0f, 0f), (plume.Sparks, plume.Diamonds, plume.Flicker, plume.Burst));
+        }
     }
 
     /// <summary>A core and, apart from it, a block of plating with one thruster mounted in the middle of a face.</summary>
@@ -47,6 +56,8 @@ public sealed class PropulsionVisualTests
     [InlineData("hotThruster")]
     [InlineData("coldGasThruster")]
     [InlineData("microthruster")]
+    [InlineData("ionThruster")]
+    [InlineData("microIonThruster")]
     public void AMountedThrustersModelStaysInsideItsSmallBoxAndPointsOutOfItsFace(string type)
     {
         foreach (var face in Directions)
@@ -110,6 +121,7 @@ public sealed class PropulsionVisualTests
 
     [Theory]
     [InlineData("engine")]
+    [InlineData("ionDrive")]
     public void AModelStaysInsideItsBlockAndPointsItsNozzlesAlongTheFacing(string type)
     {
         foreach (var facing in Directions)
@@ -184,6 +196,8 @@ public sealed class PropulsionVisualTests
     [InlineData("hotThruster", 1)]
     [InlineData("coldGasThruster", 4)]
     [InlineData("microthruster", 1)]
+    [InlineData("ionThruster", 1)]
+    [InlineData("microIonThruster", 1)]
     public void AMountIsAPodOnAFacetedPlateThatSitsOnItsFace(string type, int nozzleCount)
     {
         var model = Look.Models[type];
@@ -235,6 +249,8 @@ public sealed class PropulsionVisualTests
     [Theory]
     [InlineData("engine")]
     [InlineData("microengine")]
+    [InlineData("ionDrive")]
+    [InlineData("microIonDrive")]
     public void AModelCoversItsWholeMountingFaceSoNeighboursMeetItFlush(string type)
     {
         var model = Look.Models[type];
@@ -482,6 +498,63 @@ public sealed class PropulsionVisualTests
         Begin(effects, 12.1);
         slot = effects.Observe(Hull(9, -127, 4, lost));
         effects.Add(slot, Hull(9, -127, 4, lost), nozzles, at, Quaternion.Identity, 1, output);
+        Assert.Equal(0, effects.End());
+    }
+
+    [Fact]
+    public void TheDronesIonPartsGlowSteadilyOnlyWhileTheyHavePowerAndClearWhenTheyStop()
+    {
+        var drone = Content.Designs[Content.DroneDesign];
+        var nozzles = MeshBuilder.Hull(drone, Look).Nozzles;
+        // An ion drive and twenty-four ion thrusters: every nozzle is an ion emitter, burning no fuel.
+        Assert.Equal(1 + drone.Mounts.Length, nozzles.Length);
+        Assert.All(nozzles, n => Assert.Equal(FuelKind.None, n.Fuel));
+        var ion = Look.PlumeOrder[Look.PlumeIndex("ion")];
+        var effects = new ThrustEffects(Look);
+        var output = new PlumeInstance[PropulsionLook.PlumeCapacity];
+        var blocks = new[] { ulong.MaxValue };
+        var at = new Vector3(0, 0, -6);
+
+        // Thrust asked for but no power to give it: the step leaves the ion bit clear, and nothing glows.
+        Begin(effects, 1);
+        var dark = Hull(5, -127, 0, blocks);
+        effects.Add(effects.Observe(dark), dark, nozzles, at, Quaternion.Identity, 1, output);
+        Assert.Equal(0, effects.End());
+
+        // Forward on power: the drive glows, as an ion glow, with no sparks; strafing lights that side's four pods.
+        var forward = Hull(5, -127, 16, blocks);
+        Begin(effects, 2);
+        effects.Add(effects.Observe(forward), forward, nozzles, at, Quaternion.Identity, 1, output);
+        Assert.Equal(1, effects.End());
+        Assert.Equal(2f, output[0].EdgeKind.W);
+        Assert.Equal(0f, output[0].Extent.Z);
+        Assert.Equal(0f, output[0].Motion.Y);
+        Assert.Equal(0f, output[0].Shape.Y);
+        Assert.Equal(new Vector3(0, 0, 1), new Vector3(output[0].AxisLength.X, output[0].AxisLength.Y, output[0].AxisLength.Z));
+        var strafing = new HullView { Id = 5, Thrust = new ThrustState { X = 127, Z = -127, Flags = 16 }, Blocks = blocks };
+        Begin(effects, 3);
+        effects.Add(effects.Observe(strafing), strafing, nozzles, at, Quaternion.Identity, 1, output);
+        Assert.Equal(5, effects.End());
+        Assert.Equal(4, output.AsSpan(0, 5).ToArray().Count(p => p.AxisLength.X == -1f));
+
+        // Steady: two frames apart, a firing emitter is the same but for the clock.
+        Begin(effects, 4);
+        effects.Add(effects.Observe(forward), forward, nozzles, at, Quaternion.Identity, 1, output);
+        effects.End();
+        var first = output[0];
+        Begin(effects, 4.5);
+        effects.Add(effects.Observe(forward), forward, nozzles, at, Quaternion.Identity, 1, output);
+        effects.End();
+        Assert.Equal(first.CoreBright, output[0].CoreBright);
+        Assert.Equal(first.AxisLength, output[0].AxisLength);
+
+        // Stopped, it clears over its fade seconds, then is gone.
+        var idle = Hull(5, 0, 0, blocks);
+        Begin(effects, 5);
+        effects.Add(effects.Observe(idle), idle, nozzles, at, Quaternion.Identity, 1, output);
+        Assert.Equal(1, effects.End());
+        Begin(effects, 5 + ion.FadeSeconds * 1.01);
+        effects.Add(effects.Observe(idle), idle, nozzles, at, Quaternion.Identity, 1, output);
         Assert.Equal(0, effects.End());
     }
 

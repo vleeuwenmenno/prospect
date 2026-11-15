@@ -113,7 +113,8 @@ internal static class DesignBytes
             var item = field.GetValue(value);
             if (item is float f && !float.IsFinite(f) || item is double d && !double.IsFinite(d)
                 || item is System.Numerics.Vector3 v && (!float.IsFinite(v.X) || !float.IsFinite(v.Y) || !float.IsFinite(v.Z))
-                || item is ThrustTable table && !table.IsFinite || item is FuelTanks tanks && !tanks.IsFinite)
+                || item is ThrustTable table && !table.IsFinite || item is FuelTanks tanks && !tanks.IsFinite
+                || item is DirectionFigures figures && !figures.IsFinite)
                 throw new InvalidDataException("Nonfinite design figures.");
         }
     }
