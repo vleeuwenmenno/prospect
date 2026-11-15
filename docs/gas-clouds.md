@@ -438,6 +438,16 @@ One lookup replaces twelve corner hashes.
 - Transfer-to-fragment barrier completes before descriptor publication. Renderer disposal waits for frame work before retiring the image.
 - Repeat addressing makes the lattice continuous at its 64-cell boundary. The highest octave spans about 25 cells across a cloud, inside one period.
 
+The seed hash is `precise`. Decided:
+
+- `gasHash` multiplies its own rounding by about two thousand. A cloud's rotation and lean come from it (`gasShape`).
+- Without `precise` the driver may fuse a multiply and an add there, or not, from frame to frame. The whole cloud then
+  jumped between two looks, even with the camera and every input still (a seed hash 0.02 apart, the noise frame turned
+  about 0.12 rad).
+- `precise` does not fix the order inside `dot()`, so the hash writes its sum out term by term.
+- Keep every hash that a whole cloud's look hangs on evaluated as written. Check stills in a row with the clock held:
+  consecutive frames must not differ.
+
 Cached lighting would need invalidation for cloud motion, light and scale changes; it was not added.
 Half-resolution rendering of the primary cloud is described in "Half-resolution march".
 The twelve composition fixtures use homogeneous input, so their rerun alone cannot validate texture quality or speed.

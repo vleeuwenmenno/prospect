@@ -7,10 +7,17 @@ int gasFixtureMarches = 0;
 const int GasMaxSteps=128;
 #include "ftl.glsl"
 #include "ftl_own.glsl"
+// Precise, and the dot product written out: the last line multiplies the rounding of the lines before it by about two
+// thousand, so a driver free to fuse a multiply and an add here (or to sum a dot() in its own order) gave a cloud's seed
+// two different hashes from one frame to the next. The shape's rotation and lean come from this hash, so the whole cloud
+// jumped between two looks while the camera stood still. Every operation evaluated as written, in this order, gives every
+// frame and every pass the same value. The sum is the dot(q, q.yzx + 33.33) it replaces.
 float gasHash(vec3 p) {
-    p = fract(p * 0.1031);
-    p += dot(p, p.yzx + 33.33);
-    return fract((p.x + p.y) * p.z);
+    precise vec3 q = fract(p * 0.1031);
+    precise float spread = q.x * (q.y + 33.33) + q.y * (q.z + 33.33) + q.z * (q.x + 33.33);
+    q += spread;
+    precise float h = fract((q.x + q.y) * q.z);
+    return h;
 }
 // One immutable lattice is bound in the common frame set for every gas consumer.
 layout(set = 0, binding = 1) uniform sampler3D gasNoiseLattice;
