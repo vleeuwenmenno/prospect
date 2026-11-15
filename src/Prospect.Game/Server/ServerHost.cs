@@ -33,6 +33,12 @@ public sealed class ServerConfig
     public bool ScriptedFleetHurtBroken { get; init; }
 
     /// <summary>
+    /// With <see cref="ScriptedFleetHurtSeconds"/>: instead of hurting the other hulls, the hull flown loses its last
+    /// fuel tank, for the fuel callout's captures.
+    /// </summary>
+    public bool ScriptedFleetHurtTank { get; init; }
+
+    /// <summary>
     /// The name the host chose, shown to players and on the list. It must pass
     /// <see cref="ServerNames.TryNormalize"/>: 1 to 48 characters once cleaned, as the listing server demands.
     /// </summary>
@@ -433,6 +439,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 if (!(hurtAt >= 0f && hurtAt <= 600f) || config.Visibility != ServerVisibility.Private || world is not null || transports.Any(t => !t.IsInProcess))
                     throw new InvalidDataException("A scripted fleet hurt needs an unsaved private in-process server and a time of 0 to 600 s.");
                 _scriptedFleetHurtBroken = config.ScriptedFleetHurtBroken;
+                _scriptedFleetHurtTank = config.ScriptedFleetHurtTank;
                 _scriptedFleetHurtTick = (long)MathF.Ceiling(hurtAt / HullSim.Dt);
             }
             _visualBenchmark = config.VisualBenchmark;

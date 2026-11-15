@@ -4,12 +4,15 @@ public sealed partial class ServerHost
 {
     private long _scriptedFleetHurtTick = -1;
     private bool _scriptedFleetHurtBroken;
+    private bool _scriptedFleetHurtTank;
 
     /// <summary>
     /// The scripted capture's fleet damage: once, at the configured tick, the player's hulls other than the one flown
     /// are hurt so the target panel has something to show. Hurt means a shield half charged and a hull at 60 %; with
     /// <c>broken</c> it is a broken shield (as <c>HullSim.Damage</c> leaves it, a third of the way to its restart
-    /// point) and a hull at 20 %. At most two hulls are touched, the rest are left alone.
+    /// point) and a hull at 20 %. At most two hulls are touched, the rest are left alone. With <c>tank</c> the hull
+    /// flown loses instead its last fuel tank, in design order, as a hit that destroys the block would take it, so
+    /// the fuel callout has a lost tank to show.
     /// </summary>
     private void TickScriptedFleetHurt(long tick)
     {
@@ -21,6 +24,12 @@ public sealed partial class ServerHost
             if (connection.State != ConnectionState.Active)
                 continue;
             var own = connection.Hull.Index;
+            if (_scriptedFleetHurtTank)
+            {
+                LoseLastTank(own);
+                continue;
+            }
+
             var owner = _hulls.Info(own).Owner;
             var hurt = 0;
             for (var i = 0; i < _hulls.Slots && hurt < 2; i++)
@@ -46,5 +55,16 @@ public sealed partial class ServerHost
                 hurt++;
             }
         }
+    }
+
+    private void LoseLastTank(int index)
+    {
+        ref var info = ref _hulls.Info(index);
+        var tanks = _content.Designs[info.Design].Tanks;
+        if (tanks.Length == 0 || !_hulls.BlockStates.Hit(info.BlockState, tanks[^1].Block, float.MaxValue))
+            return;
+        info.DamageTick = _tick;
+        _hulls.State(index).Hull = (float)_hulls.BlockStates.HitTotal(info.BlockState);
+        _field.Refit(index);
     }
 }

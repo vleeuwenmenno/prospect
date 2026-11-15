@@ -29,8 +29,12 @@ opens a wide, soft, blue-violet vacuum plume, a hot thruster a small one with an
 faint, streaked cone of expanding gas lit by the star that bursts as its valve opens and clears when it closes, and an
 ion part (a flat grid in a short ring) a faint, steady blue-violet glow with a thin straight beam; boost makes plumes longer and
 brighter without burning out to white, for every hull in view. The pilot console shows each fuel's amount and flow.
-Not there: thruster torque, fuel transfer between tanks, a readout of each tank (the console shows each fuel's total),
-refineries and stations. The figures are a first balance. See
+With `Shift` held, each fuel's cell of the fuel row has its own tooltip (stored, burn, minutes left, its tanks and how
+many are lost), and a click on it calls that fuel's tanks out on the hull: each tank block outlined in the fuel's
+colour, a label with what it holds (`BIPROP 340 / 1000 KG`, a lost one `LOST` in red) and a thin line to it. More than
+eight tanks share labels by where they sit (`4 TANKS · 1200 KG`). The callout stays open after `Shift` is let go and
+in the command view; the same fuel again, or `Esc`, closes it, another fuel switches.
+Not there: thruster torque, fuel transfer between tanks, refineries and stations. The figures are a first balance. See
 [propulsion](docs/roadmap/propulsion.md).
 
 Scanning modules have a non-visual backend: three placeable Common Mk I blocks, gas composition, targeted asteroid analysis, bounded locator pulses and personal saved observations. The interface is wired: a **Module** tab in the ship editor, keys and chips for the three scanners, the asteroid analysis on the target panel, the **Gas** window and the locator's vision over the flight and command views (see *Ship modules* below). No ship in the shipped fleet carries a module: build one in the editor. Mining, upgrades and sharing knowledge are not there. See [module contract](docs/roadmap/modules.md).

@@ -14,5 +14,17 @@
   "fuelSteadyKgPerSecond": 0.0005,
   "fuelNitrogenColor": "7FD1E8",
   "fuelHydrazineColor": "C58BFF",
-  "fuelBipropellantColor": "FFB05A"
+  "fuelBipropellantColor": "FFB05A",
+  "calloutMaxLabels": 8,
+  "calloutOutlineThickness": 1.5,
+  "calloutOutlineAlpha": 0.9,
+  "calloutLostAlpha": 0.75,
+  "calloutLeaderThickness": 1,
+  "calloutLeaderAlpha": 0.65,
+  "calloutAnchorDot": 2.5,
+  "calloutLabelOffset": 56,
+  "calloutLabelGap": 4,
+  "calloutLabelPad": 6,
+  "calloutMargin": 16,
+  "calloutConsoleGap": 12
 }

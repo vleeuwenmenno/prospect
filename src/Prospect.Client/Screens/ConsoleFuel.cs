@@ -1,3 +1,4 @@
+using Brutal.Numerics;
 using Prospect.Client.Ui;
 using Prospect.Game.World;
 
@@ -66,6 +67,77 @@ internal static class ConsoleFuel
         {
             if (Capacity(fuel, KindAt(i)) > 0f)
                 count++;
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// The cell of the fuel row at <paramref name="index"/> among the cells shown: one for each fuel the hull has a
+    /// tank for, in <see cref="KindAt"/> order, side by side across the whole console with a row gap between them,
+    /// slant included. A hull with no tank has one cell, at index 0.
+    /// </summary>
+    public static HudRect CellRect(in FlightConsoleLayout layout, in FuelFlow fuel, int index)
+    {
+        var cells = Math.Max(1, Count(fuel));
+        var gap = layout.RowGap;
+        var width = MathF.Floor((layout.Right - layout.LeftX - gap * (cells - 1)) / cells);
+        var left = layout.LeftX + index * (width + gap);
+        return new HudRect(left, layout.FuelTop, left + width, layout.FuelTop + layout.FuelRow);
+    }
+
+    /// <summary>
+    /// The fuel whose cell is under <paramref name="pointer"/>: none in the gap between two cells, off the row, or on
+    /// the one cell of a hull with no tank.
+    /// </summary>
+    public static FuelKind CellAt(in FlightConsoleLayout layout, in FuelFlow fuel, float2 pointer)
+    {
+        var shown = 0;
+        for (var i = 0; i < Kinds; i++)
+        {
+            var kind = KindAt(i);
+            if (!(Capacity(fuel, kind) > 0f))
+                continue;
+            if (CellRect(layout, fuel, shown).Contains(pointer))
+                return kind;
+            shown++;
+        }
+
+        return FuelKind.None;
+    }
+
+    /// <summary>The index among the shown cells of <paramref name="kind"/>'s cell, or -1 when the hull has no tank of it.</summary>
+    public static int CellIndex(in FuelFlow fuel, FuelKind kind)
+    {
+        var shown = 0;
+        for (var i = 0; i < Kinds; i++)
+        {
+            var at = KindAt(i);
+            if (!(Capacity(fuel, at) > 0f))
+                continue;
+            if (at == kind)
+                return shown;
+            shown++;
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// How many tanks of <paramref name="kind"/> the design has, and how many of them the hull has lost: a tank
+    /// whose block is not in <paramref name="alive"/> is lost.
+    /// </summary>
+    public static int Tanks(HullDesign design, ReadOnlySpan<ulong> alive, FuelKind kind, out int lost)
+    {
+        var count = 0;
+        lost = 0;
+        foreach (var tank in design.Tanks)
+        {
+            if (tank.Kind != kind)
+                continue;
+            count++;
+            if ((tank.Block >> 6) >= alive.Length || !BlockSet.Has(alive, tank.Block))
+                lost++;
         }
 
         return count;

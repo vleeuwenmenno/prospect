@@ -10,36 +10,32 @@ internal sealed partial class ScreenHost
 {
     /// <summary>
     /// The fuel row under the console: one cell for each fuel the hull has a tank for, side by side across the whole
-    /// console. Each cell has the name, stored out of capacity, and the net flow a second with its arrow (negative
-    /// while burning, a dash at rest), and a thin strip of how full the tank is. A narrow cell drops the capacity,
-    /// then the name, before it clips the flow. A hull with no tank (the electric drone) gets one cell that says so.
+    /// console (<see cref="ConsoleFuel.CellRect"/>). Each cell has the name, stored out of capacity, and the net flow a
+    /// second with its arrow (negative while burning, a dash at rest), and a thin strip of how full the tanks are. A
+    /// narrow cell drops the capacity, then the name, before it clips the flow. A hull with no tank (the electric drone)
+    /// gets one cell that says so. The cell under the pointer is lit, and the fuel whose tanks are called out is underlined in its colour.
     /// </summary>
-    private void DrawFuelRow(ImDrawListPtr draw, in FlightConsoleLayout layout, in HullView own, bool hot)
+    private void DrawFuelRow(ImDrawListPtr draw, in FlightConsoleLayout layout, in HullView own, FuelKind hot, bool noneHot)
     {
         var fuel = own.Fuel;
-        var count = ConsoleFuel.Count(fuel);
-        var cells = Math.Max(1, count);
-        var gap = Kit.Px(FlightConsole.RowGap);
-        var total = layout.Right - layout.LeftX;
-        var width = MathF.Floor((total - gap * (cells - 1)) / cells);
-        var x = layout.LeftX;
         var shown = 0;
-        for (var i = 0; i < ConsoleFuel.Kinds && count > 0; i++)
+        for (var i = 0; i < ConsoleFuel.Kinds; i++)
         {
             var kind = ConsoleFuel.KindAt(i);
-            if (ConsoleFuel.Capacity(fuel, kind) > 0f)
-            {
-                DrawFuelCell(draw, layout, kind, fuel, x, width, hot);
-                x += width + gap;
-                shown++;
-            }
+            if (!(ConsoleFuel.Capacity(fuel, kind) > 0f))
+                continue;
+            var cell = ConsoleFuel.CellRect(layout, fuel, shown++);
+            DrawFuelCell(draw, layout, kind, fuel, cell.Left, cell.Width, hot == kind, _fuelCallout.Open == kind);
         }
 
         if (shown == 0)
-            DrawFuelCell(draw, layout, FuelKind.None, fuel, x, width, hot);
+        {
+            var cell = ConsoleFuel.CellRect(layout, fuel, 0);
+            DrawFuelCell(draw, layout, FuelKind.None, fuel, cell.Left, cell.Width, noneHot, false);
+        }
     }
 
-    private void DrawFuelCell(ImDrawListPtr draw, in FlightConsoleLayout layout, FuelKind kind, in FuelFlow fuel, float x, float w, bool hot)
+    private void DrawFuelCell(ImDrawListPtr draw, in FlightConsoleLayout layout, FuelKind kind, in FuelFlow fuel, float x, float w, bool hot, bool open)
     {
         var y = layout.FuelTop;
         var h = layout.FuelRow;
@@ -53,6 +49,12 @@ internal sealed partial class ScreenHost
         draw.AddQuadFilled(p0, p1, p2, p3, Kit.Color(hot ? Theme.PanelRaised : Theme.Panel, Hud.FillAlpha));
         draw.AddQuad(p0, p1, p2, p3, Kit.Color(Hud.Border(color, hot)), 1f);
         draw.AddLine(p3, p0, Kit.Color(color, 0.85f), Kit.Px(2));
+        if (open)
+        {
+            // The fuel whose tanks are called out: a bright line along the cell's top, in the fuel's own colour.
+            var accent = PowerReadout.Current.FuelRgb(kind);
+            draw.AddLine(p0, p1, Kit.Color(accent), Kit.Px(2));
+        }
 
         var pad = Kit.Px(FlightConsole.Pad);
         var left = x + s * 0.5f + pad;

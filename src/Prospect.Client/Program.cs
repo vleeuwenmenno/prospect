@@ -85,6 +85,12 @@ internal static class Program
           --zoom <0.5..8>         With --capture or --bench, pilot view: the camera's distance, as the scroll wheel sets it
           --rts-script <json>     Private muted capture poses; --rts-seed <n> selects the diagnostic seed
           --target                Pilot view: target the nearest other hull once in space
+          --fuel-callout <fuel>   With --capture or --bench: call out the flown hull's tanks of nitrogen, hydrazine or
+                                  bipropellant, as a click on that fuel's cell of the fuel row does
+          --fuel-tip <fuel>       With --capture or --bench, pilot view: show that fuel's details, as the pointer on
+                                  its cell does
+          --hurt-fleet <sec>      With --capture or --bench: hurt the other owned hulls that many seconds in;
+                                  --hurt-kind damaged, broken, or tank (the flown hull loses its last fuel tank)
           --social-run <seconds>  Run a headless client script, then exit; uses --join or a private local game
           --player <name>         Player name for the headless script
           --say <text>            Send one everyone-chat line after admission (with --social-run)
@@ -376,8 +382,17 @@ internal static class Program
                     options.HurtFleetSeconds = hurtAt;
                     i++;
                     break;
-                case "--hurt-kind" when hasValue && (args[i + 1] is "damaged" or "broken"):
+                case "--hurt-kind" when hasValue && (args[i + 1] is "damaged" or "broken" or "tank"):
                     options.HurtFleetBroken = args[i + 1] == "broken";
+                    options.HurtFleetTank = args[i + 1] == "tank";
+                    i++;
+                    break;
+                case "--fuel-callout" when hasValue && ParseFuel(args[i + 1]) is var called and not Prospect.Game.World.FuelKind.None:
+                    options.FuelCallout = called;
+                    i++;
+                    break;
+                case "--fuel-tip" when hasValue && ParseFuel(args[i + 1]) is var tipped and not Prospect.Game.World.FuelKind.None:
+                    options.FuelTip = tipped;
                     i++;
                     break;
                 case "--thrust" when hasValue && Prospect.Client.World.ScriptedThrust.TryParse(args[i + 1], out var thrust):
@@ -494,6 +509,9 @@ internal static class Program
         if ((options.Thrust is not null || options.Zoom is not null) && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--thrust and --zoom work only with --capture or --bench.");
 
+        if ((options.FuelCallout != Prospect.Game.World.FuelKind.None || options.FuelTip != Prospect.Game.World.FuelKind.None) && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--fuel-callout and --fuel-tip work only with --capture or --bench.");
+
         if (options.HurtFleetSeconds is not null && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
             return Fail("--hurt-fleet works only with --capture or --bench, in an unsaved private local game.");
 
@@ -589,6 +607,15 @@ internal static class Program
             return 1;
         }
     }
+
+    /// <summary>A fuel as the command line names it, or none for any other word.</summary>
+    private static Prospect.Game.World.FuelKind ParseFuel(string name) => name switch
+    {
+        "nitrogen" => Prospect.Game.World.FuelKind.Nitrogen,
+        "hydrazine" => Prospect.Game.World.FuelKind.Hydrazine,
+        "bipropellant" => Prospect.Game.World.FuelKind.Bipropellant,
+        _ => Prospect.Game.World.FuelKind.None,
+    };
 
     private static int Fail(string message)
     {
