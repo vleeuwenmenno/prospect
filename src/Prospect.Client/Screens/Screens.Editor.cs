@@ -141,6 +141,15 @@ internal sealed partial class ScreenHost
             DrawMount(draw, world, boxes[mounts[mount].Parent], mounts[mount], Kit.Color(SelectionBlue), Kit.Px(mount == editor.SelectedMount ? 2.5f : 2f), mount == editor.SelectedMount);
         }
 
+        // The box being dragged out, in the world layer like the command view's: blue to select or add, red to remove.
+        if (world.EditorBoxSelecting)
+        {
+            BoxSelect.Normalize(world.EditorBoxStart, world.EditorBoxEnd, out var boxMin, out var boxMax);
+            var tone = world.EditorBoxMode == BoxSelectMode.Remove ? Theme.Bad : SelectionBlue;
+            draw.AddRectFilled(boxMin, boxMax, Kit.Color(tone, 0.12f));
+            draw.AddRect(boxMin, boxMax, Kit.Color(tone, 0.95f));
+        }
+
         DrawSizingNote(world, editor);
         DrawMirrorPlanes(draw, world, editor, draft);
         if (!editor.HasHover)

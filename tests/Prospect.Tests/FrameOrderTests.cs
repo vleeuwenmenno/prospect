@@ -5975,6 +5975,190 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal(blocks, DraftBlocks);
     }
 
+    /// <summary>Every draft block's centre on screen, by block index; a block behind the camera is missing.</summary>
+    private Dictionary<int, float2> BlockCentresOnScreen()
+    {
+        var found = new Dictionary<int, float2>();
+        var boxes = _world.Editor.Draft!.Boxes;
+        for (var i = 0; i < boxes.Length; i++)
+            if (_world.Project(_world.EditorPoint(EditorGeometry.Middle(boxes[i])), out var at))
+                found[i] = at;
+        return found;
+    }
+
+    /// <summary>A rectangle about the hull's middle that holds some of the blocks' centres but not all, and the indices inside it.</summary>
+    private (float2 Min, float2 Max, int[] Inside) BoxAboutTheMiddle()
+    {
+        var centres = BlockCentresOnScreen();
+        var middle = HullOnScreen();
+        for (var half = 6f; half < 600f; half += 6f)
+        {
+            var min = middle - new float2(half, half);
+            var max = middle + new float2(half, half);
+            var inside = centres.Where(c => BoxSelect.Contains(min, max, c.Value)).Select(c => c.Key).Order().ToArray();
+            if (inside.Length >= 2 && inside.Length < centres.Count)
+                return (min, max, inside);
+        }
+
+        Assert.Fail("no rectangle holds some blocks and not all");
+        return default;
+    }
+
+    private void DragBox(float2 from, float2 to, Action? whileDragging = null)
+    {
+        EditorFrame(() => Move(from));
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        EditorFrame(() => Move((from + to) * 0.5f));
+        EditorFrame(() => Move(to));
+        whileDragging?.Invoke();
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        EditorFrame();
+    }
+
+    [Fact]
+    public void ABoxDragSelectsEveryBlockWhoseCentreIsInsideShiftAddsAltRemovesAndPlainDragsWhilePlacingDoNothing()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var blocks = DraftBlocks;
+        var (min, max, inside) = BoxAboutTheMiddle();
+        var outside = Enumerable.Range(0, blocks).First(i => !inside.Contains(i) && BlockCentresOnScreen().ContainsKey(i));
+
+        // While placing, a plain drag does nothing at all, and with Ctrl held it draws the box and selects.
+        Assert.True(editor.Placing);
+        DragBox(min, max);
+        Assert.Empty(editor.Selection.ToArray());
+        Assert.Equal(blocks, DraftBlocks);
+        DragBox(min, max, () =>
+        {
+            Assert.False(_world.EditorBoxSelecting);
+        });
+        EditorFrame(() => Key(GlfwKey.LeftControl, true));
+        DragBox(min, max, () => Assert.True(_world.EditorBoxSelecting));
+        EditorFrame(() => Key(GlfwKey.LeftControl, false));
+        Assert.Equal(inside, editor.Selection.ToArray().Order().ToArray());
+        Assert.True(editor.Placing, "a box select never stops placing");
+        Assert.Equal(blocks, DraftBlocks);
+        Assert.False(_world.EditorBoxSelecting);
+
+        // In the select tool a plain drag replaces the selection, whatever it was.
+        editor.StopPlacing();
+        editor.Select(outside, false);
+        DragBox(min, max);
+        Assert.Equal(inside, editor.Selection.ToArray().Order().ToArray());
+
+        // Shift adds to it; Alt takes the blocks inside out of it.
+        editor.Select(outside, false);
+        EditorFrame(() => Key(GlfwKey.LeftShift, true));
+        DragBox(min, max);
+        EditorFrame(() => Key(GlfwKey.LeftShift, false));
+        Assert.Equal(inside.Append(outside).Order().ToArray(), editor.Selection.ToArray().Order().ToArray());
+        EditorFrame(() => Key(GlfwKey.LeftAlt, true));
+        DragBox(min, max);
+        EditorFrame(() => Key(GlfwKey.LeftAlt, false));
+        Assert.Equal([outside], editor.Selection.ToArray());
+
+        // A box with nothing in it clears the selection, as a click on empty space does.
+        DragBox(EmptySpace, EmptySpace + new float2(30, 30));
+        Assert.Empty(editor.Selection.ToArray());
+        Assert.Equal(blocks, DraftBlocks);
+    }
+
+    [Fact]
+    public void ABoxSelectSelectsBlocksOnlyAndAPressBegunOnAPanelNeverStartsOne()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var boxes = editor.Draft!.Boxes;
+        var (min, max, inside) = BoxAboutTheMiddle();
+        editor.StopPlacing();
+
+        // A mounted part that was selected is not kept by a box: only blocks are box selected.
+        var thruster = _snapshot.Content.Blocks.Types.ToList().FindIndex(t => t.Mount is not null);
+        if (thruster >= 0 && editor.Draft.Mounts.Length > 0)
+            editor.SelectMount(0, false);
+        DragBox(min, max);
+        Assert.Equal(inside, editor.Selection.ToArray().Order().ToArray());
+        Assert.Empty(editor.MountSelection.ToArray());
+
+        // A press on a panel, held and dragged over the ship, selects nothing and draws no box.
+        editor.SelectMount(0, false);
+        editor.ClearSelection();
+        _paletteShown = true;
+        for (var i = 0; i < 3; i++)
+            EditorFrame();
+        DragBox(OverSearch, HullOnScreen(), () => Assert.False(_world.EditorBoxSelecting));
+        Assert.Empty(editor.Selection.ToArray());
+        Assert.Equal(boxes.Length, DraftBlocks);
+    }
+
+    [Fact]
+    public void CtrlASelectsEveryBlockAndWithShiftEveryBlockOfTheSelectedOnesTypeAsDoesADoubleClick()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        var hull = _snapshot.Content.Blocks.Get("hull");
+        Assert.Equal(DraftEdit.Done, editor.Draft!.Add(new GridSize(0, 2, 0), new GridSize(1, 1, 1), hull));
+        Assert.Equal(DraftEdit.Done, editor.Draft.Add(new GridSize(0, 3, 0), new GridSize(1, 1, 1), hull));
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var boxes = editor.Draft.Boxes.ToArray();
+        editor.StopPlacing();
+
+        EditorFrame(() =>
+        {
+            Key(GlfwKey.LeftControl, true);
+            Key(GlfwKey.A, true);
+        });
+        EditorFrame(() =>
+        {
+            Key(GlfwKey.A, false);
+            Key(GlfwKey.LeftControl, false);
+        });
+        Assert.Equal(Enumerable.Range(0, boxes.Length).ToArray(), editor.Selection.ToArray().Order().ToArray());
+
+        var same = Enumerable.Range(0, boxes.Length).Where(i => boxes[i].Type == hull).ToArray();
+        Assert.InRange(same.Length, 2, boxes.Length - 1);
+        var one = same[0];
+        editor.Select(one, false);
+        EditorFrame(() =>
+        {
+            Key(GlfwKey.LeftControl, true);
+            Key(GlfwKey.LeftShift, true);
+            Key(GlfwKey.A, true);
+        });
+        EditorFrame(() =>
+        {
+            Key(GlfwKey.A, false);
+            Key(GlfwKey.LeftShift, false);
+            Key(GlfwKey.LeftControl, false);
+        });
+        Assert.Equal(same, editor.Selection.ToArray().Order().ToArray());
+        Assert.Equal(one, editor.Selected);
+        Assert.Equal(boxes, editor.Draft.Boxes.ToArray());
+
+        // A double click on a block selects its type, where a single click selects just the block.
+        editor.ClearSelection();
+        Assert.True(PointWhere(e => e.HasHover && (uint)e.Hover.Block < (uint)boxes.Length && boxes[e.Hover.Block].Type == hull && (uint)e.Hover.Mount >= (uint)e.Draft!.Mounts.Length, out _));
+        var type = boxes[editor.Hover.Block].Type;
+        var block = editor.Hover.Block;
+        EditorFrame(() => Click());
+        EditorFrame();
+        Assert.Equal([block], editor.Selection.ToArray());
+        for (var i = 0; i < 40; i++)
+            EditorFrame();
+        EditorFrame(() => Click());
+        EditorFrame(() => Click());
+        var expected = Enumerable.Range(0, boxes.Length).Where(i => boxes[i].Type == type).ToArray();
+        Assert.True(expected.Length > 1, "the hovered block's type has more than one block");
+        Assert.Equal(expected, editor.Selection.ToArray().Order().ToArray());
+        Assert.Equal(block, editor.Selected);
+    }
+
     [Fact]
     public void AThrusterIsMountedOnTheFaceUnderThePointerAndIsSelectedDeletedUndoneAndGoesWithItsBlock()
     {

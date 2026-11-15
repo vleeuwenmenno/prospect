@@ -165,6 +165,14 @@ are never blocked. The editor works in space, around your ship:
   design.
 - The middle button selects a block, also while placing; `Shift` adds or removes one; a middle drag still pans.
   Every selected block is outlined blue. A middle click on empty space clears the selection.
+- Box select: with the **Select blocks** tool, drag the left button over empty space or over blocks (not from a
+  selected block, which moves the selection) and every block whose centre falls inside the rectangle is selected,
+  hidden ones behind other blocks too. While placing, hold `Ctrl` for the same drag; a plain drag still does
+  nothing. A plain drag replaces the selection, `Shift` adds, `Alt` removes (the rectangle is red). Only blocks are
+  box selected: mounted parts keep their own selection (middle click) and a box clears them. `Shift`+left click
+  with the select tool adds or removes one block. `Ctrl+A` selects every block; `Ctrl+Shift+A` (or a double click
+  on a block with the select tool) selects every block of that block's type, which is how to select the tanks
+  of one kind before **Merge**. Selecting is not an undo step.
 - Drag a selected block with the left button to move the whole selection onto another face. `Ctrl+C` and
   `Ctrl+V` copy and paste it; `Delete` deletes it; **Merge** joins blocks of one type that fill a box exactly,
   and shows how the figures change. Each is one step to undo. Undo and redo clear the selection.

@@ -212,6 +212,11 @@ internal sealed class WorldView
     private bool _editShown;
     private bool _editLeftDown;
     private bool _editLeftMoved;
+    // A left press that began a box select of blocks, and the double click that selects a block's type.
+    private bool _editBox;
+    private float _editClock;
+    private float _editClickAt = float.NegativeInfinity;
+    private float2 _editClickPos;
     private float2 _editLeftStart;
     private bool _editRightDown;
     private bool _editRightMoved;
@@ -516,6 +521,17 @@ internal sealed class WorldView
     public ReadOnlySpan<RockRef> SelectedRocks => _selectedRocks.AsSpan(0, _selectedRockCount);
 
     /// <summary>True while a selection box is being dragged; its corners are in window pixels.</summary>
+    /// <summary>True while the editor's box select of blocks is being dragged out.</summary>
+    public bool EditorBoxSelecting => _captureBoxDragging || (_editBox && _editLeftDown && _editLeftMoved && Editor.CanInspect);
+
+    /// <summary>The corners of the editor's box select, in window pixels, and what releasing it would do.</summary>
+    public float2 EditorBoxStart => _captureBoxDragging ? _captureBoxFrom : _editLeftStart;
+    public float2 EditorBoxEnd => _captureBoxDragging ? _captureBoxTo : _devices.MousePosition;
+    public BoxSelectMode EditorBoxMode => BoxSelect.ModeOf(ShiftHeld, AltHeld);
+
+    private bool ShiftHeld => _devices.KeyDown(GlfwKey.LeftShift) || _devices.KeyDown(GlfwKey.RightShift);
+    private bool AltHeld => _devices.KeyDown(GlfwKey.LeftAlt) || _devices.KeyDown(GlfwKey.RightAlt);
+
     public bool BoxSelecting => _leftDragging && _leftMoved && !_leftSlidesPlane;
     public float2 BoxStart => _leftDragStart;
     public float2 BoxEnd => _devices.MousePosition;
@@ -3281,7 +3297,7 @@ internal sealed class WorldView
         _editPan = Vector3.Zero;
         _editFocusing = false;
         _editGrab = -1;
-        _editLeftDown = _editRightDown = _editMiddleDown = false;
+        _editLeftDown = _editRightDown = _editMiddleDown = _editBox = false;
         ResetPartGestures();
         _editTuning ??= EditorTuning.Load();
         _freeLook = false;
@@ -3402,6 +3418,55 @@ internal sealed class WorldView
     private bool _captureMount;
     private bool _captureIon;
 
+    // The scripted box select of a capture (--open edit-box-select) and select all (--open edit-select-all); the
+    // pointer is muted, so the harness plays the drag itself: it holds the select tool, draws the rectangle growing
+    // over the middle of the ship for 1.5 s from the first second of the edit, and releases it at 2.5 s.
+    private int _captureBoxKind;
+    private float _captureBoxClock = -1f;
+    private bool _captureBoxDragging;
+    private bool _captureBoxDone;
+    private float2 _captureBoxFrom;
+    private float2 _captureBoxTo;
+
+    /// <summary>Plays a box select (<paramref name="selectAll"/> false) or Ctrl+A once the editor is open, for a capture.</summary>
+    internal void ScriptSelectionForCapture(bool selectAll) => _captureBoxKind = selectAll ? 2 : 1;
+
+    private void RunBoxCapture(float dt)
+    {
+        if (_captureBoxDone || !Editor.CanEdit)
+            return;
+        if (_captureBoxClock < 0f)
+        {
+            _captureBoxClock = 0f;
+            Editor.StopPlacing();
+        }
+
+        _captureBoxClock += dt;
+        if (_captureBoxKind == 2)
+        {
+            if (_captureBoxClock > 1f)
+            {
+                Editor.SelectAll();
+                _captureBoxDone = true;
+            }
+
+            return;
+        }
+
+        var centre = _screen * 0.5f;
+        var half = new float2(_screen.Y * 0.16f, _screen.Y * 0.22f);
+        _captureBoxFrom = centre - half;
+        var grow = Math.Clamp((_captureBoxClock - 1f) / 1.5f, 0f, 1f);
+        _captureBoxTo = centre - half + half * 2f * grow;
+        _captureBoxDragging = _captureBoxClock > 1f && _captureBoxClock < 2.5f;
+        if (_captureBoxClock >= 2.5f)
+        {
+            _captureBoxDragging = false;
+            ApplyBoxSelect(_captureBoxFrom, _captureBoxTo, BoxSelectMode.Replace);
+            _captureBoxDone = true;
+        }
+    }
+
     private void HoldCaptureGhost()
     {
         if (!Editor.CanEdit || Editor.Draft is not { } draft || Editor.Content is not { } content)
@@ -3475,6 +3540,9 @@ internal sealed class WorldView
     private void UpdateEditorControls(bool inputEnabled, bool pointerOverUi, float dt)
     {
         _ghostMotion.Step(dt);
+        _editClock += dt;
+        if (_captureBoxKind != 0)
+            RunBoxCapture(dt);
         if (_captureGhost)
         {
             HoldCaptureGhost();
@@ -3485,6 +3553,7 @@ internal sealed class WorldView
         if (!inputEnabled)
         {
             _editLeftDown = _editRightDown = _editMiddleDown = false;
+            _editBox = false;
             _editGrab = -1;
             _ringHovered = -1;
             ResetSizeDrag();
@@ -3520,6 +3589,14 @@ internal sealed class WorldView
             Editor.CopySelection();
         else if (control && _devices.KeyPressed(GlfwKey.V))
             Editor.BeginPaste();
+        else if (control && _actions.Pressed(_devices, InputAction.EditorSelectAll, true))
+        {
+            // Ctrl+A every block; with Shift too, every block of the selected block's type.
+            if (shift)
+                Editor.SelectSameType(Editor.Selected);
+            else
+                Editor.SelectAll();
+        }
         if (_devices.KeyPressed(GlfwKey.Delete))
             Editor.DeleteSelected();
         if (Editor.TakeFocusRequest() || (!control && _actions.Pressed(_devices, InputAction.Follow, true)))
@@ -3580,7 +3657,7 @@ internal sealed class WorldView
         var source = Editor.Source;
         var carrying = Editor.Carry != EditorCarry.None;
         var blocked = carrying ? PointerOverPanel : pointerOverUi;
-        if (blocked || (_editRightDown && _editRightMoved) || (_editMiddleDown && _editMiddleMoved) || !Editor.CanInspect || draft is null || source is null)
+        if (blocked || (_editRightDown && _editRightMoved) || (_editMiddleDown && _editMiddleMoved) || EditorBoxSelecting || !Editor.CanInspect || draft is null || source is null)
             Editor.ClearHover();
         else
         {
@@ -3627,6 +3704,11 @@ internal sealed class WorldView
             _editLeftMoved = false;
             _editLeftStart = _devices.MousePosition;
             _editGrab = Editor.Carry == EditorCarry.None && Editor.HasHover && Editor.IsSelected(Editor.Hover.Block) ? Editor.Hover.Block : -1;
+            // A drag that is not a move of the selection draws a box: in the select tool from anywhere that is not a
+            // selected block, and while placing only with Ctrl held, which then also takes a press on a selected block.
+            _editBox = Editor.CanInspect && Editor.Carry == EditorCarry.None && (Editor.Placing ? control : _editGrab < 0);
+            if (_editBox && Editor.Placing)
+                _editGrab = -1;
         }
 
         if (_editLeftDown)
@@ -3643,7 +3725,9 @@ internal sealed class WorldView
             {
                 _editLeftDown = false;
                 _editGrab = -1;
-                if (Editor.Carry == EditorCarry.Move)
+                if (_editBox && _editLeftMoved && Editor.Carry == EditorCarry.None)
+                    ApplyBoxSelect(BoxSelect.ModeOf(shift, AltHeld));
+                else if (Editor.Carry == EditorCarry.Move)
                 {
                     if (PointerOverPanel)
                         Editor.CancelCarry();
@@ -3651,7 +3735,8 @@ internal sealed class WorldView
                         Editor.Drop();
                 }
                 else if (!_editLeftMoved && !pointerOverUi)
-                    Editor.Click(shift);
+                    ClickEditor(shift);
+                _editBox = false;
             }
         }
 
@@ -3660,6 +3745,52 @@ internal sealed class WorldView
 
     /// <summary>Pixels a press may move and still count as a click rather than a drag.</summary>
     private const float ClickSlop = 5f;
+
+    /// <summary>Seconds between two clicks on a block that make a double click.</summary>
+    private const float DoubleClickSeconds = 0.35f;
+
+    /// <summary>
+    /// A left click on the world. With the select tool, a second click on a block within <see cref="DoubleClickSeconds"/>
+    /// and a few pixels of the first also selects every block of its type (Shift keeps what was selected).
+    /// </summary>
+    private void ClickEditor(bool shift)
+    {
+        var onBlock = !Editor.Placing && Editor.HasHover && (uint)Editor.Hover.Mount >= (uint)(Editor.Draft?.Mounts.Length ?? 0);
+        var pointer = _devices.MousePosition;
+        var twice = onBlock && _editClock - _editClickAt <= DoubleClickSeconds && !BoxSelect.IsDrag(_editClickPos, pointer, ClickSlop * 2f);
+        var block = onBlock ? Editor.Hover.Block : -1;
+        Editor.Click(shift);
+        if (twice && block >= 0)
+        {
+            Editor.SelectSameType(block, shift);
+            _editClickAt = float.NegativeInfinity;
+            return;
+        }
+
+        _editClickAt = onBlock ? _editClock : float.NegativeInfinity;
+        _editClickPos = pointer;
+    }
+
+    /// <summary>
+    /// Releases the box select: every block of the draft whose centre projects inside the rectangle is selected,
+    /// added to the selection or taken out of it, whatever lies in front of it. Mounted parts are not touched. Walks
+    /// the draft's blocks in place and takes no memory.
+    /// </summary>
+    private void ApplyBoxSelect(BoxSelectMode mode)
+    {
+        ApplyBoxSelect(_editLeftStart, _devices.MousePosition, mode);
+    }
+
+    private void ApplyBoxSelect(float2 from, float2 to, BoxSelectMode mode)
+    {
+        if (Editor.Draft is not { } draft || !Editor.BeginBulkSelect(mode))
+            return;
+        BoxSelect.Normalize(from, to, out var min, out var max);
+        var boxes = draft.Boxes;
+        for (var i = 0; i < boxes.Length; i++)
+            if (Project(EditorPoint(EditorGeometry.Middle(boxes[i])), out var screen) && BoxSelect.Contains(min, max, screen))
+                Editor.BulkSelect(i, mode);
+    }
 
     /// <summary>
     /// The right button: a drag orbits the camera and a click drops what is carried or stops placing. A press that

@@ -39,6 +39,7 @@ internal enum InputAction
     ScanAsteroid,
     PulseLocator,
     ToggleGas,
+    EditorSelectAll,
     Count,
 }
 

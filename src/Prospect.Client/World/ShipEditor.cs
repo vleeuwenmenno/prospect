@@ -971,6 +971,68 @@ internal sealed class ShipEditor(JobSystem jobs)
     }
 
     /// <summary>
+    /// Starts a bulk change of the block selection: sizes its buffers for the whole draft once, so the changes that
+    /// follow take no memory however many blocks they touch, and with <see cref="BoxSelectMode.Replace"/> forgets the
+    /// selection. Mounted parts are cleared with it, never box selected. False when blocks cannot be selected now.
+    /// </summary>
+    public bool BeginBulkSelect(BoxSelectMode mode)
+    {
+        if (!CanInspect)
+            return false;
+        var count = Draft!.Boxes.Length;
+        if (_selection.Length < count)
+            Array.Resize(ref _selection, Math.Max(count, _selection.Length * 2));
+        var words = BlockSet.WordCount(count);
+        if (_selectionMarks.Length < words)
+            Array.Resize(ref _selectionMarks, Math.Max(words, _selectionMarks.Length * 2));
+        if (mode == BoxSelectMode.Replace)
+            ClearSelection();
+        return true;
+    }
+
+    /// <summary>Puts one block in or takes it out of the selection for a bulk change begun with <see cref="BeginBulkSelect"/>.</summary>
+    public void BulkSelect(int block, BoxSelectMode mode)
+    {
+        if ((uint)block >= (uint)Draft!.Boxes.Length)
+            return;
+        if (mode == BoxSelectMode.Remove)
+            Deselect(block);
+        else
+            AddToSelection(block);
+    }
+
+    /// <summary>Selects every block of the draft. False when blocks cannot be selected now.</summary>
+    public bool SelectAll()
+    {
+        if (!BeginBulkSelect(BoxSelectMode.Replace))
+            return false;
+        for (var i = 0; i < Draft!.Boxes.Length; i++)
+            AddToSelection(i);
+        return true;
+    }
+
+    /// <summary>
+    /// Selects every block of the same type as <paramref name="block"/>, whatever its size, shape or facing: alone, or
+    /// with <paramref name="add"/> kept with what is selected already. False when there is no such block.
+    /// </summary>
+    public bool SelectSameType(int block, bool add = false)
+    {
+        if (!CanInspect || (uint)block >= (uint)Draft!.Boxes.Length)
+            return false;
+        var boxes = Draft.Boxes;
+        var type = boxes[block].Type;
+        BeginBulkSelect(add ? BoxSelectMode.Add : BoxSelectMode.Replace);
+        for (var i = 0; i < boxes.Length; i++)
+            if (boxes[i].Type == type)
+                AddToSelection(i);
+        // The one asked about is the one the details panel shows.
+        if (_selection[_selectionCount - 1] != block)
+            Deselect(block);
+        AddToSelection(block);
+        return true;
+    }
+
+    /// <summary>
     /// The pointer took hold of a selected block and has moved: the selection follows it until it is let go. False,
     /// and nothing carried, when that block is not selected.
     /// </summary>

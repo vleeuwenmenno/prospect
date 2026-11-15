@@ -1218,6 +1218,13 @@ internal sealed class App : IDisposable
                     World.Editor.SetMirror(MirrorAxes.X | MirrorAxes.Z);
                 _screens.SelectEditorTab("Move");
             }
+            else if (view is "edit-box-select" or "edit-select-all" && snapshot is { OwnHull: >= 0 })
+            {
+                // The editor in the select tool, with a scripted box drag over the middle of the ship (the rectangle
+                // shows from 1 s to 2.5 s into the edit, the selection after) or Ctrl+A.
+                World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
+                World.ScriptSelectionForCapture(view == "edit-select-all");
+            }
             else if (view is "edit-save" or "edit-load" or "edit-load-confirm" && snapshot is { OwnHull: >= 0 })
             {
                 // The editor with the Save design question, the saved designs list, or the question before one replaces the draft.
