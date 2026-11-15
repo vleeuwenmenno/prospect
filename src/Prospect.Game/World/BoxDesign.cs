@@ -162,6 +162,24 @@ public sealed class BoxDesign
         catch (JsonException e) { throw new InvalidDataException($"{path}: invalid JSON: {e.Message}", e); }
     }
 
+    /// <summary>
+    /// Reads a design file's bytes, for a file nobody here wrote (a design a player saved): the same reader and the
+    /// same checks as <see cref="Load"/>, with the JSON's nesting kept shallow. Anything wrong with the file,
+    /// whatever shape it takes, comes out as an <see cref="InvalidDataException"/> naming <paramref name="source"/>.
+    /// </summary>
+    public static BoxDesign Read(ReadOnlyMemory<byte> utf8, BlockCatalog catalog, string source)
+    {
+        try
+        {
+            using var json = JsonDocument.Parse(utf8, new JsonDocumentOptions { MaxDepth = 8 });
+            if (json.RootElement.ValueKind != JsonValueKind.Object) throw new InvalidDataException($"{source}: not a design");
+            return Parse(json.RootElement, catalog, source);
+        }
+        catch (JsonException e) { throw new InvalidDataException($"{source}: invalid JSON: {e.Message}", e); }
+        catch (Exception e) when (e is InvalidOperationException or ArgumentException or FormatException or OverflowException or KeyNotFoundException)
+        { throw new InvalidDataException($"{source}: invalid design: {e.Message}", e); }
+    }
+
     internal static BoxDesign Parse(JsonElement root, BlockCatalog catalog, string source)
     {
         var index = -1;

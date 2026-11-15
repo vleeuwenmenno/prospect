@@ -58,6 +58,7 @@ internal sealed partial class ScreenHost
                 var mapWasOpen = _mapOpen;
                 TrackSocial(snapshot);
                 UpdateNewShip(snapshot);
+                UpdateDesigns();
                 TrackTips(snapshot, _app.World);
                 TrackNotices(snapshot, _app.World);
                 PlanTip(_app.World);
@@ -70,7 +71,10 @@ internal sealed partial class ScreenHost
                 if (!_sessionMenuOpen)
                     DrawTopBar(snapshot);
                 if (!_mapOpen && !_sessionMenuOpen)
+                {
                     DrawNewShip(snapshot);
+                    DrawDesigns();
+                }
                 DrawTip();
                 DrawNotices();
 

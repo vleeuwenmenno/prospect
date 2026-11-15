@@ -178,6 +178,13 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   (`MountSelection`), which every edit clears; `EditorGeometry.Pick` with the draft's mounts says when the pointer
   is on one (`DraftHit.Mount`). Warning thresholds and the part tabs are client data in
   `content/visuals/editor.json`; warnings never block Apply.
+  Saved designs are client only (`Designs/DesignStore`, `DesignShelf`; dialogs `DesignDialog`, `DesignPanel`, wiring
+  `Screens.Designs.cs`): files are `BoxDesign` version 5 in `designs/` beside `settings.json`, never trusted (size
+  limit, no links, `BoxDesign.Read`, `BuildDraft.Check` on the worker), names only through `FileStem`, writes temp then
+  rename, disk work on workers, outcomes as notices (`designSaved`, `designSaveFailed`, `designLoaded`). Load replaces
+  the draft through `ShipEditor.ReplaceDraft` / `BuildDraft.Replace`: one undo step, and only a design of the draft's
+  block size. While a dialog is open `WorldInputEnabled` is false and `HandleEditorShortcut` hands Enter and Escape to
+  it. A scripted run has no folder unless `--designs`; check with `--open edit-save|edit-load|edit-load-confirm`.
 - **The New ship dialog and the drone's keys:** `NewShipDialog.HandleKeys` is the one place the editor key is
   read in the shortcut phase (`ScreenHost.HandleEditorShortcut` only calls it): in the escape drone
   (`SessionSnapshot.OwnIsDrone`, from the snapshot header's flag, protocol 42) the plain key opens the dialog and

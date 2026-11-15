@@ -326,7 +326,7 @@ internal sealed partial class ScreenHost
     public void HandleSocialShortcuts(bool active)
     {
         _socialHandled = false;
-        if (!active || _screen != Screen.Session || _controlsHandled || _controlsOpen || _sessionMenuOpen || _mapOpen || _newShip.Open)
+        if (!active || _screen != Screen.Session || _controlsHandled || _controlsOpen || _sessionMenuOpen || _mapOpen || _newShip.Open || _designs.Open)
             return;
 
         var typing = _ui.WantsTextInput;

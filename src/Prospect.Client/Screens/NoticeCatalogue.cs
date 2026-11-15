@@ -50,6 +50,15 @@ internal static class NoticeKinds
     /// <summary>The built ship was gone when control was to be taken.</summary>
     public const string FollowMissing = "followMissing";
 
+    /// <summary>A draft was saved to the designs folder; posted with the design's name as its text.</summary>
+    public const string DesignSaved = "designSaved";
+
+    /// <summary>A draft could not be saved; posted with the reason as its text.</summary>
+    public const string DesignSaveFailed = "designSaveFailed";
+
+    /// <summary>A saved design replaced the draft; the ship changes only on Apply.</summary>
+    public const string DesignLoaded = "designLoaded";
+
     /// <summary>The request to edit is with the server; withdrawn when it answers.</summary>
     public const string EditAsking = "editAsking";
 
@@ -66,7 +75,7 @@ internal static class NoticeKinds
     public const string FuelEmptyBipropellant = "fuelEmptyBipropellant";
 
     /// <summary>Every kind, for validation.</summary>
-    public static readonly string[] All = [GasResults, AsteroidResults, LocatorResults, ModuleNoPower, ModuleCancelled, SectorCharted, ShipBuilt, ShipRebuilt, ShipFlown, EditRefused, FollowOutOfSector, FollowMissing, EditAsking, FuelLowNitrogen, FuelLowHydrazine, FuelLowBipropellant, FuelEmptyNitrogen, FuelEmptyHydrazine, FuelEmptyBipropellant];
+    public static readonly string[] All = [GasResults, AsteroidResults, LocatorResults, ModuleNoPower, ModuleCancelled, SectorCharted, ShipBuilt, ShipRebuilt, ShipFlown, EditRefused, DesignSaved, DesignSaveFailed, DesignLoaded, FollowOutOfSector, FollowMissing, EditAsking, FuelLowNitrogen, FuelLowHydrazine, FuelLowBipropellant, FuelEmptyNitrogen, FuelEmptyHydrazine, FuelEmptyBipropellant];
 }
 
 /// <summary>What a click on a notice's body does. Named in the file, like a tip's trigger; an unknown name is refused.</summary>

@@ -318,6 +318,54 @@ public sealed class BuildDraft
         return check == DraftEdit.Done && MixesDrives(boxes) ? DraftEdit.MixedDrives : check;
     }
 
+    /// <summary>
+    /// Replaces every block and mounted part of the draft by <paramref name="boxes"/> and <paramref name="mounts"/>
+    /// (whose <see cref="DesignMount.Parent"/> is an index into <paramref name="boxes"/>), as one step to undo and
+    /// redo. The name, class, block size and colour stay the draft's: the ship keeps what it is. All of it or none:
+    /// the new blocks are checked against the content's limits and each other, and every part against its face.
+    /// </summary>
+    public DraftEdit Replace(ReadOnlySpan<DesignBox> boxes, ReadOnlySpan<DesignMount> mounts)
+    {
+        if (boxes.IsEmpty) return DraftEdit.Unchanged;
+        foreach (ref readonly var box in boxes)
+        {
+            ArgumentNullException.ThrowIfNull(box.Type, nameof(boxes));
+            if (box.Type.Mount is not null) return DraftEdit.WrongKind;
+        }
+
+        if (!CountFits(boxes.Length)) return DraftEdit.TooManyBlocks;
+        if (mounts.Length > _content.Blocks.Limits.MaxMounts) return DraftEdit.TooManyMounts;
+        if (BoxDesign.MixedDrive(boxes, out _) >= 0) return DraftEdit.MixedDrives;
+
+        // Everything now in the draft goes, so nothing of it is compared against.
+        var words = BlockSet.WordCount(_boxes.Count);
+        if (_marks.Length < words) _marks = new ulong[words];
+        Array.Fill(_marks, ulong.MaxValue);
+        var check = CheckGroup(boxes, default, default, _marks);
+        if (check != DraftEdit.Done) return check;
+        for (var i = 0; i < mounts.Length; i++)
+        {
+            if ((uint)mounts[i].Parent >= (uint)boxes.Length || mounts[i].Type is null) return DraftEdit.NoSuchBlock;
+            var fit = FaceMounts.Check(boxes, mounts[..i], mounts[i]);
+            if (fit != DraftEdit.Done) return fit;
+        }
+
+        for (var i = _mounts.Count - 1; i >= 0; i--) Do(Step.Part(i, _mounts[i], default));
+        for (var i = _boxes.Count - 1; i >= 0; i--) Do(Step.Block(i, _boxes[i], default));
+        for (var i = 0; i < boxes.Length; i++) Do(Step.Block(i, default, boxes[i]));
+        for (var i = 0; i < mounts.Length; i++) Do(Step.Part(i, default, mounts[i]));
+        Finish(settle: false);
+        return DraftEdit.Done;
+    }
+
+    /// <summary>
+    /// Runs on a design read from a file the checks <see cref="Export"/> runs on a draft, which are the ones a server
+    /// runs on a received design, with the draft's own name, class, block size and colour taken from the design.
+    /// Costs about as much as receiving a design: call it on a worker.
+    /// </summary>
+    public static DraftExport Check(BoxDesign design, GameContent content) =>
+        Export(design.Name, design.Class, design.BlockSize, design.Color, design.Blocks.ToArray(), design.Mounts.ToArray(), content);
+
     /// <summary>Removes a block and what is mounted on it; later blocks move down one index.</summary>
     public DraftEdit Delete(int block) => Delete(new ReadOnlySpan<int>(in block), default);
 

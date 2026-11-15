@@ -1375,6 +1375,22 @@ internal sealed class ShipEditor(JobSystem jobs)
         Record(result);
     }
 
+    /// <summary>
+    /// Replaces the whole draft by the blocks and parts of a loaded design, as one step to undo (and redo). The ship
+    /// is not touched until Apply; the selection is cleared, since every block is another one now.
+    /// </summary>
+    public DraftEdit ReplaceDraft(BoxDesign design)
+    {
+        if (!CanEdit)
+            return DraftEdit.Unchanged;
+        CancelCarry();
+        var result = Draft!.Replace(design.Blocks, design.Mounts);
+        if (result == DraftEdit.Done)
+            ClearSelection();
+        Record(result);
+        return result;
+    }
+
     /// <summary>Takes back the latest edit. The selection is cleared: the blocks it named may be other blocks now.</summary>
     public void Undo()
     {

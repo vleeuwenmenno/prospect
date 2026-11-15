@@ -5,6 +5,7 @@ using Brutal.Numerics;
 using Brutal.StbApi;
 using Brutal.VulkanApi;
 using Brutal.VulkanApi.Vma;
+using Prospect.Client.Designs;
 using Prospect.Client.Diagnostics;
 using Prospect.Client.Input;
 using Prospect.Client.Platform;
@@ -42,6 +43,12 @@ internal sealed class AppOptions
     /// benchmark) without one saves nothing and reads no saved world, so it never touches the player's saves.
     /// </summary>
     public string? WorldsRoot { get; set; }
+
+    /// <summary>
+    /// The folder of saved ship designs (<c>--designs</c>), or null for the player's own. A scripted run without one
+    /// has no saved designs: Save and Load in the editor are off, so a capture never touches the player's folder.
+    /// </summary>
+    public string? DesignsRoot { get; set; }
 
     /// <summary>What goes wrong with a world's final save (<c>--save-fault</c>); captures with their own <see cref="WorldsRoot"/> only.</summary>
     public StoreFault SaveFault { get; set; }
@@ -339,6 +346,11 @@ internal sealed class App : IDisposable
         Worlds = new WorldShelf(worldsRoot is null ? null : new WorldLibrary(worldsRoot), SaveCompatibility.Of(Content));
         Worlds.Refresh();
 
+        // Saved designs sit beside the settings, in the user's config folder. A scripted run has none unless it is
+        // given a folder of its own, for the same reason as the worlds.
+        var designsRoot = options.DesignsRoot ?? (scriptedRun ? null : AppPaths.UserConfig("designs"));
+        Designs = new DesignShelf(designsRoot is null ? null : new DesignStore(designsRoot, Content));
+
         // Nothing is fetched until a screen asks: making the browser opens no connection.
         Listing = ListingConfig.Resolve(options.Listing);
         AccountAuthority = options.AccountAuthority is null ? Listing : ListingConfig.Resolve(options.AccountAuthority);
@@ -528,6 +540,9 @@ internal sealed class App : IDisposable
 
     /// <summary>The saved worlds, read off the frame, for Continue and Load World.</summary>
     public WorldShelf Worlds { get; }
+
+    /// <summary>The player's saved ship designs, read and written off the frame, for the editor's Save and Load.</summary>
+    public DesignShelf Designs { get; }
 
     /// <summary>True when saved worlds are on in this run: a private game is then a saved world.</summary>
     public bool SavesWorlds => Worlds.Library is not null;
@@ -1179,6 +1194,12 @@ internal sealed class App : IDisposable
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
                 World.HoldGhostForCapture(view == "edit-mount");
                 _screens.SelectEditorTab("Move");
+            }
+            else if (view is "edit-save" or "edit-load" or "edit-load-confirm" && snapshot is { OwnHull: >= 0 })
+            {
+                // The editor with the Save design question, the saved designs list, or the question before one replaces the draft.
+                World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
+                _screens.PreviewDesigns(view);
             }
             else if (view == "modules" && snapshot is { OwnHull: >= 0 })
             {

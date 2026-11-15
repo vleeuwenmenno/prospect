@@ -552,7 +552,14 @@ Ship editor (`B` in a ship, `Ctrl`+`B` in the drone, or the New ship dialog's `E
 | Focus the camera on the selection, or the whole ship | `F` or `Space` (the Follow key) |
 | Orbit / pan / zoom the camera | Right-drag / middle-drag / mouse wheel |
 | Undo / redo | `Ctrl` + `Z` / `Ctrl` + `Y` or `Ctrl` + `Shift` + `Z` |
+| Save the draft as a design on this computer / load a saved one into it | The bar's **Save...** and **Load...** buttons (no key). Save asks for a name and asks again before it overwrites. Load lists your designs (name, blocks, block size), greys out the ones that are unreadable or built on another block size than your ship's, and asks before it replaces the draft (`Ctrl` + `Z` brings the old draft back). The ship changes only on Apply, which the server checks as ever |
 | Put back a turn, drop what is carried, then cancel the edit | `Esc`; `B` or Cancel ends the edit at once |
+
+Saved designs are version 5 design files (the format of `content/ships`) in a `designs` folder beside `settings.json`
+in the user config folder (`$XDG_CONFIG_HOME/prospect/designs`, `%APPDATA%/prospect/designs`). They stay on your
+computer: the server and saved worlds never see them. A captured or benchmarked run has no folder unless given
+`--designs <folder>`. Not there yet: sharing designs between players, deleting or renaming one in the game (delete the
+file), loading one built on another block size.
 
 Galaxy map:
 
