@@ -83,13 +83,18 @@
   block and shows no plume. A wedge-shaped part is always a plain block.
 - **Models** (`PropulsionModels`): low poly, built on a worker, never in a frame.
   - A pure function of the part's box (`PartBox`), its facing and the cell size. A thin face mount works the same way.
-  - A square mount block covers the whole mounting face and the box's sides: neighbours meet it flush.
-  - Engines and hot thrusters: an octagonal housing with panel seams, corner pipes and a bevelled front, then a collar
-    with four gusset brackets, a throat ring and a faceted bell (10 to 12 sides, 3 to 4 rings).
-  - Cold gas thrusters: a bevelled RCS block with small faceted nozzles, two per cell a side.
-  - The face is split into nozzles: an engine or hot thruster into squares of its shorter side (a 2 by 1 face has two
-    bells). A nozzle's exit follows its share of the face; its length follows its exit, capped by a share of the
-    depth. A deeper box grows its body, never its bell.
+  - Engines: a square mount block covers the whole mounting face and the box's sides, so neighbours meet it flush;
+    then an octagonal housing with panel seams, corner pipes and a bevelled front, a collar with four gusset
+    brackets, a throat ring and a faceted bell (10 to 12 sides, 3 to 4 rings).
+  - The engine's face is split into nozzles, squares of its shorter side (a 2 by 1 face has two bells). A nozzle's
+    exit follows its share of the face; its length follows its exit, capped by a share of the depth. A deeper box
+    grows its body, never its bell.
+  - Face mounts are pods (`pod` in the model's entry), inside their thin box:
+    - A faceted base plate over the whole footprint, corners cut, top edge bevelled, bolted at its four corners.
+    - A small octagonal housing on the plate, with a valve box at its side.
+    - One to four nozzles on the housing's front: `perCell` per cell of the footprint, at most two a side.
+    - Cold gas: a quad of small nozzles. Microthruster: one. Hot thruster: one small engine (seam, pipes, collar with
+      brackets, bell).
   - Every facet has vertices of its own: flat shading. Bare metal rides in the length of the normal (`mesh.vert`).
   - Housings are bare metal of mid grey (`housingShade` about 0.3), nozzles darker, throats near black. Metal shines
     with its shade, so a dark facet never flashes white.

@@ -19,9 +19,9 @@ out of collisions. A part with no fuel of its
 kind gives no thrust. Fuel is spent by the shared flight code, predicted by the client and saved with the world.
 Nothing refuels a ship yet: only a first spawn starts with full tanks. An edit keeps the fuel the ship had, up to the
 new design's room; a repair restores blocks, not fuel; a ship built new from the drone starts empty. Engines and both
-thruster kinds have low-poly models of their own that fill their block or mount flush and fit any size and facing, in
-flight and in the ship editor (placed parts and mounts, and the ghost). They show what they fire: an engine ignites with a few sparks and
-opens a wide, soft, blue-violet vacuum plume, a hot thruster a small one with an orange core, a cold gas thruster a
+thruster kinds have low-poly models of their own: an engine fills its block flush, a thruster is a pod on a faceted plate
+(a cold gas pod has four nozzles), in flight and in the ship editor (placed parts and mounts, and the ghost). They show what they fire: an engine ignites with a few sparks and
+opens a wide, soft, blue-violet vacuum plume, a hot thruster a small one with an orange core, a cold gas pod a
 fast jet of streaming vapour that bursts as its valve opens and clears when it closes; boost makes plumes longer and
 brighter without burning out to white, for every hull in view. The pilot console shows each fuel's amount and flow.
 Not there: thruster torque, fuel transfer, refineries and stations. The figures are a first balance. See

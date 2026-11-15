@@ -81,18 +81,21 @@ public sealed class PropulsionVisualTests
                 Assert.True(Vector3.Dot(cross, new Vector3(a.Normal.X, a.Normal.Y, a.Normal.Z)) > 0, $"{type} {face} triangle {i / 3}");
             }
 
-            // One nozzle, at the outer end of the box, pointing out of the face. It is lit and lost with the block
-            // it sits on, so that is the block it names.
-            var nozzle = Assert.Single(nozzles);
-            Assert.Equal(face, nozzle.Facing);
-            Assert.Equal(1, nozzle.Block);
-            Assert.Equal(Content.Blocks.Get(type).Fuel, nozzle.Fuel);
-            Assert.Equal(design.MountOffsets[0][axis] + Facings.Sign(face) * half[axis], nozzle.Exit[axis], 4);
-            Assert.True(nozzle.ExitRadius > 0 && nozzle.Depth > 0);
+            // Its nozzles (a quad for a cold gas pod, one for the others) at the outer end of the box, pointing out
+            // of the face. They are lit and lost with the block it sits on, so that is the block they name.
+            Assert.Equal(type == "coldGasThruster" ? 4 : 1, nozzles.Count);
+            foreach (var nozzle in nozzles)
+            {
+                Assert.Equal(face, nozzle.Facing);
+                Assert.Equal(1, nozzle.Block);
+                Assert.Equal(Content.Blocks.Get(type).Fuel, nozzle.Fuel);
+                Assert.Equal(design.MountOffsets[0][axis] + Facings.Sign(face) * half[axis], nozzle.Exit[axis], 4);
+                Assert.True(nozzle.ExitRadius > 0 && nozzle.Depth > 0);
+            }
 
-            // The hull's mesh has it, after the blocks.
+            // The hull's mesh has them, after the blocks.
             var mesh = MeshBuilder.Hull(design, Look);
-            Assert.Equal(nozzle with { Index = 0 }, Assert.Single(mesh.Nozzles) with { Index = 0 });
+            Assert.Equal(nozzles.Select(n => n with { Index = 0 }), mesh.Nozzles.Select(n => n with { Index = 0 }));
             Assert.True(mesh.BoundingRadius >= (design.MountOffsets[0] + Facings.Vector(face) * half[axis]).Length() - 1e-4f);
 
             // A hull that has lost the block has lost the thruster: its damaged mesh is the core alone.
@@ -178,16 +181,65 @@ public sealed class PropulsionVisualTests
     }
 
     [Theory]
+    [InlineData("hotThruster", 1)]
+    [InlineData("coldGasThruster", 4)]
+    [InlineData("microthruster", 1)]
+    public void AMountIsAPodOnAFacetedPlateThatSitsOnItsFace(string type, int nozzleCount)
+    {
+        var model = Look.Models[type];
+        var pod = Assert.IsType<PodLook>(model.Pod);
+        var fuel = Content.Blocks.Get(type).Fuel;
+        foreach (var facing in Directions)
+        {
+            var vertices = new List<MeshVertex>();
+            var indices = new List<uint>();
+            var nozzles = new List<ThrustNozzle>();
+            var box = new PartBox(new Vector3(3, -2, 1), Turned(new Vector3(0.2f, 0.2f, 0.1f), facing), facing, 1f);
+            PropulsionModels.Build(model, box, fuel, 0, true, vertices, indices, nozzles);
+            var axis = Facings.Axis(facing);
+            var u = (axis + 1) % 3;
+            var v = (axis + 2) % 3;
+            var back = box.Center[axis] - Facings.Sign(facing) * box.Half[axis];
+            var lo = new Vector3(float.MaxValue);
+            var hi = new Vector3(float.MinValue);
+            var backArea = 0f;
+            for (var i = 0; i < indices.Count; i += 3)
+            {
+                var a = P(vertices[(int)indices[i]]);
+                var b = P(vertices[(int)indices[i + 1]]);
+                var c = P(vertices[(int)indices[i + 2]]);
+                lo = Vector3.Min(lo, Vector3.Min(a, Vector3.Min(b, c)));
+                hi = Vector3.Max(hi, Vector3.Max(a, Vector3.Max(b, c)));
+                if (MathF.Abs(a[axis] - back) < 1e-4f && MathF.Abs(b[axis] - back) < 1e-4f && MathF.Abs(c[axis] - back) < 1e-4f)
+                    backArea += 0.5f * Vector3.Cross(b - a, c - a).Length();
+            }
+
+            // The plate spans the footprint edge to edge and lies on the face; only its corners are cut.
+            foreach (var k in new[] { u, v })
+            {
+                Assert.Equal(box.Center[k] - box.Half[k], lo[k], 4);
+                Assert.Equal(box.Center[k] + box.Half[k], hi[k], 4);
+            }
+            var cut = pod.PlateChamfer * MathF.Min(box.Half[u], box.Half[v]);
+            Assert.Equal(4f * box.Half[u] * box.Half[v] - 2f * cut * cut, backArea, 4);
+
+            // Its nozzles end on the box's outer face, side by side on the housing, all pointing out.
+            Assert.Equal(nozzleCount, nozzles.Count);
+            var front = box.Center[axis] + Facings.Sign(facing) * box.Half[axis];
+            Assert.All(nozzles, n => Assert.Equal(front, n.Exit[axis], 4));
+            Assert.All(nozzles, n => Assert.Equal(facing, n.Facing));
+            Assert.Equal(nozzleCount, nozzles.Select(n => (MathF.Round(n.Exit[u], 4), MathF.Round(n.Exit[v], 4))).Distinct().Count());
+        }
+    }
+
+    [Theory]
     [InlineData("engine")]
-    [InlineData("hotThruster")]
-    [InlineData("coldGasThruster")]
     [InlineData("microengine")]
-    [InlineData("microthruster")]
     public void AModelCoversItsWholeMountingFaceSoNeighboursMeetItFlush(string type)
     {
         var model = Look.Models[type];
         var fuel = Content.Blocks.Get(type).Fuel;
-        // A part in its cell, a large engine, and a thin part clipped onto a face (0.2 cell deep).
+        // A part in its cell, a large engine, a thin one and a wide one.
         foreach (var half in new[] { new Vector3(0.5f), new Vector3(2, 2, 3), new Vector3(0.5f, 0.5f, 0.1f), new Vector3(1, 0.5f, 0.5f) })
         {
             foreach (var facing in Directions)
@@ -302,17 +354,17 @@ public sealed class PropulsionVisualTests
 
         Frame(1, firing);
         Frame(2, firing);
-        Assert.Equal(4, effects.Count);
+        Assert.Equal(16, effects.Count);
         Assert.True(output[0].Flow.X < 0);
         var steady = output[0].CoreBright.W;
 
         // The first frame the valve is seen closed, the gas is released; a little later it is still there, fading;
         // then it is gone.
         Frame(2.05, idle);
-        Assert.Equal(4, effects.Count);
+        Assert.Equal(16, effects.Count);
         Assert.Equal(0f, output[0].Flow.X, 3);
         Frame(2.05 + cold.FadeSeconds * 0.5, idle);
-        Assert.Equal(4, effects.Count);
+        Assert.Equal(16, effects.Count);
         Assert.Equal(cold.FadeSeconds * 0.5f, output[0].Flow.X, 3);
         Assert.True(output[0].CoreBright.W < steady);
         Frame(2.05 + cold.FadeSeconds * 1.01, idle);
@@ -341,9 +393,9 @@ public sealed class PropulsionVisualTests
     {
         var pod = Content.Designs.First(d => d.Name == "Command Pod");
         var mesh = MeshBuilder.Hull(pod, Look);
-        // One engine and, each way but back, four mounted cold gas thrusters of one nozzle each.
-        Assert.Equal(1 + 5 * 4, mesh.Nozzles.Length);
-        Assert.Equal(pod.Mounts.Length, mesh.Nozzles.Count(nozzle => nozzle.Fuel == FuelKind.Nitrogen));
+        // One engine and, each way but back, four mounted cold gas pods of four nozzles each.
+        Assert.Equal(1 + 5 * 4 * 4, mesh.Nozzles.Length);
+        Assert.Equal(pod.Mounts.Length * 4, mesh.Nozzles.Count(nozzle => nozzle.Fuel == FuelKind.Nitrogen));
         Assert.Contains(mesh.Vertices, v => new Vector3(v.Normal.X, v.Normal.Y, v.Normal.Z).Length() > 1.5f);
         Assert.All(mesh.Indices, i => Assert.InRange((int)i, 0, mesh.Vertices.Count - 1));
     }
@@ -440,9 +492,9 @@ public sealed class PropulsionVisualTests
         var hull = new HullView { Id = 3, Thrust = new ThrustState { X = 127, Flags = 1 }, Blocks = new[] { ulong.MaxValue } };
         Begin(effects, 1);
         effects.Add(effects.Observe(hull), hull, nozzles, new Vector3(0, 0, -30), Quaternion.Identity, 1, output);
-        // Pushed right, the left-facing cluster puffs: four nozzles, pointing left.
-        Assert.Equal(4, effects.End());
-        for (var i = 0; i < 4; i++)
+        // Pushed right, the left-facing cluster puffs: four pods of four nozzles, pointing left.
+        Assert.Equal(16, effects.End());
+        for (var i = 0; i < 16; i++)
         {
             Assert.Equal(1f, output[i].EdgeKind.W);
             Assert.Equal(-1f, output[i].AxisLength.X);

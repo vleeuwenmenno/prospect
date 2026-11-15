@@ -75,6 +75,12 @@ internal sealed class PropulsionModelLook
     public float ThroatShade { get; init; }
     public float DetailShade { get; init; }
 
+    /// <summary>
+    /// For a part that mounts on a face: built as a pod (<see cref="PodLook"/>) on a base plate instead of a block
+    /// that fills its box. Null for engines, which fill their cells.
+    /// </summary>
+    public PodLook? Pod { get; init; }
+
     /// <summary>The index of <see cref="Plume"/> in <see cref="PropulsionLook.PlumeOrder"/>, set when the look loads.</summary>
     internal int PlumeSlot { get; set; } = -1;
 
@@ -82,7 +88,7 @@ internal sealed class PropulsionModelLook
     {
         static bool Share(float v) => v > 0 && v <= 1;
         static bool Shade(float v) => v is >= 0 and < 1;
-        if (!(PerCell is >= 0 and <= 4) || !(MountDepth is >= 0 and <= 1) || !(HousingChamfer is >= 0 and <= 0.45f)
+        if (!(PerCell is >= 0 and <= 8) || !(MountDepth is >= 0 and <= 1) || !(HousingChamfer is >= 0 and <= 0.45f)
             || !(Bevel is >= 0 and <= 0.3f) || Seams is < 0 or > 3 || Pipes is < 0 or > 4 || Brackets is not (0 or 4)
             || !Share(ExitShare) || !(ThroatShare > 0 && ThroatShare < 1) || !(NozzleLength is > 0 and <= 8)
             || !Share(MaxNozzleDepth) || MaxNozzleDepth > 0.9f || !(BellCurve is >= 1 and <= 6)
@@ -90,9 +96,43 @@ internal sealed class PropulsionModelLook
             // The throat ring and the brackets reach 1.6 collar radii, which must stay inside the nozzle's square.
             || ThroatShare * CollarRadius * 1.6f > 1f
             || Sides is < 6 or > 24 || Rings is < 1 or > 12
-            || !Shade(HousingShade) || !Shade(NozzleShade) || !Shade(ThroatShade) || !Shade(DetailShade))
+            || !Shade(HousingShade) || !Shade(NozzleShade) || !Shade(ThroatShade) || !Shade(DetailShade)
+            || (Pod is not null && !Pod.Valid))
             throw new InvalidDataException($"{path}: model {id} is out of range");
     }
+}
+
+/// <summary>
+/// The pod a face-mounted thruster is built as, from <c>content/visuals/propulsion.json</c>: a faceted base plate on
+/// the face, bolted down at its corners, a small housing standing on it with a valve box at its side, and one to four
+/// nozzles on the housing's front (<see cref="PropulsionModelLook.PerCell"/> per cell of the footprint, at most two a
+/// side). Every length is a share of the mount's box, so a pod fits any footprint.
+/// </summary>
+internal sealed class PodLook
+{
+    /// <summary>The plate's thickness as a share of the box's depth.</summary>
+    public float PlateDepth { get; init; }
+
+    /// <summary>How far the plate's corners are cut, as a share of the footprint's smaller half side.</summary>
+    public float PlateChamfer { get; init; }
+
+    /// <summary>The bevel round the plate's top edge, as a share of its thickness.</summary>
+    public float PlateBevel { get; init; }
+
+    /// <summary>The housing's width as a share of the footprint's.</summary>
+    public float BodyShare { get; init; }
+
+    /// <summary>Bolts at the plate's corners: 0 or 4.</summary>
+    public int Bolts { get; init; }
+
+    /// <summary>The valve box beside the housing, as a share of the gap between housing and plate edge; 0 for none.</summary>
+    public float Valve { get; init; }
+
+    internal bool Valid =>
+        PlateDepth is >= 0.05f and <= 0.5f && PlateChamfer is >= 0 and <= 0.4f && PlateBevel is >= 0 and <= 0.8f
+        && BodyShare is >= 0.4f and <= 0.9f && Bolts is 0 or 4 && Valve is >= 0 and <= 1
+        // Corner bolts sit between the housing and the plate's cut corner, so the gap must clear the cut.
+        && (Bolts == 0 || 1f - BodyShare >= PlateChamfer);
 }
 
 /// <summary>How one kind of plume looks and moves, from <c>content/visuals/propulsion.json</c>; lengths are in exit radii.</summary>
@@ -327,6 +367,11 @@ internal static class PropulsionModels
         var depth = 2f * half[axis];
         var cells = box.CellSize > 0 ? box.CellSize : 1f;
         var small = MathF.Min(hu, hv);
+        if (model.Pod is { } pod)
+        {
+            BuildPod(ref g, model, pod, box, fuel, block, back, nozzles);
+            return;
+        }
 
         // The face is split into nozzles: by cells for a cluster, otherwise into squares of the shorter side.
         int nu, nv;
@@ -394,6 +439,112 @@ internal static class PropulsionModels
                     AddCollar(ref g, model, at, bodyEnd, nozzleStart, collarRadius, throat, metal, detail);
                 AddNozzle(ref g, model, at, nozzleStart, depth, throat, exit, wall, collarRadius, collar > 1e-5f, metal, dark, detail);
                 nozzles?.Add(new ThrustNozzle(block, fuel, facing, g.F.At(at.X, at.Y, depth), exit, nozzleLength, model.PlumeSlot, nozzles.Count));
+            }
+        }
+    }
+
+    // A pod on a face: a faceted plate covering the footprint, corner bolts, a small housing with a valve box, and its
+    // nozzles. Its back is the face it sits on, so the plate's underside is left out unless asked for.
+    private static void BuildPod(ref Geometry g, PropulsionModelLook model, PodLook pod, in PartBox box, FuelKind fuel, int block, bool back, List<ThrustNozzle>? nozzles)
+    {
+        var axis = Facings.Axis(box.Facing);
+        var hu = box.Half[(axis + 1) % 3];
+        var hv = box.Half[(axis + 2) % 3];
+        var depth = 2f * box.Half[axis];
+        var cells = box.CellSize > 0 ? box.CellSize : 1f;
+        var small = MathF.Min(hu, hv);
+        var plating = Tag(model.HousingShade);
+        var plateTag = Tag(model.HousingShade * 0.8f);
+        var metal = Tag(model.NozzleShade);
+        var dark = Tag(model.ThroatShade);
+        var detail = Tag(model.DetailShade);
+
+        // The plate: an octagon over the whole footprint, its top edge bevelled.
+        var plateTop = pod.PlateDepth * depth;
+        var cut = pod.PlateChamfer * small;
+        var bevel = MathF.Min(pod.PlateBevel * plateTop, 0.4f * cut + 0.25f * plateTop);
+        Span<Vector2> plate = stackalloc Vector2[8];
+        Span<Vector2> inset = stackalloc Vector2[8];
+        Octagon(plate, hu, hv, MathF.Max(cut, 1e-4f));
+        Octagon(inset, hu - bevel, hv - bevel, MathF.Max(cut - bevel * (2f - MathF.Sqrt(2f)), 1e-4f));
+        if (back)
+            g.Cap(plate, Vector2.Zero, 0f, -1f, plateTag);
+        g.Loft(plate, 0f, plate, plateTop - bevel, Vector2.Zero, plateTag, 1f);
+        if (bevel > 0)
+            g.Loft(plate, plateTop - bevel, inset, plateTop, Vector2.Zero, plateTag, 1f);
+        g.Cap(inset, Vector2.Zero, plateTop, 1f, plateTag);
+
+        // The housing's front carries the nozzles: one to two a side, by the footprint's cells, else one square each.
+        var bu = hu * pod.BodyShare;
+        var bv = hv * pod.BodyShare;
+        var bodySmall = MathF.Min(bu, bv);
+        int nu, nv;
+        if (model.PerCell > 0)
+        {
+            nu = Math.Clamp((int)MathF.Round(2f * hu / cells * model.PerCell), 1, 2);
+            nv = Math.Clamp((int)MathF.Round(2f * hv / cells * model.PerCell), 1, 2);
+        }
+        else
+        {
+            nu = Math.Clamp((int)MathF.Round(bu / bodySmall), 1, 2);
+            nv = Math.Clamp((int)MathF.Round(bv / bodySmall), 1, 2);
+        }
+        var pitchU = 2f * bu / nu;
+        var pitchV = 2f * bv / nv;
+        var exit = 0.5f * MathF.Min(pitchU, pitchV) * model.ExitShare / (1f + model.Lip);
+        var nozzleLength = MathF.Min(model.NozzleLength * exit, model.MaxNozzleDepth * depth);
+        var collar = MathF.Min(model.CollarLength * exit, 0.12f * depth);
+        // The housing keeps at least a sliver of height above the plate; the nozzle gives way first, then the collar.
+        var bodyEnd = MathF.Max(depth - nozzleLength - collar, plateTop + 0.12f * depth);
+        collar = MathF.Max(MathF.Min(collar, depth - nozzleLength - bodyEnd), 0f);
+        var nozzleStart = bodyEnd + collar;
+        nozzleLength = depth - nozzleStart;
+        var front = MathF.Min(model.Bevel * bodySmall, 0.45f * (bodyEnd - plateTop));
+        AddHousing(ref g, model, bu, bv, bodySmall, plateTop, bodyEnd, front, cells, plating, detail);
+
+        // Bolts in the plate's corners, between the housing and the cut.
+        var gap = hu - bu;
+        var gapV = hv - bv;
+        Span<Vector2> ring = stackalloc Vector2[6];
+        if (pod.Bolts == 4)
+        {
+            var radius = 0.22f * MathF.Min(gap, gapV);
+            var top = plateTop + MathF.Min(0.5f * plateTop, 0.3f * (bodyEnd - plateTop));
+            for (var k = 0; k < 4; k++)
+            {
+                var centre = new Vector2((k is 0 or 3 ? 1f : -1f) * (hu - 0.5f * gap - 0.25f * cut), (k is 0 or 1 ? 1f : -1f) * (hv - 0.5f * gapV - 0.25f * cut));
+                Polygon(ring, centre, radius, MathF.PI / 6f);
+                g.Loft(ring, plateTop, ring, top, centre, detail, 1f);
+                g.Cap(ring, centre, top, 1f, detail);
+            }
+        }
+
+        // The valve box: a small block against the housing's side, where the feed comes in.
+        if (pod.Valve > 0)
+        {
+            Span<Vector2> valve = stackalloc Vector2[4];
+            var reach = pod.Valve * gap;
+            var centre = new Vector2(bu + 0.5f * reach, 0f);
+            Rectangle(valve, 0.5f * reach, 0.3f * bv);
+            for (var k = 0; k < 4; k++)
+                valve[k] += centre;
+            var top = plateTop + 0.6f * (bodyEnd - plateTop);
+            g.Loft(valve, plateTop, valve, top, centre, detail, 1f);
+            g.Cap(valve, centre, top, 1f, detail);
+        }
+
+        var throat = exit * model.ThroatShare;
+        var wall = exit * model.Lip;
+        var collarRadius = throat * model.CollarRadius;
+        for (var i = 0; i < nu; i++)
+        {
+            for (var j = 0; j < nv; j++)
+            {
+                var at = new Vector2((i + 0.5f) * pitchU - bu, (j + 0.5f) * pitchV - bv);
+                if (collar > 1e-5f)
+                    AddCollar(ref g, model, at, bodyEnd, nozzleStart, collarRadius, throat, metal, detail);
+                AddNozzle(ref g, model, at, nozzleStart, depth, throat, exit, wall, collarRadius, collar > 1e-5f, metal, dark, detail);
+                nozzles?.Add(new ThrustNozzle(block, fuel, box.Facing, g.F.At(at.X, at.Y, depth), exit, nozzleLength, model.PlumeSlot, nozzles.Count));
             }
         }
     }

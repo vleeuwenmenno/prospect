@@ -3408,14 +3408,22 @@ internal sealed class WorldView
                 break;
             }
 
+            // The highest top face with room, so no other block hides the ghost from the camera above.
+            var best = -1;
+            var bestTop = float.MinValue;
             for (var i = 0; i < boxes.Length; i++)
             {
                 var top = EditorGeometry.Middle(boxes[i]) + new Vector3(0.22f, boxes[i].Size.Y * 0.5f, 0.2f);
                 Editor.SetHover(new DraftHit(i, 2, boxes[i].At, 0f, top));
-                if (Editor.HasMountGhost && Editor.GhostCheck == DraftEdit.Done)
-                    break;
+                if (Editor.HasMountGhost && Editor.GhostCheck == DraftEdit.Done && top.Y > bestTop)
+                {
+                    best = i;
+                    bestTop = top.Y;
+                }
             }
 
+            if (best >= 0)
+                Editor.SetHover(new DraftHit(best, 2, boxes[best].At, 0f, EditorGeometry.Middle(boxes[best]) + new Vector3(0.22f, boxes[best].Size.Y * 0.5f, 0.2f)));
             return;
         }
 
