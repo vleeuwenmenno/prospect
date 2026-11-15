@@ -370,9 +370,12 @@ public sealed class PropulsionVisualTests
         Frame(2.05 + cold.FadeSeconds * 1.01, idle);
         Assert.Equal(0, effects.Count);
 
-        // Opening again bursts denser than the steady jet.
+        // Opening again bursts denser than the steady jet: the burst rides to the shader, and the light follows.
         Frame(3, firing);
-        Assert.True(output[0].CoreBright.W > steady * 1.5f);
+        Assert.Equal(cold.Burst, output[0].Shape.Y, 3);
+        Assert.True(output[0].CoreBright.W > steady * 1.3f);
+        Frame(3 + cold.BurstSeconds * 6, firing);
+        Assert.True(output[0].Shape.Y < 0.01f);
     }
 
     private static Vector3 P(MeshVertex v) => new(v.Position.X, v.Position.Y, v.Position.Z);

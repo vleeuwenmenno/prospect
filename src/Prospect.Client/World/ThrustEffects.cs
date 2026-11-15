@@ -192,12 +192,14 @@ internal sealed class ThrustEffects
             // The cap on brightness: boost raises it a little, never past what the compression in the shader holds.
             var brightness = look.Brightness * (0.55f + 0.45f * throttle) * (boost ? _look.BoostBrightness : 1f);
             var spread = look.Spread;
+            var burst = 0f;
             if (puff)
             {
-                // A valve opening throws a denser, wider burst that settles to a steady jet.
-                var burst = look.Burst * MathF.Exp(-age / look.BurstSeconds);
-                brightness *= 1f + burst;
-                spread *= 1f + 0.25f * burst;
+                // A valve opening throws a denser, slightly wider burst that settles to a steady jet; the shader
+                // thickens the gas with it (it rides where a flame's shock node would) and the light follows.
+                burst = look.Burst * MathF.Exp(-age / look.BurstSeconds);
+                brightness *= 1f + 0.35f * burst;
+                spread *= 1f + 0.15f * burst;
             }
             else
             {
@@ -236,7 +238,7 @@ internal sealed class ThrustEffects
                 CoreBright = new float4(look.Core[0], look.Core[1], look.Core[2], brightness),
                 EdgeKind = new float4(look.Edge[0], look.Edge[1], look.Edge[2], puff ? 1f : 0f),
                 SparkAge = new float4(look.Spark[0], look.Spark[1], look.Spark[2], age),
-                Shape = new float4(spread, boost ? look.Diamonds * 1.2f : look.Diamonds, look.DiamondSpacing * radius, seed),
+                Shape = new float4(spread, puff ? burst : boost ? look.Diamonds * 1.2f : look.Diamonds, look.DiamondSpacing * radius, seed),
                 Motion = new float4(time, look.Flicker, look.SparkSeconds, sparkSpeed),
                 Extent = new float4(puff ? 0.02f * radius : nozzle.Depth * 0.6f, look.Turbulence, sparking ? look.Sparks : 0f, width),
                 Flow = new float4(released, look.FlowSpeed * radius, look.CoreLength * radius * (boost ? 1.3f : 1f), look.Opening * radius),

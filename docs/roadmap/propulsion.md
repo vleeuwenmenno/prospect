@@ -74,7 +74,9 @@
   never edits it.
 - An idle engine is dark. When thrust starts it ignites with subtle sparks, then opens a vacuum plume: wide, soft,
   faint, bell-shaped, hot only at the exit, at most one faint shock node. Bipropellant is pale blue-violet.
-- Cold gas thrusters vent a fast, short-lived jet of expanding vapour, lit by the star, never glowing.
+- Cold gas thrusters vent a fast, high-pressure jet: thin and dense at the nozzle, opening to a faint, streaked cone of
+  translucent grey-white gas, lit by the star, never glowing. A short denser burst when the valve opens; it clears
+  quickly when it closes.
 - Hot thrusters show a small version of the engine's plume with a faint orange core.
 
 ## Decided: how the models and plumes are made
@@ -114,8 +116,11 @@
     of its width. The bright core reaches `coreLength` exit radii. At most one faint shock node (`diamonds`).
   - A flame's colour is a density-weighted mix of core and edge; its density is compressed against `brightness`, so
     a view straight into it (boost included) stays tinted and graded, never flat white.
-  - A cold gas puff has no light of its own: lit by the star. A tight jet opens into a cone of turbulent vapour that
-    streams out at `flowSpeed`. A valve opening bursts denser and wider (`burst`, `burstSeconds`).
+  - A cold gas puff has no light of its own: lit by the star, far more when seen against it. A short, narrowing
+    spike at the exit (`coreLength`) opens into a straight cone (`spread` exit radii wide at its end), its gas thinning
+    as the square of its width. Fine streaks along the cone's lines stream out at `flowSpeed`.
+  - The gas only reaches as far as it has flown since the valve opened; its front is domed. While the valve's burst
+    lasts (`burst`, `burstSeconds`) the gas is denser and the front a denser slug. It is faint: `brightness` 0.26.
   - When a group stops, its last gas flies off down the plume and clears over `fadeSeconds`.
 - Check with `--thrust` and `--zoom` captures (`AGENTS.md`); `PropulsionVisualTests` holds the rules.
 

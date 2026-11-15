@@ -3,7 +3,7 @@
 
 // Per plume (PlumeInstance): the nozzle's exit, camera-relative, and its radius; the axis the plume runs along and
 // its length; core colour and brightness; edge colour and kind (0 flame, 1 puff); spark colour and seconds since
-// ignition; spread, shock diamonds, their spacing in metres and a seed; time, flicker, spark seconds and spark speed;
+// ignition; spread, shock diamonds (a puff: its valve burst), their spacing in metres and a seed; time, flicker, spark seconds and spark speed;
 // how far back into the nozzle it starts, turbulence, spark count and the half width of the box it is drawn in;
 // seconds since the part stopped (negative while it fires), how fast the gas streams, the core's reach and the opening.
 layout(location = 0) in vec4 exitRadius;

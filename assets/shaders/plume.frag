@@ -9,10 +9,12 @@
 // edge colours, and its brightness is compressed against a cap, so however much of it a ray crosses it never burns
 // out to flat white.
 //
-// A puff is cold gas and has no light of its own: a tight, fast jet at the nozzle that opens into a cone of turbulent
-// vapour, lit by the star. Its pattern streams out along the axis at the gas's speed. Every moving part is driven by
-// the plume's own clock and seed (PlumeInstance), smooth in time, so nothing shimmers from frame to frame. Once the
-// part stops, the last gas flies off down the plume and clears.
+// A puff is cold gas and has no light of its own: a thin, dense spike at the nozzle that opens into a straight cone of
+// expanding gas, lit by the star, faint and translucent. Fine streaks along the cone's lines stream out at the gas's
+// speed, so the jet reads fast. The gas that left when the valve opened has only got so far, and while the valve's
+// burst lasts its front is a denser slug. Every moving part is driven by the plume's own clock and seed
+// (PlumeInstance), smooth in time, so nothing shimmers from frame to frame. Once the part stops, the last gas flies
+// off down the plume and clears.
 layout(location = 0) in vec3 worldPosition;
 layout(location = 1) flat in vec3 faceNormal;
 layout(location = 2) flat in vec4 plumeExit;    // camera-relative exit centre, exit radius
@@ -20,7 +22,7 @@ layout(location = 3) flat in vec4 plumeAxis;    // axis, plume length in metres
 layout(location = 4) flat in vec4 plumeCore;    // core colour, brightness cap
 layout(location = 5) flat in vec4 plumeEdge;    // edge colour, kind (0 flame, 1 puff)
 layout(location = 6) flat in vec4 plumeSpark;   // spark colour, seconds since ignition
-layout(location = 7) flat in vec4 plumeShape;   // spread, first shock node, its distance in metres, seed
+layout(location = 7) flat in vec4 plumeShape;   // spread, first shock node (a puff: its valve burst), its distance in metres, seed
 layout(location = 8) flat in vec4 plumeMotion;  // seconds, flicker, spark seconds, spark speed in m/s
 layout(location = 9) flat in vec4 plumeExtent;  // depth inside the nozzle, turbulence, sparks, box half width
 layout(location = 10) flat in vec2 box;         // box length past the exit, camera inside the box
@@ -120,6 +122,10 @@ void main()
     // The streaming pattern: gas leaves the nozzle at its speed, so the noise runs out along the axis with it.
     float flowed = time * speed;
 
+    // A puff's valve burst: plumeShape.y carries it for a puff, which has no shock node.
+    float age = plumeSpark.w;
+    float burstNow = puff ? node : 0.0;
+
     float density = 0.0;
     vec3 tint = vec3(0.0);
     if (len > 0.0)
@@ -147,7 +153,43 @@ void main()
             float cleared = smoothstep(emptied, emptied + radius, z);
             if (cleared <= 0.0)
                 continue;
-            float wide = puff ? radius * (1.0 + spread * pow(u, 1.25)) : radius * (1.0 + spread * (1.0 - exp(-z / opening)));
+            if (puff)
+            {
+                // A cold gas jet: a straight cone from the exit, its gas thinning as the square of its width, so it
+                // is densest in a thin spike at the nozzle and fades out along its length. Gas that left when the
+                // valve opened has only got so far; its front is a denser slug while the valve's burst lasts.
+                float wideP = radius * (1.0 + spread * u);
+                float q2p = r2 / (wideP * wideP);
+                if (q2p > 4.0)
+                    continue;
+                float thinP = radius * radius / (wideP * wideP);
+                // The front is domed: gas on the axis runs ahead of the gas at the edge.
+                float front = age * speed * (1.0 - 0.3 * min(q2p, 1.0));
+                float soft = radius + 0.2 * front;
+                float reached = 1.0 - smoothstep(front - soft, front + soft, z);
+                if (reached <= 0.0)
+                    continue;
+                vec2 aroundP = p.xy / wideP;
+                // Streaks along the cone's lines, carried out at the gas's speed: fine across, long along the flow,
+                // so the jet reads fast rather than as soft billows. Two octaves, driven only by the plume's clock.
+                float streamP = (z - flowed) / radius;
+                float s1 = noise3(vec3(aroundP * 5.0, streamP * 0.11) + seed * 7.13);
+                float s2 = noise3(vec3(aroundP * 11.0, streamP * 0.23) + seed * 3.71);
+                float streak = smoothstep(0.25, 0.9, 0.6 * s1 + 0.4 * s2);
+                float broken = mix(1.0, streak * 1.8, turbulence * smoothstep(0.0, 0.15, u));
+                // The potential core: a short, narrowing spike of unexpanded gas right at the exit.
+                float coreU = z / coreReach;
+                float spike = radius * max(0.55 - 0.45 * coreU, 0.08);
+                float jet = exp(-r2 / (spike * spike)) * (1.0 - smoothstep(0.4, 1.0, coreU));
+                float slug = burstNow * exp(-pow((z - front) / soft, 2.0)) * exp(-q2p * 1.5);
+                float shell = exp(-q2p * 2.6) * thinP * broken;
+                float edgeFade = smoothstep(1.0, 0.35, u);
+                float d = (shell * (1.0 + 0.5 * burstNow) + jet * 0.9 + slug * thinP * 0.9) * edgeFade * cleared * reached;
+                density += d * dt / radius;
+                tint += mix(edge, core, clamp(jet * 1.5 + thinP * 0.6, 0.0, 1.0)) * d * dt / radius;
+                continue;
+            }
+            float wide = radius * (1.0 + spread * (1.0 - exp(-z / opening)));
             float q2 = r2 / (wide * wide);
             if (q2 > 5.0)
                 continue;
@@ -156,19 +198,6 @@ void main()
             float fade = smoothstep(1.0, 0.25, u) * cleared;
             vec2 across = p.xy / wide;
             float stream = (z - flowed) / radius;
-            if (puff)
-            {
-                // Billows of vapour carried out at the gas's speed, two octaves, more broken as the jet opens.
-                float n = noise3(vec3(across * 1.7, stream * 0.28) + seed * 7.13);
-                float n2 = noise3(vec3(across * 3.6, stream * 0.62) + seed * 3.71);
-                float billow = smoothstep(0.2, 0.85, 0.62 * n + 0.38 * n2);
-                float broken = mix(1.0, billow * 1.7, turbulence * smoothstep(0.0, 0.25, u + 0.08));
-                float jet = exp(-r2 / (radius * radius) * 3.0) * exp(-z / coreReach);
-                float d = (exp(-q2 * 1.8) * thin * broken * 1.8 + jet * 1.2) * fade;
-                density += d * dt / radius;
-                tint += mix(edge, core, clamp(jet * 2.0 + exp(-q2 * 2.0) * 0.4, 0.0, 1.0)) * d * dt / radius;
-                continue;
-            }
             // Faint streaks along the flow; a vacuum plume is smooth, so the body is barely broken.
             float n = noise3(vec3(across * 2.2, stream * 0.18) + seed * 7.13);
             float broken = mix(1.0, 0.55 + 0.9 * n, turbulence);
@@ -190,14 +219,14 @@ void main()
     vec3 color = hue * (1.0 - exp(-density)) * brightness * flicker;
     if (puff)
     {
-        // Cold gas has no light of its own: it scatters the star's, a little more toward the star, and some ambient.
+        // Cold gas has no light of its own: it scatters the star's, far more toward the star (fine droplets scatter
+        // forward), and barely any ambient, so a jet seen against the light glows and one seen with it is faint.
         vec3 sun = frame.sunDirection.xyz;
-        float forward = pow(max(dot(dir, sun), 0.0), 6.0);
-        color *= frame.sunColor.rgb * (0.5 + 0.5 * forward) + vec3(0.05, 0.055, 0.065);
+        float forward = pow(max(dot(dir, sun), 0.0), 4.0);
+        color *= frame.sunColor.rgb * (0.3 + 1.1 * forward) + vec3(0.02, 0.022, 0.026);
     }
 
     // Ignition: a few faint sparks thrown from the throat in a cone, gone after the spark seconds.
-    float age = plumeSpark.w;
     float sparkSeconds = plumeMotion.z;
     int sparks = int(plumeExtent.z + 0.5);
     if (sparks > 0 && age < sparkSeconds)

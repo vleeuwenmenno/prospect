@@ -195,7 +195,7 @@ internal sealed class PlumeLook
     {
         static bool Colour(float[] c) => c.Length == 3 && c[0] is >= 0 and <= 4 && c[1] is >= 0 and <= 4 && c[2] is >= 0 and <= 4;
         if (Kind is not ("flame" or "puff") || !Colour(Core) || !Colour(Edge) || !Colour(Spark)
-            || !(Brightness is > 0 and <= 40) || !(Length is > 0 and <= 40) || !(MinLength is > 0 and <= 1) || !(Spread is >= 0 and <= 8)
+            || !(Brightness is > 0 and <= 40) || !(Length is > 0 and <= 80) || !(MinLength is > 0 and <= 1) || !(Spread is >= 0 and <= 30)
             || !(Opening is > 0 and <= 20) || !(CoreLength is > 0 and <= 10) || !(FlowSpeed is >= 0 and <= 200)
             || !(Flicker is >= 0 and <= 1) || !(Turbulence is >= 0 and <= 1) || !(Diamonds is >= 0 and <= 4) || !(DiamondSpacing is > 0 and <= 10)
             || !(SparkSeconds is >= 0 and <= 1) || !(GrowSeconds is > 0 and <= 2) || Sparks is < 0 or > PropulsionLook.MaxSparks
