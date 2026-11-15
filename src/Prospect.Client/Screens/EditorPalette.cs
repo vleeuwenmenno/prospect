@@ -25,12 +25,41 @@ internal sealed class EditorPalette
     /// <summary>The search, trimmed; empty for none. While there is one it covers every tab.</summary>
     public string Query { get; set; } = "";
 
-    /// <summary>Whether a part shows under the chosen tab and the search.</summary>
+    /// <summary>
+    /// The kind of craft being edited: the palette offers only the parts that fit it, by the same rule the draft
+    /// refuses a placement with (<see cref="BlockType.FitsClass"/>). Set from the draft every frame.
+    /// </summary>
+    public HullClass Craft { get; set; } = HullClass.Ship;
+
+    /// <summary>Whether a part shows under the chosen tab and the search. A part of the other kind of craft never does.</summary>
     public bool Shows(EditorTuning tuning, BlockType type)
     {
+        if (!type.FitsClass(Craft))
+            return false;
         if (Query.Length > 0)
             return Matches(tuning, type, Query);
         return (uint)Category >= (uint)tuning.Categories.Length || tuning.Lists(tuning.Categories[Category], type);
+    }
+
+    /// <summary>Whether a tab lists at least one part that fits the craft; a tab with none is not shown.</summary>
+    public bool TabHasParts(EditorTuning tuning, IReadOnlyList<BlockType> types, int tab)
+    {
+        if ((uint)tab >= (uint)tuning.Categories.Length)
+            return false;
+        for (var i = 0; i < types.Count; i++)
+            if (types[i].FitsClass(Craft) && tuning.Lists(tuning.Categories[tab], types[i]))
+                return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Falls back to the first tab when the chosen one has no part for this craft (the Drone tab chosen, then a
+    /// ship edited), so the list is never left on a tab that is not shown.
+    /// </summary>
+    public void KeepTabShown(EditorTuning tuning, IReadOnlyList<BlockType> types)
+    {
+        if (!TabHasParts(tuning, types, Category))
+            Category = 0;
     }
 
     /// <summary>Whether a search finds a part: by its name, its id, what it is for, its fuel, or "drone" for a compact part.</summary>

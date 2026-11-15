@@ -39,6 +39,8 @@ public enum DraftEdit : byte
     TooManyTanks,
     /// <summary>The part is never slanted (<see cref="BlockType.BoxOnly"/>): it is placed, pasted and turned as a box only.</summary>
     BoxOnly,
+    /// <summary>The part is built for the other kind of craft: a drone part on a ship, or a ship part on the drone (<see cref="BlockType.FitsClass"/>).</summary>
+    WrongCraft,
 }
 
 /// <summary>
@@ -233,6 +235,7 @@ public sealed class BuildDraft
     public DraftEdit CanAddMount(int parent, BlockFacing face, int u, int v, BlockType type)
     {
         if (type?.Mount is null) return DraftEdit.WrongKind;
+        if (!type.FitsClass(Class)) return DraftEdit.WrongCraft;
         if (_mounts.Count >= _content.Blocks.Limits.MaxMounts) return DraftEdit.TooManyMounts;
         return FaceMounts.Check(Boxes, Mounts, new DesignMount(parent, face, u, v, type));
     }
@@ -274,6 +277,8 @@ public sealed class BuildDraft
             return DraftEdit.TooManyBlocks;
         if (type?.Mount is not null)
             return DraftEdit.WrongKind;
+        if (type is not null && !type.FitsClass(Class))
+            return DraftEdit.WrongCraft;
         if (!BoxDesign.ShapeAllowed(type, shape))
             return DraftEdit.BoxOnly;
         if (type is not null && type.Tank != FuelKind.None && Tanks() >= _content.Blocks.Limits.MaxTanks)

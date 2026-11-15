@@ -287,6 +287,7 @@ internal sealed class App : IDisposable
 
     // A capture of the New ship dialog first leaves the pod in the drone, then opens the dialog once it flies it.
     private string? _newShipView;
+    private bool _editDroneView;
     private bool _tipsSampled;
     private bool _noticesSampled;
     private bool _mapClosed;
@@ -652,6 +653,7 @@ internal sealed class App : IDisposable
                 Password = hosted && hosting.Password.Length > 0 ? hosting.Password : null,
                 Port = hosting.Port,
                 Listing = Listing,
+                AllowDebugFill = hosting.Visibility == ServerVisibility.Private,
             };
             open = _ => new SessionStart(GameSession.StartLocal(config, Content, player), "");
         }
@@ -1150,6 +1152,13 @@ internal sealed class App : IDisposable
             Session?.Client.Input.CancelScan();
         }
 
+        if (_editDroneView && Session is not null && snapshot is { OwnHull: >= 0, OwnIsDrone: true })
+        {
+            // Capture only: the drone has stepped out of the pod, so edit it.
+            _editDroneView = false;
+            World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
+        }
+
         if (_newShipView is { } newShip && Session is not null && snapshot is { OwnHull: >= 0, OwnIsDrone: true })
         {
             _newShipView = null;
@@ -1206,6 +1215,19 @@ internal sealed class App : IDisposable
             }
             else if (view == "edit" && snapshot is { OwnHull: >= 0 })
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
+            else if (view == "edit-drone")
+            {
+                // The editor on the escape drone: the part list shows drone parts only. Steps out first, then edits.
+                _editDroneView = true;
+                Session.Client.Input.RequestControl(0);
+            }
+            else if (view is "edit-fill" or "edit-fill-done" && snapshot is { OwnHull: >= 0 })
+            {
+                // Debug fill: the editor with the pod's first tank selected (the button shows, local game), and for
+                // edit-fill-done the server asked to fill it 1.5 s in (the notice shows after).
+                World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
+                World.ScriptFillForCapture(view == "edit-fill-done");
+            }
             else if (view is "edit-turn" or "edit-mount" or "edit-mirror" or "edit-ion" && snapshot is { OwnHull: >= 0 })
             {
                 // The editor on the Move tab with an engine turned to face right, or with a cold gas thruster to

@@ -1,5 +1,4 @@
 {
-  "compactMassBelow": 0.75,
   "categories": [
     { "name": "All" },
     { "name": "Hull", "roles": ["structure", "cargo", "crew"], "compact": false },

@@ -404,6 +404,54 @@ internal sealed class ShipEditor(JobSystem jobs)
     public int MirrorSkipped { get; private set; }
     public float MirrorSkippedAt { get; private set; } = float.NegativeInfinity;
 
+    /// <summary>Debug: the server's last answer to a tank fill (<see cref="EditorReason.FillDone"/>, <see cref="EditorReason.FillOff"/> or <see cref="EditorReason.FillRefused"/>); none before any.</summary>
+    public EditorReason FillResult { get; private set; }
+
+    /// <summary>When <see cref="FillResult"/> was given, on <see cref="Time"/>.</summary>
+    public float FillResultAt { get; private set; } = float.NegativeInfinity;
+
+    private static bool IsFillReason(EditorReason reason) => reason is EditorReason.FillDone or EditorReason.FillOff or EditorReason.FillRefused;
+
+    /// <summary>
+    /// Debug: what the Fill tank button can do now, from the selection and the server's say. The button is offered
+    /// only where the server allows it (<see cref="EditorView.DebugFill"/>), while the edit is open, with a tank
+    /// selected. To be removed with the button.
+    /// </summary>
+    public FillOffer FillState
+    {
+        get
+        {
+            Span<int> blocks = stackalloc int[EditorRequestMessage.MaxFill];
+            return FillTargets(blocks, out _);
+        }
+    }
+
+    /// <summary>
+    /// Debug: works out the fill the selection asks for. Each selected tank block of the draft is matched to the
+    /// tank of the edited hull's own design by type, shape and cells, the way the server carries fuel into a
+    /// rebuilt hull; a tank that exists only in the draft has no match and is <see cref="FillOffer.ApplyFirst"/>.
+    /// The matched block indices of the hull's design go into <paramref name="blocks"/>, which holds at most
+    /// <see cref="EditorRequestMessage.MaxFill"/>.
+    /// </summary>
+    public FillOffer FillTargets(Span<int> blocks, out int count)
+    {
+        count = 0;
+        if (!CanEdit || !Server.DebugFill || Draft is not { } draft || Source is not { } source)
+            return FillOffer.None;
+        var offer = EditorFill.Plan(draft, source, Selection, blocks, out count);
+        return offer == FillOffer.Ready && Server.Pending ? FillOffer.Waiting : offer;
+    }
+
+    /// <summary>Debug: asks the server to fill the selected tanks. False, and nothing is sent, unless the offer is <see cref="FillOffer.Ready"/>.</summary>
+    public bool RequestFill(PlayerInputBridge bridge)
+    {
+        Span<int> blocks = stackalloc int[EditorRequestMessage.MaxFill];
+        if (FillTargets(blocks, out var count) != FillOffer.Ready)
+            return false;
+        bridge.FillTanks(Token, blocks[..count]);
+        return true;
+    }
+
     private readonly DesignBox[] _copyBoxes = new DesignBox[Mirroring.MaxCopies];
     private readonly DraftEdit[] _copyBoxChecks = new DraftEdit[Mirroring.MaxCopies];
     private int _copyBoxCount;
@@ -696,7 +744,12 @@ internal sealed class ShipEditor(JobSystem jobs)
                 {
                     if (view.Token != 0)
                         Token = view.Token;
-                    if (fresh && view.Reason != EditorReason.None)
+                    if (fresh && IsFillReason(view.Reason))
+                    {
+                        FillResult = view.Reason;
+                        FillResultAt = _time;
+                    }
+                    else if (fresh && view.Reason != EditorReason.None)
                         Refuse(view.Reason, view.WaitSeconds);
                 }
 
@@ -727,7 +780,7 @@ internal sealed class ShipEditor(JobSystem jobs)
                     // Turned down, by the server or by the session before it was sent; the edit stays open.
                     Stage = EditorStage.Editing;
                     Token = view.Token;
-                    if (view.Reason != EditorReason.None)
+                    if (view.Reason != EditorReason.None && !IsFillReason(view.Reason))
                         Refuse(view.Reason, view.WaitSeconds);
                 }
 

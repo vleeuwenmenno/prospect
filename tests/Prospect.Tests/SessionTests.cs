@@ -137,7 +137,7 @@ public sealed class ProtocolTests
             reader = new NetReader(writer.Written[..length]);
             Assert.False(HullRecord.TryRead(ref reader, out _));
         }
-        Assert.Equal(53u, ProtocolInfo.Version);
+        Assert.Equal(54u, ProtocolInfo.Version);
     }
 
     [Fact]
@@ -173,8 +173,34 @@ public sealed class ProtocolTests
             reader = new NetReader([.. writer.Written[1..], 0]);
             Assert.False(EditorRequestMessage.TryRead(ref reader, read, out _));
         }
-        reader = new NetReader([5, 0, 0, 0, 0]);
+        reader = new NetReader([6, 0, 0, 0, 0]);
         Assert.False(EditorRequestMessage.TryRead(ref reader, read, out _));
+
+        // Debug tank fill: a count of one to MaxFill block indices, nothing more, and it fits the largest request.
+        Assert.True(1 + 1 + 4 + 1 + EditorRequestMessage.MaxFill * sizeof(int) <= EditorRequestMessage.MaxWireSize);
+        writer = new NetWriter(buffer);
+        var fill = new EditorRequestMessage { Kind = EditorRequestKind.FillTank, Token = 11, FillCount = EditorRequestMessage.MaxFill };
+        for (var i = 0; i < EditorRequestMessage.MaxFill; i++) fill.Blocks[i] = 1000 + i;
+        fill.Write(ref writer, hash);
+        Assert.Equal(1 + 1 + 4 + 1 + EditorRequestMessage.MaxFill * sizeof(int), writer.Length);
+        reader = new NetReader(writer.Written[1..]);
+        Assert.True(EditorRequestMessage.TryRead(ref reader, read, out request));
+        Assert.Equal((EditorRequestKind.FillTank, 11u, EditorRequestMessage.MaxFill, 1000, 1000 + EditorRequestMessage.MaxFill - 1), (request.Kind, request.Token, request.FillCount, request.Blocks[0], request.Blocks[EditorRequestMessage.MaxFill - 1]));
+        for (var length = 1; length < writer.Length; length++)
+        {
+            reader = new NetReader(writer.Written[1..length]);
+            Assert.False(EditorRequestMessage.TryRead(ref reader, read, out _));
+        }
+
+        reader = new NetReader([.. writer.Written[1..], 0]);
+        Assert.False(EditorRequestMessage.TryRead(ref reader, read, out _));
+        foreach (var bad in new byte[] { 0, (byte)(EditorRequestMessage.MaxFill + 1), 255 })
+        {
+            var forged = writer.Written.ToArray();
+            forged[6] = bad;
+            reader = new NetReader(forged.AsSpan(1));
+            Assert.False(EditorRequestMessage.TryRead(ref reader, read, out _), $"a count of {bad}");
+        }
 
         // Chunks: the header, then exactly the bytes it counts, one to a chunk's worth.
         var bytes = new byte[EditorDataMessage.MaxChunk];
@@ -196,7 +222,7 @@ public sealed class ProtocolTests
         // The answer.
         writer = new NetWriter(buffer);
         new EditorStateMessage { Phase = EditorPhase.Applied, Reason = EditorReason.HullLimit, Token = 3, Hull = 0x00020005, ReplacedHull = 0x00010004, WaitSeconds = 30 }.Write(ref writer);
-        Assert.Equal(18, EditorStateMessage.WireSize);
+        Assert.Equal(19, EditorStateMessage.WireSize);
         Assert.Equal(EditorStateMessage.WireSize, writer.Length);
         reader = new NetReader(writer.Written[1..]);
         Assert.True(EditorStateMessage.TryRead(ref reader, out var state));
@@ -211,6 +237,19 @@ public sealed class ProtocolTests
         reader = new NetReader(wrong.AsSpan(1));
         Assert.False(EditorStateMessage.TryRead(ref reader, out _));
         wrong[1] = 0;
+        // The debug fill flag is a bool, and the debug reasons are the last there are.
+        wrong[18] = 2;
+        reader = new NetReader(wrong.AsSpan(1));
+        Assert.False(EditorStateMessage.TryRead(ref reader, out _));
+        wrong[18] = 1;
+        wrong[2] = (byte)EditorReason.FillRefused;
+        reader = new NetReader(wrong.AsSpan(1));
+        Assert.True(EditorStateMessage.TryRead(ref reader, out state));
+        Assert.True(state.DebugFill);
+        wrong[2] = (byte)EditorReason.FillRefused + 1;
+        reader = new NetReader(wrong.AsSpan(1));
+        Assert.False(EditorStateMessage.TryRead(ref reader, out _));
+        wrong[18] = 0;
         // A reason only a client gives itself never comes from a server.
         wrong[2] = (byte)EditorReason.Unavailable;
         reader = new NetReader(wrong.AsSpan(1));

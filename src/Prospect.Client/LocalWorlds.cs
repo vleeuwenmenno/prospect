@@ -113,6 +113,7 @@ internal static class LocalWorlds
                 Name = persistence.World.Name,
                 MaxPlayers = 1,
                 Visibility = ServerVisibility.Private,
+                AllowDebugFill = true,
                 World = persistence,
                 AccountAuthority = accountAuthority,
             };

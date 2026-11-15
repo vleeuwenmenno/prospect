@@ -122,9 +122,14 @@ public sealed class PlayerInputBridge
         Cancel,
         Commit,
         Repair,
+
+        /// <summary>Debug: fill tanks; the blocks are taken with <see cref="TakeFill"/>.</summary>
+        Fill,
     }
 
-    private bool _hasEditBegin, _hasEditCancel, _hasEditRepair;
+    private bool _hasEditBegin, _hasEditCancel, _hasEditRepair, _hasEditFill;
+    private FillBlocks _fillBlocks;
+    private int _fillCount;
     private uint _editHull, _editToken;
     private byte[]? _editBytes;
     private int _installedDesigns, _failedDesigns;
@@ -205,6 +210,35 @@ public sealed class PlayerInputBridge
     }
 
     /// <summary>
+    /// Debug: asks the server to fill the tanks in the blocks listed (indices of the edited hull's design) of the
+    /// edit <paramref name="token"/> names. The server decides, and answers with <see cref="EditorReason.FillDone"/>,
+    /// <see cref="EditorReason.FillOff"/> or <see cref="EditorReason.FillRefused"/>. At most
+    /// <see cref="EditorRequestMessage.MaxFill"/> blocks are taken; a newer request replaces one not yet sent.
+    /// To be removed with the Fill tank button.
+    /// </summary>
+    public void FillTanks(uint token, ReadOnlySpan<int> blocks)
+    {
+        lock (_lock)
+        {
+            _fillCount = Math.Min(blocks.Length, EditorRequestMessage.MaxFill);
+            for (var i = 0; i < _fillCount; i++)
+                _fillBlocks[i] = blocks[i];
+            _editToken = token;
+            _hasEditFill = _fillCount > 0;
+        }
+    }
+
+    /// <summary>Called by the simulation after <see cref="EditIntent.Fill"/>: the blocks to fill.</summary>
+    internal int TakeFill(out FillBlocks blocks)
+    {
+        lock (_lock)
+        {
+            blocks = _fillBlocks;
+            return _fillCount;
+        }
+    }
+
+    /// <summary>
     /// Called by the simulation: takes the next editor request, a cancel before a begin before a repair or a
     /// commit. The bytes of a commit are the session's from here on.
     /// </summary>
@@ -232,6 +266,13 @@ public sealed class PlayerInputBridge
                 _hasEditRepair = false;
                 value = _editToken;
                 return EditIntent.Repair;
+            }
+
+            if (_hasEditFill)
+            {
+                _hasEditFill = false;
+                value = _editToken;
+                return EditIntent.Fill;
             }
 
             if (_editBytes is null)

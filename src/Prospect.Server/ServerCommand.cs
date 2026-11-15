@@ -38,6 +38,7 @@ internal sealed class ServerCommand
         Description = "With --world: create the world if the folder holds none, from --seed, --settings and --set. A world that is there is opened, and must agree with them.",
     };
     private readonly Option<int?> _autosave = new("--autosave") { HelpName = "seconds", Description = $"With --world: seconds between automatic saves, 1..3600 (default: {DefaultAutosaveSeconds})." };
+    private readonly Option<bool> _debugFill = new("--debug-fill") { Description = "Debug: let players fill the tanks of the ship they edit (the editor's Fill tank button). Off by default; never use on a public server." };
     internal readonly Option<bool> Verbose = new("--verbose") { Description = "Log debug messages." };
     private readonly RootCommand _root = new("Prospect dedicated server. CLI overrides the settings file. Password: CLI > PROSPECT_PASSWORD > file; an empty environment variable is absent. Game traffic is not encrypted.");
 
@@ -55,7 +56,7 @@ internal sealed class ServerCommand
 
     internal ServerCommand()
     {
-        foreach (var option in new Option[] { _name, _visibility, _port, _players, _password, _listing, _seed, _settings, _set, _world, _createWorld, _autosave, Verbose })
+        foreach (var option in new Option[] { _name, _visibility, _port, _players, _password, _listing, _seed, _settings, _set, _world, _createWorld, _autosave, _debugFill, Verbose })
             _root.Options.Add(option);
         _autosave.Validators.Add(result =>
         {
@@ -145,6 +146,7 @@ internal sealed class ServerCommand
             Settings = world is null ? settings : null,
             Limits = file.Limits ?? ConnectionLimits.Default,
             World = world,
+            AllowDebugFill = result.GetValue(_debugFill),
         };
     }
 

@@ -73,10 +73,85 @@ public sealed partial class ServerHost
             case EditorRequestKind.Repair:
                 RepairEdit(connection, request.Token);
                 break;
+            case EditorRequestKind.FillTank:
+                FillTanks(connection, request);
+                break;
             default:
                 CommitEdit(connection, request, hash);
                 break;
         }
+    }
+
+    /// <summary>The fewest ticks between two tank fills of one player: a quarter of a second.</summary>
+    private const long FillIntervalTicks = TickLoop.SimulationHz / 4;
+
+    /// <summary>
+    /// Debug, for local games: fills the tanks in the blocks the request names to capacity, in the hull of the open
+    /// edit. Only when the server allows it (<see cref="ServerConfig.AllowDebugFill"/>). Everything is checked
+    /// before anything is written: the edit is the sender's and open, the hull is the sender's own, and each block
+    /// is in range and a tank the hull has not lost; one bad block refuses the whole request. Each tank is written
+    /// through the block state and the hull's fuel is added up again, as every change to a tank must. The edit
+    /// stays open whatever the answer. To be removed with the Fill tank button.
+    /// </summary>
+    private void FillTanks(Connection connection, in EditorRequestMessage request)
+    {
+        if (!_allowDebugFill)
+        {
+            ReplyEdit(connection, EditorReason.FillOff);
+            return;
+        }
+
+        if (connection.EditPhase != EditorPhase.Open || request.Token != connection.EditToken)
+        {
+            SendEditorState(connection);
+            return;
+        }
+
+        var invalid = EditInvalid(connection);
+        if (invalid != EditorReason.None)
+        {
+            EndEdit(connection, invalid);
+            return;
+        }
+
+        // Owned by the sender: a hull edited from the drone is the player's own, and EditInvalid checked that too.
+        var index = connection.EditHull.Index;
+        if (_hulls.Info(index).Owner != connection.PlayerId)
+        {
+            ReplyEdit(connection, EditorReason.FillRefused);
+            return;
+        }
+
+        if (_tick < connection.EditNextFill)
+        {
+            ReplyEdit(connection, EditorReason.TooSoon, 1);
+            return;
+        }
+
+        connection.EditNextFill = _tick + FillIntervalTicks;
+        var design = _content.Designs[_hulls.Info(index).Design];
+        var state = _hulls.Info(index).BlockState;
+        var alive = _hulls.BlockStates.Alive(state);
+        var tanks = design.Tanks;
+        for (var i = 0; i < request.FillCount; i++)
+        {
+            var block = request.Blocks[i];
+            if ((uint)block >= (uint)design.BlockCount || design.TankOf(block) < 0 || !BlockSet.Has(alive, block))
+            {
+                ReplyEdit(connection, EditorReason.FillRefused);
+                return;
+            }
+        }
+
+        var levels = _hulls.BlockStates.TankLevels(state);
+        for (var i = 0; i < request.FillCount; i++)
+        {
+            var tank = design.TankOf(request.Blocks[i]);
+            levels[tank] = tanks[tank].Capacity;
+        }
+
+        _hulls.State(index).Fuel = TankFuel.Total(levels, tanks);
+        ReplyEdit(connection, EditorReason.FillDone);
     }
 
     /// <summary>
@@ -698,6 +773,7 @@ public sealed partial class ServerHost
     private void SendEditorState(Connection connection)
     {
         var writer = new NetWriter(_sendBuffer);
+        connection.EditReply.DebugFill = _allowDebugFill;
         connection.EditReply.Write(ref writer);
         connection.EditReplyDirty = !connection.Transport.Send(connection.Peer, NetChannel.Reliable, writer.Written);
     }
