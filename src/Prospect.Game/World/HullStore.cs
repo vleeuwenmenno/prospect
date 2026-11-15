@@ -144,7 +144,7 @@ public sealed unsafe class HullStore : IDisposable
     public long BlockTotal => _blockTotal;
 
     /// <summary>
-    /// Creates an intact hull of a design at a position, at rest, with full shield and battery. Its block state,
+    /// Creates an intact hull of a design at a position, at rest, with full shield, battery and tanks. Its block state,
     /// with every block's hit points and the design's intact sums, is taken here and given back when the hull is
     /// destroyed.
     /// </summary>
@@ -153,8 +153,9 @@ public sealed unsafe class HullStore : IDisposable
 
     /// <summary>
     /// Creates a hull of a design with the motion a save holds, over an intact block state of its own. The
-    /// caller brings the block state to what was saved with <see cref="BlockStateStore.TryRestore"/> and reads the
-    /// flight figures again with <see cref="HullField.RestoreFigures"/>; nothing here judges the saved motion.
+    /// caller brings the block state to what was saved with <see cref="BlockStateStore.TryRestore"/> and
+    /// <see cref="BlockStateStore.SetTanks"/>, and reads the flight figures and the fuel again with
+    /// <see cref="HullField.RestoreFigures"/>; nothing here judges the saved motion.
     /// </summary>
     public HullHandle Restore(uint owner, byte designIndex, HullDesign design, in HullState state)
     {
@@ -164,6 +165,9 @@ public sealed unsafe class HullStore : IDisposable
         info.BlockState = _blockStates.Create(design, hitPoints: true);
         info.OwnsBlockState = true;
         _blockTotal += design.BlockCount;
+
+        // What the hull has of each fuel is its tanks added up, never a figure of its own.
+        _states[handle.Index].Fuel = TankFuel.Total(_blockStates.Tanks(info.BlockState), design.Tanks);
         return handle;
     }
 
@@ -183,6 +187,7 @@ public sealed unsafe class HullStore : IDisposable
         info.BlockState = blockState;
         info.FittedRevision = _blockStates.Revision(blockState);
         _blockTotal += design.BlockCount;
+        _states[handle.Index].Fuel = TankFuel.Total(_blockStates.Tanks(blockState), design.Tanks);
         return handle;
     }
 

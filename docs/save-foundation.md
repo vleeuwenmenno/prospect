@@ -26,7 +26,7 @@ Saved multiplayer and moving a world between machines stay undelivered until ver
 | Type | What it is |
 | --- | --- |
 | `WorldSnapshot` | The bounded state of a world between two intervals. A buffer, never live memory. |
-| `WorldSnapshotCodec` | The save's own byte layout, `Version` 3. Reading trusts nothing. |
+| `WorldSnapshotCodec` | The save's own byte layout, `Version` 8. Reading trusts nothing. |
 | `SaveLimits` | Aggregate bounds of a world and of a save: owners, hulls, blocks, asteroids, sectors. |
 | `IWorldStore` | A leased store: `Commit`, `Backup`, `Dispose`. One worker thread uses it. |
 | `SqliteWorldStore` | The store on disk: one SQLite database per world folder. |
@@ -191,8 +191,9 @@ Engineering defaults in `SaveLimits.Default`, not host tuning.
 | Pushed asteroids | 16,384 |
 | Sectors with a pushed asteroid | 256 |
 
-- The base capture buffer at these limits is about 11 MiB; content-sized chart storage adds 8 MiB at 64 owners and 4,096 charts each. Both are taken once.
-- Base records encode at most about 11.2 MiB; shipped chart limits add 6 MiB. The format ceiling allows about 112.4 MB including charts; the catalogue is at most 1 MiB.
+- The base capture buffer at these limits is about 19 MiB; content-sized chart storage adds 8 MiB at 64 owners and 4,096 charts each. Both are taken once.
+- Base records encode at most about 19.2 MiB; shipped chart limits add 6 MiB. The format ceiling allows about 120.8 MB including charts; the catalogue is at most 1 MiB.
+- 8 MiB of both is room for fuel: eight bytes a tank, and a tank is a block, so as many as there are blocks.
 - A world refuses to grow past them before it grows: see `ServerHost.HasRoom` and `RockField.CanMove`.
 - A refusal is counted in `SaveStatus.RefusedGrowth`. Nothing is dropped from a save.
 - One drone per owner is held back, so a pilot whose hull is destroyed always gets out.
@@ -219,8 +220,10 @@ A save is refused on load unless it leaves that drone room:
 
 ## What a load does
 
-- Rebuilt from the save: block sets, revisions, lost cores, collision counts, sums, flight figures.
-- Kept exactly: motion, charge, fuel, shield marks, jump stage and timers, orders, hit points, the hit total, dents.
+- Rebuilt from the save: block sets, revisions, lost cores, collision counts, sums, flight figures, what a hull
+  has of each fuel (its tanks added up).
+- Kept exactly: motion, charge, each tank's fuel, shield marks, jump stage and timers, orders, hit points, the hit
+  total, dents.
 - Started over: contact ticks, order counters, control epochs, rounds, everything of a connection.
 - The catalogue and its roles (pod, drone, starting fleet) come from the save, in order. The files are not asked.
 - Hulls keep the order they are stepped in. The gaps between slots are not kept.
@@ -430,14 +433,23 @@ Server restoration additionally validates resource ids and that each named cloud
 Observation timestamps and reported values survive unchanged; operation progress and cooldowns reset.
 Generation 8 and codec 5 made older worlds incompatible; they are refused without writes or migration.
 
-## Fuel (codec 6)
+## Fuel (codec 8)
 
-- Each saved hull holds its three tanks (nitrogen, hydrazine, bipropellant, in kg) after its battery charge, then
-  four bytes of what its thrust parts were doing (`ThrustState`). 16 bytes a hull.
-- Load rules: each tank is a number, not below nothing and not above what the hull's tanks hold after its losses.
-  Thrust bits no step writes are refused. A hull that breaks a rule refuses the whole save, as any other rule does.
-- Kept exactly, like charge. Capacity is not saved: it is read off the blocks the hull has left.
-- The design encoding is part of what a save must match: 4 since thrusters mount on faces. Codec 7, encoding 4
+- Fuel is saved tank by tank. After its hit points each saved hull holds a count of tanks and eight bytes a tank:
+  the kilograms in it, double precision, in the order of the design's tanks (`HullDesign.Tanks`).
+- The snapshot holds them in `WorldSnapshot.TankFuel`, hull after hull; `SavedHull.TankStart` and `Tanks` say where.
+- A hull's per-fuel figures are not saved. A load adds its tanks up (`HullField.RestoreFigures`).
+- After its battery charge a hull still holds four bytes of what its thrust parts were doing (`ThrustState`).
+- Load rules (`BlockStateStore.TryRestoreTanks`), after the losses are replayed:
+  - One figure for each tank of the hull's design, no more and no fewer.
+  - Each a number, not below nothing and not above the tank's capacity.
+  - Nothing in a tank the hull has lost.
+  - Thrust bits no step writes are refused.
+  - A hull that breaks a rule refuses the whole save, as any other rule does. Nothing is clamped to fit.
+- Kept exactly, to the bit. Capacity is not saved: it comes from the design.
+- Room: a tank is a block, so `HasRoom`'s bound on blocks bounds tanks. The capture buffer has a figure for
+  every block.
+- The design encoding is part of what a save must match: 4 since thrusters mount on faces. Codec 8, encoding 4
   and evaluator 12 make older worlds incompatible; they are refused untouched, without migration.
 - A mounted thruster has nothing of its own in a save: a hull has it while it has the block it sits on.
 - Rules and figures: `docs/roadmap/propulsion.md`.

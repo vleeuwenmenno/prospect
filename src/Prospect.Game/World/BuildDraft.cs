@@ -35,6 +35,8 @@ public enum DraftEdit : byte
     TooManyMounts,
     /// <summary>The part mounts on a face and cannot be placed as a block, or is a block and cannot be mounted.</summary>
     WrongKind,
+    /// <summary>One more tank would exceed the content's count: a hull's fuel is kept tank by tank.</summary>
+    TooManyTanks,
 }
 
 /// <summary>
@@ -270,6 +272,8 @@ public sealed class BuildDraft
             return DraftEdit.TooManyBlocks;
         if (type?.Mount is not null)
             return DraftEdit.WrongKind;
+        if (type is not null && type.Tank != FuelKind.None && Tanks() >= _content.Blocks.Limits.MaxTanks)
+            return DraftEdit.TooManyTanks;
         var check = Check(new DesignBox(at, size, type!), -1);
         if (check != DraftEdit.Done || type is null)
             return check;
@@ -312,8 +316,14 @@ public sealed class BuildDraft
     {
         if (boxes.IsEmpty) return DraftEdit.Unchanged;
         if (!CountFits((long)_boxes.Count + boxes.Length)) return DraftEdit.TooManyBlocks;
+        var tanks = 0;
         foreach (ref readonly var box in boxes)
+        {
             if (box.Type?.Mount is not null) return DraftEdit.WrongKind;
+            if (box.Type is not null && box.Type.Tank != FuelKind.None) tanks++;
+        }
+
+        if (tanks > 0 && Tanks() + tanks > _content.Blocks.Limits.MaxTanks) return DraftEdit.TooManyTanks;
         var check = CheckGroup(boxes, default, by, default);
         return check == DraftEdit.Done && MixesDrives(boxes) ? DraftEdit.MixedDrives : check;
     }
@@ -904,6 +914,15 @@ public sealed class BuildDraft
         }
 
         return false;
+    }
+
+    /// <summary>How many of the draft's blocks are tanks. One pass over the boxes; allocates nothing.</summary>
+    private int Tanks()
+    {
+        var tanks = 0;
+        foreach (var box in _boxes)
+            if (box.Type.Tank != FuelKind.None) tanks++;
+        return tanks;
     }
 
     // The same count bound GeometryAdmission.Count applies, checked here so the editor stops at it; Export runs the real one.

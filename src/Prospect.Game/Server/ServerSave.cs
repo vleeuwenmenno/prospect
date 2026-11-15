@@ -295,8 +295,9 @@ public sealed partial class ServerHost
 
     /// <summary>
     /// Puts a snapshot's owners, hulls and pushed asteroids into the empty world, in the saved order, and
-    /// judges every one of them on the way. Block state is brought back by replaying the losses, flight figures
-    /// are read off the restored sums, and motion, charge, jumps and orders are then left exactly as saved.
+    /// judges every one of them on the way. Block state is brought back by replaying the losses, each tank is
+    /// given what it held, flight figures are read off the restored sums and fuel off the restored tanks, and
+    /// motion, charge, jumps and orders are then left exactly as saved.
     /// Throws <see cref="InvalidDataException"/> for anything a world of this content could not have saved.
     /// </summary>
     private void RestoreWorld(WorldSnapshot world)
@@ -304,7 +305,7 @@ public sealed partial class ServerHost
         if (world.NextWorldTick is < 0 or > long.MaxValue / 2 || world.NextOwnerId == 0 || world.NextEntityId == 0)
             throw new InvalidDataException("The saved world's clock or counters do not hold together.");
         if (world.OwnerCount > _saveLimits.MaxOwners || world.HullCount > _saveLimits.MaxHulls || world.BlockCount > _saveLimits.MaxBlocks
-            || world.RockCount > _saveLimits.MaxRocks || world.LossCount > world.BlockCount)
+            || world.RockCount > _saveLimits.MaxRocks || world.LossCount > world.BlockCount || world.TankCount > world.BlockCount)
             throw new InvalidDataException("The saved world holds more than a world may.");
         for (var i = 0; i < _catalogue.Count; i++)
         {
@@ -323,6 +324,7 @@ public sealed partial class ServerHost
         var entities = new HashSet<ulong>(world.HullCount);
         var blocks = 0;
         var losses = 0;
+        var tanks = 0;
         for (var i = 0; i < world.HullCount; i++)
         {
             ref var saved = ref world.Hulls[i];
@@ -343,8 +345,15 @@ public sealed partial class ServerHost
                 throw new InvalidDataException($"Saved hull {i}: {error}.");
             if (_hulls.Revision(handle.Index) == (uint)saved.Blocks || _hulls.BlockStates.CoresLost(info.BlockState) > 0)
                 throw new InvalidDataException($"Saved hull {i} is a hull that was destroyed.");
+
+            // A tank holds what it was saved with, and only what such a tank can: one figure for each tank of the
+            // design, a number from nothing to the tank's capacity, and nothing in a tank that was lost.
+            if (saved.Tanks != design.Tanks.Length || saved.TankStart != tanks || tanks + saved.Tanks > world.TankCount
+                || !_hulls.BlockStates.TryRestoreTanks(info.BlockState, world.TankFuel.AsSpan(tanks, saved.Tanks)))
+                throw new InvalidDataException($"Saved hull {i}: its fuel is outside what its tanks hold.");
             blocks += saved.Blocks;
             losses += saved.LossCount;
+            tanks += saved.Tanks;
 
             _field.RestoreFigures(handle.Index);
             error = JudgeHull(saved, _hulls.Flight(handle.Index), design, world.NextWorldTick);
@@ -361,7 +370,7 @@ public sealed partial class ServerHost
             info.Piloted = _owners[owner].Controlled == saved.Entity;
         }
 
-        if (blocks != world.BlockCount || losses != world.LossCount)
+        if (blocks != world.BlockCount || losses != world.LossCount || tanks != world.TankCount)
             throw new InvalidDataException("The saved hulls do not add up to the saved blocks.");
 
         for (var i = 0; i < _ownerCount; i++)
@@ -421,8 +430,6 @@ public sealed partial class ServerHost
         if (!(state.Heat >= 0f && state.Heat <= 1f) || !(state.Energy >= 0f && state.Energy <= flight.EnergyStorage)
             || !(state.Shield >= 0f && state.Shield <= flight.ShieldCapacity) || !(state.ShieldCooldown >= 0f) || !float.IsFinite(state.ShieldCooldown))
             return "its charge is outside what the hull holds";
-        if (!state.Fuel.Within(flight.FuelCapacity))
-            return "its fuel is outside what its tanks hold";
         if (!state.Thrust.IsValid)
             return "its thrust is not one a hull has";
         var intact = Math.Max(design.Flight.HullPoints, (float)design.IntactHitTotal);
@@ -496,6 +503,7 @@ public sealed partial class ServerHost
         buffer.HullCount = 0;
         buffer.BlockCount = 0;
         buffer.LossCount = 0;
+        buffer.TankCount = 0;
         for (var i = 0; i < _hulls.Slots; i++)
         {
             if (!_hulls.IsAliveAt(i))
@@ -510,6 +518,9 @@ public sealed partial class ServerHost
             saved.EscapeDrone = info.EscapeDrone;
             saved.DamageTick = info.DamageTick;
             saved.State = _hulls.State(i);
+
+            // What the hull has of each fuel is its tanks added up: the tanks are saved, the sum is made again.
+            saved.State.Fuel = default;
             saved.Order = info.Order;
             saved.Visual = info.Visual;
             saved.HitTotal = _hulls.BlockStates.HitTotal(info.BlockState);
@@ -521,6 +532,13 @@ public sealed partial class ServerHost
             lost.CopyTo(buffer.Losses.AsSpan(buffer.LossCount));
             buffer.BlockCount += points.Length;
             buffer.LossCount += lost.Length;
+
+            // A tank is a block, so the room for every hull's blocks is room for every hull's tanks.
+            var fuel = _hulls.BlockStates.Tanks(info.BlockState);
+            saved.TankStart = buffer.TankCount;
+            saved.Tanks = fuel.Length;
+            fuel.CopyTo(buffer.TankFuel.AsSpan(buffer.TankCount));
+            buffer.TankCount += fuel.Length;
         }
 
         // An owner whose hull went while they were away is saved as flying nothing: they get a drone when let in.
@@ -777,15 +795,19 @@ public sealed partial class ServerHost
     /// <summary>
     /// Creates a hull and gives it its durable name: a new one, or <paramref name="entity"/> for the hull that
     /// replaces another in a repair or an edit and is still that ship. Creating a hull can move the hull
-    /// storage: hold no reference into it across this call. Tanks start full or empty as the caller says: a
-    /// first spawn and an escape drone are full; a ship built new and a hull that replaces another start empty
-    /// and the caller sets what the old one held.
+    /// storage: hold no reference into it across this call. Every tank starts full or empty as the caller says:
+    /// a first spawn and an escape drone are full; a ship built new and a hull that replaces another start empty
+    /// and the caller gives each tank what the old hull's held (<see cref="CarryFuel"/>).
     /// </summary>
     private HullHandle CreateHull(uint owner, byte design, Double3 position, bool fullTanks, ulong entity = 0)
     {
         var handle = _hulls.Create(owner, design, _content.Designs[design], position);
         if (!fullTanks)
+        {
+            _hulls.BlockStates.EmptyTanks(_hulls.Info(handle.Index).BlockState);
             _hulls.State(handle.Index).Fuel = default;
+        }
+
         _hulls.Info(handle.Index).Entity = entity != 0 ? entity : _nextEntityId++;
         return handle;
     }

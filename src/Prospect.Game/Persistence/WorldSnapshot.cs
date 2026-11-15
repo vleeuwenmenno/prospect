@@ -164,6 +164,13 @@ public struct SavedHull
     /// <summary>Where this hull's lost blocks begin in <see cref="WorldSnapshot.Losses"/>, and how many it has lost, in order.</summary>
     public int LossStart;
     public int LossCount;
+
+    /// <summary>
+    /// Where this hull's tanks begin in <see cref="WorldSnapshot.TankFuel"/>, and how many tanks its design has.
+    /// The fuel in <see cref="State"/> is not saved: it is the tanks added up, and a load adds them up again.
+    /// </summary>
+    public int TankStart;
+    public int Tanks;
 }
 
 /// <summary>
@@ -179,7 +186,8 @@ public struct SavedHull
 /// </para>
 /// <para>
 /// What a save does not hold and a load makes again: block sets, revisions, lost cores, collision counts and
-/// sums (by replaying the losses), flight figures (read off the sums), which hull is piloted (from the owners),
+/// sums (by replaying the losses), flight figures (read off the sums), what a hull has of each fuel (its tanks
+/// added up), which hull is piloted (from the owners),
 /// contact ticks, order counters, control epochs and rounds (they start over).
 /// </para>
 /// </summary>
@@ -192,6 +200,7 @@ public sealed class WorldSnapshot
         Hulls = new SavedHull[hulls];
         HitPoints = new float[blocks];
         Losses = new int[blocks];
+        TankFuel = new double[blocks];
         Rocks = new RockDelta[rocks];
         Charts = new SectorChart[charts];
         ModuleObservations = new ModuleObservation[moduleObservations];
@@ -271,6 +280,14 @@ public sealed class WorldSnapshot
     /// <summary>Every hull's lost blocks in the order they went, hull after hull. The first <see cref="LossCount"/> are meaningful.</summary>
     public readonly int[] Losses;
     public int LossCount;
+
+    /// <summary>
+    /// The kilograms of fuel in every hull's tanks, tank by tank in the order of the hull's design, hull after
+    /// hull, in the double precision they are kept in; a tank that was lost holds nothing. The first
+    /// <see cref="TankCount"/> are meaningful. A tank is a block, so there is room for as many as there are blocks.
+    /// </summary>
+    public readonly double[] TankFuel;
+    public int TankCount;
 
     /// <summary>
     /// The asteroids that were pushed, in the order they first were, with the tick each motion starts at. The

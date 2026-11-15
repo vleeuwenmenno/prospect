@@ -87,6 +87,15 @@ public struct HullView
     public FuelFlow Fuel;
 
     /// <summary>
+    /// The kilograms of fuel in each tank of the hull, as prediction has them now: entry <c>i</c> is tank <c>i</c>
+    /// of the design's <see cref="HullDesign.Tanks"/>, which names its block, its fuel and its capacity; a tank
+    /// that is lost holds nothing. <see cref="Fuel"/> has the same fuel added up. Filled for the hull the player
+    /// flies and empty for every other: the server tells nobody of any other hull's tanks. It reads the
+    /// snapshot's own memory (<see cref="SessionSnapshot.OwnTanks"/>).
+    /// </summary>
+    public ReadOnlyMemory<float> Tanks;
+
+    /// <summary>
     /// What the hull's thrust parts are doing, for every hull in view: the throttle toward each direction and the
     /// kinds of part firing, as the simulation's last step left it. <see cref="ThrustState.Firing"/> answers for
     /// one part from the fuel its type burns and the way its box faces. The player's hull has it from prediction,
@@ -607,8 +616,11 @@ internal sealed partial class ClientWorld : IDisposable
         _ownHealth = own.HasHealth;
         ReadHealth(_ownBlocks, own);
 
-        // Records carry no tanks; the header has those of the hull the player flies.
-        own.State.Fuel = header.OwnFuel;
+        // Records carry no tanks; the header has those of the hull the player flies, one figure for each tank of
+        // its design. Prediction burns from them, and what the hull has of a fuel is those tanks added up.
+        ReadOnlySpan<float> levels = header.OwnTanks;
+        _blocks.SetTanks(_ownBlocks, levels[..header.OwnTankCount]);
+        own.State.Fuel = TankFuel.Total(_blocks.Tanks(_ownBlocks), OwnDesign.Tanks);
         Reconcile(own.State, own.Order, header.ServerTick, header.AppliedOrderId);
     }
 
@@ -644,9 +656,10 @@ internal sealed partial class ClientWorld : IDisposable
     /// Writes this tick's hull views. Returns how many were written and which one is the player's. Each view's
     /// blocks are copied into <paramref name="blockWords"/>, the publication's own memory for them, so the
     /// reader of the views never looks into the world's store. That memory is replaced by a larger one only
-    /// when the hulls in view need more words than it has.
+    /// when the hulls in view need more words than it has. The own hull's tank levels are copied into
+    /// <paramref name="ownTanks"/>, which has room for the most tanks a design may have.
     /// </summary>
-    public int BuildViews(HullView[] views, ref ulong[] blockWords, double serverTick, long clientTick, out int ownIndex)
+    public int BuildViews(HullView[] views, ref ulong[] blockWords, float[] ownTanks, double serverTick, long clientTick, out int ownIndex)
     {
         var count = 0;
         ownIndex = -1;
@@ -665,6 +678,10 @@ internal sealed partial class ClientWorld : IDisposable
 
         if (_hasOwnState)
         {
+            // The tanks as prediction left them: the predicted hull burns from a copy of its own.
+            var levels = _near.Slots > 0 && _near.IsAliveAt(0) ? _near.BlockStates.Tanks(_near.Info(0).BlockState) : _blocks.Tanks(_ownBlocks);
+            for (var tank = 0; tank < levels.Length; tank++)
+                ownTanks[tank] = (float)levels[tank];
             ownIndex = count;
             views[count++] = new HullView
             {
@@ -692,6 +709,7 @@ internal sealed partial class ClientWorld : IDisposable
                 EnergyRate = _energyRate,
                 Power = _power,
                 Fuel = new FuelFlow { Amount = _predicted.Fuel, Capacity = _flight.FuelCapacity, Burn = _fuel.Burn },
+                Tanks = new ReadOnlyMemory<float>(ownTanks, 0, levels.Length),
                 Thrust = _predicted.Thrust,
                 Shield = _predicted.Shield,
                 Hull = _predicted.Hull,

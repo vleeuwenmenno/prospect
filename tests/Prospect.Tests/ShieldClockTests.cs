@@ -78,7 +78,7 @@ public sealed class ShieldClockTests
             // A first-sight observer receives the same wire bytes, using its delayed display moment.
             reader = new NetReader(bytes[1..]);
             observer.OnSnapshot(ref reader, header.ServerTick);
-            var count = observer.BuildViews(views, ref words, header.ServerTick + 6, header.ServerTick, out _);
+            var count = observer.BuildViews(views, ref words, new float[TankFuel.MaxTanks], header.ServerTick + 6, header.ServerTick, out _);
             Assert.True(count > 1);
             for (var i = 0; i < count; i++)
             {
@@ -89,7 +89,7 @@ public sealed class ShieldClockTests
             {
                 reader = new NetReader(bytes[1..]);
                 lateObserver.OnSnapshot(ref reader, header.ServerTick);
-                count = lateObserver.BuildViews(views, ref words, header.ServerTick + 6, header.ServerTick, out _);
+                count = lateObserver.BuildViews(views, ref words, new float[TankFuel.MaxTanks], header.ServerTick + 6, header.ServerTick, out _);
                 Assert.True(count > 1);
                 for (var i = 0; i < count; i++)
                 {

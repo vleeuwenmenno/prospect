@@ -200,6 +200,9 @@ public sealed class BoxHullSums
     /// <summary>The hull points a block has when intact, by its type and size, before a world's hull strength.</summary>
     public double HullPoints(int block) => _kinds[_kindOf[block]].Values[Hull];
 
+    /// <summary>The kilograms of <paramref name="fuel"/> a block holds when full, by its type and size; zero for a block that is no tank of it.</summary>
+    public double TankCapacity(int block, FuelKind fuel) => fuel == FuelKind.None ? 0.0 : _kinds[_kindOf[block]].Values[FuelCapacity + (int)fuel - 1];
+
     /// <summary>
     /// Builds the sums of the hull that has the blocks of <paramref name="alive"/>, a <see cref="BlockSet"/> of
     /// the design, into <paramref name="sums"/>. It looks at every block, so it is for a design being made and

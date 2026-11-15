@@ -12,8 +12,8 @@ public readonly record struct BlockStateHandle(int Index, int Generation)
 
 /// <summary>
 /// What a hull adds to its design: which blocks it still has, how many it has lost, the running sums its
-/// figures are read from and, where the hull is decided, the hit points each block has left and their total.
-/// Unmanaged memory addressed by handle, sized to the hull's design.
+/// figures are read from, the kilograms of fuel in each of its tanks and, where the hull is decided, the hit
+/// points each block has left and their total. Unmanaged memory addressed by handle, sized to the hull's design.
 /// <para>
 /// A block state lasts as long as its hull is known, and one party owns it. On the server that is the
 /// <see cref="HullStore"/> the hull lives in: it takes the state when the hull is created and gives it back when
@@ -25,8 +25,9 @@ public readonly record struct BlockStateHandle(int Index, int Generation)
 /// </para>
 /// <para>
 /// A state is only read from outside. A block goes by <see cref="Lose"/>, or by <see cref="Hit"/> where there
-/// are hit points, and that one call takes the block from the set, counts the loss and brings the sums and the
-/// hit total up to date, so the four can never disagree.
+/// are hit points, and that one call takes the block from the set, counts the loss, empties the tank it was and
+/// brings the sums and the hit total up to date, so they can never disagree. The one thing written from outside
+/// is what the tanks hold (<see cref="TankLevels"/>): the flight step burns from it.
 /// </para>
 /// <para>
 /// Memory is taken when a state is created and kept for the next one when it is released; losing a block takes
@@ -62,6 +63,9 @@ public sealed unsafe class BlockStateStore : IDisposable
         /// <summary>The hit points of every block left, added up; kept right from the blocks that are touched.</summary>
         public double HitTotal;
         public int HasHitPoints;
+
+        /// <summary>How many tanks the design has: the kilograms in each sit last in the state's memory.</summary>
+        public int Tanks;
     }
 
     private struct Slot
@@ -105,12 +109,24 @@ public sealed unsafe class BlockStateStore : IDisposable
 
     /// <summary>The bytes the state of one hull of a design takes, before the store rounds it up to a piece it hands out.</summary>
     public static long BytesFor(HullDesign design, bool hitPoints) =>
-        sizeof(Header) + (long)BlockSet.WordCount(design.BlockCount) * sizeof(ulong) + design.Sums.StorageBytes + (hitPoints ? (long)design.BlockCount * sizeof(float) : 0) + (long)design.BlockCount * sizeof(int) + (long)design.Collision.IntactCounts.Length * sizeof(int);
+        sizeof(Header) + (long)BlockSet.WordCount(design.BlockCount) * sizeof(ulong) + design.Sums.StorageBytes + (hitPoints ? (long)design.BlockCount * sizeof(float) : 0) + (long)design.BlockCount * sizeof(int) + (long)design.Collision.IntactCounts.Length * sizeof(int)
+        + TankBytes(design.BlockCount, hitPoints, design.Tanks.Length);
 
     /// <summary>
-    /// Takes the block state of an intact hull of a design: every block alive, none lost, and the design's
-    /// intact sums, copied. With <paramref name="hitPoints"/> it also holds each block's hit points, full; a
-    /// prediction baseline also needs these to reproduce block losses.
+    /// The bytes a state's tanks take at its end: eight for each, after what brings them to a multiple of eight
+    /// from the block arrays before them, so the kilograms sit aligned.
+    /// </summary>
+    private static long TankBytes(int blocks, bool hitPoints, int tanks) =>
+        tanks == 0 ? 0 : TankPadding(blocks, hitPoints) + (long)tanks * sizeof(double);
+
+    // Before the tanks come four bytes for each block's hit points, if kept, four for each loss and four for each
+    // of the 2n - 1 collision counts; everything before those is a multiple of eight.
+    private static int TankPadding(int blocks, bool hitPoints) => (int)(((hitPoints ? 4L : 3L) * blocks - 1) * sizeof(int) & 7) == 0 ? 0 : 4;
+
+    /// <summary>
+    /// Takes the block state of an intact hull of a design: every block alive, none lost, every tank full, and
+    /// the design's intact sums, copied. With <paramref name="hitPoints"/> it also holds each block's hit points,
+    /// full; a prediction baseline also needs these to reproduce block losses.
     /// </summary>
     public BlockStateHandle Create(HullDesign design, bool hitPoints)
     {
@@ -142,7 +158,8 @@ public sealed unsafe class BlockStateStore : IDisposable
         _count++;
 
         var header = (Header*)slot.Memory;
-        *header = new Header { Blocks = blocks, Nodes = design.Sums.NodeCount, HasHitPoints = hitPoints ? 1 : 0 };
+        var tanks = design.Tanks;
+        *header = new Header { Blocks = blocks, Nodes = design.Sums.NodeCount, HasHitPoints = hitPoints ? 1 : 0, Tanks = tanks.Length };
         BlockSet.Fill(new Span<ulong>(header + 1, words), blocks);
         design.Sums.Intact.CopyTo(SumsOf(header));
         design.Collision.IntactCounts.CopyTo(CollisionCountsOf(header));
@@ -152,6 +169,9 @@ public sealed unsafe class BlockStateStore : IDisposable
             header->HitTotal = design.IntactHitTotal;
         }
 
+        var levels = TanksOf(header);
+        for (var i = 0; i < tanks.Length; i++)
+            levels[i] = tanks[i].Capacity;
         return new BlockStateHandle(index, slot.Generation);
     }
 
@@ -347,8 +367,76 @@ public sealed unsafe class BlockStateStore : IDisposable
             points = 0f;
         }
 
+        // A tank that is lost loses what it held.
+        if (header->Tanks != 0 && design.TankOf(block) is >= 0 and var tank)
+            TanksOf(header)[tank] = 0.0;
+
         design.Sums.Lose(SumsOf(header), alive, block);
         design.Collision.Lose(CollisionCountsOf(header), block);
+        return true;
+    }
+
+    /// <summary>
+    /// The kilograms of fuel in each tank of the state's design, in the order of <see cref="HullDesign.Tanks"/>. A
+    /// tank that is lost holds nothing. The span stays good until the state is released.
+    /// </summary>
+    public ReadOnlySpan<double> Tanks(BlockStateHandle handle) => TanksOf(Find(handle));
+
+    /// <summary>
+    /// <see cref="Tanks"/> to write to, for the flight step that burns from them. Whoever writes keeps what a tank
+    /// may hold: a number from nothing to the tank's capacity, and nothing in a tank that is lost.
+    /// </summary>
+    internal Span<double> TankLevels(BlockStateHandle handle) => TanksOf(Find(handle));
+
+    /// <summary>Empties every tank: a ship built new starts with none of the fuel a first spawn is given.</summary>
+    public void EmptyTanks(BlockStateHandle handle) => TanksOf(Find(handle)).Clear();
+
+    /// <summary>
+    /// Gives each tank what a save says it held. Nothing is trusted: the figures must be one for each tank of the
+    /// design, each a number from nothing to the tank's capacity, and nothing for a tank that is lost. Returns
+    /// false for anything else; the tanks are then half written and the state only fit to be released.
+    /// </summary>
+    public bool TryRestoreTanks(BlockStateHandle handle, ReadOnlySpan<double> kilograms)
+    {
+        var header = Find(handle);
+        var levels = TanksOf(header);
+        if (kilograms.Length != levels.Length)
+            return false;
+
+        var tanks = _slots[handle.Index].Design!.Tanks;
+        var alive = AliveOf(header);
+        for (var i = 0; i < levels.Length; i++)
+        {
+            // Written so that a value that is no number fails it.
+            if (!(kilograms[i] >= 0.0 && kilograms[i] <= (BlockSet.Has(alive, tanks[i].Block) ? tanks[i].Capacity : 0f)))
+                return false;
+            levels[i] = kilograms[i];
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Sets what each tank holds from the figures a server sends of the hull a client predicts, which travel in
+    /// single precision. Each is brought into what its tank may hold: no number and less than nothing are
+    /// nothing, more than the tank's capacity is the capacity, and a tank that is lost holds nothing whatever
+    /// is said. A count that is not the design's changes nothing and returns false.
+    /// </summary>
+    public bool SetTanks(BlockStateHandle handle, ReadOnlySpan<float> kilograms)
+    {
+        var header = Find(handle);
+        var levels = TanksOf(header);
+        if (kilograms.Length != levels.Length)
+            return false;
+
+        var tanks = _slots[handle.Index].Design!.Tanks;
+        var alive = AliveOf(header);
+        for (var i = 0; i < levels.Length; i++)
+        {
+            var most = BlockSet.Has(alive, tanks[i].Block) ? tanks[i].Capacity : 0f;
+            levels[i] = kilograms[i] > most ? most : kilograms[i] >= 0f ? kilograms[i] : 0.0;
+        }
+
         return true;
     }
 
@@ -403,6 +491,11 @@ public sealed unsafe class BlockStateStore : IDisposable
     private static Span<int> CollisionCountsOf(Header* header) => new(
         (byte*)(header + 1) + BlockSet.WordCount(header->Blocks) * sizeof(ulong) + (nint)header->Nodes * sizeof(HullSum)
         + (header->HasHitPoints != 0 ? (nint)header->Blocks * sizeof(float) : 0) + (nint)header->Blocks * sizeof(int), header->Blocks * 2 - 1);
+
+    private static Span<double> TanksOf(Header* header) => new(
+        (byte*)(header + 1) + BlockSet.WordCount(header->Blocks) * sizeof(ulong) + (nint)header->Nodes * sizeof(HullSum)
+        + (header->HasHitPoints != 0 ? (nint)header->Blocks * sizeof(float) : 0) + (nint)header->Blocks * sizeof(int) + (nint)(header->Blocks * 2 - 1) * sizeof(int)
+        + TankPadding(header->Blocks, header->HasHitPoints != 0), header->Tanks);
 
     private static Span<ulong> AliveOf(Header* header) => new(header + 1, BlockSet.WordCount(header->Blocks));
 

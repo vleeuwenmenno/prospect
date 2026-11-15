@@ -307,16 +307,27 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   hold them. Check with `--open edit-mount` and the `--thrust` captures.
 - **Thrust, facing and fuel:** a thrust part pushes the hull the opposite way to its `DesignBox.Facing` (a mounted
   one, to the face it sits on) and burns its `BlockType.Fuel`; `BoxHullSums` keeps thrust and burn per push direction and fuel (`ThrustTable`), tank room
-  and pump power per fuel, and `FlightModel.Step` is the one place that moves a hull and spends fuel
-  (`HullState.Fuel`), dampener braking included. It also fills `FuelFlow` (`HullBody.Fuel`, `HullInfo.Fuel`,
-  `HullView.Fuel`, like `PowerFlow`) and writes `HullState.Thrust` (`ThrustState`: which way the hull is pushed and
-  which kinds of part fire), which every hull record carries, so effects read it for any hull and never work
-  thrust out a second way. Only the own hull's tanks are sent (`SnapshotHeader.OwnFuel`): a record has four bytes
-  to spare before 255 of them no longer fit a snapshot (`ProtocolTests`). A fuel a hull has none of gives no
-  thrust; never add thrust that skips the tanks. Nothing refuels. `ServerHost.CreateHull` says whether tanks start
-  full: a first spawn (`SpawnFleet`) and an escape drone are full; a ship built new from the drone starts empty; a
-  hull that replaces another (edit or repair, `ReplaceHull`) keeps the old hull's fuel per fuel, clamped to the new
-  design's capacity, so new tanks add room, not fuel, and a repair restores blocks, never fuel. A new facing-dependent figure goes through
+  and pump power per fuel, and `FlightModel.Step` is the one place that moves a hull and spends fuel,
+  dampener braking included. Fuel is kept per tank: a design lists its tanks in block order (`HullDesign.Tanks`,
+  at most 255: `limits.maxTanks`, `TankFuel.MaxTanks`), a hull keeps the kilograms in each with its block state
+  (`BlockStateStore.Tanks`, doubles; a lost tank holds nothing), and `HullState.Fuel` is only their sum per fuel
+  (`TankFuel.Total`): whoever changes a tank writes the sum again, and nothing sends or saves it. A burn draws
+  from every tank of the fuel in proportion to what it holds (`TankFuel.Drain`); never spend or add fuel another
+  way, and keep the arithmetic plain and in tank order, as the client predicts with it. A hull stepped without a
+  block state (`HullSim.Step` with no body) is flown from `HullState.Fuel` as one tank per fuel. The step also
+  fills `FuelFlow` (`HullBody.Fuel`, `HullInfo.Fuel`, `HullView.Fuel`, like `PowerFlow`) and writes
+  `HullState.Thrust` (`ThrustState`: which way the hull is pushed and which kinds of part fire), which every hull
+  record carries, so effects read it for any hull and never work thrust out a second way. Only the own hull's
+  tanks are sent, in the snapshot header (`SnapshotHeader.OwnTanks`: a count and a float a tank, at most 1,046
+  bytes): 255 records and that header just fit a snapshot, with no byte a record to spare (`ProtocolTests`,
+  `PropulsionTests`). The client reads them through `HullView.Tanks` (`SessionSnapshot.OwnTanks`); the fuel row
+  reads only `HullView.Fuel`. A fuel a hull has none of gives no thrust; never add thrust that skips the tanks.
+  Nothing refuels and nothing moves fuel between tanks. `ServerHost.CreateHull` says whether tanks start full: a
+  first spawn (`SpawnFleet`) and an escape drone are full; a ship built new from the drone starts empty; a hull
+  that replaces another (edit or repair, `ReplaceHull`) gives each tank what the same tank of the old hull held
+  (`CarryFuel`: same type, shape and cells), so a new, moved or resized tank and one a repair builds again are
+  empty. A save holds each tank (`WorldSnapshot.TankFuel`, load rule `BlockStateStore.TryRestoreTanks`). A new
+  facing-dependent figure goes through
   `ScaledFigures` and bumps `ContentIdentity.EvaluatorVersion`; a new fuel needs a `FuelKind`, a slot in
   `FuelTanks` and `ThrustTable`, the wire, the save codec and a load rule. Size limits per type are `maxSide` in
   `blocks.json` (`BoxDesign.MaxSide`). Figures and rules in `docs/roadmap/propulsion.md`; `PropulsionTests` holds

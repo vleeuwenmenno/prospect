@@ -8,7 +8,8 @@
 - **Built:** low-poly models of engines and both thruster kinds, in flight and in the editor, and their vacuum plumes
   and cold gas puffs (below).
 - **Built:** thrusters mount on block faces ("Face mounts" below): data, simulation, editor, shipped ships.
-- Protocol 51, save layout 7, design encoding 4, design file version 5, evaluator 12.
+- **Built:** fuel is kept tank by tank ("Fuel per tank" below): simulation, wire, save. No interface for it yet.
+- Protocol 52, save layout 8, design encoding 4, design file version 5, evaluator 12.
 
 ## Decided: parts
 
@@ -46,8 +47,8 @@
   recovery, more softly than before. Boost costs fuel more than electricity: it drains the battery over tens of seconds, not
   seconds, and burns far more fuel for its extra speed.
 - No refuelling exists yet. Only a ship's first spawn starts with full tanks.
-  - An edit keeps the fuel the ship had, per fuel, up to the new capacity. New tanks add room, not fuel.
-  - A repair restores blocks, not fuel. There is no Refuel button.
+  - An edit keeps each tank's fuel. A new tank starts empty: it adds room, not fuel.
+  - A repair restores blocks, not fuel. A tank it builds again is empty. There is no Refuel button.
   - A ship built new from the drone starts with empty tanks.
   - The escape drone is made new each time a pilot steps out or loses a hull, and always starts with full tanks. It is
     the pilot's spare, not a ship they built; it carries too little to refuel anything.
@@ -55,6 +56,79 @@
 - Fuel is simulation state: shared flight code, predicted by the client, saved with the world.
 - Dampeners fire the same parts and burn the same fuel. At rest they burn nothing.
 - Fuel has no mass yet: a full tank and an empty one weigh the same.
+
+## Decided: fuel per tank
+
+Built. Why: gas mining will later fill tanks to different levels. Rules live in `TankFuel`; `PropulsionTests`,
+`EditorSessionTests` and `SaveLifecycleTests` hold them.
+
+### What is kept
+
+- Every tank block holds its own kilograms. Its capacity comes from its type and size, as before.
+- A design lists its tanks in block order (`HullDesign.Tanks`). A tank is named by its index there.
+- A hull keeps the kilograms with its block state (`BlockStateStore.Tanks`), one figure a tank.
+- What a hull has of a fuel is its tanks of that fuel added up (`HullState.Fuel`). It is never a figure of its own.
+- Kilograms are kept in double precision. Why: one thruster burns 0.000125 kg a tick; in single precision that
+  rounds the same way every tick, and a large tank at a low throttle would not fall at all.
+
+### Burning
+
+- A burn draws from every tank of that fuel at once, each in proportion to what it holds.
+  - Tanks that are equally full stay equally full, to the bit.
+  - No tank of a fuel runs dry before another: they reach nothing in the same tick.
+- `FlightModel.Step` is still the one place that spends fuel. Plain arithmetic in tank order.
+- A fuel with nothing left gives no thrust, as before.
+- A hull stepped without its tanks (a client flying a hull it only knows the motion of) is stepped as if each fuel
+  sat in one tank: the same code on three figures.
+
+### Losing, repairing, editing
+
+- A tank that is destroyed loses what it held. The other tanks keep theirs.
+- A repair builds a lost tank again, empty.
+- An edit keeps a tank's fuel when the tank is still there: a block of the same type and shape in the same cells.
+  Which way it faces does not matter.
+  - It keeps its kilograms, up to its capacity.
+  - Every other tank of the new design is new and empty. So is a tank moved or resized: it is another box.
+  - A tank taken out takes its fuel with it.
+- A first spawn and an escape drone start with every tank full. A ship built new from the drone starts with
+  every tank empty.
+- Nothing refuels and nothing moves fuel between tanks.
+
+### Limit
+
+- A design has at most 255 tanks: `limits.maxTanks` in `blocks.json`, never above 255 (`TankFuel.MaxTanks`).
+  - Why: a snapshot tells the pilot of every tank, its count is one byte, and 255 records must still fit beside it.
+  - A tank can be any size, so this bounds the number of separate tanks, not the fuel.
+- Design files, `DesignBytes.Decode` and the editor's draft all refuse one more (`DraftEdit.TooManyTanks`).
+
+### Wire (protocol 52)
+
+- The snapshot header carries the own hull's tanks: one count byte, then four bytes a tank (kilograms, single
+  precision), in tank order. A lost tank is sent as nothing.
+- 26 bytes with no tank, 34 for the pod's two, at most 1,046 (255 tanks). It replaces the three per-fuel floats.
+- 255 records without health (252 bytes each) and the largest header are 65,306 bytes: under the 65,536 a
+  snapshot has. One more byte a record would not fit.
+- Not quantised to a fill scale: a float is nearer than one part in ten million to what the server keeps, and is
+  never nothing while the tank holds something. So the client's "has fuel" always agrees with the server's.
+- The client brings each figure into its tank: no number or less than nothing is nothing, more than the capacity
+  is the capacity. A count that is not the design's is ignored. A figure that is no number or below nothing
+  refuses the snapshot.
+- Nobody is sent another hull's tanks.
+
+### Save (layout 8)
+
+- Each hull saves a count and eight bytes a tank (kilograms, double precision), in tank order.
+- The three per-fuel figures are no longer saved: a load adds the tanks up.
+- Load rules: one figure for each tank of the design; each a number from nothing to the tank's capacity; nothing
+  in a tank that was lost. Anything else refuses the whole save.
+- A tank is a block, so the room a save keeps for blocks (`HasRoom`) is room for every tank.
+
+### For the interface
+
+- `HullView.Tanks`, own hull only: the kilograms in each tank as prediction has them, entry `i` for tank `i` of
+  the design's `HullDesign.Tanks` (block, fuel, capacity). Empty for every other hull.
+- It reads `SessionSnapshot.OwnTanks`, the snapshot's own memory.
+- `HullView.Fuel` (`FuelFlow`) still has amount, capacity and burn per fuel. The fuel row reads only that.
 
 ## Decided: readout
 
@@ -203,7 +277,8 @@ How many, and of what:
     one-cell block of them did.
   - A thruster whose nozzle had a block in front of it is left out: it pushes no more.
   - The ship is heavier by the plating. A thruster more than one cell deep pushes less: thrust follows the face.
-- Old saves and old servers are refused untouched: protocol 51, save layout 7, encoding 4, evaluator 12.
+- Old saves and old servers are refused untouched: encoding 4, evaluator 12, and the protocol and save layout
+  under "Status".
 
 ### Editor
 
@@ -319,13 +394,17 @@ With mounts, same mass, thrust and burn as with thruster blocks, so the shipped 
 - **Per part:** its facing is `DesignBox.Facing`, its fuel `BlockType.Fuel`, both in `HullDesign.Boxes`.
 - **Fuel, own hull only:** `HullView.Fuel` (`FuelFlow`): amount, capacity and burn per fuel in kg and kg/s. The burn
   is smoothed like `HullView.Power`. No other hull's tanks are sent to anyone.
+- **Tanks, own hull only:** `HullView.Tanks`: kilograms in each tank ("Fuel per tank").
 - It is simulation state (`HullState.Thrust`), written by `FlightModel.Step`. Nothing is worked out a second way.
-- Wire: 4 bytes in every hull record; the own tanks are 12 bytes in the snapshot header.
+- Wire: 4 bytes in every hull record; the own tanks are one byte and 4 bytes a tank in the snapshot header.
 - Nothing here allocates.
 
 ## Known limits
 
 - The client flies its other hulls forward as if their tanks were full. Wrong only for one that has run dry.
+- A design has at most 255 tanks ("Fuel per tank").
+- The client's tanks are the server's in single precision, so the two can differ in a tank's last place until
+  the next snapshot. Flight does not depend on it: only on whether a fuel is left.
 - An engine's nozzle with a block in front of it still pushes. Nothing checks for it. A mounted thruster cannot
   have one: its box must be clear.
 - A mounted thruster is not hit, not picked and not collided with ("Face mounts").
@@ -336,6 +415,7 @@ With mounts, same mass, thrust and burn as with thruster blocks, so the shipped 
 ## Open
 
 - Whether thrusters placed away from the centre also give torque, alongside or instead of gyros.
-- Fuel transfer, refineries and stations.
+- Fuel transfer between tanks, refineries and stations.
+- How the interface shows each tank.
 - Whether fuel should weigh something.
 - Whether the figures above are right. They are a first balance, not an approved one.

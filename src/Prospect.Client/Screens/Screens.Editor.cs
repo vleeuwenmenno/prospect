@@ -1529,6 +1529,7 @@ internal sealed partial class ScreenHost
         DraftEdit.OffFace => "It does not fit there: a thruster mounts on a whole flat face."u8,
         DraftEdit.TooManyMounts => "The ship has as many mounted parts as a design may have."u8,
         DraftEdit.WrongKind => "That part mounts on a face; it is not a block."u8,
+        DraftEdit.TooManyTanks => "The ship has as many tanks as a design may have. Make a tank larger instead."u8,
         _ => "Nothing changed."u8,
     };
 

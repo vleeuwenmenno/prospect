@@ -538,7 +538,39 @@ public sealed class HullDesign
         }
 
         Sums = new BoxHullSums(boxes);
+
+        // The tanks, in block order: a tank's index here names it wherever its kilograms are kept or sent.
+        var tanks = new List<DesignTank>();
+        for (var i = 0; i < blocks.Length; i++)
+            if (blocks[i].Type.Tank != FuelKind.None)
+                tanks.Add(new DesignTank(i, blocks[i].Type.Tank, (float)Sums.TankCapacity(i, blocks[i].Type.Tank)));
+        _tanks = [.. tanks];
         Apply(rules);
+    }
+
+    private readonly DesignTank[] _tanks;
+
+    /// <summary>
+    /// The design's tanks in block order: which block each is, its fuel and what it holds when full. A hull keeps
+    /// the kilograms in each with its block state, in this order. At most <see cref="TankFuel.MaxTanks"/>.
+    /// </summary>
+    public ReadOnlySpan<DesignTank> Tanks => _tanks;
+
+    /// <summary>The index in <see cref="Tanks"/> of the tank a block is, or -1 for a block that is no tank.</summary>
+    public int TankOf(int block)
+    {
+        var low = 0;
+        var high = _tanks.Length - 1;
+        while (low <= high)
+        {
+            var middle = (low + high) >> 1;
+            var at = _tanks[middle].Block;
+            if (at == block) return middle;
+            if (at < block) low = middle + 1;
+            else high = middle - 1;
+        }
+
+        return -1;
     }
 
     /// <summary>

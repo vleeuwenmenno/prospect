@@ -1421,8 +1421,16 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             AckedInput = connection.LastSimulatedSequence,
             OwnHull = connection.Hull.Packed,
             OwnIsDrone = _hulls.IsAlive(connection.Hull) && _hulls.Info(connection.Hull.Index).EscapeDrone,
-            OwnFuel = _hulls.IsAlive(connection.Hull) ? _hulls.State(connection.Hull.Index).Fuel : default,
         };
+
+        // What each tank of the hull the player flies holds, in single precision: the client burns from these.
+        if (_hulls.IsAlive(connection.Hull))
+        {
+            var levels = _hulls.BlockStates.Tanks(_hulls.Info(connection.Hull.Index).BlockState);
+            header.OwnTankCount = (byte)levels.Length;
+            for (var tank = 0; tank < levels.Length; tank++)
+                header.OwnTanks[tank] = (float)levels[tank];
+        }
 
         // While the player's hull is knocking against others, those go out every tick as well: the client
         // predicts the contact, and can only do it against hulls that are where the server has them.

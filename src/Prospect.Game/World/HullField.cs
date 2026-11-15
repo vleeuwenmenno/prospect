@@ -326,13 +326,15 @@ public sealed class HullField
             States = _authoritative || info.PredictDamage ? _hulls.BlockStates : null,
             State = info.BlockState,
             Scratch = _scratch,
+            Tanks = _hulls.BlockStates.TankLevels(info.BlockState),
             CollisionCounts = _hulls.BlockStates.CollisionCounts(info.BlockState),
         };
     }
 
     /// <summary>
-    /// Reads the flight figures of a hull that was just restored from a save off its restored sums, and leaves its
-    /// motion, charge and jump exactly as they were saved. <see cref="Refit"/> is not used for this: it clamps
+    /// Reads the flight figures of a hull that was just restored from a save off its restored sums, adds its
+    /// restored tanks up into <see cref="HullState.Fuel"/>, and leaves its motion, charge and jump exactly as
+    /// they were saved. <see cref="Refit"/> is not used for this: it clamps
     /// charge and can restart the shield's change clock, which is right when a block goes and wrong when nothing
     /// happened but a load. Whoever restores the hull checks the saved charge against these figures.
     /// </summary>
@@ -342,6 +344,7 @@ public sealed class HullField
         info.FittedRevision = _hulls.Revision(index);
         if (info.FittedRevision != 0)
             _designs[info.Design].Figures(_hulls.BlockStates.Sums(info.BlockState), out _hulls.Flight(index), out _);
+        _hulls.State(index).Fuel = TankFuel.Total(_hulls.BlockStates.Tanks(info.BlockState), _designs[info.Design].Tanks);
     }
 
     /// <summary>
@@ -369,7 +372,7 @@ public sealed class HullField
         state.Shield = Math.Min(state.Shield, flight.ShieldCapacity);
         state.Energy = Math.Min(state.Energy, flight.EnergyStorage);
 
-        // A lost tank takes its share of the room: what the tanks left cannot hold is gone with it.
-        state.Fuel = state.Fuel.Clamped(flight.FuelCapacity);
+        // A lost tank lost what it held when it went: the hull has what its other tanks hold.
+        state.Fuel = TankFuel.Total(_hulls.BlockStates.Tanks(info.BlockState), _designs[info.Design].Tanks);
     }
 }

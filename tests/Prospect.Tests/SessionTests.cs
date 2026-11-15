@@ -137,7 +137,7 @@ public sealed class ProtocolTests
             reader = new NetReader(writer.Written[..length]);
             Assert.False(HullRecord.TryRead(ref reader, out _));
         }
-        Assert.Equal(51u, ProtocolInfo.Version);
+        Assert.Equal(52u, ProtocolInfo.Version);
     }
 
     [Fact]
@@ -365,6 +365,7 @@ public sealed class ClientPredictionTests : IDisposable
     private readonly PlayerInputBridge _input = new();
     private readonly HullView[] _views = new HullView[ClientWorld.MaxViews];
     private ulong[] _blockWords = [];
+    private readonly float[] _ownTanks = new float[TankFuel.MaxTanks];
     private readonly byte[] _buffer = new byte[1024];
     private long _serverTick = 100;
 
@@ -411,14 +412,25 @@ public sealed class ClientPredictionTests : IDisposable
     private void Snapshot(long tick, uint acked, params HullRecord[] hulls)
     {
         var writer = new NetWriter(_buffer);
-        new SnapshotHeader
+        var header = new SnapshotHeader
         {
             ServerTick = tick,
             AckedInput = acked,
             OwnHull = hulls[0].Id,
             HullCount = (byte)hulls.Length,
-            OwnFuel = hulls[0].State.Fuel,
-        }.Write(ref writer);
+        };
+
+        // The own hull's fuel goes out tank by tank: each tank as full as the record says the hull is of its fuel.
+        var design = Content.Designs[hulls[0].Design];
+        var tanks = design.Tanks;
+        header.OwnTankCount = (byte)tanks.Length;
+        for (var i = 0; i < tanks.Length; i++)
+        {
+            var capacity = design.Flight.FuelCapacity[tanks[i].Kind];
+            header.OwnTanks[i] = capacity > 0f ? tanks[i].Capacity * Math.Clamp(hulls[0].State.Fuel[tanks[i].Kind] / capacity, 0f, 1f) : 0f;
+        }
+
+        header.Write(ref writer);
         foreach (var hull in hulls)
             hull.Write(ref writer);
 
@@ -432,7 +444,7 @@ public sealed class ClientPredictionTests : IDisposable
     /// <summary>The player's hull as the client now predicts it.</summary>
     private HullView Own()
     {
-        _world.BuildViews(_views, ref _blockWords, _serverTick, _serverTick, out var own);
+        _world.BuildViews(_views, ref _blockWords, _ownTanks, _serverTick, _serverTick, out var own);
         return _views[own];
     }
 
@@ -742,7 +754,7 @@ public sealed class ClientPredictionTests : IDisposable
             if (i > 60)
                 allocation.Start();
             Snapshot(_serverTick, (uint)i, hulls);
-            var count = _world.BuildViews(_views, ref _blockWords, _serverTick, _serverTick, out _);
+            var count = _world.BuildViews(_views, ref _blockWords, _ownTanks, _serverTick, _serverTick, out _);
             if (i > 60)
                 allocation.Stop();
             Assert.Equal(3, count);
@@ -752,7 +764,7 @@ public sealed class ClientPredictionTests : IDisposable
         Assert.Equal(3, _world.BlockStates.Count);
 
         // What was published without taking memory is each hull's data sheet for the blocks it has left.
-        _world.BuildViews(_views, ref _blockWords, _serverTick, _serverTick, out _);
+        _world.BuildViews(_views, ref _blockWords, _ownTanks, _serverTick, _serverTick, out _);
         foreach (var hull in hulls)
         {
             var view = _views.First(v => v.Id == hull.Id);
@@ -771,7 +783,7 @@ public sealed class ClientPredictionTests : IDisposable
 
         HullView View(uint id)
         {
-            var count = _world.BuildViews(_views, ref _blockWords, _serverTick, _serverTick, out _);
+            var count = _world.BuildViews(_views, ref _blockWords, _ownTanks, _serverTick, _serverTick, out _);
             return _views.Take(count).First(v => v.Id == id);
         }
 

@@ -25,6 +25,11 @@ public sealed record DesignLimits(int MaxBoxSide, int MaxDesignSide, int MaxBloc
     public ShellShape Shield { get; init; } = ShellShape.Default;
     /// <summary>The most parts a design may have mounted on its blocks' faces.</summary>
     public int MaxMounts { get; init; } = 1024;
+    /// <summary>
+    /// The most tank blocks a design may have, at most <see cref="TankFuel.MaxTanks"/>: a hull's fuel is kept tank
+    /// by tank, and a snapshot tells the pilot of every one.
+    /// </summary>
+    public int MaxTanks { get; init; } = TankFuel.MaxTanks;
     internal static DesignLimits Read(JsonElement e, string source)
     {
         var limits = new DesignLimits(e.GetProperty("maxBoxSide"u8).GetInt32(), e.GetProperty("maxDesignSide"u8).GetInt32(), e.GetProperty("maxBlocks"u8).GetInt32())
@@ -34,7 +39,10 @@ public sealed record DesignLimits(int MaxBoxSide, int MaxDesignSide, int MaxBloc
             GeometryPairTests = e.GetProperty("geometryPairTests"u8).GetInt32(),
             Shield = new ShellShape(e.GetProperty("shieldRoundness"u8).GetSingle(), e.GetProperty("shieldBlend"u8).GetSingle()),
             MaxMounts = e.GetProperty("maxMounts"u8).GetInt32(),
+            MaxTanks = e.TryGetProperty("maxTanks"u8, out var tanks) ? tanks.GetInt32() : TankFuel.MaxTanks,
         };
+        if (limits.MaxTanks is < 0 or > TankFuel.MaxTanks)
+            throw new InvalidDataException($"{source}: maxTanks must be from 0 to {TankFuel.MaxTanks}");
         if (limits.MaxMounts is < 0 or > 65535)
             throw new InvalidDataException($"{source}: maxMounts must be from 0 to 65535");
         if (limits.MaxBoxSide < 1 || limits.MaxDesignSide < limits.MaxBoxSide || limits.MaxBlocks < 1 || limits.SurfaceVertices is < 36 or > GeometryAdmission.MaxVertices || limits.SurfaceIndices is < 36 or > GeometryAdmission.MaxIndices || limits.GeometryPairTests is < 6 or > 6000000 || !limits.Shield.IsValid)
@@ -341,10 +349,15 @@ public sealed class BoxDesign
         var min = new Vector3(float.PositiveInfinity); var max = new Vector3(float.NegativeInfinity);
         double mass = 0, x = 0, y = 0, z = 0;
         var cores = 0;
+        var tanks = 0;
         double crew = 0;
         for (var i = 0; i < blocks.Length; i++)
         {
             var b = blocks[i];
+
+            // Held to the wire's bound as well as the content's: limits made in code are not read from a file.
+            if (b.Type.Tank != FuelKind.None && ++tanks > Math.Min(limits.MaxTanks, TankFuel.MaxTanks))
+                throw new InvalidDataException($"{source}: block {i}: too many tanks (limit {Math.Min(limits.MaxTanks, TankFuel.MaxTanks)})");
             if (!BlockShapes.IsValid(b.Shape)) throw new InvalidDataException($"{source}: block {i}: Unknown block shape.");
             if (!Facings.IsValid(b.Facing)) throw new InvalidDataException($"{source}: block {i}: Unknown block facing.");
             if (b.Type.Mount is not null) throw new InvalidDataException($"{source}: block {i}: a {b.Type.Name} mounts on a face and cannot be a block");

@@ -284,7 +284,13 @@ public struct HullState
     /// <summary>Stored energy in megajoules.</summary>
     public float Energy;
 
-    /// <summary>What the tanks hold of each fuel, in kilograms. A part whose fuel is gone gives no thrust.</summary>
+    /// <summary>
+    /// What the hull has of each fuel, in kilograms: its tanks of that fuel added up (<see cref="TankFuel.Total"/>).
+    /// A part whose fuel is gone gives no thrust. The kilograms themselves are kept tank by tank with the hull's
+    /// block state, in double precision; this is their sum in single, written by <see cref="FlightModel.Step"/>
+    /// and by whoever else changes a tank, and never sent or saved. A hull stepped without its tanks is flown
+    /// from this figure alone.
+    /// </summary>
     public FuelTanks Fuel;
 
     /// <summary>What the thrust parts did in the last step; see <see cref="ThrustState"/>.</summary>
@@ -367,10 +373,33 @@ public static class FlightModel
     /// <summary>
     /// Advances the hull one tick and reports where its power went in <paramref name="flow"/> and what its tanks
     /// hold and burnt in <paramref name="fuel"/>, worked out by the same lines that move the battery and empty the
-    /// tanks. The jump drive's draw is not here: it is taken before flight steps.
+    /// tanks. The jump drive's draw is not here: it is taken before flight steps. This form flies the hull from
+    /// <see cref="HullState.Fuel"/> alone; a hull with a block state steps over its tanks.
     /// </summary>
     public static void Step(ref HullState state, in FlightInput input, in FlightParams p, float dt, out PowerFlow flow, out FuelFlow fuel)
     {
+        // A hull stepped without its tanks, such as one a client only knows the motion of, is flown as if each
+        // fuel sat in one tank: the same arithmetic, on three figures.
+        Span<double> levels = [state.Fuel.Nitrogen, state.Fuel.Hydrazine, state.Fuel.Bipropellant];
+        ReadOnlySpan<DesignTank> tanks =
+        [
+            new(-1, FuelKind.Nitrogen, p.FuelCapacity.Nitrogen),
+            new(-1, FuelKind.Hydrazine, p.FuelCapacity.Hydrazine),
+            new(-1, FuelKind.Bipropellant, p.FuelCapacity.Bipropellant),
+        ];
+        Step(ref state, input, p, dt, levels, tanks, out flow, out fuel);
+    }
+
+    /// <summary>
+    /// Advances the hull one tick over its own tanks: <paramref name="levels"/> holds the kilograms in each tank of
+    /// <paramref name="tanks"/>, the hull's design's, and is what the step burns from. What the hull has of a fuel
+    /// is read off them before the step and written to <see cref="HullState.Fuel"/> after it.
+    /// </summary>
+    public static void Step(ref HullState state, in FlightInput input, in FlightParams p, float dt, Span<double> levels, ReadOnlySpan<DesignTank> tanks, out PowerFlow flow, out FuelFlow fuel)
+    {
+        if (levels.Length != tanks.Length)
+            throw new ArgumentException("A hull's tank levels are those of its design's tanks.", nameof(levels));
+
         // Rotation: the commanded rate is approached at a limited angular acceleration.
         var target = new Vector3(input.Pitch * p.TurnRate.X, -input.Yaw * p.TurnRate.Y, -input.Roll * p.TurnRate.Z) * AxisScale;
         var maxDelta = p.TurnAcceleration * dt;
@@ -400,10 +429,12 @@ public static class FlightModel
 
         // Fuel: the tanks as they stand before the step decide which parts can fire in it. A tank that runs dry
         // during the step still feeds it to the end, so nothing here depends on the order parts are added up in.
-        var tanks = state.Fuel;
-        var nitrogen = tanks.Nitrogen > 0f;
-        var hydrazine = tanks.Hydrazine > 0f;
-        var bipropellant = tanks.Bipropellant > 0f;
+        Span<double> sums = stackalloc double[Fuels.Count + 1];
+        TankFuel.Sum(levels, tanks, sums);
+        var held = TankFuel.Fuel(sums);
+        var nitrogen = held.Nitrogen > 0f;
+        var hydrazine = held.Hydrazine > 0f;
+        var bipropellant = held.Bipropellant > 0f;
 
         // Power: what the hull wants this tick against what the generator makes. The battery covers a shortfall
         // and takes the surplus; with the battery flat, thrust is cut back to what the generator alone can feed.
@@ -454,9 +485,9 @@ public static class FlightModel
         var toLocal = Quaternion.Conjugate(state.Orientation);
         var velocity = Vector3.Transform(state.Velocity, toLocal);
         var gain = (boosting ? p.BoostMultiplier : 1f) * thrustScale;
-        Drive(ref velocity.X, thrust.X, p.Push(BlockFacing.Right, tanks), p.Push(BlockFacing.Left, tanks), input.Dampeners, gain, thrustScale, dt, out var right, out var left);
-        Drive(ref velocity.Y, thrust.Y, p.Push(BlockFacing.Up, tanks), p.Push(BlockFacing.Down, tanks), input.Dampeners, gain, thrustScale, dt, out var up, out var down);
-        Drive(ref velocity.Z, thrust.Z, p.Push(BlockFacing.Back, tanks), p.Push(BlockFacing.Front, tanks), input.Dampeners, gain, thrustScale, dt, out var back, out var front);
+        Drive(ref velocity.X, thrust.X, p.Push(BlockFacing.Right, held), p.Push(BlockFacing.Left, held), input.Dampeners, gain, thrustScale, dt, out var right, out var left);
+        Drive(ref velocity.Y, thrust.Y, p.Push(BlockFacing.Up, held), p.Push(BlockFacing.Down, held), input.Dampeners, gain, thrustScale, dt, out var up, out var down);
+        Drive(ref velocity.Z, thrust.Z, p.Push(BlockFacing.Back, held), p.Push(BlockFacing.Front, held), input.Dampeners, gain, thrustScale, dt, out var back, out var front);
 
         // What the parts burnt: each direction's rate at the throttle it ran at. Boost burns more for the thrust
         // it adds; the dampeners never boost, but share the multiplier in a tick where the pilot does.
@@ -467,12 +498,10 @@ public static class FlightModel
             Hydrazine = hydrazine ? Burnt(p.Burn, FuelKind.Hydrazine, right, left, up, down, back, front) * rate : 0f,
             Bipropellant = bipropellant ? Burnt(p.Burn, FuelKind.Bipropellant, right, left, up, down, back, front) * rate : 0f,
         };
-        state.Fuel = new FuelTanks
-        {
-            Nitrogen = Math.Clamp(tanks.Nitrogen - burn.Nitrogen * dt, 0f, p.FuelCapacity.Nitrogen),
-            Hydrazine = Math.Clamp(tanks.Hydrazine - burn.Hydrazine * dt, 0f, p.FuelCapacity.Hydrazine),
-            Bipropellant = Math.Clamp(tanks.Bipropellant - burn.Bipropellant * dt, 0f, p.FuelCapacity.Bipropellant),
-        };
+
+        // Every tank of a fuel gives its share of what was burnt, and what is left is added up again.
+        var burnt = new FuelTanks { Nitrogen = burn.Nitrogen * dt, Hydrazine = burn.Hydrazine * dt, Bipropellant = burn.Bipropellant * dt };
+        state.Fuel = TankFuel.Drain(levels, tanks, sums, burnt);
         state.Thrust = ThrustState.Of(right - left, up - down, back - front, burn.Nitrogen > 0f, burn.Hydrazine > 0f, burn.Bipropellant > 0f, state.Boosting);
         fuel = new FuelFlow { Amount = state.Fuel, Capacity = p.FuelCapacity, Burn = burn };
 

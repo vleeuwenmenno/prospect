@@ -229,6 +229,12 @@ public ref struct HullBody
     public FuelFlow Fuel;
 
     /// <summary>
+    /// The kilograms in each tank of <see cref="Design"/>, which the step burns from: the hull's own, kept with its
+    /// block state. A body given none is flown from <see cref="HullState.Fuel"/> alone.
+    /// </summary>
+    public Span<double> Tanks;
+
+    /// <summary>
     /// The blocks the hull still has: a <see cref="BlockSet"/>. For a body that takes damage it is the set of
     /// <see cref="State"/> itself, so a block that is destroyed is gone from it at once.
     /// </summary>
@@ -309,7 +315,12 @@ public static class HullSim
         }
 
         var ftl = (energyBefore - state.Energy) / Dt;
-        FlightModel.Step(ref state, input, flight, Dt, out var flow, out var fuel);
+        PowerFlow flow;
+        FuelFlow fuel;
+        if (body.Tanks.IsEmpty)
+            FlightModel.Step(ref state, input, flight, Dt, out flow, out fuel);
+        else
+            FlightModel.Step(ref state, input, flight, Dt, body.Tanks, body.Design.Tanks, out flow, out fuel);
         flow.Ftl = ftl;
         body.Power = flow;
         body.Fuel = fuel;
