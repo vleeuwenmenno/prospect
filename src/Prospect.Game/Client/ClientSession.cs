@@ -134,6 +134,13 @@ public sealed class SessionSnapshot(GameContent content)
     /// </summary>
     internal ulong[] BlockWords = new ulong[ClientWorld.MaxViews];
 
+    /// <summary>
+    /// The kilograms of fuel in each tank of the player's own hull: the memory behind that hull's
+    /// <see cref="HullView.Tanks"/>, which says how many are meaningful. Entry <c>i</c> is tank <c>i</c> of the
+    /// hull's design (<see cref="HullDesign.Tanks"/>). Room for the most tanks a design may have.
+    /// </summary>
+    public readonly float[] OwnTanks = new float[TankFuel.MaxTanks];
+
     /// <summary>Index of the player's own hull in <see cref="Hulls"/>, or -1 before it exists.</summary>
     public int OwnHull = -1;
     public bool Dampeners;
@@ -358,7 +365,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         snapshot.RockCount = _state == SessionState.Active ? _world.CopyRockDeltas(snapshot.Rocks) : 0;
         snapshot.Galaxy = _galaxy;
         snapshot.Content = _content;
-        snapshot.HullCount = _state == SessionState.Active ? _world.BuildViews(snapshot.Hulls, ref snapshot.BlockWords, serverTick, tick, out snapshot.OwnHull) : 0;
+        snapshot.HullCount = _state == SessionState.Active ? _world.BuildViews(snapshot.Hulls, ref snapshot.BlockWords, snapshot.OwnTanks, serverTick, tick, out snapshot.OwnHull) : 0;
         if (snapshot.HullCount == 0)
             snapshot.OwnHull = -1;
         snapshot.OwnIsDrone = _state == SessionState.Active && snapshot.HullCount > 0 && _world.OwnIsDrone;

@@ -349,10 +349,16 @@ public sealed class SaveLifecycleTests
         info.Order = new HullOrder { Kind = OrderKind.MoveTo, Target = damaged.Position + new Vector3(0, 300, 0) };
 
         // Tanks part empty, each by another share, and thrust parts caught firing: both come back as they were saved.
+        // The damaged hull's tanks each hold another amount, so a tank is known to come back as itself.
         ref var flown = ref hulls.State(0);
         var tanks = hulls.Flight(0).FuelCapacity;
         Assert.True(tanks.Nitrogen > 0f && tanks.Bipropellant > 0f);
-        flown.Fuel = new FuelTanks { Nitrogen = tanks.Nitrogen * 0.25f, Hydrazine = tanks.Hydrazine * 0.5f, Bipropellant = tanks.Bipropellant * 0.75f };
+        TankHarness.Fill(hulls, 0, nitrogen: 0.25f, hydrazine: 0.5f, bipropellant: 0.75f);
+        Assert.Equal(tanks.Nitrogen * 0.25f, flown.Fuel.Nitrogen, 3);
+        var uneven = states.TankLevels(handle);
+        for (var i = 0; i < uneven.Length; i++)
+            uneven[i] *= (i + 1.0) / (uneven.Length + 1.3);
+        hulls.State(3).Fuel = TankFuel.Total(uneven, custom.Tanks);
         flown.Thrust = new ThrustState { X = -40, Y = 127, Z = -127, Flags = 5 };
 
         Jumping(hulls, 0, JumpPhase.Charge);
@@ -379,7 +385,7 @@ public sealed class SaveLifecycleTests
     public void ASavedWorldComesBackExactlyAndSavesToTheSameBytes()
     {
         var folder = SaveRig.NewWorld(Custom);
-        var expected = new List<(HullState State, FlightParams Flight, float[] Points, int[] Lost, double Total, ulong Entity, uint Owner, byte Design, HullOrder Order, VisualDamageState Visual, bool Piloted, long DamageTick)>();
+        var expected = new List<(HullState State, FlightParams Flight, float[] Points, int[] Lost, double Total, ulong Entity, uint Owner, byte Design, HullOrder Order, VisualDamageState Visual, bool Piloted, long DamageTick, double[] Tanks)>();
         RockDelta[] rocks;
         long tick;
         using (var rig = new SaveRig(folder, Shipped))
@@ -389,8 +395,11 @@ public sealed class SaveLifecycleTests
             for (var i = 0; i < hulls.Slots; i++)
             {
                 var info = hulls.Info(i);
-                expected.Add((hulls.State(i), hulls.Flight(i), hulls.BlockHp(i).ToArray(), hulls.BlockStates.Losses(info.BlockState).ToArray(), hulls.BlockStates.HitTotal(info.BlockState), info.Entity, info.Owner, info.Design, info.Order, info.Visual, info.Piloted, info.DamageTick));
+                expected.Add((hulls.State(i), hulls.Flight(i), hulls.BlockHp(i).ToArray(), hulls.BlockStates.Losses(info.BlockState).ToArray(), hulls.BlockStates.HitTotal(info.BlockState), info.Entity, info.Owner, info.Design, info.Order, info.Visual, info.Piloted, info.DamageTick, TankHarness.Levels(hulls, i)));
             }
+
+            // The world holds tanks that are full, part empty by another share each, and unevenly filled.
+            Assert.Contains(expected, hull => hull.Tanks.Length > 1 && hull.Tanks.Distinct().Count() > 1);
 
             rocks = rig.Rocks.Deltas.ToArray();
             tick = rig.WorldTick;
@@ -420,6 +429,10 @@ public sealed class SaveLifecycleTests
                 var was = expected[i];
                 Assert.Equal(was.State, hulls.State(i));
                 Assert.Equal(was.Flight, hulls.Flight(i));
+
+                // Every tank holds what it held, to the bit, and the hull's fuel is those tanks added up.
+                Assert.Equal(was.Tanks.Select(BitConverter.DoubleToInt64Bits), TankHarness.Levels(hulls, i).Select(BitConverter.DoubleToInt64Bits));
+                Assert.Equal(TankFuel.Total(was.Tanks, rig.Server.Content.Designs[info.Design].Tanks), hulls.State(i).Fuel);
                 Assert.Equal(was.Points, hulls.BlockHp(i).ToArray());
                 Assert.Equal(was.Lost, hulls.BlockStates.Losses(info.BlockState).ToArray());
                 Assert.Equal(BitConverter.DoubleToInt64Bits(was.Total), BitConverter.DoubleToInt64Bits(hulls.BlockStates.HitTotal(info.BlockState)));
@@ -1230,6 +1243,7 @@ public sealed class SaveLifecycleTests
     [InlineData("fuel above the tanks")]
     [InlineData("fuel that is no number")]
     [InlineData("fuel below nothing")]
+    [InlineData("tank count")]
     [InlineData("thrust bits")]
     [InlineData("jump")]
     [InlineData("design number")]
@@ -1322,13 +1336,21 @@ public sealed class SaveLifecycleTests
                     world.Hulls[0].State.Shield = 1e9f;
                     break;
                 case "fuel above the tanks":
-                    world.Hulls[0].State.Fuel.Bipropellant *= 2f;
+                    Assert.True(world.TankFuel[world.Hulls[0].TankStart] > 0.0);
+                    world.TankFuel[world.Hulls[0].TankStart] *= 8.0;
                     break;
                 case "fuel that is no number":
-                    world.Hulls[0].State.Fuel.Nitrogen = float.NaN;
+                    world.TankFuel[world.Hulls[0].TankStart] = double.NaN;
                     break;
                 case "fuel below nothing":
-                    world.Hulls[1].State.Fuel.Hydrazine = -1f;
+                    world.TankFuel[world.Hulls[1].TankStart + world.Hulls[1].Tanks - 1] = -1.0;
+                    break;
+                case "tank count":
+                    // One tank fewer than the design has: the figures no longer belong to its tanks.
+                    Array.Copy(world.TankFuel, world.Hulls[0].TankStart + 1, world.TankFuel, world.Hulls[0].TankStart, world.TankCount - world.Hulls[0].TankStart - 1);
+                    world.Hulls[0].Tanks--;
+                    for (var i = 1; i < world.HullCount; i++) world.Hulls[i].TankStart--;
+                    world.TankCount--;
                     break;
                 case "thrust bits":
                     world.Hulls[0].State.Thrust.Flags = 16;
@@ -1534,6 +1556,9 @@ public sealed class SaveLifecycleTests
                 var hull = world.Hulls[i];
                 world.HitPoints.AsSpan(hull.BlockStart, hull.Blocks).CopyTo(big.HitPoints.AsSpan(big.BlockCount));
                 world.Losses.AsSpan(hull.LossStart, hull.LossCount).CopyTo(big.Losses.AsSpan(big.LossCount));
+                world.TankFuel.AsSpan(hull.TankStart, hull.Tanks).CopyTo(big.TankFuel.AsSpan(big.TankCount));
+                hull.TankStart = big.TankCount;
+                big.TankCount += hull.Tanks;
                 hull.Entity += (ulong)copy * 1000;
                 hull.State.Position += new Vector3(copy % 32 * 900f, 0, copy / 32 * 900f);
                 hull.BlockStart = big.BlockCount;

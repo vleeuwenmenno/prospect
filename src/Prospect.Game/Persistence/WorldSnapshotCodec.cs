@@ -26,7 +26,7 @@ namespace Prospect.Game.Persistence;
 public static partial class WorldSnapshotCodec
 {
     /// <summary>The layout's version. A save with any other is refused; there are no migrations yet.</summary>
-    public const int Version = 7;
+    public const int Version = 8;
     internal const int ChartBytes = 4 + 12 + 8;
 
     /// <summary>"PWS1": tells a save from any other bytes before its version is believed.</summary>
@@ -36,13 +36,14 @@ public static partial class WorldSnapshotCodec
     internal const int DentBytes = 4 + 1 + 1 + 2 + 2;
     internal const int RockBytes = 12 + 4 + 12 + 12 + 8;
 
-    /// <summary>A hull's record without its dents, lost blocks and hit points.</summary>
+    /// <summary>A hull's record without its dents, lost blocks, hit points and tanks.</summary>
     internal const int HullFixedBytes =
         8 + 4 + 1 + 1 + 8 // entity, owner, design, flags, damage tick
-        + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 12 + 4 + 4 + 4 + 4 + 6 + 1 + 1 + 4 + 4 + 4 + 8 // motion state; the three tanks and what the thrust parts did follow the battery
+        + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 4 + 4 + 4 + 4 + 6 + 1 + 1 + 4 + 4 + 4 + 8 // motion state; what the thrust parts did follows the battery
         + 1 + 24 // order
         + 4 + 1 + 4 + 8 + DentBytes // dent version and count, spark
-        + 4 + 4 + 8; // blocks, losses, hit total
+        + 4 + 4 + 8 // blocks, losses, hit total
+        + 4; // tanks
 
     /// <summary>Everything before the catalogue's designs, at its longest.</summary>
     internal const int HeaderBound =
@@ -51,7 +52,7 @@ public static partial class WorldSnapshotCodec
         + 1 + WorldSettings.Capacity * (1 + WorldSettingCatalog.MaxIdLength + 4)
         + 8 + 8 + 4 + 8
         + 4 + byte.MaxValue
-        + 7 * 4;
+        + 8 * 4;
 
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
@@ -61,13 +62,13 @@ public static partial class WorldSnapshotCodec
         long size = 4 + 4 + 4 + 4 + ContentIdentity.WireSize + 16 + 1 + Utf8.GetByteCount(snapshot.Name) + 8 + 8 + 12 + 1;
         for (var i = 0; i < snapshot.SettingCount; i++)
             size += 1 + snapshot.SettingIds[i].Length + 4;
-        size += 8 + 8 + 4 + 8 + 4 + snapshot.StartingFleet.Length + 7 * 4;
+        size += 8 + 8 + 4 + 8 + 4 + snapshot.StartingFleet.Length + 8 * 4;
         for (var i = 0; i < snapshot.DesignCount; i++)
             size += 4 + SHA256.HashSizeInBytes + snapshot.Designs[i].Length;
         size += (long)snapshot.OwnerCount * OwnerBytes;
         for (var i = 0; i < snapshot.HullCount; i++)
             size += HullFixedBytes + snapshot.Hulls[i].Visual.Count * DentBytes;
-        size += (long)snapshot.LossCount * sizeof(int) + (long)snapshot.BlockCount * sizeof(float);
+        size += (long)snapshot.LossCount * sizeof(int) + (long)snapshot.BlockCount * sizeof(float) + (long)snapshot.TankCount * sizeof(double);
         return size + (long)snapshot.RockCount * RockBytes + (long)snapshot.ChartCount * ChartBytes + (long)snapshot.ModuleObservationCount * ModuleObservationBytes;
     }
 
@@ -138,6 +139,7 @@ public static partial class WorldSnapshotCodec
         writer.WriteInt32(snapshot.HullCount);
         writer.WriteInt32(snapshot.BlockCount);
         writer.WriteInt32(snapshot.LossCount);
+        writer.WriteInt32(snapshot.TankCount);
         writer.WriteInt32(snapshot.RockCount);
         writer.WriteInt32(snapshot.ChartCount);
         writer.WriteInt32(snapshot.ModuleObservationCount);
@@ -190,6 +192,9 @@ public static partial class WorldSnapshotCodec
                 writer.WriteInt32(block);
             foreach (var points in snapshot.HitPoints.AsSpan(hull.BlockStart, hull.Blocks))
                 writer.WriteSingle(points);
+            writer.WriteInt32(hull.Tanks);
+            foreach (var kilograms in snapshot.TankFuel.AsSpan(hull.TankStart, hull.Tanks))
+                writer.WriteDouble(kilograms);
         }
 
         for (var i = 0; i < snapshot.RockCount; i++)
@@ -326,6 +331,7 @@ public static partial class WorldSnapshotCodec
         var hulls = reader.ReadInt32();
         var blocks = reader.ReadInt32();
         var losses = reader.ReadInt32();
+        var tanks = reader.ReadInt32();
         var rocks = reader.ReadInt32();
         var charts = reader.ReadInt32();
         var observations = reader.ReadInt32();
@@ -344,7 +350,7 @@ public static partial class WorldSnapshotCodec
         // Every count against its limit and against the bytes left, before a single array is taken for it.
         if (designCount < 1 || pod >= designCount || drone >= designCount
             || (uint)owners > (uint)limits.MaxOwners || (uint)hulls > (uint)limits.MaxHulls || (uint)blocks > (uint)limits.MaxBlocks
-            || (uint)losses > (uint)blocks || (uint)rocks > (uint)limits.MaxRocks || charts < 0 || charts > limits.MaxCharts
+            || (uint)losses > (uint)blocks || (uint)tanks > (uint)blocks || (uint)rocks > (uint)limits.MaxRocks || charts < 0 || charts > limits.MaxCharts
             || observations < 0 || observations > limits.MaxModuleObservations)
         {
             error = "the save names more than a world may hold";
@@ -352,7 +358,7 @@ public static partial class WorldSnapshotCodec
         }
 
         var promised = (long)designCount * (4 + SHA256.HashSizeInBytes) + (long)owners * OwnerBytes + (long)hulls * HullFixedBytes
-            + (long)losses * sizeof(int) + (long)blocks * sizeof(float) + (long)rocks * RockBytes + (long)charts * ChartBytes + (long)observations * ModuleObservationBytes;
+            + (long)losses * sizeof(int) + (long)blocks * sizeof(float) + (long)tanks * sizeof(double) + (long)rocks * RockBytes + (long)charts * ChartBytes + (long)observations * ModuleObservationBytes;
         if (promised > reader.Remaining)
         {
             error = "the save names more than it holds";
@@ -486,6 +492,18 @@ public static partial class WorldSnapshotCodec
                 result.Losses[result.LossCount++] = reader.ReadInt32();
             for (var b = 0; b < hull.Blocks; b++)
                 result.HitPoints[result.BlockCount++] = reader.ReadSingle();
+            hull.Tanks = reader.ReadInt32();
+            hull.TankStart = result.TankCount;
+
+            // A tank is one of the hull's blocks, and no hull can claim more tanks than the save promised.
+            if ((uint)hull.Tanks > (uint)hull.Blocks || hull.Tanks > tanks - result.TankCount)
+            {
+                error = "a hull's tanks do not fit what the save promised";
+                return false;
+            }
+
+            for (var t = 0; t < hull.Tanks; t++)
+                result.TankFuel[result.TankCount++] = reader.ReadDouble();
             if (!reader.IsValid)
             {
                 error = "the save ends inside a hull";
@@ -536,7 +554,7 @@ public static partial class WorldSnapshotCodec
             result.ModuleObservations[i] = record;
         }
 
-        if (!reader.IsValid || reader.Remaining != 0 || result.BlockCount != blocks || result.LossCount != losses)
+        if (!reader.IsValid || reader.Remaining != 0 || result.BlockCount != blocks || result.LossCount != losses || result.TankCount != tanks)
         {
             error = "the save's records do not add up to what it promised";
             return false;
@@ -559,9 +577,6 @@ public static partial class WorldSnapshotCodec
         writer.WriteSingle(state.Heat);
         writer.WriteByte((byte)((state.BoostLocked ? 1 : 0) | (state.Boosting ? 2 : 0) | (state.ShieldOffline ? 4 : 0)));
         writer.WriteSingle(state.Energy);
-        writer.WriteSingle(state.Fuel.Nitrogen);
-        writer.WriteSingle(state.Fuel.Hydrazine);
-        writer.WriteSingle(state.Fuel.Bipropellant);
         writer.WriteByte((byte)state.Thrust.X);
         writer.WriteByte((byte)state.Thrust.Y);
         writer.WriteByte((byte)state.Thrust.Z);
@@ -597,7 +612,6 @@ public static partial class WorldSnapshotCodec
         state.Boosting = (flags & 2) != 0;
         state.ShieldOffline = (flags & 4) != 0;
         state.Energy = reader.ReadSingle();
-        state.Fuel = new FuelTanks { Nitrogen = reader.ReadSingle(), Hydrazine = reader.ReadSingle(), Bipropellant = reader.ReadSingle() };
         state.Thrust = new ThrustState { X = (sbyte)reader.ReadByte(), Y = (sbyte)reader.ReadByte(), Z = (sbyte)reader.ReadByte(), Flags = reader.ReadByte() };
         state.Shield = reader.ReadSingle();
         state.Hull = reader.ReadSingle();

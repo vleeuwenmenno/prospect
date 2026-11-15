@@ -155,7 +155,7 @@ public struct HullRecord
     /// Id, owner, design, block revision and losses, position, velocity, orientation, spin, heat, flags, the jump's four figures,
     /// energy, shield, hull and shield delay, the shield's newest hit and the age of its last change, what the
     /// thrust parts did, and the order's target. A hull's tanks are not here: 255 records without health must fit
-    /// one snapshot, which leaves a record four bytes to spare, so the receiver's own hull has its tanks in the
+    /// one snapshot beside its header, so the receiver's own hull has its tanks in the
     /// <see cref="SnapshotHeader"/> and no other hull's are sent.
     /// </summary>
     public const int MaxHealth = GeometryAdmission.MaxBlocks;
@@ -197,7 +197,7 @@ public struct HullRecord
 
     /// <summary>
     /// The hull's motion and charge. <see cref="HullState.Fuel"/> does not travel in a record and reads empty:
-    /// the receiver's own hull takes its tanks from <see cref="SnapshotHeader.OwnFuel"/>.
+    /// the receiver's own hull takes its tanks from <see cref="SnapshotHeader.OwnTanks"/>.
     /// </summary>
     public HullState State;
     /// <summary>Environment flags sampled at this record’s server tick.</summary>
@@ -346,7 +346,8 @@ public struct HullRecord
 /// </summary>
 public struct SnapshotHeader
 {
-    public const int MaxWireSize = 25 + 12;
+    /// <summary>The fixed fields, the count of the own hull's tanks and four bytes for each of them.</summary>
+    public const int MaxWireSize = 25 + 1 + TankFuel.MaxTanks * sizeof(float);
     public long ServerTick;
     public uint ControlEpoch;
     public ushort AppliedOrderId;
@@ -365,10 +366,21 @@ public struct SnapshotHeader
     public bool OwnIsDrone;
 
     /// <summary>
-    /// What the tanks of <see cref="OwnHull"/> hold, in kilograms. The receiver predicts that hull with the
-    /// server's own flight code, which spends fuel, so it has the figures exactly; no other hull's are sent.
+    /// How many tanks the design of <see cref="OwnHull"/> has, at most <see cref="TankFuel.MaxTanks"/>, and the
+    /// kilograms in each, in the order of <see cref="HullDesign.Tanks"/>; a tank that is lost holds nothing. The
+    /// receiver predicts that hull with the server's own flight code, which burns from each tank, so it is sent
+    /// every tank's own figure, in single precision: nearer than one part in ten million to what the server
+    /// keeps, and never nothing while the tank holds something. No other hull's tanks are sent.
     /// </summary>
-    public FuelTanks OwnFuel;
+    public byte OwnTankCount;
+    public TankLevels OwnTanks;
+
+    /// <summary>Room for the kilograms in each tank of one hull.</summary>
+    [System.Runtime.CompilerServices.InlineArray(TankFuel.MaxTanks)]
+    public struct TankLevels { private float _element0; }
+
+    /// <summary>The bytes this header takes: fewer than <see cref="MaxWireSize"/> for a hull with fewer tanks.</summary>
+    public readonly int WireSize => 25 + 1 + OwnTankCount * sizeof(float);
 
     public readonly void Write(ref NetWriter writer)
     {
@@ -380,13 +392,14 @@ public struct SnapshotHeader
         writer.WriteUInt32(OwnHull);
         writer.WriteByte(HullCount);
         writer.WriteByte(OwnIsDrone ? (byte)1 : (byte)0);
-        writer.WriteSingle(OwnFuel.Nitrogen);
-        writer.WriteSingle(OwnFuel.Hydrazine);
-        writer.WriteSingle(OwnFuel.Bipropellant);
+        writer.WriteByte(OwnTankCount);
+        for (var i = 0; i < OwnTankCount; i++)
+            writer.WriteSingle(OwnTanks[i]);
     }
 
     public static bool TryRead(ref NetReader reader, out SnapshotHeader header)
     {
+        header = default;
         header.ServerTick = reader.ReadInt64();
         header.ControlEpoch = reader.ReadUInt32();
         header.AppliedOrderId = reader.ReadUInt16();
@@ -395,9 +408,18 @@ public struct SnapshotHeader
         header.HullCount = reader.ReadByte();
         var flags = reader.ReadByte();
         header.OwnIsDrone = flags == 1;
-        header.OwnFuel = new FuelTanks { Nitrogen = reader.ReadSingle(), Hydrazine = reader.ReadSingle(), Bipropellant = reader.ReadSingle() };
-        return reader.IsValid && flags <= 1 && header.ServerTick >= 0 && header.ServerTick <= long.MaxValue - 256
-            && header.OwnFuel.IsFinite && header.OwnFuel.Nitrogen >= 0 && header.OwnFuel.Hydrazine >= 0 && header.OwnFuel.Bipropellant >= 0;
+        header.OwnTankCount = reader.ReadByte();
+
+        // Each figure a number that is not negative; whether it fits its tank is for whoever knows the design.
+        var tanks = true;
+        for (var i = 0; i < header.OwnTankCount; i++)
+        {
+            var kilograms = reader.ReadSingle();
+            header.OwnTanks[i] = kilograms;
+            tanks &= float.IsFinite(kilograms) && kilograms >= 0f;
+        }
+
+        return reader.IsValid && flags <= 1 && header.ServerTick >= 0 && header.ServerTick <= long.MaxValue - 256 && tanks;
     }
 }
 

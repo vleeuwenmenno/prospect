@@ -1659,8 +1659,11 @@ public sealed class EditorSessionTests
         Assert.Null(rig.Server.Fault);
     }
 
+    /// <summary>What a client is sent of tanks: each tank's kilograms in single precision.</summary>
+    private static float[] Sent(double[] levels) => [.. levels.Select(level => (float)level)];
+
     [Fact]
-    public void AFirstSpawnIsFullAndAnEditAndARepairKeepTheFuelWhileANewTankAddsRoomNotFuel()
+    public void AFirstSpawnIsFullAndAnEditAndARepairKeepEachTanksFuelWhileANewOrRebuiltTankIsEmpty()
     {
         using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);
         var startup = rig.Content.Designs.Length;
@@ -1668,19 +1671,26 @@ public sealed class EditorSessionTests
         var full = rig.Hulls.Flight(pod).FuelCapacity;
         Assert.True(full.Nitrogen > 0f && full.Bipropellant > 0f);
 
+        // The pod's two tanks, in block order: bipropellant, then nitrogen.
+        var tanks = rig.Content.Pod.Tanks.ToArray();
+        Assert.Equal([FuelKind.Bipropellant, FuelKind.Nitrogen], tanks.Select(tank => tank.Kind));
+
         // The first spawn: every tank full, and so the whole starting fleet.
         Assert.Equal(full, rig.Hulls.State(pod).Fuel);
+        Assert.Equal(tanks.Select(tank => (double)tank.Capacity), TankHarness.Levels(rig.Hulls, pod));
 
         // Whole: a repair has nothing to do, whatever the tanks hold.
-        rig.Hulls.State(pod).Fuel = new FuelTanks { Nitrogen = full.Nitrogen * 0.5f, Bipropellant = full.Bipropellant * 0.25f };
+        TankHarness.Fill(rig.Hulls, pod, nitrogen: 0.5f, hydrazine: 0f, bipropellant: 0.25f);
         var held = rig.Hulls.State(pod).Fuel;
+        var levels = TankHarness.Levels(rig.Hulls, pod);
+        Assert.Equal(new FuelTanks { Nitrogen = full.Nitrogen * 0.5f, Bipropellant = full.Bipropellant * 0.25f }, held);
         var token = rig.Open(0);
         var serial = rig.Editor(0).Serial;
         rig.Input(0).RepairEdit(token);
         Assert.Equal((EditorPhase.Open, EditorReason.NoChange), (rig.Answer(0, serial).Phase, rig.Editor(0).Reason));
         Assert.Equal(held, rig.Hulls.State(pod).Fuel);
 
-        // A repair restores blocks, not fuel: the rebuilt hull holds what the worn one did.
+        // A repair restores blocks, not fuel: each tank of the rebuilt hull holds what the worn one's did.
         var hurt = FirstBoxOfType(rig.Content.Pod, "cargo");
         var blockState = rig.Hulls.Info(pod).BlockState;
         Assert.True(rig.Hulls.BlockStates.Lose(blockState, hurt));
@@ -1693,28 +1703,71 @@ public sealed class EditorSessionTests
         var rebuilt = Rig.Index(rig.Editor(0).Hull);
         Assert.Equal(rig.Content.PodDesign, rig.Hulls.Info(rebuilt).Design);
         Assert.Equal(held, rig.Hulls.State(rebuilt).Fuel);
+        Assert.Equal(levels, TankHarness.Levels(rig.Hulls, rebuilt));
         Assert.Equal(0u, rig.Hulls.Revision(rebuilt));
-        Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Fuel.Amount.Equals(held)), "the client should see the same tanks");
 
-        // An applied edit keeps the fuel, per fuel: one nitrogen tank more gives room for twice as much, and
-        // none of the new room is filled. The tank goes on the gyro, whose top carries no thrusters.
+        // The client is told every tank of the hull it flies, exactly.
+        Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Fuel.Amount.Equals(held)), "the client should see the same tanks");
+        Assert.Equal(Sent(levels), rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Tanks.ToArray());
+
+        // A tank that is lost loses what it held, and the pilot sees it empty. Built again by a repair, it is
+        // there and still empty; the other tank holds what it did.
+        var nitrogenTank = tanks[1].Block;
+        blockState = rig.Hulls.Info(rebuilt).BlockState;
+        Assert.True(rig.Hulls.BlockStates.Lose(blockState, nitrogenTank));
+        rig.Hulls.State(rebuilt).Hull = (float)rig.Hulls.BlockStates.HitTotal(blockState);
+        Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Revision > 0));
+        Assert.Equal(new FuelTanks { Bipropellant = held.Bipropellant }, rig.Hulls.State(rebuilt).Fuel);
+        Assert.Equal(0f, rig.Hulls.Flight(rebuilt).FuelCapacity.Nitrogen);
+        Assert.Equal([levels[0], 0.0], TankHarness.Levels(rig.Hulls, rebuilt));
+        Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Tanks.Span[1] == 0f), "the client should see the lost tank empty");
+        Assert.Equal(0f, rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Fuel.Amount.Nitrogen);
+        token = rig.Open(0);
+        rig.Input(0).RepairEdit(token);
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied), $"{rig.Editor(0).Phase}/{rig.Editor(0).Reason}");
+        Assert.True(rig.Until(() => rig.Own(0) == rig.Editor(0).Hull));
+        var repaired = Rig.Index(rig.Editor(0).Hull);
+        Assert.Equal(0u, rig.Hulls.Revision(repaired));
+        Assert.Equal(full, rig.Hulls.Flight(repaired).FuelCapacity);
+        Assert.Equal([levels[0], 0.0], TankHarness.Levels(rig.Hulls, repaired));
+        Assert.Equal(new FuelTanks { Bipropellant = held.Bipropellant }, rig.Hulls.State(repaired).Fuel);
+
+        // An applied edit keeps each tank's fuel: one nitrogen tank more gives room for twice as much, and the
+        // new tank is empty. It goes on the gyro, whose top carries no thrusters.
+        TankHarness.Fill(rig.Hulls, repaired, nitrogen: 0.5f, hydrazine: 0f, bipropellant: 0.25f);
         var draft = BuildDraft.FromBlueprint(rig.Content.Pod, rig.Content);
         Assert.Equal(DraftEdit.Done, draft.Add(new GridSize(0, 2, 1), new GridSize(1, 1, 1), rig.Content.Blocks.Get("nitrogenTank")));
         var edited = Build(rig, draft, startup + 1);
+        var editedDesign = rig.Server.Content.Designs[rig.Hulls.Info(edited).Design];
         var larger = rig.Hulls.Flight(edited).FuelCapacity;
         Assert.Equal(full.Nitrogen * 2f, larger.Nitrogen);
+        Assert.Equal([FuelKind.Bipropellant, FuelKind.Nitrogen, FuelKind.Nitrogen], editedDesign.Tanks.ToArray().Select(tank => tank.Kind));
+        Assert.Equal([levels[0], levels[1], 0.0], TankHarness.Levels(rig.Hulls, edited));
         Assert.Equal(held, rig.Hulls.State(edited).Fuel);
-        Assert.True(rig.Hulls.State(edited).Fuel.Nitrogen < larger.Nitrogen);
+        Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Tanks.Length == 3));
+        Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Tanks.ToArray().SequenceEqual(Sent([levels[0], levels[1], 0.0]))), "the client should see the new tank empty");
 
-        // A smaller capacity clamps: with the tank above brimming, taking the new tank away again leaves the
-        // nitrogen the old capacity holds, and nothing the other fuels did not have.
-        rig.Hulls.State(edited).Fuel = new FuelTanks { Nitrogen = larger.Nitrogen, Bipropellant = held.Bipropellant };
-        var editedDesign = rig.Server.Content.Designs[rig.Hulls.Info(edited).Design];
+        // A tank that is taken away takes its fuel with it: with every nitrogen tank brimming, removing the new
+        // one leaves what the old one holds, and nothing the other fuel did not have.
+        TankHarness.Fill(rig.Hulls, edited, nitrogen: 1f, hydrazine: 0f, bipropellant: 0.25f);
         var smaller = BuildDraft.FromBlueprint(editedDesign, rig.Server.Content);
         Assert.Equal(DraftEdit.Done, smaller.Delete(LastBoxOfType(smaller.Boxes, "nitrogenTank")));
         var back = Build(rig, smaller, startup + 1);
         Assert.Equal(full, rig.Hulls.Flight(back).FuelCapacity);
         Assert.Equal(new FuelTanks { Nitrogen = full.Nitrogen, Bipropellant = held.Bipropellant }, rig.Hulls.State(back).Fuel);
+        Assert.Equal([levels[0], tanks[1].Capacity], TankHarness.Levels(rig.Hulls, back));
+
+        // A tank is the same tank only in the same place: taken out and put in one cell further up, the nitrogen
+        // tank is a new one and empty, while the bipropellant tank, which was not touched, keeps its fuel. A tank
+        // made larger where it stands is another box, so it starts empty too.
+        var moved = BuildDraft.FromBlueprint(rig.Server.Content.Designs[rig.Hulls.Info(back).Design], rig.Server.Content);
+        var old = moved.Boxes[LastBoxOfType(moved.Boxes, "nitrogenTank")];
+        Assert.Equal(DraftEdit.Done, moved.Delete(LastBoxOfType(moved.Boxes, "nitrogenTank")));
+        Assert.Equal(DraftEdit.Done, moved.Add(new GridSize(0, 2, 1), new GridSize(1, 1, 1), old.Type));
+        var shifted = Build(rig, moved, startup + 2);
+        Assert.Equal(full, rig.Hulls.Flight(shifted).FuelCapacity);
+        Assert.Equal(new FuelTanks { Bipropellant = held.Bipropellant }, rig.Hulls.State(shifted).Fuel);
+        Assert.Equal([levels[0], 0.0], TankHarness.Levels(rig.Hulls, shifted));
         Assert.Null(rig.Server.Fault);
     }
 

@@ -58,6 +58,8 @@ The goal and the block model are in `direction.md` under "Decided: building".
 - Canonical design bytes version 4 append the mounts after the blocks, 11 bytes and the type name each. Version 3
   bytes are not read: the protocol and the save layout moved with it. Files of versions 1 to 4 load, converted.
 - Limit: `maxMounts` in `blocks.json` (1,024). Rules, conversion and figures: `docs/roadmap/propulsion.md`.
+- A hull keeps the kilograms in each tank with its block state: 8 B a tank, at most 255 tanks a design
+  (`maxTanks`). The table under "Sum memory" is for hulls without tanks.
 
 ## Decided: size rule notation
 

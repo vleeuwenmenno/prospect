@@ -162,7 +162,7 @@ public sealed class PropulsionTests
     }
 
     [Fact]
-    public void LosingAPartTakesItsDirectionAndLosingATankTakesItsRoomAndClampsWhatItHeld()
+    public void LosingAPartTakesItsDirectionAndLosingATankTakesItsRoomAndWhatItHeld()
     {
         // Two blocks of plating carry a braking thruster each: a mounted part is there exactly while its block is.
         var design = Design(
@@ -190,19 +190,34 @@ public sealed class PropulsionTests
         Assert.Equal(intact.FuelCapacity, flight.FuelCapacity);
         Assert.Equal(intact.FuelCapacity, hulls.State(hull).Fuel);
 
-        // A tank goes: its room goes with it, and what the tanks left cannot hold is gone.
-        hulls.State(hull).Fuel.Nitrogen = tank * 1.5f;
+        // A tank goes: its room goes with it, and so does what it held, however little the other tank holds.
+        Assert.Equal(4, design.Tanks.Length);
+        Assert.Equal((design.BlockCount - 1, FuelKind.Nitrogen, tank), (design.Tanks[3].Block, design.Tanks[3].Kind, design.Tanks[3].Capacity));
+        Assert.Equal(3, design.TankOf(design.BlockCount - 1));
+        Assert.Equal(-1, design.TankOf(design.BlockCount - 2));
+        states.TankLevels(handle)[0] = tank * 0.25;
+        hulls.State(hull).Fuel = TankFuel.Total(states.Tanks(handle), design.Tanks);
+        Assert.Equal(tank * 1.25f, hulls.State(hull).Fuel.Nitrogen);
         Assert.True(states.Lose(handle, design.BlockCount - 1));
         field.Refit(hull);
         Assert.Equal(tank, hulls.Flight(hull).FuelCapacity.Nitrogen);
-        Assert.Equal(tank, hulls.State(hull).Fuel.Nitrogen);
+        Assert.Equal(0.0, states.Tanks(handle)[3]);
+        Assert.Equal(tank * 0.25, states.Tanks(handle)[0]);
+        Assert.Equal(tank * 0.25f, hulls.State(hull).Fuel.Nitrogen);
+        Assert.Equal(intact.FuelCapacity.Bipropellant, hulls.State(hull).Fuel.Bipropellant);
 
-        // Less than the room left is kept as it is.
-        hulls.State(hull).Fuel.Nitrogen = tank * 0.25f;
+        // A block that is no tank takes no fuel with it.
         Assert.True(states.Lose(handle, design.BlockCount - 2));
         field.Refit(hull);
         Assert.Equal(0f, hulls.Flight(hull).Push(BlockFacing.Back));
         Assert.Equal(tank * 0.25f, hulls.State(hull).Fuel.Nitrogen);
+
+        // The last tank of a fuel goes: none of it is left, and no part that burns it fires.
+        Assert.True(states.Lose(handle, 4));
+        field.Refit(hull);
+        Assert.Equal(0f, hulls.State(hull).Fuel.Nitrogen);
+        Assert.Equal(0f, hulls.Flight(hull).FuelCapacity.Nitrogen);
+        Assert.Equal([0.0, design.Tanks[1].Capacity, design.Tanks[2].Capacity, 0.0], states.Tanks(handle).ToArray());
 
         // The sums agree with a scan of what is left, whatever order the blocks went in.
         Figures.Reference(design, Content.Rules, states.Alive(handle), out var expected, out var expectedStats);
@@ -454,6 +469,334 @@ public sealed class PropulsionTests
         var asked = Fly(damped, new FlightInput { Strafe = -127, Vertical = 127 }, flight, 60);
         Assert.Equal(damped.Velocity, asked.Velocity);
         Assert.Equal(damped.Fuel, asked.Fuel);
+    }
+
+    /// <summary>A hull with four nitrogen tanks, one of them two cells, a cold gas thruster that burns from them to push it up and a hot thruster that pushes it back.</summary>
+    private static HullDesign ManyTanks() => Design(
+        [Box("hull", 1, 0, 0), Box("nitrogenTank", 2, 0, 0), Box("nitrogenTank", 3, 0, 0), Box("nitrogenTank", 4, 0, 0, size: new GridSize(2, 1, 1))],
+        [Mount("coldGasThruster", 7, BlockFacing.Down), Mount("hotThruster", 7, BlockFacing.Front)]);
+
+    private static long Bits(double value) => BitConverter.DoubleToInt64Bits(value);
+
+    [Fact]
+    public void BurningDrawsFromEveryTankOfTheFuelInProportionToWhatItHoldsAndEqualTanksStayEqual()
+    {
+        var design = ManyTanks();
+        using var hulls = new HullStore();
+        var field = new HullField(hulls, [design]);
+        var hull = hulls.Create(1, 0, design, Double3.Zero).Index;
+        var states = hulls.BlockStates;
+        var handle = hulls.Info(hull).BlockState;
+
+        // The tanks in block order, each with its own capacity; a hull is created with every one full.
+        var tanks = design.Tanks.ToArray();
+        Assert.Equal([FuelKind.Nitrogen, FuelKind.Hydrazine, FuelKind.Bipropellant, FuelKind.Nitrogen, FuelKind.Nitrogen, FuelKind.Nitrogen], tanks.Select(tank => tank.Kind));
+        Assert.Equal([4, 5, 6, 8, 9, 10], tanks.Select(tank => tank.Block));
+        var one = Content.Blocks.Get("nitrogenTank").FuelCapacity;
+        Assert.Equal(one, tanks[0].Capacity);
+        Assert.Equal(one * 2f, tanks[5].Capacity);
+        Assert.Equal(tanks.Select(tank => (double)tank.Capacity), states.Tanks(handle).ToArray());
+        Assert.Equal(design.Flight.FuelCapacity, hulls.State(hull).Fuel);
+
+        // Filled unevenly: two equal tanks, one a fifth full, the large one three quarters.
+        var levels = states.TankLevels(handle);
+        levels[0] = one * 0.6;
+        levels[3] = one * 0.6;
+        levels[4] = one * 0.2;
+        levels[5] = one * 1.5;
+        hulls.State(hull).Fuel = TankFuel.Total(levels, tanks);
+        var before = levels.ToArray();
+        var total = hulls.State(hull).Fuel;
+        Assert.Equal(one * 2.9f, total.Nitrogen, 3);
+
+        // Ten minutes of full thrust upward on the cold gas thruster, which burns 0.0075 kg a second.
+        var burnt = 0.0;
+        for (var tick = 0; tick < 36000; tick++)
+        {
+            field.BeginRound();
+            Assert.False(field.Step(hull, Toward(BlockFacing.Up)));
+            burnt += (double)hulls.Info(hull).Fuel.Burn.Nitrogen * HullSim.Dt;
+        }
+
+        var after = states.Tanks(handle).ToArray();
+        var left = hulls.State(hull).Fuel;
+        Assert.Equal(Content.Blocks.Get("coldGasThruster").FuelBurn * 600.0, burnt, 4);
+
+        // Nothing is lost to rounding: the tanks fell by what was burnt, to a milligram in ten minutes.
+        Assert.Equal(before[0] + before[3] + before[4] + before[5] - burnt, after[0] + after[3] + after[4] + after[5], 6);
+
+        // What the hull has of a fuel is its tanks added up, and the readout says the same.
+        Assert.Equal(TankFuel.Total(after, tanks), left);
+        Assert.Equal((float)(after[0] + after[3] + after[4] + after[5]), left.Nitrogen);
+        Assert.Equal(left, hulls.Info(hull).Fuel.Amount);
+
+        // Each tank gave the share it held: every one is at the same fraction of what it had, and the two that
+        // were equal are still equal to the bit.
+        var share = (after[0] + after[3] + after[4] + after[5]) / (before[0] + before[3] + before[4] + before[5]);
+        foreach (var i in new[] { 0, 3, 4, 5 })
+            Assert.Equal(share, after[i] / before[i], 9);
+        Assert.Equal(Bits(after[0]), Bits(after[3]));
+        Assert.True(after[4] < after[0] && after[0] < after[5]);
+
+        // The fuels nothing burnt are untouched, tank and total.
+        Assert.Equal(Bits(before[1]), Bits(after[1]));
+        Assert.Equal(Bits(before[2]), Bits(after[2]));
+        Assert.Equal(total.Hydrazine, left.Hydrazine);
+
+        // Two fuels at once, each from its own tanks: back on the hot thruster's hydrazine, up on nitrogen.
+        field.BeginRound();
+        field.Step(hull, new FlightInput { Vertical = 127, Forward = -127 });
+        Assert.True(states.Tanks(handle)[1] < before[1]);
+        Assert.True(states.Tanks(handle)[0] < after[0]);
+        Assert.Equal(Bits(before[2]), Bits(states.Tanks(handle)[2]));
+
+        // Run dry: every tank of the fuel is at exactly nothing in the same step, none before another.
+        levels = states.TankLevels(handle);
+        foreach (var i in new[] { 0, 3, 4, 5 })
+            levels[i] = before[i] * 1e-5;
+        hulls.State(hull).Fuel = TankFuel.Total(levels, tanks);
+        var steps = 0;
+        while (hulls.State(hull).Fuel.Nitrogen > 0f && steps++ < 600)
+        {
+            foreach (var i in new[] { 0, 3, 4, 5 })
+                Assert.True(states.Tanks(handle)[i] > 0.0, "a tank ran dry before the others");
+            field.BeginRound();
+            field.Step(hull, Toward(BlockFacing.Up));
+        }
+
+        Assert.InRange(steps, 1, 599);
+        foreach (var i in new[] { 0, 3, 4, 5 })
+            Assert.Equal(0.0, states.Tanks(handle)[i]);
+
+        // With none of it left the thruster gives nothing, and the tanks stay at nothing.
+        var speed = hulls.State(hull).Velocity;
+        field.BeginRound();
+        field.Step(hull, Toward(BlockFacing.Up));
+        Assert.Equal(speed, hulls.State(hull).Velocity);
+        Assert.False(hulls.State(hull).Thrust.Burning(FuelKind.Nitrogen));
+        Assert.Equal(0f, hulls.State(hull).Fuel.Nitrogen);
+    }
+
+    [Fact]
+    public void ALargeTankAtALowThrottleStillFallsByWhatIsBurnt()
+    {
+        // 64 cells of nitrogen, 9,600 kg, and one cold gas thruster at a tenth of its throttle: 1.25e-5 kg a tick.
+        // In single precision that is less than half a unit in the tank's last place, and the tank would never
+        // fall. Kept in double precision it falls by what is burnt.
+        var design = Design(
+            [Box("hull", 1, 0, 0), Box("nitrogenTank", 2, 0, 0, size: new GridSize(4, 4, 4))],
+            [Mount("coldGasThruster", 7, BlockFacing.Down)]);
+        using var hulls = new HullStore();
+        var field = new HullField(hulls, [design]);
+        var hull = hulls.Create(1, 0, design, Double3.Zero).Index;
+        var handle = hulls.Info(hull).BlockState;
+        var large = design.TankOf(8);
+        Assert.Equal(Content.Blocks.Get("nitrogenTank").FuelCapacity * 64f, design.Tanks[large].Capacity);
+        var before = hulls.BlockStates.Tanks(handle).ToArray();
+        var burnt = 0.0;
+        for (var tick = 0; tick < 6000; tick++)
+        {
+            field.BeginRound();
+            field.Step(hull, new FlightInput { Vertical = 13 });
+            burnt += (double)hulls.Info(hull).Fuel.Burn.Nitrogen * HullSim.Dt;
+        }
+
+        var after = hulls.BlockStates.Tanks(handle).ToArray();
+        Assert.InRange(burnt, 0.07, 0.08);
+        Assert.Equal(before[0] + before[large] - burnt, after[0] + after[large], 6);
+        Assert.Equal(after[0] / before[0], after[large] / before[large], 12);
+        Assert.True(after[large] < before[large]);
+    }
+
+    [Fact]
+    public void TwoHullsSteppedAlikeFromTheSameTanksHoldTheSameBitsAndAHullFlownFromItsTotalsAgreesWithItsTanks()
+    {
+        // The pod has one tank of each fuel it burns. Stepped over its tanks through a field, and stepped from
+        // the per-fuel figures alone as a client steps a hull it only knows the motion of, it flies the same and
+        // holds the same fuel to within what single precision keeps of it: one piece of arithmetic either way.
+        var design = Content.Pod;
+        Assert.Equal(1, design.Tanks.ToArray().Count(tank => tank.Kind == FuelKind.Nitrogen));
+        Assert.Equal(1, design.Tanks.ToArray().Count(tank => tank.Kind == FuelKind.Bipropellant));
+        using var hulls = new HullStore();
+        var field = new HullField(hulls, [design]);
+        var hull = hulls.Create(1, 0, design, Double3.Zero).Index;
+        var alone = hulls.State(hull);
+        var order = default(HullOrder);
+        for (var tick = 0; tick < 1200; tick++)
+        {
+            var input = tick < 400 ? new FlightInput { Forward = 127, Strafe = 60, Boost = tick > 100 }
+                : tick < 800 ? new FlightInput { Vertical = -127, Strafe = -127 }
+                : new FlightInput { Dampeners = true };
+            field.BeginRound();
+            field.Step(hull, input);
+            HullSim.AdvanceShieldClock(ref alone);
+            HullSim.Step(ref alone, ref order, input, design.Flight);
+        }
+
+        Assert.Equal(alone.Position, hulls.State(hull).Position);
+        Assert.Equal(alone.Velocity, hulls.State(hull).Velocity);
+        Assert.Equal(alone.Thrust, hulls.State(hull).Thrust);
+        Assert.True(alone.Fuel.Nitrogen < design.Flight.FuelCapacity.Nitrogen - 0.1f && alone.Fuel.Bipropellant < design.Flight.FuelCapacity.Bipropellant - 1f);
+        Assert.Equal(alone.Fuel.Nitrogen, hulls.State(hull).Fuel.Nitrogen, 2);
+        Assert.Equal(alone.Fuel.Bipropellant, hulls.State(hull).Fuel.Bipropellant, 1);
+
+        // Two hulls of one design, stepped by the same inputs from the same tanks, hold the same bits in every
+        // tank: the server's code on a predicting client gives the server's answer.
+        var many = ManyTanks();
+        using var pair = new HullStore();
+        var both = new HullField(pair, [many]);
+        var server = pair.Create(1, 0, many, Double3.Zero).Index;
+        var client = pair.Create(1, 0, many, new Double3(1e6, 0, 0)).Index;
+        foreach (var index in new[] { server, client })
+        {
+            var levels = pair.BlockStates.TankLevels(pair.Info(index).BlockState);
+            for (var i = 0; i < levels.Length; i++)
+                levels[i] *= (i + 2.0) / (levels.Length + 3.0);
+            pair.State(index).Fuel = TankFuel.Total(levels, many.Tanks);
+        }
+
+        var full = pair.State(server).Fuel;
+        for (var tick = 0; tick < 900; tick++)
+        {
+            var input = new FlightInput { Vertical = (sbyte)(tick % 255 - 127), Forward = (sbyte)(-(tick % 127)), Dampeners = tick % 90 > 45 };
+            both.BeginRound();
+            both.Step(server, input);
+            both.Step(client, input);
+        }
+
+        Assert.Equal(
+            pair.BlockStates.Tanks(pair.Info(server).BlockState).ToArray().Select(Bits),
+            pair.BlockStates.Tanks(pair.Info(client).BlockState).ToArray().Select(Bits));
+        Assert.Equal(pair.State(server).Fuel, pair.State(client).Fuel);
+        Assert.True(pair.State(server).Fuel.Nitrogen < full.Nitrogen && pair.State(server).Fuel.Hydrazine < full.Hydrazine);
+    }
+
+    [Fact]
+    public void TankLevelsThatAreNotTrustedAreRefusedForASaveAndBroughtIntoTheirTanksForASnapshot()
+    {
+        var design = ManyTanks();
+        using var states = new BlockStateStore();
+        var handle = states.Create(design, hitPoints: true);
+        var full = states.Tanks(handle).ToArray();
+        var half = full.Select(level => level * 0.5).ToArray();
+        float[] Single(double[] levels) => [.. levels.Select(level => (float)level)];
+
+        // What a hull of the design can hold is taken as it is, either way.
+        Assert.True(states.TryRestoreTanks(handle, half));
+        Assert.Equal(half, states.Tanks(handle).ToArray());
+        Assert.True(states.SetTanks(handle, Single(full)));
+        Assert.Equal(full, states.Tanks(handle).ToArray());
+
+        // A save: the wrong count, no number, less than nothing and more than the tank holds are all refused.
+        Assert.False(states.TryRestoreTanks(handle, half.AsSpan(1)));
+        foreach (var hostile in new[] { double.NaN, double.PositiveInfinity, -0.5, full[2] * 1.000001 })
+        {
+            var bad = (double[])half.Clone();
+            bad[2] = hostile;
+            Assert.False(states.TryRestoreTanks(handle, bad));
+        }
+
+        // A snapshot: each figure is brought into its tank, and a wrong count changes nothing.
+        Assert.True(states.SetTanks(handle, Single(half)));
+        Assert.False(states.SetTanks(handle, Single(full).AsSpan(1)));
+        Assert.Equal(half, states.Tanks(handle).ToArray());
+        Assert.True(states.SetTanks(handle, [float.NaN, (float)full[1] * 4f, -1f, (float)half[3], float.PositiveInfinity, float.NegativeInfinity]));
+        Assert.Equal([0.0, full[1], 0.0, half[3], full[4], 0.0], states.Tanks(handle).ToArray());
+
+        // A tank that is lost holds nothing: a save that says otherwise is refused, a snapshot's figure is dropped.
+        Assert.True(states.SetTanks(handle, Single(half)));
+        Assert.True(states.Lose(handle, design.Tanks[3].Block));
+        Assert.Equal(0.0, states.Tanks(handle)[3]);
+        Assert.False(states.TryRestoreTanks(handle, half));
+        var gone = (double[])half.Clone();
+        gone[3] = 0.0;
+        Assert.True(states.TryRestoreTanks(handle, gone));
+        Assert.True(states.SetTanks(handle, Single(half)));
+        Assert.Equal(gone, states.Tanks(handle).ToArray());
+
+        // A copy for prediction takes the tanks with the blocks.
+        var copy = states.Create(design, hitPoints: true);
+        states.Lose(copy, design.Tanks[3].Block);
+        states.CopyFrom(copy, states, handle);
+        Assert.Equal(gone, states.Tanks(copy).ToArray());
+        states.EmptyTanks(copy);
+        Assert.All(states.Tanks(copy).ToArray(), level => Assert.Equal(0.0, level));
+        Assert.Equal(gone, states.Tanks(handle).ToArray());
+
+        // The tanks sit after the block arrays whatever the design's size and whether hit points are kept:
+        // writing every tank and losing every other block leaves both as they were written.
+        foreach (var hitPoints in new[] { true, false })
+        {
+            var state = states.Create(design, hitPoints);
+            var levels = states.TankLevels(state);
+            for (var i = 0; i < levels.Length; i++)
+                levels[i] = i + 0.25;
+            for (var block = 0; block < design.BlockCount; block++)
+                if (design.TankOf(block) < 0 && block != 0)
+                    Assert.True(states.Lose(state, block));
+            Assert.Equal([0.25, 1.25, 2.25, 3.25, 4.25, 5.25], states.Tanks(state).ToArray());
+            Assert.Equal(design.BlockCount - 6 - 1, states.Losses(state).Length);
+        }
+    }
+
+    [Fact]
+    public void ADesignHasAtMostAsManyTanksAsASnapshotCanTellThePilotOf()
+    {
+        Assert.Equal(255, TankFuel.MaxTanks);
+        Assert.Equal(255, Content.Blocks.Limits.MaxTanks);
+
+        // 255 tanks in a row are a design; one more is refused, by the file's rule and so by Decode's and the editor's.
+        DesignBox[] Row(int tanks)
+        {
+            var boxes = new List<DesignBox> { Box("core", 0, 0, 0) };
+            for (var i = 0; i < tanks; i++)
+                boxes.Add(Box(i % 2 == 0 ? "nitrogenTank" : "bipropellantTank", 1 + i, 0, 0));
+            return [.. boxes];
+        }
+
+        var most = new BoxDesign("Tanker", 1f, Row(255), Content.Blocks.Limits, "test");
+        Assert.Equal(256, most.Blocks.Length);
+        var refused = Assert.Throws<InvalidDataException>(() => new BoxDesign("Tanker", 1f, Row(256), Content.Blocks.Limits, "test"));
+        Assert.Contains("too many tanks (limit 255)", refused.Message);
+
+        // The editor stops at the same count, for a block placed and for blocks pasted, and only for tanks.
+        var draft = BuildDraft.FromBlueprint(HullDesign.Of(most, Content.Rules), Content);
+        var tank = Content.Blocks.Get("nitrogenTank");
+        Assert.Equal(DraftEdit.TooManyTanks, draft.CanAdd(new GridSize(0, 1, 0), One, tank));
+        Assert.Equal(DraftEdit.TooManyTanks, draft.Add(new GridSize(0, 1, 0), One, tank));
+        Assert.Equal(DraftEdit.TooManyTanks, draft.Paste([Box("hull", 0, 1, 0), Box("hydrazineTank", 0, 2, 0)], default));
+        Assert.Equal(DraftEdit.Done, draft.CanAdd(new GridSize(0, 1, 0), One, Content.Blocks.Get("hull")));
+        Assert.Equal(DraftEdit.Done, draft.Delete(1));
+        Assert.Equal(DraftEdit.Done, draft.Add(new GridSize(0, 1, 0), One, tank));
+
+        // The limit is what keeps the wire's promise: a header with every tank still leaves room for 255 records.
+        Assert.True(SnapshotHeader.MaxWireSize + byte.MaxValue * (HullRecord.MaxWireSize - HullRecord.MaxHealth * 6) < 65536);
+    }
+
+    [Fact]
+    public void SteppingOverTanksTakesNoManagedMemory()
+    {
+        var design = ManyTanks();
+        using var hulls = new HullStore();
+        var field = new HullField(hulls, [design]);
+        var hull = hulls.Create(1, 0, design, Double3.Zero).Index;
+        var input = new FlightInput { Vertical = 127, Forward = -100, Dampeners = true };
+        field.BeginRound();
+        field.Step(hull, input);
+        var probe = new AllocationProbe();
+        for (var tick = 0; tick < 600; tick++)
+        {
+            if (tick == 300)
+                hulls.BlockStates.EmptyTanks(hulls.Info(hull).BlockState);
+            while (probe.Measuring())
+            {
+                field.BeginRound();
+                field.Step(hull, input);
+            }
+        }
+
+        Assert.Equal(0L, probe.Bytes);
+        Assert.Equal(default, hulls.State(hull).Fuel);
     }
 
     [Fact]
@@ -759,24 +1102,49 @@ public sealed class PropulsionTests
     [Fact]
     public void TheSnapshotHeaderCarriesTheOwnTanksAndEveryRecordWhatItsThrustPartsDid()
     {
+        // The header names how many tanks the own hull's design has and the kilograms in each, exactly.
         Span<byte> buffer = stackalloc byte[SnapshotHeader.MaxWireSize];
         var writer = new NetWriter(buffer);
-        var header = new SnapshotHeader { ServerTick = 9, OwnHull = 7, HullCount = 1, OwnFuel = new FuelTanks { Nitrogen = 1.5f, Hydrazine = 0f, Bipropellant = 999.25f } };
+        var header = new SnapshotHeader { ServerTick = 9, OwnHull = 7, HullCount = 1, OwnTankCount = 3 };
+        header.OwnTanks[0] = 1.5f;
+        header.OwnTanks[1] = 0f;
+        header.OwnTanks[2] = 999.25f;
         header.Write(ref writer);
-        Assert.Equal(SnapshotHeader.MaxWireSize, writer.Length);
-        Assert.Equal(37, SnapshotHeader.MaxWireSize);
+        Assert.Equal(25 + 1 + 3 * 4, writer.Length);
+        Assert.Equal(header.WireSize, writer.Length);
         var reader = new NetReader(writer.Written[1..]);
         Assert.True(SnapshotHeader.TryRead(ref reader, out var read));
-        Assert.Equal(header.OwnFuel, read.OwnFuel);
+        Assert.Equal(3, read.OwnTankCount);
+        for (var i = 0; i < 3; i++)
+            Assert.Equal(BitConverter.SingleToUInt32Bits(header.OwnTanks[i]), BitConverter.SingleToUInt32Bits(read.OwnTanks[i]));
 
-        // Tanks that are no number or below nothing are refused with the header.
+        // A hull without tanks costs one byte, and one with as many as a design may have fills the bound.
+        writer = new NetWriter(buffer);
+        (header with { OwnTankCount = 0 }).Write(ref writer);
+        Assert.Equal(26, writer.Length);
+        writer = new NetWriter(buffer);
+        (header with { OwnTankCount = TankFuel.MaxTanks }).Write(ref writer);
+        Assert.Equal(SnapshotHeader.MaxWireSize, writer.Length);
+        Assert.Equal(25 + 1 + 255 * 4, SnapshotHeader.MaxWireSize);
+        reader = new NetReader(writer.Written[1..]);
+        Assert.True(SnapshotHeader.TryRead(ref reader, out read));
+        Assert.Equal(TankFuel.MaxTanks, read.OwnTankCount);
+
+        // Tanks that are no number or below nothing are refused with the header, and so is one cut short.
         foreach (var hostile in new[] { float.NaN, float.PositiveInfinity, -1f })
         {
+            var bad = header;
+            bad.OwnTanks[1] = hostile;
             writer = new NetWriter(buffer);
-            (header with { OwnFuel = new FuelTanks { Hydrazine = hostile } }).Write(ref writer);
+            bad.Write(ref writer);
             reader = new NetReader(writer.Written[1..]);
             Assert.False(SnapshotHeader.TryRead(ref reader, out _));
         }
+
+        writer = new NetWriter(buffer);
+        header.Write(ref writer);
+        reader = new NetReader(writer.Written[1..^1]);
+        Assert.False(SnapshotHeader.TryRead(ref reader, out _));
 
         // A record carries the thrust state and no tanks: the receiver reads them empty.
         var bytes = new byte[HullRecord.MaxWireSize];
@@ -800,8 +1168,10 @@ public sealed class PropulsionTests
             Assert.False(HullRecord.TryRead(ref reader, out _));
         }
 
-        // 255 records without health still fit one snapshot, with room to spare for no more than four bytes each.
+        // 255 records without health still fit one snapshot beside a header with every tank a design may have:
+        // that is what holds a design to 255 tanks, and a record to no more than what it carries now.
         Assert.True(SnapshotHeader.MaxWireSize + byte.MaxValue * (HullRecord.MaxWireSize - HullRecord.MaxHealth * 6) < 65536);
+        Assert.False(SnapshotHeader.MaxWireSize + byte.MaxValue * (HullRecord.MaxWireSize - HullRecord.MaxHealth * 6 + 1) < 65536);
     }
 
     [Fact]
@@ -838,6 +1208,12 @@ public sealed class PropulsionTests
         Assert.Equal(capacity, start.Hulls[start.OwnHull].Fuel.Capacity);
         Assert.Equal(capacity, start.Hulls[start.OwnHull].Fuel.Amount);
 
+        // The pilot is shown every tank of their hull: one figure for each tank of the design, full at the start.
+        var tanks = Content.Pod.Tanks.ToArray();
+        Assert.True(tanks.Length >= 2);
+        Assert.Equal(tanks.Select(tank => tank.Capacity), start.Hulls[start.OwnHull].Tanks.ToArray());
+        Assert.Same(start.OwnTanks, System.Runtime.InteropServices.MemoryMarshal.TryGetArray(start.Hulls[start.OwnHull].Tanks, out var memory) ? memory.Array : null);
+
         // Engines with boost, then thrusters on two axes, then the dampeners braking it all: every way fuel is
         // spent. The prediction runs the server's code on the server's tanks, so it is never corrected.
         var worst = 0f;
@@ -868,6 +1244,7 @@ public sealed class PropulsionTests
                 // Nobody is told another player's tanks.
                 Assert.Equal(default, seen.Hulls[h].Fuel.Amount);
                 Assert.Equal(default, seen.Hulls[h].Fuel.Capacity);
+                Assert.True(seen.Hulls[h].Tanks.IsEmpty);
             }
         }
 
@@ -885,6 +1262,29 @@ public sealed class PropulsionTests
         Assert.Equal(truth.Bipropellant, view.Fuel.Amount.Bipropellant, 2);
         Assert.Equal(truth.Nitrogen, view.Fuel.Amount.Nitrogen, 2);
         Assert.Equal(capacity, view.Fuel.Capacity);
+
+        // Tank by tank the same holds, and the tanks shown add up to the fuel shown.
+        var levels = hulls.BlockStates.Tanks(hulls.Info(slot).BlockState).ToArray();
+        Assert.Equal(tanks.Length, view.Tanks.Length);
+        for (var i = 0; i < tanks.Length; i++)
+        {
+            Assert.Equal(levels[i], view.Tanks.Span[i], 2);
+            Assert.Equal(view.Fuel.Amount[tanks[i].Kind], view.Tanks.Span[i], 3);
+        }
+
+        // At rest nothing burns, and then the client shows the server's own figures: each tank what the server
+        // holds of it, in the single precision it is sent in.
+        pilot.Input.Submit(new PlayerControls());
+        for (var i = 0; i < 1200 && hulls.State(slot).Velocity != Vector3.Zero; i++)
+            Step();
+        for (var i = 0; i < 30; i++)
+            Step();
+        Assert.Equal(Vector3.Zero, hulls.State(slot).Velocity);
+        view = pilot.AcquireSnapshot().Hulls[pilot.AcquireSnapshot().OwnHull];
+        levels = hulls.BlockStates.Tanks(hulls.Info(slot).BlockState).ToArray();
+        Assert.Equal(levels.Select(level => (float)level), view.Tanks.ToArray());
+        Assert.Equal(hulls.State(slot).Fuel, view.Fuel.Amount);
+        Assert.True(levels[0] < tanks[0].Capacity && levels[1] < tanks[1].Capacity);
         Assert.Null(server.Fault);
     }
 }

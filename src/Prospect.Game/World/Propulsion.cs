@@ -118,7 +118,10 @@ public static class Fuels
     };
 }
 
-/// <summary>One figure per fuel: an amount in a hull's tanks, a capacity, a burn rate. Kilograms, or kilograms a second.</summary>
+/// <summary>
+/// One figure per fuel: what a hull's tanks of that fuel hold together, what they can hold, a burn rate.
+/// Kilograms, or kilograms a second. What each tank holds is kept with the hull's block state (<see cref="TankFuel"/>).
+/// </summary>
 public struct FuelTanks
 {
     public float Nitrogen;
@@ -134,20 +137,87 @@ public struct FuelTanks
         _ => 0f,
     };
 
-    /// <summary>Each figure brought down to the one in <paramref name="limit"/> where it is above it.</summary>
-    public readonly FuelTanks Clamped(in FuelTanks limit) => new()
-    {
-        Nitrogen = Math.Min(Nitrogen, limit.Nitrogen),
-        Hydrazine = Math.Min(Hydrazine, limit.Hydrazine),
-        Bipropellant = Math.Min(Bipropellant, limit.Bipropellant),
-    };
-
-    /// <summary>True when every figure is a number, is not negative and is at most the one in <paramref name="limit"/>.</summary>
-    public readonly bool Within(in FuelTanks limit) =>
-        Nitrogen >= 0f && Nitrogen <= limit.Nitrogen && Hydrazine >= 0f && Hydrazine <= limit.Hydrazine && Bipropellant >= 0f && Bipropellant <= limit.Bipropellant;
-
     /// <summary>True when every figure is a finite number.</summary>
     public readonly bool IsFinite => float.IsFinite(Nitrogen) && float.IsFinite(Hydrazine) && float.IsFinite(Bipropellant);
+}
+
+/// <summary>
+/// One tank of a design: the block it is, the fuel it holds and the most it holds. A hull keeps the kilograms in each
+/// of its tanks with its block state, in the order of <see cref="HullDesign.Tanks"/>, so a tank is named by its
+/// index there on the wire, in a save and in the interface.
+/// </summary>
+public readonly record struct DesignTank(int Block, FuelKind Kind, float Capacity);
+
+/// <summary>
+/// The arithmetic of fuel kept tank by tank. A hull's fuel is what each of its tanks holds; what it has of a fuel
+/// is its tanks of that fuel added up, in tank order, and nothing else. Burning draws from every tank of the fuel
+/// at once, each in proportion to what it holds, so tanks that are equally full stay equally full. A tank that is
+/// lost holds nothing. Plain arithmetic in a fixed order: the server and a predicting client get the same bits
+/// from the same tanks. Allocates nothing.
+/// <para>
+/// A tank's kilograms are kept in double precision. One tick of one thruster burns a ten-thousandth of a
+/// kilogram; taken from a single-precision figure of some hundreds of kilograms that rounds to a few units in
+/// the last place, tick after tick the same way, and a large tank at a low throttle would not fall at all.
+/// </para>
+/// </summary>
+public static class TankFuel
+{
+    /// <summary>
+    /// The most tanks a design may have: a snapshot tells the pilot of every one, and its count is a byte. Content
+    /// may allow fewer (<c>limits.maxTanks</c> in <c>blocks.json</c>), never more.
+    /// </summary>
+    public const int MaxTanks = byte.MaxValue;
+
+    /// <summary>What the tanks hold of each fuel, added up in tank order.</summary>
+    public static FuelTanks Total(ReadOnlySpan<double> levels, ReadOnlySpan<DesignTank> tanks)
+    {
+        Span<double> sums = stackalloc double[Fuels.Count + 1];
+        Sum(levels, tanks, sums);
+        return Fuel(sums);
+    }
+
+    /// <summary>
+    /// Adds the tanks up into <paramref name="sums"/>, which is indexed by <see cref="FuelKind"/> and so has one
+    /// entry more than there are fuels: the figures a step shares its burn out by.
+    /// </summary>
+    internal static void Sum(ReadOnlySpan<double> levels, ReadOnlySpan<DesignTank> tanks, Span<double> sums)
+    {
+        sums.Clear();
+        for (var i = 0; i < tanks.Length; i++)
+            sums[(int)tanks[i].Kind] += levels[i];
+    }
+
+    /// <summary>Sums by <see cref="FuelKind"/> as the figures a hull's state and its readout carry.</summary>
+    internal static FuelTanks Fuel(ReadOnlySpan<double> sums) => new()
+    {
+        Nitrogen = (float)sums[(int)FuelKind.Nitrogen],
+        Hydrazine = (float)sums[(int)FuelKind.Hydrazine],
+        Bipropellant = (float)sums[(int)FuelKind.Bipropellant],
+    };
+
+    /// <summary>
+    /// Takes <paramref name="burnt"/> kilograms of each fuel out of the tanks that hold it, each tank giving the
+    /// share it holds of <paramref name="held"/>, which is what <see cref="Sum"/> made of them before the step.
+    /// A fuel burnt down to nothing leaves its tanks at exactly nothing. Returns what the tanks hold afterwards.
+    /// </summary>
+    internal static FuelTanks Drain(Span<double> levels, ReadOnlySpan<DesignTank> tanks, ReadOnlySpan<double> held, in FuelTanks burnt)
+    {
+        Span<double> left = stackalloc double[Fuels.Count + 1];
+        left.Clear();
+        for (var i = 0; i < tanks.Length; i++)
+        {
+            ref readonly var tank = ref tanks[i];
+            var all = held[(int)tank.Kind];
+            double taken = burnt[tank.Kind];
+            ref var level = ref levels[i];
+
+            // The share is exactly one for a fuel in a single tank, so that tank loses exactly what was burnt.
+            level = all > 0.0 && taken < all ? Math.Clamp(level - taken * (level / all), 0.0, tank.Capacity) : 0.0;
+            left[(int)tank.Kind] += level;
+        }
+
+        return Fuel(left);
+    }
 }
 
 /// <summary>
@@ -264,7 +334,8 @@ public struct ThrustState
 /// A hull's fuel in one tick: what its tanks hold, what they can hold and what its parts burnt, per fuel.
 /// <see cref="FlightModel.Step"/> fills it from the same arithmetic that empties the tanks, so the pilot's readout
 /// and the simulation cannot disagree. The burn is gross, in kilograms a second. Only the amounts are simulation
-/// state, and they live in <see cref="HullState.Fuel"/>; this is never sent or saved.
+/// state, and they live tank by tank with the hull's block state (<see cref="HullState.Fuel"/> is their sum);
+/// this is never sent or saved.
 /// </summary>
 public struct FuelFlow
 {

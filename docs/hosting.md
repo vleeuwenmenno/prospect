@@ -398,6 +398,8 @@ What a design need not have:
 - **Room for every mounted thruster** is required: each on a whole face of a block that is there, clear of every
   block and every other mount, at most `maxMounts` (1,024) a design. A thruster sent as a block, or a block sent
   as a mount, is refused. Rules: [propulsion](roadmap/propulsion.md), "Face mounts".
+- **At most 255 tanks** (`maxTanks`): a snapshot tells the pilot of every tank. One more is refused. A tank can
+  be any size, so this bounds separate tanks, not fuel. Rules: [propulsion](roadmap/propulsion.md), "Fuel per tank".
 - Shipped design files still must fly (`HullDesign.Parse`): that check is for content, not for players.
 
 Repair:
@@ -977,6 +979,27 @@ Full API, figures and limitations: [modules](roadmap/modules.md).
 
 Active module spending is shared with client prediction through `ModuleScanRules.Spend`; `PowerFlow.Modules` contributes to total draw/net flow. The existing net energy readout includes it; a separate module tooltip row is UI follow-up.
 
+## Fuel per tank (protocol 52)
+
+- A hull's fuel is kept tank by tank. What it has of a fuel is its tanks added up.
+- The snapshot header carries the receiving player's own tanks: a count byte, then four bytes a tank (kilograms,
+  single precision) in the order of the design's tanks. A lost tank is sent as nothing.
+  - 26 bytes with no tank, at most 1,046 (`SnapshotHeader.MaxWireSize`, 255 tanks).
+  - 255 records without health and the largest header are 65,306 bytes, under the 65,536 of a snapshot.
+- A figure that is no number or below nothing refuses the snapshot. The client brings the rest into each tank's
+  capacity, and ignores a count that is not its design's.
+- A design has at most 255 tanks: `limits.maxTanks` in `blocks/blocks.json`, which is hashed already.
+  `DesignBytes.Decode` refuses one more.
+- **What is disclosed:** nothing new. Nobody is sent another hull's tanks, not even the owner's other hulls.
+- The client predicts its own hull with the server's flight code on these tanks. The server keeps kilograms in
+  double precision, so the two can differ in a tank's last place until the next snapshot; whether a fuel is
+  left, which is all flight reads, always agrees.
+- Nothing refuels. A first spawn and an escape drone start with every tank full; a ship built new from the drone
+  starts with every tank empty; a hull that replaces another (an edit or a `Repair`) gives each tank what the
+  same tank of the old hull held. A new tank, and one a repair builds again, is empty.
+- Content identity: evaluator 12, unchanged. No figure a design is evaluated to moved.
+- Rules: [propulsion](roadmap/propulsion.md), "Fuel per tank".
+
 ## Face mounts (protocol 51)
 
 - Canonical design bytes are version 4: after the blocks, a count of mounts and for each its type, its block, its
@@ -991,8 +1014,8 @@ Active module spending is shared with client prediction through `ModuleScanRules
 - Every hull record carries four more bytes: the hull's `ThrustState` (three throttles from -127 to 127 along the
   hull's right, up and back axes, and a byte with a bit per fuel firing and a boost bit). A record without health is
   252 bytes; 255 of them still fit one snapshot. Bits no step writes, or a throttle of -128, refuse the record.
-- The snapshot header carries the receiving player's own tanks: three floats, 12 bytes, 37 in all. Not numbers or
-  below nothing refuse the snapshot.
+- The snapshot header carries the receiving player's own tanks. Since protocol 52 that is one figure a tank
+  ("Fuel per tank" above).
 - **What is disclosed:** every viewer sees which way a hull in view is pushed and which kinds of part fire, as it
   sees its position. Nobody is sent another hull's tanks, not even the owner's other hulls.
 - The client predicts its own hull with the server's flight code on the server's tanks. Its other hulls are flown
@@ -1000,7 +1023,6 @@ Active module spending is shared with client prediction through `ModuleScanRules
 - Canonical design bytes version 3 added a facing byte per block. `DesignBytes.Decode` refuses a facing above 5 and
   a block larger than its type's `maxSide`.
 - Content identity: evaluator 11. The figures are in `blocks/blocks.json`, which is hashed already.
-- Nothing refuels. A first spawn and an escape drone start with full tanks; a ship built new from the drone starts
-  empty; a hull that replaces another (an edit or a `Repair`) holds the old hull's fuel per fuel, up to the new
-  design's capacity. `Repair` on a whole hull answers `NoChange` whatever the tanks hold. Tanks never hold back a commit.
+- Nothing refuels. What a new or rebuilt hull's tanks hold is under "Fuel per tank" above. `Repair` on a whole
+  hull answers `NoChange` whatever the tanks hold. Tanks never hold back a commit.
 - Rules and figures: [propulsion](roadmap/propulsion.md).

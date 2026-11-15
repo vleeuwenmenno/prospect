@@ -1450,8 +1450,13 @@ public sealed class SqliteWorldStoreTests : IDisposable
             hull.BlockStart = snapshot.BlockCount;
             hull.LossStart = snapshot.LossCount;
             hull.Visual.Count = VisualDamageState.Capacity;
+
+            // Every block a tank: the most fuel figures a save of these limits can hold.
+            hull.Tanks = perHull;
+            hull.TankStart = snapshot.TankCount;
             snapshot.BlockCount += perHull;
             snapshot.LossCount += perHull;
+            snapshot.TankCount += perHull;
             snapshot.Hulls[snapshot.HullCount++] = hull;
         }
 

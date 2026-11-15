@@ -17,14 +17,17 @@ size; thrusters are small parts mounted on the faces of blocks, several to a fac
 of the face they sit on. A thruster is lost with the block it sits on; it has no hit points of its own and is left
 out of collisions. A part with no fuel of its
 kind gives no thrust. Fuel is spent by the shared flight code, predicted by the client and saved with the world.
-Nothing refuels a ship yet: only a first spawn starts with full tanks. An edit keeps the fuel the ship had, up to the
-new design's room; a repair restores blocks, not fuel; a ship built new from the drone starts empty. Engines and both
+Fuel is kept tank by tank: thrust draws from every tank of its fuel in proportion to what each holds, and a tank
+that is destroyed loses what it held. Nothing refuels a ship yet: only a first spawn starts with full tanks. An edit
+keeps the fuel of every tank that is still there and a new tank starts empty; a repair restores blocks, not fuel,
+so a tank it builds again is empty; a ship built new from the drone starts empty. A design has at most 255 tanks. Engines and both
 thruster kinds have low-poly models of their own: an engine fills its block flush, a thruster is a pod on a faceted plate
 (a cold gas pod has four nozzles), in flight and in the ship editor (placed parts and mounts, and the ghost). They show what they fire: an engine ignites with a few sparks and
 opens a wide, soft, blue-violet vacuum plume, a hot thruster a small one with an orange core, a cold gas pod a
 faint, streaked cone of expanding gas lit by the star that bursts as its valve opens and clears when it closes; boost makes plumes longer and
 brighter without burning out to white, for every hull in view. The pilot console shows each fuel's amount and flow.
-Not there: thruster torque, fuel transfer, refineries and stations. The figures are a first balance. See
+Not there: thruster torque, fuel transfer between tanks, a readout of each tank (the console shows each fuel's total),
+refineries and stations. The figures are a first balance. See
 [propulsion](docs/roadmap/propulsion.md).
 
 Scanning modules have a non-visual backend: three placeable Common Mk I blocks, gas composition, targeted asteroid analysis, bounded locator pulses and personal saved observations. The interface is wired: a **Module** tab in the ship editor, keys and chips for the three scanners, the asteroid analysis on the target panel, the **Gas** window and the locator's vision over the flight and command views (see *Ship modules* below). No ship in the shipped fleet carries a module: build one in the editor. Mining, upgrades and sharing knowledge are not there. See [module contract](docs/roadmap/modules.md).
@@ -165,8 +168,9 @@ are never blocked. The editor works in space, around your ship:
   repaired first: the editor opens on it to look, select and **Repair**, and nothing can be changed or applied
   until it is whole. The server refuses a design for a damaged hull too. **Repair** rebuilds the ship as built,
   for free. Changes kept from before the damage hold it back until **Discard changes** throws them away.
-- Fuel carries over: applying a change keeps the fuel the ship had, per fuel, up to the new tanks' room (a new tank
-  adds room, not fuel), and a repair leaves the tanks as they are. A ship built new from the drone starts with empty
+- Fuel carries over tank by tank: applying a change keeps what each tank holds as long as the tank stays where it
+  is (a new, moved or resized tank starts empty), and a repair leaves the tanks as they are, building a lost tank
+  again empty. A ship built new from the drone starts with empty
   tanks. Nothing refuels a ship yet.
 - The right panel shows the checked figures, with braking, sideways and vertical acceleration and the room in each
   kind of tank. Low power, no battery for the shield, low or no forward acceleration, a direction with no part

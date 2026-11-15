@@ -48,7 +48,10 @@ public sealed record SaveLimits
     /// <summary>All owners at the hard per-owner chart limit.</summary>
     public long MaxCharts => (long)MaxOwners * ExplorationRules.MaxChartsPerOwner;
 
-    /// <summary>The most bytes an encoded save can be: every count at its limit, every hull with every dent.</summary>
+    /// <summary>
+    /// The most bytes an encoded save can be: every count at its limit, every hull with every dent, every block
+    /// with its hit points, its place among the losses and, were it a tank, its fuel.
+    /// </summary>
     public long MaxEncodedBytes =>
         WorldSnapshotCodec.HeaderBound
         + MaxModuleObservations * WorldSnapshotCodec.ModuleObservationBytes
@@ -57,7 +60,7 @@ public sealed record SaveLimits
         + (long)MaxDesigns * (4 + SHA256.HashSizeInBytes)
         + (long)MaxOwners * WorldSnapshotCodec.OwnerBytes
         + (long)MaxHulls * (WorldSnapshotCodec.HullFixedBytes + VisualDamageState.Capacity * WorldSnapshotCodec.DentBytes)
-        + (long)MaxBlocks * (sizeof(float) + sizeof(int))
+        + (long)MaxBlocks * (sizeof(float) + sizeof(int) + sizeof(double))
         + (long)MaxRocks * WorldSnapshotCodec.RockBytes;
 
     /// <summary>
@@ -72,6 +75,6 @@ public sealed record SaveLimits
         + (long)MaxDesigns * (SHA256.HashSizeInBytes + 64)
         + (long)MaxOwners * System.Runtime.CompilerServices.Unsafe.SizeOf<SavedOwner>()
         + (long)MaxHulls * System.Runtime.CompilerServices.Unsafe.SizeOf<SavedHull>()
-        + (long)MaxBlocks * (sizeof(float) + sizeof(int))
+        + (long)MaxBlocks * (sizeof(float) + sizeof(int) + sizeof(double))
         + (long)MaxRocks * System.Runtime.CompilerServices.Unsafe.SizeOf<RockDelta>();
 }

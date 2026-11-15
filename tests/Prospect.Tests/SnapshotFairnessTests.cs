@@ -83,7 +83,7 @@ public sealed class SnapshotFairnessTests
             if (contactAndRefusal && i == 20) rig.Net.SnapshotsToRefuse = 1;
             rig.Tick();
             var tick = rig.Server.Status.Tick - 1;
-            var count = world.BuildViews(views, ref words, tick, tick, out var own);
+            var count = world.BuildViews(views, ref words, new float[TankFuel.MaxTanks], tick, tick, out var own);
             if (i < 8) continue;
             Assert.Equal(50, count);
             Assert.Equal(ids[0], views[own].Id);
