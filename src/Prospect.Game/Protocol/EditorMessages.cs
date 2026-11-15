@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using Prospect.Engine.Net;
 
@@ -99,6 +100,15 @@ public enum EditorReason : byte
     DuplicateName = 22,
     ShipLimit = 23,
     NoClearSpot = 24,
+
+    /// <summary>Debug: the tanks asked for were filled (<see cref="EditorRequestKind.FillTank"/>). The edit stays open.</summary>
+    FillDone = 25,
+
+    /// <summary>Debug: this server does not allow filling tanks (<c>ServerConfig.AllowDebugFill</c>). The edit stays open.</summary>
+    FillOff = 26,
+
+    /// <summary>Debug: the request named a block that is not a living tank of the edited hull, or came too soon. Nothing was filled. The edit stays open.</summary>
+    FillRefused = 27,
 }
 
 /// <summary>What a client asks of the editor, reliable. The server answers every one with an <see cref="EditorStateMessage"/>.</summary>
@@ -119,13 +129,29 @@ public enum EditorRequestKind : byte
     /// </summary>
     Repair = 3,
     NewShip = 4,
+
+    /// <summary>
+    /// Debug, local games only: fill the tanks in the blocks listed to capacity, in the hull of the edit the token
+    /// names. The server decides; see <c>ServerConfig.AllowDebugFill</c>. To be removed with the Fill tank button.
+    /// </summary>
+    FillTank = 5,
+}
+
+/// <summary>The block indices of a <see cref="EditorRequestKind.FillTank"/> request, fixed so reading one takes no memory.</summary>
+[InlineArray(EditorRequestMessage.MaxFill)]
+public struct FillBlocks
+{
+    private int _first;
 }
 
 /// <summary>Client to server, reliable: one editor request.</summary>
 public struct EditorRequestMessage
 {
     /// <summary>Message id, kind, reserved token, length and at most 64 UTF-16 units: a new ship name.</summary>
-    public const int MaxWireSize = 1 + 1 + 4 + 1 + ShipName.MaxUnits * 2;
+    public const int MaxWireSize = 1 + 1 + 4 + 1 + (ShipName.MaxUnits * 2 > MaxFill * sizeof(int) ? ShipName.MaxUnits * 2 : MaxFill * sizeof(int));
+
+    /// <summary>The most tanks one fill request names; each is a block index of the edited hull's design.</summary>
+    public const int MaxFill = 32;
 
     public EditorRequestKind Kind;
     public ShipName Name;
@@ -139,12 +165,26 @@ public struct EditorRequestMessage
     /// <summary>With commit: how many canonical bytes the design is.</summary>
     public int Total;
 
+    /// <summary>With <see cref="EditorRequestKind.FillTank"/>: how many of <see cref="Blocks"/> are named.</summary>
+    public int FillCount;
+
+    /// <summary>With <see cref="EditorRequestKind.FillTank"/>: block indices of the edited hull's design.</summary>
+    public FillBlocks Blocks;
+
     public readonly void Write(ref NetWriter writer, scoped ReadOnlySpan<byte> hash)
     {
         writer.WriteByte((byte)MessageId.Editor);
         writer.WriteByte((byte)Kind);
         writer.WriteUInt32(Kind == EditorRequestKind.Begin ? Hull : Token);
         if (Kind == EditorRequestKind.NewShip) { Name.Write(ref writer); return; }
+        if (Kind == EditorRequestKind.FillTank)
+        {
+            writer.WriteByte((byte)FillCount);
+            for (var i = 0; i < FillCount; i++)
+                writer.WriteInt32(Blocks[i]);
+            return;
+        }
+
         if (Kind != EditorRequestKind.Commit)
             return;
         writer.WriteInt32(Total);
@@ -157,7 +197,7 @@ public struct EditorRequestMessage
         message = default;
         var kind = reader.ReadByte();
         var value = reader.ReadUInt32();
-        if (!reader.IsValid || kind > (byte)EditorRequestKind.NewShip)
+        if (!reader.IsValid || kind > (byte)EditorRequestKind.FillTank)
             return false;
         message.Kind = (EditorRequestKind)kind;
         if (message.Kind == EditorRequestKind.Begin)
@@ -165,6 +205,17 @@ public struct EditorRequestMessage
         else
             message.Token = value;
         if (message.Kind == EditorRequestKind.NewShip) return ShipName.Read(ref reader, out message.Name);
+        if (message.Kind == EditorRequestKind.FillTank)
+        {
+            var count = reader.ReadByte();
+            if (!reader.IsValid || count is < 1 or > MaxFill || reader.Remaining != count * sizeof(int))
+                return false;
+            message.FillCount = count;
+            for (var i = 0; i < count; i++)
+                message.Blocks[i] = reader.ReadInt32();
+            return reader.IsValid && reader.Remaining == 0;
+        }
+
         if (message.Kind == EditorRequestKind.Commit)
         {
             message.Total = reader.ReadInt32();
@@ -211,7 +262,7 @@ public static class EditorDataMessage
 /// <summary>Server to client, reliable: where the client's edit stands. Sent in answer to every request and at every change.</summary>
 public struct EditorStateMessage
 {
-    public const int WireSize = 1 + 1 + 1 + 4 + 4 + 4 + 2 + 1;
+    public const int WireSize = 1 + 1 + 1 + 4 + 4 + 4 + 2 + 1 + 1;
 
     public EditorPhase Phase;
     public NewShipStatus NewShip;
@@ -229,6 +280,12 @@ public struct EditorStateMessage
     /// <summary>With <see cref="EditorReason.Quiet"/> and <see cref="EditorReason.TooSoon"/>: seconds to wait.</summary>
     public ushort WaitSeconds;
 
+    /// <summary>
+    /// Debug: whether this server allows <see cref="EditorRequestKind.FillTank"/>. The server sets it on every
+    /// answer, so the editor shows the Fill tank button only where it would work. To be removed with the button.
+    /// </summary>
+    public bool DebugFill;
+
     public readonly void Write(ref NetWriter writer)
     {
         writer.WriteByte((byte)MessageId.EditorState);
@@ -239,6 +296,7 @@ public struct EditorStateMessage
         writer.WriteUInt32(ReplacedHull);
         writer.WriteUInt16(WaitSeconds);
         writer.WriteByte((byte)NewShip);
+        writer.WriteBool(DebugFill);
     }
 
     public static bool TryRead(ref NetReader reader, out EditorStateMessage message)
@@ -251,7 +309,9 @@ public struct EditorStateMessage
         message.ReplacedHull = reader.ReadUInt32();
         message.WaitSeconds = reader.ReadUInt16();
         message.NewShip = (NewShipStatus)reader.ReadByte();
-        if (!reader.IsValid || reader.Remaining != 0 || phase > (byte)EditorPhase.Applied || reason > (byte)EditorReason.NoClearSpot || reason == (byte)EditorReason.Unavailable || message.NewShip > NewShipStatus.Refused)
+        var debug = reader.ReadByte();
+        message.DebugFill = debug == 1;
+        if (!reader.IsValid || reader.Remaining != 0 || debug > 1 || phase > (byte)EditorPhase.Applied || reason > (byte)EditorReason.FillRefused || reason == (byte)EditorReason.Unavailable || message.NewShip > NewShipStatus.Refused)
             return false;
         message.Phase = (EditorPhase)phase;
         message.Reason = (EditorReason)reason;

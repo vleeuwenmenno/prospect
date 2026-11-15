@@ -1,6 +1,7 @@
 using System.Numerics;
 using Prospect.Client.Screens;
 using Prospect.Client.World;
+using Prospect.Game.Protocol;
 using Prospect.Game.World;
 using Xunit;
 
@@ -38,25 +39,144 @@ public sealed class EditorPanelTests
     [Fact]
     public void ASearchCoversEveryTabAndFindsPartsByNameRoleAndDrone()
     {
+        // A ship is edited: search and tabs list ship parts only.
         var palette = new EditorPalette { Category = Array.IndexOf(Tuning.Categories, Tab("Move")) };
         string[] Shown() => Content.Blocks.Types.Where(t => palette.Shows(Tuning, t)).Select(t => t.Id).ToArray();
 
         Assert.Equal(["engine", "hotThruster", "coldGasThruster", "ionDrive", "ionThruster", "bipropellantTank", "hydrazineTank", "nitrogenTank", "gyro"], Shown());
         palette.Query = "ion";
-        Assert.Equal(["ionDrive", "ionThruster", "microIonDrive", "microIonThruster"], Shown());
+        Assert.Equal(["ionDrive", "ionThruster"], Shown());
         palette.Query = "nitrogen";
-        Assert.Equal(["coldGasThruster", "nitrogenTank", "microthruster", "microNitrogenTank"], Shown());
+        Assert.Equal(["coldGasThruster", "nitrogenTank"], Shown());
         palette.Query = "tank";
-        Assert.Equal(["bipropellantTank", "hydrazineTank", "nitrogenTank", "microBipropellantTank", "microNitrogenTank"], Shown());
+        Assert.Equal(["bipropellantTank", "hydrazineTank", "nitrogenTank"], Shown());
         palette.Query = "shield";
-        Assert.Equal(["shield", "microshield"], Shown());
+        Assert.Equal(["shield"], Shown());
+        palette.Query = "drone";
+        Assert.Empty(Shown());
+        palette.Query = "POWER";
+        Assert.Contains("generator", Shown());
+        Assert.DoesNotContain("microgenerator", Shown());
+        palette.Query = "zzz";
+        Assert.Empty(Shown());
+
+        // The drone is edited: the same searches find drone parts only.
+        palette.Craft = HullClass.Fighter;
+        palette.Query = "ion";
+        Assert.Equal(["microIonDrive", "microIonThruster"], Shown());
+        palette.Query = "nitrogen";
+        Assert.Equal(["microthruster", "microNitrogenTank"], Shown());
+        palette.Query = "shield";
+        Assert.Equal(["microshield"], Shown());
         palette.Query = "drone";
         Assert.Equal(Content.Blocks.Types.Where(Tuning.Compact).Select(t => t.Id).ToArray(), Shown());
         palette.Query = "POWER";
-        Assert.Contains("generator", Shown());
-        Assert.Contains("microgenerator", Shown());
-        palette.Query = "zzz";
-        Assert.Empty(Shown());
+        Assert.Equal(["microgenerator"], Shown());
+    }
+
+    [Fact]
+    public void ThePaletteOffersExactlyThePartsTheDraftAcceptsForTheCraftBeingEdited()
+    {
+        foreach (var (craft, design) in new[] { (HullClass.Ship, Content.Pod), (HullClass.Fighter, Content.Designs[Content.DroneDesign]) })
+        {
+            Assert.Equal(craft, design.Class);
+            var draft = BuildDraft.FromBlueprint(design, Content);
+            var palette = new EditorPalette { Craft = craft, Category = 0 };
+            foreach (var type in Content.Blocks.Types)
+            {
+                // The draft's own refusal is the authority; the palette is derived from the same flag.
+                var refused = type.Mount is null
+                    ? draft.CanAdd(new GridSize(100, 100, 100), new GridSize(1, 1, 1), type) == DraftEdit.WrongCraft
+                    : draft.CanAddMount(0, BlockFacing.Back, 0, 0, type) == DraftEdit.WrongCraft;
+                Assert.Equal(!refused, palette.Shows(Tuning, type));
+                Assert.Equal(type.Drone == (craft == HullClass.Fighter), palette.Shows(Tuning, type));
+            }
+        }
+    }
+
+    [Fact]
+    public void DebugFillMapsSelectedTanksToTheHullsOwnTanksAndASpareDraftTankSaysApplyFirst()
+    {
+        var pod = Content.Pod;
+        var tanks = pod.Tanks.ToArray();
+        var draft = BuildDraft.FromBlueprint(pod, Content);
+        Span<int> blocks = stackalloc int[EditorRequestMessage.MaxFill];
+
+        // The tanks as built: selected, they map to the hull's own blocks, in the order selected.
+        Assert.Equal(FillOffer.Ready, EditorFill.Plan(draft, pod, [tanks[1].Block, tanks[0].Block], blocks, out var count));
+        Assert.Equal([tanks[1].Block, tanks[0].Block], blocks[..count].ToArray());
+
+        // Blocks that are no tank are left out; none at all offers nothing.
+        Assert.Equal(FillOffer.Ready, EditorFill.Plan(draft, pod, [FirstBlockOf(pod, "cargo"), tanks[0].Block], blocks, out count));
+        Assert.Equal([tanks[0].Block], blocks[..count].ToArray());
+        Assert.Equal(FillOffer.None, EditorFill.Plan(draft, pod, [FirstBlockOf(pod, "cargo")], blocks, out count));
+        Assert.Equal(FillOffer.None, EditorFill.Plan(draft, pod, [], blocks, out _));
+        Assert.Equal(FillOffer.None, EditorFill.Plan(draft, pod, [-1, 9999], blocks, out _));
+
+        // A tank that is only in the draft cannot be filled: apply first, even next to one that can.
+        var one = new GridSize(1, 1, 1);
+        var added = -1;
+        for (var target = 0; target < draft.Boxes.Length && added < 0; target++)
+            for (var side = 0; side < 6 && added < 0; side++)
+                if (draft.Add(draft.Snap(target, side, one), one, Content.Blocks.Get("nitrogenTank")) == DraftEdit.Done)
+                    added = draft.Boxes.Length - 1;
+        Assert.True(added > 0);
+        Assert.Equal(FillOffer.ApplyFirst, EditorFill.Plan(draft, pod, [added], blocks, out count));
+        Assert.Equal(0, count);
+        Assert.Equal(FillOffer.ApplyFirst, EditorFill.Plan(draft, pod, [tanks[0].Block, added], blocks, out _));
+
+        // A tank resized in the draft is another tank until it is applied.
+        var resized = BuildDraft.FromBlueprint(pod, Content);
+        var box = resized.Boxes[tanks[0].Block];
+        var grown = false;
+        for (var face = 0; face < 6 && !grown; face++)
+            grown = resized.Resize(tanks[0].Block, face, new[] { box.Size.X, box.Size.Y, box.Size.Z }[face >> 1] + 1) == DraftEdit.Done;
+        Assert.True(grown);
+        Assert.NotEqual(box.Size, resized.Boxes[tanks[0].Block].Size);
+        Assert.Equal(FillOffer.ApplyFirst, EditorFill.Plan(resized, pod, [tanks[0].Block], blocks, out _));
+        Assert.Equal(FillOffer.Ready, EditorFill.Plan(resized, pod, [tanks[1].Block], blocks, out count));
+
+        // More than a request carries.
+        var many = new int[EditorRequestMessage.MaxFill + 1];
+        Array.Fill(many, tanks[0].Block);
+        Assert.Equal(FillOffer.TooMany, EditorFill.Plan(draft, pod, many, blocks, out _));
+    }
+
+    private static int FirstBlockOf(HullDesign design, string type)
+    {
+        for (var i = 0; i < design.Boxes.Length; i++)
+            if (design.Boxes[i].Type.Id == type)
+                return i;
+        throw new InvalidOperationException(type);
+    }
+
+    [Fact]
+    public void ATabWithNoPartForTheCraftIsHiddenAndAChosenOneFallsBackToAll()
+    {
+        var types = Content.Blocks.Types;
+        var ship = new EditorPalette { Craft = HullClass.Ship };
+        var drone = new EditorPalette { Craft = HullClass.Fighter };
+        var droneTab = Array.IndexOf(Tuning.Categories, Tab("Drone"));
+        Assert.False(ship.TabHasParts(Tuning, types, droneTab));
+        Assert.True(drone.TabHasParts(Tuning, types, droneTab));
+        Assert.True(ship.TabHasParts(Tuning, types, 0));
+        Assert.True(drone.TabHasParts(Tuning, types, 0));
+        for (var tab = 0; tab < Tuning.Categories.Length; tab++)
+            Assert.Equal(types.Any(t => !t.Drone && Tuning.Lists(Tuning.Categories[tab], t)), ship.TabHasParts(Tuning, types, tab));
+
+        // The ship tabs with parts are all but Drone; on the drone, the role tabs list none (drone parts live on their own tab).
+        Assert.DoesNotContain(Tuning.Categories.Where((_, i) => ship.TabHasParts(Tuning, types, i)), c => c.Name == "Drone");
+        Assert.All(Tuning.Categories.Where((_, i) => drone.TabHasParts(Tuning, types, i)), c => Assert.Contains(c.Name, new[] { "All", "Drone" }));
+
+        // The Drone tab was chosen while the drone was edited; editing a ship falls back to All, and the list is a ship's.
+        ship.Category = droneTab;
+        ship.KeepTabShown(Tuning, types);
+        Assert.Equal(0, ship.Category);
+        Assert.DoesNotContain(types.Where(t => ship.Shows(Tuning, t)), t => t.Drone);
+        drone.Category = droneTab;
+        drone.KeepTabShown(Tuning, types);
+        Assert.Equal(droneTab, drone.Category);
+        Assert.All(types.Where(t => drone.Shows(Tuning, t)), t => Assert.True(t.Drone));
     }
 
     [Fact]

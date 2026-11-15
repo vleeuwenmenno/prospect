@@ -358,7 +358,7 @@ public sealed class EditorSessionTests
         private readonly StepClock _time = new();
 
         /// <summary>A server with a link for every client; the first <paramref name="joined"/> join at once.</summary>
-        internal Rig(int clients = 2, int joined = 2, int quiet = 1, int peerWait = 1, int ready = 5, int commit = 0, int uploads = 2, int? catalogueSpare = null, int maxShips = 16, int? sectorKm = null)
+        internal Rig(int clients = 2, int joined = 2, int quiet = 1, int peerWait = 1, int ready = 5, int commit = 0, int uploads = 2, int? catalogueSpare = null, int maxShips = 16, int? sectorKm = null, bool debugFill = false)
         {
             _files.Write("net/editor.json", $$"""{ "maxOwnedShips": {{maxShips}}, "quietSeconds": {{quiet}}, "uploads": {{uploads}}, "uploadSeconds": 5, "readySeconds": {{ready}}, "peerWaitSeconds": {{peerWait}}, "commitSeconds": {{commit}} }""");
             if (catalogueSpare is { } spare)
@@ -379,7 +379,7 @@ public sealed class EditorSessionTests
                 _links[i] = new LoopbackLink();
                 Wires[i] = new Wire(_links[i].Server) { Hold = i >= joined };
             }
-            Server = new ServerHost(new ServerConfig { Clock = _time }, Content, [.. Wires]);
+            Server = new ServerHost(new ServerConfig { Clock = _time, AllowDebugFill = debugFill }, Content, [.. Wires]);
             Hulls = Field<HullStore>("_hulls");
             for (var i = 0; i < joined; i++) Join(i);
             Assert.True(Until(() => Enumerable.Range(0, joined).All(i => Snap(i).HullCount > 0), settle: true), "the clients should be in space");
@@ -474,12 +474,15 @@ public sealed class EditorSessionTests
         var own = snapshot.Hulls[snapshot.OwnHull];
         var draft = BuildDraft.From(snapshot.Content.Designs[own.Design], own.Blocks.Span, snapshot.Content);
         var one = new GridSize(1, 1, 1);
+
+        // The part is plating built for the kind of craft being edited: the draft refuses the other kind's.
+        var plating = snapshot.Content.Blocks.Get(draft.Class == HullClass.Fighter ? "microhull" : "hull");
         for (var added = 0; added < extra; added++)
         {
             var placed = false;
             for (var target = 0; target < draft.Boxes.Length && !placed; target++)
                 for (var side = 0; side < 6 && !placed; side++)
-                    placed = draft.Add(draft.Snap(target, side, one), one, snapshot.Content.Blocks.Get("hull"), shape) == DraftEdit.Done;
+                    placed = draft.Add(draft.Snap(target, side, one), one, plating, shape) == DraftEdit.Done;
             Assert.True(placed);
         }
         var export = draft.Export();
@@ -1717,6 +1720,145 @@ public sealed class EditorSessionTests
 
     /// <summary>What a client is sent of tanks: each tank's kilograms in single precision.</summary>
     private static float[] Sent(double[] levels) => [.. levels.Select(level => (float)level)];
+
+
+    /// <summary>A debug tank fill, hand-built the way a tampering client could send one.</summary>
+    private static byte[] Fill(uint token, params int[] blocks)
+    {
+        var buffer = new byte[EditorRequestMessage.MaxWireSize];
+        var writer = new NetWriter(buffer);
+        var request = new EditorRequestMessage { Kind = EditorRequestKind.FillTank, Token = token, FillCount = blocks.Length };
+        for (var i = 0; i < blocks.Length; i++) request.Blocks[i] = blocks[i];
+        request.Write(ref writer, default);
+        return writer.Written.ToArray();
+    }
+
+    [Fact]
+    public void DebugFillFillsTheNamedTanksThroughTheServerAndTheClientSeesTheNewLevel()
+    {
+        using var rig = new Rig(clients: 1, joined: 1, peerWait: 0, debugFill: true);
+        var pod = Rig.Index(rig.Own(0));
+        var tanks = rig.Content.Pod.Tanks.ToArray();
+        TankHarness.Fill(rig.Hulls, pod, 0.25f);
+        var token = rig.Open(0);
+        Assert.True(rig.Editor(0).DebugFill, "the grant should say the server allows it");
+
+        // One tank: only it is full, and the hull's fuel is the sum again.
+        var serial = rig.Editor(0).Serial;
+        rig.Input(0).FillTanks(token, [tanks[0].Block]);
+        var answer = rig.Answer(0, serial);
+        Assert.Equal((EditorPhase.Open, EditorReason.FillDone), (answer.Phase, answer.Reason));
+        var levels = TankHarness.Levels(rig.Hulls, pod);
+        Assert.Equal([(double)tanks[0].Capacity, tanks[1].Capacity * 0.25], levels);
+        Assert.Equal(TankFuel.Total(rig.Hulls.BlockStates.Tanks(rig.Hulls.Info(pod).BlockState), tanks), rig.Hulls.State(pod).Fuel);
+        Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Tanks.Span[0] == (float)tanks[0].Capacity), "the client should see the full tank");
+        Assert.Equal(Sent(levels), rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Tanks.ToArray());
+
+        // Several at once, and the same tank twice.
+        rig.Step(20);
+        TankHarness.Fill(rig.Hulls, pod, 0.1f);
+        serial = rig.Editor(0).Serial;
+        rig.Input(0).FillTanks(token, [tanks[1].Block, tanks[0].Block, tanks[1].Block]);
+        Assert.Equal(EditorReason.FillDone, rig.Answer(0, serial).Reason);
+        Assert.Equal(tanks.Select(tank => (double)tank.Capacity), TankHarness.Levels(rig.Hulls, pod));
+        Assert.Equal(rig.Hulls.Flight(pod).FuelCapacity, rig.Hulls.State(pod).Fuel);
+        Assert.Null(rig.Server.Fault);
+    }
+
+    [Fact]
+    public void DebugFillIsRefusedWhereTheServerDoesNotAllowItAndTheHullIsLeftAlone()
+    {
+        using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);
+        var pod = Rig.Index(rig.Own(0));
+        var tanks = rig.Content.Pod.Tanks.ToArray();
+        TankHarness.Fill(rig.Hulls, pod, 0.25f);
+        var before = TankHarness.Levels(rig.Hulls, pod);
+        var token = rig.Open(0);
+        Assert.False(rig.Editor(0).DebugFill);
+        var serial = rig.Editor(0).Serial;
+        rig.Input(0).FillTanks(token, [tanks[0].Block]);
+        var answer = rig.Answer(0, serial);
+        Assert.Equal((EditorPhase.Open, EditorReason.FillOff), (answer.Phase, answer.Reason));
+        Assert.Equal(before, TankHarness.Levels(rig.Hulls, pod));
+    }
+
+    [Fact]
+    public void DebugFillRefusesAnythingButALiveTankOfTheEditedHullOfTheSendersOwnEdit()
+    {
+        using var rig = new Rig(clients: 2, joined: 2, peerWait: 0, debugFill: true);
+        var pod = Rig.Index(rig.Own(0));
+        var tanks = rig.Content.Pod.Tanks.ToArray();
+        var design = rig.Content.Pod;
+        TankHarness.Fill(rig.Hulls, pod, 0.25f);
+        var before = TankHarness.Levels(rig.Hulls, pod);
+        var token = rig.Open(0);
+
+        // Each of these names something that is not a live tank of the sender's edited hull.
+        var hullBlock = FirstBoxOfType(design, "cargo");
+        var lost = tanks[1].Block;
+        Assert.True(rig.Hulls.BlockStates.Lose(rig.Hulls.Info(pod).BlockState, lost));
+        TankHarness.Fill(rig.Hulls, pod, 0.25f);
+        before = TankHarness.Levels(rig.Hulls, pod);
+        foreach (var blocks in new[] { new[] { -1 }, [design.BlockCount], [int.MaxValue], [hullBlock], [tanks[0].Block, hullBlock], [lost], [tanks[0].Block, lost] })
+        {
+            rig.Step(20);
+            var serial = rig.Editor(0).Serial;
+            rig.Raw(0, NetChannel.Reliable, Fill(token, blocks));
+            var answer = rig.Answer(0, serial);
+            Assert.Equal((EditorPhase.Open, EditorReason.FillRefused), (answer.Phase, answer.Reason));
+            Assert.Equal(before, TankHarness.Levels(rig.Hulls, pod));
+        }
+
+        // Another player's request, or a stale token, neither fills nor ends the owner's edit.
+        var other = rig.Editor(1).Serial;
+        rig.Raw(1, NetChannel.Reliable, Fill(token, tanks[0].Block));
+        var refused = rig.Answer(1, other);
+        Assert.Equal(EditorPhase.Closed, refused.Phase);
+        Assert.Equal(before, TankHarness.Levels(rig.Hulls, pod));
+        rig.Step(20);
+        var mine = rig.Editor(0).Serial;
+        rig.Raw(0, NetChannel.Reliable, Fill(token + 1, tanks[0].Block));
+        Assert.Equal(EditorPhase.Open, rig.Answer(0, mine).Phase);
+        Assert.Equal(before, TankHarness.Levels(rig.Hulls, pod));
+
+        // Too many names, none at all and a truncated request are dropped unread.
+        var overfull = Fill(token, tanks[0].Block);
+        overfull[6] = EditorRequestMessage.MaxFill + 1;
+        rig.Raw(0, NetChannel.Reliable, overfull);
+        rig.Raw(0, NetChannel.Reliable, overfull[..^2]);
+        rig.Raw(0, NetChannel.Reliable, Fill(token));
+        rig.Step(20);
+        Assert.Equal(before, TankHarness.Levels(rig.Hulls, pod));
+        Assert.Null(rig.Server.Fault);
+    }
+
+    [Fact]
+    public void DebugFillIsRateLimitedAndNeedsAnOpenEdit()
+    {
+        using var rig = new Rig(clients: 1, joined: 1, peerWait: 0, debugFill: true);
+        var pod = Rig.Index(rig.Own(0));
+        var tanks = rig.Content.Pod.Tanks.ToArray();
+
+        // No edit open: nothing is filled.
+        TankHarness.Fill(rig.Hulls, pod, 0.25f);
+        var before = TankHarness.Levels(rig.Hulls, pod);
+        rig.Raw(0, NetChannel.Reliable, Fill(1, tanks[0].Block));
+        rig.Step(20);
+        Assert.Equal(before, TankHarness.Levels(rig.Hulls, pod));
+
+        // Two in one tick: the second waits.
+        var token = rig.Open(0);
+        var serial = rig.Editor(0).Serial;
+        rig.Raw(0, NetChannel.Reliable, Fill(token, tanks[0].Block));
+        rig.Raw(0, NetChannel.Reliable, Fill(token, tanks[1].Block));
+        Assert.True(rig.Until(() => rig.Editor(0).Reason == EditorReason.TooSoon), $"{rig.Editor(0).Reason}");
+        Assert.Equal([(double)tanks[0].Capacity, tanks[1].Capacity * 0.25], TankHarness.Levels(rig.Hulls, pod));
+        rig.Step(20);
+        serial = rig.Editor(0).Serial;
+        rig.Raw(0, NetChannel.Reliable, Fill(token, tanks[1].Block));
+        Assert.Equal(EditorReason.FillDone, rig.Answer(0, serial).Reason);
+        Assert.Equal(tanks.Select(tank => (double)tank.Capacity), TankHarness.Levels(rig.Hulls, pod));
+    }
 
     [Fact]
     public void AFirstSpawnIsFullAndAnEditAndARepairKeepEachTanksFuelWhileANewOrRebuiltTankIsEmpty()

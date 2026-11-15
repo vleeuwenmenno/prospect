@@ -22,6 +22,7 @@ internal sealed class EditorNoticeTracker
     private float _noticeAt = float.NegativeInfinity;
     private float _followAt = float.NegativeInfinity;
     private float _mirrorAt = float.NegativeInfinity;
+    private float _fillAt = float.NegativeInfinity;
     private float _askingSince = float.NegativeInfinity;
     private bool _askingPosted;
 
@@ -42,6 +43,8 @@ internal sealed class EditorNoticeTracker
         var mirrorNew = editor.MirrorSkippedAt != _mirrorAt;
         _primed = true;
         _mirrorAt = editor.MirrorSkippedAt;
+        var fillNew = editor.FillResultAt != _fillAt;
+        _fillAt = editor.FillResultAt;
         _noticeAt = editor.NoticeAt;
         _followAt = editor.FollowNoticeAt;
 
@@ -68,6 +71,14 @@ internal sealed class EditorNoticeTracker
 
         if (followNew && editor.FollowNotice != FollowRefusal.None)
             board.Post(editor.FollowNotice == FollowRefusal.OutOfSector ? NoticeKinds.FollowOutOfSector : NoticeKinds.FollowMissing);
+
+        if (fillNew)
+            board.Post(editor.FillResult switch
+            {
+                EditorReason.FillDone => NoticeKinds.FillDone,
+                EditorReason.FillOff => NoticeKinds.FillOff,
+                _ => NoticeKinds.FillRefused,
+            });
 
         if (mirrorNew && editor.MirrorSkipped > 0)
         {

@@ -28,6 +28,9 @@ public readonly record struct EditorView
     /// <summary>With <see cref="EditorReason.Quiet"/> and <see cref="EditorReason.TooSoon"/>: seconds the server asks to wait.</summary>
     public int WaitSeconds { get; init; }
 
+    /// <summary>Debug: whether the server allows filling tanks, as its last answer said.</summary>
+    public bool DebugFill { get; init; }
+
     /// <summary>Rises with every answer, so the same refusal twice is seen as two.</summary>
     public uint Serial { get; init; }
 
@@ -66,6 +69,7 @@ internal sealed class EditorClient
         Hull = _state.Hull,
         ReplacedHull = _state.ReplacedHull,
         WaitSeconds = _state.WaitSeconds,
+        DebugFill = _state.DebugFill,
         Serial = _serial,
         Pending = _pending || _wantCancel,
         SentBytes = _uploading || _state.Phase is EditorPhase.Checking or EditorPhase.Publishing ? _offset : 0,
@@ -155,6 +159,17 @@ internal sealed class EditorClient
                 _bytes = null;
                 _offset = 0;
                 Request(transport, new EditorRequestMessage { Kind = EditorRequestKind.Repair, Token = value });
+                return;
+            case PlayerInputBridge.EditIntent.Fill:
+                if (_state.Phase != EditorPhase.Open || value != _state.Token || _pending)
+                {
+                    Refuse(EditorReason.FillRefused);
+                    return;
+                }
+
+                var request = new EditorRequestMessage { Kind = EditorRequestKind.FillTank, Token = value };
+                request.FillCount = bridge.TakeFill(out request.Blocks);
+                Request(transport, request);
                 return;
         }
 

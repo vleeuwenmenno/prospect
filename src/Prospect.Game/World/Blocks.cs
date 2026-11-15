@@ -65,6 +65,18 @@ public sealed class BlockType
     /// </summary>
     public bool BoxOnly { get; init; }
 
+    /// <summary>
+    /// True for a part built for the escape drone's 0.25 m blocks (<c>"drone"</c> in <c>blocks.json</c>); every other
+    /// part is built for a ship. <see cref="FitsClass"/> is the one rule the editor's palette and its placements ask.
+    /// </summary>
+    public bool Drone { get; init; }
+
+    /// <summary>
+    /// Whether the part belongs on a craft of <paramref name="craft"/>: drone parts on small craft (the drone is the
+    /// one design of class <see cref="HullClass.Fighter"/>), every other part on the rest.
+    /// </summary>
+    public bool FitsClass(HullClass craft) => Drone == (craft == HullClass.Fighter);
+
     /// <summary>True for the block a hull cannot exist without; losing it destroys the hull.</summary>
     public bool Core { get; init; }
     public bool Sensor { get; init; }
@@ -320,6 +332,7 @@ public sealed class BlockCatalog
                     ? new MountSpec(mount.GetProperty("side"u8).GetInt32(), mount.GetProperty("depth"u8).GetInt32(), mount.GetProperty("legacyBlock"u8).GetString()!)
                     : null,
                 BoxOnly = block.TryGetProperty("boxOnly"u8, out var boxOnly) && boxOnly.GetBoolean(),
+                Drone = block.TryGetProperty("drone"u8, out var drone) && drone.GetBoolean(),
                 Sensor = block.TryGetProperty("sensor"u8, out var sensor) && sensor.GetBoolean(),
                 Charting = block.TryGetProperty("charting"u8, out var charting) && charting.GetBoolean(),
                 Core = block.TryGetProperty("core"u8, out var core) && core.GetBoolean(),

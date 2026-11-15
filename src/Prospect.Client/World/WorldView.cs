@@ -800,6 +800,8 @@ internal sealed class WorldView
 
         // The editor follows the server before anything reads input, so a grant or an end shows this frame.
         Editor.Track(snapshot, bridge, dt);
+        if (_captureFillMode != 0)
+            RunFillCapture(bridge, dt);
         UpdateEditedPose(snapshot);
         if (Editor.TakeReplacement(out var replaced, out var replacement))
             ReplaceHull(replaced, replacement);
@@ -3436,6 +3438,42 @@ internal sealed class WorldView
     // pointer is muted, so the harness plays the drag itself: it holds the select tool, draws the rectangle growing
     // over the middle of the ship for 1.5 s from the first second of the edit, and releases it at 2.5 s.
     private int _captureBoxKind;
+
+    // Debug fill capture only (--open edit-fill, edit-fill-done): the harness selects the pod's first tank in the editor,
+    // and for the second view asks the server to fill it 1.5 s later, since the pointer is muted.
+    private int _captureFillMode;
+    private float _captureFillClock = -1f;
+    private bool _captureFillSent;
+
+    /// <summary>Selects the first tank once the editor is open and, with <paramref name="fill"/>, asks the server to fill it, for a capture.</summary>
+    internal void ScriptFillForCapture(bool fill) => _captureFillMode = fill ? 2 : 1;
+
+    private void RunFillCapture(PlayerInputBridge bridge, float dt)
+    {
+        if (!Editor.CanEdit || Editor.Draft is not { } draft)
+            return;
+        if (_captureFillClock < 0f)
+        {
+            Editor.StopPlacing();
+            for (var i = 0; i < draft.Boxes.Length; i++)
+            {
+                if (draft.Boxes[i].Type.Tank == FuelKind.None)
+                    continue;
+                Editor.Select(i, false);
+                _captureFillClock = 0f;
+                break;
+            }
+
+            return;
+        }
+
+        _captureFillClock += dt;
+        if (_captureFillMode == 2 && !_captureFillSent && _captureFillClock > 1.5f)
+        {
+            _captureFillSent = true;
+            Editor.RequestFill(bridge);
+        }
+    }
     private float _captureBoxClock = -1f;
     private bool _captureBoxDragging;
     private bool _captureBoxDone;

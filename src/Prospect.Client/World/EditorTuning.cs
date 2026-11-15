@@ -11,9 +11,6 @@ namespace Prospect.Client.World;
 /// </summary>
 internal sealed class EditorTuning
 {
-    /// <summary>A part of less mass than this, in tonnes, is a compact (drone) part and listed with those.</summary>
-    public float CompactMassBelow { get; init; }
-
     /// <summary>The part list's tabs, in order.</summary>
     public PartCategory[] Categories { get; init; } = [];
 
@@ -45,17 +42,8 @@ internal sealed class EditorTuning
     /// <summary>How near, in pixels, the pointer must be to a rotation ring of the part being turned to take it.</summary>
     public float RotateRingPixels { get; init; }
 
-    /// <summary>
-    /// Whether a part is a compact one, by its mass. A part that mounts on a face is a fraction of a block, so it is
-    /// weighed as the number of them that fill one cell's face: four cold gas thrusters weigh what a block does.
-    /// </summary>
-    public bool Compact(BlockType type)
-    {
-        if (type.Mount is not { } spec)
-            return type.Mass < CompactMassBelow;
-        var across = FaceMounts.PerCell / spec.Side;
-        return type.Mass * across * across < CompactMassBelow;
-    }
+    /// <summary>Whether a part is a compact (drone) one: <see cref="BlockType.Drone"/>, the same flag the draft's placement rule reads.</summary>
+    public bool Compact(BlockType type) => type.Drone;
 
     /// <summary>Whether a part belongs on a tab.</summary>
     public bool Lists(PartCategory category, BlockType type)
@@ -88,8 +76,6 @@ internal sealed class EditorTuning
             throw new InvalidDataException($"{path}: {e.Message}", e);
         }
 
-        if (!(tuning.CompactMassBelow is >= 0 and <= 1000))
-            throw new InvalidDataException($"{path}: compactMassBelow is 0 to 1000 t");
         if (tuning.Categories.Length is < 1 or > 12)
             throw new InvalidDataException($"{path}: 1 to 12 categories");
         foreach (var category in tuning.Categories)

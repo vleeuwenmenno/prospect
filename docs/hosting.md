@@ -468,7 +468,15 @@ The replacement:
 - The time without damage carries over, also into a drone a player steps out in. Editing an escape drone
   preserves its temporary identity: no further ejection, cleanup on leaving, and respawn at the spawn point.
 
-Sizes (protocol 41): `Editor` 135 B at most (a repair is 6 B), `EditorData` 11 B and its chunk, `EditorState` 18 B, `DesignNotice` 38 B,
+Debug fill (protocol 54, temporary): `EditorRequestKind.FillTank` names up to 32 block indices of the edited hull's design
+(`Editor`, at most 135 B) and the server fills each tank among them to capacity, then adds the hull's fuel up again.
+It is on only when `ServerConfig.AllowDebugFill` is: a private local game sets it, a dedicated server needs
+`--debug-fill`, and a hosted (unlisted or public) game from the client never has it. Every `EditorState` carries the flag, so
+the editor shows the button only where it works. The edit must be the sender's and open, the token current, and every
+block in range and a live tank, or nothing is filled (`FillRefused`); a player may fill once per quarter second
+(`TooSoon`); where it is off the answer is `FillOff`. Remove with the button.
+
+Sizes (protocol 54): `Editor` 135 B at most (a repair is 6 B), `EditorData` 11 B and its chunk, `EditorState` 19 B, `DesignNotice` 38 B,
 `DesignReady` 3 B. A client sends one editor request and one `DesignReady` a tick; both are reserved in its
 reliable allowance.
 

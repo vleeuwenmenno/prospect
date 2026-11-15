@@ -141,7 +141,9 @@ yes (no damage for 30 seconds, no jump ordered or running). The world keeps runn
 are never blocked. The editor works in space, around your ship:
 
 - The part list has a search at the top, tabs by role (hull, power, move, shield, jump) and a Drone tab for the
-  compact parts. Each card shows the part's figures at the size parts are placed at (whole cells on X, Y, Z).
+  compact parts. It lists only parts that fit the craft: editing a ship shows no drone parts (and no Drone tab),
+  editing the drone shows only drone parts, and the search obeys the same rule. A part of the other kind is also
+  refused if placed some other way. Each card shows the part's figures at the size parts are placed at (whole cells on X, Y, Z).
 - Click a card, then click a block face; or drag the card onto the ship. The ghost shows green where the part
   fits and red with the reason where it does not. Let go over a panel, or press `Esc`, and nothing changes.
 - Size the part before placing it: hold `S` with its ghost on a face. The ghost holds still; the face of the
@@ -587,6 +589,7 @@ Ship editor (`B` in a ship, `Ctrl`+`B` in the drone, or the New ship dialog's `E
 | Undo / redo | `Ctrl` + `Z` / `Ctrl` + `Y` or `Ctrl` + `Shift` + `Z` |
 | Save the draft as a design on this computer / load a saved one into it | The bar's **Save...** and **Load...** buttons (no key). Save asks for a name and asks again before it overwrites. Load lists your designs (name, blocks, block size), greys out the ones that are unreadable or built on another block size than your ship's, and asks before it replaces the draft (`Ctrl` + `Z` brings the old draft back). The ship changes only on Apply, which the server checks as ever |
 | Put back a turn, drop what is carried, then cancel the edit | `Esc`; `B` or Cancel ends the edit at once |
+| Debug: fill tank | The details panel's **FILL TANK (DEBUG)**, with a tank selected: the server fills it (or each selected tank, up to 32) to capacity. Debug: fill tank, local games only (private games on this computer; a dedicated server needs `--debug-fill`). A tank that is only in the unapplied draft says to apply first. Temporary: remove with `EditorRequestKind.FillTank` |
 
 Saved designs are version 5 design files (the format of `content/ships`) in a `designs` folder beside `settings.json`
 in the user config folder (`$XDG_CONFIG_HOME/prospect/designs`, `%APPDATA%/prospect/designs`). They stay on your

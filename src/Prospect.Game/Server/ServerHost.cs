@@ -39,6 +39,13 @@ public sealed class ServerConfig
     public bool ScriptedFleetHurtTank { get; init; }
 
     /// <summary>
+    /// Debug: whether the ship editor's Fill tank button works (<see cref="EditorRequestKind.FillTank"/>): it fills the
+    /// tanks of the hull being edited to capacity. Off by default; a private local game turns it on and a dedicated
+    /// server only with <c>--debug-fill</c>. To be removed with the button.
+    /// </summary>
+    public bool AllowDebugFill { get; init; }
+
+    /// <summary>
     /// The name the host chose, shown to players and on the list. It must pass
     /// <see cref="ServerNames.TryNormalize"/>: 1 to 48 characters once cleaned, as the listing server demands.
     /// </summary>
@@ -215,6 +222,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         /// <summary>The earliest tick the player may commit another design.</summary>
         public long EditNextCommit;
 
+        /// <summary>Debug: the earliest tick the player may ask for another tank fill.</summary>
+        public long EditNextFill;
+
         /// <summary>The buffer the committed design arrives in, while it arrives and is checked.</summary>
         public EditUpload? EditUpload;
 
@@ -320,7 +330,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             EditToken = 0;
             EditHull = EditPilot = default;
             CreatingShip = RemoteEdit = false;
-            EditStartTick = EditDeadline = EditNextCommit = 0;
+            EditStartTick = EditDeadline = EditNextCommit = EditNextFill = 0;
             EditUpload = null;
             EditDesign = 0;
             EditOwnerReady = false;
@@ -369,6 +379,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     // What the server needs of its configuration. The password is not among it: only the key derived from it is kept.
     private readonly int _maxPlayers;
     private readonly ServerVisibility _visibility;
+    private readonly bool _allowDebugFill;
     private readonly ulong _galaxySeed;
     private readonly SectorCoord _spawnSector;
     private readonly int _chartedRadius;
@@ -445,6 +456,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             _visualBenchmark = config.VisualBenchmark;
             _maxPlayers = config.MaxPlayers;
             _visibility = config.Visibility;
+            _allowDebugFill = config.AllowDebugFill;
             _accountAuthority = config.AccountAuthority ?? config.Listing;
             _galaxySeed = world?.World.Seed ?? config.GalaxySeed;
             _spawnSector = world?.World.SpawnSector ?? config.SpawnSector;

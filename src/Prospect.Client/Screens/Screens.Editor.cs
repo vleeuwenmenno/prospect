@@ -561,6 +561,8 @@ internal sealed partial class ScreenHost
     private void DrawEditorParts(in HudRect rect, ShipEditor editor, GameContent content)
     {
         var tuning = Tuning;
+        _palette.Craft = editor.Draft?.Class ?? editor.Source?.Class ?? HullClass.Ship;
+        _palette.KeepTabShown(tuning, content.Blocks.Types);
         BeginEditorPanel("##editorparts"u8, "##editorpartsbody"u8, rect);
         var width = ImGui.GetContentRegionAvail().X;
 
@@ -587,11 +589,15 @@ internal sealed partial class ScreenHost
             widest = Math.Max(widest, Kit.Measure(_ui.SansMedium, Theme.FontSmall, category.Label).X);
         var perRow = EditorLayout.TabsPerRow(width, widest, gap, Kit.Scale);
         var chip = EditorLayout.TabWidth(width, perRow, gap);
+        var drawnTabs = 0;
         for (var i = 0; i < categories.Length; i++)
         {
-            if (i % perRow != 0)
+            // A tab with no part for this craft (the Drone tab on a ship) is not shown.
+            if (!_palette.TabHasParts(tuning, content.Blocks.Types, i))
+                continue;
+            if (drawnTabs++ % perRow != 0)
                 ImGui.SameLine(0, gap);
-            else if (i > 0)
+            else if (drawnTabs > 1)
                 Kit.Space(Theme.Space1);
             ImGui.PushID(i);
             if (EditorPalette.HandBack(EditorButton("##tab"u8, categories[i].Label, new float2(chip, Kit.Px(24)), true, false, _palette.Query.Length == 0 && _palette.Category == i)))
@@ -857,6 +863,7 @@ internal sealed partial class ScreenHost
         ImGui.BeginChild("##editordetailsscroll"u8, new float2(width, ImGui.GetContentRegionAvail().Y), ImGuiChildFlags.None, ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoScrollbar);
         width = ImGui.GetContentRegionAvail().X;
         DrawEditorSelection(editor, draft, content, width);
+        DrawFillTank(editor, bridge, width);
 
         if (editor.Time - editor.LastEditAt < EditMessageSeconds && editor.LastEdit is not (DraftEdit.Done or DraftEdit.Unchanged))
         {
@@ -1038,6 +1045,27 @@ internal sealed partial class ScreenHost
         Kit.Space(Theme.Space1);
         if (EditorButton("##delete"u8, count > 1 ? Kit.F($"Delete {count} blocks") : "Delete block"u8, new float2(width, Kit.Px(28)), editor.CanDelete))
             editor.DeleteSelected();
+    }
+
+    /// <summary>
+    /// Debug: the Fill tank button, under the selection's own buttons. It asks the server to fill the selected tank
+    /// blocks of the edited hull to capacity, and shows only where the server allows it and a tank is selected. A
+    /// tank that is only in the unapplied draft says to apply first. To be removed with the debug fill.
+    /// </summary>
+    private void DrawFillTank(ShipEditor editor, PlayerInputBridge bridge, float width)
+    {
+        Span<int> blocks = stackalloc int[EditorRequestMessage.MaxFill];
+        var offer = editor.FillTargets(blocks, out var count);
+        if (offer == FillOffer.None)
+            return;
+        Kit.Space(Theme.Space2);
+        var label = count > 1 ? Kit.F($"FILL {count} TANKS (DEBUG)") : "FILL TANK (DEBUG)"u8;
+        if (EditorButton("##filltank"u8, label, new float2(width, Kit.Px(28)), offer == FillOffer.Ready))
+            editor.RequestFill(bridge);
+        if (offer == FillOffer.ApplyFirst)
+            Paragraph(Theme.TextMute, "Apply first: that tank is only in your draft."u8, width);
+        else if (offer == FillOffer.TooMany)
+            Paragraph(Theme.TextMute, Kit.F($"Select at most {EditorRequestMessage.MaxFill} tanks."), width);
     }
 
     /// <summary>
@@ -1542,6 +1570,7 @@ internal sealed partial class ScreenHost
         DraftEdit.WrongKind => "That part mounts on a face; it is not a block."u8,
         DraftEdit.TooManyTanks => "The ship has as many tanks as a design may have. Make a tank larger instead."u8,
         DraftEdit.BoxOnly => "That part is never slanted: tanks, sensors and scanners are boxes only."u8,
+        DraftEdit.WrongCraft => "That part is for the other kind of craft: drone parts fit only the drone."u8,
         _ => "Nothing changed."u8,
     };
 
