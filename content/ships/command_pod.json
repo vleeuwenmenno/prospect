@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "name": "Command Pod",
   "class": "ship",
   "blockSize": 1.0,
@@ -9,8 +9,6 @@
     { "at": [0, 0, -1], "type": "sensor" },
     { "at": [0, 0, -2], "type": "charting" },
     { "at": [0, 0, 1], "type": "engine", "facing": "back" },
-    { "at": [1, 0, 0], "type": "coldGasThruster", "facing": "right" },
-    { "at": [-1, 0, 0], "type": "coldGasThruster", "facing": "left" },
     { "at": [1, 0, 1], "type": "generator" },
     { "at": [-1, 0, 1], "type": "battery" },
     { "at": [0, 1, 0], "type": "quarters" },
@@ -18,10 +16,29 @@
     { "at": [2, 0, 1], "type": "shield" },
     { "at": [-2, 0, 1], "type": "cargo" },
     { "at": [0, 1, -1], "type": "hyperdrive" },
-    { "at": [-1, 0, -1], "type": "coldGasThruster", "facing": "up" },
-    { "at": [1, 0, -1], "type": "coldGasThruster", "facing": "down" },
-    { "at": [0, 1, -2], "type": "coldGasThruster", "facing": "front" },
     { "at": [1, 1, 1], "type": "bipropellantTank" },
     { "at": [-1, 1, 1], "type": "nitrogenTank" }
+  ],
+  "mounts": [
+    { "on": 8, "face": "right", "at": [1, 1], "type": "coldGasThruster" },
+    { "on": 8, "face": "right", "at": [5, 1], "type": "coldGasThruster" },
+    { "on": 8, "face": "right", "at": [1, 5], "type": "coldGasThruster" },
+    { "on": 8, "face": "right", "at": [5, 5], "type": "coldGasThruster" },
+    { "on": 9, "face": "left", "at": [1, 1], "type": "coldGasThruster" },
+    { "on": 9, "face": "left", "at": [5, 1], "type": "coldGasThruster" },
+    { "on": 9, "face": "left", "at": [1, 5], "type": "coldGasThruster" },
+    { "on": 9, "face": "left", "at": [5, 5], "type": "coldGasThruster" },
+    { "on": 6, "face": "up", "at": [1, 1], "type": "coldGasThruster" },
+    { "on": 6, "face": "up", "at": [5, 1], "type": "coldGasThruster" },
+    { "on": 6, "face": "up", "at": [1, 5], "type": "coldGasThruster" },
+    { "on": 6, "face": "up", "at": [5, 5], "type": "coldGasThruster" },
+    { "on": 0, "face": "down", "at": [1, 1], "type": "coldGasThruster" },
+    { "on": 0, "face": "down", "at": [5, 1], "type": "coldGasThruster" },
+    { "on": 0, "face": "down", "at": [1, 5], "type": "coldGasThruster" },
+    { "on": 0, "face": "down", "at": [5, 5], "type": "coldGasThruster" },
+    { "on": 2, "face": "front", "at": [1, 1], "type": "coldGasThruster" },
+    { "on": 2, "face": "front", "at": [5, 1], "type": "coldGasThruster" },
+    { "on": 2, "face": "front", "at": [1, 5], "type": "coldGasThruster" },
+    { "on": 2, "face": "front", "at": [5, 5], "type": "coldGasThruster" }
   ]
 }

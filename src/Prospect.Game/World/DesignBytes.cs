@@ -7,8 +7,15 @@ namespace Prospect.Game.World;
 /// <summary>Versioned canonical design data. Only catalogue names and box geometry cross this boundary.</summary>
 internal static class DesignBytes
 {
-    /// <summary>Version 3 adds each block's facing, one byte after its shape.</summary>
-    internal const int Version = 3;
+    /// <summary>
+    /// Version 3 added each block's facing, one byte after its shape. Version 4 adds the parts mounted on block
+    /// faces after the blocks: a count, then for each its type, parent block, face and place on the face, in the
+    /// order of <see cref="FaceMounts.Compare"/>.
+    /// </summary>
+    internal const int Version = 4;
+
+    /// <summary>The fewest bytes a mount takes: a one-byte name with its length, the parent, the face and two positions.</summary>
+    private const int MinMountBytes = 2 + 4 + 1 + 2 + 2;
 
     /// <summary>The fewest bytes a block takes: a one-byte name with its length, six integers, a shape and a facing.</summary>
     private const int MinBlockBytes = 2 + 24 + 1 + 1;
@@ -29,6 +36,12 @@ internal static class DesignBytes
             Text(writer, box.Type.Id);
             writer.Write(box.At.X); writer.Write(box.At.Y); writer.Write(box.At.Z);
             writer.Write(box.Size.X); writer.Write(box.Size.Y); writer.Write(box.Size.Z); writer.Write((byte)box.Shape); writer.Write((byte)box.Facing);
+        }
+        writer.Write(design.Mounts.Length);
+        foreach (ref readonly var mount in design.Mounts)
+        {
+            Text(writer, mount.Type.Id);
+            writer.Write(mount.Parent); writer.Write((byte)mount.Face); writer.Write(checked((ushort)mount.U)); writer.Write(checked((ushort)mount.V));
         }
         return stream.ToArray();
     }
@@ -63,10 +76,23 @@ internal static class DesignBytes
             if (!Facings.IsValid(facing)) throw new InvalidDataException("Unknown block facing.");
             boxes[i] = new DesignBox(at, extent, type, shape, facing);
         }
+        var mountCount = reader.Int();
+        if (mountCount < 0 || mountCount > content.Blocks.Limits.MaxMounts || mountCount > reader.Left / MinMountBytes)
+            throw new InvalidDataException("Design mount count exceeds live admission bounds.");
+        var mounts = new DesignMount[mountCount];
+        for (var i = 0; i < mountCount; i++)
+        {
+            var type = content.Blocks.Get(reader.Text());
+            var parent = reader.Int();
+            var face = (BlockFacing)reader.Byte();
+            if (!Facings.IsValid(face)) throw new InvalidDataException("Unknown mount face.");
+            mounts[i] = new DesignMount(parent, face, reader.UShort(), reader.UShort(), type);
+        }
         if (reader.Left != 0) throw new InvalidDataException("Trailing design bytes.");
         // Checked before the design is evaluated or its shield built: it costs one pass over the boxes.
         BoxDesign.RequireOneDriveKind(boxes, "received design");
-        var design = HullDesign.Of(new BoxDesign(name, size, boxes, content.Blocks.Limits, "received design", kind, color), content.Rules);
+        // The design puts its mounts in order; bytes that list them in another are refused below as noncanonical.
+        var design = HullDesign.Of(new BoxDesign(name, size, boxes, content.Blocks.Limits, "received design", kind, color, mounts), content.Rules);
         GeometryAdmission.Validate(design, content.Blocks.Limits);
         // Re-encoding prevents alternate encodings from naming the same accepted data differently.
         if (!Encode(design).AsSpan().SequenceEqual(bytes)) throw new InvalidDataException("Noncanonical design bytes.");
@@ -110,6 +136,7 @@ internal static class DesignBytes
         }
         internal byte Byte() => Take(1)[0];
         internal int Int() => BinaryPrimitives.ReadInt32LittleEndian(Take(4));
+        internal ushort UShort() => BinaryPrimitives.ReadUInt16LittleEndian(Take(2));
         internal float Float()
         {
             var value = BitConverter.Int32BitsToSingle(Int());

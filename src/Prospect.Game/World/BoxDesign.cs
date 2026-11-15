@@ -23,6 +23,8 @@ public sealed record DesignLimits(int MaxBoxSide, int MaxDesignSide, int MaxBloc
     public int GeometryPairTests { get; init; } = 6000000;
     /// <summary>The shape every shield shell takes, shared so that a server and its clients admit the same designs.</summary>
     public ShellShape Shield { get; init; } = ShellShape.Default;
+    /// <summary>The most parts a design may have mounted on its blocks' faces.</summary>
+    public int MaxMounts { get; init; } = 1024;
     internal static DesignLimits Read(JsonElement e, string source)
     {
         var limits = new DesignLimits(e.GetProperty("maxBoxSide"u8).GetInt32(), e.GetProperty("maxDesignSide"u8).GetInt32(), e.GetProperty("maxBlocks"u8).GetInt32())
@@ -31,7 +33,10 @@ public sealed record DesignLimits(int MaxBoxSide, int MaxDesignSide, int MaxBloc
             SurfaceIndices = e.GetProperty("surfaceIndices"u8).GetInt32(),
             GeometryPairTests = e.GetProperty("geometryPairTests"u8).GetInt32(),
             Shield = new ShellShape(e.GetProperty("shieldRoundness"u8).GetSingle(), e.GetProperty("shieldBlend"u8).GetSingle()),
+            MaxMounts = e.GetProperty("maxMounts"u8).GetInt32(),
         };
+        if (limits.MaxMounts is < 0 or > 65535)
+            throw new InvalidDataException($"{source}: maxMounts must be from 0 to 65535");
         if (limits.MaxBoxSide < 1 || limits.MaxDesignSide < limits.MaxBoxSide || limits.MaxBlocks < 1 || limits.SurfaceVertices is < 36 or > GeometryAdmission.MaxVertices || limits.SurfaceIndices is < 36 or > GeometryAdmission.MaxIndices || limits.GeometryPairTests is < 6 or > 6000000 || !limits.Shield.IsValid)
             throw new InvalidDataException($"{source}: invalid design limits");
         return limits;
@@ -45,8 +50,17 @@ public sealed record DesignLimits(int MaxBoxSide, int MaxDesignSide, int MaxBloc
 public sealed class BoxDesign
 {
     private readonly DesignBox[] _blocks;
+    private readonly DesignMount[] _mounts;
+    private readonly int[] _mountStart;
     /// <summary>Blocks in file order, never spatially reordered.</summary>
     public ReadOnlySpan<DesignBox> Blocks => _blocks;
+    /// <summary>
+    /// The parts mounted on block faces, in the order of <see cref="FaceMounts.Compare"/>: by parent block, so the
+    /// mounts of one block follow each other (<see cref="MountsOf"/>).
+    /// </summary>
+    public ReadOnlySpan<DesignMount> Mounts => _mounts;
+    /// <summary>The mounts of one block, as a range of <see cref="Mounts"/>: from <paramref name="start"/> up to <paramref name="end"/>.</summary>
+    public void MountsOf(int block, out int start, out int end) { start = _mountStart[block]; end = _mountStart[block + 1]; }
     /// <summary>Design display name.</summary>
     public string Name { get; }
     /// <summary>Metres per grid cell.</summary>
@@ -128,12 +142,15 @@ public sealed class BoxDesign
         return new System.Collections.ObjectModel.ReadOnlyDictionary<string, double>(result);
     }
 
-    /// <summary>The version <see cref="Write"/> writes: 2 added sizes, 3 shapes and 4 facings.</summary>
-    public const int FormatVersion = 4;
+    /// <summary>The version <see cref="Write"/> writes: 2 added sizes, 3 shapes, 4 facings and 5 face mounts.</summary>
+    public const int FormatVersion = 5;
 
     /// <summary>
-    /// Loads legacy unit cells, version 2 boxes, version 3 shapes or version 4 facings, with source-labelled
-    /// validation. A block of an older version, or one that names no facing, faces <see cref="BlockFacing.Back"/>.
+    /// Loads legacy unit cells, version 2 boxes, version 3 shapes, version 4 facings or version 5 face mounts, with
+    /// source-labelled validation. A block of an older version, or one that names no facing, faces
+    /// <see cref="BlockFacing.Back"/>. Before version 5 a part that now mounts on a face was a block: such a block
+    /// is kept as its type's <see cref="MountSpec.LegacyBlock"/> and carries the part on the face it pointed from
+    /// (<see cref="ConvertLegacy"/>).
     /// </summary>
     public static BoxDesign Load(string path, BlockCatalog catalog)
     {
@@ -153,6 +170,8 @@ public sealed class BoxDesign
             var version = root.TryGetProperty("version"u8, out var v) ? v.GetInt32() : 1;
             if (version is < 1 or > FormatVersion) throw new InvalidDataException($"{source}: unsupported design version {version}");
             var list = new List<DesignBox>();
+            var mounts = new List<DesignMount>();
+            var legacy = new List<(int Block, BlockFacing Facing, BlockType Type)>();
             foreach (var entry in root.GetProperty("blocks"u8).EnumerateArray())
             {
                 index++;
@@ -180,15 +199,71 @@ public sealed class BoxDesign
                     try { facing = Facings.Parse(fc.GetString()); }
                     catch (InvalidDataException e) { throw new InvalidDataException($"{source}: block {index}: {e.Message}", e); }
                 }
+                if (type.Mount is { } spec)
+                {
+                    if (version >= 5) throw new InvalidDataException($"{source}: block {index}: a {type.Name} mounts on a face; list it under \"mounts\"");
+                    legacy.Add((index, facing, type));
+                    type = catalog.Get(spec.LegacyBlock);
+                    facing = BlockFacing.Back;
+                }
                 list.Add(new DesignBox(Grid(entry.GetProperty("at"u8)), size, type, shape, facing));
             }
+            if (root.TryGetProperty("mounts"u8, out var listed))
+            {
+                if (version < 5) throw new InvalidDataException($"{source}: mounts require version 5");
+                var at = -1;
+                foreach (var entry in listed.EnumerateArray())
+                {
+                    at++;
+                    if (at >= catalog.Limits.MaxMounts) throw new InvalidDataException($"{source}: mount {at}: too many mounted parts (limit {catalog.Limits.MaxMounts})");
+                    try
+                    {
+                        var place = entry.GetProperty("at"u8);
+                        if (place.GetArrayLength() != 2) throw new FormatException("expected two face positions");
+                        mounts.Add(new DesignMount(entry.GetProperty("on"u8).GetInt32(), Facings.Parse(entry.GetProperty("face"u8).GetString()), place[0].GetInt32(), place[1].GetInt32(), catalog.Get(entry.GetProperty("type"u8).GetString()!)));
+                    }
+                    catch (Exception e) when (e is InvalidDataException or InvalidOperationException or KeyNotFoundException or FormatException or OverflowException)
+                    { throw new InvalidDataException($"{source}: mount {at}: {e.Message}", e); }
+                }
+            }
+            ConvertLegacy(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(list), legacy, mounts, catalog.Limits);
             RequireOneDriveKind(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(list), source);
             var c = root.GetProperty("color"u8);
             var kind = root.GetProperty("class"u8).GetString() switch { "ship" => HullClass.Ship, "fighter" => HullClass.Fighter, "station" => HullClass.Station, _ => throw new InvalidDataException($"{source}: unknown class") };
-            return new BoxDesign(root.GetProperty("name"u8).GetString()!, root.GetProperty("blockSize"u8).GetSingle(), list.ToArray(), catalog.Limits, source, kind, new Vector3(c[0].GetSingle(), c[1].GetSingle(), c[2].GetSingle()));
+            return new BoxDesign(root.GetProperty("name"u8).GetString()!, root.GetProperty("blockSize"u8).GetSingle(), list.ToArray(), catalog.Limits, source, kind, new Vector3(c[0].GetSingle(), c[1].GetSingle(), c[2].GetSingle()), mounts.ToArray());
         }
         catch (Exception e) when (e is InvalidOperationException or KeyNotFoundException or FormatException or OverflowException or IndexOutOfRangeException)
         { throw new InvalidDataException($"{source}: block {index}: invalid design: {e.Message}", e); }
+    }
+
+    /// <summary>
+    /// Gives the blocks of an old file that were thrusters their thrusters back as mounts. Each such block, by now
+    /// plating, gets as many of the part as fit on every cell of the face it pointed from, in rows from the face's
+    /// low corner: four cold gas thrusters a cell, which push what a one-cell block of them did. A part with no room
+    /// (a block or an earlier part in front of that face, or the face being a wedge's slope) is left out, as is
+    /// everything past the content's count: an old thruster whose nozzle was covered pushes no more.
+    /// </summary>
+    private static void ConvertLegacy(ReadOnlySpan<DesignBox> blocks, List<(int Block, BlockFacing Facing, BlockType Type)> legacy, List<DesignMount> mounts, DesignLimits limits)
+    {
+        foreach (var (block, facing, type) in legacy)
+        {
+            var spec = type.Mount!;
+            var n = Facings.Axis(facing);
+            var across = FaceMounts.PerCell / spec.Side;
+            var pitch = FaceMounts.PerCell / across;
+            var inset = (pitch - spec.Side) / 2;
+            var columns = FaceMounts.Of(blocks[block].Size, (n + 1) % 3) * across;
+            var rows = FaceMounts.Of(blocks[block].Size, (n + 2) % 3) * across;
+            for (var row = 0; row < rows; row++)
+            {
+                for (var column = 0; column < columns && mounts.Count < limits.MaxMounts; column++)
+                {
+                    var mount = new DesignMount(block, facing, column * pitch + inset, row * pitch + inset, type);
+                    if (FaceMounts.Check(blocks, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(mounts), mount) == DraftEdit.Done)
+                        mounts.Add(mount);
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -233,11 +308,16 @@ public sealed class BoxDesign
         return new GridSize(e[0].GetInt32(), e[1].GetInt32(), e[2].GetInt32());
     }
 
-    /// <summary>Validates and owns a copy of generated boxes. At least one core is required, as in legacy designs.</summary>
-    public BoxDesign(string name, float blockSize, DesignBox[] blocks, DesignLimits limits, string source, HullClass kind = HullClass.Ship, Vector3 color = default)
+    /// <summary>
+    /// Validates and owns a copy of generated boxes and of the parts mounted on them, which it puts in the order of
+    /// <see cref="FaceMounts.Compare"/>. At least one core is required, as in legacy designs.
+    /// </summary>
+    public BoxDesign(string name, float blockSize, DesignBox[] blocks, DesignLimits limits, string source, HullClass kind = HullClass.Ship, Vector3 color = default, DesignMount[]? mounts = null)
     {
         Name = name; BlockSize = blockSize; Class = kind; Color = color;
         _blocks = (DesignBox[])blocks.Clone();
+        _mounts = mounts is null ? [] : (DesignMount[])mounts.Clone();
+        _mountStart = new int[blocks.Length + 1];
         if (!float.IsFinite(blockSize) || blockSize <= 0 || blocks.Length == 0 || blocks.Length > limits.MaxBlocks)
             throw new InvalidDataException($"{source}: block count or blockSize outside limits");
         var min = new Vector3(float.PositiveInfinity); var max = new Vector3(float.NegativeInfinity);
@@ -249,6 +329,7 @@ public sealed class BoxDesign
             var b = blocks[i];
             if (!BlockShapes.IsValid(b.Shape)) throw new InvalidDataException($"{source}: block {i}: Unknown block shape.");
             if (!Facings.IsValid(b.Facing)) throw new InvalidDataException($"{source}: block {i}: Unknown block facing.");
+            if (b.Type.Mount is not null) throw new InvalidDataException($"{source}: block {i}: a {b.Type.Name} mounts on a face and cannot be a block");
             var side = MaxSide(b.Type, limits);
             foreach (var (at, size) in new[] { (b.At.X, b.Size.X), (b.At.Y, b.Size.Y), (b.At.Z, b.Size.Z) })
             {
@@ -270,16 +351,63 @@ public sealed class BoxDesign
             if (b.Type.Core) cores++;
         }
         if (cores == 0) throw new InvalidDataException($"{source}: blocks: a hull needs a core");
-        var reach = (double)limits.MaxDesignSide * blockSize;
-        if (mass * 2 * (reach * reach) > float.MaxValue)
-            throw new InvalidDataException($"{source}: blocks: inertia exceeds numeric range");
-        Center = new Double3(x / mass, y / mass, z / mass);
         var spatial = new Spatial(_blocks);
         for (var i = 0; i < blocks.Length; i++)
         {
             var other = spatial.Overlap(i);
             if (other >= 0) throw new InvalidDataException($"{source}: block {i} overlaps block {other}");
         }
+
+        // The mounts, once the blocks they sit on are known to be sound. They weigh something, so they move the
+        // centre the hull turns about like any block.
+        foreach (var mount in _mounts)
+            if (mount.Type is null) throw new InvalidDataException($"{source}: mounts: a mounted part names no type");
+        Array.Sort(_mounts, FaceMounts.Compare);
+        FaceMounts.Validate(_blocks, _mounts, limits, source);
+        foreach (var mount in _mounts)
+        {
+            _mountStart[mount.Parent + 1]++;
+            double m = mount.Type.Mass;
+            if (!double.IsFinite(m) || m <= 0) throw new InvalidDataException($"{source}: mounts: mass outside numeric range");
+            var centre = MountMiddle(mount);
+            mass += m; x += m * centre.X; y += m * centre.Y; z += m * centre.Z;
+        }
+
+        for (var i = 0; i < blocks.Length; i++)
+            _mountStart[i + 1] += _mountStart[i];
+        var reach = (double)limits.MaxDesignSide * blockSize;
+        if (mass * 2 * (reach * reach) > float.MaxValue)
+            throw new InvalidDataException($"{source}: blocks: inertia exceeds numeric range");
+        Center = new Double3(x / mass, y / mass, z / mass);
+    }
+
+    /// <summary>
+    /// The middle of the box a mount fills, in grid coordinates: those of <see cref="Mid"/>, where cell <c>i</c> has
+    /// its centre at <c>i</c> and its edges half a cell either side.
+    /// </summary>
+    public Double3 MountMiddle(in DesignMount mount)
+    {
+        Span<int> low = stackalloc int[3];
+        Span<int> high = stackalloc int[3];
+        FaceMounts.Box(_blocks[mount.Parent], mount, low, high);
+        const double Tenths = 2.0 * FaceMounts.PerCell;
+        return new Double3((low[0] + high[0]) / Tenths - 0.5, (low[1] + high[1]) / Tenths - 0.5, (low[2] + high[2]) / Tenths - 0.5);
+    }
+
+    /// <summary>The width, height and length of the box a mount fills, in cells.</summary>
+    public static Vector3 MountSize(in DesignMount mount)
+    {
+        var spec = mount.Type.Mount!;
+        var size = new Vector3(spec.Side / (float)FaceMounts.PerCell);
+        size[Facings.Axis(mount.Face)] = spec.Depth / (float)FaceMounts.PerCell;
+        return size;
+    }
+
+    /// <summary>A mount's centre from the design's original centre, in metres, in the hull's own frame.</summary>
+    internal Vector3 MountOffset(in DesignMount mount)
+    {
+        var mid = MountMiddle(mount);
+        return new Vector3((float)((mid.X - Center.X) * BlockSize), (float)((mid.Y - Center.Y) * BlockSize), (float)((mid.Z - Center.Z) * BlockSize));
     }
 
     /// <summary>The most cells a block of a type may measure along a side: the type's own limit, or the content's.</summary>
@@ -299,7 +427,13 @@ public sealed class BoxDesign
     /// <summary>Half of a block's width, height and length, in metres.</summary>
     internal Vector3 HalfExtents(in DesignBox b) => new Vector3(b.Size.X, b.Size.Y, b.Size.Z) * (BlockSize * 0.5f);
 
-    /// <summary>Writes version 4, preserving block identity and metadata.</summary>
+    /// <summary>The mounts as the array they are kept in, for the evaluator's inner loops. Never written to.</summary>
+    internal DesignMount[] MountArray => _mounts;
+
+    /// <summary>Where each block's mounts start in <see cref="MountArray"/>; one entry more than there are blocks.</summary>
+    internal int[] MountStart => _mountStart;
+
+    /// <summary>Writes version 5, preserving block identity and metadata.</summary>
     public void Write(Stream stream)
     {
         using var w = new Utf8JsonWriter(stream);
@@ -312,6 +446,13 @@ public sealed class BoxDesign
             w.WriteString("shape"u8, BlockShapes.Name(b.Shape));
             w.WriteString("facing"u8, Facings.Name(b.Facing));
             WriteGrid(w, "at", b.At); WriteGrid(w, "size", b.Size); w.WriteEndObject();
+        }
+        w.WriteEndArray();
+        w.WriteStartArray("mounts"u8);
+        foreach (var m in _mounts)
+        {
+            w.WriteStartObject(); w.WriteString("type"u8, m.Type.Id); w.WriteNumber("on"u8, m.Parent); w.WriteString("face"u8, Facings.Name(m.Face));
+            w.WriteStartArray("at"u8); w.WriteNumberValue(m.U); w.WriteNumberValue(m.V); w.WriteEndArray(); w.WriteEndObject();
         }
         w.WriteEndArray(); w.WriteEndObject();
     }

@@ -13,8 +13,8 @@ import sys
 from pathlib import Path
 
 SCANNERS = ["gasScanner", "asteroidScanner", "asteroidLocator"]
-# Beside the pod's own blocks, on cells it leaves free.
-CELLS = [[2, 0, 0], [-2, 0, 0], [0, -1, 0]]
+# Beside the pod's own blocks, on cells it leaves free and no mounted thruster stands in.
+CELLS = [[1, 0, 0], [-1, 0, 0], [0, 1, 2]]
 SCAN_SECONDS = 0.5
 COOLDOWN_SECONDS = 1
 

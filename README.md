@@ -12,7 +12,10 @@ or that local game opened to other players. There is one simulation and one code
 ## Status
 
 Propulsion burns fuel and is directional: engines, hot thrusters and cold gas thrusters each push the opposite way
-to the way they face, and burn bipropellant, hydrazine and nitrogen from tank blocks. A part with no fuel of its
+to the way they face, and burn bipropellant, hydrazine and nitrogen from tank blocks. Engines are blocks of any
+size; thrusters are small parts mounted on the faces of blocks, several to a face, that fill no cell and point out
+of the face they sit on. A thruster is lost with the block it sits on; it has no hit points of its own and is left
+out of collisions. A part with no fuel of its
 kind gives no thrust. Fuel is spent by the shared flight code, predicted by the client and saved with the world.
 Nothing refuels a ship yet but rebuilding it: applying an edit or a repair fills every tank, and the editor offers
 **Refuel ship** on a whole ship with room in its tanks. Engines and both thruster kinds have models of their own
@@ -20,7 +23,7 @@ that fit any block size and facing, and show what they fire: an engine ignites w
 with shock diamonds, a hot thruster a small orange one, a cold gas thruster a pale puff; boost makes plumes longer
 and brighter, for every hull in view. Not there: a fuel readout in the pilot console (the figures reach the client
 and nothing draws them), thruster torque, fuel transfer, refineries and stations. The ship editor still shows thrust
-parts as plain blocks. The figures are a first balance. See
+parts as plain blocks, a mounted thruster as a plain small box. The figures are a first balance. See
 [propulsion](docs/roadmap/propulsion.md).
 
 Scanning modules have a non-visual backend: three placeable Common Mk I blocks, gas composition, targeted asteroid analysis, bounded locator pulses and personal saved observations. The interface is wired: a **Module** tab in the ship editor, keys and chips for the three scanners, the asteroid analysis on the target panel, the **Gas** window and the locator's vision over the flight and command views (see *Ship modules* below). No ship in the shipped fleet carries a module: build one in the editor. Mining, upgrades and sharing knowledge are not there. See [module contract](docs/roadmap/modules.md).
@@ -174,11 +177,16 @@ are never blocked. The editor works in space, around your ship:
 - Damage, a jump or leaving the ship closes the edit and says why; your changes are kept for the next `B`
   on the same hull and design, including after block loss. `B`, `Esc` or Cancel throws the draft away.
 
-- **Facing.** Every part faces one of six ways, and turns with `R` like its shape and size. An engine or a thruster
-  pushes the ship the opposite way to its facing: its ghost, and a selected one, show the side the nozzle is on in
-  orange with a line out of it, and the part list says which way it pushes (FACES BACK: PUSHES FORWARD). A new part
-  faces back. Cold gas thrusters are at most 2 cells a side and hot thrusters 4; engines and tanks take any size.
-  Tanks and thrusters are on the **Move** tab.
+- **Facing.** Every block faces one of six ways, and turns with `R` like its shape and size. An engine pushes the
+  ship the opposite way to its facing: its ghost, and a selected one, show the side the nozzle is on in orange with
+  a line out of it, and the part list says which way it pushes (FACES BACK: PUSHES FORWARD). A new part faces back.
+  Engines and tanks take any size. Tanks, engines and thrusters are on the **Move** tab.
+- **Thrusters mount on faces.** With a cold gas or hot thruster chosen, the ghost is only the thruster, on the
+  face under the pointer, snapped to tenths of a cell, with a line the way it points: out of that face. A click
+  mounts it; four fit a one-cell face. It has no size and no turn, so `S` and `R` do nothing for it. A middle
+  click selects it, Delete removes it, and copying it picks it as the part to place. It belongs to its block: a
+  moved block takes its thrusters along, a deleted one takes them with it in the same undo step, and a block put
+  where a thruster stands removes that thruster in the same step. A turned block drops its thrusters.
 
 - **Wedges.** Part shape Box or Wedge sits under the part list, with the size, the shape and the sizing and
   turning keys. A wedge fills half its box, with half the box's figures; the part cards show them. A selected
@@ -211,14 +219,15 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   asteroids too. The map's counts are estimates; crowded placements are omitted. The default size table runs
   from pebbles 12 m across to giants 12 km across, limited by field fit; most are tiny and a giant is rare. The
   middle of every sector, where ships arrive, is kept clear.
-- **Hulls from blocks.** A hull is a list of typed blocks (engine, hot and cold gas thrusters, fuel tanks, gyro,
-  generator, battery, shield emitter, cargo, quarters, plating), each facing one of six ways. Mass, moments of
+- **Hulls from blocks.** A hull is a list of typed blocks (engine, fuel tanks, gyro, generator, battery, shield
+  emitter, cargo, quarters, plating), each facing one of six ways, and of hot and cold gas thrusters mounted on
+  their faces. Mass, moments of
   inertia, acceleration in each direction, turn rates, top speed, hull and shield points, tank room and the power
   budget are all computed from them and shown on the ship's data sheet.
 - **Flight.** A command pod with inertial flight: thrust on all three axes, roll, dampeners, and a boost that heats
   up and locks out. Each direction is pushed by the parts that face away from it: the engine faces back and pushes
-  forward, and one cold gas thruster faces each other way, so the pod brakes and strafes at half its forward
-  acceleration. Thrust burns fuel, boost two and a half times as much, and the dampeners burn it while they brake;
+  forward, and four cold gas thrusters are mounted facing each other way, so the pod brakes and strafes at half
+  its forward acceleration. Thrust burns fuel, boost two and a half times as much, and the dampeners burn it while they brake;
   with a tank dry its parts give nothing, and with every tank dry the hull drifts and can still turn. The shipped
   ships carry about 83 minutes of full engine thrust, the drone 75. Thrust, boost and shield recharge also draw
   power; the generator refills the battery with the

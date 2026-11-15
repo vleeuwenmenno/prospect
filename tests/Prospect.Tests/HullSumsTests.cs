@@ -25,7 +25,7 @@ internal static class TestDesigns
             blocks,
             static count =>
             {
-                string[] working = ["core", "generator", "coldGasThruster", "gyro", "shield", "hyperdrive"];
+                string[] working = ["core", "generator", "engine", "gyro", "shield", "hyperdrive"];
                 var boxes = new DesignBox[count];
                 for (var i = 0; i < count; i++)
                     boxes[i] = new DesignBox(new GridSize(i % 50, i / 2500, i / 50 % 50), new GridSize(1, 1, 1), Content.Blocks.Get(i < working.Length ? working[i] : "hull"));
@@ -41,6 +41,10 @@ internal static class TestDesigns
 
     /// <summary>A design of exactly these boxes, under the content's rules.</summary>
     public static HullDesign Of(params DesignBox[] boxes) => HullDesign.Of(new BoxDesign("Test", 1f, boxes, Content.Blocks.Limits, "test"), Content.Rules);
+
+    /// <summary>A design of exactly these boxes with these parts mounted on their faces, under the content's rules.</summary>
+    public static HullDesign Mounted(DesignBox[] boxes, DesignMount[] mounts) =>
+        HullDesign.Of(new BoxDesign("Test", 1f, boxes, Content.Blocks.Limits, "test", mounts: mounts), Content.Rules);
 }
 
 /// <summary>
@@ -182,6 +186,37 @@ internal static class Figures
 
             if (type.Tank != FuelKind.None)
                 tanks[(int)type.Tank - 1] += Scaled(type, "fuelCapacity", type.FuelCapacity, volume);
+
+            // What is mounted on the block is there with it: its own figures, pushing away from its face, with no
+            // hull points and no cell of its own.
+            foreach (var mount in design.Mounts)
+            {
+                if (mount.Parent != i)
+                    continue;
+                var spec = mount.Type.Mount!;
+                var axis = Facings.Axis(mount.Face);
+                var from = new[] { box.At.X, box.At.Y, box.At.Z };
+                var span = new[] { box.Size.X, box.Size.Y, box.Size.Z };
+                var middle = new double[3];
+                var side = new double[3];
+                middle[axis] = Facings.Sign(mount.Face) > 0 ? from[axis] + span[axis] + spec.Depth / 20.0 : from[axis] - spec.Depth / 20.0;
+                side[axis] = spec.Depth / 10.0;
+                middle[(axis + 1) % 3] = from[(axis + 1) % 3] + (mount.U + spec.Side / 2.0) / 10.0;
+                middle[(axis + 2) % 3] = from[(axis + 2) % 3] + (mount.V + spec.Side / 2.0) / 10.0;
+                side[(axis + 1) % 3] = side[(axis + 2) % 3] = spec.Side / 10.0;
+                // Block edges are half a cell below cell centres.
+                var (mx, my, mz) = ((middle[0] - 0.5 - pivot.X) * size, (middle[1] - 0.5 - pivot.Y) * size, (middle[2] - 0.5 - pivot.Z) * size);
+                var (wx, wy, wz) = (side[0] * size, side[1] * size, side[2] * size);
+                double part = mount.Type.Mass;
+                mass += part;
+                var away = (int)Facings.Opposite(mount.Face);
+                thrust[away, (int)mount.Type.Fuel - 1] += mount.Type.Thrust;
+                burn[away, (int)mount.Type.Fuel - 1] += mount.Type.FuelBurn;
+                pumps[(int)mount.Type.Fuel - 1] += mount.Type.PowerDraw;
+                ix += part * (my * my + mz * mz + (wy * wy + wz * wz) / 12);
+                iy += part * (mx * mx + mz * mz + (wx * wx + wz * wz) / 12);
+                iz += part * (mx * mx + my * my + (wx * wx + wy * wy) / 12);
+            }
 
             ix += m * (y * y + z * z + (sy * sy + sz * sz) / 12);
             iy += m * (x * x + z * z + (sx * sx + sz * sz) / 12);
@@ -471,7 +506,7 @@ public sealed class HullSumsTests
             {
                 3 or 40 or 79 => "core",
                 1 => "generator",
-                2 => "hotThruster",
+                2 => "engine",
                 4 => "gyro",
                 _ => "hull",
             };

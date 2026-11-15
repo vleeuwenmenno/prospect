@@ -206,6 +206,14 @@ public sealed class WedgeClientTests
         var rules = content.Rules;
         foreach (var type in content.Blocks.Types)
         {
+            // A part that mounts on a face has one size and no shape: its card shows its own figures whatever is asked.
+            if (type.Mount is not null)
+            {
+                Assert.Equal(PartFigures.Of(type, 1, rules), PartFigures.Of(type, 3, rules, BlockShape.WedgeYPlusPlus));
+                Assert.Equal(type.Mass, PartFigures.Of(type, 12, rules).Mass);
+                continue;
+            }
+
             var wedge = PartFigures.Of(type, 2, rules, BlockShape.WedgeXMinusPlus);
             var cell = PartFigures.Of(type, 1, rules);
             Assert.Equal(cell.Mass, wedge.Mass);

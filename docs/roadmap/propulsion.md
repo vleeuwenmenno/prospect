@@ -6,7 +6,9 @@
 - **Built:** the editor turns a part's facing with `R` and warns about a missing direction or tank.
 - **Built:** the fuel readout in the pilot console (a fuel row under the two groups, a tooltip, low and empty notices).
 - **Built:** the models of engines and both thruster kinds, and their plumes and puffs (below).
-- Protocol 50, save layout 6, design encoding 3, design file version 4, evaluator 11.
+- **Built:** thrusters mount on block faces ("Face mounts" below): data, simulation, editor, shipped ships.
+- Not built yet from the second pass: low-poly models, models in the editor, vacuum plumes.
+- Protocol 51, save layout 7, design encoding 4, design file version 5, evaluator 12.
 
 ## Decided: parts
 
@@ -14,7 +16,8 @@
   - **Cold gas thrusters** (`coldGasThruster`): small to medium. They puff compressed nitrogen.
   - **Hot thrusters** (`hotThruster`): bigger and stronger, small rocket engines that push the hull sideways.
 - **Engines** (`engine`) are the large main drives.
-- All three are **rotatable** to face any of the six directions and push only the opposite way.
+- Engines are **rotatable** to face any of the six directions and push only the opposite way. A thruster mounts
+  on a face and points out of it ("Face mounts").
   - Engines on the front give braking power.
   - A ship needs parts facing each way it wants to move. The editor warns when a direction has none; warnings never
     block Apply.
@@ -102,17 +105,123 @@
 - **The editor shows the models.** The ghost and every placed part show the real model at once.
 - **Plumes are vacuum-realistic.** Wide, soft, faint and bell-shaped; few or no shock diamonds.
 
+## Decided: face mounts
+
+Built. Rules live in `FaceMounts`; `PropulsionTests`, `BuildDraftTests` and `EditorSessionTests` hold them.
+
+### What a mount is
+
+- A thruster (`coldGasThruster`, `hotThruster`, `microthruster`) is a **mount**: it sits on a block's face and
+  fills no grid cell. A block type with `"mount"` in `blocks.json` is a mount and never a block; every other
+  type is a block and never a mount.
+- A mount names **its block** (design index), **the face** (one of six) and **where on the face** it is.
+- Positions are whole **tenths of a cell**, from the face's low corner: `at: [u, v]` along the axes after the
+  face's own (`(axis + 1) % 3`, then `(axis + 2) % 3`).
+- Its footprint is a square: `side` and `depth` in tenths, per type. Cold gas 0.4 x 0.4, hot 0.5 x 0.5, both
+  0.2 deep. Four of either fit a one-cell face.
+- A mount is never deeper than 0.2 cell: the shield stands 0.3 off the blocks, so a mount is always inside it.
+
+### It points out of its face, and no other way
+
+- The nozzle points along the face's normal. The thruster pushes the hull the other way.
+- No facing along the face. Why:
+  - Every hull has an open face each of the six ways, so nothing is lost.
+  - A nozzle along a face would fire across the hull's own plating.
+  - The face you pick is the direction: no turn step, and `R` does nothing for a thruster.
+
+### What a design must hold to
+
+`DesignBytes.Decode`, design files and the editor's drafts all ask `FaceMounts`.
+
+Where a mount may sit:
+
+- The block is there, and the face is a whole flat side: any side of a box, the two full sides of a wedge.
+- The footprint lies on the face.
+- No block shares volume with the mount's box. That is what "the face is open" means, per mount, so a long wall
+  can carry thrusters beside a neighbour.
+- No two mounts share volume, on one face or across an inside corner. Touching is fine.
+
+How many, and of what:
+
+- At most `limits.maxMounts` a design (1,024).
+- A design also has to fit a transfer: 32,768 bytes. A mount is about 25.
+- A mount type is a thrust part with no core, sensor, tank, drive or module, no size rules and no `maxSide`.
+
+### Simulation
+
+- A hull has a mount **exactly while it has the mount's block**. A mount has no state of its own.
+  - No alive bit, no hit points, nothing on the wire, nothing in a save. The block's loss is all there is.
+  - Its thrust, burn, power and mass are added to the running sums with its block (`BoxHullSums.Add`), so losing
+    the block takes them in the same step. No tick ever looks at a mount.
+- A mount weighs something: it counts in mass, inertia and the centre the hull turns about.
+- It has **no hit points**. A hull's hull points are its blocks'. The shipped ships have fewer than before.
+- It is **left out of collision**. Why: it stands 0.2 cell off a face, inside the shield, and putting up to
+  1,024 more boxes in every contact tree would cost every hull pair for a scrape that changes nothing.
+  - So a mount can sink into a rock or another hull by 0.2 cell before the blocks touch.
+  - The collision sphere is still the blocks' own.
+- Target picking takes blocks only. A mount is never the picked block.
+
+### Files and bytes
+
+- Design file version 5: `"mounts": [{ "on": 8, "face": "right", "at": [1, 5], "type": "coldGasThruster" }]`.
+- Canonical bytes version 4: after the blocks a count, then per mount its type, block, face and two positions
+  (`u`, `v` as 16 bits), in the order block, face, `v`, `u`. Another order is refused as noncanonical.
+- **Old files still load** (versions 1 to 4), converted:
+  - A thruster block stays as plating (`mount.legacyBlock`: `hull`, or `microhull` for the drone) in its cell.
+  - It carries four thrusters on every cell of the face it pointed from. Four cold gas thrusters push what a
+    one-cell block of them did.
+  - A thruster whose nozzle had a block in front of it is left out: it pushes no more.
+  - The ship is heavier by the plating. A thruster more than one cell deep pushes less: thrust follows the face.
+- Old saves and old servers are refused untouched: protocol 51, save layout 7, encoding 4, evaluator 12.
+
+### Editor
+
+Placing and picking:
+
+- A thruster card places a mount. The ghost is only the thruster's box, on the face under the pointer, snapped to
+  tenths, with its exhaust line. Green where it has room, red with the reason where not.
+- `S` and `R` do nothing for it. The part list says so.
+- Select it with a middle click (Shift adds), delete it with Delete, undo with Ctrl+Z.
+- Copying a block copies what is mounted on it. Copying a thruster alone picks it as the part to place.
+
+Mounts belong to their block:
+
+- Moved, the block takes them along.
+- Deleted, it takes them with it, as one undo step.
+- Merged blocks keep theirs. A block resized from its low side keeps them where they are in the ship.
+- A turned block drops its mounts: its faces are other faces.
+
+And the rest:
+
+- An edit never fails because of a mount. A mount the edit leaves without room (a block put in front of it, a
+  face shrunk under it) is taken away in the same undo step.
+- Warnings (no thrust a way, no tank) read the checked design, so they count mounts.
+- Not built: the editor draws a placed mount as a plain small box, not as its model.
+
+### Drawing
+
+- A mount is drawn with its type's model from `propulsion.json`, built in the mount's small box
+  (`PropulsionModels.AddMount`), on whole and on damaged hulls. With no model it is that box.
+- Its nozzle is in the hull's nozzle list under its block, so plumes are lit and lost with the block.
+- Check with `--open edit-mount` and `--thrust` captures (`AGENTS.md`).
+
 ## Decided: provisional figures
 
 All in `content/blocks/blocks.json`. Tunable; change them there, never in code.
 
-| Part | Thrust per cell | Fuel | Burn per cell at full thrust | Power at full thrust | Mass | Largest side |
+| Block | Thrust per cell | Fuel | Burn per cell at full thrust | Power at full thrust | Mass | Largest side |
 | --- | --- | --- | --- | --- | --- | --- |
 | `engine` | 800 kN | bipropellant | 0.2 kg/s | 1.0 MW | 3.5 t | 64 cells (no limit of its own) |
-| `hotThruster` | 640 kN | hydrazine | 0.06 kg/s | 0.4 MW | 3.0 t | 4 cells |
-| `coldGasThruster` | 400 kN | nitrogen | 0.03 kg/s | 0.15 MW | 1.8 t | 2 cells |
 | `microengine` | 60 kN | bipropellant | 0.02 kg/s | 0.12 MW | 0.3 t | no limit of its own |
-| `microthruster` | 30 kN | nitrogen | 0.003 kg/s | 0.03 MW | 0.15 t | 2 cells |
+
+| Mount | Thrust each | Fuel | Burn each at full thrust | Power at full thrust | Mass | Footprint |
+| --- | --- | --- | --- | --- | --- | --- |
+| `hotThruster` | 160 kN | hydrazine | 0.015 kg/s | 0.1 MW | 0.75 t | 0.5 x 0.5 x 0.2 cell |
+| `coldGasThruster` | 100 kN | nitrogen | 0.0075 kg/s | 0.0375 MW | 0.45 t | 0.4 x 0.4 x 0.2 cell |
+| `microthruster` | 7.5 kN | nitrogen | 0.00075 kg/s | 0.0075 MW | 0.0375 t | 0.4 x 0.4 x 0.2 cell |
+
+- A mount is a quarter of what a one-cell thruster block was, in every figure: four on a face are that block.
+- No shipped block has a `maxSide` now. The field stays.
 
 | Tank | Holds per cell | Mass |
 | --- | --- | --- |
@@ -126,8 +235,9 @@ All in `content/blocks/blocks.json`. Tunable; change them there, never in code.
 - `boostPowerMultiplier` 4 → 9.4, so boost draws what it drew before (pod 16.5 MW) while plain thrust draws far less.
 - Size limits are a per-block field, `maxSide`: the most cells along any side. Left out, the content's limit applies.
 - `fuelBurn` and `fuelCapacity` take size rules like any other figure.
-- Why engines stay the main drive: best thrust per cell and per tonne, and a bipropellant tank carries twice
-  as many thrust-seconds as a nitrogen tank of the same size. Thrusters are cheap and light, and limited in size.
+- Why engines stay the main drive: best thrust per tonne, they scale with their size, and a bipropellant tank
+  carries twice as many thrust-seconds as a nitrogen tank of the same size. Thrusters are cheap and light, take
+  no cell, and are limited by the faces a ship has.
 - Gyro torque 520 → 680 and drone gyro 0.3 → 0.46: the tanks and extra thrusters added mass, and the ships turn about
   as fast as before.
 - `ftlEnergyPerTonne` 2.0 → 1.5 for the same reason: a jump costs a ship about what it did (pod 62 MJ, vessels
@@ -141,6 +251,16 @@ Shipped designs, tanks full, measured by `PropulsionTests`:
 | Prospector | 20.3 m/s² | 10.1 m/s² | 83 min | 52 min | 83 min |
 | Surveyor | 20.4 m/s² | 10.2 m/s² | 83 min | 52 min | 83 min |
 | Drone | 16.7 m/s² | braking 16.7, others 8.3 m/s² | 75 min | 47 min | 133 min (braking 67 min) |
+
+With mounts, same mass, thrust and burn as with thruster blocks, so the table above did not move:
+
+| Design | Blocks | Mounts | Where | Hull points |
+| --- | --- | --- | --- | --- |
+| Command Pod | 13 (was 18) | 20 | four each on the shield (right), cargo (left), quarters (up), core (down), charting (front) | 2,760 (was 3,510) |
+| Prospector, Surveyor | 28 (was 38) | 40 | eight each way: two cargo holds a side, two on top, two below, two plates at the front | 5,900 and 5,910 (were 7,400 and 7,410) |
+| Drone | 9 (was 15) | 24 | four each on the tanks, gyro (up) and generator (down), eight on the front of gyro and generator | 310 (was 490) |
+
+- The ships are more compact, so they turn a little differently (drone 38, 45, 40 deg/s; was 39, 43, 45).
 
 - Before: pod 20.5 and 11.5 m/s², vessels 21.9 and 12.4 m/s², drone 16.6 and 8.0 m/s².
 - Electric draw at full thrust: pod 4.1 → 1.75 MW, vessels 8.2 → 3.5 MW, drone 0.6 → 0.3 MW.
@@ -162,7 +282,9 @@ Shipped designs, tanks full, measured by `PropulsionTests`:
 ## Known limits
 
 - The client flies its other hulls forward as if their tanks were full. Wrong only for one that has run dry.
-- A nozzle with a block in front of it still pushes. Nothing checks for it.
+- An engine's nozzle with a block in front of it still pushes. Nothing checks for it. A mounted thruster cannot
+  have one: its box must be clear.
+- A mounted thruster is not hit, not picked and not collided with ("Face mounts").
 - The electric draw follows the largest throttle the pilot asks, over all fuelled parts, not each part's own use.
 - A node of the running sums grew from 216 to 528 bytes (thrust and burn for six directions and three fuels). See
   "Sum memory" in `docs/blocks-at-scale.md`.

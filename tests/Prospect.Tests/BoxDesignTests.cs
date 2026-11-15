@@ -18,14 +18,14 @@ public sealed class BoxDesignTests
     internal static DesignBox[] Generate(int count, uint seed)
     {
         var boxes = new DesignBox[count];
-        string[] types = ["hull", "hull", "hull", "engine", "hotThruster", "generator", "gyro", "shield", "battery", "cargo", "quarters", "hyperdrive"];
+        string[] types = ["hull", "hull", "hull", "engine", "engine", "generator", "gyro", "shield", "battery", "cargo", "quarters", "hyperdrive"];
         for (var i = 0; i < count; i++)
         {
             seed = unchecked(seed * 1664525 + 1013904223);
             var type = i == 0 ? "core" : types[(int)(seed % (uint)types.Length)];
             var size = type == "hull" ? new GridSize(8, 1 + (int)(seed >> 8 & 3), 8) : new GridSize(1 + (int)(seed >> 12 & 3), 2, 2);
             // Thrust parts face every way, so the sums of each direction are exercised; the rest face back, as files without a facing do.
-            var facing = type is "engine" or "hotThruster" ? (BlockFacing)((seed >> 20 & 0xFF) % Facings.Count) : BlockFacing.Back;
+            var facing = type is "engine" ? (BlockFacing)((seed >> 20 & 0xFF) % Facings.Count) : BlockFacing.Back;
             boxes[i] = new DesignBox(new GridSize(i % 50 * 8, i / 2500 * 8, i / 50 % 50 * 8), size, Catalog.Get(type), BlockShape.Box, facing);
         }
         return boxes;

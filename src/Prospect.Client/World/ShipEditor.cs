@@ -140,10 +140,17 @@ internal sealed class ShipEditor(JobSystem jobs)
     private int _selectionCount;
     private ulong[] _selectionMarks = new ulong[1];
 
-    // The copied blocks, where they were, and which of them the pointer holds when they are pasted.
+    // The selected mounted parts, as indices into the draft's mounts, in the order they were picked.
+    private int[] _mountSelection = new int[16];
+    private int _mountSelectionCount;
+
+    // The copied blocks, where they were, and which of them the pointer holds when they are pasted; and what was
+    // mounted on them, each naming its block by its place among the copied ones.
     private DesignBox[] _clip = [];
     private int _clipCount;
     private int _clipAnchor;
+    private DesignMount[] _clipMounts = [];
+    private int _clipMountCount;
 
     // The block the pointer took hold of to move the selection.
     private int _grab;
@@ -268,6 +275,15 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// <summary>Whether a block of the draft is selected.</summary>
     public bool IsSelected(int block) => (uint)block < (uint)(_selectionMarks.Length << 6) && BlockSet.Has(_selectionMarks, block);
 
+    /// <summary>Every selected mounted part, by index into the draft's mounts, in the order they were picked. Valid until the next change.</summary>
+    public ReadOnlySpan<int> MountSelection => _mountSelection.AsSpan(0, _mountSelectionCount);
+
+    /// <summary>The selected mounted part the details panel shows (the latest one picked), or -1 with none.</summary>
+    public int SelectedMount => _mountSelectionCount > 0 ? _mountSelection[_mountSelectionCount - 1] : -1;
+
+    /// <summary>Whether a mounted part of the draft is selected.</summary>
+    public bool IsMountSelected(int mount) => MountSelection.Contains(mount);
+
     /// <summary>What the pointer carries.</summary>
     public EditorCarry Carry { get; private set; }
 
@@ -278,6 +294,9 @@ internal sealed class ShipEditor(JobSystem jobs)
 
     /// <summary>The copied blocks, as they were in the draft when copied.</summary>
     public ReadOnlySpan<DesignBox> Clipboard => _clip.AsSpan(0, _clipCount);
+
+    /// <summary>What was mounted on the copied blocks; each names its block by its index in <see cref="Clipboard"/>.</summary>
+    public ReadOnlySpan<DesignMount> ClipboardMounts => _clipMounts.AsSpan(0, _clipMountCount);
 
     /// <summary>True when the draft differs from the blueprint it started from.</summary>
     public bool Dirty => _depth != 0;
@@ -337,6 +356,19 @@ internal sealed class ShipEditor(JobSystem jobs)
     public bool HasGhost { get; private set; }
     public GridSize GhostAt { get; private set; }
     public DraftEdit GhostCheck { get; private set; }
+
+    /// <summary>
+    /// True when the part to place mounts on a face instead of filling cells (<see cref="BlockType.Mount"/>): it is
+    /// neither sized nor turned, and points out of the face it is put on.
+    /// </summary>
+    public bool PartIsMount => Content is { } content && (uint)Part < (uint)content.Blocks.Types.Count && content.Blocks.Types[Part].Mount is not null;
+
+    /// <summary>
+    /// While placing a part that mounts, with a face under the pointer: the mount it would make, snapped to the
+    /// face's grid under the pointer, and whether it has room there (<see cref="GhostCheck"/>).
+    /// </summary>
+    public bool HasMountGhost { get; private set; }
+    public DesignMount GhostMount { get; private set; }
 
     /// <summary>True when the draft can be committed now.</summary>
     public bool CanApply =>
@@ -509,6 +541,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         Carry = EditorCarry.None;
         ClearSelection();
         _clipCount = 0;
+        _clipMountCount = 0;
         Server = default;
         _seenSerial = _askedSerial = _commitSerial = 0;
         _pilotHull = _awaitedHull = _createdHull = _followHull = 0;
@@ -717,6 +750,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         CancelPartGestures();
         HasHover = false;
         HasGhost = false;
+        HasMountGhost = false;
         HasCarryGhost = false;
         GhostPinned = false;
     }
@@ -743,6 +777,12 @@ internal sealed class ShipEditor(JobSystem jobs)
             return;
         }
 
+        if (HasMountGhost)
+        {
+            Record(Draft!.AddMount(GhostMount.Parent, GhostMount.Face, GhostMount.U, GhostMount.V, GhostMount.Type));
+            return;
+        }
+
         if (!HasGhost)
             return;
         var result = Draft!.Add(GhostAt, PartSize, Content!.Blocks.Types[Part], PartShape, PartFacing);
@@ -765,8 +805,38 @@ internal sealed class ShipEditor(JobSystem jobs)
             return;
         }
 
+        // A part mounted on the block is nearer than the block: it is what the pointer is on.
+        if ((uint)Hover.Mount < (uint)Draft.Mounts.Length)
+        {
+            SelectMount(Hover.Mount, add);
+            return;
+        }
+
         Face = Hover.Side;
         Select(Hover.Block, add);
+    }
+
+    /// <summary>Selects a mounted part alone, or with <paramref name="add"/> adds it to the selection or takes it out.</summary>
+    public void SelectMount(int mount, bool add)
+    {
+        if (!CanInspect || (uint)mount >= (uint)Draft!.Mounts.Length)
+            return;
+        if (!add)
+            ClearSelection();
+        var at = MountSelection.IndexOf(mount);
+        if (at >= 0)
+        {
+            Array.Copy(_mountSelection, at + 1, _mountSelection, at, _mountSelectionCount - at - 1);
+            _mountSelectionCount--;
+        }
+        else
+        {
+            if (_mountSelectionCount == _mountSelection.Length)
+                Array.Resize(ref _mountSelection, _mountSelection.Length * 2);
+            _mountSelection[_mountSelectionCount++] = mount;
+        }
+
+        _selectionStamp++;
     }
 
     /// <summary>Selects a block alone, or with <paramref name="add"/> adds it to the selection or takes it out.</summary>
@@ -806,6 +876,7 @@ internal sealed class ShipEditor(JobSystem jobs)
             if ((uint)_selection[i] < (uint)(_selectionMarks.Length << 6))
                 BlockSet.Remove(_selectionMarks, _selection[i]);
         _selectionCount = 0;
+        _mountSelectionCount = 0;
         _selectionStamp++;
         if (Carry == EditorCarry.Move)
             CancelCarry();
@@ -878,21 +949,52 @@ internal sealed class ShipEditor(JobSystem jobs)
 
     private bool _partPressUsed;
 
-    /// <summary>Copies the selected blocks, in draft order; the latest picked is the one the pointer holds on paste.</summary>
+    /// <summary>
+    /// Copies the selected blocks, in draft order, with what is mounted on them; the latest picked is the one the
+    /// pointer holds on paste. A mounted part selected with no block is not copied to be pasted: it sits on a face,
+    /// not in a place of its own, so copying it picks it as the part to place.
+    /// </summary>
     public bool CopySelection()
     {
-        if (!CanEdit || _selectionCount == 0)
+        if (!CanEdit || (_selectionCount == 0 && _mountSelectionCount == 0))
             return false;
+        var mounts = Draft!.Mounts;
+        if (_selectionCount == 0)
+        {
+            if ((uint)SelectedMount >= (uint)mounts.Length || Content is null)
+                return false;
+            var types = Content.Blocks.Types;
+            for (var i = 0; i < types.Count; i++)
+            {
+                if (types[i] != mounts[SelectedMount].Type)
+                    continue;
+                ChoosePart(i);
+                return true;
+            }
+
+            return false;
+        }
+
         if (_clip.Length < _selectionCount)
             _clip = new DesignBox[Math.Max(_selectionCount, _clip.Length * 2)];
-        var boxes = Draft!.Boxes;
+        var boxes = Draft.Boxes;
         _clipCount = 0;
+        _clipMountCount = 0;
         for (var i = 0; i < boxes.Length; i++)
         {
             if (!IsSelected(i))
                 continue;
             if (i == Selected)
                 _clipAnchor = _clipCount;
+            foreach (ref readonly var mount in mounts)
+            {
+                if (mount.Parent != i)
+                    continue;
+                if (_clipMountCount == _clipMounts.Length)
+                    Array.Resize(ref _clipMounts, Math.Max(16, _clipMounts.Length * 2));
+                _clipMounts[_clipMountCount++] = mount with { Parent = _clipCount };
+            }
+
             _clip[_clipCount++] = boxes[i];
         }
 
@@ -926,7 +1028,9 @@ internal sealed class ShipEditor(JobSystem jobs)
         if (carry == EditorCarry.Part)
         {
             Carry = EditorCarry.None;
-            if (HasGhost && GhostCheck == DraftEdit.Done)
+            if (HasMountGhost && GhostCheck == DraftEdit.Done)
+                Record(Draft!.AddMount(GhostMount.Parent, GhostMount.Face, GhostMount.U, GhostMount.V, GhostMount.Type));
+            else if (HasGhost && GhostCheck == DraftEdit.Done)
             {
                 var placed = Draft!.Add(GhostAt, PartSize, Content!.Blocks.Types[Part], PartShape, PartFacing);
                 Record(placed);
@@ -948,7 +1052,7 @@ internal sealed class ShipEditor(JobSystem jobs)
             return;
         }
 
-        var result = Draft!.Paste(Clipboard, by);
+        var result = Draft!.Paste(Clipboard, by, ClipboardMounts);
         Record(result);
     }
 
@@ -982,6 +1086,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         CancelPartGestures();
         Placing = false;
         HasGhost = false;
+        HasMountGhost = false;
         GhostPinned = false;
     }
 
@@ -1023,7 +1128,7 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// </summary>
     public bool BeginPartSizing()
     {
-        if (SizingPart || RotatingPart || !CanEdit || !Placing || Carry != EditorCarry.None || !HasGhost)
+        if (SizingPart || RotatingPart || !CanEdit || !Placing || Carry != EditorCarry.None || !HasGhost || PartIsMount)
             return false;
         _sizeFromSize = PartSize;
         _sizeFromAt = GhostAt;
@@ -1129,7 +1234,7 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// </summary>
     public bool BeginPartRotation()
     {
-        if (RotatingPart || SizingPart || !CanEdit || !Placing || Carry != EditorCarry.None || !HasGhost)
+        if (RotatingPart || SizingPart || !CanEdit || !Placing || Carry != EditorCarry.None || !HasGhost || PartIsMount)
             return false;
         _rotateSize = PartSize;
         _rotateShape = PartShape;
@@ -1263,16 +1368,18 @@ internal sealed class ShipEditor(JobSystem jobs)
         Record(Draft.Resize(Selected, Face, length));
     }
 
-    /// <summary>True when the selection may be deleted: there is one, and it leaves at least one block.</summary>
-    public bool CanDelete => CanEdit && _selectionCount > 0 && _selectionCount < Draft!.Boxes.Length;
+    /// <summary>True when the selection may be deleted: there is one, of blocks or mounted parts, and it leaves at least one block.</summary>
+    public bool CanDelete => CanEdit && (_selectionCount > 0 || _mountSelectionCount > 0) && _selectionCount < Draft!.Boxes.Length;
 
-    /// <summary>Deletes every selected block, as one step to undo.</summary>
+    /// <summary>
+    /// Deletes every selected block, with what is mounted on it, and every selected mounted part, as one step to undo.
+    /// </summary>
     public void DeleteSelected()
     {
         if (!CanDelete)
             return;
         CancelCarry();
-        var result = Draft!.Delete(Selection);
+        var result = Draft!.Delete(Selection, MountSelection);
         if (result == DraftEdit.Done)
             ClearSelection();
         Record(result);
@@ -1321,6 +1428,13 @@ internal sealed class ShipEditor(JobSystem jobs)
         GhostPinned = false;
         _editedAt = _time;
         Check = DraftCheck.Pending;
+        // An edit may take mounts away with it, which moves the others down: mounted parts are picked again after one.
+        if (_mountSelectionCount > 0)
+        {
+            _mountSelectionCount = 0;
+            _selectionStamp++;
+        }
+
         // Every edit that shifts indices sets the selection itself; this only guards against one left past the end.
         var count = Draft!.Boxes.Length;
         for (var i = 0; i < _selectionCount; i++)
@@ -1341,6 +1455,7 @@ internal sealed class ShipEditor(JobSystem jobs)
     private void UpdateGhost()
     {
         HasGhost = false;
+        HasMountGhost = false;
         HasCarryGhost = false;
         if (!HasHover || !CanEdit || (uint)Hover.Block >= (uint)Draft!.Boxes.Length)
             return;
@@ -1373,6 +1488,18 @@ internal sealed class ShipEditor(JobSystem jobs)
 
         if (!Placing)
             return;
+        if (PartIsMount)
+        {
+            // A part that mounts goes on the face under the pointer, where the pointer is on it, and points out of it.
+            var type = Content!.Blocks.Types[Part];
+            var face = (BlockFacing)Hover.Side;
+            Draft.SnapMount(Hover.Block, face, type, Hover.Point, out var u, out var v);
+            GhostMount = new DesignMount(Hover.Block, face, u, v, type);
+            GhostCheck = Draft.CanAddMount(Hover.Block, face, u, v, type);
+            HasMountGhost = true;
+            return;
+        }
+
         if (GhostPinned)
         {
             // A held ghost stays where it is held. Turned, its new size is laid against its face again, centred

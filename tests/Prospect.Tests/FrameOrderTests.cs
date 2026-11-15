@@ -5619,7 +5619,7 @@ public sealed class FrameOrderTests : IDisposable
         OpenEditor();
         var editor = _world.Editor;
         var types = _snapshot.Content.Blocks.Types;
-        _palettePart = types.ToList().FindIndex(t => t.Id == "coldGasThruster");
+        _palettePart = types.ToList().FindIndex(t => t.Id == "nitrogenTank");
         Assert.NotEqual(editor.Part, _palettePart);
         _paletteShown = true;
         for (var i = 0; i < 30; i++)
@@ -5732,7 +5732,7 @@ public sealed class FrameOrderTests : IDisposable
         OpenEditor();
         var editor = _world.Editor;
         var types = _snapshot.Content.Blocks.Types;
-        _palettePart = types.ToList().FindIndex(t => t.Id == "coldGasThruster");
+        _palettePart = types.ToList().FindIndex(t => t.Id == "nitrogenTank");
         Assert.NotEqual(editor.Part, _palettePart);
         _paletteShown = true;
         for (var i = 0; i < 30; i++)
@@ -5864,6 +5864,85 @@ public sealed class FrameOrderTests : IDisposable
         EditorFrame(() => Click(GlfwMouseButton.Middle));
         Assert.Empty(editor.Selection.ToArray());
         Assert.Equal(blocks, DraftBlocks);
+    }
+
+    [Fact]
+    public void AThrusterIsMountedOnTheFaceUnderThePointerAndIsSelectedDeletedUndoneAndGoesWithItsBlock()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var draft = editor.Draft!;
+        var blocks = DraftBlocks;
+        var mounts = draft.Mounts.Length;
+        var types = _snapshot.Content.Blocks.Types;
+        editor.ChoosePart(types.ToList().FindIndex(t => t.Id == "coldGasThruster"));
+        Assert.True(editor.PartIsMount);
+
+        // Over the ship: no block's ghost, only the thruster on the face under the pointer, on that face's grid.
+        Assert.True(PointWhere(e => e.HasMountGhost && e.GhostCheck == DraftEdit.Done, out _));
+        Assert.False(editor.HasGhost);
+        var ghost = editor.GhostMount;
+        Assert.Equal((editor.Hover.Block, (BlockFacing)editor.Hover.Side), (ghost.Parent, ghost.Face));
+        Assert.InRange(ghost.U, 0, 6);
+        Assert.InRange(ghost.V, 0, 6);
+        Assert.Same(types[editor.Part], ghost.Type);
+
+        // It has one size and points out of its face: neither S nor R takes hold of it.
+        Assert.False(editor.BeginPartSizing());
+        Assert.False(editor.BeginPartRotation());
+
+        // A click mounts it and adds no block. The pointer has not moved, so the place is now taken.
+        EditorFrame(() => Click());
+        EditorFrame();
+        Assert.Equal((blocks, mounts + 1), (DraftBlocks, draft.Mounts.Length));
+        Assert.Equal(ghost, draft.Mounts[^1]);
+        EditorFrame();
+        Assert.True(editor.HasMountGhost);
+        Assert.Equal(mounts, editor.Hover.Mount);
+        Assert.Equal(DraftEdit.Overlaps, editor.GhostCheck);
+        EditorFrame(() => Click());
+        EditorFrame();
+        Assert.Equal(mounts + 1, draft.Mounts.Length);
+
+        // A middle click on it selects the thruster and not its block; Delete takes it alone, and undo brings it back.
+        EditorFrame(() => Click(GlfwMouseButton.Middle));
+        EditorFrame();
+        Assert.Equal([mounts], editor.MountSelection.ToArray());
+        Assert.Empty(editor.Selection.ToArray());
+        Chord(GlfwKey.Delete);
+        Assert.Equal((blocks, mounts), (DraftBlocks, draft.Mounts.Length));
+        Chord(GlfwKey.LeftControl, GlfwKey.Z);
+        Assert.Equal((blocks, mounts + 1), (DraftBlocks, draft.Mounts.Length));
+        Assert.Equal(ghost, draft.Mounts[^1]);
+        Assert.Empty(editor.MountSelection.ToArray());
+
+        // Copying a thruster picks it as the part to place: it has no place of its own to be pasted to.
+        editor.StopPlacing();
+        EditorFrame(() => Click(GlfwMouseButton.Middle));
+        EditorFrame();
+        Assert.Equal([mounts], editor.MountSelection.ToArray());
+        Chord(GlfwKey.LeftControl, GlfwKey.C);
+        Assert.True(editor.Placing && editor.PartIsMount);
+        Assert.Empty(editor.Clipboard.ToArray());
+
+        // The block it sits on, deleted, takes everything mounted on it along; one undo brings all of it back.
+        var carried = draft.Mounts.ToArray().Count(mount => mount.Parent == ghost.Parent);
+        Assert.True(carried >= 1);
+        editor.Select(ghost.Parent, false);
+        Chord(GlfwKey.Delete);
+        Assert.Equal((blocks - 1, mounts + 1 - carried), (DraftBlocks, draft.Mounts.Length));
+        Chord(GlfwKey.LeftControl, GlfwKey.Z);
+        Assert.Equal((blocks, mounts + 1), (DraftBlocks, draft.Mounts.Length));
+        Assert.Equal(ghost, draft.Mounts[^1]);
+
+        // Copied with its block, it is pasted with it.
+        editor.Select(ghost.Parent, false);
+        Chord(GlfwKey.LeftControl, GlfwKey.C);
+        Assert.Equal(1, editor.Clipboard.Length);
+        Assert.Equal(carried, editor.ClipboardMounts.Length);
+        Assert.All(editor.ClipboardMounts.ToArray(), mount => Assert.Equal(0, mount.Parent));
     }
 
     [Fact]

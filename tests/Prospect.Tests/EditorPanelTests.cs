@@ -107,10 +107,11 @@ public sealed class EditorPanelTests
         foreach (var design in Content.Designs)
             Assert.Empty(Of(design.Flight));
 
-        // The pod without its thruster facing front cannot brake; without its nitrogen tank no thruster fires.
+        // The pod without its thrusters facing front cannot brake; without its nitrogen tank no thruster fires.
         var draft = BuildDraft.FromBlueprint(Content.Pod, Content);
-        var brake = draft.Boxes.ToArray().ToList().FindIndex(box => box.Type.Thrust > 0 && box.Facing == BlockFacing.Front);
-        Assert.Equal(DraftEdit.Done, draft.Delete(brake));
+        var brakes = Enumerable.Range(0, draft.Mounts.Length).Where(i => draft.Mounts[i].Face == BlockFacing.Front).ToArray();
+        Assert.Equal(4, brakes.Length);
+        Assert.Equal(DraftEdit.Done, draft.Delete(default, brakes));
         var noBrake = draft.Export().Design!.Flight;
         Assert.Equal([DesignWarning.NoDirection], Of(noBrake));
         Assert.Equal(1 << (int)BlockFacing.Back, DesignWarnings.MissingDirections(noBrake));

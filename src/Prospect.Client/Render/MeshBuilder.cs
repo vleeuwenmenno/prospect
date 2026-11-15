@@ -33,7 +33,8 @@ internal static class MeshBuilder
     /// on the hull's centre of mass. A wedge's faces are its two full sides, two triangular caps and the slant, which
     /// its exterior-face bit (u, +su) stands for; its bit (v, +sv) has no face. A thrust part with a model in
     /// <paramref name="look"/> is drawn as that model instead (<see cref="PropulsionModels"/>), and its nozzles are
-    /// listed in <see cref="MeshData.Nozzles"/> for the plumes.
+    /// listed in <see cref="MeshData.Nozzles"/> for the plumes. The parts mounted on block faces follow the blocks,
+    /// each as its model in the small box it fills, or as that box when it has no model.
     /// </summary>
     public static MeshData Hull(HullDesign design, PropulsionLook? look = null)
     {
@@ -56,6 +57,25 @@ internal static class MeshBuilder
             {
                 if ((design.ExteriorFaces[b] & (1 << side)) != 0)
                     AddFace(mesh, design.Shapes[b], design.BlockOffsets[b], design.BlockHalfExtents[b], side);
+            }
+        }
+
+        for (var m = 0; m < design.Mounts.Length; m++)
+        {
+            var first = mesh.Vertices.Count;
+            if (!PropulsionModels.AddMount(design, m, look, mesh.Vertices, mesh.Indices, nozzles))
+            {
+                // Every side but the one against the block it sits on.
+                var back = (int)Facings.Opposite(design.Mounts[m].Face);
+                for (var side = 0; side < 6; side++)
+                    if (side != back)
+                        AddFace(mesh, BlockShape.Box, design.MountOffsets[m], design.MountHalfExtents[m], side);
+            }
+
+            for (var i = first; i < mesh.Vertices.Count; i++)
+            {
+                var p = mesh.Vertices[i].Position;
+                mesh.BoundingRadius = Math.Max(mesh.BoundingRadius, new Vector3(p.X, p.Y, p.Z).Length());
             }
         }
 

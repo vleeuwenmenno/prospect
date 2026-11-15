@@ -172,7 +172,11 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   (`EditorPalette.Card` hands it over, `WorldView.HoldsInterfacePress`, released by the raw button over
   `PointerRouter.PointerOverWindow`); add no other. A mouse choice on the part list gives the keyboard back to
   the world (`EditorPalette.HandBack`), so the ghost shows without a click away. A turn with `R` is never
-  confirmed: a press on the ghost ends it and becomes placing's press (`WorldView.UpdatePartRotation`). Warning thresholds and the part tabs are client data in
+  confirmed: a press on the ghost ends it and becomes placing's press (`WorldView.UpdatePartRotation`). A part
+  that mounts on a face (`ShipEditor.PartIsMount`) has its own ghost (`HasMountGhost`, `GhostMount`, placed from
+  `DraftHit.Point` by `BuildDraft.SnapMount`), is never sized or turned, and has its own selection
+  (`MountSelection`), which every edit clears; `EditorGeometry.Pick` with the draft's mounts says when the pointer
+  is on one (`DraftHit.Mount`). Warning thresholds and the part tabs are client data in
   `content/visuals/editor.json`; warnings never block Apply.
 - **The New ship dialog and the drone's keys:** `NewShipDialog.HandleKeys` is the one place the editor key is
   read in the shortcut phase (`ScreenHost.HandleEditorShortcut` only calls it): in the escape drone
@@ -275,8 +279,20 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   (`FuelTop`, `FuelRow`; `ConsoleTop` includes it) and a hover target (`ConsoleBar.Fuel`, tooltip `ConsoleTip.Fuel`).
   Low and empty notices come from `NoticeTracker` (own hull, once per crossing; six kinds in `notices.json`). Check with
   `--hold-thrust 1` (scripted runs only: holds the forward axis, as the window is never focused) at `"UiScale": 1` and `2`.
-- **Thrust, facing and fuel:** a thrust part pushes the hull the opposite way to its `DesignBox.Facing` and burns
-  its `BlockType.Fuel`; `BoxHullSums` keeps thrust and burn per push direction and fuel (`ThrustTable`), tank room
+- **Face mounts:** a thruster is a `DesignMount` on a block's face (`BoxDesign.Mounts`, `HullDesign.Mounts`), never
+  a block: a type has `BlockType.Mount` or it has not. Every rule of where one may sit is `FaceMounts` (whole
+  tenths of a cell, exact), asked by design files, `DesignBytes.Decode` and `BuildDraft` alike; never check a mount
+  a second way. A hull has a mount exactly while it has the mount's block: there is no alive bit, hit point, wire
+  field or save field for one, and none may be added without the wire, the save codec and a load rule.
+  `BoxHullSums.Add` adds a block's mounts with the block; collision, the shield shell and picking know blocks
+  only. A draft keeps its mounts valid: an edit takes away, in its own undo step, each mount it leaves without
+  room (`BuildDraft.Settle`), and never fails for one. Old design files (versions 1 to 4) are converted on load
+  (`BoxDesign.ConvertLegacy`, `mount.legacyBlock`). A new mount type needs `mount` in `blocks.json`, a model in
+  `propulsion.json` and nothing else. Rules in `docs/roadmap/propulsion.md`, "Face mounts"; `PropulsionTests`,
+  `BuildDraftTests`, `PropulsionVisualTests` and the mount tests in `FrameOrderTests` and `EditorSessionTests`
+  hold them. Check with `--open edit-mount` and the `--thrust` captures.
+- **Thrust, facing and fuel:** a thrust part pushes the hull the opposite way to its `DesignBox.Facing` (a mounted
+  one, to the face it sits on) and burns its `BlockType.Fuel`; `BoxHullSums` keeps thrust and burn per push direction and fuel (`ThrustTable`), tank room
   and pump power per fuel, and `FlightModel.Step` is the one place that moves a hull and spends fuel
   (`HullState.Fuel`), dampener braking included. It also fills `FuelFlow` (`HullBody.Fuel`, `HullInfo.Fuel`,
   `HullView.Fuel`, like `PowerFlow`) and writes `HullState.Thrust` (`ThrustState`: which way the hull is pushed and
@@ -292,7 +308,8 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
 - **Thrust part models and plumes:** look and proportions are `content/visuals/propulsion.json` (`PropulsionLook`),
   keyed by block type id. Models are built with the hull mesh (`MeshBuilder.Hull`, `DamageMesh.Build`, both on
   workers) by `PropulsionModels`, which also lists each design's nozzles (`MeshData.Nozzles`); never build them in a
-  frame. Plumes read only `HullView.Thrust` and the hull's blocks (`ThrustEffects`, fixed tables, no memory in a
+  frame. A mounted thruster gets the same model in its small box (`PropulsionModels.AddMount`), its nozzles
+  under the block it sits on; anything that lists a design's thrust parts must list its mounts too. Plumes read only `HullView.Thrust` and the hull's blocks (`ThrustEffects`, fixed tables, no memory in a
   frame) and are drawn by `plume.vert`/`plume.frag` after the solid scene, nothing when nothing fires. Rules in
   `docs/roadmap/propulsion.md`; `PropulsionVisualTests` holds them. Check with `--thrust` captures (below).
 - **Interface mode and the windows:** `InterfaceMode` is the latch and its key; `ScreenHost` treats it as the old
@@ -384,7 +401,7 @@ The client opens a real window on the developer's desktop, and they are usually 
   `content/visuals/target.json`): damaged is a half shield and 60 % hull, broken is a shield restarting and 20 % hull.
   Same limits as `--break-shield`. Check at `"UiScale": 2` too.
 - `make run ARGS="--start local --open <view> --capture /path/shot.png --capture-after 2.5"` saves a screenshot
-  and exits. Views: `command`, `edit` (asks to edit the own ship; the editor opens on the grant), `edit-turn` (the same on the Move tab, with the ghost of a cold gas thruster held on the ship and turned to face right: its nozzle side in orange; capture after 3 s), `drone` (steps out of the hull into the escape drone), `map`, `map-hover` (the map with the pointer on your own sector, a preview card), `map-card` (your own sector's card pinned), `map-card-near` (a sector 144 km away: a blind jump with risk) and `map-card-far` (460 km: out of drive range), `command-menu` (the command view's right-click menu on a blind jump 60 km ahead for the ship being flown: Plot jump), `command-menu-fleet` (the same for the other ships: Jump here), `command-menu-close` (3 km, too close) and `command-menu-far` (450 km, too far), `new-ship` (leaves the pod in the drone and opens the New ship dialog empty; `--tips-sample on` shows the drone-edit tip beside it), `new-ship-refused` (the same with a refusal shown, put there by the hook rather than sent by a server) `new-ship-editor` (builds a ship through the real dialog and server: the editor opens on its single block, drone still flown; capture after 4 s) and `new-ship-closed` (the same, then cancels that edit: you fly the new ship; capture after 6 s), `map-tilt` (the same, tilted), `map-reach` and `map-reach-tilt` (zoomed in on the own position to show the shape of sensor reach), `scan` (pinned card and a scan started: capture after 2.5 s for progress, after 7 s for the charted result; add `--map-cell 190` to see field and cloud outlines, `scan-command` (the command view 9 km back with a scan started: the pulse from outside, capture after 6.2 s), `scan-pilot` (the flight view with a scan started: capture after 2.5 s for the bar, 6.5 s for result and cooldown, 12 s for the cooldown alone; `--tips-sample on` shows the scan tip), `--map-tilt`, `--map-hover` to rest the pointer on the own ship), `command-fog` (the command view pulled back to show sensor rings and fog, all owned ships selected), `command-fog-one` (only the flown ship selected), `command-fog-pair` and `command-fog-far` (it and another ship that jumps 6 km or 14 km away along -x, selected; capture after 28 s), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,
+  and exits. Views: `command`, `edit` (asks to edit the own ship; the editor opens on the grant), `edit-turn` (the same on the Move tab, with the ghost of an engine held on the ship and turned to face right: its nozzle side in orange; capture after 3 s), `edit-mount` (the same with the ghost of a cold gas thruster mounted on a top face, its exhaust line pointing out of it; capture after 4 s), `drone` (steps out of the hull into the escape drone), `map`, `map-hover` (the map with the pointer on your own sector, a preview card), `map-card` (your own sector's card pinned), `map-card-near` (a sector 144 km away: a blind jump with risk) and `map-card-far` (460 km: out of drive range), `command-menu` (the command view's right-click menu on a blind jump 60 km ahead for the ship being flown: Plot jump), `command-menu-fleet` (the same for the other ships: Jump here), `command-menu-close` (3 km, too close) and `command-menu-far` (450 km, too far), `new-ship` (leaves the pod in the drone and opens the New ship dialog empty; `--tips-sample on` shows the drone-edit tip beside it), `new-ship-refused` (the same with a refusal shown, put there by the hook rather than sent by a server) `new-ship-editor` (builds a ship through the real dialog and server: the editor opens on its single block, drone still flown; capture after 4 s) and `new-ship-closed` (the same, then cancels that edit: you fly the new ship; capture after 6 s), `map-tilt` (the same, tilted), `map-reach` and `map-reach-tilt` (zoomed in on the own position to show the shape of sensor reach), `scan` (pinned card and a scan started: capture after 2.5 s for progress, after 7 s for the charted result; add `--map-cell 190` to see field and cloud outlines, `scan-command` (the command view 9 km back with a scan started: the pulse from outside, capture after 6.2 s), `scan-pilot` (the flight view with a scan started: capture after 2.5 s for the bar, 6.5 s for result and cooldown, 12 s for the cooldown alone; `--tips-sample on` shows the scan tip), `--map-tilt`, `--map-hover` to rest the pointer on the own ship), `command-fog` (the command view pulled back to show sensor rings and fog, all owned ships selected), `command-fog-one` (only the flown ship selected), `command-fog-pair` and `command-fog-far` (it and another ship that jumps 6 km or 14 km away along -x, selected; capture after 28 s), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,
   `players`, `social`, `friends`, `chat`, `hud` (the world with the party list and recent chat only). The social views and
   `hud` leave the performance overlay off. Screens
   without a session: `--start menu|join|settings|newgame|credits|account|load`; `--set id=value` shows on `newgame`, and so
@@ -434,8 +451,9 @@ The client opens a real window on the developer's desktop, and they are usually 
   camera's distance as the scroll wheel does. Both only with `--capture` or `--bench`. The chase camera sits
   opposite the look: `--look 75` shows the hull's left side and its back-facing plumes from the side, `--look 100
   --thrust right` the left-facing puffs. Ignition sparks last 0.3 s: capture about 0.1 s after `--thrust-at`. No
-  shipped ship has a front-facing engine or a large one: put them in a copy of the build's `command_pod.json`
-  (with generators and a hydrazine tank, or the battery empties and throttle drops).
+  shipped ship has a front-facing engine, a large one or a hot thruster: put them in a copy of the build's
+  `command_pod.json` (with generators and a hydrazine tank, or the battery empties and throttle drops). The pod's
+  thrusters are mounted four to a face: shield (right), cargo (left), quarters (up), core (down), charting (front).
 - `--look <degrees>` holds the pilot camera that far to the right of the hull's nose, as free look would (`0`
   looks along the nose, `150` nearly back). Use it to check that an effect follows the hull, not the view.
 - `--target` targets the nearest other hull once in space (in a local game the Prospector, about 120 degrees to

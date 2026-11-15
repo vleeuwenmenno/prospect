@@ -239,17 +239,43 @@ internal static class PropulsionModels
         var model = ModelOf(design, block, look);
         if (model is null)
             return false;
-        var box = design.Boxes[block];
-        var facing = box.Facing;
+        var facing = design.Boxes[block].Facing;
+        var backCovered = (design.ExteriorFaces[block] & (1 << (byte)Facings.Opposite(facing))) == 0;
+        AddPart(model, look, design.BlockOffsets[block], design.BlockHalfExtents[block], facing, design.BlockSize, design.Types[block].Fuel, backCovered, block, vertices, indices, nozzles);
+        return true;
+    }
+
+    /// <summary>
+    /// Adds the model of a part mounted on a block face (<see cref="HullDesign.Mounts"/>): the same model a block of
+    /// its type gets, built in the small box the mount fills and pointing out of its face. Its nozzles name the
+    /// block it sits on, since a hull has a mount exactly while it has that block. Returns false, adding nothing,
+    /// for a part with no model in <paramref name="look"/>.
+    /// </summary>
+    public static bool AddMount(HullDesign design, int mount, PropulsionLook look, List<MeshVertex> vertices, List<uint> indices, List<ThrustNozzle>? nozzles)
+    {
+        var part = design.Mounts[mount];
+        if (!look.Models.TryGetValue(part.Type.Id, out var model))
+            return false;
+        // Its back is the face it sits on.
+        AddPart(model, look, design.MountOffsets[mount], design.MountHalfExtents[mount], part.Face, design.BlockSize, part.Type.Fuel, true, part.Parent, vertices, indices, nozzles);
+        return true;
+    }
+
+    /// <summary>
+    /// Builds one thrust part's model in a box: <paramref name="center"/> and <paramref name="half"/> in the hull's
+    /// frame and metres, its nozzles pointing along <paramref name="facing"/>. <paramref name="block"/> is the block
+    /// its nozzles are lit and lost with.
+    /// </summary>
+    private static void AddPart(PropulsionModelLook model, PropulsionLook look, Vector3 center, Vector3 half, BlockFacing facing, float blockSize, FuelKind fuel, bool backCovered, int block, List<MeshVertex> vertices, List<uint> indices, List<ThrustNozzle>? nozzles)
+    {
         var axis = Facings.Axis(facing);
         var u = (axis + 1) % 3;
         var v = (axis + 2) % 3;
-        var half = design.BlockHalfExtents[block];
-        var frame = new Frame(design.BlockOffsets[block], Facings.Vector(facing), Unit(u), Unit(v), half[axis]);
+        var frame = new Frame(center, Facings.Vector(facing), Unit(u), Unit(v), half[axis]);
         var hu = half[u];
         var hv = half[v];
         var depth = 2f * half[axis];
-        var cells = design.BlockSize > 0 ? design.BlockSize : 1f;
+        var cells = blockSize > 0 ? blockSize : 1f;
 
         // The face is split into nozzles: by cells for a cluster, otherwise into squares of the shorter side.
         int nu, nv;
@@ -279,7 +305,6 @@ internal static class PropulsionModels
         var housing = PropulsionModels.Tag(model.HousingShade);
         var metal = PropulsionModels.Tag(model.NozzleShade);
         var throat = PropulsionModels.Tag(model.ThroatShade);
-        var backCovered = (design.ExteriorFaces[block] & (1 << (byte)Facings.Opposite(facing))) == 0;
         AddBox(vertices, indices, frame, hu * model.HousingShare, hv * model.HousingShare, 0, housingEnd, housing, !backCovered);
         if (plate > 0)
             AddBox(vertices, indices, frame, hu * model.PlateShare, hv * model.PlateShare, housingEnd, housingEnd + plate, housing, true);
@@ -287,7 +312,6 @@ internal static class PropulsionModels
         var throatRadius = exit * model.ThroatShare;
         var wall = exit * model.Lip;
         var plume = look.PlumeIndex(model.Plume);
-        var fuel = design.Types[block].Fuel;
         for (var i = 0; i < nu; i++)
         {
             for (var j = 0; j < nv; j++)
@@ -300,7 +324,6 @@ internal static class PropulsionModels
                 nozzles?.Add(new ThrustNozzle(block, fuel, facing, frame.At(x, y, depth), exit, nozzleLength, plume, nozzles.Count));
             }
         }
-        return true;
     }
 
     /// <summary>A block's own frame: x and y across its nozzle face, z from its back face (0) out along its facing.</summary>

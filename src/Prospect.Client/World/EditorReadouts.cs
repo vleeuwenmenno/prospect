@@ -21,6 +21,13 @@ internal struct PartFigures
     /// </summary>
     public static PartFigures Of(BlockType type, long cells, FlightRules rules, BlockShape shape = BlockShape.Box)
     {
+        // A part that mounts on a face has one size and one shape: its figures are its type's own.
+        if (type.Mount is not null)
+        {
+            cells = 1;
+            shape = BlockShape.Box;
+        }
+
         var half = shape != BlockShape.Box;
         float Scaled(string stat, float value) => value == 0f ? 0f
             : (float)(half ? BoxDesign.ScaleHalf(type, stat, value, cells) : BoxDesign.Scale(type, stat, value, cells));

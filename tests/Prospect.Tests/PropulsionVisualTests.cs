@@ -36,10 +36,76 @@ public sealed class PropulsionVisualTests
         Assert.False(Look.PlumeOrder[Look.PlumeIndex("engine")].IsPuff);
     }
 
+    /// <summary>A core and, apart from it, a block of plating with one thruster mounted in the middle of a face.</summary>
+    private static HullDesign Mounted(string type, BlockFacing face) =>
+        TestDesigns.Mounted(
+            [new DesignBox(new GridSize(0, 0, 0), One, Content.Blocks.Get("core")), new DesignBox(new GridSize(2, 0, 0), One, Content.Blocks.Get("hull"))],
+            [new DesignMount(1, face, 3, 3, Content.Blocks.Get(type))]);
+
     [Theory]
-    [InlineData("engine")]
     [InlineData("hotThruster")]
     [InlineData("coldGasThruster")]
+    [InlineData("microthruster")]
+    public void AMountedThrustersModelStaysInsideItsSmallBoxAndPointsOutOfItsFace(string type)
+    {
+        foreach (var face in Directions)
+        {
+            var design = Mounted(type, face);
+            var vertices = new List<MeshVertex>();
+            var indices = new List<uint>();
+            var nozzles = new List<ThrustNozzle>();
+            Assert.True(PropulsionModels.AddMount(design, 0, Look, vertices, indices, nozzles));
+            Assert.NotEmpty(indices);
+            var axis = Facings.Axis(face);
+
+            // The box stands 0.2 of a block out of the face it sits on, and the model is all inside it.
+            var half = design.MountHalfExtents[0];
+            Assert.Equal(0.1f, half[axis], 5);
+            Assert.Equal(design.BlockOffsets[1][axis] + Facings.Sign(face) * 0.6f, design.MountOffsets[0][axis], 5);
+            var lo = design.MountOffsets[0] - half - new Vector3(1e-4f);
+            var hi = design.MountOffsets[0] + half + new Vector3(1e-4f);
+            foreach (var v in vertices)
+            {
+                var p = new Vector3(v.Position.X, v.Position.Y, v.Position.Z);
+                Assert.True(p.X >= lo.X && p.Y >= lo.Y && p.Z >= lo.Z && p.X <= hi.X && p.Y <= hi.Y && p.Z <= hi.Z, $"{type} {face}: {p}");
+            }
+
+            for (var i = 0; i < indices.Count; i += 3)
+            {
+                var a = vertices[(int)indices[i]];
+                var b = vertices[(int)indices[i + 1]];
+                var c = vertices[(int)indices[i + 2]];
+                var pa = new Vector3(a.Position.X, a.Position.Y, a.Position.Z);
+                var cross = Vector3.Cross(new Vector3(b.Position.X, b.Position.Y, b.Position.Z) - pa, new Vector3(c.Position.X, c.Position.Y, c.Position.Z) - pa);
+                Assert.True(Vector3.Dot(cross, new Vector3(a.Normal.X, a.Normal.Y, a.Normal.Z)) > 0, $"{type} {face} triangle {i / 3}");
+            }
+
+            // One nozzle, at the outer end of the box, pointing out of the face. It is lit and lost with the block
+            // it sits on, so that is the block it names.
+            var nozzle = Assert.Single(nozzles);
+            Assert.Equal(face, nozzle.Facing);
+            Assert.Equal(1, nozzle.Block);
+            Assert.Equal(Content.Blocks.Get(type).Fuel, nozzle.Fuel);
+            Assert.Equal(design.MountOffsets[0][axis] + Facings.Sign(face) * half[axis], nozzle.Exit[axis], 4);
+            Assert.True(nozzle.ExitRadius > 0 && nozzle.Depth > 0);
+
+            // The hull's mesh has it, after the blocks.
+            var mesh = MeshBuilder.Hull(design, Look);
+            Assert.Equal(nozzle with { Index = 0 }, Assert.Single(mesh.Nozzles) with { Index = 0 });
+            Assert.True(mesh.BoundingRadius >= (design.MountOffsets[0] + Facings.Vector(face) * half[axis]).Length() - 1e-4f);
+
+            // A hull that has lost the block has lost the thruster: its damaged mesh is the core alone.
+            var alive = design.FullSet.ToArray();
+            var whole = DamageMesh.Build(design, alive, default, 40000, 0.2f)!;
+            BlockSet.Remove(alive, 1);
+            var without = DamageMesh.Build(design, alive, default, 40000, 0.2f)!;
+            Assert.Equal(36, without.Original.Length);
+            Assert.True(whole.Original.Length > 72);
+        }
+    }
+
+    [Theory]
+    [InlineData("engine")]
     public void AModelStaysInsideItsBlockAndPointsItsNozzlesAlongTheFacing(string type)
     {
         foreach (var facing in Directions)
@@ -100,11 +166,14 @@ public sealed class PropulsionVisualTests
     }
 
     [Fact]
-    public void AColdGasThrusterIsAClusterThatGrowsWithItsFace()
+    public void AThrusterWithNoModelIsDrawnAsItsPlainSmallBox()
     {
-        Assert.Equal(4, Nozzles("coldGasThruster", One).Count);
-        Assert.Equal(16, Nozzles("coldGasThruster", new GridSize(2, 2, 1)).Count);
-        Assert.Single(Nozzles("hotThruster", One));
+        // No look at all: every part is a plain block, and a mounted one the five sides of its box that show.
+        var design = Mounted("coldGasThruster", BlockFacing.Up);
+        var plain = MeshBuilder.Hull(design, new PropulsionLook());
+        Assert.Empty(plain.Nozzles);
+        Assert.Equal((6 + 6 + 5) * 4, plain.Vertices.Count);
+        Assert.False(PropulsionModels.AddMount(design, 0, new PropulsionLook(), [], [], null));
     }
 
     [Fact]
@@ -112,8 +181,9 @@ public sealed class PropulsionVisualTests
     {
         var pod = Content.Designs.First(d => d.Name == "Command Pod");
         var mesh = MeshBuilder.Hull(pod, Look);
-        // One engine and five cold gas thrusters of four nozzles each.
+        // One engine and, each way but back, four mounted cold gas thrusters of one nozzle each.
         Assert.Equal(1 + 5 * 4, mesh.Nozzles.Length);
+        Assert.Equal(pod.Mounts.Length, mesh.Nozzles.Count(nozzle => nozzle.Fuel == FuelKind.Nitrogen));
         Assert.Contains(mesh.Vertices, v => new Vector3(v.Normal.X, v.Normal.Y, v.Normal.Z).Length() > 1.5f);
         Assert.All(mesh.Indices, i => Assert.InRange((int)i, 0, mesh.Vertices.Count - 1));
     }

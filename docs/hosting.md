@@ -393,8 +393,11 @@ What a design need not have:
 - **A shield with nothing to feed it** has a capacity and no charge. Nothing makes energy or shield from no power.
 - **An FTL drive.** Without one the hull does not jump. Any number of drives of one kind (hyperspace, wormhole,
   rift) is fine, normal and compact alike; drives of two kinds are refused, in design files and the editor too.
-- **A size the part's type allows** is required: `maxSide` in `content/blocks/blocks.json` (cold gas thrusters 2
-  cells a side, hot thrusters 4). A larger one is refused like any size over the limits.
+- **A size the part's type allows** is required: `maxSide` in `content/blocks/blocks.json`, where a type has one.
+  A larger block is refused like any size over the limits.
+- **Room for every mounted thruster** is required: each on a whole face of a block that is there, clear of every
+  block and every other mount, at most `maxMounts` (1,024) a design. A thruster sent as a block, or a block sent
+  as a mount, is refused. Rules: [propulsion](roadmap/propulsion.md), "Face mounts".
 - Shipped design files still must fly (`HullDesign.Parse`): that check is for content, not for players.
 
 Repair:
@@ -974,6 +977,15 @@ Full API, figures and limitations: [modules](roadmap/modules.md).
 
 Active module spending is shared with client prediction through `ModuleScanRules.Spend`; `PowerFlow.Modules` contributes to total draw/net flow. The existing net energy readout includes it; a separate module tooltip row is UI follow-up.
 
+## Face mounts (protocol 51)
+
+- Canonical design bytes are version 4: after the blocks, a count of mounts and for each its type, its block, its
+  face and two positions on the face. Nothing else on the wire changed.
+- A hull has a mount exactly while it has the mount's block: no message, snapshot field or loss record names one.
+- `DesignBytes.Decode` refuses a mount that has no room, mounts out of order, and more than `maxMounts`.
+- Content identity: evaluator 12. `blocks/blocks.json`, which has the mount figures, is hashed already.
+- Rules and figures: [propulsion](roadmap/propulsion.md).
+
 ## Propulsion and fuel (protocol 50)
 
 - Every hull record carries four more bytes: the hull's `ThrustState` (three throttles from -127 to 127 along the
@@ -985,7 +997,7 @@ Active module spending is shared with client prediction through `ModuleScanRules
   sees its position. Nobody is sent another hull's tanks, not even the owner's other hulls.
 - The client predicts its own hull with the server's flight code on the server's tanks. Its other hulls are flown
   forward as if their tanks were full.
-- Canonical design bytes are version 3: a facing byte per block. `DesignBytes.Decode` refuses a facing above 5 and
+- Canonical design bytes version 3 added a facing byte per block. `DesignBytes.Decode` refuses a facing above 5 and
   a block larger than its type's `maxSide`.
 - Content identity: evaluator 11. The figures are in `blocks/blocks.json`, which is hashed already.
 - Refuelling is a repair: `Repair` on a whole hull is taken when a tank holds less than the design's

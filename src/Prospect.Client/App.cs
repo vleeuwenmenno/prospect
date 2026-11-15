@@ -1172,12 +1172,12 @@ internal sealed class App : IDisposable
             }
             else if (view == "edit" && snapshot is { OwnHull: >= 0 })
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
-            else if (view == "edit-turn" && snapshot is { OwnHull: >= 0 })
+            else if (view is "edit-turn" or "edit-mount" && snapshot is { OwnHull: >= 0 })
             {
-                // The editor on the Move tab with a cold gas thruster turned to face right, its ghost held on the
-                // ship: the pointer is muted, so the harness holds it there.
+                // The editor on the Move tab with an engine turned to face right, or with a cold gas thruster to
+                // mount, its ghost held on the ship: the pointer is muted, so the harness holds it there.
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
-                World.HoldGhostForCapture();
+                World.HoldGhostForCapture(view == "edit-mount");
                 _screens.SelectEditorTab("Move");
             }
             else if (view == "modules" && snapshot is { OwnHull: >= 0 })

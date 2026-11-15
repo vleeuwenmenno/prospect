@@ -123,6 +123,147 @@ public sealed class BuildDraftTests
     }
 
     [Fact]
+    public void MountsArePlacedOnFacesCarriedByTheirBlocksAndTakenAwayWhenAnEditLeavesThemNoRoom()
+    {
+        var cold = Content.Blocks.Get("coldGasThruster");
+        var hot = Content.Blocks.Get("hotThruster");
+        // A core, a plate two cells wide beside it and a lone plate further on.
+        var draft = Draft(Box("core", new GridSize(0, 0, 0), One), Box("hull", new GridSize(1, 0, 0), new GridSize(2, 1, 1)), Box("hull", new GridSize(5, 0, 0), One));
+        DesignMount[] Mounts() => draft.Mounts.ToArray();
+
+        // Where one may go, and where not.
+        Assert.Equal(DraftEdit.Done, draft.CanAddMount(1, BlockFacing.Up, 0, 0, cold));
+        Assert.Equal(DraftEdit.WrongKind, draft.CanAddMount(1, BlockFacing.Up, 0, 0, Content.Blocks.Get("engine")));
+        Assert.Equal(DraftEdit.WrongKind, draft.CanAdd(new GridSize(0, 1, 0), One, cold));
+        Assert.Equal(DraftEdit.WrongKind, draft.Add(new GridSize(0, 1, 0), One, cold));
+        Assert.Equal(DraftEdit.NoSuchBlock, draft.CanAddMount(3, BlockFacing.Up, 0, 0, cold));
+        Assert.Equal(DraftEdit.OffFace, draft.CanAddMount(1, BlockFacing.Up, 7, 0, cold));
+        Assert.Equal(DraftEdit.OffFace, draft.CanAddMount(1, BlockFacing.Up, 0, 17, cold));
+        Assert.Equal(DraftEdit.Overlaps, draft.CanAddMount(0, BlockFacing.Right, 3, 3, cold));
+        Assert.Equal(0, draft.Version);
+
+        // On a top face the first position runs along z and the second along x: two on the wide plate, one on the core.
+        Assert.Equal(DraftEdit.Done, draft.AddMount(1, BlockFacing.Up, 3, 2, cold));
+        Assert.Equal(DraftEdit.Done, draft.AddMount(1, BlockFacing.Up, 3, 14, hot));
+        Assert.Equal(DraftEdit.Done, draft.AddMount(0, BlockFacing.Left, 3, 3, cold));
+        Assert.Equal(DraftEdit.Overlaps, draft.AddMount(1, BlockFacing.Up, 5, 4, cold));
+        Assert.Equal(DraftEdit.Done, draft.AddMount(1, BlockFacing.Up, 3, 6, cold));
+        Assert.True(draft.Undo());
+        Assert.Equal(3, Mounts().Length);
+        var placed = Mounts();
+
+        // The pointer's place on a face becomes a square on its grid of tenths, kept on the face.
+        draft.SnapMount(1, BlockFacing.Up, cold, new System.Numerics.Vector3(1.73f, 0.5f, 0.02f), out var u, out var v);
+        Assert.Equal((3, 10), (u, v));
+        draft.SnapMount(1, BlockFacing.Up, cold, new System.Numerics.Vector3(9f, 0.5f, -9f), out u, out v);
+        Assert.Equal((0, 16), (u, v));
+        draft.SnapMount(2, BlockFacing.Left, hot, new System.Numerics.Vector3(4.5f, 0f, 0f), out u, out v);
+        Assert.Equal((3, 3), (u, v));
+
+        // Exported, the design has them in its own order, and its bytes decode to the same design.
+        var export = draft.Export();
+        Assert.True(export.Ok, export.Problem);
+        Assert.Equal([placed[2], placed[0], placed[1]], export.Design!.Mounts.ToArray());
+        Assert.Equal(export.Bytes, DesignBytes.Encode(export.Design));
+        Assert.Equal(placed.Sum(mount => mount.Type.Mass) + 9f, export.Design.Flight.Mass, 3);
+        var again = BuildDraft.FromBlueprint(export.Design, Content);
+        Assert.Equal(export.Bytes, again.Export().Bytes);
+
+        // A block moved takes what is mounted on it along: the mounts name it and say where on its face they are.
+        Assert.Equal(DraftEdit.Done, draft.Move([1], new GridSize(0, 3, 0)));
+        Assert.Equal(placed, Mounts());
+        Assert.True(draft.Undo());
+
+        // A block put where a mount stands takes that mount away, in the same step; undo brings both changes back.
+        Assert.Equal(DraftEdit.Done, draft.CanAdd(new GridSize(1, 1, 0), One, Content.Blocks.Get("hull")));
+        Assert.Equal(DraftEdit.Done, draft.Add(new GridSize(1, 1, 0), One, Content.Blocks.Get("hull")));
+        Assert.Equal([placed[1], placed[2]], Mounts());
+        Assert.True(draft.Undo());
+        Assert.Equal(placed, Mounts());
+        Assert.Equal(3, draft.Boxes.Length);
+        Assert.True(draft.Redo());
+        Assert.Equal([placed[1], placed[2]], Mounts());
+        Assert.True(draft.Undo());
+
+        // Deleting a block deletes its mounts, and the mounts of later blocks still name their own.
+        Assert.Equal(DraftEdit.Done, draft.AddMount(2, BlockFacing.Front, 3, 3, cold));
+        var four = Mounts();
+        Assert.Equal(DraftEdit.Done, draft.Delete(1));
+        Assert.Equal([four[2], four[3] with { Parent = 1 }], Mounts());
+        Assert.True(draft.Undo());
+        Assert.Equal(four, Mounts());
+        Assert.Equal(new GridSize(2, 1, 1), draft.Boxes[1].Size);
+
+        // A mount is deleted alone, or with blocks, as one step. One named twice, or not there, is refused.
+        Assert.Equal(DraftEdit.BadSelection, draft.Delete(default, [0, 0]));
+        Assert.Equal(DraftEdit.NoSuchBlock, draft.Delete(default, [4]));
+        Assert.Equal(DraftEdit.Done, draft.Delete([2], [0]));
+        Assert.Equal([four[1], four[2]], Mounts());
+        Assert.Equal(2, draft.Boxes.Length);
+        Assert.True(draft.Undo());
+        Assert.Equal(four, Mounts());
+        Assert.Equal(DraftEdit.Done, draft.DeleteMount(3));
+        Assert.Equal(placed, Mounts());
+
+        // Resized from its low side, a block's mounts stay where they are in the ship; one the face no longer
+        // reaches goes. Here the plate loses its first cell, and with it the thruster that stood there.
+        Assert.Equal(DraftEdit.Done, draft.Resize(1, 1, 1));
+        Assert.Equal(new GridSize(2, 0, 0), draft.Boxes[1].At);
+        Assert.Equal([placed[1] with { V = 4 }, placed[2]], Mounts());
+        Assert.True(draft.Undo());
+        Assert.Equal(placed, Mounts());
+        Assert.Equal(DraftEdit.Done, draft.Resize(1, 0, 1));
+        Assert.Equal([placed[0], placed[2]], Mounts());
+        Assert.True(draft.Undo());
+
+        // Turned, a block's faces are other faces: its mounts are taken off.
+        Assert.Equal(DraftEdit.Done, draft.Rotate(1, 2));
+        Assert.Equal([placed[2]], Mounts());
+        Assert.True(draft.Undo());
+        Assert.Equal(placed, Mounts());
+
+        // Merged blocks keep what was mounted on them, counted from the one block's corner.
+        Assert.Equal(DraftEdit.Done, draft.Add(new GridSize(3, 0, 0), One, Content.Blocks.Get("hull")));
+        Assert.Equal(DraftEdit.Done, draft.AddMount(3, BlockFacing.Up, 3, 3, cold));
+        Assert.Equal(DraftEdit.Done, draft.Merge([3, 1]));
+        Assert.Equal(new GridSize(3, 1, 1), draft.Boxes[1].Size);
+        Assert.Equal([placed[0], placed[1], placed[2], new DesignMount(1, BlockFacing.Up, 3, 23, cold)], Mounts());
+        Assert.True(draft.Export().Ok);
+        Assert.True(draft.Undo());
+        Assert.Equal(3, Mounts().Count(mount => mount.Parent == 1) + Mounts().Count(mount => mount.Parent == 3));
+        Assert.Equal(new DesignMount(3, BlockFacing.Up, 3, 3, cold), Mounts()[^1]);
+
+        // A pasted block brings its mounts, each on the copy; one with no room where the copy lands is left behind.
+        Assert.Equal(DraftEdit.Done, draft.Paste([draft.Boxes[1]], new GridSize(0, 3, 0), [placed[0] with { Parent = 0 }, placed[1] with { Parent = 0 }]));
+        Assert.Equal([placed[0] with { Parent = 4 }, placed[1] with { Parent = 4 }], Mounts()[^2..]);
+        Assert.True(draft.Undo());
+        Assert.Equal(DraftEdit.Done, draft.Paste([draft.Boxes[1]], new GridSize(0, -1, 0), [new DesignMount(0, BlockFacing.Up, 3, 2, cold), new DesignMount(0, BlockFacing.Down, 3, 2, cold)]));
+        Assert.Equal(new DesignMount(4, BlockFacing.Down, 3, 2, cold), Mounts()[^1]);
+        Assert.Equal(5, Mounts().Length);
+        Assert.True(draft.Undo());
+
+        // A draft of what a damaged hull has left has the mounts of the blocks it still has, under their new numbers.
+        var whole = draft.Export().Design!;
+        var alive = whole.FullSet.ToArray();
+        BlockSet.Remove(alive, 1);
+        var left = BuildDraft.From(whole, alive, Content);
+        Assert.Equal(whole.BlockCount - 1, left.Boxes.Length);
+        Assert.All(left.Mounts.ToArray(), mount => Assert.NotEqual(whole.Boxes[1], left.Boxes[mount.Parent]));
+        Assert.Equal(whole.Mounts.ToArray().Count(mount => mount.Parent != 1), left.Mounts.Length);
+
+        // The content's count is the most a draft takes: with room for forty, a vessel that has forty takes no more.
+        using var files = new ContentCopy();
+        files.Replace("blocks/blocks.json", "\"maxMounts\": 1024", "\"maxMounts\": 40");
+        var tight = files.Load();
+        var full = BuildDraft.FromBlueprint(tight.Designs[1], tight);
+        Assert.Equal(40, full.Mounts.Length);
+        var plating = full.Boxes.ToArray().ToList().FindIndex(box => box.Type.Id == "hull");
+        Assert.Equal(DraftEdit.TooManyMounts, full.CanAddMount(plating, BlockFacing.Down, 3, 3, tight.Blocks.Get("coldGasThruster")));
+        Assert.Equal(DraftEdit.Done, full.DeleteMount(0));
+        Assert.Equal(DraftEdit.Done, full.CanAddMount(plating, BlockFacing.Down, 3, 3, tight.Blocks.Get("coldGasThruster")));
+    }
+
+    [Fact]
     public void ExportsOnlyAValidDesignAsCanonicalBytes()
     {
         var draft = BuildDraft.From(Content.Pod, Content.Pod.FullSet, Content);
@@ -149,8 +290,8 @@ public sealed class BuildDraftTests
         Assert.True(draft.HasCore);
 
         // What a hull can do is no condition: without its gyro the design is accepted, and says it cannot turn.
-        Assert.Equal("gyro", draft.Boxes[9].Type.Id);
-        Assert.Equal(DraftEdit.Done, draft.Delete(9));
+        Assert.Equal("gyro", draft.Boxes[7].Type.Id);
+        Assert.Equal(DraftEdit.Done, draft.Delete(7));
         var grounded = draft.Export();
         Assert.True(grounded.Ok, grounded.Problem);
         Assert.Equal(System.Numerics.Vector3.Zero, grounded.Design!.Flight.TurnRate);

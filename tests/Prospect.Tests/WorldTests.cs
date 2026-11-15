@@ -203,14 +203,18 @@ public sealed class HullDesignTests
             hull += type.Hull;
         }
 
+        // A mounted thruster weighs something and has no hit points of its own.
+        foreach (var mount in pod.Mounts)
+            mass += mount.Type.Mass;
+
         Assert.Equal(pod.Cells.Length, stats.Blocks);
         Assert.Equal(mass, stats.Mass, 3);
         Assert.Equal(hull, stats.HullPoints, 3);
         Assert.Equal(new Vector3(5, 2, 4), stats.Size);
 
-        // The engine faces back and pushes forward; one cold gas thruster faces each other way, so the pod
-        // accelerates harder than it brakes or strafes.
-        var thruster = Content.Blocks.Get("coldGasThruster").Thrust;
+        // The engine faces back and pushes forward; four cold gas thrusters are mounted facing each other way, so
+        // the pod accelerates harder than it brakes or strafes.
+        var thruster = Content.Blocks.Get("coldGasThruster").Thrust * 4;
         var engine = Content.Blocks.Get("engine").Thrust;
         Assert.Equal(thruster / mass, stats.Deceleration, 3);
         Assert.Equal(thruster / mass, stats.LateralAcceleration, 3);
@@ -1024,6 +1028,14 @@ public sealed class HullCollisionTests : IDisposable
         return new Double3(x, theirs.Y - mine.Y, theirs.Z - mine.Z);
     }
 
+    /// <summary>As <see cref="Facing"/>, along the Y axis: the hull is put at height <paramref name="y"/>, its block in line with the other's.</summary>
+    private static Double3 Below(HullDesign design, (int, int, int) cell, HullDesign other, (int, int, int) otherCell, double y)
+    {
+        var mine = design.BlockOffsets[Array.IndexOf(design.Cells, cell)];
+        var theirs = other.BlockOffsets[Array.IndexOf(other.Cells, otherCell)];
+        return new Double3(theirs.X - mine.X, y, theirs.Z - mine.Z);
+    }
+
     private int DamagedBlocks(int hull)
     {
         var design = Content.Designs[_hulls.Info(hull).Design];
@@ -1097,17 +1109,17 @@ public sealed class HullCollisionTests : IDisposable
     [Fact]
     public void AHeavyHullBarelyMovesWhenALightOneHitsIt()
     {
-        // The drone's left thruster meets the vessel's right one squarely.
+        // The drone comes up under the vessel: its gyro, on top of its core, meets the vessel's core squarely.
         var vessel = Add(Vessel, Double3.Zero);
-        var from = Facing(Content.Designs[Content.DroneDesign], (-1, 0, 0), Content.Designs[Vessel], (2, 0, 0), 20);
-        var drone = Add(Content.DroneDesign, from, new Vector3(-40, 0, 0));
+        var from = Below(Content.Designs[Content.DroneDesign], (0, 1, 0), Content.Designs[Vessel], (0, 0, 0), -20);
+        var drone = Add(Content.DroneDesign, from, new Vector3(0, 40, 0));
         var droneShield = _hulls.State(drone).Shield;
         var vesselShield = _hulls.State(vessel).Shield;
 
         Run(60, drone, vessel);
 
         // The drone is thrown back; the vessel, twenty times its mass, picks up a twentieth of the change.
-        Assert.True(_hulls.State(drone).Velocity.X > 0, $"the drone kept going at {_hulls.State(drone).Velocity}");
+        Assert.True(_hulls.State(drone).Velocity.Y < 0, $"the drone kept going at {_hulls.State(drone).Velocity}");
         Assert.InRange(_hulls.State(vessel).Velocity.Length(), 0.2f, 3f);
 
         // Both take the same damage, and it is the drone's weight that sets it: a scratch on the vessel's shield.
@@ -1122,13 +1134,14 @@ public sealed class HullCollisionTests : IDisposable
     public void AHeavyHullShovesALightOneAsideAndKeepsGoing()
     {
         var drone = Add(Content.DroneDesign, Double3.Zero);
-        var from = Facing(Content.Designs[Vessel], (-2, 0, 0), Content.Designs[Content.DroneDesign], (1, 0, 0), 20);
-        var vessel = Add(Vessel, from, new Vector3(-40, 0, 0));
+        // The vessel comes down on the drone, core on gyro.
+        var under = Below(Content.Designs[Content.DroneDesign], (0, 1, 0), Content.Designs[Vessel], (0, 0, 0), -20);
+        var vessel = Add(Vessel, new Double3(-under.X, 20, -under.Z), new Vector3(0, -40, 0));
 
         Run(60, drone, vessel);
 
-        Assert.InRange(_hulls.State(vessel).Velocity.X, -40f, -37f);
-        Assert.True(_hulls.State(drone).Velocity.X < -40f, $"the drone only reached {_hulls.State(drone).Velocity}");
+        Assert.InRange(_hulls.State(vessel).Velocity.Y, -40f, -37f);
+        Assert.True(_hulls.State(drone).Velocity.Y < -40f, $"the drone only reached {_hulls.State(drone).Velocity}");
     }
 
     [Fact]
@@ -1430,7 +1443,7 @@ public sealed class HullCollisionTests : IDisposable
 
         Assert.True(destroyed, "the pod should have destroyed itself");
         Assert.Equal(0, _field.Lost.Length);
-        Assert.True(_hulls.State(vessel).Velocity.Y < -30f, "the vessel should have been pushed down");
+        Assert.True(_hulls.State(vessel).Velocity.Y < -20f, $"the vessel should have been pushed down, not {_hulls.State(vessel).Velocity}");
         Assert.Equal(0f, _hulls.State(vessel).Shield);
         Assert.True(DamagedBlocks(vessel) > 0);
     }
@@ -3423,7 +3436,7 @@ public sealed class LargeHullTests
                 {
                     Core => "core",
                     151 or 152 => "generator",
-                    >= 153 and <= 156 => "coldGasThruster",
+                    >= 153 and <= 156 => "engine",
                     >= 157 and <= 160 => "gyro",
                     161 or 162 => "shield",
                     _ => "hull",

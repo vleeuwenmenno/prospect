@@ -163,7 +163,7 @@ WorldSnapshot holds the counted ModuleObservations prefix. Save codec 5 owns its
 Capture copies into a preallocated buffer; the save worker alone writes it.
 Loading checks owner, uniqueness, capacity, finite values, a possible mix, observation tick, resource catalogue (mix-ins too) and generated target existence.
 Active scans and cooldowns are transient and reset on load. Generated mixtures are recomputed; observed values are retained unchanged.
-Evaluator version is 11; protocol 50; generation 8; save codec 6. Older incompatible saves are refused untouched, without migration.
+Evaluator version is 12; protocol 51; generation 8; save codec 7. Older incompatible saves are refused untouched, without migration.
 
 ## Decided: interface
 

@@ -40,10 +40,24 @@ The goal and the block model are in `direction.md` under "Decided: building".
   Versions 1 to 3 still load, every block facing `back`.
 - A thrust part pushes the hull the opposite way to its facing. For other blocks it only says how the block sits.
 - A block type may have `"maxSide"`: the most cells along any side of a block of that type. Omitted, the content's
-  `maxBoxSide` applies. `BoxDesign`, `BuildDraft` and `DesignBytes.Decode` all hold a design to it.
+  `maxBoxSide` applies. `BoxDesign`, `BuildDraft` and `DesignBytes.Decode` all hold a design to it. No shipped
+  type has one since thrusters became mounts.
 - Canonical design bytes version 3 append one facing byte (0 to 5) after each block's shape byte. The minimum block
   record is 28 bytes. Version 2 bytes are not read: the protocol and the save layout moved with it.
 - Rules and figures: `docs/roadmap/propulsion.md`.
+
+## Decided: face mounts (design file version 5)
+
+- A thruster is a **mount**: it sits on a block's face, fills no cell and is no block. It has no block id.
+- A design lists its mounts apart from its blocks: block, face, and a place on the face in tenths of a cell.
+  `BoxDesign.Mounts`, in the order block, face, `v`, `u`; `MountsOf(block)` is one block's.
+- A hull has a mount exactly while it has the mount's block. Block sets, hit points, loss messages, the collision
+  tree, the shield shell and target picking know blocks only.
+- Its figures are added to the running sums with its block, so a loss takes them with no extra step and no extra
+  memory in a hull: the design keeps 4 B a mount for its kind.
+- Canonical design bytes version 4 append the mounts after the blocks, 11 bytes and the type name each. Version 3
+  bytes are not read: the protocol and the save layout moved with it. Files of versions 1 to 4 load, converted.
+- Limit: `maxMounts` in `blocks.json` (1,024). Rules, conversion and figures: `docs/roadmap/propulsion.md`.
 
 ## Decided: size rule notation
 
