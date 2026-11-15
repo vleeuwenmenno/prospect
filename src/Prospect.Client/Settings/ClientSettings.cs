@@ -30,6 +30,9 @@ internal sealed class ClientSettings
     /// <summary>Pointer sensitivity for steering, as a multiplier of the default.</summary>
     public float MouseSensitivity { get; set; } = 1.0f;
     public bool InvertPitch { get; set; }
+
+    /// <summary>Whether the flight view marks the direction of travel (prograde) and its opposite (retrograde).</summary>
+    public bool ShowTravelMarkers { get; set; } = true;
     public string PlayerName { get; set; } = "Prospector";
     public string LastHost { get; set; } = "127.0.0.1";
     public int LastPort { get; set; } = ProtocolInfo.DefaultPort;

@@ -231,7 +231,9 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   forward, and four cold gas thrusters are mounted facing each other way, so the pod brakes and strafes at half
   its forward acceleration. Thrust burns fuel, boost four and a half times as much, and the dampeners burn it while they brake;
   with a tank dry its parts give nothing, and with every tank dry the hull drifts and can still turn. The shipped
-  ships carry about 83 minutes of full engine thrust, the drone 75. Thrust, boost and shield recharge also draw
+  ships carry about 83 minutes of full engine thrust, the drone 75. Once moving, the pilot view marks the direction of travel
+  (prograde: a circle with three ticks) and its opposite (retrograde: a circle with a cross), where to point the
+  engine to stop; Settings, Steering turns both off. Thrust, boost and shield recharge also draw
   power; the generator refills the battery with the
   surplus. Boost needs the battery above 5% to start (`boostEnergyFloor` in `content/blocks/blocks.json`), runs
   until the battery is empty, then waits for the battery to pass 5% again; a hull without a battery cannot

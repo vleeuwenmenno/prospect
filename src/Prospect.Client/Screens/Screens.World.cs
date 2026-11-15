@@ -331,14 +331,28 @@ internal sealed partial class ScreenHost
             draw.AddCircleFilled(nose, Kit.Px(1.5f), Kit.Color(Theme.Text, 0.8f), 8);
         }
 
-        if (speed > 2f && world.Project(world.OwnPosition + own.Velocity / speed * 2000f, out var prograde))
+        if (speed > 2f && _app.Settings.ShowTravelMarkers)
         {
             var r = Kit.Px(6);
             var color = Kit.Color(Theme.Accent, 0.9f);
-            draw.AddCircle(prograde, r, color, 16, Kit.Px(1.5f));
-            draw.AddLine(prograde - new float2(r * 2, 0), prograde - new float2(r, 0), color, Kit.Px(1.5f));
-            draw.AddLine(prograde + new float2(r, 0), prograde + new float2(r * 2, 0), color, Kit.Px(1.5f));
-            draw.AddLine(prograde - new float2(0, r * 2), prograde - new float2(0, r), color, Kit.Px(1.5f));
+            var direction = own.Velocity / speed * 2000f;
+            if (world.Project(world.OwnPosition + direction, out var prograde))
+            {
+                draw.AddCircle(prograde, r, color, 16, Kit.Px(1.5f));
+                draw.AddLine(prograde - new float2(r * 2, 0), prograde - new float2(r, 0), color, Kit.Px(1.5f));
+                draw.AddLine(prograde + new float2(r, 0), prograde + new float2(r * 2, 0), color, Kit.Px(1.5f));
+                draw.AddLine(prograde - new float2(0, r * 2), prograde - new float2(0, r), color, Kit.Px(1.5f));
+            }
+
+            // Retrograde: where to point the engines to stop. The usual cross inside the circle tells it apart.
+            if (world.Project(world.OwnPosition - direction, out var retrograde))
+            {
+                var d = r * 0.7071f;
+                draw.AddCircle(retrograde, r, color, 16, Kit.Px(1.5f));
+                draw.AddLine(retrograde - new float2(d, d), retrograde + new float2(d, d), color, Kit.Px(1.5f));
+                draw.AddLine(retrograde - new float2(d, -d), retrograde + new float2(d, -d), color, Kit.Px(1.5f));
+                draw.AddLine(retrograde + new float2(0, r), retrograde + new float2(0, r * 2), color, Kit.Px(1.5f));
+            }
         }
 
         // One clear room for every marker that moves with the world: the target's and the plotted jump's.

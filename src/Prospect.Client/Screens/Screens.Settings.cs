@@ -121,6 +121,10 @@ internal sealed partial class ScreenHost
         if (Kit.Toggle("Invert pitch"u8, ref invert, rowWidth))
             settings.InvertPitch = invert;
 
+        var travel = settings.ShowTravelMarkers;
+        if (Kit.Toggle("Prograde and retrograde markers"u8, ref travel, rowWidth))
+            settings.ShowTravelMarkers = travel;
+
         Kit.Space(Theme.Space5);
         Kit.Caption("SAVED WORLDS"u8);
         Kit.Space(Theme.Space2);
