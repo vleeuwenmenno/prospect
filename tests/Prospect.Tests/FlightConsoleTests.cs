@@ -282,6 +282,8 @@ public sealed class FlightConsoleTests
                 ("\"shieldMarkAlpha\": 0.8", "\"shieldMarkAlpha\": 1.5"),
                 ("\"moduleMarkColor\": \"E8A33D\"", "\"moduleMarkColor\": \"nothex\""),
                 ("\"moduleMarkAlpha\": 0.85", "\"moduleMarkAlpha\": 2"),
+                ("\"calloutMaxLabels\": 8", "\"calloutMaxLabels\": 9"),
+                ("\"calloutLeaderAlpha\": 0.65", "\"calloutLeaderAlpha\": 1.5"),
             })
             {
                 Assert.Contains(from, text);

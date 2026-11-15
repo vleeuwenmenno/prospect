@@ -8,7 +8,8 @@
 - **Built:** low-poly models of engines and both thruster kinds, in flight and in the editor, and their vacuum plumes
   and cold gas puffs (below).
 - **Built:** thrusters mount on block faces ("Face mounts" below): data, simulation, editor, shipped ships.
-- **Built:** fuel is kept tank by tank ("Fuel per tank" below): simulation, wire, save. No interface for it yet.
+- **Built:** fuel is kept tank by tank ("Fuel per tank" below): simulation, wire, save, and the fuel callout
+  ("Decided: readout").
 - Protocol 52, save layout 8, design encoding 4, design file version 5, evaluator 12.
 
 ## Decided: parts
@@ -137,7 +138,18 @@ Built. Why: gas mining will later fill tanks to different levels. Rules live in 
 - The console's fuel row sits under the two groups and spans them: one cell per fuel the hull has a tank for.
   - Each cell: name, amount / capacity, net flow in kg/s with an arrow ("—" at rest), a strip of how full.
   - A narrow cell drops the capacity, then the name.
-  - Hover shows the tooltip: per fuel, amount, burn, minutes left at that burn ("—" at rest).
+  - Each cell is its own hover target with its own tooltip: that fuel's amount, burn, minutes left at that burn
+    ("—" at rest), and its tanks with how many are lost.
+- A click on a fuel's cell opens its callout on the flown hull (`FuelCallout`, `FuelCalloutLayout`).
+  - Each tank block of the fuel is outlined in the fuel's colour; a lost one in red. Lines from the design's boxes,
+    no mesh.
+  - A label per tank (`BIPROP 340 / 1000 KG`, a lost one `BIPROP LOST`) with a thin leader to the tank.
+  - More tanks than `calloutMaxLabels` (8 at most): grouped in the hull's frame by nearness, one label each
+    (`4 TANKS · 1200 KG`, `· 1 LOST`). Groups do not change as the view turns.
+  - Labels stand in two columns beside the hull, clear of each other, the screen's edge and the console.
+  - The same fuel again, or `Esc` (a back step), closes it; another fuel switches. It stays open with the pointer
+    captured again, and in the command view. Another hull, or no tank of the fuel left, closes it.
+  - Figures are in `content/visuals/power.json` (`callout*`).
 - Low is under `fuelLowFraction` of capacity (`content/visuals/power.json`). The cell turns red and a notice posts once.
   Empty posts its own notice. Both are own hull only, once per crossing, one kind per fuel in `notices.json`.
 - The editor's stats already list tank capacity per fuel.
@@ -416,6 +428,5 @@ With mounts, same mass, thrust and burn as with thruster blocks, so the shipped 
 
 - Whether thrusters placed away from the centre also give torque, alongside or instead of gyros.
 - Fuel transfer between tanks, refineries and stations.
-- How the interface shows each tank.
 - Whether fuel should weigh something.
 - Whether the figures above are right. They are a first balance, not an approved one.

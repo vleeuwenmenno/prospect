@@ -116,6 +116,7 @@ internal sealed partial class ScreenHost
         var world = _app.World;
         UpdateExploration(snapshot, world);
         UpdateModules(snapshot, world);
+        UpdateFuelCallout(world);
         // While the ship editor is shown its own keys apply: the map and the data sheet wait until it closes.
         var editing = world.Editor.Shown;
         var asking = _newShip.Open;
@@ -180,6 +181,7 @@ internal sealed partial class ScreenHost
                 DrawCommandOverlay(draw, snapshot, world, world.CommandBlend);
             }
 
+            DrawFuelCallout(draw, snapshot, world);
             DrawScanStrip(draw, snapshot, world, 1f, WorldInputEnabled && (world.Mode == ViewMode.Command || (world.Mode == ViewMode.Pilot && _app.PointerReleased)));
             DrawModuleStrip(draw, snapshot, world, 1f);
             if (pilot > 0.01f)

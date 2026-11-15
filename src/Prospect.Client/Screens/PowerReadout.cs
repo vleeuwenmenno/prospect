@@ -52,6 +52,36 @@ internal sealed class PowerReadout
     public string FuelHydrazineColor { get; init; } = "";
     public string FuelBipropellantColor { get; init; } = "";
 
+    /// <summary>
+    /// The fuel callout (<see cref="FuelCallout"/>): the most labels before tanks are grouped, 1 to
+    /// <see cref="FuelCalloutLayout.MaxLabels"/>.
+    /// </summary>
+    public int CalloutMaxLabels { get; init; }
+
+    /// <summary>The outline drawn on each tank block: its thickness, how strongly it is drawn, and how strongly a lost tank's is.</summary>
+    public float CalloutOutlineThickness { get; init; }
+
+    public float CalloutOutlineAlpha { get; init; }
+    public float CalloutLostAlpha { get; init; }
+
+    /// <summary>The leader from a label to its tank: thickness, how strongly it is drawn, and the dot's radius at the tank.</summary>
+    public float CalloutLeaderThickness { get; init; }
+
+    public float CalloutLeaderAlpha { get; init; }
+    public float CalloutAnchorDot { get; init; }
+
+    /// <summary>
+    /// Where the labels go: how far a column stands beyond the outermost tank on its side, the space between two
+    /// labels, the space inside a label, the margin kept from the screen's edges, and the space kept above the
+    /// pilot console.
+    /// </summary>
+    public float CalloutLabelOffset { get; init; }
+
+    public float CalloutLabelGap { get; init; }
+    public float CalloutLabelPad { get; init; }
+    public float CalloutMargin { get; init; }
+    public float CalloutConsoleGap { get; init; }
+
     /// <summary>The accent colour of one fuel as 0xRRGGBB; checked when the figures load.</summary>
     public uint FuelRgb(Prospect.Game.World.FuelKind kind) => uint.Parse(
         kind switch
@@ -88,6 +118,16 @@ internal sealed class PowerReadout
             if (color.Length != 6 || !uint.TryParse(color, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out _))
                 throw new InvalidDataException($"{path}: the fuel colours are six hex digits");
         }
+
+        if (!(look.CalloutMaxLabels is >= 1 and <= FuelCalloutLayout.MaxLabels))
+            throw new InvalidDataException($"{path}: calloutMaxLabels is 1 to {FuelCalloutLayout.MaxLabels}");
+        if (!(look.CalloutOutlineThickness is >= 0.5f and <= 8f) || !(look.CalloutLeaderThickness is >= 0.5f and <= 8f) || !(look.CalloutAnchorDot is >= 0f and <= 8f))
+            throw new InvalidDataException($"{path}: calloutOutlineThickness and calloutLeaderThickness are 0.5 to 8, calloutAnchorDot 0 to 8");
+        if (!(look.CalloutOutlineAlpha is >= 0f and <= 1f) || !(look.CalloutLostAlpha is >= 0f and <= 1f) || !(look.CalloutLeaderAlpha is >= 0f and <= 1f))
+            throw new InvalidDataException($"{path}: calloutOutlineAlpha, calloutLostAlpha and calloutLeaderAlpha are 0 to 1");
+        if (!(look.CalloutLabelOffset is >= 0f and <= 400f) || !(look.CalloutLabelGap is >= 0f and <= 32f) || !(look.CalloutLabelPad is >= 0f and <= 32f)
+            || !(look.CalloutMargin is >= 0f and <= 200f) || !(look.CalloutConsoleGap is >= 0f and <= 200f))
+            throw new InvalidDataException($"{path}: calloutLabelOffset is 0 to 400, calloutLabelGap and calloutLabelPad 0 to 32, calloutMargin and calloutConsoleGap 0 to 200");
 
         return look;
     }

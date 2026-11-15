@@ -181,6 +181,18 @@ internal sealed class AppOptions
     /// <summary>Target the nearest other hull once in space; for captures of the target's markers.</summary>
     public bool TargetNearest { get; set; }
 
+    /// <summary>
+    /// Scripted runs only (<c>--fuel-callout</c>): the fuel whose tanks are called out on the flown hull once it has
+    /// a tank of it, as a click on its cell of the fuel row would.
+    /// </summary>
+    public Prospect.Game.World.FuelKind FuelCallout { get; set; }
+
+    /// <summary>Scripted runs only (<c>--fuel-tip</c>): the fuel whose cell of the fuel row shows its details, as the pointer on it would.</summary>
+    public Prospect.Game.World.FuelKind FuelTip { get; set; }
+
+    /// <summary>With <c>--hurt-fleet</c>, <c>--hurt-kind tank</c> takes the flown hull's last fuel tank instead.</summary>
+    public bool HurtFleetTank { get; set; }
+
     /// <summary>Target the asteroid nearest the ship once its sector has loaded; for captures of the target panel.</summary>
     public bool TargetRock { get; set; }
 
@@ -476,6 +488,12 @@ internal sealed class App : IDisposable
     public ClientSettings Settings { get; }
     public GameContent Content { get; }
 
+    /// <summary>The fuel a scripted run calls out (<c>--fuel-callout</c>), or none.</summary>
+    public Prospect.Game.World.FuelKind ScriptedFuelCallout => _options.FuelCallout;
+
+    /// <summary>The fuel whose details a scripted run shows (<c>--fuel-tip</c>), or none.</summary>
+    public Prospect.Game.World.FuelKind ScriptedFuelTip => _options.FuelTip;
+
     /// <summary>True when a scripted run asked for tips; a capture or benchmark shows none otherwise.</summary>
     public bool TipsInScriptedRuns => _options.TipsSample is not null;
 
@@ -627,6 +645,7 @@ internal sealed class App : IDisposable
                 ScriptedShieldBreakSeconds = _options.BreakShieldSeconds,
                 ScriptedFleetHurtSeconds = _options.HurtFleetSeconds,
                 ScriptedFleetHurtBroken = _options.HurtFleetBroken,
+                ScriptedFleetHurtTank = _options.HurtFleetTank,
                 SpawnSector = spawn,
                 ChartedRadius = _options.ChartedRadius,
                 Visibility = hosting.Visibility,

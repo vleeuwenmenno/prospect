@@ -20,6 +20,12 @@ internal interface IConsoleTipSink
 }
 
 /// <summary>
+/// The fuel a fuel row tooltip is about: its kind (none for the one cell of a hull with no tank), how many tanks of
+/// it the design has and how many of them the hull has lost, and whether its callout is open.
+/// </summary>
+internal readonly record struct FuelPick(FuelKind Kind, int Tanks, int Lost, bool Open);
+
+/// <summary>
 /// The details a pilot console row shows while the pointer is on it: only figures the snapshot publishes for the
 /// hull being flown, read again every frame. Nothing here is a forecast; a broken shield's wait is told as the rule
 /// it follows, never as a countdown.
@@ -35,7 +41,7 @@ internal static class ConsoleTip
     public const float LineHeight = 16f;
 
     /// <summary>Writes a row's details into <paramref name="sink"/>.</summary>
-    public static void Write<T>(ref T sink, ConsoleBar bar, in HullView own, in FlightParams flight)
+    public static void Write<T>(ref T sink, ConsoleBar bar, in HullView own, in FlightParams flight, in FuelPick fuel = default)
         where T : struct, IConsoleTipSink
     {
         switch (bar)
@@ -53,28 +59,28 @@ internal static class ConsoleTip
                 Heat(ref sink, own, flight);
                 break;
             case ConsoleBar.Fuel:
-                Fuel(ref sink, own.Fuel);
+                Fuel(ref sink, own.Fuel, fuel);
                 break;
         }
     }
 
     /// <summary>The box a row's details need at <paramref name="scale"/>.</summary>
-    public static float2 Measure(ImFontPtr mono, ImFontPtr sans, float scale, ConsoleBar bar, in HullView own, in FlightParams flight)
+    public static float2 Measure(ImFontPtr mono, ImFontPtr sans, float scale, ConsoleBar bar, in HullView own, in FlightParams flight, in FuelPick fuel = default)
     {
         var measure = new Measurer(mono, sans);
-        Write(ref measure, bar, own, flight);
+        Write(ref measure, bar, own, flight, fuel);
         return measure.Size(scale);
     }
 
     /// <summary>Draws a row's details in <paramref name="rect"/>, as <see cref="Measure"/> sized them.</summary>
-    public static void Draw(ImDrawListPtr draw, ImFontPtr mono, ImFontPtr sans, float scale, in HudRect rect, uint tone, ConsoleBar bar, in HullView own, in FlightParams flight)
+    public static void Draw(ImDrawListPtr draw, ImFontPtr mono, ImFontPtr sans, float scale, in HudRect rect, uint tone, ConsoleBar bar, in HullView own, in FlightParams flight, in FuelPick fuel = default)
     {
         var min = new float2(rect.Left, rect.Top);
         var max = new float2(rect.Right, rect.Bottom);
         Hud.Plate(draw, min, max, tone, true);
         draw.PushClipRect(min, max, true);
         var painter = new Painter(draw, mono, sans, scale, min, max.X);
-        Write(ref painter, bar, own, flight);
+        Write(ref painter, bar, own, flight, fuel);
         draw.PopClipRect();
     }
 
@@ -134,33 +140,41 @@ internal static class ConsoleTip
             sink.Line("SAFE IMPACT"u8, Kit.F($"BELOW {flight.CollisionSafeSpeed:0} M/S"), Theme.Text);
     }
 
-    /// <summary>The tooltip's accent for the fuel row: the warning colour when any tank is low, the accent otherwise.</summary>
-    public static uint FuelTone(in FuelFlow fuel) => ConsoleFuel.Worst(fuel) >= FuelLevel.Low ? Theme.Bad : Theme.Accent;
+    /// <summary>
+    /// The tooltip's accent for one fuel's cell: the warning colour when that fuel is low or empty, its own colour
+    /// otherwise, and the accent for the cell of a hull with no tank.
+    /// </summary>
+    public static uint FuelTone(in FuelFlow fuel, FuelKind kind) =>
+        kind == FuelKind.None ? Theme.Accent : ConsoleFuel.Color(fuel, kind);
 
-    private static void Fuel<T>(ref T sink, in FuelFlow fuel)
+    /// <summary>
+    /// One fuel's details: what its tanks hold out of what they can hold, the flow, how long it lasts at this burn,
+    /// and its tanks, with those lost, and what a click does. Only that fuel: each fuel has its own cell.
+    /// </summary>
+    private static void Fuel<T>(ref T sink, in FuelFlow fuel, in FuelPick pick)
         where T : struct, IConsoleTipSink
     {
-        var worst = ConsoleFuel.Worst(fuel);
-        if (worst == FuelLevel.None)
+        var kind = pick.Kind;
+        var level = kind == FuelKind.None ? FuelLevel.None : ConsoleFuel.Level(fuel, kind);
+        if (level == FuelLevel.None)
         {
             sink.Title("FUEL"u8, "NONE"u8, Theme.TextMute);
             sink.Note("NO FUEL TANK ON THIS HULL"u8, Theme.TextDim);
             return;
         }
 
-        sink.Title("FUEL"u8, worst == FuelLevel.Empty ? "EMPTY"u8 : worst == FuelLevel.Low ? "LOW"u8 : "OK"u8, worst >= FuelLevel.Low ? Theme.Bad : Theme.Accent);
-        for (var i = 0; i < ConsoleFuel.Kinds; i++)
-        {
-            var kind = ConsoleFuel.KindAt(i);
-            var capacity = ConsoleFuel.Capacity(fuel, kind);
-            if (!(capacity > 0f))
-                continue;
-            var amount = ConsoleFuel.Amount(fuel, kind);
-            var flow = ConsoleFuel.Flow(fuel, kind);
-            sink.Line(ConsoleFuel.FullName(kind), ConsoleFuel.Stored(amount, capacity), ConsoleFuel.Color(fuel, kind));
-            sink.Line("  BURN"u8, ConsoleFuel.FlowText(flow), flow < 0f ? FlightConsole.DrawColor : flow > 0f ? FlightConsole.ChargeColor : Theme.TextMute);
-            sink.Line("  LEFT AT THIS BURN"u8, ConsoleFuel.MinutesText(ConsoleFuel.MinutesLeft(fuel, kind)), Theme.Text);
-        }
+        sink.Title(ConsoleFuel.FullName(kind), level == FuelLevel.Empty ? "EMPTY"u8 : level == FuelLevel.Low ? "LOW"u8 : "OK"u8, level >= FuelLevel.Low ? Theme.Bad : PowerReadout.Current.FuelRgb(kind));
+        var capacity = ConsoleFuel.Capacity(fuel, kind);
+        var amount = ConsoleFuel.Amount(fuel, kind);
+        var flow = ConsoleFuel.Flow(fuel, kind);
+        sink.Line("STORED"u8, ConsoleFuel.Stored(amount, capacity), level >= FuelLevel.Low ? Theme.Bad : Theme.Text);
+        sink.Line("BURN"u8, ConsoleFuel.FlowText(flow), flow < 0f ? FlightConsole.DrawColor : flow > 0f ? FlightConsole.ChargeColor : Theme.TextMute);
+        sink.Line("LEFT AT THIS BURN"u8, ConsoleFuel.MinutesText(ConsoleFuel.MinutesLeft(fuel, kind)), Theme.Text);
+        if (pick.Lost > 0)
+            sink.Line("TANKS"u8, Kit.F($"{pick.Tanks - pick.Lost} OF {pick.Tanks}, {pick.Lost} LOST"), Theme.Bad);
+        else
+            sink.Line("TANKS"u8, Kit.F($"{pick.Tanks}"), Theme.Text);
+        sink.Note(pick.Open ? "CLICK TO HIDE THE TANKS"u8 : "CLICK TO SHOW THE TANKS"u8, Theme.TextDim);
     }
 
     private static void Energy<T>(ref T sink, in HullView own, in FlightParams flight)

@@ -290,9 +290,20 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
 - **The fuel readout:** `ConsoleFuel` (font-free) reads `HullView.Fuel` only: tank present, level (`FuelLevel`, low mark
   `fuelLowFraction` in `content/visuals/power.json`), signed flow (negative while burning, zero under
   `fuelSteadyKgPerSecond`), minutes left. The row is `ScreenHost.DrawFuelRow`, part of `FlightConsoleLayout`
-  (`FuelTop`, `FuelRow`; `ConsoleTop` includes it) and a hover target (`ConsoleBar.Fuel`, tooltip `ConsoleTip.Fuel`).
-  Low and empty notices come from `NoticeTracker` (own hull, once per crossing; six kinds in `notices.json`). Check with
-  `--hold-thrust 1` (scripted runs only: holds the forward axis, as the window is never focused) at `"UiScale": 1` and `2`.
+  (`FuelTop`, `FuelRow`; `ConsoleTop` includes it); each fuel's cell (`ConsoleFuel.CellRect`, `CellAt`) is its own
+  hover target with its own tooltip (`ConsoleBar.Fuel` plus a `FuelPick`, `ConsoleTip.Fuel`); a gap between cells is
+  none. A click on a cell opens that fuel's callout: `FuelCallout` (font-free state, `Point` reads the click the way
+  `FlightConsole.Hovered` reads the hover, `Follow` keeps it to the flown hull), drawn by `ScreenHost.DrawFuelCallout`
+  in the pilot and command views from `HullView.Tanks` and the design's boxes (outlines are projected lines, never a
+  mesh; clipped above the console in the pilot view). Grouping and label places are `FuelCalloutLayout` (fixed
+  buffers, at most `MaxLabels` 8, grouped in the hull's frame); figures are `callout*` in `power.json`. Escape closes it
+  through `BackStep.FuelCallout`. In the pilot view a shown pointer reaches no world button, so a click on the row needs
+  no blocking; never change `PointerFrame` for it. `FuelCalloutTests` and the fuel tests in `FrameOrderTests` hold the
+  rules. Low and empty notices come from `NoticeTracker` (own hull, once per crossing; six kinds in `notices.json`).
+  Check with `--hold-thrust 1` (scripted runs only: holds the forward axis, as the window is never focused) at
+  `"UiScale": 1` and `2`, and the callout with `--fuel-callout <fuel>` and `--fuel-tip <fuel>` (scripted runs only;
+  add `--open command` for the command view) on a copy of the build whose `command_pod.json` has extra
+  `bipropellantTank` blocks (more than eight to see groups), with `--hurt-fleet 1 --hurt-kind tank` to lose the last tank.
 - **Face mounts:** a thruster is a `DesignMount` on a block's face (`BoxDesign.Mounts`, `HullDesign.Mounts`), never
   a block: a type has `BlockType.Mount` or it has not. Every rule of where one may sit is `FaceMounts` (whole
   tenths of a cell, exact), asked by design files, `DesignBytes.Decode` and `BuildDraft` alike; never check a mount
@@ -426,9 +437,10 @@ The client opens a real window on the developer's desktop, and they are usually 
   --capture-count 4 --capture-every 7` shows the energy readout while the restart drains the battery (about 11 s),
   runs it dry (18 s) and recharges the shield (25 s and later); a `"UiScale": 2` settings copy checks the console at
   scale 2.
-- `--hurt-fleet <seconds>` (0 to 600; `--hurt-kind damaged|broken`, default damaged) hurts the player's other hulls once, for
+- `--hurt-fleet <seconds>` (0 to 600; `--hurt-kind damaged|broken|tank`, default damaged) hurts the player's other hulls once, for
   the target panel (`--target`, its bars are `TargetGauges`, drawn with the console's `ConsoleBars`; figures in
-  `content/visuals/target.json`): damaged is a half shield and 60 % hull, broken is a shield restarting and 20 % hull.
+  `content/visuals/target.json`): damaged is a half shield and 60 % hull, broken is a shield restarting and 20 % hull;
+  tank instead takes the flown hull's last fuel tank (design order) as a destroying hit would, for the fuel callout.
   Same limits as `--break-shield`. Check at `"UiScale": 2` too.
 - `make run ARGS="--start local --open <view> --capture /path/shot.png --capture-after 2.5"` saves a screenshot
   and exits. Views: `command`, `edit` (asks to edit the own ship; the editor opens on the grant), `edit-turn` (the same on the Move tab, with the ghost of an engine held on the ship and turned to face right: its nozzle side in orange; capture after 3 s), `edit-mirror` (the `edit-turn` engine ghost with the X and Z mirror planes on: copies and planes show; capture after 4 s), `edit-mount` (the same with the ghost of a cold gas thruster mounted on a top face, its exhaust line pointing out of it; capture after 4 s), `drone` (steps out of the hull into the escape drone), `map`, `map-hover` (the map with the pointer on your own sector, a preview card), `map-card` (your own sector's card pinned), `map-card-near` (a sector 144 km away: a blind jump with risk) and `map-card-far` (460 km: out of drive range), `command-menu` (the command view's right-click menu on a blind jump 60 km ahead for the ship being flown: Plot jump), `command-menu-fleet` (the same for the other ships: Jump here), `command-menu-close` (3 km, too close) and `command-menu-far` (450 km, too far), `new-ship` (leaves the pod in the drone and opens the New ship dialog empty; `--tips-sample on` shows the drone-edit tip beside it), `new-ship-refused` (the same with a refusal shown, put there by the hook rather than sent by a server) `new-ship-editor` (builds a ship through the real dialog and server: the editor opens on its single block, drone still flown; capture after 4 s) and `new-ship-closed` (the same, then cancels that edit: you fly the new ship; capture after 6 s), `map-tilt` (the same, tilted), `map-reach` and `map-reach-tilt` (zoomed in on the own position to show the shape of sensor reach), `scan` (pinned card and a scan started: capture after 2.5 s for progress, after 7 s for the charted result; add `--map-cell 190` to see field and cloud outlines, `scan-command` (the command view 9 km back with a scan started: the pulse from outside, capture after 6.2 s), `scan-pilot` (the flight view with a scan started: capture after 2.5 s for the bar, 6.5 s for result and cooldown, 12 s for the cooldown alone; `--tips-sample on` shows the scan tip), `--map-tilt`, `--map-hover` to rest the pointer on the own ship), `command-fog` (the command view pulled back to show sensor rings and fog, all owned ships selected), `command-fog-one` (only the flown ship selected), `command-fog-pair` and `command-fog-far` (it and another ship that jumps 6 km or 14 km away along -x, selected; capture after 28 s), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,

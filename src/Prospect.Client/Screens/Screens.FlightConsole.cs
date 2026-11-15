@@ -99,7 +99,16 @@ internal sealed partial class ScreenHost
         if (own.BoostLocked)
             ConsoleBars.Marker(draw, track, FlightModel.BoostUnlockHeat, 0.7f);
 
-        DrawFuelRow(draw, layout, own, hovered == ConsoleBar.Fuel);
+        // Each fuel is its own hover target, and a click on one calls its tanks out on the hull.
+        var hoveredFuel = _fuelCallout.Point(layout, own.Fuel, ImGui.GetIO().MousePos, pointable, _ui.PointerOverInterface, ImGui.IsMouseClicked(ImGuiMouseButton.Left));
+        if (_app.ScriptedFuelTip is var tip and not FuelKind.None && ConsoleFuel.Capacity(own.Fuel, tip) > 0f)
+        {
+            // A scripted run's pointer is muted: it asks for one fuel's details instead of resting on its cell.
+            hovered = ConsoleBar.Fuel;
+            hoveredFuel = tip;
+        }
+
+        DrawFuelRow(draw, layout, own, hovered == ConsoleBar.Fuel ? hoveredFuel : FuelKind.None, hovered == ConsoleBar.Fuel && ConsoleFuel.Count(own.Fuel) == 0);
 
         // Centre: speed and its unit in a hexagon with a quiet outline; the dampeners are said in the heat row.
         var cx = layout.CenterX;
@@ -115,7 +124,21 @@ internal sealed partial class ScreenHost
         Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(cx - unit.X * 0.5f, top + Kit.Px(FlightConsole.UnitTop)), Theme.TextMute, "M/S"u8);
 
         // The hovered row's figures, above the console and over any window: a tooltip, which takes no input.
-        if (hovered != ConsoleBar.None)
+        // The fuel row's details are one fuel's, the one under the pointer: a gap between two cells shows none.
+        if (hovered == ConsoleBar.Fuel && (hoveredFuel != FuelKind.None || ConsoleFuel.Count(own.Fuel) == 0))
+        {
+            var tanks = 0;
+            var lost = 0;
+            var designs = snapshot.Content.Designs;
+            if (hoveredFuel != FuelKind.None && own.Design < designs.Length)
+                tanks = ConsoleFuel.Tanks(designs[own.Design], own.Blocks.Span, hoveredFuel, out lost);
+            var pick = new FuelPick(hoveredFuel, tanks, lost, _fuelCallout.Open == hoveredFuel && hoveredFuel != FuelKind.None);
+            var size = ConsoleTip.Measure(_ui.Mono, _ui.SansMedium, Kit.Scale, ConsoleBar.Fuel, own, flight, pick);
+            var cell = ConsoleFuel.CellRect(layout, own.Fuel, Math.Max(0, ConsoleFuel.CellIndex(own.Fuel, hoveredFuel)));
+            var rect = FlightConsole.TipRect(layout, cell, true, size, _ui.DisplaySize, Kit.Scale);
+            ConsoleTip.Draw(ImGui.GetForegroundDrawList(), _ui.Mono, _ui.SansMedium, Kit.Scale, rect, ConsoleTip.FuelTone(own.Fuel, hoveredFuel), ConsoleBar.Fuel, own, flight, pick);
+        }
+        else if (hovered is not ConsoleBar.None and not ConsoleBar.Fuel)
         {
             var size = ConsoleTip.Measure(_ui.Mono, _ui.SansMedium, Kit.Scale, hovered, own, flight);
             var rect = FlightConsole.TipRect(layout, hovered, size, _ui.DisplaySize, Kit.Scale);
@@ -124,7 +147,6 @@ internal sealed partial class ScreenHost
                 ConsoleBar.Shield => offline ? Theme.Bad : hasShield ? Theme.Info : Theme.LineStrong,
                 ConsoleBar.Hull => hullColor,
                 ConsoleBar.Energy => energyColor,
-                ConsoleBar.Fuel => ConsoleTip.FuelTone(own.Fuel),
                 _ => heatColor,
             };
             ConsoleTip.Draw(ImGui.GetForegroundDrawList(), _ui.Mono, _ui.SansMedium, Kit.Scale, rect, tone, hovered, own, flight);
@@ -545,12 +567,18 @@ internal static class FlightConsole
     /// inside the side margins of a <paramref name="display"/> of any size. Wider than the screen allows, the
     /// details are cut to it.
     /// </summary>
-    public static HudRect TipRect(in FlightConsoleLayout layout, ConsoleBar bar, float2 size, float2 display, float scale)
+    public static HudRect TipRect(in FlightConsoleLayout layout, ConsoleBar bar, float2 size, float2 display, float scale) =>
+        TipRect(layout, BarRect(layout, bar), bar is ConsoleBar.Shield or ConsoleBar.Hull or ConsoleBar.Fuel, size, display, scale);
+
+    /// <summary>
+    /// Where the details of a part of the console go, such as one fuel's cell (<see cref="ConsoleFuel.CellRect"/>):
+    /// above the console, from <paramref name="row"/>'s left edge or, not <paramref name="fromLeft"/>, its right.
+    /// </summary>
+    public static HudRect TipRect(in FlightConsoleLayout layout, in HudRect row, bool fromLeft, float2 size, float2 display, float scale)
     {
         var side = MathF.Round(Side * scale);
         var width = Math.Min(size.X, Math.Max(0f, display.X - 2 * side));
-        var row = BarRect(layout, bar);
-        var left = bar is ConsoleBar.Shield or ConsoleBar.Hull or ConsoleBar.Fuel ? row.Left : row.Right - width;
+        var left = fromLeft ? row.Left : row.Right - width;
         left = Math.Clamp(left, side, Math.Max(side, display.X - side - width));
         var top = Math.Max(side, layout.Top - MathF.Round(Theme.Space2 * scale) - size.Y);
         return new HudRect(left, top, left + width, top + size.Y);

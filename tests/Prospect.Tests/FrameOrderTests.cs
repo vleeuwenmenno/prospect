@@ -3996,10 +3996,10 @@ public sealed class FrameOrderTests : IDisposable
     public void EscapeClosesTheCourseMenuBeforeTheCommandViewAndLeavesTheViewAlone()
     {
         OpenCourseMenu(Ahead(100000));
-        Assert.Equal(ScreenHost.BackStep.CourseMenu, ScreenHost.NextBackStep(false, false, false, _world.CourseMenu.IsOpen, ViewMode.Command));
-        Assert.Equal(ScreenHost.BackStep.SessionMenu, ScreenHost.NextBackStep(false, false, true, true, ViewMode.Command));
-        Assert.Equal(ScreenHost.BackStep.PilotView, ScreenHost.NextBackStep(false, false, false, false, ViewMode.Command));
-        Assert.Equal(ScreenHost.BackStep.OpenMenu, ScreenHost.NextBackStep(false, false, false, false, ViewMode.Pilot));
+        Assert.Equal(ScreenHost.BackStep.CourseMenu, ScreenHost.NextBackStep(false, false, false, _world.CourseMenu.IsOpen, false, ViewMode.Command));
+        Assert.Equal(ScreenHost.BackStep.SessionMenu, ScreenHost.NextBackStep(false, false, true, true, false, ViewMode.Command));
+        Assert.Equal(ScreenHost.BackStep.PilotView, ScreenHost.NextBackStep(false, false, false, false, false, ViewMode.Command));
+        Assert.Equal(ScreenHost.BackStep.OpenMenu, ScreenHost.NextBackStep(false, false, false, false, false, ViewMode.Pilot));
         Assert.True(_world.CourseMenu.Close());
         Frame();
         Assert.Equal(ViewMode.Command, _world.Mode);
@@ -4559,6 +4559,97 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal(ConsoleBar.None, ConsoleHovered);
     }
 
+    /// <summary>
+    /// The fuel row's click as ScreenHost reads it after the world: the console's own pointer rule, the fuel under
+    /// the pointer, and Dear ImGui's click of this frame.
+    /// </summary>
+    private FuelKind PointFuel(FuelCallout callout)
+    {
+        var own = _snapshot.Hulls[_snapshot.OwnHull];
+        callout.Follow(own.Id, own.Fuel);
+        return callout.Point(Bars, own.Fuel, ImGui.GetIO().MousePos,
+            !_surfaceOpen && _world.Mode == ViewMode.Pilot && _router.ReleaseHeld && !_router.Captured, _router.PointerOverInterface,
+            ImGui.IsMouseClicked(ImGuiMouseButton.Left));
+    }
+
+    [Fact]
+    public void AClickOnAFuelOpensItsCalloutReachesNoWorldButtonAndEscapeClosesIt()
+    {
+        var own = _snapshot.Hulls[_snapshot.OwnHull];
+        Assert.True(ConsoleFuel.Count(own.Fuel) > 0, "the spawned hull carries fuel");
+        var cell = ConsoleFuel.CellRect(Bars, own.Fuel, 0);
+        var middle = new float2((cell.Left + cell.Right) * 0.5f, (cell.Top + cell.Bottom) * 0.5f);
+        var first = ConsoleFuel.CellAt(Bars, own.Fuel, middle);
+        Assert.NotEqual(FuelKind.None, first);
+        var callout = new FuelCallout();
+        var pointed = FuelKind.None;
+        _drawOver = () => pointed = PointFuel(callout);
+
+        // Flying with the pointer captured, a click over the fuel row is the hull's and opens nothing.
+        Frame(() => Move(middle));
+        Frame(() => Click());
+        Assert.True(_router.Captured);
+        Assert.False(callout.IsOpen);
+
+        // With Shift the cell is pointed at, and a click opens its fuel; no interface button and no world press.
+        PilotWithShift();
+        Frame(() => Move(middle));
+        Assert.Equal(first, pointed);
+        var selected = _world.Selection.Length;
+        Frame(() => Click());
+        Assert.Equal(first, callout.Open);
+        Assert.Equal(0, _buttonClicks);
+        Assert.Equal(selected, _world.Selection.Length);
+
+        // Letting go of Shift keeps it open; the pointer is the hull's again.
+        Frame(() => Key(GlfwKey.LeftShift, false));
+        Frame();
+        Assert.True(_router.Captured);
+        Assert.Equal(first, callout.Open);
+
+        // Escape takes the callout before the menu, in the pilot view, and the view stays.
+        var steps = new List<ScreenHost.BackStep>();
+        bool Shortcut()
+        {
+            if (!_actions.Pressed(_devices, InputAction.Pause, true))
+                return false;
+            var step = ScreenHost.NextBackStep(false, false, false, false, callout.IsOpen, _world.Mode);
+            steps.Add(step);
+            if (step == ScreenHost.BackStep.FuelCallout)
+                callout.Close();
+            return true;
+        }
+
+        Frame(() => Key(GlfwKey.Escape, true), Shortcut);
+        Frame(() => Key(GlfwKey.Escape, false));
+        Assert.Equal([ScreenHost.BackStep.FuelCallout], steps);
+        Assert.False(callout.IsOpen);
+        Assert.Equal(ViewMode.Pilot, _world.Mode);
+        Assert.Equal(ScreenHost.BackStep.OpenMenu, ScreenHost.NextBackStep(false, false, false, false, callout.IsOpen, _world.Mode));
+
+        // Opened again, the same fuel's click closes it; in the command view Escape still takes it first.
+        // Dear ImGui reads a press and its release in two frames, so each click gets a frame to finish.
+        PilotWithShift();
+        Frame(() => Move(middle));
+        Frame(() => Click());
+        Frame();
+        Assert.Equal(first, callout.Open);
+        Frame(() => Click());
+        Frame();
+        Assert.False(callout.IsOpen);
+        Frame(() => Click());
+        Frame();
+        Assert.Equal(first, callout.Open);
+        Assert.Equal(ScreenHost.BackStep.FuelCallout, ScreenHost.NextBackStep(false, false, false, false, callout.IsOpen, ViewMode.Command));
+
+        // A gap between cells, or the bars above, opens nothing and closes nothing.
+        Frame(() => Move(MiddleOf(ConsoleBar.Shield)));
+        Frame(() => Click());
+        Frame();
+        Assert.Equal(first, callout.Open);
+        _drawOver = null;
+    }
+
     [Fact]
     public void APinnedWindowOverTheConsoleKeepsItsRowsFromThePointer()
     {
@@ -4750,6 +4841,24 @@ public sealed class FrameOrderTests : IDisposable
                     Assert.True(rect.Left >= side && rect.Right <= width - side, $"{bar} {state}: {rect}");
                     Assert.True(rect.Top >= 0f && rect.Bottom <= layout.Top, $"{bar} {state}: {rect}, console {layout.Top}");
                 }
+            }
+
+            // Each fuel's details, the longest figures and a lost tank, go above its own cell inside the margins.
+            own.Fuel = new FuelFlow
+            {
+                Amount = new FuelTanks { Nitrogen = 9_999f, Hydrazine = 9_999f, Bipropellant = 9_999f },
+                Capacity = new FuelTanks { Nitrogen = 9_999f, Hydrazine = 9_999f, Bipropellant = 9_999f },
+                Burn = new FuelTanks { Nitrogen = 99f, Hydrazine = 0.0009f, Bipropellant = 9f },
+            };
+            for (var i = 0; i < ConsoleFuel.Kinds; i++)
+            {
+                var kind = ConsoleFuel.KindAt(i);
+                var pick = new FuelPick(kind, 255, 254, true);
+                var size = ConsoleTip.Measure(mono, sans, scale, ConsoleBar.Fuel, own, flight, pick);
+                var rect = FlightConsole.TipRect(layout, ConsoleFuel.CellRect(layout, own.Fuel, i), true, size, display, scale);
+                Assert.Equal(size.X, rect.Width);
+                Assert.True(rect.Left >= side && rect.Right <= width - side, $"{kind}: {rect}");
+                Assert.True(rect.Top >= 0f && rect.Bottom <= layout.Top, $"{kind}: {rect}, console {layout.Top}");
             }
 
             // Measuring a row's details every frame allocates nothing.
