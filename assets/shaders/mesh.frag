@@ -114,11 +114,23 @@ void main()
     float diffuse = max(dot(n, sun), 0.0);
     float fill = 0.5 + 0.5 * dot(n, -sun);
     vec3 halfway = normalize(sun + view);
-    float specular = metal >= 0.0 ? pow(max(dot(n, halfway), 0.0), 90.0) * 0.8
+    // Bare metal shines with its shade: a flat-shaded facet lights up whole, so a dark throat or nozzle lining must
+    // not flash white when it lines up with the star.
+    float specular = metal >= 0.0 ? pow(max(dot(n, halfway), 0.0), 40.0) * 0.3 * (0.15 + metal)
         : pow(max(dot(n, halfway), 0.0), 48.0) * (color.a < 0.5 ? 0.03 : 0.35);
     float rim = pow(1.0 - max(dot(n, view), 0.0), 3.0);
 
-    vec3 lit = albedo * (frame.sunColor.rgb * diffuse + vec3(0.012, 0.016, 0.026) * fill)
+    vec3 light;
+    if (color.a < 0.5)
+        light = frame.sunColor.rgb * diffuse + vec3(0.012, 0.016, 0.026) * fill;
+    else
+    {
+        // Hulls: the star is held below the tone curve's shoulder, so sunlit facets keep their differences instead of
+        // all reading near white, and a cool fill that turns with the facet (strongest facing away from the star)
+        // keeps the shaded side's shapes readable without lifting it to a flat grey.
+        light = frame.sunColor.rgb * diffuse * 0.72 + vec3(0.046, 0.054, 0.07) * (0.15 + 0.85 * fill * fill);
+    }
+    vec3 lit = albedo * light
         + frame.sunColor.rgb * specular * diffuse
         + vec3(0.02, 0.03, 0.05) * rim;
     // Inside a hyperspace tunnel or a throat its light falls on the hull riding through it: blue, or a rift's orange.

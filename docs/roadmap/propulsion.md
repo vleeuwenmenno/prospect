@@ -91,6 +91,11 @@
     bells). A nozzle's exit follows its share of the face; its length follows its exit, capped by a share of the
     depth. A deeper box grows its body, never its bell.
   - Every facet has vertices of its own: flat shading. Bare metal rides in the length of the normal (`mesh.vert`).
+  - Housings are bare metal of mid grey (`housingShade` about 0.3), nozzles darker, throats near black. Metal shines
+    with its shade, so a dark facet never flashes white.
+- **Hull light** (`mesh.frag`, every hull): the star is held below the tone curve's shoulder (0.72 of its light),
+  so sunlit facets stay apart instead of all reading white. A cool fill that turns with the facet, strongest facing
+  away from the star, keeps the shaded side readable. Asteroids keep their own light.
 - **Where models show:** a design's mesh; a near damaged hull's mesh; and from `PartModels` (single part models,
   worker-built, a fixed table) the editor's placed parts, its placement ghost and far hulls drawn block by block. A
   part model not built yet shows its plain block for a frame or two.

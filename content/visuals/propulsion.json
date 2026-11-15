@@ -19,10 +19,10 @@
       "lip": 0.05,
       "sides": 12,
       "rings": 4,
-      "housingShade": 0,
-      "nozzleShade": 0.42,
-      "throatShade": 0.08,
-      "detailShade": 0.3
+      "housingShade": 0.3,
+      "nozzleShade": 0.24,
+      "throatShade": 0.05,
+      "detailShade": 0.4
     },
     "microengine": {
       "plume": "engine",
@@ -43,10 +43,10 @@
       "lip": 0.05,
       "sides": 10,
       "rings": 3,
-      "housingShade": 0,
-      "nozzleShade": 0.42,
-      "throatShade": 0.08,
-      "detailShade": 0.3
+      "housingShade": 0.3,
+      "nozzleShade": 0.24,
+      "throatShade": 0.05,
+      "detailShade": 0.4
     },
     "hotThruster": {
       "plume": "hot",
@@ -67,10 +67,10 @@
       "lip": 0.07,
       "sides": 10,
       "rings": 3,
-      "housingShade": 0,
-      "nozzleShade": 0.5,
-      "throatShade": 0.08,
-      "detailShade": 0.32
+      "housingShade": 0.32,
+      "nozzleShade": 0.26,
+      "throatShade": 0.05,
+      "detailShade": 0.42
     },
     "coldGasThruster": {
       "plume": "cold",
@@ -91,10 +91,10 @@
       "lip": 0.1,
       "sides": 8,
       "rings": 2,
-      "housingShade": 0,
-      "nozzleShade": 0.55,
-      "throatShade": 0.1,
-      "detailShade": 0.34
+      "housingShade": 0.36,
+      "nozzleShade": 0.22,
+      "throatShade": 0.05,
+      "detailShade": 0.44
     },
     "microthruster": {
       "plume": "cold",
@@ -115,10 +115,10 @@
       "lip": 0.1,
       "sides": 8,
       "rings": 2,
-      "housingShade": 0,
-      "nozzleShade": 0.55,
-      "throatShade": 0.1,
-      "detailShade": 0.34
+      "housingShade": 0.36,
+      "nozzleShade": 0.22,
+      "throatShade": 0.05,
+      "detailShade": 0.44
     }
   },
   "plumes": {
