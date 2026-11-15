@@ -37,6 +37,17 @@ public sealed class PropulsionTests
         return TestDesigns.Of([.. boxes]);
     }
 
+    /// <summary>The same seven blocks, the parts a test adds as blocks 7 and up, and the thrusters it mounts on any of them.</summary>
+    private static HullDesign Design(DesignBox[] parts, DesignMount[] mounts)
+    {
+        var boxes = Design(parts).Boxes.ToArray();
+        return TestDesigns.Mounted(boxes, mounts);
+    }
+
+    /// <summary>A thruster mounted on a face of a block, by default in the middle of a one-cell face.</summary>
+    private static DesignMount Mount(string type, int parent, BlockFacing face, int u = 3, int v = 3) =>
+        new(parent, face, u, v, Content.Blocks.Get(type));
+
     /// <summary>The input that asks for full thrust toward a direction, dampeners off.</summary>
     private static FlightInput Toward(BlockFacing push) => push switch
     {
@@ -90,15 +101,19 @@ public sealed class PropulsionTests
     [Fact]
     public void EveryPartPushesAwayFromWhereItFacesAndTheSumsKeepEachDirectionAndFuelApart()
     {
-        // One engine facing back, a hot thruster facing right and cold gas thrusters facing every other way.
+        // One engine facing back, a hot thruster mounted facing right and cold gas thrusters facing every other
+        // way: on the battery, the gyro, the top tank, under the core, and three on front faces.
         var design = Design(
-            Box("engine", 1, 0, 0, BlockFacing.Back),
-            Box("hotThruster", 2, 0, 0, BlockFacing.Right),
-            Box("coldGasThruster", 3, 0, 0, BlockFacing.Left),
-            Box("coldGasThruster", 4, 0, 0, BlockFacing.Up),
-            Box("coldGasThruster", 5, 0, 0, BlockFacing.Down),
-            Box("coldGasThruster", 6, 0, 0, BlockFacing.Front),
-            Box("coldGasThruster", 7, 0, 0, BlockFacing.Front, new GridSize(2, 1, 1)));
+            [Box("engine", 1, 0, 0, BlockFacing.Back)],
+            [
+                Mount("hotThruster", 3, BlockFacing.Right),
+                Mount("coldGasThruster", 2, BlockFacing.Left),
+                Mount("coldGasThruster", 6, BlockFacing.Up),
+                Mount("coldGasThruster", 0, BlockFacing.Down),
+                Mount("coldGasThruster", 1, BlockFacing.Front, 1, 1),
+                Mount("coldGasThruster", 1, BlockFacing.Front, 5, 1),
+                Mount("coldGasThruster", 2, BlockFacing.Front),
+            ]);
         var flight = design.Flight;
         var mass = flight.Mass;
         var engine = Content.Blocks.Get("engine");
@@ -130,26 +145,29 @@ public sealed class PropulsionTests
         Assert.Equal(flight.Push(BlockFacing.Back), design.Stats.Deceleration);
         Assert.Equal(cold.Thrust / mass, design.Stats.LateralAcceleration, 4);
         Assert.Equal(Content.Rules.SpeedPerRootAcceleration * MathF.Sqrt(flight.StrongestPush), flight.MaxSpeed, 3);
-        Assert.Equal(flight.Push(BlockFacing.Back), flight.StrongestPush);
+        Assert.Equal(flight.Push(BlockFacing.Front), flight.StrongestPush);
 
-        // The same design turned a quarter about the nose pushes the way its parts now face.
-        var turned = design.Boxes.ToArray();
-        for (var i = 0; i < turned.Length; i++)
-            turned[i] = turned[i] with { At = new GridSize(-turned[i].At.Y, turned[i].At.X, turned[i].At.Z), Size = new GridSize(turned[i].Size.Y, turned[i].Size.X, turned[i].Size.Z), Facing = Facings.Rotate(turned[i].Facing, 2) };
-        var other = TestDesigns.Of(turned).Flight;
-        Assert.Equal(flight.Push(BlockFacing.Left), other.Push(BlockFacing.Down), 5);
-        Assert.Equal(flight.Push(BlockFacing.Up), other.Push(BlockFacing.Left), 5);
-        Assert.Equal(flight.Push(BlockFacing.Front), other.Push(BlockFacing.Front), 5);
+        // A mounted thruster points out of the face it sits on, whichever face that is, and pushes only the other way.
+        foreach (var face in Directions)
+        {
+            var one = Design([Box("hull", 3, 0, 0)], [Mount("coldGasThruster", 7, face)]).Flight;
+            foreach (var push in Directions)
+                Assert.Equal(push == Facings.Opposite(face) ? cold.Thrust / one.Mass : 0f, one.Push(push), 4);
+        }
+
+        // An engine turned a quarter about the nose pushes the way it now faces.
+        var turned = Design(Box("engine", 1, 0, 0, Facings.Rotate(BlockFacing.Right, 2))).Flight;
+        Assert.Equal(engine.Thrust / turned.Mass, turned.Push(BlockFacing.Down), 4);
+        Assert.Equal(0f, turned.Push(BlockFacing.Front));
     }
 
     [Fact]
     public void LosingAPartTakesItsDirectionAndLosingATankTakesItsRoomAndClampsWhatItHeld()
     {
+        // Two blocks of plating carry a braking thruster each: a mounted part is there exactly while its block is.
         var design = Design(
-            Box("engine", 1, 0, 0),
-            Box("coldGasThruster", 2, 0, 0, BlockFacing.Front),
-            Box("coldGasThruster", 3, 0, 0, BlockFacing.Front),
-            Box("nitrogenTank", 4, 0, 0));
+            [Box("engine", 1, 0, 0), Box("hull", 2, 0, 0), Box("hull", 3, 0, 0), Box("nitrogenTank", 4, 0, 0)],
+            [Mount("coldGasThruster", 8, BlockFacing.Front), Mount("coldGasThruster", 9, BlockFacing.Front)]);
         using var hulls = new HullStore();
         var field = new HullField(hulls, [design]);
         var hull = hulls.Create(1, 0, design, Double3.Zero).Index;
@@ -160,7 +178,7 @@ public sealed class PropulsionTests
         Assert.Equal(tank * 2, hulls.State(hull).Fuel.Nitrogen);
         Assert.Equal(intact.FuelCapacity, hulls.State(hull).Fuel);
 
-        // One of the two braking thrusters goes: half the braking, the same forward push over less mass.
+        // One of the two blocks goes, and its braking thruster with it: half the braking, the same forward push over less mass.
         var thruster = design.BlockCount - 3;
         Assert.True(states.Lose(handle, thruster));
         field.Refit(hull);
@@ -460,7 +478,7 @@ public sealed class PropulsionTests
     }
 
     [Fact]
-    public void DesignFilesOfEveryVersionLoadAndOnlyVersionFourMayNameAFacing()
+    public void DesignFilesOfEveryVersionLoadAndOnlyVersionFourAndLaterMayNameAFacing()
     {
         static BoxDesign Parse(string json)
         {
@@ -496,12 +514,12 @@ public sealed class PropulsionTests
             design.Write(stream);
             var again = Parse(System.Text.Encoding.UTF8.GetString(stream.ToArray()));
             Assert.Equal(design.Blocks.ToArray(), again.Blocks.ToArray());
-            Assert.Contains("\"version\":4", System.Text.Encoding.UTF8.GetString(stream.ToArray()));
+            Assert.Contains("\"version\":5", System.Text.Encoding.UTF8.GetString(stream.ToArray()));
         }
 
         Assert.Contains("Unknown block facing", Assert.Throws<InvalidDataException>(() => Parse("{ \"version\": 4, " + head + "{ \"at\": [0, 0, 1], \"type\": \"engine\", \"facing\": \"forward\" }] }")).Message);
-        Assert.Contains("unsupported design version 5", Assert.Throws<InvalidDataException>(() => Parse("{ \"version\": 5, " + head + "{ \"at\": [0, 0, 1], \"type\": \"engine\" }] }")).Message);
-        Assert.Equal(4, BoxDesign.FormatVersion);
+        Assert.Contains("unsupported design version 6", Assert.Throws<InvalidDataException>(() => Parse("{ \"version\": 6, " + head + "{ \"at\": [0, 0, 1], \"type\": \"engine\" }] }")).Message);
+        Assert.Equal(5, BoxDesign.FormatVersion);
     }
 
     [Fact]
@@ -509,50 +527,185 @@ public sealed class PropulsionTests
     {
         var design = Design(
             Box("engine", 1, 0, 0, BlockFacing.Back),
-            Box("coldGasThruster", 2, 0, 0, BlockFacing.Left, new GridSize(2, 2, 1)),
-            Box("hotThruster", 4, 0, 0, BlockFacing.Up, new GridSize(1, 4, 4)),
+            Box("engine", 2, 0, 0, BlockFacing.Left, new GridSize(2, 2, 1)),
+            Box("engine", 4, 0, 0, BlockFacing.Up, new GridSize(1, 4, 4)),
             Box("hull", 5, 0, 0, BlockFacing.Down));
         var bytes = DesignBytes.Encode(design);
-        Assert.Equal(3, DesignBytes.Version);
+        Assert.Equal(4, DesignBytes.Version);
         var decoded = DesignBytes.Decode(bytes, SHA256.HashData(bytes), Content);
         Assert.Equal(design.Boxes.ToArray(), decoded.Boxes.ToArray());
         Assert.Equal(design.Flight, decoded.Flight);
         Assert.Equal(BlockFacing.Left, decoded.Boxes[^3].Facing);
         Assert.Equal(BlockFacing.Down, decoded.Boxes[^1].Facing);
 
-        // A block's facing is its last byte. The last block is plating, and the design ends with it.
+        // A block's facing is its last byte. The last block is plating; after it comes only the count of mounts, none here.
         var hostile = (byte[])bytes.Clone();
-        Assert.Equal((byte)BlockFacing.Down, hostile[^1]);
-        hostile[^1] = 6;
+        Assert.Equal((byte)BlockFacing.Down, hostile[^5]);
+        hostile[^5] = 6;
         Assert.Contains("Unknown block facing", Assert.Throws<InvalidDataException>(() => DesignBytes.Decode(hostile, SHA256.HashData(hostile), Content)).Message);
 
         // Another facing is another design: other bytes, another hash, and for a thrust part other figures.
         var other = (byte[])bytes.Clone();
-        other[^1] = (byte)BlockFacing.Up;
+        other[^5] = (byte)BlockFacing.Up;
         Assert.Equal(BlockFacing.Up, DesignBytes.Decode(other, SHA256.HashData(other), Content).Boxes[^1].Facing);
         Assert.False(SHA256.HashData(other).AsSpan().SequenceEqual(SHA256.HashData(bytes)));
 
-        // The encoding before facings is not read: a save or a server that has it is of another version altogether.
-        var older = (byte[])bytes.Clone();
-        older[0] = 2;
-        Assert.Contains("Unknown design encoding", Assert.Throws<InvalidDataException>(() => DesignBytes.Decode(older, SHA256.HashData(older), Content)).Message);
+        // The encodings before mounts are not read: a save or a server that has one is of another version altogether.
+        foreach (var version in new byte[] { 2, 3 })
+        {
+            var older = (byte[])bytes.Clone();
+            older[0] = version;
+            Assert.Contains("Unknown design encoding", Assert.Throws<InvalidDataException>(() => DesignBytes.Decode(older, SHA256.HashData(older), Content)).Message);
+        }
 
-        // A size the type does not allow is refused wherever a design is made: built, drafted or received.
+        // A size the type does not allow is refused wherever a design is made. No shipped block has a limit of
+        // its own since thrusters became mounts, so the catalogue here gives the engine one.
         var limits = Content.Blocks.Limits;
-        Assert.Equal(2, BoxDesign.MaxSide(Content.Blocks.Get("coldGasThruster"), limits));
-        Assert.Equal(4, BoxDesign.MaxSide(Content.Blocks.Get("hotThruster"), limits));
         Assert.Equal(limits.MaxBoxSide, BoxDesign.MaxSide(Content.Blocks.Get("engine"), limits));
         Assert.Equal(limits.MaxBoxSide, BoxDesign.MaxSide(Content.Blocks.Get("hull"), limits));
-        var large = design.Boxes.ToArray();
-        large[^3] = large[^3] with { Size = new GridSize(1, 3, 1) };
-        var refused = Assert.Throws<InvalidDataException>(() => new BoxDesign("T", 1, large, limits, "received design"));
+        var text = File.ReadAllText(Prospect.Engine.IO.AppPaths.Content("blocks", "blocks.json"));
+        var limited = BlockCatalog.Parse(System.Text.Encoding.UTF8.GetBytes(text.Replace("\"engine\": { \"name\": \"Engine\",", "\"engine\": { \"maxSide\": 2, \"name\": \"Engine\",")), "limited");
+        Assert.Equal(2, BoxDesign.MaxSide(limited.Get("engine"), limited.Limits));
+        DesignBox[] small = [new(new GridSize(0, 0, 0), One, limited.Get("core")), new(new GridSize(1, 0, 0), new GridSize(1, 2, 2), limited.Get("engine"))];
+        Assert.Equal(2, new BoxDesign("T", 1, small, limited.Limits, "received design").Blocks.Length);
+        small[1] = small[1] with { Size = new GridSize(1, 3, 1) };
+        var refused = Assert.Throws<InvalidDataException>(() => new BoxDesign("T", 1, small, limited.Limits, "received design"));
         Assert.Contains("at most 2 cells a side", refused.Message);
-        var draft = BuildDraft.FromBlueprint(design, Content);
-        Assert.Equal(DraftEdit.BadSize, draft.CanAdd(new GridSize(9, 0, 0), new GridSize(3, 1, 1), Content.Blocks.Get("coldGasThruster")));
-        Assert.Equal(DraftEdit.Done, draft.CanAdd(new GridSize(9, 0, 0), new GridSize(2, 1, 1), Content.Blocks.Get("coldGasThruster")));
-        Assert.Equal(DraftEdit.Done, draft.CanAdd(new GridSize(9, 0, 0), new GridSize(3, 1, 1), Content.Blocks.Get("engine")));
-        Assert.Equal(DraftEdit.BadSize, draft.Resize(design.BlockCount - 3, 0, 3));
-        Assert.Equal(DraftEdit.BadSize, draft.CanAdd(new GridSize(9, 0, 0), new GridSize(1, 5, 1), Content.Blocks.Get("hotThruster")));
+    }
+
+    [Fact]
+    public void AMountedThrusterIsReadWrittenEncodedAndHeldToItsFace()
+    {
+        static BoxDesign Parse(string json)
+        {
+            using var document = JsonDocument.Parse(json);
+            return BoxDesign.Parse(document.RootElement, Content.Blocks, "test.json");
+        }
+
+        const string blocks = "\"name\": \"T\", \"class\": \"ship\", \"blockSize\": 1, \"color\": [1, 1, 1], \"blocks\": [{ \"at\": [0, 0, 0], \"type\": \"core\" }, { \"at\": [1, 0, 0], \"type\": \"hull\", \"size\": [2, 1, 1] }]";
+        static string File5(string mounts) => "{ \"version\": 5, " + blocks + ", \"mounts\": [" + mounts + "] }";
+        static string At(int on, string face, int u, int v, string type = "coldGasThruster") => $"{{ \"on\": {on}, \"face\": \"{face}\", \"at\": [{u}, {v}], \"type\": \"{type}\" }}";
+
+        // Version five lists mounts apart from the blocks. The design keeps them by block, then face, then place.
+        // On a top face the first position runs along z and the second along x.
+        var design = Parse(File5(At(1, "up", 5, 14) + ", " + At(1, "up", 0, 0) + ", " + At(0, "left", 3, 3, "hotThruster")));
+        Assert.Equal(2, design.Blocks.Length);
+        Assert.Equal(
+            [new DesignMount(0, BlockFacing.Left, 3, 3, Content.Blocks.Get("hotThruster")), new DesignMount(1, BlockFacing.Up, 0, 0, Content.Blocks.Get("coldGasThruster")), new DesignMount(1, BlockFacing.Up, 5, 14, Content.Blocks.Get("coldGasThruster"))],
+            design.Mounts.ToArray());
+        design.MountsOf(1, out var start, out var end);
+        Assert.Equal((1, 3), (start, end));
+
+        // Where it sits: on the top of the plating, 0.2 of a cell high, its middle over the square it was given.
+        var middle = design.MountMiddle(design.Mounts[2]);
+        Assert.Equal(new Double3(2.1, 0.6, 0.2), new Double3(Math.Round(middle.X, 6), Math.Round(middle.Y, 6), Math.Round(middle.Z, 6)));
+        Assert.Equal(new Vector3(0.4f, 0.2f, 0.4f), BoxDesign.MountSize(design.Mounts[2]));
+
+        // Written and read back, and encoded and decoded, they are the same mounts; the bytes list them in the design's order.
+        using var stream = new MemoryStream();
+        design.Write(stream);
+        Assert.Equal(design.Mounts.ToArray(), Parse(System.Text.Encoding.UTF8.GetString(stream.ToArray())).Mounts.ToArray());
+        var hull = HullDesign.Of(design, Content.Rules);
+        var bytes = DesignBytes.Encode(hull);
+        var decoded = DesignBytes.Decode(bytes, SHA256.HashData(bytes), Content);
+        Assert.Equal(design.Mounts.ToArray(), decoded.Mounts.ToArray());
+        Assert.Equal(hull.Flight, decoded.Flight);
+
+        // The same mounts in another order are other bytes for the same design, and are refused as such.
+        var swapped = (byte[])bytes.Clone();
+        var cold = "coldGasThruster"u8;
+        var first = bytes.AsSpan().IndexOf(cold);
+        var second = first + cold.Length + 9 + 1;
+        Assert.True(bytes.AsSpan(second).StartsWith(cold));
+        bytes.AsSpan(second + cold.Length, 9).CopyTo(swapped.AsSpan(first + cold.Length));
+        bytes.AsSpan(first + cold.Length, 9).CopyTo(swapped.AsSpan(second + cold.Length));
+        Assert.Contains("Noncanonical", Assert.Throws<InvalidDataException>(() => DesignBytes.Decode(swapped, SHA256.HashData(swapped), Content)).Message);
+
+        // What a file or a sender may not do.
+        void Refused(string mounts, string why) => Assert.Contains(why, Assert.Throws<InvalidDataException>(() => Parse(File5(mounts))).Message);
+        Refused(At(2, "up", 0, 0), "no block 2");
+        Refused(At(1, "up", 7, 0), "does not fit on that face");
+        Refused(At(1, "up", 0, 17), "does not fit on that face");
+        Refused(At(1, "up", -1, 0), "does not fit on that face");
+        Refused(At(0, "right", 3, 3), "in its way");
+        Refused(At(1, "up", 0, 0) + ", " + At(1, "up", 3, 3), "in its way");
+        Refused(At(1, "up", 0, 0, "engine"), "is a block and cannot be mounted");
+        Refused(At(1, "sideways", 0, 0), "Unknown block facing");
+        Assert.Contains("mounts on a face", Assert.Throws<InvalidDataException>(() => Parse("{ \"version\": 5, " + blocks[..^1] + ", { \"at\": [0, 1, 0], \"type\": \"coldGasThruster\" }] }")).Message);
+        Assert.Contains("mounts require version 5", Assert.Throws<InvalidDataException>(() => Parse("{ \"version\": 4, " + blocks + ", \"mounts\": [] }")).Message);
+
+        // Mounts on faces that meet at an inside corner may not run into each other, and neighbours on one face may touch.
+        Assert.Equal(2, Parse(File5(At(1, "up", 0, 0) + ", " + At(1, "up", 4, 0))).Mounts.Length);
+        var coldGas = Content.Blocks.Get("coldGasThruster");
+        DesignBox[] corner = [new(new GridSize(0, 0, 0), One, Content.Blocks.Get("core")), new(new GridSize(1, 1, 0), One, Content.Blocks.Get("hull"))];
+        DesignMount[] meeting = [new(0, BlockFacing.Right, 6, 3, coldGas), new(1, BlockFacing.Down, 3, 0, coldGas)];
+        Assert.Contains("in its way", Assert.Throws<InvalidDataException>(() => new BoxDesign("T", 1, corner, Content.Blocks.Limits, "received design", mounts: meeting)).Message);
+        meeting[0] = meeting[0] with { U = 4 };
+        Assert.Equal(2, new BoxDesign("T", 1, corner, Content.Blocks.Limits, "received design", mounts: meeting).Mounts.Length);
+
+        // A wedge carries mounts on its two whole sides only.
+        const string wedge = "{ \"version\": 5, \"name\": \"T\", \"class\": \"ship\", \"blockSize\": 1, \"color\": [1, 1, 1], \"blocks\": [{ \"at\": [0, 0, 0], \"type\": \"core\" }, { \"at\": [2, 0, 0], \"type\": \"hull\", \"shape\": \"wedge-z++\" }], \"mounts\": [";
+        var whole = 0;
+        foreach (var face in Directions)
+        {
+            try
+            {
+                Parse(wedge + At(1, Facings.Name(face), 3, 3) + "] }");
+                Assert.True(BlockShapes.IsFullFace(BlockShape.WedgeZPlusPlus, (int)face));
+                whole++;
+            }
+            catch (InvalidDataException e)
+            {
+                Assert.Contains("does not fit on that face", e.Message);
+            }
+        }
+
+        Assert.Equal(2, whole);
+
+        // The content's count is the most a design may carry.
+        var limits = Content.Blocks.Limits with { MaxMounts = 1 };
+        DesignBox[] boxes = [.. design.Blocks];
+        Assert.Single(new BoxDesign("T", 1, boxes, limits, "received design", mounts: [design.Mounts[0]]).Mounts.ToArray());
+        Assert.Contains("too many mounted parts", Assert.Throws<InvalidDataException>(() => new BoxDesign("T", 1, boxes, limits, "received design", mounts: [design.Mounts[0], design.Mounts[1]])).Message);
+    }
+
+    [Fact]
+    public void AnOldFilesThrusterBlocksBecomePlatingThatCarriesTheThrustersOnTheFaceTheyPointedFrom()
+    {
+        static BoxDesign Parse(string json)
+        {
+            using var document = JsonDocument.Parse(json);
+            return BoxDesign.Parse(document.RootElement, Content.Blocks, "test.json");
+        }
+
+        const string head = "\"name\": \"T\", \"class\": \"ship\", \"blockSize\": 1, \"color\": [1, 1, 1], \"blocks\": [{ \"at\": [0, 0, 0], \"type\": \"core\" }, ";
+        var cold = Content.Blocks.Get("coldGasThruster");
+        var plating = Content.Blocks.Get("hull");
+
+        // A one-cell thruster facing right: the cell stays, as plating, with four thrusters on its right face.
+        var old = Parse("{ \"version\": 4, " + head + "{ \"at\": [1, 0, 0], \"type\": \"coldGasThruster\", \"facing\": \"right\" }] }");
+        Assert.Equal(new DesignBox(new GridSize(1, 0, 0), One, plating), old.Blocks[1]);
+        Assert.Equal(
+            [new DesignMount(1, BlockFacing.Right, 0, 0, cold), new DesignMount(1, BlockFacing.Right, 5, 0, cold), new DesignMount(1, BlockFacing.Right, 0, 5, cold), new DesignMount(1, BlockFacing.Right, 5, 5, cold)],
+            old.Mounts.ToArray());
+        var sums = new BoxHullSums(old);
+        sums.Evaluate(sums.Intact, Content.Rules, out var flight, out _);
+        Assert.Equal(cold.Thrust * 4 / flight.Mass, flight.Push(BlockFacing.Left), 4);
+
+        // Versions before facings: the thruster faced back. A sized one carries four a cell of its face.
+        var wide = Parse("{ \"version\": 2, " + head + "{ \"at\": [0, 0, 1], \"type\": \"hotThruster\", \"size\": [2, 1, 3] }] }");
+        Assert.Equal(8, wide.Mounts.Length);
+        Assert.All(wide.Mounts.ToArray(), mount => Assert.Equal((1, BlockFacing.Back), (mount.Parent, mount.Face)));
+
+        // A thruster whose nozzle was covered pushes no more: nothing is mounted where a block stands in front of it.
+        var covered = Parse("{ \"version\": 4, " + head + "{ \"at\": [1, 0, 0], \"type\": \"coldGasThruster\", \"facing\": \"left\" }] }");
+        Assert.Equal(plating, covered.Blocks[1].Type);
+        Assert.Equal(0, covered.Mounts.Length);
+
+        // The drone's thruster becomes drone plating.
+        var drone = Parse("{ \"version\": 4, " + head.Replace("\"core\"", "\"microcore\"") + "{ \"at\": [0, 1, 0], \"type\": \"microthruster\", \"facing\": \"up\" }] }");
+        Assert.Equal(Content.Blocks.Get("microhull"), drone.Blocks[1].Type);
+        Assert.Equal(4, drone.Mounts.Length);
     }
 
     [Fact]
@@ -560,7 +713,7 @@ public sealed class PropulsionTests
     {
         var draft = BuildDraft.FromBlueprint(Content.Pod, Content);
         var count = draft.Boxes.Length;
-        var thruster = Content.Blocks.Get("coldGasThruster");
+        var thruster = Content.Blocks.Get("engine");
         Assert.Equal(DraftEdit.Done, draft.Add(new GridSize(0, 3, 0), One, thruster, BlockShape.Box, BlockFacing.Up));
         Assert.Equal(BlockFacing.Up, draft.Boxes[count].Facing);
 
@@ -589,15 +742,12 @@ public sealed class PropulsionTests
         Assert.True(draft.Redo());
         Assert.Equal(BlockFacing.Up, draft.Boxes[count].Facing);
 
-        // Two thrusters merge into one that faces as the first did, and no larger than the type allows.
+        // Two engines merge into one that faces as the first did.
         Assert.Equal(DraftEdit.Done, draft.Add(new GridSize(0, 4, 0), One, thruster, BlockShape.Box, BlockFacing.Down));
         Assert.Equal(DraftEdit.Done, draft.CanMerge([count, count + 1], out var merged));
         Assert.Equal((new GridSize(1, 2, 1), BlockFacing.Up), (merged.Size, merged.Facing));
-        Assert.Equal(DraftEdit.Done, draft.Add(new GridSize(0, 5, 0), One, thruster));
-        Assert.Equal(DraftEdit.BadSize, draft.CanMerge([count, count + 1, count + 2], out _));
 
-        // The exported design has the facings, and what they do: the thruster facing up pushes the ship down.
-        Assert.True(draft.Undo());
+        // The exported design has the facings, and what they do: the engine facing up pushes the ship down.
         Assert.True(draft.Undo());
         var export = draft.Export();
         Assert.True(export.Ok, export.Problem);

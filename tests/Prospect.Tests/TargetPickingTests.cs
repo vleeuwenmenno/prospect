@@ -298,7 +298,14 @@ public sealed class TargetPickingTests
                 var normal = Point(mesh.Vertices[q].Normal);
                 var axis = normal.X != 0 ? 0 : normal.Y != 0 ? 1 : 2;
                 var block = Array.FindIndex(design.BlockOffsets, b => Vector3.Distance(b, middle - normal * design.BlockSize * 0.5f) < 1e-4f);
-                Assert.True(block >= 0);
+                if (block < 0)
+                {
+                    // A face of a mounted thruster, drawn here as its plain small box: it is no block's face.
+                    Assert.Contains(Enumerable.Range(0, design.Mounts.Length), m => Vector3.Abs(middle - design.MountOffsets[m]) is var d
+                        && d.X <= design.MountHalfExtents[m].X + 1e-4f && d.Y <= design.MountHalfExtents[m].Y + 1e-4f && d.Z <= design.MountHalfExtents[m].Z + 1e-4f);
+                    continue;
+                }
+
                 faces[block] |= (byte)(1 << (2 * axis + (normal[axis] < 0 ? 1 : 0)));
             }
             Assert.Equal(faces, design.ExteriorFaces);
@@ -346,8 +353,17 @@ public sealed class TargetPickingTests
 
             // The triangles as the mesh pass places them: one hull mesh, or a cube per block it has.
             triangles.Clear();
+            // A mounted thruster is drawn and never picked: it stands 0.2 of a block off its face. The picks are held
+            // to the blocks' own faces, which the mesh lists first, a quad of four vertices and six indices each.
             if (kind == 1)
-                Add(MeshBuilder.Hull(design, Boxes), Vector3.Zero, 1);
+            {
+                var whole = MeshBuilder.Hull(design, Boxes);
+                var quads = design.ExteriorFaces.Sum(faces => System.Numerics.BitOperations.PopCount(faces));
+                var blocks = new MeshData();
+                blocks.Vertices.AddRange(whole.Vertices.Take(quads * 4));
+                blocks.Indices.AddRange(whole.Indices.Take(quads * 6));
+                Add(blocks, Vector3.Zero, 1);
+            }
             else
                 for (var b = 0; b < hull.Blocks.Length; b++)
                     if ((mask & 1UL << b) != 0)

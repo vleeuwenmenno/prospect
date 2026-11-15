@@ -29,6 +29,12 @@ public enum DraftEdit : byte
     NotABox,
     /// <summary>The blocks would give the ship FTL drives of two kinds; a ship takes drives of one kind only.</summary>
     MixedDrives,
+    /// <summary>A mounted part does not fit on that face: the face is no whole side of the block, or the part would hang over its edge.</summary>
+    OffFace,
+    /// <summary>One more mounted part would exceed the content's count.</summary>
+    TooManyMounts,
+    /// <summary>The part mounts on a face and cannot be placed as a block, or is a block and cannot be mounted.</summary>
+    WrongKind,
 }
 
 /// <summary>
@@ -62,10 +68,19 @@ public readonly record struct DraftExport(HullDesign? Design, byte[]? Bytes, str
 /// selection is a list of block indices in any order; each must name a block, and none twice. The boxes of a
 /// draft never share volume, which every edit keeps and the group edits rely on.
 /// </para>
+/// <para>
+/// Parts mounted on block faces (<see cref="Mounts"/>) are kept apart from the boxes and name their block by its
+/// index, which every edit keeps right. They belong to their block: they move with it and go with it. The
+/// mounts of a draft always have room, and an edit keeps that by taking away, in the same step, every mount it
+/// leaves without: one whose face is now covered, whose block was turned, or that no longer fits a resized face.
+/// Undo brings them back with the rest of the step.
+/// </para>
 /// </remarks>
 public sealed class BuildDraft
 {
     private readonly List<DesignBox> _boxes;
+    private readonly List<DesignMount> _mounts;
+    private readonly List<Step> _pending = [];
     private readonly GameContent _content;
     private readonly List<Step[]> _undo = [];
     private readonly List<Step[]> _redo = [];
@@ -78,14 +93,18 @@ public sealed class BuildDraft
     // The selection of the group edit being checked, as a set. Kept so that a preview every frame takes no memory.
     private ulong[] _marks = [];
 
-    // One recorded change; an edit is the changes it made, in the order it made them. An add has no Before and
-    // a delete has no After (the box's Type is null).
-    private readonly record struct Step(int Index, DesignBox Before, DesignBox After);
+    // One recorded change, to a box or to a mount; an edit is the changes it made, in the order it made them. An
+    // add has no Before and a delete has no After (its Type is null).
+    private readonly record struct Step(int Index, DesignBox Before, DesignBox After, DesignMount MountBefore, DesignMount MountAfter, bool Mount)
+    {
+        public static Step Block(int index, DesignBox before, DesignBox after) => new(index, before, after, default, default, false);
+        public static Step Part(int index, DesignMount before, DesignMount after) => new(index, default, default, before, after, true);
+    }
 
-    private BuildDraft(HullDesign design, List<DesignBox> boxes, GameContent content, int historyLimit)
+    private BuildDraft(HullDesign design, List<DesignBox> boxes, List<DesignMount> mounts, GameContent content, int historyLimit)
     {
         Name = design.Name; Class = design.Class; BlockSize = design.BlockSize; Color = design.Color;
-        _boxes = boxes; _content = content; _historyLimit = historyLimit;
+        _boxes = boxes; _mounts = mounts; _content = content; _historyLimit = historyLimit;
         foreach (var box in boxes)
         {
             if (box.Type.Core) _cores++;
@@ -102,9 +121,18 @@ public sealed class BuildDraft
         if (alive.Length < BlockSet.WordCount(design.BlockCount)) throw new ArgumentException("The set is shorter than the design.", nameof(alive));
         ArgumentOutOfRangeException.ThrowIfLessThan(historyLimit, 1);
         var boxes = new List<DesignBox>(design.BlockCount);
+        var mounts = new List<DesignMount>(design.Mounts.Length);
         for (var i = 0; i < design.BlockCount; i++)
-            if (BlockSet.Has(alive, i)) boxes.Add(design.Boxes[i]);
-        return new BuildDraft(design, boxes, content, historyLimit);
+        {
+            if (!BlockSet.Has(alive, i)) continue;
+
+            // A block's mounts come with it, under the index the block has in the draft.
+            design.MountsOf(i, out var start, out var end);
+            for (var m = start; m < end; m++) mounts.Add(design.Mounts[m] with { Parent = boxes.Count });
+            boxes.Add(design.Boxes[i]);
+        }
+
+        return new BuildDraft(design, boxes, mounts, content, historyLimit);
     }
 
     /// <summary>
@@ -126,6 +154,11 @@ public sealed class BuildDraft
 
     /// <summary>The boxes in draft order. Valid until the next edit; read it again after one.</summary>
     public ReadOnlySpan<DesignBox> Boxes => CollectionsMarshal.AsSpan(_boxes);
+    /// <summary>
+    /// The parts mounted on block faces, in the order they were made; <see cref="DesignMount.Parent"/> is an index
+    /// into <see cref="Boxes"/>. Valid until the next edit; read it again after one.
+    /// </summary>
+    public ReadOnlySpan<DesignMount> Mounts => CollectionsMarshal.AsSpan(_mounts);
     /// <summary>Rises on every change, undo and redo included, so a view rebuilds only when it differs.</summary>
     public int Version { get; private set; }
     /// <summary>Whether a core is left. Without one the draft cannot be exported.</summary>
@@ -169,8 +202,60 @@ public sealed class BuildDraft
         if (!Facings.IsValid(facing)) throw new ArgumentOutOfRangeException(nameof(facing));
         var check = CanAdd(at, size, type);
         if (check != DraftEdit.Done) return check;
-        Record([new Step(_boxes.Count, default, box)]);
+        Do(Step.Block(_boxes.Count, default, box));
+        Finish();
         return DraftEdit.Done;
+    }
+
+    /// <summary>
+    /// Mounts a part on side <paramref name="face"/> of block <paramref name="parent"/>, its square's low corner
+    /// <paramref name="u"/> and <paramref name="v"/> tenths of a cell from the face's (<see cref="DesignMount"/>).
+    /// It points out of the face. The new mount is the last of <see cref="Mounts"/>.
+    /// </summary>
+    public DraftEdit AddMount(int parent, BlockFacing face, int u, int v, BlockType type)
+    {
+        ArgumentNullException.ThrowIfNull(type);
+        var check = CanAddMount(parent, face, u, v, type);
+        if (check != DraftEdit.Done) return check;
+        Do(Step.Part(_mounts.Count, default, new DesignMount(parent, face, u, v, type)));
+        Finish(settle: false);
+        return DraftEdit.Done;
+    }
+
+    /// <summary>
+    /// What <see cref="AddMount"/> would answer, without changing the draft, its version or its history: whether
+    /// the part has room there. One pass over the boxes and the mounts; allocates nothing.
+    /// </summary>
+    public DraftEdit CanAddMount(int parent, BlockFacing face, int u, int v, BlockType type)
+    {
+        if (type?.Mount is null) return DraftEdit.WrongKind;
+        if (_mounts.Count >= _content.Blocks.Limits.MaxMounts) return DraftEdit.TooManyMounts;
+        return FaceMounts.Check(Boxes, Mounts, new DesignMount(parent, face, u, v, type));
+    }
+
+    /// <summary>
+    /// Where a part's square goes on side <paramref name="face"/> of block <paramref name="parent"/> so that its
+    /// middle is as near as it can be to <paramref name="point"/> (grid space, as the editor's rays are): on the
+    /// face's grid of tenths, and kept on the face. Only a position: <see cref="AddMount"/> still checks it.
+    /// </summary>
+    public void SnapMount(int parent, BlockFacing face, BlockType type, Vector3 point, out int u, out int v)
+    {
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)parent, (uint)_boxes.Count, nameof(parent));
+        var spec = type.Mount ?? throw new ArgumentException("The part is no mount.", nameof(type));
+        var box = _boxes[parent];
+        var n = Facings.Axis(face);
+        var a = (n + 1) % 3;
+        var b = (n + 2) % 3;
+        u = Place(a);
+        v = Place(b);
+
+        int Place(int axis)
+        {
+            // The face's low edge is half a cell below its first cell's centre; the square's low corner then sits
+            // half its side below the point.
+            var from = (point[axis] + 0.5f - Of(box.At, axis)) * FaceMounts.PerCell - spec.Side * 0.5f;
+            return Math.Clamp((int)MathF.Floor(from + 0.5f), 0, Math.Max(Of(box.Size, axis) * FaceMounts.PerCell - spec.Side, 0));
+        }
     }
 
     /// <summary>
@@ -183,6 +268,8 @@ public sealed class BuildDraft
         // The same count bound GeometryAdmission.Count applies, checked here so the editor stops at it; Export runs the real one.
         if (!CountFits(_boxes.Count + 1L))
             return DraftEdit.TooManyBlocks;
+        if (type?.Mount is not null)
+            return DraftEdit.WrongKind;
         var check = Check(new DesignBox(at, size, type!), -1);
         if (check != DraftEdit.Done || type is null)
             return check;
@@ -192,17 +279,27 @@ public sealed class BuildDraft
 
     /// <summary>
     /// Adds copies of <paramref name="boxes"/>, each moved by <paramref name="by"/> cells, at the end of the
-    /// draft in their order: the pasted blocks are the last <c>boxes.Length</c>. All of them or none.
+    /// draft in their order: the pasted blocks are the last <c>boxes.Length</c>. All of them or none. With
+    /// <paramref name="mounts"/>, whose <see cref="DesignMount.Parent"/> is an index into <paramref name="boxes"/>,
+    /// the copies carry those parts; one with no room where it lands, or past the content's count, is left behind.
     /// </summary>
-    public DraftEdit Paste(ReadOnlySpan<DesignBox> boxes, GridSize by)
+    public DraftEdit Paste(ReadOnlySpan<DesignBox> boxes, GridSize by, ReadOnlySpan<DesignMount> mounts = default)
     {
         foreach (ref readonly var box in boxes) ArgumentNullException.ThrowIfNull(box.Type, nameof(boxes));
         var check = CanPaste(boxes, by);
         if (check != DraftEdit.Done) return check;
-        var steps = new Step[boxes.Length];
-        for (var i = 0; i < steps.Length; i++)
-            steps[i] = new Step(_boxes.Count + i, default, boxes[i] with { At = Shifted(boxes[i].At, by) });
-        Record(steps);
+        var first = _boxes.Count;
+        for (var i = 0; i < boxes.Length; i++)
+            Do(Step.Block(first + i, default, boxes[i] with { At = Shifted(boxes[i].At, by) }));
+        foreach (ref readonly var mount in mounts)
+        {
+            if ((uint)mount.Parent >= (uint)boxes.Length) throw new ArgumentOutOfRangeException(nameof(mounts));
+            var placed = mount with { Parent = first + mount.Parent };
+            if (_mounts.Count < _content.Blocks.Limits.MaxMounts && FaceMounts.Check(Boxes, Mounts, placed) == DraftEdit.Done)
+                Do(Step.Part(_mounts.Count, default, placed));
+        }
+
+        Finish();
         return DraftEdit.Done;
     }
 
@@ -215,31 +312,44 @@ public sealed class BuildDraft
     {
         if (boxes.IsEmpty) return DraftEdit.Unchanged;
         if (!CountFits((long)_boxes.Count + boxes.Length)) return DraftEdit.TooManyBlocks;
+        foreach (ref readonly var box in boxes)
+            if (box.Type?.Mount is not null) return DraftEdit.WrongKind;
         var check = CheckGroup(boxes, default, by, default);
         return check == DraftEdit.Done && MixesDrives(boxes) ? DraftEdit.MixedDrives : check;
     }
 
-    /// <summary>Removes a block; later blocks move down one index.</summary>
-    public DraftEdit Delete(int block)
-    {
-        if ((uint)block >= (uint)_boxes.Count) return DraftEdit.NoSuchBlock;
-        Record([new Step(block, _boxes[block], default)]);
-        return DraftEdit.Done;
-    }
+    /// <summary>Removes a block and what is mounted on it; later blocks move down one index.</summary>
+    public DraftEdit Delete(int block) => Delete(new ReadOnlySpan<int>(in block), default);
 
-    /// <summary>Removes the blocks of a selection; the blocks left move down and keep their order.</summary>
-    public DraftEdit Delete(ReadOnlySpan<int> blocks)
+    /// <summary>Removes the blocks of a selection and what is mounted on them; the blocks left move down and keep their order.</summary>
+    public DraftEdit Delete(ReadOnlySpan<int> blocks) => Delete(blocks, default);
+
+    /// <summary>Removes one mounted part; later mounts move down one index.</summary>
+    public DraftEdit DeleteMount(int mount) => Delete(default, new ReadOnlySpan<int>(in mount));
+
+    /// <summary>
+    /// Removes the blocks and the mounted parts of a selection together, as one step: each listed block with
+    /// everything mounted on it, and each listed mount (an index into <see cref="Mounts"/>, none twice). What is
+    /// left moves down and keeps its order.
+    /// </summary>
+    public DraftEdit Delete(ReadOnlySpan<int> blocks, ReadOnlySpan<int> mounts)
     {
         var check = Mark(blocks, out var marks);
         if (check != DraftEdit.Done) return check;
-        if (blocks.IsEmpty) return DraftEdit.Unchanged;
+        for (var i = 0; i < mounts.Length; i++)
+        {
+            if ((uint)mounts[i] >= (uint)_mounts.Count) return DraftEdit.NoSuchBlock;
+            if (mounts[..i].Contains(mounts[i])) return DraftEdit.BadSelection;
+        }
 
-        // From the last block down, so that no removal moves a block that is still to go.
-        var steps = new Step[blocks.Length];
-        var next = 0;
+        if (blocks.IsEmpty && mounts.IsEmpty) return DraftEdit.Unchanged;
+
+        // From the last down, so that no removal moves one that is still to go; mounts before the blocks they sit on.
+        for (var i = _mounts.Count - 1; i >= 0; i--)
+            if (mounts.Contains(i) || BlockSet.Has(marks, _mounts[i].Parent)) Do(Step.Part(i, _mounts[i], default));
         for (var i = _boxes.Count - 1; i >= 0; i--)
-            if (BlockSet.Has(marks, i)) steps[next++] = new Step(i, _boxes[i], default);
-        Record(steps);
+            if (BlockSet.Has(marks, i)) Do(Step.Block(i, _boxes[i], default));
+        Finish(settle: false);
         return DraftEdit.Done;
     }
 
@@ -251,14 +361,13 @@ public sealed class BuildDraft
     {
         var check = CanMove(blocks, by);
         if (check != DraftEdit.Done) return check;
-        var steps = new Step[blocks.Length];
-        for (var i = 0; i < steps.Length; i++)
+        foreach (var block in blocks)
         {
-            var box = _boxes[blocks[i]];
-            steps[i] = new Step(blocks[i], box, box with { At = Shifted(box.At, by) });
+            var box = _boxes[block];
+            Do(Step.Block(block, box, box with { At = Shifted(box.At, by) }));
         }
 
-        Record(steps);
+        Finish();
         return DraftEdit.Done;
     }
 
@@ -287,14 +396,27 @@ public sealed class BuildDraft
 
         // CanMerge left the selection marked. The others go from the last down; the lowest then still has its index.
         ReadOnlySpan<ulong> marks = _marks;
-        var steps = new Step[blocks.Length];
-        var next = 0;
         var lowest = 0;
         while (!BlockSet.Has(marks, lowest)) lowest++;
+
+        // What was mounted on the blocks stays where it is, now on the one block: every such mount was on the
+        // outside of the box they fill, which is a face of the merged block.
+        Span<int> low = stackalloc int[3];
+        Span<int> high = stackalloc int[3];
+        for (var i = 0; i < _mounts.Count; i++)
+        {
+            var mount = _mounts[i];
+            if (!BlockSet.Has(marks, mount.Parent)) continue;
+            FaceMounts.Box(_boxes[mount.Parent], mount, low, high);
+            var n = Facings.Axis(mount.Face);
+            int a = (n + 1) % 3, b = (n + 2) % 3;
+            Do(Step.Part(i, mount, mount with { Parent = lowest, U = low[a] - Of(merged.At, a) * FaceMounts.PerCell, V = low[b] - Of(merged.At, b) * FaceMounts.PerCell }));
+        }
+
         for (var i = _boxes.Count - 1; i > lowest; i--)
-            if (BlockSet.Has(marks, i)) steps[next++] = new Step(i, _boxes[i], default);
-        steps[next] = new Step(lowest, _boxes[lowest], merged);
-        Record(steps);
+            if (BlockSet.Has(marks, i)) Do(Step.Block(i, _boxes[i], default));
+        Do(Step.Block(lowest, _boxes[lowest], merged));
+        Finish();
         return DraftEdit.Done;
     }
 
@@ -343,7 +465,22 @@ public sealed class BuildDraft
     {
         var check = CanResize(block, side, length, out var changed);
         if (check != DraftEdit.Done) return check;
-        Record([new Step(block, _boxes[block], changed)]);
+
+        // A minus side that moves takes the block's low corner with it; what is mounted on the faces along that
+        // axis is counted from that corner, so it is counted again to stay where it is. A mount the face no
+        // longer reaches goes with the rest that has no room.
+        var axis = side >> 1;
+        var shift = (Of(_boxes[block].At, axis) - Of(changed.At, axis)) * FaceMounts.PerCell;
+        for (var i = 0; shift != 0 && i < _mounts.Count; i++)
+        {
+            var mount = _mounts[i];
+            var n = Facings.Axis(mount.Face);
+            if (mount.Parent != block || n == axis) continue;
+            Do(Step.Part(i, mount, (n + 1) % 3 == axis ? mount with { U = mount.U + shift } : mount with { V = mount.V + shift }));
+        }
+
+        Do(Step.Block(block, _boxes[block], changed));
+        Finish();
         return DraftEdit.Done;
     }
 
@@ -365,12 +502,17 @@ public sealed class BuildDraft
 
     /// <summary>
     /// Rotates one block by a positive quarter turn, keeping its low corner fixed; one undo step. Its size, shape
-    /// and facing turn together, so a thrust part turned this way pushes another way.
+    /// and facing turn together, so a thrust part turned this way pushes another way. What was mounted on it is
+    /// taken off: its faces are other faces now.
     /// </summary>
     public DraftEdit Rotate(int block, int axis)
     {
         var check = CanRotate(block, axis, out var changed);
-        if (check == DraftEdit.Done) Record([new Step(block, _boxes[block], changed)]);
+        if (check != DraftEdit.Done) return check;
+        for (var i = _mounts.Count - 1; i >= 0; i--)
+            if (_mounts[i].Parent == block) Do(Step.Part(i, _mounts[i], default));
+        Do(Step.Block(block, _boxes[block], changed));
+        Finish();
         return check;
     }
 
@@ -395,7 +537,7 @@ public sealed class BuildDraft
         if (_undo.Count == 0) return false;
         var steps = _undo[^1];
         _undo.RemoveAt(_undo.Count - 1);
-        for (var i = steps.Length - 1; i >= 0; i--) Apply(steps[i].Index, steps[i].After, steps[i].Before);
+        for (var i = steps.Length - 1; i >= 0; i--) Apply(steps[i], false);
         _redo.Add(steps);
         return true;
     }
@@ -406,7 +548,7 @@ public sealed class BuildDraft
         if (_redo.Count == 0) return false;
         var steps = _redo[^1];
         _redo.RemoveAt(_redo.Count - 1);
-        foreach (var step in steps) Apply(step.Index, step.Before, step.After);
+        foreach (var step in steps) Apply(step, true);
         _undo.Add(steps);
         return true;
     }
@@ -418,15 +560,15 @@ public sealed class BuildDraft
     /// for the editor to warn about. Allocates and costs about as much as receiving the design, so call it on
     /// Apply or on a worker, not every frame.
     /// </summary>
-    public DraftExport Export() => Export(Name, Class, BlockSize, Color, _boxes.ToArray(), _content);
+    public DraftExport Export() => Export(Name, Class, BlockSize, Color, _boxes.ToArray(), _mounts.ToArray(), _content);
 
     /// <summary>
     /// A frozen copy of the draft as it is now, numbered with its <see cref="Version"/>. Another thread may export
     /// the copy while this draft goes on being edited; the copy never changes. Allocates the box array once.
     /// </summary>
-    public DraftCopy Copy() => new(Name, Class, BlockSize, Color, _boxes.ToArray(), _content, Version);
+    public DraftCopy Copy() => new(Name, Class, BlockSize, Color, _boxes.ToArray(), _mounts.ToArray(), _content, Version);
 
-    internal static DraftExport Export(string name, HullClass hullClass, float blockSize, Vector3 color, DesignBox[] boxes, GameContent content)
+    internal static DraftExport Export(string name, HullClass hullClass, float blockSize, Vector3 color, DesignBox[] boxes, DesignMount[] mounts, GameContent content)
     {
         SurfaceUsage? surface = null;
         try
@@ -434,7 +576,7 @@ public sealed class BuildDraft
             var limits = content.Blocks.Limits;
             GeometryAdmission.Count(boxes.Length, limits);
             BoxDesign.RequireOneDriveKind(boxes, "draft");
-            var built = HullDesign.Of(new BoxDesign(name, blockSize, boxes, limits, "draft", hullClass, color), content.Rules);
+            var built = HullDesign.Of(new BoxDesign(name, blockSize, boxes, limits, "draft", hullClass, color, mounts), content.Rules);
 
             // Measured here as well as in the decoding, so that a draft refused for its surface still says how far over it is.
             surface = GeometryAdmission.Measure(built, limits.SurfaceVertices, limits.Shield, limits.SurfaceIndices);
@@ -592,18 +734,61 @@ public sealed class BuildDraft
         return overlaps ? DraftEdit.Overlaps : DraftEdit.Done;
     }
 
-    // Makes an edit and remembers it as one step of history, however many changes it is.
-    private void Record(Step[] steps)
+    // Makes one change of the edit under way and notes it.
+    private void Do(Step step)
     {
-        foreach (var step in steps) Apply(step.Index, step.Before, step.After);
-        _redo.Clear();
-        if (_undo.Count == _historyLimit) _undo.RemoveAt(0);
-        _undo.Add(steps);
+        Apply(step, true);
+        _pending.Add(step);
     }
 
-    // Replaces `from` at `index` with `to`; a box without a type means no box, so this inserts or removes.
-    private void Apply(int index, DesignBox from, DesignBox to)
+    // Ends an edit: remembers its changes as one step of history, however many they are. With `settle`, mounts the
+    // edit left without room are taken away first, as part of the same step.
+    private void Finish(bool settle = true)
     {
+        if (settle) Settle();
+        _redo.Clear();
+        if (_undo.Count == _historyLimit) _undo.RemoveAt(0);
+        _undo.Add([.. _pending]);
+        _pending.Clear();
+    }
+
+    // Takes away every mount that has no room as the boxes now stand, in order: an earlier mount keeps its place
+    // against a later one. Edits that only add or remove mounts check for themselves and skip this.
+    private void Settle()
+    {
+        for (var i = 0; i < _mounts.Count;)
+        {
+            var mounts = Mounts;
+            if (FaceMounts.Check(Boxes, mounts[..i], mounts[i]) == DraftEdit.Done) i++;
+            else Do(Step.Part(i, _mounts[i], default));
+        }
+    }
+
+    // Makes a change (`forward`) or takes it back. A box or mount without a type means none, so this inserts or
+    // removes. Mounts name their block by index: they follow when a box is put in or taken out below them. A box
+    // is only ever taken out with nothing mounted on it, and comes back before what was.
+    private void Apply(in Step step, bool forward)
+    {
+        var index = step.Index;
+        if (step.Mount)
+        {
+            var (before, after) = forward ? (step.MountBefore, step.MountAfter) : (step.MountAfter, step.MountBefore);
+            if (before.Type is null) _mounts.Insert(index, after);
+            else if (after.Type is null) _mounts.RemoveAt(index);
+            else _mounts[index] = after;
+            Version++;
+            return;
+        }
+
+        var (from, to) = forward ? (step.Before, step.After) : (step.After, step.Before);
+        if (from.Type is null || to.Type is null)
+        {
+            var mounts = CollectionsMarshal.AsSpan(_mounts);
+            var by = from.Type is null ? 1 : -1;
+            foreach (ref var mount in mounts)
+                if (mount.Parent > index || (by > 0 && mount.Parent == index)) mount = mount with { Parent = mount.Parent + by };
+        }
+
         if (from.Type is null) _boxes.Insert(index, to);
         else if (to.Type is null) _boxes.RemoveAt(index);
         else _boxes[index] = to;
@@ -629,11 +814,12 @@ public sealed class DraftCopy
     private readonly float _blockSize;
     private readonly Vector3 _color;
     private readonly DesignBox[] _boxes;
+    private readonly DesignMount[] _mounts;
     private readonly GameContent _content;
 
-    internal DraftCopy(string name, HullClass hullClass, float blockSize, Vector3 color, DesignBox[] boxes, GameContent content, int version)
+    internal DraftCopy(string name, HullClass hullClass, float blockSize, Vector3 color, DesignBox[] boxes, DesignMount[] mounts, GameContent content, int version)
     {
-        _name = name; _class = hullClass; _blockSize = blockSize; _color = color; _boxes = boxes; _content = content; Version = version;
+        _name = name; _class = hullClass; _blockSize = blockSize; _color = color; _boxes = boxes; _mounts = mounts; _content = content; Version = version;
     }
 
     /// <summary>The draft's <see cref="BuildDraft.Version"/> when the copy was made.</summary>
@@ -643,5 +829,5 @@ public sealed class DraftCopy
     public int BlockCount => _boxes.Length;
 
     /// <summary>As <see cref="BuildDraft.Export"/>, for the draft as it was when copied. Safe on any thread.</summary>
-    public DraftExport Export() => BuildDraft.Export(_name, _class, _blockSize, _color, _boxes, _content);
+    public DraftExport Export() => BuildDraft.Export(_name, _class, _blockSize, _color, _boxes, _mounts, _content);
 }

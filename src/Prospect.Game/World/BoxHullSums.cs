@@ -105,6 +105,12 @@ public sealed class BoxHullSums
     private readonly DesignBox[] _boxes;
     private readonly Kind[] _kinds;
     private readonly int[] _kindOf;
+
+    // The parts mounted on block faces, kept by parent block: block b has the mounts from _mountStart[b] up to
+    // _mountStart[b + 1]. A mount is added with its parent and goes with it, so it needs no place in the tree.
+    private readonly DesignMount[] _mounts;
+    private readonly int[] _mountStart;
+    private readonly int[] _mountKindOf;
     private readonly HullSum[] _intact;
     private readonly int _leaves;
 
@@ -137,6 +143,24 @@ public sealed class BoxHullSums
             radius = Math.Max(radius, design.Offset(box).Length() + design.BlockSize * 0.87f * corner);
         }
 
+        // A mount's figures follow from its type and the way its face points, which is the way its nozzle does.
+        _mounts = design.MountArray;
+        _mountStart = design.MountStart;
+        _mountKindOf = new int[_mounts.Length];
+        var knownMounts = new Dictionary<(BlockType, BlockFacing), int>();
+        for (var i = 0; i < _mounts.Length; i++)
+        {
+            ref readonly var mount = ref _mounts[i];
+            if (!knownMounts.TryGetValue((mount.Type, mount.Face), out var kind))
+            {
+                kind = kinds.Count;
+                kinds.Add(MountKind(mount.Type, mount.Face));
+                knownMounts.Add((mount.Type, mount.Face), kind);
+            }
+
+            _mountKindOf[i] = kind;
+        }
+
         _kinds = [.. kinds];
         Radius = radius;
         _leaves = (_boxes.Length + GroupSize - 1) / GroupSize;
@@ -162,7 +186,7 @@ public sealed class BoxHullSums
     /// The bytes the design keeps for evaluation besides its boxes: the intact sums, an index per block and the
     /// table of kinds. Object headers are not counted.
     /// </summary>
-    public long DesignBytes => StorageBytes + (long)_kindOf.Length * sizeof(int) + (long)_kinds.Length * Unsafe.SizeOf<Kind>();
+    public long DesignBytes => StorageBytes + ((long)_kindOf.Length + _mountKindOf.Length) * sizeof(int) + (long)_kinds.Length * Unsafe.SizeOf<Kind>();
 
     /// <summary>The sums of the intact hull. A hull's own sums start as a copy of these.</summary>
     public ReadOnlySpan<HullSum> Intact => _intact;
@@ -284,6 +308,33 @@ public sealed class BoxHullSums
         // Blocks are added in rising order, so the first drive seen is the lowest.
         if (kind.Drive && sum.Drive == 0)
             sum.Drive = block + 1;
+
+        // What is mounted on the block is there exactly while the block is: its thrust, burn, power and mass are
+        // added with it, in the design's order, and go with it when its group is added up again without it.
+        for (var m = _mountStart[block]; m < _mountStart[block + 1]; m++)
+            AddMount(ref sum, m);
+    }
+
+    /// <summary>Adds one mounted part to a sum: its kind's figures and the inertia of its small box where it sits.</summary>
+    private void AddMount(ref HullSum sum, int index)
+    {
+        ref readonly var kind = ref _kinds[_mountKindOf[index]];
+        ref readonly var mount = ref _mounts[index];
+        for (var j = 0; j < Totals; j++)
+            sum.Values[j] += kind.Values[j];
+        var scale = (double)_design.BlockSize;
+        var middle = _design.MountMiddle(mount);
+        var size = BoxDesign.MountSize(mount);
+        var x = (middle.X - _design.Center.X) * scale;
+        var y = (middle.Y - _design.Center.Y) * scale;
+        var z = (middle.Z - _design.Center.Z) * scale;
+        var sx = size.X * scale;
+        var sy = size.Y * scale;
+        var sz = size.Z * scale;
+        var mass = kind.Values[Mass];
+        sum.Values[InertiaX] += mass * (y * y + z * z + (sy * sy + sz * sz) / 12);
+        sum.Values[InertiaY] += mass * (x * x + z * z + (sx * sx + sz * sz) / 12);
+        sum.Values[InertiaZ] += mass * (x * x + y * y + (sx * sx + sy * sy) / 12);
     }
 
     /// <summary>Makes a node the sum of its two children.</summary>
@@ -363,6 +414,20 @@ public sealed class BoxHullSums
             values[FtlPower + (int)type.Ftl - 1] = Scaled("ftlPower", type.FtlPower);
         return values;
     }
+
+    /// <summary>
+    /// What one mounted part adds: its type's own figures, pushing away from the face it sits on. It fills no cell
+    /// and has no hit points of its own, so it adds neither volume nor hull points.
+    /// </summary>
+    internal static HullSum.Numbers MountFigures(BlockType type, BlockFacing face)
+    {
+        var values = ScaledFigures(type, 1, out _, false, face);
+        values[Hull] = 0;
+        values[Cells] = 0;
+        return values;
+    }
+
+    private static Kind MountKind(BlockType type, BlockFacing face) => new() { Values = MountFigures(type, face) };
 
     private static Kind KindOf(BlockType type, long cells, bool half, BlockFacing facing)
     {

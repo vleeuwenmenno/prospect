@@ -29,6 +29,37 @@ internal sealed class DamageMesh
         for (var b = 0; b < design.BlockCount; b++)
         {
             if (!BlockSet.Has(alive, b)) continue;
+            // What is mounted on a block the hull still has is there too, as its model or as its plain small box.
+            design.MountsOf(b, out var firstMount, out var endMount);
+            for (var m = firstMount; m < endMount; m++)
+            {
+                modelVertices.Clear();
+                modelIndices.Clear();
+                if (PropulsionModels.AddMount(design, m, look, modelVertices, modelIndices, null))
+                {
+                    foreach (var index in modelIndices)
+                    {
+                        original.Add(modelVertices[(int)index]);
+                        dented.Add(modelVertices[(int)index]);
+                    }
+                }
+                else
+                {
+                    var back = (int)Facings.Opposite(design.Mounts[m].Face);
+                    for (var face = 0; face < 6; face++)
+                    {
+                        if (face == back) continue;
+                        BlockShapes.Face(BlockShape.Box, face, corners);
+                        var normal = BlockShapes.FaceNormal(BlockShape.Box, design.MountHalfExtents[m], face);
+                        var a = design.MountOffsets[m] + BlockShapes.Corner(corners[0], design.MountHalfExtents[m]);
+                        for (var c = 1; c + 1 < 4; c++)
+                            Triangle(a, design.MountOffsets[m] + BlockShapes.Corner(corners[c], design.MountHalfExtents[m]), design.MountOffsets[m] + BlockShapes.Corner(corners[c + 1], design.MountHalfExtents[m]), a, normal);
+                    }
+                }
+
+                if (original.Count > capacity) return null;
+            }
+
             // A thrust part is its model, as on an undamaged hull; dents on it are not drawn.
             modelVertices.Clear();
             modelIndices.Clear();

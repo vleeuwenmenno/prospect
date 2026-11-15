@@ -47,6 +47,12 @@ public sealed class BlockType
     /// <summary>The most cells a block of the type may measure along any side; zero for the content's general limit.</summary>
     public int MaxSide { get; init; }
 
+    /// <summary>
+    /// Set for a part that sits on the face of a block and fills no grid cell (<see cref="DesignMount"/>); null for
+    /// a block. Its figures are those of one part: nothing scales them.
+    /// </summary>
+    public MountSpec? Mount { get; init; }
+
     /// <summary>True for the block a hull cannot exist without; losing it destroys the hull.</summary>
     public bool Core { get; init; }
     public bool Sensor { get; init; }
@@ -297,6 +303,9 @@ public sealed class BlockCatalog
                 Tank = block.TryGetProperty("tank"u8, out var tank) ? Fuels.Parse(tank.GetString(), path + ": " + entry.Name) : FuelKind.None,
                 FuelCapacity = Number(block, "fuelCapacity"u8),
                 MaxSide = block.TryGetProperty("maxSide"u8, out var maxSide) ? maxSide.GetInt32() : 0,
+                Mount = block.TryGetProperty("mount"u8, out var mount)
+                    ? new MountSpec(mount.GetProperty("side"u8).GetInt32(), mount.GetProperty("depth"u8).GetInt32(), mount.GetProperty("legacyBlock"u8).GetString()!)
+                    : null,
                 Sensor = block.TryGetProperty("sensor"u8, out var sensor) && sensor.GetBoolean(),
                 Charting = block.TryGetProperty("charting"u8, out var charting) && charting.GetBoolean(),
                 Core = block.TryGetProperty("core"u8, out var core) && core.GetBoolean(),
@@ -337,6 +346,18 @@ public sealed class BlockCatalog
                 throw new InvalidDataException($"{path}: {type.Id}: a tank needs a positive finite fuelCapacity, and only a tank has one");
             if (type.MaxSide < 0 || type.MaxSide > limits.MaxBoxSide)
                 throw new InvalidDataException($"{path}: {type.Id}: maxSide must be from 1 to {limits.MaxBoxSide}, or left out");
+
+            // A mount is a thrust part and nothing a hull keeps by its block number: its figures go into the sums
+            // with its parent block, and it has no hit points, size or identity of its own.
+            if (type.Mount is not { } spec)
+                continue;
+            if (spec.Side is < 1 or > FaceMounts.MaxSide || spec.Depth is < 1 or > FaceMounts.MaxDepth)
+                throw new InvalidDataException($"{path}: {type.Id}: a mount's side is 1 to {FaceMounts.MaxSide} tenths of a cell and its depth 1 to {FaceMounts.MaxDepth}");
+            if (!(type.Thrust > 0) || type.Core || type.Sensor || type.Charting || type.Ftl != FtlKind.None || type.Tank != FuelKind.None
+                || type.Module.Family != ModuleFamily.None || type.Crew != 0 || type.MaxSide != 0 || type.SizeRules.Count != 0)
+                throw new InvalidDataException($"{path}: {type.Id}: only a thrust part mounts on a face, and it has no size rules or maxSide");
+            if (!types.TryGetValue(spec.LegacyBlock, out var legacy) || legacy.Mount is not null)
+                throw new InvalidDataException($"{path}: {type.Id}: legacyBlock must name a block type that is no mount");
         }
 
         // A dictionary does not promise an order; the file's is kept apart for whoever lists the types.
@@ -442,6 +463,15 @@ public sealed class HullDesign
         Types = new BlockType[blocks.Length];
         BlockOffsets = new Vector3[blocks.Length];
         BlockHalfExtents = new Vector3[blocks.Length];
+        var mounts = boxes.Mounts;
+        MountOffsets = new Vector3[mounts.Length];
+        MountHalfExtents = new Vector3[mounts.Length];
+        for (var i = 0; i < mounts.Length; i++)
+        {
+            MountOffsets[i] = boxes.MountOffset(mounts[i]);
+            MountHalfExtents[i] = BoxDesign.MountSize(mounts[i]) * (boxes.BlockSize * 0.5f);
+        }
+
         ExteriorFaces = new byte[blocks.Length];
         Shapes = new BlockShape[blocks.Length];
         _fullSet = new ulong[BlockSet.WordCount(blocks.Length)];
@@ -543,6 +573,21 @@ public sealed class HullDesign
 
     /// <summary>The blocks as the file has them: each a box of whole cells and a type. A block's id is its index here.</summary>
     public ReadOnlySpan<DesignBox> Boxes => _boxes.Blocks;
+
+    /// <summary>
+    /// The parts mounted on block faces, ordered by parent block. A hull has a mount exactly while it has the
+    /// mount's parent: there is no other state for one, on the wire or in a saved world.
+    /// </summary>
+    public ReadOnlySpan<DesignMount> Mounts => _boxes.Mounts;
+
+    /// <summary>The mounts of one block, as a range of <see cref="Mounts"/>.</summary>
+    public void MountsOf(int block, out int start, out int end) => _boxes.MountsOf(block, out start, out end);
+
+    /// <summary>Each mount's centre relative to <see cref="Pivot"/>, in metres, in the hull's own frame.</summary>
+    public Vector3[] MountOffsets { get; }
+
+    /// <summary>Half of each mount's width, height and length, in metres. It stands out along its face's axis.</summary>
+    public Vector3[] MountHalfExtents { get; }
 
     /// <summary>
     /// The lowest cell of each block, and each block's type. The rounded unit-cube shield uses these; sized geometry reads the full boxes.

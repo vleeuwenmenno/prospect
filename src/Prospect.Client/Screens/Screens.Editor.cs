@@ -125,6 +125,15 @@ internal sealed partial class ScreenHost
                 DrawFacing(draw, world, box, Quaternion.Identity, Vector3.Zero);
         }
 
+        // Selected mounted parts, outlined like selected blocks, each with where it points.
+        var mounts = draft.Mounts;
+        foreach (var mount in editor.MountSelection)
+        {
+            if ((uint)mount >= (uint)mounts.Length || (uint)mounts[mount].Parent >= (uint)boxes.Length)
+                continue;
+            DrawMount(draw, world, boxes[mounts[mount].Parent], mounts[mount], Kit.Color(SelectionBlue), Kit.Px(mount == editor.SelectedMount ? 2.5f : 2f), mount == editor.SelectedMount);
+        }
+
         DrawSizingNote(world, editor);
         if (!editor.HasHover)
             return;
@@ -151,7 +160,15 @@ internal sealed partial class ScreenHost
             return;
         }
 
-        if (editor.HasGhost)
+        if (editor.HasMountGhost && (uint)editor.GhostMount.Parent < (uint)boxes.Length)
+        {
+            // A part that mounts shows only itself, on the face under the pointer, and where it points.
+            var ok = editor.GhostCheck == DraftEdit.Done;
+            DrawMount(draw, world, boxes[editor.GhostMount.Parent], editor.GhostMount, Kit.Color(ok ? Theme.Good : Theme.Bad), Kit.Px(2), true);
+            if (!ok)
+                PointerNote(EditText(editor.GhostCheck));
+        }
+        else if (editor.HasGhost)
         {
             var ok = editor.GhostCheck == DraftEdit.Done;
             var tone = ok ? Theme.Good : Theme.Bad;
@@ -174,11 +191,46 @@ internal sealed partial class ScreenHost
             if (!ok)
                 PointerNote(EditText(editor.GhostCheck));
         }
+        else if ((uint)editor.Hover.Mount < (uint)mounts.Length && (uint)mounts[editor.Hover.Mount].Parent < (uint)boxes.Length)
+        {
+            DrawMount(draw, world, boxes[mounts[editor.Hover.Mount].Parent], mounts[editor.Hover.Mount], Kit.Color(Theme.Accent, 0.8f), Kit.Px(1.5f), false);
+        }
         else if ((uint)editor.Hover.Block < (uint)boxes.Length)
         {
             ref readonly var box = ref boxes[editor.Hover.Block];
             DrawFace(draw, world, box, editor.Hover.Side, Kit.Color(Theme.Accent, 0.18f), Kit.Color(Theme.Accent, 0.8f));
         }
+    }
+
+    /// <summary>
+    /// A mounted part as the edges of the small box it fills on its face; with <paramref name="exhaust"/>, a line out
+    /// of its middle the way its nozzle points, which is out of the face. The part pushes the ship the other way.
+    /// </summary>
+    private static void DrawMount(ImDrawListPtr draw, WorldView world, in DesignBox parent, in DesignMount mount, ImColor8 color, float thickness, bool exhaust)
+    {
+        EditorGeometry.MountBounds(parent, mount, out var low, out var high);
+        Span<Double3> corners = stackalloc Double3[8];
+        for (var i = 0; i < 8; i++)
+            corners[i] = world.EditorPoint(new Vector3((i & 1) == 0 ? low.X : high.X, (i & 2) == 0 ? low.Y : high.Y, (i & 4) == 0 ? low.Z : high.Z));
+        for (var i = 0; i < 8; i++)
+        {
+            for (var bit = 1; bit < 8; bit <<= 1)
+            {
+                if ((i & bit) == 0 && world.ProjectSegment(corners[i], corners[i | bit], out var a, out var b))
+                    draw.AddLine(a, b, color, thickness);
+            }
+        }
+
+        if (!exhaust)
+            return;
+        var normal = EditorGeometry.Normal((int)mount.Face);
+        var middle = (low + high) * 0.5f;
+        var from = middle + normal * ((high - low)[(int)mount.Face >> 1] * 0.5f);
+        if (!world.ProjectSegment(world.EditorPoint(from), world.EditorPoint(from + normal * 0.8f), out var p, out var q))
+            return;
+        var orange = Kit.Color(ExhaustOrange);
+        draw.AddLine(p, q, orange, Kit.Px(3f));
+        draw.AddCircle(q, Kit.Px(5), orange, 0, Kit.Px(2f));
     }
 
     private static GridSize Shift(GridSize at, GridSize by) => new(at.X + by.X, at.Y + by.Y, at.Z + by.Z);
@@ -494,10 +546,22 @@ internal sealed partial class ScreenHost
         Kit.Caption("PART SHAPE"u8);
         Kit.Space(Theme.Space1);
         var size = editor.PartSize;
-        ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, Kit.F($"{size.X} x {size.Y} x {size.Z} CELLS"), width);
-        ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, ShapeText(editor.PartShape), width);
-        if ((uint)editor.Part < (uint)content.Blocks.Types.Count && content.Blocks.Types[editor.Part].Thrust > 0)
-            ClippedLine(_ui.Mono, Theme.FontCaption, ExhaustOrange, FacingText(editor.PartFacing), width);
+        if (editor.PartIsMount)
+        {
+            // A part that mounts has one size and no shape, and points out of the face it is put on.
+            var spec = content.Blocks.Types[editor.Part].Mount!;
+            ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, Kit.F($"MOUNTS ON A FACE: {spec.Side / (float)FaceMounts.PerCell:0.#} x {spec.Side / (float)FaceMounts.PerCell:0.#} CELL"), width);
+            ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, "NO SIZE, NO TURN"u8, width);
+            ClippedLine(_ui.Mono, Theme.FontCaption, ExhaustOrange, "POINTS OUT OF ITS FACE"u8, width);
+        }
+        else
+        {
+            ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, Kit.F($"{size.X} x {size.Y} x {size.Z} CELLS"), width);
+            ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, ShapeText(editor.PartShape), width);
+            if ((uint)editor.Part < (uint)content.Blocks.Types.Count && content.Blocks.Types[editor.Part].Thrust > 0)
+                ClippedLine(_ui.Mono, Theme.FontCaption, ExhaustOrange, FacingText(editor.PartFacing), width);
+        }
+
         Kit.Space(Theme.Space1);
         var pair = MathF.Floor((width - gap) * 0.5f);
         if (EditorPalette.HandBack(EditorButton("##shapebox"u8, "Box"u8, new float2(pair, Kit.Px(26)), editor.CanEdit, false, editor.PartShape == BlockShape.Box)))
@@ -677,8 +741,30 @@ internal sealed partial class ScreenHost
     {
         var boxes = draft.Boxes;
         var count = editor.Selection.Length;
-        Kit.Caption(count > 1 ? Kit.F($"SELECTED: {count} BLOCKS") : "SELECTED"u8, SelectionBlue);
+        var mounts = draft.Mounts;
+        var mountCount = editor.MountSelection.Length;
+        Kit.Caption(count > 1 ? Kit.F($"SELECTED: {count} BLOCKS") : count == 0 && mountCount > 1 ? Kit.F($"SELECTED: {mountCount} MOUNTED PARTS") : "SELECTED"u8, SelectionBlue);
         Kit.Space(Theme.Space1);
+        if (count == 0 && (uint)editor.SelectedMount < (uint)mounts.Length && (uint)mounts[editor.SelectedMount].Parent < (uint)boxes.Length)
+        {
+            // A mounted part: what it is, what it sits on and which way it pushes. It is deleted or picked to place
+            // another; it has no size and no turn of its own.
+            var mount = mounts[editor.SelectedMount];
+            ClippedLine(_ui.SansMedium, Theme.FontSmall, Theme.Text, Kit.F($"{mount.Type.Name}"), width);
+            ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, Kit.F($"MOUNTED ON {boxes[mount.Parent].Type.Name}, {SideName((int)mount.Face)} FACE"), width);
+            ClippedLine(_ui.Mono, Theme.FontCaption, ExhaustOrange, FacingText(mount.Face), width);
+            ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, Kit.F($"{mount.Type.Thrust:0.#} KN   {mount.Type.FuelBurn:0.####} KG/S   {mount.Type.Mass:0.###} T"), width);
+            if (editor.IsMissing(mount.Parent))
+                Paragraph(Theme.Bad, "The ship has lost the block this sits on. Repair rebuilds both."u8, width);
+            Kit.Space(Theme.Space2);
+            if (EditorButton("##placemore"u8, "Place more of these"u8, new float2(width, Kit.Px(26)), editor.CanEdit))
+                editor.CopySelection();
+            Kit.Space(Theme.Space1);
+            if (EditorButton("##deletemount"u8, mountCount > 1 ? Kit.F($"Delete {mountCount} parts") : "Delete part"u8, new float2(width, Kit.Px(28)), editor.CanDelete))
+                editor.DeleteSelected();
+            return;
+        }
+
         if ((uint)editor.Selected >= (uint)boxes.Length)
         {
             var part = PartName(editor, content);
@@ -1265,6 +1351,9 @@ internal sealed partial class ScreenHost
         DraftEdit.TooManyBlocks => "The ship has as many blocks as a design may have."u8,
         DraftEdit.NoSuchBlock => "That block is gone."u8,
         DraftEdit.MixedDrives => "The ship has another kind of FTL drive; a ship takes one kind."u8,
+        DraftEdit.OffFace => "It does not fit there: a thruster mounts on a whole flat face."u8,
+        DraftEdit.TooManyMounts => "The ship has as many mounted parts as a design may have."u8,
+        DraftEdit.WrongKind => "That part mounts on a face; it is not a block."u8,
         _ => "Nothing changed."u8,
     };
 

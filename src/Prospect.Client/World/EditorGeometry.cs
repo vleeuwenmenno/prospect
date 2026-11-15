@@ -3,8 +3,16 @@ using Prospect.Game.World;
 
 namespace Prospect.Client.World;
 
-/// <summary>What a pointer ray found on a draft: a block, the face it entered through, and the cell of that face.</summary>
-internal readonly record struct DraftHit(int Block, int Side, GridSize Cell, float Distance);
+/// <summary>
+/// What a pointer ray found on a draft: a block, the face it entered through, and the cell of that face. With
+/// <paramref name="Point"/>, where on the face in grid space, which places a part mounted on it. When the ray met a
+/// part mounted on a block first, <see cref="Mount"/> names it and the block and face are the ones it sits on.
+/// </summary>
+internal readonly record struct DraftHit(int Block, int Side, GridSize Cell, float Distance, Vector3 Point = default, int MountNumber = 0)
+{
+    /// <summary>The mount the ray met, as an index into the draft's mounts, or -1 when it met a block.</summary>
+    public int Mount => MountNumber - 1;
+}
 
 /// <summary>
 /// The ship editor's geometry, free of the renderer and the interface so it can be tested alone. Grid space is
@@ -43,6 +51,80 @@ internal static class EditorGeometry
         if (float.IsPositiveInfinity(best))
             return false;
         hit = hit with { Cell = FaceCell(boxes[hit.Block], hit.Side, origin + direction * best) };
+        return true;
+    }
+
+    /// <summary>
+    /// As <see cref="Pick(ReadOnlySpan{DesignBox}, Vector3, Vector3, ReadOnlySpan{ulong}, out DraftHit)"/>, with the
+    /// parts mounted on the blocks: one the ray meets before any block is the hit, on the block and face it sits on.
+    /// The mounts of a block in <paramref name="skip"/> are passed over with it.
+    /// </summary>
+    public static bool Pick(ReadOnlySpan<DesignBox> boxes, ReadOnlySpan<DesignMount> mounts, Vector3 origin, Vector3 direction, ReadOnlySpan<ulong> skip, out DraftHit hit)
+    {
+        var found = Pick(boxes, origin, direction, skip, out hit);
+        var best = found ? hit.Distance : float.PositiveInfinity;
+        if (found)
+            hit = hit with { Point = origin + direction * best };
+        for (var i = 0; i < mounts.Length; i++)
+        {
+            ref readonly var mount = ref mounts[i];
+            if ((uint)mount.Parent >= (uint)boxes.Length || mount.Type?.Mount is null)
+                continue;
+            if (!skip.IsEmpty && (mount.Parent >> 6) < skip.Length && BlockSet.Has(skip, mount.Parent))
+                continue;
+            MountBounds(boxes[mount.Parent], mount, out var low, out var high);
+            if (!EnterBox(low, high, origin, direction, out var t) || t >= best)
+                continue;
+            best = t;
+            found = true;
+            var point = origin + direction * t;
+            hit = new DraftHit(mount.Parent, (int)mount.Face, FaceCell(boxes[mount.Parent], (int)mount.Face, point), t, point, i + 1);
+        }
+
+        return found;
+    }
+
+    /// <summary>The box a mount fills, in grid space: its low and high corners.</summary>
+    public static void MountBounds(in DesignBox parent, in DesignMount mount, out Vector3 low, out Vector3 high)
+    {
+        Span<int> from = stackalloc int[3];
+        Span<int> to = stackalloc int[3];
+        FaceMounts.Box(parent, mount, from, to);
+        const float Tenth = 1f / FaceMounts.PerCell;
+        low = new Vector3(from[0] * Tenth - 0.5f, from[1] * Tenth - 0.5f, from[2] * Tenth - 0.5f);
+        high = new Vector3(to[0] * Tenth - 0.5f, to[1] * Tenth - 0.5f, to[2] * Tenth - 0.5f);
+    }
+
+    /// <summary>Where a ray enters an axis-aligned box from outside: the distance along it. False when it misses or starts inside.</summary>
+    public static bool EnterBox(Vector3 low, Vector3 high, Vector3 origin, Vector3 direction, out float distance)
+    {
+        distance = 0f;
+        var near = float.NegativeInfinity;
+        var far = float.PositiveInfinity;
+        for (var axis = 0; axis < 3; axis++)
+        {
+            var o = origin[axis];
+            var d = direction[axis];
+            if (MathF.Abs(d) < 1e-9f)
+            {
+                if (o < low[axis] || o > high[axis])
+                    return false;
+                continue;
+            }
+
+            var a = (low[axis] - o) / d;
+            var b = (high[axis] - o) / d;
+            if (a > b)
+                (a, b) = (b, a);
+            near = Math.Max(near, a);
+            far = Math.Min(far, b);
+            if (near > far)
+                return false;
+        }
+
+        if (near < 0f || float.IsNegativeInfinity(near))
+            return false;
+        distance = near;
         return true;
     }
 

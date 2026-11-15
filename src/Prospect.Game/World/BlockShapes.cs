@@ -140,6 +140,18 @@ public static class BlockShapes
         return count >= 3 ? count : 0;
     }
 
+    /// <summary>
+    /// Whether a side of a shape is a whole rectangle of its bounding box: every side of a box, and the two full
+    /// sides of a wedge. A wedge's slant, its triangular caps and its missing side are not.
+    /// </summary>
+    public static bool IsFullFace(BlockShape shape, int side)
+    {
+        if ((uint)side > 5u || !IsValid(shape)) return false;
+        if (shape == BlockShape.Box) return true;
+        Span<int> corners = stackalloc int[4];
+        return side != SlantSide(shape) && Face(shape, side, corners) == 4;
+    }
+
     /// <summary>The outward unit normal of a face of a shape of half extents <paramref name="half"/>.</summary>
     public static Vector3 FaceNormal(BlockShape shape, Vector3 half, int side)
     {

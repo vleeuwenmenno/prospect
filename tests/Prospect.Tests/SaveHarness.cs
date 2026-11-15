@@ -508,7 +508,11 @@ internal sealed class SaveRig : IDisposable
         foreach (var box in boxes)
             if (box.At.X + box.Size.X > far.At.X + far.Size.X) far = box;
         var big = new DesignBox(new GridSize(far.At.X + far.Size.X, far.At.Y, far.At.Z), new GridSize(2, 2, 2), content.Blocks.Get("hull"));
-        var bytes = DesignBytes.Encode(HullDesign.Of(new BoxDesign("Custom Hauler", mining.BlockSize, [.. boxes, big], content.Blocks.Limits, "test", mining.Class, mining.Color), content.Rules));
+        // The vessel's mounted thrusters come along, but for those the big block now stands in front of.
+        DesignBox[] all = [.. boxes, big];
+        var mounts = mining.Mounts.ToArray().Where(mount => FaceMounts.Check(all, default, mount) == DraftEdit.Done).ToArray();
+        Assert.InRange(mounts.Length, mining.Mounts.Length - 8, mining.Mounts.Length - 1);
+        var bytes = DesignBytes.Encode(HullDesign.Of(new BoxDesign("Custom Hauler", mining.BlockSize, all, content.Blocks.Limits, "test", mining.Class, mining.Color, mounts), content.Rules));
         var custom = DesignBytes.Decode(bytes, System.Security.Cryptography.SHA256.HashData(bytes), content);
         return content.WithCatalogue([.. content.Designs, custom], content.PodDesign, content.DroneDesign, [1, 2, content.Designs.Length, 1, 2]);
     }

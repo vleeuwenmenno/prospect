@@ -748,12 +748,12 @@ public sealed class EditorSessionTests
         Assert.Equal(design.BlockCount, BlockSet.Count(seen.Blocks.Span));
 
         // Damage to the new hull reaches both.
-        // The new block sits under the core; a drone comes up at it, with the shield out of the way.
+        // The new block sits beside the core with nothing under it; a drone comes up at it, with the shield out of the way.
         rig.Hulls.State(next.Index).Velocity = Vector3.Zero;
         rig.Hulls.State(next.Index).Shield = 0f;
         rig.Hulls.State(next.Index).ShieldOffline = true;
         var added = design.BlockCount - 1;
-        Assert.Equal(new GridSize(0, -1, 0), design.Boxes[added].At);
+        Assert.Equal(new GridSize(1, 0, 0), design.Boxes[added].At);
         var state = rig.Hulls.State(next.Index);
         var down = Vector3.Transform(-Vector3.UnitY, state.Orientation);
         var target = state.Position + Vector3.Transform(design.BlockOffsets[added], state.Orientation);
@@ -1034,7 +1034,7 @@ public sealed class EditorSessionTests
     [Fact]
     public void TheSameDesignAgainIsRefusedAKnownDesignIsNotSentAndAFullCatalogueSaysSo()
     {
-        using var rig = new Rig(catalogueSpare: 800);
+        using var rig = new Rig(catalogueSpare: 1500);
         var catalogue = rig.Field<DesignCatalogue>("_catalogue");
         var startup = catalogue.Count;
         var pod = Rig.Index(rig.Own(0));
@@ -1066,7 +1066,7 @@ public sealed class EditorSessionTests
 
         // The whole ship with one block more: a new design.
         var bytes = Edited(rig.Snap(0));
-        Assert.True(bytes.Length <= 800);
+        Assert.True(bytes.Length <= 1500, $"{bytes.Length} bytes");
         Assert.True(rig.Input(0).CommitEdit(token, bytes));
         rig.Input(0).ReportInstalledDesigns(startup + 1);
         rig.Input(1).ReportInstalledDesigns(startup + 1);
@@ -1610,6 +1610,56 @@ public sealed class EditorSessionTests
     }
 
     [Fact]
+    public void AMountedThrusterGoesThroughAnEditPushesTheHullOnTheServerAndIsLostWithItsBlock()
+    {
+        using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);
+        var startup = rig.Content.Designs.Length;
+        var content = rig.Content;
+        var cold = content.Blocks.Get("coldGasThruster");
+
+        // A block of plating out on the pod's right side, and four more thrusters on its outer face.
+        var draft = BuildDraft.FromBlueprint(content.Pod, content);
+        var plate = draft.Boxes.Length;
+        Assert.Equal(DraftEdit.Done, draft.Add(new GridSize(1, 0, 0), new GridSize(1, 1, 1), content.Blocks.Get("hull")));
+        foreach (var (u, v) in new[] { (0, 0), (5, 0), (0, 5), (5, 5) })
+            Assert.Equal(DraftEdit.Done, draft.AddMount(plate, BlockFacing.Right, u, v, cold));
+        var before = content.Pod.Flight;
+        var hull = Build(rig, draft, startup + 1);
+
+        // The server's design and the one the client was sent have the same mounts, and the hull pushes left harder.
+        var design = rig.Server.Content.Designs[startup];
+        Assert.Equal(content.Pod.Mounts.Length + 4, design.Mounts.Length);
+        Assert.Equal(design.Mounts.ToArray(), rig.Snap(0).Content.Designs[startup].Mounts.ToArray());
+        var flight = rig.Hulls.Flight(hull);
+        Assert.Equal(cold.Thrust * 8 / flight.Mass, flight.Push(BlockFacing.Left), 4);
+        Assert.Equal(before.Push(BlockFacing.Right) * before.Mass / flight.Mass, flight.Push(BlockFacing.Right), 4);
+
+        // Flown: a second of full thrust to the left gains what eight thrusters give, and the prediction agrees.
+        rig.Hulls.State(hull).Velocity = default;
+        rig.Input(0).Submit(new PlayerControls { Strafe = -1f });
+        var start = rig.Hulls.State(hull).Velocity;
+        rig.Step(60);
+        var left = Vector3.Transform(-Vector3.UnitX, rig.Hulls.State(hull).Orientation);
+        Assert.InRange(Vector3.Dot(rig.Hulls.State(hull).Velocity - start, left), flight.Push(BlockFacing.Left) * 0.8f, flight.Push(BlockFacing.Left) * 1.05f);
+        Assert.True(rig.Snap(0).PredictionError < 0.05f, $"prediction was off by {rig.Snap(0).PredictionError}");
+        rig.Input(0).Submit(default);
+
+        // The plating is lost: its four thrusters go with it, on the server and, once told, on the client. No
+        // message names a mount; the block's loss is all there is.
+        var states = rig.Hulls.BlockStates;
+        var handle = rig.Hulls.Info(hull).BlockState;
+        Assert.True(states.Hit(handle, plate, 1e9f));
+        Assert.False(BlockSet.Has(states.Alive(handle), plate));
+        design.Figures(states.Sums(handle), out var damaged, out _);
+        Assert.Equal(cold.Thrust * 4 / damaged.Mass, damaged.Push(BlockFacing.Left), 4);
+        Assert.Equal(flight.Mass - content.Blocks.Get("hull").Mass - cold.Mass * 4, damaged.Mass, 3);
+        Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Revision > 0));
+        var seen = rig.Snap(0).Hulls[rig.Snap(0).OwnHull];
+        Assert.False(BlockSet.Has(seen.Blocks.Span, plate));
+        Assert.Null(rig.Server.Fault);
+    }
+
+    [Fact]
     public void AFirstSpawnIsFullAndAnEditAndARepairKeepTheFuelWhileANewTankAddsRoomNotFuel()
     {
         using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);
@@ -1647,9 +1697,9 @@ public sealed class EditorSessionTests
         Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Fuel.Amount.Equals(held)), "the client should see the same tanks");
 
         // An applied edit keeps the fuel, per fuel: one nitrogen tank more gives room for twice as much, and
-        // none of the new room is filled.
+        // none of the new room is filled. The tank goes on the gyro, whose top carries no thrusters.
         var draft = BuildDraft.FromBlueprint(rig.Content.Pod, rig.Content);
-        Assert.Equal(DraftEdit.Done, draft.Add(new GridSize(0, 2, 0), new GridSize(1, 1, 1), rig.Content.Blocks.Get("nitrogenTank")));
+        Assert.Equal(DraftEdit.Done, draft.Add(new GridSize(0, 2, 1), new GridSize(1, 1, 1), rig.Content.Blocks.Get("nitrogenTank")));
         var edited = Build(rig, draft, startup + 1);
         var larger = rig.Hulls.Flight(edited).FuelCapacity;
         Assert.Equal(full.Nitrogen * 2f, larger.Nitrogen);
@@ -1740,9 +1790,11 @@ public sealed class EditorSessionTests
         var startup = rig.Content.Designs.Length;
         var content = rig.Content;
 
-        // The pod stripped to its core and two plates: nothing that pushes, turns, makes or holds power.
+        // The pod stripped to its core and two plates, and every mounted thruster taken off: nothing that pushes,
+        // turns, makes or holds power.
         var draft = BuildDraft.FromBlueprint(content.Pod, content);
-        Assert.Equal(DraftEdit.Done, draft.Delete([3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]));
+        Assert.Equal(DraftEdit.Done, draft.Delete([3, 4, 5, 6, 7, 8, 9, 10, 11, 12], Enumerable.Range(0, draft.Mounts.Length).ToArray()));
+        Assert.Equal((3, 0), (draft.Boxes.Length, draft.Mounts.Length));
         var hull = Build(rig, draft, startup + 1);
         var flight = rig.Hulls.Flight(hull);
         Assert.Equal((Vector3.Zero, Vector3.Zero, 0f, 0f, 0f, 0f), (flight.Acceleration, flight.TurnRate, flight.MaxSpeed, flight.PowerGenerated, flight.EnergyStorage, flight.ShieldCapacity));

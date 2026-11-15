@@ -127,9 +127,15 @@ public sealed class DesignTransferTests
         design.Evaluate(alive, out var flight, out var stats);
         Assert.Equal(hulls.Flight(own), flight);
         Assert.True(stats.Blocks < 300);
-        // Without part models every block is its box: four corners on each of six faces.
+        // Without part models every block is its box: four corners on each of six faces. The file is of version 2
+        // and has a cold gas thruster as a block two cells wide: that block is plating now and carries eight
+        // thrusters on its back face, which crossed to the client with the design. Each is drawn as the five
+        // sides of its small box that show.
         var mesh = MeshBuilder.Hull(design, new PropulsionLook());
-        Assert.Equal(300 * 24, mesh.Vertices.Count);
+        Assert.Equal("hull", design.Boxes[1].Type.Id);
+        Assert.Equal(8, design.Mounts.Length);
+        Assert.All(design.Mounts.ToArray(), mount => Assert.Equal((1, BlockFacing.Back, "coldGasThruster"), (mount.Parent, mount.Face, mount.Type.Id)));
+        Assert.Equal(300 * 24 + 8 * 20, mesh.Vertices.Count);
         Assert.Contains(mesh.Vertices, v => Math.Abs(v.Position.X - (design.BlockOffsets[299].X + 1)) < 0.001f);
         var shell = new ShieldSurface();
         var output = new ShellVertex[GeometryAdmission.MaxVertices];

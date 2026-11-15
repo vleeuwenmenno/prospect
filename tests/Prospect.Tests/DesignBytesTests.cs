@@ -54,7 +54,7 @@ public sealed class DesignBytesTests
             (metadata + 5, BitConverter.SingleToInt32Bits(float.PositiveInfinity)),
             (metadata + 17, int.MaxValue),
             (firstPosition, int.MaxValue),
-            (firstPosition + 12, 2),
+            (firstPosition + 20, 2),
         })
         {
             var bytes = (byte[])original.Clone();

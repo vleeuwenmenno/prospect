@@ -437,6 +437,7 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
 - Load rules: each tank is a number, not below nothing and not above what the hull's tanks hold after its losses.
   Thrust bits no step writes are refused. A hull that breaks a rule refuses the whole save, as any other rule does.
 - Kept exactly, like charge. Capacity is not saved: it is read off the blocks the hull has left.
-- Design encoding 3 (a facing per block) is part of what a save must match. Codec 6, encoding 3 and evaluator 11 make
-  older worlds incompatible; they are refused untouched, without migration.
+- The design encoding is part of what a save must match: 4 since thrusters mount on faces. Codec 7, encoding 4
+  and evaluator 12 make older worlds incompatible; they are refused untouched, without migration.
+- A mounted thruster has nothing of its own in a save: a hull has it while it has the block it sits on.
 - Rules and figures: `docs/roadmap/propulsion.md`.

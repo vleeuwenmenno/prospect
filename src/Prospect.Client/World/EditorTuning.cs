@@ -45,8 +45,17 @@ internal sealed class EditorTuning
     /// <summary>How near, in pixels, the pointer must be to a rotation ring of the part being turned to take it.</summary>
     public float RotateRingPixels { get; init; }
 
-    /// <summary>Whether a part is a compact one, by its mass.</summary>
-    public bool Compact(BlockType type) => type.Mass < CompactMassBelow;
+    /// <summary>
+    /// Whether a part is a compact one, by its mass. A part that mounts on a face is a fraction of a block, so it is
+    /// weighed as the number of them that fill one cell's face: four cold gas thrusters weigh what a block does.
+    /// </summary>
+    public bool Compact(BlockType type)
+    {
+        if (type.Mount is not { } spec)
+            return type.Mass < CompactMassBelow;
+        var across = FaceMounts.PerCell / spec.Side;
+        return type.Mass * across * across < CompactMassBelow;
+    }
 
     /// <summary>Whether a part belongs on a tab.</summary>
     public bool Lists(PartCategory category, BlockType type)

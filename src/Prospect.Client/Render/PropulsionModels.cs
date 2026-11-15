@@ -294,6 +294,23 @@ internal static class PropulsionModels
     }
 
     /// <summary>
+    /// Adds the model of a part mounted on a block face (<see cref="HullDesign.Mounts"/>): the same model a block of
+    /// its type gets, built in the thin box the mount fills and pointing out of its face. Its back is the face it sits
+    /// on, so it is left open. Its nozzles name the block it sits on, since a hull has a mount exactly while it has
+    /// that block. Returns false, adding nothing, for a part with no model in <paramref name="look"/>.
+    /// </summary>
+    public static bool AddMount(HullDesign design, int mount, PropulsionLook look, List<MeshVertex> vertices, List<uint> indices, List<ThrustNozzle>? nozzles)
+    {
+        var part = design.Mounts[mount];
+        var model = ModelOf(part.Type, BlockShape.Box, look);
+        if (model is null)
+            return false;
+        var box = new PartBox(design.MountOffsets[mount], design.MountHalfExtents[mount], part.Face, design.BlockSize > 0 ? design.BlockSize : 1f);
+        Build(model, box, part.Type.Fuel, part.Parent, false, vertices, indices, nozzles);
+        return true;
+    }
+
+    /// <summary>
     /// Adds the model of one part filling <paramref name="box"/> to the triangle lists, and its nozzles, numbered on
     /// from what <paramref name="nozzles"/> holds, when given. A pure function of the box, the look and the cell size.
     /// </summary>

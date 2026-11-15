@@ -1155,6 +1155,19 @@ internal sealed class WorldView
                     && _scene.AddTriangles(frameIndex, model, MeshTransform(position + Vector3.Transform(block, orientation), orientation, Vector3.One, design.Color, material, stretch)))
                     continue;
                 Add(ref candidateCount, _cubeMesh + (int)design.Shapes[b], position + Vector3.Transform(block, orientation), orientation, design.BlockHalfExtents[b] * 2f, design.Color, material, stretch);
+
+                // What is mounted on a block it still has, each as its model, or the small box it fills until that is built.
+                design.MountsOf(b, out var firstMount, out var endMount);
+                for (var m = firstMount; m < endMount && candidateCount < _candidates.Length; m++)
+                {
+                    var mount = design.MountOffsets[m];
+                    mount.Z *= stretch;
+                    var mountAt = position + Vector3.Transform(mount, orientation);
+                    if (_partModels.TryGet(design.Mounts[m].Type, BlockShape.Box, design.MountHalfExtents[m], design.Mounts[m].Face, design.BlockSize, out var mountModel)
+                        && _scene.AddTriangles(frameIndex, mountModel, MeshTransform(mountAt, orientation, Vector3.One, design.Color, material, stretch)))
+                        continue;
+                    Add(ref candidateCount, _cubeMesh, mountAt, orientation, design.MountHalfExtents[m] * 2f, design.Color, material, stretch);
+                }
             }
         }
 
@@ -3363,32 +3376,63 @@ internal sealed class WorldView
     private bool _captureGhostTurned;
 
     /// <summary>
-    /// For a capture, whose pointer is muted (<c>--open edit-turn</c>): from now on the editor holds the ghost of a
-    /// cold gas thruster on top of the ship's thruster that faces right, turned a quarter about y so that it faces
-    /// right too, as the pointer and <c>R</c> would leave it.
+    /// For a capture, whose pointer is muted (<c>--open edit-turn</c>): from now on the editor holds the ghost of an
+    /// engine on top of the ship's core, turned a quarter about y so that it faces right, as the pointer and
+    /// <c>R</c> would leave it. With <paramref name="mount"/> (<c>--open edit-mount</c>) it holds the ghost of a
+    /// cold gas thruster mounted on that face instead.
     /// </summary>
-    internal void HoldGhostForCapture() => _captureGhost = true;
+    internal void HoldGhostForCapture(bool mount = false)
+    {
+        _captureGhost = true;
+        _captureMount = mount;
+    }
+
+    private bool _captureMount;
 
     private void HoldCaptureGhost()
     {
         if (!Editor.CanEdit || Editor.Draft is not { } draft || Editor.Content is not { } content)
             return;
         var types = content.Blocks.Types;
+        var boxes = draft.Boxes;
+        if (_captureMount)
+        {
+            // The ghost of a cold gas thruster on the first top face that has room for it, off the middle of the
+            // face, as the pointer would leave it there.
+            for (var i = 0; !_captureGhostTurned && i < types.Count; i++)
+            {
+                if (types[i].Mount is null || types[i].Fuel != FuelKind.Nitrogen || EditorTuningCompact(types[i]))
+                    continue;
+                Editor.ChoosePart(i);
+                _captureGhostTurned = true;
+                break;
+            }
+
+            for (var i = 0; i < boxes.Length; i++)
+            {
+                var top = EditorGeometry.Middle(boxes[i]) + new Vector3(0.22f, boxes[i].Size.Y * 0.5f, 0.2f);
+                Editor.SetHover(new DraftHit(i, 2, boxes[i].At, 0f, top));
+                if (Editor.HasMountGhost && Editor.GhostCheck == DraftEdit.Done)
+                    break;
+            }
+
+            return;
+        }
+
         for (var i = 0; !_captureGhostTurned && i < types.Count; i++)
         {
-            if (types[i].Fuel != FuelKind.Nitrogen || EditorTuningCompact(types[i]))
+            if (types[i].Fuel != FuelKind.Bipropellant || types[i].Mount is not null || EditorTuningCompact(types[i]))
                 continue;
             Editor.ChoosePart(i);
             break;
         }
 
-        var boxes = draft.Boxes;
+        // On the first top face it fits on.
         for (var i = 0; i < boxes.Length; i++)
         {
-            if (boxes[i].Type.Thrust <= 0 || boxes[i].Facing != BlockFacing.Right)
-                continue;
             Editor.SetHover(new DraftHit(i, 2, boxes[i].At, 0f));
-            break;
+            if (Editor.HasGhost && Editor.GhostCheck == DraftEdit.Done)
+                break;
         }
 
         if (_captureGhostTurned || !Editor.HasGhost)
@@ -3522,7 +3566,7 @@ internal sealed class WorldView
             PointerInGrid(out var origin, out var direction);
             // A moved group is laid against what is behind it, never against itself.
             var skip = Editor.Carry == EditorCarry.Move ? Editor.SelectionMarks : default;
-            var found = EditorGeometry.Pick(draft.Boxes, origin, direction, skip, out var hit);
+            var found = EditorGeometry.Pick(draft.Boxes, draft.Mounts, origin, direction, skip, out var hit);
             // A ghost held where sizing or a turn left it stays while the pointer is still or on the ghost, so a click
             // there places it as it is; once the pointer leaves it for the ship, placing follows the pointer again.
             if (Editor.GhostPinned && !carrying && Editor.HasGhost
@@ -4172,16 +4216,55 @@ internal sealed class WorldView
             Add(ref count, _cubeMesh + (int)box.Shape, at, orientation, size, color, material);
         }
 
+        // What is mounted on the blocks: each part as its model in the thin box it fills on its face, its plain box
+        // only until the model is built.
+        var mounts = draft.Mounts;
+        for (var i = 0; i < mounts.Length && count < _candidates.Length; i++)
+        {
+            ref readonly var mount = ref mounts[i];
+            if ((uint)mount.Parent >= (uint)boxes.Length)
+                continue;
+            EditorGeometry.MountBounds(boxes[mount.Parent], mount, out var low, out var high);
+            var middle = EditorGeometry.ToHull((low + high) * 0.5f, source.Pivot, source.BlockSize);
+            var color = EditorGeometry.BlockColor(source.Color, mount.Type);
+            if (Editor.IsMissing(mount.Parent))
+                color = Vector3.Lerp(color, new Vector3(0.45f, 0.08f, 0.06f), 0.7f);
+            if (Editor.IsMountSelected(i) || Editor.IsSelected(mount.Parent))
+                color = Vector3.Lerp(color, new Vector3(0.6f, 0.8f, 1f), 0.4f);
+            var at = hull + Vector3.Transform(middle, orientation);
+            var size = (high - low) * source.BlockSize;
+            if (_partModels.TryGet(mount.Type, BlockShape.Box, size * 0.5f, mount.Face, source.BlockSize, out var model)
+                && _scene.AddTriangles(frameIndex, model, MeshTransform(at, orientation, Vector3.One, color, material, 1f)))
+                continue;
+            Add(ref count, _cubeMesh, at, orientation, size, color, material);
+        }
+
         AddGhostModel(frameIndex, source, hull, orientation, material);
     }
 
     /// <summary>
     /// The ghost of a thrust part about to be placed, as its model in the colour of the hull's part, a little toward
-    /// the outline's good or bad tone; turned and moved with the ghost while it glides into a turn. Other parts keep
-    /// their outline alone.
+    /// the outline's good or bad tone; turned and moved with the ghost while it glides into a turn. A part that
+    /// mounts shows on the face under the pointer. Other parts keep their outline alone.
     /// </summary>
     private void AddGhostModel(int frameIndex, HullDesign source, Vector3 hull, Quaternion orientation, float material)
     {
+        var tone = Editor.GhostCheck == DraftEdit.Done ? new Vector3(0.35f, 0.85f, 0.45f) : new Vector3(0.9f, 0.3f, 0.25f);
+        if (Editor.HasMountGhost && Editor.Draft is { } draft && (uint)Editor.GhostMount.Parent < (uint)draft.Boxes.Length)
+        {
+            // A part that mounts shows its model on the face under the pointer, pointing out of it.
+            var mount = Editor.GhostMount;
+            EditorGeometry.MountBounds(draft.Boxes[mount.Parent], mount, out var low, out var high);
+            var extent = (high - low) * source.BlockSize;
+            if (_partModels.TryGet(mount.Type, BlockShape.Box, extent * 0.5f, mount.Face, source.BlockSize, out var mounted))
+            {
+                var place = hull + Vector3.Transform(EditorGeometry.ToHull((low + high) * 0.5f, source.Pivot, source.BlockSize), orientation);
+                var shade = Vector3.Lerp(EditorGeometry.BlockColor(source.Color, mount.Type), tone, 0.35f);
+                _scene.AddTriangles(frameIndex, mounted, MeshTransform(place, orientation, Vector3.One, shade, material, 1f));
+            }
+            return;
+        }
+
         if (!Editor.HasGhost || Editor.Content is not { } content || (uint)Editor.Part >= (uint)content.Blocks.Types.Count)
             return;
         var type = content.Blocks.Types[Editor.Part];
@@ -4193,7 +4276,6 @@ internal sealed class WorldView
         var at = Editor.GhostAt;
         var middle = new Vector3(at.X - 0.5f, at.Y - 0.5f, at.Z - 0.5f) + new Vector3(size.X, size.Y, size.Z) * 0.5f + shift;
         var position = hull + Vector3.Transform(EditorGeometry.ToHull(middle, source.Pivot, source.BlockSize), orientation);
-        var tone = Editor.GhostCheck == DraftEdit.Done ? new Vector3(0.35f, 0.85f, 0.45f) : new Vector3(0.9f, 0.3f, 0.25f);
         var color = Vector3.Lerp(EditorGeometry.BlockColor(source.Color, type), tone, 0.35f);
         _scene.AddTriangles(frameIndex, model, MeshTransform(position, Quaternion.Concatenate(turn, orientation), Vector3.One, color, material, 1f));
     }
