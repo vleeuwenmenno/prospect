@@ -334,8 +334,18 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// <summary>The whole-cell size the next part is placed at.</summary>
     public GridSize PartSize { get; private set; } = new(1, 1, 1);
 
-    /// <summary>The shape the next part is placed in: a box, or a wedge filling half of <see cref="PartSize"/>.</summary>
-    public BlockShape PartShape { get; private set; } = BlockShape.Box;
+    /// <summary>
+    /// The shape the next part is placed in: a box, or a wedge filling half of <see cref="PartSize"/>. Always a box
+    /// for a part that is never slanted (<see cref="PartBoxOnly"/>); the wedge chosen before comes back for the next
+    /// part that may be one.
+    /// </summary>
+    public BlockShape PartShape => PartBoxOnly ? BlockShape.Box : _partShape;
+
+    // The shape chosen for parts that may be slanted; a box-only part neither shows nor turns it.
+    private BlockShape _partShape = BlockShape.Box;
+
+    /// <summary>True when the part to place is never slanted (<see cref="BlockType.BoxOnly"/>): its wedge button is off.</summary>
+    public bool PartBoxOnly => Content is { } content && (uint)Part < (uint)content.Blocks.Types.Count && !BoxDesign.ShapeAllowed(content.Blocks.Types[Part], BlockShape.WedgeXPlusPlus);
 
     /// <summary>
     /// The way the next part faces. It turns with the part (<see cref="RotatePart"/>): a thrust part pushes the ship
@@ -1310,9 +1320,12 @@ internal sealed class ShipEditor(JobSystem jobs)
     {
         if (!BlockShapes.IsValid(shape))
             return;
+        // A part that is never slanted keeps its box: the wedge button is off for it, and nothing else asks.
+        if (shape != BlockShape.Box && PartBoxOnly)
+            return;
         CancelPartGestures();
         GhostPinned = false;
-        PartShape = shape;
+        _partShape = shape;
         UpdateGhost();
     }
 
@@ -1327,7 +1340,9 @@ internal sealed class ShipEditor(JobSystem jobs)
         var u = (axis + 1) % 3;
         var v = (axis + 2) % 3;
         PartSize = EditorGeometry.With(EditorGeometry.With(PartSize, u, EditorGeometry.Of(PartSize, v)), v, EditorGeometry.Of(PartSize, u));
-        PartShape = BlockShapes.Rotate(PartShape, axis);
+        // A box turns into a box, so a box-only part can never be turned into a slant.
+        if (!PartBoxOnly)
+            _partShape = BlockShapes.Rotate(_partShape, axis);
         PartFacing = Facings.Rotate(PartFacing, axis);
         UpdateGhost();
     }
@@ -1353,7 +1368,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         if (RotatingPart || SizingPart || !CanEdit || !Placing || Carry != EditorCarry.None || !HasGhost || PartIsMount)
             return false;
         _rotateSize = PartSize;
-        _rotateShape = PartShape;
+        _rotateShape = _partShape;
         _rotateFacing = PartFacing;
         _rotateAt = GhostAt;
         RotatingPart = true;
@@ -1399,7 +1414,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         RotatingPart = false;
         RotationCancels++;
         PartSize = _rotateSize;
-        PartShape = _rotateShape;
+        _partShape = _rotateShape;
         PartFacing = _rotateFacing;
         // A held ghost goes back to where it was held, not to where the turn re-laid it.
         if (GhostPinned)
@@ -1656,7 +1671,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         }
         else
             GhostAt = Draft.Snap(Hover.Block, Hover.Side, PartSize, Hover.Cell);
-        GhostCheck = Draft.CanAdd(GhostAt, PartSize, Content!.Blocks.Types[Part]);
+        GhostCheck = Draft.CanAdd(GhostAt, PartSize, Content!.Blocks.Types[Part], PartShape);
         HasGhost = true;
         if (Mirror != MirrorAxes.None)
         {

@@ -1218,6 +1218,17 @@ internal sealed class App : IDisposable
                     World.Editor.SetMirror(MirrorAxes.X | MirrorAxes.Z);
                 _screens.SelectEditorTab("Move");
             }
+            else if (view is "edit-tank" or "edit-tank-long" or "edit-tank-slab" or "edit-scanner" && snapshot is { OwnHull: >= 0 })
+            {
+                // The editor on the Move tab holding the ghost of a bipropellant tank (1, 2 by 1 by 1, or a 2 by 1 by 2
+                // slab) or of an asteroid scanner on the ship, with the wedge chosen first: the part stays a box and the
+                // Wedge button is off.
+                World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
+                World.Editor.SetPartShape(BlockShape.WedgeXPlusPlus);
+                World.HoldPartGhostForCapture(view == "edit-scanner" ? "asteroidScanner" : "bipropellantTank",
+                    view switch { "edit-tank-long" => new GridSize(2, 1, 1), "edit-tank-slab" => new GridSize(2, 1, 2), _ => new GridSize(1, 1, 1) });
+                _screens.SelectEditorTab(view == "edit-scanner" ? "Module" : "Move");
+            }
             else if (view is "edit-box-select" or "edit-select-all" && snapshot is { OwnHull: >= 0 })
             {
                 // The editor in the select tool, with a scripted box drag over the middle of the ship (the rectangle

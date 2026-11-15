@@ -361,6 +361,7 @@ public sealed class BoxDesign
             if (!BlockShapes.IsValid(b.Shape)) throw new InvalidDataException($"{source}: block {i}: Unknown block shape.");
             if (!Facings.IsValid(b.Facing)) throw new InvalidDataException($"{source}: block {i}: Unknown block facing.");
             if (b.Type.Mount is not null) throw new InvalidDataException($"{source}: block {i}: a {b.Type.Name} mounts on a face and cannot be a block");
+            if (!ShapeAllowed(b.Type, b.Shape)) throw new InvalidDataException($"{source}: block {i}: a {b.Type.Name} is never slanted: it is a box only");
             var side = MaxSide(b.Type, limits);
             foreach (var (at, size) in new[] { (b.At.X, b.Size.X), (b.At.Y, b.Size.Y), (b.At.Z, b.Size.Z) })
             {
@@ -440,6 +441,13 @@ public sealed class BoxDesign
         var mid = MountMiddle(mount);
         return new Vector3((float)((mid.X - Center.X) * BlockSize), (float)((mid.Y - Center.Y) * BlockSize), (float)((mid.Z - Center.Z) * BlockSize));
     }
+
+    /// <summary>
+    /// Whether a block of <paramref name="type"/> may have <paramref name="shape"/>: every type may be a box, and only a
+    /// type that is not <see cref="BlockType.BoxOnly"/> a wedge. The one rule, asked by design files, received
+    /// designs (both through this constructor) and the editor's draft.
+    /// </summary>
+    public static bool ShapeAllowed(BlockType? type, BlockShape shape) => shape == BlockShape.Box || type is not { BoxOnly: true };
 
     /// <summary>The most cells a block of a type may measure along a side: the type's own limit, or the content's.</summary>
     public static int MaxSide(BlockType? type, DesignLimits limits) =>

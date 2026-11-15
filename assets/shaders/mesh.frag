@@ -8,6 +8,7 @@ layout(location = 2) in vec3 localPosition;
 layout(location = 3) in vec4 color;
 layout(location = 4) flat in int cut;
 layout(location = 5) in float metal;
+layout(location = 6) flat in vec3 paint;
 layout(location = 0) out vec4 outColor;
 
 // On for the hull pipeline: a hull going through a jump's opening is cut away where it is past it, before anything
@@ -97,6 +98,12 @@ void main()
         float mottling = noise(localPosition * 9.0) * 0.6 + noise(localPosition * 31.0) * 0.4;
         albedo *= 0.55 + 0.75 * mottling;
     }
+    else if (paint.r >= 0.0)
+    {
+        // A tank's painted vessel: its own colour, a touch of the instance's so the editor's tones still show, no
+        // panel lines.
+        albedo = mix(paint, albedo, 0.12);
+    }
     else if (metal >= 0.0)
     {
         // Bare metal of a nozzle or its collar: grey with a touch of the hull's colour, no panel lines.
@@ -117,6 +124,7 @@ void main()
     // Bare metal shines with its shade: a flat-shaded facet lights up whole, so a dark throat or nozzle lining must
     // not flash white when it lines up with the star.
     float specular = metal >= 0.0 ? pow(max(dot(n, halfway), 0.0), 40.0) * 0.3 * (0.15 + metal)
+        : paint.r >= 0.0 ? pow(max(dot(n, halfway), 0.0), 32.0) * 0.2
         : pow(max(dot(n, halfway), 0.0), 48.0) * (color.a < 0.5 ? 0.03 : 0.35);
     float rim = pow(1.0 - max(dot(n, view), 0.0), 3.0);
 

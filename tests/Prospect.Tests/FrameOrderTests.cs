@@ -7022,6 +7022,51 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     [Fact]
+    public void ATankOrSensorIsPlacedAsABoxWhateverShapeWasChosenAndTurnsAsABox()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var types = editor.Content!.Blocks.Types;
+        int Index(string id)
+        {
+            for (var i = 0; i < types.Count; i++)
+                if (types[i].Id == id)
+                    return i;
+            throw new InvalidOperationException(id);
+        }
+
+        editor.ChoosePart(Index("hull"));
+        editor.SetPartShape(BlockShape.WedgeXPlusPlus);
+        Assert.False(editor.PartBoxOnly);
+        Assert.Equal(BlockShape.WedgeXPlusPlus, editor.PartShape);
+
+        foreach (var id in new[] { "nitrogenTank", "sensor", "asteroidScanner" })
+        {
+            // The wedge chosen for plating does not carry over, the wedge button is refused, and a turn keeps a box.
+            editor.ChoosePart(Index(id));
+            Assert.True(editor.PartBoxOnly, id);
+            Assert.Equal(BlockShape.Box, editor.PartShape);
+            editor.SetPartShape(BlockShape.WedgeYMinusPlus);
+            Assert.Equal(BlockShape.Box, editor.PartShape);
+            for (var axis = 0; axis < 3; axis++)
+            {
+                editor.RotatePart(axis);
+                Assert.Equal(BlockShape.Box, editor.PartShape);
+            }
+            EditorFrame(() => Move(HullOnScreen()));
+            EditorFrame();
+            Assert.True(editor.HasGhost);
+            Assert.NotEqual(DraftEdit.BoxOnly, editor.GhostCheck);
+        }
+
+        // Back on plating, the wedge chosen before is there again.
+        editor.ChoosePart(Index("hull"));
+        Assert.Equal(BlockShape.WedgeXPlusPlus, editor.PartShape);
+    }
+
+    [Fact]
     public void AGhostSizedOnItsFaceStaysForTheClickWhileThePointerIsOnItAndAWedgeStaysAWedge()
     {
         OpenEditor();

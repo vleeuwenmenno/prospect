@@ -6,7 +6,7 @@ using Prospect.Game.World;
 namespace Prospect.Client.Render;
 
 /// <summary>
-/// Models of single thrust parts for what no design mesh holds: the editor's draft and its placement ghost, and far
+/// Models of single thrust parts and tanks for what no design mesh holds: the editor's draft and its placement ghost, and far
 /// hulls that have lost blocks and are drawn block by block. Each model is a triangle list (no indices) centred on its
 /// box, keyed by part type, half extents, facing and cell size, built on a worker by <see cref="PropulsionModels"/>
 /// and drawn through <see cref="SceneRenderer.AddTriangles"/>. A fixed table: looking a model up takes no memory, and a
@@ -70,7 +70,7 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
     public bool TryGet(BlockType type, BlockShape shape, Vector3 half, BlockFacing facing, float cell, out ReadOnlySpan<MeshVertex> vertices)
     {
         vertices = default;
-        if (PropulsionModels.ModelOf(type, shape, look) is null)
+        if (!PropulsionModels.HasModel(type, shape, look))
             return false;
         var free = -1;
         var oldest = long.MaxValue;
@@ -135,7 +135,7 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
                 var type = Types[i]!;
                 vertices.Clear();
                 indices.Clear();
-                PropulsionModels.Build(PropulsionModels.ModelOf(type, BlockShape.Box, look)!, new PartBox(Vector3.Zero, Halves[i], Facings[i], Cells[i]), type.Fuel, 0, true, vertices, indices, null);
+                PropulsionModels.BuildPart(type, new PartBox(Vector3.Zero, Halves[i], Facings[i], Cells[i]), look, vertices, indices);
                 var soup = new MeshVertex[indices.Count];
                 for (var k = 0; k < soup.Length; k++)
                     soup[k] = vertices[(int)indices[k]];

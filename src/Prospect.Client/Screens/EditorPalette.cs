@@ -84,7 +84,8 @@ internal sealed class EditorPalette
             _figures = new PartFigures[types.Count];
         var cells = (long)size.X * size.Y * size.Z;
         for (var i = 0; i < types.Count; i++)
-            _figures[i] = PartFigures.Of(types[i], cells, content.Rules, shape);
+            // A part that is never slanted is placed as a box whatever shape is chosen, so its card says so.
+            _figures[i] = PartFigures.Of(types[i], cells, content.Rules, BoxDesign.ShapeAllowed(types[i], shape) ? shape : BlockShape.Box);
         _figuresContent = content;
         _figuresSize = size;
         _figuresHalf = half;

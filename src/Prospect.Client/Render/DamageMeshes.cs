@@ -60,7 +60,7 @@ internal sealed class DamageMesh
                 if (original.Count > capacity) return null;
             }
 
-            // A thrust part is its model, as on an undamaged hull; dents on it are not drawn.
+            // A thrust part or a tank is its model, as on an undamaged hull; dents on it are not drawn.
             modelVertices.Clear();
             modelIndices.Clear();
             if (PropulsionModels.Add(design, b, look, modelVertices, modelIndices, null))

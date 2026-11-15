@@ -657,6 +657,8 @@ internal sealed partial class ScreenHost
         {
             ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, Kit.F($"{size.X} x {size.Y} x {size.Z} CELLS"), width);
             ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, ShapeText(editor.PartShape), width);
+            if (editor.PartBoxOnly)
+                ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextMute, "NEVER SLANTED: NO WEDGE"u8, width);
             if ((uint)editor.Part < (uint)content.Blocks.Types.Count && content.Blocks.Types[editor.Part].Thrust > 0)
                 ClippedLine(_ui.Mono, Theme.FontCaption, ExhaustOrange, FacingText(editor.PartFacing), width);
         }
@@ -666,7 +668,7 @@ internal sealed partial class ScreenHost
         if (EditorPalette.HandBack(EditorButton("##shapebox"u8, "Box"u8, new float2(pair, Kit.Px(26)), editor.CanEdit, false, editor.PartShape == BlockShape.Box)))
             editor.SetPartShape(BlockShape.Box);
         ImGui.SameLine(0, gap);
-        if (EditorPalette.HandBack(EditorButton("##shapewedge"u8, "Wedge"u8, new float2(pair, Kit.Px(26)), editor.CanEdit, false, editor.PartShape != BlockShape.Box)))
+        if (EditorPalette.HandBack(EditorButton("##shapewedge"u8, "Wedge"u8, new float2(pair, Kit.Px(26)), editor.CanEdit && !editor.PartBoxOnly, false, editor.PartShape != BlockShape.Box)))
             editor.SetPartShape(editor.PartShape == BlockShape.Box ? BlockShape.WedgeXPlusPlus : editor.PartShape);
         DrawMirrorRow(editor, width, gap);
         EndEditorPanel();
@@ -1539,6 +1541,7 @@ internal sealed partial class ScreenHost
         DraftEdit.TooManyMounts => "The ship has as many mounted parts as a design may have."u8,
         DraftEdit.WrongKind => "That part mounts on a face; it is not a block."u8,
         DraftEdit.TooManyTanks => "The ship has as many tanks as a design may have. Make a tank larger instead."u8,
+        DraftEdit.BoxOnly => "That part is never slanted: tanks, sensors and scanners are boxes only."u8,
         _ => "Nothing changed."u8,
     };
 

@@ -28,7 +28,10 @@ thruster kinds have low-poly models of their own: an engine fills its block flus
 opens a wide, soft, blue-violet vacuum plume, a hot thruster a small one with an orange core, a cold gas pod a
 faint, streaked cone of expanding gas lit by the star that bursts as its valve opens and clears when it closes, and an
 ion part (a flat grid in a short ring) a faint, steady blue-violet glow with a thin straight beam; boost makes plumes longer and
-brighter without burning out to white, for every hull in view. The pilot console shows each fuel's amount and flow.
+brighter without burning out to white, for every hull in view. Tanks have low-poly models too: an open frame of beams
+round painted round vessels (a sphere in a cube, a capsule in a longer block, capsules side by side in a slab; never an
+oval), held by clamp bands and struts, with a pipe stub toward the way the tank faces. Nitrogen is pale with a blue stripe,
+hydrazine yellow with a dark one, bipropellant orange with a white one. The pilot console shows each fuel's amount and flow.
 With `Shift` held, each fuel's cell of the fuel row has its own tooltip (stored, burn, minutes left, its tanks and how
 many are lost), and a click on it calls that fuel's tanks out on the hull: each tank block outlined in the fuel's
 colour, a label with what it holds (`BIPROP 340 / 1000 KG`, a lost one `LOST` in red) and a thin line to it. More than
@@ -214,6 +217,8 @@ are never blocked. The editor works in space, around your ship:
   block turns with its own Turn X/Y/Z, keeping
   its low corner; a turn that would overlap is refused. Copy, paste, move and undo keep each block's shape.
   Merge joins boxes only. A part placed on a slope snaps against the wedge's box, on the larger box side.
+  Tanks, sensors and scanners are never slanted: with one chosen the Wedge button is off ("NEVER SLANTED: NO WEDGE"),
+  it is placed and turned as a box, and a design file or a received design with a slanted one is refused.
 
 - **Mirror.** Three checkboxes under the part list, X, Y and Z, in any mix (all three: up to eight copies). The planes
   pass through the centre of the draft's core, drawn faintly while on. Placing a block or a mounted part, and

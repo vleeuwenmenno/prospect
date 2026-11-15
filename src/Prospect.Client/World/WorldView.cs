@@ -3415,6 +3415,20 @@ internal sealed class WorldView
         _captureIon = ion;
     }
 
+    /// <summary>
+    /// For a capture (<c>--open edit-tank</c> and the like): from now on the editor holds the ghost of a part of type
+    /// <paramref name="part"/> at <paramref name="size"/> cells on the first top face it fits, unturned.
+    /// </summary>
+    internal void HoldPartGhostForCapture(string part, GridSize size)
+    {
+        _captureGhost = true;
+        _capturePart = part;
+        _capturePartSize = size;
+    }
+
+    private string? _capturePart;
+    private GridSize _capturePartSize;
+
     private bool _captureMount;
     private bool _captureIon;
 
@@ -3505,7 +3519,21 @@ internal sealed class WorldView
             return;
         }
 
-        for (var i = 0; !_captureGhostTurned && i < types.Count; i++)
+        if (_capturePart is not null)
+        {
+            for (var i = 0; !_captureGhostTurned && i < types.Count; i++)
+            {
+                if (types[i].Id != _capturePart)
+                    continue;
+                Editor.ChoosePart(i);
+                Editor.SetPartSize(0, _capturePartSize.X);
+                Editor.SetPartSize(1, _capturePartSize.Y);
+                Editor.SetPartSize(2, _capturePartSize.Z);
+                _captureGhostTurned = true;
+            }
+        }
+
+        for (var i = 0; _capturePart is null && !_captureGhostTurned && i < types.Count; i++)
         {
             if ((_captureIon ? !types[i].Ion : types[i].Fuel != FuelKind.Bipropellant) || types[i].Thrust <= 0f || types[i].Mount is not null || EditorTuningCompact(types[i]))
                 continue;
@@ -4361,7 +4389,7 @@ internal sealed class WorldView
             if (Editor.IsSelected(i))
                 color = Vector3.Lerp(color, new Vector3(0.6f, 0.8f, 1f), 0.4f);
             var at = hull + Vector3.Transform(middle, orientation);
-            // A thrust part shows its model, as the ship will; its plain block only until the model is built.
+            // A thrust part or a tank shows its model, as the ship will; its plain block only until the model is built.
             if (_partModels.TryGet(box.Type, box.Shape, size * 0.5f, box.Facing, source.BlockSize, out var model)
                 && _scene.AddTriangles(frameIndex, model, MeshTransform(at, orientation, Vector3.One, color, material, 1f)))
                 continue;

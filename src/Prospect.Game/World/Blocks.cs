@@ -59,6 +59,12 @@ public sealed class BlockType
     /// </summary>
     public MountSpec? Mount { get; init; }
 
+    /// <summary>
+    /// True for a block that is always a box and never a wedge (<c>"boxOnly"</c> in <c>blocks.json</c>): tanks, whose
+    /// round vessels a slant would cut, and sensors and scanners. <see cref="BoxDesign.ShapeAllowed"/> is the one rule.
+    /// </summary>
+    public bool BoxOnly { get; init; }
+
     /// <summary>True for the block a hull cannot exist without; losing it destroys the hull.</summary>
     public bool Core { get; init; }
     public bool Sensor { get; init; }
@@ -313,6 +319,7 @@ public sealed class BlockCatalog
                 Mount = block.TryGetProperty("mount"u8, out var mount)
                     ? new MountSpec(mount.GetProperty("side"u8).GetInt32(), mount.GetProperty("depth"u8).GetInt32(), mount.GetProperty("legacyBlock"u8).GetString()!)
                     : null,
+                BoxOnly = block.TryGetProperty("boxOnly"u8, out var boxOnly) && boxOnly.GetBoolean(),
                 Sensor = block.TryGetProperty("sensor"u8, out var sensor) && sensor.GetBoolean(),
                 Charting = block.TryGetProperty("charting"u8, out var charting) && charting.GetBoolean(),
                 Core = block.TryGetProperty("core"u8, out var core) && core.GetBoolean(),
@@ -364,8 +371,8 @@ public sealed class BlockCatalog
             if (spec.Side is < 1 or > FaceMounts.MaxSide || spec.Depth is < 1 or > FaceMounts.MaxDepth)
                 throw new InvalidDataException($"{path}: {type.Id}: a mount's side is 1 to {FaceMounts.MaxSide} tenths of a cell and its depth 1 to {FaceMounts.MaxDepth}");
             if (!(type.Thrust > 0) || type.Core || type.Sensor || type.Charting || type.Ftl != FtlKind.None || type.Tank != FuelKind.None
-                || type.Module.Family != ModuleFamily.None || type.Crew != 0 || type.MaxSide != 0 || type.SizeRules.Count != 0)
-                throw new InvalidDataException($"{path}: {type.Id}: only a thrust part mounts on a face, and it has no size rules or maxSide");
+                || type.Module.Family != ModuleFamily.None || type.Crew != 0 || type.MaxSide != 0 || type.SizeRules.Count != 0 || type.BoxOnly)
+                throw new InvalidDataException($"{path}: {type.Id}: only a thrust part mounts on a face, and it has no size rules, maxSide or boxOnly");
             if (!types.TryGetValue(spec.LegacyBlock, out var legacy) || legacy.Mount is not null)
                 throw new InvalidDataException($"{path}: {type.Id}: legacyBlock must name a block type that is no mount");
         }
@@ -483,6 +490,7 @@ public sealed class HullDesign
         }
 
         ExteriorFaces = new byte[blocks.Length];
+        TouchedFaces = new byte[blocks.Length];
         Shapes = new BlockShape[blocks.Length];
         _fullSet = new ulong[BlockSet.WordCount(blocks.Length)];
         _coreSet = new ulong[_fullSet.Length];
@@ -537,14 +545,18 @@ public sealed class HullDesign
                 }
             }
             var faces = 0x3F;
+            var touched = 0;
             for (var side = 0; side < 6; side++)
             {
+                if (covered[side] > 0)
+                    touched |= 1 << side;
                 var u = (side / 2 + 1) % 3;
                 var v = (side / 2 + 2) % 3;
                 if (covered[side] >= (long)(hi[u] - lo[u]) * (long)(hi[v] - lo[v]))
                     faces &= ~(1 << side);
             }
             ExteriorFaces[i] = box.Shape == BlockShape.Box ? (byte)faces : (byte)0x3F;
+            TouchedFaces[i] = (byte)touched;
         }
 
         Sums = new BoxHullSums(boxes);
@@ -669,6 +681,13 @@ public sealed class HullDesign
     /// <c>MeshBuilder.Hull</c> walks them. Partial adjacency retains the whole face.
     /// </summary>
     public byte[] ExteriorFaces { get; }
+
+    /// <summary>
+    /// For each block, the faces an adjacent box touches over any area, bits as in <see cref="ExteriorFaces"/>. A part
+    /// drawn as an open frame (a tank) closes these, since a neighbour leaves out a face the part wholly covers.
+    /// Wedges are not counted: a wedge draws all its faces.
+    /// </summary>
+    public byte[] TouchedFaces { get; }
 
     /// <summary>The <see cref="BlockSet"/> of the blocks whose loss destroys the hull. Never changes.</summary>
     public ReadOnlySpan<ulong> CoreSet => _coreSet;

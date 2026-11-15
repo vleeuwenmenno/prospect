@@ -142,6 +142,87 @@ internal sealed class PodLook
         && (Bolts == 0 || 1f - BodyShare >= PlateChamfer);
 }
 
+/// <summary>
+/// How fuel tanks are drawn, from the <c>tanks</c> entry of <c>content/visuals/propulsion.json</c>
+/// (<see cref="PropulsionModels.BuildTank"/>): an open frame of square beams along the block's edges, and inside it
+/// round vessels held by clamp bands and struts, with a pipe stub on a cross brace toward the block's facing. Every
+/// length is a share of the block's smallest half side or of a vessel's radius, so one entry fits a tank of any size.
+/// </summary>
+internal sealed class TankLook
+{
+    /// <summary>Shades of the bare metal: the frame's beams, the bands and struts, the pipe and the backing plates.</summary>
+    public float FrameShade { get; init; }
+    public float StrutShade { get; init; }
+    public float PipeShade { get; init; }
+    public float PlateShade { get; init; }
+
+    /// <summary>A beam's thickness as a share of the block's smallest side.</summary>
+    public float Beam { get; init; }
+
+    /// <summary>A strut's thickness as a share of the block's smallest side; never thicker than a beam.</summary>
+    public float Strut { get; init; }
+
+    /// <summary>A vessel's radius as a share of the room inside the frame across it.</summary>
+    public float TankShare { get; init; }
+
+    /// <summary>Facets around a vessel, and latitude rings on each of its two hemispheres.</summary>
+    public int Sides { get; init; }
+    public int CapRings { get; init; }
+
+    /// <summary>A clamp band's width and how far it stands proud, both in vessel radii; the most room between bands, in radii.</summary>
+    public float BandWidth { get; init; }
+    public float BandLift { get; init; }
+    public float BandSpacing { get; init; }
+
+    /// <summary>Half the width of the painted stripe round a vessel's middle, in radii; 0 for none.</summary>
+    public float Stripe { get; init; }
+
+    /// <summary>The pipe stub's radius, in vessel radii.</summary>
+    public float Pipe { get; init; }
+
+    /// <summary>The most vessels side by side in one block (a slab); past it they grow apart, never wider.</summary>
+    public int MaxVessels { get; init; }
+
+    /// <summary>The paint of each fuel's vessels, keyed by the fuel's name in <c>blocks.json</c>. A fuel without one stays a plain block.</summary>
+    public Dictionary<string, TankFuelLook> Fuels { get; init; } = [];
+
+    // The looks by FuelKind, filled when the look loads, so a worker never searches the dictionary.
+    private readonly TankFuelLook?[] _byFuel = new TankFuelLook?[Prospect.Game.World.Fuels.Count + 1];
+
+    /// <summary>The look of tanks of <paramref name="fuel"/>, or null when it has none.</summary>
+    public TankFuelLook? Of(FuelKind fuel) => (uint)fuel < (uint)_byFuel.Length ? _byFuel[(int)fuel] : null;
+
+    internal void Check(string path)
+    {
+        static bool Shade(float v) => v is >= 0 and < 1;
+        if (!Shade(FrameShade) || !Shade(StrutShade) || !Shade(PipeShade) || !Shade(PlateShade)
+            || !(Beam is > 0 and <= 0.2f) || !(Strut > 0 && Strut <= Beam) || !(TankShare is >= 0.5f and <= 0.95f)
+            || Sides is < 6 or > 24 || CapRings is < 1 or > 6 || !(BandWidth is >= 0 and <= 0.5f) || !(BandLift is >= 0 and <= 0.2f)
+            || !(BandSpacing is >= 1 and <= 20) || !(Stripe is >= 0 and <= 1) || !(Pipe is > 0 and <= 0.5f)
+            || MaxVessels is < 1 or > PropulsionModels.MaxTankVessels)
+            throw new InvalidDataException($"{path}: tanks are out of range");
+        foreach (var (name, fuel) in Fuels)
+        {
+            fuel.Check(path, name);
+            _byFuel[(int)Prospect.Game.World.Fuels.Parse(name, path + ": tanks")] = fuel;
+        }
+    }
+}
+
+/// <summary>The paint of one fuel's tank vessels: the body and the stripe round its middle, each RGB from 0 to 1.</summary>
+internal sealed class TankFuelLook
+{
+    public float[] Body { get; init; } = [];
+    public float[] Stripe { get; init; } = [];
+
+    internal void Check(string path, string id)
+    {
+        static bool Colour(float[] c) => c.Length == 3 && c[0] is >= 0 and <= 1 && c[1] is >= 0 and <= 1 && c[2] is >= 0 and <= 1;
+        if (!Colour(Body) || !Colour(Stripe))
+            throw new InvalidDataException($"{path}: tank paint {id} is out of range");
+    }
+}
+
 /// <summary>How one kind of plume looks and moves, from <c>content/visuals/propulsion.json</c>; lengths are in exit radii.</summary>
 internal sealed class PlumeLook
 {
@@ -239,6 +320,9 @@ internal sealed class PropulsionLook
     public Dictionary<string, PropulsionModelLook> Models { get; init; } = [];
     public Dictionary<string, PlumeLook> Plumes { get; init; } = [];
 
+    /// <summary>How fuel tanks are drawn; null draws every tank as its plain block.</summary>
+    public TankLook? Tanks { get; init; }
+
     /// <summary>How much longer and brighter boost makes a flame; the brightness still stays under the plume's cap times this.</summary>
     public float BoostLength { get; init; }
     public float BoostBrightness { get; init; }
@@ -274,6 +358,7 @@ internal sealed class PropulsionLook
                 throw new InvalidDataException($"{path}: model {id} names plume {model.Plume}, which is not there");
             model.PlumeSlot = look.PlumeIndex(model.Plume);
         }
+        look.Tanks?.Check(path);
         if (!(look.BoostLength is >= 1 and <= 4) || !(look.BoostBrightness is >= 1 and <= 4)
             || look.MaxPlumes is < 1 or > PlumeCapacity || !(look.MinPixels is >= 0 and <= 64))
             throw new InvalidDataException($"{path}: boost is 1 to 4, maxPlumes 1 to {PlumeCapacity}, minPixels 0 to 64");
@@ -322,7 +407,7 @@ internal readonly record struct PartBox(Vector3 Center, Vector3 Half, BlockFacin
 /// facing. Every facet is flat shaded: it has vertices of its own. Runs where hull meshes are built, on a worker;
 /// never in a frame.
 /// </summary>
-internal static class PropulsionModels
+internal static partial class PropulsionModels
 {
     /// <summary>
     /// The length a normal is given to carry a shade to the mesh shader: 1 is ordinary plating, 2 plus a shade below
@@ -340,13 +425,14 @@ internal static class PropulsionModels
 
     /// <summary>
     /// Adds the model of <paramref name="block"/> to the triangle lists, and its nozzles to <paramref name="nozzles"/>
-    /// when given. Returns false, adding nothing, for a block drawn as its plain shape.
+    /// when given: a thrust part's, or a tank's (<see cref="BuildTank"/>, which has no nozzles). Returns false,
+    /// adding nothing, for a block drawn as its plain shape.
     /// </summary>
     public static bool Add(HullDesign design, int block, PropulsionLook look, List<MeshVertex> vertices, List<uint> indices, List<ThrustNozzle>? nozzles)
     {
         var model = ModelOf(design, block, look);
         if (model is null)
-            return false;
+            return AddTank(design, block, look, vertices, indices);
         var facing = design.Boxes[block].Facing;
         // The back face is left out where a neighbour covers it.
         var back = (design.ExteriorFaces[block] & (1 << (byte)Facings.Opposite(facing))) != 0;

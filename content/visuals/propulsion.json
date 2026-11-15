@@ -261,6 +261,28 @@
       }
     }
   },
+  "tanks": {
+    "frameShade": 0.3,
+    "strutShade": 0.4,
+    "pipeShade": 0.46,
+    "plateShade": 0.2,
+    "beam": 0.08,
+    "strut": 0.04,
+    "tankShare": 0.8,
+    "sides": 12,
+    "capRings": 3,
+    "bandWidth": 0.12,
+    "bandLift": 0.05,
+    "bandSpacing": 2.5,
+    "stripe": 0.3,
+    "pipe": 0.16,
+    "maxVessels": 16,
+    "fuels": {
+      "nitrogen": { "body": [0.7, 0.74, 0.78], "stripe": [0.18, 0.36, 0.62] },
+      "hydrazine": { "body": [0.8, 0.68, 0.22], "stripe": [0.14, 0.14, 0.15] },
+      "bipropellant": { "body": [0.78, 0.34, 0.16], "stripe": [0.86, 0.84, 0.78] }
+    }
+  },
   "plumes": {
     "engine": {
       "kind": "flame",

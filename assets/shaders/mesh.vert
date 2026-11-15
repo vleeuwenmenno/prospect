@@ -19,6 +19,9 @@ layout(location = 4) flat out int cut;
 // Bare metal of a thrust part's model, from 0 (black) to 1, or -1 for ordinary plating: carried in the length of
 // the mesh's normal, 2 plus the shade (PropulsionModels.Tag). Every other mesh has unit normals.
 layout(location = 5) out float metal;
+// The paint of a tank's vessel, RGB from 0 to 1, or -1 for anything else: a normal's length of 3.5 and over carries
+// five bits a channel (PropulsionModels.Paint). Flat: a facet's three vertices carry the same paint.
+layout(location = 6) flat out vec3 paint;
 
 void main()
 {
@@ -33,7 +36,13 @@ void main()
     worldNormal = cross(cy, cz) * normal.x + cross(cz, cx) * normal.y + cross(cx, cy) * normal.z;
     localPosition = position;
     float tag = length(normal);
-    metal = tag > 1.5 ? tag - 2.0 : -1.0;
+    metal = tag > 1.5 && tag < 3.25 ? tag - 2.0 : -1.0;
+    paint = vec3(-1.0);
+    if (tag >= 3.25)
+    {
+        float code = floor((tag - 3.5) * 32768.0);
+        paint = vec3(floor(code / 1024.0), mod(floor(code / 32.0), 32.0), mod(code, 32.0)) / 31.0;
+    }
     int slot = int((tint.a + 0.5) * 0.25);
     cut = slot - 1;
     color = vec4(tint.rgb, tint.a - 4.0 * float(slot));

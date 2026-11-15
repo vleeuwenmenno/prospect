@@ -11,6 +11,8 @@
 - **Built:** fuel is kept tank by tank ("Fuel per tank" below): simulation, wire, save, and the fuel callout
   ("Decided: readout").
 - **Built:** electric ion parts that burn no fuel ("Decided: ion propulsion" below). The escape drone is all ion.
+- **Built:** tank models: round vessels in an open frame ("Decided: tank models" below).
+- **Built:** tanks, sensors and scanners are never slanted ("Decided: parts never slanted" below).
 - Protocol 53, save layout 8, design encoding 4, design file version 5, evaluator 13.
 
 ## Decided: parts
@@ -236,7 +238,8 @@ Built. Rules live in `FlightModel.Step`; `PropulsionTests`, `PowerFlowTests` and
 ## Decided: how the models and plumes are made
 
 - Every figure is in `content/visuals/propulsion.json`, keyed by block type id. A part without an entry stays a plain
-  block and shows no plume. A wedge-shaped part is always a plain block.
+  block and shows no plume. A wedge-shaped part is always a plain block. Tanks have their own entry ("Decided: tank
+  models").
 - **Models** (`PropulsionModels`): low poly, built on a worker, never in a frame.
   - A pure function of the part's box (`PartBox`), its facing and the cell size. A thin face mount works the same way.
   - Engines: a square mount block covers the whole mounting face and the box's sides, so neighbours meet it flush;
@@ -284,6 +287,75 @@ Built. Rules live in `FlightModel.Step`; `PropulsionTests`, `PowerFlowTests` and
     the ray's closest approach, never thinner than about a pixel, so it does not break into steps. Loading refuses
     an ion glow with sparks, shock nodes, flicker or burst. Its parts are their own group per facing (the fourth).
 - Check with `--thrust` and `--zoom` captures (`AGENTS.md`); `PropulsionVisualTests` holds the rules.
+
+## Decided: tank models
+
+Built. Code in `PropulsionModels.Tanks.cs`; `TankModelTests` holds the rules.
+
+### Shape
+
+- A tank is an open frame with round vessels inside. The rest of the block is see-through.
+- A vessel's radius comes from the block's **smallest** side. A vessel is never stretched into an oval.
+- How many, and which way (`TankLayout`):
+  - A cube (any N x N x N): one **sphere**. Its poles point along the tank's facing.
+  - A longer block (one long side, e.g. 2 x 1 x 1): one **capsule** along the long side. A cylinder with two
+    hemispherical end caps of the same radius.
+  - A slab (two long sides, e.g. 2 x 2 x 1): **parallel capsules** along the longest side, side by side across the
+    middle side.
+  - Capsules in a slab: the middle side divided by the smallest side, rounded, at most `maxVessels` (16). Past it they
+    spread apart, never wider.
+  - Ties between sides go to the lower axis (x before y before z).
+- Radius: `tankShare` (0.8) of the room inside the frame: the smaller of the strip's half width and the smallest half
+  side, less one beam. Ends keep the same clearance as the sides.
+
+### Parts of the model
+
+- **Frame:** twelve square beams on the block's edges, flush with its faces. `beam` is 0.08 of the smallest side.
+  - A slab adds beams between its vessels, top and bottom and across both ends, so each vessel has a frame.
+- **Vessels:** 12 facets round, 3 latitude rings a hemisphere. Flat shaded, painted.
+- **Clamp bands:** one round a sphere's equator. A capsule has one at each end of its cylinder and more between,
+  no more than `bandSpacing` (2.5) radii apart, at most 32.
+- **Struts:** four from every band, diagonally out to the frame's beams.
+- **Pipe stub:** toward the tank's facing, ending in a flange on an X brace over that face. In a slab facing across
+  its vessels, only the outer vessel on that side has one.
+- **Plates:** a face a neighbour touches gets a plate inside the frame, facing in. Why: a neighbour leaves out a face
+  the tank wholly covers, which would show as a hole. A face with mounted thrusters gets one facing both ways.
+
+### Look
+
+- Figures and paint are in the `tanks` entry of `content/visuals/propulsion.json`.
+- Paint per fuel, a body and a stripe round the vessel's middle:
+  - Nitrogen: pale grey-blue, blue stripe.
+  - Hydrazine: yellow, dark stripe.
+  - Bipropellant: orange, white stripe.
+- Frame and struts are bare metal like the engine housings.
+- Paint reaches the mesh shader in the length of the normal: 3.5 plus five bits a channel. Bare metal stays below 3.
+
+### What did not change
+
+- Collision, the shield shell and target picking stay block-based.
+- The design mesh, a damaged hull's mesh, the editor's parts and ghost, and far hulls drawn block by block all show
+  the model, through the same paths as thrust parts. The fuel callout's outlines are the block's box, as before.
+- A wedge-shaped tank cannot exist ("Decided: parts never slanted").
+
+## Decided: parts never slanted
+
+Built. One rule, `BoxDesign.ShapeAllowed`; `BoxOnlyTests` and `FrameOrderTests` hold it.
+
+- `"boxOnly": true` in `blocks.json` marks a type that is always a box, never a wedge.
+- Today: every tank (`bipropellantTank`, `hydrazineTank`, `nitrogenTank`, both micro tanks) and every sensor and
+  scanner (`sensor`, `charting`, `gasScanner`, `asteroidScanner`, `asteroidLocator`).
+- Why: a slant would cut a round tank; sensors and scanners are boxes of instruments.
+- A design file or a received design with a slanted one is refused, with the reason ("a Nitrogen tank is never
+  slanted"). No shipped design has one.
+- The editor:
+  - The Wedge button is off for such a part, with "NEVER SLANTED: NO WEDGE" under the shape.
+  - It is placed as a box whatever shape was chosen; the chosen wedge comes back for the next part that may be one.
+  - `R` turns it as a box: a box turned is a box.
+  - Paste, replace and mirror refuse a slanted one (`DraftEdit.BoxOnly`). Merge joins boxes only already.
+- Wire and saves: unchanged. The design encoding is the same; only what a server accepts changed. `blocks.json` is in
+  the content identity, so the flag changes the identity by itself: no protocol bump. No figure changes, so no
+  evaluator bump.
 
 ## Decided: second pass (look and mounting)
 

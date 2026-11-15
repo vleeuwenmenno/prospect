@@ -37,6 +37,8 @@ public enum DraftEdit : byte
     WrongKind,
     /// <summary>One more tank would exceed the content's count: a hull's fuel is kept tank by tank.</summary>
     TooManyTanks,
+    /// <summary>The part is never slanted (<see cref="BlockType.BoxOnly"/>): it is placed, pasted and turned as a box only.</summary>
+    BoxOnly,
 }
 
 /// <summary>
@@ -202,7 +204,7 @@ public sealed class BuildDraft
         var box = new DesignBox(at, size, type, shape, facing);
         if (!BlockShapes.IsValid(shape)) throw new ArgumentOutOfRangeException(nameof(shape));
         if (!Facings.IsValid(facing)) throw new ArgumentOutOfRangeException(nameof(facing));
-        var check = CanAdd(at, size, type);
+        var check = CanAdd(at, size, type, shape);
         if (check != DraftEdit.Done) return check;
         Do(Step.Block(_boxes.Count, default, box));
         Finish();
@@ -265,13 +267,15 @@ public sealed class BuildDraft
     /// for showing whether a placement fits before it is made. With a <paramref name="type"/>, also whether its
     /// drive is of the draft's kind and the size is one the type allows. One pass over the boxes; allocates nothing.
     /// </summary>
-    public DraftEdit CanAdd(GridSize at, GridSize size, BlockType? type = null)
+    public DraftEdit CanAdd(GridSize at, GridSize size, BlockType? type = null, BlockShape shape = BlockShape.Box)
     {
         // The same count bound GeometryAdmission.Count applies, checked here so the editor stops at it; Export runs the real one.
         if (!CountFits(_boxes.Count + 1L))
             return DraftEdit.TooManyBlocks;
         if (type?.Mount is not null)
             return DraftEdit.WrongKind;
+        if (!BoxDesign.ShapeAllowed(type, shape))
+            return DraftEdit.BoxOnly;
         if (type is not null && type.Tank != FuelKind.None && Tanks() >= _content.Blocks.Limits.MaxTanks)
             return DraftEdit.TooManyTanks;
         var check = Check(new DesignBox(at, size, type!), -1);
@@ -662,7 +666,7 @@ public sealed class BuildDraft
         {
             for (var i = 0; i < boxes.Length; i++)
             {
-                results[i] = CanAdd(boxes[i].At, boxes[i].Size, boxes[i].Type);
+                results[i] = CanAdd(boxes[i].At, boxes[i].Size, boxes[i].Type, boxes[i].Shape);
                 if (results[i] != DraftEdit.Done)
                     continue;
 
@@ -969,6 +973,7 @@ public sealed class BuildDraft
         {
             ref readonly var box = ref source[pick.IsEmpty ? i : pick[i]];
             if (!BlockShapes.IsValid(box.Shape)) throw new ArgumentOutOfRangeException(nameof(source));
+            if (!BoxDesign.ShapeAllowed(box.Type, box.Shape)) return DraftEdit.BoxOnly;
             for (var axis = 0; axis < 3; axis++)
             {
                 // In 64 bits: a move far enough to wrap around would otherwise look like one that fits.
@@ -1029,6 +1034,7 @@ public sealed class BuildDraft
         Span<int> high = stackalloc int[3];
         Span<int> unionLow = stackalloc int[3];
         Span<int> unionHigh = stackalloc int[3];
+        if (!BoxDesign.ShapeAllowed(box.Type, box.Shape)) return DraftEdit.BoxOnly;
         for (var axis = 0; axis < 3; axis++)
         {
             int at = Of(box.At, axis), size = Of(box.Size, axis);
