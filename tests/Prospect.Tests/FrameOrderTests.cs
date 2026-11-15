@@ -5946,6 +5946,71 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     [Fact]
+    public void MirrorShowsEveryCopyOfTheGhostPlacesAllOfThemAsOneUndoStepAndDeletesTheirMirrorsToo()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var draft = editor.Draft!;
+        var blocks = DraftBlocks;
+
+        // With no plane on, the ghost is alone.
+        Assert.True(PointWhere(e => e.HasGhost && e.GhostCheck == DraftEdit.Done, out _));
+        Assert.Empty(editor.GhostCopies.ToArray());
+
+        // Across x and z the ghost has up to three copies, each with its own answer, and no memory is taken.
+        editor.SetMirror(MirrorAxes.X | MirrorAxes.Z);
+        Assert.True(draft.TryMirrorFrame(out _, out _, out _));
+        Assert.True(PointWhere(e => e.HasGhost && e.GhostCheck == DraftEdit.Done && e.GhostCopies.Length > 1, out var at), "a copy of the ghost should show");
+        Assert.Equal(editor.GhostAt, editor.GhostCopies[0].At);
+        Assert.Equal(editor.GhostCopies.Length, editor.GhostCopyChecks.Length);
+        var fits = editor.GhostCopyChecks.ToArray().Count(check => check == DraftEdit.Done);
+        var skipped = editor.GhostCopies.Length - fits;
+
+        // One click places the ghost and every copy that fits, and one undo takes them all back.
+        EditorFrame(() => Click());
+        EditorFrame();
+        Assert.Equal(blocks + fits, DraftBlocks);
+        Assert.Equal(skipped, editor.MirrorSkipped);
+        Assert.Equal(skipped > 0, editor.MirrorSkippedAt > float.NegativeInfinity);
+        Chord(GlfwKey.LeftControl, GlfwKey.Z);
+        Assert.Equal(blocks, DraftBlocks);
+        Chord(GlfwKey.LeftControl, GlfwKey.Y);
+        Assert.Equal(blocks + fits, DraftBlocks);
+
+        // Deleting one of them takes the ones that mirror it, and one undo brings them back. The block is the ghost's own.
+        editor.Select(blocks, false);
+        Assert.True(editor.CanDelete);
+        Chord(GlfwKey.Delete);
+        Assert.Equal(blocks, DraftBlocks);
+        Chord(GlfwKey.LeftControl, GlfwKey.Z);
+        Assert.Equal(blocks + fits, DraftBlocks);
+
+        // A copy with another block in its place is left out, and the notice says how many in one post.
+        editor.SetMirror(MirrorAxes.X);
+        Assert.True(PointWhere(e => e.HasGhost && e.GhostCheck == DraftEdit.Done && e.GhostCopies.Length > 1 && e.GhostCopyChecks[1] == DraftEdit.Done, out _));
+        var taken = editor.GhostCopies[1];
+        Assert.Equal(DraftEdit.Done, draft.Add(taken.At, taken.Size, taken.Type));
+        var board = new NoticeBoard(NoticeCatalogue.Load(Path.Combine(AppContext.BaseDirectory, "content", "visuals", "notices.json"), _actions));
+        var tracker = new EditorNoticeTracker();
+        tracker.Update(board, editor, static (_, _, _) => default);
+        var before = DraftBlocks;
+        EditorFrame(() => Click());
+        EditorFrame();
+        Assert.Equal(before + 1, DraftBlocks);
+        Assert.Equal(1, editor.MirrorSkipped);
+        tracker.Update(board, editor, static (_, _, _) => default);
+        tracker.Update(board, editor, static (_, _, _) => default);
+        var kinds = Enumerable.Range(0, board.Visible).Select(r => board.NoticeAt(r).Id).ToArray();
+        Assert.Equal(1, kinds.Count(k => k == NoticeKinds.MirrorSkipped));
+
+        // Turned off, a block is placed alone again.
+        editor.SetMirror(MirrorAxes.None);
+        Assert.Empty(editor.GhostCopies.ToArray());
+    }
+
+    [Fact]
     public void AGroupIsDeletedPastedAndMovedEachAsOneUndoAndADropOnAPanelChangesNothing()
     {
         OpenEditor();

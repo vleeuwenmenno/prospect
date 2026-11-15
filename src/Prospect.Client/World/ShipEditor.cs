@@ -369,6 +369,48 @@ internal sealed class ShipEditor(JobSystem jobs)
     public bool HasMountGhost { get; private set; }
     public DesignMount GhostMount { get; private set; }
 
+    /// <summary>
+    /// The planes placing, deleting and mounting are mirrored across, through the centre of the draft's core: a client
+    /// preference, nothing of it is sent. Set it with <see cref="SetMirror"/>.
+    /// </summary>
+    public MirrorAxes Mirror { get; private set; }
+
+    /// <summary>Whether the mirror planes are in effect: some are on and the draft has a core to mirror about.</summary>
+    public bool MirrorActive => Mirror != MirrorAxes.None && Draft is { } draft && draft.TryMirrorFrame(out _, out _, out _);
+
+    /// <summary>
+    /// While placing with mirror on and a ghost shown: the ghost and its mirrored copies, the original first, and
+    /// whether each fits as it would be placed. Fixed room for <see cref="Mirroring.MaxCopies"/>;
+    /// empty with mirror off, so the plain ghost is all there is.
+    /// </summary>
+    public ReadOnlySpan<DesignBox> GhostCopies => _copyBoxes.AsSpan(0, _copyBoxCount);
+    public ReadOnlySpan<DraftEdit> GhostCopyChecks => _copyBoxChecks.AsSpan(0, _copyBoxCount);
+
+    /// <summary>As <see cref="GhostCopies"/> for a part that mounts; a copy with no block to go on has parent -1 and is not drawn.</summary>
+    public ReadOnlySpan<DesignMount> GhostMountCopies => _copyMounts.AsSpan(0, _copyMountCount);
+    public ReadOnlySpan<DraftEdit> GhostMountCopyChecks => _copyMountChecks.AsSpan(0, _copyMountCount);
+
+    /// <summary>How many mirrored copies the latest placement or deletion left out, and when; zero stamps are news only when the time changes.</summary>
+    public int MirrorSkipped { get; private set; }
+    public float MirrorSkippedAt { get; private set; } = float.NegativeInfinity;
+
+    private readonly DesignBox[] _copyBoxes = new DesignBox[Mirroring.MaxCopies];
+    private readonly DraftEdit[] _copyBoxChecks = new DraftEdit[Mirroring.MaxCopies];
+    private int _copyBoxCount;
+    private readonly DesignMount[] _copyMounts = new DesignMount[Mirroring.MaxCopies];
+    private readonly DraftEdit[] _copyMountChecks = new DraftEdit[Mirroring.MaxCopies];
+    private int _copyMountCount;
+
+    /// <summary>Turns the mirror planes on or off, any mix, and shows the ghost's copies at once.</summary>
+    public void SetMirror(MirrorAxes axes)
+    {
+        axes &= MirrorAxes.All;
+        if (axes == Mirror)
+            return;
+        Mirror = axes;
+        UpdateGhost();
+    }
+
     /// <summary>True when the draft can be committed now.</summary>
     public bool CanApply =>
         CanEdit && Dirty && Server.Phase == EditorPhase.Open && !Server.Pending
@@ -769,14 +811,39 @@ internal sealed class ShipEditor(JobSystem jobs)
 
         if (HasMountGhost)
         {
-            Record(Draft!.AddMount(GhostMount.Parent, GhostMount.Face, GhostMount.U, GhostMount.V, GhostMount.Type));
+            PlaceMount();
             return;
         }
 
         if (!HasGhost)
             return;
-        var result = Draft!.Add(GhostAt, PartSize, Content!.Blocks.Types[Part], PartShape, PartFacing);
+        PlaceBlock();
+    }
+
+    /// <summary>Places the ghost's mounted part and, with mirror on, its copies, as one step.</summary>
+    private void PlaceMount()
+    {
+        var result = Draft!.AddMountMirrored(GhostMount.Parent, GhostMount.Face, GhostMount.U, GhostMount.V, GhostMount.Type, Mirror, out var skipped);
+        NoteSkipped(result, skipped);
         Record(result);
+    }
+
+    /// <summary>Places the ghost block and, with mirror on, its copies, as one step.</summary>
+    private void PlaceBlock()
+    {
+        var box = new DesignBox(GhostAt, PartSize, Content!.Blocks.Types[Part], PartShape, PartFacing);
+        var result = Draft!.AddMirrored(box, Mirror, out var skipped);
+        NoteSkipped(result, skipped);
+        Record(result);
+    }
+
+    // Copies left out of an edit that was made are news: the notice says how many.
+    private void NoteSkipped(DraftEdit result, int skipped)
+    {
+        if (result != DraftEdit.Done || skipped <= 0)
+            return;
+        MirrorSkipped = skipped;
+        MirrorSkippedAt = _time;
     }
 
     /// <summary>
@@ -1019,12 +1086,9 @@ internal sealed class ShipEditor(JobSystem jobs)
         {
             Carry = EditorCarry.None;
             if (HasMountGhost && GhostCheck == DraftEdit.Done)
-                Record(Draft!.AddMount(GhostMount.Parent, GhostMount.Face, GhostMount.U, GhostMount.V, GhostMount.Type));
+                PlaceMount();
             else if (HasGhost && GhostCheck == DraftEdit.Done)
-            {
-                var placed = Draft!.Add(GhostAt, PartSize, Content!.Blocks.Types[Part], PartShape, PartFacing);
-                Record(placed);
-            }
+                PlaceBlock();
 
             return;
         }
@@ -1369,7 +1433,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         if (!CanDelete)
             return;
         CancelCarry();
-        var result = Draft!.Delete(Selection, MountSelection);
+        var result = Draft!.DeleteMirrored(Selection, MountSelection, Mirror);
         if (result == DraftEdit.Done)
             ClearSelection();
         Record(result);
@@ -1447,6 +1511,8 @@ internal sealed class ShipEditor(JobSystem jobs)
         HasGhost = false;
         HasMountGhost = false;
         HasCarryGhost = false;
+        _copyBoxCount = 0;
+        _copyMountCount = 0;
         if (!HasHover || !CanEdit || (uint)Hover.Block >= (uint)Draft!.Boxes.Length)
             return;
         var boxes = Draft.Boxes;
@@ -1487,6 +1553,14 @@ internal sealed class ShipEditor(JobSystem jobs)
             GhostMount = new DesignMount(Hover.Block, face, u, v, type);
             GhostCheck = Draft.CanAddMount(Hover.Block, face, u, v, type);
             HasMountGhost = true;
+            if (Mirror != MirrorAxes.None)
+            {
+                _copyMountCount = Draft.MirrorMounts(GhostMount, Mirror, _copyMounts);
+                Draft.CheckMounts(_copyMounts.AsSpan(0, _copyMountCount), _copyMountChecks);
+                if (_copyMountCount == 1)
+                    _copyMountCount = 0;
+            }
+
             return;
         }
 
@@ -1506,6 +1580,14 @@ internal sealed class ShipEditor(JobSystem jobs)
             GhostAt = Draft.Snap(Hover.Block, Hover.Side, PartSize, Hover.Cell);
         GhostCheck = Draft.CanAdd(GhostAt, PartSize, Content!.Blocks.Types[Part]);
         HasGhost = true;
+        if (Mirror != MirrorAxes.None)
+        {
+            var box = new DesignBox(GhostAt, PartSize, Content.Blocks.Types[Part], PartShape, PartFacing);
+            _copyBoxCount = Draft.MirrorBoxes(box, Mirror, _copyBoxes);
+            Draft.CheckBoxes(_copyBoxes.AsSpan(0, _copyBoxCount), _copyBoxChecks);
+            if (_copyBoxCount == 1)
+                _copyBoxCount = 0;
+        }
     }
 
     /// <summary>

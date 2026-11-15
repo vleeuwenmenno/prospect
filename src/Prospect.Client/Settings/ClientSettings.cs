@@ -33,6 +33,12 @@ internal sealed class ClientSettings
 
     /// <summary>Whether the flight view marks the direction of travel (prograde) and its opposite (retrograde).</summary>
     public bool ShowTravelMarkers { get; set; } = true;
+
+    /// <summary>
+    /// The mirror planes the ship editor has on: bit 1 for X, 2 for Y, 4 for Z (<c>MirrorAxes</c>). Kept per client,
+    /// never sent; anything outside those bits is dropped on load.
+    /// </summary>
+    public int EditorMirror { get; set; }
     public string PlayerName { get; set; } = "Prospector";
     public string LastHost { get; set; } = "127.0.0.1";
     public int LastPort { get; set; } = ProtocolInfo.DefaultPort;
@@ -157,6 +163,7 @@ internal sealed class ClientSettings
         LastHost = string.IsNullOrWhiteSpace(LastHost) ? "127.0.0.1" : LastHost.Trim();
         LastPort = LastPort is > 0 and <= ushort.MaxValue ? LastPort : ProtocolInfo.DefaultPort;
         AutosaveSeconds = Math.Clamp(AutosaveSeconds, 10, 600);
+        EditorMirror &= 7;
 
         // A file can say anything: keep sane, distinct ids, in the order they were hidden.
         HiddenTips ??= [];

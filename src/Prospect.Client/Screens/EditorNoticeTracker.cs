@@ -21,6 +21,7 @@ internal sealed class EditorNoticeTracker
     private bool _primed;
     private float _noticeAt = float.NegativeInfinity;
     private float _followAt = float.NegativeInfinity;
+    private float _mirrorAt = float.NegativeInfinity;
     private float _askingSince = float.NegativeInfinity;
     private bool _askingPosted;
 
@@ -38,7 +39,9 @@ internal sealed class EditorNoticeTracker
         var primed = _primed;
         var noticeNew = editor.NoticeAt != _noticeAt;
         var followNew = editor.FollowNoticeAt != _followAt;
+        var mirrorNew = editor.MirrorSkippedAt != _mirrorAt;
         _primed = true;
+        _mirrorAt = editor.MirrorSkippedAt;
         _noticeAt = editor.NoticeAt;
         _followAt = editor.FollowNoticeAt;
 
@@ -65,6 +68,13 @@ internal sealed class EditorNoticeTracker
 
         if (followNew && editor.FollowNotice != FollowRefusal.None)
             board.Post(editor.FollowNotice == FollowRefusal.OutOfSector ? NoticeKinds.FollowOutOfSector : NoticeKinds.FollowMissing);
+
+        if (mirrorNew && editor.MirrorSkipped > 0)
+        {
+            // One notice for the whole placement, with how many copies it left out.
+            Span<byte> text = stackalloc byte[NoticeCatalogue.MaxText];
+            board.Post(NoticeKinds.MirrorSkipped, System.Text.Unicode.Utf8.TryWrite(text, $"{editor.MirrorSkipped} mirrored copies left out: no room.", out var written) ? text[..written] : default);
+        }
 
         if (!noticeNew)
             return;

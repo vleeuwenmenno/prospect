@@ -356,6 +356,7 @@ internal sealed class WorldView
         actions.Changed += RefreshKeyNames;
         _designs = designs;
         Editor = new ShipEditor(jobs);
+        Editor.SetMirror((MirrorAxes)settings.EditorMirror);
         // Damaged shells are built on a worker, one at a time; nothing builds one in the frame.
         _shields = new ShieldVisuals(ShieldLook.Load(), jobs);
         // Every cloud the seed generates is known. Fog of war would hand a narrower source in here.
@@ -4257,19 +4258,19 @@ internal sealed class WorldView
     /// </summary>
     private void AddGhostModel(int frameIndex, HullDesign source, Vector3 hull, Quaternion orientation, float material)
     {
-        var tone = Editor.GhostCheck == DraftEdit.Done ? new Vector3(0.35f, 0.85f, 0.45f) : new Vector3(0.9f, 0.3f, 0.25f);
+        var good = new Vector3(0.35f, 0.85f, 0.45f);
+        var bad = new Vector3(0.9f, 0.3f, 0.25f);
+        var tone = Editor.GhostCheck == DraftEdit.Done ? good : bad;
         if (Editor.HasMountGhost && Editor.Draft is { } draft && (uint)Editor.GhostMount.Parent < (uint)draft.Boxes.Length)
         {
-            // A part that mounts shows its model on the face under the pointer, pointing out of it.
-            var mount = Editor.GhostMount;
-            EditorGeometry.MountBounds(draft.Boxes[mount.Parent], mount, out var low, out var high);
-            var extent = (high - low) * source.BlockSize;
-            if (_partModels.TryGet(mount.Type, BlockShape.Box, extent * 0.5f, mount.Face, source.BlockSize, out var mounted))
-            {
-                var place = hull + Vector3.Transform(EditorGeometry.ToHull((low + high) * 0.5f, source.Pivot, source.BlockSize), orientation);
-                var shade = Vector3.Lerp(EditorGeometry.BlockColor(source.Color, mount.Type), tone, 0.35f);
-                _scene.AddTriangles(frameIndex, mounted, MeshTransform(place, orientation, Vector3.One, shade, material, 1f));
-            }
+            // A part that mounts shows its model on the face under the pointer, pointing out of it, and on each
+            // face a mirrored copy would go on.
+            AddMountGhost(frameIndex, source, hull, orientation, material, draft, Editor.GhostMount, tone);
+            var copies = Editor.GhostMountCopies;
+            var checks = Editor.GhostMountCopyChecks;
+            for (var i = 1; i < copies.Length; i++)
+                if ((uint)copies[i].Parent < (uint)draft.Boxes.Length)
+                    AddMountGhost(frameIndex, source, hull, orientation, material, draft, copies[i], checks[i] == DraftEdit.Done ? good : bad);
             return;
         }
 
@@ -4286,6 +4287,33 @@ internal sealed class WorldView
         var position = hull + Vector3.Transform(EditorGeometry.ToHull(middle, source.Pivot, source.BlockSize), orientation);
         var color = Vector3.Lerp(EditorGeometry.BlockColor(source.Color, type), tone, 0.35f);
         _scene.AddTriangles(frameIndex, model, MeshTransform(position, Quaternion.Concatenate(turn, orientation), Vector3.One, color, material, 1f));
+
+        // The mirrored copies, each with the model for its own facing and slant, held where they would be placed.
+        var boxes = Editor.GhostCopies;
+        var boxChecks = Editor.GhostCopyChecks;
+        for (var i = 1; i < boxes.Length; i++)
+        {
+            var copy = boxes[i];
+            var extent = new Vector3(copy.Size.X, copy.Size.Y, copy.Size.Z);
+            if (!_partModels.TryGet(type, copy.Shape, extent * (0.5f * source.BlockSize), copy.Facing, source.BlockSize, out var copyModel))
+                continue;
+            var centre = new Vector3(copy.At.X - 0.5f, copy.At.Y - 0.5f, copy.At.Z - 0.5f) + extent * 0.5f;
+            var place = hull + Vector3.Transform(EditorGeometry.ToHull(centre, source.Pivot, source.BlockSize), orientation);
+            var shade = Vector3.Lerp(EditorGeometry.BlockColor(source.Color, type), boxChecks[i] == DraftEdit.Done ? good : bad, 0.35f);
+            _scene.AddTriangles(frameIndex, copyModel, MeshTransform(place, orientation, Vector3.One, shade, material, 1f));
+        }
+    }
+
+    /// <summary>One ghost of a mounted part: its model in the thin box it fills on its face, toned by whether it fits.</summary>
+    private void AddMountGhost(int frameIndex, HullDesign source, Vector3 hull, Quaternion orientation, float material, BuildDraft draft, in DesignMount mount, Vector3 tone)
+    {
+        EditorGeometry.MountBounds(draft.Boxes[mount.Parent], mount, out var low, out var high);
+        var extent = (high - low) * source.BlockSize;
+        if (!_partModels.TryGet(mount.Type, BlockShape.Box, extent * 0.5f, mount.Face, source.BlockSize, out var mounted))
+            return;
+        var place = hull + Vector3.Transform(EditorGeometry.ToHull((low + high) * 0.5f, source.Pivot, source.BlockSize), orientation);
+        var shade = Vector3.Lerp(EditorGeometry.BlockColor(source.Color, mount.Type), tone, 0.35f);
+        _scene.AddTriangles(frameIndex, mounted, MeshTransform(place, orientation, Vector3.One, shade, material, 1f));
     }
 
     /// <summary>A point of the draft's grid in the world, where the edited hull is drawn this frame.</summary>

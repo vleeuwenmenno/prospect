@@ -515,4 +515,190 @@ public sealed class BuildDraftTests
         Assert.True(cores.Undo());
         Assert.Equal(2, cores.Boxes.Length);
     }
+
+    [Fact]
+    public void MirroredPlacementIsOneUndoStepAndSkipsWhatDoesNotFit()
+    {
+        var hull = Content.Blocks.Get("hull");
+        var draft = Draft(Box("core", new GridSize(0, 0, 0), One));
+        var version = draft.Version;
+
+        // Two planes: the block, and its copies across x, across y and across both. The centre of the core is the middle of all of them.
+        Assert.Equal(DraftEdit.Done, draft.AddMirrored(new DesignBox(new GridSize(1, 1, 0), One, hull), MirrorAxes.X | MirrorAxes.Y, out var skipped));
+        Assert.Equal(0, skipped);
+        Assert.Equal([new GridSize(1, 1, 0), new GridSize(-1, 1, 0), new GridSize(1, -1, 0), new GridSize(-1, -1, 0)], draft.Boxes[1..].ToArray().Select(box => box.At).ToArray());
+        Assert.True(draft.Undo());
+        Assert.Single(draft.Boxes.ToArray());
+        Assert.False(draft.CanUndo);
+        Assert.True(draft.Redo());
+        Assert.Equal(5, draft.Boxes.Length);
+        Assert.True(draft.Version > version);
+
+        // A copy that would sit on another block is left out and counted; the rest are placed, in one step.
+        var next = Draft(Box("core", new GridSize(0, 0, 0), new GridSize(3, 1, 1)), Box("hull", new GridSize(-1, 0, 0), One));
+        Assert.Equal(DraftEdit.Done, next.AddMirrored(new DesignBox(new GridSize(3, 0, 0), One, hull), MirrorAxes.X, out skipped));
+        Assert.Equal(1, skipped);
+        Assert.Equal(3, next.Boxes.Length);
+        Assert.True(next.Undo());
+        Assert.Equal(2, next.Boxes.Length);
+
+        // The block itself not fitting refuses the whole edit and changes nothing.
+        var before = next.Version;
+        Assert.Equal(DraftEdit.Overlaps, next.AddMirrored(new DesignBox(new GridSize(1, 0, 0), One, hull), MirrorAxes.X, out skipped));
+        Assert.Equal(before, next.Version);
+        Assert.Equal(2, next.Boxes.Length);
+    }
+
+    [Fact]
+    public void ACopyOnAPlaneIsTheBlockItselfAndIsNotAddedTwice()
+    {
+        var hull = Content.Blocks.Get("hull");
+        var draft = Draft(Box("core", new GridSize(0, 0, 0), One));
+        Assert.Equal(DraftEdit.Done, draft.AddMirrored(new DesignBox(new GridSize(0, 1, 0), One, hull), MirrorAxes.All, out var skipped));
+        Assert.Equal(0, skipped);
+        // Across x and z it is on both planes, so only the copy below across y is another block.
+        Assert.Equal([new GridSize(0, 1, 0), new GridSize(0, -1, 0)], draft.Boxes[1..].ToArray().Select(box => box.At).ToArray());
+
+        // The same with one more plane in the way: none of the copies is a second one.
+        Assert.Equal(DraftEdit.Done, draft.AddMirrored(new DesignBox(new GridSize(0, 2, 0), One, hull), MirrorAxes.All, out skipped));
+        Assert.Equal(0, skipped);
+        Assert.Equal(5, draft.Boxes.Length);
+        Assert.Equal(new GridSize(0, -2, 0), draft.Boxes[4].At);
+    }
+
+    [Fact]
+    public void WithoutACoreOrWithNoPlanesOnlyTheBlockIsPlaced()
+    {
+        var hull = Content.Blocks.Get("hull");
+        var draft = Draft(Box("core", new GridSize(0, 0, 0), One), Box("hull", new GridSize(1, 0, 0), One));
+        Assert.Equal(DraftEdit.Done, draft.AddMirrored(new DesignBox(new GridSize(0, 1, 0), One, hull), MirrorAxes.None, out _));
+        Assert.Equal(3, draft.Boxes.Length);
+        Assert.Equal(DraftEdit.Done, draft.Delete(0));
+        Assert.False(draft.TryMirrorFrame(out _, out _, out _));
+        Assert.Equal(DraftEdit.Done, draft.AddMirrored(new DesignBox(new GridSize(4, 0, 0), One, hull), MirrorAxes.All, out var skipped));
+        Assert.Equal(0, skipped);
+        Assert.Equal(3, draft.Boxes.Length);
+    }
+
+    [Fact]
+    public void AMirroredDirectionalPartFacesTheMirroredWayAndAWedgeKeepsItsSlantOnTheOtherSide()
+    {
+        var engine = Content.Blocks.Get("engine");
+        var draft = Draft(Box("core", new GridSize(0, 0, 0), One));
+        Assert.Equal(DraftEdit.Done, draft.AddMirrored(new DesignBox(new GridSize(1, 1, 0), One, engine, BlockShape.Box, BlockFacing.Right), MirrorAxes.X | MirrorAxes.Y, out _));
+        // Across x it faces left, across y only it still faces right, across both it faces left.
+        Assert.Equal([BlockFacing.Right, BlockFacing.Left, BlockFacing.Right, BlockFacing.Left], draft.Boxes[1..].ToArray().Select(box => box.Facing).ToArray());
+        Assert.Equal(DraftEdit.Done, draft.AddMirrored(new DesignBox(new GridSize(0, 0, 1), One, engine, BlockShape.Box, BlockFacing.Back), MirrorAxes.Z, out _));
+        Assert.Equal([BlockFacing.Back, BlockFacing.Front], draft.Boxes[5..].ToArray().Select(box => box.Facing).ToArray());
+
+        // For every wedge and every set of planes the mirrored shape is the reflected solid: same corners, reflected.
+        var half = new System.Numerics.Vector3(1.5f, 1f, 0.5f);
+        Span<System.Numerics.Vector3> own = stackalloc System.Numerics.Vector3[8];
+        Span<System.Numerics.Vector3> other = stackalloc System.Numerics.Vector3[8];
+        for (var shape = BlockShape.WedgeXPlusPlus; shape <= BlockShape.WedgeZMinusMinus; shape++)
+        {
+            for (var mask = 0; mask < 8; mask++)
+            {
+                var reflected = Mirroring.Shape(shape, mask);
+                var count = BlockShapes.Vertices(shape, half, own);
+                Assert.Equal(count, BlockShapes.Vertices(reflected, half, other));
+                foreach (var corner in own[..count])
+                {
+                    var mirrored = new System.Numerics.Vector3((mask & 1) != 0 ? -corner.X : corner.X, (mask & 2) != 0 ? -corner.Y : corner.Y, (mask & 4) != 0 ? -corner.Z : corner.Z);
+                    Assert.True(other[..count].Contains(mirrored), $"{shape} across {mask}");
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void MirroredMountsGoOnTheMirroredBlockAndFaceAtTheMirroredPlaceAsOneStep()
+    {
+        var cold = Content.Blocks.Get("coldGasThruster");
+        // A core with a plate on each side along x.
+        var draft = Draft(Box("core", new GridSize(0, 0, 0), One), Box("hull", new GridSize(1, 0, 0), One), Box("hull", new GridSize(-1, 0, 0), One));
+        Assert.Equal(DraftEdit.Done, draft.AddMountMirrored(1, BlockFacing.Up, 1, 2, cold, MirrorAxes.X | MirrorAxes.Z, out var skipped));
+        Assert.Equal(0, skipped);
+        var mounts = draft.Mounts.ToArray();
+        // On the right plate at the place asked, and its z copy on the same plate; the x copies on the left plate.
+        Assert.Contains(new DesignMount(1, BlockFacing.Up, 1, 2, cold), mounts);
+        Assert.Contains(new DesignMount(1, BlockFacing.Up, 5, 2, cold), mounts);
+        Assert.Contains(new DesignMount(2, BlockFacing.Up, 1, 4, cold), mounts);
+        Assert.Contains(new DesignMount(2, BlockFacing.Up, 5, 4, cold), mounts);
+        Assert.Equal(4, mounts.Length);
+        Assert.True(draft.Undo());
+        Assert.Empty(draft.Mounts.ToArray());
+
+        // Across x a side face turns to the opposite side.
+        Assert.Equal(DraftEdit.Done, draft.AddMountMirrored(1, BlockFacing.Right, 3, 3, cold, MirrorAxes.X, out _));
+        Assert.Contains(new DesignMount(2, BlockFacing.Left, 3, 3, cold), draft.Mounts.ToArray());
+
+        // With no mirrored block to carry the copy, it is left out and counted; the part itself is placed.
+        var lone = Draft(Box("core", new GridSize(0, 0, 0), One), Box("hull", new GridSize(1, 0, 0), One));
+        Assert.Equal(DraftEdit.Done, lone.AddMountMirrored(1, BlockFacing.Up, 3, 3, cold, MirrorAxes.X, out skipped));
+        Assert.Equal(1, skipped);
+        Assert.Single(lone.Mounts.ToArray());
+
+        // On a plane the copy is the part itself.
+        var centred = Draft(Box("core", new GridSize(0, 0, 0), One));
+        Assert.Equal(DraftEdit.Done, centred.AddMountMirrored(0, BlockFacing.Up, 3, 3, cold, MirrorAxes.X | MirrorAxes.Z, out skipped));
+        Assert.Equal(0, skipped);
+        Assert.Single(centred.Mounts.ToArray());
+    }
+
+    [Fact]
+    public void MirroredDeletionTakesTheCopiesTheDraftHasWithTheirMountsAsOneStep()
+    {
+        var cold = Content.Blocks.Get("coldGasThruster");
+        var draft = Draft(Box("core", new GridSize(0, 0, 0), One), Box("hull", new GridSize(1, 0, 0), One), Box("hull", new GridSize(-1, 0, 0), One), Box("hull", new GridSize(0, 1, 0), One));
+        Assert.Equal(DraftEdit.Done, draft.AddMountMirrored(1, BlockFacing.Up, 3, 3, cold, MirrorAxes.X, out _));
+        Assert.Equal(2, draft.Mounts.Length);
+
+        // The right plate goes with the left one and what they carried; the plate above has no copy and stays.
+        Assert.Equal(DraftEdit.Done, draft.DeleteMirrored([1], default, MirrorAxes.X));
+        Assert.Equal(2, draft.Boxes.Length);
+        Assert.Empty(draft.Mounts.ToArray());
+        Assert.True(draft.Undo());
+        Assert.Equal(4, draft.Boxes.Length);
+        Assert.Equal(2, draft.Mounts.Length);
+
+        // A mounted part goes with its mirror.
+        Assert.Equal(DraftEdit.Done, draft.DeleteMirrored(default, [0], MirrorAxes.X));
+        Assert.Empty(draft.Mounts.ToArray());
+        Assert.Equal(4, draft.Boxes.Length);
+        Assert.True(draft.Undo());
+        Assert.Equal(2, draft.Mounts.Length);
+
+        // Without planes it is the plain delete, and a deletion that would take every block is refused.
+        Assert.Equal(DraftEdit.Done, draft.DeleteMirrored([3], default, MirrorAxes.None));
+        Assert.Equal(3, draft.Boxes.Length);
+        var pair = Draft(Box("core", new GridSize(0, 0, 0), One), Box("hull", new GridSize(1, 0, 0), One), Box("hull", new GridSize(-1, 0, 0), One));
+        Assert.Equal(DraftEdit.Unchanged, pair.DeleteMirrored([0, 1], default, MirrorAxes.X));
+        Assert.Equal(3, pair.Boxes.Length);
+    }
+
+    [Fact]
+    public void MirroredChecksAndGhostsTakeNoMemoryOnceTheDraftHasRoom()
+    {
+        var hull = Content.Blocks.Get("hull");
+        var draft = Draft(Box("core", new GridSize(0, 0, 0), One));
+        var box = new DesignBox(new GridSize(1, 1, 1), One, hull);
+        var copies = new DesignBox[Mirroring.MaxCopies];
+        var checks = new DraftEdit[Mirroring.MaxCopies];
+        // Reserves the draft's list once, as the first placement would.
+        draft.CheckBoxes(copies.AsSpan(0, draft.MirrorBoxes(box, MirrorAxes.All, copies)), checks);
+        var count = draft.MirrorBoxes(box, MirrorAxes.All, copies);
+        Assert.Equal(Mirroring.MaxCopies, count);
+        var version = draft.Version;
+        var allocation = new AllocationProbe();
+        while (allocation.Measuring())
+        {
+            draft.MirrorBoxes(box, MirrorAxes.All, copies);
+            draft.CheckBoxes(copies, checks);
+        }
+
+        Assert.Equal(0, allocation.Bytes);
+        Assert.Equal(version, draft.Version);
+        Assert.Single(draft.Boxes.ToArray());
+    }
 }

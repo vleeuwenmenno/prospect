@@ -315,7 +315,7 @@ What works now:
 Not built yet:
 
 - Shapes other than boxes and wedges; stock parts with their own meshes.
-- Mirror and symmetry. Saved designs; changing a ship's name, class, block size or colour.
+- Saved designs; changing a ship's name, class, block size or colour.
 - A drag handle for resizing a placed block; its resize is numeric.
 - Anything past today's limits of a few hundred boxes.
 
@@ -352,7 +352,7 @@ The existing editor and scale tracks below continue separately; this roadmap doe
 
 Next:
 
-1. The ship editor (B): its second slice and wedges are in. Smooth shields are in. Next: mirror, stock parts, a drag handle.
+1. The ship editor (B): its second slice and wedges are in. Smooth shields are in. Mirror (X, Y, Z through the core) is in. Next: stock parts, a drag handle.
 2. Blocks at scale, stages 3 to 5: collision, drawing and the full load.
 3. The entity store and the entity kinds: ships, stations, fighters, asteroids, gas fields.
 4. Interest management and delta snapshots.

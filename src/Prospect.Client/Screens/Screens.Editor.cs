@@ -135,6 +135,7 @@ internal sealed partial class ScreenHost
         }
 
         DrawSizingNote(world, editor);
+        DrawMirrorPlanes(draw, world, editor, draft);
         if (!editor.HasHover)
             return;
         if (editor.HasCarryGhost)
@@ -165,8 +166,21 @@ internal sealed partial class ScreenHost
             // A part that mounts shows only itself, on the face under the pointer, and where it points.
             var ok = editor.GhostCheck == DraftEdit.Done;
             DrawMount(draw, world, boxes[editor.GhostMount.Parent], editor.GhostMount, Kit.Color(ok ? Theme.Good : Theme.Bad), Kit.Px(2), true);
+            var mirrored = editor.GhostMountCopies;
+            var mirroredChecks = editor.GhostMountCopyChecks;
+            var left = 0;
+            for (var i = 1; i < mirrored.Length; i++)
+            {
+                if (mirroredChecks[i] != DraftEdit.Done)
+                    left++;
+                if ((uint)mirrored[i].Parent < (uint)boxes.Length)
+                    DrawMount(draw, world, boxes[mirrored[i].Parent], mirrored[i], Kit.Color(mirroredChecks[i] == DraftEdit.Done ? Theme.Good : Theme.Bad), Kit.Px(2), true);
+            }
+
             if (!ok)
                 PointerNote(EditText(editor.GhostCheck));
+            else if (left > 0)
+                PointerNote(Kit.F($"{left} mirrored not placed"), Theme.TextDim);
         }
         else if (editor.HasGhost)
         {
@@ -177,8 +191,22 @@ internal sealed partial class ScreenHost
             world.GhostPose(out var turn, out var shift);
             DrawBlockEdges(draw, world, ghost, Kit.Color(tone), Kit.Px(2), turn, shift);
             // A thrust part shows where its nozzle points, so a turn that only changes that can be seen.
-            if (editor.Content is { } parts && (uint)editor.Part < (uint)parts.Blocks.Types.Count && parts.Blocks.Types[editor.Part].Thrust > 0)
+            var thrusts = editor.Content is { } parts && (uint)editor.Part < (uint)parts.Blocks.Types.Count && parts.Blocks.Types[editor.Part].Thrust > 0;
+            if (thrusts)
                 DrawFacing(draw, world, ghost, turn, shift);
+            // The mirrored copies, each outlined by whether it would be placed.
+            var mirroredBoxes = editor.GhostCopies;
+            var mirroredBoxChecks = editor.GhostCopyChecks;
+            var skippedCopies = 0;
+            for (var i = 1; i < mirroredBoxes.Length; i++)
+            {
+                var copyOk = mirroredBoxChecks[i] == DraftEdit.Done;
+                if (!copyOk)
+                    skippedCopies++;
+                DrawBlockEdges(draw, world, mirroredBoxes[i], Kit.Color(copyOk ? Theme.Good : Theme.Bad), Kit.Px(2));
+                if (thrusts)
+                    DrawFacing(draw, world, mirroredBoxes[i], Quaternion.Identity, Vector3.Zero);
+            }
             // The ghost's face against the hull, filled, shows where it attaches; a wedge being turned shows its slant.
             DrawFace(draw, world, ghost, editor.Hover.Side ^ 1, Kit.Color(tone, 0.22f), Kit.Color(tone, 0.6f), turn, shift);
             if (editor.RotatingPart && editor.PartShape != BlockShape.Box)
@@ -190,6 +218,8 @@ internal sealed partial class ScreenHost
                 DrawRotationRings(draw, world);
             if (!ok)
                 PointerNote(EditText(editor.GhostCheck));
+            else if (skippedCopies > 0)
+                PointerNote(Kit.F($"{skippedCopies} mirrored not placed"), Theme.TextDim);
         }
         else if ((uint)editor.Hover.Mount < (uint)mounts.Length && (uint)mounts[editor.Hover.Mount].Parent < (uint)boxes.Length)
         {
@@ -200,6 +230,59 @@ internal sealed partial class ScreenHost
             ref readonly var box = ref boxes[editor.Hover.Block];
             DrawFace(draw, world, box, editor.Hover.Side, Kit.Color(Theme.Accent, 0.18f), Kit.Color(Theme.Accent, 0.8f));
         }
+    }
+
+    /// <summary>The colours of the mirror planes: X red and Y green as the axes are drawn, Z blue.</summary>
+    private const uint PlaneZ = 0x5AA0E0;
+
+    /// <summary>
+    /// The active mirror planes, faintly, through the centre of the core: a rectangle each, square to its axis,
+    /// reaching a cell past the draft on every side so it can be seen from outside the ship.
+    /// </summary>
+    private static void DrawMirrorPlanes(ImDrawListPtr draw, WorldView world, ShipEditor editor, BuildDraft draft)
+    {
+        if (editor.Mirror == MirrorAxes.None || !draft.TryMirrorFrame(out var centre2, out var low, out var high))
+            return;
+        Span<float2> points = stackalloc float2[4];
+        Span<Double3> corners = stackalloc Double3[4];
+        for (var axis = 0; axis < 3; axis++)
+        {
+            if (((int)editor.Mirror & (1 << axis)) == 0)
+                continue;
+            var tone = axis == 0 ? RingX : axis == 1 ? RingY : PlaneZ;
+            int a = (axis + 1) % 3, b = (axis + 2) % 3;
+            // Symmetric about the core on the two axes the plane spans, so the core is its middle.
+            var reachA = MirrorReach(centre2, low, high, a);
+            var reachB = MirrorReach(centre2, low, high, b);
+            var middle = new Vector3(centre2.X * 0.5f - 0.5f, centre2.Y * 0.5f - 0.5f, centre2.Z * 0.5f - 0.5f);
+            for (var i = 0; i < 4; i++)
+            {
+                var corner = middle;
+                corner[a] += (i & 1) == 0 ? -reachA : reachA;
+                corner[b] += (i & 2) == 0 ? -reachB : reachB;
+                corners[i] = world.EditorPoint(corner);
+            }
+
+            // The ring order of the four corners: 0, 1, 3, 2.
+            ReadOnlySpan<int> ring = [0, 1, 3, 2];
+            var whole = true;
+            for (var i = 0; i < 4; i++)
+                whole &= world.Project(corners[ring[i]], out points[i]);
+            if (whole)
+                draw.AddConvexPolyFilled(points, Kit.Color(tone, 0.07f));
+            for (var i = 0; i < 4; i++)
+            {
+                if (world.ProjectSegment(corners[ring[i]], corners[ring[(i + 1) % 4]], out var from, out var to))
+                    draw.AddLine(from, to, Kit.Color(tone, 0.4f), Kit.Px(1.25f));
+            }
+        }
+    }
+
+    // Half the plane's length along one axis: from the core's middle to the draft's far side, a cell more.
+    private static float MirrorReach(GridSize centre2, GridSize low, GridSize high, int axis)
+    {
+        var middle = EditorGeometry.Of(centre2, axis) * 0.5f;
+        return Math.Max(middle - EditorGeometry.Of(low, axis), EditorGeometry.Of(high, axis) - middle) + 1f;
     }
 
     /// <summary>
@@ -517,7 +600,7 @@ internal sealed partial class ScreenHost
         // The cards scroll between the tabs and the size controls, while there is room for a couple; in a short
         // window the whole panel scrolls instead.
         // The caption, the size and shape lines and the shape buttons below the cards.
-        var footer = 3 * Kit.Px(16) + Kit.Px(28) + 2 * Kit.Px(Theme.Space2) + 2 * Kit.Px(Theme.Space1);
+        var footer = 3 * Kit.Px(16) + Kit.Px(28) + 2 * Kit.Px(Theme.Space2) + 2 * Kit.Px(Theme.Space1) + MirrorRowHeight;
         var listHeight = ImGui.GetContentRegionAvail().Y - footer;
         var cardHeight = Kit.Px(70);
         var split = listHeight >= cardHeight;
@@ -569,7 +652,79 @@ internal sealed partial class ScreenHost
         ImGui.SameLine(0, gap);
         if (EditorPalette.HandBack(EditorButton("##shapewedge"u8, "Wedge"u8, new float2(pair, Kit.Px(26)), editor.CanEdit, false, editor.PartShape != BlockShape.Box)))
             editor.SetPartShape(editor.PartShape == BlockShape.Box ? BlockShape.WedgeXPlusPlus : editor.PartShape);
+        DrawMirrorRow(editor, width, gap);
         EndEditorPanel();
+    }
+
+    /// <summary>The height <see cref="DrawMirrorRow"/> takes: its caption and the checkboxes, with the space above them.</summary>
+    private static float MirrorRowHeight => Kit.Px(16) + Kit.Px(24) + Kit.Px(Theme.Space2) + Kit.Px(Theme.Space1);
+
+    /// <summary>
+    /// Three checkboxes, X, Y and Z, for the planes through the core that placing, deleting and mounting are mirrored
+    /// across. A change is a client preference: it is saved with the settings and sent to no one.
+    /// </summary>
+    private void DrawMirrorRow(ShipEditor editor, float width, float gap)
+    {
+        Kit.Space(Theme.Space2);
+        Kit.Caption("MIRROR"u8);
+        Kit.Space(Theme.Space1);
+        var cell = MathF.Floor((width - 2 * gap) / 3f);
+        var axes = editor.Mirror;
+        var next = axes;
+        for (var axis = 0; axis < 3; axis++)
+        {
+            if (axis > 0)
+                ImGui.SameLine(0, gap);
+            var flag = (MirrorAxes)(1 << axis);
+            ImGui.PushID(axis);
+            var label = axis == 0 ? "X"u8 : axis == 1 ? "Y"u8 : "Z"u8;
+            if (EditorPalette.HandBack(EditorCheckbox("##mirror"u8, label, new float2(cell, Kit.Px(24)), editor.CanEdit, (axes & flag) != 0)))
+                next ^= flag;
+            ImGui.PopID();
+        }
+
+        if (next == axes)
+            return;
+        editor.SetMirror(next);
+        _app.Settings.EditorMirror = (int)next;
+        if (!_app.Devices.Muted)
+            _app.Settings.Save();
+    }
+
+    /// <summary>A checkbox cell: a square that is filled and ticked when on, and its label. True when pressed.</summary>
+    private bool EditorCheckbox(ImString id, ReadOnlySpan<byte> label, float2 size, bool enabled, bool on)
+    {
+        var draw = ImGui.GetWindowDrawList();
+        var position = ImGui.GetCursorScreenPos();
+        if (!enabled)
+            ImGui.BeginDisabled();
+        var pressed = ImGui.InvisibleButton(id, size);
+        var hot = enabled && ImGui.IsItemHovered();
+        if (!enabled)
+            ImGui.EndDisabled();
+        var chamfer = Kit.Px(5);
+        Kit.ChamferFill(draw, position, position + size, Kit.Color(hot ? Theme.PanelRaised : Theme.Panel), chamfer);
+        Kit.ChamferOutline(draw, position, position + size, Kit.Color(on ? Theme.Accent : hot ? Theme.LineStrong : Theme.Line), chamfer);
+        var box = Kit.Px(12);
+        var min = position + new float2(Kit.Px(8), (size.Y - box) * 0.5f);
+        var max = min + new float2(box, box);
+        var tone = !enabled ? Theme.TextMute : on ? Theme.Accent : Theme.TextDim;
+        if (on)
+        {
+            draw.AddRectFilled(min, max, Kit.Color(tone));
+            // The tick, in the ink the primary buttons use over the accent.
+            var thick = Kit.Px(1.75f);
+            var a = min + new float2(box * 0.2f, box * 0.55f);
+            var b = min + new float2(box * 0.42f, box * 0.78f);
+            var c = min + new float2(box * 0.8f, box * 0.25f);
+            draw.AddLine(a, b, Kit.Color(Theme.AccentInk), thick);
+            draw.AddLine(b, c, Kit.Color(Theme.AccentInk), thick);
+        }
+        else
+            draw.AddRect(min, max, Kit.Color(tone), 0, 0, Kit.Px(1.5f));
+        var measured = Kit.Measure(_ui.SansMedium, Theme.FontSmall, label);
+        Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, new float2(max.X + Kit.Px(8), position.Y + (size.Y - measured.Y) * 0.5f), on || hot ? Theme.Text : Theme.TextDim, label);
+        return pressed && enabled;
     }
 
     /// <summary>The hint over the part list for sizing the part on the ship before it is placed.</summary>

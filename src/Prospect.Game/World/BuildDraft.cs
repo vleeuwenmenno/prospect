@@ -531,6 +531,261 @@ public sealed class BuildDraft
         return Check(changed, block);
     }
 
+    // Room for one edit's copies, so a mirrored edit takes no memory. An edit runs on one thread, one at a time.
+    private readonly DesignBox[] _copyBoxes = new DesignBox[Mirroring.MaxCopies];
+    private readonly DesignMount[] _copyMounts = new DesignMount[Mirroring.MaxCopies];
+
+    // The mirror planes' place and the draft's extent, worked out again only when the draft has changed.
+    private int _frameVersion = -1;
+    private bool _hasFrame;
+    private GridSize _centre2;
+    private GridSize _frameLow;
+    private GridSize _frameHigh;
+
+    /// <summary>
+    /// Where the mirror planes are: through the centre of the draft's first core block. <paramref name="centre2"/> is
+    /// twice that centre in cells and <paramref name="low"/> and <paramref name="high"/> the draft's extent on the
+    /// grid's integer edges. False when the draft has no core, which leaves nothing to mirror about. One pass over
+    /// the boxes after a change, nothing between; allocates nothing.
+    /// </summary>
+    public bool TryMirrorFrame(out GridSize centre2, out GridSize low, out GridSize high)
+    {
+        if (_frameVersion != Version)
+        {
+            _frameVersion = Version;
+            _hasFrame = false;
+            int lx = int.MaxValue, ly = int.MaxValue, lz = int.MaxValue, hx = int.MinValue, hy = int.MinValue, hz = int.MinValue;
+            foreach (ref readonly var box in Boxes)
+            {
+                if (!_hasFrame && box.Type.Core)
+                {
+                    _hasFrame = true;
+                    _centre2 = Mirroring.Centre2(box);
+                }
+
+                lx = Math.Min(lx, box.At.X); ly = Math.Min(ly, box.At.Y); lz = Math.Min(lz, box.At.Z);
+                hx = Math.Max(hx, box.At.X + box.Size.X); hy = Math.Max(hy, box.At.Y + box.Size.Y); hz = Math.Max(hz, box.At.Z + box.Size.Z);
+            }
+
+            _frameLow = new GridSize(lx, ly, lz);
+            _frameHigh = new GridSize(hx, hy, hz);
+        }
+
+        centre2 = _centre2; low = _frameLow; high = _frameHigh;
+        return _hasFrame;
+    }
+
+    /// <summary>
+    /// Fills <paramref name="into"/> (room for <see cref="Mirroring.MaxCopies"/>) with <paramref name="box"/> and its
+    /// mirrored copies across <paramref name="axes"/>, the original first, and returns how many. Without a core to
+    /// mirror about, or with no axes, only the original. Allocates nothing.
+    /// </summary>
+    public int MirrorBoxes(in DesignBox box, MirrorAxes axes, Span<DesignBox> into)
+    {
+        if (axes == MirrorAxes.None || !TryMirrorFrame(out var centre2, out _, out _))
+        {
+            into[0] = box;
+            return 1;
+        }
+
+        return Mirroring.Copies(box, axes, centre2, into);
+    }
+
+    /// <summary>
+    /// What <see cref="Add"/> would answer for each of these boxes placed one after the other, as
+    /// <see cref="AddMirrored"/> places them: a box is checked against the draft and the boxes before it that fit.
+    /// Nothing changes: the draft, its version and its history stay as they were. Allocates nothing once the draft's
+    /// list has room.
+    /// </summary>
+    public void CheckBoxes(ReadOnlySpan<DesignBox> boxes, Span<DraftEdit> results)
+    {
+        var provisional = 0;
+        try
+        {
+            for (var i = 0; i < boxes.Length; i++)
+            {
+                results[i] = CanAdd(boxes[i].At, boxes[i].Size, boxes[i].Type);
+                if (results[i] != DraftEdit.Done)
+                    continue;
+
+                // Later boxes are checked against this one as if it were placed; taken out again below.
+                _boxes.Add(boxes[i]);
+                provisional++;
+            }
+        }
+        finally
+        {
+            _boxes.RemoveRange(_boxes.Count - provisional, provisional);
+        }
+    }
+
+    /// <summary>
+    /// Adds <paramref name="box"/> and its mirrored copies across <paramref name="axes"/> as one step to undo. When
+    /// the box itself does not fit, the answer is why and nothing changes. A copy that does not fit is left out:
+    /// <paramref name="skipped"/> counts those. A copy that is the box itself, as one lying on a plane is, is not
+    /// a second block and is not counted.
+    /// </summary>
+    public DraftEdit AddMirrored(in DesignBox box, MirrorAxes axes, out int skipped)
+    {
+        skipped = 0;
+        ArgumentNullException.ThrowIfNull(box.Type);
+        if (!BlockShapes.IsValid(box.Shape)) throw new ArgumentOutOfRangeException(nameof(box));
+        if (!Facings.IsValid(box.Facing)) throw new ArgumentOutOfRangeException(nameof(box));
+        Span<DesignBox> copies = _copyBoxes;
+        Span<DraftEdit> checks = stackalloc DraftEdit[Mirroring.MaxCopies];
+        var count = MirrorBoxes(box, axes, copies);
+        CheckBoxes(copies[..count], checks);
+        if (checks[0] != DraftEdit.Done)
+            return checks[0];
+        for (var i = 0; i < count; i++)
+        {
+            if (checks[i] == DraftEdit.Done)
+                Do(Step.Block(_boxes.Count, default, copies[i]));
+            else
+                skipped++;
+        }
+
+        Finish();
+        return DraftEdit.Done;
+    }
+
+    /// <summary>
+    /// Fills <paramref name="into"/> (room for <see cref="Mirroring.MaxCopies"/>) with <paramref name="mount"/> and
+    /// its mirrored copies across <paramref name="axes"/>, the original first, and returns how many. A copy whose
+    /// mirrored parent block is not in the draft has <see cref="DesignMount.Parent"/> -1: there is nothing to put
+    /// it on. Without a core to mirror about, or with no axes, only the original. Allocates nothing.
+    /// </summary>
+    public int MirrorMounts(in DesignMount mount, MirrorAxes axes, Span<DesignMount> into)
+    {
+        into[0] = mount;
+        if (axes == MirrorAxes.None || !TryMirrorFrame(out var centre2, out _, out _) || (uint)mount.Parent >= (uint)_boxes.Count)
+            return 1;
+        var parent = _boxes[mount.Parent];
+        var count = 1;
+        for (var mask = 1; mask < Mirroring.MaxCopies; mask++)
+        {
+            if ((mask & ~(int)axes) != 0)
+                continue;
+            var mirrored = Mirroring.Box(parent, mask, centre2);
+            var copy = Mirroring.Mount(parent, mirrored, mount, mask, centre2) with { Parent = IndexOfBlock(mirrored) };
+            var seen = false;
+            for (var i = 0; !seen && i < count; i++)
+                seen = into[i] == copy;
+            if (!seen)
+                into[count++] = copy;
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// What <see cref="AddMount"/> would answer for each of these mounts placed one after the other, as
+    /// <see cref="AddMountMirrored"/> places them. A mount with no parent (-1) cannot be placed. Nothing changes.
+    /// </summary>
+    public void CheckMounts(ReadOnlySpan<DesignMount> mounts, Span<DraftEdit> results)
+    {
+        var provisional = 0;
+        try
+        {
+            for (var i = 0; i < mounts.Length; i++)
+            {
+                results[i] = mounts[i].Parent < 0 ? DraftEdit.NoSuchBlock : CanAddMount(mounts[i].Parent, mounts[i].Face, mounts[i].U, mounts[i].V, mounts[i].Type);
+                if (results[i] != DraftEdit.Done)
+                    continue;
+                _mounts.Add(mounts[i]);
+                provisional++;
+            }
+        }
+        finally
+        {
+            _mounts.RemoveRange(_mounts.Count - provisional, provisional);
+        }
+    }
+
+    /// <summary>
+    /// As <see cref="AddMount"/>, with the mirrored copies across <paramref name="axes"/> as one step to undo: each
+    /// goes on the mirrored block, on the mirrored face, at the mirrored place on it. A copy with no block to go on
+    /// or no room is left out and counted in <paramref name="skipped"/>; a copy that is the mount itself is not.
+    /// </summary>
+    public DraftEdit AddMountMirrored(int parent, BlockFacing face, int u, int v, BlockType type, MirrorAxes axes, out int skipped)
+    {
+        skipped = 0;
+        ArgumentNullException.ThrowIfNull(type);
+        Span<DesignMount> copies = _copyMounts;
+        Span<DraftEdit> checks = stackalloc DraftEdit[Mirroring.MaxCopies];
+        var count = MirrorMounts(new DesignMount(parent, face, u, v, type), axes, copies);
+        CheckMounts(copies[..count], checks);
+        if (checks[0] != DraftEdit.Done)
+            return checks[0];
+        for (var i = 0; i < count; i++)
+        {
+            if (checks[i] == DraftEdit.Done)
+                Do(Step.Part(_mounts.Count, default, copies[i]));
+            else
+                skipped++;
+        }
+
+        Finish(settle: false);
+        return DraftEdit.Done;
+    }
+
+    /// <summary>
+    /// As <see cref="Delete(ReadOnlySpan{int}, ReadOnlySpan{int})"/>, and also the mirrored copies across
+    /// <paramref name="axes"/> of each listed block and mounted part that the draft has: the same box of the same
+    /// type, or the same mount on the mirrored block. One step to undo. A copy the draft does not have is simply not
+    /// there to remove. Refused as <see cref="DraftEdit.Unchanged"/> when it would take every block.
+    /// </summary>
+    public DraftEdit DeleteMirrored(ReadOnlySpan<int> blocks, ReadOnlySpan<int> mounts, MirrorAxes axes)
+    {
+        if (axes == MirrorAxes.None || !TryMirrorFrame(out var centre2, out _, out _))
+            return Delete(blocks, mounts);
+        var check = Mark(blocks, out _);
+        if (check != DraftEdit.Done) return check;
+        var allBlocks = new List<int>(blocks.Length * 2);
+        var allMounts = new List<int>(mounts.Length * 2);
+        foreach (var block in blocks)
+        {
+            var box = _boxes[block];
+            for (var mask = 0; mask < Mirroring.MaxCopies; mask++)
+            {
+                if ((mask & ~(int)axes) != 0) continue;
+                var at = mask == 0 ? block : IndexOfBlock(Mirroring.Box(box, mask, centre2));
+                if (at >= 0 && !allBlocks.Contains(at)) allBlocks.Add(at);
+            }
+        }
+
+        foreach (var index in mounts)
+        {
+            if ((uint)index >= (uint)_mounts.Count) return DraftEdit.NoSuchBlock;
+            var mount = _mounts[index];
+            var parent = _boxes[mount.Parent];
+            for (var mask = 0; mask < Mirroring.MaxCopies; mask++)
+            {
+                if ((mask & ~(int)axes) != 0) continue;
+                var at = index;
+                if (mask != 0)
+                {
+                    var mirrored = Mirroring.Box(parent, mask, centre2);
+                    var copy = Mirroring.Mount(parent, mirrored, mount, mask, centre2) with { Parent = IndexOfBlock(mirrored) };
+                    at = copy.Parent < 0 ? -1 : _mounts.IndexOf(copy);
+                }
+
+                if (at >= 0 && !allMounts.Contains(at)) allMounts.Add(at);
+            }
+        }
+
+        if (allBlocks.Count >= _boxes.Count) return DraftEdit.Unchanged;
+        return Delete(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(allBlocks), System.Runtime.InteropServices.CollectionsMarshal.AsSpan(allMounts));
+    }
+
+    // The index of the block that is exactly this box, or -1: the mirrored counterpart of a block, when there is one.
+    private int IndexOfBlock(in DesignBox box)
+    {
+        for (var i = 0; i < _boxes.Count; i++)
+            if (Mirroring.Same(_boxes[i], box)) return i;
+        return -1;
+    }
+
     /// <summary>Takes back the latest edit. False when there is none.</summary>
     public bool Undo()
     {

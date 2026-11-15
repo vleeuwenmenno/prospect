@@ -196,7 +196,14 @@ are never blocked. The editor works in space, around your ship:
   its low corner; a turn that would overlap is refused. Copy, paste, move and undo keep each block's shape.
   Merge joins boxes only. A part placed on a slope snaps against the wedge's box, on the larger box side.
 
-**Not there in the editor:** other shapes, stock or custom meshes, mirror or symmetry,
+- **Mirror.** Three checkboxes under the part list, X, Y and Z, in any mix (all three: up to eight copies). The planes
+  pass through the centre of the draft's core, drawn faintly while on. Placing a block or a mounted part, and
+  deleting, act on the mirrored copies too: a thrust part's facing and a wedge's slant are mirrored, a mount goes on
+  the mirrored block, face and place. The ghost shows every copy, green or red. One action is one undo step. A copy with
+  no room is left out and a notice counts them; a copy on a plane is not doubled. A client preference, never sent.
+  Painting does not exist yet, so nothing mirrors it; copy, paste and move are not mirrored.
+
+**Not there in the editor:** other shapes, stock or custom meshes,
 dragging a face of a placed block with the mouse (its resize is numeric), saved designs, renaming or recolouring a ship. Ships stay at
 the current limits of a few hundred boxes. A server's design catalogue only grows, so it can fill up until it
 restarts; the editor then says so. The editor has not been checked on screen by a person yet.
