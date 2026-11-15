@@ -558,6 +558,36 @@ public sealed class PropulsionVisualTests
         Assert.Equal(0, effects.End());
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(3)]
+    public void AHullAtRestAfterTurningShowsNoPlume(int index)
+    {
+        // The plumes read only what the step wrote: a hull steered about at rest with its dampeners on writes
+        // nothing, so after the last braking gas has cleared, nothing is drawn, frame after frame.
+        var design = Content.Designs[index];
+        var flight = design.Flight;
+        var nozzles = MeshBuilder.Hull(design, Look).Nozzles;
+        var effects = new ThrustEffects(Look);
+        var output = new PlumeInstance[PropulsionLook.PlumeCapacity];
+        var blocks = new[] { ulong.MaxValue, ulong.MaxValue };
+        var state = HullState.Spawn(Double3.Zero, flight);
+        state.Velocity = new Vector3(1f, 0.5f, -2f);
+        var drawn = 0;
+        for (var tick = 0; tick < 60 * 12; tick++)
+        {
+            var input = new FlightInput { Dampeners = true, Yaw = (sbyte)(tick % 7 - 3), Pitch = (sbyte)(tick % 5 - 2), Roll = (sbyte)(tick % 3 - 1) };
+            FlightModel.Step(ref state, input, flight, HullSim.Dt);
+            var hull = new HullView { Id = 11, Thrust = state.Thrust, Blocks = blocks };
+            Begin(effects, tick / 60.0);
+            effects.Add(effects.Observe(hull), hull, nozzles, new Vector3(0, 0, -8), Quaternion.Identity, 1, output);
+            var count = effects.End();
+            if (tick >= 60 * 6)
+                drawn += count;
+        }
+        Assert.Equal(0, drawn);
+    }
+
     [Fact]
     public void StrafingPuffsTheColdGasThrustersOfThatSide()
     {

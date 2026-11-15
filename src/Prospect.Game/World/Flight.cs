@@ -372,6 +372,35 @@ public struct HullState
 }
 
 /// <summary>
+/// Turns a vector by a unit quaternion in plain single-precision arithmetic, in a fixed order, so the server and every
+/// predicting client get the same bits. Why not <see cref="Vector3.Transform(Vector3, Quaternion)"/>: on .NET 10 it
+/// returns a vector of about 7.5e-9 for a zero vector and any turn but none, an error of fixed size that does not
+/// shrink with the vector. Flight turns a hull's velocity into its own frame and back every tick, so a hull at rest
+/// that had ever turned was never at rest: its dampeners fired against that error every tick, burning fuel and power
+/// and lighting parts on opposite sides. Here a zero vector stays exactly zero.
+/// </summary>
+public static class HullRotation
+{
+    /// <summary>
+    /// <paramref name="v"/> turned by <paramref name="q"/>: <c>v + w t + u × t</c> with <c>t = 2 u × v</c>, where
+    /// <c>u</c> is the quaternion's vector part and <c>w</c> its scalar.
+    /// </summary>
+    public static Vector3 Rotate(Vector3 v, Quaternion q)
+    {
+        var tx = 2f * (q.Y * v.Z - q.Z * v.Y);
+        var ty = 2f * (q.Z * v.X - q.X * v.Z);
+        var tz = 2f * (q.X * v.Y - q.Y * v.X);
+        return new Vector3(
+            v.X + q.W * tx + (q.Y * tz - q.Z * ty),
+            v.Y + q.W * ty + (q.Z * tx - q.X * tz),
+            v.Z + q.W * tz + (q.X * ty - q.Y * tx));
+    }
+
+    /// <summary><paramref name="v"/> turned back by <paramref name="q"/>: from the world into the frame <paramref name="q"/> turns to it.</summary>
+    public static Vector3 Unrotate(Vector3 v, Quaternion q) => Rotate(v, new Quaternion(-q.X, -q.Y, -q.Z, q.W));
+}
+
+/// <summary>
 /// The rigid-body flight model. Space is frictionless: velocity persists until thrust changes it. Each thrust part
 /// pushes the hull the opposite way to its facing and burns its own fuel, or, an ion part, only power; a direction
 /// with no part facing away from it, or whose parts have run dry, cannot be pushed. Dampeners are the hull's computer firing those same parts
@@ -383,6 +412,13 @@ public static class FlightModel
 {
     /// <summary>Heat an overheated drive must cool to before boost unlocks.</summary>
     public const float BoostUnlockHeat = 0.35f;
+
+    /// <summary>
+    /// Speeds along one of a hull's own axes below this, in m/s, are rest: the dampeners take them to exactly zero
+    /// without firing a part, so nothing is burnt, drawn or shown for a drift of a micrometre a second left over by
+    /// arithmetic (a collision's push-out, a turn of the frame). Real drift is far above it and is braked as before.
+    /// </summary>
+    public const float RestSpeed = 1e-4f;
     private const float AxisScale = 1f / 127f;
 
     public static void Step(ref HullState state, in FlightInput input, in FlightParams p, float dt) =>
@@ -458,8 +494,7 @@ public static class FlightModel
         var bipropellant = held.Bipropellant > 0f;
 
         // What each direction can push with: the parts of the fuels left, and the ion parts, which need none.
-        var toLocal = Quaternion.Conjugate(state.Orientation);
-        var velocity = Vector3.Transform(state.Velocity, toLocal);
+        var velocity = HullRotation.Unrotate(state.Velocity, state.Orientation);
         var pushRight = p.Push(BlockFacing.Right, held);
         var pushLeft = p.Push(BlockFacing.Left, held);
         var pushUp = p.Push(BlockFacing.Up, held);
@@ -547,7 +582,7 @@ public static class FlightModel
         if (speed > limit)
             velocity *= Math.Max(limit, speed - p.ShedAcceleration * dt) / speed;
 
-        state.Velocity = Vector3.Transform(velocity, state.Orientation);
+        state.Velocity = HullRotation.Rotate(velocity, state.Orientation);
         state.Position += state.Velocity * dt;
     }
 
@@ -562,7 +597,7 @@ public static class FlightModel
             return command * ionPlus;
         if (command < 0f)
             return -command * ionMinus;
-        if (!dampeners)
+        if (!dampeners || MathF.Abs(speed) < RestSpeed)
             return 0f;
         if (speed > 0f && minus > 0f)
             return Math.Min(speed, minus * dt) / (minus * dt) * ionMinus;
@@ -590,6 +625,12 @@ public static class FlightModel
         {
             speed += command * minus * gain * dt;
             usedMinus = minus > 0f ? -command * scale : 0f;
+        }
+        else if (dampeners && MathF.Abs(speed) < RestSpeed)
+        {
+            // At rest: nothing fires. Only parts that could brake this way, with power to do it, hold it there.
+            if ((speed > 0f ? minus : plus) > 0f && scale > 0f)
+                speed = 0f;
         }
         else if (dampeners)
         {

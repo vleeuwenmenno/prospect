@@ -957,8 +957,17 @@ internal sealed class WorldView
             controls.Vertical = held.Vertical;
             controls.Forward = held.Forward;
             controls.Boost = held.Boost;
-            // The hull holds its heading, so a camera held to the side does not turn it.
-            controls.Align = false;
+            // The hull holds its heading, so a camera held to the side does not turn it, unless the run asks it to
+            // turn: then the nose is steered a fifth of a radian up and to the left of where it points, all the
+            // while, so the hull yaws and pitches together as it would under a mouse.
+            controls.Align = held.Turn;
+            if (held.Turn)
+            {
+                var nose = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
+                var hullUp = Vector3.Transform(Vector3.UnitY, OwnOrientation);
+                var hullRight = Vector3.Transform(Vector3.UnitX, OwnOrientation);
+                controls.Aim = Vector3.Transform(nose, Quaternion.CreateFromAxisAngle(Vector3.Normalize(hullUp + hullRight), 0.2f));
+            }
         }
 
         // A jump never takes the view: the pilot looks wherever they like through all of it. The server holds the

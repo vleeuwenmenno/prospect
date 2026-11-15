@@ -288,14 +288,19 @@ internal sealed class ThrustEffects
 }
 
 /// <summary>Flight keys a scripted run holds (<c>--thrust</c>), so a capture can show plumes without a person at the keys.</summary>
-internal readonly record struct ScriptedThrust(float Strafe, float Vertical, float Forward, bool Boost)
+internal readonly record struct ScriptedThrust(float Strafe, float Vertical, float Forward, bool Boost, bool Turn = false)
 {
-    /// <summary>Reads a comma list of forward, back, left, right, up, down and boost; false for anything else.</summary>
+    /// <summary>
+    /// Reads a comma list of forward, back, left, right, up, down, boost and turn; false for anything else. Turn
+    /// steers the nose to the left all the while, as a pilot's mouse would, so the hull's frame turns under its
+    /// velocity.
+    /// </summary>
     public static bool TryParse(string text, out ScriptedThrust thrust)
     {
         thrust = default;
         float strafe = 0, vertical = 0, forward = 0;
         var boost = false;
+        var turn = false;
         foreach (var word in text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             switch (word)
@@ -307,10 +312,11 @@ internal readonly record struct ScriptedThrust(float Strafe, float Vertical, flo
                 case "up": vertical = 1; break;
                 case "down": vertical = -1; break;
                 case "boost": boost = true; break;
+                case "turn": turn = true; break;
                 default: return false;
             }
         }
-        thrust = new ScriptedThrust(strafe, vertical, forward, boost);
+        thrust = new ScriptedThrust(strafe, vertical, forward, boost, turn);
         return true;
     }
 }

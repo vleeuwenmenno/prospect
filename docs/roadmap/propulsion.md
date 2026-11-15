@@ -61,6 +61,9 @@
   - Tanks run down are no damage: they never hold back an edit.
 - Fuel is simulation state: shared flight code, predicted by the client, saved with the world.
 - Dampeners fire the same parts and burn the same fuel. At rest they burn nothing.
+  - Rest is exact: flight turns the velocity with `HullRotation`, which keeps zero at zero whatever way the hull
+    faces. `Vector3.Transform` does not (about 7.5e-9 m/s on .NET 10), and parts fired at rest for ever.
+  - A drift under 1e-4 m/s along an axis (`FlightModel.RestSpeed`) is taken to zero without firing a part.
 - Fuel has no mass yet: a full tank and an empty one weigh the same.
 
 ## Decided: fuel per tank

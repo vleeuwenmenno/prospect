@@ -98,6 +98,81 @@ public sealed class PropulsionTests
         Assert.Equal(BlockFacing.Back, new DesignBox(One, One, null!).Facing);
     }
 
+    [Fact]
+    public void TurningAHullDoesNotTurnZeroIntoADriftAndTheTurnAgreesWithTheLibrarys()
+    {
+        // Flight turns the velocity into the hull's frame and back every tick: a hull at rest must stay at exactly
+        // zero, whatever way it faces. (Vector3.Transform gives about 7.5e-9 for zero on .NET 10.)
+        var random = new Random(7);
+        for (var i = 0; i < 1000; i++)
+        {
+            var q = Quaternion.Normalize(new Quaternion(random.NextSingle() * 2 - 1, random.NextSingle() * 2 - 1, random.NextSingle() * 2 - 1, random.NextSingle() * 2 - 1));
+            Assert.Equal(Vector3.Zero, HullRotation.Rotate(Vector3.Zero, q));
+            Assert.Equal(Vector3.Zero, HullRotation.Unrotate(Vector3.Zero, q));
+            var v = new Vector3(random.NextSingle() * 200 - 100, random.NextSingle() * 200 - 100, random.NextSingle() * 200 - 100);
+            Assert.True((HullRotation.Rotate(v, q) - Vector3.Transform(v, q)).Length() < 1e-4f, $"{q} {v}");
+            Assert.True((HullRotation.Unrotate(HullRotation.Rotate(v, q), q) - v).Length() < 1e-4f, $"{q} {v}");
+        }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void AHullThatTurnsWithItsDampenersOnBrakesItsDriftThenFiresAndSpendsNothingAtRest(int index)
+    {
+        // The developer's report: at 0 m/s with the dampeners on, after steering with the mouse, parts on opposite
+        // sides glowed at once and kept glowing. Steer as a mouse does (yaw, pitch and roll together, never still)
+        // from a drift, then keep steering at rest.
+        var design = Content.Designs[index];
+        var flight = design.Flight;
+        var state = HullState.Spawn(Double3.Zero, flight);
+        state.Velocity = new Vector3(3f, -2f, 5f);
+        for (var tick = 0; tick < 60 * 30; tick++)
+        {
+            var input = new FlightInput { Dampeners = true, Yaw = (sbyte)(tick % 7 - 3), Pitch = (sbyte)(tick % 5 - 2), Roll = (sbyte)(tick % 3 - 1) };
+            var fuelBefore = state.Fuel;
+            var energyBefore = state.Energy;
+            FlightModel.Step(ref state, input, flight, HullSim.Dt, out var flow, out var fuel);
+            if (tick < 60 * 5)
+                continue;
+
+            // Braked to exactly nothing within five seconds, and from then on nothing fires, burns or draws.
+            Assert.Equal(Vector3.Zero, state.Velocity);
+            Assert.True(state.Thrust.Equals(default(ThrustState)), $"{design.Name} tick {tick}: thrust {state.Thrust.X} {state.Thrust.Y} {state.Thrust.Z}, flags {state.Thrust.Flags}");
+            Assert.Equal(default, fuel.Burn);
+            Assert.Equal(0f, flow.Thrust);
+            Assert.Equal(fuelBefore, state.Fuel);
+            Assert.True(state.Energy >= energyBefore, $"{design.Name} tick {tick}: the battery fell");
+        }
+    }
+
+    [Fact]
+    public void TheDampenersTakeADriftUnderTheRestSpeedToNothingWithoutFiringAndBrakeOneAboveIt()
+    {
+        var flight = Content.Designs[Content.DroneDesign].Flight;
+        var state = HullState.Spawn(Double3.Zero, flight);
+        state.Velocity = new Vector3(FlightModel.RestSpeed * 0.5f, 0, -FlightModel.RestSpeed * 0.5f);
+        FlightModel.Step(ref state, new FlightInput { Dampeners = true }, flight, HullSim.Dt, out var flow);
+        Assert.Equal(Vector3.Zero, state.Velocity);
+        Assert.True(state.Thrust.Equals(default(ThrustState)));
+        Assert.Equal(0f, flow.Thrust);
+
+        // Twice the rest speed is drift: the parts that oppose it brake it, and show it.
+        state.Velocity = new Vector3(FlightModel.RestSpeed * 2f, 0, 0);
+        FlightModel.Step(ref state, new FlightInput { Dampeners = true }, flight, HullSim.Dt, out flow);
+        Assert.Equal(Vector3.Zero, state.Velocity);
+        Assert.Equal(-1, state.Thrust.X);
+        Assert.True(state.Thrust.Ion);
+        Assert.True(flow.Thrust > 0f);
+
+        // With the dampeners off, a drift that small is left alone.
+        state.Velocity = new Vector3(FlightModel.RestSpeed * 0.5f, 0, 0);
+        FlightModel.Step(ref state, default, flight, HullSim.Dt);
+        Assert.Equal(FlightModel.RestSpeed * 0.5f, state.Velocity.X, 6);
+    }
+
     /// <summary>A core, a gyro, a battery and the parts a test adds, with no tank at all.</summary>
     private static HullDesign Tankless(params DesignBox[] parts) =>
         TestDesigns.Of([Box("core", 0, 0, 0), Box("gyro", 0, 2, 0), Box("battery", 0, 3, 0), .. parts]);

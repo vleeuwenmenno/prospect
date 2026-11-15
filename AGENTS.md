@@ -341,6 +341,11 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   thrust when the battery is flat (`FlightModel.Step`, which also cuts the dampeners then). Never give an ion part a
   fuel, a burn or a tank, and never put fuel on the wire or in a save for it; `ThrustState` bit 4 says it fires.
   The escape drone is all ion and has no tanks.
+  Flight turns the velocity into the hull's frame and back with `HullRotation` (exact, keeps zero at zero), never
+  `Vector3.Transform`, which on .NET 10 returns about 7.5e-9 for a zero vector: a hull that had turned never came to
+  rest, and its dampeners fired on both sides forever. The dampeners take a drift under `FlightModel.RestSpeed`
+  (1e-4 m/s per axis) to zero without firing; `PropulsionTests` and `PropulsionVisualTests` hold that a hull steered
+  about at rest fires, burns, draws and shows nothing.
   Nothing refuels and nothing moves fuel between tanks. `ServerHost.CreateHull` says whether tanks start full: a
   first spawn (`SpawnFleet`) and an escape drone are full; a ship built new from the drone starts empty; a hull
   that replaces another (edit or repair, `ReplaceHull`) gives each tank what the same tank of the old hull held
@@ -498,7 +503,9 @@ The client opens a real window on the developer's desktop, and they are usually 
   These replace the old sub-minimum-distance capture jumps. Their openings are farther from the watcher.
 - Scan across the map and a cancel: `--open scan --close-map-at 0.8 --capture-after 0.5 --capture-count 4 --capture-every 1.2` shows the strip
   after leaving the map mid-scan; add `--cancel-scan-at 2.5` for the "SCAN CANCELLED" readout and its cooldown line.
-- `--thrust <keys>` (`forward`, `back`, `left`, `right`, `up`, `down`, `boost`, comma separated) holds those flight
+- `--thrust <keys>` (`forward`, `back`, `left`, `right`, `up`, `down`, `boost`, comma separated; `turn` steers the
+  nose up and left all the while, as a mouse would, so `--thrust turn --thrust-until 4` and a capture at 8 s show a hull
+  at rest after turning, which must fire nothing) holds those flight
   keys in the pilot view from `--thrust-at <s>` to `--thrust-until <s>` after the splash, with the hull holding its
   heading; each capture then prints the own hull's thrust and the plumes drawn. `--zoom <0.5..8>` sets the pilot
   camera's distance as the scroll wheel does. Both only with `--capture` or `--bench`. The chase camera sits
