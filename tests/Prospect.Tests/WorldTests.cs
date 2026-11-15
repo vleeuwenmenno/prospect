@@ -210,7 +210,7 @@ public sealed class HullDesignTests
         Assert.Equal(pod.Cells.Length, stats.Blocks);
         Assert.Equal(mass, stats.Mass, 3);
         Assert.Equal(hull, stats.HullPoints, 3);
-        Assert.Equal(new Vector3(5, 2, 4), stats.Size);
+        Assert.Equal(new Vector3(5, 2, 5), stats.Size);
 
         // The engine faces back and pushes forward; four cold gas thrusters are mounted facing each other way, so
         // the pod accelerates harder than it brakes or strafes.
@@ -1503,7 +1503,7 @@ public sealed class HullCollisionTests : IDisposable
         }
 
         // A ram the shields can take: the client's two hulls move exactly as the server's do, tick for tick.
-        var (pod, vessel) = Start(50);
+        var (pod, vessel) = Start(40);
         for (var i = 0; i < 30; i++)
         {
             _field.BeginRound();
@@ -1514,6 +1514,7 @@ public sealed class HullCollisionTests : IDisposable
             predicted.Step(vessel, hold);
             foreach (var hull in new[] { pod, vessel })
             {
+                Assert.True(_hulls.Mask(hull).Equals(copy.Mask(hull)), "this ram must leave every block on the server");
                 Assert.Equal(_hulls.State(hull).Position, copy.State(hull).Position);
                 Assert.Equal(_hulls.State(hull).Velocity, copy.State(hull).Velocity);
                 Assert.Equal(_hulls.State(hull).AngularVelocity, copy.State(hull).AngularVelocity);

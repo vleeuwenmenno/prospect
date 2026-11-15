@@ -7,13 +7,14 @@
   "blocks": [
     { "at": [0, 0, 0], "type": "microcore" },
     { "at": [0, 0, -1], "type": "microshield" },
-    { "at": [0, 0, 1], "type": "microengine", "facing": "back" },
+    { "at": [0, 0, 2], "type": "microengine", "facing": "back" },
     { "at": [0, 1, 0], "type": "microgyro" },
     { "at": [0, -1, 0], "type": "microgenerator" },
     { "at": [0, 1, 1], "type": "microbattery" },
     { "at": [0, -1, 1], "type": "riftdrive" },
     { "at": [1, 0, 1], "type": "microBipropellantTank" },
-    { "at": [-1, 0, 1], "type": "microNitrogenTank" }
+    { "at": [-1, 0, 1], "type": "microNitrogenTank" },
+    { "at": [0, 0, 1], "type": "microhull" }
   ],
   "mounts": [
     { "on": 7, "face": "right", "at": [1, 1], "type": "microthruster" },

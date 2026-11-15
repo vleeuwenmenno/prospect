@@ -8,7 +8,7 @@
     { "at": [0, 0, 0], "type": "core" },
     { "at": [0, 0, -1], "type": "sensor" },
     { "at": [0, 0, -2], "type": "charting" },
-    { "at": [0, 0, 1], "type": "engine", "facing": "back" },
+    { "at": [0, 0, 2], "type": "engine", "facing": "back" },
     { "at": [1, 0, 1], "type": "generator" },
     { "at": [-1, 0, 1], "type": "battery" },
     { "at": [0, 1, 0], "type": "quarters" },
@@ -17,7 +17,8 @@
     { "at": [-2, 0, 1], "type": "cargo" },
     { "at": [0, 1, -1], "type": "hyperdrive" },
     { "at": [1, 1, 1], "type": "bipropellantTank" },
-    { "at": [-1, 1, 1], "type": "nitrogenTank" }
+    { "at": [-1, 1, 1], "type": "nitrogenTank" },
+    { "at": [0, 0, 1], "type": "hull" }
   ],
   "mounts": [
     { "on": 8, "face": "right", "at": [1, 1], "type": "coldGasThruster" },

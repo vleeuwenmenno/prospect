@@ -1793,7 +1793,7 @@ public sealed class EditorSessionTests
         // The pod stripped to its core and two plates, and every mounted thruster taken off: nothing that pushes,
         // turns, makes or holds power.
         var draft = BuildDraft.FromBlueprint(content.Pod, content);
-        Assert.Equal(DraftEdit.Done, draft.Delete([3, 4, 5, 6, 7, 8, 9, 10, 11, 12], Enumerable.Range(0, draft.Mounts.Length).ToArray()));
+        Assert.Equal(DraftEdit.Done, draft.Delete([3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], Enumerable.Range(0, draft.Mounts.Length).ToArray()));
         Assert.Equal((3, 0), (draft.Boxes.Length, draft.Mounts.Length));
         var hull = Build(rig, draft, startup + 1);
         var flight = rig.Hulls.Flight(hull);

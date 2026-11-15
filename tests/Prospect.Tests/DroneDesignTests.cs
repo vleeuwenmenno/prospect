@@ -15,28 +15,27 @@ public sealed class DroneDesignTests
         var drone = Shipped.Designs[Shipped.DroneDesign];
         var flight = drone.Flight;
 
-        // Half the former 0.5 block edge, so the hull is half as long and wide and half the radius. Its tanks
-        // fill corners of the same three by three by three cells, so it is no larger than it was; its thrusters
-        // are mounted on faces now and fill none, so the sphere around its blocks is a little smaller.
+        // Half the former 0.5 block edge. Its engine stands one cell behind the rest on a plate, so the hull is
+        // four cells long and three wide and high; its thrusters are mounted on faces and fill none.
         Assert.Equal(0.25f, drone.BlockSize);
-        Assert.Equal(0.539f, flight.Radius, 0.01f);
-        Assert.Equal(new Vector3(0.75f), drone.Stats.Size);
+        Assert.Equal(0.620f, flight.Radius, 0.01f);
+        Assert.Equal(new Vector3(0.75f, 0.75f, 1f), drone.Stats.Size);
 
         // Figures that do not come from size: mass, thrust in each direction, shield, hull and power. Two tanks
-        // came with fuel, and twenty-four mounted thrusters weigh and push what six thruster blocks did. A
-        // mounted part has no hit points of its own, so the hull lost the 180 those blocks had.
-        Assert.Equal(3.6f, flight.Mass, 0.001f);
-        Assert.Equal(16.666666f, flight.Acceleration.Z, 0.001f);
-        Assert.Equal(8.333333f, flight.Acceleration.X, 0.001f);
-        Assert.Equal(8.333333f, flight.Acceleration.Y, 0.001f);
-        Assert.Equal(16.666666f, flight.ReverseAcceleration, 0.001f);
+        // came with fuel, twenty-four mounted thrusters weigh and push what six thruster blocks did, and a plate
+        // carries the engine. A mounted part has no hit points of its own.
+        Assert.Equal(3.75f, flight.Mass, 0.001f);
+        Assert.Equal(16f, flight.Acceleration.Z, 0.001f);
+        Assert.Equal(8f, flight.Acceleration.X, 0.001f);
+        Assert.Equal(8f, flight.Acceleration.Y, 0.001f);
+        Assert.Equal(16f, flight.ReverseAcceleration, 0.001f);
         Assert.Equal(120f, flight.ShieldCapacity, 0.001f);
-        Assert.Equal(310f, flight.HullPoints, 0.001f);
+        Assert.Equal(340f, flight.HullPoints, 0.001f);
         Assert.Equal(1.2f, flight.PowerGenerated, 0.001f);
         Assert.Equal(new FuelTanks { Nitrogen = 24f, Bipropellant = 90f }, flight.FuelCapacity);
 
-        // The gyro's torque was raised with the mass the thrusters and tanks added, so the drone turns about as before.
-        Assert.Equal(new Vector3(0.65833f, 0.78825f, 0.70178f), flight.TurnRate, new VectorTolerance());
+        // The engine's plate and the longer lever behind it make the drone turn a little slower than before.
+        Assert.Equal(new Vector3(0.60820f, 0.70618f, 0.69959f), flight.TurnRate, new VectorTolerance());
     }
 
     private sealed class VectorTolerance : IEqualityComparer<Vector3>
