@@ -473,16 +473,6 @@ public static class FlightModel
         // its floor; once running, boost holds on until the battery is empty, then stays off until the battery is
         // back above the floor. A hull without a battery never boosts.
         var thrust = new Vector3(input.Strafe, input.Vertical, -input.Forward) * AxisScale;
-        var boosting = input.Boost
-            && !state.BoostLocked
-            && thrust != Vector3.Zero
-            && state.Energy > 0f
-            && (state.Boosting || state.Energy >= p.BoostEnergyFloor);
-        state.Heat = Math.Clamp(state.Heat + (boosting ? p.HeatRate : -p.CoolRate) * dt, 0f, 1f);
-        if (state.Heat >= 1f)
-            state.BoostLocked = true;
-        else if (state.BoostLocked && state.Heat <= BoostUnlockHeat)
-            state.BoostLocked = false;
 
         // Fuel: the tanks as they stand before the step decide which parts can fire in it. A tank that runs dry
         // during the step still feeds it to the end, so nothing here depends on the order parts are added up in.
@@ -501,6 +491,20 @@ public static class FlightModel
         var pushDown = p.Push(BlockFacing.Down, held);
         var pushBack = p.Push(BlockFacing.Back, held);
         var pushFront = p.Push(BlockFacing.Front, held);
+
+        // Boost only runs, and only heats the drive, while a part can push the way the pilot asks: a key held
+        // with every tank of that direction dry, or with no part facing that way, boosts nothing.
+        var pushing = Asked(thrust.X, pushRight, pushLeft) || Asked(thrust.Y, pushUp, pushDown) || Asked(thrust.Z, pushBack, pushFront);
+        var boosting = input.Boost
+            && !state.BoostLocked
+            && pushing
+            && state.Energy > 0f
+            && (state.Boosting || state.Energy >= p.BoostEnergyFloor);
+        state.Heat = Math.Clamp(state.Heat + (boosting ? p.HeatRate : -p.CoolRate) * dt, 0f, 1f);
+        if (state.Heat >= 1f)
+            state.BoostLocked = true;
+        else if (state.BoostLocked && state.Heat <= BoostUnlockHeat)
+            state.BoostLocked = false;
 
         // Power: what the hull wants this tick against what the generator makes. The battery covers a shortfall
         // and takes the surplus; with the battery flat, thrust is cut back to what the generator alone can feed.
@@ -652,6 +656,9 @@ public static class FlightModel
             }
         }
     }
+
+    /// <summary>Whether the command on one axis asks for a direction that has thrust to give.</summary>
+    private static bool Asked(float command, float plus, float minus) => command > 0f ? plus > 0f : command < 0f && minus > 0f;
 
     /// <summary>Kilograms a second of one fuel the six directions burn at the throttles they ran at.</summary>
     private static float Burnt(in ThrustTable burn, FuelKind fuel, float right, float left, float up, float down, float back, float front) =>

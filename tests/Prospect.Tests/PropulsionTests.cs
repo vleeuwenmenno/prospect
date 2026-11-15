@@ -227,6 +227,23 @@ public sealed class PropulsionTests
     }
 
     [Fact]
+    public void BoostWithDryTanksNeitherRunsNorHeatsTheDrive()
+    {
+        // The pod with every tank empty: holding boost and forward pushes nothing, so the drive stays cold.
+        var flight = Content.Pod.Flight;
+        var state = HullState.Spawn(Double3.Zero, flight);
+        state.Fuel = default;
+        var input = new FlightInput { Forward = 127, Boost = true };
+        state = Fly(state, input, flight, 120);
+        Assert.Equal(0f, state.Heat);
+        Assert.False(state.Boosting);
+
+        // With fuel the same keys boost and heat it, so the rule above is not just boost never running.
+        var fuelled = Fly(HullState.Spawn(Double3.Zero, flight), input, flight, 120);
+        Assert.True(fuelled.Heat > 0f);
+    }
+
+    [Fact]
     public void AnIonPartWithoutPowerGivesNoThrustAndOneShortOfPowerIsCutBack()
     {
         // No generator: the battery runs flat, then neither the pilot nor the dampeners can push.
