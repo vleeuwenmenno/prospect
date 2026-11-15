@@ -193,6 +193,9 @@ public sealed class FloodRegressionTests
         var config = new ServerConfig { Visibility = ServerVisibility.Unlisted, Port = port, Password = "secret" };
         Assert.Throws<IOException>(() => new ServerHost(config, Content, transport));
         Assert.False(transport.Disposed);
+        // The failed constructor's listener is released: the port comes free. RakNet closes its socket on its own
+        // thread, so how soon is up to the scheduler; the check is that it does, not that it is instant.
+        TestNet.WaitUntil(() => TestNet.IsFree(port), "the failed constructor's listener releasing its port");
         using var listener = RakNetTransport.Listen(port, 2);
         Assert.Throws<IOException>(() => new ServerHost(config, Content, transport));
         Assert.False(transport.Disposed);
