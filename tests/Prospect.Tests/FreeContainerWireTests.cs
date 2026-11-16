@@ -9,6 +9,36 @@ namespace Prospect.Tests;
 public sealed class FreeContainerWireTests
 {
     [Fact]
+    public void JettisonRequestHasExactBudgetAndRejectsTruncationAndInvalidSlot()
+    {
+        var bytes = new byte[EditorRequestMessage.JettisonWireSize];
+        var request = new EditorRequestMessage
+        {
+            Kind = EditorRequestKind.JettisonContainer,
+            Token = 3,
+            Hull = 7,
+            CargoRack = 42,
+            CargoIndex = 254,
+            CargoTick = 100
+        };
+        var writer = new NetWriter(bytes); request.Write(ref writer, default);
+        Assert.Equal(bytes.Length, writer.Written.Length);
+        var reader = new NetReader(bytes.AsSpan(1));
+        Assert.True(EditorRequestMessage.TryRead(ref reader, default, out var actual));
+        Assert.Equal(request.Kind, actual.Kind); Assert.Equal(request.Token, actual.Token);
+        Assert.Equal(request.Hull, actual.Hull); Assert.Equal(request.CargoRack, actual.CargoRack);
+        Assert.Equal(request.CargoIndex, actual.CargoIndex); Assert.Equal(request.CargoTick, actual.CargoTick);
+        for (var length = 1; length < bytes.Length; length++)
+        {
+            reader = new NetReader(bytes.AsSpan(1, length - 1));
+            Assert.False(EditorRequestMessage.TryRead(ref reader, default, out _));
+        }
+        bytes[14] = 255;
+        reader = new NetReader(bytes.AsSpan(1));
+        Assert.False(EditorRequestMessage.TryRead(ref reader, default, out _));
+    }
+
+    [Fact]
     public void MaximumSetRoundTripsWithinItsSeparateBudgetWithoutAllocation()
     {
         var content = GameContent.Load();
@@ -41,7 +71,7 @@ public sealed class FreeContainerWireTests
         {
             var writer = new NetWriter(bytes);
             FreeContainerMessage.Write(ref writer, 17, items);
-            length = writer.Length;
+            length = writer.Written.Length;
             var reader = new NetReader(writer.Written[1..]);
             valid = FreeContainerMessage.TryRead(ref reader, content, output, out tick, out count);
         }

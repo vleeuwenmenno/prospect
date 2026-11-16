@@ -145,6 +145,7 @@ public sealed class SessionSnapshot(GameContent content)
     public readonly float[] OwnTanks = new float[TankFuel.MaxTanks];
 
     /// <summary>Fixed storage behind the controlled hull cargo view.</summary>
+    public long OwnCargoTick;
     public readonly HoldContainer[] OwnCargo = new HoldContainer[BlockStateStore.MaxContainers];
 
     /// <summary>Snapshot-owned loose cargo, filtered by the server's sensor coverage.</summary>

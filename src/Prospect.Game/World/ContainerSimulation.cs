@@ -32,7 +32,7 @@ public sealed class ContainerSimulation
         }
         for (var n = 0; n < count && budget > 0; n++)
         {
-            ref var c = ref containers.At((first + n) % count);
+            var c = containers.At((first + n) % count);
             var half = FreeContainers.Half(content.Cargo, c.Size);
             for (var h = 0; h < field.Hulls.Slots && budget > 0; h++)
             {
@@ -70,6 +70,9 @@ public sealed class ContainerSimulation
                     break;
                 }
             }
+            var slot = containers.Find(c.Id);
+            if (slot < 0) continue;
+            containers.At(slot) = c;
             if (rocks.Galaxy.SectorOf(c.Position) != _coord) continue;
             var origin = rocks.Galaxy.CenterOf(_coord);
             for (var r = 0; r < _sector.AsteroidCount && budget > 0; r++)
@@ -83,6 +86,8 @@ public sealed class ContainerSimulation
                 FreeContainers.RockContact(ref c, content.Cargo, rock, position, velocity,
                     content.Rules.CollisionSafeSpeed, content.Rules.CollisionDamagePerTonneSpeedSquared);
             }
+            slot = containers.Find(c.Id);
+            if (slot >= 0) containers.At(slot) = c;
         }
         for (var i = containers.Items.Length - 1; i >= 0; i--)
             if (containers.Items[i].Hull <= 0) containers.Remove(i);

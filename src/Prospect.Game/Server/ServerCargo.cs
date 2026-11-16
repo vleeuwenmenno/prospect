@@ -47,7 +47,7 @@ public sealed partial class ServerHost
             var writer = new NetWriter(_sendBuffer);
             CargoMessage.Write(ref writer, c.Hull.Packed, info.Design, _tick, _hulls.BlockStates.Cargo(info.BlockState));
             if (c.Transport.Send(c.Peer, NetChannel.Reliable, writer.Written))
-            { c.CargoHull = c.Hull.Packed; c.CargoRevision = revision; }
+            { c.CargoHull = c.Hull.Packed; c.CargoRevision = revision; c.CargoTick = _tick; }
         }
     }
 }

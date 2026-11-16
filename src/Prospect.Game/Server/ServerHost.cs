@@ -293,6 +293,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         /// <summary>The slot of the durable owner this connection was let in as; -1 in a world that is not saved.</summary>
         public long WreckSettingsVersion;
         public uint CargoHull, CargoRevision;
+        public long CargoTick;
         public int OwnerSlot = -1;
         public readonly InputTimeline Inputs = new();
         public uint ControlEpoch = 1;
@@ -362,6 +363,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             OwnerSlot = -1;
             WreckSettingsVersion = 0;
             CargoHull = CargoRevision = 0;
+            CargoTick = 0;
             Inputs.Clear();
             ControlEpoch = 1;
             LastSimulatedSequence = 0;
@@ -579,6 +581,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             // A saved world's asteroids are bounded before they are pushed, never when they are saved.
             _rocks = new RockField(Galaxy, _saveLimits.MaxRocks, _saveLimits.MaxMovedSectors);
             _containerSimulation = new ContainerSimulation(Galaxy);
+            _hulls.BlockStates.CargoEjection = EjectDestroyedRack;
 
             // Room for the largest design the editor can add, taken now: a new design costs the tick no memory.
             _wreckSettings = new((int)(_content.Rules.WreckLifetimeTicks / 3600), _content.Rules.WreckMaxPerSector);
