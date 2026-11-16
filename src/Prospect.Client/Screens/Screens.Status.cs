@@ -1,6 +1,7 @@
 using Brutal.ImGuiApi;
 using Brutal.Numerics;
 using Prospect.Client.Ui;
+using Prospect.Client.World;
 using Prospect.Game.Client;
 using Prospect.Game.Protocol;
 using Prospect.Game.World;
@@ -148,16 +149,20 @@ internal sealed partial class ScreenHost
         return true;
     }
 
+    private const uint AlignLockSlideId = 0x414C_4947u;
+    private float _ownStatusChipWidth;
+
     /// <summary>
     /// The pilot's own status chip: a small plate above the left of the flight console naming what the ship is in
     /// (lightning cloud, sensors disrupted, cold cloud), pulsing with the icon while a burst is on. Shown only for
     /// a ship with a status. Beside the jump strip it keeps to the room left of it and drops its words for icons.
+    /// Returns the drawn width in scaled pixels, or zero when nothing is shown.
     /// </summary>
-    private void DrawOwnStatusChip(ImDrawListPtr draw, in HullView own, float alpha, bool pointable)
+    private float DrawOwnStatusChip(ImDrawListPtr draw, in HullView own, float alpha, bool pointable)
     {
         var environment = own.Environment;
         if (HullStatus.Count(environment) == 0)
-            return;
+            return 0f;
         var previous = Kit.Fade;
         Kit.Fade = alpha;
         var look = StatusLook;
@@ -181,5 +186,35 @@ internal sealed partial class ScreenHost
         Kit.Fade = previous;
         if (!wordsFit)
             DrawStatusTip(environment, left + pad, middle, pointable);
+        return inner;
+    }
+
+    /// <summary>
+    /// The auto-align lock tag in the bottom flight console cluster: sits in the status slot above the left of
+    /// the console, and slides smoothly aside when an environmental status chip occupies that slot.
+    /// </summary>
+    private void DrawAlignLockStatus(ImDrawListPtr draw, WorldView world, float alpha, float chipWidth)
+    {
+        if (chipWidth > 0f)
+            _ownStatusChipWidth = chipWidth / Kit.Scale;
+        var shift = Kit.Animate(AlignLockSlideId, chipWidth > 0f ? 1f : 0f);
+        if (!world.AlignLockOn)
+            return;
+
+        var previous = Kit.Fade;
+        Kit.Fade = alpha;
+        var layout = FlightConsole.Layout(_ui.DisplaySize, Kit.Scale);
+        var height = Kit.Px(HudLayout.ChipHeight);
+        var gap = Kit.Px(Theme.Space2);
+        var top = layout.Top - gap - height;
+        var slide = shift * (Kit.Px(_ownStatusChipWidth) + gap);
+        var x = MathF.Round(layout.LeftX + slide);
+
+        var tag = world.AlignLockKeyName.Length == 0 ? "AUTO-ALIGN"u8 : Kit.F($"AUTO-ALIGN [{world.AlignLockKeyName}]");
+        var paused = world.FreeLook || _app.PointerReleased;
+        var tagSize = Kit.Measure(_ui.SansMedium, Theme.FontCaption, tag);
+        var y = MathF.Round(top + (height - tagSize.Y) * 0.5f);
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(x, y), paused ? Theme.TextDim : Theme.Accent, tag);
+        Kit.Fade = previous;
     }
 }
