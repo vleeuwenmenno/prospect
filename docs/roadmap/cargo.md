@@ -78,6 +78,18 @@ Temporary local debug loading is available. Mining output is not built.
 - Clicking a tile shows its details: size, resource, mass, hit points, rack.
 - The details offer Jettison (abandon) and Jettison and keep claim.
 
+### Tractor turret and tiers
+
+- A tractor is a small turret on a face mount: a round base plate, a yoke that turns about the face normal,
+  and an emitter head that pitches between the yoke arms, with a recessed lens and coil rings.
+- The head aims at the container it holds, slewing smoothly; idle, it points straight out of the face.
+  Aiming is client look only; the server rule (reach, line of sight, power) is unchanged.
+- The beams start at the lens.
+- Tractors come in the same six tiers as sensors (Common to Alien Tech). A tier scales range, pull,
+  maximum mass and power draw. Multipliers are content, beside the sensor tiers.
+- The editor card shows the tier badge, as sensor cards do. The turret base carries the tier colour.
+- The editor's Storage category holds tanks, cargo racks and tractors.
+
 ## Open
 
 - **Towing huge chunks** outside the hull: tractor-held mass joins the ship's flight. It changes shared flight

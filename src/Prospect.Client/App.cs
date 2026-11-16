@@ -1288,7 +1288,7 @@ internal sealed class App : IDisposable
                 if (view == "edit-rack") World.PreviewCargo();
                 World.HoldPartGhostForCapture(view == "edit-rack" ? "cargo" : view == "edit-scanner" ? "asteroidScanner" : "bipropellantTank",
                     view switch { "edit-rack" => new GridSize(2, 2, 2), "edit-tank-long" => new GridSize(2, 1, 1), "edit-tank-slab" => new GridSize(2, 1, 2), _ => new GridSize(1, 1, 1) });
-                _screens.SelectEditorTab(view == "edit-rack" ? "Hull" : view == "edit-scanner" ? "Sensors" : "Tanks");
+                _screens.SelectEditorTab(view == "edit-scanner" ? "Sensors" : "Storage");
             }
             else if (view is "edit-palette-tip" or "edit-tank-fuel" && snapshot is { OwnHull: >= 0 })
             {
@@ -1304,7 +1304,7 @@ internal sealed class App : IDisposable
                 else
                 {
                     World.HoldPartGhostForCapture("hydrazineTank", new GridSize(1, 1, 1));
-                    _screens.SelectEditorTab("Tanks");
+                    _screens.SelectEditorTab("Storage");
                 }
             }
             else if (view is "edit-box-select" or "edit-select-all" && snapshot is { OwnHull: >= 0 })

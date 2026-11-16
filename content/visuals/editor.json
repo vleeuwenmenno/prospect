@@ -1,10 +1,10 @@
 {
   "categories": [
     { "name": "All", "icon": "grid", "tip": "Every part that fits this craft." },
-    { "name": "Hull", "icon": "cube", "roles": ["structure", "cargo", "crew", "tractor"], "tip": "Structure, cargo space and crew quarters." },
+    { "name": "Hull", "icon": "cube", "roles": ["structure", "crew"], "tip": "Structure and crew quarters." },
     { "name": "Power", "icon": "bolt", "roles": ["core", "power", "storage"], "tip": "The core, generators and batteries." },
     { "name": "Thrust", "icon": "nozzle", "roles": ["engine", "thruster", "gyro"], "tip": "Engines, thrusters, ion drives and gyros." },
-    { "name": "Tanks", "icon": "tank", "roles": ["tank"], "tip": "Fuel tanks for every fuel." },
+    { "name": "Storage", "icon": "tank", "roles": ["tank", "cargo", "tractor"], "tip": "Fuel tanks, cargo racks and tractor beams." },
     { "name": "Shield", "icon": "shield", "roles": ["shield"], "tip": "Shield emitters." },
     { "name": "Jump", "icon": "jump", "roles": ["drive"], "tip": "Jump drives." },
     { "name": "Sensors", "icon": "radar", "roles": ["module"], "tip": "Sensors, charting, scanners and the locator." }
