@@ -516,6 +516,7 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Up / down | `R`, `F` | Right / left trigger |
 | Look around | Mouse, or arrow keys | Right stick |
 | Free look (hull holds its heading) | Hold right mouse button | |
+| Turn the hull onto the view (hold, or click) | Left mouse button | |
 | Zoom camera | Mouse wheel | |
 | Roll | `Q` `E` | Bumpers |
 | Boost | `Space` | Left stick click |
@@ -548,7 +549,10 @@ row with focus is the one picked: `Enter` or a double-click joins it.
 
 The pointer turns the view, not the hull. The hull swings its nose onto the view line whenever it is under
 thrust, so looking around while coasting costs nothing; hold the right mouse button to look around under thrust
-without turning.
+without turning. The left mouse button turns the hull onto the view without thrust: held, it follows the view; a
+click keeps turning after release until the nose is within 2 degrees of the view (`alignStopDegrees` in
+`content/visuals/pilot.json`). Thrust, free look, a shown pointer (`Shift`) and a jump end it. It is the
+remappable action `AlignToView`.
 
 A ship near the reticle is bracketed; the middle mouse button targets it and shows its shield and hull. A target
 out of view, behind you, or under a panel, the jump strip or the console, shows as an arrow at the edge of the clear

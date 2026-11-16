@@ -12,6 +12,7 @@ internal enum InputAction
     ToggleFullscreen,
     Screenshot,
     Boost,
+    AlignToView,
     ToggleDampeners,
     ToggleCommand,
     ToggleMap,

@@ -548,6 +548,11 @@ The client opens a real window on the developer's desktop, and they are usually 
   shipped ship has a front-facing engine, a large one or a hot thruster: put them in a copy of the build's
   `command_pod.json` (with generators and a hydrazine tank, or the battery empties and throttle drops). The pod's
   thrusters are mounted four to a face: shield (right), cargo (left), quarters (up), core (down), charting (front).
+- `--align-at <s>` (scripted runs only) clicks the align button for 0.15 s that many seconds after the splash, through
+  `PilotAlign`, the latch the left mouse button (`AlignToView`) uses: the hull turns onto the view without thrust, so
+  `--look 60 --align-at 3 --capture-after 2.5 --capture-count 3 --capture-every 1.5` shows the world swinging after 3 s.
+  The stop angle is `content/visuals/pilot.json`; `PilotAlignTests` and `FrameOrderTests` hold the rules (pilot view,
+  pointer captured, no Shift, no free look, no jump, thrust ends it).
 - `--look <degrees>` holds the pilot camera that far to the right of the hull's nose, as free look would (`0`
   looks along the nose, `150` nearly back). Use it to check that an effect follows the hull, not the view.
 - `--target` targets the nearest other hull once in space (in a local game the Prospector, about 120 degrees to

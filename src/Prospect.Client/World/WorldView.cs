@@ -471,6 +471,9 @@ internal sealed class WorldView
     /// <summary>Flight keys a scripted run holds in the pilot view (<c>--thrust</c>); null for none.</summary>
     public ScriptedThrust? ScriptedThrust { get; set; }
 
+    /// <summary>Scripted runs only: whether the align button is down this frame; null when the run has no align click.</summary>
+    public bool? ScriptedAlignClick { get; set; }
+
     /// <summary>The flight figures of the hull the player is flying.</summary>
     public FlightParams OwnFlight => _designs[Math.Min(Own.Design, _designs.Length - 1)].Flight;
 
@@ -570,6 +573,7 @@ internal sealed class WorldView
     // Far gas: how it is levelled, and the clouds around the camera, which a worker keeps current.
     private readonly GasTiers _gasTiers = GasTiers.Load();
     private readonly ScanPulseLook _pulseLook = ScanPulseLook.Load();
+    private readonly PilotAlign _align = new(PilotTuning.Load().AlignStopCosine);
     private readonly ScanPulse _scanPulse;
     private readonly ScanWaves _scanWaves;
     private readonly GasCloudField _gasField;
@@ -885,6 +889,8 @@ internal sealed class WorldView
             }
         }
 
+        if (!(inputEnabled && !editing && Mode == ViewMode.Pilot))
+            _align.Clear();
         if (inputEnabled && !editing && Mode == ViewMode.Pilot)
         {
             controls.Strafe = _actions.Axis(_devices, InputAxis.Strafe, keyboard);
@@ -943,6 +949,16 @@ internal sealed class WorldView
             var thrusting = controls.Strafe != 0 || controls.Vertical != 0 || controls.Forward != 0;
             controls.Aim = _lookDirection;
             controls.Align = thrusting && !freeLook;
+
+            // The align button turns the hull onto the view without thrust. Only with the pointer captured (a shown
+            // pointer's click belongs to windows and, later, turret aim), never in free look, and never in a jump,
+            // where the server holds the nose. Thrust already aligns, so it just ends a standing click.
+            var alignBlocked = freeLook || thrusting || _devices.SuppressMouse
+                || Own.Jump != JumpPhase.None || Own.Order.Kind == OrderKind.Jump;
+            var alignHeld = _actions.Held(_devices, InputAction.AlignToView, keyboard);
+            var nose = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
+            if (_align.Update(alignHeld && !alignBlocked, alignBlocked, nose, _lookDirection))
+                controls.Align = true;
         }
         else if (inputEnabled && !editing)
         {
@@ -985,6 +1001,19 @@ internal sealed class WorldView
                 var hullUp = Vector3.Transform(Vector3.UnitY, OwnOrientation);
                 var hullRight = Vector3.Transform(Vector3.UnitX, OwnOrientation);
                 controls.Aim = Vector3.Transform(nose, Quaternion.CreateFromAxisAngle(Vector3.Normalize(hullUp + hullRight), 0.2f));
+            }
+        }
+
+        // A scripted run's input is off, so its align click is fed here, after the held look is applied, through the
+        // same latch the button uses.
+        if (ScriptedAlignClick is { } clicked && !editing && Mode == ViewMode.Pilot)
+        {
+            var scriptedNose = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
+            var blocked = Own.Jump != JumpPhase.None || Own.Order.Kind == OrderKind.Jump;
+            if (_align.Update(clicked && !blocked, blocked, scriptedNose, _lookDirection))
+            {
+                controls.Aim = _lookDirection;
+                controls.Align = true;
             }
         }
 
