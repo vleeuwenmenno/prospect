@@ -32,6 +32,9 @@ public sealed unsafe partial class BlockStateStore
         return total;
     }
 
+    /// <summary>Changes whenever hold contents or placement change, including rack loss.</summary>
+    public uint CargoRevision(BlockStateHandle handle) => Find(handle)->CargoRevision;
+
     private static void RemoveCargoOf(Header* header, int rack)
     {
         var containers = CargoOf(header);
@@ -39,6 +42,7 @@ public sealed unsafe partial class BlockStateStore
         for (var i = 0; i < header->CargoCount; i++)
             if (containers[i].Rack != rack) containers[kept++] = containers[i];
         containers.Slice(kept, header->CargoCount - kept).Clear();
+        if (header->CargoCount != kept) header->CargoRevision++;
         header->CargoCount = kept;
     }
 
@@ -78,6 +82,7 @@ public sealed unsafe partial class BlockStateStore
         if (!CargoPacking.TryPack(content.Cargo, design.Boxes[container.Rack].Size, design.BlockSize,
             sizes[..count], occupied, placements)) return false;
         containers[header->CargoCount++] = container;
+        header->CargoRevision++;
         for (var i = 0; i < count; i++)
             containers[indices[i]] = containers[indices[i]] with { At = placements[i].At };
         return true;

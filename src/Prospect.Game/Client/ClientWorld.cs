@@ -343,7 +343,7 @@ internal sealed partial class ClientWorld : IDisposable
         if (_hasOwnState)
         {
             // The sums do not depend on a world's rules; the figures read off them do.
-            OwnDesign.Figures(_blocks.Sums(_ownBlocks), out _flight, out _stats);
+            OwnDesign.Figures(_blocks.Sums(_ownBlocks), out _flight, out _stats, _blocks.Cargo(_ownBlocks));
         }
         else
         {
@@ -624,7 +624,7 @@ internal sealed partial class ClientWorld : IDisposable
         if (ApplyLosses(_ownBlocks, _replica.Losses(own.Id)))
         {
             // The hull has lost blocks: it flies on what is left.
-            OwnDesign.Figures(_blocks.Sums(_ownBlocks), out _flight, out _stats);
+            OwnDesign.Figures(_blocks.Sums(_ownBlocks), out _flight, out _stats, _blocks.Cargo(_ownBlocks));
         }
 
         _ownHealth = own.HasHealth;
@@ -883,7 +883,7 @@ internal sealed partial class ClientWorld : IDisposable
         // Another hull, so another block state: the old hull's goes back, and it is heard of as a remote from here on.
         _blocks.Release(_ownBlocks);
         _ownBlocks = TakeBlocks(OwnDesign, _replica.Losses(record.Id));
-        OwnDesign.Figures(_blocks.Sums(_ownBlocks), out _flight, out _stats);
+        OwnDesign.Figures(_blocks.Sums(_ownBlocks), out _flight, out _stats, _blocks.Cargo(_ownBlocks));
         _hasOwnState = false;
         _correction = Vector3.Zero;
         SetOrder(default);
@@ -1131,7 +1131,7 @@ internal sealed partial class ClientWorld : IDisposable
             && _near.State(0).Jump == JumpPhase.None)
         {
             ref var own = ref _near.Info(0);
-            OwnDesign.Figures(_near.BlockStates.Sums(own.BlockState), out _, out var stats);
+            OwnDesign.Figures(_near.BlockStates.Sums(own.BlockState), out _, out var stats, _near.BlockStates.Cargo(own.BlockState));
             ModuleScanRules.Spend(ref _near.State(0).Energy, stats.Module(scan.Family), ref own.Power);
         }
         order = _near.Info(0).Order;

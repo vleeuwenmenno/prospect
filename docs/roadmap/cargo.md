@@ -21,6 +21,7 @@ There is no cargo inventory, mining yield or pickup yet.
 - One resource per container. A hold fills up either by volume or because it carries too many kinds at once.
 - A container has its own hull points. Collisions and weapons can destroy it, and its contents go with it.
 - Cargo mass counts toward flight: a full hold makes the ship heavier.
+  Flight treats the payload as uniformly distributed through its rack for centre of mass and diagonal inertia.
 
 ### Hold state decisions
 
@@ -93,6 +94,7 @@ Deferred: drone launcher, tractor filter.
 - `BlockStateStore.Cargo` provides fixed storage for up to 255 containers on a hull with racks.
   Adds validate payload and health, and repack atomically through `CargoPacking` without allocating.
   Block-state copies preserve containers; losing a block removes only that rack's containers.
-- This storage has no gameplay caller yet. Cargo flight mass, replication, save/restore, edit retention/refusal,
+- Shared flight includes cargo mass and inertia; server and prediction use the same figures.
+- This storage has no gameplay loading caller yet. Replication, save/restore, edit retention/refusal,
   debug loading and live drawing remain unbuilt. Protocol 55 and codec 9 are unchanged.
   Current content identity rules still refuse incompatible saves; retune migration is not implemented.

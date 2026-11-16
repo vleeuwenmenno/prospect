@@ -68,6 +68,7 @@ public sealed unsafe partial class BlockStateStore : IDisposable
         public int Tanks;
         public int CargoCount;
         public int CargoCapacity;
+        public uint CargoRevision;
     }
 
     private struct Slot

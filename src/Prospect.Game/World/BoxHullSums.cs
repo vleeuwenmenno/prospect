@@ -482,12 +482,27 @@ public sealed class BoxHullSums
     /// Constant time. The first drive left in file order decides the kind of drive; only drives of that kind
     /// supply jump power.
     /// </summary>
-    public void Evaluate(ReadOnlySpan<HullSum> sums, FlightRules rules, out FlightParams flight, out HullStats stats)
+    public void Evaluate(ReadOnlySpan<HullSum> sums, FlightRules rules, out FlightParams flight, out HullStats stats, ReadOnlySpan<HoldContainer> cargo = default)
     {
         if (sums.Length != NodeCount)
             throw new ArgumentException("The sums were not sized for this design.", nameof(sums));
 
-        ref readonly var sum = ref sums[0];
+        var sum = sums[0];
+        foreach (var container in cargo)
+        {
+            // Payload is distributed uniformly through its rack for mass, centre and diagonal inertia.
+            var box = _boxes[container.Rack];
+            var centerOfRack = _design.Offset(box);
+            var dimensions = new Vector3(box.Size.X, box.Size.Y, box.Size.Z) * _design.BlockSize;
+            var tonnes = container.Amount / 1000.0;
+            double x = centerOfRack.X, y = centerOfRack.Y, z = centerOfRack.Z;
+            double sx = dimensions.X, sy = dimensions.Y, sz = dimensions.Z;
+            sum.Values[Mass] += tonnes;
+            sum.Values[MomentX] += tonnes * x; sum.Values[MomentY] += tonnes * y; sum.Values[MomentZ] += tonnes * z;
+            sum.Values[InertiaX] += tonnes * (y * y + z * z + (sy * sy + sz * sz) / 12);
+            sum.Values[InertiaY] += tonnes * (x * x + z * z + (sx * sx + sz * sz) / 12);
+            sum.Values[InertiaZ] += tonnes * (x * x + y * y + (sx * sx + sy * sy) / 12);
+        }
         var size = _design.BlockSize;
         var mass = Math.Max((float)sum.Values[Mass], 0.01f);
         var actualMass = sum.Values[Mass];

@@ -804,7 +804,8 @@ public sealed class HullDesign
     /// A hull's flight figures and data sheet read off its sums, in the world the design was evaluated for.
     /// Constant time: this is what a hull is refitted with when it loses blocks.
     /// </summary>
-    public void Figures(ReadOnlySpan<HullSum> sums, out FlightParams flight, out HullStats stats) => Sums.Evaluate(sums, _rules, out flight, out stats);
+    public void Figures(ReadOnlySpan<HullSum> sums, out FlightParams flight, out HullStats stats, ReadOnlySpan<HoldContainer> cargo = default) =>
+        Sums.Evaluate(sums, _rules, out flight, out stats, cargo);
 
     private void Apply(FlightRules rules)
     {

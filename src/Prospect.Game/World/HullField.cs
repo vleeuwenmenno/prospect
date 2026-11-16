@@ -197,7 +197,10 @@ public sealed class HullField
         {
             _participants[i] = _hulls.HandleAt(i);
             if (_hulls.IsAliveAt(i))
+            {
+                if (_hulls.Info(i).BlockState.IsValid) Refit(i);
                 HullSim.AdvanceShieldClock(ref _hulls.State(i));
+            }
         }
     }
 
@@ -268,6 +271,7 @@ public sealed class HullField
         ref var own = ref _hulls.State(index);
         var from = own.Position;
         IsFirstStep = info.Round != _round;
+        Refit(index);
         var body = Body(index);
         body.ContactTick = (long)tick;
         var destroyed = HullSim.Step(ref own, ref info.Order, input, _hulls.Flight(index), ref body, rocks, tick, impulses, this);
@@ -343,8 +347,8 @@ public sealed class HullField
     {
         ref var info = ref _hulls.Info(index);
         info.FittedRevision = _hulls.Revision(index);
-        if (info.FittedRevision != 0)
-            _designs[info.Design].Figures(_hulls.BlockStates.Sums(info.BlockState), out _hulls.Flight(index), out _);
+        info.FittedCargoRevision = _hulls.BlockStates.CargoRevision(info.BlockState);
+        _designs[info.Design].Figures(_hulls.BlockStates.Sums(info.BlockState), out _hulls.Flight(index), out _, _hulls.BlockStates.Cargo(info.BlockState));
         if (info.Wreck) _hulls.Flight(index).MakeWreck();
         _hulls.State(index).Fuel = TankFuel.Total(_hulls.BlockStates.Tanks(info.BlockState), _designs[info.Design].Tanks);
     }
@@ -359,13 +363,14 @@ public sealed class HullField
     {
         ref var info = ref _hulls.Info(index);
         var revision = _hulls.Revision(index);
-        if (revision == info.FittedRevision)
+        if (revision == info.FittedRevision && info.FittedCargoRevision == _hulls.BlockStates.CargoRevision(info.BlockState))
             return;
 
         info.FittedRevision = revision;
+        info.FittedCargoRevision = _hulls.BlockStates.CargoRevision(info.BlockState);
         var hadShield = _hulls.Flight(index).ShieldCapacity > 0f;
         var oldCenter = _hulls.Flight(index).CenterOfMass;
-        _designs[info.Design].Figures(_hulls.BlockStates.Sums(info.BlockState), out _hulls.Flight(index), out _);
+        _designs[info.Design].Figures(_hulls.BlockStates.Sums(info.BlockState), out _hulls.Flight(index), out _, _hulls.BlockStates.Cargo(info.BlockState));
         ref var flight = ref _hulls.Flight(index);
         if (info.Wreck) flight.MakeWreck();
         ref var state = ref _hulls.State(index);

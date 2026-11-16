@@ -57,6 +57,9 @@ public struct HullInfo
     /// has moved past it the hull has lost blocks since, and <see cref="HullField"/> fits the figures again.
     /// </summary>
     public uint FittedRevision;
+
+    /// <summary>The hold revision included in the cached flight figures.</summary>
+    public uint FittedCargoRevision;
     public HullOrder Order;
 
     /// <summary>Where the hull's power went in its last step, for the pilot's readout; never sent or saved.</summary>
