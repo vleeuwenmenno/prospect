@@ -227,7 +227,13 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `MergeCheck`, `SelectionIsTanks`, `CanChangeFuel`, `SplitPieces`, `CanSplit`) so the window (`Screens.EditorMenu.cs`)
   and the action cannot differ. A press outside it closes it and goes no further (`UpdateEditorControls`, as for
   `CourseMenu`); Escape closes it first (`ShipEditor.HandleKeys`); any edit, `Cancel`, `Reset` and `Close` close it.
-  `ClearHover` must not (the pointer over the menu clears the hover). Fuel and Split are `BuildDraft.SwapTank` and
+  `ClearHover` must not (the pointer over the menu clears the hover). The window is `EditorMenuPanel` (the screens
+  hold one; `FrameOrderTests` draws the same class). A row acts on release, and the held press claims the keyboard,
+  which the frame loop reads as a surface over the world and which would close the menu first: the panel sets
+  `EditorMenu.Pressing` while a row is held and `WorldView.HoldsInterfacePress` lets the world run through it. The
+  flyout opens at once from none, but another row takes it over (or away) only after the pointer has rested on that
+  row `EditorMenuPanel.FlyoutSwitchSeconds`, so a diagonal path from Fuel to a fuel keeps it. `FrameOrderTests` clicks
+  Fuel, Split and Delete through the real pointer path. Fuel and Split are `BuildDraft.SwapTank` and
   `Split`: the tank type of a fuel is found from the data (`TankType`: `BlockType.Tank` and `FitsClass`, never ids;
   `TankFuels` lists them), a split keeps the first piece at the block's index and appends the rest, mounts follow the
   piece they sit on or go (`DraftEdit.NotATank` for a block that is no tank). Neither, nor resize, is mirrored (as

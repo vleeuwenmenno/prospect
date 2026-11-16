@@ -38,6 +38,13 @@ internal sealed class EditorMenu
     /// <summary>The flyout that is out.</summary>
     public EditorMenuSub Sub { get; set; }
 
+    /// <summary>
+    /// True while a press that began on one of the menu's rows is held, set by the window as it is drawn. The held
+    /// button claims the keyboard, and the frame loop would take that for a surface over the world, which closes the
+    /// menu before the release the row acts on (<see cref="WorldView.HoldsInterfacePress"/>).
+    /// </summary>
+    public bool Pressing { get; set; }
+
     /// <summary>Seconds the editor had run, at the frame the menu opened; the screens ease it in from this.</summary>
     public float OpenedAt { get; private set; }
 
@@ -57,6 +64,7 @@ internal sealed class EditorMenu
     {
         var was = IsOpen;
         IsOpen = false;
+        Pressing = false;
         Sub = EditorMenuSub.None;
         return was;
     }

@@ -79,6 +79,7 @@ public sealed class FrameOrderTests : IDisposable
     private int _buttonClicks;
     private long _tick;
     private bool _surfaceOpen;
+    private EditorMenuPanel? _editorMenu;
 
     // The map with its unit list, drawn instead of the quick buttons while set, and what the map took from it.
     private bool _mapShown;
@@ -578,6 +579,12 @@ public sealed class FrameOrderTests : IDisposable
         // As the editor screen does before its panels: a press on one ends a turn, keeping it.
         _world.EndPartRotationOnPanelPress();
         DrawPalette();
+        // The editor's context menu last among the editor's windows, as the editor screen draws it: the production panel.
+        if (_editorMenu is { } menuPanel && _world.Editor is { Shown: true, Draft: { } menuDraft })
+        {
+            Kit.BeginFrame(_tipKit!);
+            menuPanel.Draw(_world.Editor, menuDraft, _devices.MousePosition);
+        }
 
         // The quick buttons, drawn after the world as ScreenHost draws them.
         ImGui.SetNextWindowPos(ButtonMin);
@@ -8331,5 +8338,189 @@ public sealed class FrameOrderTests : IDisposable
         Assert.False(editor.ResizingBlock);
         Assert.Equal(ResizeOffer.Several, editor.ResizeState);
         EditorFrame(() => Key(GlfwKey.S, false));
+    }
+
+    // ---- The editor's context menu through the real pointer path ----
+
+    /// <summary>The flat sequence a hand makes: <paramref name="steps"/> moves from where the pointer is to <paramref name="to"/>, a frame each.</summary>
+    private void Glide(float2 to, int steps = 8)
+    {
+        var from = _devices.MousePosition;
+        for (var i = 1; i <= steps; i++)
+        {
+            var at = from + (to - from) * (i / (float)steps);
+            EditorFrame(() => Move(at));
+        }
+    }
+
+    /// <summary>A left click as a hand makes it: down, held for a few frames, up.</summary>
+    private void HoldClick(int held = 6)
+    {
+        var log = new StringBuilder();
+        void Note(string what) => log.Append($"{what}: open={_world.Editor.Menu.IsOpen} sub={_world.Editor.Menu.Sub} overUi={_router.PointerOverInterface} kbd={ImGui.GetIO().WantCaptureKeyboard} mouse={ImGui.GetIO().WantCaptureMouse}\n");
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        Note("down");
+        for (var i = 0; i < held; i++)
+        {
+            EditorFrame();
+            Note("held");
+        }
+
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        Note("up");
+        _holdLog = log.ToString();
+    }
+
+    private string _holdLog = "";
+
+    /// <summary>Opens the editor, puts the production menu panel in the frame and right-clicks a tank: the menu is open on it after.</summary>
+    private int OpenMenuOnATank(bool longer = false)
+    {
+        UseTips();
+        _editorMenu = new EditorMenuPanel(_tipKit!);
+        OpenEditor();
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var editor = _world.Editor;
+        var boxes = editor.Draft!.Boxes;
+        _world.Editor.StopPlacing();
+        var only = -1;
+        // A tank made one cell longer, so Split has a cut to offer.
+        for (var block = 0; longer && only < 0 && block < boxes.Length; block++)
+            for (var side = 0; side < 6 && boxes[block].Type.Tank != FuelKind.None && only < 0; side++)
+                if (editor.Draft.CanResize(block, side, EditorGeometry.Of(boxes[block].Size, side >> 1) + 1) == DraftEdit.Done)
+                {
+                    Assert.Equal(DraftEdit.Done, editor.Draft.Resize(block, side, EditorGeometry.Of(boxes[block].Size, side >> 1) + 1));
+                    only = block;
+                }
+
+        Assert.True(!longer || only >= 0, "a tank can grow a cell");
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        boxes = editor.Draft.Boxes;
+        for (var block = 0; block < boxes.Length; block++)
+        {
+            if ((only >= 0 && block != only) || boxes[block].Type.Tank == FuelKind.None || !_world.Project(_world.EditorPoint(EditorGeometry.Middle(boxes[block])), out var at))
+                continue;
+            EditorFrame(() => Move(at));
+            EditorFrame(() => Button(GlfwMouseButton.Right, true));
+            EditorFrame(() => Button(GlfwMouseButton.Right, false));
+            if (editor.Menu.IsOpen && editor.Menu.Block >= 0 && editor.Draft.Boxes[editor.Menu.Block].Type.Tank != FuelKind.None)
+            {
+                for (var i = 0; i < 30; i++)
+                    EditorFrame();
+                return editor.Menu.Block;
+            }
+
+            EditorFrame(() => Key(GlfwKey.Escape, true));
+            EditorFrame(() => Key(GlfwKey.Escape, false));
+        }
+
+        Assert.Fail("no tank could be right-clicked");
+        return -1;
+    }
+
+    private float2 MenuRow(EditorMenuPanel.EditorMenuRow row)
+    {
+        Assert.True(_editorMenu!.TryRowCentre(row, out var at), $"the menu has no {row} row");
+        return at;
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AClickOnAFuelInTheMenusFlyoutChangesTheTankAndClosesTheMenu(bool diagonal)
+    {
+        var block = OpenMenuOnATank();
+        var editor = _world.Editor;
+        var was = editor.Draft!.Boxes[block].Type.Tank;
+        Span<FuelKind> choices = stackalloc FuelKind[4];
+        var count = editor.FuelChoices(choices);
+        var pick = -1;
+        for (var i = 0; i < count; i++)
+            if (choices[i] != was && editor.CanChangeFuel(choices[i]) == DraftEdit.Done)
+                pick = i;
+        Assert.True(pick >= 0, "the pod has another fuel to change a tank to");
+        var target = choices[pick];
+
+        // The pointer goes to Fuel, rests, then to the last fuel of the flyout along a straight line.
+        Glide(MenuRow(EditorMenuPanel.EditorMenuRow.Fuel));
+        for (var i = 0; i < 6; i++)
+            EditorFrame();
+        Assert.Equal(EditorMenuSub.Fuel, editor.Menu.Sub);
+        Assert.True(_editorMenu!.TrySubRowCentre(pick, out var row));
+        Assert.True(_editorMenu.TrySubRowCentre(0, out var first));
+        // Straight at the row, or across to the flyout's first row and then down it.
+        if (!diagonal)
+            Glide(first);
+        Glide(row);
+        Assert.True(editor.Menu.IsOpen, "the menu stays while the pointer goes to the flyout");
+        Assert.Equal(EditorMenuSub.Fuel, editor.Menu.Sub);
+        HoldClick();
+        Assert.True(target == editor.Draft.Boxes[block].Type.Tank, _holdLog);
+        Assert.False(editor.Menu.IsOpen);
+    }
+
+    [Fact]
+    public void AClickOnSplitInTheMenusFlyoutCutsTheTankAndClosesTheMenu()
+    {
+        var block = OpenMenuOnATank(longer: true);
+        var editor = _world.Editor;
+        var before = DraftBlocks;
+        // On the way to Split the pointer crosses Fuel, whose flyout is out until it has rested on Split a moment.
+        Glide(MenuRow(EditorMenuPanel.EditorMenuRow.Split));
+        for (var i = 0; i < 20; i++)
+            EditorFrame();
+        Assert.Equal(EditorMenuSub.Split, editor.Menu.Sub);
+        Assert.True(_editorMenu!.TrySubRowCentre(0, out var first));
+        Glide(first);
+        Assert.Equal(EditorMenuSub.Split, editor.Menu.Sub);
+        HoldClick();
+        Assert.True(DraftBlocks > before, _holdLog);
+        Assert.False(editor.Menu.IsOpen);
+        Assert.True(block >= 0);
+    }
+
+    [Fact]
+    public void AClickOnARowOfTheMenuActsOnReleaseAndClosesTheMenu()
+    {
+        OpenMenuOnATank();
+        var editor = _world.Editor;
+        var before = DraftBlocks;
+        Glide(MenuRow(EditorMenuPanel.EditorMenuRow.Delete));
+        for (var i = 0; i < 3; i++)
+            EditorFrame();
+        HoldClick();
+        Assert.True(DraftBlocks == before - 1, _holdLog);
+        Assert.False(editor.Menu.IsOpen);
+    }
+
+    [Fact]
+    public void TheFlyoutStaysWhileThePointerCrossesOtherRowsAndGivesWayOnlyWhenItRestsOnOne()
+    {
+        OpenMenuOnATank(longer: true);
+        var editor = _world.Editor;
+        Glide(MenuRow(EditorMenuPanel.EditorMenuRow.Fuel));
+        EditorFrame();
+        Assert.Equal(EditorMenuSub.Fuel, editor.Menu.Sub);
+
+        // Passing over Split and Delete on the way, a quick sweep leaves the flyout where it is.
+        Glide(MenuRow(EditorMenuPanel.EditorMenuRow.Delete), 6);
+        Assert.Equal(EditorMenuSub.Fuel, editor.Menu.Sub);
+
+        // Resting on Delete takes it away; resting on Split brings the other one out; Fuel again, at once from none.
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        Assert.Equal(EditorMenuSub.None, editor.Menu.Sub);
+        // With none out, a row that has a flyout opens it at once (the way up crosses Split first); resting on Fuel then takes it over.
+        Glide(MenuRow(EditorMenuPanel.EditorMenuRow.Fuel), 4);
+        for (var i = 0; i < 20; i++)
+            EditorFrame();
+        Assert.Equal(EditorMenuSub.Fuel, editor.Menu.Sub);
+        Glide(MenuRow(EditorMenuPanel.EditorMenuRow.Split), 2);
+        Assert.Equal(EditorMenuSub.Fuel, editor.Menu.Sub);
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        Assert.Equal(EditorMenuSub.Split, editor.Menu.Sub);
     }
 }

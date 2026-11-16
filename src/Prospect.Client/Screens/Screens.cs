@@ -45,6 +45,7 @@ internal sealed partial class ScreenHost
     {
         _app = app;
         _ui = ui;
+        _editorMenu = new EditorMenuPanel(ui);
         InitializeJoin();
         InitializeControls();
         InitializeNewGame();
