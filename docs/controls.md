@@ -20,6 +20,8 @@ How the two Controls screens and the remap work. Rules for changing them are in 
 - Escape cancels a capture. A left click cancels it too, so the left button cannot be bound.
 - A clash is the same control in two slots whose `scope` views overlap. Space on Boost (Pilot) and Follow (Command,
   Editor) is no clash. Choices: Swap, Clear the other, Cancel.
+- `V` is the align lock (Pilot scope): the hull follows the view while it is on. `V` is also Map tilt; their scopes
+  do not overlap, so it is no clash. It is per session and not saved.
 - Actions marked `required` (Menu / back) keep their last control.
 - An action holds up to four controls. An axis half holds one.
 

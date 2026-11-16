@@ -577,6 +577,12 @@ click keeps turning after release until the nose is within 2 degrees of the view
 `content/visuals/pilot.json`). Thrust, free look, a shown pointer (`Shift`) and a jump end it. It is the
 remappable action `AlignToView`.
 
+`V` turns the align lock on and off (remappable action `AlignLock`; per session, it starts off in every world).
+While on, the hull follows the view as if the left button were held, and an `AUTO-ALIGN [V]` tag shows above the
+reticle. Free look (right mouse button) and a shown pointer (`Shift`) pause it (the tag dims for them), a jump
+holds it off, and the command view, map and editor keep its state but never act on it. Turning it off stops the
+turn at once.
+
 A ship near the reticle is bracketed; the middle mouse button targets it and shows its shield and hull. A target
 out of view, behind you, or under a panel, the jump strip or the console, shows as an arrow at the edge of the clear
 part of the view pointing the way to turn; it slides back into the bracket as the target comes into view. The
