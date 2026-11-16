@@ -396,6 +396,9 @@ internal sealed partial class ClientWorld : IDisposable
     /// Predicts one tick and sends input. When sendCommands is false, reliable control/fleet intents stay queued
     /// until the session receives a newer server snapshot, so catch-up ticks cannot spend the allowance again.
     /// </summary>
+    private WreckSettingsMessage _pendingWreckSettings;
+    private bool _hasWreckSettings;
+
     public void Tick(PlayerInputBridge bridge, ITransport transport, double serverTick, bool sendCommands = true, long clientTick = -1, float roundTripMs = 0)
     {
 
@@ -431,9 +434,14 @@ internal sealed partial class ClientWorld : IDisposable
         var fleetOrderCount = sendCommands ? bridge.ConsumeFleetOrders(fleetOrders) : 0;
         if (sendCommands && bridge.ConsumeWreckSettings(out var wreckSettings))
         {
+            _pendingWreckSettings = wreckSettings;
+            _hasWreckSettings = true;
+        }
+        if (sendCommands && _hasWreckSettings)
+        {
             var writer = new NetWriter(_fleetBuffer);
-            wreckSettings.Write(ref writer);
-            if (!transport.Send(0, NetChannel.Reliable, writer.Written)) bridge.RequestWreckSettings(wreckSettings);
+            _pendingWreckSettings.Write(ref writer);
+            if (transport.Send(0, NetChannel.Reliable, writer.Written)) _hasWreckSettings = false;
         }
         if (sendCommands && bridge.ConsumeControlRequest(out var controlHull))
         {

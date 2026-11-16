@@ -142,7 +142,11 @@ public sealed class DesignTransferTests
         var indices = new ushort[GeometryAdmission.MaxIndices];
         Assert.True(shell.Build(design, alive, design.ShellShape, output, indices, out _) is -1 or > 0);
         var ray = Vector3.UnitZ;
-        var eye = design.BlockOffsets[298] - ray * 20;
+        // Detached blocks now belong to wrecks; pick a block the retained ship still has.
+        var retained = 0;
+        for (var block = 0; block < design.BlockCount; block++)
+            if (BlockSet.Has(alive, block)) retained = block;
+        var eye = design.BlockOffsets[retained] - ray * 20;
         var pick = new PickHull(1, default, Quaternion.Identity, design.BlockOffsets, design.BlockSize,
             alive, design.Flight.Radius, HalfExtents: design.BlockHalfExtents);
         Assert.Equal(1, TargetPicking.Pick(ray, new(eye.X, eye.Y, eye.Z), ray, 1000, [pick], [], new PickHit[1]));

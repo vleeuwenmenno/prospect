@@ -32,6 +32,8 @@ public sealed class EditorSessionTests
     {
         using var rig = new Rig(clients: 1, joined: 1, wreckFixture: true);
         var own = Rig.Index(rig.Own(0));
+        rig.Hulls.State(own).AngularVelocity = new Vector3(0, 0.3f, 0);
+        rig.Hulls.State(own).Velocity = new Vector3(2, 0, 0);
         rig.Hulls.BlockStates.Lose(rig.Hulls.Info(own).BlockState, 2);
         rig.Step(120);
         var wreck = WreckageTests.Wreck(rig.Hulls);

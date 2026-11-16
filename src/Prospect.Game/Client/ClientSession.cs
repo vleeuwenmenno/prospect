@@ -241,6 +241,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         _loaded = content;
         _cache = new DesignCatalogue(content);
         _content = content;
+        _wreckSettings = new((int)(content.Rules.WreckLifetimeTicks / 3600), content.Rules.WreckMaxPerSector);
         _snapshots = new SnapshotExchange<SessionSnapshot>(() => new SessionSnapshot(content));
         _world = new ClientWorld(content);
         _playerName = PlayerNames.Sanitize(playerName);
@@ -257,7 +258,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     public SessionSnapshot AcquireSnapshot() => _snapshots.Acquire(out _);
 
     /// <summary>Where the input thread delivers the player's controls and orders.</summary>
-    private WreckSettingsMessage _wreckSettings = new(30, 64);
+    private WreckSettingsMessage _wreckSettings;
     public PlayerInputBridge Input { get; } = new();
 
     /// <summary>Asks the session to leave the server. Safe from any thread; takes effect on the next tick.</summary>
