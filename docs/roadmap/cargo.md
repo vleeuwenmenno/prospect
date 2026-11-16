@@ -109,6 +109,19 @@ Temporary local debug loading is available. Mining output is not built.
 - The editor card shows the tier badge, as sensor cards do. The turret base carries the tier colour.
 - The editor's Storage category holds tanks, cargo racks and tractors.
 
+### Implementation: tractor tiers
+
+- Six block types: `tractorBeam` (Common), then suffixes `Uncommon`, `Rare`, `Epic`, `Legendary`, `AlienTech`.
+  Each has `tractor.quality`, using the same quality names and `ModuleQuality` enum as modules.
+- `tractorTiers` multiplies range, acceleration, maxMass and power at load time.
+  Power scales both basePower and powerPerTonne. Invalid quality, nonfinite/nonpositive multipliers and oversized results refuse content.
+- Common multipliers are 1/1/1/1; Uncommon 1.2/1.25/1.5/1.1; Rare 1.4/1.5/2.5/1.2.
+  Epic is 1.7/2/4/1.35; Legendary 2/2.5/6/1.5; Alien Tech 2.5/3.5/10/1.7.
+- Shared reach, plan, pull, power prediction and editor preview read each mount's evaluated `TractorSpec`.
+  Content and save identities cover the table; evaluator 17 rejects older arithmetic. Protocol remains 62; codec remains 15.
+- All six types appear through the existing Storage palette. Existing emitter models are reused through content entries.
+  Tier badges need new drawing: the sensor card is module-specific. Badge, turret aiming and tier-colour visuals remain separate work.
+
 ## Open
 
 - **Towing huge chunks** outside the hull: tractor-held mass joins the ship's flight. It changes shared flight
