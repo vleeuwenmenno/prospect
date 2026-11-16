@@ -35,7 +35,15 @@ Temporary local debug loading is available. Mining output is not built.
 
 ### Racks
 
-- The cargo block becomes a rack: an open frame, mostly empty space.
+- The cargo block becomes a rack: a loading deck, not a frame. Visual only; collision, shield, picking and tractor reach stay block-based.
+- The deck is a solid plate on one face. Every other side is open, so tractors see in and it reads as a loading bay.
+- Which face: the face that touches the hull. With several, the -Y face if it is one of them, else the lowest face. With none, -Y.
+  The same rule (`RackDeck`) serves hull meshes, the editor's draft, ghosts and far hulls. Racks are box-only and never turned.
+- Two low rails run along the deck's longest axis. Thin posts stand at the four corners. Small lights sit on the rails and post tops.
+- Each stowed container carries four clamp jaws on the sides next to the deck, with a light that shows them closed.
+  An empty slot has none, so an empty rack is a clean deck with rails.
+- Every deck thickness fits the clearance a container keeps from its slot wall, so no part sinks into a container.
+- Proportions and colours are the `rack` entry of `visuals/propulsion.json`, checked on load.
 - Containers placed in a rack are drawn there. The rack's size decides which containers fit.
 - In the hold, containers are slots kept by the server, not physics objects. The server places them by a fixed rule.
 
@@ -165,7 +173,7 @@ Deferred: drone launcher, tractor filter.
   Caller supplies occupancy and placement buffers; output is canonical size order, independent of input order.
 - The existing `cargo` id is a box-only ship rack in Hull. Capacity is u, linearly scaled (8 u per cell).
   Retuning the grid requires matching the cargo stat; loading rejects mismatches. No drone rack yet.
-- Worker-built rack frames and reusable ribbed container models use the `rack` look in `visuals/propulsion.json`.
+- Worker-built rack decks, clamp jaws (per size and deck face) and reusable ribbed container models use the `rack` look in `visuals/propulsion.json`.
   `--open edit-rack` remains a visual sample. `--open cargo` and `edit-cargo` add real containers through the server for captures.
 
 ### Hold state, wire and save

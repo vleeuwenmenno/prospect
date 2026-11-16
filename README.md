@@ -14,7 +14,7 @@ or that local game opened to other players. There is one simulation and one code
 Ships split into unowned wrecks when block loss disconnects shared faces. Wrecks retain HP, fuel and spin,
 collide, split again, and survive saves. Cleanup is configurable; salvage and reclaiming fuel are not built.
 
-Cargo racks have open-frame models, content-defined container sizes and shared deterministic packing.
+Cargo racks are loading decks (a plate on the hull side, rails, posts, clamp jaws on stowed containers), content-defined container sizes and shared deterministic packing.
 Cargo payload mass affects flight and client prediction through the same shared simulation.
 Own hull cargo is held by the server, saved, replicated and drawn; local debug loading is available in the editor.
 Select an applied rack, choose a container in its cargo panel, then JETTISON SELECTED in local or remote games.

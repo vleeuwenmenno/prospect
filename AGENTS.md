@@ -95,7 +95,10 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
 - **Cargo holds:** `content/blocks/cargo.json` is shared through `GameContent.Cargo`. `CargoPacking` owns
   capacity and largest-first X/Z/Y fixed-orientation packing with caller buffers. The `cargo` block is box-only,
   in Hull; its linear capacity stat is u and must match the grid. `PropulsionModels.Cargo.cs` builds racks and
-  reusable containers on workers, with the `rack` look in `visuals/propulsion.json`. `--open edit-rack` is a
+  reusable containers on workers, with the `rack` look in `visuals/propulsion.json`: a deck plate on one face
+  (`RackDeck.Choose`: the touched face, else -Y; it travels as the rack's `PartBox.Facing`, so the editor, ghosts and
+  far hulls pass `RackDeck`'s answer, never the design's facing), rails, posts, lights; clamp jaws are per container
+  (`PartModels.TryGetClamp`, drawn beside each container). Every thickness must fit the container clearance (`gap`). `--open edit-rack` is a
   capture-only sample, never inventory. `BlockStateStore.Cargo` holds at most 255 containers per hull without tick
   allocations; adds validate payload/health and repack atomically. Density is shared cargo content. Payload is kg,
   galaxy resource index (-1 for empty), size, HP and rack/slot. `CargoTransfer` repacks retained racks by type and grid
@@ -927,4 +930,4 @@ How to apply it:
 
 Capture fixture: `tools/prepare_tractor_capture.py` copies a built client and equips its pod with a tractor,
 one reachable rack and one blocked rack. Run that copy with `--open cargo --jettison 6 --capture ...` for pickup,
-or `--open edit-cargo --capture ...` for reach guidance. Keep `agent.prospect` hidden as for other captures.
+or `--open edit-cargo --capture ...` for reach guidance (both close the editor camera on the first rack after 0.3 s). Keep `agent.prospect` hidden as for other captures.

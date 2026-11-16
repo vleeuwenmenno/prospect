@@ -55,8 +55,21 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
         return true;
     }
 
+    /// <summary>
+    /// The clamp jaws of a container of <paramref name="size"/> held in a rack whose deck is on <paramref name="deck"/>;
+    /// false while the worker has not finished. Allocates nothing.
+    /// </summary>
+    public bool TryGetClamp(int size, BlockFacing deck, out ReadOnlySpan<MeshVertex> vertices)
+    {
+        vertices = default;
+        if ((uint)size >= 8 || (uint)deck >= 6 || !_containersReady) return false;
+        vertices = _containers.Clamps[size * 6 + (int)deck];
+        return vertices.Length > 0;
+    }
+
     private sealed class ContainerBuild(PropulsionLook look) : IJob
     {
+        public readonly MeshVertex[][] Clamps = new MeshVertex[8 * 6][];
         public readonly int ResourceSlots = 1 + (look.Rack?.Resources.Length ?? 0);
         public readonly MeshVertex[][] Results = new MeshVertex[8 * (1 + (look.Rack?.Resources.Length ?? 0))][];
         public void Run()
@@ -76,6 +89,15 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
                     var soup = new MeshVertex[indices.Count];
                     for (var k = 0; k < soup.Length; k++) soup[k] = vertices[(int)indices[k]];
                     Results[i * ResourceSlots + r] = soup;
+                }
+                for (var face = 0; face < 6; face++)
+                {
+                    vertices.Clear(); indices.Clear();
+                    if (look.Rack is { } clampLook)
+                        PropulsionModels.ClampModel(shape, (BlockFacing)face, clampLook, look.Cargo, vertices, indices);
+                    var clamp = new MeshVertex[indices.Count];
+                    for (var k = 0; k < clamp.Length; k++) clamp[k] = vertices[(int)indices[k]];
+                    Clamps[i * 6 + face] = clamp;
                 }
             }
         }
