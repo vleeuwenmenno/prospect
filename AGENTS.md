@@ -880,7 +880,11 @@ How to apply it:
   `PlayerInputBridge.JettisonContainer` accepts `JettisonMode.Abandon` (default) or `KeepClaim`, locally and remotely.
   KeepClaim uses the hull owner identity, saved and restored like hull ownership. Destroyed racks are unclaimed.
   Every release waits `pickupDelaySeconds` (default 10, finite 0–3600) before any tractor can acquire it.
-- Protocol 61: reliable message 37, 104-byte body records, 26,635-byte full-set maximum at 10 Hz; sensor/gas coverage
+- Flight release uses `PlayerInputBridge.JettisonCargo(hull, rack, index, tick, mode)` without an editor token.
+  Reliable message 38 is 19 bytes. Both release paths call `ServerHost.ReleaseCargo`: owned controlled live hull,
+  current hold tick/revision, live rack/slot, shared quarter-second rate limit and no FTL transit.
+  Pass the displayed hold's `OwnCargoTick`; successful releases arrive through normal hold/free snapshots.
+- Protocol 62: reliable message 37, 104-byte body records, 26,635-byte full-set maximum at 10 Hz; sensor/gas coverage
   through `MaySeeContainer`/`Covered`, as used by `MaySeeHull`. No ownership bypass and no hull snapshot growth.
 - Codec 15 saves bodies, birth/age/id clocks, ClaimOwner and PickupReadyTick; tractor pulls restart on load. `containerLifetimeMinutes` defaults to 60, zero never;
   connected pilots within the base sensor radius pause aging. Oldest-first caps remain active.
@@ -906,7 +910,7 @@ How to apply it:
 - `FlightModel.Step` alone bills `PowerFlow.Tractor`; `Pull` uses only that paid power, before container contacts.
   Base plus per-tonne demand includes payload and collision shell mass. Insufficient power means no tractor force.
   Pulls approach the emitter, then the rack's open side; only `TryAddCargo` followed by removing the free body stows it.
-- Protocol 61 replicates pickup ownership and ready tick as well as transient pulls for beams and prediction;
+- Protocol 62 replicates pickup ownership and ready tick as well as transient pulls for beams and prediction;
   redact only transient pulls whose hull/design is unavailable to a client.
   Codec 15 preserves pickup ownership and ready tick; restore clears only transient pulls and restarts acquisition. `TractorPreview` caches the shared
   reach rule in fixed storage with a content-defined per-frame budget. Tests: `TractorTests`, `TractorReachTests`,

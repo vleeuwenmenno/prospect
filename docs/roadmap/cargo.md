@@ -77,8 +77,18 @@ Temporary local debug loading is available. Mining output is not built.
 - Every release stores `PickupReadyTick`; `pickupDelaySeconds` defaults to 10 and accepts finite 0–3600 seconds.
 - `ClaimOwner` uses the durable hull owner id; zero is unclaimed. Destroyed racks always release unclaimed cargo.
 - `FreeContainer.MayPickup(owner, tick)` gates acquisition and client prediction. Visibility, damage and aging do not change.
-- Protocol 61 sends owner and ready tick (104-byte records, 26,635-byte maximum). Codec 15 saves both.
+- Protocol 62 sends owner and ready tick (104-byte records, 26,635-byte maximum). Codec 15 saves both.
   Unknown saved owners and invalid clocks refuse loading; transient tractor pulls restart. Older layouts are refused.
+
+### Flight release API
+
+- `PlayerInputBridge.JettisonCargo(uint hull, int rack, int index, long tick, JettisonMode mode)` needs no open editor.
+- Pass the flown hull's id, the selected hold record's rack, its index in that hold, and `SessionSnapshot.OwnCargoTick`.
+  Mode is `JettisonMode.Abandon` or `JettisonMode.KeepClaim` (`Prospect.Game.Protocol`).
+- Reliable message 38 is 19 bytes. Server admission and receive budgets apply before decoding.
+- Both paths share `ReleaseCargo`: owned controlled hull, current hold tick/revision, live rack/slot,
+  quarter-second cooldown and no FTL transit. The editor path also retains its edit-token checks.
+- Success updates the normal hold/free-container snapshots. Invalid flight requests change nothing; no separate reply.
 
 ### Cargo window
 
