@@ -107,7 +107,13 @@ internal sealed partial class ScreenHost
             var hot = interactive && ImGui.IsItemHovered();
             ImGui.PopID();
             if (pressed && interactive)
-                _cargoView.Select(i);
+            {
+                // A second click on the selected tile lets go of it, and so of its callout on the ship.
+                if (_cargoView.SelectedIndex == i)
+                    _cargoView.ClearSelection();
+                else
+                    _cargoView.Select(i);
+            }
 
             var selected = _cargoView.SelectedIndex == i;
             var resColor = (uint)c.Resource < (uint)resources.Length ? StarColor(resources[c.Resource].Color) : Theme.TextMute;

@@ -40,6 +40,8 @@
 - Shows the flown ship's hold (`SessionSnapshot.Hulls[OwnHull].Cargo`) as a grid of size-stepped, resource-coloured tiles with size class (`XXS`..`XXXL`) and fill bar; header shows used/total volume (`u`) and total cargo mass (`kg`).
 - Drones and ships without racks show an empty-state message.
 - Clicking a tile shows its size, resource, mass, fill %, HP bar and rack index, with `Jettison` (`JettisonMode.Abandon`) and `Jettison, keep claim` (`JettisonMode.KeepClaim`) via `PlayerInputBridge.JettisonCargo`, disabled in FTL transit. Selection clears when `OwnCargoTick` or `Hull.Id` changes.
+- The selected tile is also called out on the ship: its packed box outlined in the resource's colour, with a label (resource, kg, size class) on a leader. Pilot and command view, like the fuel callout.
+- It follows the hull and clears with the selection: hold or hull change, jettison, a second click on the tile, window closed, Escape (`BackStep.CargoCallout`).
 - No allocation: `CargoHoldView` keeps its tile buffer fixed.
 
 ## Checks

@@ -4907,9 +4907,7 @@ internal sealed partial class WorldView
         foreach (var container in cargo)
         {
             if (!_partModels.TryGetContainer(container.Size, container.Resource, out var mesh)) continue;
-            var shape = catalog.Sizes[container.Size].Shape;
-            var offset = design.BlockOffsets[container.Rack] - design.BlockHalfExtents[container.Rack]
-                + new Vector3(container.At.X + shape.X * .5f, container.At.Y + shape.Y * .5f, container.At.Z + shape.Z * .5f) * catalog.UnitSize;
+            var offset = CargoSlots.Centre(design, catalog, container);
             offset.Z *= stretch;
             _scene.AddTriangles(frameIndex, mesh, MeshTransform(position + Vector3.Transform(offset, orientation), orientation, Vector3.One, design.Color, material, stretch));
         }

@@ -26,5 +26,7 @@
   "calloutLabelGap": 4,
   "calloutLabelPad": 6,
   "calloutMargin": 16,
-  "calloutConsoleGap": 12
+  "calloutConsoleGap": 12,
+  "cargoCalloutOutlineThickness": 2,
+  "cargoCalloutOutlineAlpha": 0.95
 }

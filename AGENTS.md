@@ -106,6 +106,7 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   current retunes repack and log drops. `GameContent.SaveIdentity` allows only cargo tuning/capacity retunes.
   `PartModels` builds real container meshes on a worker; own holds draw in flight and editor. No drone rack.
   The Cargo window (`SocialPane.Cargo`, `ToggleCargo`, `U`, `--open cargo-window`) uses font-free `CargoHoldView` for hold totals, size-stepped tile layout, selection lifetime and FTL gating; `DrawCargoPane` renders tiles coloured by `Galaxy.Resources[i].Color` and calls `PlayerInputBridge.JettisonCargo` (`Abandon` / `KeepClaim`).
+  The selected tile is called out on the ship by `CargoCallout` (font-free: follows `CargoHoldView.SelectedIndex` while the window is shown; hull or `OwnCargoTick` change, window closed, second click on the tile and Escape through `BackStep.CargoCallout` clear it). The box is `CargoSlots.Centre`/`Half`, the one rule `WorldView.DrawCargo` draws containers by, never a second packing rule. `DrawCargoCallout` (`Screens.CargoCallout.cs`) shares `BeginCalloutClip`, `DrawCalloutLabelFrame`, `DrawBlockOutline` and `FuelCalloutLayout.Place` with the fuel callout; figures are the `callout*` ones plus `cargoCalloutOutline*` in `power.json`. Check with `--open cargo-window --cargo-sample --capture ...` (first tile auto-selected). Tests: `CargoCalloutTests`.
   Tests: `CargoHoldTests`, `CargoFlightTests`, `CargoWireTests`, `CargoWindowTests`, `EditorSessionTests`, `WreckageTests`, `SaveLifecycleTests`, `FrameOrderTests`.
 
 
