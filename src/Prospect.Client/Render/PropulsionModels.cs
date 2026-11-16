@@ -327,6 +327,9 @@ internal sealed class PropulsionLook
 
     /// <summary>How fuel tanks are drawn; null draws every tank as its plain block.</summary>
     public TankLook? Tanks { get; init; }
+    public RackLook? Rack { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public CargoCatalog Cargo { get; private set; } = null!;
 
     /// <summary>How much longer and brighter boost makes a flame; the brightness still stays under the plume's cap times this.</summary>
     public float BoostLength { get; init; }
@@ -364,6 +367,8 @@ internal sealed class PropulsionLook
             model.PlumeSlot = look.PlumeIndex(model.Plume);
         }
         look.Tanks?.Check(path);
+        look.Rack?.Check();
+        look.Cargo = CargoCatalog.Parse(File.ReadAllBytes(AppPaths.Content("blocks", "cargo.json")));
         if (!(look.BoostLength is >= 1 and <= 4) || !(look.BoostBrightness is >= 1 and <= 4)
             || look.MaxPlumes is < 1 or > PlumeCapacity || !(look.MinPixels is >= 0 and <= 64))
             throw new InvalidDataException($"{path}: boost is 1 to 4, maxPlumes 1 to {PlumeCapacity}, minPixels 0 to 64");
@@ -437,7 +442,7 @@ internal static partial class PropulsionModels
     {
         var model = ModelOf(design, block, look);
         if (model is null)
-            return AddTank(design, block, look, vertices, indices);
+            return AddRack(design, block, look, vertices, indices) || AddTank(design, block, look, vertices, indices);
         var facing = design.Boxes[block].Facing;
         // The back face is left out where a neighbour covers it.
         var back = (design.ExteriorFaces[block] & (1 << (byte)Facings.Opposite(facing))) != 0;

@@ -33,6 +33,10 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
 
     private readonly Entry[] _entries = new Entry[Slots];
     private readonly Build _build = new(look);
+
+    /// <summary>Only scripted editor captures request sample containers.</summary>
+    public void PreviewCargo() => _cargoPreview = true;
+    private bool _cargoPreview;
     private JobHandle _handle;
     private bool _pending;
     private long _frame = 1;
@@ -112,6 +116,7 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
         if (_pending || _build.Count == 0)
             return;
         _pending = true;
+        _build.CargoPreview = _cargoPreview;
         _handle = jobs.Schedule(_build, 2);
     }
 
@@ -119,6 +124,7 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
     private sealed class Build(PropulsionLook look) : IJob
     {
         public int Count;
+        public bool CargoPreview;
         public readonly int[] Slots = new int[Batch];
         public readonly BlockType?[] Types = new BlockType?[Batch];
         public readonly Vector3[] Halves = new Vector3[Batch];
@@ -136,6 +142,8 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
                 vertices.Clear();
                 indices.Clear();
                 PropulsionModels.BuildPart(type, new PartBox(Vector3.Zero, Halves[i], Facings[i], Cells[i]), look, vertices, indices);
+                if (CargoPreview && type.Cargo > 0 && look.Rack is { } rack)
+                    PropulsionModels.RackPreview(new PartBox(Vector3.Zero, Halves[i], Facings[i], Cells[i]), rack, look.Cargo, vertices, indices);
                 var soup = new MeshVertex[indices.Count];
                 for (var k = 0; k < soup.Length; k++)
                     soup[k] = vertices[(int)indices[k]];

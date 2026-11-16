@@ -11,6 +11,10 @@ or that local game opened to other players. There is one simulation and one code
 
 ## Status
 
+Cargo racks have open-frame models, content-defined container sizes and shared deterministic packing.
+There is no cargo inventory yet; containers appear only in the scripted `--open edit-rack` preview.
+
+
 Propulsion burns fuel and is directional: engines, hot thrusters and cold gas thrusters each push the opposite way
 to the way they face, and burn bipropellant, hydrazine and nitrogen from tank blocks. Engines are blocks of any
 size; thrusters are small parts mounted on the faces of blocks, several to a face, that fill no cell and point out

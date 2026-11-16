@@ -93,7 +93,7 @@
     "nitrogenTank": { "name": "Nitrogen tank", "boxOnly": true, "mass": 2.0, "hull": 180, "tank": "nitrogen", "fuelCapacity": 150 },
     "gyro": { "name": "Gyro", "mass": 2.0, "hull": 150, "torque": 680, "powerDraw": 0.5 },
     "shield": { "name": "Shield emitter", "mass": 2.5, "hull": 120, "shield": 1500, "shieldRecharge": 37.5, "powerDraw": 3.0 },
-    "cargo": { "name": "Cargo hold", "mass": 1.0, "hull": 150, "cargo": 0.8 },
+    "cargo": { "name": "Cargo rack", "mass": 1.0, "hull": 150, "cargo": 8, "boxOnly": true },
     "quarters": { "name": "Crew quarters", "mass": 1.5, "hull": 150, "crew": 2, "sizeRules": { "crew": { "volumeExponent": 0.5 } } },
     "hyperdrive": { "name": "Hyperspace drive", "mass": 3.0, "hull": 180, "ftl": "hyperspace", "ftlPower": 8, "ftlMaxSectors": 10 },
     "wormholedrive": { "name": "Wormhole generator", "mass": 4.0, "hull": 160, "ftl": "wormhole", "ftlPower": 12, "ftlMaxSectors": 10 },

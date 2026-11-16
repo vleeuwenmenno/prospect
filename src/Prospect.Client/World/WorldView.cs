@@ -118,6 +118,9 @@ internal sealed class WorldView
     private readonly DamageMeshes _damage;
     // Models of single thrust parts, for the editor's draft and ghost and for far hulls drawn block by block.
     private readonly PartModels _partModels;
+
+    /// <summary>Enables sample cargo solely for a scripted editor capture.</summary>
+    public void PreviewCargo() => _partModels.PreviewCargo();
     public int VisibleHulls { get; private set; }
     public int DrawnDents { get; private set; }
     public int DamageFallbacks { get; private set; }
