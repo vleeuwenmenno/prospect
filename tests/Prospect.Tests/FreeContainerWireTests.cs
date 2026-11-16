@@ -8,6 +8,32 @@ namespace Prospect.Tests;
 
 public sealed class FreeContainerWireTests
 {
+    [Theory]
+    [InlineData(JettisonMode.Abandon)]
+    [InlineData(JettisonMode.KeepClaim)]
+    public void FlightReleaseHasExactBudgetAndRejectsMalformedRequests(JettisonMode mode)
+    {
+        var request = new JettisonCargoMessage(65536, 42, 254, 100, mode);
+        var bytes = new byte[JettisonCargoMessage.MaxWireSize];
+        var writer = new NetWriter(bytes); request.Write(ref writer);
+        Assert.Equal(19, writer.Length);
+        var reader = new NetReader(bytes.AsSpan(1));
+        Assert.True(JettisonCargoMessage.TryRead(ref reader, out var copy));
+        Assert.Equal(request, copy);
+        for (var n = 1; n < bytes.Length; n++)
+        {
+            reader = new NetReader(bytes.AsSpan(1, n - 1));
+            Assert.False(JettisonCargoMessage.TryRead(ref reader, out _));
+        }
+        foreach (var bad in new[] { request with { Hull = 0 }, request with { Rack = -1 },
+            request with { Index = 255 }, request with { Tick = -1 }, request with { Mode = (JettisonMode)2 } })
+        {
+            writer = new NetWriter(bytes); bad.Write(ref writer);
+            reader = new NetReader(bytes.AsSpan(1));
+            Assert.False(JettisonCargoMessage.TryRead(ref reader, out _));
+        }
+    }
+
     [Fact]
     public void TractorWireRejectsImpossibleClaimsAndFlags()
     {

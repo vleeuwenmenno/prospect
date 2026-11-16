@@ -34,7 +34,7 @@ public sealed partial class ServerHost
         if (connection.EditHull != connection.Hull)
         { ReplyEdit(connection, EditorReason.FillRefused); return; }
         var reason = ReleaseCargo(connection, request.Hull, request.CargoRack, request.CargoIndex, request.CargoTick, request.JettisonMode);
-        ReplyEdit(connection, reason, reason == EditorReason.TooSoon ? 1 : 0);
+        ReplyEdit(connection, reason, (ushort)(reason == EditorReason.TooSoon ? 1 : 0));
     }
 
     private EditorReason ReleaseCargo(Connection connection, uint hull, int rack, int index, long tick, JettisonMode mode)
