@@ -95,6 +95,8 @@ public enum MessageId : byte
     ModuleSurvey = 34,
     /// <summary>Reliable local-host wreck setting request or authoritative update.</summary>
     WreckSettings = 35,
+    /// <summary>Reliable own-hull hold state.</summary>
+    Cargo = 36,
 }
 
 public enum RejectReason : byte
@@ -171,7 +173,7 @@ public static class ProtocolInfo
     /// index in a list both ends generate for themselves, so two builds that generate differently would mean
     /// different rocks by the same number. Client and server must match exactly.
     /// </summary>
-    public const uint Version = 55;
+    public const uint Version = 56;
 
     public const ushort DefaultPort = 27420;
     public const int MaxNameBytes = 48;

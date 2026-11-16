@@ -19,6 +19,33 @@ namespace Prospect.Tests;
 public sealed class EditorSessionTests
 {
     [Fact]
+    public void OwnHoldArrivesThroughReliableSessionAndFollowsControl()
+    {
+        using var rig = new Rig(clients: 1, joined: 1);
+        var original = rig.Own(0);
+        var index = Rig.Index(original);
+        var info = rig.Hulls.Info(index);
+        var design = rig.Content.Designs[info.Design];
+        var rack = Array.FindIndex(design.Types, t => t.Cargo > 0);
+        Assert.True(rig.Hulls.BlockStates.TryAddCargo(info.BlockState, rig.Content, new(rack, 0, 0, 100, 50, default),
+            new byte[CargoPacking.Capacity(rig.Content.Cargo, design.Boxes[rack].Size, design.BlockSize)]));
+        Assert.True(rig.Until(() => rig.Snap(0).OwnHull >= 0 && rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Cargo.Length == 1));
+        rig.Step(30);
+        Assert.Equal(design.Flight.Mass + .1f, rig.Snap(0).Flight.Mass, 3);
+        var own = rig.Snap(0).Hulls[rig.Snap(0).OwnHull];
+        Assert.Equal(100, own.Cargo.Span[0].Amount);
+        rig.Input(0).RequestControl(0);
+        Assert.True(rig.Until(() => rig.Own(0) != original));
+        rig.Step(30);
+        Assert.Empty(rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Cargo.ToArray());
+        rig.Input(0).RequestControl(original);
+        Assert.True(rig.Until(() => rig.Own(0) == original));
+        Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Cargo.Length == 1));
+        Assert.Null(rig.Server.Fault);
+        Assert.Null(rig.Clients[0]!.Fault);
+    }
+
+    [Fact]
     public void LocalHostChangesWreckSettingsThroughRealSession()
     {
         using var rig = new Rig(clients: 1, joined: 1, wreckFixture: true);

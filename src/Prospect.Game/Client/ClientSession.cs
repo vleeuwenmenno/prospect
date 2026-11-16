@@ -143,6 +143,9 @@ public sealed class SessionSnapshot(GameContent content)
     /// </summary>
     public readonly float[] OwnTanks = new float[TankFuel.MaxTanks];
 
+    /// <summary>Fixed storage behind the controlled hull cargo view.</summary>
+    public readonly HoldContainer[] OwnCargo = new HoldContainer[BlockStateStore.MaxContainers];
+
     /// <summary>Index of the player's own hull in <see cref="Hulls"/>, or -1 before it exists.</summary>
     public int OwnHull = -1;
     public bool Dampeners;
@@ -373,6 +376,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         snapshot.HullCount = _state == SessionState.Active ? _world.BuildViews(snapshot.Hulls, ref snapshot.BlockWords, snapshot.OwnTanks, serverTick, tick, out snapshot.OwnHull) : 0;
         if (snapshot.HullCount == 0)
             snapshot.OwnHull = -1;
+        _world.PublishCargo(snapshot);
         snapshot.OwnIsDrone = _state == SessionState.Active && snapshot.HullCount > 0 && _world.OwnIsDrone;
         snapshot.Dampeners = _world.Dampeners;
         snapshot.PredictionError = _world.PredictionError;
@@ -498,6 +502,9 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                     break;
                 }
 
+            case MessageId.Cargo when _state == SessionState.Active && channel == NetChannel.Reliable && payload.Length <= CargoMessage.MaxWireSize:
+                _world.OnCargo(ref reader);
+                break;
             case MessageId.WreckSettings when _state == SessionState.Active && channel == NetChannel.Reliable && payload.Length == WreckSettingsMessage.MaxWireSize:
                 if (WreckSettingsMessage.TryRead(ref reader, out var wreckSettings)) _wreckSettings = wreckSettings;
                 break;

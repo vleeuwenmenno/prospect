@@ -95,6 +95,9 @@ public struct HullView
     /// </summary>
     public ReadOnlyMemory<float> Tanks;
 
+    /// <summary>Containers of the controlled hull, in snapshot-owned memory.</summary>
+    public ReadOnlyMemory<HoldContainer> Cargo;
+
     /// <summary>
     /// What the hull's thrust parts are doing, for every hull in view: the throttle toward each direction and the
     /// kinds of part firing, as the simulation's last step left it. <see cref="ThrustState.Firing"/> answers for
@@ -627,6 +630,7 @@ internal sealed partial class ClientWorld : IDisposable
             OwnDesign.Figures(_blocks.Sums(_ownBlocks), out _flight, out _stats, _blocks.Cargo(_ownBlocks));
         }
 
+        ApplyCargo();
         _ownHealth = own.HasHealth;
         ReadHealth(_ownBlocks, own);
 
@@ -883,6 +887,7 @@ internal sealed partial class ClientWorld : IDisposable
         // Another hull, so another block state: the old hull's goes back, and it is heard of as a remote from here on.
         _blocks.Release(_ownBlocks);
         _ownBlocks = TakeBlocks(OwnDesign, _replica.Losses(record.Id));
+        _appliedHoldSerial = 0;
         OwnDesign.Figures(_blocks.Sums(_ownBlocks), out _flight, out _stats, _blocks.Cargo(_ownBlocks));
         _hasOwnState = false;
         _correction = Vector3.Zero;

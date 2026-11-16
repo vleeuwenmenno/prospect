@@ -46,6 +46,49 @@ public sealed unsafe partial class BlockStateStore
         header->CargoCount = kept;
     }
 
+    /// <summary>Installs a complete validated hold atomically, without changing block health or fuel.</summary>
+    public bool TrySetCargo(BlockStateHandle handle, GameContent content, ReadOnlySpan<HoldContainer> hold)
+    {
+        var header = Find(handle);
+        var design = Design(handle);
+        if (hold.Length > header->CargoCapacity) return false;
+        for (var i = 0; i < hold.Length; i++)
+        {
+            var c = hold[i];
+            if (!CargoPayloadValid(content, c) || (uint)c.Rack >= (uint)design.BlockCount
+                || design.Types[c.Rack].Cargo <= 0 || !BlockSet.Has(AliveOf(header), c.Rack)) return false;
+            var grid = CargoPacking.Grid(content.Cargo, design.Boxes[c.Rack].Size, design.BlockSize);
+            var shape = content.Cargo.Sizes[c.Size].Shape;
+            if (c.At.X < 0 || c.At.Y < 0 || c.At.Z < 0 || c.At.X > grid.X - shape.X
+                || c.At.Y > grid.Y - shape.Y || c.At.Z > grid.Z - shape.Z) return false;
+            for (var j = 0; j < i; j++)
+            {
+                var other = hold[j];
+                if (c.Rack != other.Rack) continue;
+                var size = content.Cargo.Sizes[other.Size].Shape;
+                if (c.At.X < other.At.X + size.X && other.At.X < c.At.X + shape.X
+                    && c.At.Y < other.At.Y + size.Y && other.At.Y < c.At.Y + shape.Y
+                    && c.At.Z < other.At.Z + size.Z && other.At.Z < c.At.Z + shape.Z) return false;
+            }
+        }
+        hold.CopyTo(CargoOf(header));
+        header->CargoCount = hold.Length;
+        header->CargoRevision++;
+        return true;
+    }
+
+    /// <summary>Checks resource identity, finite payload capacity and shell health against shared content.</summary>
+    public static bool CargoPayloadValid(GameContent content, in HoldContainer c)
+    {
+        if ((uint)c.Size >= (uint)content.Cargo.Sizes.Length || c.Resource < -1 || c.Resource >= content.Galaxy.Resources.Length) return false;
+        var size = content.Cargo.Sizes[c.Size];
+        var density = c.Resource < 0 ? 0 : content.Cargo.Density(content.Galaxy.Resources[c.Resource].Id);
+        var unit = (double)content.Cargo.UnitSize;
+        var capacity = size.Units * unit * unit * unit * density;
+        return double.IsFinite(capacity) && (c.Resource < 0 || density > 0)
+            && c.Amount >= 0 && c.Amount <= capacity && c.Hull > 0 && c.Hull <= size.Hull;
+    }
+
     /// <summary>
     /// Validates and adds one container, repacking its rack through the shared rule. Refusal changes nothing.
     /// Occupancy is caller-owned scratch with at least the rack's capacity in bytes.
@@ -58,13 +101,7 @@ public sealed unsafe partial class BlockStateStore
             || !BlockSet.Has(AliveOf(header), container.Rack) || design.Types[container.Rack].Cargo <= 0
             || (uint)container.Size >= (uint)content.Cargo.Sizes.Length
             || container.Resource < -1 || container.Resource >= content.Galaxy.Resources.Length) return false;
-        var size = content.Cargo.Sizes[container.Size];
-        var density = container.Resource < 0 ? 0 : content.Cargo.Density(content.Galaxy.Resources[container.Resource].Id);
-        var unit = (double)content.Cargo.UnitSize;
-        var capacity = size.Units * unit * unit * unit * density;
-        if (!double.IsFinite(capacity) || (container.Resource >= 0 && density <= 0)
-            || !(container.Amount >= 0 && container.Amount <= capacity)
-            || !(container.Hull > 0 && container.Hull <= size.Hull)) return false;
+        if (!CargoPayloadValid(content, container)) return false;
 
         Span<int> sizes = stackalloc int[MaxContainers];
         Span<int> indices = stackalloc int[MaxContainers];
