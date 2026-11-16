@@ -267,6 +267,7 @@ public sealed class HullField
         ref var info = ref _hulls.Info(index);
         ref var own = ref _hulls.State(index);
         var from = own.Position;
+        var inTransit = own.Jump == JumpPhase.Tunnel;
         IsFirstStep = info.Round != _round;
         var body = Body(index);
         body.ContactTick = (long)tick;
@@ -278,7 +279,8 @@ public sealed class HullField
         Refit(index);
 
         // What the hulls that step after this one need to know of it: that it has flown, and how far.
-        Moved(ref info, own.Position.RelativeTo(from));
+        // Transit is not a collision sweep, including the interval that reaches the destination.
+        Moved(ref info, inTransit || own.Jump == JumpPhase.Tunnel ? Vector3.Zero : own.Position.RelativeTo(from));
         info.Round = _round;
 
         _collecting = false;

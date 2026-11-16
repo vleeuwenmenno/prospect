@@ -1399,12 +1399,29 @@ public sealed class HullCollisionTests : IDisposable
     }
 
     [Fact]
+    public void TransitArrivalDoesNotSweepItsRouteThroughOtherHulls()
+    {
+        var vessel = Add(Vessel, new Double3(-1000, 0, 0));
+        var pod = Add(Content.PodDesign, Double3.Zero);
+        _hulls.State(vessel).Jump = JumpPhase.Tunnel;
+        _hulls.State(vessel).JumpTunnelSeconds = HullSim.Dt;
+        _hulls.Info(vessel).Order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(1000, 0, 0) };
+        _hulls.Flight(vessel).FtlSpeed = 120000;
+        Tick();
+        Assert.Equal(new Double3(1000, 0, 0), _hulls.State(vessel).Position);
+        Assert.Equal(Vector3.Zero, _hulls.Info(vessel).Flown);
+        Assert.Equal(Double3.Zero, _hulls.State(pod).Position);
+        Assert.Equal(Vector3.Zero, _hulls.State(pod).Velocity);
+        Assert.Equal(0, DamagedBlocks(pod) + DamagedBlocks(vessel));
+    }
+
+    [Fact]
     public void AHullInTheTunnelIsNotThereAndOneJustArrivedDoesNoHarm()
     {
         var vessel = Add(Vessel, Double3.Zero);
         var pod = Add(Content.PodDesign, new Double3(12, 0, 0), new Vector3(-60, 0, 0));
 
-        // In the tunnel the vessel's position is already its destination, but it is not there yet.
+        // A vessel passing this position in transit cannot be struck.
         _hulls.State(vessel).Jump = JumpPhase.Tunnel;
         for (var i = 0; i < 24; i++)
             _field.Step(pod, default);
