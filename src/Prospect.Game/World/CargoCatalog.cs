@@ -9,11 +9,16 @@ public readonly record struct ContainerSize(string Name, int Units, GridSize Sha
 public sealed class CargoCatalog
 {
     private readonly ContainerSize[] _sizes;
+    private readonly Dictionary<string, double> _densities;
     /// <summary>Metres per unit edge, relative to the one-metre ship cell.</summary>
     public float UnitSize { get; }
     /// <summary>Sizes in ascending volume order.</summary>
     public ReadOnlySpan<ContainerSize> Sizes => _sizes;
-    private CargoCatalog(float unitSize, ContainerSize[] sizes) { UnitSize = unitSize; _sizes = sizes; }
+    private CargoCatalog(float unitSize, ContainerSize[] sizes, Dictionary<string, double> densities)
+    { UnitSize = unitSize; _sizes = sizes; _densities = densities; }
+
+    /// <summary>Maximum kilograms per cubic metre for a galaxy resource id; zero for an unknown resource.</summary>
+    public double Density(string resource) => _densities.GetValueOrDefault(resource);
 
     /// <summary>Reads and validates doubling sizes, positive strength and exact integer box volumes.</summary>
     public static CargoCatalog Parse(ReadOnlyMemory<byte> bytes)
@@ -43,7 +48,14 @@ public sealed class CargoCatalog
                 if (sizes[j].Name == name) throw new InvalidDataException("Duplicate cargo size name.");
             sizes[i] = new ContainerSize(name, units, s, hull);
         }
-        return new CargoCatalog(unit, sizes);
+        var densities = new Dictionary<string, double>(StringComparer.Ordinal);
+        foreach (var entry in root.GetProperty("densityKgPerCubicMetre"u8).EnumerateObject())
+        {
+            var density = entry.Value.GetDouble();
+            if (string.IsNullOrWhiteSpace(entry.Name) || !double.IsFinite(density) || density <= 0 || density > 1e9 || !densities.TryAdd(entry.Name, density))
+                throw new InvalidDataException("Invalid or duplicate cargo resource density.");
+        }
+        return new CargoCatalog(unit, sizes, densities);
     }
 }
 

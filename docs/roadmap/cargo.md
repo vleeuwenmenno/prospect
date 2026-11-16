@@ -16,10 +16,19 @@ There is no cargo inventory, mining yield or pickup yet.
   So 8 u is one ship cell, 16 u two, 32 u four, 64 u a 2x2x2 cube of cells, 128 u a 4x2x2 block of cells.
 - A drone cell (`blockSize` 0.25) is half a unit on a side: a drone rack needs 2x2x2 drone cells per XXS.
 - The size of a unit, the sizes and their shapes are content, never code, so they can be retuned.
-  A world saved before a retune must still load (load rule to be designed with the hold's save).
+  The hold load rule must drop containers that no longer fit after a retune, with a log line.
+  Invalid records must still refuse the save; the compatibility change and restoration path are not built yet.
 - One resource per container. A hold fills up either by volume or because it carries too many kinds at once.
 - A container has its own hull points. Collisions and weapons can destroy it, and its contents go with it.
 - Cargo mass counts toward flight: a full hold makes the ship heavier.
+
+### Hold state decisions
+
+- Amounts are kilograms; resource ids are galaxy indices. Resource -1 means an empty shell and requires zero kilograms.
+- Maximum payload is unit volume times resource density from `blocks/cargo.json` (`densityKgPerCubicMetre`).
+- The initial visibility scope is the own hull only; reliable updates must leave the snapshot record budget unchanged.
+- Apply must refuse an edit whose remaining racks cannot retain the cargo; repair must preserve it.
+- Until step 2, destroyed racks lose their containers instead of creating containers in space.
 
 ### Racks
 
@@ -50,7 +59,6 @@ There is no cargo inventory, mining yield or pickup yet.
 
 ## Open
 
-- **Load rule after a retune:** what happens to stored containers that no longer fit their racks.
 - **Tractor figures:** range, power per tonne, the most mass one beam can move, how several beams add up.
 - **Towing huge chunks** outside the hull: tractor-held mass joins the ship's flight. It changes shared flight
   and prediction, so it comes last and needs its own design pass.
@@ -82,5 +90,9 @@ Deferred: drone launcher, tractor filter.
   Retuning the grid requires matching the cargo stat; loading rejects mismatches. No drone rack yet.
 - Worker-built rack frames and reusable ribbed container models use the `rack` look in `visuals/propulsion.json`.
   `--open edit-rack` previews XXS through L in a 2x2x2 ghost only; real hull racks stay empty.
-- Server slots, cargo mass, inventory, wire/save state and debug loading remain unbuilt.
-  Save migration after a retune remains open; current content identity rules still refuse incompatible saves.
+- `BlockStateStore.Cargo` provides fixed storage for up to 255 containers on a hull with racks.
+  Adds validate payload and health, and repack atomically through `CargoPacking` without allocating.
+  Block-state copies preserve containers; losing a block removes only that rack's containers.
+- This storage has no gameplay caller yet. Cargo flight mass, replication, save/restore, edit retention/refusal,
+  debug loading and live drawing remain unbuilt. Protocol 55 and codec 9 are unchanged.
+  Current content identity rules still refuse incompatible saves; retune migration is not implemented.

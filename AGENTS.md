@@ -86,7 +86,9 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   capacity and largest-first X/Z/Y fixed-orientation packing with caller buffers. The `cargo` block is box-only,
   in Hull; its linear capacity stat is u and must match the grid. `PropulsionModels.Cargo.cs` builds racks and
   reusable containers on workers, with the `rack` look in `visuals/propulsion.json`. `--open edit-rack` is a
-  capture-only sample, never inventory. No drone racks, server slots, cargo mass or cargo wire/save state yet.
+  capture-only sample, never inventory. `BlockStateStore.Cargo` adds bounded storage (255 containers), atomic
+  shared-rule repacking, kilogram/resource/health validation and rack-loss removal. Payload density is shared
+  cargo content. No gameplay caller, drone racks, cargo flight mass, wire/save, edit retention or debug add yet.
 
 
 - **Social messages:** validate new kinds after admission and the receive/rate budgets; publish through `SessionSnapshot.Social` and send intent through `PlayerInputBridge`.

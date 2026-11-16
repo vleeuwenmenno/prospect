@@ -195,6 +195,9 @@ public sealed class GameContent
             throw new InvalidDataException("fleet.json: needs between 1 and 255 designs");
 
         var galaxy = Galaxy.Parse(Shared("galaxy", "galaxy.json"), At("galaxy", "galaxy.json")).Under(settingCatalog, settings);
+        foreach (var resource in galaxy.Resources)
+            if (cargo.Density(resource.Id) <= 0)
+                throw new InvalidDataException("Every galaxy resource needs a cargo density.");
 
         // Not shared: the server enforces its own social limits and the wire's bounds are fixed in code, so a
         // client with other numbers shows another party size or chat counter and nothing in the simulation moves.

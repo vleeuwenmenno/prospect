@@ -81,5 +81,14 @@
       ],
       "hull": 6400
     }
-  ]
+  ],
+  "densityKgPerCubicMetre": {
+    "iron": 7874,
+    "copper": 8960,
+    "nickel": 8908,
+    "titanium": 4506,
+    "silver": 10490,
+    "gold": 19300,
+    "ice": 917
+  }
 }

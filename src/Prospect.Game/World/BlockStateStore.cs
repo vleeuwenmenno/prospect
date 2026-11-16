@@ -38,7 +38,7 @@ public readonly record struct BlockStateHandle(int Index, int Generation)
 /// may grow when a state is created. Used from one thread.
 /// </para>
 /// </summary>
-public sealed unsafe class BlockStateStore : IDisposable
+public sealed unsafe partial class BlockStateStore : IDisposable
 {
     /// <summary>The smallest piece handed out is 256 bytes: the header, one word of blocks and one node of sums.</summary>
     private const int SmallestShift = 8;
@@ -49,10 +49,10 @@ public sealed unsafe class BlockStateStore : IDisposable
     private const int Classes = ChunkShift - SmallestShift + 1;
 
     /// <summary>
-    /// What sits in front of a state's memory; thirty-two bytes, so what follows stays aligned. After it come the
+    /// What sits in front of a state's memory; forty-eight bytes, so what follows stays aligned. After it come the
     /// alive words, then the sums, then the hit points if the state has them.
     /// </summary>
-    [StructLayout(LayoutKind.Sequential, Size = 32)]
+    [StructLayout(LayoutKind.Sequential, Size = 48)]
     private struct Header
     {
         public int Blocks;
@@ -64,8 +64,10 @@ public sealed unsafe class BlockStateStore : IDisposable
         public double HitTotal;
         public int HasHitPoints;
 
-        /// <summary>How many tanks the design has: the kilograms in each sit last in the state's memory.</summary>
+        /// <summary>How many tanks the design has: their kilograms precede the cargo records.</summary>
         public int Tanks;
+        public int CargoCount;
+        public int CargoCapacity;
     }
 
     private struct Slot
@@ -110,14 +112,8 @@ public sealed unsafe class BlockStateStore : IDisposable
     /// <summary>The bytes the state of one hull of a design takes, before the store rounds it up to a piece it hands out.</summary>
     public static long BytesFor(HullDesign design, bool hitPoints) =>
         sizeof(Header) + (long)BlockSet.WordCount(design.BlockCount) * sizeof(ulong) + design.Sums.StorageBytes + (hitPoints ? (long)design.BlockCount * sizeof(float) : 0) + (long)design.BlockCount * sizeof(int) + (long)design.Collision.IntactCounts.Length * sizeof(int)
-        + TankBytes(design.BlockCount, hitPoints, design.Tanks.Length);
-
-    /// <summary>
-    /// The bytes a state's tanks take at its end: eight for each, after what brings them to a multiple of eight
-    /// from the block arrays before them, so the kilograms sit aligned.
-    /// </summary>
-    private static long TankBytes(int blocks, bool hitPoints, int tanks) =>
-        tanks == 0 ? 0 : TankPadding(blocks, hitPoints) + (long)tanks * sizeof(double);
+        + TankPadding(design.BlockCount, hitPoints) + (long)design.Tanks.Length * sizeof(double)
+        + (long)CargoCapacityFor(design) * sizeof(HoldContainer);
 
     // Before the tanks come four bytes for each block's hit points, if kept, four for each loss and four for each
     // of the 2n - 1 collision counts; everything before those is a multiple of eight.
@@ -159,7 +155,7 @@ public sealed unsafe class BlockStateStore : IDisposable
 
         var header = (Header*)slot.Memory;
         var tanks = design.Tanks;
-        *header = new Header { Blocks = blocks, Nodes = design.Sums.NodeCount, HasHitPoints = hitPoints ? 1 : 0, Tanks = tanks.Length };
+        *header = new Header { Blocks = blocks, Nodes = design.Sums.NodeCount, HasHitPoints = hitPoints ? 1 : 0, Tanks = tanks.Length, CargoCapacity = CargoCapacityFor(design) };
         BlockSet.Fill(new Span<ulong>(header + 1, words), blocks);
         design.Sums.Intact.CopyTo(SumsOf(header));
         design.Collision.IntactCounts.CopyTo(CollisionCountsOf(header));
@@ -371,6 +367,7 @@ public sealed unsafe class BlockStateStore : IDisposable
         if (header->Tanks != 0 && design.TankOf(block) is >= 0 and var tank)
             TanksOf(header)[tank] = 0.0;
 
+        RemoveCargoOf(header, block);
         design.Sums.Lose(SumsOf(header), alive, block);
         design.Collision.Lose(CollisionCountsOf(header), block);
         return true;

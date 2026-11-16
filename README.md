@@ -15,6 +15,7 @@ Ships split into unowned wrecks when block loss disconnects shared faces. Wrecks
 collide, split again, and survive saves. Cleanup is configurable; salvage and reclaiming fuel are not built.
 
 Cargo racks have open-frame models, content-defined container sizes and shared deterministic packing.
+Bounded hold storage and payload validation exist in shared code but are not connected to gameplay.
 There is no cargo inventory yet; containers appear only in the scripted `--open edit-rack` preview.
 
 

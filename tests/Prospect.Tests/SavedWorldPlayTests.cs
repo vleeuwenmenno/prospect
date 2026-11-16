@@ -398,6 +398,7 @@ public sealed class SavedWorldPlayTests : IDisposable
         folder.Entered.Reset();
         folder.Gate = gate;
         _lifecycle.Leave();
+        Assert.True(folder.Entered.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
         Assert.Equal(SessionPhase.Closing, _lifecycle.Phase);
         Assert.False(_lifecycle.CanStopWaiting);
         Volatile.Write(ref _skew, Stopwatch.Frequency * (long)(SessionLifecycle.PatienceSeconds + 1));

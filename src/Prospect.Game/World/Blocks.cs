@@ -492,6 +492,7 @@ public enum HullClass : byte
 /// </summary>
 public sealed class HullDesign
 {
+    internal int CargoCapacity { get; private set; }
     internal readonly int[] SensorBlocks;
     internal readonly int[] ChartingBlocks;
     private readonly BoxDesign _boxes;
@@ -531,6 +532,7 @@ public sealed class HullDesign
             ref readonly var box = ref blocks[i];
             Cells[i] = (box.At.X, box.At.Y, box.At.Z);
             Types[i] = box.Type;
+            if (box.Type.Cargo > 0) CargoCapacity = BlockStateStore.MaxContainers;
             BlockOffsets[i] = boxes.Offset(box);
             BlockHalfExtents[i] = boxes.HalfExtents(box);
             Shapes[i] = box.Shape;
