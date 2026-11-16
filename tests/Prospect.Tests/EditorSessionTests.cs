@@ -41,8 +41,10 @@ public sealed class EditorSessionTests
         Assert.Null(rig.Server.Fault);
     }
 
-    [Fact]
-    public void JettisonValidatesOwnerAndHoldTickAndBothClientsSeeRemoteRelease()
+    [Theory]
+    [InlineData(JettisonMode.Abandon)]
+    [InlineData(JettisonMode.KeepClaim)]
+    public void JettisonValidatesOwnerAndHoldTickAndBothClientsSeeRemoteRelease(JettisonMode mode)
     {
         using var rig = new Rig(clients: 2, joined: 2);
         var own = rig.Own(0);
@@ -72,10 +74,12 @@ public sealed class EditorSessionTests
         rig.Step(20);
         Assert.Single(rig.Hulls.BlockStates.Cargo(state).ToArray());
         rig.Wires[0].Remote = true;
-        rig.Input(0).JettisonContainer(token, own, rack, 0, rig.Snap(0).OwnCargoTick);
+        rig.Input(0).JettisonContainer(token, own, rack, 0, rig.Snap(0).OwnCargoTick, mode);
         Assert.True(rig.Until(() => rig.Snap(0).FreeContainerCount == 1 && rig.Snap(1).FreeContainerCount == 1));
         Assert.Empty(rig.Hulls.BlockStates.Cargo(state).ToArray());
         Assert.Equal(100, rig.Snap(1).FreeContainers[0].Amount);
+        Assert.Equal(mode == JettisonMode.KeepClaim ? rig.Hulls.Info(Rig.Index(own)).Owner : 0u, rig.Snap(1).FreeContainers[0].ClaimOwner);
+        Assert.True(rig.Snap(1).FreeContainers[0].PickupReadyTick > rig.Snap(1).FreeContainerTick);
         Assert.Equal(rig.Snap(0).FreeContainers[0].Id, rig.Snap(1).FreeContainers[0].Id);
         Assert.Null(rig.Server.Fault);
     }
