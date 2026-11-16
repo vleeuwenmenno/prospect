@@ -43,6 +43,8 @@ public sealed class SaveLifecycleTests
         var content = WreckageTests.Content();
         var folder = SaveRig.NewWorld(content);
         ulong entity;
+        long born;
+        long age;
         using (var rig = new SaveRig(folder, content))
         {
             rig.Join();
@@ -50,11 +52,17 @@ public sealed class SaveLifecycleTests
             WreckageTests.Tick(rig.Server)();
             var wreck = WreckageTests.Wreck(rig.Hulls);
             entity = rig.Hulls.Info(wreck).Entity;
+            var blocks = rig.Hulls.Info(wreck).BlockState;
+            rig.Hulls.BlockStates.SetHitPoints(blocks, 6, 17);
+            rig.Hulls.BlockStates.TankLevels(blocks)[0] = 12.345;
             var settingsBytes = new byte[WreckSettingsMessage.MaxWireSize];
             var settingsWriter = new NetWriter(settingsBytes);
             new WreckSettingsMessage(0, 7).Write(ref settingsWriter);
             rig.Link.Deliver(settingsBytes);
-            rig.Tick();
+            rig.Tick(3);
+            rig.Hulls.Info(wreck).WreckAge = 2;
+            born = rig.Hulls.Info(wreck).WreckBorn;
+            age = rig.Hulls.Info(wreck).WreckAge;
             Assert.True(rig.Close().Clean);
         }
         using var loaded = new SaveRig(folder, content);
@@ -64,7 +72,10 @@ public sealed class SaveLifecycleTests
         Assert.Equal(entity, loaded.Hulls.Info(index).Entity);
         Assert.Equal(0u, loaded.Hulls.Info(index).Owner);
         Assert.True(BlockSet.Has(loaded.Hulls.Blocks(index), 6));
-        Assert.True(loaded.Hulls.BlockStates.Tanks(loaded.Hulls.Info(index).BlockState)[0] > 0);
+        Assert.Equal(17, loaded.Hulls.BlockHp(index)[6]);
+        Assert.Equal(12.345, loaded.Hulls.BlockStates.Tanks(loaded.Hulls.Info(index).BlockState)[0]);
+        Assert.Equal(born, loaded.Hulls.Info(index).WreckBorn);
+        Assert.Equal(age, loaded.Hulls.Info(index).WreckAge);
         Assert.Equal(0, loaded.Hulls.Flight(index).ShieldCapacity);
     }
 

@@ -4,8 +4,7 @@ Built: authoritative splitting, drifting wrecks, persistence, cleanup settings a
 
 ## Why
 
-- Today a ship stays rigid when the block holding two parts together is destroyed. The cut-off part floats along
-  as if still attached.
+- Destroying a connector separates the parts it held together. Detached pieces drift independently.
 
 ## Decided
 
