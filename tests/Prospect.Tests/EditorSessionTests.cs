@@ -19,6 +19,26 @@ namespace Prospect.Tests;
 public sealed class EditorSessionTests
 {
     [Fact]
+    public void AutomaticTractorStowsThroughTheRealServerAndPublishesTheHold()
+    {
+        using var rig = new Rig(clients: 1, joined: 1, tractorFixture: true, sectorKm: 80);
+        var h = Rig.Index(rig.Own(0));
+        var design = rig.Content.Pod;
+        var position = rig.Hulls.State(h).Position + new Vector3(.5f, 7, .5f)
+            - (design.CenterOfMass + new Vector3(.5f)) * design.BlockSize;
+        var bodies = rig.Field<FreeContainers>("_containers");
+        Assert.True(bodies.Add(rig.Content, new FreeContainer
+        { Position = position, Orientation = Quaternion.Identity, Size = 0, Resource = -1, Hull = 50 }, out _));
+        rig.Step(30);
+        Assert.Single(bodies.Items.ToArray());
+        Assert.Equal(rig.Own(0), bodies.Items[0].TractorHull);
+        rig.Step(900);
+        Assert.Empty(bodies.Items.ToArray());
+        Assert.Single(rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Cargo.ToArray());
+        Assert.Null(rig.Server.Fault);
+    }
+
+    [Fact]
     public void JettisonValidatesOwnerAndHoldTickAndBothClientsSeeRemoteRelease()
     {
         using var rig = new Rig(clients: 2, joined: 2);
@@ -567,7 +587,7 @@ public sealed class EditorSessionTests
         private readonly StepClock _time = new();
 
         /// <summary>A server with a link for every client; the first <paramref name="joined"/> join at once.</summary>
-        internal Rig(int clients = 2, int joined = 2, int quiet = 1, int peerWait = 1, int ready = 5, int commit = 0, int uploads = 2, int? catalogueSpare = null, int maxShips = 16, int? sectorKm = null, bool debugFill = false, bool wreckFixture = false)
+        internal Rig(int clients = 2, int joined = 2, int quiet = 1, int peerWait = 1, int ready = 5, int commit = 0, int uploads = 2, int? catalogueSpare = null, int maxShips = 16, int? sectorKm = null, bool debugFill = false, bool wreckFixture = false, bool tractorFixture = false)
         {
             _files.Write("net/editor.json", $$"""{ "maxOwnedShips": {{maxShips}}, "quietSeconds": {{quiet}}, "uploads": {{uploads}}, "uploadSeconds": 5, "readySeconds": {{ready}}, "peerWaitSeconds": {{peerWait}}, "commitSeconds": {{commit}} }""");
             if (catalogueSpare is { } spare)
@@ -577,6 +597,16 @@ public sealed class EditorSessionTests
                 _files.Replace("net/blocks.json", "\"catalogueBytes\": 196608", $"\"catalogueBytes\": {shipped + spare}");
             }
             _files.Replace("rules/exploration.json", "5e3", "5");
+            if (tractorFixture) _files.Write("ships/command_pod.json", """
+                { "version":5, "name":"Tractor pod", "class":"ship", "blockSize":1, "color":[0.34,0.37,0.42],
+                  "blocks":[
+                    {"at":[0,0,0],"type":"core"}, {"at":[2,1,0],"type":"cargo"},
+                    {"at":[0,-1,0],"type":"generator"}, {"at":[0,-2,0],"type":"battery"},
+                    {"at":[-1,0,0],"type":"gyro"}, {"at":[0,0,1],"type":"ionDrive"},
+                    {"at":[0,0,-1],"type":"sensor"}, {"at":[1,0,0],"type":"hull"},
+                    {"at":[2,0,0],"type":"hull"}, {"at":[3,1,0],"type":"hull"}],
+                  "mounts":[{"on":0,"face":"up","at":[2,2],"type":"tractorBeam"}] }
+                """);
             Content = wreckFixture ? WreckageTests.Content() : _files.Load();
             if (sectorKm is { } km) Content = Content.WithSettings(Content.SettingCatalog.Build(null, [$"sectorSize={km}", "asteroidAmount=0"]));
             _links = new LoopbackLink[clients];

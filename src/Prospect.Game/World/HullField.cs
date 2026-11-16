@@ -273,6 +273,7 @@ public sealed class HullField
         var inTransit = own.Jump == JumpPhase.Tunnel;
         IsFirstStep = info.Round != _round;
         Refit(index);
+        _hulls.Flight(index).TractorPower = info.TractorDemand;
         var body = Body(index);
         body.ContactTick = (long)tick;
         var destroyed = HullSim.Step(ref own, ref info.Order, input, _hulls.Flight(index), ref body, rocks, tick, impulses, this);

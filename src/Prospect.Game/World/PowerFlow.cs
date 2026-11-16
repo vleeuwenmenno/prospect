@@ -28,8 +28,11 @@ public struct PowerFlow
     /// <summary>Additional active scanner/locator draw after ordinary flight and shield spending.</summary>
     public float Modules;
 
+    /// <summary>Active tractor draw paid by the shared flight step.</summary>
+    public float Tractor;
+
     /// <summary>Everything drawn.</summary>
-    public readonly float Drawn => Idle + Thrust + Shield + Ftl + Modules;
+    public readonly float Drawn => Idle + Thrust + Shield + Ftl + Modules + Tractor;
 
     /// <summary>Generation less everything drawn: positive is surplus, negative comes out of the battery.</summary>
     public readonly float Net => Generated - Drawn;
@@ -43,5 +46,6 @@ public struct PowerFlow
         Shield += (sample.Shield - Shield) * share;
         Ftl += (sample.Ftl - Ftl) * share;
         Modules += (sample.Modules - Modules) * share;
+        Tractor += (sample.Tractor - Tractor) * share;
     }
 }

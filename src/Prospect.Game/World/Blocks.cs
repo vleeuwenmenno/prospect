@@ -522,6 +522,9 @@ public sealed class HullDesign
         BlockOffsets = new Vector3[blocks.Length];
         BlockHalfExtents = new Vector3[blocks.Length];
         var mounts = boxes.Mounts;
+        var tractors = new List<int>();
+        for (var i = 0; i < mounts.Length; i++) if (mounts[i].Type.Tractor is not null) tractors.Add(i);
+        Tractors = tractors.ToArray();
         MountOffsets = new Vector3[mounts.Length];
         MountHalfExtents = new Vector3[mounts.Length];
         for (var i = 0; i < mounts.Length; i++)
@@ -694,10 +697,10 @@ public sealed class HullDesign
     /// <summary>How many blocks the design has. A block's id is its index in <see cref="Boxes"/>.</summary>
     public int BlockCount => Cells.Length;
 
-    /// <summary>
-    /// The point the hull turns about, in grid units: the intact design's centre of mass. It never moves, whatever
-    /// the hull loses.
-    /// </summary>
+    /// <summary>Tractor mount indices, prepared with the immutable design off the tick.</summary>
+    public int[] Tractors { get; }
+
+    /// <summary>The immutable design pivot in grid units.</summary>
     public Double3 Pivot => _boxes.Center;
 
     /// <summary><see cref="Pivot"/> in single precision, for building a mesh about it.</summary>

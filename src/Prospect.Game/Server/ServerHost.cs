@@ -415,6 +415,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     private GameContent _content;
     private readonly RockField _rocks;
     private readonly FreeContainers _containers = new();
+    private readonly TractorSimulation _tractors = new();
     private readonly ContainerSimulation _containerSimulation;
     private readonly RockImpulses _impulses = new();
     private readonly string _name;
@@ -852,6 +853,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         for (var i = 0; i < participantCount; i++)
             _participants[i] = _hulls.IsAliveAt(i) ? _hulls.HandleAt(i) : default;
         _field.BeginRound();
+        _tractors.Plan(_containers, _content, _field, CargoScratch);
         for (var i = 0; i < participantCount; i++)
         {
             var handle = _participants[i];
@@ -863,6 +865,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 _hulls.Destroy(handle);
         }
 
+        _tractors.Pull(_containers, _content, _field, CargoScratch);
         _containerSimulation.Step(_containers, _content, _field, _rocks, _tick);
         TickWreckage();
         SendCargo();

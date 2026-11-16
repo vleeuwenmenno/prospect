@@ -6,6 +6,11 @@ namespace Prospect.Game.World;
 public struct FreeContainer
 {
     public uint Id;
+    /// <summary>Transient exclusive tractor claim; loading restarts acquisition.</summary>
+    public uint TractorHull;
+    public int TractorMount, TractorRack;
+    public byte TractorStage;
+    public bool TractorPowered;
     public Double3 Position;
     public Vector3 Velocity, AngularVelocity;
     public Quaternion Orientation;
