@@ -68,7 +68,6 @@ internal sealed class WorldView
     private const float RockSpeckPixels = 8f;
     private const float RockCloseRadius = 250f;
     private const float RockCloseNearness = 0.25f;
-    private const float RockFineRadius = 1000f;
     private const float RockFineNearness = 0.35f;
 
     // Where a rift's or wormhole's opening sits, in hull radii (see HullVisuals). The lens bends the view out to about
@@ -405,7 +404,7 @@ internal sealed class WorldView
     /// How finely each level of asteroid detail is meshed, finest first, in icosphere subdivisions: 81,920
     /// triangles for a giant seen from its surface down to 80 for a speck.
     /// </summary>
-    public static ReadOnlySpan<int> AsteroidDetail => [6, 5, 4, 2, 1];
+    public static ReadOnlySpan<int> AsteroidDetail => [Prospect.Game.World.AsteroidMesh.Subdivisions, 5, 4, 2, 1];
 
     private const int DetailFine = 0;
     private const int DetailClose = 1;
@@ -679,11 +678,25 @@ internal sealed class WorldView
     /// <summary>The first key or button bound to boost, as the HUD names it.</summary>
     public string BoostKeyName { get; private set; } = "BOOST";
 
+    /// <summary>
+    /// True while the pilot has the align lock on: the hull follows the view as if the align button were held, in the
+    /// pilot view only. Per session: a new world view starts with it off. Free look, a shown pointer and a jump pause it.
+    /// </summary>
+    public bool AlignLockOn { get; private set; }
+
+    /// <summary>A scripted run's request to turn the align lock on (<c>--align-lock</c>); read once, as a key press would be.</summary>
+    public bool ScriptedAlignLock { get; set; }
+
+    /// <summary>The first key bound to the align lock as the HUD names it, empty when none is.</summary>
+    public string AlignLockKeyName { get; private set; } = "";
+
     /// <summary>Builds the names the HUD shows for boost and for taking control again, after the bindings changed.</summary>
     private void RefreshKeyNames()
     {
         var boost = _actions.Bindings(InputAction.Boost);
         BoostKeyName = boost.IsEmpty ? "BOOST" : boost[0].DisplayName.ToUpperInvariant();
+        var alignLock = _actions.Bindings(InputAction.AlignLock);
+        AlignLockKeyName = alignLock.IsEmpty ? "" : alignLock[0].DisplayName.ToUpperInvariant();
         _switchKeyName = null;
     }
 
@@ -985,7 +998,15 @@ internal sealed class WorldView
             // where the server holds the nose. Thrust already aligns, so it just ends a standing click.
             var alignBlocked = freeLook || thrusting || _devices.SuppressMouse
                 || Own.Jump != JumpPhase.None || Own.Order.Kind == OrderKind.Jump;
-            var alignHeld = _actions.Held(_devices, InputAction.AlignToView, keyboard);
+            if (_actions.Pressed(_devices, InputAction.AlignLock, keyboard))
+            {
+                AlignLockOn = !AlignLockOn;
+                // Turning it off ends the turn at once, not as a released click that keeps turning.
+                if (!AlignLockOn)
+                    _align.Clear();
+            }
+
+            var alignHeld = _actions.Held(_devices, InputAction.AlignToView, keyboard) || AlignLockOn;
             var nose = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
             if (_align.Update(alignHeld && !alignBlocked, alignBlocked, nose, _lookDirection))
                 controls.Align = true;
@@ -1031,6 +1052,19 @@ internal sealed class WorldView
                 var hullUp = Vector3.Transform(Vector3.UnitY, OwnOrientation);
                 var hullRight = Vector3.Transform(Vector3.UnitX, OwnOrientation);
                 controls.Aim = Vector3.Transform(nose, Quaternion.CreateFromAxisAngle(Vector3.Normalize(hullUp + hullRight), 0.2f));
+            }
+        }
+
+        // A scripted run's input is off, so the lock is turned on here and fed through the same latch the keys use.
+        if (ScriptedAlignLock && !editing && Mode == ViewMode.Pilot)
+        {
+            AlignLockOn = true;
+            var lockNose = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
+            var lockBlocked = Own.Jump != JumpPhase.None || Own.Order.Kind == OrderKind.Jump;
+            if (_align.Update(!lockBlocked, lockBlocked, lockNose, _lookDirection))
+            {
+                controls.Aim = _lookDirection;
+                controls.Align = true;
             }
         }
 
@@ -1868,8 +1902,10 @@ internal sealed class WorldView
         var position = slot.CameraCenter + rock.LocalPosition + (slot.Displaced ? slot.Offsets[i] : Vector3.Zero);
         // How much of the view the asteroid takes up, from 0 to 1 at its surface.
         var nearness = pixels * _tanHalfFov * 2f / _viewport.Y;
+        var contactReach = rock.Radius + OwnFlight.Radius;
+        var nearOwnHull = Vector3.DistanceSquared(position, Own.Position.RelativeTo(CameraPosition)) <= contactReach * contactReach;
         var detail =
-            rock.Radius >= RockFineRadius && nearness > RockFineNearness ? DetailFine
+            nearOwnHull || nearness > RockFineNearness ? DetailFine
             : rock.Radius >= RockCloseRadius && nearness > RockCloseNearness ? DetailClose
             : pixels > RockNormalPixels ? DetailNormal
             : pixels > RockSpeckPixels ? DetailCoarse

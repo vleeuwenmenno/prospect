@@ -13,6 +13,7 @@ internal enum InputAction
     Screenshot,
     Boost,
     AlignToView,
+    AlignLock,
     ToggleDampeners,
     ToggleCommand,
     ToggleMap,

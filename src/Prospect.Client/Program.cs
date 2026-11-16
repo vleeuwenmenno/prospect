@@ -422,6 +422,9 @@ internal static class Program
                     options.Thrust = thrust;
                     i++;
                     break;
+                case "--align-lock":
+                    options.AlignLock = true;
+                    break;
                 case "--align-at" when hasValue && float.TryParse(args[i + 1], out var alignAt) && alignAt is >= 0f and <= 600f:
                     options.AlignAt = alignAt;
                     i++;

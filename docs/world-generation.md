@@ -230,3 +230,19 @@ Debug, best of 20 on seed 11, dense sector `(-39,0,-19)`, gas kinds enabled:
 
 All fifteen supported 10 km steps passed the 15 ms Debug budget.
 `AsteroidRetuningTests.SectorSizeOptimizationKeepsRecordedBytes` pins the new 20/80/160 km hashes.
+
+## Decided: contact surface
+
+- `AsteroidMesh` owns the fixed icosphere tessellation; the finest level has 81,920 triangles.
+- Collision and picking intersect these flat facets, not the smooth noise function between their vertices.
+- Contact normals and shield tangents use the same facet. Nearby rocks of every size draw this finest level.
+- Tables are prepared when content loads; queries allocate nothing and descend six levels, never scan a rock mesh.
+- Placement, shape vertices, radii, random draws and generation identity are unchanged.
+
+## Contact work limits
+
+- Positional separation checks continue after the 256 stored damage/effect contacts.
+- Blocks sample their centre, closest point and corners against mesh facets.
+- Residual separation spends the remaining 2,048 box tests; the initial tree walk has 8,192 visits.
+- A 910-block admitted hull has at most 1,819 tree nodes; a full initial scan leaves 1,138 box tests.
+- Finite samples and exhausted correction budgets still limit pathological intersections; this is not continuous triangle collision.

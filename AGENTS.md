@@ -629,6 +629,10 @@ The client opens a real window on the developer's desktop, and they are usually 
 - `--align-at <s>` (scripted runs only) clicks the align button for 0.15 s that many seconds after the splash, through
   `PilotAlign`, the latch the left mouse button (`AlignToView`) uses: the hull turns onto the view without thrust, so
   `--look 60 --align-at 3 --capture-after 2.5 --capture-count 3 --capture-every 1.5` shows the world swinging after 3 s.
+  `AlignLock` (`V`, `WorldView.AlignLockOn`, per session, not saved) is the same latch held on: it adds to the held
+  button, so free look, a shown pointer and a jump block it through the same `alignBlocked`, and turning it off clears
+  the latch. Its tag is drawn over the reticle in `DrawFlightReadouts`, named from `WorldView.AlignLockKeyName`
+  (rebuilt on `ActionMap.Changed`); `--align-lock` turns it on in a scripted run.
   The stop angle is `content/visuals/pilot.json`; `PilotAlignTests` and `FrameOrderTests` hold the rules (pilot view,
   pointer captured, no Shift, no free look, no jump, thrust ends it).
 - `--look <degrees>` holds the pilot camera that far to the right of the hull's nose, as free look would (`0`
@@ -751,8 +755,9 @@ The client opens a real window on the developer's desktop, and they are usually 
   First contact on a resident sector never allocates. Unsaved servers use the default save bounds too.
 - A pushed asteroid still belongs to the sector it was generated in. One that drifts across the sector's edge is
   not hit by a hull that is wholly in the next sector.
-- Box collision prunes a per-design tree with live branch counts and content budgets. Asteroids use nearest-point
-  and corner samples against the seeded surface; narrow ridges between samples can be missed. Large-hull tick
+- Box collision prunes a per-design tree with live branch counts and content budgets. Asteroids use
+  centre, nearest-point and corner samples against the finest shared mesh facets (`AsteroidMesh`, six subdivisions), with facet normals;
+  narrow ridges between samples can be missed. Large-hull tick
   performance is not yet established.
 - The client predicts contact only with hulls near its own, and flies only its own fleet's hulls forward exactly;
   another player's hull is assumed to keep its velocity until the next snapshot.

@@ -4415,6 +4415,64 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     [Fact]
+    public void TheAlignLockKeepsTheHullOnTheViewUntilFreeLookShiftOrTheKeyTurnsItOff()
+    {
+        LookAside();
+        Assert.False(_world.AlignLockOn);
+
+        // On: align with no button and no thrust, frame after frame, until the nose is on the view.
+        Frame(() => Key(GlfwKey.V, true));
+        Frame(() => Key(GlfwKey.V, false));
+        Assert.True(_world.AlignLockOn);
+        var sent = Sent();
+        Assert.True(sent.Align);
+        Assert.Equal(0f, sent.Forward);
+        Assert.True(Vector3.Dot(sent.Aim, Nose) < 0.99f);
+
+        // Free look pauses it and returns it when released.
+        Frame(() => Button(GlfwMouseButton.Right, true));
+        Assert.True(_world.FreeLook);
+        Assert.False(Sent().Align);
+        Frame(() => Button(GlfwMouseButton.Right, false));
+        Frame();
+        Assert.True(_world.AlignLockOn);
+
+        // Looking aside again, still locked: it follows the new view without any click.
+        Frame(() => Key(GlfwKey.Right, true));
+        for (var i = 0; i < 10; i++)
+            Frame();
+        Frame(() => Key(GlfwKey.Right, false));
+        Assert.True(Sent().Align);
+
+        // Shift shows the pointer and pauses it; the toggle keeps its state.
+        Frame(() => Key(GlfwKey.LeftShift, true));
+        Frame();
+        Assert.False(Sent().Align);
+        Assert.True(_world.AlignLockOn);
+        Frame(() => Key(GlfwKey.LeftShift, false));
+        Frame();
+        Assert.True(Sent().Align);
+
+        // Off: nothing turns the hull any more.
+        Frame(() => Key(GlfwKey.V, true));
+        Frame(() => Key(GlfwKey.V, false));
+        Assert.False(_world.AlignLockOn);
+        Assert.False(Sent().Align);
+    }
+
+    [Fact]
+    public void TheAlignLockKeepsItsStateInTheCommandViewButActsOnlyInThePilotView()
+    {
+        LookAside();
+        Frame(() => Key(GlfwKey.V, true));
+        Frame(() => Key(GlfwKey.V, false));
+        Assert.True(_world.AlignLockOn);
+        CommandView();
+        Assert.True(_world.AlignLockOn);
+        Assert.False(Sent().Align);
+    }
+
+    [Fact]
     public void ARightDragBegunOnTheInterfaceNeverTurnsTheCamera()
     {
         PilotWithShift();
