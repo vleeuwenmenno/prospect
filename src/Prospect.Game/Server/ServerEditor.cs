@@ -73,6 +73,9 @@ public sealed partial class ServerHost
             case EditorRequestKind.Repair:
                 RepairEdit(connection, request.Token);
                 break;
+            case EditorRequestKind.AddContainer:
+                AddContainer(connection, request);
+                break;
             case EditorRequestKind.FillTank:
                 FillTanks(connection, request);
                 break;

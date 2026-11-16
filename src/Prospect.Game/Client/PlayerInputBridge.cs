@@ -125,9 +125,22 @@ public sealed class PlayerInputBridge
 
         /// <summary>Debug: fill tanks; the blocks are taken with <see cref="TakeFill"/>.</summary>
         Fill,
+        AddContainer,
     }
 
     private bool _hasEditBegin, _hasEditCancel, _hasEditRepair, _hasEditFill;
+    private bool _hasCargoAdd;
+    private EditorRequestMessage _cargoAdd, _takenCargoAdd;
+    public void AddContainer(uint token, int rack, int size, int resource)
+    {
+        lock (_lock)
+        {
+            _cargoAdd = new EditorRequestMessage { Kind = EditorRequestKind.AddContainer, Token = token, CargoRack = rack, CargoSize = size, CargoResource = resource };
+            _hasCargoAdd = true;
+        }
+    }
+    internal EditorRequestMessage TakeCargoAdd() => _takenCargoAdd;
+
     private FillBlocks _fillBlocks;
     private int _fillCount;
     private uint _editHull, _editToken;
@@ -275,6 +288,13 @@ public sealed class PlayerInputBridge
                 return EditIntent.Fill;
             }
 
+            if (_hasCargoAdd)
+            {
+                _hasCargoAdd = false;
+                _takenCargoAdd = _cargoAdd;
+                value = _takenCargoAdd.Token;
+                return EditIntent.AddContainer;
+            }
             if (_editBytes is null)
                 return EditIntent.None;
             value = _editToken;

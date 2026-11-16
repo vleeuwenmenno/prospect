@@ -160,6 +160,11 @@ internal sealed class EditorClient
                 _offset = 0;
                 Request(transport, new EditorRequestMessage { Kind = EditorRequestKind.Repair, Token = value });
                 return;
+            case PlayerInputBridge.EditIntent.AddContainer:
+                if (_state.Phase != EditorPhase.Open || value != _state.Token || _pending)
+                { Refuse(EditorReason.FillRefused); return; }
+                Request(transport, bridge.TakeCargoAdd());
+                return;
             case PlayerInputBridge.EditIntent.Fill:
                 if (_state.Phase != EditorPhase.Open || value != _state.Token || _pending)
                 {

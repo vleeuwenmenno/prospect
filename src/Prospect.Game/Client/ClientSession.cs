@@ -65,6 +65,7 @@ public sealed class SessionSnapshot(GameContent content)
 {
     /// <summary>Authoritative mutable wreck settings.</summary>
     public WreckSettingsMessage WreckSettings;
+    public bool InProcess;
     /// <summary>Roster, recent chat, party status, invitation and refusal for the interface.</summary>
     public readonly SocialState Social = new();
 
@@ -356,6 +357,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         snapshot.State = _state;
         snapshot.EndReason = _endReason;
         snapshot.WreckSettings = _wreckSettings;
+        snapshot.InProcess = _transport.IsInProcess;
         snapshot.PlayerId = _playerId;
         snapshot.ServerName = _serverName;
         snapshot.GalaxySeed = _galaxySeed;

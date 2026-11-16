@@ -138,6 +138,9 @@ public enum EditorRequestKind : byte
     /// names. The server decides; see <c>ServerConfig.AllowDebugFill</c>. To be removed with the Fill tank button.
     /// </summary>
     FillTank = 5,
+
+    /// <summary>Debug, local only: add a full or empty container to one existing rack.</summary>
+    AddContainer = 6,
 }
 
 /// <summary>The block indices of a <see cref="EditorRequestKind.FillTank"/> request, fixed so reading one takes no memory.</summary>
@@ -173,6 +176,8 @@ public struct EditorRequestMessage
 
     /// <summary>With <see cref="EditorRequestKind.FillTank"/>: block indices of the edited hull's design.</summary>
     public FillBlocks Blocks;
+    public int CargoRack, CargoSize, CargoResource;
+    public const int AddContainerWireSize = 1 + 1 + 4 + 4 + 1 + 1;
 
     public readonly void Write(ref NetWriter writer, scoped ReadOnlySpan<byte> hash)
     {
@@ -180,6 +185,13 @@ public struct EditorRequestMessage
         writer.WriteByte((byte)Kind);
         writer.WriteUInt32(Kind == EditorRequestKind.Begin ? Hull : Token);
         if (Kind == EditorRequestKind.NewShip) { Name.Write(ref writer); return; }
+        if (Kind == EditorRequestKind.AddContainer)
+        {
+            writer.WriteInt32(CargoRack);
+            writer.WriteByte((byte)CargoSize);
+            writer.WriteByte(CargoResource < 0 ? byte.MaxValue : (byte)CargoResource);
+            return;
+        }
         if (Kind == EditorRequestKind.FillTank)
         {
             writer.WriteByte((byte)FillCount);
@@ -200,7 +212,7 @@ public struct EditorRequestMessage
         message = default;
         var kind = reader.ReadByte();
         var value = reader.ReadUInt32();
-        if (!reader.IsValid || kind > (byte)EditorRequestKind.FillTank)
+        if (!reader.IsValid || kind > (byte)EditorRequestKind.AddContainer)
             return false;
         message.Kind = (EditorRequestKind)kind;
         if (message.Kind == EditorRequestKind.Begin)
@@ -208,6 +220,15 @@ public struct EditorRequestMessage
         else
             message.Token = value;
         if (message.Kind == EditorRequestKind.NewShip) return ShipName.Read(ref reader, out message.Name);
+        if (message.Kind == EditorRequestKind.AddContainer)
+        {
+            message.CargoRack = reader.ReadInt32();
+            message.CargoSize = reader.ReadByte();
+            var resource = reader.ReadByte();
+            message.CargoResource = resource == byte.MaxValue ? -1 : resource;
+            return reader.IsValid && reader.Remaining == 0 && message.CargoRack >= 0
+                && message.CargoSize < 8 && message.CargoResource < 16;
+        }
         if (message.Kind == EditorRequestKind.FillTank)
         {
             var count = reader.ReadByte();

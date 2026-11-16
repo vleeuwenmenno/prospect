@@ -8,6 +8,48 @@ namespace Prospect.Tests;
 public sealed class CargoWireTests
 {
     [Fact]
+    public void DebugBridgeAndParserTakeNoMemory()
+    {
+        var bridge = new Prospect.Game.Client.PlayerInputBridge();
+        Span<byte> bytes = stackalloc byte[EditorRequestMessage.MaxWireSize];
+        Span<byte> hash = stackalloc byte[32];
+        bridge.AddContainer(42, 5, 1, -1);
+        bridge.ConsumeEdit(out _, out _);
+        var probe = new AllocationProbe();
+        while (probe.Measuring())
+        {
+            bridge.AddContainer(42, 5, 1, -1);
+            Assert.True(bridge.ConsumeEdit(out _, out _) == Prospect.Game.Client.PlayerInputBridge.EditIntent.AddContainer);
+            var request = bridge.TakeCargoAdd();
+            var writer = new NetWriter(bytes);
+            request.Write(ref writer, hash);
+            var reader = new NetReader(writer.Written[1..]);
+            Assert.True(EditorRequestMessage.TryRead(ref reader, hash, out _));
+        }
+        Assert.Equal(0, probe.Bytes);
+    }
+
+    [Fact]
+    public void DebugAddRoundTripAndTruncation()
+    {
+        var request = new EditorRequestMessage { Kind = EditorRequestKind.AddContainer, Token = 42, CargoRack = 12345, CargoSize = 3, CargoResource = -1 };
+        Span<byte> bytes = stackalloc byte[EditorRequestMessage.MaxWireSize];
+        Span<byte> hash = stackalloc byte[32];
+        var writer = new NetWriter(bytes);
+        request.Write(ref writer, hash);
+        Assert.Equal(EditorRequestMessage.AddContainerWireSize, writer.Length);
+        var reader = new NetReader(writer.Written[1..]);
+        Assert.True(EditorRequestMessage.TryRead(ref reader, hash, out var copy));
+        Assert.Equal((request.Kind, request.Token, request.CargoRack, request.CargoSize, request.CargoResource),
+            (copy.Kind, copy.Token, copy.CargoRack, copy.CargoSize, copy.CargoResource));
+        for (var n = 1; n < writer.Length; n++)
+        {
+            reader = new NetReader(writer.Written[1..n]);
+            Assert.False(EditorRequestMessage.TryRead(ref reader, hash, out _));
+        }
+    }
+
+    [Fact]
     public void MaximumHoldRoundTripsAndTruncationIsRefused()
     {
         var cargo = new HoldContainer[BlockStateStore.MaxContainers];

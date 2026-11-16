@@ -8,6 +8,33 @@ public sealed partial class ServerHost
 {
     private readonly byte[] CargoScratch;
 
+    private void AddContainer(Connection connection, in EditorRequestMessage request)
+    {
+        if (!_allowDebugFill || !connection.Transport.IsInProcess)
+        { ReplyEdit(connection, EditorReason.FillOff); return; }
+        if (connection.EditPhase != EditorPhase.Open || request.Token != connection.EditToken)
+        { SendEditorState(connection); return; }
+        var invalid = EditInvalid(connection);
+        if (invalid != EditorReason.None) { EndEdit(connection, invalid); return; }
+        if (connection.EditHull != connection.Hull || _hulls.Info(connection.EditHull.Index).Owner != connection.PlayerId)
+        { ReplyEdit(connection, EditorReason.FillRefused); return; }
+        if (_tick < connection.EditNextFill) { ReplyEdit(connection, EditorReason.TooSoon, 1); return; }
+        connection.EditNextFill = _tick + FillIntervalTicks;
+        if (!HasRoom(0, 0)) { ReplyEdit(connection, EditorReason.HullLimit); return; }
+        if ((uint)request.CargoSize >= (uint)_content.Cargo.Sizes.Length || request.CargoResource < -1
+            || request.CargoResource >= _content.Galaxy.Resources.Length)
+        { ReplyEdit(connection, EditorReason.FillRefused); return; }
+        var size = _content.Cargo.Sizes[request.CargoSize];
+        var unit = (double)_content.Cargo.UnitSize;
+        var kg = request.CargoResource < 0 ? 0 : size.Units * unit * unit * unit * _content.Cargo.Density(_content.Galaxy.Resources[request.CargoResource].Id);
+        var container = new HoldContainer(request.CargoRack, request.CargoSize, request.CargoResource, kg, size.Hull, default);
+        var state = _hulls.Info(connection.EditHull.Index).BlockState;
+        if (!_hulls.BlockStates.TryAddCargo(state, _content, container, CargoScratch))
+        { ReplyEdit(connection, EditorReason.CargoFull); return; }
+        _field.Refit(connection.EditHull.Index);
+        ReplyEdit(connection, EditorReason.None);
+    }
+
     private void SendCargo()
     {
         foreach (var c in _connections)

@@ -1034,6 +1034,7 @@ internal sealed partial class ScreenHost
         width = ImGui.GetContentRegionAvail().X;
         DrawEditorSelection(editor, draft, content, width);
         DrawFillTank(editor, bridge, width);
+        DrawAddContainer(editor, bridge, width);
 
         if (editor.Time - editor.LastEditAt < EditMessageSeconds && editor.LastEdit is not (DraftEdit.Done or DraftEdit.Unchanged))
         {
@@ -1253,6 +1254,23 @@ internal sealed partial class ScreenHost
         Kit.Space(Theme.Space1);
         if (EditorButton("##delete"u8, count > 1 ? Kit.F($"Delete {count} blocks") : "Delete block"u8, new float2(width, Kit.Px(28)), editor.CanDelete))
             editor.DeleteSelected();
+    }
+
+    private int _cargoSize = 3, _cargoResource = -1;
+    private void DrawAddContainer(ShipEditor editor, PlayerInputBridge bridge, float width)
+    {
+        var rack = editor.CargoRack;
+        if (rack == -1 || editor.Content is not { } content) return;
+        Kit.Space(Theme.Space2);
+        var size = content.Cargo.Sizes[_cargoSize];
+        if (EditorButton("##cargosize"u8, Kit.F($"Size: {size.Name} ({size.Units} u)"), new float2(width, Kit.Px(24)), true))
+            _cargoSize = (_cargoSize + 1) % content.Cargo.Sizes.Length;
+        var resource = _cargoResource < 0 ? "Empty" : content.Galaxy.Resources[_cargoResource].Name;
+        if (EditorButton("##cargoresource"u8, Kit.F($"Resource: {resource}"), new float2(width, Kit.Px(24)), true))
+            _cargoResource = (_cargoResource + 2) % (content.Galaxy.Resources.Length + 1) - 1;
+        if (EditorButton("##addcontainer"u8, "ADD CONTAINER (DEBUG)"u8, new float2(width, Kit.Px(28)), rack >= 0 && !editor.Server.Pending))
+            editor.RequestContainer(bridge, _cargoSize, _cargoResource);
+        if (rack == -2) Paragraph(Theme.TextMute, "Apply first: that rack is only in your draft."u8, width);
     }
 
     /// <summary>

@@ -471,6 +471,27 @@ internal sealed class ShipEditor(JobSystem jobs)
         return true;
     }
 
+    /// <summary>Selected cargo rack in the live design; -2 means Apply first, -1 means no eligible selection.</summary>
+    private bool _local;
+    public int CargoRack
+    {
+        get
+        {
+            if (!CanEdit || !_local || !Server.DebugFill || Draft is null || Source is null || Selection.Length != 1) return -1;
+            var box = Draft.Boxes[Selection[0]];
+            if (box.Type.Cargo <= 0) return -1;
+            for (var i = 0; i < Source.Boxes.Length; i++) if (Source.Boxes[i] == box) return i;
+            return -2;
+        }
+    }
+    public bool RequestContainer(PlayerInputBridge bridge, int size, int resource)
+    {
+        var rack = CargoRack;
+        if (rack < 0 || Server.Pending) return false;
+        bridge.AddContainer(Token, rack, size, resource);
+        return true;
+    }
+
     private readonly DesignBox[] _copyBoxes = new DesignBox[Mirroring.MaxCopies];
     private readonly DraftEdit[] _copyBoxChecks = new DraftEdit[Mirroring.MaxCopies];
     private int _copyBoxCount;
@@ -718,6 +739,7 @@ internal sealed class ShipEditor(JobSystem jobs)
     public void Track(SessionSnapshot snapshot, PlayerInputBridge bridge, float dt)
     {
         _time += dt;
+        _local = snapshot.InProcess;
         var view = snapshot.Editor;
         Server = view;
         var fresh = view.Serial != _seenSerial;

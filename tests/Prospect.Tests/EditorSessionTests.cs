@@ -52,6 +52,80 @@ public sealed class EditorSessionTests
     }
 
     [Fact]
+    public void DebugContainerRejectsRemoteStaleAndClosedRequestsAndRateLimitsAdds()
+    {
+        using var rig = new Rig(clients: 2, joined: 2, debugFill: true);
+        var own = Rig.Index(rig.Own(0));
+        var state = rig.Hulls.Info(own).BlockState;
+        var rack = Array.FindIndex(rig.Content.Pod.Types, t => t.Cargo > 0);
+        byte[] Request(uint token)
+        {
+            var bytes = new byte[EditorRequestMessage.AddContainerWireSize];
+            var writer = new NetWriter(bytes);
+            new EditorRequestMessage { Kind = EditorRequestKind.AddContainer, Token = token, CargoRack = rack, CargoSize = 0, CargoResource = -1 }.Write(ref writer, default);
+            return bytes;
+        }
+        rig.Raw(0, NetChannel.Reliable, Request(1));
+        rig.Step(20);
+        Assert.Empty(rig.Hulls.BlockStates.Cargo(state).ToArray());
+        var token = rig.Open(0);
+        rig.Raw(0, NetChannel.Reliable, Request(token + 1));
+        rig.Raw(1, NetChannel.Reliable, Request(token));
+        rig.Step(20);
+        Assert.Empty(rig.Hulls.BlockStates.Cargo(state).ToArray());
+        rig.Wires[0].Remote = true;
+        rig.Raw(0, NetChannel.Reliable, Request(token));
+        Assert.True(rig.Until(() => rig.Editor(0).Reason == EditorReason.FillOff));
+        Assert.Empty(rig.Hulls.BlockStates.Cargo(state).ToArray());
+        rig.Wires[0].Remote = false;
+        rig.Raw(0, NetChannel.Reliable, Request(token));
+        rig.Raw(0, NetChannel.Reliable, Request(token));
+        Assert.True(rig.Until(() => rig.Editor(0).Reason == EditorReason.TooSoon));
+        Assert.Single(rig.Hulls.BlockStates.Cargo(state).ToArray());
+        rig.Step(20);
+        rig.Hulls.BlockStates.Lose(state, rack);
+        rig.Raw(0, NetChannel.Reliable, Request(token));
+        Assert.True(rig.Until(() => rig.Editor(0).Reason == EditorReason.CargoFull));
+        Assert.Empty(rig.Hulls.BlockStates.Cargo(state).ToArray());
+        Assert.Null(rig.Server.Fault);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DebugContainerUsesTheGateAndValidatesRackFit(bool enabled)
+    {
+        using var rig = new Rig(clients: 1, joined: 1, debugFill: enabled);
+        var own = Rig.Index(rig.Own(0));
+        var rack = Array.FindIndex(rig.Content.Pod.Types, t => t.Cargo > 0);
+        var token = rig.Open(0);
+        rig.Input(0).AddContainer(token, rack, 0, 0);
+        if (!enabled)
+        {
+            Assert.True(rig.Until(() => rig.Editor(0).Reason == EditorReason.FillOff));
+            Assert.Empty(rig.Hulls.BlockStates.Cargo(rig.Hulls.Info(own).BlockState).ToArray());
+            return;
+        }
+        Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Cargo.Length == 1));
+        var state = rig.Hulls.Info(own).BlockState;
+        var first = rig.Hulls.BlockStates.Cargo(state)[0];
+        Assert.Equal(rig.Content.Cargo.Density(rig.Content.Galaxy.Resources[0].Id) / 8, first.Amount);
+        rig.Step(30);
+        rig.Input(0).AddContainer(token, 0, 0, 0);
+        Assert.True(rig.Until(() => rig.Editor(0).Reason == EditorReason.CargoFull));
+        Assert.Single(rig.Hulls.BlockStates.Cargo(state).ToArray());
+        rig.Step(30);
+        rig.Input(0).AddContainer(token, rack, 7, -1);
+        Assert.True(rig.Until(() => !rig.Editor(0).Pending));
+        rig.Step(30);
+        Assert.Single(rig.Hulls.BlockStates.Cargo(state).ToArray());
+        rig.Input(0).AddContainer(token, rack, 0, -1);
+        Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Cargo.Length == 2));
+        Assert.Equal(-1, rig.Hulls.BlockStates.Cargo(state)[1].Resource);
+        Assert.Null(rig.Server.Fault);
+    }
+
+    [Fact]
     public void OwnHoldArrivesThroughReliableSessionAndFollowsControl()
     {
         using var rig = new Rig(clients: 1, joined: 1);
@@ -380,14 +454,14 @@ public sealed class EditorSessionTests
     /// <summary>The server's end of a link, able to hold a client back, refuse sends and count what passes.</summary>
     private sealed class Wire(ITransport inner) : ITransport, ITransportHandler
     {
-        internal bool Hold, RefuseReliable, RefuseBulk;
+        internal bool Hold, RefuseReliable, RefuseBulk, Remote;
         internal int DesignChunksBeforeRefusal = -1;
         internal readonly int[] Sent = new int[256], Received = new int[256];
         internal EditorPhase LastPhase;
         private ITransportHandler? _handler;
         public string Description => inner.Description;
         public int MaxPayloadSize => inner.MaxPayloadSize;
-        public bool IsInProcess => inner.IsInProcess;
+        public bool IsInProcess => !Remote && inner.IsInProcess;
         public bool Poll(ITransportHandler handler, ReceiveBudget budget)
         {
             if (Hold) return true;
