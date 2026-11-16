@@ -125,10 +125,23 @@ public sealed class CargoTests
         jobs.CompleteAll();
         models.Begin();
         Assert.True(models.TryGet(type, BlockShape.Box, Vector3.One, BlockFacing.Back, 1, out _));
+        for (var size = 0; size < 8; size++)
+        {
+            Assert.True(models.TryGetContainer(size, out var container));
+            Assert.False(container.IsEmpty);
+            var shape = Cargo.Sizes[size].Shape;
+            foreach (var vertex in container)
+            {
+                Assert.InRange(Math.Abs(vertex.Position.X), 0, shape.X * Cargo.UnitSize * .5f);
+                Assert.InRange(Math.Abs(vertex.Position.Y), 0, shape.Y * Cargo.UnitSize * .5f);
+                Assert.InRange(Math.Abs(vertex.Position.Z), 0, shape.Z * Cargo.UnitSize * .5f);
+            }
+        }
         var allocation = new AllocationProbe();
         while (allocation.Measuring())
         {
             models.Begin();
+            Assert.True(models.TryGetContainer(3, out _));
             models.TryGet(type, BlockShape.Box, Vector3.One, BlockFacing.Back, 1, out _);
             models.Flush();
         }

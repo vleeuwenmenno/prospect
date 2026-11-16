@@ -141,6 +141,11 @@ public sealed class EditorSessionTests
         Assert.Equal(design.Flight.Mass + .1f, rig.Snap(0).Flight.Mass, 3);
         var own = rig.Snap(0).Hulls[rig.Snap(0).OwnHull];
         Assert.Equal(100, own.Cargo.Span[0].Amount);
+        rig.Input(0).Submit(new PlayerControls { Forward = 1, Strafe = .4f, Roll = .3f });
+        rig.Step(120);
+        Assert.InRange(rig.Snap(0).PredictionError, 0, .01f);
+        rig.Input(0).Submit(default);
+        rig.Step(30);
         rig.Input(0).RequestControl(0);
         Assert.True(rig.Until(() => rig.Own(0) != original));
         rig.Step(30);

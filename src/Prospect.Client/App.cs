@@ -1242,6 +1242,11 @@ internal sealed class App : IDisposable
                 _editDroneView = true;
                 Session.Client.Input.RequestControl(0);
             }
+            else if (view is "cargo" or "edit-cargo" && snapshot is { OwnHull: >= 0 })
+            {
+                World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
+                World.ScriptCargoForCapture(view == "cargo");
+            }
             else if (view is "edit-fill" or "edit-fill-done" && snapshot is { OwnHull: >= 0 })
             {
                 // Debug fill: the editor with the pod's first tank selected (the button shows, local game), and for

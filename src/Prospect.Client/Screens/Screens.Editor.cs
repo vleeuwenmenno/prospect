@@ -1262,6 +1262,7 @@ internal sealed partial class ScreenHost
         var rack = editor.CargoRack;
         if (rack == -1 || editor.Content is not { } content) return;
         Kit.Space(Theme.Space2);
+        Paragraph(Theme.TextDim, Kit.F($"Live cargo: {editor.CargoUsedUnits} / {editor.Source!.Stats.CargoHold:0} u, {editor.CargoKilograms:0.#} kg"), width);
         var size = content.Cargo.Sizes[_cargoSize];
         if (EditorButton("##cargosize"u8, Kit.F($"Size: {size.Name} ({size.Units} u)"), new float2(width, Kit.Px(24)), true))
             _cargoSize = (_cargoSize + 1) % content.Cargo.Sizes.Length;

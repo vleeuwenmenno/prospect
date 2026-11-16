@@ -5262,6 +5262,31 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     [Fact]
+    public void CargoPreviewDisablesApplyForRackRemovalAndUndoRestoresPackedDrawing()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        var source = editor.Source!;
+        var rack = Array.FindIndex(source.Types, type => type.Cargo > 0);
+        var index = (int)(_snapshot.Hulls[_snapshot.OwnHull].Id & 0xFFFF);
+        Assert.True(ServerHulls.BlockStates.TryAddCargo(ServerHulls.Info(index).BlockState, _snapshot.Content,
+            new(rack, 0, 0, 100, 50, default), new byte[1024]));
+        Assert.True(PlayUntil(() => _snapshot.Hulls[_snapshot.OwnHull].Cargo.Length == 1));
+        editor.StopPlacing();
+        editor.Select(rack, false);
+        editor.DeleteSelected();
+        AwaitCheck();
+        Assert.False(editor.CargoFits);
+        Assert.False(editor.CanApply);
+        Assert.False(editor.Apply(Bridge));
+        editor.Undo();
+        AwaitCheck();
+        Assert.True(editor.CargoFits);
+        Assert.Equal(1, editor.DraftCargo.Length);
+        Assert.Equal(100, editor.DraftCargo[0].Amount);
+    }
+
+    [Fact]
     public void FuelPreviewKeepsGrowthAndWarnsWhenShrinkingBelowTheLevel()
     {
         OpenEditor();

@@ -31,6 +31,38 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
         public long Used;
     }
 
+    private readonly ContainerBuild _containers = new(look);
+    private JobHandle _containerHandle;
+    private bool _containersStarted, _containersReady;
+    public bool TryGetContainer(int size, out ReadOnlySpan<MeshVertex> vertices)
+    {
+        vertices = default;
+        if ((uint)size >= 8 || !_containersReady) return false;
+        vertices = _containers.Results[size];
+        return true;
+    }
+
+    private sealed class ContainerBuild(PropulsionLook look) : IJob
+    {
+        public readonly MeshVertex[][] Results = new MeshVertex[8][];
+        public void Run()
+        {
+            var vertices = new List<MeshVertex>();
+            var indices = new List<uint>();
+            for (var i = 0; i < Results.Length; i++)
+            {
+                vertices.Clear(); indices.Clear();
+                var shape = look.Cargo.Sizes[i].Shape;
+                var half = new Vector3(shape.X, shape.Y, shape.Z) * (look.Cargo.UnitSize * .5f);
+                if (look.Rack is { } rack)
+                    PropulsionModels.ContainerModel(new PartBox(Vector3.Zero, half, BlockFacing.Front, 1), i, rack, vertices, indices);
+                var soup = new MeshVertex[indices.Count];
+                for (var k = 0; k < soup.Length; k++) soup[k] = vertices[(int)indices[k]];
+                Results[i] = soup;
+            }
+        }
+    }
+
     private readonly Entry[] _entries = new Entry[Slots];
     private readonly Build _build = new(look);
 
@@ -48,6 +80,8 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
     public void Begin()
     {
         _frame++;
+        if (!_containersStarted) { _containerHandle = jobs.Schedule(_containers, 2); _containersStarted = true; }
+        if (!_containersReady && jobs.IsComplete(_containerHandle)) _containersReady = true;
         if (!_pending || !jobs.IsComplete(_handle))
             return;
         _pending = false;

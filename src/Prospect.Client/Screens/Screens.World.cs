@@ -1000,7 +1000,10 @@ internal sealed partial class ScreenHost
         Row("Volume"u8, Kit.F($"{stats.Volume:0} m³"));
         Row("W x H x L"u8, Kit.F($"{stats.Size.X:0} x {stats.Size.Y:0} x {stats.Size.Z:0} m"));
         Row("Blocks"u8, stats.Blocks == design.BlockCount ? Kit.F($"{stats.Blocks}") : Kit.F($"{stats.Blocks} of {design.BlockCount}"), stats.Blocks == design.BlockCount ? Theme.Text : Theme.Bad);
-        Row("Cargo hold"u8, Kit.F($"{stats.CargoHold:0.0} u"));
+        var cargoUnits = 0;
+        var cargoMass = 0.0;
+        foreach (var container in hull.Cargo.Span) { cargoUnits += 1 << container.Size; cargoMass += container.Amount; }
+        Row("Cargo hold"u8, hull.IsOwn ? Kit.F($"{cargoUnits} / {stats.CargoHold:0} u, {cargoMass:0.#} kg") : Kit.F($"{stats.CargoHold:0} u"));
         Row("Crew"u8, Kit.F($"{stats.Crew}"));
         y += line * 0.5f;
 

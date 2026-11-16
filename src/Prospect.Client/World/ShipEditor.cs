@@ -531,6 +531,17 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// <summary>True when the draft can be committed now.</summary>
     private readonly HoldContainer[] _cargo = new HoldContainer[BlockStateStore.MaxContainers];
     private int _cargoCount;
+    public int CargoUsedUnits
+    {
+        get { var total = 0; for (var i = 0; i < _cargoCount; i++) total += Content!.Cargo.Sizes[_cargo[i].Size].Units; return total; }
+    }
+    public double CargoKilograms
+    {
+        get { var total = 0.0; for (var i = 0; i < _cargoCount; i++) total += _cargo[i].Amount; return total; }
+    }
+    private readonly HoldContainer[] _draftCargo = new HoldContainer[BlockStateStore.MaxContainers];
+    private int _draftCargoCount;
+    public ReadOnlySpan<HoldContainer> DraftCargo => CheckedVersion == Draft?.Version ? _draftCargo.AsSpan(0, _draftCargoCount) : default;
     public bool CargoFits { get; private set; } = true;
 
     public bool CanApply =>
@@ -2250,6 +2261,8 @@ internal sealed class ShipEditor(JobSystem jobs)
                 _checkedFuelVersion = _job.FuelVersion;
                 FuelPlan = _job.Plan;
                 CargoFits = _job.CargoFits;
+                _draftCargoCount = CargoFits ? _job.CargoCount : 0;
+                _job.PlannedCargo.AsSpan(0, _draftCargoCount).CopyTo(_draftCargo);
                 if (_job.SelectionStamp == _selectionStamp)
                 {
                     MenuFuelPlan = _job.MenuPlan;
@@ -2316,6 +2329,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         public readonly HoldContainer[] Cargo = new HoldContainer[BlockStateStore.MaxContainers];
         public int CargoCount;
         public bool CargoFits;
+        public readonly HoldContainer[] PlannedCargo = new HoldContainer[BlockStateStore.MaxContainers];
         public readonly double[] Levels = new double[TankFuel.MaxTanks];
         public int FuelVersion;
         public EditFuelPlan Plan;
@@ -2351,8 +2365,7 @@ internal sealed class ShipEditor(JobSystem jobs)
                         var capacity = 0;
                         foreach (var box in Result.Design!.Boxes)
                             if (box.Type.Cargo > 0) capacity = Math.Max(capacity, CargoPacking.Capacity(Content!.Cargo, box.Size, Result.Design.BlockSize));
-                        Span<HoldContainer> planned = stackalloc HoldContainer[BlockStateStore.MaxContainers];
-                        CargoFits = CargoTransfer.TryPlan(Content!, Source, Result.Design, Cargo.AsSpan(0, CargoCount), planned, new byte[capacity]);
+                        CargoFits = CargoTransfer.TryPlan(Content!, Source, Result.Design, Cargo.AsSpan(0, CargoCount), PlannedCargo, new byte[capacity]);
                     }
                     Span<double> levels = stackalloc double[TankFuel.MaxTanks];
                     Plan = EditFuel.Plan(Source, Levels, Result.Design!, levels);

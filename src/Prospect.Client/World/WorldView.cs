@@ -848,6 +848,7 @@ internal sealed class WorldView
 
         // The editor follows the server before anything reads input, so a grant or an end shows this frame.
         Editor.Track(snapshot, bridge, dt);
+        if (_captureCargoMode != 0) RunCargoCapture(bridge, dt);
         if (_captureFillMode != 0)
             RunFillCapture(bridge, dt);
         UpdateEditedPose(snapshot);
@@ -1248,6 +1249,7 @@ internal sealed class WorldView
             // The pilot's own hull inside its jump takes no slot: its opening is cut from the frame's own jump.
             VisibleHulls++;
             var material = Material(visual.Inside, visual.Inside ? -1 : visual.Clip);
+            DrawCargo(frameIndex, design, hull.Cargo.Span, position, orientation, material, stretch);
             // The shield goes where the hull goes, drawn out and cut with it by the same material.
             _shields.Add(hull.Id, position, orientation, stretch, material, shieldInstances, shieldVertices, shieldIndices);
             var pixels = design.Flight.Radius * _viewport.Y / (Math.Max(position.Length(), 1f) * _tanHalfFov);
@@ -3608,6 +3610,33 @@ internal sealed class WorldView
     // over the middle of the ship for 1.5 s from the first second of the edit, and releases it at 2.5 s.
     private int _captureBoxKind;
 
+    private int _captureCargoMode, _captureCargoSent;
+    private float _captureCargoClock;
+    internal void ScriptCargoForCapture(bool flight) => _captureCargoMode = flight ? 2 : 1;
+    private void RunCargoCapture(PlayerInputBridge bridge, float dt)
+    {
+        if (!Editor.CanEdit || Editor.Draft is not { } draft) return;
+        if (_captureCargoClock == 0)
+        {
+            _editYaw = -.75f;
+            _editPitch = -.35f;
+            Editor.StopPlacing();
+            for (var i = 0; i < draft.Boxes.Length; i++)
+                if (draft.Boxes[i].Type.Cargo > 0) { Editor.Select(i, false); break; }
+        }
+        _captureCargoClock += dt;
+        if (_captureCargoSent < 3 && _captureCargoClock > 1 + _captureCargoSent * .6f)
+        {
+            if (Editor.RequestContainer(bridge, _captureCargoSent == 0 ? 2 : 1, _captureCargoSent == 2 ? -1 : _captureCargoSent)) _captureCargoSent++;
+        }
+        if (_captureCargoMode == 2 && _captureCargoClock > 4 && Editor.DraftCargo.Length == 3)
+        {
+            Editor.Cancel(bridge);
+            _captureCargoMode = 0;
+            SetCommandCapturePose(OwnPosition, 14, -.7f, -.35f);
+        }
+    }
+
     // Debug fill capture only (--open edit-fill, edit-fill-done): the harness selects the pod's first tank in the editor,
     // and for the second view asks the server to fill it 1.5 s later, since the pointer is muted.
     private int _captureFillMode;
@@ -4780,6 +4809,21 @@ internal sealed class WorldView
         }
     }
 
+    private void DrawCargo(int frameIndex, HullDesign design, ReadOnlySpan<HoldContainer> cargo,
+        Vector3 position, Quaternion orientation, float material, float stretch)
+    {
+        var catalog = PropulsionLook.Shared.Cargo;
+        foreach (var container in cargo)
+        {
+            if (!_partModels.TryGetContainer(container.Size, out var mesh)) continue;
+            var shape = catalog.Sizes[container.Size].Shape;
+            var offset = design.BlockOffsets[container.Rack] - design.BlockHalfExtents[container.Rack]
+                + new Vector3(container.At.X + shape.X * .5f, container.At.Y + shape.Y * .5f, container.At.Z + shape.Z * .5f) * catalog.UnitSize;
+            offset.Z *= stretch;
+            _scene.AddTriangles(frameIndex, mesh, MeshTransform(position + Vector3.Transform(offset, orientation), orientation, Vector3.One, design.Color, material, stretch));
+        }
+    }
+
     /// <summary>Adds the draft's blocks in their own shapes where the hull is, each tinted for its role.</summary>
     private void AddDraft(ref int count, int frameIndex, BuildDraft draft, HullDesign source, Double3 camera)
     {
@@ -4787,6 +4831,17 @@ internal sealed class WorldView
         var orientation = EditedOrientation;
         var boxes = draft.Boxes;
         var material = Material(false, -1);
+        var catalog = PropulsionLook.Shared.Cargo;
+        foreach (var container in Editor.DraftCargo)
+        {
+            if ((uint)container.Rack >= (uint)boxes.Length || !_partModels.TryGetContainer(container.Size, out var mesh)) continue;
+            var box = boxes[container.Rack];
+            var shape = catalog.Sizes[container.Size].Shape;
+            var corner = EditorGeometry.ToHull(EditorGeometry.Middle(box), source.Pivot, source.BlockSize)
+                - new Vector3(box.Size.X, box.Size.Y, box.Size.Z) * (source.BlockSize * .5f);
+            var offset = corner + new Vector3(container.At.X + shape.X * .5f, container.At.Y + shape.Y * .5f, container.At.Z + shape.Z * .5f) * catalog.UnitSize;
+            _scene.AddTriangles(frameIndex, mesh, MeshTransform(hull + Vector3.Transform(offset, orientation), orientation, Vector3.One, source.Color, material, 1));
+        }
         for (var i = 0; i < boxes.Length && count < _candidates.Length; i++)
         {
             ref readonly var box = ref boxes[i];
