@@ -31,25 +31,37 @@ public sealed partial class ServerHost
         { SendEditorState(connection); return; }
         var invalid = EditInvalid(connection);
         if (invalid != EditorReason.None) { EndEdit(connection, invalid); return; }
-        if (connection.EditHull != connection.Hull || request.Hull != connection.Hull.Packed
-            || _hulls.Info(connection.Hull.Index).Owner != connection.PlayerId)
+        if (connection.EditHull != connection.Hull)
         { ReplyEdit(connection, EditorReason.FillRefused); return; }
-        if (_tick < connection.EditNextFill) { ReplyEdit(connection, EditorReason.TooSoon, 1); return; }
+        var reason = ReleaseCargo(connection, request.Hull, request.CargoRack, request.CargoIndex, request.CargoTick, request.JettisonMode);
+        ReplyEdit(connection, reason, reason == EditorReason.TooSoon ? 1 : 0);
+    }
+
+    private EditorReason ReleaseCargo(Connection connection, uint hull, int rack, int index, long tick, JettisonMode mode)
+    {
+        if (!_hulls.IsAlive(connection.Hull) || hull != connection.Hull.Packed
+            || _hulls.Info(connection.Hull.Index).Owner != connection.PlayerId
+            || _hulls.State(connection.Hull.Index).Jump == JumpPhase.Tunnel)
+            return EditorReason.FillRefused;
+        if (_tick < connection.EditNextFill) return EditorReason.TooSoon;
         connection.EditNextFill = _tick + FillIntervalTicks;
         var state = _hulls.Info(connection.Hull.Index).BlockState;
         var hold = _hulls.BlockStates.Cargo(state);
         var design = _content.Designs[_hulls.Info(connection.Hull.Index).Design];
-        if (request.JettisonMode is not (JettisonMode.Abandon or JettisonMode.KeepClaim)
-            || request.CargoTick != connection.CargoTick || _hulls.BlockStates.CargoRevision(state) != connection.CargoRevision
-            || (uint)request.CargoIndex >= (uint)hold.Length || hold[request.CargoIndex].Rack != request.CargoRack
-            || CargoEjection.OpenSide(design, request.CargoRack) < 0 || !HasRoom(0, 0))
-        { ReplyEdit(connection, EditorReason.FillRefused); return; }
-        var free = CargoEjection.Make(_content.Cargo, design, hold[request.CargoIndex], _hulls.State(connection.Hull.Index),
+        if (mode is not (JettisonMode.Abandon or JettisonMode.KeepClaim)
+            || connection.CargoHull != hull || tick != connection.CargoTick
+            || _hulls.BlockStates.CargoRevision(state) != connection.CargoRevision
+            || (uint)index >= (uint)hold.Length || hold[index].Rack != rack
+            || (uint)rack >= (uint)design.Types.Length || design.Types[rack].Cargo <= 0
+            || !BlockSet.Has(_hulls.Blocks(connection.Hull.Index), rack)
+            || CargoEjection.OpenSide(design, rack) < 0 || !HasRoom(0, 0))
+            return EditorReason.FillRefused;
+        var free = CargoEjection.Make(_content.Cargo, design, hold[index], _hulls.State(connection.Hull.Index),
             _hulls.Flight(connection.Hull.Index).CenterOfMass, _tick, 0, false);
-        free.ClaimOwner = request.JettisonMode == JettisonMode.KeepClaim ? connection.PlayerId : 0;
-        if (!_containers.Add(_content, free, out _)) { ReplyEdit(connection, EditorReason.FillRefused); return; }
-        _hulls.BlockStates.RemoveCargoAt(state, request.CargoIndex);
+        free.ClaimOwner = mode == JettisonMode.KeepClaim ? connection.PlayerId : 0;
+        if (!_containers.Add(_content, free, out _)) return EditorReason.FillRefused;
+        _hulls.BlockStates.RemoveCargoAt(state, index);
         _field.Refit(connection.Hull.Index);
-        ReplyEdit(connection, EditorReason.None);
+        return EditorReason.None;
     }
 }

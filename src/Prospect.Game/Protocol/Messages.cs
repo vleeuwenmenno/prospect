@@ -100,6 +100,9 @@ public enum MessageId : byte
 
     /// <summary>Server to client: sensor-visible free containers.</summary>
     FreeContainers = 37,
+
+    /// <summary>Client to server: release cargo from the controlled hull without an editor.</summary>
+    JettisonCargo = 38,
 }
 
 public enum RejectReason : byte
