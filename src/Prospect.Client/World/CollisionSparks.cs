@@ -61,6 +61,25 @@ internal sealed class CollisionSparks
         }
     }
 
+    /// <summary>A shield-less contact inferred from two authoritative container velocities.</summary>
+    public void Container(in FreeContainer item, Vector3 normal, long tick, CollisionDetail tuning)
+    {
+        for (var i = 0; i < tuning.SparkCapacity; i++)
+        {
+            if (_bursts[i].Live && (tick - _bursts[i].Tick) / (double)TickLoop.SimulationHz < tuning.Seconds) continue;
+            _bursts[i] = new Burst
+            {
+                Live = true,
+                Origin = item.Position,
+                Velocity = item.Velocity,
+                Normal = normal,
+                Tick = tick,
+                Seed = item.Id ^ (uint)tick
+            };
+            return;
+        }
+    }
+
     public ReadOnlySpan<MeshVertex> Expand(Double3 camera, Vector3 right, Vector3 up, Vector3 forward, float aspect, float tanHalf, float height, double tick, CollisionDetail tuning)
     {
         var count = 0;

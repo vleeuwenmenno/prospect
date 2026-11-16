@@ -473,11 +473,12 @@ internal sealed class ShipEditor(JobSystem jobs)
 
     /// <summary>Selected cargo rack in the live design; -2 means Apply first, -1 means no eligible selection.</summary>
     private bool _local;
-    public int CargoRack
+    public int CargoRack => _local && Server.DebugFill ? SelectedCargoRack : -1;
+    public int SelectedCargoRack
     {
         get
         {
-            if (!CanEdit || !_local || !Server.DebugFill || Draft is null || Source is null || Selection.Length != 1) return -1;
+            if (!CanEdit || Draft is null || Source is null || Selection.Length != 1) return -1;
             var box = Draft.Boxes[Selection[0]];
             if (box.Type.Cargo <= 0) return -1;
             for (var i = 0; i < Source.Boxes.Length; i++) if (Source.Boxes[i] == box) return i;

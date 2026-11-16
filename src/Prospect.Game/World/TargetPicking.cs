@@ -164,6 +164,16 @@ public static class TargetPicking
         return (point / depth - ray / rayDepth).LengthSquared() <= GrabPixels * GrabPixels / (focal * focal);
     }
 
+    /// <summary>Exact oriented-box pick for a free container. Misses return positive infinity.</summary>
+    public static float Container(Vector3 ray, Double3 camera, in FreeContainer item, CargoCatalog cargo, float nearPlane = .25f)
+    {
+        var inverse = Quaternion.Conjugate(item.Orientation);
+        var center = Vector3.Transform(item.Position.RelativeTo(camera), inverse);
+        var direction = Vector3.Transform(ray, inverse);
+        return Faces(center, direction, FreeContainers.Half(cargo, item.Size), BlockShape.Box, AllFaces,
+            Vector3.Zero, 0, nearPlane, float.PositiveInfinity, default);
+    }
+
     private const int AllFaces = 0x3F;
 
     /// <summary>

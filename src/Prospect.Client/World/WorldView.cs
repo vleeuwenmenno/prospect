@@ -29,7 +29,7 @@ internal enum ViewMode
 /// Nothing here is game state. Positions stay in doubles until they are made relative to the camera, which is the
 /// origin of everything that reaches the GPU.
 /// </summary>
-internal sealed class WorldView
+internal sealed partial class WorldView
 {
     public const int MaxSelection = 64;
     private const float FormationSpacing = 45f;
@@ -808,6 +808,8 @@ internal sealed class WorldView
             _shields.Clear();
             _damage.Clear();
             _sparks.Clear();
+            _freeVisuals.Clear();
+            TargetContainer = 0;
             _thrust.Clear();
             _rockExhaust.Clear();
             _scanPulse.Reset();
@@ -828,6 +830,7 @@ internal sealed class WorldView
             _currentCoord = new SectorCoord(int.MinValue, 0, 0);
         }
 
+        UpdateFreeContainers(snapshot);
         ApplyRockDeltas(snapshot);
         _time += dt;
 
@@ -1373,6 +1376,7 @@ internal sealed class WorldView
         for (var i = 0; i < candidateCount; i++)
             instances[_meshOffsets[_candidates[i].Mesh]++] = _candidates[i].Instance;
 
+        DrawFreeContainers(frameIndex, snapshot, camera);
         _scene.AddSparks(frameIndex, _sparks.Expand(camera, _right, _up, _forward, aspect, _tanHalfFov, _viewport.Y, snapshot.ServerTickPrecise + alpha, _collision));
         var f = 1f / _tanHalfFov;
         var sunColor = galaxy.StarClasses[Sector.StarClass].Color * 1.7f;
@@ -2110,8 +2114,12 @@ internal sealed class WorldView
         var center = _screen * 0.5f;
         var count = PickTargets(snapshot, center, true);
         var hovered = count == 0 ? default : _pickHits[0];
-        HoveredHull = hovered.Hull;
-        HoveredRock = hovered.Rock;
+        var free = PickFreeContainer(snapshot, out var freeDistance);
+        if (count > 0)
+            for (var i = 0; i < count; i++) if (_pickHits[i].Distance < freeDistance) { free = 0; break; }
+        HoveredHull = free == 0 ? hovered.Hull : 0;
+        HoveredRock = free == 0 ? hovered.Rock : null;
+        if (TargetContainer != 0 && !TryGetContainer(TargetContainer, out _)) TargetContainer = 0;
         if (TargetHull != 0 && (!TryGetHull(TargetHull, out var targeted) || targeted.Jump == JumpPhase.Tunnel)) TargetHull = 0;
         if (TargetRock is { } held && !TryGetRock(held, out _, out _)) TargetRock = null;
         // Pilot input moves the view while the reticle stays fixed in the middle of the window.
@@ -2120,8 +2128,9 @@ internal sealed class WorldView
         if (_devices.MousePressed(GlfwMouseButton.Middle))
         {
             var hit = _pilotCycle.Click(_pickHits.AsSpan(0, count), _pilotPointer, TargetHull, TargetRock);
-            TargetHull = hit.Hull;
-            TargetRock = hit.Rock;
+            TargetContainer = free;
+            TargetHull = free == 0 ? hit.Hull : 0;
+            TargetRock = free == 0 ? hit.Rock : null;
         }
 
         if (!_actions.Pressed(_devices, InputAction.SwitchHull, true))
@@ -2130,7 +2139,7 @@ internal sealed class WorldView
         if (TargetHull == 0)
         {
             // An asteroid is not something to climb into; only leave in a drone when nothing at all is targeted.
-            if (TargetRock is null)
+            if (TargetRock is null && TargetContainer == 0)
                 bridge.RequestControl(0);
         }
         else if (TryGetHull(TargetHull, out var target) && target.Owner == snapshot.PlayerId)
@@ -2267,6 +2276,7 @@ internal sealed class WorldView
             // the drive's readout. A plotted course alone is a route, not a start, and keeps it.
             TargetHull = 0;
             TargetRock = null;
+            TargetContainer = 0;
             _jumpChaseLatched = false;
             _carryOffset = _jumpOffset;
             _carryOpen = _jumpEntryOpen;
@@ -2905,6 +2915,7 @@ internal sealed class WorldView
             best = distance;
             TargetHull = hull.Id;
             TargetRock = null;
+            TargetContainer = 0;
         }
     }
 
@@ -2934,6 +2945,7 @@ internal sealed class WorldView
 
         if (found is null)
             return;
+        TargetContainer = 0;
         TargetRock = found;
         TargetHull = 0;
     }
@@ -2989,6 +3001,7 @@ internal sealed class WorldView
                 // A plotted course takes the strip and the pilot's attention, so the target panel gives way to it.
                 TargetHull = 0;
                 TargetRock = null;
+                TargetContainer = 0;
             }
             else if (_selected[i] == Own.Id)
                 bridge.IssueOrder(order);
