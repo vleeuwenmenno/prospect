@@ -947,6 +947,81 @@ internal sealed partial class ScreenHost
         _ => default,
     };
 
+    /// <summary>Kilograms of fuel the checked draft would dump, over every fuel.</summary>
+    private static float TotalDumped(ShipEditor editor) => editor.FuelDump.Nitrogen + editor.FuelDump.Hydrazine + editor.FuelDump.Bipropellant;
+
+    /// <summary>
+    /// What an apply does to the fuel, a row a fuel like the FIGURES rows: the fuel's name on the left, its level
+    /// before and after on the right with a drawn arrow, then a note under it only when fuel moves between tanks or is dumped.
+    /// </summary>
+    private void DrawFuelOnApply(ShipEditor editor, float width)
+    {
+        if (editor.Check != DraftCheck.Ready || !editor.Dirty || editor.Source is not { } source || editor.Checked.Design is not { } design)
+            return;
+        var any = false;
+        for (var fuel = 1; fuel <= Fuels.Count && !any; fuel++)
+            any = source.Flight.FuelCapacity[(FuelKind)fuel] > 0 || design.Flight.FuelCapacity[(FuelKind)fuel] > 0;
+        if (!any)
+            return;
+        Kit.Space(Theme.Space4);
+        Kit.Caption("FUEL ON APPLY"u8, Theme.Accent);
+        Kit.Space(Theme.Space1);
+        var known = editor.FuelKnown;
+        for (var fuel = 1; fuel <= Fuels.Count; fuel++)
+        {
+            var kind = (FuelKind)fuel;
+            var capBefore = source.Flight.FuelCapacity[kind];
+            var capAfter = design.Flight.FuelCapacity[kind];
+            if (capBefore <= 0 && capAfter <= 0)
+                continue;
+            var name = ConsoleFuel.FullName(kind);
+            if (!known)
+            {
+                FuelChangeRow(name, capBefore, capAfter, "KG CAPACITY"u8, Theme.TextDim, width);
+                continue;
+            }
+
+            var before = editor.FuelPlan.Before[kind];
+            var after = editor.FuelPlan.After[kind];
+            var moved = editor.FuelPlan.Moved[kind];
+            var dumped = editor.FuelDump[kind];
+            FuelChangeRow(name, before, after, "KG"u8, dumped > 0f ? ExhaustOrange : Theme.Text, width);
+            ImGui.Indent(Kit.Px(Theme.Space2));
+            if (moved > 0f)
+                StatRow("MOVED"u8, Kit.F($"{moved:0.##} KG"), Theme.Info, width - Kit.Px(Theme.Space2));
+            if (dumped > 0f)
+                StatRow("DUMPED"u8, Kit.F($"{dumped:0.##} KG"), ExhaustOrange, width - Kit.Px(Theme.Space2));
+            ImGui.Unindent(Kit.Px(Theme.Space2));
+        }
+
+        if (!known)
+            Paragraph(ExhaustOrange, "This ship's tank levels are not known here, so a tank that changes may lose its fuel."u8, width);
+    }
+
+    /// <summary>One fuel row: name on the left, "before > after UNIT" on the right, the arrow drawn so no font needs the glyph.</summary>
+    private void FuelChangeRow(ReadOnlySpan<byte> name, float before, float after, ReadOnlySpan<byte> unit, uint tone, float width)
+    {
+        var draw = ImGui.GetWindowDrawList();
+        var at = ImGui.GetCursorScreenPos();
+        var font = _ui.Mono;
+        var size = Theme.FontCaption;
+        var tail = Kit.Measure(font, size, Kit.F($"{after:0.##} {unit}")).X;
+        var head = Kit.Measure(font, size, Kit.F($"{before:0.##}")).X;
+        var gap = Kit.Px(Theme.Space1);
+        var arrow = Kit.Px(9);
+        var tailAt = at.X + width - tail;
+        Kit.Text(draw, font, size, new float2(tailAt, at.Y), tone, Kit.F($"{after:0.##} {unit}"));
+        var tip = new float2(tailAt - gap, at.Y + Kit.Px(size) * 0.55f);
+        var color = Kit.Color(Theme.TextDim);
+        draw.AddLine(tip - new float2(arrow, 0), tip, color, Kit.Px(1));
+        draw.AddLine(tip - new float2(Kit.Px(4), Kit.Px(3)), tip, color, Kit.Px(1));
+        draw.AddLine(tip - new float2(Kit.Px(4), -Kit.Px(3)), tip, color, Kit.Px(1));
+        var headAt = tip.X - arrow - gap - head;
+        Kit.Text(draw, font, size, new float2(headAt, at.Y), Theme.TextDim, Kit.F($"{before:0.##}"));
+        Kit.ClippedText(draw, _ui.SansMedium, Theme.FontCaption, at, Theme.TextMute, name, Math.Max(0f, headAt - at.X - Kit.Px(Theme.Space2)));
+        ImGui.Dummy(new float2(width, Kit.Px(18)));
+    }
+
     /// <summary>
     /// The selection with what can be done to it, the ship against its blueprint with Repair, the checked figures
     /// with their warnings, the shield shape's complexity, and whether the draft can be applied.
@@ -986,35 +1061,12 @@ internal sealed partial class ScreenHost
         DrawEditorFigures(editor, draft, width);
         DrawSurface(editor, draft, width);
 
+        DrawFuelOnApply(editor, width);
         Kit.Space(Theme.Space4);
         Kit.Caption("CHECK"u8, Theme.Accent);
         Kit.Space(Theme.Space1);
         if (editor.DraftRestarted && !editor.Dirty)
             Paragraph(Theme.Info, "The ship changed since your last draft, so this draft starts again from its blueprint."u8, width);
-        Kit.Caption("FUEL ON APPLY"u8, Theme.Accent);
-        if (editor.Check == DraftCheck.Ready && editor.Checked.Design is { } fuelDesign)
-        {
-            for (var fuel = 1; fuel <= Fuels.Count; fuel++)
-            {
-                var kind = (FuelKind)fuel;
-                var before = editor.Source!.Flight.FuelCapacity[kind];
-                var after = fuelDesign.Flight.FuelCapacity[kind];
-                if (before <= 0 && after <= 0) continue;
-                Kit.Caption(ConsoleFuel.FullName(kind));
-                if (!editor.FuelKnown)
-                    Paragraph(Theme.TextDim, Kit.F($"CAPACITY {before:0.##} KG -> {after:0.##} KG"), width);
-                else
-                {
-                    Paragraph(Theme.Text, Kit.F($"{editor.FuelPlan.Before[kind]:0.##} KG -> {editor.FuelPlan.After[kind]:0.##} KG"), width);
-                    if (editor.FuelPlan.Moved[kind] > 0f)
-                        Paragraph(Theme.Accent, Kit.F($"{editor.FuelPlan.Moved[kind]:0.##} KG MOVED"), width);
-                    if (editor.FuelDump[kind] > 0f)
-                        Paragraph(Theme.Bad, Kit.F($"{editor.FuelDump[kind]:0.##} KG DUMPED"), width);
-                }
-            }
-        }
-        if (!editor.FuelKnown)
-            Paragraph(Theme.Bad, "Fuel levels unknown: tanks that change may lose fuel."u8, width);
         switch (editor.Check)
         {
             case DraftCheck.Pending:
@@ -1024,7 +1076,10 @@ internal sealed partial class ScreenHost
                 Paragraph(Theme.TextDim, "No changes yet."u8, width);
                 break;
             case DraftCheck.Ready:
-                Paragraph(Theme.Good, editor.DumpsFuel ? "Passes every check. Confirm fuel dumping to apply."u8 : "Passes every check. Ready to apply."u8, width);
+                if (editor.DumpsFuel)
+                    Paragraph(ExhaustOrange, Kit.F($"Applying dumps {TotalDumped(editor):0.##} kg of fuel."), width);
+                else
+                    Paragraph(Theme.Good, "Passes every check. Ready to apply."u8, width);
                 break;
             default:
                 Paragraph(Theme.Bad, Kit.F($"{editor.CheckProblem}"), width);
@@ -1530,6 +1585,12 @@ internal sealed partial class ScreenHost
             case DraftCheck.Ready when !editor.Dirty:
                 tone = Theme.TextDim;
                 return "Editing. Place, move, merge or delete blocks, then apply."u8;
+            case DraftCheck.Ready when editor.ConfirmDump:
+                tone = ExhaustOrange;
+                return Kit.F($"Click again to dump {TotalDumped(editor):0.##} kg and apply.");
+            case DraftCheck.Ready when editor.DumpsFuel:
+                tone = ExhaustOrange;
+                return Kit.F($"Applying dumps {TotalDumped(editor):0.##} kg of fuel.");
             case DraftCheck.Ready:
                 tone = Theme.Good;
                 return "Ready to apply."u8;

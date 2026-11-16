@@ -243,6 +243,7 @@ internal sealed class EditorMenuPanel(UiContext ui)
     {
         ReadOnlySpan<byte> label;
         ReadOnlySpan<byte> note = default;
+        var noteTone = 0u;
         var enabled = true;
         var arrow = false;
         var blocks = editor.Selection.Length;
@@ -274,7 +275,10 @@ internal sealed class EditorMenuPanel(UiContext ui)
                 enabled = editor.CanDelete;
                 note = enabled ? "DEL"u8 : editor.CanEdit ? "LEAVES NO BLOCK"u8 : "REPAIR FIRST"u8;
                 if (enabled && editor.MenuFuelReady && editor.Menu.Mount < 0 && (dumped > 0f || moved > 0f))
+                {
                     note = dumped > 0f ? Kit.F($"DUMPS {dumped:0.##} KG") : Kit.F($"MOVES {moved:0.##} KG");
+                    noteTone = dumped > 0f ? 0xFF8A3Du : Theme.Info;
+                }
                 break;
             case EditorMenuRow.SameType:
                 label = "Select same type"u8;
@@ -291,7 +295,10 @@ internal sealed class EditorMenuPanel(UiContext ui)
                 if (enabled && editor.SelectionFuel == FuelKind.None)
                     note = "MIXED"u8;
                 if (enabled && editor.MenuFuelReady && (dumped > 0f || moved > 0f))
+                {
                     note = dumped > 0f ? Kit.F($"DUMPS {dumped:0.##} KG") : Kit.F($"MOVES {moved:0.##} KG");
+                    noteTone = dumped > 0f ? 0xFF8A3Du : Theme.Info;
+                }
                 arrow = enabled;
                 break;
             default:
@@ -314,12 +321,12 @@ internal sealed class EditorMenuPanel(UiContext ui)
         var id = ImGui.GetItemID();
         ImGui.PopID();
         var hot = Kit.Animate(id, enabled && ImGui.IsItemHovered() ? 1f : 0f);
-        RowLook(draw, rowMin, rowSize, label, note, enabled, hot, arrow, false);
+        RowLook(draw, rowMin, rowSize, label, note, enabled, hot, arrow, false, noteTone);
         return pressed && enabled;
     }
 
     /// <summary>The look shared by the menu's rows and its flyouts' rows.</summary>
-    private void RowLook(ImDrawListPtr draw, float2 rowMin, float2 rowSize, ReadOnlySpan<byte> label, ReadOnlySpan<byte> note, bool enabled, float hot, bool arrow, bool check)
+    private void RowLook(ImDrawListPtr draw, float2 rowMin, float2 rowSize, ReadOnlySpan<byte> label, ReadOnlySpan<byte> note, bool enabled, float hot, bool arrow, bool check, uint noteTone = 0)
     {
         if (hot > 0.01f)
         {
@@ -354,7 +361,7 @@ internal sealed class EditorMenuPanel(UiContext ui)
         var room = Math.Max(0f, right - left - labelWidth - Kit.Px(Theme.Space2));
         var noteWidth = Math.Min(Kit.Measure(ui.Mono, Theme.FontCaption, note).X, room);
         Kit.ClippedText(draw, ui.Mono, Theme.FontCaption, new float2(right - noteWidth, middle - Kit.Px(Theme.FontCaption) * 0.55f),
-            enabled ? Kit.Mix(Theme.TextMute, Theme.Accent, hot) : Theme.Bad, note, room);
+            noteTone != 0 && enabled ? noteTone : enabled ? Kit.Mix(Theme.TextMute, Theme.Accent, hot) : Theme.Bad, note, room);
     }
 
     private static ReadOnlySpan<byte> MergeReason(DraftEdit edit) => edit switch

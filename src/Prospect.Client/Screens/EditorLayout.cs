@@ -25,7 +25,7 @@ internal readonly record struct EditorLayout(HudRect Parts, HudRect Details, Hud
     public const float DetailsShare = 0.27f;
 
     /// <summary>The bar's buttons, in design pixels: Undo, Redo, Cancel and Apply, with the gaps between them.</summary>
-    public static ReadOnlySpan<float> ButtonWidths => [72f, 72f, 84f, 100f];
+    public static ReadOnlySpan<float> ButtonWidths => [72f, 72f, 84f, 116f];
 
     /// <summary>The two buttons before them, in design pixels: Save... and Load..., which open the saved designs dialogs.</summary>
     public static ReadOnlySpan<float> DesignButtonWidths => [78f, 78f];
