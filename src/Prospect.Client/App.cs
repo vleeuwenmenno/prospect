@@ -343,6 +343,9 @@ internal sealed class App : IDisposable
     private readonly RtsCapture? _rts;
     private bool _benchmarkEditRequested, _benchmarkRepairRequested;
 
+    /// <summary>Whether a run with <c>--jettison</c> has seen the released container loose in space; its report needs it.</summary>
+    private bool _benchmarkSawFreeContainer;
+
     // The run time at which a scripted diagnostic run reached its own end (all captures saved, or the benchmark
     // finished), or null before that. Closing the session afterwards takes more frames, which are not measured.
     private float? _diagnosticEnd;
@@ -1143,6 +1146,8 @@ internal sealed class App : IDisposable
             return;
         // Wall-clock time, so scripted captures line up with the simulation whatever the frame pacing.
         _sinceSplash = (float)Stopwatch.GetElapsedTime(_splashFinishedAt).TotalSeconds;
+        if (_options.JettisonSeconds is not null && World.FreeContainerCount > 0)
+            _benchmarkSawFreeContainer = true;
 
         // Nothing is sampled once the diagnostic run has ended: the frames that follow close the session.
         var measuring = _diagnosticEnd is null;
@@ -1654,6 +1659,9 @@ internal sealed class App : IDisposable
             ExitCode = _benchmark.Report(_gpu, _swapchain, _moduleScansDone) ? 0 : 1;
             var editorReady = _options.OpenView switch
             {
+                // Jettison, drift, tractor pull and stow all happen inside the measurement: the container was seen loose
+                // and is back in the hold, so a run that never released or never picked it up cannot pass.
+                "cargo" when _options.JettisonSeconds is not null => _benchmarkSawFreeContainer && World.Own.Cargo.Length == 3 && World.FreeContainerCount == 0,
                 "edit-cargo" => World.Editor.CanEdit && World.Editor.LiveCargo.Length == 3 && World.Editor.CargoRack >= 0,
                 "edit-menu" => World.Editor.Menu.IsOpen && World.Editor.Menu.Sub == EditorMenuSub.Fuel,
                 "edit-dump" => World.Editor.ConfirmDump,
@@ -1662,7 +1670,7 @@ internal sealed class App : IDisposable
             };
             if (!editorReady)
             {
-                Console.WriteLine("  Editor fixture       FAIL: the requested panel did not reach its prepared state");
+                Console.WriteLine("  Editor fixture       FAIL: the requested fixture did not reach its prepared state");
                 ExitCode = 1;
             }
             Console.WriteLine($"  World drawing        skipped in {WorldFramesSkipped} frames since the start (the map hid it)");

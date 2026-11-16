@@ -306,7 +306,13 @@ test: need-dotnet ## Run the unit tests
 	$(call step,Running the listing server tests)
 	$(Q)"$(DOTNET)" $(BIN)/Prospect.Listing.Tests/$(config)/Prospect.Listing.Tests.dll $(TEST_ARGS)
 
-bench: need-dotnet ## Release benchmark: empty scene, resizing and editor panels (fails below target or on allocation)
+# The shipped pod has no tractor beam, so the cargo run uses a copy of the Release build whose pod has one and two
+# racks (tools/prepare_tractor_capture.py). The run lasts about 24 s of play: the first rack releases a container at 5 s,
+# it drifts away, the beam picks it up and the rack takes it back. It fails on any managed allocation, and when the
+# container was never seen loose or is not back in the hold at the end.
+TRACTOR_BENCH := $(BIN)/tractor-bench
+
+bench: need-dotnet ## Release benchmark: empty scene, resizing, editor panels and cargo (fails below target or on allocation)
 	$(call step,Building the client (Release))
 	$(Q)"$(DOTNET)" build $(CLIENT) -c Release $(QUIET)
 	$(call step,Benchmarking an empty scene at 1920x1080)
@@ -317,6 +323,10 @@ bench: need-dotnet ## Release benchmark: empty scene, resizing and editor panels
 	$(Q)for view in edit-cargo edit-menu edit-dump edit-mirror; do \
 	  $(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 4 --size 1920x1080 --open $$view || exit $$?; \
 	done
+	$(call step,Fitting a copy of the build with a tractor beam and racks)
+	$(Q)python3 tools/prepare_tractor_capture.py $(BIN)/Prospect.Client/release $(TRACTOR_BENCH)
+	$(call step,Benchmarking cargo (jettison, drift, tractor pull and stow))
+	$(Q)$(RUN_ENV) "$(DOTNET)" $(TRACTOR_BENCH)/prospect.dll --bench 25 --size 1920x1080 --open cargo --jettison 5
 
 # Inside gas clouds, where the primary cloud is marched at half resolution (assets/shaders/gas_half.glsl): an ordinary
 # cloud from inside, from the pilot's seat (composed with the shields) and from the command view, a huge one and a

@@ -107,6 +107,34 @@ public sealed class SensorShapeTests
     }
 
     [Fact]
+    public void TheCommandViewsFirstFrameOfCoverageTakesNoMemory()
+    {
+        // What a frame does once the screens exist and Collect has sized the sensors: the very first selection, link,
+        // sampling, outline and lost-range build must take nothing, since the first frame in the command view is a frame
+        // of play. The benchmark with a jettison (make bench) hits the same path in the real client.
+        var allocation = new AllocationProbe();
+        while (allocation.Run())
+        {
+            var coverage = Coverage([new(0, 0, 0), new(8000, 0, 0), new(60000, 0, 0)]);
+            coverage.ReserveEntries(3);
+            uint[] selection = [1, 2, 3];
+            allocation.Start();
+            coverage.SelectActive(selection);
+            coverage.LinkActive();
+            coverage.Refresh(0, true);
+            var outline = coverage.Outline();
+            var lost = coverage.LostRange(true);
+            var inside = coverage.InsideShown(1000, 0);
+            allocation.Stop();
+            Assert.True(outline.Length > 0);
+            Assert.True(inside);
+            Assert.Equal(0, lost.Length);
+        }
+
+        Assert.Equal(0, allocation.Bytes);
+    }
+
+    [Fact]
     public void ShipsWithinTheLinkDistanceLinkInAChainAndTheRestStandApart()
     {
         // A-B and B-C are 8 km apart, A-C 16 km: one chain. D is far from all.
