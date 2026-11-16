@@ -306,13 +306,17 @@ test: need-dotnet ## Run the unit tests
 	$(call step,Running the listing server tests)
 	$(Q)"$(DOTNET)" $(BIN)/Prospect.Listing.Tests/$(config)/Prospect.Listing.Tests.dll $(TEST_ARGS)
 
-bench: need-dotnet ## Release benchmark: frame rate and per-frame allocation, also while resizing (fails below target)
+bench: need-dotnet ## Release benchmark: empty scene, resizing and editor panels (fails below target or on allocation)
 	$(call step,Building the client (Release))
 	$(Q)"$(DOTNET)" build $(CLIENT) -c Release $(QUIET)
 	$(call step,Benchmarking an empty scene at 1920x1080)
 	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 10 --size 1920x1080
 	$(call step,Benchmarking the same scene while the window is resized)
 	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 6 --bench-resize 6 --size 1920x1080
+	$(call step,Benchmarking editor cargo and fuel panels and mirror ghosts)
+	$(Q)for view in edit-cargo edit-menu edit-dump edit-mirror; do \
+	  $(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 4 --size 1920x1080 --open $$view || exit $$?; \
+	done
 
 # Inside gas clouds, where the primary cloud is marched at half resolution (assets/shaders/gas_half.glsl): an ordinary
 # cloud from inside, from the pilot's seat (composed with the shields) and from the command view, a huge one and a

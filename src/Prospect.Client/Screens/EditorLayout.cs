@@ -24,11 +24,15 @@ internal readonly record struct EditorLayout(HudRect Parts, HudRect Details, Hud
     public const float PartsShare = 0.345f;
     public const float DetailsShare = 0.27f;
 
+    // Cache these once: evaluating a primitive-span collection expression allocates on the current runtime.
+    private static readonly float[] EditWidths = [72f, 72f, 84f, 116f];
+    private static readonly float[] DesignWidths = [78f, 78f];
+
     /// <summary>The bar's buttons, in design pixels: Undo, Redo, Cancel and Apply, with the gaps between them.</summary>
-    public static ReadOnlySpan<float> ButtonWidths => [72f, 72f, 84f, 116f];
+    public static ReadOnlySpan<float> ButtonWidths => EditWidths;
 
     /// <summary>The two buttons before them, in design pixels: Save... and Load..., which open the saved designs dialogs.</summary>
-    public static ReadOnlySpan<float> DesignButtonWidths => [78f, 78f];
+    public static ReadOnlySpan<float> DesignButtonWidths => DesignWidths;
     public const float ButtonGap = 8f;
     public const float ButtonHeight = 34f;
     public const float Pad = 12f;

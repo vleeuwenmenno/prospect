@@ -33,6 +33,36 @@ namespace Prospect.Tests;
 /// </summary>
 public sealed class FrameOrderTests : IDisposable
 {
+    [Fact]
+    public void EditorRailAndButtonLayoutAllocateNothing()
+    {
+        _ui.NewFrame();
+        try
+        {
+            var draw = ImGui.GetForegroundDrawList();
+            for (var icon = EditorIcon.Grid; icon <= EditorIcon.Radar; icon++)
+            {
+                EditorIcons.Draw(draw, icon, new float2(50, 50), 10, Kit.Color(Theme.Text), 1);
+                var allocation = new AllocationProbe();
+                while (allocation.Measuring())
+                    EditorIcons.Draw(draw, icon, new float2(50, 50), 10, Kit.Color(Theme.Text), 1);
+                Assert.Equal(0, allocation.Bytes);
+            }
+
+            var expected = EditorLayout.ButtonsWidth(1) + EditorLayout.DesignButtonWidths[0];
+            var width = 0f;
+            var layoutAllocation = new AllocationProbe();
+            while (layoutAllocation.Measuring())
+                width = EditorLayout.ButtonsWidth(1) + EditorLayout.DesignButtonWidths[0];
+            Assert.Equal(expected, width);
+            Assert.Equal(0, layoutAllocation.Bytes);
+        }
+        finally
+        {
+            ImGui.Render();
+        }
+    }
+
     private static readonly float2 Screen = new(1280, 720);
     private static readonly float2 ButtonMin = new(1100, 20);
     private static readonly float2 ButtonSize = new(150, 32);

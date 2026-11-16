@@ -705,6 +705,28 @@ public sealed class BuildDraftTests
     private static DesignBox Tank(string type, GridSize at, GridSize size) => Box(type, at, size);
 
     [Fact]
+    public void FuelMenuQueriesAllocateNothing()
+    {
+        var draft = Draft(Box("core", new GridSize(0, 0, 0), One), Tank("bipropellantTank", new GridSize(1, 0, 0), One));
+        int[] selection = [1];
+        Span<FuelKind> fuels = stackalloc FuelKind[Fuels.Count];
+        var count = draft.TankFuels(fuels);
+        for (var i = 0; i < count; i++)
+            draft.CanSwapTank(selection, fuels[i]);
+        var allocation = new AllocationProbe();
+        while (allocation.Measuring())
+        {
+            count = draft.TankFuels(fuels);
+            for (var i = 0; i < count; i++)
+                draft.CanSwapTank(selection, fuels[i]);
+        }
+
+        Assert.Equal(3, count);
+        Assert.Equal(0, allocation.Bytes);
+        Assert.False(draft.CanUndo);
+    }
+
+    [Fact]
     public void ChangingATanksFuelSwapsTheTypeInPlaceAsOneUndoStep()
     {
         var draft = Draft(Box("core", new GridSize(0, 0, 0), One), Tank("bipropellantTank", new GridSize(1, 0, 0), new GridSize(2, 1, 1)),

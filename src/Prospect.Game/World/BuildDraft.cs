@@ -576,8 +576,12 @@ public sealed class BuildDraft
     public BlockType? TankType(FuelKind fuel)
     {
         if (fuel == FuelKind.None) return null;
-        foreach (var type in _content.Blocks.Types)
+        var types = _content.Blocks.Types;
+        for (var i = 0; i < types.Count; i++)
+        {
+            var type = types[i];
             if (type.Tank == fuel && type.Mount is null && type.FitsClass(Class)) return type;
+        }
         return null;
     }
 
@@ -588,8 +592,10 @@ public sealed class BuildDraft
     public int TankFuels(Span<FuelKind> into)
     {
         var count = 0;
-        foreach (var type in _content.Blocks.Types)
+        var types = _content.Blocks.Types;
+        for (var i = 0; i < types.Count; i++)
         {
+            var type = types[i];
             if (type.Tank == FuelKind.None || type.Mount is not null || !type.FitsClass(Class) || count == into.Length) continue;
             if (into[..count].Contains(type.Tank)) continue;
             into[count++] = type.Tank;
