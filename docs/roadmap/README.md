@@ -10,6 +10,7 @@ Implementation continues separately; this change records decisions and a read-on
 2. [Exploration and map](exploration.md): hybrid map, charts, sensors, fog and jump limits.
 3. [Implementation plan](implementation.md): dependencies, agent ownership and acceptance checks.
 4. [Cargo](cargo.md): containers, racks, tractor beams; decided and open.
+5. [Shield contact and exhaust](shield-exhaust.md): contact strength, contact patch, exhaust on shields and rock.
 
 ## Status vocabulary
 
