@@ -59,6 +59,9 @@ public sealed class BlockType
     /// </summary>
     public MountSpec? Mount { get; init; }
 
+    /// <summary>Optional automatic cargo tractor, present only on a face mount.</summary>
+    public TractorSpec? Tractor { get; init; }
+
     /// <summary>
     /// True for a block that is always a box and never a wedge (<c>"boxOnly"</c> in <c>blocks.json</c>): tanks, whose
     /// round vessels a slant would cut, and sensors and scanners. <see cref="BoxDesign.ShapeAllowed"/> is the one rule.
@@ -339,6 +342,7 @@ public sealed class BlockCatalog
                 SizeRules = BoxDesign.ReadSizeRules(block, path + ": " + entry.Name),
                 Id = entry.Name,
                 Module = ModuleSpec.Read(block, root),
+                Tractor = TractorSpec.Read(block),
                 Name = block.GetProperty("name"u8).GetString()!,
                 Mass = block.GetProperty("mass"u8).GetSingle(),
                 Hull = block.GetProperty("hull"u8).GetSingle(),
@@ -398,15 +402,17 @@ public sealed class BlockCatalog
             if (type.MaxSide < 0 || type.MaxSide > limits.MaxBoxSide)
                 throw new InvalidDataException($"{path}: {type.Id}: maxSide must be from 1 to {limits.MaxBoxSide}, or left out");
 
-            // A mount is a thrust part and nothing a hull keeps by its block number: its figures go into the sums
+            // A mount has no independent block state: its figures go into the sums
             // with its parent block, and it has no hit points, size or identity of its own.
+            if (type.Tractor is not null && (type.Mount is null || type.Thrust != 0 || type.PowerDraw != 0))
+                throw new InvalidDataException($"{path}: {type.Id}: a tractor requires a non-thrust mount with active-only power");
             if (type.Mount is not { } spec)
                 continue;
             if (spec.Side is < 1 or > FaceMounts.MaxSide || spec.Depth is < 1 or > FaceMounts.MaxDepth)
                 throw new InvalidDataException($"{path}: {type.Id}: a mount's side is 1 to {FaceMounts.MaxSide} tenths of a cell and its depth 1 to {FaceMounts.MaxDepth}");
-            if (!(type.Thrust > 0) || type.Core || type.Sensor || type.Charting || type.Ftl != FtlKind.None || type.Tank != FuelKind.None
+            if (!(type.Thrust > 0 || type.Tractor is not null) || type.Core || type.Sensor || type.Charting || type.Ftl != FtlKind.None || type.Tank != FuelKind.None
                 || type.Module.Family != ModuleFamily.None || type.Crew != 0 || type.MaxSide != 0 || type.SizeRules.Count != 0 || type.BoxOnly)
-                throw new InvalidDataException($"{path}: {type.Id}: only a thrust part mounts on a face, and it has no size rules, maxSide or boxOnly");
+                throw new InvalidDataException($"{path}: {type.Id}: only a thrust part or tractor mounts on a face, and it has no size rules, maxSide or boxOnly");
             if (!types.TryGetValue(spec.LegacyBlock, out var legacy) || legacy.Mount is not null)
                 throw new InvalidDataException($"{path}: {type.Id}: legacyBlock must name a block type that is no mount");
         }

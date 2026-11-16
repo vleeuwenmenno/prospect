@@ -1,5 +1,38 @@
 {
   "models": {
+    "tractorBeam": {
+      "plume": "ion",
+      "perCell": 0,
+      "grid": 3,
+      "mountDepth": 1,
+      "housingChamfer": 0.22,
+      "bevel": 0.1,
+      "seams": 0,
+      "pipes": 0,
+      "brackets": 0,
+      "exitShare": 0.9,
+      "throatShare": 0.4,
+      "nozzleLength": 0.4,
+      "maxNozzleDepth": 0.3,
+      "bellCurve": 1,
+      "collarLength": 0,
+      "collarRadius": 1,
+      "lip": 0.12,
+      "sides": 12,
+      "rings": 1,
+      "housingShade": 0.36,
+      "nozzleShade": 0.28,
+      "throatShade": 0.06,
+      "detailShade": 0.5,
+      "pod": {
+            "plateDepth": 0.22,
+            "plateChamfer": 0.18,
+            "plateBevel": 0.45,
+            "bodyShare": 0.74,
+            "bolts": 4,
+            "valve": 0.5
+      }
+},
     "engine": {
       "plume": "engine",
       "perCell": 0,

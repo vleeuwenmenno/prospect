@@ -430,7 +430,7 @@ internal static partial class PropulsionModels
 
     /// <summary>The model look of a block type, or null for a type drawn as its plain shape.</summary>
     public static PropulsionModelLook? ModelOf(BlockType type, BlockShape shape, PropulsionLook look) =>
-        shape == BlockShape.Box && type.Thrust > 0 && look.Models.TryGetValue(type.Id, out var model) ? model : null;
+        shape == BlockShape.Box && (type.Thrust > 0 || type.Tractor is not null) && look.Models.TryGetValue(type.Id, out var model) ? model : null;
 
     /// <summary>The model look of a block, or null for a block drawn as its plain shape.</summary>
     public static PropulsionModelLook? ModelOf(HullDesign design, int block, PropulsionLook look) =>
@@ -467,7 +467,7 @@ internal static partial class PropulsionModels
         if (model is null)
             return false;
         var box = new PartBox(design.MountOffsets[mount], design.MountHalfExtents[mount], part.Face, design.BlockSize > 0 ? design.BlockSize : 1f);
-        Build(model, box, part.Type.Fuel, part.Parent, false, vertices, indices, nozzles);
+        Build(model, box, part.Type.Fuel, part.Parent, false, vertices, indices, part.Type.Tractor is null ? nozzles : null);
         return true;
     }
 

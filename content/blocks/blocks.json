@@ -115,6 +115,11 @@
     "charting": { "name": "Sector scanner", "boxOnly": true, "mass": 2, "hull": 400, "charting": true },
     "gasScanner": {"name": "Gas scanner", "boxOnly": true, "mass": 2, "hull": 200, "powerDraw": 0.1, "sizeRules": {"powerDraw": {"volumeExponent": 0}}, "module": {"family": "gasScanner", "quality": "Common", "mark": 1, "variant": "standard", "range": 1500, "accuracy": 0.2, "scanSeconds": 4, "powerDraw": 6, "cooldownSeconds": 10}},
     "asteroidScanner": {"name": "Asteroid scanner", "boxOnly": true, "mass": 2.5, "hull": 200, "powerDraw": 0.1, "sizeRules": {"powerDraw": {"volumeExponent": 0}}, "module": {"family": "asteroidScanner", "quality": "Common", "mark": 1, "variant": "standard", "range": 3000, "accuracy": 0.2, "scanSeconds": 5, "powerDraw": 9, "cooldownSeconds": 10}},
-    "asteroidLocator": {"name": "Asteroid locator", "boxOnly": true, "mass": 3, "hull": 200, "powerDraw": 0.1, "sizeRules": {"powerDraw": {"volumeExponent": 0}}, "module": {"family": "asteroidLocator", "quality": "Common", "mark": 1, "variant": "standard", "range": 5000, "accuracy": 0.2, "scanSeconds": 2, "powerDraw": 12, "cooldownSeconds": 15}}
+    "asteroidLocator": {"name": "Asteroid locator", "boxOnly": true, "mass": 3, "hull": 200, "powerDraw": 0.1, "sizeRules": {"powerDraw": {"volumeExponent": 0}}, "module": {"family": "asteroidLocator", "quality": "Common", "mark": 1, "variant": "standard", "range": 5000, "accuracy": 0.2, "scanSeconds": 2, "powerDraw": 12, "cooldownSeconds": 15}},
+    "tractorBeam": {
+      "name": "Tractor beam", "mass": 0.15, "hull": 0,
+      "mount": { "side": 6, "depth": 2, "legacyBlock": "hull" },
+      "tractor": { "range": 40, "acceleration": 4, "maxMass": 100000, "basePower": 2, "powerPerTonne": 0.5 }
+    }
   }
 }
