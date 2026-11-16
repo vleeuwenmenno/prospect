@@ -1,7 +1,7 @@
 # Cargo, containers and tractor beams
 
-Product direction from the brainstorm on 2026-11-16. Nothing here is built yet.
-Today a cargo block is a plain box with a capacity figure; there is no inventory, mining yield or pickup.
+Racks, shared container sizes and deterministic packing are built.
+There is no cargo inventory, mining yield or pickup yet.
 
 ## Decided
 
@@ -71,3 +71,16 @@ checked afterwards. This overrides the joint mining, inventory and turret brains
 5. Towing huge chunks.
 
 Deferred: drone launcher, tractor filter.
+
+
+## Built: step 1 foundation
+
+- `blocks/cargo.json` owns the unit edge, eight named shapes and hull points; shared content identity includes it.
+- `CargoPacking` uses fixed orientation, largest first, X then Z then Y first fit. No rotations or backtracking.
+  Caller supplies occupancy and placement buffers; output is canonical size order, independent of input order.
+- The existing `cargo` id is a box-only ship rack in Hull. Capacity is u, linearly scaled (8 u per cell).
+  Retuning the grid requires matching the cargo stat; loading rejects mismatches. No drone rack yet.
+- Worker-built rack frames and reusable ribbed container models use the `rack` look in `visuals/propulsion.json`.
+  `--open edit-rack` previews XXS through L in a 2x2x2 ghost only; real hull racks stay empty.
+- Server slots, cargo mass, inventory, wire/save state and debug loading remain unbuilt.
+  Save migration after a retune remains open; current content identity rules still refuse incompatible saves.

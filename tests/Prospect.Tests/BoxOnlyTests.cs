@@ -17,7 +17,7 @@ public sealed class BoxOnlyTests
     private static readonly GridSize One = new(1, 1, 1);
 
     private static readonly string[] BoxOnlyTypes =
-        ["bipropellantTank", "hydrazineTank", "nitrogenTank", "microBipropellantTank", "microNitrogenTank", "sensor", "charting", "gasScanner", "asteroidScanner", "asteroidLocator"];
+        ["cargo", "bipropellantTank", "hydrazineTank", "nitrogenTank", "microBipropellantTank", "microNitrogenTank", "sensor", "charting", "gasScanner", "asteroidScanner", "asteroidLocator"];
 
     private static BuildDraft Draft(params DesignBox[] boxes)
     {
@@ -33,7 +33,7 @@ public sealed class BoxOnlyTests
     {
         foreach (var type in Content.Blocks.Types)
         {
-            var expected = type.Tank != FuelKind.None || type.Sensor || type.Charting || type.Module.Family != ModuleFamily.None;
+            var expected = type.Cargo > 0 || type.Tank != FuelKind.None || type.Sensor || type.Charting || type.Module.Family != ModuleFamily.None;
             Assert.True(expected == type.BoxOnly, type.Id);
             Assert.True(BoxDesign.ShapeAllowed(type, BlockShape.Box), type.Id);
             Assert.Equal(!expected, BoxDesign.ShapeAllowed(type, BlockShape.WedgeZPlusPlus));

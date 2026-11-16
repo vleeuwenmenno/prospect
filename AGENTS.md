@@ -72,6 +72,13 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
 
 ## When you change something
 
+- **Cargo foundation:** `content/blocks/cargo.json` is shared through `GameContent.Cargo`. `CargoPacking` owns
+  capacity and largest-first X/Z/Y fixed-orientation packing with caller buffers. The `cargo` block is box-only,
+  in Hull; its linear capacity stat is u and must match the grid. `PropulsionModels.Cargo.cs` builds racks and
+  reusable containers on workers, with the `rack` look in `visuals/propulsion.json`. `--open edit-rack` is a
+  capture-only sample, never inventory. No drone racks, server slots, cargo mass or cargo wire/save state yet.
+
+
 - **Social messages:** validate new kinds after admission and the receive/rate budgets; publish through `SessionSnapshot.Social` and send intent through `PlayerInputBridge`.
 - **Wire format:** bump `ProtocolInfo.Version` in `Protocol/Messages.cs`, and update `MaxWireSize` constants.
 - **The handshake or the password:** the scheme is written down in `Passwords` and `docs/hosting.md`; change

@@ -21,9 +21,11 @@ public sealed class GameContent
         ContentIdentity identity,
         BlockTransferRules blockTransfers,
         EditorRules editor,
-        ExplorationRules exploration
+        ExplorationRules exploration,
+        CargoCatalog cargo
     )
     {
+        Cargo = cargo;
         Exploration = exploration.ForSectorSize(galaxy.SectorSize);
         Editor = editor;
         BlockTransfers = blockTransfers;
@@ -93,6 +95,9 @@ public sealed class GameContent
 
     public BlockCatalog Blocks { get; }
 
+    /// <summary>Shared container sizes and packing grid.</summary>
+    public CargoCatalog Cargo { get; }
+
     /// <summary>The galaxy's rules. Apply a server's seed with <see cref="Galaxy.WithSeed"/> to get its galaxy.</summary>
     public Galaxy Galaxy { get; }
 
@@ -116,12 +121,12 @@ public sealed class GameContent
         var designs = new HullDesign[Designs.Length];
         for (var i = 0; i < designs.Length; i++)
             designs[i] = Designs[i].WithRules(rules);
-        return new GameContent(Galaxy.Under(SettingCatalog, clean), Blocks, SettingCatalog, clean, rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration);
+        return new GameContent(Galaxy.Under(SettingCatalog, clean), Blocks, SettingCatalog, clean, rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration, Cargo);
     }
 
     internal GameContent WithCatalogue(HullDesign[] designs, int pod, int drone, int[] fleet) =>
         new(Galaxy, Blocks, SettingCatalog, Settings, Rules, (HullDesign[])designs.Clone(), pod, drone,
-            (int[])fleet.Clone(), Social, Identity, BlockTransfers, Editor, Exploration);
+            (int[])fleet.Clone(), Social, Identity, BlockTransfers, Editor, Exploration, Cargo);
 
     /// <summary>
     /// This content with one more design at the end of the catalogue. Every design it had keeps its number and is
@@ -133,7 +138,7 @@ public sealed class GameContent
         var designs = new HullDesign[Designs.Length + 1];
         Designs.CopyTo(designs, 0);
         designs[^1] = design;
-        return new GameContent(Galaxy, Blocks, SettingCatalog, Settings, Rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration);
+        return new GameContent(Galaxy, Blocks, SettingCatalog, Settings, Rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration, Cargo);
     }
 
     /// <summary>Loads the content shipped beside the executable.</summary>
@@ -152,7 +157,12 @@ public sealed class GameContent
         string At(string folder, string file) => Path.Combine(directory, folder, file);
         byte[] Shared(string folder, string file) => identity.Add(folder + "/" + file, At(folder, file));
 
+        var cargo = CargoCatalog.Parse(Shared("blocks", "cargo.json"));
         var blocks = BlockCatalog.Parse(Shared("blocks", "blocks.json"), At("blocks", "blocks.json"));
+        foreach (var type in blocks.Types)
+            if (type.Cargo > 0 && (type.Cargo != CargoPacking.Capacity(cargo, new GridSize(1, 1, 1), 1f)
+                || !type.BoxOnly || (type.SizeRules.TryGetValue("cargo", out var exponent) && exponent != 1)))
+                throw new InvalidDataException("Rack capacity must match the cargo grid and scale linearly.");
         var settingCatalog = WorldSettingCatalog.Parse(Shared("rules", "settings.json"), At("rules", "settings.json"));
         var exploration = ExplorationRules.Parse(Shared("rules", "exploration.json"));
         var settings = settingCatalog.Defaults;
@@ -209,7 +219,8 @@ public sealed class GameContent
             identity.Build(),
             transfers,
             editor,
-            exploration
+            exploration,
+            cargo
         );
     }
 }

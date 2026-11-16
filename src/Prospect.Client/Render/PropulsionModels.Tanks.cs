@@ -25,7 +25,8 @@ internal static partial class PropulsionModels
 
     /// <summary>True when a block of <paramref name="type"/> in <paramref name="shape"/> is drawn as a model: a thrust part's or a tank's.</summary>
     public static bool HasModel(BlockType type, BlockShape shape, PropulsionLook look) =>
-        ModelOf(type, shape, look) is not null || TankOf(type, shape, look) is not null;
+        ModelOf(type, shape, look) is not null || TankOf(type, shape, look) is not null
+        || (shape == BlockShape.Box && type.Cargo > 0 && look.Rack is not null);
 
     /// <summary>
     /// Adds the model of one part of <paramref name="type"/> filling <paramref name="box"/>, alone: no neighbours,
@@ -34,7 +35,9 @@ internal static partial class PropulsionModels
     /// </summary>
     public static void BuildPart(BlockType type, in PartBox box, PropulsionLook look, List<MeshVertex> vertices, List<uint> indices)
     {
-        if (ModelOf(type, BlockShape.Box, look) is { } model)
+        if (type.Cargo > 0 && look.Rack is { } rack)
+            BuildRack(box, rack, look.Cargo, vertices, indices);
+        else if (ModelOf(type, BlockShape.Box, look) is { } model)
             Build(model, box, type.Fuel, 0, true, vertices, indices, null);
         else if (TankOf(type, BlockShape.Box, look) is { } paint)
             BuildTank(look.Tanks!, paint, box, 0, 0, vertices, indices);

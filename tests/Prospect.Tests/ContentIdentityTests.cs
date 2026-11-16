@@ -137,7 +137,7 @@ public sealed class ContentIdentityTests
             return;
 
         using var copy = new ContentCopy();
-        string[] shared = ["blocks/blocks.json", "rules/settings.json", "rules/exploration.json", "ships/fleet.json", "ships/command_pod.json", "ships/drone.json", "galaxy/galaxy.json", "net/blocks.json"];
+        string[] shared = ["blocks/cargo.json", "blocks/blocks.json", "rules/settings.json", "rules/exploration.json", "ships/fleet.json", "ships/command_pod.json", "ships/drone.json", "galaxy/galaxy.json", "net/blocks.json"];
         var writers = new List<Task>();
         foreach (var file in shared)
         {
@@ -193,6 +193,7 @@ public sealed class ContentIdentityTests
     [InlineData("blocks/blocks.json", "\"collisionBounce\": 0.3", "\"collisionBounce\": 0.31")]
     [InlineData("blocks/blocks.json", "\"volumeExponent\": 1.25", "\"volumeExponent\": 1.5")]
     [InlineData("blocks/blocks.json", "\"maxBoxSide\": 64", "\"maxBoxSide\": 63")]
+    [InlineData("blocks/cargo.json", "\"hull\": 50", "\"hull\": 51")]
     [InlineData("blocks/blocks.json", "\"Hull plating\"", "\"Hull plate\"")]
     // The world setting catalogue: what a setting may be set to.
     [InlineData("rules/settings.json", "\"name\": \"Weak\",\n          \"value\": 4", "\"name\": \"Weak\",\n          \"value\": 5")]
