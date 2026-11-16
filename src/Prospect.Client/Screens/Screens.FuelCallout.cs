@@ -60,12 +60,7 @@ internal sealed partial class ScreenHost
         var accent = look.FuelRgb(kind);
         var outline = Kit.Px(look.CalloutOutlineThickness);
 
-        // In the pilot view the console covers the bottom of the view, and the tanks behind it stay behind it: the
-        // whole callout is cut off at the console's top edge, and its labels keep a gap above that.
-        var display = _ui.DisplaySize;
-        var pilot = world.CommandBlend < 0.5f;
-        var consoleTop = FlightConsole.Layout(display, Kit.Scale).Top;
-        draw.PushClipRect(float2.Zero, new float2(display.X, pilot ? consoleTop : display.Y), true);
+        var bounds = BeginCalloutClip(draw, world, look, out _);
 
         // Every tank of the fuel: its outline now, its place and figures for the labels.
         var count = 0;
@@ -94,34 +89,52 @@ internal sealed partial class ScreenHost
         for (var i = 0; i < labels; i++)
             _calloutSizes[i] = new float2(CalloutLabelWidth(kind, _calloutLabels[i]) + pad * 2, height);
 
-        // The columns keep to the screen and, in the pilot view, above the console and its fuel row.
-        var margin = Kit.Px(look.CalloutMargin);
-        var bottom = pilot ? consoleTop - Kit.Px(look.CalloutConsoleGap) : display.Y - margin;
-        var bounds = new HudRect(margin, margin, display.X - margin, Math.Max(margin, bottom));
-        var centreOnScreen = world.Project(position, out var hullCentre) ? hullCentre : display * 0.5f;
+        var centreOnScreen = world.Project(position, out var hullCentre) ? hullCentre : _ui.DisplaySize * 0.5f;
         FuelCalloutLayout.Place(_calloutLabels, labels, _calloutSizes, centreOnScreen, bounds, Kit.Px(look.CalloutLabelOffset), Kit.Px(look.CalloutLabelGap));
 
-        var leader = Kit.Px(look.CalloutLeaderThickness);
-        var dot = Kit.Px(look.CalloutAnchorDot);
         for (var i = 0; i < labels; i++)
         {
             ref readonly var label = ref _calloutLabels[i];
             if (!label.Visible)
                 continue;
             var tone = label.Lost == label.Tanks ? Theme.Bad : accent;
+            DrawCalloutLabelFrame(draw, label, tone, look, pad);
             var rect = label.Rect;
-            var edge = new float2(label.Left ? rect.Right : rect.Left, (rect.Top + rect.Bottom) * 0.5f);
-            draw.AddLine(edge, label.Anchor, Kit.Color(tone, look.CalloutLeaderAlpha), leader);
-            if (dot > 0f)
-                draw.AddCircleFilled(label.Anchor, dot, Kit.Color(tone, look.CalloutLeaderAlpha), 8);
-            var min = new float2(rect.Left, rect.Top);
-            var max = new float2(rect.Right, rect.Bottom);
-            draw.AddRectFilled(min, max, Kit.Color(Theme.Panel, Hud.FillAlpha));
-            draw.AddRect(min, max, Kit.Color(tone, 0.8f), 0f, ImDrawFlags.None, 1f);
             DrawCalloutLabelText(draw, kind, label, new float2(rect.Left + pad, rect.Top + pad * 0.5f), accent);
         }
 
         draw.PopClipRect();
+    }
+
+    /// <summary>
+    /// Starts a callout's drawing and returns the bounds its labels keep to. In the pilot view the console covers the
+    /// bottom of the view, and what is behind it stays behind it: the whole callout is cut off at the console's top
+    /// edge, and its labels keep a gap above that. The caller pops the clip.
+    /// </summary>
+    private HudRect BeginCalloutClip(ImDrawListPtr draw, WorldView world, PowerReadout look, out bool pilot)
+    {
+        var display = _ui.DisplaySize;
+        pilot = world.CommandBlend < 0.5f;
+        var consoleTop = FlightConsole.Layout(display, Kit.Scale).Top;
+        draw.PushClipRect(float2.Zero, new float2(display.X, pilot ? consoleTop : display.Y), true);
+        var margin = Kit.Px(look.CalloutMargin);
+        var bottom = pilot ? consoleTop - Kit.Px(look.CalloutConsoleGap) : display.Y - margin;
+        return new HudRect(margin, margin, display.X - margin, Math.Max(margin, bottom));
+    }
+
+    /// <summary>A placed label's leader line, anchor dot and boxed background in <paramref name="tone"/>; its text is the caller's.</summary>
+    private static void DrawCalloutLabelFrame(ImDrawListPtr draw, in CalloutLabel label, uint tone, PowerReadout look, float pad)
+    {
+        var rect = label.Rect;
+        var edge = new float2(label.Left ? rect.Right : rect.Left, (rect.Top + rect.Bottom) * 0.5f);
+        var dot = Kit.Px(look.CalloutAnchorDot);
+        draw.AddLine(edge, label.Anchor, Kit.Color(tone, look.CalloutLeaderAlpha), Kit.Px(look.CalloutLeaderThickness));
+        if (dot > 0f)
+            draw.AddCircleFilled(label.Anchor, dot, Kit.Color(tone, look.CalloutLeaderAlpha), 8);
+        var min = new float2(rect.Left, rect.Top);
+        var max = new float2(rect.Right, rect.Bottom);
+        draw.AddRectFilled(min, max, Kit.Color(Theme.Panel, Hud.FillAlpha));
+        draw.AddRect(min, max, Kit.Color(tone, 0.8f), 0f, ImDrawFlags.None, 1f);
     }
 
     /// <summary>The twelve edges of a block's box, projected and cut at the near plane.</summary>

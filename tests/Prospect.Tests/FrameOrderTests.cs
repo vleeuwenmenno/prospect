@@ -4067,10 +4067,10 @@ public sealed class FrameOrderTests : IDisposable
     public void EscapeClosesTheCourseMenuBeforeTheCommandViewAndLeavesTheViewAlone()
     {
         OpenCourseMenu(Ahead(100000));
-        Assert.Equal(ScreenHost.BackStep.CourseMenu, ScreenHost.NextBackStep(false, false, false, _world.CourseMenu.IsOpen, false, ViewMode.Command));
-        Assert.Equal(ScreenHost.BackStep.SessionMenu, ScreenHost.NextBackStep(false, false, true, true, false, ViewMode.Command));
-        Assert.Equal(ScreenHost.BackStep.PilotView, ScreenHost.NextBackStep(false, false, false, false, false, ViewMode.Command));
-        Assert.Equal(ScreenHost.BackStep.OpenMenu, ScreenHost.NextBackStep(false, false, false, false, false, ViewMode.Pilot));
+        Assert.Equal(ScreenHost.BackStep.CourseMenu, ScreenHost.NextBackStep(false, false, false, _world.CourseMenu.IsOpen, false, false, ViewMode.Command));
+        Assert.Equal(ScreenHost.BackStep.SessionMenu, ScreenHost.NextBackStep(false, false, true, true, false, false, ViewMode.Command));
+        Assert.Equal(ScreenHost.BackStep.PilotView, ScreenHost.NextBackStep(false, false, false, false, false, false, ViewMode.Command));
+        Assert.Equal(ScreenHost.BackStep.OpenMenu, ScreenHost.NextBackStep(false, false, false, false, false, false, ViewMode.Pilot));
         Assert.True(_world.CourseMenu.Close());
         Frame();
         Assert.Equal(ViewMode.Command, _world.Mode);
@@ -4823,7 +4823,7 @@ public sealed class FrameOrderTests : IDisposable
         {
             if (!_actions.Pressed(_devices, InputAction.Pause, true))
                 return false;
-            var step = ScreenHost.NextBackStep(false, false, false, false, callout.IsOpen, _world.Mode);
+            var step = ScreenHost.NextBackStep(false, false, false, false, callout.IsOpen, false, _world.Mode);
             steps.Add(step);
             if (step == ScreenHost.BackStep.FuelCallout)
                 callout.Close();
@@ -4835,7 +4835,7 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal([ScreenHost.BackStep.FuelCallout], steps);
         Assert.False(callout.IsOpen);
         Assert.Equal(ViewMode.Pilot, _world.Mode);
-        Assert.Equal(ScreenHost.BackStep.OpenMenu, ScreenHost.NextBackStep(false, false, false, false, callout.IsOpen, _world.Mode));
+        Assert.Equal(ScreenHost.BackStep.OpenMenu, ScreenHost.NextBackStep(false, false, false, false, callout.IsOpen, false, _world.Mode));
 
         // Opened again, the same fuel's click closes it; in the command view Escape still takes it first.
         // Dear ImGui reads a press and its release in two frames, so each click gets a frame to finish.
@@ -4850,7 +4850,7 @@ public sealed class FrameOrderTests : IDisposable
         Frame(() => Click());
         Frame();
         Assert.Equal(first, callout.Open);
-        Assert.Equal(ScreenHost.BackStep.FuelCallout, ScreenHost.NextBackStep(false, false, false, false, callout.IsOpen, ViewMode.Command));
+        Assert.Equal(ScreenHost.BackStep.FuelCallout, ScreenHost.NextBackStep(false, false, false, false, callout.IsOpen, false, ViewMode.Command));
 
         // A gap between cells, or the bars above, opens nothing and closes nothing.
         Frame(() => Move(MiddleOf(ConsoleBar.Shield)));

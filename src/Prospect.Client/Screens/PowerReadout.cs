@@ -82,6 +82,14 @@ internal sealed class PowerReadout
     public float CalloutMargin { get; init; }
     public float CalloutConsoleGap { get; init; }
 
+    /// <summary>
+    /// The Cargo window's container callout (<see cref="CargoCallout"/>) uses the fuel callout's leader, label and
+    /// margin figures; only the outline on the container's box, drawn in its resource's colour, has its own.
+    /// </summary>
+    public float CargoCalloutOutlineThickness { get; init; }
+
+    public float CargoCalloutOutlineAlpha { get; init; }
+
     /// <summary>The accent colour of one fuel as 0xRRGGBB; checked when the figures load.</summary>
     public uint FuelRgb(Prospect.Game.World.FuelKind kind) => uint.Parse(
         kind switch
@@ -128,6 +136,8 @@ internal sealed class PowerReadout
         if (!(look.CalloutLabelOffset is >= 0f and <= 400f) || !(look.CalloutLabelGap is >= 0f and <= 32f) || !(look.CalloutLabelPad is >= 0f and <= 32f)
             || !(look.CalloutMargin is >= 0f and <= 200f) || !(look.CalloutConsoleGap is >= 0f and <= 200f))
             throw new InvalidDataException($"{path}: calloutLabelOffset is 0 to 400, calloutLabelGap and calloutLabelPad 0 to 32, calloutMargin and calloutConsoleGap 0 to 200");
+        if (!(look.CargoCalloutOutlineThickness is >= 0.5f and <= 8f) || !(look.CargoCalloutOutlineAlpha is >= 0f and <= 1f))
+            throw new InvalidDataException($"{path}: cargoCalloutOutlineThickness is 0.5 to 8, cargoCalloutOutlineAlpha 0 to 1");
 
         return look;
     }
