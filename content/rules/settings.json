@@ -643,7 +643,7 @@
     {
       "id": "wreckLifetimeMinutes",
       "name": "Wreck lifetime (minutes)",
-      "description": "Time spent outside every connected player hull\u2019s sensor radius. Zero keeps wrecks indefinitely.",
+      "description": "Time spent outside every connected player hull\u2019s sensor radius. 0 keeps wrecks forever.",
       "kind": "integer",
       "default": 30,
       "minimum": 0,
