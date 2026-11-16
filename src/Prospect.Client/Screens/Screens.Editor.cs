@@ -255,6 +255,7 @@ internal sealed partial class ScreenHost
 
     /// <summary>The colours of the mirror planes: X red and Y green as the axes are drawn, Z blue.</summary>
     private const uint PlaneZ = 0x5AA0E0;
+    private static readonly int[] MirrorPlaneRing = [0, 1, 3, 2];
 
     /// <summary>
     /// The active mirror planes, faintly, through the centre of the core: a rectangle each, square to its axis,
@@ -285,7 +286,7 @@ internal sealed partial class ScreenHost
             }
 
             // The ring order of the four corners: 0, 1, 3, 2.
-            ReadOnlySpan<int> ring = [0, 1, 3, 2];
+            ReadOnlySpan<int> ring = MirrorPlaneRing;
             var whole = true;
             for (var i = 0; i < 4; i++)
                 whole &= world.Project(corners[ring[i]], out points[i]);

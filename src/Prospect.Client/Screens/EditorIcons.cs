@@ -135,14 +135,15 @@ internal static class EditorIcons
         draw.AddPolyline(head, color, ImDrawFlags.None, width);
     }
 
+    private static readonly float[] RadarRadii = [0.6f, 1.1f, 1.6f];
+
     /// <summary>A source with waves spreading from it: the sensors.</summary>
     private static void Radar(ImDrawListPtr draw, float2 c, float r, ImColor8 color, float width)
     {
         var source = At(c, r, -0.65f, 0.65f);
         draw.AddCircleFilled(source, MathF.Max(width * 1.2f, r * 0.14f), color, 8);
         Span<float2> arc = stackalloc float2[10];
-        ReadOnlySpan<float> radii = [0.6f, 1.1f, 1.6f];
-        foreach (var radius in radii)
+        foreach (var radius in RadarRadii)
         {
             for (var i = 0; i < arc.Length; i++)
             {
