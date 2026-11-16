@@ -283,6 +283,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public readonly Dictionary<SectorCoord, long> SentCharts = new(ExplorationRules.MaxChartsPerOwner);
         public int RockCursor;
         public int SensorHead = -1;
+        public bool FreeContainersSent;
         public readonly uint[] ContactIds = new uint[HullStore.MaxHulls], VisibleIds = new uint[HullStore.MaxHulls], Destroyed = new uint[HullStore.MaxHulls];
         public readonly long[] ContactUntil = new long[HullStore.MaxHulls];
         public readonly Dictionary<RockRef, RockDelta> SentRocks = new(SaveLimits.Default.MaxRocks);
@@ -304,6 +305,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public void Reset()
         {
             Array.Clear(Visible);
+            FreeContainersSent = false;
             Array.Clear(ContactIds);
             Array.Clear(ContactUntil);
             Array.Clear(VisibleIds);
@@ -860,6 +862,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         TickWreckage();
         SendCargo();
         GatherSensors();
+        SendFreeContainers();
         foreach (var connection in _connections)
             if (connection.State == ConnectionState.Active && connection.CatalogueReady) UpdateVisibility(connection, tick);
 

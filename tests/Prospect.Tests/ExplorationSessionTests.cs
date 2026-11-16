@@ -106,6 +106,34 @@ public sealed class ExplorationSessionTests
     }
 
     [Fact]
+    public void FreeContainersReachBothClientsAndWithdrawOutsideSensorCoverage()
+    {
+        using var rig = new Rig();
+        var containers = rig.Get<FreeContainers>("_containers");
+        var own = rig.Snap(0);
+        var position = own.Hulls[own.OwnHull].Position + new Vector3(0, 20, 0);
+        Assert.True(containers.Add(Content, new FreeContainer
+        {
+            Position = position,
+            Orientation = Quaternion.Identity,
+            Resource = -1,
+            Hull = 50,
+            Born = rig.Tick
+        }, out var id));
+        rig.Step(12);
+        Assert.Equal(1, rig.Snap(0).FreeContainerCount);
+        Assert.Equal(1, rig.Snap(1).FreeContainerCount);
+        Assert.Equal(id, rig.Snap(1).FreeContainers[0].Id);
+        rig.MoveOwner(1, new Double3(0, 1000000, 0));
+        rig.Step(12);
+        Assert.Equal(1, rig.Snap(0).FreeContainerCount);
+        Assert.Equal(0, rig.Snap(1).FreeContainerCount);
+        Assert.True(containers.Damage(id, 50));
+        rig.Step(12);
+        Assert.Equal(0, rig.Snap(0).FreeContainerCount);
+    }
+
+    [Fact]
     public void LightningEnvironmentReachesOwnAndRemoteHullViews()
     {
         using var rig = new Rig();
