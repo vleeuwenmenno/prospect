@@ -180,6 +180,9 @@ internal sealed class AppOptions
     /// <summary>Scripted runs only (<c>--align-at</c>): seconds after the splash at which the align button is clicked for a moment.</summary>
     public float? AlignAt { get; set; }
 
+    /// <summary>Scripted runs only: turn the pilot align lock on for the whole run.</summary>
+    public bool AlignLock { get; set; }
+
     /// <summary>
     /// With <see cref="LookDegrees"/>, the angle the camera turns to, evenly over the time the captures take; for
     /// capturing how a marker moves as the view turns.
@@ -1489,6 +1492,7 @@ internal sealed class App : IDisposable
 
         if (_options.Zoom is { } zoom && Session is not null)
             World.ChaseZoom = zoom;
+        World.ScriptedAlignLock = Devices.Muted && Session is not null && _options.AlignLock;
         World.ScriptedAlignClick = Devices.Muted && Session is not null && _options.AlignAt is { } alignAt
             ? _sinceSplash >= alignAt && _sinceSplash < alignAt + 0.15f : null;
         World.ScriptedThrust = _options.Thrust is { } held && Session is not null && _sinceSplash >= _options.ThrustAt

@@ -18,6 +18,7 @@
     { "tab": "Flight", "axis": "Forward", "label": "Back / forward", "negative": "Thrust back", "positive": "Thrust forward", "scope": ["Pilot", "Command", "Map"] },
     { "tab": "Flight", "axis": "Roll", "label": "Roll", "negative": "Roll left", "positive": "Roll right", "scope": ["Pilot", "Command"] },
     { "tab": "Flight", "action": "AlignToView", "label": "Turn the hull onto the view (hold, or click to finish the turn)", "scope": ["Pilot"] },
+    { "tab": "Flight", "action": "AlignLock", "label": "Keep the hull turned onto the view (on / off; free look and Shift pause it)", "scope": ["Pilot"] },
     { "tab": "Flight", "action": "SwitchHull", "label": "Take control of target / leave in drone", "scope": ["Pilot", "Command", "Map"] },
 
     { "tab": "Camera", "axis": "Pitch", "label": "Look down / up", "negative": "Look down", "positive": "Look up", "scope": ["Pilot", "Command", "Map"] },

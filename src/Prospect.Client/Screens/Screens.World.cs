@@ -374,6 +374,15 @@ internal sealed partial class ScreenHost
             Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, middle + new float2(-free.X * 0.5f, Kit.Px(22)), Theme.Info, "FREE LOOK"u8);
         }
 
+        // The align lock's tag sits over the reticle, where free look's sits under it, so the two never meet.
+        if (world.AlignLockOn)
+        {
+            var tag = world.AlignLockKeyName.Length == 0 ? "AUTO-ALIGN"u8 : Kit.F($"AUTO-ALIGN [{world.AlignLockKeyName}]");
+            var paused = world.FreeLook || _app.PointerReleased;
+            var tagSize = Kit.Measure(_ui.SansMedium, Theme.FontCaption, tag);
+            Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, middle + new float2(-tagSize.X * 0.5f, -Kit.Px(22) - tagSize.Y), paused ? Theme.TextDim : Theme.Accent, tag);
+        }
+
         // Speed in the middle; what keeps the hull alive on the left, what drives it on the right. The jump strip
         // (what the drive is doing and what the pilot can do) sits at the top centre, off the middle of the view.
         DrawFlightConsole(draw, snapshot, own, speed, world.Mode == ViewMode.Pilot && WorldInputEnabled && _app.PointerReleased);

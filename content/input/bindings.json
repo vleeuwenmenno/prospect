@@ -11,6 +11,7 @@
     "ToggleCommand": ["Key:N", "Key:F9", "Pad:Back"],
     "ToggleMap": ["Key:M", "Pad:Y"],
     "AlignToView": ["Mouse:Left"],
+    "AlignLock": ["Key:V"],
     "Halt": ["Key:H", "Key:Backspace", "Pad:B"],
     "Follow": ["Key:Space", "Key:F", "Pad:RightThumb"],
     "ShipInfo": ["Key:I", "Pad:DpadUp"],
