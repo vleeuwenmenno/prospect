@@ -554,7 +554,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                     ? Math.Min(_content.Exploration.SensorRadius, Galaxy.SectorSize) : _content.Exploration.SensorRadius);
 
             // A saved world's asteroids are bounded before they are pushed, never when they are saved.
-            _rocks = world is null ? new RockField(Galaxy) : new RockField(Galaxy, _saveLimits.MaxRocks, _saveLimits.MaxMovedSectors);
+            _rocks = new RockField(Galaxy, _saveLimits.MaxRocks, _saveLimits.MaxMovedSectors);
 
             // Room for the largest design the editor can add, taken now: a new design costs the tick no memory.
             _field = new HullField(_hulls, _content.Designs, reserveBlocks: Math.Min(_content.Blocks.Limits.MaxBlocks, GeometryAdmission.MaxBlocks)) { ContactObserved = RememberContact };
@@ -1419,7 +1419,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 if (!connection.Transport.Send(connection.Peer, NetChannel.Reliable, writer.Written)) return;
                 foreach (var delta in visible[..count])
                 {
-                    // Unsaved worlds can exceed the cache; those entries retain bounded periodic replay.
+                    // A test or future world with a larger budget still retains bounded periodic replay.
                     if (connection.SentRocks.Count < SaveLimits.Default.MaxRocks || connection.SentRocks.ContainsKey(delta.Rock))
                         connection.SentRocks[delta.Rock] = delta;
                 }

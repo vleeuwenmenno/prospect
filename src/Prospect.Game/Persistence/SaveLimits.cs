@@ -29,7 +29,7 @@ public sealed record SaveLimits
 
     /// <summary>
     /// Sectors with a pushed asteroid. Bounded apart from the asteroids: a restored <see cref="RockField"/> keeps
-    /// a table as long as a sector can have asteroids for each, about 80 KiB, whatever the count in it.
+    /// a preallocated sector list into the global bounded motion history, with no per-sector asteroid array.
     /// </summary>
     public int MaxMovedSectors { get; internal init; } = 256;
 
@@ -66,7 +66,7 @@ public sealed record SaveLimits
     /// <summary>
     /// The most memory a decoded save takes as a <see cref="WorldSnapshot"/>, in bytes, to within the size of the
     /// arrays' own headers. What restoring it into a running world takes on top is bounded by the same counts:
-    /// the hull and block stores, and <see cref="MaxMovedSectors"/> tables of a sector's asteroid limit.
+    /// the hull and block stores, and the bounded rock motion dictionaries and lists.
     /// </summary>
     public long MaxDecodedBytes =>
         MaxModuleObservations * (System.Runtime.CompilerServices.Unsafe.SizeOf<ModuleObservation>() + 128)

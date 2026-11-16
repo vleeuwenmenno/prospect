@@ -547,7 +547,7 @@ public static class HullSim
                     var near = content.Rocks.Near(local, flight.Radius + ContactPad);
                     while (near.Next(out var i))
                     {
-                        if (moved is not null && moved.Entries[i] > 0)
+                        if (moved is not null && moved.EntryOf(i) > 0)
                             continue;
                         if (Strike(ref state, flight, ref body, rocks, new RockRef(coord, i), content.Asteroids[i], default, default, tick, impulses, ref local))
                             return true;
@@ -558,12 +558,11 @@ public static class HullSim
 
                     // The asteroids that have been pushed are not where the index has them. There are few, and
                     // most are ruled out by how far each could ever have drifted, without working out where it is.
-                    for (var m = 0; m < moved.Count; m++)
+                    for (var entry = moved.First; entry >= 0; entry = moved.Next(entry))
                     {
-                        var i = moved.Indices[m];
+                        var i = rocks.DeltaAt(entry).Rock.Index;
                         if (i >= content.AsteroidCount)
                             continue;
-                        var entry = moved.Entries[i] - 1;
                         ref readonly var rock = ref content.Asteroids[i];
                         var bound = rock.Radius + flight.Radius + ContactPad + rocks.ReachAt(entry);
                         if ((local - rock.LocalPosition).LengthSquared() >= bound * bound)

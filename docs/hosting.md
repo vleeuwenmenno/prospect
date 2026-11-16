@@ -783,7 +783,7 @@ Invisible tail capacity is omitted. Requests use existing admission/rate budgets
   Editor announcements consume the previous mask. No spatial index yet.
 - Visibility checks only the recipient’s owned hull volumes, plus recent contacts. Each client retains an 8 KiB mask and bounded per-slot identity/contact arrays.
 - One asteroid sweep visits at most 32 deltas every 15 ticks (4 Hz); immediate collision updates retain their existing packet bound.
-  Per connection, up to 16,384 rock identities and last-sent deltas suppress unchanged repeats. Unsaved overflow entries still replay.
+  Per connection, up to 16,384 rock identities and last-sent deltas suppress unchanged repeats. Unsaved worlds use the same 16,384-rock, 256-sector motion bound as saved worlds.
   At 16,384 deltas a full sweep takes 7,680 ticks; immediate new impulses do not wait for it.
 - Chart delivery walks once after admission and resumes for additions/refreshes; scan changes send once. Idle sends nothing.
   Each tick visits at most the content chart limit and sends at most 32 matching records. Refused sends retry.

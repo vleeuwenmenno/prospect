@@ -404,7 +404,7 @@ public sealed partial class ServerHost
             // Against the list this seed and this generator actually make: an index means nothing against another.
             if (!IsFinite(rock.Offset) || !IsFinite(rock.Velocity) || rock.StartTick > world.NextWorldTick
                 || (uint)rock.Rock.Index >= (uint)_rocks.Sector(rock.Rock.Sector).AsteroidCount
-                || _rocks.MovedIn(rock.Rock.Sector) is { } moved && moved.Entries[rock.Rock.Index] > 0
+                || _rocks.MovedIn(rock.Rock.Sector) is { } moved && moved.EntryOf(rock.Rock.Index) > 0
                 || !_rocks.Set(rock))
                 throw new InvalidDataException($"Saved asteroid {i} is not an asteroid of this galaxy, is named twice, or is one more than a world may move.");
         }

@@ -453,3 +453,11 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
   and evaluator 12 make older worlds incompatible; they are refused untouched, without migration.
 - A mounted thruster has nothing of its own in a save: a hull has it while it has the block it sits on.
 - Rules and figures: `docs/roadmap/propulsion.md`.
+
+### Motion storage
+
+- Server and client reserve 16,384 rock records and 256 moved-sector list headers before simulation starts.
+- Saved worlds use their save limits; unsaved servers use the same default limits.
+- One global rock lookup and linked sector lists replace the dense per-sector index arrays. First pushes,
+  new moved sectors and full-budget refusals take no memory once the generated sector is resident.
+- The client's 512 rendered rocks are a snapshot limit, not a limit on its prediction history.

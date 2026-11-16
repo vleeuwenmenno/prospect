@@ -694,6 +694,9 @@ The client opens a real window on the developer's desktop, and they are usually 
 - A sector's summary estimates its asteroids without placing one. It knows nothing of crowding; the map says
   "ABOUT". Only cold/normal cloud pairs may overlap.
 - The client draws at most 32,768 instances a frame and shows at most 512 pushed asteroids out of place.
+  Its prediction history retains the server's 16,384 rocks across 256 sectors. `RockField` reserves motion arrays,
+  dictionaries and sector-list headers before ticking; `MovedRocks` links global delta entries in insertion order.
+  First contact on a resident sector never allocates. Unsaved servers use the default save bounds too.
 - A pushed asteroid still belongs to the sector it was generated in. One that drifts across the sector's edge is
   not hit by a hull that is wholly in the next sector.
 - Box collision prunes a per-design tree with live branch counts and content budgets. Asteroids use nearest-point

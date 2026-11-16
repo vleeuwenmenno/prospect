@@ -6,7 +6,13 @@ namespace Prospect.Game.World;
 /// Names one asteroid: its sector and its index in that sector's generated list. The list is a pure function of
 /// the seed, so the name means the same asteroid to the server and to every client, and stays valid for good.
 /// </summary>
-public readonly record struct RockRef(SectorCoord Sector, int Index);
+public readonly record struct RockRef(SectorCoord Sector, int Index)
+{
+    /// <summary>Compares coordinates directly, without initializing nested generic comparers on first contact.</summary>
+    public bool Equals(RockRef other) => Sector.X == other.Sector.X && Sector.Y == other.Sector.Y && Sector.Z == other.Sector.Z && Index == other.Index;
+    /// <summary>Hash used by the bounded motion lookup.</summary>
+    public override int GetHashCode() => HashCode.Combine(Sector.X, Sector.Y, Sector.Z, Index);
+}
 
 /// <summary>
 /// How an asteroid has been knocked from where the galaxy's seed put it: its displacement and velocity at a given
@@ -31,21 +37,28 @@ public struct RockDelta
 }
 
 /// <summary>The asteroids of one sector that have been pushed from where the seed put them.</summary>
-public sealed class MovedRocks(int capacity)
+public sealed class MovedRocks
 {
-    /// <summary>From asteroid index to its entry in <see cref="RockField.Deltas"/> plus one; zero if it never moved.</summary>
-    public readonly int[] Entries = new int[capacity];
+    private readonly RockField _field;
+    internal SectorCoord Sector;
+    internal int Last = -1;
+    internal MovedRocks(RockField field) => _field = field;
 
-    /// <summary>The indices of the moved asteroids; the first <see cref="Count"/> are meaningful.</summary>
-    public int[] Indices = new int[16];
-    public int Count;
+    /// <summary>First global delta entry, or -1. Follow with Next to visit this sector's entries in insertion order.</summary>
+    public int First { get; internal set; } = -1;
+    /// <summary>Number of moved asteroids in this sector.</summary>
+    public int Count { get; internal set; }
+    /// <summary>The global delta entry plus one, or zero for an asteroid that never moved.</summary>
+    public int EntryOf(int index) => _field.EntryOf(new RockRef(Sector, index));
+    /// <summary>The next global entry of this sector, or -1.</summary>
+    public int Next(int entry) => _field.Next(entry);
 }
 
 /// <summary>
 /// The asteroids as the simulation sees them: generated from the seed, plus the deltas for those that have been
 /// pushed. Persistence of the world is exactly this: the seed and the deltas. Used from one thread.
 /// </summary>
-public sealed class RockField(Galaxy galaxy, int maxDeltas = int.MaxValue, int maxMovedSectors = int.MaxValue)
+public sealed class RockField
 {
     /// <summary>The share of an asteroid's nominal radius that is solid all the way round.</summary>
     public const float SolidFraction = 0.88f;
@@ -57,11 +70,37 @@ public sealed class RockField(Galaxy galaxy, int maxDeltas = int.MaxValue, int m
     private const int CacheSlots = 128;
 
     private readonly Dictionary<SectorCoord, SectorContent> _sectors = new(CacheSlots);
-    private readonly Dictionary<SectorCoord, MovedRocks> _moved = [];
-    // A field with a budget takes room for all of it now, so recording a push never resizes these.
-    private RockDelta[] _deltas = new RockDelta[maxDeltas == int.MaxValue ? 64 : maxDeltas];
-    private float[] _reach = new float[maxDeltas == int.MaxValue ? 64 : maxDeltas];
-    private Double3[] _origins = new Double3[maxDeltas == int.MaxValue ? 64 : maxDeltas];
+    private readonly Dictionary<SectorCoord, MovedRocks> _moved;
+    private readonly Dictionary<RockRef, int> _entries;
+    private readonly MovedRocks[] _sectorPool;
+    private readonly RockDelta[] _deltas;
+    private readonly float[] _reach;
+    private readonly Double3[] _origins;
+    private readonly int[] _next;
+    private readonly Galaxy galaxy;
+    private readonly int maxDeltas;
+    private readonly int maxMovedSectors;
+
+    /// <summary>Reserves bounded motion history before simulation starts, including the first rock and sector.</summary>
+    public RockField(Galaxy galaxy, int maxDeltas = 16384, int maxMovedSectors = 256)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(maxDeltas);
+        ArgumentOutOfRangeException.ThrowIfNegative(maxMovedSectors);
+        this.galaxy = galaxy;
+        this.maxDeltas = maxDeltas;
+        this.maxMovedSectors = Math.Min(maxDeltas, maxMovedSectors);
+        _moved = new(this.maxMovedSectors, EqualityComparer<SectorCoord>.Default);
+        _entries = new(maxDeltas, EqualityComparer<RockRef>.Default);
+        _sectorPool = new MovedRocks[this.maxMovedSectors];
+        for (var i = 0; i < _sectorPool.Length; i++) _sectorPool[i] = new MovedRocks(this);
+        _deltas = new RockDelta[maxDeltas];
+        _reach = new float[maxDeltas];
+        _origins = new Double3[maxDeltas];
+        _next = new int[maxDeltas];
+    }
+
+    internal int EntryOf(RockRef rock) => _entries.TryGetValue(rock, out var entry) ? entry + 1 : 0;
+    internal int Next(int entry) => _next[entry];
     private int _deltaCount;
     private SectorContent? _last;
     private long _clock;
@@ -71,7 +110,7 @@ public sealed class RockField(Galaxy galaxy, int maxDeltas = int.MaxValue, int m
     /// <summary>Every asteroid that has ever been pushed.</summary>
     public ReadOnlySpan<RockDelta> Deltas => _deltas.AsSpan(0, _deltaCount);
 
-    /// <summary>How many sectors have an asteroid that was pushed. Each keeps a table as long as a sector can have asteroids.</summary>
+    /// <summary>How many sectors have an asteroid that was pushed. Each uses a preallocated list of global motion entries.</summary>
     public int MovedSectors => _moved.Count;
 
     /// <summary>The generated contents of a sector, made on first use.</summary>
@@ -132,11 +171,11 @@ public sealed class RockField(Galaxy galaxy, int maxDeltas = int.MaxValue, int m
     public float ReachAt(int entry) => _reach[entry];
 
     /// <summary>The immutable generated position of a moved asteroid.</summary>
-    public Double3 GeneratedPositionOf(RockRef rock) => _origins[_moved[rock.Sector].Entries[rock.Index] - 1];
+    public Double3 GeneratedPositionOf(RockRef rock) => _origins[_moved[rock.Sector].EntryOf(rock.Index) - 1];
 
     public Double3 PositionOf(RockRef rock, long tick)
     {
-        var entry = _moved[rock.Sector].Entries[rock.Index] - 1;
+        var entry = _moved[rock.Sector].EntryOf(rock.Index) - 1;
         _deltas[entry].Evaluate(tick, galaxy.DriftDecay, out var offset, out _);
         return _origins[entry] + offset;
     }
@@ -147,16 +186,15 @@ public sealed class RockField(Galaxy galaxy, int maxDeltas = int.MaxValue, int m
         offset = default;
         velocity = default;
         var moved = MovedIn(rock.Sector);
-        if (moved is not null && (uint)rock.Index < (uint)moved.Entries.Length && moved.Entries[rock.Index] > 0)
-            _deltas[moved.Entries[rock.Index] - 1].Evaluate(tick, galaxy.DriftDecay, out offset, out velocity);
+        if (moved is not null && moved.EntryOf(rock.Index) > 0)
+            _deltas[moved.EntryOf(rock.Index) - 1].Evaluate(tick, galaxy.DriftDecay, out offset, out velocity);
     }
 
     /// <summary>
     /// Whether an asteroid can be given a motion at the end of this interval, with <paramref name="pending"/>
     /// the motions already promised in it and not recorded yet. Asked before a contact exchanges anything: an
     /// asteroid that cannot be moved must be struck as one that does not give way, so that the hull's side and
-    /// the asteroid's side of the contact are one outcome. True without a look for a field that has no budget,
-    /// for an asteroid that has moved before and for one that is already promised a motion; otherwise the
+    /// the asteroid's side of the contact are one outcome. True for an asteroid that has moved before and for one that is already promised a motion; otherwise the
     /// promised motions of asteroids that never moved, and of sectors that never had one, are counted against
     /// what is left. A true answer holds until <see cref="Set"/> is called for other asteroids than the
     /// pending ones. Takes no memory; the count is over the pending motions only.
@@ -165,11 +203,9 @@ public sealed class RockField(Galaxy galaxy, int maxDeltas = int.MaxValue, int m
     {
         if ((uint)rock.Index >= (uint)galaxy.MaxAsteroidsPerSector)
             return false;
-        if (maxDeltas == int.MaxValue && maxMovedSectors == int.MaxValue)
-            return true;
 
         var own = MovedIn(rock.Sector);
-        if (own is not null && own.Entries[rock.Index] > 0)
+        if (own is not null && own.EntryOf(rock.Index) > 0)
             return true;
 
         var newRocks = 0;
@@ -183,7 +219,7 @@ public sealed class RockField(Galaxy galaxy, int maxDeltas = int.MaxValue, int m
             if ((uint)other.Index >= (uint)galaxy.MaxAsteroidsPerSector)
                 continue;
             var moved = MovedIn(other.Sector);
-            if (moved is not null && moved.Entries[other.Index] > 0)
+            if (moved is not null && moved.EntryOf(other.Index) > 0)
                 continue;
 
             // Counted once however often it was struck in this interval, and its sector once for all its asteroids.
@@ -222,28 +258,25 @@ public sealed class RockField(Galaxy galaxy, int maxDeltas = int.MaxValue, int m
         {
             if (_deltaCount >= maxDeltas || _moved.Count >= maxMovedSectors)
                 return false;
-            _moved[delta.Rock.Sector] = moved = new MovedRocks(galaxy.MaxAsteroidsPerSector);
+            moved = _sectorPool[_moved.Count];
+            moved.Sector = delta.Rock.Sector;
+            _moved.Add(delta.Rock.Sector, moved);
         }
 
-        var entry = moved.Entries[delta.Rock.Index] - 1;
+        var entry = moved.EntryOf(delta.Rock.Index) - 1;
         if (entry < 0)
         {
             if (_deltaCount >= maxDeltas)
                 return false;
-            if (_deltaCount == _deltas.Length)
-            {
-                Array.Resize(ref _deltas, _deltas.Length * 2);
-                Array.Resize(ref _reach, _reach.Length * 2);
-                Array.Resize(ref _origins, _origins.Length * 2);
-            }
-
-            if (moved.Count == moved.Indices.Length)
-                Array.Resize(ref moved.Indices, moved.Indices.Length * 2);
             var generated = Sector(delta.Rock.Sector);
             entry = _deltaCount++;
             _origins[entry] = galaxy.CenterOf(delta.Rock.Sector) + ((uint)delta.Rock.Index < (uint)generated.AsteroidCount ? generated.Asteroids[delta.Rock.Index].LocalPosition : Vector3.Zero);
-            moved.Entries[delta.Rock.Index] = entry + 1;
-            moved.Indices[moved.Count++] = delta.Rock.Index;
+            _entries.Add(delta.Rock, entry);
+            _next[entry] = -1;
+            if (moved.Last >= 0) _next[moved.Last] = entry;
+            else moved.First = entry;
+            moved.Last = entry;
+            moved.Count++;
         }
 
         _deltas[entry] = delta;
