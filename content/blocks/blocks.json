@@ -158,11 +158,6 @@
       "name": "Tractor beam", "mass": 0.15, "hull": 0,
       "mount": { "side": 6, "depth": 2, "legacyBlock": "hull" },
       "tractor": { "quality": "Common", "range": 40, "acceleration": 4, "maxMass": 100000, "basePower": 2, "powerPerTonne": 0.5 }
-    },
-    "tractorBeamUncommon": {"name": "Tractor Uncommon", "mass": 0.15, "hull": 0, "mount": {"side": 6, "depth": 2, "legacyBlock": "hull"}, "tractor": {"quality": "Uncommon", "range": 40, "acceleration": 4, "maxMass": 100000, "basePower": 2, "powerPerTonne": 0.5}},
-    "tractorBeamRare": {"name": "Tractor Rare", "mass": 0.15, "hull": 0, "mount": {"side": 6, "depth": 2, "legacyBlock": "hull"}, "tractor": {"quality": "Rare", "range": 40, "acceleration": 4, "maxMass": 100000, "basePower": 2, "powerPerTonne": 0.5}},
-    "tractorBeamEpic": {"name": "Tractor Epic", "mass": 0.15, "hull": 0, "mount": {"side": 6, "depth": 2, "legacyBlock": "hull"}, "tractor": {"quality": "Epic", "range": 40, "acceleration": 4, "maxMass": 100000, "basePower": 2, "powerPerTonne": 0.5}},
-    "tractorBeamLegendary": {"name": "Tractor Legendary", "mass": 0.15, "hull": 0, "mount": {"side": 6, "depth": 2, "legacyBlock": "hull"}, "tractor": {"quality": "Legendary", "range": 40, "acceleration": 4, "maxMass": 100000, "basePower": 2, "powerPerTonne": 0.5}},
-    "tractorBeamAlienTech": {"name": "Tractor Alien Tech", "mass": 0.15, "hull": 0, "mount": {"side": 6, "depth": 2, "legacyBlock": "hull"}, "tractor": {"quality": "Alien Tech", "range": 40, "acceleration": 4, "maxMass": 100000, "basePower": 2, "powerPerTonne": 0.5}}
+    }
   }
 }

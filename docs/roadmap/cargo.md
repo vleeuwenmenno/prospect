@@ -111,8 +111,9 @@ Temporary local debug loading is available. Mining output is not built.
 
 ### Implementation: tractor tiers
 
-- Six block types: `tractorBeam` (Common), then suffixes `Uncommon`, `Rare`, `Epic`, `Legendary`, `AlienTech`.
-  Each has `tractor.quality`, using the same quality names and `ModuleQuality` enum as modules.
+- Only `tractorBeam` (Common) ships, as only Common sensors do. Its `tractor.quality` uses the same quality
+  names and `ModuleQuality` enum as modules; a higher tier is the same block at another quality.
+- The editor card matches a sensor card: tier badge, then range, pull, lift and draw.
 - `tractorTiers` multiplies range, acceleration, maxMass and power at load time.
   Power scales both basePower and powerPerTonne. Invalid quality, nonfinite/nonpositive multipliers and oversized results refuse content.
 - Common multipliers are 1/1/1/1; Uncommon 1.2/1.25/1.5/1.1; Rare 1.4/1.5/2.5/1.2.

@@ -648,7 +648,7 @@ internal sealed partial class ScreenHost
             if (!_palette.ShowsCard(tuning, types, i))
                 continue;
             shown++;
-            DrawPartCard(i, type, figures[i], tuning.Compact(type), type.Module.Family != ModuleFamily.None ? Kit.Px(ModuleCardHeight) : cardHeight, hull, editor);
+            DrawPartCard(i, type, figures[i], tuning.Compact(type), type.Module.Family != ModuleFamily.None || type.Tractor is not null ? Kit.Px(ModuleCardHeight) : cardHeight, hull, editor);
             Kit.Space(Theme.Space1);
         }
 
@@ -899,6 +899,13 @@ internal sealed partial class ScreenHost
             return;
         }
 
+        if (type.Tractor is { } tractor)
+        {
+            DrawTractorCard(draw, at, tractor, figures, left, room);
+            ImGui.PopID();
+            return;
+        }
+
         // The tank card names the fuel it would place; the fuel is chosen in the details panel.
         Kit.ClippedText(draw, _ui.Sans, Theme.FontCaption, at + new float2(left, Kit.Px(22)), Theme.TextMute, tankCard ? Kit.F($"{type.Name}") : RoleText(role), room - tag);
         Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(left, Kit.Px(38)), Theme.TextDim, Kit.F($"{figures.Mass:0.##} T   {figures.Hull:0} HP"), room);
@@ -932,6 +939,25 @@ internal sealed partial class ScreenHost
         var reach = spec.Range >= 1000 ? Kit.F($"RANGE {spec.Range / 1000:0.##} KM   SCAN {spec.ScanSeconds:0.#} S") : Kit.F($"RANGE {spec.Range:0} M   SCAN {spec.ScanSeconds:0.#} S");
         Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(left, Kit.Px(70)), Theme.Text, reach, room);
         Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(left, Kit.Px(85)), Theme.Text, Kit.F($"DRAWS {spec.PowerDraw:0.##} MW   COOLDOWN {spec.CooldownSeconds:0.#} S"), room);
+    }
+
+    /// <summary>
+    /// A tractor's card below its name, laid out as a module's: what it is, its quality as a badge in the tier's colour,
+    /// the mass, then its reach and pull and what it draws. Every figure is the block's own at its quality.
+    /// </summary>
+    private void DrawTractorCard(ImDrawListPtr draw, float2 at, TractorSpec spec, in PartFigures figures, float left, float room)
+    {
+        var tier = ModuleLook.Current.Tier(spec.Quality);
+        Kit.ClippedText(draw, _ui.Sans, Theme.FontCaption, at + new float2(left, Kit.Px(21)), Theme.TextMute, "TRACTOR BEAM"u8, room);
+        var badge = Kit.Measure(_ui.SansMedium, Theme.FontCaption, tier.Label);
+        var badgeMin = at + new float2(left, Kit.Px(36));
+        var badgeMax = badgeMin + badge + new float2(Kit.Px(8), Kit.Px(2));
+        draw.AddRectFilled(badgeMin, badgeMax, Kit.Color(tier.Rgb, 0.18f));
+        draw.AddRect(badgeMin, badgeMax, Kit.Color(tier.Rgb, 0.9f));
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, badgeMin + new float2(Kit.Px(4), Kit.Px(1)), tier.Rgb, tier.Label);
+        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(left, Kit.Px(55)), Theme.TextDim, Kit.F($"{figures.Mass:0.##} T   FACE MOUNT"), room);
+        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(left, Kit.Px(70)), Theme.Text, Kit.F($"RANGE {spec.Range:0} M   PULL {spec.Acceleration:0.#} M/S2"), room);
+        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(left, Kit.Px(85)), Theme.Text, Kit.F($"LIFTS {spec.MaxMass / 1000:0.#} T   DRAWS {spec.BasePower:0.##} MW + {spec.PowerPerTonne:0.##}/T"), room);
     }
 
     /// <summary>The figures a part of a role is chosen for, on one line: what it gives, then what it draws.</summary>
