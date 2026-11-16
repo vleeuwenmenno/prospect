@@ -1602,8 +1602,8 @@ internal sealed class App : IDisposable
                 }
                 if ((_options.JettisonSeconds is not null || _options.HurtFleetCargo) && Session is not null)
                 {
-                    if (World.TryGetContainer(1, out var loose)) Console.WriteLine($"capture cargo position: {loose.Position.RelativeTo(World.OwnPosition)}; on screen {World.Project(loose.Position, out var screen)} at {screen}");
-                    Console.WriteLine($"capture cargo: free {World.FreeContainerCount}, drawn {World.DrawnFreeContainers}, target {World.TargetContainer}");
+                    if (World.TryGetContainer(1, out var loose)) Console.WriteLine($"capture cargo position: {loose.Position.RelativeTo(World.OwnPosition)}; on screen {World.Project(loose.Position, out var screen)} at {screen}; tractor {loose.TractorHull}/{loose.TractorMount}, stage {loose.TractorStage}, powered {loose.TractorPowered}");
+                    Console.WriteLine($"capture cargo: held {World.Own.Cargo.Length}, free {World.FreeContainerCount}, drawn {World.DrawnFreeContainers}, target {World.TargetContainer}");
                 }
                 if (World.PulseShown.Strength > 0f)
                     Console.WriteLine($"capture {_capturesTaken:D2} scan pulse: radius {World.PulseShown.Radius:F0} m, strength {World.PulseShown.Strength:F2}");

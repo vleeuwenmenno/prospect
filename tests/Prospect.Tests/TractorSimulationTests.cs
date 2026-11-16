@@ -43,6 +43,24 @@ public sealed class TractorSimulationTests
     }
 
     [Fact]
+    public void AFullAcquisitionBudgetResumesAtTheNextMountInsteadOfStarvingIt()
+    {
+        var basis = Design();
+        var blocked = TestDesigns.Mounted([.. basis.Boxes, Box("hull", 1, 1, 0)], basis.Mounts.ToArray());
+        using var hulls = new HullStore();
+        for (var i = 0; i < 4; i++) hulls.Create((uint)(i + 1), 0, blocked, Double3.Zero);
+        var receiver = hulls.Create(5, 1, basis, new(0, 0, 4));
+        var field = new HullField(hulls, [blocked, basis]);
+        var bodies = new FreeContainers();
+        for (var i = 0; i < 64; i++) Assert.True(bodies.Add(Content, Item(basis, Double3.Zero), out _));
+        var tractor = new TractorSimulation(); var scratch = new byte[8];
+        tractor.Plan(bodies, Content, field, scratch);
+        Assert.Equal(0u, bodies.Items[0].TractorHull);
+        tractor.Plan(bodies, Content, field, scratch);
+        Assert.Equal(receiver.Packed, bodies.Items[0].TractorHull);
+    }
+
+    [Fact]
     public void PowerIsBilledOnceAndInsufficientPowerSuppliesNoTractor()
     {
         var flight = Content.Pod.Flight; flight.PowerGenerated = 0; flight.IdlePower = 0; flight.ShieldRecharge = 0;

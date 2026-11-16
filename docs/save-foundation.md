@@ -499,7 +499,7 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
   Current cargo retunes then validate payloads, logging drops, and reapply sector caps.
 - `containerLifetimeMinutes` persists with world settings (default 60, zero never). Unattended age advances only
   without a connected pilot within the base sensor radius. Birth/id order controls cap eviction.
-- Layouts before 13 are refused without migration. Wreck splitting preserves held cargo; only rack damage ejects.
+- Layouts before 14 are refused without migration. Wreck splitting preserves held cargo; only rack damage ejects.
 
 ## Tractor acquisition (codec 14)
 

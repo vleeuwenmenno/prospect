@@ -1076,25 +1076,26 @@ Active module spending is shared with client prediction through `ModuleScanRules
 - Codec 12 retains moving FTL and adds bounded holds and original cargo rules. Invalid saves refuse; a cargo-only
   retune repacks under current rules and logs every dropped container. Other simulation changes remain incompatible.
 
-### Free containers (protocol 59, save codec 13)
+### Free containers (introduced in protocol 59, save codec 13)
 
 - Free containers use a separate fixed pool of 256, with content cap 64 per sector. They never consume a hull record.
-- Reliable message 37 sends sensor-visible containers at 10 Hz: 11-byte header, 82 bytes per container,
-  maximum 21,003 bytes per set (210,030 payload bytes/s per fully interested client). Empty sets withdraw contacts.
+- Reliable message 37 sends sensor-visible containers at 10 Hz: 11-byte header, 92 bytes per container,
+  maximum 23,563 bytes per set (235,630 payload bytes/s per fully interested client). Empty sets withdraw contacts.
   Sensor/gas coverage is shared with `MaySeeHull`; containers have no ownership or brief-contact bypass.
 - Editor request kind 7 jettisons one container (23 bytes). Remote clients may use it after admission.
   An open edit token, owned controlled hull, matching live rack, selected slot and current hold tick/revision are
   required. It shares the quarter-second fill rate limit. It does not require the local debug-loading flag.
 - `blocks/cargo.json` also owns contact budget, sector cap, shell collision mass, restitution and release speed.
   `containerLifetimeMinutes` is a creation setting, 0–1440, default 60; zero never expires. No live edit message.
-- Codec 13 saves the pool and clocks separately from hulls. Older layouts are refused untouched; no migration.
+- Codec 14 retains the pool and clocks separately from hulls. Older layouts are refused untouched; no migration.
 
 ### Tractor claims (protocol 60)
 
 - Free-container message 37 adds ten bytes per body: pulling hull handle, mount and rack indices, approach stage,
   and a powered flag. Records are 92 bytes; the 256-body set is at most 23,563 bytes at 10 Hz.
 - Claims are exclusively server-owned. Clients cannot request a claim or assign a container to a hull.
-  An existing valid claim wins before new mounts acquire in stable hull/mount/body order.
+  An existing valid claim wins before new mounts acquire in deterministic hull/mount/body order.
+  The bounded acquisition scan resumes at its deferred mount on the next tick.
 - Sensor filtering still applies. A claim naming a hull the recipient cannot see or whose design is not ready
   is removed from that recipient's copy. The container can remain visible independently.
 - The client estimates active tractor demand from the latest authoritative claims and bills it through the same

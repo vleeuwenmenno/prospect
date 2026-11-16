@@ -553,9 +553,9 @@ internal static class Program
         if ((options.FuelCallout != Prospect.Game.World.FuelKind.None || options.FuelTip != Prospect.Game.World.FuelKind.None) && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--fuel-callout and --fuel-tip work only with --capture or --bench.");
 
-        if (options.JettisonSeconds is not null && (options.CapturePath is null || options.JoinHost is not null
-            || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null || options.OpenView != "cargo"))
-            return Fail("--jettison requires --capture --open cargo in an unsaved private local game.");
+        if (options.JettisonSeconds is not null && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null
+            || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null || options.OpenView is not ("cargo" or "edit-cargo")))
+            return Fail("--jettison requires --capture or --bench and --open cargo or edit-cargo in an unsaved private local game.");
 
         if (options.HurtFleetSeconds is not null && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
             return Fail("--hurt-fleet works only with --capture or --bench, in an unsaved private local game.");

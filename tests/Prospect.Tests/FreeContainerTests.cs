@@ -36,6 +36,30 @@ public sealed class FreeContainerTests
     }
 
     [Fact]
+    public void FirstContactTickWithAsteroidsDisabledUsesOnlyReservedMemory()
+    {
+        var content = Content.WithSettings(Content.SettingCatalog.Build(null, ["asteroidAmount=0"]));
+        // World generation is already warm in a running world; the container's own scratch is still fresh.
+        var warm = new SectorContent();
+        content.Galaxy.Reserve(warm);
+        content.Galaxy.Generate(default, warm);
+        var probe = new AllocationProbe();
+        while (probe.Run())
+        {
+            using var hulls = new HullStore();
+            var field = new HullField(hulls, content.Designs);
+            var rocks = new RockField(content.Galaxy);
+            var simulation = new ContainerSimulation(content.Galaxy);
+            var store = new FreeContainers();
+            Assert.True(store.Add(content, Container(), out _));
+            probe.Start();
+            simulation.Step(store, content, field, rocks, 1);
+            probe.Stop();
+        }
+        Assert.Equal(0, probe.Bytes);
+    }
+
+    [Fact]
     public void ProductionContactPassTransfersMomentumAndRemovesDestroyedContainer()
     {
         using var hulls = new HullStore();

@@ -20,7 +20,11 @@ Own hull cargo is held by the server, saved, replicated and drawn; local debug l
 Select an applied rack, choose a container in its cargo panel, then JETTISON SELECTED in local or remote games.
 Destroyed racks eject intact containers; wreck splits retain cargo. Free containers drift, collide, take damage,
 and persist in saves. Middle-click a free container to see its size, resource, amount and HP.
-Cleanup defaults to 60 unattended minutes (`containerLifetimeMinutes`, 0 means never). Tractor pickup is not built.
+Cleanup defaults to 60 unattended minutes (`containerLifetimeMinutes`, 0 means never).
+Place a Tractor beam face mount from the editor's Hull tab. It automatically pulls nearby free containers into
+racks it can see and fit them in; anyone can recover them. Range is 40 m and power rises with load mass.
+Editor lines show reachable racks; amber racks have no tractor access. Move the ship for blocked or distant cargo.
+The energy tooltip lists TRACTORS. No pickup key or pickup by touch; no allow-list/block-list filter yet.
 
 
 Propulsion burns fuel and is directional: engines, hot thrusters and cold gas thrusters each push the opposite way
@@ -988,10 +992,10 @@ integration; mining and physical container pickup remain absent.
 | `iceAbundance` | 0–4 | 1 |
 | `iceGradeMin` / `iceGradeMax` | 0–1 | 0 / 1 |
 
-### Cargo holds (step 1)
+### Cargo holds and tractor pickup (steps 1–3)
 
 - Own hulls carry server-owned containers: shared packing, payload mass in flight and prediction, reliable updates.
 - Local editor: select an applied rack, choose size/resource, then **ADD CONTAINER (DEBUG)**. Empty is available.
 - Flight and editor draw the contents; ship data shows used/capacity u and cargo kg.
-- Apply refuses cargo loss; repair and wreck splits retain surviving racks' contents. Rack destruction loses them for now.
-- Protocol 59 and save codec 13 include holds and free containers alongside moving FTL. Tractor pickup and mining output remain unbuilt.
+- Apply refuses cargo loss; repair and wreck splits retain surviving racks' contents. Rack destruction ejects intact free containers.
+- Protocol 60 shows active tractor beams; save codec 14 keeps bodies and holds, restarting interrupted pulls on load. Mining output remains unbuilt.

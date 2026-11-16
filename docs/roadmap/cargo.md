@@ -1,7 +1,7 @@
 # Cargo, containers and tractor beams
 
-Steps 1 and 2 are built: holds and free containers, jettison, damage ejection, collisions, replication and saves.
-Temporary local debug loading is available. Tractor pickup and mining output are not built.
+Steps 1–3 are built: holds, free containers and automatic tractor pickup.
+Temporary local debug loading is available. Mining output is not built.
 
 ## Decided
 
@@ -39,7 +39,7 @@ Temporary local debug loading is available. Tractor pickup and mining output are
 - Containers placed in a rack are drawn there. The rack's size decides which containers fit.
 - In the hold, containers are slots kept by the server, not physics objects. The server places them by a fixed rule.
 
-### Loading: never automatic
+### Loading: only by tractor or drone
 
 - Two ways to pick something up, and nothing else:
   1. A tractor beam (first).
@@ -57,12 +57,11 @@ Temporary local debug loading is available. Tractor pickup and mining output are
 ### Losing cargo (step 2)
 
 - A rack that is destroyed throws its containers into space, contents intact.
-- Step 3 will let anyone pick those containers up with a tractor beam. There is no pickup yet.
+- Anyone can recover those containers with a tractor beam. Ownership does not restrict pickup.
 - Dropping cargo uses the same containers as the hold.
 
 ## Open
 
-- **Tractor figures:** range, power per tonne, the most mass one beam can move, how several beams add up.
 - **Towing huge chunks** outside the hull: tractor-held mass joins the ship's flight. It changes shared flight
   and prediction, so it comes last and needs its own design pass.
 - **Tractor filter:** a pickup list per ship that can be switched between allow-list and block-list.
@@ -77,7 +76,7 @@ checked afterwards. This overrides the joint mining, inventory and turret brains
 1. **Built:** racks and containers in the hold: rack block, container sizes in content, the hold's slots on the server,
    wire, save, drawing, and a debug button that adds a container.
 2. **Built:** containers in space: jettison, a rack's destruction, hull points, saved.
-3. Tractor beam mount: range, power, pull, sliding onto a rack in view.
+3. **Built:** tractor beam mount: range, power, pull, sliding onto a rack in view.
 4. Mining output into containers.
 5. Towing huge chunks.
 
@@ -122,7 +121,7 @@ Deferred: drone launcher, tractor filter.
 - Other players' containers and unpiloted owned hulls' holds are not replicated or drawn.
 - Payload kilograms affect mass, centre of mass and inertia; empty shells have no additional mass.
 - Container health is stored and validated. Step 2 adds independent collision damage and jettison; pickup waits for step 3.
-- No drone rack. No tractor beam or mining output yet.
+- No drone rack. Tractor pickup is step 3; mining output is still deferred.
 
 ### Validation
 
@@ -136,7 +135,7 @@ Deferred: drone launcher, tractor filter.
 
 - Free containers are separate bodies, never hull records: Double3 position, velocity, orientation, spin, size,
   resource, kilograms and HP. They drift, collide with hull boxes and shared asteroid geometry, and lose HP.
-  Zero HP destroys the shell and its payload: boom means gone. No weapon damage or pickup yet.
+  Zero HP destroys the shell and its payload: boom means gone. No weapon damage yet; pickup is step 3.
 - Select an applied rack in the controlled hull's editor, select a container in the separate cargo panel,
   then JETTISON SELECTED. Local and remote sessions use the same server request.
   The server checks owner, controlled hull, edit token, rack, selected slot and the exact hold revision seen.
@@ -180,3 +179,50 @@ Deferred: drone launcher, tractor filter.
   Captures, native crops and sequence strips: `/tmp/prospect-cargo-step2-captures/`.
 - Allocation probes cover drift, rock contact, server contact stepping, damage ejection, wire/save codecs,
   interpolation and picking. The two-client session test covers ownership, stale hold rejection and remote release.
+
+
+## Built: step 3
+
+- The freely placed `tractorBeam` face mount works automatically. Starting content: 40 m range, 4 m/s² pull,
+  100 t maximum, 2 MW base plus 0.5 MW/t of payload and shell. One body per mount; several mounts work in parallel.
+- Both straight segments must clear the own hull's live blocks: emitter to container, emitter to the nearest
+  rack face centre. That face must be open. No alternate face is chosen around an obstruction.
+  A fitting slot uses the existing largest-first packing rule, including other tractors' reservations.
+- A pulled body stays free and collidable while approaching the emitter, then the rack's open side.
+  At arrival the server adds it to the hold and removes the free body. Touch alone never stows it.
+- Existing claims win; new claims use deterministic hull/mount/body order, resuming deferred mounts next tick. Anyone can recover free cargo.
+  All active mounts on a hull run only when their combined demand is paid by `FlightModel.Step`.
+  No power means no tractor force; existing momentum remains. The energy tooltip lists TRACTORS.
+- Editor reach lines and amber unreached racks use the same shared geometry rule. The details panel reports
+  reached/total racks. Beam colour, line widths and warning tint are client data in `visuals/propulsion.json`.
+
+### Wire, save and bounds
+
+- Protocol 60 adds ten claim bytes to each free record: hull, mount, rack, stage and powered flag.
+  At most 23,563 bytes per set; sensor filtering and the separate hull/hold budgets remain unchanged.
+- Codec 14 preserves the free body's pose, motion, health and payload, but does not save its claim.
+  An interrupted pull restarts acquisition after loading. Stowed cargo is saved only in its hold.
+- The fixed free pool supplies position-based range rejection before geometry; at most 256 new candidate
+  positions are tested per tick. Existing claims are checked each tick. The scan resumes at a deferred mount,
+  so crowded acquisition waits without starving later mounts or hulls.
+- Editor pair checks are spread over frames without allocation, with fixed storage for admitted designs.
+  Cargo-only updates reuse the frozen checked draft and packing scratch, without a new geometry export.
+  Beams are soft screen-space lines; external hulls and rocks do not occlude them or block tractor acquisition.
+- No drone tractor/rack, towing, allow-list/block-list filter, or replication of foreign holds. These remain deferred.
+
+### Step 3 evidence
+
+- Every implementation step passed foreground `timeout 900 make check` before committing.
+- `tools/prepare_tractor_capture.py` equips a copy of the built client, leaving shipped designs unchanged.
+  `--open cargo --jettison 6` exercises the real jettison request and automatic pickup;
+  `--open edit-cargo` shows one reachable rack and one rack blocked by the hull.
+- Final full check: 2,597 game tests and 354 listing tests passed.
+- `make bench`: normal 862 fps, resize 770 fps; editor cargo 1,264 fps, menu 1,266 fps,
+  dump 1,268 fps and mirror 1,049 fps. All six runs measured zero managed bytes on all threads.
+  The compositor used 5096x1390; resize measured twelve swapchain and twelve target rebuilds.
+  The tractor fixture also passed `--bench 10 --open edit-cargo --jettison 5 --set asteroidAmount=0`:
+  1,146 fps, zero managed bytes on all threads through release, powered pull and stow.
+- Hidden real-client sequence logged held/free counts 3/0, 2/1, 3/0, with both powered approach stages.
+  Crops: `/tmp/prospect-tractor-captures/pull-stow-sequence.png`,
+  `/tmp/prospect-tractor-captures/editor-reach-crop.png`,
+  `/tmp/prospect-tractor-captures/editor-details-crop.png`. No desktop input was injected.

@@ -878,12 +878,38 @@ How to apply it:
   Never eject inside `Lose`: wreck splitting copies racks with cargo and removes generic source blocks.
 - `ServerCargoEjection` validates jettison token, owner, controlled hull, rack, slot and the hold tick/revision.
   `PlayerInputBridge.JettisonContainer` works locally and remotely. The separate rack panel leaves model looks alone.
-- Protocol 59: reliable message 37, 82-byte body records, 21,003-byte full-set maximum at 10 Hz; sensor/gas coverage
+- Protocol 60: reliable message 37, 92-byte body records, 23,563-byte full-set maximum at 10 Hz; sensor/gas coverage
   through `MaySeeContainer`/`Covered`, as used by `MaySeeHull`. No ownership bypass and no hull snapshot growth.
-- Codec 13 saves bodies and birth/age/id clocks. `containerLifetimeMinutes` defaults to 60, zero never;
+- Codec 14 saves bodies and birth/age/id clocks; tractor claims restart on load. `containerLifetimeMinutes` defaults to 60, zero never;
   connected pilots within the base sensor radius pause aging. Oldest-first caps remain active.
 - `FreeContainerVisuals` interpolates and detects contact velocity changes; existing worker container meshes draw
-  the result. Middle-click shows the target panel. No pickup, tractor or weapon support yet.
+  the result. Middle-click shows the target panel. Tractor pickup is described below; no weapon support yet.
 - Tests: `FreeContainerTests`, `FreeContainerWireTests`, `FreeContainerSaveTests`, `FreeContainerEjectionTests`,
   `FreeContainerVisualTests`, and two-client jettison in `EditorSessionTests`.
   Capture: `--open cargo --jettison 6`, or `--open cargo --hurt-fleet 7 --hurt-kind cargo`, always with `--capture`.
+
+
+## Tractor beams: cargo step 3
+
+- `tractorBeam` is a freely placed face mount: both `mount` and `tractor` data in `blocks.json`, emitter model and
+  client beam/reach/warning appearance in `visuals/propulsion.json`. No drone variant or filter yet.
+- `TractorReach` is the shared range, nearest rack face, live-block segment and packing rule. Its points use
+  grid-edge metres; hull-local points subtract `(design.CenterOfMass + 0.5) * BlockSize`. Wedges use their slant.
+  Both mount-to-container and mount-to-rack paths must be clear. Never load by contact.
+- `TractorSimulation.Plan` preserves existing exclusive claims, then acquires in hull/mount/body order from the
+  fixed 256-body pool, rejecting distant positions before geometry. At most 256 candidate positions per tick;
+  the next tick resumes at the deferred mount so unsuitable cargo cannot starve later hulls.
+  Each mount holds one body; same-hull claims reserve packing space. Anyone may pull a free body.
+- `FlightModel.Step` alone bills `PowerFlow.Tractor`; `Pull` uses only that paid power, before container contacts.
+  Base plus per-tonne demand includes payload and collision shell mass. Insufficient power means no tractor force.
+  Pulls approach the emitter, then the rack's open side; only `TryAddCargo` followed by removing the free body stows it.
+- Protocol 60 replicates claims for beams and prediction; redact claims whose hull/design is unavailable to a client.
+  Codec 14 does not encode claims; restore clears them and restarts acquisition. `TractorPreview` caches the shared
+  reach rule in fixed storage with a content-defined per-frame budget. Tests: `TractorTests`, `TractorReachTests`,
+  `TractorSimulationTests`, `TractorPreviewTests`, free-container wire/save tests and `EditorSessionTests`.
+  `ShipEditor.CheckJob` reuses frozen geometry and packing scratch for cargo/fuel-only updates; automatic
+  pickup must never copy/re-export the unchanged draft. `FrameOrderTests` probes that path.
+
+Capture fixture: `tools/prepare_tractor_capture.py` copies a built client and equips its pod with a tractor,
+one reachable rack and one blocked rack. Run that copy with `--open cargo --jettison 6 --capture ...` for pickup,
+or `--open edit-cargo --capture ...` for reach guidance. Keep `agent.prospect` hidden as for other captures.

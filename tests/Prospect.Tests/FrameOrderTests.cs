@@ -5292,6 +5292,36 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     [Fact]
+    public void AutomaticCargoChangesReuseCheckedGeometryAndTakeNoFrameMemory()
+    {
+        OpenEditor();
+        AwaitCheck();
+        FinishJobs();
+        var editor = _world.Editor;
+        editor.Track(_snapshot, Bridge, 1);
+        var design = editor.Checked.Design;
+        var rack = Array.FindIndex(editor.Source!.Types, type => type.Cargo > 0);
+        HoldContainer[] cargo = [new(rack, 0, 0, 100, 50, default)];
+        var probe = new AllocationProbe();
+        while (probe.Run())
+            for (var i = 0; i < 20; i++)
+            {
+                _snapshot.Hulls[_snapshot.OwnHull].Cargo = i % 2 == 0 ? cargo : ReadOnlyMemory<HoldContainer>.Empty;
+                probe.Start();
+                editor.Track(_snapshot, Bridge, 1);
+                probe.Stop();
+                FinishJobs();
+                probe.Start();
+                editor.Track(_snapshot, Bridge, 1);
+                probe.Stop();
+                Assert.True(editor.CargoFits);
+                Assert.Equal(i % 2 == 0 ? 1 : 0, editor.DraftCargo.Length);
+                Assert.Same(design, editor.Checked.Design);
+            }
+        Assert.Equal(0, probe.Bytes);
+    }
+
+    [Fact]
     public void CargoPreviewDisablesApplyForRackRemovalAndUndoRestoresPackedDrawing()
     {
         OpenEditor();

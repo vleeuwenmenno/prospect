@@ -891,7 +891,14 @@ internal sealed class ShipEditor(JobSystem jobs)
                 _fuelLevels[i] = level;
             }
         var cargo = Hull == own.Id ? own.Cargo.Span : ReadOnlySpan<HoldContainer>.Empty;
-        if (!_cargo.AsSpan(0, _cargoCount).SequenceEqual(cargo))
+        var cargoChanged = _cargoCount != cargo.Length;
+        for (var i = 0; i < cargo.Length && !cargoChanged; i++)
+        {
+            var a = _cargo[i]; var b = cargo[i];
+            cargoChanged = a.Rack != b.Rack || a.Size != b.Size || a.Resource != b.Resource || a.Amount != b.Amount
+                || a.Hull != b.Hull || a.At.X != b.At.X || a.At.Y != b.At.Y || a.At.Z != b.At.Z;
+        }
+        if (cargoChanged)
         {
             cargo.CopyTo(_cargo);
             _cargoCount = cargo.Length;
@@ -2288,22 +2295,23 @@ internal sealed class ShipEditor(JobSystem jobs)
                     CheckProblem = Plain(_job.Result.Problem);
                 }
             }
-
-            _job.Copy = null;
         }
 
         // Only one check at a time, on a frozen copy; a newer edit waits for the running one and then starts again.
         if (Stage == EditorStage.Editing && Draft is not null && !_jobRunning && (CheckedVersion != Draft.Version || _checkedFuelVersion != _fuelVersion || _checkedSelectionStamp != _selectionStamp) && _time - _editedAt >= CheckDelay)
         {
             Check = DraftCheck.Pending;
-            _job.Copy = Draft.Copy();
+            // Automatic cargo/fuel updates reuse the frozen geometry and its export. Only a player edit
+            // needs another copy; otherwise a tractor stow would allocate on the render thread.
+            _job.Rebuild = _job.Copy is null || _job.Version != Draft.Version || _job.Generation != _generation || _job.Failure is not null;
+            if (_job.Rebuild) _job.Copy = Draft.Copy();
             _job.Source = FuelKnown ? Source : null;
             _job.Content = Content;
             _job.CargoCount = _cargoCount;
             _cargo.AsSpan(0, _cargoCount).CopyTo(_job.Cargo);
             _fuelLevels.CopyTo(_job.Levels, 0);
             _job.FuelVersion = _fuelVersion;
-            _job.Selection = Selection.ToArray();
+            if (_job.SelectionStamp != _selectionStamp) _job.Selection = Selection.ToArray();
             _job.SelectionStamp = _selectionStamp;
             _job.Version = Draft.Version;
             _job.Generation = _generation;
@@ -2339,6 +2347,8 @@ internal sealed class ShipEditor(JobSystem jobs)
         public int[] Selection = [];
         public int SelectionStamp;
         public DraftCopy? Copy;
+        public bool Rebuild;
+        private byte[] _occupied = [];
         public int Version;
         public int Generation;
         public DraftExport Result;
@@ -2354,20 +2364,27 @@ internal sealed class ShipEditor(JobSystem jobs)
         public void Run()
         {
             Failure = null;
-            Result = default;
+            if (Rebuild) Result = default;
             Plan = MenuPlan = default;
             CargoFits = true;
             try
             {
-                Result = Copy!.Export();
-                if (Result.Ok && Source is not null)
+                if (Rebuild)
                 {
-                    if (CargoCount > 0)
+                    Result = Copy!.Export();
+                    if (Result.Ok)
                     {
                         var capacity = 0;
                         foreach (var box in Result.Design!.Boxes)
                             if (box.Type.Cargo > 0) capacity = Math.Max(capacity, CargoPacking.Capacity(Content!.Cargo, box.Size, Result.Design.BlockSize));
-                        CargoFits = CargoTransfer.TryPlan(Content!, Source, Result.Design, Cargo.AsSpan(0, CargoCount), PlannedCargo, new byte[capacity]);
+                        if (_occupied.Length < capacity) _occupied = new byte[capacity];
+                    }
+                }
+                if (Result.Ok && Source is not null)
+                {
+                    if (CargoCount > 0)
+                    {
+                        CargoFits = CargoTransfer.TryPlan(Content!, Source, Result.Design!, Cargo.AsSpan(0, CargoCount), PlannedCargo, _occupied);
                     }
                     Span<double> levels = stackalloc double[TankFuel.MaxTanks];
                     Plan = EditFuel.Plan(Source, Levels, Result.Design!, levels);

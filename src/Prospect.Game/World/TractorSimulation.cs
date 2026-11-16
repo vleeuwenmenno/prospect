@@ -5,6 +5,7 @@ namespace Prospect.Game.World;
 /// <summary>Authoritative automatic pickup. The fixed free-body pool also holds exclusive transient claims.</summary>
 public sealed class TractorSimulation
 {
+    private int _acquireHull, _acquireMount;
     private readonly HoldContainer[] _reserved = new HoldContainer[BlockStateStore.MaxContainers];
 
     /// <summary>Validates existing claims first, then lets free mounts acquire in hull/mount/body order.</summary>
@@ -22,33 +23,7 @@ public sealed class TractorSimulation
             if (!hulls.IsAlive(handle) || !Eligible(hulls, handle.Index)
                 || !Valid(containers, content, field, handle.Index, item.TractorMount, ref item, occupied)) Release(ref item);
         }
-        // Only nearby candidates run geometry/packing. The pool itself is capped at 256 bodies.
-        var budget = FreeContainers.Capacity;
-        for (var h = 0; h < hulls.Slots; h++)
-        {
-            if (!hulls.IsAliveAt(h) || !Eligible(hulls, h)) continue;
-            var design = field.Designs[hulls.Info(h).Design];
-            if (design.Tractors.Length == 0) continue;
-            var id = hulls.HandleAt(h).Packed;
-            foreach (var m in design.Tractors)
-            {
-                var busy = false;
-                foreach (var item in containers.Items)
-                    if (item.TractorHull == id && item.TractorMount == m) { busy = true; break; }
-                if (busy || budget == 0 || !BlockSet.Has(hulls.Blocks(h), design.Mounts[m].Parent)) continue;
-                var spec = design.Mounts[m].Type.Tractor!;
-                var emitter = hulls.State(h).Position + HullRotation.Rotate(design.MountOffsets[m], hulls.State(h).Orientation);
-                for (var c = 0; c < containers.Items.Length && budget > 0; c++)
-                {
-                    ref var item = ref containers.At(c);
-                    if (item.TractorHull != 0 || item.Position.RelativeTo(emitter).LengthSquared() > (spec.Range + design.BlockSize) * (spec.Range + design.BlockSize)) continue;
-                    budget--;
-                    if (!Valid(containers, content, field, h, m, ref item, occupied)) continue;
-                    item.TractorHull = id; item.TractorMount = m; item.TractorStage = 0;
-                    break;
-                }
-            }
-        }
+        Acquire(containers, content, field, occupied);
         foreach (var item in containers.Items)
             if (item.TractorHull != 0)
             {
@@ -56,6 +31,44 @@ public sealed class TractorSimulation
                 var spec = field.Designs[hulls.Info(h).Design].Mounts[item.TractorMount].Type.Tractor!;
                 hulls.Info(h).TractorDemand += spec.Power(Mass(content.Cargo, item));
             }
+    }
+
+    private void Acquire(FreeContainers containers, GameContent content, HullField field, Span<byte> occupied)
+    {
+        var hulls = field.Hulls;
+        if (containers.Items.IsEmpty || hulls.Slots == 0) return;
+        var budget = FreeContainers.Capacity;
+        var start = _acquireHull % hulls.Slots;
+        for (var offset = 0; offset < hulls.Slots; offset++)
+        {
+            var h = (start + offset) % hulls.Slots;
+            if (!hulls.IsAliveAt(h) || !Eligible(hulls, h)) continue;
+            var design = field.Designs[hulls.Info(h).Design];
+            var id = hulls.HandleAt(h).Packed;
+            for (var t = offset == 0 ? _acquireMount : 0; t < design.Tractors.Length; t++)
+            {
+                var m = design.Tractors[t];
+                var busy = false;
+                foreach (var item in containers.Items)
+                    if (item.TractorHull == id && item.TractorMount == m) { busy = true; break; }
+                if (busy || !BlockSet.Has(hulls.Blocks(h), design.Mounts[m].Parent)) continue;
+                // Reserve a full bounded pool scan before starting a mount. Resume here next tick so crowded,
+                // unsuitable cargo cannot starve later mounts or hulls, and no body's tail is skipped forever.
+                if (budget < containers.Items.Length) { _acquireHull = h; _acquireMount = t; return; }
+                var spec = design.Mounts[m].Type.Tractor!;
+                var emitter = hulls.State(h).Position + HullRotation.Rotate(design.MountOffsets[m], hulls.State(h).Orientation);
+                for (var c = 0; c < containers.Items.Length; c++)
+                {
+                    budget--;
+                    ref var item = ref containers.At(c);
+                    if (item.TractorHull != 0 || item.Position.RelativeTo(emitter).LengthSquared() > (spec.Range + design.BlockSize) * (spec.Range + design.BlockSize)) continue;
+                    if (!Valid(containers, content, field, h, m, ref item, occupied)) continue;
+                    item.TractorHull = id; item.TractorMount = m; item.TractorStage = 0;
+                    break;
+                }
+            }
+        }
+        _acquireHull = _acquireMount = 0;
     }
 
     private bool Valid(FreeContainers containers, GameContent content, HullField field, int h, int mount,

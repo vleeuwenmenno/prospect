@@ -28,6 +28,22 @@ public sealed class FreeContainerVisualTests
     }
 
     [Fact]
+    public void PoweredPullAndItsHandOffDoNotInventContactSparks()
+    {
+        var view = new FreeContainerVisuals();
+        var items = new[] { new FreeContainer { Id = 1, Orientation = Quaternion.Identity } };
+        view.Update(items, 6);
+        items[0].Velocity = Vector3.UnitY;
+        items[0].TractorPowered = true;
+        view.Update(items, 12);
+        Assert.False(view.Contact(items[0], out _));
+        items[0].TractorPowered = false;
+        items[0].Velocity = Vector3.UnitX;
+        view.Update(items, 18);
+        Assert.False(view.Contact(items[0], out _));
+    }
+
+    [Fact]
     public void PickingUsesRotatedContainerBoxAndViewWorkTakesNoMemory()
     {
         var content = GameContent.Load();

@@ -672,7 +672,12 @@ public sealed class Galaxy
     /// afterwards, sector after sector, takes no managed memory. For holders that generate repeatedly off the tick
     /// and the frame and would otherwise grow their buffers on the first scan.
     /// </summary>
-    public void Reserve(SectorContent content) => AsteroidFields?.Reserve(content, SectorSize);
+    public void Reserve(SectorContent content)
+    {
+        // Generate resets even an empty rock index. Reserve its minimum buckets when asteroids are disabled too.
+        content.Rocks.Reset(0, SectorSize);
+        AsteroidFields?.Reserve(content, SectorSize);
+    }
 
     /// <summary>Generates a sector's contents into <paramref name="content"/>, reusing its buffers.</summary>
     public void Generate(SectorCoord coord, SectorContent content)

@@ -28,6 +28,8 @@ internal sealed class FreeContainerVisuals
         {
             ref var old = ref _previous[i];
             if (old.Id != item.Id) continue;
+            // Tractor acceleration and its hand-off are intentional motion, not evidence of a collision.
+            if (item.TractorPowered || old.TractorPowered) return false;
             var change = item.Velocity - old.Velocity;
             if (change.LengthSquared() < .01f) return false;
             normal = Vector3.Normalize(change);
