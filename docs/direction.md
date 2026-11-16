@@ -366,9 +366,9 @@ After that:
 5. Factions: strategic model first, then their ships and stations in occupied sectors.
 
 ## Deferred
-
+- Cargo (containers, racks, tractor beams) is next: [cargo](roadmap/cargo.md). Mining waits until the environment work is complete.
 - Mining and inventory wait until the environment work is complete.
-- Before implementation, hold a brainstorming session with the product owner covering mining/inventory together with ship turrets.
+- Each major mechanic (cargo, mining, turrets) is designed and tuned on its own first, then the glue between them; see [cargo](roadmap/cargo.md).
 - Ice currently exists only as a generated resource; there is no extraction, cargo inventory or mining yield.
 - Gas-stress performance optimization is deferred to a later pass; retain same-build measurements for that work.
 

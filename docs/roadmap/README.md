@@ -9,6 +9,7 @@ Implementation continues separately; this change records decisions and a read-on
 1. [Persistent worlds](persistence.md): autosaves, identity, hosting migration and offline protection.
 2. [Exploration and map](exploration.md): hybrid map, charts, sensors, fog and jump limits.
 3. [Implementation plan](implementation.md): dependencies, agent ownership and acceptance checks.
+4. [Cargo](cargo.md): containers, racks, tractor beams; decided and open.
 
 ## Status vocabulary
 
