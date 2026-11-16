@@ -295,7 +295,7 @@ What works now:
 - `B` asks; the editor opens only on the server's grant. The world keeps running; the ship gets no controls.
 - The draft is the full blueprint. Lost blocks are in it, outlined red; the hull reads now against built.
 - An orbit camera around the ship. `F` (the Follow key) fits the selection, or the whole draft, in view.
-- Parts: a search, tabs by role, drone parts on their own tab, cards with figures at the placing size.
+- Parts: a search, a rail of category icons (the drone has the same ones, filtered by craft), one Tank card with a fuel choice, cards with figures at the placing size.
 - Place by click or by dragging a card onto a face. Select with the middle button; Shift adds or removes.
 - Selected blocks are outlined blue. A left drag moves them; Copy, Paste, Delete and Merge act on all.
 - Every change is one undo step. Undo and redo clear the selection rather than name shifted blocks.

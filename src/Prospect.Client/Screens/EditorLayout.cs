@@ -20,8 +20,8 @@ internal readonly record struct EditorLayout(HudRect Parts, HudRect Details, Hud
     public const float BarHeight = 64f;
     public const float MaxBarWidth = 980f;
 
-    /// <summary>The share of the window's width each side panel may take at most.</summary>
-    public const float PartsShare = 0.28f;
+    /// <summary>The share of the window's width each side panel may take at most; the parts panel's includes the category rail.</summary>
+    public const float PartsShare = 0.345f;
     public const float DetailsShare = 0.27f;
 
     /// <summary>The bar's buttons, in design pixels: Undo, Redo, Cancel and Apply, with the gaps between them.</summary>
@@ -44,7 +44,8 @@ internal readonly record struct EditorLayout(HudRect Parts, HudRect Details, Hud
         var barLeft = MathF.Round((display.X - barWidth) * 0.5f);
         var bar = new HudRect(barLeft, display.Y - margin - Px(BarHeight), barLeft + barWidth, display.Y - margin);
         var bottom = bar.Top - gap;
-        var parts = Math.Min(Px(PartsWidth), MathF.Round(display.X * PartsShare));
+        // The rail sits beside the part list, so it is added to the panel's width and its share of the window.
+        var parts = Math.Min(Px(PartsWidth + RailWidth + RailGap), MathF.Round(display.X * PartsShare));
         var details = Math.Min(Px(DetailsWidth), MathF.Round(display.X * DetailsShare));
         return new EditorLayout(
             new HudRect(margin, top, margin + parts, bottom),
@@ -52,20 +53,27 @@ internal readonly record struct EditorLayout(HudRect Parts, HudRect Details, Hud
             bar);
     }
 
-    /// <summary>
-    /// How many of the part list's tabs go in a row <paramref name="width"/> wide: four, or fewer when the widest
-    /// name would not fit its tab with two pixels either side.
-    /// </summary>
-    public static int TabsPerRow(float width, float widest, float gap, float scale)
-    {
-        for (var count = 4; count > 1; count--)
-            if (TabWidth(width, count, gap) - MathF.Round(4 * scale) >= widest)
-                return count;
-        return 1;
-    }
+    /// <summary>The category rail's width and the gap between it and the part list, in design pixels.</summary>
+    public const float RailWidth = 34f;
+    public const float RailGap = 8f;
 
-    /// <summary>The width of one tab when <paramref name="count"/> share a row.</summary>
-    public static float TabWidth(float width, int count, float gap) => MathF.Floor((width - gap * (count - 1)) / count);
+    /// <summary>The tallest an icon button on the rail is, and the gap between buttons, in design pixels.</summary>
+    public const float RailButton = 34f;
+    public const float RailButtonGap = 4f;
+
+    /// <summary>The shortest a rail button gets in a short window, in design pixels.</summary>
+    public const float RailMinButton = 12f;
+
+    /// <summary>
+    /// The height of each rail button for <paramref name="count"/> buttons in <paramref name="height"/> pixels: the
+    /// full size, or smaller when a short window would otherwise cut the last one off. Never under <see cref="RailMinButton"/>.
+    /// </summary>
+    public static float RailButtonHeight(float height, int count, float scale)
+    {
+        var gaps = MathF.Round(RailButtonGap * scale) * Math.Max(count - 1, 0);
+        var room = count > 0 ? (height - gaps) / count : height;
+        return Math.Clamp(MathF.Floor(room), MathF.Round(RailMinButton * scale), MathF.Round(RailButton * scale));
+    }
 
     /// <summary>The width the bar's buttons take, gaps and the bar's padding included, at an interface scale.</summary>
     public static float ButtonsWidth(float scale)

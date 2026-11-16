@@ -19,15 +19,20 @@ public sealed class EditorPanelTests
     private static PartCategory Tab(string name) => Array.Find(Tuning.Categories, c => c.Name == name)!;
 
     [Fact]
-    public void EveryPartIsOnExactlyOneTabBesidesAllAndDronePartsAreOnlyOnTheirOwn()
+    public void EveryPartIsOnExactlyOneCategoryBesidesAllAndTheDroneHasTheSameCategories()
     {
         foreach (var type in Content.Blocks.Types)
         {
             var tabs = Tuning.Categories.Where(c => c.Name != "All" && Tuning.Lists(c, type)).Select(c => c.Name).ToArray();
             Assert.True(tabs.Length == 1, $"{type.Id} is on {string.Join(", ", tabs)}");
             Assert.True(Tuning.Lists(Tab("All"), type));
-            Assert.Equal(Tuning.Compact(type), tabs[0] == "Drone");
         }
+
+        // Tanks are only under Tanks, gyros under Thrust; there is no category of its own for the drone.
+        Assert.Equal(["Tanks"], Tuning.Categories.Where(c => Tuning.Lists(c, Content.Blocks.Get("hydrazineTank"))).Select(c => c.Name).Where(n => n != "All").ToArray());
+        Assert.Equal(["Tanks"], Tuning.Categories.Where(c => Tuning.Lists(c, Content.Blocks.Get("microNitrogenTank"))).Select(c => c.Name).Where(n => n != "All").ToArray());
+        Assert.Equal(["Thrust"], Tuning.Categories.Where(c => Tuning.Lists(c, Content.Blocks.Get("gyro"))).Select(c => c.Name).Where(n => n != "All").ToArray());
+        Assert.DoesNotContain(Tuning.Categories, c => c.Name == "Drone");
 
         // The drone parts are told apart by their figures, not by a list of ids.
         Assert.True(Tuning.Compact(Content.Blocks.Get("microshield")));
@@ -40,10 +45,10 @@ public sealed class EditorPanelTests
     public void ASearchCoversEveryTabAndFindsPartsByNameRoleAndDrone()
     {
         // A ship is edited: search and tabs list ship parts only.
-        var palette = new EditorPalette { Category = Array.IndexOf(Tuning.Categories, Tab("Move")) };
+        var palette = new EditorPalette { Category = Array.IndexOf(Tuning.Categories, Tab("Thrust")) };
         string[] Shown() => Content.Blocks.Types.Where(t => palette.Shows(Tuning, t)).Select(t => t.Id).ToArray();
 
-        Assert.Equal(["engine", "hotThruster", "coldGasThruster", "ionDrive", "ionThruster", "bipropellantTank", "hydrazineTank", "nitrogenTank", "gyro"], Shown());
+        Assert.Equal(["engine", "hotThruster", "coldGasThruster", "ionDrive", "ionThruster", "gyro"], Shown());
         palette.Query = "ion";
         Assert.Equal(["ionDrive", "ionThruster"], Shown());
         palette.Query = "nitrogen";
@@ -151,32 +156,117 @@ public sealed class EditorPanelTests
     }
 
     [Fact]
-    public void ATabWithNoPartForTheCraftIsHiddenAndAChosenOneFallsBackToAll()
+    public void ACategoryWithNoPartForTheCraftIsHiddenAndAChosenOneFallsBackToAll()
     {
         var types = Content.Blocks.Types;
         var ship = new EditorPalette { Craft = HullClass.Ship };
         var drone = new EditorPalette { Craft = HullClass.Fighter };
-        var droneTab = Array.IndexOf(Tuning.Categories, Tab("Drone"));
-        Assert.False(ship.TabHasParts(Tuning, types, droneTab));
-        Assert.True(drone.TabHasParts(Tuning, types, droneTab));
-        Assert.True(ship.TabHasParts(Tuning, types, 0));
-        Assert.True(drone.TabHasParts(Tuning, types, 0));
+        string[] Visible(EditorPalette palette) => Tuning.Categories.Where((_, i) => palette.TabHasParts(Tuning, types, i)).Select(c => c.Name).ToArray();
+
+        // A category is shown exactly when some part of it fits the craft.
         for (var tab = 0; tab < Tuning.Categories.Length; tab++)
+        {
             Assert.Equal(types.Any(t => !t.Drone && Tuning.Lists(Tuning.Categories[tab], t)), ship.TabHasParts(Tuning, types, tab));
+            Assert.Equal(types.Any(t => t.Drone && Tuning.Lists(Tuning.Categories[tab], t)), drone.TabHasParts(Tuning, types, tab));
+        }
 
-        // The ship tabs with parts are all but Drone; on the drone, the role tabs list none (drone parts live on their own tab).
-        Assert.DoesNotContain(Tuning.Categories.Where((_, i) => ship.TabHasParts(Tuning, types, i)), c => c.Name == "Drone");
-        Assert.All(Tuning.Categories.Where((_, i) => drone.TabHasParts(Tuning, types, i)), c => Assert.Contains(c.Name, new[] { "All", "Drone" }));
+        // The drone shows the categories its parts fill, among them Hull, Power, Thrust, Tanks and Shield; never Sensors.
+        Assert.Contains("All", Visible(drone));
+        Assert.All(new[] { "Thrust", "Tanks", "Shield", "Power" }, name => Assert.Contains(name, Visible(drone)));
+        Assert.DoesNotContain("Sensors", Visible(drone));
+        Assert.Contains("Sensors", Visible(ship));
 
-        // The Drone tab was chosen while the drone was edited; editing a ship falls back to All, and the list is a ship's.
-        ship.Category = droneTab;
-        ship.KeepTabShown(Tuning, types);
-        Assert.Equal(0, ship.Category);
-        Assert.DoesNotContain(types.Where(t => ship.Shows(Tuning, t)), t => t.Drone);
-        drone.Category = droneTab;
+        // Sensors was chosen on a ship; editing the drone falls back to All, and the list holds drone parts only.
+        var sensors = Array.IndexOf(Tuning.Categories, Tab("Sensors"));
+        drone.Category = sensors;
         drone.KeepTabShown(Tuning, types);
-        Assert.Equal(droneTab, drone.Category);
+        Assert.Equal(0, drone.Category);
         Assert.All(types.Where(t => drone.Shows(Tuning, t)), t => Assert.True(t.Drone));
+        ship.Category = sensors;
+        ship.KeepTabShown(Tuning, types);
+        Assert.Equal(sensors, ship.Category);
+        Assert.DoesNotContain(types.Where(t => ship.Shows(Tuning, t)), t => t.Drone);
+
+        // A drone part shows under its category, and a ship part never does.
+        drone.Category = Array.IndexOf(Tuning.Categories, Tab("Tanks"));
+        Assert.Equal(["microBipropellantTank", "microNitrogenTank"], types.Where(t => drone.Shows(Tuning, t)).Select(t => t.Id).ToArray());
+        ship.Category = Array.IndexOf(Tuning.Categories, Tab("Tanks"));
+        Assert.Equal(["bipropellantTank", "hydrazineTank", "nitrogenTank"], types.Where(t => ship.Shows(Tuning, t)).Select(t => t.Id).ToArray());
+    }
+
+    [Fact]
+    public void TheTanksCategoryShowsOneCardAndChoosingAFuelPlacesThatFuelsTankType()
+    {
+        var types = Content.Blocks.Types;
+        var palette = new EditorPalette { Craft = HullClass.Ship, Category = Array.IndexOf(Tuning.Categories, Tab("Tanks")) };
+        string[] Cards() => Enumerable.Range(0, types.Count).Where(i => palette.ShowsCard(Tuning, types, i)).Select(i => types[i].Id).ToArray();
+
+        // One card stands for the three tanks, and it places the chosen fuel's type.
+        Assert.Equal(["bipropellantTank"], Cards());
+        palette.TankFuel = FuelKind.Hydrazine;
+        Assert.Equal(["hydrazineTank"], Cards());
+        Assert.Equal(Array.FindIndex(types.ToArray(), t => t.Id == "nitrogenTank"), palette.TankTypeOf(types, FuelKind.Nitrogen));
+        Span<FuelKind> fuels = stackalloc FuelKind[4];
+        Assert.Equal(3, palette.TankFuels(types, fuels));
+        Assert.Equal([FuelKind.Bipropellant, FuelKind.Hydrazine, FuelKind.Nitrogen], fuels[..3].ToArray());
+
+        // "tank" and every fuel's name find the one card; a fuel's name finds it as that fuel's tank.
+        foreach (var query in new[] { "tank", "hydrazine", "nitrogen", "bipropellant" })
+        {
+            palette.Query = query;
+            Assert.Single(Cards(), id => EditorPalette.IsTank(Content.Blocks.Get(id)));
+        }
+
+        palette.Query = "nitrogen";
+        Assert.Contains("nitrogenTank", Cards());
+        Assert.DoesNotContain("hydrazineTank", Cards());
+        palette.Query = "";
+
+        // All shows it once as well, among the other parts.
+        palette.Category = 0;
+        Assert.Single(Cards(), id => EditorPalette.IsTank(Content.Blocks.Get(id)));
+
+        // The drone has two fuels, and a remembered fuel it has no tank of falls back to one it has.
+        palette.Craft = HullClass.Fighter;
+        palette.Category = Array.IndexOf(Tuning.Categories, Tab("Tanks"));
+        Assert.Equal(2, palette.TankFuels(types, fuels));
+        Assert.Equal(-1, palette.TankTypeOf(types, FuelKind.Hydrazine));
+        Assert.Equal(["microBipropellantTank"], Cards());
+        palette.TankFuel = FuelKind.Nitrogen;
+        Assert.Equal(["microNitrogenTank"], Cards());
+    }
+
+    [Fact]
+    public void AnUnknownIconIdOrAMissingTipIsRefusedWhenTheFileLoads()
+    {
+        var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "content", "visuals", "editor.json"));
+        var folder = Path.Combine(Path.GetTempPath(), "prospect-editor-icons-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            string Write(string name, string text)
+            {
+                var path = Path.Combine(folder, name);
+                File.WriteAllText(path, text);
+                return path;
+            }
+
+            Assert.NotNull(EditorTuning.Load(Write("good.json", source)));
+            var unknown = Assert.Throws<InvalidDataException>(() => EditorTuning.Load(Write("icon.json", source.Replace("\"icon\": \"nozzle\"", "\"icon\": \"rocket\""))));
+            Assert.Contains("rocket", unknown.Message);
+            Assert.Throws<InvalidDataException>(() => EditorTuning.Load(Write("none.json", source.Replace("\"icon\": \"nozzle\", ", ""))));
+            Assert.Throws<InvalidDataException>(() => EditorTuning.Load(Write("tip.json", source.Replace("\"tip\": \"Shield emitters.\"", "\"tip\": \"\""))));
+        }
+        finally
+        {
+            Directory.Delete(folder, true);
+        }
+
+        // Every id the file may name has a drawing.
+        foreach (var id in EditorIcons.Names.Split(", "))
+            Assert.True(EditorIcons.TryParse(id, out _), id);
+        Assert.False(EditorIcons.TryParse(null, out _));
+        Assert.All(Tuning.Categories, c => Assert.False(string.IsNullOrWhiteSpace(c.Tip)));
     }
 
     [Fact]

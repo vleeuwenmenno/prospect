@@ -1,13 +1,13 @@
 {
   "categories": [
-    { "name": "All" },
-    { "name": "Hull", "roles": ["structure", "cargo", "crew"], "compact": false },
-    { "name": "Power", "roles": ["core", "power", "storage"], "compact": false },
-    { "name": "Move", "roles": ["engine", "thruster", "tank", "gyro"], "compact": false },
-    { "name": "Shield", "roles": ["shield"], "compact": false },
-    { "name": "Jump", "roles": ["drive"], "compact": false },
-    { "name": "Module", "roles": ["module"], "compact": false },
-    { "name": "Drone", "compact": true }
+    { "name": "All", "icon": "grid", "tip": "Every part that fits this craft." },
+    { "name": "Hull", "icon": "cube", "roles": ["structure", "cargo", "crew"], "tip": "Structure, cargo space and crew quarters." },
+    { "name": "Power", "icon": "bolt", "roles": ["core", "power", "storage"], "tip": "The core, generators and batteries." },
+    { "name": "Thrust", "icon": "nozzle", "roles": ["engine", "thruster", "gyro"], "tip": "Engines, thrusters, ion drives and gyros." },
+    { "name": "Tanks", "icon": "tank", "roles": ["tank"], "tip": "Fuel tanks for every fuel." },
+    { "name": "Shield", "icon": "shield", "roles": ["shield"], "tip": "Shield emitters." },
+    { "name": "Jump", "icon": "jump", "roles": ["drive"], "tip": "Jump drives." },
+    { "name": "Sensors", "icon": "radar", "roles": ["module"], "tip": "Sensors, charting, scanners and the locator." }
   ],
   "lowForwardAcceleration": 2.0,
   "lowTopSpeed": 40,

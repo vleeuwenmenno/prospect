@@ -53,13 +53,79 @@ internal sealed class EditorPalette
     }
 
     /// <summary>
-    /// Falls back to the first tab when the chosen one has no part for this craft (the Drone tab chosen, then a
-    /// ship edited), so the list is never left on a tab that is not shown.
+    /// Falls back to the first tab when the chosen one has no part for this craft (a tab chosen on a ship that the
+    /// drone, edited next, has no part for), so the list is never left on a tab that is not shown.
     /// </summary>
     public void KeepTabShown(EditorTuning tuning, IReadOnlyList<BlockType> types)
     {
         if (!TabHasParts(tuning, types, Category))
             Category = 0;
+    }
+
+    /// <summary>
+    /// The fuel the one Tank card places, kept for the session: chosen with the fuel buttons or by choosing a tank
+    /// any other way. When the craft has no tank of it, the card falls back to the first tank that shows.
+    /// </summary>
+    public FuelKind TankFuel { get; set; } = FuelKind.Bipropellant;
+
+    /// <summary>Whether a part is a fuel tank, whose types share one card.</summary>
+    public static bool IsTank(BlockType type) => EditorGeometry.Role(type) == PartRole.Tank;
+
+    /// <summary>
+    /// The index of the tank type that stands for every tank on the card: the chosen fuel's if it shows under the
+    /// tab and the search, else the first tank that does; -1 when none shows.
+    /// </summary>
+    public int TankCard(EditorTuning tuning, IReadOnlyList<BlockType> types)
+    {
+        var first = -1;
+        for (var i = 0; i < types.Count; i++)
+        {
+            if (!IsTank(types[i]) || !Shows(tuning, types[i]))
+                continue;
+            if (types[i].Tank == TankFuel)
+                return i;
+            if (first < 0)
+                first = i;
+        }
+
+        return first;
+    }
+
+    /// <summary>
+    /// Whether a part gets its own card. Every part that shows does, except the tanks: one card stands for them
+    /// all, placing the chosen fuel's tank type (<see cref="TankCard"/>).
+    /// </summary>
+    public bool ShowsCard(EditorTuning tuning, IReadOnlyList<BlockType> types, int index) =>
+        Shows(tuning, types[index]) && (!IsTank(types[index]) || TankCard(tuning, types) == index);
+
+    /// <summary>
+    /// The index of the tank type that holds <paramref name="fuel"/> and fits the craft, found from the content,
+    /// never by id; -1 when the craft has none.
+    /// </summary>
+    public int TankTypeOf(IReadOnlyList<BlockType> types, FuelKind fuel)
+    {
+        for (var i = 0; i < types.Count; i++)
+            if (IsTank(types[i]) && types[i].Tank == fuel && types[i].FitsClass(Craft))
+                return i;
+        return -1;
+    }
+
+    /// <summary>The fuels the craft has a tank for, in content order, written into <paramref name="fuels"/>; how many.</summary>
+    public int TankFuels(IReadOnlyList<BlockType> types, Span<FuelKind> fuels)
+    {
+        var count = 0;
+        for (var i = 0; i < types.Count && count < fuels.Length; i++)
+        {
+            if (!IsTank(types[i]) || !types[i].FitsClass(Craft))
+                continue;
+            var seen = false;
+            for (var j = 0; j < count; j++)
+                seen |= fuels[j] == types[i].Tank;
+            if (!seen)
+                fuels[count++] = types[i].Tank;
+        }
+
+        return count;
     }
 
     /// <summary>Whether a search finds a part: by its name, its id, what it is for, its fuel, or "drone" for a compact part.</summary>

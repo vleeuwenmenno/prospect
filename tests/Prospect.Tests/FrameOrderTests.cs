@@ -7980,19 +7980,20 @@ public sealed class FrameOrderTests : IDisposable
             // design pixels across (1280 at a scale of 2); narrower than that a long name is cut with dots rather
             // than spill out of the panel. The drone tag sits on the line below, with the role.
             var tuning = EditorTuning.Load(Path.Combine(AppContext.BaseDirectory, "content", "visuals", "editor.json"));
-            var inner = layout.Parts.Width - Px(EditorLayout.Pad) * 2;
+            // The category rail takes the left of the panel; the list and the controls share what is right of it.
+            var rail = Px(EditorLayout.RailWidth + EditorLayout.RailGap);
+            var inner = layout.Parts.Width - Px(EditorLayout.Pad) * 2 - rail;
             var card = inner - ImGui.GetStyle().ScrollbarSize - Px(26) - Px(6);
             if (width / scale >= 640f)
                 foreach (var type in GameContent.Load().Blocks.Types)
                     Assert.InRange(Kit.Measure(shipped.SansMedium, Theme.FontSmall, Encoding.UTF8.GetBytes(type.Name)).X, 1f, card);
 
-            // The tabs hold their names at every size: four to a row, fewer in a narrow panel, and at most four rows.
-            var widest = 0f;
-            foreach (var category in tuning.Categories)
-                widest = Math.Max(widest, Kit.Measure(shipped.SansMedium, Theme.FontSmall, category.Label).X);
-            var perRow = EditorLayout.TabsPerRow(inner, widest, Px(Theme.Space1), scale);
-            Assert.InRange(widest, 1f, EditorLayout.TabWidth(inner, perRow, Px(Theme.Space1)) - Px(4));
-            Assert.True((tuning.Categories.Length + perRow - 1) / perRow <= 4, $"{perRow} tabs a row");
+            // The rail's buttons all fit its height, one for each category at most, and are never taller than their size.
+            var railHeight = layout.Parts.Height - Px(EditorLayout.Pad) * 2;
+            var button = EditorLayout.RailButtonHeight(railHeight, tuning.Categories.Length, scale);
+            Assert.InRange(button, Px(EditorLayout.RailMinButton), Px(EditorLayout.RailButton));
+            if (width / scale >= 640f && height / scale >= 480f)
+                Assert.True(tuning.Categories.Length * button + (tuning.Categories.Length - 1) * Px(EditorLayout.RailButtonGap) <= railHeight, $"{button} a button in {railHeight}");
 
             // The two hints for sizing and turning the part are a line each from 800 design pixels across; narrower
             // they wrap.

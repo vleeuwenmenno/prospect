@@ -77,10 +77,10 @@ public sealed class ModuleInterfaceTests
     }
 
     [Fact]
-    public void ModulesHaveTheirOwnEditorTabAndNoOtherPartIsOnIt()
+    public void ModulesHaveTheirOwnEditorCategoryAndNoOtherPartIsOnIt()
     {
         var tuning = EditorTuning.Load(Path.Combine(Content, "visuals", "editor.json"));
-        var tab = Array.Find(tuning.Categories, c => c.Name == "Module")!;
+        var tab = Array.Find(tuning.Categories, c => c.Name == "Sensors")!;
         var listed = Game.Blocks.Types.Where(t => tuning.Lists(tab, t)).Select(t => t.Id).Order().ToArray();
         Assert.Equal(["asteroidLocator", "asteroidScanner", "gasScanner"], listed);
         foreach (var id in listed)
