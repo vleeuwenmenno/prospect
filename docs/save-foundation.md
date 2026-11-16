@@ -29,7 +29,7 @@ Saved multiplayer and moving a world between machines stay undelivered until ver
 | Type | What it is |
 | --- | --- |
 | `WorldSnapshot` | The bounded state of a world between two intervals. A buffer, never live memory. |
-| `WorldSnapshotCodec` | The save's own byte layout, `Version` 12. Reading trusts nothing. |
+| `WorldSnapshotCodec` | The save's own byte layout, `Version` 13. Reading trusts nothing. |
 | `SaveLimits` | Aggregate bounds of a world and of a save: owners, hulls, blocks, asteroids, sectors. |
 | `IWorldStore` | A leased store: `Commit`, `Backup`, `Dispose`. One worker thread uses it. |
 | `SqliteWorldStore` | The store on disk: one SQLite database per world folder. |
@@ -486,3 +486,17 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
 - Load requires a jump order, positive duration and elapsed time within that duration for a hull in transit.
 - Earlier codecs are refused explicitly; an old teleported transit is never silently treated as a moving one.
 - World settings retain `ftlSpeedKmPerSecond`; no per-tick disk work or new snapshot array is needed.
+
+## Free containers (codec 13)
+
+- The snapshot reserves 256 free records before ticking. Each encodes 98 bytes: durable id, Double3 position,
+  velocity, orientation, angular velocity, size, resource, kilograms, HP, birth tick and unattended age.
+  Count and next id add eight header bytes; maximum extra encoded storage is 25,096 bytes.
+- Capture takes no memory. Save limits reserve both encoded and decoded space, even when the pool is empty.
+  Sources still call `HasRoom`; oldest-first sector/global eviction bounds growth.
+- Load validates finite poses, normalized orientation, positive HP, payload against original saved cargo rules,
+  unique nonzero ids, next-id ordering and clocks. Corrupt originals refuse the save untouched.
+  Current cargo retunes then validate payloads, logging drops, and reapply sector caps.
+- `containerLifetimeMinutes` persists with world settings (default 60, zero never). Unattended age advances only
+  without a connected pilot within the base sensor radius. Birth/id order controls cap eviction.
+- Layouts before 13 are refused without migration. Wreck splitting preserves held cargo; only rack damage ejects.

@@ -1035,6 +1035,13 @@ internal sealed partial class WorldView
                 var count = PickTargets(snapshot, _devices.MousePosition, false);
                 HoveredHull = count == 0 ? 0 : _pickHits[0].Hull;
                 HoveredRock = count == 0 ? null : _pickHits[0].Rock;
+                if (_devices.MousePressed(GlfwMouseButton.Middle) && !pointerOverUi)
+                {
+                    var free = PickFreeContainer(snapshot, _devices.MousePosition, out var distance);
+                    for (var i = 0; i < count; i++) if (_pickHits[i].Distance < distance) { free = 0; break; }
+                    TargetContainer = free;
+                    if (free != 0) { TargetHull = 0; TargetRock = null; }
+                }
             }
             UpdateCommandControls(snapshot, bridge, dt, pointerOverUi);
         }
@@ -2114,7 +2121,7 @@ internal sealed partial class WorldView
         var center = _screen * 0.5f;
         var count = PickTargets(snapshot, center, true);
         var hovered = count == 0 ? default : _pickHits[0];
-        var free = PickFreeContainer(snapshot, out var freeDistance);
+        var free = PickFreeContainer(snapshot, center, out var freeDistance);
         if (count > 0)
             for (var i = 0; i < count; i++) if (_pickHits[i].Distance < freeDistance) { free = 0; break; }
         HoveredHull = free == 0 ? hovered.Hull : 0;
@@ -3651,6 +3658,9 @@ internal sealed partial class WorldView
     // over the middle of the ship for 1.5 s from the first second of the edit, and releases it at 2.5 s.
     private int _captureBoxKind;
 
+    public bool CaptureCargoSpace { get; set; }
+    public float? CaptureJettisonSeconds { get; set; }
+    private bool _captureJettisonSent;
     private int _captureCargoMode, _captureCargoSent;
     private float _captureCargoClock;
     internal void ScriptCargoForCapture(bool flight) => _captureCargoMode = flight ? 2 : 1;
@@ -3670,13 +3680,27 @@ internal sealed partial class WorldView
         {
             if (Editor.RequestContainer(bridge, _captureCargoSent == 0 ? 2 : 1, _captureCargoSent == 2 ? -1 : _captureCargoSent)) _captureCargoSent++;
         }
-        if (_captureCargoMode == 2 && _captureCargoClock > 4 && Editor.DraftCargo.Length == 3)
+        if (CaptureJettisonSeconds is { } at && !_captureJettisonSent && _captureCargoClock >= at
+            && _snapshot is { OwnHull: >= 0 } snapshot && Editor.DraftCargo.Length == 3)
         {
+            var hold = snapshot.Hulls[snapshot.OwnHull].Cargo.Span;
+            for (var i = 0; i < hold.Length; i++)
+            {
+                if (hold[i].Rack != Editor.SelectedCargoRack) continue;
+                bridge.JettisonContainer(Editor.Token, Editor.Hull, hold[i].Rack, i, snapshot.OwnCargoTick);
+                _captureJettisonSent = true;
+                break;
+            }
+        }
+        if (_captureCargoMode == 2 && _captureCargoClock > 4
+            && (CaptureJettisonSeconds is null ? Editor.DraftCargo.Length == 3 : _captureJettisonSent && _snapshot!.FreeContainerCount > 0))
+        {
+            if (CaptureJettisonSeconds is not null) TargetContainer = _snapshot!.FreeContainers[0].Id;
             Editor.Cancel(bridge);
             _captureCargoMode = 0;
             SetCommandCapturePose(OwnPosition, 25, -.75f, -.8f);
             // Capture-only close inspection of the real hold.
-            _commandDistance = 12f;
+            _commandDistance = CaptureCargoSpace ? 30f : 12f;
             ClearSelection();
         }
     }

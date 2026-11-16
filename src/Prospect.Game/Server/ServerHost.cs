@@ -42,6 +42,7 @@ public sealed class ServerConfig
     /// fuel tank, for the fuel callout's captures.
     /// </summary>
     public bool ScriptedFleetHurtTank { get; init; }
+    public bool ScriptedFleetHurtCargo { get; init; }
     /// <summary>Scripted private captures: cut the flown hull across its middle.</summary>
     public bool ScriptedCutHull { get; init; }
 
@@ -480,6 +481,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                     throw new InvalidDataException("A scripted fleet hurt needs an unsaved private in-process server and a time of 0 to 600 s.");
                 _scriptedFleetHurtBroken = config.ScriptedFleetHurtBroken;
                 _scriptedFleetHurtTank = config.ScriptedFleetHurtTank;
+                _scriptedFleetHurtCargo = config.ScriptedFleetHurtCargo;
                 _scriptedCutHull = config.ScriptedCutHull;
                 _scriptedFleetHurtTick = (long)MathF.Ceiling(hurtAt / HullSim.Dt);
             }

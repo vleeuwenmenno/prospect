@@ -185,8 +185,8 @@ internal sealed partial class ScreenHost
             DrawFuelCallout(draw, snapshot, world);
             DrawScanStrip(draw, snapshot, world, 1f, WorldInputEnabled && (world.Mode == ViewMode.Command || (world.Mode == ViewMode.Pilot && _app.PointerReleased)));
             DrawModuleStrip(draw, snapshot, world, 1f);
-            if (pilot > 0.01f)
-                DrawTargetReadout(draw, snapshot, world, pilot);
+            if (pilot > 0.01f || world.TargetContainer != 0)
+                DrawTargetReadout(draw, snapshot, world, world.TargetContainer != 0 ? 1 : pilot);
             if (_sectorInfo.Open)
                 DrawSectorPanel(draw, snapshot, world, compactSector);
             DrawPartyHud(draw, snapshot, world, sectorBottom, limit, cards);
@@ -523,7 +523,7 @@ internal sealed partial class ScreenHost
 
         var title = "COMMAND"u8;
         var titleSize = Kit.Measure(_ui.SansMedium, Theme.FontSmall, title);
-        var top = new float2(display.X * 0.5f, HudTop);
+        var top = new float2(display.X * 0.5f, HudTop + (world.TargetContainer != 0 ? Kit.Px(120) : 0));
         Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, top - new float2(titleSize.X * 0.5f, 0), Theme.Accent, title);
         var status = world.CommandFollowing
             ? Kit.F($"{world.Selection.Length + world.SelectedRocks.Length} SELECTED   FOLLOWING   RANGE {world.CommandDistance / 1000f:0.00} KM")

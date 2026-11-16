@@ -18,6 +18,48 @@ public sealed class FreeContainerTests
     };
 
     [Fact]
+    public void GlobalCapAndCrossingSectorCapKeepNewestIdentities()
+    {
+        var store = new FreeContainers();
+        for (var i = 0; i <= FreeContainers.Capacity; i++)
+        {
+            var item = Container(i); item.Position = Content.Galaxy.CenterOf(new(i, 100, 0));
+            Assert.True(store.Add(Content, item, out _));
+        }
+        Assert.Equal(FreeContainers.Capacity, store.Items.Length);
+        Assert.Equal(-1, store.Find(1));
+        var id = store.Items[^1].Id;
+        for (var i = 0; i < store.Items.Length; i++) store.At(i).Position = Double3.Zero;
+        store.EnforceCaps(Content);
+        Assert.Equal(Content.Cargo.SpacePerSector, store.Items.Length);
+        Assert.True(store.Find(id) >= 0);
+    }
+
+    [Fact]
+    public void ProductionContactPassTransfersMomentumAndRemovesDestroyedContainer()
+    {
+        using var hulls = new HullStore();
+        var design = Content.Pod;
+        var designIndex = Array.IndexOf(Content.Designs, design);
+        var origin = Content.Galaxy.CenterOf(new(0, 100, 0));
+        var hull = hulls.Create(1, (byte)designIndex, design, origin);
+        hulls.State(hull.Index).Shield = 0;
+        var field = new HullField(hulls, Content.Designs);
+        var rocks = new RockField(Content.Galaxy);
+        var simulation = new ContainerSimulation(Content.Galaxy);
+        var block = 0;
+        for (var i = 1; i < design.BlockCount; i++)
+            if (design.BlockOffsets[i].X + design.BlockHalfExtents[i].X > design.BlockOffsets[block].X + design.BlockHalfExtents[block].X) block = i;
+        var item = Container(); item.Hull = .001f; item.Velocity = new(-1000, 0, 0);
+        item.Position = origin + design.BlockOffsets[block] + new Vector3(design.BlockHalfExtents[block].X
+            + FreeContainers.Half(Content.Cargo, 0).X - .05f + 1000 * HullSim.Dt, 0, 0);
+        var store = new FreeContainers(); Assert.True(store.Add(Content, item, out _));
+        simulation.Step(store, Content, field, rocks, 1);
+        Assert.True(store.Items.IsEmpty);
+        Assert.True(hulls.State(hull.Index).Velocity.X < 0);
+    }
+
+    [Fact]
     public void SectorCapEvictsOldestWithoutReusingIdentity()
     {
         var store = new FreeContainers();
