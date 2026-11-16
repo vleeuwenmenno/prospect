@@ -6,6 +6,7 @@ namespace Prospect.Client.World;
 internal sealed class TractorPreview(int maxMounts)
 {
     private const int Blocks = GeometryAdmission.MaxBlocks;
+    private const byte FaceMask = 7, NearestBit = 8;
     private readonly byte[] _links = new byte[maxMounts * Blocks];
     private readonly bool[] _reached = new bool[GeometryAdmission.MaxBlocks];
     private readonly int[] _mounts = new int[maxMounts];
@@ -19,7 +20,10 @@ internal sealed class TractorPreview(int maxMounts)
     public bool Reached(int rack) => (uint)rack < (uint)_reached.Length && _reached[rack];
     public bool Linked(int mount, int rack) => (uint)mount < (uint)maxMounts && (uint)rack < GeometryAdmission.MaxBlocks
         && _links[mount * Blocks + rack] != 0;
-    public BlockFacing Face(int mount, int rack) => (BlockFacing)(_links[mount * Blocks + rack] - 1);
+    public BlockFacing Face(int mount, int rack) => (BlockFacing)((_links[mount * Blocks + rack] & FaceMask) - 1);
+
+    /// <summary>True when the aim is the visible part's nearest point instead of its middle.</summary>
+    public bool Nearest(int mount, int rack) => (_links[mount * Blocks + rack] & NearestBit) != 0;
 
     public void Update(BuildDraft? draft, int budget)
     {
@@ -38,8 +42,8 @@ internal sealed class TractorPreview(int maxMounts)
         while (_mount < _mountCount && _rackCount > 0 && budget-- > 0)
         {
             var mount = _mounts[_mount]; var rack = _racks[_rack];
-            if (TractorReach.Rack(draft.Boxes, draft.Mounts, [], draft.BlockSize, mount, rack, out _, out var side))
-            { _links[mount * Blocks + rack] = (byte)((int)side + 1); _reached[rack] = true; }
+            if (TractorReach.Rack(draft.Boxes, draft.Mounts, [], draft.BlockSize, mount, rack, out _, out var side, out var nearest))
+            { _links[mount * Blocks + rack] = (byte)((int)side + 1 | (nearest ? NearestBit : 0)); _reached[rack] = true; }
             if (++_rack == _rackCount) { _rack = 0; _mount++; }
         }
         if (_mount >= _mountCount || _rackCount == 0)

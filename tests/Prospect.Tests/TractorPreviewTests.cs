@@ -94,4 +94,21 @@ public sealed class TractorPreviewTests
             StrandCount = 0,
         }.Check());
     }
+
+    [Fact]
+    public void PreviewAndServerFitAgreeOnARackThatStraddlesTheFacePlane()
+    {
+        var design = TestDesigns.Mounted([Box("core", 0, 0), new(new(1, -1, 0), new(1, 3, 1), Content.Blocks.Get("cargo"))],
+            [new(0, BlockFacing.Up, 2, 2, Content.Blocks.Get("tractorBeam"))]);
+        var draft = BuildDraft.From(design, design.FullSet, Content);
+        var preview = new TractorPreview(Content.Blocks.Limits.MaxMounts);
+        preview.Update(draft, 10);
+        Assert.True(preview.Complete);
+        Assert.True(preview.Linked(0, 1));
+        Assert.Equal(0, preview.Unreached);
+        var aim = TractorReach.Aim(draft.Boxes, draft.Mounts[0], draft.BlockSize, 1, preview.Face(0, 1), preview.Nearest(0, 1));
+        Assert.True(TractorReach.Rack(draft.Boxes, draft.Mounts, [], draft.BlockSize, 0, 1, out var point, out _));
+        Assert.Equal(point, aim);
+        Assert.Equal(1, TractorReach.ChooseRack(Content.Cargo, draft.Boxes, draft.Mounts, [], draft.BlockSize, 0, [], [], 0, new byte[4096]));
+    }
 }

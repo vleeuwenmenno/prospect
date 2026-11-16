@@ -28,9 +28,8 @@ internal sealed partial class ScreenHost
             for (var r = 0; r < boxes.Length; r++)
             {
                 if (!preview.Linked(m, r)) continue;
-                var box = boxes[r];
-                var end = EditorGeometry.Middle(box) + Facings.Vector(preview.Face(m, r))
-                    * new Vector3(box.Size.X, box.Size.Y, box.Size.Z) * .5f;
+                var end = TractorReach.Aim(boxes, mounts[m], draft.BlockSize, r, preview.Face(m, r), preview.Nearest(m, r))
+                    / draft.BlockSize - new Vector3(.5f);
                 if (!world.ProjectSegment(world.EditorPoint(start), world.EditorPoint(end), out var a, out var b))
                     continue;
 

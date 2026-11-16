@@ -260,8 +260,12 @@ Deferred: drone launcher, tractor filter.
 
 - The freely placed `tractorBeam` face mount works automatically. Starting content: 40 m range, 4 m/s² pull,
   100 t maximum, 2 MW base plus 0.5 MW/t of payload and shell. One body per mount; several mounts work in parallel.
-- Both straight segments must clear the own hull's live blocks: emitter to container, emitter to the nearest
-  rack face centre. That face must be open. No alternate face is chosen around an obstruction.
+- Both straight segments must clear the own hull's live blocks: emitter to container, emitter to a rack face.
+  A rack face counts when the emitter is on its outer side, it carries no mount, and part of it lies in the mount's
+  outward half-space (the plane of the block the mount sits on, and beyond). The aim is the middle of that visible
+  part, else its point nearest the emitter. The nearest face with a clear line wins, so an obstructed face does not
+  hide a rack that another face shows. A rack's own frame never blocks its loading; every other live block does,
+  the mount's own block included. A rack wholly behind the mount's face plane is not in view.
   A fitting slot uses the existing largest-first packing rule, including other tractors' reservations.
 - A pulled body stays free and collidable while approaching the emitter, then the rack's open side.
   At arrival the server adds it to the hold and removes the free body. Touch alone never stows it.
