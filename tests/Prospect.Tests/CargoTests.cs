@@ -121,7 +121,7 @@ public sealed class CargoTests
         Assert.InRange(vertices.Count, 100, 2000);
         var rackVertices = vertices.Count;
         PropulsionModels.RackPreview(box, look.Rack!, Cargo, vertices, indices);
-        Assert.InRange(vertices.Count, rackVertices + 1, 10000);
+        Assert.InRange(vertices.Count, rackVertices + 1, 40000);
         foreach (var v in vertices)
         {
             Assert.InRange(v.Position.X, -1.001f, 1.001f);

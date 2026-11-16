@@ -380,6 +380,7 @@ internal sealed class PropulsionLook
         if (look.Tractor is null) throw new InvalidDataException($"{path}: missing tractor appearance");
         look.Tractor.Check();
         look.Cargo = CargoCatalog.Parse(File.ReadAllBytes(AppPaths.Content("blocks", "cargo.json")));
+        look.Rack?.Attach(Galaxy.Load(AppPaths.Content("galaxy", "galaxy.json")).Resources, look.Cargo);
         if (!(look.BoostLength is >= 1 and <= 4) || !(look.BoostBrightness is >= 1 and <= 4)
             || look.MaxPlumes is < 1 or > PlumeCapacity || !(look.MinPixels is >= 0 and <= 64))
             throw new InvalidDataException($"{path}: boost is 1 to 4, maxPlumes 1 to {PlumeCapacity}, minPixels 0 to 64");

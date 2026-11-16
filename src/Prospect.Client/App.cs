@@ -207,6 +207,12 @@ internal sealed class AppOptions
     public bool HurtFleetCargo { get; set; }
     public float? JettisonSeconds { get; set; }
     public bool CargoSample { get; set; }
+    /// <summary>Capture only: <c>--cargo-wide</c> loads a rack with one container of each resource and jettisons several.</summary>
+    public bool CargoWide { get; set; }
+    /// <summary>Capture only: <c>--container-sheet n</c> draws every resource's container of size n before the camera.</summary>
+    public int? ContainerSheet { get; set; }
+    /// <summary>Capture only: <c>--hover-container stowed|free</c> puts the scripted pointer on such a container.</summary>
+    public string? HoverContainer { get; set; }
     /// <summary>Scripted private capture: cut the flown hull.</summary>
     public bool CutHull { get; set; }
 
@@ -991,6 +997,8 @@ internal sealed class App : IDisposable
                 var screen = windowSize.X > 0 && windowSize.Y > 0 ? new float2(windowSize.X, windowSize.Y) : viewport;
                 _pointer.BeginWorldMouse(worldInput);
                 World.PointerOverPanel = _pointer.PointerOverWindow;
+                // Only a real, focused window with a shown pointer hovers; a scripted run's pointer is muted.
+                World.PointerShown = focused && !Devices.Muted && !_pointer.Captured;
                 World.Update(snapshot!, Session!.Client.Input, dt, worldInput, viewport, screen, _pointer.PointerOverInterface);
                 _pointer.EndWorldMouse();
                 // The command key and taking control change the view inside the update; the pointer follows in
@@ -1265,6 +1273,9 @@ internal sealed class App : IDisposable
             else if (view is "cargo" or "edit-cargo" && snapshot is { OwnHull: >= 0 })
             {
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
+                World.CaptureCargoWide = _options.CargoWide;
+                World.CaptureCargoDistance = _options.Zoom is { } cargoZoom ? cargoZoom * 4f : null;
+                World.ScriptedHover = _options.HoverContainer;
                 World.ScriptCargoForCapture(view == "cargo");
                 World.CaptureJettisonSeconds = _options.JettisonSeconds;
                 World.CaptureCargoSpace = _options.HurtFleetCargo || _options.JettisonSeconds is not null;
@@ -1538,6 +1549,7 @@ internal sealed class App : IDisposable
             World.LookHeight = _options.LookHeight;
         }
 
+        World.ContainerSheetSize = Devices.Muted ? _options.ContainerSheet : null;
         if (_options.Zoom is { } zoom && Session is not null)
             World.ChaseZoom = zoom;
         World.ScriptedAlignLock = Devices.Muted && Session is not null && _options.AlignLock;
@@ -1664,7 +1676,7 @@ internal sealed class App : IDisposable
                 // Jettison, drift, tractor pull and stow all happen inside the measurement: the container was seen loose
                 // and is back in the hold, so a run that never released or never picked it up cannot pass.
                 "cargo" when _options.JettisonSeconds is not null => _benchmarkSawFreeContainer && World.Own.Cargo.Length == 3 && World.FreeContainerCount == 0,
-                "edit-cargo" => World.Editor.CanEdit && World.Editor.LiveCargo.Length == 3 && World.Editor.CargoRack >= 0,
+                "edit-cargo" => World.Editor.CanEdit && World.Editor.LiveCargo.Length == World.CaptureCargoSampleCount && World.Editor.CargoRack >= 0,
                 "edit-menu" => World.Editor.Menu.IsOpen && World.Editor.Menu.Sub == EditorMenuSub.Fuel,
                 "edit-dump" => World.Editor.ConfirmDump,
                 "edit-mirror" => World.Editor.HasGhost && World.Editor.Mirror == (MirrorAxes.X | MirrorAxes.Z),

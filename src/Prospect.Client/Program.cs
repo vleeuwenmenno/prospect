@@ -403,6 +403,17 @@ internal static class Program
                     options.JettisonSeconds = jettisonAt;
                     i++;
                     break;
+                case "--container-sheet" when hasValue && int.TryParse(args[i + 1], out var sheet) && sheet is >= 0 and < 8:
+                    options.ContainerSheet = sheet;
+                    i++;
+                    break;
+                case "--cargo-wide":
+                    options.CargoWide = true;
+                    break;
+                case "--hover-container" when hasValue && args[i + 1] is "stowed" or "free":
+                    options.HoverContainer = args[i + 1];
+                    i++;
+                    break;
                 case "--cargo-sample":
                     options.CargoSample = true;
                     break;
@@ -559,6 +570,13 @@ internal static class Program
         if (options.JettisonSeconds is not null && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null
             || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null || options.OpenView is not ("cargo" or "edit-cargo")))
             return Fail("--jettison requires --capture or --bench and --open cargo or edit-cargo in an unsaved private local game.");
+
+        if (options.ContainerSheet is not null && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--container-sheet works only with --capture or --bench.");
+
+        if ((options.CargoWide || options.HoverContainer is not null) && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null
+            || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null || options.OpenView is not ("cargo" or "edit-cargo")))
+            return Fail("--cargo-wide and --hover-container require --capture or --bench and --open cargo or edit-cargo in an unsaved private local game.");
 
         if (options.CargoSample && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null
             || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null || options.OpenView != "cargo-window"))
