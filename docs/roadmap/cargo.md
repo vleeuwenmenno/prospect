@@ -60,6 +60,24 @@ Temporary local debug loading is available. Mining output is not built.
 - Anyone can recover those containers with a tractor beam. Ownership does not restrict pickup.
 - Dropping cargo uses the same containers as the hold.
 
+### Jettison and claims (step 3b)
+
+- A container leaving a hull (jettison or a destroyed rack) ignores every tractor for a short delay
+  (`pickupDelaySeconds` in `blocks/cargo.json`, default 10 s). The ship that dropped it does not pull it straight back.
+- Jettison has two choices:
+  1. Abandon: anyone may pull it, as today.
+  2. Keep claim: only the owner's own hulls' tractors may pull it.
+- A claim limits pickup only. Anyone may still see it (sensor rules) and shoot it ("boom means gone").
+- A claimed container ages and expires like any other. The claim is saved with the world.
+- Containers thrown out by a destroyed rack are unclaimed.
+
+### Cargo window
+
+- The top bar's Inventory tab becomes Cargo. It opens the Cargo window in interface mode.
+- The window shows the flown ship's hold as a grid: one tile per container, drawn by size, coloured by resource.
+- Clicking a tile shows its details: size, resource, mass, hit points, rack.
+- The details offer Jettison (abandon) and Jettison and keep claim.
+
 ## Open
 
 - **Towing huge chunks** outside the hull: tractor-held mass joins the ship's flight. It changes shared flight
