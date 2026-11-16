@@ -900,6 +900,12 @@ How to apply it:
 
 - `tractorBeam` is a freely placed face mount: both `mount` and `tractor` data in `blocks.json`, emitter model and
   client beam/reach/warning appearance in `visuals/propulsion.json`. No drone variant or filter yet.
+- Tractor quality uses `ModuleQuality` on `TractorSpec.Quality`, with `tractorTiers` in `blocks.json`.
+  Only Common `tractorBeam` ships, as only Common sensors do; never add one block type per tier to the palette.
+  Its editor card is `DrawTractorCard` (badge from `ModuleLook` tiers, like `DrawModuleCard`).
+  Load applies range, acceleration, maxMass and power multipliers once; power scales both base and per-tonne draw.
+  Every shared reach, acquisition, pull, prediction and preview consumer reads the evaluated mount spec.
+  Evaluator 17 prevents older code from accepting the same files while ignoring tiers.
 - `TractorReach` is the shared range, nearest rack face, live-block segment and packing rule. Its points use
   grid-edge metres; hull-local points subtract `(design.CenterOfMass + 0.5) * BlockSize`. Wedges use their slant.
   Both mount-to-container and mount-to-rack paths must be clear. Never load by contact.
