@@ -4,7 +4,7 @@ namespace Prospect.Game.World;
 
 /// <summary>
 /// The shapes asteroids come in. Each is a sphere pushed in and out by layered noise, defined as a function of
-/// direction, so the mesh the client draws and the surface the simulation collides with are the same thing.
+/// direction. Contact uses the flat triangles of the finest shared mesh, including their outward normals.
 /// </summary>
 public static class AsteroidShape
 {
@@ -13,7 +13,12 @@ public static class AsteroidShape
 
     private static readonly float[] Scales = ComputeScales();
 
-    /// <summary>The surface point of a shape in a direction, for a rock of unit radius.</summary>
+    private static readonly Vector4[][] Planes = BuildPlanes();
+
+    /// <summary>Initialize shared contact geometry before simulation starts.</summary>
+    public static void Prepare() => _ = Planes.Length;
+
+    /// <summary>A vertex sample before tessellation, for a rock of unit radius.</summary>
     public static Vector3 Point(int shape, Vector3 direction) => shape == Icicle
         ? direction * RadiusAlong(shape, direction)
         : direction * Squash(shape) * (Lumps(shape, direction) * Scales[shape]);
@@ -22,7 +27,7 @@ public static class AsteroidShape
     /// How far the surface is from the centre along a unit direction given in the rock's own frame, as a fraction
     /// of the rock's nominal radius.
     /// </summary>
-    public static float RadiusAlong(int shape, Vector3 direction)
+    internal static float SmoothRadiusAlong(int shape, Vector3 direction)
     {
         if (shape == Icicle) return 1f / (MathF.Abs(direction.X) + 6f * MathF.Abs(direction.Y) + 6f * MathF.Abs(direction.Z));
         // The shape is defined before squashing; undo the squash to find which part of it lies this way.
@@ -31,20 +36,44 @@ public static class AsteroidShape
         return Lumps(shape, unsquashed / length) * Scales[shape] / length;
     }
 
-    /// <summary>Outward tangent normal of the shared radial surface, sampled in the rock's frame.</summary>
-    public static Vector3 Normal(int shape, Vector3 local, float radius, float step)
+    /// <summary>Radius of the finest drawn triangle along a unit direction.</summary>
+    public static float RadiusAlong(int shape, Vector3 direction)
     {
-        var gradient = new Vector3(
-            SurfaceDistance(shape, radius, local + Vector3.UnitX * step) - SurfaceDistance(shape, radius, local - Vector3.UnitX * step),
-            SurfaceDistance(shape, radius, local + Vector3.UnitY * step) - SurfaceDistance(shape, radius, local - Vector3.UnitY * step),
-            SurfaceDistance(shape, radius, local + Vector3.UnitZ * step) - SurfaceDistance(shape, radius, local - Vector3.UnitZ * step));
-        return gradient.LengthSquared() > 1e-12f ? Vector3.Normalize(gradient) : Vector3.UnitY;
+        if (shape == Icicle) return SmoothRadiusAlong(shape, direction);
+        var plane = Plane(shape, direction);
+        return plane.W / Vector3.Dot(new Vector3(plane.X, plane.Y, plane.Z), direction);
     }
 
-    private static float SurfaceDistance(int shape, float radius, Vector3 point)
+    /// <summary>Outward normal of the contact facet, in the rock's frame.</summary>
+    public static Vector3 Normal(int shape, Vector3 local, float radius, float step)
     {
-        var length = point.Length();
-        return length - radius * RadiusAlong(shape, length > 1e-6f ? point / length : Vector3.UnitY);
+        if (shape == Icicle)
+            return Vector3.Normalize(new Vector3(MathF.CopySign(1, local.X), MathF.CopySign(6, local.Y), MathF.CopySign(6, local.Z)));
+        var plane = Plane(shape, local);
+        return new Vector3(plane.X, plane.Y, plane.Z);
+    }
+
+    private static Vector4 Plane(int shape, Vector3 direction) => Planes[shape][AsteroidMesh.Triangle(direction / Squash(shape))];
+
+    private static Vector4[][] BuildPlanes()
+    {
+        var sphere = AsteroidMesh.Sphere(AsteroidMesh.Subdivisions);
+        var planes = new Vector4[Galaxy.RockShapes][];
+        for (var shape = 0; shape < planes.Length; shape++)
+        {
+            var points = new Vector3[sphere.Points.Length];
+            for (var i = 0; i < points.Length; i++) points[i] = Point(shape, sphere.Points[i]);
+            planes[shape] = new Vector4[sphere.Indices.Length / 3];
+            for (var i = 0; i < planes[shape].Length; i++)
+            {
+                var a = points[sphere.Indices[i * 3]];
+                var b = points[sphere.Indices[i * 3 + 1]];
+                var c = points[sphere.Indices[i * 3 + 2]];
+                var normal = Vector3.Normalize(Vector3.Cross(b - a, c - a));
+                planes[shape][i] = new Vector4(normal, Vector3.Dot(normal, a));
+            }
+        }
+        return planes;
     }
 
     private static Vector3 Squash(int shape)

@@ -716,8 +716,9 @@ The client opens a real window on the developer's desktop, and they are usually 
   First contact on a resident sector never allocates. Unsaved servers use the default save bounds too.
 - A pushed asteroid still belongs to the sector it was generated in. One that drifts across the sector's edge is
   not hit by a hull that is wholly in the next sector.
-- Box collision prunes a per-design tree with live branch counts and content budgets. Asteroids use nearest-point
-  and corner samples against the seeded surface; narrow ridges between samples can be missed. Large-hull tick
+- Box collision prunes a per-design tree with live branch counts and content budgets. Asteroids use
+  centre, nearest-point and corner samples against the finest shared mesh facets (`AsteroidMesh`, six subdivisions), with facet normals;
+  narrow ridges between samples can be missed. Large-hull tick
   performance is not yet established.
 - The client predicts contact only with hulls near its own, and flies only its own fleet's hulls forward exactly;
   another player's hull is assumed to keep its velocity until the next snapshot.

@@ -145,6 +145,7 @@ public sealed class GameContent
     /// </summary>
     public static GameContent Load(string directory)
     {
+        AsteroidShape.Prepare();
         // Every file the server and the client must agree on is loaded through this, which is what puts it in
         // the identity: a file the shared simulation reads cannot be added here and left out there. The order
         // of the calls is the order the files are hashed in.
@@ -616,13 +617,15 @@ public static class HullSim
         var cursor = 0;
         var rockInHull = Vector3.Transform(-toHull, Quaternion.Conjugate(state.Orientation));
         var reach = new Vector3(rock.Radius);
-        while (tests > 0 && touchCount < rules.CollisionContacts && design.Collision.Next(ref cursor, rockInHull - reach, rockInHull + reach, body.Alive, ref visits, out var b, body.CollisionCounts))
+        while (tests > 0 && design.Collision.Next(ref cursor, rockInHull - reach, rockInHull + reach, body.Alive, ref visits, out var b, body.CollisionCounts))
         {
             tests--;
             var arm = Vector3.Transform(design.BlockOffsets[b], state.Orientation);
             if (!BoxCollision.Rock(toHull + arm, design.BlockHalfExtents[b], state.Orientation, rock, out var direction, out var depth, out var point, design.Boxes[b].Shape))
                 continue;
             deepest = Math.Max(deepest, depth);
+            // Contact storage limits damage and effects, never which blocks need separation.
+            if (touchCount >= rules.CollisionContacts) continue;
             normalSum += direction;
             armSum += arm;
             shieldPointSum += arm + point;
@@ -643,6 +646,26 @@ public static class HullSim
         var contact = armSum / touchCount;
         state.Position += normal * deepest;
         local += normal * deepest;
+
+        // Averaged normals are for impulse response. On a long hull they need not clear the
+        // deepest facet. Spend the remaining narrow-phase budget correcting residual contacts.
+        for (var pass = 0; pass < rules.CollisionStrides && tests > 0; pass++)
+        {
+            var corrected = false;
+            for (var b = 0; b < design.BlockCount && tests > 0; b++)
+            {
+                if (!BlockSet.Has(body.Alive, b)) continue;
+                tests--;
+                var arm = Vector3.Transform(design.BlockOffsets[b], state.Orientation);
+                if (!BoxCollision.Rock(local - rock.LocalPosition - rockOffset + arm, design.BlockHalfExtents[b], state.Orientation,
+                    rock, out var outward, out var overlap, out _, design.Boxes[b].Shape) || overlap < 0.001f) continue;
+                var correction = outward * (overlap + 0.001f);
+                state.Position += correction;
+                local += correction;
+                corrected = true;
+            }
+            if (!corrected) break;
+        }
 
         // Whether the asteroid can take its share is settled before anything is exchanged. Where its motion
         // is decided, it must be possible to write that motion down: there is a place left for it among this
