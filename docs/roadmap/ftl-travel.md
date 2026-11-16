@@ -1,6 +1,6 @@
 # FTL travel: flying, not teleporting
 
-Product direction from 2026-11-16. Implementation added; validation recorded below.
+Built 2026-11-16. Validation recorded below.
 
 ## Why
 
@@ -37,3 +37,11 @@ Product direction from 2026-11-16. Implementation added; validation recorded bel
 - Client rock-sector requests pause during transit. Pilot tunnel effects keep their clocks.
 - `--start local --open map-ftl --set ftlSpeedKmPerSecond=10 --capture <path>` shows owned fleet travel on the map.
 - Party/friend/alliance visibility is not implemented; server policy is `MaySeeHull`.
+
+## Validation
+
+- `timeout 900 make check`: 2,526 game tests and 354 listing tests passed.
+- `make bench`: 814/790 fps, zero managed bytes on all threads, resize rebuilds passed.
+- Hidden `--capture` runs verified the pilot tunnel/arrival and a moving fleet FTL marker on the map.
+- Main merged at `23a1a7a`; cargo was not on main yet. Protocol 56 and codec 10 remain reserved for it;
+  this implementation uses 57 and 11. Merge and check again when cargo reaches main.
