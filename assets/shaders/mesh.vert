@@ -39,9 +39,14 @@ void main()
     worldNormal = cross(cy, cz) * normal.x + cross(cz, cx) * normal.y + cross(cx, cy) * normal.z;
     localPosition = position;
     float tag = length(normal);
-    metal = tag > 1.5 && tag < 3.25 ? tag - 2.0 : -1.0;
+    metal = tag > 1.5 && tag < 3.25 ? tag - 2.0 : (tag >= 4.5 ? -2.0 : -1.0);
     paint = vec3(-1.0);
-    if (tag >= 3.25)
+    if (tag >= 4.5)
+    {
+        float code = floor((tag - 4.5) * 32768.0);
+        paint = vec3(floor(code / 1024.0), mod(floor(code / 32.0), 32.0), mod(code, 32.0)) / 31.0;
+    }
+    else if (tag >= 3.25)
     {
         float code = floor((tag - 3.5) * 32768.0);
         paint = vec3(floor(code / 1024.0), mod(floor(code / 32.0), 32.0), mod(code, 32.0)) / 31.0;

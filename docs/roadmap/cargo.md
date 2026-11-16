@@ -121,7 +121,19 @@ Temporary local debug loading is available. Mining output is not built.
 - Shared reach, plan, pull, power prediction and editor preview read each mount's evaluated `TractorSpec`.
   Content and save identities cover the table; evaluator 17 rejects older arithmetic. Protocol remains 62; codec remains 15.
 - All six types appear through the existing Storage palette. Existing emitter models are reused through content entries.
-  Tier badges need new drawing: the sensor card is module-specific. Badge, turret aiming and tier-colour visuals remain separate work.
+  The editor card draws the tier badge (`DrawTractorCard`).
+
+### Implementation: turret and beam look
+
+- Turret: the base plate is in the hull mesh (`BuildTractorBase`); its chamfered rim is painted the tier colour
+  (`ModuleLook.Tier(spec.Quality)`). Yoke and head are worker-built by `PartModels.TryGetTractorTurret` and drawn per
+  frame by `WorldView.DrawTractorTurrets`, which slews them (`turretSlewRate`) toward the held container. Idle and in
+  the editor they point out of the face. Coil paint and the emissive lens colour are `tractor` figures in `propulsion.json`.
+- Beam: `tractor.vert/.frag`, additive, depth-tested, after the plumes. A box per beam; the fragment shader works out
+  the strands (polylines that fan out, twist and waver), a faint haze, the lens glow and a round aura about the container.
+- A strand narrower than a pixel spreads its light and fades (energy kept), so a far beam never turns into a solid line.
+- All look figures (strand count, width, waver, flow speed, pulse spacing, haze, aura) are `tractor` entries in
+  `propulsion.json`, checked by `TractorLook.Check`.
 
 ## Open
 

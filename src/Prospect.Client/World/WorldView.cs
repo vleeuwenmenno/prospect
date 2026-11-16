@@ -1202,6 +1202,7 @@ internal sealed partial class WorldView
         Array.Clear(_meshCounts);
         _damage.Begin(snapshot.Hulls.AsSpan(0, snapshot.HullCount));
         _partModels.Begin();
+        BeginTractorTurrets(time);
         _scene.BeginDamage();
         VisibleHulls = DrawnDents = DamageFallbacks = GeneratedRocks = VisibleRocks = 0;
         foreach (var slot in _slots)
@@ -1265,6 +1266,7 @@ internal sealed partial class WorldView
             VisibleHulls++;
             var material = Material(visual.Inside, visual.Inside ? -1 : visual.Clip);
             DrawCargo(frameIndex, design, hull.Cargo.Span, position, orientation, material, stretch);
+            DrawTractorTurrets(frameIndex, snapshot, hull, design, camera, position, orientation, material, stretch);
             // The shield goes where the hull goes, drawn out and cut with it by the same material.
             _shields.Add(hull.Id, position, orientation, stretch, material, shieldInstances, shieldVertices, shieldIndices);
             var pixels = design.Flight.Radius * _viewport.Y / (Math.Max(position.Length(), 1f) * _tanHalfFov);
@@ -1386,6 +1388,7 @@ internal sealed partial class WorldView
             instances[_meshOffsets[_candidates[i].Mesh]++] = _candidates[i].Instance;
 
         DrawFreeContainers(frameIndex, snapshot, camera);
+        DrawTractorBeams(frameIndex, snapshot, camera);
         _scene.AddSparks(frameIndex, _sparks.Expand(camera, _right, _up, _forward, aspect, _tanHalfFov, _viewport.Y, snapshot.ServerTickPrecise + alpha, _collision));
         var f = 1f / _tanHalfFov;
         var sunColor = galaxy.StarClasses[Sector.StarClass].Color * 1.7f;
@@ -3715,9 +3718,12 @@ internal sealed partial class WorldView
             if (CaptureJettisonSeconds is not null) TargetContainer = _snapshot!.FreeContainers[0].Id;
             Editor.Cancel(bridge);
             _captureCargoMode = 0;
-            SetCommandCapturePose(OwnPosition, 25, -.75f, -.8f);
-            // Capture-only close inspection of the real hold.
-            _commandDistance = CaptureCargoSpace ? 30f : 12f;
+            if (LookDegrees is null)
+            {
+                SetCommandCapturePose(OwnPosition, 25, -.75f, -.8f);
+                // Capture-only close inspection of the real hold.
+                _commandDistance = CaptureCargoSpace ? 30f : 12f;
+            }
             ClearSelection();
         }
     }
@@ -4972,7 +4978,11 @@ internal sealed partial class WorldView
             var size = (high - low) * source.BlockSize;
             if (_partModels.TryGet(mount.Type, BlockShape.Box, size * 0.5f, mount.Face, source.BlockSize, out var model)
                 && _scene.AddTriangles(frameIndex, model, MeshTransform(at, orientation, Vector3.One, color, material, 1f)))
+            {
+                if (mount.Type.Tractor is not null)
+                    DrawIdleTractorTurret(frameIndex, at, mount.Face, size * 0.5f, orientation, color, material);
                 continue;
+            }
             Add(ref count, _cubeMesh, at, orientation, size, color, material);
         }
 
@@ -5042,6 +5052,8 @@ internal sealed partial class WorldView
         var place = hull + Vector3.Transform(EditorGeometry.ToHull((low + high) * 0.5f, source.Pivot, source.BlockSize), orientation);
         var shade = Vector3.Lerp(EditorGeometry.BlockColor(source.Color, mount.Type), tone, 0.35f);
         _scene.AddTriangles(frameIndex, mounted, MeshTransform(place, orientation, Vector3.One, shade, material, 1f));
+        if (mount.Type.Tractor is not null)
+            DrawIdleTractorTurret(frameIndex, place, mount.Face, extent * 0.5f, orientation, shade, material);
     }
 
     /// <summary>A point of the draft's grid in the world, where the edited hull is drawn this frame.</summary>

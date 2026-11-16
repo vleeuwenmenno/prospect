@@ -10,69 +10,6 @@ namespace Prospect.Client.Screens;
 
 internal sealed partial class ScreenHost
 {
-    private static void DrawTractorBeams(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world)
-    {
-        var look = world.TractorLook;
-        var time = world.Time;
-        for (var i = 0; i < snapshot.FreeContainerCount; i++)
-        {
-            if (!world.TractorBeam(snapshot.FreeContainers[i], out var start, out var end)
-                || !world.ProjectTractorSegment(start, end, out var a, out var b, out var scaleA, out var scaleB))
-                continue;
-
-            var rA = Math.Clamp(look.EmitterRadius * scaleA, Kit.Px(look.CoreWidth * 0.75f), Kit.Px(look.MaxConeHalfWidth * 0.5f));
-            var rB = Math.Clamp(MathF.Max(look.TargetRadius * scaleB, rA * 1.4f), rA, Kit.Px(look.MaxConeHalfWidth));
-            var delta = b - a;
-            var len = delta.Length();
-
-            if (len >= 1f)
-            {
-                var dir = delta / len;
-                var perp = new float2(-dir.Y, dir.X);
-
-                // Soft translucent cone widening from emitter to container.
-                AddConeQuad(draw, a, b, perp, rA * 1.5f, rB * 1.5f, Kit.Color(look.BeamColor, look.ConeOpacity * 0.25f));
-                AddConeQuad(draw, a, b, perp, rA, rB, Kit.Color(look.BeamColor, look.ConeOpacity * 0.55f));
-                AddConeQuad(draw, a, b, perp, rA * 0.45f, rB * 0.45f, Kit.Color(look.BeamColor, look.ConeOpacity));
-                draw.AddLine(a, b, Kit.Color(look.BeamColor, look.Opacity * 0.55f), Kit.Px(look.CoreWidth));
-
-                // Gentle pulses travelling from the container toward the ship.
-                var phaseBase = (time * look.PulseSpeed) % 1f;
-                var crestColor = Kit.Mix(look.BeamColor, 0xFFFFFF, 0.35f);
-                for (var p = 0; p < look.PulseCount; p++)
-                {
-                    var t = 1f - ((phaseBase + (float)p / look.PulseCount) % 1f);
-                    var envelope = MathF.Sin(t * MathF.PI);
-                    envelope *= envelope;
-                    if (envelope <= 0.01f)
-                        continue;
-
-                    var t0 = MathF.Max(0f, t - look.PulseWidth * 0.5f);
-                    var t1 = MathF.Min(1f, t + look.PulseWidth * 0.5f);
-                    var p0 = float2.Lerp(a, b, t0);
-                    var p1 = float2.Lerp(a, b, t1);
-                    var w0 = float.Lerp(rA, rB, t0);
-                    var w1 = float.Lerp(rA, rB, t1);
-                    AddConeQuad(draw, p0, p1, perp, w0, w1, Kit.Color(look.BeamColor, look.PulseOpacity * envelope));
-
-                    var pMid = float2.Lerp(a, b, t);
-                    var wMid = float.Lerp(rA, rB, t) * 0.85f;
-                    draw.AddLine(pMid - perp * wMid, pMid + perp * wMid,
-                        Kit.Color(crestColor, look.PulseOpacity * 0.9f * envelope), Kit.Px(look.CoreWidth));
-                }
-            }
-
-            // Slight glow at both ends.
-            draw.AddCircleFilled(a, rA * look.EndGlowScale * 1.4f, Kit.Color(look.BeamColor, look.EndGlowOpacity * 0.3f), 16);
-            draw.AddCircleFilled(a, rA * look.EndGlowScale * 0.7f, Kit.Color(look.BeamColor, look.EndGlowOpacity * 0.75f), 16);
-            draw.AddCircleFilled(b, rB * look.EndGlowScale * 0.9f, Kit.Color(look.BeamColor, look.EndGlowOpacity * 0.25f), 20);
-            draw.AddCircleFilled(b, rB * look.EndGlowScale * 0.48f, Kit.Color(look.BeamColor, look.EndGlowOpacity * 0.6f), 20);
-        }
-    }
-
-    private static void AddConeQuad(ImDrawListPtr draw, float2 a, float2 b, float2 perp, float rA, float rB, uint color) =>
-        draw.AddQuadFilled(a - perp * rA, a + perp * rA, b + perp * rB, b - perp * rB, color);
-
     private void DrawTractorReach(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, ShipEditor editor, BuildDraft draft, in EditorLayout layout)
     {
         var preview = world.TractorPreview;

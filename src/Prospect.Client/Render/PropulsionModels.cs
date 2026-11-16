@@ -453,7 +453,10 @@ internal static partial class PropulsionModels
         // The back face is left out where a neighbour covers it.
         var back = (design.ExteriorFaces[block] & (1 << (byte)Facings.Opposite(facing))) != 0;
         var box = new PartBox(design.BlockOffsets[block], design.BlockHalfExtents[block], facing, design.BlockSize > 0 ? design.BlockSize : 1f);
-        Build(model, box, design.Types[block].Fuel, block, back, vertices, indices, nozzles);
+        if (design.Types[block].Tractor is { } spec && look.Tractor is { } tractor)
+            BuildTractorBase(model, box, tractor, spec, vertices, indices);
+        else
+            Build(model, box, design.Types[block].Fuel, block, back, vertices, indices, nozzles);
         return true;
     }
 
@@ -470,7 +473,10 @@ internal static partial class PropulsionModels
         if (model is null)
             return false;
         var box = new PartBox(design.MountOffsets[mount], design.MountHalfExtents[mount], part.Face, design.BlockSize > 0 ? design.BlockSize : 1f);
-        Build(model, box, part.Type.Fuel, part.Parent, false, vertices, indices, part.Type.Tractor is null ? nozzles : null);
+        if (part.Type.Tractor is { } spec && look.Tractor is { } tractor)
+            BuildTractorBase(model, box, tractor, spec, vertices, indices);
+        else
+            Build(model, box, part.Type.Fuel, part.Parent, false, vertices, indices, part.Type.Tractor is null ? nozzles : null);
         return true;
     }
 

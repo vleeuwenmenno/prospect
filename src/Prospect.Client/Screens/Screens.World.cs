@@ -166,7 +166,6 @@ internal sealed partial class ScreenHost
             var chatShown = PaneShown(SocialPane.Chat);
             _chatFeedBounds = chatShown ? default : DrawChatFeed(draw, snapshot, _columnBottom, paint: false);
             CollectPaneRects();
-            DrawTractorBeams(draw, snapshot, world);
             if (editing)
             {
                 // The editor replaces the flight readouts and the columns: the middle of the view is the ship's.
