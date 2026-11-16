@@ -176,6 +176,7 @@ internal sealed class AppOptions
     public float? Zoom { get; set; }
     public float ThrustAt { get; set; }
     public float? ThrustUntil { get; set; }
+    public string ExhaustKind { get; set; } = "engine";
 
     /// <summary>Scripted runs only (<c>--align-at</c>): seconds after the splash at which the align button is clicked for a moment.</summary>
     public float? AlignAt { get; set; }
@@ -487,6 +488,7 @@ internal sealed class App : IDisposable
             meshes[i] = meshJobs[i]?.Result ?? emptyShipSlot;
         _scene = new SceneRenderer(_gpu, _swapchain, shaders, meshes, _options.GasFixture > 0);
         World = new WorldView(Devices, Actions, Settings, Jobs, _scene, Content.Designs);
+        if (Devices.Muted && _options.OpenView == "exhaust-rock") World.ExhaustRock = new ExhaustRockCapture(Content, _options.ExhaustKind);
 
         _screens = new ScreenHost(this, _ui);
         _pump = new SessionPump(Lifecycle, Worlds, scriptedRun, () => _screens.Show(Screen.Session));
@@ -1188,6 +1190,11 @@ internal sealed class App : IDisposable
                 ScriptedThrust.TryParse(view == "exhaust-shield-cold" ? "right" : "forward", out var exhaustThrust);
                 _options.Thrust = exhaustThrust;
             }
+            else if (view == "exhaust-rock" && World.ExhaustRock is { } exhaustRock)
+            {
+                exhaustRock.Anchor = World.OwnPosition;
+                World.SetCommandCapturePose(exhaustRock.Anchor, 12f, 2.85f, -0.4f);
+            }
             else if (view == "command")
             {
                 World.SetMode(ViewMode.Command);
@@ -1552,7 +1559,9 @@ internal sealed class App : IDisposable
         {
             var count = _options.CaptureCount;
             var due = _options.CaptureAfter + _capturesTaken * _options.CaptureEvery;
-            if (_capturesTaken < count && rtsReady && (_options.CaptureHitAge is not { } hitAge || World.Own.ShieldHit.Strength > 0 && World.Own.ShieldHitAge >= hitAge) && _sinceSplash >= due && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
+            var captureClock = World.ExhaustRock is { Started: >= 0 } fixtureClock ? _ui.Time - fixtureClock.Started : _sinceSplash;
+            if (World.ExhaustRock is not null && count == 3) due = _capturesTaken switch { 0 => 3, 1 => 8, _ => 25 };
+            if (_capturesTaken < count && rtsReady && (_options.CaptureHitAge is not { } hitAge || World.Own.ShieldHit.Strength > 0 && World.Own.ShieldHitAge >= hitAge) && captureClock >= due && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
             {
                 ShowPerformance |= Session is not null && _options.OpenView is not ("controls" or "players" or "social" or "friends" or "chat" or "hud" or "interface" or "charts" or "pinned-charts" or "inventory" or "edit-tank-fuel");
                 var file = Path.GetFullPath(path);
@@ -1567,6 +1576,8 @@ internal sealed class App : IDisposable
                 if (gasDraws != default)
                     Console.WriteLine($"capture {_capturesTaken:D2} gas draws: full {gasDraws.Full}, middle {gasDraws.Middle}, far {gasDraws.Far}; pairs {World.GasKinds.Pairs}, lit {World.GasKinds.Flashes}, bolts {World.GasKinds.Bolts}; composed {World.LastGasMode.Deferred}, half {World.LastGasHalf}");
                 // What the own hull fired and how many plumes were drawn; read by scripted checks of the plumes.
+                if (World.ExhaustRock is { } exhaustCapture)
+                    Console.WriteLine($"capture {_capturesTaken:D2} exhaust-rock {_options.ExhaustKind}: age {_ui.Time - exhaustCapture.Started:F3} s; firing {exhaustCapture.Hull.Thrust.Flags != 0}; plumes {World.DrawnPlumes}");
                 if (_options.RamSpeed is not null)
                     Console.WriteLine($"capture shield: strength {World.Own.ShieldHit.Strength}, age {World.Own.ShieldHitAge}, position {World.Own.Position}, patch {World.Shields.LatestPatch(World.Own.Id)}");
                 if (_options.Thrust is not null)

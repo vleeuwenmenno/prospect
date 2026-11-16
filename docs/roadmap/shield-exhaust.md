@@ -47,7 +47,7 @@ Product direction from the brainstorm on 2026-11-16. Built step by step; this sa
 
 1. Done: contact strength from energy, and the contact patch.
 2. Done: exhaust on shields.
-3. Dust and marks on rock.
+3. Done: dust and marks on nearby fine-detail rock.
 
 ### Other hull contacts
 
@@ -107,3 +107,42 @@ Product direction from the brainstorm on 2026-11-16. Built step by step; this sa
 - RTX 5070 Ti, actual 5096×1390: `make bench` 679 fps, resize 644 fps; active engine 758, cold 802, ion 813, hot 611 fps.
   Every run reports 0 managed bytes on the render thread and across the process.
 - Validation layers were inactive. Maximum-capacity fleets, Windows and macOS were not runtime-tested.
+
+## Step 3 implementation
+
+- `RockExhaust` consumes every admitted hull plume from `ThrustEffects`, including the existing shield clip.
+  Up to 16 nearest candidate plume/rock pairs receive exact finest-facet ray tests per frame.
+  `RockExhaustSurface` caches groups of shared `AsteroidMesh` / `AsteroidShape.Point` triangles; ice uses its eight planes.
+- Dust uses 4,096 fixed slots and GPU instance storage, with CPU ring spawning and depth-tested streak billboards.
+  Tangent-plane velocity plus outward lift, rock tint, throttle and plume-distance attenuation drive the spray.
+  Particle origins are double precision; current positions are relative to the camera.
+- The 64 marks merge nearby contacts on the same rock and kind; otherwise the oldest is replaced.
+  Positions and normals stay in the rock frame. Continuous firing refreshes heat; it cools over 2 s and fades over 30 s.
+- Hot engine and thruster responses glow orange, scorch and raise dust. Cold gas raises dust only.
+  Ion produces a faint blue surface shimmer with no particles or scorch. Each response validates in propulsion.json.
+- Marks use depth-tested tangent quads offset slightly along the normal, avoiding another scene-depth copy.
+  Dust and marks draw after solids and before plumes. No frame constants, server, wire or save changes.
+
+### Step 3 limits and capture contract
+
+- Only drawn fine-detail rocks receive effects. Far-detail behavior remains open.
+  Tangent quads approximate curvature: large patches can intersect or float over neighboring facets.
+- Candidate admission shares plume visibility and size limits. The nearest 16 candidate pairs are tested;
+  excess candidates are dropped. Dust does not collide again after spawning and uses approximate alpha ordering.
+- `--open exhaust-rock --exhaust-kind engine|hot|cold|ion` is an explicitly render-only two-block test hull,
+  with the real part model/nozzles above a fixed shape-0 rock. Its thrust is scripted, not server flight.
+  It changes no live hull or generated rock. `--capture-count 3` records fixture ages 3, 8 and 25 s;
+  the burn stops at 5 s. Logs report actual age and firing state.
+
+### Step 3 verification
+
+- `timeout 900 make check`: 2,509 game tests and 354 listing tests passed.
+  Tests cover exact facet reach, nearest hit, kind validation, merge/replacement, rock transforms, expiry and allocation.
+  Both new shaders pass `glslc -I assets/shaders`.
+- `make bench`: 807 fps; resize 831 fps at 5096×1390, with zero managed bytes on the render thread and across the process.
+- `make bench-gas` passed on the sequential rerun: the five judged scenes reached 211, 192, 315, 171 and 166 fps.
+  All seven scenes reported zero managed bytes. Initial runs varied under concurrent desktop GPU work;
+  unchanged HEAD also failed the huge-cloud target in one run. Logs retain both failures and the passing rerun.
+- Native-pixel crops and actual fixture ages for all four kinds are under `artifacts/exhaust-rock-evidence/`.
+  The compositor can change capture height when another agent opens a hidden window; evidence records dimensions.
+  Vulkan validation layers were unavailable. Windows, macOS and maximum-capacity fleets were not runtime-tested.

@@ -240,6 +240,8 @@ internal sealed class PlumeLook
     /// <summary>The most scene light the plume reaches, however long the view runs through it: a flame never burns out to flat white.</summary>
     public float Brightness { get; init; }
 
+    public RockExhaustLook Rock { get; init; } = new();
+
     public float ShieldStrength { get; init; }
     public float ShieldSpread { get; init; }
     public float[] ShieldColor { get; init; } = [];
@@ -294,6 +296,7 @@ internal sealed class PlumeLook
 
     internal void Check(string path, string id)
     {
+        Rock.Check(Kind);
         static bool Colour(float[] c) => c.Length == 3 && c[0] is >= 0 and <= 4 && c[1] is >= 0 and <= 4 && c[2] is >= 0 and <= 4;
         if (!(ShieldSpread is >= 1 and <= 4) || !Colour(ShieldColor) || !(ShieldStrength is >= 0 and <= 4)
             || Kind is not ("flame" or "puff" or "ion") || !Colour(Core) || !Colour(Edge) || !Colour(Spark)
