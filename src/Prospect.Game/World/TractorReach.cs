@@ -21,7 +21,8 @@ public static class TractorReach
     /// is on its outer side, it carries no mount, and its part in the mount's outward half-space (the plane of the face
     /// of the block the mount sits on, and everything beyond it) is within range and has a clear line. The aim is the middle of that
     /// visible part, else its point nearest the emitter (<paramref name="nearest"/>). Of the faces in view the nearest
-    /// wins. Only the rack's own frame is ignored on the way: it is open, so it never blocks its own loading. Every
+    /// wins. An aim point lying against a neighbouring live box (<see cref="Covered"/>) is not an entrance: the container
+    /// would have to pass through that box. Only the rack's own frame is ignored on the way: it is open, so it never blocks its own loading. Every
     /// other live block blocks, the block the mount sits on included, which is why nothing behind the mount's face
     /// plane is in view.
     /// </summary>
@@ -44,7 +45,8 @@ public static class TractorReach
             {
                 var aim = k == 0 ? (low + high) * .5f : Vector3.Clamp(start, low, high);
                 var distance = Vector3.DistanceSquared(start, aim);
-                if (distance >= best || distance > range || !Clear(boxes, alive, cell, start, aim, rack)) continue;
+                if (distance >= best || distance > range || Covered(boxes, alive, cell, rack, facing, aim)
+                    || !Clear(boxes, alive, cell, start, aim, rack)) continue;
                 best = distance; point = aim; side = facing; nearest = k == 1;
                 break;
             }
@@ -89,11 +91,23 @@ public static class TractorReach
 
     /// <summary>Range and line of sight to a free container from the emitting point.</summary>
     public static bool Container(ReadOnlySpan<DesignBox> boxes, ReadOnlySpan<ulong> alive, float cell,
-        in DesignMount mount, Vector3 point)
+        in DesignMount mount, Vector3 point) => Container(boxes, alive, cell, mount, point, 0);
+
+    /// <summary>
+    /// The same for a container the beam already holds, whose range is extended by <paramref name="slack"/>: the path to
+    /// a slot runs deeper into the rack than the face the range was measured to.
+    /// </summary>
+    public static bool Container(ReadOnlySpan<DesignBox> boxes, ReadOnlySpan<ulong> alive, float cell,
+        in DesignMount mount, Vector3 point, float slack) =>
+        InRange(boxes, alive, cell, mount, point, slack) && Clear(boxes, alive, cell, Emitter(boxes, mount, cell), point);
+
+    /// <summary>Range alone, from the emitting point. A container on its final glide is held by it: the rack's face was in view.</summary>
+    public static bool InRange(ReadOnlySpan<DesignBox> boxes, ReadOnlySpan<ulong> alive, float cell,
+        in DesignMount mount, Vector3 point, float slack)
     {
         if (mount.Type.Tractor is not { } spec || !Live(alive, mount.Parent)) return false;
-        var start = Emitter(boxes, mount, cell);
-        return Vector3.DistanceSquared(start, point) <= spec.Range * spec.Range && Clear(boxes, alive, cell, start, point);
+        var range = spec.Range + slack;
+        return Vector3.DistanceSquared(Emitter(boxes, mount, cell), point) <= range * range;
     }
 
     /// <summary>Tests the open segment against live box and wedge solids; touching a face alone is not a blockage.</summary>
@@ -153,6 +167,32 @@ public static class TractorReach
 
     private const float Epsilon = 1e-5f;
 
+    /// <summary>
+    /// True when the point <paramref name="aim"/> on the rack's face lies against a live box (its edge included): the
+    /// face is that box's deck there, and a container led to it would have to pass through the box.
+    /// </summary>
+    private static bool Covered(ReadOnlySpan<DesignBox> boxes, ReadOnlySpan<ulong> alive, float cell, int rack,
+        BlockFacing face, Vector3 aim)
+    {
+        var self = boxes[rack]; var axis = Facings.Axis(face); var sign = Facings.Sign(face);
+        var plane = FaceMounts.Of(self.At, axis) + (sign > 0 ? FaceMounts.Of(self.Size, axis) : 0);
+        for (var j = 0; j < boxes.Length; j++)
+        {
+            if (j == rack || boxes[j].Shape != BlockShape.Box || !Live(alive, j)) continue;
+            var other = boxes[j];
+            if (FaceMounts.Of(other.At, axis) + (sign > 0 ? 0 : FaceMounts.Of(other.Size, axis)) != plane) continue;
+            var against = true;
+            for (var a = 0; a < 3 && against; a++)
+            {
+                if (a == axis) continue;
+                var low = FaceMounts.Of(other.At, a) * cell; var high = (FaceMounts.Of(other.At, a) + FaceMounts.Of(other.Size, a)) * cell;
+                against = aim[a] >= low - Epsilon && aim[a] <= high + Epsilon;
+            }
+            if (against) return true;
+        }
+        return false;
+    }
+
     private static bool Mounted(ReadOnlySpan<DesignMount> mounts, int rack, BlockFacing face)
     {
         foreach (var mount in mounts) if (mount.Parent == rack && mount.Face == face) return true;
@@ -160,7 +200,7 @@ public static class TractorReach
     }
 
     private static bool Live(ReadOnlySpan<ulong> alive, int block) => alive.IsEmpty || BlockSet.Has(alive, block);
-    private static Vector3 Middle(in DesignBox box, float cell) =>
+    internal static Vector3 Middle(in DesignBox box, float cell) =>
         new Vector3(box.At.X + box.Size.X * .5f, box.At.Y + box.Size.Y * .5f, box.At.Z + box.Size.Z * .5f) * cell;
-    private static Vector3 Half(in DesignBox box, float cell) => new Vector3(box.Size.X, box.Size.Y, box.Size.Z) * (cell * .5f);
+    internal static Vector3 Half(in DesignBox box, float cell) => new Vector3(box.Size.X, box.Size.Y, box.Size.Z) * (cell * .5f);
 }

@@ -5,6 +5,42 @@ namespace Prospect.Game.World;
 /// <summary>A container's immutable size, in cargo-grid units, and empty shell strength.</summary>
 public readonly record struct ContainerSize(string Name, int Units, GridSize Shape, float Hull);
 
+/// <summary>
+/// How a tractor guides a held container home: staging point, final glide, settling and the time-out. Read once from
+/// the <c>tractor</c> entry of <c>blocks/cargo.json</c>; every figure is validated there.
+/// </summary>
+/// <param name="StagingMarginMetres">Gap between the container's near face and the rack's open face at the staging point.</param>
+/// <param name="ToleranceMetres">How close counts as arrived, at the staging point and at the slot.</param>
+/// <param name="FinalSpeed">Speed cap, in metres per second, on the final leg into the slot.</param>
+/// <param name="SettleSpeed">Relative speed under which a container inside its slot cell is stowed.</param>
+/// <param name="AlignRate">Per second, how fast the container turns onto the hull's axes.</param>
+/// <param name="ProgressMetres">The path left must shrink by this much to count as progress.</param>
+/// <param name="StallSeconds">Without progress or without a clear line this long, the claim is released.</param>
+/// <param name="RetrySeconds">After such a release no tractor may acquire the container for this long.</param>
+public readonly record struct TractorGuidance(float StagingMarginMetres, float ToleranceMetres, float FinalSpeed,
+    float SettleSpeed, float AlignRate, float ProgressMetres, float StallSeconds, float RetrySeconds)
+{
+    /// <summary>Ticks of <see cref="StallSeconds"/> at the fixed simulation interval.</summary>
+    public int StallTicks => Math.Max(1, (int)MathF.Ceiling(StallSeconds / Prospect.Game.World.HullSim.Dt));
+
+    /// <summary>Reads and validates the <c>tractor</c> entry.</summary>
+    internal static TractorGuidance Read(System.Text.Json.JsonElement e)
+    {
+        var g = new TractorGuidance(
+            e.GetProperty("stagingMarginMetres"u8).GetSingle(), e.GetProperty("toleranceMetres"u8).GetSingle(),
+            e.GetProperty("finalSpeed"u8).GetSingle(), e.GetProperty("settleSpeed"u8).GetSingle(),
+            e.GetProperty("alignRate"u8).GetSingle(), e.GetProperty("progressMetres"u8).GetSingle(),
+            e.GetProperty("stallSeconds"u8).GetSingle(), e.GetProperty("retrySeconds"u8).GetSingle());
+        if (!In(g.StagingMarginMetres, 0.01f, 2) || !In(g.ToleranceMetres, 0.005f, 0.5f) || !In(g.FinalSpeed, 0.05f, 10)
+            || !In(g.SettleSpeed, 0.01f, 5) || !In(g.AlignRate, 0.1f, 60) || !In(g.ProgressMetres, 0.001f, 1)
+            || !In(g.StallSeconds, 0.5f, 120) || !In(g.RetrySeconds, 0, 3600) || g.SettleSpeed > g.FinalSpeed)
+            throw new InvalidDataException("Invalid tractor guidance tuning.");
+        return g;
+    }
+
+    private static bool In(float v, float low, float high) => float.IsFinite(v) && v >= low && v <= high;
+}
+
 /// <summary>Shared container geometry. One ship cell is one metre; drone cells do not redefine cargo units.</summary>
 public sealed class CargoCatalog
 {
@@ -17,6 +53,8 @@ public sealed class CargoCatalog
     /// <summary>Delay before any tractor may acquire a released container.</summary>
     public float PickupDelaySeconds { get; private set; }
     public float EjectionSpeed { get; private set; }
+    /// <summary>Figures for the tractor's guided path into a rack.</summary>
+    public TractorGuidance Tractor { get; private set; }
     private readonly ContainerSize[] _sizes;
     private readonly Dictionary<string, double> _densities;
     /// <summary>Metres per unit edge, relative to the one-metre ship cell.</summary>
@@ -73,7 +111,8 @@ public sealed class CargoCatalog
             SpaceShellKg = space.GetProperty("shellKgPerUnit"u8).GetSingle(),
             SpaceRestitution = space.GetProperty("restitution"u8).GetSingle(),
             JettisonSpeed = space.GetProperty("jettisonSpeed"u8).GetSingle(),
-            EjectionSpeed = space.GetProperty("ejectionSpeed"u8).GetSingle()
+            EjectionSpeed = space.GetProperty("ejectionSpeed"u8).GetSingle(),
+            Tractor = TractorGuidance.Read(root.GetProperty("tractor"u8))
         };
         if (!float.IsFinite(result.PickupDelaySeconds) || result.PickupDelaySeconds < 0 || result.PickupDelaySeconds > 3600
             || result.SpacePerSector is < 1 or > FreeContainers.Capacity || result.SpaceContactBudget is < 1 or > 1024

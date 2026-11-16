@@ -37,6 +37,10 @@ public sealed class ContainerSimulation
             for (var h = 0; h < field.Hulls.Slots && budget > 0; h++)
             {
                 if (!field.Hulls.IsAliveAt(h)) continue;
+                // A container the hull's own tractor is guiding into a rack passes the hull's blocks: the beam
+                // steers it through the open face, and a jam against the ridge between it and the slot was the bug.
+                // Rocks and other hulls still hit it.
+                if (c.TractorPowered && c.TractorHull == field.Hulls.HandleAt(h).Packed) continue;
                 ref var state = ref field.Hulls.State(h);
                 if (state.Jump == JumpPhase.Tunnel) continue;
                 var design = field.Designs[field.Hulls.Info(h).Design];

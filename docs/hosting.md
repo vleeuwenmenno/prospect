@@ -1086,6 +1086,7 @@ Active module spending is shared with client prediction through `ModuleScanRules
   An open edit token, owned controlled hull, matching live rack, selected slot and current hold tick/revision are
   required. It shares the quarter-second fill rate limit. It does not require the local debug-loading flag.
 - `blocks/cargo.json` also owns contact budget, sector cap, shell collision mass, restitution and release speed.
+  It also holds the `tractor` guidance figures (staging margin, tolerances, speeds, time-outs); they are server physics only.
   `containerLifetimeMinutes` is a creation setting, 0–1440, default 60; zero never expires. No live edit message.
 - Codec 15 retains the pool, pickup-ready tick and durable claim owner separately from hulls. Older layouts are refused untouched; no migration.
 

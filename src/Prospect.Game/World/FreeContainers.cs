@@ -9,8 +9,12 @@ public struct FreeContainer
     /// <summary>Transient exclusive tractor claim; loading restarts acquisition.</summary>
     public uint TractorHull;
     public int TractorMount, TractorRack;
+    /// <summary>0 while travelling to the staging point, 1 on the final glide into the slot.</summary>
     public byte TractorStage;
     public bool TractorPowered;
+    /// <summary>Server-only, never sent or saved: the least path left so far (0 = not set) and the ticks without gaining on it.</summary>
+    public float TractorBest;
+    public int TractorIdle;
     public Double3 Position;
     public Vector3 Velocity, AngularVelocity;
     public Quaternion Orientation;
@@ -77,7 +81,7 @@ public sealed class FreeContainers
 
     /// <summary>Drops transient claim state on load or when the pulling hull is not visible to a recipient.</summary>
     public static void ClearTractor(ref FreeContainer item)
-    { item.TractorHull = 0; item.TractorMount = 0; item.TractorRack = 0; item.TractorStage = 0; item.TractorPowered = false; }
+    { item.TractorHull = 0; item.TractorMount = 0; item.TractorRack = 0; item.TractorStage = 0; item.TractorPowered = false; item.TractorBest = 0; item.TractorIdle = 0; }
 
     private static bool Older(in FreeContainer a, in FreeContainer b) => a.Born < b.Born || a.Born == b.Born && a.Id < b.Id;
 

@@ -22,7 +22,7 @@ public sealed class TractorSimulation
             var handle = Handle(item.TractorHull);
             if (!hulls.IsAlive(handle) || !Eligible(hulls, handle.Index)
                 || !item.MayPickup(hulls.Info(handle.Index).Owner, tick)
-                || !Valid(containers, content, field, handle.Index, item.TractorMount, ref item, occupied)) Release(ref item);
+                || !Valid(containers, content, field, handle.Index, item.TractorMount, ref item, occupied, needSight: false)) Release(ref item);
         }
         Acquire(containers, content, field, occupied, tick);
         foreach (var item in containers.Items)
@@ -63,8 +63,8 @@ public sealed class TractorSimulation
                     budget--;
                     ref var item = ref containers.At(c);
                     if (!item.MayPickup(hulls.Info(h).Owner, tick) || item.TractorHull != 0 || item.Position.RelativeTo(emitter).LengthSquared() > (spec.Range + design.BlockSize) * (spec.Range + design.BlockSize)) continue;
-                    if (!Valid(containers, content, field, h, m, ref item, occupied)) continue;
-                    item.TractorHull = id; item.TractorMount = m; item.TractorStage = 0;
+                    if (!Valid(containers, content, field, h, m, ref item, occupied, needSight: true)) continue;
+                    item.TractorHull = id; item.TractorMount = m; item.TractorStage = 0; item.TractorBest = 0; item.TractorIdle = 0;
                     break;
                 }
             }
@@ -72,15 +72,19 @@ public sealed class TractorSimulation
         _acquireHull = _acquireMount = 0;
     }
 
+    /// <summary>
+    /// Whether the mount may hold the body and has a rack to load it into. A new claim also needs the beam's line of
+    /// sight to it; a held body that has lost it is not let go at once, <see cref="Pull"/> times it out.
+    /// </summary>
     private bool Valid(FreeContainers containers, GameContent content, HullField field, int h, int mount,
-        ref FreeContainer item, Span<byte> occupied)
+        ref FreeContainer item, Span<byte> occupied, bool needSight)
     {
         var hulls = field.Hulls; var info = hulls.Info(h); var design = field.Designs[info.Design];
         if (item.ClaimOwner != 0 && item.ClaimOwner != info.Owner) return false;
         if ((uint)mount >= (uint)design.Mounts.Length || design.Mounts[mount].Type.Tractor is not { } spec
             || Mass(content.Cargo, item) > spec.MaxMass) return false;
-        var local = Local(design, hulls.State(h), item.Position);
-        if (!TractorReach.Container(design.Boxes, hulls.Blocks(h), design.BlockSize, design.Mounts[mount], local)) return false;
+        if (needSight && !TractorReach.Container(design.Boxes, hulls.Blocks(h), design.BlockSize, design.Mounts[mount],
+            Local(design, hulls.State(h), item.Position))) return false;
         var count = 0; var id = hulls.HandleAt(h).Packed;
         foreach (var other in containers.Items)
             if (other.Id != item.Id && other.TractorHull == id)
@@ -96,10 +100,17 @@ public sealed class TractorSimulation
         return true;
     }
 
-    /// <summary>Uses only power already billed by FlightModel. Bodies remain free until the rack accepts them.</summary>
-    public void Pull(FreeContainers containers, GameContent content, HullField field, Span<byte> occupied)
+    /// <summary>
+    /// Uses only power already billed by FlightModel. Bodies remain free until the rack accepts them. A held body
+    /// follows <see cref="TractorPath"/>: to the staging point outside the rack's face (by way of the emitter's exit
+    /// when the straight line is blocked), then a slow glide along the face normal into its slot, where it is stowed.
+    /// <see cref="ContainerSimulation"/> lets it pass its own hull's blocks meanwhile. A body that makes no progress, or
+    /// that the beam cannot see, for <see cref="TractorGuidance.StallSeconds"/> is let go and waits
+    /// <see cref="TractorGuidance.RetrySeconds"/> before any tractor tries it again, so nothing jams for ever.
+    /// </summary>
+    public void Pull(FreeContainers containers, GameContent content, HullField field, Span<byte> occupied, long tick = 0)
     {
-        var hulls = field.Hulls;
+        var hulls = field.Hulls; var tuning = content.Cargo.Tractor;
         for (var c = containers.Items.Length - 1; c >= 0; c--)
         {
             ref var item = ref containers.At(c);
@@ -107,43 +118,76 @@ public sealed class TractorSimulation
             var handle = Handle(item.TractorHull);
             if (!hulls.IsAlive(handle) || !Eligible(hulls, handle.Index)) { Release(ref item); continue; }
             var h = handle.Index; ref var info = ref hulls.Info(h);
-            if (info.TractorDemand <= 0 || info.Power.Tractor < info.TractorDemand) continue;
             var design = field.Designs[info.Design]; var state = hulls.State(h);
-            if (!Valid(containers, content, field, h, item.TractorMount, ref item, occupied)) { Release(ref item); continue; }
+            if (!Valid(containers, content, field, h, item.TractorMount, ref item, occupied, needSight: false)) { Release(ref item); continue; }
+            if (!TractorPath.TryGuide(content.Cargo, design, hulls.Blocks(h), item.TractorMount, item.TractorRack, item.Size,
+                hulls.BlockStates.Cargo(info.BlockState), occupied, out var guide)) { Release(ref item); continue; }
             var mount = design.Mounts[item.TractorMount]; var spec = mount.Type.Tractor!;
-            var emitter = TractorReach.Emitter(design.Boxes, mount, design.BlockSize);
-            var clearance = FreeContainers.Half(content.Cargo, item.Size).Length() + content.Cargo.UnitSize * .1f;
-            var target = emitter + Facings.Vector(mount.Face) * clearance;
-            if (item.TractorStage != 0)
-            {
-                TractorReach.Rack(design.Boxes, design.Mounts, hulls.Blocks(h), design.BlockSize,
-                    item.TractorMount, item.TractorRack, out target, out var side);
-                target += Facings.Vector(side) * clearance;
-            }
+            var final = item.TractorStage != 0;
             var local = Local(design, state, item.Position);
+            // On the final glide the slot may lie behind the hull's own corner as the emitter sees it; what held the
+            // container was the rack's open face in view (TryGuide), so only the range is asked of it then.
+            var sight = final ? TractorReach.InRange(design.Boxes, hulls.Blocks(h), design.BlockSize, mount, local, guide.Slack)
+                : TractorReach.Container(design.Boxes, hulls.Blocks(h), design.BlockSize, mount, local, guide.Slack);
+
+            // Staging first; by way of the emitter's exit only when the container has no clear line to it.
+            var viaExit = !final && !TractorReach.Clear(design.Boxes, hulls.Blocks(h), design.BlockSize, local, guide.Staging);
+            var target = final ? guide.Slot : viaExit ? guide.Exit : guide.Staging;
+            var left = Vector3.Distance(local, target) + (viaExit ? Vector3.Distance(guide.Exit, guide.Staging) : 0)
+                + (final ? 0 : Vector3.Distance(guide.Staging, guide.Slot));
+            var powered = info.TractorDemand > 0 && info.Power.Tractor >= info.TractorDemand;
+            if (!sight) item.TractorIdle++;
+            else if (powered)
+            {
+                if (item.TractorBest <= 0 || left < item.TractorBest - tuning.ProgressMetres) { item.TractorBest = Math.Max(left, 1e-6f); item.TractorIdle = 0; }
+                else item.TractorIdle++;
+            }
+            if (item.TractorIdle >= tuning.StallTicks)
+            {
+                item.PickupReadyTick = tick + (long)Math.Ceiling(tuning.RetrySeconds * Prospect.Engine.Time.TickLoop.SimulationHz);
+                Release(ref item);
+                continue;
+            }
+            if (!powered || !sight) continue;
+
             var delta = target - local;
             var distance = delta.Length();
             var offset = target - Pivot(design);
             var carrierVelocity = state.Velocity + HullRotation.Rotate(Vector3.Cross(state.AngularVelocity,
                 offset - hulls.Flight(h).CenterOfMass), state.Orientation);
             var relative = item.Velocity - carrierVelocity;
-            var tolerance = Math.Max(.02f, relative.Length() * HullSim.Dt);
+            var tolerance = Math.Max(tuning.ToleranceMetres, relative.Length() * HullSim.Dt);
             item.TractorPowered = true;
-            if (distance <= tolerance)
+            // Turn onto the hull's axes, as the slot is, and take its spin; a container never settles tumbling.
+            item.Orientation = Quaternion.Normalize(Quaternion.Slerp(item.Orientation, state.Orientation,
+                Math.Min(1f, tuning.AlignRate * HullSim.Dt)));
+            item.AngularVelocity = state.AngularVelocity;
+            if (distance <= tolerance && !viaExit)
             {
-                if (item.TractorStage == 0) { item.TractorStage = 1; item.Velocity = carrierVelocity; }
-                else if (hulls.BlockStates.TryAddCargo(info.BlockState, content, Held(item), occupied))
+                if (!final) { item.TractorStage = 1; item.Velocity = carrierVelocity; continue; }
+                var aligned = Math.Abs(Quaternion.Dot(item.Orientation, state.Orientation)) >= AlignedDot;
+                if (aligned && hulls.BlockStates.TryAddCargo(info.BlockState, content, Held(item), occupied))
                 { containers.Remove(c); field.Refit(h); }
                 continue;
             }
-            var desired = HullRotation.Rotate(delta / distance, state.Orientation) * MathF.Sqrt(2 * spec.Acceleration * distance);
+            // Inside its slot's cell and nearly still counts as home, so the sqrt braking profile need not creep in.
+            if (final && relative.Length() <= tuning.SettleSpeed && Math.Abs(delta.X) <= guide.Half.X
+                && Math.Abs(delta.Y) <= guide.Half.Y && Math.Abs(delta.Z) <= guide.Half.Z
+                && Math.Abs(Quaternion.Dot(item.Orientation, state.Orientation)) >= AlignedDot
+                && hulls.BlockStates.TryAddCargo(info.BlockState, content, Held(item), occupied))
+            { containers.Remove(c); field.Refit(h); continue; }
+
+            var speed = MathF.Sqrt(2 * spec.Acceleration * distance);
+            if (final) speed = Math.Min(speed, tuning.FinalSpeed);
+            var desired = distance > 1e-6f ? HullRotation.Rotate(delta / distance, state.Orientation) * speed : Vector3.Zero;
             var change = desired - relative;
             var length = change.Length();
             if (length > 0) item.Velocity += change * (Math.Min(length, spec.Acceleration * HullSim.Dt) / length);
-            item.Orientation = state.Orientation;
-            item.AngularVelocity = state.AngularVelocity;
         }
     }
+
+    /// <summary>Cosine of half the turn (about 0.1 rad in all) a container may still be short of the hull's axes when stowed.</summary>
+    private const float AlignedDot = .9987f;
 
     /// <summary>Payload and shell mass in kilograms.</summary>
     public static double Mass(CargoCatalog cargo, in FreeContainer item) => item.Amount + cargo.SpaceShellKg * cargo.Sizes[item.Size].Units;
@@ -153,6 +197,5 @@ public sealed class TractorSimulation
     private static Vector3 Pivot(HullDesign design) => (design.CenterOfMass + new Vector3(.5f)) * design.BlockSize;
     private static Vector3 Local(HullDesign design, in HullState state, Double3 point) =>
         HullRotation.Rotate(point.RelativeTo(state.Position), Quaternion.Conjugate(state.Orientation)) + Pivot(design);
-    private static void Release(ref FreeContainer item)
-    { item.TractorHull = 0; item.TractorMount = 0; item.TractorRack = 0; item.TractorStage = 0; item.TractorPowered = false; }
+    private static void Release(ref FreeContainer item) => FreeContainers.ClearTractor(ref item);
 }

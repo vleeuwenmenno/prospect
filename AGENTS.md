@@ -949,7 +949,20 @@ How to apply it:
   tick and durable claim owner. Only that owner may recover claimed cargo; unclaimed cargo is open to all.
 - `FlightModel.Step` alone bills `PowerFlow.Tractor`; `Pull` uses only that paid power, before container contacts.
   Base plus per-tonne demand includes payload and collision shell mass. Insufficient power means no tractor force.
-  Pulls approach the emitter, then the rack's open side; only `TryAddCargo` followed by removing the free body stows it.
+  A held body follows `TractorPath.TryGuide` (never the emitter once a rack is chosen): a staging point outside the
+  rack's face (the slot centre pushed out along the face normal by the container's half size plus
+  `tractor.stagingMarginMetres`), by way of the emitter's exit point only when the straight line to it is blocked, then a
+  glide along the normal at most `tractor.finalSpeed` into the slot `TryAddCargo` will give it (stored containers first,
+  largest first, the new one after its size). Stage 1 is that glide; it needs only range from the beam (the slot can lie
+  behind the hull's own corner as the emitter sees it), stage 0 range and line of sight. The body turns onto the hull's
+  axes at `alignRate`; it is stowed (only `TryAddCargo` followed by removing the free body does it) within
+  `toleranceMetres` of the slot and aligned, or inside the slot's cell and slower than `settleSpeed`.
+  `ContainerSimulation` ignores contacts between a powered held body and the hull holding it (rocks and other hulls
+  still hit it): the ridge between a body and its slot used to jam it. A held body that makes no progress, or that the beam
+  cannot see, for `stallSeconds` is released and gets `PickupReadyTick` = now + `retrySeconds`. `FreeContainer.TractorBest`
+  and `TractorIdle` are server-only (not on the wire, not saved). Figures are the `tractor` entry of `blocks/cargo.json`
+  (`TractorGuidance`, validated). `TractorReach.Rack` skips an aim point lying against another live box (a face
+  against a neighbour is a deck, not an entrance). Tests: `TractorGuideTests`.
 - Protocol 62 replicates pickup ownership and ready tick as well as transient pulls for beams and prediction;
   redact only transient pulls whose hull/design is unavailable to a client.
   Codec 15 preserves pickup ownership and ready tick; restore clears only transient pulls and restarts acquisition. `TractorPreview` caches the shared

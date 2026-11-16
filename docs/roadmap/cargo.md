@@ -328,3 +328,15 @@ Deferred: drone launcher, tractor filter.
   Crops: `/tmp/prospect-tractor-captures/pull-stow-sequence.png`,
   `/tmp/prospect-tractor-captures/editor-reach-crop.png`,
   `/tmp/prospect-tractor-captures/editor-details-crop.png`. No desktop input was injected.
+
+### Implementation: guided loading
+
+- The tractor leads a held container; it never aims at the emitter once a rack is chosen.
+- Path: a staging point outside the rack's open face, then a slow glide straight in along the face normal to the packed slot.
+- If the straight line to the staging point is blocked, it goes first to the emitter's exit point.
+- While guided and powered, the container ignores contacts with its own hull. Rocks and other hulls still hit it.
+- It turns onto the hull's axes and is stowed at the slot, within tolerance, or inside the slot cell and nearly still.
+- No progress, or no line of sight, for `stallSeconds`: the claim is released and the container waits `retrySeconds`.
+- A rack face against another block is a deck, never an entrance.
+- Figures: `tractor` in `content/blocks/cargo.json` (staging margin, tolerance, final speed, settle speed, align rate, progress, stall, retry).
+- Server only: no wire or save change. Tests: `TractorGuideTests`.

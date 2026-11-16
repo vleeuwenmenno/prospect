@@ -92,6 +92,16 @@
     "gold": 19300,
     "ice": 917
   },
+  "tractor": {
+    "stagingMarginMetres": 0.15,
+    "toleranceMetres": 0.05,
+    "finalSpeed": 0.6,
+    "settleSpeed": 0.2,
+    "alignRate": 6,
+    "progressMetres": 0.02,
+    "stallSeconds": 4,
+    "retrySeconds": 10
+  },
   "space": {
     "perSector": 64,
     "shellKgPerUnit": 1,
