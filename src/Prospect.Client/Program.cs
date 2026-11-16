@@ -376,6 +376,10 @@ internal static class Program
                     options.HoldThrust = holdThrust;
                     i++;
                     break;
+                case "--ram" when hasValue && float.TryParse(args[i + 1], out var ramSpeed) && ramSpeed is >= 0f and <= 100f:
+                    options.RamSpeed = ramSpeed;
+                    i++;
+                    break;
                 case "--break-shield" when hasValue && float.TryParse(args[i + 1], out var breakAt) && breakAt is >= 0f and <= 600f:
                     options.BreakShieldSeconds = breakAt;
                     i++;
@@ -509,8 +513,8 @@ internal static class Program
         if (options.HoldThrust is not null && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--hold-thrust works only with --capture or --bench: it replaces the pilot's forward key.");
 
-        if (options.BreakShieldSeconds is not null && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
-            return Fail("--break-shield works only with --capture or --bench, in an unsaved private local game.");
+        if ((options.BreakShieldSeconds is not null || options.RamSpeed is not null) && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
+            return Fail("--break-shield and --ram work only with --capture or --bench, in an unsaved private local game.");
 
         if ((options.Thrust is not null || options.Zoom is not null) && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--thrust and --zoom work only with --capture or --bench.");

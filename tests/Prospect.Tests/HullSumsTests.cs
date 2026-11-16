@@ -314,6 +314,7 @@ internal static class Figures
             ShieldPower = (float)(shieldPower * rules.ShieldRechargeMultiplier),
             ShieldRestartFraction = rules.ShieldRestartFraction,
             ShieldContactSpeed = rules.ShieldContactSpeed,
+            ShieldImpactEnergyFraction = rules.ShieldImpactEnergyFraction,
             ShieldRestartPower = (float)(shieldPower * rules.ShieldRechargeMultiplier * rules.ShieldRestartPowerMultiplier),
             BoostPowerMultiplier = rules.BoostPowerMultiplier,
             EnergyStorage = (float)storage,

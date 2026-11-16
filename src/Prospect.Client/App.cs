@@ -129,6 +129,7 @@ internal sealed class AppOptions
 
     /// <summary>Scripted runs only (<c>--break-shield</c>): seconds into the run at which the own shield is broken.</summary>
     public float? BreakShieldSeconds { get; set; }
+    public float? RamSpeed { get; set; }
 
     /// <summary>Scripted runs only (<c>--hurt-fleet</c>): seconds into the run at which the other owned hulls are hurt.</summary>
     public float? HurtFleetSeconds { get; set; }
@@ -647,6 +648,7 @@ internal sealed class App : IDisposable
                 GalaxySeed = _options.RtsSeed ?? new ServerConfig().GalaxySeed,
                 VisualBenchmark = _options.VisualBenchmark,
                 ScriptedShieldBreakSeconds = _options.BreakShieldSeconds,
+                ScriptedRamSpeed = _options.RamSpeed,
                 ScriptedFleetHurtSeconds = _options.HurtFleetSeconds,
                 ScriptedFleetHurtBroken = _options.HurtFleetBroken,
                 ScriptedFleetHurtTank = _options.HurtFleetTank,
@@ -1549,6 +1551,8 @@ internal sealed class App : IDisposable
                 if (gasDraws != default)
                     Console.WriteLine($"capture {_capturesTaken:D2} gas draws: full {gasDraws.Full}, middle {gasDraws.Middle}, far {gasDraws.Far}; pairs {World.GasKinds.Pairs}, lit {World.GasKinds.Flashes}, bolts {World.GasKinds.Bolts}; composed {World.LastGasMode.Deferred}, half {World.LastGasHalf}");
                 // What the own hull fired and how many plumes were drawn; read by scripted checks of the plumes.
+                if (_options.RamSpeed is not null)
+                    Console.WriteLine($"capture shield: strength {World.Own.ShieldHit.Strength}, age {World.Own.ShieldHitAge}, position {World.Own.Position}");
                 if (_options.Thrust is not null)
                 {
                     var thrust = World.Own.Thrust;

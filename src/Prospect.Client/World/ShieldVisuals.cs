@@ -42,6 +42,12 @@ internal struct ShieldInstance
     /// shiver in step.
     /// </summary>
     public float4 Recovery;
+
+    /// <summary>Hull-local tangent normal divided by band width (xyz), and disk extent (w), for each contact patch.</summary>
+    public float4 Patch0;
+    public float4 Patch1;
+    public float4 Patch2;
+    public float4 Patch3;
 }
 
 /// <summary>
@@ -128,6 +134,7 @@ internal sealed class ShieldVisuals
     private struct Ripple
     {
         public Vector3 Point;
+        public ShieldPatch Patch;
         public float Strength;
         public float Age;
 
@@ -267,7 +274,7 @@ internal sealed class ShieldVisuals
     /// the two is what its hulls' <see cref="HullView.ShownTick"/> say. Only a frame that draws the same
     /// publication again moves on by <paramref name="dt"/>, the frame's own length.
     /// </summary>
-    public void Update(ReadOnlySpan<HullView> hulls, HullDesign[] designs, long publication, float dt)
+    public void Update(ReadOnlySpan<HullView> hulls, HullDesign[] designs, long publication, float dt, WorldView? world = null)
     {
         _frame++;
         dt = Math.Clamp(dt, 0f, 0.1f);
@@ -329,7 +336,7 @@ internal sealed class ShieldVisuals
                 shield.Risen = Settled;
                 shield.Serial = hull.ShieldHit.Serial;
                 if (hull.ShieldHit.Strength > 0 && hull.ShieldHitAge < _look.RippleSeconds)
-                    Start(ref shield, hull.ShieldHit, hull.ShieldHitAge, radius);
+                    Start(ref shield, hull, radius, world);
             }
             else
             {
@@ -353,7 +360,7 @@ internal sealed class ShieldVisuals
                     shield.Ahead = 0f;
                 }
 
-                Ripples(ref shield, hull, radius, elapsed, fresh);
+                Ripples(ref shield, hull, radius, elapsed, fresh, world);
                 Follow(ref shield, shown, hull.ShieldChangeAge, elapsed, fresh);
                 Charging(ref shield, hull.Shield, capacity, elapsed, fresh, onward);
             }
@@ -427,6 +434,10 @@ internal sealed class ShieldVisuals
             Ripple1 = Packed(shield.Ripple1),
             Ripple2 = Packed(shield.Ripple2),
             Ripple3 = Packed(shield.Ripple3),
+            Patch0 = Patch(shield.Ripple0),
+            Patch1 = Patch(shield.Ripple1),
+            Patch2 = Patch(shield.Ripple2),
+            Patch3 = Patch(shield.Ripple3),
             Strengths = new float4(shield.Ripple0.Strength, shield.Ripple1.Strength, shield.Ripple2.Strength, shield.Ripple3.Strength),
             Recovery = new float4(strain * shield.Recovery, shield.Recovery, _look.RecoveryHz, (id * 0.618034f % 1f) * MathF.Tau),
         };
@@ -793,7 +804,7 @@ internal sealed class ShieldVisuals
     /// starts one for a newly reported hit at the age it is published with. A <paramref name="fresh"/> publication
     /// that tells of the same hit again puts that hit's ripple on the age it gives.
     /// </summary>
-    private void Ripples(ref HullShield shield, in HullView hull, float radius, float elapsed, bool fresh)
+    private void Ripples(ref HullShield shield, in HullView hull, float radius, float elapsed, bool fresh, WorldView? world)
     {
         var life = _look.RippleSeconds;
         // The newest live ripple has an authoritative age: do not expire it on the predicted clock before Place.
@@ -810,7 +821,7 @@ internal sealed class ShieldVisuals
         {
             shield.Serial = hull.ShieldHit.Serial;
             if (hull.ShieldHit.Strength > 0 && hull.ShieldHitAge < life)
-                Start(ref shield, hull.ShieldHit, hull.ShieldHitAge, radius);
+                Start(ref shield, hull, radius, world);
         }
         else if (fresh)
         {
@@ -832,8 +843,10 @@ internal sealed class ShieldVisuals
     }
 
     /// <summary>Puts a new ripple in the place of the oldest, or of one that is over.</summary>
-    private void Start(ref HullShield shield, in ShieldHit hit, float age, float radius)
+    private void Start(ref HullShield shield, in HullView hull, float radius, WorldView? world)
     {
+        var hit = hull.ShieldHit;
+        var age = hull.ShieldHitAge;
         ref var slot = ref shield.Ripple0;
         if (Older(shield.Ripple1, slot))
             slot = ref shield.Ripple1;
@@ -844,7 +857,8 @@ internal sealed class ShieldVisuals
         slot = new Ripple
         {
             Point = hit.Point(radius),
-            Strength = _look.ContactStrength + (1f - _look.ContactStrength) * (hit.Strength / 255f),
+            Patch = world?.ContactPatch(hull, hit.Point(radius), radius, Math.Min(_look.RippleWidth, radius * _look.ContactBandFraction)) ?? default,
+            Strength = _look.ContactStrength + (1f - _look.ContactStrength) * ((hit.Strength - 1f) / 254f),
             Age = age,
             Serial = hit.Serial,
         };
@@ -860,6 +874,8 @@ internal sealed class ShieldVisuals
         if (ripple.Age >= life || ripple.Age < -life)
             ripple = default;
     }
+
+    private static float4 Patch(in Ripple ripple) => new(ripple.Patch.Normal.X / Math.Max(ripple.Patch.Band, 1e-6f), ripple.Patch.Normal.Y / Math.Max(ripple.Patch.Band, 1e-6f), ripple.Patch.Normal.Z / Math.Max(ripple.Patch.Band, 1e-6f), ripple.Patch.Extent);
 
     private float4 Packed(in Ripple ripple) => new(ripple.Point.X, ripple.Point.Y, ripple.Point.Z, ripple.Strength > 0f ? ripple.Age : _look.RippleSeconds);
 

@@ -30,6 +30,7 @@ internal struct HullImpulse
 
     /// <summary>Closing speed used for visual feedback even when the contact does no damage.</summary>
     public float ContactSpeed;
+    public float ContactMass;
 
     /// <summary>The struck box surface in the receiving hull's local coordinates.</summary>
     public Vector3 ShieldPoint;
@@ -301,7 +302,7 @@ public sealed class HullField
             struck.ContactTick = (long)tick;
             struck.Contacts = _visualContacts.AsSpan(i * FlightRules.MaxCollisionContacts, _visualCounts[i]);
             var touching = _touching.AsSpan(i * _touchWords, struck.Alive.Length);
-            HullSim.ShieldContact(ref state, _hulls.Flight(impulse.Hull), struck.Design, touching, impulse.ContactSpeed, impulse.ShieldPoint);
+            HullSim.ShieldContact(ref state, _hulls.Flight(impulse.Hull), struck.Design, touching, impulse.ContactSpeed, impulse.ShieldPoint, impulse.ContactMass);
             if (impulse.Damage <= 0)
                 continue;
 

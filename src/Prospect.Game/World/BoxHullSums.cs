@@ -563,6 +563,7 @@ public sealed class BoxHullSums
             EnergyStorage = storage,
             BoostEnergyFloor = rules.BoostEnergyFloor * storage,
             ShieldContactSpeed = rules.ShieldContactSpeed,
+            ShieldImpactEnergyFraction = rules.ShieldImpactEnergyFraction,
             CollisionSafeSpeed = rules.CollisionSafeSpeed,
             CollisionDamagePerTonneSpeedSquared = rules.CollisionDamagePerTonneSpeedSquared,
             CollisionBounce = rules.CollisionBounce,

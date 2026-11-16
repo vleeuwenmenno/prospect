@@ -679,7 +679,7 @@ public static class HullSim
 
         body.Contacts = Scratch(body).OwnContacts.AsSpan(0, touchCount);
         var shieldPoint = Vector3.Transform(shieldPointSum / touchCount, Quaternion.Conjugate(state.Orientation));
-        ShieldContact(ref state, flight, body.Design, touching, closing, shieldPoint);
+        ShieldContact(ref state, flight, body.Design, touching, closing, shieldPoint, movable ? flight.Mass * rockMass / (flight.Mass + rockMass) : flight.Mass);
         var damage = ImpactDamage(closing, flight.Mass, flight);
         return damage > 0 && Damage(ref state, flight, ref body, touching, touchCount, damage, shieldPoint);
     }
@@ -830,6 +830,7 @@ public static class HullSim
                         Velocity = -normal * (impulse / otherFlight.Mass),
                         AngularVelocity = -otherLever * impulse / otherFlight.Inertia,
                         ContactSpeed = closing,
+                        ContactMass = involved,
                         ShieldPoint = touch.ShieldTheirsSum / touch.Weight,
                         Damage = harmless ? 0f : ImpactDamage(closing, involved, otherFlight),
                     },
@@ -838,7 +839,7 @@ public static class HullSim
 
                 body.Contacts = Scratch(body).OwnContacts.AsSpan(0, Scratch(body).ContactCount);
                 var shieldPoint = touch.ShieldMineSum / touch.Weight;
-                ShieldContact(ref state, flight, body.Design, touchMine, closing, shieldPoint);
+                ShieldContact(ref state, flight, body.Design, touchMine, closing, shieldPoint, involved);
                 var damage = harmless ? 0f : ImpactDamage(closing, involved, flight);
                 if (damage > 0 && Damage(ref state, flight, ref body, touchMine, BlockSet.Count(touchMine), damage, shieldPoint))
                 {
@@ -1092,18 +1093,18 @@ public static class HullSim
     }
 
     /// <summary>Reports a light contact without changing charge, damage or the recharge delay.</summary>
-    internal static void ShieldContact(ref HullState state, in FlightParams flight, HullDesign design, ReadOnlySpan<ulong> touching, float closing, Vector3? shieldPoint = null)
+    internal static void ShieldContact(ref HullState state, in FlightParams flight, HullDesign design, ReadOnlySpan<ulong> touching, float closing, Vector3? shieldPoint = null, float contactMass = 0f)
     {
         if (closing < flight.ShieldContactSpeed || closing <= 0 || flight.CollisionShieldCost <= 0 || flight.ShieldCapacity <= 0 || state.ShieldOffline || state.Shield <= 0)
             return;
-        RecordShieldHit(ref state, flight, design, touching, 0f, shieldPoint);
+        RecordShieldHit(ref state, flight, design, touching, 0f, shieldPoint, 0.5f * (contactMass > 0 ? contactMass : flight.Mass) * closing * closing);
     }
 
     /// <summary>
     /// Records a contact or absorbed impact at its surface point, or the middle of touched blocks for callers
     /// without one. Impacts in the same tick are one event: the strongest individual impact supplies both strength and position.
     /// </summary>
-    private static void RecordShieldHit(ref HullState state, in FlightParams flight, HullDesign? design, ReadOnlySpan<ulong> touching, float absorbed, Vector3? surfacePoint)
+    private static void RecordShieldHit(ref HullState state, in FlightParams flight, HullDesign? design, ReadOnlySpan<ulong> touching, float absorbed, Vector3? surfacePoint, float energy = 0f)
     {
         var point = Vector3.Zero;
         var count = 0;
@@ -1126,9 +1127,8 @@ public static class HullSim
         var scale = flight.Radius > 0 ? 127f / flight.Radius : 0f;
         point = Vector3.Clamp(point * scale, new Vector3(-127f), new Vector3(127f));
 
-        // Four hits of a quarter of the shield each show at full strength; a contact with no absorbed damage gets the minimum strength.
-        var strength = (int)MathF.Ceiling(Math.Min(1f, absorbed / flight.ShieldCapacity * 4f) * 255f);
-        strength = Math.Clamp(strength, 1, 255);
+        // Damage and kinetic energy describe the same impact; use the larger, never their sum.
+        var strength = ShieldImpact.Strength(energy, absorbed, flight.ShieldCapacity, flight.ShieldImpactEnergyFraction);
         ref var hit = ref state.ShieldHit;
         var sameTick = hit.Strength > 0 && hit.AgeTicks == 0;
         if (sameTick && strength <= hit.Strength)

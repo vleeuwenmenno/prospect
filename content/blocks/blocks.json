@@ -14,6 +14,7 @@
     "shieldRestartFraction": 0.25,
     "shieldRestartPowerMultiplier": 4.5,
     "shieldContactSpeed": 0.1,
+"shieldImpactEnergyFraction": 0.9,
     "collisionTreeVisits": 8192,
     "collisionBoxTests": 2048,
     "dentThreshold": 0.02,

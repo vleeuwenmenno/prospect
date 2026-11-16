@@ -800,7 +800,7 @@ internal sealed class WorldView
         _ownInside = _commandBlend < 0.5f;
         _visuals.Update(snapshot.Hulls.AsSpan(0, snapshot.HullCount), _designs, alpha, dt, _ownInside, FtlPreview);
         _scanPulse.Observe(snapshot.Exploration.Scan, OwnPosition, dt);
-        _shields.Update(snapshot.Hulls.AsSpan(0, snapshot.HullCount), _designs, snapshot.PublishedAt, dt);
+        _shields.Update(snapshot.Hulls.AsSpan(0, snapshot.HullCount), _designs, snapshot.PublishedAt, dt, this);
 
         // The editor follows the server before anything reads input, so a grant or an end shows this frame.
         Editor.Track(snapshot, bridge, dt);
@@ -2947,6 +2947,54 @@ internal sealed class WorldView
                     _selectedRocks[_selectedRockCount++] = rock;
             }
         }
+    }
+
+    /// <summary>Finds the nearby surface only when a new shield hit starts a ripple.</summary>
+    internal ShieldPatch ContactPatch(in HullView hull, Vector3 point, float radius, float band)
+    {
+        if (_galaxy is null) return default;
+        var world = hull.Position + Vector3.Transform(point, hull.Orientation);
+        var best = radius + band;
+        var patch = default(ShieldPatch);
+        foreach (var slot in _slots)
+        {
+            if (slot.State != SectorSlot.Ready || !ReferenceEquals(slot.Galaxy, _galaxy)) continue;
+            var center = _galaxy.CenterOf(slot.Coord);
+            for (var i = 0; i < slot.Content.AsteroidCount; i++)
+            {
+                ref var rock = ref slot.Content.Asteroids[i];
+                var delta = world.RelativeTo(center + rock.LocalPosition + (slot.Displaced ? slot.Offsets[i] : Vector3.Zero));
+                if (delta.LengthSquared() > (rock.Radius + best) * (rock.Radius + best)) continue;
+                var distance = MathF.Abs(ShieldPatch.Distance(rock, Vector3.Transform(delta, Quaternion.Conjugate(rock.Rotation))));
+                if (distance >= best) continue;
+                best = distance;
+                patch = ShieldPatch.Rock(rock, delta, hull.Orientation, radius, band);
+            }
+        }
+        if (_snapshot is { } snapshot)
+            for (var h = 0; h < snapshot.HullCount; h++)
+            {
+                ref readonly var other = ref snapshot.Hulls[h];
+                if (other.Id == hull.Id) continue;
+                var design = _designs[other.Design];
+                var local = Vector3.Transform(world.RelativeTo(other.Position), Quaternion.Conjugate(other.Orientation));
+                if (local.LengthSquared() > (design.Flight.Radius + best) * (design.Flight.Radius + best)) continue;
+                var tested = 0;
+                foreach (var b in BlockSet.Each(other.Blocks.Span))
+                {
+                    if (b >= design.BlockCount || tested++ >= snapshot.Content.Rules.CollisionBoxTests) break;
+                    var delta = local - design.BlockOffsets[b];
+                    var half = design.BlockHalfExtents[b];
+                    var closest = BlockShapes.Closest(design.Boxes[b].Shape, half, delta);
+                    var offset = delta - closest;
+                    var distance = offset.Length();
+                    if (distance >= best) continue;
+                    best = distance;
+                    var normal = Vector3.Transform(ShieldPatch.BlockNormal(delta, half, design.Boxes[b].Shape), other.Orientation);
+                    patch = new ShieldPatch(Vector3.Transform(normal, Quaternion.Conjugate(hull.Orientation)), Math.Min(2f * radius, half.Length()), band);
+                }
+            }
+        return patch;
     }
 
     /// <summary>Where an asteroid is this frame, and its radius. False if its sector is not loaded.</summary>

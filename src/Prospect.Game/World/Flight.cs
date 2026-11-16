@@ -157,6 +157,9 @@ public struct FlightParams
     /// <summary>Minimum closing speed for visual shield contact feedback.</summary>
     public float ShieldContactSpeed;
 
+    /// <summary>Impact energy per shield capacity for a full contact flash.</summary>
+    public float ShieldImpactEnergyFraction;
+
     /// <summary>Impacts slower than this do no damage, in m/s.</summary>
     public float CollisionSafeSpeed;
     public float CollisionDamagePerTonneSpeedSquared;

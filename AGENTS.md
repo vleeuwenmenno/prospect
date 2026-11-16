@@ -576,6 +576,11 @@ The client opens a real window on the developer's desktop, and they are usually 
   shipped ship has a front-facing engine, a large one or a hot thruster: put them in a copy of the build's
   `command_pod.json` (with generators and a hydrazine tank, or the battery empties and throttle drops). The pod's
   thrusters are mounted four to a face: shield (right), cargo (left), quarters (up), core (down), charting (front).
+- `--ram <speed>` (0–100 m/s) sets the own hull against the largest rock of the spawn sector at simulation
+  second 6, aligned with the rock's tangent, then lets ordinary collision resolve it. Only with `--capture`
+  or `--bench`, in an unsaved private local game. Use `--open drone` for the drone, `--sector 3,0,1` for a giant,
+  `--look 90`, and `--capture-after 6.1 --capture-count 6 --capture-every 0.1`. Capture logs include hit strength
+  and age; PNG writing can make actual intervals longer. The fixture changes pose/velocity, never injects hits.
 - `--align-at <s>` (scripted runs only) clicks the align button for 0.15 s that many seconds after the splash, through
   `PilotAlign`, the latch the left mouse button (`AlignToView`) uses: the hull turns onto the view without thrust, so
   `--look 60 --align-at 3 --capture-after 2.5 --capture-count 3 --capture-every 1.5` shows the world swinging after 3 s.
@@ -668,6 +673,12 @@ The client opens a real window on the developer's desktop, and they are usually 
   nothing builds a shell in a frame or a tick. Some four hundred or more separate parts do not fit.
 - A shield's ripple shows the newest hit a snapshot reports; hits between two snapshots of a remote hull (three
   ticks) show as the last of them, and impacts in one tick are one event. A client keeps four ripples per hull.
+  `ShieldImpact` maps max(contact energy, absorbed shield charge) through a square root; full strength is
+  `shieldImpactEnergyFraction` times capacity (blocks.json). No wire or save field changed.
+  New hits query loaded rocks and nearby hull blocks once (`WorldView.ContactPatch`, `ShieldPatch`); a tangent
+  disk lights the touching side and starts the ring. Missing geometry falls back to the point. This is a local
+  tangent approximation, not the full curved contact manifold. Four packed normals/extents extend only the GPU
+  instance (`ShieldInstance`, shader attributes 12–15); frame.glsl is unchanged.
 - Shields copy the scene's colour and depth once a frame whenever one is drawn, to bend what is behind them, and
   are drawn last in the scene. Overlapping shields each bend that one copy; dust, the command grid and jump marks
   have no depth, so one in front of a shield is bent as if it were behind it. In the pilot's own hyperspace

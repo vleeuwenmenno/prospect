@@ -327,8 +327,8 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   shell is built on a worker from the blocks it still has; until then, or if it would not fit, it keeps the shell
   it had or its intact one, so heavy damage can keep the original outline. A design whose intact shell does not fit
   is refused before Apply: some four hundred or more separate parts need more than the room. It shimmers and bends what is
-  behind it by a few pixels, most at its rim. A contact lights a short, bright patch and paired fading ripples
-  at the contacted surface, on the pilot's hull and everyone else's, aged from the server event (old hits never
+  behind it by a few pixels, most at its rim. A contact lights a tangent patch along the touching side and paired fading ripples
+  whose brightness follows impact energy (a tap is faint), on the pilot's hull and everyone else's, aged from the server event (old hits never
   restart on joining). Below 80% charge it shifts gradually from neutral through amber, visible by half charge,
   then towards red near empty, with slow waves; a break, or the loss of the last emitter, collapses it red and it is
   gone until the simulation brings it back online, when it fades in. While it comes back and while its charge

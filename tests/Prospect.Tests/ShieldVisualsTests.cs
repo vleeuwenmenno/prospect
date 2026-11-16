@@ -522,7 +522,7 @@ public sealed class ShieldVisualsTests
         var hit = Hull(2);
         hit.ShieldHit = new ShieldHit { Serial = 1, Strength = 1 };
         var drawn = Frame(hit)!.Value;
-        Assert.InRange(drawn.Strengths.X, 0.6f, 1f);
+        Assert.InRange(drawn.Strengths.X, 0.05f, 0.06f);
         Assert.Equal(Look.ImpactRadius, Look.Constants.Impact.X);
         Assert.Equal(Look.ImpactSeconds, Look.Constants.Impact.Y);
         Assert.Equal(Look.ImpactGlow, Look.Constants.Impact.Z);
@@ -1456,7 +1456,7 @@ public sealed class ShieldVisualsTests
     [InlineData("\"rippleWidth\": 0.45", "\"rippleWidth\": -1")]
     [InlineData("\"impactRadius\": 1.2", "\"impactRadius\": 0")]
     [InlineData("\"impactSeconds\": 0.45", "\"impactSeconds\": 1.2")]
-    [InlineData("\"contactStrength\": 0.65", "\"contactStrength\": 2")]
+    [InlineData("\"contactStrength\": 0.05", "\"contactStrength\": 2")]
     [InlineData("\"recoveryWobble\": 0.008", "\"recoveryWobble\": 0.2")]
     [InlineData("\"recoveryHz\": 2.5", "\"recoveryHz\": 0")]
     [InlineData("\"recoveryShimmer\": 0.3", "\"recoveryShimmer\": 1.5")]
@@ -1507,8 +1507,8 @@ public sealed class ShieldShaderSeamTests
 
         // Two vertex attributes, then one location per four floats of the instance.
         var locations = System.Runtime.CompilerServices.Unsafe.SizeOf<ShieldInstance>() / 16;
-        Assert.Equal(10, locations);
+        Assert.Equal(14, locations);
         Assert.Contains("layout(location = 10) in vec4 strengths;", shield);
-        Assert.Contains($"layout(location = {2 + locations - 1}) in vec4 recovery;", shield);
+        Assert.Contains($"layout(location = {2 + locations - 1}) in vec4 patch3;", shield);
     }
 }

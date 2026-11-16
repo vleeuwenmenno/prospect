@@ -2796,7 +2796,7 @@ public sealed class ShieldStateTests
         Assert.Equal(expected.X, state.ShieldHit.X, 1f);
         Assert.Equal(expected.Y, state.ShieldHit.Y, 1f);
         Assert.Equal(expected.Z, state.ShieldHit.Z, 1f);
-        Assert.Equal(102, state.ShieldHit.Strength);
+        Assert.Equal(ShieldImpact.Strength(0, 150f * Pod.CollisionShieldCost, Pod.ShieldCapacity, Pod.ShieldImpactEnergyFraction), state.ShieldHit.Strength);
         Assert.Equal(1, state.ShieldHit.Serial);
     }
 
@@ -2830,7 +2830,7 @@ public sealed class ShieldStateTests
         HullSim.ShieldContact(ref state, Pod, PodDesign, body.Alive, Pod.ShieldContactSpeed * 0.5f);
         Assert.Equal(0, state.ShieldHit.Strength);
         HullSim.ShieldContact(ref state, Pod, PodDesign, body.Alive, Pod.ShieldContactSpeed * 2f);
-        Assert.Equal(1, state.ShieldHit.Strength);
+        Assert.Equal(ShieldImpact.Strength(0.5f * Pod.Mass * MathF.Pow(Pod.ShieldContactSpeed * 2f, 2), 0, Pod.ShieldCapacity, Pod.ShieldImpactEnergyFraction), state.ShieldHit.Strength);
         Assert.Equal(Pod.ShieldCapacity, state.Shield);
         Assert.Equal(Pod.HullPoints, state.Hull);
         Assert.Equal(0f, state.ShieldCooldown);

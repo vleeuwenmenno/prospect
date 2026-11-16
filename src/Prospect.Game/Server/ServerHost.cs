@@ -22,6 +22,9 @@ public sealed class ServerConfig
     /// </summary>
     public float? ScriptedShieldBreakSeconds { get; init; }
 
+    /// <summary>Capture-only impact speed against a large rock, in an unsaved local game.</summary>
+    public float? ScriptedRamSpeed { get; init; }
+
     /// <summary>
     /// Scripted captures only (<c>--hurt-fleet</c>): seconds into the run at which the player's other hulls are hurt, one
     /// with a half shield and hull, one with a broken shield and a low hull, so the target panel can be checked.
@@ -439,6 +442,12 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             if (config.VisualBenchmark is not null && (config.Visibility != ServerVisibility.Private || world is not null || transports.Any(t => !t.IsInProcess)))
                 throw new InvalidDataException("Visual benchmark requires an unsaved private in-process server.");
             config.VisualBenchmark?.Validate();
+            if (config.ScriptedRamSpeed is { } ramSpeed)
+            {
+                if (!(ramSpeed >= 0 && ramSpeed <= 100) || config.Visibility != ServerVisibility.Private || world is not null || transports.Any(t => !t.IsInProcess))
+                    throw new InvalidDataException("A scripted ram needs an unsaved private in-process server and a speed of 0 to 100 m/s.");
+                _scriptedRamSpeed = ramSpeed;
+            }
             if (config.ScriptedShieldBreakSeconds is { } breakAt)
             {
                 if (!(breakAt >= 0f && breakAt <= 600f) || config.Visibility != ServerVisibility.Private || world is not null || transports.Any(t => !t.IsInProcess))
@@ -804,6 +813,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         TickEditor(tick);
         TickVisualBenchmark(tick);
         TickScriptedShieldBreak(tick);
+        TickScriptedRam(tick);
         TickScriptedFleetHurt(tick);
 
         // Capture generations before the round: replacement drones wait until the next interval.

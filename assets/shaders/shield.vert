@@ -26,7 +26,13 @@ layout(location = 4) flat out vec4 ripples[4];
 layout(location = 8) flat out vec4 rippleStrength;
 layout(location = 9) flat out int cut;
 layout(location = 10) flat out int own;
+layout(location = 12) flat out vec4 patches[4];
 layout(location = 11) flat out vec4 recovering;
+
+layout(location = 12) in vec4 patch0;
+layout(location = 13) in vec4 patch1;
+layout(location = 14) in vec4 patch2;
+layout(location = 15) in vec4 patch3;
 
 void main()
 {
@@ -58,6 +64,7 @@ void main()
     ripples[3] = ripple3;
     rippleStrength = strengths;
     recovering = recovery;
+    patches[0] = patch0; patches[1] = patch1; patches[2] = patch2; patches[3] = patch3;
 
     // The material is decoded as the hull's mesh decodes it: the kind, plus four times one more than the slot.
     int slot = int((params.w + 0.5) * 0.25);

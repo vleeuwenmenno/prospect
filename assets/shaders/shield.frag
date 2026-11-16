@@ -18,6 +18,7 @@ layout(location = 4) flat in vec4 ripples[4];
 layout(location = 8) flat in vec4 rippleStrength;
 layout(location = 9) flat in int cut;
 layout(location = 10) flat in int own;
+layout(location = 12) flat in vec4 patches[4];
 layout(location = 11) flat in vec4 recovering;  // see ShieldInstance.Recovery
 layout(location = 0) out vec4 outColor;
 
@@ -49,18 +50,26 @@ float noise(vec3 x)
         f.z);
 }
 
-vec2 ripple(vec4 at, float strength)
+vec2 ripple(vec4 at, float strength, vec4 contactPatch)
 {
     float age = at.w;
     float seconds = shieldLook.ripple.z;
     if (strength <= 0.0 || age < 0.0 || age >= seconds)
         return vec2(0.0);
-    float d = length(localPosition - at.xyz);
+    vec3 delta = localPosition - at.xyz;
+    float d = length(delta);
+    float spot = d / shieldLook.impact.x;
+    if (contactPatch.w > 0.0) {
+        vec3 normal = normalize(contactPatch.xyz);
+        float plane = dot(delta, normal);
+        float edge = max(0.0, length(delta - plane * normal) - contactPatch.w);
+        d = length(vec2(plane, edge));
+        spot = length(vec2(plane * length(contactPatch.xyz), edge / shieldLook.impact.x));
+    }
     float ring = (d - age * shieldLook.ripple.x) / shieldLook.ripple.y;
     float life = 1.0 - age / seconds;
     // A bright contact patch and two narrow wavefronts share the authoritative hit clock.
     float echo = ring + 1.8;
-    float spot = d / shieldLook.impact.x;
     float flashLife = max(0.0, 1.0 - age / shieldLook.impact.y);
     return strength * vec2(life * life * (exp(-ring * ring) + 0.3 * exp(-echo * echo * 2.0)),
         flashLife * flashLife * exp(-spot * spot));
@@ -86,8 +95,8 @@ void main()
     float fine = noise(localPosition * 2.6 - vec3(time * 0.5, 0.0, time * 0.4));
     float field = drift * 0.65 + fine * 0.35;
 
-    vec2 hit = ripple(ripples[0], rippleStrength.x) + ripple(ripples[1], rippleStrength.y)
-        + ripple(ripples[2], rippleStrength.z) + ripple(ripples[3], rippleStrength.w);
+    vec2 hit = ripple(ripples[0], rippleStrength.x, patches[0]) + ripple(ripples[1], rippleStrength.y, patches[1])
+        + ripple(ripples[2], rippleStrength.z, patches[2]) + ripple(ripples[3], rippleStrength.w, patches[3]);
 
     // Near breaking, broad slow waves roll across the whole shell, never a flicker.
     float wave = 0.5 + 0.5 * sin(dot(localPosition, vec3(0.55, 0.9, 0.4)) * 1.1 - time * 1.6 + field * 2.5);

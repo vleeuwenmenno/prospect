@@ -143,6 +143,9 @@ public sealed record FlightRules
     /// <summary>Minimum closing speed for a contact glint, independent of damage.</summary>
     public float ShieldContactSpeed { get; init; } = 0.1f;
 
+    /// <summary>Impact energy per shield capacity that produces a full contact flash.</summary>
+    public float ShieldImpactEnergyFraction { get; init; } = 0.9f;
+
     /// <summary>Maximum tree visits per hull pair stride or asteroid query.</summary>
     public int CollisionTreeVisits { get; init; } = 8192;
     /// <summary>Maximum narrow-phase tests per query.</summary>
@@ -259,6 +262,7 @@ public sealed class BlockCatalog
             ShieldRechargeDelaySeconds = r.GetProperty("shieldRechargeDelaySeconds"u8).GetSingle(),
             ShieldRestartFraction = r.GetProperty("shieldRestartFraction"u8).GetSingle(),
             ShieldRestartPowerMultiplier = r.GetProperty("shieldRestartPowerMultiplier"u8).GetSingle(),
+            ShieldImpactEnergyFraction = r.TryGetProperty("shieldImpactEnergyFraction"u8, out var impactFraction) ? impactFraction.GetSingle() : 0.9f,
             ShieldContactSpeed = r.TryGetProperty("shieldContactSpeed"u8, out var contactSpeed) ? contactSpeed.GetSingle() : 0.1f,
             CollisionTreeVisits = r.GetProperty("collisionTreeVisits"u8).GetInt32(),
             CollisionBoxTests = r.GetProperty("collisionBoxTests"u8).GetInt32(),
@@ -286,6 +290,8 @@ public sealed class BlockCatalog
             throw new InvalidDataException($"{path}: invalid collision budgets");
         if (!(rules.BoostFuelMultiplier >= 1 && rules.BoostFuelMultiplier <= 100))
             throw new InvalidDataException($"{path}: boostFuelMultiplier must be from 1 to 100");
+        if (!float.IsFinite(rules.ShieldImpactEnergyFraction) || rules.ShieldImpactEnergyFraction <= 0)
+            throw new InvalidDataException($"{path}: shieldImpactEnergyFraction must be finite and positive");
         if (!float.IsFinite(rules.ShieldContactSpeed) || rules.ShieldContactSpeed <= 0)
             throw new InvalidDataException($"{path}: shieldContactSpeed must be finite and positive");
         if (!float.IsFinite(rules.ShieldRechargeDelaySeconds) || rules.ShieldRechargeDelaySeconds < 0)

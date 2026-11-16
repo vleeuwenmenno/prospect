@@ -32,12 +32,13 @@ internal sealed class ShieldLook
     public float RippleGlow { get; init; } = 0.9f;
 
     /// <summary>The impact patch's radius in metres, lifetime in seconds, and peak scene light.</summary>
+    public float ContactBandFraction { get; init; } = 0.1f;
     public float ImpactRadius { get; init; } = 1.2f;
     public float ImpactSeconds { get; init; } = 0.45f;
     public float ImpactGlow { get; init; } = 2.4f;
 
     /// <summary>The visible strength of a contact that absorbs no damage, from zero to one.</summary>
-    public float ContactStrength { get; init; } = 0.65f;
+    public float ContactStrength { get; init; } = 0.05f;
 
     /// <summary>The share of its capacity below which a shield starts to waver, and at which it wavers most.</summary>
     public float UnstableBelow { get; init; }
@@ -93,6 +94,8 @@ internal sealed class ShieldLook
         static bool Colour(float[] c) => c.Length == 3 && c[0] is >= 0 and <= 4 && c[1] is >= 0 and <= 4 && c[2] is >= 0 and <= 4;
         if (!Seconds(look.CollapseSeconds) || !Seconds(look.FadeInSeconds) || !Seconds(look.RippleSeconds))
             throw new InvalidDataException($"{path}: collapse, fade-in and ripple last from 0.05 to {MaxEffectSeconds} s");
+        if (!(look.ContactBandFraction > 0 && look.ContactBandFraction <= 1))
+            throw new InvalidDataException($"{path}: contactBandFraction must be above zero and at most one");
         if (!(look.RippleSpeed > 0 && look.RippleSpeed <= 100) || !(look.RippleWidth > 0 && look.RippleWidth <= 20))
             throw new InvalidDataException($"{path}: rippleSpeed is above 0 to 100 m/s, rippleWidth above 0 to 20 m");
         if (!(look.RippleGlow is >= 0 and <= 8) || !(look.ImpactGlow is >= 0 and <= 8)

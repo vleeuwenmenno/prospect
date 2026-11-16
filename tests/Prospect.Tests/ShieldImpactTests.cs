@@ -1,4 +1,5 @@
 using System.Numerics;
+using Prospect.Client.World;
 using Prospect.Game.World;
 using Xunit;
 
@@ -8,6 +9,51 @@ namespace Prospect.Tests;
 public sealed class ShieldImpactTests
 {
     private static readonly GameContent Content = GameContent.Load();
+    [Fact]
+    public void EnergyCurveIsMonotonicAndDroneTapsAreFaint()
+    {
+        var drone = Content.Designs[Content.DroneDesign].Flight;
+        var pod = Content.Pod.Flight;
+        byte Strength(float speed, FlightParams flight) => ShieldImpact.Strength(0.5f * flight.Mass * speed * speed, 0, flight.ShieldCapacity, flight.ShieldImpactEnergyFraction);
+        Console.WriteLine($"Shield calibration: drone mass {drone.Mass}, capacity {drone.ShieldCapacity}, tap {Strength(0.3f, drone)}, ram {Strength(8, drone)}; pod mass {pod.Mass}, capacity {pod.ShieldCapacity}, ram {Strength(8, pod)}");
+        Assert.InRange(Strength(0.3f, drone), (byte)1, (byte)10);
+        Assert.Equal(1, Strength(0, drone));
+        Assert.Equal(255, Strength(8, pod));
+        var previous = (byte)0;
+        for (var i = 0; i < 1000; i++)
+        {
+            var next = Strength(i * 0.1f, drone);
+            Assert.True(next >= previous);
+            previous = next;
+        }
+        Assert.Equal(ShieldImpact.Strength(20, 0, 100, 2), ShieldImpact.Strength(20, 10, 100, 2));
+    }
+
+    [Fact]
+    public void GiantRockPatchFollowsItsSurfaceAndCoversTheTouchingSide()
+    {
+        var rock = new Asteroid { Radius = 10000, Rotation = Quaternion.Identity, Shape = 0 };
+        var point = Vector3.UnitY * (rock.Radius * AsteroidShape.RadiusAlong(rock.Shape, Vector3.UnitY));
+        var patch = ShieldPatch.Rock(rock, point, Quaternion.Identity, 5, 0.45f);
+        Assert.InRange(patch.Normal.Length(), 0.999f, 1.001f);
+        Assert.True(Vector3.Dot(patch.Normal, Vector3.UnitY) > 0.8f);
+        Assert.Equal(10f, patch.Extent);
+        var probe = new AllocationProbe();
+        while (probe.Measuring())
+            _ = ShieldPatch.Rock(rock, point, Quaternion.Identity, 5, 0.45f);
+        Assert.Equal(0, probe.Bytes);
+        var tangent = Vector3.Normalize(Vector3.Cross(patch.Normal, Vector3.UnitX));
+        Assert.InRange(MathF.Abs(ShieldPatch.Distance(rock, point + tangent) - ShieldPatch.Distance(rock, point - tangent)), 0, 0.05f);
+    }
+
+    [Fact]
+    public void HullPatchNormalSurvivesPointQuantizationOntoTheFace()
+    {
+        Assert.Equal(Vector3.UnitY, ShieldPatch.BlockNormal(new Vector3(0, 1, 0), Vector3.One, BlockShape.Box));
+        Assert.Equal(Vector3.UnitY, ShieldPatch.BlockNormal(new Vector3(0, 0.99f, 0), Vector3.One, BlockShape.Box));
+        Assert.Equal(Vector3.UnitY, ShieldPatch.BlockNormal(new Vector3(0, 1.01f, 0), Vector3.One, BlockShape.Box));
+    }
+
     private static HullDesign Box(int width) => HullDesign.Of(new BoxDesign("Shield contact", 1,
         [new(new(0, 0, 0), new(width, 2, 2), new BlockType
         {

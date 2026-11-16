@@ -31,6 +31,22 @@ public static class AsteroidShape
         return Lumps(shape, unsquashed / length) * Scales[shape] / length;
     }
 
+    /// <summary>Outward tangent normal of the shared radial surface, sampled in the rock's frame.</summary>
+    public static Vector3 Normal(int shape, Vector3 local, float radius, float step)
+    {
+        var gradient = new Vector3(
+            SurfaceDistance(shape, radius, local + Vector3.UnitX * step) - SurfaceDistance(shape, radius, local - Vector3.UnitX * step),
+            SurfaceDistance(shape, radius, local + Vector3.UnitY * step) - SurfaceDistance(shape, radius, local - Vector3.UnitY * step),
+            SurfaceDistance(shape, radius, local + Vector3.UnitZ * step) - SurfaceDistance(shape, radius, local - Vector3.UnitZ * step));
+        return gradient.LengthSquared() > 1e-12f ? Vector3.Normalize(gradient) : Vector3.UnitY;
+    }
+
+    private static float SurfaceDistance(int shape, float radius, Vector3 point)
+    {
+        var length = point.Length();
+        return length - radius * RadiusAlong(shape, length > 1e-6f ? point / length : Vector3.UnitY);
+    }
+
     private static Vector3 Squash(int shape)
     {
         var seed = shape + 1;
