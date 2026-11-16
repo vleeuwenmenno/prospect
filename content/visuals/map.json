@@ -51,5 +51,19 @@
   ],
   "unitHoverPixels": 14,
   "unitLabelAlpha": 0.75,
-  "legendRowHeight": 20
+  "legendRowHeight": 20,
+  "ftlColor": "5CE1E6",
+  "ftlContactColor": "45C8DC",
+  "ftlMarkerSize": 9,
+  "ftlGlowRadius": 16,
+  "ftlGlowAlpha": 0.28,
+  "ftlPathAlpha": 0.65,
+  "ftlPathWidth": 1.75,
+  "ftlDashLength": 7,
+  "ftlDashGap": 5,
+  "ftlTargetSize": 6,
+  "ftlTrailSeconds": 1.8,
+  "ftlTrailMinPixels": 28,
+  "ftlTrailWidth": 3,
+  "ftlTrailAlpha": 0.85
 }
