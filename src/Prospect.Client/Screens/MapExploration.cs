@@ -118,6 +118,7 @@ internal sealed partial class SensorCoverage
             Positions = new Double3[capacity];
             Ids = new uint[capacity];
             Piloted = new bool[capacity];
+            ReserveEntries(capacity);
         }
 
         Configure(world.Galaxy, snapshot.Content.Exploration);

@@ -24,6 +24,12 @@ internal sealed partial class SensorCoverage
     /// <summary>A sensor or plane that moved this fraction of the sensor radius has its shape sampled again.</summary>
     private const double MoveTolerance = 0.004;
 
+    /// <summary>
+    /// Runs <see cref="SensorOutline"/>'s tables (sine and cosine of each sample direction) when the screens are made. Left
+    /// to its first use they were built in the middle of play, by the command view's first frame.
+    /// </summary>
+    static SensorCoverage() => System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(SensorOutline).TypeHandle);
+
     /// <summary>How far, in metres between hull centres, two ships' radars link into one picture. Display only.</summary>
     public double LinkDistance;
 
@@ -47,14 +53,16 @@ internal sealed partial class SensorCoverage
     public int ActiveCount { get; private set; }
     public int LinkCount { get; private set; }
 
-    private OutlineSegment[]? _outline;
+    // Made with the object, never on the first frame that asks for them: the command view's first frame used to
+    // allocate these (about 1.2 MB) in the middle of play. The screens hold one coverage for the whole run.
+    private readonly OutlineSegment[] _outline = new OutlineSegment[MaxOutlineSegments];
     private int _outlineCount;
     private int _builtCount = -1;
-    private int[] _builtActive = [];
-    private uint[] _builtVersions = [];
-    private int[] _builtGroup = [];
-    private double[] _ringX = [], _ringZ = [], _ringSamples = [];
-    private int[] _ringGroup = [];
+    private readonly int[] _builtActive = new int[MaxActive];
+    private readonly uint[] _builtVersions = new uint[MaxActive];
+    private readonly int[] _builtGroup = new int[MaxActive];
+    private readonly double[] _ringX = new double[MaxActive], _ringZ = new double[MaxActive], _ringSamples = new double[MaxActive * ReachSamples];
+    private readonly int[] _ringGroup = new int[MaxActive];
 
     /// <summary>
     /// Points sampling at a galaxy and the content's rules. A change of either forgets every shape. The gas cache is
@@ -137,6 +145,19 @@ internal sealed partial class SensorCoverage
         return slot;
     }
 
+    /// <summary>Makes room for the sampled shapes of <paramref name="capacity"/> sensors; a no-op once there is room.</summary>
+    public void ReserveEntries(int capacity)
+    {
+        if (_entryState.Length >= capacity)
+            return;
+        _samples = new double[capacity * ReachSamples];
+        _entryId = new uint[capacity];
+        _entryAt = new Double3[capacity];
+        _entryPlane = new double[capacity];
+        _entryState = new byte[capacity];
+        _entryVersion = new uint[capacity];
+    }
+
     /// <summary>
     /// Brings the sampled reach of the shown (or every) sensor up to date for the horizontal plane at
     /// <paramref name="planeY"/>. A sensor never sampled, replaced, or far from where it was sampled is worked out at
@@ -147,17 +168,8 @@ internal sealed partial class SensorCoverage
     {
         if (_rules is null)
             return;
-        if (_entryState.Length < Positions.Length)
-        {
-            var capacity = Positions.Length;
-            _samples = new double[capacity * ReachSamples];
-            _entryId = new uint[capacity];
-            _entryAt = new Double3[capacity];
-            _entryPlane = new double[capacity];
-            _entryState = new byte[capacity];
-            _entryVersion = new uint[capacity];
-        }
-
+        // Collect has already sized these to the snapshot; this only serves a caller that sets Positions by hand.
+        ReserveEntries(Positions.Length);
         var radius = _rules.SensorRadius;
         var budget = RefreshBudget;
         var shown = activeOnly ? ActiveCount : Count;
@@ -254,18 +266,6 @@ internal sealed partial class SensorCoverage
     /// </summary>
     public ReadOnlySpan<OutlineSegment> Outline()
     {
-        if (_outline is null)
-        {
-            _outline = new OutlineSegment[MaxOutlineSegments];
-            _builtActive = new int[MaxActive];
-            _builtVersions = new uint[MaxActive];
-            _builtGroup = new int[MaxActive];
-            _ringX = new double[MaxActive];
-            _ringZ = new double[MaxActive];
-            _ringGroup = new int[MaxActive];
-            _ringSamples = new double[MaxActive * ReachSamples];
-        }
-
         var current = _builtCount == ActiveCount;
         for (var s = 0; s < ActiveCount && current; s++)
         {
@@ -315,25 +315,17 @@ internal sealed partial class SensorCoverage
         return false;
     }
 
-    private OutlineSegment[]? _lost;
-    private double[] _lostX = [], _lostZ = [], _lostNominal = [], _lostSamples = [];
+    private readonly OutlineSegment[] _lost = new OutlineSegment[SensorOutline.MaxRings * ReachSamples];
+    private readonly double[] _lostX = new double[SensorOutline.MaxRings], _lostZ = new double[SensorOutline.MaxRings],
+        _lostNominal = new double[SensorOutline.MaxRings], _lostSamples = new double[SensorOutline.MaxRings * ReachSamples];
 
     /// <summary>
     /// The outline, on the plane last given to <see cref="Refresh"/>, of the range gas took from the shown (or
     /// every) sensor: pieces of each plain sphere's circle beside a direction gas cut short, once where the discs
-    /// overlap. Built from the sampled rings each call and written into memory made on the first one.
+    /// overlap. Built from the sampled rings each call and written into memory made with the object.
     /// </summary>
     public ReadOnlySpan<OutlineSegment> LostRange(bool activeOnly)
     {
-        if (_lost is null)
-        {
-            _lost = new OutlineSegment[SensorOutline.MaxRings * ReachSamples];
-            _lostX = new double[SensorOutline.MaxRings];
-            _lostZ = new double[SensorOutline.MaxRings];
-            _lostNominal = new double[SensorOutline.MaxRings];
-            _lostSamples = new double[SensorOutline.MaxRings * ReachSamples];
-        }
-
         var rings = 0;
         var shown = activeOnly ? ActiveCount : Count;
         for (var s = 0; s < shown && rings < SensorOutline.MaxRings; s++)

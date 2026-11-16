@@ -56,6 +56,11 @@ internal sealed partial class ScreenHost
         InitializeNotices();
         _mapPanels = new MapPanels(app.Settings);
         _app.Actions.Changed += OnBindingsChanged;
+        // Read here, never on the first frame that draws with them: a load builds a parser and its tables, which is
+        // memory the frame loop must not take (the command view's fleet list used to read the status look in play).
+        _mapTuning = MapTuning.Load();
+        _statusTuning = StatusTuning.Load();
+        _editorTuning = Prospect.Client.World.EditorTuning.Load();
     }
 
     public Screen Current => _screen;
