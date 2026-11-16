@@ -906,7 +906,10 @@ How to apply it:
   Load applies range, acceleration, maxMass and power multipliers once; power scales both base and per-tonne draw.
   Every shared reach, acquisition, pull, prediction and preview consumer reads the evaluated mount spec.
   Evaluator 17 prevents older code from accepting the same files while ignoring tiers.
-- `TractorReach` is the shared range, nearest rack face, live-block segment and packing rule. Its points use
+- `TractorReach` is the shared range, rack-face view, live-block segment and packing rule. A rack is in view
+  through any open face the emitter is outside of whose part in the mount's outward half-space (parent block's face
+  plane) has a clear line: aim is that part's middle, else its nearest point (`Rack`'s `nearest`, `Aim`, kept by
+  `TractorPreview` and drawn by the editor); never test only the nearest face centre. Its points use
   grid-edge metres; hull-local points subtract `(design.CenterOfMass + 0.5) * BlockSize`. Wedges use their slant.
   Both mount-to-container and mount-to-rack paths must be clear. Never load by contact.
 - `TractorSimulation.Plan` preserves existing exclusive claims, then acquires in hull/mount/body order from the
