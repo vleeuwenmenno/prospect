@@ -8,6 +8,32 @@ namespace Prospect.Tests;
 
 public sealed class FreeContainerWireTests
 {
+    [Theory]
+    [InlineData(JettisonMode.Abandon)]
+    [InlineData(JettisonMode.KeepClaim)]
+    public void FlightReleaseHasExactBudgetAndRejectsMalformedRequests(JettisonMode mode)
+    {
+        var request = new JettisonCargoMessage(65536, 42, 254, 100, mode);
+        var bytes = new byte[JettisonCargoMessage.MaxWireSize];
+        var writer = new NetWriter(bytes); request.Write(ref writer);
+        Assert.Equal(19, writer.Length);
+        var reader = new NetReader(bytes.AsSpan(1));
+        Assert.True(JettisonCargoMessage.TryRead(ref reader, out var copy));
+        Assert.Equal(request, copy);
+        for (var n = 1; n < bytes.Length; n++)
+        {
+            reader = new NetReader(bytes.AsSpan(1, n - 1));
+            Assert.False(JettisonCargoMessage.TryRead(ref reader, out _));
+        }
+        foreach (var bad in new[] { request with { Hull = 0 }, request with { Rack = -1 },
+            request with { Index = 255 }, request with { Tick = -1 }, request with { Mode = (JettisonMode)2 } })
+        {
+            writer = new NetWriter(bytes); bad.Write(ref writer);
+            reader = new NetReader(bytes.AsSpan(1));
+            Assert.False(JettisonCargoMessage.TryRead(ref reader, out _));
+        }
+    }
+
     [Fact]
     public void TractorWireRejectsImpossibleClaimsAndFlags()
     {
@@ -40,12 +66,14 @@ public sealed class FreeContainerWireTests
             Hull = 7,
             CargoRack = 42,
             CargoIndex = 254,
+            JettisonMode = JettisonMode.KeepClaim,
             CargoTick = 100
         };
         var writer = new NetWriter(bytes); request.Write(ref writer, default);
         Assert.Equal(bytes.Length, writer.Written.Length);
         var reader = new NetReader(bytes.AsSpan(1));
         Assert.True(EditorRequestMessage.TryRead(ref reader, default, out var actual));
+        Assert.Equal(request.JettisonMode, actual.JettisonMode);
         Assert.Equal(request.Kind, actual.Kind); Assert.Equal(request.Token, actual.Token);
         Assert.Equal(request.Hull, actual.Hull); Assert.Equal(request.CargoRack, actual.CargoRack);
         Assert.Equal(request.CargoIndex, actual.CargoIndex); Assert.Equal(request.CargoTick, actual.CargoTick);
@@ -54,6 +82,10 @@ public sealed class FreeContainerWireTests
             reader = new NetReader(bytes.AsSpan(1, length - 1));
             Assert.False(EditorRequestMessage.TryRead(ref reader, default, out _));
         }
+        bytes[^1] = 2;
+        reader = new NetReader(bytes.AsSpan(1));
+        Assert.False(EditorRequestMessage.TryRead(ref reader, default, out _));
+        bytes[^1] = (byte)JettisonMode.KeepClaim;
         bytes[14] = 255;
         reader = new NetReader(bytes.AsSpan(1));
         Assert.False(EditorRequestMessage.TryRead(ref reader, default, out _));
@@ -70,6 +102,8 @@ public sealed class FreeContainerWireTests
             items[i] = new()
             {
                 Id = (uint)i + 1,
+                ClaimOwner = (uint)i + 7,
+                PickupReadyTick = 600,
                 Position = new(1e12 + i, -3, 4),
                 Orientation = Quaternion.Identity,
                 Velocity = new(1, 2, 3),
@@ -106,7 +140,7 @@ public sealed class FreeContainerWireTests
         Assert.Equal(17L, tick);
         Assert.Equal(items.Length, count);
         Assert.Equal(0, probe.Bytes);
-        Assert.Equal(23563, bytes.Length);
+        Assert.Equal(26635, bytes.Length);
         for (var i = 0; i < items.Length; i++) Assert.Equal(items[i], output[i]);
         for (var n = 1; n < bytes.Length; n++)
         {

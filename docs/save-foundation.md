@@ -487,11 +487,11 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
 - Earlier codecs are refused explicitly; an old teleported transit is never silently treated as a moving one.
 - World settings retain `ftlSpeedKmPerSecond`; no per-tick disk work or new snapshot array is needed.
 
-## Free containers (codec 13)
+## Free containers (codec 15)
 
-- The snapshot reserves 256 free records before ticking. Each encodes 98 bytes: durable id, Double3 position,
-  velocity, orientation, angular velocity, size, resource, kilograms, HP, birth tick and unattended age.
-  Count and next id add eight header bytes; maximum extra encoded storage is 25,096 bytes.
+- The snapshot reserves 256 free records before ticking. Each encodes 110 bytes: durable id, Double3 position,
+  velocity, orientation, angular velocity, size, resource, kilograms, HP, birth tick, unattended age, durable claim owner and pickup-ready tick.
+  Count and next id add eight header bytes; maximum extra encoded storage is 28,168 bytes.
 - Capture takes no memory. Save limits reserve both encoded and decoded space, even when the pool is empty.
   Sources still call `HasRoom`; oldest-first sector/global eviction bounds growth.
 - Load validates finite poses, normalized orientation, positive HP, payload against original saved cargo rules,
@@ -499,12 +499,15 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
   Current cargo retunes then validate payloads, logging drops, and reapply sector caps.
 - `containerLifetimeMinutes` persists with world settings (default 60, zero never). Unattended age advances only
   without a connected pilot within the base sensor radius. Birth/id order controls cap eviction.
-- Layouts before 14 are refused without migration. Wreck splitting preserves held cargo; only rack damage ejects.
+- Layouts before 15 are refused without migration. Wreck splitting preserves held cargo; only rack damage ejects.
 
-## Tractor acquisition (codec 14)
+## Tractor acquisition (codec 15)
 
-- Free-body position, velocity, orientation and payload remain the existing 98-byte saved record.
+- Free-body position, velocity, orientation and payload are part of the 110-byte saved record.
 - Tractor hull handles, mount/rack selection, approach stage and powered flag are transient, never encoded.
-  Both codec loading and direct store restoration clear claims; acquisition restarts from the saved pose.
+  Both codec loading and direct store restoration clear transient pulls; acquisition restarts from the saved pose.
 - A stowed container is already in the saved hold; an approaching container remains in the free pool.
   There is no second cargo copy or pending disk operation. Older codec layouts are refused untouched.
+
+- Pickup ownership survives load and reconnect using the same durable owner as hulls. Unknown owners refuse loading.
+- Pickup-ready ticks survive unchanged on the saved simulation clock; time offline does not consume the delay.

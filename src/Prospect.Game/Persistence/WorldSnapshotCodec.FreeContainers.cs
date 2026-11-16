@@ -5,7 +5,7 @@ namespace Prospect.Game.Persistence;
 
 public static partial class WorldSnapshotCodec
 {
-    internal const int FreeContainerBytes = 98;
+    internal const int FreeContainerBytes = 110;
 
     private static void WriteFreeContainer(ref NetWriter writer, in FreeContainer c)
     {
@@ -14,6 +14,7 @@ public static partial class WorldSnapshotCodec
         Write(ref writer, c.AngularVelocity);
         writer.WriteByte((byte)c.Size); writer.WriteByte(c.Resource < 0 ? byte.MaxValue : (byte)c.Resource);
         writer.WriteDouble(c.Amount); writer.WriteSingle(c.Hull);
+        writer.WriteUInt32(c.ClaimOwner); writer.WriteInt64(c.PickupReadyTick);
         writer.WriteInt64(c.Born); writer.WriteInt64(c.Age);
     }
 
@@ -30,6 +31,8 @@ public static partial class WorldSnapshotCodec
             Resource = reader.ReadByte(),
             Amount = reader.ReadDouble(),
             Hull = reader.ReadSingle(),
+            ClaimOwner = reader.ReadUInt32(),
+            PickupReadyTick = reader.ReadInt64(),
             Born = reader.ReadInt64(),
             Age = reader.ReadInt64()
         };
@@ -39,7 +42,7 @@ public static partial class WorldSnapshotCodec
 
     internal static bool ValidFreeContainer(in FreeContainer c, in SavedCargoRules rules, long tick, uint next)
     {
-        if (c.Id == 0 || next != 0 && c.Id >= next || c.Born < 0 || c.Born > tick || c.Age < 0 || c.Age > tick - c.Born
+        if (c.PickupReadyTick < 0 || c.PickupReadyTick > long.MaxValue / 2 || c.Id == 0 || next != 0 && c.Id >= next || c.Born < 0 || c.Born > tick || c.Age < 0 || c.Age > tick - c.Born
             || !double.IsFinite(c.Position.X) || !double.IsFinite(c.Position.Y) || !double.IsFinite(c.Position.Z)
             || !float.IsFinite(c.Velocity.LengthSquared()) || !float.IsFinite(c.AngularVelocity.LengthSquared())
             || !float.IsFinite(c.Orientation.LengthSquared()) || Math.Abs(c.Orientation.LengthSquared() - 1) >= .001f

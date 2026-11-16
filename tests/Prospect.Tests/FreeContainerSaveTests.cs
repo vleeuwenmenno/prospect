@@ -36,7 +36,7 @@ public sealed class FreeContainerSaveTests
         Assert.Equal(expected, copy!.FreeContainers[0]);
         var store = new FreeContainers(); store.Restore(world.FreeContainers.AsSpan(0, 1), 2);
         Assert.Equal(expected, store.Items[0]);
-        Assert.Equal(14, WorldSnapshotCodec.Version);
+        Assert.Equal(15, WorldSnapshotCodec.Version);
     }
 
     [Fact]
@@ -55,6 +55,8 @@ public sealed class FreeContainerSaveTests
                 Orientation = Quaternion.Identity,
                 Velocity = new(1, 2, 3),
                 AngularVelocity = new(0, .3f, 0),
+                ClaimOwner = rig.Hulls.Info(0).Owner,
+                PickupReadyTick = 600,
                 Resource = 0,
                 Amount = 100,
                 Hull = 30
@@ -67,6 +69,8 @@ public sealed class FreeContainerSaveTests
         Assert.Single(restored.Items.ToArray());
         Assert.Equal(expected, restored.Items[0]);
         Assert.Equal(next, restored.NextId);
+        loaded.Join();
+        Assert.Equal(restored.Items[0].ClaimOwner, loaded.Hulls.Info(0).Owner);
     }
 
     [Fact]
@@ -96,6 +100,12 @@ public sealed class FreeContainerSaveTests
         Assert.Equal(0, probe.Bytes);
         for (var n = bytes.Length - WorldSnapshotCodec.FreeContainerBytes; n < bytes.Length; n++)
             Assert.False(WorldSnapshotCodec.TryDecode(bytes.AsSpan(0, n), SaveLimits.Default, out _, out _));
+        world.FreeContainers[0].ClaimOwner = 99;
+        Assert.False(WorldSnapshotCodec.TryDecode(WorldSnapshotCodec.Encode(world), SaveLimits.Default, out _, out _));
+        world.FreeContainers[0].ClaimOwner = 0;
+        world.FreeContainers[0].PickupReadyTick = -1;
+        Assert.False(WorldSnapshotCodec.TryDecode(WorldSnapshotCodec.Encode(world), SaveLimits.Default, out _, out _));
+        world.FreeContainers[0].PickupReadyTick = 600;
         world.FreeContainers[0].Age = 18;
         Assert.False(WorldSnapshotCodec.TryDecode(WorldSnapshotCodec.Encode(world), SaveLimits.Default, out _, out _));
         world.FreeContainers[0].Age = 4;

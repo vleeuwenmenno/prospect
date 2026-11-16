@@ -71,6 +71,25 @@ Temporary local debug loading is available. Mining output is not built.
 - A claimed container ages and expires like any other. The claim is saved with the world.
 - Containers thrown out by a destroyed rack are unclaimed.
 
+### Implementation (step 3b)
+
+- Server, simulation, wire and save support Abandon and KeepClaim; the Cargo window is separate work.
+- Every release stores `PickupReadyTick`; `pickupDelaySeconds` defaults to 10 and accepts finite 0–3600 seconds.
+- `ClaimOwner` uses the durable hull owner id; zero is unclaimed. Destroyed racks always release unclaimed cargo.
+- `FreeContainer.MayPickup(owner, tick)` gates acquisition and client prediction. Visibility, damage and aging do not change.
+- Protocol 62 sends owner and ready tick (104-byte records, 26,635-byte maximum). Codec 15 saves both.
+  Unknown saved owners and invalid clocks refuse loading; transient tractor pulls restart. Older layouts are refused.
+
+### Flight release API
+
+- `PlayerInputBridge.JettisonCargo(uint hull, int rack, int index, long tick, JettisonMode mode)` needs no open editor.
+- Pass the flown hull's id, the selected hold record's rack, its index in that hold, and `SessionSnapshot.OwnCargoTick`.
+  Mode is `JettisonMode.Abandon` or `JettisonMode.KeepClaim` (`Prospect.Game.Protocol`).
+- Reliable message 38 is 19 bytes. Server admission and receive budgets apply before decoding.
+- Both paths share `ReleaseCargo`: owned controlled hull, current hold tick/revision, live rack/slot,
+  quarter-second cooldown and no FTL transit. The editor path also retains its edit-token checks.
+- Success updates the normal hold/free-container snapshots. Invalid flight requests change nothing; no separate reply.
+
 ### Cargo window
 
 - The top bar's Inventory tab becomes Cargo. It opens the Cargo window in interface mode.
@@ -89,6 +108,20 @@ Temporary local debug loading is available. Mining output is not built.
   maximum mass and power draw. Multipliers are content, beside the sensor tiers.
 - The editor card shows the tier badge, as sensor cards do. The turret base carries the tier colour.
 - The editor's Storage category holds tanks, cargo racks and tractors.
+
+### Implementation: tractor tiers
+
+- Only `tractorBeam` (Common) ships, as only Common sensors do. Its `tractor.quality` uses the same quality
+  names and `ModuleQuality` enum as modules; a higher tier is the same block at another quality.
+- The editor card matches a sensor card: tier badge, then range, pull, lift and draw.
+- `tractorTiers` multiplies range, acceleration, maxMass and power at load time.
+  Power scales both basePower and powerPerTonne. Invalid quality, nonfinite/nonpositive multipliers and oversized results refuse content.
+- Common multipliers are 1/1/1/1; Uncommon 1.2/1.25/1.5/1.1; Rare 1.4/1.5/2.5/1.2.
+  Epic is 1.7/2/4/1.35; Legendary 2/2.5/6/1.5; Alien Tech 2.5/3.5/10/1.7.
+- Shared reach, plan, pull, power prediction and editor preview read each mount's evaluated `TractorSpec`.
+  Content and save identities cover the table; evaluator 17 rejects older arithmetic. Protocol remains 62; codec remains 15.
+- All six types appear through the existing Storage palette. Existing emitter models are reused through content entries.
+  Tier badges need new drawing: the sensor card is module-specific. Badge, turret aiming and tier-colour visuals remain separate work.
 
 ## Open
 

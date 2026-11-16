@@ -20,6 +20,35 @@ public sealed class TractorSimulationTests
         Hull = 50
     };
 
+    [Theory]
+    [InlineData(0u)]
+    [InlineData(2u)]
+    public void DelayBlocksEveryOwnerThenEligibleOwnerPulls(uint owner)
+    {
+        var design = Design(); using var hulls = new HullStore();
+        var first = hulls.Create(1, 0, design, Double3.Zero);
+        var second = hulls.Create(2, 0, design, Double3.Zero);
+        var field = new HullField(hulls, [design]);
+        var bodies = new FreeContainers(); var item = Item(design, Double3.Zero);
+        item.ClaimOwner = owner; item.PickupReadyTick = 600;
+        Assert.True(bodies.Add(Content, item, out _));
+        var tractor = new TractorSimulation(); var scratch = new byte[8];
+        for (var tick = 0; tick < 600; tick++)
+        {
+            tractor.Plan(bodies, Content, field, scratch, tick);
+            Assert.Equal(0u, bodies.Items[0].TractorHull);
+            Assert.Equal(0, hulls.Info(first.Index).TractorDemand);
+            Assert.Equal(0, hulls.Info(second.Index).TractorDemand);
+        }
+        tractor.Plan(bodies, Content, field, scratch, 600);
+        var receiver = owner == 0 ? first : second;
+        Assert.Equal(receiver.Packed, bodies.Items[0].TractorHull);
+        hulls.Info(receiver.Index).Power.Tractor = hulls.Info(receiver.Index).TractorDemand;
+        tractor.Pull(bodies, Content, field, scratch);
+        Assert.True(bodies.Items[0].TractorPowered);
+        Assert.NotEqual(Vector3.Zero, bodies.Items[0].Velocity);
+    }
+
     [Fact]
     public void TwoMountsReserveDifferentBodiesInParallel()
     {
@@ -83,14 +112,16 @@ public sealed class TractorSimulationTests
         var origin = Content.Galaxy.CenterOf(new(0, 100, 0));
         var h = hulls.Create(1, 0, design, origin);
         var field = new HullField(hulls, [design]);
-        var bodies = new FreeContainers(); Assert.True(bodies.Add(Content, Item(design, origin), out _));
+        var bodies = new FreeContainers(); var delayed = Item(design, origin);
+        delayed.ClaimOwner = 1; delayed.PickupReadyTick = 600;
+        Assert.True(bodies.Add(Content, delayed, out _));
         var tractor = new TractorSimulation(); var scratch = new byte[8];
         var contact = new ContainerSimulation(Content.Galaxy); var rocks = new RockField(Content.Galaxy);
         var probe = new AllocationProbe(); var moved = false; var slid = false; var billed = false;
         var start = bodies.Items[0].Position;
-        for (var tick = 0; tick < 1200 && !bodies.Items.IsEmpty; tick++)
+        for (var tick = 0; tick < 1800 && !bodies.Items.IsEmpty; tick++)
         {
-            field.BeginRound(); tractor.Plan(bodies, Content, field, scratch);
+            field.BeginRound(); tractor.Plan(bodies, Content, field, scratch, tick);
             field.Step(h.Index, default);
             tractor.Pull(bodies, Content, field, scratch);
             contact.Step(bodies, Content, field, rocks, tick);

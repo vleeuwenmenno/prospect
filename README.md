@@ -22,7 +22,10 @@ Destroyed racks eject intact containers; wreck splits retain cargo. Free contain
 and persist in saves. Middle-click a free container to see its size, resource, amount and HP.
 Cleanup defaults to 60 unattended minutes (`containerLifetimeMinutes`, 0 means never).
 Place a Tractor beam face mount from the editor's Hull tab. It automatically pulls nearby free containers into
-racks it can see and fit them in; anyone can recover them. Range is 40 m and power rises with load mass.
+racks it can see and fit them in. Every release waits 10 seconds before pickup; unclaimed cargo is open to anyone.
+The server API also supports keeping the owner's claim; Cargo window controls are not built yet.
+Six tractor qualities scale range, pull, maximum mass and power: Common starts at 40 m; Alien Tech reaches 100 m.
+Power rises with load mass. Tier badges and the aiming turret visuals are not built yet.
 Editor lines show reachable racks; amber racks have no tractor access. Move the ship for blocked or distant cargo.
 The energy tooltip lists TRACTORS. No pickup key or pickup by touch; no allow-list/block-list filter yet.
 

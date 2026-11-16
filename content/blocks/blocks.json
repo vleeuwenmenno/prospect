@@ -34,6 +34,44 @@
     "ftlArrivalReach": 6.0,
     "ftlArrivalPulseMass": 100.0
   },
+  "tractorTiers": {
+    "Common": {
+      "range": 1,
+      "acceleration": 1,
+      "maxMass": 1,
+      "power": 1
+    },
+    "Uncommon": {
+      "range": 1.2,
+      "acceleration": 1.25,
+      "maxMass": 1.5,
+      "power": 1.1
+    },
+    "Rare": {
+      "range": 1.4,
+      "acceleration": 1.5,
+      "maxMass": 2.5,
+      "power": 1.2
+    },
+    "Epic": {
+      "range": 1.7,
+      "acceleration": 2,
+      "maxMass": 4,
+      "power": 1.35
+    },
+    "Legendary": {
+      "range": 2,
+      "acceleration": 2.5,
+      "maxMass": 6,
+      "power": 1.5
+    },
+    "Alien Tech": {
+      "range": 2.5,
+      "acceleration": 3.5,
+      "maxMass": 10,
+      "power": 1.7
+    }
+  },
   "moduleTiers": {
       "Common": {
           "range": 1,
@@ -119,7 +157,7 @@
     "tractorBeam": {
       "name": "Tractor beam", "mass": 0.15, "hull": 0,
       "mount": { "side": 6, "depth": 2, "legacyBlock": "hull" },
-      "tractor": { "range": 40, "acceleration": 4, "maxMass": 100000, "basePower": 2, "powerPerTonne": 0.5 }
+      "tractor": { "quality": "Common", "range": 40, "acceleration": 4, "maxMass": 100000, "basePower": 2, "powerPerTonne": 0.5 }
     }
   }
 }

@@ -100,6 +100,9 @@ public enum MessageId : byte
 
     /// <summary>Server to client: sensor-visible free containers.</summary>
     FreeContainers = 37,
+
+    /// <summary>Client to server: release cargo from the controlled hull without an editor.</summary>
+    JettisonCargo = 38,
 }
 
 public enum RejectReason : byte
@@ -176,7 +179,7 @@ public static class ProtocolInfo
     /// index in a list both ends generate for themselves, so two builds that generate differently would mean
     /// different rocks by the same number. Client and server must match exactly.
     /// </summary>
-    public const uint Version = 60;
+    public const uint Version = 62;
 
     public const ushort DefaultPort = 27420;
     public const int MaxNameBytes = 48;

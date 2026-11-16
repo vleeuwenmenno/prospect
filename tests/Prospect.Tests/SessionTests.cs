@@ -137,7 +137,7 @@ public sealed class ProtocolTests
             reader = new NetReader(writer.Written[..length]);
             Assert.False(HullRecord.TryRead(ref reader, out _));
         }
-        Assert.Equal(60u, ProtocolInfo.Version);
+        Assert.Equal(62u, ProtocolInfo.Version);
     }
 
     [Fact]
@@ -280,8 +280,8 @@ public sealed class ProtocolTests
 
         // What a client may send in one tick besides social traffic still fits the server's allowance for it.
         Assert.Equal(EditorRequestMessage.MaxWireSize + DesignReadyMessage.WireSize, ClientSession.EditorBytesPerTick);
-        Assert.True(ClientSession.SocialMessagesPerTick * SocialMessage.MaxWireSize + FleetOrdersMessage.MaxWireSize + 5 + ClientSession.EditorBytesPerTick <= ServerHost.PlayerBytesPerTick);
-        Assert.True(ClientSession.SocialMessagesPerTick + 4 <= ServerHost.PlayerMessagesPerTick);
+        Assert.True(ClientSession.SocialMessagesPerTick * SocialMessage.MaxWireSize + FleetOrdersMessage.MaxWireSize + 5 + ClientSession.EditorBytesPerTick + ExplorationMessage.ScanWireSize + ModuleMessage.RequestWireSize + JettisonCargoMessage.MaxWireSize <= ServerHost.PlayerBytesPerTick);
+        Assert.True(ClientSession.SocialMessagesPerTick + 7 <= ServerHost.PlayerMessagesPerTick);
     }
 
     [Theory]

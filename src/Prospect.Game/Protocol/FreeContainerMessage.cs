@@ -7,14 +7,14 @@ namespace Prospect.Game.Protocol;
 /// <summary>A complete sensor-filtered set of loose containers, separate from the hull snapshot.</summary>
 public static class FreeContainerMessage
 {
-    public const int RecordBytes = 92;
+    public const int RecordBytes = 104;
     public const int HeaderBytes = 11;
     public const int MaxWireSize = HeaderBytes + FreeContainers.Capacity * RecordBytes;
 
     /// <summary>Writes one fixed-size pose and payload record.</summary>
     public static void WriteRecord(ref NetWriter w, in FreeContainer c)
     {
-        w.WriteUInt32(c.Id);
+        w.WriteUInt32(c.Id); w.WriteUInt32(c.ClaimOwner); w.WriteInt64(c.PickupReadyTick);
         w.WriteDouble(c.Position.X); w.WriteDouble(c.Position.Y); w.WriteDouble(c.Position.Z);
         Vector(ref w, c.Velocity);
         w.WriteSingle(c.Orientation.X); w.WriteSingle(c.Orientation.Y); w.WriteSingle(c.Orientation.Z); w.WriteSingle(c.Orientation.W);
@@ -34,6 +34,8 @@ public static class FreeContainerMessage
         var c = new FreeContainer
         {
             Id = r.ReadUInt32(),
+            ClaimOwner = r.ReadUInt32(),
+            PickupReadyTick = r.ReadInt64(),
             Position = new(r.ReadDouble(), r.ReadDouble(), r.ReadDouble()),
             Velocity = Vector(ref r),
             Orientation = new(r.ReadSingle(), r.ReadSingle(), r.ReadSingle(), r.ReadSingle()),

@@ -50,6 +50,8 @@ public sealed class FreeContainerEjectionTests
         var first = CargoEjection.Make(content.Cargo, design, held, hull, Vector3.Zero, 42, 17, true);
         var again = CargoEjection.Make(content.Cargo, design, held, hull, Vector3.Zero, 42, 17, true);
         Assert.Equal(first, again);
+        Assert.Equal(642, first.PickupReadyTick);
+        Assert.Equal(0u, first.ClaimOwner);
         var other = CargoEjection.Make(content.Cargo, design, held, hull, Vector3.Zero, 42, 18, true);
         Assert.NotEqual(first.Velocity, other.Velocity);
         Assert.Equal(100, first.Amount); Assert.Equal(31, first.Hull); Assert.Equal(42, first.Born);
