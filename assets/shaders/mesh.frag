@@ -122,6 +122,13 @@ void main()
         float mottling = noise(localPosition * 9.0) * 0.6 + noise(localPosition * 31.0) * 0.4;
         albedo *= 0.55 + 0.75 * mottling;
     }
+    else if (paint.r >= 0.0 && metal < -1.5)
+    {
+        // Emissive paint (such as a tractor turret's recessed lens): glows softly regardless of star angle.
+        vec3 glow = mix(paint, albedo, 0.08) * 1.9;
+        outColor = vec4(glow, color.a > 1.5 ? 0.5 : color.a > 0.5 ? 0.375 : 0.25);
+        return;
+    }
     else if (paint.r >= 0.0)
     {
         // A tank's painted vessel: its own colour, a touch of the instance's so the editor's tones still show, no

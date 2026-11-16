@@ -38,7 +38,12 @@ internal static partial class PropulsionModels
         if (type.Cargo > 0 && look.Rack is { } rack)
             BuildRack(box, rack, look.Cargo, vertices, indices);
         else if (ModelOf(type, BlockShape.Box, look) is { } model)
-            Build(model, box, type.Fuel, 0, true, vertices, indices, null);
+        {
+            if (type.Tractor is not null && look.Tractor is { } tractor)
+                BuildTractorBase(model, box, tractor, vertices, indices);
+            else
+                Build(model, box, type.Fuel, 0, true, vertices, indices, null);
+        }
         else if (TankOf(type, BlockShape.Box, look) is { } paint)
             BuildTank(look.Tanks!, paint, box, 0, 0, vertices, indices);
     }
@@ -389,6 +394,14 @@ internal static partial class PropulsionModels
         static int Level(float c) => Math.Clamp((int)MathF.Round(c * 31f), 0, 31);
         var code = (Level(rgb[0]) << 10) | (Level(rgb[1]) << 5) | Level(rgb[2]);
         return 3.5f + (code + 0.5f) / 32768f;
+    }
+
+    /// <summary>Encodes an emissive RGB colour in the normal length (<c>4.5..</c>), read by <c>mesh.vert</c>.</summary>
+    public static float Emissive(uint rgb)
+    {
+        static int Level(uint c) => Math.Clamp((int)MathF.Round(c / 255f * 31f), 0, 31);
+        var code = (Level((rgb >> 16) & 0xFF) << 10) | (Level((rgb >> 8) & 0xFF) << 5) | Level(rgb & 0xFF);
+        return 4.5f + (code + 0.5f) / 32768f;
     }
 
     /// <summary>The paint a normal's length carries, as <c>mesh.vert</c> reads it; false for plating and bare metal.</summary>

@@ -31,6 +31,15 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
         public long Used;
     }
 
+    private struct TurretEntry
+    {
+        public float Small;
+        public MeshVertex[]? Yoke;
+        public MeshVertex[]? Head;
+        public bool Queued;
+        public long Used;
+    }
+
     private readonly ContainerBuild _containers = new(look);
     private JobHandle _containerHandle;
     private bool _containersStarted, _containersReady;
@@ -73,6 +82,7 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
     }
 
     private readonly Entry[] _entries = new Entry[Slots];
+    private readonly TurretEntry[] _turrets = new TurretEntry[16];
     private readonly Build _build = new(look);
 
     /// <summary>Only scripted editor captures request sample containers.</summary>
@@ -96,6 +106,20 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
         _pending = false;
         for (var i = 0; i < _build.Count; i++)
         {
+            if (_build.IsTurret[i])
+            {
+                ref var tEntry = ref _turrets[_build.Slots[i]];
+                tEntry.Queued = false;
+                if (tEntry.Small == _build.Cells[i])
+                {
+                    tEntry.Yoke = _build.Results[i];
+                    tEntry.Head = _build.HeadResults[i];
+                    Built++;
+                }
+                _build.Results[i] = null;
+                _build.HeadResults[i] = null;
+                continue;
+            }
             ref var entry = ref _entries[_build.Slots[i]];
             entry.Queued = false;
             // A slot handed to another part meanwhile keeps waiting for its own model.
@@ -146,10 +170,52 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
         _entries[free] = new Entry { Type = type, Half = half, Facing = facing, Cell = cell, Queued = true, Used = _frame };
         var at = _build.Count++;
         _build.Slots[at] = free;
+        _build.IsTurret[at] = false;
         _build.Types[at] = type;
         _build.Halves[at] = half;
         _build.Facings[at] = facing;
         _build.Cells[at] = cell;
+        return false;
+    }
+
+    /// <summary>
+    /// Returns the worker-built yoke and emitter head meshes for a tractor turret of half-width <paramref name="small"/>;
+    /// false while queued. Allocates nothing.
+    /// </summary>
+    public bool TryGetTractorTurret(float small, out ReadOnlySpan<MeshVertex> yoke, out ReadOnlySpan<MeshVertex> head)
+    {
+        yoke = default;
+        head = default;
+        if (small <= 0 || look.Tractor is null || !look.Models.ContainsKey("tractorBeam"))
+            return false;
+        var free = -1;
+        var oldest = long.MaxValue;
+        for (var i = 0; i < _turrets.Length; i++)
+        {
+            ref var entry = ref _turrets[i];
+            if (entry.Small == small)
+            {
+                entry.Used = _frame;
+                if (entry.Yoke is null || entry.Head is null)
+                    return false;
+                yoke = entry.Yoke;
+                head = entry.Head;
+                return true;
+            }
+            var age = entry.Small <= 0 ? long.MinValue : entry.Used;
+            if (!entry.Queued && entry.Used < _frame && age < oldest)
+            {
+                oldest = age;
+                free = i;
+            }
+        }
+        if (free < 0 || _pending || _build.Count == Batch)
+            return false;
+        _turrets[free] = new TurretEntry { Small = small, Queued = true, Used = _frame };
+        var at = _build.Count++;
+        _build.Slots[at] = free;
+        _build.IsTurret[at] = true;
+        _build.Cells[at] = small;
         return false;
     }
 
@@ -169,11 +235,13 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
         public int Count;
         public bool CargoPreview;
         public readonly int[] Slots = new int[Batch];
+        public readonly bool[] IsTurret = new bool[Batch];
         public readonly BlockType?[] Types = new BlockType?[Batch];
         public readonly Vector3[] Halves = new Vector3[Batch];
         public readonly BlockFacing[] Facings = new BlockFacing[Batch];
         public readonly float[] Cells = new float[Batch];
         public readonly MeshVertex[]?[] Results = new MeshVertex[]?[Batch];
+        public readonly MeshVertex[]?[] HeadResults = new MeshVertex[]?[Batch];
 
         public void Run()
         {
@@ -181,6 +249,27 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
             var indices = new List<uint>();
             for (var i = 0; i < Count; i++)
             {
+                if (IsTurret[i])
+                {
+                    var model = look.Models["tractorBeam"];
+                    var tractor = look.Tractor!;
+                    vertices.Clear();
+                    indices.Clear();
+                    PropulsionModels.BuildTractorYoke(Cells[i], model, tractor, vertices, indices);
+                    var yokeSoup = new MeshVertex[indices.Count];
+                    for (var k = 0; k < yokeSoup.Length; k++)
+                        yokeSoup[k] = vertices[(int)indices[k]];
+                    Results[i] = yokeSoup;
+
+                    vertices.Clear();
+                    indices.Clear();
+                    PropulsionModels.BuildTractorHead(Cells[i], model, tractor, vertices, indices);
+                    var headSoup = new MeshVertex[indices.Count];
+                    for (var k = 0; k < headSoup.Length; k++)
+                        headSoup[k] = vertices[(int)indices[k]];
+                    HeadResults[i] = headSoup;
+                    continue;
+                }
                 var type = Types[i]!;
                 vertices.Clear();
                 indices.Clear();
