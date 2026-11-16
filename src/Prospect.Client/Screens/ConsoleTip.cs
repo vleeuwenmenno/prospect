@@ -207,6 +207,8 @@ internal static class ConsoleTip
         if (flight.ShieldCapacity > 0f)
             sink.Line(own.ShieldOffline ? "SHIELD RESTART"u8 : "SHIELD RECHARGE"u8, Draw(flow.Shield), DrawTone(flow.Shield));
         // Only while a scan takes power: the module draw is zero the rest of the time, whatever is fitted.
+        if (flow.Tractor >= FlightConsole.SteadyRate)
+            sink.Line("TRACTORS"u8, Draw(flow.Tractor), DrawTone(flow.Tractor));
         if (flow.Modules >= FlightConsole.SteadyRate)
             sink.Line("MODULES"u8, Draw(flow.Modules), DrawTone(flow.Modules));
         if (flow.Ftl > 0f || flight.FtlPower > 0f)

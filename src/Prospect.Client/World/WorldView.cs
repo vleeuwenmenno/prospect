@@ -375,7 +375,7 @@ internal sealed partial class WorldView
     // displays that report window sizes in points, such as Retina screens.
     private float2 _screen = new(1, 1);
 
-    public WorldView(InputDevices devices, ActionMap actions, ClientSettings settings, JobSystem jobs, SceneRenderer scene, HullDesign[] designs)
+    public WorldView(InputDevices devices, ActionMap actions, ClientSettings settings, JobSystem jobs, SceneRenderer scene, HullDesign[] designs, int maxMounts = 1024)
     {
         _devices = devices;
         _actions = actions;
@@ -388,6 +388,7 @@ internal sealed partial class WorldView
         actions.Changed += RefreshKeyNames;
         _designs = designs;
         Editor = new ShipEditor(jobs);
+        TractorPreview = new TractorPreview(maxMounts);
         Editor.SetMirror((MirrorAxes)settings.EditorMirror);
         // Damaged shells are built on a worker, one at a time; nothing builds one in the frame.
         _shields = new ShieldVisuals(ShieldLook.Load(), jobs);
@@ -854,6 +855,7 @@ internal sealed partial class WorldView
 
         // The editor follows the server before anything reads input, so a grant or an end shows this frame.
         Editor.Track(snapshot, bridge, dt);
+        TractorPreview.Update(Editor.Draft, TractorLook.PreviewPairsPerFrame);
         if (_captureCargoMode != 0) RunCargoCapture(bridge, dt);
         if (_captureFillMode != 0)
             RunFillCapture(bridge, dt);
@@ -4916,6 +4918,12 @@ internal sealed partial class WorldView
             var middle = EditorGeometry.ToHull(EditorGeometry.Middle(box), source.Pivot, source.BlockSize);
             var size = new Vector3(box.Size.X, box.Size.Y, box.Size.Z) * source.BlockSize;
             var color = EditorGeometry.BlockColor(source.Color, box.Type);
+            if (box.Type.Cargo > 0 && TractorPreview.Complete && !TractorPreview.Reached(i))
+            {
+                var rgb = TractorLook.WarningColor;
+                color = Vector3.Lerp(color, new Vector3((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255) / 255,
+                    TractorLook.WarningTint);
+            }
             // A block the ship has lost is drawn dark red; a selected one lighter and bluer. The outlines say which
             // is which as well, so the colours never have to carry it alone.
             if (Editor.IsMissing(i))

@@ -491,7 +491,7 @@ internal sealed class App : IDisposable
         for (var i = 0; i < meshes.Length; i++)
             meshes[i] = meshJobs[i]?.Result ?? emptyShipSlot;
         _scene = new SceneRenderer(_gpu, _swapchain, shaders, meshes, _options.GasFixture > 0);
-        World = new WorldView(Devices, Actions, Settings, Jobs, _scene, Content.Designs);
+        World = new WorldView(Devices, Actions, Settings, Jobs, _scene, Content.Designs, Content.Blocks.Limits.MaxMounts);
         if (Devices.Muted && _options.OpenView == "exhaust-rock") World.ExhaustRock = new ExhaustRockCapture(Content, _options.ExhaustKind);
 
         _screens = new ScreenHost(this, _ui);

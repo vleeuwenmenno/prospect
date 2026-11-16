@@ -312,6 +312,7 @@ internal static class EditorGeometry
         : type.PowerOutput > 0 ? PartRole.Power
         : type.EnergyStorage > 0 ? PartRole.Storage
         : type.Shield > 0 ? PartRole.Shield
+        : type.Tractor is not null ? PartRole.Tractor
         : type.Cargo > 0 ? PartRole.Cargo
         : type.Crew > 0 ? PartRole.Crew
         : type.Module.Family != ModuleFamily.None ? PartRole.Module
@@ -361,4 +362,6 @@ internal enum PartRole : byte
 
     /// <summary>A fuel tank.</summary>
     Tank,
+    /// <summary>An automatic cargo tractor mounted on a face.</summary>
+    Tractor,
 }

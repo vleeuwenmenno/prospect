@@ -713,8 +713,10 @@ public sealed class SavedWorldPlayTests : IDisposable
 
         // The final save hangs; the player stops waiting, so the release is still pending when the close ends.
         using var gate = new ManualResetEventSlim();
+        folder.Entered.Reset();
         folder.Gate = gate;
         _lifecycle.Leave();
+        Assert.True(folder.Entered.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
         Impatient();
         _lifecycle.StopWaiting();
         Settle();

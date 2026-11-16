@@ -97,6 +97,7 @@ internal sealed partial class ScreenHost
         editor.RefreshMerge();
         // A press on a panel ends a turn, keeping it, before its rings are drawn.
         world.EndPartRotationOnPanelPress();
+        DrawTractorReach(draw, world, draft);
         DrawEditorMarks(draw, world, editor, draft);
         var layout = EditorLayout.Of(_ui.DisplaySize, Kit.Scale);
         DrawEditorParts(layout.Parts, editor, content);
@@ -943,6 +944,7 @@ internal sealed partial class ScreenHost
         PartRole.Storage => Kit.F($"STORES {f.Energy:0.#} MJ"),
         PartRole.Shield => Kit.F($"{f.Shield:0} SHIELD   {f.Recharge:0.#}/S   DRAWS {f.PowerDraw:0.##} MW"),
         PartRole.Cargo => Kit.F($"{f.Cargo:0.#} u CARGO"),
+        PartRole.Tractor => "AUTOMATIC CARGO PICKUP"u8,
         PartRole.Crew => Kit.F($"{f.Crew:0} CREW"),
         PartRole.Drive => Kit.F($"CHARGES AT {f.FtlPower:0.#} MW"),
         PartRole.Core => Kit.F($"DRAWS {f.PowerDraw:0.##} MW"),
@@ -1037,6 +1039,7 @@ internal sealed partial class ScreenHost
         DrawEditorSelection(editor, draft, content, width);
         DrawFillTank(editor, bridge, width);
         DrawCargoSection(editor, draft, content, bridge, width);
+        DrawTractorDetails(editor, draft, width);
 
         if (editor.Time - editor.LastEditAt < EditMessageSeconds && editor.LastEdit is not (DraftEdit.Done or DraftEdit.Unchanged))
         {
@@ -1822,6 +1825,7 @@ internal sealed partial class ScreenHost
         PartRole.Storage => "Battery: stores energy"u8,
         PartRole.Shield => "Shield emitter"u8,
         PartRole.Cargo => "Cargo space"u8,
+        PartRole.Tractor => "Tractor beam: pulls containers into reachable racks"u8,
         PartRole.Crew => "Crew quarters"u8,
         _ => "Structure and armour"u8,
     };

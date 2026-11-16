@@ -151,6 +151,7 @@ internal sealed class EditorPalette
         PartRole.Storage => "battery energy",
         PartRole.Shield => "shield",
         PartRole.Cargo => "cargo",
+        PartRole.Tractor => "tractor cargo pickup",
         PartRole.Crew => "crew quarters",
         PartRole.Module => "module scanner locator gas asteroid survey",
         _ => "structure armour hull",
