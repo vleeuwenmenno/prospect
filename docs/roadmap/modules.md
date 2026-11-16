@@ -2,13 +2,14 @@
 
 ## Status
 
-The non-visual implementation is complete: placeable blocks, derived equipment, generated gas composition,
+The non-visual implementation is complete: face-mounted scanners, derived equipment, generated gas composition,
 server scans, private session publication and saved knowledge.
 The interface is built (see UI below). Mining, inventory installation and knowledge sharing remain open.
 
 ## Decided: equipment
 
-- Modules are damageable, sized blocks with mass and power draw, installed through the ship editor now.
+- Modules are face mounts: small parts on a block's face with mass and power draw, no hit points of their own and no size,
+  installed through the ship editor now. A hull has one exactly while it has the block it sits on.
 - Family, quality and mark/variant are independent axes. Only Common Mk I blocks ship now.
 - Families: gasScanner, asteroidScanner, asteroidLocator; future families extend the schema and server behavior.
 - Quality order: Common, Uncommon, Rare, Epic, Legendary, Alien Tech.
@@ -39,17 +40,17 @@ Its family, quality, positive mark (1–255), nonblank variant (up to 32 charact
 The decoder rejects unknown identities, nonfinite/nonpositive figures and accuracy above one.
 
 `HullStats.GasScanner`, `AsteroidScanner`, `AsteroidLocator` contain `ModuleEquipment`; `Module(family)` selects one.
-Block is a one-based design index; zero means absent.
-`BoxHullSums` selects highest surviving quality, then mark, then lowest block index; duplicates provide redundancy only.
-Size affects mass/hull normally, but not range/detail/time or the 0.1 MW standby draw per block.
+Mount is a one-based index into the design's mounts (`BoxDesign.Mounts`); zero means absent.
+`BoxHullSums` selects highest surviving quality, then mark, then lowest mount index; duplicates provide redundancy only.
+A mount is added to the sums with its block, so losing the block takes the scanner, its mass and its 0.1 MW standby draw.
 Short display names fit existing editor cards; quality and mark remain module metadata.
-The editor's All list already enumerates these block types. Designs still pass through `DesignBytes.Decode`.
+The editor's All list already enumerates these mount types. Designs still pass through `DesignBytes.Decode`.
 
-| Common Mk I block id | Mass t | HP/cell | Range m | Scan s | Active MW | Cooldown s |
+| Common Mk I mount id | Mass t | Side tenths | Range m | Scan s | Active MW | Cooldown s |
 | --- | --- | --- | --- | --- | --- | --- |
-| gasScanner | 2 | 200 | 1500 | 4 | 6 | 10 |
-| asteroidScanner | 2.5 | 200 | 3000 | 5 | 9 | 10 |
-| asteroidLocator | 3 | 200 | 5000 | 2 | 12 | 15 |
+| gasScanner | 0.4 | 5 | 1500 | 4 | 6 | 10 |
+| asteroidScanner | 0.5 | 5 | 3000 | 5 | 9 | 10 |
+| asteroidLocator | 0.6 | 6 | 5000 | 2 | 12 | 15 |
 
 Active draw is large on purpose: the command pod's generator makes 6 MW and its idle draw with all three modules is about 1 MW,
 so a scan must move the net energy figure, as shield recovery does (`docs/direction.md`, "shield power must be felt and seen").
@@ -163,11 +164,11 @@ WorldSnapshot holds the counted ModuleObservations prefix. Save codec 5 owns its
 Capture copies into a preallocated buffer; the save worker alone writes it.
 Loading checks owner, uniqueness, capacity, finite values, a possible mix, observation tick, resource catalogue (mix-ins too) and generated target existence.
 Active scans and cooldowns are transient and reset on load. Generated mixtures are recomputed; observed values are retained unchanged.
-Evaluator version is 12; protocol 52; generation 8; save codec 8. Older incompatible saves are refused untouched, without migration.
+Evaluator version is 18; protocol 63; generation 8; save codec 16. Older incompatible saves are refused untouched, without migration.
 
 ## Decided: interface
 
-- Editor: a Sensors category (`PartRole.Module`); cards show family, quality badge (tier colour), mark, range, scan time, draw, cooldown.
+- Editor: a Sensors category (`PartRole.Module`); cards show family, quality badge (tier colour), mark, range, scan time, draw, cooldown. A scanner is placed with the mount ghost on a block face; it is neither sized nor turned.
 - Keys: `X` asteroid scan on the target, `C` gas scan, `Y` locator pulse, `F4` Gas window. All rebindable. They work in flight and the command view.
 - Chips over the console, only for modules the ship flown has; click or key does the same. A known no (no target, no cloud, out of range) is said on the chip and sends nothing.
 - Target panel: analysis from `SessionSnapshot.Modules` only. Unscanned asteroids show size and distance, never generated ore or mass.
@@ -176,8 +177,19 @@ Evaluator version is 12; protocol 52; generation 8; save codec 8. Older incompat
 - Tier colours, classes, gas colours and strip figures are content (`content/visuals/modules.json`).
 - Captures: `--open modules|gas|pinned-gas|module-command`, `--target-rock`, `--module gas|asteroid|locator [--module-at s]`, on a copy of the client build whose pod carries modules.
 
+## Decided: scanners mount on faces
+
+- Built. The three scanners are face mounts (`mount` in `blocks.json`, see `propulsion.md`, "Decided: scanners mount"), like
+  thrusters and the tractor beam. Design file version 6.
+- Old design files with a scanner block load converted: plating plus one scanner on the first face with room, or refused
+  if no face is free. Old saved worlds are refused (save layout 16).
+- The sector scanner (`charting`) and the passive `sensor` stay blocks for now.
+
 ## Open
 
+- Whether the sector scanner (`charting`) and the passive `sensor` also become face mounts. Not decided: they stay blocks.
+- Converting old saved worlds: not built. A world saved with scanner blocks is refused; a migration would have to rebuild
+  each hull's design and block hit points.
 - Gameplay balance of the provisional figures and quality multipliers.
 - UI controls, presentation and locator overlay treatment of partial/stale observations.
 - Inventory, upgrades, mining revisions and explicit knowledge sharing/trading.

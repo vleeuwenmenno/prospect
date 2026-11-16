@@ -327,6 +327,9 @@ internal sealed class PropulsionLook
 
     public Dictionary<string, PropulsionModelLook> Models { get; init; } = [];
     public TractorLook? Tractor { get; init; }
+
+    /// <summary>How each mounted module scanner is drawn, keyed by block type id; a scanner with no entry is its plain small box.</summary>
+    public Dictionary<string, ScannerLook> Scanners { get; init; } = [];
     public Dictionary<string, PlumeLook> Plumes { get; init; } = [];
 
     /// <summary>How fuel tanks are drawn; null draws every tank as its plain block.</summary>
@@ -370,6 +373,8 @@ internal sealed class PropulsionLook
                 throw new InvalidDataException($"{path}: model {id} names plume {model.Plume}, which is not there");
             model.PlumeSlot = look.PlumeIndex(model.Plume);
         }
+        foreach (var (id, scanner) in look.Scanners)
+            scanner.Check(path, id);
         look.Tanks?.Check(path);
         look.Rack?.Check();
         if (look.Tractor is null) throw new InvalidDataException($"{path}: missing tractor appearance");
@@ -471,7 +476,12 @@ internal static partial class PropulsionModels
         var part = design.Mounts[mount];
         var model = ModelOf(part.Type, BlockShape.Box, look);
         if (model is null)
-            return false;
+        {
+            if (ScannerOf(part.Type, look) is not { } scanner)
+                return false;
+            BuildScanner(scanner, part.Type, new PartBox(design.MountOffsets[mount], design.MountHalfExtents[mount], part.Face, design.BlockSize > 0 ? design.BlockSize : 1f), vertices, indices);
+            return true;
+        }
         var box = new PartBox(design.MountOffsets[mount], design.MountHalfExtents[mount], part.Face, design.BlockSize > 0 ? design.BlockSize : 1f);
         if (part.Type.Tractor is { } spec && look.Tractor is { } tractor)
             BuildTractorBase(model, box, tractor, spec, vertices, indices);

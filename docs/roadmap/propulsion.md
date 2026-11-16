@@ -13,7 +13,8 @@
 - **Built:** electric ion parts that burn no fuel ("Decided: ion propulsion" below). The escape drone is all ion.
 - **Built:** tank models: round vessels in an open frame ("Decided: tank models" below).
 - **Built:** tanks, sensors and scanners are never slanted ("Decided: parts never slanted" below).
-- Protocol 53, save layout 8, design encoding 4, design file version 5, evaluator 13.
+- **Built:** the module scanners mount on faces too ("Decided: scanners mount" below).
+- Protocol 63, save layout 16, design encoding 4, design file version 6, evaluator 18.
 
 ## Decided: parts
 
@@ -353,9 +354,9 @@ Built. Code in `PropulsionModels.Tanks.cs`; `TankModelTests` holds the rules.
 Built. One rule, `BoxDesign.ShapeAllowed`; `BoxOnlyTests` and `FrameOrderTests` hold it.
 
 - `"boxOnly": true` in `blocks.json` marks a type that is always a box, never a wedge.
-- Today: every tank (`bipropellantTank`, `hydrazineTank`, `nitrogenTank`, both micro tanks) and every sensor and
-  scanner (`sensor`, `charting`, `gasScanner`, `asteroidScanner`, `asteroidLocator`).
-- Why: a slant would cut a round tank; sensors and scanners are boxes of instruments.
+- Today: every tank (`bipropellantTank`, `hydrazineTank`, `nitrogenTank`, both micro tanks), the cargo rack and the
+  block instruments (`sensor`, `charting`). The module scanners are face mounts, not blocks.
+- Why: a slant would cut a round tank; sensors are boxes of instruments.
 - A design file or a received design with a slanted one is refused, with the reason ("a Nitrogen tank is never
   slanted"). No shipped design has one.
 - The editor:
@@ -419,7 +420,8 @@ How many, and of what:
 
 - At most `limits.maxMounts` a design (1,024).
 - A design also has to fit a transfer: 32,768 bytes. A mount is about 25.
-- A mount type is a thrust part with no core, sensor, tank, drive or module, no size rules and no `maxSide`.
+- A mount type is a thrust part, the tractor beam or a module scanner, with no core, sensor, tank or drive, no size
+  rules, no `maxSide` and no `boxOnly`.
 
 ### Simulation
 
@@ -437,7 +439,7 @@ How many, and of what:
 
 ### Files and bytes
 
-- Design file version 5: `"mounts": [{ "on": 8, "face": "right", "at": [1, 5], "type": "coldGasThruster" }]`.
+- Design file version 5 added mounts for thrusters, version 6 for the module scanners: `"mounts": [{ "on": 8, "face": "right", "at": [1, 5], "type": "coldGasThruster" }]`.
 - Canonical bytes version 4: after the blocks a count, then per mount its type, block, face and two positions
   (`u`, `v` as 16 bits), in the order block, face, `v`, `u`. Another order is refused as noncanonical.
 - **Old files still load** (versions 1 to 4), converted:
@@ -448,6 +450,27 @@ How many, and of what:
   - The ship is heavier by the plating. A thruster more than one cell deep pushes less: thrust follows the face.
 - Old saves and old servers are refused untouched: encoding 4, evaluator 12, and the protocol and save layout
   under "Status".
+
+### Decided: scanners mount
+
+Built. `gasScanner`, `asteroidScanner` and `asteroidLocator` are face mounts, five to six tenths wide and two deep.
+
+- Each keeps its `module` data and its idle draw (0.1 MW). It has mass, no hit points and no size: a scanner never grew
+  with its block, so one mount is one scanner.
+- A hull has the scanner **exactly while it has the block it sits on**. `BoxHullSums.AddMount` picks equipment
+  (best quality, then mark, then lowest mount index). `ModuleEquipment.Mount` is that mount's index plus one, in
+  `BoxDesign.Mounts`. Losing the block cancels a running scan, as before.
+- The model is a small round plate with a head by family (`scanners` in `visuals/propulsion.json`): a dome with a
+  dark intake (gas), a dish (asteroid scanner), a ring of pickets (locator). Plate rim is the tier's colour.
+  Built on workers with the other mount models; the ghost is the mount ghost.
+- **Old design files** (version 5 and older) with a scanner block load converted (`mount.blockThrough` is 5):
+  - The block becomes plating (`legacyBlock`, `hull`) and carries ONE scanner, centred on the first face with room.
+    Order: top, right, left, back, front, bottom.
+  - A scanner with no free face is **refused** with the block named, never dropped. Free a face and load again.
+  - Saved designs in `designs/` go through the same reader.
+- **Old saved worlds are refused** (layout 15, protocol 62): the world codec has no migrations, a world keeps block
+  hit points per design, and the content identity changed. Nothing is converted or touched.
+- Still blocks, and open: the sector scanner (`charting`) and the passive `sensor`. Whether they mount is not decided.
 
 ### Editor
 

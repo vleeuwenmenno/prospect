@@ -28,6 +28,7 @@ public struct HullSum
 
     /// <summary>One more than the lowest id of a drive block under the node, or zero when there is none.</summary>
     internal int Drive;
+    /// <summary>One more than the index of the chosen scanner among the design's mounts, or zero when there is none.</summary>
     internal int GasScanner, AsteroidScanner, AsteroidLocator;
 }
 
@@ -323,12 +324,6 @@ public sealed class BoxHullSums
             (sum.MaxX, sum.MaxY, sum.MaxZ) = (Math.Max(sum.MaxX, box.At.X + box.Size.X), Math.Max(sum.MaxY, box.At.Y + box.Size.Y), Math.Max(sum.MaxZ, box.At.Z + box.Size.Z));
         }
 
-        switch (box.Type.Module.Family)
-        {
-            case ModuleFamily.GasScanner: sum.GasScanner = SelectModule(sum.GasScanner, block + 1); break;
-            case ModuleFamily.AsteroidScanner: sum.AsteroidScanner = SelectModule(sum.AsteroidScanner, block + 1); break;
-            case ModuleFamily.AsteroidLocator: sum.AsteroidLocator = SelectModule(sum.AsteroidLocator, block + 1); break;
-        }
         sum.Count++;
 
         // Blocks are added in rising order, so the first drive seen is the lowest.
@@ -364,6 +359,15 @@ public sealed class BoxHullSums
         sum.Values[InertiaX] += mass * (y * y + z * z + (sy * sy + sz * sz) / 12);
         sum.Values[InertiaY] += mass * (x * x + z * z + (sx * sx + sz * sz) / 12);
         sum.Values[InertiaZ] += mass * (x * x + y * y + (sx * sx + sy * sy) / 12);
+
+        // A scanner is a mounted part, so it is equipment exactly while its block is: the sums name it by its place in
+        // the design's mounts, one more than its index.
+        switch (mount.Type.Module.Family)
+        {
+            case ModuleFamily.GasScanner: sum.GasScanner = SelectModule(sum.GasScanner, index + 1); break;
+            case ModuleFamily.AsteroidScanner: sum.AsteroidScanner = SelectModule(sum.AsteroidScanner, index + 1); break;
+            case ModuleFamily.AsteroidLocator: sum.AsteroidLocator = SelectModule(sum.AsteroidLocator, index + 1); break;
+        }
     }
 
     /// <summary>Makes a node the sum of its two children.</summary>
@@ -391,14 +395,14 @@ public sealed class BoxHullSums
     {
         if (a == 0) return b;
         if (b == 0) return a;
-        var first = _boxes[a - 1].Type.Module;
-        var second = _boxes[b - 1].Type.Module;
+        var first = _mounts[a - 1].Type.Module;
+        var second = _mounts[b - 1].Type.Module;
         if (first.Quality != second.Quality) return first.Quality > second.Quality ? a : b;
         if (first.Mark != second.Mark) return first.Mark > second.Mark ? a : b;
         return Math.Min(a, b);
     }
 
-    private ModuleEquipment Equipment(int block) => block == 0 ? default : ModuleEquipment.Of(block, _boxes[block - 1].Type.Module);
+    private ModuleEquipment Equipment(int mount) => mount == 0 ? default : ModuleEquipment.Of(mount, _mounts[mount - 1].Type.Module);
 
     /// <summary>Where the burn of a push direction and a fuel sits after <see cref="Burn"/>.</summary>
     private static int BurnIndex(BlockFacing push, FuelKind fuel) => (byte)push * Fuels.Count + (byte)fuel - 1;

@@ -334,6 +334,54 @@
       }
     }
   },
+  "scanners": {
+    "gasScanner": {
+      "shape": "dome",
+      "sides": 16,
+      "baseRadius": 0.92,
+      "baseHeight": 0.22,
+      "headRadius": 0.78,
+      "headHeight": 1.0,
+      "bowlHeight": 0.7,
+      "baseShade": 0.36,
+      "headShade": 0.5,
+      "detailShade": 0.62,
+      "portShade": 0.05,
+      "rimShare": 0.9
+    },
+    "asteroidScanner": {
+      "shape": "dish",
+      "sides": 20,
+      "baseRadius": 0.92,
+      "baseHeight": 0.2,
+      "headRadius": 0.9,
+      "headHeight": 1.0,
+      "bowlHeight": 0.55,
+      "stemRadius": 0.18,
+      "baseShade": 0.36,
+      "headShade": 0.58,
+      "detailShade": 0.66,
+      "portShade": 0.08,
+      "rimShare": 0.9
+    },
+    "asteroidLocator": {
+      "shape": "array",
+      "sides": 16,
+      "baseRadius": 0.94,
+      "baseHeight": 0.2,
+      "headRadius": 0.86,
+      "headHeight": 1.0,
+      "bowlHeight": 0.5,
+      "stemRadius": 0.18,
+      "spikes": 4,
+      "spikeRadius": 0.08,
+      "baseShade": 0.36,
+      "headShade": 0.5,
+      "detailShade": 0.7,
+      "portShade": 0.05,
+      "rimShare": 0.9
+    }
+  },
   "tanks": {
     "frameShade": 0.3,
     "strutShade": 0.4,

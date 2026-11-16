@@ -80,7 +80,7 @@ public sealed partial class ServerHost
         CopyCooldowns(owner, ref scan);
         if (_tick < scan.CooldownUntil(request.Family)) { scan.State = ModuleScanState.Cooldown; return; }
         var equipment = InstalledModule(connection, request.Family);
-        if (equipment.Block == 0) { scan.State = ModuleScanState.NoEquipment; return; }
+        if (equipment.Mount == 0) { scan.State = ModuleScanState.NoEquipment; return; }
         ref var state = ref _hulls.State(connection.Hull.Index);
         if (state.Energy < equipment.PowerDraw / Prospect.Engine.Time.TickLoop.SimulationHz)
         { scan.State = ModuleScanState.NoPower; return; }

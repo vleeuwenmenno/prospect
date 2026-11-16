@@ -10,7 +10,12 @@ namespace Prospect.Game.World;
 /// The block type a design file older than version 5 gets where it has this part as a block: the cell stays, as
 /// that type, and carries the part on the face it pointed from.
 /// </param>
-public sealed record MountSpec(int Side, int Depth, string LegacyBlock);
+/// <param name="LastBlockVersion">
+/// The newest design file version in which this part was still a block (<c>"blockThrough"</c> in
+/// <c>blocks.json</c>): 4 for the thrusters, which became mounts in version 5, and 5 for the module scanners, which
+/// became mounts in version 6. A file of that version or older names the part as a block and is converted on load.
+/// </param>
+public sealed record MountSpec(int Side, int Depth, string LegacyBlock, int LastBlockVersion = 4);
 
 /// <summary>
 /// One part mounted on a face of a block. <paramref name="Parent"/> is the block's index in the design,
