@@ -98,7 +98,8 @@ public sealed class FreeContainers
 
     /// <summary>Checks physical state and payload before admission, decoding or restoration.</summary>
     public static bool Valid(GameContent content, in FreeContainer item) =>
-        double.IsFinite(item.Position.X) && double.IsFinite(item.Position.Y) && double.IsFinite(item.Position.Z)
+        item.PickupReadyTick >= 0 && item.PickupReadyTick <= long.MaxValue / 2
+        && double.IsFinite(item.Position.X) && double.IsFinite(item.Position.Y) && double.IsFinite(item.Position.Z)
         && Finite(item.Velocity) && Finite(item.AngularVelocity)
         && float.IsFinite(item.Orientation.LengthSquared()) && Math.Abs(item.Orientation.LengthSquared() - 1) < .001f
         && BlockStateStore.CargoPayloadValid(content, new(0, item.Size, item.Resource, item.Amount, item.Hull, default));

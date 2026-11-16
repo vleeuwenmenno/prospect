@@ -189,7 +189,7 @@ public struct EditorRequestMessage
     public long CargoTick;
     /// <summary>Pickup ownership requested when releasing cargo.</summary>
     public JettisonMode JettisonMode;
-    public const int JettisonWireSize = 23;
+    public const int JettisonWireSize = 24;
     public const int AddContainerWireSize = 1 + 1 + 4 + 4 + 1 + 1;
 
     public readonly void Write(ref NetWriter writer, scoped ReadOnlySpan<byte> hash)
@@ -200,7 +200,7 @@ public struct EditorRequestMessage
         if (Kind == EditorRequestKind.NewShip) { Name.Write(ref writer); return; }
         if (Kind == EditorRequestKind.JettisonContainer)
         {
-            writer.WriteUInt32(Hull); writer.WriteInt32(CargoRack); writer.WriteByte((byte)CargoIndex); writer.WriteInt64(CargoTick);
+            writer.WriteUInt32(Hull); writer.WriteInt32(CargoRack); writer.WriteByte((byte)CargoIndex); writer.WriteInt64(CargoTick); writer.WriteByte((byte)JettisonMode);
             return;
         }
         if (Kind == EditorRequestKind.AddContainer)
@@ -240,8 +240,9 @@ public struct EditorRequestMessage
         if (message.Kind == EditorRequestKind.NewShip) return ShipName.Read(ref reader, out message.Name);
         if (message.Kind == EditorRequestKind.JettisonContainer)
         {
-            message.Hull = reader.ReadUInt32(); message.CargoRack = reader.ReadInt32(); message.CargoIndex = reader.ReadByte(); message.CargoTick = reader.ReadInt64();
+            message.Hull = reader.ReadUInt32(); message.CargoRack = reader.ReadInt32(); message.CargoIndex = reader.ReadByte(); message.CargoTick = reader.ReadInt64(); message.JettisonMode = (JettisonMode)reader.ReadByte();
             return reader.IsValid && reader.Remaining == 0 && message.Hull != 0 && message.CargoRack >= 0
+                && message.JettisonMode is JettisonMode.Abandon or JettisonMode.KeepClaim
                 && message.CargoIndex < World.BlockStateStore.MaxContainers && message.CargoTick >= 0;
         }
         if (message.Kind == EditorRequestKind.AddContainer)

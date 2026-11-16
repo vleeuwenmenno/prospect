@@ -140,7 +140,7 @@ public sealed class PlayerInputBridge
         }
     }
     /// <summary>Queues a selected hold slot together with the authoritative hold tick the player saw.</summary>
-    public void JettisonContainer(uint token, uint hull, int rack, int index, long tick)
+    public void JettisonContainer(uint token, uint hull, int rack, int index, long tick, JettisonMode mode = JettisonMode.Abandon)
     {
         lock (_lock)
         {
@@ -151,7 +151,8 @@ public sealed class PlayerInputBridge
                 Hull = hull,
                 CargoRack = rack,
                 CargoIndex = index,
-                CargoTick = tick
+                CargoTick = tick,
+                JettisonMode = mode
             };
             _hasCargoAdd = true;
         }
