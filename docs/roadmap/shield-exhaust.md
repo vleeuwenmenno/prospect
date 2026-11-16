@@ -37,8 +37,8 @@ Product direction from the brainstorm on 2026-11-16. Built step by step; this sa
 
 ### Exhaust on rock
 
-- Where a plume meets a rock: dust thrown out sideways, and a mark that glows hot for about 2 s and cools to a
-  dark scorch that fades over about 30 s. At most 64 marks at once, oldest replaced.
+- Where a plume meets a rock: dust thrown out sideways, and a mark still orange 3 s after the burn.
+  It cools over 5 s to dark scorch, held through 20 s and faded by about 30 s. At most 64 marks, oldest replaced.
 - Per kind, as data in `content/visuals/propulsion.json`: bipropellant and hot thrusters glow, scorch and raise a
   lot of dust; cold gas raises dust only; ion parts a faint shimmer and nothing else.
 - Each client works marks out from what every hull already sends (`HullView.Thrust`); they are not saved.
@@ -47,7 +47,7 @@ Product direction from the brainstorm on 2026-11-16. Built step by step; this sa
 
 1. Done: contact strength from energy, and the contact patch.
 2. Done: exhaust on shields.
-3. Dust and marks on rock.
+3. Done: dust and marks on nearby fine-detail rock.
 
 ### Other hull contacts
 
@@ -107,3 +107,49 @@ Product direction from the brainstorm on 2026-11-16. Built step by step; this sa
 - RTX 5070 Ti, actual 5096×1390: `make bench` 679 fps, resize 644 fps; active engine 758, cold 802, ion 813, hot 611 fps.
   Every run reports 0 managed bytes on the render thread and across the process.
 - Validation layers were inactive. Maximum-capacity fleets, Windows and macOS were not runtime-tested.
+
+## Step 3 implementation
+
+- `RockExhaust` consumes every admitted hull plume from `ThrustEffects`, including the existing shield clip.
+  Up to 16 nearest candidate plume/rock pairs receive exact finest-facet ray tests per frame.
+  `RockExhaustSurface` caches groups of shared `AsteroidMesh` / `AsteroidShape.Point` triangles; ice uses its eight planes.
+- Dust uses 4,096 fixed slots and GPU instance storage, with CPU ring spawning and depth-tested streak billboards.
+  Tangent-plane velocity plus outward lift, rock tint, throttle and plume-distance attenuation drive the spray.
+  Particle origins are double precision; current positions are relative to the camera.
+- The 64 marks merge nearby contacts on the same rock and kind; otherwise the oldest is replaced.
+  Positions and normals stay in the rock frame. Continuous firing refreshes heat while peak strength is retained.
+  Cooling lasts 5 s (still orange at 3 s); soot holds until 20 s and fades by 30 s.
+- Hot engine and thruster responses glow orange, scorch and raise dust. Cold gas raises dust only.
+  Ion produces a faint blue surface shimmer with no particles or scorch. Each response validates in propulsion.json.
+- Marks shade actual rock fragments in mesh.frag, with a smooth radial footprint and no hatch texture.
+  Four numeric 16-bit masks per mesh instance select only that rock's marks from a fixed storage buffer.
+  Dust uses premultiplied additive light after solids, so it cannot darken the scene.
+  No extra scene-depth copy, frame constants, server, wire or save changes.
+
+### Step 3 limits and capture contract
+
+- Only drawn fine-detail rocks receive effects. Far-detail behavior remains open.
+  Mark footprints follow the rendered surface and reject faces pointing away from the contact normal.
+- Candidate admission shares plume visibility and size limits. The nearest 16 candidate pairs are tested;
+  excess candidates are dropped. Dust does not collide again after spawning; additive light needs no alpha sorting.
+- `--open exhaust-rock --exhaust-kind engine|hot|cold|ion` is an explicitly render-only two-block test hull,
+  with the real part model/nozzles above a fixed shape-0 rock. Its thrust is scripted, not server flight.
+  It changes no live hull or generated rock. `--capture-count 3` records fixture ages 3, 8 and 25 s;
+  the burn stops at 5 s. Logs report actual age and firing state.
+
+### Step 3 verification
+
+- `timeout 900 make check TEST_ARGS="-parallel none"`: 2,511 game tests and 354 listing tests passed.
+  Default parallel runs hit unrelated timing/save-test failures; no tests or budgets were weakened.
+  Tests cover facet reach, nearest hit, kind validation, merge/replacement, transforms, cooling, expiry and allocation.
+  Both mesh shaders and both rock-effect shaders pass `glslc -I assets/shaders`.
+- `make bench`: 862 fps; resize 718 fps at 5096×1390, with zero managed bytes on every thread.
+  The active engine fixture also reports zero bytes at 968 fps.
+- `make bench-gas`: judged scenes pass at 213, 163, 281, 148 and 152 fps.
+  All seven scenes report zero managed bytes; cold and paired clouds report 76 and 32 fps without an fps gate.
+- Native-pixel crops and exact fixture ages are in `artifacts/exhaust-rock-v2/REPORT.txt`.
+  Count 4 adds an unburned control. Separate runs sample ages 5 through 8 s at 0.5 s steps, avoiding capture delays.
+  The fixture is front-lit so residual scorch is distinguishable from natural shadow.
+- Cold-gas control versus burn: no darkened pixels in the 500×300 contact rectangle.
+  Window height can change when other hidden test windows open; evidence records actual dimensions.
+  Vulkan validation layers were unavailable. Windows, macOS and maximum-capacity fleets were not runtime-tested.

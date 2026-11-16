@@ -129,6 +129,8 @@ internal sealed class WorldView
     public int VisibleRocks { get; private set; }
     public double DamageWorkerMs => _damage.LastBuildMs;
     private readonly CollisionSparks _sparks = new();
+    public ExhaustRockCapture? ExhaustRock { get; set; }
+    private readonly RockExhaust _rockExhaust = new();
     private readonly ThrustEffects _thrust = new(PropulsionLook.Shared);
 
     /// <summary>Plumes drawn in the last frame.</summary>
@@ -807,6 +809,7 @@ internal sealed class WorldView
             _damage.Clear();
             _sparks.Clear();
             _thrust.Clear();
+            _rockExhaust.Clear();
             _scanPulse.Reset();
             _ownId = 0;
             ResetOwnJump();
@@ -1208,7 +1211,7 @@ internal sealed class WorldView
 
         // Hulls, where the update has them drawn this frame.
         var visuals = _visuals.Hulls;
-        for (var i = 0; i < Math.Min(snapshot.HullCount, visuals.Length) && candidateCount < _candidates.Length; i++)
+        for (var i = 0; ExhaustRock is null && i < Math.Min(snapshot.HullCount, visuals.Length) && candidateCount < _candidates.Length; i++)
         {
             ref var hull = ref snapshot.Hulls[i];
             ref readonly var visual = ref visuals[i];
@@ -1295,6 +1298,15 @@ internal sealed class WorldView
             }
         }
 
+        if (ExhaustRock is { } capture)
+        {
+            capture.Advance(time);
+            var position = capture.Anchor.RelativeTo(camera);
+            var slot = _thrust.Observe(capture.Hull);
+            _thrust.Add(slot, capture.Hull, capture.Nozzles, position, Quaternion.Identity, 1, plumes);
+            Add(ref candidateCount, _cubeMesh, position - Vector3.UnitZ, Quaternion.Identity, 1f, new Vector3(0.5f), 1);
+            _scene.AddTriangles(frameIndex, capture.Triangles, MeshTransform(position, Quaternion.Identity, Vector3.One, new Vector3(0.5f), 1, 1));
+        }
         _partModels.Flush();
         DrawnPlumes = _thrust.End();
         _scene.QueuePlumes(DrawnPlumes);
@@ -1317,7 +1329,21 @@ internal sealed class WorldView
             composite.Setup.W += 1;
         }
 
-        PrepareRockInstances(camera, aspect, ref candidateCount);
+        _rockExhaust.Begin(time, camera);
+        if (ExhaustRock is { } fixture)
+        {
+            var center = fixture.Anchor.RelativeTo(camera) + fixture.RockCenter;
+            Add(ref candidateCount, _asteroidMeshBase + DetailFine * Galaxy.AsteroidShapes, center, Quaternion.Identity, ExhaustRockCapture.Radius, new Vector3(0.3f), 0);
+            _rockExhaust.Offer(default, 0, 0, center, Quaternion.Identity, ExhaustRockCapture.Radius, new Vector3(0.3f), _thrust, candidateCount - 1);
+        }
+        else PrepareRockInstances(camera, aspect, ref candidateCount);
+        var rockEffects = _rockExhaust.End(_thrust, _right, _up);
+        _rockExhaust.Instances.AsSpan(0, rockEffects).CopyTo(_scene.RockEffects(frameIndex));
+        _scene.QueueRockEffects(rockEffects);
+        _rockExhaust.MarkData.AsSpan().CopyTo(_scene.RockMarks(frameIndex));
+        for (var i = 0; i < RockExhaust.Marks; i++)
+            if (_rockExhaust.MarkDraws[i] is var draw && draw >= 0 && draw < candidateCount)
+                RockExhaust.Include(ref _candidates[draw].Instance.RockMarks, i);
 
         // Group instances by mesh so each mesh is one draw call: asteroids first, then hulls, so the jump lenses can
         // keep the world as it was before any hull was drawn over it.
@@ -1348,7 +1374,7 @@ internal sealed class WorldView
         _scene.AddSparks(frameIndex, _sparks.Expand(camera, _right, _up, _forward, aspect, _tanHalfFov, _viewport.Y, snapshot.ServerTickPrecise + alpha, _collision));
         var f = 1f / _tanHalfFov;
         var sunColor = galaxy.StarClasses[Sector.StarClass].Color * 1.7f;
-        var sunDirection = Sector.SunDirection;
+        var sunDirection = ExhaustRock is null ? Sector.SunDirection : -Vector3.UnitZ;
         if (_jumpSunBlend < 1f)
         {
             sunColor = Vector3.Lerp(_jumpFromSunColor * 1.7f, sunColor, _jumpSunBlend);
@@ -1374,7 +1400,7 @@ internal sealed class WorldView
             Dust = new float4(Wrap(camera.X, DustCell), Wrap(camera.Y, DustCell), Wrap(camera.Z, DustCell), time),
             Drift = new float4(velocity.X, velocity.Y, velocity.Z, velocity.Length()),
             Grid = new float4(Wrap(camera.X, 1000), Wrap(camera.Z, 1000), Wrap(camera.X, sectorSize), Wrap(camera.Z, sectorSize)),
-            GridPlane = new float4((float)(_commandFocus.Y - camera.Y), (float)sectorSize, _commandBlend, Exposure),
+            GridPlane = new float4((float)(_commandFocus.Y - camera.Y), (float)sectorSize, ExhaustRock is null ? _commandBlend : 0, Exposure),
             Openings = openings,
             Clips = clips,
         };
@@ -1401,7 +1427,7 @@ internal sealed class WorldView
         // queues none in either capture; hulls in view are drawn without shields in both.
         _scene.QueueShields(overlayCheck ? 0 : _shields.Draws.Length, _shields.Look.Constants);
         QueueScanPulse(galaxy, camera, frameIndex);
-        _scene.Render(commands, frameIndex, constants, composite, _batches.AsSpan(0, rockBatches), _batches.AsSpan(rockBatches, batchCount - rockBatches), _commandBlend > 0.01f, markCount, lensing);
+        _scene.Render(commands, frameIndex, constants, composite, _batches.AsSpan(0, rockBatches), _batches.AsSpan(rockBatches, batchCount - rockBatches), ExhaustRock is null && _commandBlend > 0.01f, markCount, lensing);
     }
 
     public float ExposureValue => Exposure;
@@ -1927,6 +1953,8 @@ internal sealed class WorldView
         }
         if (rock.Resource >= 0)
             tint = Vector3.Lerp(tint, galaxy.Resources[rock.Resource].Color * 0.55f, (0.25f + 0.5f * rock.Grade) * (material == MaterialIce ? 0.4f : 1f));
+        if (detail == DetailFine)
+            _rockExhaust.Offer(slot.Coord, i, rock.Shape, position, rock.Rotation, rock.Radius, tint, _thrust, candidateCount);
         VisibleRocks++;
         _scanWaves.Offer(position, rock.Radius, pixels);
         Add(ref candidateCount, _asteroidMeshBase + detail * Galaxy.AsteroidShapes + rock.Shape, position, rock.Rotation, rock.Radius, tint, material);

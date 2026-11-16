@@ -10,6 +10,8 @@ layout(location = 2) in vec4 row0;
 layout(location = 3) in vec4 row1;
 layout(location = 4) in vec4 row2;
 layout(location = 5) in vec4 tint;
+layout(location = 6) in vec4 rockMarks;
+layout(location = 7) flat out uvec4 markMask;
 
 layout(location = 0) out vec3 worldNormal;
 layout(location = 1) out vec3 worldPosition;
@@ -25,6 +27,7 @@ layout(location = 6) flat out vec3 paint;
 
 void main()
 {
+    markMask = uvec4(rockMarks);
     vec4 p = vec4(position, 1.0);
     worldPosition = vec3(dot(row0, p), dot(row1, p), dot(row2, p));
     // Blocks are scaled per axis and hulls drawn out along their length, so a normal is turned by the cofactor

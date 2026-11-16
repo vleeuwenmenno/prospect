@@ -10,6 +10,9 @@ layout(location = 4) flat in int cut;
 layout(location = 5) in float metal;
 layout(location = 6) flat in vec3 paint;
 layout(location = 0) out vec4 outColor;
+layout(location = 7) flat in uvec4 markMask;
+struct RockMark { vec4 centerRadius; vec4 normalScorch; vec4 glow; };
+layout(std430, set = 0, binding = 3) readonly buffer RockMarks { RockMark marks[]; } rock;
 
 // On for the hull pipeline: a hull going through a jump's opening is cut away where it is past it, before anything
 // is stored, so the scene, its depth and the lenses that read them never see the part that is gone. Off for
@@ -32,6 +35,27 @@ float noise(vec3 x)
         mix(mix(hash(i), hash(i + vec3(1, 0, 0)), f.x), mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
         mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x), mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y),
         f.z);
+}
+
+// Shade the actual rock fragments: no decal plane, depth copy, hatch texture or detached geometry.
+vec3 exhaustMarks(vec3 lit, vec3 normal)
+{
+    for (int group = 0; group < 4; group++)
+    {
+        uint bits = markMask[group];
+        while (bits != 0u)
+        {
+            int bit = findLSB(bits);
+            bits &= bits - 1u;
+            RockMark mark = rock.marks[group * 16 + bit];
+            vec3 delta = worldPosition - mark.centerRadius.xyz;
+            float r = length(delta) / mark.centerRadius.w;
+            float edge = (1.0 - smoothstep(0.15, 1.0, r)) * smoothstep(0.0, 0.35, dot(normal, mark.normalScorch.xyz));
+            float shimmer = mark.glow.w >= 0.0 ? 0.7 + 0.3 * sin(mark.glow.w * 3.0 + r * 8.0) : 1.0;
+            lit = lit * (1.0 - edge * mark.normalScorch.w) + mark.glow.rgb * (edge * shimmer);
+        }
+    }
+    return lit;
 }
 
 void main()
@@ -83,7 +107,7 @@ void main()
             float below = worldPosition.y < frame.gridPlane.x ? 0.55 : 1.0;
             ice = mix(ice * mix(1.0, below, frame.gridPlane.z), vec3(1.0, 0.69, 0.13) * 1.8, cutLine * frame.gridPlane.z);
         }
-        outColor = vec4(ice, 0.25);
+        outColor = vec4(exhaustMarks(ice, n), 0.25);
         return;
     }
 
@@ -158,5 +182,6 @@ void main()
     // A solid surface clears the jump lens mask, so a hull in front of an opening stays sharp, and leaves a mark
     // of what it is in the fraction: 0.25 an asteroid, 0.375 a hull, 0.5 the pilot's own hull, which their jump
     // never covers.
+    if (color.a < 0.5) lit = exhaustMarks(lit, n);
     outColor = vec4(lit, color.a > 1.5 ? 0.5 : color.a > 0.5 ? 0.375 : 0.25);
 }
