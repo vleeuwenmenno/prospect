@@ -1,5 +1,6 @@
 {
   "unitSize": 0.5,
+  "pickupDelaySeconds": 10,
   "sizes": [
     {
       "name": "XXS",

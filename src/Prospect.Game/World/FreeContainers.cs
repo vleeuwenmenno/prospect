@@ -18,6 +18,8 @@ public struct FreeContainer
     public double Amount;
     public float Hull;
     public long Born, Age;
+    /// <summary>First authoritative tick on which tractors may acquire this body.</summary>
+    public long PickupReadyTick;
 }
 
 /// <summary>Fixed storage for loose cargo. Stable ids are never reused within a world.</summary>
