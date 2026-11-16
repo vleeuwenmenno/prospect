@@ -71,5 +71,27 @@ public sealed class TractorPreviewTests
             WarningTint = .5f,
             PreviewPairsPerFrame = 128,
         }.Check());
+        Assert.Throws<InvalidDataException>(() => new TractorLook
+        {
+            BeamColor = 1,
+            WarningColor = 1,
+            CoreWidth = 1,
+            GlowWidth = 2,
+            Opacity = .8f,
+            WarningTint = .5f,
+            PreviewPairsPerFrame = 128,
+            ConeOpacity = 0f,
+        }.Check());
+        Assert.Throws<InvalidDataException>(() => new TractorLook
+        {
+            BeamColor = 1,
+            WarningColor = 1,
+            CoreWidth = 1,
+            GlowWidth = 2,
+            Opacity = .8f,
+            WarningTint = .5f,
+            PreviewPairsPerFrame = 128,
+            PulseCount = 0,
+        }.Check());
     }
 }

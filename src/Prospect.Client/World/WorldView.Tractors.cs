@@ -1,4 +1,5 @@
 using System.Numerics;
+using Brutal.Numerics;
 using Prospect.Client.Render;
 using Prospect.Game.World;
 
@@ -31,5 +32,26 @@ internal sealed partial class WorldView
             return true;
         }
         return false;
+    }
+
+    /// <summary>Projects a tractor beam segment and returns pixels per metre at each clipped endpoint.</summary>
+    public bool ProjectTractorSegment(Double3 from, Double3 to, out float2 a, out float2 b, out float scaleA, out float scaleB)
+    {
+        var va = ToView(from);
+        var vb = ToView(to);
+        a = b = default;
+        scaleA = scaleB = 0f;
+        if (va.Z < NearPlane && vb.Z < NearPlane)
+            return false;
+        if (va.Z < NearPlane)
+            va = Vector3.Lerp(va, vb, (NearPlane - va.Z) / (vb.Z - va.Z));
+        else if (vb.Z < NearPlane)
+            vb = Vector3.Lerp(vb, va, (NearPlane - vb.Z) / (va.Z - va.Z));
+        a = ViewToScreen(va);
+        b = ViewToScreen(vb);
+        var factor = _screen.Y * 0.5f / _tanHalfFov;
+        scaleA = factor / va.Z;
+        scaleB = factor / vb.Z;
+        return true;
     }
 }

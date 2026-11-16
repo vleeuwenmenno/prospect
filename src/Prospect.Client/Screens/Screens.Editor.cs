@@ -97,9 +97,9 @@ internal sealed partial class ScreenHost
         editor.RefreshMerge();
         // A press on a panel ends a turn, keeping it, before its rings are drawn.
         world.EndPartRotationOnPanelPress();
-        DrawTractorReach(draw, world, draft);
-        DrawEditorMarks(draw, world, editor, draft);
         var layout = EditorLayout.Of(_ui.DisplaySize, Kit.Scale);
+        DrawTractorReach(draw, snapshot, world, editor, draft, layout);
+        DrawEditorMarks(draw, world, editor, draft);
         DrawEditorParts(layout.Parts, editor, content);
         DrawEditorDetails(layout.Details, editor, draft, content, bridge);
         DrawEditorBar(layout.Bar, editor, draft, bridge);
