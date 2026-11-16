@@ -14,6 +14,9 @@ or that local game opened to other players. There is one simulation and one code
 Ships split into unowned wrecks when block loss disconnects shared faces. Wrecks retain HP, fuel and spin,
 collide, split again, and survive saves. Cleanup is configurable; salvage and reclaiming fuel are not built.
 
+Cargo racks have open-frame models, content-defined container sizes and shared deterministic packing.
+There is no cargo inventory yet; containers appear only in the scripted `--open edit-rack` preview.
+
 
 Propulsion burns fuel and is directional: engines, hot thrusters and cold gas thrusters each push the opposite way
 to the way they face, and burn bipropellant, hydrazine and nitrogen from tank blocks. Engines are blocks of any

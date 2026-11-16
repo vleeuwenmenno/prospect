@@ -105,7 +105,7 @@ public sealed class BlockType
     public float Shield { get; init; }
     public float ShieldRecharge { get; init; }
 
-    /// <summary>Cubic metres of cargo space.</summary>
+    /// <summary>Cargo capacity in u per ship cell.</summary>
     public float Cargo { get; init; }
     public int Crew { get; init; }
 }

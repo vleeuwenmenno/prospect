@@ -1261,16 +1261,17 @@ internal sealed class App : IDisposable
                     World.Editor.SetMirror(MirrorAxes.X | MirrorAxes.Z);
                 _screens.SelectEditorTab("Thrust");
             }
-            else if (view is "edit-tank" or "edit-tank-long" or "edit-tank-slab" or "edit-scanner" && snapshot is { OwnHull: >= 0 })
+            else if (view is "edit-rack" or "edit-tank" or "edit-tank-long" or "edit-tank-slab" or "edit-scanner" && snapshot is { OwnHull: >= 0 })
             {
                 // The editor holding the ghost of a bipropellant tank (1, 2 by 1 by 1, or a 2 by 1 by 2
                 // slab) or of an asteroid scanner on the ship, with the wedge chosen first: the part stays a box and the
                 // Wedge button is off.
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
                 World.Editor.SetPartShape(BlockShape.WedgeXPlusPlus);
-                World.HoldPartGhostForCapture(view == "edit-scanner" ? "asteroidScanner" : "bipropellantTank",
-                    view switch { "edit-tank-long" => new GridSize(2, 1, 1), "edit-tank-slab" => new GridSize(2, 1, 2), _ => new GridSize(1, 1, 1) });
-                _screens.SelectEditorTab(view == "edit-scanner" ? "Sensors" : "Tanks");
+                if (view == "edit-rack") World.PreviewCargo();
+                World.HoldPartGhostForCapture(view == "edit-rack" ? "cargo" : view == "edit-scanner" ? "asteroidScanner" : "bipropellantTank",
+                    view switch { "edit-rack" => new GridSize(2, 2, 2), "edit-tank-long" => new GridSize(2, 1, 1), "edit-tank-slab" => new GridSize(2, 1, 2), _ => new GridSize(1, 1, 1) });
+                _screens.SelectEditorTab(view == "edit-rack" ? "Hull" : view == "edit-scanner" ? "Sensors" : "Tanks");
             }
             else if (view is "edit-palette-tip" or "edit-tank-fuel" && snapshot is { OwnHull: >= 0 })
             {

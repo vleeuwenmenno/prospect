@@ -1,0 +1,85 @@
+{
+  "unitSize": 0.5,
+  "sizes": [
+    {
+      "name": "XXS",
+      "units": 1,
+      "shape": [
+        1,
+        1,
+        1
+      ],
+      "hull": 50
+    },
+    {
+      "name": "XS",
+      "units": 2,
+      "shape": [
+        2,
+        1,
+        1
+      ],
+      "hull": 100
+    },
+    {
+      "name": "S",
+      "units": 4,
+      "shape": [
+        2,
+        2,
+        1
+      ],
+      "hull": 200
+    },
+    {
+      "name": "M",
+      "units": 8,
+      "shape": [
+        2,
+        2,
+        2
+      ],
+      "hull": 400
+    },
+    {
+      "name": "L",
+      "units": 16,
+      "shape": [
+        4,
+        2,
+        2
+      ],
+      "hull": 800
+    },
+    {
+      "name": "XL",
+      "units": 32,
+      "shape": [
+        4,
+        4,
+        2
+      ],
+      "hull": 1600
+    },
+    {
+      "name": "XXL",
+      "units": 64,
+      "shape": [
+        4,
+        4,
+        4
+      ],
+      "hull": 3200
+    },
+    {
+      "name": "XXXL",
+      "units": 128,
+      "shape": [
+        8,
+        4,
+        4
+      ],
+      "hull": 6400
+    }
+  ]
+}

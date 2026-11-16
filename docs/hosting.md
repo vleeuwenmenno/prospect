@@ -115,6 +115,7 @@ Both sides simulate from their own `content/`: with other block figures the same
 
 The identity covers:
 
+- `content/blocks/cargo.json`: container unit edge, sizes, shapes and hull points.
 - `content/blocks/blocks.json`: block types, flight rules, size rules, design limits and fixed collision budgets.
 - `content/rules/settings.json`: which world settings exist, their ranges and defaults.
 - `content/galaxy/galaxy.json`: the galaxy rules and sector modules.

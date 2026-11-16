@@ -992,7 +992,7 @@ internal sealed partial class ScreenHost
         Row("Volume"u8, Kit.F($"{stats.Volume:0} m³"));
         Row("W x H x L"u8, Kit.F($"{stats.Size.X:0} x {stats.Size.Y:0} x {stats.Size.Z:0} m"));
         Row("Blocks"u8, stats.Blocks == design.BlockCount ? Kit.F($"{stats.Blocks}") : Kit.F($"{stats.Blocks} of {design.BlockCount}"), stats.Blocks == design.BlockCount ? Theme.Text : Theme.Bad);
-        Row("Cargo hold"u8, Kit.F($"{stats.CargoHold:0.0} m³"));
+        Row("Cargo hold"u8, Kit.F($"{stats.CargoHold:0.0} u"));
         Row("Crew"u8, Kit.F($"{stats.Crew}"));
         y += line * 0.5f;
 
