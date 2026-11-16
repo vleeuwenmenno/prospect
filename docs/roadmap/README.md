@@ -13,6 +13,7 @@ Implementation continues separately; this change records decisions and a read-on
 5. [Shield contact and exhaust](shield-exhaust.md): contact strength, contact patch, exhaust on shields and rock.
 6. [Wreckage](wreckage.md): ships that break apart, wrecks, lifetime settings.
 7. [FTL travel](ftl-travel.md): jumps fly across the map instead of teleporting.
+8. [Drones and mining](drones-mining.md): drone bay, scans, charges, fetching; scraping, cracking, heat; orders.
 
 ## Status vocabulary
 
