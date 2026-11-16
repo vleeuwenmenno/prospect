@@ -877,10 +877,12 @@ How to apply it:
 - `BlockStateStore.Hit` invokes `CargoEjection` only on positive-to-zero rack HP, before generic `Lose`.
   Never eject inside `Lose`: wreck splitting copies racks with cargo and removes generic source blocks.
 - `ServerCargoEjection` validates jettison token, owner, controlled hull, rack, slot and the hold tick/revision.
-  `PlayerInputBridge.JettisonContainer` works locally and remotely. The separate rack panel leaves model looks alone.
-- Protocol 60: reliable message 37, 92-byte body records, 23,563-byte full-set maximum at 10 Hz; sensor/gas coverage
+  `PlayerInputBridge.JettisonContainer` accepts `JettisonMode.Abandon` (default) or `KeepClaim`, locally and remotely.
+  KeepClaim uses the hull owner identity, saved and restored like hull ownership. Destroyed racks are unclaimed.
+  Every release waits `pickupDelaySeconds` (default 10, finite 0–3600) before any tractor can acquire it.
+- Protocol 61: reliable message 37, 104-byte body records, 26,635-byte full-set maximum at 10 Hz; sensor/gas coverage
   through `MaySeeContainer`/`Covered`, as used by `MaySeeHull`. No ownership bypass and no hull snapshot growth.
-- Codec 14 saves bodies and birth/age/id clocks; tractor claims restart on load. `containerLifetimeMinutes` defaults to 60, zero never;
+- Codec 15 saves bodies, birth/age/id clocks, ClaimOwner and PickupReadyTick; tractor pulls restart on load. `containerLifetimeMinutes` defaults to 60, zero never;
   connected pilots within the base sensor radius pause aging. Oldest-first caps remain active.
 - `FreeContainerVisuals` interpolates and detects contact velocity changes; existing worker container meshes draw
   the result. Middle-click shows the target panel. Tractor pickup is described below; no weapon support yet.
@@ -899,12 +901,14 @@ How to apply it:
 - `TractorSimulation.Plan` preserves existing exclusive claims, then acquires in hull/mount/body order from the
   fixed 256-body pool, rejecting distant positions before geometry. At most 256 candidate positions per tick;
   the next tick resumes at the deferred mount so unsuitable cargo cannot starve later hulls.
-  Each mount holds one body; same-hull claims reserve packing space. Anyone may pull a free body.
+  Each mount holds one body; same-hull pulls reserve packing space. `FreeContainer.MayPickup` checks the ready
+  tick and durable claim owner. Only that owner may recover claimed cargo; unclaimed cargo is open to all.
 - `FlightModel.Step` alone bills `PowerFlow.Tractor`; `Pull` uses only that paid power, before container contacts.
   Base plus per-tonne demand includes payload and collision shell mass. Insufficient power means no tractor force.
   Pulls approach the emitter, then the rack's open side; only `TryAddCargo` followed by removing the free body stows it.
-- Protocol 60 replicates claims for beams and prediction; redact claims whose hull/design is unavailable to a client.
-  Codec 14 does not encode claims; restore clears them and restarts acquisition. `TractorPreview` caches the shared
+- Protocol 61 replicates pickup ownership and ready tick as well as transient pulls for beams and prediction;
+  redact only transient pulls whose hull/design is unavailable to a client.
+  Codec 15 preserves pickup ownership and ready tick; restore clears only transient pulls and restarts acquisition. `TractorPreview` caches the shared
   reach rule in fixed storage with a content-defined per-frame budget. Tests: `TractorTests`, `TractorReachTests`,
   `TractorSimulationTests`, `TractorPreviewTests`, free-container wire/save tests and `EditorSessionTests`.
   `ShipEditor.CheckJob` reuses frozen geometry and packing scratch for cargo/fuel-only updates; automatic

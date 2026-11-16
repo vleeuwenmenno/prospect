@@ -71,6 +71,15 @@ Temporary local debug loading is available. Mining output is not built.
 - A claimed container ages and expires like any other. The claim is saved with the world.
 - Containers thrown out by a destroyed rack are unclaimed.
 
+### Implementation (step 3b)
+
+- Server, simulation, wire and save support Abandon and KeepClaim; the Cargo window is separate work.
+- Every release stores `PickupReadyTick`; `pickupDelaySeconds` defaults to 10 and accepts finite 0–3600 seconds.
+- `ClaimOwner` uses the durable hull owner id; zero is unclaimed. Destroyed racks always release unclaimed cargo.
+- `FreeContainer.MayPickup(owner, tick)` gates acquisition and client prediction. Visibility, damage and aging do not change.
+- Protocol 61 sends owner and ready tick (104-byte records, 26,635-byte maximum). Codec 15 saves both.
+  Unknown saved owners and invalid clocks refuse loading; transient tractor pulls restart. Older layouts are refused.
+
 ### Cargo window
 
 - The top bar's Inventory tab becomes Cargo. It opens the Cargo window in interface mode.
