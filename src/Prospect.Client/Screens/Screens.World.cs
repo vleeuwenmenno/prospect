@@ -397,6 +397,9 @@ internal sealed partial class ScreenHost
         var planeHeight = world.CommandFocus.Y;
         var designs = snapshot.Content.Designs;
         var statusTipShown = false;
+        var look = MapLook;
+        var clip = new HudRect(0f, 0f, display.X, display.Y);
+        Span<float2> trailPoints = stackalloc float2[10];
 
         for (var i = 0; i < snapshot.HullCount; i++)
         {
@@ -412,18 +415,25 @@ internal sealed partial class ScreenHost
             var color = mine ? Theme.Accent : Theme.Info;
             if (hull.Jump == JumpPhase.Tunnel)
             {
-                Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, screen + new float2(Kit.Px(12), -Kit.Px(30)), color, "FTL"u8);
-                if (world.Project(hull.Order.Target, out var destination))
-                    draw.AddLine(screen, destination, Kit.Color(color, 0.4f));
+                var hasEnd = world.Project(hull.Order.Target, out var destination);
                 var direction = Vector3.Transform(-Vector3.UnitZ, hull.Orientation);
-                var previous = screen;
-                for (var trail = 1; trail <= 8; trail++)
+                var fallbackDir = float2.Zero;
+                if (world.Project(position + direction * 100f, out var ahead))
+                    fallbackDir = ahead - screen;
+                var dir = FtlScreenDirection(screen, destination, fallbackDir, hasEnd);
+                var trailCount = 0;
+                var maxTrail = Math.Min(hull.JumpTunnelElapsed, look.FtlTrailSeconds);
+                if (maxTrail > 0.001)
                 {
-                    var point = position - direction * (designs[hull.Design].Flight.FtlSpeed * (float)Math.Min(hull.JumpTunnelElapsed, trail * 0.05));
-                    if (!world.Project(point, out var next)) break;
-                    draw.AddLine(previous, next, Kit.Color(color, (9 - trail) / 10f), Kit.Px(2));
-                    previous = next;
+                    var speed = designs[Math.Min(hull.Design, designs.Length - 1)].Flight.FtlSpeed;
+                    for (var trail = 1; trail <= 10; trail++)
+                    {
+                        var point = position - direction * (speed * (float)(maxTrail * (trail / 10.0)));
+                        if (!world.Project(point, out var next)) break;
+                        trailPoints[trailCount++] = next;
+                    }
                 }
+                DrawFtlTransit(draw, look, clip, screen, destination, hasEnd, dir, mine ? look.FtlRgb : look.FtlContactRgb, hull.JumpTunnelElapsed, hull.JumpTunnelSeconds, trailPoints[..trailCount]);
             }
 
             // A stalk down to the command plane shows how far above or below it the hull is.

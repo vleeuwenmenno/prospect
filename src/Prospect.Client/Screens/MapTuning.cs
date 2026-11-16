@@ -123,6 +123,28 @@ internal sealed class MapTuning
     /// <summary>The map legend's row height in unscaled pixels.</summary>
     public float LegendRowHeight { get; init; }
 
+    /// <summary>The colour of owned/fleet FTL transit markers and of other contacts in FTL, as six hex digits (RRGGBB).</summary>
+    public string FtlColor { get; init; } = "5CE1E6";
+    public string FtlContactColor { get; init; } = "45C8DC";
+
+    /// <summary>In-transit chevron half-size, soft glow radius (unscaled pixels), and glow peak alpha (0 to 1).</summary>
+    public float FtlMarkerSize { get; init; }
+    public float FtlGlowRadius { get; init; }
+    public float FtlGlowAlpha { get; init; }
+
+    /// <summary>Dashed FTL destination line alpha (0 to 1), width, dash length, gap, and destination tick size (unscaled pixels).</summary>
+    public float FtlPathAlpha { get; init; }
+    public float FtlPathWidth { get; init; }
+    public float FtlDashLength { get; init; }
+    public float FtlDashGap { get; init; }
+    public float FtlTargetSize { get; init; }
+
+    /// <summary>Seconds of travel the fading FTL trail spans, its minimum screen length and starting width (unscaled pixels), and starting alpha (0 to 1).</summary>
+    public float FtlTrailSeconds { get; init; }
+    public float FtlTrailMinPixels { get; init; }
+    public float FtlTrailWidth { get; init; }
+    public float FtlTrailAlpha { get; init; }
+
     /// <summary>The colour of asteroid fields as 0xRRGGBB.</summary>
     [JsonIgnore]
     public uint FieldRgb => Rgb(FieldColor);
@@ -130,6 +152,14 @@ internal sealed class MapTuning
     /// <summary>The colour of gas clouds as 0xRRGGBB.</summary>
     [JsonIgnore]
     public uint CloudRgb => Rgb(CloudColor);
+
+    /// <summary>The colour of owned/fleet FTL transit markers as 0xRRGGBB.</summary>
+    [JsonIgnore]
+    public uint FtlRgb => Rgb(FtlColor);
+
+    /// <summary>The colour of other contacts in FTL transit as 0xRRGGBB.</summary>
+    [JsonIgnore]
+    public uint FtlContactRgb => Rgb(FtlContactColor);
 
     /// <summary>The shape the map draws for a star class, a circle for one the file does not name.</summary>
     public StarIconShape ShapeOf(string starClass)
@@ -189,15 +219,22 @@ internal sealed class MapTuning
         if (!(tuning.CourseRefusalSeconds is >= 0 and <= 60))
             throw new InvalidDataException($"{path}: courseRefusalSeconds is 0 to 60");
         static bool Hex(string value) => value.Length == 6 && uint.TryParse(value, System.Globalization.NumberStyles.AllowHexSpecifier, null, out _);
-        if (!Hex(tuning.FieldColor) || !Hex(tuning.CloudColor))
-            throw new InvalidDataException($"{path}: fieldColor and cloudColor are six hex digits");
+        if (!Hex(tuning.FieldColor) || !Hex(tuning.CloudColor) || !Hex(tuning.FtlColor) || !Hex(tuning.FtlContactColor))
+            throw new InvalidDataException($"{path}: fieldColor, cloudColor, ftlColor and ftlContactColor are six hex digits");
         if (!Unit(tuning.FieldFillAlpha) || !Unit(tuning.FieldCoreAlpha) || !Unit(tuning.FieldLineAlpha) || !Unit(tuning.CloudFringeAlpha)
-            || !Unit(tuning.CloudBodyAlpha) || !Unit(tuning.CloudLineAlpha) || !Unit(tuning.StarIconAlpha) || !Unit(tuning.StarDotAlpha) || !Unit(tuning.UnitLabelAlpha))
-            throw new InvalidDataException($"{path}: feature, star icon and label strengths are 0 to 1");
+            || !Unit(tuning.CloudBodyAlpha) || !Unit(tuning.CloudLineAlpha) || !Unit(tuning.StarIconAlpha) || !Unit(tuning.StarDotAlpha) || !Unit(tuning.UnitLabelAlpha)
+            || !Unit(tuning.FtlGlowAlpha) || !Unit(tuning.FtlPathAlpha) || !Unit(tuning.FtlTrailAlpha))
+            throw new InvalidDataException($"{path}: feature, star icon, label and FTL strengths are 0 to 1");
         if (!(tuning.FieldCoreShare is >= 0.1f and <= 1f))
             throw new InvalidDataException($"{path}: fieldCoreShare is 0.1 to 1");
         if (!(tuning.StarIconSize is >= 2 and <= 16) || !(tuning.UnitHoverPixels is >= 4 and <= 64) || !(tuning.LegendRowHeight is >= 12 and <= 40))
             throw new InvalidDataException($"{path}: starIconSize is 2 to 16, unitHoverPixels 4 to 64, legendRowHeight 12 to 40");
+        if (!(tuning.FtlMarkerSize is >= 4 and <= 32) || !(tuning.FtlGlowRadius is >= 4 and <= 64) || !(tuning.FtlTargetSize is >= 2 and <= 24))
+            throw new InvalidDataException($"{path}: ftlMarkerSize is 4 to 32, ftlGlowRadius 4 to 64, ftlTargetSize 2 to 24");
+        if (!(tuning.FtlPathWidth is >= 0.5f and <= 8) || !(tuning.FtlDashLength is >= 1 and <= 32) || !(tuning.FtlDashGap is >= 1 and <= 32))
+            throw new InvalidDataException($"{path}: ftlPathWidth is 0.5 to 8, ftlDashLength and ftlDashGap 1 to 32");
+        if (!(tuning.FtlTrailSeconds is >= 0.1f and <= 10) || !(tuning.FtlTrailMinPixels is >= 0 and <= 128) || !(tuning.FtlTrailWidth is >= 0.5f and <= 12))
+            throw new InvalidDataException($"{path}: ftlTrailSeconds is 0.1 to 10, ftlTrailMinPixels 0 to 128, ftlTrailWidth 0.5 to 12");
         foreach (var icon in tuning.StarIcons)
         {
             if (string.IsNullOrWhiteSpace(icon.Star) || !Enum.TryParse<StarIconShape>(icon.Shape, true, out _))

@@ -329,4 +329,36 @@ public sealed class MapExplorationTests
         var bigLegend = MapLegend.Layout(display, 2f, big, rows, 20f);
         Assert.True(!bigLegend.Shown || bigLegend.Min.Y + bigLegend.Size.Y <= display.Y);
     }
+
+    [Fact]
+    public void FtlTransitTuningLoadsAndRefusesBadValues()
+    {
+        var sourcePath = Path.Combine(AppContext.BaseDirectory, "content", "visuals", "map.json");
+        var tuning = MapTuning.Load(sourcePath);
+        Assert.NotEqual(tuning.FieldRgb, tuning.FtlRgb);
+        Assert.InRange(tuning.FtlMarkerSize, 4f, 32f);
+        Assert.InRange(tuning.FtlGlowRadius, 4f, 64f);
+        Assert.InRange(tuning.FtlTrailSeconds, 0.1f, 10f);
+
+        var folder = Directory.CreateTempSubdirectory("map-ftl-tuning");
+        try
+        {
+            var raw = File.ReadAllText(sourcePath);
+            var badColor = Path.Combine(folder.FullName, "bad-color.json");
+            File.WriteAllText(badColor, raw.Replace("\"ftlColor\": \"5CE1E6\"", "\"ftlColor\": \"cyan\""));
+            Assert.Throws<InvalidDataException>(() => MapTuning.Load(badColor));
+
+            var badMarker = Path.Combine(folder.FullName, "bad-marker.json");
+            File.WriteAllText(badMarker, raw.Replace("\"ftlMarkerSize\": 9", "\"ftlMarkerSize\": 1"));
+            Assert.Throws<InvalidDataException>(() => MapTuning.Load(badMarker));
+
+            var badTrail = Path.Combine(folder.FullName, "bad-trail.json");
+            File.WriteAllText(badTrail, raw.Replace("\"ftlTrailSeconds\": 1.8", "\"ftlTrailSeconds\": 0"));
+            Assert.Throws<InvalidDataException>(() => MapTuning.Load(badTrail));
+        }
+        finally
+        {
+            folder.Delete(true);
+        }
+    }
 }

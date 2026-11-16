@@ -203,6 +203,8 @@ internal sealed partial class ScreenHost
         var clicked = 0u;
         var clickedDistance = Kit.Px(14) * Kit.Px(14);
         var unitHover = new MapUnitHover(Kit.Px(look.UnitHoverPixels));
+        var clip = new HudRect(0f, 0f, display.X, display.Y);
+        Span<float2> trailPoints = stackalloc float2[10];
         for (var i = 0; i < snapshot.HullCount; i++)
         {
             ref var hull = ref snapshot.Hulls[i];
@@ -220,25 +222,28 @@ internal sealed partial class ScreenHost
             DrawStalk(draw, view, position, size, at, mine ? Theme.Accent : Theme.Info);
             if (hull.Jump == JumpPhase.Tunnel)
             {
-                var color = mine ? Theme.Accent : Theme.Info;
                 var target = hull.Order.Target;
                 var end = view.ToScreen((float)(target.X / size), (float)(target.Y / size), (float)(target.Z / size));
-                draw.AddLine(at, end, Kit.Color(color, 0.4f));
-                Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, at + new float2(Kit.Px(10), -Kit.Px(16)), color, "FTL"u8);
                 var direction = Vector3.Transform(-Vector3.UnitZ, hull.Orientation);
-                var previous = at;
-                for (var trail = 1; trail <= 8; trail++)
+                var dir = FtlScreenDirection(at, end, new float2(direction.X, direction.Z * view.Cos), true);
+                var trailCount = 0;
+                var maxTrail = Math.Min(hull.JumpTunnelElapsed, look.FtlTrailSeconds);
+                if (maxTrail > 0.001)
                 {
-                    var point = position - direction * (snapshot.Content.Designs[hull.Design].Flight.FtlSpeed * (float)Math.Min(hull.JumpTunnelElapsed, trail * 0.05));
-                    var next = view.ToScreen((float)(point.X / size), (float)(point.Y / size), (float)(point.Z / size));
-                    draw.AddLine(previous, next, Kit.Color(color, (9 - trail) / 10f), Kit.Px(2));
-                    previous = next;
+                    var speed = snapshot.Content.Designs[Math.Min(hull.Design, snapshot.Content.Designs.Length - 1)].Flight.FtlSpeed;
+                    for (var trail = 1; trail <= 10; trail++)
+                    {
+                        var point = position - direction * (speed * (float)(maxTrail * (trail / 10.0)));
+                        trailPoints[trailCount++] = view.ToScreen((float)(point.X / size), (float)(point.Y / size), (float)(point.Z / size));
+                    }
                 }
+                DrawFtlTransit(draw, look, clip, at, end, true, dir, mine ? look.FtlRgb : look.FtlContactRgb, hull.JumpTunnelElapsed, hull.JumpTunnelSeconds, trailPoints[..trailCount]);
             }
             if (!mine)
             {
                 // A hull the server lets the player see is live: a filled marker in the sensor colour.
-                DrawContactMarker(draw, at, Kit.Px(5), Theme.Info, 1f, true, snapshot.Content.Designs[Math.Min(hull.Design, snapshot.Content.Designs.Length - 1)].Class);
+                if (hull.Jump != JumpPhase.Tunnel)
+                    DrawContactMarker(draw, at, Kit.Px(5), Theme.Info, 1f, true, snapshot.Content.Designs[Math.Min(hull.Design, snapshot.Content.Designs.Length - 1)].Class);
                 continue;
             }
 
@@ -253,8 +258,8 @@ internal sealed partial class ScreenHost
             }
 
             if (world.IsSelected(hull.Id))
-                draw.AddCircle(at, Kit.Px(9), Kit.Color(Theme.Text), 20, Kit.Px(1.5f));
-            if (!hull.IsOwn)
+                draw.AddCircle(at, Kit.Px(look.FtlMarkerSize + 3f), Kit.Color(Theme.Text), 20, Kit.Px(1.5f));
+            if (!hull.IsOwn && hull.Jump != JumpPhase.Tunnel)
                 draw.AddCircleFilled(at, Kit.Px(3), Kit.Color(Theme.Accent, 0.9f), 10);
         }
 
@@ -845,6 +850,114 @@ internal sealed partial class ScreenHost
         var tip = at + new float2(0, up ? -s : s);
         draw.AddTriangle(tip, at + new float2(-s, up ? s * 0.6f : -s * 0.6f), at + new float2(s, up ? s * 0.6f : -s * 0.6f), Kit.Color(rgb, 0.85f), Kit.Px(1.4f));
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, at + new float2(s + Kit.Px(3), -Kit.Px(7)), rgb, Kit.F($"{layers:+0;-0}"), 0.85f);
+    }
+
+    /// <summary>Unit screen direction for an FTL transit marker, preferring the path to the destination.</summary>
+    private static float2 FtlScreenDirection(float2 at, float2 end, float2 fallback, bool hasEnd)
+    {
+        if (hasEnd)
+        {
+            var delta = end - at;
+            var lenSq = delta.X * delta.X + delta.Y * delta.Y;
+            if (lenSq > 1f)
+                return delta / MathF.Sqrt(lenSq);
+        }
+
+        var fallbackSq = fallback.X * fallback.X + fallback.Y * fallback.Y;
+        return fallbackSq > 1e-6f ? fallback / MathF.Sqrt(fallbackSq) : new float2(0f, -1f);
+    }
+
+    /// <summary>
+    /// Draws a hull in FTL transit on the map or command view: dashed path with destination tick, fading wake
+    /// trail, soft glow, directional chevron, and "FTL" tag with remaining seconds when known. Zero allocations.
+    /// </summary>
+    private void DrawFtlTransit(ImDrawListPtr draw, MapTuning look, in HudRect clip, float2 at, float2 end, bool hasEnd, float2 dir, uint color, double elapsed, float totalSeconds, ReadOnlySpan<float2> trailPoints)
+    {
+        // Dashed route to destination + destination tick.
+        if (hasEnd)
+        {
+            var toEnd = end - at;
+            var distSq = toEnd.X * toEnd.X + toEnd.Y * toEnd.Y;
+            if (distSq > 4f)
+            {
+                MapRoute.Dotted(draw, at, end, clip, Kit.Px(look.FtlDashLength), Kit.Px(look.FtlDashGap), Kit.Color(color, look.FtlPathAlpha), Kit.Px(look.FtlPathWidth));
+                if (end.X >= clip.Left && end.X <= clip.Right && end.Y >= clip.Top && end.Y <= clip.Bottom)
+                {
+                    var pathDir = toEnd / MathF.Sqrt(distSq);
+                    var pathSide = new float2(-pathDir.Y, pathDir.X);
+                    var tick = Kit.Px(look.FtlTargetSize);
+                    draw.AddLine(end - pathSide * tick, end + pathSide * tick, Kit.Color(color, 0.9f), Kit.Px(2f));
+                    Span<float2> diamond =
+                    [
+                        end + pathDir * (tick * 0.7f),
+                        end + pathSide * (tick * 0.7f),
+                        end - pathDir * (tick * 0.7f),
+                        end - pathSide * (tick * 0.7f),
+                    ];
+                    draw.AddPolyline(diamond, Kit.Color(color, 0.85f), ImDrawFlags.Closed, Kit.Px(1.5f));
+                }
+            }
+        }
+
+        // Fading wake trail behind the hull: use world-space points when long enough on screen, or extend along
+        // -dir up to FtlTrailMinPixels (ramped in over the first 0.5 s) so zoomed-out maps still read clearly.
+        var minTrailPx = Kit.Px(look.FtlTrailMinPixels) * Math.Clamp((float)(elapsed / 0.5), 0f, 1f);
+        var trailLenSq = trailPoints.Length > 0 ? (trailPoints[^1] - at).LengthSquared() : 0f;
+        if (trailPoints.Length > 0 && trailLenSq >= minTrailPx * minTrailPx)
+        {
+            var prev = at;
+            var n = trailPoints.Length;
+            for (var i = 0; i < n; i++)
+            {
+                var frac = 1f - i / (float)n;
+                var width = Math.Max(1f, Kit.Px(1f + (look.FtlTrailWidth - 1f) * frac));
+                draw.AddLine(prev, trailPoints[i], Kit.Color(color, look.FtlTrailAlpha * frac), width);
+                prev = trailPoints[i];
+            }
+        }
+        else if (minTrailPx > 1f)
+        {
+            const int segments = 8;
+            var prev = at;
+            for (var i = 1; i <= segments; i++)
+            {
+                var next = at - dir * (minTrailPx * (i / (float)segments));
+                var frac = 1f - (i - 1) / (float)segments;
+                var width = Math.Max(1f, Kit.Px(1f + (look.FtlTrailWidth - 1f) * frac));
+                draw.AddLine(prev, next, Kit.Color(color, look.FtlTrailAlpha * frac), width);
+                prev = next;
+            }
+        }
+
+        // Soft multi-ring glow behind the chevron.
+        var glowR = Kit.Px(look.FtlGlowRadius);
+        draw.AddCircleFilled(at, glowR, Kit.Color(color, look.FtlGlowAlpha * 0.25f), 20);
+        draw.AddCircleFilled(at, glowR * 0.65f, Kit.Color(color, look.FtlGlowAlpha * 0.45f), 16);
+        draw.AddCircleFilled(at, glowR * 0.35f, Kit.Color(color, look.FtlGlowAlpha), 12);
+
+        // Directional chevron pointing along the FTL path.
+        var side = new float2(-dir.Y, dir.X);
+        var s = Kit.Px(look.FtlMarkerSize);
+        var tip = at + dir * (s * 1.25f);
+        var right = at - dir * (s * 0.75f) + side * (s * 0.95f);
+        var notch = at - dir * (s * 0.25f);
+        var left = at - dir * (s * 0.75f) - side * (s * 0.95f);
+        var coreColor = Kit.Mix(color, 0xFFFFFF, 0.3f);
+        draw.AddTriangleFilled(tip, right, notch, Kit.Color(coreColor, 0.95f));
+        draw.AddTriangleFilled(tip, notch, left, Kit.Color(coreColor, 0.95f));
+        Span<float2> outline = [tip, right, notch, left];
+        draw.AddPolyline(outline, Kit.Color(0xFFFFFF, 0.85f), ImDrawFlags.Closed, Kit.Px(1.25f));
+
+        // "FTL" tag + ETA seconds in a compact high-contrast badge.
+        var hasEta = totalSeconds > 0f && float.IsFinite(totalSeconds);
+        var remaining = hasEta ? Math.Max(0, (int)Math.Ceiling(totalSeconds - elapsed)) : 0;
+        var tag = hasEta ? Kit.F($"FTL {remaining}S") : "FTL"u8;
+        var tagSize = Kit.Measure(_ui.Mono, Theme.FontCaption, tag);
+        var tagPos = at + new float2(Kit.Px(look.FtlMarkerSize + 5f), -Kit.Px(look.FtlMarkerSize + 14f));
+        var pad = new float2(Kit.Px(4f), Kit.Px(2f));
+        draw.AddRectFilled(tagPos - pad, tagPos + tagSize + pad, Kit.Color(Theme.Void, 0.78f), Kit.Px(2f));
+        draw.AddRect(tagPos - pad, tagPos + tagSize + pad, Kit.Color(color, 0.55f), Kit.Px(2f));
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, tagPos, color, tag);
     }
 
     /// <summary>Corner brackets around a sector of the chosen layer.</summary>
