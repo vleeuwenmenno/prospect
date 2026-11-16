@@ -158,7 +158,7 @@ public sealed class HullDesignTests
     [InlineData(0, 800f, 400f, 37.5f)]
     [InlineData(1, 1600f, 800f, 37.5f)]
     [InlineData(2, 1600f, 800f, 37.5f)]
-    [InlineData(3, 30f, 15f, 5f)]
+    [InlineData(3, 60f, 15f, 5f)]
     public void ShippedFlightBalanceReachesRuntimeAndEditorStats(int index, float forwardThrust, float lateralThrust, float recharge)
     {
         var design = Content.Designs[index];
@@ -1124,14 +1124,15 @@ public sealed class HullCollisionTests : IDisposable
 
         Run(60, drone, vessel);
 
-        // The drone is thrown back; the vessel, twenty times its mass, picks up a twentieth of the change.
+        // The drone is thrown back; the vessel, some fourteen times its mass, picks up a fourteenth of the change.
         Assert.True(_hulls.State(drone).Velocity.Y < 0, $"the drone kept going at {_hulls.State(drone).Velocity}");
-        Assert.InRange(_hulls.State(vessel).Velocity.Length(), 0.2f, 3f);
+        Assert.InRange(_hulls.State(vessel).Velocity.Length(), 0.2f, 3.5f);
 
         // Both take the same damage, and it is the drone's weight that sets it: a scratch on the vessel's shield.
         var onDrone = droneShield - _hulls.State(drone).Shield;
         var onVessel = vesselShield - _hulls.State(vessel).Shield;
-        Assert.InRange(onDrone, 20f, 110f);
+        // The heavier drone hits harder, and its shield holds only 120.
+        Assert.InRange(onDrone, 20f, 120f);
         Assert.Equal(onDrone, onVessel, 1);
         Assert.Equal(Content.Designs[Vessel].Flight.HullPoints, _hulls.State(vessel).Hull);
     }
@@ -1146,7 +1147,8 @@ public sealed class HullCollisionTests : IDisposable
 
         Run(60, drone, vessel);
 
-        Assert.InRange(_hulls.State(vessel).Velocity.Y, -40f, -37f);
+        // The drone weighs 5.17 t, so the vessel gives up a little more of its speed than it did to the old 3.52 t one.
+        Assert.InRange(_hulls.State(vessel).Velocity.Y, -40f, -36.5f);
         Assert.True(_hulls.State(drone).Velocity.Y < -40f, $"the drone only reached {_hulls.State(drone).Velocity}");
     }
 
@@ -1305,8 +1307,10 @@ public sealed class HullCollisionTests : IDisposable
             closest = Math.Min(closest, Gap(drone, pod));
         }
 
-        // It never got inside the pod, let alone through it: it was turned aside, and the pod thrown back.
-        Assert.True(closest > 0.74f, $"the hulls were {closest} m apart at the closest");
+        // It never got inside the pod, let alone through it: it was turned aside, and the pod thrown back. Block
+        // centres of a pod cell (half 0.5 m) and a drone cell (half 0.125 m) touch at 0.625 m; the drone's wider
+        // shape (gyros and plating a cell to each side) comes closer by a few centimetres than the old one did.
+        Assert.True(closest > 0.65f, $"the hulls were {closest} m apart at the closest");
         Assert.True(_hulls.State(drone).Velocity.X > -200f, $"the drone kept {_hulls.State(drone).Velocity}");
         Assert.True(_hulls.State(pod).Velocity.X < -10f);
     }

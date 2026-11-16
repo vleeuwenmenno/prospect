@@ -297,7 +297,8 @@ public sealed class TargetPickingTests
                     middle += Point(mesh.Vertices[q + k].Position) * 0.25f;
                 var normal = Point(mesh.Vertices[q].Normal);
                 var axis = normal.X != 0 ? 0 : normal.Y != 0 ? 1 : 2;
-                var block = Array.FindIndex(design.BlockOffsets, b => Vector3.Distance(b, middle - normal * design.BlockSize * 0.5f) < 1e-4f);
+                // A block may be several cells thick, so its face lies half its own extent from its centre.
+                var block = Enumerable.Range(0, design.BlockOffsets.Length).FirstOrDefault(b => Vector3.Distance(design.BlockOffsets[b], middle - normal * design.BlockHalfExtents[b][axis]) < 1e-4f, -1);
                 if (block < 0)
                 {
                     // A face of a mounted thruster, drawn here as its plain small box: it is no block's face.
@@ -349,7 +350,7 @@ public sealed class TargetPickingTests
             var hull = kind == 0
                 ? new PickHull(1, new Double3(center.X, center.Y, center.Z), rotation, [Vector3.Zero], 1, BlockMasks.Set(1), 0.87f, stretch, cutPoint, normal)
                 : new PickHull(1, new Double3(center.X, center.Y, center.Z), rotation, design.BlockOffsets, design.BlockSize, BlockMasks.Set(mask),
-                    design.Flight.Radius, stretch, cutPoint, normal, kind == 1 ? design.ExteriorFaces : null);
+                    design.Flight.Radius, stretch, cutPoint, normal, kind == 1 ? design.ExteriorFaces : null, HalfExtents: design.BlockHalfExtents);
 
             // The triangles as the mesh pass places them: one hull mesh, or a cube per block it has.
             triangles.Clear();
@@ -362,12 +363,12 @@ public sealed class TargetPickingTests
                 var blocks = new MeshData();
                 blocks.Vertices.AddRange(whole.Vertices.Take(quads * 4));
                 blocks.Indices.AddRange(whole.Indices.Take(quads * 6));
-                Add(blocks, Vector3.Zero, 1);
+                Add(blocks, Vector3.Zero, Vector3.One);
             }
             else
                 for (var b = 0; b < hull.Blocks.Length; b++)
                     if ((mask & 1UL << b) != 0)
-                        Add(cube, hull.Blocks[b] with { Z = hull.Blocks[b].Z * stretch }, hull.BlockSize);
+                        Add(cube, hull.Blocks[b] with { Z = hull.Blocks[b].Z * stretch }, (kind == 0 ? new Vector3(hull.BlockSize) : design.BlockHalfExtents[b] * 2f));
 
             var spread = 1.6f * size / depth;
             var pointer = new Vector3(center.X / depth + (random.NextSingle() - 0.5f) * spread, center.Y / depth + (random.NextSingle() - 0.5f) * spread, 1);
@@ -411,7 +412,7 @@ public sealed class TargetPickingTests
             missed += 1 - expected;
 
             bool Drawn(Vector3 p) => p.Z >= near && Vector3.Dot(p - center - cutPoint, normal) <= 0;
-            void Add(MeshData mesh, Vector3 offset, float scale)
+            void Add(MeshData mesh, Vector3 offset, Vector3 scale)
             {
                 for (var i = 0; i < mesh.Indices.Count; i += 3)
                 {
