@@ -307,9 +307,9 @@
       "burst": 0,
       "burstSeconds": 0.2,
       "fadeSeconds": 0.15,
-      "shieldStrength": 0.65,
-      "shieldReach": 1,
-      "shieldColor": [0.5, 0.65, 1]
+      "shieldStrength": 1.8,
+      "shieldSpread": 1.5,
+      "shieldColor": [0.8, 0.85, 1]
     },
     "hot": {
       "kind": "flame",
@@ -334,8 +334,8 @@
       "burst": 0,
       "burstSeconds": 0.2,
       "fadeSeconds": 0.12,
-      "shieldStrength": 0.5,
-      "shieldReach": 1,
+      "shieldStrength": 1.0,
+      "shieldSpread": 2.0,
       "shieldColor": [0.7, 0.5, 0.3]
     },
     "ion": {
@@ -361,9 +361,9 @@
       "burst": 0,
       "burstSeconds": 0.2,
       "fadeSeconds": 0.35,
-      "shieldStrength": 0.13,
-      "shieldReach": 1,
-      "shieldColor": [0.35, 0.3, 1]
+      "shieldStrength": 0.9,
+      "shieldSpread": 2.2,
+      "shieldColor": [0.5, 0.32, 1]
     },
     "cold": {
       "kind": "puff",
@@ -388,9 +388,9 @@
       "burst": 1.4,
       "burstSeconds": 0.15,
       "fadeSeconds": 0.18,
-      "shieldStrength": 0.25,
-      "shieldReach": 1,
-      "shieldColor": [0.4, 0.65, 0.85]
+      "shieldStrength": 0.5,
+      "shieldSpread": 2.2,
+      "shieldColor": [0.7, 0.85, 1]
     }
   },
   "boostLength": 1.4,

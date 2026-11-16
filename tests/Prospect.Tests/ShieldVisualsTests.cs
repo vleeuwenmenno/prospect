@@ -448,6 +448,18 @@ public sealed class ShieldVisualsTests
         Assert.True(Pod.IntactIndices.Span.SequenceEqual(_indices.AsSpan(_shields.Draws[0].FirstIndex, _shields.Draws[0].IndexCount)));
         Assert.Equal(shell[5].Position.Y, _vertices[_shields.Draws[0].FirstVertex + 5].Position.Y);
 
+        // Exhaust queries use the CPU shell and cached group bounds, not the write-combined upload memory.
+        var draw = _shields.Draws[0];
+        Assert.Equal(drawn.Row2, _shields.ExhaustInstances[0].Row2);
+        for (var i = 0; i < draw.IndexCount; i++)
+        {
+            var v = _shields.ExhaustVertices[draw.ShellVertex + _shields.ExhaustIndices[draw.ShellIndex + i]].Position;
+            var bounds = _shields.Bounds[draw.BoundsOffset + i / ShieldVisuals.ExhaustGroupIndices];
+            Assert.InRange(v.X, bounds.Min.X, bounds.Max.X);
+            Assert.InRange(v.Y, bounds.Min.Y, bounds.Max.Y);
+            Assert.InRange(v.Z, bounds.Min.Z, bounds.Max.Z);
+        }
+
         // A hull not in the snapshot this frame adds nothing.
         _shields.Add(99, Vector3.Zero, Quaternion.Identity, 1f, 1f, _instances, _vertices, _indices);
         Assert.Equal(1, _shields.Draws.Length);

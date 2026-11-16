@@ -424,10 +424,15 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   ray's closest approach, with no sparks, shock nodes, flicker or burst (`PlumeLook.Check` refuses them). Rules in
   `docs/roadmap/propulsion.md`; `PropulsionVisualTests` holds them. Check with `--thrust` captures (below).
   Shield exhaust reads those same drawn plumes (`ThrustEffects.Capsules`), never recalculates thrust or nozzle geometry.
-  `ShieldExhaust` keeps the nearest eight intersecting capsules per shell, excluding its hull id; fixed mapped storage
-  per frame slot (25 vec4s per shield, set 0 binding 2), indexed by `gl_InstanceIndex`. The mask pass never reads it.
-  Kind strength, reach fraction and colour are `shieldStrength`, `shieldReach`, `shieldColor` in each plume entry;
-  zero strength disables the reaction for comparisons. No scene-copy, pass-order or frame.glsl change.
+  `ShieldExhaust` ray-tests the actual cached shell triangles, rejecting own hull ids and bounding spheres first.
+  Cached groups of 64 triangles reject most work; at most 262,144 triangle tests a frame. An incomplete search
+  installs neither a clip nor a splash. Queries read CPU caches, never write-combined GPU upload memory.
+  First foreign entry supplies one tangent clipping plane to `plume.vert/.frag` (gas, ion beam and sparks) and a
+  splash at that exact point. Its radius follows the drawn plume profile there, multiplied by `shieldSpread`;
+  `shieldStrength` and `shieldColor` tune the response. Reach is the plume's own grown length, with no second reach.
+  Each shell keeps eight nearest splashes in fixed per-frame storage (25 vec4s, set 0 binding 2, `gl_InstanceIndex`).
+  Zero strength disables both clipping and splash for comparisons. The mask pass never reads the data.
+  No scene-copy, pass-order or frame.glsl change.
   Tanks are models too (`PropulsionModels.BuildTank`, `PropulsionModels.Tanks.cs`; figures and per-fuel paint in the
   `tanks` entry of `propulsion.json`, keyed by fuel): an open frame round round vessels laid out by `TankLayout`. A
   vessel's radius comes from the smallest side, never the longest: a cube holds a sphere (poles along the facing), a
@@ -581,11 +586,13 @@ The client opens a real window on the developer's desktop, and they are usually 
   shipped ship has a front-facing engine, a large one or a hot thruster: put them in a copy of the build's
   `command_pod.json` (with generators and a hydrazine tank, or the battery empties and throttle drops). The pod's
   thrusters are mounted four to a face: shield (right), cargo (left), quarters (up), core (down), charting (front).
-- `--open exhaust-shield` holds the pod and Prospector 9 m apart and holds forward thrust; `exhaust-shield-cold`
-  places the Prospector 4.5 m to the left and holds right thrust. Scripted runs only, unsaved private local server.
+- `--open exhaust-shield` holds the pod and Prospector 6.8 m apart and holds forward thrust; `exhaust-shield-cold`
+  places the Prospector 5 m to the left and holds right thrust. Scripted runs only, unsaved private local server.
   These fixtures pin poses/velocities each tick, but normal flight computes thrust and spends fuel; they inject no hits.
-  Engine: `--look 90 --look-height 2 --zoom 1.5`; cold: `--look 0 --look-height 1.5 --zoom 1.3`.
-  Capture at 4 s, three frames 0.6 s apart. For ion, copy the build and replace the pod's engine type with `ionDrive`.
+  Engine: `--look 110 --look-height 1 --zoom 1.2`; cold/hot: `--look 170 --look-height 1.5 --zoom 1.3`.
+  Capture at 4 s, three frames 0.6 s apart. Oblique engine: `--look 145 --look-height 1 --zoom 1.3`.
+  For ion, copy the build and replace the pod's engine type with `ionDrive`. For hot, use the cold fixture with
+  the pod's four left mounts replaced by one `hotThruster` at `[3,3]` and its nitrogen tank changed to hydrazine.
   Compare with a second copy whose plume entries all have `shieldStrength: 0`. Own-shield control:
   `--thrust forward --look 150`, without the fixture. Crop original pixels; report actual capture times.
 - `--ram <speed>` (0–100 m/s) sets the own hull against the largest rock of the spawn sector at simulation
@@ -697,7 +704,7 @@ The client opens a real window on the developer's desktop, and they are usually 
   spreads tangentially from the disk edge, never through the hull to its back. Missing geometry falls back to the point. This is a local
   tangent approximation, not the full curved contact manifold. Four packed normals/extents extend only the GPU
   instance (`ShieldInstance`, shader attributes 12–15); frame.glsl is unchanged.
-- Shield exhaust is light in that same shell pass, at most eight foreign plume capsules per shield;
+- Shield exhaust is light in that same shell pass, at most eight foreign plume splash patches per shield;
   no extra scene copy or pass. `ShieldExhaustTests` holds selection, attenuation, data validation and allocation rules.
 - Shields copy the scene's colour and depth once a frame whenever one is drawn, to bend what is behind them, and
   are drawn last in the scene. Overlapping shields each bend that one copy; dust, the command grid and jump marks

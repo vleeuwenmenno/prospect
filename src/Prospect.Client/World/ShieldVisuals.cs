@@ -59,6 +59,10 @@ internal struct ShieldDraw
     public uint Hull;
     public Vector3 Center;
     public float Radius;
+    public int ShellVertex;
+    public int ShellIndex;
+    public int BoundsOffset;
+    public int BoundsCount;
     public int FirstVertex;
     public int VertexCount;
     public int FirstIndex;
@@ -98,6 +102,15 @@ internal sealed class ShieldVisuals
 
     /// <summary>The indices of all the shells in one frame.</summary>
     public const int MaxIndices = MaxShields * ShellIndices;
+
+    public const int ExhaustGroupIndices = 192;
+    private const int ExhaustGroups = (ShellIndices + ExhaustGroupIndices - 1) / ExhaustGroupIndices;
+    private readonly ExhaustBounds[] _exhaustBounds = new ExhaustBounds[MaxShields * ExhaustGroups];
+    private readonly ShieldInstance[] _exhaustInstances = new ShieldInstance[MaxShields];
+    public ReadOnlySpan<ShieldInstance> ExhaustInstances => _exhaustInstances;
+    public ReadOnlySpan<ExhaustBounds> Bounds => _exhaustBounds;
+    public ReadOnlySpan<MeshVertex> ExhaustVertices => _shellVertices;
+    public ReadOnlySpan<ushort> ExhaustIndices => _shellIndices;
 
     private readonly ShieldLook _look;
     private readonly JobSystem? _jobs;
@@ -419,14 +432,14 @@ internal sealed class ShieldVisuals
         _shellIndices.AsSpan(shield.Shell * ShellIndices, shell.IndexCount).CopyTo(indices[_indexCount..]);
         // The material is the kind (1 a hull, 2 the pilot's own) plus four times one more than the clip slot.
         var own = material - 4f * MathF.Floor((material + 0.5f) * 0.25f) > 1.5f;
-        _draws[_drawCount] = new ShieldDraw { Hull = id, Center = position, Radius = _designs![shell.Design].Flight.Radius * Math.Max(1f, stretch) + 0.6f, FirstVertex = _vertexCount, VertexCount = shell.VertexCount, FirstIndex = _indexCount, IndexCount = shell.IndexCount, Own = own };
+        _draws[_drawCount] = new ShieldDraw { ShellVertex = shield.Shell * ShellVertices, ShellIndex = shield.Shell * ShellIndices, BoundsOffset = shield.Shell * ExhaustGroups, BoundsCount = (shell.IndexCount + ExhaustGroupIndices - 1) / ExhaustGroupIndices, Hull = id, Center = position, Radius = _designs![shell.Design].Flight.Radius * Math.Max(1f, stretch) + 0.6f, FirstVertex = _vertexCount, VertexCount = shell.VertexCount, FirstIndex = _indexCount, IndexCount = shell.IndexCount, Own = own };
         _vertexCount += shell.VertexCount;
         _indexCount += shell.IndexCount;
 
         var m = Matrix4x4.CreateFromQuaternion(orientation);
         var design = _designs![shell.Design];
         var strain = _look.RecoveryWobble * design.BlockSize / Math.Max(design.Flight.Radius, design.BlockSize);
-        instances[_drawCount++] = new ShieldInstance
+        instances[_drawCount] = _exhaustInstances[_drawCount] = new ShieldInstance
         {
             // System.Numerics matrices transform row vectors, so the rotation's columns are its rows here.
             Row0 = new float4(m.M11, m.M21, m.M31 * stretch, position.X),
@@ -444,6 +457,7 @@ internal sealed class ShieldVisuals
             Strengths = new float4(shield.Ripple0.Strength, shield.Ripple1.Strength, shield.Ripple2.Strength, shield.Ripple3.Strength),
             Recovery = new float4(strain * shield.Recovery, shield.Recovery, _look.RecoveryHz, (id * 0.618034f % 1f) * MathF.Tau),
         };
+        _drawCount++;
     }
 
     /// <summary>
@@ -540,6 +554,19 @@ internal sealed class ShieldVisuals
         blocks.CopyTo(words);
         vertices.CopyTo(MemoryMarshal.Cast<MeshVertex, ShellVertex>(_shellVertices.AsSpan(slot * ShellVertices, ShellVertices)));
         indices.CopyTo(_shellIndices.AsSpan(slot * ShellIndices, ShellIndices));
+        // Consecutive surface triangles are spatially local. Cache their bounds with the shell, never per frame.
+        for (var first = 0; first < indices.Length; first += ExhaustGroupIndices)
+        {
+            var lo = new Vector3(float.PositiveInfinity);
+            var hi = new Vector3(float.NegativeInfinity);
+            for (var i = first; i < Math.Min(first + ExhaustGroupIndices, indices.Length); i++)
+            {
+                var at = vertices[indices[i]].Position;
+                lo = Vector3.Min(lo, at);
+                hi = Vector3.Max(hi, at);
+            }
+            _exhaustBounds[slot * ExhaustGroups + first / ExhaustGroupIndices] = new ExhaustBounds(lo, hi);
+        }
         _shells[slot] = new Shell
         {
             Used = true,

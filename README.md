@@ -329,8 +329,8 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   is refused before Apply: some four hundred or more separate parts need more than the room. It shimmers and bends what is
   behind it by a few pixels, most at its rim. A contact lights a tangent patch along the touching side and paired fading ripples
   whose brightness follows impact energy (a tap is faint), on the pilot's hull and everyone else's, aged from the server event (old hits never
-  restart on joining). Another hull's exhaust adds a soft local shimmer, fading along and away from the stream;
-  ion exhaust is faint violet. Own exhaust never lights the own shield. This is visual only, with no heat or damage.
+  restart on joining). Another hull's exhaust stops at the shield and makes a bright, soft splash where its axis enters;
+  ion exhaust is fainter violet. Own exhaust never lights or clips against the own shield. This is visual only, with no heat or damage.
   Below 80% charge it shifts gradually from neutral through amber, visible by half charge,
   then towards red near empty, with slow waves; a break, or the loss of the last emitter, collapses it red and it is
   gone until the simulation brings it back online, when it fades in. While it comes back and while its charge

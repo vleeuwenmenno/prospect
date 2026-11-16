@@ -32,6 +32,7 @@ layout(location = 8) flat in vec4 plumeMotion;  // seconds, flicker, spark secon
 layout(location = 9) flat in vec4 plumeExtent;  // depth inside the nozzle, turbulence, sparks, box half width
 layout(location = 10) flat in vec2 box;         // box length past the exit, camera inside the box
 layout(location = 11) flat in vec4 plumeFlow;   // seconds since it stopped (< 0 firing), flow m/s, core reach m, opening m
+layout(location = 12) flat in vec4 plumeClip; // outward shell normal, plane offset; zero means no foreign shield
 layout(location = 0) out vec4 outColor;
 
 const int Steps = 16;
@@ -104,6 +105,14 @@ void main()
     vec3 tf = max(ta, tb);
     float t0 = max(max(max(tn.x, tn.y), tn.z), 0.0);
     float t1 = min(min(tf.x, tf.y), tf.z);
+    bool clipped = dot(plumeClip.xyz, plumeClip.xyz) > 0.5;
+    if (clipped) {
+        float slope = dot(plumeClip.xyz, dir);
+        if (abs(slope) < 1e-6) {
+            if (plumeClip.w < 0.0) discard;
+        } else if (slope > 0.0) t0 = max(t0, -plumeClip.w / slope);
+        else t1 = min(t1, -plumeClip.w / slope);
+    }
     if (t1 <= t0)
         discard;
 
@@ -264,7 +273,9 @@ void main()
         // over that width so a far beam keeps what it has. It fades along its length and, once the part stops,
         // empties from the grid outward with the rest.
         vec3 a = plumeExit.xyz;
-        vec3 u = axis * len;
+        float beamLength = len;
+        if (clipped) beamLength = min(len, max(0.0, -(dot(plumeClip.xyz, a) + plumeClip.w) / dot(plumeClip.xyz, axis)));
+        vec3 u = axis * beamLength;
         float uu = dot(u, u);
         float ud = dot(u, dir);
         float s = clamp((ud * dot(dir, a) - dot(u, a)) / max(uu - ud * ud, 1e-6), 0.0, 1.0);
@@ -273,9 +284,10 @@ void main()
         float dist = length(q - dir * t);
         float thin = radius * 0.07;
         float w = max(thin, t * frame.lens.x * 2.4 / max(frame.lens.w, 1.0));
-        float along = (1.0 - s) * sqrt(1.0 - s);
-        float beam = exp(-(dist * dist) / (w * w)) * (thin / w) * along * smoothstep(emptied, emptied + radius, s * len);
-        color += mix(edge, core, 0.85) * beam * brightness * 0.9;
+        float along = max(0.0, 1.0 - s * beamLength / len);
+        along *= sqrt(along);
+        float beam = exp(-(dist * dist) / (w * w)) * (thin / w) * along * smoothstep(emptied, emptied + radius, s * beamLength);
+        if (t >= t0 && t <= t1) color += mix(edge, core, 0.85) * beam * brightness * 0.9;
     }
 
     // Ignition: a few faint sparks thrown from the throat in a cone, gone after the spark seconds.
@@ -301,6 +313,13 @@ void main()
             vec3 d = axis * cos(cone) + (side * cos(around) + up * sin(around)) * sin(cone);
             vec3 head = throat + d * (sparkSpeed * flown);
             vec3 tail = head - d * min(sparkSpeed * flown, radius * 0.6);
+            if (clipped) {
+                float hside = dot(plumeClip.xyz, head) + plumeClip.w;
+                float tside = dot(plumeClip.xyz, tail) + plumeClip.w;
+                if (hside < 0.0 && tside < 0.0) continue;
+                if (hside < 0.0) head = mix(tail, head, tside / (tside - hside));
+                else if (tside < 0.0) tail = mix(head, tail, hside / (hside - tside));
+            }
             float dist = rayToSegment(dir, tail, head);
             glow += exp(-(dist * dist) / (w * w)) * (1.0 - flown / (sparkSeconds - start));
         }

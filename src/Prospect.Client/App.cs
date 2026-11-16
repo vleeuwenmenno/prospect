@@ -1567,7 +1567,7 @@ internal sealed class App : IDisposable
                 if (_options.Thrust is not null)
                 {
                     var thrust = World.Own.Thrust;
-                    Console.WriteLine($"capture {_capturesTaken:D2} thrust: {thrust.X} {thrust.Y} {thrust.Z}, flags {thrust.Flags}; plumes {World.DrawnPlumes}");
+                    Console.WriteLine($"capture {_capturesTaken:D2} thrust: {thrust.X} {thrust.Y} {thrust.Z}, flags {thrust.Flags}; plumes {World.DrawnPlumes}; shield contacts {World.ExhaustContacts}; splash radius/strength/contact distance/plume length {World.ExhaustSample}");
                 }
                 if (World.PulseShown.Strength > 0f)
                     Console.WriteLine($"capture {_capturesTaken:D2} scan pulse: radius {World.PulseShown.Radius:F0} m, strength {World.PulseShown.Strength:F2}");

@@ -131,6 +131,29 @@ internal sealed class WorldView
 
     /// <summary>Plumes drawn in the last frame.</summary>
     public int DrawnPlumes { get; private set; }
+    public int ExhaustContacts { get; private set; }
+    public float4 ExhaustSample
+    {
+        get
+        {
+            for (var s = 0; s < _shields.Draws.Length; s++)
+            {
+                var first = s * ShieldExhaust.VectorsPerShield;
+                if (_exhaustData[first].X <= 0) continue;
+                for (var p = 0; p < DrawnPlumes; p++)
+                {
+                    var clip = _thrust.Instances[p].ShieldClip;
+                    var normal = new Vector3(clip.X, clip.Y, clip.Z);
+                    if (normal.LengthSquared() < 0.5f) continue;
+                    var plume = _thrust.Capsules[p];
+                    var distance = -(Vector3.Dot(normal, plume.Start) + clip.W) / Vector3.Dot(normal, plume.Direction);
+                    return new float4(_exhaustData[first + 1].W, _exhaustData[first + 2].W, distance, plume.Length);
+                }
+            }
+            return default;
+        }
+    }
+    private readonly float4[] _exhaustData = new float4[ShieldVisuals.MaxShields * ShieldExhaust.VectorsPerShield];
 
     /// <summary>
     /// The installed catalogue's meshes, in design order, set with them by the application: the world reads only the
@@ -1234,12 +1257,16 @@ internal sealed class WorldView
         _partModels.Flush();
         DrawnPlumes = _thrust.End();
         _scene.QueuePlumes(DrawnPlumes);
-        var exhaustData = _scene.ShieldExhaustData(frameIndex);
-        for (var i = 0; i < _shields.Draws.Length; i++)
+        // GPU upload memory is write-combined: geometry queries and sorting must read the CPU caches, never it.
+        ShieldExhaust.Apply(_thrust.Capsules.AsSpan(0, DrawnPlumes), _thrust.Instances, _shields.Draws, _shields.ExhaustInstances,
+            _shields.ExhaustVertices, _shields.ExhaustIndices, _exhaustData, time, _shields.Bounds);
+        _exhaustData.AsSpan(0, _shields.Draws.Length * ShieldExhaust.VectorsPerShield).CopyTo(_scene.ShieldExhaustData(frameIndex));
+        ExhaustContacts = 0;
+        for (var i = 0; i < DrawnPlumes; i++)
         {
-            ref readonly var shield = ref _shields.Draws[i];
-            ShieldExhaust.Select(shield.Hull, shield.Center, shield.Radius, _thrust.Capsules.AsSpan(0, DrawnPlumes),
-                exhaustData.Slice(i * ShieldExhaust.VectorsPerShield, ShieldExhaust.VectorsPerShield));
+            var clip = _thrust.Instances[i].ShieldClip;
+            plumes[i].ShieldClip = clip;
+            if (clip.X != 0 || clip.Y != 0 || clip.Z != 0) ExhaustContacts++;
         }
         AddOpenings(camera, aspect, marks, ref markCount, ref composite, ref openings, ref clips);
         if (overlayCheck && GasOverlayOpening && composite.Setup.W < CompositeConstants.MaxLenses)

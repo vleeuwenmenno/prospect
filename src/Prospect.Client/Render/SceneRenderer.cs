@@ -231,6 +231,7 @@ internal struct PlumeInstance
     public float4 Motion;
     public float4 Extent;
     public float4 Flow;
+    public float4 ShieldClip;
 }
 
 /// <summary>
@@ -752,7 +753,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         var markInput = new VertexInput(1, 3).AddBindingWithAttributes<FtlMark>(0, 0, VkVertexInputRate.Instance);
         _ftlMarkPipeline = ScenePipeline(Module(shaders, "ftl_mark.vert"), Module(shaders, "ftl_mark.frag"), markInput, Presets.Rasterization.Fill.CullNone, &depthRead, &additive);
         // Plumes are light added in the scene, tested against what is solid, and march only the pixels of their boxes.
-        var plumeInput = new VertexInput(1, 9).AddBindingWithAttributes<PlumeInstance>(0, 0, VkVertexInputRate.Instance);
+        var plumeInput = new VertexInput(1, 10).AddBindingWithAttributes<PlumeInstance>(0, 0, VkVertexInputRate.Instance);
         _plumePipeline = ScenePipeline(Module(shaders, "plume.vert"), Module(shaders, "plume.frag"), plumeInput, Presets.Rasterization.Fill.CullNone, &depthRead, &additive);
 
         // The scan pulse is light added to the displayed image after tone mapping, in the present pass, under the

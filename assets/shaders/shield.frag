@@ -133,25 +133,25 @@ void main()
     vec3 flashTint = mix(tint, vec3(1.0, 0.95, 0.8), 0.65);
     vec3 light = tint * glow + present * flashTint * hit.y * shieldLook.impact.z + shieldLook.collapse.rgb * burning * (0.35 + 0.8 * rim) * 1.4;
 
-    // Only nearby plumes enter this loop. The mask pass returns before any buffer read.
+    // A contact exists only where the plume axis hit this shell. Nothing behind that entry is lit.
     int base = exhaustIndex * 25;
     int count = int(exhaust[base].x);
-    vec3 streamLight = vec3(0.0);
-    for (int i = 0; i < count; i++) {
-        vec4 start = exhaust[base + 1 + i * 3];
-        vec4 axis = exhaust[base + 2 + i * 3];
-        vec4 color = exhaust[base + 3 + i * 3];
-        vec3 delta = worldPosition - start.xyz;
-        float along = dot(delta, axis.xyz);
-        if (along < 0.0 || along >= axis.w) continue;
-        vec3 radial = delta - axis.xyz * along;
-        float edge = max(0.0, 1.0 - dot(radial, radial) / (start.w * start.w));
-        if (edge <= 0.0) continue;
-        float fade = 1.0 - along / axis.w;
-        float flow = noise(delta / max(start.w, 0.05) * 2.0 - axis.xyz * time * 0.7);
-        streamLight += color.rgb * color.a * edge * edge * fade * fade * (0.45 + 0.55 * flow);
+    if (count > 0) {
+        vec3 streamLight = vec3(0.0);
+        for (int i = 0; i < count; i++) {
+            vec4 hit = exhaust[base + 1 + i * 3];
+            vec4 normalStrength = exhaust[base + 2 + i * 3];
+            vec3 color = exhaust[base + 3 + i * 3].rgb;
+            vec3 delta = (worldPosition - hit.xyz) / hit.w;
+            float plane = dot(delta, normalStrength.xyz);
+            float radial = max(0.0, dot(delta, delta) - plane * plane);
+            if (radial > 6.0 || abs(plane) > 1.5) continue;
+            float flow = noise(delta * 2.5 + vec3(time * 0.35, -time * 0.45, time * 0.2));
+            float splash = (exp(-radial * 3.0) + 0.35 * exp(-radial * 0.7)) * exp(-plane * plane * 2.0);
+            streamLight += color * normalStrength.w * splash * (0.65 + 0.35 * flow);
+        }
+        light += present * streamLight / (1.0 + max(streamLight.r, max(streamLight.g, streamLight.b)) * 0.5);
     }
-    light += present * streamLight / (1.0 + max(streamLight.r, max(streamLight.g, streamLight.b)));
 
     // The bend: along the shell's normal as seen on screen, strongest at the rim and in a ripple, a few pixels at most.
     vec2 size = frame.lens.zw;

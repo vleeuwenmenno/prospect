@@ -24,7 +24,7 @@ public sealed partial class ServerHost
             {
                 if (i == own || !_hulls.IsAliveAt(i) || _hulls.Info(i).Owner != connection.PlayerId) continue;
                 ref var target = ref _hulls.State(i);
-                target.Position = source.Position + (_scriptedExhaustShield == 2 ? new Vector3(-4.5f, 0, 0) : new Vector3(0, 0, 9));
+                target.Position = source.Position + (_scriptedExhaustShield == 2 ? new Vector3(-5f, 0, 0) : new Vector3(0, 0, 6.8f));
                 target.Velocity = Vector3.Zero;
                 target.Orientation = Quaternion.Identity;
                 target.AngularVelocity = Vector3.Zero;
