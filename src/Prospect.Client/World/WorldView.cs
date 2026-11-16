@@ -3474,6 +3474,79 @@ internal sealed class WorldView
             Editor.RequestFill(bridge);
         }
     }
+
+    // The scripted context menu (--open edit-menu: the pod's first tank right-clicked, its Fuel flyout out) and
+    // face-drag resize (--open edit-resize: a block selected, then grown one cell by the gesture) of a capture; the
+    // pointer is muted, so the harness plays both through the editor's own calls.
+    private int _captureEditKind;
+    private float _captureEditClock = -1f;
+    private int _captureEditBlock = -1;
+    private int _captureEditSide;
+    private bool _captureEditDone;
+
+    /// <summary>Plays the context menu (<paramref name="resize"/> false) or a face-drag resize once the editor is open, for a capture.</summary>
+    internal void ScriptEditForCapture(bool resize) => _captureEditKind = resize ? 2 : 1;
+
+    private void RunEditCapture(float dt)
+    {
+        if (_captureEditDone || !Editor.CanEdit || Editor.Draft is not { } draft)
+            return;
+        var boxes = draft.Boxes;
+        if (_captureEditClock < 0f)
+        {
+            _captureEditClock = 0f;
+            Editor.StopPlacing();
+            // A tank, else any block that is not the core, with a face it can grow from.
+            for (var pass = 0; pass < 2 && _captureEditBlock < 0; pass++)
+            {
+                for (var i = 0; i < boxes.Length && _captureEditBlock < 0; i++)
+                {
+                    if (pass == 0 ? boxes[i].Type.Tank == FuelKind.None : boxes[i].Type.Core)
+                        continue;
+                    for (var side = 0; side < 6; side++)
+                    {
+                        var length = EditorGeometry.Of(boxes[i].Size, side >> 1);
+                        if (draft.CanResize(i, side, length + 1) != DraftEdit.Done)
+                            continue;
+                        _captureEditBlock = i;
+                        _captureEditSide = side;
+                        break;
+                    }
+                }
+            }
+
+            if (_captureEditBlock < 0)
+                _captureEditBlock = 0;
+            Editor.Select(_captureEditBlock, false);
+        }
+
+        _captureEditClock += dt;
+        if (_captureEditClock < 1f)
+            return;
+        if (_captureEditKind == 1)
+        {
+            var at = _screen * 0.5f;
+            if (Project(EditorPoint(EditorGeometry.Middle(boxes[_captureEditBlock])), out var screen))
+                at = screen;
+            Editor.OpenMenu(at, _captureEditBlock, -1);
+            Editor.Menu.Sub = EditorMenuSub.Fuel;
+            _captureEditDone = true;
+            return;
+        }
+
+        if (!Editor.ResizingBlock && _captureEditClock < 2f)
+        {
+            Editor.BeginBlockResize(true);
+            _sizeVersion = draft.Version;
+        }
+
+        if (_captureEditClock >= 2f && !_captureEditDone && Editor.ResizingBlock)
+        {
+            Editor.SizeBlockFace(_captureEditSide, EditorGeometry.Of(boxes[_captureEditBlock].Size, _captureEditSide >> 1) + 1);
+            _sizeVersion = draft.Version;
+            _captureEditDone = true;
+        }
+    }
     private float _captureBoxClock = -1f;
     private bool _captureBoxDragging;
     private bool _captureBoxDone;
@@ -3600,8 +3673,9 @@ internal sealed class WorldView
     /// middle drag pans and a middle click selects (Shift adds or removes); the wheel zooms. A left click places,
     /// or selects when not placing; a left drag that starts on a selected block moves the selection. A part dragged
     /// from the part list follows the pointer until the button is let go. Ctrl+Z, Ctrl+Y (or Ctrl+Shift+Z), Ctrl+C,
-    /// Ctrl+V and Delete edit; the Follow key focuses the camera. Holding S sizes the part to place and R turns it;
-    /// the right button still orbits through both. Nothing starts over the interface.
+    /// Ctrl+V and Delete edit; the Follow key focuses the camera. Holding S sizes the part to place (or the one selected block)
+    /// and R turns the part; the right button still orbits through both, and a right click on a block or mounted part
+    /// opens its menu. Nothing starts over the interface.
     /// </summary>
     private void UpdateEditorControls(bool inputEnabled, bool pointerOverUi, float dt)
     {
@@ -3609,6 +3683,8 @@ internal sealed class WorldView
         _editClock += dt;
         if (_captureBoxKind != 0)
             RunBoxCapture(dt);
+        if (_captureEditKind != 0)
+            RunEditCapture(dt);
         if (_captureGhost)
         {
             HoldCaptureGhost();
@@ -3630,11 +3706,17 @@ internal sealed class WorldView
             // A surface over the world ends sizing where it is: the gesture's key may not be seen let go.
             if (Editor.SizingPart)
                 Editor.EndPartSizing();
+            // The scripted menu and resize of a capture hold through the frames its window has no focus.
+            if (_captureEditKind == 0)
+            {
+                Editor.EndBlockResize();
+                Editor.Menu.Close();
+            }
             if (Editor.Carry is EditorCarry.Part or EditorCarry.Move)
                 Editor.CancelCarry();
             // A part being turned waits, ghost and all, until a surface over the world gives the input back. Escape,
             // R and clicks reach it only with the world's input.
-            if (!Editor.RotatingPart)
+            if (!Editor.RotatingPart && _captureEditKind == 0)
                 Editor.ClearHover();
             GlideEditorCamera(dt);
             return;
@@ -3667,6 +3749,19 @@ internal sealed class WorldView
             Editor.DeleteSelected();
         if (Editor.TakeFocusRequest() || (!control && _actions.Pressed(_devices, InputAction.Follow, true)))
             FocusEditor();
+
+        // A press outside the open context menu closes it. A left or middle press only closes it, and so reaches
+        // nothing else; a right press goes on to begin the camera drag or a menu of its own at the new point.
+        if (Editor.Menu.IsOpen && !pointerOverUi)
+        {
+            if (_devices.MousePressed(GlfwMouseButton.Left) || _devices.MousePressed(GlfwMouseButton.Middle))
+            {
+                Editor.Menu.Close();
+                pointerOverUi = true;
+            }
+            else if (_devices.MousePressed(GlfwMouseButton.Right))
+                Editor.Menu.Close();
+        }
 
         // While the part is turned with its rings, or sized with S held, the left button and the wheel are theirs;
         // the right button still orbits, and its click leaves placing alone.
@@ -3892,7 +3987,23 @@ internal sealed class WorldView
         if (Editor.Carry != EditorCarry.None)
             Editor.CancelCarry();
         else
+        {
+            // A click on a placed block or mounted part leaves placing, as it always has, and opens its menu.
+            var onPart = PickUnderPointer(out var hit);
             Editor.StopPlacing();
+            if (onPart)
+                Editor.OpenMenu(_devices.MousePosition, hit.Block, hit.Mount);
+        }
+    }
+
+    /// <summary>The block or mounted part under the pointer, picked afresh from the camera: false over empty space.</summary>
+    private bool PickUnderPointer(out DraftHit hit)
+    {
+        hit = default;
+        if (!Editor.CanInspect || Editor.Draft is not { } draft)
+            return false;
+        PointerInGrid(out var origin, out var direction);
+        return EditorGeometry.Pick(draft.Boxes, draft.Mounts, origin, direction, default, out hit);
     }
 
     /// <summary>The camera and the ray under the pointer, in the draft's grid.</summary>
@@ -3915,11 +4026,12 @@ internal sealed class WorldView
         return EditorGeometry.Enter(ghost, origin, direction, out var distance, out side) && distance <= nearer;
     }
 
-    /// <summary>The side of the ghost being sized that is highlighted (dragged, or under the pointer), or -1.</summary>
-    internal int PartSizingFace => Editor.SizingPart ? _sizeDragging ? _sizeSide : _sizeFace : -1;
+    /// <summary>The side of the ghost or block being sized that is highlighted (dragged, or under the pointer), or -1.</summary>
+    internal int PartSizingFace => _captureEditKind == 2 && Editor.ResizingBlock ? _captureEditSide
+        : Editor.SizingPart || Editor.ResizingBlock ? _sizeDragging ? _sizeSide : _sizeFace : -1;
 
-    /// <summary>True while a face of the ghost is dragged up and down, its axis pointing too nearly along the view.</summary>
-    internal bool PartSizingEdgeOn => Editor.SizingPart && _sizeDragging && _sizeEdgeOn;
+    /// <summary>True while a face is dragged up and down, its axis pointing too nearly along the view.</summary>
+    internal bool PartSizingEdgeOn => (Editor.SizingPart || Editor.ResizingBlock) && _sizeDragging && _sizeEdgeOn;
 
     /// <summary>
     /// The part-size gesture. S held with the ghost on a face holds the ghost still; the face of the ghost under the
@@ -3930,23 +4042,42 @@ internal sealed class WorldView
     /// Escape puts both back. The right button orbits meanwhile, holding a drag still until it is let go. Never
     /// starts over the interface, with Ctrl or a mouse button held, while something is carried, while selecting or
     /// turning, or on a damaged ship. True while it holds the controls.
+    /// The same gesture sizes the one selected block when there is no ghost to size (the select tool, or placing with
+    /// the pointer off the ship): S held, or the menu's Resize, which holds until the drag is let go, Enter, a click
+    /// elsewhere, or Escape, which puts the block back. The draft's own checks stop the face at the last size that
+    /// fits, and the whole drag is one step to undo.
     /// </summary>
     private bool UpdatePartSizing(bool pointerOverUi, bool control)
     {
-        var allowed = Editor.CanEdit && Editor.Placing && Editor.Carry == EditorCarry.None && _editTuning is not null && Editor.Draft is not null;
-        if (!Editor.SizingPart)
+        var common = Editor.CanEdit && Editor.Carry == EditorCarry.None && _editTuning is not null && Editor.Draft is not null;
+        if (!Editor.SizingPart && !Editor.ResizingBlock)
         {
             ResetSizeDrag();
-            if (!allowed || control || pointerOverUi || _editLeftDown || _editRightDown || _editMiddleDown || !_devices.KeyPressed(GlfwKey.S)
-                || !Editor.BeginPartSizing())
+            var asked = Editor.TakeResizeRequest();
+            if (!common || _editLeftDown || _editRightDown || _editMiddleDown)
+                return false;
+            if (asked)
+            {
+                if (!Editor.BeginBlockResize(true))
+                    return false;
+            }
+            else if (control || pointerOverUi || !_devices.KeyPressed(GlfwKey.S)
+                || !((Editor.Placing && Editor.BeginPartSizing()) || Editor.BeginBlockResize(false)))
                 return false;
             _sizeVersion = Editor.Draft!.Version;
         }
 
-        if (!allowed || !_devices.KeyDown(GlfwKey.S) || Editor.Draft!.Version != _sizeVersion)
+        var block = Editor.ResizingBlock;
+        var keep = block
+            ? common && Editor.Selection.Length == 1 && Editor.Selected == Editor.ResizingIndex && !_devices.KeyPressed(GlfwKey.Enter) && (Editor.ResizeByMenu || _devices.KeyDown(GlfwKey.S))
+            : common && Editor.Placing && _devices.KeyDown(GlfwKey.S);
+        if (!keep || Editor.Draft!.Version != _sizeVersion)
         {
             // Let go: the size and the place stay for the next click, which takes a press of its own.
-            Editor.EndPartSizing();
+            if (block)
+                Editor.EndBlockResize();
+            else
+                Editor.EndPartSizing();
             ResetSizeDrag();
             return false;
         }
@@ -3962,7 +4093,17 @@ internal sealed class WorldView
         }
 
         if (_sizeDragging && !_devices.RawMouseDown(GlfwMouseButton.Left))
+        {
             _sizeDragging = false;
+            // A resize begun from the menu is one drag.
+            if (block && Editor.ResizeByMenu)
+            {
+                Editor.EndBlockResize();
+                ResetSizeDrag();
+                return true;
+            }
+        }
+
         if (_sizeDragging)
         {
             if (_sizeRebase)
@@ -3973,15 +4114,55 @@ internal sealed class WorldView
         }
 
         PointerInGrid(out var origin, out var direction);
-        _sizeFace = !pointerOverUi && GhostUnder(origin, direction, float.PositiveInfinity, out var side) ? side : -1;
-        if (_sizeFace >= 0 && _devices.MousePressed(GlfwMouseButton.Left))
-            StartSizeDrag(_sizeFace);
+        _sizeFace = !pointerOverUi && SizedUnder(origin, direction, out var side) ? side : -1;
+        if (_devices.MousePressed(GlfwMouseButton.Left))
+        {
+            if (_sizeFace >= 0)
+                StartSizeDrag(_sizeFace);
+            else if (block && Editor.ResizeByMenu && !pointerOverUi)
+            {
+                // A click away from the block ends a resize begun from the menu, and goes no further.
+                Editor.EndBlockResize();
+                ResetSizeDrag();
+            }
+        }
+
         return true;
     }
 
     /// <summary>
-    /// Starts dragging a face of the ghost, or starts again from where the pointer is: the length it has now, and
-    /// how a cell along the face's axis shows on screen from here.
+    /// The face of what is being sized that the ray enters: the ghost's (<see cref="GhostUnder"/>) or the selected
+    /// block's, which counts only where nothing else of the ship is in front of it.
+    /// </summary>
+    private bool SizedUnder(Vector3 origin, Vector3 direction, out int side)
+    {
+        if (!Editor.ResizingBlock)
+            return GhostUnder(origin, direction, float.PositiveInfinity, out side);
+        var box = Editor.ResizingBox;
+        if (!EditorGeometry.Enter(box, origin, direction, out var distance, out side))
+            return false;
+        // Another block nearer along the ray hides this one's face: the hit's block is then not this one.
+        return !EditorGeometry.Pick(Editor.Draft!.Boxes, origin, direction, out var hit) || hit.Block == Editor.ResizingIndex || hit.Distance >= distance - 1e-3f;
+    }
+
+    /// <summary>Where and how large the thing being sized is: the block, or the ghost of the part to place.</summary>
+    private void SizedBox(out GridSize at, out GridSize size)
+    {
+        if (Editor.ResizingBlock)
+        {
+            var box = Editor.ResizingBox;
+            at = box.At;
+            size = box.Size;
+            return;
+        }
+
+        at = Editor.GhostAt;
+        size = Editor.PartSize;
+    }
+
+    /// <summary>
+    /// Starts dragging a face of the ghost or the block, or starts again from where the pointer is: the length it has
+    /// now, and how a cell along the face's axis shows on screen from here.
     /// </summary>
     private void StartSizeDrag(int side)
     {
@@ -3990,11 +4171,11 @@ internal sealed class WorldView
         _sizeSide = side;
         _sizeStart = _devices.MousePosition;
         var axis = side >> 1;
-        _sizeBase = EditorGeometry.Of(Editor.PartSize, axis);
+        SizedBox(out var at, out var size);
+        _sizeBase = EditorGeometry.Of(size, axis);
         var tuning = _editTuning!;
-        var size = Editor.PartSize;
         var normal = EditorGeometry.Normal(side);
-        var face = GhostMotion.Middle(Editor.GhostAt, size) + normal * (EditorGeometry.Of(size, axis) * 0.5f);
+        var face = GhostMotion.Middle(at, size) + normal * (EditorGeometry.Of(size, axis) * 0.5f);
         PointerInGrid(out var origin, out _);
         var view = face - origin;
         var sine = view.LengthSquared() > 1e-8f ? Vector3.Cross(normal, Vector3.Normalize(view)).Length() : 0f;
@@ -4021,7 +4202,8 @@ internal sealed class WorldView
     {
         var moved = _devices.MousePosition - _sizeStart;
         var cells = (moved.X * _sizeCell.X + moved.Y * _sizeCell.Y) / (_sizeCell.X * _sizeCell.X + _sizeCell.Y * _sizeCell.Y);
-        var limit = Editor.PartMaxSide;
+        var block = Editor.ResizingBlock;
+        var limit = block ? Editor.ResizingMaxSide : Editor.PartMaxSide;
         var length = _sizeBase + cells;
         // Past a limit the movement is dropped, so turning back answers at once.
         if (length > limit)
@@ -4036,8 +4218,21 @@ internal sealed class WorldView
         }
 
         var whole = Math.Clamp((int)MathF.Floor(length + 0.5f), 1, limit);
-        if (whole != EditorGeometry.Of(Editor.PartSize, _sizeSide >> 1))
+        SizedBox(out _, out var size);
+        if (whole == EditorGeometry.Of(size, _sizeSide >> 1))
+            return;
+        if (!block)
+        {
             Editor.SizePartFace(_sizeSide, whole);
+            return;
+        }
+
+        // A block stops where the draft says it no longer fits; the drag is moved to that length, so turning back
+        // answers at once, as past the limits above.
+        var got = Editor.SizeBlockFace(_sizeSide, whole);
+        if (got > 0 && got != whole)
+            _sizeBase += got - whole;
+        _sizeVersion = Editor.Draft!.Version;
     }
 
     /// <summary>Forgets the face under the pointer and any face drag.</summary>
@@ -4141,7 +4336,7 @@ internal sealed class WorldView
                 _ghostMotion.Reset();
             }
 
-            if (!r || Editor.SizingPart || _editLeftDown || _editRightDown || _editMiddleDown || pointerOverUi || !GhostRings(out _ringMiddle, out _ringRadius)
+            if (!r || Editor.SizingPart || Editor.ResizingBlock || _editLeftDown || _editRightDown || _editMiddleDown || pointerOverUi || !GhostRings(out _ringMiddle, out _ringRadius)
                 || !Editor.BeginPartRotation())
                 return false;
             _ghostMotion.Reset();

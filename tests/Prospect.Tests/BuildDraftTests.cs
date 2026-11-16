@@ -701,4 +701,166 @@ public sealed class BuildDraftTests
         Assert.Equal(version, draft.Version);
         Assert.Single(draft.Boxes.ToArray());
     }
+
+    private static DesignBox Tank(string type, GridSize at, GridSize size) => Box(type, at, size);
+
+    [Fact]
+    public void ChangingATanksFuelSwapsTheTypeInPlaceAsOneUndoStep()
+    {
+        var draft = Draft(Box("core", new GridSize(0, 0, 0), One), Tank("bipropellantTank", new GridSize(1, 0, 0), new GridSize(2, 1, 1)),
+            Tank("bipropellantTank", new GridSize(0, 1, 0), One), Box("hull", new GridSize(0, 2, 0), One));
+        var before = draft.Boxes.ToArray();
+
+        // Every fuel the content has a ship tank for is offered, found from the data.
+        Span<FuelKind> fuels = stackalloc FuelKind[8];
+        var count = draft.TankFuels(fuels);
+        Assert.Equal(3, count);
+        Assert.Contains(FuelKind.Nitrogen, fuels[..count].ToArray());
+        Assert.Contains(FuelKind.Hydrazine, fuels[..count].ToArray());
+        Assert.Contains(FuelKind.Bipropellant, fuels[..count].ToArray());
+
+        Assert.Equal(DraftEdit.Done, draft.SwapTank([1, 2], FuelKind.Hydrazine));
+        var after = draft.Boxes.ToArray();
+        foreach (var block in new[] { 1, 2 })
+        {
+            Assert.Equal(Content.Blocks.Get("hydrazineTank"), after[block].Type);
+            Assert.Equal(before[block] with { Type = after[block].Type }, after[block]);
+        }
+
+        Assert.Equal(before[0], after[0]);
+        Assert.Equal(before[3], after[3]);
+
+        // One step: a single undo gives back both tanks, and there is nothing older.
+        Assert.True(draft.Undo());
+        Assert.Equal(before, draft.Boxes.ToArray());
+        Assert.False(draft.CanUndo);
+        Assert.True(draft.Redo());
+        Assert.Equal(after, draft.Boxes.ToArray());
+    }
+
+    [Fact]
+    public void ChangingFuelRefusesWhatIsNotATankKeepsTheDraftAndSkipsTanksAlreadyOfTheFuel()
+    {
+        var draft = Draft(Box("core", new GridSize(0, 0, 0), One), Tank("bipropellantTank", new GridSize(1, 0, 0), One), Box("hull", new GridSize(0, 1, 0), One));
+        var before = draft.Boxes.ToArray();
+        var version = draft.Version;
+        Assert.Equal(DraftEdit.NotATank, draft.SwapTank([1, 2], FuelKind.Nitrogen));
+        Assert.Equal(DraftEdit.Unchanged, draft.SwapTank([1], FuelKind.Bipropellant));
+        Assert.Equal(DraftEdit.Unchanged, draft.CanSwapTank([], FuelKind.Nitrogen));
+        Assert.Equal(DraftEdit.WrongKind, draft.CanSwapTank([1], FuelKind.None));
+        Assert.Equal(DraftEdit.BadSelection, draft.CanSwapTank([1, 1], FuelKind.Nitrogen));
+        Assert.Equal(before, draft.Boxes.ToArray());
+        Assert.Equal(version, draft.Version);
+        Assert.False(draft.CanUndo);
+    }
+
+    [Fact]
+    public void TheDronesFuelsAreItsOwnTankTypes()
+    {
+        var drone = BuildDraft.FromBlueprint(Content.Designs[Content.DroneDesign], Content);
+        Span<FuelKind> fuels = stackalloc FuelKind[8];
+        var count = drone.TankFuels(fuels);
+        Assert.Equal(2, count);
+        Assert.Contains(FuelKind.Bipropellant, fuels[..count].ToArray());
+        Assert.Contains(FuelKind.Nitrogen, fuels[..count].ToArray());
+        Assert.DoesNotContain(FuelKind.Hydrazine, fuels[..count].ToArray());
+        Assert.True(drone.TankType(FuelKind.Nitrogen)!.Drone);
+        Assert.Null(drone.TankType(FuelKind.Hydrazine));
+    }
+
+    [Fact]
+    public void SplittingATankMakesOneCellPiecesAsOneUndoStepAndCarriesTheMountsThatStillFit()
+    {
+        var cold = Content.Blocks.Get("coldGasThruster");
+        var side = cold.Mount!.Side;
+        var draft = Draft(Box("core", new GridSize(0, 0, 0), One), Tank("bipropellantTank", new GridSize(1, 0, 0), new GridSize(3, 1, 1)));
+        // On the top face, counted along x from the tank's low corner (V): in the first cell, in the second, and
+        // across the cut between the first two. And one on the +x end.
+        Assert.Equal(DraftEdit.Done, draft.AddMount(1, BlockFacing.Up, 3, 1, cold));
+        Assert.Equal(DraftEdit.Done, draft.AddMount(1, BlockFacing.Up, 3, 14, cold));
+        Assert.Equal(DraftEdit.Done, draft.AddMount(1, BlockFacing.Up, 3, 8, cold));
+        Assert.Equal(DraftEdit.Done, draft.AddMount(1, BlockFacing.Right, 3, 3, cold));
+        var mountsBefore = draft.Mounts.ToArray();
+        var boxesBefore = draft.Boxes.ToArray();
+
+        Assert.Equal(DraftEdit.Unchanged, draft.CanSplit([1], 1));
+        Assert.Equal(DraftEdit.NotATank, draft.CanSplit([0], 0));
+        Assert.Equal(DraftEdit.Done, draft.CanSplit([1], 0));
+        Assert.Equal(DraftEdit.Done, draft.Split([1], 0));
+
+        // Three tanks one cell long, the first keeping the index, the rest added low to high; nothing else moved.
+        var boxes = draft.Boxes.ToArray();
+        Assert.Equal(4, boxes.Length);
+        Assert.Equal(boxesBefore[0], boxes[0]);
+        for (var k = 0; k < 3; k++)
+        {
+            var index = k == 0 ? 1 : 1 + k;
+            Assert.Equal(new DesignBox(new GridSize(1 + k, 0, 0), One, boxesBefore[1].Type), boxes[index]);
+        }
+
+        // The mount in the first cell stayed; the one in the second moved to its piece, keeping its place on the face;
+        // the one on the end face went with the piece at that end.
+        Assert.Contains(draft.Mounts.ToArray(), m => m.Parent == 1 && m.V == 1);
+        Assert.Contains(draft.Mounts.ToArray(), m => m.Parent == 2 && m.V == 14 - FaceMounts.PerCell);
+        // One across the cut had no room on either piece and went.
+        Assert.True(8 + side > FaceMounts.PerCell);
+        Assert.DoesNotContain(draft.Mounts.ToArray(), m => m.Face == BlockFacing.Up && (m.V == 8 || m.V == 8 - FaceMounts.PerCell));
+        Assert.Contains(draft.Mounts.ToArray(), m => m.Face == BlockFacing.Right && m.Parent == (Facings.Sign(BlockFacing.Right) > 0 ? 3 : 1));
+        Assert.Equal(3, draft.Mounts.Length);
+
+        // One step to take back, giving the one long tank and its mounts again.
+        Assert.True(draft.Undo());
+        Assert.Equal(boxesBefore, draft.Boxes.ToArray());
+        Assert.Equal(mountsBefore, draft.Mounts.ToArray());
+        Assert.True(draft.Redo());
+        Assert.True(draft.Undo());
+    }
+
+    [Fact]
+    public void SplittingEachSelectedTankAlongAnAxisSkipsThoseOneCellThickAndHonoursTheTankLimit()
+    {
+        var draft = Draft(Box("core", new GridSize(0, 0, 0), One), Tank("bipropellantTank", new GridSize(1, 0, 0), new GridSize(2, 2, 1)),
+            Tank("nitrogenTank", new GridSize(0, 3, 0), new GridSize(1, 1, 4)));
+        Assert.Equal(DraftEdit.Done, draft.Split([1, 2], 2));
+        // The 2 x 2 x 1 tank is one cell thick along z and stays whole; the other is cut into four.
+        Assert.Equal(1 + 1 + 4, draft.Boxes.Length);
+        Assert.Equal(new GridSize(2, 2, 1), draft.Boxes[1].Size);
+        Assert.True(draft.Undo());
+        Assert.Equal(3, draft.Boxes.Length);
+    }
+
+    [Fact]
+    public void ResizingAFaceInSeveralSmallEditsJoinsIntoOneUndoStepAndStopsWhereTheDraftSaysNo()
+    {
+        var draft = Draft(Box("core", new GridSize(0, 0, 0), One), Box("hull", new GridSize(1, 0, 0), One), Box("hull", new GridSize(5, 0, 0), One));
+        var before = draft.Boxes.ToArray();
+        // Two cells out along +x, then a third: each a step of its own until they are joined.
+        Assert.Equal(DraftEdit.Done, draft.Resize(1, 0, 2));
+        Assert.Equal(DraftEdit.Done, draft.Resize(1, 0, 3));
+        Assert.True(draft.JoinLatest());
+        // The next cell would run into the lone plate at x = 5; the draft says so and the box stays at three.
+        Assert.Equal(DraftEdit.Overlaps, draft.CanResize(1, 0, 5));
+        Assert.Equal(DraftEdit.Done, draft.CanResize(1, 0, 4));
+        Assert.Equal(new GridSize(3, 1, 1), draft.Boxes[1].Size);
+        Assert.True(draft.Undo());
+        Assert.Equal(before, draft.Boxes.ToArray());
+        Assert.False(draft.CanUndo);
+
+        // A minus face moves the low corner with it and keeps the opposite face.
+        var tall = Draft(Box("core", new GridSize(0, 0, 0), One), Box("hull", new GridSize(3, 0, 0), One));
+        Assert.Equal(DraftEdit.Done, tall.Resize(1, 1, 2));
+        Assert.Equal(new DesignBox(new GridSize(2, 0, 0), new GridSize(2, 1, 1), tall.Boxes[1].Type), tall.Boxes[1]);
+        Assert.Equal(DraftEdit.Done, tall.Resize(1, 1, 2 + 1));
+        Assert.True(tall.JoinLatest());
+        Assert.Equal(new GridSize(1, 0, 0), tall.Boxes[1].At);
+
+        // Past the type's largest side nothing fits.
+        var limit = BoxDesign.MaxSide(tall.Boxes[1].Type, Content.Blocks.Limits);
+        Assert.Equal(DraftEdit.BadSize, tall.CanResize(1, 0, limit + 1));
+
+        // A gesture that is put back leaves nothing to redo.
+        Assert.True(tall.Retract());
+        Assert.False(tall.CanRedo);
+        Assert.Equal(new GridSize(3, 0, 0), tall.Boxes[1].At);
+    }
 }

@@ -41,6 +41,8 @@ public enum DraftEdit : byte
     BoxOnly,
     /// <summary>The part is built for the other kind of craft: a drone part on a ship, or a ship part on the drone (<see cref="BlockType.FitsClass"/>).</summary>
     WrongCraft,
+    /// <summary>The block is no tank; changing a fuel or splitting applies to tanks only.</summary>
+    NotATank,
 }
 
 /// <summary>
@@ -565,6 +567,188 @@ public sealed class BuildDraft
         changed = box with { At = at, Size = With(box.Size, axis, length) };
         if (changed == box) return DraftEdit.Unchanged;
         return Check(changed, block);
+    }
+
+    /// <summary>
+    /// The tank type that holds <paramref name="fuel"/> for this draft's kind of craft (<see cref="BlockType.FitsClass"/>),
+    /// the first the content lists, or null when there is none. Read from the content's data, never from names.
+    /// </summary>
+    public BlockType? TankType(FuelKind fuel)
+    {
+        if (fuel == FuelKind.None) return null;
+        foreach (var type in _content.Blocks.Types)
+            if (type.Tank == fuel && type.Mount is null && type.FitsClass(Class)) return type;
+        return null;
+    }
+
+    /// <summary>
+    /// Writes the fuels this craft has a tank type for into <paramref name="into"/>, in the order the content lists
+    /// them, and returns how many. Allocates nothing.
+    /// </summary>
+    public int TankFuels(Span<FuelKind> into)
+    {
+        var count = 0;
+        foreach (var type in _content.Blocks.Types)
+        {
+            if (type.Tank == FuelKind.None || type.Mount is not null || !type.FitsClass(Class) || count == into.Length) continue;
+            if (into[..count].Contains(type.Tank)) continue;
+            into[count++] = type.Tank;
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// Makes every listed tank hold <paramref name="fuel"/>: each takes the type of that fuel for this craft and keeps
+    /// its place, size, shape and facing, as one undo step. A tank already of the fuel is left. What is mounted on
+    /// the blocks stays. The ship's figures change with the type.
+    /// </summary>
+    public DraftEdit SwapTank(ReadOnlySpan<int> blocks, FuelKind fuel)
+    {
+        var check = CanSwapTank(blocks, fuel, out var type);
+        if (check != DraftEdit.Done) return check;
+        foreach (var block in blocks)
+        {
+            var box = _boxes[block];
+            if (box.Type != type) Do(Step.Block(block, box, box with { Type = type! }));
+        }
+
+        Finish(settle: false);
+        return DraftEdit.Done;
+    }
+
+    /// <summary>What <see cref="SwapTank"/> would answer, without changing the draft, its version or its history.</summary>
+    public DraftEdit CanSwapTank(ReadOnlySpan<int> blocks, FuelKind fuel) => CanSwapTank(blocks, fuel, out _);
+
+    private DraftEdit CanSwapTank(ReadOnlySpan<int> blocks, FuelKind fuel, out BlockType? type)
+    {
+        type = TankType(fuel);
+        var check = Mark(blocks, out _);
+        if (check != DraftEdit.Done) return check;
+        if (blocks.IsEmpty) return DraftEdit.Unchanged;
+        if (type is null) return DraftEdit.WrongKind;
+        var limits = _content.Blocks.Limits;
+        var side = BoxDesign.MaxSide(type, limits);
+        var changes = false;
+        foreach (var block in blocks)
+        {
+            var box = _boxes[block];
+            if (box.Type.Tank == FuelKind.None) return DraftEdit.NotATank;
+            if (box.Type == type) continue;
+            changes = true;
+            if (box.Size.X > side || box.Size.Y > side || box.Size.Z > side) return DraftEdit.BadSize;
+        }
+
+        return changes ? DraftEdit.Done : DraftEdit.Unchanged;
+    }
+
+    /// <summary>
+    /// Cuts every listed tank that is more than one cell long along <paramref name="axis"/> into pieces one cell
+    /// thick, each a whole tank of the same type, shape and facing, as one undo step. The first piece keeps the
+    /// block's index and the rest are added at the end, low to high. A part mounted on a tank goes with the piece
+    /// whose face it sits on, and stays where it is; one that would span a cut is removed.
+    /// </summary>
+    public DraftEdit Split(ReadOnlySpan<int> blocks, int axis)
+    {
+        var check = CanSplit(blocks, axis);
+        if (check != DraftEdit.Done) return check;
+        Span<int> ordered = blocks.Length <= 64 ? stackalloc int[blocks.Length] : new int[blocks.Length];
+        blocks.CopyTo(ordered);
+        ordered.Sort();
+        var pieces = new List<int>();
+        foreach (var block in ordered)
+        {
+            var box = _boxes[block];
+            var length = Of(box.Size, axis);
+            if (length < 2) continue;
+            pieces.Clear();
+            pieces.Add(block);
+            var thin = box with { Size = With(box.Size, axis, 1) };
+            for (var k = 1; k < length; k++)
+            {
+                pieces.Add(_boxes.Count);
+                Do(Step.Block(_boxes.Count, default, thin with { At = With(box.At, axis, Of(box.At, axis) + k) }));
+            }
+
+            // From the last mount down, so removing one does not move one still to be placed.
+            for (var i = _mounts.Count - 1; i >= 0; i--)
+            {
+                var mount = _mounts[i];
+                if (mount.Parent != block) continue;
+                var n = Facings.Axis(mount.Face);
+                if (n == axis)
+                {
+                    var end = pieces[Facings.Sign(mount.Face) > 0 ? length - 1 : 0];
+                    if (end != block) Do(Step.Part(i, mount, mount with { Parent = end }));
+                    continue;
+                }
+
+                var along = (n + 1) % 3 == axis ? mount.U : mount.V;
+                var piece = along / FaceMounts.PerCell;
+                if (along < 0 || piece >= length || along + mount.Type.Mount!.Side > (piece + 1) * FaceMounts.PerCell)
+                {
+                    Do(Step.Part(i, mount, default));
+                    continue;
+                }
+
+                if (piece == 0) continue;
+                var shifted = along - piece * FaceMounts.PerCell;
+                Do(Step.Part(i, mount, (n + 1) % 3 == axis ? mount with { Parent = pieces[piece], U = shifted } : mount with { Parent = pieces[piece], V = shifted }));
+            }
+
+            Do(Step.Block(block, box, thin));
+        }
+
+        Finish();
+        return DraftEdit.Done;
+    }
+
+    /// <summary>
+    /// What <see cref="Split"/> would answer, without changing the draft, its version or its history: Done when at
+    /// least one listed tank is over one cell long on the axis and the pieces fit the block and tank counts.
+    /// </summary>
+    public DraftEdit CanSplit(ReadOnlySpan<int> blocks, int axis)
+    {
+        ArgumentOutOfRangeException.ThrowIfGreaterThan((uint)axis, 2u, nameof(axis));
+        var check = Mark(blocks, out _);
+        if (check != DraftEdit.Done) return check;
+        long extra = 0;
+        foreach (var block in blocks)
+        {
+            var box = _boxes[block];
+            if (box.Type.Tank == FuelKind.None) return DraftEdit.NotATank;
+            if (box.Shape != BlockShape.Box) return DraftEdit.NotABox;
+            extra += Math.Max(Of(box.Size, axis) - 1, 0);
+        }
+
+        if (extra == 0) return DraftEdit.Unchanged;
+        if (!CountFits(_boxes.Count + extra)) return DraftEdit.TooManyBlocks;
+        return Tanks() + extra > _content.Blocks.Limits.MaxTanks ? DraftEdit.TooManyTanks : DraftEdit.Done;
+    }
+
+    /// <summary>
+    /// Joins the two latest edits into one undo step, for a gesture made of many small edits (dragging a face).
+    /// False when there are fewer than two or the latest is not the one just made.
+    /// </summary>
+    public bool JoinLatest()
+    {
+        if (_undo.Count < 2 || _redo.Count != 0) return false;
+        var last = _undo[^1];
+        var before = _undo[^2];
+        _undo.RemoveRange(_undo.Count - 2, 2);
+        _undo.Add([.. before, .. last]);
+        return true;
+    }
+
+    /// <summary>
+    /// Takes back the latest edit and forgets it, so it cannot be made again: for a gesture that is put back.
+    /// False when there is none.
+    /// </summary>
+    public bool Retract()
+    {
+        if (!Undo()) return false;
+        _redo.RemoveAt(_redo.Count - 1);
+        return true;
     }
 
     /// <summary>
