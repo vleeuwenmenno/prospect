@@ -1230,7 +1230,7 @@ internal sealed class App : IDisposable
             }
             else if (view is "edit-turn" or "edit-mount" or "edit-mirror" or "edit-ion" && snapshot is { OwnHull: >= 0 })
             {
-                // The editor on the Move tab with an engine turned to face right, or with a cold gas thruster to
+                // The editor on the Thrust tab with an engine turned to face right, or with a cold gas thruster to
                 // mount, its ghost held on the ship: the pointer is muted, so the harness holds it there.
                 // edit-mirror is the engine with the X and Z planes on, so its copies show, each facing the mirrored way;
                 // edit-ion holds an ion drive instead of the engine.
@@ -1238,18 +1238,35 @@ internal sealed class App : IDisposable
                 World.HoldGhostForCapture(view == "edit-mount", view == "edit-ion");
                 if (view == "edit-mirror")
                     World.Editor.SetMirror(MirrorAxes.X | MirrorAxes.Z);
-                _screens.SelectEditorTab("Move");
+                _screens.SelectEditorTab("Thrust");
             }
             else if (view is "edit-tank" or "edit-tank-long" or "edit-tank-slab" or "edit-scanner" && snapshot is { OwnHull: >= 0 })
             {
-                // The editor on the Move tab holding the ghost of a bipropellant tank (1, 2 by 1 by 1, or a 2 by 1 by 2
+                // The editor holding the ghost of a bipropellant tank (1, 2 by 1 by 1, or a 2 by 1 by 2
                 // slab) or of an asteroid scanner on the ship, with the wedge chosen first: the part stays a box and the
                 // Wedge button is off.
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
                 World.Editor.SetPartShape(BlockShape.WedgeXPlusPlus);
                 World.HoldPartGhostForCapture(view == "edit-scanner" ? "asteroidScanner" : "bipropellantTank",
                     view switch { "edit-tank-long" => new GridSize(2, 1, 1), "edit-tank-slab" => new GridSize(2, 1, 2), _ => new GridSize(1, 1, 1) });
-                _screens.SelectEditorTab(view == "edit-scanner" ? "Module" : "Move");
+                _screens.SelectEditorTab(view == "edit-scanner" ? "Sensors" : "Tanks");
+            }
+            else if (view is "edit-palette-tip" or "edit-tank-fuel" && snapshot is { OwnHull: >= 0 })
+            {
+                // edit-palette-tip: the Thrust category chosen with its rail tooltip held open (no pointer in a scripted
+                // run). edit-tank-fuel: the Tanks category with a hydrazine tank as the part to place, so the details
+                // panel shows the fuel choice with Hydrazine lit.
+                World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
+                if (view == "edit-palette-tip")
+                {
+                    _screens.SelectEditorTab("Thrust");
+                    _screens.ShowEditorRailTip("Thrust");
+                }
+                else
+                {
+                    World.HoldPartGhostForCapture("hydrazineTank", new GridSize(1, 1, 1));
+                    _screens.SelectEditorTab("Tanks");
+                }
             }
             else if (view is "edit-box-select" or "edit-select-all" && snapshot is { OwnHull: >= 0 })
             {
@@ -1266,9 +1283,9 @@ internal sealed class App : IDisposable
             }
             else if (view == "modules" && snapshot is { OwnHull: >= 0 })
             {
-                // The editor on the part list's Modules tab.
+                // The editor on the part list's Sensors category.
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
-                _screens.SelectEditorTab("Module");
+                _screens.SelectEditorTab("Sensors");
             }
             else if (view == "module-command")
             {
@@ -1507,7 +1524,7 @@ internal sealed class App : IDisposable
             var due = _options.CaptureAfter + _capturesTaken * _options.CaptureEvery;
             if (_capturesTaken < count && rtsReady && _sinceSplash >= due && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
             {
-                ShowPerformance |= Session is not null && _options.OpenView is not ("controls" or "players" or "social" or "friends" or "chat" or "hud" or "interface" or "charts" or "pinned-charts" or "inventory");
+                ShowPerformance |= Session is not null && _options.OpenView is not ("controls" or "players" or "social" or "friends" or "chat" or "hud" or "interface" or "charts" or "pinned-charts" or "inventory" or "edit-tank-fuel");
                 var file = Path.GetFullPath(path);
                 if (count > 1)
                 {

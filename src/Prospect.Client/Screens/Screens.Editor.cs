@@ -554,9 +554,10 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
-    /// The part list: a search at the top, tabs by what parts are for (compact drone parts on their own tab), and
-    /// a card per part with its figures at the size parts are placed at. A card is clicked to place that part with
-    /// clicks, or dragged onto the ship. The size controls stay at the foot.
+    /// The part list: a rail of category icons down its left side (a tooltip names each), a search at the top, and
+    /// a card per part with its figures at the size parts are placed at; the fuel tanks share one card, whose fuel
+    /// is chosen in the details panel. A card is clicked to place that part with clicks, or dragged onto the ship.
+    /// The size controls stay at the foot.
     /// </summary>
     private void DrawEditorParts(in HudRect rect, ShipEditor editor, GameContent content)
     {
@@ -564,7 +565,19 @@ internal sealed partial class ScreenHost
         _palette.Craft = editor.Draft?.Class ?? editor.Source?.Class ?? HullClass.Ship;
         _palette.KeepTabShown(tuning, content.Blocks.Types);
         BeginEditorPanel("##editorparts"u8, "##editorpartsbody"u8, rect);
+
+        // The rail takes the panel's left side; everything else lives in a column to its right.
+        var origin = ImGui.GetCursorScreenPos();
+        var whole = ImGui.GetContentRegionAvail();
+        DrawCategoryRail(tuning, content.Blocks.Types, origin, whole.Y);
+        var railSpace = Kit.Px(EditorLayout.RailWidth + EditorLayout.RailGap);
+        ImGui.SetCursorScreenPos(origin + new float2(railSpace, 0));
+        ImGui.BeginChild("##editorpartsmain"u8, new float2(whole.X - railSpace, whole.Y), ImGuiChildFlags.None, ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoScrollbar);
         var width = ImGui.GetContentRegionAvail().X;
+
+        // Placing a tank by any route remembers its fuel for the one Tank card.
+        if (editor.Placing && (uint)editor.Part < (uint)content.Blocks.Types.Count && EditorPalette.IsTank(content.Blocks.Types[editor.Part]))
+            _palette.TankFuel = content.Blocks.Types[editor.Part].Tank;
 
         // The search: typing here never reaches the world, which takes no keys while a field has the keyboard.
         ImGui.SetNextItemWidth(width);
@@ -581,36 +594,10 @@ internal sealed partial class ScreenHost
             ImGui.GetWindowDrawList().AddRect(ImGui.GetItemRectMin(), ImGui.GetItemRectMax(), Kit.Color(Theme.Accent));
         Kit.Space(Theme.Space2);
 
-        // The tabs, four to a row or fewer in a narrow panel; a search covers every tab, so none is lit while there is one.
-        var categories = tuning.Categories;
         var gap = Kit.Px(Theme.Space1);
-        var widest = 0f;
-        foreach (var category in categories)
-            widest = Math.Max(widest, Kit.Measure(_ui.SansMedium, Theme.FontSmall, category.Label).X);
-        var perRow = EditorLayout.TabsPerRow(width, widest, gap, Kit.Scale);
-        var chip = EditorLayout.TabWidth(width, perRow, gap);
-        var drawnTabs = 0;
-        for (var i = 0; i < categories.Length; i++)
-        {
-            // A tab with no part for this craft (the Drone tab on a ship) is not shown.
-            if (!_palette.TabHasParts(tuning, content.Blocks.Types, i))
-                continue;
-            if (drawnTabs++ % perRow != 0)
-                ImGui.SameLine(0, gap);
-            else if (drawnTabs > 1)
-                Kit.Space(Theme.Space1);
-            ImGui.PushID(i);
-            if (EditorPalette.HandBack(EditorButton("##tab"u8, categories[i].Label, new float2(chip, Kit.Px(24)), true, false, _palette.Query.Length == 0 && _palette.Category == i)))
-            {
-                _palette.Category = i;
-                _partSearch.Clear();
-                _palette.Query = "";
-            }
-
-            ImGui.PopID();
-        }
-
-        Kit.Space(Theme.Space2);
+        var heading = _palette.Query.Length > 0 ? "SEARCH RESULTS"u8 : (uint)_palette.Category < (uint)tuning.Categories.Length ? tuning.Categories[_palette.Category].Label : "PARTS"u8;
+        Kit.Caption(heading);
+        Kit.Space(Theme.Space1);
         if (EditorPalette.HandBack(EditorButton("##selecttool"u8, "Select blocks"u8, new float2(width, Kit.Px(26)), editor.CanEdit, false, !editor.Placing)))
             editor.StopPlacing();
         // How a part is sized and turned on the ship: two short lines, wrapped in a narrow panel.
@@ -635,7 +622,7 @@ internal sealed partial class ScreenHost
         for (var i = 0; i < types.Count; i++)
         {
             var type = types[i];
-            if (!_palette.Shows(tuning, type))
+            if (!_palette.ShowsCard(tuning, types, i))
                 continue;
             shown++;
             DrawPartCard(i, type, figures[i], tuning.Compact(type), type.Module.Family != ModuleFamily.None ? Kit.Px(ModuleCardHeight) : cardHeight, hull, editor);
@@ -677,7 +664,90 @@ internal sealed partial class ScreenHost
         if (EditorPalette.HandBack(EditorButton("##shapewedge"u8, "Wedge"u8, new float2(pair, Kit.Px(26)), editor.CanEdit && !editor.PartBoxOnly, false, editor.PartShape != BlockShape.Box)))
             editor.SetPartShape(editor.PartShape == BlockShape.Box ? BlockShape.WedgeXPlusPlus : editor.PartShape);
         DrawMirrorRow(editor, width, gap);
+        ImGui.EndChild();
         EndEditorPanel();
+    }
+
+    /// <summary>The category the tooltip is held open for by a scripted capture (<c>--open edit-palette-tip</c>); -1 for none.</summary>
+    private int _railTipScripted = -1;
+
+    /// <summary>Holds the tooltip of a category's rail button open without a pointer, and chooses that category. For captures.</summary>
+    public void ShowEditorRailTip(string name)
+    {
+        var categories = Tuning.Categories;
+        for (var i = 0; i < categories.Length; i++)
+            if (categories[i].Name == name)
+                _railTipScripted = i;
+    }
+
+    /// <summary>
+    /// The category rail: one icon button per category that has a part for this craft, down the panel's left side,
+    /// the chosen one filled with an accent bar (none while a search covers every category). Hovering a button shows
+    /// the category's name and its tip beside it. Choosing one clears the search.
+    /// </summary>
+    private void DrawCategoryRail(EditorTuning tuning, IReadOnlyList<BlockType> types, float2 origin, float height)
+    {
+        var draw = ImGui.GetWindowDrawList();
+        var categories = tuning.Categories;
+        var count = 0;
+        for (var i = 0; i < categories.Length; i++)
+            if (_palette.TabHasParts(tuning, types, i))
+                count++;
+        var size = new float2(Kit.Px(EditorLayout.RailWidth), EditorLayout.RailButtonHeight(height, count, Kit.Scale));
+        var gap = Kit.Px(EditorLayout.RailButtonGap);
+        var stroke = MathF.Max(1f, Kit.Px(1.25f));
+        var radius = MathF.Floor(Math.Min(size.X, size.Y) * 0.3f);
+        var y = 0f;
+        var tipped = -1;
+        var tipMin = default(float2);
+        for (var i = 0; i < categories.Length; i++)
+        {
+            // A category with no part for this craft is not shown.
+            if (!_palette.TabHasParts(tuning, types, i))
+                continue;
+            var min = origin + new float2(0, y);
+            var max = min + size;
+            ImGui.SetCursorScreenPos(min);
+            ImGui.PushID(i);
+            var pressed = ImGui.InvisibleButton("##category"u8, size);
+            var hot = ImGui.IsItemHovered();
+            ImGui.PopID();
+            var chosen = _palette.Query.Length == 0 && _palette.Category == i;
+            Kit.ChamferFill(draw, min, max, Kit.Color(chosen || hot ? Theme.PanelRaised : Theme.Panel, chosen ? 0.95f : 0.8f), Kit.Px(5));
+            Kit.ChamferOutline(draw, min, max, Kit.Color(chosen ? Theme.Accent : hot ? Theme.LineStrong : Theme.Line), Kit.Px(5));
+            if (chosen)
+                draw.AddRectFilled(min + new float2(0, Kit.Px(4)), min + new float2(Kit.Px(2), size.Y - Kit.Px(4)), Kit.Color(Theme.Accent));
+            var tone = chosen ? Theme.Accent : hot ? Theme.AccentBright : Theme.TextDim;
+            EditorIcons.Draw(draw, categories[i].Glyph, new float2(MathF.Floor((min.X + max.X) * 0.5f) + 0.5f, MathF.Floor((min.Y + max.Y) * 0.5f) + 0.5f), radius, Kit.Color(tone), stroke);
+            if (hot || i == _railTipScripted)
+            {
+                tipped = i;
+                tipMin = new float2(max.X + Kit.Px(6), min.Y);
+            }
+
+            if (EditorPalette.HandBack(pressed))
+            {
+                _palette.Category = i;
+                _partSearch.Clear();
+                _palette.Query = "";
+            }
+
+            y += size.Y + gap;
+        }
+
+        if (tipped < 0)
+            return;
+        var category = categories[tipped];
+        var fore = ImGui.GetForegroundDrawList();
+        var title = Kit.Measure(_ui.SansMedium, Theme.FontSmall, category.NameText);
+        var line = Kit.Measure(_ui.Sans, Theme.FontCaption, category.TipText);
+        var pad = Kit.Px(Theme.Space2);
+        var box = new float2(MathF.Ceiling(Math.Max(title.X, line.X)) + pad * 2, pad * 2 + Kit.Px(20) + Kit.Px(16));
+        tipMin.X = Math.Min(tipMin.X, Math.Max(0f, _ui.DisplaySize.X - box.X - Kit.Px(6)));
+        tipMin.Y = Math.Min(tipMin.Y, Math.Max(0f, _ui.DisplaySize.Y - box.Y - Kit.Px(6)));
+        Kit.PanelFrame(fore, tipMin, tipMin + box);
+        Kit.Text(fore, _ui.SansMedium, Theme.FontSmall, tipMin + new float2(pad, pad), Theme.Text, category.NameText);
+        Kit.Text(fore, _ui.Sans, Theme.FontCaption, tipMin + new float2(pad, pad + Kit.Px(20)), Theme.TextDim, category.TipText);
     }
 
     /// <summary>The height <see cref="DrawMirrorRow"/> takes: its caption and the checkboxes, with the space above them.</summary>
@@ -772,8 +842,12 @@ internal sealed partial class ScreenHost
         var hot = EditorPalette.Card(part, new float2(cardWidth, height), editor) && editor.CanEdit;
         if (!editor.CanEdit)
             ImGui.EndDisabled();
-        var chosen = editor.Placing && editor.Part == part;
-        var carried = editor.Carry == EditorCarry.Part && editor.Part == part;
+        // One card stands for every tank type, so it is lit while any of them is the part to place.
+        var tankCard = EditorPalette.IsTank(type);
+        var placedType = editor.Content is { } placed && (uint)editor.Part < (uint)placed.Blocks.Types.Count ? placed.Blocks.Types[editor.Part] : null;
+        var isPart = editor.Part == part || (tankCard && placedType is not null && EditorPalette.IsTank(placedType));
+        var chosen = editor.Placing && isPart;
+        var carried = editor.Carry == EditorCarry.Part && isPart;
         var max = at + new float2(cardWidth, height);
         Kit.ChamferFill(draw, at, max, Kit.Color(chosen || hot ? Theme.PanelRaised : Theme.Panel, chosen ? 0.95f : 0.8f), Kit.Px(5));
         Kit.ChamferOutline(draw, at, max, Kit.Color(carried || chosen ? Theme.Accent : hot ? Theme.LineStrong : Theme.Line), Kit.Px(5));
@@ -794,7 +868,7 @@ internal sealed partial class ScreenHost
             Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, tagAt, Theme.Info, "DRONE"u8);
         }
 
-        Kit.ClippedText(draw, _ui.SansMedium, Theme.FontSmall, at + new float2(left, Kit.Px(4)), chosen ? Theme.Text : Theme.TextDim, Kit.F($"{type.Name}"), room);
+        Kit.ClippedText(draw, _ui.SansMedium, Theme.FontSmall, at + new float2(left, Kit.Px(4)), chosen ? Theme.Text : Theme.TextDim, tankCard ? "Tank"u8 : Kit.F($"{type.Name}"), room);
         if (role == PartRole.Module)
         {
             DrawModuleCard(draw, at, type.Module, figures, left, room, max.X);
@@ -802,7 +876,8 @@ internal sealed partial class ScreenHost
             return;
         }
 
-        Kit.ClippedText(draw, _ui.Sans, Theme.FontCaption, at + new float2(left, Kit.Px(22)), Theme.TextMute, RoleText(role), room - tag);
+        // The tank card names the fuel it would place; the fuel is chosen in the details panel.
+        Kit.ClippedText(draw, _ui.Sans, Theme.FontCaption, at + new float2(left, Kit.Px(22)), Theme.TextMute, tankCard ? Kit.F($"{type.Name}") : RoleText(role), room - tag);
         Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(left, Kit.Px(38)), Theme.TextDim, Kit.F($"{figures.Mass:0.##} T   {figures.Hull:0} HP"), room);
         var main = MainFigures(role, figures);
         if (!main.IsEmpty)
@@ -917,6 +992,39 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>The selection: one block with its resize controls, or a group with Merge; Copy, Paste and Delete.</summary>
+    /// <summary>
+    /// While a tank is the part to place: one button per fuel the craft has a tank for. Choosing one makes that
+    /// fuel's tank type the part to place, and the palette keeps the choice for the next tank.
+    /// </summary>
+    private void DrawTankFuelChoice(ShipEditor editor, GameContent content, float width)
+    {
+        var types = content.Blocks.Types;
+        if (!editor.Placing || !editor.CanEdit || (uint)editor.Part >= (uint)types.Count || !EditorPalette.IsTank(types[editor.Part]))
+            return;
+        Span<FuelKind> fuels = stackalloc FuelKind[4];
+        var count = _palette.TankFuels(types, fuels);
+        if (count == 0)
+            return;
+        Kit.Space(Theme.Space1);
+        Kit.Caption("TANK FUEL"u8);
+        Kit.Space(Theme.Space1);
+        var gap = Kit.Px(Theme.Space1);
+        var chip = MathF.Floor((width - gap * (count - 1)) / count);
+        for (var i = 0; i < count; i++)
+        {
+            if (i > 0)
+                ImGui.SameLine(0, gap);
+            ImGui.PushID(i);
+            if (EditorPalette.HandBack(EditorButton("##tankfuel"u8, ConsoleFuel.Name(fuels[i]), new float2(chip, Kit.Px(26)), true, false, types[editor.Part].Tank == fuels[i])))
+            {
+                _palette.TankFuel = fuels[i];
+                editor.ChoosePart(_palette.TankTypeOf(types, fuels[i]));
+            }
+
+            ImGui.PopID();
+        }
+    }
+
     private void DrawEditorSelection(ShipEditor editor, BuildDraft draft, GameContent content, float width)
     {
         var boxes = draft.Boxes;
@@ -953,6 +1061,7 @@ internal sealed partial class ScreenHost
                 : editor.Placing
                 ? Kit.F($"Click a face to place {part}, or drag a card onto the ship. Middle click a block to select it; Shift adds.")
                 : "Click or middle click a block to select it; Shift adds or removes one."u8, width);
+            DrawTankFuelChoice(editor, content, width);
             if (editor.Clipboard.Length > 0)
             {
                 Kit.Space(Theme.Space1);

@@ -167,7 +167,7 @@ Evaluator version is 12; protocol 52; generation 8; save codec 8. Older incompat
 
 ## Decided: interface
 
-- Editor: a Module tab (`PartRole.Module`); cards show family, quality badge (tier colour), mark, range, scan time, draw, cooldown.
+- Editor: a Sensors category (`PartRole.Module`); cards show family, quality badge (tier colour), mark, range, scan time, draw, cooldown.
 - Keys: `X` asteroid scan on the target, `C` gas scan, `Y` locator pulse, `F4` Gas window. All rebindable. They work in flight and the command view.
 - Chips over the console, only for modules the ship flown has; click or key does the same. A known no (no target, no cloud, out of range) is said on the chip and sends nothing.
 - Target panel: analysis from `SessionSnapshot.Modules` only. Unscanned asteroids show size and distance, never generated ore or mass.

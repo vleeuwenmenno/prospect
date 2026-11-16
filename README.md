@@ -140,9 +140,11 @@ drone itself.
 yes (no damage for 30 seconds, no jump ordered or running). The world keeps running around you and other players
 are never blocked. The editor works in space, around your ship:
 
-- The part list has a search at the top, tabs by role (hull, power, move, shield, jump) and a Drone tab for the
-  compact parts. It lists only parts that fit the craft: editing a ship shows no drone parts (and no Drone tab),
-  editing the drone shows only drone parts, and the search obeys the same rule. A part of the other kind is also
+- The part list has a search at the top and a rail of icon buttons down its left side, one per category: All, Hull,
+  Power, Thrust, Tanks, Shield, Jump and Sensors. Hover an icon for its name and what is in it. It lists only parts that
+  fit the craft: editing a ship shows no drone parts, editing the drone shows only drone parts (a category with none is
+  not shown), and the search obeys the same rule. The fuel tanks are one **Tank** card; the details panel beside the
+  ship has a button per fuel the craft has a tank for (the choice is kept for the next tank). A part of the other kind is also
   refused if placed some other way. Each card shows the part's figures at the size parts are placed at (whole cells on X, Y, Z).
 - Click a card, then click a block face; or drag the card onto the ship. The ghost shows green where the part
   fits and red with the reason where it does not. Let go over a panel, or press `Esc`, and nothing changes.
@@ -206,7 +208,7 @@ are never blocked. The editor works in space, around your ship:
 - **Facing.** Every block faces one of six ways, and turns with `R` like its shape and size. An engine pushes the
   ship the opposite way to its facing: its ghost, and a selected one, show the side the nozzle is on in orange with
   a line out of it, and the part list says which way it pushes (FACES BACK: PUSHES FORWARD). A new part faces back.
-  Engines and tanks take any size. Tanks, engines and thrusters are on the **Move** tab.
+  Engines and tanks take any size. Engines and thrusters are under **Thrust**, tanks under **Tanks**.
 - **Thrusters mount on faces.** With a cold gas or hot thruster chosen, the ghost is only the thruster, on the
   face under the pointer, snapped to tenths of a cell, with a line the way it points: out of that face. A click
   mounts it; four fit a one-cell face. It has no size and no turn, so `S` and `R` do nothing for it. A middle
