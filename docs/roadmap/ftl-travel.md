@@ -23,5 +23,9 @@ Product direction from 2026-11-16. Not built yet.
 
 ## Open
 
+- Whether party members (and friends and alliances, once they exist) always see each other's ships, in FTL
+  or not, without sensor coverage. Today's exploration rule says knowledge is personal; live sharing of
+  positions within a party would be a new, separate rule.
+
 - Whether drives differ in speed by default, or only in look.
 - Whether a jump can be interrupted (interdiction) later.
