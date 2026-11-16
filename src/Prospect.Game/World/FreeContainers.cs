@@ -20,6 +20,10 @@ public struct FreeContainer
     public long Born, Age;
     /// <summary>First authoritative tick on which tractors may acquire this body.</summary>
     public long PickupReadyTick;
+    /// <summary>Durable hull owner identity; zero means anyone may pick it up.</summary>
+    public uint ClaimOwner;
+    /// <summary>Shared pickup gate for simulation and client previews.</summary>
+    public readonly bool MayPickup(uint owner, long tick) => tick >= PickupReadyTick && (ClaimOwner == 0 || ClaimOwner == owner);
 }
 
 /// <summary>Fixed storage for loose cargo. Stable ids are never reused within a world.</summary>

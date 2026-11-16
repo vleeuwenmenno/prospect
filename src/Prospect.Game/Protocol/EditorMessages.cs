@@ -152,6 +152,13 @@ public struct FillBlocks
     private int _first;
 }
 
+/// <summary>Whether released cargo stays reserved for its owner.</summary>
+public enum JettisonMode : byte
+{
+    Abandon,
+    KeepClaim
+}
+
 /// <summary>Client to server, reliable: one editor request.</summary>
 public struct EditorRequestMessage
 {
@@ -180,6 +187,8 @@ public struct EditorRequestMessage
     public FillBlocks Blocks;
     public int CargoRack, CargoSize, CargoResource, CargoIndex;
     public long CargoTick;
+    /// <summary>Pickup ownership requested when releasing cargo.</summary>
+    public JettisonMode JettisonMode;
     public const int JettisonWireSize = 23;
     public const int AddContainerWireSize = 1 + 1 + 4 + 4 + 1 + 1;
 

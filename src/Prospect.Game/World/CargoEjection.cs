@@ -47,7 +47,7 @@ public static class CargoEjection
             Amount = held.Amount,
             Hull = held.Hull,
             Born = tick,
-            PickupReadyTick = tick + (long)Math.Ceiling(cargo.PickupDelaySeconds * HullSim.TickRate)
+            PickupReadyTick = tick + (long)Math.Ceiling(cargo.PickupDelaySeconds * Prospect.Engine.Time.TickLoop.SimulationHz)
         };
     }
 
