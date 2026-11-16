@@ -1,13 +1,14 @@
 #version 450
 #include "frame.glsl"
 
+// TractorLookConstants: the figures of the tractor entry in propulsion.json (see tractor.vert).
 layout(push_constant) uniform TractorLook
 {
-    vec4 strand; // rgb: linear strand colour, w: strand width (m)
-    vec4 haze;   // rgb: linear haze colour, w: haze width (m)
-    vec4 motion; // x: strand count, y: wave amplitude (m), z: wave frequency, w: wave speed
-    vec4 flow;   // x: flow speed, y: strand opacity, z: haze opacity, w: container glow
-    vec4 spread; // x: emitter spread (m), y: target spread (container radius factor), z: container glow scale, w: unused
+    vec4 strand;
+    vec4 haze;
+    vec4 motion;
+    vec4 flow;
+    vec4 spread;
 } look;
 
 layout(location = 0) in vec3 worldPosition;
@@ -16,51 +17,51 @@ layout(location = 2) flat in vec4 beamFrom;
 layout(location = 3) flat in vec4 beamTo;
 layout(location = 4) flat in vec4 beamQuat;
 layout(location = 5) flat in vec4 beamHalf;
-layout(location = 6) flat in vec4 beamBox; // x: halfW, y: back, z: front, w: inside
+layout(location = 6) flat in float inside;
 layout(location = 0) out vec4 outColor;
 
-const int Segments = 16;
+// Each strand is a polyline of this many pieces from the lens to the container.
+const int Segments = 24;
+const float Tau = 6.2831853;
 
-vec3 rotateInv(vec4 q, vec3 v)
+vec3 rotateInverse(vec4 q, vec3 v)
 {
     vec3 u = -q.xyz;
     float s = q.w;
     return 2.0 * dot(u, v) * u + (s * s - dot(u, u)) * v + 2.0 * s * cross(u, v);
 }
 
-// Closest distance from the camera ray (origin along dir) to segment [a, b].
-// Also returns ray parameter t, segment parameter s in [0, 1].
-float rayToSegment(vec3 dir, vec3 a, vec3 b, out float tRay, out float sSeg)
+// Closest distance from the camera ray (from the camera along dir) to the segment [a, b]; the ray's distance there
+// and the share of the segment.
+float rayToSegment(vec3 dir, vec3 a, vec3 b, out float along, out float share)
 {
     vec3 u = b - a;
-    float uu = dot(u, u);
+    float uu = max(dot(u, u), 1e-8);
     float ud = dot(u, dir);
-    float denom = max(uu - ud * ud, 1e-6);
-    sSeg = clamp((ud * dot(dir, a) - dot(u, a)) / denom, 0.0, 1.0);
-    vec3 q = a + u * sSeg;
-    tRay = max(dot(q, dir), 0.0);
-    return length(q - dir * tRay);
+    float denom = max(uu - ud * ud, 1e-6 * uu);
+    share = clamp((ud * dot(dir, a) - dot(u, a)) / denom, 0.0, 1.0);
+    vec3 q = a + u * share;
+    along = max(dot(q, dir), 0.0);
+    return length(q - dir * along);
 }
 
-// Ray-AABB intersection in local box space. Returns true if hit with tNear <= tFar and tFar > 0.
-bool intersectBox(vec3 ro, vec3 rd, vec3 halfExtents, out float tNear, out float tFar, out vec3 hitNormal)
+bool rayBox(vec3 origin, vec3 dir, vec3 halfExtents, out float near)
 {
-    vec3 inv = 1.0 / (rd + sign(rd + 1e-7) * 1e-7);
-    vec3 t0 = (-halfExtents - ro) * inv;
-    vec3 t1 = (halfExtents - ro) * inv;
-    vec3 tMin = min(t0, t1);
-    vec3 tMax = max(t0, t1);
-    tNear = max(max(tMin.x, tMin.y), tMin.z);
-    tFar = min(min(tMax.x, tMax.y), tMax.z);
-    hitNormal = -sign(rd) * step(tMin.yzx, tMin.xyz) * step(tMin.zxy, tMin.xyz);
-    return tNear <= tFar && tFar > 0.0;
+    vec3 inv = 1.0 / (dir + sign(dir + 1e-7) * 1e-7);
+    vec3 t0 = (-halfExtents - origin) * inv;
+    vec3 t1 = (halfExtents - origin) * inv;
+    vec3 lo = min(t0, t1);
+    vec3 hi = max(t0, t1);
+    near = max(max(lo.x, lo.y), lo.z);
+    float far = min(min(hi.x, hi.y), hi.z);
+    return near <= far && far > 0.0;
 }
 
 void main()
 {
     vec3 dir = normalize(worldPosition);
     float facing = dot(faceNormal, dir);
-    if (beamBox.w > 0.5 ? facing < 0.0 : facing > 0.0)
+    if (inside > 0.5 ? facing < 0.0 : facing > 0.0)
         discard;
 
     vec3 from = beamFrom.xyz;
@@ -70,151 +71,133 @@ void main()
     vec3 side = normalize(cross(axis, abs(axis.y) < 0.9 ? vec3(0, 1, 0) : vec3(1, 0, 0)));
     vec3 up = cross(axis, side);
 
-    // Clip ray to the outer bounding box in beam-local space.
-    vec3 eye = -from;
-    vec3 ro = vec3(dot(eye, side), dot(eye, up), dot(eye, axis));
-    vec3 rd = vec3(dot(dir, side), dot(dir, up), dot(dir, axis));
-    vec3 lo = vec3(-beamBox.x, -beamBox.x, -beamBox.y);
-    vec3 hi = vec3(beamBox.x, beamBox.x, beamBox.z);
-    vec3 inv = 1.0 / (rd + sign(rd + 1e-7) * 1e-7);
-    vec3 t0 = (lo - ro) * inv;
-    vec3 t1 = (hi - ro) * inv;
-    float tBoxMin = max(max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z)), 0.0);
-    float tBoxMax = min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z));
-    if (tBoxMax <= tBoxMin)
-        discard;
-
-    // Intersect with the held container's OBB so strands and haze occlude behind the container
-    // and the container aura wraps cleanly around its silhouette and front rim.
-    vec3 roBox = rotateInv(beamQuat, -to);
-    vec3 rdBox = rotateInv(beamQuat, dir);
-    float tHitNear, tHitFar;
-    vec3 hitNormal;
-    bool hitsContainer = intersectBox(roBox, rdBox, beamHalf.xyz, tHitNear, tHitFar, hitNormal);
-    float tOcclude = hitsContainer ? max(tHitNear, 0.0) : tBoxMax;
+    // The held container hides what is behind it.
+    vec3 boxOrigin = rotateInverse(beamQuat, -to);
+    vec3 boxDir = rotateInverse(beamQuat, dir);
+    float hitNear;
+    bool onContainer = rayBox(boxOrigin, boxDir, beamHalf.xyz, hitNear);
+    float hidden = onContainer ? max(hitNear, 0.0) : 1e9;
 
     float time = frame.dust.w;
     float seed = beamFrom.w;
-    float cRad = max(beamHalf.w, 0.1);
-    float pixelScale = frame.lens.x * 2.0 / max(frame.lens.w, 1.0);
+    float radius = max(beamHalf.w, 0.1);
+    // Metres a pixel covers one metre from the camera.
+    float pixel = frame.lens.x * 2.0 / max(frame.lens.w, 1.0);
 
     int count = clamp(int(look.motion.x + 0.5), 1, 8);
-    float waveAmp = look.motion.y * min(1.0, len / 2.2);
-    float waveFreq = look.motion.z;
-    float waveSpeed = look.motion.w;
-    float flowSpeed = look.flow.x;
+    float startRadius = look.spread.x;
+    float endRadius = max(radius * look.spread.y, startRadius);
+    // The strands end a little inside the container's near side, which hides their tips.
+    float reach = max(len - radius * 0.3, len * 0.5);
+    float wavers = clamp(len * look.motion.z, 0.6, 8.0);
+    float spacing = max(look.spread.w, 0.05);
+    vec3 light = vec3(0.0);
 
-    vec3 totalLight = vec3(0.0);
-    float landingGlow = 0.0;
-    vec3 pHit = hitsContainer ? (roBox + rdBox * max(tHitNear, 0.0)) : vec3(0.0);
-
-    // 1. Thin wavering cyan-teal energy strands with gentle travelling flow.
-    float strandAccum = 0.0;
+    // 1. Thin strands that fan out from the lens to the container, twist slowly about the axis and waver, with light
+    // flowing along them towards the ship.
+    vec3 landing[8];
     for (int i = 0; i < count; i++)
     {
         float fi = float(i);
-        float ang0 = fi * (6.2831853 / float(count)) + seed * 6.2831853;
-        float ang1 = ang0 + 0.28 * sin(seed * 11.3 + fi * 1.7);
-        vec3 r0 = (side * cos(ang0) + up * sin(ang0)) * look.spread.x;
-        vec3 r1 = (side * cos(ang1) + up * sin(ang1)) * (cRad * look.spread.y);
-        vec3 pStart = from + r0;
-        vec3 pEnd = to + r1 - axis * (cRad * 0.22);
-
-        if (hitsContainer)
-        {
-            vec3 endLocal = rotateInv(beamQuat, pEnd - to);
-            float dLand = length(pHit - endLocal);
-            float landR = max(cRad * 0.36, 0.12);
-            landingGlow += exp(-(dLand * dLand) / (landR * landR) * 2.5);
-        }
-
-        float bestStrand = 0.0;
-        vec3 prevP = pStart;
+        float phase = fract(seed * 7.13 + fi * 0.618);
+        float base = Tau * (fi + 0.35 * phase) / float(count) + seed * Tau + 0.5 * sin(time * 0.31 + fi * 1.7 + seed * 9.0);
+        float twist = (1.4 + 0.6 * phase) * (i % 2 == 0 ? 1.0 : -1.0);
+        float best = 0.0;
+        float bestCore = 0.0;
+        vec3 previous = from;
+        float previousU = 0.0;
         for (int s = 1; s <= Segments; s++)
         {
             float u = float(s) / float(Segments);
-            float env = sin(u * 3.14159265);
-            float w1 = sin(u * waveFreq * 6.2831853 - time * waveSpeed + fi * 2.094 + seed * 4.7);
-            float w2 = cos(u * (waveFreq * 1.35) * 6.2831853 + time * (waveSpeed * 0.85) + fi * 1.37 + seed * 3.1);
-            vec3 wave = (side * w1 + up * w2) * (waveAmp * env);
-            vec3 curP = mix(pStart, pEnd, u) + wave;
+            float spread = startRadius + (endRadius - startRadius) * pow(u, 1.35);
+            float angle = base + twist * u;
+            float ring = 0.62 + 0.3 * sin(Tau * (u * 0.7 + phase) + time * 0.4);
+            float envelope = sin(u * 3.14159265);
+            float w1 = sin(Tau * (u * wavers + phase) - time * look.motion.w + fi * 2.1);
+            float w2 = cos(Tau * (u * wavers * 1.37 + phase * 0.5) + time * look.motion.w * 0.83 + fi * 1.3);
+            vec3 radial = (side * cos(angle) + up * sin(angle)) * (spread * ring);
+            vec3 waver = (side * w1 + up * w2) * (spread * look.motion.y * envelope);
+            vec3 point = from + axis * (reach * u) + radial + waver;
+            if (s == Segments)
+                landing[i] = point;
 
-            float tSeg, segFrac;
-            float d = rayToSegment(dir, prevP, curP, tSeg, segFrac);
-            if (tSeg <= tOcclude + 0.02)
+            float along, share;
+            float d = rayToSegment(dir, previous, point, along, share);
+            if (along < hidden)
             {
-                float rStrand = max(look.strand.w, max(tSeg, 0.2) * pixelScale * 1.1);
-                float uAt = mix(float(s - 1) / float(Segments), u, segFrac);
-
-                // Mostly transparent core: soft Gaussian falloff + subtle halo, no hard opaque edge.
-                float core = exp(-(d * d) / (rStrand * rStrand) * 3.0);
-                float halo = exp(-(d * d) / (rStrand * rStrand * 9.0) * 1.6) * 0.20;
-
-                // Gentle travelling energy flow along the strand toward the emitter.
-                float f1 = 0.5 + 0.5 * sin(uAt * 10.5 + time * flowSpeed + fi * 1.9 + seed * 5.0);
-                float f2 = 0.5 + 0.5 * sin(uAt * 21.0 + time * flowSpeed * 1.4 - fi * 1.1);
-                float flowMod = 0.50 + 0.50 * (f1 * 0.65 + f2 * 0.35);
-
-                // Softly taper at the emitter & container ends.
-                float endTaper = smoothstep(0.0, 0.08, uAt) * smoothstep(1.0, 0.88, uAt);
-                float val = (core * 0.65 + halo) * flowMod * (0.40 + 0.60 * endTaper);
-                bestStrand = max(bestStrand, val);
+                float at = mix(previousU, u, share);
+                // Narrower than a pixel, a strand keeps its light and spreads it, so a far beam fades instead of
+                // turning into a solid line.
+                float width = max(look.strand.w, along * pixel * 0.7);
+                float keep = clamp(look.strand.w / width, 0.18, 1.0);
+                float core = exp(-(d * d) / (width * width) * 2.0);
+                float halo = exp(-(d * d) / (width * width * 36.0) * 2.0) * 0.14;
+                float metres = at * reach;
+                float pulse = pow(0.5 + 0.5 * cos(Tau * ((metres + time * look.flow.x) / spacing + phase * 3.0)), 6.0);
+                float taper = smoothstep(0.0, 0.05, at) * (1.0 - 0.45 * smoothstep(0.75, 1.0, at));
+                float value = (core + halo) * keep * taper * (0.22 + 1.1 * pulse);
+                if (value > best)
+                {
+                    best = value;
+                    bestCore = core * keep * taper * pulse;
+                }
             }
-            prevP = curP;
+            previous = point;
+            previousU = u;
         }
-        strandAccum += bestStrand;
+        light += look.strand.rgb * (best * look.flow.y) + vec3(bestCore * look.flow.y * 0.2);
     }
-    totalLight += look.strand.rgb * (strandAccum * look.flow.y);
 
-    // 2. Faint wide translucent haze around the strands, fading smoothly before the box edges.
-    float tAxis, uAxis;
-    float dAxis = rayToSegment(dir, from, to, tAxis, uAxis);
-    if (tAxis <= tOcclude + cRad * 0.35)
+    // 2. A faint haze about the beam, widening with it.
+    float alongAxis, uAxis;
+    float dAxis = rayToSegment(dir, from, from + axis * reach, alongAxis, uAxis);
+    if (alongAxis < hidden + radius * 0.3)
     {
-        float envR = mix(look.spread.x + look.haze.w * 0.35, cRad * look.spread.y + look.haze.w, uAxis);
-        float hazeProfile = exp(-(dAxis * dAxis) / (envR * envR) * 2.4);
-        float boxFade = smoothstep(beamBox.x, beamBox.x * 0.45, dAxis);
-        float endFade = smoothstep(0.0, 0.14, uAxis) * smoothstep(1.0, 0.82, uAxis);
-        totalLight += look.haze.rgb * (hazeProfile * boxFade * endFade * look.flow.z);
+        float hazeRadius = startRadius + (endRadius - startRadius) * pow(uAxis, 1.35) + look.haze.w * (0.3 + 0.7 * uAxis);
+        float profile = exp(-(dAxis * dAxis) / (hazeRadius * hazeRadius) * 2.0);
+        float ends = smoothstep(0.0, 0.08, uAxis) * smoothstep(1.0, 0.85, uAxis);
+        float drift = 0.85 + 0.15 * sin(uAxis * len * 1.3 + time * look.flow.x * 0.7);
+        light += look.haze.rgb * (profile * ends * drift * look.flow.z);
     }
 
-    // 3. Soft glow/aura wrapped around the held container where the strands land.
+    // 3. A soft round aura about the held container: the half behind it is hidden by it, so it reads darker there.
     if (look.flow.w > 0.0)
     {
-        float auraStrength = 0.0;
-        if (hitsContainer)
+        float alongCentre = max(dot(to, dir), 0.0);
+        float dCentre = length(to - dir * alongCentre);
+        float reachAura = max(radius * look.spread.z, 0.2);
+        float shimmer = 0.85 + 0.15 * sin(time * 2.3 + seed * 20.0);
+        // Brightest at the centre, so it shows as a soft halo round the container's outline, never as a disc.
+        float aura = exp(-(dCentre * dCentre) / (reachAura * reachAura) * 3.0) * shimmer;
+        if (onContainer)
         {
-            float fresnel = pow(1.0 - clamp(abs(dot(hitNormal, rdBox)), 0.0, 1.0), 2.4);
-            auraStrength = fresnel * 0.45 + min(landingGlow, 1.2) * 0.32;
+            aura *= 0.3;
+            // Where the strands touch the container, its surface glows.
+            vec3 hit = boxOrigin + boxDir * max(hitNear, 0.0);
+            float spot = max(radius * 0.18, 0.06);
+            for (int i = 0; i < count; i++)
+            {
+                vec3 end = rotateInverse(beamQuat, landing[i] - to);
+                vec3 gap = hit - end;
+                aura += exp(-dot(gap, gap) / (spot * spot) * 2.0) * 0.35;
+            }
         }
-        else
-        {
-            float tClosest = clamp(dot(to, dir), tBoxMin, tBoxMax);
-            vec3 pClosest = roBox + rdBox * tClosest;
-            vec3 q = abs(pClosest) - beamHalf.xyz;
-            float dBox = length(max(q, 0.0));
-            float auraWidth = max(cRad * (look.spread.z - 1.0), 0.06) + 0.06;
-            float auraMax = cRad * look.spread.z + 0.25;
-            float edgeFade = smoothstep(auraMax, auraMax * 0.45, length(pClosest));
-            auraStrength = exp(-(dBox * dBox) / (auraWidth * auraWidth) * 2.8) * edgeFade * 0.72;
-        }
-        vec3 auraColor = mix(look.haze.rgb, look.strand.rgb, 0.42);
-        totalLight += auraColor * (auraStrength * look.flow.w);
+        light += mix(look.haze.rgb, look.strand.rgb, 0.5) * (aura * look.flow.w);
     }
 
-    // 4. Subtle emitter point glow where the strands emerge.
-    float tEmit = max(dot(from, dir), 0.0);
-    if (tEmit <= tOcclude + 0.02)
+    // 4. The lens's glow where the strands leave it.
+    float alongLens = max(dot(from, dir), 0.0);
+    if (alongLens < hidden)
     {
-        float dEmit = length(from - dir * tEmit);
-        float emitR = max(look.spread.x * 1.6, tEmit * pixelScale * 2.0);
-        float emitFade = smoothstep(beamBox.y, beamBox.y * 0.2, dEmit);
-        float emitGlow = exp(-(dEmit * dEmit) / (emitR * emitR) * 2.8) * emitFade * 0.22 * look.flow.y;
-        totalLight += look.strand.rgb * emitGlow;
+        float dLens = length(from - dir * alongLens);
+        float size = max(startRadius * 1.4, 0.02);
+        float spreadSize = max(size, alongLens * pixel * 1.5);
+        float keep = clamp((size * size) / (spreadSize * spreadSize), 0.15, 1.0);
+        float glow = exp(-(dLens * dLens) / (spreadSize * spreadSize) * 2.0) * keep;
+        light += (look.strand.rgb * 0.6 + vec3(0.12)) * (glow * look.flow.y);
     }
 
-    if (dot(totalLight, totalLight) < 1e-6)
+    if (dot(light, light) < 1e-7)
         discard;
-
-    outColor = vec4(totalLight, 1.0);
+    outColor = vec4(light, 1.0);
 }

@@ -1134,6 +1134,9 @@ internal sealed unsafe class SceneRenderer : IDisposable
             commands.PushConstants(_tractorPipelineLayout, VkShaderStageFlags.VertexBit | VkShaderStageFlags.FragmentBit, 0, new ReadOnlySpan<byte>(&tractorLook, sizeof(TractorLookConstants)));
             commands.BindVertexBuffers(0, new ReadOnlySpan<VkBuffer>(in tractors), new ReadOnlySpan<ByteSize64>(in zero));
             commands.Draw(36, _tractorCount, 0, 0);
+            // The beam's layout has push constants, so its set 0 is not compatible with the scene layout: bind the frame
+            // again for the scene pipelines that follow.
+            commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _scenePipelineLayout, 0, new ReadOnlySpan<VkDescriptorSet>(in set), []);
         }
         _tractorCount = 0;
         commands.BindPipeline(VkPipelineBindPoint.Graphics, _dustPipeline);

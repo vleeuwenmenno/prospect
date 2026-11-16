@@ -1,4 +1,5 @@
 using System.Numerics;
+using Prospect.Client.Screens;
 using Prospect.Game.World;
 
 namespace Prospect.Client.Render;
@@ -25,11 +26,14 @@ internal static partial class PropulsionModels
     public static float TractorLensOffset(float small, TractorLook tractor)
     {
         var baseR = small * tractor.TurretBaseRadius;
-        return baseR * tractor.TurretHeadLength * 0.63f;
+        return baseR * tractor.TurretHeadLength * 0.64f;
     }
 
-    /// <summary>Builds the round bolted base plate and bearing collar flush on the mount's block face (static hull mesh).</summary>
-    public static void BuildTractorBase(PropulsionModelLook model, in PartBox box, TractorLook tractor, List<MeshVertex> vertices, List<uint> indices)
+    /// <summary>
+    /// Builds the round bolted base plate and bearing collar flush on the mount's block face (static hull mesh). Its
+    /// chamfered rim is painted in the colour of the tractor's tier (<c>modules.json</c>, as on the editor card).
+    /// </summary>
+    public static void BuildTractorBase(PropulsionModelLook model, in PartBox box, TractorLook tractor, TractorSpec spec, List<MeshVertex> vertices, List<uint> indices)
     {
         var axis = Facings.Axis(box.Facing);
         var u = (axis + 1) % 3;
@@ -44,39 +48,54 @@ internal static partial class PropulsionModels
         var plating = Tag(model.HousingShade);
         var metal = Tag(model.NozzleShade);
         var detail = Tag(model.DetailShade);
+        var tier = PaintRgb(ModuleLook.Current.Tier(spec.Quality).Rgb);
 
-        const int sides = 16;
+        const int sides = 24;
+        var turn = MathF.PI / sides;
         Span<Vector2> outer = stackalloc Vector2[sides];
-        Span<Vector2> bevel = stackalloc Vector2[sides];
+        Span<Vector2> rim = stackalloc Vector2[sides];
+        Span<Vector2> top = stackalloc Vector2[sides];
         Span<Vector2> collar = stackalloc Vector2[sides];
-        Polygon(outer, Vector2.Zero, baseR, MathF.PI / sides);
-        Polygon(bevel, Vector2.Zero, baseR * 0.90f, MathF.PI / sides);
-        Polygon(collar, Vector2.Zero, baseR * 0.56f, MathF.PI / sides);
+        Span<Vector2> collarLip = stackalloc Vector2[sides];
+        Polygon(outer, Vector2.Zero, baseR, turn);
+        Polygon(rim, Vector2.Zero, baseR * 0.86f, turn);
+        Polygon(top, Vector2.Zero, baseR * 0.62f, turn);
+        Polygon(collar, Vector2.Zero, baseR * 0.5f, turn);
+        Polygon(collarLip, Vector2.Zero, baseR * 0.56f, turn);
 
-        // Round base plate with chamfered rim, flush on the block face (z = 0).
-        g.Loft(outer, 0f, outer, baseH * 0.72f, Vector2.Zero, plating, 1f);
-        g.Loft(outer, baseH * 0.72f, bevel, baseH, Vector2.Zero, plating, 1f);
-        g.Cap(bevel, Vector2.Zero, baseH, 1f, plating);
+        // Round plate flush on the block face, a chamfered rim in the tier's colour, and a raised inner deck.
+        g.Loft(outer, 0f, outer, baseH * 0.5f, Vector2.Zero, plating, 1f);
+        g.Loft(outer, baseH * 0.5f, rim, baseH * 0.85f, Vector2.Zero, tier, 1f);
+        g.Annulus(rim, top, Vector2.Zero, baseH * 0.85f, 1f, plating);
+        g.Loft(top, baseH * 0.85f, top, baseH, Vector2.Zero, metal, 1f);
+        g.Annulus(top, collarLip, Vector2.Zero, baseH, 1f, plating);
 
-        // Central bearing collar where the yoke rotates.
-        g.Loft(collar, baseH, collar, collarTop, Vector2.Zero, metal, 1f);
+        // The bearing collar the yoke turns on.
+        g.Loft(collarLip, baseH, collarLip, baseH * 1.12f, Vector2.Zero, detail, 1f);
+        g.Annulus(collarLip, collar, Vector2.Zero, baseH * 1.12f, 1f, detail);
+        g.Loft(collar, baseH * 1.12f, collar, collarTop, Vector2.Zero, metal, 1f);
         g.Cap(collar, Vector2.Zero, collarTop, 1f, detail);
 
-        // Perimeter bolts around the base plate.
-        var boltR = baseR * 0.80f;
-        var boltHalf = baseR * 0.055f;
-        var boltTop = baseH * 1.24f;
-        Span<Vector2> bolt = stackalloc Vector2[4];
+        // Hex bolts on the rim's deck.
+        var boltR = baseR * 0.74f;
+        var boltRadius = baseR * 0.045f;
+        var boltTop = baseH * 1.15f;
+        Span<Vector2> bolt = stackalloc Vector2[6];
         for (var i = 0; i < tractor.TurretBolts; i++)
         {
-            var angle = i * (MathF.Tau / tractor.TurretBolts);
+            var angle = (i + 0.5f) * (MathF.Tau / tractor.TurretBolts);
             var centre = new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * boltR;
-            Rectangle(bolt, boltHalf, boltHalf);
-            for (var c = 0; c < 4; c++)
-                bolt[c] += centre;
-            g.Loft(bolt, baseH, bolt, boltTop, centre, detail, 1f);
+            Polygon(bolt, centre, boltRadius, angle);
+            g.Loft(bolt, baseH * 0.85f, bolt, boltTop, centre, detail, 1f);
             g.Cap(bolt, centre, boltTop, 1f, detail);
         }
+    }
+
+    /// <summary>A colour as the paint tag <c>mesh.vert</c> reads (see <see cref="Paint"/>).</summary>
+    private static float PaintRgb(uint rgb)
+    {
+        Span<float> c = [((rgb >> 16) & 0xFF) / 255f, ((rgb >> 8) & 0xFF) / 255f, (rgb & 0xFF) / 255f];
+        return Paint(c);
     }
 
     /// <summary>Builds the azimuth-rotating yoke in canonical space (origin at collar top, +Z face normal, +X pitch axis).</summary>
@@ -145,60 +164,61 @@ internal static partial class PropulsionModels
         var metal = Tag(model.NozzleShade);
         var dark = Tag(model.ThroatShade);
         var detail = Tag(model.DetailShade);
+        var coilPaint = PaintRgb(tractor.TurretCoilColor);
         var lens = Emissive(tractor.TurretLensColor);
 
-        const int sides = 8;
+        const int sides = 16;
         var turn = MathF.PI / sides;
-        Span<Vector2> breech = stackalloc Vector2[sides];
         Span<Vector2> rear = stackalloc Vector2[sides];
+        Span<Vector2> breech = stackalloc Vector2[sides];
         Span<Vector2> barrel = stackalloc Vector2[sides];
         Span<Vector2> coil = stackalloc Vector2[sides];
+        Span<Vector2> shroudBack = stackalloc Vector2[sides];
         Span<Vector2> shroudOut = stackalloc Vector2[sides];
         Span<Vector2> shroudIn = stackalloc Vector2[sides];
-        Span<Vector2> lensDisk = stackalloc Vector2[sides];
+        Span<Vector2> lensRing = stackalloc Vector2[sides];
+        Polygon(rear, Vector2.Zero, headR * 0.86f, turn);
+        Polygon(breech, Vector2.Zero, headR * 1.2f, turn);
+        Polygon(barrel, Vector2.Zero, headR * 0.9f, turn);
+        Polygon(coil, Vector2.Zero, headR * 1.16f, turn);
+        Polygon(shroudBack, Vector2.Zero, headR * 1.08f, turn);
+        Polygon(shroudOut, Vector2.Zero, headR * 1.26f, turn);
+        Polygon(shroudIn, Vector2.Zero, headR * 0.92f, turn);
+        Polygon(lensRing, Vector2.Zero, headR * 0.7f, turn);
 
         var zBack = -0.28f * headLen;
-        var zBreech = 0.18f * headLen;
+        var zBreech = 0.12f * headLen;
+        var zShroud = 0.5f * headLen;
+        var zFlare = 0.58f * headLen;
+        var zLens = TractorLensOffset(small, tractor);
         var zTip = 0.74f * headLen;
-        var zShroud = 0.60f * headLen;
-        var zLens = 0.63f * headLen;
 
-        Polygon(rear, Vector2.Zero, headR * 0.92f, turn);
-        Polygon(breech, Vector2.Zero, headR * 1.24f, turn);
-        Polygon(barrel, Vector2.Zero, headR, turn);
-        Polygon(coil, Vector2.Zero, headR * 1.26f, turn);
-        Polygon(shroudOut, Vector2.Zero, headR * 1.16f, turn);
-        Polygon(shroudIn, Vector2.Zero, headR * 0.78f, turn);
-        Polygon(lensDisk, Vector2.Zero, headR * 0.78f, turn);
-
-        // Breech housing.
+        // Breech housing about the trunnion: a rounded back, then a short step down to the barrel.
         g.Cap(rear, Vector2.Zero, zBack, -1f, dark);
-        g.Loft(rear, zBack, breech, zBack + 0.08f * headLen, Vector2.Zero, plating, 1f);
-        g.Loft(breech, zBack + 0.08f * headLen, breech, zBreech, Vector2.Zero, plating, 1f);
+        g.Loft(rear, zBack, breech, zBack + 0.07f * headLen, Vector2.Zero, plating, 1f);
+        g.Loft(breech, zBack + 0.07f * headLen, breech, zBreech, Vector2.Zero, plating, 1f);
         g.Annulus(breech, barrel, Vector2.Zero, zBreech, 1f, metal);
 
-        // Main barrel.
+        // Barrel with the field coils wound round it.
         g.Loft(barrel, zBreech, barrel, zShroud, Vector2.Zero, metal, 1f);
-
-        // Raised coil rings along the barrel.
         var coilSpan = zShroud - zBreech;
-        var coilWidth = 0.065f * headLen;
+        var coilWidth = coilSpan / (tractor.TurretCoilCount * 2f + 1f);
         for (var i = 0; i < tractor.TurretCoilCount; i++)
         {
-            var t = (i + 1f) / (tractor.TurretCoilCount + 1f);
-            var cz = zBreech + coilSpan * t;
-            var za = cz - coilWidth * 0.5f;
-            var zb = cz + coilWidth * 0.5f;
-            g.Loft(coil, za, coil, zb, Vector2.Zero, detail, 1f);
-            g.Annulus(coil, barrel, Vector2.Zero, za, -1f, detail);
-            g.Annulus(coil, barrel, Vector2.Zero, zb, 1f, detail);
+            var za = zBreech + coilWidth * (1f + 2f * i);
+            var zb = za + coilWidth;
+            g.Annulus(coil, barrel, Vector2.Zero, za, -1f, coilPaint);
+            g.Loft(coil, za, coil, zb, Vector2.Zero, coilPaint, 1f);
+            g.Annulus(coil, barrel, Vector2.Zero, zb, 1f, coilPaint);
         }
 
-        // Front shroud & recessed glowing lens.
-        g.Annulus(shroudOut, barrel, Vector2.Zero, zShroud, -1f, metal);
-        g.Loft(shroudOut, zShroud, shroudOut, zTip, Vector2.Zero, plating, 1f);
-        g.Annulus(shroudOut, shroudIn, Vector2.Zero, zTip, 1f, metal);
+        // The emitter shroud flares out round a lens set back from its mouth.
+        g.Annulus(shroudBack, barrel, Vector2.Zero, zShroud, -1f, metal);
+        g.Loft(shroudBack, zShroud, shroudOut, zFlare, Vector2.Zero, plating, 1f);
+        g.Loft(shroudOut, zFlare, shroudOut, zTip, Vector2.Zero, plating, 1f);
+        g.Annulus(shroudOut, shroudIn, Vector2.Zero, zTip, 1f, detail);
         g.Loft(shroudIn, zLens, shroudIn, zTip, Vector2.Zero, dark, -1f);
-        g.Cap(lensDisk, Vector2.Zero, zLens, 1f, lens);
+        g.Annulus(shroudIn, lensRing, Vector2.Zero, zLens, 1f, dark);
+        g.Cap(lensRing, Vector2.Zero, zLens, 1f, lens);
     }
 }

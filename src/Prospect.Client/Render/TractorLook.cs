@@ -12,21 +12,31 @@ internal sealed class TractorLook
     public float Opacity { get; init; }
     public float WarningTint { get; init; }
     public int PreviewPairsPerFrame { get; init; }
+    /// <summary>How many strands a beam has.</summary>
     public int StrandCount { get; init; } = 4;
     public uint StrandColor { get; init; } = 7927274;
     public uint HazeColor { get; init; } = 1806006;
-    public float StrandWidth { get; init; } = 0.020f;
-    public float StrandOpacity { get; init; } = 0.80f;
-    public float EmitterSpread { get; init; } = 0.055f;
-    public float TargetSpread { get; init; } = 0.68f;
-    public float WaveAmplitude { get; init; } = 0.065f;
-    public float WaveFrequency { get; init; } = 2.2f;
-    public float WaveSpeed { get; init; } = 1.6f;
-    public float FlowSpeed { get; init; } = 2.0f;
-    public float HazeWidth { get; init; } = 0.38f;
-    public float HazeOpacity { get; init; } = 0.08f;
-    public float ContainerGlow { get; init; } = 0.35f;
-    public float ContainerGlowScale { get; init; } = 1.38f;
+    /// <summary>A strand's width in metres; seen from farther than that covers, it spreads its light and fades.</summary>
+    public float StrandWidth { get; init; } = 0.012f;
+    public float StrandOpacity { get; init; } = 1.4f;
+    /// <summary>The beam's radius at the lens, in metres.</summary>
+    public float EmitterSpread { get; init; } = 0.035f;
+    /// <summary>The beam's radius at the container, as a share of the container's bounding radius.</summary>
+    public float TargetSpread { get; init; } = 0.55f;
+    /// <summary>How far a strand wavers sideways, as a share of the beam's radius there.</summary>
+    public float WaveAmplitude { get; init; } = 0.18f;
+    /// <summary>Wavers per metre of beam (at least about half a waver on a short beam).</summary>
+    public float WaveFrequency { get; init; } = 0.18f;
+    public float WaveSpeed { get; init; } = 1.2f;
+    /// <summary>How fast light flows along the strands towards the ship, in metres a second.</summary>
+    public float FlowSpeed { get; init; } = 3f;
+    /// <summary>Metres between the bright pulses that flow along a strand.</summary>
+    public float PulseSpacing { get; init; } = 2.5f;
+    public float HazeWidth { get; init; } = 0.25f;
+    public float HazeOpacity { get; init; } = 0.05f;
+    public float ContainerGlow { get; init; } = 0.22f;
+    /// <summary>The aura's radius about the held container, as a share of its bounding radius.</summary>
+    public float ContainerGlowScale { get; init; } = 1.5f;
     public float TurretBaseRadius { get; init; } = 0.88f;
     public float TurretBaseHeight { get; init; } = 0.18f;
     public int TurretBolts { get; init; } = 8;
@@ -38,6 +48,8 @@ internal sealed class TractorLook
     public float TurretSlewRate { get; init; } = 180f;
     public float TurretMaxPitch { get; init; } = 82f;
     public uint TurretLensColor { get; init; } = 7927274;
+    /// <summary>The paint of the field coils round the emitter barrel.</summary>
+    public uint TurretCoilColor { get; init; } = 0xA8683A;
     public float ReachDashLength { get; init; } = 8f;
     public float ReachGapLength { get; init; } = 5f;
     public float ReachArrowSize { get; init; } = 8f;
@@ -48,7 +60,7 @@ internal sealed class TractorLook
         Haze = new float4(LinearColor(HazeColor), HazeWidth),
         Motion = new float4(StrandCount, WaveAmplitude, WaveFrequency, WaveSpeed),
         Flow = new float4(FlowSpeed, StrandOpacity, HazeOpacity, ContainerGlow),
-        Spread = new float4(EmitterSpread, TargetSpread, ContainerGlowScale, 0f),
+        Spread = new float4(EmitterSpread, TargetSpread, ContainerGlowScale, PulseSpacing),
     };
 
     private static float3 LinearColor(uint rgb) => new(
@@ -59,15 +71,16 @@ internal sealed class TractorLook
     public void Check()
     {
         if (BeamColor > 0xFFFFFF || WarningColor > 0xFFFFFF || StrandColor > 0xFFFFFF
-            || HazeColor > 0xFFFFFF || TurretLensColor > 0xFFFFFF
+            || HazeColor > 0xFFFFFF || TurretLensColor > 0xFFFFFF || TurretCoilColor > 0xFFFFFF
             || !(CoreWidth is > 0 and <= 8) || !(GlowWidth >= CoreWidth && GlowWidth <= 32)
             || !(Opacity is > 0 and <= 1) || !(WarningTint is > 0 and <= 1)
             || PreviewPairsPerFrame is < 1 or > 4096
             || StrandCount is < 1 or > 8
-            || !(StrandWidth is > 0 and <= 0.5f) || !(StrandOpacity is > 0 and <= 2)
+            || !(StrandWidth is > 0 and <= 0.5f) || !(StrandOpacity is > 0 and <= 4)
             || !(EmitterSpread is >= 0 and <= 2) || !(TargetSpread is >= 0 and <= 4)
-            || !(WaveAmplitude is >= 0 and <= 1) || !(WaveFrequency is > 0 and <= 20)
+            || !(WaveAmplitude is >= 0 and <= 1.5f) || !(WaveFrequency is > 0 and <= 4)
             || !(WaveSpeed is >= 0 and <= 20) || !(FlowSpeed is > 0 and <= 20)
+            || !(PulseSpacing is >= 0.1f and <= 50)
             || !(HazeWidth is > 0 and <= 4) || !(HazeOpacity is >= 0 and <= 1)
             || !(ContainerGlow is >= 0 and <= 2) || !(ContainerGlowScale is >= 1 and <= 4)
             || !(TurretBaseRadius is > 0.3f and <= 1f) || !(TurretBaseHeight is > 0.05f and <= 0.6f)

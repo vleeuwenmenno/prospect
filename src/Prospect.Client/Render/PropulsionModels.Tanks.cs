@@ -39,8 +39,8 @@ internal static partial class PropulsionModels
             BuildRack(box, rack, look.Cargo, vertices, indices);
         else if (ModelOf(type, BlockShape.Box, look) is { } model)
         {
-            if (type.Tractor is not null && look.Tractor is { } tractor)
-                BuildTractorBase(model, box, tractor, vertices, indices);
+            if (type.Tractor is { } spec && look.Tractor is { } tractor)
+                BuildTractorBase(model, box, tractor, spec, vertices, indices);
             else
                 Build(model, box, type.Fuel, 0, true, vertices, indices, null);
         }
@@ -408,7 +408,8 @@ internal static partial class PropulsionModels
     public static bool PaintOf(float length, out Vector3 rgb)
     {
         rgb = default;
-        if (length < 3.25f)
+        // At 4.5 and over the colour is light the part gives off (Emissive), not paint.
+        if (length < 3.25f || length >= 4.5f)
             return false;
         var code = (int)MathF.Floor((length - 3.5f) * 32768f);
         rgb = new Vector3((code >> 10) & 31, (code >> 5) & 31, code & 31) / 31f;
