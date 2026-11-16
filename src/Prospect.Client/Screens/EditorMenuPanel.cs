@@ -246,6 +246,10 @@ internal sealed class EditorMenuPanel(UiContext ui)
         var enabled = true;
         var arrow = false;
         var blocks = editor.Selection.Length;
+        var plan = editor.MenuFuelPlan;
+        var dumped = plan.Dumped.Nitrogen + plan.Dumped.Hydrazine + plan.Dumped.Bipropellant;
+        var moved = plan.Moved.Nitrogen + plan.Moved.Hydrazine + plan.Moved.Bipropellant;
+
         switch (row)
         {
             case EditorMenuRow.Resize:
@@ -269,6 +273,8 @@ internal sealed class EditorMenuPanel(UiContext ui)
                 label = editor.Menu.Mount >= 0 ? "Delete part"u8 : blocks > 1 ? Kit.F($"Delete {blocks} blocks") : "Delete block"u8;
                 enabled = editor.CanDelete;
                 note = enabled ? "DEL"u8 : editor.CanEdit ? "LEAVES NO BLOCK"u8 : "REPAIR FIRST"u8;
+                if (enabled && editor.MenuFuelReady && editor.Menu.Mount < 0 && (dumped > 0f || moved > 0f))
+                    note = dumped > 0f ? Kit.F($"DUMPS {dumped:0.##} KG") : Kit.F($"MOVES {moved:0.##} KG");
                 break;
             case EditorMenuRow.SameType:
                 label = "Select same type"u8;
@@ -284,6 +290,8 @@ internal sealed class EditorMenuPanel(UiContext ui)
                 note = enabled ? ConsoleFuel.Name(editor.SelectionFuel == FuelKind.None ? FuelKind.Bipropellant : editor.SelectionFuel) : "REPAIR FIRST"u8;
                 if (enabled && editor.SelectionFuel == FuelKind.None)
                     note = "MIXED"u8;
+                if (enabled && editor.MenuFuelReady && (dumped > 0f || moved > 0f))
+                    note = dumped > 0f ? Kit.F($"DUMPS {dumped:0.##} KG") : Kit.F($"MOVES {moved:0.##} KG");
                 arrow = enabled;
                 break;
             default:

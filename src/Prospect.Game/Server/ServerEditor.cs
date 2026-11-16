@@ -591,8 +591,8 @@ public sealed partial class ServerHost
     /// the same ship, so it keeps the old hull's durable name (<see cref="HullInfo.Entity"/>). It keeps the
     /// owner, the pilot, the heading and the motion, and the grid stays where it was in space, so a block that
     /// was not touched does not move. Its blocks are new and whole, as building is free. Each of its tanks keeps
-    /// the fuel the same tank of the old hull held (<see cref="CarryFuel"/>): a new tank starts empty, and so does
-    /// one that was lost and is built again, as nothing refuels a ship. Its shield and battery keep the charge
+    /// fuel through overlap first, then pumps spill into same-fuel room (<see cref="CarryFuel"/>). A repaired
+    /// lost tank stays empty, as nothing refuels a ship. Its shield and battery keep the charge
     /// they had, up to what the new design holds. The old hull is removed only after the new one exists.
     /// </summary>
     private void ReplaceHull(Connection connection, byte design)
@@ -663,37 +663,12 @@ public sealed partial class ServerHost
         Logs.Sim.Info($"{connection.Name} (player {connection.PlayerId}) rebuilt hull {old.Packed} as {next.Packed}, design {design}");
     }
 
-    /// <summary>
-    /// Gives each tank of a hull that replaces another what the same tank of the old hull held, and returns what
-    /// the new hull then has of each fuel. A tank is the same tank when it is a block of the same type and shape
-    /// in the same cells of the grid the two designs share; which way it faces does not matter. It keeps its
-    /// kilograms, up to what it holds now. Every other tank of the new hull is new and stays empty; a tank the
-    /// old hull had lost held nothing, so a repair builds it again empty. The new hull's tanks must be empty.
-    /// </summary>
+    /// <summary>Keeps fuel in overlapping tanks in the shared grid; repaired lost tanks remain empty.</summary>
     private FuelTanks CarryFuel(BlockStateHandle oldState, HullDesign from, BlockStateHandle newState, HullDesign to)
     {
-        var held = _hulls.BlockStates.Tanks(oldState);
         var levels = _hulls.BlockStates.TankLevels(newState);
-        var oldTanks = from.Tanks;
-        var newTanks = to.Tanks;
-        var oldBoxes = from.Boxes;
-        var newBoxes = to.Boxes;
-        for (var i = 0; i < newTanks.Length; i++)
-        {
-            ref readonly var box = ref newBoxes[newTanks[i].Block];
-
-            // Blocks of a design never share a cell, so at most one old tank is this one.
-            for (var j = 0; j < oldTanks.Length; j++)
-            {
-                ref readonly var old = ref oldBoxes[oldTanks[j].Block];
-                if (old.At != box.At || old.Size != box.Size || old.Shape != box.Shape || !ReferenceEquals(old.Type, box.Type))
-                    continue;
-                levels[i] = Math.Clamp(held[j], 0.0, newTanks[i].Capacity);
-                break;
-            }
-        }
-
-        return TankFuel.Total(levels, newTanks);
+        EditFuel.Transfer(from, _hulls.BlockStates.Tanks(oldState), to, levels);
+        return TankFuel.Total(levels, to.Tanks);
     }
 
     /// <summary>Whether a design may stand in for a hull's: the same name, class, block size and colour.</summary>

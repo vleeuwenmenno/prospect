@@ -5204,6 +5204,69 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     [Fact]
+    public void FuelPreviewKeepsGrowthAndWarnsWhenShrinkingBelowTheLevel()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        var tank = editor.Source!.Tanks[0].Block;
+        editor.StopPlacing();
+        editor.Select(tank, false);
+        Assert.True(editor.BeginBlockResize(true));
+        var side = -1;
+        for (var candidate = 0; candidate < 6; candidate++)
+            if (editor.Draft!.CanResize(tank, candidate, 2) == DraftEdit.Done) { side = candidate; break; }
+        Assert.True(side >= 0);
+        editor.SizeBlockFace(side, 2);
+        editor.EndBlockResize();
+        AwaitCheck();
+        Assert.False(editor.DumpsFuel);
+        Assert.True(editor.Apply(Bridge));
+        Assert.True(PlayUntil(() => editor.Stage == EditorStage.Closed));
+        Assert.True(PlayUntil(() => _snapshot.Hulls[_snapshot.OwnHull].Id == _snapshot.Editor.Hull));
+        var hull = (int)(_snapshot.Editor.Hull & 0xFFFF);
+        TankHarness.Fill(ServerHulls, hull, 1f);
+        OpenEditor();
+        editor.StopPlacing();
+        editor.Select(tank, false);
+        Assert.True(editor.BeginBlockResize(true));
+        editor.SizeBlockFace(side, 1);
+        editor.EndBlockResize();
+        AwaitCheck();
+        Assert.True(editor.DumpsFuel);
+        Assert.True(editor.FuelDump[editor.Source!.Tanks[0].Kind] > 0);
+    }
+
+    [Fact]
+    public void FuelLossNeedsTwoAppliesAndEscapeOrAnEditResetsConfirmation()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        var tank = editor.Source!.Tanks[0].Block;
+        editor.StopPlacing();
+        editor.Select(tank, false);
+        editor.DeleteSelected();
+        AwaitCheck();
+        Assert.True(editor.FuelKnown);
+        Assert.True(editor.DumpsFuel);
+        Assert.False(editor.Apply(Bridge));
+        Assert.True(editor.ConfirmDump);
+        EditorFrame(() => Key(GlfwKey.Escape, true));
+        EditorFrame(() => Key(GlfwKey.Escape, false));
+        Assert.False(editor.ConfirmDump);
+        Assert.Equal(EditorStage.Editing, editor.Stage);
+        Assert.False(editor.Apply(Bridge));
+        editor.Undo();
+        Assert.False(editor.ConfirmDump);
+        AwaitCheck();
+        Assert.False(editor.DumpsFuel);
+        editor.Select(tank, false);
+        editor.DeleteSelected();
+        AwaitCheck();
+        Assert.False(editor.Apply(Bridge));
+        Assert.True(editor.Apply(Bridge));
+    }
+
+    [Fact]
     public void AnEditPlacedWithTheMouseIsAppliedByTheServerAndTheNewShipFlies()
     {
         OpenEditor();
@@ -8057,7 +8120,7 @@ public sealed class FrameOrderTests : IDisposable
 
             // The bar holds its buttons; their labels fit them.
             Assert.True(EditorLayout.ButtonsWidth(scale) + Px(EditorLayout.Pad) <= layout.Bar.Width);
-            ReadOnlySpan<string> labels = ["Undo", "Redo", "Cancel", "Applying"];
+            ReadOnlySpan<string> labels = ["Undo", "Redo", "Cancel", "Applying", "Dump & apply?"];
             for (var i = 0; i < labels.Length; i++)
             {
                 var label = Kit.Measure(shipped.SansMedium, Theme.FontSmall, Encoding.UTF8.GetBytes(labels[i])).X;

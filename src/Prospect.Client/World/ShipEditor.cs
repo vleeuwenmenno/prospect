@@ -448,8 +448,7 @@ internal sealed class ShipEditor(JobSystem jobs)
 
     /// <summary>
     /// Debug: works out the fill the selection asks for. Each selected tank block of the draft is matched to the
-    /// tank of the edited hull's own design by type, shape and cells, the way the server carries fuel into a
-    /// rebuilt hull; a tank that exists only in the draft has no match and is <see cref="FillOffer.ApplyFirst"/>.
+    /// tank of the edited hull's own design by type, shape and cells; a tank that exists only in the draft has no match and is <see cref="FillOffer.ApplyFirst"/>.
     /// The matched block indices of the hull's design go into <paramref name="blocks"/>, which holds at most
     /// <see cref="EditorRequestMessage.MaxFill"/>.
     /// </summary>
@@ -489,10 +488,29 @@ internal sealed class ShipEditor(JobSystem jobs)
         UpdateGhost();
     }
 
+    private readonly double[] _fuelLevels = new double[TankFuel.MaxTanks];
+    private int _fuelVersion;
+    private int _checkedFuelVersion = -1;
+    /// <summary>Whether the snapshot contains the edited hull's tank levels.</summary>
+    public bool FuelKnown { get; private set; }
+    /// <summary>Fuel discarded by the checked draft, in kilograms per fuel.</summary>
+    public FuelTanks FuelDump => FuelPlan.Dumped;
+    /// <summary>The current checked refit's fuel balance.</summary>
+    public EditFuelPlan FuelPlan { get; private set; }
+    /// <summary>Fuel balance if selected tanks are removed or switched to another fuel.</summary>
+    public EditFuelPlan MenuFuelPlan { get; private set; }
+    private int _checkedSelectionStamp = -1;
+    /// <summary>Whether the menu's prediction belongs to this selection and draft.</summary>
+    public bool MenuFuelReady => FuelKnown && _checkedSelectionStamp == _selectionStamp && CheckedVersion == Draft?.Version && _checkedFuelVersion == _fuelVersion;
+    /// <summary>The next Apply confirms the displayed fuel loss.</summary>
+    public bool ConfirmDump { get; private set; }
+    /// <summary>Whether the checked edit discards a measurable quantity of fuel.</summary>
+    public bool DumpsFuel => FuelKnown && (FuelDump.Nitrogen > 0f || FuelDump.Hydrazine > 0f || FuelDump.Bipropellant > 0f);
+
     /// <summary>True when the draft can be committed now.</summary>
     public bool CanApply =>
         CanEdit && Dirty && Server.Phase == EditorPhase.Open && !Server.Pending
-        && Server.Token != 0 && Check == DraftCheck.Ready && CheckedVersion == Draft!.Version;
+        && _checkedFuelVersion == _fuelVersion && Server.Token != 0 && Check == DraftCheck.Ready && CheckedVersion == Draft!.Version;
 
     /// <summary>True when the ship has lost or worn blocks, or was repaired before, so its blueprint can rebuild it.</summary>
     public bool Damaged => Source is { } source && source.NeedsRepair(_ownRevision, _ownHull, _ownDents);
@@ -529,6 +547,7 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// </summary>
     public bool DiscardChanges()
     {
+        ConfirmDump = false;
         if (!CanInspect || !Dirty || Source is null || Content is null)
             return false;
         CancelCarry();
@@ -607,7 +626,9 @@ internal sealed class ShipEditor(JobSystem jobs)
             // Escape first closes the context menu, then puts back a part or a block being sized or a part turned, then
             // drops what the pointer carries; only with
             // none of those does it end the edit.
-            if (Menu.IsOpen)
+            if (ConfirmDump)
+                ConfirmDump = false;
+            else if (Menu.IsOpen)
                 Menu.Close();
             else if (SizingPart)
                 CancelPartSizing();
@@ -628,6 +649,7 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// <summary>The player cancels: whatever stage the edit is in ends, and the draft is thrown away.</summary>
     public void Cancel(PlayerInputBridge bridge)
     {
+        ConfirmDump = false;
         if (Stage == EditorStage.Closed)
             return;
         CancelPartGestures();
@@ -649,6 +671,7 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// <summary>Forgets everything, for a new session; a check still running is discarded when it finishes.</summary>
     public void Reset()
     {
+        ConfirmDump = false;
         CancelPartGestures();
         Menu.Close();
         GhostPinned = false;
@@ -818,6 +841,21 @@ internal sealed class ShipEditor(JobSystem jobs)
         // A part is sized or turned only while the ship may be edited.
         if ((SizingPart || RotatingPart) && !CanEdit)
             CancelPartGestures();
+        var known = Source is not null && Hull == own.Id && own.Tanks.Length == Source.Tanks.Length;
+        var fuelChanged = known != FuelKnown;
+        FuelKnown = known;
+        if (known)
+            for (var i = 0; i < own.Tanks.Length; i++)
+            {
+                var level = (double)own.Tanks.Span[i];
+                fuelChanged |= _fuelLevels[i] != level;
+                _fuelLevels[i] = level;
+            }
+        if (fuelChanged)
+        {
+            _fuelVersion++;
+            ConfirmDump = false;
+        }
         PumpCheck();
     }
 
@@ -838,6 +876,11 @@ internal sealed class ShipEditor(JobSystem jobs)
     {
         if (!CanApply)
             return false;
+        if (DumpsFuel && !ConfirmDump)
+        {
+            ConfirmDump = true;
+            return false;
+        }
         if (!bridge.CommitEdit(Token, Checked.Bytes))
         {
             Refuse(EditorReason.TooLarge, 0);
@@ -1916,6 +1959,7 @@ internal sealed class ShipEditor(JobSystem jobs)
 
     private void Changed(bool gesture = false)
     {
+        ConfirmDump = false;
         // The ghost's face may have moved or gone: a part being sized or turned is put back, and a held ghost lets go.
         // The face drag of a block is made of edits and goes on through its own.
         if (!gesture)
@@ -2111,6 +2155,7 @@ internal sealed class ShipEditor(JobSystem jobs)
 
     private void Close(EditorReason reason, int wait, bool keep)
     {
+        ConfirmDump = false;
         // The server or a change of ship ended the edit, not the player: they stay where they are.
         _createdHull = 0;
         CancelPartGestures();
@@ -2166,9 +2211,16 @@ internal sealed class ShipEditor(JobSystem jobs)
         if (_jobRunning && jobs.IsComplete(_handle))
         {
             _jobRunning = false;
-            if (_job.Generation == _generation && Draft is not null && _job.Version == Draft.Version)
+            if (_job.Generation == _generation && Draft is not null && _job.Version == Draft.Version && _job.FuelVersion == _fuelVersion)
             {
                 CheckedVersion = _job.Version;
+                _checkedFuelVersion = _job.FuelVersion;
+                FuelPlan = _job.Plan;
+                if (_job.SelectionStamp == _selectionStamp)
+                {
+                    MenuFuelPlan = _job.MenuPlan;
+                    _checkedSelectionStamp = _job.SelectionStamp;
+                }
                 Latest = _job.Result;
                 if (_job.Failure is { } failure)
                 {
@@ -2192,10 +2244,15 @@ internal sealed class ShipEditor(JobSystem jobs)
         }
 
         // Only one check at a time, on a frozen copy; a newer edit waits for the running one and then starts again.
-        if (Stage == EditorStage.Editing && Draft is not null && !_jobRunning && CheckedVersion != Draft.Version && _time - _editedAt >= CheckDelay)
+        if (Stage == EditorStage.Editing && Draft is not null && !_jobRunning && (CheckedVersion != Draft.Version || _checkedFuelVersion != _fuelVersion || _checkedSelectionStamp != _selectionStamp) && _time - _editedAt >= CheckDelay)
         {
             Check = DraftCheck.Pending;
             _job.Copy = Draft.Copy();
+            _job.Source = FuelKnown ? Source : null;
+            _fuelLevels.CopyTo(_job.Levels, 0);
+            _job.FuelVersion = _fuelVersion;
+            _job.Selection = Selection.ToArray();
+            _job.SelectionStamp = _selectionStamp;
             _job.Version = Draft.Version;
             _job.Generation = _generation;
             _handle = jobs.Schedule(_job, 2);
@@ -2217,19 +2274,47 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// <summary>Checks one frozen draft as the server would. Reused: one runs at a time.</summary>
     private sealed class CheckJob : IJob
     {
+        public HullDesign? Source;
+        public readonly double[] Levels = new double[TankFuel.MaxTanks];
+        public int FuelVersion;
+        public EditFuelPlan Plan;
+        public EditFuelPlan MenuPlan;
+        public int[] Selection = [];
+        public int SelectionStamp;
         public DraftCopy? Copy;
         public int Version;
         public int Generation;
         public DraftExport Result;
         public string? Failure;
 
+        private static FuelTanks Difference(FuelTanks a, FuelTanks b) => new()
+        {
+            Nitrogen = Math.Max(0, a.Nitrogen - b.Nitrogen),
+            Hydrazine = Math.Max(0, a.Hydrazine - b.Hydrazine),
+            Bipropellant = Math.Max(0, a.Bipropellant - b.Bipropellant),
+        };
+
         public void Run()
         {
             Failure = null;
             Result = default;
+            Plan = MenuPlan = default;
             try
             {
                 Result = Copy!.Export();
+                if (Result.Ok && Source is not null)
+                {
+                    Span<double> levels = stackalloc double[TankFuel.MaxTanks];
+                    Plan = EditFuel.Plan(Source, Levels, Result.Design!, levels);
+                    var selectedFuel = 0.0;
+                    for (var tank = 0; tank < Result.Design!.Tanks.Length; tank++)
+                        if (Selection.AsSpan().Contains(Result.Design.Tanks[tank].Block)) selectedFuel += levels[tank];
+                    if (selectedFuel > 0)
+                    {
+                        var removed = EditFuel.Plan(Source, Levels, Result.Design, levels, Selection);
+                        MenuPlan = removed with { Moved = Difference(removed.Moved, Plan.Moved), Dumped = Difference(removed.Dumped, Plan.Dumped) };
+                    }
+                }
             }
             catch (Exception exception)
             {

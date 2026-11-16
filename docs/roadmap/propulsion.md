@@ -55,7 +55,7 @@
   recovery, more softly than before. Boost costs fuel more than electricity: it drains the battery over tens of seconds, not
   seconds, and burns far more fuel for its extra speed.
 - No refuelling exists yet. Only a ship's first spawn starts with full tanks.
-  - An edit keeps each tank's fuel. A new tank starts empty: it adds room, not fuel.
+  - An edit keeps overlapping fuel, then pumps spill into remaining same-fuel room. A new tank adds no fuel.
   - A repair restores blocks, not fuel. A tank it builds again is empty. There is no Refuel button.
   - A ship built new from the drone starts with empty tanks.
   - The escape drone is made new each time a pilot steps out or loses a hull. It has no tanks: it is electric, so
@@ -96,14 +96,20 @@ Built. Why: gas mining will later fill tanks to different levels. Rules live in 
 
 - A tank that is destroyed loses what it held. The other tanks keep theirs.
 - A repair builds a lost tank again, empty.
-- An edit keeps a tank's fuel when the tank is still there: a block of the same type and shape in the same cells.
-  Which way it faces does not matter.
-  - It keeps its kilograms, up to its capacity.
-  - Every other tank of the new design is new and empty. So is a tank moved or resized: it is another box.
-  - A tank taken out takes its fuel with it.
+- An edit preserves the design grid: replacement position compensates for the changed pivot.
+- `EditFuel.Transfer` pools fuel in connected groups of overlapping old and new same-fuel tanks, in tank order.
+  Shares follow overlap volume; capped shares are offered again to remaining overlapping tanks.
+  Grow keeps fuel, shrink keeps what fits, split shares it and merge sums it up to capacity.
+- Surplus, deleted, fuel-switched and moved tanks spill into any remaining same-fuel capacity, in tank order.
+  Only what cannot fit is dumped. Untouched levels only change when receiving spill.
+  Repairs leave lost tanks empty; there is no refuelling.
+- The editor worker uses that same rule on a frozen draft and copied snapshot tank levels.
+  FUEL ON APPLY lists current/after kilograms, pumped kilograms and dumped kilograms per fuel. Apply asks twice; an edit or Escape clears confirmation.
+  Non-flown hulls have unknown levels: capacities and a warning are shown, without blocking Apply.
+  Fuel/Delete menu hints show the extra pumping or loss from removing the selected tanks.
 - A first spawn and an escape drone start with every tank full. A ship built new from the drone starts with
   every tank empty.
-- Nothing refuels and nothing moves fuel between tanks.
+- Nothing refuels. Pumping between tanks happens only when a refit is applied, by the shared rule above.
 
 ### Limit
 

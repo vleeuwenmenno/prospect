@@ -879,6 +879,8 @@ internal sealed class WorldView
             // orders or jumps while it is open.
             HoveredHull = 0;
             HoveredRock = null;
+            if (_captureEditKind != 0)
+                RunEditCapture(dt, bridge);
             UpdateEditorControls(inputEnabled, pointerOverUi, dt);
         }
         else if (inputEnabled)
@@ -3572,9 +3574,9 @@ internal sealed class WorldView
     private bool _captureEditDone;
 
     /// <summary>Plays the context menu (<paramref name="resize"/> false) or a face-drag resize once the editor is open, for a capture.</summary>
-    internal void ScriptEditForCapture(bool resize) => _captureEditKind = resize ? 2 : 1;
+    internal void ScriptEditForCapture(bool resize, bool dump = false) => _captureEditKind = dump ? 3 : resize ? 2 : 1;
 
-    private void RunEditCapture(float dt)
+    private void RunEditCapture(float dt, PlayerInputBridge bridge)
     {
         if (_captureEditDone || !Editor.CanEdit || Editor.Draft is not { } draft)
             return;
@@ -3610,6 +3612,17 @@ internal sealed class WorldView
         _captureEditClock += dt;
         if (_captureEditClock < 1f)
             return;
+        if (_captureEditKind == 3)
+        {
+            if (_captureEditClock - dt < 1f)
+                Editor.DeleteSelected();
+            if (Editor.CanApply)
+            {
+                Editor.Apply(bridge);
+                _captureEditDone = true;
+            }
+            return;
+        }
         if (_captureEditKind == 1)
         {
             var at = _screen * 0.5f;
@@ -3770,8 +3783,6 @@ internal sealed class WorldView
         _editClock += dt;
         if (_captureBoxKind != 0)
             RunBoxCapture(dt);
-        if (_captureEditKind != 0)
-            RunEditCapture(dt);
         if (_captureGhost)
         {
             HoldCaptureGhost();

@@ -241,10 +241,10 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   at the selected block when there is no ghost to size (`ShipEditor.BeginBlockResize`, `ResizingBlock`, `SizeBlockFace`,
   `CancelBlockResize`): each cell is a normal `BuildDraft.Resize` that stops at the last size `CanResize` accepts, then
   `BuildDraft.JoinLatest` makes the drag one undo step; Escape is `BuildDraft.Retract` (undo, nothing to redo). The
-  gesture's own edits go through `Changed(gesture: true)`, which leaves it alone; any other edit ends it. Changed and
-  split tanks start empty on apply (`CarryFuel` matches type, shape and cells). `FrameOrderTests` and `BuildDraftTests`
+  gesture's own edits go through `Changed(gesture: true)`, which leaves it alone; any other edit ends it. Resized, split and merged tanks keep fuel through same-fuel overlap (`EditFuel.Transfer`). `FrameOrderTests` and `BuildDraftTests`
   hold it. Check with `--open edit-menu` (the pod's first tank right-clicked, Fuel flyout out) and `--open edit-resize`
-  (a block grown one cell by the gesture at 2 s); capture after 4 s.
+  (a block grown one cell by the gesture at 2 s); capture after 4 s. `--open edit-dump` deletes a full tank
+  and arms the fuel-loss confirmation; capture after 4 s.
 - **Mirror in the editor:** `ShipEditor.Mirror` (`MirrorAxes`, saved as `ClientSettings.EditorMirror`, never sent) is
   applied by `BuildDraft.AddMirrored`, `AddMountMirrored` and `DeleteMirrored`, each one undo step; the geometry (planes
   through the first core's centre, `TryMirrorFrame`; facing of thrust parts, wedge slant, mount face and U/V) is
@@ -406,11 +406,16 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   rest, and its dampeners fired on both sides forever. The dampeners take a drift under `FlightModel.RestSpeed`
   (1e-4 m/s per axis) to zero without firing; `PropulsionTests` and `PropulsionVisualTests` hold that a hull steered
   about at rest fires, burns, draws and shows nothing.
-  Nothing refuels and nothing moves fuel between tanks. `ServerHost.CreateHull` says whether tanks start full: a
+  Nothing refuels. Fuel moves between tanks only during an applied refit: keep same-fuel overlap first,
+  then pump spill into remaining same-fuel capacity in design block order. Only capacity shortage dumps fuel. `ServerHost.CreateHull` says whether tanks start full: a
   first spawn (`SpawnFleet`) and an escape drone are full; a ship built new from the drone starts empty; a hull
-  that replaces another (edit or repair, `ReplaceHull`) gives each tank what the same tank of the old hull held
-  (`CarryFuel`: same type, shape and cells), so a new, moved or resized tank and one a repair builds again are
-  empty. A save holds each tank (`WorldSnapshot.TankFuel`, load rule `BlockStateStore.TryRestoreTanks`). A new
+  that replaces another (edit or repair, `ReplaceHull`) preserves fuel first where it overlapped, then pumps spill
+  (`CarryFuel` calls shared `EditFuel.Transfer`: same-fuel cell overlap, proportional shares capped at capacity).
+  Grow keeps fuel, split shares it, merge sums it; excess, deleted, switched or nonoverlapping fuel is pumped
+  into other same-fuel tanks before any remainder is dumped.
+  A repaired lost tank stays empty. The editor worker previews per-fuel loss; Apply asks twice when loss is known.
+  FUEL ON APPLY shows before/after, moved and dumped kilograms. Fuel/Delete menu hints preview the selected
+  tanks through that same worker plan. Unknown remote-hull levels show capacities and a warning without confirmation. A save holds each tank (`WorldSnapshot.TankFuel`, load rule `BlockStateStore.TryRestoreTanks`). A new
   facing-dependent figure goes through
   `ScaledFigures` and bumps `ContentIdentity.EvaluatorVersion`; a new fuel needs a `FuelKind`, a slot in
   `FuelTanks` and `ThrustTable`, the wire, the save codec and a load rule. Size limits per type are `maxSide` in

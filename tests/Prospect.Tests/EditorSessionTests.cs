@@ -1956,16 +1956,40 @@ public sealed class EditorSessionTests
         Assert.Equal([levels[0], tanks[1].Capacity], TankHarness.Levels(rig.Hulls, back));
 
         // A tank is the same tank only in the same place: taken out and put in one cell further up, the nitrogen
-        // tank is a new one and empty, while the bipropellant tank, which was not touched, keeps its fuel. A tank
-        // made larger where it stands is another box, so it starts empty too.
+        // tank receives its fuel through the refit pump, while the bipropellant tank keeps its fuel.
         var moved = BuildDraft.FromBlueprint(rig.Server.Content.Designs[rig.Hulls.Info(back).Design], rig.Server.Content);
         var old = moved.Boxes[LastBoxOfType(moved.Boxes, "nitrogenTank")];
         Assert.Equal(DraftEdit.Done, moved.Delete(LastBoxOfType(moved.Boxes, "nitrogenTank")));
         Assert.Equal(DraftEdit.Done, moved.Add(new GridSize(0, 2, 1), new GridSize(1, 1, 1), old.Type));
         var shifted = Build(rig, moved, startup + 2);
         Assert.Equal(full, rig.Hulls.Flight(shifted).FuelCapacity);
-        Assert.Equal(new FuelTanks { Bipropellant = held.Bipropellant }, rig.Hulls.State(shifted).Fuel);
-        Assert.Equal([levels[0], 0.0], TankHarness.Levels(rig.Hulls, shifted));
+        Assert.Equal(new FuelTanks { Nitrogen = full.Nitrogen, Bipropellant = held.Bipropellant }, rig.Hulls.State(shifted).Fuel);
+        Assert.Equal([levels[0], tanks[1].Capacity], TankHarness.Levels(rig.Hulls, shifted));
+        Assert.Null(rig.Server.Fault);
+    }
+
+    [Fact]
+    public void ApplyingATankResizeKeepsItsFuel()
+    {
+        using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);
+        var pod = Rig.Index(rig.Own(0));
+        var before = TankHarness.Levels(rig.Hulls, pod);
+        var draft = BuildDraft.FromBlueprint(rig.Content.Pod, rig.Content);
+        var tank = rig.Content.Pod.Tanks[0].Block;
+        var resized = false;
+        for (var side = 0; side < 6 && !resized; side++)
+        {
+            var size = draft.Boxes[tank].Size;
+            var length = side / 2 == 0 ? size.X : side / 2 == 1 ? size.Y : size.Z;
+            if (draft.CanResize(tank, side, length + 1) == DraftEdit.Done)
+            {
+                Assert.Equal(DraftEdit.Done, draft.Resize(tank, side, length + 1));
+                resized = true;
+            }
+        }
+        Assert.True(resized);
+        var rebuilt = Build(rig, draft, rig.Content.Designs.Length + 1);
+        Assert.Equal(before, TankHarness.Levels(rig.Hulls, rebuilt));
         Assert.Null(rig.Server.Fault);
     }
 

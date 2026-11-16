@@ -991,6 +991,30 @@ internal sealed partial class ScreenHost
         Kit.Space(Theme.Space1);
         if (editor.DraftRestarted && !editor.Dirty)
             Paragraph(Theme.Info, "The ship changed since your last draft, so this draft starts again from its blueprint."u8, width);
+        Kit.Caption("FUEL ON APPLY"u8, Theme.Accent);
+        if (editor.Check == DraftCheck.Ready && editor.Checked.Design is { } fuelDesign)
+        {
+            for (var fuel = 1; fuel <= Fuels.Count; fuel++)
+            {
+                var kind = (FuelKind)fuel;
+                var before = editor.Source!.Flight.FuelCapacity[kind];
+                var after = fuelDesign.Flight.FuelCapacity[kind];
+                if (before <= 0 && after <= 0) continue;
+                Kit.Caption(ConsoleFuel.FullName(kind));
+                if (!editor.FuelKnown)
+                    Paragraph(Theme.TextDim, Kit.F($"CAPACITY {before:0.##} KG -> {after:0.##} KG"), width);
+                else
+                {
+                    Paragraph(Theme.Text, Kit.F($"{editor.FuelPlan.Before[kind]:0.##} KG -> {editor.FuelPlan.After[kind]:0.##} KG"), width);
+                    if (editor.FuelPlan.Moved[kind] > 0f)
+                        Paragraph(Theme.Accent, Kit.F($"{editor.FuelPlan.Moved[kind]:0.##} KG MOVED"), width);
+                    if (editor.FuelDump[kind] > 0f)
+                        Paragraph(Theme.Bad, Kit.F($"{editor.FuelDump[kind]:0.##} KG DUMPED"), width);
+                }
+            }
+        }
+        if (!editor.FuelKnown)
+            Paragraph(Theme.Bad, "Fuel levels unknown: tanks that change may lose fuel."u8, width);
         switch (editor.Check)
         {
             case DraftCheck.Pending:
@@ -1000,7 +1024,7 @@ internal sealed partial class ScreenHost
                 Paragraph(Theme.TextDim, "No changes yet."u8, width);
                 break;
             case DraftCheck.Ready:
-                Paragraph(Theme.Good, "Passes every check the server makes. Ready to apply; warnings above do not stop it."u8, width);
+                Paragraph(Theme.Good, editor.DumpsFuel ? "Passes every check. Confirm fuel dumping to apply."u8 : "Passes every check. Ready to apply."u8, width);
                 break;
             default:
                 Paragraph(Theme.Bad, Kit.F($"{editor.CheckProblem}"), width);
@@ -1454,7 +1478,7 @@ internal sealed partial class ScreenHost
         if (EditorButton("##cancel"u8, "Cancel"u8, new float2(Kit.Px(widths[2]), height), true))
             editor.Cancel(bridge);
         ImGui.SameLine(0, gap);
-        if (EditorButton("##apply"u8, editor.Stage == EditorStage.Applying ? "Applying"u8 : "Apply"u8, new float2(Kit.Px(widths[3]), height), editor.CanApply, true))
+        if (EditorButton("##apply"u8, editor.Stage == EditorStage.Applying ? "Applying"u8 : editor.ConfirmDump ? "Dump & apply?"u8 : "Apply"u8, new float2(Kit.Px(widths[3]), height), editor.CanApply, true))
             editor.Apply(bridge);
         EndEditorPanel();
     }
