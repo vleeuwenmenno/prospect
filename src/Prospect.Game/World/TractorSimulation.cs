@@ -9,7 +9,7 @@ public sealed class TractorSimulation
     private readonly HoldContainer[] _reserved = new HoldContainer[BlockStateStore.MaxContainers];
 
     /// <summary>Validates existing claims first, then lets free mounts acquire in hull/mount/body order.</summary>
-    public void Plan(FreeContainers containers, GameContent content, HullField field, Span<byte> occupied)
+    public void Plan(FreeContainers containers, GameContent content, HullField field, Span<byte> occupied, long tick = 0)
     {
         var hulls = field.Hulls;
         for (var h = 0; h < hulls.Slots; h++)
@@ -21,9 +21,10 @@ public sealed class TractorSimulation
             if (item.TractorHull == 0) continue;
             var handle = Handle(item.TractorHull);
             if (!hulls.IsAlive(handle) || !Eligible(hulls, handle.Index)
+                || !item.MayPickup(hulls.Info(handle.Index).Owner, tick)
                 || !Valid(containers, content, field, handle.Index, item.TractorMount, ref item, occupied)) Release(ref item);
         }
-        Acquire(containers, content, field, occupied);
+        Acquire(containers, content, field, occupied, tick);
         foreach (var item in containers.Items)
             if (item.TractorHull != 0)
             {
@@ -33,7 +34,7 @@ public sealed class TractorSimulation
             }
     }
 
-    private void Acquire(FreeContainers containers, GameContent content, HullField field, Span<byte> occupied)
+    private void Acquire(FreeContainers containers, GameContent content, HullField field, Span<byte> occupied, long tick = 0)
     {
         var hulls = field.Hulls;
         if (containers.Items.IsEmpty || hulls.Slots == 0) return;
@@ -61,7 +62,7 @@ public sealed class TractorSimulation
                 {
                     budget--;
                     ref var item = ref containers.At(c);
-                    if (item.TractorHull != 0 || item.Position.RelativeTo(emitter).LengthSquared() > (spec.Range + design.BlockSize) * (spec.Range + design.BlockSize)) continue;
+                    if (!item.MayPickup(hulls.Info(h).Owner, tick) || item.TractorHull != 0 || item.Position.RelativeTo(emitter).LengthSquared() > (spec.Range + design.BlockSize) * (spec.Range + design.BlockSize)) continue;
                     if (!Valid(containers, content, field, h, m, ref item, occupied)) continue;
                     item.TractorHull = id; item.TractorMount = m; item.TractorStage = 0;
                     break;
@@ -75,6 +76,7 @@ public sealed class TractorSimulation
         ref FreeContainer item, Span<byte> occupied)
     {
         var hulls = field.Hulls; var info = hulls.Info(h); var design = field.Designs[info.Design];
+        if (item.ClaimOwner != 0 && item.ClaimOwner != info.Owner) return false;
         if ((uint)mount >= (uint)design.Mounts.Length || design.Mounts[mount].Type.Tractor is not { } spec
             || Mass(content.Cargo, item) > spec.MaxMass) return false;
         var local = Local(design, hulls.State(h), item.Position);

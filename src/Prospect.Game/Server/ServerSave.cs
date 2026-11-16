@@ -325,6 +325,8 @@ public sealed partial class ServerHost
         for (var i = 0; i < world.FreeContainerCount; i++)
         {
             var c = world.FreeContainers[i];
+            if (c.ClaimOwner != 0 && OwnerSlot(c.ClaimOwner) < 0)
+                throw new InvalidDataException("Unknown container claim owner.");
             if (!WorldSnapshotCodec.ValidFreeContainer(c, world.CargoRules, world.NextWorldTick, world.NextContainerId))
                 throw new InvalidDataException("Invalid saved free container.");
             for (var j = 0; j < i; j++)

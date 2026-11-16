@@ -14,6 +14,8 @@ public sealed class CargoCatalog
     public float SpaceShellKg { get; private set; }
     public float SpaceRestitution { get; private set; }
     public float JettisonSpeed { get; private set; }
+    /// <summary>Delay before any tractor may acquire a released container.</summary>
+    public float PickupDelaySeconds { get; private set; }
     public float EjectionSpeed { get; private set; }
     private readonly ContainerSize[] _sizes;
     private readonly Dictionary<string, double> _densities;
@@ -65,6 +67,7 @@ public sealed class CargoCatalog
         var space = root.GetProperty("space"u8);
         var result = new CargoCatalog(unit, sizes, densities)
         {
+            PickupDelaySeconds = root.GetProperty("pickupDelaySeconds"u8).GetSingle(),
             SpacePerSector = space.GetProperty("perSector"u8).GetInt32(),
             SpaceContactBudget = space.GetProperty("contactBudget"u8).GetInt32(),
             SpaceShellKg = space.GetProperty("shellKgPerUnit"u8).GetSingle(),
@@ -72,7 +75,8 @@ public sealed class CargoCatalog
             JettisonSpeed = space.GetProperty("jettisonSpeed"u8).GetSingle(),
             EjectionSpeed = space.GetProperty("ejectionSpeed"u8).GetSingle()
         };
-        if (result.SpacePerSector is < 1 or > FreeContainers.Capacity || result.SpaceContactBudget is < 1 or > 1024
+        if (!float.IsFinite(result.PickupDelaySeconds) || result.PickupDelaySeconds < 0 || result.PickupDelaySeconds > 3600
+            || result.SpacePerSector is < 1 or > FreeContainers.Capacity || result.SpaceContactBudget is < 1 or > 1024
             || !float.IsFinite(result.SpaceShellKg) || result.SpaceShellKg <= 0 || result.SpaceShellKg > 1000
             || !float.IsFinite(result.SpaceRestitution) || result.SpaceRestitution < 0 || result.SpaceRestitution > 1
             || !float.IsFinite(result.JettisonSpeed) || result.JettisonSpeed <= 0 || result.JettisonSpeed > 100

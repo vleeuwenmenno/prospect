@@ -140,7 +140,7 @@ public sealed class PlayerInputBridge
         }
     }
     /// <summary>Queues a selected hold slot together with the authoritative hold tick the player saw.</summary>
-    public void JettisonContainer(uint token, uint hull, int rack, int index, long tick)
+    public void JettisonContainer(uint token, uint hull, int rack, int index, long tick, JettisonMode mode = JettisonMode.Abandon)
     {
         lock (_lock)
         {
@@ -151,11 +151,38 @@ public sealed class PlayerInputBridge
                 Hull = hull,
                 CargoRack = rack,
                 CargoIndex = index,
-                CargoTick = tick
+                CargoTick = tick,
+                JettisonMode = mode
             };
             _hasCargoAdd = true;
         }
     }
+    private bool _hasJettisonCargo;
+    private JettisonCargoMessage _jettisonCargo;
+
+    /// <summary>Queues a flight release using the controlled hull and the observed hold tick; no editor is needed.</summary>
+    public void JettisonCargo(uint hull, int rack, int index, long tick, JettisonMode mode)
+    {
+        if (hull == 0 || rack < 0 || (uint)index >= BlockStateStore.MaxContainers || tick < 0
+            || mode is not (JettisonMode.Abandon or JettisonMode.KeepClaim)) return;
+        lock (_lock)
+        {
+            _jettisonCargo = new(hull, rack, index, tick, mode);
+            _hasJettisonCargo = true;
+        }
+    }
+
+    internal bool ConsumeJettisonCargo(out JettisonCargoMessage request)
+    {
+        lock (_lock)
+        {
+            request = _jettisonCargo;
+            var pending = _hasJettisonCargo;
+            _hasJettisonCargo = false;
+            return pending;
+        }
+    }
+
     internal EditorRequestMessage TakeCargoAdd() => _takenCargoAdd;
 
     private FillBlocks _fillBlocks;

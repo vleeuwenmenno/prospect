@@ -853,7 +853,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         for (var i = 0; i < participantCount; i++)
             _participants[i] = _hulls.IsAliveAt(i) ? _hulls.HandleAt(i) : default;
         _field.BeginRound();
-        _tractors.Plan(_containers, _content, _field, CargoScratch);
+        _tractors.Plan(_containers, _content, _field, CargoScratch, _tick);
         for (var i = 0; i < participantCount; i++)
         {
             var handle = _participants[i];
@@ -1185,6 +1185,10 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 break;
             case MessageId.FleetOrders when channel == NetChannel.Reliable:
                 ReceiveFleetOrders(connection, ref reader);
+                break;
+            case MessageId.JettisonCargo when channel == NetChannel.Reliable:
+                if (JettisonCargoMessage.TryRead(ref reader, out var cargo))
+                    ReleaseCargo(connection, cargo.Hull, cargo.Rack, cargo.Index, cargo.Tick, cargo.Mode);
                 break;
             case MessageId.Editor when channel == NetChannel.Reliable:
                 ReceiveEditor(connection, ref reader);

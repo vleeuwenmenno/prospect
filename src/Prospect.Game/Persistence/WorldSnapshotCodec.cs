@@ -26,7 +26,7 @@ namespace Prospect.Game.Persistence;
 public static partial class WorldSnapshotCodec
 {
     /// <summary>The layout's version. A save with any other is refused; there are no migrations yet.</summary>
-    public const int Version = 14;
+    public const int Version = 15;
     internal const int ChartBytes = 4 + 12 + 8;
 
     /// <summary>"PWS1": tells a save from any other bytes before its version is believed.</summary>
@@ -595,6 +595,12 @@ public static partial class WorldSnapshotCodec
             { error = "invalid saved free container"; return false; }
             for (var j = 0; j < i; j++)
                 if (result.FreeContainers[j].Id == c.Id) { error = "duplicate free container identity"; return false; }
+            if (c.ClaimOwner != 0)
+            {
+                var known = false;
+                for (var o = 0; o < owners; o++) if (result.Owners[o].Id == c.ClaimOwner) { known = true; break; }
+                if (!known) { error = "unknown container claim owner"; return false; }
+            }
             result.FreeContainers[i] = c;
         }
 

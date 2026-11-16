@@ -80,6 +80,17 @@ public sealed class CargoTests
         Assert.Throws<InvalidDataException>(() => CargoCatalog.Parse(Encoding.UTF8.GetBytes(json.ToJsonString())));
     }
 
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(3601)]
+    public void InvalidPickupDelayIsRefused(float delay)
+    {
+        using var copy = new ContentCopy();
+        var json = JsonNode.Parse(copy.Read("blocks/cargo.json"))!;
+        json["pickupDelaySeconds"] = delay;
+        Assert.Throws<InvalidDataException>(() => CargoCatalog.Parse(Encoding.UTF8.GetBytes(json.ToJsonString())));
+    }
+
     [Fact]
     public void RetuningTheUnitAndCapacityTogetherKeepsTheGridAndFiguresConsistent()
     {

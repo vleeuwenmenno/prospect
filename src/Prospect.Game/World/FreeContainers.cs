@@ -18,6 +18,12 @@ public struct FreeContainer
     public double Amount;
     public float Hull;
     public long Born, Age;
+    /// <summary>First authoritative tick on which tractors may acquire this body.</summary>
+    public long PickupReadyTick;
+    /// <summary>Durable hull owner identity; zero means anyone may pick it up.</summary>
+    public uint ClaimOwner;
+    /// <summary>Shared pickup gate for simulation and client previews.</summary>
+    public readonly bool MayPickup(uint owner, long tick) => tick >= PickupReadyTick && (ClaimOwner == 0 || ClaimOwner == owner);
 }
 
 /// <summary>Fixed storage for loose cargo. Stable ids are never reused within a world.</summary>
@@ -92,7 +98,8 @@ public sealed class FreeContainers
 
     /// <summary>Checks physical state and payload before admission, decoding or restoration.</summary>
     public static bool Valid(GameContent content, in FreeContainer item) =>
-        double.IsFinite(item.Position.X) && double.IsFinite(item.Position.Y) && double.IsFinite(item.Position.Z)
+        item.PickupReadyTick >= 0 && item.PickupReadyTick <= long.MaxValue / 2
+        && double.IsFinite(item.Position.X) && double.IsFinite(item.Position.Y) && double.IsFinite(item.Position.Z)
         && Finite(item.Velocity) && Finite(item.AngularVelocity)
         && float.IsFinite(item.Orientation.LengthSquared()) && Math.Abs(item.Orientation.LengthSquared() - 1) < .001f
         && BlockStateStore.CargoPayloadValid(content, new(0, item.Size, item.Resource, item.Amount, item.Hull, default));
