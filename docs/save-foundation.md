@@ -29,7 +29,7 @@ Saved multiplayer and moving a world between machines stay undelivered until ver
 | Type | What it is |
 | --- | --- |
 | `WorldSnapshot` | The bounded state of a world between two intervals. A buffer, never live memory. |
-| `WorldSnapshotCodec` | The save's own byte layout, `Version` 10. Reading trusts nothing. |
+| `WorldSnapshotCodec` | The save's own byte layout, `Version` 12. Reading trusts nothing. |
 | `SaveLimits` | Aggregate bounds of a world and of a save: owners, hulls, blocks, asteroids, sectors. |
 | `IWorldStore` | A leased store: `Commit`, `Backup`, `Dispose`. One worker thread uses it. |
 | `SqliteWorldStore` | The store on disk: one SQLite database per world folder. |
@@ -474,9 +474,16 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
 - Wreck growth calls `HasRoom`; excess debris is discarded only after evicting existing wrecks to try to make room.
 - Live cleanup settings overwrite their existing setting values during capture. Codec 8 saves are refused untouched.
 
-## Cargo hold (codec 10)
+## Cargo hold (codec 12)
 
 - Each hull saves a bounded range of container records: rack, size, resource, kilograms, health and placement.
 - Storage reserves at most 255 records per allowed hull; save size and decoded-memory bounds include them.
 - Capture copies the hold without allocating. Restoration validates old bounds and overlaps before any retune.
 - Dropped containers are absent from the next save. Other simulation-content changes remain incompatible.
+### Moving FTL transit (codec 11)
+
+- The saved position is the position reached along the route, not the destination.
+- Existing saved order, transit duration and elapsed time resume through shared `HullSim` from that position.
+- Load requires a jump order, positive duration and elapsed time within that duration for a hull in transit.
+- Earlier codecs are refused explicitly; an old teleported transit is never silently treated as a moving one.
+- World settings retain `ftlSpeedKmPerSecond`; no per-tick disk work or new snapshot array is needed.

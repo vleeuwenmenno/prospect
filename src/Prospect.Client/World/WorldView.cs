@@ -835,7 +835,7 @@ internal sealed class WorldView
         Own = own;
 
         // A jump moves the hull further in one tick than it could fly; there is nothing in between to show.
-        var jumped = own.Position.RelativeTo(own.PreviousPosition).LengthSquared() > JumpGap * JumpGap;
+        var jumped = own.Jump != JumpPhase.Tunnel && own.Position.RelativeTo(own.PreviousPosition).LengthSquared() > JumpGap * JumpGap;
         OwnPosition = jumped ? own.Position : Double3.Lerp(own.PreviousPosition, own.Position, alpha);
         OwnOrientation = Quaternion.Slerp(own.PreviousOrientation, own.Orientation, alpha);
 
@@ -1968,7 +1968,7 @@ internal sealed class WorldView
             ref readonly var visual = ref visuals[i];
             // Only what is drawn can be picked: not a hull between a jump's openings, nor the part past an opening,
             // and a hull drawn out by hyperspace is picked drawn out.
-            if ((pilot && hull.IsOwn) || (!pilot && hull.Owner != snapshot.PlayerId) || !visual.Visible || !BlockSet.Any(visual.PickBlocks.Span))
+            if ((pilot && hull.IsOwn) || (!pilot && hull.Owner != snapshot.PlayerId) || hull.Jump == JumpPhase.Tunnel || !visual.Visible || !BlockSet.Any(visual.PickBlocks.Span))
                 continue;
 
             // What is not drawn for want of a mesh is not picked either.
@@ -2082,7 +2082,7 @@ internal sealed class WorldView
         var hovered = count == 0 ? default : _pickHits[0];
         HoveredHull = hovered.Hull;
         HoveredRock = hovered.Rock;
-        if (TargetHull != 0 && !TryGetHull(TargetHull, out _)) TargetHull = 0;
+        if (TargetHull != 0 && (!TryGetHull(TargetHull, out var targeted) || targeted.Jump == JumpPhase.Tunnel)) TargetHull = 0;
         if (TargetRock is { } held && !TryGetRock(held, out _, out _)) TargetRock = null;
         // Pilot input moves the view while the reticle stays fixed in the middle of the window.
         _pilotPointer += new Vector2(_devices.MouseDelta.X, _devices.MouseDelta.Y);
@@ -2129,6 +2129,13 @@ internal sealed class WorldView
     private void AddHyperspaceMarks(in HullView hull, in HullVisuals.HullVisual visual, in FlightParams flight, Double3 camera, Span<FtlMark> marks, ref int markCount)
     {
         var kind = hull.IsOwn && FtlPreview != FtlKind.None ? FtlPreview : flight.Ftl;
+        if (hull.Jump == JumpPhase.Tunnel)
+        {
+            var axis = Vector3.Transform(-Vector3.UnitZ, hull.Orientation);
+            AddMark(marks, ref markCount, visual.Anchor.RelativeTo(camera), flight.Radius * 4f,
+                FtlKind.Hyperspace, 3f, 0.3f, (hull.Id & 0xFF) / 255f, axis, 40f);
+            return;
+        }
         if (hull.Jump == JumpPhase.None || kind != FtlKind.Hyperspace)
             return;
         var forward = Vector3.Transform(-Vector3.UnitZ, visual.Orientation);
@@ -2523,7 +2530,7 @@ internal sealed class WorldView
                 _jumpExitPlaced = true;
                 _jumpEntryRadius = 0f;
                 _jumpEntryOpen = 0f;
-                _jumpExit = own.Position + _jumpAxis * (-span * (1f - cross) * (1f - cross) - _jumpChase);
+                _jumpExit = (own.Jump == JumpPhase.Tunnel ? own.Order.Target : own.Position) + _jumpAxis * (-span * (1f - cross) * (1f - cross) - _jumpChase);
             }
 
             _jumpExitOpen = stage == 2f ? Smooth((since - 0.3f) / 1.6f) * 0.95f + 0.05f : 1f - Smooth(progress);
@@ -4938,6 +4945,7 @@ internal sealed class WorldView
     /// <summary>Keeps the block of sectors around the camera generated, on worker threads.</summary>
     private void UpdateStream()
     {
+        if (Own.Jump == JumpPhase.Tunnel) return;
         var galaxy = _galaxy!;
         var center = galaxy.SectorOf(CameraPosition);
         if (center != _streamCenter)

@@ -304,6 +304,34 @@ internal sealed partial class ScreenHost
             }
 
         var changed = _newGame.Get(definition) != definition.Default || (definition.Upper is { } paired && _newGame.Get(paired) != paired.Default);
+        if (DrawSettingFooter(definition, top, changed))
+        {
+            _newGame.Set(definition, definition.Default);
+            if (definition.Upper is { } resetUpper) _newGame.Set(resetUpper, resetUpper.Default);
+        }
+
+        ImGui.PopID();
+    }
+
+    private void DrawWreckSettingEditor(SettingDefinition definition, ref float value, GameSession session)
+    {
+        ImGui.PushID(definition.Id);
+        var top = ImGui.GetCursorScreenPos();
+        var edited = Kit.Slider(definition.Name, ref value, definition.Minimum, definition.Maximum, definition.Step, Kit.F($"{value:0}"), WorldRowWidth);
+        if (DrawSettingFooter(definition, top, value != definition.Default))
+        {
+            value = definition.Default;
+            edited = true;
+        }
+
+        ImGui.PopID();
+        if (edited)
+            session.Client.Input.RequestWreckSettings(new((int)MathF.Round(_wreckMinutes), (int)MathF.Round(_wreckLimit)));
+    }
+
+    private bool DrawSettingFooter(SettingDefinition definition, float2 top, bool changed)
+    {
+        var reset = false;
         Kit.Space(Theme.Space1);
         ImGui.Indent(Kit.Px(Theme.Space3));
         var textTop = ImGui.GetCursorScreenPos();
@@ -312,11 +340,7 @@ internal sealed partial class ScreenHost
         if (changed)
         {
             ImGui.SetCursorScreenPos(new float2(top.X + Kit.Px(WorldRowWidth - 66), textTop.Y));
-            if (Kit.LinkButton("RESET"u8))
-            {
-                _newGame.Set(definition, definition.Default);
-                if (definition.Upper is { } resetUpper) _newGame.Set(resetUpper, resetUpper.Default);
-            }
+            reset = Kit.LinkButton("RESET"u8);
             bottom = Math.Max(bottom, ImGui.GetCursorScreenPos().Y);
             ImGui.SetCursorScreenPos(new float2(textTop.X, bottom));
         }
@@ -325,7 +349,7 @@ internal sealed partial class ScreenHost
         if (changed)
             ChangedMarker(top, bottom);
         Kit.Space(Theme.Space4);
-        ImGui.PopID();
+        return reset;
     }
 
     /// <summary>The accent bar beside a setting whose value is not its default.</summary>
@@ -391,17 +415,7 @@ internal sealed partial class ScreenHost
         var listHeight = Math.Max(Kit.Px(80), ImGui.GetContentRegionAvail().Y - footer);
         ImGui.BeginChild("##worldsettingslist"u8, new float2(0, listHeight), ImGuiChildFlags.NavFlattened, ImGuiWindowFlags.NoBackground);
         ImGui.Indent(Kit.Px(MarkerGutter));
-        if (_app.Session is { IsLocal: true } session)
-        {
-            Kit.Slider("Wreck lifetime (minutes)"u8, ref _wreckMinutes, 0, 1440, 1, Kit.F($"{_wreckMinutes:0}"), WorldRowWidth);
-            Kit.Slider("Wrecks per sector"u8, ref _wreckLimit, 1, 255, 1, Kit.F($"{_wreckLimit:0}"), WorldRowWidth);
-            if (Kit.Button("Apply wreck settings"u8, ButtonKind.Secondary, 220))
-                session.Client.Input.RequestWreckSettings(new((int)_wreckMinutes, (int)_wreckLimit));
-        }
-        Kit.Body(Kit.F($"Wreck cleanup in force: {snapshot.WreckSettings.Minutes} minutes, {snapshot.WreckSettings.PerSector} per sector"));
-        Kit.Body("0 minutes keeps wrecks indefinitely."u8);
-        Kit.Space(Theme.Space4);
-        DrawSettingGroups(content.SettingCatalog, true);
+        DrawSettingGroups(content.SettingCatalog, true, snapshot.WreckSettings);
 
         ImGui.Unindent(Kit.Px(MarkerGutter));
         ImGui.EndChild();
@@ -413,43 +427,77 @@ internal sealed partial class ScreenHost
         EndPanel();
         EndRoot();
     }
-    private void DrawSettingGroups(WorldSettingCatalog catalog, bool readOnly)
+    private void DrawSettingGroups(WorldSettingCatalog catalog, bool readOnly, WreckSettingsMessage? wreckSettings = null)
     {
-        DrawSettingGroup(catalog, "", "", readOnly);
-        if (ImGui.CollapsingHeader("Asteroids"u8, ImGuiTreeNodeFlags.DefaultOpen)) DrawSettingGroup(catalog, "Asteroids", "", readOnly);
+        DrawSettingGroup(catalog, "", "", readOnly, wreckSettings);
+        if (ImGui.CollapsingHeader("Asteroids"u8, ImGuiTreeNodeFlags.DefaultOpen)) DrawSettingGroup(catalog, "Asteroids", "", readOnly, wreckSettings);
         if (ImGui.CollapsingHeader("Resources / Materials"u8, ImGuiTreeNodeFlags.DefaultOpen))
         {
-            DrawSettingGroup(catalog, "Resources", "", readOnly);
+            DrawSettingGroup(catalog, "Resources", "", readOnly, wreckSettings);
             foreach (var resource in _app.Content.Galaxy.Resources)
             {
                 ImGui.PushID(resource.Id);
-                if (ImGui.CollapsingHeader(resource.Name)) DrawSettingGroup(catalog, "Resources", resource.Id, readOnly);
+                if (ImGui.CollapsingHeader(resource.Name)) DrawSettingGroup(catalog, "Resources", resource.Id, readOnly, wreckSettings);
                 ImGui.PopID();
             }
         }
     }
 
-    private void DrawSettingGroup(WorldSettingCatalog catalog, string group, string material, bool readOnly)
+    private void DrawSettingGroup(WorldSettingCatalog catalog, string group, string material, bool readOnly, WreckSettingsMessage? wreckSettings)
     {
+        if (readOnly && group.Length == 0 && material.Length == 0)
+        {
+            DrawWorldSettingRow(catalog.Definitions[_wreckMinutesIndex], true, wreckSettings);
+            DrawWorldSettingRow(catalog.Definitions[_wreckLimitIndex], true, wreckSettings);
+        }
+
         foreach (var definition in catalog.Definitions)
         {
             if (definition.IsUpper || definition.Group != group || definition.Material != material) continue;
-            if (readOnly && (definition.Index == _wreckMinutesIndex
-                || definition.Index == _wreckLimitIndex)) continue;
-            if (readOnly) DrawInForceSetting(definition);
-            else DrawSettingEditor(definition);
+            if (readOnly && (definition.Index == _wreckMinutesIndex || definition.Index == _wreckLimitIndex)) continue;
+            DrawWorldSettingRow(definition, readOnly, wreckSettings);
         }
     }
 
-    private void DrawInForceSetting(SettingDefinition definition)
+    private void DrawWorldSettingRow(SettingDefinition definition, bool readOnly, WreckSettingsMessage? wreckSettings)
+    {
+        if (!readOnly)
+        {
+            DrawSettingEditor(definition);
+            return;
+        }
+
+        if (definition.Index == _wreckMinutesIndex && _app.Session is { IsLocal: true } localForMinutes)
+            DrawWreckSettingEditor(definition, ref _wreckMinutes, localForMinutes);
+        else if (definition.Index == _wreckLimitIndex && _app.Session is { IsLocal: true } localForLimit)
+            DrawWreckSettingEditor(definition, ref _wreckLimit, localForLimit);
+        else
+            DrawInForceSetting(definition, wreckSettings);
+    }
+
+    private void DrawInForceSetting(SettingDefinition definition, WreckSettingsMessage? wreckSettings)
     {
         var draw = ImGui.GetWindowDrawList();
         var top = ImGui.GetCursorScreenPos();
         Kit.Label(_ui.Sans, Theme.FontBody, Theme.Text, definition.Name);
-        Kit.Label(_ui.Mono, Theme.FontSmall, Theme.Text, _inForceValue[definition.Index]);
-        var standard = _inForceDefault[definition.Index];
-        if (standard.Length > 0)
-            Kit.Label(_ui.Mono, Theme.FontCaption, Theme.Accent, standard);
+        bool changed;
+        if (wreckSettings is { } ws && (definition.Index == _wreckMinutesIndex || definition.Index == _wreckLimitIndex))
+        {
+            var live = definition.Index == _wreckMinutesIndex ? ws.Minutes : ws.PerSector;
+            Kit.Label(_ui.Mono, Theme.FontSmall, Theme.Text, Kit.F($"{live:0}"));
+            changed = live != (int)definition.Default;
+            if (changed)
+                Kit.Label(_ui.Mono, Theme.FontCaption, Theme.Accent, Kit.F($"default {definition.Default:0}"));
+        }
+        else
+        {
+            Kit.Label(_ui.Mono, Theme.FontSmall, Theme.Text, _inForceValue[definition.Index]);
+            var standard = _inForceDefault[definition.Index];
+            changed = standard.Length > 0;
+            if (changed)
+                Kit.Label(_ui.Mono, Theme.FontCaption, Theme.Accent, standard);
+        }
+
         var line = ImGui.GetCursorScreenPos();
         draw.AddLine(line, line + new float2(Kit.Px(WorldRowWidth), 0), Kit.Color(Theme.Line, 0.6f));
         Kit.Space(Theme.Space1);
@@ -457,7 +505,7 @@ internal sealed partial class ScreenHost
         Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, definition.Description, WorldRowWidth - 150);
         ImGui.Unindent(Kit.Px(Theme.Space3));
         var bottom = ImGui.GetCursorScreenPos().Y;
-        if (standard.Length > 0)
+        if (changed)
             ChangedMarker(top, bottom);
         Kit.Space(Theme.Space4);
     }

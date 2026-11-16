@@ -729,11 +729,9 @@ public sealed class JumpCameraTests : IDisposable
     }
 
     [Fact]
-    public void TakingControlOfAnotherHullInTransitDrawsItsOwnPassage()
+    public void TakingControlInTransitCannotDiscardTheCurrentDestination()
     {
-        // The pilot's hull and the fleet jump together; while both are in transit the pilot takes control of a fleet
-        // hull. Its passage is its own from that frame on: the same as a view that only ever saw it, its exit placed
-        // for it and not left where the first hull's was.
+        // A transit cannot be targeted or abandoned by switching control.
         _world.FtlPreview = FtlKind.Rift;
         var target = _client.AcquireSnapshot().Galaxy!.CenterOf(new SectorCoord(12, 0, -7));
         _world.SelectAllOwned();
@@ -756,34 +754,11 @@ public sealed class JumpCameraTests : IDisposable
         while (snapshot.Hulls[snapshot.OwnHull].Jump != JumpPhase.Tunnel || snapshot.Hulls[snapshot.OwnHull].JumpTimer < 1f);
 
         Assert.NotEqual(0u, other);
-        var before = _world.OwnOpening.Centre;
+        var original = _world.Own.Id;
         _client.Input.RequestControl(other);
-        do
-            snapshot = Frame(false);
-        while (_world.Own.Id != other);
-        // Both hulls were in transit: the one taken over is still in its own.
+        for (var i = 0; i < 30; i++) snapshot = Frame(false);
+        Assert.Equal(original, _world.Own.Id);
         Assert.Equal(JumpPhase.Tunnel, _world.Own.Jump);
-
-        var fresh = new WorldView(new InputDevices(), _actions, new ClientSettings(), _jobs, null!, snapshot.Content.Designs) { FtlPreview = FtlKind.Rift };
-        fresh.Update(snapshot, _client.Input, Dt, false, Screen, Screen, false);
-        var compared = 0;
-        for (var frame = 0; frame < TickLoop.SimulationHz * 60; frame++)
-        {
-            Assert.True(_world.OwnOpening.Centre.RelativeTo(fresh.OwnOpening.Centre).Length() < 0.05f,
-                $"{_world.Own.Jump}: exit {_world.OwnOpening.Centre.RelativeTo(fresh.OwnOpening.Centre).Length()} m from a fresh view's");
-            Assert.True(MathF.Abs(_world.OwnOpening.Radius - fresh.OwnOpening.Radius) < 0.01f,
-                $"{_world.Own.Jump}: opening radius {_world.OwnOpening.Radius} m, fresh view {fresh.OwnOpening.Radius} m");
-            Assert.True(_world.OwnDrawnPosition.RelativeTo(fresh.OwnDrawnPosition).Length() < 0.05f);
-            Assert.True(MathF.Abs(_world.JumpThrough - fresh.JumpThrough) < 0.01f);
-            compared++;
-            snapshot = Frame(false);
-            if (snapshot.Hulls[snapshot.OwnHull].Jump == JumpPhase.None)
-                break;
-            fresh.Update(snapshot, _client.Input, Dt, false, Screen, Screen, false);
-        }
-
-        Assert.True(compared > TickLoop.SimulationHz, $"compared {compared} frames");
-        // The first hull's exit, kept where it was relative to the new hull, would have been somewhere else.
-        Assert.True(before.RelativeTo(fresh.OwnOpening.Centre).Length() > 1f, "the first hull's exit was where the new one's is");
+        Assert.Equal(target, _world.Own.Order.Target);
     }
 }

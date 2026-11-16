@@ -382,7 +382,7 @@ public sealed class HullVisualsTests
         }
 
         Assert.True(flashes > 10, $"the light at the start showed for {flashes} frames");
-        Assert.True(arrivedSeen, "the hull is not streaking in before the transit is over");
+        Assert.False(arrivedSeen, "a transit marker must never be a solid hull");
 
         // It streaks in from behind and settles where the simulation has it.
         Update(visuals, [Hull(1, design, JumpPhase.Arrive, 0f)]);
@@ -497,6 +497,7 @@ public sealed class HullVisualsTests
                     continue;
                 devices.PlacePointer(at);
                 Step(false);
+                if (seen.Jump == JumpPhase.Arrive && seen.JumpTimer == 0) continue; // The last transit interval is still interpolating.
                 if (visual.Visible && pickable == whole)
                 {
                     Assert.True(seen.Id == world.HoveredHull, $"{seen.Jump} {WorldView.JumpProgress(seen, Content.Designs[seen.Design].Flight)}: hovered {world.HoveredHull}");

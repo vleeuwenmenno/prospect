@@ -70,7 +70,7 @@ public sealed class JumpCalculationSessionTests
             if (own.Jump == JumpPhase.Tunnel)
             {
                 Assert.True(i > 1000);
-                Assert.True(own.Position.RelativeTo(replacement).Length() < 1);
+                Assert.True(own.Position.RelativeTo(replacement).Length() > 900000);
                 arrived = true;
                 break;
             }
@@ -78,7 +78,7 @@ public sealed class JumpCalculationSessionTests
         Assert.True(arrived);
         Assert.Equal(1, resets);
         var duration = Own().JumpTunnelSeconds;
-        Assert.InRange(duration, 28.02f, 28.03f);
+        Assert.InRange(duration, 25.02f, 25.03f);
         for (var i = 0; i < (int)((duration - 0.25f) / HullSim.Dt); i++)
         {
             Step();
@@ -160,7 +160,7 @@ public sealed class JumpCalculationSessionTests
         Assert.Equal(12f, Own().JumpCalculation);
         Step(12);
         Assert.Equal(JumpPhase.Tunnel, Own().Jump);
-        Assert.True(Own().Position.RelativeTo(target).Length() < 1);
+        Assert.True(Own().Position.RelativeTo(target).Length() > 900000);
     }
 
     [Fact]
@@ -235,10 +235,10 @@ public sealed class JumpCalculationSessionTests
         Assert.Equal(JumpPhase.Tunnel, Own().Jump);
         Assert.Equal(12, Own().JumpCalculation);
         Assert.Equal(12, Seen(observer, own.Id).JumpCalculation);
-        Assert.InRange(Own().JumpTunnelSeconds, 28.02f, 28.03f);
+        Assert.InRange(Own().JumpTunnelSeconds, 25.02f, 25.03f);
         Assert.Equal(Own().JumpTunnelSeconds, Seen(observer, own.Id).JumpTunnelSeconds);
-        Assert.Equal(28, Seen(client, fleet.Id).JumpTunnelSeconds);
-        Assert.Equal(28, Seen(observer, fleet.Id).JumpTunnelSeconds);
+        Assert.Equal(25, Seen(client, fleet.Id).JumpTunnelSeconds);
+        Assert.Equal(25, Seen(observer, fleet.Id).JumpTunnelSeconds);
         using var late = new ClientSession(lateLink.Client, content, "Late");
         for (var i = 0; i < 30; i++)
         {
@@ -247,8 +247,13 @@ public sealed class JumpCalculationSessionTests
         }
         Assert.Equal(JumpPhase.Tunnel, Seen(late, own.Id).Jump);
         Assert.Equal(Own().JumpTunnelSeconds, Seen(late, own.Id).JumpTunnelSeconds);
-        Assert.Equal(28, Seen(late, fleet.Id).JumpTunnelSeconds);
+        Assert.Equal(25, Seen(late, fleet.Id).JumpTunnelSeconds);
 
-        Assert.True(Own().Position.RelativeTo(replacement.Target).Length() < 1);
+        var before = Seen(observer, own.Id).Position;
+        Step(30);
+        var after = Seen(observer, own.Id);
+        Assert.InRange((after.Position - before).Length, 19000, 21000);
+        Assert.Equal(replacement.Target, after.Order.Target);
+        Assert.True(Own().Position.RelativeTo(replacement.Target).Length() > 800000);
     }
 }

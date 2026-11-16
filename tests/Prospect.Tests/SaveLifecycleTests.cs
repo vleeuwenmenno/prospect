@@ -355,7 +355,7 @@ public sealed class SaveLifecycleTests
         ref var info = ref hulls.Info(slot);
         var flight = hulls.Flight(slot);
         Assert.NotEqual(FtlKind.None, flight.Ftl);
-        var target = state.Position + new Vector3(6000 + 1500 * slot, 0, 0);
+        var target = state.Position + new Vector3(120000 + 1500 * slot, 0, 0);
         info.Order = new HullOrder { Kind = phase == JumpPhase.Arrive ? OrderKind.None : OrderKind.Jump, Target = target };
         state.Jump = phase;
         state.JumpTunnelSeconds = HullSim.JumpTravelSeconds(state.Position, target, flight);
@@ -367,7 +367,7 @@ public sealed class SaveLifecycleTests
                 state.Energy *= 0.5f;
                 break;
             case JumpPhase.Tunnel:
-                state.Position = target;
+                state.Position += new Double3(flight.FtlSpeed * 1.25, 0, 0);
                 state.Velocity = default;
                 state.JumpTunnelElapsed = 1.25;
                 state.JumpTimer = 1.25f;

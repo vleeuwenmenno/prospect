@@ -44,7 +44,7 @@ public sealed class BoxDesignTests
         sums.Evaluate(sums.Intact, rules, out var box, out _);
         Assert.Equal(12345, box.FtlSpeed);
         var settings = content.SettingCatalog.Build(null, ["jumpChargeSpeed=2"]);
-        Assert.Equal(12345, rules.Under(content.SettingCatalog, settings).FtlSpeed);
+        Assert.Equal(40000, rules.Under(content.SettingCatalog, settings).FtlSpeed);
         Assert.Equal(40000, content.WithSettings(settings).Pod.Flight.FtlSpeed);
     }
 

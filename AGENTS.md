@@ -72,6 +72,16 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
 
 ## When you change something
 
+- **FTL transit:** `HullSim.Jump` advances Double3 positions at `FlightParams.FtlSpeed`, shared by authority
+  and prediction. Transit keeps its jump order; control changes cannot discard its destination.
+  `ServerHost.MaySeeHull` is the one replication visibility policy for ordinary and FTL hulls.
+  Today it uses ownership and sensor coverage (brief contact visibility only outside transit).
+  Party/friend/alliance visibility is undecided; add any future rule there.
+  `WorldView.UpdateStream` pauses sector requests in transit. Markers read only replicated hulls.
+  Capture own transit with `--open jump`; observer captures use `--open jump-fleet` on another client.
+  Local map evidence: `--start local --open map-ftl --set ftlSpeedKmPerSecond=10`, capture 16–24 seconds.
+
+
 - **Wreckage:** `HullConnectivity` labels surviving bounding-face components in reserved memory. Wedges use all
   bounding faces; mounts follow their block. `ServerHost.TickWreckage` runs after the hull round, uses `CreateHull`
   with owner zero and the same design, and preserves HP, tanks and COM point velocity. `BoxHullSums` maintains live

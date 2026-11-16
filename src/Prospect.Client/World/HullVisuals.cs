@@ -152,7 +152,8 @@ internal sealed class HullVisuals
         {
             ref readonly var hull = ref hulls[i];
             var design = designs[Math.Min(hull.Design, designs.Length - 1)];
-            var anchor = TargetPicking.HullPosition(hull.PreviousPosition, hull.Position, alpha, JumpGap);
+            var anchor = hull.Jump == JumpPhase.Tunnel ? Double3.Lerp(hull.PreviousPosition, hull.Position, alpha)
+                : TargetPicking.HullPosition(hull.PreviousPosition, hull.Position, alpha, JumpGap);
             ref var visual = ref _hulls[i];
             visual = new HullVisual
             {
@@ -168,6 +169,7 @@ internal sealed class HullVisuals
             };
             if (!visual.Inside)
                 Jump(hull, design, hull.IsOwn && ownPreview != FtlKind.None ? ownPreview : design.Flight.Ftl, ref visual, dt);
+            if (hull.Jump == JumpPhase.Tunnel && !visual.Inside) visual.Visible = false;
         }
 
         EndPassages(dt);

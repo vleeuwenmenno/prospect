@@ -19,6 +19,15 @@ public sealed class WorldSettingEffectTests
     /// <summary>The content as a world with these settings plays by it.</summary>
     private static GameContent World(params string[] assignments) => Content.WithSettings(Content.SettingCatalog.Build(null, assignments));
 
+    [Fact]
+    public void FtlSpeedAppliesInMetresPerSecond()
+    {
+        Assert.Equal(40000, Content.Pod.Flight.FtlSpeed);
+        var world = World("ftlSpeedKmPerSecond=80");
+        Assert.Equal(80000, world.Pod.Flight.FtlSpeed);
+        Assert.Equal(5, HullSim.JumpTravelSeconds(default, new Double3(0, 0, -400000), world.Pod.Flight));
+    }
+
     [Theory]
     [InlineData(20)]
     [InlineData(80)]
@@ -546,7 +555,7 @@ public sealed class WorldSettingParsingTests
     public void TheShippedSettingsHaveTheirRangesAndDefaults()
     {
         Assert.Equal(["collisionDamage", "collisionShields", "shieldRecharge", "jumpChargeSpeed", "hullStrength", "asteroidAmount", "asteroidCap", "asteroidSize", "asteroidFieldSize", "asteroidFrequency", "asteroidSpacing", "asteroidOreShare", "asteroidOreGrade"], Catalog.Definitions.ToArray().Take(13).Select(d => d.Id));
-        Assert.Equal(54, Catalog.Definitions.Length);
+        Assert.Equal(55, Catalog.Definitions.Length);
         Assert.Equal(14, Catalog.Definitions.ToArray().Count(d => d.Upper is not null));
 
         var damage = Catalog.Find("collisionDamage")!;

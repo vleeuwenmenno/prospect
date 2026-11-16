@@ -1409,11 +1409,12 @@ internal sealed class App : IDisposable
                     Session.Client.Input.IssueFleetOrder(hull.Id, new HullOrder { Kind = OrderKind.Jump, Target = World.CameraPosition + new Double3(offset.X, offset.Y, offset.Z) });
                 }
             }
-            else if (view == "jump-fleet" && snapshot is { OwnHull: >= 0 })
+            else if (view is "jump-fleet" or "map-ftl" && snapshot is { OwnHull: >= 0 })
             {
                 // The player's other hulls make short jumps side by side to 6 km along -x from the pod, so another
                 // player's client can watch them leave and arrive from the server's snapshots. The second player
                 // to join a server starts 160 m along -x of the first.
+                if (view == "map-ftl") _screens.OpenMap();
                 var from = snapshot.Hulls[snapshot.OwnHull].Position;
                 var lane = 0;
                 for (var i = 0; i < snapshot.HullCount; i++)
@@ -1421,7 +1422,7 @@ internal sealed class App : IDisposable
                     ref var hull = ref snapshot.Hulls[i];
                     if (hull.IsOwn || hull.Owner != snapshot.PlayerId)
                         continue;
-                    var target = from + new Double3(-6000, 0, -60 + 120 * lane++);
+                    var target = from + new Double3(view == "map-ftl" ? -160000 : -6000, 0, -60 + 120 * lane++);
                     Session.Client.Input.IssueFleetOrder(hull.Id, new HullOrder { Kind = OrderKind.Jump, Target = target });
                 }
             }

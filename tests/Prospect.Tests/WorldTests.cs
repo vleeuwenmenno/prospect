@@ -1399,12 +1399,29 @@ public sealed class HullCollisionTests : IDisposable
     }
 
     [Fact]
+    public void TransitArrivalDoesNotSweepItsRouteThroughOtherHulls()
+    {
+        var vessel = Add(Vessel, new Double3(-1000, 0, 0));
+        var pod = Add(Content.PodDesign, Double3.Zero);
+        _hulls.State(vessel).Jump = JumpPhase.Tunnel;
+        _hulls.State(vessel).JumpTunnelSeconds = HullSim.Dt;
+        _hulls.Info(vessel).Order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(1000, 0, 0) };
+        _hulls.Flight(vessel).FtlSpeed = 120000;
+        Tick();
+        Assert.Equal(new Double3(1000, 0, 0), _hulls.State(vessel).Position);
+        Assert.Equal(Vector3.Zero, _hulls.Info(vessel).Flown);
+        Assert.Equal(Double3.Zero, _hulls.State(pod).Position);
+        Assert.Equal(Vector3.Zero, _hulls.State(pod).Velocity);
+        Assert.Equal(0, DamagedBlocks(pod) + DamagedBlocks(vessel));
+    }
+
+    [Fact]
     public void AHullInTheTunnelIsNotThereAndOneJustArrivedDoesNoHarm()
     {
         var vessel = Add(Vessel, Double3.Zero);
         var pod = Add(Content.PodDesign, new Double3(12, 0, 0), new Vector3(-60, 0, 0));
 
-        // In the tunnel the vessel's position is already its destination, but it is not there yet.
+        // A vessel passing this position in transit cannot be struck.
         _hulls.State(vessel).Jump = JumpPhase.Tunnel;
         for (var i = 0; i < 24; i++)
             _field.Step(pod, default);
@@ -1575,15 +1592,16 @@ public sealed class JumpTests
             var order = new HullOrder { Kind = OrderKind.Jump, Target = target };
             var expected = HullSim.JumpTravelSeconds(origin, target, flight);
             var preparation = 0;
-            while (state.Jump != JumpPhase.Tunnel && preparation++ < 1000)
+            while (state.Jump is not (JumpPhase.Tunnel or JumpPhase.Arrive) && preparation++ < 1000)
                 HullSim.Step(ref state, ref order, default, flight);
             Assert.InRange(preparation, 719, 721);
             Assert.Equal(expected, state.JumpTunnelSeconds);
-            Assert.Equal(target, state.Position);
-            var ticks = 0;
+            Assert.InRange((state.Position - origin).Length, 0, flight.FtlSpeed * (double)HullSim.Dt + 0.001);
+            var ticks = 1;
             while (state.Jump == JumpPhase.Tunnel && ticks++ < 1000)
                 HullSim.Step(ref state, ref order, default, flight);
-            Assert.Equal((int)Math.Ceiling(expected / (double)HullSim.Dt), ticks);
+            Assert.InRange(ticks, Math.Max(1, (int)Math.Ceiling(expected / (double)HullSim.Dt)), Math.Max(1, (int)Math.Ceiling(expected / (double)HullSim.Dt)) + 1);
+            Assert.Equal(target, state.Position);
             Assert.Equal(JumpPhase.Arrive, state.Jump);
             Assert.Equal(expected, state.JumpTunnelSeconds);
             var arrival = 0;
@@ -1595,11 +1613,45 @@ public sealed class JumpTests
     }
 
     [Fact]
+    public void TransitMovesLinearlyCrossesSectorsAndTakesNoMemory()
+    {
+        var flight = Content.Pod.Flight;
+        var state = HullState.Spawn(default, flight);
+        state.Jump = JumpPhase.Tunnel;
+        state.JumpTunnelSeconds = 5;
+        var target = new Double3(120000, 0, -160000);
+        var order = new HullOrder { Kind = OrderKind.Jump, Target = target };
+        var probe = new AllocationProbe();
+        var crossed = false;
+        var ticks = 0;
+        while (state.Jump == JumpPhase.Tunnel && ticks < 400)
+        {
+            var before = state;
+            var beforeOrder = order;
+            while (probe.Measuring())
+            {
+                state = before;
+                order = beforeOrder;
+                HullSim.Step(ref state, ref order, default, flight);
+            }
+            ticks++;
+            var expected = Double3.Lerp(default, target, Math.Min(1, ticks * (double)HullSim.Dt / 5));
+            Assert.InRange((state.Position - expected).Length, 0, 0.00001);
+            crossed |= Content.Galaxy.SectorOf(state.Position) != Content.Galaxy.SectorOf(default);
+        }
+        Assert.True(crossed);
+        Assert.Equal(300, ticks);
+        Assert.Equal(target, state.Position);
+        Assert.Equal(JumpPhase.Arrive, state.Jump);
+        Assert.Equal(0, probe.Bytes);
+    }
+
+    [Fact]
     public void TravelUsesDoublePrecisionThreeDimensionalDistanceAndRejectsOverflow()
     {
         var flight = Content.Pod.Flight;
         var origin = new Double3(1e12, -1e12, 1e12);
-        Assert.Equal(3.325f, HullSim.JumpTravelSeconds(origin, origin + new Double3(3000, 4000, -12000), flight));
+        Assert.Equal(0.325f, HullSim.JumpTravelSeconds(origin, origin + new Double3(3000, 4000, -12000), flight));
         Assert.True(float.IsFinite(HullSim.JumpTravelSeconds(new Double3(-9e12, -9e12, -9e12), new Double3(9e12, 9e12, 9e12), flight)));
         Assert.True(float.IsNaN(HullSim.JumpTravelSeconds(new Double3(-double.MaxValue, 0, 0), new Double3(double.MaxValue, 0, 0), flight)));
         flight.FtlSpeed = 0;
@@ -1619,16 +1671,17 @@ public sealed class JumpTests
         var state = HullState.Spawn(default, flight);
         var order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -40000) };
         HullSim.Step(ref state, ref order, default, flight);
-        Assert.Equal(4, state.JumpTunnelSeconds);
+        Assert.Equal(1, state.JumpTunnelSeconds);
         HullSim.SetOrder(ref state, ref order, order);
-        Assert.Equal(4, state.JumpTunnelSeconds);
+        Assert.Equal(1, state.JumpTunnelSeconds);
         HullSim.SetOrder(ref state, ref order, new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -80000) });
         Assert.Equal(0, state.JumpTunnelSeconds);
         HullSim.Step(ref state, ref order, default, flight);
-        Assert.Equal(5, state.JumpTunnelSeconds);
+        Assert.Equal(2, state.JumpTunnelSeconds);
         HullSim.SetOrder(ref state, ref order, default);
         Assert.Equal(0, state.JumpTunnelSeconds);
         state.Jump = JumpPhase.Tunnel;
+        order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(0, 0, -40000) };
         state.JumpTunnelSeconds = 1000000000;
         state.JumpTunnelElapsed = 999999999;
         state.JumpTimer = (float)state.JumpTunnelElapsed;
@@ -2809,6 +2862,19 @@ public sealed class ShieldStateTests
     }
 
     [Fact]
+    public void TransitRejectsDirectDamageAndContactFeedback()
+    {
+        var body = States.Body(PodDesign);
+        var state = HullState.Spawn(Double3.Zero, Pod);
+        state.Jump = JumpPhase.Tunnel;
+        var before = state;
+        Hit(ref state, Pod, ref body, 1, 100000f);
+        HullSim.ShieldContact(ref state, Pod, PodDesign, [1UL << 1], 1000f);
+        Assert.Equal(before, state);
+        Assert.False(body.Damaged);
+    }
+
+    [Fact]
     public void AnImpactAgesOncePerTickThroughoutTransitWithoutAdvancingRecharge()
     {
         var body = States.Body(PodDesign);
@@ -2818,7 +2884,7 @@ public sealed class ShieldStateTests
         var shield = state.Shield;
         state.Jump = JumpPhase.Tunnel;
         state.JumpTunnelSeconds = 600f;
-        var order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(40000, 0, 0) };
+        var order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(24000000, 0, 0) };
         for (var tick = 1; tick <= ShieldHit.MaxAgeTicks + 10; tick++)
         {
             HullSim.AdvanceShieldClock(ref state);
@@ -2977,7 +3043,7 @@ public sealed class ShieldChangeTests
         // Through a long transit the clock keeps counting, and stops at its cap.
         state.Jump = JumpPhase.Tunnel;
         state.JumpTunnelSeconds = 600f;
-        order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(40000, 0, 0) };
+        order = new HullOrder { Kind = OrderKind.Jump, Target = new Double3(24000000, 0, 0) };
         for (var tick = 2; tick <= ShieldHit.MaxAgeTicks + 10; tick++)
         {
             HullSim.AdvanceShieldClock(ref state);
