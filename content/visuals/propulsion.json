@@ -306,7 +306,10 @@
       "sparkSpeed": 24,
       "burst": 0,
       "burstSeconds": 0.2,
-      "fadeSeconds": 0.15
+      "fadeSeconds": 0.15,
+      "shieldStrength": 0.65,
+      "shieldReach": 1,
+      "shieldColor": [0.5, 0.65, 1]
     },
     "hot": {
       "kind": "flame",
@@ -330,7 +333,10 @@
       "sparkSpeed": 20,
       "burst": 0,
       "burstSeconds": 0.2,
-      "fadeSeconds": 0.12
+      "fadeSeconds": 0.12,
+      "shieldStrength": 0.5,
+      "shieldReach": 1,
+      "shieldColor": [0.7, 0.5, 0.3]
     },
     "ion": {
       "kind": "ion",
@@ -354,7 +360,10 @@
       "sparkSpeed": 0,
       "burst": 0,
       "burstSeconds": 0.2,
-      "fadeSeconds": 0.35
+      "fadeSeconds": 0.35,
+      "shieldStrength": 0.13,
+      "shieldReach": 1,
+      "shieldColor": [0.35, 0.3, 1]
     },
     "cold": {
       "kind": "puff",
@@ -378,7 +387,10 @@
       "sparkSpeed": 0,
       "burst": 1.4,
       "burstSeconds": 0.15,
-      "fadeSeconds": 0.18
+      "fadeSeconds": 0.18,
+      "shieldStrength": 0.25,
+      "shieldReach": 1,
+      "shieldColor": [0.4, 0.65, 0.85]
     }
   },
   "boostLength": 1.4,

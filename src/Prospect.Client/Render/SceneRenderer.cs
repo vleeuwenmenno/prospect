@@ -292,6 +292,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private readonly VkPipeline _tonemapPipeline;
     private readonly VkPipeline _ftlMarkPipeline;
     private readonly VkPipeline _plumePipeline;
+    private readonly GpuBuffer[] _exhaustBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
+    private const int ExhaustVectors = ShieldVisuals.MaxShields * ShieldExhaust.VectorsPerShield;
     private readonly GpuBuffer[] _plumeBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
     private int _plumeCount;
     private readonly VkPipelineLayout _pulsePipelineLayout;
@@ -429,6 +431,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
                 _frameBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.UniformBufferBit, sizeof(FrameConstants));
                 _instanceBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshInstance) * MaxInstances);
                 _ftlBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(FtlMark) * MaxFtlMarks);
+                _exhaustBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.StorageBufferBit, sizeof(float4) * ExhaustVectors);
                 _plumeBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(PlumeInstance) * PropulsionLook.PlumeCapacity);
                 _damageVertices[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshVertex) * DamageVertices);
                 _damageInstances[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshInstance) * DynamicDraws);
@@ -448,6 +451,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         // scene before anything solid and before any hull was drawn, the scene's depth and the depth before hulls.
         Span<VkDescriptorPoolSize> poolSizes =
         [
+            new VkDescriptorPoolSize { Type = VkDescriptorType.StorageBuffer, DescriptorCount = FrameRenderer.FramesInFlight },
             new VkDescriptorPoolSize { Type = VkDescriptorType.UniformBuffer, DescriptorCount = 2 * FrameRenderer.FramesInFlight },
             new VkDescriptorPoolSize { Type = VkDescriptorType.CombinedImageSampler, DescriptorCount = 9 + 3 + 3 + FrameRenderer.FramesInFlight },
         ];
@@ -472,6 +476,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
                 DescriptorCount = 1,
                 StageFlags = VkShaderStageFlags.FragmentBit,
             },
+            new VkDescriptorSetLayoutBinding { Binding = 2, DescriptorType = VkDescriptorType.StorageBuffer, DescriptorCount = 1, StageFlags = VkShaderStageFlags.FragmentBit },
         ];
         _frameLayout = device.CreateDescriptorSetLayout(new DescriptorSetLayoutEx.CreateInfo { Bindings = frameBindings }, null);
 
@@ -605,6 +610,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
         for (var i = 0; i < FrameRenderer.FramesInFlight; i++)
         {
             _frameSets[i] = device.AllocateDescriptorSet(_descriptorPool, _frameLayout);
+            var exhaustInfo = new VkDescriptorBufferInfo { Buffer = _exhaustBuffers[i].Buffer, Offset = new ByteSize64(0), Range = new ByteSize64((ulong)(sizeof(float4) * ExhaustVectors)) };
+            device.UpdateDescriptorSets([new VkWriteDescriptorSet { DstSet = _frameSets[i], DstBinding = 2, DescriptorCount = 1, DescriptorType = VkDescriptorType.StorageBuffer, BufferInfo = &exhaustInfo }], []);
             var bufferInfo = new VkDescriptorBufferInfo
             {
                 Buffer = _frameBuffers[i].Buffer,
@@ -830,6 +837,9 @@ internal sealed unsafe class SceneRenderer : IDisposable
 
     /// <summary>The jump-mark memory for this frame; say how many were filled when calling <see cref="Render"/>.</summary>
     public Span<FtlMark> FtlMarks(int frameIndex) => new((void*)_ftlBuffers[frameIndex].Mapped, MaxFtlMarks);
+
+    /// <summary>This frame slot's selected shield exhaust capsules, written before submission.</summary>
+    public Span<float4> ShieldExhaustData(int frameIndex) => new((void*)_exhaustBuffers[frameIndex].Mapped, ExhaustVectors);
 
     /// <summary>This frame slot's plume instances, written by the world before <see cref="Render"/>.</summary>
     public Span<PlumeInstance> Plumes(int frameIndex) => new((void*)_plumeBuffers[frameIndex].Mapped, PropulsionLook.PlumeCapacity);
@@ -1691,6 +1701,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
             _frameBuffers[i].Destroy(_gpu);
             _instanceBuffers[i].Destroy(_gpu);
             _ftlBuffers[i].Destroy(_gpu);
+            _exhaustBuffers[i].Destroy(_gpu);
             _plumeBuffers[i].Destroy(_gpu);
             _damageVertices[i].Destroy(_gpu);
             _damageInstances[i].Destroy(_gpu);

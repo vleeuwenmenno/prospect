@@ -56,6 +56,9 @@ internal struct ShieldInstance
 /// </summary>
 internal struct ShieldDraw
 {
+    public uint Hull;
+    public Vector3 Center;
+    public float Radius;
     public int FirstVertex;
     public int VertexCount;
     public int FirstIndex;
@@ -416,7 +419,7 @@ internal sealed class ShieldVisuals
         _shellIndices.AsSpan(shield.Shell * ShellIndices, shell.IndexCount).CopyTo(indices[_indexCount..]);
         // The material is the kind (1 a hull, 2 the pilot's own) plus four times one more than the clip slot.
         var own = material - 4f * MathF.Floor((material + 0.5f) * 0.25f) > 1.5f;
-        _draws[_drawCount] = new ShieldDraw { FirstVertex = _vertexCount, VertexCount = shell.VertexCount, FirstIndex = _indexCount, IndexCount = shell.IndexCount, Own = own };
+        _draws[_drawCount] = new ShieldDraw { Hull = id, Center = position, Radius = _designs![shell.Design].Flight.Radius * Math.Max(1f, stretch) + 0.6f, FirstVertex = _vertexCount, VertexCount = shell.VertexCount, FirstIndex = _indexCount, IndexCount = shell.IndexCount, Own = own };
         _vertexCount += shell.VertexCount;
         _indexCount += shell.IndexCount;
 

@@ -21,6 +21,8 @@ layout(location = 10) flat in int own;
 layout(location = 12) flat in vec4 patches[4];
 layout(location = 11) flat in vec4 recovering;  // see ShieldInstance.Recovery
 layout(location = 0) out vec4 outColor;
+layout(location = 16) flat in int exhaustIndex;
+layout(std430, set = 0, binding = 2) readonly buffer Exhaust { vec4 exhaust[]; };
 
 // How shields look, from content/visuals/shields.json (ShieldLookConstants).
 layout(push_constant) uniform Look
@@ -130,6 +132,26 @@ void main()
     float glow = present * (0.008 + shieldLook.calm.a * rim + 0.025 * field * rim + 0.10 * waver * (0.4 + rim) + 0.05 * shiver * (0.5 + rim)) + present * hit.x * shieldLook.ripple.w;
     vec3 flashTint = mix(tint, vec3(1.0, 0.95, 0.8), 0.65);
     vec3 light = tint * glow + present * flashTint * hit.y * shieldLook.impact.z + shieldLook.collapse.rgb * burning * (0.35 + 0.8 * rim) * 1.4;
+
+    // Only nearby plumes enter this loop. The mask pass returns before any buffer read.
+    int base = exhaustIndex * 25;
+    int count = int(exhaust[base].x);
+    vec3 streamLight = vec3(0.0);
+    for (int i = 0; i < count; i++) {
+        vec4 start = exhaust[base + 1 + i * 3];
+        vec4 axis = exhaust[base + 2 + i * 3];
+        vec4 color = exhaust[base + 3 + i * 3];
+        vec3 delta = worldPosition - start.xyz;
+        float along = dot(delta, axis.xyz);
+        if (along < 0.0 || along >= axis.w) continue;
+        vec3 radial = delta - axis.xyz * along;
+        float edge = max(0.0, 1.0 - dot(radial, radial) / (start.w * start.w));
+        if (edge <= 0.0) continue;
+        float fade = 1.0 - along / axis.w;
+        float flow = noise(delta / max(start.w, 0.05) * 2.0 - axis.xyz * time * 0.7);
+        streamLight += color.rgb * color.a * edge * edge * fade * fade * (0.45 + 0.55 * flow);
+    }
+    light += present * streamLight / (1.0 + max(streamLight.r, max(streamLight.g, streamLight.b)));
 
     // The bend: along the shell's normal as seen on screen, strongest at the rim and in a ripple, a few pixels at most.
     vec2 size = frame.lens.zw;

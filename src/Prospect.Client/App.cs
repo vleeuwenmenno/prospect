@@ -653,6 +653,7 @@ internal sealed class App : IDisposable
                 VisualBenchmark = _options.VisualBenchmark,
                 ScriptedShieldBreakSeconds = _options.BreakShieldSeconds,
                 ScriptedRamSpeed = _options.RamSpeed,
+                ScriptedExhaustShield = Devices.Muted ? _options.OpenView switch { "exhaust-shield" => 1, "exhaust-shield-cold" => 2, _ => 0 } : 0,
                 ScriptedFleetHurtSeconds = _options.HurtFleetSeconds,
                 ScriptedFleetHurtBroken = _options.HurtFleetBroken,
                 ScriptedFleetHurtTank = _options.HurtFleetTank,
@@ -1179,7 +1180,12 @@ internal sealed class App : IDisposable
             _viewOpened = true;
             if (_options.MapCell is { } mapCell && view != "galaxy")
                 _screens.SetMapCell(mapCell);
-            if (view == "command")
+            if (Devices.Muted && view is "exhaust-shield" or "exhaust-shield-cold")
+            {
+                ScriptedThrust.TryParse(view == "exhaust-shield-cold" ? "right" : "forward", out var exhaustThrust);
+                _options.Thrust = exhaustThrust;
+            }
+            else if (view == "command")
             {
                 World.SetMode(ViewMode.Command);
                 World.SelectAllOwned();

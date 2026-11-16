@@ -46,7 +46,7 @@ Product direction from the brainstorm on 2026-11-16. Built step by step; this sa
 ## Order
 
 1. Done: contact strength from energy, and the contact patch.
-2. Exhaust on shields.
+2. Done: exhaust on shields.
 3. Dust and marks on rock.
 
 ### Other hull contacts
@@ -71,3 +71,27 @@ Product direction from the brainstorm on 2026-11-16. Built step by step; this sa
   It approximates a curved surface by a tangent disk; narrow ridges and disconnected faces are not reconstructed.
 - No evaluator version bump: block-derived physical figures are unchanged; the changed shared blocks.json is
   already hashed into content identity. No protocol or save changes.
+
+## Step 2 implementation
+
+- `ThrustEffects` exports the same nozzle positions, grown lengths and spread radii used for drawn plumes.
+  Reaction intensity uses replicated throttle and ignition/release fading. No flight arithmetic is duplicated.
+- `ShieldExhaust` rejects own hull ids and capsules outside the shield's bounding sphere, then keeps the nearest eight.
+  Each frame slot holds 64 fixed shield records of 25 vec4s (25,600 bytes); no frame allocations or resize rebuilds.
+- Strength, reach fraction and colour live in each `propulsion.json` plume entry, beside the geometry they modify.
+  `shieldStrength: 0` disables a kind for capture comparisons. All four kinds validate on load.
+- `shield.frag` evaluates a soft radial/axial envelope and slow turbulent drift only for selected capsules.
+  Coloured light is bounded, never flashes white. Empty lists skip the loop; the mask pass skips all exhaust reads.
+- Shields remain last, using the same scene copies. No wire, save or frame.glsl change.
+
+### Limits and checks
+
+- Candidate plumes share the existing visibility, minimum-pixel and global plume budget (largest on screen retained).
+  A visible plume can come from a hull outside the frustum. This is a capsule approximation, not gas simulation.
+- A capsule uses the plume's maximum spread radius; it does not reconstruct its detailed cone or shock nodes.
+  Only the shell receives light; no push, heat, damage, rock marks or extra particles.
+- `--open exhaust-shield` and `exhaust-shield-cold` hold two real hulls beside one another for captures;
+  ordinary flight still computes thrust and fuel use. See AGENTS.md for pose and ion content-copy instructions.
+- Linux GPU checks: empty 765 fps, resize 761 fps (12 rebuilds), engine reaction 765 fps, cold reaction 690 fps,
+  all at 5096 x 1390 with zero render/process allocations. All 22 shaders compile; mask specialization has no loops.
+  Validation layers were inactive; Windows and the hot-thruster appearance remain unchecked.

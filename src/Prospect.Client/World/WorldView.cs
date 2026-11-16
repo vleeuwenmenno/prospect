@@ -1175,14 +1175,14 @@ internal sealed class WorldView
                 && _collision.Fade(position, design.Flight.Radius, sparkPixels) > 0;
             _sparks.Observe(hull, design, DrawnPosition(visual), orientation, sparkVisible, snapshot.ServerTickPrecise + alpha, _collision);
             var stretch = visual.Stretch;
+            // A plume may reach a visible shield even while its hull is outside the view.
+            if (visual.Visible && ShipMeshes is { } shipMeshes && hull.Design < shipMeshes.Length)
+                _thrust.Add(thrustSlot, hull, shipMeshes[hull.Design].Nozzles, position, orientation, stretch, plumes);
             if (!visual.Visible || !Visible(position, design.Flight.Radius * stretch, aspect, out _))
                 continue;
             // The material says what the mesh is and, above it in steps of four, which opening cuts it.
             // The pilot's own hull inside its jump takes no slot: its opening is cut from the frame's own jump.
             VisibleHulls++;
-            // Plumes of the parts that fire, whatever mesh the hull is drawn with below; a hull in a jump's tunnel fires none.
-            if (ShipMeshes is { } shipMeshes && hull.Design < shipMeshes.Length)
-                _thrust.Add(thrustSlot, hull, shipMeshes[hull.Design].Nozzles, position, orientation, stretch, plumes);
             var material = Material(visual.Inside, visual.Inside ? -1 : visual.Clip);
             // The shield goes where the hull goes, drawn out and cut with it by the same material.
             _shields.Add(hull.Id, position, orientation, stretch, material, shieldInstances, shieldVertices, shieldIndices);
@@ -1234,6 +1234,13 @@ internal sealed class WorldView
         _partModels.Flush();
         DrawnPlumes = _thrust.End();
         _scene.QueuePlumes(DrawnPlumes);
+        var exhaustData = _scene.ShieldExhaustData(frameIndex);
+        for (var i = 0; i < _shields.Draws.Length; i++)
+        {
+            ref readonly var shield = ref _shields.Draws[i];
+            ShieldExhaust.Select(shield.Hull, shield.Center, shield.Radius, _thrust.Capsules.AsSpan(0, DrawnPlumes),
+                exhaustData.Slice(i * ShieldExhaust.VectorsPerShield, ShieldExhaust.VectorsPerShield));
+        }
         AddOpenings(camera, aspect, marks, ref markCount, ref composite, ref openings, ref clips);
         if (overlayCheck && GasOverlayOpening && composite.Setup.W < CompositeConstants.MaxLenses)
         {

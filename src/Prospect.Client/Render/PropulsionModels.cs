@@ -240,6 +240,10 @@ internal sealed class PlumeLook
     /// <summary>The most scene light the plume reaches, however long the view runs through it: a flame never burns out to flat white.</summary>
     public float Brightness { get; init; }
 
+    public float ShieldStrength { get; init; }
+    public float ShieldReach { get; init; }
+    public float[] ShieldColor { get; init; } = [];
+
     /// <summary>Length at full throttle in exit radii, and the share of it shown at the smallest throttle.</summary>
     public float Length { get; init; }
     public float MinLength { get; init; }
@@ -291,7 +295,8 @@ internal sealed class PlumeLook
     internal void Check(string path, string id)
     {
         static bool Colour(float[] c) => c.Length == 3 && c[0] is >= 0 and <= 4 && c[1] is >= 0 and <= 4 && c[2] is >= 0 and <= 4;
-        if (Kind is not ("flame" or "puff" or "ion") || !Colour(Core) || !Colour(Edge) || !Colour(Spark)
+        if (!Colour(ShieldColor) || !(ShieldStrength is >= 0 and <= 4) || !(ShieldReach is > 0 and <= 1)
+            || Kind is not ("flame" or "puff" or "ion") || !Colour(Core) || !Colour(Edge) || !Colour(Spark)
             || !(Brightness is > 0 and <= 40) || !(Length is > 0 and <= 80) || !(MinLength is > 0 and <= 1) || !(Spread is >= 0 and <= 30)
             || !(Opening is > 0 and <= 20) || !(CoreLength is > 0 and <= 10) || !(FlowSpeed is >= 0 and <= 200)
             || !(Flicker is >= 0 and <= 1) || !(Turbulence is >= 0 and <= 1) || !(Diamonds is >= 0 and <= 4) || !(DiamondSpacing is > 0 and <= 10)
