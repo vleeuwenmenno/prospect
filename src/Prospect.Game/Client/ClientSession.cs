@@ -177,11 +177,11 @@ public sealed class SessionSnapshot(GameContent content)
 /// </summary>
 public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
 {
-    // Reserve the full fleet message, one five-byte Control, one editor request and one design acknowledgement
+    // Reserve the full fleet message, one five-byte Control, one editor request, one cargo release and one design acknowledgement
     // before allowing any social traffic.
     internal const int EditorBytesPerTick = EditorRequestMessage.MaxWireSize + DesignReadyMessage.WireSize;
-    internal const int SocialBytesPerTick = ServerHost.PlayerBytesPerTick - FleetOrdersMessage.MaxWireSize - 5 - EditorBytesPerTick - ExplorationMessage.ScanWireSize - ModuleMessage.RequestWireSize;
-    internal static readonly int SocialMessagesPerTick = Math.Min(ServerHost.PlayerMessagesPerTick - 6, SocialBytesPerTick / SocialMessage.MaxWireSize);
+    internal const int SocialBytesPerTick = ServerHost.PlayerBytesPerTick - FleetOrdersMessage.MaxWireSize - 5 - EditorBytesPerTick - ExplorationMessage.ScanWireSize - ModuleMessage.RequestWireSize - JettisonCargoMessage.MaxWireSize;
+    internal static readonly int SocialMessagesPerTick = Math.Min(ServerHost.PlayerMessagesPerTick - 7, SocialBytesPerTick / SocialMessage.MaxWireSize);
     private long _receivedSnapshotTick = -1;
     private long _clientTick;
     private long _sentReliableTick = -1;
