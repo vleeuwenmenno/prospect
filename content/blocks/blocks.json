@@ -109,7 +109,7 @@
     "microBipropellantTank": { "name": "Drone biprop tank", "drone": true, "boxOnly": true, "mass": 0.15, "hull": 30, "tank": "bipropellant", "fuelCapacity": 90 },
     "microNitrogenTank": { "name": "Drone nitrogen tank", "drone": true, "boxOnly": true, "mass": 0.15, "hull": 30, "tank": "nitrogen", "fuelCapacity": 24 },
     "microgyro": { "name": "Drone gyro", "drone": true, "mass": 0.3, "hull": 30, "torque": 0.46, "powerDraw": 0.05 },
-    "microshield": { "name": "Drone shield", "drone": true, "mass": 0.3, "hull": 30, "shield": 120, "shieldRecharge": 5, "powerDraw": 0.4 },
+    "microshield": { "name": "Drone shield", "drone": true, "mass": 0.3, "hull": 30, "shield": 120, "shieldRecharge": 5, "powerDraw": 0.7 },
     "sensor": { "name": "Passive sensor", "boxOnly": true, "mass": 2, "hull": 400, "sensor": true },
     "charting": { "name": "Sector scanner", "boxOnly": true, "mass": 2, "hull": 400, "charting": true },
     "gasScanner": {"name": "Gas scanner", "boxOnly": true, "mass": 2, "hull": 200, "powerDraw": 0.1, "sizeRules": {"powerDraw": {"volumeExponent": 0}}, "module": {"family": "gasScanner", "quality": "Common", "mark": 1, "variant": "standard", "range": 1500, "accuracy": 0.2, "scanSeconds": 4, "powerDraw": 6, "cooldownSeconds": 10}},

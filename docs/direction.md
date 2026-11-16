@@ -56,11 +56,11 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
 
 - Recharge spends the shared ship energy pool for each point restored. Normal MJ/point is surviving emitters' summed
   `powerDraw` divided by their summed base `shieldRecharge`, both evaluated with block size rules.
-  Standard and drone emitters currently cost 0.08 MJ/point: 3 MW / 37.5 points/s and 0.4 MW / 5 points/s
+  Standard and drone emitters currently cost 0.08 and 0.14 MJ/point: 3 MW / 37.5 points/s and 0.7 MW / 5 points/s
   (doubled from 0.04 so recovery is felt on the shipped designs; see the next section).
 - Collapsed shields retain the existing offline state and 8 s damage delay. Recovery to 25% capacity costs 4.5× normal
   MJ/point (`shieldRestartPowerMultiplier` in `content/blocks/blocks.json`). One standard emitter restarts for 135 MJ
-  (13.5 MW for 10 s); one drone emitter for 10.8 MJ (1.8 MW for 6 s). No separate restart fee or new phase state.
+  (13.5 MW for 10 s); one drone emitter for 18.9 MJ (3.15 MW for 6 s). No separate restart fee or new phase state.
 - The last offline tick stops exactly at the threshold; normal recharge resumes next tick. Partial top-ups pay only
   for points restored. Insufficient energy restores fewer points; zero available energy waits. Energy never goes negative.
 - Priority per shared step: FTL takes stored energy first under its existing charge gate, then generator output and
@@ -77,7 +77,7 @@ Open: flight feel and balance approval; these numbers remain content tuning, not
 Why: with 1.5 MW recharge and 6 MW restart against 6 to 12 MW of generation the battery never moved, so the
 energy readout showed nothing while a shield recovered.
 
-- Retune: shield emitter `powerDraw` 1.5 → 3.0 MW, drone shield 0.2 → 0.4 MW, `shieldRestartPowerMultiplier`
+- Retune: shield emitter `powerDraw` 1.5 → 3.0 MW, drone shield 0.2 → 0.4 MW (0.7 MW since the two-generator drone, so a restart outruns its surplus), `shieldRestartPowerMultiplier`
   4 → 4.5. Generators, batteries, recharge rates, delay and thresholds are unchanged. Content identity changes
   with `blocks.json`; no evaluator arithmetic changed, so `ContentIdentity.EvaluatorVersion` stays.
 - Result at rest, battery full, 8 s delay not counted (command pod 6 MW generator; mining and survey vessels
