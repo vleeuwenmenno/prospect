@@ -73,21 +73,22 @@ internal sealed partial class ScreenHost
         }
 
         var detailsHeight = Kit.Px(_cargoView.InFtlTransit ? 146 : 126);
-        var gridHeight = Math.Max(Kit.Px(64), ImGui.GetContentRegionAvail().Y - detailsHeight - Kit.Px(Theme.Space2));
-        DrawCargoGrid(snapshot, hull, width, gridHeight, interactive);
+        var gridWidth = Math.Max(1f, width - Kit.Px(Theme.Space2));
+        var layoutHeight = _cargoView.Layout(hull.Cargo.Span, gridWidth, Kit.Scale);
+        var room = ImGui.GetContentRegionAvail().Y - detailsHeight - Kit.Px(Theme.Space2);
+        var gridHeight = Math.Clamp(layoutHeight + Kit.Px(Theme.Space2), Kit.Px(64), Math.Max(Kit.Px(64), room));
+        DrawCargoGrid(snapshot, hull, width, gridWidth, layoutHeight, gridHeight, interactive);
         Kit.Space(Theme.Space2);
         DrawCargoDetails(snapshot, hull, width, interactive);
         EndPane();
     }
 
-    private void DrawCargoGrid(SessionSnapshot snapshot, in HullView hull, float width, float height, bool interactive)
+    private void DrawCargoGrid(SessionSnapshot snapshot, in HullView hull, float width, float gridWidth, float layoutHeight, float height, bool interactive)
     {
         var flags = FloatingWindow.ChildFlags(interactive ? FloatingInput.Full : FloatingInput.Passive);
         ImGui.BeginChild("##cargogrid"u8, new float2(width, height), ImGuiChildFlags.None, flags);
         var gridDraw = ImGui.GetWindowDrawList();
-        var gridWidth = Math.Max(1f, ImGui.GetContentRegionAvail().X - Kit.Px(Theme.Space2));
         var cargo = hull.Cargo.Span;
-        var layoutHeight = _cargoView.Layout(cargo, gridWidth, Kit.Scale);
         var origin = ImGui.GetCursorScreenPos();
         var tiles = _cargoView.Tiles;
         var sizes = snapshot.Content.Cargo.Sizes;
@@ -123,7 +124,7 @@ internal sealed partial class ScreenHost
             if (c.Resource < 0)
                 Kit.ClippedText(gridDraw, _ui.Sans, Theme.FontCaption, new float2(textLeft, tileMin.Y + Kit.Px(20)), Theme.TextMute, "Empty"u8, textWidth);
             else
-                Kit.ClippedText(gridDraw, _ui.Mono, Theme.FontCaption, new float2(textLeft, tileMin.Y + Kit.Px(20)), Theme.TextDim, Kit.F($"{c.Amount:0}k"), textWidth);
+                Kit.ClippedText(gridDraw, _ui.Mono, Theme.FontCaption, new float2(textLeft, tileMin.Y + Kit.Px(20)), Theme.TextDim, Kit.F($"{c.Amount:0} kg"), textWidth);
 
             var fill = CargoHoldView.FillFraction(snapshot, c);
             var barPad = Kit.Px(5);

@@ -475,7 +475,7 @@ internal sealed partial class ScreenHost
         SocialPane.Players => new float2(Kit.Px(440), Kit.Px(480)),
         SocialPane.Chat => new float2(Kit.Px(540), Kit.Px(340)),
         SocialPane.Charts => new float2(Kit.Px(520), Kit.Px(580)),
-        SocialPane.Cargo => new float2(Kit.Px(460), Kit.Px(440)),
+        SocialPane.Cargo => new float2(Kit.Px(460), Kit.Px(320)),
         SocialPane.Player => new float2(Kit.Px(240), Kit.Px(190)),
         SocialPane.Gas => new float2(Kit.Px(ModuleLook.Current.GasWindowWidth), Kit.Px(ModuleLook.Current.GasWindowHeight)),
         _ => new float2(Kit.Px(360), Kit.Px(420)),

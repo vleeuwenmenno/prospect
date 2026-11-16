@@ -90,10 +90,10 @@ internal sealed class CargoHoldView
     /// <summary>Tile width and height in unscaled pixels, growing in four steps with container size class (0..7).</summary>
     public static (float Width, float Height) TileSizeUnscaled(int sizeIndex) => sizeIndex switch
     {
-        <= 1 => (48f, 44f),
-        <= 3 => (62f, 44f),
-        <= 5 => (80f, 50f),
-        _ => (104f, 56f),
+        <= 1 => (62f, 44f),
+        <= 3 => (74f, 48f),
+        <= 5 => (92f, 54f),
+        _ => (116f, 60f),
     };
 
     /// <summary>
