@@ -1206,6 +1206,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
         var drone = (byte)_content.DroneDesign;
         var current = connection.Hull;
+        if (_hulls.State(current.Index).Jump is JumpPhase.Tunnel or JumpPhase.Arrive) return;
         ref var currentInfo = ref _hulls.Info(current.Index);
         HullHandle next;
 
@@ -1237,7 +1238,8 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         else
         {
             next = new HullHandle((int)(hullId & 0xFFFF), (int)(hullId >> 16));
-            if (next == current || !_hulls.IsAlive(next) || _hulls.Info(next.Index).Owner != connection.PlayerId)
+            if (next == current || !_hulls.IsAlive(next) || _hulls.Info(next.Index).Owner != connection.PlayerId
+                || _hulls.State(next.Index).Jump is JumpPhase.Tunnel or JumpPhase.Arrive)
                 return;
 
             // Check before mutation so an out-of-sector refusal also preserves an escape drone.
@@ -1517,7 +1519,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 Environment = _sensorGas is null ? HullEnvironment.None : GasSensors.EnvironmentAt(Galaxy, _sensorGas.At(_hulls.State(i).Position), _content.Exploration, _hulls.State(i).Position, tick),
                 Order = info.Order,
             };
-            if (info.Owner != connection.PlayerId) record.Order.Target = default;
+            if (info.Owner != connection.PlayerId && record.State.Jump != JumpPhase.Tunnel) record.Order.Target = default;
             record.LossStart = Math.Min(record.Revision, connection.Blocks.Acknowledged(record.Id));
             var losses = _hulls.BlockStates.Losses(info.BlockState);
             record.LossCount = (byte)Math.Min(HullRecord.MaxLosses, record.Revision - record.LossStart);

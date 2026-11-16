@@ -659,6 +659,17 @@
       "minimum": 1,
       "maximum": 255,
       "step": 1
+    },
+    {
+      "id": "ftlSpeedKmPerSecond",
+      "name": "FTL speed",
+      "description": "Transit speed for every jump drive. Preparation and arrival timings stay unchanged.",
+      "kind": "multiplier",
+      "default": 40,
+      "minimum": 1,
+      "maximum": 400,
+      "step": 1,
+      "unit": "km/s"
     }
   ]
 }

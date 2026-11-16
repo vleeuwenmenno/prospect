@@ -1,10 +1,10 @@
 # FTL travel: flying, not teleporting
 
-Product direction from 2026-11-16. Not built yet.
+Product direction from 2026-11-16. Implementation added; validation recorded below.
 
 ## Why
 
-- Today a jump teleports the hull at the end of the tunnel. Other players never see it travel.
+- Other players can observe travel through their current sensor coverage.
 
 ## Decided
 
@@ -25,3 +25,11 @@ Product direction from 2026-11-16. Not built yet.
 
 - Whether drives differ in speed by default, or only in look.
 - Whether a jump can be interrupted (interdiction) later.
+
+## Implementation
+
+- Shared `HullSim` moves every drive kind and fleet order; prediction runs the same function.
+- Existing wire/save fields carry position, phase, destination and clocks; protocol 57 and codec 11 change their meaning.
+- Client rock-sector requests pause during transit. Pilot tunnel effects keep their clocks.
+- `--start local --open map-ftl --set ftlSpeedKmPerSecond=10 --capture <path>` shows owned fleet travel on the map.
+- Party/friend/alliance visibility is not implemented; server policy is `MaySeeHull`.

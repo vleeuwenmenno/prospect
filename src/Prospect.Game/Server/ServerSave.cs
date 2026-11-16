@@ -450,6 +450,9 @@ public sealed partial class ServerHost
             return "its jump does not hold together";
         if (hull.Order.Kind > OrderKind.Jump || !double.IsFinite(hull.Order.Target.X) || !double.IsFinite(hull.Order.Target.Y) || !double.IsFinite(hull.Order.Target.Z))
             return "its order does not hold together";
+        if (state.Jump == JumpPhase.Tunnel && (hull.Order.Kind != OrderKind.Jump
+            || state.JumpTunnelElapsed > state.JumpTunnelSeconds || state.JumpTunnelSeconds <= 0))
+            return "its transit has no destination or valid clock";
         if (hull.DamageTick > nextTick || hull.Visual.Spark.Tick > nextTick && hull.Visual.Spark.Sequence != 0)
             return "it was damaged in an interval the world has not reached";
         if (hull.Visual.Count > VisualDamageState.Capacity || hull.Visual.Spark.Sequence != 0 && !hull.Visual.Spark.Contact.Valid(design))

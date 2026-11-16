@@ -470,3 +470,11 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
   Core loss alone no longer makes a remaining hull invalid. Live COM and inertia are rebuilt from surviving blocks.
 - Wreck growth calls `HasRoom`; excess debris is discarded only after evicting existing wrecks to try to make room.
 - Live cleanup settings overwrite their existing setting values during capture. Codec 8 saves are refused untouched.
+
+### Moving FTL transit (codec 11)
+
+- The saved position is the position reached along the route, not the destination.
+- Existing saved order, transit duration and elapsed time resume through shared `HullSim` from that position.
+- Load requires a jump order, positive duration and elapsed time within that duration for a hull in transit.
+- Earlier codecs are refused explicitly; an old teleported transit is never silently treated as a moving one.
+- World settings retain `ftlSpeedKmPerSecond`; no per-tick disk work or new snapshot array is needed.

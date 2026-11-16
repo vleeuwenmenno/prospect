@@ -400,15 +400,30 @@ internal sealed partial class ScreenHost
         for (var i = 0; i < snapshot.HullCount; i++)
         {
             ref var hull = ref snapshot.Hulls[i];
-            if (!world.IsDrawn(hull))
+            if (hull.Jump != JumpPhase.Tunnel && !world.IsDrawn(hull))
                 continue;
-            var position = world.DrawnPosition(hull);
+            var position = hull.Jump == JumpPhase.Tunnel ? world.HullPosition(hull) : world.DrawnPosition(hull);
             if (!world.Project(position, out var screen))
                 continue;
 
             var mine = hull.Owner == snapshot.PlayerId;
             var selected = mine && world.IsSelected(hull.Id);
             var color = mine ? Theme.Accent : Theme.Info;
+            if (hull.Jump == JumpPhase.Tunnel)
+            {
+                Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, screen + new float2(Kit.Px(12), -Kit.Px(30)), color, "FTL"u8);
+                if (world.Project(hull.Order.Target, out var destination))
+                    draw.AddLine(screen, destination, Kit.Color(color, 0.4f));
+                var direction = Vector3.Transform(-Vector3.UnitZ, hull.Orientation);
+                var previous = screen;
+                for (var trail = 1; trail <= 8; trail++)
+                {
+                    var point = position - direction * (designs[hull.Design].Flight.FtlSpeed * (float)Math.Min(hull.JumpTunnelElapsed, trail * 0.05));
+                    if (!world.Project(point, out var next)) break;
+                    draw.AddLine(previous, next, Kit.Color(color, (9 - trail) / 10f), Kit.Px(2));
+                    previous = next;
+                }
+            }
 
             // A stalk down to the command plane shows how far above or below it the hull is.
             var onPlane = new Double3(position.X, planeHeight, position.Z);
@@ -756,6 +771,7 @@ internal sealed partial class ScreenHost
             var design = designs[Math.Min(target.Design, designs.Length - 1)];
             var mine = target.Owner == snapshot.PlayerId;
             var color = mine ? Theme.Accent : Theme.Info;
+
             var size = new float2(Kit.Px(HudLayout.TargetReadoutWidth), Kit.Px(HudLayout.TargetReadoutHeight));
             var min = new float2((display.X - size.X) * 0.5f, HudTop);
             Kit.PanelFrame(draw, min, min + size);

@@ -15,6 +15,8 @@
   "shieldRecharge": 1,
   // How fast a jump drive charges. The energy a jump takes stays the same. Unit: multiplier; range: 0.25–4; default: 1.
   "jumpChargeSpeed": 1,
+  // Transit speed in kilometres per second (1 to 400).
+  "ftlSpeedKmPerSecond": 40,
   // How many hit points every block has. Unit: multiplier; range: 0.25–4; default: 1.
   "hullStrength": 1,
   // 1x is the former maximum preset. Scales requested counts, including home. Zero removes all asteroids. Placement can fall short in crowded fields. Unit: multiplier; range: 0–5; default: 1.

@@ -270,3 +270,10 @@ Lightning at the sensor centre intermittently cuts its range budget, using share
 Hull snapshots carry cold/lightning/disrupted flags. Proximity and ownership disclosure remain unchanged.
 The renderer must consume snapshot time and invalidate stationary outlines at burst edges.
 Numbers and integration contract: [gas kinds](../gas-clouds.md#decided-provisional-tunable-kinds-and-renderer-integration).
+
+### FTL markers
+
+- Live replicated hulls in transit show an FTL tag, destination line and short fading route trail.
+- Galaxy map and command view read the same hull phase and destination; neither generates hidden sector details.
+- `ServerHost.MaySeeHull` controls ordinary and FTL disclosure. Ownership and current sensors apply today.
+  Party, friend and alliance visibility remains undecided.

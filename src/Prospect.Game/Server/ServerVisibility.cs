@@ -58,6 +58,13 @@ public sealed partial class ServerHost
         }
     }
 
+    // All ordinary and FTL hull disclosure goes through this policy before replication.
+    private bool MaySeeHull(Connection viewer, int slot, long tick) =>
+        _hulls.IsAliveAt(slot) && (_hulls.Info(slot).Owner == viewer.PlayerId
+            || Covered(viewer.PlayerId, _hulls.State(slot).Position)
+            || (_hulls.State(slot).Jump != JumpPhase.Tunnel
+                && viewer.ContactIds[slot] == _hulls.HandleAt(slot).Packed && viewer.ContactUntil[slot] >= tick));
+
     private void UpdateVisibility(Connection connection, long tick)
     {
         var changed = !connection.VisibilitySent;
@@ -77,9 +84,7 @@ public sealed partial class ServerHost
             {
                 var slot = word * 64 + b;
                 if (slot >= _hulls.Slots) break;
-                if (_hulls.IsAliveAt(slot) && (_hulls.Info(slot).Owner == connection.PlayerId
-                    || (connection.ContactIds[slot] == _hulls.HandleAt(slot).Packed && connection.ContactUntil[slot] >= tick)
-                    || Covered(connection.PlayerId, _hulls.State(slot).Position))) bits |= 1UL << b;
+                if (MaySeeHull(connection, slot, tick)) bits |= 1UL << b;
             }
             changed |= connection.Visible[word] != bits;
             connection.Visible[word] = bits;

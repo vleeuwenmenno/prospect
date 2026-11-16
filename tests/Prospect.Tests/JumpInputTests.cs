@@ -82,7 +82,7 @@ public sealed class JumpInputTests
     }
 
     [Fact]
-    public void ThePatternFromTheOrderOnReachesTheTunnelAtTheTarget()
+    public void ThePatternFromTheOrderOnMovesThroughTransitToTheTarget()
     {
         var flight = Content.Pod.Flight;
         var state = HullState.Spawn(Origin, flight);
@@ -96,6 +96,8 @@ public sealed class JumpInputTests
         }
 
         Assert.True(entered);
+        Assert.NotEqual(target, state.Position);
+        while (state.Jump == JumpPhase.Tunnel) HullSim.Step(ref state, ref order, default, flight);
         Assert.Equal(target, state.Position);
     }
 
@@ -117,7 +119,7 @@ public sealed class JumpInputTests
     public void ACancelOnceTheHullIsInTheTunnelCannotBringItBack()
     {
         var (state, order, flight) = InStage(JumpPhase.Tunnel);
-        var target = state.Position;
+        var target = order.Target;
         HullSim.SetOrder(ref state, ref order, default);
         var ticks = 0;
         while (state.Jump == JumpPhase.Tunnel && ticks++ < 4000)

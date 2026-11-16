@@ -218,6 +218,23 @@ internal sealed partial class ScreenHost
 
             var at = view.ToScreen((float)(position.X / size), (float)(position.Y / size), (float)(position.Z / size));
             DrawStalk(draw, view, position, size, at, mine ? Theme.Accent : Theme.Info);
+            if (hull.Jump == JumpPhase.Tunnel)
+            {
+                var color = mine ? Theme.Accent : Theme.Info;
+                var target = hull.Order.Target;
+                var end = view.ToScreen((float)(target.X / size), (float)(target.Y / size), (float)(target.Z / size));
+                draw.AddLine(at, end, Kit.Color(color, 0.4f));
+                Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, at + new float2(Kit.Px(10), -Kit.Px(16)), color, "FTL"u8);
+                var direction = Vector3.Transform(-Vector3.UnitZ, hull.Orientation);
+                var previous = at;
+                for (var trail = 1; trail <= 8; trail++)
+                {
+                    var point = position - direction * (snapshot.Content.Designs[hull.Design].Flight.FtlSpeed * (float)Math.Min(hull.JumpTunnelElapsed, trail * 0.05));
+                    var next = view.ToScreen((float)(point.X / size), (float)(point.Y / size), (float)(point.Z / size));
+                    draw.AddLine(previous, next, Kit.Color(color, (9 - trail) / 10f), Kit.Px(2));
+                    previous = next;
+                }
+            }
             if (!mine)
             {
                 // A hull the server lets the player see is live: a filled marker in the sensor colour.

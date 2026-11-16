@@ -1092,7 +1092,7 @@ internal sealed partial class ClientWorld : IDisposable
             ref var info = ref _near.Info(index);
             ref var state = ref _near.State(index);
             var mine = remote.Owner == _playerId;
-            info.Order = mine ? sample.Order : default;
+            info.Order = mine || sample.State.Jump == JumpPhase.Tunnel ? sample.Order : default;
             state = sample.State;
             _near.Flight(index) = remote.Flight;
 
@@ -1191,7 +1191,8 @@ internal sealed partial class ClientWorld : IDisposable
 
                 // A jump moves a hull further in one step than it could ever fly: show it at one end or the
                 // other, never somewhere along the line between.
-                if (b.State.Position.RelativeTo(a.State.Position).LengthSquared() > JumpGap * JumpGap)
+                if (a.State.Jump != JumpPhase.Tunnel && b.State.Jump != JumpPhase.Tunnel
+                    && b.State.Position.RelativeTo(a.State.Position).LengthSquared() > JumpGap * JumpGap)
                     t = t < 0.5f ? 0f : 1f;
                 view.Position = Double3.Lerp(a.State.Position, b.State.Position, t);
                 view.Orientation = Quaternion.Slerp(a.State.Orientation, b.State.Orientation, t);

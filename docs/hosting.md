@@ -1054,3 +1054,13 @@ Active module spending is shared with client prediction through `ModuleScanRules
 - Only an active, admitted in-process connection may request changes, after normal receive budgets.
   Applied values broadcast reliably to every admitted client, including late joiners, and persist in saves.
 - Shared evaluator 14 derives live COM and COM inertia. Flight and prediction use the same origin integration.
+
+### Moving FTL transit (protocol 57)
+
+- Visible transit records retain `Order.Target` for every viewer; other foreign orders still hide destinations.
+- `HullRecord` already carries phase, Double3 position, destination and transit clocks. Its byte bound is unchanged.
+  The existing 255-record budget still applies.
+- `ServerHost.MaySeeHull` owns disclosure for ordinary and travelling hulls. Transit uses ownership or current
+  sensor coverage, without the brief collision-contact exception. No party or friend bypass exists.
+- Prediction steps the same `HullSim` transit as authority. It does not invent a second travel clock.
+- `ftlSpeedKmPerSecond` is a world setting, also accepted by the server settings file; default 40, bounds 1–400.

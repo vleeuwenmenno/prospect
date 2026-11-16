@@ -219,6 +219,7 @@ public sealed record FlightRules
             CollisionDamagePerTonneSpeedSquared = CollisionDamagePerTonneSpeedSquared * catalog.Number(settings, "collisionDamage"),
             CollisionShieldCost = catalog.Number(settings, "collisionShields"),
             ShieldRechargeMultiplier = catalog.Number(settings, "shieldRecharge"),
+            FtlSpeed = catalog.Number(settings, "ftlSpeedKmPerSecond") * 1000,
             FtlChargeMultiplier = catalog.Number(settings, "jumpChargeSpeed"),
             HullStrength = catalog.Number(settings, "hullStrength"),
             SectorSize = catalog.Number(settings, "sectorSize") * 1000,

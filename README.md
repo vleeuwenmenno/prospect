@@ -381,8 +381,9 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   turns its nose to the destination, then calculates for 12 seconds while charging from the hull's power.
   Both must finish; jump charge speed affects charging only. A bigger ship needs more energy, and a weak or
   drained battery charges slower. Once ready, the hull is
-  in transit for three seconds plus one second per 40 km of straight-line distance.
-  Base time and speed are content tuning; there is no distance energy cost.
+  moving along the straight route at 40 km/s by default: duration is distance divided by speed.
+  `ftlSpeedKmPerSecond` sets that speed for the world; there is no distance energy cost.
+  Visible travelling ships have an FTL marker, destination line and fading trail; transit has no collision.
   The server requires at least 5 km and at most the live drive’s derived range (ten sectors, 800 km by default). Blind jumps through one sector width (80 km by default) are safe; farther ones risk
   proportional block damage, never below 10% intact hull HP. Personal destination charts remove blind risk.
   The map card, the map's course menu and the command view's right-click menu show the distance against the
@@ -732,6 +733,7 @@ the generation cap does not mean every rock in every visible sector draws simult
 | `collisionDamage` | 0 to 4 | 1 | Multiplies collision damage. At 0 collisions push but never damage. |
 | `collisionShields` | `Full`, `Weak`, `None` | `Full` | `Full`: the shield absorbs a collision. `Weak`: it absorbs it but drains four times as fast. `None`: collisions pass the shield and hit the blocks. |
 | `shieldRecharge` | 0.25 to 4 | 1 | Multiplies how fast shields recharge. |
+| `ftlSpeedKmPerSecond` | 1 to 400 km/s | 40 | Straight-line jump transit speed; preparation and arrival unchanged. |
 | `jumpChargeSpeed` | 0.25 to 4 | 1 | Multiplies how fast a jump drive charges. A jump takes the same energy. |
 | `wreckLifetimeMinutes` | 0 to 1440 | 30 | Unattended wreck lifetime; 0 never expires. Local host can change it live. |
 | `wreckMaxPerSector` | 1 to 255 | 64 | Sector wreck cap; oldest removed first. Local host can change it live. |

@@ -51,7 +51,7 @@ public sealed class ShieldClockTests
             {
                 state.Jump = JumpPhase.Tunnel;
                 state.JumpTunnelSeconds = 600;
-                store.Info(i).Order = new HullOrder { Kind = OrderKind.Jump, Target = state.Position + new Double3(10000, 0, 0) };
+                store.Info(i).Order = new HullOrder { Kind = OrderKind.Jump, Target = state.Position + new Double3(24000000, 0, 0) };
             }
         }
         Assert.True(pilot >= 0);

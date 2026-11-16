@@ -359,7 +359,7 @@ public static class HullSim
     /// <summary>Numerical duration ceiling: double elapsed time retains sub-tick precision up to this value.</summary>
     public const float MaxJumpTravelSeconds = 1099511627776f;
 
-    /// <summary>Base transit plus Euclidean world distance over speed; NaN means numerically unsupported.</summary>
+    /// <summary>Euclidean world distance over speed; NaN means numerically unsupported.</summary>
     public static float JumpTravelSeconds(Double3 departure, Double3 target, in FlightParams flight)
     {
         var speed = flight.FtlSpeed;
@@ -369,7 +369,7 @@ public static class HullSim
             !float.IsFinite(flight.FtlTunnelSeconds) || flight.FtlTunnelSeconds < 0)
             return float.NaN;
         var unit = scale > 0 ? new Double3(delta.X / scale, delta.Y / scale, delta.Z / scale) : Double3.Zero;
-        var seconds = flight.FtlTunnelSeconds + scale / speed * unit.Length;
+        var seconds = scale / speed * unit.Length;
         return double.IsFinite(seconds) && seconds <= MaxJumpTravelSeconds ? (float)seconds : float.NaN;
     }
 
@@ -396,6 +396,7 @@ public static class HullSim
             state.JumpTunnelSeconds = 0;
             state.JumpTunnelElapsed = 0;
         }
+        if (state.Jump is JumpPhase.Tunnel or JumpPhase.Arrive) return;
         current = next;
     }
 
@@ -479,18 +480,29 @@ public static class HullSim
                     if (state.JumpTimer < flight.FtlEnergy || state.JumpCalculation < flight.FtlCalculateSeconds)
                         return false;
 
-                    state.Position = order.Target;
+                    state.JumpTunnelSeconds = JumpTravelSeconds(state.Position, order.Target, flight);
+                    var forward = System.Numerics.Vector3.Normalize(order.Target.RelativeTo(state.Position));
+                    if (float.IsFinite(forward.X))
+                    {
+                        var up = MathF.Abs(forward.Y) > 0.99f ? System.Numerics.Vector3.UnitX : System.Numerics.Vector3.UnitY;
+                        state.Orientation = System.Numerics.Quaternion.CreateFromRotationMatrix(
+                            System.Numerics.Matrix4x4.CreateWorld(System.Numerics.Vector3.Zero, forward, up));
+                    }
                     state.Velocity = System.Numerics.Vector3.Zero;
                     state.AngularVelocity = System.Numerics.Vector3.Zero;
                     state.Jump = JumpPhase.Tunnel;
                     state.JumpTimer = 0;
-                    return true;
+                    goto case JumpPhase.Tunnel;
                 }
 
             case JumpPhase.Tunnel:
-                state.JumpTunnelElapsed += Dt;
+                var delta = order.Target - state.Position;
+                var remaining = delta.Length;
+                var travel = (double)flight.FtlSpeed * Dt;
+                state.Position = remaining <= travel ? order.Target : state.Position + delta * (travel / remaining);
+                state.JumpTunnelElapsed = Math.Min(state.JumpTunnelSeconds, state.JumpTunnelElapsed + Dt);
                 state.JumpTimer = (float)state.JumpTunnelElapsed;
-                if (state.JumpTunnelElapsed >= state.JumpTunnelSeconds)
+                if (remaining <= travel)
                 {
                     state.Jump = JumpPhase.Arrive;
                     state.JumpTimer = 0;
@@ -1063,6 +1075,7 @@ public static class HullSim
     /// </summary>
     internal static bool Damage(ref HullState state, in FlightParams flight, ref HullBody body, scoped ReadOnlySpan<ulong> touching, int touchCount, float amount, Vector3? shieldPoint = null)
     {
+        if (state.Jump == JumpPhase.Tunnel) return false;
         body.Damaged = true;
         state.ShieldCooldown = flight.ShieldDelay;
         var remaining = amount;
@@ -1130,6 +1143,7 @@ public static class HullSim
     /// <summary>Reports a light contact without changing charge, damage or the recharge delay.</summary>
     internal static void ShieldContact(ref HullState state, in FlightParams flight, HullDesign design, ReadOnlySpan<ulong> touching, float closing, Vector3? shieldPoint = null, float contactMass = 0f)
     {
+        if (state.Jump == JumpPhase.Tunnel) return;
         if (closing < flight.ShieldContactSpeed || closing <= 0 || flight.CollisionShieldCost <= 0 || flight.ShieldCapacity <= 0 || state.ShieldOffline || state.Shield <= 0)
             return;
         RecordShieldHit(ref state, flight, design, touching, 0f, shieldPoint, 0.5f * (contactMass > 0 ? contactMass : flight.Mass) * closing * closing);
