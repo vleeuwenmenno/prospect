@@ -141,6 +141,8 @@ public enum EditorRequestKind : byte
 
     /// <summary>Debug, local only: add a full or empty container to one existing rack.</summary>
     AddContainer = 6,
+    /// <summary>Release one selected container from the controlled hull; available in remote games too.</summary>
+    JettisonContainer = 7,
 }
 
 /// <summary>The block indices of a <see cref="EditorRequestKind.FillTank"/> request, fixed so reading one takes no memory.</summary>
@@ -176,7 +178,9 @@ public struct EditorRequestMessage
 
     /// <summary>With <see cref="EditorRequestKind.FillTank"/>: block indices of the edited hull's design.</summary>
     public FillBlocks Blocks;
-    public int CargoRack, CargoSize, CargoResource;
+    public int CargoRack, CargoSize, CargoResource, CargoIndex;
+    public long CargoTick;
+    public const int JettisonWireSize = 23;
     public const int AddContainerWireSize = 1 + 1 + 4 + 4 + 1 + 1;
 
     public readonly void Write(ref NetWriter writer, scoped ReadOnlySpan<byte> hash)
@@ -185,6 +189,11 @@ public struct EditorRequestMessage
         writer.WriteByte((byte)Kind);
         writer.WriteUInt32(Kind == EditorRequestKind.Begin ? Hull : Token);
         if (Kind == EditorRequestKind.NewShip) { Name.Write(ref writer); return; }
+        if (Kind == EditorRequestKind.JettisonContainer)
+        {
+            writer.WriteUInt32(Hull); writer.WriteInt32(CargoRack); writer.WriteByte((byte)CargoIndex); writer.WriteInt64(CargoTick);
+            return;
+        }
         if (Kind == EditorRequestKind.AddContainer)
         {
             writer.WriteInt32(CargoRack);
@@ -212,7 +221,7 @@ public struct EditorRequestMessage
         message = default;
         var kind = reader.ReadByte();
         var value = reader.ReadUInt32();
-        if (!reader.IsValid || kind > (byte)EditorRequestKind.AddContainer)
+        if (!reader.IsValid || kind > (byte)EditorRequestKind.JettisonContainer)
             return false;
         message.Kind = (EditorRequestKind)kind;
         if (message.Kind == EditorRequestKind.Begin)
@@ -220,6 +229,12 @@ public struct EditorRequestMessage
         else
             message.Token = value;
         if (message.Kind == EditorRequestKind.NewShip) return ShipName.Read(ref reader, out message.Name);
+        if (message.Kind == EditorRequestKind.JettisonContainer)
+        {
+            message.Hull = reader.ReadUInt32(); message.CargoRack = reader.ReadInt32(); message.CargoIndex = reader.ReadByte(); message.CargoTick = reader.ReadInt64();
+            return reader.IsValid && reader.Remaining == 0 && message.Hull != 0 && message.CargoRack >= 0
+                && message.CargoIndex < World.BlockStateStore.MaxContainers && message.CargoTick >= 0;
+        }
         if (message.Kind == EditorRequestKind.AddContainer)
         {
             message.CargoRack = reader.ReadInt32();

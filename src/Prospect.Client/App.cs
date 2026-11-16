@@ -204,6 +204,8 @@ internal sealed class AppOptions
 
     /// <summary>With <c>--hurt-fleet</c>, <c>--hurt-kind tank</c> takes the flown hull's last fuel tank instead.</summary>
     public bool HurtFleetTank { get; set; }
+    public bool HurtFleetCargo { get; set; }
+    public float? JettisonSeconds { get; set; }
     /// <summary>Scripted private capture: cut the flown hull.</summary>
     public bool CutHull { get; set; }
 
@@ -664,6 +666,7 @@ internal sealed class App : IDisposable
                 ScriptedFleetHurtSeconds = _options.HurtFleetSeconds,
                 ScriptedFleetHurtBroken = _options.HurtFleetBroken,
                 ScriptedFleetHurtTank = _options.HurtFleetTank,
+                ScriptedFleetHurtCargo = _options.HurtFleetCargo,
                 ScriptedCutHull = _options.CutHull,
                 SpawnSector = spawn,
                 ChartedRadius = _options.ChartedRadius,
@@ -1253,6 +1256,8 @@ internal sealed class App : IDisposable
             {
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
                 World.ScriptCargoForCapture(view == "cargo");
+                World.CaptureJettisonSeconds = _options.JettisonSeconds;
+                World.CaptureCargoSpace = _options.HurtFleetCargo || _options.JettisonSeconds is not null;
             }
             else if (view is "edit-fill" or "edit-fill-done" && snapshot is { OwnHull: >= 0 })
             {
@@ -1594,6 +1599,11 @@ internal sealed class App : IDisposable
                 {
                     var thrust = World.Own.Thrust;
                     Console.WriteLine($"capture {_capturesTaken:D2} thrust: {thrust.X} {thrust.Y} {thrust.Z}, flags {thrust.Flags}; plumes {World.DrawnPlumes}; shield contacts {World.ExhaustContacts}; splash radius/strength/contact distance/plume length {World.ExhaustSample}");
+                }
+                if ((_options.JettisonSeconds is not null || _options.HurtFleetCargo) && Session is not null)
+                {
+                    if (World.TryGetContainer(1, out var loose)) Console.WriteLine($"capture cargo position: {loose.Position.RelativeTo(World.OwnPosition)}; on screen {World.Project(loose.Position, out var screen)} at {screen}");
+                    Console.WriteLine($"capture cargo: free {World.FreeContainerCount}, drawn {World.DrawnFreeContainers}, target {World.TargetContainer}");
                 }
                 if (World.PulseShown.Strength > 0f)
                     Console.WriteLine($"capture {_capturesTaken:D2} scan pulse: radius {World.PulseShown.Radius:F0} m, strength {World.PulseShown.Strength:F2}");

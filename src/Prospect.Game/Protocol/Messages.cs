@@ -97,6 +97,9 @@ public enum MessageId : byte
     WreckSettings = 35,
     /// <summary>Reliable own-hull hold state.</summary>
     Cargo = 36,
+
+    /// <summary>Server to client: sensor-visible free containers.</summary>
+    FreeContainers = 37,
 }
 
 public enum RejectReason : byte
@@ -173,7 +176,7 @@ public static class ProtocolInfo
     /// index in a list both ends generate for themselves, so two builds that generate differently would mean
     /// different rocks by the same number. Client and server must match exactly.
     /// </summary>
-    public const uint Version = 58;
+    public const uint Version = 59;
 
     public const ushort DefaultPort = 27420;
     public const int MaxNameBytes = 48;

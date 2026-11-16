@@ -139,6 +139,23 @@ public sealed class PlayerInputBridge
             _hasCargoAdd = true;
         }
     }
+    /// <summary>Queues a selected hold slot together with the authoritative hold tick the player saw.</summary>
+    public void JettisonContainer(uint token, uint hull, int rack, int index, long tick)
+    {
+        lock (_lock)
+        {
+            _cargoAdd = new EditorRequestMessage
+            {
+                Kind = EditorRequestKind.JettisonContainer,
+                Token = token,
+                Hull = hull,
+                CargoRack = rack,
+                CargoIndex = index,
+                CargoTick = tick
+            };
+            _hasCargoAdd = true;
+        }
+    }
     internal EditorRequestMessage TakeCargoAdd() => _takenCargoAdd;
 
     private FillBlocks _fillBlocks;

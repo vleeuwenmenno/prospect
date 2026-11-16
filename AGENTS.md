@@ -100,7 +100,7 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   allocations; adds validate payload/health and repack atomically. Density is shared cargo content. Payload is kg,
   galaxy resource index (-1 for empty), size, HP and rack/slot. `CargoTransfer` repacks retained racks by type and grid
   anchor; client `CanApply` and server preflight refuse cargo loss. Repair preserves cargo, wreck copies keep their
-  racks' containers, rack loss discards them until step 2. Shared `BoxHullSums` adds cargo mass and rack-distributed
+  racks' containers, damage-only rack loss ejects them; generic loss and wreck splitting never eject. Shared `BoxHullSums` adds cargo mass and rack-distributed
   moments on both simulation sides. Protocol 58 sends the own hold reliably on change (`CargoMessage`, 6135 B max),
   never in the full 255-hull snapshot. Codec 12 captures hold records and old cargo rules; corrupt originals refuse,
   current retunes repack and log drops. `GameContent.SaveIdentity` allows only cargo tuning/capacity retunes.
@@ -868,3 +868,22 @@ How to apply it:
 - Public types and members get a `<summary>`.
 - Report results plainly: what passed, what failed, what was not verified.
 - Commit and push only when asked.
+
+
+## Free containers: cargo step 2
+
+- `FreeContainers` is a fixed 256-body pool, separate from hull records. `ContainerSimulation` drifts and uses
+  shared rock/box contacts with rotating bounded work. `blocks/cargo.json` owns cap, contact and release tuning.
+- `BlockStateStore.Hit` invokes `CargoEjection` only on positive-to-zero rack HP, before generic `Lose`.
+  Never eject inside `Lose`: wreck splitting copies racks with cargo and removes generic source blocks.
+- `ServerCargoEjection` validates jettison token, owner, controlled hull, rack, slot and the hold tick/revision.
+  `PlayerInputBridge.JettisonContainer` works locally and remotely. The separate rack panel leaves model looks alone.
+- Protocol 59: reliable message 37, 82-byte body records, 21,003-byte full-set maximum at 10 Hz; sensor/gas coverage
+  through `MaySeeContainer`/`Covered`, as used by `MaySeeHull`. No ownership bypass and no hull snapshot growth.
+- Codec 13 saves bodies and birth/age/id clocks. `containerLifetimeMinutes` defaults to 60, zero never;
+  connected pilots within the base sensor radius pause aging. Oldest-first caps remain active.
+- `FreeContainerVisuals` interpolates and detects contact velocity changes; existing worker container meshes draw
+  the result. Middle-click shows the target panel. No pickup, tractor or weapon support yet.
+- Tests: `FreeContainerTests`, `FreeContainerWireTests`, `FreeContainerSaveTests`, `FreeContainerEjectionTests`,
+  `FreeContainerVisualTests`, and two-client jettison in `EditorSessionTests`.
+  Capture: `--open cargo --jettison 6`, or `--open cargo --hurt-fleet 7 --hurt-kind cargo`, always with `--capture`.

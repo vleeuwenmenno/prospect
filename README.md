@@ -17,6 +17,10 @@ collide, split again, and survive saves. Cleanup is configurable; salvage and re
 Cargo racks have open-frame models, content-defined container sizes and shared deterministic packing.
 Cargo payload mass affects flight and client prediction through the same shared simulation.
 Own hull cargo is held by the server, saved, replicated and drawn; local debug loading is available in the editor.
+Select an applied rack, choose a container in its cargo panel, then JETTISON SELECTED in local or remote games.
+Destroyed racks eject intact containers; wreck splits retain cargo. Free containers drift, collide, take damage,
+and persist in saves. Middle-click a free container to see its size, resource, amount and HP.
+Cleanup defaults to 60 unattended minutes (`containerLifetimeMinutes`, 0 means never). Tractor pickup is not built.
 
 
 Propulsion burns fuel and is directional: engines, hot thrusters and cold gas thrusters each push the opposite way
@@ -990,4 +994,4 @@ integration; mining and physical container pickup remain absent.
 - Local editor: select an applied rack, choose size/resource, then **ADD CONTAINER (DEBUG)**. Empty is available.
 - Flight and editor draw the contents; ship data shows used/capacity u and cargo kg.
 - Apply refuses cargo loss; repair and wreck splits retain surviving racks' contents. Rack destruction loses them for now.
-- Protocol 58 and save codec 12 include cargo alongside moving FTL. Physical pickup, unloading and mining output remain unbuilt.
+- Protocol 59 and save codec 13 include holds and free containers alongside moving FTL. Tractor pickup and mining output remain unbuilt.

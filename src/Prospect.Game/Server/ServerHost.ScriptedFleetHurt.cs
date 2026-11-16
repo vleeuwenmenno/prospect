@@ -4,7 +4,7 @@ public sealed partial class ServerHost
 {
     private long _scriptedFleetHurtTick = -1;
     private bool _scriptedFleetHurtBroken;
-    private bool _scriptedFleetHurtTank;
+    private bool _scriptedFleetHurtTank, _scriptedFleetHurtCargo;
     private bool _scriptedCutHull;
 
     /// <summary>
@@ -37,6 +37,20 @@ public sealed partial class ServerHost
                         _hulls.BlockStates.Lose(info.BlockState, b);
                 }
                 _hulls.State(own).AngularVelocity = new System.Numerics.Vector3(0, 0.3f, 0);
+                continue;
+            }
+            if (_scriptedFleetHurtCargo)
+            {
+                var info = _hulls.Info(own);
+                var design = _content.Designs[info.Design];
+                for (var b = 0; b < design.BlockCount; b++)
+                {
+                    if (design.Types[b].Cargo <= 0 || !_hulls.BlockStates.Hit(info.BlockState, b, float.MaxValue)) continue;
+                    _hulls.Info(own).DamageTick = _tick;
+                    _hulls.State(own).Hull = (float)_hulls.BlockStates.HitTotal(info.BlockState);
+                    _field.Refit(own);
+                    break;
+                }
                 continue;
             }
             if (_scriptedFleetHurtTank)

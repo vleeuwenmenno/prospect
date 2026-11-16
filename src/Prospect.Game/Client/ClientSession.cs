@@ -145,7 +145,13 @@ public sealed class SessionSnapshot(GameContent content)
     public readonly float[] OwnTanks = new float[TankFuel.MaxTanks];
 
     /// <summary>Fixed storage behind the controlled hull cargo view.</summary>
+    public long OwnCargoTick;
     public readonly HoldContainer[] OwnCargo = new HoldContainer[BlockStateStore.MaxContainers];
+
+    /// <summary>Snapshot-owned loose cargo, filtered by the server's sensor coverage.</summary>
+    public readonly FreeContainer[] FreeContainers = new FreeContainer[Prospect.Game.World.FreeContainers.Capacity];
+    public int FreeContainerCount;
+    public long FreeContainerTick;
 
     /// <summary>Index of the player's own hull in <see cref="Hulls"/>, or -1 before it exists.</summary>
     public int OwnHull = -1;
@@ -379,6 +385,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         if (snapshot.HullCount == 0)
             snapshot.OwnHull = -1;
         _world.PublishCargo(snapshot);
+        _world.PublishFreeContainers(snapshot);
         snapshot.OwnIsDrone = _state == SessionState.Active && snapshot.HullCount > 0 && _world.OwnIsDrone;
         snapshot.Dampeners = _world.Dampeners;
         snapshot.PredictionError = _world.PredictionError;
@@ -504,6 +511,9 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                     break;
                 }
 
+            case MessageId.FreeContainers when _state == SessionState.Active && channel == NetChannel.Reliable && payload.Length <= FreeContainerMessage.MaxWireSize:
+                _world.OnFreeContainers(ref reader);
+                break;
             case MessageId.Cargo when _state == SessionState.Active && channel == NetChannel.Reliable && payload.Length <= CargoMessage.MaxWireSize:
                 _world.OnCargo(ref reader);
                 break;

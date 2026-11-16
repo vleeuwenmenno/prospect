@@ -5,6 +5,8 @@
 {
   // Wrecks age only outside connected player sensor range; zero means never expire.
   "wreckLifetimeMinutes": 30,
+  // Loose-container lifetime in unattended minutes; range: 0–1440; default: 60. 0 disables expiry.
+  "containerLifetimeMinutes": 60,
   // Per-sector wreck cap, oldest removed first.
   "wreckMaxPerSector": 64,
   // How hard a collision hits. At 0 collisions push but never damage. Unit: multiplier; range: 0–4; default: 1.

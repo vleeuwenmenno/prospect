@@ -318,6 +318,23 @@ public sealed partial class ServerHost
         world.Owners.AsSpan(0, world.OwnerCount).CopyTo(_owners);
 
         _ownerCount = world.OwnerCount;
+        if ((uint)world.FreeContainerCount > FreeContainers.Capacity) throw new InvalidDataException("Too many free containers.");
+        if (world.FreeContainerCount > 0 && !world.CargoRules.Valid(Galaxy.Resources.Length))
+            throw new InvalidDataException("Invalid saved cargo rules.");
+        var keptContainers = 0;
+        for (var i = 0; i < world.FreeContainerCount; i++)
+        {
+            var c = world.FreeContainers[i];
+            if (!WorldSnapshotCodec.ValidFreeContainer(c, world.CargoRules, world.NextWorldTick, world.NextContainerId))
+                throw new InvalidDataException("Invalid saved free container.");
+            for (var j = 0; j < i; j++)
+                if (world.FreeContainers[j].Id == c.Id) throw new InvalidDataException("Duplicate free container identity.");
+            if (!FreeContainers.Valid(_content, c))
+            { Logs.Sim.Warning($"Dropped free container {c.Id} after cargo content retune."); continue; }
+            _containerSend[keptContainers++] = c;
+        }
+        _containers.Restore(_containerSend.AsSpan(0, keptContainers), world.NextContainerId);
+        _containers.EnforceCaps(_content);
         RestoreCharts(world);
         RestoreModules(world);
 
@@ -531,6 +548,9 @@ public sealed partial class ServerHost
         buffer.TankCount = 0;
         buffer.CargoCount = 0;
         buffer.CargoRules = SavedCargoRules.Of(_content);
+        buffer.FreeContainerCount = _containers.Items.Length;
+        buffer.NextContainerId = _containers.NextId;
+        _containers.Items.CopyTo(buffer.FreeContainers);
         for (var i = 0; i < _hulls.Slots; i++)
         {
             if (!_hulls.IsAliveAt(i))

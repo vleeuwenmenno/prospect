@@ -42,6 +42,7 @@ public sealed class ServerConfig
     /// fuel tank, for the fuel callout's captures.
     /// </summary>
     public bool ScriptedFleetHurtTank { get; init; }
+    public bool ScriptedFleetHurtCargo { get; init; }
     /// <summary>Scripted private captures: cut the flown hull across its middle.</summary>
     public bool ScriptedCutHull { get; init; }
 
@@ -283,6 +284,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public readonly Dictionary<SectorCoord, long> SentCharts = new(ExplorationRules.MaxChartsPerOwner);
         public int RockCursor;
         public int SensorHead = -1;
+        public bool FreeContainersSent;
         public readonly uint[] ContactIds = new uint[HullStore.MaxHulls], VisibleIds = new uint[HullStore.MaxHulls], Destroyed = new uint[HullStore.MaxHulls];
         public readonly long[] ContactUntil = new long[HullStore.MaxHulls];
         public readonly Dictionary<RockRef, RockDelta> SentRocks = new(SaveLimits.Default.MaxRocks);
@@ -292,6 +294,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         /// <summary>The slot of the durable owner this connection was let in as; -1 in a world that is not saved.</summary>
         public long WreckSettingsVersion;
         public uint CargoHull, CargoRevision;
+        public long CargoTick;
         public int OwnerSlot = -1;
         public readonly InputTimeline Inputs = new();
         public uint ControlEpoch = 1;
@@ -304,6 +307,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public void Reset()
         {
             Array.Clear(Visible);
+            FreeContainersSent = false;
             Array.Clear(ContactIds);
             Array.Clear(ContactUntil);
             Array.Clear(VisibleIds);
@@ -360,6 +364,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             OwnerSlot = -1;
             WreckSettingsVersion = 0;
             CargoHull = CargoRevision = 0;
+            CargoTick = 0;
             Inputs.Clear();
             ControlEpoch = 1;
             LastSimulatedSequence = 0;
@@ -409,6 +414,8 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     // Replaced, never changed, when a design is added: the same content with one more design at the end.
     private GameContent _content;
     private readonly RockField _rocks;
+    private readonly FreeContainers _containers = new();
+    private readonly ContainerSimulation _containerSimulation;
     private readonly RockImpulses _impulses = new();
     private readonly string _name;
 
@@ -474,6 +481,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                     throw new InvalidDataException("A scripted fleet hurt needs an unsaved private in-process server and a time of 0 to 600 s.");
                 _scriptedFleetHurtBroken = config.ScriptedFleetHurtBroken;
                 _scriptedFleetHurtTank = config.ScriptedFleetHurtTank;
+                _scriptedFleetHurtCargo = config.ScriptedFleetHurtCargo;
                 _scriptedCutHull = config.ScriptedCutHull;
                 _scriptedFleetHurtTick = (long)MathF.Ceiling(hurtAt / HullSim.Dt);
             }
@@ -574,6 +582,8 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
             // A saved world's asteroids are bounded before they are pushed, never when they are saved.
             _rocks = new RockField(Galaxy, _saveLimits.MaxRocks, _saveLimits.MaxMovedSectors);
+            _containerSimulation = new ContainerSimulation(Galaxy);
+            _hulls.BlockStates.CargoEjection = EjectDestroyedRack;
 
             // Room for the largest design the editor can add, taken now: a new design costs the tick no memory.
             _wreckSettings = new((int)(_content.Rules.WreckLifetimeTicks / 3600), _content.Rules.WreckMaxPerSector);
@@ -853,9 +863,12 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 _hulls.Destroy(handle);
         }
 
+        _containerSimulation.Step(_containers, _content, _field, _rocks, _tick);
         TickWreckage();
         SendCargo();
         GatherSensors();
+        CleanupFreeContainers();
+        SendFreeContainers();
         foreach (var connection in _connections)
             if (connection.State == ConnectionState.Active && connection.CatalogueReady) UpdateVisibility(connection, tick);
 

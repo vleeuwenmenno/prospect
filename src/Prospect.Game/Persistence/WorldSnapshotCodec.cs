@@ -26,7 +26,7 @@ namespace Prospect.Game.Persistence;
 public static partial class WorldSnapshotCodec
 {
     /// <summary>The layout's version. A save with any other is refused; there are no migrations yet.</summary>
-    public const int Version = 12;
+    public const int Version = 13;
     internal const int ChartBytes = 4 + 12 + 8;
 
     /// <summary>"PWS1": tells a save from any other bytes before its version is believed.</summary>
@@ -52,7 +52,7 @@ public static partial class WorldSnapshotCodec
         + 1 + WorldSettings.Capacity * (1 + WorldSettingCatalog.MaxIdLength + 4)
         + 8 + 8 + 4 + 8
         + 4 + byte.MaxValue
-        + 8 * 4 + 4 + SavedCargoRules.WireBytes;
+        + 8 * 4 + 4 + SavedCargoRules.WireBytes + 8;
 
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
@@ -62,14 +62,14 @@ public static partial class WorldSnapshotCodec
         long size = 4 + 4 + 4 + 4 + ContentIdentity.WireSize + 16 + 1 + Utf8.GetByteCount(snapshot.Name) + 8 + 8 + 12 + 1;
         for (var i = 0; i < snapshot.SettingCount; i++)
             size += 1 + snapshot.SettingIds[i].Length + 4;
-        size += 8 + 8 + 4 + 8 + 4 + snapshot.StartingFleet.Length + 8 * 4 + 4 + SavedCargoRules.WireBytes;
+        size += 8 + 8 + 4 + 8 + 4 + snapshot.StartingFleet.Length + 8 * 4 + 4 + SavedCargoRules.WireBytes + 8;
         for (var i = 0; i < snapshot.DesignCount; i++)
             size += 4 + SHA256.HashSizeInBytes + snapshot.Designs[i].Length;
         size += (long)snapshot.OwnerCount * OwnerBytes;
         for (var i = 0; i < snapshot.HullCount; i++)
             size += HullFixedBytes + snapshot.Hulls[i].Visual.Count * DentBytes;
         size += (long)snapshot.LossCount * sizeof(int) + (long)snapshot.BlockCount * sizeof(float) + (long)snapshot.TankCount * sizeof(double) + (long)snapshot.CargoCount * CargoRecordBytes;
-        return size + (long)snapshot.RockCount * RockBytes + (long)snapshot.ChartCount * ChartBytes + (long)snapshot.ModuleObservationCount * ModuleObservationBytes;
+        return size + (long)snapshot.FreeContainerCount * FreeContainerBytes + (long)snapshot.RockCount * RockBytes + (long)snapshot.ChartCount * ChartBytes + (long)snapshot.ModuleObservationCount * ModuleObservationBytes;
     }
 
     /// <summary>Encodes a snapshot into an array of exactly its size.</summary>
@@ -145,6 +145,8 @@ public static partial class WorldSnapshotCodec
         writer.WriteInt32(snapshot.ModuleObservationCount);
         writer.WriteInt32(snapshot.CargoCount);
         snapshot.CargoRules.Write(ref writer);
+        writer.WriteInt32(snapshot.FreeContainerCount);
+        writer.WriteUInt32(snapshot.NextContainerId);
 
         for (var i = 0; i < snapshot.DesignCount; i++)
         {
@@ -222,6 +224,8 @@ public static partial class WorldSnapshotCodec
         }
 
         foreach (var record in snapshot.ModuleObservations.AsSpan(0, snapshot.ModuleObservationCount)) WriteModule(ref writer, record);
+
+        foreach (var container in snapshot.FreeContainers.AsSpan(0, snapshot.FreeContainerCount)) WriteFreeContainer(ref writer, container);
 
         if (writer.Length != size)
             throw new InvalidDataException("The snapshot's counts do not describe its records.");
@@ -344,6 +348,8 @@ public static partial class WorldSnapshotCodec
         var observations = reader.ReadInt32();
         var cargoCount = reader.ReadInt32();
         var cargoRules = SavedCargoRules.Read(ref reader);
+        var freeCount = reader.ReadInt32();
+        var nextContainer = reader.ReadUInt32();
         if (!reader.IsValid)
         {
             error = "the save ends inside its header";
@@ -357,7 +363,7 @@ public static partial class WorldSnapshotCodec
         }
 
         // Every count against its limit and against the bytes left, before a single array is taken for it.
-        if (designCount < 1 || pod >= designCount || drone >= designCount
+        if ((uint)freeCount > FreeContainers.Capacity || designCount < 1 || pod >= designCount || drone >= designCount
             || (uint)owners > (uint)limits.MaxOwners || (uint)hulls > (uint)limits.MaxHulls || (uint)blocks > (uint)limits.MaxBlocks
             || (uint)losses > (uint)blocks || (uint)tanks > (uint)blocks || (uint)rocks > (uint)limits.MaxRocks || charts < 0 || charts > limits.MaxCharts
             || observations < 0 || observations > limits.MaxModuleObservations
@@ -368,7 +374,7 @@ public static partial class WorldSnapshotCodec
         }
 
         var promised = (long)designCount * (4 + SHA256.HashSizeInBytes) + (long)owners * OwnerBytes + (long)hulls * HullFixedBytes
-            + (long)losses * sizeof(int) + (long)blocks * sizeof(float) + (long)tanks * sizeof(double) + (long)rocks * RockBytes + (long)charts * ChartBytes + (long)observations * ModuleObservationBytes + (long)cargoCount * CargoRecordBytes;
+            + (long)losses * sizeof(int) + (long)blocks * sizeof(float) + (long)tanks * sizeof(double) + (long)rocks * RockBytes + (long)charts * ChartBytes + (long)observations * ModuleObservationBytes + (long)cargoCount * CargoRecordBytes + (long)freeCount * FreeContainerBytes;
         if (promised > reader.Remaining)
         {
             error = "the save names more than it holds";
@@ -427,6 +433,8 @@ public static partial class WorldSnapshotCodec
             OwnerCount = owners,
             HullCount = hulls,
             CargoRules = cargoRules,
+            FreeContainerCount = freeCount,
+            NextContainerId = nextContainer,
             RockCount = rocks,
             ChartCount = charts,
             ModuleObservationCount = observations,
@@ -578,6 +586,16 @@ public static partial class WorldSnapshotCodec
             { error = "invalid module observation owner, key or time"; return false; }
             observationCounts[record.Owner] = owned + 1;
             result.ModuleObservations[i] = record;
+        }
+
+        for (var i = 0; i < freeCount; i++)
+        {
+            var c = ReadFreeContainer(ref reader);
+            if (!reader.IsValid || !ValidFreeContainer(c, cargoRules, nextTick, nextContainer))
+            { error = "invalid saved free container"; return false; }
+            for (var j = 0; j < i; j++)
+                if (result.FreeContainers[j].Id == c.Id) { error = "duplicate free container identity"; return false; }
+            result.FreeContainers[i] = c;
         }
 
         if (!reader.IsValid || reader.Remaining != 0 || result.BlockCount != blocks || result.LossCount != losses || result.TankCount != tanks || result.CargoCount != cargoCount)

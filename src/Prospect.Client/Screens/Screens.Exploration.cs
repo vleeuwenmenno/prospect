@@ -308,7 +308,7 @@ internal sealed partial class ScreenHost
             : _coverage.ActiveCount == 0 ? "NO SENSOR ON THE SELECTED SHIPS"u8
             : charted ? "SECTOR CHARTED   LIVE INSIDE THE RINGS"u8 : "SECTOR UNCHARTED   SCAN FROM THE MAP CARD"u8;
         var width = Kit.Measure(_ui.Mono, Theme.FontCaption, state).X;
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(MathF.Round((_ui.DisplaySize.X - width) * 0.5f), HudTop + Kit.Px(40)),
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(MathF.Round((_ui.DisplaySize.X - width) * 0.5f), HudTop + Kit.Px(world.TargetContainer != 0 ? 160 : 40)),
             _coverage.ActiveCount == 0 ? Theme.Bad : charted ? Theme.Info : Theme.Accent, state, alpha);
     }
 }

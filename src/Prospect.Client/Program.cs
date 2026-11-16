@@ -399,6 +399,10 @@ internal static class Program
                     options.BreakShieldSeconds = breakAt;
                     i++;
                     break;
+                case "--jettison" when hasValue && float.TryParse(args[i + 1], out var jettisonAt) && jettisonAt is >= 4f and <= 600f:
+                    options.JettisonSeconds = jettisonAt;
+                    i++;
+                    break;
                 case "--cut-hull" when hasValue && float.TryParse(args[i + 1], out var cutAt) && cutAt is >= 0f and <= 600f:
                     options.HurtFleetSeconds = cutAt;
                     options.CutHull = true;
@@ -408,9 +412,10 @@ internal static class Program
                     options.HurtFleetSeconds = hurtAt;
                     i++;
                     break;
-                case "--hurt-kind" when hasValue && (args[i + 1] is "damaged" or "broken" or "tank"):
+                case "--hurt-kind" when hasValue && (args[i + 1] is "damaged" or "broken" or "tank" or "cargo"):
                     options.HurtFleetBroken = args[i + 1] == "broken";
                     options.HurtFleetTank = args[i + 1] == "tank";
+                    options.HurtFleetCargo = args[i + 1] == "cargo";
                     i++;
                     break;
                 case "--fuel-callout" when hasValue && ParseFuel(args[i + 1]) is var called and not Prospect.Game.World.FuelKind.None:
@@ -547,6 +552,10 @@ internal static class Program
 
         if ((options.FuelCallout != Prospect.Game.World.FuelKind.None || options.FuelTip != Prospect.Game.World.FuelKind.None) && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--fuel-callout and --fuel-tip work only with --capture or --bench.");
+
+        if (options.JettisonSeconds is not null && (options.CapturePath is null || options.JoinHost is not null
+            || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null || options.OpenView != "cargo"))
+            return Fail("--jettison requires --capture --open cargo in an unsaved private local game.");
 
         if (options.HurtFleetSeconds is not null && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
             return Fail("--hurt-fleet works only with --capture or --bench, in an unsaved private local game.");

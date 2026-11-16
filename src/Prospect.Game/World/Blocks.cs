@@ -201,6 +201,8 @@ public sealed record FlightRules
     public float ShieldRechargeMultiplier { get; init; } = 1f;
     public float FtlChargeMultiplier { get; init; } = 1f;
     public float SectorSize { get; init; } = 80000f;
+    /// <summary>Unattended loose-container lifetime in ticks; zero means never expire.</summary>
+    public long ContainerLifetimeTicks { get; init; } = 60 * 60 * 60;
     /// <summary>Unattended wreck lifetime in ticks; zero means never expire.</summary>
     public long WreckLifetimeTicks { get; init; } = 30 * 60 * 60;
     /// <summary>Maximum wrecks retained in one sector.</summary>
@@ -223,6 +225,7 @@ public sealed record FlightRules
             FtlChargeMultiplier = catalog.Number(settings, "jumpChargeSpeed"),
             HullStrength = catalog.Number(settings, "hullStrength"),
             SectorSize = catalog.Number(settings, "sectorSize") * 1000,
+            ContainerLifetimeTicks = (long)catalog.Number(settings, "containerLifetimeMinutes") * 3600,
             WreckLifetimeTicks = (long)catalog.Number(settings, "wreckLifetimeMinutes") * 3600,
             WreckMaxPerSector = (int)catalog.Number(settings, "wreckMaxPerSector"),
             WreckLifetimeIndex = catalog.Find("wreckLifetimeMinutes")!.Index,

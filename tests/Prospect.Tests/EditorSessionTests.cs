@@ -19,6 +19,45 @@ namespace Prospect.Tests;
 public sealed class EditorSessionTests
 {
     [Fact]
+    public void JettisonValidatesOwnerAndHoldTickAndBothClientsSeeRemoteRelease()
+    {
+        using var rig = new Rig(clients: 2, joined: 2);
+        var own = rig.Own(0);
+        var state = rig.Hulls.Info(Rig.Index(own)).BlockState;
+        var rack = Array.FindIndex(rig.Content.Pod.Types, t => t.Cargo > 0);
+        Assert.True(rig.Hulls.BlockStates.TryAddCargo(state, rig.Content, new(rack, 0, 0, 100, 50, default), new byte[1024]));
+        rig.Step(20);
+        var token = rig.Open(0);
+        var foreignToken = rig.Open(1);
+        var request = new EditorRequestMessage
+        {
+            Kind = EditorRequestKind.JettisonContainer,
+            Token = foreignToken,
+            Hull = own,
+            CargoRack = rack,
+            CargoIndex = 0,
+            CargoTick = rig.Snap(0).OwnCargoTick
+        };
+        var bytes = new byte[EditorRequestMessage.JettisonWireSize];
+        var writer = new NetWriter(bytes); request.Write(ref writer, default);
+        rig.Raw(1, NetChannel.Reliable, writer.Written.ToArray());
+        rig.Step(20);
+        Assert.Single(rig.Hulls.BlockStates.Cargo(state).ToArray());
+        request.Token = token; request.CargoTick++;
+        writer = new NetWriter(bytes); request.Write(ref writer, default);
+        rig.Raw(0, NetChannel.Reliable, writer.Written.ToArray());
+        rig.Step(20);
+        Assert.Single(rig.Hulls.BlockStates.Cargo(state).ToArray());
+        rig.Wires[0].Remote = true;
+        rig.Input(0).JettisonContainer(token, own, rack, 0, rig.Snap(0).OwnCargoTick);
+        Assert.True(rig.Until(() => rig.Snap(0).FreeContainerCount == 1 && rig.Snap(1).FreeContainerCount == 1));
+        Assert.Empty(rig.Hulls.BlockStates.Cargo(state).ToArray());
+        Assert.Equal(100, rig.Snap(1).FreeContainers[0].Amount);
+        Assert.Equal(rig.Snap(0).FreeContainers[0].Id, rig.Snap(1).FreeContainers[0].Id);
+        Assert.Null(rig.Server.Fault);
+    }
+
+    [Fact]
     public void EditKeepsCargoRepairKeepsItAndRemovingItsRackIsRefused()
     {
         using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);

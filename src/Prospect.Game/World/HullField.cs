@@ -322,7 +322,7 @@ public sealed class HullField
         return destroyed;
     }
 
-    private HullBody Body(int index)
+    internal HullBody Body(int index)
     {
         ref var info = ref _hulls.Info(index);
         return new HullBody

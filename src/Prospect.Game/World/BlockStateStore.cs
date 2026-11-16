@@ -453,6 +453,7 @@ public sealed unsafe partial class BlockStateStore : IDisposable
         var before = points;
         points = Math.Max(0f, before - amount);
         header->HitTotal = Math.Max(0.0, header->HitTotal - ((double)before - points));
+        if (before > 0 && points <= 0) CargoEjection?.Invoke(handle, block);
         return points <= 0 && Lose(handle, block);
     }
 

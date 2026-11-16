@@ -1,7 +1,7 @@
 # Cargo, containers and tractor beams
 
-Step 1 is built: authoritative holds, cargo flight mass, reliable own-hull updates, saves, edit protection and drawing.
-Temporary local debug loading is available. Mining yield, jettison and physical pickup are not built.
+Steps 1 and 2 are built: holds and free containers, jettison, damage ejection, collisions, replication and saves.
+Temporary local debug loading is available. Tractor pickup and mining output are not built.
 
 ## Decided
 
@@ -31,7 +31,7 @@ Temporary local debug loading is available. Mining yield, jettison and physical 
 - Apply refuses an edit whose remaining racks cannot retain the cargo; repair preserves it.
   A retained rack has the same type and grid anchor; resizing repacks through the shared rule.
   Moving an occupied rack is refused until unloading exists. Wrecks take containers in their surviving racks.
-- Until step 2, destroyed racks lose their containers instead of creating containers in space.
+- Damage that destroys a rack ejects its containers intact exactly once. Wreck splits keep cargo in surviving racks.
 
 ### Racks
 
@@ -57,7 +57,7 @@ Temporary local debug loading is available. Mining yield, jettison and physical 
 ### Losing cargo (step 2)
 
 - A rack that is destroyed throws its containers into space, contents intact.
-- Anyone can pick those containers up.
+- Step 3 will let anyone pick those containers up with a tractor beam. There is no pickup yet.
 - Dropping cargo uses the same containers as the hold.
 
 ## Open
@@ -76,7 +76,7 @@ checked afterwards. This overrides the joint mining, inventory and turret brains
 
 1. **Built:** racks and containers in the hold: rack block, container sizes in content, the hold's slots on the server,
    wire, save, drawing, and a debug button that adds a container.
-2. Containers in space: jettison, a rack's destruction, hull points, saved.
+2. **Built:** containers in space: jettison, a rack's destruction, hull points, saved.
 3. Tractor beam mount: range, power, pull, sliding onto a rack in view.
 4. Mining output into containers.
 5. Towing huge chunks.
@@ -110,7 +110,7 @@ Deferred: drone launcher, tractor filter.
 
 - Apply preserves containers in racks with the same type and grid anchor, repacking after resize.
   Both the client and server refuse overflow or removal of an occupied rack; moving one is also refused.
-- Repair preserves cargo. Wrecks take their racks' containers; destroyed racks lose cargo until step 2.
+- Repair preserves cargo. Wrecks take their racks' containers; damage-destroyed racks eject cargo in step 2.
 - Select one applied rack in the editor, cycle size and resource (including Empty), then ADD CONTAINER (DEBUG).
   The server fills that size to its density limit, or adds an empty shell, only if it fits.
 - Debug add requires an in-process local connection, `AllowDebugFill`, the current edit token and the controlled hull.
@@ -121,7 +121,7 @@ Deferred: drone launcher, tractor filter.
 
 - Other players' containers and unpiloted owned hulls' holds are not replicated or drawn.
 - Payload kilograms affect mass, centre of mass and inertia; empty shells have no additional mass.
-- Container health is stored and validated, but independent container damage, jettison, pickup and unloading wait for step 2.
+- Container health is stored and validated. Step 2 adds independent collision damage and jettison; pickup waits for step 3.
 - No drone rack. No tractor beam or mining output yet.
 
 ### Validation
@@ -131,3 +131,52 @@ Deferred: drone launcher, tractor filter.
   The compositor kept 5096x1390; six resize requests and twelve swapchain/target rebuilds were measured.
 - Real local captures use `--open cargo` and `--open edit-cargo`, `--set asteroidAmount=0` and `--capture`.
   Both showed the server-added 8 u hold (6,177 kg), with `agent.prospect` hidden on `special:agents`.
+
+## Built: step 2
+
+- Free containers are separate bodies, never hull records: Double3 position, velocity, orientation, spin, size,
+  resource, kilograms and HP. They drift, collide with hull boxes and shared asteroid geometry, and lose HP.
+  Zero HP destroys the shell and its payload: boom means gone. No weapon damage or pickup yet.
+- Select an applied rack in the controlled hull's editor, select a container in the separate cargo panel,
+  then JETTISON SELECTED. Local and remote sessions use the same server request.
+  The server checks owner, controlled hull, edit token, rack, selected slot and the exact hold revision seen.
+- Jettison starts outside an unplated, unmounted rack face with a small outward push and hull point velocity.
+  Damage-only `CargoEjection` adds a seeded outward kick before generic rack loss. Generic `Lose` never ejects;
+  a wreck split transfers surviving racks with their contents. Repeated damage cannot eject them twice.
+- Existing container models draw free cargo. Middle-click targets size, resource, kilograms and HP.
+  Poses interpolate authoritative sets; contact sparks infer velocity changes, with no container shield.
+  Hull shields receive the existing shared contact-strength response.
+
+### Bounds, visibility and lifetime
+
+- `blocks/cargo.json` owns free-body tuning: 64 per sector, 64 contact-tree/rock checks per tick, restitution,
+  shell collision mass, and release speeds. The global fixed pool holds 256. Caps evict the oldest by birth/id.
+- Collision work rotates through the pool and generates at most one sector per tick. Dense scenes defer contacts;
+  fast bodies use discrete contacts. Containers do not collide with one another. Rendering shares the bounded
+  dynamic-model budget with hull details and can omit excess models under extreme load.
+- Protocol 59 adds reliable message 37: an 11-byte header and 82-byte records, at most 21,003 bytes, ten sets/s.
+  A client receives only containers inside its sensor coverage, including gas attenuation, with no ownership bypass.
+  An empty set withdraws lost contacts. The existing 255-hull snapshot and 6,135-byte hold message stay unchanged.
+- Codec 13 saves all free-body fields, birth and unattended age, plus the next durable id: 98 bytes each,
+  at most 25,088 record bytes. Original cargo rules validate before current retunes; incompatible payloads log drops.
+- `containerLifetimeMinutes` defaults to 60; 0 never expires. Only time with no connected pilot within the base
+  sensor radius counts, as for wrecks. It is a world creation setting and survives saves; caps still apply.
+
+### Capture fixtures
+
+- `--open cargo --jettison 6 --capture <path>` loads the pod through the real local debug request,
+  then sends the same validated jettison request as the button. The time is seconds after the editor opens.
+- `--open cargo --hurt-fleet 7 --hurt-kind cargo --capture <path>` destroys the first rack through `Hit`.
+  Both fixtures require unsaved private local games. Use `--set asteroidAmount=0` to inspect the release clearly.
+
+### Step 2 validation
+
+- Each of the six implementation parts passed foreground `timeout 900 make check` before its commit.
+  Final suite: 2,570 game tests and 354 listing tests, no failures.
+- `make bench`: 854 fps normal, 735 fps with resizing; zero managed bytes on all threads in both runs.
+  The compositor used 5096x1390; six resize requests and twelve swapchain/target rebuilds were measured.
+- Real `--capture` sequences confirm one jettisoned container and three containers from rack destruction.
+  `agent.prospect` stayed on `special:agents`; no desktop input was injected.
+  Captures, native crops and sequence strips: `/tmp/prospect-cargo-step2-captures/`.
+- Allocation probes cover drift, rock contact, server contact stepping, damage ejection, wire/save codecs,
+  interpolation and picking. The two-client session test covers ownership, stale hold rejection and remote release.

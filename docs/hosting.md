@@ -1075,3 +1075,16 @@ Active module spending is shared with client prediction through `ModuleScanRules
   Requests are limited to one per quarter second, shared with tank filling. Remote clients cannot use it.
 - Codec 12 retains moving FTL and adds bounded holds and original cargo rules. Invalid saves refuse; a cargo-only
   retune repacks under current rules and logs every dropped container. Other simulation changes remain incompatible.
+
+### Free containers (protocol 59, save codec 13)
+
+- Free containers use a separate fixed pool of 256, with content cap 64 per sector. They never consume a hull record.
+- Reliable message 37 sends sensor-visible containers at 10 Hz: 11-byte header, 82 bytes per container,
+  maximum 21,003 bytes per set (210,030 payload bytes/s per fully interested client). Empty sets withdraw contacts.
+  Sensor/gas coverage is shared with `MaySeeHull`; containers have no ownership or brief-contact bypass.
+- Editor request kind 7 jettisons one container (23 bytes). Remote clients may use it after admission.
+  An open edit token, owned controlled hull, matching live rack, selected slot and current hold tick/revision are
+  required. It shares the quarter-second fill rate limit. It does not require the local debug-loading flag.
+- `blocks/cargo.json` also owns contact budget, sector cap, shell collision mass, restitution and release speed.
+  `containerLifetimeMinutes` is a creation setting, 0–1440, default 60; zero never expires. No live edit message.
+- Codec 13 saves the pool and clocks separately from hulls. Older layouts are refused untouched; no migration.

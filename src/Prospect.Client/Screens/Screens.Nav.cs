@@ -161,7 +161,7 @@ internal sealed partial class ScreenHost
         var width = Math.Clamp(Math.Max(tag + nameWidth, detailWidth) + pad * 2 + Kit.Px(4), Kit.Px(HudLayout.NavCardMin), Kit.Px(HudLayout.NavCardMax));
         // Rounded up, so a line measured to a fraction of a pixel is never cut by the rounding.
         var size = new float2(MathF.Ceiling(width), Kit.Px(HudLayout.NavCardHeight));
-        var free = HudLayout.NavFree(_ui.DisplaySize, Kit.Scale, world.TargetHull != 0 || world.TargetRock is not null, _jumpStrip);
+        var free = HudLayout.NavFree(_ui.DisplaySize, Kit.Scale, world.TargetHull != 0 || world.TargetRock is not null || world.TargetContainer != 0, _jumpStrip);
         if (!HudLayout.PlaceNavCard(marker, size, free, room, Kit.Scale, out var min))
             return false;
 

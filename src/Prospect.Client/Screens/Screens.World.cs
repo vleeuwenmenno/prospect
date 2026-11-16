@@ -151,7 +151,7 @@ internal sealed partial class ScreenHost
             var pilot = 1f - world.CommandBlend;
             _jumpPrompt = pilot > 0.01f ? PromptFor(world) : JumpPrompt.None;
             _jumpStrip = _jumpPrompt == JumpPrompt.None ? default : HudLayout.Strip(_ui.DisplaySize, Kit.Scale,
-                HudLayout.StripTop(Kit.Scale, world.TargetHull != 0 || world.TargetRock is not null, ScanStripBottom(snapshot, world), Kit.Px(MapLook.JumpStripGap)));
+                HudLayout.StripTop(Kit.Scale, world.TargetHull != 0 || world.TargetRock is not null || world.TargetContainer != 0, ScanStripBottom(snapshot, world), Kit.Px(MapLook.JumpStripGap)));
             // The party list must keep at least one member on screen above the flight readouts, and above the
             // jump strip while it is drawn and shares the list's width. When the full sector panel leaves no room
             // for the whole list, the panel drops its ore and server lines (they are on the map and in the menu),
@@ -185,8 +185,8 @@ internal sealed partial class ScreenHost
             DrawFuelCallout(draw, snapshot, world);
             DrawScanStrip(draw, snapshot, world, 1f, WorldInputEnabled && (world.Mode == ViewMode.Command || (world.Mode == ViewMode.Pilot && _app.PointerReleased)));
             DrawModuleStrip(draw, snapshot, world, 1f);
-            if (pilot > 0.01f)
-                DrawTargetReadout(draw, snapshot, world, pilot);
+            if (pilot > 0.01f || world.TargetContainer != 0)
+                DrawTargetReadout(draw, snapshot, world, world.TargetContainer != 0 ? 1 : pilot);
             if (_sectorInfo.Open)
                 DrawSectorPanel(draw, snapshot, world, compactSector);
             DrawPartyHud(draw, snapshot, world, sectorBottom, limit, cards);
@@ -359,7 +359,7 @@ internal sealed partial class ScreenHost
         }
 
         // One clear room for every marker that moves with the world: the target's and the plotted jump's.
-        var room = new HudCueRoom(display, Kit.Scale, _columnBottom, world.TargetHull != 0 || world.TargetRock is not null, _jumpStrip, _chatFeedBounds, _paneRects, _paneRectCount);
+        var room = new HudCueRoom(display, Kit.Scale, _columnBottom, world.TargetHull != 0 || world.TargetRock is not null || world.TargetContainer != 0, _jumpStrip, _chatFeedBounds, _paneRects, _paneRectCount);
         DrawTargetMarkers(draw, snapshot, world, room);
         DrawNavTarget(draw, world, room, _jumpPrompt);
 
@@ -533,7 +533,7 @@ internal sealed partial class ScreenHost
 
         var title = "COMMAND"u8;
         var titleSize = Kit.Measure(_ui.SansMedium, Theme.FontSmall, title);
-        var top = new float2(display.X * 0.5f, HudTop);
+        var top = new float2(display.X * 0.5f, HudTop + (world.TargetContainer != 0 ? Kit.Px(120) : 0));
         Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, top - new float2(titleSize.X * 0.5f, 0), Theme.Accent, title);
         var status = world.CommandFollowing
             ? Kit.F($"{world.Selection.Length + world.SelectedRocks.Length} SELECTED   FOLLOWING   RANGE {world.CommandDistance / 1000f:0.00} KM")
@@ -704,6 +704,10 @@ internal sealed partial class ScreenHost
         {
             DrawTargetIndicator(draw, world, room, rockPosition, rockRadius, Theme.Info, true);
         }
+        else if (world.TryGetContainer(world.TargetContainer, out var container))
+        {
+            DrawTargetIndicator(draw, world, room, container.Position, FreeContainers.Half(snapshot.Content.Cargo, container.Size).Length(), Theme.Info, false);
+        }
         else
         {
             _indicatorHull = 0;
@@ -820,6 +824,8 @@ internal sealed partial class ScreenHost
             Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(min.X + size.X - rangeSize.X - Kit.Px(Theme.Space4), text.Y + Kit.Px(20)), Theme.TextDim, rangeText);
             DrawRockAnalysis(draw, snapshot, world, targetRock, text + new float2(0, Kit.Px(64)), size.X - Kit.Px(Theme.Space4 * 2));
         }
+
+        if (world.TryGetContainer(world.TargetContainer, out var container)) DrawContainerReadout(draw, snapshot, container);
 
         if (world.ControlDenied)
         {

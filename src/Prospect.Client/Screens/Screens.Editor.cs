@@ -102,6 +102,7 @@ internal sealed partial class ScreenHost
         DrawEditorParts(layout.Parts, editor, content);
         DrawEditorDetails(layout.Details, editor, draft, content, bridge);
         DrawEditorBar(layout.Bar, editor, draft, bridge);
+        DrawCargoJettison(snapshot, editor, bridge);
         // Last, so the menu is in front of the panels.
         _editorMenu.Draw(editor, draft, _app.Devices.MousePosition);
     }

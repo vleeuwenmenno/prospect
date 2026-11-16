@@ -297,6 +297,10 @@ public sealed class WorldSnapshot
     /// <summary>Fixed cargo capture storage, reserved per allowed hull.</summary>
     public readonly HoldContainer[] Cargo;
     public int CargoCount;
+    /// <summary>Loose cargo uses a fixed independent budget, including in worlds without hulls.</summary>
+    public readonly FreeContainer[] FreeContainers = new FreeContainer[Prospect.Game.World.FreeContainers.Capacity];
+    public int FreeContainerCount;
+    public uint NextContainerId = 1;
     public SavedCargoRules CargoRules;
     public int TankCount;
 

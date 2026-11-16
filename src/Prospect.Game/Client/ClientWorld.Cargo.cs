@@ -9,7 +9,7 @@ internal sealed partial class ClientWorld
     private readonly HoldContainer[] _hold = new HoldContainer[BlockStateStore.MaxContainers];
     private uint _holdHull;
     private byte _holdDesign;
-    private long _holdTick;
+    private long _holdTick, _appliedHoldTick;
     private int _holdCount;
     private uint _holdSerial, _appliedHoldSerial;
 
@@ -30,6 +30,7 @@ internal sealed partial class ClientWorld
             || _holdDesign != _ownDesign || _snapshotTick < _holdTick) return;
         if (!_blocks.TrySetCargo(_ownBlocks, _content, _hold.AsSpan(0, _holdCount))) return;
         _appliedHoldSerial = _holdSerial;
+        _appliedHoldTick = _holdTick;
         OwnDesign.Figures(_blocks.Sums(_ownBlocks), out _flight, out _stats, _blocks.Cargo(_ownBlocks));
     }
 
@@ -39,6 +40,7 @@ internal sealed partial class ClientWorld
         if (snapshot.OwnHull < 0 || !_ownBlocks.IsValid) return;
         var cargo = _blocks.Cargo(_ownBlocks);
         cargo.CopyTo(snapshot.OwnCargo);
+        snapshot.OwnCargoTick = _appliedHoldTick;
         snapshot.Hulls[snapshot.OwnHull].Cargo = snapshot.OwnCargo.AsMemory(0, cargo.Length);
     }
 }

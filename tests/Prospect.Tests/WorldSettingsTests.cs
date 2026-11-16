@@ -112,6 +112,14 @@ public sealed class WorldSettingEffectTests
     }
 
     [Fact]
+    public void ContainerLifetimeAppliesThroughSharedRules()
+    {
+        Assert.Equal(216000, Content.Rules.ContainerLifetimeTicks);
+        var changed = Content.WithSettings(Content.SettingCatalog.Build(null, ["containerLifetimeMinutes=0"]));
+        Assert.Equal(0, changed.Rules.ContainerLifetimeTicks);
+    }
+
+    [Fact]
     public void WreckSettingsApplyThroughSharedRules()
     {
         var content = GameContent.Load();
@@ -555,7 +563,7 @@ public sealed class WorldSettingParsingTests
     public void TheShippedSettingsHaveTheirRangesAndDefaults()
     {
         Assert.Equal(["collisionDamage", "collisionShields", "shieldRecharge", "jumpChargeSpeed", "hullStrength", "asteroidAmount", "asteroidCap", "asteroidSize", "asteroidFieldSize", "asteroidFrequency", "asteroidSpacing", "asteroidOreShare", "asteroidOreGrade"], Catalog.Definitions.ToArray().Take(13).Select(d => d.Id));
-        Assert.Equal(55, Catalog.Definitions.Length);
+        Assert.Equal(56, Catalog.Definitions.Length);
         Assert.Equal(14, Catalog.Definitions.ToArray().Count(d => d.Upper is not null));
 
         var damage = Catalog.Find("collisionDamage")!;

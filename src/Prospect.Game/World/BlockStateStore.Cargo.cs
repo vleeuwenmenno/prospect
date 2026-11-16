@@ -8,6 +8,20 @@ public sealed unsafe partial class BlockStateStore
     /// <summary>Storage safety bound per hull, independent of the volume its racks provide.</summary>
     public const int MaxContainers = 255;
 
+    /// <summary>Server damage-only ejection hook; generic loss and wreck transfers never invoke it.</summary>
+    internal Action<BlockStateHandle, int>? CargoEjection;
+
+    /// <summary>Removes a validated selected container, retaining all other slots and their placement.</summary>
+    internal void RemoveCargoAt(BlockStateHandle handle, int index)
+    {
+        var header = Find(handle);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)index, (uint)header->CargoCount);
+        var cargo = CargoOf(header);
+        cargo.Slice(index + 1, header->CargoCount - index - 1).CopyTo(cargo[index..]);
+        cargo[--header->CargoCount] = default;
+        header->CargoRevision++;
+    }
+
     private static int CargoCapacityFor(HullDesign design) => design.CargoCapacity;
 
     private static Span<HoldContainer> CargoOf(Header* header)
