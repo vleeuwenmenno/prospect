@@ -342,7 +342,7 @@ public sealed class BlockCatalog
                 SizeRules = BoxDesign.ReadSizeRules(block, path + ": " + entry.Name),
                 Id = entry.Name,
                 Module = ModuleSpec.Read(block, root),
-                Tractor = TractorSpec.Read(block),
+                Tractor = TractorSpec.Read(block, root),
                 Name = block.GetProperty("name"u8).GetString()!,
                 Mass = block.GetProperty("mass"u8).GetSingle(),
                 Hull = block.GetProperty("hull"u8).GetSingle(),
