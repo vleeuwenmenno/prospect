@@ -2862,6 +2862,19 @@ public sealed class ShieldStateTests
     }
 
     [Fact]
+    public void TransitRejectsDirectDamageAndContactFeedback()
+    {
+        var body = States.Body(PodDesign);
+        var state = HullState.Spawn(Double3.Zero, Pod);
+        state.Jump = JumpPhase.Tunnel;
+        var before = state;
+        Hit(ref state, Pod, ref body, 1, 100000f);
+        HullSim.ShieldContact(ref state, Pod, PodDesign, [1UL << 1], 1000f);
+        Assert.Equal(before, state);
+        Assert.False(body.Damaged);
+    }
+
+    [Fact]
     public void AnImpactAgesOncePerTickThroughoutTransitWithoutAdvancingRecharge()
     {
         var body = States.Body(PodDesign);
