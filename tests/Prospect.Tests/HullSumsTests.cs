@@ -87,7 +87,7 @@ internal static class Figures
     public static void AssertClose<T>(T expected, T actual, double tolerance = ReferenceTolerance)
         where T : struct
     {
-        static bool Close(float x, float y, double tolerance) => Math.Abs((double)x - y) <= tolerance * Math.Max(Math.Abs((double)x), Math.Abs((double)y));
+        static bool Close(float x, float y, double tolerance) => Math.Abs((double)x - y) <= tolerance * Math.Max(1e-6, Math.Max(Math.Abs((double)x), Math.Abs((double)y)));
 
         static bool CloseTables(ThrustTable x, ThrustTable y, double tolerance)
         {
@@ -139,6 +139,7 @@ internal static class Figures
         var tanks = new double[Fuels.Count];
         var pumps = new double[Fuels.Count];
         double ix = 0, iy = 0, iz = 0, radius = 0;
+        double momentX = 0, momentY = 0, momentZ = 0;
         var min = new Double3(double.MaxValue, double.MaxValue, double.MaxValue);
         var max = new Double3(double.MinValue, double.MinValue, double.MinValue);
         var blocks = 0;
@@ -165,6 +166,7 @@ internal static class Figures
             blocks++;
             cells += volume;
             mass += m;
+            momentX += m * x; momentY += m * y; momentZ += m * z;
             hull += Scaled(type, "hull", type.Hull, volume);
             shield += Scaled(type, "shield", type.Shield, volume);
             recharge += Scaled(type, "shieldRecharge", type.ShieldRecharge, volume);
@@ -242,6 +244,7 @@ internal static class Figures
                 }
                 ix += part * (my * my + mz * mz + (wy * wy + wz * wz) / 12);
                 iy += part * (mx * mx + mz * mz + (wx * wx + wz * wz) / 12);
+                momentX += part * mx; momentY += part * my; momentZ += part * mz;
                 iz += part * (mx * mx + my * my + (wx * wx + wy * wy) / 12);
             }
 
@@ -253,7 +256,10 @@ internal static class Figures
         }
 
         var massFloor = Math.Max(mass, 0.01f);
-        var inertia = new Double3(Math.Max(ix, 0.001f), Math.Max(iy, 0.001f), Math.Max(iz, 0.001f));
+        var center = mass > 0 ? new Double3(momentX / mass, momentY / mass, momentZ / mass) : default;
+        var inertia = new Double3(Math.Max(ix - mass * (center.Y * center.Y + center.Z * center.Z), 0.001f),
+            Math.Max(iy - mass * (center.X * center.X + center.Z * center.Z), 0.001f),
+            Math.Max(iz - mass * (center.X * center.X + center.Y * center.Y), 0.001f));
         var thrustTable = default(ThrustTable);
         var burnTable = default(ThrustTable);
         var pushes = new double[Facings.Count];
@@ -301,6 +307,7 @@ internal static class Figures
             CoolRate = 1f / rules.CoolSeconds,
             Mass = (float)massFloor,
             Inertia = new Vector3((float)inertia.X, (float)inertia.Y, (float)inertia.Z),
+            CenterOfMass = new Vector3((float)center.X, (float)center.Y, (float)center.Z),
             Radius = (float)radius,
             HullPoints = (float)(hull * rules.HullStrength),
             ShieldCapacity = (float)shield,
@@ -623,12 +630,13 @@ public sealed class HullSumsTests
             sums.Lose(running, alive, block);
         }
 
-        // Only the core is left: one cube of three tonnes, still turning about the intact hull's centre.
+        // Only the core is left: one cube of three tonnes turning about its own centre.
         design.Figures(running, out var flight, out _);
         Assert.Equal(pivot, design.Pivot);
         Assert.Equal(offsets, design.BlockOffsets);
         Assert.NotEqual(0.0, pivot.X);
-        Assert.Equal((float)(3 * (pivot.X * pivot.X + pivot.Z * pivot.Z + 1.0 / 6)), flight.Inertia.Y);
+        Assert.Equal(0.5f, flight.Inertia.Y, 4);
+        Assert.Equal(offsets[0], flight.CenterOfMass);
         Assert.Equal(design.Flight.Radius, flight.Radius);
 
         // A box's centre is the middle of its cells, and its half extents are in metres.
@@ -663,7 +671,7 @@ public sealed class HullSumsTests
     [Fact]
     public void AHullsStateTakesTheMemoryItsDesignSaysAndTheDesignKeepsItsShareOnce()
     {
-        Assert.Equal(624, BoxHullSums.NodeBytes);
+        Assert.Equal(648, BoxHullSums.NodeBytes);
         (int Blocks, long Sums, long Predicted, long Decided)[] expected =
         [
             (64, 1_872, 2_676, 2_932),
@@ -674,9 +682,10 @@ public sealed class HullSumsTests
         foreach (var (blocks, sumBytes, predicted, decided) in expected)
         {
             var design = blocks == 150_000 ? TestDesigns.Station : TestDesigns.Mixed(blocks, 3);
-            Assert.Equal(sumBytes, design.Sums.StorageBytes);
-            Assert.Equal(predicted, BlockStateStore.BytesFor(design, hitPoints: false));
-            Assert.Equal(decided, BlockStateStore.BytesFor(design, hitPoints: true));
+            var growth = design.Sums.NodeCount * 24;
+            Assert.Equal(sumBytes + growth, design.Sums.StorageBytes);
+            Assert.Equal(predicted + growth, BlockStateStore.BytesFor(design, hitPoints: false));
+            Assert.Equal(decided + growth, BlockStateStore.BytesFor(design, hitPoints: true));
             Console.WriteLine($"SUMS {blocks} blocks: sums {sumBytes} B a hull; block state {predicted} B predicted, {decided} B decided; design keeps {design.Sums.DesignBytes} B for evaluation");
         }
     }
@@ -731,7 +740,7 @@ public sealed class HullSumsTests
         Assert.True(create < 50, $"creating the hull took {create} ms");
         Assert.True(lose / losses < 0.2, $"a loss took {lose / losses} ms");
         Assert.Equal(0L, allocated);
-        Assert.True(BlockStateStore.BytesFor(design, hitPoints: true) < 8L * 1024 * 1024);
+        Assert.True(BlockStateStore.BytesFor(design, hitPoints: true) < 9L * 1024 * 1024);
         Assert.True(mass > 0);
 
         Assert.Equal((uint)losses, store.Revision(state));
@@ -810,11 +819,11 @@ public sealed class MixedBoxHullTests
         Assert.InRange(lost, 50, Design.BlockCount - 50);
         Assert.True(store.Flight(hull).Mass < Design.Flight.Mass);
 
-        // The core is block 0. The blow that takes it destroys the hull.
+        // The core is block 0. Its loss leaves the other live blocks.
         Array.Clear(touching);
         BlockSet.Add(touching, 0);
         Assert.False(HullSim.Damage(ref state, store.Flight(hull), ref body, touching, 1, Design.BlockHitPoints(0) * 0.5f));
-        Assert.True(HullSim.Damage(ref state, store.Flight(hull), ref body, touching, 1, Design.BlockHitPoints(0)));
+        Assert.False(HullSim.Damage(ref state, store.Flight(hull), ref body, touching, 1, Design.BlockHitPoints(0)));
         Assert.Equal(1, states.CoresLost(block));
         InStep();
 

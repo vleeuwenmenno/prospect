@@ -26,7 +26,7 @@ namespace Prospect.Game.Persistence;
 public static partial class WorldSnapshotCodec
 {
     /// <summary>The layout's version. A save with any other is refused; there are no migrations yet.</summary>
-    public const int Version = 8;
+    public const int Version = 9;
     internal const int ChartBytes = 4 + 12 + 8;
 
     /// <summary>"PWS1": tells a save from any other bytes before its version is believed.</summary>
@@ -38,7 +38,7 @@ public static partial class WorldSnapshotCodec
 
     /// <summary>A hull's record without its dents, lost blocks, hit points and tanks.</summary>
     internal const int HullFixedBytes =
-        8 + 4 + 1 + 1 + 8 // entity, owner, design, flags, damage tick
+        8 + 4 + 1 + 1 + 8 + 16 // entity, owner, design, flags, damage tick
         + 24 + 12 + 16 + 12 + 4 + 1 + 4 + 4 + 4 + 4 + 4 + 6 + 1 + 1 + 4 + 4 + 4 + 8 // motion state; what the thrust parts did follows the battery
         + 1 + 24 // order
         + 4 + 1 + 4 + 8 + DentBytes // dent version and count, spark
@@ -175,6 +175,8 @@ public static partial class WorldSnapshotCodec
             writer.WriteByte(hull.Design);
             writer.WriteByte(hull.EscapeDrone ? (byte)1 : (byte)0);
             writer.WriteInt64(hull.DamageTick);
+            writer.WriteInt64(hull.WreckBorn);
+            writer.WriteInt64(hull.WreckAge);
             Write(ref writer, hull.State);
             writer.WriteByte((byte)hull.Order.Kind);
             Write(ref writer, hull.Order.Target);
@@ -459,6 +461,8 @@ public static partial class WorldSnapshotCodec
             var flags = reader.ReadByte();
             hull.EscapeDrone = flags == 1;
             hull.DamageTick = reader.ReadInt64();
+            hull.WreckBorn = reader.ReadInt64();
+            hull.WreckAge = reader.ReadInt64();
             var stateRead = TryReadState(ref reader, out hull.State);
             var order = reader.ReadByte();
             hull.Order = new HullOrder { Kind = (OrderKind)order, Target = ReadDouble3(ref reader) };

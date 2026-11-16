@@ -90,7 +90,7 @@ public sealed unsafe class BlockStateStore : IDisposable
     }
 
     private readonly nint[] _free = new nint[Classes];
-    private nint[] _chunks = new nint[8];
+    private nint[] _chunks = new nint[256];
     private int _chunkCount;
     private Big[] _big = new Big[4];
     private int _bigCount;

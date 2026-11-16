@@ -94,6 +94,7 @@ internal static class Program
                                   bipropellant, as a click on that fuel's cell of the fuel row does
           --fuel-tip <fuel>       With --capture or --bench, pilot view: show that fuel's details, as the pointer on
                                   its cell does
+          --cut-hull <sec>        Scripted unsaved private local game: cut the flown hull across its middle.
           --hurt-fleet <sec>      With --capture or --bench: hurt the other owned hulls that many seconds in;
                                   --hurt-kind damaged, broken, or tank (the flown hull loses its last fuel tank)
           --social-run <seconds>  Run a headless client script, then exit; uses --join or a private local game
@@ -393,6 +394,11 @@ internal static class Program
                     break;
                 case "--break-shield" when hasValue && float.TryParse(args[i + 1], out var breakAt) && breakAt is >= 0f and <= 600f:
                     options.BreakShieldSeconds = breakAt;
+                    i++;
+                    break;
+                case "--cut-hull" when hasValue && float.TryParse(args[i + 1], out var cutAt) && cutAt is >= 0f and <= 600f:
+                    options.HurtFleetSeconds = cutAt;
+                    options.CutHull = true;
                     i++;
                     break;
                 case "--hurt-fleet" when hasValue && float.TryParse(args[i + 1], out var hurtAt) && hurtAt is >= 0f and <= 600f:

@@ -286,7 +286,7 @@ public sealed class BoxDesignTests
         Lose(2); Lose(3);
         sums.Evaluate(running, Catalog.Rules, out var core, out _);
         Assert.Equal(original, design.Center);
-        Assert.Equal((float)(3 * (original.X * original.X + 1.0 / 6)), core.Inertia.Y);
+        Assert.Equal(0.5f, core.Inertia.Y, 4);
     }
 
 }

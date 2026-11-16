@@ -103,6 +103,17 @@ public sealed class WorldSettingEffectTests
     }
 
     [Fact]
+    public void WreckSettingsApplyThroughSharedRules()
+    {
+        var content = GameContent.Load();
+        var changed = content.WithSettings(content.SettingCatalog.Build(null, ["wreckLifetimeMinutes=0", "wreckMaxPerSector=12"]));
+        Assert.Equal(0, changed.Rules.WreckLifetimeTicks);
+        Assert.Equal(12, changed.Rules.WreckMaxPerSector);
+        Assert.Equal(108000, content.Rules.WreckLifetimeTicks);
+        Assert.Equal(64, content.Rules.WreckMaxPerSector);
+    }
+
+    [Fact]
     public void CloudWispinessVariationChangesOnlyDrawing()
     {
         var plain = World("gasWispinessMin=1", "gasWispinessMax=1").Galaxy.WithSeed(42);
@@ -535,7 +546,7 @@ public sealed class WorldSettingParsingTests
     public void TheShippedSettingsHaveTheirRangesAndDefaults()
     {
         Assert.Equal(["collisionDamage", "collisionShields", "shieldRecharge", "jumpChargeSpeed", "hullStrength", "asteroidAmount", "asteroidCap", "asteroidSize", "asteroidFieldSize", "asteroidFrequency", "asteroidSpacing", "asteroidOreShare", "asteroidOreGrade"], Catalog.Definitions.ToArray().Take(13).Select(d => d.Id));
-        Assert.Equal(52, Catalog.Definitions.Length);
+        Assert.Equal(54, Catalog.Definitions.Length);
         Assert.Equal(14, Catalog.Definitions.ToArray().Count(d => d.Upper is not null));
 
         var damage = Catalog.Find("collisionDamage")!;

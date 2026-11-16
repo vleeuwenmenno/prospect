@@ -11,6 +11,10 @@ or that local game opened to other players. There is one simulation and one code
 
 ## Status
 
+Ships split into unowned wrecks when block loss disconnects shared faces. Wrecks retain HP, fuel and spin,
+collide, split again, and survive saves. Cleanup is configurable; salvage and reclaiming fuel are not built.
+
+
 Propulsion burns fuel and is directional: engines, hot thrusters and cold gas thrusters each push the opposite way
 to the way they face, and burn bipropellant, hydrazine and nitrogen from tank blocks. Engines are blocks of any
 size; thrusters are small parts mounted on the faces of blocks, several to a face, that fill no cell and point out
@@ -720,6 +724,8 @@ the generation cap does not mean every rock in every visible sector draws simult
 | `collisionShields` | `Full`, `Weak`, `None` | `Full` | `Full`: the shield absorbs a collision. `Weak`: it absorbs it but drains four times as fast. `None`: collisions pass the shield and hit the blocks. |
 | `shieldRecharge` | 0.25 to 4 | 1 | Multiplies how fast shields recharge. |
 | `jumpChargeSpeed` | 0.25 to 4 | 1 | Multiplies how fast a jump drive charges. A jump takes the same energy. |
+| `wreckLifetimeMinutes` | 0 to 1440 | 30 | Unattended wreck lifetime; 0 never expires. Local host can change it live. |
+| `wreckMaxPerSector` | 1 to 255 | 64 | Sector wreck cap; oldest removed first. Local host can change it live. |
 | `hullStrength` | 0.25 to 4 | 1 | Multiplies every block's hit points. |
 | `asteroidAmount` | 0 to 5 | 1 | Requested asteroid counts, including home; 0 disables rocks. |
 | `asteroidCap` | 0 to 20480, integer | 20480 | Per-sector upper count limit, never above shared content. |

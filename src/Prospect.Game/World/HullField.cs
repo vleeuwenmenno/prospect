@@ -345,6 +345,7 @@ public sealed class HullField
         info.FittedRevision = _hulls.Revision(index);
         if (info.FittedRevision != 0)
             _designs[info.Design].Figures(_hulls.BlockStates.Sums(info.BlockState), out _hulls.Flight(index), out _);
+        if (info.Wreck) _hulls.Flight(index).MakeWreck();
         _hulls.State(index).Fuel = TankFuel.Total(_hulls.BlockStates.Tanks(info.BlockState), _designs[info.Design].Tanks);
     }
 
@@ -363,9 +364,14 @@ public sealed class HullField
 
         info.FittedRevision = revision;
         var hadShield = _hulls.Flight(index).ShieldCapacity > 0f;
+        var oldCenter = _hulls.Flight(index).CenterOfMass;
         _designs[info.Design].Figures(_hulls.BlockStates.Sums(info.BlockState), out _hulls.Flight(index), out _);
         ref var flight = ref _hulls.Flight(index);
+        if (info.Wreck) flight.MakeWreck();
         ref var state = ref _hulls.State(index);
+
+        // The design origin stays put; velocity follows the new live centre of mass.
+        state.Velocity += HullRotation.Rotate(Vector3.Cross(state.AngularVelocity, flight.CenterOfMass - oldCenter), state.Orientation);
 
         // Losing the last emitter takes an online shield away: a change viewers see, with no hit of its own.
         if (hadShield && flight.ShieldCapacity <= 0f && !state.ShieldOffline)

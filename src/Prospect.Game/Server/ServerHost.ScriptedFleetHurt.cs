@@ -5,6 +5,7 @@ public sealed partial class ServerHost
     private long _scriptedFleetHurtTick = -1;
     private bool _scriptedFleetHurtBroken;
     private bool _scriptedFleetHurtTank;
+    private bool _scriptedCutHull;
 
     /// <summary>
     /// The scripted capture's fleet damage: once, at the configured tick, the player's hulls other than the one flown
@@ -24,6 +25,20 @@ public sealed partial class ServerHost
             if (connection.State != ConnectionState.Active)
                 continue;
             var own = connection.Hull.Index;
+            if (_scriptedCutHull)
+            {
+                var info = _hulls.Info(own);
+                var design = _content.Designs[info.Design];
+                var plane = (int)Math.Floor(design.CenterOfMass.Z);
+                for (var b = 0; b < design.BlockCount; b++)
+                {
+                    var box = design.Boxes[b];
+                    if (box.At.Z <= plane && box.At.Z + box.Size.Z > plane)
+                        _hulls.BlockStates.Lose(info.BlockState, b);
+                }
+                _hulls.State(own).AngularVelocity = new System.Numerics.Vector3(0, 0.3f, 0);
+                continue;
+            }
             if (_scriptedFleetHurtTank)
             {
                 LoseLastTank(own);

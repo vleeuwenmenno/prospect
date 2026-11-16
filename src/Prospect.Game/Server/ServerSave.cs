@@ -334,7 +334,7 @@ public sealed partial class ServerHost
             var owner = OwnerSlot(saved.Owner);
 
             // The ranges are checked against the running totals: a hull cannot claim another hull's blocks.
-            if (owner < 0 || saved.Entity == 0 || saved.Entity >= world.NextEntityId || !entities.Add(saved.Entity)
+            if ((owner < 0 && saved.Owner != 0) || saved.Entity == 0 || saved.Entity >= world.NextEntityId || !entities.Add(saved.Entity)
                 || saved.Blocks != design.BlockCount || saved.BlockStart != blocks || saved.LossStart != losses
                 || (uint)saved.LossCount > (uint)saved.Blocks || blocks + saved.Blocks > world.BlockCount || losses + saved.LossCount > world.LossCount)
                 throw new InvalidDataException($"Saved hull {i} does not hold together.");
@@ -343,7 +343,7 @@ public sealed partial class ServerHost
             ref var info = ref _hulls.Info(handle.Index);
             if (!_hulls.BlockStates.TryRestore(info.BlockState, world.Losses.AsSpan(losses, saved.LossCount), world.HitPoints.AsSpan(blocks, saved.Blocks), saved.HitTotal, out var error))
                 throw new InvalidDataException($"Saved hull {i}: {error}.");
-            if (_hulls.Revision(handle.Index) == (uint)saved.Blocks || _hulls.BlockStates.CoresLost(info.BlockState) > 0)
+            if (_hulls.Revision(handle.Index) == (uint)saved.Blocks)
                 throw new InvalidDataException($"Saved hull {i} is a hull that was destroyed.");
 
             // A tank holds what it was saved with, and only what such a tank can: one figure for each tank of the
@@ -355,6 +355,14 @@ public sealed partial class ServerHost
             losses += saved.LossCount;
             tanks += saved.Tanks;
 
+            info.Wreck = saved.Owner == 0;
+            if (saved.WreckBorn < 0 || saved.WreckBorn > world.NextWorldTick || saved.WreckAge < 0 || saved.WreckAge > world.NextWorldTick
+                || (!info.Wreck && (saved.WreckBorn != 0 || saved.WreckAge != 0))
+                || (info.Wreck && (saved.EscapeDrone || saved.Order.Kind != OrderKind.None || saved.State.Jump != JumpPhase.None || saved.State.Energy != 0 || saved.State.Shield != 0)))
+                throw new InvalidDataException($"Saved hull {i} has invalid wreck state.");
+            info.WreckBorn = saved.WreckBorn;
+            info.WreckAge = saved.WreckAge;
+            info.ConnectivityRevision = _hulls.Revision(handle.Index);
             _field.RestoreFigures(handle.Index);
             error = JudgeHull(saved, _hulls.Flight(handle.Index), design, world.NextWorldTick);
             if (error is not null)
@@ -367,7 +375,7 @@ public sealed partial class ServerHost
             info.Visual = saved.Visual;
 
             // Which hull is flown follows from the owner: one fact, kept in one place.
-            info.Piloted = _owners[owner].Controlled == saved.Entity;
+            info.Piloted = owner >= 0 && _owners[owner].Controlled == saved.Entity;
         }
 
         if (blocks != world.BlockCount || losses != world.LossCount || tanks != world.TankCount)
@@ -487,6 +495,9 @@ public sealed partial class ServerHost
         for (var i = 0; i < definitions.Length; i++)
             buffer.SettingValues[i] = settings.Get(definitions[i]);
 
+        buffer.SettingValues[_content.Rules.WreckLifetimeIndex] = _wreckSettings.Minutes;
+        buffer.SettingValues[_content.Rules.WreckMaxIndex] = _wreckSettings.PerSector;
+
         buffer.NextWorldTick = _tick;
         buffer.CapturedUnixMs = _clock.GetUtcNow().ToUnixTimeMilliseconds();
         buffer.NextOwnerId = _nextPlayerId;
@@ -517,6 +528,8 @@ public sealed partial class ServerHost
             saved.Design = info.Design;
             saved.EscapeDrone = info.EscapeDrone;
             saved.DamageTick = info.DamageTick;
+            saved.WreckBorn = info.WreckBorn;
+            saved.WreckAge = info.WreckAge;
             saved.State = _hulls.State(i);
 
             // What the hull has of each fuel is its tanks added up: the tanks are saved, the sum is made again.

@@ -38,6 +38,37 @@ public sealed class SaveLifecycleTests
     private static MemoryWorld PopulatedWorld() => new() { Bytes = Populated.Value, Generation = 7 };
 
     [Fact]
+    public void WreckSurvivesSaveAndLoadWithHealthFuelAndAge()
+    {
+        var content = WreckageTests.Content();
+        var folder = SaveRig.NewWorld(content);
+        ulong entity;
+        using (var rig = new SaveRig(folder, content))
+        {
+            rig.Join();
+            rig.Hulls.BlockStates.Lose(rig.Hulls.Info(0).BlockState, 2);
+            WreckageTests.Tick(rig.Server)();
+            var wreck = WreckageTests.Wreck(rig.Hulls);
+            entity = rig.Hulls.Info(wreck).Entity;
+            var settingsBytes = new byte[WreckSettingsMessage.MaxWireSize];
+            var settingsWriter = new NetWriter(settingsBytes);
+            new WreckSettingsMessage(0, 7).Write(ref settingsWriter);
+            rig.Link.Deliver(settingsBytes);
+            rig.Tick();
+            Assert.True(rig.Close().Clean);
+        }
+        using var loaded = new SaveRig(folder, content);
+        Assert.Equal(0, loaded.Server.Content.Rules.WreckLifetimeTicks);
+        Assert.Equal(7, loaded.Server.Content.Rules.WreckMaxPerSector);
+        var index = WreckageTests.Wreck(loaded.Hulls);
+        Assert.Equal(entity, loaded.Hulls.Info(index).Entity);
+        Assert.Equal(0u, loaded.Hulls.Info(index).Owner);
+        Assert.True(BlockSet.Has(loaded.Hulls.Blocks(index), 6));
+        Assert.True(loaded.Hulls.BlockStates.Tanks(loaded.Hulls.Info(index).BlockState)[0] > 0);
+        Assert.Equal(0, loaded.Hulls.Flight(index).ShieldCapacity);
+    }
+
+    [Fact]
     public void NewShipKeepsItsOwnerRootNameAndEntityAcrossSaveLoad()
     {
         var folder = SaveRig.NewWorld(Shipped);
@@ -576,12 +607,12 @@ public sealed class SaveLifecycleTests
         Assert.Equal(name, hulls.Info(slot).Entity);
         Assert.Equal(0u, hulls.Revision(slot));
         Assert.Equal(name, rig.Owners[0].Controlled);
-        Assert.Equal(3, hulls.Count);
+        Assert.Equal(4, hulls.Count);
 
         // Stepping out: the drone is a new entity and the one the owner flies; the pod keeps its name.
         rig.Link.Control(0);
         rig.Tick();
-        Assert.Equal(4, hulls.Count);
+        Assert.Equal(5, hulls.Count);
         var drone = rig.Owners[0].Controlled;
         Assert.True(drone > highest);
         Assert.Equal(name, hulls.Info(slot).Entity);
@@ -589,7 +620,7 @@ public sealed class SaveLifecycleTests
 
         // Destroyed: the drone that follows is another new entity, never the lost hull's.
         rig.WithConnection("LoseHull");
-        Assert.Equal(4, hulls.Count);
+        Assert.Equal(5, hulls.Count);
         var next = rig.Owners[0].Controlled;
         Assert.True(next > drone);
 

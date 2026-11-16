@@ -144,6 +144,8 @@ public struct SavedHull
 
     /// <summary>The tick the hull last took damage in; <see cref="long.MinValue"/> if it never did.</summary>
     public long DamageTick;
+    /// <summary>Wreck creation tick and unattended age; zero for owned hulls.</summary>
+    public long WreckBorn, WreckAge;
 
     /// <summary>The whole motion state: place, speed, charge, shield marks and where it is in a jump.</summary>
     public HullState State;

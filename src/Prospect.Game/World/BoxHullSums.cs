@@ -55,7 +55,7 @@ public sealed class BoxHullSums
     public const int GroupSize = 32;
 
     /// <summary>The numbers one node holds.</summary>
-    internal const int Totals = 72;
+    internal const int Totals = FtlPower + 3;
 
     private const int Mass = 0;
     private const int Hull = 1;
@@ -96,7 +96,10 @@ public sealed class BoxHullSums
     private const int InertiaZ = InertiaY + 1;
 
     /// <summary>Jump power per kind of drive: this index plus the kind, less one.</summary>
-    private const int FtlPower = InertiaZ + 1;
+    private const int MomentX = InertiaZ + 1;
+    private const int MomentY = MomentX + 1;
+    private const int MomentZ = MomentY + 1;
+    private const int FtlPower = MomentZ + 1;
 
     /// <summary>How fast a hull above its rated speed sheds the excess, as a share of its strongest acceleration.</summary>
     internal const float ShedShare = 1.125f;
@@ -260,6 +263,15 @@ public sealed class BoxHullSums
         sums[_leaves + group - 1] = sum;
     }
 
+    /// <summary>The evaluated dry mass of a block and every part mounted on it, in tonnes.</summary>
+    internal double BlockMass(int block)
+    {
+        var mass = _kinds[_kindOf[block]].Values[Mass];
+        for (var m = _mountStart[block]; m < _mountStart[block + 1]; m++)
+            mass += _kinds[_mountKindOf[m]].Values[Mass];
+        return mass;
+    }
+
     /// <summary>Adds one block to a sum: its kind's figures, then what follows from where it sits.</summary>
     internal void Add(ref HullSum sum, int block)
     {
@@ -295,6 +307,10 @@ public sealed class BoxHullSums
             sum.Values[InertiaY] += mass * (x * x + z * z + vx + vz);
             sum.Values[InertiaZ] += mass * (x * x + y * y + vx + vy);
         }
+
+        sum.Values[MomentX] += mass * x;
+        sum.Values[MomentY] += mass * y;
+        sum.Values[MomentZ] += mass * z;
 
         if (sum.Count == 0)
         {
@@ -342,6 +358,9 @@ public sealed class BoxHullSums
         var sy = size.Y * scale;
         var sz = size.Z * scale;
         var mass = kind.Values[Mass];
+        sum.Values[MomentX] += mass * x;
+        sum.Values[MomentY] += mass * y;
+        sum.Values[MomentZ] += mass * z;
         sum.Values[InertiaX] += mass * (y * y + z * z + (sy * sy + sz * sz) / 12);
         sum.Values[InertiaY] += mass * (x * x + z * z + (sx * sx + sz * sz) / 12);
         sum.Values[InertiaZ] += mass * (x * x + y * y + (sx * sx + sy * sy) / 12);
@@ -471,7 +490,15 @@ public sealed class BoxHullSums
         ref readonly var sum = ref sums[0];
         var size = _design.BlockSize;
         var mass = Math.Max((float)sum.Values[Mass], 0.01f);
-        var inertia = Vector3.Max(new Vector3((float)sum.Values[InertiaX], (float)sum.Values[InertiaY], (float)sum.Values[InertiaZ]), new Vector3(0.001f));
+        var actualMass = sum.Values[Mass];
+        var cx = actualMass > 0 ? sum.Values[MomentX] / actualMass : 0;
+        var cy = actualMass > 0 ? sum.Values[MomentY] / actualMass : 0;
+        var cz = actualMass > 0 ? sum.Values[MomentZ] / actualMass : 0;
+        var center = new Vector3((float)cx, (float)cy, (float)cz);
+        var inertia = Vector3.Max(new Vector3(
+            (float)(sum.Values[InertiaX] - actualMass * (cy * cy + cz * cz)),
+            (float)(sum.Values[InertiaY] - actualMass * (cx * cx + cz * cz)),
+            (float)(sum.Values[InertiaZ] - actualMass * (cx * cx + cy * cy))), new Vector3(0.001f));
         var hull = (float)sum.Values[Hull] * rules.HullStrength;
         var shield = (float)sum.Values[Shield];
         var recharge = (float)sum.Values[ShieldRecharge] * rules.ShieldRechargeMultiplier;
@@ -546,6 +573,7 @@ public sealed class BoxHullSums
             CoolRate = 1f / rules.CoolSeconds,
             Mass = mass,
             Inertia = inertia,
+            CenterOfMass = center,
             Radius = Radius,
             HullPoints = hull,
             ShieldCapacity = shield,

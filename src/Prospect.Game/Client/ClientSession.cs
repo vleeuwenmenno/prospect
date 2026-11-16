@@ -63,6 +63,8 @@ public enum SessionEndReason : byte
 /// </summary>
 public sealed class SessionSnapshot(GameContent content)
 {
+    /// <summary>Authoritative mutable wreck settings.</summary>
+    public WreckSettingsMessage WreckSettings;
     /// <summary>Roster, recent chat, party status, invitation and refusal for the interface.</summary>
     public readonly SocialState Social = new();
 
@@ -255,6 +257,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     public SessionSnapshot AcquireSnapshot() => _snapshots.Acquire(out _);
 
     /// <summary>Where the input thread delivers the player's controls and orders.</summary>
+    private WreckSettingsMessage _wreckSettings = new(30, 64);
     public PlayerInputBridge Input { get; } = new();
 
     /// <summary>Asks the session to leave the server. Safe from any thread; takes effect on the next tick.</summary>
@@ -348,6 +351,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         snapshot.NewShip = _editor.NewShip;
         snapshot.State = _state;
         snapshot.EndReason = _endReason;
+        snapshot.WreckSettings = _wreckSettings;
         snapshot.PlayerId = _playerId;
         snapshot.ServerName = _serverName;
         snapshot.GalaxySeed = _galaxySeed;
@@ -493,6 +497,9 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                     break;
                 }
 
+            case MessageId.WreckSettings when _state == SessionState.Active && channel == NetChannel.Reliable && payload.Length == WreckSettingsMessage.MaxWireSize:
+                if (WreckSettingsMessage.TryRead(ref reader, out var wreckSettings)) _wreckSettings = wreckSettings;
+                break;
             case MessageId.Social when _state == SessionState.Active && channel == NetChannel.Reliable:
                 if (SocialMessage.TryRead(ref reader, out var social)
                     && (social.Kind != SocialKind.Member || (social.Value < _content.Designs.Length && social.Shield is >= 0 and <= 1 && social.Hull is >= 0 and <= 1)))

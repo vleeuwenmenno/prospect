@@ -200,6 +200,8 @@ internal sealed class AppOptions
 
     /// <summary>With <c>--hurt-fleet</c>, <c>--hurt-kind tank</c> takes the flown hull's last fuel tank instead.</summary>
     public bool HurtFleetTank { get; set; }
+    /// <summary>Scripted private capture: cut the flown hull.</summary>
+    public bool CutHull { get; set; }
 
     /// <summary>Target the asteroid nearest the ship once its sector has loaded; for captures of the target panel.</summary>
     public bool TargetRock { get; set; }
@@ -657,6 +659,7 @@ internal sealed class App : IDisposable
                 ScriptedFleetHurtSeconds = _options.HurtFleetSeconds,
                 ScriptedFleetHurtBroken = _options.HurtFleetBroken,
                 ScriptedFleetHurtTank = _options.HurtFleetTank,
+                ScriptedCutHull = _options.CutHull,
                 SpawnSector = spawn,
                 ChartedRadius = _options.ChartedRadius,
                 Visibility = hosting.Visibility,

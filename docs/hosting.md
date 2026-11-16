@@ -1041,3 +1041,15 @@ Active module spending is shared with client prediction through `ModuleScanRules
 - Nothing refuels. What a new or rebuilt hull's tanks hold is under "Fuel per tank" above. `Repair` on a whole
   hull answers `NoChange` whatever the tanks hold. Tanks never hold back a commit.
 - Rules and figures: [propulsion](roadmap/propulsion.md).
+
+## Wreckage (protocol 55)
+
+- Owner zero in an ordinary hull record means an unowned wreck; no record bytes changed, including MaxWireSize.
+  Wrecks use existing visibility, block recovery and snapshot continuation. Own hull is still sent first.
+- Creating wrecks is limited to 255 total hulls and existing save bounds. Existing wrecks are evicted oldest first
+  for room; if owned hulls occupy the budget, detached excess is discarded. The design catalogue does not grow.
+- Reliable message 35 is 9 bytes: id, signed 32-bit lifetime minutes, signed 32-bit per-sector cap.
+  Bounds are 0–1440 minutes and 1–255 wrecks. Zero lifetime means never expire.
+- Only an active, admitted in-process connection may request changes, after normal receive budgets.
+  Applied values broadcast reliably to every admitted client, including late joiners, and persist in saves.
+- Shared evaluator 14 derives live COM and COM inertia. Flight and prediction use the same origin integration.

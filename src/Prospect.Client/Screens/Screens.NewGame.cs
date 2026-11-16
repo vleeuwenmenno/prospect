@@ -19,6 +19,8 @@ internal sealed partial class ScreenHost
 
     /// <summary>The settings being chosen on the New game screen; handed to the app on Start or Back.</summary>
     private WorldSettings _newGame;
+    private float _wreckMinutes, _wreckLimit;
+    private int _wreckMinutesIndex, _wreckLimitIndex;
 
     /// <summary>How the game is hosted, as chosen on the New game screen; the text fields hold the rest until Start or Back.</summary>
     private HostingOptions _hosting = new();
@@ -344,6 +346,10 @@ internal sealed partial class ScreenHost
     private void OpenWorldSettings(SessionSnapshot snapshot)
     {
         var content = snapshot.Content;
+        _wreckMinutesIndex = content.Rules.WreckLifetimeIndex;
+        _wreckLimitIndex = content.Rules.WreckMaxIndex;
+        _wreckMinutes = snapshot.WreckSettings.Minutes;
+        _wreckLimit = snapshot.WreckSettings.PerSector;
         var definitions = content.SettingCatalog.Definitions;
         _inForceValue = new string[definitions.Length];
         _inForceDefault = new string[definitions.Length];
@@ -378,7 +384,7 @@ internal sealed partial class ScreenHost
         Kit.Space(Theme.Space1);
         Kit.Heading("World Settings"u8);
         Kit.Space(Theme.Space2);
-        Kit.Body("The settings this world runs by. The server chose them when it started."u8);
+        Kit.Body("The settings this world runs by. The local host can change wreck cleanup."u8);
         Kit.Space(Theme.Space4);
 
         var footer = Kit.Px(Theme.ControlHeight + Theme.Space4);
@@ -386,6 +392,14 @@ internal sealed partial class ScreenHost
         ImGui.BeginChild("##worldsettingslist"u8, new float2(0, listHeight), ImGuiChildFlags.NavFlattened, ImGuiWindowFlags.NoBackground);
         ImGui.Indent(Kit.Px(MarkerGutter));
         DrawSettingGroups(content.SettingCatalog, true);
+        if (_app.Session is { IsLocal: true } session)
+        {
+            Kit.Slider("Wreck lifetime (minutes)"u8, ref _wreckMinutes, 0, 1440, 1, Kit.F($"{_wreckMinutes:0}"), WorldRowWidth);
+            Kit.Slider("Wrecks per sector"u8, ref _wreckLimit, 1, 255, 1, Kit.F($"{_wreckLimit:0}"), WorldRowWidth);
+            if (Kit.Button("Apply wreck settings"u8, ButtonKind.Secondary, 220))
+                session.Client.Input.RequestWreckSettings(new((int)_wreckMinutes, (int)_wreckLimit));
+        }
+        Kit.Body(Kit.F($"Wreck cleanup in force: {snapshot.WreckSettings.Minutes} minutes, {snapshot.WreckSettings.PerSector} per sector"));
 
         ImGui.Unindent(Kit.Px(MarkerGutter));
         ImGui.EndChild();
@@ -418,6 +432,8 @@ internal sealed partial class ScreenHost
         foreach (var definition in catalog.Definitions)
         {
             if (definition.IsUpper || definition.Group != group || definition.Material != material) continue;
+            if (readOnly && (definition.Index == _wreckMinutesIndex
+                || definition.Index == _wreckLimitIndex)) continue;
             if (readOnly) DrawInForceSetting(definition);
             else DrawSettingEditor(definition);
         }

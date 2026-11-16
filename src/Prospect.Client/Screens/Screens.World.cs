@@ -440,7 +440,7 @@ internal sealed partial class ScreenHost
             var label = screen + new float2(Kit.Px(24), -Kit.Px(14));
             var nameWidth = mine
                 ? Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, label, selected ? Theme.Text : color, Kit.F($"{design.Name} {(hull.Id & 0xFFFF) + 1}")).X
-                : Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, label, color, Kit.F($"PLAYER {hull.Owner}  {design.Name}")).X;
+                : Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, label, color, hull.Owner == 0 ? "WRECK"u8 : Kit.F($"PLAYER {hull.Owner}  {design.Name}")).X;
             if (HullStatus.Count(hull.Environment) > 0)
             {
                 // Status icons after the name; resting the pointer on one says what it means.
@@ -661,7 +661,7 @@ internal sealed partial class ScreenHost
                 var reach = Math.Max(pixels * 1.3f, Kit.Px(16));
                 Brackets(draw, screen - new float2(reach, reach), screen + new float2(reach, reach), Kit.Px(8), Kit.Color(Theme.Text, 0.85f));
                 var mine = hovered.Owner == snapshot.PlayerId;
-                Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, screen + new float2(reach + Kit.Px(8), -Kit.Px(7)), mine ? Theme.Accent : Theme.Info, mine ? Kit.F($"{design.Name} {(hovered.Id & 0xFFFF) + 1}") : Kit.F($"PLAYER {hovered.Owner}  {design.Name}"));
+                Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, screen + new float2(reach + Kit.Px(8), -Kit.Px(7)), mine ? Theme.Accent : Theme.Info, mine ? Kit.F($"{design.Name} {(hovered.Id & 0xFFFF) + 1}") : hovered.Owner == 0 ? "WRECK"u8 : Kit.F($"PLAYER {hovered.Owner}  {design.Name}"));
             }
         }
 
@@ -760,7 +760,7 @@ internal sealed partial class ScreenHost
             Kit.PanelFrame(draw, min, min + size);
             var text = min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3));
             Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, text, color, mine ? "TARGET  -  YOURS"u8 : "TARGET"u8);
-            Kit.Text(draw, _ui.SansMedium, Theme.FontBody, text + new float2(0, Kit.Px(16)), Theme.Text, mine ? Kit.F($"{design.Name} {(target.Id & 0xFFFF) + 1}") : Kit.F($"Player {target.Owner}  {design.Name}"));
+            Kit.Text(draw, _ui.SansMedium, Theme.FontBody, text + new float2(0, Kit.Px(16)), Theme.Text, mine ? Kit.F($"{design.Name} {(target.Id & 0xFFFF) + 1}") : target.Owner == 0 ? "WRECK"u8 : Kit.F($"Player {target.Owner}  {design.Name}"));
             var range = target.Position.RelativeTo(world.OwnPosition).Length();
             var rangeText = range >= 1000f ? Kit.F($"{range / 1000f:0.00} KM") : Kit.F($"{range:0} M");
             var rangeSize = Kit.Measure(_ui.Mono, Theme.FontCaption, rangeText);

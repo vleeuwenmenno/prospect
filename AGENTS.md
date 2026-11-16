@@ -72,6 +72,16 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
 
 ## When you change something
 
+- **Wreckage:** `HullConnectivity` labels surviving bounding-face components in reserved memory. Wedges use all
+  bounding faces; mounts follow their block. `ServerHost.TickWreckage` runs after the hull round, uses `CreateHull`
+  with owner zero and the same design, and preserves HP, tanks and COM point velocity. `BoxHullSums` maintains live
+  first moments; `FlightModel` keeps the design origin while rotating about live COM, and collision lever arms
+  subtract that COM. Never change asteroid surface sampling as part of COM work. Core loss alone is not destruction.
+  Wrecks have no active systems. Codec 9 saves birth/age; protocol 55 uses owner zero and reliable setting message 35.
+  Cleanup settings apply through `FlightRules.Under`; host edits travel through `PlayerInputBridge`, are checked
+  after admission, broadcast reliably, and captured by setting index. Tests: `HullConnectivityTests`, `WreckageTests`,
+  `SaveLifecycleTests`, and the real-client split test in `EditorSessionTests`. Capture with `--cut-hull`.
+
 - **Social messages:** validate new kinds after admission and the receive/rate budgets; publish through `SessionSnapshot.Social` and send intent through `PlayerInputBridge`.
 - **Wire format:** bump `ProtocolInfo.Version` in `Protocol/Messages.cs`, and update `MaxWireSize` constants.
 - **The handshake or the password:** the scheme is written down in `Passwords` and `docs/hosting.md`; change
@@ -692,6 +702,10 @@ The client opens a real window on the developer's desktop, and they are usually 
 - Far gas: three levels of detail by distance in cloud radii, figures in `content/visuals/gas.json` (`GasTiers`). Which clouds exist comes from `IGasCloudSource` only (today `GeneratedGasClouds`: `GasCloudQuery.Collect` over `GasCloudModule.TryGetCloud`, by anchor sector); never read clouds from sector slots. Composition takes one cloud, the primary (`GasQueue`); every other draw is in the scene or, at the far level, in the sky. A new level or draw order needs a case in `GasLevelsTests` and a `--gas-distance` sweep capture. Large clouds (x half-extent over 7 km) gain strands, bent steps and clearing near the camera (`closeUp` in the same file, `gasStrands` in `gas.glsl`); an ordinary cloud must keep taking the unbent expressions exactly, so check fixtures 1–13 after touching the march.
 
 ## Known limits to design around
+
+- Wreck creation has a 255-total-hull ceiling plus saved-world growth bounds. Old wrecks are evicted for room;
+  when owned hulls fill the budget, excess detached fragments are discarded. Each fragment keeps original-design
+  block storage. Sector caps evict even near players; lifetime alone pauses within connected-player sensor range.
 
 - Runtime designs obey shared surface/work and catalogue budgets; see docs/blocks-at-scale.md.
   The old 64-block and unit-cell restrictions are removed; 150,000-block play remains future work.

@@ -102,6 +102,18 @@ public struct FlightParams
     /// <summary>Moments of inertia about the hull's own axes, in tonne square metres.</summary>
     public Vector3 Inertia;
 
+    /// <summary>Live centre of mass in metres relative to the unchanged design origin.</summary>
+    public Vector3 CenterOfMass;
+
+    /// <summary>Disables active systems while retaining live mass, collision figures and tank capacities.</summary>
+    public void MakeWreck()
+    {
+        Thrust = default; Burn = default; TurnRate = default; TurnAcceleration = default;
+        ShedAcceleration = 0; ShieldCapacity = 0; ShieldRecharge = 0; ShieldPower = 0;
+        PowerGenerated = 0; IdlePower = 0; ThrustPower = 0; ThrustPowerByFuel = default;
+        IonPower = default; EnergyStorage = 0; Ftl = FtlKind.None; FtlPower = 0;
+    }
+
     /// <summary>Radius of the sphere around the centre of mass that contains the hull, in metres.</summary>
     public float Radius;
     public float HullPoints;
@@ -460,6 +472,8 @@ public static class FlightModel
         if (levels.Length != tanks.Length)
             throw new ArgumentException("A hull's tank levels are those of its design's tanks.", nameof(levels));
 
+        var oldCenter = HullRotation.Rotate(p.CenterOfMass, state.Orientation);
+
         // Rotation: the commanded rate is approached at a limited angular acceleration.
         var target = new Vector3(input.Pitch * p.TurnRate.X, -input.Yaw * p.TurnRate.Y, -input.Roll * p.TurnRate.Z) * AxisScale;
         var maxDelta = p.TurnAcceleration * dt;
@@ -590,7 +604,7 @@ public static class FlightModel
             velocity *= Math.Max(limit, speed - p.ShedAcceleration * dt) / speed;
 
         state.Velocity = HullRotation.Rotate(velocity, state.Orientation);
-        state.Position += state.Velocity * dt;
+        state.Position += state.Velocity * dt + oldCenter - HullRotation.Rotate(p.CenterOfMass, state.Orientation);
     }
 
     /// <summary>

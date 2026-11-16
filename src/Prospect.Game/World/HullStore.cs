@@ -33,6 +33,12 @@ public struct HullInfo
 
     /// <summary>True for a temporary escape drone, even after editing gives it a new design.</summary>
     public bool EscapeDrone;
+    /// <summary>True for an unowned inert wreck.</summary>
+    public bool Wreck;
+    /// <summary>World tick when this wreck was created, and ticks aged away from players.</summary>
+    public long WreckBorn, WreckAge;
+    /// <summary>Last block loss revision examined for connectivity.</summary>
+    public uint ConnectivityRevision;
 
     /// <summary>
     /// The hull's block state in the store's <see cref="BlockStateStore"/>: the blocks it still has, how many it

@@ -18,6 +18,31 @@ namespace Prospect.Tests;
 /// </summary>
 public sealed class EditorSessionTests
 {
+    [Fact]
+    public void LocalHostChangesWreckSettingsThroughRealSession()
+    {
+        using var rig = new Rig(clients: 1, joined: 1, wreckFixture: true);
+        rig.Input(0).RequestWreckSettings(new WreckSettingsMessage(0, 7));
+        Assert.True(rig.Until(() => rig.Snap(0).WreckSettings == new WreckSettingsMessage(0, 7)));
+        Assert.Null(rig.Server.Fault);
+    }
+
+    [Fact]
+    public void ServerSplitReachesRealClientWithoutPredictionLoop()
+    {
+        using var rig = new Rig(clients: 1, joined: 1, wreckFixture: true);
+        var own = Rig.Index(rig.Own(0));
+        rig.Hulls.BlockStates.Lose(rig.Hulls.Info(own).BlockState, 2);
+        rig.Step(120);
+        var wreck = WreckageTests.Wreck(rig.Hulls);
+        var snapshot = rig.Snap(0);
+        Assert.Contains(snapshot.Hulls.Take(snapshot.HullCount), hull => hull.Id == rig.Hulls.HandleAt(wreck).Packed && hull.Owner == 0);
+        Assert.False(BlockSet.Has(rig.Hulls.Blocks(own), 6));
+        Assert.InRange(snapshot.PredictionError, 0, 0.01f);
+        Assert.Null(rig.Server.Fault);
+        Assert.Null(rig.Clients[0]!.Fault);
+    }
+
     [Theory]
     [InlineData(20, false)]
     [InlineData(20, true)]
@@ -358,7 +383,7 @@ public sealed class EditorSessionTests
         private readonly StepClock _time = new();
 
         /// <summary>A server with a link for every client; the first <paramref name="joined"/> join at once.</summary>
-        internal Rig(int clients = 2, int joined = 2, int quiet = 1, int peerWait = 1, int ready = 5, int commit = 0, int uploads = 2, int? catalogueSpare = null, int maxShips = 16, int? sectorKm = null, bool debugFill = false)
+        internal Rig(int clients = 2, int joined = 2, int quiet = 1, int peerWait = 1, int ready = 5, int commit = 0, int uploads = 2, int? catalogueSpare = null, int maxShips = 16, int? sectorKm = null, bool debugFill = false, bool wreckFixture = false)
         {
             _files.Write("net/editor.json", $$"""{ "maxOwnedShips": {{maxShips}}, "quietSeconds": {{quiet}}, "uploads": {{uploads}}, "uploadSeconds": 5, "readySeconds": {{ready}}, "peerWaitSeconds": {{peerWait}}, "commitSeconds": {{commit}} }""");
             if (catalogueSpare is { } spare)
@@ -368,7 +393,7 @@ public sealed class EditorSessionTests
                 _files.Replace("net/blocks.json", "\"catalogueBytes\": 196608", $"\"catalogueBytes\": {shipped + spare}");
             }
             _files.Replace("rules/exploration.json", "5e3", "5");
-            Content = _files.Load();
+            Content = wreckFixture ? WreckageTests.Content() : _files.Load();
             if (sectorKm is { } km) Content = Content.WithSettings(Content.SettingCatalog.Build(null, [$"sectorSize={km}", "asteroidAmount=0"]));
             _links = new LoopbackLink[clients];
             Wires = new Wire[clients];
@@ -2126,14 +2151,11 @@ public sealed class EditorSessionTests
         var pod = Rig.Handle(rig.Own(0));
         Assert.Equal(long.MinValue, rig.Hulls.Info(pod.Index).DamageTick);
 
-        // The core goes at the first touch.
-        rig.Hulls.BlockStates.SetHitPoints(rig.Hulls.Info(pod.Index).BlockState, 0, 0.01f);
-        rig.Hulls.State(pod.Index).Shield = 0f;
-        rig.Hulls.State(pod.Index).ShieldOffline = true;
+        // An empty hull is destroyed; a core loss alone now leaves the surviving piece.
+        for (var block = 0; block < rig.Content.Pod.BlockCount; block++)
+            rig.Hulls.BlockStates.Lose(rig.Hulls.Info(pod.Index).BlockState, block);
         var drone = (byte)rig.Content.DroneDesign;
-        var rammer = rig.Hulls.Create(0, drone, rig.Content.Designs[drone], rig.Hulls.State(pod.Index).Position + new Vector3(0, -6, 0));
-        rig.Hulls.State(rammer.Index).Velocity = new Vector3(0, 60, 0);
-        Assert.True(rig.Until(() => !rig.Hulls.IsAlive(pod), 600), "the pod should be destroyed");
+        Assert.True(rig.Until(() => !rig.Hulls.IsAlive(pod), 600), "the empty pod should be destroyed");
         var lost = rig.Tick;
         Assert.True(rig.Until(() => rig.Snap(0).OwnHull >= 0 && rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Design == drone));
         var own = Rig.Index(rig.Own(0));

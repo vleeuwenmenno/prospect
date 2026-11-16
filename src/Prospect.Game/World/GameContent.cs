@@ -783,7 +783,8 @@ public static class HullSim
                 // The point of contact as each hull sees it, and how freely the other gives way there.
                 var otherArm = Vector3.Transform(touch.PointSum / touch.Weight, other.Orientation);
                 var otherSpin = Vector3.Transform(other.AngularVelocity, other.Orientation);
-                var otherLever = Lever(other.Orientation, otherArm, normal);
+                var otherComArm = otherArm - HullRotation.Rotate(otherFlight.CenterOfMass, other.Orientation);
+                var otherLever = Lever(other.Orientation, otherComArm, normal);
                 var otherInverseMass = 1f / otherFlight.Mass + Vector3.Dot(otherLever / otherFlight.Inertia, otherLever);
 
                 // Hulls that only lean on each other do not bounce: at rest they would never settle.
@@ -792,7 +793,7 @@ public static class HullSim
                     flight,
                     otherArm - centre,
                     normal,
-                    other.Velocity + Vector3.Cross(otherSpin, otherArm),
+                    other.Velocity + Vector3.Cross(otherSpin, otherComArm),
                     otherInverseMass,
                     flight.CollisionSafeSpeed,
                     out var closing
@@ -980,6 +981,7 @@ public static class HullSim
         out float closing
     )
     {
+        contact -= HullRotation.Rotate(flight.CenterOfMass, state.Orientation);
         // Closing speed at the point of contact, including the hull's spin.
         var spin = Vector3.Transform(state.AngularVelocity, state.Orientation);
         closing = -Vector3.Dot(state.Velocity + Vector3.Cross(spin, contact) - otherVelocity, normal);
@@ -1088,7 +1090,7 @@ public static class HullSim
 
         // Whether anything is left is counted, not read off the total: the total is kept by subtraction, and
         // beside one enormous block the others can round out of it while they are still there.
-        return states.Revision(body.State) == (uint)states.Blocks(body.State) || states.CoresLost(body.State) > 0;
+        return states.Revision(body.State) == (uint)states.Blocks(body.State);
     }
 
     /// <summary>Reports a light contact without changing charge, damage or the recharge delay.</summary>

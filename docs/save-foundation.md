@@ -461,3 +461,12 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
 - One global rock lookup and linked sector lists replace the dense per-sector index arrays. First pushes,
   new moved sectors and full-budget refusals take no memory once the generated sector is resident.
 - The client's 512 rendered rocks are a snapshot limit, not a limit on its prediction history.
+
+## Wrecks (codec 9)
+
+- Owner zero marks an unowned wreck. Its existing design, live block state, HP and tank fuel use ordinary hull storage.
+- Each saved hull adds two 64-bit values: wreck creation tick and unattended age; owned hulls keep both zero.
+- Load rejects negative/future clocks, empty hulls, or wrecks with ownership-only state, power, shields or a jump.
+  Core loss alone no longer makes a remaining hull invalid. Live COM and inertia are rebuilt from surviving blocks.
+- Wreck growth calls `HasRoom`; excess debris is discarded only after evicting existing wrecks to try to make room.
+- Live cleanup settings overwrite their existing setting values during capture. Codec 8 saves are refused untouched.

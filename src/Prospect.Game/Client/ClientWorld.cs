@@ -429,6 +429,12 @@ internal sealed partial class ClientWorld : IDisposable
 
         Span<FleetOrder> fleetOrders = stackalloc FleetOrder[FleetOrdersMessage.MaxOrders];
         var fleetOrderCount = sendCommands ? bridge.ConsumeFleetOrders(fleetOrders) : 0;
+        if (sendCommands && bridge.ConsumeWreckSettings(out var wreckSettings))
+        {
+            var writer = new NetWriter(_fleetBuffer);
+            wreckSettings.Write(ref writer);
+            if (!transport.Send(0, NetChannel.Reliable, writer.Written)) bridge.RequestWreckSettings(wreckSettings);
+        }
         if (sendCommands && bridge.ConsumeControlRequest(out var controlHull))
         {
             var writer = new NetWriter(_fleetBuffer);
@@ -1002,6 +1008,7 @@ internal sealed partial class ClientWorld : IDisposable
         remote.HasHealth = record.HasHealth;
         ReadHealth(remote.Blocks, record);
         remote.Owner = record.Owner;
+        if (remote.Owner == 0) remote.Flight.MakeWreck();
         remote.Newest = (remote.Newest + 1) % SamplesPerHull;
         remote.Count = Math.Min(remote.Count + 1, SamplesPerHull);
         ref var sample = ref _samples[slot * SamplesPerHull + remote.Newest];
@@ -1066,6 +1073,7 @@ internal sealed partial class ClientWorld : IDisposable
             _nearSources[index] = remote.Blocks;
             _near.BlockStates.CopyFrom(_near.Info(index).BlockState, _blocks, remote.Blocks);
             _near.Info(index).PredictDamage = remote.HasHealth;
+            _near.Info(index).Wreck = remote.Owner == 0;
             _near.Info(index).FittedRevision = _blocks.Revision(remote.Blocks);
             var at = _canonicalCount++;
             var key = remote.Id & 0xFFFF;

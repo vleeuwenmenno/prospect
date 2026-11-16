@@ -42,6 +42,8 @@ public sealed class ServerConfig
     /// fuel tank, for the fuel callout's captures.
     /// </summary>
     public bool ScriptedFleetHurtTank { get; init; }
+    /// <summary>Scripted private captures: cut the flown hull across its middle.</summary>
+    public bool ScriptedCutHull { get; init; }
 
     /// <summary>
     /// Debug: whether the ship editor's Fill tank button works (<see cref="EditorRequestKind.FillTank"/>): it fills the
@@ -288,6 +290,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public readonly ulong[] Visible = new ulong[BlockSet.WordCount(HullStore.MaxHulls)];
 
         /// <summary>The slot of the durable owner this connection was let in as; -1 in a world that is not saved.</summary>
+        public long WreckSettingsVersion;
         public int OwnerSlot = -1;
         public readonly InputTimeline Inputs = new();
         public uint ControlEpoch = 1;
@@ -354,6 +357,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             Array.Clear(Challenge);
             Hull = default;
             OwnerSlot = -1;
+            WreckSettingsVersion = 0;
             Inputs.Clear();
             ControlEpoch = 1;
             LastSimulatedSequence = 0;
@@ -468,6 +472,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                     throw new InvalidDataException("A scripted fleet hurt needs an unsaved private in-process server and a time of 0 to 600 s.");
                 _scriptedFleetHurtBroken = config.ScriptedFleetHurtBroken;
                 _scriptedFleetHurtTank = config.ScriptedFleetHurtTank;
+                _scriptedCutHull = config.ScriptedCutHull;
                 _scriptedFleetHurtTick = (long)MathF.Ceiling(hurtAt / HullSim.Dt);
             }
             _visualBenchmark = config.VisualBenchmark;
@@ -565,6 +570,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             _rocks = new RockField(Galaxy, _saveLimits.MaxRocks, _saveLimits.MaxMovedSectors);
 
             // Room for the largest design the editor can add, taken now: a new design costs the tick no memory.
+            _wreckSettings = new((int)(_content.Rules.WreckLifetimeTicks / 3600), _content.Rules.WreckMaxPerSector);
             _field = new HullField(_hulls, _content.Designs, reserveBlocks: Math.Min(_content.Blocks.Limits.MaxBlocks, GeometryAdmission.MaxBlocks)) { ContactObserved = RememberContact };
 
             // A slot for every player, and apart from those one for every connection that may be pending: however
@@ -841,6 +847,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 _hulls.Destroy(handle);
         }
 
+        TickWreckage();
         GatherSensors();
         foreach (var connection in _connections)
             if (connection.State == ConnectionState.Active && connection.CatalogueReady) UpdateVisibility(connection, tick);
@@ -1099,6 +1106,13 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         }
         switch ((MessageId)payload[0])
         {
+            case MessageId.WreckSettings when channel == NetChannel.Reliable && payload.Length == WreckSettingsMessage.MaxWireSize:
+                if (connection.Transport.IsInProcess && WreckSettingsMessage.TryRead(ref reader, out var wreckSettings) && wreckSettings != _wreckSettings)
+                {
+                    _wreckSettings = wreckSettings;
+                    _wreckSettingsVersion++;
+                }
+                break;
             case MessageId.PlotJump when channel == NetChannel.Reliable:
                 if (NavigationMessage.Read(ref reader, false, out var plot) && plot.HasPlot
                     && plot.Hull == connection.Hull.Packed && _hulls.IsAlive(connection.Hull))

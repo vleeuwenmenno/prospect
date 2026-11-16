@@ -201,6 +201,13 @@ public sealed record FlightRules
     public float ShieldRechargeMultiplier { get; init; } = 1f;
     public float FtlChargeMultiplier { get; init; } = 1f;
     public float SectorSize { get; init; } = 80000f;
+    /// <summary>Unattended wreck lifetime in ticks; zero means never expire.</summary>
+    public long WreckLifetimeTicks { get; init; } = 30 * 60 * 60;
+    /// <summary>Maximum wrecks retained in one sector.</summary>
+    public int WreckMaxPerSector { get; init; } = 64;
+    /// <summary>Cached setting positions for allocation-free persistence of mutable wreck settings.</summary>
+    public int WreckLifetimeIndex { get; init; }
+    public int WreckMaxIndex { get; init; }
 
     /// <summary>
     /// These rules as one world plays by them. This is the one place a world setting takes effect: to add a
@@ -215,6 +222,10 @@ public sealed record FlightRules
             FtlChargeMultiplier = catalog.Number(settings, "jumpChargeSpeed"),
             HullStrength = catalog.Number(settings, "hullStrength"),
             SectorSize = catalog.Number(settings, "sectorSize") * 1000,
+            WreckLifetimeTicks = (long)catalog.Number(settings, "wreckLifetimeMinutes") * 3600,
+            WreckMaxPerSector = (int)catalog.Number(settings, "wreckMaxPerSector"),
+            WreckLifetimeIndex = catalog.Find("wreckLifetimeMinutes")!.Index,
+            WreckMaxIndex = catalog.Find("wreckMaxPerSector")!.Index,
         };
 }
 

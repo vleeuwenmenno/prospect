@@ -36,6 +36,7 @@ internal static class TargetGauges
         var flight = design.Flight;
         if (target.Stats.Blocks > 0)
             flight.ShieldCapacity = target.Stats.ShieldCapacity;
+        if (target.Owner == 0) flight.MakeWreck();
         return flight;
     }
 

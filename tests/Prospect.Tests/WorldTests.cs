@@ -1068,13 +1068,17 @@ public sealed class HullCollisionTests : IDisposable
             {
                 var podMass = _hulls.Flight(pod).Mass;
                 var vesselMass = _hulls.Flight(vessel).Mass;
+                var podCenter = _hulls.Flight(pod).CenterOfMass;
+                var vesselCenter = _hulls.Flight(vessel).CenterOfMass;
                 var momentum = Momentum(pod) + Momentum(vessel);
                 Assert.False(_field.Step(stepping, default));
                 Assert.Empty(_field.Lost.ToArray());
                 // Lost material leaves with its hull's velocity at that impact. Subsequent box contacts use
                 // the reduced mass, so using the original masses after sixty ticks is not momentum accounting.
                 var debris = _hulls.State(pod).Velocity * (podMass - _hulls.Flight(pod).Mass)
-                    + _hulls.State(vessel).Velocity * (vesselMass - _hulls.Flight(vessel).Mass);
+                    + _hulls.State(vessel).Velocity * (vesselMass - _hulls.Flight(vessel).Mass)
+                    - podMass * HullRotation.Rotate(Vector3.Cross(_hulls.State(pod).AngularVelocity, _hulls.Flight(pod).CenterOfMass - podCenter), _hulls.State(pod).Orientation)
+                    - vesselMass * HullRotation.Rotate(Vector3.Cross(_hulls.State(vessel).AngularVelocity, _hulls.Flight(vessel).CenterOfMass - vesselCenter), _hulls.State(vessel).Orientation);
                 if (!checkedFirstDamage && DamagedBlocks(vessel) > 0)
                 {
                     var hp = _hulls.BlockHp(vessel);
@@ -1434,7 +1438,7 @@ public sealed class HullCollisionTests : IDisposable
             lost = _field.Lost.Length == 1 && _field.Lost[0] == pod;
         }
 
-        Assert.True(lost, "the pod should have been reported destroyed");
+        Assert.False(lost, "losing a core does not destroy remaining blocks");
         Assert.NotEqual(Content.Pod.CoreMask(), _hulls.Mask(pod) & Content.Pod.CoreMask());
         Assert.True(_hulls.State(pod).Velocity.Y > 50f, "the pod should still have been thrown upward");
         Assert.True(DamagedBlocks(vessel) > 0);
@@ -1451,7 +1455,7 @@ public sealed class HullCollisionTests : IDisposable
         for (var i = 0; i < 30 && !destroyed; i++)
             destroyed = _field.Step(pod, default);
 
-        Assert.True(destroyed, "the pod should have destroyed itself");
+        Assert.False(destroyed, "losing a core does not destroy remaining blocks");
         Assert.Equal(0, _field.Lost.Length);
         Assert.True(_hulls.State(vessel).Velocity.Y < -20f, $"the vessel should have been pushed down, not {_hulls.State(vessel).Velocity}");
         Assert.Equal(0f, _hulls.State(vessel).Shield);
@@ -3572,8 +3576,8 @@ public sealed class LargeHullTests
         Assert.Equal(0f, flight.ShieldCapacity);
         Assert.Equal(0f, state.Shield);
 
-        // The core is block 150. When it goes the hull is destroyed, and its block state goes back with it.
-        Assert.True(HullSim.Damage(ref state, store.Flight(hull), ref body, Set(Core), 1, Slab.BlockHitPoints(Core)));
+        // Losing the core leaves the other live blocks; only an empty hull is destroyed.
+        Assert.False(HullSim.Damage(ref state, store.Flight(hull), ref body, Set(Core), 1, Slab.BlockHitPoints(Core)));
         Assert.False(BlockSet.Has(store.Blocks(hull), Core));
         Assert.Equal(6u, store.Revision(hull));
         var blocks = store.Info(hull).BlockState;
@@ -3847,5 +3851,26 @@ public sealed class GasEnvironmentWorldTests
         clouds[0] = clouds[0] with { Cloud = clouds[0].Cloud with { Kind = GasCloudKind.Cold } };
         Assert.Equal(HullEnvironment.InColdCloud, GasSensors.EnvironmentAt(content.Galaxy, clouds, rules, default, 0));
         Assert.True(GasSensors.Covers(content.Galaxy, clouds, rules, default, new Double3(1000, 0, 0), tick: 0));
+    }
+}
+
+public sealed class WreckWorldTests
+{
+    [Fact]
+    public void AuthoritativeTickSeparatesLostConnectorAndStepsTheWreck()
+    {
+        var content = WreckageTests.Content();
+        using var rig = new SaveRig(SaveRig.NewWorld(content), content);
+        rig.Join();
+        rig.Hulls.BlockStates.Lose(rig.Hulls.Info(0).BlockState, 2);
+        rig.Tick();
+        var wreck = WreckageTests.Wreck(rig.Hulls);
+        rig.Hulls.State(wreck).Velocity = new Vector3(0, 0, 1);
+        var before = rig.Hulls.State(wreck).Position;
+        rig.Tick();
+        Assert.True(rig.Hulls.State(wreck).Position.Z > before.Z);
+        Assert.Equal(0, rig.Hulls.State(wreck).Energy);
+        Assert.Equal(0, rig.Hulls.State(wreck).Shield);
+        Assert.Null(rig.Server.Fault);
     }
 }

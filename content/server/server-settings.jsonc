@@ -3,6 +3,10 @@
 // --settings (file path, absent), --set (repeatable id=value, catalogue ranges/defaults below; no overrides by default).
 // --create-world (boolean, false), --autosave (seconds, 1–3600, 30), --verbose (boolean, false).
 {
+  // Wrecks age only outside connected player sensor range; zero means never expire.
+  "wreckLifetimeMinutes": 30,
+  // Per-sector wreck cap, oldest removed first.
+  "wreckMaxPerSector": 64,
   // How hard a collision hits. At 0 collisions push but never damage. Unit: multiplier; range: 0–4; default: 1.
   "collisionDamage": 1,
   // Full: the shield absorbs a collision. Weak: it absorbs it but drains four times as fast. None: collisions pass the shield and hit the blocks. Unit: choice; range: Full, Weak, None; default: Full.

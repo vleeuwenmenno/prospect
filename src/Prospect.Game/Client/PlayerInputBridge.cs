@@ -369,6 +369,20 @@ public sealed class PlayerInputBridge
     /// <summary>
     /// Asks to take direct control of a hull the player owns. Zero asks to leave the current hull in a drone.
     /// </summary>
+    private WreckSettingsMessage _wreckSettings;
+    private bool _hasWreckSettings;
+    /// <summary>Requests new wreck settings; only the local host is authorized by the server.</summary>
+    public void RequestWreckSettings(WreckSettingsMessage value)
+    {
+        if (!value.IsValid) return;
+        lock (_lock) { _wreckSettings = value; _hasWreckSettings = true; }
+    }
+    /// <summary>Takes a pending wreck setting request on the simulation thread.</summary>
+    public bool ConsumeWreckSettings(out WreckSettingsMessage value)
+    {
+        lock (_lock) { value = _wreckSettings; var pending = _hasWreckSettings; _hasWreckSettings = false; return pending; }
+    }
+
     public void RequestControl(uint hull)
     {
         lock (_lock)
