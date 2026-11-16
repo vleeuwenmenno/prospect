@@ -66,7 +66,12 @@ public sealed class FreeContainers
     {
         if (items.Length > Capacity) throw new InvalidDataException("Too many free containers.");
         items.CopyTo(_items); _count = items.Length; _next = next;
+        for (var i = 0; i < _count; i++) ClearTractor(ref _items[i]);
     }
+
+    /// <summary>Drops transient claim state on load or when the pulling hull is not visible to a recipient.</summary>
+    public static void ClearTractor(ref FreeContainer item)
+    { item.TractorHull = 0; item.TractorMount = 0; item.TractorRack = 0; item.TractorStage = 0; item.TractorPowered = false; }
 
     private static bool Older(in FreeContainer a, in FreeContainer b) => a.Born < b.Born || a.Born == b.Born && a.Id < b.Id;
 

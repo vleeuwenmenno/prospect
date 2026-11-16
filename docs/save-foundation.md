@@ -500,3 +500,11 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
 - `containerLifetimeMinutes` persists with world settings (default 60, zero never). Unattended age advances only
   without a connected pilot within the base sensor radius. Birth/id order controls cap eviction.
 - Layouts before 13 are refused without migration. Wreck splitting preserves held cargo; only rack damage ejects.
+
+## Tractor acquisition (codec 14)
+
+- Free-body position, velocity, orientation and payload remain the existing 98-byte saved record.
+- Tractor hull handles, mount/rack selection, approach stage and powered flag are transient, never encoded.
+  Both codec loading and direct store restoration clear claims; acquisition restarts from the saved pose.
+- A stowed container is already in the saved hold; an approaching container remains in the free pool.
+  There is no second cargo copy or pending disk operation. Older codec layouts are refused untouched.

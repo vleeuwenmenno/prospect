@@ -1088,3 +1088,15 @@ Active module spending is shared with client prediction through `ModuleScanRules
 - `blocks/cargo.json` also owns contact budget, sector cap, shell collision mass, restitution and release speed.
   `containerLifetimeMinutes` is a creation setting, 0–1440, default 60; zero never expires. No live edit message.
 - Codec 13 saves the pool and clocks separately from hulls. Older layouts are refused untouched; no migration.
+
+### Tractor claims (protocol 60)
+
+- Free-container message 37 adds ten bytes per body: pulling hull handle, mount and rack indices, approach stage,
+  and a powered flag. Records are 92 bytes; the 256-body set is at most 23,563 bytes at 10 Hz.
+- Claims are exclusively server-owned. Clients cannot request a claim or assign a container to a hull.
+  An existing valid claim wins before new mounts acquire in stable hull/mount/body order.
+- Sensor filtering still applies. A claim naming a hull the recipient cannot see or whose design is not ready
+  is removed from that recipient's copy. The container can remain visible independently.
+- The client estimates active tractor demand from the latest authoritative claims and bills it through the same
+  FlightModel step; intervening acquisition/release changes are corrected by authoritative hull snapshots.
+  The hull snapshot and hold message sizes are unchanged. Codec 14 restarts claims on loading.

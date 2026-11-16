@@ -10,6 +10,36 @@ public sealed class FreeContainerSaveTests
     private static readonly GameContent Content = GameContent.Load();
 
     [Fact]
+    public void SavingAPullPreservesTheBodyAndRestartsAcquisition()
+    {
+        var world = WorldSnapshot.NewWorld(Content, Guid.NewGuid(), "Pull", DateTimeOffset.UnixEpoch,
+            1, Content.SettingCatalog.Defaults, default);
+        world.NextWorldTick = 20; world.FreeContainerCount = 1; world.NextContainerId = 2;
+        world.FreeContainers[0] = new FreeContainer
+        {
+            Id = 1,
+            Position = new(100, 200, 300),
+            Velocity = new(1, 2, 3),
+            Orientation = Quaternion.Identity,
+            Size = 0,
+            Resource = -1,
+            Hull = 50,
+            Born = 3,
+            TractorHull = 65536,
+            TractorMount = 3,
+            TractorRack = 4,
+            TractorStage = 1,
+            TractorPowered = true
+        };
+        Assert.True(WorldSnapshotCodec.TryDecode(WorldSnapshotCodec.Encode(world), SaveLimits.Default, out var copy, out _));
+        var expected = world.FreeContainers[0]; FreeContainers.ClearTractor(ref expected);
+        Assert.Equal(expected, copy!.FreeContainers[0]);
+        var store = new FreeContainers(); store.Restore(world.FreeContainers.AsSpan(0, 1), 2);
+        Assert.Equal(expected, store.Items[0]);
+        Assert.Equal(14, WorldSnapshotCodec.Version);
+    }
+
+    [Fact]
     public void ServerCaptureRestoresContainersAndTheirNextIdentity()
     {
         var folder = SaveRig.NewWorld(Content);

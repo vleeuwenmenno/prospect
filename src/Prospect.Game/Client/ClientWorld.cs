@@ -1123,6 +1123,15 @@ internal sealed partial class ClientWorld : IDisposable
     /// </summary>
     private void StepNear(ref HullOrder order, in FlightInput input)
     {
+        _near.Info(0).TractorDemand = 0;
+        for (var c = 0; c < _freeContainerCount; c++)
+        {
+            ref readonly var item = ref _freeContainers[c];
+            if (item.TractorHull != _ownHullId || (uint)item.TractorMount >= (uint)OwnDesign.Mounts.Length
+                || OwnDesign.Mounts[item.TractorMount].Type.Tractor is not { } spec
+                || !BlockSet.Has(_near.Blocks(0), OwnDesign.Mounts[item.TractorMount].Parent)) continue;
+            _near.Info(0).TractorDemand += spec.Power(TractorSimulation.Mass(_content.Cargo, item));
+        }
         _field.BeginRound();
         for (var at = 0; at < _canonicalCount; at++)
         {

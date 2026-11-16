@@ -30,7 +30,15 @@ public sealed partial class ServerHost
             if (connection.State != ConnectionState.Active || !connection.CatalogueReady) continue;
             var count = 0;
             foreach (var container in _containers.Items)
-                if (MaySeeContainer(connection, container)) _containerSend[count++] = container;
+                if (MaySeeContainer(connection, container))
+                {
+                    var shown = container;
+                    var handle = new HullHandle((int)(shown.TractorHull & 65535), (int)(shown.TractorHull >> 16));
+                    if (shown.TractorHull != 0 && (!_hulls.IsAlive(handle) || !MaySeeHull(connection, handle.Index, _tick)
+                        || !BlockSet.Has(connection.ReadyDesigns, _hulls.Info(handle.Index).Design)))
+                        FreeContainers.ClearTractor(ref shown);
+                    _containerSend[count++] = shown;
+                }
             if (count == 0 && !connection.FreeContainersSent) continue;
             var writer = new NetWriter(_sendBuffer);
             FreeContainerMessage.Write(ref writer, _tick, _containerSend.AsSpan(0, count));

@@ -29,8 +29,11 @@ public sealed class EditorSessionTests
         var bodies = rig.Field<FreeContainers>("_containers");
         Assert.True(bodies.Add(rig.Content, new FreeContainer
         { Position = position, Orientation = Quaternion.Identity, Size = 0, Resource = -1, Hull = 50 }, out _));
-        rig.Step(30);
+        rig.Step(120);
         Assert.Single(bodies.Items.ToArray());
+        Assert.Equal(1, rig.Snap(0).FreeContainerCount);
+        Assert.Equal(rig.Own(0), rig.Snap(0).FreeContainers[0].TractorHull);
+        Assert.True(rig.Snap(0).FreeContainers[0].TractorPowered);
         Assert.Equal(rig.Own(0), bodies.Items[0].TractorHull);
         rig.Step(900);
         Assert.Empty(bodies.Items.ToArray());

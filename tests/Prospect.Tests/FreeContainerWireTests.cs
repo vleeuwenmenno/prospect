@@ -9,6 +9,27 @@ namespace Prospect.Tests;
 public sealed class FreeContainerWireTests
 {
     [Fact]
+    public void TractorWireRejectsImpossibleClaimsAndFlags()
+    {
+        var content = GameContent.Load();
+        FreeContainer[] items = [new() { Id = 1, Orientation = Quaternion.Identity, Resource = -1, Hull = 50,
+            TractorHull = 65536, TractorMount = 0, TractorRack = 1, TractorStage = 1, TractorPowered = true }];
+        var bytes = new byte[FreeContainerMessage.HeaderBytes + FreeContainerMessage.RecordBytes];
+        var output = new FreeContainer[1];
+        var writer = new NetWriter(bytes); FreeContainerMessage.Write(ref writer, 1, items);
+        var reader = new NetReader(bytes.AsSpan(1));
+        Assert.True(FreeContainerMessage.TryRead(ref reader, content, output, out _, out _));
+        Assert.Equal(items[0], output[0]);
+        bytes[^1] = 2;
+        reader = new NetReader(bytes.AsSpan(1));
+        Assert.False(FreeContainerMessage.TryRead(ref reader, content, output, out _, out _));
+        items[0].TractorHull = 0;
+        writer = new NetWriter(bytes); FreeContainerMessage.Write(ref writer, 1, items);
+        reader = new NetReader(bytes.AsSpan(1));
+        Assert.False(FreeContainerMessage.TryRead(ref reader, content, output, out _, out _));
+    }
+
+    [Fact]
     public void JettisonRequestHasExactBudgetAndRejectsTruncationAndInvalidSlot()
     {
         var bytes = new byte[EditorRequestMessage.JettisonWireSize];
@@ -53,6 +74,11 @@ public sealed class FreeContainerWireTests
                 Orientation = Quaternion.Identity,
                 Velocity = new(1, 2, 3),
                 AngularVelocity = new(0, .2f, 0),
+                TractorHull = 65536,
+                TractorMount = i,
+                TractorRack = i,
+                TractorStage = 1,
+                TractorPowered = true,
                 Resource = -1,
                 Hull = 50
             };
@@ -80,7 +106,7 @@ public sealed class FreeContainerWireTests
         Assert.Equal(17L, tick);
         Assert.Equal(items.Length, count);
         Assert.Equal(0, probe.Bytes);
-        Assert.Equal(21003, bytes.Length);
+        Assert.Equal(23563, bytes.Length);
         for (var i = 0; i < items.Length; i++) Assert.Equal(items[i], output[i]);
         for (var n = 1; n < bytes.Length; n++)
         {
