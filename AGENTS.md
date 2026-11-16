@@ -431,9 +431,11 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
 - **Exhaust on rock:** `RockExhaust` uses the exact drawn plume and its shield clip, with at most 16 nearest
   candidate ray/rock pairs per frame. `RockExhaustSurface` caches bounds over shared finest facets; ice uses
   its exact eight planes. Only fine-detail drawn rocks participate. The 4,096 dust slots and 64 rock-local
-  marks are fixed pools; nearby marks merge and the oldest is replaced. `RockExhaustLook` validates each
-  kind's response in propulsion.json. `rock_effect` draws depth-tested instanced billboards and biased
-  tangent quads after solids; no extra scene copy, wire or save state. Tangent marks approximate curved rock.
+  marks are fixed pools; nearby marks merge and the oldest is replaced. Peak intensity survives fading exhaust.
+  `RockExhaustLook` validates each kind's response in propulsion.json: cooling over 5 s, soot held for 20 s then
+  faded by 30 s. Marks shade the actual rock in `mesh.frag`, selected by four exact 16-bit masks in `MeshInstance`;
+  frame binding 3 holds 64 three-vector records. No tangent quads or scene-depth copy. `rock_effect` draws only
+  additive, depth-tested dust; it never darkens the existing scene. No wire or save changes.
 - **Thrust part models and plumes:** look and proportions are `content/visuals/propulsion.json` (`PropulsionLook`),
   keyed by block type id. A model is a pure function of the part's box (`PartBox`: centre, half extents, facing,
   cell size), so a cell part and a thin face-mounted one take the same code (`PropulsionModels.Build`). It is built
@@ -603,7 +605,10 @@ The client opens a real window on the developer's desktop, and they are usually 
   hull with the real part model and nozzles, held over shape 0 at finest detail. No server state changes.
   It starts firing 1 s after its first world draw and stops at 5 s. Capture at 3 s, 8 s and 25 s for
   burn, cooled glow and old scorch; with `--capture-count 3` these times are automatic and measured from
-  the fixture clock, independent of loading. Fixture age is reported with each capture. Normal gameplay uses every
+  the fixture clock, independent of loading. Count 4 adds a pre-burn control at 0.8 s. Separate runs with
+  `--capture-after 5`, `5.5`, through `8` capture cooling at exact 0.5 s steps without screenshot-write latency
+  stretching the intervals. The fixture is front-lit so soot is visible against the rock.
+  Fixture age is reported with each capture. Normal gameplay uses every
   visible hull's actual `HullView.Thrust`. Crops must keep native pixels and report the actual window size.
 - `--thrust <keys>` (`forward`, `back`, `left`, `right`, `up`, `down`, `boost`, comma separated; `turn` steers the
   nose up and left all the while, as a mouse would, so `--thrust turn --thrust-until 4` and a capture at 8 s show a hull

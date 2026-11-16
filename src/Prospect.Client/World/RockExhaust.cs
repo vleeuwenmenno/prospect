@@ -5,6 +5,13 @@ using Prospect.Game.World;
 
 namespace Prospect.Client.World;
 
+internal struct RockMarkData
+{
+    public float4 CenterRadius;
+    public float4 NormalScorch;
+    public float4 Glow;
+}
+
 internal struct RockEffectInstance
 {
     public float4 PositionSize;
@@ -32,6 +39,9 @@ internal sealed class RockExhaust
     private Double3 _camera;
     private int _outputCount;
     public readonly RockEffectInstance[] Instances = new RockEffectInstance[Capacity];
+    public readonly RockMarkData[] MarkData = new RockMarkData[Marks];
+    public readonly int[] MarkDraws = new int[Marks];
+
     private struct Particle
     {
         public Double3 Origin;
@@ -43,13 +53,13 @@ internal sealed class RockExhaust
     {
         public bool Used, Seen;
         public SectorCoord Sector;
-        public int Index, Kind;
+        public int Index, Kind, Draw;
         public Vector3 Local, Normal, Center, WorldNormal;
         public double Born, Heated;
         public float Radius, Strength;
     }
     private readonly record struct Candidate(int Plume, SectorCoord Sector, int Index, int Shape, Vector3 Center,
-        Quaternion Rotation, float Radius, Vector3 Tint, float Score);
+        Quaternion Rotation, float Radius, Vector3 Tint, float Score, int Draw);
 
     public void Clear()
     {
@@ -65,17 +75,20 @@ internal sealed class RockExhaust
         _last = time;
         _camera = camera;
         _candidateCount = _outputCount = 0;
+        Array.Clear(MarkData);
+        Array.Fill(MarkDraws, -1);
         for (var i = 0; i < Marks; i++) _marks[i].Seen = false;
     }
 
     public void Offer(SectorCoord sector, int index, int shape, Vector3 center, Quaternion rotation, float radius,
-        Vector3 tint, ThrustEffects thrust)
+        Vector3 tint, ThrustEffects thrust, int draw = -1)
     {
         for (var i = 0; i < Marks; i++)
         {
             ref var mark = ref _marks[i];
             if (!mark.Used || mark.Sector != sector || mark.Index != index) continue;
             mark.Seen = true;
+            mark.Draw = draw;
             mark.Center = center + Vector3.Transform(mark.Local, rotation);
             mark.WorldNormal = Vector3.Transform(mark.Normal, rotation);
         }
@@ -88,7 +101,7 @@ internal sealed class RockExhaust
             while (at > 0 && score < _candidates[at - 1].Score) at--;
             if (at >= Rays) continue;
             for (var i = Math.Min(_candidateCount, Rays - 1); i > at; i--) _candidates[i] = _candidates[i - 1];
-            _candidates[at] = new(p, sector, index, shape, center, rotation, radius, tint, score);
+            _candidates[at] = new(p, sector, index, shape, center, rotation, radius, tint, score, draw);
             _candidateCount = Math.Min(Rays, _candidateCount + 1);
         }
     }
@@ -129,7 +142,7 @@ internal sealed class RockExhaust
             if (!(strength > 0)) continue;
             var radius = ShieldExhaust.RadiusAt(thrust.Instances[p], nearest[p]) * look.Spread;
             if (look.Glow + look.Scorch + look.Shimmer > 0)
-                Heat(c.Sector, c.Index, kind, Vector3.Transform(point - c.Center, Quaternion.Conjugate(c.Rotation)), normals[p], point, normal, radius, strength);
+                Heat(c.Sector, c.Index, kind, Vector3.Transform(point - c.Center, Quaternion.Conjugate(c.Rotation)), normals[p], point, normal, radius, strength, c.Draw);
             var expected = look.DustRate * strength * _dt;
             var count = (int)expected + (Random() < expected % 1 ? 1 : 0);
             var tangent = Tangent(normal);
@@ -158,14 +171,14 @@ internal sealed class RockExhaust
             var age = (float)(_time - m.Heated);
             if (age >= look.FadeSeconds) { m.Used = false; continue; }
             if (!m.Seen) continue;
-            var heat = Math.Max(0, 1 - age / look.HotSeconds);
-            var alpha = Math.Max(look.Scorch * (1 - age / look.FadeSeconds), look.Shimmer * Math.Max(0, 1 - age / 0.15f));
-            alpha = Math.Max(alpha, heat * Math.Min(look.Glow, 1));
-            if (alpha <= 0) continue;
-            var color = new Vector3(1, 0.19f, 0.025f) * (look.Glow * heat * heat) + new Vector3(0.012f);
-            if (look.Shimmer > 0) color = new Vector3(0.25f, 0.55f, 1);
-            var tangent = Tangent(m.WorldNormal);
-            Write(m.Center + m.WorldNormal * look.Bias, m.Radius, tangent, Vector3.Cross(m.WorldNormal, tangent), color, alpha * m.Strength, look.Shimmer > 0 ? 2 : 1);
+            var response = Response(look, age, m.Strength);
+            MarkData[i] = new RockMarkData
+            {
+                CenterRadius = new(m.Center.X, m.Center.Y, m.Center.Z, m.Radius),
+                NormalScorch = new(m.WorldNormal.X, m.WorldNormal.Y, m.WorldNormal.Z, response.W),
+                Glow = new(response.X, response.Y, response.Z, look.Shimmer > 0 ? (float)(_time % 1000) : -1),
+            };
+            MarkDraws[i] = m.Draw;
         }
         for (var i = 0; i < Particles; i++)
         {
@@ -181,7 +194,7 @@ internal sealed class RockExhaust
         return _outputCount;
     }
 
-    internal int Heat(SectorCoord sector, int index, int kind, Vector3 local, Vector3 normal, Vector3 center, Vector3 worldNormal, float radius, float strength)
+    internal int Heat(SectorCoord sector, int index, int kind, Vector3 local, Vector3 normal, Vector3 center, Vector3 worldNormal, float radius, float strength, int draw = -1)
     {
         var slot = -1;
         var oldest = 0;
@@ -191,7 +204,7 @@ internal sealed class RockExhaust
             if (m.Used && m.Sector == sector && m.Index == index && m.Kind == kind && Vector3.DistanceSquared(m.Local, local) < radius * radius
                 && Vector3.Dot(m.Normal, normal) > 0.8f)
             {
-                m.Heated = _time; m.Strength = strength; m.Seen = true;
+                m.Heated = _time; m.Strength = Math.Max(m.Strength, strength); m.Seen = true; m.Draw = draw;
                 return i;
             }
             if (!m.Used && slot < 0) slot = i;
@@ -205,6 +218,7 @@ internal sealed class RockExhaust
             Sector = sector,
             Index = index,
             Kind = kind,
+            Draw = draw,
             Local = local,
             Normal = normal,
             Center = center,
@@ -215,6 +229,29 @@ internal sealed class RockExhaust
             Heated = _time
         };
         return slot;
+    }
+
+    /// <summary>Retained heat and soot, independent of the last wisp's fading throttle.</summary>
+    internal static float4 Response(RockExhaustLook look, float age, float strength)
+    {
+        var heat = Math.Max(0, 1 - age / look.HotSeconds);
+        var scorch = look.Scorch * Math.Clamp((look.FadeSeconds - age) / (look.FadeSeconds - look.ScorchHoldSeconds), 0, 1);
+        var shimmer = look.Shimmer * Math.Max(0, 1 - age / 0.15f);
+        var glow = new Vector3(1, 0.19f, 0.025f) * (look.Glow * heat) + new Vector3(0.25f, 0.55f, 1) * shimmer;
+        return new(glow.X * strength, glow.Y * strength, glow.Z * strength, scorch * strength);
+    }
+
+    /// <summary>Four exact 16-bit numeric masks avoid NaNs and denormal float bit patterns in vertex input.</summary>
+    public static void Include(ref float4 mask, int mark)
+    {
+        var bit = 1 << (mark % 16);
+        switch (mark / 16)
+        {
+            case 0: mask.X += bit; break;
+            case 1: mask.Y += bit; break;
+            case 2: mask.Z += bit; break;
+            case 3: mask.W += bit; break;
+        }
     }
 
     private void Write(Vector3 point, float radius, Vector3 right, Vector3 up, Vector3 color, float alpha, float kind)

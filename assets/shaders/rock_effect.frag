@@ -6,9 +6,8 @@ layout(location=0) out vec4 color;
 void main() {
     float r = length(uv);
     float edge = 1.0 - smoothstep(0.35,1.0,r);
-    float grain = 0.8 + 0.2 * sin(uv.x*47.0 + sin(uv.y*31.0));
-    float opacity = edge * grain * tint.a;
-    if (kind.x > 1.5) opacity *= 0.6 + 0.4 * sin(kind.y * 3.0 + r * 12.0);
+    float opacity = edge * tint.a;
     if (opacity < 0.002) discard;
-    color = vec4(tint.rgb,opacity);
+    // Premultiplied additive dust can brighten a rock, never attenuate its existing HDR light.
+    color = vec4(max(tint.rgb, vec3(0.0)) * opacity, 0.0);
 }

@@ -68,9 +68,9 @@ public sealed class RockExhaustTests
         }
         for (var i = 0; i < 200; i++) Frame();
         Assert.True(count > 0);
-        Assert.Equal(1, effects.Instances[0].Shape.X);
+        Assert.True(effects.MarkData[0].Glow.X > 0);
         var surfaceZ = 8 - 5 * AsteroidShape.RadiusAlong(0, -Vector3.UnitZ);
-        Assert.InRange(Math.Abs(effects.Instances[0].PositionSize.Z - surfaceZ), 0, 0.03f);
+        Assert.InRange(Math.Abs(effects.MarkData[0].CenterRadius.Z - surfaceZ), 0, 0.03f);
         var probe = new AllocationProbe();
         while (probe.Measuring()) Frame();
         Assert.Equal(0, probe.Bytes);
@@ -88,11 +88,48 @@ public sealed class RockExhaustTests
         var rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI / 2);
         effects.Begin(2, default);
         effects.Offer(default, 0, 0, new Vector3(10, 0, 0), rotation, 5, Vector3.One, thrust);
-        Assert.Equal(1, effects.End(thrust, Vector3.UnitX, Vector3.UnitY));
-        Assert.InRange(effects.Instances[0].PositionSize.X, 9.98f, 10);
-        Assert.InRange(effects.Instances[0].PositionSize.Y, 0.999f, 1.001f);
+        Assert.Equal(0, effects.End(thrust, Vector3.UnitX, Vector3.UnitY));
+        Assert.InRange(effects.MarkData[0].CenterRadius.X, 9.98f, 10);
+        Assert.InRange(effects.MarkData[0].CenterRadius.Y, 0.999f, 1.001f);
         effects.Begin(32, default);
         Assert.Equal(0, effects.End(thrust, Vector3.UnitX, Vector3.UnitY));
+    }
+
+    [Fact]
+    public void FadingPlumeCannotEraseStoredMarkAndCoolingLeavesSoot()
+    {
+        var effects = new RockExhaust();
+        var thrust = new ThrustEffects(PropulsionLook.Shared);
+        var kind = PropulsionLook.Shared.PlumeIndex("engine");
+        effects.Begin(1, default);
+        effects.Heat(default, 0, kind, Vector3.Zero, Vector3.UnitY, Vector3.Zero, Vector3.UnitY, 1, 1);
+        effects.Begin(2, default);
+        effects.Heat(default, 0, kind, Vector3.Zero, Vector3.UnitY, Vector3.Zero, Vector3.UnitY, 1, 0.0001f);
+        void At(double time)
+        {
+            effects.Begin(time, default);
+            effects.Offer(default, 0, 0, Vector3.Zero, Quaternion.Identity, 10, Vector3.One, thrust, 7);
+            effects.End(thrust, Vector3.UnitX, Vector3.UnitY);
+        }
+        At(5);
+        Assert.True(effects.MarkData[0].Glow.X > 0.5f);
+        Assert.Equal(7, effects.MarkDraws[0]);
+        At(22);
+        Assert.True(effects.MarkData[0].NormalScorch.W > 0.5f);
+        Assert.Equal(0, effects.MarkData[0].Glow.X);
+        At(32);
+        Assert.Equal(-1, effects.MarkDraws[0]);
+    }
+
+    [Fact]
+    public void AllMarkMaskBitsStayExactAndFinite()
+    {
+        var mask = new Brutal.Numerics.float4();
+        for (var i = 0; i < RockExhaust.Marks; i++) RockExhaust.Include(ref mask, i);
+        Assert.Equal(65535, mask.X);
+        Assert.Equal(65535, mask.Y);
+        Assert.Equal(65535, mask.Z);
+        Assert.Equal(65535, mask.W);
     }
 
     [Fact]

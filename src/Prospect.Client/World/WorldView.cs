@@ -1334,12 +1334,16 @@ internal sealed class WorldView
         {
             var center = fixture.Anchor.RelativeTo(camera) + fixture.RockCenter;
             Add(ref candidateCount, _asteroidMeshBase + DetailFine * Galaxy.AsteroidShapes, center, Quaternion.Identity, ExhaustRockCapture.Radius, new Vector3(0.3f), 0);
-            _rockExhaust.Offer(default, 0, 0, center, Quaternion.Identity, ExhaustRockCapture.Radius, new Vector3(0.3f), _thrust);
+            _rockExhaust.Offer(default, 0, 0, center, Quaternion.Identity, ExhaustRockCapture.Radius, new Vector3(0.3f), _thrust, candidateCount - 1);
         }
         else PrepareRockInstances(camera, aspect, ref candidateCount);
         var rockEffects = _rockExhaust.End(_thrust, _right, _up);
         _rockExhaust.Instances.AsSpan(0, rockEffects).CopyTo(_scene.RockEffects(frameIndex));
         _scene.QueueRockEffects(rockEffects);
+        _rockExhaust.MarkData.AsSpan().CopyTo(_scene.RockMarks(frameIndex));
+        for (var i = 0; i < RockExhaust.Marks; i++)
+            if (_rockExhaust.MarkDraws[i] is var draw && draw >= 0 && draw < candidateCount)
+                RockExhaust.Include(ref _candidates[draw].Instance.RockMarks, i);
 
         // Group instances by mesh so each mesh is one draw call: asteroids first, then hulls, so the jump lenses can
         // keep the world as it was before any hull was drawn over it.
@@ -1370,7 +1374,7 @@ internal sealed class WorldView
         _scene.AddSparks(frameIndex, _sparks.Expand(camera, _right, _up, _forward, aspect, _tanHalfFov, _viewport.Y, snapshot.ServerTickPrecise + alpha, _collision));
         var f = 1f / _tanHalfFov;
         var sunColor = galaxy.StarClasses[Sector.StarClass].Color * 1.7f;
-        var sunDirection = Sector.SunDirection;
+        var sunDirection = ExhaustRock is null ? Sector.SunDirection : -Vector3.UnitZ;
         if (_jumpSunBlend < 1f)
         {
             sunColor = Vector3.Lerp(_jumpFromSunColor * 1.7f, sunColor, _jumpSunBlend);
@@ -1950,7 +1954,7 @@ internal sealed class WorldView
         if (rock.Resource >= 0)
             tint = Vector3.Lerp(tint, galaxy.Resources[rock.Resource].Color * 0.55f, (0.25f + 0.5f * rock.Grade) * (material == MaterialIce ? 0.4f : 1f));
         if (detail == DetailFine)
-            _rockExhaust.Offer(slot.Coord, i, rock.Shape, position, rock.Rotation, rock.Radius, tint, _thrust);
+            _rockExhaust.Offer(slot.Coord, i, rock.Shape, position, rock.Rotation, rock.Radius, tint, _thrust, candidateCount);
         VisibleRocks++;
         _scanWaves.Offer(position, rock.Radius, pixels);
         Add(ref candidateCount, _asteroidMeshBase + detail * Galaxy.AsteroidShapes + rock.Shape, position, rock.Rotation, rock.Radius, tint, material);

@@ -1561,6 +1561,7 @@ internal sealed class App : IDisposable
             var due = _options.CaptureAfter + _capturesTaken * _options.CaptureEvery;
             var captureClock = World.ExhaustRock is { Started: >= 0 } fixtureClock ? _ui.Time - fixtureClock.Started : _sinceSplash;
             if (World.ExhaustRock is not null && count == 3) due = _capturesTaken switch { 0 => 3, 1 => 8, _ => 25 };
+            if (World.ExhaustRock is not null && count == 4) due = _capturesTaken switch { 0 => 0.8f, 1 => 3, 2 => 8, _ => 25 };
             if (_capturesTaken < count && rtsReady && (_options.CaptureHitAge is not { } hitAge || World.Own.ShieldHit.Strength > 0 && World.Own.ShieldHitAge >= hitAge) && captureClock >= due && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
             {
                 ShowPerformance |= Session is not null && _options.OpenView is not ("controls" or "players" or "social" or "friends" or "chat" or "hud" or "interface" or "charts" or "pinned-charts" or "inventory" or "edit-tank-fuel");
