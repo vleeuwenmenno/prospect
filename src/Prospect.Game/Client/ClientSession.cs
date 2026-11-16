@@ -347,6 +347,13 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                         _world.AppendContent(_content);
                     }
 
+                    if (sendCommands && Input.ConsumeJettisonCargo(out var cargo))
+                    {
+                        var writer = new NetWriter(_sendBuffer);
+                        cargo.Write(ref writer);
+                        if (!_transport.Send(0, NetChannel.Reliable, writer.Written))
+                        { End(SessionEndReason.ConnectionLost); return; }
+                    }
                     _editor.Tick(Input, _transport, sendCommands, _content.BlockTransfers.MaxBytes);
                     if (sendCommands)
                         ReportDesigns();
