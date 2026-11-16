@@ -121,7 +121,7 @@ internal static class MeshBuilder
     {
         if (shape == AsteroidShape.Icicle)
             return Icicle();
-        var sphere = Spheres[subdivisions].Value;
+        var sphere = AsteroidMesh.Sphere(subdivisions);
         var positions = new Vector3[sphere.Points.Length];
         for (var i = 0; i < positions.Length; i++)
             positions[i] = AsteroidShape.Point(shape, sphere.Points[i]);
@@ -177,75 +177,6 @@ internal static class MeshBuilder
             mesh.Indices.AddRange([first, first + 1, first + 2]);
         }
         return mesh;
-    }
-
-    /// <summary>The most an asteroid mesh is subdivided.</summary>
-    private const int MaxSubdivisions = 6;
-
-    /// <summary>
-    /// The unit sphere at each level of subdivision. Every asteroid shape of a level is the same sphere pushed in
-    /// and out, so the sphere is built once and shared by the jobs that mesh the shapes.
-    /// </summary>
-    private static readonly Lazy<(Vector3[] Points, uint[] Indices)>[] Spheres = CreateSpheres();
-
-    private static Lazy<(Vector3[] Points, uint[] Indices)>[] CreateSpheres()
-    {
-        var spheres = new Lazy<(Vector3[], uint[])>[MaxSubdivisions + 1];
-        for (var i = 0; i < spheres.Length; i++)
-        {
-            var subdivisions = i;
-            spheres[i] = new Lazy<(Vector3[], uint[])>(() => Icosphere(subdivisions), LazyThreadSafetyMode.ExecutionAndPublication);
-        }
-
-        return spheres;
-    }
-
-    private static (Vector3[] Points, uint[] Indices) Icosphere(int subdivisions)
-    {
-        var t = (1f + MathF.Sqrt(5f)) / 2f;
-        var points = new List<Vector3>
-        {
-            new(-1, t, 0), new(1, t, 0), new(-1, -t, 0), new(1, -t, 0),
-            new(0, -1, t), new(0, 1, t), new(0, -1, -t), new(0, 1, -t),
-            new(t, 0, -1), new(t, 0, 1), new(-t, 0, -1), new(-t, 0, 1),
-        };
-        for (var i = 0; i < points.Count; i++)
-            points[i] = Vector3.Normalize(points[i]);
-
-        var indices = new List<uint>
-        {
-            0, 11, 5, 0, 5, 1, 0, 1, 7, 0, 7, 10, 0, 10, 11,
-            1, 5, 9, 5, 11, 4, 11, 10, 2, 10, 7, 6, 7, 1, 8,
-            3, 9, 4, 3, 4, 2, 3, 2, 6, 3, 6, 8, 3, 8, 9,
-            4, 9, 5, 2, 4, 11, 6, 2, 10, 8, 6, 7, 9, 8, 1,
-        };
-
-        var midpoints = new Dictionary<ulong, uint>();
-        uint Midpoint(uint a, uint b)
-        {
-            var key = a < b ? (ulong)a << 32 | b : (ulong)b << 32 | a;
-            if (midpoints.TryGetValue(key, out var index))
-                return index;
-            index = (uint)points.Count;
-            points.Add(Vector3.Normalize(points[(int)a] + points[(int)b]));
-            midpoints[key] = index;
-            return index;
-        }
-
-        for (var level = 0; level < subdivisions; level++)
-        {
-            var next = new List<uint>(indices.Count * 4);
-            for (var i = 0; i < indices.Count; i += 3)
-            {
-                var (a, b, c) = (indices[i], indices[i + 1], indices[i + 2]);
-                var (ab, bc, ca) = (Midpoint(a, b), Midpoint(b, c), Midpoint(c, a));
-                next.AddRange([a, ab, ca, b, bc, ab, c, ca, bc, ab, bc, ca]);
-            }
-
-            indices = next;
-        }
-
-        return ([.. points], [.. indices]);
     }
 
     private static void AddVertex(MeshData mesh, Vector3 position, Vector3 normal)

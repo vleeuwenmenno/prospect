@@ -68,7 +68,6 @@ internal sealed class WorldView
     private const float RockSpeckPixels = 8f;
     private const float RockCloseRadius = 250f;
     private const float RockCloseNearness = 0.25f;
-    private const float RockFineRadius = 1000f;
     private const float RockFineNearness = 0.35f;
 
     // Where a rift's or wormhole's opening sits, in hull radii (see HullVisuals). The lens bends the view out to about
@@ -405,7 +404,7 @@ internal sealed class WorldView
     /// How finely each level of asteroid detail is meshed, finest first, in icosphere subdivisions: 81,920
     /// triangles for a giant seen from its surface down to 80 for a speck.
     /// </summary>
-    public static ReadOnlySpan<int> AsteroidDetail => [6, 5, 4, 2, 1];
+    public static ReadOnlySpan<int> AsteroidDetail => [Prospect.Game.World.AsteroidMesh.Subdivisions, 5, 4, 2, 1];
 
     private const int DetailFine = 0;
     private const int DetailClose = 1;
@@ -1903,8 +1902,10 @@ internal sealed class WorldView
         var position = slot.CameraCenter + rock.LocalPosition + (slot.Displaced ? slot.Offsets[i] : Vector3.Zero);
         // How much of the view the asteroid takes up, from 0 to 1 at its surface.
         var nearness = pixels * _tanHalfFov * 2f / _viewport.Y;
+        var contactReach = rock.Radius + OwnFlight.Radius;
+        var nearOwnHull = Vector3.DistanceSquared(position, Own.Position.RelativeTo(CameraPosition)) <= contactReach * contactReach;
         var detail =
-            rock.Radius >= RockFineRadius && nearness > RockFineNearness ? DetailFine
+            nearOwnHull || nearness > RockFineNearness ? DetailFine
             : rock.Radius >= RockCloseRadius && nearness > RockCloseNearness ? DetailClose
             : pixels > RockNormalPixels ? DetailNormal
             : pixels > RockSpeckPixels ? DetailCoarse

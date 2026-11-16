@@ -33,10 +33,14 @@ public sealed class ShieldImpactTests
     public void GiantRockPatchFollowsItsSurfaceAndCoversTheTouchingSide()
     {
         var rock = new Asteroid { Radius = 10000, Rotation = Quaternion.Identity, Shape = 0 };
-        var point = Vector3.UnitY * (rock.Radius * AsteroidShape.RadiusAlong(rock.Shape, Vector3.UnitY));
+        var sphere = AsteroidMesh.Sphere(AsteroidMesh.Subdivisions);
+        var point = (AsteroidShape.Point(rock.Shape, sphere.Points[sphere.Indices[0]])
+            + AsteroidShape.Point(rock.Shape, sphere.Points[sphere.Indices[1]])
+            + AsteroidShape.Point(rock.Shape, sphere.Points[sphere.Indices[2]])) * (rock.Radius / 3);
+        var direction = Vector3.Normalize(point);
         var patch = ShieldPatch.Rock(rock, point, Quaternion.Identity, 5, 0.45f);
         Assert.InRange(patch.Normal.Length(), 0.999f, 1.001f);
-        Assert.True(Vector3.Dot(patch.Normal, Vector3.UnitY) > 0.8f);
+        Assert.True(Vector3.Dot(patch.Normal, direction) > 0.8f);
         Assert.Equal(10f, patch.Extent);
         var probe = new AllocationProbe();
         while (probe.Measuring())

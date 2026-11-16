@@ -145,15 +145,18 @@ internal sealed class BoxCollision
         var toRock = Quaternion.Conjugate(rock.Rotation);
         Span<Vector3> vertices = stackalloc Vector3[8];
         var count = BlockShapes.Vertices(shape, half, vertices);
-        for (var i = -1; i < count; i++)
+        for (var i = -2; i < count; i++)
         {
-            var local = i < 0 ? nearest : vertices[i];
+            var local = i == -2 ? Vector3.Zero : i == -1 ? nearest : vertices[i];
             var p = center + Vector3.Transform(local, orientation);
             var distance = p.Length();
             var direction = distance > 1e-6f ? p / distance : Vector3.UnitY;
             if (distance >= rock.Radius) continue;
             var penetration = rock.Radius * AsteroidShape.RadiusAlong(rock.Shape, Vector3.Transform(direction, toRock)) - distance;
-            if (penetration > depth) { depth = penetration; normal = direction; point = Vector3.Transform(local, orientation); }
+            if (penetration <= 0) continue;
+            var facet = Vector3.Transform(AsteroidShape.Normal(rock.Shape, Vector3.Transform(direction, toRock), rock.Radius, 0), rock.Rotation);
+            penetration *= Math.Max(0, Vector3.Dot(facet, direction));
+            if (penetration > depth) { depth = penetration; normal = facet; point = Vector3.Transform(local, orientation); }
         }
         return depth > 0;
     }
