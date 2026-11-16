@@ -42,6 +42,29 @@ Product direction from the brainstorm on 2026-11-16. Nothing here is built yet.
 - Ore has its own Ore Cargo window, separate from the Cargo window.
 - While debugging, every method is unlocked. A tech tree decides unlocks later.
 
+### Drone life and the bay
+
+- Drones can be destroyed. Scan drones come back and are reused; charge drones are used up.
+- A lost drone is gone; the bay rebuilds one slowly. Buying and building comes later.
+- The bay has tiers, like sensors and tractors: capacity, launch rate (how many at once), rebuild speed.
+  Figures are content.
+
+### Rock interiors: why crack
+
+- Every rock has a fixed interior from the world seed, the same for every player:
+  1. Crust: rock and weathered, low-grade ore.
+  2. Mantle: normal grade.
+  3. Veins: twisting tubes of high-grade ore through the rock.
+  4. Sometimes a core pocket of a rare mix-in.
+- Scraping takes the crust: slow, low grade. Cracking cuts through veins and exposes them; the laser then
+  scrapes vein faces at high grade.
+- Three scan levels:
+  1. Scanner module: surface average composition.
+  2. Drone group scan: true bulk composition and a hint that veins exist.
+  3. Detailed drone scan: a 3D hologram of veins and pockets, and a heat map of easy and unstable pockets.
+- Unstable pockets (ice, volatile gas) can blow when cracked: a bonus when planned, damage when not.
+  A bad cut can split a vein across two pieces.
+
 ### Built to be extended
 
 - Every new mechanic is a set of parts: data in `content/`, shared rules in `Prospect.Game`, a client view.
@@ -62,10 +85,10 @@ Product direction from the brainstorm on 2026-11-16. Nothing here is built yet.
 
 ## Open
 
-- What the drone bay looks like, how many it holds, and how drones leave and come back (a hatch face?).
+- What the drone bay looks like and how drones leave and come back (a hatch face?).
 - How a rock edit is represented exactly (carved volumes on the mesh, a voxel field, or something else).
   This is the biggest technical choice; it decides scraping, cracking, collision and the wire.
-- How veins and the heat map are generated per rock, and how much a scan reveals at each level.
+- The exact generation of crust, veins and pockets, and their figures.
 - The heat game's figures: heat rate, cooling, the window, what overheating does.
 - The Ore Cargo window's layout.
 - Automated mining by NPCs and captains: out of scope now; only the order model above is designed for it.
