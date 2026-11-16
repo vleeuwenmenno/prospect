@@ -183,6 +183,7 @@ internal sealed partial class ScreenHost
             }
 
             DrawFuelCallout(draw, snapshot, world);
+            DrawContainerHover(snapshot, world);
             DrawScanStrip(draw, snapshot, world, 1f, WorldInputEnabled && (world.Mode == ViewMode.Command || (world.Mode == ViewMode.Pilot && _app.PointerReleased)));
             DrawModuleStrip(draw, snapshot, world, 1f);
             if (pilot > 0.01f || world.TargetContainer != 0)

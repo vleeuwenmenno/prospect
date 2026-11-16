@@ -49,20 +49,55 @@ internal sealed class RackLook
     public float Rib { get; init; }
     /// <summary>Dark rib metal shade.</summary>
     public float RibShade { get; init; }
-    /// <summary>Size-stripe half-width as a share of container half-length.</summary>
-    public float Stripe { get; init; }
+    /// <summary>Corner block half-size as a share of the container's smallest half-side.</summary>
+    public float Corner { get; init; }
+    /// <summary>How far a corner block stands off the body, as a share of its own half-size.</summary>
+    public float CornerLift { get; init; }
+    /// <summary>Corner block brightness.</summary>
+    public float CornerShade { get; init; }
+    /// <summary>Door seam width as a share of the smallest half-side.</summary>
+    public float Seam { get; init; }
+    /// <summary>Door seam and lock rod brightness.</summary>
+    public float SeamShade { get; init; }
+    /// <summary>Lock rod width as a share of the smallest half-side.</summary>
+    public float Rod { get; init; }
+    /// <summary>Lifting eye size as a share of the smallest half-side.</summary>
+    public float Eye { get; init; }
+    /// <summary>Lifting eye brightness.</summary>
+    public float EyeShade { get; init; }
+    /// <summary>How far the body takes its resource's colour: 0 is the plain body, 1 the resource colour.</summary>
+    public float BodyTint { get; init; }
+    /// <summary>Label plate thickness as a share of the clearance a container keeps.</summary>
+    public float PlateDepth { get; init; }
+    /// <summary>Stroke width as a share of a glyph's height.</summary>
+    public float Stroke { get; init; }
+    /// <summary>Brightness of the code's strokes on the resource plate.</summary>
+    public float TextShade { get; init; }
+    /// <summary>Plate RGB for an empty container.</summary>
+    public float[] EmptyPlate { get; init; } = [];
+    /// <summary>Plate RGB behind the size-class mark.</summary>
+    public float[] SizePlate { get; init; } = [];
     /// <summary>Empty container body RGB.</summary>
     public float[] Body { get; init; } = [];
-    /// <summary>One RGB body paint per resource index.</summary>
-    public float[][] Resources { get; init; } = [];
-    /// <summary>One RGB stripe for each ascending size.</summary>
+    /// <summary>One RGB stroke colour for each ascending size's class mark.</summary>
     public float[][] Stripes { get; init; } = [];
+
+    /// <summary>The galaxy's resources, in index order: colour and code for each container plate. Set at load.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Resource[] Galaxy { get; private set; } = [];
+
+    /// <summary>The cargo catalogue, for size names. Set at load.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public CargoCatalog? Cargo { get; private set; }
+
+    /// <summary>Gives the look what its container plates read: resources and size names.</summary>
+    public void Attach(Resource[] resources, CargoCatalog cargo) { Galaxy = resources; Cargo = cargo; }
 
     /// <summary>Refuses proportions or colours outside model bounds.</summary>
     public void Check()
     {
         var room = .5f * Gap;
-        if (!(Gap is > 0 and <= .2f) || !(Rib > 0) || Rib >= Gap || !(RibShade is >= 0 and <= 1) || !(Stripe is > 0 and <= .35f) || Stripes.Length != 8)
+        if (!(Gap is > 0 and <= .2f) || !(Rib > 0) || Rib >= Gap || !(RibShade is >= 0 and <= 1) || Stripes.Length != 8)
             throw new InvalidDataException("Invalid rack proportions.");
         foreach (var thin in new[] { Deck, Rail, Post, Jaw })
             if (!(thin > 0 && thin <= room)) throw new InvalidDataException("A rack part is thicker than the clearance a container keeps.");
@@ -70,10 +105,15 @@ internal sealed class RackLook
             || !(LightSize > 0 && LightSize <= Rail) || LightEvery is < 1 or > 16
             || !(DeckShade is > 0 and <= 1) || !(RailShade is > 0 and <= 1) || !(PostShade is > 0 and <= 1) || !(JawShade is > 0 and <= 1))
             throw new InvalidDataException("Invalid rack proportions.");
+        if (!(Corner is > 0 and <= .4f) || !(CornerLift is > 0 and <= 1) || !(Seam is > 0 and <= .1f) || !(Rod is > 0 and <= .1f) || !(Eye is > 0 and <= .4f)
+            || !(BodyTint is >= 0 and <= 1) || !(PlateDepth is > 0 and <= 1) || !(Stroke is > 0 and <= .3f)
+            || !(CornerShade is > 0 and <= 1) || !(SeamShade is > 0 and <= 1) || !(EyeShade is > 0 and <= 1) || !(TextShade is >= 0 and <= 1))
+            throw new InvalidDataException("Invalid container detail proportions.");
         CheckPaint(Body);
+        CheckPaint(EmptyPlate);
+        CheckPaint(SizePlate);
         CheckPaint(Light);
         CheckPaint(ClampLight);
-        foreach (var paint in Resources) CheckPaint(paint);
         foreach (var stripe in Stripes) CheckPaint(stripe);
     }
     private static void CheckPaint(float[] paint)
@@ -208,25 +248,143 @@ internal static partial class PropulsionModels
         }
     }
 
-    /// <summary>Reusable ribbed container box with resource body paint and a size-coloured stripe, at a packed slot.</summary>
+    /// <summary>A container of <paramref name="size"/> with no resource, at a packed slot.</summary>
     public static void ContainerModel(in PartBox box, int size, RackLook look, List<MeshVertex> vertices, List<uint> indices) =>
         ContainerModel(box, size, -1, look, vertices, indices);
 
-    /// <summary>Reusable ribbed container box with resource body paint and a size-coloured stripe, at a packed slot.</summary>
+    /// <summary>
+    /// A shipping container at a packed slot: a body tinted toward its resource, corner blocks, door seams and lock rods
+    /// on its ends, lifting eyes on top, rib bands, a label plate in the resource's colour with its code and a plate
+    /// with the size class, on both long sides. Every detail stands off the body by less than the clearance the slot
+    /// leaves, so nothing reaches a neighbour. One model for racks and for free containers; built only on workers.
+    /// </summary>
     public static void ContainerModel(in PartBox box, int size, int resource, RackLook look, List<MeshVertex> vertices, List<uint> indices)
     {
-        var h = box.Half;
-        var inset = MathF.Min(h.X, MathF.Min(h.Y, h.Z)) * look.Gap;
-        h -= new Vector3(inset);
-        var body = (uint)resource < (uint)look.Resources.Length ? look.Resources[resource] : look.Body;
-        Bar(vertices, indices, box.Center, 0, h.X, h.Y, h.Z, Paint(body));
-        var rib = MathF.Min(h.X, MathF.Min(h.Y, h.Z)) * look.Rib;
+        var slot = box.Half;
+        var inset = MathF.Min(slot.X, MathF.Min(slot.Y, slot.Z)) * look.Gap;
+        var h = slot - new Vector3(inset);
+        var centre = box.Center;
+        var m = MathF.Min(h.X, MathF.Min(h.Y, h.Z));
+        var pro = inset * .85f;
+        var res = (uint)resource < (uint)look.Galaxy.Length ? look.Galaxy[resource] : null;
+        var plain = new Vector3(look.Body[0], look.Body[1], look.Body[2]);
+        var body = res is null ? plain : Vector3.Lerp(plain, res.Color, look.BodyTint);
+        Span<float> rgb = stackalloc float[3];
+        rgb[0] = body.X; rgb[1] = body.Y; rgb[2] = body.Z;
+        Slab(vertices, indices, centre, h, Paint(rgb));
+
+        // Corner blocks: the strong points a container is stacked and lashed by.
+        var c = look.Corner * m;
+        var lift = MathF.Min(c * look.CornerLift, pro);
+        var cornerTag = Tag(look.CornerShade);
+        for (var i = 0; i < 8; i++)
+        {
+            var sign = new Vector3((i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1 : 1, (i & 4) == 0 ? -1 : 1);
+            Slab(vertices, indices, centre + sign * (h - new Vector3(c - lift)), new Vector3(c), cornerTag);
+        }
+
+        // Rib bands round the body, near each end.
+        var rib = MathF.Min(m * look.Rib, pro);
         var ribTag = Tag(look.RibShade);
-        Bar(vertices, indices, box.Center + new Vector3(-h.X * .72f, 0, 0), 0, rib, h.Y + rib, h.Z + rib, ribTag);
-        Bar(vertices, indices, box.Center + new Vector3(h.X * .72f, 0, 0), 0, rib, h.Y + rib, h.Z + rib, ribTag);
-        var stripeHalf = Math.Clamp(h.X * look.Stripe, rib * 1.5f, h.X * .35f);
-        var stripeLift = rib * .6f;
-        Bar(vertices, indices, box.Center, 0, stripeHalf, h.Y + stripeLift, h.Z + stripeLift, Paint(look.Stripes[size]));
+        for (var sx = -1; sx <= 1; sx += 2)
+            Slab(vertices, indices, centre + new Vector3(sx * h.X * .72f, 0, 0), new Vector3(rib, h.Y + rib, h.Z + rib), ribTag);
+
+        // A door on each end: a seam down the middle and two lock rods.
+        var seamTag = Tag(look.SeamShade);
+        var seam = look.Seam * m;
+        var rod = look.Rod * m;
+        var doorDepth = MathF.Min(pro * .6f, seam * 1.5f);
+        var doorHalf = MathF.Max(h.Y - 2 * c, c);
+        for (var sx = -1; sx <= 1; sx += 2)
+        {
+            var face = centre + new Vector3(sx * (h.X + doorDepth * .25f), 0, 0);
+            var depthHalf = doorDepth * .75f;
+            Slab(vertices, indices, face, new Vector3(depthHalf, doorHalf, seam), seamTag);
+            for (var r = -1; r <= 1; r += 2)
+                Slab(vertices, indices, face + new Vector3(0, 0, r * h.Z * .5f), new Vector3(depthHalf, doorHalf, rod), seamTag);
+        }
+
+        // Lifting eyes: four, on the top face, each a pad with a loop standing on it.
+        var eye = look.Eye * m;
+        var eyeHeight = MathF.Min(pro, eye * 1.5f);
+        var eyeTag = Tag(look.EyeShade);
+        for (var sx = -1; sx <= 1; sx += 2)
+            for (var sz = -1; sz <= 1; sz += 2)
+            {
+                var at = centre + new Vector3(sx * (h.X - 2.4f * c), h.Y, sz * (h.Z - 2.4f * c));
+                Slab(vertices, indices, at + new Vector3(0, eyeHeight * .15f, 0), new Vector3(eye, eyeHeight * .35f, eye), eyeTag);
+                for (var leg = -1; leg <= 1; leg += 2)
+                    Slab(vertices, indices, at + new Vector3(leg * eye * .8f, eyeHeight * .5f, 0), new Vector3(eye * .2f, eyeHeight * .5f, eye * .2f), eyeTag);
+                Slab(vertices, indices, at + new Vector3(0, eyeHeight * .9f, 0), new Vector3(eye, eyeHeight * .1f, eye * .2f), eyeTag);
+            }
+
+        // Plates on both long sides, each reading left to right as seen from outside.
+        var plateDepth = MathF.Max(inset * look.PlateDepth, 1e-4f);
+        var stroke = look.Stroke;
+        var emptyRgb = look.EmptyPlate;
+        var plateColour = res is null ? emptyRgb : new[] { res.Color.X, res.Color.Y, res.Color.Z };
+        var code = res?.Code ?? "EMPTY";
+        var sizeName = look.Cargo is { } cargo && (uint)size < (uint)cargo.Sizes.Length ? cargo.Sizes[size].Name : "";
+        for (var side = -1; side <= 1; side += 2)
+        {
+            var normal = new Vector3(0, 0, side);
+            var right = new Vector3(side, 0, 0);
+            var up = Vector3.UnitY;
+            var plane = centre + normal * h.Z;
+            // The resource's plate, high on the side.
+            var top = new Vector3(0, h.Y * .3f, 0);
+            var topHalf = new Vector2(h.X * .66f, h.Y * .3f);
+            Plate(vertices, indices, plane + top, topHalf, normal, right, up, plateDepth, Paint(plateColour));
+            Label(vertices, indices, code, plane + top, topHalf * .86f, normal, right, up, plateDepth, stroke, Tag(look.TextShade));
+            // The size class, small and low.
+            var low = new Vector3(0, -h.Y * .46f, 0);
+            var lowHalf = new Vector2(h.X * .4f, h.Y * .15f);
+            Plate(vertices, indices, plane + low, lowHalf, normal, right, up, plateDepth, Paint(look.SizePlate));
+            Label(vertices, indices, sizeName, plane + low, lowHalf * .8f, normal, right, up, plateDepth, stroke, Paint(look.Stripes[size]));
+        }
+    }
+
+    // A thin slab lying on a side face: half width and height across it, plateDepth standing off it.
+    private static void Plate(List<MeshVertex> vertices, List<uint> indices, Vector3 on, Vector2 half, Vector3 normal, Vector3 right, Vector3 up, float depth, float tag)
+    {
+        // From half a depth inside the body to the plate's top, one depth out.
+        var centre = on + normal * (depth * .25f);
+        var extent = Vector3.Abs(right) * half.X + Vector3.Abs(up) * half.Y + Vector3.Abs(normal) * (depth * .75f);
+        Slab(vertices, indices, centre, extent, tag);
+    }
+
+    // Text as raised strokes on a plate: fitted into <paramref name="room"/> (half width, half height) about <paramref name="on"/>.
+    private static void Label(List<MeshVertex> vertices, List<uint> indices, string text, Vector3 on, Vector2 room, Vector3 normal, Vector3 right, Vector3 up,
+        float plateDepth, float stroke, float tag)
+    {
+        if (text.Length == 0) return;
+        const float space = 1.2f;
+        var unit = MathF.Min(room.Y * 2 / StrokeFont.Height, room.X * 2 / (text.Length * StrokeFont.Width + (text.Length - 1) * space));
+        var half = unit * StrokeFont.Height * stroke * .5f;
+        var total = text.Length * StrokeFont.Width + (text.Length - 1) * space;
+        // Strokes stand on the plate's top (one depth out) and rise half a depth more.
+        var raised = plateDepth * .25f;
+        var origin = on - right * (total * unit * .5f) - up * (StrokeFont.Height * unit * .5f) + normal * (plateDepth + raised);
+        for (var k = 0; k < text.Length; k++)
+        {
+            var left = k * (StrokeFont.Width + space);
+            foreach (var line in StrokeFont.Of(text[k]).Split('|', StringSplitOptions.RemoveEmptyEntries))
+            {
+                Vector3 previous = default;
+                var first = true;
+                foreach (var point in line.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var p = origin + right * ((left + (point[0] - '0')) * unit) + up * ((point[1] - '0') * unit);
+                    if (!first)
+                    {
+                        var direction = Vector3.Normalize(p - previous);
+                        BeamBetween(vertices, indices, previous - direction * half, p + direction * half, normal, raised, half, tag);
+                    }
+                    previous = p;
+                    first = false;
+                }
+            }
+        }
     }
 
     /// <summary>Capture-only sample; no hull cargo state is inferred or changed.</summary>

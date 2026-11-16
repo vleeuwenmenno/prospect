@@ -70,8 +70,8 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
     private sealed class ContainerBuild(PropulsionLook look) : IJob
     {
         public readonly MeshVertex[][] Clamps = new MeshVertex[8 * 6][];
-        public readonly int ResourceSlots = 1 + (look.Rack?.Resources.Length ?? 0);
-        public readonly MeshVertex[][] Results = new MeshVertex[8 * (1 + (look.Rack?.Resources.Length ?? 0))][];
+        public readonly int ResourceSlots = 1 + (look.Rack?.Galaxy.Length ?? 0);
+        public readonly MeshVertex[][] Results = new MeshVertex[8 * (1 + (look.Rack?.Galaxy.Length ?? 0))][];
         public void Run()
         {
             var vertices = new List<MeshVertex>();

@@ -28,6 +28,7 @@
     { "tab": "Camera", "label": "Zoom camera", "binding": "Mouse wheel" },
     { "tab": "Camera", "action": "ReleasePointer", "label": "Hold to show cursor", "scope": ["Pilot"] },
     { "tab": "Camera", "label": "Show cursor (mouse leaves flight)", "binding": "Hold {ReleasePointer}; keyboard flight still works" },
+    { "tab": "Camera", "label": "Container details", "binding": "Put the cursor on a container, in your own rack or loose in space: a tooltip says what it holds, its size, hit points and, for a loose one, its claim and pickup delay (hold {ReleasePointer} in flight; always shown in the command view and interface mode)" },
     { "tab": "Camera", "label": "Turn the camera with the cursor shown", "binding": "Hold {ReleasePointer}, then right drag over space (press {ReleasePointer} first)" },
 
     { "tab": "Jump & navigation", "action": "Halt", "label": "Halt: cancel the current order, or the jump being prepared", "scope": ["Pilot", "Command"] },

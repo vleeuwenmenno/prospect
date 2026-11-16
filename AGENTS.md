@@ -98,7 +98,23 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   reusable containers on workers, with the `rack` look in `visuals/propulsion.json`: a deck plate on one face
   (`RackDeck.Choose`: the touched face, else -Y; it travels as the rack's `PartBox.Facing`, so the editor, ghosts and
   far hulls pass `RackDeck`'s answer, never the design's facing), rails, posts, lights; clamp jaws are per container
-  (`PartModels.TryGetClamp`, drawn beside each container). Every thickness must fit the container clearance (`gap`). `--open edit-rack` is a
+  (`PartModels.TryGetClamp`, drawn beside each container). Every thickness must fit the container clearance (`gap`).
+  A container (`PropulsionModels.ContainerModel`, one model for racked and free ones, per size and resource, built
+  on workers) has corner blocks, door seams, lock rods, lifting eyes and plates: the resource's plate takes its colour
+  from `Galaxy.Resources[i].Color` and its code from content (`Resource.Code`, `code` in `galaxy.json`), written as
+  raised strokes (`StrokeFont`); the size plate names the class. `RackLook.Attach` gives the look the galaxy's
+  resources; never read a resource's colour or code elsewhere for a container. Every detail stands off the body by
+  less than the slot clearance. `--container-sheet n` (scripted only) draws every resource's size-n container
+  before the camera; `--cargo-wide` loads a rack with one of each resource and jettisons four;
+  `--hover-container stowed|free` puts the scripted pointer on one (with `--open cargo`, `--zoom` sets the command
+  camera's distance in four-metre steps).
+  Hover: `WorldView.UpdateContainerHover` (a shown pointer only: `WorldView.PointerShown`, set by `App.Run` when the
+  window is focused, devices are not muted and `PointerRouter.Captured` is false; no window under it, not in the
+  editor) picks free containers and own racks' slots with `TargetPicking.Container`, drops it when a rock or other
+  ship is nearer, and fills `HoverContainer` from `ContainerHover` (font-free: fill, claim, pickup seconds). The
+  tooltip is `ScreenHost.DrawContainerHover`. Shift already shows the pointer in flight (`ReleasePointer`), so no new
+  binding. Own hull blocks in front of a stowed container do not hide it. Tests: `ContainerHoverTests`,
+  `ContainerModelTests`, `ResourceCodeTests`, `FrameOrderTests` (own-rack hover). `--open edit-rack` is a
   capture-only sample, never inventory. `BlockStateStore.Cargo` holds at most 255 containers per hull without tick
   allocations; adds validate payload/health and repack atomically. Density is shared cargo content. Payload is kg,
   galaxy resource index (-1 for empty), size, HP and rack/slot. `CargoTransfer` repacks retained racks by type and grid

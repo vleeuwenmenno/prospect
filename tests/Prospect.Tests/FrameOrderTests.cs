@@ -591,6 +591,7 @@ public sealed class FrameOrderTests : IDisposable
         var worldInput = !_surfaceOpen && !handled && (!ImGui.GetIO().WantCaptureKeyboard || _world.HoldsInterfacePress);
         _router.BeginWorldMouse(worldInput);
         _world.PointerOverPanel = _router.PointerOverWindow;
+        _world.PointerShown = !_router.Captured;
         _world.Update(_snapshot, Bridge, 1f / 60f, worldInput, Screen, Screen, _router.PointerOverInterface);
         _router.EndWorldMouse();
         pointerFrame.CommandView = _world.PointerView;
@@ -1238,6 +1239,48 @@ public sealed class FrameOrderTests : IDisposable
         Frame(() => Key(GlfwKey.LeftShift, false));
         Frame();
         Assert.True(_router.Captured);
+    }
+
+    [Fact]
+    public void AContainerInAnOwnRackIsDescribedOnlyUnderAShownPointer()
+    {
+        ref var hull = ref _snapshot.Hulls[_snapshot.OwnHull];
+        var design = _snapshot.Content.Designs[hull.Design];
+        var rack = Array.FindIndex(design.Types, type => type.Cargo > 0);
+        Assert.True(rack >= 0);
+        var held = new HoldContainer(rack, 1, 1, 500, 90, default);
+        hull.Cargo = new[] { held };
+        Frame();
+        Frame();
+        var pose = ContainerHover.StowedPose(design, _world.DrawnPosition(hull), _world.OwnOrientation, 1, held, _snapshot.Content.Cargo);
+        Assert.True(_world.ProjectDisc(pose.Position, 0, out var at, out _, out _));
+
+        // Hidden pointer: the flight reticle hovers nothing, whatever the stale mouse position says.
+        Frame(() => Move(at));
+        Frame();
+        Assert.True(_router.Captured);
+        Assert.False(_world.HoverContainer.Any);
+
+        // Shift shows the pointer: the container under it is described, from its own record.
+        Frame(() => Key(GlfwKey.LeftShift, true));
+        Frame(() => Move(at));
+        Frame();
+        Assert.False(_router.Captured);
+        Assert.Equal(HoverKind.Stowed, _world.HoverContainer.Kind);
+        Assert.Equal(1, _world.HoverContainer.Resource);
+        Assert.Equal(500, _world.HoverContainer.Amount);
+        Assert.Equal(90, _world.HoverContainer.Hull);
+
+        // The pointer elsewhere hovers nothing; back on it, and Shift let go, nothing again.
+        Frame(() => Move(new float2(2, 2)));
+        Frame();
+        Assert.False(_world.HoverContainer.Any);
+        Frame(() => Move(at));
+        Frame();
+        Assert.True(_world.HoverContainer.Any);
+        Frame(() => Key(GlfwKey.LeftShift, false));
+        Frame();
+        Assert.False(_world.HoverContainer.Any);
     }
 
     [Fact]

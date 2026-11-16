@@ -23,6 +23,12 @@ public sealed class Resource
     public required string Name { get; init; }
     public required Vector3 Color { get; init; }
 
+    /// <summary>
+    /// A one to four character code (capitals and digits, unique) written on containers of the resource. Content
+    /// that names none gets the first two letters of the id.
+    /// </summary>
+    public string Code { get; init; } = "";
+
     /// <summary>How common the resource is, relative to the others.</summary>
     public required float Weight { get; init; }
 
@@ -446,6 +452,15 @@ public sealed class Galaxy
         }
     }
 
+    private static string ResourceCode(JsonElement resource, string path)
+    {
+        var id = resource.GetProperty("id"u8).GetString()!;
+        var code = resource.TryGetProperty("code"u8, out var named) ? named.GetString() : id[..Math.Min(2, id.Length)].ToUpperInvariant();
+        if (string.IsNullOrEmpty(code) || code.Length > 4 || code.Any(c => !(c is >= 'A' and <= 'Z' or >= '0' and <= '9')))
+            throw new InvalidDataException($"{path}: resource {id} needs a code of one to four capitals or digits");
+        return code;
+    }
+
     public static Galaxy Load(string path, ulong seed = 0) => Parse(File.ReadAllBytes(path), path, seed);
 
     /// <summary>Reads the galaxy's rules from a file's bytes. <paramref name="path"/> names where they came from in error messages.</summary>
@@ -480,6 +495,7 @@ public sealed class Galaxy
                 {
                     Id = resource.GetProperty("id"u8).GetString()!,
                     Name = resource.GetProperty("name"u8).GetString()!,
+                    Code = ResourceCode(resource, path),
                     Color = new Vector3(tint[0].GetSingle(), tint[1].GetSingle(), tint[2].GetSingle()),
                     Weight = resource.GetProperty("weight"u8).GetSingle(),
                     CoreBias = resource.GetProperty("coreBias"u8).GetSingle(),
@@ -492,6 +508,8 @@ public sealed class Galaxy
             throw new InvalidDataException($"{path}: needs at least one star class and one name syllable");
         if (resources.Count > MaxResources)
             throw new InvalidDataException($"{path}: at most {MaxResources} resources");
+        if (resources.Select(r => r.Code).Distinct().Count() != resources.Count)
+            throw new InvalidDataException($"{path}: resource codes must differ");
 
         // Partners name other resources, which may be listed later, so they are resolved once all are known.
         var listed = 0;

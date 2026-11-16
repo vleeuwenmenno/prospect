@@ -20,19 +20,19 @@
     "Mor", "Pra", "Lun", "Sig", "Var", "Ke", "Ond", "Rhe", "Ty", "Ulm", "Gan", "Fen", "Yar", "Qua"
   ],
   "resources": [
-    { "id": "iron", "name": "Iron", "color": [0.62, 0.36, 0.26], "weight": 10, "coreBias": 0.0, "presence": 0.8,
+    { "id": "iron", "code": "FE", "name": "Iron", "color": [0.62, 0.36, 0.26], "weight": 10, "coreBias": 0.0, "presence": 0.8,
       "partners": [{ "id": "nickel", "weight": 4 }, { "id": "titanium", "weight": 1 }] },
-    { "id": "copper", "name": "Copper", "color": [0.78, 0.47, 0.25], "weight": 6, "coreBias": 0.2, "presence": 0.6,
+    { "id": "copper", "code": "CU", "name": "Copper", "color": [0.78, 0.47, 0.25], "weight": 6, "coreBias": 0.2, "presence": 0.6,
       "partners": [{ "id": "silver", "weight": 2 }, { "id": "gold", "weight": 1 }] },
-    { "id": "nickel", "name": "Nickel", "color": [0.55, 0.6, 0.52], "weight": 5, "coreBias": 0.4, "presence": 0.5,
+    { "id": "nickel", "code": "NI", "name": "Nickel", "color": [0.55, 0.6, 0.52], "weight": 5, "coreBias": 0.4, "presence": 0.5,
       "partners": [{ "id": "iron", "weight": 2 }, { "id": "copper", "weight": 1 }] },
-    { "id": "titanium", "name": "Titanium", "color": [0.52, 0.6, 0.72], "weight": 3, "coreBias": 1.5, "presence": 0.3,
+    { "id": "titanium", "code": "TI", "name": "Titanium", "color": [0.52, 0.6, 0.72], "weight": 3, "coreBias": 1.5, "presence": 0.3,
       "partners": [{ "id": "iron", "weight": 1 }] },
-    { "id": "silver", "name": "Silver", "color": [0.8, 0.82, 0.86], "weight": 1.5, "coreBias": 2.5, "presence": 0.18,
+    { "id": "silver", "code": "AG", "name": "Silver", "color": [0.8, 0.82, 0.86], "weight": 1.5, "coreBias": 2.5, "presence": 0.18,
       "partners": [{ "id": "copper", "weight": 1 }, { "id": "gold", "weight": 1 }] },
-    { "id": "gold", "name": "Gold", "color": [0.92, 0.74, 0.28], "weight": 0.8, "coreBias": 4.0, "presence": 0.1,
+    { "id": "gold", "code": "AU", "name": "Gold", "color": [0.92, 0.74, 0.28], "weight": 0.8, "coreBias": 4.0, "presence": 0.1,
       "partners": [{ "id": "silver", "weight": 1 }, { "id": "copper", "weight": 1 }] },
-    { "id": "ice", "name": "Ice", "color": [0.65, 0.85, 1.0], "weight": 2, "coreBias": 0.0, "presence": 1.0,
+    { "id": "ice", "code": "ICE", "name": "Ice", "color": [0.65, 0.85, 1.0], "weight": 2, "coreBias": 0.0, "presence": 1.0,
       "partners": [] }
   ],
   "sectorCharacter": {

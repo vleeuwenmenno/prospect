@@ -20,6 +20,11 @@ Own hull cargo is held by the server, saved, replicated and drawn; local debug l
 Select an applied rack, choose a container in its cargo panel, then JETTISON SELECTED in local or remote games.
 Destroyed racks eject intact containers; wreck splits retain cargo. Free containers drift, collide, take damage,
 and persist in saves. Middle-click a free container to see its size, resource, amount and HP.
+Containers are drawn the same racked or loose: corner blocks, door seams and lock rods, lifting eyes, and a plate in the
+resource's colour with its code (FE, CU, NI, TI, AG, AU, ICE, set in `galaxy.json`) and the size class; an empty one says EMPTY.
+Put the cursor on one (hold `Shift` in flight; the command view and interface mode already show it) for a tooltip: resource,
+kg and fill, size and u, HP and, for a loose one, who claims it and the pickup delay left. A rack's own hull blocks in front
+of a stowed container do not hide it from the cursor yet.
 Cleanup defaults to 60 unattended minutes (`containerLifetimeMinutes`, 0 means never).
 Place a Tractor beam face mount from the editor's Hull tab. It automatically pulls nearby free containers into
 racks it can see and fit them in. Every release waits 10 seconds before pickup; unclaimed cargo is open to anyone.

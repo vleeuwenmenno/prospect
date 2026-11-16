@@ -1185,6 +1185,7 @@ internal sealed partial class WorldView
         // Which side of the opening the camera is on, from where the camera is this frame.
         UpdateThrough(dt);
         UpdateStream();
+        UpdateContainerHover(snapshot, pointerOverUi);
     }
 
     /// <summary>Builds this frame's instances and constants and records the scene.</summary>
@@ -3679,6 +3680,16 @@ internal sealed partial class WorldView
         return true;
     }
     private bool _captureFocused;
+    private int _captureJettisonCount;
+
+    /// <summary>Capture only: <c>--zoom</c> on a cargo view sets the command camera's distance, four metres a step.</summary>
+    public float? CaptureCargoDistance { get; set; }
+
+    /// <summary>Capture only (<c>--cargo-wide</c>): more containers, one of each resource, and several jettisoned.</summary>
+    public bool CaptureCargoWide { get; set; }
+    internal int CaptureCargoSampleCount => CaptureCargoCount;
+    private int CaptureCargoCount => CaptureCargoWide ? WideSamples.Length : 3;
+    private static readonly (int Size, int Resource)[] WideSamples = [(2, 0), (1, 1), (0, 2), (0, 3), (0, 4), (0, 5), (1, 6), (1, -1)];
     private void RunCargoCapture(PlayerInputBridge bridge, float dt)
     {
         if (!Editor.CanEdit || Editor.Draft is not { } draft) return;
@@ -3693,23 +3704,27 @@ internal sealed partial class WorldView
         _captureCargoClock += dt;
         // Close on the selected rack so a capture shows its deck, clamps and containers at a readable size.
         if (!_captureFocused && _captureCargoClock > .3f) { FocusEditor(); _captureFocused = true; }
-        if (_captureCargoSent < 3 && _captureCargoClock > 1 + _captureCargoSent * .6f)
+        var samples = CaptureCargoCount;
+        if (_captureCargoSent < samples && _captureCargoClock > 1 + _captureCargoSent * .6f)
         {
-            if (Editor.RequestContainer(bridge, _captureCargoSent == 0 ? 2 : 1, _captureCargoSent == 2 ? -1 : _captureCargoSent)) _captureCargoSent++;
+            var (size, resource) = CaptureCargoWide ? WideSamples[_captureCargoSent] : _captureCargoSent == 0 ? (2, 0) : _captureCargoSent == 2 ? (1, -1) : (1, 1);
+            if (Editor.RequestContainer(bridge, size, resource)) _captureCargoSent++;
         }
-        if (CaptureJettisonSeconds is { } at && !_captureJettisonSent && _captureCargoClock >= at
-            && _snapshot is { OwnHull: >= 0 } snapshot && Editor.DraftCargo.Length == 3)
+        // Wide runs jettison several, half a second apart, so loose containers of different resources are in view.
+        var toJettison = CaptureCargoWide ? 4 : 1;
+        if (CaptureJettisonSeconds is { } at && !_captureJettisonSent && _captureCargoClock >= at + _captureJettisonCount * .5f
+            && _snapshot is { OwnHull: >= 0 } snapshot && Editor.DraftCargo.Length == samples - _captureJettisonCount)
         {
             var hold = snapshot.Hulls[snapshot.OwnHull].Cargo.Span;
             for (var i = 0; i < hold.Length; i++)
             {
                 if (hold[i].Rack != Editor.SelectedCargoRack) continue;
                 bridge.JettisonContainer(Editor.Token, Editor.Hull, hold[i].Rack, i, snapshot.OwnCargoTick);
-                _captureJettisonSent = true;
+                _captureJettisonSent = ++_captureJettisonCount >= toJettison;
                 break;
             }
         }
-        if (_captureCargoMode == 3 && _captureCargoClock > 3 && Editor.DraftCargo.Length == 3)
+        if (_captureCargoMode == 3 && _captureCargoClock > 3 && Editor.DraftCargo.Length == CaptureCargoCount)
         {
             Editor.Cancel(bridge);
             _captureCargoMode = 0;
@@ -3717,7 +3732,7 @@ internal sealed partial class WorldView
             return;
         }
         if (_captureCargoMode == 2 && _captureCargoClock > 4
-            && (CaptureJettisonSeconds is null ? Editor.DraftCargo.Length == 3 : _captureJettisonSent && _snapshot!.FreeContainerCount > 0))
+            && (CaptureJettisonSeconds is null ? Editor.DraftCargo.Length == CaptureCargoCount : _captureJettisonSent && _snapshot!.FreeContainerCount > 0))
         {
             if (CaptureJettisonSeconds is not null) TargetContainer = _snapshot!.FreeContainers[0].Id;
             Editor.Cancel(bridge);
@@ -3726,7 +3741,7 @@ internal sealed partial class WorldView
             {
                 SetCommandCapturePose(OwnPosition, 25, -.75f, -.8f);
                 // Capture-only close inspection of the real hold.
-                _commandDistance = CaptureCargoSpace ? 30f : 12f;
+                _commandDistance = CaptureCargoDistance ?? (CaptureCargoSpace ? 30f : 12f);
             }
             ClearSelection();
         }

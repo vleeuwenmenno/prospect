@@ -46,15 +46,41 @@ internal sealed partial class WorldView
         }
         return id;
     }
+    /// <summary>
+    /// Capture only (<c>--container-sheet n</c>): every resource's container of size <c>n</c>, and an empty one, in two
+    /// rows before the camera, turned to show a long side, an end and the top. Drawn through the one container mesh path.
+    /// </summary>
+    public int? ContainerSheetSize { get; set; }
+
+    private void DrawContainerSheet(int frameIndex, SessionSnapshot snapshot)
+    {
+        if (ContainerSheetSize is not { } size || snapshot.Galaxy is not { } galaxy) return;
+        var shape = snapshot.Content.Cargo.Sizes[size].Shape;
+        var longest = MathF.Max(shape.X, MathF.Max(shape.Y, shape.Z)) * snapshot.Content.Cargo.UnitSize;
+        var spacing = longest * 1.5f;
+        var orientation = Quaternion.CreateFromYawPitchRoll(.6f, .35f, 0);
+        var count = galaxy.Resources.Length + 1;
+        var columns = (count + 1) / 2;
+        for (var i = 0; i < count; i++)
+        {
+            if (!_partModels.TryGetContainer(size, i - 1, out var mesh)) continue;
+            var column = i % columns - (columns - 1) * .5f;
+            var row = i / columns == 0 ? .5f : -.5f;
+            var position = _forward * (longest * 3.4f) + _right * (column * spacing) + _up * (row * spacing);
+            _scene.AddTriangles(frameIndex, mesh, MeshTransform(position, orientation, Vector3.One, Vector3.One, Material(false, -1), 1));
+        }
+    }
+
     private void DrawFreeContainers(int frameIndex, SessionSnapshot snapshot, Double3 camera)
     {
+        DrawContainerSheet(frameIndex, snapshot);
         DrawnFreeContainers = 0;
         foreach (var item in _freeVisuals.Items)
         {
             var pose = _freeVisuals.Pose(item, snapshot.ServerTickPrecise + _frameAlpha);
             var position = pose.Position.RelativeTo(camera);
             if (!Visible(position, FreeContainers.Half(snapshot.Content.Cargo, item.Size).Length(), _viewport.X / _viewport.Y, out _)
-                || !_partModels.TryGetContainer(item.Size, out var mesh)) continue;
+                || !_partModels.TryGetContainer(item.Size, item.Resource, out var mesh)) continue;
             if (_scene.AddTriangles(frameIndex, mesh, MeshTransform(position, pose.Orientation, Vector3.One, Vector3.One, Material(false, -1), 1))) DrawnFreeContainers++;
         }
     }
