@@ -956,6 +956,7 @@ internal sealed class App : IDisposable
                 Focused = focused,
                 SurfaceOpen = !_screens.WorldInputEnabled,
                 CommandView = World.PointerView,
+                InterfaceMode = _screens.InterfaceCameraDragAllowed,
             };
             _pointer.Update(pointerFrame);
             // Escape closes a tip before any other surface takes it.
@@ -968,6 +969,7 @@ internal sealed class App : IDisposable
             _screens.HandleEditorShortcut(inSpace && focused, snapshot, Session?.Client.Input);
             // A shortcut can open or close a surface after NewFrame; its cursor change belongs to this frame.
             pointerFrame.SurfaceOpen = !_screens.WorldInputEnabled;
+            pointerFrame.InterfaceMode = _screens.InterfaceCameraDragAllowed;
             _pointer.RefreshCapture(pointerFrame);
             // A part card held for a drag keeps an interface item active, which claims the keyboard; the world still
             // takes that one press over, as the editor's palette hands it (WorldView.HoldsInterfacePress).

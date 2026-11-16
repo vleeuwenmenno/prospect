@@ -963,12 +963,7 @@ internal sealed partial class WorldView
             }
 
             // Pointer, arrow keys and right stick turn the view, not the hull.
-            var invert = _settings.InvertPitch ? -1f : 1f;
-            var pointer = _devices.CameraDelta * (LookRadiansPerPixel * _settings.MouseSensitivity);
-            var yaw = pointer.X + _actions.Axis(_devices, InputAxis.Yaw, keyboard) * LookRadiansPerSecond * dt;
-            var pitch = (-pointer.Y + _actions.Axis(_devices, InputAxis.Pitch, keyboard) * LookRadiansPerSecond * dt) * invert;
-            _lookDirection = Vector3.Transform(_lookDirection, Quaternion.CreateFromAxisAngle(_up, -yaw));
-            _lookDirection = Vector3.Normalize(Vector3.Transform(_lookDirection, Quaternion.CreateFromAxisAngle(_right, pitch)));
+            TurnLook(_actions.Axis(_devices, InputAxis.Yaw, keyboard) * LookRadiansPerSecond * dt, _actions.Axis(_devices, InputAxis.Pitch, keyboard) * LookRadiansPerSecond * dt);
 
             // Holding the free-look button looks around without committing the hull to anything; letting go
             // returns the view to the nose. Otherwise the hull swings onto the view whenever it is under thrust.
@@ -1022,6 +1017,21 @@ internal sealed partial class WorldView
             var nose = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
             if (_align.Update(alignHeld && !alignBlocked, alignBlocked, nose, _lookDirection))
                 controls.Align = true;
+        }
+        else if (!inputEnabled && !editing && Mode == ViewMode.Pilot)
+        {
+            // Interface mode: the world has no input, but a right drag begun over space (PointerRouter) turns the
+            // camera exactly as free look does, and letting go returns the view to the nose. No flight intent is sent.
+            var dragging = _devices.CameraDrag;
+            if (dragging)
+            {
+                TurnLook(0f, 0f);
+                if (_devices.CameraScroll != 0)
+                    _chaseZoom = Math.Clamp(_chaseZoom * MathF.Pow(0.88f, _devices.CameraScroll), 0.5f, 8f);
+            }
+            else if (_freeLook)
+                _lookDirection = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
+            _freeLook = dragging;
         }
         else if (inputEnabled && !editing)
         {
@@ -4249,6 +4259,20 @@ internal sealed partial class WorldView
         for (var i = 0; i < boxes.Length; i++)
             if (Project(EditorPoint(EditorGeometry.Middle(boxes[i])), out var screen) && BoxSelect.Contains(min, max, screen))
                 Editor.BulkSelect(i, mode);
+    }
+
+    /// <summary>
+    /// Turns the look direction by the pointer's camera motion plus the given key or stick turn, at the player's
+    /// mouse sensitivity and pitch inversion: free look's one rule.
+    /// </summary>
+    private void TurnLook(float keyYaw, float keyPitch)
+    {
+        var invert = _settings.InvertPitch ? -1f : 1f;
+        var pointer = _devices.CameraDelta * (LookRadiansPerPixel * _settings.MouseSensitivity);
+        var yaw = pointer.X + keyYaw;
+        var pitch = (-pointer.Y + keyPitch) * invert;
+        _lookDirection = Vector3.Transform(_lookDirection, Quaternion.CreateFromAxisAngle(_up, -yaw));
+        _lookDirection = Vector3.Normalize(Vector3.Transform(_lookDirection, Quaternion.CreateFromAxisAngle(_right, pitch)));
     }
 
     /// <summary>

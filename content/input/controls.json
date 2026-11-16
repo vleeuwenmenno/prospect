@@ -93,6 +93,7 @@
 
     { "tab": "Interface", "action": "Pause", "label": "Menu / back", "scope": ["All"], "required": true },
     { "tab": "Interface", "action": "ToggleInterface", "label": "Interface mode: free pointer, show every window not pinned", "scope": ["All"] },
+    { "tab": "Interface", "label": "Turn the camera in interface mode", "binding": "Right drag over space, not over a window; the view returns to the nose on release" },
     { "tab": "Interface", "action": "ToggleCharts", "label": "Charts window", "scope": ["All"] },
     { "tab": "Interface", "action": "ToggleGas", "label": "Gas window: clouds you have sampled", "scope": ["All"] },
     { "tab": "Interface", "action": "ToggleCargo", "label": "Cargo window", "scope": ["All"] },

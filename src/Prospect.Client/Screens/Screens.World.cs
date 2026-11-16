@@ -54,6 +54,12 @@ internal sealed partial class ScreenHost
     /// True while the player is in space with nothing open over it, so input belongs to the world. Pinned social
     /// windows are not open surfaces: they never take flight's input.
     /// </summary>
+    /// <summary>
+    /// Interface mode is the only thing open over the session, so a right drag over the world may turn the pilot
+    /// camera (<c>PointerFrame.InterfaceMode</c>). Every other surface keeps the world's mouse off.
+    /// </summary>
+    public bool InterfaceCameraDragAllowed => _screen == Screen.Session && InterfaceModeOn && !_sessionMenuOpen && !_mapOpen && !_shipInfoOpen && !_controlsOpen && !_chatOpen && !_newShip.Open && !_designs.Open;
+
     public bool WorldInputEnabled => _screen == Screen.Session && !_sessionMenuOpen && !_mapOpen && !_shipInfoOpen && !_controlsOpen && !InterfaceModeOn && !_chatOpen && !_newShip.Open && !_designs.Open;
 
     public void OpenShipInfo() => _shipInfoOpen = true;

@@ -109,6 +109,7 @@ public sealed class FrameOrderTests : IDisposable
     private int _buttonClicks;
     private long _tick;
     private bool _surfaceOpen;
+    private bool _interfaceMode;
     private EditorMenuPanel? _editorMenu;
 
     // The map with its unit list, drawn instead of the quick buttons while set, and what the map took from it.
@@ -580,13 +581,14 @@ public sealed class FrameOrderTests : IDisposable
     {
         _devices.BeginFrame();
         poll?.Invoke();
-        var pointerFrame = new PointerFrame { InSpace = true, Focused = true, SurfaceOpen = _surfaceOpen, CommandView = _world.PointerView };
+        var pointerFrame = new PointerFrame { InSpace = true, Focused = true, SurfaceOpen = _surfaceOpen, CommandView = _world.PointerView, InterfaceMode = _interfaceMode };
         _router.Update(pointerFrame);
         var handled = shortcut?.Invoke() ?? false;
         // As App.Run: the sector key after the other interface shortcuts, never consuming the frame's input.
         if (_sectorShown)
             _sector.HandleShortcut(_actions, _devices, _sectorKeyAllowed, ImGui.GetIO().WantTextInput, _router.PointerOverInterface);
         pointerFrame.SurfaceOpen = _surfaceOpen;
+        pointerFrame.InterfaceMode = _interfaceMode;
         _router.RefreshCapture(pointerFrame);
         var worldInput = !_surfaceOpen && !handled && (!ImGui.GetIO().WantCaptureKeyboard || _world.HoldsInterfacePress);
         _router.BeginWorldMouse(worldInput);
@@ -8348,6 +8350,7 @@ public sealed class FrameOrderTests : IDisposable
     {
         var handled = _mode.HandleKey(_actions, _devices, ImGui.GetIO().WantTextInput, _router.PointerOverInterface);
         _surfaceOpen = _mode.Active;
+        _interfaceMode = _mode.Active;
         _floatingFull = _mode.Active;
         return handled;
     }
@@ -8381,6 +8384,71 @@ public sealed class FrameOrderTests : IDisposable
         Assert.True(_router.Captured);
         Frame(() => Key(GlfwKey.Tab, false), InterfaceKey);
         Assert.True(_router.Captured);
+    }
+
+    private void InterfaceModeOn()
+    {
+        Frame(() => Key(GlfwKey.Tab, true), InterfaceKey);
+        Frame(() => Key(GlfwKey.Tab, false), InterfaceKey);
+        Frame(() => Move(EmptySpace), InterfaceKey);
+        Assert.True(_mode.Active);
+        Assert.False(_router.Captured);
+        Bridge.Consume(out _, out _);
+    }
+
+    [Fact]
+    public void ARightDragOverSpaceInInterfaceModeTurnsTheCameraAndSendsNoFlight()
+    {
+        InterfaceModeOn();
+        var before = _world.CameraForward;
+        Frame(() => Button(GlfwMouseButton.Right, true), InterfaceKey);
+        Frame(() => Move(EmptySpace + new float2(200, 40)), InterfaceKey);
+        Assert.True(_world.FreeLook);
+        Assert.True(Vector3.Distance(_world.CameraForward, before) > 0.05f);
+        var sent = Sent();
+        Assert.Equal(0f, sent.Forward);
+        Assert.Equal(0f, sent.Strafe);
+        Assert.False(sent.Align);
+        Assert.True(_mode.Active);
+        Assert.Equal(0, _buttonClicks);
+
+        // Let go: free look's own rule, the view returns to the nose; the hull never turned.
+        Frame(() => Button(GlfwMouseButton.Right, false), InterfaceKey);
+        Assert.False(_world.FreeLook);
+        // The chase camera eases back onto the nose over a few frames.
+        for (var i = 0; i < 240; i++)
+            Frame(shortcut: InterfaceKey);
+        Assert.True(Vector3.Distance(_world.CameraForward, before) < 0.05f);
+    }
+
+    [Fact]
+    public void ARightDragThatLeavesOntoAWindowInInterfaceModeKeepsTurning()
+    {
+        InterfaceModeOn();
+        Frame(() => Button(GlfwMouseButton.Right, true), InterfaceKey);
+        Frame(() => Move(EmptySpace + new float2(100, 0)), InterfaceKey);
+        var mid = _world.CameraForward;
+        Frame(() => Move(OverButton), InterfaceKey);
+        Frame(() => Move(OverButton + new float2(60, 0)), InterfaceKey);
+        Assert.True(_world.FreeLook);
+        Assert.True(Vector3.Distance(_world.CameraForward, mid) > 0.01f);
+        Frame(() => Button(GlfwMouseButton.Right, false), InterfaceKey);
+        Assert.Equal(0, _buttonClicks);
+    }
+
+    [Fact]
+    public void ARightPressOnAWindowInInterfaceModeNeverTurnsTheCamera()
+    {
+        InterfaceModeOn();
+        Frame(() => Move(OverButton), InterfaceKey);
+        Frame(() => Button(GlfwMouseButton.Right, true), InterfaceKey);
+        Frame(() => Move(EmptySpace), InterfaceKey);
+        Frame(() => Move(EmptySpace + new float2(300, 0)), InterfaceKey);
+        Assert.False(_world.FreeLook);
+        var sent = Sent();
+        Assert.Equal(0f, sent.Forward);
+        Frame(() => Button(GlfwMouseButton.Right, false), InterfaceKey);
+        Assert.False(_world.FreeLook);
     }
 
     [Fact]

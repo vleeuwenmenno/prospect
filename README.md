@@ -532,6 +532,7 @@ The cursor is hidden only in the pilot view. The command view, the map and every
   stop, keyboard flight still works, and the bar and pinned windows can be clicked. With `Shift` held, a right drag that
   starts over space turns the camera, as free look does; letting go of the button or of `Shift` returns the view to
   the nose. Press `Shift` before the right button: a click in the same instant as `Shift` is dropped.
+- **Interface mode (`Tab`), pilot view:** a right drag that starts over space turns the camera as free look does (the hull does not turn, no flight input is sent); letting go returns the view to the nose. A press that starts on a window never turns it.
 - **Command view:** the cursor is shown as soon as it opens (`N`), and the mouse works in the world: select,
   box-select, order, rotate, pan and zoom. `Shift` there only adds to a selection or moves the plane; it never
   hides the cursor or ends a drag. Back in the pilot view the cursor is hidden again unless `Shift` is held or

@@ -27,7 +27,7 @@ How the two Controls screens and the remap work. Rules for changing them are in 
 
 ## Limits
 
-- Fixed: mouse gestures, Ctrl chords, the editor's `S` and `R`, Enter and Escape in text fields.
+- Fixed: mouse gestures (the right drag over space in interface mode turns the camera, listed on the Interface tab), Ctrl chords, the editor's `S` and `R`, Enter and Escape in text fields.
   They are not checked for clashes with remaps.
 - Not remappable: sticks, triggers, the roll bumper pair.
 - No chords. One press binds one control.

@@ -39,6 +39,12 @@ internal struct PointerFrame
     /// camera gestures, except over the interface.
     /// </summary>
     public bool CommandView;
+
+    /// <summary>
+    /// Interface mode is the only surface open (no menu, map, Controls, chat or dialog over it). A right drag begun
+    /// over the world in the pilot view then turns the camera, as with the release key held.
+    /// </summary>
+    public bool InterfaceMode;
 }
 
 /// <summary>
@@ -75,6 +81,7 @@ internal sealed class PointerRouter(InputDevices devices, ActionMap actions, IIn
     public bool ReleaseHeld { get; private set; }
 
     private bool _commandView;
+    private bool _interfaceMode;
     private bool _cameraDrag;
 
     /// <summary>
@@ -107,6 +114,7 @@ internal sealed class PointerRouter(InputDevices devices, ActionMap actions, IIn
     {
         ReleaseHeld = actions.Held(devices, InputAction.ReleasePointer, true);
         _commandView = frame.CommandView;
+        _interfaceMode = frame.InterfaceMode;
         Apply(frame.InSpace && frame.Focused && !devices.Muted && !frame.SurfaceOpen && !frame.CommandView && !ReleaseHeld);
         PointerOverInterface = !Captured && ui.PointerOverInterface;
         PointerOverWindow &= !Captured;
@@ -130,12 +138,14 @@ internal sealed class PointerRouter(InputDevices devices, ActionMap actions, IIn
     /// One exception in the pilot view: with the release key held, a right press that begins over the world (not
     /// in the same poll as the key, which the quarantine drops) turns the camera as free look does, until the
     /// button or the key is let go. Only the camera's motion and wheel see it; every button stays masked.
+    /// Interface mode (<see cref="PointerFrame.InterfaceMode"/>) gives the same drag without the key, though the world
+    /// has no input there.
     /// </para>
     /// </summary>
     public void BeginWorldMouse(bool worldInput)
     {
         devices.ReadingWorldMouse = true;
-        var released = !_commandView && ReleaseHeld && worldInput && !Captured;
+        var released = !_commandView && !Captured && ((ReleaseHeld && worldInput) || _interfaceMode);
         // A release and re-press in one poll starts a new gesture, even if the old drag was ours.
         _cameraDrag = released && devices.RawMouseDown(GlfwMouseButton.Right) && !PointerOverInterface
             && (devices.FreshPress(GlfwMouseButton.Right) ? !ui.PointerOverWindow(devices.RightPressPosition) : _cameraDrag);
