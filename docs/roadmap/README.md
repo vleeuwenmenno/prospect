@@ -11,6 +11,7 @@ Implementation continues separately; this change records decisions and a read-on
 3. [Implementation plan](implementation.md): dependencies, agent ownership and acceptance checks.
 4. [Cargo](cargo.md): containers, racks, tractor beams; decided and open.
 5. [Shield contact and exhaust](shield-exhaust.md): contact strength, contact patch, exhaust on shields and rock.
+6. [Wreckage](wreckage.md): ships that break apart, wrecks, lifetime settings.
 
 ## Status vocabulary
 
