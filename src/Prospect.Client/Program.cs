@@ -82,7 +82,9 @@ internal static class Program
           --thrust <axes>         With --capture or --bench, pilot view: hold the flight keys, a comma list of forward,
                                   back, left, right, up, down and boost; --thrust-at <sec> and --thrust-until <sec>
                                   after the splash say when (default from 0, to the end)
-          --zoom <0.5..8>         With --capture or --bench, pilot view: the camera's distance, as the scroll wheel sets it
+          --align-at <sec>        With --capture or --bench, pilot view: click the align button for a moment this many
+                                 seconds after the splash (use with --look <degrees>)
+         --zoom <0.5..8>         With --capture or --bench, pilot view: the camera's distance, as the scroll wheel sets it
           --rts-script <json>     Private muted capture poses; --rts-seed <n> selects the diagnostic seed
           --target                Pilot view: target the nearest other hull once in space
           --fuel-callout <fuel>   With --capture or --bench: call out the flown hull's tanks of nitrogen, hydrazine or
@@ -397,6 +399,10 @@ internal static class Program
                     break;
                 case "--thrust" when hasValue && Prospect.Client.World.ScriptedThrust.TryParse(args[i + 1], out var thrust):
                     options.Thrust = thrust;
+                    i++;
+                    break;
+                case "--align-at" when hasValue && float.TryParse(args[i + 1], out var alignAt) && alignAt is >= 0f and <= 600f:
+                    options.AlignAt = alignAt;
                     i++;
                     break;
                 case "--zoom" when hasValue && float.TryParse(args[i + 1], out var zoom) && zoom is >= 0.5f and <= 8f:

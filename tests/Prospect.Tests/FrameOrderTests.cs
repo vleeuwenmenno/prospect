@@ -4326,6 +4326,87 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal(0, _buttonClicks);
     }
 
+    // Turns the view off the nose with the yaw keys, with the pointer captured and no thrust.
+    private void LookAside()
+    {
+        Frame();
+        Frame(() => Key(GlfwKey.Right, true));
+        for (var i = 0; i < 10; i++)
+            Frame();
+        Frame(() => Key(GlfwKey.Right, false));
+        var sent = Sent();
+        Assert.False(sent.Align);
+        Assert.True(Vector3.Dot(Nose, sent.Aim) < 0.99f);
+    }
+
+    [Fact]
+    public void TheLeftButtonAlignsTheHullWithoutThrustAndAClickKeepsAligningUntilTheNoseIsOnTheView()
+    {
+        LookAside();
+        Assert.True(_router.Captured);
+
+        // Held: align is on, nothing is thrusting.
+        Frame(() => Button(GlfwMouseButton.Left, true));
+        var sent = Sent();
+        Assert.True(sent.Align);
+        Assert.Equal(0f, sent.Forward);
+        Assert.True(Vector3.Dot(sent.Aim, Nose) < 0.99f);
+
+        // Let go: the click carries on until the nose is within the stop angle of the view, then it stops.
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        var stop = PilotTuning.Load().AlignStopCosine;
+        var carried = 0;
+        for (var i = 0; i < 2000; i++)
+        {
+            sent = Sent();
+            if (!sent.Align)
+                break;
+            Assert.True(Vector3.Dot(Nose, sent.Aim) < stop, "a click that has reached the view must have stopped");
+            carried++;
+            Tick();
+            Frame();
+        }
+
+        Assert.True(carried > 0);
+        Assert.False(sent.Align);
+        Assert.True(Vector3.Dot(Nose, sent.Aim) >= stop);
+    }
+
+    [Fact]
+    public void ShiftFreeLookAndThrustKeepTheLeftButtonFromAligningAndAnyOfThemEndsAClick()
+    {
+        // Free look: the right button wins over a held left.
+        LookAside();
+        Frame(() => Button(GlfwMouseButton.Right, true));
+        Frame(() => Button(GlfwMouseButton.Left, true));
+        Assert.True(_world.FreeLook);
+        Assert.False(Sent().Align);
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        Frame(() => Button(GlfwMouseButton.Right, false));
+        Frame();
+        Assert.False(Sent().Align);
+
+        // Shift shows the pointer: the same click is the windows', not a turn.
+        LookAside();
+        Frame(() => Key(GlfwKey.LeftShift, true));
+        Frame(() => Button(GlfwMouseButton.Left, true));
+        Assert.False(Sent().Align);
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        Frame(() => Key(GlfwKey.LeftShift, false));
+        Frame();
+        Assert.False(Sent().Align);
+
+        // A click, then thrust: thrust aligns by itself, and when it stops the click is gone.
+        LookAside();
+        Frame(() => Button(GlfwMouseButton.Left, true));
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        Assert.True(Sent().Align);
+        Frame(() => Key(GlfwKey.W, true));
+        Frame(() => Key(GlfwKey.W, false));
+        Frame();
+        Assert.False(Sent().Align);
+    }
+
     [Fact]
     public void ARightDragBegunOnTheInterfaceNeverTurnsTheCamera()
     {
