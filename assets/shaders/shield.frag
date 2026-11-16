@@ -59,19 +59,23 @@ vec2 ripple(vec4 at, float strength, vec4 contactPatch)
     vec3 delta = localPosition - at.xyz;
     float d = length(delta);
     float spot = d / shieldLook.impact.x;
+    float contactMask = 1.0;
     if (contactPatch.w > 0.0) {
         vec3 normal = normalize(contactPatch.xyz);
         float plane = dot(delta, normal);
         float edge = max(0.0, length(delta - plane * normal) - contactPatch.w);
-        d = length(vec2(plane, edge));
-        spot = length(vec2(plane * length(contactPatch.xyz), edge / shieldLook.impact.x));
+        // A contact wave travels along the touching side, never through the hull to its back.
+        // Keep the plane band for both the flash and its waves as the disk expands tangentially.
+        contactMask = 1.0 - smoothstep(1.0, 2.0, abs(plane) * length(contactPatch.xyz));
+        d = edge;
+        spot = edge / shieldLook.impact.x;
     }
     float ring = (d - age * shieldLook.ripple.x) / shieldLook.ripple.y;
     float life = 1.0 - age / seconds;
     // A bright contact patch and two narrow wavefronts share the authoritative hit clock.
     float echo = ring + 1.8;
     float flashLife = max(0.0, 1.0 - age / shieldLook.impact.y);
-    return strength * vec2(life * life * (exp(-ring * ring) + 0.3 * exp(-echo * echo * 2.0)),
+    return strength * contactMask * vec2(life * life * (exp(-ring * ring) + 0.3 * exp(-echo * echo * 2.0)),
         flashLife * flashLife * exp(-spot * spot));
 }
 

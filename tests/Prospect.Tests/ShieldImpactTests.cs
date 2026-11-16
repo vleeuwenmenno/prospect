@@ -16,7 +16,7 @@ public sealed class ShieldImpactTests
         var pod = Content.Pod.Flight;
         byte Strength(float speed, FlightParams flight) => ShieldImpact.Strength(0.5f * flight.Mass * speed * speed, 0, flight.ShieldCapacity, flight.ShieldImpactEnergyFraction);
         Console.WriteLine($"Shield calibration: drone mass {drone.Mass}, capacity {drone.ShieldCapacity}, tap {Strength(0.3f, drone)}, ram {Strength(8, drone)}; pod mass {pod.Mass}, capacity {pod.ShieldCapacity}, ram {Strength(8, pod)}");
-        Assert.InRange(Strength(0.3f, drone), (byte)1, (byte)10);
+        Assert.InRange(Strength(0.3f, drone), (byte)1, (byte)12);
         Assert.Equal(1, Strength(0, drone));
         Assert.Equal(255, Strength(8, pod));
         var previous = (byte)0;

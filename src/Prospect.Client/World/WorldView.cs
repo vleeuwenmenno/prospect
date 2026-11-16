@@ -462,6 +462,9 @@ internal sealed class WorldView
     /// </summary>
     public float? LookDegrees { get; set; }
 
+    /// <summary>Scripted chase height in metres; the ordinary chase height remains unchanged.</summary>
+    public float? LookHeight { get; set; }
+
     /// <summary>Scripted runs only: the forward axis held in the pilot view, as a held key would.</summary>
     public float? ScriptedForward { get; set; }
 
@@ -3295,6 +3298,11 @@ internal sealed class WorldView
 
         _chaseOrientation = Quaternion.Slerp(_chaseOrientation, OwnOrientation, 1f - MathF.Exp(-11f * dt));
         _cameraDirection = Vector3.Normalize(Vector3.Lerp(_cameraDirection, _lookDirection, 1f - MathF.Exp(-22f * dt)));
+        if (LookHeight is not null && LookDegrees is { } azimuth)
+        {
+            _chaseOrientation = OwnOrientation;
+            _cameraDirection = Vector3.Transform(Vector3.Transform(-Vector3.UnitZ, Quaternion.CreateFromAxisAngle(Vector3.UnitY, azimuth * MathF.PI / 180f)), OwnOrientation);
+        }
         var hullUp = Vector3.Transform(Vector3.UnitY, _chaseOrientation);
         var side = Vector3.Cross(_cameraDirection, hullUp);
         if (side.LengthSquared() > 0.01f)
@@ -3313,7 +3321,7 @@ internal sealed class WorldView
         var pullBack = 1f + Math.Min(speed / 720f, 1f) * 0.25f;
         var chaseDistance = Math.Max(3f, _designs[Math.Min(Own.Design, _designs.Length - 1)].Flight.Radius * 3.3f) * _chaseZoom;
         // Through a jump too the camera only follows the hull: where it is and where it looks stay the pilot's.
-        var chasePosition = OwnDrawnPosition + chaseUp * (chaseDistance * 0.24f) - _cameraDirection * (chaseDistance * pullBack);
+        var chasePosition = OwnDrawnPosition + chaseUp * (LookHeight ?? chaseDistance * 0.24f) - _cameraDirection * (chaseDistance * pullBack);
 
         if (_followId != 0)
         {

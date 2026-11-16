@@ -68,6 +68,8 @@ internal static class Program
           --capture-after <sec>   Delay for --capture, counted from the end of the splash (default 1.5)
           --capture-count <n>     Take n numbered screenshots instead of one (file-00.png, file-01.png, ...)
           --capture-every <sec>   Time between numbered screenshots (default 0.25)
+          --capture-hit-age <s>   With --capture/--bench: wait for a real shield hit to reach this age (0 to 1 s)
+          --ram <m/s>            Unsaved private scripted run: settle by a giant at 3 s, strike it at 6 s (0 to 100 m/s)
           --map-cell <pixels>     With --capture or --bench and a map view: open the map at this many pixels per sector (1.4 to 190)
           --close-map-at <sec>    With --capture or --bench and a map view: close the map at this time after the splash (captures of the first frames back in the world)
           --cancel-scan-at <sec>  With --capture or --bench and a scan view (scan, scan-pilot): cancel the scan at this time after the splash, as the scan key pressed again would
@@ -77,6 +79,7 @@ internal static class Program
           --bench-no-fps-target   With --bench: report the frame rate but do not fail below 144 fps; for a scene whose cost is not what the run measures (allocation still must be zero)
           --module-repeat         With --bench and --module: run it again each time its cooldown ends, and fail the run if fewer than 5 scans completed
           --look <degrees>        Pilot view: hold the camera this many degrees to the right of the hull's nose
+          --look-height <m>      With --look and --capture/--bench: camera height above hull centre, without chase lag
           --look-to <degrees>     With --look and --capture: turn the camera from --look to this angle, evenly
                                   over the time the captures take
           --thrust <axes>         With --capture or --bench, pilot view: hold the flight keys, a comma list of forward,
@@ -368,6 +371,14 @@ internal static class Program
                 case "--map-hover":
                     options.MapHover = true;
                     break;
+                case "--look-height" when hasValue && float.TryParse(args[i + 1], out var lookHeight) && lookHeight is >= -100f and <= 100f:
+                    options.LookHeight = lookHeight;
+                    i++;
+                    break;
+                case "--capture-hit-age" when hasValue && float.TryParse(args[i + 1], out var hitAge) && hitAge is >= 0f and <= 1f:
+                    options.CaptureHitAge = hitAge;
+                    i++;
+                    break;
                 case "--look" when hasValue && float.TryParse(args[i + 1], out var look):
                     options.LookDegrees = look;
                     i++;
@@ -516,7 +527,7 @@ internal static class Program
         if ((options.BreakShieldSeconds is not null || options.RamSpeed is not null) && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
             return Fail("--break-shield and --ram work only with --capture or --bench, in an unsaved private local game.");
 
-        if ((options.Thrust is not null || options.Zoom is not null) && options.CapturePath is null && options.BenchSeconds <= 0)
+        if ((options.Thrust is not null || options.Zoom is not null || options.LookHeight is not null || options.CaptureHitAge is not null) && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--thrust and --zoom work only with --capture or --bench.");
 
         if ((options.FuelCallout != Prospect.Game.World.FuelKind.None || options.FuelTip != Prospect.Game.World.FuelKind.None) && options.CapturePath is null && options.BenchSeconds <= 0)

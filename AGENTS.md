@@ -577,10 +577,15 @@ The client opens a real window on the developer's desktop, and they are usually 
   `command_pod.json` (with generators and a hydrazine tank, or the battery empties and throttle drops). The pod's
   thrusters are mounted four to a face: shield (right), cargo (left), quarters (up), core (down), charting (front).
 - `--ram <speed>` (0–100 m/s) sets the own hull against the largest rock of the spawn sector at simulation
-  second 6, aligned with the rock's tangent, then lets ordinary collision resolve it. Only with `--capture`
+  second 3, aligned with the rock's tangent, then applies the contact velocity at second 6 and lets ordinary
+  collision resolve it. The lead-in lets streaming and camera tracking settle before the hit. Only with `--capture`
   or `--bench`, in an unsaved private local game. Use `--open drone` for the drone, `--sector 3,0,1` for a giant,
   `--look 90`, and `--capture-after 6.1 --capture-count 6 --capture-every 0.1`. Capture logs include hit strength
   and age; PNG writing can make actual intervals longer. The fixture changes pose/velocity, never injects hits.
+  For a side-on view use `--look 90 --look-height 0 --zoom 1`: scripted height is in metres relative to the hull
+  centre and disables chase orientation lag. For exact effect samples run separate captures with
+  `--capture-after 0 --capture-hit-age 0.05|0.2|0.5|1` (one numeric value each run); each waits for a real hit,
+  and logs its actual age. Main comparisons add these diagnostic hooks only to a scratch archive of main.
 - `--align-at <s>` (scripted runs only) clicks the align button for 0.15 s that many seconds after the splash, through
   `PilotAlign`, the latch the left mouse button (`AlignToView`) uses: the hull turns onto the view without thrust, so
   `--look 60 --align-at 3 --capture-after 2.5 --capture-count 3 --capture-every 1.5` shows the world swinging after 3 s.
@@ -676,7 +681,8 @@ The client opens a real window on the developer's desktop, and they are usually 
   `ShieldImpact` maps max(contact energy, absorbed shield charge) through a square root; full strength is
   `shieldImpactEnergyFraction` times capacity (blocks.json). No wire or save field changed.
   New hits query loaded rocks and nearby hull blocks once (`WorldView.ContactPatch`, `ShieldPatch`); a tangent
-  disk lights the touching side and starts the ring. Missing geometry falls back to the point. This is a local
+  disk lights the touching side and starts the ring. Both flash and ring stay in the plane band; the ring
+  spreads tangentially from the disk edge, never through the hull to its back. Missing geometry falls back to the point. This is a local
   tangent approximation, not the full curved contact manifold. Four packed normals/extents extend only the GPU
   instance (`ShieldInstance`, shader attributes 12–15); frame.glsl is unchanged.
 - Shields copy the scene's colour and depth once a frame whenever one is drawn, to bend what is behind them, and

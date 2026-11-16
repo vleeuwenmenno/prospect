@@ -864,6 +864,18 @@ internal sealed class ShieldVisuals
         };
     }
 
+    /// <summary>The newest patch, for capture diagnostics.</summary>
+    internal ShieldPatch LatestPatch(uint id)
+    {
+        var index = Find(id);
+        if (index < 0) return default;
+        ref var hull = ref _hulls[index];
+        if (hull.Ripple0.Serial == hull.Serial) return hull.Ripple0.Patch;
+        if (hull.Ripple1.Serial == hull.Serial) return hull.Ripple1.Patch;
+        if (hull.Ripple2.Serial == hull.Serial) return hull.Ripple2.Patch;
+        return hull.Ripple3.Patch;
+    }
+
     private static bool Older(in Ripple a, in Ripple b) => a.Strength <= 0f ? b.Strength > 0f : b.Strength > 0f && a.Age > b.Age;
 
     private static void Advance(ref Ripple ripple, float dt, float life)

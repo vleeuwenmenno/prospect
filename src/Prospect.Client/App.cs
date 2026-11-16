@@ -164,6 +164,10 @@ internal sealed class AppOptions
 
     /// <summary>In the pilot view, holds the camera this many degrees to the side of the hull's nose; for captures.</summary>
     public float? LookDegrees { get; set; }
+    /// <summary>Scripted camera height in metres above the hull centre.</summary>
+    public float? LookHeight { get; set; }
+    /// <summary>Wait for a real hit of at least this age before capturing.</summary>
+    public float? CaptureHitAge { get; set; }
 
     /// <summary>Flight keys held in the pilot view, from <see cref="ThrustAt"/> to <see cref="ThrustUntil"/> seconds after the splash; for captures of plumes.</summary>
     public ScriptedThrust? Thrust { get; set; }
@@ -1480,6 +1484,7 @@ internal sealed class App : IDisposable
             }
 
             World.LookDegrees = look;
+            World.LookHeight = _options.LookHeight;
         }
 
         if (_options.Zoom is { } zoom && Session is not null)
@@ -1536,7 +1541,7 @@ internal sealed class App : IDisposable
         {
             var count = _options.CaptureCount;
             var due = _options.CaptureAfter + _capturesTaken * _options.CaptureEvery;
-            if (_capturesTaken < count && rtsReady && _sinceSplash >= due && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
+            if (_capturesTaken < count && rtsReady && (_options.CaptureHitAge is not { } hitAge || World.Own.ShieldHit.Strength > 0 && World.Own.ShieldHitAge >= hitAge) && _sinceSplash >= due && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
             {
                 ShowPerformance |= Session is not null && _options.OpenView is not ("controls" or "players" or "social" or "friends" or "chat" or "hud" or "interface" or "charts" or "pinned-charts" or "inventory" or "edit-tank-fuel");
                 var file = Path.GetFullPath(path);
@@ -1552,7 +1557,7 @@ internal sealed class App : IDisposable
                     Console.WriteLine($"capture {_capturesTaken:D2} gas draws: full {gasDraws.Full}, middle {gasDraws.Middle}, far {gasDraws.Far}; pairs {World.GasKinds.Pairs}, lit {World.GasKinds.Flashes}, bolts {World.GasKinds.Bolts}; composed {World.LastGasMode.Deferred}, half {World.LastGasHalf}");
                 // What the own hull fired and how many plumes were drawn; read by scripted checks of the plumes.
                 if (_options.RamSpeed is not null)
-                    Console.WriteLine($"capture shield: strength {World.Own.ShieldHit.Strength}, age {World.Own.ShieldHitAge}, position {World.Own.Position}");
+                    Console.WriteLine($"capture shield: strength {World.Own.ShieldHit.Strength}, age {World.Own.ShieldHitAge}, position {World.Own.Position}, patch {World.Shields.LatestPatch(World.Own.Id)}");
                 if (_options.Thrust is not null)
                 {
                     var thrust = World.Own.Thrust;
