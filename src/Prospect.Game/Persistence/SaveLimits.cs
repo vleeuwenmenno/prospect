@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Prospect.Game.Protocol;
 using Prospect.Game.World;
 
 namespace Prospect.Game.Persistence;
@@ -61,7 +62,8 @@ public sealed record SaveLimits
         + (long)MaxOwners * WorldSnapshotCodec.OwnerBytes
         + (long)MaxHulls * (WorldSnapshotCodec.HullFixedBytes + VisualDamageState.Capacity * WorldSnapshotCodec.DentBytes)
         + (long)MaxBlocks * (sizeof(float) + sizeof(int) + sizeof(double))
-        + (long)MaxRocks * WorldSnapshotCodec.RockBytes;
+        + (long)MaxRocks * WorldSnapshotCodec.RockBytes
+        + (long)MaxHulls * BlockStateStore.MaxContainers * CargoMessage.RecordBytes;
 
     /// <summary>
     /// The most memory a decoded save takes as a <see cref="WorldSnapshot"/>, in bytes, to within the size of the
@@ -76,5 +78,6 @@ public sealed record SaveLimits
         + (long)MaxOwners * System.Runtime.CompilerServices.Unsafe.SizeOf<SavedOwner>()
         + (long)MaxHulls * System.Runtime.CompilerServices.Unsafe.SizeOf<SavedHull>()
         + (long)MaxBlocks * (sizeof(float) + sizeof(int) + sizeof(double))
-        + (long)MaxRocks * System.Runtime.CompilerServices.Unsafe.SizeOf<RockDelta>();
+        + (long)MaxRocks * System.Runtime.CompilerServices.Unsafe.SizeOf<RockDelta>()
+        + (long)MaxHulls * BlockStateStore.MaxContainers * System.Runtime.CompilerServices.Unsafe.SizeOf<HoldContainer>();
 }

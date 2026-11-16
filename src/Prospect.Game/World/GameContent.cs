@@ -22,10 +22,12 @@ public sealed class GameContent
         BlockTransferRules blockTransfers,
         EditorRules editor,
         ExplorationRules exploration,
-        CargoCatalog cargo
+        CargoCatalog cargo,
+        ContentIdentity saveIdentity
     )
     {
         Cargo = cargo;
+        SaveIdentity = saveIdentity;
         Exploration = exploration.ForSectorSize(galaxy.SectorSize);
         Editor = editor;
         BlockTransfers = blockTransfers;
@@ -71,6 +73,9 @@ public sealed class GameContent
     /// in the welcome, so <see cref="WithSettings"/> keeps it.
     /// </summary>
     public ContentIdentity Identity { get; }
+
+    /// <summary>Save compatibility excludes cargo tuning, which has its own validated migration.</summary>
+    public ContentIdentity SaveIdentity { get; }
 
     /// <summary>Every setting a world can have: what it is called, its range and its default.</summary>
     public WorldSettingCatalog SettingCatalog { get; }
@@ -121,12 +126,12 @@ public sealed class GameContent
         var designs = new HullDesign[Designs.Length];
         for (var i = 0; i < designs.Length; i++)
             designs[i] = Designs[i].WithRules(rules);
-        return new GameContent(Galaxy.Under(SettingCatalog, clean), Blocks, SettingCatalog, clean, rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration, Cargo);
+        return new GameContent(Galaxy.Under(SettingCatalog, clean), Blocks, SettingCatalog, clean, rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity);
     }
 
     internal GameContent WithCatalogue(HullDesign[] designs, int pod, int drone, int[] fleet) =>
         new(Galaxy, Blocks, SettingCatalog, Settings, Rules, (HullDesign[])designs.Clone(), pod, drone,
-            (int[])fleet.Clone(), Social, Identity, BlockTransfers, Editor, Exploration, Cargo);
+            (int[])fleet.Clone(), Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity);
 
     /// <summary>
     /// This content with one more design at the end of the catalogue. Every design it had keeps its number and is
@@ -138,7 +143,7 @@ public sealed class GameContent
         var designs = new HullDesign[Designs.Length + 1];
         Designs.CopyTo(designs, 0);
         designs[^1] = design;
-        return new GameContent(Galaxy, Blocks, SettingCatalog, Settings, Rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration, Cargo);
+        return new GameContent(Galaxy, Blocks, SettingCatalog, Settings, Rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity);
     }
 
     /// <summary>Loads the content shipped beside the executable.</summary>
@@ -155,8 +160,23 @@ public sealed class GameContent
         // the identity: a file the shared simulation reads cannot be added here and left out there. The order
         // of the calls is the order the files are hashed in.
         var identity = new ContentIdentityBuilder();
+        var saveIdentity = new ContentIdentityBuilder();
         string At(string folder, string file) => Path.Combine(directory, folder, file);
-        byte[] Shared(string folder, string file) => identity.Add(folder + "/" + file, At(folder, file));
+        byte[] Shared(string folder, string file)
+        {
+            var name = folder + "/" + file;
+            var bytes = identity.Add(name, At(folder, file));
+            if (name == "blocks/cargo.json") return bytes;
+            if (name == "blocks/blocks.json")
+            {
+                var node = System.Text.Json.Nodes.JsonNode.Parse(bytes)!;
+                foreach (var entry in node["blocks"]!.AsObject())
+                    if (entry.Value?["cargo"] is { } capacity && capacity.GetValue<double>() > 0) entry.Value!["cargo"] = 1;
+                saveIdentity.Add(name, System.Text.Encoding.UTF8.GetBytes(node.ToJsonString()));
+            }
+            else saveIdentity.Add(name, bytes);
+            return bytes;
+        }
 
         var cargo = CargoCatalog.Parse(Shared("blocks", "cargo.json"));
         var blocks = BlockCatalog.Parse(Shared("blocks", "blocks.json"), At("blocks", "blocks.json"));
@@ -224,7 +244,8 @@ public sealed class GameContent
             transfers,
             editor,
             exploration,
-            cargo
+            cargo,
+            saveIdentity.Build()
         );
     }
 }

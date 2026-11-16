@@ -38,6 +38,41 @@ public sealed class SaveLifecycleTests
     private static MemoryWorld PopulatedWorld() => new() { Bytes = Populated.Value, Generation = 7 };
 
     [Fact]
+    public void CargoRetuneDropsOnlyWhatNoLongerFitsAndCorruptCargoIsRefused()
+    {
+        var folder = SaveRig.NewWorld(Shipped);
+        using (var rig = new SaveRig(folder, Shipped))
+        {
+            rig.Join();
+            var state = rig.Hulls.Info(0).BlockState;
+            var design = rig.Server.Content.Designs[rig.Hulls.Info(0).Design];
+            var rack = Array.FindIndex(design.Types, t => t.Cargo > 0);
+            Assert.True(rig.Hulls.BlockStates.TryAddCargo(state, rig.Server.Content, new(rack, 3, 0, 500, 400, default),
+                new byte[CargoPacking.Capacity(Shipped.Cargo, design.Boxes[rack].Size, design.BlockSize)]));
+            Assert.True(rig.Close().Clean);
+        }
+        var saved = folder.Bytes!.ToArray();
+        using (var copy = new ContentCopy())
+        {
+            var json = System.Text.Json.Nodes.JsonNode.Parse(copy.Read("blocks/cargo.json"))!;
+            json["sizes"]![3]!["shape"] = System.Text.Json.Nodes.JsonNode.Parse("[8,1,1]"u8);
+            copy.Write("blocks/cargo.json", json.ToJsonString());
+            var tuned = copy.Load();
+            Assert.NotEqual(Shipped.Identity, tuned.Identity);
+            Assert.Equal(Shipped.SaveIdentity, tuned.SaveIdentity);
+            using var restored = new SaveRig(folder, tuned);
+            Assert.Empty(restored.Hulls.BlockStates.Cargo(restored.Hulls.Info(0).BlockState).ToArray());
+            Assert.True(restored.Close().Clean);
+        }
+        folder.Bytes = saved;
+        Assert.Throws<InvalidDataException>(() => new SaveRig(folder, Shipped, edit: world =>
+        {
+            world.Cargo[0] = world.Cargo[0] with { Amount = double.NaN };
+            return world;
+        }));
+    }
+
+    [Fact]
     public void WreckSurvivesSaveAndLoadWithHealthFuelAndAge()
     {
         var content = WreckageTests.Content();
@@ -359,6 +394,11 @@ public sealed class SaveLifecycleTests
         var hulls = rig.Hulls;
         var states = hulls.BlockStates;
         var tick = rig.WorldTick;
+        var pod = rig.Server.Content.Designs[hulls.Info(0).Design];
+        var rack = Array.FindIndex(pod.Types, t => t.Cargo > 0);
+        Assert.True(states.TryAddCargo(hulls.Info(0).BlockState, rig.Server.Content, new(rack, 0, 0, 100, 40, default),
+            new byte[CargoPacking.Capacity(rig.Server.Content.Cargo, pod.Boxes[rack].Size, pod.BlockSize)]));
+        rig.Field.Refit(0);
         Assert.True(rig.Server.RecordChart(hulls.Info(0).Owner, new SectorCoord(3, -2, 1), tick - 1));
         Assert.True(rig.Server.RecordChart(hulls.Info(0).Owner, new SectorCoord(4, -2, 1), tick - 1));
         Assert.Equal(6, hulls.Count);
@@ -427,7 +467,7 @@ public sealed class SaveLifecycleTests
     public void ASavedWorldComesBackExactlyAndSavesToTheSameBytes()
     {
         var folder = SaveRig.NewWorld(Custom);
-        var expected = new List<(HullState State, FlightParams Flight, float[] Points, int[] Lost, double Total, ulong Entity, uint Owner, byte Design, HullOrder Order, VisualDamageState Visual, bool Piloted, long DamageTick, double[] Tanks)>();
+        var expected = new List<(HullState State, FlightParams Flight, float[] Points, int[] Lost, double Total, ulong Entity, uint Owner, byte Design, HullOrder Order, VisualDamageState Visual, bool Piloted, long DamageTick, double[] Tanks, HoldContainer[] Cargo)>();
         RockDelta[] rocks;
         long tick;
         using (var rig = new SaveRig(folder, Shipped))
@@ -437,7 +477,7 @@ public sealed class SaveLifecycleTests
             for (var i = 0; i < hulls.Slots; i++)
             {
                 var info = hulls.Info(i);
-                expected.Add((hulls.State(i), hulls.Flight(i), hulls.BlockHp(i).ToArray(), hulls.BlockStates.Losses(info.BlockState).ToArray(), hulls.BlockStates.HitTotal(info.BlockState), info.Entity, info.Owner, info.Design, info.Order, info.Visual, info.Piloted, info.DamageTick, TankHarness.Levels(hulls, i)));
+                expected.Add((hulls.State(i), hulls.Flight(i), hulls.BlockHp(i).ToArray(), hulls.BlockStates.Losses(info.BlockState).ToArray(), hulls.BlockStates.HitTotal(info.BlockState), info.Entity, info.Owner, info.Design, info.Order, info.Visual, info.Piloted, info.DamageTick, TankHarness.Levels(hulls, i), hulls.BlockStates.Cargo(info.BlockState).ToArray()));
             }
 
             // The world holds tanks that are full, part empty by another share each, and unevenly filled.
@@ -470,6 +510,7 @@ public sealed class SaveLifecycleTests
                 var info = hulls.Info(i);
                 var was = expected[i];
                 Assert.Equal(was.State, hulls.State(i));
+                Assert.Equal(was.Cargo, hulls.BlockStates.Cargo(info.BlockState).ToArray());
                 Assert.Equal(was.Flight, hulls.Flight(i));
 
                 // Every tank holds what it held, to the bit, and the hull's fuel is those tanks added up.
@@ -1588,6 +1629,7 @@ public sealed class SaveLifecycleTests
             DroneDesign = world.DroneDesign,
             StartingFleet = world.StartingFleet,
             OwnerCount = world.OwnerCount,
+            CargoRules = world.CargoRules,
         };
         world.SettingValues.CopyTo(big.SettingValues, 0);
         world.Owners.CopyTo(big.Owners, 0);
@@ -1599,6 +1641,9 @@ public sealed class SaveLifecycleTests
                 world.HitPoints.AsSpan(hull.BlockStart, hull.Blocks).CopyTo(big.HitPoints.AsSpan(big.BlockCount));
                 world.Losses.AsSpan(hull.LossStart, hull.LossCount).CopyTo(big.Losses.AsSpan(big.LossCount));
                 world.TankFuel.AsSpan(hull.TankStart, hull.Tanks).CopyTo(big.TankFuel.AsSpan(big.TankCount));
+                world.Cargo.AsSpan(hull.CargoStart, hull.CargoCount).CopyTo(big.Cargo.AsSpan(big.CargoCount));
+                hull.CargoStart = big.CargoCount;
+                big.CargoCount += hull.CargoCount;
                 hull.TankStart = big.TankCount;
                 big.TankCount += hull.Tanks;
                 hull.Entity += (ulong)copy * 1000;

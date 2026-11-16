@@ -6,6 +6,8 @@ namespace Prospect.Game.Server;
 
 public sealed partial class ServerHost
 {
+    private readonly byte[] CargoScratch;
+
     private void SendCargo()
     {
         foreach (var c in _connections)

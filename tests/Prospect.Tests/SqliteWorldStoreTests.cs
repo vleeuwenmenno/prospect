@@ -1452,6 +1452,10 @@ public sealed class SqliteWorldStoreTests : IDisposable
             hull.Visual.Count = VisualDamageState.Capacity;
 
             // Every block a tank: the most fuel figures a save of these limits can hold.
+            hull.CargoStart = snapshot.CargoCount;
+            hull.CargoCount = BlockStateStore.MaxContainers;
+            for (var c = 0; c < hull.CargoCount; c++)
+                snapshot.Cargo[snapshot.CargoCount++] = new HoldContainer(0, 0, -1, 0, 1, default);
             hull.Tanks = perHull;
             hull.TankStart = snapshot.TankCount;
             snapshot.BlockCount += perHull;

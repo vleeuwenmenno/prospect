@@ -558,6 +558,10 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             }
 
             _charts = new SectorChart[checked((world is null ? _maxPlayers : _saveLimits.MaxOwners) * _content.Exploration.ChartsPerOwner)];
+            var cargoSide = _content.Blocks.Limits.MaxBoxSide;
+            var cargoBlockSize = 1f;
+            foreach (var design in _content.Designs) cargoBlockSize = Math.Max(cargoBlockSize, design.BlockSize);
+            CargoScratch = new byte[CargoPacking.Capacity(_content.Cargo, new(cargoSide, cargoSide, cargoSide), cargoBlockSize)];
             _catalogue = new DesignCatalogue(_content);
             _startupDesigns = _catalogue.Count;
             _uploads = new EditUpload[_content.Editor.Uploads];

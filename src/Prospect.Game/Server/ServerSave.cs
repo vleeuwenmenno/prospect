@@ -325,6 +325,7 @@ public sealed partial class ServerHost
         var blocks = 0;
         var losses = 0;
         var tanks = 0;
+        var cargoCount = 0;
         for (var i = 0; i < world.HullCount; i++)
         {
             ref var saved = ref world.Hulls[i];
@@ -351,6 +352,16 @@ public sealed partial class ServerHost
             if (saved.Tanks != design.Tanks.Length || saved.TankStart != tanks || tanks + saved.Tanks > world.TankCount
                 || !_hulls.BlockStates.TryRestoreTanks(info.BlockState, world.TankFuel.AsSpan(tanks, saved.Tanks)))
                 throw new InvalidDataException($"Saved hull {i}: its fuel is outside what its tanks hold.");
+            if (saved.CargoStart != cargoCount || saved.CargoCount < 0 || saved.CargoCount > BlockStateStore.MaxContainers
+                || saved.CargoCount > world.CargoCount - cargoCount)
+                throw new InvalidDataException($"Saved hull {i}: invalid cargo range.");
+            var cargo = world.Cargo.AsSpan(cargoCount, saved.CargoCount);
+            if (!world.CargoRules.ValidHold(design, _hulls.Blocks(handle.Index), Galaxy.Resources.Length, cargo))
+                throw new InvalidDataException($"Saved hull {i}: invalid cargo records.");
+            foreach (var container in cargo)
+                if (!_hulls.BlockStates.TryAddCargo(info.BlockState, _content, container, CargoScratch))
+                    Logs.Sim.Warning($"Saved hull {i}: dropped cargo container from rack {container.Rack} after cargo content retune.");
+            cargoCount += saved.CargoCount;
             blocks += saved.Blocks;
             losses += saved.LossCount;
             tanks += saved.Tanks;
@@ -378,7 +389,7 @@ public sealed partial class ServerHost
             info.Piloted = owner >= 0 && _owners[owner].Controlled == saved.Entity;
         }
 
-        if (blocks != world.BlockCount || losses != world.LossCount || tanks != world.TankCount)
+        if (blocks != world.BlockCount || losses != world.LossCount || tanks != world.TankCount || cargoCount != world.CargoCount)
             throw new InvalidDataException("The saved hulls do not add up to the saved blocks.");
 
         for (var i = 0; i < _ownerCount; i++)
@@ -515,6 +526,8 @@ public sealed partial class ServerHost
         buffer.BlockCount = 0;
         buffer.LossCount = 0;
         buffer.TankCount = 0;
+        buffer.CargoCount = 0;
+        buffer.CargoRules = SavedCargoRules.Of(_content);
         for (var i = 0; i < _hulls.Slots; i++)
         {
             if (!_hulls.IsAliveAt(i))
@@ -552,6 +565,11 @@ public sealed partial class ServerHost
             saved.Tanks = fuel.Length;
             fuel.CopyTo(buffer.TankFuel.AsSpan(buffer.TankCount));
             buffer.TankCount += fuel.Length;
+            var cargo = _hulls.BlockStates.Cargo(info.BlockState);
+            saved.CargoStart = buffer.CargoCount;
+            saved.CargoCount = cargo.Length;
+            cargo.CopyTo(buffer.Cargo.AsSpan(buffer.CargoCount));
+            buffer.CargoCount += cargo.Length;
         }
 
         // An owner whose hull went while they were away is saved as flying nothing: they get a drone when let in.

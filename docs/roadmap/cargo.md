@@ -17,7 +17,7 @@ There is no cargo inventory, mining yield or pickup yet.
 - A drone cell (`blockSize` 0.25) is half a unit on a side: a drone rack needs 2x2x2 drone cells per XXS.
 - The size of a unit, the sizes and their shapes are content, never code, so they can be retuned.
   The hold load rule must drop containers that no longer fit after a retune, with a log line.
-  Invalid records must still refuse the save; the compatibility change and restoration path are not built yet.
+  Saved cargo rules validate original bounds and overlaps first; invalid records refuse the save.
 - One resource per container. A hold fills up either by volume or because it carries too many kinds at once.
 - A container has its own hull points. Collisions and weapons can destroy it, and its contents go with it.
 - Cargo mass counts toward flight: a full hold makes the ship heavier.
@@ -95,6 +95,6 @@ Deferred: drone launcher, tractor filter.
   Adds validate payload and health, and repack atomically through `CargoPacking` without allocating.
   Block-state copies preserve containers; losing a block removes only that rack's containers.
 - Shared flight includes cargo mass and inertia; server and prediction use the same figures.
-- This storage has no gameplay loading caller yet. Replication, save/restore, edit retention/refusal,
-  debug loading and live drawing remain unbuilt. Protocol 55 and codec 9 are unchanged.
-  Current content identity rules still refuse incompatible saves; retune migration is not implemented.
+- This storage has no gameplay loading caller yet. Edit retention/refusal,
+  debug loading and live drawing remain unbuilt. Protocol 56 sends the own hold reliably on change; snapshots keep their existing record budget.
+  Codec 10 saves the hold and its old tuning, validates it, and logs containers dropped during a retune.

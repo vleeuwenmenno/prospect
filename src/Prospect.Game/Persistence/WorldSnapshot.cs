@@ -22,7 +22,7 @@ public readonly record struct SaveCompatibility(int SaveVersion, int GeneratorVe
 {
     /// <summary>What a save must say to be loaded by this build with this content.</summary>
     public static SaveCompatibility Of(GameContent content) =>
-        new(WorldSnapshotCodec.Version, Galaxy.GenerationVersion, DesignBytes.Version, content.Identity);
+        new(WorldSnapshotCodec.Version, Galaxy.GenerationVersion, DesignBytes.Version, content.SaveIdentity);
 }
 
 /// <summary>What kind of proof binds a connection to an owner.</summary>
@@ -173,6 +173,9 @@ public struct SavedHull
     /// </summary>
     public int TankStart;
     public int Tanks;
+
+    /// <summary>Range in the snapshot hold buffer.</summary>
+    public int CargoStart, CargoCount;
 }
 
 /// <summary>
@@ -203,6 +206,7 @@ public sealed class WorldSnapshot
         HitPoints = new float[blocks];
         Losses = new int[blocks];
         TankFuel = new double[blocks];
+        Cargo = new HoldContainer[checked(hulls * BlockStateStore.MaxContainers)];
         Rocks = new RockDelta[rocks];
         Charts = new SectorChart[charts];
         ModuleObservations = new ModuleObservation[moduleObservations];
@@ -289,6 +293,11 @@ public sealed class WorldSnapshot
     /// <see cref="TankCount"/> are meaningful. A tank is a block, so there is room for as many as there are blocks.
     /// </summary>
     public readonly double[] TankFuel;
+
+    /// <summary>Fixed cargo capture storage, reserved per allowed hull.</summary>
+    public readonly HoldContainer[] Cargo;
+    public int CargoCount;
+    public SavedCargoRules CargoRules;
     public int TankCount;
 
     /// <summary>
@@ -331,6 +340,7 @@ public sealed class WorldSnapshot
         var snapshot = new WorldSnapshot(0, 0, 0, 0)
         {
             Compatibility = SaveCompatibility.Of(content),
+            CargoRules = SavedCargoRules.Of(content),
             WorldId = worldId,
             Name = name,
             CreatedUnixMs = created.ToUnixTimeMilliseconds(),

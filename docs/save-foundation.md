@@ -17,7 +17,10 @@ Saved multiplayer and moving a world between machines stay undelivered until ver
 - One snapshot of the whole world, committed in one transaction. No incremental records.
 - One capture buffer, taken once at the world's limits. Nothing queues behind a slow save.
 - A saved world keeps its own clock, apart from the scheduler's count of callbacks.
-- A save is refused unless content identity, generator version, design encoding and save layout all match.
+- A save is refused unless save content identity, generator version, design encoding and save layout all match.
+  Save identity excludes cargo tuning and the rack capacity figure; wire identity still includes both.
+  Cargo saves its old unit, shapes, strength and densities. Invalid old records refuse the save.
+  Valid records are repacked under current cargo content; containers that no longer fit are dropped with a log line.
   Refused means left untouched and shown as "OTHER VERSION": there is no migration between generator versions.
 - Owners and entities are durable. Connections, handles and input queues are not saved.
 
@@ -26,7 +29,7 @@ Saved multiplayer and moving a world between machines stay undelivered until ver
 | Type | What it is |
 | --- | --- |
 | `WorldSnapshot` | The bounded state of a world between two intervals. A buffer, never live memory. |
-| `WorldSnapshotCodec` | The save's own byte layout, `Version` 8. Reading trusts nothing. |
+| `WorldSnapshotCodec` | The save's own byte layout, `Version` 10. Reading trusts nothing. |
 | `SaveLimits` | Aggregate bounds of a world and of a save: owners, hulls, blocks, asteroids, sectors. |
 | `IWorldStore` | A leased store: `Commit`, `Backup`, `Dispose`. One worker thread uses it. |
 | `SqliteWorldStore` | The store on disk: one SQLite database per world folder. |
@@ -470,3 +473,10 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
   Core loss alone no longer makes a remaining hull invalid. Live COM and inertia are rebuilt from surviving blocks.
 - Wreck growth calls `HasRoom`; excess debris is discarded only after evicting existing wrecks to try to make room.
 - Live cleanup settings overwrite their existing setting values during capture. Codec 8 saves are refused untouched.
+
+## Cargo hold (codec 10)
+
+- Each hull saves a bounded range of container records: rack, size, resource, kilograms, health and placement.
+- Storage reserves at most 255 records per allowed hull; save size and decoded-memory bounds include them.
+- Capture copies the hold without allocating. Restoration validates old bounds and overlaps before any retune.
+- Dropped containers are absent from the next save. Other simulation-content changes remain incompatible.
