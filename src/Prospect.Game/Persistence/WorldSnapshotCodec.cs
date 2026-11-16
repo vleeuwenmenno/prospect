@@ -68,7 +68,7 @@ public static partial class WorldSnapshotCodec
         size += (long)snapshot.OwnerCount * OwnerBytes;
         for (var i = 0; i < snapshot.HullCount; i++)
             size += HullFixedBytes + snapshot.Hulls[i].Visual.Count * DentBytes;
-        size += (long)snapshot.LossCount * sizeof(int) + (long)snapshot.BlockCount * sizeof(float) + (long)snapshot.TankCount * sizeof(double) + (long)snapshot.CargoCount * CargoMessage.RecordBytes;
+        size += (long)snapshot.LossCount * sizeof(int) + (long)snapshot.BlockCount * sizeof(float) + (long)snapshot.TankCount * sizeof(double) + (long)snapshot.CargoCount * CargoRecordBytes;
         return size + (long)snapshot.RockCount * RockBytes + (long)snapshot.ChartCount * ChartBytes + (long)snapshot.ModuleObservationCount * ModuleObservationBytes;
     }
 
@@ -201,7 +201,7 @@ public static partial class WorldSnapshotCodec
                 writer.WriteDouble(kilograms);
             writer.WriteInt32(hull.CargoCount);
             foreach (var container in snapshot.Cargo.AsSpan(hull.CargoStart, hull.CargoCount))
-                CargoMessage.WriteContainer(ref writer, container);
+                WriteCargo(ref writer, container);
         }
 
         for (var i = 0; i < snapshot.RockCount; i++)
@@ -368,7 +368,7 @@ public static partial class WorldSnapshotCodec
         }
 
         var promised = (long)designCount * (4 + SHA256.HashSizeInBytes) + (long)owners * OwnerBytes + (long)hulls * HullFixedBytes
-            + (long)losses * sizeof(int) + (long)blocks * sizeof(float) + (long)tanks * sizeof(double) + (long)rocks * RockBytes + (long)charts * ChartBytes + (long)observations * ModuleObservationBytes + (long)cargoCount * CargoMessage.RecordBytes;
+            + (long)losses * sizeof(int) + (long)blocks * sizeof(float) + (long)tanks * sizeof(double) + (long)rocks * RockBytes + (long)charts * ChartBytes + (long)observations * ModuleObservationBytes + (long)cargoCount * CargoRecordBytes;
         if (promised > reader.Remaining)
         {
             error = "the save names more than it holds";
@@ -523,7 +523,7 @@ public static partial class WorldSnapshotCodec
             { error = "a hull's cargo exceeds the saved bounds"; return false; }
             for (var c = 0; c < hull.CargoCount; c++)
             {
-                var container = CargoMessage.ReadContainer(ref reader);
+                var container = ReadCargo(ref reader);
                 if (container.Rack < 0 || container.Size >= 8 || container.Resource >= Galaxy.MaxResources
                     || !double.IsFinite(container.Amount) || container.Amount < 0
                     || (container.Resource < 0 && container.Amount != 0) || !float.IsFinite(container.Hull) || container.Hull <= 0)

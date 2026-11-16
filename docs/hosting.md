@@ -1064,3 +1064,14 @@ Active module spending is shared with client prediction through `ModuleScanRules
   sensor coverage, without the brief collision-contact exception. No party or friend bypass exists.
 - Prediction steps the same `HullSim` transit as authority. It does not invent a second travel clock.
 - `ftlSpeedKmPerSecond` is a world setting, also accepted by the server settings file; default 40, bounds 1–400.
+
+### Cargo holds (protocol 58, save codec 12)
+
+- `blocks/cargo.json` (geometry, shell health and resource density) participates in the shared handshake identity.
+- Reliable message 36 carries the controlled hull's hold on change: 15-byte header, up to 255 24-byte records (6,135 bytes).
+  Other hulls' holds are not sent; the existing 255-hull snapshot maximum is unchanged.
+- Editor request kind 6 adds one debug container (12 bytes). It requires an in-process local connection and
+  `AllowDebugFill`, an open current edit of the controlled hull, a live rack, valid content choices and space.
+  Requests are limited to one per quarter second, shared with tank filling. Remote clients cannot use it.
+- Codec 12 retains moving FTL and adds bounded holds and original cargo rules. Invalid saves refuse; a cargo-only
+  retune repacks under current rules and logs every dropped container. Other simulation changes remain incompatible.

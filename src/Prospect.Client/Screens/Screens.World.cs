@@ -113,6 +113,7 @@ internal sealed partial class ScreenHost
     /// <summary>Everything drawn over the world while in space: flight readouts, command markers, the map.</summary>
     private void DrawWorldInterface(SessionSnapshot snapshot)
     {
+        if (_app.World.ExhaustRock is not null) return;
         var world = _app.World;
         UpdateExploration(snapshot, world);
         UpdateModules(snapshot, world);

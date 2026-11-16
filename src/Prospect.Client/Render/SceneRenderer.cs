@@ -244,6 +244,7 @@ internal struct MeshInstance
     public float4 Row1;
     public float4 Row2;
     public float4 Tint;
+    public float4 RockMarks;
 }
 
 internal struct StarInstance
@@ -292,6 +293,10 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private readonly VkPipeline _gridPipeline;
     private readonly VkPipeline _tonemapPipeline;
     private readonly VkPipeline _ftlMarkPipeline;
+    private readonly GpuBuffer[] _rockMarkBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
+    private readonly VkPipeline _rockEffectPipeline;
+    private readonly GpuBuffer[] _rockEffectBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
+    private int _rockEffectCount;
     private readonly VkPipeline _plumePipeline;
     private readonly GpuBuffer[] _exhaustBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
     private const int ExhaustVectors = ShieldVisuals.MaxShields * ShieldExhaust.VectorsPerShield;
@@ -433,6 +438,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
                 _instanceBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshInstance) * MaxInstances);
                 _ftlBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(FtlMark) * MaxFtlMarks);
                 _exhaustBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.StorageBufferBit, sizeof(float4) * ExhaustVectors);
+                _rockMarkBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.StorageBufferBit, sizeof(RockMarkData) * RockExhaust.Marks);
+                _rockEffectBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(RockEffectInstance) * RockExhaust.Capacity);
                 _plumeBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(PlumeInstance) * PropulsionLook.PlumeCapacity);
                 _damageVertices[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshVertex) * DamageVertices);
                 _damageInstances[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshInstance) * DynamicDraws);
@@ -452,7 +459,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         // scene before anything solid and before any hull was drawn, the scene's depth and the depth before hulls.
         Span<VkDescriptorPoolSize> poolSizes =
         [
-            new VkDescriptorPoolSize { Type = VkDescriptorType.StorageBuffer, DescriptorCount = FrameRenderer.FramesInFlight },
+            new VkDescriptorPoolSize { Type = VkDescriptorType.StorageBuffer, DescriptorCount = 2 * FrameRenderer.FramesInFlight },
             new VkDescriptorPoolSize { Type = VkDescriptorType.UniformBuffer, DescriptorCount = 2 * FrameRenderer.FramesInFlight },
             new VkDescriptorPoolSize { Type = VkDescriptorType.CombinedImageSampler, DescriptorCount = 9 + 3 + 3 + FrameRenderer.FramesInFlight },
         ];
@@ -478,6 +485,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
                 StageFlags = VkShaderStageFlags.FragmentBit,
             },
             new VkDescriptorSetLayoutBinding { Binding = 2, DescriptorType = VkDescriptorType.StorageBuffer, DescriptorCount = 1, StageFlags = VkShaderStageFlags.FragmentBit },
+            new VkDescriptorSetLayoutBinding { Binding = 3, DescriptorType = VkDescriptorType.StorageBuffer, DescriptorCount = 1, StageFlags = VkShaderStageFlags.FragmentBit },
         ];
         _frameLayout = device.CreateDescriptorSetLayout(new DescriptorSetLayoutEx.CreateInfo { Bindings = frameBindings }, null);
 
@@ -611,6 +619,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
         for (var i = 0; i < FrameRenderer.FramesInFlight; i++)
         {
             _frameSets[i] = device.AllocateDescriptorSet(_descriptorPool, _frameLayout);
+            var rockInfo = new VkDescriptorBufferInfo { Buffer = _rockMarkBuffers[i].Buffer, Range = new ByteSize64((ulong)(sizeof(RockMarkData) * RockExhaust.Marks)) };
+            device.UpdateDescriptorSets([new VkWriteDescriptorSet { DstSet = _frameSets[i], DstBinding = 3, DescriptorCount = 1, DescriptorType = VkDescriptorType.StorageBuffer, BufferInfo = &rockInfo }], []);
             var exhaustInfo = new VkDescriptorBufferInfo { Buffer = _exhaustBuffers[i].Buffer, Offset = new ByteSize64(0), Range = new ByteSize64((ulong)(sizeof(float4) * ExhaustVectors)) };
             device.UpdateDescriptorSets([new VkWriteDescriptorSet { DstSet = _frameSets[i], DstBinding = 2, DescriptorCount = 1, DescriptorType = VkDescriptorType.StorageBuffer, BufferInfo = &exhaustInfo }], []);
             var bufferInfo = new VkDescriptorBufferInfo
@@ -752,6 +762,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
 
         var markInput = new VertexInput(1, 3).AddBindingWithAttributes<FtlMark>(0, 0, VkVertexInputRate.Instance);
         _ftlMarkPipeline = ScenePipeline(Module(shaders, "ftl_mark.vert"), Module(shaders, "ftl_mark.frag"), markInput, Presets.Rasterization.Fill.CullNone, &depthRead, &additive);
+        var rockInput = new VertexInput(1, 5).AddBindingWithAttributes<RockEffectInstance>(0, 0, VkVertexInputRate.Instance);
+        _rockEffectPipeline = ScenePipeline(Module(shaders, "rock_effect.vert"), Module(shaders, "rock_effect.frag"), rockInput, Presets.Rasterization.Fill.CullNone, &depthRead, &additive);
         // Plumes are light added in the scene, tested against what is solid, and march only the pixels of their boxes.
         var plumeInput = new VertexInput(1, 10).AddBindingWithAttributes<PlumeInstance>(0, 0, VkVertexInputRate.Instance);
         _plumePipeline = ScenePipeline(Module(shaders, "plume.vert"), Module(shaders, "plume.frag"), plumeInput, Presets.Rasterization.Fill.CullNone, &depthRead, &additive);
@@ -841,6 +853,14 @@ internal sealed unsafe class SceneRenderer : IDisposable
 
     /// <summary>This frame slot's selected shield exhaust capsules, written before submission.</summary>
     public Span<float4> ShieldExhaustData(int frameIndex) => new((void*)_exhaustBuffers[frameIndex].Mapped, ExhaustVectors);
+
+    /// <summary>This frame slot's retained rock-material marks.</summary>
+    public Span<RockMarkData> RockMarks(int frameIndex) => new((void*)_rockMarkBuffers[frameIndex].Mapped, RockExhaust.Marks);
+
+    /// <summary>This frame slot's fixed additive dust instance storage.</summary>
+    public Span<RockEffectInstance> RockEffects(int frameIndex) => new((void*)_rockEffectBuffers[frameIndex].Mapped, RockExhaust.Capacity);
+    /// <summary>How many rock effects the next scene draws; cleared after recording.</summary>
+    public void QueueRockEffects(int count) => _rockEffectCount = count;
 
     /// <summary>This frame slot's plume instances, written by the world before <see cref="Render"/>.</summary>
     public Span<PlumeInstance> Plumes(int frameIndex) => new((void*)_plumeBuffers[frameIndex].Mapped, PropulsionLook.PlumeCapacity);
@@ -1056,6 +1076,14 @@ internal sealed unsafe class SceneRenderer : IDisposable
         }
 
         commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _scenePipelineLayout, 0, new ReadOnlySpan<VkDescriptorSet>(in set), []);
+        if (_rockEffectCount > 0)
+        {
+            var effects = _rockEffectBuffers[frameIndex].Buffer;
+            commands.BindPipeline(VkPipelineBindPoint.Graphics, _rockEffectPipeline);
+            commands.BindVertexBuffers(0, new ReadOnlySpan<VkBuffer>(in effects), new ReadOnlySpan<ByteSize64>(in zero));
+            commands.Draw(6, _rockEffectCount, 0, 0);
+        }
+        _rockEffectCount = 0;
         // Thrust plumes, after everything solid so hulls and rocks hide them; nothing at all when nothing fires.
         if (_plumeCount > 0)
         {
@@ -1667,7 +1695,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         DestroyTargets();
         device.DestroySampler(_sampler, null);
         device.DestroySampler(_pointSampler, null);
-        foreach (var pipeline in (ReadOnlySpan<VkPipeline>)[_backgroundPipeline, _starPipeline, _dustPipeline, _meshPipeline, _hullPipeline, _gridPipeline, _tonemapPipeline, _ftlMarkPipeline, _plumePipeline])
+        foreach (var pipeline in (ReadOnlySpan<VkPipeline>)[_backgroundPipeline, _starPipeline, _dustPipeline, _meshPipeline, _hullPipeline, _gridPipeline, _tonemapPipeline, _ftlMarkPipeline, _plumePipeline, _rockEffectPipeline])
             device.DestroyPipeline(pipeline, null);
         device.DestroyPipeline(_gasPipeline, null);
         device.DestroyPipeline(_gasSkyPipeline, null);
@@ -1704,6 +1732,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
             _ftlBuffers[i].Destroy(_gpu);
             _exhaustBuffers[i].Destroy(_gpu);
             _plumeBuffers[i].Destroy(_gpu);
+            _rockEffectBuffers[i].Destroy(_gpu);
+            _rockMarkBuffers[i].Destroy(_gpu);
             _damageVertices[i].Destroy(_gpu);
             _damageInstances[i].Destroy(_gpu);
             _shieldVertexBuffers[i].Destroy(_gpu);

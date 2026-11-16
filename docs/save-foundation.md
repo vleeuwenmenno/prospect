@@ -164,11 +164,11 @@ Bounds at `SaveLimits.Default`:
 
 | What | Bound |
 | --- | --- |
-| One database file, live or copy | 225.9 MB (twice the format ceiling, plus 1 MiB) |
-| All files named as recovery copies, the one being made included | 903.4 MB |
-| The log: never written past it, and refused as damaged beyond it | 903.4 MB |
+| One database file, live or copy | 121.4 MB (twice the format ceiling, plus 1 MiB) |
+| All files named as recovery copies, the one being made included | 485.7 MB |
+| The log: never written past it, and refused as damaged beyond it | 485.7 MB |
 
-Measured on the development machine (Linux, NVMe, Debug build), the largest save there is, 10.7 MB encoded:
+Earlier pre-cargo measurement on the development machine (Linux, NVMe, Debug build), 10.7 MB encoded:
 commit 38 to 51 ms, recovery copy 63 to 67 ms, open and decode 50 ms, 4.6 KiB of managed memory a commit.
 The database file was 21.4 MB: a replaced blob's pages stay in the file.
 
@@ -194,12 +194,11 @@ Engineering defaults in `SaveLimits.Default`, not host tuning.
 | Pushed asteroids | 16,384 |
 | Sectors with a pushed asteroid | 256 |
 
-- The base capture buffer at these limits is about 19 MiB; content-sized chart storage adds 8 MiB at 64 owners and 4,096 charts each. Both are taken once.
-- Base records encode at most about 19.2 MiB; shipped chart limits add 6 MiB. The format ceiling allows about 120.8 MB including charts; the catalogue is at most 1 MiB.
-- 8 MiB of both is room for fuel: eight bytes a tank, and a tank is a block, so as many as there are blocks.
-- A world refuses to grow past them before it grows: see `ServerHost.HasRoom` and `RockField.CanMove`.
-- A refusal is counted in `SaveStatus.RefusedGrowth`. Nothing is dropped from a save.
-- One drone per owner is held back, so a pilot whose hull is destroyed always gets out.
+- Capture arrays are reserved before ticking. The decoded-memory ceiling, including bounded validation scratch, is about 120.1 MB.
+- Encoded saves are bounded to about 60.2 MB, including charts, module observations and cargo; the catalogue is at most 1 MiB.
+- Cargo reserves 255 records per hull: at the hull limit, about 39.8 MiB in memory and 23.9 MiB encoded. Fuel reserves another 8 MiB in each.
+- A world refuses growth before exceeding these bounds (`ServerHost.HasRoom`, `RockField.CanMove`); refusals increment `SaveStatus.RefusedGrowth`.
+- One drone per owner is held back. Ordinary growth drops no saved data; cargo-only retuning uses the explicit logged drop rule below.
 
 An asteroid the world cannot move:
 
@@ -480,7 +479,7 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
 - Storage reserves at most 255 records per allowed hull; save size and decoded-memory bounds include them.
 - Capture copies the hold without allocating. Restoration validates old bounds and overlaps before any retune.
 - Dropped containers are absent from the next save. Other simulation-content changes remain incompatible.
-### Moving FTL transit (codec 11)
+### Moving FTL transit (introduced in codec 11, retained in 12)
 
 - The saved position is the position reached along the route, not the destination.
 - Existing saved order, transit duration and elapsed time resume through shared `HullSim` from that position.

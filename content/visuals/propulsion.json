@@ -285,6 +285,21 @@
   },
   "plumes": {
     "engine": {
+      "rock": {
+        "dustRate": 500,
+        "dustSeconds": 1.6,
+        "dustSpeed": 7,
+        "dustLift": 1.2,
+        "dustSize": 0.035,
+        "glow": 2.8,
+        "scorch": 0.8,
+        "shimmer": 0,
+        "hotSeconds": 5,
+        "fadeSeconds": 30,
+        "scorchHoldSeconds": 20,
+        "spread": 1.3,
+        "bias": 0.012
+      },
       "kind": "flame",
       "core": [0.5, 0.56, 1.0],
       "edge": [0.5, 0.34, 0.4],
@@ -312,6 +327,21 @@
       "shieldColor": [0.8, 0.85, 1]
     },
     "hot": {
+      "rock": {
+        "dustRate": 500,
+        "dustSeconds": 1.6,
+        "dustSpeed": 7,
+        "dustLift": 1.2,
+        "dustSize": 0.035,
+        "glow": 2.8,
+        "scorch": 0.8,
+        "shimmer": 0,
+        "hotSeconds": 5,
+        "fadeSeconds": 30,
+        "scorchHoldSeconds": 20,
+        "spread": 1.3,
+        "bias": 0.012
+      },
       "kind": "flame",
       "core": [1.0, 0.82, 0.62],
       "edge": [0.7, 0.45, 0.38],
@@ -339,6 +369,21 @@
       "shieldColor": [0.7, 0.5, 0.3]
     },
     "ion": {
+      "rock": {
+        "dustRate": 0,
+        "dustSeconds": 1.6,
+        "dustSpeed": 7,
+        "dustLift": 1.2,
+        "dustSize": 0.035,
+        "glow": 0,
+        "scorch": 0,
+        "shimmer": 0.12,
+        "hotSeconds": 5,
+        "fadeSeconds": 30,
+        "scorchHoldSeconds": 20,
+        "spread": 1.3,
+        "bias": 0.012
+      },
       "kind": "ion",
       "core": [0.62, 0.66, 1.0],
       "edge": [0.46, 0.32, 0.92],
@@ -366,6 +411,21 @@
       "shieldColor": [0.5, 0.32, 1]
     },
     "cold": {
+      "rock": {
+        "dustRate": 220,
+        "dustSeconds": 1.6,
+        "dustSpeed": 7,
+        "dustLift": 1.2,
+        "dustSize": 0.035,
+        "glow": 0,
+        "scorch": 0,
+        "shimmer": 0,
+        "hotSeconds": 5,
+        "fadeSeconds": 30,
+        "scorchHoldSeconds": 20,
+        "spread": 1.3,
+        "bias": 0.012
+      },
       "kind": "puff",
       "core": [0.86, 0.88, 0.92],
       "edge": [0.6, 0.63, 0.68],

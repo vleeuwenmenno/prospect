@@ -17,15 +17,15 @@ public static class CargoMessage
         foreach (var container in hold) WriteContainer(ref writer, container);
     }
 
-    /// <summary>Writes a compact, fixed-size record. Used by the cargo save section too.</summary>
-    public static void WriteContainer(ref NetWriter writer, in HoldContainer c)
+    /// <summary>Writes a compact, fixed-size record.</summary>
+    private static void WriteContainer(ref NetWriter writer, in HoldContainer c)
     {
         writer.WriteInt32(c.Rack); writer.WriteByte((byte)c.Size); writer.WriteByte(c.Resource < 0 ? byte.MaxValue : (byte)c.Resource);
         writer.WriteDouble(c.Amount); writer.WriteSingle(c.Hull);
         writer.WriteUInt16((ushort)c.At.X); writer.WriteUInt16((ushort)c.At.Y); writer.WriteUInt16((ushort)c.At.Z);
     }
 
-    public static HoldContainer ReadContainer(ref NetReader reader)
+    private static HoldContainer ReadContainer(ref NetReader reader)
     {
         var rack = reader.ReadInt32(); var size = reader.ReadByte(); var resource = reader.ReadByte();
         var amount = reader.ReadDouble(); var hp = reader.ReadSingle();

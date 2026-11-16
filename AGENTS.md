@@ -92,13 +92,20 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   after admission, broadcast reliably, and captured by setting index. Tests: `HullConnectivityTests`, `WreckageTests`,
   `SaveLifecycleTests`, and the real-client split test in `EditorSessionTests`. Capture with `--cut-hull`.
 
-- **Cargo foundation:** `content/blocks/cargo.json` is shared through `GameContent.Cargo`. `CargoPacking` owns
+- **Cargo holds:** `content/blocks/cargo.json` is shared through `GameContent.Cargo`. `CargoPacking` owns
   capacity and largest-first X/Z/Y fixed-orientation packing with caller buffers. The `cargo` block is box-only,
   in Hull; its linear capacity stat is u and must match the grid. `PropulsionModels.Cargo.cs` builds racks and
   reusable containers on workers, with the `rack` look in `visuals/propulsion.json`. `--open edit-rack` is a
-  capture-only sample, never inventory. `BlockStateStore.Cargo` adds bounded storage (255 containers), atomic
-  shared-rule repacking, kilogram/resource/health validation and rack-loss removal. Payload density is shared
-  cargo content. No gameplay caller, drone racks, cargo flight mass, wire/save, edit retention or debug add yet.
+  capture-only sample, never inventory. `BlockStateStore.Cargo` holds at most 255 containers per hull without tick
+  allocations; adds validate payload/health and repack atomically. Density is shared cargo content. Payload is kg,
+  galaxy resource index (-1 for empty), size, HP and rack/slot. `CargoTransfer` repacks retained racks by type and grid
+  anchor; client `CanApply` and server preflight refuse cargo loss. Repair preserves cargo, wreck copies keep their
+  racks' containers, rack loss discards them until step 2. Shared `BoxHullSums` adds cargo mass and rack-distributed
+  moments on both simulation sides. Protocol 58 sends the own hold reliably on change (`CargoMessage`, 6135 B max),
+  never in the full 255-hull snapshot. Codec 12 captures hold records and old cargo rules; corrupt originals refuse,
+  current retunes repack and log drops. `GameContent.SaveIdentity` allows only cargo tuning/capacity retunes.
+  `PartModels` builds real container meshes on a worker; own holds draw in flight and editor. No drone rack.
+  Tests: `CargoHoldTests`, `CargoFlightTests`, `CargoWireTests`, `EditorSessionTests`, `WreckageTests`, `SaveLifecycleTests`.
 
 
 - **Social messages:** validate new kinds after admission and the receive/rate budgets; publish through `SessionSnapshot.Social` and send intent through `PlayerInputBridge`.
@@ -197,6 +204,11 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   and `FitsClass`), and placing a tank any other way remembers its fuel. The block types, wire, saves and designs are
   unchanged. `--open edit-tank-fuel` shows it. Paste, mirror and loading a
   saved design keep their own refusals; the server does not check the kind. `EditorPanelTests` holds it.
+- **Debug: add container (temporary, local games only):** `EditorRequestKind.AddContainer` asks for size/resource in
+  one existing selected rack. `ShipEditor.RequestContainer` sends through `PlayerInputBridge`; `ServerHost.AddContainer`
+  checks the edit token, owner, controlled hull, in-process transport, `AllowDebugFill`, rate and `HasRoom`, then uses
+  `TryAddCargo` and the shared packing rule. Empty is resource -1; other choices fill to content density. Capture with
+  `--open cargo` / `--open edit-cargo` and `--capture`; these use the real editor request. Remove with the debug fill feature.
 - **Debug: fill tank (temporary, local games only):** `EditorRequestKind.FillTank` (protocol 54) asks the server to fill
   the tanks in the listed design block indices of the edited hull; `ServerHost.FillTanks` checks everything first (edit
   open and the sender's, token, each block in range and a live tank, a quarter second apart) and writes through
@@ -450,6 +462,14 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `FuelTanks` and `ThrustTable`, the wire, the save codec and a load rule. Size limits per type are `maxSide` in
   `blocks.json` (`BoxDesign.MaxSide`). Figures and rules in `docs/roadmap/propulsion.md`; `PropulsionTests` holds
   them, and `PowerFlowTests` the electric side, so retuning a design or the content runs both.
+- **Exhaust on rock:** `RockExhaust` uses the exact drawn plume and its shield clip, with at most 16 nearest
+  candidate ray/rock pairs per frame. `RockExhaustSurface` caches bounds over shared finest facets; ice uses
+  its exact eight planes. Only fine-detail drawn rocks participate. The 4,096 dust slots and 64 rock-local
+  marks are fixed pools; nearby marks merge and the oldest is replaced. Peak intensity survives fading exhaust.
+  `RockExhaustLook` validates each kind's response in propulsion.json: cooling over 5 s, soot held for 20 s then
+  faded by 30 s. Marks shade the actual rock in `mesh.frag`, selected by four exact 16-bit masks in `MeshInstance`;
+  frame binding 3 holds 64 three-vector records. No tangent quads or scene-depth copy. `rock_effect` draws only
+  additive, depth-tested dust; it never darkens the existing scene. No wire or save changes.
 - **Thrust part models and plumes:** look and proportions are `content/visuals/propulsion.json` (`PropulsionLook`),
   keyed by block type id. A model is a pure function of the part's box (`PartBox`: centre, half extents, facing,
   cell size), so a cell part and a thin face-mounted one take the same code (`PropulsionModels.Build`). It is built
@@ -615,6 +635,15 @@ The client opens a real window on the developer's desktop, and they are usually 
   These replace the old sub-minimum-distance capture jumps. Their openings are farther from the watcher.
 - Scan across the map and a cancel: `--open scan --close-map-at 0.8 --capture-after 0.5 --capture-count 4 --capture-every 1.2` shows the strip
   after leaving the map mid-scan; add `--cancel-scan-at 2.5` for the "SCAN CANCELLED" readout and its cooldown line.
+- `--open exhaust-rock --exhaust-kind engine|hot|cold|ion` is a render-only capture fixture: a two-block
+  hull with the real part model and nozzles, held over shape 0 at finest detail. No server state changes.
+  It starts firing 1 s after its first world draw and stops at 5 s. Capture at 3 s, 8 s and 25 s for
+  burn, cooled glow and old scorch; with `--capture-count 3` these times are automatic and measured from
+  the fixture clock, independent of loading. Count 4 adds a pre-burn control at 0.8 s. Separate runs with
+  `--capture-after 5`, `5.5`, through `8` capture cooling at exact 0.5 s steps without screenshot-write latency
+  stretching the intervals. The fixture is front-lit so soot is visible against the rock.
+  Fixture age is reported with each capture. Normal gameplay uses every
+  visible hull's actual `HullView.Thrust`. Crops must keep native pixels and report the actual window size.
 - `--thrust <keys>` (`forward`, `back`, `left`, `right`, `up`, `down`, `boost`, comma separated; `turn` steers the
   nose up and left all the while, as a mouse would, so `--thrust turn --thrust-until 4` and a capture at 8 s show a hull
   at rest after turning, which must fire nothing) holds those flight

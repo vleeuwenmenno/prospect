@@ -63,7 +63,7 @@ public sealed record SaveLimits
         + (long)MaxHulls * (WorldSnapshotCodec.HullFixedBytes + VisualDamageState.Capacity * WorldSnapshotCodec.DentBytes)
         + (long)MaxBlocks * (sizeof(float) + sizeof(int) + sizeof(double))
         + (long)MaxRocks * WorldSnapshotCodec.RockBytes
-        + (long)MaxHulls * BlockStateStore.MaxContainers * CargoMessage.RecordBytes;
+        + (long)MaxHulls * BlockStateStore.MaxContainers * WorldSnapshotCodec.CargoRecordBytes;
 
     /// <summary>
     /// The most memory a decoded save takes as a <see cref="WorldSnapshot"/>, in bytes, to within the size of the

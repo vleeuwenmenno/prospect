@@ -15,8 +15,8 @@ Ships split into unowned wrecks when block loss disconnects shared faces. Wrecks
 collide, split again, and survive saves. Cleanup is configurable; salvage and reclaiming fuel are not built.
 
 Cargo racks have open-frame models, content-defined container sizes and shared deterministic packing.
-Bounded hold storage and payload validation exist in shared code but are not connected to gameplay.
-There is no cargo inventory yet; containers appear only in the scripted `--open edit-rack` preview.
+Cargo payload mass affects flight and client prediction through the same shared simulation.
+Own hull cargo is held by the server, saved, replicated and drawn; local debug loading is available in the editor.
 
 
 Propulsion burns fuel and is directional: engines, hot thrusters and cold gas thrusters each push the opposite way
@@ -338,7 +338,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   behind it by a few pixels, most at its rim. A contact lights a tangent patch along the touching side and paired fading ripples
   whose brightness follows impact energy (a tap is faint), on the pilot's hull and everyone else's, aged from the server event (old hits never
   restart on joining). Another hull's exhaust stops at the shield and makes a bright, soft splash where its axis enters;
-  ion exhaust is fainter violet. Own exhaust never lights or clips against the own shield. This is visual only, with no heat or damage.
+  ion exhaust is fainter violet. Own exhaust never lights or clips against the own shield. On nearby fine-detail rocks, hot exhaust raises dust and leaves a glowing mark that cools to scorch; cold gas raises dust only, and ion exhaust makes a faint surface shimmer. This is visual only, with no heat or damage.
   Below 80% charge it shifts gradually from neutral through amber, visible by half charge,
   then towards red near empty, with slow waves; a break, or the loss of the last emitter, collapses it red and it is
   gone until the simulation brings it back online, when it fades in. While it comes back and while its charge
@@ -975,7 +975,7 @@ Gas-kind simulation is present: cold/normal mixtures, shared icicle shapes and l
 The renderer draws the kinds: lightning clouds flash and throw branching bolts on the server's burst clock, cold clouds are bluish
 white with an ice halo and glints, overlapping cold and normal clouds are integrated together along each ray, and icicles are drawn
 as the exact ice shard. Fleet/RTS status indicators for the environment flags and the sensor outline's tracking of bursts await
-integration; mining and cargo inventory remain absent.
+integration; mining and physical container pickup remain absent.
 
 | New world setting | Range | Default |
 | --- | --- | --- |
@@ -983,3 +983,11 @@ integration; mining and cargo inventory remain absent.
 | `gasLightningChance` (among non-cold candidates) | 0–1 | 0.10 |
 | `iceAbundance` | 0–4 | 1 |
 | `iceGradeMin` / `iceGradeMax` | 0–1 | 0 / 1 |
+
+### Cargo holds (step 1)
+
+- Own hulls carry server-owned containers: shared packing, payload mass in flight and prediction, reliable updates.
+- Local editor: select an applied rack, choose size/resource, then **ADD CONTAINER (DEBUG)**. Empty is available.
+- Flight and editor draw the contents; ship data shows used/capacity u and cargo kg.
+- Apply refuses cargo loss; repair and wreck splits retain surviving racks' contents. Rack destruction loses them for now.
+- Protocol 58 and save codec 12 include cargo alongside moving FTL. Physical pickup, unloading and mining output remain unbuilt.

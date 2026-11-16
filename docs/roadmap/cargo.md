@@ -1,7 +1,7 @@
 # Cargo, containers and tractor beams
 
-Racks, shared container sizes and deterministic packing are built.
-There is no cargo inventory, mining yield or pickup yet.
+Step 1 is built: authoritative holds, cargo flight mass, reliable own-hull updates, saves, edit protection and drawing.
+Temporary local debug loading is available. Mining yield, jettison and physical pickup are not built.
 
 ## Decided
 
@@ -54,7 +54,7 @@ There is no cargo inventory, mining yield or pickup yet.
 - "In view" is a clear straight line from the mount to the rack.
 - The editor shows each tractor's lines to the racks it reaches, and marks racks no tractor reaches.
 
-### Losing cargo
+### Losing cargo (step 2)
 
 - A rack that is destroyed throws its containers into space, contents intact.
 - Anyone can pick those containers up.
@@ -74,7 +74,7 @@ checked afterwards. This overrides the joint mining, inventory and turret brains
 
 ## Proposed build order
 
-1. Racks and containers in the hold: rack block, container sizes in content, the hold's slots on the server,
+1. **Built:** racks and containers in the hold: rack block, container sizes in content, the hold's slots on the server,
    wire, save, drawing, and a debug button that adds a container.
 2. Containers in space: jettison, a rack's destruction, hull points, saved.
 3. Tractor beam mount: range, power, pull, sliding onto a rack in view.
@@ -84,7 +84,7 @@ checked afterwards. This overrides the joint mining, inventory and turret brains
 Deferred: drone launcher, tractor filter.
 
 
-## Built: step 1 foundation
+## Built: step 1
 
 - `blocks/cargo.json` owns the unit edge, eight named shapes and hull points; shared content identity includes it.
 - `CargoPacking` uses fixed orientation, largest first, X then Z then Y first fit. No rotations or backtracking.
@@ -92,10 +92,42 @@ Deferred: drone launcher, tractor filter.
 - The existing `cargo` id is a box-only ship rack in Hull. Capacity is u, linearly scaled (8 u per cell).
   Retuning the grid requires matching the cargo stat; loading rejects mismatches. No drone rack yet.
 - Worker-built rack frames and reusable ribbed container models use the `rack` look in `visuals/propulsion.json`.
-  `--open edit-rack` previews XXS through L in a 2x2x2 ghost only; real hull racks stay empty.
+  `--open edit-rack` remains a visual sample. `--open cargo` and `edit-cargo` add real containers through the server for captures.
+
+### Hold state, wire and save
+
 - `BlockStateStore.Cargo` provides fixed storage for up to 255 containers on a hull with racks.
   Adds validate payload and health, and repack atomically through `CargoPacking` without allocating.
   Block-state copies preserve containers; losing a block removes only that rack's containers.
 - Shared flight includes cargo mass and inertia; server and prediction use the same figures.
-- This storage has no gameplay loading caller yet. Debug loading and live drawing remain unbuilt. Protocol 58 sends the own hold reliably on change; snapshots keep their existing record budget.
-  Codec 12 saves the hold and its old tuning, validates it, and logs containers dropped during a retune.
+- Protocol 58 sends only the controlled hull's hold reliably on change, including after control changes.
+  Its maximum is 6,135 bytes (255 records); the 255-hull snapshot budget is unchanged.
+- Codec 12 saves hold contents and their original tuning alongside moving FTL transit from main.
+  Loading refuses corrupt original contents, then repacks with current tuning, logging each dropped container.
+  Only cargo tuning and its matching rack-capacity stat can change without invalidating the saved content identity.
+
+### Editor and debug loading
+
+- Apply preserves containers in racks with the same type and grid anchor, repacking after resize.
+  Both the client and server refuse overflow or removal of an occupied rack; moving one is also refused.
+- Repair preserves cargo. Wrecks take their racks' containers; destroyed racks lose cargo until step 2.
+- Select one applied rack in the editor, cycle size and resource (including Empty), then ADD CONTAINER (DEBUG).
+  The server fills that size to its density limit, or adds an empty shell, only if it fits.
+- Debug add requires an in-process local connection, `AllowDebugFill`, the current edit token and the controlled hull.
+  Requests are spaced a quarter second apart. Apply and take control first when building from the drone.
+- Flight and editor draw the own hold using the reusable preview model. Ship data shows used/capacity u and kg.
+
+### Limits of step 1
+
+- Other players' containers and unpiloted owned hulls' holds are not replicated or drawn.
+- Payload kilograms affect mass, centre of mass and inertia; empty shells have no additional mass.
+- Container health is stored and validated, but independent container damage, jettison, pickup and unloading wait for step 2.
+- No drone rack. No tractor beam or mining output yet.
+
+### Validation
+
+- Final merged `timeout 900 make check`: 2,550 game tests and 354 listing tests passed.
+- `make bench`: 798 fps normal, 792 fps with resizing, zero managed bytes on all threads in both runs.
+  The compositor kept 5096x1390; six resize requests and twelve swapchain/target rebuilds were measured.
+- Real local captures use `--open cargo` and `--open edit-cargo`, `--set asteroidAmount=0` and `--capture`.
+  Both showed the server-added 8 u hold (6,177 kg), with `agent.prospect` hidden on `special:agents`.
