@@ -29,8 +29,8 @@ public sealed class EditorPanelTests
         }
 
         // Tanks are only under Tanks, gyros under Thrust; there is no category of its own for the drone.
-        Assert.Equal(["Tanks"], Tuning.Categories.Where(c => Tuning.Lists(c, Content.Blocks.Get("hydrazineTank"))).Select(c => c.Name).Where(n => n != "All").ToArray());
-        Assert.Equal(["Tanks"], Tuning.Categories.Where(c => Tuning.Lists(c, Content.Blocks.Get("microNitrogenTank"))).Select(c => c.Name).Where(n => n != "All").ToArray());
+        Assert.Equal(["Storage"], Tuning.Categories.Where(c => Tuning.Lists(c, Content.Blocks.Get("hydrazineTank"))).Select(c => c.Name).Where(n => n != "All").ToArray());
+        Assert.Equal(["Storage"], Tuning.Categories.Where(c => Tuning.Lists(c, Content.Blocks.Get("microNitrogenTank"))).Select(c => c.Name).Where(n => n != "All").ToArray());
         Assert.Equal(["Thrust"], Tuning.Categories.Where(c => Tuning.Lists(c, Content.Blocks.Get("gyro"))).Select(c => c.Name).Where(n => n != "All").ToArray());
         Assert.DoesNotContain(Tuning.Categories, c => c.Name == "Drone");
 
@@ -172,7 +172,7 @@ public sealed class EditorPanelTests
 
         // The drone shows the categories its parts fill, among them Hull, Power, Thrust, Tanks and Shield; never Sensors.
         Assert.Contains("All", Visible(drone));
-        Assert.All(new[] { "Thrust", "Tanks", "Shield", "Power" }, name => Assert.Contains(name, Visible(drone)));
+        Assert.All(new[] { "Thrust", "Storage", "Shield", "Power" }, name => Assert.Contains(name, Visible(drone)));
         Assert.DoesNotContain("Sensors", Visible(drone));
         Assert.Contains("Sensors", Visible(ship));
 
@@ -188,23 +188,23 @@ public sealed class EditorPanelTests
         Assert.DoesNotContain(types.Where(t => ship.Shows(Tuning, t)), t => t.Drone);
 
         // A drone part shows under its category, and a ship part never does.
-        drone.Category = Array.IndexOf(Tuning.Categories, Tab("Tanks"));
+        drone.Category = Array.IndexOf(Tuning.Categories, Tab("Storage"));
         Assert.Equal(["microBipropellantTank", "microNitrogenTank"], types.Where(t => drone.Shows(Tuning, t)).Select(t => t.Id).ToArray());
-        ship.Category = Array.IndexOf(Tuning.Categories, Tab("Tanks"));
-        Assert.Equal(["bipropellantTank", "hydrazineTank", "nitrogenTank"], types.Where(t => ship.Shows(Tuning, t)).Select(t => t.Id).ToArray());
+        ship.Category = Array.IndexOf(Tuning.Categories, Tab("Storage"));
+        Assert.Equal(["bipropellantTank", "hydrazineTank", "nitrogenTank", "cargo", "tractorBeam"], types.Where(t => ship.Shows(Tuning, t)).Select(t => t.Id).ToArray());
     }
 
     [Fact]
     public void TheTanksCategoryShowsOneCardAndChoosingAFuelPlacesThatFuelsTankType()
     {
         var types = Content.Blocks.Types;
-        var palette = new EditorPalette { Craft = HullClass.Ship, Category = Array.IndexOf(Tuning.Categories, Tab("Tanks")) };
+        var palette = new EditorPalette { Craft = HullClass.Ship, Category = Array.IndexOf(Tuning.Categories, Tab("Storage")) };
         string[] Cards() => Enumerable.Range(0, types.Count).Where(i => palette.ShowsCard(Tuning, types, i)).Select(i => types[i].Id).ToArray();
 
         // One card stands for the three tanks, and it places the chosen fuel's type.
-        Assert.Equal(["bipropellantTank"], Cards());
+        Assert.Equal(["bipropellantTank", "cargo", "tractorBeam"], Cards());
         palette.TankFuel = FuelKind.Hydrazine;
-        Assert.Equal(["hydrazineTank"], Cards());
+        Assert.Equal(["hydrazineTank", "cargo", "tractorBeam"], Cards());
         Assert.Equal(Array.FindIndex(types.ToArray(), t => t.Id == "nitrogenTank"), palette.TankTypeOf(types, FuelKind.Nitrogen));
         Span<FuelKind> fuels = stackalloc FuelKind[4];
         Assert.Equal(3, palette.TankFuels(types, fuels));
@@ -228,7 +228,7 @@ public sealed class EditorPanelTests
 
         // The drone has two fuels, and a remembered fuel it has no tank of falls back to one it has.
         palette.Craft = HullClass.Fighter;
-        palette.Category = Array.IndexOf(Tuning.Categories, Tab("Tanks"));
+        palette.Category = Array.IndexOf(Tuning.Categories, Tab("Storage"));
         Assert.Equal(2, palette.TankFuels(types, fuels));
         Assert.Equal(-1, palette.TankTypeOf(types, FuelKind.Hydrazine));
         Assert.Equal(["microBipropellantTank"], Cards());

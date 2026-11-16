@@ -97,7 +97,7 @@ public sealed class CargoTests
         var look = PropulsionLook.Load();
         var type = Content.Blocks.Get("cargo");
         var tuning = Prospect.Client.World.EditorTuning.Load(Path.Combine(AppContext.BaseDirectory, "content", "visuals", "editor.json"));
-        var palette = new Prospect.Client.Screens.EditorPalette { Category = Array.FindIndex(tuning.Categories, c => c.Name == "Hull") };
+        var palette = new Prospect.Client.Screens.EditorPalette { Category = Array.FindIndex(tuning.Categories, c => c.Name == "Storage") };
         Assert.True(palette.Shows(tuning, type));
         Assert.True(type.BoxOnly);
         Assert.True(type.FitsClass(HullClass.Ship));
