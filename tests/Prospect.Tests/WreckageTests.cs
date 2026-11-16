@@ -10,12 +10,12 @@ namespace Prospect.Tests;
 
 public sealed class WreckageTests
 {
-    internal static GameContent Content()
+    internal static GameContent Content(bool cargo = false)
     {
         var content = GameContent.Load();
         DesignBox[] boxes = new DesignBox[7];
         for (var i = 0; i < boxes.Length; i++)
-            boxes[i] = new(new GridSize(i, 0, 0), new GridSize(1, 1, 1), content.Blocks.Get(i == 0 ? "core" : i == 6 ? "nitrogenTank" : "hull"));
+            boxes[i] = new(new GridSize(i, 0, 0), new GridSize(1, 1, 1), content.Blocks.Get(i == 0 ? "core" : i == 6 ? cargo ? "cargo" : "nitrogenTank" : "hull"));
         var design = HullDesign.Of(new BoxDesign("Wreck fixture", 1, boxes, content.Blocks.Limits, "test"), content.Rules);
         return content.WithCatalogue([.. content.Designs, design], content.Designs.Length, content.DroneDesign, []);
     }
@@ -27,6 +27,27 @@ public sealed class WreckageTests
         for (var i = 0; i < hulls.Slots; i++) if (hulls.IsAliveAt(i) && hulls.Info(i).Wreck) return i;
         Assert.Fail("No wreck was created.");
         return -1;
+    }
+
+    [Fact]
+    public void WreckTakesItsRacksCargoAndDestroyedRackLosesIt()
+    {
+        var content = Content(cargo: true);
+        using var rig = new SaveRig(SaveRig.NewWorld(content), content);
+        rig.Join();
+        var source = rig.Hulls.Info(0).BlockState;
+        Assert.True(rig.Hulls.BlockStates.TryAddCargo(source, content, new(6, 0, 0, 100, 50, default), new byte[8]));
+        rig.Hulls.BlockStates.Lose(source, 2);
+        Tick(rig.Server)();
+        var wreck = Wreck(rig.Hulls);
+        var target = rig.Hulls.Info(wreck).BlockState;
+        Assert.Empty(rig.Hulls.BlockStates.Cargo(source).ToArray());
+        Assert.Equal(100, rig.Hulls.BlockStates.CargoKilograms(target));
+        var mass = rig.Hulls.Flight(wreck).Mass;
+        rig.Hulls.BlockStates.Lose(target, 6);
+        rig.Field.Refit(wreck);
+        Assert.Empty(rig.Hulls.BlockStates.Cargo(target).ToArray());
+        Assert.True(rig.Hulls.Flight(wreck).Mass < mass - .09f);
     }
 
     [Fact]

@@ -1585,6 +1585,9 @@ internal sealed partial class ScreenHost
             case DraftCheck.Ready when !editor.Dirty:
                 tone = Theme.TextDim;
                 return "Editing. Place, move, merge or delete blocks, then apply."u8;
+            case DraftCheck.Ready when !editor.CargoFits:
+                tone = Theme.Bad;
+                return "Cargo would not fit. Keep occupied racks in place with enough room."u8;
             case DraftCheck.Ready when editor.ConfirmDump:
                 tone = ExhaustOrange;
                 return Kit.F($"Click again to dump {TotalDumped(editor):0.##} kg and apply.");
@@ -1808,6 +1811,7 @@ internal sealed partial class ScreenHost
         EditorReason.UploadTimedOut => "Sending the design took too long. Apply again."u8,
         EditorReason.Invalid => "The server does not accept this design."u8,
         EditorReason.WrongKind => "The design is not the same kind of ship."u8,
+        EditorReason.CargoFull => "Cargo would not fit. Keep occupied racks in place with enough room."u8,
         EditorReason.NoChange => "The draft is the ship as it already is."u8,
         EditorReason.CatalogueFull => "This server has no room for more designs until it restarts."u8,
         EditorReason.ClientNotReady => "Your game was not ready to show the new ship in time."u8,

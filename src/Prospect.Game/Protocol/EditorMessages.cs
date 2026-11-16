@@ -109,6 +109,9 @@ public enum EditorReason : byte
 
     /// <summary>Debug: the request named a block that is not a living tank of the edited hull, or came too soon. Nothing was filled. The edit stays open.</summary>
     FillRefused = 27,
+
+    /// <summary>The proposed racks cannot retain every carried container.</summary>
+    CargoFull = 28,
 }
 
 /// <summary>What a client asks of the editor, reliable. The server answers every one with an <see cref="EditorStateMessage"/>.</summary>
@@ -311,7 +314,7 @@ public struct EditorStateMessage
         message.NewShip = (NewShipStatus)reader.ReadByte();
         var debug = reader.ReadByte();
         message.DebugFill = debug == 1;
-        if (!reader.IsValid || reader.Remaining != 0 || debug > 1 || phase > (byte)EditorPhase.Applied || reason > (byte)EditorReason.FillRefused || reason == (byte)EditorReason.Unavailable || message.NewShip > NewShipStatus.Refused)
+        if (!reader.IsValid || reader.Remaining != 0 || debug > 1 || phase > (byte)EditorPhase.Applied || reason > (byte)EditorReason.CargoFull || reason == (byte)EditorReason.Unavailable || message.NewShip > NewShipStatus.Refused)
             return false;
         message.Phase = (EditorPhase)phase;
         message.Reason = (EditorReason)reason;

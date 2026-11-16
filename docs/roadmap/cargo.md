@@ -28,7 +28,9 @@ There is no cargo inventory, mining yield or pickup yet.
 - Amounts are kilograms; resource ids are galaxy indices. Resource -1 means an empty shell and requires zero kilograms.
 - Maximum payload is unit volume times resource density from `blocks/cargo.json` (`densityKgPerCubicMetre`).
 - The initial visibility scope is the own hull only; reliable updates must leave the snapshot record budget unchanged.
-- Apply must refuse an edit whose remaining racks cannot retain the cargo; repair must preserve it.
+- Apply refuses an edit whose remaining racks cannot retain the cargo; repair preserves it.
+  A retained rack has the same type and grid anchor; resizing repacks through the shared rule.
+  Moving an occupied rack is refused until unloading exists. Wrecks take containers in their surviving racks.
 - Until step 2, destroyed racks lose their containers instead of creating containers in space.
 
 ### Racks
@@ -95,6 +97,5 @@ Deferred: drone launcher, tractor filter.
   Adds validate payload and health, and repack atomically through `CargoPacking` without allocating.
   Block-state copies preserve containers; losing a block removes only that rack's containers.
 - Shared flight includes cargo mass and inertia; server and prediction use the same figures.
-- This storage has no gameplay loading caller yet. Edit retention/refusal,
-  debug loading and live drawing remain unbuilt. Protocol 56 sends the own hold reliably on change; snapshots keep their existing record budget.
-  Codec 10 saves the hold and its old tuning, validates it, and logs containers dropped during a retune.
+- This storage has no gameplay loading caller yet. Debug loading and live drawing remain unbuilt. Protocol 58 sends the own hold reliably on change; snapshots keep their existing record budget.
+  Codec 12 saves the hold and its old tuning, validates it, and logs containers dropped during a retune.

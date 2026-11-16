@@ -508,8 +508,12 @@ internal sealed class ShipEditor(JobSystem jobs)
     public bool DumpsFuel => FuelKnown && (FuelDump.Nitrogen > 0f || FuelDump.Hydrazine > 0f || FuelDump.Bipropellant > 0f);
 
     /// <summary>True when the draft can be committed now.</summary>
+    private readonly HoldContainer[] _cargo = new HoldContainer[BlockStateStore.MaxContainers];
+    private int _cargoCount;
+    public bool CargoFits { get; private set; } = true;
+
     public bool CanApply =>
-        CanEdit && Dirty && Server.Phase == EditorPhase.Open && !Server.Pending
+        CanEdit && Dirty && CargoFits && Server.Phase == EditorPhase.Open && !Server.Pending
         && _checkedFuelVersion == _fuelVersion && Server.Token != 0 && Check == DraftCheck.Ready && CheckedVersion == Draft!.Version;
 
     /// <summary>True when the ship has lost or worn blocks, or was repaired before, so its blueprint can rebuild it.</summary>
@@ -851,6 +855,13 @@ internal sealed class ShipEditor(JobSystem jobs)
                 fuelChanged |= _fuelLevels[i] != level;
                 _fuelLevels[i] = level;
             }
+        var cargo = Hull == own.Id ? own.Cargo.Span : ReadOnlySpan<HoldContainer>.Empty;
+        if (!_cargo.AsSpan(0, _cargoCount).SequenceEqual(cargo))
+        {
+            cargo.CopyTo(_cargo);
+            _cargoCount = cargo.Length;
+            fuelChanged = true;
+        }
         if (fuelChanged)
         {
             _fuelVersion++;
@@ -2216,6 +2227,7 @@ internal sealed class ShipEditor(JobSystem jobs)
                 CheckedVersion = _job.Version;
                 _checkedFuelVersion = _job.FuelVersion;
                 FuelPlan = _job.Plan;
+                CargoFits = _job.CargoFits;
                 if (_job.SelectionStamp == _selectionStamp)
                 {
                     MenuFuelPlan = _job.MenuPlan;
@@ -2249,6 +2261,9 @@ internal sealed class ShipEditor(JobSystem jobs)
             Check = DraftCheck.Pending;
             _job.Copy = Draft.Copy();
             _job.Source = FuelKnown ? Source : null;
+            _job.Content = Content;
+            _job.CargoCount = _cargoCount;
+            _cargo.AsSpan(0, _cargoCount).CopyTo(_job.Cargo);
             _fuelLevels.CopyTo(_job.Levels, 0);
             _job.FuelVersion = _fuelVersion;
             _job.Selection = Selection.ToArray();
@@ -2275,6 +2290,10 @@ internal sealed class ShipEditor(JobSystem jobs)
     private sealed class CheckJob : IJob
     {
         public HullDesign? Source;
+        public GameContent? Content;
+        public readonly HoldContainer[] Cargo = new HoldContainer[BlockStateStore.MaxContainers];
+        public int CargoCount;
+        public bool CargoFits;
         public readonly double[] Levels = new double[TankFuel.MaxTanks];
         public int FuelVersion;
         public EditFuelPlan Plan;
@@ -2299,11 +2318,20 @@ internal sealed class ShipEditor(JobSystem jobs)
             Failure = null;
             Result = default;
             Plan = MenuPlan = default;
+            CargoFits = true;
             try
             {
                 Result = Copy!.Export();
                 if (Result.Ok && Source is not null)
                 {
+                    if (CargoCount > 0)
+                    {
+                        var capacity = 0;
+                        foreach (var box in Result.Design!.Boxes)
+                            if (box.Type.Cargo > 0) capacity = Math.Max(capacity, CargoPacking.Capacity(Content!.Cargo, box.Size, Result.Design.BlockSize));
+                        Span<HoldContainer> planned = stackalloc HoldContainer[BlockStateStore.MaxContainers];
+                        CargoFits = CargoTransfer.TryPlan(Content!, Source, Result.Design, Cargo.AsSpan(0, CargoCount), planned, new byte[capacity]);
+                    }
                     Span<double> levels = stackalloc double[TankFuel.MaxTanks];
                     Plan = EditFuel.Plan(Source, Levels, Result.Design!, levels);
                     var selectedFuel = 0.0;

@@ -19,6 +19,39 @@ namespace Prospect.Tests;
 public sealed class EditorSessionTests
 {
     [Fact]
+    public void EditKeepsCargoRepairKeepsItAndRemovingItsRackIsRefused()
+    {
+        using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);
+        var content = rig.Content;
+        var original = Rig.Index(rig.Own(0));
+        var rack = Array.FindIndex(content.Pod.Types, t => t.Cargo > 0);
+        Assert.True(rig.Hulls.BlockStates.TryAddCargo(rig.Hulls.Info(original).BlockState, content,
+            new(rack, 0, 0, 100, 50, default), new byte[1024]));
+        var draft = BuildDraft.FromBlueprint(content.Pod, content);
+        Assert.Equal(DraftEdit.Done, draft.Add(new GridSize(1, 0, 0), new GridSize(1, 1, 1), content.Blocks.Get("hull")));
+        var rebuilt = Build(rig, draft, content.Designs.Length + 1);
+        Assert.Equal(100, rig.Hulls.BlockStates.CargoKilograms(rig.Hulls.Info(rebuilt).BlockState));
+        var design = rig.Server.Content.Designs[rig.Hulls.Info(rebuilt).Design];
+        var before = rig.Hulls.BlockStates.Cargo(rig.Hulls.Info(rebuilt).BlockState).ToArray();
+        var removed = BuildDraft.FromBlueprint(design, rig.Server.Content);
+        Assert.Equal(DraftEdit.Done, removed.Delete(before[0].Rack));
+        var token = rig.Open(0);
+        Assert.True(rig.Input(0).CommitEdit(token, removed.Export().Bytes));
+        Assert.True(rig.Until(() => rig.Editor(0).Reason == EditorReason.CargoFull, settle: true));
+        Assert.Equal(EditorPhase.Open, rig.Editor(0).Phase);
+        Assert.Equal(rebuilt, Rig.Index(rig.Own(0)));
+        Assert.Equal(before, rig.Hulls.BlockStates.Cargo(rig.Hulls.Info(rebuilt).BlockState).ToArray());
+        rig.Input(0).CancelEdit();
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Closed));
+        rig.Hulls.BlockStates.Lose(rig.Hulls.Info(rebuilt).BlockState, design.BlockCount - 1);
+        rig.Step(10);
+        token = rig.Open(0);
+        rig.Input(0).RepairEdit(token);
+        Assert.True(rig.Until(() => rig.Editor(0).Phase == EditorPhase.Applied, settle: true));
+        Assert.Equal(before, rig.Hulls.BlockStates.Cargo(rig.Hulls.Info(Rig.Index(rig.Editor(0).Hull)).BlockState).ToArray());
+    }
+
+    [Fact]
     public void OwnHoldArrivesThroughReliableSessionAndFollowsControl()
     {
         using var rig = new Rig(clients: 1, joined: 1);

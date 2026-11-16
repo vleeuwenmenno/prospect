@@ -237,7 +237,7 @@ public sealed class ProtocolTests
         reader = new NetReader(wrong.AsSpan(1));
         Assert.False(EditorStateMessage.TryRead(ref reader, out _));
         wrong[1] = 0;
-        // The debug fill flag is a bool, and the debug reasons are the last there are.
+        // The debug fill flag is a bool, and cargo refusal is the last defined reason.
         wrong[18] = 2;
         reader = new NetReader(wrong.AsSpan(1));
         Assert.False(EditorStateMessage.TryRead(ref reader, out _));
@@ -246,7 +246,7 @@ public sealed class ProtocolTests
         reader = new NetReader(wrong.AsSpan(1));
         Assert.True(EditorStateMessage.TryRead(ref reader, out state));
         Assert.True(state.DebugFill);
-        wrong[2] = (byte)EditorReason.FillRefused + 1;
+        wrong[2] = (byte)EditorReason.CargoFull + 1;
         reader = new NetReader(wrong.AsSpan(1));
         Assert.False(EditorStateMessage.TryRead(ref reader, out _));
         wrong[18] = 0;

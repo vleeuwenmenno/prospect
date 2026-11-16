@@ -12,6 +12,29 @@ public sealed class CargoHoldTests
          new(new(-1, 0, 0), new(1, 1, 1), Content.Blocks.Get("cargo"))], Content.Blocks.Limits, "test"), Content.Rules);
 
     [Fact]
+    public void TransferReordersRacksRepacksAndRefusesMissingOrSmallRacksWithoutAllocation()
+    {
+        var from = Design();
+        var boxes = from.Boxes.ToArray();
+        (boxes[1], boxes[2]) = (boxes[2], boxes[1]);
+        var to = HullDesign.Of(new BoxDesign("Hold", 1, boxes, Content.Blocks.Limits, "test"), Content.Rules);
+        HoldContainer[] cargo = [new(1, 4, 0, 100, 500, default), new(1, 0, -1, 0, 50, default)];
+        var output = new HoldContainer[255];
+        var occupied = new byte[64];
+        var probe = new AllocationProbe();
+        while (probe.Measuring()) Assert.True(CargoTransfer.TryPlan(Content, from, to, cargo, output, occupied));
+        Assert.Equal(0, probe.Bytes);
+        Assert.Equal(2, output[0].Rack);
+        Assert.Equal(100, output[0].Amount);
+        boxes[2] = boxes[2] with { Size = new GridSize(1, 1, 1) };
+        to = HullDesign.Of(new BoxDesign("Hold", 1, boxes, Content.Blocks.Limits, "test"), Content.Rules);
+        Assert.False(CargoTransfer.TryPlan(Content, from, to, cargo, output, occupied));
+        boxes[2] = boxes[2] with { At = new GridSize(4, 0, 0), Size = new GridSize(2, 2, 2) };
+        to = HullDesign.Of(new BoxDesign("Hold", 1, boxes, Content.Blocks.Limits, "test"), Content.Rules);
+        Assert.False(CargoTransfer.TryPlan(Content, from, to, cargo, output, occupied));
+    }
+
+    [Fact]
     public void RepackingPreservesPayloadAndRefusalIsAtomic()
     {
         using var store = new BlockStateStore();

@@ -503,6 +503,15 @@ public sealed partial class ServerHost
             return;
         }
 
+        Span<HoldContainer> planned = stackalloc HoldContainer[BlockStateStore.MaxContainers];
+        var cargo = _hulls.BlockStates.Cargo(_hulls.Info(connection.EditHull.Index).BlockState);
+        if (!CargoTransfer.TryPlan(_content, _content.Designs[current], result.Design, cargo, planned, CargoScratch))
+        {
+            connection.EditPhase = EditorPhase.Open;
+            ReplyEdit(connection, EditorReason.CargoFull);
+            return;
+        }
+
         // Asked again: another player's design may have gone in while this one was on its way.
         var id = _catalogue.Find(result.Hash, result.Bytes.Length);
         if (id == current)
@@ -611,6 +620,16 @@ public sealed partial class ServerHost
         var from = _content.Designs[oldInfo.Design];
         var to = _content.Designs[design];
 
+        Span<HoldContainer> planned = stackalloc HoldContainer[BlockStateStore.MaxContainers];
+        var cargo = _hulls.BlockStates.Cargo(oldInfo.BlockState);
+        if (!CargoTransfer.TryPlan(_content, from, to, cargo, planned, CargoScratch))
+        {
+            connection.EditPhase = EditorPhase.Open;
+            ReplyEdit(connection, EditorReason.CargoFull);
+            return;
+        }
+        var cargoCount = cargo.Length;
+
         // A saved world takes a larger design only while its save has room for the difference.
         if (to.BlockCount > from.BlockCount && !HasRoom(0, to.BlockCount - from.BlockCount))
         {
@@ -623,6 +642,15 @@ public sealed partial class ServerHost
         var moved = (to.Pivot - from.Pivot) * to.BlockSize;
         var position = oldState.Position + Vector3.Transform(new Vector3((float)moved.X, (float)moved.Y, (float)moved.Z), oldState.Orientation);
         var next = CreateHull(oldInfo.Owner, design, position, fullTanks: false, oldInfo.Entity);
+
+        if (!_hulls.BlockStates.TrySetCargo(_hulls.Info(next.Index).BlockState, _content, planned[..cargoCount]))
+        {
+            _hulls.Destroy(next);
+            connection.EditPhase = EditorPhase.Open;
+            ReplyEdit(connection, EditorReason.CargoFull);
+            return;
+        }
+        _field.RestoreFigures(next.Index);
 
         ref var state = ref _hulls.State(next.Index);
         ref var flight = ref _hulls.Flight(next.Index);
