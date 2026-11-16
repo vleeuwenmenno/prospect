@@ -187,11 +187,15 @@ Built. Rules live in `FlightModel.Step`; `PropulsionTests`, `PowerFlowTests` and
 
 ### The electric drone
 
-- An ion drive behind the hull on its plate, where the engine was; twenty-four ion thrusters where the fuelled ones
-  were. The two tanks are drone plating now, so every mount keeps its block.
-- Mass 3.52 t (was 3.75). Forward 8.5 m/s², braking 8.5, sideways and up and down 4.3 (were 16, 16 and 8).
-- Power: generator 1.2 MW, core and gyro 0.1 MW, battery 8 MJ.
-  - Full forward draws 0.9 MW: the generator carries it with 0.2 MW to spare. The battery stays full.
+- Fourteen blocks: core, shield, three gyros (up and to each side), two generators, two batteries, the rift drive,
+  three plating blocks and a 1 x 2 x 1 ion drive behind the hull; twenty-four ion thrusters on faces. It is the
+  design the developer built in the editor (`content/ships/drone.json`).
+- Mass 5.17 t (was 3.52). Forward 11.6 m/s² (60 N from the double drive), braking 5.8, sideways and up and down 2.9
+  (were 8.5, 8.5 and 4.3). Hull 500 points (was 340). Turns at 51, 52 and 59 deg/s (three gyros).
+- Power: generators 2.4 MW, core and gyros 0.2 MW, batteries 16 MJ. The drone shield draws 0.7 MW (was 0.4): with
+  two generators 0.4 MW left a restart (1.8 MW) below the 2.2 MW surplus, so the battery never fell, and the shield
+  took 0.18 of the surplus. At 0.7 MW a restart draws 3.15 MW and ordinary recharge 0.32 of the surplus.
+  - Full forward draws 1.8 MW: the generators carry it with 0.4 MW to spare. The battery stays full.
   - Forward and sideways: 1.45 MW, the battery runs down in about 32 s.
   - Forward, sideways and the shield recharging: about 12 s. All three axes at once: about 11 s.
   - Boosting forward: 4.05 MW, the battery is empty in about 2.7 s.
@@ -517,7 +521,7 @@ Shipped designs, tanks full, measured by `PropulsionTests`:
 | Command Pod | 19.3 m/s² | 9.6 m/s² | 83 min | 52 min | 83 min |
 | Prospector | 20.3 m/s² | 10.1 m/s² | 83 min | 52 min | 83 min |
 | Surveyor | 20.4 m/s² | 10.2 m/s² | 83 min | 52 min | 83 min |
-| Drone | 8.5 m/s² | braking 8.5, others 4.3 m/s² | no tanks: electric | no tanks | no tanks |
+| Drone | 11.6 m/s² | braking 5.8, others 2.9 m/s² | no tanks: electric | no tanks | no tanks |
 
 Boost, measured with the battery full and the drive never overheating (`PropulsionTests`, `PowerFlowTests`):
 
@@ -525,7 +529,7 @@ Boost, measured with the battery full and the drive never overheating (`Propulsi
 | --- | --- | --- | --- |
 | Command Pod | 7.9 MW (16.5) | 23 s (5 s) | 34 min (52) |
 | Prospector, Surveyor | 15.8 MW (32.9) | 12 s (3 s) | 34 min (52) |
-| Drone | 4.05 MW, ion (1.35 MW fuelled) | 2.7 s (32 s fuelled) | no tanks |
+| Drone | 8.1 MW, ion (4.05 MW with the single drive) | 2.7 s | no tanks |
 
 - Battery time counts idle draw and generation. The old times are worked out from the old multiplier, not measured. A pod that boosts the 6 s heat allows keeps about three
   quarters of its battery; the vessels about half.
@@ -536,9 +540,10 @@ With mounts, same mass, thrust and burn as with thruster blocks, so the shipped 
 | --- | --- | --- | --- | --- |
 | Command Pod | 13 (was 18) | 20 | four each on the shield (right), cargo (left), quarters (up), core (down), charting (front) | 2,760 (was 3,510) |
 | Prospector, Surveyor | 28 (was 38) | 40 | eight each way: two cargo holds a side, two on top, two below, two plates at the front | 5,900 and 5,910 (were 7,400 and 7,410) |
-| Drone | 10 (was 15) | 24 ion thrusters | four each on the plates where the tanks were, gyro (up) and generator (down), eight on the front of gyro and generator | 340 (was 490) |
+| Drone | 14 (was 15) | 24 ion thrusters | four each on the top and bottom, right and left, eight on the front (top and bottom blocks) | 500 (was 490) |
 
-- The ships are more compact, so they turn a little differently (drone 38, 45, 40 deg/s; was 39, 43, 45).
+- The ships are more compact, so they turn a little differently (drone 38, 45, 40 deg/s; was 39, 43, 45). The
+  drone's later three-gyro design turns at 51, 52, 59 deg/s.
 
 - Before: pod 20.5 and 11.5 m/s², vessels 21.9 and 12.4 m/s², drone 16.6 and 8.0 m/s².
 - Electric draw at full thrust: pod 4.1 → 1.75 MW, vessels 8.2 → 3.5 MW, drone 0.6 → 0.3 MW.

@@ -506,8 +506,8 @@ public sealed class PropulsionVisualTests
     {
         var drone = Content.Designs[Content.DroneDesign];
         var nozzles = MeshBuilder.Hull(drone, Look).Nozzles;
-        // An ion drive and twenty-four ion thrusters: every nozzle is an ion emitter, burning no fuel.
-        Assert.Equal(1 + drone.Mounts.Length, nozzles.Length);
+        // A two-cell ion drive (one nozzle per cell) and twenty-four ion thrusters: every nozzle is an ion emitter, burning no fuel.
+        Assert.Equal(drone.Mounts.Length + 2, nozzles.Length);
         Assert.All(nozzles, n => Assert.Equal(FuelKind.None, n.Fuel));
         var ion = Look.PlumeOrder[Look.PlumeIndex("ion")];
         var effects = new ThrustEffects(Look);
@@ -521,11 +521,12 @@ public sealed class PropulsionVisualTests
         effects.Add(effects.Observe(dark), dark, nozzles, at, Quaternion.Identity, 1, output);
         Assert.Equal(0, effects.End());
 
-        // Forward on power: the drive glows, as an ion glow, with no sparks; strafing lights that side's four pods.
+        // Forward on power: the drive's two nozzles glow, as ion glows, with no sparks; strafing lights that side's
+        // four pods as well.
         var forward = Hull(5, -127, 16, blocks);
         Begin(effects, 2);
         effects.Add(effects.Observe(forward), forward, nozzles, at, Quaternion.Identity, 1, output);
-        Assert.Equal(1, effects.End());
+        Assert.Equal(2, effects.End());
         Assert.Equal(2f, output[0].EdgeKind.W);
         Assert.Equal(0f, output[0].Extent.Z);
         Assert.Equal(0f, output[0].Motion.Y);
@@ -534,8 +535,8 @@ public sealed class PropulsionVisualTests
         var strafing = new HullView { Id = 5, Thrust = new ThrustState { X = 127, Z = -127, Flags = 16 }, Blocks = blocks };
         Begin(effects, 3);
         effects.Add(effects.Observe(strafing), strafing, nozzles, at, Quaternion.Identity, 1, output);
-        Assert.Equal(5, effects.End());
-        Assert.Equal(4, output.AsSpan(0, 5).ToArray().Count(p => p.AxisLength.X == -1f));
+        Assert.Equal(6, effects.End());
+        Assert.Equal(4, output.AsSpan(0, 6).ToArray().Count(p => p.AxisLength.X == -1f));
 
         // Steady: two frames apart, a firing emitter is the same but for the clock.
         Begin(effects, 4);
@@ -552,7 +553,7 @@ public sealed class PropulsionVisualTests
         var idle = Hull(5, 0, 0, blocks);
         Begin(effects, 5);
         effects.Add(effects.Observe(idle), idle, nozzles, at, Quaternion.Identity, 1, output);
-        Assert.Equal(1, effects.End());
+        Assert.Equal(2, effects.End());
         Begin(effects, 5 + ion.FadeSeconds * 1.01);
         effects.Add(effects.Observe(idle), idle, nozzles, at, Quaternion.Identity, 1, output);
         Assert.Equal(0, effects.End());

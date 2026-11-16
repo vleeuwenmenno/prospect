@@ -286,7 +286,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   its forward acceleration. Thrust burns fuel, boost four and a half times as much, and the dampeners burn it while they brake;
   with a tank dry its parts give nothing, and with every tank dry the hull drifts and can still turn. The shipped
   ships carry about 83 minutes of full engine thrust. The drone is electric: its ion drive holds full forward thrust on
-  its generator, while pushing sideways too, or the shield recharging, runs its battery down in tens of seconds and
+  its two generators, while pushing sideways too, or the shield recharging, runs its battery down in tens of seconds and
   boost empties it in about three. Once moving, the pilot view marks the direction of travel
   (prograde: a circle with three ticks) and its opposite (retrograde: a circle with a cross), where to point the
   engine to stop; Settings, Steering turns both off. Thrust, boost and shield recharge also draw
