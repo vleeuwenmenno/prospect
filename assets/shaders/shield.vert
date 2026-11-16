@@ -34,9 +34,12 @@ layout(location = 13) in vec4 patch1;
 layout(location = 14) in vec4 patch2;
 layout(location = 15) in vec4 patch3;
 
+layout(location = 16) flat out int exhaustIndex;
+
 void main()
 {
     // A collapsing shield swells a little as it goes.
+    exhaustIndex = gl_InstanceIndex;
     vec3 p = position + normal * (params.z * 0.6);
 
     // Charging back up, the whole field shivers: squashed and stretched a little along its own axes, out of step

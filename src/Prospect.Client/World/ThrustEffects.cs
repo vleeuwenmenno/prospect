@@ -28,6 +28,8 @@ internal sealed class ThrustEffects
     private readonly float[] _throttle = new float[Slots * Groups];
     private readonly float[] _scores = new float[PropulsionLook.PlumeCapacity];
     private readonly PropulsionLook _look;
+    public readonly PlumeInstance[] Instances = new PlumeInstance[PropulsionLook.PlumeCapacity];
+    public readonly ExhaustCapsule[] Capsules = new ExhaustCapsule[PropulsionLook.PlumeCapacity];
     private int _count;
     private int _weakest = -1;
     private double _seconds;
@@ -233,7 +235,10 @@ internal sealed class ThrustEffects
                 continue;
 
             var seed = (float)(((hull.Id * 2654435761u) ^ ((uint)nozzle.Index * 40503u)) & 1023u) / 37f;
-            output[target] = new PlumeInstance
+            Capsules[target] = new ExhaustCapsule(hull.Id, at, axis, length, radius * (1f + spread),
+                look.ShieldStrength * throttle * grow * (released >= 0 ? 1f - released / look.FadeSeconds : 1f),
+                new Vector3(look.ShieldColor[0], look.ShieldColor[1], look.ShieldColor[2]), look.ShieldSpread);
+            output[target] = Instances[target] = new PlumeInstance
             {
                 ExitRadius = new float4(at.X, at.Y, at.Z, radius),
                 AxisLength = new float4(axis.X, axis.Y, axis.Z, length),

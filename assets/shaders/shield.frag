@@ -21,6 +21,8 @@ layout(location = 10) flat in int own;
 layout(location = 12) flat in vec4 patches[4];
 layout(location = 11) flat in vec4 recovering;  // see ShieldInstance.Recovery
 layout(location = 0) out vec4 outColor;
+layout(location = 16) flat in int exhaustIndex;
+layout(std430, set = 0, binding = 2) readonly buffer Exhaust { vec4 exhaust[]; };
 
 // How shields look, from content/visuals/shields.json (ShieldLookConstants).
 layout(push_constant) uniform Look
@@ -130,6 +132,26 @@ void main()
     float glow = present * (0.008 + shieldLook.calm.a * rim + 0.025 * field * rim + 0.10 * waver * (0.4 + rim) + 0.05 * shiver * (0.5 + rim)) + present * hit.x * shieldLook.ripple.w;
     vec3 flashTint = mix(tint, vec3(1.0, 0.95, 0.8), 0.65);
     vec3 light = tint * glow + present * flashTint * hit.y * shieldLook.impact.z + shieldLook.collapse.rgb * burning * (0.35 + 0.8 * rim) * 1.4;
+
+    // A contact exists only where the plume axis hit this shell. Nothing behind that entry is lit.
+    int base = exhaustIndex * 25;
+    int count = int(exhaust[base].x);
+    if (count > 0) {
+        vec3 streamLight = vec3(0.0);
+        for (int i = 0; i < count; i++) {
+            vec4 hit = exhaust[base + 1 + i * 3];
+            vec4 normalStrength = exhaust[base + 2 + i * 3];
+            vec3 color = exhaust[base + 3 + i * 3].rgb;
+            vec3 delta = (worldPosition - hit.xyz) / hit.w;
+            float plane = dot(delta, normalStrength.xyz);
+            float radial = max(0.0, dot(delta, delta) - plane * plane);
+            if (radial > 6.0 || abs(plane) > 1.5) continue;
+            float flow = noise(delta * 2.5 + vec3(time * 0.35, -time * 0.45, time * 0.2));
+            float splash = (exp(-radial * 3.0) + 0.35 * exp(-radial * 0.7)) * exp(-plane * plane * 2.0);
+            streamLight += color * normalStrength.w * splash * (0.65 + 0.35 * flow);
+        }
+        light += present * streamLight / (1.0 + max(streamLight.r, max(streamLight.g, streamLight.b)) * 0.5);
+    }
 
     // The bend: along the shell's normal as seen on screen, strongest at the rim and in a ripple, a few pixels at most.
     vec2 size = frame.lens.zw;

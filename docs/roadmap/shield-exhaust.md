@@ -46,7 +46,7 @@ Product direction from the brainstorm on 2026-11-16. Built step by step; this sa
 ## Order
 
 1. Done: contact strength from energy, and the contact patch.
-2. Exhaust on shields.
+2. Done: exhaust on shields.
 3. Dust and marks on rock.
 
 ### Other hull contacts
@@ -71,3 +71,39 @@ Product direction from the brainstorm on 2026-11-16. Built step by step; this sa
   It approximates a curved surface by a tangent disk; narrow ridges and disconnected faces are not reconstructed.
 - No evaluator version bump: block-derived physical figures are unchanged; the changed shared blocks.json is
   already hashed into content identity. No protocol or save changes.
+
+## Step 2 implementation
+
+- `ThrustEffects` exports the exact drawn plume instances and their hull ids. No flight arithmetic is duplicated.
+  Reach is the grown plume length itself; there is no separate shield reach.
+- `ShieldExhaust` intersects the plume axis with actual cached shield triangles and chooses the first foreign entry.
+  Own shields are excluded. Cached triangle-group bounds prune the search; CPU queries never read GPU upload memory.
+- The entry supplies a tangent clipping plane to the plume shader, including its ion beam and ignition sparks.
+  Gas stops there; a soft splash spreads along the shell at the same point with slow turbulent shimmer.
+- Splash radius uses that plume's width at the hit distance, then `shieldSpread`; intensity follows throttle,
+  ignition/release and the plume's own longitudinal fade. Strength, spread and colour are per-kind propulsion data.
+  These stay in propulsion.json beside the profiles they describe, so one kind owns its plume and shield response.
+  `shieldStrength: 0` disables both clipping and splash for comparisons; all kinds validate on load.
+- Eight nearest contacts per shield, 64 fixed shield records, 25 vec4s each per frame slot (25,600 bytes).
+  Empty lists skip shading; the mask pass skips exhaust entirely. Scene copies, pass order, wire and saves stay unchanged.
+
+### Limits and checks
+
+- Candidate plumes share existing visibility, minimum-pixel and global budgets. An off-screen hull can emit a visible plume.
+  Axis contact drives clipping; a grazing cone whose axis misses the shell is not stopped.
+- At most 262,144 triangle tests a frame; an unfinished plume query produces no clip or splash, never a partial answer.
+  Each cached shell stores bounds of consecutive 64-triangle groups. No per-frame memory is taken.
+- The clipping surface is the contact's tangent plane, not a curved volume reconstructed across the plume width.
+  Splashes follow the shell, but gas spilling around its sides is not simulated. No push, heat or damage.
+- `--open exhaust-shield` and `exhaust-shield-cold` hold real hulls close together; normal flight computes thrust and fuel use.
+  AGENTS.md lists engine, hot, cold, ion, oblique and own-plume control captures, using feature-off content copies.
+
+### Revision verification
+
+- Close-contact OFF/ON sequences cover engine, hot thruster, cold gas and ion, plus an oblique view and own-plume control.
+  Native-pixel comparisons and run logs are in `artifacts/exhaust-v2-evidence/REPORT.txt` on the implementation worktree.
+- `timeout 900 make check`: 2,467 game tests and 354 listing tests passed. All four plume/shield shaders compile with glslc;
+  `make gas-shaders` confirms the shield mask has no texture operations or loops.
+- RTX 5070 Ti, actual 5096×1390: `make bench` 679 fps, resize 644 fps; active engine 758, cold 802, ion 813, hot 611 fps.
+  Every run reports 0 managed bytes on the render thread and across the process.
+- Validation layers were inactive. Maximum-capacity fleets, Windows and macOS were not runtime-tested.
