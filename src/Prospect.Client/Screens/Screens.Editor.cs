@@ -77,9 +77,10 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>The blue every selected block is outlined in, apart from the amber of acting and the red of loss.</summary>
-    private const uint SelectionBlue = 0x4D8DFF;
+    internal const uint SelectionBlue = 0x4D8DFF;
 
     private readonly EditorPalette _palette = new();
+    private readonly EditorMenuPanel _editorMenu;
     private readonly ImInputString _partSearch = new(48);
     private EditorTuning? _editorTuning;
 
@@ -102,7 +103,7 @@ internal sealed partial class ScreenHost
         DrawEditorDetails(layout.Details, editor, draft, content, bridge);
         DrawEditorBar(layout.Bar, editor, draft, bridge);
         // Last, so the menu is in front of the panels.
-        DrawEditorMenu(editor, draft, content);
+        _editorMenu.Draw(editor, draft, _app.Devices.MousePosition);
     }
 
     /// <summary>
@@ -1618,7 +1619,7 @@ internal sealed partial class ScreenHost
     private static uint Packed(Vector3 color) =>
         ((uint)Math.Clamp(color.X * 255f, 0f, 255f) << 16) | ((uint)Math.Clamp(color.Y * 255f, 0f, 255f) << 8) | (uint)Math.Clamp(color.Z * 255f, 0f, 255f);
 
-    private static ReadOnlySpan<byte> AxisName(int axis) => axis switch { 0 => "X"u8, 1 => "Y"u8, _ => "Z"u8 };
+    internal static ReadOnlySpan<byte> AxisName(int axis) => axis switch { 0 => "X"u8, 1 => "Y"u8, _ => "Z"u8 };
 
     /// <summary>A block shape for the player: a box, or a wedge and the way its slope faces.</summary>
     internal static ReadOnlySpan<byte> ShapeText(BlockShape shape)

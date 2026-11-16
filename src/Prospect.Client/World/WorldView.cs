@@ -440,8 +440,10 @@ internal sealed class WorldView
     /// <summary>
     /// True while the world carries a press the interface began: a part dragged out of the editor's part list. The
     /// interface item stays active and claims the keyboard meanwhile; the frame loop lets the world read input anyway.
+    /// The same holds for a press on a row of the editor's context menu: a surface over the world would close the
+    /// menu, and the row, which acts when the button is let go, would never see its release.
     /// </summary>
-    public bool HoldsInterfacePress => Editor.Carry == EditorCarry.Part;
+    public bool HoldsInterfacePress => Editor.Carry == EditorCarry.Part || Editor.Menu.Pressing;
 
     /// <summary>The point the editor's camera orbits, in the hull's own frame, and its distance from it, in metres.</summary>
     public Vector3 EditorFocus => _editPan;
