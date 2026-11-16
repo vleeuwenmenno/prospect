@@ -1059,7 +1059,7 @@ public static class HullSim
     /// recharge delay. A block at zero is gone, and its loss is counted in the body's block state. Only the blocks
     /// that touched are looked at: the hull's total comes from the running total its block state keeps.
     /// <paramref name="touching"/> is the <see cref="BlockSet"/> of the blocks that touched. Returns true if the
-    /// hull is destroyed: its core is gone or nothing is left.
+    /// hull is destroyed: no live blocks remain.
     /// </summary>
     internal static bool Damage(ref HullState state, in FlightParams flight, ref HullBody body, scoped ReadOnlySpan<ulong> touching, int touchCount, float amount, Vector3? shieldPoint = null)
     {

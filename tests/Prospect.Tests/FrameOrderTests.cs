@@ -6895,7 +6895,7 @@ public sealed class FrameOrderTests : IDisposable
         for (var i = 0; i < 30; i++)
             EditorFrame();
         Assert.Equal(design.BlockCount, DraftBlocks);
-        Assert.Equal(1, editor.MissingCount);
+        Assert.Equal((int)hulls.Revision(index), editor.MissingCount);
         Assert.True(editor.IsMissing(lost));
         Assert.True(editor.Damaged);
         Assert.True(editor.OwnHullPoints < design.Flight.HullPoints);
@@ -7008,7 +7008,7 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal(blocks + 1, DraftBlocks);
         Assert.True(editor.Dirty);
         Assert.True(editor.RepairOnly);
-        Assert.Equal(loseBlock ? 1 : 0, editor.MissingCount);
+        Assert.Equal((int)hulls.Revision(own), editor.MissingCount);
         Assert.Equal(RepairBlock.Unsaved, editor.RepairState);
         Assert.False(editor.Repair(Bridge));
         Assert.False(editor.CanApply);

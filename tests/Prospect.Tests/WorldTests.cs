@@ -654,10 +654,10 @@ public sealed class PowerAndDamageTests
     }
 
     [Fact]
-    public void LosingTheCoreDestroysTheHull()
+    public void LosingTheCoreKeepsRemainingBlocks()
     {
         // Belly-first at speed: the core sits in the bottom layer and takes the hit.
-        Assert.True(Crash(new Vector3(0, 1, 0), new Vector3(0, -300, 0), Pod, out _, out var alive, out _));
+        Assert.False(Crash(new Vector3(0, 1, 0), new Vector3(0, -300, 0), Pod, out _, out var alive, out _));
         Assert.NotEqual(Content.Pod.CoreMask(), alive & Content.Pod.CoreMask());
     }
 

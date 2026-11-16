@@ -40,7 +40,11 @@ public sealed class EditorSessionTests
         var snapshot = rig.Snap(0);
         Assert.Contains(snapshot.Hulls.Take(snapshot.HullCount), hull => hull.Id == rig.Hulls.HandleAt(wreck).Packed && hull.Owner == 0);
         Assert.False(BlockSet.Has(rig.Hulls.Blocks(own), 6));
-        Assert.InRange(snapshot.PredictionError, 0, 0.01f);
+        var initialCorrection = snapshot.PredictionError;
+        // The readout retains a decaying maximum of the initial authoritative split correction.
+        rig.Step(180);
+        Assert.InRange(rig.Snap(0).PredictionError, 0, 0.01f);
+        Assert.True(rig.Snap(0).PredictionError < initialCorrection * 0.5f);
         Assert.Null(rig.Server.Fault);
         Assert.Null(rig.Clients[0]!.Fault);
     }

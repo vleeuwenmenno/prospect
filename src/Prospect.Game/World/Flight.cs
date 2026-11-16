@@ -604,7 +604,7 @@ public static class FlightModel
             velocity *= Math.Max(limit, speed - p.ShedAcceleration * dt) / speed;
 
         state.Velocity = HullRotation.Rotate(velocity, state.Orientation);
-        state.Position += state.Velocity * dt + oldCenter - HullRotation.Rotate(p.CenterOfMass, state.Orientation);
+        state.Position += state.Velocity * dt + (oldCenter - HullRotation.Rotate(p.CenterOfMass, state.Orientation));
     }
 
     /// <summary>

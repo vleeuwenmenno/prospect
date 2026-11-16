@@ -30,6 +30,16 @@ public sealed class WreckageTests
     }
 
     [Fact]
+    public void OffsetCenterDoesNotRoundAwaySlowTranslation()
+    {
+        var flight = new FlightParams { Mass = 1, CenterOfMass = new Vector3(10000, 0, 0), Inertia = Vector3.One };
+        var state = HullState.Spawn(default, flight);
+        state.Velocity = new Vector3(0.001f, 0, 0);
+        FlightModel.Step(ref state, default, flight, HullSim.Dt);
+        Assert.InRange(state.Position.X, 0.000016, 0.000017);
+    }
+
+    [Fact]
     public void WreckHullUsesExistingWireRecordWithoutAnOwner()
     {
         var content = Content();

@@ -391,7 +391,6 @@ internal sealed partial class ScreenHost
         var listHeight = Math.Max(Kit.Px(80), ImGui.GetContentRegionAvail().Y - footer);
         ImGui.BeginChild("##worldsettingslist"u8, new float2(0, listHeight), ImGuiChildFlags.NavFlattened, ImGuiWindowFlags.NoBackground);
         ImGui.Indent(Kit.Px(MarkerGutter));
-        DrawSettingGroups(content.SettingCatalog, true);
         if (_app.Session is { IsLocal: true } session)
         {
             Kit.Slider("Wreck lifetime (minutes)"u8, ref _wreckMinutes, 0, 1440, 1, Kit.F($"{_wreckMinutes:0}"), WorldRowWidth);
@@ -400,6 +399,9 @@ internal sealed partial class ScreenHost
                 session.Client.Input.RequestWreckSettings(new((int)_wreckMinutes, (int)_wreckLimit));
         }
         Kit.Body(Kit.F($"Wreck cleanup in force: {snapshot.WreckSettings.Minutes} minutes, {snapshot.WreckSettings.PerSector} per sector"));
+        Kit.Body("0 minutes keeps wrecks indefinitely."u8);
+        Kit.Space(Theme.Space4);
+        DrawSettingGroups(content.SettingCatalog, true);
 
         ImGui.Unindent(Kit.Px(MarkerGutter));
         ImGui.EndChild();
