@@ -1,4 +1,5 @@
 using Brutal.Concurrency.Jobs;
+using Brutal.Numerics;
 using Prospect.Client.Input;
 using Prospect.Engine.Diagnostics;
 using Prospect.Engine.Jobs;
@@ -51,6 +52,25 @@ internal enum DraftCheck : byte
 
     /// <summary>The check itself failed; <see cref="ShipEditor.CheckProblem"/> says so.</summary>
     Failed,
+}
+
+/// <summary>Whether the face-drag resize can start on the selection, and if not why.</summary>
+internal enum ResizeOffer : byte
+{
+    /// <summary>One block is selected and the ship can be edited.</summary>
+    Yes,
+
+    /// <summary>Nothing is selected.</summary>
+    None,
+
+    /// <summary>More than one block is selected: the gesture sizes one block.</summary>
+    Several,
+
+    /// <summary>Only a mounted part is selected: it has no size.</summary>
+    Mount,
+
+    /// <summary>The ship cannot be edited now, or something else holds the pointer.</summary>
+    Busy,
 }
 
 /// <summary>What the pointer carries in the editor until it is let go.</summary>
@@ -513,6 +533,7 @@ internal sealed class ShipEditor(JobSystem jobs)
             return false;
         CancelCarry();
         CancelPartGestures();
+        Menu.Close();
         GhostPinned = false;
         Draft = BuildDraft.FromBlueprint(Source, Content);
         _depth = 0;
@@ -583,10 +604,15 @@ internal sealed class ShipEditor(JobSystem jobs)
 
         if (Stage != EditorStage.Closed && !typing && actions.InterfaceShortcutPressed(devices, InputAction.Pause, typing, pointerOwned))
         {
-            // Escape first puts back a part being sized or turned, then drops what the pointer carries; only with
+            // Escape first closes the context menu, then puts back a part or a block being sized or a part turned, then
+            // drops what the pointer carries; only with
             // none of those does it end the edit.
-            if (SizingPart)
+            if (Menu.IsOpen)
+                Menu.Close();
+            else if (SizingPart)
                 CancelPartSizing();
+            else if (ResizingBlock)
+                CancelBlockResize();
             else if (RotatingPart)
                 CancelPartRotation();
             else if (Carry != EditorCarry.None)
@@ -605,6 +631,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         if (Stage == EditorStage.Closed)
             return;
         CancelPartGestures();
+        Menu.Close();
         GhostPinned = false;
         bridge.CancelEdit();
         // Cancelling the edit of a ship just built leaves it as it was made, and the player goes to fly it.
@@ -623,6 +650,7 @@ internal sealed class ShipEditor(JobSystem jobs)
     public void Reset()
     {
         CancelPartGestures();
+        Menu.Close();
         GhostPinned = false;
         Stage = EditorStage.Closed;
         _partPressUsed = false;
@@ -1366,6 +1394,8 @@ internal sealed class ShipEditor(JobSystem jobs)
     {
         CancelPartSizing();
         CancelPartRotation();
+        // A block being resized keeps what it has: whatever ended the gesture is not the player's Escape.
+        EndBlockResize();
     }
 
     /// <summary>Chooses the shape parts are placed in. A part being turned is put back first.</summary>
@@ -1492,6 +1522,269 @@ internal sealed class ShipEditor(JobSystem jobs)
 
     /// <summary>Chooses which side of the selected block resizing moves.</summary>
     public void SetFace(int side) => Face = Math.Clamp(side, 0, 5);
+
+    /// <summary>The context menu a right click on a block or a mounted part opens.</summary>
+    public EditorMenu Menu { get; } = new();
+
+    /// <summary>
+    /// Opens the context menu at <paramref name="at"/> for the block or mounted part the right click was on. When it
+    /// is in the selection the menu acts on the whole selection; otherwise it becomes the selection first. False
+    /// when nothing can be inspected.
+    /// </summary>
+    public bool OpenMenu(float2 at, int block, int mount)
+    {
+        if (!CanInspect || Carry != EditorCarry.None)
+            return false;
+        var boxes = Draft!.Boxes;
+        if ((uint)mount < (uint)Draft.Mounts.Length)
+        {
+            if (!IsMountSelected(mount))
+                SelectMount(mount, false);
+            block = -1;
+        }
+        else if ((uint)block < (uint)boxes.Length)
+        {
+            if (!IsSelected(block))
+                Select(block, false);
+            mount = -1;
+        }
+        else
+            return false;
+        RefreshMerge();
+        Menu.Open(at, block, mount, _time);
+        return true;
+    }
+
+    /// <summary>Selects every mounted part of the type of mounted part <paramref name="mount"/>, replacing the selection.</summary>
+    public bool SelectSameMountType(int mount)
+    {
+        if (!CanInspect || (uint)mount >= (uint)Draft!.Mounts.Length)
+            return false;
+        var mounts = Draft.Mounts;
+        var type = mounts[mount].Type;
+        ClearSelection();
+        for (var i = 0; i < mounts.Length; i++)
+            if (mounts[i].Type == type && i != mount)
+                SelectMount(i, true);
+        SelectMount(mount, true);
+        return true;
+    }
+
+    /// <summary>Writes the fuels the craft has a tank type for into <paramref name="into"/> and returns how many.</summary>
+    public int FuelChoices(Span<FuelKind> into) => Draft?.TankFuels(into) ?? 0;
+
+    /// <summary>True when at least one block is selected and every selected block is a tank.</summary>
+    public bool SelectionIsTanks
+    {
+        get
+        {
+            if (Draft is not { } draft || _selectionCount == 0)
+                return false;
+            var boxes = draft.Boxes;
+            foreach (var block in Selection)
+                if ((uint)block >= (uint)boxes.Length || boxes[block].Type.Tank == FuelKind.None)
+                    return false;
+            return true;
+        }
+    }
+
+    /// <summary>The fuel every selected tank holds, or none when they differ or the selection is no tanks.</summary>
+    public FuelKind SelectionFuel
+    {
+        get
+        {
+            if (!SelectionIsTanks)
+                return FuelKind.None;
+            var boxes = Draft!.Boxes;
+            var fuel = boxes[Selection[0]].Type.Tank;
+            foreach (var block in Selection)
+                if (boxes[block].Type.Tank != fuel)
+                    return FuelKind.None;
+            return fuel;
+        }
+    }
+
+    /// <summary>What making the selected tanks hold <paramref name="fuel"/> would answer, without doing it.</summary>
+    public DraftEdit CanChangeFuel(FuelKind fuel) =>
+        CanEdit && _selectionCount > 0 ? Draft!.CanSwapTank(Selection, fuel) : DraftEdit.NoSuchBlock;
+
+    /// <summary>
+    /// Makes every selected tank hold <paramref name="fuel"/>, as one step to undo: the block takes the tank type of
+    /// that fuel for this craft and keeps its place, size and facing. Never mirrored. A changed tank starts empty
+    /// when the edit is applied, as any tank the edit replaces does (<c>CarryFuel</c>: same type, shape and cells).
+    /// </summary>
+    public void ChangeFuel(FuelKind fuel)
+    {
+        if (!CanEdit || _selectionCount == 0)
+            return;
+        CancelCarry();
+        Record(Draft!.SwapTank(Selection, fuel));
+    }
+
+    /// <summary>
+    /// How many pieces cutting the selected tanks along <paramref name="axis"/> makes: the cells of each tank that is
+    /// over one cell long on it, added up. Zero when none is.
+    /// </summary>
+    public int SplitPieces(int axis)
+    {
+        if (Draft is not { } draft)
+            return 0;
+        var boxes = draft.Boxes;
+        var pieces = 0;
+        foreach (var block in Selection)
+        {
+            if ((uint)block >= (uint)boxes.Length)
+                continue;
+            var length = EditorGeometry.Of(boxes[block].Size, axis);
+            if (length > 1)
+                pieces += length;
+        }
+
+        return pieces;
+    }
+
+    /// <summary>What cutting the selected tanks along <paramref name="axis"/> would answer, without doing it.</summary>
+    public DraftEdit CanSplit(int axis) =>
+        CanEdit && _selectionCount > 0 ? Draft!.CanSplit(Selection, axis) : DraftEdit.NoSuchBlock;
+
+    /// <summary>
+    /// Cuts every selected tank over one cell long on <paramref name="axis"/> into pieces one cell thick, as one step
+    /// to undo, and selects all the pieces. Never mirrored. The pieces start empty when the edit is applied, as a
+    /// changed tank does.
+    /// </summary>
+    public void SplitSelected(int axis)
+    {
+        if (!CanEdit || _selectionCount == 0)
+            return;
+        CancelCarry();
+        var before = Draft!.Boxes.Length;
+        var result = Draft.Split(Selection, axis);
+        Record(result);
+        if (result != DraftEdit.Done || !BeginBulkSelect(BoxSelectMode.Add))
+            return;
+        for (var i = before; i < Draft.Boxes.Length; i++)
+            BulkSelect(i, BoxSelectMode.Add);
+    }
+
+    /// <summary>Why the face-drag resize cannot start on the selection now.</summary>
+    public ResizeOffer ResizeState =>
+        !CanEdit || Carry != EditorCarry.None || RotatingPart || SizingPart ? ResizeOffer.Busy
+        : _mountSelectionCount > 0 && _selectionCount == 0 ? ResizeOffer.Mount
+        : _selectionCount == 0 ? ResizeOffer.None
+        : _selectionCount > 1 ? ResizeOffer.Several
+        : ResizeOffer.Yes;
+
+    /// <summary>True while a face of the selected block is dragged to resize it (S held, or started from the menu).</summary>
+    public bool ResizingBlock { get; private set; }
+
+    /// <summary>True when the resize began from the menu, so it does not end when S is not held.</summary>
+    public bool ResizeByMenu { get; private set; }
+
+    /// <summary>The block being resized.</summary>
+    public int ResizingIndex { get; private set; } = -1;
+
+    // Whether the gesture has made its one step yet: later changes of the size join it.
+    private bool _resizeStarted;
+
+    /// <summary>The menu asked for the resize gesture; the view starts it on its next update.</summary>
+    public bool ResizeRequested { get; private set; }
+
+    /// <summary>Asks the view to start the face-drag resize on the selected block, as S does.</summary>
+    public void RequestResize()
+    {
+        if (ResizeState == ResizeOffer.Yes)
+            ResizeRequested = true;
+    }
+
+    /// <summary>Takes a request to start resizing, once.</summary>
+    public bool TakeResizeRequest()
+    {
+        var requested = ResizeRequested;
+        ResizeRequested = false;
+        return requested;
+    }
+
+    /// <summary>
+    /// Starts dragging a face of the one selected block to resize it, as S does for the ghost of a part. Nothing on
+    /// the draft changes until a face is dragged; every change from then on is the same one step to undo. False when
+    /// it cannot start (see <see cref="ResizeState"/>).
+    /// </summary>
+    public bool BeginBlockResize(bool byMenu)
+    {
+        if (ResizingBlock || ResizeState != ResizeOffer.Yes || (uint)Selected >= (uint)Draft!.Boxes.Length)
+            return false;
+        ResizingBlock = true;
+        ResizeByMenu = byMenu;
+        ResizingIndex = Selected;
+        _resizeStarted = false;
+        Menu.Close();
+        return true;
+    }
+
+    /// <summary>The block being resized, as it stands now.</summary>
+    public DesignBox ResizingBox => Draft!.Boxes[ResizingIndex];
+
+    /// <summary>The most cells the block being resized may measure along a side: its type's limit.</summary>
+    public int ResizingMaxSide => Content is { } content && Draft is { } draft && (uint)ResizingIndex < (uint)draft.Boxes.Length
+        ? BoxDesign.MaxSide(draft.Boxes[ResizingIndex].Type, content.Blocks.Limits)
+        : 1;
+
+    /// <summary>
+    /// Moves one face of the block being resized to make it <paramref name="length"/> whole cells along that face's
+    /// axis, from one to its type's largest side, the opposite face staying where it is. Where the draft's own checks
+    /// refuse that length it stops at the nearest length that fits and never overlaps. Returns the length the block
+    /// has now. Every change joins the gesture's one undo step.
+    /// </summary>
+    public int SizeBlockFace(int side, int length)
+    {
+        if (!ResizingBlock || !CanEdit || (uint)ResizingIndex >= (uint)Draft!.Boxes.Length || (uint)side > 5u)
+            return 0;
+        var axis = side >> 1;
+        var current = EditorGeometry.Of(Draft.Boxes[ResizingIndex].Size, axis);
+        length = Math.Clamp(length, 1, ResizingMaxSide);
+        var step = length > current ? -1 : 1;
+        while (length != current && Draft.CanResize(ResizingIndex, side, length) != DraftEdit.Done)
+            length += step;
+        if (length == current || Draft.Resize(ResizingIndex, side, length) != DraftEdit.Done)
+            return current;
+        if (_resizeStarted)
+            Draft.JoinLatest();
+        else
+        {
+            _resizeStarted = true;
+            _depth++;
+        }
+
+        LastEdit = DraftEdit.Done;
+        LastEditAt = _time;
+        Changed(gesture: true);
+        return length;
+    }
+
+    /// <summary>Ends the resize, keeping the size the block has.</summary>
+    public void EndBlockResize()
+    {
+        ResizingBlock = false;
+        ResizeByMenu = false;
+        ResizingIndex = -1;
+        _resizeStarted = false;
+    }
+
+    /// <summary>Ends the resize and puts the block back as it was before the gesture, with nothing left to redo.</summary>
+    public void CancelBlockResize()
+    {
+        if (!ResizingBlock)
+            return;
+        if (_resizeStarted && Draft is { } draft && draft.Retract())
+        {
+            _depth--;
+            EndBlockResize();
+            Changed(gesture: true);
+            return;
+        }
+
+        EndBlockResize();
+    }
 
     /// <summary>Works out again, when the draft or the selection changed, whether the selection can be merged.</summary>
     public void RefreshMerge()
@@ -1621,10 +1914,16 @@ internal sealed class ShipEditor(JobSystem jobs)
         Changed();
     }
 
-    private void Changed()
+    private void Changed(bool gesture = false)
     {
         // The ghost's face may have moved or gone: a part being sized or turned is put back, and a held ghost lets go.
-        CancelPartGestures();
+        // The face drag of a block is made of edits and goes on through its own.
+        if (!gesture)
+        {
+            CancelPartGestures();
+            Menu.Close();
+        }
+
         GhostPinned = false;
         _editedAt = _time;
         Check = DraftCheck.Pending;
@@ -1768,6 +2067,7 @@ internal sealed class ShipEditor(JobSystem jobs)
     private void Enter(SessionSnapshot snapshot, in HullView own, in EditorView view)
     {
         CancelPartGestures();
+        Menu.Close();
         Token = view.Token;
         Hull = own.Id;
         Content = snapshot.Content;
@@ -1814,6 +2114,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         // The server or a change of ship ended the edit, not the player: they stay where they are.
         _createdHull = 0;
         CancelPartGestures();
+        Menu.Close();
         Stage = EditorStage.Closed;
         _partPressUsed = false;
         Notice = reason;

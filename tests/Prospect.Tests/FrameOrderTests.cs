@@ -8135,4 +8135,119 @@ public sealed class FrameOrderTests : IDisposable
         var near = galaxy.CenterOf(_world.Sector.Coord);
         Assert.Equal(0, ChartActions.Plan(_snapshot, _world, near).Ready);
     }
+
+    [Fact]
+    public void ARightClickOnABlockOpensTheEditorMenuADragOrbitsInsteadAndEscapeThenAPressElsewhereCloseIt()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        Vector3 Camera() => _world.CameraPosition.RelativeTo(_world.OwnDrawnPosition);
+
+        // A right drag over the ship orbits and opens nothing.
+        var before = Camera();
+        EditorFrame(() => Move(HullOnScreen()));
+        EditorFrame(() => Button(GlfwMouseButton.Right, true));
+        EditorFrame(() => Move(HullOnScreen() + new float2(40, 0)));
+        EditorFrame(() => Move(HullOnScreen() + new float2(80, 0)));
+        EditorFrame(() => Button(GlfwMouseButton.Right, false));
+        Assert.False(editor.Menu.IsOpen);
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        Assert.True((Camera() - before).Length() > 0.5f);
+
+        // A click without moving, on the ship while placing, leaves placing as it always did and opens the menu on
+        // the block, which becomes the selection.
+        Assert.True(editor.Placing);
+        EditorFrame(() => Move(HullOnScreen()));
+        EditorFrame(() => Button(GlfwMouseButton.Right, true));
+        EditorFrame(() => Button(GlfwMouseButton.Right, false));
+        Assert.True(editor.Menu.IsOpen);
+        Assert.False(editor.Placing);
+        Assert.Equal([editor.Menu.Block], editor.Selection.ToArray());
+        Assert.Equal(-1, editor.Menu.Mount);
+        var menuAt = editor.Menu.At;
+        Assert.Equal(_devices.MousePosition, menuAt);
+
+        // Escape closes the menu first and the editor stays open.
+        EditorFrame(() => Key(GlfwKey.Escape, true));
+        Assert.False(editor.Menu.IsOpen);
+        Assert.True(editor.Shown);
+        EditorFrame(() => Key(GlfwKey.Escape, false));
+
+        // Open again: a left press elsewhere closes it and goes no further, so the selection is not cleared by it.
+        EditorFrame(() => Button(GlfwMouseButton.Right, true));
+        EditorFrame(() => Button(GlfwMouseButton.Right, false));
+        Assert.True(editor.Menu.IsOpen);
+        var selected = editor.Selection.ToArray();
+        EditorFrame(() => Move(EmptySpace));
+        EditorFrame(() => Button(GlfwMouseButton.Left, true));
+        Assert.False(editor.Menu.IsOpen);
+        EditorFrame(() => Button(GlfwMouseButton.Left, false));
+        Assert.Equal(selected, editor.Selection.ToArray());
+
+        // A click on empty space opens nothing.
+        EditorFrame(() => Button(GlfwMouseButton.Right, true));
+        EditorFrame(() => Button(GlfwMouseButton.Right, false));
+        Assert.False(editor.Menu.IsOpen);
+    }
+
+    [Fact]
+    public void SWithOneBlockSelectedSizesItAsOneUndoStepEscapePutsItBackAndSeveralBlocksTakeNoGesture()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        var hull = _snapshot.Content.Blocks.Get("hull");
+        Assert.Equal(DraftEdit.Done, editor.Draft!.Add(new GridSize(0, 2, 0), new GridSize(1, 1, 1), hull));
+        var grown = editor.Draft.Boxes.Length - 1;
+        // Something at y = 5 stops the block's top face there: it can reach y = 4 and no further.
+        Assert.Equal(DraftEdit.Done, editor.Draft.Add(new GridSize(0, 5, 0), new GridSize(1, 1, 1), hull));
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        editor.StopPlacing();
+        editor.Select(grown, false);
+        var before = editor.Draft.Boxes.ToArray();
+
+        // S with the pointer over empty space starts it on the one selected block; letting go keeps what it has.
+        EditorFrame(() => Move(EmptySpace));
+        EditorFrame(() => Key(GlfwKey.S, true));
+        Assert.True(editor.ResizingBlock);
+        Assert.Equal(grown, editor.ResizingIndex);
+        Assert.Equal(3, editor.SizeBlockFace(2, 10));
+        Assert.Equal(new GridSize(1, 3, 1), editor.Draft.Boxes[grown].Size);
+        Assert.Equal(new GridSize(0, 2, 0), editor.Draft.Boxes[grown].At);
+        // Going back shrinks it, still the same gesture.
+        Assert.Equal(2, editor.SizeBlockFace(2, 2));
+        Assert.Equal(3, editor.SizeBlockFace(2, 3));
+        EditorFrame(() => Key(GlfwKey.S, false));
+        Assert.False(editor.ResizingBlock);
+        Assert.Equal(3, editor.Draft.Boxes[grown].Size.Y);
+
+        // The whole gesture is one step: one undo gives the block back, the second takes the added blocks.
+        Assert.True(editor.Dirty);
+        editor.Undo();
+        Assert.Equal(before, editor.Draft.Boxes.ToArray());
+
+        // Escape while it is held puts the block back and leaves nothing to redo.
+        editor.Select(grown, false);
+        EditorFrame(() => Key(GlfwKey.S, true));
+        Assert.True(editor.ResizingBlock);
+        editor.SizeBlockFace(2, 3);
+        EditorFrame(() => Key(GlfwKey.Escape, true));
+        Assert.False(editor.ResizingBlock);
+        Assert.True(editor.Shown);
+        EditorFrame(() => Key(GlfwKey.Escape, false));
+        EditorFrame(() => Key(GlfwKey.S, false));
+        Assert.Equal(before, editor.Draft.Boxes.ToArray());
+        Assert.False(editor.Draft.CanRedo);
+
+        // With two blocks selected, S does nothing; neither does it on a mounted part.
+        editor.Select(grown, false);
+        editor.Select(0, true);
+        EditorFrame(() => Key(GlfwKey.S, true));
+        Assert.False(editor.ResizingBlock);
+        Assert.Equal(ResizeOffer.Several, editor.ResizeState);
+        EditorFrame(() => Key(GlfwKey.S, false));
+    }
 }

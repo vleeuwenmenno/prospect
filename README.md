@@ -181,6 +181,25 @@ are never blocked. The editor works in space, around your ship:
 - Drag a selected block with the left button to move the whole selection onto another face. `Ctrl+C` and
   `Ctrl+V` copy and paste it; `Delete` deletes it; **Merge** joins blocks of one type that fill a box exactly,
   and shows how the figures change. Each is one step to undo. Undo and redo clear the selection.
+- Right-click a placed block or a mounted part (a click without moving; a right drag still orbits) for its menu.
+  A click while placing also leaves placing. If the block is in the selection the menu acts on the whole selection,
+  otherwise the block becomes the selection first. Rows: **Resize** (`S`), **Copy**, **Merge** (two or more blocks),
+  **Select same type**, **Delete**; for tanks also **Fuel** and **Split**. A row that cannot apply stays and says why.
+  `Esc`, or a click anywhere else, closes it. A mounted part's menu has Select same type and Delete only.
+  - **Fuel** lists the fuels this craft has a tank for (a ship: bipropellant, hydrazine, nitrogen; the drone: its
+    own bipropellant and nitrogen tanks), the current one checked. Choosing one turns every selected tank into that
+    fuel's tank, with the same place, size and facing. One undo step.
+  - **Split** lists the axes along which a selected tank is over one cell long ("Along X (3 pieces)") and cuts each
+    selected tank into one-cell-thick tanks of the same type. Mounted parts stay on the piece they sit on where they
+    still fit; one that would span a cut is removed. One undo step.
+  - A changed or split tank starts empty when the edit is applied (fuel carries over only for the same type, shape
+    and cells). Fuel, Split and Resize are not mirrored.
+- Resize a placed block: with exactly one block selected and no ghost to size, hold `S` and left-drag a face of it
+  (the face under the pointer is highlighted, as for a ghost): the face moves by whole cells, 1 to the type's
+  largest side, the opposite face stays, and it stops at the last size that fits, never overlapping. Let go of `S`
+  to keep it; `Esc` while held puts the block back. The whole drag is one undo step. The menu's **Resize** starts
+  the same gesture without `S`: it ends when the drag is let go, with `Enter`, or on a click away from the block;
+  `Esc` puts it back. With several blocks selected `S` does nothing; a mounted part is never sized.
 - `F` (the Follow key) turns the camera to the selection, or to the whole draft with nothing selected, keeping
   its angle. The camera's range grows with the draft.
 - The draft is the ship's full blueprint: blocks the ship lost are in it, outlined red, and the panel shows hull

@@ -1258,6 +1258,13 @@ internal sealed class App : IDisposable
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
                 World.ScriptSelectionForCapture(view == "edit-select-all");
             }
+            else if (view is "edit-menu" or "edit-resize" && snapshot is { OwnHull: >= 0 })
+            {
+                // The editor with the pod's first tank right-clicked (its menu and Fuel flyout out), or a block
+                // selected and grown one cell by the face-drag resize, the harness playing what the muted pointer cannot.
+                World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
+                World.ScriptEditForCapture(view == "edit-resize");
+            }
             else if (view is "edit-save" or "edit-load" or "edit-load-confirm" && snapshot is { OwnHull: >= 0 })
             {
                 // The editor with the Save design question, the saved designs list, or the question before one replaces the draft.

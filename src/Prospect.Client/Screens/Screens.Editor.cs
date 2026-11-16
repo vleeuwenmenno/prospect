@@ -101,6 +101,8 @@ internal sealed partial class ScreenHost
         DrawEditorParts(layout.Parts, editor, content);
         DrawEditorDetails(layout.Details, editor, draft, content, bridge);
         DrawEditorBar(layout.Bar, editor, draft, bridge);
+        // Last, so the menu is in front of the panels.
+        DrawEditorMenu(editor, draft, content);
     }
 
     /// <summary>
@@ -152,7 +154,9 @@ internal sealed partial class ScreenHost
 
         DrawSizingNote(world, editor);
         DrawMirrorPlanes(draw, world, editor, draft);
-        if (!editor.HasHover)
+        if (editor.ResizingBlock && (uint)editor.ResizingIndex < (uint)boxes.Length && world.PartSizingFace >= 0)
+            DrawSizingFace(draw, world, boxes[editor.ResizingIndex], world.PartSizingFace);
+        if (!editor.HasHover || editor.ResizingBlock)
             return;
         if (editor.HasCarryGhost)
         {
@@ -372,6 +376,21 @@ internal sealed partial class ScreenHost
     /// </summary>
     private void DrawSizingNote(WorldView world, ShipEditor editor)
     {
+        if (editor.ResizingBlock && editor.Draft is { } draft && (uint)editor.ResizingIndex < (uint)draft.Boxes.Length)
+        {
+            var box = draft.Boxes[editor.ResizingIndex];
+            var current = box.Size;
+            var max = editor.ResizingMaxSide;
+            var side = world.PartSizingFace;
+            if (side < 0)
+                PointerNote(Kit.F($"SIZE X {current.X}  Y {current.Y}  Z {current.Z}: point at a face of the block, then drag it. Esc puts it back"), Theme.Info, -Kit.Px(28));
+            else if (world.PartSizingEdgeOn)
+                PointerNote(Kit.F($"SIZE X {current.X}  Y {current.Y}  Z {current.Z} (1 to {max}): {FaceName(side)} faces you, drag up or down"), Theme.Info, -Kit.Px(28));
+            else
+                PointerNote(Kit.F($"SIZE X {current.X}  Y {current.Y}  Z {current.Z} (1 to {max}): drag the {FaceName(side)} face"), Theme.Info, -Kit.Px(28));
+            return;
+        }
+
         if (!editor.SizingPart || editor.Content is not { } content)
             return;
         var size = editor.PartSize;
