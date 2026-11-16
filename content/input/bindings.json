@@ -21,7 +21,7 @@
     "ToggleChat": ["Key:Enter", "Key:KpEnter"],
     "ToggleInterface": ["Key:Tab"],
     "ToggleCharts": ["Key:G"],
-    "ToggleInventory": ["Key:U"],
+    "ToggleCargo": ["Key:U"],
     "TogglePlayerInfo": ["Key:J"],
     "ToggleSectorInfo": ["Key:F2"],
     "ToggleEditor": ["Key:B"],

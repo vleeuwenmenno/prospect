@@ -21,7 +21,7 @@ internal enum PaneClose : byte
 /// </summary>
 internal sealed class SocialPanes
 {
-    // Charts, Inventory and Player start open: interface mode shows every window that is open and not pinned.
+    // Charts, Cargo and Player start open: interface mode shows every window that is open and not pinned.
     private readonly FloatingWindow[] _windows =
     [
         new(), new(), new(), new(), new(), new(),
@@ -39,7 +39,7 @@ internal sealed class SocialPanes
         SocialPane.Chat => "Chat",
         SocialPane.Detail => "Detail",
         SocialPane.Charts => "Charts",
-        SocialPane.Inventory => "Inventory",
+        SocialPane.Cargo => "Cargo",
         SocialPane.Gas => "Gas",
         _ => "Player",
     };
@@ -64,7 +64,7 @@ internal sealed class SocialPanes
 
     /// <summary>
     /// True when the window is drawn: the navigator while the workspace is; any other open window in the workspace,
-    /// pinned, or chat while it is being typed in. Party, Players, Chat, Charts, Inventory and Player need a game; the card needs something to show.
+    /// pinned, or chat while it is being typed in. Party, Players, Chat, Charts, Cargo and Player need a game; the card needs something to show.
     /// </summary>
     public bool Shown(SocialPane pane, bool workspace, bool inGame, bool chatTyping, SocialDetail detail)
     {
@@ -75,7 +75,7 @@ internal sealed class SocialPanes
             return false;
         switch (pane)
         {
-            case SocialPane.Party or SocialPane.Players or SocialPane.Chat or SocialPane.Charts or SocialPane.Inventory or SocialPane.Player or SocialPane.Gas when !inGame:
+            case SocialPane.Party or SocialPane.Players or SocialPane.Chat or SocialPane.Charts or SocialPane.Cargo or SocialPane.Player or SocialPane.Gas when !inGame:
                 return false;
             case SocialPane.Detail when !(detail.ShowsFriend || (inGame && detail.ShowsPlayer)):
                 return false;

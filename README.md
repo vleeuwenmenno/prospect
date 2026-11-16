@@ -23,7 +23,7 @@ and persist in saves. Middle-click a free container to see its size, resource, a
 Cleanup defaults to 60 unattended minutes (`containerLifetimeMinutes`, 0 means never).
 Place a Tractor beam face mount from the editor's Hull tab. It automatically pulls nearby free containers into
 racks it can see and fit them in. Every release waits 10 seconds before pickup; unclaimed cargo is open to anyone.
-The server API also supports keeping the owner's claim; Cargo window controls are not built yet.
+The Cargo window (`U` or the Cargo tab) shows the flown ship's hold and lets you jettison containers (`Jettison` or `Jettison, keep claim`).
 Range is 40 m and power rises with load mass.
 Editor lines show reachable racks; amber racks have no tractor access. Move the ship for blocked or distant cargo.
 The energy tooltip lists TRACTORS. No pickup key or pickup by touch; no allow-list/block-list filter yet.
@@ -89,16 +89,16 @@ the Gas window; a charted sector: Charts) runs it. Kinds, words, colours and dur
 Chat, the player roster and parties work end to end: the server decides, the client shows them.
 
 - **Navigation bar** along the top. In a game: Fleet (command view; press it again for the pilot view), Map,
-  Charts, Inventory, Player, Social and Settings. Out of a game: Play (main menu), Social (Friends) and
+  Charts, Cargo, Player, Social and Settings. Out of a game: Play (main menu), Social (Friends) and
   Settings. At the right, your Discord display name; signed out, Sign in with Discord. An amber dot on Social
-  means a friend request or a party invitation is waiting. No tab starts or leaves a game. Charts, Inventory,
+  means a friend request or a party invitation is waiting. No tab starts or leaves a game. Charts, Cargo,
   Player and Social open their window in interface mode.
 - **Interface mode** (`Tab`): the pointer is freed and stays free, and every window that is open and not
   pinned appears. `Tab` or `Esc` ends it: unpinned windows hide, the pointer is captured again. While it is on,
   flight keys are off (as with the old social workspace) and a click never reaches the world. Hold `Shift`
   instead to click a pinned window and keep flying.
 - **Windows**: Social (a navigator and separate windows for Friends, Party, Players, Chat and a card for one
-  account or player), Charts, Inventory and Player. Drag a window by its title bar, close it with its X; its
+  account or player), Charts, Cargo and Player. Drag a window by its title bar, close it with its X; its
   pin keeps it on screen outside interface mode. Which windows are open and pinned, and where they are, are
   saved per client (`settings.json`, `Windows`) and kept on screen when the window or scale changes.
 - **Pinned windows** stay over the view after interface mode ends. In flight they take nothing: W, Space and
@@ -109,8 +109,9 @@ Chat, the player roster and parties work end to end: the server decides, the cli
   galaxy map centred on the sector with its card pinned; *Plot jump* plots a course for the ship you fly (or,
   with ships selected, orders them) through the same plan the course menus use. The title shows how many of the
   limit you hold.
-- **Inventory** (`U`) and **Player** (`J`) are placeholders: a "Coming soon" window each. Inventory arrives
-  with mining; Player later.
+- **Cargo** (`U`): the flown ship's hold as a grid of size-stepped, resource-coloured container tiles with
+  used/total volume and mass, container details (size, resource, mass, fill %, HP, rack) and **Jettison** /
+  **Jettison, keep claim** controls. **Player** (`J`) is a placeholder ("Coming soon").
 - **Players** (`P`): everyone on this server and who left this session, with Invite and a pending
   invitation's Accept and Decline. These are session names, not accounts. **Party** (`O`): your party, Remove
   for the leader, Leave Party.
@@ -124,8 +125,7 @@ Chat, the player roster and parties work end to end: the server decides, the cli
   card. The list belongs to your account and lasts across games and restarts. It needs the account service
   beside the listing server ([accounts](docs/accounts.md)); with `--listing off` there are no accounts.
 - **Not there:** whether a friend is online or in a game, avatars, direct messages, joining a friend, blocking,
-  voice or video calls, an inventory (the Inventory window is a placeholder), player information (the Player
-  window is a placeholder).
+  voice or video calls, player information (the Player window is a placeholder).
 - **Sign-in for playing with others.** Join Server and hosting an unlisted or public game ask for a Discord
   sign-in first, on the same screen; a private game never does, offline included. Servers do not check the
   account yet: in a game, names and ids are still the session's, not verified accounts.
@@ -577,7 +577,7 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Take control of the target (same sector only), or leave in a drone | `T` | D-pad down |
 | Menu or back | `Esc` | `Start` |
 | Interface mode: free pointer, show every window that is not pinned (`Tab` or `Esc` leaves) | `Tab` | |
-| Charts window / Inventory window (coming soon) / Player window (coming soon) | `G` / `U` / `J` | |
+| Charts window / Cargo window / Player window (coming soon) | `G` / `U` / `J` | |
 | Social: Players window | `P` | |
 | Social: Party window | `O` | |
 | Chat: open, send, close | `Enter`; `Enter` sends, `Esc` closes | |

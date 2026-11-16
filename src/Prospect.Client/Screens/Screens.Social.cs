@@ -14,7 +14,7 @@ namespace Prospect.Client.Screens;
 
 /// <summary>
 /// The windows of the interface: the social ones (a navigator, Friends, Party, Players, Chat, a detail card) and the
-/// player's own (Charts, Inventory, Player). All are drawn, pinned and placed the same way.
+/// player's own (Charts, Cargo, Player). All are drawn, pinned and placed the same way.
 /// </summary>
 internal enum SocialPane : byte
 {
@@ -31,8 +31,8 @@ internal enum SocialPane : byte
     /// <summary>The charts the player owns.</summary>
     Charts,
 
-    /// <summary>What the player carries. Coming soon: it arrives with mining.</summary>
-    Inventory,
+    /// <summary>The flown ship's cargo hold.</summary>
+    Cargo,
 
     /// <summary>Who the player is in the game. Coming soon.</summary>
     Player,
@@ -44,7 +44,7 @@ internal enum SocialPane : byte
 /// <summary>
 /// The interface windows and interface mode. Interface mode (Tab, or any window's key or top bar button) frees the
 /// pointer until it is left again with Tab or Escape and shows every window that is open and not pinned: the social
-/// ones (a navigator, Friends, Party, Players, Chat and a detail card) and the player's own (Charts, Inventory,
+/// ones (a navigator, Friends, Party, Players, Chat and a detail card) and the player's own (Charts, Cargo,
 /// Player). Pinned windows are shown the rest of the time too. The party list at the top left and the recent chat
 /// lines are part of the same interface. A window can be pinned, which keeps it on
 /// screen when the workspace closes and the player flies on; a pinned window then takes the pointer only while the
@@ -155,8 +155,13 @@ internal sealed partial class ScreenHost
         CloseWorkspace();
     }
 
-    /// <summary>Opens the Inventory window in interface mode. Used by <c>--open inventory</c>, for captures.</summary>
-    public void OpenInventoryWindow() => OpenPane(SocialPane.Inventory);
+    /// <summary>Opens the Cargo window in interface mode. Used by <c>--open cargo-window</c>, for captures.</summary>
+    public void OpenCargoWindow(bool selectFirst = false)
+    {
+        OpenPane(SocialPane.Cargo);
+        if (selectFirst)
+            _cargoSelectPending = true;
+    }
 
     /// <summary>Opens the workspace on the Friends window.</summary>
     public void OpenFriends()
@@ -354,9 +359,9 @@ internal sealed partial class ScreenHost
             TogglePane(SocialPane.Gas);
             _socialHandled = true;
         }
-        else if (actions.InterfaceShortcutPressed(devices, InputAction.ToggleInventory, typing, pointerOwned))
+        else if (actions.InterfaceShortcutPressed(devices, InputAction.ToggleCargo, typing, pointerOwned))
         {
-            TogglePane(SocialPane.Inventory);
+            TogglePane(SocialPane.Cargo);
             _socialHandled = true;
         }
         else if (actions.InterfaceShortcutPressed(devices, InputAction.TogglePlayerInfo, typing, pointerOwned))
@@ -470,7 +475,7 @@ internal sealed partial class ScreenHost
         SocialPane.Players => new float2(Kit.Px(440), Kit.Px(480)),
         SocialPane.Chat => new float2(Kit.Px(540), Kit.Px(340)),
         SocialPane.Charts => new float2(Kit.Px(520), Kit.Px(580)),
-        SocialPane.Inventory => new float2(Kit.Px(300), Kit.Px(220)),
+        SocialPane.Cargo => new float2(Kit.Px(460), Kit.Px(440)),
         SocialPane.Player => new float2(Kit.Px(240), Kit.Px(190)),
         SocialPane.Gas => new float2(Kit.Px(ModuleLook.Current.GasWindowWidth), Kit.Px(ModuleLook.Current.GasWindowHeight)),
         _ => new float2(Kit.Px(360), Kit.Px(420)),
@@ -492,9 +497,9 @@ internal sealed partial class ScreenHost
             SocialPane.Party => new float2(MathF.Round(display.X * 0.5f), display.Y - size.Y - left),
             SocialPane.Chat => new float2(left, display.Y - size.Y - left),
             SocialPane.Charts => new float2(display.X - size.X - left, top),
-            SocialPane.Inventory => new float2(display.X - size.X - left, display.Y - size.Y - left),
+            SocialPane.Cargo => new float2(display.X - size.X - left, display.Y - size.Y - left),
             SocialPane.Player => new float2(left, top + PaneSize(SocialPane.Navigator).Y + Kit.Px(Theme.Space4)),
-            SocialPane.Gas => new float2(display.X - size.X - left, Math.Max(top, display.Y - size.Y - left - PaneSize(SocialPane.Inventory).Y - Kit.Px(Theme.Space4))),
+            SocialPane.Gas => new float2(display.X - size.X - left, Math.Max(top, display.Y - size.Y - left - PaneSize(SocialPane.Cargo).Y - Kit.Px(Theme.Space4))),
             _ => new float2(display.X - size.X - left, top),
         };
     }
@@ -544,8 +549,8 @@ internal sealed partial class ScreenHost
                 DrawChartsPane(snapshot);
             if (PaneShown(SocialPane.Gas))
                 DrawGasPane(snapshot);
-            if (PaneShown(SocialPane.Inventory))
-                DrawPlaceholderPane(SocialPane.Inventory, "##inventory"u8, "Inventory"u8, "Your cargo and stores will be listed here once there is mining."u8);
+            if (PaneShown(SocialPane.Cargo))
+                DrawCargoPane(snapshot);
             if (PaneShown(SocialPane.Player))
                 DrawPlaceholderPane(SocialPane.Player, "##playerinfo"u8, "Player"u8, "Who you are in the game. Nothing to show yet."u8);
             if (PaneShown(SocialPane.Chat))

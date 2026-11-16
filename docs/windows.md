@@ -5,14 +5,14 @@
 - `Tab` (`ToggleInterface`, rebindable) toggles interface mode. `Tab` again or `Esc` leaves it.
 - In it: the pointer is free and stays free; flight input is off; a click never reaches the world.
 - In it every window that is open and not pinned is shown. Leaving hides them and recaptures the pointer in the pilot view.
-- Windows: Social (navigator, Friends, Party, Players, Chat, card), Charts, Gas, Inventory, Player.
+- Windows: Social (navigator, Friends, Party, Players, Chat, card), Charts, Gas, Cargo, Player.
 - Each window has a pin. A pinned window stays on screen outside interface mode. It takes nothing in flight; hold `Shift` to click it.
 - The window's X closes it and unpins it. The top bar button, or its key, opens it again.
-- Charts, Inventory and Player start open. Keys: `G`, `U`, `J` (`ToggleCharts`, `ToggleInventory`, `TogglePlayerInfo`).
-- Top bar in a game: Fleet, Map, Charts, Inventory, Player, Social, Settings. No Play. Fleet again returns to the pilot view.
-- Charts, Inventory, Player and Social buttons open the window in front, entering interface mode. A key or button pressed on the window already in front leaves interface mode.
+- Charts, Cargo and Player start open. Keys: `G`, `U`, `J` (`ToggleCharts`, `ToggleCargo`, `TogglePlayerInfo`).
+- Top bar in a game: Fleet, Map, Charts, Cargo, Player, Social, Settings. No Play. Fleet again returns to the pilot view.
+- Charts, Cargo, Player and Social buttons open the window in front, entering interface mode. A key or button pressed on the window already in front leaves interface mode.
 - Open, pinned and place of each window are saved per client in `settings.json` (`Windows`), place unscaled. A drag is saved when released.
-- Inventory and Player are placeholders ("Coming soon"), by the product owner's request. Inventory arrives with mining.
+- Player is a placeholder ("Coming soon"), by the product owner's request.
 
 ## Charts window
 
@@ -34,10 +34,18 @@
 - Show on map: the same as Charts.
 - No allocation: `GasLedger` makes its arrays once and rebuilds only when the records change.
 
+## Cargo window
+
+- Key `U` (`ToggleCargo`), or the Cargo top bar tab. Starts open in interface mode; pinnable like Charts.
+- Shows the flown ship's hold (`SessionSnapshot.Hulls[OwnHull].Cargo`) as a grid of size-stepped, resource-coloured tiles with size class (`XXS`..`XXXL`) and fill bar; header shows used/total volume (`u`) and total cargo mass (`kg`).
+- Drones and ships without racks show an empty-state message.
+- Clicking a tile shows its size, resource, mass, fill %, HP bar and rack index, with `Jettison` (`JettisonMode.Abandon`) and `Jettison, keep claim` (`JettisonMode.KeepClaim`) via `PlayerInputBridge.JettisonCargo`, disabled in FTL transit. Selection clears when `OwnCargoTick` or `Hull.Id` changes.
+- No allocation: `CargoHoldView` keeps its tile buffer fixed.
+
 ## Checks
 
 - `--charted <n>` (with `--capture` or `--bench`, no `--worlds`) charts every sector within n of the start, for captures.
-- `--open interface`, `charts`, `pinned-charts`, `inventory`, `gas`, `pinned-gas`.
+- `--open interface`, `charts`, `pinned-charts`, `cargo-window` (pair with `--cargo-sample` for a populated hold), `gas`, `pinned-gas`.
 
 ## Open
 

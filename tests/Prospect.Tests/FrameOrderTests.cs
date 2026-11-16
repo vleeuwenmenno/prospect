@@ -136,6 +136,9 @@ public sealed class FrameOrderTests : IDisposable
     private float _floatingScale = 1f;
     private HudRect _floatingReserved;
     private HudRect _floatingDrawn;
+    private CargoHoldView? _cargoPane;
+    private float2 _cargoTileClickAt;
+    private float2 _cargoJettisonAt;
     private static readonly float2 FloatingSize = new(360, 240);
     private static readonly float2 FloatingAt = new(400, 200);
 
@@ -729,6 +732,35 @@ public sealed class FrameOrderTests : IDisposable
         ImGui.BeginChild("##body"u8, frame.Size - new float2(0, frame.Title), ImGuiChildFlags.None, FloatingWindow.ChildFlags(input));
         if (_floatingField)
             ImGui.InputText("##field"u8, _floatingText.Buffer);
+        if (_cargoPane is { } cargoView)
+        {
+            cargoView.Update(_snapshot);
+            var hull = _snapshot.Hulls[_snapshot.OwnHull];
+            var origin = ImGui.GetCursorScreenPos();
+            cargoView.Layout(hull.Cargo.Span, ImGui.GetContentRegionAvail().X, _floatingScale);
+            var tiles = cargoView.Tiles;
+            for (var i = 0; i < tiles.Length; i++)
+            {
+                var t = tiles[i];
+                var min = origin + new float2(t.X, t.Y);
+                if (i == 1)
+                    _cargoTileClickAt = min + new float2(t.Width, t.Height) * 0.5f;
+                ImGui.SetCursorScreenPos(min);
+                ImGui.PushID(i);
+                if (ImGui.InvisibleButton("##ctile"u8, new float2(t.Width, t.Height)))
+                    cargoView.Select(i);
+                ImGui.PopID();
+            }
+            if (cargoView.SelectedIndex >= 0 && !cargoView.InFtlTransit)
+            {
+                var btnPos = origin + new float2(0, 120);
+                var btnSize = new float2(140, 24);
+                _cargoJettisonAt = btnPos + btnSize * 0.5f;
+                ImGui.SetCursorScreenPos(btnPos);
+                if (ImGui.InvisibleButton("##cjettison"u8, btnSize))
+                    Bridge.JettisonCargo(hull.Id, hull.Cargo.Span[cargoView.SelectedIndex].Rack, cargoView.SelectedIndex, _snapshot.OwnCargoTick, JettisonMode.KeepClaim);
+            }
+        }
         ImGui.EndChild();
         FloatingWindow.End();
     }
@@ -8728,5 +8760,46 @@ public sealed class FrameOrderTests : IDisposable
         for (var i = 0; i < 30; i++)
             EditorFrame();
         Assert.Equal(EditorMenuSub.Split, editor.Menu.Sub);
+    }
+
+    [Fact]
+    public void TheCargoWindowSelectsATileAndJettisonsThroughTheRealPointerPath()
+    {
+        var hull = _snapshot.Hulls[_snapshot.OwnHull];
+        _snapshot.OwnCargo[0] = new HoldContainer(3, 1, 0, 500, 100, default);
+        _snapshot.OwnCargo[1] = new HoldContainer(3, 2, 1, 1200, 200, default);
+        _snapshot.OwnCargoTick = 42;
+        _snapshot.Hulls[_snapshot.OwnHull].Stats.CargoHold = 16;
+        _snapshot.Hulls[_snapshot.OwnHull].Cargo = _snapshot.OwnCargo.AsMemory(0, 2);
+
+        _cargoPane = new CargoHoldView();
+        _floating = new FloatingWindow { Open = true };
+        Frame(() => Key(GlfwKey.Tab, true), InterfaceKey);
+        Frame(() => Key(GlfwKey.Tab, false), InterfaceKey);
+        Assert.True(_mode.Active);
+
+        // Click tile 1 through the real pointer path.
+        Frame(() => Move(_cargoTileClickAt), InterfaceKey);
+        Frame(() => Button(GlfwMouseButton.Left, true), InterfaceKey);
+        Frame(() => Button(GlfwMouseButton.Left, false), InterfaceKey);
+        Assert.Equal(1, _cargoPane.SelectedIndex);
+
+        // Click Jettison, keep claim through the real pointer path.
+        Bridge.ConsumeJettisonCargo(out _);
+        Frame(() => Move(_cargoJettisonAt), InterfaceKey);
+        Frame(() => Button(GlfwMouseButton.Left, true), InterfaceKey);
+        Frame(() => Button(GlfwMouseButton.Left, false), InterfaceKey);
+        Assert.True(Bridge.ConsumeJettisonCargo(out var request));
+        Assert.Equal(hull.Id, request.Hull);
+        Assert.Equal(3, request.Rack);
+        Assert.Equal(1, request.Index);
+        Assert.Equal(42, request.Tick);
+        Assert.Equal(JettisonMode.KeepClaim, request.Mode);
+
+        // When the hold updates, selection clears.
+        _snapshot.OwnCargoTick = 43;
+        _snapshot.Hulls[_snapshot.OwnHull].Cargo = _snapshot.OwnCargo.AsMemory(0, 1);
+        Frame(shortcut: InterfaceKey);
+        Assert.Equal(-1, _cargoPane.SelectedIndex);
     }
 }

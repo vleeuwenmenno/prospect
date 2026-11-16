@@ -206,6 +206,7 @@ internal sealed class AppOptions
     public bool HurtFleetTank { get; set; }
     public bool HurtFleetCargo { get; set; }
     public float? JettisonSeconds { get; set; }
+    public bool CargoSample { get; set; }
     /// <summary>Scripted private capture: cut the flown hull.</summary>
     public bool CutHull { get; set; }
 
@@ -1173,6 +1174,8 @@ internal sealed class App : IDisposable
             Session?.Client.Input.CancelScan();
         }
 
+        if (World.ConsumeCargoWindowReady())
+            _screens.OpenCargoWindow(selectFirst: true);
         if (_editDroneView && Session is not null && snapshot is { OwnHull: >= 0, OwnIsDrone: true })
         {
             // Capture only: the drone has stepped out of the pod, so edit it.
@@ -1364,8 +1367,18 @@ internal sealed class App : IDisposable
                 _screens.OpenChartsWindow(false);
             else if (view == "pinned-charts")
                 _screens.OpenChartsWindow(true);
-            else if (view == "inventory")
-                _screens.OpenInventoryWindow();
+            else if (view == "cargo-window")
+            {
+                if (_options.CargoSample && snapshot is { OwnHull: >= 0 })
+                {
+                    World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
+                    World.ScriptCargoWindowForCapture();
+                }
+                else
+                {
+                    _screens.OpenCargoWindow();
+                }
+            }
             else if (view == "players")
                 _screens.OpenSocial(false);
             else if (view == "social")

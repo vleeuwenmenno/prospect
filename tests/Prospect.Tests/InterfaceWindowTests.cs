@@ -207,7 +207,7 @@ public sealed class InterfaceWindowTests
     {
         var panes = new SocialPanes();
         var detail = new SocialDetail();
-        foreach (var pane in new[] { SocialPane.Charts, SocialPane.Inventory, SocialPane.Player })
+        foreach (var pane in new[] { SocialPane.Charts, SocialPane.Cargo, SocialPane.Player })
         {
             Assert.True(panes[pane].Open);
             Assert.False(panes.Shown(pane, false, true, false, detail));
@@ -236,7 +236,7 @@ public sealed class InterfaceWindowTests
             panes[SocialPane.Charts].Pinned = true;
             panes[SocialPane.Charts].Placed = true;
             panes[SocialPane.Charts].Min = new float2(600, 240);
-            panes[SocialPane.Inventory].Close();
+            panes[SocialPane.Cargo].Close();
             panes[SocialPane.Party].Open = true;
 
             // A held drag is not saved; its release is, once.
@@ -253,7 +253,7 @@ public sealed class InterfaceWindowTests
             new WindowLayout(loaded, again, () => { }).Restore(2f);
             Assert.True(again[SocialPane.Charts].Open && again[SocialPane.Charts].Pinned && again[SocialPane.Charts].Placed);
             Assert.Equal(new float2(600, 240), again[SocialPane.Charts].Min);
-            Assert.False(again[SocialPane.Inventory].Open);
+            Assert.False(again[SocialPane.Cargo].Open);
             Assert.True(again[SocialPane.Party].Open);
             Assert.True(again[SocialPane.Player].Open);
 

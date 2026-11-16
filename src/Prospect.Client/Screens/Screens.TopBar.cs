@@ -16,13 +16,13 @@ internal sealed partial class ScreenHost
         Fleet,
         Map,
         Charts,
-        Inventory,
+        Cargo,
         Player,
         Social,
         Settings,
     }
 
-    private static readonly BarTab[] SessionTabs = [BarTab.Fleet, BarTab.Map, BarTab.Charts, BarTab.Inventory, BarTab.Player, BarTab.Social, BarTab.Settings];
+    private static readonly BarTab[] SessionTabs = [BarTab.Fleet, BarTab.Map, BarTab.Charts, BarTab.Cargo, BarTab.Player, BarTab.Social, BarTab.Settings];
     private static readonly BarTab[] MenuTabs = [BarTab.Play, BarTab.Social, BarTab.Settings];
     private readonly float[] _tabLabels = new float[8];
     private readonly float[] _tabLeft = new float[8];
@@ -37,7 +37,7 @@ internal sealed partial class ScreenHost
         BarTab.Fleet => "FLEET"u8,
         BarTab.Map => "MAP"u8,
         BarTab.Charts => "CHARTS"u8,
-        BarTab.Inventory => "INVENTORY"u8,
+        BarTab.Cargo => "CARGO"u8,
         BarTab.Player => "PLAYER"u8,
         BarTab.Social => "SOCIAL"u8,
         _ => "SETTINGS"u8,
@@ -59,7 +59,7 @@ internal sealed partial class ScreenHost
             return _focusedPane switch
             {
                 SocialPane.Charts or SocialPane.Gas => BarTab.Charts,
-                SocialPane.Inventory => BarTab.Inventory,
+                SocialPane.Cargo => BarTab.Cargo,
                 SocialPane.Player => BarTab.Player,
                 _ => BarTab.Social,
             };
@@ -68,7 +68,7 @@ internal sealed partial class ScreenHost
 
     /// <summary>
     /// The navigation bar along the top. In a game: Fleet (the command view, again to return to the pilot view), Map,
-    /// Charts, Inventory, Player (windows that open in interface mode), Social and Settings; out of one: Play (the main
+    /// Charts, Cargo, Player (windows that open in interface mode), Social and Settings; out of one: Play (the main
     /// menu), Social (Friends) and Settings. No tab starts or leaves a game.
     /// At the right, the Discord account's display name as the account service gives it, or the way to sign in.
     /// While flight has the pointer it is drawn dimmed: the interface cannot see a captured pointer at all.
@@ -241,9 +241,9 @@ internal sealed partial class ScreenHost
                 _mapOpen = false;
                 OpenWindow(SocialPane.Charts, true);
                 break;
-            case BarTab.Inventory:
+            case BarTab.Cargo:
                 _mapOpen = false;
-                OpenWindow(SocialPane.Inventory, true);
+                OpenWindow(SocialPane.Cargo, true);
                 break;
             case BarTab.Player:
                 _mapOpen = false;
@@ -251,13 +251,13 @@ internal sealed partial class ScreenHost
                 break;
             case BarTab.Social:
                 _mapOpen = false;
-                if (InterfaceModeOn && _focusedPane is not (SocialPane.Charts or SocialPane.Inventory or SocialPane.Player or SocialPane.Gas))
+                if (InterfaceModeOn && _focusedPane is not (SocialPane.Charts or SocialPane.Cargo or SocialPane.Player or SocialPane.Gas))
                     CloseWorkspace();
                 else
                 {
                     OpenWorkspace(snapshot);
                     // The Social tab lights for the window in front, so bring the social ones forward from the player's own.
-                    if (_focusedPane is SocialPane.Charts or SocialPane.Inventory or SocialPane.Player or SocialPane.Gas)
+                    if (_focusedPane is SocialPane.Charts or SocialPane.Cargo or SocialPane.Player or SocialPane.Gas)
                         Raise(SocialPane.Navigator);
                 }
 

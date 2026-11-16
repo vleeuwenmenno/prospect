@@ -3663,9 +3663,17 @@ internal sealed partial class WorldView
     public bool CaptureCargoSpace { get; set; }
     public float? CaptureJettisonSeconds { get; set; }
     private bool _captureJettisonSent;
+    private bool _cargoWindowReady;
     private int _captureCargoMode, _captureCargoSent;
     private float _captureCargoClock;
     internal void ScriptCargoForCapture(bool flight) => _captureCargoMode = flight ? 2 : 1;
+    internal void ScriptCargoWindowForCapture() => _captureCargoMode = 3;
+    internal bool ConsumeCargoWindowReady()
+    {
+        if (!_cargoWindowReady) return false;
+        _cargoWindowReady = false;
+        return true;
+    }
     private void RunCargoCapture(PlayerInputBridge bridge, float dt)
     {
         if (!Editor.CanEdit || Editor.Draft is not { } draft) return;
@@ -3693,6 +3701,13 @@ internal sealed partial class WorldView
                 _captureJettisonSent = true;
                 break;
             }
+        }
+        if (_captureCargoMode == 3 && _captureCargoClock > 3 && Editor.DraftCargo.Length == 3)
+        {
+            Editor.Cancel(bridge);
+            _captureCargoMode = 0;
+            _cargoWindowReady = true;
+            return;
         }
         if (_captureCargoMode == 2 && _captureCargoClock > 4
             && (CaptureJettisonSeconds is null ? Editor.DraftCargo.Length == 3 : _captureJettisonSent && _snapshot!.FreeContainerCount > 0))

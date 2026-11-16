@@ -28,7 +28,7 @@ internal enum InputAction
     ToggleChat,
     ToggleInterface,
     ToggleCharts,
-    ToggleInventory,
+    ToggleCargo,
     TogglePlayerInfo,
     ToggleSectorInfo,
     ToggleEditor,

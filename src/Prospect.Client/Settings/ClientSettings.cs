@@ -81,7 +81,7 @@ internal sealed class ClientSettings
     public const int MaxPanelPositions = 16;
 
     /// <summary>
-    /// The interface windows (Social's, Charts, Inventory, Player) by name: whether each is open and pinned, and
+    /// The interface windows (Social's, Charts, Cargo, Player) by name: whether each is open and pinned, and
     /// where the player left it, in unscaled pixels so it follows a change of interface scale. Kept per client.
     /// A window with no entry takes its first place and defaults.
     /// </summary>

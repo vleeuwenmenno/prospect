@@ -105,7 +105,8 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   never in the full 255-hull snapshot. Codec 12 captures hold records and old cargo rules; corrupt originals refuse,
   current retunes repack and log drops. `GameContent.SaveIdentity` allows only cargo tuning/capacity retunes.
   `PartModels` builds real container meshes on a worker; own holds draw in flight and editor. No drone rack.
-  Tests: `CargoHoldTests`, `CargoFlightTests`, `CargoWireTests`, `EditorSessionTests`, `WreckageTests`, `SaveLifecycleTests`.
+  The Cargo window (`SocialPane.Cargo`, `ToggleCargo`, `U`, `--open cargo-window`) uses font-free `CargoHoldView` for hold totals, size-stepped tile layout, selection lifetime and FTL gating; `DrawCargoPane` renders tiles coloured by `Galaxy.Resources[i].Color` and calls `PlayerInputBridge.JettisonCargo` (`Abandon` / `KeepClaim`).
+  Tests: `CargoHoldTests`, `CargoFlightTests`, `CargoWireTests`, `CargoWindowTests`, `EditorSessionTests`, `WreckageTests`, `SaveLifecycleTests`, `FrameOrderTests`.
 
 
 - **Social messages:** validate new kinds after admission and the receive/rate budgets; publish through `SessionSnapshot.Social` and send intent through `PlayerInputBridge`.

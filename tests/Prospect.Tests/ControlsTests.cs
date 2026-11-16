@@ -173,7 +173,7 @@ public sealed class ControlsTests
     [Theory]
     [InlineData("ToggleInterface", GlfwKey.Tab)]
     [InlineData("ToggleCharts", GlfwKey.G)]
-    [InlineData("ToggleInventory", GlfwKey.U)]
+    [InlineData("ToggleCargo", GlfwKey.U)]
     [InlineData("TogglePlayerInfo", GlfwKey.J)]
     public void InterfaceModeAndTheWindowKeysAreBoundAndListedUnderInterface(string name, GlfwKey key)
     {
