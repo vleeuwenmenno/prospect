@@ -56,6 +56,13 @@ public sealed class FreeContainers
         return true;
     }
 
+    /// <summary>Restores a validated snapshot while preserving identities and the exhausted counter state.</summary>
+    public void Restore(ReadOnlySpan<FreeContainer> items, uint next)
+    {
+        if (items.Length > Capacity) throw new InvalidDataException("Too many free containers.");
+        items.CopyTo(_items); _count = items.Length; _next = next;
+    }
+
     private static bool Older(in FreeContainer a, in FreeContainer b) => a.Born < b.Born || a.Born == b.Born && a.Id < b.Id;
 
     /// <summary>Removes one item without changing any surviving identity.</summary>
@@ -80,7 +87,7 @@ public sealed class FreeContainers
         && float.IsFinite(item.Orientation.LengthSquared()) && Math.Abs(item.Orientation.LengthSquared() - 1) < .001f
         && BlockStateStore.CargoPayloadValid(content, new(0, item.Size, item.Resource, item.Amount, item.Hull, default));
 
-    private static bool Finite(Vector3 v) => float.IsFinite(v.X) && float.IsFinite(v.Y) && float.IsFinite(v.Z);
+    private static bool Finite(Vector3 v) => float.IsFinite(v.X) && float.IsFinite(v.Y) && float.IsFinite(v.Z) && float.IsFinite(v.LengthSquared());
 
     /// <summary>Applies damage once; a destroyed shell and all its contents disappear together.</summary>
     public bool Damage(uint id, float amount)
@@ -115,6 +122,23 @@ public sealed class FreeContainers
             for (var j = 0; j < _count; j++)
                 if (content.Galaxy.SectorOf(_items[j].Position) == sector && Older(_items[i], _items[j])) newer++;
             if (newer >= content.Cargo.SpacePerSector) Remove(i);
+        }
+    }
+
+    /// <summary>Accumulates unattended ticks; proximity pauses lifetime but never the sector cap.</summary>
+    public void Cleanup(long lifetime, ReadOnlySpan<Double3> players, double radius)
+    {
+        for (var i = _count - 1; i >= 0; i--)
+        {
+            ref var c = ref _items[i];
+            var near = false;
+            foreach (var player in players)
+            {
+                var d = c.Position - player;
+                if (d.X * d.X + d.Y * d.Y + d.Z * d.Z <= (double)radius * radius) { near = true; break; }
+            }
+            if (!near) c.Age++;
+            if (lifetime > 0 && c.Age >= lifetime) Remove(i);
         }
     }
 

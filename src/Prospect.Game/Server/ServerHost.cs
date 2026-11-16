@@ -862,6 +862,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         TickWreckage();
         SendCargo();
         GatherSensors();
+        CleanupFreeContainers();
         SendFreeContainers();
         foreach (var connection in _connections)
             if (connection.State == ConnectionState.Active && connection.CatalogueReady) UpdateVisibility(connection, tick);

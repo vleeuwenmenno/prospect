@@ -55,6 +55,7 @@ public sealed record SaveLimits
     /// </summary>
     public long MaxEncodedBytes =>
         WorldSnapshotCodec.HeaderBound
+        + FreeContainers.Capacity * WorldSnapshotCodec.FreeContainerBytes
         + MaxModuleObservations * WorldSnapshotCodec.ModuleObservationBytes
         + MaxCharts * WorldSnapshotCodec.ChartBytes
         + MaxCatalogueBytes
@@ -71,7 +72,8 @@ public sealed record SaveLimits
     /// the hull and block stores, and the bounded rock motion dictionaries and lists.
     /// </summary>
     public long MaxDecodedBytes =>
-        MaxModuleObservations * (System.Runtime.CompilerServices.Unsafe.SizeOf<ModuleObservation>() + 128)
+        FreeContainers.Capacity * System.Runtime.CompilerServices.Unsafe.SizeOf<FreeContainer>()
+        + MaxModuleObservations * (System.Runtime.CompilerServices.Unsafe.SizeOf<ModuleObservation>() + 128)
         + MaxCharts * (System.Runtime.CompilerServices.Unsafe.SizeOf<SectorChart>() + 128)
         + MaxCatalogueBytes
         + (long)MaxDesigns * (SHA256.HashSizeInBytes + 64)

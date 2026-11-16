@@ -670,6 +670,16 @@
       "maximum": 400,
       "step": 1,
       "unit": "km/s"
+    },
+    {
+      "id": "containerLifetimeMinutes",
+      "name": "Container lifetime (minutes)",
+      "description": "Time outside every connected player hull sensor radius. 0 keeps free containers forever.",
+      "kind": "integer",
+      "default": 60,
+      "minimum": 0,
+      "maximum": 1440,
+      "step": 1
     }
   ]
 }

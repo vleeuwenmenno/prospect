@@ -11,6 +11,17 @@ public sealed partial class ServerHost
     // Loose cargo has no ownership exception; it shares hulls' sensor and gas coverage policy.
     private bool MaySeeContainer(Connection viewer, in FreeContainer container) => Covered(viewer.PlayerId, container.Position);
 
+    private void CleanupFreeContainers()
+    {
+        if (_containers.Items.IsEmpty) return;
+        Span<Double3> players = stackalloc Double3[byte.MaxValue];
+        var count = 0;
+        foreach (var connection in _connections)
+            if (connection.State == ConnectionState.Active && _hulls.IsAlive(connection.Hull))
+                players[count++] = _hulls.State(connection.Hull.Index).Position;
+        _containers.Cleanup(_content.Rules.ContainerLifetimeTicks, players[..count], _content.Exploration.SensorRadius);
+    }
+
     private void SendFreeContainers()
     {
         if (_tick % 6 != 0) return;
