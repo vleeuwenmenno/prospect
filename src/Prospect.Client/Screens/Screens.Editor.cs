@@ -1034,7 +1034,7 @@ internal sealed partial class ScreenHost
         width = ImGui.GetContentRegionAvail().X;
         DrawEditorSelection(editor, draft, content, width);
         DrawFillTank(editor, bridge, width);
-        DrawAddContainer(editor, bridge, width);
+        DrawCargoSection(editor, draft, content, bridge, width);
 
         if (editor.Time - editor.LastEditAt < EditMessageSeconds && editor.LastEdit is not (DraftEdit.Done or DraftEdit.Unchanged))
         {
@@ -1257,18 +1257,78 @@ internal sealed partial class ScreenHost
     }
 
     private int _cargoSize = 3, _cargoResource = -1;
-    private void DrawAddContainer(ShipEditor editor, PlayerInputBridge bridge, float width)
+    private void DrawCargoSection(ShipEditor editor, BuildDraft draft, GameContent content, PlayerInputBridge bridge, float width)
     {
+        if (editor.Selection.Length != 1 || editor.Source is not { } source) return;
+        if (draft.Boxes[editor.Selection[0]].Type.Cargo <= 0) return;
+
+        Kit.Space(Theme.Space4);
+        Kit.Caption("CARGO"u8, Theme.Accent);
+        Kit.Space(Theme.Space1);
+        StatRow("USED"u8, Kit.F($"{editor.CargoUsedUnits} / {source.Stats.CargoHold:0} U"), Theme.Text, width);
+        StatRow("MASS"u8, Kit.F($"{editor.CargoKilograms / 1000.0:0.0} T"), Theme.Text, width);
+
+        var cargo = editor.LiveCargo;
+        if (cargo.Length > 0)
+        {
+            const int maxShown = 8;
+            var shown = Math.Min(cargo.Length, maxShown);
+            ImGui.Indent(Kit.Px(Theme.Space2));
+            var subWidth = width - Kit.Px(Theme.Space2);
+            for (var i = 0; i < shown; i++)
+            {
+                ref readonly var c = ref cargo[i];
+                var sizeName = (uint)c.Size < (uint)content.Cargo.Sizes.Length ? content.Cargo.Sizes[c.Size].Name : "?";
+                var resName = (uint)c.Resource < (uint)content.Galaxy.Resources.Length ? content.Galaxy.Resources[c.Resource].Name : "Empty";
+                var label = Kit.F($"{sizeName} {resName}");
+                var value = Kit.F($"{c.Amount / 1000.0:0.0} T");
+                StatRow(label, value, Theme.TextDim, subWidth);
+            }
+            if (cargo.Length > shown)
+                Paragraph(Theme.TextMute, Kit.F($"+{cargo.Length - shown} more"), subWidth);
+            ImGui.Unindent(Kit.Px(Theme.Space2));
+        }
+
         var rack = editor.CargoRack;
-        if (rack == -1 || editor.Content is not { } content) return;
+        if (rack == -1) return;
+
         Kit.Space(Theme.Space2);
-        Paragraph(Theme.TextDim, Kit.F($"Live cargo: {editor.CargoUsedUnits} / {editor.Source!.Stats.CargoHold:0} u, {editor.CargoKilograms:0.#} kg"), width);
-        var size = content.Cargo.Sizes[_cargoSize];
-        if (EditorButton("##cargosize"u8, Kit.F($"Size: {size.Name} ({size.Units} u)"), new float2(width, Kit.Px(24)), true))
-            _cargoSize = (_cargoSize + 1) % content.Cargo.Sizes.Length;
-        var resource = _cargoResource < 0 ? "Empty" : content.Galaxy.Resources[_cargoResource].Name;
-        if (EditorButton("##cargoresource"u8, Kit.F($"Resource: {resource}"), new float2(width, Kit.Px(24)), true))
-            _cargoResource = (_cargoResource + 2) % (content.Galaxy.Resources.Length + 1) - 1;
+        Kit.Caption("DEBUG"u8, ExhaustOrange);
+        Kit.Space(Theme.Space1);
+
+        var gap = Kit.Px(Theme.Space1);
+        var sizes = content.Cargo.Sizes;
+        _cargoSize = Math.Clamp(_cargoSize, 0, sizes.Length - 1);
+        const int sizeCols = 4;
+        var sizeChip = MathF.Floor((width - gap * (sizeCols - 1)) / sizeCols);
+        for (var i = 0; i < sizes.Length; i++)
+        {
+            if (i % sizeCols > 0) ImGui.SameLine(0, gap);
+            else if (i > 0) Kit.Space(Theme.Space1);
+            ImGui.PushID(i);
+            if (EditorButton("##cargosize"u8, Kit.F($"{sizes[i].Name}"), new float2(sizeChip, Kit.Px(24)), true, false, _cargoSize == i))
+                _cargoSize = i;
+            ImGui.PopID();
+        }
+
+        Kit.Space(Theme.Space1);
+        var resources = content.Galaxy.Resources;
+        var resTotal = resources.Length + 1;
+        const int resCols = 3;
+        var resChip = MathF.Floor((width - gap * (resCols - 1)) / resCols);
+        for (var i = 0; i < resTotal; i++)
+        {
+            var resIndex = i - 1;
+            if (i % resCols > 0) ImGui.SameLine(0, gap);
+            else if (i > 0) Kit.Space(Theme.Space1);
+            ImGui.PushID(100 + i);
+            var name = resIndex < 0 ? "Empty"u8 : Kit.F($"{resources[resIndex].Name}");
+            if (EditorButton("##cargores"u8, name, new float2(resChip, Kit.Px(24)), true, false, _cargoResource == resIndex))
+                _cargoResource = resIndex;
+            ImGui.PopID();
+        }
+
+        Kit.Space(Theme.Space1);
         if (EditorButton("##addcontainer"u8, "ADD CONTAINER (DEBUG)"u8, new float2(width, Kit.Px(28)), rack >= 0 && !editor.Server.Pending))
             editor.RequestContainer(bridge, _cargoSize, _cargoResource);
         if (rack == -2) Paragraph(Theme.TextMute, "Apply first: that rack is only in your draft."u8, width);

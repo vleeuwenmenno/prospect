@@ -1004,7 +1004,7 @@ internal sealed partial class ScreenHost
         var cargoUnits = 0;
         var cargoMass = 0.0;
         foreach (var container in hull.Cargo.Span) { cargoUnits += 1 << container.Size; cargoMass += container.Amount; }
-        Row("Cargo hold"u8, hull.IsOwn ? Kit.F($"{cargoUnits} / {stats.CargoHold:0} u, {cargoMass:0.#} kg") : Kit.F($"{stats.CargoHold:0} u"));
+        Row("Cargo hold"u8, hull.IsOwn ? Kit.F($"{cargoUnits} / {stats.CargoHold:0} u, {cargoMass / 1000.0:0.0} t") : Kit.F($"{stats.CargoHold:0} u"));
         Row("Crew"u8, Kit.F($"{stats.Crew}"));
         y += line * 0.5f;
 

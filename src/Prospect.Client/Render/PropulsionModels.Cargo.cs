@@ -14,8 +14,14 @@ internal sealed class RackLook
     public float Gap { get; init; }
     /// <summary>Rib half-width as a share of the inset body half-side.</summary>
     public float Rib { get; init; }
-    /// <summary>Container body RGB.</summary>
+    /// <summary>Dark rib metal shade.</summary>
+    public float RibShade { get; init; }
+    /// <summary>Size-stripe half-width as a share of container half-length.</summary>
+    public float Stripe { get; init; }
+    /// <summary>Empty container body RGB.</summary>
     public float[] Body { get; init; } = [];
+    /// <summary>One RGB body paint per resource index.</summary>
+    public float[][] Resources { get; init; } = [];
     /// <summary>One RGB stripe for each ascending size.</summary>
     public float[][] Stripes { get; init; } = [];
 
@@ -23,9 +29,10 @@ internal sealed class RackLook
     public void Check()
     {
         if (!(Beam is > 0 and <= .1f) || !(Shade is > 0 and <= 1) || !(Gap is > 0 and <= .2f)
-            || !(Rib is > 0 and <= .05f) || Stripes.Length != 8)
+            || !(Rib is > 0) || Rib >= Gap || !(RibShade is >= 0 and <= 1) || !(Stripe is > 0 and <= .35f) || Stripes.Length != 8)
             throw new InvalidDataException("Invalid rack proportions.");
         CheckPaint(Body);
+        foreach (var paint in Resources) CheckPaint(paint);
         foreach (var stripe in Stripes) CheckPaint(stripe);
     }
     private static void CheckPaint(float[] paint)
@@ -77,17 +84,25 @@ internal static partial class PropulsionModels
                     0, h.X, beam, beam, Tag(look.Shade));
     }
 
-    /// <summary>Reusable ribbed container box with a size-coloured stripe, at a packed slot.</summary>
-    public static void ContainerModel(in PartBox box, int size, RackLook look, List<MeshVertex> vertices, List<uint> indices)
+    /// <summary>Reusable ribbed container box with resource body paint and a size-coloured stripe, at a packed slot.</summary>
+    public static void ContainerModel(in PartBox box, int size, RackLook look, List<MeshVertex> vertices, List<uint> indices) =>
+        ContainerModel(box, size, -1, look, vertices, indices);
+
+    /// <summary>Reusable ribbed container box with resource body paint and a size-coloured stripe, at a packed slot.</summary>
+    public static void ContainerModel(in PartBox box, int size, int resource, RackLook look, List<MeshVertex> vertices, List<uint> indices)
     {
         var h = box.Half;
         var inset = MathF.Min(h.X, MathF.Min(h.Y, h.Z)) * look.Gap;
         h -= new Vector3(inset);
-        Bar(vertices, indices, box.Center, 0, h.X, h.Y, h.Z, Paint(look.Body));
+        var body = (uint)resource < (uint)look.Resources.Length ? look.Resources[resource] : look.Body;
+        Bar(vertices, indices, box.Center, 0, h.X, h.Y, h.Z, Paint(body));
         var rib = MathF.Min(h.X, MathF.Min(h.Y, h.Z)) * look.Rib;
-        for (var k = -1; k <= 1; k++)
-            Bar(vertices, indices, box.Center + new Vector3(k * h.X * .75f, 0, 0), 0, rib,
-                h.Y + rib, h.Z + rib, k == 0 ? Paint(look.Stripes[size]) : Tag(look.Shade));
+        var ribTag = Tag(look.RibShade);
+        Bar(vertices, indices, box.Center + new Vector3(-h.X * .72f, 0, 0), 0, rib, h.Y + rib, h.Z + rib, ribTag);
+        Bar(vertices, indices, box.Center + new Vector3(h.X * .72f, 0, 0), 0, rib, h.Y + rib, h.Z + rib, ribTag);
+        var stripeHalf = Math.Clamp(h.X * look.Stripe, rib * 1.5f, h.X * .35f);
+        var stripeLift = rib * .6f;
+        Bar(vertices, indices, box.Center, 0, stripeHalf, h.Y + stripeLift, h.Z + stripeLift, Paint(look.Stripes[size]));
     }
 
     /// <summary>Capture-only sample; no hull cargo state is inferred or changed.</summary>

@@ -128,7 +128,9 @@ public sealed class CargoTests
         for (var size = 0; size < 8; size++)
         {
             Assert.True(models.TryGetContainer(size, out var container));
+            Assert.True(models.TryGetContainer(size, 0, out var resourceContainer));
             Assert.False(container.IsEmpty);
+            Assert.False(resourceContainer.IsEmpty);
             var shape = Cargo.Sizes[size].Shape;
             foreach (var vertex in container)
             {
@@ -141,7 +143,7 @@ public sealed class CargoTests
         while (allocation.Measuring())
         {
             models.Begin();
-            Assert.True(models.TryGetContainer(3, out _));
+            Assert.True(models.TryGetContainer(3, 0, out _));
             models.TryGet(type, BlockShape.Box, Vector3.One, BlockFacing.Back, 1, out _);
             models.Flush();
         }

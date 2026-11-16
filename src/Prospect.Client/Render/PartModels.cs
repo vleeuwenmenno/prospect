@@ -34,31 +34,40 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
     private readonly ContainerBuild _containers = new(look);
     private JobHandle _containerHandle;
     private bool _containersStarted, _containersReady;
-    public bool TryGetContainer(int size, out ReadOnlySpan<MeshVertex> vertices)
+    public bool TryGetContainer(int size, out ReadOnlySpan<MeshVertex> vertices) =>
+        TryGetContainer(size, -1, out vertices);
+
+    public bool TryGetContainer(int size, int resource, out ReadOnlySpan<MeshVertex> vertices)
     {
         vertices = default;
         if ((uint)size >= 8 || !_containersReady) return false;
-        vertices = _containers.Results[size];
+        var slot = (uint)resource < (uint)(_containers.ResourceSlots - 1) ? resource + 1 : 0;
+        vertices = _containers.Results[size * _containers.ResourceSlots + slot];
         return true;
     }
 
     private sealed class ContainerBuild(PropulsionLook look) : IJob
     {
-        public readonly MeshVertex[][] Results = new MeshVertex[8][];
+        public readonly int ResourceSlots = 1 + (look.Rack?.Resources.Length ?? 0);
+        public readonly MeshVertex[][] Results = new MeshVertex[8 * (1 + (look.Rack?.Resources.Length ?? 0))][];
         public void Run()
         {
             var vertices = new List<MeshVertex>();
             var indices = new List<uint>();
-            for (var i = 0; i < Results.Length; i++)
+            for (var i = 0; i < 8; i++)
             {
-                vertices.Clear(); indices.Clear();
                 var shape = look.Cargo.Sizes[i].Shape;
                 var half = new Vector3(shape.X, shape.Y, shape.Z) * (look.Cargo.UnitSize * .5f);
-                if (look.Rack is { } rack)
-                    PropulsionModels.ContainerModel(new PartBox(Vector3.Zero, half, BlockFacing.Front, 1), i, rack, vertices, indices);
-                var soup = new MeshVertex[indices.Count];
-                for (var k = 0; k < soup.Length; k++) soup[k] = vertices[(int)indices[k]];
-                Results[i] = soup;
+                var box = new PartBox(Vector3.Zero, half, BlockFacing.Front, 1);
+                for (var r = 0; r < ResourceSlots; r++)
+                {
+                    vertices.Clear(); indices.Clear();
+                    if (look.Rack is { } rack)
+                        PropulsionModels.ContainerModel(box, i, r - 1, rack, vertices, indices);
+                    var soup = new MeshVertex[indices.Count];
+                    for (var k = 0; k < soup.Length; k++) soup[k] = vertices[(int)indices[k]];
+                    Results[i * ResourceSlots + r] = soup;
+                }
             }
         }
     }

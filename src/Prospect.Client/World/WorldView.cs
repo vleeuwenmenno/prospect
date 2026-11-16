@@ -4846,7 +4846,7 @@ internal sealed class WorldView
         var catalog = PropulsionLook.Shared.Cargo;
         foreach (var container in cargo)
         {
-            if (!_partModels.TryGetContainer(container.Size, out var mesh)) continue;
+            if (!_partModels.TryGetContainer(container.Size, container.Resource, out var mesh)) continue;
             var shape = catalog.Sizes[container.Size].Shape;
             var offset = design.BlockOffsets[container.Rack] - design.BlockHalfExtents[container.Rack]
                 + new Vector3(container.At.X + shape.X * .5f, container.At.Y + shape.Y * .5f, container.At.Z + shape.Z * .5f) * catalog.UnitSize;
@@ -4865,7 +4865,7 @@ internal sealed class WorldView
         var catalog = PropulsionLook.Shared.Cargo;
         foreach (var container in Editor.DraftCargo)
         {
-            if ((uint)container.Rack >= (uint)boxes.Length || !_partModels.TryGetContainer(container.Size, out var mesh)) continue;
+            if ((uint)container.Rack >= (uint)boxes.Length || !_partModels.TryGetContainer(container.Size, container.Resource, out var mesh)) continue;
             var box = boxes[container.Rack];
             var shape = catalog.Sizes[container.Size].Shape;
             var corner = EditorGeometry.ToHull(EditorGeometry.Middle(box), source.Pivot, source.BlockSize)

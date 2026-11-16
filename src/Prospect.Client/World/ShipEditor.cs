@@ -531,6 +531,7 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// <summary>True when the draft can be committed now.</summary>
     private readonly HoldContainer[] _cargo = new HoldContainer[BlockStateStore.MaxContainers];
     private int _cargoCount;
+    public ReadOnlySpan<HoldContainer> LiveCargo => _cargo.AsSpan(0, _cargoCount);
     public int CargoUsedUnits
     {
         get { var total = 0; for (var i = 0; i < _cargoCount; i++) total += Content!.Cargo.Sizes[_cargo[i].Size].Units; return total; }
