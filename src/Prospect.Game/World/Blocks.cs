@@ -354,7 +354,8 @@ public sealed class BlockCatalog
                 FuelCapacity = Number(block, "fuelCapacity"u8),
                 MaxSide = block.TryGetProperty("maxSide"u8, out var maxSide) ? maxSide.GetInt32() : 0,
                 Mount = block.TryGetProperty("mount"u8, out var mount)
-                    ? new MountSpec(mount.GetProperty("side"u8).GetInt32(), mount.GetProperty("depth"u8).GetInt32(), mount.GetProperty("legacyBlock"u8).GetString()!)
+                    ? new MountSpec(mount.GetProperty("side"u8).GetInt32(), mount.GetProperty("depth"u8).GetInt32(), mount.GetProperty("legacyBlock"u8).GetString()!,
+                        mount.TryGetProperty("blockThrough"u8, out var through) ? through.GetInt32() : 4)
                     : null,
                 BoxOnly = block.TryGetProperty("boxOnly"u8, out var boxOnly) && boxOnly.GetBoolean(),
                 Drone = block.TryGetProperty("drone"u8, out var drone) && drone.GetBoolean(),
@@ -410,9 +411,11 @@ public sealed class BlockCatalog
                 continue;
             if (spec.Side is < 1 or > FaceMounts.MaxSide || spec.Depth is < 1 or > FaceMounts.MaxDepth)
                 throw new InvalidDataException($"{path}: {type.Id}: a mount's side is 1 to {FaceMounts.MaxSide} tenths of a cell and its depth 1 to {FaceMounts.MaxDepth}");
-            if (!(type.Thrust > 0 || type.Tractor is not null) || type.Core || type.Sensor || type.Charting || type.Ftl != FtlKind.None || type.Tank != FuelKind.None
-                || type.Module.Family != ModuleFamily.None || type.Crew != 0 || type.MaxSide != 0 || type.SizeRules.Count != 0 || type.BoxOnly)
-                throw new InvalidDataException($"{path}: {type.Id}: only a thrust part or tractor mounts on a face, and it has no size rules, maxSide or boxOnly");
+            if (!(type.Thrust > 0 || type.Tractor is not null || type.Module.Family != ModuleFamily.None) || type.Core || type.Sensor || type.Charting || type.Ftl != FtlKind.None || type.Tank != FuelKind.None
+                || (type.Module.Family != ModuleFamily.None && (type.Thrust != 0 || type.Tractor is not null)) || type.Crew != 0 || type.MaxSide != 0 || type.SizeRules.Count != 0 || type.BoxOnly)
+                throw new InvalidDataException($"{path}: {type.Id}: only a thrust part, tractor or module scanner mounts on a face, and it has no size rules, maxSide or boxOnly");
+            if (spec.LastBlockVersion is < 4 or >= BoxDesign.FormatVersion)
+                throw new InvalidDataException($"{path}: {type.Id}: blockThrough must name a design file version from 4 up to the one before {BoxDesign.FormatVersion}");
             if (!types.TryGetValue(spec.LegacyBlock, out var legacy) || legacy.Mount is not null)
                 throw new InvalidDataException($"{path}: {type.Id}: legacyBlock must name a block type that is no mount");
         }

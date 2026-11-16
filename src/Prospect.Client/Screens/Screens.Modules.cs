@@ -51,10 +51,10 @@ internal sealed partial class ScreenHost
 
         _gasLedger.Update(snapshot.Modules, galaxy);
         var gas = _moduleEquipment[0];
-        _gasTarget.Update(galaxy, world.OwnPosition, gas.Block != 0 ? gas.Range : 0, world.Time);
-        var targets = new ModuleTargets { HasCloud = _gasTarget.Has, Cloud = _gasTarget.Anchor, CloudInRange = gas.Block != 0 && _gasTarget.InRange(gas.Range) };
+        _gasTarget.Update(galaxy, world.OwnPosition, gas.Mount != 0 ? gas.Range : 0, world.Time);
+        var targets = new ModuleTargets { HasCloud = _gasTarget.Has, Cloud = _gasTarget.Anchor, CloudInRange = gas.Mount != 0 && _gasTarget.InRange(gas.Range) };
         var asteroid = _moduleEquipment[1];
-        if (asteroid.Block != 0 && ScannableRock(world) is { } rock && world.TryGetRock(rock, out var rockAt, out var rockRadius))
+        if (asteroid.Mount != 0 && ScannableRock(world) is { } rock && world.TryGetRock(rock, out var rockAt, out var rockRadius))
         {
             targets.Rock = rock;
             targets.RockInRange = ModuleScanRules.InRange(world.OwnPosition, rockAt, rockRadius, asteroid.Range);

@@ -59,7 +59,7 @@ in the command view; the same fuel again, or `Esc`, closes it, another fuel swit
 Not there: thruster torque, fuel transfer between tanks, refineries and stations. The figures are a first balance. See
 [propulsion](docs/roadmap/propulsion.md).
 
-Scanning modules have a non-visual backend: three placeable Common Mk I blocks, gas composition, targeted asteroid analysis, bounded locator pulses and personal saved observations. The interface is wired: a **Module** tab in the ship editor, keys and chips for the three scanners, the asteroid analysis on the target panel, the **Gas** window and the locator's vision over the flight and command views (see *Ship modules* below). No ship in the shipped fleet carries a module: build one in the editor. Mining, upgrades and sharing knowledge are not there. See [module contract](docs/roadmap/modules.md).
+Scanning modules have a non-visual backend: three Common Mk I face-mounted scanners (a small part on a block face, like a thruster), gas composition, targeted asteroid analysis, bounded locator pulses and personal saved observations. The interface is wired: a **Module** tab in the ship editor, keys and chips for the three scanners, the asteroid analysis on the target panel, the **Gas** window and the locator's vision over the flight and command views (see *Ship modules* below). No ship in the shipped fleet carries a module: build one in the editor. Mining, upgrades and sharing knowledge are not there. See [module contract](docs/roadmap/modules.md).
 
 New ships from a drone: server/session creation, remote editor grant, persistence, the New ship dialog and its keys are implemented. Closing the editor of a ship just built puts you in control of it.
 
@@ -259,7 +259,7 @@ are never blocked. The editor works in space, around your ship:
   block turns with its own Turn X/Y/Z, keeping
   its low corner; a turn that would overlap is refused. Copy, paste, move and undo keep each block's shape.
   Merge joins boxes only. A part placed on a slope snaps against the wedge's box, on the larger box side.
-  Tanks, sensors and scanners are never slanted: with one chosen the Wedge button is off ("NEVER SLANTED: NO WEDGE"),
+  Tanks, cargo racks, the sensor and the sector scanner are never slanted (a module scanner is a face mount, not a block): with one chosen the Wedge button is off ("NEVER SLANTED: NO WEDGE"),
   it is placed and turned as a box, and a design file or a received design with a slanted one is refused.
 
 - **Mirror.** Three checkboxes under the part list, X, Y and Z, in any mix (all three: up to eight copies). The planes
@@ -697,7 +697,7 @@ galaxy rules in `content/galaxy`, world settings in `content/rules`, the listing
 
 ## Ship modules
 
-Three modules exist, each a block you place in the ship editor (**Module** tab; a card shows the family, the quality
+Three modules exist, each a small part you mount on a block face in the ship editor (**Sensors** tab; a card shows the family, the quality
 as a coloured badge, the mark, range, scan time, power draw and cooldown). All are Common Mk I today; the six
 qualities (Common, Uncommon, Rare, Epic, Legendary, Alien Tech) and their colours are content
 (`content/visuals/modules.json`, `moduleTiers` in `content/blocks/blocks.json`).

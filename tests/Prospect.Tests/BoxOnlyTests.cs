@@ -7,7 +7,7 @@ using Xunit;
 namespace Prospect.Tests;
 
 /// <summary>
-/// Parts that are never slanted (<see cref="BlockType.BoxOnly"/>): tanks, sensors and scanners. One rule,
+/// Parts that are never slanted (<see cref="BlockType.BoxOnly"/>): tanks, cargo racks, sensors and the sector scanner (module scanners are face mounts). One rule,
 /// <see cref="BoxDesign.ShapeAllowed"/>, refuses a wedge of one in a design file, in a received design and in every
 /// edit of the editor's draft that could make one.
 /// </summary>
@@ -17,7 +17,7 @@ public sealed class BoxOnlyTests
     private static readonly GridSize One = new(1, 1, 1);
 
     private static readonly string[] BoxOnlyTypes =
-        ["cargo", "bipropellantTank", "hydrazineTank", "nitrogenTank", "microBipropellantTank", "microNitrogenTank", "sensor", "charting", "gasScanner", "asteroidScanner", "asteroidLocator"];
+        ["cargo", "bipropellantTank", "hydrazineTank", "nitrogenTank", "microBipropellantTank", "microNitrogenTank", "sensor", "charting"];
 
     private static BuildDraft Draft(params DesignBox[] boxes)
     {
@@ -33,7 +33,7 @@ public sealed class BoxOnlyTests
     {
         foreach (var type in Content.Blocks.Types)
         {
-            var expected = type.Cargo > 0 || type.Tank != FuelKind.None || type.Sensor || type.Charting || type.Module.Family != ModuleFamily.None;
+            var expected = type.Cargo > 0 || type.Tank != FuelKind.None || type.Sensor || type.Charting;
             Assert.True(expected == type.BoxOnly, type.Id);
             Assert.True(BoxDesign.ShapeAllowed(type, BlockShape.Box), type.Id);
             Assert.Equal(!expected, BoxDesign.ShapeAllowed(type, BlockShape.WedgeZPlusPlus));

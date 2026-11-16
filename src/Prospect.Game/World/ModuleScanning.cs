@@ -106,7 +106,7 @@ public static class ModuleScanRules
     /// <summary>Consumes one full interval's active energy or refuses without spending a partial interval.</summary>
     public static bool Spend(ref float energy, in ModuleEquipment equipment)
     {
-        if (equipment.Block == 0 || !double.IsFinite(equipment.PowerDraw) || equipment.PowerDraw <= 0) return false;
+        if (equipment.Mount == 0 || !double.IsFinite(equipment.PowerDraw) || equipment.PowerDraw <= 0) return false;
         var cost = (float)(equipment.PowerDraw / TickLoop.SimulationHz);
         if (!float.IsFinite(energy) || energy < cost) return false;
         energy -= cost;

@@ -8,7 +8,7 @@ public enum ModuleFamily : byte { None, GasScanner, AsteroidScanner, AsteroidLoc
 /// <summary>Ordered equipment quality, independent of mark and variant.</summary>
 public enum ModuleQuality : byte { Common, Uncommon, Rare, Epic, Legendary, AlienTech }
 
-/// <summary>Evaluated equipment figures from one block type; duplicates and resizing do not improve them.</summary>
+/// <summary>Evaluated equipment figures from one mounted part's type; duplicates and resizing do not improve them.</summary>
 public readonly record struct ModuleSpec(ModuleFamily Family, ModuleQuality Quality, int Mark, string Variant,
     double Range, double Accuracy, double ScanSeconds, double PowerDraw, double CooldownSeconds)
 {
@@ -56,8 +56,12 @@ public readonly record struct ModuleSpec(ModuleFamily Family, ModuleQuality Qual
     }
 }
 
-/// <summary>The chosen live block of one module family and its content-derived figures. Block is one-based; zero means absent.</summary>
-public readonly record struct ModuleEquipment(int Block, ModuleQuality Quality, int Mark, double Range,
+/// <summary>
+/// The chosen live mounted scanner of one module family and its content-derived figures. Mount is one more than the
+/// scanner's index in the design's mounts (<see cref="BoxDesign.Mounts"/>); zero means absent. The scanner is there
+/// exactly while the block it is mounted on is.
+/// </summary>
+public readonly record struct ModuleEquipment(int Mount, ModuleQuality Quality, int Mark, double Range,
     double Accuracy, double ScanSeconds, double PowerDraw, double CooldownSeconds)
 {
     /// <summary>
@@ -65,14 +69,14 @@ public readonly record struct ModuleEquipment(int Block, ModuleQuality Quality, 
     /// whose first use for each field type allocates its comparer, and the server compares equipment on the tick.
     /// </summary>
     public bool Equals(ModuleEquipment other) =>
-        Block == other.Block && Quality == other.Quality && Mark == other.Mark && Range == other.Range
+        Mount == other.Mount && Quality == other.Quality && Mark == other.Mark && Range == other.Range
         && Accuracy == other.Accuracy && ScanSeconds == other.ScanSeconds && PowerDraw == other.PowerDraw
         && CooldownSeconds == other.CooldownSeconds;
 
     /// <inheritdoc/>
-    public override int GetHashCode() => HashCode.Combine(Block, (int)Quality, Mark, Range, Accuracy, HashCode.Combine(ScanSeconds, PowerDraw, CooldownSeconds));
+    public override int GetHashCode() => HashCode.Combine(Mount, (int)Quality, Mark, Range, Accuracy, HashCode.Combine(ScanSeconds, PowerDraw, CooldownSeconds));
 
-    /// <summary>Copies the selected block's evaluated specification without allocating.</summary>
-    internal static ModuleEquipment Of(int block, in ModuleSpec spec) => block == 0 ? default :
-        new(block, spec.Quality, spec.Mark, spec.Range, spec.Accuracy, spec.ScanSeconds, spec.PowerDraw, spec.CooldownSeconds);
+    /// <summary>Copies the selected mount's evaluated specification without allocating.</summary>
+    internal static ModuleEquipment Of(int mount, in ModuleSpec spec) => mount == 0 ? default :
+        new(mount, spec.Quality, spec.Mark, spec.Range, spec.Accuracy, spec.ScanSeconds, spec.PowerDraw, spec.CooldownSeconds);
 }

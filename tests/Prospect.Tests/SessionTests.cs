@@ -137,7 +137,7 @@ public sealed class ProtocolTests
             reader = new NetReader(writer.Written[..length]);
             Assert.False(HullRecord.TryRead(ref reader, out _));
         }
-        Assert.Equal(62u, ProtocolInfo.Version);
+        Assert.Equal(63u, ProtocolInfo.Version);
     }
 
     [Fact]

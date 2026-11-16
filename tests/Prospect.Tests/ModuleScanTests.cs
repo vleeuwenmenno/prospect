@@ -57,7 +57,13 @@ public sealed class ModuleScanTests
             {
                 var pod = JsonNode.Parse(copy.Read("ships/command_pod.json"))!;
                 var blocks = pod["blocks"]!.AsArray();
-                for (var i = 0; i < 3; i++) blocks.Add(new JsonObject { ["at"] = new JsonArray(-3 - i, 0, 0), ["type"] = new[] { "gasScanner", "asteroidScanner", "asteroidLocator" }[i] });
+                var mounts = pod["mounts"]!.AsArray();
+                for (var i = 0; i < 3; i++)
+                {
+                    // A scanner is a face mount: plating to carry it, and the scanner on that block's top face.
+                    blocks.Add(new JsonObject { ["at"] = new JsonArray(-3 - i, 0, 0), ["type"] = "hull" });
+                    mounts.Add(new JsonObject { ["on"] = blocks.Count - 1, ["face"] = "up", ["at"] = new JsonArray(2, 2), ["type"] = new[] { "gasScanner", "asteroidScanner", "asteroidLocator" }[i] });
+                }
                 copy.Write("ships/command_pod.json", pod.ToJsonString());
                 var catalogue = JsonNode.Parse(copy.Read("blocks/blocks.json"))!;
                 foreach (var id in new[] { "gasScanner", "asteroidScanner", "asteroidLocator" }) catalogue["blocks"]![id]!["module"]!["quality"] = quality;
@@ -363,7 +369,7 @@ public sealed class ModuleScanTests
         var hull = rig.Hull();
         ref var info = ref rig.Hulls.Info(hull);
         var design = rig.Content.Designs[info.Design];
-        var block = design.Stats.AsteroidScanner.Block - 1;
+        var block = design.Mounts[design.Stats.AsteroidScanner.Mount - 1].Parent;
         Assert.True(rig.Hulls.BlockStates.Hit(info.BlockState, block, 1e9f));
         rig.Until(() => rig.Scan().State == ModuleScanState.Cancelled);
         Assert.True(rig.Scan().CooldownUntil(ModuleFamily.AsteroidScanner) > rig.Tick);

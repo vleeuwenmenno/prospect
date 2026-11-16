@@ -99,7 +99,7 @@ internal static class ModuleRules
     /// </summary>
     public static ModuleGate Gate(ModuleFamily family, in ModuleEquipment equipment, in ModuleScanView scan, uint ownHull, long serverTick, in ModuleTargets targets)
     {
-        if (equipment.Block == 0 || ownHull == 0)
+        if (equipment.Mount == 0 || ownHull == 0)
             return ModuleGate.Absent;
         if (scan.Hull == ownHull && scan.State is ModuleScanState.Preparing or ModuleScanState.Scanning)
             return scan.Family == family ? ModuleGate.Running : ModuleGate.Waiting;

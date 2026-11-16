@@ -3898,13 +3898,16 @@ internal sealed partial class WorldView
             return;
         var types = content.Blocks.Types;
         var boxes = draft.Boxes;
-        if (_captureMount)
+        var namedMount = false;
+        for (var i = 0; _capturePart is not null && i < types.Count; i++)
+            namedMount |= types[i].Id == _capturePart && types[i].Mount is not null;
+        if (_captureMount || namedMount)
         {
-            // The ghost of a cold gas thruster on the first top face that has room for it, off the middle of the
-            // face, as the pointer would leave it there.
+            // The ghost of a cold gas thruster (or of the mounted part a capture names, a scanner) on the first top
+            // face that has room for it, off the middle of the face, as the pointer would leave it there.
             for (var i = 0; !_captureGhostTurned && i < types.Count; i++)
             {
-                if (types[i].Mount is null || types[i].Fuel != FuelKind.Nitrogen || EditorTuningCompact(types[i]))
+                if (_capturePart is not null ? types[i].Id != _capturePart : types[i].Mount is null || types[i].Fuel != FuelKind.Nitrogen || EditorTuningCompact(types[i]))
                     continue;
                 Editor.ChoosePart(i);
                 _captureGhostTurned = true;

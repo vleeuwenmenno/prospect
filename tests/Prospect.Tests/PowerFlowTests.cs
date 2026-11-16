@@ -251,14 +251,20 @@ public sealed class PowerFlowTests
         Assert.True(boost.Boosting);
     }
 
-    /// <summary>The shipped command pod with all three scan modules added, at one quality, as the module tests fit it.</summary>
+    /// <summary>The shipped command pod with all three scan modules mounted on plating added to it, at one quality, as the module tests fit it.</summary>
     private static GameContent PodWithModules(string quality)
     {
         using var copy = new ContentCopy();
         var pod = JsonNode.Parse(copy.Read("ships/command_pod.json"))!;
         var blocks = pod["blocks"]!.AsArray();
         var ids = new[] { "gasScanner", "asteroidScanner", "asteroidLocator" };
-        for (var i = 0; i < ids.Length; i++) blocks.Add(new JsonObject { ["at"] = new JsonArray(-3 - i, 0, 0), ["type"] = ids[i] });
+        var mounts = pod["mounts"]!.AsArray();
+        for (var i = 0; i < ids.Length; i++)
+        {
+            // A scanner is a face mount: plating to carry it, and the scanner on that block's top face.
+            blocks.Add(new JsonObject { ["at"] = new JsonArray(-3 - i, 0, 0), ["type"] = "hull" });
+            mounts.Add(new JsonObject { ["on"] = blocks.Count - 1, ["face"] = "up", ["at"] = new JsonArray(2, 2), ["type"] = ids[i] });
+        }
         copy.Write("ships/command_pod.json", pod.ToJsonString());
         var catalogue = JsonNode.Parse(copy.Read("blocks/blocks.json"))!;
         foreach (var id in ids) catalogue["blocks"]![id]!["module"]!["quality"] = quality;

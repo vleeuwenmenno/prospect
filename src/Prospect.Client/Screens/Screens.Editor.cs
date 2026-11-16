@@ -920,7 +920,7 @@ internal sealed partial class ScreenHost
 
     /// <summary>
     /// A module's card below its name: the family, its quality as a badge in the tier's colour with its mark, the
-    /// mass and hull, and the figures it is chosen for (reach, scan time, power draw, cooldown). Every figure is the
+    /// mass and that it mounts on a face (it has no hit points of its own), and the figures it is chosen for (reach, scan time, power draw, cooldown). Every figure is the
     /// block's own from the content, at its quality.
     /// </summary>
     private void DrawModuleCard(ImDrawListPtr draw, float2 at, in ModuleSpec spec, in PartFigures figures, float left, float room, float right)
@@ -935,7 +935,7 @@ internal sealed partial class ScreenHost
         draw.AddRect(badgeMin, badgeMax, Kit.Color(tier.Rgb, 0.9f));
         Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, badgeMin + new float2(Kit.Px(4), Kit.Px(1)), tier.Rgb, tier.Label);
         Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, new float2(badgeMax.X + Kit.Px(8), badgeMin.Y + Kit.Px(1)), Theme.Text, Kit.F($"MK {spec.Mark}"), Math.Max(0f, right - badgeMax.X - Kit.Px(14)));
-        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(left, Kit.Px(55)), Theme.TextDim, Kit.F($"{figures.Mass:0.##} T   {figures.Hull:0} HP"), room);
+        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(left, Kit.Px(55)), Theme.TextDim, Kit.F($"{figures.Mass:0.##} T   FACE MOUNT"), room);
         var reach = spec.Range >= 1000 ? Kit.F($"RANGE {spec.Range / 1000:0.##} KM   SCAN {spec.ScanSeconds:0.#} S") : Kit.F($"RANGE {spec.Range:0} M   SCAN {spec.ScanSeconds:0.#} S");
         Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(left, Kit.Px(70)), Theme.Text, reach, room);
         Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(left, Kit.Px(85)), Theme.Text, Kit.F($"DRAWS {spec.PowerDraw:0.##} MW   COOLDOWN {spec.CooldownSeconds:0.#} S"), room);

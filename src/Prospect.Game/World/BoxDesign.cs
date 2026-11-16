@@ -150,15 +150,16 @@ public sealed class BoxDesign
         return new System.Collections.ObjectModel.ReadOnlyDictionary<string, double>(result);
     }
 
-    /// <summary>The version <see cref="Write"/> writes: 2 added sizes, 3 shapes, 4 facings and 5 face mounts.</summary>
-    public const int FormatVersion = 5;
+    /// <summary>The version <see cref="Write"/> writes: 2 added sizes, 3 shapes, 4 facings, 5 face mounts for thrusters and 6 for module scanners.</summary>
+    public const int FormatVersion = 6;
 
     /// <summary>
-    /// Loads legacy unit cells, version 2 boxes, version 3 shapes, version 4 facings or version 5 face mounts, with
-    /// source-labelled validation. A block of an older version, or one that names no facing, faces
-    /// <see cref="BlockFacing.Back"/>. Before version 5 a part that now mounts on a face was a block: such a block
-    /// is kept as its type's <see cref="MountSpec.LegacyBlock"/> and carries the part on the face it pointed from
-    /// (<see cref="ConvertLegacy"/>).
+    /// Loads legacy unit cells, version 2 boxes, version 3 shapes, version 4 facings, version 5 face mounts or version
+    /// 6, where module scanners mount too, with source-labelled validation. A block of an older version, or one that
+    /// names no facing, faces <see cref="BlockFacing.Back"/>. A part that now mounts on a face was a block up to the
+    /// version its <see cref="MountSpec.LastBlockVersion"/> names: such a block is kept as its type's
+    /// <see cref="MountSpec.LegacyBlock"/> and carries the part on the face it pointed from
+    /// (<see cref="ConvertLegacy"/>); a scanner that has no face to go on is refused, never dropped.
     /// </summary>
     public static BoxDesign Load(string path, BlockCatalog catalog)
     {
@@ -227,7 +228,7 @@ public sealed class BoxDesign
                 }
                 if (type.Mount is { } spec)
                 {
-                    if (version >= 5) throw new InvalidDataException($"{source}: block {index}: a {type.Name} mounts on a face; list it under \"mounts\"");
+                    if (version > spec.LastBlockVersion) throw new InvalidDataException($"{source}: block {index}: a {type.Name} mounts on a face; list it under \"mounts\"");
                     legacy.Add((index, facing, type));
                     type = catalog.Get(spec.LegacyBlock);
                     facing = BlockFacing.Back;
@@ -252,7 +253,7 @@ public sealed class BoxDesign
                     { throw new InvalidDataException($"{source}: mount {at}: {e.Message}", e); }
                 }
             }
-            ConvertLegacy(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(list), legacy, mounts, catalog.Limits);
+            ConvertLegacy(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(list), legacy, mounts, catalog.Limits, source);
             RequireOneDriveKind(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(list), source);
             var c = root.GetProperty("color"u8);
             var kind = root.GetProperty("class"u8).GetString() switch { "ship" => HullClass.Ship, "fighter" => HullClass.Fighter, "station" => HullClass.Station, _ => throw new InvalidDataException($"{source}: unknown class") };
@@ -268,12 +269,37 @@ public sealed class BoxDesign
     /// low corner: four cold gas thrusters a cell, which push what a one-cell block of them did. A part with no room
     /// (a block or an earlier part in front of that face, or the face being a wedge's slope) is left out, as is
     /// everything past the content's count: an old thruster whose nozzle was covered pushes no more.
+    /// A module scanner is one part however large its block was (its figures never grew with size): it takes the
+    /// middle of the face it pointed from, or of the first face with room (<see cref="ScannerFaces"/>). With no
+    /// face that has room the file is refused, since a scanner dropped silently would leave a ship that cannot scan.
     /// </summary>
-    private static void ConvertLegacy(ReadOnlySpan<DesignBox> blocks, List<(int Block, BlockFacing Facing, BlockType Type)> legacy, List<DesignMount> mounts, DesignLimits limits)
+    private static void ConvertLegacy(ReadOnlySpan<DesignBox> blocks, List<(int Block, BlockFacing Facing, BlockType Type)> legacy, List<DesignMount> mounts, DesignLimits limits, string source)
     {
         foreach (var (block, facing, type) in legacy)
         {
             var spec = type.Mount!;
+            if (type.Module.Family != ModuleFamily.None)
+            {
+                if (mounts.Count >= limits.MaxMounts)
+                    throw new InvalidDataException($"{source}: block {block}: a {type.Name} cannot be converted to a mounted part: the design has too many mounted parts (limit {limits.MaxMounts})");
+                var placed = false;
+                foreach (var face in ScannerFaces)
+                {
+                    var width = FaceMounts.Of(blocks[block].Size, (Facings.Axis(face) + 1) % 3) * FaceMounts.PerCell;
+                    var height = FaceMounts.Of(blocks[block].Size, (Facings.Axis(face) + 2) % 3) * FaceMounts.PerCell;
+                    var mount = new DesignMount(block, face, (width - spec.Side) / 2, (height - spec.Side) / 2, type);
+                    if (FaceMounts.Check(blocks, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(mounts), mount) != DraftEdit.Done)
+                        continue;
+                    mounts.Add(mount);
+                    placed = true;
+                    break;
+                }
+
+                if (!placed)
+                    throw new InvalidDataException($"{source}: block {block}: a {type.Name} cannot be converted to a mounted part: every face of the block is covered. Free a face and load the design again");
+                continue;
+            }
+
             var n = Facings.Axis(facing);
             var across = FaceMounts.PerCell / spec.Side;
             var pitch = FaceMounts.PerCell / across;
@@ -291,6 +317,13 @@ public sealed class BoxDesign
             }
         }
     }
+
+    /// <summary>
+    /// The faces a converted scanner tries, in order: top first, where an antenna or dish sees most of the sky, then
+    /// the sides and the ends, and the underside last. A scanner block's facing never meant anything (it only said
+    /// how the block sat), so it does not choose.
+    /// </summary>
+    private static readonly BlockFacing[] ScannerFaces = [BlockFacing.Up, BlockFacing.Right, BlockFacing.Left, BlockFacing.Back, BlockFacing.Front, BlockFacing.Down];
 
     /// <summary>
     /// The first block whose kind of FTL drive differs from an earlier drive's, or -1 when every drive is of one
@@ -472,7 +505,7 @@ public sealed class BoxDesign
     /// <summary>Where each block's mounts start in <see cref="MountArray"/>; one entry more than there are blocks.</summary>
     internal int[] MountStart => _mountStart;
 
-    /// <summary>Writes version 5, preserving block identity and metadata.</summary>
+    /// <summary>Writes the current version, preserving block identity and metadata.</summary>
     public void Write(Stream stream)
     {
         using var w = new Utf8JsonWriter(stream);

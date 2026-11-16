@@ -7368,7 +7368,7 @@ public sealed class FrameOrderTests : IDisposable
         Assert.False(editor.PartBoxOnly);
         Assert.Equal(BlockShape.WedgeXPlusPlus, editor.PartShape);
 
-        foreach (var id in new[] { "nitrogenTank", "sensor", "asteroidScanner" })
+        foreach (var id in new[] { "nitrogenTank", "sensor", "charting" })
         {
             // The wedge chosen for plating does not carry over, the wedge button is refused, and a turn keeps a box.
             editor.ChoosePart(Index(id));

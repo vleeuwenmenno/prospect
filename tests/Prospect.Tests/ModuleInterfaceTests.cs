@@ -397,11 +397,11 @@ public sealed class ModuleInterfaceTests
     {
         using var rig = new ModuleScanTests.Rig();
         var rock = rig.PlaceNearRock();
-        rig.Until(() => rig.Clients[0].AcquireSnapshot().Hulls[rig.Clients[0].AcquireSnapshot().OwnHull].Stats.Module(ModuleFamily.AsteroidScanner).Block != 0);
+        rig.Until(() => rig.Clients[0].AcquireSnapshot().Hulls[rig.Clients[0].AcquireSnapshot().OwnHull].Stats.Module(ModuleFamily.AsteroidScanner).Mount != 0);
         var snapshot = rig.Clients[0].AcquireSnapshot();
         var own = snapshot.Hulls[snapshot.OwnHull];
         var equipment = own.Stats.Module(ModuleFamily.AsteroidScanner);
-        Assert.NotEqual(0, equipment.Block);
+        Assert.NotEqual(0, equipment.Mount);
         // Unscanned: the panel has nothing to show.
         Assert.Equal(-1, snapshot.Modules.Find(ModuleFamily.AsteroidScanner, rock.Sector, rock.Index));
         var targets = new ModuleTargets { Rock = rock, RockInRange = true };
