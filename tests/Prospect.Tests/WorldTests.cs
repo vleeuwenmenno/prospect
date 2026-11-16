@@ -10,6 +10,31 @@ namespace Prospect.Tests;
 
 public sealed class FlightTests
 {
+    [Fact]
+    public void LooseContainerTickTakesNoMemoryAfterSectorGeneration()
+    {
+        var content = GameContent.Load();
+        using var hulls = new HullStore();
+        var field = new HullField(hulls, content.Designs);
+        var rocks = new RockField(content.Galaxy);
+        var simulation = new ContainerSimulation(content.Galaxy);
+        var containers = new FreeContainers();
+        Assert.True(containers.Add(content, new FreeContainer
+        {
+            Orientation = Quaternion.Identity,
+            Resource = -1,
+            Hull = 50,
+            Position = content.Galaxy.CenterOf(new(0, 100, 0)),
+            Velocity = new(1, 0, 0)
+        }, out _));
+        simulation.Step(containers, content, field, rocks, 1);
+        var probe = new AllocationProbe();
+        while (probe.Measuring()) simulation.Step(containers, content, field, rocks, 2);
+        Assert.Equal(0, probe.Bytes);
+        Assert.Single(containers.Items.ToArray());
+        Assert.True(containers.Items[0].Position.X > 0);
+    }
+
     private static readonly FlightParams Pod = GameContent.Load().Pod.Flight;
 
     private static HullState Fly(HullState state, FlightInput input, int ticks)

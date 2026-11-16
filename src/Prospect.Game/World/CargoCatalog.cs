@@ -8,6 +8,13 @@ public readonly record struct ContainerSize(string Name, int Units, GridSize Sha
 /// <summary>Shared container geometry. One ship cell is one metre; drone cells do not redefine cargo units.</summary>
 public sealed class CargoCatalog
 {
+    /// <summary>Loose-container simulation tuning, read once from shared content.</summary>
+    public int SpacePerSector { get; private set; }
+    public int SpaceContactBudget { get; private set; }
+    public float SpaceShellKg { get; private set; }
+    public float SpaceRestitution { get; private set; }
+    public float JettisonSpeed { get; private set; }
+    public float EjectionSpeed { get; private set; }
     private readonly ContainerSize[] _sizes;
     private readonly Dictionary<string, double> _densities;
     /// <summary>Metres per unit edge, relative to the one-metre ship cell.</summary>
@@ -55,7 +62,23 @@ public sealed class CargoCatalog
             if (string.IsNullOrWhiteSpace(entry.Name) || !double.IsFinite(density) || density <= 0 || density > 1e9 || !densities.TryAdd(entry.Name, density))
                 throw new InvalidDataException("Invalid or duplicate cargo resource density.");
         }
-        return new CargoCatalog(unit, sizes, densities);
+        var space = root.GetProperty("space"u8);
+        var result = new CargoCatalog(unit, sizes, densities)
+        {
+            SpacePerSector = space.GetProperty("perSector"u8).GetInt32(),
+            SpaceContactBudget = space.GetProperty("contactBudget"u8).GetInt32(),
+            SpaceShellKg = space.GetProperty("shellKgPerUnit"u8).GetSingle(),
+            SpaceRestitution = space.GetProperty("restitution"u8).GetSingle(),
+            JettisonSpeed = space.GetProperty("jettisonSpeed"u8).GetSingle(),
+            EjectionSpeed = space.GetProperty("ejectionSpeed"u8).GetSingle()
+        };
+        if (result.SpacePerSector is < 1 or > FreeContainers.Capacity || result.SpaceContactBudget is < 1 or > 1024
+            || !float.IsFinite(result.SpaceShellKg) || result.SpaceShellKg <= 0 || result.SpaceShellKg > 1000
+            || !float.IsFinite(result.SpaceRestitution) || result.SpaceRestitution < 0 || result.SpaceRestitution > 1
+            || !float.IsFinite(result.JettisonSpeed) || result.JettisonSpeed <= 0 || result.JettisonSpeed > 100
+            || !float.IsFinite(result.EjectionSpeed) || result.EjectionSpeed <= 0 || result.EjectionSpeed > 100)
+            throw new InvalidDataException("Invalid free-container simulation tuning.");
+        return result;
     }
 }
 

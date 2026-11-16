@@ -90,5 +90,13 @@
     "silver": 10490,
     "gold": 19300,
     "ice": 917
+  },
+  "space": {
+    "perSector": 64,
+    "shellKgPerUnit": 1,
+    "restitution": 0.2,
+    "contactBudget": 64,
+    "jettisonSpeed": 2,
+    "ejectionSpeed": 4
   }
 }

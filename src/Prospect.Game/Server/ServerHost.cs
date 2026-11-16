@@ -409,6 +409,8 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     // Replaced, never changed, when a design is added: the same content with one more design at the end.
     private GameContent _content;
     private readonly RockField _rocks;
+    private readonly FreeContainers _containers = new();
+    private readonly ContainerSimulation _containerSimulation;
     private readonly RockImpulses _impulses = new();
     private readonly string _name;
 
@@ -574,6 +576,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
             // A saved world's asteroids are bounded before they are pushed, never when they are saved.
             _rocks = new RockField(Galaxy, _saveLimits.MaxRocks, _saveLimits.MaxMovedSectors);
+            _containerSimulation = new ContainerSimulation(Galaxy);
 
             // Room for the largest design the editor can add, taken now: a new design costs the tick no memory.
             _wreckSettings = new((int)(_content.Rules.WreckLifetimeTicks / 3600), _content.Rules.WreckMaxPerSector);
@@ -853,6 +856,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 _hulls.Destroy(handle);
         }
 
+        _containerSimulation.Step(_containers, _content, _field, _rocks, _tick);
         TickWreckage();
         SendCargo();
         GatherSensors();
