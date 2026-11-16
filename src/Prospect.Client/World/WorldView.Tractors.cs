@@ -1,6 +1,7 @@
 using System.Numerics;
 using Brutal.Numerics;
 using Prospect.Client.Render;
+using Prospect.Game.Client;
 using Prospect.Game.World;
 
 namespace Prospect.Client.World;
@@ -11,9 +12,13 @@ internal sealed partial class WorldView
     public TractorLook TractorLook => PropulsionLook.Shared.Tractor!;
 
     /// <summary>Beam endpoints use the same rendered hull and interpolated container poses as their models.</summary>
-    public bool TractorBeam(in FreeContainer container, out Double3 from, out Double3 to)
+    public bool TractorBeam(in FreeContainer container, out Double3 from, out Double3 to) =>
+        TractorBeam(container, out from, out to, out _);
+
+    private bool TractorBeam(in FreeContainer container, out Double3 from, out Double3 to, out FreeContainer pose)
     {
         from = to = default;
+        pose = default;
         if (!container.TractorPowered || container.TractorHull == 0 || _snapshot is null) return false;
         for (var i = 0; i < _snapshot.HullCount && i < _visuals.Hulls.Length; i++)
         {
@@ -27,31 +32,38 @@ internal sealed partial class WorldView
             var offset = design.MountOffsets[container.TractorMount]
                 + Facings.Vector(mount.Face) * design.MountHalfExtents[container.TractorMount];
             from = DrawnPosition(visual) + HullRotation.Rotate(offset, visual.Orientation);
-            if (!TryGetContainer(container.Id, out var pose)) return false;
+            if (!TryGetContainer(container.Id, out pose)) return false;
             to = pose.Position;
             return true;
         }
         return false;
     }
 
-    /// <summary>Projects a tractor beam segment and returns pixels per metre at each clipped endpoint.</summary>
-    public bool ProjectTractorSegment(Double3 from, Double3 to, out float2 a, out float2 b, out float scaleA, out float scaleB)
+    private void DrawTractorBeams(int frameIndex, SessionSnapshot snapshot, Double3 camera)
     {
-        var va = ToView(from);
-        var vb = ToView(to);
-        a = b = default;
-        scaleA = scaleB = 0f;
-        if (va.Z < NearPlane && vb.Z < NearPlane)
-            return false;
-        if (va.Z < NearPlane)
-            va = Vector3.Lerp(va, vb, (NearPlane - va.Z) / (vb.Z - va.Z));
-        else if (vb.Z < NearPlane)
-            vb = Vector3.Lerp(vb, va, (NearPlane - vb.Z) / (va.Z - va.Z));
-        a = ViewToScreen(va);
-        b = ViewToScreen(vb);
-        var factor = _screen.Y * 0.5f / _tanHalfFov;
-        scaleA = factor / va.Z;
-        scaleB = factor / vb.Z;
-        return true;
+        var output = _scene.Tractors(frameIndex);
+        var count = 0;
+        var cargo = snapshot.Content.Cargo;
+        for (var i = 0; i < snapshot.FreeContainerCount && count < output.Length; i++)
+        {
+            ref readonly var item = ref snapshot.FreeContainers[i];
+            if (!TractorBeam(item, out var from, out var to, out var pose)) continue;
+            var fromRel = from.RelativeTo(camera);
+            var toRel = to.RelativeTo(camera);
+            var len = (toRel - fromRel).Length();
+            if (len < 1e-4f) continue;
+
+            var half = FreeContainers.Half(cargo, item.Size);
+            var q = pose.Orientation;
+            var seed = ((item.Id * 0x9E3779B9u) & 0xFFFFu) / 65536f;
+            output[count++] = new TractorInstance
+            {
+                FromSeed = new float4(fromRel.X, fromRel.Y, fromRel.Z, seed),
+                ToLength = new float4(toRel.X, toRel.Y, toRel.Z, len),
+                ContainerQuat = new float4(q.X, q.Y, q.Z, q.W),
+                ContainerHalf = new float4(half.X, half.Y, half.Z, half.Length()),
+            };
+        }
+        _scene.QueueTractors(count, TractorLook.Constants);
     }
 }

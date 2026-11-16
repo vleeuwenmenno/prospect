@@ -1386,6 +1386,7 @@ internal sealed partial class WorldView
             instances[_meshOffsets[_candidates[i].Mesh]++] = _candidates[i].Instance;
 
         DrawFreeContainers(frameIndex, snapshot, camera);
+        DrawTractorBeams(frameIndex, snapshot, camera);
         _scene.AddSparks(frameIndex, _sparks.Expand(camera, _right, _up, _forward, aspect, _tanHalfFov, _viewport.Y, snapshot.ServerTickPrecise + alpha, _collision));
         var f = 1f / _tanHalfFov;
         var sunColor = galaxy.StarClasses[Sector.StarClass].Color * 1.7f;

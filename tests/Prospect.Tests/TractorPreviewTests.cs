@@ -80,7 +80,7 @@ public sealed class TractorPreviewTests
             Opacity = .8f,
             WarningTint = .5f,
             PreviewPairsPerFrame = 128,
-            ConeOpacity = 0f,
+            HazeOpacity = -0.1f,
         }.Check());
         Assert.Throws<InvalidDataException>(() => new TractorLook
         {
@@ -91,7 +91,7 @@ public sealed class TractorPreviewTests
             Opacity = .8f,
             WarningTint = .5f,
             PreviewPairsPerFrame = 128,
-            PulseCount = 0,
+            StrandCount = 0,
         }.Check());
     }
 }

@@ -234,6 +234,14 @@ internal struct PlumeInstance
     public float4 ShieldClip;
 }
 
+internal struct TractorInstance
+{
+    public float4 FromSeed;
+    public float4 ToLength;
+    public float4 ContainerQuat;
+    public float4 ContainerHalf;
+}
+
 /// <summary>
 /// One drawn mesh: a camera-relative 3x4 transform and a colour. Alpha 0 is rock, 1 is hull plating, 2 the pilot's
 /// own hull; a hull cut by a jump's opening adds four times its passage slot plus one.
@@ -302,6 +310,11 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private const int ExhaustVectors = ShieldVisuals.MaxShields * ShieldExhaust.VectorsPerShield;
     private readonly GpuBuffer[] _plumeBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
     private int _plumeCount;
+    private readonly VkPipelineLayout _tractorPipelineLayout;
+    private readonly VkPipeline _tractorPipeline;
+    private readonly GpuBuffer[] _tractorBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
+    private int _tractorCount;
+    private TractorLookConstants _tractorLook;
     private readonly VkPipelineLayout _pulsePipelineLayout;
     private readonly VkPipeline _pulsePipeline;
     private ScanPulseConstants _pulseQueued;
@@ -441,6 +454,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
                 _rockMarkBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.StorageBufferBit, sizeof(RockMarkData) * RockExhaust.Marks);
                 _rockEffectBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(RockEffectInstance) * RockExhaust.Capacity);
                 _plumeBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(PlumeInstance) * PropulsionLook.PlumeCapacity);
+                _tractorBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(TractorInstance) * FreeContainers.Capacity);
                 _damageVertices[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshVertex) * DamageVertices);
                 _damageInstances[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshInstance) * DynamicDraws);
                 _shieldVertexBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshVertex) * ShieldVisuals.MaxVertices);
@@ -558,6 +572,11 @@ internal sealed unsafe class SceneRenderer : IDisposable
         _sceneLayout = device.CreateDescriptorSetLayout(new DescriptorSetLayoutEx.CreateInfo { Bindings = sceneBindings }, null);
 
         _scenePipelineLayout = device.CreatePipelineLayout([_frameLayout.Handle], [], null);
+        _tractorPipelineLayout = device.CreatePipelineLayout(
+            [_frameLayout.Handle],
+            [new VkPushConstantRange { StageFlags = VkShaderStageFlags.VertexBit | VkShaderStageFlags.FragmentBit, Offset = (ByteSize32)0, Size = (ByteSize32)sizeof(TractorLookConstants) }],
+            null
+        );
 
         // Set 1 of the shield shader: what was behind the shields, colour and depth. The gas passes share the layout;
         // binding 2, the half-resolution march of the primary cloud, is read by the ordinary gas pass alone.
@@ -767,6 +786,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
         // Plumes are light added in the scene, tested against what is solid, and march only the pixels of their boxes.
         var plumeInput = new VertexInput(1, 10).AddBindingWithAttributes<PlumeInstance>(0, 0, VkVertexInputRate.Instance);
         _plumePipeline = ScenePipeline(Module(shaders, "plume.vert"), Module(shaders, "plume.frag"), plumeInput, Presets.Rasterization.Fill.CullNone, &depthRead, &additive);
+        var tractorInput = new VertexInput(1, 4).AddBindingWithAttributes<TractorInstance>(0, 0, VkVertexInputRate.Instance);
+        _tractorPipeline = Pipeline(Module(shaders, "tractor.vert"), Module(shaders, "tractor.frag"), tractorInput, Presets.Rasterization.Fill.CullNone, &depthRead, &additive, _tractorPipelineLayout, VkRenderPass.NullHandle);
 
         // The scan pulse is light added to the displayed image after tone mapping, in the present pass, under the
         // interface. Its alpha is left as the tone mapper wrote it.
@@ -867,6 +888,16 @@ internal sealed unsafe class SceneRenderer : IDisposable
 
     /// <summary>How many of <see cref="Plumes"/> the next <see cref="Render"/> draws; cleared once drawn.</summary>
     public void QueuePlumes(int count) => _plumeCount = Math.Clamp(count, 0, PropulsionLook.PlumeCapacity);
+
+    /// <summary>This frame slot's tractor beam instances, written by the world before <see cref="Render"/>.</summary>
+    public Span<TractorInstance> Tractors(int frameIndex) => new((void*)_tractorBuffers[frameIndex].Mapped, FreeContainers.Capacity);
+
+    /// <summary>How many of <see cref="Tractors"/> the next <see cref="Render"/> draws; cleared once drawn.</summary>
+    public void QueueTractors(int count, in TractorLookConstants look)
+    {
+        _tractorCount = Math.Clamp(count, 0, FreeContainers.Capacity);
+        _tractorLook = look;
+    }
 
     /// <summary>The plumes the last recorded frame drew, for the benchmark report.</summary>
     public int LastPlumes { get; private set; }
@@ -1094,6 +1125,17 @@ internal sealed unsafe class SceneRenderer : IDisposable
         }
         LastPlumes = _plumeCount;
         _plumeCount = 0;
+        if (_tractorCount > 0)
+        {
+            var tractors = _tractorBuffers[frameIndex].Buffer;
+            var tractorLook = _tractorLook;
+            commands.BindPipeline(VkPipelineBindPoint.Graphics, _tractorPipeline);
+            commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _tractorPipelineLayout, 0, new ReadOnlySpan<VkDescriptorSet>(in set), []);
+            commands.PushConstants(_tractorPipelineLayout, VkShaderStageFlags.VertexBit | VkShaderStageFlags.FragmentBit, 0, new ReadOnlySpan<byte>(&tractorLook, sizeof(TractorLookConstants)));
+            commands.BindVertexBuffers(0, new ReadOnlySpan<VkBuffer>(in tractors), new ReadOnlySpan<ByteSize64>(in zero));
+            commands.Draw(36, _tractorCount, 0, 0);
+        }
+        _tractorCount = 0;
         commands.BindPipeline(VkPipelineBindPoint.Graphics, _dustPipeline);
         commands.Draw(6, DustCount, 0, 0);
 
@@ -1708,6 +1750,8 @@ internal sealed unsafe class SceneRenderer : IDisposable
         _pulseLayout.Dispose();
         device.DestroyPipelineLayout(_shieldPipelineLayout, null);
         _shieldLayout.Dispose();
+        device.DestroyPipeline(_tractorPipeline, null);
+        device.DestroyPipelineLayout(_tractorPipelineLayout, null);
         device.DestroyPipelineLayout(_scenePipelineLayout, null);
         device.DestroyPipelineLayout(_tonemapPipelineLayout, null);
         _descriptorPool.Dispose();
@@ -1732,6 +1776,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
             _ftlBuffers[i].Destroy(_gpu);
             _exhaustBuffers[i].Destroy(_gpu);
             _plumeBuffers[i].Destroy(_gpu);
+            _tractorBuffers[i].Destroy(_gpu);
             _rockEffectBuffers[i].Destroy(_gpu);
             _rockMarkBuffers[i].Destroy(_gpu);
             _damageVertices[i].Destroy(_gpu);
