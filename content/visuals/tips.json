@@ -123,6 +123,13 @@
       "anchor": { "region": "console", "side": "top", "offset": [0, 0] }
     },
     {
+      "id": "action-groups",
+      "trigger": "actionGroupReady",
+      "title": "Action groups",
+      "text": "Press {ActionGroup1}, {ActionGroup2} and the other number keys to turn a group on or off. While a group is on, the left mouse button fires it; with every group off it aligns the ship to the view. Hold {ReleasePointer} and click the strip to change which group a laser fires with.",
+      "anchor": { "region": "console", "side": "top", "offset": [0, 0] }
+    },
+    {
       "id": "interface-mode",
       "trigger": "interfaceOpened",
       "title": "Interface mode",

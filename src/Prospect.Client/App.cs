@@ -1511,6 +1511,13 @@ internal sealed class App : IDisposable
                 _screens.OpenFriends();
             else if (view == "chat")
                 _screens.OpenChat();
+            else if (view == "action-groups")
+            {
+                // The pilot view of a ship with lasers: the action group strip above the console, every group off.
+                // Add --tips-sample on to see the tip.
+            }
+            else if (view == "action-groups-popup")
+                _screens.OpenActionGroupsPopup();
             else if (view == "hud")
             {
                 // The world with only what is always shown: the navigation bar, the party list, the passive chat

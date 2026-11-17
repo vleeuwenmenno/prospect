@@ -632,6 +632,21 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   hold it. Check with `--open modules|gas|module-command`, `--target-rock`, `--module`
   on a copy of the client build whose `command_pod.json` carries plating with scanner mounts on it (no shipped ship has
   any; `tools/prepare_scan_bench.py` makes such a copy, and `--open edit-scanner` holds a scanner's mount ghost on a face).
+- **Action groups (interface):** the strip above the console shows only groups the flown hull has a part in.
+  - State is `ActionGroupStrip` (font-free, no memory): cells in key order (1 to 9, then 0), on, firing, cutting.
+    It reads `SessionSnapshot.GroupOf` (override else design), `WorldView.ActionGroupsOn`/`LasersFiring` and `LaserBeams`.
+  - Place: `ScreenHost.ActionGroupsRect`, above the module chips, or above the status-chip slot with none. Tips
+    (`ConsoleArea`) and the party list keep clear of it. Never draw anything else in that row.
+  - Drawing is `ActionGroupPanel` (static, so `FrameOrderTests` draws the production code). Figures, colours and
+    the part-kind words are `content/visuals/action_groups.json` (`ActionGroupLook`).
+  - Key names come from `ActionMap` (`ActionGroupKeys`, rebuilt on `ActionMap.Version`); a number-row key reads as its digit.
+  - A click on a cell opens the popup (`ScreenHost._actionGroupsOpen`, Escape closes it first, `BackStep.ActionGroups`).
+    It takes input only where the pointer is shown. Never change `PointerFrame` for it.
+  - `ActionGroupPanel.DrawActionGroupsSection` lists each laser with a selector (groups, NONE, DESIGN) and calls
+    `PlayerInputBridge.SetActionGroup`. It shows the server's answer, never the click. The Ship window calls it too.
+  - Tip: `actionGroupReady`, fired when the hull first has a group. Tests: `ActionGroupStripTests`, `FrameOrderTests`.
+  - Check with `--open action-groups` and `--open action-groups-popup` on a copy whose `command_pod.json` has laser
+    mounts (version 7; not on the faces that carry the pod's thrusters), at `"UiScale"` 1 and 2.
 - **A new action or key:** add it to `content/input/bindings.json` and to `content/input/controls.json` (tab, label,
   scope; a fixed mouse or chord row goes there too). Loading refuses an action the catalogue lacks. Read it through
   `ActionMap` only; never cache a key name without rebuilding it on `ActionMap.Changed`. Anything that reads input
