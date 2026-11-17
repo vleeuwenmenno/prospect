@@ -4521,6 +4521,98 @@ public sealed class FrameOrderTests : IDisposable
         Assert.False(Sent().Align);
     }
 
+    // Gives the flown pod a mining laser in action group 1 on the front face of its hyperdrive, through a real edit.
+    private void FitALaser()
+    {
+        OpenEditorInSelectTool();
+        var editor = _world.Editor;
+        var content = _snapshot.Content;
+        var pod = content.Designs[_snapshot.Hulls[_snapshot.OwnHull].Design];
+        var hyperdrive = -1;
+        for (var i = 0; i < pod.Boxes.Length && hyperdrive < 0; i++)
+            if (pod.Boxes[i].Type.Id == "hyperdrive") hyperdrive = i;
+        var mounts = pod.Mounts.ToArray().Append(new DesignMount(hyperdrive, BlockFacing.Front, 2, 2, content.Blocks.Get("miningLaser"), 1)).ToArray();
+        var design = new BoxDesign(pod.Name, pod.BlockSize, pod.Boxes.ToArray(), content.Blocks.Limits, "laser test", pod.Class, pod.Color, mounts);
+        Assert.Equal(DraftEdit.Done, editor.ReplaceDraft(design));
+        for (var i = 0; i < 600 && !(editor.Check == DraftCheck.Ready && editor.CheckedVersion == editor.Draft!.Version); i++)
+        {
+            FinishJobs();
+            EditorFrame();
+        }
+
+        Assert.True(editor.CanApply);
+        Tick((int)(content.Editor.CommitSeconds + 1) * TickLoop.SimulationHz);
+        Assert.True(editor.Apply(Bridge));
+        Assert.True(PlayUntil(() => editor.Stage == EditorStage.Closed), $"{_snapshot.Editor.Phase}/{_snapshot.Editor.Reason}");
+        for (var i = 0; i < 10; i++)
+        {
+            Tick();
+            Frame();
+        }
+    }
+
+    [Fact]
+    public void TheNumberKeysToggleActionGroupsAndWhileOneIsOnTheLeftButtonFiresInsteadOfAligning()
+    {
+        FitALaser();
+        Assert.Equal(ActionGroups.Bit(1), _world.ActionGroupsPresent);
+        Assert.Equal(0, _world.ActionGroupsOn);
+
+        // A key whose group has no part does nothing.
+        Frame(() => Key(GlfwKey.Number2, true));
+        Frame(() => Key(GlfwKey.Number2, false));
+        Assert.Equal(0, _world.ActionGroupsOn);
+
+        // All off: the left button aligns, as it always has, and nothing fires.
+        LookAside();
+        Frame(() => Button(GlfwMouseButton.Left, true));
+        Assert.True(Sent().Align);
+        Assert.False(_world.LasersFiring);
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        // A click carries the turn on until the nose is on the view.
+        for (var i = 0; i < 2000 && Sent().Align; i++)
+        {
+            Tick();
+            Frame();
+        }
+
+        Bridge.ConsumeLaserAim(out _);
+
+        // Group 1 on: the same button fires along the view and does not align.
+        LookAside();
+        Frame(() => Key(GlfwKey.Number1, true));
+        Frame(() => Key(GlfwKey.Number1, false));
+        Assert.Equal(ActionGroups.Bit(1), _world.ActionGroupsOn);
+        Frame(() => Button(GlfwMouseButton.Left, true));
+        var sent = Sent();
+        Assert.False(sent.Align);
+        Assert.True(_world.LasersFiring);
+        Assert.True(Bridge.ConsumeLaserAim(out var aim));
+        Assert.Equal(ActionGroups.Bit(1), aim.Groups);
+        Assert.Equal(_snapshot.Hulls[_snapshot.OwnHull].Id, aim.Hull);
+        Assert.True(Vector3.Dot(aim.Direction, sent.Aim) > 0.9999f, $"aim {aim.Direction} view {sent.Aim}");
+
+        // Shift shows the pointer: the click is the windows', so nothing fires and the server is told so.
+        Frame(() => Key(GlfwKey.LeftShift, true));
+        Assert.False(_world.LasersFiring);
+        Assert.True(Bridge.ConsumeLaserAim(out aim));
+        Assert.Equal(0, aim.Groups);
+        Frame(() => Key(GlfwKey.LeftShift, false));
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        Frame();
+        Assert.False(_world.LasersFiring);
+
+        // The key again: all off, and the button aligns once more.
+        Frame(() => Key(GlfwKey.Number1, true));
+        Frame(() => Key(GlfwKey.Number1, false));
+        Assert.Equal(0, _world.ActionGroupsOn);
+        LookAside();
+        Frame(() => Button(GlfwMouseButton.Left, true));
+        Assert.True(Sent().Align);
+        Assert.False(_world.LasersFiring);
+        Frame(() => Button(GlfwMouseButton.Left, false));
+    }
+
     [Fact]
     public void TheAlignLockKeepsTheHullOnTheViewUntilFreeLookShiftOrTheKeyTurnsItOff()
     {
