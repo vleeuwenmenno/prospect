@@ -116,9 +116,28 @@ internal sealed partial class ScreenHost
         _mapNav.Reset(_app.World.Sector.Coord.Y);
     }
 
+    /// <summary>The rock-interior capture's legend: what the rock is and what each layer holds, top left.</summary>
+    private void DrawRockInteriorLegend(RockInteriorCapture cut)
+    {
+        var draw = ImGui.GetForegroundDrawList();
+        var size = ImGui.GetFontSize();
+        var at = new float2(Kit.Px(Theme.Space3), Kit.Px(Theme.Space3) + size * 3f);
+        foreach (var line in cut.Lines)
+        {
+            draw.AddText(_ui.Sans, size, at, Kit.Color(Theme.Text), line);
+            at.Y += size * 1.35f;
+        }
+    }
+
     /// <summary>Everything drawn over the world while in space: flight readouts, command markers, the map.</summary>
     private void DrawWorldInterface(SessionSnapshot snapshot)
     {
+        if (_app.World.RockInterior is { } cut)
+        {
+            DrawRockInteriorLegend(cut);
+            return;
+        }
+
         if (_app.World.ExhaustRock is not null) return;
         var world = _app.World;
         UpdateExploration(snapshot, world);

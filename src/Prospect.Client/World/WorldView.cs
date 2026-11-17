@@ -131,6 +131,12 @@ internal sealed partial class WorldView
     public double DamageWorkerMs => _damage.LastBuildMs;
     private readonly CollisionSparks _sparks = new();
     public ExhaustRockCapture? ExhaustRock { get; set; }
+
+    /// <summary>The rock-interior capture fixture, or null: a rock cut open, drawn instead of hulls and rocks.</summary>
+    public RockInteriorCapture? RockInterior { get; set; }
+
+    /// <summary>Whether a render-only capture fixture replaces the world's hulls, rocks and interface.</summary>
+    public bool CaptureFixture => ExhaustRock is not null || RockInterior is not null;
     private readonly RockExhaust _rockExhaust = new();
     private readonly ThrustEffects _thrust = new(PropulsionLook.Shared);
 
@@ -1237,7 +1243,7 @@ internal sealed partial class WorldView
 
         // Hulls, where the update has them drawn this frame.
         var visuals = _visuals.Hulls;
-        for (var i = 0; ExhaustRock is null && i < Math.Min(snapshot.HullCount, visuals.Length) && candidateCount < _candidates.Length; i++)
+        for (var i = 0; !CaptureFixture && i < Math.Min(snapshot.HullCount, visuals.Length) && candidateCount < _candidates.Length; i++)
         {
             ref var hull = ref snapshot.Hulls[i];
             ref readonly var visual = ref visuals[i];
@@ -1326,6 +1332,14 @@ internal sealed partial class WorldView
             }
         }
 
+        if (RockInterior is { } cut)
+        {
+            var at = cut.Anchor.RelativeTo(camera);
+            var turn = RockInteriorCapture.Facing(_forward, _right, _up);
+            _scene.AddTriangles(frameIndex, cut.Shell, MeshTransform(at, turn, new Vector3(cut.Radius), new Vector3(0.34f, 0.32f, 0.3f), 0, 1));
+            _scene.AddTriangles(frameIndex, cut.Cut, MeshTransform(at, turn, new Vector3(cut.Radius), new Vector3(0.5f), 1, 1));
+        }
+
         if (ExhaustRock is { } capture)
         {
             capture.Advance(time);
@@ -1364,7 +1378,7 @@ internal sealed partial class WorldView
             Add(ref candidateCount, _asteroidMeshBase + DetailFine * Galaxy.AsteroidShapes, center, Quaternion.Identity, ExhaustRockCapture.Radius, new Vector3(0.3f), 0);
             _rockExhaust.Offer(default, 0, 0, center, Quaternion.Identity, ExhaustRockCapture.Radius, new Vector3(0.3f), _thrust, candidateCount - 1);
         }
-        else PrepareRockInstances(camera, aspect, ref candidateCount);
+        else if (RockInterior is null) PrepareRockInstances(camera, aspect, ref candidateCount);
         var rockEffects = _rockExhaust.End(_thrust, _right, _up);
         _rockExhaust.Instances.AsSpan(0, rockEffects).CopyTo(_scene.RockEffects(frameIndex));
         _scene.QueueRockEffects(rockEffects);
@@ -1404,7 +1418,7 @@ internal sealed partial class WorldView
         _scene.AddSparks(frameIndex, _sparks.Expand(camera, _right, _up, _forward, aspect, _tanHalfFov, _viewport.Y, snapshot.ServerTickPrecise + alpha, _collision));
         var f = 1f / _tanHalfFov;
         var sunColor = galaxy.StarClasses[Sector.StarClass].Color * 1.7f;
-        var sunDirection = ExhaustRock is null ? Sector.SunDirection : -Vector3.UnitZ;
+        var sunDirection = RockInterior is not null ? Vector3.Normalize(-_forward + _up * 0.7f - _right * 0.5f) : ExhaustRock is null ? Sector.SunDirection : -Vector3.UnitZ;
         if (_jumpSunBlend < 1f)
         {
             sunColor = Vector3.Lerp(_jumpFromSunColor * 1.7f, sunColor, _jumpSunBlend);
@@ -1430,7 +1444,7 @@ internal sealed partial class WorldView
             Dust = new float4(Wrap(camera.X, DustCell), Wrap(camera.Y, DustCell), Wrap(camera.Z, DustCell), time),
             Drift = new float4(velocity.X, velocity.Y, velocity.Z, velocity.Length()),
             Grid = new float4(Wrap(camera.X, 1000), Wrap(camera.Z, 1000), Wrap(camera.X, sectorSize), Wrap(camera.Z, sectorSize)),
-            GridPlane = new float4((float)(_commandFocus.Y - camera.Y), (float)sectorSize, ExhaustRock is null ? _commandBlend : 0, Exposure),
+            GridPlane = new float4((float)(_commandFocus.Y - camera.Y), (float)sectorSize, !CaptureFixture ? _commandBlend : 0, Exposure),
             Openings = openings,
             Clips = clips,
         };
@@ -1457,7 +1471,7 @@ internal sealed partial class WorldView
         // queues none in either capture; hulls in view are drawn without shields in both.
         _scene.QueueShields(overlayCheck ? 0 : _shields.Draws.Length, _shields.Look.Constants);
         QueueScanPulse(galaxy, camera, frameIndex);
-        _scene.Render(commands, frameIndex, constants, composite, _batches.AsSpan(0, rockBatches), _batches.AsSpan(rockBatches, batchCount - rockBatches), ExhaustRock is null && _commandBlend > 0.01f, markCount, lensing);
+        _scene.Render(commands, frameIndex, constants, composite, _batches.AsSpan(0, rockBatches), _batches.AsSpan(rockBatches, batchCount - rockBatches), !CaptureFixture && _commandBlend > 0.01f, markCount, lensing);
     }
 
     public float ExposureValue => Exposure;
