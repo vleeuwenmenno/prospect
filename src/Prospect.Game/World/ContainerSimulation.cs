@@ -88,7 +88,8 @@ public sealed class ContainerSimulation
                 if (c.Position.RelativeTo(position).LengthSquared() > reach * reach) continue;
                 budget--;
                 FreeContainers.RockContact(ref c, content.Cargo, rock, position, velocity,
-                    content.Rules.CollisionSafeSpeed, content.Rules.CollisionDamagePerTonneSpeedSquared);
+                    content.Rules.CollisionSafeSpeed, content.Rules.CollisionDamagePerTonneSpeedSquared,
+                    rocks.Edits is { } edits ? edits.CutOf(new RockRef(_coord, r)) : default);
             }
             slot = containers.Find(c.Id);
             if (slot >= 0) containers.At(slot) = c;

@@ -34,7 +34,8 @@
     "ScanAsteroid": ["Key:X"],
     "PulseLocator": ["Key:Y"],
     "ToggleGas": ["Key:F4"],
-    "EditorSelectAll": ["Key:A"]
+    "EditorSelectAll": ["Key:A"],
+    "DebugScrape": ["Key:F10"]
   },
   "axes": {
     "Strafe": [{ "negative": "Key:A", "positive": "Key:D" }, { "axis": "Pad:LeftX" }],

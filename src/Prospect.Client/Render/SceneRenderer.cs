@@ -352,6 +352,22 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private const int DamageDrawLimit = 64;
     private readonly MeshRange[] _damageRanges = new MeshRange[DynamicDraws];
     private int _damageCount, _damageUsed, _damageMeshes, _modelDraws;
+    /// <summary>The most scraped rocks drawn with their patch in one frame.</summary>
+    public const int RockPatchDraws = 64;
+
+    /// <summary>Vertices the patches of scraped rocks share: one buffer for every frame slot, written only where no frame in flight reads.</summary>
+    public readonly int RockPatchCapacity = RockPatchLook.Load().ArenaVertices;
+    private GpuBuffer _rockPatchVertices;
+
+    private struct RockPatchDraw
+    {
+        public int Mesh, Instance, FirstVertex, VertexCount, RunCount;
+        public int[] Runs;
+    }
+
+    private readonly RockPatchDraw[] _rockPatches = new RockPatchDraw[RockPatchDraws];
+    private int _rockPatchCount;
+
     private readonly GpuBuffer[] _shieldVertexBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
     private readonly GpuBuffer[] _shieldIndexBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
     private readonly GpuBuffer[] _shieldInstanceBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
@@ -455,6 +471,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
                 _rockEffectBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(RockEffectInstance) * RockExhaust.Capacity);
                 _plumeBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(PlumeInstance) * PropulsionLook.PlumeCapacity);
                 _tractorBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(TractorInstance) * FreeContainers.Capacity);
+                if (i == 0) _rockPatchVertices = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshVertex) * RockPatchCapacity);
                 _damageVertices[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshVertex) * DamageVertices);
                 _damageInstances[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshInstance) * DynamicDraws);
                 _shieldVertexBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshVertex) * ShieldVisuals.MaxVertices);
@@ -1093,6 +1110,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         if (lensing)
             KeepScene(commands, _skyImage, false, ref color, ref depth);
         DrawMeshes(commands, frameIndex, rocks, _meshPipeline);
+        DrawRockPatches(commands, frameIndex);
         if (lensing)
             KeepScene(commands, _rocksImage, true, ref color, ref depth);
         DrawMeshes(commands, frameIndex, hulls, _hullPipeline);
@@ -1267,6 +1285,57 @@ internal sealed unsafe class SceneRenderer : IDisposable
         new Span<MeshInstance>((void*)_damageInstances[frame].Mapped, DynamicDraws)[_damageCount] = instance;
         _damageRanges[_damageCount++] = new MeshRange(_damageUsed, count, 0);
         _damageUsed += count;
+    }
+
+    /// <summary>
+    /// The shared patch vertices, for writing a range no frame in flight draws: one that was never queued, or was last
+    /// queued more than <see cref="FrameRenderer.FramesInFlight"/> frames ago.
+    /// </summary>
+    public Span<MeshVertex> RockPatchVertices(int first, int count) => new Span<MeshVertex>((void*)_rockPatchVertices.Mapped, RockPatchCapacity).Slice(first, count);
+
+    /// <summary>Forgets last frame's scraped rocks; call before queueing this frame's.</summary>
+    public void BeginRockPatches() => _rockPatchCount = 0;
+
+    /// <summary>
+    /// Queues one scraped rock: the runs of its finest mesh's triangles still drawn (first triangle and count, two
+    /// numbers a run) and its patch's vertices, both with one instance of this frame's instance buffer. The runs must
+    /// stay as they are until the frame is recorded. False, queueing nothing, when the frame's patch draws are used up.
+    /// </summary>
+    public bool AddRockPatch(int mesh, int instance, int firstVertex, int vertexCount, int[] runs, int runCount)
+    {
+        if (_rockPatchCount == RockPatchDraws) return false;
+        _rockPatches[_rockPatchCount++] = new RockPatchDraw { Mesh = mesh, Instance = instance, FirstVertex = firstVertex, VertexCount = vertexCount, Runs = runs, RunCount = runCount };
+        return true;
+    }
+
+    // Scraped rocks, with the rock pipeline and in the rock pass: first what is left of each one's shared mesh, as
+    // runs of its index buffer, then every patch from the buffer they share.
+    private void DrawRockPatches(CommandBuffer commands, int frameIndex)
+    {
+        if (_rockPatchCount == 0)
+            return;
+        var zero = new ByteSize64(0);
+        Span<VkBuffer> buffers = [_vertexBuffer.Buffer, _instanceBuffers[frameIndex].Buffer];
+        Span<ByteSize64> offsets = [zero, zero];
+        commands.BindPipeline(VkPipelineBindPoint.Graphics, _meshPipeline);
+        commands.BindVertexBuffers(0, buffers, offsets);
+        commands.BindIndexBuffer(_indexBuffer.Buffer, zero, VkIndexType.UInt32);
+        for (var i = 0; i < _rockPatchCount; i++)
+        {
+            ref readonly var patch = ref _rockPatches[i];
+            var mesh = _meshes[patch.Mesh];
+            for (var run = 0; run < patch.RunCount; run++)
+                commands.DrawIndexed(patch.Runs[run * 2 + 1] * 3, 1, mesh.FirstIndex + patch.Runs[run * 2] * 3, mesh.VertexOffset, patch.Instance);
+        }
+
+        buffers[0] = _rockPatchVertices.Buffer;
+        commands.BindVertexBuffers(0, buffers, offsets);
+        for (var i = 0; i < _rockPatchCount; i++)
+        {
+            ref readonly var patch = ref _rockPatches[i];
+            if (patch.VertexCount > 0)
+                commands.Draw(patch.VertexCount, 1, patch.FirstVertex, patch.Instance);
+        }
     }
 
     private void DrawMeshes(CommandBuffer commands, int frameIndex, ReadOnlySpan<DrawBatch> batches, VkPipeline pipeline)
@@ -1782,6 +1851,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
             _tractorBuffers[i].Destroy(_gpu);
             _rockEffectBuffers[i].Destroy(_gpu);
             _rockMarkBuffers[i].Destroy(_gpu);
+            if (i == 0) _rockPatchVertices.Destroy(_gpu);
             _damageVertices[i].Destroy(_gpu);
             _damageInstances[i].Destroy(_gpu);
             _shieldVertexBuffers[i].Destroy(_gpu);

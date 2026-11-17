@@ -1,6 +1,6 @@
 # Drones and mining
 
-Product direction from the brainstorm on 2026-11-16. Nothing here is built yet.
+Product direction from the brainstorm on 2026-11-16. Built so far: R1, the scrape foundation (see "R1 as built").
 
 ## Why
 
@@ -102,6 +102,7 @@ Three tracks. A track's steps run in order; the tracks run side by side, each in
 
 1. R1, scrape foundation: the edit list per rock, scrape bricks, wire, save, collision, drawing, brick seams
    and level of detail. A temporary debug scrape (local games only) drives it until the laser exists.
+   **Done** (2026-11-17), see "R1 as built".
 2. R2, cracks: radial pieces as new rocks, rough natural break faces, wire and save of the pieces.
 3. R3, mining laser: a face mount that scrapes on an order; it frees floating ore chunks.
 4. R4, ore: chunks pulled by tractor into an ore hopper, raw ore containers, the Ore Cargo window.
@@ -118,6 +119,75 @@ Three tracks. A track's steps run in order; the tracks run side by side, each in
 
 1. I1, interiors: crust, mantle, veins and pockets from the seed; what scraping and cracking yield.
 2. I2, heat cracking: the special laser and the heat window.
+
+## R1 as built
+
+How to work on it is in `AGENTS.md`, "Rock edits (scrapes)". This is what exists and what does not.
+
+### What exists
+
+- The edit list per rock (`RockEditLog`), server-owned, append-only. A scrape is a capsule in whole numbers.
+- One way to make an edit: `ServerHost.ScrapeRock`. The mining laser (R3) will call it.
+- Bricks of 8³ cells at 0.25 m, one signed byte a sample, only where a scrape cut or came within a cell (`RockBricks`).
+- Wire (protocol 64), save (codec 17), contact for hulls and loose containers, drawing with level of detail.
+- The temporary debug scrape: `F10` in the pilot view and `--open rock-scrape` for captures.
+
+### What changed from the spike
+
+- Bricks hold the cut only, never the base shape. The edited rock is "inside the base shape, outside every cut".
+- So bricks depend on the edits alone, in exact arithmetic: the same bytes on every machine. The spike's
+  cross-machine risk is gone for which bricks exist and what they hold.
+- The unedited surface is never drawn from bricks. Reached facets are clipped on their own planes with their own
+  normals; the cut's walls are clipped to the base shape; both by the same planes. No seam, no normal jump.
+- Level of detail: beyond half a metre a pixel the rock is its plain facets (`content/visuals/rock_edits.json`).
+- A stream-in replay runs on a worker. A scrape costs under 0.2 ms to apply, not 10 to 30 ms.
+
+### Figures
+
+`content/rules/rock_edits.json`, shared content:
+
+| Figure | Value |
+| --- | --- |
+| Cell, brick | 0.25 m, 2 m |
+| Scrape radius | 0.25 to 2 m |
+| Longest stroke of one scrape | 4 m |
+| Edits and bricks a rock | 2,048 and 1,024 |
+| Edited rocks, edits and bricks a world | 512, 65,536 and 16,384 |
+| Debug scrape | 1 m radius, 0.4 m bite a pass, 600 m range, 0.1 s apart |
+
+Measured (this machine, Release, one thread, a three-pass groove of 48 scrapes, 8 m long, 1 m radius):
+
+| Figure | 20 m rock | 200 m rock | 2 km rock |
+| --- | --- | --- | --- |
+| Applying a scrape to the bricks | under 0.2 ms; 0.05 ms once the code is warm | same | same |
+| Bricks the groove made (of which hold a cut) | 28 (24) | 39 (31) | 42 (34) |
+| Base facets the patch replaces | 3,381 | 113 | 4 |
+| Patch vertices | 42,240 | 23,277 | 27,894 |
+| Patch build | 22 ms | 3.3 ms | 2.6 ms |
+| Runs the shared mesh is drawn in | 45 | 7 | 2 |
+| Wire, the whole groove | 468 B | 468 B | 468 B |
+
+- The spike's bricks for the same groove: 80, 128 and 632; 29, 8.8 and 17 ms a scrape.
+- A brick is 729 bytes on the server, on each client's simulation and on its render side.
+- Memory reserved at start: about 14 MB a simulation side, 29 MB on the render side, 48 MB of vertex buffer.
+- `make bench` scrapes a 199 m rock thirty passes: no managed allocation on any thread.
+
+### Not built, known limits
+
+- Ice shards cannot be scraped: their eight faces are not facets of the shared mesh.
+- A patch is rebuilt whole when its rock changes. Cost grows with the rock's bricks; a rock near its limits lags.
+- A small rock is slow to patch (22 ms for a 20 m one, 76 ms for an 8 m one): its facets are smaller than a cell,
+  so thousands are reached.
+- A patch over 600,000 vertices is not drawn; the rock shows its plain facets. Collision still has the groove.
+- Where passes cross, the wall's shading is faceted: a sampled field cannot hold a crease.
+- The pointer, the target outline, exhaust marks' ray and the shield's contact patch still use the unscraped surface.
+- A rock's edits reach a client by sensor range to its surface, gas not asked; farther rocks show no grooves.
+- Contact samples a box at its centre, corners and nearest point, as before: a groove narrower than a block can
+  be bridged or missed.
+- A block pressed more than a cell (0.25 m) into a groove's wall in one tick reads no wall there and is pushed
+  out by the base shape instead: fast impacts into a groove can bounce out of it.
+- A full patch buffer (2,000,000 vertices) drops the patch drawn longest ago and tries again later.
+- Nothing is yielded: no ore, no chunks. Scraped volume is not counted.
 
 ## Open
 
@@ -202,6 +272,8 @@ In `docs/roadmap/rock-edit-spike/`. Left to right: base, A, B (or A, B for groov
 - `both-giant-a.jpg`: 2 km rock, A only. The crack and rough break look right in 0.7 s.
 
 ### Risks
+
+How R1 answered them is in "R1 as built". Cracks (R2) still face the radial and giant-rock ones.
 
 - Seams (B): bricks overlap base facets by up to 6 cm, and normals jump there. Needs clipping to the cones and a
   skirt, or one surface for the whole rock.

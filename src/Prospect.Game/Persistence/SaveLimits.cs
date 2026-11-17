@@ -2,6 +2,8 @@ using System.Security.Cryptography;
 using Prospect.Game.Protocol;
 using Prospect.Game.World;
 
+using Prospect.Game.World.RockEditing;
+
 namespace Prospect.Game.Persistence;
 
 /// <summary>
@@ -34,6 +36,12 @@ public sealed record SaveLimits
     /// </summary>
     public int MaxMovedSectors { get; internal init; } = 256;
 
+    /// <summary>Asteroids that hold a scrape.</summary>
+    public int MaxEditedRocks { get; internal init; } = 512;
+
+    /// <summary>Scrapes, every asteroid's together.</summary>
+    public int MaxRockEdits { get; internal init; } = 65536;
+
     /// <summary>Designs in a catalogue: a design's number is one byte, and 255 names the manifest.</summary>
     public const int MaxDesigns = byte.MaxValue;
 
@@ -64,6 +72,7 @@ public sealed record SaveLimits
         + (long)MaxHulls * (WorldSnapshotCodec.HullFixedBytes + VisualDamageState.Capacity * WorldSnapshotCodec.DentBytes)
         + (long)MaxBlocks * (sizeof(float) + sizeof(int) + sizeof(double))
         + (long)MaxRocks * WorldSnapshotCodec.RockBytes
+        + (long)MaxEditedRocks * WorldSnapshotCodec.EditedRockBytes + (long)MaxRockEdits * RockEditCodec.ScrapeBytes
         + (long)MaxHulls * BlockStateStore.MaxContainers * WorldSnapshotCodec.CargoRecordBytes;
 
     /// <summary>
@@ -81,5 +90,7 @@ public sealed record SaveLimits
         + (long)MaxHulls * System.Runtime.CompilerServices.Unsafe.SizeOf<SavedHull>()
         + (long)MaxBlocks * (sizeof(float) + sizeof(int) + sizeof(double))
         + (long)MaxRocks * System.Runtime.CompilerServices.Unsafe.SizeOf<RockDelta>()
+        + (long)MaxEditedRocks * (System.Runtime.CompilerServices.Unsafe.SizeOf<RockRef>() + sizeof(int))
+        + (long)MaxRockEdits * System.Runtime.CompilerServices.Unsafe.SizeOf<RockScrape>()
         + (long)MaxHulls * BlockStateStore.MaxContainers * System.Runtime.CompilerServices.Unsafe.SizeOf<HoldContainer>();
 }

@@ -183,6 +183,34 @@ public sealed class PlayerInputBridge
         }
     }
 
+    private bool _hasRockScrape;
+    private RockScrapeRequest _rockScrape;
+
+    /// <summary>
+    /// Queues the temporary debug scrape: rays in the rock's own frame along which the server looks for its surface.
+    /// Local games only; the server refuses it anywhere else. A newer request replaces one not sent yet.
+    /// </summary>
+    public void DebugScrape(in RockScrapeRequest request)
+    {
+        if (request.Rays is < 1 or > RockScrapeRequest.MaxRays || request.RadiusMm == 0) return;
+        lock (_lock)
+        {
+            _rockScrape = request;
+            _hasRockScrape = true;
+        }
+    }
+
+    internal bool ConsumeRockScrape(out RockScrapeRequest request)
+    {
+        lock (_lock)
+        {
+            request = _rockScrape;
+            var pending = _hasRockScrape;
+            _hasRockScrape = false;
+            return pending;
+        }
+    }
+
     internal EditorRequestMessage TakeCargoAdd() => _takenCargoAdd;
 
     private FillBlocks _fillBlocks;

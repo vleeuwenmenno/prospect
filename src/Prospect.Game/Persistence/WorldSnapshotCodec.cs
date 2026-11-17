@@ -6,6 +6,8 @@ using Prospect.Engine.Net;
 using Prospect.Game.Protocol;
 using Prospect.Game.World;
 
+using Prospect.Game.World.RockEditing;
+
 namespace Prospect.Game.Persistence;
 
 /// <summary>
@@ -26,7 +28,7 @@ namespace Prospect.Game.Persistence;
 public static partial class WorldSnapshotCodec
 {
     /// <summary>The layout's version. A save with any other is refused; there are no migrations yet.</summary>
-    public const int Version = 16;
+    public const int Version = 17;
     internal const int ChartBytes = 4 + 12 + 8;
 
     /// <summary>"PWS1": tells a save from any other bytes before its version is believed.</summary>
@@ -52,7 +54,7 @@ public static partial class WorldSnapshotCodec
         + 1 + WorldSettings.Capacity * (1 + WorldSettingCatalog.MaxIdLength + 4)
         + 8 + 8 + 4 + 8
         + 4 + byte.MaxValue
-        + 8 * 4 + 4 + SavedCargoRules.WireBytes + 8;
+        + 8 * 4 + 4 + SavedCargoRules.WireBytes + 8 + 8;
 
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
@@ -62,7 +64,7 @@ public static partial class WorldSnapshotCodec
         long size = 4 + 4 + 4 + 4 + ContentIdentity.WireSize + 16 + 1 + Utf8.GetByteCount(snapshot.Name) + 8 + 8 + 12 + 1;
         for (var i = 0; i < snapshot.SettingCount; i++)
             size += 1 + snapshot.SettingIds[i].Length + 4;
-        size += 8 + 8 + 4 + 8 + 4 + snapshot.StartingFleet.Length + 8 * 4 + 4 + SavedCargoRules.WireBytes + 8;
+        size += 8 + 8 + 4 + 8 + 4 + snapshot.StartingFleet.Length + 8 * 4 + 4 + SavedCargoRules.WireBytes + 8 + 8 + RockEditBytes(snapshot);
         for (var i = 0; i < snapshot.DesignCount; i++)
             size += 4 + SHA256.HashSizeInBytes + snapshot.Designs[i].Length;
         size += (long)snapshot.OwnerCount * OwnerBytes;
@@ -147,6 +149,8 @@ public static partial class WorldSnapshotCodec
         snapshot.CargoRules.Write(ref writer);
         writer.WriteInt32(snapshot.FreeContainerCount);
         writer.WriteUInt32(snapshot.NextContainerId);
+        writer.WriteInt32(snapshot.EditedRockCount);
+        writer.WriteInt32(snapshot.RockEditCount);
 
         for (var i = 0; i < snapshot.DesignCount; i++)
         {
@@ -226,6 +230,8 @@ public static partial class WorldSnapshotCodec
         foreach (var record in snapshot.ModuleObservations.AsSpan(0, snapshot.ModuleObservationCount)) WriteModule(ref writer, record);
 
         foreach (var container in snapshot.FreeContainers.AsSpan(0, snapshot.FreeContainerCount)) WriteFreeContainer(ref writer, container);
+
+        WriteRockEdits(ref writer, snapshot);
 
         if (writer.Length != size)
             throw new InvalidDataException("The snapshot's counts do not describe its records.");
@@ -350,6 +356,8 @@ public static partial class WorldSnapshotCodec
         var cargoRules = SavedCargoRules.Read(ref reader);
         var freeCount = reader.ReadInt32();
         var nextContainer = reader.ReadUInt32();
+        var editedRocks = reader.ReadInt32();
+        var rockEdits = reader.ReadInt32();
         if (!reader.IsValid)
         {
             error = "the save ends inside its header";
@@ -367,14 +375,16 @@ public static partial class WorldSnapshotCodec
             || (uint)owners > (uint)limits.MaxOwners || (uint)hulls > (uint)limits.MaxHulls || (uint)blocks > (uint)limits.MaxBlocks
             || (uint)losses > (uint)blocks || (uint)tanks > (uint)blocks || (uint)rocks > (uint)limits.MaxRocks || charts < 0 || charts > limits.MaxCharts
             || observations < 0 || observations > limits.MaxModuleObservations
-            || cargoCount < 0 || cargoCount > (long)hulls * BlockStateStore.MaxContainers)
+            || cargoCount < 0 || cargoCount > (long)hulls * BlockStateStore.MaxContainers
+            || (uint)editedRocks > (uint)limits.MaxEditedRocks || (uint)rockEdits > (uint)limits.MaxRockEdits || editedRocks > rockEdits)
         {
             error = "the save names more than a world may hold";
             return false;
         }
 
         var promised = (long)designCount * (4 + SHA256.HashSizeInBytes) + (long)owners * OwnerBytes + (long)hulls * HullFixedBytes
-            + (long)losses * sizeof(int) + (long)blocks * sizeof(float) + (long)tanks * sizeof(double) + (long)rocks * RockBytes + (long)charts * ChartBytes + (long)observations * ModuleObservationBytes + (long)cargoCount * CargoRecordBytes + (long)freeCount * FreeContainerBytes;
+            + (long)losses * sizeof(int) + (long)blocks * sizeof(float) + (long)tanks * sizeof(double) + (long)rocks * RockBytes + (long)charts * ChartBytes + (long)observations * ModuleObservationBytes + (long)cargoCount * CargoRecordBytes + (long)freeCount * FreeContainerBytes
+            + (long)editedRocks * EditedRockBytes + (long)rockEdits * RockEditCodec.ScrapeOnBytes;
         if (promised > reader.Remaining)
         {
             error = "the save names more than it holds";
@@ -410,7 +420,7 @@ public static partial class WorldSnapshotCodec
             designs[i] = reader.ReadBytes(length).ToArray();
         }
 
-        var result = new WorldSnapshot(owners, hulls, blocks, rocks, charts, observations)
+        var result = new WorldSnapshot(owners, hulls, blocks, rocks, charts, observations, editedRocks, rockEdits)
         {
             Compatibility = compatibility,
             WorldId = worldId,
@@ -602,6 +612,12 @@ public static partial class WorldSnapshotCodec
                 if (!known) { error = "unknown container claim owner"; return false; }
             }
             result.FreeContainers[i] = c;
+        }
+
+        if (!ReadRockEdits(ref reader, result, editedRocks, rockEdits))
+        {
+            error = "invalid saved rock edits";
+            return false;
         }
 
         if (!reader.IsValid || reader.Remaining != 0 || result.BlockCount != blocks || result.LossCount != losses || result.TankCount != tanks || result.CargoCount != cargoCount)

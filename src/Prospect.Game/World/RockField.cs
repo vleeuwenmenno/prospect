@@ -107,6 +107,12 @@ public sealed class RockField
 
     public Galaxy Galaxy => galaxy;
 
+    /// <summary>
+    /// The scrapes made into this field's asteroids, or null where none are kept. Contact reads an asteroid's
+    /// surface through it, so a groove is real for hulls and loose cargo on the server and in prediction alike.
+    /// </summary>
+    public RockEditing.RockEdits? Edits { get; set; }
+
     /// <summary>Every asteroid that has ever been pushed.</summary>
     public ReadOnlySpan<RockDelta> Deltas => _deltas.AsSpan(0, _deltaCount);
 

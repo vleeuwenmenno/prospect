@@ -81,6 +81,28 @@ public sealed class ContentIdentityTests
     }
 
     [Fact]
+    public void RockEditCellSizeIsSharedContentBecauseEverySideBuildsItsBricksFromIt()
+    {
+        // A cell of half a metre is a valid figure only with a least radius that is not below it, so both change.
+        using var copy = new ContentCopy();
+        copy.Replace("rules/rock_edits.json", "\"cellMetres\": 0.25", "\"cellMetres\": 0.5");
+        copy.Replace("rules/rock_edits.json", "\"minRadiusMetres\": 0.25", "\"minRadiusMetres\": 0.5");
+        var changed = copy.Load();
+        Assert.NotEqual(Content.Identity, changed.Identity);
+        Assert.Equal(0.5f, changed.RockEdits.CellMetres);
+        Assert.Equal(Content.RockEdits.CellMetres, GameContent.Load().RockEdits.CellMetres);
+    }
+
+    [Fact]
+    public void RockEditRulesThatContradictEachOtherAreRefusedWhenTheContentLoads()
+    {
+        // The cell alone, with a least radius below it, is not content the game accepts.
+        using var copy = new ContentCopy();
+        copy.Replace("rules/rock_edits.json", "\"cellMetres\": 0.25", "\"cellMetres\": 0.5");
+        Assert.Throws<InvalidDataException>(() => copy.Load());
+    }
+
+    [Fact]
     public void GasSensorPenaltyIsSharedContent()
     {
         using var copy = new ContentCopy();
@@ -137,7 +159,7 @@ public sealed class ContentIdentityTests
             return;
 
         using var copy = new ContentCopy();
-        string[] shared = ["blocks/cargo.json", "blocks/blocks.json", "rules/settings.json", "rules/exploration.json", "ships/fleet.json", "ships/command_pod.json", "ships/drone.json", "galaxy/galaxy.json", "net/blocks.json"];
+        string[] shared = ["blocks/cargo.json", "blocks/blocks.json", "rules/settings.json", "rules/exploration.json", "ships/fleet.json", "ships/command_pod.json", "ships/drone.json", "galaxy/galaxy.json", "net/blocks.json", "rules/rock_edits.json"];
         var writers = new List<Task>();
         foreach (var file in shared)
         {
@@ -199,6 +221,10 @@ public sealed class ContentIdentityTests
     [InlineData("rules/settings.json", "\"name\": \"Weak\",\n          \"value\": 4", "\"name\": \"Weak\",\n          \"value\": 5")]
     // The galaxy rules.
     [InlineData("galaxy/galaxy.json", "\"winding\": 4.5", "\"winding\": 4.6")]
+    // Rock edits: what a scrape may be and how much a rock may hold, which the server enforces and the client checks.
+    [InlineData("rules/rock_edits.json", "\"maxSegmentMetres\": 4", "\"maxSegmentMetres\": 3")]
+    [InlineData("rules/rock_edits.json", "\"maxEditsPerRock\": 2048", "\"maxEditsPerRock\": 2047")]
+    [InlineData("rules/rock_edits.json", "\"maxRadiusMetres\": 2", "\"maxRadiusMetres\": 3")]
     public void AnyChangeToWhatBothSidesSimulateGivesAnotherIdentity(string file, string old, string replacement)
     {
         using var copy = new ContentCopy();

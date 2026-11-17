@@ -327,6 +327,8 @@ bench: need-dotnet ## Release benchmark: empty scene, resizing, editor panels an
 	$(Q)python3 tools/prepare_tractor_capture.py $(BIN)/Prospect.Client/release $(TRACTOR_BENCH)
 	$(call step,Benchmarking cargo (jettison, drift, tractor pull and stow))
 	$(Q)$(RUN_ENV) "$(DOTNET)" $(TRACTOR_BENCH)/prospect.dll --bench 25 --size 1920x1080 --open cargo --jettison 5
+	$(call step,Benchmarking a rock being scraped (edits, bricks, patch rebuilds))
+	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 14 --size 1920x1080 --open rock-scrape --rock-scrape-radius 100 --rock-scrape-passes 30
 
 # Inside gas clouds, where the primary cloud is marched at half resolution (assets/shaders/gas_half.glsl): an ordinary
 # cloud from inside, from the pilot's seat (composed with the shields) and from the command view, a huge one and a

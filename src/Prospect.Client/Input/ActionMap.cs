@@ -42,6 +42,7 @@ internal enum InputAction
     PulseLocator,
     ToggleGas,
     EditorSelectAll,
+    DebugScrape,
     Count,
 }
 

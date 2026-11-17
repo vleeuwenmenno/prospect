@@ -118,6 +118,9 @@ The identity covers:
 - `content/blocks/cargo.json`: container unit edge, sizes, shapes and hull points.
 - `content/blocks/blocks.json`: block types, flight rules, size rules, design limits and fixed collision budgets.
 - `content/rules/settings.json`: which world settings exist, their ranges and defaults.
+- `content/rules/exploration.json`: jump, sensor and scan rules.
+- `content/rules/rock_edits.json`: what a scrape of a rock may be, the cell size of its bricks, and how many edits
+  and bricks a rock and a world hold.
 - `content/galaxy/galaxy.json`: the galaxy rules and sector modules.
 - `content/net/blocks.json`: block recovery and bulk transfer bounds.
 
@@ -1113,3 +1116,21 @@ Active module spending is shared with client prediction through `ModuleScanRules
 - Editor release adds its token checks, then uses the same release path. Claims use durable hull owner ids;
   every release waits `pickupDelaySeconds` (default 10). Visibility and aging are unchanged.
 - Successful release publishes the normal hold and free-container updates. Refused flight requests have no separate reply.
+
+### Rock edits (protocol 64)
+
+- Reliable message 39, server to client: a run of one rock's edits in the order they were made. Sector (12 bytes),
+  rock index (uint16), place of the run's first edit in the rock's list (uint16), count (1 to 64), then the edits:
+  21 bytes for one that starts anywhere, 9 for one that continues the edit before it. 1,362 bytes at most.
+  The first edit of a message is always in its full form.
+- The server sends a connection the edits it lacks of every rock one of its sensors reaches, surface included
+  (`RockInView`; gas is not asked, since a hull that can touch a rock must have its grooves). New edits go out in the
+  tick they are made; a rock that comes into view gets its whole list, at most 256 edits a tick.
+- A connection is sent a rock's edits in order and each once. A client takes a run only if it continues what it
+  holds; it checks every edit against the rules and the rock its own galaxy has there, and drops a run that fails.
+- Bricks and meshes never travel: each side works them out from the edits.
+- Disclosure: a rock's edits tell a client that someone scraped it, within sensor range only.
+- Reliable message 40, client to server: the temporary debug scrape. Sector, rock index, radius in millimetres,
+  1 to 17 rays (an origin and a direction, 24 bytes each) in the rock's own frame; 426 bytes at most.
+  Taken only on the in-process link of a server with debug fill allowed, from a player flying a live hull, at most
+  once every 0.1 s, with every hit within 600 m of that hull. A refused request has no reply.

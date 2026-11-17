@@ -25,6 +25,19 @@ public sealed class ServerConfig
     /// <summary>Capture-only impact speed against a large rock, in an unsaved local game.</summary>
     public float? ScriptedRamSpeed { get; init; }
 
+    /// <summary>
+    /// Scripted runs only (<c>--open rock-scrape</c>): two seconds in, every flown hull is put above the rock of the
+    /// spawn sector whose radius is nearest this many metres, nose to it, <see cref="ScriptedRockScrapeStandoff"/>
+    /// metres off its surface. Null leaves hulls where they spawn.
+    /// </summary>
+    public float? ScriptedRockScrapeRadius { get; init; }
+
+    /// <inheritdoc cref="ScriptedRockScrapeRadius" />
+    public float ScriptedRockScrapeStandoff { get; init; } = 25f;
+
+    /// <summary>Scripted runs only: this many seconds in, the hull is set down into the groove scraped by then and pressed against it for three seconds.</summary>
+    public float? ScriptedRockScrapeRest { get; init; }
+
     public int ScriptedExhaustShield { get; init; }
 
     /// <summary>
@@ -291,6 +304,15 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public bool VisibilitySent;
         public readonly ulong[] Visible = new ulong[BlockSet.WordCount(HullStore.MaxHulls)];
 
+        /// <summary>Per edited rock (its slot in the world's edit log): how many of its edits this connection was sent, and the last of them.</summary>
+        public int[] RockEditsSent = [], RockEditsLast = [];
+
+        /// <summary>The count of the world's edits at which this connection was last found to lack none it may see.</summary>
+        public int RockEditsSeen;
+
+        /// <summary>The first tick at which the connection's next debug scrape is taken.</summary>
+        public long NextRockScrape;
+
         /// <summary>The slot of the durable owner this connection was let in as; -1 in a world that is not saved.</summary>
         public long WreckSettingsVersion;
         public uint CargoHull, CargoRevision;
@@ -314,6 +336,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             Array.Clear(Destroyed);
             SensorHead = -1;
             SentRocks.Clear();
+            Array.Clear(RockEditsSent);
+            RockEditsSeen = 0;
+            NextRockScrape = 0;
             VisibilitySent = false;
             RockCursor = 0;
             Navigation = SentNavigation = default;
@@ -464,6 +489,15 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                     throw new InvalidDataException("Scripted exhaust needs an unsaved private in-process server.");
                 _scriptedExhaustShield = config.ScriptedExhaustShield;
             }
+            if (config.ScriptedRockScrapeRadius is { } scrapeRadius)
+            {
+                if (!(scrapeRadius is > 0 and <= 100_000) || !(config.ScriptedRockScrapeStandoff is >= 1 and <= 5000) || config.ScriptedRockScrapeRest is < 0 or > 600
+                    || config.Visibility != ServerVisibility.Private || world is not null || transports.Any(t => !t.IsInProcess))
+                    throw new InvalidDataException("A scripted rock scrape needs an unsaved private in-process server.");
+                _scriptedScrapeRadius = scrapeRadius;
+                _scriptedScrapeStandoff = config.ScriptedRockScrapeStandoff;
+                _scriptedScrapeRest = config.ScriptedRockScrapeRest;
+            }
             if (config.ScriptedRamSpeed is { } ramSpeed)
             {
                 if (!(ramSpeed >= 0 && ramSpeed <= 100) || config.Visibility != ServerVisibility.Private || world is not null || transports.Any(t => !t.IsInProcess))
@@ -583,6 +617,10 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
             // A saved world's asteroids are bounded before they are pushed, never when they are saved.
             _rocks = new RockField(Galaxy, _saveLimits.MaxRocks, _saveLimits.MaxMovedSectors);
+            _rockEdits = new World.RockEditing.RockEdits(_content.RockEdits);
+            _rockEditOrigins = new Double3[_content.RockEdits.MaxEditedRocks];
+            _rockEditRadii = new float[_content.RockEdits.MaxEditedRocks];
+            _rocks.Edits = _rockEdits;
             _containerSimulation = new ContainerSimulation(Galaxy);
             _hulls.BlockStates.CargoEjection = EjectDestroyedRack;
 
@@ -599,7 +637,11 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             _connections = new Connection[config.MaxPlayers + _limits.PendingTotal + inProcess];
             for (var i = 0; i < _connections.Length; i++)
             {
-                _connections[i] = new Connection();
+                _connections[i] = new Connection
+                {
+                    RockEditsSent = new int[_content.RockEdits.MaxEditedRocks],
+                    RockEditsLast = new int[_content.RockEdits.MaxEditedRocks],
+                };
                 _connections[i].Reset();
             }
 
@@ -845,6 +887,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         TickVisualBenchmark(tick);
         TickScriptedShieldBreak(tick);
         TickScriptedRam(tick);
+        TickScriptedRockScrape(tick);
         TickScriptedExhaustShield();
         TickScriptedFleetHurt(tick);
 
@@ -918,6 +961,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             }
         }
 
+        SendRockEdits();
         TickExploration(tick);
         foreach (var connection in _connections)
             if (connection.State == ConnectionState.Active) { SendExploration(connection); SendModules(connection); }
@@ -1189,6 +1233,10 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             case MessageId.JettisonCargo when channel == NetChannel.Reliable:
                 if (JettisonCargoMessage.TryRead(ref reader, out var cargo))
                     ReleaseCargo(connection, cargo.Hull, cargo.Rack, cargo.Index, cargo.Tick, cargo.Mode);
+                break;
+            case MessageId.RockScrape when channel == NetChannel.Reliable:
+                if (RockScrapeRequest.TryRead(ref reader, out var scrape))
+                    DebugScrape(connection, scrape);
                 break;
             case MessageId.Editor when channel == NetChannel.Reliable:
                 ReceiveEditor(connection, ref reader);

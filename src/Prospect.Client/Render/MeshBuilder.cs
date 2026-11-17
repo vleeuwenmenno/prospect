@@ -137,10 +137,17 @@ internal static class MeshBuilder
             normals[c] += face;
         }
 
+        for (var i = 0; i < normals.Length; i++)
+            normals[i] = Vector3.Normalize(normals[i]);
+
+        // The patches of scraped rocks are meshed against exactly these values.
+        if (subdivisions == AsteroidMesh.Subdivisions)
+            RockBaseMesh.Adopt(shape, positions, normals);
+
         var mesh = new MeshData { BoundingRadius = 1f };
         mesh.Vertices.Capacity = positions.Length;
         for (var i = 0; i < positions.Length; i++)
-            mesh.Vertices.Add(new MeshVertex { Position = ToFloat3(positions[i]), Normal = ToFloat3(Vector3.Normalize(normals[i])) });
+            mesh.Vertices.Add(new MeshVertex { Position = ToFloat3(positions[i]), Normal = ToFloat3(normals[i]) });
         mesh.Indices.AddRange(indices);
         return mesh;
     }

@@ -35,6 +35,14 @@ Editor lines show reachable racks; amber racks have no tractor access. Move the 
 The energy tooltip lists TRACTORS. No pickup key or pickup by touch; no allow-list/block-list filter yet.
 
 
+Rocks can be scraped: a scrape cuts a groove into an asteroid for everyone who has it in view, hulls and loose
+containers touch the groove, and it is saved with the world. This is the foundation of mining and has no tool yet:
+the only way to scrape is the temporary debug key (`F10`, held in the pilot view, private local games only), which
+cuts a metre-wide groove where the view's centre meets a rock within 600 m of the ship. Far away a scraped rock is
+drawn without its grooves. Not there: the mining laser, ore, cracks, scraping ice shards, and the pointer and
+exhaust marks following a groove (they still see the unscraped surface). A rock holds at most 2,048 scrapes and a
+world 65,536 (`content/rules/rock_edits.json`). See [drones and mining](docs/roadmap/drones-mining.md).
+
 Propulsion burns fuel and is directional: engines, hot thrusters and cold gas thrusters each push the opposite way
 to the way they face, and burn bipropellant, hydrazine and nitrogen from tank blocks. Engines are blocks of any
 size; thrusters are small parts mounted on the faces of blocks, several to a face, that fill no cell and point out
@@ -649,6 +657,7 @@ Ship editor (`B` in a ship, `Ctrl`+`B` in the drone, or the New ship dialog's `E
 | Save the draft as a design on this computer / load a saved one into it | The bar's **Save...** and **Load...** buttons (no key). Save asks for a name and asks again before it overwrites. Load lists your designs (name, blocks, block size), greys out the ones that are unreadable or built on another block size than your ship's, and asks before it replaces the draft (`Ctrl` + `Z` brings the old draft back). The ship changes only on Apply, which the server checks as ever |
 | Put back a turn, drop what is carried, then cancel the edit | `Esc`; `B` or Cancel ends the edit at once |
 | Debug: fill tank | The details panel's **FILL TANK (DEBUG)**, with a tank selected: the server fills it (or each selected tank, up to 32) to capacity. Debug: fill tank, local games only (private games on this computer; a dedicated server needs `--debug-fill`). A tank that is only in the unapplied draft says to apply first. Temporary: remove with `EditorRequestKind.FillTank` |
+| Debug: scrape rock | `F10` held in the pilot view (remappable action `DebugScrape`): scrapes the rock at the view's centre, a metre-wide groove that deepens with every pass. Private local games only; temporary, until the mining laser |
 
 Saved designs are version 5 design files (the format of `content/ships`) in a `designs` folder beside `settings.json`
 in the user config folder (`$XDG_CONFIG_HOME/prospect/designs`, `%APPDATA%/prospect/designs`). They stay on your

@@ -178,6 +178,21 @@ internal sealed class AppOptions
     public float? ThrustUntil { get; set; }
     public string ExhaustKind { get; set; } = "engine";
 
+    /// <summary>Scripted runs only (<c>--open rock-scrape</c>): the radius in metres of the rock to scrape; the spawn sector's nearest in size is taken.</summary>
+    public float RockScrapeRadius { get; set; } = 10f;
+
+    /// <summary>Scripted runs only: how far off the rock's surface the hull is put, in metres.</summary>
+    public float RockScrapeStandoff { get; set; } = 25f;
+
+    /// <summary>Scripted runs only: how many passes the scripted groove is scraped.</summary>
+    public int RockScrapePasses { get; set; } = 3;
+
+    /// <summary>Scripted runs only: seconds in at which the hull is set down into the groove, or null to leave it hanging.</summary>
+    public float? RockScrapeRest { get; set; }
+
+    /// <summary>Scripted runs only: the command camera's distance from the groove in metres, or null for the pilot view.</summary>
+    public float? RockScrapeDistance { get; set; }
+
     /// <summary>Scripted runs only (<c>--align-at</c>): seconds after the splash at which the align button is clicked for a moment.</summary>
     public float? AlignAt { get; set; }
 
@@ -672,6 +687,9 @@ internal sealed class App : IDisposable
                 VisualBenchmark = _options.VisualBenchmark,
                 ScriptedShieldBreakSeconds = _options.BreakShieldSeconds,
                 ScriptedRamSpeed = _options.RamSpeed,
+                ScriptedRockScrapeRadius = Devices.Muted && _options.OpenView == "rock-scrape" ? _options.RockScrapeRadius : null,
+                ScriptedRockScrapeStandoff = _options.RockScrapeStandoff,
+                ScriptedRockScrapeRest = Devices.Muted && _options.OpenView == "rock-scrape" ? _options.RockScrapeRest : null,
                 ScriptedExhaustShield = Devices.Muted ? _options.OpenView switch { "exhaust-shield" => 1, "exhaust-shield-cold" => 2, _ => 0 } : 0,
                 ScriptedFleetHurtSeconds = _options.HurtFleetSeconds,
                 ScriptedFleetHurtBroken = _options.HurtFleetBroken,
@@ -1280,6 +1298,11 @@ internal sealed class App : IDisposable
                 World.CaptureJettisonSeconds = _options.JettisonSeconds;
                 World.CaptureCargoSpace = _options.HurtFleetCargo || _options.JettisonSeconds is not null;
             }
+            else if (view == "rock-scrape")
+            {
+                // The debug scrape through the real request: the server has put the hull above a rock by now.
+                World.ScriptRockScrape(_options.RockScrapePasses);
+            }
             else if (view is "edit-fill" or "edit-fill-done" && snapshot is { OwnHull: >= 0 })
             {
                 // Debug fill: the editor with the pod's first tank selected (the button shows, local game), and for
@@ -1608,6 +1631,9 @@ internal sealed class App : IDisposable
             var captureClock = World.ExhaustRock is { Started: >= 0 } fixtureClock ? _ui.Time - fixtureClock.Started : _sinceSplash;
             if (World.ExhaustRock is not null && count == 3) due = _capturesTaken switch { 0 => 3, 1 => 8, _ => 25 };
             if (World.ExhaustRock is not null && count == 4) due = _capturesTaken switch { 0 => 0.8f, 1 => 3, 2 => 8, _ => 25 };
+            // The scripted groove seen from the command camera, from the side the star lights.
+            if (_options.RockScrapeDistance is { } scrapeDistance && World.RockScrapeFocus is { } scrapeFocus && _viewOpened)
+                World.SetCommandCapturePose(scrapeFocus, scrapeDistance, 0.5f, -0.85f);
             if (_capturesTaken < count && rtsReady && (_options.CaptureHitAge is not { } hitAge || World.Own.ShieldHit.Strength > 0 && World.Own.ShieldHitAge >= hitAge) && captureClock >= due && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
             {
                 ShowPerformance |= Session is not null && _options.OpenView is not ("controls" or "players" or "social" or "friends" or "chat" or "hud" or "interface" or "charts" or "pinned-charts" or "inventory" or "edit-tank-fuel");
@@ -1636,6 +1662,11 @@ internal sealed class App : IDisposable
                 {
                     if (World.TryGetContainer(1, out var loose)) Console.WriteLine($"capture cargo position: {loose.Position.RelativeTo(World.OwnPosition)}; on screen {World.Project(loose.Position, out var screen)} at {screen}; tractor {loose.TractorHull}/{loose.TractorMount}, stage {loose.TractorStage}, powered {loose.TractorPowered}");
                     Console.WriteLine($"capture cargo: held {World.Own.Cargo.Length}, free {World.FreeContainerCount}, drawn {World.DrawnFreeContainers}, target {World.TargetContainer}");
+                }
+                if (_options.OpenView == "rock-scrape")
+                {
+                    var work = World.RockPatchWork;
+                    Console.WriteLine($"capture {_capturesTaken:D2} rock-scrape: asked {World.RockScrapeAsked}; edits {World.RockEditsKnown}; patches drawn {World.RockPatchesDrawn}, ready {World.RockPatchesReady}, built {work.Built} (last {work.Milliseconds:F1} ms, {work.Vertices} vertices); own speed {World.Own.Velocity.Length():F2} m/s");
                 }
                 if (World.PulseShown.Strength > 0f)
                     Console.WriteLine($"capture {_capturesTaken:D2} scan pulse: radius {World.PulseShown.Radius:F0} m, strength {World.PulseShown.Strength:F2}");
@@ -1676,6 +1707,9 @@ internal sealed class App : IDisposable
                 // Jettison, drift, tractor pull and stow all happen inside the measurement: the container was seen loose
                 // and is back in the hold, so a run that never released or never picked it up cannot pass.
                 "cargo" when _options.JettisonSeconds is not null => _benchmarkSawFreeContainer && World.Own.Cargo.Length == 3 && World.FreeContainerCount == 0,
+                // Every pass was asked for, the edits came back from the server, and the worker built the rock's patch
+                // again and again inside the measurement: a run that scraped nothing cannot pass.
+                "rock-scrape" => World.RockScrapeAsked && World.RockEditsKnown >= 16 * _options.RockScrapePasses && World.RockPatchWork.Built >= 2 && World.RockPatchesDrawn == 1,
                 "edit-cargo" => World.Editor.CanEdit && World.Editor.LiveCargo.Length == World.CaptureCargoSampleCount && World.Editor.CargoRack >= 0,
                 "edit-menu" => World.Editor.Menu.IsOpen && World.Editor.Menu.Sub == EditorMenuSub.Fuel,
                 "edit-dump" => World.Editor.ConfirmDump,
@@ -1687,6 +1721,8 @@ internal sealed class App : IDisposable
                 Console.WriteLine("  Editor fixture       FAIL: the requested fixture did not reach its prepared state");
                 ExitCode = 1;
             }
+            if (_options.OpenView == "rock-scrape")
+                Console.WriteLine($"  Rock scrape          {World.RockEditsKnown} edits, patch built {World.RockPatchWork.Built} times (last {World.RockPatchWork.Milliseconds:F1} ms, {World.RockPatchWork.Vertices} vertices)");
             Console.WriteLine($"  World drawing        skipped in {WorldFramesSkipped} frames since the start (the map hid it)");
             Console.WriteLine();
         }
