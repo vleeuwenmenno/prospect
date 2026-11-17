@@ -125,7 +125,7 @@ public sealed class RockEditSaveTests
         var saved = Shared.Value;
         var bytes = saved.Bytes;
         var sectionBytes = RockBytes(saved.EditsA) + RockBytes(saved.EditsB);
-        var section = bytes.Length - sectionBytes;
+        var section = bytes.Length - sectionBytes - WorldSnapshotCodec.MiningHeaderBytes;
         var secondRecord = section + RockBytes(saved.EditsA);
         Assert.True(WorldSnapshotCodec.TryDecode(bytes, SaveLimits.Default, out _, out _));
 

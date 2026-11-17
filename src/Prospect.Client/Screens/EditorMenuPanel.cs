@@ -22,6 +22,7 @@ internal sealed class EditorMenuPanel(UiContext ui)
         Merge,
         Fuel,
         Split,
+        Group,
     }
 
     // Unscaled pixels.
@@ -113,6 +114,9 @@ internal sealed class EditorMenuPanel(UiContext ui)
             }
         }
 
+        else if (editor.SelectionIsGroupable)
+            _menuRows[count++] = EditorMenuRow.Group;
+
         _menuRows[count++] = EditorMenuRow.SameType;
         _menuRows[count++] = EditorMenuRow.Delete;
 
@@ -159,7 +163,7 @@ internal sealed class EditorMenuPanel(UiContext ui)
             var rowMin = new float2(min.X + Kit.Px(6), rowTop + i * rowHeight);
             if (Inside(rowMin, inner, mouse))
                 hovered = row;
-            if (row == menu.Sub switch { EditorMenuSub.Fuel => EditorMenuRow.Fuel, EditorMenuSub.Split => EditorMenuRow.Split, _ => (EditorMenuRow)255 })
+            if (row == menu.Sub switch { EditorMenuSub.Fuel => EditorMenuRow.Fuel, EditorMenuSub.Split => EditorMenuRow.Split, EditorMenuSub.Group => EditorMenuRow.Group, _ => (EditorMenuRow)255 })
                 subTop = rowMin.Y;
             if (DrawRow(draw, editor, row, rowMin, inner))
                 chosen = row;
@@ -173,7 +177,7 @@ internal sealed class EditorMenuPanel(UiContext ui)
         // crosses the rows below Fuel on the way and must not lose the flyout to them.
         if (hovered is { } over)
         {
-            var sub = over switch { EditorMenuRow.Fuel => EditorMenuSub.Fuel, EditorMenuRow.Split => EditorMenuSub.Split, _ => EditorMenuSub.None };
+            var sub = over switch { EditorMenuRow.Fuel => EditorMenuSub.Fuel, EditorMenuRow.Split => EditorMenuSub.Split, EditorMenuRow.Group => EditorMenuSub.Group, _ => EditorMenuSub.None };
             if (sub == menu.Sub)
                 _waiting = null;
             else
@@ -228,6 +232,9 @@ internal sealed class EditorMenuPanel(UiContext ui)
                 break;
             case EditorMenuRow.Fuel:
                 menu.Sub = EditorMenuSub.Fuel;
+                break;
+            case EditorMenuRow.Group:
+                menu.Sub = EditorMenuSub.Group;
                 break;
             default:
                 menu.Sub = EditorMenuSub.Split;
@@ -299,6 +306,13 @@ internal sealed class EditorMenuPanel(UiContext ui)
                     note = dumped > 0f ? Kit.F($"DUMPS {dumped:0.##} KG") : Kit.F($"MOVES {moved:0.##} KG");
                     noteTone = dumped > 0f ? 0xFF8A3Du : Theme.Info;
                 }
+                arrow = enabled;
+                break;
+            case EditorMenuRow.Group:
+                label = "Group"u8;
+                enabled = editor.CanEdit;
+                var group = editor.SelectionGroup;
+                note = !enabled ? "REPAIR FIRST"u8 : group < 0 ? "MIXED"u8 : group == ActionGroups.None ? "NONE"u8 : Kit.F($"{ActionGroups.Digit(group)}");
                 arrow = enabled;
                 break;
             default:
@@ -382,7 +396,7 @@ internal sealed class EditorMenuPanel(UiContext ui)
         var rowHeight = MathF.Round(MenuRowHeight * scale);
         var pad = MathF.Round(MenuPad * scale);
         Span<FuelKind> fuels = stackalloc FuelKind[4];
-        var count = menu.Sub == EditorMenuSub.Fuel ? editor.FuelChoices(fuels) : 3;
+        var count = menu.Sub switch { EditorMenuSub.Fuel => editor.FuelChoices(fuels), EditorMenuSub.Group => ActionGroups.Count + 1, _ => 3 };
         if (count == 0)
             return false;
         var size = new float2(MathF.Round(SubWidth * scale), rowHeight * count + pad * 2);
@@ -423,6 +437,16 @@ internal sealed class EditorMenuPanel(UiContext ui)
                 enabled = can == DraftEdit.Done;
                 note = check ? "NOW"u8 : can switch { DraftEdit.Done => default, DraftEdit.BadSize => "TOO LONG"u8, DraftEdit.Unchanged => "NOW"u8, _ => "NOT NOW"u8 };
             }
+            else if (menu.Sub == EditorMenuSub.Group)
+            {
+                // Groups 1 to 9, then 0 (group 10) as the keys run, then none.
+                var group = i < ActionGroups.Count ? i + 1 : ActionGroups.None;
+                label = group == ActionGroups.None ? "None"u8 : Kit.F($"Group {ActionGroups.Digit(group)}");
+                check = editor.SelectionGroup == group;
+                var can = editor.CanSetGroup((byte)group);
+                enabled = can == DraftEdit.Done;
+                note = check ? "NOW"u8 : can switch { DraftEdit.Done => default, _ => "NOT NOW"u8 };
+            }
             else
             {
                 var pieces = editor.SplitPieces(axis);
@@ -448,6 +472,8 @@ internal sealed class EditorMenuPanel(UiContext ui)
                 continue;
             if (menu.Sub == EditorMenuSub.Fuel)
                 editor.ChangeFuel(fuels[i]);
+            else if (menu.Sub == EditorMenuSub.Group)
+                editor.SetSelectedGroup((byte)(i < ActionGroups.Count ? i + 1 : ActionGroups.None));
             else
                 editor.SplitSelected(axis);
             menu.Close();

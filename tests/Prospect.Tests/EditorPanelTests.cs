@@ -192,7 +192,7 @@ public sealed class EditorPanelTests
         drone.Category = Array.IndexOf(Tuning.Categories, Tab("Storage"));
         Assert.Equal(["microBipropellantTank", "microNitrogenTank"], types.Where(t => drone.Shows(Tuning, t)).Select(t => t.Id).ToArray());
         ship.Category = Array.IndexOf(Tuning.Categories, Tab("Storage"));
-        Assert.Equal(["bipropellantTank", "hydrazineTank", "nitrogenTank", "cargo", "droneBay", "tractorBeam"], types.Where(t => ship.Shows(Tuning, t)).Select(t => t.Id).ToArray());
+        Assert.Equal(["bipropellantTank", "hydrazineTank", "nitrogenTank", "cargo", "droneBay", "tractorBeam", "miningLaser"], types.Where(t => ship.Shows(Tuning, t)).Select(t => t.Id).ToArray());
     }
 
     [Fact]
@@ -203,9 +203,9 @@ public sealed class EditorPanelTests
         string[] Cards() => Enumerable.Range(0, types.Count).Where(i => palette.ShowsCard(Tuning, types, i)).Select(i => types[i].Id).ToArray();
 
         // One card stands for the three tanks, and it places the chosen fuel's type.
-        Assert.Equal(["bipropellantTank", "cargo", "droneBay", "tractorBeam"], Cards());
+        Assert.Equal(["bipropellantTank", "cargo", "droneBay", "tractorBeam", "miningLaser"], Cards());
         palette.TankFuel = FuelKind.Hydrazine;
-        Assert.Equal(["hydrazineTank", "cargo", "droneBay", "tractorBeam"], Cards());
+        Assert.Equal(["hydrazineTank", "cargo", "droneBay", "tractorBeam", "miningLaser"], Cards());
         Assert.Equal(Array.FindIndex(types.ToArray(), t => t.Id == "nitrogenTank"), palette.TankTypeOf(types, FuelKind.Nitrogen));
         Span<FuelKind> fuels = stackalloc FuelKind[4];
         Assert.Equal(3, palette.TankFuels(types, fuels));

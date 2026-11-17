@@ -78,6 +78,12 @@ public static class ActionGroups
     /// <summary>Whether a part of <paramref name="type"/> belongs in a group: lasers today, weapons later.</summary>
     public static bool Groupable(BlockType? type) => type?.Laser is not null;
 
+    /// <summary>
+    /// The group a part starts in when it is placed: group 1 for a groupable part, so a new laser fires without a
+    /// further step, and none for everything else.
+    /// </summary>
+    public static byte Default(BlockType? type) => Groupable(type) ? (byte)1 : None;
+
     /// <summary>Whether <paramref name="group"/> is a group (1 to 10) or none.</summary>
     public static bool Valid(int group) => group is >= 0 and <= Count;
 

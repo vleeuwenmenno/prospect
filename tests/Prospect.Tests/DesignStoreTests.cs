@@ -50,7 +50,7 @@ public sealed class DesignStoreTests : IDisposable
 
         // The current format: version 6, with blocks and mounts.
         using var json = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(_store.PathOf("Scout Mk II")));
-        Assert.Equal(6, json.RootElement.GetProperty("version"u8).GetInt32());
+        Assert.Equal(7, json.RootElement.GetProperty("version"u8).GetInt32());
         Assert.True(json.RootElement.TryGetProperty("blocks"u8, out _));
         Assert.True(json.RootElement.TryGetProperty("mounts"u8, out _));
     }

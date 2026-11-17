@@ -163,6 +163,9 @@ internal sealed partial class ScreenHost
                 _palette.Category = i;
     }
 
+    /// <summary>Types <paramref name="text"/> into the part list's search, for captures (<c>--open edit-laser</c>): a long tab's card is then in view without a scroll.</summary>
+    public void SearchEditorParts(string text) => _palette.Query = text;
+
     /// <summary>Opens the GAS window in interface mode, or with <paramref name="pinned"/> pins it over the flight view. Used by <c>--open gas</c> and <c>pinned-gas</c>.</summary>
     public void OpenGasWindow(bool pinned)
     {
