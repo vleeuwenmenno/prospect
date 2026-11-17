@@ -41,7 +41,8 @@ Product direction from the brainstorm on 2026-11-16. Built so far: D1 (orders, t
 - Raw ore never goes in cargo racks. It goes:
   1. Floating ore chunks are pulled by tractor or drone into an ore hopper.
   2. The hopper fills raw ore containers: one ore type each, capacity by size.
-- Ore has its own Ore Cargo window, separate from the Cargo window.
+- Ore shows in the Cargo window, on its own ORE tab beside CONTAINERS (decided 2026-11-17). The tab has a totals row
+  per ore (kg, mass-weighted grade, bins used) and a tile per bin in the ore's colour with a fill bar, ore, grade and kg.
 
 ### Ore collection (R4)
 
@@ -556,7 +557,6 @@ allocation.
   built and is not this.
 - Whether lasers should cut out at an empty battery and wait for the battery to pass a floor, as boost does.
   Today fire held on a flat battery flickers and cuts nothing.
-- The Ore Cargo window's layout.
 - Where markers fade out, and whether the command view shows chunks as icons too.
 - Automated mining by NPCs and captains: out of scope now; only the order model above is designed for it.
 
