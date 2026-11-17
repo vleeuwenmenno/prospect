@@ -40,6 +40,9 @@ public sealed partial class ServerHost
         public RockScrape Last;
         public long LastTick;
 
+        /// <summary>The last tick the beam was on <see cref="Rock"/>: a stroke ends only when the beam has been off it a while.</summary>
+        public long OnTick;
+
         /// <summary>Cubic metres the beam has cut since its last scrape, not yet given to one.</summary>
         public double Volume;
 
@@ -261,7 +264,8 @@ public sealed partial class ServerHost
         var face = MathF.PI * radius * radius;
 
         beam.Volume += face * spec.CutRate * HullSim.Dt;
-        var fresh = !beam.Stroke || beam.Rock != rock || _tick - beam.LastTick > rules.StrokeGapTicks;
+        var fresh = !beam.Stroke || beam.Rock != rock || _tick - beam.OnTick > rules.StrokeGapTicks;
+        if (beam.Stroke && beam.Rock == rock) beam.OnTick = _tick;
         if (!fresh && _tick - beam.LastTick < rules.EditIntervalTicks) return;
 
         // Where a full bite would put the scrape, and how far that is from the last one.
@@ -295,8 +299,11 @@ public sealed partial class ServerHost
         beam.Rock = rock;
         beam.Last = edit;
         beam.LastTick = _tick;
+        beam.OnTick = _tick;
         var kilograms = rules.ScrapeKg(radius, length, Galaxy.AsteroidDensity) * (depth / rules.BiteMetres);
-        Yield(ref beam, rock, asteroid, spot + along * radius, kilograms, hit, direction, rockVelocity);
+        // Chunks leave outward from the rock's centre, not back up the beam into the ship that cut them.
+        var outward = Vector3.Normalize(hit.RelativeTo(centre));
+        Yield(ref beam, rock, asteroid, spot + along * radius, kilograms, hit, -outward, rockVelocity);
     }
 
     // The ore at the scrape's deepest point, from the rock's interior, added to the laser's tally; each ore that
@@ -338,7 +345,8 @@ public sealed partial class ServerHost
         return ref _interiors[slot];
     }
 
-    // A chunk breaks off where the beam meets the rock, thrown back along it with the rock's own motion and a turn
+    // A chunk breaks off where the beam meets the rock, thrown out along -direction (the rock's outward direction at
+    // the cut) with the rock's own motion and a turn
     // that comes from its identity, so no randomness is needed.
     private void SpawnChunk(int resource, float grade, float mass, Double3 hit, Vector3 direction, Vector3 rockVelocity)
     {

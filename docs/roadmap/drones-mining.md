@@ -272,7 +272,7 @@ How to work on it is in `AGENTS.md`, "Mining lasers, action groups and ore chunk
 | Cut radius, rate | 0.5 m, 0.25 m deep a second |
 | Power while firing | 3 MW, paid all or nothing after the tractors |
 | Scrape | 0.25 m bite, at least 0.15 s apart; a new stroke after 0.5 s off the rock |
-| Chunk | 60 kg of one ore; thrown back along the beam at 2 m/s |
+| Chunk | 300 kg of one ore; thrown out from the rock's centre at 2 m/s |
 | Chunks | 64 a sector, 256 a world, 30 minutes unattended |
 | Lasers fired a hull | 16; 64 can have a group changed without a rebuild |
 

@@ -227,7 +227,7 @@ public sealed class PlayerInputBridge
         if (hull == 0 || (uint)part >= ActionGroupsMessage.MaxParts || (group != ActionGroups.NotOverridden && !ActionGroups.Valid(group))) return;
         lock (_lock)
         {
-            // A change of the same part not yet sent is replaced; the queue keeps the newest few parts.
+            // A change of the same part not yet sent is replaced; a change of yet another part while eight wait is dropped.
             for (var i = 0; i < _groupChangeCount; i++)
                 if (_groupChanges[i].Hull == hull && _groupChanges[i].Part == part)
                 {

@@ -980,7 +980,7 @@ internal sealed partial class WorldView
             _align.Clear();
             // Only the pilot view fires; a scripted capture keeps its last aim so another view can watch the beam.
             if (ScriptedFireGroup == 0) StopFiring(bridge);
-            else if (!editing) UpdateFiring(snapshot, bridge, false, false);
+            else if (!editing && Mode == ViewMode.Pilot) UpdateFiring(snapshot, bridge, false, false);
         }
         if (inputEnabled && !editing && Mode == ViewMode.Pilot)
         {
