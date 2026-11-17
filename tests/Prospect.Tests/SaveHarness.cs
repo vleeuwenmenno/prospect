@@ -260,6 +260,14 @@ internal sealed class OwnerLink(GameContent content, bool inProcess = true) : IT
         Deliver(bytes[..writer.Length]);
     }
 
+    public void DroneSettings(in DroneSettingsMessage message)
+    {
+        var bytes = new byte[DroneSettingsMessage.MaxWireSize];
+        var writer = new NetWriter(bytes);
+        message.Write(ref writer);
+        Deliver(bytes[..writer.Length]);
+    }
+
     public void Edit(EditorRequestKind kind, uint value)
     {
         var bytes = new byte[EditorRequestMessage.MaxWireSize];

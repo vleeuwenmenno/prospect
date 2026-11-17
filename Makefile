@@ -318,7 +318,10 @@ test: need-dotnet ## Run the unit tests
 # container is not back in the hold at the end.
 FETCH_BENCH := $(BIN)/fetch-bench
 
-bench: need-dotnet ## Release benchmark: empty scene, resizing, editor panels, cargo and drones (fails below target or on allocation)
+# The shipped ship's two mining lasers are in group 1: the laser bench fires them at a 199 m rock through the real aim
+# and fails unless it cut the rock and freed a chunk.
+
+bench: need-dotnet ## Release benchmark: empty scene, resizing, editor panels, cargo, drones, scrapes and the mining laser (fails below target or on allocation)
 	$(call step,Building the client (Release))
 	$(Q)"$(DOTNET)" build $(CLIENT) -c Release $(QUIET)
 	$(call step,Benchmarking an empty scene at 1920x1080)
@@ -339,6 +342,8 @@ bench: need-dotnet ## Release benchmark: empty scene, resizing, editor panels, c
 	$(Q)$(RUN_ENV) "$(DOTNET)" $(FETCH_BENCH)/prospect.dll --bench 50 --size 1920x1080 --open cargo --jettison 5 --drone-fetch 12
 	$(call step,Benchmarking a rock being scraped (edits, bricks, patch rebuilds))
 	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 14 --size 1920x1080 --open rock-scrape --rock-scrape-radius 100 --rock-scrape-passes 30
+	$(call step,Benchmarking a mining laser (aim, scrapes, patch rebuilds, ore chunks))
+	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 16 --size 1920x1080 --open laser --rock-scrape-radius 100
 
 # Inside gas clouds, where the primary cloud is marched at half resolution (assets/shaders/gas_half.glsl): an ordinary
 # cloud from inside, from the pilot's seat (composed with the shields) and from the command view, a huge one and a

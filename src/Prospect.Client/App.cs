@@ -202,6 +202,12 @@ internal sealed class AppOptions
     /// <summary>Scripted runs only: the command camera's distance from the groove in metres, or null for the pilot view.</summary>
     public float? RockScrapeDistance { get; set; }
 
+    /// <summary>Scripted runs only (<c>--fire-group</c>): the action group (1 to 10) turned on and fired, or null.</summary>
+    public int? FireGroup { get; set; }
+
+    /// <summary>Scripted runs only (<c>--fire-at</c>): seconds after the splash at which the scripted group starts firing.</summary>
+    public float FireAt { get; set; } = 3f;
+
     /// <summary>Scripted runs only (<c>--align-at</c>): seconds after the splash at which the align button is clicked for a moment.</summary>
     public float? AlignAt { get; set; }
 
@@ -242,6 +248,16 @@ internal sealed class AppOptions
     /// drones are sent, through the fetch key's bridge call, for the first loose container.
     /// </summary>
     public float? DroneFetchSeconds { get; set; }
+
+    /// <summary>
+    /// Scripted runs only (<c>--drone-autopickup</c>): seconds after the splash at which auto pickup is turned on for the
+    /// flown hull, through the popup checkbox's bridge call. With <c>--open cargo --jettison</c> the drones then fetch the
+    /// jettisoned container on their own.
+    /// </summary>
+    public float? DroneAutoPickupSeconds { get; set; }
+
+    /// <summary>Scripted runs only (<c>--drone-popup</c>): opens the drone settings popup over the DRONES chip once the chip is there.</summary>
+    public bool DronePopup { get; set; }
     public bool CargoSample { get; set; }
     /// <summary>Capture only: <c>--cargo-wide</c> loads a rack with one container of each resource and jettisons several.</summary>
     public bool CargoWide { get; set; }
@@ -720,7 +736,7 @@ internal sealed class App : IDisposable
                 ScriptedShieldBreakSeconds = _options.BreakShieldSeconds,
                 ScriptedRamSpeed = _options.RamSpeed,
                 ScriptedCoastSpeed = _options.CoastSpeed,
-                ScriptedRockScrapeRadius = Devices.Muted && _options.OpenView == "rock-scrape" ? _options.RockScrapeRadius : null,
+                ScriptedRockScrapeRadius = Devices.Muted && _options.OpenView is "rock-scrape" or "laser" or "laser-command" ? _options.RockScrapeRadius : null,
                 ScriptedRockScrapeStandoff = _options.RockScrapeStandoff,
                 ScriptedRockScrapeRest = Devices.Muted && _options.OpenView == "rock-scrape" ? _options.RockScrapeRest : null,
                 ScriptedExhaustShield = Devices.Muted ? _options.OpenView switch { "exhaust-shield" => 1, "exhaust-shield-cold" => 2, _ => 0 } : 0,
@@ -1201,7 +1217,9 @@ internal sealed class App : IDisposable
         _window.SetFullscreen(monitor, new int2(mode.Width, mode.Height), mode.RefreshRate);
     }
 
-    private bool _dronesLaunched, _dronesRecalled, _benchmarkSawDrones, _dronesHome, _droneFetchSent, _benchmarkSawFetch;
+    private bool _benchmarkSawChunk, _benchmarkSawBeam;
+    private int _laserEditsSeen;
+    private bool _dronesLaunched, _dronesRecalled, _benchmarkSawDrones, _dronesHome, _droneFetchSent, _benchmarkSawFetch, _droneAutoSent, _dronePopupRequested;
     private int _dronesOut;
 
     /// <summary>
@@ -1281,6 +1299,17 @@ internal sealed class App : IDisposable
         {
             _droneFetchSent = true;
             Session.Client.Input.FetchContainer(snapshot.Hulls[snapshot.OwnHull].Id, snapshot.FreeContainers[0].Id);
+        }
+        if (_options.DroneAutoPickupSeconds is { } autoAt && !_droneAutoSent && _sinceSplash >= autoAt && Session is not null
+            && snapshot is { OwnHull: >= 0 } && DroneUi.Present(snapshot.Bays, snapshot.Hulls[snapshot.OwnHull].Id))
+        {
+            _droneAutoSent = true;
+            Session.Client.Input.SetDroneAutoPickup(snapshot.Hulls[snapshot.OwnHull].Id, true);
+        }
+        if (_options.DronePopup && !_dronePopupRequested && _viewOpened && _sinceSplash >= 1f)
+        {
+            _dronePopupRequested = true;
+            _screens.RequestDronePopup();
         }
         if (_editDroneView && Session is not null && snapshot is { OwnHull: >= 0, OwnIsDrone: true })
         {
@@ -1387,6 +1416,10 @@ internal sealed class App : IDisposable
                 World.CaptureJettisonSeconds = _options.JettisonSeconds;
                 World.CaptureCargoSpace = _options.HurtFleetCargo || _options.JettisonSeconds is not null;
             }
+            else if (view is "laser" or "laser-command")
+            {
+                // The pilot view: the server puts the hull over a rock, and the scripted group fires from --fire-at on.
+            }
             else if (view == "rock-scrape")
             {
                 // The debug scrape through the real request: the server has put the hull above a rock by now.
@@ -1399,14 +1432,14 @@ internal sealed class App : IDisposable
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
                 World.ScriptFillForCapture(view == "edit-fill-done");
             }
-            else if (view is "edit-turn" or "edit-mount" or "edit-mirror" or "edit-ion" && snapshot is { OwnHull: >= 0 })
+            else if (view is "edit-turn" or "edit-rings" or "edit-mount" or "edit-mirror" or "edit-ion" && snapshot is { OwnHull: >= 0 })
             {
                 // The editor on the Thrust tab with an engine turned to face right, or with a cold gas thruster to
                 // mount, its ghost held on the ship: the pointer is muted, so the harness holds it there.
                 // edit-mirror is the engine with the X and Z planes on, so its copies show, each facing the mirrored way;
                 // edit-ion holds an ion drive instead of the engine.
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
-                World.HoldGhostForCapture(view == "edit-mount", view == "edit-ion");
+                World.HoldGhostForCapture(view == "edit-mount", view == "edit-ion", view == "edit-rings");
                 if (view == "edit-mirror")
                     World.Editor.SetMirror(MirrorAxes.X | MirrorAxes.Z);
                 _screens.SelectEditorTab("Thrust");
@@ -1417,7 +1450,7 @@ internal sealed class App : IDisposable
                 // and ahead, so the drones are seen leaving, holding and coming home.
                 World.SetCommandCapturePose(World.OwnPosition + new Double3(-8, 0, 0), 20f, -0.6f, -0.3f);
             }
-            else if (view is "edit-rack" or "edit-tank" or "edit-tank-long" or "edit-tank-slab" or "edit-scanner" or "edit-bay" && snapshot is { OwnHull: >= 0 })
+            else if (view is "edit-rack" or "edit-tank" or "edit-tank-long" or "edit-tank-slab" or "edit-scanner" or "edit-bay" or "edit-laser" or "edit-laser-group" && snapshot is { OwnHull: >= 0 })
             {
                 // The editor holding the ghost of a bipropellant tank (1, 2 by 1 by 1, or a 2 by 1 by 2
                 // slab) or of an asteroid scanner on the ship, with the wedge chosen first: the part stays a box and the
@@ -1425,8 +1458,13 @@ internal sealed class App : IDisposable
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
                 World.Editor.SetPartShape(BlockShape.WedgeXPlusPlus);
                 if (view == "edit-rack") World.PreviewCargo();
-                World.HoldPartGhostForCapture(view == "edit-rack" ? "cargo" : view == "edit-scanner" ? "asteroidScanner" : view == "edit-bay" ? "droneBay" : "bipropellantTank",
+                World.HoldPartGhostForCapture(view == "edit-rack" ? "cargo" : view == "edit-scanner" ? "asteroidScanner" : view == "edit-bay" ? "droneBay" : view is "edit-laser" or "edit-laser-group" ? "miningLaser" : "bipropellantTank",
                     view switch { "edit-rack" => new GridSize(2, 2, 2), "edit-tank-long" => new GridSize(2, 1, 1), "edit-tank-slab" => new GridSize(2, 1, 2), _ => new GridSize(1, 1, 1) });
+                // edit-laser-group places the laser through the editor's click and selects it: the group selector shows.
+                if (view == "edit-laser-group")
+                    World.PlaceHeldPartForCapture();
+                if (view is "edit-laser" or "edit-laser-group")
+                    _screens.SearchEditorParts("laser");
                 _screens.SelectEditorTab(view == "edit-scanner" ? "Sensors" : "Storage");
             }
             else if (view is "edit-palette-tip" or "edit-tank-fuel" && snapshot is { OwnHull: >= 0 })
@@ -1490,7 +1528,7 @@ internal sealed class App : IDisposable
                 Session.Client.Input.RequestControl(0);
             }
             else if (view == "info")
-                _screens.OpenShipInfo();
+                _screens.OpenShipWindow();
             else if (view == "world-settings")
                 _screens.RequestWorldSettings();
             else if (view == "menu")
@@ -1523,6 +1561,13 @@ internal sealed class App : IDisposable
                 _screens.OpenFriends();
             else if (view == "chat")
                 _screens.OpenChat();
+            else if (view == "action-groups")
+            {
+                // The pilot view of a ship with lasers: the action group strip above the console, every group off.
+                // Add --tips-sample on to see the tip.
+            }
+            else if (view == "action-groups-popup")
+                _screens.OpenActionGroupsPopup();
             else if (view == "hud")
             {
                 // The world with only what is always shown: the navigation bar, the party list, the passive chat
@@ -1656,7 +1701,9 @@ internal sealed class App : IDisposable
             && Volatile.Read(ref _screenshotJob.Saved) > 0;
         World.ScriptedForward = Devices.Muted && Session is not null ? _options.HoldThrust : null;
         World.CaptureCoast = Devices.Muted && Session is not null && _options.CoastSpeed is not null;
-        if (_options.LookDegrees is { } look && Session is not null)
+        // The laser fixtures look along the nose unless told otherwise: the hull is turned onto the rock, and the aim
+        // is the view's centre.
+        if ((_options.LookDegrees ?? (_options.OpenView is "laser" or "laser-command" ? 0f : null)) is { } look && Session is not null)
         {
             if (_options.LookToDegrees is { } lookTo)
             {
@@ -1672,6 +1719,20 @@ internal sealed class App : IDisposable
         if (_options.Zoom is { } zoom && Session is not null)
             World.ChaseZoom = zoom;
         World.ScriptedAlignLock = Devices.Muted && Session is not null && _options.AlignLock;
+        var fireGroup = _options.FireGroup ?? (_options.OpenView is "laser" or "laser-command" ? 1 : null);
+        World.ScriptedFireGroup = Devices.Muted && Session is not null && fireGroup is { } group && _sinceSplash >= _options.FireAt ? group : 0;
+        if (Devices.Muted && _options.OpenView == "laser-command" && snapshot is not null && World.TryOwnCut(snapshot, out var laserCut))
+        {
+            // The command camera on the cut, from the side the star lights, once the beam is on the rock.
+            if (World.Mode != ViewMode.Command) World.SetMode(ViewMode.Command);
+            World.SetCommandCapturePose(laserCut, _options.RockScrapeDistance ?? 40f, 0.5f, -0.85f);
+        }
+        if (snapshot is not null)
+        {
+            _laserEditsSeen = Math.Max(_laserEditsSeen, World.RockEditsKnown);
+            _benchmarkSawChunk |= snapshot.OreChunkCount > 0;
+            _benchmarkSawBeam |= snapshot.LaserBeamCount > 0;
+        }
         World.ScriptedAlignClick = Devices.Muted && Session is not null && _options.AlignAt is { } alignAt
             ? _sinceSplash >= alignAt && _sinceSplash < alignAt + 0.15f : null;
         World.ScriptedThrust = _options.Thrust is { } held && Session is not null && _sinceSplash >= _options.ThrustAt
@@ -1732,7 +1793,7 @@ internal sealed class App : IDisposable
                 World.SetCommandCapturePose(scrapeFocus, scrapeDistance, 0.5f, -0.85f);
             if (_capturesTaken < count && rtsReady && (_options.CaptureHitAge is not { } hitAge || World.Own.ShieldHit.Strength > 0 && World.Own.ShieldHitAge >= hitAge) && captureClock >= due && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
             {
-                ShowPerformance |= Session is not null && _options.OpenView is not ("controls" or "players" or "social" or "friends" or "chat" or "hud" or "interface" or "charts" or "pinned-charts" or "inventory" or "edit-tank-fuel");
+                ShowPerformance |= Session is not null && _options.OpenView is not ("controls" or "players" or "social" or "friends" or "chat" or "hud" or "interface" or "charts" or "pinned-charts" or "inventory" or "edit-tank-fuel" or "edit-laser-group");
                 var file = Path.GetFullPath(path);
                 if (count > 1)
                 {
@@ -1761,6 +1822,8 @@ internal sealed class App : IDisposable
                     if (_options.DroneFetchSeconds is not null && snapshot is not null)
                         Console.WriteLine($"capture drones: fetching {snapshot.Bays.Fetching}, reply {snapshot.Bays.Reply} ({snapshot.Bays.ReplyCount}), since splash {_sinceSplash:F1} s");
                 }
+                if (_options.OpenView is "laser" or "laser-command" && snapshot is not null)
+                    Console.WriteLine($"capture {_capturesTaken:D2} laser: groups on {World.ActionGroupsOn}, firing {World.LasersFiring}, beams {snapshot.LaserBeamCount}, edits {World.RockEditsKnown}, chunks {snapshot.OreChunkCount}, energy {World.Own.Energy:F1}, own speed {World.Own.Velocity.Length():F2} m/s");
                 if (_options.OpenView == "rock-scrape")
                 {
                     var work = World.RockPatchWork;
@@ -1808,6 +1871,8 @@ internal sealed class App : IDisposable
                     && (_options.DroneFetchSeconds is null || _benchmarkSawFetch),
                 // Every pass was asked for, the edits came back from the server, and the worker built the rock's patch
                 // again and again inside the measurement: a run that scraped nothing cannot pass.
+                // The laser fired, cut the rock through the real aim and freed at least one chunk inside the run.
+                "laser" or "laser-command" => _benchmarkSawBeam && _laserEditsSeen >= 8 && _benchmarkSawChunk,
                 "rock-scrape" => World.RockScrapeAsked && World.RockEditsKnown >= 16 * _options.RockScrapePasses && World.RockPatchWork.Built >= 2 && World.RockPatchesDrawn == 1,
                 "edit-cargo" => World.Editor.CanEdit && World.Editor.LiveCargo.Length == World.CaptureCargoSampleCount && World.Editor.CargoRack >= 0,
                 "edit-menu" => World.Editor.Menu.IsOpen && World.Editor.Menu.Sub == EditorMenuSub.Fuel,
@@ -1822,6 +1887,8 @@ internal sealed class App : IDisposable
                 Console.WriteLine("  Editor fixture       FAIL: the requested fixture did not reach its prepared state");
                 ExitCode = 1;
             }
+            if (_options.OpenView is "laser" or "laser-command")
+                Console.WriteLine($"  Mining laser         beam seen {_benchmarkSawBeam}, {_laserEditsSeen} edits, chunk seen {_benchmarkSawChunk}");
             if (_options.OpenView == "rock-scrape")
                 Console.WriteLine($"  Rock scrape          {World.RockEditsKnown} edits, patch built {World.RockPatchWork.Built} times (last {World.RockPatchWork.Milliseconds:F1} ms, {World.RockPatchWork.Vertices} vertices)");
             Console.WriteLine($"  World drawing        skipped in {WorldFramesSkipped} frames since the start (the map hid it)");

@@ -31,8 +31,11 @@ public struct PowerFlow
     /// <summary>Active tractor draw paid by the shared flight step.</summary>
     public float Tractor;
 
+    /// <summary>Mining laser draw paid by the shared flight step while lasers fire.</summary>
+    public float Laser;
+
     /// <summary>Everything drawn.</summary>
-    public readonly float Drawn => Idle + Thrust + Shield + Ftl + Modules + Tractor;
+    public readonly float Drawn => Idle + Thrust + Shield + Ftl + Modules + Tractor + Laser;
 
     /// <summary>Generation less everything drawn: positive is surplus, negative comes out of the battery.</summary>
     public readonly float Net => Generated - Drawn;
@@ -47,5 +50,6 @@ public struct PowerFlow
         Ftl += (sample.Ftl - Ftl) * share;
         Modules += (sample.Modules - Modules) * share;
         Tractor += (sample.Tractor - Tractor) * share;
+        Laser += (sample.Laser - Laser) * share;
     }
 }

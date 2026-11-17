@@ -17,7 +17,7 @@ collide, split again, and survive saves. Cleanup is configurable; salvage and re
 Cargo racks are loading decks (a plate on the hull side, rails, posts, clamp jaws on stowed containers), content-defined container sizes and shared deterministic packing.
 Cargo payload mass affects flight and client prediction through the same shared simulation.
 Own hull cargo is held by the server, saved, replicated and drawn; local debug loading is available in the editor.
-Select an applied rack, choose a container in its cargo panel, then JETTISON SELECTED in local or remote games.
+Open the Cargo window (U), select a container and jettison it, in local or remote games.
 Destroyed racks eject intact containers; wreck splits retain cargo. Free containers drift, collide, take damage,
 and persist in saves. Middle-click a free container to see its size, resource, amount and HP.
 Containers are drawn the same racked or loose: corner blocks, door seams and lock rods, lifting eyes, and a plate in the
@@ -36,9 +36,8 @@ The energy tooltip lists TRACTORS. No pickup key or pickup by touch; no allow-li
 
 Drone bays (editor, Storage tab) are box blocks with one hatch: it faces away from the face the bay is placed on,
 and the model shows it (frame, orange doors, a light). A Common bay keeps 4 drones, launches 2 at once and rebuilds
-a lost one in 90 s; tiers are content, only Common is in the palette. `.` (or a click on the DRONES chip over the
-console) launches every drone inside; they leave through the hatch and hold station 14 m out in front of it. `,` (or
-the chip while drones are out) calls them home: they line up in front of the hatch, fly in and dock. A blocked hatch
+a lost one in 90 s; tiers are content, only Common is in the palette. `.` launches every drone inside; they leave through the hatch and hold station 14 m out in front of it. `,` calls
+them home: they line up in front of the hatch, fly in and dock. A blocked hatch
 (a block or a part of the ship in front of it) refuses a launch, and the chip says why. Drones are small real hulls
 flown by the server: they collide, can be destroyed (the bay rebuilds them) and use power. A player has at most 12
 out. A jump calls them home; one still out when the ship leaves is lost. A saved world docks every drone.
@@ -50,18 +49,32 @@ lift it together, faster the more they are. They bring it 10 m out in front of t
 the beam stows it as it stows any container. The DRONES chip shows how many are fetching, and why a fetch is refused:
 no tractor beam, no rack room, too heavy, too few drones, someone else's claim, already taken, out of range. Drones wait
 out a container's pickup delay before lifting it. Losing a carrier, or the ship jumping, drops the container where it is.
+
+A click on the DRONES chip (pointer shown: `Shift` or `Tab`) opens the drone settings popup over it: a Launch / Recall
+button (the same as `.` and `,`), the "Pick up cargo" checkbox, and how many drones are in, out and fetching, the
+rebuild timer and the server's last answer. A click on the chip again, a click elsewhere or `Esc` closes it. With
+"Pick up cargo" on, the ship's drones fetch loose containers on their own, one at a time, whenever one is in range and
+in sensor sight, is yours to take (no one else's claim, pickup delay over) and is out of reach of your own tractor beam
+(which takes it by itself). A container a fetch is refused for is left alone for 20 s. Recalling by hand holds it off
+for 30 s, or until you launch again. The setting is per ship and is saved with the world. There is no "Pick up ores"
+box yet: ore chunks do not exist until the mining laser (R4).
 A saved world keeps a carried container loose where it was. Not built: a ship without a tractor beam cannot be fetched
 to, choosing the hold point in the interface, a drone panel, drone battery limits, scans and charges (later drone steps),
 and any avoidance: a drone flies straight to its place and may bump the ship it came from.
 
 
-Rocks can be scraped: a scrape cuts a groove into an asteroid for everyone who has it in view, hulls and loose
-containers touch the groove, and it is saved with the world. This is the foundation of mining and has no tool yet:
-the only way to scrape is the temporary debug key (`F10`, held in the pilot view, private local games only), which
-cuts a metre-wide groove where the view's centre meets a rock within 600 m of the ship. Far away a scraped rock is
-drawn without its grooves. Not there: the mining laser, ore, cracks, scraping ice shards, and the pointer and
-exhaust marks following a groove (they still see the unscraped surface). A rock holds at most 2,048 scrapes and a
-world 65,536 (`content/rules/rock_edits.json`). See [drones and mining](docs/roadmap/drones-mining.md).
+Rocks can be mined with a mining laser: a small part mounted on a block's face, in an action group (1 to 9 and 0)
+chosen per part in the editor. The number keys turn groups on and off; while any group is on, the left mouse button
+fires every group that is on at the view's centre, and with all off it turns the hull onto the view as before. A
+laser reaches 60 m, turns at most 40° off its face, draws 3 MW while it fires, and cuts a groove 1 m wide into the
+first rock its beam meets, seen by everyone who has the rock in view and saved with the world. What it cuts away
+yields ore from the rock's interior; every 300 kg of one ore breaks off as a loose ore chunk that drifts and bounces
+off rocks and ships. Chunks cannot be picked up yet: the ore hopper comes next. No shipped ship carries a laser yet;
+build one on in the editor. The temporary debug scrape (`F10`, held in the pilot view, private local games only)
+still exists. Not there: picking up ore, cracks, scraping ice shards, beams blocked by other ships, and the pointer
+and exhaust marks following a groove. A rock holds at most 2,048 scrapes and a world 65,536
+(`content/rules/rock_edits.json`); laser and chunk figures are in `content/rules/mining.json` and `blocks.json`. See
+[drones and mining](docs/roadmap/drones-mining.md).
 
 Propulsion burns fuel and is directional: engines, hot thrusters and cold gas thrusters each push the opposite way
 to the way they face, and burn bipropellant, hydrazine and nitrogen from tank blocks. Engines are blocks of any
@@ -208,11 +221,11 @@ are never blocked. The editor works in space, around your ship:
   side it stands for, and the wedge stays the same wedge. Let go of the button or `S`: nothing is placed; the
   size and place stay, and a new click while the pointer is still or on the ghost places it there. `Esc` puts
   back the size and place from before `S`. The right button still orbits while `S` is held.
-- Turn the part before placing it: `R` with its ghost on a face shows two rings around the ghost, about the
-  grid's x (red) and y (green). Left-drag a ring round: the ghost follows the pointer, and the part itself turns
+- Turn the part before placing it: `R` with its ghost on a face shows three rings around the ghost, about the
+  grid's x (red), y (green) and z (blue). Left-drag a ring round: the ghost follows the pointer, and the part itself turns
   in exact quarter turns (90 degrees) as the drag passes each half way. Let go, and the ghost glides onto the
   quarter turn; nothing else happens. The wheel over a ring turns a quarter either way; a click on it a quarter
-  forward, `Shift`+click back. The two rings together reach all twelve wedge orientations. Each turn glides over
+  forward, `Shift`+click back. The x and y rings alone reach all twelve wedge orientations; z saves the detour. Each turn glides over
   `turnSeconds` in `content/visuals/editor.json`; the glide is only drawn, the part placed is always the quarter
   turn. The right button orbits the camera without ending the turn. Every turn counts at once; nothing confirms
   it. A click on the ghost places it as it is drawn and ends the turn. `R` again, or a left or middle click
@@ -335,7 +348,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 - **Flight.** The Prospector flies with inertia: thrust on all three axes, roll, dampeners, and a boost that heats
   up and locks out. Each direction is pushed by the parts that face away from it: two engines and four hot thrusters
   face back and push forward; cold gas thrusters push every other way, and the ion drive in the nose and two ion
-  thrusters brake on power alone. It accelerates at about 12.4 m/s², brakes at 9.5 and strafes at 6.6. Thrust burns fuel, boost four and a half times as much, and the dampeners burn it while they brake;
+  thrusters brake on power alone. It accelerates at about 12.1 m/s², brakes at 9.3 and strafes at 6.5. Thrust burns fuel, boost four and a half times as much, and the dampeners burn it while they brake;
   with a tank dry its parts give nothing, and with every tank dry the hull drifts and can still turn. The shipped
   ship carries about 83 minutes of full engine thrust (34 boosting whenever the drive allows). The drone is electric: its ion drive holds full forward thrust on
   its two generators, while pushing sideways too, or the shield recharging, runs its battery down in tens of seconds and
@@ -450,13 +463,15 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   up to two others mixed in (nickel or titanium in iron, silver or gold in copper), only ones its sector has, and
   at least 30 % of every asteroid is rock. Nothing can be mined yet.
 - **The starting ship.** Each player starts in one ship, the Prospector (`content/ships/prospector.json`), and no
-  other hull. It carries every part a ship can take: 39 blocks (boxes and wedges) and 78 mounted parts, 180.7 t,
-  7 x 3 x 10 m. Rated 211 m/s (422 boosting), turning 72 to 123 degrees a second. Two generators make 12 MW against
+  other hull. It carries every part a ship can take: 41 blocks (boxes and wedges) and 80 mounted parts, 185.1 t,
+  7 x 3 x 10 m. Rated 209 m/s (417 boosting), turning 69 to 121 degrees a second. Two generators make 12 MW against
   6.8 MW idle (twelve cells of gyros, six scanners), four batteries hold 240 MJ, one shield emitter gives 1,500 points.
   Fuel: 2,000 kg bipropellant (two engines), 450 kg nitrogen (52 cold gas thrusters), 300 kg hydrazine (four hot
   thrusters); the ion drive and ion thrusters need none. Two 2 x 2 x 2 cargo racks (128 units, up to XXL containers),
   a tractor beam over each, a drone bay (four drones) opening upward, the passive sensor and sector scanner, two of
-  each scan module and a hyperspace drive. A ship takes FTL drives of one kind only, so it has no wormhole generator
+  each scan module, a hyperspace drive and two mining lasers in the nose, either side of the ion drive, facing ahead
+  in action group 1 (key `1`). Firing both draws 6 MW: at rest with the shield full that is 0.8 MW more than the
+  generators spare, about five minutes on a full battery. A ship takes FTL drives of one kind only, so it has no wormhole generator
   or rift cutter; those can still be built.
 - **Fleet.** More hulls come from the ship editor (New ship). Hulls nobody is flying are flown by the server under
   their standing orders.
@@ -572,14 +587,14 @@ The cursor is hidden only in the pilot view. The command view, the map and every
 
 - **Pilot view:** the hidden cursor steers the view. Hold either `Shift` to show it: mouse flight and targeting
   stop, keyboard flight still works, and the bar and pinned windows can be clicked. With `Shift` held, a right drag that
-  starts over space turns the camera, as free look does; letting go of the button or of `Shift` returns the view to
-  the nose. Press `Shift` before the right button: a click in the same instant as `Shift` is dropped.
-- **Interface mode (`Tab`), pilot view:** a right drag that starts over space turns the camera as free look does (the hull does not turn, no flight input is sent); letting go returns the view to the nose. A press that starts on a window never turns it.
+  starts over space turns the camera, as free look does; letting go of the button or of `Shift` leaves the view
+  where it is. Press `Shift` before the right button: a click in the same instant as `Shift` is dropped.
+- **Interface mode (`Tab`), pilot view:** a right drag that starts over space turns the camera as free look does (the hull does not turn, no flight input is sent); letting go leaves the view where it is. A press that starts on a window never turns it.
 - **Command view:** the cursor is shown as soon as it opens (`N`), and the mouse works in the world: select,
   box-select, order, rotate, pan and zoom. `Shift` there only adds to a selection or moves the plane; it never
   hides the cursor or ends a drag. Back in the pilot view the cursor is hidden again unless `Shift` is held or
   something is open.
-- **Menus, data sheet, map, Controls, the Social workspace, Chat while typing:** the cursor shows until they
+- **Menus, map, Controls, the Social workspace, Chat while typing:** the cursor shows until they
   close, and the world gets no mouse. Pinned windows do not count: they leave the cursor hidden.
 - **Ship editor:** the cursor is shown and the mouse works on the ship, except over the editor's panels. The ship
   gets no controls while it is open. A press on a panel never reaches the ship, with one exception: a part card
@@ -601,7 +616,7 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Forward / back, strafe | `W` `S`, `A` `D` | Left stick |
 | Up / down | `R`, `F` | Right / left trigger |
 | Look around | Mouse, or arrow keys | Right stick |
-| Free look (hull holds its heading) | Hold right mouse button | |
+| Free look (hull holds its heading; the view stays where you leave it) | Hold right mouse button | |
 | Turn the hull onto the view (hold, or click) | Left mouse button | |
 | Zoom camera | Mouse wheel | |
 | Roll | `Q` `E` | Bumpers |
@@ -618,7 +633,7 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Command view | `N` or `F9` | `Back` |
 | Galaxy map | `M` | `Y` |
 | Halt (cancel order; the only way to cancel a started jump) | `H` or `Backspace` | `B` |
-| Ship data sheet | `I` | D-pad up |
+| Ship window (stats of the ship flown, or the selection in the command view) | `I` | D-pad up |
 | Target the ship under the reticle, or the asteroid if there is no ship | Middle mouse button | |
 | Take control of the target (same sector only), or leave in a drone | `T` | D-pad down |
 | Menu or back | `Esc` | `Start` |
@@ -647,6 +662,13 @@ While on, the hull follows the view as if the left button were held, and an `AUT
 reticle. Free look (right mouse button) and a shown pointer (`Shift`) pause it (the tag dims for them), a jump
 holds it off, and the command view, map and editor keep its state but never act on it. Turning it off stops the
 turn at once.
+
+The number keys `1` to `9` and `0` turn action groups on and off (remappable actions `ActionGroup1` to
+`ActionGroup0`). A group exists while a part of the ship is assigned to it; a strip above the console shows
+each one with its key, whether it is on, and its parts ("LASER x2"). While any group is on, the left mouse
+button fires every group that is on instead of aligning the ship; with all off it aligns as before. With the
+pointer shown (`Shift`, interface mode or the command view), clicking the strip opens a popup that changes which
+group each laser fires with, without a rebuild.
 
 A ship near the reticle is bracketed; the middle mouse button targets it and shows its shield and hull. A target
 out of view, behind you, or under a panel, the jump strip or the console, shows as an arrow at the edge of the clear
@@ -730,7 +752,7 @@ on arrival. Outside the map, a move with nothing selected
 still goes to the ship you fly.
 
 Where the command plane cuts through an asteroid or a hull, the cut is drawn as a bright line and the part below
-the plane is dimmed, so it is clear what sits on the plane. `I` shows the data sheet of the first selected hull or
+the plane is dimmed, so it is clear what sits on the plane. `I` opens the Ship window, which then shows the first selected hull or
 asteroid.
 
 `F2` shows or hides the sector panel (name,

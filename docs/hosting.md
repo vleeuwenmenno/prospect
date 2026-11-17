@@ -122,6 +122,8 @@ The identity covers:
 - `content/rules/exploration.json`: jump, sensor and scan rules.
 - `content/rules/rock_edits.json`: what a scrape of a rock may be, the cell size of its bricks, and how many edits
   and bricks a rock and a world hold.
+- `content/rules/mining.json`: how a mining laser's beam turns into scrapes, when the ore it frees breaks off as a
+  chunk, and how loose chunks behave.
 - `content/galaxy/galaxy.json`: the galaxy rules and sector modules.
 - `content/galaxy/interiors.json`: what is inside every asteroid (crust, veins, pockets).
 - `content/net/blocks.json`: block recovery and bulk transfer bounds.

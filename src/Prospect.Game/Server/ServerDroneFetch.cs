@@ -14,18 +14,32 @@ namespace Prospect.Game.Server;
 /// </summary>
 public sealed partial class ServerHost
 {
+    /// <summary>A manual fetch: <see cref="StartFetch"/> for the connection's own player, with its answer told to the connection.</summary>
     private void FetchContainer(Connection connection, HullHandle hull, int page, uint id)
     {
-        if (_hulls.State(hull.Index).Jump != JumpPhase.None) { ReplyDrones(connection, DroneReply.InTransit, 0); return; }
+        var reply = StartFetch(connection.PlayerId, hull, page, id, out var count);
+        ReplyDrones(connection, reply, count);
+    }
+
+    /// <summary>
+    /// The one way a fetch starts, for the key and for auto pickup alike: checks everything and, when it all holds,
+    /// puts drones holding station or waiting in their bays on <see cref="OrderTask.Fetch"/> orders for the container
+    /// and marks it as being fetched. Returns <see cref="DroneReply.Fetching"/> (with how many drones carry it) or why
+    /// it refused; never replies itself.
+    /// </summary>
+    private DroneReply StartFetch(uint viewer, HullHandle hull, int page, uint id, out int carriers)
+    {
+        carriers = 0;
+        if (_hulls.State(hull.Index).Jump != JumpPhase.None) return DroneReply.InTransit;
         var index = _containers.Find(id);
-        if (index < 0 || !MaySeeContainer(connection, _containers.Items[index])) { ReplyDrones(connection, DroneReply.NotFound, 0); return; }
+        if (index < 0 || !Covered(viewer, _containers.Items[index].Position)) return DroneReply.NotFound;
         var item = _containers.Items[index];
-        if (item.TractorHull != 0 || item.FetchHull != 0) { ReplyDrones(connection, DroneReply.Taken, 0); return; }
+        if (item.TractorHull != 0 || item.FetchHull != 0) return DroneReply.Taken;
         var info = _hulls.Info(hull.Index);
-        if (item.ClaimOwner != 0 && item.ClaimOwner != info.Owner) { ReplyDrones(connection, DroneReply.Claimed, 0); return; }
+        if (item.ClaimOwner != 0 && item.ClaimOwner != info.Owner) return DroneReply.Claimed;
         var rules = _content.Drones;
         var range = (double)rules.FetchRangeMetres;
-        if (item.Position.RelativeTo(_hulls.State(hull.Index).Position).LengthSquared() > range * range) { ReplyDrones(connection, DroneReply.TooFar, 0); return; }
+        if (item.Position.RelativeTo(_hulls.State(hull.Index).Position).LengthSquared() > range * range) return DroneReply.TooFar;
         // The most the bays could ever lift: their best drones, as many as hold on to one container.
         var design = _content.Designs[info.Design];
         var alive = _hulls.Blocks(hull.Index);
@@ -34,17 +48,14 @@ public sealed partial class ServerHost
         for (var b = 0; b < design.Bays.Length; b++)
             if (BlockSet.Has(alive, design.Bays[b])) best = Math.Max(best, design.Types[design.Bays[b]].Bay!.CarryKg);
         var most = Math.Min(rules.MaxCarriers, rules.MaxPerPlayer);
-        if (best * most < mass) { ReplyDrones(connection, DroneReply.TooHeavy, 0); return; }
+        if (best * most < mass) return DroneReply.TooHeavy;
         var mount = _tractors.Receiver(_containers, _content, _field, hull.Index, item, rules.HandoverMetres, free: false, CargoScratch, out var why, out _);
         if (mount < 0)
-        {
-            ReplyDrones(connection, why switch { FetchRefusal.NoRoom => DroneReply.NoRoom, FetchRefusal.TooHeavy => DroneReply.TooHeavy, _ => DroneReply.NoTractor }, 0);
-            return;
-        }
+            return why switch { FetchRefusal.NoRoom => DroneReply.NoRoom, FetchRefusal.TooHeavy => DroneReply.TooHeavy, _ => DroneReply.NoTractor };
 
         // Carriers: drones holding station first, then drones inside bays whose hatch is open, until they lift it.
         ref var p = ref _bayPages[page];
-        var room = p.FetchPending > 0 ? 0 : DroneRoom(connection.PlayerId, out _);
+        var room = p.FetchPending > 0 ? 0 : DroneRoom(viewer, out _);
         var carry = 0f;
         var holders = 0;
         for (var i = 0; i < _orderCount && carry < mass && holders < rules.MaxCarriers; i++)
@@ -60,7 +71,7 @@ public sealed partial class ServerHost
             while (free-- > 0 && carry < mass && holders + launches < rules.MaxCarriers && launches < room)
             { carry += spec.CarryKg; taken[b]++; launches++; }
         }
-        if (carry < mass) { ReplyDrones(connection, DroneReply.TooFew, 0); return; }
+        if (carry < mass) return DroneReply.TooFew;
 
         var half = FreeContainers.Half(_content.Cargo, item.Size);
         var radius = _content.Designs[_content.WorkDroneDesign].Flight.Radius;
@@ -89,12 +100,13 @@ public sealed partial class ServerHost
         p.FetchSubject = id;
         p.FetchSlot = (byte)slot;
         p.FetchUntil = until;
-        if (launches > 0) p.LaunchIssuer = connection.PlayerId;
+        if (launches > 0) p.LaunchIssuer = viewer;
         p.Revision++;
         ref var target = ref _containers.At(index);
         target.FetchHull = hull.Packed;
         target.FetchMount = mount;
-        ReplyDrones(connection, DroneReply.Fetching, holders + launches);
+        carriers = holders + launches;
+        return DroneReply.Fetching;
     }
 
     /// <summary>A recall's phase while the drone first flies to its bay's hold point.</summary>

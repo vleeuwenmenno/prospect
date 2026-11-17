@@ -156,6 +156,40 @@ public sealed class SessionSnapshot(GameContent content)
     public int FreeContainerCount;
     public long FreeContainerTick;
 
+    /// <summary>
+    /// Mining laser beams of the hulls the server lets this client see, as it last reported them: empty once none
+    /// has been reported for a few ticks. The tick is the server's.
+    /// </summary>
+    public readonly LaserBeamView[] LaserBeams = new LaserBeamView[LaserBeamsMessage.MaxBeams];
+    public int LaserBeamCount;
+    public long LaserBeamTick = -1;
+
+    /// <summary>Snapshot-owned loose ore chunks, filtered by the server's sensor coverage.</summary>
+    public readonly OreChunk[] OreChunks = new OreChunk[Prospect.Game.World.OreChunks.Capacity];
+    public int OreChunkCount;
+    public long OreChunkTick = -1;
+
+    /// <summary>
+    /// The flown hull's per-hull action group changes (<see cref="ActionGroupHull"/>, its packed handle): one entry a
+    /// groupable part in the order of <see cref="HullDesign.Lasers"/>, <see cref="ActionGroups.NotOverridden"/> where
+    /// the design's group stands. <see cref="ActionGroupRevision"/> moves on with each change the server reports.
+    /// </summary>
+    public readonly byte[] ActionGroupOverrides = new byte[ActionGroupsMessage.MaxParts];
+    public uint ActionGroupHull;
+    public int ActionGroupCount;
+    public uint ActionGroupRevision;
+
+    /// <summary>
+    /// The group a hull's groupable part <paramref name="part"/> fires with, as far as this client knows: the
+    /// override the server reported for the flown hull, else the design's.
+    /// </summary>
+    public int GroupOf(uint hull, HullDesign design, int part)
+    {
+        var mount = design.Mounts[design.Lasers[part]];
+        var overridden = hull == ActionGroupHull && part < ActionGroupCount ? ActionGroupOverrides[part] : ActionGroups.NotOverridden;
+        return ActionGroups.Effective(mount, overridden);
+    }
+
     /// <summary>Index of the player's own hull in <see cref="Hulls"/>, or -1 before it exists.</summary>
     public int OwnHull = -1;
     public bool Dampeners;
@@ -189,7 +223,8 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     // Reserve the full fleet message, one five-byte Control, one editor request, one cargo release and one design acknowledgement
     // before allowing any social traffic.
     internal const int EditorBytesPerTick = EditorRequestMessage.MaxWireSize + DesignReadyMessage.WireSize;
-    internal const int SocialBytesPerTick = ServerHost.PlayerBytesPerTick - FleetOrdersMessage.MaxWireSize - 5 - EditorBytesPerTick - ExplorationMessage.ScanWireSize - ModuleMessage.RequestWireSize - JettisonCargoMessage.MaxWireSize - DroneCommandMessage.MaxWireSize;
+    internal const int SocialBytesPerTick = ServerHost.PlayerBytesPerTick - FleetOrdersMessage.MaxWireSize - 5 - EditorBytesPerTick - ExplorationMessage.ScanWireSize - ModuleMessage.RequestWireSize - JettisonCargoMessage.MaxWireSize - DroneCommandMessage.MaxWireSize - DroneSettingsMessage.MaxWireSize
+        - LaserAimMessage.MaxWireSize - SetActionGroupMessage.MaxWireSize;
     internal static readonly int SocialMessagesPerTick = Math.Min(ServerHost.PlayerMessagesPerTick - 7, SocialBytesPerTick / SocialMessage.MaxWireSize);
     private long _receivedSnapshotTick = -1;
     private long _clientTick;
@@ -371,6 +406,13 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                         if (!_transport.Send(0, NetChannel.Reliable, writer.Written))
                         { End(SessionEndReason.ConnectionLost); return; }
                     }
+                    if (sendCommands && Input.ConsumeDroneSettings(out var droneSettings))
+                    {
+                        var writer = new NetWriter(_sendBuffer);
+                        droneSettings.Write(ref writer);
+                        if (!_transport.Send(0, NetChannel.Reliable, writer.Written))
+                        { End(SessionEndReason.ConnectionLost); return; }
+                    }
                     _editor.Tick(Input, _transport, sendCommands, _content.BlockTransfers.MaxBytes);
                     if (sendCommands)
                         ReportDesigns();
@@ -412,6 +454,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         _world.PublishCargo(snapshot);
         snapshot.Bays = _state == SessionState.Active ? _bays : default;
         _world.PublishFreeContainers(snapshot);
+        _world.PublishLasers(snapshot, tick);
         snapshot.OwnIsDrone = _state == SessionState.Active && snapshot.HullCount > 0 && _world.OwnIsDrone;
         snapshot.Dampeners = _world.Dampeners;
         snapshot.PredictionError = _world.PredictionError;
@@ -542,6 +585,15 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                 break;
             case MessageId.Cargo when _state == SessionState.Active && channel == NetChannel.Reliable && payload.Length <= CargoMessage.MaxWireSize:
                 _world.OnCargo(ref reader);
+                break;
+            case MessageId.LaserBeams when _state == SessionState.Active && channel == NetChannel.Unreliable && payload.Length <= LaserBeamsMessage.MaxWireSize:
+                _world.OnLaserBeams(ref reader, _clientTick);
+                break;
+            case MessageId.OreChunks when _state == SessionState.Active && channel == NetChannel.Reliable && payload.Length <= OreChunkMessage.MaxWireSize:
+                _world.OnOreChunks(ref reader);
+                break;
+            case MessageId.ActionGroups when _state == SessionState.Active && channel == NetChannel.Reliable && payload.Length <= ActionGroupsMessage.MaxWireSize:
+                _world.OnActionGroups(ref reader);
                 break;
             case MessageId.Bays when _state == SessionState.Active && channel == NetChannel.Reliable && payload.Length <= BayMessage.MaxWireSize:
                 if (BayMessage.TryRead(ref reader, out var bays)) _bays = bays;

@@ -116,6 +116,33 @@ public readonly record struct DroneCommandMessage(uint Hull, DroneCommand Comman
     }
 }
 
+/// <summary>
+/// A player's drone setting for one of their hulls. Reliable; the server checks the hull, its owner and the rate again.
+/// Today the one setting is auto pickup: with it on, the hull's drones fetch loose containers on their own. It is a
+/// message of its own, not a <see cref="DroneCommand"/>, so a click on its checkbox is never lost behind a launch
+/// or recall sent in the same moment (the two are rate-limited apart).
+/// </summary>
+public readonly record struct DroneSettingsMessage(uint Hull, bool AutoPickup)
+{
+    /// <summary>Id, hull and the flag.</summary>
+    public const int MaxWireSize = 1 + 4 + 1;
+
+    /// <summary>Writes the whole message.</summary>
+    public void Write(ref NetWriter writer)
+    {
+        writer.WriteByte((byte)MessageId.DroneSettings);
+        writer.WriteUInt32(Hull); writer.WriteByte(AutoPickup ? (byte)1 : (byte)0);
+    }
+
+    /// <summary>Refuses a malformed message before the server looks at the hull.</summary>
+    public static bool TryRead(ref NetReader reader, out DroneSettingsMessage message)
+    {
+        var hull = reader.ReadUInt32(); var flag = reader.ReadByte();
+        message = new DroneSettingsMessage(hull, flag == 1);
+        return reader.IsValid && reader.Remaining == 0 && hull != 0 && flag <= 1;
+    }
+}
+
 /// <summary>One bay of the flown hull as its pilot sees it.</summary>
 public struct BayEntry
 {
@@ -160,6 +187,9 @@ public struct BayView
 
     /// <summary>Drones of the hull out on a fetch, or waiting to launch for one.</summary>
     public byte Fetching;
+
+    /// <summary>True while the hull's drones fetch loose containers on their own.</summary>
+    public bool AutoPickup;
     public int Count;
     public BayEntries Bays;
 
@@ -189,7 +219,7 @@ public struct BayView
 public static class BayMessage
 {
     public const int RecordBytes = 2 + 1 + 1 + 1 + 1 + 1 + 8;
-    public const int HeaderBytes = 1 + 4 + 8 + 4 + 1 + 1 + 1 + 1;
+    public const int HeaderBytes = 1 + 4 + 8 + 4 + 1 + 1 + 1 + 1 + 1;
     public const int MaxWireSize = HeaderBytes + DroneBayRules.MaxBays * RecordBytes;
 
     /// <summary>Writes the view whole.</summary>
@@ -197,7 +227,8 @@ public static class BayMessage
     {
         writer.WriteByte((byte)MessageId.Bays);
         writer.WriteUInt32(view.Hull); writer.WriteInt64(view.Tick); writer.WriteUInt32(view.ReplySequence);
-        writer.WriteByte((byte)view.Reply); writer.WriteByte(view.ReplyCount); writer.WriteByte(view.Fetching); writer.WriteByte((byte)view.Count);
+        writer.WriteByte((byte)view.Reply); writer.WriteByte(view.ReplyCount); writer.WriteByte(view.Fetching);
+        writer.WriteByte(view.AutoPickup ? (byte)1 : (byte)0); writer.WriteByte((byte)view.Count);
         for (var i = 0; i < view.Count; i++)
         {
             var bay = view.Bays[i];
@@ -213,8 +244,9 @@ public static class BayMessage
     {
         view = default;
         view.Hull = reader.ReadUInt32(); view.Tick = reader.ReadInt64(); view.ReplySequence = reader.ReadUInt32();
-        view.Reply = (DroneReply)reader.ReadByte(); view.ReplyCount = reader.ReadByte(); view.Fetching = reader.ReadByte(); view.Count = reader.ReadByte();
-        if (!reader.IsValid || view.Tick < 0 || view.Reply > DroneReply.Delivered || view.Count > DroneBayRules.MaxBays
+        view.Reply = (DroneReply)reader.ReadByte(); view.ReplyCount = reader.ReadByte(); view.Fetching = reader.ReadByte();
+        var auto = reader.ReadByte(); view.AutoPickup = auto == 1; view.Count = reader.ReadByte();
+        if (!reader.IsValid || auto > 1 || view.Tick < 0 || view.Reply > DroneReply.Delivered || view.Count > DroneBayRules.MaxBays
             || reader.Remaining != view.Count * RecordBytes) return false;
         for (var i = 0; i < view.Count; i++)
         {

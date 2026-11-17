@@ -76,6 +76,39 @@ public sealed class DefaultShipTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void ItsTwoMiningLasersFireStraightAheadTogetherAndTheGeneratorsAlmostCarryThem()
+    {
+        // Both lasers are in action group 1 and can fire along the nose: within their gimbal and clear of the ship.
+        var pod = Content.Pod;
+        Assert.Equal(2, pod.Lasers.Length);
+        var draw = 0f;
+        foreach (var m in pod.Lasers)
+        {
+            var mount = pod.Mounts[m];
+            var spec = mount.Type.Laser!;
+            Assert.Equal(1, mount.Group);
+            LaserAim.Local(pod, m, out var grid, out var outward);
+            var ahead = -Vector3.UnitZ;
+            Assert.True(spec.WithinGimbal(outward, ahead), $"laser {m} cannot aim straight ahead");
+            Assert.True(TractorReach.Clear(pod.Boxes, pod.FullSet, pod.BlockSize, grid, grid + ahead * spec.Range), $"laser {m}'s beam ahead crosses the ship");
+            draw += spec.Power;
+        }
+
+        // At rest with the shield full, firing both takes 0.8 MW more than the generators spare: the battery lasts
+        // minutes, not seconds, and flying or recharging the shield while cutting runs it down faster.
+        var flight = pod.Flight;
+        var net = flight.PowerGenerated - flight.IdlePower - draw;
+        Assert.InRange(net, -1.5f, 0f);
+        Assert.True(flight.EnergyStorage / -net > 240f, $"the battery lasts {flight.EnergyStorage / -net:0} s of cutting");
+        flight.LaserPower = draw;
+        var state = HullState.Spawn(Double3.Zero, flight);
+        FlightModel.Step(ref state, default, flight, HullSim.Dt, out var flow);
+        Assert.Equal(draw, flow.Laser);
+        Assert.Equal(net, flow.Net, 4);
+        output.WriteLine($"SHIP lasers: {pod.Lasers.Length} in group 1, {draw:0} MW firing, net {net:0.0} MW at rest, battery {flight.EnergyStorage / -net / 60f:0.0} min");
+    }
+
+    [Fact]
     public void ItsLargestContainerFitsAndItsFiguresAreReported()
     {
         var pod = Content.Pod;

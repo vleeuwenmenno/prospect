@@ -1,0 +1,20 @@
+{
+  "laser": {
+    "biteMetres": 0.25,
+    "editSeconds": 0.15,
+    "strokeGapSeconds": 0.5,
+    "moveRadii": 1,
+    "maxPerHull": 16,
+    "maxAimOffsetMetres": 400
+  },
+  "chunks": {
+    "oreKg": 300,
+    "densityKgPerCubicMetre": 3000,
+    "speed": 2,
+    "spin": 1.2,
+    "perSector": 64,
+    "lifetimeMinutes": 30,
+    "restitution": 0.3,
+    "contactBudget": 512
+  }
+}

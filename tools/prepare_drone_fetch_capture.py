@@ -5,6 +5,8 @@ Usage: prepare_drone_fetch_capture.py <client build folder> <folder for the copy
 The shipped ship already carries tractor beams, racks and a drone bay. The copy only jettisons containers at 6 m/s
 instead of 2, so one leaves the beam's 40 m range before its 10 s pickup delay is over and only drones can bring it
 back. Run the copy with --open cargo --jettison 5 --drone-fetch 12 --capture ... Shipped files are never changed.
+For auto pickup use --drone-autopickup 3 instead of --drone-fetch: the drones go for the jettisoned container on their
+own once its pickup delay is over; add --drone-popup to open the settings popup over the DRONES chip.
 """
 import json
 import shutil

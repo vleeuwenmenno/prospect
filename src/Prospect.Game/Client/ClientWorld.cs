@@ -409,6 +409,8 @@ internal sealed partial class ClientWorld : IDisposable
     public void Tick(PlayerInputBridge bridge, ITransport transport, double serverTick, bool sendCommands = true, long clientTick = -1, float roundTripMs = 0)
     {
         TickRockEdits();
+        _laserClock = clientTick;
+        SendLaserCommands(bridge, transport, sendCommands);
         if (sendCommands && bridge.ConsumeRockScrape(out var scrape))
         {
             Span<byte> bytes = stackalloc byte[RockScrapeRequest.MaxWireSize];
@@ -1144,6 +1146,7 @@ internal sealed partial class ClientWorld : IDisposable
                 || !BlockSet.Has(_near.Blocks(0), OwnDesign.Mounts[item.TractorMount].Parent)) continue;
             _near.Info(0).TractorDemand += spec.Power(TractorSimulation.Mass(_content.Cargo, item));
         }
+        _near.Info(0).LaserDemand = OwnLaserDemand(_laserClock);
         _field.BeginRound();
         for (var at = 0; at < _canonicalCount; at++)
         {

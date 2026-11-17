@@ -269,7 +269,7 @@ public sealed class OwnerClaimTests
         var ownerOffset = original.Length - WorldSnapshotCodec.OwnerBytes;
         for (var i = 0; i < snapshot.HullCount; i++)
             ownerOffset -= WorldSnapshotCodec.HullFixedBytes + snapshot.Hulls[i].Visual.Count * WorldSnapshotCodec.DentBytes;
-        ownerOffset -= snapshot.BlockCount * 4 + snapshot.LossCount * 4 + snapshot.TankCount * 8 + snapshot.RockCount * WorldSnapshotCodec.RockBytes + snapshot.ChartCount * WorldSnapshotCodec.ChartBytes + snapshot.ModuleObservationCount * WorldSnapshotCodec.ModuleObservationBytes + snapshot.CargoCount * WorldSnapshotCodec.CargoRecordBytes + snapshot.FreeContainerCount * WorldSnapshotCodec.FreeContainerBytes + snapshot.BayCount * WorldSnapshotCodec.BayBytes;
+        ownerOffset -= snapshot.BlockCount * 4 + snapshot.LossCount * 4 + snapshot.TankCount * 8 + snapshot.RockCount * WorldSnapshotCodec.RockBytes + snapshot.ChartCount * WorldSnapshotCodec.ChartBytes + snapshot.ModuleObservationCount * WorldSnapshotCodec.ModuleObservationBytes + snapshot.CargoCount * WorldSnapshotCodec.CargoRecordBytes + snapshot.FreeContainerCount * WorldSnapshotCodec.FreeContainerBytes + snapshot.BayCount * WorldSnapshotCodec.BayBytes + WorldSnapshotCodec.MiningHeaderBytes + snapshot.OreChunkCount * WorldSnapshotCodec.OreChunkBytes + snapshot.ActionGroupCount * WorldSnapshotCodec.ActionGroupBytes;
         var duplicate = new byte[original.Length + WorldSnapshotCodec.OwnerBytes];
         original.AsSpan(0, ownerOffset + WorldSnapshotCodec.OwnerBytes).CopyTo(duplicate);
         original.AsSpan(ownerOffset).CopyTo(duplicate.AsSpan(ownerOffset + WorldSnapshotCodec.OwnerBytes));

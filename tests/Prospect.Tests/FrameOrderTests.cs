@@ -945,6 +945,55 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal(0, _world.Selection.Length);
     }
 
+    [Theory]
+    [InlineData(1f)]
+    [InlineData(2f)]
+    public void AClickOnTheActionGroupStripIsItsOwnAndNeverReachesTheWorld(float scale)
+    {
+        UseTips(scale);
+        _world.SetMode(ViewMode.Command);
+        _world.SelectAllOwned();
+        Frame();
+        Frame();
+        var owned = _world.Selection.Length;
+        Assert.True(owned > 0);
+
+        // Groups 1 (on, firing) and 2 (cutting) and 0 (the tenth), as the production host places them over the chips.
+        var strip = new ActionGroupStrip();
+        strip.Begin();
+        strip.Add(1, false);
+        strip.Add(2, true);
+        strip.Add(10, false);
+        strip.End(ActionGroups.Bit(1), true);
+        var keys = new ActionGroupKeys();
+        keys.Update(_actions);
+        var look = ActionGroupLook.Load(Path.Combine(AppContext.BaseDirectory, "content", "visuals", "action_groups.json"));
+        var modules = ModuleLook.Load(Path.Combine(AppContext.BaseDirectory, "content", "visuals", "modules.json")).Strip;
+        var rect = ScreenHost.ActionGroupsRect(Screen, scale, strip.Count, 3, modules, look, out var cellWidth);
+        var presses = new List<int>();
+        var hovered = new List<int>();
+        _drawOver = () =>
+        {
+            Kit.BeginFrame(_tipKit!);
+            var result = ActionGroupPanel.DrawStrip(strip, keys, rect, cellWidth, look);
+            if (result.Pressed != 0) presses.Add(result.Pressed);
+            if (result.Hovered != 0) hovered.Add(result.Hovered);
+        };
+
+        var second = ActionGroupStrip.CellRect(rect, 1, cellWidth, MathF.Round(look.Gap * scale));
+        ClickAt(new float2((second.Left + second.Right) * 0.5f, (second.Top + second.Bottom) * 0.5f));
+        Assert.Equal([2], presses);
+        Assert.Contains(2, hovered);
+        Assert.Equal(owned, _world.Selection.Length);
+
+        // Between two cells, and anywhere else, the press is the world's again.
+        presses.Clear();
+        ClickAt(EmptySpace);
+        Assert.Empty(presses);
+        Assert.Equal(0, _world.Selection.Length);
+        _drawOver = null;
+    }
+
     [Fact]
     public void ANoticeHeldByThePointerStaysAndOneLeftAloneLeaves()
     {
@@ -4110,8 +4159,8 @@ public sealed class FrameOrderTests : IDisposable
     public void EscapeClosesTheCourseMenuBeforeTheCommandViewAndLeavesTheViewAlone()
     {
         OpenCourseMenu(Ahead(100000));
-        Assert.Equal(ScreenHost.BackStep.CourseMenu, ScreenHost.NextBackStep(false, false, false, _world.CourseMenu.IsOpen, false, false, ViewMode.Command));
-        Assert.Equal(ScreenHost.BackStep.SessionMenu, ScreenHost.NextBackStep(false, false, true, true, false, false, ViewMode.Command));
+        Assert.Equal(ScreenHost.BackStep.CourseMenu, ScreenHost.NextBackStep(false, false, _world.CourseMenu.IsOpen, false, false, false, ViewMode.Command));
+        Assert.Equal(ScreenHost.BackStep.SessionMenu, ScreenHost.NextBackStep(false, true, true, false, false, false, ViewMode.Command));
         Assert.Equal(ScreenHost.BackStep.PilotView, ScreenHost.NextBackStep(false, false, false, false, false, false, ViewMode.Command));
         Assert.Equal(ScreenHost.BackStep.OpenMenu, ScreenHost.NextBackStep(false, false, false, false, false, false, ViewMode.Pilot));
         Assert.True(_world.CourseMenu.Close());
@@ -4432,11 +4481,11 @@ public sealed class FrameOrderTests : IDisposable
         Frame(() => Move(OverButton));
         Assert.True(_world.FreeLook);
 
-        // Letting go returns the view to the nose, as free look does.
+        // Letting go keeps the view where the drag left it, as free look does.
         Frame(() => Button(GlfwMouseButton.Right, false));
         Frame();
         Assert.False(_world.FreeLook);
-        Assert.True(Vector3.Distance(Sent().Aim, Nose) < 1e-4f);
+        Assert.True(Vector3.Distance(Sent().Aim, Nose) > 0.05f);
         Assert.Equal(0, _buttonClicks);
     }
 
@@ -4521,6 +4570,98 @@ public sealed class FrameOrderTests : IDisposable
         Assert.False(Sent().Align);
     }
 
+    // Gives the flown pod a mining laser in action group 1 on the front face of its hyperdrive, through a real edit.
+    private void FitALaser()
+    {
+        OpenEditorInSelectTool();
+        var editor = _world.Editor;
+        var content = _snapshot.Content;
+        var pod = content.Designs[_snapshot.Hulls[_snapshot.OwnHull].Design];
+        var hyperdrive = -1;
+        for (var i = 0; i < pod.Boxes.Length && hyperdrive < 0; i++)
+            if (pod.Boxes[i].Type.Id == "hyperdrive") hyperdrive = i;
+        var mounts = pod.Mounts.ToArray().Append(new DesignMount(hyperdrive, BlockFacing.Front, 2, 2, content.Blocks.Get("miningLaser"), 1)).ToArray();
+        var design = new BoxDesign(pod.Name, pod.BlockSize, pod.Boxes.ToArray(), content.Blocks.Limits, "laser test", pod.Class, pod.Color, mounts);
+        Assert.Equal(DraftEdit.Done, editor.ReplaceDraft(design));
+        for (var i = 0; i < 600 && !(editor.Check == DraftCheck.Ready && editor.CheckedVersion == editor.Draft!.Version); i++)
+        {
+            FinishJobs();
+            EditorFrame();
+        }
+
+        Assert.True(editor.CanApply);
+        Tick((int)(content.Editor.CommitSeconds + 1) * TickLoop.SimulationHz);
+        Assert.True(editor.Apply(Bridge));
+        Assert.True(PlayUntil(() => editor.Stage == EditorStage.Closed), $"{_snapshot.Editor.Phase}/{_snapshot.Editor.Reason}");
+        for (var i = 0; i < 10; i++)
+        {
+            Tick();
+            Frame();
+        }
+    }
+
+    [Fact]
+    public void TheNumberKeysToggleActionGroupsAndWhileOneIsOnTheLeftButtonFiresInsteadOfAligning()
+    {
+        FitALaser();
+        Assert.Equal(ActionGroups.Bit(1), _world.ActionGroupsPresent);
+        Assert.Equal(0, _world.ActionGroupsOn);
+
+        // A key whose group has no part does nothing.
+        Frame(() => Key(GlfwKey.Number2, true));
+        Frame(() => Key(GlfwKey.Number2, false));
+        Assert.Equal(0, _world.ActionGroupsOn);
+
+        // All off: the left button aligns, as it always has, and nothing fires.
+        LookAside();
+        Frame(() => Button(GlfwMouseButton.Left, true));
+        Assert.True(Sent().Align);
+        Assert.False(_world.LasersFiring);
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        // A click carries the turn on until the nose is on the view.
+        for (var i = 0; i < 2000 && Sent().Align; i++)
+        {
+            Tick();
+            Frame();
+        }
+
+        Bridge.ConsumeLaserAim(out _);
+
+        // Group 1 on: the same button fires along the view and does not align.
+        LookAside();
+        Frame(() => Key(GlfwKey.Number1, true));
+        Frame(() => Key(GlfwKey.Number1, false));
+        Assert.Equal(ActionGroups.Bit(1), _world.ActionGroupsOn);
+        Frame(() => Button(GlfwMouseButton.Left, true));
+        var sent = Sent();
+        Assert.False(sent.Align);
+        Assert.True(_world.LasersFiring);
+        Assert.True(Bridge.ConsumeLaserAim(out var aim));
+        Assert.Equal(ActionGroups.Bit(1), aim.Groups);
+        Assert.Equal(_snapshot.Hulls[_snapshot.OwnHull].Id, aim.Hull);
+        Assert.True(Vector3.Dot(aim.Direction, sent.Aim) > 0.9999f, $"aim {aim.Direction} view {sent.Aim}");
+
+        // Shift shows the pointer: the click is the windows', so nothing fires and the server is told so.
+        Frame(() => Key(GlfwKey.LeftShift, true));
+        Assert.False(_world.LasersFiring);
+        Assert.True(Bridge.ConsumeLaserAim(out aim));
+        Assert.Equal(0, aim.Groups);
+        Frame(() => Key(GlfwKey.LeftShift, false));
+        Frame(() => Button(GlfwMouseButton.Left, false));
+        Frame();
+        Assert.False(_world.LasersFiring);
+
+        // The key again: all off, and the button aligns once more.
+        Frame(() => Key(GlfwKey.Number1, true));
+        Frame(() => Key(GlfwKey.Number1, false));
+        Assert.Equal(0, _world.ActionGroupsOn);
+        LookAside();
+        Frame(() => Button(GlfwMouseButton.Left, true));
+        Assert.True(Sent().Align);
+        Assert.False(_world.LasersFiring);
+        Frame(() => Button(GlfwMouseButton.Left, false));
+    }
+
     [Fact]
     public void TheAlignLockKeepsTheHullOnTheViewUntilFreeLookShiftOrTheKeyTurnsItOff()
     {
@@ -4601,6 +4742,7 @@ public sealed class FrameOrderTests : IDisposable
         Frame(() => Move(EmptySpace + new float2(200, 0)));
         Assert.True(_world.FreeLook);
         Frame(() => Move(OverButton));
+        var held = Sent().Aim;
 
         // Both edges arrive in one poll: the new UI press must not continue the old world drag.
         Frame(() =>
@@ -4611,7 +4753,7 @@ public sealed class FrameOrderTests : IDisposable
         Frame(() => Move(EmptySpace));
         Frame(() => Move(EmptySpace + new float2(300, 0)));
         Assert.False(_world.FreeLook);
-        Assert.True(Vector3.Distance(Sent().Aim, Nose) < 1e-4f);
+        Assert.True(Vector3.Distance(Sent().Aim, held) < 1e-4f);
         Assert.Equal(0, _buttonClicks);
 
         Frame(() => Button(GlfwMouseButton.Right, false));
@@ -4627,6 +4769,7 @@ public sealed class FrameOrderTests : IDisposable
         Frame(() => Button(GlfwMouseButton.Right, true));
         Frame(() => Move(EmptySpace + new float2(100, 0)));
         Assert.True(_world.FreeLook);
+        var held = Sent().Aim;
         Frame(() =>
         {
             Button(GlfwMouseButton.Right, false);
@@ -4634,7 +4777,7 @@ public sealed class FrameOrderTests : IDisposable
             Button(GlfwMouseButton.Right, true);
         });
         Assert.False(_world.FreeLook);
-        Assert.True(Vector3.Distance(Sent().Aim, Nose) < 1e-4f);
+        Assert.True(Vector3.Distance(Sent().Aim, held) < 1e-4f);
         Frame(() => Move(OverButton + new float2(20, 0)));
         Frame(() => Move(EmptySpace));
         Assert.False(_world.FreeLook);
@@ -4646,6 +4789,7 @@ public sealed class FrameOrderTests : IDisposable
         PilotWithShift();
         Frame(() => Button(GlfwMouseButton.Right, true));
         Frame(() => Move(EmptySpace + new float2(100, 0)));
+        var held = Sent().Aim;
         Frame(() =>
         {
             Button(GlfwMouseButton.Right, false);
@@ -4654,7 +4798,7 @@ public sealed class FrameOrderTests : IDisposable
             Move(EmptySpace + new float2(200, 0));
         });
         Assert.False(_world.FreeLook);
-        Assert.True(Vector3.Distance(Sent().Aim, Nose) < 1e-4f);
+        Assert.True(Vector3.Distance(Sent().Aim, held) < 1e-4f);
         Frame(() => Move(EmptySpace + new float2(300, 0)));
         Assert.False(_world.FreeLook);
     }
@@ -4866,7 +5010,7 @@ public sealed class FrameOrderTests : IDisposable
         {
             if (!_actions.Pressed(_devices, InputAction.Pause, true))
                 return false;
-            var step = ScreenHost.NextBackStep(false, false, false, false, callout.IsOpen, false, _world.Mode);
+            var step = ScreenHost.NextBackStep(false, false, false, callout.IsOpen, false, false, _world.Mode);
             steps.Add(step);
             if (step == ScreenHost.BackStep.FuelCallout)
                 callout.Close();
@@ -4878,7 +5022,7 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal([ScreenHost.BackStep.FuelCallout], steps);
         Assert.False(callout.IsOpen);
         Assert.Equal(ViewMode.Pilot, _world.Mode);
-        Assert.Equal(ScreenHost.BackStep.OpenMenu, ScreenHost.NextBackStep(false, false, false, false, callout.IsOpen, false, _world.Mode));
+        Assert.Equal(ScreenHost.BackStep.OpenMenu, ScreenHost.NextBackStep(false, false, false, callout.IsOpen, false, false, _world.Mode));
 
         // Opened again, the same fuel's click closes it; in the command view Escape still takes it first.
         // Dear ImGui reads a press and its release in two frames, so each click gets a frame to finish.
@@ -4893,7 +5037,7 @@ public sealed class FrameOrderTests : IDisposable
         Frame(() => Click());
         Frame();
         Assert.Equal(first, callout.Open);
-        Assert.Equal(ScreenHost.BackStep.FuelCallout, ScreenHost.NextBackStep(false, false, false, false, callout.IsOpen, false, ViewMode.Command));
+        Assert.Equal(ScreenHost.BackStep.FuelCallout, ScreenHost.NextBackStep(false, false, false, callout.IsOpen, false, false, ViewMode.Command));
 
         // A gap between cells, or the bars above, opens nothing and closes nothing.
         Frame(() => Move(MiddleOf(ConsoleBar.Shield)));
@@ -8487,13 +8631,12 @@ public sealed class FrameOrderTests : IDisposable
         Assert.True(_mode.Active);
         Assert.Equal(0, _buttonClicks);
 
-        // Let go: free look's own rule, the view returns to the nose; the hull never turned.
+        // Let go: free look's own rule, the view stays where the drag left it; the hull never turned.
         Frame(() => Button(GlfwMouseButton.Right, false), InterfaceKey);
         Assert.False(_world.FreeLook);
-        // The chase camera eases back onto the nose over a few frames.
         for (var i = 0; i < 240; i++)
             Frame(shortcut: InterfaceKey);
-        Assert.True(Vector3.Distance(_world.CameraForward, before) < 0.05f);
+        Assert.True(Vector3.Distance(_world.CameraForward, before) > 0.05f);
     }
 
     [Fact]
@@ -8840,6 +8983,51 @@ public sealed class FrameOrderTests : IDisposable
         HoldClick();
         Assert.True(target == editor.Draft.Boxes[block].Type.Tank, _holdLog);
         Assert.False(editor.Menu.IsOpen);
+    }
+
+    [Fact]
+    public void AClickOnGroupThreeInTheMenusFlyoutPutsTheLaserInThatGroupAndKeepsItSelected()
+    {
+        UseTips();
+        _editorMenu = new EditorMenuPanel(_tipKit!);
+        OpenEditor();
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var editor = _world.Editor;
+        editor.StopPlacing();
+        var draft = editor.Draft!;
+        var laser = editor.Content!.Blocks.Get("miningLaser");
+        var placed = false;
+        for (var block = 0; !placed && block < draft.Boxes.Length; block++)
+            placed = draft.AddMount(block, BlockFacing.Up, 2, 2, laser) == DraftEdit.Done;
+        Assert.True(placed, "a block has room for a laser");
+        var mount = draft.Mounts.Length - 1;
+        Assert.Equal(1, draft.Mounts[mount].Group);
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        editor.SelectMount(mount, false);
+        Assert.True(editor.OpenMenu(new float2(300f, 300f), -1, mount));
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+
+        // The pointer goes to Group, rests, then down its flyout to "Group 3", the third row.
+        Glide(MenuRow(EditorMenuPanel.EditorMenuRow.Group));
+        for (var i = 0; i < 6; i++)
+            EditorFrame();
+        Assert.Equal(EditorMenuSub.Group, editor.Menu.Sub);
+        Assert.True(_editorMenu!.TrySubRowCentre(2, out var row));
+        Assert.True(_editorMenu.TrySubRowCentre(0, out var first));
+        Glide(first);
+        Glide(row);
+        HoldClick();
+        Assert.True(editor.Draft!.Mounts[mount].Group == 3, _holdLog);
+        Assert.False(editor.Menu.IsOpen);
+        Assert.Equal(mount, editor.SelectedMount);
+        Assert.Equal(3, editor.SelectionGroup);
+
+        // One undo takes the choice back.
+        editor.Undo();
+        Assert.Equal(1, editor.Draft.Mounts[mount].Group);
     }
 
     [Fact]

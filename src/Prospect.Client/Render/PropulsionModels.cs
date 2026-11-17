@@ -328,6 +328,9 @@ internal sealed class PropulsionLook
     public Dictionary<string, PropulsionModelLook> Models { get; init; } = [];
     public TractorLook? Tractor { get; init; }
 
+    /// <summary>How the mounted mining laser and its beam are drawn; null draws a laser as its plain small box.</summary>
+    public LaserLook? Laser { get; init; }
+
     /// <summary>How each mounted module scanner is drawn, keyed by block type id; a scanner with no entry is its plain small box.</summary>
     public Dictionary<string, ScannerLook> Scanners { get; init; } = [];
     public Dictionary<string, PlumeLook> Plumes { get; init; } = [];
@@ -383,6 +386,7 @@ internal sealed class PropulsionLook
         look.Bay?.Check(path);
         if (look.Tractor is null) throw new InvalidDataException($"{path}: missing tractor appearance");
         look.Tractor.Check();
+        look.Laser?.Check(path);
         look.Cargo = CargoCatalog.Parse(File.ReadAllBytes(AppPaths.Content("blocks", "cargo.json")));
         look.Rack?.Attach(Galaxy.Load(AppPaths.Content("galaxy", "galaxy.json")).Resources, look.Cargo);
         if (!(look.BoostLength is >= 1 and <= 4) || !(look.BoostBrightness is >= 1 and <= 4)
@@ -482,6 +486,11 @@ internal static partial class PropulsionModels
         var model = ModelOf(part.Type, BlockShape.Box, look);
         if (model is null)
         {
+            if (LaserOf(part.Type, look) is { } laser)
+            {
+                BuildLaser(laser, part.Type, new PartBox(design.MountOffsets[mount], design.MountHalfExtents[mount], part.Face, design.BlockSize > 0 ? design.BlockSize : 1f), vertices, indices);
+                return true;
+            }
             if (ScannerOf(part.Type, look) is not { } scanner)
                 return false;
             BuildScanner(scanner, part.Type, new PartBox(design.MountOffsets[mount], design.MountHalfExtents[mount], part.Face, design.BlockSize > 0 ? design.BlockSize : 1f), vertices, indices);

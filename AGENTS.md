@@ -17,6 +17,7 @@ to work.
 - `docs/windows.md`: interface mode (`Tab`), the windows and their pins, the Charts window.
 - `docs/controls.md`: the Controls screens, tabs, search, remapping, clashes and their limits.
 - `docs/world-generation.md`: fields and clouds in world space: anchors, which sector takes a rock, the gas query.
+- `docs/roadmap/drones-mining.md`: drones, rock edits, interiors and mining lasers: decided, built, open.
 - An item under "Open" is not decided. Ask; do not guess and build.
 - When a decision is made in conversation, move it from "Open" to "Decided" in the same change.
 
@@ -35,7 +36,7 @@ Use the Makefile, not raw `dotnet` commands.
 | --- | --- |
 | `make setup` | First run on a machine: system packages for the OS (Vulkan; MoltenVK on macOS), the .NET SDK into `~/.dotnet`, restore. `make doctor` checks the toolchain and GPU. |
 | `make check` | Formatting, warnings-as-errors build and all tests. Must pass before work is called done. Takes about two minutes. |
-| `make bench` | Release benchmarks: an empty scene, resizing (`--bench-resize`), then editor cargo, Fuel menu, fuel-on-apply and mirror ghosts (four measured seconds each, after four seconds for scripted edits and workers to settle). Then, on the build as it is (the shipped ship carries tractor beams, racks and a drone bay), 25 s of cargo: jettison, drift, tractor pull and stow (`--open cargo --jettison 5`); it also fails unless the container was seen loose and is back in the hold. Then 25 s of drones: launch, hold station, recall and dock (`--open drones --drone-recall 12`); it also fails unless a drone was seen out and the bay is full again. Last, 14 s of a rock being scraped thirty passes (`--open rock-scrape`): edits, bricks and patch rebuilds on every thread; it also fails unless all 480 edits came back from the server and the patch was rebuilt and is drawn. Fails under 144 fps or on any managed allocation in the frame loop. Run it after touching anything that executes every frame or every tick. |
+| `make bench` | Release benchmarks: an empty scene, resizing (`--bench-resize`), then editor cargo, Fuel menu, fuel-on-apply and mirror ghosts (four measured seconds each, after four seconds for scripted edits and workers to settle). Then, on the build as it is (the shipped ship carries tractor beams, racks and a drone bay), 25 s of cargo: jettison, drift, tractor pull and stow (`--open cargo --jettison 5`); it also fails unless the container was seen loose and is back in the hold. Then 25 s of drones: launch, hold station, recall and dock (`--open drones --drone-recall 12`); it also fails unless a drone was seen out and the bay is full again. Then 14 s of a rock being scraped thirty passes (`--open rock-scrape`): edits, bricks and patch rebuilds on every thread; it also fails unless all 480 edits came back from the server and the patch was rebuilt and is drawn. Last, again on the shipped build (its two lasers in group 1 face forward), 16 s of a laser cutting a 199 m rock (`--open laser`); it also fails unless a beam was seen, eight scrapes came back and a chunk broke off. Fails under 144 fps or on any managed allocation in the frame loop. Run it after touching anything that executes every frame or every tick. |
 | `make bench-scans` | Release benchmark with each module scan type repeating (gas, asteroid, locator), on a copy of the build whose scans and cooldowns are short (`tools/prepare_scan_bench.py`; the shipped ship carries every scanner). Fails on any managed allocation on any thread, or under five completed scans. Run it after touching module scans, their server worker or the module interface. |
 | `make bench-gas` | Release benchmark inside gas clouds (ordinary from inside, pilot and command view, huge, lightning; cold and a pair reported only). Fails under 144 fps or on any managed allocation. Run it after touching the gas shaders or how gas is drawn. |
 | `make run ARGS="..."` | The client. `make server` is the dedicated server. |
@@ -162,6 +163,30 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   Ice shards cannot be scraped (`RockEditRules.Scrapable`). Tests: `RockEditTests`, `RockEditWireTests`,
   `RockEditSaveTests`, `RockEditSessionTests`, `SaveLifecycleTests`, `ContentIdentityTests`; `make bench` scrapes a rock.
   Cracks (R2) add a kind to `RockEditCodec` (3 is kept for it) and rocks past the generated list; nothing here builds them.
+- **Mining lasers, action groups and ore chunks (R3):** a laser is a face mount with `laser` data (`LaserSpec`,
+  `laserTiers`; only Common in the palette); `HullDesign.Lasers` lists them in mount order, and a laser's "part" on
+  the wire and in a save is its place there. Groups are `ActionGroups` (1 to 10, key `0` is 10; 0 is none; only
+  `Groupable` types may have one, checked by `FaceMounts.Validate`). The design's group is `DesignMount.Group`
+  (design file 7, `DesignBytes` 5); a hull's change without a rebuild is the server's override table
+  (`ServerLasers.cs`, `SetActionGroupMessage` 45, `ActionGroupsMessage` 48 to the flown hull, cleared by
+  `CreateHull`); read a part's group only through `ServerHost.GroupOf` / `SessionSnapshot.GroupOf`.
+  Input is `WorldView.Lasers.cs`: number keys (`ActionGroup1..0`) toggle groups the hull has; while any is on, the
+  `AlignToView` button fires them and does not align (the align lock still aligns); the intent goes through
+  `PlayerInputBridge.AimLasers` when it changes (`LaserAimMessage` 44: groups, camera offset, unit ray).
+  The server: `PlanLasers` before the hull round (flown hull, owner, no transit, part's block there, group on,
+  `LaserSpec.WithinGimbal`, own hull clear by `TractorReach.Clear`; demand into `HullInfo.LaserDemand`), the flight
+  step bills `PowerFlow.Laser` all or nothing after the tractors, `FireLasers` after the round fires from the hull's
+  new pose toward the aim found before (`LaserAim`, `RockRay.First`) and cuts through `ScrapeRock` only, strokes
+  chained so the wire sends 9 B a scrape. Ore: `MiningRules.ScrapeKg` shared out by `RockInterior.Sample` at the
+  cut's deepest point, per laser and ore, a chunk at `chunks.oreKg`. Figures: `content/rules/mining.json` (shared,
+  identity). Chunks are `OreChunks` (fixed 256, their own pool: neither tractor nor drone reads it until R4) and
+  `OreChunkSimulation` (bounded contacts, no damage); `OreChunkMessage` 47 every 6 ticks by `Covered`; beams
+  `LaserBeamsMessage` 46 unreliable each tick by `MaySeeHull`, held 6 ticks on the client, which predicts its own
+  laser draw from them (`ClientWorld.Lasers.cs`). Save codec 20 (`WorldSnapshotCodec.Mining.cs`, `RestoreMining`).
+  Nothing here takes memory in the tick or the frame. Captures: on the shipped build (the Prospector's two
+  nose lasers are in group 1), `--open laser` (hull over a rock, group 1 fires from `--fire-at`, default 3 s; `--fire-group <digit>` works in any
+  scripted view) or `--open laser-command` (command camera on the cut, `--rock-scrape-distance`); `make bench` runs
+  `--open laser`. Tests: `MiningLaserTests` and friends. Gaps in `docs/roadmap/drones-mining.md`, "R3 as built".
 - **Debug: scrape rock (temporary, local games only):** `MessageId.RockScrape` (42, `RockScrapeRequest`: rays in the
   rock's frame) through `PlayerInputBridge.DebugScrape`; `ServerHost.DebugScrape` checks `AllowDebugFill`, the
   in-process link, a live flown hull not in transit, the interval (`debug.intervalSeconds`), the radius, and that every
@@ -299,7 +324,22 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `tools/prepare_drone_fetch_capture.py` then `--open cargo --jettison 5 --drone-fetch 12` (jettisoned at 6 m/s, out of
   beam range before its pickup delay ends; delivered about 42 s in); `make bench` runs it for 50 s.
   Interface: `LaunchDrones` (`.`), `RecallDrones` (`,`), the DRONES chip in the module strip (`DroneUi`,
-  `DroneTracker`). Tests: `DroneBayTests`, `BayModelTests`. Capture:
+  `DroneTracker`). Tests: `DroneBayTests`, `BayModelTests`.
+  Drone settings popup and auto pickup: a click on the chip toggles `DronePopup` (font-free state: open, `Follow` the
+  hull, `Press` outside closes, never the chip's own press) and `DrawDronePopup` (`Screens.Modules.cs`, fixed height,
+  an ImGui window placed over the chip; Escape is `BackStep.DronePopup`). Its button is `DronePopup.LaunchOrRecall`
+  (the keys' own calls); its checkbox is `DronePopup.ToggleAutoPickup`, which asks `PlayerInputBridge.SetDroneAutoPickup`
+  and reads the answer back from `BayView.AutoPickup`, never a copy of its own. Server: per hull, `BayPage.AutoPickup`
+  (carried by `CarryBays`, saved: codec 19, `SavedHull.AutoPickup`, refused on a hull with no bays), set by
+  `ReceiveDroneSettings` (protocol 67, message 43, own `DroneSettingsNext` rate limit, owner's live non-drone
+  non-wreck hull with bays only). `ServerHost.TickAutoPickup` (`ServerDroneAuto.cs`) looks at `autoPickupWindow`
+  containers a tick from a rotating cursor and starts a fetch through `StartFetch`, the one body of the manual `/`
+  fetch: never a second path. Skips containers a tractor or drones have, the owner may not take (`MayPickup`), out of
+  range or sensor sight (`Covered`), reached by the hull's own beam (`TractorSimulation.Reaches`), or refused lately
+  (four-slot `AutoSkip`, `autoPickupRetrySeconds`). One fetch a hull at a time; a manual recall pauses it
+  (`autoPickupPauseSeconds`), a manual launch ends the pause. No ore box until R4 (no ore chunks, no stubs). Tests:
+  `DroneFetchTests` (auto pickup), `DronePopupTests`. Capture: `tools/prepare_drone_fetch_capture.py`, then
+  `--open cargo --jettison 5 --drone-autopickup 3 --drone-popup` (scripted runs only). Capture:
   `--open drones` (launch 3 at 1.5 s, recall at `--drone-recall`, default 14 s) and `--open edit-bay` (a bay's ghost
   on a top face, hatch up); `make bench` runs `--open drones` on the shipped build.
 - **Debug: add container (temporary, local games only):** `EditorRequestKind.AddContainer` asks for size/resource in
@@ -384,6 +424,17 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   hold it. Check with `--open edit-menu` (the pod's first tank right-clicked, Fuel flyout out) and `--open edit-resize`
   (a block grown one cell by the gesture at 2 s); capture after 4 s. `--open edit-dump` deletes a full tank
   and arms the fuel-loss confirmation; capture after 4 s.
+- **A mount's action group in the editor:** the group is `DesignMount.Group` (`ActionGroups`: 1 to 10, 0 for none;
+  only a groupable part, today the mining laser, may have one). `BuildDraft.AddMount` and `AddMountMirrored` start a
+  groupable part in `ActionGroups.Default` (group 1, so a new laser fires with no further step); copy, paste, move and
+  mirror keep the group. `BuildDraft.SetMountGroup` / `SetMountGroups` is the one edit (one undo step; `DraftEdit.NoGroup`
+  for a part that may not have it, `Unchanged` for the group it has); it is never mirrored. `ShipEditor.SetSelectedGroup`
+  calls it and keeps the mount selection (no index moves), `SelectionIsGroupable`, `SelectionGroup` and `CanSetGroup`
+  are what the interface reads. The details panel's ACTION GROUP chips (`DrawGroupSelector`, `Screens.LaserGroups.cs`)
+  and the context menu's Group row and flyout (`EditorMenuRow.Group`, `EditorMenuSub.Group`) both go through it. The
+  laser's card is `DrawLaserCard` (Storage category, role `PartRole.Laser`). Tests: `MountGroupTests`, and the Group
+  click in `FrameOrderTests`. Check with `--open edit-laser` (the ghost on a top face, the card shown by a part search)
+  and `--open edit-laser-group` (a laser placed by the editor's click and selected; capture after 4 s).
 - **Mirror in the editor:** `ShipEditor.Mirror` (`MirrorAxes`, saved as `ClientSettings.EditorMirror`, never sent) is
   applied by `BuildDraft.AddMirrored`, `AddMountMirrored` and `DeleteMirrored`, each one undo step; the geometry (planes
   through the first core's centre, `TryMirrorFrame`; facing of thrust parts, wedge slant, mount face and U/V) is
@@ -608,7 +659,7 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
 - **Interface mode and the windows:** `InterfaceMode` is the latch and its key; `ScreenHost` treats it as the old
   social workspace (a surface: pointer shown, `WorldInputEnabled` false). Every window is a `SocialPane` drawn
   through `BeginPane`, pinned and placed by `FloatingWindow`, kept in `SocialPanes` and saved by `WindowLayout`
-  (`ClientSettings.Windows`, unscaled). A new window: add a `SocialPane`, its name in `SocialPanes.NameOf`, its
+  (`ClientSettings.Windows`, unscaled). The Ship window (`I`, `SocialPane.Ship`, `Screens.Ship.cs`) replaces the old data sheet: `ShipSheet` (font-free) picks its subject (flown hull, command selection, selected rock) and which sections show; figures are `HullView.Stats`, the design and the flown hull's live state, never a second computation. Capture with `--open info`; tests `InterfaceWindowTests`. A new window: add a `SocialPane`, its name in `SocialPanes.NameOf`, its
   size and fallback place, a top bar tab, an action in `controls.json`/`bindings.json`. The Charts list is
   `ChartCatalogue` (font-free, allocation-free); its jump goes through `ChartActions` and `JumpPlan`, never a
   second range check. Rules in `docs/windows.md`; `InterfaceWindowTests` and the interface tests in
@@ -632,6 +683,20 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   hold it. Check with `--open modules|gas|module-command`, `--target-rock`, `--module`
   on the shipped ship, which carries two of each scanner (`tools/prepare_scan_bench.py` makes a copy with short scans,
   and `--open edit-scanner` holds a scanner's mount ghost on a face).
+- **Action groups (interface):** the strip above the console shows only groups the flown hull has a part in.
+  - State is `ActionGroupStrip` (font-free, no memory): cells in key order (1 to 9, then 0), on, firing, cutting.
+    It reads `SessionSnapshot.GroupOf` (override else design), `WorldView.ActionGroupsOn`/`LasersFiring` and `LaserBeams`.
+  - Place: `ScreenHost.ActionGroupsRect`, above the module chips, or above the status-chip slot with none. Tips
+    (`ConsoleArea`) and the party list keep clear of it. Never draw anything else in that row.
+  - Drawing is `ActionGroupPanel` (static, so `FrameOrderTests` draws the production code). Figures, colours and
+    the part-kind words are `content/visuals/action_groups.json` (`ActionGroupLook`).
+  - Key names come from `ActionMap` (`ActionGroupKeys`, rebuilt on `ActionMap.Version`); a number-row key reads as its digit.
+  - A click on a cell opens the popup (`ScreenHost._actionGroupsOpen`, Escape closes it first, `BackStep.ActionGroups`).
+    It takes input only where the pointer is shown. Never change `PointerFrame` for it.
+  - `ActionGroupPanel.DrawActionGroupsSection` lists each laser with a selector (groups, NONE, DESIGN) and calls
+    `PlayerInputBridge.SetActionGroup`. It shows the server's answer, never the click. The Ship window calls it too.
+  - Tip: `actionGroupReady`, fired when the hull first has a group. Tests: `ActionGroupStripTests`, `FrameOrderTests`.
+  - Check with `--open action-groups` and `--open action-groups-popup` on the shipped ship (two lasers in group 1), at `"UiScale"` 1 and 2.
 - **A new action or key:** add it to `content/input/bindings.json` and to `content/input/controls.json` (tab, label,
   scope; a fixed mouse or chord row goes there too). Loading refuses an action the catalogue lacks. Read it through
   `ActionMap` only; never cache a key name without rebuilding it on `ActionMap.Changed`. Anything that reads input
@@ -682,8 +747,9 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   fields to the design file.
 - **The starting ship:** the shipped content gives a player one ship, the Prospector (`content/ships/prospector.json`,
   the `pod` of `fleet.json`), and no starting fleet. It carries every part a ship can take (FTL drives of one kind
-  only: hyperspace). `DefaultShipTests` holds that, its tractor reach and bay hatch, and prints its figures (`SHIP`
-  lines); `PowerFlowTests`, `PropulsionTests` and `EditorPanelTests` (its one warning: braking with its ion parts
+  only: hyperspace), two mining lasers in group 1 among them. `DefaultShipTests` holds that, its tractor reach, bay
+  hatch and lasers (straight ahead within the gimbal and clear of the hull; both firing net -0.8 MW at rest), and
+  prints its figures (`SHIP` lines); `PowerFlowTests`, `PropulsionTests` and `EditorPanelTests` (its one warning: braking with its ion parts
   overloads, as the drone's strafing does) hold its balance. Its spare power is pinned between 4.8 and 5.45 MW by the
   scan tests (a scan must turn the net flow negative), which is why it has twelve cells of gyros. Ship files are not
   in the save identity: a saved world keeps the catalogue it was made with, old ships included.
@@ -722,7 +788,7 @@ The client opens a real window on the developer's desktop, and they are usually 
   tank instead takes the flown hull's last fuel tank (design order) as a destroying hit would, for the fuel callout.
   Same limits as `--break-shield`. Check at `"UiScale": 2` too.
 - `make run ARGS="--start local --open <view> --capture /path/shot.png --capture-after 2.5"` saves a screenshot
-  and exits. Views: `command`, `edit` (asks to edit the own ship; the editor opens on the grant), `edit-turn` (the same on the Thrust category, with the ghost of an engine held on the ship and turned to face right: its nozzle side in orange; capture after 3 s), `edit-ion` (the same with an ion drive's ghost: its grid side in orange; capture after 3 s), `edit-palette-tip` (the Thrust category with its rail tooltip held open), `edit-tank-fuel` (the Storage category, a hydrazine tank to place: the details panel shows the fuel buttons), `edit-tank`, `edit-tank-long` and `edit-tank-slab` (a bipropellant tank's ghost at 1 x 1 x 1, 2 x 1 x 1 and a 2 x 1 x 2 slab, chosen after a wedge: it stays a box and the Wedge button is off; capture after 3 s), `edit-scanner` (the ghost of an asteroid scanner, a face mount, held on the top face of the first block that has room, Sensors category; capture after 4 s), `edit-drone` (steps out into the drone, then edits it: drone parts only; capture after 5 s), `edit-fill` and `edit-fill-done` (the pod's first tank selected, so the debug FILL TANK button shows; the second asks the server to fill it 1.5 s in, and `--notices-sample on` shows the notice; capture after 4 s), `edit-box-select` and `edit-select-all` (the select tool with a scripted box drag, or Ctrl+A; see "Box select in the editor"), `edit-menu` and `edit-resize` (the pod's first tank right-clicked with its menu and Fuel flyout out, or a block selected and grown one cell by the face-drag resize; capture after 4 s; see "The editor's context menu"), `edit-mirror` (the `edit-turn` engine ghost with the X and Z mirror planes on: copies and planes show; capture after 4 s), `edit-mount` (the same with the ghost of a cold gas thruster mounted on a top face, its exhaust line pointing out of it; capture after 4 s), `drone` (steps out of the hull into the escape drone), `map`, `map-hover` (the map with the pointer on your own sector, a preview card), `map-card` (your own sector's card pinned), `map-card-near` (a sector 144 km away: a blind jump with risk) and `map-card-far` (460 km: out of drive range), `command-menu` (the command view's right-click menu on a blind jump 60 km ahead for the ship being flown: Plot jump), `command-menu-fleet` (the same for the other ships: Jump here), `command-menu-close` (3 km, too close) and `command-menu-far` (450 km, too far), `new-ship` (leaves the pod in the drone and opens the New ship dialog empty; `--tips-sample on` shows the drone-edit tip beside it), `new-ship-refused` (the same with a refusal shown, put there by the hook rather than sent by a server) `new-ship-editor` (builds a ship through the real dialog and server: the editor opens on its single block, drone still flown; capture after 4 s) and `new-ship-closed` (the same, then cancels that edit: you fly the new ship; capture after 6 s), `map-tilt` (the same, tilted), `map-reach` and `map-reach-tilt` (zoomed in on the own position to show the shape of sensor reach), `scan` (pinned card and a scan started: capture after 2.5 s for progress, after 7 s for the charted result; add `--map-cell 190` to see field and cloud outlines, `scan-command` (the command view 9 km back with a scan started: the pulse from outside, capture after 6.2 s), `scan-pilot` (the flight view with a scan started: capture after 2.5 s for the bar, 6.5 s for result and cooldown, 12 s for the cooldown alone; `--tips-sample on` shows the scan tip), `--map-tilt`, `--map-hover` to rest the pointer on the own ship), `command-fog` (the command view pulled back to show sensor rings and fog, all owned ships selected), `command-fog-one` (only the flown ship selected), `command-fog-pair` and `command-fog-far` (it and another ship that jumps 6 km or 14 km away along -x, selected; capture after 28 s), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,
+  and exits. Views: `command`, `edit` (asks to edit the own ship; the editor opens on the grant), `edit-turn` (the same on the Thrust category, with the ghost of an engine held on the ship and turned to face right: its nozzle side in orange; capture after 3 s), `edit-ion` (the same with an ion drive's ghost: its grid side in orange; capture after 3 s), `edit-rings` (the `edit-turn` engine ghost with its three rotation rings out, x red, y green, z blue; capture after 4 s), `edit-palette-tip` (the Thrust category with its rail tooltip held open), `edit-tank-fuel` (the Storage category, a hydrazine tank to place: the details panel shows the fuel buttons), `edit-tank`, `edit-tank-long` and `edit-tank-slab` (a bipropellant tank's ghost at 1 x 1 x 1, 2 x 1 x 1 and a 2 x 1 x 2 slab, chosen after a wedge: it stays a box and the Wedge button is off; capture after 3 s), `edit-scanner` (the ghost of an asteroid scanner, a face mount, held on the top face of the first block that has room, Sensors category; capture after 4 s), `edit-laser` (the ghost of a mining laser held on a top face, its card in view; capture after 4 s), `edit-laser-group` (a mining laser placed and selected, so the details panel's group selector shows; capture after 4 s), `edit-drone` (steps out into the drone, then edits it: drone parts only; capture after 5 s), `edit-fill` and `edit-fill-done` (the pod's first tank selected, so the debug FILL TANK button shows; the second asks the server to fill it 1.5 s in, and `--notices-sample on` shows the notice; capture after 4 s), `edit-box-select` and `edit-select-all` (the select tool with a scripted box drag, or Ctrl+A; see "Box select in the editor"), `edit-menu` and `edit-resize` (the pod's first tank right-clicked with its menu and Fuel flyout out, or a block selected and grown one cell by the face-drag resize; capture after 4 s; see "The editor's context menu"), `edit-mirror` (the `edit-turn` engine ghost with the X and Z mirror planes on: copies and planes show; capture after 4 s), `edit-mount` (the same with the ghost of a cold gas thruster mounted on a top face, its exhaust line pointing out of it; capture after 4 s), `drone` (steps out of the hull into the escape drone), `map`, `map-hover` (the map with the pointer on your own sector, a preview card), `map-card` (your own sector's card pinned), `map-card-near` (a sector 144 km away: a blind jump with risk) and `map-card-far` (460 km: out of drive range), `command-menu` (the command view's right-click menu on a blind jump 60 km ahead for the ship being flown: Plot jump), `command-menu-fleet` (the same for the other ships: Jump here), `command-menu-close` (3 km, too close) and `command-menu-far` (450 km, too far), `new-ship` (leaves the pod in the drone and opens the New ship dialog empty; `--tips-sample on` shows the drone-edit tip beside it), `new-ship-refused` (the same with a refusal shown, put there by the hook rather than sent by a server) `new-ship-editor` (builds a ship through the real dialog and server: the editor opens on its single block, drone still flown; capture after 4 s) and `new-ship-closed` (the same, then cancels that edit: you fly the new ship; capture after 6 s), `map-tilt` (the same, tilted), `map-reach` and `map-reach-tilt` (zoomed in on the own position to show the shape of sensor reach), `scan` (pinned card and a scan started: capture after 2.5 s for progress, after 7 s for the charted result; add `--map-cell 190` to see field and cloud outlines, `scan-command` (the command view 9 km back with a scan started: the pulse from outside, capture after 6.2 s), `scan-pilot` (the flight view with a scan started: capture after 2.5 s for the bar, 6.5 s for result and cooldown, 12 s for the cooldown alone; `--tips-sample on` shows the scan tip), `--map-tilt`, `--map-hover` to rest the pointer on the own ship), `command-fog` (the command view pulled back to show sensor rings and fog, all owned ships selected), `command-fog-one` (only the flown ship selected), `command-fog-pair` and `command-fog-far` (it and another ship that jumps 6 km or 14 km away along -x, selected; capture after 28 s), `galaxy`, `info`, `jump`, `jump-wormhole`, `jump-rift`, `world-settings`, `menu`,
   `players`, `social`, `friends`, `chat`, `hud` (the world with the party list and recent chat only). The social views and
   `hud` leave the performance overlay off. Screens
   without a session: `--start menu|join|settings|newgame|credits|account|load`; `--set id=value` shows on `newgame`, and so
@@ -1009,6 +1075,17 @@ How to apply it:
 - Commit and push only when asked.
 
 
+## Mining laser visuals (R3)
+
+- Model: `PropulsionModels.BuildLaser` (look: the `laser` entry of `visuals/propulsion.json`, `LaserLook`, validated), a pure
+  function of the thin mount box like a scanner's; wired through `AddMount`, `HasModel` and `BuildPart`, so hull meshes,
+  damage meshes, the editor and far hulls all take it. The lens is emissive and level with the outer face the beam leaves from.
+- Beams: `WorldView.DrawLaserBeams` writes one `LaserInstance` a beam (`LaserBeamLook.Instance`) from `LaserAim.World` on the
+  drawn hull pose to `drawn position + End`; `laser.vert`/`laser.frag` make everything (ribbon, pulses, the cut's glow, sparks)
+  from time and a seed, so nothing is pooled or allocated. A free beam fades toward its end, a cutting one has glow and sparks.
+- Ore chunks: `OreChunkVisuals` keeps two sets and matches chunks by id once per set; `WorldView.OreChunks.cs` draws the worker-built
+  `OreChunkModels` lump (4 variants by id) scaled to `OreChunks.Half`, tinted by ore colour and grade. Tests: `LaserVisualTests`.
+
 ## Free containers: cargo step 2
 
 - `FreeContainers` is a fixed 256-body pool, separate from hull records. `ContainerSimulation` drifts and uses
@@ -1093,5 +1170,5 @@ pickup, or `--open edit-cargo --capture ...` for reach guidance (both close the 
 0.3 s). Keep `agent.prospect` hidden as for other captures.
 At speed: add `--coast <m/s>` (0–400; scripted, unsaved private game: dampeners off, the server sets the own hull
 flying along its nose at 2 s) and `--sector -5,0,0` (no rocks), with `--look 60 --look-height 2 --zoom 1.5`; the
-ship is rated 211 m/s, so for 240 raise `speedPerRootAcceleration` in a copy's `blocks.json` to 70. Each
+ship is rated 209 m/s, so for 240 raise `speedPerRootAcceleration` in a copy's `blocks.json` to 70. Each
 capture prints the container's offset from the own hull and the own speed.

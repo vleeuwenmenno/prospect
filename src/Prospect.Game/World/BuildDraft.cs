@@ -43,6 +43,8 @@ public enum DraftEdit : byte
     WrongCraft,
     /// <summary>The block is no tank; changing a fuel or splitting applies to tanks only.</summary>
     NotATank,
+    /// <summary>The mounted part has no action group to choose: only a groupable part (<see cref="ActionGroups.Groupable"/>) has one, and a group is 1 to 10 or none.</summary>
+    NoGroup,
 }
 
 /// <summary>
@@ -218,14 +220,50 @@ public sealed class BuildDraft
     /// <summary>
     /// Mounts a part on side <paramref name="face"/> of block <paramref name="parent"/>, its square's low corner
     /// <paramref name="u"/> and <paramref name="v"/> tenths of a cell from the face's (<see cref="DesignMount"/>).
-    /// It points out of the face. The new mount is the last of <see cref="Mounts"/>.
+    /// It points out of the face. The new mount is the last of <see cref="Mounts"/>. A groupable part (a mining
+    /// laser) starts in <see cref="ActionGroups.Default"/>, so it fires with no further step.
     /// </summary>
     public DraftEdit AddMount(int parent, BlockFacing face, int u, int v, BlockType type)
     {
         ArgumentNullException.ThrowIfNull(type);
         var check = CanAddMount(parent, face, u, v, type);
         if (check != DraftEdit.Done) return check;
-        Do(Step.Part(_mounts.Count, default, new DesignMount(parent, face, u, v, type)));
+        Do(Step.Part(_mounts.Count, default, new DesignMount(parent, face, u, v, type, ActionGroups.Default(type))));
+        Finish(settle: false);
+        return DraftEdit.Done;
+    }
+
+    /// <summary>
+    /// Puts the mounted part <paramref name="mount"/> in action group <paramref name="group"/> (1 to 10, or 0 for none)
+    /// as one step to undo. Refused as <see cref="DraftEdit.NoGroup"/> for a part that may not have that group
+    /// (<see cref="ActionGroups.Allowed"/>), and as <see cref="DraftEdit.Unchanged"/> when it already has it. Not mirrored.
+    /// </summary>
+    public DraftEdit SetMountGroup(int mount, byte group) => SetMountGroups(new ReadOnlySpan<int>(in mount), group);
+
+    /// <summary>
+    /// As <see cref="SetMountGroup"/> for several mounted parts at once, one step to undo: all of them or none. Parts
+    /// that already have the group are left alone; when every one has it, the answer is <see cref="DraftEdit.Unchanged"/>.
+    /// </summary>
+    public DraftEdit SetMountGroups(ReadOnlySpan<int> mounts, byte group)
+    {
+        if (mounts.IsEmpty) return DraftEdit.Unchanged;
+        var changes = 0;
+        for (var i = 0; i < mounts.Length; i++)
+        {
+            if ((uint)mounts[i] >= (uint)_mounts.Count) return DraftEdit.NoSuchBlock;
+            var part = _mounts[mounts[i]];
+            if (!ActionGroups.Allowed(part.Type, group)) return DraftEdit.NoGroup;
+            if (part.Group != group) changes++;
+        }
+
+        if (changes == 0) return DraftEdit.Unchanged;
+        foreach (var index in mounts)
+        {
+            var part = _mounts[index];
+            if (part.Group != group)
+                Do(Step.Part(index, part, part with { Group = group }));
+        }
+
         Finish(settle: false);
         return DraftEdit.Done;
     }
@@ -970,7 +1008,7 @@ public sealed class BuildDraft
         ArgumentNullException.ThrowIfNull(type);
         Span<DesignMount> copies = _copyMounts;
         Span<DraftEdit> checks = stackalloc DraftEdit[Mirroring.MaxCopies];
-        var count = MirrorMounts(new DesignMount(parent, face, u, v, type), axes, copies);
+        var count = MirrorMounts(new DesignMount(parent, face, u, v, type, ActionGroups.Default(type)), axes, copies);
         CheckMounts(copies[..count], checks);
         if (checks[0] != DraftEdit.Done)
             return checks[0];
@@ -1024,7 +1062,7 @@ public sealed class BuildDraft
                 {
                     var mirrored = Mirroring.Box(parent, mask, centre2);
                     var copy = Mirroring.Mount(parent, mirrored, mount, mask, centre2) with { Parent = IndexOfBlock(mirrored) };
-                    at = copy.Parent < 0 ? -1 : _mounts.IndexOf(copy);
+                    at = copy.Parent < 0 ? -1 : IndexOfMount(copy);
                 }
 
                 if (at >= 0 && !allMounts.Contains(at)) allMounts.Add(at);
@@ -1033,6 +1071,15 @@ public sealed class BuildDraft
 
         if (allBlocks.Count >= _boxes.Count) return DraftEdit.Unchanged;
         return Delete(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(allBlocks), System.Runtime.InteropServices.CollectionsMarshal.AsSpan(allMounts));
+    }
+
+    // The index of the mount that sits exactly where this one does, whatever its action group, or -1: the mirrored
+    // counterpart of a part, which the player may have put in another group.
+    private int IndexOfMount(in DesignMount mount)
+    {
+        for (var i = 0; i < _mounts.Count; i++)
+            if (_mounts[i] with { Group = mount.Group } == mount) return i;
+        return -1;
     }
 
     // The index of the block that is exactly this box, or -1: the mirrored counterpart of a block, when there is one.

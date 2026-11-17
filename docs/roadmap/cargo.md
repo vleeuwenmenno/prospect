@@ -234,8 +234,8 @@ Deferred: drone launcher, tractor filter.
 - Free containers are separate bodies, never hull records: Double3 position, velocity, orientation, spin, size,
   resource, kilograms and HP. They drift, collide with hull boxes and shared asteroid geometry, and lose HP.
   Zero HP destroys the shell and its payload: boom means gone. No weapon damage yet; pickup is step 3.
-- Select an applied rack in the controlled hull's editor, select a container in the separate cargo panel,
-  then JETTISON SELECTED. Local and remote sessions use the same server request.
+- Jettison is in the Cargo window (U): select a container's tile, then Jettison or Jettison and keep claim. The editor's
+  own cargo panel is gone. Local and remote sessions use the same server request.
   The server checks owner, controlled hull, edit token, rack, selected slot and the exact hold revision seen.
 - Jettison starts outside an unplated, unmounted rack face with a small outward push and hull point velocity.
   Damage-only `CargoEjection` adds a seeded outward kick before generic rack loss. Generic `Lose` never ejects;

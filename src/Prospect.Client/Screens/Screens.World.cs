@@ -23,7 +23,6 @@ internal sealed partial class ScreenHost
     private readonly bool[] _mapCacheValid = new bool[MapCacheSize];
     private Galaxy? _mapGalaxy;
     private bool _mapOpen;
-    private bool _shipInfoOpen;
     private float _mapTime;
     private float2 _mapCenter;
     private readonly MapPointer _mapPointer = new();
@@ -58,11 +57,9 @@ internal sealed partial class ScreenHost
     /// Interface mode is the only thing open over the session, so a right drag over the world may turn the pilot
     /// camera (<c>PointerFrame.InterfaceMode</c>). Every other surface keeps the world's mouse off.
     /// </summary>
-    public bool InterfaceCameraDragAllowed => _screen == Screen.Session && InterfaceModeOn && !_sessionMenuOpen && !_mapOpen && !_shipInfoOpen && !_controlsOpen && !_chatOpen && !_newShip.Open && !_designs.Open;
+    public bool InterfaceCameraDragAllowed => _screen == Screen.Session && InterfaceModeOn && !_sessionMenuOpen && !_mapOpen && !_controlsOpen && !_chatOpen && !_newShip.Open && !_designs.Open;
 
-    public bool WorldInputEnabled => _screen == Screen.Session && !_sessionMenuOpen && !_mapOpen && !_shipInfoOpen && !_controlsOpen && !InterfaceModeOn && !_chatOpen && !_newShip.Open && !_designs.Open;
-
-    public void OpenShipInfo() => _shipInfoOpen = true;
+    public bool WorldInputEnabled => _screen == Screen.Session && !_sessionMenuOpen && !_mapOpen && !_controlsOpen && !InterfaceModeOn && !_chatOpen && !_newShip.Open && !_designs.Open;
 
     /// <summary>Opens the map zoomed all the way out, centred on the galaxy's core.</summary>
     public void OpenGalaxyOverview()
@@ -142,6 +139,7 @@ internal sealed partial class ScreenHost
         var world = _app.World;
         UpdateExploration(snapshot, world);
         UpdateModules(snapshot, world);
+        UpdateActionGroups(snapshot, world);
         UpdateFuelCallout(world);
         UpdateCargoCallout(snapshot, world);
         // While the ship editor is shown its own keys apply: the map and the data sheet wait until it closes.
@@ -154,9 +152,6 @@ internal sealed partial class ScreenHost
             else
                 OpenMap();
         }
-
-        if (!editing && !asking && !_sessionMenuOpen && !_mapOpen && !SocialSurfaceOpen && _app.Actions.Pressed(_app.Devices, InputAction.ShipInfo, !_ui.WantsTextInput))
-            _shipInfoOpen = !_shipInfoOpen;
 
         // The scan key works in the flight and command views and on the map, never over the editor, a dialog, a menu
         // or while typing.
@@ -183,6 +178,9 @@ internal sealed partial class ScreenHost
             // for the whole list, the panel drops its ore and server lines (they are on the map and in the menu),
             // and if that is still not enough the list turns into one-line rows. A closed panel takes no room.
             var limit = pilot > 0.01f ? HudLayout.ConsoleTop(_ui.DisplaySize, Kit.Scale) : _ui.DisplaySize.Y - Kit.Px(Theme.Space5);
+            // The action group strip above the console keeps the party list off its row where the two share width.
+            if (_actionGroups.Count > 0 && ActionGroupsRect(out _) is var groupsRow && groupsRow.Spans(Kit.Px(HudLayout.Margin), HudLayout.ColumnRight(_ui.DisplaySize, Kit.Scale)))
+                limit = Math.Min(limit, groupsRow.Top - Kit.Px(Theme.Space2));
             var (sectorBottom, compactSector, cards) = SectorInfoToggle.Column(Kit.Scale, _sectorInfo.Open,
                 SectorPanelHeight(world, false), SectorPanelHeight(world, true), PartyHudCardsHeight(snapshot), limit);
             _columnBottom = HudLayout.PartyRows(sectorBottom, limit, cards, snapshot.Social.Invitation.Player != 0,
@@ -213,6 +211,7 @@ internal sealed partial class ScreenHost
             DrawContainerHover(snapshot, world);
             DrawScanStrip(draw, snapshot, world, 1f, WorldInputEnabled && (world.Mode == ViewMode.Command || (world.Mode == ViewMode.Pilot && _app.PointerReleased)));
             DrawModuleStrip(draw, snapshot, world, 1f);
+            DrawActionGroups(snapshot, world);
             if (pilot > 0.01f || world.TargetContainer != 0)
                 DrawTargetReadout(draw, snapshot, world, world.TargetContainer != 0 ? 1 : pilot);
             if (_sectorInfo.Open)
@@ -220,8 +219,6 @@ internal sealed partial class ScreenHost
             DrawPartyHud(draw, snapshot, world, sectorBottom, limit, cards);
             if (!chatShown)
                 DrawChatFeed(draw, snapshot, _columnBottom, paint: true);
-            if (_shipInfoOpen)
-                DrawSheet(draw, snapshot, world);
             if (world.CommandBlend > 0.5f)
             {
                 DrawFleetList(snapshot, world, world.CommandBlend);
@@ -240,26 +237,6 @@ internal sealed partial class ScreenHost
             DrawMap(snapshot, world);
         }
     }
-
-    /// <summary>
-    /// The ship data sheet, or in the command view the sheet of the first selected thing: a hull, or an asteroid
-    /// when no hull is selected.
-    /// </summary>
-    private void DrawSheet(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world)
-    {
-        if (world.Mode == ViewMode.Command && world.Selection.Length == 0 && world.SelectedRocks.Length > 0)
-        {
-            DrawRockInfo(draw, snapshot, world, world.SelectedRocks[0]);
-            return;
-        }
-
-        var shown = world.Own;
-        if (world.Mode == ViewMode.Command && world.Selection.Length > 0 && world.TryGetHull(world.Selection[0], out var picked))
-            shown = picked;
-        DrawShipInfo(draw, snapshot.Content.Designs[Math.Min(shown.Design, snapshot.Content.Designs.Length - 1)], shown, world.Mode == ViewMode.Command);
-    }
-
-    /// <summary>The sector panel's height: full, or compact with only the name and one line of figures.</summary>
     private float SectorPanelHeight(WorldView world, bool compact)
     {
         if (compact)
@@ -943,145 +920,6 @@ internal sealed partial class ScreenHost
         return record.Resource >= 0 && record.Resource < snapshot.Galaxy!.Resources.Length
             ? Kit.F($"{snapshot.Galaxy.Resources[record.Resource].Name} asteroid   {record.Grade * 100:0}% grade")
             : "Bare rock asteroid"u8;
-    }
-
-    /// <summary>An asteroid's data sheet.</summary>
-    private void DrawRockInfo(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, RockRef rock)
-    {
-        if (!world.TryGetRock(rock, out var position, out var radius))
-            return;
-
-        var galaxy = world.Galaxy!;
-        var line = Kit.Px(21);
-        var size = new float2(Kit.Px(400), Kit.Px(Theme.Space5 * 2 + 46) + line * 11);
-        var min = new float2(_ui.DisplaySize.X - size.X - Kit.Px(300 + Theme.Space5 * 2), Math.Max(HudLayout.TopBarBottom(Kit.Scale), (_ui.DisplaySize.Y - size.Y) * 0.5f));
-        Kit.PanelFrame(draw, min, min + size);
-
-        var left = min.X + Kit.Px(Theme.Space5);
-        var right = min.X + size.X - Kit.Px(Theme.Space5);
-        var y = min.Y + Kit.Px(Theme.Space5);
-        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(left, y), Theme.Info, "SURVEY"u8);
-        Kit.Text(draw, _ui.SansBold, Theme.FontHeading, new float2(left, y + Kit.Px(16)), Theme.Text, "Asteroid"u8);
-        y += Kit.Px(60);
-
-        void Row(ImString label, ImString value, uint rgb = Theme.Text)
-        {
-            Kit.Text(draw, _ui.Sans, Theme.FontSmall, new float2(left, y), Theme.TextDim, label);
-            var valueSize = Kit.Measure(_ui.Mono, Theme.FontSmall, value);
-            Kit.Text(draw, _ui.Mono, Theme.FontSmall, new float2(right - valueSize.X, y), rgb, value);
-            y += line;
-        }
-
-        var range = position.RelativeTo(world.OwnPosition).Length();
-        // Ore, grade and mass are what the player's scan found; an unscanned rock does not give them away.
-        var analysis = FindAnalysis(snapshot, rock);
-        if (analysis < 0)
-        {
-            Row("Resource"u8, "Unscanned"u8, Theme.TextMute);
-            Row("Grade"u8, "Unscanned"u8, Theme.TextMute);
-        }
-        else if (snapshot.Modules.Records[analysis].Resource is >= 0 and var resource && resource < galaxy.Resources.Length)
-        {
-            ref var found = ref snapshot.Modules.Records[analysis];
-            Row("Resource"u8, galaxy.Resources[resource].Name);
-            Row("Grade"u8, ShareText(found.Grade));
-            var first = MixText(galaxy, found.Mix1, found.Mix1Share);
-            var second = MixText(galaxy, found.Mix2, found.Mix2Share);
-            if (second.Length != 0)
-                Row("Mixed in"u8, Kit.F($"{first}, {second}"));
-            else if (first.Length != 0)
-                Row("Mixed in"u8, first);
-            Row("Rock"u8, RockShareText(RockComposition.From(found, galaxy.Resources.Length)));
-        }
-        else
-        {
-            Row("Resource"u8, "None (bare rock)"u8);
-        }
-
-        Row("Sector"u8, Kit.F($"{rock.Sector.X} {rock.Sector.Y} {rock.Sector.Z}"));
-        Row("Catalogue number"u8, Kit.F($"{rock.Index + 1}"));
-        if (galaxy.AsteroidFields is { } fields)
-            Row("Size"u8, fields.SizeName(radius));
-        Row("Diameter"u8, radius >= 500f ? Kit.F($"{radius * 2 / 1000f:0.00} km") : Kit.F($"{radius * 2:0} m"));
-        if (analysis < 0)
-            Row("Mass"u8, "Unscanned"u8, Theme.TextMute);
-        else
-            Row("Mass"u8, MassText(snapshot.Modules.Records[analysis].Mass));
-        Row("Drift"u8, Kit.F($"{world.RockDrift(rock):0.00} m/s"));
-        Row("Distance from pod"u8, range >= 1000f ? Kit.F($"{range / 1000f:0.00} km") : Kit.F($"{range:0} m"));
-    }
-
-    /// <summary>The hull's data sheet: every figure follows from the blocks it is built from.</summary>
-    private void DrawShipInfo(ImDrawListPtr draw, HullDesign design, in HullView hull, bool besideFleetList)
-    {
-        // The session publishes the sheet with the hull, for the blocks it has left: nothing is worked out here.
-        var stats = hull.Stats;
-        var line = Kit.Px(21);
-        var size = new float2(Kit.Px(400), Kit.Px(Theme.Space5 * 2 + 46) + line * 25);
-        var inset = besideFleetList ? Kit.Px(300 + Theme.Space5 * 2) : Kit.Px(Theme.Space5);
-        var min = new float2(_ui.DisplaySize.X - size.X - inset, Math.Max(HudLayout.TopBarBottom(Kit.Scale), (_ui.DisplaySize.Y - size.Y) * 0.5f));
-        Kit.PanelFrame(draw, min, min + size);
-
-        var left = min.X + Kit.Px(Theme.Space5);
-        var right = min.X + size.X - Kit.Px(Theme.Space5);
-        var y = min.Y + Kit.Px(Theme.Space5);
-        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(left, y), Theme.Accent, "SHIP DATA"u8);
-        Kit.Text(draw, _ui.SansBold, Theme.FontHeading, new float2(left, y + Kit.Px(16)), Theme.Text, design.Name);
-        y += Kit.Px(60);
-
-        void Row(ImString label, ImString value, uint rgb = Theme.Text)
-        {
-            Kit.Text(draw, _ui.Sans, Theme.FontSmall, new float2(left, y), Theme.TextDim, label);
-            var valueSize = Kit.Measure(_ui.Mono, Theme.FontSmall, value);
-            Kit.Text(draw, _ui.Mono, Theme.FontSmall, new float2(right - valueSize.X, y), rgb, value);
-            y += line;
-        }
-
-        // Points now against the blueprint's full strength: the sheet's own figure shrinks with lost blocks.
-        Row("Hull (now / built)"u8, Kit.F($"{FlightConsole.Shown(hull.Hull, float.MaxValue):0} / {design.Flight.HullPoints:0} hp"),
-            hull.Hull < design.Flight.HullPoints ? Theme.Bad : Theme.Text);
-        Row("Shield"u8, Kit.F($"{stats.ShieldCapacity:0} hp"));
-        Row("Shield recharge"u8, Kit.F($"{stats.ShieldRecharge:0} hp/s"));
-        Row("Mass"u8, Kit.F($"{stats.Mass:0.0} t"));
-        Row("Volume"u8, Kit.F($"{stats.Volume:0} m³"));
-        Row("W x H x L"u8, Kit.F($"{stats.Size.X:0} x {stats.Size.Y:0} x {stats.Size.Z:0} m"));
-        Row("Blocks"u8, stats.Blocks == design.BlockCount ? Kit.F($"{stats.Blocks}") : Kit.F($"{stats.Blocks} of {design.BlockCount}"), stats.Blocks == design.BlockCount ? Theme.Text : Theme.Bad);
-        var cargoUnits = 0;
-        var cargoMass = 0.0;
-        foreach (var container in hull.Cargo.Span) { cargoUnits += 1 << container.Size; cargoMass += container.Amount; }
-        Row("Cargo hold"u8, hull.IsOwn ? Kit.F($"{cargoUnits} / {stats.CargoHold:0} u, {cargoMass / 1000.0:0.0} t") : Kit.F($"{stats.CargoHold:0} u"));
-        Row("Crew"u8, Kit.F($"{stats.Crew}"));
-        y += line * 0.5f;
-
-        Row("Acceleration"u8, Kit.F($"{stats.Acceleration:0.0} m/s²"));
-        Row("Deceleration"u8, Kit.F($"{stats.Deceleration:0.0} m/s²"));
-        Row("Sideways and vertical"u8, Kit.F($"{stats.LateralAcceleration:0.0} m/s²"));
-        Row("Max velocity"u8, Kit.F($"{stats.MaxSpeed:0} m/s"));
-        Row("Max velocity, boost"u8, Kit.F($"{stats.BoostMaxSpeed:0} m/s"));
-        Row("Yaw (left / right)"u8, Kit.F($"{stats.TurnRate.Y:0.00} rad/s"));
-        Row("Pitch (up / down)"u8, Kit.F($"{stats.TurnRate.X:0.00} rad/s"));
-        Row("Roll"u8, Kit.F($"{stats.TurnRate.Z:0.00} rad/s"));
-        y += line * 0.5f;
-
-        // The margin between what the generators make and what everything running at once would draw.
-        var margin = stats.PowerGenerated - stats.PowerRequired;
-        Row("Req. energy"u8, Kit.F($"{stats.PowerRequired:0.00} MW"));
-        Row("Generated energy"u8, Kit.F($"{stats.PowerGenerated:0.00} MW"));
-        Row("Energy margin"u8, Kit.F($"{margin:+0.00;-0.00} MW"), margin < 0 ? Theme.Bad : Theme.Good);
-        Row("Storable energy"u8, Kit.F($"{stats.EnergyStorage:0} MJ"));
-        Row(
-            "FTL drive"u8,
-            stats.Ftl switch
-            {
-                FtlKind.Hyperspace => "Hyperspace"u8,
-                FtlKind.Wormhole => "Wormhole"u8,
-                FtlKind.Rift => "Rift"u8,
-                _ => "None"u8,
-            },
-            stats.Ftl == FtlKind.None ? Theme.TextMute : Theme.Info
-        );
-        if (stats.Ftl != FtlKind.None)
-            Row("Jump charge"u8, Kit.F($"{stats.FtlEnergy:0} MJ at {stats.FtlPower:0.0} MW"));
     }
 
     private static void DrawTargetMarker(ImDrawListPtr draw, float2 center, uint rgb)

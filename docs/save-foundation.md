@@ -519,6 +519,28 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
 - Layouts before 18 are refused without migration. Codec 18 holds the drone bays of codec 17 and these lists;
   each has its own load rule.
 
+## Drone auto pickup (codec 19)
+
+- Each hull record ends with one byte after its drone bays: auto pickup, 0 or 1 (`SavedHull.AutoPickup`).
+- Load rule: 1 is allowed only on a hull with drone bays; any other value, or 1 without bays, refuses the save.
+- Only the setting is saved. The pause after a manual recall, the rotating cursor and the refused-container memory
+  are not: a load starts them fresh.
+- Layouts before 19 are refused without migration.
+
+## Ore chunks and action groups (codec 20)
+
+- A save holds every loose ore chunk and every hull's action group changes made without a rebuild.
+- They follow the rock edits as one section: chunk count, next chunk id, change count, then the records.
+- A chunk is the wire's record (77 bytes: id, pose, spin, resource, grade, mass) and its birth and age (16 bytes).
+- A change is the hull's index in the save, the laser's place in its design's laser list and the group (6 bytes).
+- Limits: `OreChunks.Capacity` (256) chunks; 64 changes a saved hull.
+- Decoding checks structure: ids below the counter and unique, clocks within the world's, figures finite, a hull
+  the save has, each part once.
+- Load rule (`RestoreMining`): every chunk of an ore this galaxy has, every change of a laser the restored hull's
+  design has and a group it may take. Otherwise the save is refused whole.
+- Beams, strokes and ore not yet broken off are not saved: a laser starts over after a load.
+- `mining.json` is in the save identity. Layouts before 20 are refused without migration.
+
 ## Tractor acquisition (codec 15)
 
 - Free-body position, velocity, orientation and payload are part of the 110-byte saved record.

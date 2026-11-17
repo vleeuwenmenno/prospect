@@ -98,6 +98,32 @@ public sealed class ContentIdentityTests
     }
 
     [Fact]
+    public void MiningRulesAreSharedContentBecauseTheServerCutsAndSpawnsByThemAndAClientShowsTheirLimits()
+    {
+        // A changed figure is another identity, for a game and for a save.
+        using var figure = new ContentCopy();
+        figure.Replace("rules/mining.json", "\"oreKg\": 300", "\"oreKg\": 41");
+        var changed = figure.Load();
+        Assert.NotEqual(Content.Identity, changed.Identity);
+        Assert.NotEqual(Content.SaveIdentity, changed.SaveIdentity);
+        Assert.Equal(41f, changed.Mining.ChunkOreKg);
+        Assert.Equal(300f, Content.Mining.ChunkOreKg);
+
+        using var spaced = new ContentCopy();
+        // JSON is hashed in its canonical form, so spacing is not a change.
+        spaced.Write("rules/mining.json", spaced.Read("rules/mining.json") + "\n");
+        Assert.Equal(Content.Identity, spaced.Load().Identity);
+        Assert.Equal(Content.Identity, GameContent.Load().Identity);
+
+        // The laser's own tiers are in blocks.json, which is shared already.
+        using var tiers = new ContentCopy();
+        var blocks = System.Text.Json.Nodes.JsonNode.Parse(tiers.Read("blocks/blocks.json"))!;
+        blocks["laserTiers"]!["Rare"]!["cutRate"] = 1.8;
+        tiers.Write("blocks/blocks.json", blocks.ToJsonString());
+        Assert.NotEqual(Content.Identity, tiers.Load().Identity);
+    }
+
+    [Fact]
     public void RockEditRulesThatContradictEachOtherAreRefusedWhenTheContentLoads()
     {
         // The cell alone, with a least radius below it, is not content the game accepts.

@@ -17,16 +17,17 @@ internal sealed partial class ScreenHost
         Map,
         Charts,
         Cargo,
+        Ship,
         Player,
         Social,
         Settings,
     }
 
-    private static readonly BarTab[] SessionTabs = [BarTab.Fleet, BarTab.Map, BarTab.Charts, BarTab.Cargo, BarTab.Player, BarTab.Social, BarTab.Settings];
+    private static readonly BarTab[] SessionTabs = [BarTab.Fleet, BarTab.Map, BarTab.Charts, BarTab.Cargo, BarTab.Ship, BarTab.Player, BarTab.Social, BarTab.Settings];
     private static readonly BarTab[] MenuTabs = [BarTab.Play, BarTab.Social, BarTab.Settings];
-    private readonly float[] _tabLabels = new float[8];
-    private readonly float[] _tabLeft = new float[8];
-    private readonly float[] _tabWidth = new float[8];
+    private readonly float[] _tabLabels = new float[9];
+    private readonly float[] _tabLeft = new float[9];
+    private readonly float[] _tabWidth = new float[9];
 
     /// <summary>True when the bar's tabs are those of a game: the game screen, or Settings opened from it.</summary>
     private bool BarInGame => _screen == Screen.Session || (_screen == Screen.Settings && _settingsReturn == Screen.Session);
@@ -38,6 +39,7 @@ internal sealed partial class ScreenHost
         BarTab.Map => "MAP"u8,
         BarTab.Charts => "CHARTS"u8,
         BarTab.Cargo => "CARGO"u8,
+        BarTab.Ship => "SHIP"u8,
         BarTab.Player => "PLAYER"u8,
         BarTab.Social => "SOCIAL"u8,
         _ => "SETTINGS"u8,
@@ -60,6 +62,7 @@ internal sealed partial class ScreenHost
             {
                 SocialPane.Charts or SocialPane.Gas => BarTab.Charts,
                 SocialPane.Cargo => BarTab.Cargo,
+                SocialPane.Ship => BarTab.Ship,
                 SocialPane.Player => BarTab.Player,
                 _ => BarTab.Social,
             };
@@ -245,19 +248,23 @@ internal sealed partial class ScreenHost
                 _mapOpen = false;
                 OpenWindow(SocialPane.Cargo, true);
                 break;
+            case BarTab.Ship:
+                _mapOpen = false;
+                OpenWindow(SocialPane.Ship, true);
+                break;
             case BarTab.Player:
                 _mapOpen = false;
                 OpenWindow(SocialPane.Player, true);
                 break;
             case BarTab.Social:
                 _mapOpen = false;
-                if (InterfaceModeOn && _focusedPane is not (SocialPane.Charts or SocialPane.Cargo or SocialPane.Player or SocialPane.Gas))
+                if (InterfaceModeOn && _focusedPane is not (SocialPane.Charts or SocialPane.Cargo or SocialPane.Ship or SocialPane.Player or SocialPane.Gas))
                     CloseWorkspace();
                 else
                 {
                     OpenWorkspace(snapshot);
                     // The Social tab lights for the window in front, so bring the social ones forward from the player's own.
-                    if (_focusedPane is SocialPane.Charts or SocialPane.Cargo or SocialPane.Player or SocialPane.Gas)
+                    if (_focusedPane is SocialPane.Charts or SocialPane.Cargo or SocialPane.Ship or SocialPane.Player or SocialPane.Gas)
                         Raise(SocialPane.Navigator);
                 }
 
