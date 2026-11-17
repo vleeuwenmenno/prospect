@@ -64,7 +64,7 @@ internal sealed partial class WorldView
 
         ActionGroupsOn = (ushort)on;
         LasersFiring = on != 0 && held && !fireBlocked;
-        SendAim(bridge, own.Id, LasersFiring ? ActionGroupsOn : (ushort)0);
+        SendAim(bridge, own.Id, LasersFiring ? ActionGroupsOn : (ushort)0, _lookDirection);
         return on == 0;
     }
 
@@ -72,13 +72,12 @@ internal sealed partial class WorldView
     private void StopFiring(PlayerInputBridge bridge)
     {
         LasersFiring = false;
-        SendAim(bridge, _aimHull, 0);
+        SendAim(bridge, _aimHull, 0, _lookDirection);
     }
 
-    private void SendAim(PlayerInputBridge bridge, uint hull, ushort groups)
+    private void SendAim(PlayerInputBridge bridge, uint hull, ushort groups, Vector3 direction)
     {
         var offset = CameraPosition.RelativeTo(OwnPosition);
-        var direction = _lookDirection;
         var changed = hull != _aimHull || groups != _aimSent;
         if (!changed && groups != 0)
             changed = Vector3.Dot(direction, _aimDirection) < AimTurnCosine || Vector3.DistanceSquared(offset, _aimOffset) > AimShiftMetres * AimShiftMetres;
@@ -88,5 +87,20 @@ internal sealed partial class WorldView
         _aimSent = groups;
         _aimOffset = offset;
         _aimDirection = direction;
+    }
+
+    /// <summary>Scripted runs: where the flown hull's first cutting beam meets its rock, if one cuts.</summary>
+    internal bool TryOwnCut(SessionSnapshot snapshot, out Double3 at)
+    {
+        at = default;
+        var own = snapshot.OwnHull >= 0 ? snapshot.Hulls[snapshot.OwnHull].Id : 0u;
+        for (var b = 0; b < snapshot.LaserBeamCount; b++)
+        {
+            ref readonly var beam = ref snapshot.LaserBeams[b];
+            if (beam.Hull != own || own == 0 || beam.State != Prospect.Game.Protocol.LaserBeamState.Cutting) continue;
+            at = OwnPosition + beam.End;
+            return true;
+        }
+        return false;
     }
 }

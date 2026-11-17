@@ -8,7 +8,7 @@
     "maxAimOffsetMetres": 400
   },
   "chunks": {
-    "oreKg": 40,
+    "oreKg": 60,
     "densityKgPerCubicMetre": 3000,
     "speed": 2,
     "spin": 1.2,
