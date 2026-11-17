@@ -59,8 +59,11 @@ internal static class TipTriggers
     /// <summary>The ship being flown has an action group (a part assigned to a number key), in the flight or command view: fired when it first comes to have one.</summary>
     public const string ActionGroupReady = "actionGroupReady";
 
+    /// <summary>Every laser of one of the flown ship's action groups has overheated and shut down: fired each time a group comes to be so.</summary>
+    public const string LaserOverheated = "laserOverheated";
+
     /// <summary>Every trigger, for validation.</summary>
-    public static readonly string[] All = [MapOpened, CommandViewOpened, EditorOpened, ScanAvailable, UnchartedSector, ShieldOffline, EnergyLow, DroneEditHint, InterfaceOpened, GasScannerReady, AsteroidScannerReady, LocatorReady, ActionGroupReady];
+    public static readonly string[] All = [MapOpened, CommandViewOpened, EditorOpened, ScanAvailable, UnchartedSector, ShieldOffline, EnergyLow, DroneEditHint, InterfaceOpened, GasScannerReady, AsteroidScannerReady, LocatorReady, ActionGroupReady, LaserOverheated];
 }
 
 /// <summary>What a tip is placed against: the screen, a panel the editor or flight view draws, or a point.</summary>

@@ -601,6 +601,8 @@ public sealed class BoxHullSums
             TurnAcceleration = turnAcceleration,
             HeatRate = 1f / rules.BoostHeatSeconds,
             CoolRate = 1f / rules.CoolSeconds,
+            ColdHeating = rules.ColdCloudHeating,
+            ColdCooling = rules.ColdCloudCooling,
             Mass = mass,
             Inertia = inertia,
             CenterOfMass = center,

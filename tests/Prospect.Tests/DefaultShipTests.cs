@@ -118,18 +118,27 @@ public sealed class DefaultShipTests(ITestOutputHelper output)
             draw += spec.Power;
         }
 
-        // At rest with the shield full, firing both takes 0.8 MW more than the generators spare: the battery lasts
-        // minutes, not seconds, and flying or recharging the shield while cutting runs it down faster.
+        // At rest with the shield full, firing both takes about 7 MW more than the generators spare: the battery
+        // lasts about half a minute of cutting, and flying or recharging the shield while cutting runs it down faster.
         var flight = pod.Flight;
         var net = flight.PowerGenerated - flight.IdlePower - draw;
-        Assert.InRange(net, -1.5f, 0f);
-        Assert.True(flight.EnergyStorage / -net > 240f, $"the battery lasts {flight.EnergyStorage / -net:0} s of cutting");
+        Assert.InRange(net, -7.5f, -6.5f);
+        Assert.InRange(flight.EnergyStorage / -net, 28f, 38f);
+
+        // Heat stops a burn before the battery does: a laser overheats in twenty seconds of firing, and has cooled
+        // to the mark it fires again at before the generators have put back what the burn took.
+        var laser = pod.Mounts[pod.Lasers[0]].Type.Laser!;
+        var burn = 1f / laser.HeatRate;
+        var rest = (1f - laser.UnlockHeat) / laser.CoolRate;
+        Assert.InRange(burn, 15f, flight.EnergyStorage / -net);
+        Assert.InRange(rest, 5f, burn);
+        Assert.True((flight.PowerGenerated - flight.IdlePower) * rest < -net * burn, "cooling alone does not refill the battery: power still limits a long cut");
         flight.LaserPower = draw;
         var state = HullState.Spawn(Double3.Zero, flight);
         FlightModel.Step(ref state, default, flight, HullSim.Dt, out var flow);
         Assert.Equal(draw, flow.Laser);
         Assert.Equal(net, flow.Net, 4);
-        output.WriteLine($"SHIP lasers: {pod.Lasers.Length} in group 1, {draw:0} MW firing, net {net:0.0} MW at rest, battery {flight.EnergyStorage / -net / 60f:0.0} min");
+        output.WriteLine($"SHIP lasers: {pod.Lasers.Length} in group 1, {draw:0} MW firing, net {net:0.0} MW at rest, battery {flight.EnergyStorage / -net:0} s, overheats in {burn:0} s, fires again after {rest:0.0} s");
     }
 
     [Fact]

@@ -101,6 +101,24 @@ public struct FlightParams
     public float HeatRate;
     public float CoolRate;
 
+    /// <summary>
+    /// True while the hull's centre is inside a cold gas cloud, as whoever steps the hull last heard: prepared
+    /// before the step like the tractor and laser demand, never a figure of the design. Heat then builds
+    /// <see cref="ColdHeating"/> times as fast and is shed <see cref="ColdCooling"/> times as fast, boost heat here
+    /// and laser heat in <see cref="LaserHeat"/>.
+    /// </summary>
+    public bool Cold;
+
+    /// <summary>How many times as fast heat builds inside a cold cloud, at most 1; and how many times as fast it is shed, at least 1.</summary>
+    public float ColdHeating;
+    public float ColdCooling;
+
+    /// <summary>Boost heat gained a second where the hull is: <see cref="HeatRate"/>, less inside a cold cloud.</summary>
+    public readonly float HeatRateHere => Cold ? HeatRate * ColdHeating : HeatRate;
+
+    /// <summary>Boost heat shed a second where the hull is: <see cref="CoolRate"/>, more inside a cold cloud.</summary>
+    public readonly float CoolRateHere => Cold ? CoolRate * ColdCooling : CoolRate;
+
     /// <summary>Mass in tonnes.</summary>
     public float Mass;
 
@@ -522,7 +540,7 @@ public static class FlightModel
             && pushing
             && state.Energy > 0f
             && (state.Boosting || state.Energy >= p.BoostEnergyFloor);
-        state.Heat = Math.Clamp(state.Heat + (boosting ? p.HeatRate : -p.CoolRate) * dt, 0f, 1f);
+        state.Heat = Math.Clamp(state.Heat + (boosting ? p.HeatRateHere : -p.CoolRateHere) * dt, 0f, 1f);
         if (state.Heat >= 1f)
             state.BoostLocked = true;
         else if (state.BoostLocked && state.Heat <= BoostUnlockHeat)

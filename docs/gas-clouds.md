@@ -471,6 +471,16 @@ Generation 6, protocol 44, evaluator 9. This non-visual implementation requires 
 - Only cold/normal pairs bypass rivalry. Positions do not move to force a mixture: independently seeded envelopes mix wherever they intersect. Cold/cold, normal/normal and every lightning pair retain the old separation margin and tie break.
 - Clouds still have one anchor, one descriptor per anchor, and reach at most its 26 neighbours. There can be at most one cold and one normal at a point; neither can share that point with lightning.
 
+Cold clouds and heat (decided, built; protocol 71, evaluator 21):
+
+- A hull whose centre is inside a cold cloud's smooth envelope (`GasSensors.Contains`) heats slower and cools faster.
+- It applies to boost heat (`FlightModel.Step`) and to mining laser heat (`LaserHeat.Step`) alike.
+- Figures are shared content, `rules` in `blocks/blocks.json`: `coldCloudHeating` 0.5, `coldCloudCooling` 2.
+- The server looks once every `coldCloudCheckSeconds` (0.25) a hull, staggered by slot, and keeps the answer in
+  `HullInfo.Cold`. The flight step never asks the gas.
+- A client predicts with the `InColdCloud` flag hull records already carry. No wire field was added for it.
+- Lightning and normal clouds do nothing to heat.
+
 Renderer contract (implemented; see "Drawing the kinds"):
 
 - Carry `Kind` with every queued cloud, including distant tiers. Do not infer it from tint or repeat probability logic.

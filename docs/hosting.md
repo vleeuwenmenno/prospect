@@ -1156,3 +1156,17 @@ Active module spending is shared with client prediction through `ModuleScanRules
 - Disclosure: a chunk in a beam tells who is pulling it, within sensor range only. Another player's bins are never sent.
 - Figures both sides simulate from are in `blocks/blocks.json` (`oreKgPerCubicMetre`, `hopper`, `maxBins`,
   `maxHoppers`), which is hashed already.
+
+### Laser heat and cold clouds (protocol 71)
+
+- The snapshot header carries the flown hull's laser heat after its tanks: a count (byte, at most 64), sixteen bits
+  of heat a laser (0 is cool, 65535 overheated), then a bit a laser that is shut down, a byte for every eight.
+  A hull with no laser costs one byte; the header is 1,183 bytes at most and 255 records still fit beside it.
+- A header with more than 64 lasers, a lock bit for a laser it did not send, or one cut short is refused.
+- The client steps that heat on with the server's rule (`LaserHeat.Step`); the next header replaces it.
+- No message tells of a cold cloud: a client goes by the environment flag each hull record already carries.
+- Disclosure: only the flown hull's laser heat is sent. Another hull's is known by its beam stopping, nothing more.
+- Content identity: evaluator 21. The figures are in `blocks/blocks.json`, which is hashed already: a laser's
+  `heatSeconds`, `coolSeconds` and `unlockHeat`, and the rules' `coldCloudHeating`, `coldCloudCooling` and
+  `coldCloudCheckSeconds`.
+- Not saved: no saved-state layout changed. A loaded world's lasers are cool.

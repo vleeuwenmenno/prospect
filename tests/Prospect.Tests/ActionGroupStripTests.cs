@@ -159,6 +159,81 @@ public sealed class ActionGroupStripTests
     }
 
     [Fact]
+    public void ACellShowsItsHottestLaserAndIsOverheatedOnlyWhenEveryLaserOfItIsShutDown()
+    {
+        var strip = new ActionGroupStrip();
+        strip.Begin();
+
+        // Group 1: two lasers, one shut down. Group 2: one laser, shut down. Group 3: cool. Heat out of range is held to 0..1.
+        strip.Add(1, false, 0.4f);
+        strip.Add(1, false, 1f, locked: true, unlock: 0.3f);
+        strip.Add(2, true, 0.7f, locked: true, unlock: 0.25f);
+        strip.Add(3, false);
+        strip.Add(4, false, float.NaN);
+        strip.Add(4, false, 7f);
+        strip.End(ActionGroups.AllMask, true);
+
+        Assert.True(strip.TryGet(1, out var mixed));
+        Assert.Equal((1f, 1, 2, false, 0.3f), (mixed.Heat, mixed.Locked, mixed.Parts, mixed.Overheated, mixed.UnlockHeat));
+        Assert.True(strip.TryGet(2, out var down));
+        Assert.Equal((0.7f, 1, true, 0.25f), (down.Heat, down.Locked, down.Overheated, down.UnlockHeat));
+        Assert.True(strip.TryGet(3, out var cool));
+        Assert.Equal((0f, 0, false, 0f), (cool.Heat, cool.Locked, cool.Overheated, cool.UnlockHeat));
+        Assert.True(strip.TryGet(4, out var held));
+        Assert.Equal(1f, held.Heat);
+
+        // A new count starts cool.
+        strip.Begin();
+        strip.Add(2, false);
+        strip.End(0, false);
+        Assert.True(strip.TryGet(2, out down));
+        Assert.Equal((0f, false), (down.Heat, down.Overheated));
+    }
+
+    [Fact]
+    public void TheStripReadsTheFlownHullsLaserHeatFromTheSnapshotAndNoOtherHulls()
+    {
+        var design = MiningFixtures.Content.Pod;
+        var snapshot = new Prospect.Game.Client.SessionSnapshot(MiningFixtures.Content);
+        var a = MiningFixtures.PartA(design);
+        var b = MiningFixtures.PartB(design);
+        snapshot.LaserHeatHull = 9;
+        snapshot.LaserHeat.Heat[a] = 0.55f;
+        snapshot.LaserHeat.Heat[b] = 1f;
+        snapshot.LaserHeat.Locked = 1UL << b;
+
+        var strip = new ActionGroupStrip();
+        strip.Read(snapshot, 9, design, 0, false);
+        Assert.True(strip.TryGet(1, out var first));
+        Assert.Equal((0.55f, false), (first.Heat, first.Overheated));
+        Assert.True(strip.TryGet(2, out var second));
+        Assert.Equal((1f, true), (second.Heat, second.Overheated));
+        Assert.Equal(design.Mounts[design.Lasers[b]].Type.Laser!.UnlockHeat, second.UnlockHeat);
+        Assert.True(ActionGroupStrip.IsLocked(snapshot, 9, b));
+        Assert.Equal(0.55f, ActionGroupStrip.HeatOf(snapshot, 9, a));
+
+        // The heat is the flown hull's: another hull of the same design reads cool.
+        strip.Read(snapshot, 12, design, 0, false);
+        Assert.True(strip.TryGet(2, out second));
+        Assert.Equal((0f, false), (second.Heat, second.Overheated));
+        Assert.False(ActionGroupStrip.IsLocked(snapshot, 12, b));
+        Assert.Equal(0f, ActionGroupStrip.HeatOf(snapshot, 0, a));
+    }
+
+    [Fact]
+    public void TheHeatBarsColourStepsFromCoolToWarmToHot()
+    {
+        var look = Look();
+        Assert.Equal(look.HeatCoolRgb, look.HeatRgb(0f));
+        Assert.Equal(look.HeatCoolRgb, look.HeatRgb(look.HeatWarmFrom - 0.01f));
+        Assert.Equal(look.HeatWarmRgb, look.HeatRgb(look.HeatWarmFrom));
+        Assert.Equal(look.HeatHotRgb, look.HeatRgb(look.HeatHotFrom));
+        Assert.Equal(look.HeatHotRgb, look.HeatRgb(1f));
+        Assert.Equal("OVERHEAT", System.Text.Encoding.UTF8.GetString(look.OverheatedLabel));
+        Assert.Equal("HOT", System.Text.Encoding.UTF8.GetString(look.OverheatedShortLabel));
+    }
+
+    [Fact]
     public void KeyNamesShowTheDigitOfANumberRowKeyAndTheTenthGroupIsZero()
     {
         var actions = ActionMap.Load(Path.Combine(Content, "input", "bindings.json"));
@@ -184,6 +259,14 @@ public sealed class ActionGroupStripTests
             File.WriteAllText(scratch, text.Replace("\"firingColor\": \"FF8A4F\"", "\"firingColor\": \"red\""));
             Assert.Throws<InvalidDataException>(() => ActionGroupLook.Load(scratch));
             File.WriteAllText(scratch, text.Replace("\"label\": \"LASER\"", "\"label\": \"\""));
+            Assert.Throws<InvalidDataException>(() => ActionGroupLook.Load(scratch));
+            File.WriteAllText(scratch, text.Replace("\"heatBarPixels\": 3", "\"heatBarPixels\": 40"));
+            Assert.Throws<InvalidDataException>(() => ActionGroupLook.Load(scratch));
+            File.WriteAllText(scratch, text.Replace("\"heatHotFrom\": 0.85", "\"heatHotFrom\": 0.4"));
+            Assert.Throws<InvalidDataException>(() => ActionGroupLook.Load(scratch));
+            File.WriteAllText(scratch, text.Replace("\"overheatedColor\": \"FF3B30\"", "\"overheatedColor\": \"hot\""));
+            Assert.Throws<InvalidDataException>(() => ActionGroupLook.Load(scratch));
+            File.WriteAllText(scratch, text.Replace("\"overheatedLabel\": \"OVERHEAT\"", "\"overheatedLabel\": \"\""));
             Assert.Throws<InvalidDataException>(() => ActionGroupLook.Load(scratch));
         }
         finally

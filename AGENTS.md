@@ -175,7 +175,7 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `AlignToView` button fires them and does not align (the align lock still aligns); the intent goes through
   `PlayerInputBridge.AimLasers` when it changes (`LaserAimMessage` 44: groups, camera offset, unit ray).
   The server: `PlanLasers` before the hull round (flown hull, owner, no transit, part's block there, group on,
-  `LaserSpec.WithinGimbal`, own hull clear by `TractorReach.Clear`; demand into `HullInfo.LaserDemand`), the flight
+  not overheated, `LaserSpec.WithinGimbal`, own hull clear by `TractorReach.Clear`; demand into `HullInfo.LaserDemand`), the flight
   step bills `PowerFlow.Laser` all or nothing after the tractors, `FireLasers` after the round fires from the hull's
   new pose toward the aim found before (`LaserAim`, `RockRay.First`) and cuts through `ScrapeRock` only, strokes
   chained so the wire sends 9 B a scrape. Ore: `MiningRules.ScrapeKg` shared out by `RockInterior.Sample` at the
@@ -188,6 +188,34 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   nose lasers are in group 1), `--open laser` (hull over a rock, group 1 fires from `--fire-at`, default 3 s; `--fire-group <digit>` works in any
   scripted view) or `--open laser-command` (command camera on the cut, `--rock-scrape-distance`); `make bench` runs
   `--open laser`. Tests: `MiningLaserTests` and friends. Gaps in `docs/roadmap/drones-mining.md`, "R3 as built".
+- **Laser heat and cold clouds:** a laser heats while it fires and shuts down at full heat; a cold gas cloud cools.
+  - State is `HullInfo.Lasers` (`LaserHeatState`: a heat per laser in `HullDesign.Lasers` order, at most
+    `LaserHeat.MaxLasers` 64; `Locked` bits; `Firing` bits prepared before the step like `LaserDemand`).
+  - The one rule is `LaserHeat.Step` (`World/LaserHeat.cs`), called by `HullField.Step` after the flight step, so the
+    server and the predicted hull run the same lines. A laser heats in a step it was asked in and the hull paid its
+    lasers (`PowerFlow.Laser`); else it cools. At 1 it locks; it unlocks at its `unlockHeat`. Never step heat elsewhere.
+  - Figures are the laser's own in `blocks.json` (`laser.heatSeconds`, `coolSeconds`, `unlockHeat`; `LaserSpec`).
+    No tier scales them. `PlanLasers` leaves a locked laser out: no beam, no demand.
+  - Cold: `FlightParams.Cold` with `ColdHeating` / `ColdCooling` (rules `coldCloudHeating`, `coldCloudCooling`).
+    Boost heat uses `HeatRateHere` / `CoolRateHere` in `FlightModel.Step`; laser heat takes the same figures.
+    The server's `TickColdClouds` (`ServerVisibility.cs`) fills `HullInfo.Cold` once every `coldCloudCheckSeconds`
+    a hull, staggered by slot, from `GasSensors.EnvironmentAt`; the step never asks the gas. A client sets it from
+    the record's `HullEnvironment.InColdCloud`. Never read a cloud from the render side for this.
+  - Wire: protocol 71. The snapshot header carries the flown hull's laser heat after its tanks
+    (`SnapshotHeader.SetLasers` / `Lasers`: count, 16 bits a laser, a lock bit each; 137 bytes at most, the header
+    1,183). `ClientWorld` starts prediction from it (`_ownLasers`, `BuildNear`), takes the lasers that fire from its
+    own beams (`OwnLaserDemand`) and publishes `SessionSnapshot.LaserHeat` / `LaserHeatHull`. Nothing is sent for cold.
+  - Not saved: a loaded world's lasers are cool. `ReplaceHull` calls `LaserHeat.Carry`: a repair keeps each laser's
+    heat, an edit starts every laser at the old hull's hottest. `ContentIdentity.EvaluatorVersion` is 21 for this.
+  - Interface: `ActionGroupCell.Heat` / `Locked` / `Overheated` / `UnlockHeat`, the bar and the red OVERHEAT cell in
+    `ActionGroupPanel.DrawCell`, per-laser heat in `DrawTip` and the section rows. `ConsoleTip.Heat` shows the rates
+    that apply and "COLD CLOUD: COOLING ×N"; `DrawTip` shows the same line. Tip `laserOverheated`.
+  - Tests: `LaserHeatTests` (rule, cold, content, header, two session tests), `ActionGroupStripTests`.
+  - Capture: `--open laser` (each capture prints the hottest laser, how many are shut down, boost heat and whether
+    the hull is in a cold cloud; overheats about 23 s in, fires again about 34 s in). `--heat-tip boost|<digit>`
+    shows the boost heat tooltip or that group's tooltip. `--cold-cloud` (unsaved private local game) sets the hull
+    in the middle of the nearest cold cloud at 2.5 s: `--sector 43,0,38 --cold-cloud --fire-group 1 --heat-tip 1`,
+    or `--thrust forward,boost --thrust-at 4 --heat-tip boost`.
 - **Ore chunk marks (R4, client only):** no wire or save change. `WorldView.UpdateOreMarkers` (`WorldView.OreMarkers.cs`, end
   of `Update`) places every chunk in `OreChunkVisuals` once a frame into a fixed `OreMarker` set, from the very pose
   `DrawOreChunks` draws the mesh at (`OreChunkVisuals.ShownTick`), so a mark sits on the chunk. Rules are font-free in
@@ -240,7 +268,8 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
     beams to held chunks in `WorldView.DrawTractorBeams`.
   - Tests: `OreCollectionTests`, `OreModelTests`, the ore test in `EditorSessionTests`, `DefaultShipTests`.
   - Capture: `--open ore` on the shipped build (the laser view; each capture prints chunks, chunks in a beam and what
-    the bins hold; bins fill in about 40 s). `--ore-window` (captures only, scratch `XDG_CONFIG_HOME`: a pinned window
+    the bins hold; about 8.5 t at 40 s and 14.7 t at 60 s. The capture holds fire, so heat stops the lasers from
+    23 s to 34 s and the battery is flat from about 36 s: nothing more is cut after that). `--ore-window` (captures only, scratch `XDG_CONFIG_HOME`: a pinned window
     is saved) pins the Ship window on its ORE section. Gaps in `docs/roadmap/drones-mining.md`, "R4 as built".
 - **Debug: scrape rock (temporary, local games only):** `MessageId.RockScrape` (42, `RockScrapeRequest`: rays in the
   rock's frame) through `PlayerInputBridge.DebugScrape`; `ServerHost.DebugScrape` checks `AllowDebugFill`, the
@@ -671,8 +700,8 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `HullState.Thrust` (`ThrustState`: which way the hull is pushed and which kinds of part fire), which every hull
   record carries, so effects read it for any hull and never work thrust out a second way. Only the own hull's
   tanks are sent, in the snapshot header (`SnapshotHeader.OwnTanks`: a count and a float a tank, at most 1,046
-  bytes): 255 records and that header just fit a snapshot, with no byte a record to spare (`ProtocolTests`,
-  `PropulsionTests`). The client reads them through `HullView.Tanks` (`SessionSnapshot.OwnTanks`); the fuel row
+  bytes; the header also carries the own lasers' heat, 1,183 bytes in all): 255 records and that header just fit a
+  snapshot, with no byte a record to spare (`ProtocolTests`, `PropulsionTests`). The client reads them through `HullView.Tanks` (`SessionSnapshot.OwnTanks`); the fuel row
   reads only `HullView.Fuel`. A fuel a hull has none of gives no thrust; never add thrust that skips the tanks.
   The one exception is an ion part (`BlockType.Ion`, `"ion": true`): it names no fuel, burns none, needs no tank and
   pushes on power alone. Its thrust is `ThrustTable`'s ion column (`IonIndex`), its draw is kept per push direction
@@ -779,6 +808,8 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   - `ActionGroupPanel.DrawActionGroupsSection` lists each laser with a selector (groups, NONE, DESIGN) and calls
     `PlayerInputBridge.SetActionGroup`. It shows the server's answer, never the click. The Ship window calls it too.
   - Tip: `actionGroupReady`, fired when the hull first has a group. Tests: `ActionGroupStripTests`, `FrameOrderTests`.
+  - Heat: each cell has a bar for its hottest laser and turns red ("OVERHEAT") when all its lasers are shut down;
+    see "Laser heat and cold clouds". Figures are `heat*`, `overheated*`, `coldColor` and `tipWidth` in the look file.
   - Check with `--open action-groups` and `--open action-groups-popup` on the shipped ship (two lasers in group 1), at `"UiScale"` 1 and 2.
 - **A new action or key:** add it to `content/input/bindings.json` and to `content/input/controls.json` (tab, label,
   scope; a fixed mouse or chord row goes there too). Loading refuses an action the catalogue lacks. Read it through
@@ -832,7 +863,7 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   the `pod` of `fleet.json`), and no starting fleet. It carries every part a ship can take (FTL drives of one kind
   only: hyperspace), two mining lasers in group 1 among them, and an ore hopper on the stern deck (intake up, in
   view of both tractor beams) with four 1 x 1 x 2 ore bins under the keel. `DefaultShipTests` holds that, its tractor
-  reach, the hopper's intake, bay hatch and lasers (straight ahead within the gimbal and clear of the hull; both firing net -0.8 MW at rest), and
+  reach, the hopper's intake, bay hatch and lasers (straight ahead within the gimbal and clear of the hull; both firing net -6.8 MW at rest, so the 240 MJ battery lasts about 35 s of cutting and a laser overheats after 20 s), and
   prints its figures (`SHIP` lines); `PowerFlowTests`, `PropulsionTests` and `EditorPanelTests` (its one warning: braking with its ion parts
   overloads, as the drone's strafing does) hold its balance. Its spare power is pinned between 4.8 and 5.45 MW by the
   scan tests (a scan must turn the net flow negative), which is why it has twelve cells of gyros. Ship files are not
@@ -1042,6 +1073,7 @@ The client opens a real window on the developer's desktop, and they are usually 
 - Generation keeps all pairs apart (`GasCloudModule.SeparationMargin`) except cold/normal pairs, which may overlap. The renderer pairs them (`GasCloudField.Pair`) and integrates both along each ray in every pass, composition and shield refraction included; see "Drawing the kinds" in `docs/gas-clouds.md`.
 - Every gas consumer calls `gasSegment`, which makes exactly one `gasMarch` call: a second call site, or a second copy of the march, multiplies the driver's compile time of `tonemap.frag` (it hung startup for minutes once). The fixtures are compiled into the tone mapper only with `--gas-fixture` (`GasFixtures` specialization constant). Check `glslc -O` time of `tonemap.frag` after touching `gas.glsl`.
 - `gasHash` is `precise` with its dot product written out: it multiplies rounding by about two thousand, and a cloud's rotation and lean (`gasShape`) come from it. Fused or reordered, the driver gave one seed two hashes on alternate frames and the whole cloud jumped between two looks. Keep any hash a cloud's look hangs on evaluated as written; no `dot()` in it.
+- A cold cloud cools boost heat and laser heat for a hull inside its smooth envelope: see "Laser heat and cold clouds". The simulation reads `HullInfo.Cold`, never a render-side cloud.
 - Lightning follows `GasSensors.LightningCycle` on the snapshot clock; bolts are `LightningBolts` (CPU, no allocation), seeded by cloud, cycle and cell, never by wall time. `GasKindVisualTests` holds the timing, determinism and allocation rules.
 - Gas uses its RGB-only pass without portals or shields; frames with either defer bounded gas segments to HDR composition. Preserve the gas-free shield copies, frame.glsl layout, and per-sample own-passage checks. The fixed 1 MiB noise lattice is renderer-owned, immutable, and independent of resize.
 - The primary cloud (normal or lightning) is marched at half resolution (`gas_half.frag`, `gas_half.glsl`, `SceneRenderer.MarchHalf`) and read back per pixel by `gas.frag` and by composition's plain interval only; anything else marches itself. The fixtures never take it. Rules in "Half-resolution march" in `docs/gas-clouds.md`; check visual parity with in-process captures, as frames of separate runs differ.

@@ -115,6 +115,7 @@ internal sealed partial class ScreenHost
         Edge(inSpace && _moduleGate[1] != ModuleGate.Absent && _moduleTargets.Rock is { } tipRock && FindAnalysis(snapshot, tipRock) < 0, ref _tipSawAsteroidTarget, TipTriggers.AsteroidScannerReady);
         Edge(inSpace && _moduleGate[2] != ModuleGate.Absent, ref _tipSawLocator, TipTriggers.LocatorReady);
         Edge(inSpace && _actionGroups.Count > 0, ref _tipSawActionGroup, TipTriggers.ActionGroupReady);
+        Edge(inSpace && _actionGroups.AnyOverheated, ref _tipSawOverheat, TipTriggers.LaserOverheated);
 
         // The battery is low below one level and not again until it has recovered past a higher one, so a battery
         // hovering at the line does not bring the tip back every few seconds.

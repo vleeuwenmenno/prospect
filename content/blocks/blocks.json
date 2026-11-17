@@ -10,6 +10,9 @@
     "boostEnergyFloor": 0.05,
     "boostHeatSeconds": 6,
     "coolSeconds": 9,
+    "coldCloudHeating": 0.5,
+    "coldCloudCooling": 2,
+    "coldCloudCheckSeconds": 0.25,
     "shieldRechargeDelaySeconds": 8,
     "shieldRestartFraction": 0.25,
     "shieldRestartPowerMultiplier": 4.5,
@@ -190,7 +193,7 @@
     "miningLaser": {
       "name": "Mining laser", "mass": 0.2, "hull": 0,
       "mount": { "side": 6, "depth": 2, "legacyBlock": "hull" },
-      "laser": { "quality": "Common", "range": 60, "cutRadius": 0.5, "cutRate": 0.25, "power": 3, "gimbalDegrees": 40 }
+      "laser": { "quality": "Common", "range": 60, "cutRadius": 0.5, "cutRate": 0.25, "power": 6, "gimbalDegrees": 40, "heatSeconds": 20, "coolSeconds": 15, "unlockHeat": 0.3 }
     }
   }
 }

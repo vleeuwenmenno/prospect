@@ -108,6 +108,10 @@ internal sealed partial class ScreenHost
             hoveredFuel = tip;
         }
 
+        // And for the boost heat row's details (--heat-tip boost).
+        if (_app.ScriptedHeatTip == 0)
+            hovered = ConsoleBar.Heat;
+
         DrawFuelRow(draw, layout, own, hovered == ConsoleBar.Fuel ? hoveredFuel : FuelKind.None, hovered == ConsoleBar.Fuel && ConsoleFuel.Count(own.Fuel) == 0);
 
         // Centre: speed and its unit in a hexagon with a quiet outline; the dampeners are said in the heat row.

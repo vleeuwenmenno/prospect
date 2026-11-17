@@ -9,7 +9,8 @@ namespace Prospect.Game.Server;
 // Mining lasers: the pilot's intent (groups on and the aim) comes in through LaserAimMessage; before the hull round
 // the lasers that may fire are planned and their power asked of the flight step; after it, each laser that was paid
 // for cuts the rock it meets through ScrapeRock, the one way an edit is made, and the ore it frees adds up into
-// loose chunks. Nothing here takes memory in the tick.
+// loose chunks. A laser that fires heats (LaserHeat, stepped with the hull): an overheated one is not planned until
+// it has cooled to its mark. Nothing here takes memory in the tick.
 public sealed partial class ServerHost
 {
     /// <summary>Beams fired at once over the whole world, at most.</summary>
@@ -138,7 +139,12 @@ public sealed partial class ServerHost
         _beamCountBefore = _beamCount;
         _beamCount = 0;
         for (var i = 0; i < _beamCountBefore; i++)
-            if (_hulls.IsAlive(_beamsBefore[i].Hull)) _hulls.Info(_beamsBefore[i].Hull.Index).LaserDemand = 0;
+        {
+            if (!_hulls.IsAlive(_beamsBefore[i].Hull)) continue;
+            ref var before = ref _hulls.Info(_beamsBefore[i].Hull.Index);
+            before.LaserDemand = 0;
+            before.Lasers.Firing = 0;
+        }
 
         var rules = _content.Mining;
         foreach (var connection in _connections)
@@ -173,6 +179,9 @@ public sealed partial class ServerHost
                 if (!BlockSet.Has(blocks, mount.Parent)) continue;
                 var group = GroupOf(handle.Index, design, k);
                 if ((connection.FireGroups & ActionGroups.Bit(group)) == 0) continue;
+
+                // An overheated laser is shut down until it has cooled to its mark: it neither fires nor draws.
+                if (info.Lasers.IsLocked(k)) continue;
                 var spec = mount.Type.Laser!;
                 LaserAim.Local(design, m, out var grid, out var outward);
                 var local = HullRotation.Rotate(target.RelativeTo(state.Position), inverse) + pivot - grid;
@@ -193,6 +202,7 @@ public sealed partial class ServerHost
                 beam.Target = target;
                 beam.State = 0;
                 info.LaserDemand += spec.Power;
+                info.Lasers.Firing |= 1UL << k;
             }
         }
     }
@@ -451,6 +461,14 @@ public sealed partial class ServerHost
             connection.GroupsHull = connection.Hull.Packed;
             connection.GroupsRevision = _groupRevisions[slot];
         }
+    }
+
+    // A hull that replaces another (an edit or a repair) keeps the old hull's laser heat by the shared rule, and
+    // what the server last knew of the cold around it.
+    private void CarryLaserHeat(in HullInfo from, ref HullInfo to)
+    {
+        to.Cold = from.Cold;
+        to.Lasers = LaserHeat.Carry(from.Lasers, from.Design == to.Design, _content.Designs[to.Design]);
     }
 
     // The hull's changed groups, by its index in the save. Takes no memory.

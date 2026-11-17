@@ -7,12 +7,22 @@ namespace Prospect.Game.World;
 /// One face-mounted mining laser's figures after its tier: how far it reaches, the radius of the cut it makes, how
 /// deep it cuts a second, the power it draws while firing and how far off its face's outward normal it may aim. Read
 /// from a block's <c>"laser"</c> entry and the catalogue's <c>laserTiers</c>, as <see cref="TractorSpec"/> reads
-/// tractors: only the Common type is in the palette.
+/// tractors: only the Common type is in the palette. Its heat figures (<c>heatSeconds</c>, <c>coolSeconds</c>,
+/// <c>unlockHeat</c>) are the laser's own and no tier scales them; <see cref="LaserHeat"/> is the rule that uses them.
 /// </summary>
 public sealed record LaserSpec(float Range, float CutRadius, float CutRate, float Power, float GimbalDegrees, ModuleQuality Quality = ModuleQuality.Common)
 {
     /// <summary>The cosine of <see cref="GimbalDegrees"/>: a beam whose direction is closer than this to the face's normal may fire.</summary>
     public float GimbalCosine { get; } = MathF.Cos(GimbalDegrees * MathF.PI / 180f);
+
+    /// <summary>Heat the laser gains a second while it fires, from 0 to 1: it overheats at 1 and shuts down.</summary>
+    public float HeatRate { get; init; } = 1f / 20f;
+
+    /// <summary>Heat the laser sheds a second while it does not fire.</summary>
+    public float CoolRate { get; init; } = 1f / 15f;
+
+    /// <summary>The heat an overheated laser must cool to before it fires again, above 0 and below 1.</summary>
+    public float UnlockHeat { get; init; } = 0.3f;
 
     /// <summary>Reads an optional laser entry; figures outside their bounds refuse the content.</summary>
     public static LaserSpec? Read(JsonElement block, JsonElement root)
@@ -44,8 +54,24 @@ public sealed record LaserSpec(float Range, float CutRadius, float CutRate, floa
         var gimbal = value.GetProperty("gimbalDegrees"u8).GetSingle();
         if (!float.IsFinite(gimbal) || gimbal <= 0 || gimbal >= 90)
             throw new InvalidDataException("A laser's gimbalDegrees is above 0 and below 90: it never aims back over its own face.");
+        float Seconds(string key)
+        {
+            var seconds = value.GetProperty(key).GetSingle();
+            if (!float.IsFinite(seconds) || seconds < 0.5f || seconds > 3600)
+                throw new InvalidDataException($"A laser's {key} is from 0.5 to 3600 seconds.");
+            return seconds;
+        }
+
+        var unlock = value.GetProperty("unlockHeat"u8).GetSingle();
+        if (!float.IsFinite(unlock) || unlock <= 0 || unlock >= 1)
+            throw new InvalidDataException("A laser's unlockHeat is above 0 and below 1: an overheated laser must cool before it fires again.");
         return new LaserSpec(Figure("range", "range", 1000), Figure("cutRadius", "cutRadius", 2), Figure("cutRate", "cutRate", 10),
-            Figure("power", "power", 10000), gimbal, quality);
+            Figure("power", "power", 10000), gimbal, quality)
+        {
+            HeatRate = 1f / Seconds("heatSeconds"),
+            CoolRate = 1f / Seconds("coolSeconds"),
+            UnlockHeat = unlock,
+        };
     }
 
     /// <summary>

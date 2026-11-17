@@ -25,22 +25,25 @@ internal static class MiningFixtures
     /// <summary>
     /// The shipped content with three mining lasers on the command pod's top faces: laser A in group 1 on plating at
     /// x = 2, laser B in group 2 on plating at x = -2, laser C in no group on plating at x = 1, and a wall of plating at x = 3
-    /// that stands in the way of a beam leaning from A toward +X.
+    /// that stands in the way of a beam leaning from A toward +X. A laser here draws <see cref="LaserPower"/>, less
+    /// than the shipped one, so the old pod's 6 MW generator carries one of them and its battery two for a while;
+    /// <paramref name="blocks"/> may change that like any other figure.
     /// </summary>
     public static GameContent Make(Action<JsonNode>? blocks = null, Action<ContentCopy>? other = null)
     {
         using var copy = new ContentCopy(fleet: true);
         copy.Write("ships/command_pod.json", PodJson());
-        if (blocks is not null)
-        {
-            var node = JsonNode.Parse(copy.Read("blocks/blocks.json"))!;
-            blocks(node);
-            copy.Write("blocks/blocks.json", node.ToJsonString());
-        }
+        var node = JsonNode.Parse(copy.Read("blocks/blocks.json"))!;
+        node["blocks"]!["miningLaser"]!["laser"]!["power"] = LaserPower;
+        blocks?.Invoke(node);
+        copy.Write("blocks/blocks.json", node.ToJsonString());
 
         other?.Invoke(copy);
         return copy.Load();
     }
+
+    /// <summary>Megawatts a laser of these fixtures draws while it fires.</summary>
+    public const float LaserPower = 3f;
 
     /// <summary>The pod's design file with the lasers, as <see cref="Make"/> describes it.</summary>
     public static string PodJson()

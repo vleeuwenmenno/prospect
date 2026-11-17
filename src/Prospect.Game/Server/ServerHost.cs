@@ -29,6 +29,9 @@ public sealed class ServerConfig
     /// <summary>Capture-only: the player's hull is set coasting along its nose at this speed, once, in an unsaved local game.</summary>
     public float? ScriptedCoastSpeed { get; init; }
 
+    /// <summary>Capture-only: the player's hull is set at rest in the middle of the nearest cold gas cloud, once, in an unsaved local game.</summary>
+    public bool ScriptedColdCloud { get; init; }
+
     /// <summary>
     /// Scripted runs only (<c>--open rock-scrape</c>): two seconds in, every flown hull is put above the rock of the
     /// spawn sector whose radius is nearest this many metres, nose to it, <see cref="ScriptedRockScrapeStandoff"/>
@@ -575,6 +578,12 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                     throw new InvalidDataException("A scripted coast needs an unsaved private in-process server and a speed of 0 to 400 m/s.");
                 _scriptedCoastSpeed = coastSpeed;
             }
+            if (config.ScriptedColdCloud)
+            {
+                if (config.Visibility != ServerVisibility.Private || world is not null || transports.Any(t => !t.IsInProcess))
+                    throw new InvalidDataException("A scripted cold cloud needs an unsaved private in-process server.");
+                _scriptedColdCloud = true;
+            }
             if (config.ScriptedShieldBreakSeconds is { } breakAt)
             {
                 if (!(breakAt >= 0f && breakAt <= 600f) || config.Visibility != ServerVisibility.Private || world is not null || transports.Any(t => !t.IsInProcess))
@@ -961,6 +970,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         TickScriptedShieldBreak(tick);
         TickScriptedRam(tick);
         TickScriptedCoast(tick);
+        TickScriptedColdCloud(tick);
         TickScriptedRockScrape(tick);
         TickScriptedExhaustShield();
         TickScriptedFleetHurt(tick);
@@ -973,6 +983,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         for (var i = 0; i < participantCount; i++)
             _participants[i] = _hulls.IsAliveAt(i) ? _hulls.HandleAt(i) : default;
         _field.BeginRound();
+        TickColdClouds();
         _tractors.Plan(_containers, _chunks, _content, _field, CargoScratch, _tick);
         PlanLasers();
         for (var i = 0; i < participantCount; i++)
@@ -1667,6 +1678,10 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             header.OwnTankCount = (byte)levels.Length;
             for (var tank = 0; tank < levels.Length; tank++)
                 header.OwnTanks[tank] = (float)levels[tank];
+
+            // The heat of its lasers, which the client steps on with the same rule between snapshots.
+            ref readonly var ownInfo = ref _hulls.Info(connection.Hull.Index);
+            header.SetLasers(ownInfo.Lasers, LaserHeat.Count(_content.Designs[ownInfo.Design]));
         }
 
         // While the player's hull is knocking against others, those go out every tick as well: the client

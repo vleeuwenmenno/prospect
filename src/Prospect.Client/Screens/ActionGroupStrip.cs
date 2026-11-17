@@ -30,25 +30,52 @@ internal struct ActionGroupCell
 
     /// <summary>At least one laser in the group is cutting rock, as the server last reported.</summary>
     public bool Cutting;
+
+    /// <summary>The heat of the group's hottest laser, from 0 to 1: the cell's heat bar.</summary>
+    public float Heat;
+
+    /// <summary>How many of the group's lasers overheated and are shut down until they have cooled.</summary>
+    public int Locked;
+
+    /// <summary>The heat a shut-down laser of the group must cool to before it fires again; zero while none is shut down.</summary>
+    public float UnlockHeat;
+
+    /// <summary>Every laser of the group is shut down by heat: the group fires nothing until one has cooled.</summary>
+    public readonly bool Overheated => Parts > 0 && Locked == Parts;
 }
 
 /// <summary>
 /// Font-free state of the action group strip beside the flight console: one cell for each group the flown hull has a
-/// part in, in key order (1 to 9, then 0), with whether it is on, firing, and cutting. Nothing is shown for a group no
-/// part is in, and the strip is empty (and not drawn) without any. Worked out once a frame from what the server
-/// reported (the design, its per-hull overrides and the beams); it takes no memory.
+/// part in, in key order (1 to 9, then 0), with whether it is on, firing, and cutting, and how hot its lasers are.
+/// Nothing is shown for a group no part is in, and the strip is empty (and not drawn) without any. Worked out once a
+/// frame from what the server reported (the design, its per-hull overrides, the beams and the lasers' heat); it takes
+/// no memory.
 /// </summary>
 internal sealed class ActionGroupStrip
 {
     private readonly ActionGroupCell[] _cells = new ActionGroupCell[ActionGroups.Count];
     private readonly int[] _parts = new int[ActionGroups.Count];
     private readonly bool[] _cutting = new bool[ActionGroups.Count];
+    private readonly float[] _heat = new float[ActionGroups.Count];
+    private readonly int[] _locked = new int[ActionGroups.Count];
+    private readonly float[] _unlock = new float[ActionGroups.Count];
 
     /// <summary>How many cells there are.</summary>
     public int Count { get; private set; }
 
     /// <summary>The cells, in key order.</summary>
     public ReadOnlySpan<ActionGroupCell> Cells => _cells.AsSpan(0, Count);
+
+    /// <summary>Whether a group's lasers are all shut down by heat.</summary>
+    public bool AnyOverheated
+    {
+        get
+        {
+            foreach (var cell in Cells)
+                if (cell.Overheated) return true;
+            return false;
+        }
+    }
 
     /// <summary>The cell of <paramref name="group"/> (1 to 10), or false when the hull has no part in it.</summary>
     public bool TryGet(int group, out ActionGroupCell cell)
@@ -69,15 +96,25 @@ internal sealed class ActionGroupStrip
     {
         Array.Clear(_parts);
         Array.Clear(_cutting);
+        Array.Clear(_heat);
+        Array.Clear(_locked);
+        Array.Clear(_unlock);
         Count = 0;
     }
 
-    /// <summary>Counts a part that fires with <paramref name="group"/>; a part with no group (or a bad one) is not in any cell.</summary>
-    public void Add(int group, bool cutting)
+    /// <summary>
+    /// Counts a part that fires with <paramref name="group"/>, with its heat (0 to 1), whether heat has shut it
+    /// down and the heat it then has to cool to; a part with no group (or a bad one) is not in any cell.
+    /// </summary>
+    public void Add(int group, bool cutting, float heat = 0f, bool locked = false, float unlock = 0f)
     {
         if (group is < 1 or > ActionGroups.Count) return;
         _parts[group - 1]++;
         _cutting[group - 1] |= cutting;
+        _heat[group - 1] = Math.Max(_heat[group - 1], float.IsFinite(heat) ? Math.Clamp(heat, 0f, 1f) : 0f);
+        if (!locked) return;
+        _locked[group - 1]++;
+        _unlock[group - 1] = Math.Max(_unlock[group - 1], unlock);
     }
 
     /// <summary>
@@ -99,6 +136,9 @@ internal sealed class ActionGroupStrip
                 On = isOn,
                 Firing = isOn && firing,
                 Cutting = _cutting[group - 1],
+                Heat = _heat[group - 1],
+                Locked = _locked[group - 1],
+                UnlockHeat = _unlock[group - 1],
             };
         }
 
@@ -113,7 +153,8 @@ internal sealed class ActionGroupStrip
         {
             var parts = Math.Min(design.Lasers.Length, ActionGroupsMessage.MaxParts);
             for (var part = 0; part < parts; part++)
-                Add(snapshot.GroupOf(hull, design, part), IsCutting(snapshot, hull, part));
+                Add(snapshot.GroupOf(hull, design, part), IsCutting(snapshot, hull, part), HeatOf(snapshot, hull, part), IsLocked(snapshot, hull, part),
+                    design.Mounts[design.Lasers[part]].Type.Laser!.UnlockHeat);
         }
 
         End(on, firing);
@@ -130,6 +171,14 @@ internal sealed class ActionGroupStrip
 
         return false;
     }
+
+    /// <summary>The heat of laser <paramref name="part"/> of the flown hull <paramref name="hull"/>, from 0 to 1; zero for any other hull.</summary>
+    public static float HeatOf(SessionSnapshot snapshot, uint hull, int part) =>
+        hull != 0 && hull == snapshot.LaserHeatHull ? snapshot.LaserHeat.Of(part) : 0f;
+
+    /// <summary>Whether heat has shut down laser <paramref name="part"/> of the flown hull <paramref name="hull"/>.</summary>
+    public static bool IsLocked(SessionSnapshot snapshot, uint hull, int part) =>
+        hull != 0 && hull == snapshot.LaserHeatHull && snapshot.LaserHeat.IsLocked(part);
 
     /// <summary>The input action of <paramref name="group"/> (1 to 10): the number keys, the tenth being <c>0</c>.</summary>
     public static Prospect.Client.Input.InputAction ActionOf(int group) => Prospect.Client.Input.InputAction.ActionGroup1 + (group - 1);

@@ -275,11 +275,15 @@ public sealed class HullField
         Refit(index);
         _hulls.Flight(index).TractorPower = info.TractorDemand;
         _hulls.Flight(index).LaserPower = info.LaserDemand;
+        _hulls.Flight(index).Cold = info.Cold;
         var body = Body(index);
         body.ContactTick = (long)tick;
         var destroyed = HullSim.Step(ref own, ref info.Order, input, _hulls.Flight(index), ref body, rocks, tick, impulses, this);
         info.Power = body.Power;
         info.Fuel = body.Fuel;
+
+        // Laser heat follows what the flight step paid for: the lasers asked to fire heat, the others cool.
+        LaserHeat.Step(ref info.Lasers, body.Design, info.Power.Laser > 0f, info.Cold, _hulls.Flight(index), HullSim.Dt);
         if (body.Damaged)
             info.DamageTick = (long)tick;
         Refit(index);
