@@ -49,6 +49,9 @@ Reference for feel: Avorion (camera scheme, sector map, ship data sheet). A refe
 - Shield recharge is halved: 37.5 points/s per standard emitter, 5 points/s per drone emitter.
 - Every damaging hit resets an 8 s recharge delay, including hits while the shield is offline.
   Harmless contact feedback does not delay recovery. Restart remains at 25% charge; its energy premium is defined below.
+- Rated speed caps thrust: thrust may turn the velocity at any speed but never raises it past the cap.
+  Boost raises the cap 2×. Dampeners on shed speed above the cap; dampeners off keep it.
+  Collisions can still push a hull past the cap. Reason: stops absurd ram speeds into stations.
 - These are starting values, not final flight-feel approval. Capacity, mass, gyro, control rules and FTL stay unchanged.
   Power shortage can still slow recovery; the world shield-recharge multiplier still applies.
 

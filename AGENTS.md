@@ -447,7 +447,9 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
 - **Thrust, facing and fuel:** a thrust part pushes the hull the opposite way to its `DesignBox.Facing` (a mounted
   one, to the face it sits on) and burns its `BlockType.Fuel`; `BoxHullSums` keeps thrust and burn per push direction and fuel (`ThrustTable`), tank room
   and pump power per fuel, and `FlightModel.Step` is the one place that moves a hull and spends fuel,
-  dampener braking included. Fuel is kept per tank: a design lists its tanks in block order (`HullDesign.Tanks`,
+  dampener braking included. Rated speed caps thrust there (`speedBefore`, `speedCap`): thrust never raises speed past
+  the limit (boost: twice), only the dampeners shed speed above it, and dampeners off keep it (`FlightLimitTests`; this
+  arithmetic is why `ContentIdentity.EvaluatorVersion` went to 19). Fuel is kept per tank: a design lists its tanks in block order (`HullDesign.Tanks`,
   at most 255: `limits.maxTanks`, `TankFuel.MaxTanks`), a hull keeps the kilograms in each with its block state
   (`BlockStateStore.Tanks`, doubles; a lost tank holds nothing), and `HullState.Fuel` is only their sum per fuel
   (`TankFuel.Total`): whoever changes a tank writes the sum again, and nothing sends or saves it. A burn draws

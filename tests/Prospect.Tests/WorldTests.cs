@@ -149,8 +149,8 @@ public sealed class FlightTests
 
         // Start above normal speed explicitly: the tuned thrust need not get there before overheating.
         overheated.Velocity = overheated.Forward * Pod.BoostMaxSpeed;
-        // Locked out, holding boost no longer helps: the hull sheds speed back toward its rated maximum.
-        var slowing = Fly(overheated, new FlightInput { Forward = 127, Boost = true }, 120);
+        // Locked out, holding boost no longer helps: with the dampeners on, the hull sheds speed back toward its rated maximum.
+        var slowing = Fly(overheated, new FlightInput { Forward = 127, Boost = true, Dampeners = true }, 120);
         Assert.True(slowing.Velocity.Length() < overheated.Velocity.Length());
 
         var cooled = Fly(overheated, default, 900);
