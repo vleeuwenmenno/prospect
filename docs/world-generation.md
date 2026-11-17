@@ -174,6 +174,8 @@ Development machine, default content. Before is generation version 3.
 
 - `sectorSize` is 20–160 km, default 80 km, step 10 km; `Galaxy.Under` owns its applied metre value.
 - Ordinary and huge cloud diameters each have a minimum/maximum pair in km; huge chance is 0–1.
+- Defaults: ordinary 32 to 45 km, huge 90 to 120.2 km (both ends of the huge range cap at one 80 km sector, so every huge cloud is a sector across), huge chance 0.12, per-cloud wispiness 1 to 1.75. They moved with generation version 9 and protocol 73.
+- A cloud's rocks follow its volume, so bigger clouds hold more of them: the stretch of space outside the galaxy disc holds about a sixth of the rocks that lie near home.
 - Both endpoints are capped at the applied sector width before sampling. The cloud remains within one neighbour of its anchor; the 27-sector query remains complete.
 - Anchors, gas queries, field density, exploration, maps and saved positions use the same applied `Galaxy.SectorSize`.
 - Saved settings already store ids and values. No snapshot codec change is needed; generation and content identity refuse older saves.

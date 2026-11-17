@@ -723,7 +723,7 @@ public sealed class DroneScanTests
         var badRock = Scanning(DroneScanPhase.Moving); badRock.ScanRock = new RockRef(rock.Sector, -1);
         Assert.False(Round(badRock, out _));
 
-        Assert.Equal(72u, ProtocolInfo.Version);
+        Assert.Equal(73u, ProtocolInfo.Version);
         Assert.Equal(49, (int)MessageId.DroneScan);
         Assert.Equal(50, (int)MessageId.DroneScanResult);
         Assert.True(BayMessage.MaxWireSize >= BayMessage.HeaderBytes + DroneBayRules.MaxBays * BayMessage.RecordBytes);

@@ -1273,7 +1273,8 @@ public sealed class AsteroidSettingTests
         // Amount scales what every field proposes, wherever its rocks land.
         var plain = Survey();
         var doubled = Survey("asteroidAmount=2");
-        Assert.InRange(doubled.Proposed / (double)plain.Proposed, 1.9, 2.1);
+        // Not quite twice: the big default clouds fill to their rock cap, which amount does not raise.
+        Assert.InRange(doubled.Proposed / (double)plain.Proposed, 1.7, 2.1);
         Assert.InRange(doubled.Placed / (double)plain.Placed, 1.5, 2.1);
 
         // Field size moves no count; larger fields reach more sectors and smaller ones fewer.
