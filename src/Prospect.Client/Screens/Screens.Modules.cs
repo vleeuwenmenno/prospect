@@ -30,6 +30,7 @@ internal sealed partial class ScreenHost
     private readonly DroneTracker _droneTrack = new();
     private DroneChipState _droneState;
     private byte[] _droneKeyName = [];
+    private byte[] _droneRecallKeyName = [];
     private int _droneKeysVersion = -1;
     private bool _tipSawGasScanner;
     private bool _tipSawAsteroidTarget;
@@ -73,6 +74,8 @@ internal sealed partial class ScreenHost
             _droneKeysVersion = _app.Actions.Version;
             var launch = _app.Actions.Bindings(InputAction.LaunchDrones);
             _droneKeyName = System.Text.Encoding.UTF8.GetBytes(launch.Length == 0 ? "UNBOUND" : launch[0].DisplayName.ToUpperInvariant());
+            var recall = _app.Actions.Bindings(InputAction.RecallDrones);
+            _droneRecallKeyName = System.Text.Encoding.UTF8.GetBytes(recall.Length == 0 ? "UNBOUND" : recall[0].DisplayName.ToUpperInvariant());
         }
         var scan = snapshot.Modules.Scan;
         _moduleTrack.Update(scan, own.Id, (float)_moduleEquipment[2].Range, _ui.DeltaTime);
@@ -270,7 +273,10 @@ internal sealed partial class ScreenHost
             DrawModuleTip(ImGui.GetForegroundDrawList(), hovered, hoveredMin, new float2(width, height), snapshot);
     }
 
-    /// <summary>The bays' chip: the launch key and DRONES, then drones out and inside, a rebuild, or the server's answer.</summary>
+    /// <summary>
+    /// The bays' chip: the key that acts now and what it does (launch while drones are inside, recall while any are
+    /// out), then drones out and inside, a rebuild, or the server's answer.
+    /// </summary>
     private void DrawDroneChip(ImDrawListPtr draw, float2 min, float2 size, bool hot, SessionSnapshot snapshot)
     {
         var look = ModuleStyle;
@@ -285,17 +291,19 @@ internal sealed partial class ScreenHost
         draw.AddRectFilled(min + new float2(0, Kit.Px(4)), min + new float2(Kit.Px(3), size.Y - Kit.Px(4)), Kit.Color(tier.Rgb));
         var pad = Kit.Px(Theme.Space2) + Kit.Px(3);
         var inner = size.X - pad - Kit.Px(Theme.Space2);
-        var keyWidth = Kit.Measure(_ui.Mono, Theme.FontCaption, _droneKeyName).X;
-        Kit.Text(draw, _ui.Mono, Theme.FontCaption, min + new float2(pad, Kit.Px(4)), Theme.Accent, _droneKeyName);
-        Kit.ClippedText(draw, _ui.SansMedium, Theme.FontCaption, min + new float2(pad + keyWidth + Kit.Px(Theme.Space2), Kit.Px(4)), Theme.Text, "DRONES"u8, Math.Max(0f, inner - keyWidth - Kit.Px(Theme.Space2)));
+        var recalling = _droneState == DroneChipState.Out;
+        var key = recalling ? _droneRecallKeyName : _droneKeyName;
+        var keyWidth = Kit.Measure(_ui.Mono, Theme.FontCaption, key).X;
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, min + new float2(pad, Kit.Px(4)), Theme.Accent, key);
+        Kit.ClippedText(draw, _ui.SansMedium, Theme.FontCaption, min + new float2(pad + keyWidth + Kit.Px(Theme.Space2), Kit.Px(4)), Theme.Text, recalling ? "RECALL"u8 : "LAUNCH"u8, Math.Max(0f, inner - keyWidth - Kit.Px(Theme.Space2)));
         var statusAt = min + new float2(pad, Kit.Px(20));
         var rebuild = DroneUi.RebuildSeconds(bays, snapshot.ServerTick);
         if (reply != DroneReply.None)
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, DroneUi.Refused(reply) ? Theme.Bad : Theme.Good, DroneUi.Words(reply), inner);
         else if (_droneState == DroneChipState.Out)
-            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.Info, Kit.F($"{outside} OUT  {stocked} IN"), inner);
+            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.Info, Kit.F($"{outside} DRONES OUT  {stocked} IN"), inner);
         else if (_droneState == DroneChipState.Ready)
-            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, pending > 0 ? Theme.Info : Theme.Good, Kit.F($"{stocked}/{capacity} IN"), inner);
+            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, pending > 0 ? Theme.Info : Theme.Good, Kit.F($"{stocked}/{capacity} DRONES IN"), inner);
         else if (rebuild > 0)
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.TextDim, Kit.F($"REBUILD {rebuild} S"), inner);
         else
