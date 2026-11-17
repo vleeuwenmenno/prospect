@@ -5214,9 +5214,37 @@ public sealed class FrameOrderTests : IDisposable
     /// <summary>Presses and lets go of the editor key, then plays until the server's grant has opened the editor.</summary>
     private void OpenEditor()
     {
+        OpenEditorInSelectTool();
+        // Most editor tests exercise placing, so they start with the remembered part held.
+        _world.Editor.ChoosePart(_world.Editor.Part);
+    }
+
+    /// <summary>Opens the editor as the player does and leaves it as it opens: in the select tool.</summary>
+    private void OpenEditorInSelectTool()
+    {
         EditorFrame(() => Key(GlfwKey.B, true));
         EditorFrame(() => Key(GlfwKey.B, false));
-        Assert.True(PlayUntil(() => _world.Editor.Shown), $"the editor should open, not {_world.Editor.Stage} {_snapshot.Editor.Phase}/{_snapshot.Editor.Reason}");
+        Assert.True(PlayUntil(() => _world.Editor.Shown), $"the editor should open, not {_snapshot.Editor.Phase}/{_snapshot.Editor.Reason} {_world.Editor.Stage}");
+        Assert.False(_world.Editor.Placing);
+        Assert.False(_world.Editor.HasGhost);
+    }
+
+    [Fact]
+    public void TheEditorAlwaysOpensInTheSelectToolEvenAfterAPartWasChosenInAnEarlierEdit()
+    {
+        OpenEditorInSelectTool();
+        var editor = _world.Editor;
+        editor.ChoosePart(editor.Part);
+        Assert.True(editor.Placing);
+
+        EditorFrame(() => Key(GlfwKey.Escape, true));
+        Assert.Equal(EditorStage.Closed, editor.Stage);
+        EditorFrame(() => Key(GlfwKey.Escape, false));
+        Assert.True(PlayUntil(() => _snapshot.Editor.Phase == EditorPhase.Closed));
+        EditorFrame();
+
+        OpenEditorInSelectTool();
+        Assert.False(editor.Placing);
     }
 
     /// <summary>Where the edited hull's centre is on screen this frame.</summary>
@@ -5862,6 +5890,10 @@ public sealed class FrameOrderTests : IDisposable
         var designs = _snapshot.Content.Designs.Length;
         for (var i = 0; i < 30; i++)
             DroneFrame();
+
+        // The edit opens in the select tool; choosing a part starts placing.
+        Assert.False(editor.Placing);
+        editor.ChoosePart(editor.Part);
 
         // The pointer finds the new ship where it is, not the drone, and a click places a block on it.
         Assert.True(_world.Project(_world.EditedPosition, out var middle));
