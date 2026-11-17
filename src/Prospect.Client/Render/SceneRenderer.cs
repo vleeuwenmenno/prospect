@@ -6,6 +6,7 @@ using Brutal.VulkanApi;
 using Brutal.VulkanApi.Abstractions;
 using Brutal.VulkanApi.Vma;
 using Prospect.Client.World;
+using Prospect.Game.Protocol;
 using Prospect.Game.World;
 
 namespace Prospect.Client.Render;
@@ -242,6 +243,20 @@ internal struct TractorInstance
     public float4 ContainerHalf;
 }
 
+/// <summary>One mining laser beam, matching <c>laser.vert</c>: see there for what each vector holds. Built by <see cref="LaserBeamLook.Instance"/>.</summary>
+internal struct LaserInstance
+{
+    public float4 FromCore;
+    public float4 ToState;
+    public float4 CoreColor;
+    public float4 GlowColor;
+    public float4 Motion;
+    public float4 Pulse;
+    public float4 HitColor;
+    public float4 Spark;
+    public float4 SparkShape;
+}
+
 /// <summary>
 /// One drawn mesh: a camera-relative 3x4 transform and a colour. Alpha 0 is rock, 1 is hull plating, 2 the pilot's
 /// own hull; a hull cut by a jump's opening adds four times its passage slot plus one.
@@ -315,6 +330,12 @@ internal sealed unsafe class SceneRenderer : IDisposable
     private readonly GpuBuffer[] _tractorBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
     private int _tractorCount;
     private TractorLookConstants _tractorLook;
+    private readonly VkPipeline _laserPipeline;
+    private readonly GpuBuffer[] _laserBuffers = new GpuBuffer[FrameRenderer.FramesInFlight];
+    private int _laserCount;
+
+    /// <summary>Vertices one laser beam instance draws: the ribbon, the hit glow and the sparks (<c>laser.vert</c>).</summary>
+    private const int LaserVertices = 6 + 6 + 6 * LaserBeamLook.MaxSparks;
     private readonly VkPipelineLayout _pulsePipelineLayout;
     private readonly VkPipeline _pulsePipeline;
     private ScanPulseConstants _pulseQueued;
@@ -471,6 +492,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
                 _rockEffectBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(RockEffectInstance) * RockExhaust.Capacity);
                 _plumeBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(PlumeInstance) * PropulsionLook.PlumeCapacity);
                 _tractorBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(TractorInstance) * FreeContainers.Capacity);
+                _laserBuffers[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(LaserInstance) * LaserBeamsMessage.MaxBeams);
                 if (i == 0) _rockPatchVertices = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshVertex) * RockPatchCapacity);
                 _damageVertices[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshVertex) * DamageVertices);
                 _damageInstances[i] = GpuBuffer.CreateMapped(gpu, VkBufferUsageFlags.VertexBufferBit, sizeof(MeshInstance) * DynamicDraws);
@@ -804,6 +826,9 @@ internal sealed unsafe class SceneRenderer : IDisposable
         var plumeInput = new VertexInput(1, 10).AddBindingWithAttributes<PlumeInstance>(0, 0, VkVertexInputRate.Instance);
         _plumePipeline = ScenePipeline(Module(shaders, "plume.vert"), Module(shaders, "plume.frag"), plumeInput, Presets.Rasterization.Fill.CullNone, &depthRead, &additive);
         var tractorInput = new VertexInput(1, 4).AddBindingWithAttributes<TractorInstance>(0, 0, VkVertexInputRate.Instance);
+        // Mining laser beams are light added in the scene like the plumes, tested against what is solid.
+        var laserInput = new VertexInput(1, 9).AddBindingWithAttributes<LaserInstance>(0, 0, VkVertexInputRate.Instance);
+        _laserPipeline = ScenePipeline(Module(shaders, "laser.vert"), Module(shaders, "laser.frag"), laserInput, Presets.Rasterization.Fill.CullNone, &depthRead, &additive);
         _tractorPipeline = Pipeline(Module(shaders, "tractor.vert"), Module(shaders, "tractor.frag"), tractorInput, Presets.Rasterization.Fill.CullNone, &depthRead, &additive, _tractorPipelineLayout, VkRenderPass.NullHandle);
 
         // The scan pulse is light added to the displayed image after tone mapping, in the present pass, under the
@@ -908,6 +933,12 @@ internal sealed unsafe class SceneRenderer : IDisposable
 
     /// <summary>This frame slot's tractor beam instances, written by the world before <see cref="Render"/>.</summary>
     public Span<TractorInstance> Tractors(int frameIndex) => new((void*)_tractorBuffers[frameIndex].Mapped, FreeContainers.Capacity);
+
+    /// <summary>This frame slot's laser beam instances, written by the world before <see cref="Render"/>.</summary>
+    public Span<LaserInstance> Lasers(int frameIndex) => new((void*)_laserBuffers[frameIndex].Mapped, LaserBeamsMessage.MaxBeams);
+
+    /// <summary>How many of <see cref="Lasers"/> the next <see cref="Render"/> draws; cleared once drawn.</summary>
+    public void QueueLasers(int count) => _laserCount = Math.Clamp(count, 0, LaserBeamsMessage.MaxBeams);
 
     /// <summary>How many of <see cref="Tractors"/> the next <see cref="Render"/> draws; cleared once drawn.</summary>
     public void QueueTractors(int count, in TractorLookConstants look)
@@ -1157,6 +1188,14 @@ internal sealed unsafe class SceneRenderer : IDisposable
             commands.BindDescriptorSets(VkPipelineBindPoint.Graphics, _scenePipelineLayout, 0, new ReadOnlySpan<VkDescriptorSet>(in set), []);
         }
         _tractorCount = 0;
+        if (_laserCount > 0)
+        {
+            var lasers = _laserBuffers[frameIndex].Buffer;
+            commands.BindPipeline(VkPipelineBindPoint.Graphics, _laserPipeline);
+            commands.BindVertexBuffers(0, new ReadOnlySpan<VkBuffer>(in lasers), new ReadOnlySpan<ByteSize64>(in zero));
+            commands.Draw(LaserVertices, _laserCount, 0, 0);
+        }
+        _laserCount = 0;
         commands.BindPipeline(VkPipelineBindPoint.Graphics, _dustPipeline);
         commands.Draw(6, DustCount, 0, 0);
 
@@ -1822,6 +1861,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
         _pulseLayout.Dispose();
         device.DestroyPipelineLayout(_shieldPipelineLayout, null);
         _shieldLayout.Dispose();
+        device.DestroyPipeline(_laserPipeline, null);
         device.DestroyPipeline(_tractorPipeline, null);
         device.DestroyPipelineLayout(_tractorPipelineLayout, null);
         device.DestroyPipelineLayout(_scenePipelineLayout, null);
@@ -1849,6 +1889,7 @@ internal sealed unsafe class SceneRenderer : IDisposable
             _exhaustBuffers[i].Destroy(_gpu);
             _plumeBuffers[i].Destroy(_gpu);
             _tractorBuffers[i].Destroy(_gpu);
+            _laserBuffers[i].Destroy(_gpu);
             _rockEffectBuffers[i].Destroy(_gpu);
             _rockMarkBuffers[i].Destroy(_gpu);
             if (i == 0) _rockPatchVertices.Destroy(_gpu);

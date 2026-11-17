@@ -1050,6 +1050,17 @@ How to apply it:
 - Commit and push only when asked.
 
 
+## Mining laser visuals (R3)
+
+- Model: `PropulsionModels.BuildLaser` (look: the `laser` entry of `visuals/propulsion.json`, `LaserLook`, validated), a pure
+  function of the thin mount box like a scanner's; wired through `AddMount`, `HasModel` and `BuildPart`, so hull meshes,
+  damage meshes, the editor and far hulls all take it. The lens is emissive and level with the outer face the beam leaves from.
+- Beams: `WorldView.DrawLaserBeams` writes one `LaserInstance` a beam (`LaserBeamLook.Instance`) from `LaserAim.World` on the
+  drawn hull pose to `drawn position + End`; `laser.vert`/`laser.frag` make everything (ribbon, pulses, the cut's glow, sparks)
+  from time and a seed, so nothing is pooled or allocated. A free beam fades toward its end, a cutting one has glow and sparks.
+- Ore chunks: `OreChunkVisuals` keeps two sets and matches chunks by id once per set; `WorldView.OreChunks.cs` draws the worker-built
+  `OreChunkModels` lump (4 variants by id) scaled to `OreChunks.Half`, tinted by ore colour and grade. Tests: `LaserVisualTests`.
+
 ## Free containers: cargo step 2
 
 - `FreeContainers` is a fixed 256-body pool, separate from hull records. `ContainerSimulation` drifts and uses
