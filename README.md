@@ -563,9 +563,9 @@ The cursor is hidden only in the pilot view. The command view, the map and every
 
 - **Pilot view:** the hidden cursor steers the view. Hold either `Shift` to show it: mouse flight and targeting
   stop, keyboard flight still works, and the bar and pinned windows can be clicked. With `Shift` held, a right drag that
-  starts over space turns the camera, as free look does; letting go of the button or of `Shift` returns the view to
-  the nose. Press `Shift` before the right button: a click in the same instant as `Shift` is dropped.
-- **Interface mode (`Tab`), pilot view:** a right drag that starts over space turns the camera as free look does (the hull does not turn, no flight input is sent); letting go returns the view to the nose. A press that starts on a window never turns it.
+  starts over space turns the camera, as free look does; letting go of the button or of `Shift` leaves the view
+  where it is. Press `Shift` before the right button: a click in the same instant as `Shift` is dropped.
+- **Interface mode (`Tab`), pilot view:** a right drag that starts over space turns the camera as free look does (the hull does not turn, no flight input is sent); letting go leaves the view where it is. A press that starts on a window never turns it.
 - **Command view:** the cursor is shown as soon as it opens (`N`), and the mouse works in the world: select,
   box-select, order, rotate, pan and zoom. `Shift` there only adds to a selection or moves the plane; it never
   hides the cursor or ends a drag. Back in the pilot view the cursor is hidden again unless `Shift` is held or
@@ -592,7 +592,7 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Forward / back, strafe | `W` `S`, `A` `D` | Left stick |
 | Up / down | `R`, `F` | Right / left trigger |
 | Look around | Mouse, or arrow keys | Right stick |
-| Free look (hull holds its heading) | Hold right mouse button | |
+| Free look (hull holds its heading; the view stays where you leave it) | Hold right mouse button | |
 | Turn the hull onto the view (hold, or click) | Left mouse button | |
 | Zoom camera | Mouse wheel | |
 | Roll | `Q` `E` | Bumpers |

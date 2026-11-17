@@ -994,14 +994,12 @@ internal sealed partial class WorldView
             // Pointer, arrow keys and right stick turn the view, not the hull.
             TurnLook(_actions.Axis(_devices, InputAxis.Yaw, keyboard) * LookRadiansPerSecond * dt, _actions.Axis(_devices, InputAxis.Pitch, keyboard) * LookRadiansPerSecond * dt);
 
-            // Holding the free-look button looks around without committing the hull to anything; letting go
-            // returns the view to the nose. Otherwise the hull swings onto the view whenever it is under thrust.
+            // Holding the free-look button looks around without committing the hull to anything; letting go keeps
+            // the view where it was left. Otherwise the hull swings onto the view whenever it is under thrust.
             // A camera drag with the pointer shown (release key held) is free look too.
             var freeLook = _devices.MouseDown(GlfwMouseButton.Right) || _devices.CameraDrag;
             if (_devices.CameraScroll != 0)
                 _chaseZoom = Math.Clamp(_chaseZoom * MathF.Pow(0.88f, _devices.CameraScroll), 0.5f, 8f);
-            if (_freeLook && !freeLook)
-                _lookDirection = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
             _freeLook = freeLook;
 
             UpdateTargeting(snapshot, bridge);
@@ -1053,7 +1051,7 @@ internal sealed partial class WorldView
         else if (!inputEnabled && !editing && Mode == ViewMode.Pilot)
         {
             // Interface mode: the world has no input, but a right drag begun over space (PointerRouter) turns the
-            // camera exactly as free look does, and letting go returns the view to the nose. No flight intent is sent.
+            // camera exactly as free look does, and letting go leaves the view where it is. No flight intent is sent.
             var dragging = _devices.CameraDrag;
             if (dragging)
             {
@@ -1061,8 +1059,6 @@ internal sealed partial class WorldView
                 if (_devices.CameraScroll != 0)
                     _chaseZoom = Math.Clamp(_chaseZoom * MathF.Pow(0.88f, _devices.CameraScroll), 0.5f, 8f);
             }
-            else if (_freeLook)
-                _lookDirection = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
             _freeLook = dragging;
         }
         else if (inputEnabled && !editing)

@@ -4,7 +4,7 @@
 
 - `Tab` (`ToggleInterface`, rebindable) toggles interface mode. `Tab` again or `Esc` leaves it.
 - In it: the pointer is free and stays free; flight input is off; a click never reaches the world.
-- A right drag begun over space (not over a window) turns the pilot camera as free look does: same sensitivity, invert and limits, wheel zooms. The hull never turns and no flight input is sent. Letting go returns the view to the nose, as free look does. A press begun on a window never turns it; a drag that leaves onto a window keeps turning until release. The pointer stays shown. Pilot view only: the command view and map are unchanged. `PointerFrame.InterfaceMode` (`Screens.InterfaceCameraDragAllowed`: interface mode is the only surface open); `FrameOrderTests` holds it.
+- A right drag begun over space (not over a window) turns the pilot camera as free look does: same sensitivity, invert and limits, wheel zooms. The hull never turns and no flight input is sent. Letting go leaves the view where it is, as free look does. A press begun on a window never turns it; a drag that leaves onto a window keeps turning until release. The pointer stays shown. Pilot view only: the command view and map are unchanged. `PointerFrame.InterfaceMode` (`Screens.InterfaceCameraDragAllowed`: interface mode is the only surface open); `FrameOrderTests` holds it.
 - In it every window that is open and not pinned is shown. Leaving hides them and recaptures the pointer in the pilot view.
 - Windows: Social (navigator, Friends, Party, Players, Chat, card), Charts, Gas, Cargo, Player.
 - Each window has a pin. A pinned window stays on screen outside interface mode. It takes nothing in flight; hold `Shift` to click it.
