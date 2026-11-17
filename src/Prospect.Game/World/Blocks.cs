@@ -62,6 +62,9 @@ public sealed class BlockType
     /// <summary>Optional automatic cargo tractor, present only on a face mount.</summary>
     public TractorSpec? Tractor { get; init; }
 
+    /// <summary>Set for a drone bay: a box block that keeps drones and lets them out through one hatch face.</summary>
+    public BaySpec? Bay { get; init; }
+
     /// <summary>
     /// True for a block that is always a box and never a wedge (<c>"boxOnly"</c> in <c>blocks.json</c>): tanks, whose
     /// round vessels a slant would cut, and sensors and scanners. <see cref="BoxDesign.ShapeAllowed"/> is the one rule.
@@ -343,6 +346,7 @@ public sealed class BlockCatalog
                 Id = entry.Name,
                 Module = ModuleSpec.Read(block, root),
                 Tractor = TractorSpec.Read(block, root),
+                Bay = BaySpec.Read(block, root),
                 Name = block.GetProperty("name"u8).GetString()!,
                 Mass = block.GetProperty("mass"u8).GetSingle(),
                 Hull = block.GetProperty("hull"u8).GetSingle(),
@@ -407,6 +411,10 @@ public sealed class BlockCatalog
             // with its parent block, and it has no hit points, size or identity of its own.
             if (type.Tractor is not null && (type.Mount is null || type.Thrust != 0 || type.PowerDraw != 0))
                 throw new InvalidDataException($"{path}: {type.Id}: a tractor requires a non-thrust mount with active-only power");
+
+            // A bay is one box with one hatch, its facing: never a mount, a wedge or a part of the drone itself.
+            if (type.Bay is not null && (type.Mount is not null || !type.BoxOnly || type.Drone || type.Thrust != 0 || type.Tank != FuelKind.None || type.Cargo != 0 || type.Core))
+                throw new InvalidDataException($"{path}: {type.Id}: a drone bay is a box-only ship block and nothing else");
             if (type.Mount is not { } spec)
                 continue;
             if (spec.Side is < 1 or > FaceMounts.MaxSide || spec.Depth is < 1 or > FaceMounts.MaxDepth)
@@ -615,8 +623,17 @@ public sealed class HullDesign
             if (blocks[i].Type.Tank != FuelKind.None)
                 tanks.Add(new DesignTank(i, blocks[i].Type.Tank, (float)Sums.TankCapacity(i, blocks[i].Type.Tank)));
         _tanks = [.. tanks];
+
+        // The bays, in block order: a bay's index here names it in the server's records, on the wire and in a save.
+        var bays = new List<int>();
+        for (var i = 0; i < blocks.Length; i++)
+            if (blocks[i].Type.Bay is not null) bays.Add(i);
+        Bays = [.. bays];
         Apply(rules);
     }
+
+    /// <summary>The blocks that are drone bays, in block order. At most <see cref="DroneBayRules.MaxBays"/>.</summary>
+    public int[] Bays { get; }
 
     private readonly DesignTank[] _tanks;
 

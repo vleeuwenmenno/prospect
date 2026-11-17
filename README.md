@@ -34,6 +34,17 @@ Power rises with load mass. Tier badges and the aiming turret visuals are not bu
 Editor lines show reachable racks; amber racks have no tractor access. Move the ship for blocked or distant cargo.
 The energy tooltip lists TRACTORS. No pickup key or pickup by touch; no allow-list/block-list filter yet.
 
+Drone bays (editor, Storage tab) are box blocks with one hatch: it faces away from the face the bay is placed on,
+and the model shows it (frame, orange doors, a light). A Common bay keeps 4 drones, launches 2 at once and rebuilds
+a lost one in 90 s; tiers are content, only Common is in the palette. `.` (or a click on the DRONES chip over the
+console) launches every drone inside; they leave through the hatch and hold station 14 m out in front of it. `,` (or
+the chip while drones are out) calls them home: they line up in front of the hatch, fly in and dock. A blocked hatch
+(a block or a part of the ship in front of it) refuses a launch, and the chip says why. Drones are small real hulls
+flown by the server: they collide, can be destroyed (the bay rebuilds them) and use power. A player has at most 12
+out. A jump calls them home; one still out when the ship leaves is lost. A saved world docks every drone. Not built:
+choosing the hold point in the interface, a drone panel, fetching cargo, scans and charges (later drone steps), and
+any avoidance: a drone flies straight to its place and may bump the ship it came from.
+
 
 Propulsion burns fuel and is directional: engines, hot thrusters and cold gas thrusters each push the opposite way
 to the way they face, and burn bipropellant, hydrazine and nitrogen from tank blocks. Engines are blocks of any
@@ -575,6 +586,7 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Asteroid scanner: scan the targeted asteroid (flight, command view) | `X` | |
 | Gas scanner: sample the gas cloud you are in or beside | `C` | |
 | Asteroid locator: pulse | `Y` | |
+| Drones: launch every drone in the bays / call them all home (flight, command view) | `.` / `,` | |
 | Gas window: clouds you have sampled | `F4` | |
 | Command view | `N` or `F9` | `Back` |
 | Galaxy map | `M` | `Y` |

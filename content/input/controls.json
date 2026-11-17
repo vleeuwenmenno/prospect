@@ -20,6 +20,8 @@
     { "tab": "Flight", "action": "AlignToView", "label": "Turn the hull onto the view (hold, or click to finish the turn)", "scope": ["Pilot"] },
     { "tab": "Flight", "action": "AlignLock", "label": "Keep the hull turned onto the view (on / off; free look and Shift pause it)", "scope": ["Pilot"] },
     { "tab": "Flight", "action": "SwitchHull", "label": "Take control of target / leave in drone", "scope": ["Pilot", "Command", "Map"] },
+    { "tab": "Flight", "action": "LaunchDrones", "label": "Launch every drone in the bays to hold station in front of their hatches", "scope": ["Pilot", "Command"] },
+    { "tab": "Flight", "action": "RecallDrones", "label": "Call every drone home through its hatch", "scope": ["Pilot", "Command"] },
 
     { "tab": "Camera", "axis": "Pitch", "label": "Look down / up", "negative": "Look down", "positive": "Look up", "scope": ["Pilot", "Command", "Map"] },
     { "tab": "Camera", "axis": "Yaw", "label": "Look left / right", "negative": "Look left", "positive": "Look right", "scope": ["Pilot", "Command", "Map"] },

@@ -176,6 +176,12 @@ public struct SavedHull
 
     /// <summary>Range in the snapshot hold buffer.</summary>
     public int CargoStart, CargoCount;
+
+    /// <summary>
+    /// Where this hull's drone bays begin in <see cref="WorldSnapshot.BayStocked"/> and
+    /// <see cref="WorldSnapshot.BayRebuild"/>, and how many: every bay of its design, or none for a wreck.
+    /// </summary>
+    public int BayStart, Bays;
 }
 
 /// <summary>
@@ -206,6 +212,8 @@ public sealed class WorldSnapshot
         HitPoints = new float[blocks];
         Losses = new int[blocks];
         TankFuel = new double[blocks];
+        BayStocked = new byte[Math.Min(blocks, checked(hulls * DroneBayRules.MaxBays))];
+        BayRebuild = new int[BayStocked.Length];
         Cargo = new HoldContainer[checked(hulls * BlockStateStore.MaxContainers)];
         Rocks = new RockDelta[rocks];
         Charts = new SectorChart[charts];
@@ -265,6 +273,9 @@ public sealed class WorldSnapshot
     /// <summary>The catalogue's roles: the pod and the drone, and the hulls a new owner is given besides the pod. Never written to.</summary>
     public int PodDesign;
     public int DroneDesign;
+
+    /// <summary>The design of the drones a drone bay launches.</summary>
+    public int WorkDroneDesign;
     public int[] StartingFleet = [];
 
     /// <summary>The owners, in the order they were created. The first <see cref="OwnerCount"/> are meaningful.</summary>
@@ -303,6 +314,15 @@ public sealed class WorldSnapshot
     public uint NextContainerId = 1;
     public SavedCargoRules CargoRules;
     public int TankCount;
+
+    /// <summary>
+    /// Every drone bay's drones and the ticks left on the drone it is rebuilding (zero for none), bay by bay in the
+    /// order of the hull's design, hull after hull. Drones that were out are counted in: a saved world docks them.
+    /// The first <see cref="BayCount"/> are meaningful.
+    /// </summary>
+    public readonly byte[] BayStocked;
+    public readonly int[] BayRebuild;
+    public int BayCount;
 
     /// <summary>
     /// The asteroids that were pushed, in the order they first were, with the tick each motion starts at. The
@@ -360,6 +380,7 @@ public sealed class WorldSnapshot
             DesignCount = designs.Length,
             PodDesign = content.PodDesign,
             DroneDesign = content.DroneDesign,
+            WorkDroneDesign = content.WorkDroneDesign,
             StartingFleet = (int[])content.StartingFleet.Clone(),
         };
         for (var i = 0; i < ids.Length; i++)

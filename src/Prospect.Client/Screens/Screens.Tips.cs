@@ -190,7 +190,7 @@ internal sealed partial class ScreenHost
             case TipRegion.Console:
                 if (_mapOpen || world.Editor.Shown || world.Mode is not (ViewMode.Pilot or ViewMode.Command))
                     return false;
-                area = ConsoleArea(display, Kit.Scale, ModulesPresent(), ModuleStyle.Strip);
+                area = ConsoleArea(display, Kit.Scale, StripChips(), ModuleStyle.Strip);
                 return true;
             case TipRegion.NewShipDialog:
                 if (!_newShip.Open)

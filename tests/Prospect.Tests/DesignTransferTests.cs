@@ -325,7 +325,7 @@ public sealed class DesignTransferTests
         var names = Enumerable.Range(0, 30).Select(i => "admission" + i).ToArray();
         for (var i = 0; i < names.Length; i++)
             files.Write("ships/" + names[i] + ".json", original.Replace("Command Pod", names[i]));
-        files.Write("ships/fleet.json", JsonSerializer.Serialize(new { designs = names, pod = names[0], drone = names[1], startingFleet = Array.Empty<string>() }));
+        files.Write("ships/fleet.json", JsonSerializer.Serialize(new { designs = names.Append("work_drone").ToArray(), pod = names[0], drone = names[1], workDrone = "work_drone", startingFleet = Array.Empty<string>() }));
         var serverContent = files.Load();
         using var link = new LoopbackLink();
         using var server = new ServerHost(new ServerConfig(), serverContent, link.Server);
@@ -338,7 +338,7 @@ public sealed class DesignTransferTests
         }
         Assert.True(tick > 600);
         Assert.Equal(SessionState.Active, client.AcquireSnapshot().State);
-        Assert.Equal(30, client.AcquireSnapshot().Content.Designs.Length);
+        Assert.Equal(31, client.AcquireSnapshot().Content.Designs.Length);
         var slow = local.BlockTransfers with { BytesPerTick = 64 };
         Assert.True(slow.TransferTicks > slow.Transfers * (long)slow.MaxBytes / (64 - BlockTransfer.HeaderBytes));
     }

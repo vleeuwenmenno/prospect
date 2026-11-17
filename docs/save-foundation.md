@@ -511,3 +511,14 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
 
 - Pickup ownership survives load and reconnect using the same durable owner as hulls. Unknown owners refuse loading.
 - Pickup-ready ticks survive unchanged on the saved simulation clock; time offline does not consume the delay.
+
+## Drone bays (codec 17)
+
+- Each owned hull saves one record per bay of its design, in block order: drones inside and ticks left on the
+  drone being rebuilt. Five bytes a bay; a wreck saves none. Bays are blocks, so block room covers them.
+- Drones out of their bays are not saved. Capture counts each one back into its bay: a loaded world has every
+  drone docked, and no order survives a load. Docked drones never exceed the bay's capacity.
+- The work drone design is a catalogue role, saved with the pod and the escape drone; load refuses one that is not
+  a small craft without a jump drive.
+- Load refuses a bay count other than the design's, drones above capacity, a rebuild longer than the bay's, a
+  rebuild in a full bay, and anything in a bay whose block was lost. Layouts before 17 are refused untouched.

@@ -1,6 +1,6 @@
 # Drones and mining
 
-Product direction from the brainstorm on 2026-11-16. Nothing here is built yet.
+Product direction from the brainstorm on 2026-11-16. Built so far: D1 (orders, the bay, launch and recall).
 
 ## Why
 
@@ -90,11 +90,15 @@ and the mining rules will be refined by playing.
   the same orders. One executor on the server, whoever gave the order.
 - The server decides every result: what a scan reveals, where a rock breaks, how much ore comes off.
 
-## Proposed (technical, not decided)
+### Drones as hulls and orders (built in D1)
 
 - Drones are small real hulls flown by the server with `HullSim`, so they collide, can be shot and use power.
   A drone that is used up (scan, charge) is removed when its job ends.
-- An order is a small record: kind, target, owner, limits. The executor runs it each tick without allocation.
+- An order is a small record (`TaskOrder`): task, phase, issuer, actor, base hull and bay, point, subject, until.
+  One executor on the server (`ServerHost.TickDrones`) runs a fixed table of them each tick without allocation.
+- The executor turns an order into the drone's `HullOrder` (move to a point), so a client predicts the drone with
+  the same autopilot. A new task is an `OrderTask` value and one case in the executor.
+- A saved world docks every drone: drones out are counted back into their bays, and no order survives a load.
 
 ## Build plan
 
@@ -111,7 +115,18 @@ Three tracks. A track's steps run in order; the tracks run side by side, each in
 ### Track D: drones
 
 1. D1, orders and the bay: the order record and its one executor on the server, the drone bay block with tiers,
-   drones as small server-flown hulls, launch and return.
+   drones as small server-flown hulls, launch and return. **Done.** Notes:
+   - Bay: `droneBay` (box only, one cell), `bay` figures and `bayTiers` in `blocks.json`; Common keeps 4,
+     launches 2 at once, rebuilds one in 90 s. At most 16 bays a design (`limits.maxBays`).
+   - Hatch: the block's facing, chosen in the editor as the face opposite the one the bay is set against.
+     A launch and a docking need the hatch clear for 3 m of the ship's own blocks and mounts.
+   - Drones: the `work_drone` design (fleet role `workDrone`), all ion, no shield, no drive. Figures and caps in
+     `blocks/drones.json`: 12 out per player, 16 hulls kept free below the 255-hull ceiling.
+   - Orders in D1: Hold (a point in the base's frame; by default 14 m out from each hatch, spread on a grid) and
+     Recall (line up 6 m out, fly in, dock). A jump recalls; drones still out when the ship leaves are lost.
+   - Interface: `.` launches all, `,` recalls all, a DRONES chip over the console. No drone panel yet (D2).
+   - Gaps: no avoidance on the way home; the hold point is not chosen in the interface yet; drones out of a hull
+     that is not the one flown show nowhere but in the world.
 2. D2, fetching cargo: drones bring containers back; two or more lift a heavy one; claims respected.
 3. D3, scans: group scan and detailed scan (needs rock interiors, track I).
 4. D4, charges: drones place charges along the player's cutting plane (needs R2).
@@ -123,7 +138,8 @@ Three tracks. A track's steps run in order; the tracks run side by side, each in
 
 ## Open
 
-- The drone bay's model (hatch, doors, lights).
+- The drone bay's final look. A first model is built (frame, plating, a hatch rim, two orange doors, a light);
+  its figures are in `visuals/propulsion.json`.
 - The figures for crust, veins and pockets. I1 starts with first guesses in content; the player tunes them from captures.
 - The heat game's figures: heat rate, cooling, the window, what overheating does.
 - The Ore Cargo window's layout.

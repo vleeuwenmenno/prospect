@@ -304,6 +304,15 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public ushort OrderId;
         public HullOrder Order;
 
+        /// <summary>The earliest tick the player may give another drone command, and the newest answer to one.</summary>
+        public long DroneNextCommand;
+        public uint DroneReplySequence;
+        public DroneReply DroneReply;
+        public byte DroneReplyCount;
+
+        /// <summary>What the client was last told of its flown hull's bays.</summary>
+        public uint BaysHull, BaysRevision, BaysReply;
+
         public void Reset()
         {
             Array.Clear(Visible);
@@ -370,6 +379,11 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             LastSimulatedSequence = 0;
             OrderId = 0;
             Order = default;
+            DroneNextCommand = 0;
+            DroneReplySequence = 0;
+            DroneReply = DroneReply.None;
+            DroneReplyCount = 0;
+            BaysHull = BaysRevision = BaysReply = 0;
         }
     }
 
@@ -848,6 +862,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         TickScriptedExhaustShield();
         TickScriptedFleetHurt(tick);
 
+        // Drones launch, dock and take their orders before the round, so each flies its new order this interval.
+        TickDrones();
+
         // Capture generations before the round: replacement drones wait until the next interval.
         var participantCount = _hulls.Slots;
         for (var i = 0; i < participantCount; i++)
@@ -869,6 +886,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         _containerSimulation.Step(_containers, _content, _field, _rocks, _tick);
         TickWreckage();
         SendCargo();
+        SendBays();
         GatherSensors();
         CleanupFreeContainers();
         SendFreeContainers();
@@ -1186,6 +1204,10 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             case MessageId.FleetOrders when channel == NetChannel.Reliable:
                 ReceiveFleetOrders(connection, ref reader);
                 break;
+            case MessageId.DroneCommand when channel == NetChannel.Reliable:
+                if (DroneCommandMessage.TryRead(ref reader, out var drones))
+                    ReceiveDroneCommand(connection, drones);
+                break;
             case MessageId.JettisonCargo when channel == NetChannel.Reliable:
                 if (JettisonCargoMessage.TryRead(ref reader, out var cargo))
                     ReleaseCargo(connection, cargo.Hull, cargo.Rack, cargo.Index, cargo.Tick, cargo.Mode);
@@ -1265,7 +1287,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         else
         {
             next = new HullHandle((int)(hullId & 0xFFFF), (int)(hullId >> 16));
-            if (next == current || !_hulls.IsAlive(next) || _hulls.Info(next.Index).Owner != connection.PlayerId
+            if (next == current || !_hulls.IsAlive(next) || _hulls.Info(next.Index).Owner != connection.PlayerId || _hulls.Info(next.Index).WorkDrone
                 || _hulls.State(next.Index).Jump is JumpPhase.Tunnel or JumpPhase.Arrive)
                 return;
 
@@ -1302,7 +1324,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             if (!_hulls.IsAlive(handle))
                 continue;
             ref var info = ref _hulls.Info(handle.Index);
-            if (info.Owner == connection.PlayerId && !info.Piloted
+            if (info.Owner == connection.PlayerId && !info.Piloted && !info.WorkDrone
                 && (orders[i].Order.Kind != OrderKind.Jump || ValidateJump(connection, handle.Index, orders[i].Order.Target)))
                 HullSim.SetOrder(ref _hulls.State(handle.Index), ref info.Order, orders[i].Order);
         }
