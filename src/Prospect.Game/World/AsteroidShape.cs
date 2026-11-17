@@ -82,7 +82,7 @@ public static class AsteroidShape
         return new Vector3(1f + 0.35f * MathF.Sin(seed * 1.7f), 1f + 0.3f * MathF.Sin(seed * 2.9f + 1f), 1f + 0.35f * MathF.Sin(seed * 4.1f + 2f));
     }
 
-    private static float Lumps(int shape, Vector3 direction)
+    internal static float Lumps(int shape, Vector3 direction)
     {
         var seed = shape + 1;
         var offset = new Vector3(seed * 12.9898f % 97f, seed * 78.233f % 89f, seed * 37.719f % 83f);

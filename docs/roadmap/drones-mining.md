@@ -119,15 +119,80 @@ Three tracks. A track's steps run in order; the tracks run side by side, each in
 ### Track I: rock interiors and heat
 
 1. I1, interiors: crust, mantle, veins and pockets from the seed; what scraping and cracking yield.
+   Done: the shared query. The yield rules themselves come with R3 and R4. See "I1: rock interiors (built)".
 2. I2, heat cracking: the special laser and the heat window.
 
 ## Open
 
 - The drone bay's model (hatch, doors, lights).
-- The figures for crust, veins and pockets. I1 starts with first guesses in content; the player tunes them from captures.
+- The figures for crust, veins and pockets. First guesses are in `content/galaxy/interiors.json`; tune from
+  `--open rock-interior` captures.
 - The heat game's figures: heat rate, cooling, the window, what overheating does.
 - The Ore Cargo window's layout.
 - Automated mining by NPCs and captains: out of scope now; only the order model above is designed for it.
+
+## I1: rock interiors (built)
+
+### What it is
+
+- `RockInterior` in `Prospect.Game/World`: a query-only description of every rock's inside.
+- From the seed, the sector and the rock's index. The same on every machine, for every player.
+- Its own streams (`rock-interior` key, then vein, pocket and unstable draws). No existing stream is touched.
+- No rock, list or composition changed. No `GenerationVersion` or protocol bump.
+
+### How it is laid out
+
+- Normalised space: a point's distance from the centre divided by the surface's distance that way.
+  The rock is a unit ball there; the crust follows the surface.
+- The surface comes from `RockInteriorSurface`: a 32-cell cube map per shape, built with `DetMath`.
+  It follows `AsteroidShape` within about a percent of the radius.
+- Order of a point: crust, then pockets, then veins, else mantle. Outside the rock reads as crust.
+- Core pocket: the rarer mix-in (`Mix2`, else `Mix1`). Only rocks with a mix-in have one.
+- Unstable pockets: ice or volatile gas, no ore. Flagged (`RockSample.Unstable`) for cracking later.
+- Ice shards (`AsteroidShape.Icicle`) have an ice body.
+
+### How ore adds up
+
+- The core pocket takes `pocket.holds` of its mix-in, at most `maxLocalOre` per point.
+- The rest is spread over crust, mantle and veins by their factors (`crust.ore`, `veins.ore`).
+- Layer volumes are worked out, not counted. Crust is exact for the table; veins and pockets are close.
+- A rich rock is evened out until no point holds more than `maxLocalOre`.
+- Measured: over 93 sample rocks the integrated shares are within 3.4 % of the published ones
+  (`bulkTolerance` is 10 %).
+
+### The API
+
+- `RockInterior.Describe(galaxy, rockRef, asteroid, out interior)`: once per rock.
+- `interior.Sample(local, out sample)`: layer, material, pocket kind, depth, shares, strongest ore and grade.
+- `interior.Average(centre, radius, perAxis, out volume)`: a lattice of up to 16³ points, for a scan.
+- `RockInterior.ToLocal(asteroid, offset)`: world offset into the rock's own frame.
+- No memory taken. Debug build: about 0.7 µs a sample, 19 µs a describe.
+
+### First-guess figures (`content/galaxy/interiors.json`)
+
+| Figure | Value |
+| --- | --- |
+| Crust depth | 0.14 of the surface distance, at most 60 m, wobble ±35 % |
+| Crust ore | 0.45 × mantle |
+| Veins | 3 to 7, radius 0.04–0.09, taper ±40 %, 14 segments of 0.08–0.13, twist 0.55 |
+| Vein ore | 3 × mantle |
+| Core pocket | 45 % of rocks with a mix-in, radius 0.12–0.24, within 0.35 of the centre, holds half the mix-in |
+| Unstable pockets | two tries at 25 %, radius 0.06–0.12, ice or gas equally |
+| Most ore at a point | 92 % |
+
+### Check it
+
+- `make run ARGS="--start local --open rock-interior --rock-interior-size small|medium|giant --rock-interior-resource iron --capture f.png --capture-after 4"`.
+- Captures only. A real rock near home, cut through its centre; a legend lists its layers.
+- Colours: crust light brown, mantle tinted by its ore, veins and core pocket in their ore's colour, ice pale blue,
+  gas orange.
+- Captures from the first build: `artifacts/captures/rock-interior/` (not committed).
+
+### Limits
+
+- Veins are polylines of capsules: they bend at their points.
+- Crack pieces (R2) take indices past the generated list; they will need their parent's interior, not their own.
+- The crust wobble pattern is per shape, not per rock (rocks are turned, so it does not repeat visibly).
 
 ## Spike results: how a rock holds edits
 

@@ -137,7 +137,7 @@ public sealed class ContentIdentityTests
             return;
 
         using var copy = new ContentCopy();
-        string[] shared = ["blocks/cargo.json", "blocks/blocks.json", "rules/settings.json", "rules/exploration.json", "ships/fleet.json", "ships/command_pod.json", "ships/drone.json", "galaxy/galaxy.json", "net/blocks.json"];
+        string[] shared = ["blocks/cargo.json", "blocks/blocks.json", "rules/settings.json", "rules/exploration.json", "ships/fleet.json", "ships/command_pod.json", "ships/drone.json", "galaxy/galaxy.json", "galaxy/interiors.json", "net/blocks.json"];
         var writers = new List<Task>();
         foreach (var file in shared)
         {
@@ -199,6 +199,8 @@ public sealed class ContentIdentityTests
     [InlineData("rules/settings.json", "\"name\": \"Weak\",\n          \"value\": 4", "\"name\": \"Weak\",\n          \"value\": 5")]
     // The galaxy rules.
     [InlineData("galaxy/galaxy.json", "\"winding\": 4.5", "\"winding\": 4.6")]
+    // What is inside every asteroid.
+    [InlineData("galaxy/interiors.json", "\"ore\": 3.0", "\"ore\": 3.1")]
     public void AnyChangeToWhatBothSidesSimulateGivesAnotherIdentity(string file, string old, string replacement)
     {
         using var copy = new ContentCopy();

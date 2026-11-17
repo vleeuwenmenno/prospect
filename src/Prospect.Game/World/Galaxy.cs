@@ -374,6 +374,20 @@ public sealed class Galaxy
     /// <summary>The asteroid count at which a sector shows at full strength on the map.</summary>
     public float MapFullSignalAsteroids { get; private set; }
 
+    /// <summary>
+    /// What is inside every asteroid (<see cref="RockInterior"/>), from <c>content/galaxy/interiors.json</c>; null for
+    /// a galaxy loaded without it, such as a test's frozen rules.
+    /// </summary>
+    public RockInteriorRules? Interiors { get; private set; }
+
+    /// <summary>The same galaxy with these interior rules.</summary>
+    public Galaxy WithInteriors(RockInteriorRules interiors)
+    {
+        var copy = (Galaxy)MemberwiseClone();
+        copy.Interiors = interiors;
+        return copy;
+    }
+
     /// <summary>The same galaxy rules under a different seed.</summary>
     public Galaxy WithSeed(ulong seed)
     {

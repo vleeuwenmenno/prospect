@@ -1,0 +1,8 @@
+{
+  "crust": { "depth": 0.14, "maxMetres": 60, "wobble": 0.35, "ore": 0.45 },
+  "veins": { "count": [3, 7], "radius": [0.04, 0.09], "taper": 0.4, "segments": 14, "step": [0.08, 0.13], "twist": 0.55, "ore": 3.0 },
+  "pocket": { "chance": 0.45, "radius": [0.12, 0.24], "offset": 0.35, "holds": 0.5 },
+  "unstable": { "chance": 0.25, "max": 2, "radius": [0.06, 0.12], "iceWeight": 1, "volatileWeight": 1 },
+  "maxLocalOre": 0.92,
+  "bulkTolerance": 0.1
+}

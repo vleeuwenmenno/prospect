@@ -178,6 +178,12 @@ internal sealed class AppOptions
     public float? ThrustUntil { get; set; }
     public string ExhaustKind { get; set; } = "engine";
 
+    /// <summary>Scripted captures only (<c>--open rock-interior</c>): which size of rock to cut open.</summary>
+    public string RockInteriorSize { get; set; } = "medium";
+
+    /// <summary>Scripted captures only: the resource id the cut rock's main ore must be, or null for any.</summary>
+    public string? RockInteriorResource { get; set; }
+
     /// <summary>Scripted runs only (<c>--align-at</c>): seconds after the splash at which the align button is clicked for a moment.</summary>
     public float? AlignAt { get; set; }
 
@@ -1213,6 +1219,22 @@ internal sealed class App : IDisposable
             {
                 ScriptedThrust.TryParse(view == "exhaust-shield-cold" ? "right" : "forward", out var exhaustThrust);
                 _options.Thrust = exhaustThrust;
+            }
+            else if (view == "rock-interior" && Devices.Muted && World.Galaxy is { } interiorGalaxy)
+            {
+                // Render-only: a real rock of this world, cut open in front of the command camera.
+                var cut = RockInteriorCapture.Find(interiorGalaxy, _options.RockInteriorSize, _options.RockInteriorResource);
+                if (cut is null)
+                    Console.WriteLine($"rock-interior: no {_options.RockInteriorSize} rock of {_options.RockInteriorResource ?? "any ore"} near home");
+                else
+                {
+                    cut.Anchor = World.OwnPosition;
+                    World.RockInterior = cut;
+                    World.SetCommandCapturePose(cut.Anchor, cut.Radius * 2.9f, 0.4f, -0.3f);
+                    Console.WriteLine($"rock-interior: rock {cut.Rock.Index} of sector {cut.Rock.Sector}");
+                    foreach (var line in cut.Lines)
+                        Console.WriteLine("rock-interior: " + System.Text.Encoding.UTF8.GetString(line));
+                }
             }
             else if (view == "exhaust-rock" && World.ExhaustRock is { } exhaustRock)
             {

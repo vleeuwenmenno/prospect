@@ -505,7 +505,7 @@ Not there yet: NAT traversal or automatic port forwarding (a host needs a UDP po
 saving hosted games (an unlisted or public game is not saved: a saved world cannot yet tell who a returning player
 is), playable saved multiplayer, deleting or renaming a world from the game, restoring a recovery copy
 from the game. Stations are not generated yet; gas reduces passive sensor reach; asteroids do not crack into pieces, and ore shows only as
-a tint. Asteroids come in a shared set of shapes until mining gives each one its own body. Mixed-size designs of hundreds of blocks now load, transfer, fly and take replicated damage.
+a tint. Asteroids come in a shared set of shapes until mining gives each one its own body. Every asteroid has a fixed interior from the seed (crust, mantle, veins of high-grade ore, sometimes a core pocket of its rarer mix-in, and unstable ice or gas pockets), but only as shared data: no scan, drill or crack reads it yet, and only `--open rock-interior` captures show it. Mixed-size designs of hundreds of blocks now load, transfer, fly and take replicated damage.
 Shared admission bounds geometry work, the intact shield shell and total catalogue resources before play.
 The default shell budget is 32,768 vertices and 196,608 indices per hull, and at most 910 blocks. A separate
 box-shaped part uses a triangulated rounded box of 80 surface vertices, so about four hundred separate boxes fit; separate

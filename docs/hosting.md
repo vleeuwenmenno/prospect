@@ -119,6 +119,7 @@ The identity covers:
 - `content/blocks/blocks.json`: block types, flight rules, size rules, design limits and fixed collision budgets.
 - `content/rules/settings.json`: which world settings exist, their ranges and defaults.
 - `content/galaxy/galaxy.json`: the galaxy rules and sector modules.
+- `content/galaxy/interiors.json`: what is inside every asteroid (crust, veins, pockets).
 - `content/net/blocks.json`: block recovery and bulk transfer bounds.
 
 It also includes the evaluator version, `ContentIdentity.EvaluatorVersion`, a number in code.

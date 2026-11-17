@@ -156,6 +156,7 @@ public sealed class GameContent
     public static GameContent Load(string directory)
     {
         AsteroidShape.Prepare();
+        RockInteriorSurface.Prepare();
         // Every file the server and the client must agree on is loaded through this, which is what puts it in
         // the identity: a file the shared simulation reads cannot be added here and left out there. The order
         // of the calls is the order the files are hashed in.
@@ -215,6 +216,7 @@ public sealed class GameContent
             throw new InvalidDataException("fleet.json: needs between 1 and 255 designs");
 
         var galaxy = Galaxy.Parse(Shared("galaxy", "galaxy.json"), At("galaxy", "galaxy.json")).Under(settingCatalog, settings);
+        galaxy = galaxy.WithInteriors(RockInteriorRules.Parse(Shared("galaxy", "interiors.json"), At("galaxy", "interiors.json")));
         foreach (var resource in galaxy.Resources)
             if (cargo.Density(resource.Id) <= 0)
                 throw new InvalidDataException("Every galaxy resource needs a cargo density.");

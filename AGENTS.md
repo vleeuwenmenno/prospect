@@ -590,6 +590,17 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `content/visuals/modules.json` (`rockColor`, `traceMarkPixels`, `composition*`). `RockCompositionTests` holds it.
   `ModuleObservationRules.Valid` holds the shape for the wire and the save. Rules in `docs/roadmap/modules.md`;
   `AsteroidCompositionTests` holds them.
+- **Rock interiors:** `RockInterior` (shared, query-only) describes crust, mantle, veins and pockets of a rock from
+  the seed, sector and rock index, on its own streams: never draw from the generation streams, and nothing here may
+  change a rock. Figures are `content/galaxy/interiors.json` (`RockInteriorRules`, shared, in the identity); the
+  surface it measures depth from is `RockInteriorSurface` (cube map per shape, `DetMath`), never `AsteroidShape`'s
+  `MathF` surface, because the layer of a point is a discrete choice. `Describe` once per rock, then `Sample` or
+  `Average`; neither takes memory. Shares must integrate to the rock's published composition within
+  `bulkTolerance`. `RockInteriorTests` holds it, with a recorded hash on frozen fixtures
+  (`tests/Prospect.Tests/fixtures/interiors.json`): change the interior on purpose, record the new hash. Check with
+  `--open rock-interior --rock-interior-size small|medium|giant [--rock-interior-resource <id>]`, captures only
+  (render-only fixture `RockInteriorCapture`). Rules in `docs/roadmap/drones-mining.md`, "I1".
+
 - **A new hull design:** add it to `content/ships/fleet.json`. Stats are derived from blocks; do not add stat
   fields to the design file.
 - **A new world setting:** one entry in `content/rules/settings.json`, its number applied in `FlightRules.Under` (flight) or `Galaxy.Under` / `AsteroidFieldsModule.Under` (generation),
