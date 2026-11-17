@@ -55,7 +55,8 @@ public sealed class BlockType
 
     /// <summary>
     /// Set for a part that sits on the face of a block and fills no grid cell (<see cref="DesignMount"/>); null for
-    /// a block. Its figures are those of one part: nothing scales them.
+    /// a block. Its figures are those of one unit of the part: a part placed larger (<see cref="MountSpec.Sizes"/>,
+    /// <see cref="DesignMount.Size"/>) counts them once for each unit, and nothing else scales them.
     /// </summary>
     public MountSpec? Mount { get; init; }
 
@@ -297,6 +298,20 @@ public sealed class BlockCatalog
     /// <summary>Every block type, in the order the file lists them: what a parts palette offers.</summary>
     public IReadOnlyList<BlockType> Types { get; private init; } = [];
 
+    // A mount's entry: its unit square and depth in tenths of a cell, the block an old file's part becomes, and, for a
+    // part placed in several sizes, the sizes and the one a file that names none means.
+    private static MountSpec ReadMount(JsonElement mount)
+    {
+        var spec = new MountSpec(mount.GetProperty("side"u8).GetInt32(), mount.GetProperty("depth"u8).GetInt32(), mount.GetProperty("legacyBlock"u8).GetString()!,
+            mount.TryGetProperty("blockThrough"u8, out var through) ? through.GetInt32() : 4);
+        if (!mount.TryGetProperty("sizes"u8, out var listed))
+            return mount.TryGetProperty("defaultSize"u8, out var lone) ? spec with { DefaultSize = lone.GetInt32() } : spec;
+        var sizes = new int[listed.GetArrayLength()];
+        for (var i = 0; i < sizes.Length; i++)
+            sizes[i] = listed[i].GetInt32();
+        return spec with { Sizes = sizes, DefaultSize = mount.TryGetProperty("defaultSize"u8, out var chosen) ? chosen.GetInt32() : sizes.Length > 0 ? sizes[0] : 1 };
+    }
+
     public static BlockCatalog Load(string path) => Parse(File.ReadAllBytes(path), path);
 
     /// <summary>Reads the catalogue from a file's bytes. <paramref name="path"/> names where they came from in error messages.</summary>
@@ -402,10 +417,7 @@ public sealed class BlockCatalog
                 Tank = block.TryGetProperty("tank"u8, out var tank) ? Fuels.Parse(tank.GetString(), path + ": " + entry.Name) : FuelKind.None,
                 FuelCapacity = Number(block, "fuelCapacity"u8),
                 MaxSide = block.TryGetProperty("maxSide"u8, out var maxSide) ? maxSide.GetInt32() : 0,
-                Mount = block.TryGetProperty("mount"u8, out var mount)
-                    ? new MountSpec(mount.GetProperty("side"u8).GetInt32(), mount.GetProperty("depth"u8).GetInt32(), mount.GetProperty("legacyBlock"u8).GetString()!,
-                        mount.TryGetProperty("blockThrough"u8, out var through) ? through.GetInt32() : 4)
-                    : null,
+                Mount = block.TryGetProperty("mount"u8, out var mount) ? ReadMount(mount) : null,
                 BoxOnly = block.TryGetProperty("boxOnly"u8, out var boxOnly) && boxOnly.GetBoolean(),
                 Drone = block.TryGetProperty("drone"u8, out var drone) && drone.GetBoolean(),
                 Sensor = block.TryGetProperty("sensor"u8, out var sensor) && sensor.GetBoolean(),
@@ -475,6 +487,16 @@ public sealed class BlockCatalog
                 continue;
             if (spec.Side is < 1 or > FaceMounts.MaxSide || spec.Depth is < 1 or > FaceMounts.MaxDepth)
                 throw new InvalidDataException($"{path}: {type.Id}: a mount's side is 1 to {FaceMounts.MaxSide} tenths of a cell and its depth 1 to {FaceMounts.MaxDepth}");
+
+            // Sizes: whole units a side, rising, the largest still within a cell; the default is one of them. Only a
+            // thrust part is sized: its figures are per unit, and a tractor, a laser or a scanner is one device.
+            var sizesValid = spec.Sizes.Count is >= 1 and <= MountSpec.MaxSize && spec.Allows(spec.DefaultSize);
+            for (var i = 0; sizesValid && i < spec.Sizes.Count; i++)
+                sizesValid = spec.Sizes[i] is >= 1 and <= MountSpec.MaxSize && (i == 0 || spec.Sizes[i] > spec.Sizes[i - 1]);
+            if (!sizesValid || spec.LargestSide > FaceMounts.MaxSide)
+                throw new InvalidDataException($"{path}: {type.Id}: a mount's sizes are rising whole numbers from 1 to {MountSpec.MaxSize}, the largest no wider than a cell ({FaceMounts.MaxSide} tenths), and defaultSize is one of them");
+            if (spec.Sizable && !(type.Thrust > 0))
+                throw new InvalidDataException($"{path}: {type.Id}: only a thrust part is placed in more than one size");
             if (!(type.Thrust > 0 || type.Tractor is not null || type.Laser is not null || type.Module.Family != ModuleFamily.None) || type.Core || type.Sensor || type.Charting || type.Ftl != FtlKind.None || type.Tank != FuelKind.None
                 || (type.Module.Family != ModuleFamily.None && (type.Thrust != 0 || type.Tractor is not null)) || type.Crew != 0 || type.MaxSide != 0 || type.SizeRules.Count != 0 || type.BoxOnly)
                 throw new InvalidDataException($"{path}: {type.Id}: only a thrust part, tractor, mining laser or module scanner mounts on a face, and it has no size rules, maxSide or boxOnly");

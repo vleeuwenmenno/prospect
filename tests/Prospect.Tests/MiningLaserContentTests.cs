@@ -204,7 +204,7 @@ public sealed class MiningLaserContentTests
         using var stream = new MemoryStream();
         design.Write(stream);
         var text = Encoding.UTF8.GetString(stream.ToArray());
-        Assert.Contains("\"version\":7", text);
+        Assert.Contains($"\"version\":{BoxDesign.FormatVersion}", text);
         Assert.Equal(2, text.Split("\"group\":").Length - 1);
         Assert.DoesNotContain("\"group\":0", text);
 
@@ -276,7 +276,7 @@ public sealed class MiningLaserContentTests
         var content = MiningFixtures.Content;
         var design = content.Pod;
         Assert.Equal(3, design.Lasers.Length);
-        Assert.Equal(5, DesignBytes.Version);
+        Assert.Equal(6, DesignBytes.Version);
         var bytes = DesignBytes.Encode(design);
         var decoded = DesignBytes.Decode(bytes, SHA256.HashData(bytes), content);
         Assert.Equal(design.Mounts.ToArray(), decoded.Mounts.ToArray());
@@ -285,28 +285,28 @@ public sealed class MiningLaserContentTests
         Assert.Equal(new[] { 0, 1, 2 }, design.Lasers.Select(i => (int)mounts[i].Group).OrderBy(g => g));
         Assert.Equal(bytes, DesignBytes.Encode(decoded));
 
-        // The group is the last byte of the last mount's record. Eleven and 255 are no groups.
+        // The group is the byte before the last of the last mount's record (its size is the last). Eleven and 255 are no groups.
         foreach (var bad in new byte[] { 11, 255 })
         {
             var changed = (byte[])bytes.Clone();
-            changed[^1] = bad;
+            changed[^2] = bad;
             Assert.Throws<InvalidDataException>(() => DesignBytes.Decode(changed, SHA256.HashData(changed), content));
         }
 
         // A group on a thruster, which only a laser may have.
         var plain = DesignBytes.Encode(Shipped.Pod);
-        Assert.Equal(0, plain[^1]);
+        Assert.Equal(0, plain[^2]);
         var onThruster = (byte[])plain.Clone();
-        onThruster[^1] = 3;
+        onThruster[^2] = 3;
         Assert.Contains("action group", Assert.Throws<InvalidDataException>(() => DesignBytes.Decode(onThruster, SHA256.HashData(onThruster), Shipped)).Message);
 
         // A change of a laser's group changes the bytes of the design and so its hash: two groupings are two designs.
         var other = (byte[])bytes.Clone();
         var last = mounts[^1];
-        other[^1] = (byte)(last.Group == 4 ? 5 : 4);
+        other[^2] = (byte)(last.Group == 4 ? 5 : 4);
         Assert.NotEqual(SHA256.HashData(bytes), SHA256.HashData(other));
         if (last.Type.Laser is not null)
-            Assert.Equal(other[^1], DesignBytes.Decode(other, SHA256.HashData(other), content).Mounts.ToArray()[^1].Group);
+            Assert.Equal(other[^2], DesignBytes.Decode(other, SHA256.HashData(other), content).Mounts.ToArray()[^1].Group);
     }
 
     [Fact]

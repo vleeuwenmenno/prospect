@@ -16,6 +16,9 @@ internal enum EditorMenuSub : byte
 
     /// <summary>The action groups a selected mounted part (a mining laser) can be put in.</summary>
     Group,
+
+    /// <summary>The sizes a selected mounted part (a cold gas array) is made in.</summary>
+    Size,
 }
 
 /// <summary>

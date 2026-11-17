@@ -228,8 +228,9 @@ public sealed class HullDesignTests
         }
 
         // A mounted thruster weighs something and has no hit points of its own.
+        // One placed larger weighs its type's mass once for each unit.
         foreach (var mount in pod.Mounts)
-            mass += mount.Type.Mass;
+            mass += mount.Type.Mass * FaceMounts.Units(mount);
 
         Assert.Equal(pod.Cells.Length, stats.Blocks);
         Assert.Equal(mass, stats.Mass, 3);
@@ -243,7 +244,7 @@ public sealed class HullDesignTests
         {
             var sum = 0f;
             foreach (var mount in pod.Mounts)
-                if (mount.Face == face && kind(mount.Type)) sum += mount.Type.Thrust;
+                if (mount.Face == face && kind(mount.Type)) sum += mount.Type.Thrust * FaceMounts.Units(mount);
             foreach (var box in pod.Boxes)
                 if (box.Type.Thrust > 0 && box.Type.Mount is null && box.Facing == face && kind(box.Type)) sum += box.Type.Thrust;
             return sum;
@@ -253,8 +254,9 @@ public sealed class HullDesignTests
         var braking = Pushing(BlockFacing.Front, _ => true);
         var lateral = Pushing(BlockFacing.Left, _ => true);
         Assert.Equal(2 * Content.Blocks.Get("engine").Thrust + 4 * Content.Blocks.Get("hotThruster").Thrust, forward);
-        Assert.Equal(16 * Content.Blocks.Get("coldGasThruster").Thrust + Content.Blocks.Get("ionDrive").Thrust + 2 * Content.Blocks.Get("ionThruster").Thrust, braking);
-        Assert.Equal(12 * Content.Blocks.Get("coldGasThruster").Thrust, lateral);
+        // Every cold gas array on it is two by two: four nozzles' thrust each.
+        Assert.Equal(16 * 4 * Content.Blocks.Get("coldGasThruster").Thrust + Content.Blocks.Get("ionDrive").Thrust + 2 * Content.Blocks.Get("ionThruster").Thrust, braking);
+        Assert.Equal(12 * 4 * Content.Blocks.Get("coldGasThruster").Thrust, lateral);
         Assert.Equal(braking / mass, stats.Deceleration, 3);
         Assert.Equal(lateral / mass, stats.LateralAcceleration, 3);
         Assert.Equal(forward / mass, stats.Acceleration, 3);

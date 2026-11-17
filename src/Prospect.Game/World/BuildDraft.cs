@@ -45,6 +45,8 @@ public enum DraftEdit : byte
     NotATank,
     /// <summary>The mounted part has no action group to choose: only a groupable part (<see cref="ActionGroups.Groupable"/>) has one, and a group is 1 to 10 or none.</summary>
     NoGroup,
+    /// <summary>The mounted part is not made in that size: only a part with sizes (<see cref="MountSpec.Sizes"/>) has more than one.</summary>
+    NoSize,
 }
 
 /// <summary>
@@ -221,16 +223,90 @@ public sealed class BuildDraft
     /// Mounts a part on side <paramref name="face"/> of block <paramref name="parent"/>, its square's low corner
     /// <paramref name="u"/> and <paramref name="v"/> tenths of a cell from the face's (<see cref="DesignMount"/>).
     /// It points out of the face. The new mount is the last of <see cref="Mounts"/>. A groupable part (a mining
-    /// laser) starts in <see cref="ActionGroups.Default"/>, so it fires with no further step.
+    /// laser) starts in <see cref="ActionGroups.Default"/>, so it fires with no further step. <paramref name="size"/>
+    /// is the part's size (<see cref="DesignMount.Size"/>); 0 asks for the type's default.
     /// </summary>
-    public DraftEdit AddMount(int parent, BlockFacing face, int u, int v, BlockType type)
+    public DraftEdit AddMount(int parent, BlockFacing face, int u, int v, BlockType type, int size = 0)
     {
         ArgumentNullException.ThrowIfNull(type);
-        var check = CanAddMount(parent, face, u, v, type);
+        var check = CanAddMount(parent, face, u, v, type, size);
         if (check != DraftEdit.Done) return check;
-        Do(Step.Part(_mounts.Count, default, new DesignMount(parent, face, u, v, type, ActionGroups.Default(type))));
+        Do(Step.Part(_mounts.Count, default, new DesignMount(parent, face, u, v, type, ActionGroups.Default(type), SizeOr(type, size))));
         Finish(settle: false);
         return DraftEdit.Done;
+    }
+
+    // The size a new mount gets: the one asked for, or the type's default for 0. One byte; anything else is no size
+    // any type has, which the check then refuses.
+    private static byte SizeOr(BlockType type, int size) => size == 0 ? FaceMounts.DefaultSize(type) : (uint)size <= MountSpec.MaxSize ? (byte)size : byte.MaxValue;
+
+    /// <summary>
+    /// Makes the mounted part <paramref name="mount"/> the size <paramref name="size"/> (<see cref="MountSpec.Sizes"/>)
+    /// as one step to undo. See <see cref="SetMountSizes"/>.
+    /// </summary>
+    public DraftEdit SetMountSize(int mount, int size) => SetMountSizes(new ReadOnlySpan<int>(in mount), size);
+
+    /// <summary>
+    /// Makes several mounted parts the size <paramref name="size"/> at once, one step to undo: all of them or none.
+    /// Each keeps its middle where it is as far as its face allows, and is moved in from an edge it would hang over.
+    /// Refused as <see cref="DraftEdit.NoSize"/> when a part is not made in that size, as
+    /// <see cref="DraftEdit.OffFace"/> or <see cref="DraftEdit.Overlaps"/> when one has no room at that size (the
+    /// others resized with it counted as they would be), and as <see cref="DraftEdit.Unchanged"/> when every one
+    /// already has it. Not mirrored, as a group change is not; no index moves.
+    /// </summary>
+    public DraftEdit SetMountSizes(ReadOnlySpan<int> mounts, int size) => ResizeMounts(mounts, size, keep: true);
+
+    /// <summary>What <see cref="SetMountSizes"/> would answer, without changing the draft, its version or its history.</summary>
+    public DraftEdit CanSetMountSizes(ReadOnlySpan<int> mounts, int size) => ResizeMounts(mounts, size, keep: false);
+
+    // Resizes the parts one after the other, each checked against the draft as it then stands, so two parts that
+    // grow into each other are refused. What was done is taken back when one has no room or when only asked.
+    private DraftEdit ResizeMounts(ReadOnlySpan<int> mounts, int size, bool keep)
+    {
+        if (mounts.IsEmpty) return DraftEdit.Unchanged;
+        var changes = 0;
+        for (var i = 0; i < mounts.Length; i++)
+        {
+            if ((uint)mounts[i] >= (uint)_mounts.Count) return DraftEdit.NoSuchBlock;
+            var part = _mounts[mounts[i]];
+            if (!FaceMounts.SizeAllowed(part.Type, size)) return DraftEdit.NoSize;
+            if (part.Size != size) changes++;
+        }
+
+        if (changes == 0) return DraftEdit.Unchanged;
+        var version = Version;
+        var result = DraftEdit.Done;
+        foreach (var index in mounts)
+        {
+            var part = _mounts[index];
+            if (part.Size == size) continue;
+            var spec = part.Type.Mount!;
+            var box = _boxes[part.Parent];
+            var n = Facings.Axis(part.Face);
+            var grown = spec.SideOf(size);
+            var shift = (spec.SideOf(part.Size) - grown) / 2;
+            var changed = part with
+            {
+                Size = (byte)size,
+                U = Math.Clamp(part.U + shift, 0, Math.Max(Of(box.Size, (n + 1) % 3) * FaceMounts.PerCell - grown, 0)),
+                V = Math.Clamp(part.V + shift, 0, Math.Max(Of(box.Size, (n + 2) % 3) * FaceMounts.PerCell - grown, 0)),
+            };
+            result = FaceMounts.Check(Boxes, Mounts, changed, index);
+            if (result != DraftEdit.Done) break;
+            Do(Step.Part(index, part, changed));
+        }
+
+        if (keep && result == DraftEdit.Done)
+        {
+            Finish(settle: false);
+            return DraftEdit.Done;
+        }
+
+        for (var i = _pending.Count - 1; i >= 0; i--)
+            Apply(_pending[i], false);
+        _pending.Clear();
+        Version = version;
+        return result;
     }
 
     /// <summary>
@@ -272,23 +348,25 @@ public sealed class BuildDraft
     /// What <see cref="AddMount"/> would answer, without changing the draft, its version or its history: whether
     /// the part has room there. One pass over the boxes and the mounts; allocates nothing.
     /// </summary>
-    public DraftEdit CanAddMount(int parent, BlockFacing face, int u, int v, BlockType type)
+    public DraftEdit CanAddMount(int parent, BlockFacing face, int u, int v, BlockType type, int size = 0)
     {
         if (type?.Mount is null) return DraftEdit.WrongKind;
         if (!type.FitsClass(Class)) return DraftEdit.WrongCraft;
         if (_mounts.Count >= _content.Blocks.Limits.MaxMounts) return DraftEdit.TooManyMounts;
-        return FaceMounts.Check(Boxes, Mounts, new DesignMount(parent, face, u, v, type));
+        return FaceMounts.Check(Boxes, Mounts, new DesignMount(parent, face, u, v, type, Size: SizeOr(type, size)));
     }
 
     /// <summary>
     /// Where a part's square goes on side <paramref name="face"/> of block <paramref name="parent"/> so that its
     /// middle is as near as it can be to <paramref name="point"/> (grid space, as the editor's rays are): on the
     /// face's grid of tenths, and kept on the face. Only a position: <see cref="AddMount"/> still checks it.
+    /// <paramref name="size"/> is the part's size; 0 asks for the type's default.
     /// </summary>
-    public void SnapMount(int parent, BlockFacing face, BlockType type, Vector3 point, out int u, out int v)
+    public void SnapMount(int parent, BlockFacing face, BlockType type, Vector3 point, out int u, out int v, int size = 0)
     {
         ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)parent, (uint)_boxes.Count, nameof(parent));
         var spec = type.Mount ?? throw new ArgumentException("The part is no mount.", nameof(type));
+        var side = spec.SideOf(SizeOr(type, size));
         var box = _boxes[parent];
         var n = Facings.Axis(face);
         var a = (n + 1) % 3;
@@ -300,8 +378,8 @@ public sealed class BuildDraft
         {
             // The face's low edge is half a cell below its first cell's centre; the square's low corner then sits
             // half its side below the point.
-            var from = (point[axis] + 0.5f - Of(box.At, axis)) * FaceMounts.PerCell - spec.Side * 0.5f;
-            return Math.Clamp((int)MathF.Floor(from + 0.5f), 0, Math.Max(Of(box.Size, axis) * FaceMounts.PerCell - spec.Side, 0));
+            var from = (point[axis] + 0.5f - Of(box.At, axis)) * FaceMounts.PerCell - side * 0.5f;
+            return Math.Clamp((int)MathF.Floor(from + 0.5f), 0, Math.Max(Of(box.Size, axis) * FaceMounts.PerCell - side, 0));
         }
     }
 
@@ -729,7 +807,7 @@ public sealed class BuildDraft
 
                 var along = (n + 1) % 3 == axis ? mount.U : mount.V;
                 var piece = along / FaceMounts.PerCell;
-                if (along < 0 || piece >= length || along + mount.Type.Mount!.Side > (piece + 1) * FaceMounts.PerCell)
+                if (along < 0 || piece >= length || along + FaceMounts.Side(mount) > (piece + 1) * FaceMounts.PerCell)
                 {
                     Do(Step.Part(i, mount, default));
                     continue;
@@ -984,7 +1062,7 @@ public sealed class BuildDraft
         {
             for (var i = 0; i < mounts.Length; i++)
             {
-                results[i] = mounts[i].Parent < 0 ? DraftEdit.NoSuchBlock : CanAddMount(mounts[i].Parent, mounts[i].Face, mounts[i].U, mounts[i].V, mounts[i].Type);
+                results[i] = mounts[i].Parent < 0 ? DraftEdit.NoSuchBlock : CanAddMount(mounts[i].Parent, mounts[i].Face, mounts[i].U, mounts[i].V, mounts[i].Type, mounts[i].Size);
                 if (results[i] != DraftEdit.Done)
                     continue;
                 _mounts.Add(mounts[i]);
@@ -1001,14 +1079,15 @@ public sealed class BuildDraft
     /// As <see cref="AddMount"/>, with the mirrored copies across <paramref name="axes"/> as one step to undo: each
     /// goes on the mirrored block, on the mirrored face, at the mirrored place on it. A copy with no block to go on
     /// or no room is left out and counted in <paramref name="skipped"/>; a copy that is the mount itself is not.
+    /// Every copy has the size of the first (<paramref name="size"/>; 0 asks for the type's default).
     /// </summary>
-    public DraftEdit AddMountMirrored(int parent, BlockFacing face, int u, int v, BlockType type, MirrorAxes axes, out int skipped)
+    public DraftEdit AddMountMirrored(int parent, BlockFacing face, int u, int v, BlockType type, MirrorAxes axes, out int skipped, int size = 0)
     {
         skipped = 0;
         ArgumentNullException.ThrowIfNull(type);
         Span<DesignMount> copies = _copyMounts;
         Span<DraftEdit> checks = stackalloc DraftEdit[Mirroring.MaxCopies];
-        var count = MirrorMounts(new DesignMount(parent, face, u, v, type, ActionGroups.Default(type)), axes, copies);
+        var count = MirrorMounts(new DesignMount(parent, face, u, v, type, ActionGroups.Default(type), SizeOr(type, size)), axes, copies);
         CheckMounts(copies[..count], checks);
         if (checks[0] != DraftEdit.Done)
             return checks[0];

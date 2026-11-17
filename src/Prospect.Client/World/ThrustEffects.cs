@@ -48,6 +48,45 @@ internal sealed class ThrustEffects
     /// <summary>Plumes written this frame.</summary>
     public int Count => _count;
 
+    // The parts whose lights brighten with thrust (a cold gas array's bands): what they burn and how much of their
+    // colour they gain at full thrust, found once for a session's content. Zero gain: no such part, nothing is lit.
+    private GameContent? _glowContent;
+    private FuelKind _glowFuel;
+    private float _glowGain;
+
+    /// <summary>
+    /// What a hull's mesh instance is told so that the lights of its firing nozzles brighten
+    /// (<see cref="MeshInstance.RockMarks"/>, read by <c>mesh.vert</c> for hulls): the way its array parts fire, in
+    /// the hull's frame, each axis weighted by its throttle, and the gain at full thrust. It reads only
+    /// <see cref="HullView.Thrust"/>, as the plumes do, so a light is lit exactly while its plume shows.
+    /// The first type in <paramref name="content"/> whose model is an array names the fuel and the gain. Allocates nothing.
+    /// </summary>
+    public float4 Glow(GameContent content, in ThrustState thrust)
+    {
+        if (!ReferenceEquals(content, _glowContent))
+        {
+            _glowContent = content;
+            _glowFuel = FuelKind.None;
+            _glowGain = 0f;
+            var types = content.Blocks.Types;
+            for (var i = 0; i < types.Count; i++)
+            {
+                if (!(types[i].Thrust > 0) || !_look.Models.TryGetValue(types[i].Id, out var model) || model.Array is not { } array)
+                    continue;
+                _glowFuel = types[i].Fuel;
+                _glowGain = array.GlowFiring;
+                break;
+            }
+        }
+
+        if (_glowGain <= 0f)
+            return default;
+        var fire = Vector3.Zero;
+        for (var facing = 0; facing < Facings.Count; facing++)
+            fire += Facings.Vector((BlockFacing)facing) * thrust.Firing(_glowFuel, (BlockFacing)facing);
+        return new float4(fire.X, fire.Y, fire.Z, _glowGain);
+    }
+
     /// <summary>Forgets every hull, as when a session ends.</summary>
     public void Clear()
     {

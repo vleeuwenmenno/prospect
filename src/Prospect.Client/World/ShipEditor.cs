@@ -397,9 +397,73 @@ internal sealed class ShipEditor(JobSystem jobs)
 
     /// <summary>
     /// True when the part to place mounts on a face instead of filling cells (<see cref="BlockType.Mount"/>): it is
-    /// neither sized nor turned, and points out of the face it is put on.
+    /// never turned, points out of the face it is put on, and is sized only when its type is made in several sizes
+    /// (<see cref="PartSizes"/>).
     /// </summary>
     public bool PartIsMount => Content is { } content && (uint)Part < (uint)content.Blocks.Types.Count && content.Blocks.Types[Part].Mount is not null;
+
+    private static readonly int[] NoSizes = [];
+
+    /// <summary>
+    /// The sizes the part to place is made in, when it mounts and has more than one (<see cref="MountSpec.Sizes"/>: a
+    /// cold gas array of one, two by two or three by three nozzles); empty for every other part.
+    /// </summary>
+    public IReadOnlyList<int> PartSizes =>
+        Content is { } content && (uint)Part < (uint)content.Blocks.Types.Count && content.Blocks.Types[Part].Mount is { Sizable: true } spec ? spec.Sizes : NoSizes;
+
+    /// <summary>
+    /// The size the next mounted part is placed in: the one chosen for the part's type (<see cref="SetMountSize"/>,
+    /// <see cref="CycleMountSize"/>, or copied from a placed one), else the type's default. 1 for a part with one size.
+    /// </summary>
+    public int MountSize
+    {
+        get
+        {
+            if (Content is not { } content || (uint)Part >= (uint)content.Blocks.Types.Count)
+                return 1;
+            return MountSizeOf(content.Blocks.Types[Part]);
+        }
+    }
+
+    /// <summary>
+    /// The size a part of <paramref name="type"/> would be mounted in if it were chosen now: the size last chosen for
+    /// that type, else its default; 1 for a type that is no mount. What a part card's figures are shown for.
+    /// </summary>
+    public int MountSizeOf(BlockType type) =>
+        type.Mount is not { } spec ? 1 : _mountSizeType == type && spec.Allows(_mountSize) ? _mountSize : spec.DefaultSize;
+
+    // The size last chosen, and the type it was chosen for: another type starts at its own default.
+    private int _mountSize;
+    private BlockType? _mountSizeType;
+
+    /// <summary>Chooses the size the part to place is mounted in. False when the part is not made in that size.</summary>
+    public bool SetMountSize(int size)
+    {
+        if (Content is not { } content || (uint)Part >= (uint)content.Blocks.Types.Count || content.Blocks.Types[Part].Mount is not { Sizable: true } spec || !spec.Allows(size))
+            return false;
+        _mountSize = size;
+        _mountSizeType = content.Blocks.Types[Part];
+        if (Placing)
+            UpdateGhost();
+        return true;
+    }
+
+    /// <summary>
+    /// Steps the size of the part to place to the next one its type is made in, back to the smallest after the
+    /// largest: what the sizing key does for a part that mounts. False for a part with one size.
+    /// </summary>
+    public bool CycleMountSize()
+    {
+        var sizes = PartSizes;
+        if (sizes.Count == 0 || !CanEdit || !Placing)
+            return false;
+        var now = MountSize;
+        var next = sizes[0];
+        for (var i = 0; i < sizes.Count - 1; i++)
+            if (sizes[i] == now)
+                next = sizes[i + 1];
+        return SetMountSize(next);
+    }
 
     /// <summary>
     /// While placing a part that mounts, with a face under the pointer: the mount it would make, snapped to the
@@ -1019,7 +1083,7 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// <summary>Places the ghost's mounted part and, with mirror on, its copies, as one step.</summary>
     private void PlaceMount()
     {
-        var result = Draft!.AddMountMirrored(GhostMount.Parent, GhostMount.Face, GhostMount.U, GhostMount.V, GhostMount.Type, Mirror, out var skipped);
+        var result = Draft!.AddMountMirrored(GhostMount.Parent, GhostMount.Face, GhostMount.U, GhostMount.V, GhostMount.Type, Mirror, out var skipped, GhostMount.Size);
         NoteSkipped(result, skipped);
         Record(result);
     }
@@ -1283,6 +1347,9 @@ internal sealed class ShipEditor(JobSystem jobs)
             {
                 if (types[i] != mounts[SelectedMount].Type)
                     continue;
+                // The next one is placed in the size of the one copied.
+                _mountSize = mounts[SelectedMount].Size;
+                _mountSizeType = types[i];
                 ChoosePart(i);
                 return true;
             }
@@ -1712,6 +1779,62 @@ internal sealed class ShipEditor(JobSystem jobs)
             return;
         CancelCarry();
         Record(Draft!.SetMountGroups(MountSelection, group), keepMountSelection: true);
+    }
+
+    /// <summary>
+    /// The sizes every selected mounted part is made in, when at least one is selected, all are of one type and that
+    /// type has more than one size: what the size selector and the menu's Size row are offered on. Empty otherwise.
+    /// </summary>
+    public IReadOnlyList<int> SelectionSizes
+    {
+        get
+        {
+            if (Draft is not { } draft || _mountSelectionCount == 0)
+                return NoSizes;
+            var mounts = draft.Mounts;
+            if ((uint)MountSelection[0] >= (uint)mounts.Length || mounts[MountSelection[0]].Type.Mount is not { Sizable: true } spec)
+                return NoSizes;
+            var type = mounts[MountSelection[0]].Type;
+            foreach (var mount in MountSelection)
+                if ((uint)mount >= (uint)mounts.Length || mounts[mount].Type != type)
+                    return NoSizes;
+            return spec.Sizes;
+        }
+    }
+
+    /// <summary>The size every selected mounted part has, or -1 when they differ or the selection has no sizes.</summary>
+    public int SelectionSize
+    {
+        get
+        {
+            if (SelectionSizes.Count == 0)
+                return -1;
+            var mounts = Draft!.Mounts;
+            int size = mounts[MountSelection[0]].Size;
+            foreach (var mount in MountSelection)
+                if (mounts[mount].Size != size)
+                    return -1;
+            return size;
+        }
+    }
+
+    /// <summary>
+    /// What making the selected mounted parts <paramref name="size"/> would answer, without doing it: the draft's own
+    /// check (<see cref="BuildDraft.CanSetMountSizes"/>), so a part with no room at that size is said before the click.
+    /// </summary>
+    public DraftEdit CanSetSize(int size) =>
+        !CanEdit || SelectionSizes.Count == 0 ? DraftEdit.NoSize : Draft!.CanSetMountSizes(MountSelection, size);
+
+    /// <summary>
+    /// Makes every selected mounted part <paramref name="size"/> (<see cref="BuildDraft.SetMountSizes"/>), as one step
+    /// to undo. The selection stays, since no index moves; the change is never mirrored, as a group change is not.
+    /// </summary>
+    public void SetSelectedSize(int size)
+    {
+        if (!CanEdit || SelectionSizes.Count == 0)
+            return;
+        CancelCarry();
+        Record(Draft!.SetMountSizes(MountSelection, size), keepMountSelection: true);
     }
 
     /// <summary>Selects every mounted part of the type of mounted part <paramref name="mount"/>, replacing the selection.</summary>
@@ -2156,9 +2279,10 @@ internal sealed class ShipEditor(JobSystem jobs)
             // A part that mounts goes on the face under the pointer, where the pointer is on it, and points out of it.
             var type = Content!.Blocks.Types[Part];
             var face = (BlockFacing)Hover.Side;
-            Draft.SnapMount(Hover.Block, face, type, Hover.Point, out var u, out var v);
-            GhostMount = new DesignMount(Hover.Block, face, u, v, type);
-            GhostCheck = Draft.CanAddMount(Hover.Block, face, u, v, type);
+            var size = MountSize;
+            Draft.SnapMount(Hover.Block, face, type, Hover.Point, out var u, out var v, size);
+            GhostMount = new DesignMount(Hover.Block, face, u, v, type, Size: (byte)size);
+            GhostCheck = Draft.CanAddMount(Hover.Block, face, u, v, type, size);
             HasMountGhost = true;
             if (Mirror != MirrorAxes.None)
             {

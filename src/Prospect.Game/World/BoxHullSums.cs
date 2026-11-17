@@ -157,19 +157,19 @@ public sealed class BoxHullSums
             radius = Math.Max(radius, design.Offset(box).Length() + design.BlockSize * 0.87f * corner);
         }
 
-        // A mount's figures follow from its type and the way its face points, which is the way its nozzle does.
+        // A mount's figures follow from its type, its size and the way its face points, which is the way its nozzle does.
         _mounts = design.MountArray;
         _mountStart = design.MountStart;
         _mountKindOf = new int[_mounts.Length];
-        var knownMounts = new Dictionary<(BlockType, BlockFacing), int>();
+        var knownMounts = new Dictionary<(BlockType, BlockFacing, int), int>();
         for (var i = 0; i < _mounts.Length; i++)
         {
             ref readonly var mount = ref _mounts[i];
-            if (!knownMounts.TryGetValue((mount.Type, mount.Face), out var kind))
+            if (!knownMounts.TryGetValue((mount.Type, mount.Face, mount.Size), out var kind))
             {
                 kind = kinds.Count;
-                kinds.Add(MountKind(mount.Type, mount.Face));
-                knownMounts.Add((mount.Type, mount.Face), kind);
+                kinds.Add(MountKind(mount.Type, mount.Face, mount.Size));
+                knownMounts.Add((mount.Type, mount.Face, mount.Size), kind);
             }
 
             _mountKindOf[i] = kind;
@@ -480,17 +480,26 @@ public sealed class BoxHullSums
 
     /// <summary>
     /// What one mounted part adds: its type's own figures, pushing away from the face it sits on. It fills no cell
-    /// and has no hit points of its own, so it adds neither volume nor hull points.
+    /// and has no hit points of its own, so it adds neither volume nor hull points. A part placed larger
+    /// (<see cref="DesignMount.Size"/>) adds them once for each of its units, its size squared: thrust, burn, power
+    /// and mass alike. A part of size 1 adds the type's figures untouched.
     /// </summary>
-    internal static HullSum.Numbers MountFigures(BlockType type, BlockFacing face)
+    internal static HullSum.Numbers MountFigures(BlockType type, BlockFacing face, int size = 1)
     {
         var values = ScaledFigures(type, 1, out _, false, face);
         values[Hull] = 0;
         values[Cells] = 0;
+        if (size != 1)
+        {
+            double units = size * size;
+            for (var j = 0; j < Totals; j++)
+                values[j] *= units;
+        }
+
         return values;
     }
 
-    private static Kind MountKind(BlockType type, BlockFacing face) => new() { Values = MountFigures(type, face) };
+    private static Kind MountKind(BlockType type, BlockFacing face, int size) => new() { Values = MountFigures(type, face, size) };
 
     private static Kind KindOf(BlockType type, long cells, bool half, BlockFacing facing)
     {

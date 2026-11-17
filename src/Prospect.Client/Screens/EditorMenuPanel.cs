@@ -23,6 +23,7 @@ internal sealed class EditorMenuPanel(UiContext ui)
         Fuel,
         Split,
         Group,
+        Size,
     }
 
     // Unscaled pixels.
@@ -114,8 +115,13 @@ internal sealed class EditorMenuPanel(UiContext ui)
             }
         }
 
-        else if (editor.SelectionIsGroupable)
-            _menuRows[count++] = EditorMenuRow.Group;
+        else
+        {
+            if (editor.SelectionIsGroupable)
+                _menuRows[count++] = EditorMenuRow.Group;
+            if (editor.SelectionSizes.Count > 0)
+                _menuRows[count++] = EditorMenuRow.Size;
+        }
 
         _menuRows[count++] = EditorMenuRow.SameType;
         _menuRows[count++] = EditorMenuRow.Delete;
@@ -163,7 +169,7 @@ internal sealed class EditorMenuPanel(UiContext ui)
             var rowMin = new float2(min.X + Kit.Px(6), rowTop + i * rowHeight);
             if (Inside(rowMin, inner, mouse))
                 hovered = row;
-            if (row == menu.Sub switch { EditorMenuSub.Fuel => EditorMenuRow.Fuel, EditorMenuSub.Split => EditorMenuRow.Split, EditorMenuSub.Group => EditorMenuRow.Group, _ => (EditorMenuRow)255 })
+            if (row == menu.Sub switch { EditorMenuSub.Fuel => EditorMenuRow.Fuel, EditorMenuSub.Split => EditorMenuRow.Split, EditorMenuSub.Group => EditorMenuRow.Group, EditorMenuSub.Size => EditorMenuRow.Size, _ => (EditorMenuRow)255 })
                 subTop = rowMin.Y;
             if (DrawRow(draw, editor, row, rowMin, inner))
                 chosen = row;
@@ -177,7 +183,7 @@ internal sealed class EditorMenuPanel(UiContext ui)
         // crosses the rows below Fuel on the way and must not lose the flyout to them.
         if (hovered is { } over)
         {
-            var sub = over switch { EditorMenuRow.Fuel => EditorMenuSub.Fuel, EditorMenuRow.Split => EditorMenuSub.Split, EditorMenuRow.Group => EditorMenuSub.Group, _ => EditorMenuSub.None };
+            var sub = over switch { EditorMenuRow.Fuel => EditorMenuSub.Fuel, EditorMenuRow.Split => EditorMenuSub.Split, EditorMenuRow.Group => EditorMenuSub.Group, EditorMenuRow.Size => EditorMenuSub.Size, _ => EditorMenuSub.None };
             if (sub == menu.Sub)
                 _waiting = null;
             else
@@ -235,6 +241,9 @@ internal sealed class EditorMenuPanel(UiContext ui)
                 break;
             case EditorMenuRow.Group:
                 menu.Sub = EditorMenuSub.Group;
+                break;
+            case EditorMenuRow.Size:
+                menu.Sub = EditorMenuSub.Size;
                 break;
             default:
                 menu.Sub = EditorMenuSub.Split;
@@ -313,6 +322,13 @@ internal sealed class EditorMenuPanel(UiContext ui)
                 enabled = editor.CanEdit;
                 var group = editor.SelectionGroup;
                 note = !enabled ? "REPAIR FIRST"u8 : group < 0 ? "MIXED"u8 : group == ActionGroups.None ? "NONE"u8 : Kit.F($"{ActionGroups.Digit(group)}");
+                arrow = enabled;
+                break;
+            case EditorMenuRow.Size:
+                label = "Size"u8;
+                enabled = editor.CanEdit;
+                var units = editor.SelectionSize;
+                note = !enabled ? "REPAIR FIRST"u8 : units < 0 ? "MIXED"u8 : Kit.F($"{units} X {units}");
                 arrow = enabled;
                 break;
             default:
@@ -396,7 +412,8 @@ internal sealed class EditorMenuPanel(UiContext ui)
         var rowHeight = MathF.Round(MenuRowHeight * scale);
         var pad = MathF.Round(MenuPad * scale);
         Span<FuelKind> fuels = stackalloc FuelKind[4];
-        var count = menu.Sub switch { EditorMenuSub.Fuel => editor.FuelChoices(fuels), EditorMenuSub.Group => ActionGroups.Count + 1, _ => 3 };
+        var sizes = editor.SelectionSizes;
+        var count = menu.Sub switch { EditorMenuSub.Fuel => editor.FuelChoices(fuels), EditorMenuSub.Group => ActionGroups.Count + 1, EditorMenuSub.Size => sizes.Count, _ => 3 };
         if (count == 0)
             return false;
         var size = new float2(MathF.Round(SubWidth * scale), rowHeight * count + pad * 2);
@@ -447,6 +464,16 @@ internal sealed class EditorMenuPanel(UiContext ui)
                 enabled = can == DraftEdit.Done;
                 note = check ? "NOW"u8 : can switch { DraftEdit.Done => default, _ => "NOT NOW"u8 };
             }
+            else if (menu.Sub == EditorMenuSub.Size)
+            {
+                // One row a size the part is made in: so many nozzles a side.
+                var units = sizes[i];
+                label = Kit.F($"{units} x {units}");
+                check = editor.SelectionSize == units;
+                var can = editor.CanSetSize(units);
+                enabled = can == DraftEdit.Done;
+                note = check ? "NOW"u8 : can switch { DraftEdit.Done => default, DraftEdit.Unchanged => "NOW"u8, DraftEdit.OffFace => "FACE TOO SMALL"u8, DraftEdit.Overlaps => "NO ROOM"u8, _ => "NOT NOW"u8 };
+            }
             else
             {
                 var pieces = editor.SplitPieces(axis);
@@ -474,6 +501,8 @@ internal sealed class EditorMenuPanel(UiContext ui)
                 editor.ChangeFuel(fuels[i]);
             else if (menu.Sub == EditorMenuSub.Group)
                 editor.SetSelectedGroup((byte)(i < ActionGroups.Count ? i + 1 : ActionGroups.None));
+            else if (menu.Sub == EditorMenuSub.Size)
+                editor.SetSelectedSize(sizes[i]);
             else
                 editor.SplitSelected(axis);
             menu.Close();

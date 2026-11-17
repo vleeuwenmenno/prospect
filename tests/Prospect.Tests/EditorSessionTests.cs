@@ -2061,7 +2061,8 @@ public sealed class EditorSessionTests
         Assert.Equal(content.Pod.Mounts.Length + 4, design.Mounts.Length);
         Assert.Equal(design.Mounts.ToArray(), rig.Snap(0).Content.Designs[startup].Mounts.ToArray());
         var flight = rig.Hulls.Flight(hull);
-        Assert.Equal(cold.Thrust * 8 / flight.Mass, flight.Push(BlockFacing.Left), 4);
+        // Eight arrays of the default size, two by two: four nozzles' thrust each.
+        Assert.Equal(cold.Thrust * 4 * 8 / flight.Mass, flight.Push(BlockFacing.Left), 4);
         Assert.Equal(before.Push(BlockFacing.Right) * before.Mass / flight.Mass, flight.Push(BlockFacing.Right), 4);
 
         // Flown: a second of full thrust to the left gains what eight thrusters give, and the prediction agrees.
@@ -2081,8 +2082,8 @@ public sealed class EditorSessionTests
         Assert.True(states.Hit(handle, plate, 1e9f));
         Assert.False(BlockSet.Has(states.Alive(handle), plate));
         design.Figures(states.Sums(handle), out var damaged, out _);
-        Assert.Equal(cold.Thrust * 4 / damaged.Mass, damaged.Push(BlockFacing.Left), 4);
-        Assert.Equal(flight.Mass - content.Blocks.Get("hull").Mass - cold.Mass * 4, damaged.Mass, 3);
+        Assert.Equal(cold.Thrust * 4 * 4 / damaged.Mass, damaged.Push(BlockFacing.Left), 4);
+        Assert.Equal(flight.Mass - content.Blocks.Get("hull").Mass - cold.Mass * 4 * 4, damaged.Mass, 3);
         Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Revision > 0));
         var seen = rig.Snap(0).Hulls[rig.Snap(0).OwnHull];
         Assert.False(BlockSet.Has(seen.Blocks.Span, plate));

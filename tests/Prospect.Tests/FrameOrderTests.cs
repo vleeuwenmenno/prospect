@@ -9031,6 +9031,98 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     [Fact]
+    public void AnArraysSizeIsChosenWhilePlacingAndAClickOnThreeByThreeInTheMenusFlyoutResizesAPlacedOne()
+    {
+        UseTips();
+        _editorMenu = new EditorMenuPanel(_tipKit!);
+        OpenEditor();
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var editor = _world.Editor;
+        var types = editor.Content!.Blocks.Types;
+        var cold = editor.Content.Blocks.Get("coldGasThruster");
+
+        // Chosen as the part to place, an array offers its sizes and starts at its default; the sizing key's step
+        // goes on to the next and round again, and a size it is not made in is refused.
+        for (var i = 0; i < types.Count; i++)
+            if (types[i] == cold)
+                editor.ChoosePart(i);
+        Assert.True(editor.PartIsMount);
+        Assert.Equal([1, 2, 3], editor.PartSizes);
+        Assert.Equal(2, editor.MountSize);
+        Assert.True(editor.CycleMountSize());
+        Assert.Equal(3, editor.MountSize);
+        Assert.True(editor.CycleMountSize());
+        Assert.Equal(1, editor.MountSize);
+        Assert.False(editor.SetMountSize(4));
+        Assert.True(editor.SetMountSize(2));
+        Assert.Equal(2, editor.MountSizeOf(cold));
+
+        // A part with one size has none to choose, and the array's choice is kept for when it is chosen again.
+        editor.SetMountSize(3);
+        for (var i = 0; i < types.Count; i++)
+            if (types[i].Id == "hotThruster")
+                editor.ChoosePart(i);
+        Assert.Empty(editor.PartSizes);
+        Assert.Equal(1, editor.MountSize);
+        Assert.False(editor.CycleMountSize());
+        Assert.Equal(3, editor.MountSizeOf(cold));
+
+        // A two by two array on a top face with room to grow, selected, with the menu open on it.
+        editor.StopPlacing();
+        var draft = editor.Draft!;
+        var mount = -1;
+        for (var block = 0; mount < 0 && block < draft.Boxes.Length; block++)
+        {
+            if (draft.AddMount(block, BlockFacing.Up, 3, 3, cold, 2) != DraftEdit.Done)
+                continue;
+            if (draft.CanSetMountSizes([draft.Mounts.Length - 1], 3) == DraftEdit.Done)
+                mount = draft.Mounts.Length - 1;
+            else
+                draft.Undo();
+        }
+
+        Assert.True(mount >= 0, "a top face has room for a three by three array");
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        editor.SelectMount(mount, false);
+        Assert.Equal([1, 2, 3], editor.SelectionSizes);
+        Assert.Equal(2, editor.SelectionSize);
+        Assert.Equal(DraftEdit.Unchanged, editor.CanSetSize(2));
+        Assert.Equal(DraftEdit.Done, editor.CanSetSize(3));
+        Assert.True(editor.OpenMenu(new float2(300f, 300f), -1, mount));
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+
+        // The pointer goes to Size, rests, then down its flyout to "3 x 3", the third row.
+        Glide(MenuRow(EditorMenuPanel.EditorMenuRow.Size));
+        for (var i = 0; i < 6; i++)
+            EditorFrame();
+        Assert.Equal(EditorMenuSub.Size, editor.Menu.Sub);
+        Assert.True(_editorMenu!.TrySubRowCentre(2, out var row));
+        Assert.True(_editorMenu.TrySubRowCentre(0, out var first));
+        Glide(first);
+        Glide(row);
+        HoldClick();
+        Assert.True(editor.Draft!.Mounts[mount].Size == 3, _holdLog);
+        Assert.False(editor.Menu.IsOpen);
+        Assert.Equal(mount, editor.SelectedMount);
+        Assert.Equal(3, editor.SelectionSize);
+        // It grew about its middle: two by two at 3 covers 3 to 7, three by three 2 to 8.
+        Assert.Equal((2, 2), (editor.Draft.Mounts[mount].U, editor.Draft.Mounts[mount].V));
+
+        // One undo takes the choice back; copying the array picks it to place in the size it has.
+        editor.Undo();
+        Assert.Equal(2, editor.Draft.Mounts[mount].Size);
+        editor.SelectMount(mount, false);
+        editor.SetSelectedSize(1);
+        Assert.Equal(1, editor.Draft.Mounts[mount].Size);
+        Assert.True(editor.CopySelection());
+        Assert.True(editor.PartIsMount);
+        Assert.Equal(1, editor.MountSize);
+    }
+
+    [Fact]
     public void AClickOnSplitInTheMenusFlyoutCutsTheTankAndClosesTheMenu()
     {
         var block = OpenMenuOnATank(longer: true);

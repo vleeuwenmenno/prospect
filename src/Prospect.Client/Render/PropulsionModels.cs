@@ -88,6 +88,12 @@ internal sealed class PropulsionModelLook
     /// </summary>
     public PodLook? Pod { get; init; }
 
+    /// <summary>
+    /// For a cold gas thruster array: built as a stepped plate carrying a grid of nozzle cups
+    /// (<see cref="ArrayLook"/>), one a unit of the footprint, instead of a pod. Null for every other part.
+    /// </summary>
+    public ArrayLook? Array { get; init; }
+
     /// <summary>The index of <see cref="Plume"/> in <see cref="PropulsionLook.PlumeOrder"/>, set when the look loads.</summary>
     internal int PlumeSlot { get; set; } = -1;
 
@@ -104,7 +110,9 @@ internal sealed class PropulsionModelLook
             || ThroatShare * CollarRadius * 1.6f > 1f
             || Sides is < 6 or > 24 || Rings is < 1 or > 12 || Grid is < 0 or > 6
             || !Shade(HousingShade) || !Shade(NozzleShade) || !Shade(ThroatShade) || !Shade(DetailShade)
-            || (Pod is not null && !Pod.Valid))
+            || (Pod is not null && !Pod.Valid)
+            // An array's cups stand on its upper plate, a unit each: it needs units a cell, and no pod beside it.
+            || (Array is not null && (!Array.Valid || Pod is not null || !(PerCell > 0) || Grid != 0)))
             throw new InvalidDataException($"{path}: model {id} is out of range");
     }
 }
@@ -532,6 +540,12 @@ internal static partial class PropulsionModels
         var depth = 2f * half[axis];
         var cells = box.CellSize > 0 ? box.CellSize : 1f;
         var small = MathF.Min(hu, hv);
+        if (model.Array is { } array)
+        {
+            BuildArray(ref g, model, array, box, fuel, block, back, nozzles);
+            return;
+        }
+
         if (model.Pod is { } pod)
         {
             BuildPod(ref g, model, pod, box, fuel, block, back, nozzles);
@@ -956,6 +970,16 @@ internal static partial class PropulsionModels
     {
         public readonly Frame F = frame;
 
+        /// <summary>
+        /// While set, facets are given the part's facing as their normal instead of their own: a light that brightens
+        /// with thrust (<see cref="Lit"/>), which the mesh shader asks the hull's thrust about by that direction.
+        /// </summary>
+        public bool Lit;
+
+        // How far a lit facet's normal leans from the facing toward the facet's own: enough to keep its side, too
+        // little for a nozzle firing along another axis to light it.
+        private const float LitLean = 0.06f;
+
         // The side walls between two outlines of the same count, at za and zb: outward (side 1) or toward the
         // centre line (side -1).
         public readonly void Loft(ReadOnlySpan<Vector2> a, float za, ReadOnlySpan<Vector2> b, float zb, Vector2 centre, float tag, float side)
@@ -1044,7 +1068,8 @@ internal static partial class PropulsionModels
             }
         }
 
-        private readonly void Quad(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3, Vector3 normal, float tag)
+        // One flat four-sided facet in the part's frame, facing along `normal` (part frame, any length).
+        public readonly void Quad(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3, Vector3 normal, float tag)
         {
             var n = F.Dir(normal.X, normal.Y, normal.Z);
             var first = (uint)vertices.Count;
@@ -1058,7 +1083,8 @@ internal static partial class PropulsionModels
 
         private readonly void Put(Vector3 position, Vector3 normal, float tag)
         {
-            var n = Vector3.Normalize(normal) * tag;
+            // A lit facet's normal leans a little to the facet's own side, so it never points against its winding.
+            var n = (Lit ? Vector3.Normalize(F.N + LitLean * Vector3.Normalize(normal)) : Vector3.Normalize(normal)) * tag;
             vertices.Add(new MeshVertex { Position = new float3(position.X, position.Y, position.Z), Normal = new float3(n.X, n.Y, n.Z) });
         }
 

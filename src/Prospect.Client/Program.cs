@@ -97,6 +97,8 @@ internal static class Program
           --align-at <sec>        With --capture or --bench, pilot view: click the align button for a moment this many
                                  seconds after the splash (use with --look <degrees>)
          --zoom <0.5..8>         With --capture or --bench, pilot view: the camera's distance, as the scroll wheel sets it
+          --mount-size <n>        With --open edit-mount and --capture or --bench: hold the cold gas array's ghost in
+                                  this size (1, 2 or 3 nozzles a side) instead of the default
           --rts-script <json>     Private muted capture poses; --rts-seed <n> selects the diagnostic seed
           --target                Pilot view: target the nearest other hull once in space
           --fuel-callout <fuel>   With --capture or --bench: call out the flown hull's tanks of nitrogen, hydrazine or
@@ -556,6 +558,10 @@ internal static class Program
                     options.Zoom = zoom;
                     i++;
                     break;
+                case "--mount-size" when hasValue && int.TryParse(args[i + 1], out var mountSize) && mountSize is >= 1 and <= Prospect.Game.World.MountSpec.MaxSize:
+                    options.MountSize = mountSize;
+                    i++;
+                    break;
                 case "--thrust-at" when hasValue && float.TryParse(args[i + 1], out var thrustAt) && thrustAt is >= 0f and <= 600f:
                     options.ThrustAt = thrustAt;
                     i++;
@@ -677,8 +683,8 @@ internal static class Program
         if ((options.BreakShieldSeconds is not null || options.RamSpeed is not null || options.CoastSpeed is not null || options.ColdCloud) && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
             return Fail("--break-shield, --ram, --coast and --cold-cloud work only with --capture or --bench, in an unsaved private local game.");
 
-        if ((options.Thrust is not null || options.Zoom is not null || options.LookHeight is not null || options.CaptureHitAge is not null) && options.CapturePath is null && options.BenchSeconds <= 0)
-            return Fail("--thrust and --zoom work only with --capture or --bench.");
+        if ((options.Thrust is not null || options.Zoom is not null || options.LookHeight is not null || options.CaptureHitAge is not null || options.MountSize is not null) && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--thrust, --zoom and --mount-size work only with --capture or --bench.");
 
         if ((options.FuelCallout != Prospect.Game.World.FuelKind.None || options.FuelTip != Prospect.Game.World.FuelKind.None) && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--fuel-callout and --fuel-tip work only with --capture or --bench.");
