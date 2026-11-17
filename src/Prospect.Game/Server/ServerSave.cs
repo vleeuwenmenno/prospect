@@ -460,6 +460,7 @@ public sealed partial class ServerHost
                 throw new InvalidDataException($"Saved asteroid {i} is not an asteroid of this galaxy, is named twice, or is one more than a world may move.");
         }
 
+        RestoreRockEdits(world);
         _nextPlayerId = world.NextOwnerId;
         _nextEntityId = world.NextEntityId;
         _tick = world.NextWorldTick;
@@ -522,7 +523,8 @@ public sealed partial class ServerHost
     private bool Capture(WorldSnapshot buffer)
     {
         if (_ownerCount > buffer.Owners.Length || _hulls.Count > buffer.Hulls.Length || _hulls.BlockTotal > buffer.HitPoints.Length
-            || _rocks.Deltas.Length > buffer.Rocks.Length || _chartCount > buffer.Charts.Length)
+            || _rocks.Deltas.Length > buffer.Rocks.Length || _chartCount > buffer.Charts.Length
+            || _rockEdits.Log.RockCount > buffer.EditedRocks.Length || _rockEdits.Log.Count > buffer.RockEdits.Length)
             return false;
 
         if (!CaptureModules(buffer)) return false;
@@ -641,6 +643,7 @@ public sealed partial class ServerHost
         var rocks = _rocks.Deltas;
         rocks.CopyTo(buffer.Rocks);
         buffer.RockCount = rocks.Length;
+        CaptureRockEdits(buffer);
         return true;
     }
 

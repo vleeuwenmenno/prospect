@@ -25,9 +25,11 @@ public sealed class GameContent
         CargoCatalog cargo,
         ContentIdentity saveIdentity,
         DroneRules drones,
-        int workDrone
+        int workDrone,
+        RockEditing.RockEditRules rockEdits
     )
     {
+        RockEdits = rockEdits;
         Drones = drones;
         WorkDroneDesign = workDrone;
         Cargo = cargo;
@@ -63,6 +65,9 @@ public sealed class GameContent
     /// </summary>
     public EditorRules Editor { get; }
     public ExplorationRules Exploration { get; }
+
+    /// <summary>What a scrape of a rock may be, the size of the bricks it is kept in and how much a world may hold.</summary>
+    public RockEditing.RockEditRules RockEdits { get; }
 
     /// <summary>
     /// Social limits as this machine's files have them. A server enforces its own; a client's only shape what
@@ -136,12 +141,12 @@ public sealed class GameContent
         var designs = new HullDesign[Designs.Length];
         for (var i = 0; i < designs.Length; i++)
             designs[i] = Designs[i].WithRules(rules);
-        return new GameContent(Galaxy.Under(SettingCatalog, clean), Blocks, SettingCatalog, clean, rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity, Drones, WorkDroneDesign);
+        return new GameContent(Galaxy.Under(SettingCatalog, clean), Blocks, SettingCatalog, clean, rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity, Drones, WorkDroneDesign, RockEdits);
     }
 
     internal GameContent WithCatalogue(HullDesign[] designs, int pod, int drone, int[] fleet, int workDrone) =>
         new(Galaxy, Blocks, SettingCatalog, Settings, Rules, (HullDesign[])designs.Clone(), pod, drone,
-            (int[])fleet.Clone(), Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity, Drones, workDrone);
+            (int[])fleet.Clone(), Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity, Drones, workDrone, RockEdits);
 
     /// <summary>
     /// This content with one more design at the end of the catalogue. Every design it had keeps its number and is
@@ -153,7 +158,7 @@ public sealed class GameContent
         var designs = new HullDesign[Designs.Length + 1];
         Designs.CopyTo(designs, 0);
         designs[^1] = design;
-        return new GameContent(Galaxy, Blocks, SettingCatalog, Settings, Rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity, Drones, WorkDroneDesign);
+        return new GameContent(Galaxy, Blocks, SettingCatalog, Settings, Rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity, Drones, WorkDroneDesign, RockEdits);
     }
 
     /// <summary>Loads the content shipped beside the executable.</summary>
@@ -198,6 +203,7 @@ public sealed class GameContent
                 throw new InvalidDataException("Rack capacity must match the cargo grid and scale linearly.");
         var settingCatalog = WorldSettingCatalog.Parse(Shared("rules", "settings.json"), At("rules", "settings.json"));
         var exploration = ExplorationRules.Parse(Shared("rules", "exploration.json"));
+        var rockEdits = RockEditing.RockEditRules.Parse(Shared("rules", "rock_edits.json"));
         var settings = settingCatalog.Defaults;
         var rules = blocks.Rules.Under(settingCatalog, settings);
         using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(At("ships", "fleet.json")));
@@ -260,7 +266,8 @@ public sealed class GameContent
             cargo,
             saveIdentity.Build(),
             drones,
-            WorkDrone(Index(root.GetProperty("workDrone"u8).GetString()!))
+            WorkDrone(Index(root.GetProperty("workDrone"u8).GetString()!)),
+            rockEdits
         );
 
         // The drone a bay launches is a small craft of drone parts with no drive to leave its base behind with.
@@ -673,7 +680,9 @@ public static class HullSim
         if (toHull.LengthSquared() >= bound * bound)
             return false;
 
-        // Narrow phase: every remaining block against the asteroid's surface in the block's direction.
+        // Narrow phase: every remaining block against the asteroid's surface in the block's direction; a scraped
+        // rock's surface is the base shape less its cuts.
+        var cut = rocks.Edits is { } edits ? edits.CutOf(name) : default;
         var design = body.Design;
         var deepest = 0f;
         var normalSum = Vector3.Zero;
@@ -692,7 +701,7 @@ public static class HullSim
         {
             tests--;
             var arm = Vector3.Transform(design.BlockOffsets[b], state.Orientation);
-            if (!BoxCollision.Rock(toHull + arm, design.BlockHalfExtents[b], state.Orientation, rock, out var direction, out var depth, out var point, design.Boxes[b].Shape))
+            if (!BoxCollision.Rock(toHull + arm, design.BlockHalfExtents[b], state.Orientation, rock, out var direction, out var depth, out var point, design.Boxes[b].Shape, cut))
                 continue;
             deepest = Math.Max(deepest, depth);
             // Contact storage limits damage and effects, never which blocks need separation.
@@ -729,7 +738,7 @@ public static class HullSim
                 tests--;
                 var arm = Vector3.Transform(design.BlockOffsets[b], state.Orientation);
                 if (!BoxCollision.Rock(local - rock.LocalPosition - rockOffset + arm, design.BlockHalfExtents[b], state.Orientation,
-                    rock, out var outward, out var overlap, out _, design.Boxes[b].Shape) || overlap < 0.001f) continue;
+                    rock, out var outward, out var overlap, out _, design.Boxes[b].Shape, cut) || overlap < 0.001f) continue;
                 var correction = outward * (overlap + 0.001f);
                 state.Position += correction;
                 local += correction;

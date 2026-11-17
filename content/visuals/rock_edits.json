@@ -1,0 +1,9 @@
+{
+  "drawMetresPerPixel": 0.5,
+  "keepFactor": 1.25,
+  "maxPatches": 32,
+  "arenaVertices": 2000000,
+  "maxPatchVertices": 600000,
+  "mergeGap": 12,
+  "idleFrames": 600
+}

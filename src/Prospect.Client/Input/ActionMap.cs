@@ -45,6 +45,7 @@ internal enum InputAction
     LaunchDrones,
     RecallDrones,
     FetchContainer,
+    DebugScrape,
     Count,
 }
 

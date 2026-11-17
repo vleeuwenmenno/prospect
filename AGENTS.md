@@ -35,7 +35,7 @@ Use the Makefile, not raw `dotnet` commands.
 | --- | --- |
 | `make setup` | First run on a machine: system packages for the OS (Vulkan; MoltenVK on macOS), the .NET SDK into `~/.dotnet`, restore. `make doctor` checks the toolchain and GPU. |
 | `make check` | Formatting, warnings-as-errors build and all tests. Must pass before work is called done. Takes about two minutes. |
-| `make bench` | Release benchmarks: an empty scene, resizing (`--bench-resize`), then editor cargo, Fuel menu, fuel-on-apply and mirror ghosts (four measured seconds each, after four seconds for scripted edits and workers to settle). Last, on a copy of the build whose pod has a tractor beam and racks (`tools/prepare_tractor_capture.py`), 25 s of cargo: jettison, drift, tractor pull and stow (`--open cargo --jettison 5`); it also fails unless the container was seen loose and is back in the hold. Fails under 144 fps or on any managed allocation in the frame loop. Run it after touching anything that executes every frame or every tick. |
+| `make bench` | Release benchmarks: an empty scene, resizing (`--bench-resize`), then editor cargo, Fuel menu, fuel-on-apply and mirror ghosts (four measured seconds each, after four seconds for scripted edits and workers to settle). Then, on a copy of the build whose pod has a tractor beam and racks (`tools/prepare_tractor_capture.py`), 25 s of cargo: jettison, drift, tractor pull and stow (`--open cargo --jettison 5`); it also fails unless the container was seen loose and is back in the hold. Then, on a copy whose pod has a drone bay (`tools/prepare_drone_capture.py`), 25 s of drones: launch, hold station, recall and dock (`--open drones --drone-recall 12`); it also fails unless a drone was seen out and the bay is full again. Last, 14 s of a rock being scraped thirty passes (`--open rock-scrape`): edits, bricks and patch rebuilds on every thread; it also fails unless all 480 edits came back from the server and the patch was rebuilt and is drawn. Fails under 144 fps or on any managed allocation in the frame loop. Run it after touching anything that executes every frame or every tick. |
 | `make bench-scans` | Release benchmark with each module scan type repeating (gas, asteroid, locator), on a copy of the build whose pod carries the scanners (`tools/prepare_scan_bench.py`). Fails on any managed allocation on any thread, or under five completed scans. Run it after touching module scans, their server worker or the module interface. |
 | `make bench-gas` | Release benchmark inside gas clouds (ordinary from inside, pilot and command view, huge, lightning; cold and a pair reported only). Fails under 144 fps or on any managed allocation. Run it after touching the gas shaders or how gas is drawn. |
 | `make run ARGS="..."` | The client. `make server` is the dedicated server. |
@@ -129,6 +129,46 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   Tests: `CargoHoldTests`, `CargoFlightTests`, `CargoWireTests`, `CargoWindowTests`, `EditorSessionTests`, `WreckageTests`, `SaveLifecycleTests`, `FrameOrderTests`.
 
 
+- **Rock edits (scrapes):** the edit list is the truth (`RockEditLog`, `Prospect.Game/World/RockEditing`): it only
+  grows, the wire and the save carry it, and bricks and meshes are caches worked out from it. A scrape (`RockScrape`)
+  is a capsule in the rock's own frame in whole numbers (1/64 m, millimetres), fixed when the server makes it.
+  Edits are made only through `ServerHost.ScrapeRock` (rules, the world's limits, `HasRoom`, all or none of a stroke);
+  the mining laser (R3) must call it too. Figures are shared content, `content/rules/rock_edits.json`
+  (`RockEditRules`: cell size, radius and stroke limits, edits and bricks a rock and a world).
+  `RockBricks` holds the **cut field only**, never the base shape: a sample is the distance to the nearest scrape
+  (negative inside a cut), a brick exists only where a sample is inside a cut or within a cell of one (so rock
+  beside a wall always reads its distance to it; the mesher skips bricks without a cut, `HasCut`), and the edited
+  rock is "inside the base shape and outside every cut". The bricks are a function of the set of edits alone, worked out in `RockCutMath.Lower`
+  with doubles, `+ - * /` and `Math.Sqrt` in a fixed order: never `MathF`, `Vector3.Dot` or `Length` there, and never
+  let which bricks exist depend on the base shape. Contact reads it through `RockCut` (`RockField.Edits`,
+  `BoxCollision.Rock`, `FreeContainers.RockContact`, `RockPicking.Hit` with a cut): server and prediction, one code.
+  Wire: protocol 65, reliable message 41 `RockEditsMessage` (at most 64 edits, 1,362 bytes; 21 B a stroke start, 9 B
+  a continuing segment), sent by `SendRockEdits` to each connection whose sensor reaches the rock's surface
+  (`RockInView`, from the rock's place kept when it was first scraped: never generate a sector for it in the
+  tick), in order and each once (`Connection.RockEditsSent`), at most 256 edits a tick; the client takes a
+  run only if it continues what it holds (`ClientWorld.OnRockEdits`) and checks every edit against the rules.
+  A client takes at most 8 edits a tick into its bricks; a longer list is replayed on a pool thread
+  (`RockEditReplay`) and copied in. Save: codec 18, `WorldSnapshot.EditedRocks`/`RockEdits`, limits
+  `SaveLimits.MaxEditedRocks`/`MaxRockEdits`; `RestoreRockEdits` is the load rule (every edit valid on a rock this
+  galaxy has, else the save is refused) and rebuilds the bricks. Bricks are never sent or saved.
+  Drawing: `RockPatches` (render side) reads the log through `SessionSnapshot.RockEdits`, keeps mirror bricks only its
+  job touches, and has `RockPatchMesher` build one rock's patch at a time on a worker: the reached base facets less
+  the cuts, on their own planes with the base mesh's normals, and the cuts' walls (marching tetrahedra) clipped to the
+  base shape, both clipped by the same planes in each tetrahedron so they meet in one line. Unreached facets stay the
+  shared mesh, drawn as runs of its index buffer (`SceneRenderer.AddRockPatch`, `DrawRockPatches`); a patch lives in
+  one shared vertex buffer and its range is reused only after the frames in flight. Never draw a second copy of the
+  unedited surface from bricks: that was the spike's seam. Level of detail and memory are client figures,
+  `content/visuals/rock_edits.json` (`RockPatchLook`): beyond `drawMetresPerPixel` a rock is its plain facets.
+  Ice shards cannot be scraped (`RockEditRules.Scrapable`). Tests: `RockEditTests`, `RockEditWireTests`,
+  `RockEditSaveTests`, `RockEditSessionTests`, `SaveLifecycleTests`, `ContentIdentityTests`; `make bench` scrapes a rock.
+  Cracks (R2) add a kind to `RockEditCodec` (3 is kept for it) and rocks past the generated list; nothing here builds them.
+- **Debug: scrape rock (temporary, local games only):** `MessageId.RockScrape` (42, `RockScrapeRequest`: rays in the
+  rock's frame) through `PlayerInputBridge.DebugScrape`; `ServerHost.DebugScrape` checks `AllowDebugFill`, the
+  in-process link, a live flown hull not in transit, the interval (`debug.intervalSeconds`), the radius, and that every
+  hit lies within `debug.rangeMetres` of the hull, finds the surface itself (`RockPicking.Hit` with the cut) and calls
+  `ScrapeRock`. Client: the `DebugScrape` action (`F10`, held in the pilot view, `WorldView.UpdateDebugScrape`).
+  Capture: `--open rock-scrape` (below). Remove the message, the bridge call, the action, `WorldView.RockScrape.cs`,
+  `ServerHost.ScriptedRockScrape.cs` and the `debug` figures together when the mining laser exists.
 - **Social messages:** validate new kinds after admission and the receive/rate budgets; publish through `SessionSnapshot.Social` and send intent through `PlayerInputBridge`.
 - **Wire format:** bump `ProtocolInfo.Version` in `Protocol/Messages.cs`, and update `MaxWireSize` constants.
 - **The handshake or the password:** the scheme is written down in `Passwords` and `docs/hosting.md`; change
@@ -725,6 +765,14 @@ The client opens a real window on the developer's desktop, and they are usually 
   stretching the intervals. The fixture is front-lit so soot is visible against the rock.
   Fixture age is reported with each capture. Normal gameplay uses every
   visible hull's actual `HullView.Thrust`. Crops must keep native pixels and report the actual window size.
+- `--open rock-scrape` (scripted runs only, unsaved private local game): two seconds in the server puts the hull above
+  the spawn sector's rock nearest `--rock-scrape-radius <m>` (default 10; the home sector has rocks of 20 m, 199 m and
+  1,897 m: use 10, 100, 1000), nose to it, `--rock-scrape-standoff <m>` off its surface (default 25); the client then
+  asks for a 17-ray groove under the hull through the real debug scrape, `--rock-scrape-passes <n>` times (default 3).
+  `--rock-scrape-distance <m>` looks at the groove from the command camera (grid off) at that distance: 20 for a close
+  look, 300 for the patch from afar, 2500 for the plain facets beyond the level of detail. `--rock-scrape-rest <s>`
+  sets the hull down across the groove at that time and presses it there for three seconds (capture four seconds
+  later). Each capture prints the edits known, the patches drawn and built, and the hull's speed. Capture after 8 s.
 - `--thrust <keys>` (`forward`, `back`, `left`, `right`, `up`, `down`, `boost`, comma separated; `turn` steers the
   nose up and left all the while, as a mouse would, so `--thrust turn --thrust-until 4` and a capture at 8 s show a hull
   at rest after turning, which must fire nothing) holds those flight

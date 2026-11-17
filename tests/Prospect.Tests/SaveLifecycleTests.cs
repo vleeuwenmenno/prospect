@@ -7,6 +7,7 @@ using Prospect.Game.Persistence;
 using Prospect.Game.Protocol;
 using Prospect.Game.Server;
 using Prospect.Game.World;
+using Prospect.Game.World.RockEditing;
 using Xunit;
 
 namespace Prospect.Tests;
@@ -387,7 +388,7 @@ public sealed class SaveLifecycleTests
     /// down, a hull in every stage of a jump (the piloted pod among them), a standing move order, and pushed
     /// asteroids in two sectors.
     /// </summary>
-    private static void Populate(SaveRig rig)
+    private static RockRef Populate(SaveRig rig)
     {
         rig.Join();
         rig.Tick(5);
@@ -454,6 +455,15 @@ public sealed class SaveLifecycleTests
         { Mix1 = -1, Mix2 = -1, Owner = hulls.Info(0).Owner, Family = ModuleFamily.AsteroidLocator, Sector = sector, Index = 0, Resource = -1, RecordedTick = tick - 1 }));
         Assert.True(rig.Rocks.Set(new RockDelta { Rock = new RockRef(sector, 0), Offset = new Vector3(1, 2, 3), Velocity = new Vector3(0.5f, 0, -0.25f), StartTick = tick - 3 }));
         Assert.True(rig.Rocks.Set(new RockDelta { Rock = new RockRef(sector, 3), Offset = new Vector3(-4, 0, 9), Velocity = new Vector3(0, 0.75f, 0), StartTick = tick - 2 }));
+
+        // The largest scrapable rock of that sector holds a groove made in two strokes: its edits are state the server must not lose.
+        var scrapable = RockEditSaveTests.ScrapableRocks(rig.Rocks, sector, 3f);
+        Assert.NotEmpty(scrapable);
+        var (scraped, asteroid) = scrapable[0];
+        var groove = RockEditTests.Groove(asteroid.Radius, asteroid.Shape);
+        Assert.Equal(RockEditRefusal.None, rig.Server.ScrapeRock(scraped, groove.AsSpan(0, 16)));
+        Assert.Equal(RockEditRefusal.None, rig.Server.ScrapeRock(scraped, groove.AsSpan(16, 16)));
+        return scraped;
     }
 
     private static byte[] Canonical(byte[] bytes)
@@ -470,9 +480,22 @@ public sealed class SaveLifecycleTests
         var expected = new List<(HullState State, FlightParams Flight, float[] Points, int[] Lost, double Total, ulong Entity, uint Owner, byte Design, HullOrder Order, VisualDamageState Visual, bool Piloted, long DamageTick, double[] Tanks, HoldContainer[] Cargo)>();
         RockDelta[] rocks;
         long tick;
+        RockRef scraped;
+        RockScrape[] scrapes;
+        ulong scrapedHash;
+        int scrapedBricks;
         using (var rig = new SaveRig(folder, Shipped))
         {
-            Populate(rig);
+            scraped = Populate(rig);
+            var edits = rig.Server.RockEdits;
+            var scrapedSlot = edits.Log.SlotOf(scraped);
+            scrapes = new RockScrape[edits.Log.EditsOf(scrapedSlot)];
+            var at = 0;
+            for (var index = edits.Log.FirstOf(scrapedSlot); index >= 0; index = edits.Log.NextOf(index)) scrapes[at++] = edits.Log.EditAt(index);
+            scrapedHash = edits.Bricks.Hash(scrapedSlot);
+            scrapedBricks = edits.Bricks.Used;
+            Assert.Equal(32, scrapes.Length);
+            Assert.True(scrapedBricks > 0);
             var hulls = rig.Hulls;
             for (var i = 0; i < hulls.Slots; i++)
             {
@@ -531,6 +554,21 @@ public sealed class SaveLifecycleTests
             Assert.Equal(2u, hulls.Revision(3));
             Assert.Equal(rocks, rig.Rocks.Deltas.ToArray());
             Assert.Equal(1, rig.Rocks.MovedSectors);
+
+            // The scrapes are back, in order, and the bricks worked out from them are the ones that were saved.
+            var restored = rig.Server.RockEdits;
+            var restoredSlot = restored.Log.SlotOf(scraped);
+            Assert.Equal((1, scrapes.Length), (restored.Log.RockCount, restored.Log.Count));
+            var index = restored.Log.FirstOf(restoredSlot);
+            foreach (var scrape in scrapes)
+            {
+                Assert.Equal(scrape, restored.Log.EditAt(index));
+                index = restored.Log.NextOf(index);
+            }
+
+            Assert.Equal(-1, index);
+            Assert.Equal(scrapedHash, restored.Bricks.Hash(restoredSlot));
+            Assert.Equal(scrapedBricks, restored.Bricks.Used);
             Assert.True(rig.Close().Clean);
         }
 

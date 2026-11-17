@@ -2,6 +2,8 @@ using System.Security.Cryptography;
 using Prospect.Game.Protocol;
 using Prospect.Game.World;
 
+using Prospect.Game.World.RockEditing;
+
 namespace Prospect.Game.Persistence;
 
 /// <summary>
@@ -205,8 +207,11 @@ public struct SavedHull
 public sealed class WorldSnapshot
 {
     /// <summary>A snapshot with room for exactly these counts.</summary>
-    public WorldSnapshot(int owners, int hulls, int blocks, int rocks, int charts = 0, int moduleObservations = 0)
+    public WorldSnapshot(int owners, int hulls, int blocks, int rocks, int charts = 0, int moduleObservations = 0, int editedRocks = 0, int rockEdits = 0)
     {
+        EditedRocks = new RockRef[editedRocks];
+        EditedRockEdits = new int[editedRocks];
+        RockEdits = new RockScrape[rockEdits];
         Owners = new SavedOwner[owners];
         Hulls = new SavedHull[hulls];
         HitPoints = new float[blocks];
@@ -222,7 +227,9 @@ public sealed class WorldSnapshot
 
     /// <summary>A snapshot with room for the most a world under <paramref name="limits"/> can hold: a capture buffer.</summary>
     public WorldSnapshot(SaveLimits limits, int charts = 0)
-        : this(limits.MaxOwners, limits.MaxHulls, limits.MaxBlocks, limits.MaxRocks, charts, checked(limits.MaxOwners * ModuleScanRules.KnowledgePerOwner)) { }
+        : this(limits.MaxOwners, limits.MaxHulls, limits.MaxBlocks, limits.MaxRocks, charts, checked(limits.MaxOwners * ModuleScanRules.KnowledgePerOwner),
+            limits.MaxEditedRocks, limits.MaxRockEdits)
+    { }
 
     /// <summary>What the save was made with; compared before anything else is believed.</summary>
     public SaveCompatibility Compatibility;
@@ -330,6 +337,28 @@ public sealed class WorldSnapshot
     /// </summary>
     public readonly RockDelta[] Rocks;
     public int RockCount;
+
+    /// <summary>
+    /// The asteroids that hold scrapes, in the order each was first scraped, and how many each holds. The first
+    /// <see cref="EditedRockCount"/> are meaningful.
+    /// </summary>
+    public readonly RockRef[] EditedRocks;
+
+    /// <inheritdoc cref="EditedRocks" />
+    public readonly int[] EditedRockEdits;
+
+    /// <inheritdoc cref="EditedRocks" />
+    public int EditedRockCount;
+
+    /// <summary>
+    /// Every scrape, asteroid by asteroid in the order of <see cref="EditedRocks"/>, each asteroid's in the order
+    /// they were made. The first <see cref="RockEditCount"/> are meaningful. Bricks are not saved: they are worked
+    /// out from these again.
+    /// </summary>
+    public readonly RockScrape[] RockEdits;
+
+    /// <inheritdoc cref="RockEdits" />
+    public int RockEditCount;
     public readonly SectorChart[] Charts;
     public int ChartCount;
 

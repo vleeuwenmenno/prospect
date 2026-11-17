@@ -171,6 +171,12 @@ public sealed class SessionSnapshot(GameContent content)
     public readonly RockDelta[] Rocks = new RockDelta[512];
     public int RockCount;
 
+    /// <summary>
+    /// The scrapes the server has sent of the rocks in view, or null outside a game. The log only grows and is safe
+    /// to read from the render side below the counts it reads there; meshes are worked out from it on workers.
+    /// </summary>
+    public Prospect.Game.World.RockEditing.RockEditLog? RockEdits;
+
     public TickStats Loop;
 }
 
@@ -397,6 +403,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         _world.CopyExploration(snapshot.Exploration, (long)serverTick);
         snapshot.ServerTickPrecise = serverTick;
         snapshot.RockCount = _state == SessionState.Active ? _world.CopyRockDeltas(snapshot.Rocks) : 0;
+        snapshot.RockEdits = _state == SessionState.Active ? _world.RockEditLog : null;
         snapshot.Galaxy = _galaxy;
         snapshot.Content = _content;
         snapshot.HullCount = _state == SessionState.Active ? _world.BuildViews(snapshot.Hulls, ref snapshot.BlockWords, snapshot.OwnTanks, serverTick, tick, out snapshot.OwnHull) : 0;
@@ -562,6 +569,9 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                 break;
             case MessageId.RockDeltas when _state == SessionState.Active && channel == NetChannel.Reliable:
                 _world.OnRockDeltas(ref reader);
+                break;
+            case MessageId.RockEdits when _state == SessionState.Active && channel == NetChannel.Reliable:
+                _world.OnRockEdits(ref reader);
                 break;
 
             case MessageId.VisualState when _state == SessionState.Active && channel == NetChannel.Bulk:

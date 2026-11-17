@@ -393,7 +393,11 @@ internal sealed partial class ClientWorld : IDisposable
     public bool OwnIsDrone => _ownIsDrone;
 
     /// <summary>Gives the world the server's galaxy, whose asteroids the prediction collides with.</summary>
-    public void SetGalaxy(Galaxy galaxy) => _rocks = new RockField(galaxy, Prospect.Game.Persistence.SaveLimits.Default.MaxRocks, Prospect.Game.Persistence.SaveLimits.Default.MaxMovedSectors);
+    public void SetGalaxy(Galaxy galaxy)
+    {
+        _rocks = new RockField(galaxy, Prospect.Game.Persistence.SaveLimits.Default.MaxRocks, Prospect.Game.Persistence.SaveLimits.Default.MaxMovedSectors);
+        ResetRockEdits();
+    }
 
     /// <summary>
     /// Predicts one tick and sends input. When sendCommands is false, reliable control/fleet intents stay queued
@@ -404,6 +408,14 @@ internal sealed partial class ClientWorld : IDisposable
 
     public void Tick(PlayerInputBridge bridge, ITransport transport, double serverTick, bool sendCommands = true, long clientTick = -1, float roundTripMs = 0)
     {
+        TickRockEdits();
+        if (sendCommands && bridge.ConsumeRockScrape(out var scrape))
+        {
+            Span<byte> bytes = stackalloc byte[RockScrapeRequest.MaxWireSize];
+            var writer = new NetWriter(bytes);
+            scrape.Write(ref writer);
+            transport.Send(0, NetChannel.Reliable, writer.Written);
+        }
 
         if (sendCommands && bridge.ConsumeModuleScan(out var moduleRequest))
         {

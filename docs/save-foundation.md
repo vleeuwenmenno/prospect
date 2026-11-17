@@ -29,7 +29,7 @@ Saved multiplayer and moving a world between machines stay undelivered until ver
 | Type | What it is |
 | --- | --- |
 | `WorldSnapshot` | The bounded state of a world between two intervals. A buffer, never live memory. |
-| `WorldSnapshotCodec` | The save's own byte layout, `Version` 13. Reading trusts nothing. |
+| `WorldSnapshotCodec` | The save's own byte layout, `Version` 18. Reading trusts nothing. |
 | `SaveLimits` | Aggregate bounds of a world and of a save: owners, hulls, blocks, asteroids, sectors. |
 | `IWorldStore` | A leased store: `Commit`, `Backup`, `Dispose`. One worker thread uses it. |
 | `SqliteWorldStore` | The store on disk: one SQLite database per world folder. |
@@ -501,6 +501,22 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
   without a connected pilot within the base sensor radius. Birth/id order controls cap eviction.
 - Layouts before 15 are refused without migration. Wreck splitting preserves held cargo; only rack damage ejects.
 
+## Rock edits (codec 18)
+
+- A save holds every scraped rock's edit list: rock by rock in the order each was first scraped, a rock's edits in
+  the order they were made. Bricks and meshes are not saved; they are worked out again on load.
+- A rock's record is its sector, index and edit count (20 bytes), then its edits as on the wire: 21 bytes for one
+  that starts anywhere, 9 for one that continues the edit before it. Two counts add eight header bytes.
+- Limits: `SaveLimits.MaxEditedRocks` (512) and `MaxRockEdits` (65,536), at most 1,386,496 encoded bytes.
+  The server refuses a scrape that would pass them, or the content's own limits, before anything grows.
+- Capture copies the lists and takes no memory.
+- Decoding checks structure: every rock named once, every count met, every edit one the codec reads.
+- Load rule (`RestoreRockEdits`): every edit must be one `content/rules/rock_edits.json` allows on a rock this
+  galaxy really has there, and that rock must be one that can be scraped. Otherwise the save is refused whole.
+- `rock_edits.json` is in the save identity: a retune refuses older worlds, as for other shared content.
+- Layouts before 18 are refused without migration. Codec 18 holds the drone bays of codec 17 and these lists;
+  each has its own load rule.
+
 ## Tractor acquisition (codec 15)
 
 - Free-body position, velocity, orientation and payload are part of the 110-byte saved record.
@@ -521,4 +537,5 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
 - The work drone design is a catalogue role, saved with the pod and the escape drone; load refuses one that is not
   a small craft without a jump drive.
 - Load refuses a bay count other than the design's, drones above capacity, a rebuild longer than the bay's, a
-  rebuild in a full bay, and anything in a bay whose block was lost. Layouts before 17 are refused untouched.
+  rebuild in a full bay, and anything in a bay whose block was lost. Layouts before 18 are refused untouched
+  (18 added rock edits to the bays of 17).

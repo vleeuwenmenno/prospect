@@ -109,6 +109,12 @@ public enum MessageId : byte
 
     /// <summary>Server to client: the flown hull's drone bays and the newest drone answer (<see cref="BayMessage"/>).</summary>
     Bays = 40,
+
+    /// <summary>Server to client, reliable: a run of one rock's edits. See <see cref="RockEditsMessage"/>.</summary>
+    RockEdits = 41,
+
+    /// <summary>Client to server, reliable: the temporary debug scrape. See <see cref="RockScrapeRequest"/>.</summary>
+    RockScrape = 42,
 }
 
 public enum RejectReason : byte

@@ -37,7 +37,8 @@
     "EditorSelectAll": ["Key:A"],
     "LaunchDrones": ["Key:Period"],
     "RecallDrones": ["Key:Comma"],
-    "FetchContainer": ["Key:Slash"]
+    "FetchContainer": ["Key:Slash"],
+    "DebugScrape": ["Key:F10"]
   },
   "axes": {
     "Strafe": [{ "negative": "Key:A", "positive": "Key:D" }, { "axis": "Pad:LeftX" }],

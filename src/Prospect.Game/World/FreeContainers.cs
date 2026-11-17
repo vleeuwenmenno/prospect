@@ -181,10 +181,10 @@ public sealed class FreeContainers
 
     /// <summary>Shared finest-facet rock contact, with no separate container rock approximation.</summary>
     public static bool RockContact(ref FreeContainer c, CargoCatalog cargo, in Asteroid rock, Double3 position,
-        Vector3 velocity, float safeSpeed, float damagePerTonne)
+        Vector3 velocity, float safeSpeed, float damagePerTonne, RockEditing.RockCut cut = default)
     {
         if (!BoxCollision.Rock(c.Position.RelativeTo(position), Half(cargo, c.Size), c.Orientation, rock,
-            out var normal, out var depth, out _)) return false;
+            out var normal, out var depth, out _, BlockShape.Box, cut)) return false;
         c.Position += normal * depth;
         Resolve(ref c, cargo, normal, velocity, safeSpeed, damagePerTonne);
         return true;

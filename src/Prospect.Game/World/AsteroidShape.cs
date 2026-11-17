@@ -55,6 +55,12 @@ public static class AsteroidShape
 
     private static Vector4 Plane(int shape, Vector3 direction) => Planes[shape][AsteroidMesh.Triangle(direction / Squash(shape))];
 
+    /// <summary>
+    /// The per-axis stretch of a rock shape. A facet's cone from the centre is the stretched cone of its triangle on
+    /// the unit sphere, so whoever looks facets up by direction divides by this first.
+    /// </summary>
+    public static Vector3 SquashOf(int shape) => shape == Icicle ? Vector3.One : Squash(shape);
+
     private static Vector4[][] BuildPlanes()
     {
         var sphere = AsteroidMesh.Sphere(AsteroidMesh.Subdivisions);

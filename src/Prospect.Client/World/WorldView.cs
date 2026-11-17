@@ -116,6 +116,26 @@ internal sealed partial class WorldView
     private readonly ClientSettings _settings;
     private readonly JobSystem _jobs;
     private readonly DamageMeshes _damage;
+
+    // Scraped rocks: their patches, and those drawn this frame with the instance each is drawn by.
+    private readonly RockPatches _rockPatches;
+    private readonly (MeshInstance Instance, int Mesh, RockPatchView Patch)[] _patchDraws = new (MeshInstance, int, RockPatchView)[SceneRenderer.RockPatchDraws];
+    private int _patchDrawCount;
+
+    // A mark's draw number at or above this is a scraped rock's place in _patchDraws, not a candidate.
+    private const int PatchDrawBase = 1 << 24;
+
+    /// <summary>Scraped rocks drawn with their patch this frame, and the patches kept in memory.</summary>
+    public int RockPatchesDrawn => _patchDrawCount;
+
+    /// <inheritdoc cref="RockPatchesDrawn" />
+    public int RockPatchesReady => _rockPatches.Ready;
+
+    /// <summary>Rock edits the render side has taken in from the session.</summary>
+    public int RockEditsKnown => _rockPatches.Edits;
+
+    /// <summary>How many patches the worker has built, the time of the last in milliseconds and its vertices.</summary>
+    public (int Built, double Milliseconds, int Vertices) RockPatchWork => (_rockPatches.Built, _rockPatches.LastBuildMs, _rockPatches.LastVertices);
     // Models of single thrust parts, for the editor's draft and ghost and for far hulls drawn block by block.
     private readonly PartModels _partModels;
     private readonly RackDeck _rackDecks = new();
@@ -389,6 +409,7 @@ internal sealed partial class WorldView
         _settings = settings;
         _jobs = jobs;
         _damage = new DamageMeshes(jobs, _collision.MeshVertices);
+        _rockPatches = new RockPatches(jobs, RockPatchLook.Load());
         _partModels = new PartModels(jobs, PropulsionLook.Shared);
         _scene = scene;
         RefreshKeyNames();
@@ -866,6 +887,7 @@ internal sealed partial class WorldView
         if (_captureCargoMode != 0) RunCargoCapture(bridge, dt);
         if (_captureFillMode != 0)
             RunFillCapture(bridge, dt);
+        if (_scrapeScriptPasses != 0) RunRockScrapeCapture(bridge, dt, snapshot.Content.RockEdits.DebugRadiusMm);
         UpdateEditedPose(snapshot);
         if (Editor.TakeReplacement(out var replaced, out var replacement))
             ReplaceHull(replaced, replacement);
@@ -1019,6 +1041,9 @@ internal sealed partial class WorldView
                 if (!AlignLockOn)
                     _align.Clear();
             }
+
+            // The temporary debug scrape: held, it scrapes the rock at the view's centre. The server takes it in local games only.
+            UpdateDebugScrape(bridge, dt, _actions.Held(_devices, InputAction.DebugScrape, keyboard), snapshot.Content.RockEdits.DebugRadiusMm);
 
             var alignHeld = _actions.Held(_devices, InputAction.AlignToView, keyboard) || AlignLockOn;
             var nose = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
@@ -1379,6 +1404,9 @@ internal sealed partial class WorldView
         }
 
         _rockExhaust.Begin(time, camera);
+        _rockPatches.Begin(snapshot.RockEdits, _scene);
+        _scene.BeginRockPatches();
+        _patchDrawCount = 0;
         if (ExhaustRock is { } fixture)
         {
             var center = fixture.Anchor.RelativeTo(camera) + fixture.RockCenter;
@@ -1386,13 +1414,19 @@ internal sealed partial class WorldView
             _rockExhaust.Offer(default, 0, 0, center, Quaternion.Identity, ExhaustRockCapture.Radius, new Vector3(0.3f), _thrust, candidateCount - 1);
         }
         else if (RockInterior is null) PrepareRockInstances(camera, aspect, ref candidateCount);
+        _rockPatches.End();
         var rockEffects = _rockExhaust.End(_thrust, _right, _up);
         _rockExhaust.Instances.AsSpan(0, rockEffects).CopyTo(_scene.RockEffects(frameIndex));
         _scene.QueueRockEffects(rockEffects);
         _rockExhaust.MarkData.AsSpan().CopyTo(_scene.RockMarks(frameIndex));
         for (var i = 0; i < RockExhaust.Marks; i++)
-            if (_rockExhaust.MarkDraws[i] is var draw && draw >= 0 && draw < candidateCount)
+        {
+            var draw = _rockExhaust.MarkDraws[i];
+            if (draw >= PatchDrawBase && draw - PatchDrawBase < _patchDrawCount)
+                RockExhaust.Include(ref _patchDraws[draw - PatchDrawBase].Instance.RockMarks, i);
+            else if (draw >= 0 && draw < candidateCount)
                 RockExhaust.Include(ref _candidates[draw].Instance.RockMarks, i);
+        }
 
         // Group instances by mesh so each mesh is one draw call: asteroids first, then hulls, so the jump lenses can
         // keep the world as it was before any hull was drawn over it.
@@ -1419,6 +1453,15 @@ internal sealed partial class WorldView
         var instances = _scene.Instances(frameIndex);
         for (var i = 0; i < candidateCount; i++)
             instances[_meshOffsets[_candidates[i].Mesh]++] = _candidates[i].Instance;
+
+        // Scraped rocks take their instances from the end of the buffer, which candidates never reach.
+        for (var i = 0; i < _patchDrawCount; i++)
+        {
+            ref readonly var draw = ref _patchDraws[i];
+            var instance = SceneRenderer.MaxInstances - 1 - i;
+            instances[instance] = draw.Instance;
+            _scene.AddRockPatch(draw.Mesh, instance, draw.Patch.FirstVertex, draw.Patch.VertexCount, draw.Patch.Runs, draw.Patch.RunCount);
+        }
 
         DrawFreeContainers(frameIndex, snapshot, camera);
         DrawTractorBeams(frameIndex, snapshot, camera);
@@ -1451,7 +1494,7 @@ internal sealed partial class WorldView
             Dust = new float4(Wrap(camera.X, DustCell), Wrap(camera.Y, DustCell), Wrap(camera.Z, DustCell), time),
             Drift = new float4(velocity.X, velocity.Y, velocity.Z, velocity.Length()),
             Grid = new float4(Wrap(camera.X, 1000), Wrap(camera.Z, 1000), Wrap(camera.X, sectorSize), Wrap(camera.Z, sectorSize)),
-            GridPlane = new float4((float)(_commandFocus.Y - camera.Y), (float)sectorSize, !CaptureFixture ? _commandBlend : 0, Exposure),
+            GridPlane = new float4((float)(_commandFocus.Y - camera.Y), (float)sectorSize, !CaptureFixture && _scrapeScriptPasses == 0 ? _commandBlend : 0, Exposure),
             Openings = openings,
             Clips = clips,
         };
@@ -1478,7 +1521,7 @@ internal sealed partial class WorldView
         // queues none in either capture; hulls in view are drawn without shields in both.
         _scene.QueueShields(overlayCheck ? 0 : _shields.Draws.Length, _shields.Look.Constants);
         QueueScanPulse(galaxy, camera, frameIndex);
-        _scene.Render(commands, frameIndex, constants, composite, _batches.AsSpan(0, rockBatches), _batches.AsSpan(rockBatches, batchCount - rockBatches), !CaptureFixture && _commandBlend > 0.01f, markCount, lensing);
+        _scene.Render(commands, frameIndex, constants, composite, _batches.AsSpan(0, rockBatches), _batches.AsSpan(rockBatches, batchCount - rockBatches), !CaptureFixture && _scrapeScriptPasses == 0 && _commandBlend > 0.01f, markCount, lensing);
     }
 
     public float ExposureValue => Exposure;
@@ -2004,10 +2047,21 @@ internal sealed partial class WorldView
         }
         if (rock.Resource >= 0)
             tint = Vector3.Lerp(tint, galaxy.Resources[rock.Resource].Color * 0.55f, (0.25f + 0.5f * rock.Grade) * (material == MaterialIce ? 0.4f : 1f));
-        if (detail == DetailFine)
-            _rockExhaust.Offer(slot.Coord, i, rock.Shape, position, rock.Rotation, rock.Radius, tint, _thrust, candidateCount);
         VisibleRocks++;
         _scanWaves.Offer(position, rock.Radius, pixels);
+
+        // A scraped rock near enough for its grooves to show: what is left of its finest mesh, and its patch.
+        var surface = Math.Max(1f, position.Length() - rock.Radius);
+        if (material == 0f && _patchDrawCount < _patchDraws.Length
+            && _rockPatches.Request(new RockRef(slot.Coord, i), rock.Shape, rock.Radius, surface * 2f * _tanHalfFov / _viewport.Y, surface, out var patch))
+        {
+            _rockExhaust.Offer(slot.Coord, i, rock.Shape, position, rock.Rotation, rock.Radius, tint, _thrust, PatchDrawBase + _patchDrawCount);
+            _patchDraws[_patchDrawCount++] = (MeshTransform(position, rock.Rotation, new Vector3(rock.Radius), tint, material, 1f), _asteroidMeshBase + DetailFine * Galaxy.AsteroidShapes + rock.Shape, patch);
+            return;
+        }
+
+        if (detail == DetailFine)
+            _rockExhaust.Offer(slot.Coord, i, rock.Shape, position, rock.Rotation, rock.Radius, tint, _thrust, candidateCount);
         Add(ref candidateCount, _asteroidMeshBase + detail * Galaxy.AsteroidShapes + rock.Shape, position, rock.Rotation, rock.Radius, tint, material);
     }
 
@@ -5272,7 +5326,7 @@ internal sealed partial class WorldView
 
     private void Add(ref int count, int mesh, Vector3 position, Quaternion rotation, Vector3 scale, Vector3 color, float material, float stretch = 1f)
     {
-        if (count == _candidates.Length) return;
+        if (count >= _candidates.Length - SceneRenderer.RockPatchDraws) return;
         _candidates[count++] = new Candidate
         {
             Mesh = mesh,

@@ -137,7 +137,10 @@ internal sealed class BoxCollision
     }
 
     // shortcut: finite box samples can miss a narrow rock ridge between samples; refine adaptively in stage 3.
-    internal static bool Rock(Vector3 center, Vector3 half, Quaternion orientation, in Asteroid rock, out Vector3 normal, out float depth, out Vector3 point, BlockShape shape = BlockShape.Box)
+    // A scraped rock (cut) is what is inside the base shape and outside every cut: a sample inside a cut touches
+    // nothing, and one nearer a cut's wall than the facet above it is pushed out through that wall.
+    internal static bool Rock(Vector3 center, Vector3 half, Quaternion orientation, in Asteroid rock, out Vector3 normal, out float depth, out Vector3 point, BlockShape shape = BlockShape.Box,
+        RockEditing.RockCut cut = default)
     {
         normal = Vector3.UnitY; depth = 0; point = default;
         var inverse = Quaternion.Conjugate(orientation);
@@ -156,6 +159,18 @@ internal sealed class BoxCollision
             if (penetration <= 0) continue;
             var facet = Vector3.Transform(AsteroidShape.Normal(rock.Shape, Vector3.Transform(direction, toRock), rock.Radius, 0), rock.Rotation);
             penetration *= Math.Max(0, Vector3.Dot(facet, direction));
+            if (cut.Any)
+            {
+                var wall = cut.Sample(Vector3.Transform(p, toRock), out var slope);
+                if (wall <= 0) continue;
+                var steep = slope.Length();
+                if (wall < penetration && steep > 0.25f)
+                {
+                    penetration = wall;
+                    facet = Vector3.Transform(slope / -steep, rock.Rotation);
+                }
+            }
+
             if (penetration > depth) { depth = penetration; normal = facet; point = Vector3.Transform(local, orientation); }
         }
         return depth > 0;

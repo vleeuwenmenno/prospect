@@ -224,7 +224,7 @@ internal static class Program
                 case "--rock-interior-resource" when hasValue:
                     options.RockInteriorResource = args[++i];
                     break;
-                case "--open" when hasValue && args[i + 1] is "rock-interior" or "exhaust-rock" or "exhaust-shield" or "exhaust-shield-cold" or "command" or "drone" or "map" or "map-ftl" or "map-menu" or "map-hover" or "map-card" or "map-card-near" or "map-card-far" or "map-tilt" or "map-reach" or "map-reach-tilt" or "scan" or "command-fog" or "command-fog-one" or "command-fog-pair" or "command-fog-far" or "command-menu" or "command-menu-fleet" or "command-menu-close" or "command-menu-far" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "edit-drone" or "edit-fill" or "edit-fill-done" or "edit-turn" or "edit-ion" or "edit-tank" or "edit-cargo" or "cargo" or "edit-rack" or "edit-tank-long" or "edit-tank-slab" or "edit-tank-fuel" or "edit-palette-tip" or "edit-scanner" or "edit-bay" or "drones" or "edit-mount" or "edit-mirror" or "edit-box-select" or "edit-select-all" or "edit-menu" or "edit-resize" or "edit-dump" or "edit-save" or "edit-load" or "edit-load-confirm" or "new-ship" or "new-ship-refused" or "new-ship-editor" or "new-ship-closed" or "scan-pilot" or "scan-command" or "interface" or "charts" or "pinned-charts" or "cargo-window" or "modules" or "module-command" or "gas" or "pinned-gas" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
+                case "--open" when hasValue && args[i + 1] is "rock-interior" or "exhaust-rock" or "rock-scrape" or "exhaust-shield" or "exhaust-shield-cold" or "command" or "drone" or "map" or "map-ftl" or "map-menu" or "map-hover" or "map-card" or "map-card-near" or "map-card-far" or "map-tilt" or "map-reach" or "map-reach-tilt" or "scan" or "command-fog" or "command-fog-one" or "command-fog-pair" or "command-fog-far" or "command-menu" or "command-menu-fleet" or "command-menu-close" or "command-menu-far" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "edit-drone" or "edit-fill" or "edit-fill-done" or "edit-turn" or "edit-ion" or "edit-tank" or "edit-cargo" or "cargo" or "edit-rack" or "edit-tank-long" or "edit-tank-slab" or "edit-tank-fuel" or "edit-palette-tip" or "edit-scanner" or "edit-bay" or "drones" or "edit-mount" or "edit-mirror" or "edit-box-select" or "edit-select-all" or "edit-menu" or "edit-resize" or "edit-dump" or "edit-save" or "edit-load" or "edit-load-confirm" or "new-ship" or "new-ship-refused" or "new-ship-editor" or "new-ship-closed" or "scan-pilot" or "scan-command" or "interface" or "charts" or "pinned-charts" or "cargo-window" or "modules" or "module-command" or "gas" or "pinned-gas" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
                     options.OpenView = args[++i];
                     break;
                 case "--browser-sample" when hasValue:
@@ -396,6 +396,26 @@ internal static class Program
                     break;
                 case "--hold-thrust" when hasValue && float.TryParse(args[i + 1], out var holdThrust) && holdThrust is >= -1f and <= 1f:
                     options.HoldThrust = holdThrust;
+                    i++;
+                    break;
+                case "--rock-scrape-radius" when hasValue && float.TryParse(args[i + 1], System.Globalization.CultureInfo.InvariantCulture, out var scrapeRadius) && scrapeRadius is > 0f and <= 100_000f:
+                    options.RockScrapeRadius = scrapeRadius;
+                    i++;
+                    break;
+                case "--rock-scrape-standoff" when hasValue && float.TryParse(args[i + 1], System.Globalization.CultureInfo.InvariantCulture, out var scrapeStandoff) && scrapeStandoff is >= 1f and <= 5000f:
+                    options.RockScrapeStandoff = scrapeStandoff;
+                    i++;
+                    break;
+                case "--rock-scrape-passes" when hasValue && int.TryParse(args[i + 1], out var scrapePasses) && scrapePasses is >= 1 and <= 100:
+                    options.RockScrapePasses = scrapePasses;
+                    i++;
+                    break;
+                case "--rock-scrape-rest" when hasValue && float.TryParse(args[i + 1], System.Globalization.CultureInfo.InvariantCulture, out var scrapeRest) && scrapeRest is >= 0f and <= 600f:
+                    options.RockScrapeRest = scrapeRest;
+                    i++;
+                    break;
+                case "--rock-scrape-distance" when hasValue && float.TryParse(args[i + 1], System.Globalization.CultureInfo.InvariantCulture, out var scrapeDistance) && scrapeDistance is >= 2f and <= 100_000f:
+                    options.RockScrapeDistance = scrapeDistance;
                     i++;
                     break;
                 case "--coast" when hasValue && float.TryParse(args[i + 1], out var coastSpeed) && coastSpeed is >= 0f and <= 400f:
@@ -576,6 +596,9 @@ internal static class Program
 
         if (options.BenchResizes > 0 && (options.BenchSeconds <= 0 || options.VisualBenchmark is not null))
             return Fail("--bench-resize works only with --bench, without --visual-scene.");
+
+        if (options.OpenView == "rock-scrape" && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
+            return Fail("--open rock-scrape works only with --capture or --bench, in an unsaved private local game.");
 
         if (options.HoldThrust is not null && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--hold-thrust works only with --capture or --bench: it replaces the pilot's forward key.");

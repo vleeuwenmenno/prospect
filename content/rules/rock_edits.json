@@ -1,0 +1,17 @@
+{
+  "cellMetres": 0.25,
+  "minRadiusMetres": 0.25,
+  "maxRadiusMetres": 2,
+  "maxSegmentMetres": 4,
+  "maxEditsPerRock": 2048,
+  "maxBricksPerRock": 1024,
+  "maxEditedRocks": 512,
+  "maxEdits": 65536,
+  "maxBricks": 16384,
+  "debug": {
+    "rangeMetres": 600,
+    "intervalSeconds": 0.1,
+    "biteMetres": 0.4,
+    "radiusMetres": 1
+  }
+}
