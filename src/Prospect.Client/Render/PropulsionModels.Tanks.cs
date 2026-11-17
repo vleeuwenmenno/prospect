@@ -26,6 +26,7 @@ internal static partial class PropulsionModels
     /// <summary>True when a block of <paramref name="type"/> in <paramref name="shape"/> is drawn as a model: a thrust part's or a tank's.</summary>
     public static bool HasModel(BlockType type, BlockShape shape, PropulsionLook look) =>
         ModelOf(type, shape, look) is not null || TankOf(type, shape, look) is not null || (shape == BlockShape.Box && ScannerOf(type, look) is not null)
+        || (shape == BlockShape.Box && LaserOf(type, look) is not null)
         || (shape == BlockShape.Box && type.Cargo > 0 && look.Rack is not null) || IsBay(type, shape, look);
 
     /// <summary>
@@ -46,6 +47,8 @@ internal static partial class PropulsionModels
         }
         else if (TankOf(type, BlockShape.Box, look) is { } paint)
             BuildTank(look.Tanks!, paint, box, 0, 0, vertices, indices);
+        else if (LaserOf(type, look) is { } laser)
+            BuildLaser(laser, type, box, vertices, indices);
         else if (ScannerOf(type, look) is { } scanner)
             BuildScanner(scanner, type, box, vertices, indices);
         else if (IsBay(type, BlockShape.Box, look))

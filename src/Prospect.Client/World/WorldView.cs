@@ -838,6 +838,7 @@ internal sealed partial class WorldView
             _damage.Clear();
             _sparks.Clear();
             _freeVisuals.Clear();
+            _oreVisuals.Clear();
             TargetContainer = 0;
             _thrust.Clear();
             _rockExhaust.Clear();
@@ -860,6 +861,7 @@ internal sealed partial class WorldView
         }
 
         UpdateFreeContainers(snapshot);
+        UpdateOreChunks(snapshot);
         ApplyRockDeltas(snapshot);
         _time += dt;
 
@@ -1473,6 +1475,8 @@ internal sealed partial class WorldView
 
         DrawFreeContainers(frameIndex, snapshot, camera);
         DrawTractorBeams(frameIndex, snapshot, camera);
+        DrawLaserBeams(frameIndex, snapshot, camera);
+        DrawOreChunks(frameIndex, snapshot, camera);
         _scene.AddSparks(frameIndex, _sparks.Expand(camera, _right, _up, _forward, aspect, _tanHalfFov, _viewport.Y, snapshot.ServerTickPrecise + alpha, _collision));
         var f = 1f / _tanHalfFov;
         var sunColor = galaxy.StarClasses[Sector.StarClass].Color * 1.7f;
