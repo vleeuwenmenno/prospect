@@ -52,9 +52,10 @@ The editor's All list already enumerates these mount types. Designs still pass t
 | asteroidScanner | 0.5 | 5 | 3000 | 5 | 9 | 10 |
 | asteroidLocator | 0.6 | 6 | 5000 | 2 | 12 | 15 |
 
-Active draw is large on purpose: the command pod's generator makes 6 MW and its idle draw with all three modules is about 1 MW,
-so a scan must move the net energy figure, as shield recovery does (`docs/direction.md`, "shield power must be felt and seen").
-On the pod a gas scan nets about -1 MW, an asteroid scan -4 MW, a locator pulse -7 MW; one scan costs at most about a third of the battery.
+Active draw is large on purpose: the Prospector's generators make 12 MW against 6.8 MW of idle draw (gyros, six scanners),
+5.2 MW spare, so a scan must move the net energy figure, as shield recovery does (`docs/direction.md`, "shield power must be felt and seen").
+On it a gas scan nets about -0.8 MW, an asteroid scan -3.8 MW, a locator pulse -6.8 MW; one scan costs under a tenth of the battery.
+The scan tests pin the starting ship's spare power between 4.8 and 5.45 MW.
 `PowerFlowTests` holds this for every quality (the multiplier takes Alien Tech to 24 MW for a 0.5 s pulse).
 
 Base accuracy is 0.2: percentage observations resolve 5 percentage points; Alien Tech resolves one point.

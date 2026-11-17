@@ -651,7 +651,7 @@ public sealed class EditorSessionTests
 
     private sealed class Rig : IDisposable
     {
-        private readonly ContentCopy _files = new();
+        private readonly ContentCopy _files = new(fleet: true);
         private readonly LoopbackLink[] _links;
         private readonly long[] _joined;
         internal readonly GameContent Content;
@@ -676,7 +676,7 @@ public sealed class EditorSessionTests
             if (catalogueSpare is { } spare)
             {
                 long shipped = 0;
-                foreach (var design in GameContent.Load().Designs) shipped += DesignBytes.Encode(design).Length;
+                foreach (var design in FleetContent.Value.Designs) shipped += DesignBytes.Encode(design).Length;
                 _files.Replace("net/blocks.json", "\"catalogueBytes\": 196608", $"\"catalogueBytes\": {shipped + spare}");
             }
             _files.Replace("rules/exploration.json", "5e3", "5");
@@ -1737,7 +1737,7 @@ public sealed class EditorSessionTests
     {
         // The shipped rules, a real socket and every thread running: the chunks count against the builder's
         // allowance, the check runs beside a live tick, and the other player's session is told by the server.
-        var content = GameContent.Load();
+        var content = FleetContent.Value;
         var port = TestNet.Port(28);
         using var server = new ServerHost(new ServerConfig { MaxPlayers = 2 }, content, RakNetTransport.Listen(port, 8));
         server.Start();

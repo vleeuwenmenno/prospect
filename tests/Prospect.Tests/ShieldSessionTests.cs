@@ -19,7 +19,7 @@ public sealed class ShieldSessionTests
     [InlineData(4)]
     public void EnergyLimitedRestartAgreesWithPredictionAcrossSnapshots(int lead)
     {
-        var content = GameContent.Load();
+        var content = FleetContent.Value;
         using var link = new LoopbackLink();
         using var server = new ServerHost(new ServerConfig { MaxPlayers = 1 }, content, link.Server);
         using var client = new ClientSession(link.Client, content, "Pilot");
@@ -73,7 +73,7 @@ public sealed class ShieldSessionTests
     [Fact]
     public void ThePilotsPowerFlowShowsTheRestartWhileAFullBatteryHidesIt()
     {
-        var content = GameContent.Load();
+        var content = FleetContent.Value;
         using var link = new LoopbackLink();
         using var server = new ServerHost(new ServerConfig { MaxPlayers = 1 }, content, link.Server);
         using var client = new ClientSession(link.Client, content, "Pilot");
@@ -126,7 +126,7 @@ public sealed class ShieldSessionTests
     public void ABrokenShieldStaysOfflineUntilItsThresholdAndEveryClientAgrees()
     {
         // Weak shields break in one pass; stronger blocks keep the emitter alive so it can recharge.
-        var content = GameContent.Load();
+        var content = FleetContent.Value;
         content = content.WithSettings(content.SettingCatalog.Build(null, ["collisionShields=Weak", "hullStrength=4"]));
         var pod = content.Pod.Flight;
         using var link = new LoopbackLink();

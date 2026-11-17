@@ -11,7 +11,7 @@ namespace Prospect.Tests;
 /// </summary>
 public sealed class SaveCapacityTests
 {
-    private static readonly GameContent Shipped = GameContent.Load();
+    private static readonly GameContent Shipped = FleetContent.Value;
 
     /// <summary>
     /// Asteroids of a sector that a hull can be flown at alone: small enough that they would visibly give way,

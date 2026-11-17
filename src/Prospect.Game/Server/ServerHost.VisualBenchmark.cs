@@ -32,6 +32,13 @@ public sealed partial class ServerHost
     private readonly VisualBenchmarkScene? _visualBenchmark;
     private HullHandle[]? _benchmarkHulls;
 
+    /// <summary>
+    /// The design of the scene's <paramref name="i"/>th hull: the large plate, else the starting fleet's designs in
+    /// turn, else (content that gives a player no fleet) the pod's.
+    /// </summary>
+    private byte BenchmarkDesign(VisualBenchmarkScene scene, int i) => (byte)(scene.Large ? _content.Designs.Length - 1
+        : _content.StartingFleet.Length > 0 ? _content.StartingFleet[i % _content.StartingFleet.Length] : _content.PodDesign);
+
     private void TickVisualBenchmark(long tick)
     {
         if (_visualBenchmark is not { } scene || _playerCount == 0) return;
@@ -52,7 +59,7 @@ public sealed partial class ServerHost
             _benchmarkHulls = new HullHandle[scene.Hulls - 1];
             for (var i = 0; i < _benchmarkHulls.Length; i++)
             {
-                var index = (byte)(scene.Large ? _content.Designs.Length - 1 : _content.StartingFleet[i % _content.StartingFleet.Length]);
+                var index = BenchmarkDesign(scene, i);
                 var design = _content.Designs[index];
                 var position = SpawnPoint + new Double3((i % 7 - 3) * (scene.Large ? 40 : 16), (i / 7 - 2) * (scene.Large ? 32 : 14), scene.View == "far" ? -1200 : scene.View == "behind" ? 200 : scene.Large ? -260 : -100);
                 var h = CreateHull(0, index, position, fullTanks: true);
@@ -70,8 +77,7 @@ public sealed partial class ServerHost
             for (var i = 0; i < 2; i++)
             {
                 if (_hulls.IsAlive(_benchmarkHulls[i])) _hulls.Destroy(_benchmarkHulls[i]);
-                var index = (byte)(scene.Large ? _content.Designs.Length - 1 : _content.StartingFleet[i % _content.StartingFleet.Length]);
-                _benchmarkHulls[i] = CreateHull(0, index, SpawnPoint + new Double3(i * 30 - 15, 0, -35), fullTanks: true);
+                _benchmarkHulls[i] = CreateHull(0, BenchmarkDesign(scene, i), SpawnPoint + new Double3(i * 30 - 15, 0, -35), fullTanks: true);
             }
         // Re-stage two existing bodies, then let the ordinary collision solver decide the contact and damage.
         if (scene.Activity != "impacts" || tick % 60 != 30) return;
@@ -80,7 +86,9 @@ public sealed partial class ServerHost
             var h = _benchmarkHulls[i];
             if (!_hulls.IsAlive(h)) continue;
             ref var state = ref _hulls.State(h.Index);
-            state.Position = SpawnPoint + new Double3(i * 3, 0, -35);
+            // Side by side with a metre between them, whatever the design's width, so they meet at once.
+            var width = _content.Designs[_hulls.Info(h.Index).Design].Stats.Size.X + 1.0;
+            state.Position = SpawnPoint + new Double3(i * width, 0, -35);
             state.Velocity = new Vector3(i == 0 ? 15 : -15, 0, 0);
             state.Shield = 0;
             state.ShieldOffline = true;

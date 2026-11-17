@@ -395,7 +395,7 @@ public sealed class ProtocolTests
 /// <summary>The client's predicted world, fed the snapshots a server would send it.</summary>
 public sealed class ClientPredictionTests : IDisposable
 {
-    private static readonly GameContent Content = GameContent.Load();
+    private static readonly GameContent Content = FleetContent.Value;
     private const uint Player = 1;
     private const uint OwnHull = 1 << 16;
 

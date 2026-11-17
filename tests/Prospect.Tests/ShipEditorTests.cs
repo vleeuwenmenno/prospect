@@ -8,7 +8,7 @@ namespace Prospect.Tests;
 /// <summary>The ship editor's geometry and the draft's preview checks, without a renderer or an interface.</summary>
 public sealed class ShipEditorTests
 {
-    private static readonly GameContent Content = GameContent.Load();
+    private static readonly GameContent Content = FleetContent.Value;
     private static readonly GridSize One = new(1, 1, 1);
 
     private static DesignBox Box(string type, GridSize at, GridSize size) => new(at, size, Content.Blocks.Get(type));

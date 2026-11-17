@@ -13,7 +13,7 @@ public sealed class FlightTests
     [Fact]
     public void LooseContainerTickTakesNoMemoryAfterSectorGeneration()
     {
-        var content = GameContent.Load();
+        var content = FleetContent.Value;
         using var hulls = new HullStore();
         var field = new HullField(hulls, content.Designs);
         var rocks = new RockField(content.Galaxy);
@@ -35,7 +35,7 @@ public sealed class FlightTests
         Assert.True(containers.Items[0].Position.X > 0);
     }
 
-    private static readonly FlightParams Pod = GameContent.Load().Pod.Flight;
+    private static readonly FlightParams Pod = FleetContent.Value.Pod.Flight;
 
     private static HullState Fly(HullState state, FlightInput input, int ticks)
     {
@@ -47,7 +47,7 @@ public sealed class FlightTests
     [Fact]
     public void ModuleTickSpendsOnlyWholeIntervalsAndReportsTheSamePowerWithoutAllocation()
     {
-        var equipment = ModuleEquipment.Of(1, GameContent.Load().Blocks.Get("gasScanner").Module);
+        var equipment = ModuleEquipment.Of(1, FleetContent.Value.Blocks.Get("gasScanner").Module);
         var cost = (float)(equipment.PowerDraw / 60);
         var energy = cost * .5f;
         var flow = default(PowerFlow);
@@ -70,7 +70,7 @@ public sealed class FlightTests
     [Fact]
     public void GasCoverageTickUsesSharedRangeBudget()
     {
-        var content = GameContent.Load();
+        var content = FleetContent.Value;
         var cache = new SensorGasCache(content.Galaxy, content.Exploration.SensorRadius);
         Assert.True(GasSensors.Covers(content.Galaxy, cache.At(default), content.Exploration, default, new Double3(250, 0, 0), false));
         Assert.False(GasSensors.Covers(content.Galaxy, cache.At(default), content.Exploration, default, new Double3(5001, 0, 0)));
@@ -79,7 +79,7 @@ public sealed class FlightTests
     [Fact]
     public void JumpPreviewAndRollTakeNoTickMemory()
     {
-        var content = GameContent.Load();
+        var content = FleetContent.Value;
         var probe = new AllocationProbe();
         for (var i = 0; i < 100; i++)
             while (probe.Measuring())
@@ -180,10 +180,8 @@ public sealed class HullDesignTests
     private static readonly GameContent Content = GameContent.Load();
 
     [Theory]
-    [InlineData(0, 800f, 400f, 37.5f)]
-    [InlineData(1, 1600f, 800f, 37.5f)]
-    [InlineData(2, 1600f, 800f, 37.5f)]
-    [InlineData(3, 60f, 15f, 5f)]
+    [InlineData(0, 2240f, 1200f, 37.5f)]
+    [InlineData(1, 60f, 15f, 5f)]
     public void ShippedFlightBalanceReachesRuntimeAndEditorStats(int index, float forwardThrust, float lateralThrust, float recharge)
     {
         var design = Content.Designs[index];
@@ -222,10 +220,11 @@ public sealed class HullDesignTests
         var stats = pod.Stats;
         var mass = 0f;
         var hull = 0f;
-        foreach (var type in pod.Types)
+        // A block larger than a cell weighs and holds as its size says; a wedge is half its box.
+        foreach (var box in pod.Boxes)
         {
-            mass += type.Mass;
-            hull += type.Hull;
+            mass += (float)BoxDesign.Scaled(box, "mass", box.Type.Mass);
+            hull += (float)BoxDesign.Scaled(box, "hull", box.Type.Hull);
         }
 
         // A mounted thruster weighs something and has no hit points of its own.
@@ -235,16 +234,31 @@ public sealed class HullDesignTests
         Assert.Equal(pod.Cells.Length, stats.Blocks);
         Assert.Equal(mass, stats.Mass, 3);
         Assert.Equal(hull, stats.HullPoints, 3);
-        Assert.Equal(new Vector3(5, 2, 5), stats.Size);
+        Assert.Equal(new Vector3(7, 3, 10), stats.Size);
 
-        // The engine faces back and pushes forward; four cold gas thrusters are mounted facing each other way, so
-        // the pod accelerates harder than it brakes or strafes.
-        var thruster = Content.Blocks.Get("coldGasThruster").Thrust * 4;
-        var engine = Content.Blocks.Get("engine").Thrust;
-        Assert.Equal(thruster / mass, stats.Deceleration, 3);
-        Assert.Equal(thruster / mass, stats.LateralAcceleration, 3);
-        Assert.Equal(engine / mass, stats.Acceleration, 3);
-        Assert.True(stats.Acceleration > stats.Deceleration);
+        // Two engines and four hot thrusters face back and push forward; cold gas thrusters push every other way, and
+        // the ion drive in the nose and the ion thrusters beside the braking thrusters face front, so they brake too.
+        // The ship accelerates harder than it brakes, and brakes harder than it strafes.
+        float Pushing(BlockFacing face, Func<BlockType, bool> kind)
+        {
+            var sum = 0f;
+            foreach (var mount in pod.Mounts)
+                if (mount.Face == face && kind(mount.Type)) sum += mount.Type.Thrust;
+            foreach (var box in pod.Boxes)
+                if (box.Type.Thrust > 0 && box.Type.Mount is null && box.Facing == face && kind(box.Type)) sum += box.Type.Thrust;
+            return sum;
+        }
+
+        var forward = Pushing(BlockFacing.Back, _ => true);
+        var braking = Pushing(BlockFacing.Front, _ => true);
+        var lateral = Pushing(BlockFacing.Left, _ => true);
+        Assert.Equal(2 * Content.Blocks.Get("engine").Thrust + 4 * Content.Blocks.Get("hotThruster").Thrust, forward);
+        Assert.Equal(16 * Content.Blocks.Get("coldGasThruster").Thrust + Content.Blocks.Get("ionDrive").Thrust + 2 * Content.Blocks.Get("ionThruster").Thrust, braking);
+        Assert.Equal(12 * Content.Blocks.Get("coldGasThruster").Thrust, lateral);
+        Assert.Equal(braking / mass, stats.Deceleration, 3);
+        Assert.Equal(lateral / mass, stats.LateralAcceleration, 3);
+        Assert.Equal(forward / mass, stats.Acceleration, 3);
+        Assert.True(stats.Acceleration > stats.Deceleration && stats.Deceleration > stats.LateralAcceleration);
 
         // Rolling turns the least mass about the shortest lever, so it is the quickest axis.
         Assert.True(stats.TurnRate.Z > stats.TurnRate.Y);
@@ -256,7 +270,7 @@ public sealed class HullDesignTests
 [Collection(TimingBudgets.Name)]
 public sealed class PowerAndDamageTests
 {
-    private static readonly GameContent Content = GameContent.Load();
+    private static readonly GameContent Content = FleetContent.Value;
     private static readonly FlightParams Pod = Content.Pod.Flight;
 
     [Fact]
@@ -970,7 +984,7 @@ public sealed class PowerAndDamageTests
 /// <summary>Hulls running into each other, stepped the way the server steps them.</summary>
 public sealed class HullCollisionTests : IDisposable
 {
-    private static readonly GameContent Content = GameContent.Load();
+    private static readonly GameContent Content = FleetContent.Value;
     private static readonly int Vessel = Content.StartingFleet[0];
     private readonly HullStore _hulls = new();
     private readonly HullField _field;
@@ -1598,7 +1612,7 @@ public sealed class HullCollisionTests : IDisposable
 
 public sealed class JumpTests
 {
-    private static readonly GameContent Content = GameContent.Load();
+    private static readonly GameContent Content = FleetContent.Value;
 
     [Theory]
     [InlineData(0d)]
@@ -2013,7 +2027,7 @@ public sealed class HullStoreTests
 /// <summary>Flies real sessions: prediction against the authoritative server, orders, and a second player.</summary>
 public sealed class FlightSessionTests
 {
-    private static readonly GameContent Content = GameContent.Load();
+    private static readonly GameContent Content = FleetContent.Value;
 
     [Fact]
     public void PredictedHullTracksTheServerWhileFlying()

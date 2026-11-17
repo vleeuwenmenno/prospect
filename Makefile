@@ -306,18 +306,13 @@ test: need-dotnet ## Run the unit tests
 	$(call step,Running the listing server tests)
 	$(Q)"$(DOTNET)" $(BIN)/Prospect.Listing.Tests/$(config)/Prospect.Listing.Tests.dll $(TEST_ARGS)
 
-# The shipped pod has no tractor beam, so the cargo run uses a copy of the Release build whose pod has one and two
-# racks (tools/prepare_tractor_capture.py). The run lasts about 24 s of play: the first rack releases a container at 5 s,
-# it drifts away, the beam picks it up and the rack takes it back. It fails on any managed allocation, and when the
-# container was never seen loose or is not back in the hold at the end.
-TRACTOR_BENCH := $(BIN)/tractor-bench
+# The shipped ship carries tractor beams, racks and a drone bay, so the cargo and drone runs use the Release build as it
+# is. Cargo: the first rack releases a container at 5 s, it drifts away, a beam picks it up and the rack takes it back;
+# it fails on any managed allocation, and when the container was never seen loose or is not back in the hold at the end.
+# Drones: three launch at 1.5 s, hold station and are called home at 12 s; it fails on any managed allocation, and when
+# no drone was seen out or the bay is not full again with every drone docked at the end.
 
-# The shipped pod has no drone bay either, so the drone run uses a copy whose pod has one (tools/prepare_drone_capture.py).
-# Three drones launch at 1.5 s, hold station and are called home at 12 s. It fails on any managed allocation, and when no
-# drone was seen out or the bay is not full again with every drone docked at the end.
-DRONE_BENCH := $(BIN)/drone-bench
-
-# Drone fetch: the tractor pod with a drone bay, containers jettisoned fast enough to leave the beam's range
+# Drone fetch: a copy whose containers are jettisoned fast enough to leave the beam's range
 # (tools/prepare_drone_fetch_capture.py). One container is jettisoned at 5 s, drones are sent for it at 12 s, carry it
 # back and hand it to the beam, which stows it. It fails on any managed allocation, and when no fetch was seen or the
 # container is not back in the hold at the end.
@@ -334,14 +329,10 @@ bench: need-dotnet ## Release benchmark: empty scene, resizing, editor panels, c
 	$(Q)for view in edit-cargo edit-menu edit-dump edit-mirror; do \
 	  $(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 4 --size 1920x1080 --open $$view || exit $$?; \
 	done
-	$(call step,Fitting a copy of the build with a tractor beam and racks)
-	$(Q)python3 tools/prepare_tractor_capture.py $(BIN)/Prospect.Client/release $(TRACTOR_BENCH)
 	$(call step,Benchmarking cargo (jettison, drift, tractor pull and stow))
-	$(Q)$(RUN_ENV) "$(DOTNET)" $(TRACTOR_BENCH)/prospect.dll --bench 25 --size 1920x1080 --open cargo --jettison 5
-	$(call step,Fitting a copy of the build with a drone bay)
-	$(Q)python3 tools/prepare_drone_capture.py $(BIN)/Prospect.Client/release $(DRONE_BENCH)
+	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 25 --size 1920x1080 --open cargo --jettison 5
 	$(call step,Benchmarking drones (launch, hold station, recall and dock))
-	$(Q)$(RUN_ENV) "$(DOTNET)" $(DRONE_BENCH)/prospect.dll --bench 25 --size 1920x1080 --open drones --drone-recall 12
+	$(Q)$(RUN_ENV) "$(DOTNET)" $(BIN)/Prospect.Client/release/prospect.dll --bench 25 --size 1920x1080 --open drones --drone-recall 12
 	$(call step,Fitting a copy of the build for a drone fetch)
 	$(Q)python3 tools/prepare_drone_fetch_capture.py $(BIN)/Prospect.Client/release $(FETCH_BENCH)
 	$(call step,Benchmarking a drone fetch (outbound, carry, hand-over and stow))
@@ -373,7 +364,7 @@ bench-gas: need-dotnet ## Release benchmark inside gas clouds: fails under 144 f
 	$(call step,Inside a cold and normal pair (not judged))
 	$(Q)$(GAS_BENCH) --set sectorSize=20 --sector -21,2,35 --gas-view inside --bench-no-fps-target
 
-# The shipped pod has no scanner, so this runs a copy of the Release build whose pod has all three, with short scans.
+# The shipped ship carries all three scanners; this runs a copy of the Release build whose scans and cooldowns are short.
 # Each run asks again the moment its cooldown ends; it fails on a single managed allocation (render thread or any other)
 # and on fewer than five completed scans, so a scan that never started cannot pass. Gas needs a cloud near arrival, and
 # the inside of a cloud is slower than 144 fps at the window's size, so that run reports its frame rate without judging it.

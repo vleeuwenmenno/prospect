@@ -18,7 +18,7 @@ public sealed class ObserverPassageTests
     private static readonly GameContent Content = WithCoverage();
     private static GameContent WithCoverage()
     {
-        using var files = new ContentCopy();
+        using var files = new ContentCopy(fleet: true);
         files.Replace("rules/exploration.json", "5000", "2000000");
         // These replication fixtures deliberately see across the whole jump, independent of gas.
         files.Replace("rules/exploration.json", "\"gasOpticalPenalty\": 1.0", "\"gasOpticalPenalty\": 0.0");

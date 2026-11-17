@@ -16,7 +16,7 @@ Set `PROSPECT_VISUAL_REPORT` to the absolute CSV destination (default `/tmp/pros
 - Activity: `clean`, server-seeded retained `dents`, or `impacts` (seeded dents plus re-staged real hull contacts).
 - View: `near`, `far` (1,200 m ahead), or `behind` (200 m behind).
 - Optional `,large`: shared connected 910-box plate, admitted by `DesignBytes.Decode` before any session threads start.
-- Default designs alternate the shipped mining and survey vessels. All scenarios use the normal authoritative server, snapshot replication and renderer.
+- Default designs alternate the starting fleet's designs; the shipped content has none, so every hull is the starting ship. All scenarios use the normal authoritative server, snapshot replication and renderer.
 
 ## What is controlled
 

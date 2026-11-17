@@ -319,6 +319,17 @@ internal sealed class HostingOptions
 /// </summary>
 internal sealed class App : IDisposable
 {
+    /// <summary>
+    /// Scripted fixtures that need other owned hulls (fleet jumps, the command view's coverage of a pair, the fleet's
+    /// course menu, the exhaust-on-shield pair, the hurt fleet and the target panel) get two copies of the ship
+    /// beside it, since the shipped content gives a player one ship and no fleet.
+    /// </summary>
+    private static int ScriptedEscorts(AppOptions options) =>
+        options.OpenView is "jump-fleet" or "jump-fleet-ahead" or "map-ftl" or "command-fog-pair" or "command-fog-far"
+            or "command-menu-fleet" or "exhaust-shield" or "exhaust-shield-cold"
+        || options.HurtFleetSeconds is not null && !options.HurtFleetTank && !options.HurtFleetCargo && !options.CutHull
+        || options.TargetNearest ? 2 : 0;
+
     public const string VersionLabel = "PROSPECT 0.1.0";
 
     /// <summary>The window title of a capture or benchmark run, which a compositor rule can match to hide it.</summary>
@@ -713,6 +724,7 @@ internal sealed class App : IDisposable
                 ScriptedRockScrapeStandoff = _options.RockScrapeStandoff,
                 ScriptedRockScrapeRest = Devices.Muted && _options.OpenView == "rock-scrape" ? _options.RockScrapeRest : null,
                 ScriptedExhaustShield = Devices.Muted ? _options.OpenView switch { "exhaust-shield" => 1, "exhaust-shield-cold" => 2, _ => 0 } : 0,
+                ScriptedEscorts = Devices.Muted && !hosted ? ScriptedEscorts(_options) : 0,
                 ScriptedFleetHurtSeconds = _options.HurtFleetSeconds,
                 ScriptedFleetHurtBroken = _options.HurtFleetBroken,
                 ScriptedFleetHurtTank = _options.HurtFleetTank,

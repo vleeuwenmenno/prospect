@@ -7,11 +7,12 @@ namespace Prospect.Tests;
 
 /// <summary>
 /// A copy of the shipped <c>content/</c> in a temporary directory, for a test to change and load. The game's own
-/// content is never written to.
+/// content is never written to. With <c>fleet</c> the copy is <see cref="FleetContent"/>'s instead: the test fleet's
+/// ships in place of the shipped one.
 /// </summary>
 internal sealed class ContentCopy : IDisposable
 {
-    public ContentCopy()
+    public ContentCopy(bool fleet = false)
     {
         Root = Path.Combine(Path.GetTempPath(), "prospect-content-" + Guid.NewGuid().ToString("N"));
         var source = AppPaths.Content();
@@ -21,6 +22,9 @@ internal sealed class ContentCopy : IDisposable
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             File.Copy(file, target);
         }
+
+        if (fleet)
+            FleetContent.Fit(Root);
     }
 
     /// <summary>The directory, laid out as <c>content/</c> is.</summary>
@@ -159,7 +163,7 @@ public sealed class ContentIdentityTests
             return;
 
         using var copy = new ContentCopy();
-        string[] shared = ["blocks/cargo.json", "blocks/blocks.json", "rules/settings.json", "rules/exploration.json", "ships/fleet.json", "ships/command_pod.json", "ships/drone.json", "ships/work_drone.json", "blocks/drones.json", "galaxy/galaxy.json", "galaxy/interiors.json", "net/blocks.json", "rules/rock_edits.json"];
+        string[] shared = ["blocks/cargo.json", "blocks/blocks.json", "rules/settings.json", "rules/exploration.json", "ships/fleet.json", "ships/prospector.json", "ships/drone.json", "ships/work_drone.json", "blocks/drones.json", "galaxy/galaxy.json", "galaxy/interiors.json", "net/blocks.json", "rules/rock_edits.json"];
         var writers = new List<Task>();
         foreach (var file in shared)
         {
@@ -246,11 +250,11 @@ public sealed class ContentIdentityTests
     // Limits the server enforces by its own files, whatever a client's say.
     [InlineData("net/social.json", "\"partySize\": 8", "\"partySize\": 6")]
     // A shipped design: one block of another type, and one block elsewhere.
-    [InlineData("ships/command_pod.json", "{ \"at\": [-2, 0, 1], \"type\": \"cargo\" }", "{ \"at\": [-2, 0, 1], \"type\": \"hull\" }")]
-    [InlineData("ships/command_pod.json", "{ \"at\": [-2, 0, 1], \"type\": \"cargo\" }", "{ \"at\": [-2, 1, 1], \"type\": \"cargo\" }")]
+    [InlineData("ships/prospector.json", "{\"at\": [0, -1, 2], \"type\": \"hull\"", "{\"at\": [0, -1, 2], \"type\": \"battery\"")]
+    [InlineData("ships/prospector.json", "{\"at\": [0, 0, 3], \"type\": \"hull\"}", "{\"at\": [0, 1, 3], \"type\": \"hull\"}")]
     // The fleet list: the order of the designs, which is what a design number means, and what a player starts with.
-    [InlineData("ships/fleet.json", "\"mining_vessel\", \"survey_vessel\", \"drone\"", "\"survey_vessel\", \"mining_vessel\", \"drone\"")]
-    [InlineData("ships/fleet.json", "\"startingFleet\": [\"mining_vessel\", \"survey_vessel\"]", "\"startingFleet\": [\"mining_vessel\"]")]
+    [InlineData("ships/fleet.json", "\"prospector\", \"drone\", \"work_drone\"", "\"drone\", \"prospector\", \"work_drone\"")]
+    [InlineData("ships/fleet.json", "\"startingFleet\": []", "\"startingFleet\": [\"prospector\"]")]
     public void WhatCannotPutTheSimulationOutOfStepIsLeftOut(string file, string old, string replacement)
     {
         using var copy = new ContentCopy();

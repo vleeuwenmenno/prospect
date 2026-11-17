@@ -188,7 +188,7 @@ Built. Rules live in `FlightModel.Step`; `PropulsionTests`, `PowerFlowTests` and
 
 - Against fuelled parts: half the thrust of the matching part, at about 8 times (drive) to 15 times (thrusters) its
   power. An `engine` is 800 kN for 1.0 MW and 0.2 kg/s; a cold gas thruster 100 kN for 0.0375 MW.
-- Why ion is pointless as a Prospector's main drive: its two engines give 1,600 kN (20.3 m/s² on 79 t).
+- Why ion is pointless as a main drive: two engines give 1,600 kN (20.3 m/s² on a 79 t ship).
   - Two ion drives in their place give 200 kN: 2.6 m/s², a top speed of 97 m/s against 270.
   - Matching the engines takes sixteen ion drives: 48 MW, four times its 12 MW of generators, and 32 t of drives.
 
@@ -543,21 +543,21 @@ All in `content/blocks/blocks.json`. Tunable; change them there, never in code.
 - `ftlEnergyPerTonne` 2.0 → 1.5 for the same reason: a jump costs a ship about what it did (pod 62 MJ, vessels
   118 MJ), so the fleet still charges within the 12 s calculation and jumps together.
 
+The command pod, mining vessel and survey vessel are no longer shipped: a player starts in the Prospector alone. The
+three live on as test fixtures (`tests/Prospect.Tests/fixtures/ships`).
+
 Shipped designs, tanks full, measured by `PropulsionTests`:
 
 | Design | Forward | Braking, sideways, up, down | Engines at full thrust | Boosting whenever the drive allows | One thruster direction at full |
 | --- | --- | --- | --- | --- | --- |
-| Command Pod | 19.3 m/s² | 9.6 m/s² | 83 min | 52 min | 83 min |
-| Prospector | 20.3 m/s² | 10.1 m/s² | 83 min | 52 min | 83 min |
-| Surveyor | 20.4 m/s² | 10.2 m/s² | 83 min | 52 min | 83 min |
+| Prospector (the one starting ship) | 12.5 m/s² | braking 9.7, others 6.7 m/s² | 83 min | 34 min | braking 62 min, others 83 min |
 | Drone | 11.6 m/s² | braking 5.8, others 2.9 m/s² | no tanks: electric | no tanks | no tanks |
 
 Boost, measured with the battery full and the drive never overheating (`PropulsionTests`, `PowerFlowTests`):
 
 | Design | Boost draw (thrust, was) | Battery empty after (was) | Engines boosting whenever the drive allows (was) |
 | --- | --- | --- | --- |
-| Command Pod | 7.9 MW (16.5) | 23 s (5 s) | 34 min (52) |
-| Prospector, Surveyor | 15.8 MW (32.9) | 12 s (3 s) | 34 min (52) |
+| Prospector | 21.6 MW forward, 33.1 MW braking (ion parts too) | 15 s forward | 34 min |
 | Drone | 8.1 MW, ion (4.05 MW with the single drive) | 2.7 s | no tanks |
 
 - Battery time counts idle draw and generation. The old times are worked out from the old multiplier, not measured. A pod that boosts the 6 s heat allows keeps about three
@@ -567,8 +567,7 @@ With mounts, same mass, thrust and burn as with thruster blocks, so the shipped 
 
 | Design | Blocks | Mounts | Where | Hull points |
 | --- | --- | --- | --- | --- |
-| Command Pod | 13 (was 18) | 20 | four each on the shield (right), cargo (left), quarters (up), core (down), charting (front) | 2,760 (was 3,510) |
-| Prospector, Surveyor | 28 (was 38) | 40 | eight each way: two cargo holds a side, two on top, two below, two plates at the front | 5,900 and 5,910 (were 7,400 and 7,410) |
+| Prospector | 38 | 78: 52 cold gas, 4 hot, 2 ion thrusters, 6 scanners, 2 tractor beams | braking on the racks' fronts (16), sideways on their outer sides (12 each), up under the gyros (12), down on the deck (12) | 16,340 |
 | Drone | 14 (was 15) | 24 ion thrusters | four each on the top and bottom, right and left, eight on the front (top and bottom blocks) | 500 (was 490) |
 
 - The ships are more compact, so they turn a little differently (drone 38, 45, 40 deg/s; was 39, 43, 45). The

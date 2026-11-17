@@ -54,8 +54,8 @@ public sealed class DesignTransferTests
     [Fact]
     public void ThreeHundredMixedBoxesLoadTransferCollideAndBuildAfterDamage()
     {
-        var local = GameContent.Load();
-        using var files = new ContentCopy();
+        var local = FleetContent.Value;
+        using var files = new ContentCopy(fleet: true);
         var blocks = Enumerable.Range(0, 300).Select(i => new
         {
             at = new[] { i * 4, 0, 0 },
@@ -162,8 +162,8 @@ public sealed class DesignTransferTests
     [InlineData(true)]
     public void RealJoinUsesServerOrderAndDownloadedDamageGeometry(bool missing)
     {
-        var local = GameContent.Load();
-        using var copy = new ContentCopy();
+        var local = FleetContent.Value;
+        using var copy = new ContentCopy(fleet: true);
         copy.Replace("ships/fleet.json", "\"mining_vessel\", \"survey_vessel\", \"drone\"", "\"survey_vessel\", \"mining_vessel\", \"drone\"");
         if (missing) copy.Replace("ships/command_pod.json", "{ \"at\": [-2, 0, 1], \"type\": \"cargo\" }", "{ \"at\": [-2, 0, 1], \"type\": \"hull\" }, { \"at\": [10, 10, 10], \"type\": \"hull\" }");
         var authoritative = copy.Load();
@@ -207,7 +207,7 @@ public sealed class DesignTransferTests
     [Fact]
     public void MalformedCatalogueAndOversizedChunksFailWithoutPublication()
     {
-        var content = GameContent.Load();
+        var content = FleetContent.Value;
         var cache = new DesignCatalogue(content);
         foreach (var oversized in new[] { false, true })
         {
@@ -223,7 +223,7 @@ public sealed class DesignTransferTests
     [Fact]
     public void BadCanonicalHashNeverPublishesAndSlotsShareOneBudget()
     {
-        var content = GameContent.Load();
+        var content = FleetContent.Value;
         var cache = new DesignCatalogue(content);
         using var download = new DesignDownload(content, cache);
         var manifest = (byte[])cache.Manifest.Clone();
@@ -260,7 +260,7 @@ public sealed class DesignTransferTests
     [Fact]
     public void ConflictingHashMetadataFailsAndDisconnectJoinsAnInFlightDecode()
     {
-        var content = GameContent.Load(); var cache = new DesignCatalogue(content);
+        var content = FleetContent.Value; var cache = new DesignCatalogue(content);
         var manifest = (byte[])cache.Manifest.Clone(); var first = 4 + content.StartingFleet.Length;
         cache.Hashes[0].CopyTo(manifest, first + 36 + 4);
         System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(manifest.AsSpan(first + 36), cache.Bytes[0].Length + 1);
@@ -287,7 +287,7 @@ public sealed class DesignTransferTests
     [Fact]
     public void ManifestAggregateBudgetIncludesCachedAndRepeatedEntries()
     {
-        var content = GameContent.Load();
+        var content = FleetContent.Value;
         var cache = new DesignCatalogue(content);
         using var download = new DesignDownload(content, cache);
         var manifest = new byte[4 + 255 * 36];
@@ -305,7 +305,7 @@ public sealed class DesignTransferTests
         Assert.True(download.Failed);
         Assert.Null(download.Result);
         Assert.Null(typeof(DesignDownload).GetField("_designs", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(download));
-        using var files = new ContentCopy();
+        using var files = new ContentCopy(fleet: true);
         files.Write("ships/fleet.json", JsonSerializer.Serialize(new
         {
             designs = Enumerable.Repeat("mining_vessel", 255).ToArray(),
@@ -319,8 +319,8 @@ public sealed class DesignTransferTests
     [Fact]
     public void ManyCacheMissesCanFinishAfterOldSixHundredTickDeadline()
     {
-        var local = GameContent.Load();
-        using var files = new ContentCopy();
+        var local = FleetContent.Value;
+        using var files = new ContentCopy(fleet: true);
         var original = files.Read("ships/command_pod.json");
         var names = Enumerable.Range(0, 30).Select(i => "admission" + i).ToArray();
         for (var i = 0; i < names.Length; i++)
@@ -346,7 +346,7 @@ public sealed class DesignTransferTests
     [Fact]
     public void RefusedCatalogueExpiresAndLeavesNoClientWorker()
     {
-        var content = GameContent.Load();
+        var content = FleetContent.Value;
         using var link = new LoopbackLink();
         using var server = new ServerHost(new ServerConfig(), content, new Wire(link.Server) { Refuse = true });
         using var client = new ClientSession(link.Client, content, "Timeout");

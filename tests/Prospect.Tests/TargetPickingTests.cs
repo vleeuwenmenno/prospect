@@ -286,7 +286,7 @@ public sealed class TargetPickingTests
     {
         // Picking takes a thrust part as its block's box; its model lies inside that box (PropulsionVisualTests), so
         // the faces are compared with the mesh as it is without the models.
-        foreach (var design in GameContent.Load().Designs)
+        foreach (var design in FleetContent.Value.Designs)
         {
             var mesh = MeshBuilder.Hull(design, Boxes);
             var faces = new byte[design.BlockOffsets.Length];
@@ -325,7 +325,7 @@ public sealed class TargetPickingTests
         // drawn point, sampled on each triangle, decides the grab, except within the sampling's error of its edge.
         const float Focal = 200f;
         const int Samples = 48;
-        var designs = GameContent.Load().Designs;
+        var designs = FleetContent.Value.Designs;
         var random = new Random(17);
         var picks = new PickHit[1];
         var grab = TargetPicking.GrabPixels / Focal;
@@ -453,7 +453,7 @@ public sealed class TargetPickingTests
     {
         // Intact hulls, cut and drawn out, every one inside the broad test: half on the ray, met face by face, and
         // half just beside it, where every drawn face of every block is clipped and measured for the grab.
-        var design = GameContent.Load().Designs[2];
+        var design = FleetContent.Value.Designs[2];
         var radius = design.Flight.Radius;
         var hulls = new PickHull[256];
         for (var i = 0; i < hulls.Length; i++)

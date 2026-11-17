@@ -35,8 +35,8 @@ Use the Makefile, not raw `dotnet` commands.
 | --- | --- |
 | `make setup` | First run on a machine: system packages for the OS (Vulkan; MoltenVK on macOS), the .NET SDK into `~/.dotnet`, restore. `make doctor` checks the toolchain and GPU. |
 | `make check` | Formatting, warnings-as-errors build and all tests. Must pass before work is called done. Takes about two minutes. |
-| `make bench` | Release benchmarks: an empty scene, resizing (`--bench-resize`), then editor cargo, Fuel menu, fuel-on-apply and mirror ghosts (four measured seconds each, after four seconds for scripted edits and workers to settle). Then, on a copy of the build whose pod has a tractor beam and racks (`tools/prepare_tractor_capture.py`), 25 s of cargo: jettison, drift, tractor pull and stow (`--open cargo --jettison 5`); it also fails unless the container was seen loose and is back in the hold. Then, on a copy whose pod has a drone bay (`tools/prepare_drone_capture.py`), 25 s of drones: launch, hold station, recall and dock (`--open drones --drone-recall 12`); it also fails unless a drone was seen out and the bay is full again. Last, 14 s of a rock being scraped thirty passes (`--open rock-scrape`): edits, bricks and patch rebuilds on every thread; it also fails unless all 480 edits came back from the server and the patch was rebuilt and is drawn. Fails under 144 fps or on any managed allocation in the frame loop. Run it after touching anything that executes every frame or every tick. |
-| `make bench-scans` | Release benchmark with each module scan type repeating (gas, asteroid, locator), on a copy of the build whose pod carries the scanners (`tools/prepare_scan_bench.py`). Fails on any managed allocation on any thread, or under five completed scans. Run it after touching module scans, their server worker or the module interface. |
+| `make bench` | Release benchmarks: an empty scene, resizing (`--bench-resize`), then editor cargo, Fuel menu, fuel-on-apply and mirror ghosts (four measured seconds each, after four seconds for scripted edits and workers to settle). Then, on the build as it is (the shipped ship carries tractor beams, racks and a drone bay), 25 s of cargo: jettison, drift, tractor pull and stow (`--open cargo --jettison 5`); it also fails unless the container was seen loose and is back in the hold. Then 25 s of drones: launch, hold station, recall and dock (`--open drones --drone-recall 12`); it also fails unless a drone was seen out and the bay is full again. Last, 14 s of a rock being scraped thirty passes (`--open rock-scrape`): edits, bricks and patch rebuilds on every thread; it also fails unless all 480 edits came back from the server and the patch was rebuilt and is drawn. Fails under 144 fps or on any managed allocation in the frame loop. Run it after touching anything that executes every frame or every tick. |
+| `make bench-scans` | Release benchmark with each module scan type repeating (gas, asteroid, locator), on a copy of the build whose scans and cooldowns are short (`tools/prepare_scan_bench.py`; the shipped ship carries every scanner). Fails on any managed allocation on any thread, or under five completed scans. Run it after touching module scans, their server worker or the module interface. |
 | `make bench-gas` | Release benchmark inside gas clouds (ordinary from inside, pilot and command view, huge, lightning; cold and a pair reported only). Fails under 144 fps or on any managed allocation. Run it after touching the gas shaders or how gas is drawn. |
 | `make run ARGS="..."` | The client. `make server` is the dedicated server. |
 | `make listing` | The listing server on 127.0.0.1:8080. `make listing-image` builds its container. |
@@ -299,9 +299,9 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `tools/prepare_drone_fetch_capture.py` then `--open cargo --jettison 5 --drone-fetch 12` (jettisoned at 6 m/s, out of
   beam range before its pickup delay ends; delivered about 42 s in); `make bench` runs it for 50 s.
   Interface: `LaunchDrones` (`.`), `RecallDrones` (`,`), the DRONES chip in the module strip (`DroneUi`,
-  `DroneTracker`). Tests: `DroneBayTests`, `BayModelTests`. Capture: `tools/prepare_drone_capture.py` then
+  `DroneTracker`). Tests: `DroneBayTests`, `BayModelTests`. Capture:
   `--open drones` (launch 3 at 1.5 s, recall at `--drone-recall`, default 14 s) and `--open edit-bay` (a bay's ghost
-  on a top face, hatch up); `make bench` runs `--open drones` on the prepared copy.
+  on a top face, hatch up); `make bench` runs `--open drones` on the shipped build.
 - **Debug: add container (temporary, local games only):** `EditorRequestKind.AddContainer` asks for size/resource in
   one existing selected rack. `ShipEditor.RequestContainer` sends through `PlayerInputBridge`; `ServerHost.AddContainer`
   checks the edit token, owner, controlled hull, in-process transport, `AllowDebugFill`, rate and `HasRoom`, then uses
@@ -503,7 +503,7 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   with no tank (the electric drone) shows one cell, "FUEL NO TANKS", and posts no fuel notice.
   Check with `--hold-thrust 1` (scripted runs only: holds the forward axis, as the window is never focused) at
   `"UiScale": 1` and `2`, and the callout with `--fuel-callout <fuel>` and `--fuel-tip <fuel>` (scripted runs only;
-  add `--open command` for the command view) on a copy of the build whose `command_pod.json` has extra
+  add `--open command` for the command view) on a copy of the build whose `prospector.json` has extra
   `bipropellantTank` blocks (more than eight to see groups), with `--hurt-fleet 1 --hurt-kind tank` to lose the last tank.
 - **Face mounts:** a thruster, the tractor beam and a module scanner are each a `DesignMount` on a block's face
   (`BoxDesign.Mounts`, `HullDesign.Mounts`), never a block: a type has `BlockType.Mount` or it has not. Every rule of where one may sit is `FaceMounts` (whole
@@ -630,8 +630,8 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   gas bar would build (`ModuleLook.ClassOf`, `GasColor`, `GasLedger`'s fixed kind table). Do not add a `Dictionary`, a
   lazy table or an `EqualityComparer`-backed compare to these paths; `ModuleScanAllocationTests` and `make bench-scans`
   hold it. Check with `--open modules|gas|module-command`, `--target-rock`, `--module`
-  on a copy of the client build whose `command_pod.json` carries plating with scanner mounts on it (no shipped ship has
-  any; `tools/prepare_scan_bench.py` makes such a copy, and `--open edit-scanner` holds a scanner's mount ghost on a face).
+  on the shipped ship, which carries two of each scanner (`tools/prepare_scan_bench.py` makes a copy with short scans,
+  and `--open edit-scanner` holds a scanner's mount ghost on a face).
 - **A new action or key:** add it to `content/input/bindings.json` and to `content/input/controls.json` (tab, label,
   scope; a fixed mouse or chord row goes there too). Loading refuses an action the catalogue lacks. Read it through
   `ActionMap` only; never cache a key name without rebuilding it on `ActionMap.Changed`. Anything that reads input
@@ -680,6 +680,16 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
 
 - **A new hull design:** add it to `content/ships/fleet.json`. Stats are derived from blocks; do not add stat
   fields to the design file.
+- **The starting ship:** the shipped content gives a player one ship, the Prospector (`content/ships/prospector.json`,
+  the `pod` of `fleet.json`), and no starting fleet. It carries every part a ship can take (FTL drives of one kind
+  only: hyperspace). `DefaultShipTests` holds that, its tractor reach and bay hatch, and prints its figures (`SHIP`
+  lines); `PowerFlowTests`, `PropulsionTests` and `EditorPanelTests` (its one warning: braking with its ion parts
+  overloads, as the drone's strafing does) hold its balance. Its spare power is pinned between 4.8 and 5.45 MW by the
+  scan tests (a scan must turn the net flow negative), which is why it has twelve cells of gyros. Ship files are not
+  in the save identity: a saved world keeps the catalogue it was made with, old ships included.
+- **Tests that need a fleet** (several owned hulls, every drive kind, the small pod's layout) use `FleetContent`
+  (`tests/Prospect.Tests/fixtures/ships`: the old command pod, mining vessel and survey vessel, catalogue order pod 0,
+  mining 1, survey 2, drone 3, work drone 4) or `new ContentCopy(fleet: true)`, never the shipped content.
 - **A new world setting:** one entry in `content/rules/settings.json`, its number applied in `FlightRules.Under` (flight) or `Galaxy.Under` / `AsteroidFieldsModule.Under` (generation),
   a unit test in `WorldSettingsTests.cs`, a row in the README table. Read setting ids only in those shared application paths, never in generation or simulation loops.
 - **README:** keep the Status and Controls sections true. Say what is not there.
@@ -740,9 +750,10 @@ The client opens a real window on the developer's desktop, and they are usually 
   prints the own hull's jump stage and progress. Preparation takes at least 12 s, the default transit about 10.2 s,
   then 1.5 s of arrival. `--open jump --capture-after 6 --capture-count 70 --capture-every 0.3` covers the default jump.
 - Another player's jump: run a dedicated server with `--listing off`, join it with a capturing client, then join a
-  second client with `--open jump-fleet` (and a late `--capture` to keep it connected): its mining vessel and
-  survey vessel jump 6 km along -x. An observer needs sensor coverage at each endpoint to see departure and arrival;
-  the default 5 km sensor at the starting pod cannot see the arrival. The second player starts 160 m along -x
+  second client with `--open jump-fleet` (and a late `--capture` to keep it connected): its two escorts (copies of
+  the ship, `ServerConfig.ScriptedEscorts`, given to scripted runs that need other owned hulls) jump 6 km along -x. An
+  observer needs sensor coverage at each endpoint to see departure and arrival; the default 5 km sensor at the
+  starting ship cannot see the arrival. The second player starts 160 m along -x
   of the first; `--look` points the watcher at them.
 - Social data for a capture: run a dedicated server with `--listing off`, join it with the capturing client,
   and run headless clients against it (`--social-run 40 --join ... --player <name>` with `--invite <name>`
@@ -780,17 +791,16 @@ The client opens a real window on the developer's desktop, and they are usually 
   heading; each capture then prints the own hull's thrust and the plumes drawn. `--zoom <0.5..8>` sets the pilot
   camera's distance as the scroll wheel does. Both only with `--capture` or `--bench`. The chase camera sits
   opposite the look: `--look 75` shows the hull's left side and its back-facing plumes from the side, `--look 100
-  --thrust right` the left-facing puffs. Ignition sparks last 0.3 s: capture about 0.1 s after `--thrust-at`. No
-  shipped ship has a front-facing engine, a large one or a hot thruster: put them in a copy of the build's
-  `command_pod.json` (with generators and a hydrazine tank, or the battery empties and throttle drops). The pod's
-  thrusters are mounted four to a face: shield (right), cargo (left), quarters (up), core (down), charting (front).
-- `--open exhaust-shield` holds the pod and Prospector 6.8 m apart and holds forward thrust; `exhaust-shield-cold`
-  places the Prospector 5 m to the left and holds right thrust. Scripted runs only, unsaved private local server.
+  --thrust right` the left-facing puffs. Ignition sparks last 0.3 s: capture about 0.1 s after `--thrust-at`. The
+  shipped ship has no front-facing engine or large one: put them in a copy of the build's `prospector.json`. Its two
+  engines and the hot thrusters face back; cold gas thrusters sit on the racks' fronts (braking) and outer sides
+  (sideways), under the gyros (up) and on the deck (down); the ion drive (nose) and two ion thrusters face front.
+- `--open exhaust-shield` holds the ship and an escort (a copy of it) box behind box, 0.8 m apart, and holds forward
+  thrust; `exhaust-shield-cold` places the escort 1 m to the left and holds right thrust. Scripted runs only, unsaved private local server.
   These fixtures pin poses/velocities each tick, but normal flight computes thrust and spends fuel; they inject no hits.
   Engine: `--look 110 --look-height 1 --zoom 1.2`; cold/hot: `--look 170 --look-height 1.5 --zoom 1.3`.
   Capture at 4 s, three frames 0.6 s apart. Oblique engine: `--look 145 --look-height 1 --zoom 1.3`.
-  For ion, copy the build and replace the pod's engine type with `ionDrive`. For hot, use the cold fixture with
-  the pod's four left mounts replaced by one `hotThruster` at `[3,3]` and its nitrogen tank changed to hydrazine.
+  The ship's ion drive and hot thrusters fire with `--thrust back` and `--thrust forward`.
   Compare with a second copy whose plume entries all have `shieldStrength: 0`. Own-shield control:
   `--thrust forward --look 150`, without the fixture. Crop original pixels; report actual capture times.
 - `--ram <speed>` (0–100 m/s) sets the own hull against the largest rock of the spawn sector at simulation
@@ -814,8 +824,8 @@ The client opens a real window on the developer's desktop, and they are usually 
   pointer captured, no Shift, no free look, no jump, thrust ends it).
 - `--look <degrees>` holds the pilot camera that far to the right of the hull's nose, as free look would (`0`
   looks along the nose, `150` nearly back). Use it to check that an effect follows the hull, not the view.
-- `--target` targets the nearest other hull once in space (in a local game the Prospector, about 120 degrees to
-  the right of the nose). `--open menu` opens the in-game Esc menu. `--look-to <degrees>` with `--look` turns the
+- `--target` targets the nearest other hull once in space (in a local game one of the two escorts it brings, 45 m
+  to the side and 40 m back). `--open menu` opens the in-game Esc menu. `--look-to <degrees>` with `--look` turns the
   camera evenly from one angle to the other over the captures: `--target --look 40 --look-to 130
   --capture-count 16 --capture-every 0.12` brings the target into view from the right edge, and `--look -90
   --look-to -30` sweeps it past straight behind.
@@ -1078,10 +1088,10 @@ How to apply it:
   `ShipEditor.CheckJob` reuses frozen geometry and packing scratch for cargo/fuel-only updates; automatic
   pickup must never copy/re-export the unchanged draft. `FrameOrderTests` probes that path.
 
-Capture fixture: `tools/prepare_tractor_capture.py` copies a built client and equips its pod with a tractor,
-one reachable rack and one blocked rack. Run that copy with `--open cargo --jettison 6 --capture ...` for pickup,
-or `--open edit-cargo --capture ...` for reach guidance (both close the editor camera on the first rack after 0.3 s). Keep `agent.prospect` hidden as for other captures.
+Capture: the shipped ship has two racks, each under a tractor beam. Run `--open cargo --jettison 6 --capture ...` for
+pickup, or `--open edit-cargo --capture ...` for reach guidance (both close the editor camera on the first rack after
+0.3 s). Keep `agent.prospect` hidden as for other captures.
 At speed: add `--coast <m/s>` (0–400; scripted, unsaved private game: dampeners off, the server sets the own hull
 flying along its nose at 2 s) and `--sector -5,0,0` (no rocks), with `--look 60 --look-height 2 --zoom 1.5`; the
-tractor pod is rated 122 m/s, so for 240 raise `speedPerRootAcceleration` in the copy's `blocks.json` to 130. Each
+ship is rated 212 m/s, so for 240 raise `speedPerRootAcceleration` in a copy's `blocks.json` to 70. Each
 capture prints the container's offset from the own hull and the own speed.

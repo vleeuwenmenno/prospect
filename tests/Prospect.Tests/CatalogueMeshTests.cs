@@ -11,8 +11,8 @@ public sealed class CatalogueMeshTests
     [Fact]
     public void ReorderedAndDownloadedDesignsBuildTheirOwnVertices()
     {
-        var local = GameContent.Load();
-        using var copy = new ContentCopy();
+        var local = FleetContent.Value;
+        using var copy = new ContentCopy(fleet: true);
         copy.Replace("ships/command_pod.json", "{ \"at\": [-2, 0, 1], \"type\": \"cargo\" }",
             "{ \"at\": [-2, 0, 1], \"type\": \"cargo\" }, { \"at\": [10, 10, 10], \"type\": \"hull\" }");
         var remote = copy.Load();
@@ -55,7 +55,7 @@ public sealed class CatalogueMeshTests
     [Fact]
     public void AbandonedBuildCannotPublishOverANewCatalogueOrMenu()
     {
-        var content = GameContent.Load();
+        var content = FleetContent.Value;
         HullDesign[] next = [content.Designs[1], content.Pod];
         using var jobs = new JobSystem(1, "Meshes");
         var preparation = new CatalogueMeshes(jobs);
@@ -89,7 +89,7 @@ public sealed class CatalogueMeshTests
         Assert.False(preparation.IsReady(broken));
         Assert.Null(preparation.Prepare(broken));
         Assert.Equal(0, jobs.Pending);
-        var valid = GameContent.Load().Designs;
+        var valid = FleetContent.Value.Designs;
         preparation.Prepare(valid);
         jobs.CompleteAll();
         Assert.NotNull(preparation.Prepare(valid));

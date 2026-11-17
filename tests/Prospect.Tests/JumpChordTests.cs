@@ -37,7 +37,7 @@ public sealed class JumpChordTests : IDisposable
 
     public JumpChordTests()
     {
-        _content = GameContent.Load();
+        _content = FleetContent.Value;
         _client = new ClientSession(_link.Client, _content, "Pilot");
         _server = new ServerHost(new ServerConfig { MaxPlayers = 1 }, _content, [_link.Server]);
         _actions = ActionMap.Load(Path.Combine(AppContext.BaseDirectory, "content", "input", "bindings.json"));

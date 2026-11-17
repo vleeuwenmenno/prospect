@@ -83,13 +83,12 @@ energy readout showed nothing while a shield recovered.
 - Retune: shield emitter `powerDraw` 1.5 → 3.0 MW, drone shield 0.2 → 0.4 MW (0.7 MW since the two-generator drone, so a restart outruns its surplus), `shieldRestartPowerMultiplier`
   4 → 4.5. Generators, batteries, recharge rates, delay and thresholds are unchanged. Content identity changes
   with `blocks.json`; no evaluator arithmetic changed, so `ContentIdentity.EvaluatorVersion` stays.
-- Result at rest, battery full, 8 s delay not counted (command pod 6 MW generator; mining and survey vessels
-  12 MW): ordinary recharge takes 57% of the pod's spare power and 28% of a vessel's. A restart draws 13.5 MW,
-  more than the spare power of every shipped design, so it drains the battery: the pod's to empty, a vessel's by
-  about 45%. Restart still takes about 10 s when the battery can carry it.
+- Result at rest, battery full, 8 s delay not counted (the Prospector: 12 MW of generators, 6.8 MW idle, 5.2 MW
+  spare): ordinary recharge takes 58% of its spare power. A restart draws 13.5 MW, more than the spare power of
+  every shipped design, so it drains the battery: the Prospector's by about 35% (83 of 240 MJ). Restart still takes about 10 s when the battery can carry it.
 - Propulsion and boost keep priority over shields, so flying is never slowed by a restart. The price is that
-  shields recover more slowly while the engines run. Since thrust burns fuel its electric draw is small (pod 1.75 MW,
-  was 4.1), so the price is softer than it was; boost still draws what it did (`docs/roadmap/propulsion.md`).
+  shields recover more slowly while the engines run. Since thrust burns fuel its electric draw is small (the Prospector's
+  fuelled parts 4.8 MW, inside its spare power; its ion parts add 3.75 MW only while braking), so the price is softer than it was; boost still draws what it did (`docs/roadmap/propulsion.md`).
 - The readout shows live flow: generation less idle, thrust or boost, shield and jump-drive draw, in MW, with an
   arrow, even while a full battery turns the surplus away. The tooltip lists each draw and the battery's own rate.
   A muted blue mark on the energy strip is the shield's share; an amber one, continuing from it, is a running scan's.

@@ -18,6 +18,15 @@ namespace Prospect.Tests;
 public sealed class PropulsionTests
 {
     private static readonly GameContent Content = GameContent.Load();
+
+    /// <summary>Every shipped design of a ship (not a drone), by catalogue index.</summary>
+    public static TheoryData<int> Ships()
+    {
+        var ships = new TheoryData<int>();
+        for (var i = 0; i < Content.Designs.Length; i++)
+            if (Content.Designs[i].Class == HullClass.Ship) ships.Add(i);
+        return ships;
+    }
     private static readonly GridSize One = new(1, 1, 1);
 
     private static readonly BlockFacing[] Directions = [BlockFacing.Right, BlockFacing.Left, BlockFacing.Up, BlockFacing.Down, BlockFacing.Back, BlockFacing.Front];
@@ -119,7 +128,6 @@ public sealed class PropulsionTests
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(2)]
-    [InlineData(3)]
     public void AHullThatTurnsWithItsDampenersOnBrakesItsDriftThenFiresAndSpendsNothingAtRest(int index)
     {
         // The developer's report: at 0 m/s with the dampeners on, after steering with the mouse, parts on opposite
@@ -494,9 +502,7 @@ public sealed class PropulsionTests
     }
 
     [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    [InlineData(2)]
+    [MemberData(nameof(Ships))]
     public void EveryShippedDesignFliesAllSixWaysOnItsOwnTanksAndHasFuelForEveryPart(int index)
     {
         var design = Content.Designs[index];
@@ -520,9 +526,7 @@ public sealed class PropulsionTests
     }
 
     [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    [InlineData(2)]
+    [MemberData(nameof(Ships))]
     public void ShippedTanksHoldMoreThanAnHourOfFullThrustAndBoostingWheneverItBurnsThemInUnderThreeFifthsOfThatTime(int index)
     {
         var design = Content.Designs[index];
@@ -615,7 +619,8 @@ public sealed class PropulsionTests
     [Fact]
     public void APartWithNoFuelOfItsKindGivesNoThrustDrawsNoPowerAndTheOthersFlyOn()
     {
-        var flight = Content.Pod.Flight;
+        // The test fleet's pod: one engine, the only part that pushes forward, and thrusters of one other fuel.
+        var flight = FleetContent.Value.Pod.Flight;
         var state = HullState.Spawn(Double3.Zero, flight);
 
         // The last of the bipropellant feeds one more tick and is then gone, never below nothing.
@@ -873,10 +878,10 @@ public sealed class PropulsionTests
     [Fact]
     public void TwoHullsSteppedAlikeFromTheSameTanksHoldTheSameBitsAndAHullFlownFromItsTotalsAgreesWithItsTanks()
     {
-        // The pod has one tank of each fuel it burns. Stepped over its tanks through a field, and stepped from
+        // The test fleet's pod has one tank of each fuel it burns. Stepped over its tanks through a field, and stepped from
         // the per-fuel figures alone as a client steps a hull it only knows the motion of, it flies the same and
         // holds the same fuel to within what single precision keeps of it: one piece of arithmetic either way.
-        var design = Content.Pod;
+        var design = FleetContent.Value.Pod;
         Assert.Equal(1, design.Tanks.ToArray().Count(tank => tank.Kind == FuelKind.Nitrogen));
         Assert.Equal(1, design.Tanks.ToArray().Count(tank => tank.Kind == FuelKind.Bipropellant));
         using var hulls = new HullStore();
@@ -1439,12 +1444,14 @@ public sealed class PropulsionTests
     [Fact]
     public void ThePredictedTanksFollowTheServersWhileThrustersEnginesAndBoostBurnAndAWatcherSeesThePartsFire()
     {
+        // The test fleet's small pod: one tank of each fuel, so a few ticks' burn stays within the figures compared.
+        var content = FleetContent.Value;
         using var first = new LoopbackLink();
         using var second = new LoopbackLink();
-        using var server = new ServerHost(new ServerConfig { MaxPlayers = 2 }, Content, first.Server, second.Server);
+        using var server = new ServerHost(new ServerConfig { MaxPlayers = 2 }, content, first.Server, second.Server);
         var clock = new ManualTime();
-        using var pilot = new ClientSession(first.Client, Content, "Pilot", clock: clock);
-        using var watcher = new ClientSession(second.Client, Content, "Watcher", clock: clock);
+        using var pilot = new ClientSession(first.Client, content, "Pilot", clock: clock);
+        using var watcher = new ClientSession(second.Client, content, "Watcher", clock: clock);
         var hulls = (HullStore)typeof(ServerHost).GetField("_hulls", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(server)!;
         long tick = 0;
         void Step()
@@ -1471,7 +1478,7 @@ public sealed class PropulsionTests
         Assert.Equal(capacity, start.Hulls[start.OwnHull].Fuel.Amount);
 
         // The pilot is shown every tank of their hull: one figure for each tank of the design, full at the start.
-        var tanks = Content.Pod.Tanks.ToArray();
+        var tanks = content.Pod.Tanks.ToArray();
         Assert.True(tanks.Length >= 2);
         Assert.Equal(tanks.Select(tank => tank.Capacity), start.Hulls[start.OwnHull].Tanks.ToArray());
         Assert.Same(start.OwnTanks, System.Runtime.InteropServices.MemoryMarshal.TryGetArray(start.Hulls[start.OwnHull].Tanks, out var memory) ? memory.Array : null);

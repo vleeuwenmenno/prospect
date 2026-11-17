@@ -61,7 +61,7 @@ public sealed class InputTimelineTests
     [Fact]
     public void TwoPlayersUnequalBatchesProduceIdenticalPhysicalIntervals()
     {
-        var content = GameContent.Load();
+        var content = FleetContent.Value;
         using var single = new ScriptedServer(content, maxPlayers: 2);
         using var batch = new ScriptedServer(content, maxPlayers: 2);
         var a = single.Join(1);
@@ -106,7 +106,7 @@ public sealed class InputTimelineTests
     [Fact]
     public void ReturningToTheSameHullRejectsOldEpochInputs()
     {
-        var content = GameContent.Load();
+        var content = FleetContent.Value;
         using var rig = new ScriptedServer(content);
         var peer = rig.Join(1);
         var hulls = Hulls(rig.Server);
@@ -143,7 +143,7 @@ public sealed class InputTimelineTests
     [Fact]
     public void ReusedSlotIsNotACollisionParticipantUntilTheNextRound()
     {
-        var content = GameContent.Load();
+        var content = FleetContent.Value;
         using var hulls = new HullStore();
         var own = hulls.Create(1, (byte)content.PodDesign, content.Pod, Double3.Zero);
         var old = hulls.Create(2, (byte)content.PodDesign, content.Pod, Double3.Zero);

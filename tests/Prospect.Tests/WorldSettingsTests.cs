@@ -13,7 +13,7 @@ namespace Prospect.Tests;
 /// <summary>What each world setting does to the simulation, on the shared code the server and the client both run.</summary>
 public sealed class WorldSettingEffectTests
 {
-    private static readonly GameContent Content = GameContent.Load();
+    private static readonly GameContent Content = FleetContent.Value;
     private static readonly int Vessel = Content.StartingFleet[0];
 
     /// <summary>The content as a world with these settings plays by it.</summary>
@@ -122,7 +122,7 @@ public sealed class WorldSettingEffectTests
     [Fact]
     public void WreckSettingsApplyThroughSharedRules()
     {
-        var content = GameContent.Load();
+        var content = FleetContent.Value;
         var changed = content.WithSettings(content.SettingCatalog.Build(null, ["wreckLifetimeMinutes=0", "wreckMaxPerSector=12"]));
         Assert.Equal(0, changed.Rules.WreckLifetimeTicks);
         Assert.Equal(12, changed.Rules.WreckMaxPerSector);
@@ -891,7 +891,7 @@ public sealed class WorldSettingParsingTests
 /// <summary>Real servers with settings of their own, and the clients that join them.</summary>
 public sealed class WorldSettingSessionTests
 {
-    private static readonly GameContent Content = GameContent.Load();
+    private static readonly GameContent Content = FleetContent.Value;
 
     private static HullView WaitFor(GameSession session, Func<HullView, bool> condition, int seconds)
     {
