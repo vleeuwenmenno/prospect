@@ -581,6 +581,7 @@ public static class FlightModel
         // Translation, in the hull's frame so each direction uses the parts that push that way. Forward is -Z.
         // Each axis reports the throttle it used toward its plus and its minus direction, which is what burns fuel.
         var gain = (boosting ? p.BoostMultiplier : 1f) * thrustScale;
+        var speedBefore = velocity.Length();
         Drive(ref velocity.X, thrust.X, pushRight, pushLeft, input.Dampeners, gain, thrustScale, dt, out var right, out var left);
         Drive(ref velocity.Y, thrust.Y, pushUp, pushDown, input.Dampeners, gain, thrustScale, dt, out var up, out var down);
         Drive(ref velocity.Z, thrust.Z, pushBack, pushFront, input.Dampeners, gain, thrustScale, dt, out var back, out var front);
@@ -604,10 +605,22 @@ public static class FlightModel
         state.Thrust = ThrustState.Of(right - left, up - down, back - front, burn.Nitrogen > 0f, burn.Hydrazine > 0f, burn.Bipropellant > 0f, ion > 0f, state.Boosting);
         fuel = new FuelFlow { Amount = state.Fuel, Capacity = p.FuelCapacity, Burn = burn };
 
-        // Above the hull's rated speed the drive sheds the excess rather than cutting it instantly.
+        // Rated speed caps what thrust can add: the drive may turn the velocity at any speed, but never raises the
+        // speed past the limit (twice the rating while boosting), so boosting, cooling and boosting again cannot
+        // ratchet a hull up. A speed that was already above the limit (a collision, an ended boost) is the most
+        // thrust may leave it at. Fuel and power for thrust this cap wastes are still billed above.
         var limit = boosting ? p.BoostMaxSpeed : p.MaxSpeed;
         var speed = velocity.Length();
-        if (speed > limit)
+        var speedCap = Math.Max(limit, speedBefore);
+        if (speed > speedCap)
+        {
+            velocity *= speedCap / speed;
+            speed = speedCap;
+        }
+
+        // Only the dampeners bleed speed above the limit, and they shed it rather than cutting it instantly. With
+        // them off the hull keeps whatever speed it has.
+        if (input.Dampeners && speed > limit)
             velocity *= Math.Max(limit, speed - p.ShedAcceleration * dt) / speed;
 
         state.Velocity = HullRotation.Rotate(velocity, state.Orientation);
