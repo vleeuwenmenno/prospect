@@ -440,6 +440,10 @@ internal static class Program
                     options.DroneScanCamera = scanCamera;
                     i++;
                     break;
+                case "--drone-camera" when hasValue && TryParseScanCamera(args[i + 1], out var droneCamera, 0.5f, 80f):
+                    options.DroneCamera = droneCamera;
+                    i++;
+                    break;
                 case "--drone-scan-hold" when hasValue && float.TryParse(args[i + 1], System.Globalization.CultureInfo.InvariantCulture, out var scanHold) && scanHold is >= 0f and <= 120f:
                     options.DroneScanHold = scanHold;
                     i++;
@@ -802,14 +806,14 @@ internal static class Program
     };
 
     /// <summary>A command camera for the drone scan capture, "distance,yaw,pitch" in metres and degrees.</summary>
-    private static bool TryParseScanCamera(string text, out System.Numerics.Vector3 camera)
+    private static bool TryParseScanCamera(string text, out System.Numerics.Vector3 camera, float nearest = 2f, float highest = 0f)
     {
         camera = default;
         var parts = text.Split(',');
         var culture = System.Globalization.CultureInfo.InvariantCulture;
         if (parts.Length != 3 || !float.TryParse(parts[0], culture, out var distance) || !float.TryParse(parts[1], culture, out var yaw) || !float.TryParse(parts[2], culture, out var pitch))
             return false;
-        if (distance is < 2f or > 100_000f || yaw is < -360f or > 360f || pitch is < -90f or > 0f)
+        if (distance < nearest || distance > 100_000f || yaw is < -360f or > 360f || pitch < -90f || pitch > highest)
             return false;
         camera = new System.Numerics.Vector3(distance, yaw, pitch);
         return true;

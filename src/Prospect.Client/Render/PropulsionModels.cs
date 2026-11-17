@@ -345,6 +345,9 @@ internal sealed class PropulsionLook
     /// <summary>How ore hoppers and ore bins are drawn; null draws each as its plain block.</summary>
     public HopperLook? Hopper { get; init; }
     public BinLook? Bin { get; init; }
+
+    /// <summary>How a work drone is drawn; null draws it from its blocks like any hull.</summary>
+    public WorkDroneLook? WorkDrone { get; init; }
     [System.Text.Json.Serialization.JsonIgnore]
     public CargoCatalog Cargo { get; private set; } = null!;
 
@@ -390,6 +393,7 @@ internal sealed class PropulsionLook
         look.Bay?.Check(path);
         look.Hopper?.Check(path);
         look.Bin?.Check(path);
+        look.WorkDrone?.Check(path);
         if (look.Tractor is null) throw new InvalidDataException($"{path}: missing tractor appearance");
         look.Tractor.Check();
         look.Laser?.Check(path);
@@ -475,7 +479,7 @@ internal static partial class PropulsionModels
         var back = (design.ExteriorFaces[block] & (1 << (byte)Facings.Opposite(facing))) != 0;
         var box = new PartBox(design.BlockOffsets[block], design.BlockHalfExtents[block], facing, design.BlockSize > 0 ? design.BlockSize : 1f);
         if (design.Types[block].Tractor is { } spec && look.Tractor is { } tractor)
-            BuildTractorBase(model, box, tractor, spec, vertices, indices);
+            BuildTractorBase(box, tractor, spec, vertices, indices);
         else
             Build(model, box, design.Types[block].Fuel, block, back, vertices, indices, nozzles);
         return true;
@@ -505,7 +509,7 @@ internal static partial class PropulsionModels
         }
         var box = new PartBox(design.MountOffsets[mount], design.MountHalfExtents[mount], part.Face, design.BlockSize > 0 ? design.BlockSize : 1f);
         if (part.Type.Tractor is { } spec && look.Tractor is { } tractor)
-            BuildTractorBase(model, box, tractor, spec, vertices, indices);
+            BuildTractorBase(box, tractor, spec, vertices, indices);
         else
             Build(model, box, part.Type.Fuel, part.Parent, false, vertices, indices, part.Type.Tractor is null ? nozzles : null);
         return true;
@@ -975,6 +979,45 @@ internal static partial class PropulsionModels
                     normal = -normal;
                 Quad(p0, p1, p2, p3, normal, tag);
             }
+        }
+
+        // The same walls with a tag of its own for every face: face k runs from point k to point k + 1.
+        public readonly void Loft(ReadOnlySpan<Vector2> a, float za, ReadOnlySpan<Vector2> b, float zb, Vector2 centre, ReadOnlySpan<float> tags, float side)
+        {
+            var n = a.Length;
+            for (var k = 0; k < n; k++)
+            {
+                var k1 = (k + 1) % n;
+                var p0 = new Vector3(a[k], za);
+                var p1 = new Vector3(a[k1], za);
+                var p2 = new Vector3(b[k1], zb);
+                var p3 = new Vector3(b[k], zb);
+                var normal = Vector3.Cross(p1 - p0, p3 - p0);
+                if (normal.LengthSquared() < 1e-14f)
+                    normal = Vector3.Cross(p2 - p3, p2 - p1);
+                if (normal.LengthSquared() < 1e-14f)
+                    continue;
+                var middle = 0.25f * (p0 + p1 + p2 + p3);
+                var radial = new Vector2(middle.X - centre.X, middle.Y - centre.Y);
+                if ((normal.X * radial.X + normal.Y * radial.Y) * side < 0)
+                    normal = -normal;
+                Quad(p0, p1, p2, p3, normal, tags[k]);
+            }
+        }
+
+        // A flat panel lying on the quad p0 p1 p2 p3 (p0 to p1 its lower edge, p3 to p2 its upper one), covering the
+        // shares u0..u1 along and v0..v1 up it, lifted off it by lift on the side away from the point inside.
+        public readonly void Panel(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3, float u0, float u1, float v0, float v1, Vector3 inside, float lift, float tag)
+        {
+            var normal = Vector3.Cross(p1 - p0, p3 - p0);
+            if (normal.LengthSquared() < 1e-14f)
+                return;
+            normal = Vector3.Normalize(normal);
+            if (Vector3.Dot(normal, 0.25f * (p0 + p1 + p2 + p3) - inside) < 0)
+                normal = -normal;
+            var up = normal * lift;
+            Vector3 At(float u, float v) => Vector3.Lerp(Vector3.Lerp(p0, p1, u), Vector3.Lerp(p3, p2, u), v) + up;
+            Quad(At(u0, v0), At(u1, v0), At(u1, v1), At(u0, v1), normal, tag);
         }
 
         // A flat outline across the axis at z, as a fan from its centre, facing +z (side 1) or -z.

@@ -830,6 +830,9 @@ internal sealed partial class WorldView
         _screen = screen;
         _snapshot = snapshot;
         _designs = snapshot.Content.Designs;
+        // The work drone's lights are built as the session starts, never when the first drone is launched.
+        if ((uint)snapshot.Content.WorkDroneDesign < (uint)_designs.Length)
+            _partModels.PrepareDrone(_designs[snapshot.Content.WorkDroneDesign]);
         var galaxy = snapshot.Galaxy!;
         if (!ReferenceEquals(galaxy, _galaxy))
         {
@@ -1331,6 +1334,13 @@ internal sealed partial class WorldView
             _shields.Add(hull.Id, position, orientation, stretch, material, shieldInstances, shieldVertices, shieldIndices);
             var pixels = design.Flight.Radius * _viewport.Y / (Math.Max(position.Length(), 1f) * _tanHalfFov);
             _scanWaves.Offer(position, design.Flight.Radius * stretch, pixels);
+            // A work drone is its own model, whatever its blocks have been through, with its lights over it.
+            if (IsModelledDrone(snapshot, hull, design))
+            {
+                Add(ref candidateCount, hull.Design, position, orientation, 1f, PropulsionLook.Shared.WorkDrone!.Tint, material, stretch);
+                DrawWorkDroneGlow(frameIndex, snapshot, hull, design, position, orientation, pixels, time);
+                continue;
+            }
             var detail = _collision.Fade(position, design.Flight.Radius * stretch, pixels);
             if (detail > 0 && hull.Visual.Count > 0)
             {

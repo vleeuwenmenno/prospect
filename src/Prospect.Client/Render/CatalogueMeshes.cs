@@ -43,8 +43,12 @@ internal sealed class CatalogueMeshes(JobSystem jobs)
         return _installed.Length;
     }
 
-    /// <summary>Polls on the render thread. Null abandons admission without waiting for or publishing old work.</summary>
-    public MeshData[]? Prepare(HullDesign[]? designs)
+    /// <summary>
+    /// Polls on the render thread. Null abandons admission without waiting for or publishing old work.
+    /// <paramref name="workDrone"/> is the design drawn as the work drone's own model (<see cref="MeshBuilder.WorkDrone"/>),
+    /// or -1 for none; a catalogue keeps its work drone for as long as it lives.
+    /// </summary>
+    public MeshData[]? Prepare(HullDesign[]? designs, int workDrone = -1)
     {
         if (!ReferenceEquals(_requested, designs))
         {
@@ -66,7 +70,7 @@ internal sealed class CatalogueMeshes(JobSystem jobs)
 
         // A catalogue that only grew keeps the meshes it has: the worker builds the new designs alone.
         var kept = Installed(designs);
-        _pending = new BuildJob(designs, kept > 0 ? _installedMeshes : null, kept);
+        _pending = new BuildJob(designs, kept > 0 ? _installedMeshes : null, kept, workDrone);
         _handle = jobs.Schedule(_pending, 3);
         return null;
     }
@@ -80,7 +84,7 @@ internal sealed class CatalogueMeshes(JobSystem jobs)
         _installedMeshes = meshes;
     }
 
-    private sealed class BuildJob(HullDesign[] designs, MeshData[]? kept, int keptCount) : IJob
+    private sealed class BuildJob(HullDesign[] designs, MeshData[]? kept, int keptCount, int workDrone) : IJob
     {
         public HullDesign[] Designs => designs;
         public MeshData[]? Result;
@@ -103,7 +107,7 @@ internal sealed class CatalogueMeshes(JobSystem jobs)
                     // not is admitted here, on the worker, so a hull of it is never drawn without a shield to fall back to.
                     if (designs[i].IntactShell.IsEmpty)
                         GeometryAdmission.Validate(designs[i]);
-                    meshes[i] = MeshBuilder.Hull(designs[i]);
+                    meshes[i] = i == workDrone ? MeshBuilder.WorkDrone(designs[i]) : MeshBuilder.Hull(designs[i]);
                 }
                 Result = meshes;
             }

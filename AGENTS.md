@@ -1176,6 +1176,37 @@ How to apply it:
 - Ore chunks: `OreChunkVisuals` keeps two sets and matches chunks by id once per set; `WorldView.OreChunks.cs` draws the worker-built
   `OreChunkModels` lump (4 variants by id) scaled to `OreChunks.Half`, tinted by ore colour and grade. Tests: `LaserVisualTests`.
 
+## Work drone model
+
+A work drone is drawn as one model of its own, never from its blocks. Only drawing changes: collision, picking, the
+shield and the server know the design's blocks.
+
+- Model: `PropulsionModels.BuildWorkDrone` (`PropulsionModels.Drone.cs`), a pure function of the design's block bounds
+  and the `workDrone` entry of `visuals/propulsion.json` (`WorkDroneLook`, validated). Lengths are shares of the
+  bounds, so the model stays about the box that is picked and collided.
+- It is the design's mesh: `MeshBuilder.WorkDrone`, built by `CatalogueMeshes` for `GameContent.WorkDroneDesign`
+  (`Prepare(designs, workDrone)`), so intact, dented and far drones all take the instanced path. `WorldView.Draw`
+  skips the damage mesh and the block-by-block path for it (`IsModelledDrone`); a hull of that design with under half
+  its blocks is debris and drawn block by block.
+- Plumes: the model lists the design's thrusters as `MeshData.Nozzles` on its pods, one a mount, same block and
+  facing. Never add a nozzle the design has no mount for.
+- Lights that change are parts of their own (`BuildWorkDroneGlow`, `PartModels.TryGetDroneGlow`, worker-built), drawn
+  by `WorldView.DrawWorkDroneGlow` with `MaterialLight`: the tractor array under the nose (brighter and pulsing while
+  carrying) and the strips on the pods (brighter with `HullView.Thrust`). The eye, the lamps and the antenna tip are
+  in the mesh. Dark on a wreck (owner zero) and under `glowPixels` on screen.
+- Carrying is read from what the client has, nothing new on the wire: nearness to a free container or ore chunk
+  within a carrier's reach (`WorkDroneLook.Carry`: tether, attach gap, drone radius; fades over `carryFadeMetres`).
+- The escape drone is a ship like any other and keeps its blocks.
+- Tests: `WorkDroneModelTests`. Check with `--open drones --drone-camera <metres>,<yaw>,<pitch>` (scripted runs only:
+  the command camera held on the first work drone out, nearer than a player may come, pitch up to 80 for the
+  underside; capture after 10 s), and carrying with `tools/prepare_drone_fetch_capture.py` then
+  `--open cargo --jettison 5 --drone-fetch 12 --drone-camera 12,120,-12 --capture-after 31`.
+- Keep the draw path free of new `static readonly` fields with initialisers (`WorldView`, the look): the first read
+  set the type up inside the frame that drew the first drone, 88 bytes on the render thread, which `make bench`'s
+  drone scan run caught. The model's instance colour is `WorkDroneLook.Tint`, worked out when asked.
+- In the command view the command plane's mark crosses a drone that sits on the plane; that is the view's rule for
+  every hull, not the model.
+
 ## Free containers: cargo step 2
 
 - `FreeContainers` is a fixed 256-body pool, separate from hull records. `ContainerSimulation` drifts and uses
@@ -1207,7 +1238,7 @@ How to apply it:
 
 ## Tractor beams: cargo step 3
 
-- `tractorBeam` is a freely placed face mount: both `mount` and `tractor` data in `blocks.json`, emitter model and
+- `tractorBeam` is a freely placed face mount: both `mount` and `tractor` data in `blocks.json`, turret model and
   client beam/reach/warning appearance in `visuals/propulsion.json`. No drone variant or filter yet.
 - Tractor quality uses `ModuleQuality` on `TractorSpec.Quality`, with `tractorTiers` in `blocks.json`.
   Only Common `tractorBeam` ships, as only Common sensors do; never add one block type per tier to the palette.
@@ -1215,6 +1246,21 @@ How to apply it:
   Load applies range, acceleration, maxMass and power multipliers once; power scales both base and per-tonne draw.
   Every shared reach, acquisition, pull, prediction and preview consumer reads the evaluated mount spec.
   Evaluator 17 prevents older code from accepting the same files while ignoring tiers.
+- The turret (look only; reach, view rules and the mount box are unchanged). Three parts, all shares of the mount's
+  half width, figures `turret*` in the `tractor` entry (`TractorLook`, validated: the head must fit between the arms
+  and swing clear of the turntable):
+  - Base: `PropulsionModels.BuildTractorBase`, in the hull mesh. Octagonal ring, glow slots on its flats, accent panels
+    on its corners, the collar banded in the tier's colour.
+  - Yoke, head and bars: `BuildTractorYoke`, `BuildTractorHead`, `BuildTractorBars`, worker-built per mount size
+    (`PartModels.TryGetTractorTurret`), posed each frame by `WorldView.DrawTractorTurrets` through
+    `SceneRenderer.AddTriangles` (three draws a turret; state in the fixed `_turrets` table, no memory).
+  - The head aims at what its beam holds (`FindHeldContainer`: a container or an ore chunk, where it is drawn) and
+    otherwise rests by `WorldView.TurretRest`: along the hull's nose, `turretRestPitch` off the face normal. The
+    editor's draft uses the same rest (`DrawIdleTractorTurret`). The beam starts at the bars (`TractorLensOffset`).
+  - The bars are light, not paint: drawn with `MaterialLight` (material below zero: `mesh.frag` writes the instance's
+    colour unlit, as for sparks), `turretIdleGlow` idle, `turretActiveGlow` and a pulse while the beam holds.
+  - Tests: `TractorTurretModelTests`. Check with `--open edit-cargo` (idle), `--open cargo --jettison 6 --zoom 1`
+    from 17 s (aiming at a container) and `--open ore --zoom 0.5 --look 150 --look-height 4` (ore chunks).
 - `TractorReach` is the shared range, rack-face view, live-block segment and packing rule. A rack is in view
   through any open face the emitter is outside of whose part in the mount's outward half-space (parent block's face
   plane) has a clear line: aim is that part's middle, else its nearest point (`Rack`'s `nearest`, `Aim`, kept by

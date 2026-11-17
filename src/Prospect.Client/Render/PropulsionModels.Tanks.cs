@@ -42,7 +42,7 @@ internal static partial class PropulsionModels
         else if (ModelOf(type, BlockShape.Box, look) is { } model)
         {
             if (type.Tractor is { } spec && look.Tractor is { } tractor)
-                BuildTractorBase(model, box, tractor, spec, vertices, indices);
+                BuildTractorBase(box, tractor, spec, vertices, indices);
             else
                 Build(model, box, type.Fuel, 0, true, vertices, indices, null);
         }

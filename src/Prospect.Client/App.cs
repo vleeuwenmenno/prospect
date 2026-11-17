@@ -208,6 +208,12 @@ internal sealed class AppOptions
     /// <summary>Scripted runs only (<c>--drone-scan-camera</c>): the command camera's distance in metres, yaw and pitch in degrees, looking at the rock; null for the pilot view.</summary>
     public System.Numerics.Vector3? DroneScanCamera { get; set; }
 
+    /// <summary>
+    /// Scripted runs only (<c>--drone-camera</c>): the command camera's distance in metres, yaw and pitch in degrees,
+    /// held on the player's first work drone in space from the moment there is one; null leaves the camera alone.
+    /// </summary>
+    public System.Numerics.Vector3? DroneCamera { get; set; }
+
     /// <summary>Scripted runs only (<c>--drone-scan-hold</c>): seconds the drones are left in place, ready, before the scan is ordered.</summary>
     public float DroneScanHold { get; set; }
 
@@ -1020,7 +1026,7 @@ internal sealed class App : IDisposable
             // The world is drawn whenever the session has put the player's hull in space.
             var snapshot = Session?.Client.AcquireSnapshot();
             var designs = snapshot is { State: SessionState.Active } ? snapshot.Content.Designs : null;
-            var prepared = _catalogueMeshes.Prepare(designs);
+            var prepared = _catalogueMeshes.Prepare(designs, designs is null ? -1 : snapshot!.Content.WorkDroneDesign);
             if (prepared is not null)
             {
                 _scene.ReplaceShipMeshes(prepared);
@@ -1869,6 +1875,9 @@ internal sealed class App : IDisposable
             if (_options.OpenView == "drone-scan" && _options.DroneScanCamera is { } scanCamera && _viewOpened && _sinceSplash >= _options.DroneScanCameraAt
                 && World.TargetRock is { } scanRock && World.TryGetRockPose(scanRock, out var scanFocus, out _, out _))
                 World.SetCommandCapturePose(scanFocus, scanCamera.X, scanCamera.Y * (MathF.PI / 180f), scanCamera.Z * (MathF.PI / 180f));
+            // A work drone seen close, wherever it flies.
+            if (_options.DroneCamera is { } droneCamera && _viewOpened)
+                World.SetDroneCapturePose(droneCamera.X, droneCamera.Y * (MathF.PI / 180f), droneCamera.Z * (MathF.PI / 180f));
             if (_capturesTaken < count && rtsReady && (_options.CaptureHitAge is not { } hitAge || World.Own.ShieldHit.Strength > 0 && World.Own.ShieldHitAge >= hitAge) && captureClock >= due && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
             {
                 ShowPerformance |= Session is not null && _options.OpenView is not ("controls" or "players" or "social" or "friends" or "chat" or "hud" or "interface" or "charts" or "pinned-charts" or "inventory" or "edit-tank-fuel" or "edit-laser-group");
