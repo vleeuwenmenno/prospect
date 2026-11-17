@@ -1947,7 +1947,7 @@ internal sealed class App : IDisposable
                 {
                     Console.WriteLine($"capture {_capturesTaken:D2} laser: groups on {World.ActionGroupsOn}, firing {World.LasersFiring}, beams {snapshot.LaserBeamCount}, edits {World.RockEditsKnown}, chunks {snapshot.OreChunkCount}, energy {World.Own.Energy:F1}, own speed {World.Own.Velocity.Length():F2} m/s");
                     var hottest = LaserHeat.Hottest(snapshot.LaserHeat, ulong.MaxValue, out _);
-                    Console.WriteLine($"capture {_capturesTaken:D2} heat at {_sinceSplash:F1}s: hottest laser {hottest * 100f:F0} %, shut down {System.Numerics.BitOperations.PopCount(snapshot.LaserHeat.Locked)}, boost {World.Own.Heat * 100f:F0} %, cold cloud {(World.Own.Environment & HullEnvironment.InColdCloud) != 0}");
+                    Console.WriteLine($"capture {_capturesTaken:D2} heat at {_sinceSplash:F1}s: hottest laser {hottest * 100f:F0} %, shut down {System.Numerics.BitOperations.PopCount(snapshot.LaserHeat.Locked)}, waiting for power {snapshot.LaserHeat.AwaitingPower}, battery {(snapshot.Flight.EnergyStorage > 0f ? World.Own.Energy / snapshot.Flight.EnergyStorage * 100f : 0f):F0} %, boost {World.Own.Heat * 100f:F0} %, cold cloud {(World.Own.Environment & HullEnvironment.InColdCloud) != 0}");
                 }
                 if (_options.OpenView == "rock-scrape")
                 {

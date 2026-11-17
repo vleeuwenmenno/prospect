@@ -221,6 +221,72 @@ public sealed class ActionGroupStripTests
     }
 
     [Fact]
+    public void EveryCellSaysTheLasersWaitForPowerUnlessItIsOverheatedAndShowsTheBatterysWayToTheFloor()
+    {
+        var strip = new ActionGroupStrip();
+        strip.Begin();
+        strip.Add(1, false, 0.4f);
+        strip.Add(2, false, 1f, locked: true, unlock: 0.3f);
+        strip.End(ActionGroups.AllMask, true, awaitingPower: true, battery: 0.05f, resume: 0.2f);
+
+        // The wait is the whole hull's. A group that is also overheated says so first.
+        Assert.True(strip.TryGet(1, out var waiting));
+        Assert.Equal((true, true, false), (waiting.AwaitingPower, waiting.NoPower, waiting.Overheated));
+        Assert.Equal(0.25f, waiting.PowerProgress, 4);
+        Assert.True(strip.TryGet(2, out var hot));
+        Assert.Equal((true, false, true), (hot.AwaitingPower, hot.NoPower, hot.Overheated));
+        Assert.True(strip.AnyNoPower);
+
+        // The bar is full at the floor and never past it; figures out of range are held, and no floor reads full.
+        strip.End(0, false, awaitingPower: true, battery: 0.9f, resume: 0.2f);
+        Assert.True(strip.TryGet(1, out waiting));
+        Assert.Equal(1f, waiting.PowerProgress);
+        strip.End(0, false, awaitingPower: true, battery: float.NaN, resume: 7f);
+        Assert.True(strip.TryGet(1, out waiting));
+        Assert.Equal((0f, 1f, 0f), (waiting.Battery, waiting.ResumeBattery, waiting.PowerProgress));
+        strip.End(0, false, awaitingPower: true, battery: 0f, resume: 0f);
+        Assert.True(strip.TryGet(1, out waiting));
+        Assert.Equal(1f, waiting.PowerProgress);
+
+        // Lasers that do not wait show nothing of the battery.
+        strip.End(ActionGroups.AllMask, true, awaitingPower: false, battery: 0.5f, resume: 0.2f);
+        Assert.True(strip.TryGet(1, out waiting));
+        Assert.Equal((false, false, 0f, 0f), (waiting.AwaitingPower, waiting.NoPower, waiting.Battery, waiting.ResumeBattery));
+        Assert.False(strip.AnyNoPower);
+    }
+
+    [Fact]
+    public void TheStripReadsTheFlownHullsWaitForPowerAndItsBatteryFromTheSnapshot()
+    {
+        var design = MiningFixtures.Content.Pod;
+        var snapshot = new Prospect.Game.Client.SessionSnapshot(MiningFixtures.Content);
+        snapshot.LaserHeatHull = 9;
+        snapshot.LaserHeat.AwaitingPower = true;
+        snapshot.Flight = design.Flight;
+        snapshot.HullCount = 1;
+        snapshot.OwnHull = 0;
+        snapshot.Hulls[0] = new Prospect.Game.Client.HullView { Id = 9, Energy = design.Flight.EnergyStorage * 0.1f };
+
+        Assert.True(ActionGroupStrip.AwaitsPower(snapshot, 9, out var battery, out var resume));
+        Assert.Equal(0.1f, battery, 4);
+        Assert.Equal(0.2f, resume, 4);
+        var strip = new ActionGroupStrip();
+        strip.Read(snapshot, 9, design, 0, false);
+        Assert.True(strip.TryGet(1, out var cell));
+        Assert.True(cell.NoPower);
+        Assert.Equal(0.5f, cell.PowerProgress, 3);
+
+        // The wait is the flown hull's: another hull reads none, and so does the flown one once it has ended.
+        Assert.False(ActionGroupStrip.AwaitsPower(snapshot, 12, out battery, out resume));
+        Assert.Equal((0f, 0f), (battery, resume));
+        strip.Read(snapshot, 12, design, 0, false);
+        Assert.True(strip.TryGet(1, out cell));
+        Assert.False(cell.NoPower);
+        snapshot.LaserHeat.AwaitingPower = false;
+        Assert.False(ActionGroupStrip.AwaitsPower(snapshot, 9, out _, out _));
+    }
+
+    [Fact]
     public void TheHeatBarsColourStepsFromCoolToWarmToHot()
     {
         var look = Look();
@@ -231,6 +297,9 @@ public sealed class ActionGroupStripTests
         Assert.Equal(look.HeatHotRgb, look.HeatRgb(1f));
         Assert.Equal("OVERHEAT", System.Text.Encoding.UTF8.GetString(look.OverheatedLabel));
         Assert.Equal("HOT", System.Text.Encoding.UTF8.GetString(look.OverheatedShortLabel));
+        Assert.Equal("NO POWER", System.Text.Encoding.UTF8.GetString(look.NoPowerLabel));
+        Assert.Equal("PWR", System.Text.Encoding.UTF8.GetString(look.NoPowerShortLabel));
+        Assert.NotEqual(look.OverheatedRgb, look.NoPowerRgb);
     }
 
     [Fact]

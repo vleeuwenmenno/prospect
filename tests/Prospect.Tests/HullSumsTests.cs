@@ -328,6 +328,7 @@ internal static class Figures
             BoostPowerMultiplier = rules.BoostPowerMultiplier,
             EnergyStorage = (float)storage,
             BoostEnergyFloor = (float)(rules.BoostEnergyFloor * storage),
+            LaserEnergyFloor = (float)(rules.LaserResumeBattery * storage),
             CollisionSafeSpeed = rules.CollisionSafeSpeed,
             CollisionDamagePerTonneSpeedSquared = rules.CollisionDamagePerTonneSpeedSquared,
             CollisionBounce = rules.CollisionBounce,

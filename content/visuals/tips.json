@@ -137,6 +137,13 @@
       "anchor": { "region": "console", "side": "top", "offset": [0, 0] }
     },
     {
+      "id": "laser-power",
+      "trigger": "laserNoPower",
+      "title": "Lasers out of power",
+      "text": "Mining lasers draw more than the reactor makes, so they run on the battery. When it is empty they shut off and wait until it has refilled part of the way; the bar under each group shows how far it is. Fire in bursts to keep the battery up, or fit more reactors or batteries.",
+      "anchor": { "region": "console", "side": "top", "offset": [0, 0] }
+    },
+    {
       "id": "interface-mode",
       "trigger": "interfaceOpened",
       "title": "Interface mode",

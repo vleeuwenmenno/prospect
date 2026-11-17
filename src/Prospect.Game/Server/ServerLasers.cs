@@ -10,7 +10,8 @@ namespace Prospect.Game.Server;
 // the lasers that may fire are planned and their power asked of the flight step; after it, each laser that was paid
 // for cuts the rock it meets through ScrapeRock, the one way an edit is made, and the ore it frees adds up into
 // loose chunks. A laser that fires heats (LaserHeat, stepped with the hull): an overheated one is not planned until
-// it has cooled to its mark. Nothing here takes memory in the tick.
+// it has cooled to its mark, and none of a hull's is while they wait for an emptied battery to hold its floor again.
+// Nothing here takes memory in the tick.
 public sealed partial class ServerHost
 {
     /// <summary>Beams fired at once over the whole world, at most.</summary>
@@ -158,6 +159,9 @@ public sealed partial class ServerHost
             var design = _content.Designs[info.Design];
             var lasers = Math.Min(design.Lasers.Length, Math.Min(rules.MaxLasersPerHull, ActionGroupsMessage.MaxParts));
             if (lasers == 0) continue;
+
+            // Lasers that ran the battery empty wait for it: no beam and no demand until it holds its floor again.
+            if (!LaserHeat.MayFire(info.Lasers)) continue;
 
             // The aim: the first rock along the ray from the camera through the pointer, else a point as far out as
             // the farthest laser reaches. Every laser turns to it from where it sits.

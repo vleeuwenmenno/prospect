@@ -62,8 +62,11 @@ internal static class TipTriggers
     /// <summary>Every laser of one of the flown ship's action groups has overheated and shut down: fired each time a group comes to be so.</summary>
     public const string LaserOverheated = "laserOverheated";
 
+    /// <summary>The flown ship's lasers ran its battery empty and wait for it to refill: fired each time they come to wait.</summary>
+    public const string LaserNoPower = "laserNoPower";
+
     /// <summary>Every trigger, for validation.</summary>
-    public static readonly string[] All = [MapOpened, CommandViewOpened, EditorOpened, ScanAvailable, UnchartedSector, ShieldOffline, EnergyLow, DroneEditHint, InterfaceOpened, GasScannerReady, AsteroidScannerReady, LocatorReady, ActionGroupReady, LaserOverheated];
+    public static readonly string[] All = [MapOpened, CommandViewOpened, EditorOpened, ScanAvailable, UnchartedSector, ShieldOffline, EnergyLow, DroneEditHint, InterfaceOpened, GasScannerReady, AsteroidScannerReady, LocatorReady, ActionGroupReady, LaserOverheated, LaserNoPower];
 }
 
 /// <summary>What a tip is placed against: the screen, a panel the editor or flight view draws, or a point.</summary>

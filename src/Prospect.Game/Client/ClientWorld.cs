@@ -1161,7 +1161,8 @@ internal sealed partial class ClientWorld : IDisposable
         }
         _near.Info(0).TractorDemand += OwnChunkDemand();
         ref var flown = ref _near.Info(0);
-        flown.LaserDemand = OwnLaserDemand(_laserClock, flown.Lasers.Locked, out flown.Lasers.Firing);
+        flown.LaserDemand = OwnLaserDemand(_laserClock, flown.Lasers, out var firing);
+        flown.Lasers.Firing = firing;
 
         // Heat goes by the environment the server last reported for the hull, as the server's own step does.
         flown.Cold = (_ownEnvironment & HullEnvironment.InColdCloud) != 0;

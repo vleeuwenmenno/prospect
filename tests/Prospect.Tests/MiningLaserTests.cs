@@ -309,17 +309,20 @@ public sealed class MiningLaserTests
         rig.Step(2);
         var count = rig.Server.RockEdits.Log.Count;
 
-        // What the generator makes beyond the pod's own draw trickles into the battery, and the beam fires on the ticks
-        // that the trickle can pay for: a fraction of the time, well short of a scrape's worth of cutting.
+        // The first tick the battery cannot pay shuts the laser off, and it waits: what the generator makes beyond the
+        // pod's own draw goes into the battery, and no tick fires on that trickle. Nothing is cut.
         var paid = 0;
+        var floor = rig.Hulls.Flight(rig.Slot()).LaserEnergyFloor;
         for (var t = 0; t < FirstScrape; t++)
         {
             rig.Step();
             if (rig.Hulls.Info(rig.Slot()).Power.Laser > 0) paid++;
-            Assert.True(rig.Hulls.State(rig.Slot()).Energy < 1f, "the battery never gets ahead of the beam");
+            Assert.True(rig.Hulls.State(rig.Slot()).Energy < floor, "the battery has not yet reached the floor the laser waits for");
         }
 
-        Assert.InRange(paid, 0, FirstScrape / 2);
+        Assert.Equal(0, paid);
+        Assert.True(rig.Hulls.Info(rig.Slot()).Lasers.AwaitingPower, "the laser waits for power");
+        Assert.Empty(Beams(rig));
         Assert.Equal(count, rig.Server.RockEdits.Log.Count);
 
         // Charge in the battery and the very next ticks fire it again.

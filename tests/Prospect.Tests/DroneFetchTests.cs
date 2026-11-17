@@ -512,7 +512,7 @@ public sealed class DroneFetchTests
         broken[1 + 4 + 8 + 4 + 3] = 2;
         reader = new NetReader(broken.AsSpan(1));
         Assert.False(BayMessage.TryRead(ref reader, out _));
-        Assert.Equal(74u, ProtocolInfo.Version);
+        Assert.Equal(75u, ProtocolInfo.Version);
         Assert.Equal(43, (int)MessageId.DroneSettings);
     }
 

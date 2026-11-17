@@ -40,13 +40,31 @@ internal struct ActionGroupCell
     /// <summary>The heat a shut-down laser of the group must cool to before it fires again; zero while none is shut down.</summary>
     public float UnlockHeat;
 
+    /// <summary>
+    /// The hull's lasers wait for its battery: they ran it empty and fire again once it holds
+    /// <see cref="ResumeBattery"/>. The whole hull's, so every cell of a strip has it alike.
+    /// </summary>
+    public bool AwaitingPower;
+
+    /// <summary>What the battery holds and what it must hold before the lasers fire again, as shares of its capacity; zero while they do not wait.</summary>
+    public float Battery;
+
+    public float ResumeBattery;
+
     /// <summary>Every laser of the group is shut down by heat: the group fires nothing until one has cooled.</summary>
     public readonly bool Overheated => Parts > 0 && Locked == Parts;
+
+    /// <summary>The cell says the lasers wait for power. Overheated comes first: a group that is both says it is hot, as that lasts longer.</summary>
+    public readonly bool NoPower => AwaitingPower && !Overheated;
+
+    /// <summary>How far the battery is to where the lasers fire again, from 0 to 1: the bar of a cell that waits for power.</summary>
+    public readonly float PowerProgress => ResumeBattery > 0f ? Math.Clamp(Battery / ResumeBattery, 0f, 1f) : 1f;
 }
 
 /// <summary>
 /// Font-free state of the action group strip beside the flight console: one cell for each group the flown hull has a
-/// part in, in key order (1 to 9, then 0), with whether it is on, firing, and cutting, and how hot its lasers are.
+/// part in, in key order (1 to 9, then 0), with whether it is on, firing, and cutting, how hot its lasers are and
+/// whether they wait for the battery.
 /// Nothing is shown for a group no part is in, and the strip is empty (and not drawn) without any. Worked out once a
 /// frame from what the server reported (the design, its per-hull overrides, the beams and the lasers' heat); it takes
 /// no memory.
@@ -73,6 +91,17 @@ internal sealed class ActionGroupStrip
         {
             foreach (var cell in Cells)
                 if (cell.Overheated) return true;
+            return false;
+        }
+    }
+
+    /// <summary>Whether the hull's lasers wait for its battery, as a cell says it: a group that is not overheated shows it.</summary>
+    public bool AnyNoPower
+    {
+        get
+        {
+            foreach (var cell in Cells)
+                if (cell.NoPower) return true;
             return false;
         }
     }
@@ -120,9 +149,13 @@ internal sealed class ActionGroupStrip
     /// <summary>
     /// Ends the count: a cell for every group with a part, on or off by <paramref name="on"/> (a bit a group), and
     /// firing while <paramref name="firing"/> says the fire button is held where it may fire.
+    /// <paramref name="awaitingPower"/> says the hull's lasers wait for its battery, which holds
+    /// <paramref name="battery"/> of its capacity and must hold <paramref name="resume"/> of it.
     /// </summary>
-    public void End(ushort on, bool firing)
+    public void End(ushort on, bool firing, bool awaitingPower = false, float battery = 0f, float resume = 0f)
     {
+        battery = awaitingPower && float.IsFinite(battery) ? Math.Clamp(battery, 0f, 1f) : 0f;
+        resume = awaitingPower && float.IsFinite(resume) ? Math.Clamp(resume, 0f, 1f) : 0f;
         var count = 0;
         for (var group = 1; group <= ActionGroups.Count; group++)
         {
@@ -139,6 +172,9 @@ internal sealed class ActionGroupStrip
                 Heat = _heat[group - 1],
                 Locked = _locked[group - 1],
                 UnlockHeat = _unlock[group - 1],
+                AwaitingPower = awaitingPower,
+                Battery = battery,
+                ResumeBattery = resume,
             };
         }
 
@@ -157,7 +193,28 @@ internal sealed class ActionGroupStrip
                     design.Mounts[design.Lasers[part]].Type.Laser!.UnlockHeat);
         }
 
-        End(on, firing);
+        End(on, firing, AwaitsPower(snapshot, hull, out var battery, out var resume), battery, resume);
+    }
+
+    /// <summary>
+    /// Whether the lasers of the flown hull <paramref name="hull"/> wait for its battery, as prediction has it, with
+    /// what the battery holds and what it must hold before they fire again, as shares of its capacity. False, and
+    /// zero, for any other hull.
+    /// </summary>
+    public static bool AwaitsPower(SessionSnapshot snapshot, uint hull, out float battery, out float resume)
+    {
+        battery = 0f;
+        resume = 0f;
+        if (hull == 0 || hull != snapshot.LaserHeatHull || !snapshot.LaserHeat.AwaitingPower) return false;
+        var storage = snapshot.Flight.EnergyStorage;
+        if (storage > 0f)
+        {
+            resume = snapshot.Flight.LaserEnergyFloor / storage;
+            if ((uint)snapshot.OwnHull < (uint)snapshot.HullCount && snapshot.Hulls[snapshot.OwnHull].Id == hull)
+                battery = snapshot.Hulls[snapshot.OwnHull].Energy / storage;
+        }
+
+        return true;
     }
 
     /// <summary>Whether the server reports laser <paramref name="part"/> of <paramref name="hull"/> as cutting rock.</summary>

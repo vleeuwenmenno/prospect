@@ -15,7 +15,7 @@
 - **Built:** tanks, sensors and scanners are never slanted ("Decided: parts never slanted" below).
 - **Built:** the module scanners mount on faces too ("Decided: scanners mount" below).
 - **Built:** the cold gas thruster is an array placed in three sizes ("Decided: cold gas arrays" below).
-- Protocol 74, save layout 23, design encoding 6, design file version 8, evaluator 22.
+- Protocol 75, save layout 23, design encoding 6, design file version 8, evaluator 23.
 
 ## Decided: parts
 
