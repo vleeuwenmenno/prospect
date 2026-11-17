@@ -410,6 +410,8 @@ internal sealed partial class WorldView
         _jobs = jobs;
         _damage = new DamageMeshes(jobs, _collision.MeshVertices);
         _rockPatches = new RockPatches(jobs, RockPatchLook.Load());
+        // Read the ore marks' figures now: the first chunk would otherwise read the file inside a frame.
+        _ = OreChunkLook.Current;
         _partModels = new PartModels(jobs, PropulsionLook.Shared);
         _scene = scene;
         RefreshKeyNames();
