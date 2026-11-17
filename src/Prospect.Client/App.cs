@@ -183,6 +183,13 @@ internal sealed class AppOptions
 
     /// <summary>The size the scripted mount ghost of <c>--open edit-mount</c> is held in; null for the part's default. For captures.</summary>
     public int? MountSize { get; set; }
+
+    /// <summary>
+    /// The snap step a scripted editor view holds its ghost at (<c>--snap</c>), in quarter cells: 4, 2 or 1; null
+    /// leaves the saved one. With <c>--open edit-turn</c> the engine is placed one step over and selected.
+    /// For captures.
+    /// </summary>
+    public int? Snap { get; set; }
     public float ThrustAt { get; set; }
     public float? ThrustUntil { get; set; }
     public string ExhaustKind { get; set; } = "engine";
@@ -1543,7 +1550,7 @@ internal sealed class App : IDisposable
                 // edit-mirror is the engine with the X and Z planes on, so its copies show, each facing the mirrored way;
                 // edit-ion holds an ion drive instead of the engine.
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
-                World.HoldGhostForCapture(view == "edit-mount", view == "edit-ion", view == "edit-rings", _options.MountSize ?? 0);
+                World.HoldGhostForCapture(view == "edit-mount", view == "edit-ion", view == "edit-rings", _options.MountSize ?? 0, _options.Snap ?? 0);
                 if (view == "edit-mirror")
                     World.Editor.SetMirror(MirrorAxes.X | MirrorAxes.Z);
                 _screens.SelectEditorTab("Thrust");
@@ -1908,7 +1915,7 @@ internal sealed class App : IDisposable
                 World.SetDroneCapturePose(droneCamera.X, droneCamera.Y * (MathF.PI / 180f), droneCamera.Z * (MathF.PI / 180f));
             if (_capturesTaken < count && rtsReady && (_options.CaptureHitAge is not { } hitAge || World.Own.ShieldHit.Strength > 0 && World.Own.ShieldHitAge >= hitAge) && captureClock >= due && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
             {
-                ShowPerformance |= Session is not null && _options.MountSize is null && _options.OpenView is not ("controls" or "players" or "social" or "friends" or "chat" or "hud" or "interface" or "charts" or "pinned-charts" or "inventory" or "edit-tank-fuel" or "edit-laser-group");
+                ShowPerformance |= Session is not null && _options.MountSize is null && _options.Snap is null && _options.OpenView is not ("controls" or "players" or "social" or "friends" or "chat" or "hud" or "interface" or "charts" or "pinned-charts" or "inventory" or "edit-tank-fuel" or "edit-laser-group");
                 var file = Path.GetFullPath(path);
                 if (count > 1)
                 {

@@ -20,7 +20,7 @@ public struct HullSum
 
     internal Numbers Values;
 
-    /// <summary>The grid box around the blocks under the node; meaningless while <see cref="Count"/> is zero.</summary>
+    /// <summary>The grid box around the blocks under the node, in quarter cells; meaningless while <see cref="Count"/> is zero.</summary>
     internal int MinX, MinY, MinZ, MaxX, MaxY, MaxZ;
 
     /// <summary>How many blocks under the node the hull still has.</summary>
@@ -322,13 +322,13 @@ public sealed class BoxHullSums
 
         if (sum.Count == 0)
         {
-            (sum.MinX, sum.MinY, sum.MinZ) = (box.At.X, box.At.Y, box.At.Z);
-            (sum.MaxX, sum.MaxY, sum.MaxZ) = (box.At.X + box.Size.X, box.At.Y + box.Size.Y, box.At.Z + box.Size.Z);
+            (sum.MinX, sum.MinY, sum.MinZ) = (box.Low4(0), box.Low4(1), box.Low4(2));
+            (sum.MaxX, sum.MaxY, sum.MaxZ) = (box.High4(0), box.High4(1), box.High4(2));
         }
         else
         {
-            (sum.MinX, sum.MinY, sum.MinZ) = (Math.Min(sum.MinX, box.At.X), Math.Min(sum.MinY, box.At.Y), Math.Min(sum.MinZ, box.At.Z));
-            (sum.MaxX, sum.MaxY, sum.MaxZ) = (Math.Max(sum.MaxX, box.At.X + box.Size.X), Math.Max(sum.MaxY, box.At.Y + box.Size.Y), Math.Max(sum.MaxZ, box.At.Z + box.Size.Z));
+            (sum.MinX, sum.MinY, sum.MinZ) = (Math.Min(sum.MinX, box.Low4(0)), Math.Min(sum.MinY, box.Low4(1)), Math.Min(sum.MinZ, box.Low4(2)));
+            (sum.MaxX, sum.MaxY, sum.MaxZ) = (Math.Max(sum.MaxX, box.High4(0)), Math.Max(sum.MaxY, box.High4(1)), Math.Max(sum.MaxZ, box.High4(2)));
         }
 
         sum.Count++;
@@ -658,7 +658,8 @@ public sealed class BoxHullSums
             ShieldRecharge = recharge,
             Mass = mass,
             Volume = (float)sum.Values[Cells] * size * size * size,
-            Size = blocks > 0 ? new Vector3(sum.MaxX - sum.MinX, sum.MaxY - sum.MinY, sum.MaxZ - sum.MinZ) * size : Vector3.Zero,
+            // The box is in quarter cells; a quarter is exact, so whole cells give the figure they always did.
+            Size = blocks > 0 ? new Vector3(sum.MaxX - sum.MinX, sum.MaxY - sum.MinY, sum.MaxZ - sum.MinZ) * (1f / GridPoint.PerCell) * size : Vector3.Zero,
             Blocks = blocks,
             CargoHold = (float)sum.Values[Cargo],
             Crew = checked((int)sum.Values[Crew]),

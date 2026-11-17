@@ -66,12 +66,23 @@ public readonly record struct DesignMount(int Parent, BlockFacing Face, int U, i
 
 /// <summary>
 /// The geometry and the rules of face mounts, shared by design files, received designs and the editor's drafts.
-/// Everything is whole tenths of a cell on the blocks' integer edges, so fitting and overlap are exact.
+/// A mount's place on its face is whole tenths of a cell from the face's low corner, and a block's place is whole
+/// quarters of a cell (<see cref="GridPoint"/>), so the boxes compared here are in twentieths (<see cref="Fine"/>),
+/// the smallest step both are whole in: fitting and overlap are exact wherever the block sits.
 /// </summary>
 public static class FaceMounts
 {
     /// <summary>Positions on a face are in this many steps a cell.</summary>
     public const int PerCell = 10;
+
+    /// <summary>
+    /// Steps a cell of the boxes <see cref="Box"/> gives and <see cref="Covers"/> takes: twentieths, in which a
+    /// block's quarter cells (five each) and a mount's tenths (two each) are both whole.
+    /// </summary>
+    public const int Fine = 20;
+
+    private const int FinePerQuarter = Fine / GridPoint.PerCell;
+    private const int FinePerTenth = Fine / PerCell;
 
     /// <summary>The largest side of a mount's square: one cell.</summary>
     public const int MaxSide = PerCell;
@@ -98,32 +109,39 @@ public static class FaceMounts
     public static bool SizeAllowed(BlockType? type, int size) => type?.Mount is { } spec && spec.Allows(size);
 
     /// <summary>
-    /// The box a mount fills, on the integer block edges times <see cref="PerCell"/>: a block covers
-    /// <c>[At, At + Size)</c> times ten there. Each span needs three slots.
+    /// The box a mount fills, on the grid's edges in twentieths of a cell (<see cref="Fine"/>): a block covers
+    /// <c>[Low4, High4)</c> times five there. Each span needs three slots.
     /// </summary>
     public static void Box(in DesignBox parent, in DesignMount mount, Span<int> low, Span<int> high)
     {
         var spec = mount.Type.Mount!;
-        var side = spec.SideOf(mount.Size);
+        var side = spec.SideOf(mount.Size) * FinePerTenth;
         var n = Facings.Axis(mount.Face);
         var a = (n + 1) % 3;
         var b = (n + 2) % 3;
         if (Facings.Sign(mount.Face) > 0)
         {
-            low[n] = (Of(parent.At, n) + Of(parent.Size, n)) * PerCell;
-            high[n] = low[n] + spec.Depth;
+            low[n] = parent.High4(n) * FinePerQuarter;
+            high[n] = low[n] + spec.Depth * FinePerTenth;
         }
         else
         {
-            high[n] = Of(parent.At, n) * PerCell;
-            low[n] = high[n] - spec.Depth;
+            high[n] = parent.Low4(n) * FinePerQuarter;
+            low[n] = high[n] - spec.Depth * FinePerTenth;
         }
 
-        low[a] = Of(parent.At, a) * PerCell + mount.U;
+        low[a] = parent.Low4(a) * FinePerQuarter + mount.U * FinePerTenth;
         high[a] = low[a] + side;
-        low[b] = Of(parent.At, b) * PerCell + mount.V;
+        low[b] = parent.Low4(b) * FinePerQuarter + mount.V * FinePerTenth;
         high[b] = low[b] + side;
     }
+
+    /// <summary>
+    /// A mount's place on a face (<see cref="DesignMount.U"/> or <see cref="DesignMount.V"/>, tenths of a cell from
+    /// the face's low corner) for a square whose low edge along <paramref name="axis"/> is <paramref name="fine"/>, a
+    /// coordinate of <see cref="Box"/>. The edge must be whole tenths from the block's corner, as a mount's is.
+    /// </summary>
+    public static int Place(in DesignBox parent, int axis, int fine) => (fine - parent.Low4(axis) * FinePerQuarter) / FinePerTenth;
 
     /// <summary>
     /// Whether the mount's square lies on a whole face of its parent: a box's six sides, or the two full sides of a
@@ -140,13 +158,12 @@ public static class FaceMounts
             && mount.V + side <= Of(parent.Size, (n + 2) % 3) * PerCell;
     }
 
-    /// <summary>Whether a box in tenths shares volume with a block. Touching does not. A wedge counts as its whole box.</summary>
+    /// <summary>Whether a box in twentieths (<see cref="Fine"/>) shares volume with a block. Touching does not. A wedge counts as its whole box.</summary>
     public static bool Covers(in DesignBox block, ReadOnlySpan<int> low, ReadOnlySpan<int> high)
     {
         for (var axis = 0; axis < 3; axis++)
         {
-            var from = Of(block.At, axis) * PerCell;
-            if (low[axis] >= from + Of(block.Size, axis) * PerCell || high[axis] <= from)
+            if (low[axis] >= block.High4(axis) * FinePerQuarter || high[axis] <= block.Low4(axis) * FinePerQuarter)
                 return false;
         }
 

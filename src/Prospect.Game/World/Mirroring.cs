@@ -22,29 +22,30 @@ public enum MirrorAxes : byte
 
 /// <summary>
 /// Mirroring in the ship editor's grid, shared by the draft's edits and the ghosts that preview them. The planes
-/// pass through the centre of a block, given as <c>centre2</c>: twice the centre on each axis, in cells, which is
-/// <c>2 * At + Size</c> and so always a whole number. Every figure is whole cells, or whole tenths of a cell for a
-/// mounted part, so a mirrored copy lands exactly and compares exactly. Allocates nothing.
+/// pass through the centre of a block, given as <c>centre2</c>: twice the centre on each axis, in quarter cells on
+/// the grid's edges, which is <c>Low4 + High4</c> and so always a whole number, also for a block set between cells.
+/// Every figure is whole quarter cells, or whole tenths of a cell across a face for a mounted part, so a mirrored
+/// copy lands exactly and compares exactly. Allocates nothing.
 /// </summary>
 public static class Mirroring
 {
     /// <summary>The most copies of one edit, the original included: two to the power of three planes.</summary>
     public const int MaxCopies = 8;
 
-    /// <summary>Twice the centre of a box, in cells, on each axis.</summary>
-    public static GridSize Centre2(in DesignBox box) =>
-        new(2 * box.At.X + box.Size.X, 2 * box.At.Y + box.Size.Y, 2 * box.At.Z + box.Size.Z);
+    /// <summary>Twice the centre of a box, in quarter cells, on each axis.</summary>
+    public static GridPoint Centre2(in DesignBox box) =>
+        GridPoint.Quarters(box.Low4(0) + box.High4(0), box.Low4(1) + box.High4(1), box.Low4(2) + box.High4(2));
 
     /// <summary>
     /// A box mirrored across the planes of <paramref name="mask"/> (a <see cref="MirrorAxes"/> value): its place
     /// reflected, a thrust part's facing flipped on a mirrored axis and its wedge slant flipped on a mirrored transverse axis.
     /// </summary>
-    public static DesignBox Box(in DesignBox box, int mask, GridSize centre2)
+    public static DesignBox Box(in DesignBox box, int mask, GridPoint centre2)
     {
+        // A box's far edge is reflected to be its near one.
         var at = box.At;
-        if ((mask & 1) != 0) at = at with { X = centre2.X - (box.At.X + box.Size.X) };
-        if ((mask & 2) != 0) at = at with { Y = centre2.Y - (box.At.Y + box.Size.Y) };
-        if ((mask & 4) != 0) at = at with { Z = centre2.Z - (box.At.Z + box.Size.Z) };
+        for (var axis = 0; axis < 3; axis++)
+            if ((mask & (1 << axis)) != 0) at = at.With(axis, centre2.Of(axis) - box.High4(axis));
         // Only a thrust part's facing means anything (BoxHullSums); another block keeps its own, so a copy of it that
         // lands on its plane is still the same block.
         var facing = box.Type is { Thrust: > 0 } or { FacesOut: true } ? Facing(box.Facing, mask) : box.Facing;
@@ -75,7 +76,7 @@ public static class Mirroring
     /// mirrored copy, one for every mix of <paramref name="axes"/>, and returns how many. A copy that is the same box
     /// as one already listed, as a box lying on a plane is, is left out.
     /// </summary>
-    public static int Copies(in DesignBox box, MirrorAxes axes, GridSize centre2, Span<DesignBox> into)
+    public static int Copies(in DesignBox box, MirrorAxes axes, GridPoint centre2, Span<DesignBox> into)
     {
         var count = 0;
         for (var mask = 0; mask < MaxCopies; mask++)
@@ -94,12 +95,11 @@ public static class Mirroring
     }
 
     /// <summary>
-    /// A mounted part mirrored across the planes of <paramref name="mask"/>, given its parent box and that box
-    /// mirrored the same way. The face flips on a mirrored axis and its square is reflected across the face; its size and
-    /// action group stay. The
-    /// result's <see cref="DesignMount.Parent"/> is left as it was: the caller knows where the mirrored parent is.
+    /// A mounted part mirrored across the planes of <paramref name="mask"/>, given its parent box. The face flips on
+    /// a mirrored axis and its square is reflected across the face; its size and action group stay. The result's
+    /// <see cref="DesignMount.Parent"/> is left as it was: the caller knows where the mirrored parent is.
     /// </summary>
-    public static DesignMount Mount(in DesignBox parent, in DesignBox mirroredParent, in DesignMount mount, int mask, GridSize centre2)
+    public static DesignMount Mount(in DesignBox parent, in DesignMount mount, int mask)
     {
         var side = FaceMounts.Side(mount);
         var n = Facings.Axis(mount.Face);
@@ -107,8 +107,8 @@ public static class Mirroring
         return mount with
         {
             Face = Facing(mount.Face, mask),
-            U = Across(parent.At, mirroredParent.At, mount.U, side, a, mask, centre2),
-            V = Across(parent.At, mirroredParent.At, mount.V, side, b, mask, centre2),
+            U = Across(parent, mount.U, side, a, mask),
+            V = Across(parent, mount.V, side, b, mask),
         };
     }
 
@@ -116,14 +116,13 @@ public static class Mirroring
     public static bool Same(in DesignBox a, in DesignBox b) =>
         a.At == b.At && a.Size == b.Size && a.Shape == b.Shape && a.Facing == b.Facing && ReferenceEquals(a.Type, b.Type);
 
-    private static int Across(GridSize parentAt, GridSize mirroredAt, int offset, int side, int axis, int mask, GridSize centre2)
+    // A square on a face, reflected along an axis across the face: the mirrored block is the block reflected, so the
+    // square's far edge, counted from the block's far edge, becomes its near one. In tenths of a cell; where the
+    // block sits does not enter it.
+    private static int Across(in DesignBox parent, int offset, int side, int axis, int mask)
     {
         if ((mask & (1 << axis)) == 0)
             return offset;
-        // In tenths of a cell on the grid's integer edges: the square's far edge is reflected to be its near one.
-        var from = At(parentAt, axis) * FaceMounts.PerCell + offset + side;
-        return At(centre2, axis) * FaceMounts.PerCell - from - At(mirroredAt, axis) * FaceMounts.PerCell;
+        return FaceMounts.Of(parent.Size, axis) * FaceMounts.PerCell - offset - side;
     }
-
-    private static int At(GridSize g, int axis) => axis switch { 0 => g.X, 1 => g.Y, _ => g.Z };
 }

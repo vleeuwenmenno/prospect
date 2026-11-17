@@ -556,7 +556,7 @@ internal sealed class SaveRig : IDisposable
         var far = boxes[0];
         foreach (var box in boxes)
             if (box.At.X + box.Size.X > far.At.X + far.Size.X) far = box;
-        var big = new DesignBox(new GridSize(far.At.X + far.Size.X, far.At.Y, far.At.Z), new GridSize(2, 2, 2), content.Blocks.Get("hull"));
+        var big = new DesignBox(far.At + new GridSize(far.Size.X, 0, 0), new GridSize(2, 2, 2), content.Blocks.Get("hull"));
         // The vessel's mounted thrusters come along, but for those the big block now stands in front of.
         DesignBox[] all = [.. boxes, big];
         var mounts = mining.Mounts.ToArray().Where(mount => FaceMounts.Check(all, default, mount) == DraftEdit.Done).ToArray();

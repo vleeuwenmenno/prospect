@@ -2090,6 +2090,120 @@ public sealed class EditorSessionTests
         Assert.Null(rig.Server.Fault);
     }
 
+    [Fact]
+    public void ABlockSetBetweenCellsIsAdmittedFliesAndCollidesTheSameOnTheServerAndTheClient()
+    {
+        using var rig = new Rig(clients: 1, joined: 1, peerWait: 0);
+        var startup = rig.Content.Designs.Length;
+        var content = rig.Content;
+        var one = new GridSize(1, 1, 1);
+        var plating = content.Blocks.Get("hull");
+
+        // Plating on the first face that takes it half a cell over, as the editor's half step places it, with open
+        // space beyond it along that face's normal; and a cold gas array on its outer side.
+        var draft = BuildDraft.FromBlueprint(content.Pod, content);
+        var added = draft.Boxes.Length;
+        var normal = Vector3.Zero;
+        for (var target = 0; target < added && draft.Boxes.Length == added; target++)
+        {
+            for (var side = 0; side < 6 && draft.Boxes.Length == added; side++)
+            {
+                var across = ((side >> 1) + 1) % 3;
+                var corner = draft.Snap(target, side, one, step: 2);
+                var at = corner.With(across, corner.Of(across) + 2);
+                if (draft.CanAdd(at, one, plating) != DraftEdit.Done)
+                    continue;
+                var box = new DesignBox(at, one, plating);
+                var clear = true;
+                foreach (var other in draft.Boxes)
+                {
+                    var beyond = (side & 1) == 0 ? other.High4(side >> 1) > box.High4(side >> 1) : other.Low4(side >> 1) < box.Low4(side >> 1);
+                    var behind = true;
+                    for (var axis = 0; axis < 3; axis++)
+                        if (axis != side >> 1) behind &= other.Low4(axis) < box.High4(axis) && other.High4(axis) > box.Low4(axis);
+                    clear &= !(beyond && behind);
+                }
+
+                if (!clear)
+                    continue;
+                Assert.Equal(DraftEdit.Done, draft.Add(at, one, plating));
+                Assert.Equal(DraftEdit.Done, draft.AddMount(added, (BlockFacing)side, 3, 3, content.Blocks.Get("coldGasThruster")));
+                normal[side >> 1] = (side & 1) == 0 ? 1f : -1f;
+            }
+        }
+
+        Assert.Equal(added + 1, draft.Boxes.Length);
+        var place = draft.Boxes[added].At;
+        Assert.False(place.IsWhole);
+        var hull = Build(rig, draft, startup + 1);
+
+        // Admitted: the server's design and the one the client decoded are the same to the bit, place and all.
+        var design = rig.Server.Content.Designs[startup];
+        var sent = rig.Snap(0).Content.Designs[startup];
+        Assert.Equal(place, design.Boxes[added].At);
+        Assert.Equal(design.Boxes.ToArray(), sent.Boxes.ToArray());
+        Assert.Equal(design.Mounts.ToArray(), sent.Mounts.ToArray());
+        Assert.Equal(design.BlockOffsets, sent.BlockOffsets);
+        Assert.Equal(design.BlockHalfExtents, sent.BlockHalfExtents);
+        Assert.Equal(design.Pivot, sent.Pivot);
+        Assert.Equal(design.Flight, sent.Flight);
+        Assert.Equal(DesignBytes.Encode(design), DesignBytes.Encode(sent));
+        Assert.Equal(design.IntactShell.Length, sent.IntactShell.Length);
+        Assert.True(design.IntactShell.Length > 0);
+
+        // Flown: thrust on every axis with the nose swinging. The client predicts with the same blocks in the same
+        // places, so the server never has to correct it.
+        var worst = 0f;
+        for (var i = 0; i < 360; i++)
+        {
+            var t = i / 60f;
+            var aim = Vector3.Normalize(new Vector3(MathF.Sin(t * 1.3f), 0.4f * MathF.Cos(t * 0.9f), -MathF.Cos(t * 1.3f)));
+            rig.Input(0).Submit(i < 240 ? new PlayerControls { Forward = 1, Strafe = MathF.Sin(t * 2f), Vertical = 0.5f, Aim = aim, Align = true } : default);
+            rig.Step();
+            worst = Math.Max(worst, rig.Snap(0).PredictionError);
+        }
+
+        Assert.True(worst < 0.01f, $"prediction was off by up to {worst:0.000} m");
+        Assert.True(rig.Until(() => rig.Hulls.State(hull).Velocity.Length() < 0.05f && rig.Hulls.State(hull).AngularVelocity.Length() < 0.01f, 1800), "the hull should come to rest");
+
+        // Hit: a drone comes straight in at the half of the block that stands past where a whole cell would have
+        // put it. With the shield out of the way the block, worn thin, is what it takes.
+        rig.Hulls.State(hull).Shield = 0f;
+        rig.Hulls.State(hull).ShieldOffline = true;
+        rig.Hulls.BlockStates.SetHitPoints(rig.Hulls.Info(hull).BlockState, added, 0.01f);
+        var state = rig.Hulls.State(hull);
+        var out3 = Vector3.Transform(normal, state.Orientation);
+        var acrossAxis = Vector3.Zero;
+        for (var axis = 0; axis < 3; axis++)
+            if (place.Of(axis) % GridPoint.PerCell != 0) acrossAxis[axis] = 0.25f * design.BlockSize;
+        var past = state.Position + Vector3.Transform(design.BlockOffsets[added] + acrossAxis, state.Orientation);
+        var drone = (byte)content.DroneDesign;
+        var rammer = rig.Hulls.Create(0, drone, rig.Server.Content.Designs[drone], past + out3 * 6f);
+        rig.Hulls.State(rammer.Index).Velocity = out3 * -30f;
+        worst = 0f;
+        var struck = false;
+        for (var i = 0; i < 600 && !struck; i++)
+        {
+            rig.Step();
+            worst = Math.Max(worst, rig.Snap(0).PredictionError);
+            struck = rig.Hulls.Revision(hull) > 0;
+        }
+
+        Assert.True(struck, "the ram should take the block");
+        Assert.False(BlockSet.Has(rig.Hulls.Blocks(hull), added));
+        Assert.Equal(design.BlockCount - 1, BlockSet.Count(rig.Hulls.Blocks(hull)));
+        Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Revision > 0, 600), "the client should be told of the lost block");
+        var seen = rig.Snap(0).Hulls[rig.Snap(0).OwnHull];
+        Assert.False(BlockSet.Has(seen.Blocks.Span, added));
+
+        // The knock is the server's to decide, and the client is brought onto it: once the hull has settled the two
+        // agree again.
+        rig.Step(240);
+        Assert.True(rig.Snap(0).PredictionError < 0.05f, $"prediction is off by {rig.Snap(0).PredictionError:0.000} m after the hit (worst {worst:0.000} m)");
+        Assert.Null(rig.Server.Fault);
+        Assert.Null(rig.Clients[0]!.Fault);
+    }
+
     /// <summary>What a client is sent of tanks: each tank's kilograms in single precision.</summary>
     private static float[] Sent(double[] levels) => [.. levels.Select(level => (float)level)];
 

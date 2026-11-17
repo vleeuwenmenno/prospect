@@ -71,7 +71,8 @@ public struct ShellWork
 /// it falls short the shell stands further out, by up to δ in field value.
 /// </para>
 /// <para>
-/// Extraction. Fc is sampled on a grid of h = a third of a block, aligned with block faces, and the shell is the
+/// Extraction. Fc is sampled on a grid of h = a third of a block, aligned with the faces of blocks on whole cells
+/// (a block set between cells has its faces between samples; nothing below needs them on one), and the shell is the
 /// level set of its linear interpolation I over the six Kuhn tetrahedra of each cell, so |I - Fc| ≤ e = √3h/2 = 0.2887
 /// block and F - δ - e ≤ I ≤ F + e on the shell, give or take rounding. These are field values, not distances: the
 /// shell is not the target, but within those values of it. A cell whose samples are equal to the bit along an axis
@@ -373,9 +374,11 @@ public sealed class ShieldSurface
             Array.Clear(_edgeStamps);
         }
 
+        // The grid's corner is a whole cell, so the samples of a design on whole cells are where they always were:
+        // the lowest place in quarter cells, rounded down to a cell (an arithmetic shift, right at any sign).
         var low = (X: int.MaxValue, Y: int.MaxValue, Z: int.MaxValue);
         foreach (var box in design.Boxes)
-            low = (Math.Min(low.X, box.At.X), Math.Min(low.Y, box.At.Y), Math.Min(low.Z, box.At.Z));
+            low = (Math.Min(low.X, box.At.X4 >> 2), Math.Min(low.Y, box.At.Y4 >> 2), Math.Min(low.Z, box.At.Z4 >> 2));
         var pad = (int)MathF.Ceiling(_q + _clamp + _blend) + 2;
         _base = (low.X - pad, low.Y - pad, low.Z - pad);
         _origin = design.Pivot;
@@ -390,12 +393,17 @@ public sealed class ShieldSurface
             _partWedge = new bool[design.BlockCount];
         }
 
-        // Faces in block units from the grid's corner: whole numbers, exact.
+        // Faces in block units from the grid's corner: whole quarters, exact in single precision, and whole numbers
+        // for a block on a whole cell.
         var boxes = design.Boxes;
+        const float Quarter = 1f / GridPoint.PerCell;
         for (var b = 0; b < boxes.Length; b++)
         {
             var box = boxes[b];
-            _low[b] = new Vector3(box.At.X - _base.X, box.At.Y - _base.Y, box.At.Z - _base.Z);
+            _low[b] = new Vector3(
+                (box.At.X4 - _base.X * GridPoint.PerCell) * Quarter,
+                (box.At.Y4 - _base.Y * GridPoint.PerCell) * Quarter,
+                (box.At.Z4 - _base.Z * GridPoint.PerCell) * Quarter);
             _high[b] = _low[b] + new Vector3(box.Size.X, box.Size.Y, box.Size.Z);
         }
 
@@ -403,6 +411,8 @@ public sealed class ShieldSurface
     }
 
     private ReadOnlySpan<ulong> Alive => _alive.AsSpan(0, _aliveWords);
+
+    private int Base(int axis) => axis switch { 0 => _base.X, 1 => _base.Y, _ => _base.Z };
 
     /// <summary>A point in block units from the grid's corner, in the hull's frame and metres.</summary>
     private Vector3 Hull(Vector3 local) => new((local.X + _shift.X) * _size, (local.Y + _shift.Y) * _size, (local.Z + _shift.Z) * _size);
@@ -435,21 +445,42 @@ public sealed class ShieldSurface
         var slanted = (int)MathF.Floor((_q * 1.5f + _r) / _h) + 1;
         var boxes = _design.Boxes;
         Span<int> at = stackalloc int[3];
+        Span<int> lo = stackalloc int[3];
+        Span<int> hi = stackalloc int[3];
+        Span<int> inLo = stackalloc int[3];
+        Span<int> inHi = stackalloc int[3];
+        Span<double> edgeLo = stackalloc double[3];
+        Span<double> edgeHi = stackalloc double[3];
         for (var b = 0; b < boxes.Length; b++)
         {
             if (!BlockSet.Has(Alive, b)) continue;
             var box = boxes[b];
-            Span<int> lo = [Resolution * (box.At.X - _base.X), Resolution * (box.At.Y - _base.Y), Resolution * (box.At.Z - _base.Z)];
-            Span<int> hi = [lo[0] + Resolution * box.Size.X, lo[1] + Resolution * box.Size.Y, lo[2] + Resolution * box.Size.Z];
+            // The block in cell indices. Its faces are on whole indices when it sits on a whole cell; set between
+            // cells they fall inside a cell, and the block then has two ranges: `lo` to `hi`, the cells it reaches
+            // into (the reach is counted from these, so no cell near it is missed), and `inLo` to `inHi`, the cells
+            // wholly inside it, which alone may be left out. On a whole cell the two are the same.
+            // In twelfths of a cell both a quarter cell and a cell index are whole: three a quarter, four an index.
+            for (var axis = 0; axis < 3; axis++)
+            {
+                var from = (box.Low4(axis) - Base(axis) * GridPoint.PerCell) * Resolution;
+                var to = (box.High4(axis) - Base(axis) * GridPoint.PerCell) * Resolution;
+                edgeLo[axis] = from / (double)GridPoint.PerCell;
+                edgeHi[axis] = to / (double)GridPoint.PerCell;
+                lo[axis] = from >> 2;
+                hi[axis] = (to + GridPoint.PerCell - 1) >> 2;
+                inLo[axis] = (from + GridPoint.PerCell - 1) >> 2;
+                inHi[axis] = to >> 2;
+            }
+
             if (box.Shape == BlockShape.Box)
             {
                 // Columns along z: inside the box's x, y range only the cells past its z faces.
                 for (var i = lo[0] - reach; i < hi[0] + reach; i++)
                     for (var j = lo[1] - reach; j < hi[1] + reach; j++)
                     {
-                        var through = i >= lo[0] && i < hi[0] && j >= lo[1] && j < hi[1];
-                        if (!Interval(i, j, 2, lo[2] - reach, through ? lo[2] : hi[2] + reach)) return false;
-                        if (through && !Interval(i, j, 2, hi[2], hi[2] + reach)) return false;
+                        var through = i >= inLo[0] && i < inHi[0] && j >= inLo[1] && j < inHi[1] && inLo[2] < inHi[2];
+                        if (!Interval(i, j, 2, lo[2] - reach, through ? inLo[2] : hi[2] + reach)) return false;
+                        if (through && !Interval(i, j, 2, inHi[2], hi[2] + reach)) return false;
                     }
                 continue;
             }
@@ -457,8 +488,9 @@ public sealed class ShieldSurface
             // A wedge: columns along v; cells wholly inside the solid, or farther than the reach beyond the slant, are
             // left out, so neither the solid nor the empty half of its box is scanned.
             BlockShapes.Decode(box.Shape, out var e, out var u, out var v, out var su, out var sv);
-            double su3 = hi[u] - lo[u], sv3 = hi[v] - lo[v];
-            double cu = (lo[u] + hi[u]) * 0.5, cv = (lo[v] + hi[v]) * 0.5;
+            // The slant from the block's own faces, in index units: exact, and whole for a block on a whole cell.
+            double su3 = edgeHi[u] - edgeLo[u], sv3 = edgeHi[v] - edgeLo[v];
+            double cu = (edgeLo[u] + edgeHi[u]) * 0.5, cv = (edgeLo[v] + edgeHi[v]) * 0.5;
             var length = Math.Sqrt(su3 * su3 + sv3 * sv3);
             for (var ie = lo[e] - slanted; ie < hi[e] + slanted; ie++)
                 for (var iu = lo[u] - slanted; iu < hi[u] + slanted; iu++)
@@ -473,7 +505,7 @@ public sealed class ShieldSurface
                     var limit = (slanted * length - lean) / (sv * su3) + cv;
                     if (sv > 0) end = Math.Min(end, (int)Math.Floor(limit) + 1);
                     else start = Math.Max(start, (int)Math.Ceiling(limit) - 1);
-                    var inside = ie >= lo[e] && ie < hi[e] && iu >= lo[u] && iu < hi[u];
+                    var inside = ie >= inLo[e] && ie < inHi[e] && iu >= inLo[u] && iu < inHi[u];
                     var solidFrom = int.MaxValue;
                     var solidTo = int.MinValue;
                     if (inside)
@@ -483,19 +515,19 @@ public sealed class ShieldSurface
                         var bound = -far / (sv * su3) + cv;
                         if (sv > 0)
                         {
-                            solidFrom = lo[v];
-                            solidTo = Math.Min(hi[v], (int)Math.Floor(bound) - 1 + 1);
+                            solidFrom = inLo[v];
+                            solidTo = Math.Min(inHi[v], (int)Math.Floor(bound) - 1 + 1);
                         }
                         else
                         {
-                            solidFrom = Math.Max(lo[v], (int)Math.Ceiling(bound));
-                            solidTo = hi[v];
+                            solidFrom = Math.Max(inLo[v], (int)Math.Ceiling(bound));
+                            solidTo = inHi[v];
                         }
                     }
 
                     for (var iv = start; iv < end; iv++)
                     {
-                        if (iv >= solidFrom && iv < solidTo) { iv = solidTo - 1; continue; }
+                        if (solidFrom < solidTo && iv >= solidFrom && iv < solidTo) { iv = solidTo - 1; continue; }
                         at[e] = ie; at[u] = iu; at[v] = iv;
                         if (!AddCell(Key(at[0], at[1], at[2]))) return false;
                     }
@@ -608,14 +640,16 @@ public sealed class ShieldSurface
             var box = boxes[b];
             _partLow[root] = Vector3.Min(_partLow[root], _low[b]);
             _partHigh[root] = Vector3.Max(_partHigh[root], _high[b]);
-            _volume[root] += (long)box.Size.X * box.Size.Y * box.Size.Z;
+            // In quarter cells cubed, the unit the part's bounding box is whole in.
+            _volume[root] += (long)box.Size.X * box.Size.Y * box.Size.Z * (GridPoint.PerCell * GridPoint.PerCell * GridPoint.PerCell);
             _partWedge[root] |= box.Shape != BlockShape.Box;
         }
 
         for (var b = 0; b < boxes.Length; b++)
         {
             if (!BlockSet.Has(Alive, b) || Find(b) != b || _partWedge[b]) continue;
-            var size = _partHigh[b] - _partLow[b];
+            // The bounds are whole quarters, exact, so the product is the box's volume to the last unit.
+            var size = (_partHigh[b] - _partLow[b]) * GridPoint.PerCell;
             if ((long)size.X * (long)size.Y * (long)size.Z != _volume[b]) continue;
             if (!RoundedBox(_partLow[b], _partHigh[b], output, ref count)) return false;
             _work.RoundedBoxes++;
@@ -819,8 +853,12 @@ public sealed class ShieldSurface
             for (var axis = 0; axis < 3; axis++)
                 for (var sign = -1; sign <= 1; sign += 2)
                 {
+                    // A flat stretch is drawn on a layer of cells, so only a face on a whole cell, which lies on
+                    // the samples, can have one; a face between cells is sampled like any curved part of the shell.
+                    var edge = sign > 0 ? _high[b][axis] : _low[b][axis];
+                    if (edge != MathF.Floor(edge)) continue;
                     if (faces == _faceEntries.Length) return true;
-                    var at = (int)(sign > 0 ? _high[b][axis] : _low[b][axis]);
+                    var at = (int)edge;
                     _faceEntries[faces++] = ((long)((axis * 2 + (sign > 0 ? 1 : 0)) * (1 << 21) + at) << 20) | (uint)b;
                 }
         }

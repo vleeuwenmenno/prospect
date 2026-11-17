@@ -99,6 +99,9 @@ internal static class Program
          --zoom <0.5..8>         With --capture or --bench, pilot view: the camera's distance, as the scroll wheel sets it
           --mount-size <n>        With --open edit-mount and --capture or --bench: hold the cold gas array's ghost in
                                   this size (1, 2 or 3 nozzles a side) instead of the default
+          --snap <1|0.5|0.25>     With --open edit-turn (or edit-ion, edit-mirror) and --capture or --bench: the editor's
+                                  snap step in cells; under 1 the engine is placed one step over on its face and
+                                  selected, so the details panel shows its place
           --rts-script <json>     Private muted capture poses; --rts-seed <n> selects the diagnostic seed
           --target                Pilot view: target the nearest other hull once in space
           --fuel-callout <fuel>   With --capture or --bench: call out the flown hull's tanks of nitrogen, hydrazine or
@@ -562,6 +565,10 @@ internal static class Program
                     options.MountSize = mountSize;
                     i++;
                     break;
+                case "--snap" when hasValue && args[i + 1] is "1" or "0.5" or "0.25":
+                    options.Snap = args[i + 1] switch { "1" => 4, "0.5" => 2, _ => 1 };
+                    i++;
+                    break;
                 case "--thrust-at" when hasValue && float.TryParse(args[i + 1], out var thrustAt) && thrustAt is >= 0f and <= 600f:
                     options.ThrustAt = thrustAt;
                     i++;
@@ -683,8 +690,8 @@ internal static class Program
         if ((options.BreakShieldSeconds is not null || options.RamSpeed is not null || options.CoastSpeed is not null || options.ColdCloud) && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
             return Fail("--break-shield, --ram, --coast and --cold-cloud work only with --capture or --bench, in an unsaved private local game.");
 
-        if ((options.Thrust is not null || options.Zoom is not null || options.LookHeight is not null || options.CaptureHitAge is not null || options.MountSize is not null) && options.CapturePath is null && options.BenchSeconds <= 0)
-            return Fail("--thrust, --zoom and --mount-size work only with --capture or --bench.");
+        if ((options.Thrust is not null || options.Zoom is not null || options.LookHeight is not null || options.CaptureHitAge is not null || options.MountSize is not null || options.Snap is not null) && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--thrust, --zoom, --mount-size and --snap work only with --capture or --bench.");
 
         if ((options.FuelCallout != Prospect.Game.World.FuelKind.None || options.FuelTip != Prospect.Game.World.FuelKind.None) && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--fuel-callout and --fuel-tip work only with --capture or --bench.");

@@ -635,7 +635,8 @@ public sealed class HullDesign
         for (var i = 0; i < blocks.Length; i++)
         {
             ref readonly var box = ref blocks[i];
-            Cells[i] = (box.At.X, box.At.Y, box.At.Z);
+            // An arithmetic shift rounds down at any sign: the whole cell a place between cells falls in.
+            Cells[i] = (box.At.X4 >> 2, box.At.Y4 >> 2, box.At.Z4 >> 2);
             Types[i] = box.Type;
             if (box.Type.Cargo > 0) CargoCapacity = BlockStateStore.MaxContainers;
             BlockOffsets[i] = boxes.Offset(box);
@@ -649,17 +650,25 @@ public sealed class HullDesign
         ChartingBlocks = Enumerable.Range(0, Types.Length).Where(i => Types[i].Charting).ToArray();
 
         UsesRoundedUnitShell = true;
-        foreach (var box in blocks) UsesRoundedUnitShell &= box.Shape == BlockShape.Box && box.Size == new GridSize(1, 1, 1);
+        foreach (var box in blocks) UsesRoundedUnitShell &= box.Shape == BlockShape.Box && box.Size == new GridSize(1, 1, 1) && box.At.IsWhole;
 
         Collision = new BoxCollision(BlockOffsets, BlockHalfExtents);
-        // Partial adjacency retains a whole face, shared with picking. Adjacent boxes never overlap in area.
+        // Partial adjacency retains a whole face, shared with picking. Adjacent boxes never overlap in area. Edges
+        // and areas are in quarter cells, the unit a block's place is whole in, so a block set half a cell over
+        // touches, and covers part of a face, exactly.
         Span<long> covered = stackalloc long[6];
+        Span<int> lo = stackalloc int[3];
+        Span<int> hi = stackalloc int[3];
         for (var i = 0; i < blocks.Length; i++)
         {
             covered.Clear();
             var box = blocks[i];
-            var lo = new Vector3(box.At.X, box.At.Y, box.At.Z);
-            var hi = lo + new Vector3(box.Size.X, box.Size.Y, box.Size.Z);
+            for (var axis = 0; axis < 3; axis++)
+            {
+                lo[axis] = box.Low4(axis);
+                hi[axis] = box.High4(axis);
+            }
+
             var cursor = 0;
             var visits = int.MaxValue;
             var padding = new Vector3(0.001f);
@@ -669,16 +678,14 @@ public sealed class HullDesign
                 if (i == j) continue;
                 var other = blocks[j];
                 if (other.Shape != BlockShape.Box) continue;
-                var otherLo = new Vector3(other.At.X, other.At.Y, other.At.Z);
-                var otherHi = otherLo + new Vector3(other.Size.X, other.Size.Y, other.Size.Z);
                 for (var axis = 0; axis < 3; axis++)
                 {
                     var u = (axis + 1) % 3;
                     var v = (axis + 2) % 3;
-                    var area = (long)Math.Max(0, Math.Min(hi[u], otherHi[u]) - Math.Max(lo[u], otherLo[u]))
-                        * (long)Math.Max(0, Math.Min(hi[v], otherHi[v]) - Math.Max(lo[v], otherLo[v]));
-                    if (hi[axis] == otherLo[axis]) covered[2 * axis] += area;
-                    if (lo[axis] == otherHi[axis]) covered[2 * axis + 1] += area;
+                    var area = (long)Math.Max(0, Math.Min(hi[u], other.High4(u)) - Math.Max(lo[u], other.Low4(u)))
+                        * Math.Max(0, Math.Min(hi[v], other.High4(v)) - Math.Max(lo[v], other.Low4(v)));
+                    if (hi[axis] == other.Low4(axis)) covered[2 * axis] += area;
+                    if (lo[axis] == other.High4(axis)) covered[2 * axis + 1] += area;
                 }
             }
             var faces = 0x3F;
@@ -794,7 +801,7 @@ public sealed class HullDesign
 
     internal void Admit(ShellVertex[] vertices, ushort[] indices, ShellShape shape) => _intact = new IntactShellData(vertices, indices, shape);
 
-    /// <summary>Only box-only unit designs may use the rounded cell shell.</summary>
+    /// <summary>Only box-only unit designs on whole cells may use the rounded cell shell.</summary>
     public bool UsesRoundedUnitShell { get; }
 
     public string Name => _boxes.Name;
@@ -804,7 +811,10 @@ public sealed class HullDesign
     public float BlockSize => _boxes.BlockSize;
     public Vector3 Color => _boxes.Color;
 
-    /// <summary>The blocks as the file has them: each a box of whole cells and a type. A block's id is its index here.</summary>
+    /// <summary>
+    /// The blocks as the file has them: each a box of whole cells, placed on quarter cells (<see cref="GridPoint"/>),
+    /// and a type. A block's id is its index here.
+    /// </summary>
     public ReadOnlySpan<DesignBox> Boxes => _boxes.Blocks;
 
     /// <summary>
@@ -823,13 +833,17 @@ public sealed class HullDesign
     public Vector3[] MountHalfExtents { get; }
 
     /// <summary>
-    /// The lowest cell of each block, and each block's type. The rounded unit-cube shield uses these; sized geometry reads the full boxes.
+    /// The whole cell each block's place falls in (a place between cells rounded down), in block order. Nothing that
+    /// builds, collides or draws a hull reads it: those take <see cref="Boxes"/>, <see cref="BlockOffsets"/> and
+    /// <see cref="BlockHalfExtents"/>, which are exact for a block set between cells.
     /// </summary>
     public (int X, int Y, int Z)[] Cells { get; }
+
+    /// <summary>Each block's type, in block order.</summary>
     public BlockType[] Types { get; }
 
     /// <summary>How many blocks the design has. A block's id is its index in <see cref="Boxes"/>.</summary>
-    public int BlockCount => Cells.Length;
+    public int BlockCount => Types.Length;
 
     /// <summary>Tractor mount indices, prepared with the immutable design off the tick.</summary>
     public int[] Tractors { get; }

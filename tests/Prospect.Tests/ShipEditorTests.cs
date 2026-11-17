@@ -35,9 +35,9 @@ public sealed class ShipEditorTests
             // Every cell of the face, aimed at from straight out, is the cell the face reports.
             var u = (axis + 1) % 3;
             var v = (axis + 2) % 3;
-            for (var cu = EditorGeometry.Of(box.At, u); cu < EditorGeometry.Of(box.At, u) + EditorGeometry.Of(box.Size, u); cu++)
+            for (var cu = Cell(box.At, u); cu < Cell(box.At, u) + EditorGeometry.Of(box.Size, u); cu++)
             {
-                for (var cv = EditorGeometry.Of(box.At, v); cv < EditorGeometry.Of(box.At, v) + EditorGeometry.Of(box.Size, v); cv++)
+                for (var cv = Cell(box.At, v); cv < Cell(box.At, v) + EditorGeometry.Of(box.Size, v); cv++)
                 {
                     // A point a little off the cell's centre, towards its low corner, so rounding is tested too.
                     var target = EditorGeometry.Middle(box);
@@ -46,14 +46,18 @@ public sealed class ShipEditorTests
                     var origin = target + normal * 50f;
                     Assert.True(EditorGeometry.Pick(boxes, origin, -normal, out var hit), $"side {side}");
                     Assert.Equal((0, side), (hit.Block, hit.Side));
-                    Assert.Equal(cu, EditorGeometry.Of(hit.Cell, u));
-                    Assert.Equal(cv, EditorGeometry.Of(hit.Cell, v));
-                    var outer = (side & 1) == 0 ? EditorGeometry.Of(box.At, axis) + EditorGeometry.Of(box.Size, axis) - 1 : EditorGeometry.Of(box.At, axis);
-                    Assert.Equal(outer, EditorGeometry.Of(hit.Cell, axis));
+                    Assert.True(hit.Cell.IsWhole);
+                    Assert.Equal(cu, Cell(hit.Cell, u));
+                    Assert.Equal(cv, Cell(hit.Cell, v));
+                    var outer = (side & 1) == 0 ? Cell(box.At, axis) + EditorGeometry.Of(box.Size, axis) - 1 : Cell(box.At, axis);
+                    Assert.Equal(outer, Cell(hit.Cell, axis));
                 }
             }
         }
     }
+
+    // A whole-cell place's coordinate along an axis, in cells.
+    private static int Cell(GridPoint place, int axis) => place.Of(axis) / GridPoint.PerCell;
 
     [Fact]
     public void TheNearestBoxIsPickedAndARayStartingInsideABoxSeesPastIt()

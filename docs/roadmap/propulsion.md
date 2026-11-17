@@ -15,7 +15,8 @@
 - **Built:** tanks, sensors and scanners are never slanted ("Decided: parts never slanted" below).
 - **Built:** the module scanners mount on faces too ("Decided: scanners mount" below).
 - **Built:** the cold gas thruster is an array placed in three sizes ("Decided: cold gas arrays" below).
-- Protocol 74, save layout 23, design encoding 6, design file version 8, evaluator 22.
+- **Built:** blocks may sit between cells, placed with the editor's snap step ("Decided: snap step" below).
+- Protocol 75, save layout 23, design encoding 7, design file version 9, evaluator 22.
 
 ## Decided: parts
 
@@ -534,6 +535,43 @@ Built. Rules live in `FaceMounts` and `MountSpec`; the model in `PropulsionModel
   and fly as they did**. Converted thruster blocks of versions 1 to 4 carry 2 x 2 arrays, four a cell.
 - Canonical bytes version 6: one byte a mount, after its action group.
 - Old saved worlds and old servers are refused untouched: encoding 6, evaluator 22, protocol 74.
+
+## Decided: snap step
+
+So an engine can sit half a cell over and centre on a side two cells wide.
+
+### What it is
+
+- The editor's snap step: **1 cell, 1/2 cell or 1/4 cell**. Buttons under the part list (SNAP), or `H`.
+- A client preference (`ClientSettings.EditorSnap`, quarter cells: 4, 2, 1), like the mirror planes. Never sent.
+- It only changes where a block's place may be. A block's size stays whole cells.
+- It applies to placing, pasting and moving blocks. Mounts keep their own grid of tenths on a face.
+
+### Where a block lands
+
+- Flush against the face under the pointer, as before.
+- Across the face: whole steps from the **corner of the block under the pointer** (`BuildDraft.FaceCell`, `Snap`).
+  At the step of a cell a part lines up with that block, also when the block itself sits between cells.
+- At a finer step the part's middle stays on the face but it may reach half a cell past the edge: that is how a
+  part is centred across two blocks standing side by side.
+- With no pointer place (`Snap` without `near`) the part is centred; a half step centres it exactly.
+
+### What holds for a block between cells
+
+- Place: whole quarters of a cell (`GridPoint`). Data, file and bytes: `docs/blocks-at-scale.md`, "places between cells".
+- Touching, overlap, covered faces, connectivity and wreck splitting: exact, in quarter cells.
+- Mounts: on its faces as on any block; fitting against neighbours is exact to a twentieth of a cell.
+- Mirror: planes through the core's centre; a copy lands exactly. Merge needs a box of whole cells (else `NotABox`).
+- Mass, centre and inertia, collision, picking, the hull and damage meshes: from the block's real place.
+- Racks, bays and hoppers: work between cells. Packing is counted from the rack's own corner.
+- Shield: the shell encloses it; a face between cells is sampled, not drawn as one flat stretch.
+- **Nothing is refused for being off the grid.**
+
+### Not built
+
+- No snap step for a mount on a face (tenths, as before).
+- A block's size cannot be a fraction of a cell.
+- The step is not shown beside the pointer; the SNAP buttons show it.
 
 ### Editor
 

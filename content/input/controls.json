@@ -87,6 +87,7 @@
     { "tab": "Ship editor", "action": "ToggleEditor", "label": "Ship editor: open / cancel", "scope": ["Pilot", "Editor"] },
     { "tab": "Ship editor", "label": "New ship / edit the drone (in the escape drone)", "binding": "{ToggleEditor} opens New ship; with Ctrl held it edits the drone" },
     { "tab": "Ship editor", "label": "Place part", "binding": "Left click on a block face, or drag a part card onto the ship" },
+    { "tab": "Ship editor", "action": "EditorSnapStep", "label": "Snap step for placing and moving: 1 cell, 1/2, 1/4 (also the SNAP buttons)", "scope": ["Editor"] },
     { "tab": "Ship editor", "label": "Size the part to place", "binding": "Hold S over a face, left drag a highlighted ghost face (opposite face stays); click again to place, Esc puts back" },
     { "tab": "Ship editor", "label": "Turn the part to place", "binding": "R over a face, then drag a ring round (90-degree steps), or wheel or click it (Shift + click back); click the ghost to place it, R keeps the turn, Esc puts it back" },
     { "tab": "Ship editor", "label": "Select block / add or remove one", "binding": "Middle click / Shift + middle click (left click too once right click stops placing)" },

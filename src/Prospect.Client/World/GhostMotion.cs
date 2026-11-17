@@ -21,7 +21,7 @@ internal sealed class GhostMotion
     private bool _active;
 
     // The ghost the pose was made for: its place, size and shape. Any other ghost is drawn as it is.
-    private GridSize _at;
+    private GridPoint _at;
     private GridSize _size;
     private BlockShape _shape;
 
@@ -53,7 +53,7 @@ internal sealed class GhostMotion
     /// rotation of its outline about its middle, then a shift of that middle. Identity for any ghost other than the
     /// one the glide was made for, and once the glide is over.
     /// </summary>
-    public void Pose(GridSize at, GridSize size, BlockShape shape, out Quaternion turn, out Vector3 shift)
+    public void Pose(GridPoint at, GridSize size, BlockShape shape, out Quaternion turn, out Vector3 shift)
     {
         if (!_active || at != _at || size != _size || shape != _shape)
         {
@@ -73,7 +73,7 @@ internal sealed class GhostMotion
     /// <paramref name="at"/>/<paramref name="size"/>/<paramref name="shape"/>: the glide starts from what was on
     /// screen, so nothing jumps, and ends on the new ghost.
     /// </summary>
-    public void Turned(int axis, int turns, GridSize oldAt, GridSize oldSize, BlockShape oldShape, GridSize at, GridSize size, BlockShape shape, float seconds)
+    public void Turned(int axis, int turns, GridPoint oldAt, GridSize oldSize, BlockShape oldShape, GridPoint at, GridSize size, BlockShape shape, float seconds)
     {
         Pose(oldAt, oldSize, oldShape, out var turn, out var shift);
         // The new ghost is the old one turned by the quarter turns, so drawing it turned back by them shows the old.
@@ -87,7 +87,7 @@ internal sealed class GhostMotion
     /// Glides the ghost now drawn to a goal of <paramref name="radians"/> about <paramref name="axis"/>: the part of
     /// a ring drag short of the next quarter turn, or zero once the ring is let go.
     /// </summary>
-    public void Aim(int axis, float radians, GridSize at, GridSize size, BlockShape shape, float seconds)
+    public void Aim(int axis, float radians, GridPoint at, GridSize size, BlockShape shape, float seconds)
     {
         Pose(at, size, shape, out var turn, out var shift);
         _from = turn;
@@ -97,10 +97,10 @@ internal sealed class GhostMotion
     }
 
     /// <summary>The middle of a box in the grid.</summary>
-    public static Vector3 Middle(GridSize at, GridSize size) =>
+    public static Vector3 Middle(GridPoint at, GridSize size) =>
         new(at.X + (size.X - 1) * 0.5f, at.Y + (size.Y - 1) * 0.5f, at.Z + (size.Z - 1) * 0.5f);
 
-    private void Start(GridSize at, GridSize size, BlockShape shape, float seconds)
+    private void Start(GridPoint at, GridSize size, BlockShape shape, float seconds)
     {
         (_at, _size, _shape) = (at, size, shape);
         _seconds = seconds;

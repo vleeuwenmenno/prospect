@@ -348,6 +348,13 @@ are never blocked. The editor works in space, around your ship:
   Tanks, cargo racks, the sensor and the sector scanner are never slanted (a module scanner is a face mount, not a block): with one chosen the Wedge button is off ("NEVER SLANTED: NO WEDGE"),
   it is placed and turned as a box, and a design file or a received design with a slanted one is refused.
 
+- **Snap step.** Three buttons under the mirror boxes, **1**, **1/2** and **1/4** of a cell, or `H` to step through
+  them. It is the step a placed, pasted or moved block snaps to across the face it is laid against, so with **1/2** an
+  engine can sit half a cell over and centre on a side two cells wide, or across two blocks standing side by side.
+  Steps are counted from the corner of the block under the pointer: at **1** a part lines up with that block even
+  when the block itself sits between cells. Only the place changes; a block's size stays whole cells. The details
+  panel shows a selected block's place ("AT 0.5 1 -6"). A client preference, never sent. Everything works on a block
+  between cells: touching, overlap, mounts, racks, bays, hoppers, mirror, the shield, collision and damage.
 - **Mirror.** Three checkboxes under the part list, X, Y and Z, in any mix (all three: up to eight copies). The planes
   pass through the centre of the draft's core, drawn faintly while on. Placing a block or a mounted part, and
   deleting, act on the mirrored copies too: a thrust part's facing and a wedge's slant are mirrored, a mount goes on
@@ -356,7 +363,8 @@ are never blocked. The editor works in space, around your ship:
   Painting does not exist yet, so nothing mirrors it; copy, paste and move are not mirrored.
 
 **Not there in the editor:** other shapes, stock or custom meshes,
-dragging a face of a placed block with the mouse (its resize is numeric), saved designs, renaming or recolouring a ship. Ships stay at
+dragging a face of a placed block with the mouse (its resize is numeric), saved designs, renaming or recolouring a ship,
+a block size that is part of a cell (only a block's place snaps to 1/2 or 1/4), a snap step for mounted parts (they keep their tenths of a cell). Ships stay at
 the current limits of a few hundred boxes. A server's design catalogue only grows, so it can fill up until it
 restarts; the editor then says so. The editor has not been checked on screen by a person yet.
 
@@ -745,6 +753,7 @@ Ship editor (`B` in a ship, `Ctrl`+`B` in the drone, or the New ship dialog's `E
 | --- | --- |
 | Place the chosen part | Left-click a block face, or drag a part card onto one; new and pasted blocks are not automatically selected |
 | Size the part to place | Hold `S` over a face, then left-drag a highlighted face of the ghost (the opposite face stays); click again to place, `Esc` puts it back |
+| Snap step for placing and moving: 1 cell, 1/2, 1/4 | `H` (remappable action `EditorSnapStep`), or the **SNAP** buttons under the part list |
 | Turn the part to place | `R` over a face, then left-drag a ring round (exact quarter turns), or the wheel or a click on it (`Shift`+click back); click the ghost to place it, `R` keeps the turn, `Esc` puts it back |
 | Select a block / add or remove one | Middle-click / `Shift` + middle-click (left-click too after a right-click stops placing) |
 | Move the selection | Left-drag a selected block onto a face; `Esc` or right-click drops it unchanged |

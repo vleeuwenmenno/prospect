@@ -1170,3 +1170,13 @@ Active module spending is shared with client prediction through `ModuleScanRules
   `heatSeconds`, `coolSeconds` and `unlockHeat`, and the rules' `coldCloudHeating`, `coldCloudCooling` and
   `coldCloudCheckSeconds`.
 - Not saved: no saved-state layout changed. A loaded world's lasers are cool.
+
+### Blocks between cells (protocol 75)
+
+- A design's bytes (encoding 7) give each block's place in quarter cells: three integers, as before, four times what
+  they were for a block on a whole cell. Its size stays whole cells. Nothing else on the wire changed.
+- A received design is held to the same rules as ever, counted in quarters: place and edges within the content's
+  cells, no overlap (a quarter cell counts), mounts on a whole open face, the shield shell within its room.
+- Bytes of encoding 6 are refused ("Unknown design encoding"), and so is a saved world that holds them.
+- Content identity: unchanged (evaluator 22). A design on whole cells gives the same figures and shell, to the bit.
+- The editor's snap step is a client preference and is never sent: a server cannot tell how a block was placed.

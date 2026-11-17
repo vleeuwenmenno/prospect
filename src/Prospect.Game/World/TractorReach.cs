@@ -10,9 +10,10 @@ public static class TractorReach
     {
         Span<int> low = stackalloc int[3]; Span<int> high = stackalloc int[3];
         FaceMounts.Box(boxes[mount.Parent], mount, low, high);
-        var p = new Vector3(low[0] + high[0], low[1] + high[1], low[2] + high[2]) * (cell / 20);
+        // The mount's box is in twentieths of a cell (FaceMounts.Fine); the middle is half the sum of two edges.
+        var p = new Vector3(low[0] + high[0], low[1] + high[1], low[2] + high[2]) * (cell / (2 * FaceMounts.Fine));
         var axis = Facings.Axis(mount.Face);
-        p[axis] = (Facings.Sign(mount.Face) > 0 ? high[axis] : low[axis]) * (cell / 10);
+        p[axis] = (Facings.Sign(mount.Face) > 0 ? high[axis] : low[axis]) * (cell / FaceMounts.Fine);
         return p;
     }
 
@@ -215,17 +216,19 @@ public static class TractorReach
         BlockFacing face, Vector3 aim)
     {
         var self = boxes[rack]; var axis = Facings.Axis(face); var sign = Facings.Sign(face);
-        var plane = FaceMounts.Of(self.At, axis) + (sign > 0 ? FaceMounts.Of(self.Size, axis) : 0);
+        // Planes in quarter cells, exact: a neighbour a quarter cell off the face is not against it.
+        var plane = sign > 0 ? self.High4(axis) : self.Low4(axis);
+        var quarter = cell / GridPoint.PerCell;
         for (var j = 0; j < boxes.Length; j++)
         {
             if (j == rack || boxes[j].Shape != BlockShape.Box || !Live(alive, j)) continue;
             var other = boxes[j];
-            if (FaceMounts.Of(other.At, axis) + (sign > 0 ? 0 : FaceMounts.Of(other.Size, axis)) != plane) continue;
+            if ((sign > 0 ? other.Low4(axis) : other.High4(axis)) != plane) continue;
             var against = true;
             for (var a = 0; a < 3 && against; a++)
             {
                 if (a == axis) continue;
-                var low = FaceMounts.Of(other.At, a) * cell; var high = (FaceMounts.Of(other.At, a) + FaceMounts.Of(other.Size, a)) * cell;
+                var low = other.Low4(a) * quarter; var high = other.High4(a) * quarter;
                 against = aim[a] >= low - Epsilon && aim[a] <= high + Epsilon;
             }
             if (against) return true;

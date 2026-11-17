@@ -46,6 +46,26 @@ The goal and the block model are in `direction.md` under "Decided: building".
   record is 28 bytes. Version 2 bytes are not read: the protocol and the save layout moved with it.
 - Rules and figures: `docs/roadmap/propulsion.md`.
 
+## Decided: places between cells (design file version 9)
+
+- A block's **place** is whole quarters of a cell (`GridPoint`: `X4`, `Y4`, `Z4` are four times the coordinate).
+  Its **size** stays whole cells.
+- Why quarters as whole numbers: touching, overlap, covered faces and mirroring stay exact and the same on every
+  machine. Nothing compares places as fractions.
+- `new GridPoint(x, y, z)` and a `GridSize` are whole cells, as before. `GridPoint.Quarters` names a place between.
+- Edges: `DesignBox.Low4(axis)` and `High4(axis)`, in quarter cells. Use them, never `At + Size`.
+- Design file: `"at"` is in cells and may be a number of quarters (`[1, 0.5, -0.25]`), from version 9. Older files
+  hold whole numbers, which mean what they did: **no conversion**.
+- Canonical design bytes version 7: the three place integers are quarter cells (four times what they were).
+- Limits are the same cells, counted in quarters: places and edges within `[-4096, 4096]` cells.
+- Mounts stay tenths of a cell from their face's corner. `FaceMounts` compares boxes in twentieths
+  (`FaceMounts.Fine`), in which a quarter (5) and a tenth (2) are both whole.
+- The shield's sample grid stays a third of a cell from a whole-cell corner. A face between cells falls between
+  samples: it is sampled like a curved part and gets no flat stretch. The enclosure bound needs no alignment.
+- Old saved worlds and old servers are refused untouched: encoding 7, protocol 75. Evaluator unchanged (22): a
+  design on whole cells gives the figures and the shell it did, to the bit.
+- The editor's snap step (1, 1/2, 1/4 cell) is a client preference: `docs/roadmap/propulsion.md`, "Snap step".
+
 ## Decided: face mounts (design file version 5)
 
 - A thruster is a **mount**: it sits on a block's face, fills no cell and is no block. It has no block id.

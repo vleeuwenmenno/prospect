@@ -3,14 +3,97 @@ using System.Text.Json;
 
 namespace Prospect.Game.World;
 
-/// <summary>Whole grid coordinates or extents. The position is the centre of the minimum occupied cell.</summary>
+/// <summary>Whole grid extents, or whole grid coordinates: the centre of the minimum occupied cell.</summary>
 public readonly record struct GridSize(int X, int Y, int Z);
 
 /// <summary>
-/// A whole block; its index in the design is its permanent identity. <paramref name="Facing"/> is the way it faces:
-/// a thrust part pushes the hull the opposite way, and for any other block it only says how the block sits.
+/// A place on the design grid, or a shift across it, kept in quarter cells: the centre of a block's minimum cell,
+/// which need not be a whole cell (the ship editor's snap step is a cell, a half or a quarter). <see cref="X4"/>,
+/// <see cref="Y4"/> and <see cref="Z4"/> are four times the coordinate, so every comparison of places, faces and
+/// overlaps stays whole-number arithmetic and is the same on every machine. <see cref="X"/>, <see cref="Y"/> and
+/// <see cref="Z"/> give the same place in cells: quarters are exact in single precision.
+/// <para>
+/// The constructor takes whole cells, as the whole-cell places before it did, so <c>new(1, 0, 2)</c> is still the
+/// cell (1, 0, 2); a <see cref="GridSize"/> converts by itself. A place between cells is made with
+/// <see cref="Quarters"/>.
+/// </para>
 /// </summary>
-public readonly record struct DesignBox(GridSize At, GridSize Size, BlockType Type, BlockShape Shape = BlockShape.Box, BlockFacing Facing = BlockFacing.Back);
+public readonly record struct GridPoint
+{
+    /// <summary>Steps a cell: a place is whole quarters of one.</summary>
+    public const int PerCell = 4;
+
+    /// <summary>
+    /// The place of a whole cell. A coordinate too large to count in quarters stays at the furthest there is, so a
+    /// place or a shift far past every limit is still far past it and is refused as one, never wrapped round to a
+    /// place that fits.
+    /// </summary>
+    public GridPoint(int x, int y, int z)
+    {
+        X4 = FromCells(x);
+        Y4 = FromCells(y);
+        Z4 = FromCells(z);
+    }
+
+    private static int FromCells(int cells) => (int)Math.Clamp((long)cells * PerCell, int.MinValue, int.MaxValue);
+
+    /// <summary>Four times the coordinate along X: the place in quarter cells.</summary>
+    public int X4 { get; init; }
+
+    /// <summary>Four times the coordinate along Y: the place in quarter cells.</summary>
+    public int Y4 { get; init; }
+
+    /// <summary>Four times the coordinate along Z: the place in quarter cells.</summary>
+    public int Z4 { get; init; }
+
+    /// <summary>The place <paramref name="x4"/>, <paramref name="y4"/>, <paramref name="z4"/> quarter cells along each axis.</summary>
+    public static GridPoint Quarters(int x4, int y4, int z4) => new() { X4 = x4, Y4 = y4, Z4 = z4 };
+
+    /// <summary>A whole-cell coordinate or shift as a place: four quarters a cell.</summary>
+    public static implicit operator GridPoint(GridSize cells) => new(cells.X, cells.Y, cells.Z);
+
+    /// <summary>The coordinate in cells along X; exact.</summary>
+    public float X => X4 * (1f / PerCell);
+
+    /// <summary>The coordinate in cells along Y; exact.</summary>
+    public float Y => Y4 * (1f / PerCell);
+
+    /// <summary>The coordinate in cells along Z; exact.</summary>
+    public float Z => Z4 * (1f / PerCell);
+
+    /// <summary>The place in cells; exact.</summary>
+    public Vector3 InCells => new(X, Y, Z);
+
+    /// <summary>Whether the place is a whole cell on every axis.</summary>
+    public bool IsWhole => ((X4 | Y4 | Z4) & (PerCell - 1)) == 0;
+
+    /// <summary>The coordinate along an axis, in quarter cells.</summary>
+    public int Of(int axis) => axis switch { 0 => X4, 1 => Y4, _ => Z4 };
+
+    /// <summary>The same place with one coordinate, in quarter cells, replaced.</summary>
+    public GridPoint With(int axis, int quarters) => axis switch { 0 => this with { X4 = quarters }, 1 => this with { Y4 = quarters }, _ => this with { Z4 = quarters } };
+
+    /// <summary>The place moved by a shift.</summary>
+    public static GridPoint operator +(GridPoint a, GridPoint b) => Quarters(a.X4 + b.X4, a.Y4 + b.Y4, a.Z4 + b.Z4);
+
+    /// <summary>The shift from one place to another.</summary>
+    public static GridPoint operator -(GridPoint a, GridPoint b) => Quarters(a.X4 - b.X4, a.Y4 - b.Y4, a.Z4 - b.Z4);
+}
+
+/// <summary>
+/// A block; its index in the design is its permanent identity. <paramref name="At"/> is where its minimum cell's
+/// centre sits, in quarter cells (<see cref="GridPoint"/>), and <paramref name="Size"/> its extent in whole cells.
+/// <paramref name="Facing"/> is the way it faces: a thrust part pushes the hull the opposite way, and for any other
+/// block it only says how the block sits.
+/// </summary>
+public readonly record struct DesignBox(GridPoint At, GridSize Size, BlockType Type, BlockShape Shape = BlockShape.Box, BlockFacing Facing = BlockFacing.Back)
+{
+    /// <summary>The block's low edge along an axis, in quarter cells on the grid's edges: it covers <c>[Low4, High4)</c>.</summary>
+    public int Low4(int axis) => At.Of(axis);
+
+    /// <summary>The block's high edge along an axis, in quarter cells on the grid's edges.</summary>
+    public int High4(int axis) => At.Of(axis) + GridPoint.PerCell * (axis switch { 0 => Size.X, 1 => Size.Y, _ => Size.Z });
+}
 
 /// <summary>Content-owned bounds on design complexity and dimensions.</summary>
 public sealed record DesignLimits(int MaxBoxSide, int MaxDesignSide, int MaxBlocks)
@@ -168,11 +251,16 @@ public sealed class BoxDesign
 
     /// <summary>
     /// The version <see cref="Write"/> writes: 2 added sizes, 3 shapes, 4 facings, 5 face mounts for thrusters, 6 for
-    /// module scanners, 7 a mount's action group (<c>"group"</c>, written only when set; older files have none) and
+    /// module scanners, 7 a mount's action group (<c>"group"</c>, written only when set; older files have none),
     /// 8 a mount's size (<c>"size"</c>, written for a part made in several sizes; a mount that names none, in a
-    /// file of any version, has its type's <see cref="MountSpec.DefaultSize"/>).
+    /// file of any version, has its type's <see cref="MountSpec.DefaultSize"/>) and 9 places between cells: a block's
+    /// <c>"at"</c> is in cells as before and may now be a number of quarters (<c>0.5</c>, <c>1.25</c>). An older
+    /// file's whole numbers mean what they did, so it needs no conversion.
     /// </summary>
-    public const int FormatVersion = 8;
+    public const int FormatVersion = 9;
+
+    /// <summary>The first version whose blocks may sit between cells.</summary>
+    private const int SubCellVersion = 9;
 
     /// <summary>
     /// Loads legacy unit cells, version 2 boxes, version 3 shapes, version 4 facings, version 5 face mounts or version
@@ -254,7 +342,9 @@ public sealed class BoxDesign
                     type = catalog.Get(spec.LegacyBlock);
                     facing = BlockFacing.Back;
                 }
-                list.Add(new DesignBox(Grid(entry.GetProperty("at"u8)), size, type, shape, facing));
+                var at = Place(entry.GetProperty("at"u8));
+                if (version < SubCellVersion && !at.IsWhole) throw new InvalidDataException($"{source}: block {index}: a place between cells requires version {SubCellVersion}");
+                list.Add(new DesignBox(at, size, type, shape, facing));
             }
             if (root.TryGetProperty("mounts"u8, out var listed))
             {
@@ -406,6 +496,22 @@ public sealed class BoxDesign
         return new GridSize(e[0].GetInt32(), e[1].GetInt32(), e[2].GetInt32());
     }
 
+    // A block's place: three numbers in cells, each a whole number of quarters. Quarters are exact in a double, so
+    // the test is exact; the range keeps the product inside an int, and the constructor holds it to the content's.
+    private static GridPoint Place(JsonElement e)
+    {
+        if (e.GetArrayLength() != 3) throw new FormatException("expected three grid coordinates");
+        return GridPoint.Quarters(Quarters(e[0]), Quarters(e[1]), Quarters(e[2]));
+
+        static int Quarters(JsonElement number)
+        {
+            var quarters = number.GetDouble() * GridPoint.PerCell;
+            if (!(quarters >= -(1 << 28) && quarters <= 1 << 28) || quarters != Math.Floor(quarters))
+                throw new FormatException("a block's place is a whole number of quarter cells");
+            return (int)quarters;
+        }
+    }
+
     /// <summary>
     /// Validates and owns a copy of generated boxes and of the parts mounted on them, which it puts in the order of
     /// <see cref="FaceMounts.Compare"/>. At least one core is required, as in legacy designs.
@@ -444,9 +550,10 @@ public sealed class BoxDesign
             if (b.Type.Mount is not null) throw new InvalidDataException($"{source}: block {i}: a {b.Type.Name} mounts on a face and cannot be a block");
             if (!ShapeAllowed(b.Type, b.Shape)) throw new InvalidDataException($"{source}: block {i}: a {b.Type.Name} is never slanted: it is a box only");
             var side = MaxSide(b.Type, limits);
-            foreach (var (at, size) in new[] { (b.At.X, b.Size.X), (b.At.Y, b.Size.Y), (b.At.Z, b.Size.Z) })
+            // In quarter cells, as the place is; a size is whole cells.
+            foreach (var (at, size) in new[] { (b.At.X4, b.Size.X), (b.At.Y4, b.Size.Y), (b.At.Z4, b.Size.Z) })
             {
-                if (size < 1 || size > limits.MaxBoxSide || at < -limits.MaxDesignSide || (long)at + size > limits.MaxDesignSide)
+                if (size < 1 || size > limits.MaxBoxSide || at < -(long)limits.MaxDesignSide * GridPoint.PerCell || at + (long)size * GridPoint.PerCell > (long)limits.MaxDesignSide * GridPoint.PerCell)
                     throw new InvalidDataException($"{source}: block {i}: position or size outside limits");
                 if (size > side)
                     throw new InvalidDataException($"{source}: block {i}: a {b.Type.Name} is at most {side} cells a side");
@@ -505,8 +612,10 @@ public sealed class BoxDesign
         Span<int> low = stackalloc int[3];
         Span<int> high = stackalloc int[3];
         FaceMounts.Box(_blocks[mount.Parent], mount, low, high);
-        const double Tenths = 2.0 * FaceMounts.PerCell;
-        return new Double3((low[0] + high[0]) / Tenths - 0.5, (low[1] + high[1]) / Tenths - 0.5, (low[2] + high[2]) / Tenths - 0.5);
+        // Low and high are in twentieths; a sum of two is a whole number below 2^31, so each quotient is the nearest
+        // double to the exact middle, as it was when the edges were tenths.
+        const double Steps = 2.0 * FaceMounts.Fine;
+        return new Double3((low[0] + high[0]) / Steps - 0.5, (low[1] + high[1]) / Steps - 0.5, (low[2] + high[2]) / Steps - 0.5);
     }
 
     /// <summary>The width, height and length of the box a mount fills, in cells.</summary>
@@ -567,7 +676,7 @@ public sealed class BoxDesign
             w.WriteStartObject(); w.WriteString("type"u8, b.Type.Id);
             w.WriteString("shape"u8, BlockShapes.Name(b.Shape));
             w.WriteString("facing"u8, Facings.Name(b.Facing));
-            WriteGrid(w, "at", b.At); WriteGrid(w, "size", b.Size); w.WriteEndObject();
+            WritePlace(w, "at", b.At); WriteGrid(w, "size", b.Size); w.WriteEndObject();
         }
         w.WriteEndArray();
         w.WriteStartArray("mounts"u8);
@@ -583,8 +692,28 @@ public sealed class BoxDesign
     }
     private static void WriteGrid(Utf8JsonWriter w, string name, GridSize g)
     { w.WriteStartArray(name); w.WriteNumberValue(g.X); w.WriteNumberValue(g.Y); w.WriteNumberValue(g.Z); w.WriteEndArray(); }
+
+    // In cells: a whole cell as the whole number it always was, a place between cells as its quarters (0.25, 0.5, 0.75).
+    private static void WritePlace(Utf8JsonWriter w, string name, GridPoint g)
+    {
+        w.WriteStartArray(name);
+        for (var axis = 0; axis < 3; axis++)
+        {
+            var quarters = g.Of(axis);
+            if (quarters % GridPoint.PerCell == 0) w.WriteNumberValue(quarters / GridPoint.PerCell);
+            else w.WriteNumberValue(quarters / (decimal)GridPoint.PerCell);
+        }
+
+        w.WriteEndArray();
+    }
+
     internal static long Volume(DesignBox b) => (long)b.Size.X * b.Size.Y * b.Size.Z;
-    internal static Vector3 Low(DesignBox b) => new(b.At.X, b.At.Y, b.At.Z);
+
+    /// <summary>
+    /// A block's low corner in the coordinates of <see cref="Mid"/>, where cell <c>i</c> has its centre at <c>i</c>:
+    /// the place of its minimum cell. Its faces lie half a cell lower. Exact: a place is whole quarters.
+    /// </summary>
+    internal static Vector3 Low(DesignBox b) => b.At.InCells;
     internal static Vector3 High(DesignBox b) => Low(b) + new Vector3(b.Size.X, b.Size.Y, b.Size.Z);
     internal static Vector3 Mid(DesignBox b) => (Low(b) + High(b) - Vector3.One) * 0.5f;
 
