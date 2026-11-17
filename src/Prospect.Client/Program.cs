@@ -414,6 +414,10 @@ internal static class Program
                     options.DroneRecallSeconds = recallAt;
                     i++;
                     break;
+                case "--drone-fetch" when hasValue && float.TryParse(args[i + 1], out var fetchAt) && fetchAt is >= 2f and <= 600f:
+                    options.DroneFetchSeconds = fetchAt;
+                    i++;
+                    break;
                 case "--jettison" when hasValue && float.TryParse(args[i + 1], out var jettisonAt) && jettisonAt is >= 4f and <= 600f:
                     options.JettisonSeconds = jettisonAt;
                     i++;
@@ -588,6 +592,9 @@ internal static class Program
         if (options.JettisonSeconds is not null && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null
             || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null || options.OpenView is not ("cargo" or "edit-cargo")))
             return Fail("--jettison requires --capture or --bench and --open cargo or edit-cargo in an unsaved private local game.");
+
+        if (options.DroneFetchSeconds is not null && (options.JettisonSeconds is null || options.OpenView != "cargo"))
+            return Fail("--drone-fetch requires --jettison and --open cargo.");
 
         if (options.ContainerSheet is not null && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--container-sheet works only with --capture or --bench.");

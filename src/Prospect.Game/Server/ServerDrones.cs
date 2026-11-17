@@ -50,6 +50,15 @@ public sealed partial class ServerHost
 
         /// <summary>The player whose launch is waiting, to be told how it went.</summary>
         public uint LaunchIssuer;
+
+        /// <summary>
+        /// Drones of the waiting launches that go to fetch <see cref="FetchSubject"/> rather than hold station, what
+        /// they carry together, the next place beside the container and when the fetch gives up.
+        /// </summary>
+        public byte FetchPending, FetchSlot;
+        public float FetchPendingKg;
+        public uint FetchSubject;
+        public long FetchUntil;
         public BayRecords Bays;
     }
 
@@ -221,6 +230,7 @@ public sealed partial class ServerHost
         var page = PageOf(hull);
         if (page < 0) { ReplyDrones(connection, DroneReply.NoBay, 0); return; }
         if (command.Command == DroneCommand.Recall) RecallDrones(connection, hull, page);
+        else if (command.Command == DroneCommand.Fetch) FetchContainer(connection, hull, page, command.Subject);
         else LaunchDrones(connection, hull, page, command);
     }
 
@@ -273,13 +283,18 @@ public sealed partial class ServerHost
         var count = 0;
         ref var p = ref _bayPages[page];
         for (var b = 0; b < DroneBayRules.MaxBays; b++) p.Bays[b].Pending = 0;
+        p.FetchPending = 0; p.FetchPendingKg = 0;
         for (var i = 0; i < _orderCount; i++)
         {
             ref var order = ref _orders[i];
             if (order.Base != hull) continue;
-            if (order.Task != OrderTask.Recall) { order.Task = OrderTask.Recall; order.Phase = 0; }
+            if (order.Task != OrderTask.Recall) ToRecall(ref order);
             count++;
         }
+
+        // Containers the drones were fetching are let go where they are; the answer is the recall's.
+        for (var c = 0; c < _containers.Items.Length; c++)
+            if (_containers.Items[c].FetchHull == hull.Packed) FreeContainers.ClearFetch(ref _containers.At(c));
         p.Revision++;
         ReplyDrones(connection, count > 0 ? DroneReply.Recalling : DroneReply.NoneOut, count);
     }
@@ -354,12 +369,18 @@ public sealed partial class ServerHost
             bay.NextLaunch = _tick + _content.Drones.LaunchIntervalTicks;
             if (bay.Pending > bay.Stocked) bay.Pending = bay.Stocked;
         }
+
+        // Launches that were dropped (a hatch blocked, a bay lost) take their share of a fetch with them.
+        var pending = 0;
+        for (var b = 0; b < design.Bays.Length; b++) pending += page.Bays[b].Pending;
+        if (page.FetchPending > pending) { page.FetchPending = (byte)pending; if (pending == 0) page.FetchPendingKg = 0; }
     }
 
     private void CancelLaunches(int index, DroneReply reply)
     {
         ref var page = ref _bayPages[index];
         for (var b = 0; b < DroneBayRules.MaxBays; b++) page.Bays[b].Pending = 0;
+        page.FetchPending = 0; page.FetchPendingKg = 0;
         page.Revision++;
         ReplyDrones(page.LaunchIssuer, reply, 0);
     }
@@ -394,10 +415,31 @@ public sealed partial class ServerHost
         ref var page = ref _bayPages[index];
         ref var bay = ref page.Bays[bayIndex];
         bay.Stocked--; bay.Pending--; bay.Out++;
+        page.Revision++;
+        if (page.FetchPending > 0)
+        {
+            // A drone launched for a fetch goes straight to its place beside the container.
+            var container = _containers.Find(page.FetchSubject);
+            var half = container >= 0 ? FreeContainers.Half(_content.Cargo, _containers.Items[container].Size) : Vector3.Zero;
+            page.FetchPending--;
+            page.FetchPendingKg = page.FetchPending == 0 ? 0 : Math.Max(0, page.FetchPendingKg - design.Types[block].Bay!.CarryKg);
+            _orders[_orderCount++] = new TaskOrder
+            {
+                Task = OrderTask.Fetch,
+                Issuer = owner,
+                Actor = handle,
+                Base = hull,
+                Bay = bayIndex,
+                Point = DroneFetch.Place(page.FetchSlot++, half, drone.Flight.Radius, rules.AttachGapMetres),
+                Subject = page.FetchSubject,
+                Until = page.FetchUntil,
+            };
+            return DroneReply.None;
+        }
+
         Vector3 point;
         if (page.LaunchHasPoint) point = DroneBayRules.HoldSlot(page.LaunchPoint, face, page.LaunchSlot++, rules.HoldSpacingMetres);
         else point = DroneBayRules.HoldSlot(DroneBayRules.DefaultHold(design, block, rules.HoldDistanceMetres), face, bay.Slot++, rules.HoldSpacingMetres);
-        page.Revision++;
         _orders[_orderCount++] = new TaskOrder
         {
             Task = OrderTask.Hold,
@@ -432,7 +474,7 @@ public sealed partial class ServerHost
         }
 
         // A hull that starts a jump calls its drones home; those still out when it leaves are lost.
-        if (jump != JumpPhase.None && order.Task != OrderTask.Recall) { order.Task = OrderTask.Recall; order.Phase = 0; }
+        if (jump != JumpPhase.None && order.Task != OrderTask.Recall) ToRecall(ref order);
 
         switch (order.Task)
         {
@@ -441,6 +483,8 @@ public sealed partial class ServerHost
                 return true;
             case OrderTask.Recall:
                 return Recall(ref order, page);
+            case OrderTask.Fetch:
+                return Fetch(ref order, page);
             default:
                 return false;
         }
@@ -490,6 +534,12 @@ public sealed partial class ServerHost
         var radius = _content.Designs[_content.WorkDroneDesign].Flight.Radius;
         var staging = WorldPoint(order.Base, DroneBayRules.StagingPoint(design, block, rules.StagingMetres));
         var position = _hulls.State(order.Actor.Index).Position;
+        if (order.Phase == RecallFromAfar)
+        {
+            var hold = WorldPoint(order.Base, order.Point);
+            if (hold.RelativeTo(position).LengthSquared() <= rules.StagingRadiusMetres * rules.StagingRadiusMetres) order.Phase = 0;
+            else { Fly(order.Actor, hold, rules.StagingRadiusMetres * 0.5f); return true; }
+        }
         if (order.Phase == 0)
         {
             if (staging.RelativeTo(position).LengthSquared() <= rules.StagingRadiusMetres * rules.StagingRadiusMetres) order.Phase = 1;
@@ -531,6 +581,7 @@ public sealed partial class ServerHost
                 ReplySequence = c.DroneReplySequence,
                 Reply = c.DroneReply,
                 ReplyCount = c.DroneReplyCount,
+                Fetching = (byte)Math.Min(byte.MaxValue, FetchingDrones(c.Hull, page)),
             };
             if (page >= 0)
             {

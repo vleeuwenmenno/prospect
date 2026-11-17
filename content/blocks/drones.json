@@ -13,5 +13,15 @@
   "stagingRadiusMetres": 3.5,
   "dockRadiusMetres": 0.6,
   "dockPushMetres": 4.0,
-  "commandSeconds": 0.25
+  "commandSeconds": 0.25,
+  "fetchRangeMetres": 3000.0,
+  "carryAcceleration": 1.5,
+  "carrySpeed": 12.0,
+  "attachGapMetres": 0.4,
+  "tetherMetres": 4.0,
+  "maxCarriers": 8,
+  "handoverMetres": 10.0,
+  "handoverToleranceMetres": 1.5,
+  "handoverSpeed": 1.0,
+  "fetchSeconds": 600.0
 }

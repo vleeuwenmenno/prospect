@@ -16,6 +16,13 @@ public enum OrderTask : byte
 
     /// <summary>Fly back through the hatch of the bay and dock; docking puts the drone back in the bay.</summary>
     Recall = 2,
+
+    /// <summary>
+    /// Hold on beside the free container <see cref="TaskOrder.Subject"/> at <see cref="TaskOrder.Point"/> (an offset
+    /// from the container's centre along the base hull's axes) and carry it with the other drones of the group to the
+    /// base hull's tractor beam. Phase 1 while the drone is close enough to its place to pull.
+    /// </summary>
+    Fetch = 3,
 }
 
 /// <summary>
@@ -41,7 +48,10 @@ public struct TaskOrder
     public HullHandle Base;
     public int Bay;
 
-    /// <summary>The point the task works at, in the base hull's own frame, in metres from its pivot.</summary>
+    /// <summary>
+    /// The point the task works at, in the base hull's own frame, in metres from its pivot; for a fetch, the drone's
+    /// place as an offset from the container's centre along the base hull's axes.
+    /// </summary>
     public Vector3 Point;
 
     /// <summary>What the task acts on, by its durable id (a container, a rock); zero for nothing.</summary>

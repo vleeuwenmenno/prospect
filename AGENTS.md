@@ -242,6 +242,22 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   255-hull ceiling. Wire: protocol 64, `DroneCommandMessage` (39, reliable, after admission, one command per
   `commandSeconds`) and `BayMessage` (40, the flown hull's bays and the newest `DroneReply`, reliable on change).
   Save: codec 17 keeps each bay's drones and rebuild; drones out are docked by the capture and never saved.
+  Fetch (D2): `OrderTask.Fetch` on a free container (`ServerDroneFetch.cs`, shared rules in `DroneFetch`). Drones
+  never stow: they carry a container to the hand-over point straight out from a tractor mount (`DroneFetch.Handover`,
+  `handoverMetres`) and set that beam's claim (`TractorSimulation.Receiver` picks the mount and rack), so packing,
+  staging and stowing stay the tractor's one rule. `FreeContainer.FetchHull`/`FetchMount` are server-only, never sent
+  or saved (`Restore` clears them): no tractor acquires a fetched body and no second fetch takes it; claims and
+  `MayPickup` are the tractor's. Carry is per bay tier (`bay.carryKg`, `bayTiers.carry`); the group lifts only when the
+  drones within `tetherMetres` of their places (`DroneFetch.Place`, phase 1) carry its mass, at
+  `carryAcceleration` times their carry over the mass, at most `carrySpeed`. `TickCarries` runs after the tractors pull
+  and before loose cargo drifts; a group whose drones (out or launching) no longer carry the mass drops it
+  (`DroneReply.Dropped`). Drones aim ahead of a moving container by `DroneFetch.Lead`. A drone back from a fetch flies to
+  its bay's hold point first (recall phase `RecallFromAfar`). Wire: protocol 66, `DroneCommandMessage.Subject`,
+  `BayView.Fetching`, replies 11–20. Interface: `FetchContainer` (`/`) on the hovered free container
+  (`WorldView.HoverContainerId`) or the targeted one, the target panel's FETCH WITH DRONES button
+  (`DrawFetchButton`), the chip's "N FETCHING". Tests: `DroneFetchTests`. Capture:
+  `tools/prepare_drone_fetch_capture.py` then `--open cargo --jettison 5 --drone-fetch 12` (jettisoned at 6 m/s, out of
+  beam range before its pickup delay ends; delivered about 42 s in); `make bench` runs it for 50 s.
   Interface: `LaunchDrones` (`.`), `RecallDrones` (`,`), the DRONES chip in the module strip (`DroneUi`,
   `DroneTracker`). Tests: `DroneBayTests`, `BayModelTests`. Capture: `tools/prepare_drone_capture.py` then
   `--open drones` (launch 3 at 1.5 s, recall at `--drone-recall`, default 14 s) and `--open edit-bay` (a bay's ghost

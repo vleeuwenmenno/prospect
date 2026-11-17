@@ -2,6 +2,24 @@ using System.Numerics;
 
 namespace Prospect.Game.World;
 
+/// <summary>Why no tractor beam of a hull can take a container drones bring it.</summary>
+public enum FetchRefusal : byte
+{
+    None = 0,
+
+    /// <summary>No live beam sees the hand-over point.</summary>
+    NoTractor = 1,
+
+    /// <summary>The container is heavier than any beam that sees the point may hold.</summary>
+    TooHeavy = 2,
+
+    /// <summary>No rack a beam sees has room for it.</summary>
+    NoRoom = 3,
+
+    /// <summary>Every beam that could take it holds another container now.</summary>
+    Busy = 4,
+}
+
 /// <summary>Authoritative automatic pickup. The fixed free-body pool also holds exclusive transient claims.</summary>
 public sealed class TractorSimulation
 {
@@ -62,7 +80,7 @@ public sealed class TractorSimulation
                 {
                     budget--;
                     ref var item = ref containers.At(c);
-                    if (!item.MayPickup(hulls.Info(h).Owner, tick) || item.TractorHull != 0 || item.Position.RelativeTo(emitter).LengthSquared() > (spec.Range + design.BlockSize) * (spec.Range + design.BlockSize)) continue;
+                    if (!item.MayPickup(hulls.Info(h).Owner, tick) || item.TractorHull != 0 || item.FetchHull != 0 || item.Position.RelativeTo(emitter).LengthSquared() > (spec.Range + design.BlockSize) * (spec.Range + design.BlockSize)) continue;
                     if (!Valid(containers, content, field, h, m, ref item, occupied, needSight: true)) continue;
                     item.TractorHull = id; item.TractorMount = m; item.TractorStage = 0; item.TractorBest = 0; item.TractorIdle = 0;
                     break;
@@ -187,6 +205,50 @@ public sealed class TractorSimulation
             var length = change.Length();
             if (length > 0) item.Velocity += change * (Math.Min(length, spec.Acceleration * HullSim.Dt) / length);
         }
+    }
+
+    /// <summary>
+    /// Which of hull <paramref name="h"/>'s tractor beams could take <paramref name="item"/> from drones at the hand-over
+    /// point <paramref name="handover"/> metres out in front of it: its block is there, the mass is within its limit,
+    /// the point is in its range and line of sight, and a rack it sees has room after everything its beams already
+    /// hold. With <paramref name="free"/>, only a beam holding nothing now. The mount and the rack it would load, or -1
+    /// with what stopped it.
+    /// </summary>
+    public int Receiver(FreeContainers containers, GameContent content, HullField field, int h, in FreeContainer item,
+        float handover, bool free, Span<byte> occupied, out FetchRefusal why, out int rack)
+    {
+        rack = -1;
+        var hulls = field.Hulls; var info = hulls.Info(h); var design = field.Designs[info.Design];
+        var id = hulls.HandleAt(h).Packed; var mass = Mass(content.Cargo, item);
+        why = FetchRefusal.NoTractor;
+        var count = 0;
+        foreach (var other in containers.Items)
+            if (other.Id != item.Id && other.TractorHull == id)
+            {
+                if (count == _reserved.Length) { why = FetchRefusal.NoRoom; return -1; }
+                _reserved[count++] = Held(other);
+            }
+        foreach (var m in design.Tractors)
+        {
+            var mount = design.Mounts[m];
+            if (!BlockSet.Has(hulls.Blocks(h), mount.Parent) || mount.Type.Tractor is not { } spec) continue;
+            if (mass > spec.MaxMass) { if (why == FetchRefusal.NoTractor) why = FetchRefusal.TooHeavy; continue; }
+            if (!TractorReach.Container(design.Boxes, hulls.Blocks(h), design.BlockSize, mount, DroneFetch.HandoverGrid(design, m, handover))) continue;
+            var chosen = TractorReach.ChooseRack(content.Cargo, design.Boxes, design.Mounts, hulls.Blocks(h), design.BlockSize, m,
+                hulls.BlockStates.Cargo(info.BlockState), _reserved.AsSpan(0, count), item.Size, occupied);
+            if (chosen < 0) { why = FetchRefusal.NoRoom; continue; }
+            if (free)
+            {
+                var busy = false;
+                foreach (var other in containers.Items)
+                    if (other.Id != item.Id && other.TractorHull == id && other.TractorMount == m) { busy = true; break; }
+                if (busy) { why = FetchRefusal.Busy; continue; }
+            }
+            why = FetchRefusal.None;
+            rack = chosen;
+            return m;
+        }
+        return -1;
     }
 
     /// <summary>Cosine of half the turn (about 0.1 rad in all) a container may still be short of the hull's axes when stowed.</summary>

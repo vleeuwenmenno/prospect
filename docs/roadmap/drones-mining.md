@@ -1,6 +1,7 @@
 # Drones and mining
 
-Product direction from the brainstorm on 2026-11-16. Built so far: D1 (orders, the bay, launch and recall).
+Product direction from the brainstorm on 2026-11-16. Built so far: D1 (orders, the bay, launch and recall) and D2
+(fetching cargo).
 
 ## Why
 
@@ -127,7 +128,19 @@ Three tracks. A track's steps run in order; the tracks run side by side, each in
    - Interface: `.` launches all, `,` recalls all, a DRONES chip over the console. No drone panel yet (D2).
    - Gaps: no avoidance on the way home; the hold point is not chosen in the interface yet; drones out of a hull
      that is not the one flown show nowhere but in the world.
-2. D2, fetching cargo: drones bring containers back; two or more lift a heavy one; claims respected.
+2. D2, fetching cargo: drones bring containers back; two or more lift a heavy one; claims respected. **Done.** Notes:
+   - Hand-over, not stowing: drones bring a container 10 m out in front of a tractor beam and set the beam's claim on
+     it; the beam stows it by its own path and packing. Chosen because it adds no second stow rule. A fetch is refused
+     without a beam that sees the hand-over point, or without rack room.
+   - Carry: 5 t a Common drone (`carryKg`, scaled by `bayTiers.carry`). A heavier container takes as many drones as
+     its mass needs, at most 8 (`maxCarriers`). They lift only together; the pull is 1.5 m/s² times their carry over
+     the mass, at most 12 m/s. Drones holding station go first, then the bays launch the rest.
+   - Range 3 km from the ship (`fetchRangeMetres`). Claims, pickup delay and keep-claim are the tractor's rules.
+   - A lost carrier, a ship that jumps, a recall or a 600 s time-out drops the container where it is.
+   - Interface: `/` on the hovered or targeted container, the target panel's button, "N FETCHING" on the chip.
+   - Gaps: drones have no battery limit beyond D1's power use (no endurance figure); no avoidance; a ship with no
+     tractor beam cannot be fetched to; two fetches for one rack slot are both accepted and the second is dropped
+     with "no rack room" at the hand-over; a beam busy with another container makes the drones wait at the point.
 3. D3, scans: group scan and detailed scan (needs rock interiors, track I).
 4. D4, charges: drones place charges along the player's cutting plane (needs R2).
 

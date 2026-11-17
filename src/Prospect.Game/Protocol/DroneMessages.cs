@@ -12,6 +12,12 @@ public enum DroneCommand : byte
 
     /// <summary>Call every drone of the hull home through its hatch, and stop launches still waiting.</summary>
     Recall = 2,
+
+    /// <summary>
+    /// Send enough drones to carry the free container <see cref="DroneCommandMessage.Subject"/> back to the hull's
+    /// tractor beam, which stows it.
+    /// </summary>
+    Fetch = 3,
 }
 
 /// <summary>What the server made of a drone command, or of a launch it was carrying out.</summary>
@@ -48,13 +54,44 @@ public enum DroneReply : byte
 
     /// <summary>The hull has no drone out to call home.</summary>
     NoneOut = 10,
+
+    /// <summary>Drones are on their way to fetch a container; the count says how many carry it.</summary>
+    Fetching = 11,
+
+    /// <summary>The container is gone, or out of the player's sight.</summary>
+    NotFound = 12,
+
+    /// <summary>A tractor beam or other drones already have the container.</summary>
+    Taken = 13,
+
+    /// <summary>Someone else keeps a claim on the container.</summary>
+    Claimed = 14,
+
+    /// <summary>The hull has no tractor beam to hand the container to, or none that sees in front of it.</summary>
+    NoTractor = 15,
+
+    /// <summary>No rack the hull's beams load has room for the container.</summary>
+    NoRoom = 16,
+
+    /// <summary>The container is heavier than the hull's bays' drones, or its beams, could ever take together.</summary>
+    TooHeavy = 17,
+
+    /// <summary>Not enough drones are inside or holding station now to lift the container.</summary>
+    TooFew = 18,
+
+    /// <summary>The carriers lost a drone, or their ship, and let the container go.</summary>
+    Dropped = 19,
+
+    /// <summary>Drones handed the container to the tractor beam and are coming home.</summary>
+    Delivered = 20,
 }
 
 /// <summary>A player's drone command for one of their hulls. Reliable; the server checks everything again.</summary>
-public readonly record struct DroneCommandMessage(uint Hull, DroneCommand Command, byte Count, bool HasPoint, Vector3 Point)
+/// <remarks><see cref="Subject"/> is the free container a fetch is for, zero for every other command.</remarks>
+public readonly record struct DroneCommandMessage(uint Hull, DroneCommand Command, byte Count, bool HasPoint, Vector3 Point, uint Subject = 0)
 {
-    /// <summary>Id, hull, command, count, flag and point.</summary>
-    public const int MaxWireSize = 1 + 4 + 1 + 1 + 1 + 12;
+    /// <summary>Id, hull, command, count, flag, point and subject.</summary>
+    public const int MaxWireSize = 1 + 4 + 1 + 1 + 1 + 12 + 4;
 
     /// <summary>Writes the whole command.</summary>
     public void Write(ref NetWriter writer)
@@ -62,6 +99,7 @@ public readonly record struct DroneCommandMessage(uint Hull, DroneCommand Comman
         writer.WriteByte((byte)MessageId.DroneCommand);
         writer.WriteUInt32(Hull); writer.WriteByte((byte)Command); writer.WriteByte(Count); writer.WriteByte(HasPoint ? (byte)1 : (byte)0);
         writer.WriteSingle(Point.X); writer.WriteSingle(Point.Y); writer.WriteSingle(Point.Z);
+        writer.WriteUInt32(Subject);
     }
 
     /// <summary>Refuses a malformed command before the server looks at the hull.</summary>
@@ -69,9 +107,11 @@ public readonly record struct DroneCommandMessage(uint Hull, DroneCommand Comman
     {
         var hull = reader.ReadUInt32(); var kind = (DroneCommand)reader.ReadByte(); var count = reader.ReadByte(); var flag = reader.ReadByte();
         var point = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
-        command = new DroneCommandMessage(hull, kind, count, flag == 1, point);
-        return reader.IsValid && reader.Remaining == 0 && hull != 0 && kind is DroneCommand.Launch or DroneCommand.Recall
+        var subject = reader.ReadUInt32();
+        command = new DroneCommandMessage(hull, kind, count, flag == 1, point, subject);
+        return reader.IsValid && reader.Remaining == 0 && hull != 0 && kind is DroneCommand.Launch or DroneCommand.Recall or DroneCommand.Fetch
             && flag <= 1 && (kind != DroneCommand.Launch || count > 0)
+            && (kind == DroneCommand.Fetch) == (subject != 0) && (kind != DroneCommand.Fetch || (count == 0 && flag == 0))
             && float.IsFinite(point.X) && float.IsFinite(point.Y) && float.IsFinite(point.Z) && (flag == 1 || point == Vector3.Zero);
     }
 }
@@ -117,6 +157,9 @@ public struct BayView
 
     /// <summary>How many drones the answer is about.</summary>
     public byte ReplyCount;
+
+    /// <summary>Drones of the hull out on a fetch, or waiting to launch for one.</summary>
+    public byte Fetching;
     public int Count;
     public BayEntries Bays;
 
@@ -146,7 +189,7 @@ public struct BayView
 public static class BayMessage
 {
     public const int RecordBytes = 2 + 1 + 1 + 1 + 1 + 1 + 8;
-    public const int HeaderBytes = 1 + 4 + 8 + 4 + 1 + 1 + 1;
+    public const int HeaderBytes = 1 + 4 + 8 + 4 + 1 + 1 + 1 + 1;
     public const int MaxWireSize = HeaderBytes + DroneBayRules.MaxBays * RecordBytes;
 
     /// <summary>Writes the view whole.</summary>
@@ -154,7 +197,7 @@ public static class BayMessage
     {
         writer.WriteByte((byte)MessageId.Bays);
         writer.WriteUInt32(view.Hull); writer.WriteInt64(view.Tick); writer.WriteUInt32(view.ReplySequence);
-        writer.WriteByte((byte)view.Reply); writer.WriteByte(view.ReplyCount); writer.WriteByte((byte)view.Count);
+        writer.WriteByte((byte)view.Reply); writer.WriteByte(view.ReplyCount); writer.WriteByte(view.Fetching); writer.WriteByte((byte)view.Count);
         for (var i = 0; i < view.Count; i++)
         {
             var bay = view.Bays[i];
@@ -170,8 +213,8 @@ public static class BayMessage
     {
         view = default;
         view.Hull = reader.ReadUInt32(); view.Tick = reader.ReadInt64(); view.ReplySequence = reader.ReadUInt32();
-        view.Reply = (DroneReply)reader.ReadByte(); view.ReplyCount = reader.ReadByte(); view.Count = reader.ReadByte();
-        if (!reader.IsValid || view.Tick < 0 || view.Reply > DroneReply.NoneOut || view.Count > DroneBayRules.MaxBays
+        view.Reply = (DroneReply)reader.ReadByte(); view.ReplyCount = reader.ReadByte(); view.Fetching = reader.ReadByte(); view.Count = reader.ReadByte();
+        if (!reader.IsValid || view.Tick < 0 || view.Reply > DroneReply.Delivered || view.Count > DroneBayRules.MaxBays
             || reader.Remaining != view.Count * RecordBytes) return false;
         for (var i = 0; i < view.Count; i++)
         {

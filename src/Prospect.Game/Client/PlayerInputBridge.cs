@@ -216,6 +216,21 @@ public sealed class PlayerInputBridge
         }
     }
 
+    /// <summary>
+    /// Asks the server to send drones from <paramref name="hull"/>'s bays to fetch the free container
+    /// <paramref name="container"/> and hand it to the hull's tractor beam. The server picks how many drones it takes
+    /// and says why when it cannot (<see cref="SessionSnapshot.Bays"/>).
+    /// </summary>
+    public void FetchContainer(uint hull, uint container)
+    {
+        if (hull == 0 || container == 0) return;
+        lock (_lock)
+        {
+            _droneCommand = new DroneCommandMessage(hull, DroneCommand.Fetch, 0, false, default, container);
+            _hasDroneCommand = true;
+        }
+    }
+
     internal bool ConsumeDroneCommand(out DroneCommandMessage command)
     {
         lock (_lock)

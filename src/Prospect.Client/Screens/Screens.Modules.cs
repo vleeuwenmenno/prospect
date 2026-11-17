@@ -31,6 +31,7 @@ internal sealed partial class ScreenHost
     private DroneChipState _droneState;
     private byte[] _droneKeyName = [];
     private byte[] _droneRecallKeyName = [];
+    private byte[] _droneFetchKeyName = [];
     private int _droneKeysVersion = -1;
     private bool _tipSawGasScanner;
     private bool _tipSawAsteroidTarget;
@@ -76,6 +77,8 @@ internal sealed partial class ScreenHost
             _droneKeyName = System.Text.Encoding.UTF8.GetBytes(launch.Length == 0 ? "UNBOUND" : launch[0].DisplayName.ToUpperInvariant());
             var recall = _app.Actions.Bindings(InputAction.RecallDrones);
             _droneRecallKeyName = System.Text.Encoding.UTF8.GetBytes(recall.Length == 0 ? "UNBOUND" : recall[0].DisplayName.ToUpperInvariant());
+            var fetch = _app.Actions.Bindings(InputAction.FetchContainer);
+            _droneFetchKeyName = System.Text.Encoding.UTF8.GetBytes(fetch.Length == 0 ? "UNBOUND" : fetch[0].DisplayName.ToUpperInvariant());
         }
         var scan = snapshot.Modules.Scan;
         _moduleTrack.Update(scan, own.Id, (float)_moduleEquipment[2].Range, _ui.DeltaTime);
@@ -103,7 +106,8 @@ internal sealed partial class ScreenHost
     /// </summary>
     private void HandleModuleKeys(PlayerInputBridge bridge, SessionSnapshot snapshot)
     {
-        DroneUi.HandleKeys(_app.Actions, _app.Devices, !_ui.WantsTextInput, snapshot.Bays, _app.World.Own.Id, bridge);
+        DroneUi.HandleKeys(_app.Actions, _app.Devices, !_ui.WantsTextInput, snapshot.Bays, _app.World.Own.Id, bridge,
+            DroneUi.FetchSubject(_app.World.HoverContainerId, _app.World.TargetContainer));
         for (var slot = 0; slot < 3; slot++)
         {
             var family = ModuleRules.Families[slot];
@@ -300,6 +304,8 @@ internal sealed partial class ScreenHost
         var rebuild = DroneUi.RebuildSeconds(bays, snapshot.ServerTick);
         if (reply != DroneReply.None)
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, DroneUi.Refused(reply) ? Theme.Bad : Theme.Good, DroneUi.Words(reply), inner);
+        else if (bays.Fetching > 0)
+            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.Info, Kit.F($"{bays.Fetching} FETCHING  {stocked} IN"), inner);
         else if (_droneState == DroneChipState.Out)
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.Info, Kit.F($"{outside} DRONES OUT  {stocked} IN"), inner);
         else if (_droneState == DroneChipState.Ready)

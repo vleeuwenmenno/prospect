@@ -97,10 +97,10 @@ public sealed class DroneBayTests
     [Fact]
     public void BayTiersScaleCapacityRateAndRebuildAndRefuseNonsense()
     {
-        var json = """{ "blocks": { "b": { "bay": { "quality": "Rare", "capacity": 4, "launchRate": 2, "rebuildSeconds": 100 } } }, "bayTiers": { "Rare": { "capacity": 2, "launchRate": 1.5, "rebuildSeconds": 0.5 } } }""";
+        var json = """{ "blocks": { "b": { "bay": { "quality": "Rare", "capacity": 4, "launchRate": 2, "rebuildSeconds": 100, "carryKg": 1000 } } }, "bayTiers": { "Rare": { "capacity": 2, "launchRate": 1.5, "rebuildSeconds": 0.5, "carry": 2 } } }""";
         using var document = System.Text.Json.JsonDocument.Parse(json);
         var spec = BaySpec.Read(document.RootElement.GetProperty("blocks"u8).GetProperty("b"u8), document.RootElement)!;
-        Assert.Equal(new BaySpec(8, 3, 50, ModuleQuality.Rare), spec);
+        Assert.Equal(new BaySpec(8, 3, 50, ModuleQuality.Rare, 2000), spec);
 
         var tooMany = json.Replace("\"capacity\": 4", "\"capacity\": 40");
         using var big = System.Text.Json.JsonDocument.Parse(tooMany);

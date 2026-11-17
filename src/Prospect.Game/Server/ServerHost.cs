@@ -893,6 +893,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         }
 
         _tractors.Pull(_containers, _content, _field, CargoScratch, _tick);
+        TickCarries();
         _containerSimulation.Step(_containers, _content, _field, _rocks, _tick);
         TickWreckage();
         SendCargo();

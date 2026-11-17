@@ -41,6 +41,8 @@ public sealed class ContainerSimulation
                 // steers it through the open face, and a jam against the ridge between it and the slot was the bug.
                 // Rocks and other hulls still hit it.
                 if (c.TractorPowered && c.TractorHull == field.Hulls.HandleAt(h).Packed) continue;
+                // Drones carrying a container hold on beside it; their own blocks never knock it away.
+                if (c.FetchHull != 0 && field.Hulls.Info(h).WorkDrone) continue;
                 ref var state = ref field.Hulls.State(h);
                 if (state.Jump == JumpPhase.Tunnel) continue;
                 var design = field.Designs[field.Hulls.Info(h).Design];

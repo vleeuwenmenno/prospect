@@ -73,12 +73,12 @@
     }
   },
   "bayTiers": {
-    "Common": { "capacity": 1, "launchRate": 1, "rebuildSeconds": 1 },
-    "Uncommon": { "capacity": 1.5, "launchRate": 1.5, "rebuildSeconds": 0.85 },
-    "Rare": { "capacity": 2, "launchRate": 2, "rebuildSeconds": 0.7 },
-    "Epic": { "capacity": 2.5, "launchRate": 2.5, "rebuildSeconds": 0.55 },
-    "Legendary": { "capacity": 3, "launchRate": 3, "rebuildSeconds": 0.4 },
-    "Alien Tech": { "capacity": 4, "launchRate": 4, "rebuildSeconds": 0.25 }
+    "Common": { "capacity": 1, "launchRate": 1, "rebuildSeconds": 1, "carry": 1 },
+    "Uncommon": { "capacity": 1.5, "launchRate": 1.5, "rebuildSeconds": 0.85, "carry": 1.5 },
+    "Rare": { "capacity": 2, "launchRate": 2, "rebuildSeconds": 0.7, "carry": 2 },
+    "Epic": { "capacity": 2.5, "launchRate": 2.5, "rebuildSeconds": 0.55, "carry": 2.5 },
+    "Legendary": { "capacity": 3, "launchRate": 3, "rebuildSeconds": 0.4, "carry": 3 },
+    "Alien Tech": { "capacity": 4, "launchRate": 4, "rebuildSeconds": 0.25, "carry": 4 }
   },
   "moduleTiers": {
       "Common": {
@@ -164,7 +164,7 @@
     "asteroidLocator": { "name": "Asteroid locator", "mass": 0.6, "hull": 0, "powerDraw": 0.1, "module": {"family": "asteroidLocator", "quality": "Common", "mark": 1, "variant": "standard", "range": 5000, "accuracy": 0.2, "scanSeconds": 2, "powerDraw": 12, "cooldownSeconds": 15}, "mount": { "side": 6, "depth": 2, "legacyBlock": "hull", "blockThrough": 5 } },
     "droneBay": {
       "name": "Drone bay", "boxOnly": true, "maxSide": 1, "mass": 2.5, "hull": 200,
-      "bay": { "quality": "Common", "capacity": 4, "launchRate": 2, "rebuildSeconds": 90 }
+      "bay": { "quality": "Common", "capacity": 4, "launchRate": 2, "rebuildSeconds": 90, "carryKg": 5000 }
     },
     "tractorBeam": {
       "name": "Tractor beam", "mass": 0.15, "hull": 0,

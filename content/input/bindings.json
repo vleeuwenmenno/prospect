@@ -36,7 +36,8 @@
     "ToggleGas": ["Key:F4"],
     "EditorSelectAll": ["Key:A"],
     "LaunchDrones": ["Key:Period"],
-    "RecallDrones": ["Key:Comma"]
+    "RecallDrones": ["Key:Comma"],
+    "FetchContainer": ["Key:Slash"]
   },
   "axes": {
     "Strafe": [{ "negative": "Key:A", "positive": "Key:D" }, { "axis": "Pad:LeftX" }],

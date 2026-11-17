@@ -15,6 +15,12 @@ public struct FreeContainer
     /// <summary>Server-only, never sent or saved: the least path left so far (0 = not set) and the ticks without gaining on it.</summary>
     public float TractorBest;
     public int TractorIdle;
+    /// <summary>
+    /// Server-only, never sent or saved: the hull whose drones are fetching this body (packed handle, zero for none)
+    /// and the tractor mount they hand it to. While set, no tractor acquires it and no other drones are sent for it.
+    /// </summary>
+    public uint FetchHull;
+    public int FetchMount;
     public Double3 Position;
     public Vector3 Velocity, AngularVelocity;
     public Quaternion Orientation;
@@ -76,8 +82,11 @@ public sealed class FreeContainers
     {
         if (items.Length > Capacity) throw new InvalidDataException("Too many free containers.");
         items.CopyTo(_items); _count = items.Length; _next = next;
-        for (var i = 0; i < _count; i++) ClearTractor(ref _items[i]);
+        for (var i = 0; i < _count; i++) { ClearTractor(ref _items[i]); ClearFetch(ref _items[i]); }
     }
+
+    /// <summary>Lets go of a body drones were fetching: it stays where it is, with the motion it has.</summary>
+    public static void ClearFetch(ref FreeContainer item) { item.FetchHull = 0; item.FetchMount = 0; }
 
     /// <summary>Drops transient claim state on load or when the pulling hull is not visible to a recipient.</summary>
     public static void ClearTractor(ref FreeContainer item)

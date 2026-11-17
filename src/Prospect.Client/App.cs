@@ -221,6 +221,12 @@ internal sealed class AppOptions
     /// three drones launched at 1.5 s are called home.
     /// </summary>
     public float DroneRecallSeconds { get; set; } = 14f;
+
+    /// <summary>
+    /// Scripted runs only, with <c>--open cargo --jettison</c> (<c>--drone-fetch</c>): seconds after the splash at which
+    /// drones are sent, through the fetch key's bridge call, for the first loose container.
+    /// </summary>
+    public float? DroneFetchSeconds { get; set; }
     public bool CargoSample { get; set; }
     /// <summary>Capture only: <c>--cargo-wide</c> loads a rack with one container of each resource and jettisons several.</summary>
     public bool CargoWide { get; set; }
@@ -1165,7 +1171,7 @@ internal sealed class App : IDisposable
         _window.SetFullscreen(monitor, new int2(mode.Width, mode.Height), mode.RefreshRate);
     }
 
-    private bool _dronesLaunched, _dronesRecalled, _benchmarkSawDrones, _dronesHome;
+    private bool _dronesLaunched, _dronesRecalled, _benchmarkSawDrones, _dronesHome, _droneFetchSent, _benchmarkSawFetch;
     private int _dronesOut;
 
     /// <summary>
@@ -1203,6 +1209,8 @@ internal sealed class App : IDisposable
         _sinceSplash = (float)Stopwatch.GetElapsedTime(_splashFinishedAt).TotalSeconds;
         if (_options.JettisonSeconds is not null && World.FreeContainerCount > 0)
             _benchmarkSawFreeContainer = true;
+        if (snapshot is not null && snapshot.Bays.Fetching > 0)
+            _benchmarkSawFetch = true;
 
         // Nothing is sampled once the diagnostic run has ended: the frames that follow close the session.
         var measuring = _diagnosticEnd is null;
@@ -1238,6 +1246,12 @@ internal sealed class App : IDisposable
             _screens.OpenCargoWindow(selectFirst: true);
         if (_options.OpenView == "drones" && _viewOpened && Session is not null && snapshot is { OwnHull: >= 0, Content: { } content })
             ScriptDrones(snapshot, content);
+        if (_options.DroneFetchSeconds is { } fetchAt && !_droneFetchSent && _sinceSplash >= fetchAt && Session is not null
+            && snapshot is { OwnHull: >= 0, FreeContainerCount: > 0 })
+        {
+            _droneFetchSent = true;
+            Session.Client.Input.FetchContainer(snapshot.Hulls[snapshot.OwnHull].Id, snapshot.FreeContainers[0].Id);
+        }
         if (_editDroneView && Session is not null && snapshot is { OwnHull: >= 0, OwnIsDrone: true })
         {
             // Capture only: the drone has stepped out of the pod, so edit it.
@@ -1706,6 +1720,8 @@ internal sealed class App : IDisposable
                 {
                     if (World.TryGetContainer(1, out var loose)) Console.WriteLine($"capture cargo position: {loose.Position.RelativeTo(World.OwnPosition)}; own speed {World.Own.Velocity.Length():F1} m/s; on screen {World.Project(loose.Position, out var screen)} at {screen}; tractor {loose.TractorHull}/{loose.TractorMount}, stage {loose.TractorStage}, powered {loose.TractorPowered}");
                     Console.WriteLine($"capture cargo: held {World.Own.Cargo.Length}, free {World.FreeContainerCount}, drawn {World.DrawnFreeContainers}, target {World.TargetContainer}");
+                    if (_options.DroneFetchSeconds is not null && snapshot is not null)
+                        Console.WriteLine($"capture drones: fetching {snapshot.Bays.Fetching}, reply {snapshot.Bays.Reply} ({snapshot.Bays.ReplyCount}), since splash {_sinceSplash:F1} s");
                 }
                 if (World.PulseShown.Strength > 0f)
                     Console.WriteLine($"capture {_capturesTaken:D2} scan pulse: radius {World.PulseShown.Radius:F0} m, strength {World.PulseShown.Strength:F2}");
@@ -1745,7 +1761,8 @@ internal sealed class App : IDisposable
             {
                 // Jettison, drift, tractor pull and stow all happen inside the measurement: the container was seen loose
                 // and is back in the hold, so a run that never released or never picked it up cannot pass.
-                "cargo" when _options.JettisonSeconds is not null => _benchmarkSawFreeContainer && World.Own.Cargo.Length == 3 && World.FreeContainerCount == 0,
+                "cargo" when _options.JettisonSeconds is not null => _benchmarkSawFreeContainer && World.Own.Cargo.Length == 3 && World.FreeContainerCount == 0
+                    && (_options.DroneFetchSeconds is null || _benchmarkSawFetch),
                 "edit-cargo" => World.Editor.CanEdit && World.Editor.LiveCargo.Length == World.CaptureCargoSampleCount && World.Editor.CargoRack >= 0,
                 "edit-menu" => World.Editor.Menu.IsOpen && World.Editor.Menu.Sub == EditorMenuSub.Fuel,
                 "edit-dump" => World.Editor.ConfirmDump,

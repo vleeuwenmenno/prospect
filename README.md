@@ -41,9 +41,18 @@ console) launches every drone inside; they leave through the hatch and hold stat
 the chip while drones are out) calls them home: they line up in front of the hatch, fly in and dock. A blocked hatch
 (a block or a part of the ship in front of it) refuses a launch, and the chip says why. Drones are small real hulls
 flown by the server: they collide, can be destroyed (the bay rebuilds them) and use power. A player has at most 12
-out. A jump calls them home; one still out when the ship leaves is lost. A saved world docks every drone. Not built:
-choosing the hold point in the interface, a drone panel, fetching cargo, scans and charges (later drone steps), and
-any avoidance: a drone flies straight to its place and may bump the ship it came from.
+out. A jump calls them home; one still out when the ship leaves is lost. A saved world docks every drone.
+
+Drones fetch loose containers, from up to 3 km away. Point at one with the pointer shown (`Shift`, `Tab`) or target it
+(middle click) and press `/`, or click FETCH WITH DRONES on the target panel. Drones holding station go first, then
+drones from the bays. Each Common drone carries 5 t; a heavier container takes two or more (at most 8), and they only
+lift it together, faster the more they are. They bring it 10 m out in front of the ship's tractor beam and hand it over;
+the beam stows it as it stows any container. The DRONES chip shows how many are fetching, and why a fetch is refused:
+no tractor beam, no rack room, too heavy, too few drones, someone else's claim, already taken, out of range. Drones wait
+out a container's pickup delay before lifting it. Losing a carrier, or the ship jumping, drops the container where it is.
+A saved world keeps a carried container loose where it was. Not built: a ship without a tractor beam cannot be fetched
+to, choosing the hold point in the interface, a drone panel, drone battery limits, scans and charges (later drone steps),
+and any avoidance: a drone flies straight to its place and may bump the ship it came from.
 
 
 Propulsion burns fuel and is directional: engines, hot thrusters and cold gas thrusters each push the opposite way
@@ -587,6 +596,7 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Gas scanner: sample the gas cloud you are in or beside | `C` | |
 | Asteroid locator: pulse | `Y` | |
 | Drones: launch every drone in the bays / call them all home (flight, command view) | `.` / `,` | |
+| Drones: fetch the loose container under the pointer, else the targeted one (flight, command view) | `/` | |
 | Gas window: clouds you have sampled | `F4` | |
 | Command view | `N` or `F9` | `Back` |
 | Galaxy map | `M` | `Y` |

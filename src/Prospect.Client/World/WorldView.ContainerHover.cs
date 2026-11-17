@@ -10,6 +10,9 @@ internal sealed partial class WorldView
     /// <summary>What the pointer is on: a container in an own rack or loose in space. Read by the tooltip; nothing when none.</summary>
     public ContainerInfo HoverContainer { get; private set; }
 
+    /// <summary>The id of the loose container under the pointer; zero when none is, or the one hovered is in a rack.</summary>
+    public uint HoverContainerId { get; private set; }
+
     /// <summary>Where the tooltip hangs: the pointer's place in window pixels.</summary>
     public float2 HoverContainerAt { get; private set; }
 
@@ -22,6 +25,7 @@ internal sealed partial class WorldView
     private void UpdateContainerHover(SessionSnapshot snapshot, bool pointerOverUi)
     {
         HoverContainer = default;
+        HoverContainerId = 0;
         if (Editor.Shown || (Mode != ViewMode.Pilot && Mode != ViewMode.Command) || snapshot.Galaxy is not { } galaxy) return;
         float2 pointer;
         if (ScriptedHover is { } script)
@@ -40,6 +44,7 @@ internal sealed partial class WorldView
         var cargo = snapshot.Content.Cargo;
         var best = float.PositiveInfinity;
         var info = default(ContainerInfo);
+        var id = 0u;
         foreach (var item in _freeVisuals.Items)
         {
             if (!_partModels.TryGetContainer(item.Size, out _)) continue;
@@ -48,6 +53,7 @@ internal sealed partial class WorldView
             if (hit >= best) continue;
             best = hit;
             info = ContainerHover.Free(cargo, galaxy.Resources, item, snapshot.PlayerId, snapshot.FreeContainerTick);
+            id = item.Id;
         }
         var visuals = _visuals.Hulls;
         for (var i = 0; i < Math.Min(snapshot.HullCount, visuals.Length); i++)
@@ -65,6 +71,7 @@ internal sealed partial class WorldView
                 if (hit >= best) continue;
                 best = hit;
                 info = ContainerHover.Stowed(cargo, galaxy.Resources, container);
+                id = 0;
             }
         }
         if (!info.Any) return;
@@ -72,6 +79,7 @@ internal sealed partial class WorldView
         var count = PickTargets(snapshot, pointer, true);
         for (var i = 0; i < count; i++) if (_pickHits[i].Distance < best) return;
         HoverContainer = info;
+        HoverContainerId = id;
         HoverContainerAt = pointer;
     }
 

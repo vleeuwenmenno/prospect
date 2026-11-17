@@ -22,7 +22,9 @@ internal sealed partial class ScreenHost
         var name = empty ? "Empty container" : galaxy.Resources[info.Resource].Name;
         var line = Kit.Px(16);
         var pad = Kit.Px(Theme.Space3);
-        var rows = info.Kind == HoverKind.Free ? 5 : 4;
+        // A loose container the flown hull's drones could fetch names the key that sends them.
+        var fetch = info.Kind == HoverKind.Free && DroneUi.Present(snapshot.Bays, world.Own.Id);
+        var rows = info.Kind == HoverKind.Free ? fetch ? 6 : 5 : 4;
         var size = new float2(Kit.Px(210), pad * 2 + Kit.Px(22) + line * rows);
         var at = world.HoverContainerAt + new float2(Kit.Px(18), Kit.Px(18));
         at = new float2(MathF.Min(at.X, _ui.DisplaySize.X - size.X - pad), MathF.Min(at.Y, _ui.DisplaySize.Y - size.Y - pad));
@@ -51,5 +53,10 @@ internal sealed partial class ScreenHost
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, text, info.Claim == ClaimState.Others ? Theme.Bad : Theme.Info, claim);
         text.Y += line;
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, text, Theme.TextDim, info.PickupSeconds > 0 ? Kit.F($"PICKUP IN {info.PickupSeconds:0.0} S") : "READY FOR PICKUP"u8);
+        if (!fetch) return;
+        text.Y += line;
+        var keyWidth = Kit.Measure(_ui.Mono, Theme.FontCaption, _droneFetchKeyName).X;
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, text, Theme.Accent, _droneFetchKeyName);
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, text + new float2(keyWidth + Kit.Px(Theme.Space2), 0), Theme.Text, "FETCH WITH DRONES"u8);
     }
 }

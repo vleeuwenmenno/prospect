@@ -317,6 +317,12 @@ TRACTOR_BENCH := $(BIN)/tractor-bench
 # drone was seen out or the bay is not full again with every drone docked at the end.
 DRONE_BENCH := $(BIN)/drone-bench
 
+# Drone fetch: the tractor pod with a drone bay, containers jettisoned fast enough to leave the beam's range
+# (tools/prepare_drone_fetch_capture.py). One container is jettisoned at 5 s, drones are sent for it at 12 s, carry it
+# back and hand it to the beam, which stows it. It fails on any managed allocation, and when no fetch was seen or the
+# container is not back in the hold at the end.
+FETCH_BENCH := $(BIN)/fetch-bench
+
 bench: need-dotnet ## Release benchmark: empty scene, resizing, editor panels, cargo and drones (fails below target or on allocation)
 	$(call step,Building the client (Release))
 	$(Q)"$(DOTNET)" build $(CLIENT) -c Release $(QUIET)
@@ -336,6 +342,10 @@ bench: need-dotnet ## Release benchmark: empty scene, resizing, editor panels, c
 	$(Q)python3 tools/prepare_drone_capture.py $(BIN)/Prospect.Client/release $(DRONE_BENCH)
 	$(call step,Benchmarking drones (launch, hold station, recall and dock))
 	$(Q)$(RUN_ENV) "$(DOTNET)" $(DRONE_BENCH)/prospect.dll --bench 25 --size 1920x1080 --open drones --drone-recall 12
+	$(call step,Fitting a copy of the build for a drone fetch)
+	$(Q)python3 tools/prepare_drone_fetch_capture.py $(BIN)/Prospect.Client/release $(FETCH_BENCH)
+	$(call step,Benchmarking a drone fetch (outbound, carry, hand-over and stow))
+	$(Q)$(RUN_ENV) "$(DOTNET)" $(FETCH_BENCH)/prospect.dll --bench 50 --size 1920x1080 --open cargo --jettison 5 --drone-fetch 12
 
 # Inside gas clouds, where the primary cloud is marched at half resolution (assets/shaders/gas_half.glsl): an ordinary
 # cloud from inside, from the pilot's seat (composed with the shields) and from the command view, a huge one and a

@@ -117,7 +117,7 @@ The identity covers:
 
 - `content/blocks/cargo.json`: container unit edge, sizes, shapes and hull points.
 - `content/blocks/blocks.json`: block types, flight rules, size rules, design limits and fixed collision budgets.
-- `content/blocks/drones.json`: how drones leave a bay, hold, come home, and how many a player may have out.
+- `content/blocks/drones.json`: how drones leave a bay, hold, come home, fetch containers, and how many a player may have out.
 - `content/rules/settings.json`: which world settings exist, their ranges and defaults.
 - `content/galaxy/galaxy.json`: the galaxy rules and sector modules.
 - `content/galaxy/interiors.json`: what is inside every asteroid (crust, veins, pockets).

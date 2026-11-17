@@ -6,10 +6,11 @@ namespace Prospect.Game.World;
 
 /// <summary>
 /// One drone bay block's figures after its tier: how many drones it keeps, how many leave through its hatch at once,
-/// and how long it takes to build a lost one. Read from a block's <c>"bay"</c> entry and the catalogue's
-/// <c>bayTiers</c>, as <see cref="TractorSpec"/> reads tractors: one block type per tier is never needed.
+/// how long it takes to build a lost one and the mass each of its drones carries. Read from a block's <c>"bay"</c>
+/// entry and the catalogue's <c>bayTiers</c>, as <see cref="TractorSpec"/> reads tractors: one block type per tier is
+/// never needed.
 /// </summary>
-public sealed record BaySpec(int Capacity, int LaunchRate, float RebuildSeconds, ModuleQuality Quality = ModuleQuality.Common)
+public sealed record BaySpec(int Capacity, int LaunchRate, float RebuildSeconds, ModuleQuality Quality = ModuleQuality.Common, float CarryKg = 1000f)
 {
     /// <summary>Ticks a lost drone takes to rebuild, rounded up.</summary>
     public long RebuildTicks => (long)Math.Ceiling(RebuildSeconds * TickLoop.SimulationHz);
@@ -42,9 +43,10 @@ public sealed record BaySpec(int Capacity, int LaunchRate, float RebuildSeconds,
         var capacity = (int)MathF.Round(Figure("capacity", "capacity"));
         var rate = (int)MathF.Round(Figure("launchRate", "launchRate"));
         var rebuild = Figure("rebuildSeconds", "rebuildSeconds");
-        if (capacity is < 1 or > DroneBayRules.MaxCapacity || rate < 1 || rate > capacity || rebuild > 86400f)
-            throw new InvalidDataException($"A drone bay keeps 1 to {DroneBayRules.MaxCapacity} drones, launches 1 to its capacity at once and rebuilds one in at most a day.");
-        return new BaySpec(capacity, rate, rebuild, quality);
+        var carry = Figure("carryKg", "carry");
+        if (capacity is < 1 or > DroneBayRules.MaxCapacity || rate < 1 || rate > capacity || rebuild > 86400f || carry > 1e7f)
+            throw new InvalidDataException($"A drone bay keeps 1 to {DroneBayRules.MaxCapacity} drones, launches 1 to its capacity at once, rebuilds one in at most a day and its drones carry at most 10,000 t.");
+        return new BaySpec(capacity, rate, rebuild, quality, carry);
     }
 }
 
@@ -100,6 +102,40 @@ public sealed record DroneRules
     /// <summary>The least time between two drone commands of one player.</summary>
     public required float CommandSeconds { get; init; }
 
+    /// <summary>The farthest from the hull a free container may be for drones to be sent to fetch it.</summary>
+    public required float FetchRangeMetres { get; init; }
+
+    /// <summary>
+    /// Metres a second squared drones give a container whose mass is just what they carry together: more drones than
+    /// needed lift it faster, as their carry adds.
+    /// </summary>
+    public required float CarryAcceleration { get; init; }
+
+    /// <summary>The fastest drones carry a container, relative to the hull they bring it to.</summary>
+    public required float CarrySpeed { get; init; }
+
+    /// <summary>Gap between a carrying drone and the container's side.</summary>
+    public required float AttachGapMetres { get; init; }
+
+    /// <summary>How near its place beside the container a drone counts as holding on.</summary>
+    public required float TetherMetres { get; init; }
+
+    /// <summary>The most drones one container takes: there are only so many places around it.</summary>
+    public required int MaxCarriers { get; init; }
+
+    /// <summary>How far out in front of the tractor beam drones bring a container and hand it over.</summary>
+    public required float HandoverMetres { get; init; }
+
+    /// <summary>How near the hand-over point, and how slow against the hull, a container is let go to the beam.</summary>
+    public required float HandoverToleranceMetres { get; init; }
+    public required float HandoverSpeed { get; init; }
+
+    /// <summary>The longest a fetch may take before its drones give up and come home.</summary>
+    public required float FetchSeconds { get; init; }
+
+    /// <summary>Ticks a fetch may take, at least one.</summary>
+    public long FetchTicks => Math.Max(1, (long)Math.Ceiling(FetchSeconds * TickLoop.SimulationHz));
+
     /// <summary>Ticks between two launches from one bay, at least one.</summary>
     public long LaunchIntervalTicks => Math.Max(1, (long)Math.Ceiling(LaunchIntervalSeconds * TickLoop.SimulationHz));
 
@@ -143,6 +179,16 @@ public sealed record DroneRules
             DockRadiusMetres = Number("dockRadiusMetres", 0.05f, 10),
             DockPushMetres = Number("dockPushMetres", 0, 50),
             CommandSeconds = Number("commandSeconds", 0, 10),
+            FetchRangeMetres = Number("fetchRangeMetres", 1, 20000),
+            CarryAcceleration = Number("carryAcceleration", 0.01f, 50),
+            CarrySpeed = Number("carrySpeed", 0.1f, 200),
+            AttachGapMetres = Number("attachGapMetres", 0, 10),
+            TetherMetres = Number("tetherMetres", 0.1f, 100),
+            MaxCarriers = Whole("maxCarriers", 1, DroneFetch.Places),
+            HandoverMetres = Number("handoverMetres", 1, 1000),
+            HandoverToleranceMetres = Number("handoverToleranceMetres", 0.05f, 50),
+            HandoverSpeed = Number("handoverSpeed", 0.01f, 50),
+            FetchSeconds = Number("fetchSeconds", 1, 86400),
         };
         if (rules.HoldDistanceMetres > rules.MaxHoldDistanceMetres)
             throw new InvalidDataException("drones.json: holdDistanceMetres must not exceed maxHoldDistanceMetres");

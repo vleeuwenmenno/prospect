@@ -49,12 +49,20 @@ internal static class DroneUi
     /// The launch key sends every drone that is inside and not yet waiting to leave; the recall key calls them all
     /// home. A press with nothing to launch still asks, so the server's answer (empty, hatch blocked) is shown.
     /// </summary>
-    public static void HandleKeys(ActionMap actions, InputDevices devices, bool keyboard, in BayView view, uint ownHull, PlayerInputBridge bridge)
+    /// <remarks>
+    /// The fetch key sends drones for <paramref name="fetchSubject"/>: the loose container under a shown pointer, else
+    /// the one targeted (<see cref="FetchSubject"/>); nothing when there is none.
+    /// </remarks>
+    public static void HandleKeys(ActionMap actions, InputDevices devices, bool keyboard, in BayView view, uint ownHull, PlayerInputBridge bridge, uint fetchSubject = 0)
     {
         if (!Present(view, ownHull)) return;
         if (actions.Pressed(devices, InputAction.LaunchDrones, keyboard)) Launch(view, ownHull, bridge);
         if (actions.Pressed(devices, InputAction.RecallDrones, keyboard)) bridge.RecallDrones(ownHull);
+        if (actions.Pressed(devices, InputAction.FetchContainer, keyboard) && fetchSubject != 0) bridge.FetchContainer(ownHull, fetchSubject);
     }
+
+    /// <summary>The container the fetch key acts on: the loose one under the pointer first, else the targeted one; zero for none.</summary>
+    public static uint FetchSubject(uint hovered, uint targeted) => hovered != 0 ? hovered : targeted;
 
     /// <summary>What the launch key and a click on the chip with nothing out do: launch every drone that is inside.</summary>
     public static void Launch(in BayView view, uint ownHull, PlayerInputBridge bridge)
@@ -76,11 +84,21 @@ internal static class DroneUi
         DroneReply.InTransit => "IN TRANSIT"u8,
         DroneReply.TooFar => "TOO FAR"u8,
         DroneReply.NoneOut => "NONE OUT"u8,
+        DroneReply.Fetching => "FETCHING"u8,
+        DroneReply.NotFound => "NOT IN SIGHT"u8,
+        DroneReply.Taken => "ALREADY TAKEN"u8,
+        DroneReply.Claimed => "CLAIMED"u8,
+        DroneReply.NoTractor => "NO TRACTOR"u8,
+        DroneReply.NoRoom => "NO RACK ROOM"u8,
+        DroneReply.TooHeavy => "TOO HEAVY"u8,
+        DroneReply.TooFew => "TOO FEW DRONES"u8,
+        DroneReply.Dropped => "DROPPED"u8,
+        DroneReply.Delivered => "DELIVERED"u8,
         _ => default,
     };
 
     /// <summary>Whether an answer is a refusal, shown in the warning colour.</summary>
-    public static bool Refused(DroneReply reply) => reply is not (DroneReply.None or DroneReply.Launching or DroneReply.Recalling);
+    public static bool Refused(DroneReply reply) => reply is not (DroneReply.None or DroneReply.Launching or DroneReply.Recalling or DroneReply.Fetching or DroneReply.Delivered);
 }
 
 /// <summary>
