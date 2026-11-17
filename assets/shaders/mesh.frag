@@ -11,6 +11,8 @@ layout(location = 5) in float metal;
 layout(location = 6) flat in vec3 paint;
 layout(location = 0) out vec4 outColor;
 layout(location = 7) flat in uvec4 markMask;
+layout(location = 8) flat in vec4 oreFigures;
+layout(location = 9) flat in float crystal;
 struct RockMark { vec4 centerRadius; vec4 normalScorch; vec4 glow; };
 layout(std430, set = 0, binding = 3) readonly buffer RockMarks { RockMark marks[]; } rock;
 
@@ -111,6 +113,29 @@ void main()
         return;
     }
 
+    // A loose ore chunk (WorldView.OreChunks): a broken lump of bare rock with the ore showing as veins, more of them
+    // the richer the chunk, and as crystals standing out of its break faces. color.rgb is the ore's own colour.
+    bool ore = color.a > 0.02 && color.a < 0.125;
+    float oreMask = 0.0;
+    if (ore)
+    {
+        float grade = clamp((color.a - 0.03) / 0.09, 0.0, 1.0);
+        float mottling = noise(localPosition * 4.0) * 0.6 + noise(localPosition * 13.0) * 0.4;
+        // Each break face is a little lighter or darker than its neighbours, so the broken shape reads.
+        float facetTone = 0.8 + 0.4 * hash(floor(normalize(worldNormal) * 5.0 + 0.5) + 3.0);
+        vec3 rock = vec3(0.27, 0.25, 0.225) * (0.7 + 0.5 * mottling) * facetTone;
+        // Veins: thin lines where a warped noise passes through its middle value, wider the richer the chunk.
+        float cover = mix(oreFigures.y, oreFigures.z, grade);
+        vec3 p = localPosition * oreFigures.x;
+        p += 0.7 * vec3(noise(p * 0.6), noise(p * 0.6 + 3.1), noise(p * 0.6 + 6.2));
+        float ridge = abs(2.0 * noise(p) - 1.0);
+        float width = cover * 0.5;
+        oreMask = 1.0 - smoothstep(width, width + 0.025, ridge);
+        oreMask = crystal > 0.5 ? 1.0 : oreMask;
+        vec3 body = color.rgb * (0.85 + 0.3 * noise(localPosition * 12.0));
+        albedo = mix(rock, body, oreMask);
+    }
+
     if (color.a < 0.5)
     {
         // Rock: mottled, with the facets of the mesh showing through for a rough, broken surface.
@@ -118,9 +143,12 @@ void main()
         vec3 facet = normalize(cross(dFdx(worldPosition), dFdy(worldPosition)));
         if (dot(facet, n) < 0.0)
             facet = -facet;
-        n = normalize(mix(n, facet, 0.4));
-        float mottling = noise(localPosition * 9.0) * 0.6 + noise(localPosition * 31.0) * 0.4;
-        albedo *= 0.55 + 0.75 * mottling;
+        n = normalize(mix(n, facet, ore ? 1.0 : 0.4));
+        if (!ore)
+        {
+            float mottling = noise(localPosition * 9.0) * 0.6 + noise(localPosition * 31.0) * 0.4;
+            albedo *= 0.55 + 0.75 * mottling;
+        }
     }
     else if (paint.r >= 0.0 && metal < -1.5)
     {
@@ -172,6 +200,18 @@ void main()
     vec3 lit = albedo * light
         + frame.sunColor.rgb * specular * diffuse
         + vec3(0.02, 0.03, 0.05) * rim;
+    if (ore && oreMask > 0.0)
+    {
+        // Ore is metallic and glints: a broad sheen, a sharp flash as a tumbling facet lines up with the star, and a
+        // faint glow of its own that twinkles, so it reads against the rock even in shadow.
+        float facing = max(dot(n, halfway), 0.0);
+        float sheen = pow(facing, mix(18.0, 40.0, crystal)) * 0.5;
+        float flash = pow(facing, 220.0) * 6.0;
+        float phase = hash(floor(localPosition * 6.0)) * 6.2831;
+        float glow = 0.05 + 0.04 * sin(frame.dust.w * 2.5 + phase);
+        vec3 shine = frame.sunColor.rgb * (sheen + flash) * diffuse * oreFigures.w;
+        lit += color.rgb * oreMask * (shine + glow * oreFigures.w * (0.6 + 0.8 * crystal) + 0.3 * crystal * rim);
+    }
     // Inside a hyperspace tunnel or a throat its light falls on the hull riding through it: blue, or a rift's orange.
     vec3 passage = frame.ftl.x > 2.5 ? vec3(0.16, 0.06, 0.015) : vec3(0.05, 0.08, 0.14);
     lit += albedo * passage * frame.ftlShape.w * (0.6 + 0.4 * fill);
@@ -189,6 +229,6 @@ void main()
     // A solid surface clears the jump lens mask, so a hull in front of an opening stays sharp, and leaves a mark
     // of what it is in the fraction: 0.25 an asteroid, 0.375 a hull, 0.5 the pilot's own hull, which their jump
     // never covers.
-    if (color.a < 0.5) lit = exhaustMarks(lit, n);
+    if (color.a < 0.5 && !ore) lit = exhaustMarks(lit, n);
     outColor = vec4(lit, color.a > 1.5 ? 0.5 : color.a > 0.5 ? 0.375 : 0.25);
 }

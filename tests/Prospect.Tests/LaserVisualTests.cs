@@ -2,6 +2,7 @@ using System.Numerics;
 using Brutal.Numerics;
 using Prospect.Client.Render;
 using Prospect.Client.World;
+using Prospect.Engine.IO;
 using Prospect.Game.Client;
 using Prospect.Game.World;
 using Xunit;
@@ -193,17 +194,16 @@ public sealed class LaserVisualTests
     }
 
     [Fact]
-    public void TheDrawnInstantIsTheOwnHullsAndTheColourFollowsTheGrade()
+    public void TheDrawnInstantIsTheOwnHullsAndTheMaterialCarriesTheGrade()
     {
         var hulls = new[] { new HullView { Id = 7, IsOwn = true, ShownTick = 17 } };
         Assert.Equal(16.5, OreChunkVisuals.ShownTick(hulls, 0, 14, .5f));
         Assert.Equal(14.5, OreChunkVisuals.ShownTick(hulls, -1, 14, .5f));
-        var ore = new Vector3(0.95f, 0.38f, 0.18f);
-        var poor = OreChunkVisuals.Tint(ore, 0.05f);
-        var rich = OreChunkVisuals.Tint(ore, 1f);
-        // A richer chunk is nearer the ore's own colour: more red over blue.
-        Assert.True(rich.X / rich.Z > poor.X / poor.Z);
-        Assert.True(Vector3.Distance(rich, ore * 0.85f) < Vector3.Distance(poor, ore * 0.85f));
+        // mesh.frag reads a material between 0.02 and 0.125 as an ore chunk, its grade rising with it.
+        Assert.InRange(OreChunkVisuals.Material(0f), 0.02f, 0.125f);
+        Assert.InRange(OreChunkVisuals.Material(1f), 0.02f, 0.125f);
+        Assert.True(OreChunkVisuals.Material(0.8f) > OreChunkVisuals.Material(0.2f));
+        Assert.Equal(OreChunkVisuals.Material(1f), OreChunkVisuals.Material(7f));
     }
 
     [Fact]
@@ -223,7 +223,7 @@ public sealed class LaserVisualTests
             for (var i = 0; i < view.Items.Length; i++)
             {
                 sum += view.Pose(i, tick + 3.5).Position.X;
-                sum += OreChunkVisuals.Tint(new Vector3(0.9f, 0.5f, 0.2f), items[i].Grade).X;
+                sum += OreChunkVisuals.Material(items[i].Grade);
             }
         }
 
@@ -232,39 +232,64 @@ public sealed class LaserVisualTests
     }
 
     [Fact]
-    public void EveryChunkLumpIsAClosedRoughMeshInsideItsCube()
+    public void EveryChunkLumpIsAClosedBrokenMeshWithCrystalsOnRicherOnes()
     {
-        for (var variant = 0; variant < OreChunkModels.Variants; variant++)
+        var look = OreChunkModelLook.Load(AppPaths.Content("visuals", "ore_chunk_models.json"));
+        for (var variant = 0; variant < look.Variants; variant++)
         {
-            var soup = OreChunkModels.Build(variant);
-            Assert.True(soup.Length >= 36 && soup.Length % 3 == 0);
-            var edges = new Dictionary<(Vector3, Vector3), int>();
-            for (var t = 0; t < soup.Length; t += 3)
+            var previous = 0;
+            foreach (var crystals in look.CrystalCounts)
             {
-                var a = Position(soup[t]);
-                var b = Position(soup[t + 1]);
-                var c = Position(soup[t + 2]);
-                // Wound to face outward, away from the middle, and flat shaded with unit normals.
-                var cross = Vector3.Cross(b - a, c - a);
-                Assert.True(Vector3.Dot(cross, (a + b + c) / 3f) > 0);
-                Assert.Equal(1f, new Vector3(soup[t].Normal.X, soup[t].Normal.Y, soup[t].Normal.Z).Length(), 4);
-                foreach (var (p, q) in new[] { (a, b), (b, c), (c, a) })
+                var soup = OreChunkModels.Build(look, variant, crystals);
+                Assert.True(soup.Length >= 36 && soup.Length % 3 == 0);
+                var edges = new Dictionary<(Vector3, Vector3), int>();
+                var tagged = 0;
+                for (var t = 0; t < soup.Length; t += 3)
                 {
-                    var key = Compare(p, q) < 0 ? (p, q) : (q, p);
-                    edges[key] = edges.GetValueOrDefault(key) + 1;
+                    var a = Position(soup[t]);
+                    var b = Position(soup[t + 1]);
+                    var c = Position(soup[t + 2]);
+                    // Flat shaded: a unit normal, or the crystal tag's length, and the same on all three corners.
+                    var normal = new Vector3(soup[t].Normal.X, soup[t].Normal.Y, soup[t].Normal.Z);
+                    var length = normal.Length();
+                    Assert.True(MathF.Abs(length - 1f) < 1e-3f || MathF.Abs(length - OreChunkModels.CrystalTag) < 1e-3f);
+                    if (length > 1.1f) tagged++;
+                    // Wound counter-clockwise seen from outside: the cross product follows the normal.
+                    Assert.True(Vector3.Dot(Vector3.Cross(b - a, c - a), normal) > 0);
+                    foreach (var (p, q) in new[] { (a, b), (b, c), (c, a) })
+                    {
+                        var key = Compare(p, q) < 0 ? (p, q) : (q, p);
+                        edges[key] = edges.GetValueOrDefault(key) + 1;
+                    }
                 }
-            }
 
-            // Closed: every edge is shared by exactly two triangles, so the faces meet with no gap.
-            Assert.All(edges.Values, count => Assert.Equal(2, count));
-            foreach (var v in soup)
-            {
-                var p = Position(v);
-                Assert.InRange(MathF.Max(MathF.Abs(p.X), MathF.Max(MathF.Abs(p.Y), MathF.Abs(p.Z))), 0.4f, 1.3f);
+                // Closed: every edge is shared by exactly two triangles, so the faces meet with no gap.
+                Assert.True(edges.Values.All(count => count == 2), $"variant {variant}, crystals {crystals}: open edges {string.Join(" | ", edges.Where(e => e.Value != 2).Select(e => $"{e.Key.Item1}->{e.Key.Item2} x{e.Value}"))}");
+                Assert.Equal(crystals == 0, tagged == 0);
+                Assert.True(tagged >= previous);
+                previous = tagged;
+                foreach (var v in soup)
+                {
+                    var p = Position(v);
+                    Assert.InRange(MathF.Max(MathF.Abs(p.X), MathF.Max(MathF.Abs(p.Y), MathF.Abs(p.Z))), 0.1f, 1.9f);
+                }
             }
         }
 
-        Assert.NotEqual(OreChunkModels.Build(0)[10].Position, OreChunkModels.Build(1)[10].Position);
+        Assert.NotEqual(OreChunkModels.Build(look, 0, 0)[10].Position, OreChunkModels.Build(look, 1, 0)[10].Position);
+        Assert.Equal(OreChunkModels.Build(look, 2, 4)[20].Position, OreChunkModels.Build(look, 2, 4)[20].Position);
+    }
+
+    [Fact]
+    public void TheOreChunkLookIsValidatedAndGradeBandsFollowItsSteps()
+    {
+        var look = OreChunkModelLook.Load(AppPaths.Content("visuals", "ore_chunk_models.json"));
+        Assert.Equal(0, look.Band(0f));
+        Assert.Equal(look.CrystalGrades.Length, look.Band(1f));
+        Assert.Equal(look.CrystalCounts.Length, look.CrystalGrades.Length + 1);
+        Assert.Throws<InvalidDataException>(() => new OreChunkModelLook { CrystalCounts = [0, 3], CrystalGrades = [0.3f, 0.6f] }.Validate());
+        Assert.Throws<InvalidDataException>(() => new OreChunkModelLook { BoxHalfMin = 0.9f, BoxHalfMax = 0.7f }.Validate());
+        Assert.Throws<InvalidDataException>(() => new OreChunkModelLook { VeinCoverMax = 2f }.Validate());
     }
 
     private static int Compare(Vector3 a, Vector3 b) => a.X != b.X ? a.X.CompareTo(b.X) : a.Y != b.Y ? a.Y.CompareTo(b.Y) : a.Z.CompareTo(b.Z);

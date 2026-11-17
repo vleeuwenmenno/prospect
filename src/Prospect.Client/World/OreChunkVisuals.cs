@@ -101,12 +101,8 @@ internal sealed class OreChunkVisuals
         (uint)own < (uint)hulls.Length ? hulls[own].ShownTick - 1 + alpha : serverTick + alpha;
 
     /// <summary>
-    /// The colour a chunk is drawn in: bare rock's grey, the ore's own colour coming through more the higher the
-    /// <paramref name="grade"/>. Brighter and more saturated than the rock it came from, so a loose chunk reads as ore.
+    /// The instance material <c>mesh.frag</c> draws as an ore chunk, carrying the chunk's <paramref name="grade"/>: from
+    /// 0.03 (poor) to 0.12 (pure), clear of bare rock (0), ice (0.25) and hulls (1 and over).
     /// </summary>
-    public static Vector3 Tint(Vector3 ore, float grade)
-    {
-        var rock = new Vector3(0.22f, 0.21f, 0.19f);
-        return Vector3.Lerp(rock, ore * 0.85f, 0.35f + 0.65f * Math.Clamp(grade, 0f, 1f));
-    }
+    public static float Material(float grade) => 0.03f + 0.09f * Math.Clamp(grade, 0f, 1f);
 }

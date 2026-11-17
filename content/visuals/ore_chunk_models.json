@@ -1,0 +1,21 @@
+{
+  "variants": 6,
+  "boxHalfMin": 0.62,
+  "boxHalfMax": 0.95,
+  "cutsMin": 14,
+  "cutsMax": 18,
+  "facetRelief": 0.09,
+  "cutDepthMin": 0.62,
+  "cutDepthMax": 0.85,
+  "crystalGrades": [0.3, 0.65],
+  "crystalCounts": [0, 4, 8],
+  "crystalLengthMin": 0.45,
+  "crystalLengthMax": 0.85,
+  "crystalRadiusMin": 0.11,
+  "crystalRadiusMax": 0.2,
+  "crystalTilt": 0.45,
+  "veinScale": 7,
+  "veinCoverMin": 0.05,
+  "veinCoverMax": 0.2,
+  "glint": 1.0
+}
