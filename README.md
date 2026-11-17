@@ -229,7 +229,7 @@ characters, different from your other ships; the field checks it as you type), t
 server places a one-block ship just ahead of the drone and the ship editor opens on it. When you close that editor
 you are put in control of the new ship, the way `T` takes control of a target (the drone is removed): Apply rebuilds
 the ship from your design and you fly the result; Cancel, `Esc` or `B` leaves the ship as a single block and you fly
-that. If the switch cannot be made (the ship is gone or in another sector) the editor's notice says why and you stay
+that (with changes in the draft, each of those asks "Discard changes?" first; see below). If the switch cannot be made (the ship is gone or in another sector) the editor's notice says why and you stay
 in the drone. Editing an ordinary ship, or the drone with `Ctrl`+`B`, never moves you.
 If the server refuses (name already used, ship limit, no clear space ahead, full design catalogue, ...) the dialog
 says why and you can try another name. Cancel is off while the server is working. `Ctrl`+`B` in the drone edits the
@@ -239,6 +239,10 @@ drone itself.
 yes (no damage for 30 seconds, no jump ordered or running). The world keeps running around you and other players
 are never blocked. The editor works in space, around your ship:
 
+- Leaving with changes asks first. `B`, `Esc` and the Cancel button, and Leave Session or Quit in the in-game menu while
+  an edit is open, show **Discard changes?** with **Discard** and **Keep editing** when the draft differs from the ship
+  as it is. `Enter`, `Esc` and `B` all choose Keep editing. With no changes (or every change undone) they leave at once.
+  An edit the server ends is not asked about. Closing the window is not covered.
 - The part list has a search at the top and a rail of icon buttons down its left side, one per category: All, Hull,
   Power, Thrust, Tanks, Shield, Jump and Sensors. Hover an icon for its name and what is in it. It lists only parts that
   fit the craft: editing a ship shows no drone parts, editing the drone shows only drone parts (a category with none is

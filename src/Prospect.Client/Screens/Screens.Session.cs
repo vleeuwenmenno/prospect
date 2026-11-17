@@ -59,6 +59,7 @@ internal sealed partial class ScreenHost
                 TrackSocial(snapshot);
                 UpdateNewShip(snapshot);
                 UpdateDesigns();
+                UpdateDiscard();
                 TrackTips(snapshot, _app.World);
                 TrackNotices(snapshot, _app.World);
                 PlanTip(_app.World);
@@ -74,6 +75,7 @@ internal sealed partial class ScreenHost
                 {
                     DrawNewShip(snapshot);
                     DrawDesigns();
+                    DrawDiscard();
                 }
                 DrawTip();
                 DrawNotices();
@@ -312,13 +314,13 @@ internal sealed partial class ScreenHost
             OpenSettings(Screen.Session);
         // A saved world is saved on the way out; the labels say so, since there is no other save to make.
         var saved = _app.Session is { IsPersistent: true };
-        if (Kit.MenuItem(saved ? "Save and Leave"u8 : "Leave Session"u8, 360))
+        if (Kit.MenuItem(saved ? "Save and Leave"u8 : "Leave Session"u8, 360) && !AskDiscardBefore(DiscardThen.Leave))
         {
             _sessionMenuOpen = false;
             _app.LeaveSession();
         }
 
-        if (Kit.MenuItem(saved ? "Save and Quit"u8 : "Quit to Desktop"u8, 360))
+        if (Kit.MenuItem(saved ? "Save and Quit"u8 : "Quit to Desktop"u8, 360) && !AskDiscardBefore(DiscardThen.Quit))
             _app.Quit();
 
         EndPanel();
