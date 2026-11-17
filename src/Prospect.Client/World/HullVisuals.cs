@@ -125,6 +125,12 @@ internal sealed class HullVisuals
         _count = 0;
     }
 
+    /// <summary>Hull slots taken on the first frame: a snapshot names at most 255 hulls.</summary>
+    private const int MinHulls = 256;
+
+    /// <summary>Block-set words taken on the first frame: 262,144 blocks in view before the cut sets ever grow.</summary>
+    private const int MinPickWords = 4096;
+
     /// <summary>
     /// Works out every hull's place this frame. <paramref name="alpha"/> is how far the frame is between the last two
     /// ticks; <paramref name="ownInside"/> whether the pilot sees their own hull's jump from inside, where it is not
@@ -133,9 +139,10 @@ internal sealed class HullVisuals
     /// </summary>
     public void Update(ReadOnlySpan<HullView> hulls, HullDesign[] designs, float alpha, float dt, bool ownInside, FtlKind ownPreview)
     {
-        // Sized once for the snapshot's capacity, never per frame.
+        // Sized for a full snapshot from the first frame, never per frame: hulls that come into view (drones leaving
+        // their bay, a fleet arriving) must not grow it in the middle of play.
         if (_hulls.Length < hulls.Length)
-            _hulls = new HullVisual[hulls.Length];
+            _hulls = new HullVisual[Math.Max(hulls.Length, MinHulls)];
         _count = hulls.Length;
 
         // Room for every hull to be cut at once, found before any set is handed out; it grows only when the
@@ -144,7 +151,7 @@ internal sealed class HullVisuals
         for (var i = 0; i < hulls.Length; i++)
             words += hulls[i].Blocks.Length;
         if (_pickWords.Length < words)
-            _pickWords = new ulong[words];
+            _pickWords = new ulong[Math.Max(words, Math.Max(MinPickWords, _pickWords.Length * 2))];
         _pickUsed = 0;
 
         dt = Math.Clamp(dt, 0f, 0.1f);

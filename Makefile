@@ -312,7 +312,12 @@ test: need-dotnet ## Run the unit tests
 # container was never seen loose or is not back in the hold at the end.
 TRACTOR_BENCH := $(BIN)/tractor-bench
 
-bench: need-dotnet ## Release benchmark: empty scene, resizing, editor panels and cargo (fails below target or on allocation)
+# The shipped pod has no drone bay either, so the drone run uses a copy whose pod has one (tools/prepare_drone_capture.py).
+# Three drones launch at 1.5 s, hold station and are called home at 12 s. It fails on any managed allocation, and when no
+# drone was seen out or the bay is not full again with every drone docked at the end.
+DRONE_BENCH := $(BIN)/drone-bench
+
+bench: need-dotnet ## Release benchmark: empty scene, resizing, editor panels, cargo and drones (fails below target or on allocation)
 	$(call step,Building the client (Release))
 	$(Q)"$(DOTNET)" build $(CLIENT) -c Release $(QUIET)
 	$(call step,Benchmarking an empty scene at 1920x1080)
@@ -327,6 +332,10 @@ bench: need-dotnet ## Release benchmark: empty scene, resizing, editor panels an
 	$(Q)python3 tools/prepare_tractor_capture.py $(BIN)/Prospect.Client/release $(TRACTOR_BENCH)
 	$(call step,Benchmarking cargo (jettison, drift, tractor pull and stow))
 	$(Q)$(RUN_ENV) "$(DOTNET)" $(TRACTOR_BENCH)/prospect.dll --bench 25 --size 1920x1080 --open cargo --jettison 5
+	$(call step,Fitting a copy of the build with a drone bay)
+	$(Q)python3 tools/prepare_drone_capture.py $(BIN)/Prospect.Client/release $(DRONE_BENCH)
+	$(call step,Benchmarking drones (launch, hold station, recall and dock))
+	$(Q)$(RUN_ENV) "$(DOTNET)" $(DRONE_BENCH)/prospect.dll --bench 25 --size 1920x1080 --open drones --drone-recall 12
 
 # Inside gas clouds, where the primary cloud is marched at half resolution (assets/shaders/gas_half.glsl): an ordinary
 # cloud from inside, from the pilot's seat (composed with the shields) and from the command view, a huge one and a

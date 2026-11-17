@@ -335,6 +335,9 @@ internal sealed class PropulsionLook
     /// <summary>How fuel tanks are drawn; null draws every tank as its plain block.</summary>
     public TankLook? Tanks { get; init; }
     public RackLook? Rack { get; init; }
+
+    /// <summary>How drone bays are drawn; null draws every bay as its plain block.</summary>
+    public BayLook? Bay { get; init; }
     [System.Text.Json.Serialization.JsonIgnore]
     public CargoCatalog Cargo { get; private set; } = null!;
 
@@ -377,6 +380,7 @@ internal sealed class PropulsionLook
             scanner.Check(path, id);
         look.Tanks?.Check(path);
         look.Rack?.Check();
+        look.Bay?.Check(path);
         if (look.Tractor is null) throw new InvalidDataException($"{path}: missing tractor appearance");
         look.Tractor.Check();
         look.Cargo = CargoCatalog.Parse(File.ReadAllBytes(AppPaths.Content("blocks", "cargo.json")));
@@ -454,7 +458,7 @@ internal static partial class PropulsionModels
     {
         var model = ModelOf(design, block, look);
         if (model is null)
-            return AddRack(design, block, look, vertices, indices) || AddTank(design, block, look, vertices, indices);
+            return AddRack(design, block, look, vertices, indices) || AddTank(design, block, look, vertices, indices) || AddBay(design, block, look, vertices, indices);
         var facing = design.Boxes[block].Facing;
         // The back face is left out where a neighbour covers it.
         var back = (design.ExteriorFaces[block] & (1 << (byte)Facings.Opposite(facing))) != 0;

@@ -146,6 +146,9 @@ public sealed class SessionSnapshot(GameContent content)
 
     /// <summary>Fixed storage behind the controlled hull cargo view.</summary>
     public long OwnCargoTick;
+
+    /// <summary>The flown hull's drone bays and the newest answer to a drone command; empty until the server tells.</summary>
+    public BayView Bays;
     public readonly HoldContainer[] OwnCargo = new HoldContainer[BlockStateStore.MaxContainers];
 
     /// <summary>Snapshot-owned loose cargo, filtered by the server's sensor coverage.</summary>
@@ -180,7 +183,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     // Reserve the full fleet message, one five-byte Control, one editor request, one cargo release and one design acknowledgement
     // before allowing any social traffic.
     internal const int EditorBytesPerTick = EditorRequestMessage.MaxWireSize + DesignReadyMessage.WireSize;
-    internal const int SocialBytesPerTick = ServerHost.PlayerBytesPerTick - FleetOrdersMessage.MaxWireSize - 5 - EditorBytesPerTick - ExplorationMessage.ScanWireSize - ModuleMessage.RequestWireSize - JettisonCargoMessage.MaxWireSize;
+    internal const int SocialBytesPerTick = ServerHost.PlayerBytesPerTick - FleetOrdersMessage.MaxWireSize - 5 - EditorBytesPerTick - ExplorationMessage.ScanWireSize - ModuleMessage.RequestWireSize - JettisonCargoMessage.MaxWireSize - DroneCommandMessage.MaxWireSize;
     internal static readonly int SocialMessagesPerTick = Math.Min(ServerHost.PlayerMessagesPerTick - 7, SocialBytesPerTick / SocialMessage.MaxWireSize);
     private long _receivedSnapshotTick = -1;
     private long _clientTick;
@@ -190,6 +193,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     private const int ConnectTimeoutTicks = TickLoop.SimulationHz * 10;
 
     private readonly SocialState _social = new();
+    private BayView _bays;
     private readonly ITransport _transport;
 
     // The content as loaded, and as the server's settings make it once the server has sent them.
@@ -354,6 +358,13 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                         if (!_transport.Send(0, NetChannel.Reliable, writer.Written))
                         { End(SessionEndReason.ConnectionLost); return; }
                     }
+                    if (sendCommands && Input.ConsumeDroneCommand(out var drones))
+                    {
+                        var writer = new NetWriter(_sendBuffer);
+                        drones.Write(ref writer);
+                        if (!_transport.Send(0, NetChannel.Reliable, writer.Written))
+                        { End(SessionEndReason.ConnectionLost); return; }
+                    }
                     _editor.Tick(Input, _transport, sendCommands, _content.BlockTransfers.MaxBytes);
                     if (sendCommands)
                         ReportDesigns();
@@ -392,6 +403,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         if (snapshot.HullCount == 0)
             snapshot.OwnHull = -1;
         _world.PublishCargo(snapshot);
+        snapshot.Bays = _state == SessionState.Active ? _bays : default;
         _world.PublishFreeContainers(snapshot);
         snapshot.OwnIsDrone = _state == SessionState.Active && snapshot.HullCount > 0 && _world.OwnIsDrone;
         snapshot.Dampeners = _world.Dampeners;
@@ -523,6 +535,9 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                 break;
             case MessageId.Cargo when _state == SessionState.Active && channel == NetChannel.Reliable && payload.Length <= CargoMessage.MaxWireSize:
                 _world.OnCargo(ref reader);
+                break;
+            case MessageId.Bays when _state == SessionState.Active && channel == NetChannel.Reliable && payload.Length <= BayMessage.MaxWireSize:
+                if (BayMessage.TryRead(ref reader, out var bays)) _bays = bays;
                 break;
             case MessageId.WreckSettings when _state == SessionState.Active && channel == NetChannel.Reliable && payload.Length == WreckSettingsMessage.MaxWireSize:
                 if (WreckSettingsMessage.TryRead(ref reader, out var wreckSettings)) _wreckSettings = wreckSettings;

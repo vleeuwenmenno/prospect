@@ -313,6 +313,7 @@ internal static class EditorGeometry
         : type.EnergyStorage > 0 ? PartRole.Storage
         : type.Shield > 0 ? PartRole.Shield
         : type.Tractor is not null ? PartRole.Tractor
+        : type.Bay is not null ? PartRole.Bay
         : type.Cargo > 0 ? PartRole.Cargo
         : type.Crew > 0 ? PartRole.Crew
         : type.Module.Family != ModuleFamily.None ? PartRole.Module
@@ -331,6 +332,7 @@ internal static class EditorGeometry
         PartRole.Storage => new Vector3(0.35f, 0.85f, 0.45f),
         PartRole.Shield => new Vector3(0.30f, 0.75f, 1.00f),
         PartRole.Cargo => new Vector3(0.70f, 0.55f, 0.40f),
+        PartRole.Bay => new Vector3(0.95f, 0.75f, 0.25f),
         PartRole.Crew => new Vector3(0.90f, 0.90f, 0.95f),
         PartRole.Module => new Vector3(0.35f, 0.90f, 0.85f),
         _ => Vector3.Zero,
@@ -364,4 +366,7 @@ internal enum PartRole : byte
     Tank,
     /// <summary>An automatic cargo tractor mounted on a face.</summary>
     Tractor,
+
+    /// <summary>A drone bay: keeps drones and lets them out through its hatch.</summary>
+    Bay,
 }

@@ -225,6 +225,27 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   and `FitsClass`), and placing a tank any other way remembers its fuel. The block types, wire, saves and designs are
   unchanged. `--open edit-tank-fuel` shows it. Paste, mirror and loading a
   saved design keep their own refusals; the server does not check the kind. `EditorPanelTests` holds it.
+- **Orders and drones:** an order is a `TaskOrder` (`World/Orders.cs`): task, phase, issuer, actor, base hull and bay,
+  point (base frame, metres from its pivot), subject, until. `ServerHost.TickDrones` (`ServerDrones.cs`) is the one
+  executor: it runs a fixed table of 256 before the hull round, whoever issued the order, and turns each into the
+  drone's `HullOrder` (`MoveTo`), so clients predict drones with the same autopilot. A new task (fetch, scan, charge,
+  a mining laser) is an `OrderTask` value and one executor case, never a new path. Bays: `BlockType.Bay` (`BaySpec`,
+  tiers in `bayTiers`, like tractors; only Common in the palette), box only, at most 16 a design (`limits.maxBays`),
+  listed in `HullDesign.Bays`. The hatch is the block's `DesignBox.Facing`, chosen at placement by
+  `RackDeck.Hatch` (opposite the rack-deck rule) through `ShipEditor.GhostFacing`, and mirrored like a thrust
+  part's. `DroneBayRules` holds the shared geometry (hatch, `HatchClear` through the collision tree, launch, staging,
+  dock and hold points). The server keeps a page of `BayRecord`s per hull with bays (`HullInfo.BayPage`): stocked,
+  out, pending, rebuild tick. `CreateHull` attaches it (full), `ReplaceHull` calls `CarryBays` before destroying the
+  old hull; lost bay blocks empty their bay. Drones are hulls of the `workDrone` design (`HullInfo.WorkDrone`):
+  never piloted, refused by `TakeControl` and fleet orders, left out of the fleet list, replicated as ordinary hulls
+  and seen through `MaySeeHull`. Caps are `blocks/drones.json` (shared): per player, and `HullReserve` below the
+  255-hull ceiling. Wire: protocol 64, `DroneCommandMessage` (39, reliable, after admission, one command per
+  `commandSeconds`) and `BayMessage` (40, the flown hull's bays and the newest `DroneReply`, reliable on change).
+  Save: codec 17 keeps each bay's drones and rebuild; drones out are docked by the capture and never saved.
+  Interface: `LaunchDrones` (`.`), `RecallDrones` (`,`), the DRONES chip in the module strip (`DroneUi`,
+  `DroneTracker`). Tests: `DroneBayTests`, `BayModelTests`. Capture: `tools/prepare_drone_capture.py` then
+  `--open drones` (launch 3 at 1.5 s, recall at `--drone-recall`, default 14 s) and `--open edit-bay` (a bay's ghost
+  on a top face, hatch up); `make bench` runs `--open drones` on the prepared copy.
 - **Debug: add container (temporary, local games only):** `EditorRequestKind.AddContainer` asks for size/resource in
   one existing selected rack. `ShipEditor.RequestContainer` sends through `PlayerInputBridge`; `ServerHost.AddContainer`
   checks the edit token, owner, controlled hull, in-process transport, `AllowDebugFill`, rate and `HasRoom`, then uses

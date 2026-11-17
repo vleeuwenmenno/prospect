@@ -26,7 +26,7 @@ internal static partial class PropulsionModels
     /// <summary>True when a block of <paramref name="type"/> in <paramref name="shape"/> is drawn as a model: a thrust part's or a tank's.</summary>
     public static bool HasModel(BlockType type, BlockShape shape, PropulsionLook look) =>
         ModelOf(type, shape, look) is not null || TankOf(type, shape, look) is not null || (shape == BlockShape.Box && ScannerOf(type, look) is not null)
-        || (shape == BlockShape.Box && type.Cargo > 0 && look.Rack is not null);
+        || (shape == BlockShape.Box && type.Cargo > 0 && look.Rack is not null) || IsBay(type, shape, look);
 
     /// <summary>
     /// Adds the model of one part of <paramref name="type"/> filling <paramref name="box"/>, alone: no neighbours,
@@ -48,6 +48,8 @@ internal static partial class PropulsionModels
             BuildTank(look.Tanks!, paint, box, 0, 0, vertices, indices);
         else if (ScannerOf(type, look) is { } scanner)
             BuildScanner(scanner, type, box, vertices, indices);
+        else if (IsBay(type, BlockShape.Box, look))
+            BuildBay(look.Bay!, box, vertices, indices);
     }
 
     // A tank of a design: its frame is closed where a neighbour touches it, since the neighbour leaves out a face the

@@ -42,6 +42,8 @@ internal enum InputAction
     PulseLocator,
     ToggleGas,
     EditorSelectAll,
+    LaunchDrones,
+    RecallDrones,
     Count,
 }
 

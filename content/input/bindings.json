@@ -34,7 +34,9 @@
     "ScanAsteroid": ["Key:X"],
     "PulseLocator": ["Key:Y"],
     "ToggleGas": ["Key:F4"],
-    "EditorSelectAll": ["Key:A"]
+    "EditorSelectAll": ["Key:A"],
+    "LaunchDrones": ["Key:Period"],
+    "RecallDrones": ["Key:Comma"]
   },
   "axes": {
     "Strafe": [{ "negative": "Key:A", "positive": "Key:D" }, { "axis": "Pad:LeftX" }],

@@ -17,7 +17,7 @@ public sealed class WreckageTests
         for (var i = 0; i < boxes.Length; i++)
             boxes[i] = new(new GridSize(i, 0, 0), new GridSize(1, 1, 1), content.Blocks.Get(i == 0 ? "core" : i == 6 ? cargo ? "cargo" : "nitrogenTank" : "hull"));
         var design = HullDesign.Of(new BoxDesign("Wreck fixture", 1, boxes, content.Blocks.Limits, "test"), content.Rules);
-        return content.WithCatalogue([.. content.Designs, design], content.Designs.Length, content.DroneDesign, []);
+        return content.WithCatalogue([.. content.Designs, design], content.Designs.Length, content.DroneDesign, [], content.WorkDroneDesign);
     }
 
     internal static Action Tick(ServerHost server) => typeof(ServerHost).GetMethod("TickWreckage", BindingFlags.Instance | BindingFlags.NonPublic)!.CreateDelegate<Action>(server);

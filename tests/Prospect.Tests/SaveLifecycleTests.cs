@@ -1627,6 +1627,7 @@ public sealed class SaveLifecycleTests
             DesignCount = world.DesignCount,
             PodDesign = world.PodDesign,
             DroneDesign = world.DroneDesign,
+            WorkDroneDesign = world.WorkDroneDesign,
             StartingFleet = world.StartingFleet,
             OwnerCount = world.OwnerCount,
             CargoRules = world.CargoRules,
@@ -1646,6 +1647,10 @@ public sealed class SaveLifecycleTests
                 big.CargoCount += hull.CargoCount;
                 hull.TankStart = big.TankCount;
                 big.TankCount += hull.Tanks;
+                world.BayStocked.AsSpan(hull.BayStart, hull.Bays).CopyTo(big.BayStocked.AsSpan(big.BayCount));
+                world.BayRebuild.AsSpan(hull.BayStart, hull.Bays).CopyTo(big.BayRebuild.AsSpan(big.BayCount));
+                hull.BayStart = big.BayCount;
+                big.BayCount += hull.Bays;
                 hull.Entity += (ulong)copy * 1000;
                 hull.State.Position += new Vector3(copy % 32 * 900f, 0, copy / 32 * 900f);
                 hull.BlockStart = big.BlockCount;

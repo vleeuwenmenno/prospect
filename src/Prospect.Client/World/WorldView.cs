@@ -5093,7 +5093,7 @@ internal sealed partial class WorldView
         var size = Editor.PartSize;
         var half = new Vector3(size.X, size.Y, size.Z) * (0.5f * source.BlockSize);
         var draftBoxes = Editor.Draft is { } ghostDraft ? ghostDraft.Boxes : ReadOnlySpan<DesignBox>.Empty;
-        if (!_partModels.TryGet(type, Editor.PartShape, half, type.Cargo > 0 ? RackDeck.Choose(RackDeck.Touched(draftBoxes, -1, Editor.GhostAt, size)) : Editor.PartFacing, source.BlockSize, out var model))
+        if (!_partModels.TryGet(type, Editor.PartShape, half, type.Cargo > 0 ? RackDeck.Choose(RackDeck.Touched(draftBoxes, -1, Editor.GhostAt, size)) : Editor.GhostFacing, source.BlockSize, out var model))
             return;
         GhostPose(out var turn, out var shift);
         var at = Editor.GhostAt;

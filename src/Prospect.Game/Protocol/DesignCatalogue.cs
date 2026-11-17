@@ -19,7 +19,7 @@ internal sealed class DesignCatalogue
     internal byte[][] Bytes { get; private set; }
     internal byte[][] Hashes { get; private set; }
 
-    /// <summary>The count, pod, drone and starting fleet, then each design's size and hash. Never written to.</summary>
+    /// <summary>The count, pod, drone, work drone and starting fleet, then each design's size and hash. Never written to.</summary>
     internal byte[] Manifest { get; private set; }
 
     /// <summary>The canonical bytes of every design together, which the shared budget bounds.</summary>
@@ -33,10 +33,10 @@ internal sealed class DesignCatalogue
         Bytes = new byte[content.Designs.Length][];
         Hashes = new byte[Bytes.Length][];
         if (content.StartingFleet.Length > 255) throw new InvalidDataException("Fleet is too large.");
-        _head = new byte[4 + content.StartingFleet.Length];
+        _head = new byte[5 + content.StartingFleet.Length];
         var writer = new NetWriter(_head);
         writer.WriteByte((byte)Bytes.Length); writer.WriteByte((byte)content.PodDesign);
-        writer.WriteByte((byte)content.DroneDesign); writer.WriteByte((byte)content.StartingFleet.Length);
+        writer.WriteByte((byte)content.DroneDesign); writer.WriteByte((byte)content.WorkDroneDesign); writer.WriteByte((byte)content.StartingFleet.Length);
         foreach (var id in content.StartingFleet) writer.WriteByte((byte)id);
         for (var i = 0; i < Bytes.Length; i++)
         {

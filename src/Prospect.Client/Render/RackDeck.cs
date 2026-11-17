@@ -22,6 +22,13 @@ internal sealed class RackDeck
         return (BlockFacing)System.Numerics.BitOperations.TrailingZeroCount(touched);
     }
 
+    /// <summary>
+    /// The hatch face of a drone bay placed where its neighbours touch the faces in <paramref name="touched"/>: the face
+    /// opposite the one a rack would take as its deck, so the hatch looks away from what the bay is set against. It is
+    /// chosen once, when the bay is placed, and kept as the block's facing.
+    /// </summary>
+    public static BlockFacing Hatch(int touched) => Facings.Opposite(Choose(touched));
+
     /// <summary>The deck face of block <paramref name="block"/> of a built design.</summary>
     public static BlockFacing Of(HullDesign design, int block) => Choose(design.TouchedFaces[block]);
 

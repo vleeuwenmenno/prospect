@@ -192,6 +192,10 @@ internal sealed class OwnerLink(GameContent content, bool inProcess = true) : IT
     public EditorStateMessage Editor;
     public ModuleScanView ModuleScan;
 
+    /// <summary>The newest drone bay view the server sent, and how many it sent.</summary>
+    public BayView Bays;
+    public int BayMessages;
+
     /// <summary>True if two snapshots in a row ever named the same interval, or one went back.</summary>
     public bool SnapshotRepeated;
 
@@ -248,6 +252,14 @@ internal sealed class OwnerLink(GameContent content, bool inProcess = true) : IT
         Deliver(bytes);
     }
 
+    public void Drones(in DroneCommandMessage command)
+    {
+        var bytes = new byte[DroneCommandMessage.MaxWireSize];
+        var writer = new NetWriter(bytes);
+        command.Write(ref writer);
+        Deliver(bytes[..writer.Length]);
+    }
+
     public void Edit(EditorRequestKind kind, uint value)
     {
         var bytes = new byte[EditorRequestMessage.MaxWireSize];
@@ -300,6 +312,10 @@ internal sealed class OwnerLink(GameContent content, bool inProcess = true) : IT
                 break;
             case MessageId.RockDeltas:
                 RockMessages++;
+                break;
+            case MessageId.Bays when BayMessage.TryRead(ref reader, out var bays):
+                Bays = bays;
+                BayMessages++;
                 break;
             case MessageId.EditorState when EditorStateMessage.TryRead(ref reader, out var state):
                 Editor = state;
@@ -514,7 +530,7 @@ internal sealed class SaveRig : IDisposable
         Assert.InRange(mounts.Length, mining.Mounts.Length - 8, mining.Mounts.Length - 1);
         var bytes = DesignBytes.Encode(HullDesign.Of(new BoxDesign("Custom Hauler", mining.BlockSize, all, content.Blocks.Limits, "test", mining.Class, mining.Color, mounts), content.Rules));
         var custom = DesignBytes.Decode(bytes, System.Security.Cryptography.SHA256.HashData(bytes), content);
-        return content.WithCatalogue([.. content.Designs, custom], content.PodDesign, content.DroneDesign, [1, 2, content.Designs.Length, 1, 2]);
+        return content.WithCatalogue([.. content.Designs, custom], content.PodDesign, content.DroneDesign, [1, 2, content.Designs.Length, 1, 2], content.WorkDroneDesign);
     }
 
     /// <summary>A block of a design that is not a core, other than <paramref name="except"/>.</summary>
