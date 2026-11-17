@@ -16,15 +16,9 @@ public sealed class PowerFlowTests
     private static FlightParams Of(int design) => Content.Designs[design].Flight;
 
     /// <summary>The designs a player flies in the shipped game, by name.</summary>
-    public static TheoryData<string> Designs => new() { "pod", "mining", "survey", "drone" };
+    public static TheoryData<string> Designs => new() { "ship", "drone" };
 
-    private static FlightParams Shipped(string name) => Of(name switch
-    {
-        "pod" => Content.PodDesign,
-        "mining" => Content.StartingFleet[0],
-        "survey" => Content.StartingFleet[1],
-        _ => Content.DroneDesign,
-    });
+    private static FlightParams Shipped(string name) => Of(name == "ship" ? Content.PodDesign : Content.DroneDesign);
 
     [Fact]
     public void TheFlowSumsToTheBatterysChangeWhileTheBatteryCanTakeIt()
@@ -98,13 +92,21 @@ public sealed class PowerFlowTests
     [Fact]
     public void ThrustAndBoostAreInTheFlowAsSuppliedAndCutBackWhenThePowerRunsOut()
     {
+        // Fuelled parts draw by the largest throttle asked, ion parts by their own direction's: the ship's ion drive and
+        // ion thrusters face front, so they draw only when it brakes or backs, and then everything draws at once.
         var flight = Of(Content.PodDesign);
+        var fuelled = flight.ThrustPowerByFuel.Nitrogen + flight.ThrustPowerByFuel.Hydrazine + flight.ThrustPowerByFuel.Bipropellant;
+        Assert.True(flight.IonPower[BlockFacing.Back] > 0f && flight.IonPower[BlockFacing.Front] == 0f);
         var state = HullState.Spawn(Double3.Zero, flight);
         FlightModel.Step(ref state, new FlightInput { Forward = 127 }, flight, HullSim.Dt, out var flow);
+        Assert.Equal(fuelled, flow.Thrust, 4);
+
+        state = HullState.Spawn(Double3.Zero, flight);
+        FlightModel.Step(ref state, new FlightInput { Forward = -127 }, flight, HullSim.Dt, out flow);
         Assert.Equal(flight.ThrustPower, flow.Thrust, 4);
 
         state = HullState.Spawn(Double3.Zero, flight);
-        FlightModel.Step(ref state, new FlightInput { Forward = 127, Boost = true }, flight, HullSim.Dt, out flow);
+        FlightModel.Step(ref state, new FlightInput { Forward = -127, Boost = true }, flight, HullSim.Dt, out flow);
         Assert.Equal(flight.ThrustPower * flight.BoostPowerMultiplier, flow.Thrust, 4);
 
         // A flat battery leaves only what the generator makes beyond idle for thrust, and the flow says so.
@@ -251,23 +253,12 @@ public sealed class PowerFlowTests
         Assert.True(boost.Boosting);
     }
 
-    /// <summary>The shipped command pod with all three scan modules mounted on plating added to it, at one quality, as the module tests fit it.</summary>
+    /// <summary>The shipped ship, which carries every scan module, with the modules at one quality.</summary>
     private static GameContent PodWithModules(string quality)
     {
         using var copy = new ContentCopy();
-        var pod = JsonNode.Parse(copy.Read("ships/command_pod.json"))!;
-        var blocks = pod["blocks"]!.AsArray();
-        var ids = new[] { "gasScanner", "asteroidScanner", "asteroidLocator" };
-        var mounts = pod["mounts"]!.AsArray();
-        for (var i = 0; i < ids.Length; i++)
-        {
-            // A scanner is a face mount: plating to carry it, and the scanner on that block's top face.
-            blocks.Add(new JsonObject { ["at"] = new JsonArray(-3 - i, 0, 0), ["type"] = "hull" });
-            mounts.Add(new JsonObject { ["on"] = blocks.Count - 1, ["face"] = "up", ["at"] = new JsonArray(2, 2), ["type"] = ids[i] });
-        }
-        copy.Write("ships/command_pod.json", pod.ToJsonString());
         var catalogue = JsonNode.Parse(copy.Read("blocks/blocks.json"))!;
-        foreach (var id in ids) catalogue["blocks"]![id]!["module"]!["quality"] = quality;
+        foreach (var id in new[] { "gasScanner", "asteroidScanner", "asteroidLocator" }) catalogue["blocks"]![id]!["module"]!["quality"] = quality;
         copy.Write("blocks/blocks.json", catalogue.ToJsonString());
         return copy.Load();
     }

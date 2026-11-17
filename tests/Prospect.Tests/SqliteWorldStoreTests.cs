@@ -18,7 +18,7 @@ namespace Prospect.Tests;
 /// </summary>
 public sealed class SqliteWorldStoreTests : IDisposable
 {
-    private static readonly GameContent Shipped = GameContent.Load();
+    private static readonly GameContent Shipped = FleetContent.Value;
     private static readonly SaveCompatibility Compatible = SaveCompatibility.Of(Shipped);
 
     // Beside the test binary: a real file system of the machine, not a memory disk.

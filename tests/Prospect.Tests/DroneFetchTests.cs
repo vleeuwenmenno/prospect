@@ -12,7 +12,7 @@ namespace Prospect.Tests;
 /// <summary>Drones fetching free containers and handing them to the hull's tractor beam.</summary>
 public sealed class DroneFetchTests
 {
-    private static readonly GameContent Shipped = GameContent.Load();
+    private static readonly GameContent Shipped = FleetContent.Value;
 
     /// <summary>
     /// The shipped content with a pod that has a tractor beam on its core's top face, a one-cell rack in its view (it

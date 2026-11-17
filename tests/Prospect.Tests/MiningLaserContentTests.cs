@@ -308,7 +308,7 @@ public sealed class MiningLaserContentTests
         var design = MiningFixtures.Content.Pod;
         var mounts = design.Mounts.ToArray();
         Assert.Equal(Enumerable.Range(0, mounts.Length).Where(i => mounts[i].Type.Laser is not null), design.Lasers);
-        Assert.Empty(Shipped.Pod.Lasers);
+        Assert.Empty(FleetContent.Value.Pod.Lasers);
         Assert.Equal(3, new[] { MiningFixtures.PartA(design), MiningFixtures.PartB(design), MiningFixtures.PartC(design) }.Distinct().Count());
         Assert.Equal(1, mounts[design.Lasers[MiningFixtures.PartA(design)]].Group);
         Assert.Equal(2, mounts[design.Lasers[MiningFixtures.PartB(design)]].Group);

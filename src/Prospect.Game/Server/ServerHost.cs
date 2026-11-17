@@ -45,6 +45,14 @@ public sealed class ServerConfig
     public int ScriptedExhaustShield { get; init; }
 
     /// <summary>
+    /// Scripted captures only: this many more copies of the pod (0 to 4) are given to each new player beside the
+    /// starting fleet, for fixtures that need other owned hulls (fleet jumps, the exhaust-on-shield pair, the hurt
+    /// fleet, the target panel). The shipped content gives a player one ship and no fleet. Only in an unsaved private
+    /// in-process game; no wire command can enable it.
+    /// </summary>
+    public int ScriptedEscorts { get; init; }
+
+    /// <summary>
     /// Scripted captures only (<c>--hurt-fleet</c>): seconds into the run at which the player's other hulls are hurt, one
     /// with a half shield and hull, one with a broken shield and a low hull, so the target panel can be checked.
     /// The same rules as <see cref="ScriptedShieldBreakSeconds"/> apply, and no wire command can enable it.
@@ -535,6 +543,12 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 if (config.ScriptedExhaustShield is < 1 or > 2 || config.Visibility != ServerVisibility.Private || world is not null || transports.Any(t => !t.IsInProcess))
                     throw new InvalidDataException("Scripted exhaust needs an unsaved private in-process server.");
                 _scriptedExhaustShield = config.ScriptedExhaustShield;
+            }
+            if (config.ScriptedEscorts != 0)
+            {
+                if (config.ScriptedEscorts is < 0 or > 4 || config.Visibility != ServerVisibility.Private || world is not null || transports.Any(t => !t.IsInProcess))
+                    throw new InvalidDataException("Scripted escorts need an unsaved private in-process server and a count of 0 to 4.");
+                _scriptedEscorts = config.ScriptedEscorts;
             }
             if (config.ScriptedRockScrapeRadius is { } scrapeRadius)
             {
@@ -1917,7 +1931,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     /// <summary>
     /// Gives a new player their fleet. Each player's group arrives in its own lane beside the spawn point, the
     /// pod in front and the rest of the starting fleet fanned out behind it, so nothing starts inside anything
-    /// else that started there. A lane is not checked for hulls that have flown into it since.
+    /// else that started there. A lane is not checked for hulls that have flown into it since. The shipped content
+    /// has no starting fleet; a scripted capture's escorts (<see cref="ServerConfig.ScriptedEscorts"/>), copies of
+    /// the pod, take the places after it.
     /// </summary>
     private void SpawnFleet(Connection connection, int lane)
     {
@@ -1925,11 +1941,13 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         SetHull(connection, CreateHull(connection.PlayerId, (byte)_content.PodDesign, origin, fullTanks: true));
         _hulls.Info(connection.Hull.Index).Piloted = true;
         // A diagnostic scene places its own population; only then is the ordinary fleet left out.
-        for (var i = 0; i < (_visualBenchmark is null ? _content.StartingFleet.Length : 0); i++)
+        var count = _visualBenchmark is null ? _content.StartingFleet.Length + _scriptedEscorts : 0;
+        for (var i = 0; i < count; i++)
         {
             var side = (i / 2 + 1) * 45.0 * (i % 2 == 0 ? 1 : -1);
             var position = origin + new Double3(side, 0, 40.0 + 20.0 * (i / 2));
-            CreateHull(connection.PlayerId, (byte)_content.StartingFleet[i], position, fullTanks: true);
+            var design = i < _content.StartingFleet.Length ? _content.StartingFleet[i] : _content.PodDesign;
+            CreateHull(connection.PlayerId, (byte)design, position, fullTanks: true);
         }
     }
 

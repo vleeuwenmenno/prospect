@@ -167,7 +167,7 @@ public sealed class RockEditSessionTests
                 state.AngularVelocity = Vector3.Zero;
             }
 
-            Assert.True(n > 1, "a player starts with more than one hull");
+            Assert.True(n > 0, "the player has a hull to place");
         }
 
         /// <summary>A scrapable rock of at least this radius, the nearest to home that has one.</summary>

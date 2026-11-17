@@ -12,7 +12,7 @@ namespace Prospect.Tests;
 /// </summary>
 public sealed class TankModelTests
 {
-    private static readonly GameContent Content = GameContent.Load();
+    private static readonly GameContent Content = FleetContent.Value;
     private static readonly PropulsionLook Look = PropulsionLook.Load();
     private static readonly GridSize One = new(1, 1, 1);
 

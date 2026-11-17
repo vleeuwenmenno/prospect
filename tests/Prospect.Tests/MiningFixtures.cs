@@ -29,7 +29,7 @@ internal static class MiningFixtures
     /// </summary>
     public static GameContent Make(Action<JsonNode>? blocks = null, Action<ContentCopy>? other = null)
     {
-        using var copy = new ContentCopy();
+        using var copy = new ContentCopy(fleet: true);
         copy.Write("ships/command_pod.json", PodJson());
         if (blocks is not null)
         {
@@ -45,7 +45,7 @@ internal static class MiningFixtures
     /// <summary>The pod's design file with the lasers, as <see cref="Make"/> describes it.</summary>
     public static string PodJson()
     {
-        using var copy = new ContentCopy();
+        using var copy = new ContentCopy(fleet: true);
         var pod = JsonNode.Parse(copy.Read("ships/command_pod.json"))!;
         pod["version"] = 7;
         var blocks = pod["blocks"]!.AsArray();

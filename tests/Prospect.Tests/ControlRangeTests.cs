@@ -34,7 +34,7 @@ public sealed class ControlRangeTests : IDisposable
 
     public ControlRangeTests()
     {
-        var content = GameContent.Load();
+        var content = FleetContent.Value;
         _client = new ClientSession(_link.Client, content, "Pilot");
         _server = new ServerHost(new ServerConfig { MaxPlayers = 1 }, content, [_link.Server]);
         var actions = ActionMap.Load(Path.Combine(AppContext.BaseDirectory, "content", "input", "bindings.json"));

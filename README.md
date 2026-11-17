@@ -2,7 +2,7 @@
 
 # PROSPECT
 
-A multiplayer space sandbox: you command from a pod, mine asteroids, build hulls and run a fleet across star
+A multiplayer space sandbox: you start in one mining ship, mine asteroids, build hulls and run a fleet across star
 systems. C# on .NET 10, built on the [BRUTAL](https://github.com/ahwootech/BRUTAL) framework (Vulkan, GLFW,
 Dear ImGui, RakNet). Windows x64, Linux x64 and Apple Silicon macOS.
 
@@ -357,12 +357,12 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   their faces. Mass, moments of
   inertia, acceleration in each direction, turn rates, top speed, hull and shield points, tank room and the power
   budget are all computed from them and shown on the ship's data sheet.
-- **Flight.** A command pod with inertial flight: thrust on all three axes, roll, dampeners, and a boost that heats
-  up and locks out. Each direction is pushed by the parts that face away from it: the engine faces back and pushes
-  forward, and four cold gas thrusters are mounted facing each other way, so the pod brakes and strafes at half
-  its forward acceleration. Thrust burns fuel, boost four and a half times as much, and the dampeners burn it while they brake;
+- **Flight.** The Prospector flies with inertia: thrust on all three axes, roll, dampeners, and a boost that heats
+  up and locks out. Each direction is pushed by the parts that face away from it: two engines and four hot thrusters
+  face back and push forward; cold gas thrusters push every other way, and the ion drive in the nose and two ion
+  thrusters brake on power alone. It accelerates at about 12.1 m/s², brakes at 9.3 and strafes at 6.5. Thrust burns fuel, boost four and a half times as much, and the dampeners burn it while they brake;
   with a tank dry its parts give nothing, and with every tank dry the hull drifts and can still turn. The shipped
-  ships carry about 83 minutes of full engine thrust. The drone is electric: its ion drive holds full forward thrust on
+  ship carries about 83 minutes of full engine thrust (34 boosting whenever the drive allows). The drone is electric: its ion drive holds full forward thrust on
   its two generators, while pushing sideways too, or the shield recharging, runs its battery down in tens of seconds and
   boost empties it in about three. Once moving, the pilot view marks the direction of travel
   (prograde: a circle with three ticks) and its opposite (retrograde: a circle with a cross), where to point the
@@ -474,9 +474,20 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   a richer sector has ore in more of its rocks and at a better grade. An ore-bearing asteroid has one main ore and
   up to two others mixed in (nickel or titanium in iron, silver or gold in copper), only ones its sector has, and
   at least 30 % of every asteroid is rock. Nothing can be mined yet.
-- **Fleet.** Each player starts with the command pod (hyperspace drive), a mining vessel (wormhole) and a survey vessel (rift). Hulls nobody is flying are flown by
-  the server under their standing orders.
-- **Command view.** One key pulls the camera back from the pod into a free orbiting view over the same space.
+- **The starting ship.** Each player starts in one ship, the Prospector (`content/ships/prospector.json`), and no
+  other hull. It carries every part a ship can take: 41 blocks (boxes and wedges) and 80 mounted parts, 185.1 t,
+  7 x 3 x 10 m. Rated 209 m/s (417 boosting), turning 69 to 121 degrees a second. Two generators make 12 MW against
+  6.8 MW idle (twelve cells of gyros, six scanners), four batteries hold 240 MJ, one shield emitter gives 1,500 points.
+  Fuel: 2,000 kg bipropellant (two engines), 450 kg nitrogen (52 cold gas thrusters), 300 kg hydrazine (four hot
+  thrusters); the ion drive and ion thrusters need none. Two 2 x 2 x 2 cargo racks (128 units, up to XXL containers),
+  a tractor beam over each, a drone bay (four drones) opening upward, the passive sensor and sector scanner, two of
+  each scan module, a hyperspace drive and two mining lasers in the nose, either side of the ion drive, facing ahead
+  in action group 1 (key `1`). Firing both draws 6 MW: at rest with the shield full that is 0.8 MW more than the
+  generators spare, about five minutes on a full battery. A ship takes FTL drives of one kind only, so it has no wormhole generator
+  or rift cutter; those can still be built.
+- **Fleet.** More hulls come from the ship editor (New ship). Hulls nobody is flying are flown by the server under
+  their standing orders.
+- **Command view.** One key pulls the camera back from the ship into a free orbiting view over the same space.
   Click or drag a box to select hulls, right-click a point for a menu: **Move here** (in formation), and **Plot jump**
   (the ship you fly) or **Jump here** (ships nobody flies) with the range and blind risk shown; a fleet list on the right
   selects and focuses too.

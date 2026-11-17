@@ -309,21 +309,28 @@ public sealed class EditorPanelTests
             return warnings[..DesignWarnings.Of(flight, Tuning, warnings)];
         }
 
-        // The shipped pod flies, turns and powers itself.
-        Assert.Empty(Of(Content.Pod.Flight));
+        // The shipped ship flies, turns and powers itself. Its fuelled parts all firing at once fit what the generators
+        // spare; only braking at full with its ion drive and ion thrusters too asks for more, which the editor says.
+        var ship = Content.Pod.Flight;
+        Assert.Equal([DesignWarning.ThrustOverload], Of(ship));
+        Assert.True(ship.ThrustPowerByFuel.Nitrogen + ship.ThrustPowerByFuel.Hydrazine + ship.ThrustPowerByFuel.Bipropellant <= ship.PowerGenerated - ship.IdlePower);
 
         // A core alone: no power, no movement, no turning; nothing about shields it does not have.
         var lone = new FlightParams { IdlePower = 0.2f, MaxSpeed = 0f };
         Assert.Equal([DesignWarning.NoPower, DesignWarning.NoForward, DesignWarning.NoDirection, DesignWarning.NoTurn], Of(lone));
 
-        // Every shipped design can be pushed all six ways and feeds every part it has. The drone is the one that may
-        // ask for more power than it makes: its ion parts hold full forward thrust on the generator, but strafing,
-        // climbing and pushing forward at once runs the battery down, and the editor says so.
+        // Every shipped design can be pushed all six ways and feeds every part it has. The drone and the ship are the
+        // ones that may ask for more power than they make, both for their ion parts: the drone's hold full forward
+        // thrust on the generator, but strafing, climbing and pushing forward at once runs the battery down; the
+        // ship's brake. The editor says so.
         foreach (var design in Content.Designs)
-            Assert.Equal(design.Name == "Drone" ? [DesignWarning.ThrustOverload] : [], Of(design.Flight));
+            Assert.Equal(design.Name is "Drone" or "Prospector" ? [DesignWarning.ThrustOverload] : [], Of(design.Flight));
 
-        // The pod without its thrusters facing front cannot brake; without its nitrogen tank no thruster fires.
-        var draft = BuildDraft.FromBlueprint(Content.Pod, Content);
+        // The test fleet's small pod has no ion part and no warning. Without its thrusters facing front it cannot brake;
+        // without its nitrogen tank no thruster fires.
+        var pod = FleetContent.Value;
+        Assert.Empty(Of(pod.Pod.Flight));
+        var draft = BuildDraft.FromBlueprint(pod.Pod, pod);
         var brakes = Enumerable.Range(0, draft.Mounts.Length).Where(i => draft.Mounts[i].Face == BlockFacing.Front).ToArray();
         Assert.Equal(4, brakes.Length);
         Assert.Equal(DraftEdit.Done, draft.Delete(default, brakes));
@@ -338,20 +345,20 @@ public sealed class EditorPanelTests
         Assert.Equal(FuelKind.Nitrogen, HullDesign.MissingTank(dry));
 
         // A shield without a battery never recharges under the rules; with too small a generator it drains it.
-        var flight = Content.Pod.Flight;
+        var flight = pod.Pod.Flight;
         flight.EnergyStorage = 0f;
         Assert.Contains(DesignWarning.NoBattery, Of(flight));
-        flight = Content.Pod.Flight;
+        flight = pod.Pod.Flight;
         flight.ShieldPower = flight.PowerGenerated - flight.IdlePower + 1f;
         Assert.Contains(DesignWarning.ShieldOverload, Of(flight));
-        flight = Content.Pod.Flight;
+        flight = pod.Pod.Flight;
         flight.ThrustPower = flight.PowerGenerated;
         Assert.Contains(DesignWarning.ThrustOverload, Of(flight));
         flight.IdlePower = flight.PowerGenerated + 1f;
         Assert.Contains(DesignWarning.IdleOverload, Of(flight));
 
         // Below the content's thresholds: slow, but able to move.
-        flight = Content.Pod.Flight;
+        flight = pod.Pod.Flight;
         for (var fuel = FuelKind.Nitrogen; fuel <= FuelKind.Bipropellant; fuel++)
             flight.Thrust[ThrustTable.Index(BlockFacing.Front, fuel)] = fuel == FuelKind.Bipropellant ? Tuning.LowForwardAcceleration * 0.5f : 0f;
         flight.MaxSpeed = Tuning.LowTopSpeed * 0.5f;

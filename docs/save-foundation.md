@@ -228,6 +228,8 @@ A save is refused on load unless it leaves that drone room:
   total, dents.
 - Started over: contact ticks, order counters, control epochs, rounds, everything of a connection.
 - The catalogue and its roles (pod, drone, starting fleet) come from the save, in order. The files are not asked.
+  So a world saved with the old command pod, mining vessel and survey vessel still loads and still gives new
+  players those three; ship files are not in the save identity, so changing them never refuses a world.
 - Hulls keep the order they are stepped in. The gaps between slots are not kept.
 
 Letting an owner in again is not a change of control: the hull keeps its order, so a jump goes on.

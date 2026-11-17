@@ -12,11 +12,12 @@ namespace Prospect.Tests;
 public sealed class DroneBayTests
 {
     private const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
-    private static readonly GameContent Shipped = GameContent.Load();
+    private static readonly GameContent Shipped = FleetContent.Value;
 
     /// <summary>
-    /// The shipped content with the pod given drone bays: one under the sensor whose hatch faces down by default,
-    /// more with <paramref name="bays"/>, and with <paramref name="blocked"/> a plate of hull right below that hatch.
+    /// The test fleet's content (<see cref="FleetContent"/>) with its small pod given drone bays: one under the sensor
+    /// whose hatch faces down by default, more with <paramref name="bays"/>, and with <paramref name="blocked"/> a plate
+    /// of hull right below that hatch.
     /// </summary>
     internal static GameContent Content(int bays = 1, bool blocked = false)
     {

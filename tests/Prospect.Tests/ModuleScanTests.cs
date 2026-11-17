@@ -52,7 +52,7 @@ public sealed class ModuleScanTests
         internal long Tick;
         internal Rig(bool equipped = true, string quality = "Common")
         {
-            using var copy = new ContentCopy();
+            using var copy = new ContentCopy(fleet: true);
             if (equipped)
             {
                 var pod = JsonNode.Parse(copy.Read("ships/command_pod.json"))!;
@@ -397,7 +397,7 @@ public sealed class ModuleScanTests
     [Fact]
     public void SharedPowerAndDisclosureRulesAllocateNothing()
     {
-        var equipment = GameContent.Load().Blocks.Get("gasScanner").Module;
+        var equipment = FleetContent.Value.Blocks.Get("gasScanner").Module;
         var selected = ModuleEquipment.Of(1, equipment);
         var record = new ModuleObservation { Mix1 = -1, Mix2 = -1, Family = ModuleFamily.GasScanner };
         record.Gas.Shares[0] = .92f; record.Gas.Shares[1] = .08f;

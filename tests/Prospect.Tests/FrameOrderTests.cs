@@ -192,7 +192,7 @@ public sealed class FrameOrderTests : IDisposable
         ImGui.GetStyle().WindowPadding = float2.Zero;
         ImGui.GetStyle().ItemSpacing = float2.Zero;
 
-        var content = GameContent.Load();
+        var content = FleetContent.Value;
         _client = new ClientSession(_link.Client, content, "Pilot");
         _server = new ServerHost(new ServerConfig { MaxPlayers = 1 }, content, [_link.Server]);
         for (var i = 0; i < 10; i++)
@@ -240,7 +240,7 @@ public sealed class FrameOrderTests : IDisposable
         _ui.NewFrame();
         try
         {
-            // The shipped Prospector with hullStrength=4 has 23,120 HP. Use the game's font loader and active
+            // The test fleet's mining vessel with hullStrength=4 has 23,120 HP. Use the game's font loader and active
             // scale: measuring the font outside ImGui gives different advances and can overstate its width.
             var layout = FlightConsole.Layout(new float2(width, height), scale);
             var available = layout.Compact
@@ -290,7 +290,7 @@ public sealed class FrameOrderTests : IDisposable
 
             // Aligned: the key, what it does, and what the drive needs once started, for the largest live drive.
             var energy = 0f;
-            foreach (var design in GameContent.Load().Designs)
+            foreach (var design in FleetContent.Value.Designs)
                 energy = Math.Max(energy, design.Flight.FtlEnergy);
             var cost = Kit.Measure(mono, Theme.FontCaption, Encoding.UTF8.GetBytes($"12 S + {energy:0} MJ")).X;
             Assert.InRange(Chip("SPACE"u8) + Px(Theme.Space2) + Kit.Measure(sans, Theme.FontCaption, "START JUMP"u8).X + Px(Theme.Space3) + cost, 1f, room);
@@ -3360,7 +3360,7 @@ public sealed class FrameOrderTests : IDisposable
         try
         {
             File.WriteAllText(path, """{"actions":{"SwitchHull":["Key:G"]},"axes":{}}""");
-            var rebound = new WorldView(_devices, ActionMap.Load(path), new ClientSettings(), _jobs, null!, GameContent.Load().Designs);
+            var rebound = new WorldView(_devices, ActionMap.Load(path), new ClientSettings(), _jobs, null!, FleetContent.Value.Designs);
             _unitCount = MapUnitList.Collect(_snapshot, _units);
             var other = _units.AsSpan(0, _unitCount).ToArray().First(id => id != _world.Own.Id);
             Bridge.ConsumeControlRequest(out _);
@@ -8532,7 +8532,7 @@ public sealed class FrameOrderTests : IDisposable
             var inner = layout.Parts.Width - Px(EditorLayout.Pad) * 2 - rail;
             var card = inner - ImGui.GetStyle().ScrollbarSize - Px(26) - Px(6);
             if (width / scale >= 640f)
-                foreach (var type in GameContent.Load().Blocks.Types)
+                foreach (var type in FleetContent.Value.Blocks.Types)
                     Assert.InRange(Kit.Measure(shipped.SansMedium, Theme.FontSmall, Encoding.UTF8.GetBytes(type.Name)).X, 1f, card);
 
             // The rail's buttons all fit its height, one for each category at most, and are never taller than their size.

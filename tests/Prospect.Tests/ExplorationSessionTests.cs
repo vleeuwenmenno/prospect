@@ -12,7 +12,7 @@ namespace Prospect.Tests;
 
 public sealed class ExplorationSessionTests
 {
-    private static readonly GameContent Content = GameContent.Load();
+    private static readonly GameContent Content = FleetContent.Value;
 
     private sealed class Wire(ITransport inner) : ITransport, ITransportHandler
     {

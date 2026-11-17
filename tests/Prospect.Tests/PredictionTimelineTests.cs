@@ -69,7 +69,7 @@ public sealed class PredictionTimelineTests
     [InlineData(true, true)]
     public void Replay(bool batch, bool oldBalance)
     {
-        using var files = new ContentCopy();
+        using var files = new ContentCopy(fleet: true);
         if (oldBalance)
         {
             files.Write("blocks/blocks.json", File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixtures", "prediction-old-blocks.json")));

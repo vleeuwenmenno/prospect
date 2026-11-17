@@ -703,7 +703,7 @@ This status is an observation at open, not hosting authorization. Saved multipla
 The server owns scans and charts and filters dynamic live state by personal sensor coverage.
 `rules/exploration.json` is shared content and participates in content identity.
 The provisional values are in `roadmap/exploration.md`; extra equipment gives redundancy only.
-The pod has separate sensor and charting blocks; both starting fleet ships have a sensor.
+The starting ship has separate sensor and charting blocks.
 Equipment has the plating mass and hit points it replaces, preserving stock flight figures and geometry.
 
 ### Simulation and save contract

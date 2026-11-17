@@ -20,7 +20,7 @@ namespace Prospect.Tests;
 public sealed class SaveLifecycleTests
 {
     private const long Far = 5_000_000_000;
-    private static readonly GameContent Shipped = GameContent.Load();
+    private static readonly GameContent Shipped = FleetContent.Value;
     private static readonly GameContent Custom = SaveRig.WithCustomDesign(Shipped);
 
     /// <summary>A world with one of everything a save must keep, as bytes: made once, loaded by many tests.</summary>
@@ -53,7 +53,7 @@ public sealed class SaveLifecycleTests
             Assert.True(rig.Close().Clean);
         }
         var saved = folder.Bytes!.ToArray();
-        using (var copy = new ContentCopy())
+        using (var copy = new ContentCopy(fleet: true))
         {
             var json = System.Text.Json.Nodes.JsonNode.Parse(copy.Read("blocks/cargo.json"))!;
             json["sizes"]![3]!["shape"] = System.Text.Json.Nodes.JsonNode.Parse("[8,1,1]"u8);
@@ -629,6 +629,34 @@ public sealed class SaveLifecycleTests
         Assert.Equal(JumpPhase.None, hulls.State(5).Jump);
         Assert.True(hulls.State(4).Jump is JumpPhase.Arrive or JumpPhase.None);
         Assert.True(hulls.State(3).Shield > shield);
+    }
+
+    [Fact]
+    public void AWorldSavedWithTheOldFleetLoadsUnderTheShippedContentAndKeepsItsShips()
+    {
+        // Ship files are not in the save identity: a world made when a player started with the command pod and two
+        // vessels opens under content that ships one other ship, and its catalogue, hulls and roles are the save's.
+        var folder = SaveRig.NewWorld(Shipped);
+        using (var rig = new SaveRig(folder, Shipped))
+        {
+            rig.Join();
+            Assert.Equal(3, rig.Hulls.Count);
+            Assert.True(rig.Close().Clean);
+        }
+
+        var current = GameContent.Load();
+        Assert.Equal(Shipped.SaveIdentity, current.SaveIdentity);
+        Assert.NotEqual(Shipped.Pod.Name, current.Pod.Name);
+        using (var rig = new SaveRig(folder, current))
+        {
+            rig.Join();
+            Assert.Equal(3, rig.Hulls.Count);
+            var content = (GameContent)typeof(ServerHost).GetField("_content", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(rig.Server)!;
+            Assert.Equal("Command Pod", content.Pod.Name);
+            Assert.Equal(2, content.StartingFleet.Length);
+            Assert.Equal("Command Pod", content.Designs[rig.Hulls.Info(0).Design].Name);
+            Assert.True(rig.Close().Clean);
+        }
     }
 
     [Fact]

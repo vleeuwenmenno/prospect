@@ -1,7 +1,7 @@
 {
-  "designs": ["command_pod", "mining_vessel", "survey_vessel", "drone", "work_drone"],
-  "pod": "command_pod",
+  "designs": ["prospector", "drone", "work_drone"],
+  "pod": "prospector",
   "drone": "drone",
   "workDrone": "work_drone",
-  "startingFleet": ["mining_vessel", "survey_vessel"]
+  "startingFleet": []
 }

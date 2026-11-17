@@ -5,7 +5,7 @@ namespace Prospect.Tests;
 
 public sealed class BuildDraftTests
 {
-    private static readonly GameContent Content = GameContent.Load();
+    private static readonly GameContent Content = FleetContent.Value;
     private static readonly GridSize One = new(1, 1, 1);
 
     private static BuildDraft Draft(params DesignBox[] boxes)
@@ -252,7 +252,7 @@ public sealed class BuildDraftTests
         Assert.Equal(whole.Mounts.ToArray().Count(mount => mount.Parent != 1), left.Mounts.Length);
 
         // The content's count is the most a draft takes: with room for forty, a vessel that has forty takes no more.
-        using var files = new ContentCopy();
+        using var files = new ContentCopy(fleet: true);
         files.Replace("blocks/blocks.json", "\"maxMounts\": 1024", "\"maxMounts\": 40");
         var tight = files.Load();
         var full = BuildDraft.FromBlueprint(tight.Designs[1], tight);

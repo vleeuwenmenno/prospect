@@ -315,9 +315,9 @@ Deferred: drone launcher, tractor filter.
 ### Step 3 evidence
 
 - Every implementation step passed foreground `timeout 900 make check` before committing.
-- `tools/prepare_tractor_capture.py` equips a copy of the built client, leaving shipped designs unchanged.
+- The shipped ship carries racks and tractor beams (the capture copy `tools/prepare_tractor_capture.py` is gone).
   `--open cargo --jettison 6` exercises the real jettison request and automatic pickup;
-  `--open edit-cargo` shows one reachable rack and one rack blocked by the hull.
+  `--open edit-cargo` shows the reach lines to both racks.
 - Final full check: 2,597 game tests and 354 listing tests passed.
 - `make bench`: normal 862 fps, resize 770 fps; editor cargo 1,264 fps, menu 1,266 fps,
   dump 1,268 fps and mirror 1,049 fps. All six runs measured zero managed bytes on all threads.

@@ -21,7 +21,7 @@ namespace Prospect.Tests;
 public sealed class HullVisualsTests
 {
     private const float Dt = 1f / 60f;
-    private static readonly GameContent Content = GameContent.Load();
+    private static readonly GameContent Content = FleetContent.Value;
 
     private static int DesignWith(FtlKind drive)
     {

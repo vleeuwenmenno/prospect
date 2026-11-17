@@ -15,7 +15,7 @@ namespace Prospect.Tests;
 /// </summary>
 public sealed class PropulsionVisualTests
 {
-    private static readonly GameContent Content = GameContent.Load();
+    private static readonly GameContent Content = FleetContent.Value;
     private static readonly PropulsionLook Look = PropulsionLook.Load();
     private static readonly GridSize One = new(1, 1, 1);
     private static readonly BlockFacing[] Directions = [BlockFacing.Right, BlockFacing.Left, BlockFacing.Up, BlockFacing.Down, BlockFacing.Back, BlockFacing.Front];

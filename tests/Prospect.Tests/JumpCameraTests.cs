@@ -36,7 +36,7 @@ public sealed class JumpCameraTests : IDisposable
     public JumpCameraTests()
     {
         // These visual fixtures exercise long transit independently of production drive range tuning.
-        using var files = new ContentCopy();
+        using var files = new ContentCopy(fleet: true);
         files.Write("blocks/blocks.json", files.Read("blocks/blocks.json").Replace("\"ftlMaxSectors\": 10", "\"ftlMaxSectors\": 25"));
         var content = files.Load();
         _client = new ClientSession(_link.Client, content, "Pilot");

@@ -15,7 +15,7 @@ namespace Prospect.Tests;
 public sealed class ModuleInterfaceTests
 {
     private static readonly string Content = Path.Combine(AppContext.BaseDirectory, "content");
-    private static readonly GameContent Game = GameContent.Load();
+    private static readonly GameContent Game = FleetContent.Value;
 
     private static ModuleLook Look() => ModuleLook.Load(Path.Combine(Content, "visuals", "modules.json"));
 

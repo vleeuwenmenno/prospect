@@ -13,7 +13,7 @@ namespace Prospect.Tests;
 /// </summary>
 public sealed class ModuleScanAllocationTests
 {
-    private static readonly GameContent Game = GameContent.Load();
+    private static readonly GameContent Game = FleetContent.Value;
 
     private static GasCloudPlacement FindCloud(Galaxy galaxy)
     {
