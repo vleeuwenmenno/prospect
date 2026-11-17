@@ -48,6 +48,8 @@ Product direction from the brainstorm on 2026-11-16. Nothing here is built yet.
 - A lost drone is gone; the bay rebuilds one slowly. Buying and building comes later.
 - The bay has tiers, like sensors and tractors: capacity, launch rate (how many at once), rebuild speed.
   Figures are content.
+- The bay is a box block with one hatch face, chosen like a rack's deck face. Drones leave and dock through
+  the hatch, which must face open space.
 
 ### Rock interiors: why crack
 
@@ -121,8 +123,8 @@ Three tracks. A track's steps run in order; the tracks run side by side, each in
 
 ## Open
 
-- What the drone bay looks like and how drones leave and come back (a hatch face?).
-- The exact generation of crust, veins and pockets, and their figures.
+- The drone bay's model (hatch, doors, lights).
+- The figures for crust, veins and pockets. I1 starts with first guesses in content; the player tunes them from captures.
 - The heat game's figures: heat rate, cooling, the window, what overheating does.
 - The Ore Cargo window's layout.
 - Automated mining by NPCs and captains: out of scope now; only the order model above is designed for it.
