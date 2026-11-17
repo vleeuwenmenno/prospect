@@ -1717,7 +1717,7 @@ internal sealed partial class ScreenHost
             editor.Redo();
         ImGui.SameLine(0, gap);
         if (EditorButton("##cancel"u8, "Cancel"u8, new float2(Kit.Px(widths[2]), height), true))
-            editor.Cancel(bridge);
+            editor.Leave(bridge);
         ImGui.SameLine(0, gap);
         if (EditorButton("##apply"u8, editor.Stage == EditorStage.Applying ? "Applying"u8 : editor.ConfirmDump ? "Dump & apply?"u8 : "Apply"u8, new float2(Kit.Px(widths[3]), height), editor.CanApply, true))
             editor.Apply(bridge);

@@ -5628,6 +5628,112 @@ public sealed class FrameOrderTests : IDisposable
         Assert.True(editor.FuelDump[editor.Source!.Tanks[0].Kind] > 0);
     }
 
+    // One edit that leaves the draft different from the blueprint: the first tank deleted.
+    private void MakeAnEdit()
+    {
+        var editor = _world.Editor;
+        var tank = editor.Source!.Tanks[0].Block;
+        editor.StopPlacing();
+        editor.Select(tank, false);
+        editor.DeleteSelected();
+        Assert.True(editor.Dirty);
+    }
+
+    [Fact]
+    public void TheEditorKeyWithChangesAsksBeforeDiscardingAndKeepEditingKeepsTheDraft()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        MakeAnEdit();
+        var version = editor.Draft!.Version;
+        var blocks = editor.Draft.Boxes.Length;
+
+        EditorFrame(() => Key(GlfwKey.B, true));
+        EditorFrame(() => Key(GlfwKey.B, false));
+        Assert.True(editor.ConfirmDiscard);
+        Assert.Equal(EditorStage.Editing, editor.Stage);
+        Assert.Equal(version, editor.Draft!.Version);
+
+        // Enter keeps editing; so do Escape and the editor key again, and each time the draft is whole.
+        foreach (var key in new[] { GlfwKey.Enter, GlfwKey.Escape, GlfwKey.B })
+        {
+            EditorFrame(() => Key(key, true));
+            EditorFrame(() => Key(key, false));
+            Assert.False(editor.ConfirmDiscard);
+            Assert.Equal(EditorStage.Editing, editor.Stage);
+            Assert.Equal(blocks, editor.Draft!.Boxes.Length);
+            Assert.Equal(version, editor.Draft.Version);
+            EditorFrame(() => Key(GlfwKey.B, true));
+            EditorFrame(() => Key(GlfwKey.B, false));
+            Assert.True(editor.ConfirmDiscard);
+        }
+
+        // Nothing else is read while it is up: the key to flight and the edit's own keys do nothing.
+        EditorFrame(() => Key(GlfwKey.W, true));
+        Assert.True(editor.ConfirmDiscard);
+        Assert.Equal(0f, Sent().Forward);
+        EditorFrame(() => Key(GlfwKey.W, false));
+
+        // Discard is what the question's button does: the edit ends and the draft goes.
+        editor.Cancel(Bridge);
+        Assert.False(editor.ConfirmDiscard);
+        Assert.Equal(EditorStage.Closed, editor.Stage);
+        Assert.Null(editor.Draft);
+    }
+
+    [Fact]
+    public void EscapeAndTheCancelButtonWithChangesAskAndWithoutChangesLeaveAtOnce()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        MakeAnEdit();
+        EditorFrame(() => Key(GlfwKey.Escape, true));
+        EditorFrame(() => Key(GlfwKey.Escape, false));
+        Assert.True(editor.ConfirmDiscard);
+        Assert.Equal(EditorStage.Editing, editor.Stage);
+        editor.KeepEditing();
+
+        // The Cancel button is the same call.
+        Assert.False(editor.Leave(Bridge));
+        Assert.True(editor.ConfirmDiscard);
+        editor.KeepEditing();
+
+        // An edit taken back is no change: the way out is open again, with no question.
+        editor.Undo();
+        Assert.False(editor.Dirty);
+        EditorFrame(() => Key(GlfwKey.Escape, true));
+        EditorFrame(() => Key(GlfwKey.Escape, false));
+        Assert.False(editor.ConfirmDiscard);
+        Assert.Equal(EditorStage.Closed, editor.Stage);
+    }
+
+    [Fact]
+    public void TheEditorKeyWithNoChangesClosesAtOnceWithNoQuestion()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        Assert.False(editor.Dirty);
+        EditorFrame(() => Key(GlfwKey.B, true));
+        EditorFrame(() => Key(GlfwKey.B, false));
+        Assert.False(editor.ConfirmDiscard);
+        Assert.Equal(EditorStage.Closed, editor.Stage);
+        Assert.Null(editor.Draft);
+    }
+
+    [Fact]
+    public void AnEditTheServerEndsTakesTheQuestionAwayAndIsNotAskedAbout()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        MakeAnEdit();
+        Assert.True(editor.AskDiscard());
+        Assert.True(editor.ConfirmDiscard);
+        // The server ends the edit: the player's cancel (the bridge's) arrives as the edit closing under the question.
+        Bridge.CancelEdit();
+        Assert.True(PlayUntil(() => editor.Stage == EditorStage.Closed));
+        Assert.False(editor.ConfirmDiscard);
+    }
+
     [Fact]
     public void FuelLossNeedsTwoAppliesAndEscapeOrAnEditResetsConfirmation()
     {

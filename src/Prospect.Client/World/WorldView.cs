@@ -3971,7 +3971,14 @@ internal sealed partial class WorldView
     private bool _captureEditDone;
 
     /// <summary>Plays the context menu (<paramref name="resize"/> false) or a face-drag resize once the editor is open, for a capture.</summary>
-    internal void ScriptEditForCapture(bool resize, bool dump = false) => _captureEditKind = dump ? 3 : resize ? 2 : 1;
+    internal void ScriptEditForCapture(bool resize, bool dump = false, bool leave = false)
+    {
+        _captureEditKind = dump ? 3 : resize ? 2 : 1;
+        _captureEditLeave = leave;
+    }
+
+    // --open edit-discard: after the resize, the editor key is pressed: the editor's own way out, which asks.
+    private bool _captureEditLeave;
 
     private void RunEditCapture(float dt, PlayerInputBridge bridge)
     {
@@ -4042,6 +4049,11 @@ internal sealed partial class WorldView
             Editor.SizeBlockFace(_captureEditSide, EditorGeometry.Of(boxes[_captureEditBlock].Size, _captureEditSide >> 1) + 1);
             _sizeVersion = draft.Version;
             _captureEditDone = true;
+            if (_captureEditLeave)
+            {
+                Editor.EndBlockResize();
+                Editor.Leave(bridge);
+            }
         }
     }
     private float _captureBoxClock = -1f;

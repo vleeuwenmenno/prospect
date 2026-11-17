@@ -525,6 +525,18 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `EditorSelectAll` action; a double click is `WorldView.ClickEditor`. Selection is not an undo step. Check with
   `--open edit-box-select` (rectangle from 1 s to 2.5 s into the edit, selection after; capture at 2 s and 4 s)
   and `--open edit-select-all`; `FrameOrderTests` and `BoxSelectTests` hold the rules.
+- **Leaving the editor with changes:** every way the player ends an edit goes through `ShipEditor.Leave` (the editor
+  key and Escape in `ShipEditor.HandleKeys`, the Cancel button) or `AskDiscard` (the in-game menu's Leave and Quit,
+  `ScreenHost.AskDiscardBefore`): one rule, `ShipEditor.WouldLoseChanges` (`CanInspect && Dirty`; `Dirty` is the undo
+  depth since the blueprint, so an edit undone is no change). With changes they set `ShipEditor.ConfirmDiscard` and do
+  nothing else; without, `Cancel` runs at once. The question is a surface (`WorldInputEnabled` is false, the pointer is
+  shown): `DiscardPanel` (font-free helper, Discard and Keep editing) in the window of `Screens.Discard.cs`. Its keys are
+  read first in `ShipEditor.HandleKeys`, text field or not: Enter, Escape and the editor key all call `KeepEditing`.
+  Discard is `ShipEditor.Cancel` and then the menu's pending Leave or Quit (`DiscardThen`). `Close` (the server ended the
+  edit), `Reset` and `Enter` clear the flag, and the property is false without changes, so an ended edit takes the question
+  away. `Cancel` itself never asks: capture hooks and the discard answer call it. Closing the window is not covered.
+  Tests: the discard tests in `FrameOrderTests`. Check with `--open edit-discard` (a block grown one cell, then the key;
+  capture after 4.5 s).
 - **The editor's context menu, tank fuel, split and block resize:** a right press and release without moving
   (`UpdateOrbit`: `_editRightMoved`) picks afresh (`PickUnderPointer`), calls `StopPlacing` and `ShipEditor.OpenMenu`,
   which selects the block (or mount) unless it is already selected; `EditorMenu` (font-free state: where, what, which

@@ -1595,12 +1595,12 @@ internal sealed class App : IDisposable
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
                 World.ScriptSelectionForCapture(view == "edit-select-all");
             }
-            else if (view is "edit-menu" or "edit-resize" or "edit-dump" && snapshot is { OwnHull: >= 0 })
+            else if (view is "edit-menu" or "edit-resize" or "edit-dump" or "edit-discard" && snapshot is { OwnHull: >= 0 })
             {
                 // The editor with the pod's first tank right-clicked (its menu and Fuel flyout out), or a block
                 // selected and grown one cell by the face-drag resize, the harness playing what the muted pointer cannot.
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
-                World.ScriptEditForCapture(view == "edit-resize", view == "edit-dump");
+                World.ScriptEditForCapture(view is "edit-resize" or "edit-discard", view == "edit-dump", view == "edit-discard");
             }
             else if (view is "edit-save" or "edit-load" or "edit-load-confirm" && snapshot is { OwnHull: >= 0 })
             {
@@ -2009,6 +2009,7 @@ internal sealed class App : IDisposable
                 "edit-cargo" => World.Editor.CanEdit && World.Editor.LiveCargo.Length == World.CaptureCargoSampleCount && World.Editor.CargoRack >= 0,
                 "edit-menu" => World.Editor.Menu.IsOpen && World.Editor.Menu.Sub == EditorMenuSub.Fuel,
                 "edit-dump" => World.Editor.ConfirmDump,
+                "edit-discard" => World.Editor.ConfirmDiscard,
                 "edit-mirror" => World.Editor.HasGhost && World.Editor.Mirror == (MirrorAxes.X | MirrorAxes.Z),
                 // Launch, hold and recall all happen inside the measurement: drones were seen out and every one is home.
                 "drones" => _benchmarkSawDrones && _dronesOut == 0 && _dronesHome,

@@ -57,9 +57,9 @@ internal sealed partial class ScreenHost
     /// Interface mode is the only thing open over the session, so a right drag over the world may turn the pilot
     /// camera (<c>PointerFrame.InterfaceMode</c>). Every other surface keeps the world's mouse off.
     /// </summary>
-    public bool InterfaceCameraDragAllowed => _screen == Screen.Session && InterfaceModeOn && !_sessionMenuOpen && !_mapOpen && !_controlsOpen && !_chatOpen && !_newShip.Open && !_designs.Open;
+    public bool InterfaceCameraDragAllowed => _screen == Screen.Session && InterfaceModeOn && !_sessionMenuOpen && !_mapOpen && !_controlsOpen && !_chatOpen && !_newShip.Open && !_designs.Open && !DiscardOpen;
 
-    public bool WorldInputEnabled => _screen == Screen.Session && !_sessionMenuOpen && !_mapOpen && !_controlsOpen && !InterfaceModeOn && !_chatOpen && !_newShip.Open && !_designs.Open;
+    public bool WorldInputEnabled => _screen == Screen.Session && !_sessionMenuOpen && !_mapOpen && !_controlsOpen && !InterfaceModeOn && !_chatOpen && !_newShip.Open && !_designs.Open && !DiscardOpen;
 
     /// <summary>Opens the map zoomed all the way out, centred on the galaxy's core.</summary>
     public void OpenGalaxyOverview()

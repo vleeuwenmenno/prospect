@@ -1,4 +1,5 @@
 using Brutal.Concurrency.Jobs;
+using Brutal.GlfwApi;
 using Brutal.Numerics;
 using Prospect.Client.Input;
 using Prospect.Engine.Diagnostics;
@@ -319,6 +320,21 @@ internal sealed class ShipEditor(JobSystem jobs)
 
     /// <summary>True when the draft differs from the blueprint it started from.</summary>
     public bool Dirty => _depth != 0;
+
+    private bool _confirmDiscard;
+
+    /// <summary>
+    /// True when leaving the edit now would throw away changes the player made: the draft is open and differs from the
+    /// blueprint it started from. The one rule every way out asks (the editor key, Escape, Cancel, the menu's Leave and
+    /// Quit); an edit the server ended is not asked about, as the draft is kept for it already.
+    /// </summary>
+    public bool WouldLoseChanges => CanInspect && Dirty;
+
+    /// <summary>
+    /// True while the "Discard changes?" question is up: Discard throws the draft away, Keep editing (also Enter and
+    /// Escape) goes back to it. Never true without changes to lose, so an edit that ends under it takes it away.
+    /// </summary>
+    public bool ConfirmDiscard => _confirmDiscard && WouldLoseChanges;
 
     /// <summary>The draft's boxes the ship has lost since it was built, as a <see cref="BlockSet"/>; empty when none.</summary>
     public ReadOnlySpan<ulong> Missing => _missing;
@@ -723,12 +739,22 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// </summary>
     public bool HandleKeys(ActionMap actions, InputDevices devices, in HullView own, PlayerInputBridge bridge, bool typing, bool pointerOwned)
     {
+        if (ConfirmDiscard)
+        {
+            // The question has the keyboard, text field or not: Enter, Escape and the editor key all keep the draft.
+            if (devices.KeyPressed(GlfwKey.Enter) || devices.KeyPressed(GlfwKey.KpEnter)
+                || actions.InterfaceShortcutPressed(devices, InputAction.Pause, false, pointerOwned)
+                || actions.InterfaceShortcutPressed(devices, InputAction.ToggleEditor, false, pointerOwned))
+                KeepEditing();
+            return true;
+        }
+
         if (actions.InterfaceShortcutPressed(devices, InputAction.ToggleEditor, typing, pointerOwned))
         {
             if (Stage == EditorStage.Closed)
                 Request(own, bridge);
             else
-                Cancel(bridge);
+                Leave(bridge);
             return true;
         }
 
@@ -750,17 +776,44 @@ internal sealed class ShipEditor(JobSystem jobs)
             else if (Carry != EditorCarry.None)
                 CancelCarry();
             else
-                Cancel(bridge);
+                Leave(bridge);
             return true;
         }
 
         return false;
     }
 
+    /// <summary>
+    /// The player's way out of the edit (the editor key, Escape, the Cancel button): ends it at once when nothing
+    /// would be lost, otherwise puts up the "Discard changes?" question and leaves everything as it was. True when
+    /// the edit ended.
+    /// </summary>
+    public bool Leave(PlayerInputBridge bridge)
+    {
+        if (AskDiscard())
+            return false;
+        Cancel(bridge);
+        return true;
+    }
+
+    /// <summary>Puts up the "Discard changes?" question when there are changes to lose. True when it is up.</summary>
+    public bool AskDiscard()
+    {
+        if (!WouldLoseChanges)
+            return false;
+        Menu.Close();
+        _confirmDiscard = true;
+        return true;
+    }
+
+    /// <summary>Answers the question with Keep editing: the draft and everything about it stay as they were.</summary>
+    public void KeepEditing() => _confirmDiscard = false;
+
     /// <summary>The player cancels: whatever stage the edit is in ends, and the draft is thrown away.</summary>
     public void Cancel(PlayerInputBridge bridge)
     {
         ConfirmDump = false;
+        _confirmDiscard = false;
         if (Stage == EditorStage.Closed)
             return;
         CancelPartGestures();
@@ -783,6 +836,7 @@ internal sealed class ShipEditor(JobSystem jobs)
     public void Reset()
     {
         ConfirmDump = false;
+        _confirmDiscard = false;
         CancelPartGestures();
         Menu.Close();
         GhostPinned = false;
@@ -2355,6 +2409,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         // Every edit, however it came to open, starts in the select tool: no part is held and no ghost shows.
         StopPlacing();
         Menu.Close();
+        _confirmDiscard = false;
         Token = view.Token;
         Hull = own.Id;
         Content = snapshot.Content;
@@ -2399,6 +2454,7 @@ internal sealed class ShipEditor(JobSystem jobs)
     private void Close(EditorReason reason, int wait, bool keep)
     {
         ConfirmDump = false;
+        _confirmDiscard = false;
         // The server or a change of ship ended the edit, not the player: they stay where they are.
         _createdHull = 0;
         CancelPartGestures();
