@@ -72,23 +72,36 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
     private bool _oreStarted, _oreReady;
 
     /// <summary>
-    /// The lump of an ore chunk, variant <paramref name="variant"/> (any number; it wraps), as a triangle list; false
-    /// while the worker has not finished. Allocates nothing.
+    /// The lump of an ore chunk, variant <paramref name="variant"/> (any number; it wraps) with the crystals of grade band
+    /// <paramref name="band"/> (<see cref="OreChunkModelLook.Band"/>), as a triangle list; false while the worker has not
+    /// finished. Allocates nothing.
     /// </summary>
-    public bool TryGetOreChunk(int variant, out ReadOnlySpan<MeshVertex> vertices)
+    public bool TryGetOreChunk(int variant, int band, out ReadOnlySpan<MeshVertex> vertices)
     {
         vertices = default;
         if (!_oreReady) return false;
-        vertices = _ore.Results[(int)((uint)variant % OreChunkModels.Variants)];
+        var look = _ore.Look;
+        vertices = _ore.Results[(int)((uint)variant % look.Variants) * _ore.Bands + Math.Clamp(band, 0, _ore.Bands - 1)];
         return true;
     }
 
     private sealed class OreBuild : IJob
     {
-        public readonly MeshVertex[][] Results = new MeshVertex[OreChunkModels.Variants][];
+        public readonly OreChunkModelLook Look = OreChunkModelLook.Current;
+        public readonly int Bands;
+        public readonly MeshVertex[][] Results;
+
+        public OreBuild()
+        {
+            Bands = Look.CrystalCounts.Length;
+            Results = new MeshVertex[Look.Variants * Bands][];
+        }
+
         public void Run()
         {
-            for (var i = 0; i < Results.Length; i++) Results[i] = OreChunkModels.Build(i);
+            for (var v = 0; v < Look.Variants; v++)
+                for (var b = 0; b < Bands; b++)
+                    Results[v * Bands + b] = OreChunkModels.Build(Look, v, Look.CrystalCounts[b]);
         }
     }
 

@@ -482,6 +482,9 @@ internal static class Program
                     options.ContainerSheet = sheet;
                     i++;
                     break;
+                case "--ore-sheet":
+                    options.OreSheet = true;
+                    break;
                 case "--cargo-wide":
                     options.CargoWide = true;
                     break;
@@ -676,6 +679,9 @@ internal static class Program
 
         if (options.DronePopup && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--drone-popup works only with --capture or --bench.");
+
+        if (options.OreSheet && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--ore-sheet works only with --capture or --bench.");
 
         if (options.ContainerSheet is not null && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--container-sheet works only with --capture or --bench.");

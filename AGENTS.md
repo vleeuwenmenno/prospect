@@ -1176,8 +1176,17 @@ How to apply it:
 - Beams: `WorldView.DrawLaserBeams` writes one `LaserInstance` a beam (`LaserBeamLook.Instance`) from `LaserAim.World` on the
   drawn hull pose to `drawn position + End`; `laser.vert`/`laser.frag` make everything (ribbon, pulses, the cut's glow, sparks)
   from time and a seed, so nothing is pooled or allocated. A free beam fades toward its end, a cutting one has glow and sparks.
-- Ore chunks: `OreChunkVisuals` keeps two sets and matches chunks by id once per set; `WorldView.OreChunks.cs` draws the worker-built
-  `OreChunkModels` lump (4 variants by id) scaled to `OreChunks.Half`, tinted by ore colour and grade. Tests: `LaserVisualTests`.
+- Ore chunks: `OreChunkVisuals` keeps two sets and matches chunks by id once per set (and carries them tumbling at the replicated
+  spin); `WorldView.OreChunks.cs` draws the worker-built `OreChunkModels` lump scaled to `OreChunks.Half`. A lump is a convex
+  polyhedron cut from a box by random planes (sharp break faces, each split into a fan round a pushed middle), `variants` of them
+  by id; richer chunks add ore crystals on the biggest faces, so the mesh is chosen by id and grade band
+  (`PartModels.TryGetOreChunk(variant, band)`, `OreChunkModelLook.Band`). Crystal facets carry a normal of length 1.25
+  (`OreChunkModels.CrystalTag`). Figures (cuts, box, crystal counts per grade band, vein scale and cover, glint) are
+  `content/visuals/ore_chunk_models.json` (`OreChunkModelLook`, validated). The instance is material `OreChunkVisuals.Material(grade)`
+  (0.03 to 0.12), tint = the ore's own colour, `RockMarks` = (vein scale, cover at grade 0, cover at grade 1, glint) instead of rock
+  marks; `mesh.vert`/`mesh.frag` draw bare rock with ore veins (more cover the higher the grade), crystals, a sheen, a sharp flash
+  as a facet lines up with the star and a faint twinkling glow. Capture a sheet of every ore at three grades with `--ore-sheet`
+  (scripted only; `--look`/`--zoom` as usual). Tests: `LaserVisualTests`.
 
 ## Free containers: cargo step 2
 

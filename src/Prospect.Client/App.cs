@@ -275,6 +275,8 @@ internal sealed class AppOptions
     public bool CargoSample { get; set; }
     /// <summary>Capture only: <c>--cargo-wide</c> loads a rack with one container of each resource and jettisons several.</summary>
     public bool CargoWide { get; set; }
+    /// <summary>Capture only: <c>--ore-sheet</c> draws ore chunks of every resource at three grades before the camera.</summary>
+    public bool OreSheet { get; set; }
     /// <summary>Capture only: <c>--container-sheet n</c> draws every resource's container of size n before the camera.</summary>
     public int? ContainerSheet { get; set; }
     /// <summary>Capture only: <c>--hover-container stowed|free</c> puts the scripted pointer on such a container.</summary>
@@ -1783,6 +1785,7 @@ internal sealed class App : IDisposable
         }
 
         World.ContainerSheetSize = Devices.Muted ? _options.ContainerSheet : null;
+        World.OreSheet = Devices.Muted && _options.OreSheet;
         if (_options.Zoom is { } zoom && Session is not null)
             World.ChaseZoom = zoom;
         World.ScriptedAlignLock = Devices.Muted && Session is not null && _options.AlignLock;

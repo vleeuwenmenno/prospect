@@ -412,6 +412,7 @@ internal sealed partial class WorldView
         _rockPatches = new RockPatches(jobs, RockPatchLook.Load());
         // Read the ore marks' figures now: the first chunk would otherwise read the file inside a frame.
         _ = OreChunkLook.Current;
+        _ = Prospect.Client.Render.OreChunkModelLook.Current;
         _partModels = new PartModels(jobs, PropulsionLook.Shared);
         _scene = scene;
         RefreshKeyNames();

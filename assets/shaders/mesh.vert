@@ -24,10 +24,18 @@ layout(location = 5) out float metal;
 // The paint of a tank's vessel, RGB from 0 to 1, or -1 for anything else: a normal's length of 3.5 and over carries
 // five bits a channel (PropulsionModels.Paint). Flat: a facet's three vertices carry the same paint.
 layout(location = 6) flat out vec3 paint;
+// Loose ore chunk (material 0.03 to 0.12, grade in it): rockMarks carries its look figures instead of rock marks
+// (vein scale, vein cover at grade 0 and at grade 1, glint). crystal is 1 on an ore crystal's facets, whose normals
+// have a length of 1.25 (OreChunkModels).
+layout(location = 8) flat out vec4 oreFigures;
+layout(location = 9) flat out float crystal;
 
 void main()
 {
-    markMask = uvec4(rockMarks);
+    int slot = int((tint.a + 0.5) * 0.25);
+    bool ore = tint.a > 0.02 && tint.a < 0.125;
+    markMask = ore ? uvec4(0u) : uvec4(rockMarks);
+    oreFigures = ore ? rockMarks : vec4(0.0);
     vec4 p = vec4(position, 1.0);
     worldPosition = vec3(dot(row0, p), dot(row1, p), dot(row2, p));
     // Blocks are scaled per axis and hulls drawn out along their length, so a normal is turned by the cofactor
@@ -51,7 +59,7 @@ void main()
         float code = floor((tag - 3.5) * 32768.0);
         paint = vec3(floor(code / 1024.0), mod(floor(code / 32.0), 32.0), mod(code, 32.0)) / 31.0;
     }
-    int slot = int((tint.a + 0.5) * 0.25);
+    crystal = ore && tag > 1.1 && tag < 1.5 ? 1.0 : 0.0;
     cut = slot - 1;
     color = vec4(tint.rgb, tint.a - 4.0 * float(slot));
     gl_Position = frame.viewProjection * vec4(worldPosition, 1.0);
