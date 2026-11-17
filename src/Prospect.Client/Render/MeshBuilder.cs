@@ -84,6 +84,25 @@ internal static class MeshBuilder
     }
 
     /// <summary>
+    /// The mesh of the work drone's design: its own model (<see cref="PropulsionModels.BuildWorkDrone"/>) in place of
+    /// the blocks, with the design's thrusters listed as nozzles on the model's pods. Without a work drone look it is
+    /// the block hull, as for any design.
+    /// </summary>
+    public static MeshData WorkDrone(HullDesign design, PropulsionLook? look = null)
+    {
+        look ??= PropulsionLook.Shared;
+        if (look.WorkDrone is not { } drone)
+            return Hull(design, look);
+        var mesh = new MeshData();
+        var nozzles = new List<ThrustNozzle>();
+        PropulsionModels.BuildWorkDrone(design, look, drone, mesh.Vertices, mesh.Indices, nozzles);
+        foreach (var vertex in mesh.Vertices)
+            mesh.BoundingRadius = Math.Max(mesh.BoundingRadius, new Vector3(vertex.Position.X, vertex.Position.Y, vertex.Position.Z).Length());
+        mesh.Nozzles = [.. nozzles];
+        return mesh;
+    }
+
+    /// <summary>
     /// One block of unit bounding box centred on the origin, for hulls drawn block by block: a cube for
     /// <see cref="BlockShape.Box"/>, a triangular prism for a wedge. Scaled per axis it is the block at any size;
     /// the mesh shader turns its normals for that scaling.

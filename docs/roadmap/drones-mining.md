@@ -166,6 +166,9 @@ Built in D3 (2026-11-17); see "D3 as built".
 - The executor turns an order into the drone's `HullOrder` (move to a point), so a client predicts the drone with
   the same autopilot. A new task is an `OrderTask` value and one case in the executor.
 - A saved world docks every drone: drones out are counted back into their bays, and no order survives a load.
+- A work drone is drawn as one model of its own (the MD-7), not from its blocks; collision, picking and the server
+  know the blocks. Its tractor array glows brighter while it carries, its pod strips with thrust (`AGENTS.md`,
+  "Work drone model").
 
 ## Build plan
 

@@ -10,12 +10,22 @@ internal sealed partial class WorldView
 {
     private const int MaxTurretStates = 256;
 
+    /// <summary>How fast a turret's bars brighten when its beam takes hold and dim when it lets go, in shares a second.</summary>
+    private const float TurretGlowRate = 4f;
+
+    /// <summary>
+    /// The material of a part that is only light: <c>mesh.frag</c> writes the instance's colour as it is, unlit, for a
+    /// material below zero (as it does for sparks), so the colour's size is the brightness.
+    /// </summary>
+    private const float MaterialLight = -1f;
+
     private struct TurretState
     {
         public uint HullId;
         public int Mount;
         public float Azimuth;
         public float Pitch;
+        public float Glow;
         public Vector3 LensRel;
         public long LastFrame;
         public long LensFrame;
@@ -89,6 +99,22 @@ internal sealed partial class WorldView
     {
         var axis = Facings.Axis(face);
         return MathF.Min(half[(axis + 1) % 3], half[(axis + 2) % 3]);
+    }
+
+    /// <summary>
+    /// Where a turret on <paramref name="face"/> rests while its beam holds nothing: turned to look along the hull's
+    /// nose (a turret on the nose or the stern looks up instead) and pitched <paramref name="restPitch"/> degrees off
+    /// the face normal. The angles are the ones the aim uses.
+    /// </summary>
+    internal static void TurretRest(BlockFacing face, float restPitch, out float azimuth, out float pitch)
+    {
+        var axis = Facings.Axis(face);
+        var u = Vector3.Zero;
+        u[(axis + 1) % 3] = 1f;
+        var v = Vector3.Cross(Facings.Vector(face), u);
+        var ahead = axis == Facings.Axis(BlockFacing.Front) ? Vector3.UnitY : Facings.Vector(BlockFacing.Front);
+        azimuth = MathF.Atan2(-Vector3.Dot(ahead, u), Vector3.Dot(ahead, v));
+        pitch = restPitch * (MathF.PI / 180f);
     }
 
     private int AcquireTurretSlot(uint hullId, int mount)
@@ -170,7 +196,7 @@ internal sealed partial class WorldView
 
             var half = design.MountHalfExtents[m];
             var small = MountHalfWidth(half, part.Face);
-            if (!_partModels.TryGetTractorTurret(small, out var yoke, out var head))
+            if (!_partModels.TryGetTractorTurret(small, out var yoke, out var head, out var bars))
                 continue;
 
             var axis = Facings.Axis(part.Face);
@@ -182,9 +208,9 @@ internal sealed partial class WorldView
             var collarRel = faceRel + Vector3.Transform(new Vector3(0f, 0f, PropulsionModels.TractorCollarOffset(small, look)), faceRot);
             var pivotRel = faceRel + Vector3.Transform(new Vector3(0f, 0f, PropulsionModels.TractorPivotOffset(small, look)), faceRot);
 
-            var targetAz = 0f;
-            var targetPitch = 0f;
-            if (FindHeldContainer(snapshot, hull.Id, m, camera, out var targetRel))
+            TurretRest(part.Face, look.TurretRestPitch, out var targetAz, out var targetPitch);
+            var holding = FindHeldContainer(snapshot, hull.Id, m, camera, out var targetRel);
+            if (holding)
             {
                 var toTarget = Vector3.Transform(targetRel - pivotRel, Quaternion.Conjugate(faceRot));
                 var horiz = MathF.Sqrt(toTarget.X * toTarget.X + toTarget.Y * toTarget.Y);
@@ -196,6 +222,7 @@ internal sealed partial class WorldView
             var slot = AcquireTurretSlot(hull.Id, m);
             var az = targetAz;
             var pitch = targetPitch;
+            var glow = holding ? 1f : 0f;
             if (slot >= 0)
             {
                 ref var state = ref _turrets[slot];
@@ -203,9 +230,11 @@ internal sealed partial class WorldView
                 {
                     az = StepAngle(state.Azimuth, targetAz, slewStep);
                     pitch = StepPitch(state.Pitch, targetPitch, slewStep);
+                    glow = StepPitch(state.Glow, glow, TurretGlowRate * _turretDt);
                 }
                 state.Azimuth = az;
                 state.Pitch = pitch;
+                state.Glow = glow;
                 state.LastFrame = _turretFrame;
             }
 
@@ -216,6 +245,10 @@ internal sealed partial class WorldView
 
             _scene.AddTriangles(frameIndex, yoke, MeshTransform(collarRel, yokeRot, Vector3.One, design.Color, material, 1f));
             _scene.AddTriangles(frameIndex, head, MeshTransform(pivotRel, headRot, Vector3.One, design.Color, material, 1f));
+            // The bars are light: idle they glow low, and a beam at work brightens and pulses them.
+            var pulse = 1f + look.TurretPulseDepth * MathF.Sin(_lastTurretTime * look.TurretPulseRate * MathF.Tau);
+            var level = look.TurretIdleGlow + (look.TurretActiveGlow * pulse - look.TurretIdleGlow) * glow;
+            _scene.AddTriangles(frameIndex, bars, MeshTransform(pivotRel, headRot, Vector3.One, look.BarLight(level), MaterialLight, 1f));
 
             if (slot >= 0)
             {
@@ -229,7 +262,7 @@ internal sealed partial class WorldView
     private void DrawIdleTractorTurret(int frameIndex, Vector3 mountCenter, BlockFacing face, Vector3 half, Quaternion orientation, Vector3 color, float material)
     {
         var small = MountHalfWidth(half, face);
-        if (!_partModels.TryGetTractorTurret(small, out var yoke, out var head))
+        if (!_partModels.TryGetTractorTurret(small, out var yoke, out var head, out var bars))
             return;
         var axis = Facings.Axis(face);
         var nLocal = Facings.Vector(face);
@@ -238,8 +271,12 @@ internal sealed partial class WorldView
         var look = TractorLook;
         var collarPos = facePos + Vector3.Transform(new Vector3(0f, 0f, PropulsionModels.TractorCollarOffset(small, look)), faceRot);
         var pivotPos = facePos + Vector3.Transform(new Vector3(0f, 0f, PropulsionModels.TractorPivotOffset(small, look)), faceRot);
-        _scene.AddTriangles(frameIndex, yoke, MeshTransform(collarPos, faceRot, Vector3.One, color, material, 1f));
-        _scene.AddTriangles(frameIndex, head, MeshTransform(pivotPos, faceRot, Vector3.One, color, material, 1f));
+        TurretRest(face, look.TurretRestPitch, out var azimuth, out var pitch);
+        var yokeRot = Quaternion.Concatenate(Quaternion.CreateFromAxisAngle(Vector3.UnitZ, azimuth), faceRot);
+        var headRot = Quaternion.Concatenate(Quaternion.CreateFromAxisAngle(Vector3.UnitX, -pitch), yokeRot);
+        _scene.AddTriangles(frameIndex, yoke, MeshTransform(collarPos, yokeRot, Vector3.One, color, material, 1f));
+        _scene.AddTriangles(frameIndex, head, MeshTransform(pivotPos, headRot, Vector3.One, color, material, 1f));
+        _scene.AddTriangles(frameIndex, bars, MeshTransform(pivotPos, headRot, Vector3.One, look.BarLight(look.TurretIdleGlow), MaterialLight, 1f));
     }
 
     private void DrawTractorBeams(int frameIndex, SessionSnapshot snapshot, Double3 camera)

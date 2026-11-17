@@ -30,7 +30,8 @@ Place a Tractor beam face mount from the editor's Hull tab. It automatically pul
 racks it can see and fit them in. Every release waits 10 seconds before pickup; unclaimed cargo is open to anyone.
 The Cargo window (`U` or the Cargo tab) shows the flown ship's hold and lets you jettison containers (`Jettison` or `Jettison, keep claim`).
 Six tractor qualities scale range, pull, maximum mass and power: Common starts at 40 m; Alien Tech reaches 100 m.
-Power rises with load mass. Tier badges and the aiming turret visuals are not built yet.
+Power rises with load mass. The mount is a turret: an octagonal base, a yoke and a head with three glowing bars that
+turns and tilts toward what its beam holds, and rests looking along the hull. One size only; tier badges are not built yet.
 Editor lines show reachable racks; amber racks have no tractor access. Move the ship for blocked or distant cargo.
 The energy tooltip lists TRACTORS. No pickup key or pickup by touch; no allow-list/block-list filter yet.
 
@@ -39,6 +40,7 @@ and the model shows it (frame, orange doors, a light). A Common bay keeps 4 dron
 a lost one in 90 s; tiers are content, only Common is in the palette. `.` launches every drone inside; they leave through the hatch and hold station 14 m out in front of it. `,` calls
 them home: they line up in front of the hatch, fly in and dock. A blocked hatch
 (a block or a part of the ship in front of it) refuses a launch, and the chip says why. Drones are small real hulls
+(drawn as the MD-7 utility drone, a model of their own: the tractor array under the nose brightens while carrying)
 flown by the server: they collide, can be destroyed (the bay rebuilds them) and use power. A player has at most 12
 out. A jump calls them home; one still out when the ship leaves is lost. A saved world docks every drone.
 

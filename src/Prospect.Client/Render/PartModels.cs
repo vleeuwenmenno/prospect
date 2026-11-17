@@ -36,6 +36,7 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
         public float Small;
         public MeshVertex[]? Yoke;
         public MeshVertex[]? Head;
+        public MeshVertex[]? Bars;
         public bool Queued;
         public long Used;
     }
@@ -83,6 +84,57 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
         var look = _ore.Look;
         vertices = _ore.Results[(int)((uint)variant % look.Variants) * _ore.Bands + Math.Clamp(band, 0, _ore.Bands - 1)];
         return true;
+    }
+
+    private readonly DroneBuild _drone = new(look);
+    private JobHandle _droneHandle;
+    private bool _droneStarted, _droneReady;
+
+    /// <summary>
+    /// Says which design the work drone's lit parts are built for, so the worker builds them when a session starts and
+    /// not when the first drone comes into view. One design at a time, as a session has one. Allocates nothing.
+    /// </summary>
+    public void PrepareDrone(HullDesign design)
+    {
+        // The worker reads the design it was started with: another one waits until that run is over.
+        if (look.WorkDrone is null || ReferenceEquals(_drone.Design, design) || (_droneStarted && !_droneReady))
+            return;
+        _drone.Design = design;
+        _droneStarted = _droneReady = false;
+    }
+
+    /// <summary>
+    /// The lit parts of a work drone of <paramref name="design"/>, in the hull's frame: the tractor array's segments
+    /// and the pods' strips (<see cref="PropulsionModels.BuildWorkDroneGlow"/>). False while the worker has not
+    /// finished, and without a work drone look. Allocates nothing.
+    /// </summary>
+    public bool TryGetDroneGlow(HullDesign design, out ReadOnlySpan<MeshVertex> array, out ReadOnlySpan<MeshVertex> strips)
+    {
+        array = default;
+        strips = default;
+        PrepareDrone(design);
+        if (!_droneReady || !ReferenceEquals(_drone.Design, design))
+            return false;
+        array = _drone.Array;
+        strips = _drone.Strips;
+        return true;
+    }
+
+    private sealed class DroneBuild(PropulsionLook look) : IJob
+    {
+        public HullDesign? Design;
+        public MeshVertex[] Array = [], Strips = [];
+
+        public void Run()
+        {
+            var array = new List<MeshVertex>();
+            var arrayIndices = new List<uint>();
+            var strips = new List<MeshVertex>();
+            var stripIndices = new List<uint>();
+            PropulsionModels.BuildWorkDroneGlow(Design!, look.WorkDrone!, array, arrayIndices, strips, stripIndices);
+            Array = Soup(array, arrayIndices);
+            Strips = Soup(strips, stripIndices);
+        }
     }
 
     private sealed class OreBuild : IJob
@@ -163,6 +215,8 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
         if (!_containersReady && jobs.IsComplete(_containerHandle)) _containersReady = true;
         if (!_oreStarted) { _oreHandle = jobs.Schedule(_ore, 2); _oreStarted = true; }
         if (!_oreReady && jobs.IsComplete(_oreHandle)) _oreReady = true;
+        if (_drone.Design is not null && !_droneStarted) { _droneHandle = jobs.Schedule(_drone, 2); _droneStarted = true; }
+        if (_droneStarted && !_droneReady && jobs.IsComplete(_droneHandle)) _droneReady = true;
         if (!_pending || !jobs.IsComplete(_handle))
             return;
         _pending = false;
@@ -176,10 +230,12 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
                 {
                     tEntry.Yoke = _build.Results[i];
                     tEntry.Head = _build.HeadResults[i];
+                    tEntry.Bars = _build.BarResults[i];
                     Built++;
                 }
                 _build.Results[i] = null;
                 _build.HeadResults[i] = null;
+                _build.BarResults[i] = null;
                 continue;
             }
             ref var entry = ref _entries[_build.Slots[i]];
@@ -241,13 +297,14 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
     }
 
     /// <summary>
-    /// Returns the worker-built yoke and emitter head meshes for a tractor turret of half-width <paramref name="small"/>;
-    /// false while queued. Allocates nothing.
+    /// Returns the worker-built yoke, emitter head and emitter bars of a tractor turret of half-width
+    /// <paramref name="small"/>; false while queued. Allocates nothing.
     /// </summary>
-    public bool TryGetTractorTurret(float small, out ReadOnlySpan<MeshVertex> yoke, out ReadOnlySpan<MeshVertex> head)
+    public bool TryGetTractorTurret(float small, out ReadOnlySpan<MeshVertex> yoke, out ReadOnlySpan<MeshVertex> head, out ReadOnlySpan<MeshVertex> bars)
     {
         yoke = default;
         head = default;
+        bars = default;
         if (small <= 0 || look.Tractor is null || !look.Models.ContainsKey("tractorBeam"))
             return false;
         var free = -1;
@@ -258,10 +315,11 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
             if (entry.Small == small)
             {
                 entry.Used = _frame;
-                if (entry.Yoke is null || entry.Head is null)
+                if (entry.Yoke is null || entry.Head is null || entry.Bars is null)
                     return false;
                 yoke = entry.Yoke;
                 head = entry.Head;
+                bars = entry.Bars;
                 return true;
             }
             var age = entry.Small <= 0 ? long.MinValue : entry.Used;
@@ -291,6 +349,15 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
         _handle = jobs.Schedule(_build, 2);
     }
 
+    /// <summary>An indexed mesh as the triangle list <see cref="SceneRenderer.AddTriangles"/> draws.</summary>
+    internal static MeshVertex[] Soup(List<MeshVertex> vertices, List<uint> indices)
+    {
+        var soup = new MeshVertex[indices.Count];
+        for (var k = 0; k < soup.Length; k++)
+            soup[k] = vertices[(int)indices[k]];
+        return soup;
+    }
+
     /// <summary>Builds every model asked for in one frame. Its arrays are read by the frame only once it is complete.</summary>
     private sealed class Build(PropulsionLook look) : IJob
     {
@@ -304,6 +371,7 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
         public readonly float[] Cells = new float[Batch];
         public readonly MeshVertex[]?[] Results = new MeshVertex[]?[Batch];
         public readonly MeshVertex[]?[] HeadResults = new MeshVertex[]?[Batch];
+        public readonly MeshVertex[]?[] BarResults = new MeshVertex[]?[Batch];
 
         public void Run()
         {
@@ -313,23 +381,21 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
             {
                 if (IsTurret[i])
                 {
-                    var model = look.Models["tractorBeam"];
                     var tractor = look.Tractor!;
                     vertices.Clear();
                     indices.Clear();
-                    PropulsionModels.BuildTractorYoke(Cells[i], model, tractor, vertices, indices);
-                    var yokeSoup = new MeshVertex[indices.Count];
-                    for (var k = 0; k < yokeSoup.Length; k++)
-                        yokeSoup[k] = vertices[(int)indices[k]];
-                    Results[i] = yokeSoup;
+                    PropulsionModels.BuildTractorYoke(Cells[i], tractor, vertices, indices);
+                    Results[i] = Soup(vertices, indices);
 
                     vertices.Clear();
                     indices.Clear();
-                    PropulsionModels.BuildTractorHead(Cells[i], model, tractor, vertices, indices);
-                    var headSoup = new MeshVertex[indices.Count];
-                    for (var k = 0; k < headSoup.Length; k++)
-                        headSoup[k] = vertices[(int)indices[k]];
-                    HeadResults[i] = headSoup;
+                    PropulsionModels.BuildTractorHead(Cells[i], tractor, vertices, indices);
+                    HeadResults[i] = Soup(vertices, indices);
+
+                    vertices.Clear();
+                    indices.Clear();
+                    PropulsionModels.BuildTractorBars(Cells[i], tractor, vertices, indices);
+                    BarResults[i] = Soup(vertices, indices);
                     continue;
                 }
                 var type = Types[i]!;
