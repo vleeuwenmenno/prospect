@@ -88,6 +88,33 @@ public sealed class DroneFetchTests
         Assert.True(done(), what);
     }
 
+    /// <summary>The place an order works at, in the world: the base hull's frame, from its pivot.</summary>
+    private static Double3 WorldPoint(SaveRig rig, in TaskOrder order)
+    {
+        var state = rig.Hulls.State(order.Base.Index);
+        return state.Position + HullRotation.Rotate(order.Point, state.Orientation);
+    }
+
+    /// <summary>
+    /// True once every drone out of the pod is on a <see cref="OrderTask.Hold"/> order and near the place it holds: the
+    /// station a launch gives it, not a bay it docked into.
+    /// </summary>
+    private static bool Parked(SaveRig rig)
+    {
+        var drones = Drones(rig);
+        if (drones.Count == 0) return false;
+        var orders = rig.Get<TaskOrder[]>("_orders");
+        var count = rig.Get<int>("_orderCount");
+        var parked = 0;
+        for (var i = 0; i < count; i++)
+        {
+            if (orders[i].Task != OrderTask.Hold || !drones.Contains(orders[i].Actor.Index)) continue;
+            if (rig.Hulls.State(orders[i].Actor.Index).Position.RelativeTo(WorldPoint(rig, orders[i])).LengthSquared() > 4f) return false;
+            parked++;
+        }
+        return parked == drones.Count;
+    }
+
     private static int Held(SaveRig rig) => rig.Hulls.BlockStates.Cargo(rig.Hulls.Info(Pod(rig).Index).BlockState).Length;
 
     private static SaveRig Rig(GameContent content)
@@ -125,10 +152,13 @@ public sealed class DroneFetchTests
         TickUntil(rig, () => Containers(rig).Items.Length == 0, 60, "the container stowed");
         Assert.Equal(1, Held(rig));
         Assert.Equal(DroneReply.Delivered, rig.Link.Bays.Reply);
-        TickUntil(rig, () => Drones(rig).Count == 0, 60, "the drone docked");
+        // The fetch is over: the drone goes back to holding station at its hold point, out of its bay, rather than in.
+        TickUntil(rig, () => Parked(rig), 60, "the drone parked at its hold point");
+        Assert.Single(Drones(rig));
         rig.Tick();
         Assert.Equal(0, rig.Link.Bays.Fetching);
-        Assert.Equal(4, rig.Link.Bays.Bays[0].Stocked);
+        Assert.Equal(1, rig.Link.Bays.Bays[0].Out);
+        Assert.Equal(3, rig.Link.Bays.Bays[0].Stocked);
     }
 
     [Fact]
@@ -159,7 +189,10 @@ public sealed class DroneFetchTests
         Assert.False(moved);
         TickUntil(rig, () => Containers(rig).Items.Length == 0, 120, "the container stowed");
         Assert.Equal(1, Held(rig));
-        TickUntil(rig, () => Drones(rig).Count == 0, 60, "both drones docked");
+        TickUntil(rig, () => Parked(rig), 60, "both drones parked at their hold points");
+        Assert.Equal(2, Drones(rig).Count);
+        Assert.Equal(2, rig.Link.Bays.Bays[0].Out);
+        Assert.Equal(2, rig.Link.Bays.Bays[0].Stocked);
     }
 
     [Fact]
@@ -249,8 +282,9 @@ public sealed class DroneFetchTests
         Assert.Equal(0u, item.FetchHull);
         Assert.Equal(0u, item.TractorHull);
         var orders = rig.Get<TaskOrder[]>("_orders");
-        Assert.Equal(OrderTask.Recall, orders[0].Task);
-        TickUntil(rig, () => Drones(rig).Count == 0, 90, "the other drone docked");
+        Assert.Equal(OrderTask.Hold, orders[0].Task);
+        TickUntil(rig, () => Parked(rig), 90, "the other drone parked at its hold point");
+        Assert.Single(Drones(rig));
         Assert.Single(Containers(rig).Items.ToArray());
     }
 
@@ -352,16 +386,24 @@ public sealed class DroneFetchTests
         Assert.Equal(DroneReply.Fetching, rig.Link.Bays.Reply);
         TickUntil(rig, () => Containers(rig).Items.Length == 0, 150, "the container stowed by the beam");
         Assert.Equal(1, Held(rig));
-        TickUntil(rig, () => Drones(rig).Count == 0, 60, "the drone docked");
+        // Parked, not docked: the next fetch would take the drone where it is.
+        TickUntil(rig, () => Parked(rig), 60, "the drone parked at its hold point");
+        Assert.Single(Drones(rig));
 
-        // Turned off, a new container is left where it lies.
+        // Turned off, a new container is left where it lies; the parked drone stays out.
         AutoPickup(rig, false);
         rig.Tick();
         Assert.False(rig.Link.Bays.AutoPickup);
         var second = Place(rig, content, new Vector3(-100, 10, 0), size: 2);
         rig.Tick(60 * 10);
         Assert.False(Fetching(rig, second));
-        Assert.Empty(Drones(rig));
+        Assert.Single(Drones(rig));
+        Assert.True(Parked(rig));
+
+        // Called home by hand, the parked drone docks as it always did.
+        rig.Link.Drones(new DroneCommandMessage(rig.Link.LastSnapshot.OwnHull, DroneCommand.Recall, 0, false, default));
+        TickUntil(rig, () => Drones(rig).Count == 0, 90, "the recalled drone docked");
+        Assert.Equal(4, rig.Link.Bays.Bays[0].Stocked);
     }
 
     [Fact]

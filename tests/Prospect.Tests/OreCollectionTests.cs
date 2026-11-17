@@ -631,6 +631,28 @@ public sealed class OreCollectionTests
         return found;
     }
 
+    /// <summary>
+    /// True once every drone out is on a <see cref="OrderTask.Hold"/> order and near the place it holds: a fetch that is
+    /// over parks its drones at their hold points instead of docking them.
+    /// </summary>
+    private static bool Parked(SaveRig rig)
+    {
+        var drones = Drones(rig);
+        if (drones.Count == 0) return false;
+        var orders = rig.Get<TaskOrder[]>("_orders");
+        var count = rig.Get<int>("_orderCount");
+        var parked = 0;
+        for (var i = 0; i < count; i++)
+        {
+            if (orders[i].Task != OrderTask.Hold || !drones.Contains(orders[i].Actor.Index)) continue;
+            var state = rig.Hulls.State(orders[i].Base.Index);
+            var place = state.Position + HullRotation.Rotate(orders[i].Point, state.Orientation);
+            if (rig.Hulls.State(orders[i].Actor.Index).Position.RelativeTo(place).LengthSquared() > 4f) return false;
+            parked++;
+        }
+        return parked == drones.Count;
+    }
+
     private static void Settings(SaveRig rig, bool cargo, bool ores) =>
         rig.Link.DroneSettings(new DroneSettingsMessage(rig.Link.LastSnapshot.OwnHull, cargo, ores));
 
@@ -697,16 +719,53 @@ public sealed class OreCollectionTests
         TickUntil(rig, () => Chunks(rig).Find(id) < 0, 90, "the beam took the chunk into the hopper");
         Assert.Equal(600, Bins(rig)[0].Kg);
         Assert.Equal(DroneReply.Delivered, rig.Link.Bays.Reply);
-        TickUntil(rig, () => Drones(rig).Count == 0, 60, "the drone docked");
+        // The chunk is in: the drone goes back to holding station, out of its bay, ready for the next one.
+        TickUntil(rig, () => Parked(rig), 60, "the drone parked at its hold point");
+        Assert.Single(Drones(rig));
+        Assert.Equal(1, rig.Link.Bays.Bays[0].Out);
+        Assert.Equal(3, rig.Link.Bays.Bays[0].Stocked);
 
-        // Turned off, the next chunk is left where it lies.
+        // Turned off, the next chunk is left where it lies; the parked drone stays out.
         Settings(rig, cargo: false, ores: false);
         rig.Tick();
         Assert.False(rig.Link.Bays.PickUpOres);
         Place(rig, content, new Vector3(-100, 10, 0));
         rig.Tick(60 * 8);
         Assert.Equal(0u, Chunks(rig).Items[0].FetchHull);
-        Assert.Empty(Drones(rig));
+        Assert.Single(Drones(rig));
+        Assert.True(Parked(rig));
+        Assert.Null(rig.Server.Fault);
+    }
+
+    [Fact]
+    public void OrePickupSendsTheParkedDronesForTheNextChunkWithoutLaunchingMore()
+    {
+        var content = Mining();
+        using var rig = Rig(content);
+        var first = Place(rig, content, new Vector3(-150, 20, 40), mass: 600);
+        var second = Place(rig, content, new Vector3(-160, -20, 30), mass: 500);
+        Settings(rig, cargo: false, ores: true);
+        rig.Tick();
+        TickUntil(rig, () => Chunks(rig).Items[0].FetchHull != 0, 3, "ore pickup started a fetch");
+        TickUntil(rig, () => Chunks(rig).Find(first) < 0, 120, "the first chunk went into the hopper");
+        Assert.Equal(600, Bins(rig)[0].Kg);
+        Assert.Single(Drones(rig));
+        Assert.Equal(1, rig.Link.Bays.Bays[0].Out);
+        Assert.Equal(3, rig.Link.Bays.Bays[0].Stocked);
+
+        // The second fetch takes the drone that is already out: nothing leaves a bay for it.
+        TickUntil(rig, () => Chunks(rig).Find(second) >= 0 && Chunks(rig).Items[Chunks(rig).Find(second)].FetchHull != 0, 10, "ore pickup started the second fetch");
+        Assert.Single(Drones(rig));
+        Assert.Equal(1, rig.Link.Bays.Bays[0].Out);
+        Assert.Equal(3, rig.Link.Bays.Bays[0].Stocked);
+        Assert.Equal(1, rig.Link.Bays.Fetching);
+        TickUntil(rig, () => Chunks(rig).Find(second) < 0, 150, "the second chunk went into the hopper");
+        Assert.Equal(1100, Bins(rig)[0].Kg);
+        Assert.Single(Drones(rig));
+        Assert.Equal(3, rig.Link.Bays.Bays[0].Stocked);
+
+        // With nothing left to fetch, it goes back to holding station at its hold point; a recall would dock it.
+        TickUntil(rig, () => Parked(rig), 60, "the drone parked at its hold point");
         Assert.Null(rig.Server.Fault);
     }
 

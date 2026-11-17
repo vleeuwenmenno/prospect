@@ -51,6 +51,8 @@ lift it together, faster the more they are. They bring it 10 m out in front of t
 the beam stows it as it stows any container. The DRONES chip shows how many are fetching, and why a fetch is refused:
 no tractor beam, no rack room, too heavy, too few drones, someone else's claim, already taken, out of range. Drones wait
 out a container's pickup delay before lifting it. Losing a carrier, or the ship jumping, drops the container where it is.
+When a fetch is over, delivered or not, its drones go back to holding station instead of docking, ready for the next
+load; only `,`, a jump or losing the ship brings them in.
 
 A click on the DRONES chip (pointer shown: `Shift` or `Tab`) opens the drone settings popup over it: a Launch / Recall
 button (the same as `.` and `,`), the "Pick up cargo" checkbox, and how many drones are in, out and fetching, the

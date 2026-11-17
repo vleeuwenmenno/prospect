@@ -137,6 +137,31 @@ public sealed partial class ServerHost
     }
 
     /// <summary>
+    /// Parks a drone back at the station a launch gives it: the same <see cref="OrderTask.Hold"/> order at the same
+    /// place, so it waits for the next container or chunk instead of docking. A fetch that is over parks its drones
+    /// whether the load was delivered, dropped, refused or timed out; only a recall, a jump or the loss of the base hull
+    /// still calls them home.
+    /// </summary>
+    private void ToHold(ref TaskOrder order)
+    {
+        var page = PageOf(order.Base);
+        if (page >= 0)
+        {
+            var design = _content.Designs[_hulls.Info(order.Base.Index).Design];
+            if ((uint)order.Bay < (uint)design.Bays.Length)
+            {
+                var block = design.Bays[order.Bay];
+                order.Point = DroneBayRules.HoldSlot(DroneBayRules.DefaultHold(design, block, _content.Drones.HoldDistanceMetres),
+                    DroneBayRules.Hatch(design, block), _bayPages[page].Bays[order.Bay].Slot++, _content.Drones.HoldSpacingMetres);
+            }
+        }
+        order.Task = OrderTask.Hold;
+        order.Phase = 0;
+        order.Subject = 0;
+        order.Until = 0;
+    }
+
+    /// <summary>
     /// Turns an order home. Every drone first flies to its own place beside its bay's hold point
     /// (<see cref="RecallFromAfar"/>), going round the hull, so it comes in along the hatch's normal instead of cutting
     /// across the hull from wherever its task ended, and drones coming home together wait their turn apart.
@@ -165,14 +190,14 @@ public sealed partial class ServerHost
 
     /// <summary>
     /// Flies a fetching drone to its place beside the container, closing on it as seen from the container, and
-    /// marks it holding on (phase 1) while it is within the tether of that place. Calls it home when the container is
-    /// gone, has been let go or the fetch has taken too long.
+    /// marks it holding on (phase 1) while it is within the tether of that place. Parks it at its hold point when the
+    /// container is gone, has been let go or the fetch has taken too long.
     /// </summary>
-    private bool Fetch(ref TaskOrder order, int page)
+    private bool Fetch(ref TaskOrder order)
     {
         var index = _containers.Find((uint)order.Subject);
         var held = index >= 0 && _containers.Items[index].FetchHull == order.Base.Packed;
-        return FetchBody(ref order, page, held, held ? _containers.Items[index].Position : default, held ? _containers.Items[index].Velocity : default,
+        return FetchBody(ref order, held, held ? _containers.Items[index].Position : default, held ? _containers.Items[index].Velocity : default,
             held ? FreeContainers.Half(_content.Cargo, _containers.Items[index].Size).Length() : 0);
     }
 
@@ -180,14 +205,15 @@ public sealed partial class ServerHost
     /// The one flight of a fetching drone, whatever it fetches: to its place beside the body at
     /// <paramref name="bodyPosition"/> (reaching <paramref name="bodyRadius"/> from its centre), closing on it as seen from
     /// the body (<see cref="Steer"/>), phase 1 while within the tether.
-    /// Home when the body is no longer <paramref name="held"/> for its hull or the fetch has taken too long.
+    /// Home when the body is no longer <paramref name="held"/> for its hull or the fetch has taken too long, both of which
+    /// park it at its hold point rather than send it in to dock.
     /// </summary>
-    private bool FetchBody(ref TaskOrder order, int page, bool held, Double3 bodyPosition, Vector3 bodyVelocity, float bodyRadius)
+    private bool FetchBody(ref TaskOrder order, bool held, Double3 bodyPosition, Vector3 bodyVelocity, float bodyRadius)
     {
         if (!held || (order.Until != 0 && _tick >= order.Until))
         {
-            ToRecall(ref order);
-            return Recall(ref order, page);
+            ToHold(ref order);
+            return true;
         }
         var rules = _content.Drones;
         var place = bodyPosition + HullRotation.Rotate(order.Point, _hulls.State(order.Base.Index).Orientation);
@@ -268,7 +294,7 @@ public sealed partial class ServerHost
         }
     }
 
-    /// <summary>Lets a fetched container go where it is and calls its drones home, telling the owner why.</summary>
+    /// <summary>Lets a fetched container go where it is and parks its drones, telling the owner why.</summary>
     private void DropFetch(ref FreeContainer item, HullHandle hull, DroneReply reply)
     {
         var id = item.Id;
@@ -301,14 +327,15 @@ public sealed partial class ServerHost
     }
 
     /// <summary>
-    /// Calls home every drone of <paramref name="hull"/> fetching the container <paramref name="id"/> (the ore chunk,
-    /// with <paramref name="ore"/>), and stops launches for it.
+    /// Ends a fetch: every drone of <paramref name="hull"/> that was on the container <paramref name="id"/> (the ore
+    /// chunk, with <paramref name="ore"/>) goes back to holding station at its hold point, and launches for it stop.
+    /// They park rather than dock, so the next fetch takes them where they are.
     /// </summary>
     private void EndFetch(uint id, HullHandle hull, bool ore = false)
     {
         var task = ore ? OrderTask.FetchOre : OrderTask.Fetch;
         for (var i = 0; i < _orderCount; i++)
-            if (_orders[i].Task == task && _orders[i].Subject == id && _orders[i].Base == hull) ToRecall(ref _orders[i]);
+            if (_orders[i].Task == task && _orders[i].Subject == id && _orders[i].Base == hull) ToHold(ref _orders[i]);
         var page = PageOf(hull);
         if (page < 0) return;
         ref var p = ref _bayPages[page];
