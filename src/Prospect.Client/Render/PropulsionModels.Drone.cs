@@ -196,7 +196,12 @@ internal static partial class PropulsionModels
 
         if (nozzles is null)
             return;
-        // Two thrusters push each way: sideways ones sit fore and aft on that side's pod, the others one a pod.
+        // Thrusters that push one way share it out between the two pods (alternating), and a pod with more than one
+        // of them spreads them evenly across its face, so no two nozzles sit in one place.
+        Span<int> count = stackalloc int[Facings.Count];
+        for (var m = 0; m < design.Mounts.Length; m++)
+            if (design.Mounts[m].Type.Thrust > 0 && propulsion.Models.ContainsKey(design.Mounts[m].Type.Id))
+                count[(int)design.Mounts[m].Face]++;
         Span<int> seen = stackalloc int[Facings.Count];
         for (var m = 0; m < design.Mounts.Length; m++)
         {
@@ -207,11 +212,13 @@ internal static partial class PropulsionModels
             var axis = Facings.Axis(part.Face);
             var sign = Facings.Sign(part.Face);
             var alternate = (k & 1) == 0 ? 1 : -1;
+            var pairs = (count[(int)part.Face] + 1) / 2;
+            var spread = pairs > 1 ? (float)(k >> 1) / (pairs - 1) - 0.5f : 0f;
             var exit = axis switch
             {
-                0 => f.Pod(sign).At(alternate * 0.78f * f.PodLength, 0f, f.PodOut),
-                1 => f.Pod(alternate).At(0f, sign * f.PodHeight, 0.5f * f.PodOut),
-                _ => f.Pod(alternate).At(Vector3.Dot(Facings.Vector(part.Face), f.Front) * f.PodLength, 0f, 0.5f * f.PodOut),
+                0 => f.Pod(sign).At(alternate * 0.78f * f.PodLength, spread * 0.9f * f.PodHeight, f.PodOut),
+                1 => f.Pod(alternate).At(spread * 1.2f * f.PodLength, sign * f.PodHeight, 0.5f * f.PodOut),
+                _ => f.Pod(alternate).At(Vector3.Dot(Facings.Vector(part.Face), f.Front) * f.PodLength, spread * 0.9f * f.PodHeight, 0.5f * f.PodOut),
             };
             var bore = 0.2f * f.PodHeight;
             nozzles.Add(new ThrustNozzle(part.Parent, part.Type.Fuel, part.Face, exit, bore, 0.5f * bore, model.PlumeSlot, nozzles.Count));
