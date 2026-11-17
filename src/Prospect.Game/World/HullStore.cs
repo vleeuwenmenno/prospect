@@ -77,6 +77,9 @@ public struct HullInfo
     /// <summary>Active tractor demand prepared before this hull steps; never durable.</summary>
     public float TractorDemand;
 
+    /// <summary>Mining laser demand prepared before this hull steps; never durable.</summary>
+    public float LaserDemand;
+
     /// <summary>What the hull's tanks hold and what its parts burnt in its last step, for the pilot's readout; never sent or saved.</summary>
     public FuelFlow Fuel;
 

@@ -46,6 +46,16 @@ internal enum InputAction
     RecallDrones,
     FetchContainer,
     DebugScrape,
+    ActionGroup1,
+    ActionGroup2,
+    ActionGroup3,
+    ActionGroup4,
+    ActionGroup5,
+    ActionGroup6,
+    ActionGroup7,
+    ActionGroup8,
+    ActionGroup9,
+    ActionGroup0,
     Count,
 }
 

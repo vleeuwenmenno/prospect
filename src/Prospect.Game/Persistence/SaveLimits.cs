@@ -64,6 +64,8 @@ public sealed record SaveLimits
     public long MaxEncodedBytes =>
         WorldSnapshotCodec.HeaderBound
         + FreeContainers.Capacity * WorldSnapshotCodec.FreeContainerBytes
+        + WorldSnapshotCodec.MiningHeaderBytes + OreChunks.Capacity * WorldSnapshotCodec.OreChunkBytes
+        + (long)MaxHulls * Protocol.ActionGroupsMessage.MaxParts * WorldSnapshotCodec.ActionGroupBytes
         + MaxModuleObservations * WorldSnapshotCodec.ModuleObservationBytes
         + MaxCharts * WorldSnapshotCodec.ChartBytes
         + MaxCatalogueBytes
@@ -82,6 +84,8 @@ public sealed record SaveLimits
     /// </summary>
     public long MaxDecodedBytes =>
         FreeContainers.Capacity * System.Runtime.CompilerServices.Unsafe.SizeOf<FreeContainer>()
+        + OreChunks.Capacity * System.Runtime.CompilerServices.Unsafe.SizeOf<OreChunk>()
+        + (long)MaxHulls * Protocol.ActionGroupsMessage.MaxParts * System.Runtime.CompilerServices.Unsafe.SizeOf<SavedActionGroup>()
         + MaxModuleObservations * (System.Runtime.CompilerServices.Unsafe.SizeOf<ModuleObservation>() + 128)
         + MaxCharts * (System.Runtime.CompilerServices.Unsafe.SizeOf<SectorChart>() + 128)
         + MaxCatalogueBytes

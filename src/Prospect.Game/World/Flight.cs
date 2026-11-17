@@ -66,6 +66,9 @@ public struct FlightParams
 {
     /// <summary>Prepared active tractor demand, paid after shields and before battery clipping.</summary>
     public float TractorPower;
+
+    /// <summary>Prepared mining laser demand, paid after the tractors, all or nothing; never durable.</summary>
+    public float LaserPower;
     /// <summary>
     /// Thrust acceleration in m/s² for each direction the hull can be pushed and each kind of part that pushes it (each
     /// fuel, then ion), at full throttle. A direction's parts are those facing the other way; a fuel that has run out
@@ -568,6 +571,11 @@ public static class FlightModel
         {
             flow.Tractor = p.TractorPower;
             available -= p.TractorPower * dt;
+        }
+        if (p.LaserPower > 0 && available >= p.LaserPower * dt)
+        {
+            flow.Laser = p.LaserPower;
+            available -= p.LaserPower * dt;
         }
         state.Energy = Math.Min(available, p.EnergyStorage);
 

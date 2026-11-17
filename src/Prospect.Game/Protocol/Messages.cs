@@ -115,6 +115,21 @@ public enum MessageId : byte
 
     /// <summary>Client to server, reliable: the temporary debug scrape. See <see cref="RockScrapeRequest"/>.</summary>
     RockScrape = 42,
+
+    /// <summary>Client to server, reliable: which action groups fire and where they aim. See <see cref="LaserAimMessage"/>.</summary>
+    LaserAim = 44,
+
+    /// <summary>Client to server, reliable: one part's action group on the flown hull. See <see cref="SetActionGroupMessage"/>.</summary>
+    SetActionGroup = 45,
+
+    /// <summary>Server to client, unreliable: the beams of the hulls a client may see. See <see cref="LaserBeamsMessage"/>.</summary>
+    LaserBeams = 46,
+
+    /// <summary>Server to client, reliable: every loose ore chunk a client may see. See <see cref="OreChunkMessage"/>.</summary>
+    OreChunks = 47,
+
+    /// <summary>Server to client, reliable: the flown hull's action group changes. See <see cref="ActionGroupsMessage"/>.</summary>
+    ActionGroups = 48,
 }
 
 public enum RejectReason : byte
@@ -191,7 +206,7 @@ public static class ProtocolInfo
     /// index in a list both ends generate for themselves, so two builds that generate differently would mean
     /// different rocks by the same number. Client and server must match exactly.
     /// </summary>
-    public const uint Version = 66;
+    public const uint Version = 68;
 
     public const ushort DefaultPort = 27420;
     public const int MaxNameBytes = 48;

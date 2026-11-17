@@ -183,6 +183,74 @@ public sealed class PlayerInputBridge
         }
     }
 
+    private bool _hasLaserAim;
+    private LaserAimMessage _laserAim;
+
+    /// <summary>
+    /// Queues the pilot's firing intent for <paramref name="hull"/>: the action groups that fire (a mask, bit
+    /// <c>g - 1</c> for group <c>g</c>; zero for none) and the aim, a ray from the camera through the pointer, its
+    /// origin relative to the hull's position. Call it when it changes; a newer intent replaces one not yet sent.
+    /// </summary>
+    public void AimLasers(uint hull, ushort groups, System.Numerics.Vector3 offset, System.Numerics.Vector3 direction)
+    {
+        if (hull == 0 || (groups & ~ActionGroups.AllMask) != 0 || !float.IsFinite(offset.LengthSquared())) return;
+        var length = direction.Length();
+        if (!(length > 1e-3f) || !float.IsFinite(length)) return;
+        lock (_lock)
+        {
+            _laserAim = new LaserAimMessage(hull, groups, offset, direction / length);
+            _hasLaserAim = true;
+        }
+    }
+
+    internal bool ConsumeLaserAim(out LaserAimMessage message)
+    {
+        lock (_lock)
+        {
+            message = _laserAim;
+            var pending = _hasLaserAim;
+            _hasLaserAim = false;
+            return pending;
+        }
+    }
+
+    private readonly SetActionGroupMessage[] _groupChanges = new SetActionGroupMessage[8];
+    private int _groupChangeCount;
+
+    /// <summary>
+    /// Asks the server to fire groupable part <paramref name="part"/> (its place in <see cref="HullDesign.Lasers"/>)
+    /// of an owned hull with group <paramref name="group"/>, without a rebuild; <see cref="ActionGroups.NotOverridden"/>
+    /// returns it to the design's group. The answer shows in <see cref="SessionSnapshot.ActionGroupOverrides"/>.
+    /// </summary>
+    public void SetActionGroup(uint hull, int part, byte group)
+    {
+        if (hull == 0 || (uint)part >= ActionGroupsMessage.MaxParts || (group != ActionGroups.NotOverridden && !ActionGroups.Valid(group))) return;
+        lock (_lock)
+        {
+            // A change of the same part not yet sent is replaced; the queue keeps the newest few parts.
+            for (var i = 0; i < _groupChangeCount; i++)
+                if (_groupChanges[i].Hull == hull && _groupChanges[i].Part == part)
+                {
+                    _groupChanges[i] = new SetActionGroupMessage(hull, (byte)part, group);
+                    return;
+                }
+            if (_groupChangeCount == _groupChanges.Length) return;
+            _groupChanges[_groupChangeCount++] = new SetActionGroupMessage(hull, (byte)part, group);
+        }
+    }
+
+    internal bool ConsumeSetActionGroup(out SetActionGroupMessage message)
+    {
+        lock (_lock)
+        {
+            message = default;
+            if (_groupChangeCount == 0) return false;
+            message = _groupChanges[0];
+            Array.Copy(_groupChanges, 1, _groupChanges, 0, --_groupChangeCount);
+            return true;
+        }
+    }
+
     private bool _hasRockScrape;
     private RockScrapeRequest _rockScrape;
 

@@ -28,7 +28,7 @@ namespace Prospect.Game.Persistence;
 public static partial class WorldSnapshotCodec
 {
     /// <summary>The layout's version. A save with any other is refused; there are no migrations yet.</summary>
-    public const int Version = 18;
+    public const int Version = 20;
     internal const int ChartBytes = 4 + 12 + 8;
 
     /// <summary>"PWS1": tells a save from any other bytes before its version is believed.</summary>
@@ -75,7 +75,7 @@ public static partial class WorldSnapshotCodec
         for (var i = 0; i < snapshot.HullCount; i++)
             size += HullFixedBytes + snapshot.Hulls[i].Visual.Count * DentBytes;
         size += (long)snapshot.LossCount * sizeof(int) + (long)snapshot.BlockCount * sizeof(float) + (long)snapshot.TankCount * sizeof(double) + (long)snapshot.CargoCount * CargoRecordBytes + (long)snapshot.BayCount * BayBytes;
-        return size + (long)snapshot.FreeContainerCount * FreeContainerBytes + (long)snapshot.RockCount * RockBytes + (long)snapshot.ChartCount * ChartBytes + (long)snapshot.ModuleObservationCount * ModuleObservationBytes;
+        return size + MiningBytes(snapshot) + (long)snapshot.FreeContainerCount * FreeContainerBytes + (long)snapshot.RockCount * RockBytes + (long)snapshot.ChartCount * ChartBytes + (long)snapshot.ModuleObservationCount * ModuleObservationBytes;
     }
 
     /// <summary>Encodes a snapshot into an array of exactly its size.</summary>
@@ -244,6 +244,7 @@ public static partial class WorldSnapshotCodec
         foreach (var container in snapshot.FreeContainers.AsSpan(0, snapshot.FreeContainerCount)) WriteFreeContainer(ref writer, container);
 
         WriteRockEdits(ref writer, snapshot);
+        WriteMining(ref writer, snapshot);
 
         if (writer.Length != size)
             throw new InvalidDataException("The snapshot's counts do not describe its records.");
@@ -644,6 +645,8 @@ public static partial class WorldSnapshotCodec
             error = "invalid saved rock edits";
             return false;
         }
+
+        if (!ReadMining(ref reader, result, nextTick, out error)) return false;
 
         if (!reader.IsValid || reader.Remaining != 0 || result.BlockCount != blocks || result.LossCount != losses || result.TankCount != tanks || result.CargoCount != cargoCount || result.BayCount != bayCount)
         {

@@ -974,7 +974,11 @@ internal sealed partial class WorldView
         }
 
         if (!(inputEnabled && !editing && Mode == ViewMode.Pilot))
+        {
             _align.Clear();
+            // Only the pilot view fires; a scripted capture keeps its last aim so another view can watch the beam.
+            if (ScriptedFireGroup == 0) StopFiring(bridge);
+        }
         if (inputEnabled && !editing && Mode == ViewMode.Pilot)
         {
             controls.Strafe = _actions.Axis(_devices, InputAxis.Strafe, keyboard);
@@ -1045,7 +1049,11 @@ internal sealed partial class WorldView
             // The temporary debug scrape: held, it scrapes the rock at the view's centre. The server takes it in local games only.
             UpdateDebugScrape(bridge, dt, _actions.Held(_devices, InputAction.DebugScrape, keyboard), snapshot.Content.RockEdits.DebugRadiusMm);
 
-            var alignHeld = _actions.Held(_devices, InputAction.AlignToView, keyboard) || AlignLockOn;
+            // With a group on, the align button fires instead (WorldView.Lasers.cs); the lock still aligns. Firing
+            // needs the captured pointer and no jump, as aligning does; free look aims with the view.
+            var fireBlocked = _devices.SuppressMouse || Own.Jump != JumpPhase.None || Own.Order.Kind == OrderKind.Jump;
+            var mayAlign = UpdateFiring(snapshot, bridge, keyboard, fireBlocked);
+            var alignHeld = (mayAlign && _actions.Held(_devices, InputAction.AlignToView, keyboard)) || AlignLockOn;
             var nose = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
             if (_align.Update(alignHeld && !alignBlocked, alignBlocked, nose, _lookDirection))
                 controls.Align = true;
