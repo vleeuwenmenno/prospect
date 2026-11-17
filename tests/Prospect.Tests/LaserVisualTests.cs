@@ -10,8 +10,8 @@ using Xunit;
 namespace Prospect.Tests;
 
 /// <summary>
-/// What a mining laser and the ore it frees look like: the laser's model fits its thin box, points out of its face and
-/// has its lens; its look is refused when out of range; a beam's shader instance is built without memory; loose ore
+/// What a mining laser and the ore it frees look like: the laser's base fits its thin box, its turret's head turns
+/// clear of its yoke and lies along the beam, which leaves its lens; its look is refused when out of range; a beam's shader instance is built without memory; loose ore
 /// chunks are carried between the server's sets and drawn from one closed mesh.
 /// </summary>
 public sealed class LaserVisualTests
@@ -45,8 +45,9 @@ public sealed class LaserVisualTests
     }
 
     [Fact]
-    public void AMountedLasersModelStaysInsideItsBoxPointsOutOfItsFaceAndHasItsLens()
+    public void AMountedLasersBaseStaysInsideItsBoxOnItsFaceWithItsGlowSlots()
     {
+        var laser = Look.Laser!;
         foreach (var face in Directions)
         {
             var design = Mounted(face);
@@ -59,12 +60,14 @@ public sealed class LaserVisualTests
             var half = design.MountHalfExtents[0];
             var lo = design.MountOffsets[0] - half - new Vector3(1e-4f);
             var hi = design.MountOffsets[0] + half + new Vector3(1e-4f);
-            var outer = design.MountOffsets[0][axis] + sign * half[axis];
             var back = design.MountOffsets[0][axis] - sign * half[axis];
+            var small = MathF.Min(half[(axis + 1) % 3], half[(axis + 2) % 3]);
             foreach (var v in vertices)
             {
                 var p = Position(v);
                 Assert.True(p.X >= lo.X && p.Y >= lo.Y && p.Z >= lo.Z && p.X <= hi.X && p.Y <= hi.Y && p.Z <= hi.Z, $"{face}: {p}");
+                // What the hull mesh holds is the base: it stands on the block's face and ends where the yoke begins.
+                Assert.InRange((p[axis] - back) * sign, -1e-4f, laser.Turret.CollarOffset(small) + 1e-4f);
             }
 
             // Every triangle is wound to face the way its normal says.
@@ -75,26 +78,175 @@ public sealed class LaserVisualTests
                 Assert.True(Vector3.Dot(cross, new Vector3(a.Normal.X, a.Normal.Y, a.Normal.Z)) > 0, $"{face} triangle {i / 3}");
             }
 
-            // The lens is the one part that gives off light (a normal of 4.5 and over), a disc facing out of the face, set
-            // back from the outer face by the look's share of the depth and in the middle of the box.
-            var lens = vertices.Where(v => new Vector3(v.Normal.X, v.Normal.Y, v.Normal.Z).Length() >= 4.5f).ToArray();
-            Assert.NotEmpty(lens);
-            var depth = outer - back;
-            foreach (var v in lens)
-            {
-                var n = Vector3.Normalize(new Vector3(v.Normal.X, v.Normal.Y, v.Normal.Z));
-                Assert.Equal(sign, n[axis], 4);
-                Assert.Equal(back + sign * Look.Laser!.LensDepth * MathF.Abs(depth), Position(v)[axis], 4);
-            }
-
-            var centre = lens.Select(Position).Aggregate(Vector3.Zero, (sum, p) => sum + p) / lens.Length;
-            for (var k = 0; k < 3; k++)
-                if (k != axis)
-                    Assert.Equal(design.MountOffsets[0][k], centre[k], 3);
-            // Nothing stands out past the face the beam leaves from.
-            Assert.True(vertices.All(v => (Position(v)[axis] - outer) * sign <= 1e-4f));
-            Assert.Contains(vertices, v => MathF.Abs((Position(v)[axis] - outer) * sign) < 1e-4f);
+            // One lit panel a slot (a normal of 4.5 and over is light), four vertices each, looking along the face.
+            var lit = vertices.Where(v => new Vector3(v.Normal.X, v.Normal.Y, v.Normal.Z).Length() >= 4.5f).ToArray();
+            Assert.Equal(laser.Slots * 4, lit.Length);
+            Assert.All(lit, v => Assert.Equal(0f, Vector3.Normalize(new Vector3(v.Normal.X, v.Normal.Y, v.Normal.Z))[axis], 4));
         }
+    }
+
+    private static List<MeshVertex> Part(Action<List<MeshVertex>, List<uint>> build)
+    {
+        var vertices = new List<MeshVertex>();
+        var indices = new List<uint>();
+        build(vertices, indices);
+        Assert.NotEmpty(indices);
+        Assert.Equal(0, indices.Count % 3);
+        Assert.All(indices, index => Assert.True(index < vertices.Count));
+        for (var i = 0; i < indices.Count; i += 3)
+        {
+            var a = vertices[(int)indices[i]];
+            var cross = Vector3.Cross(Position(vertices[(int)indices[i + 1]]) - Position(a), Position(vertices[(int)indices[i + 2]]) - Position(a));
+            Assert.True(Vector3.Dot(cross, new Vector3(a.Normal.X, a.Normal.Y, a.Normal.Z)) > 0, $"triangle {i / 3}");
+        }
+        return vertices;
+    }
+
+    [Theory]
+    [InlineData(0.3f)]
+    [InlineData(0.075f)]
+    [InlineData(1.2f)]
+    public void TheTurretsHeadTurnsClearOfItsYokeAndTheBeamLeavesFromItsLens(float small)
+    {
+        var laser = Look.Laser!;
+        var turret = laser.Turret;
+        var r = turret.Radius(small);
+        var yoke = Part((v, i) => PropulsionModels.BuildTurretYoke(small, turret, v, i));
+        var head = Part((v, i) => PropulsionModels.BuildLaserHead(small, laser, v, i));
+        var lens = Part((v, i) => PropulsionModels.BuildLaserLens(small, laser, v, i));
+        var pivot = turret.PivotOffset(small) - turret.CollarOffset(small);
+        Assert.Equal(r * laser.YokeHeight, pivot, 5);
+
+        // The yoke's turntable and the brace between its arms are what the head's back could meet as it pitches about
+        // the trunnion (the x axis through the pivot); the arms stand either side of it.
+        var table = yoke.Where(v => MathF.Abs(v.Position.X) < r * 0.3f && v.Position.Y > -r * 0.2f).Max(v => v.Position.Z);
+        var brace = yoke.Where(v => v.Position.Y < -r * 0.2f && v.Position.Z > r * 0.07f && v.Position.Z < r * 0.3f)
+            .Min(v => MathF.Sqrt(v.Position.Y * v.Position.Y + (v.Position.Z - pivot) * (v.Position.Z - pivot)));
+        var arms = yoke.Where(v => v.Position.Z > pivot - r * 0.3f).Min(v => MathF.Abs(v.Position.X));
+        var swing = head.Where(v => v.Position.Z < 0).Max(v => MathF.Sqrt(v.Position.Y * v.Position.Y + v.Position.Z * v.Position.Z));
+        Assert.True(swing < pivot - table, $"head swings {swing}, room over the turntable {pivot - table}");
+        Assert.True(swing < brace, $"head swings {swing}, the brace is {brace} from the trunnion");
+        Assert.True(head.Max(v => MathF.Abs(v.Position.X)) <= arms + 1e-5f);
+
+        // Pitched as far as it goes, either way, no part of the head dips into the turntable.
+        var limit = laser.MaxPitch * MathF.PI / 180f;
+        foreach (var pitch in new[] { limit, -limit })
+            Assert.All(head, v => Assert.True(v.Position.Z * MathF.Cos(pitch) - v.Position.Y * MathF.Sin(pitch) > table - pivot));
+
+        // The lens is the front of the lit part, inside the muzzle's ring and a little behind its lip: where the beam starts.
+        var offset = PropulsionModels.LaserLensOffset(small, laser);
+        Assert.Equal(offset, lens.Max(v => v.Position.Z), 5);
+        Assert.True(offset < head.Max(v => v.Position.Z));
+        Assert.True(offset > head.Max(v => v.Position.Z) - r * laser.MuzzleLength);
+        Assert.All(lens, v => Assert.True(MathF.Sqrt(v.Position.X * v.Position.X + v.Position.Y * v.Position.Y) < r * laser.MuzzleRadius * 0.8f));
+        // The barrel is the long thin end: past the body, narrower than it.
+        Assert.Equal(r * (laser.HeadFront + laser.BarrelLength), head.Max(v => v.Position.Z), 5);
+        Assert.All(head.Where(v => v.Position.Z > r * laser.HeadFront + 1e-5f), v => Assert.True(MathF.Abs(v.Position.Y) <= r * laser.MuzzleRadius + 1e-5f));
+        // Light strips on the barrel's two sides: the head's only light of its own.
+        Assert.Equal(8, head.Count(v => new Vector3(v.Normal.X, v.Normal.Y, v.Normal.Z).Length() >= 4.5f));
+    }
+
+    // The way a head aims in its face's frame once the yoke is turned and the head pitched, as the draw turns them.
+    private static Vector3 Aim(float azimuth, float pitch) =>
+        new(-MathF.Sin(azimuth) * MathF.Sin(pitch), MathF.Cos(azimuth) * MathF.Sin(pitch), MathF.Cos(pitch));
+
+    [Fact]
+    public void TheTurretLaysItsBarrelAlongTheBeamWithoutSpinningItsYoke()
+    {
+        var limit = 75f * MathF.PI / 180f;
+        var random = new Random(7);
+        for (var i = 0; i < 2000; i++)
+        {
+            // Any aim within the gimbal, from any turn of the yoke.
+            var off = (2f + 38f * random.NextSingle()) * MathF.PI / 180f;
+            var round = random.NextSingle() * MathF.Tau;
+            var to = new Vector3(MathF.Cos(round) * MathF.Sin(off), MathF.Sin(round) * MathF.Sin(off), MathF.Cos(off)) * (1f + 50f * random.NextSingle());
+            var current = (random.NextSingle() - 0.5f) * MathF.Tau;
+            WorldView.LaserTurretAim(to, current, limit, out var azimuth, out var pitch);
+            Assert.True(Vector3.Dot(Aim(azimuth, pitch), Vector3.Normalize(to)) > 0.99999f);
+            Assert.True(MathF.Abs(MathF.IEEERemainder(azimuth - current, MathF.Tau)) <= 0.5f * MathF.PI + 1e-4f);
+            Assert.InRange(MathF.Abs(pitch), 0f, limit);
+        }
+
+        // An aim that crosses the normal pitches the head through it: the yoke does not turn.
+        WorldView.LaserTurretAim(new Vector3(0f, 0.3f, 1f), 0f, limit, out var before, out var up);
+        WorldView.LaserTurretAim(new Vector3(0f, -0.3f, 1f), before, limit, out var after, out var down);
+        Assert.Equal(before, after, 5);
+        Assert.Equal(up, -down, 5);
+        // Straight out of the face, and within the deadband of it, the yoke stays and the head points straight out.
+        WorldView.LaserTurretAim(new Vector3(0.01f, -0.01f, 1f), 1.2f, limit, out var kept, out var straight);
+        Assert.Equal((1.2f, 0f), (kept, straight));
+        // Past what the head can pitch it stops there.
+        WorldView.LaserTurretAim(new Vector3(0f, 1f, 0.01f), 0f, limit, out _, out var most);
+        Assert.Equal(limit, most, 5);
+    }
+
+    [Fact]
+    public void AnIdleLaserPointsStraightOutWithItsTopTowardTheNose()
+    {
+        foreach (var face in Directions)
+        {
+            var azimuth = WorldView.LaserRestAzimuth(face);
+            var axis = Facings.Axis(face);
+            var n = Facings.Vector(face);
+            var u = Vector3.Zero;
+            u[(axis + 1) % 3] = 1f;
+            var v = Vector3.Cross(n, u);
+            // The head's top is its -Y; the yoke turns it about the normal.
+            var top = u * MathF.Sin(azimuth) - v * MathF.Cos(azimuth);
+            var ahead = axis == Facings.Axis(BlockFacing.Front) ? Vector3.UnitY : Facings.Vector(BlockFacing.Front);
+            Assert.Equal(1f, Vector3.Dot(top, ahead), 4);
+        }
+    }
+
+    [Fact]
+    public void TheLensBrightensWhileItFiresAndTurnsHotWithHeat()
+    {
+        var laser = Look.Laser!;
+        var idle = laser.LensLight(0f, 0f, 0f);
+        var firing = laser.LensLight(1f, 0f, 0f);
+        var hot = laser.LensLight(0f, 1f, 0f);
+        Assert.True(firing.X > idle.X * 2f);
+        Assert.Equal(firing.Y / firing.X, idle.Y / idle.X, 4);
+        // Heat adds light of its own and reddens it: less green for the same red.
+        Assert.True(hot.X > idle.X);
+        Assert.True(hot.Y / hot.X < idle.Y / idle.X);
+
+        var allocation = new AllocationProbe();
+        while (allocation.Measuring())
+            laser.LensLight(0.5f, 0.5f, 1.25f);
+        Assert.Equal(0, allocation.Bytes);
+    }
+
+    [Fact]
+    public void ATurretsPartsAreBuiltOnAWorkerOnceAKindAndFoundWithoutTakingMemory()
+    {
+        using var jobs = new Prospect.Engine.Jobs.JobSystem(1, "Turrets");
+        var models = new PartModels(jobs, Look);
+        models.Begin();
+        Assert.False(models.TryGetTurret(TurretKind.Laser, 0.3f, out _, out _, out _));
+        Assert.False(models.TryGetTurret(TurretKind.Tractor, 0.3f, out _, out _, out _));
+        Assert.False(models.TryGetTurret(TurretKind.None, 0.3f, out _, out _, out _));
+        models.Flush();
+        jobs.CompleteAll();
+        models.Begin();
+        Assert.True(models.TryGetTurret(TurretKind.Laser, 0.3f, out var yoke, out var head, out var lens));
+        Assert.True(models.TryGetTurret(TurretKind.Tractor, 0.3f, out var tractorYoke, out var tractorHead, out var bars));
+        Assert.Equal(2, models.Built);
+        // A mount of the same width gets a turret of its own kind: the laser's long head is not the tractor's.
+        Assert.True(yoke.Length > 0 && head.Length > 0 && lens.Length > 0 && tractorYoke.Length > 0 && bars.Length > 0);
+        Assert.NotEqual(head.Length, tractorHead.Length);
+        Assert.Equal(0, head.Length % 3);
+
+        var allocation = new AllocationProbe();
+        while (allocation.Measuring())
+        {
+            models.Begin();
+            models.TryGetTurret(TurretKind.Laser, 0.3f, out _, out _, out _);
+            models.TryGetTurret(TurretKind.Tractor, 0.3f, out _, out _, out _);
+            models.Flush();
+        }
+        Assert.Equal(0, allocation.Bytes);
     }
 
     [Fact]
@@ -102,11 +254,18 @@ public sealed class LaserVisualTests
     {
         Look.Laser!.Check("test");
         new LaserLook().Check("test");
-        Assert.Throws<InvalidDataException>(() => new LaserLook { Sides = 4 }.Check("test"));
-        Assert.Throws<InvalidDataException>(() => new LaserLook { Coils = 0 }.Check("test"));
-        Assert.Throws<InvalidDataException>(() => new LaserLook { LensDepth = 0.5f, MuzzleStart = 0.6f }.Check("test"));
-        Assert.Throws<InvalidDataException>(() => new LaserLook { LensRadius = 0.9f, MuzzleRadius = 0.8f }.Check("test"));
+        Assert.Throws<InvalidDataException>(() => new LaserLook { BaseSides = 7 }.Check("test"));
+        Assert.Throws<InvalidDataException>(() => new LaserLook { Slots = 9 }.Check("test"));
+        // A head wider than the gap between the arms, one whose back would swing through the yoke, a muzzle no wider
+        // than its barrel, a lens that does not fit its muzzle, and a pitch that would put the muzzle in the turntable.
+        Assert.Throws<InvalidDataException>(() => new LaserLook { HeadWidth = 0.56f }.Check("test"));
+        Assert.Throws<InvalidDataException>(() => new LaserLook { YokeHeight = 0.6f }.Check("test"));
+        Assert.Throws<InvalidDataException>(() => new LaserLook { HeadBack = 0.7f }.Check("test"));
+        Assert.Throws<InvalidDataException>(() => new LaserLook { MuzzleRadius = 0.2f }.Check("test"));
+        Assert.Throws<InvalidDataException>(() => new LaserLook { LensRadius = 0.35f }.Check("test"));
+        Assert.Throws<InvalidDataException>(() => new LaserLook { MaxPitch = 89f }.Check("test"));
         Assert.Throws<InvalidDataException>(() => new LaserLook { LensColor = 0x1000000 }.Check("test"));
+        Assert.Throws<InvalidDataException>(() => new LaserLook { IdleGlow = 3f, ActiveGlow = 2f }.Check("test"));
         Assert.Throws<InvalidDataException>(() => new LaserLook { Beam = new LaserBeamLook { Sparks = LaserBeamLook.MaxSparks + 1 } }.Check("test"));
         Assert.Throws<InvalidDataException>(() => new LaserLook { Beam = new LaserBeamLook { CoreWidth = 0.5f, GlowWidth = 0.1f } }.Check("test"));
         Assert.Throws<InvalidDataException>(() => new LaserLook { Beam = new LaserBeamLook { FadeStart = 1f } }.Check("test"));

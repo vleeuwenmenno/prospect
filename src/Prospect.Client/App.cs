@@ -217,6 +217,12 @@ internal sealed class AppOptions
     /// </summary>
     public System.Numerics.Vector3? DroneCamera { get; set; }
 
+    /// <summary>
+    /// Scripted runs only (<c>--laser-camera</c>): the command camera's distance in metres, yaw and pitch in degrees,
+    /// held on the flown hull's first mining laser (once its beam is on, in a run that fires); null leaves the camera alone.
+    /// </summary>
+    public System.Numerics.Vector3? LaserCamera { get; set; }
+
     /// <summary>Scripted runs only (<c>--drone-scan-hold</c>): seconds the drones are left in place, ready, before the scan is ordered.</summary>
     public float DroneScanHold { get; set; }
 
@@ -414,6 +420,7 @@ internal sealed class App : IDisposable
     private readonly Texture2D _galaxyImage;
     private long _lastFrameTimestamp;
     private bool _viewOpened;
+    private bool _laserCameraOn;
 
     // A capture of the New ship dialog first leaves the pod in the drone, then opens the dialog once it flies it.
     private string? _newShipView;
@@ -1569,6 +1576,7 @@ internal sealed class App : IDisposable
                     World.PlaceHeldPartForCapture();
                 if (view is "edit-laser" or "edit-laser-group")
                     _screens.SearchEditorParts("laser");
+                World.CaptureGhostDistance = _options.Zoom;
                 _screens.SelectEditorTab(view == "edit-scanner" ? "Sensors" : "Storage");
             }
             else if (view is "edit-palette-tip" or "edit-tank-fuel" && snapshot is { OwnHull: >= 0 })
@@ -1906,6 +1914,10 @@ internal sealed class App : IDisposable
             // A work drone seen close, wherever it flies.
             if (_options.DroneCamera is { } droneCamera && _viewOpened)
                 World.SetDroneCapturePose(droneCamera.X, droneCamera.Y * (MathF.PI / 180f), droneCamera.Z * (MathF.PI / 180f));
+            // A mining laser's turret seen close; a run that fires aims in the pilot view first, so the beam keeps that aim.
+            _laserCameraOn |= fireGroup is null || snapshot is { LaserBeamCount: > 0 };
+            if (_options.LaserCamera is { } laserCamera && (_viewOpened || _options.OpenView is null) && _sinceSplash > 1f && _laserCameraOn)
+                World.SetLaserCapturePose(laserCamera.X, laserCamera.Y * (MathF.PI / 180f), laserCamera.Z * (MathF.PI / 180f));
             if (_capturesTaken < count && rtsReady && (_options.CaptureHitAge is not { } hitAge || World.Own.ShieldHit.Strength > 0 && World.Own.ShieldHitAge >= hitAge) && captureClock >= due && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
             {
                 ShowPerformance |= Session is not null && _options.MountSize is null && _options.OpenView is not ("controls" or "players" or "social" or "friends" or "chat" or "hud" or "interface" or "charts" or "pinned-charts" or "inventory" or "edit-tank-fuel" or "edit-laser-group");

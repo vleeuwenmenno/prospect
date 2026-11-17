@@ -77,7 +77,9 @@ rich ore lies near the surface (green) or an unstable pocket lies under it (red)
 with the world; the drones come home and are used again. Not built: giants (they need over a hundred drones), drone
 power use for a scan, and checking places against other rocks or ships.
 
-Rocks can be mined with a mining laser: a small part mounted on a block's face, in an action group (1 to 9 and 0)
+Rocks can be mined with a mining laser: a small turret mounted on a block's face (a base ring, a yoke and a head with
+an octagonal barrel that turns and tilts to lie along its beam, and rests pointing straight out; its lens brightens
+while it fires and reddens as it heats), in an action group (1 to 9 and 0)
 chosen per part in the editor. The number keys turn groups on and off; while any group is on, the left mouse button
 fires every group that is on at the view's centre, and with all off it turns the hull onto the view as before. A
 laser reaches 60 m, turns at most 40° off its face, draws 6 MW while it fires, and cuts a groove 1 m wide into the
@@ -119,7 +121,9 @@ Fuel is kept tank by tank: thrust draws from every tank of its fuel in proportio
 that is destroyed loses what it held. Nothing refuels a ship yet: only a first spawn starts with full tanks. An edit
 keeps the fuel of every tank that is still there and a new tank starts empty; a repair restores blocks, not fuel,
 so a tank it builds again is empty; a ship built new from the drone starts empty. A design has at most 255 tanks. Engines and both
-thruster kinds have low-poly models of their own: an engine fills its block flush, a hot thruster is a pod on a faceted plate,
+thruster kinds have low-poly models of their own: an engine fills its block flush (a square bolted mount plate, a ring collar
+with orange bands and a cyan light on each side, and an eight-sided bell whose cyan-lit throat glows brighter with thrust; the
+bell does not gimbal), a hot thruster is a pod on a faceted plate,
 and a cold gas thruster is an array: a stepped grey plate with orange corner caps and a cyan slot in each side, carrying
 one, two by two or three by three short flared nozzle cups, whichever size it was placed in. Thrust, fuel burn, power
 draw and mass follow the nozzle count (25 kN a nozzle; the two by two array is what the old single thruster was). The cyan

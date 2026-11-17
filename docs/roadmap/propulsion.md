@@ -254,9 +254,12 @@ Built. Rules live in `FlightModel.Step`; `PropulsionTests`, `PowerFlowTests` and
   models").
 - **Models** (`PropulsionModels`): low poly, built on a worker, never in a frame.
   - A pure function of the part's box (`PartBox`), its facing and the cell size. A thin face mount works the same way.
-  - Engines: a square mount block covers the whole mounting face and the box's sides, so neighbours meet it flush;
-    then an octagonal housing with panel seams, corner pipes and a bevelled front, a collar with four gusset
-    brackets, a throat ring and a faceted bell (10 to 12 sides, 3 to 4 rings).
+  - Engines (`bell` in the entry, `BellLook`): a square bolted mount plate covers the whole mounting face, so
+    neighbours meet it flush; then, a nozzle, a ring collar (16 sides, orange bands over its top and bottom, a cyan
+    light on each side) and a faceted bell (8 sides, 3 rings) whose lining is lit cyan near the throat. A box deeper
+    than plate, collar and bell need grows an octagonal housing with panel seams and corner pipes between plate and
+    collar. The throat glows brighter with thrust: an unlit part drawn over the lining of each firing nozzle. The
+    bell is static: it does not gimbal.
   - The engine's face is split into nozzles, squares of its shorter side (a 2 by 1 face has two bells). A nozzle's
     exit follows its share of the face; its length follows its exit, capped by a share of the depth. A deeper box
     grows its body, never its bell.
@@ -271,7 +274,8 @@ Built. Rules live in `FlightModel.Step`; `PropulsionTests`, `PowerFlowTests` and
     it. An ion drive's body is the engine's mount block and octagonal housing. No collar.
   - Every facet has vertices of its own: flat shading. Bare metal rides in the length of the normal (`mesh.vert`).
   - Housings are bare metal of mid grey (`housingShade` about 0.3), nozzles darker, throats near black. Metal shines
-    with its shade, so a dark facet never flashes white.
+    with its shade, so a dark facet never flashes white. An engine's plate, collar and bell are painted instead
+    (dark charcoal, grey rings, orange bands); paint and light colours are linear values.
 - **Hull light** (`mesh.frag`, every hull): the star is held below the tone curve's shoulder (0.72 of its light),
   so sunlit facets stay apart instead of all reading white. A cool fill that turns with the facet, strongest facing
   away from the star, keeps the shaded side readable. Asteroids keep their own light.

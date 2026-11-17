@@ -73,6 +73,10 @@ internal sealed class TractorLook
     public float ReachGapLength { get; init; } = 5f;
     public float ReachArrowSize { get; init; } = 8f;
 
+    /// <summary>The base ring and yoke of the turret, as the shared turret models take them.</summary>
+    public TurretFrame Turret => new(TurretBaseRadius, TurretBaseHeight, 8, TurretSlots, TurretYokeHeight, TurretYokeSpread, 0.085f, 0.19f,
+        TurretBodyColor, TurretDarkColor, TurretAccentColor, TurretLensColor);
+
     public TractorLookConstants Constants => new()
     {
         Strand = new float4(LinearColor(StrandColor), StrandWidth),

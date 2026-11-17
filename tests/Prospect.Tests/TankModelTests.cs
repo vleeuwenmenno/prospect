@@ -254,27 +254,37 @@ public sealed class TankModelTests
         var mesh = MeshBuilder.Hull(design, Look);
         Assert.True(Painted(mesh.Vertices) > 0);
 
-        // A damaged hull draws the same vessels while it has the tanks, and none once they are lost.
+        // A damaged hull draws the same vessels while it has the tanks, and none once they are lost. Tanks are not the
+        // only painted parts (an engine's plate, collar and bell are painted too), so what goes is the tanks' own paint.
         var alive = design.FullSet.ToArray();
         var whole = DamageMesh.Build(design, alive, default, 400000, 0.2f)!;
         Assert.Equal(Painted(mesh.Indices.Select(i => mesh.Vertices[(int)i])), Painted(whole.Original));
+        var tanks = 0;
         for (var b = 0; b < design.BlockCount; b++)
-            if (design.Types[b].Tank != FuelKind.None)
-                BlockSet.Remove(alive, b);
+        {
+            if (design.Types[b].Tank == FuelKind.None)
+                continue;
+            var vertices = new List<MeshVertex>();
+            var indices = new List<uint>();
+            Assert.True(PropulsionModels.Add(design, b, Look, vertices, indices, null));
+            tanks += Painted(indices.Select(i => vertices[(int)i]));
+            BlockSet.Remove(alive, b);
+        }
+        Assert.True(tanks > 0);
         var without = DamageMesh.Build(design, alive, default, 400000, 0.2f)!;
 
-        // What paint is left is not a vessel's: the caps of the cold gas arrays on the blocks the hull still has.
-        var caps = 0;
+        // A cold gas array's caps are painted too, and those on a tank go with it.
+        var capsOnTanks = 0;
         for (var m = 0; m < design.Mounts.Length; m++)
         {
-            if (design.Types[design.Mounts[m].Parent].Tank != FuelKind.None)
+            if (design.Types[design.Mounts[m].Parent].Tank == FuelKind.None)
                 continue;
             var vertices = new List<MeshVertex>();
             var indices = new List<uint>();
             if (PropulsionModels.AddMount(design, m, Look, vertices, indices, null))
-                caps += Painted(indices.Select(i => vertices[(int)i]));
+                capsOnTanks += Painted(indices.Select(i => vertices[(int)i]));
         }
 
-        Assert.Equal(caps, Painted(without.Original));
+        Assert.Equal(Painted(whole.Original) - tanks - capsOnTanks, Painted(without.Original));
     }
 }

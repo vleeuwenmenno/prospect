@@ -1266,7 +1266,7 @@ internal sealed partial class WorldView
         Array.Clear(_meshCounts);
         _damage.Begin(snapshot.Hulls.AsSpan(0, snapshot.HullCount));
         _partModels.Begin();
-        BeginTractorTurrets(time);
+        BeginTurrets(time);
         _scene.BeginDamage();
         VisibleHulls = DrawnDents = DamageFallbacks = GeneratedRocks = VisibleRocks = 0;
         foreach (var slot in _slots)
@@ -1333,6 +1333,7 @@ internal sealed partial class WorldView
             var material = Material(visual.Inside, visual.Inside ? -1 : visual.Clip);
             DrawCargo(frameIndex, design, hull.Cargo.Span, position, orientation, material, stretch);
             DrawTractorTurrets(frameIndex, snapshot, hull, design, camera, position, orientation, material, stretch);
+            DrawLaserTurrets(frameIndex, snapshot, hull, design, position, orientation, material, stretch);
             // The shield goes where the hull goes, drawn out and cut with it by the same material.
             _shields.Add(hull.Id, position, orientation, stretch, material, shieldInstances, shieldVertices, shieldIndices);
             var pixels = design.Flight.Radius * _viewport.Y / (Math.Max(position.Length(), 1f) * _tanHalfFov);
@@ -1413,6 +1414,7 @@ internal sealed partial class WorldView
         _partModels.Flush();
         DrawnPlumes = _thrust.End();
         _scene.QueuePlumes(DrawnPlumes);
+        DrawNozzleGlow(frameIndex);
         // GPU upload memory is write-combined: geometry queries and sorting must read the CPU caches, never it.
         ShieldExhaust.Apply(_thrust.Capsules.AsSpan(0, DrawnPlumes), _thrust.Instances, _shields.Draws, _shields.ExhaustInstances,
             _shields.ExhaustVertices, _shields.ExhaustIndices, _exhaustData, time, _shields.Bounds);
@@ -1525,7 +1527,7 @@ internal sealed partial class WorldView
             Dust = new float4(Wrap(camera.X, DustCell), Wrap(camera.Y, DustCell), Wrap(camera.Z, DustCell), time),
             Drift = new float4(velocity.X, velocity.Y, velocity.Z, velocity.Length()),
             Grid = new float4(Wrap(camera.X, 1000), Wrap(camera.Z, 1000), Wrap(camera.X, sectorSize), Wrap(camera.Z, sectorSize)),
-            GridPlane = new float4((float)(_commandFocus.Y - camera.Y), (float)sectorSize, !CaptureFixture && _scrapeScriptPasses == 0 ? _commandBlend : 0, Exposure),
+            GridPlane = new float4((float)(_commandFocus.Y - camera.Y), (float)sectorSize, !CaptureFixture && _scrapeScriptPasses == 0 && !_laserCapture ? _commandBlend : 0, Exposure),
             Openings = openings,
             Clips = clips,
         };
@@ -3821,6 +3823,9 @@ internal sealed partial class WorldView
     private string? _capturePart;
     private GridSize _capturePartSize;
 
+    /// <summary>Capture only: <c>--zoom</c> on a view that holds a mounted part's ghost puts the editor's camera this many metres from it.</summary>
+    public float? CaptureGhostDistance { get; set; }
+
     // --open edit-laser-group: once the held mining laser's ghost has room, the harness clicks it into place through the
     // editor's own Click, lets go of the part and selects what it placed, so the details panel shows the group selector.
     private bool _capturePlaceThenSelect;
@@ -4140,14 +4145,24 @@ internal sealed partial class WorldView
             }
 
             if (best >= 0)
-                Editor.SetHover(new DraftHit(best, 2, boxes[best].At, 0f, EditorGeometry.Middle(boxes[best]) + new Vector3(0.22f, boxes[best].Size.Y * 0.5f, 0.2f)));
+            {
+                var held = EditorGeometry.Middle(boxes[best]) + new Vector3(0.22f, boxes[best].Size.Y * 0.5f, 0.2f);
+                Editor.SetHover(new DraftHit(best, 2, boxes[best].At, 0f, held));
+                // A close capture looks at the held part from that far, nearer than the editor lets a player come.
+                if (CaptureGhostDistance is { } near && Editor.Source is { } source)
+                {
+                    _editPan = _editPanGoal = EditorGeometry.ToHull(held, source.Pivot, source.BlockSize);
+                    _editDistance = _editDistanceGoal = near;
+                    _editFocusing = false;
+                }
+            }
 
             // A capture that names a size (--mount-size) is about the part: the camera closes on the ghost once.
-            if (_captureMountSize > 0 && !_captureFocused && Editor.HasMountGhost && Editor.Source is { } source && (uint)Editor.GhostMount.Parent < (uint)boxes.Length)
+            if (_captureMountSize > 0 && !_captureFocused && Editor.HasMountGhost && Editor.Source is { } sized && (uint)Editor.GhostMount.Parent < (uint)boxes.Length)
             {
                 EditorGeometry.MountBounds(boxes[Editor.GhostMount.Parent], Editor.GhostMount, out var low, out var high);
-                _editPanGoal = EditorGeometry.ToHull((low + high) * 0.5f, source.Pivot, source.BlockSize);
-                _editDistanceGoal = 2.2f * source.BlockSize;
+                _editPanGoal = EditorGeometry.ToHull((low + high) * 0.5f, sized.Pivot, sized.BlockSize);
+                _editDistanceGoal = 2.2f * sized.BlockSize;
                 _editFocusing = true;
                 _captureFocused = true;
             }
@@ -5239,8 +5254,7 @@ internal sealed partial class WorldView
             if (_partModels.TryGet(mount.Type, BlockShape.Box, size * 0.5f, mount.Face, source.BlockSize, out var model)
                 && _scene.AddTriangles(frameIndex, model, MeshTransform(at, orientation, Vector3.One, color, material, 1f)))
             {
-                if (mount.Type.Tractor is not null)
-                    DrawIdleTractorTurret(frameIndex, at, mount.Face, size * 0.5f, orientation, color, material);
+                DrawIdleTurret(frameIndex, mount.Type, at, mount.Face, size * 0.5f, orientation, color, material);
                 continue;
             }
             Add(ref count, _cubeMesh, at, orientation, size, color, material);
@@ -5313,8 +5327,7 @@ internal sealed partial class WorldView
         var place = hull + Vector3.Transform(EditorGeometry.ToHull((low + high) * 0.5f, source.Pivot, source.BlockSize), orientation);
         var shade = Vector3.Lerp(EditorGeometry.BlockColor(source.Color, mount.Type), tone, 0.35f);
         _scene.AddTriangles(frameIndex, mounted, MeshTransform(place, orientation, Vector3.One, shade, material, 1f));
-        if (mount.Type.Tractor is not null)
-            DrawIdleTractorTurret(frameIndex, place, mount.Face, extent * 0.5f, orientation, shade, material);
+        DrawIdleTurret(frameIndex, mount.Type, place, mount.Face, extent * 0.5f, orientation, shade, material);
     }
 
     /// <summary>A point of the draft's grid in the world, where the edited hull is drawn this frame.</summary>

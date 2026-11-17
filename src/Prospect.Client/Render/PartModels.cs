@@ -33,10 +33,11 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
 
     private struct TurretEntry
     {
+        public TurretKind Kind;
         public float Small;
         public MeshVertex[]? Yoke;
         public MeshVertex[]? Head;
-        public MeshVertex[]? Bars;
+        public MeshVertex[]? Light;
         public bool Queued;
         public long Used;
     }
@@ -84,6 +85,43 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
         var look = _ore.Look;
         vertices = _ore.Results[(int)((uint)variant % look.Variants) * _ore.Bands + Math.Clamp(band, 0, _ore.Bands - 1)];
         return true;
+    }
+
+    private readonly GlowBuild _glow = new(look);
+    private JobHandle _glowHandle;
+    private bool _glowStarted, _glowReady;
+
+    /// <summary>
+    /// The light of a bell's throat under thrust, for the look at <paramref name="slot"/> of
+    /// <see cref="PropulsionLook.GlowModels"/> (<see cref="ThrustNozzle.Glow"/>): one model a look, for a nozzle of exit
+    /// radius 1 and length 1 (<see cref="PropulsionModels.BuildEngineGlow"/>). False while the worker has not
+    /// finished. Allocates nothing.
+    /// </summary>
+    public bool TryGetNozzleGlow(int slot, out ReadOnlySpan<MeshVertex> vertices)
+    {
+        vertices = default;
+        if (!_glowReady || (uint)slot >= (uint)_glow.Results.Length)
+            return false;
+        vertices = _glow.Results[slot];
+        return vertices.Length > 0;
+    }
+
+    private sealed class GlowBuild(PropulsionLook look) : IJob
+    {
+        public readonly MeshVertex[][] Results = new MeshVertex[look.GlowModels.Length][];
+
+        public void Run()
+        {
+            var vertices = new List<MeshVertex>();
+            var indices = new List<uint>();
+            for (var i = 0; i < Results.Length; i++)
+            {
+                vertices.Clear();
+                indices.Clear();
+                PropulsionModels.BuildEngineGlow(look.GlowModels[i], look.GlowModels[i].Bell!, vertices, indices);
+                Results[i] = Soup(vertices, indices);
+            }
+        }
     }
 
     private readonly DroneBuild _drone = new(look);
@@ -215,6 +253,8 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
         if (!_containersReady && jobs.IsComplete(_containerHandle)) _containersReady = true;
         if (!_oreStarted) { _oreHandle = jobs.Schedule(_ore, 2); _oreStarted = true; }
         if (!_oreReady && jobs.IsComplete(_oreHandle)) _oreReady = true;
+        if (!_glowStarted) { _glowHandle = jobs.Schedule(_glow, 2); _glowStarted = true; }
+        if (!_glowReady && jobs.IsComplete(_glowHandle)) _glowReady = true;
         if (_drone.Design is not null && !_droneStarted) { _droneHandle = jobs.Schedule(_drone, 2); _droneStarted = true; }
         if (_droneStarted && !_droneReady && jobs.IsComplete(_droneHandle)) _droneReady = true;
         if (!_pending || !jobs.IsComplete(_handle))
@@ -222,20 +262,20 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
         _pending = false;
         for (var i = 0; i < _build.Count; i++)
         {
-            if (_build.IsTurret[i])
+            if (_build.Turrets[i] != TurretKind.None)
             {
                 ref var tEntry = ref _turrets[_build.Slots[i]];
                 tEntry.Queued = false;
-                if (tEntry.Small == _build.Cells[i])
+                if (tEntry.Kind == _build.Turrets[i] && tEntry.Small == _build.Cells[i])
                 {
                     tEntry.Yoke = _build.Results[i];
                     tEntry.Head = _build.HeadResults[i];
-                    tEntry.Bars = _build.BarResults[i];
+                    tEntry.Light = _build.LightResults[i];
                     Built++;
                 }
                 _build.Results[i] = null;
                 _build.HeadResults[i] = null;
-                _build.BarResults[i] = null;
+                _build.LightResults[i] = null;
                 continue;
             }
             ref var entry = ref _entries[_build.Slots[i]];
@@ -288,7 +328,7 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
         _entries[free] = new Entry { Type = type, Half = half, Facing = facing, Cell = cell, Queued = true, Used = _frame };
         var at = _build.Count++;
         _build.Slots[at] = free;
-        _build.IsTurret[at] = false;
+        _build.Turrets[at] = TurretKind.None;
         _build.Types[at] = type;
         _build.Halves[at] = half;
         _build.Facings[at] = facing;
@@ -297,32 +337,40 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
     }
 
     /// <summary>
-    /// Returns the worker-built yoke, emitter head and emitter bars of a tractor turret of half-width
-    /// <paramref name="small"/>; false while queued. Allocates nothing.
+    /// Returns the worker-built parts of a posed turret of <paramref name="kind"/> on a mount of half-width
+    /// <paramref name="small"/>: its yoke, its head and the part of the head that is drawn as light (the tractor's
+    /// emitter bars, the laser's lens). False, after asking for them, while they are not built, and for a kind the
+    /// look has no turret for. Allocates nothing.
     /// </summary>
-    public bool TryGetTractorTurret(float small, out ReadOnlySpan<MeshVertex> yoke, out ReadOnlySpan<MeshVertex> head, out ReadOnlySpan<MeshVertex> bars)
+    public bool TryGetTurret(TurretKind kind, float small, out ReadOnlySpan<MeshVertex> yoke, out ReadOnlySpan<MeshVertex> head, out ReadOnlySpan<MeshVertex> light)
     {
         yoke = default;
         head = default;
-        bars = default;
-        if (small <= 0 || look.Tractor is null || !look.Models.ContainsKey("tractorBeam"))
+        light = default;
+        var has = kind switch
+        {
+            TurretKind.Tractor => look.Tractor is not null && look.Models.ContainsKey("tractorBeam"),
+            TurretKind.Laser => look.Laser is not null,
+            _ => false,
+        };
+        if (small <= 0 || !has)
             return false;
         var free = -1;
         var oldest = long.MaxValue;
         for (var i = 0; i < _turrets.Length; i++)
         {
             ref var entry = ref _turrets[i];
-            if (entry.Small == small)
+            if (entry.Kind == kind && entry.Small == small)
             {
                 entry.Used = _frame;
-                if (entry.Yoke is null || entry.Head is null || entry.Bars is null)
+                if (entry.Yoke is null || entry.Head is null || entry.Light is null)
                     return false;
                 yoke = entry.Yoke;
                 head = entry.Head;
-                bars = entry.Bars;
+                light = entry.Light;
                 return true;
             }
-            var age = entry.Small <= 0 ? long.MinValue : entry.Used;
+            var age = entry.Kind == TurretKind.None ? long.MinValue : entry.Used;
             if (!entry.Queued && entry.Used < _frame && age < oldest)
             {
                 oldest = age;
@@ -331,10 +379,10 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
         }
         if (free < 0 || _pending || _build.Count == Batch)
             return false;
-        _turrets[free] = new TurretEntry { Small = small, Queued = true, Used = _frame };
+        _turrets[free] = new TurretEntry { Kind = kind, Small = small, Queued = true, Used = _frame };
         var at = _build.Count++;
         _build.Slots[at] = free;
-        _build.IsTurret[at] = true;
+        _build.Turrets[at] = kind;
         _build.Cells[at] = small;
         return false;
     }
@@ -364,14 +412,14 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
         public int Count;
         public bool CargoPreview;
         public readonly int[] Slots = new int[Batch];
-        public readonly bool[] IsTurret = new bool[Batch];
+        public readonly TurretKind[] Turrets = new TurretKind[Batch];
         public readonly BlockType?[] Types = new BlockType?[Batch];
         public readonly Vector3[] Halves = new Vector3[Batch];
         public readonly BlockFacing[] Facings = new BlockFacing[Batch];
         public readonly float[] Cells = new float[Batch];
         public readonly MeshVertex[]?[] Results = new MeshVertex[]?[Batch];
         public readonly MeshVertex[]?[] HeadResults = new MeshVertex[]?[Batch];
-        public readonly MeshVertex[]?[] BarResults = new MeshVertex[]?[Batch];
+        public readonly MeshVertex[]?[] LightResults = new MeshVertex[]?[Batch];
 
         public void Run()
         {
@@ -379,23 +427,29 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
             var indices = new List<uint>();
             for (var i = 0; i < Count; i++)
             {
-                if (IsTurret[i])
+                if (Turrets[i] != TurretKind.None)
                 {
-                    var tractor = look.Tractor!;
-                    vertices.Clear();
-                    indices.Clear();
-                    PropulsionModels.BuildTractorYoke(Cells[i], tractor, vertices, indices);
-                    Results[i] = Soup(vertices, indices);
-
-                    vertices.Clear();
-                    indices.Clear();
-                    PropulsionModels.BuildTractorHead(Cells[i], tractor, vertices, indices);
-                    HeadResults[i] = Soup(vertices, indices);
-
-                    vertices.Clear();
-                    indices.Clear();
-                    PropulsionModels.BuildTractorBars(Cells[i], tractor, vertices, indices);
-                    BarResults[i] = Soup(vertices, indices);
+                    // Three parts a turret: the yoke, the head and the head's light, each in its own space.
+                    for (var part = 0; part < 3; part++)
+                    {
+                        vertices.Clear();
+                        indices.Clear();
+                        if (Turrets[i] == TurretKind.Tractor)
+                        {
+                            var tractor = look.Tractor!;
+                            if (part == 0) PropulsionModels.BuildTractorYoke(Cells[i], tractor, vertices, indices);
+                            else if (part == 1) PropulsionModels.BuildTractorHead(Cells[i], tractor, vertices, indices);
+                            else PropulsionModels.BuildTractorBars(Cells[i], tractor, vertices, indices);
+                        }
+                        else
+                        {
+                            var laser = look.Laser!;
+                            if (part == 0) PropulsionModels.BuildTurretYoke(Cells[i], laser.Turret, vertices, indices);
+                            else if (part == 1) PropulsionModels.BuildLaserHead(Cells[i], laser, vertices, indices);
+                            else PropulsionModels.BuildLaserLens(Cells[i], laser, vertices, indices);
+                        }
+                        (part == 0 ? Results : part == 1 ? HeadResults : LightResults)[i] = Soup(vertices, indices);
+                    }
                     continue;
                 }
                 var type = Types[i]!;

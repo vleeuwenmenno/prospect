@@ -94,8 +94,17 @@ internal sealed class PropulsionModelLook
     /// </summary>
     public ArrayLook? Array { get; init; }
 
+    /// <summary>
+    /// For a main engine: built as a bolted mount plate, a ring collar and a faceted bell with a lit throat
+    /// (<see cref="BellLook"/>) instead of the plain housing and nozzle. Null for every other part.
+    /// </summary>
+    public BellLook? Bell { get; init; }
+
     /// <summary>The index of <see cref="Plume"/> in <see cref="PropulsionLook.PlumeOrder"/>, set when the look loads.</summary>
     internal int PlumeSlot { get; set; } = -1;
+
+    /// <summary>The index of this model in <see cref="PropulsionLook.GlowModels"/>, set when the look loads; -1 without a bell look.</summary>
+    internal int GlowSlot { get; set; } = -1;
 
     internal void Check(string path, string id)
     {
@@ -107,12 +116,14 @@ internal sealed class PropulsionModelLook
             || !Share(MaxNozzleDepth) || MaxNozzleDepth > 0.9f || !(BellCurve is >= 1 and <= 6)
             || !(CollarLength is >= 0 and <= 2) || !(CollarRadius is >= 1 and <= 2.5f) || !(Lip is >= 0 and <= 0.3f)
             // The throat ring and the brackets reach 1.6 collar radii, which must stay inside the nozzle's square.
-            || ThroatShare * CollarRadius * 1.6f > 1f
+            || (Bell is null && ThroatShare * CollarRadius * 1.6f > 1f)
             || Sides is < 6 or > 24 || Rings is < 1 or > 12 || Grid is < 0 or > 6
             || !Shade(HousingShade) || !Shade(NozzleShade) || !Shade(ThroatShade) || !Shade(DetailShade)
             || (Pod is not null && !Pod.Valid)
             // An array's cups stand on its upper plate, a unit each: it needs units a cell, and no pod beside it.
-            || (Array is not null && (!Array.Valid || Pod is not null || !(PerCell > 0) || Grid != 0)))
+            || (Array is not null && (!Array.Valid || Pod is not null || !(PerCell > 0) || Grid != 0))
+            // A bell look is an engine that fills its cells, never a pod or an ion grid, and never an array as well.
+            || (Bell is not null && (!Bell.Valid || Pod is not null || Grid > 0 || Array is not null)))
             throw new InvalidDataException($"{path}: model {id} is out of range");
     }
 }
@@ -372,6 +383,9 @@ internal sealed class PropulsionLook
     /// <summary>The plumes in a fixed order, so a nozzle can name its plume by index (<see cref="ThrustNozzle.Plume"/>).</summary>
     public PlumeLook[] PlumeOrder { get; private set; } = [];
 
+    /// <summary>The models with a bell look, in a fixed order, so a nozzle can name its throat's glow by index (<see cref="ThrustNozzle.Glow"/>).</summary>
+    public PropulsionModelLook[] GlowModels { get; private set; } = [];
+
     private static PropulsionLook? _shared;
 
     /// <summary>The look the game loads once; read by mesh workers and the frame alike, never changed.</summary>
@@ -394,6 +408,9 @@ internal sealed class PropulsionLook
                 throw new InvalidDataException($"{path}: model {id} names plume {model.Plume}, which is not there");
             model.PlumeSlot = look.PlumeIndex(model.Plume);
         }
+        look.GlowModels = [.. look.Models.Where(m => m.Value.Bell is not null).OrderBy(m => m.Key, StringComparer.Ordinal).Select(m => m.Value)];
+        for (var i = 0; i < look.GlowModels.Length; i++)
+            look.GlowModels[i].GlowSlot = i;
         foreach (var (id, scanner) in look.Scanners)
             scanner.Check(path, id);
         look.Tanks?.Check(path);
@@ -428,7 +445,8 @@ internal sealed class PropulsionLook
 
 /// <summary>
 /// One nozzle of a design: where its exit is in the hull's frame and what it fires. Built with the mesh. An ion part's
-/// emitter is a nozzle whose fuel is <see cref="FuelKind.None"/>, the only thrust part that burns none.
+/// emitter is a nozzle whose fuel is <see cref="FuelKind.None"/>, the only thrust part that burns none. <c>Glow</c> is
+/// the index in <see cref="PropulsionLook.GlowModels"/> of the look whose throat lights up with thrust, or -1.
 /// </summary>
 internal readonly record struct ThrustNozzle(
     int Block,
@@ -438,7 +456,8 @@ internal readonly record struct ThrustNozzle(
     float ExitRadius,
     float Depth,
     int Plume,
-    int Index
+    int Index,
+    int Glow = -1
 );
 
 /// <summary>
@@ -549,6 +568,11 @@ internal static partial class PropulsionModels
         if (model.Pod is { } pod)
         {
             BuildPod(ref g, model, pod, box, fuel, block, back, nozzles);
+            return;
+        }
+        if (model.Bell is { } bell)
+        {
+            BuildEngine(ref g, model, bell, box, fuel, block, back, nozzles);
             return;
         }
 

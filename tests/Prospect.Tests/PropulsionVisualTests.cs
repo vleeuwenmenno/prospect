@@ -291,6 +291,151 @@ public sealed class PropulsionVisualTests
         }
     }
 
+    [Theory]
+    [InlineData("engine")]
+    [InlineData("microengine")]
+    public void AnEngineIsABoltedPlateARingCollarAndAFacetedBellWithALitThroat(string type)
+    {
+        var model = Look.Models[type];
+        var bell = Assert.IsType<BellLook>(model.Bell);
+        Assert.Same(model, Look.GlowModels[model.GlowSlot]);
+        var fuel = Content.Blocks.Get(type).Fuel;
+        foreach (var facing in Directions)
+        {
+            var vertices = new List<MeshVertex>();
+            var indices = new List<uint>();
+            var nozzles = new List<ThrustNozzle>();
+            var box = new PartBox(new Vector3(3, -2, 1), new Vector3(0.5f), facing, 1f);
+            PropulsionModels.Build(model, box, fuel, 0, true, vertices, indices, nozzles);
+            var axis = Facings.Axis(facing);
+            var sign = Facings.Sign(facing);
+            var nozzle = Assert.Single(nozzles);
+            // The plume leaves the bell's exit, on the box's outer face, and the throat's glow is the look's own.
+            Assert.Equal(box.Center + Facings.Vector(facing) * 0.5f, nozzle.Exit);
+            Assert.Equal(model.GlowSlot, nozzle.Glow);
+
+            // Measured from the nozzle's axis and from the back of the box.
+            float Across(MeshVertex v)
+            {
+                var d = P(v) - box.Center;
+                d[axis] = 0f;
+                return d.Length();
+            }
+            float Along(MeshVertex v) => (P(v)[axis] - box.Center[axis]) * sign + 0.5f;
+            var start = 1f - nozzle.Depth;
+
+            // The bell is as many flats as the look says, all the way out to its lip, and opens toward the exit.
+            var lip = vertices.Where(v => MathF.Abs(Along(v) - 1f) < 1e-4f && Across(v) > nozzle.ExitRadius * 1.01f).Select(v => P(v)).Distinct().Count();
+            Assert.Equal(model.Sides, lip);
+            var wall = vertices.Where(v => Tag(v) < 4.5f && Along(v) > start + 1e-4f && Across(v) > nozzle.ExitRadius * model.ThroatShare).ToArray();
+            Assert.True(wall.Where(v => Along(v) < start + 0.5f * nozzle.Depth).Max(Across) < wall.Where(v => Along(v) > 1f - 1e-4f).Max(Across));
+
+            // Light: one panel on each side of the collar, behind the bell, and in the bell the lining near the throat
+            // with the throat's disc. All of the lining's light is inside the bell.
+            var lit = vertices.Where(v => Tag(v) >= 4.5f).ToArray();
+            var sideLights = lit.Where(v => Along(v) < start).ToArray();
+            var throat = lit.Where(v => Along(v) >= start).ToArray();
+            Assert.Equal(2 * 4, sideLights.Length);
+            Assert.Equal(model.Sides * 4 + model.Sides + 1, throat.Length);
+            Assert.All(throat, v => Assert.True(Across(v) < nozzle.ExitRadius && Along(v) <= start + bell.GlowReach * nozzle.Depth + 1e-4f));
+            // The collar stands between the plate and the bell and is rounder than the bell.
+            Assert.True(sideLights.Min(Along) > bell.PlateDepth * 0.5f * 0.5f);
+            Assert.True(bell.CollarSides > model.Sides);
+
+            // Four bolt heads a nozzle: hexagons standing on the plate, clear of the collar, inside the box's corners.
+            var bolts = vertices.Where(v => Across(v) > nozzle.ExitRadius * 1.1f && Along(v) > bell.PlateDepth * 0.5f + 1e-4f && Along(v) < start).Select(v => P(v)).Distinct().Count();
+            Assert.Equal(4 * 6, bolts);
+        }
+
+        // A face twice as wide carries two bells on one plate, each with its own collar, bolts and glow.
+        var wide = new List<ThrustNozzle>();
+        PropulsionModels.Build(model, new PartBox(Vector3.Zero, new Vector3(1f, 0.5f, 0.5f), BlockFacing.Back, 1f), fuel, 0, true, [], [], wide);
+        Assert.Equal(2, wide.Count);
+        Assert.All(wide, n => Assert.Equal(model.GlowSlot, n.Glow));
+    }
+
+    private static float Tag(MeshVertex v) => new Vector3(v.Normal.X, v.Normal.Y, v.Normal.Z).Length();
+
+    [Fact]
+    public void TheThroatsGlowLiesInsideTheBellAndIsOnlyGivenToAFiringEngineLargeEnoughToSee()
+    {
+        var model = Look.Models["engine"];
+        var bell = model.Bell!;
+        var vertices = new List<MeshVertex>();
+        var indices = new List<uint>();
+        PropulsionModels.BuildEngineGlow(model, bell, vertices, indices);
+        Assert.NotEmpty(indices);
+        // For a nozzle of exit radius 1 and length 1: the lit part of the lining, a hair inside it, and nothing else.
+        Assert.All(vertices, v => Assert.InRange(v.Position.Z, 0f, bell.GlowReach + 1e-5f));
+        Assert.All(vertices, v => Assert.True(MathF.Sqrt(v.Position.X * v.Position.X + v.Position.Y * v.Position.Y) < 1f));
+        Assert.All(vertices, v => Assert.Equal(1f, Tag(v), 4));
+
+        // Only parts with a bell look have one: a thruster's or an ion drive's nozzle names none.
+        var design = Design("engine", BlockFacing.Back, One);
+        var nozzles = MeshBuilder.Hull(design, Look).Nozzles;
+        var nozzle = Assert.Single(nozzles);
+        Assert.Equal(model.GlowSlot, nozzle.Glow);
+        Assert.All(Nozzles("ionDrive", One), n => Assert.Equal(-1, n.Glow));
+
+        var effects = new ThrustEffects(Look);
+        var output = new PlumeInstance[PropulsionLook.PlumeCapacity];
+        var blocks = new[] { ulong.MaxValue };
+        var firing = Hull(7, -127, 4, blocks);
+        var at = new Vector3(0, 0, -30);
+        Begin(effects, 10);
+        effects.Add(effects.Observe(firing), firing, nozzles, at, Quaternion.Identity, 1, output);
+        Assert.Equal(1, effects.End());
+        // The bell: its throat end is its length behind the exit, along the way the nozzle points.
+        Assert.Equal(model.GlowSlot, effects.Glows[0]);
+        Assert.Equal(new Vector3(nozzle.ExitRadius, nozzle.ExitRadius, nozzle.Depth), effects.Bells[0].Size);
+        var exit = at + nozzle.Exit;
+        Assert.True(Vector3.Distance(exit - Vector3.UnitZ * nozzle.Depth, effects.Bells[0].Start) < 1e-4f);
+        Assert.True(Vector3.Distance(Vector3.UnitZ, Vector3.Transform(Vector3.UnitZ, effects.Bells[0].Turn)) < 1e-4f);
+        Assert.True(effects.Strengths[0] > 0f);
+        Assert.Equal(Vector3.Zero, bell.GlowLight(0f));
+        Assert.True(bell.GlowLight(1f).Z > bell.GlowLight(0.3f).Z);
+
+        // Too small on screen, the plume is still drawn and the throat's own glow is left out.
+        var far = new Vector3(0, 0, -30f * 23f / (0.5f * (Look.MinPixels + bell.GlowPixels)));
+        Assert.True(bell.GlowPixels > Look.MinPixels);
+        Begin(effects, 11);
+        effects.Add(effects.Observe(firing), firing, nozzles, far, Quaternion.Identity, 1, output);
+        Assert.Equal(1, effects.End());
+        Assert.Equal(-1, effects.Glows[0]);
+
+        var allocation = new AllocationProbe();
+        while (allocation.Measuring())
+        {
+            Begin(effects, 12);
+            effects.Add(effects.Observe(firing), firing, nozzles, at, Quaternion.Identity, 1, output);
+            effects.End();
+            bell.GlowLight(effects.Strengths[0]);
+        }
+        Assert.Equal(0, allocation.Bytes);
+    }
+
+    [Fact]
+    public void ABellLookOutOfRangeIsRefused()
+    {
+        var text = File.ReadAllText(Prospect.Engine.IO.AppPaths.Content("visuals", "propulsion.json"));
+        var folder = Directory.CreateTempSubdirectory("prospect-bell-look");
+        try
+        {
+            var path = Path.Combine(folder.FullName, "propulsion.json");
+            // A collar that is no ring of quarters, a plate thicker than half the block, and a glow past its range.
+            foreach (var (from, to) in new[] { ("\"collarSides\": 16", "\"collarSides\": 14"), ("\"plateDepth\": 0.2", "\"plateDepth\": 0.9"), ("\"glowReach\": 0.4", "\"glowReach\": 0.95") })
+            {
+                Assert.Contains(from, text);
+                File.WriteAllText(path, text.Replace(from, to));
+                Assert.Throws<InvalidDataException>(() => PropulsionLook.Load(path));
+            }
+        }
+        finally
+        {
+            folder.Delete(true);
+        }
+    }
+
     [Fact]
     public void AModelIsFlatShadedFacetByFacet()
     {
