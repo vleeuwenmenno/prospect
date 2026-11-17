@@ -32,6 +32,24 @@ internal sealed partial class ScreenHost
         return true;
     }
 
+    /// <summary>
+    /// A close request from the window itself, its close button or Alt+F4, reads like the menu's Quit: with an open
+    /// edit that has changes it puts the "Discard changes?" question up and the window stays open, so only Discard
+    /// ends the game. True when the question is now up; false when there is nothing to lose and the window closes
+    /// as it always did. Font-free, so the frame order tests drive the rule with the real editor.
+    /// </summary>
+    internal static bool CloseAsksFirst(ShipEditor editor) => editor.AskDiscard();
+
+    /// <summary>
+    /// Remembers that the question a close request put up is answered by quitting, as the menu's Quit is, and that
+    /// the in-game menu it came over is no longer the surface on show.
+    /// </summary>
+    internal void ExpectQuitOnDiscard()
+    {
+        _discardThen = DiscardThen.Quit;
+        _sessionMenuOpen = false;
+    }
+
     /// <summary>Throws the draft away and does what the question stood in front of.</summary>
     private void Discard()
     {

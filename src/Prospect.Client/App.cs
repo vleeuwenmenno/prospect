@@ -1008,10 +1008,16 @@ internal sealed class App : IDisposable
         {
             // Closing the window, Quit and the end of a scripted run all close the session the same way: it is
             // saved, then released, and only then does the loop end. The window stays until then.
+            //
+            // The close button and Alt+F4 are one more way out of an open edit: with changes to lose they ask the
+            // same question as the menu's Quit and the window stays open, so only Discard ends the game.
             if (_window.ShouldClose)
             {
                 _window.ShouldClose = false;
-                _quit = true;
+                if (ScreenHost.CloseAsksFirst(World.Editor))
+                    _screens.ExpectQuitOnDiscard();
+                else
+                    _quit = true;
             }
 
             // The session moves on whether or not there is anything to draw: a minimised window still saves,

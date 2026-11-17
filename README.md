@@ -242,7 +242,8 @@ are never blocked. The editor works in space, around your ship:
 - Leaving with changes asks first. `B`, `Esc` and the Cancel button, and Leave Session or Quit in the in-game menu while
   an edit is open, show **Discard changes?** with **Discard** and **Keep editing** when the draft differs from the ship
   as it is. `Enter`, `Esc` and `B` all choose Keep editing. With no changes (or every change undone) they leave at once.
-  An edit the server ends is not asked about. Closing the window is not covered.
+  An edit the server ends is not asked about. Closing the window (its close button, or Alt+F4) asks the same, and only
+  Discard quits.
 - The part list has a search at the top and a rail of icon buttons down its left side, one per category: All, Hull,
   Power, Thrust, Tanks, Shield, Jump and Sensors. Hover an icon for its name and what is in it. It lists only parts that
   fit the craft: editing a ship shows no drone parts, editing the drone shows only drone parts (a category with none is

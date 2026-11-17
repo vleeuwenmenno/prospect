@@ -534,7 +534,9 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   read first in `ShipEditor.HandleKeys`, text field or not: Enter, Escape and the editor key all call `KeepEditing`.
   Discard is `ShipEditor.Cancel` and then the menu's pending Leave or Quit (`DiscardThen`). `Close` (the server ended the
   edit), `Reset` and `Enter` clear the flag, and the property is false without changes, so an ended edit takes the question
-  away. `Cancel` itself never asks: capture hooks and the discard answer call it. Closing the window is not covered.
+  away. `Cancel` itself never asks: capture hooks and the discard answer call it. A close request from the window
+  itself, its close button or Alt+F4, asks the same way (`ScreenHost.CloseAsksFirst`, keeping the window open) and its
+  Discard quits through `App.Quit`, so a world is still saved on the way out.
   Tests: the discard tests in `FrameOrderTests`. Check with `--open edit-discard` (a block grown one cell, then the key;
   capture after 4.5 s).
 - **The editor's context menu, tank fuel, split and block resize:** a right press and release without moving

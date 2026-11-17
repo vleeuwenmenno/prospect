@@ -5721,6 +5721,42 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     [Fact]
+    public void ClosingTheWindowWithChangesAsksBeforeQuittingAndWithoutChangesQuits()
+    {
+        // The frame loop hands a close request, the window's close button or Alt+F4, to this rule. GLFW's close
+        // flag cannot be driven headless, so what is checked here is the decision and the question it puts up;
+        // answering it with Discard is App.Quit, which needs the whole app.
+        OpenEditor();
+        var editor = _world.Editor;
+
+        // Nothing to lose: the close request quits at once, and no question is put up.
+        Assert.False(editor.WouldLoseChanges);
+        Assert.False(ScreenHost.CloseAsksFirst(editor));
+        Assert.False(editor.ConfirmDiscard);
+
+        // A change in the draft: the window stays open and the question stands over the edit.
+        MakeAnEdit();
+        Assert.True(ScreenHost.CloseAsksFirst(editor));
+        Assert.True(editor.ConfirmDiscard);
+        Assert.Equal(EditorStage.Editing, editor.Stage);
+
+        // Keep editing cancels the close: the draft is whole, and the next close request asks again.
+        editor.KeepEditing();
+        Assert.False(editor.ConfirmDiscard);
+        Assert.Equal(EditorStage.Editing, editor.Stage);
+        Assert.True(editor.Dirty);
+        Assert.True(ScreenHost.CloseAsksFirst(editor));
+        Assert.True(editor.ConfirmDiscard);
+
+        // Discard is the question's own button: the edit ends and the draft goes, so nothing asks after it.
+        editor.Cancel(Bridge);
+        Assert.False(editor.ConfirmDiscard);
+        Assert.Equal(EditorStage.Closed, editor.Stage);
+        Assert.Null(editor.Draft);
+        Assert.False(ScreenHost.CloseAsksFirst(editor));
+    }
+
+    [Fact]
     public void AnEditTheServerEndsTakesTheQuestionAwayAndIsNotAskedAbout()
     {
         OpenEditor();
