@@ -1,0 +1,10 @@
+{
+  "tabWidth": 112,
+  "tabHeight": 28,
+  "oreTileWidth": 136,
+  "oreTileHeight": 56,
+  "oreBarHeight": 4,
+  "oreRowHeight": 22,
+  "oreTintAlpha": 0.1,
+  "oreEmptyAlpha": 0.45
+}

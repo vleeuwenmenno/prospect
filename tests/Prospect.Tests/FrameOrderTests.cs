@@ -140,6 +140,7 @@ public sealed class FrameOrderTests : IDisposable
     private CargoHoldView? _cargoPane;
     private float2 _cargoTileClickAt;
     private float2 _cargoJettisonAt;
+    private readonly float2[] _cargoTabAt = new float2[OreHoldView.TabCount];
     private static readonly float2 FloatingSize = new(360, 240);
     private static readonly float2 FloatingAt = new(400, 200);
 
@@ -739,6 +740,32 @@ public sealed class FrameOrderTests : IDisposable
         {
             cargoView.Update(_snapshot);
             var hull = _snapshot.Hulls[_snapshot.OwnHull];
+
+            // The tab strip as ScreenHost draws it: the production rectangles, a press sets the window's tab.
+            var stripAt = ImGui.GetCursorScreenPos();
+            var stripWidth = ImGui.GetContentRegionAvail().X;
+            for (var i = 0; i < OreHoldView.TabCount; i++)
+            {
+                var rect = OreHoldView.TabRect((CargoTab)i, stripWidth, _floatingScale, CargoWindowLook.Current);
+                var tabMin = stripAt + new float2(rect.X, rect.Y);
+                _cargoTabAt[i] = tabMin + new float2(rect.Width, rect.Height) * 0.5f;
+                ImGui.SetCursorScreenPos(tabMin);
+                ImGui.PushID(i);
+                if (ImGui.InvisibleButton("##ctab"u8, new float2(rect.Width, rect.Height)))
+                    window.Tab = i;
+                ImGui.PopID();
+            }
+
+            ImGui.SetCursorScreenPos(stripAt);
+            ImGui.Dummy(new float2(stripWidth, OreHoldView.TabRect(CargoTab.Containers, stripWidth, _floatingScale, CargoWindowLook.Current).Height + 8f));
+            if (OreHoldView.TabOf(window.Tab) == CargoTab.Ore)
+            {
+                cargoView.ClearSelection();
+                ImGui.EndChild();
+                FloatingWindow.End();
+                return;
+            }
+
             var origin = ImGui.GetCursorScreenPos();
             cargoView.Layout(hull.Cargo.Span, ImGui.GetContentRegionAvail().X, _floatingScale);
             var tiles = cargoView.Tiles;
@@ -9324,6 +9351,23 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal(1, request.Index);
         Assert.Equal(42, request.Tick);
         Assert.Equal(JettisonMode.KeepClaim, request.Mode);
+
+        // The ORE tab through the real pointer path: it shows no tiles, so the selection is let go of, and a click on
+        // CONTAINERS brings the tiles back.
+        Frame(() => Move(_cargoTabAt[(int)CargoTab.Ore]), InterfaceKey);
+        Frame(() => Button(GlfwMouseButton.Left, true), InterfaceKey);
+        Frame(() => Button(GlfwMouseButton.Left, false), InterfaceKey);
+        Frame(shortcut: InterfaceKey);
+        Assert.Equal((int)CargoTab.Ore, _floating.Tab);
+        Assert.Equal(-1, _cargoPane.SelectedIndex);
+        Frame(() => Move(_cargoTabAt[(int)CargoTab.Containers]), InterfaceKey);
+        Frame(() => Button(GlfwMouseButton.Left, true), InterfaceKey);
+        Frame(() => Button(GlfwMouseButton.Left, false), InterfaceKey);
+        Assert.Equal((int)CargoTab.Containers, _floating.Tab);
+        Frame(() => Move(_cargoTileClickAt), InterfaceKey);
+        Frame(() => Button(GlfwMouseButton.Left, true), InterfaceKey);
+        Frame(() => Button(GlfwMouseButton.Left, false), InterfaceKey);
+        Assert.Equal(1, _cargoPane.SelectedIndex);
 
         // When the hold updates, selection clears.
         _snapshot.OwnCargoTick = 43;

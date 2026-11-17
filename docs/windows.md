@@ -39,17 +39,27 @@
 
 - Key `U` (`ToggleCargo`), or the Cargo top bar tab. Starts open in interface mode; pinnable like Charts.
 - Shows the flown ship's hold (`SessionSnapshot.Hulls[OwnHull].Cargo`) as a grid of size-stepped, resource-coloured tiles with size class (`XXS`..`XXXL`) and fill bar; header shows used/total volume (`u`) and total cargo mass (`kg`).
-- Drones and ships without racks show an empty-state message.
+- Two tabs, CONTAINERS (the rest of this section) and ORE. The tab is saved with the window (`FloatingWindow.Tab`, `WindowState.Tab`, 0 or 1; a saved value out of range is CONTAINERS). Switching to ORE lets go of the selected container, so no callout is left on the ship.
+- Drones and ships without racks show an empty-state message on CONTAINERS.
 - Clicking a tile shows its size, resource, mass, fill %, HP bar and rack index, with `Jettison` (`JettisonMode.Abandon`) and `Jettison, keep claim` (`JettisonMode.KeepClaim`) via `PlayerInputBridge.JettisonCargo`, disabled in FTL transit. Selection clears when `OwnCargoTick` or `Hull.Id` changes.
 - The selected tile is also called out on the ship: its packed box outlined in the resource's colour, with a label (resource, kg, size class) on a leader. Pilot and command view, like the fuel callout.
 - It follows the hull and clears with the selection: hold or hull change, jettison, a second click on the tile, window closed, Escape (`BackStep.CargoCallout`).
 - No allocation: `CargoHoldView` keeps its tile buffer fixed.
 
+### ORE tab
+
+- Top: `BINS used / total USED` and `held / capacity kg`.
+- Then a row per ore the bins hold: colour swatch, name, total kg, grade weighted by mass, and `bins it fills / all bins`. No ore: "No ore held."
+- Then a tile per bin in bin order, in the ore's colour (`Galaxy.Resources[i].Color`): name, grade, `kg / capacity kg` and a fill bar. An empty bin is a dim tile reading EMPTY. A ship with no bins says "This ship has no ore bins."
+- Read only from `HullView.Ore` and the design's bins (`OreHoldView`, font-free, fixed buffers, no allocation); the held and capacity sums are `ShipSheet.OreHeld` / `OreCapacity`, as the Ship window's ORE section. The tiles take no clicks.
+- Figures (tab and tile size, bar height, tint, empty dimming) are `content/visuals/cargo_window.json` (`CargoWindowLook`, validated).
+- Check with `--open cargo-window --cargo-tab ore` (empty bins) and `--open ore --cargo-tab ore --capture-after 45` (pinned, the bins fill). Use a scratch `XDG_CONFIG_HOME`: the tab and the pin are saved. `--open cargo-window --cargo-tab containers` the other way. Tests: `OreHoldViewTests`, `InterfaceWindowTests`, and the tab click in `FrameOrderTests`.
+
 ## Ship window
 
 - Key `I` (`ShipInfo`, D-pad up), or the Ship top bar tab. Starts closed; pinnable like Charts. Replaces the old data sheet.
 - Shows the stats of the ship flown, in sections: identity, flight, power, fuel, shield, cargo, ore, drones, modules. A section with nothing to show is left out.
-- ORE (a hull with ore bins): what the bins hold of what they can, then a row a bin: its ore, grade, kilograms and capacity, in the ore's colour; an empty bin says so. Read from `HullView.Ore`, which the server sends for the hull flown only; any other hull shows its bins' count and capacity. The Ore Cargo window is not built.
+- ORE (a hull with ore bins): what the bins hold of what they can, then a row a bin: its ore, grade, kilograms and capacity, in the ore's colour; an empty bin says so. Read from `HullView.Ore`, which the server sends for the hull flown only; any other hull shows its bins' count and capacity. The Cargo window's ORE tab shows the same bins as tiles.
 - Every figure is the hull's published sheet (`HullView.Stats`), its design's blocks, or the flown hull's live state. Nothing is worked out in the window.
 - Fuel, battery, shield now, cargo carried and ore held are told only for the hull flown. The rest show for any hull.
 - In the command view it follows the first selected hull; with only an asteroid selected it shows that asteroid's survey (scan findings only).

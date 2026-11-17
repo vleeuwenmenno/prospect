@@ -41,7 +41,7 @@ Product direction from the brainstorm on 2026-11-16. Built so far: D1 (orders, t
 - Raw ore never goes in cargo racks. It goes:
   1. Floating ore chunks are pulled by tractor or drone into an ore hopper.
   2. The hopper fills raw ore containers: one ore type each, capacity by size.
-- Ore shows in the Cargo window, on its own ORE tab beside CONTAINERS (decided 2026-11-17). The tab has a totals row
+- Ore shows in the Cargo window, on its own ORE tab beside CONTAINERS (decided 2026-11-17, built 2026-11-17). The tab has a totals row
   per ore (kg, mass-weighted grade, bins used) and a tile per bin in the ore's colour with a fill bar, ore, grade and kg.
 
 ### Ore collection (R4)
@@ -186,8 +186,8 @@ Three tracks. A track's steps run in order; the tracks run side by side, each in
 3. R3, mining laser: a face mount the pilot aims and fires in action groups; it scrapes through `ScrapeRock` and
    frees floating ore chunks. **Done** (2026-11-17), see "R3 as built".
 4. R4, ore: chunks pulled by tractor into an ore hopper and kept in ore bins. R4a, the server side with the bins in
-   the Ship window, is **done** (2026-11-17), see "R4 as built". Still to do: the Ore Cargo window, selling or
-   moving ore.
+   the Ship window and the Cargo window's ORE tab, is **done** (2026-11-17), see "R4 as built". Still to do:
+   selling or moving ore.
 
 ### Track D: drones
 

@@ -263,6 +263,43 @@ public sealed class InterfaceWindowTests
     }
 
     [Fact]
+    public void TheCargoWindowsTabRoundTripsThroughASettingsFileAndAHandEditedOneIsClamped()
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            var settings = new ClientSettings();
+            var panes = new SocialPanes();
+            var saves = 0;
+            var layout = new WindowLayout(settings, panes, () => saves++);
+            layout.Restore(1f);
+            Assert.Equal((int)CargoTab.Containers, panes[SocialPane.Cargo].Tab);
+
+            panes[SocialPane.Cargo].Tab = (int)CargoTab.Ore;
+            Assert.True(layout.Track(1f, false));
+            Assert.Equal(1, saves);
+            Assert.False(layout.Track(1f, false));
+
+            settings.Save(path);
+            var loaded = ClientSettings.Load(path);
+            var again = new SocialPanes();
+            new WindowLayout(loaded, again, () => { }).Restore(1f);
+            Assert.Equal((int)CargoTab.Ore, again[SocialPane.Cargo].Tab);
+            Assert.Equal(0, again[SocialPane.Charts].Tab);
+
+            // A file edited by hand cannot name a tab beyond the limit.
+            File.WriteAllText(path, File.ReadAllText(path).Replace("\"Tab\": 1", "\"Tab\": 900"));
+            var clamped = ClientSettings.Load(path);
+            Assert.Equal(ClientSettings.MaxWindowTab, clamped.Windows["Cargo"].Tab);
+            Assert.Equal(CargoTab.Containers, OreHoldView.TabOf(clamped.Windows["Cargo"].Tab));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void TheShipSheetFollowsTheCommandSelectionAndOtherwiseTheFlownHull()
     {
         Assert.Equal(ShipSheetSubject.Own, ShipSheet.Choose(ViewMode.Pilot, true, true, true));

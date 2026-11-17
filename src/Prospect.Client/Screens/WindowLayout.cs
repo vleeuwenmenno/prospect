@@ -37,6 +37,8 @@ internal sealed class WindowLayout(ClientSettings settings, SocialPanes panes, A
                 window.Pinned = state.Pinned && window.Open;
             }
 
+            window.Tab = Math.Clamp(state.Tab, 0, ClientSettings.MaxWindowTab);
+
             if (state.Placed)
             {
                 window.Min = new float2(MathF.Round(state.X * scale), MathF.Round(state.Y * scale));
@@ -90,6 +92,7 @@ internal sealed class WindowLayout(ClientSettings settings, SocialPanes panes, A
 
             state.Open = window.Open;
             state.Pinned = window.Pinned;
+            state.Tab = window.Tab;
             state.Placed = window.Placed;
             if (window.Placed && scale > 0f)
             {
@@ -101,5 +104,5 @@ internal sealed class WindowLayout(ClientSettings settings, SocialPanes panes, A
 
     // The navigator and the card are not saved open or closed, so opening one is no change worth a write.
     private static int Signature(SocialPane pane, FloatingWindow window) =>
-        HashCode.Combine(pane is SocialPane.Navigator or SocialPane.Detail || window.Open, window.Pinned, window.Placed, (int)MathF.Round(window.Min.X), (int)MathF.Round(window.Min.Y));
+        HashCode.Combine(pane is SocialPane.Navigator or SocialPane.Detail || window.Open, window.Pinned, window.Placed, window.Tab, (int)MathF.Round(window.Min.X), (int)MathF.Round(window.Min.Y));
 }

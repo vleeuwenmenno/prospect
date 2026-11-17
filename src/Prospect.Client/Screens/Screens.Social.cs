@@ -159,11 +159,24 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>Opens the Cargo window in interface mode. Used by <c>--open cargo-window</c>, for captures.</summary>
-    public void OpenCargoWindow(bool selectFirst = false)
+    public void OpenCargoWindow(bool selectFirst = false, CargoTab? tab = null)
     {
         OpenPane(SocialPane.Cargo);
+        if (tab is { } shown)
+            Pane(SocialPane.Cargo).Tab = (int)shown;
         if (selectFirst)
             _cargoSelectPending = true;
+    }
+
+    /// <summary>
+    /// Opens the Cargo window pinned on <paramref name="tab"/>, so it shows in flight. Used by
+    /// <c>--open ore --cargo-tab ore</c>, for captures: the bins fill while the lasers cut.
+    /// </summary>
+    public void OpenCargoWindowPinned(CargoTab tab)
+    {
+        OpenCargoWindow(false, tab);
+        Pane(SocialPane.Cargo).Pinned = true;
+        CloseWorkspace();
     }
 
     /// <summary>Opens the Ship window in interface mode. Used by <c>--open info</c>, for captures.</summary>
@@ -501,7 +514,7 @@ internal sealed partial class ScreenHost
         SocialPane.Players => new float2(Kit.Px(440), Kit.Px(480)),
         SocialPane.Chat => new float2(Kit.Px(540), Kit.Px(340)),
         SocialPane.Charts => new float2(Kit.Px(520), Kit.Px(580)),
-        SocialPane.Cargo => new float2(Kit.Px(460), Kit.Px(320)),
+        SocialPane.Cargo => new float2(Kit.Px(460), Kit.Px(360)),
         SocialPane.Ship => new float2(Kit.Px(380), Kit.Px(600)),
         SocialPane.Player => new float2(Kit.Px(240), Kit.Px(190)),
         SocialPane.Gas => new float2(Kit.Px(ModuleLook.Current.GasWindowWidth), Kit.Px(ModuleLook.Current.GasWindowHeight)),

@@ -89,6 +89,9 @@ internal sealed class ClientSettings
 
     /// <summary>The most windows kept, the longest name and the largest corner: a hand-edited file cannot grow the list or throw a window off screen for good.</summary>
     public const int MaxWindows = 16;
+
+    /// <summary>The highest tab a window may remember; a saved value above it is clamped.</summary>
+    public const int MaxWindowTab = 7;
     public const int MaxWindowNameLength = 24;
     public const float MaxWindowCoordinate = 16384f;
 
@@ -192,6 +195,7 @@ internal sealed class ClientSettings
             {
                 Open = state.Open,
                 Pinned = state.Pinned,
+                Tab = Math.Clamp(state.Tab, 0, MaxWindowTab),
                 Placed = placed,
                 X = placed ? Math.Clamp(state.X, -MaxWindowCoordinate, MaxWindowCoordinate) : 0f,
                 Y = placed ? Math.Clamp(state.Y, -MaxWindowCoordinate, MaxWindowCoordinate) : 0f,
@@ -229,6 +233,9 @@ internal sealed class WindowState
 {
     public bool Open { get; set; }
     public bool Pinned { get; set; }
+
+    /// <summary>The tab a window with tabs shows, from 0 to <see cref="ClientSettings.MaxWindowTab"/>.</summary>
+    public int Tab { get; set; }
 
     /// <summary>True when the player has put the window somewhere: <see cref="X"/> and <see cref="Y"/> are its top left corner, unscaled.</summary>
     public bool Placed { get; set; }
