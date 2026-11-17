@@ -17,6 +17,7 @@ to work.
 - `docs/windows.md`: interface mode (`Tab`), the windows and their pins, the Charts window.
 - `docs/controls.md`: the Controls screens, tabs, search, remapping, clashes and their limits.
 - `docs/world-generation.md`: fields and clouds in world space: anchors, which sector takes a rock, the gas query.
+- `docs/roadmap/drones-mining.md`: drones, rock edits, interiors and mining lasers: decided, built, open.
 - An item under "Open" is not decided. Ask; do not guess and build.
 - When a decision is made in conversation, move it from "Open" to "Decided" in the same change.
 
@@ -35,7 +36,7 @@ Use the Makefile, not raw `dotnet` commands.
 | --- | --- |
 | `make setup` | First run on a machine: system packages for the OS (Vulkan; MoltenVK on macOS), the .NET SDK into `~/.dotnet`, restore. `make doctor` checks the toolchain and GPU. |
 | `make check` | Formatting, warnings-as-errors build and all tests. Must pass before work is called done. Takes about two minutes. |
-| `make bench` | Release benchmarks: an empty scene, resizing (`--bench-resize`), then editor cargo, Fuel menu, fuel-on-apply and mirror ghosts (four measured seconds each, after four seconds for scripted edits and workers to settle). Then, on a copy of the build whose pod has a tractor beam and racks (`tools/prepare_tractor_capture.py`), 25 s of cargo: jettison, drift, tractor pull and stow (`--open cargo --jettison 5`); it also fails unless the container was seen loose and is back in the hold. Then, on a copy whose pod has a drone bay (`tools/prepare_drone_capture.py`), 25 s of drones: launch, hold station, recall and dock (`--open drones --drone-recall 12`); it also fails unless a drone was seen out and the bay is full again. Last, 14 s of a rock being scraped thirty passes (`--open rock-scrape`): edits, bricks and patch rebuilds on every thread; it also fails unless all 480 edits came back from the server and the patch was rebuilt and is drawn. Fails under 144 fps or on any managed allocation in the frame loop. Run it after touching anything that executes every frame or every tick. |
+| `make bench` | Release benchmarks: an empty scene, resizing (`--bench-resize`), then editor cargo, Fuel menu, fuel-on-apply and mirror ghosts (four measured seconds each, after four seconds for scripted edits and workers to settle). Then, on a copy of the build whose pod has a tractor beam and racks (`tools/prepare_tractor_capture.py`), 25 s of cargo: jettison, drift, tractor pull and stow (`--open cargo --jettison 5`); it also fails unless the container was seen loose and is back in the hold. Then, on a copy whose pod has a drone bay (`tools/prepare_drone_capture.py`), 25 s of drones: launch, hold station, recall and dock (`--open drones --drone-recall 12`); it also fails unless a drone was seen out and the bay is full again. Then 14 s of a rock being scraped thirty passes (`--open rock-scrape`): edits, bricks and patch rebuilds on every thread; it also fails unless all 480 edits came back from the server and the patch was rebuilt and is drawn. Last, on a copy whose pod has mining lasers (`tools/prepare_laser_capture.py`), 16 s of a laser cutting a 199 m rock (`--open laser`); it also fails unless a beam was seen, eight scrapes came back and a chunk broke off. Fails under 144 fps or on any managed allocation in the frame loop. Run it after touching anything that executes every frame or every tick. |
 | `make bench-scans` | Release benchmark with each module scan type repeating (gas, asteroid, locator), on a copy of the build whose pod carries the scanners (`tools/prepare_scan_bench.py`). Fails on any managed allocation on any thread, or under five completed scans. Run it after touching module scans, their server worker or the module interface. |
 | `make bench-gas` | Release benchmark inside gas clouds (ordinary from inside, pilot and command view, huge, lightning; cold and a pair reported only). Fails under 144 fps or on any managed allocation. Run it after touching the gas shaders or how gas is drawn. |
 | `make run ARGS="..."` | The client. `make server` is the dedicated server. |
@@ -162,6 +163,30 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   Ice shards cannot be scraped (`RockEditRules.Scrapable`). Tests: `RockEditTests`, `RockEditWireTests`,
   `RockEditSaveTests`, `RockEditSessionTests`, `SaveLifecycleTests`, `ContentIdentityTests`; `make bench` scrapes a rock.
   Cracks (R2) add a kind to `RockEditCodec` (3 is kept for it) and rocks past the generated list; nothing here builds them.
+- **Mining lasers, action groups and ore chunks (R3):** a laser is a face mount with `laser` data (`LaserSpec`,
+  `laserTiers`; only Common in the palette); `HullDesign.Lasers` lists them in mount order, and a laser's "part" on
+  the wire and in a save is its place there. Groups are `ActionGroups` (1 to 10, key `0` is 10; 0 is none; only
+  `Groupable` types may have one, checked by `FaceMounts.Validate`). The design's group is `DesignMount.Group`
+  (design file 7, `DesignBytes` 5); a hull's change without a rebuild is the server's override table
+  (`ServerLasers.cs`, `SetActionGroupMessage` 45, `ActionGroupsMessage` 48 to the flown hull, cleared by
+  `CreateHull`); read a part's group only through `ServerHost.GroupOf` / `SessionSnapshot.GroupOf`.
+  Input is `WorldView.Lasers.cs`: number keys (`ActionGroup1..0`) toggle groups the hull has; while any is on, the
+  `AlignToView` button fires them and does not align (the align lock still aligns); the intent goes through
+  `PlayerInputBridge.AimLasers` when it changes (`LaserAimMessage` 44: groups, camera offset, unit ray).
+  The server: `PlanLasers` before the hull round (flown hull, owner, no transit, part's block there, group on,
+  `LaserSpec.WithinGimbal`, own hull clear by `TractorReach.Clear`; demand into `HullInfo.LaserDemand`), the flight
+  step bills `PowerFlow.Laser` all or nothing after the tractors, `FireLasers` after the round fires from the hull's
+  new pose toward the aim found before (`LaserAim`, `RockRay.First`) and cuts through `ScrapeRock` only, strokes
+  chained so the wire sends 9 B a scrape. Ore: `MiningRules.ScrapeKg` shared out by `RockInterior.Sample` at the
+  cut's deepest point, per laser and ore, a chunk at `chunks.oreKg`. Figures: `content/rules/mining.json` (shared,
+  identity). Chunks are `OreChunks` (fixed 256, their own pool: neither tractor nor drone reads it until R4) and
+  `OreChunkSimulation` (bounded contacts, no damage); `OreChunkMessage` 47 every 6 ticks by `Covered`; beams
+  `LaserBeamsMessage` 46 unreliable each tick by `MaySeeHull`, held 6 ticks on the client, which predicts its own
+  laser draw from them (`ClientWorld.Lasers.cs`). Save codec 20 (`WorldSnapshotCodec.Mining.cs`, `RestoreMining`).
+  Nothing here takes memory in the tick or the frame. Captures: `tools/prepare_laser_capture.py` then
+  `--open laser` (hull over a rock, group 1 fires from `--fire-at`, default 3 s; `--fire-group <digit>` works in any
+  scripted view) or `--open laser-command` (command camera on the cut, `--rock-scrape-distance`); `make bench` runs
+  `--open laser`. Tests: `MiningLaserTests` and friends. Gaps in `docs/roadmap/drones-mining.md`, "R3 as built".
 - **Debug: scrape rock (temporary, local games only):** `MessageId.RockScrape` (42, `RockScrapeRequest`: rays in the
   rock's frame) through `PlayerInputBridge.DebugScrape`; `ServerHost.DebugScrape` checks `AllowDebugFill`, the
   in-process link, a live flown hull not in transit, the interval (`debug.intervalSeconds`), the radius, and that every

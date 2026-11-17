@@ -55,13 +55,18 @@ to, choosing the hold point in the interface, a drone panel, drone battery limit
 and any avoidance: a drone flies straight to its place and may bump the ship it came from.
 
 
-Rocks can be scraped: a scrape cuts a groove into an asteroid for everyone who has it in view, hulls and loose
-containers touch the groove, and it is saved with the world. This is the foundation of mining and has no tool yet:
-the only way to scrape is the temporary debug key (`F10`, held in the pilot view, private local games only), which
-cuts a metre-wide groove where the view's centre meets a rock within 600 m of the ship. Far away a scraped rock is
-drawn without its grooves. Not there: the mining laser, ore, cracks, scraping ice shards, and the pointer and
-exhaust marks following a groove (they still see the unscraped surface). A rock holds at most 2,048 scrapes and a
-world 65,536 (`content/rules/rock_edits.json`). See [drones and mining](docs/roadmap/drones-mining.md).
+Rocks can be mined with a mining laser: a small part mounted on a block's face, in an action group (1 to 9 and 0)
+chosen per part in the editor. The number keys turn groups on and off; while any group is on, the left mouse button
+fires every group that is on at the view's centre, and with all off it turns the hull onto the view as before. A
+laser reaches 60 m, turns at most 40° off its face, draws 3 MW while it fires, and cuts a groove 1 m wide into the
+first rock its beam meets, seen by everyone who has the rock in view and saved with the world. What it cuts away
+yields ore from the rock's interior; every 60 kg of one ore breaks off as a loose ore chunk that drifts and bounces
+off rocks and ships. Chunks cannot be picked up yet: the ore hopper comes next. No shipped ship carries a laser yet;
+build one on in the editor. The temporary debug scrape (`F10`, held in the pilot view, private local games only)
+still exists. Not there: picking up ore, cracks, scraping ice shards, beams blocked by other ships, and the pointer
+and exhaust marks following a groove. A rock holds at most 2,048 scrapes and a world 65,536
+(`content/rules/rock_edits.json`); laser and chunk figures are in `content/rules/mining.json` and `blocks.json`. See
+[drones and mining](docs/roadmap/drones-mining.md).
 
 Propulsion burns fuel and is directional: engines, hot thrusters and cold gas thrusters each push the opposite way
 to the way they face, and burn bipropellant, hydrazine and nitrogen from tank blocks. Engines are blocks of any
