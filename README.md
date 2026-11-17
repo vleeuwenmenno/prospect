@@ -216,11 +216,11 @@ are never blocked. The editor works in space, around your ship:
   side it stands for, and the wedge stays the same wedge. Let go of the button or `S`: nothing is placed; the
   size and place stay, and a new click while the pointer is still or on the ghost places it there. `Esc` puts
   back the size and place from before `S`. The right button still orbits while `S` is held.
-- Turn the part before placing it: `R` with its ghost on a face shows two rings around the ghost, about the
-  grid's x (red) and y (green). Left-drag a ring round: the ghost follows the pointer, and the part itself turns
+- Turn the part before placing it: `R` with its ghost on a face shows three rings around the ghost, about the
+  grid's x (red), y (green) and z (blue). Left-drag a ring round: the ghost follows the pointer, and the part itself turns
   in exact quarter turns (90 degrees) as the drag passes each half way. Let go, and the ghost glides onto the
   quarter turn; nothing else happens. The wheel over a ring turns a quarter either way; a click on it a quarter
-  forward, `Shift`+click back. The two rings together reach all twelve wedge orientations. Each turn glides over
+  forward, `Shift`+click back. The x and y rings alone reach all twelve wedge orientations; z saves the detour. Each turn glides over
   `turnSeconds` in `content/visuals/editor.json`; the glide is only drawn, the part placed is always the quarter
   turn. The right button orbits the camera without ending the turn. Every turn counts at once; nothing confirms
   it. A click on the ghost places it as it is drawn and ends the turn. `R` again, or a left or middle click

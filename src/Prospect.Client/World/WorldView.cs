@@ -3717,9 +3717,10 @@ internal sealed partial class WorldView
     /// cold gas thruster mounted on that face instead; with <paramref name="ion"/> (<c>--open edit-ion</c>) the engine
     /// is an ion drive.
     /// </summary>
-    internal void HoldGhostForCapture(bool mount = false, bool ion = false)
+    internal void HoldGhostForCapture(bool mount = false, bool ion = false, bool rings = false)
     {
         _captureGhost = true;
+        _captureRings = rings;
         _captureMount = mount;
         _captureIon = ion;
     }
@@ -3740,6 +3741,9 @@ internal sealed partial class WorldView
 
     private bool _captureMount;
     private bool _captureIon;
+
+    // --open edit-rings: the held engine's ghost with its three rotation rings out, as R over a face starts them.
+    private bool _captureRings;
 
     // The scripted box select of a capture (--open edit-box-select) and select all (--open edit-select-all); the
     // pointer is muted, so the harness plays the drag itself: it holds the select tool, draws the rectangle growing
@@ -4093,6 +4097,8 @@ internal sealed partial class WorldView
         if (_captureGhost)
         {
             HoldCaptureGhost();
+            if (_captureRings && !Editor.RotatingPart && GhostRings(out _ringMiddle, out _ringRadius))
+                Editor.BeginPartRotation();
             GlideEditorCamera(dt);
             return;
         }
@@ -4714,25 +4720,26 @@ internal sealed partial class WorldView
         return true;
     }
 
-    /// <summary>Point <paramref name="segment"/> of the ring about grid axis <paramref name="axis"/> (0 x, 1 y), in the grid.</summary>
+    /// <summary>Point <paramref name="segment"/> of the ring about grid axis <paramref name="axis"/> (0 x, 1 y, 2 z), in the grid.</summary>
     internal static Vector3 RingPoint(Vector3 middle, float radius, int axis, int segment) =>
         RingPointAt(middle, radius, axis, segment * MathF.Tau / RingSegments);
 
     /// <summary>
-    /// The point of the ring about grid axis <paramref name="axis"/> (0 x, 1 y) at <paramref name="angle"/> along it,
-    /// in the grid. The angle runs y to z about x, and x to z about y: for the y ring that is a turn the other way.
+    /// The point of the ring about grid axis <paramref name="axis"/> (0 x, 1 y, 2 z) at <paramref name="angle"/> along
+    /// it, in the grid. The angle runs y to z about x, x to z about y (for the y ring a turn the other way), and x to y
+    /// about z.
     /// </summary>
     internal static Vector3 RingPointAt(Vector3 middle, float radius, int axis, float angle)
     {
         var a = MathF.Cos(angle) * radius;
         var b = MathF.Sin(angle) * radius;
-        return middle + (axis == 0 ? new Vector3(0f, a, b) : new Vector3(a, 0f, b));
+        return middle + (axis == 0 ? new Vector3(0f, a, b) : axis == 1 ? new Vector3(a, 0f, b) : new Vector3(a, b, 0f));
     }
 
     /// <summary>
-    /// Turning the part to place, before it is placed. R over a face starts it: two rings stand around the ghost,
-    /// one about the grid's x axis and one about its y; together their quarter turns reach every orientation a block
-    /// may have. A left drag on a ring turns the ghost with the pointer, the part itself in whole quarter turns as
+    /// Turning the part to place, before it is placed. R over a face starts it: three rings stand around the ghost,
+    /// one about each grid axis; the x and y rings alone reach every orientation a block may have, and the z ring saves
+    /// the detour. A left drag on a ring turns the ghost with the pointer, the part itself in whole quarter turns as
     /// the drag passes each half way; the wheel over a ring turns a quarter either way, and a click on it a quarter
     /// forward, with Shift back. The ghost glides into each turn. Every turn counts at once; nothing confirms it.
     /// A left press on the ghost ends the turn and becomes placing's press, so its click places the part as it is
@@ -4926,8 +4933,8 @@ internal sealed partial class WorldView
         var p = origin + direction * t - _ringMiddle;
         if (p.LengthSquared() < _ringRadius * _ringRadius * 0.01f)
             return false;
-        // About x the angle runs y to z; about y it runs z to x, as a right-handed turn does.
-        angle = axis == 0 ? MathF.Atan2(p.Z, p.Y) : MathF.Atan2(p.X, p.Z);
+        // About x the angle runs y to z, about y z to x and about z x to y, as a right-handed turn does.
+        angle = axis == 0 ? MathF.Atan2(p.Z, p.Y) : axis == 1 ? MathF.Atan2(p.X, p.Z) : MathF.Atan2(p.Y, p.X);
         return true;
     }
 
@@ -4972,7 +4979,7 @@ internal sealed partial class WorldView
         var pointer = _devices.MousePosition;
         var best = -1;
         var nearest = _editTuning.RotateRingPixels;
-        for (var axis = 0; axis < 2; axis++)
+        for (var axis = 0; axis < 3; axis++)
         {
             for (var i = 0; i < RingSegments; i++)
             {

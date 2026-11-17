@@ -1408,14 +1408,14 @@ internal sealed class App : IDisposable
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
                 World.ScriptFillForCapture(view == "edit-fill-done");
             }
-            else if (view is "edit-turn" or "edit-mount" or "edit-mirror" or "edit-ion" && snapshot is { OwnHull: >= 0 })
+            else if (view is "edit-turn" or "edit-rings" or "edit-mount" or "edit-mirror" or "edit-ion" && snapshot is { OwnHull: >= 0 })
             {
                 // The editor on the Thrust tab with an engine turned to face right, or with a cold gas thruster to
                 // mount, its ghost held on the ship: the pointer is muted, so the harness holds it there.
                 // edit-mirror is the engine with the X and Z planes on, so its copies show, each facing the mirrored way;
                 // edit-ion holds an ion drive instead of the engine.
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
-                World.HoldGhostForCapture(view == "edit-mount", view == "edit-ion");
+                World.HoldGhostForCapture(view == "edit-mount", view == "edit-ion", view == "edit-rings");
                 if (view == "edit-mirror")
                     World.Editor.SetMirror(MirrorAxes.X | MirrorAxes.Z);
                 _screens.SelectEditorTab("Thrust");
