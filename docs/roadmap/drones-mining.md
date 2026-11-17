@@ -287,6 +287,10 @@ How to work on it is in `AGENTS.md`, "Mining lasers, action groups and ore chunk
 - Partial ore is forgotten when the laser moves to another rock or stops for good.
 - A rock fills up: 2,048 scrapes a rock, 65,536 a world. A full rock still shows the beam and yields nothing.
 - No heat (I2), no weapons in groups yet, no turret models: the emitter is fixed, the beam turns within its gimbal.
+- Power is paid all or nothing each tick: a laser on a flat battery fires on the ticks the generator's trickle pays
+  for, and a beam cut short loses the cut it had not yet made into a scrape.
+- Chunk contacts generate one sector at a time, as loose containers do: chunks spread over two sectors take turns.
+- Group changes are not mirrored in the editor (placing is).
 - The F10 debug scrape stays: `make bench` and the `--open rock-scrape` captures still use it.
 
 ## Open

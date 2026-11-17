@@ -218,7 +218,9 @@ public sealed partial class ServerHost
             ref readonly var state = ref _hulls.State(beam.Hull.Index);
             if (!(info.Power.Laser > 0) || state.Jump != JumpPhase.None)
             {
+                // A beam cut short loses the cut it had not yet made into a scrape.
                 beam.Stroke = false;
+                beam.Volume = 0;
                 continue;
             }
 
