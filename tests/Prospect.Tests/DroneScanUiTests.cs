@@ -15,9 +15,9 @@ public sealed class DroneScanUiTests
     private static readonly RockRef Rock = new(new SectorCoord(1, 0, 2), 7);
     private static readonly RockRef Other = new(new SectorCoord(1, 0, 2), 8);
 
-    private static BayView View(DroneScanPhase phase, DroneScanKind kind = DroneScanKind.Detailed, RockRef? rock = null)
+    private static BayView View(DroneScanPhase phase, RockRef? rock = null)
     {
-        var view = new BayView { Hull = 5, Count = 1, ScanPhase = phase, ScanKind = phase == DroneScanPhase.None ? DroneScanKind.None : kind, ScanRock = phase == DroneScanPhase.None ? default : rock ?? Rock };
+        var view = new BayView { Hull = 5, Count = 1, ScanPhase = phase, ScanRock = phase == DroneScanPhase.None ? default : rock ?? Rock };
         view.Bays[0] = new BayEntry { Capacity = 4, Stocked = 4, Live = true, HatchClear = true };
         return view;
     }
@@ -33,36 +33,30 @@ public sealed class DroneScanUiTests
     public void AKeyWithNothingUnderWayAsksForAScanOfTheTargetedRockAndWithoutOneDoesNothing()
     {
         var bridge = new PlayerInputBridge();
-        Assert.Equal(DroneScanKeyAction.None, DroneScanUi.Press(View(DroneScanPhase.None), 5, DroneScanKind.Survey, null, bridge));
+        Assert.Equal(DroneScanKeyAction.None, DroneScanUi.Press(View(DroneScanPhase.None), 5, null, bridge));
         Assert.False(bridge.ConsumeDroneScan(out _));
-        Assert.Equal(DroneScanKeyAction.Request, DroneScanUi.Press(View(DroneScanPhase.None), 5, DroneScanKind.Survey, Rock, bridge));
+        Assert.Equal(DroneScanKeyAction.Request, DroneScanUi.Press(View(DroneScanPhase.None), 5, Rock, bridge));
         var message = Sent(bridge);
         Assert.Equal(DroneScanAction.Request, message.Action);
-        Assert.Equal(DroneScanKind.Survey, message.Kind);
         Assert.Equal(Rock, message.Rock);
         Assert.Equal(5u, message.Hull);
     }
 
     [Fact]
-    public void WhenTheDronesAreInPlaceEitherKeyOrdersTheScan()
+    public void WhenTheDronesAreInPlaceTheKeyOrdersTheScan()
     {
-        foreach (var kind in new[] { DroneScanKind.Survey, DroneScanKind.Detailed })
-        {
-            var bridge = new PlayerInputBridge();
-            Assert.Equal(DroneScanKeyAction.Start, DroneScanUi.Press(View(DroneScanPhase.Ready, DroneScanKind.Detailed), 5, kind, Other, bridge));
-            Assert.Equal(DroneScanAction.Start, Sent(bridge).Action);
-        }
+        var bridge = new PlayerInputBridge();
+        Assert.Equal(DroneScanKeyAction.Start, DroneScanUi.Press(View(DroneScanPhase.Ready), 5, Other, bridge));
+        Assert.Equal(DroneScanAction.Start, Sent(bridge).Action);
     }
 
     [Fact]
-    public void WhileMovingOrScanningTheSameKindGivesItUpAndTheOtherKindDoesNothing()
+    public void WhileMovingOrScanningTheKeyGivesItUp()
     {
         foreach (var phase in new[] { DroneScanPhase.Moving, DroneScanPhase.Scanning })
         {
             var bridge = new PlayerInputBridge();
-            Assert.Equal(DroneScanKeyAction.None, DroneScanUi.Press(View(phase, DroneScanKind.Survey), 5, DroneScanKind.Detailed, Rock, bridge));
-            Assert.False(bridge.ConsumeDroneScan(out _));
-            Assert.Equal(DroneScanKeyAction.Cancel, DroneScanUi.Press(View(phase, DroneScanKind.Survey), 5, DroneScanKind.Survey, Rock, bridge));
+            Assert.Equal(DroneScanKeyAction.Cancel, DroneScanUi.Press(View(phase), 5, Rock, bridge));
             Assert.Equal(DroneScanAction.Cancel, Sent(bridge).Action);
         }
     }
@@ -71,7 +65,7 @@ public sealed class DroneScanUiTests
     public void AScanThatIsReturningCanBeAskedAgainSoTheServerSaysBusy()
     {
         var bridge = new PlayerInputBridge();
-        Assert.Equal(DroneScanKeyAction.Request, DroneScanUi.Press(View(DroneScanPhase.Returning), 5, DroneScanKind.Detailed, Rock, bridge));
+        Assert.Equal(DroneScanKeyAction.Request, DroneScanUi.Press(View(DroneScanPhase.Returning), 5, Rock, bridge));
         Assert.Equal(DroneScanAction.Request, Sent(bridge).Action);
     }
 
@@ -79,9 +73,9 @@ public sealed class DroneScanUiTests
     public void NothingHappensForAnotherHullOrOneWithoutBays()
     {
         var bridge = new PlayerInputBridge();
-        Assert.Equal(DroneScanKeyAction.None, DroneScanUi.Press(View(DroneScanPhase.Ready), 6, DroneScanKind.Detailed, Rock, bridge));
+        Assert.Equal(DroneScanKeyAction.None, DroneScanUi.Press(View(DroneScanPhase.Ready), 6, Rock, bridge));
         var noBays = new BayView { Hull = 5, Count = 0 };
-        Assert.Equal(DroneScanKeyAction.None, DroneScanUi.Press(noBays, 5, DroneScanKind.Detailed, Rock, bridge));
+        Assert.Equal(DroneScanKeyAction.None, DroneScanUi.Press(noBays, 5, Rock, bridge));
         Assert.False(DroneScanUi.StartIfReady(noBays, 5, bridge));
         Assert.False(bridge.ConsumeDroneScan(out _));
     }
@@ -98,7 +92,7 @@ public sealed class DroneScanUiTests
         Assert.Equal(DroneScanAction.Start, Sent(bridge).Action);
         foreach (var phase in new[] { DroneScanPhase.Moving, DroneScanPhase.Ready, DroneScanPhase.Scanning })
         {
-            Assert.True(DroneScanUi.CancelIfActive(View(phase, DroneScanKind.Survey), 5, bridge));
+            Assert.True(DroneScanUi.CancelIfActive(View(phase), 5, bridge));
             Assert.Equal(DroneScanAction.Cancel, Sent(bridge).Action);
         }
     }
@@ -151,51 +145,35 @@ public sealed class DroneScanUiTests
     }
 
     [Fact]
-    public void VeinHintsReadInBands()
-    {
-        string Words(byte hint) => System.Text.Encoding.UTF8.GetString(DroneScanUi.VeinHintWords(hint));
-        Assert.Equal("VEINS: NONE", Words(0));
-        Assert.Equal("VEINS: FEW (1-3)", Words(1));
-        Assert.Equal("VEINS: SEVERAL (4-5)", Words(2));
-        Assert.Equal("VEINS: MANY (6+)", Words(3));
-    }
-
-    [Fact]
-    public void TheFooterHeightGrowsForADetailedScanAndItsLegend()
+    public void TheFooterHeightGrowsForTheLegend()
     {
         var look = ModuleLook.Load(Path.Combine(Content, "visuals", "modules.json")).DroneScan;
-        var survey = DroneScanUi.RecordFooterHeight(look, DroneScanKind.Survey, true);
-        var detailed = DroneScanUi.RecordFooterHeight(look, DroneScanKind.Detailed, false);
-        var legend = DroneScanUi.RecordFooterHeight(look, DroneScanKind.Detailed, true);
-        Assert.Equal(look.LineHeight * 2, survey);
-        Assert.True(detailed > survey);
-        Assert.Equal(look.LineHeight, legend - detailed);
+        var plain = DroneScanUi.RecordFooterHeight(look, false);
+        var legend = DroneScanUi.RecordFooterHeight(look, true);
+        Assert.True(plain > look.LineHeight * 2);
+        Assert.Equal(look.LineHeight, legend - plain);
         Assert.True(DroneScanUi.ButtonBlockHeight(look) > look.ButtonHeight);
     }
 
-    private static DroneScanKnowledgeView Knowledge(params (RockRef Rock, DroneScanKind Kind, long Tick)[] records)
+    private static DroneScanKnowledgeView Knowledge(params (RockRef Rock, long Tick)[] records)
     {
         var view = new DroneScanKnowledgeView();
-        foreach (var (rock, kind, tick) in records)
-            view.Records[view.Count++] = new DroneScanRecord { Owner = 1, Kind = kind, Sector = rock.Sector, Index = rock.Index, RecordedTick = tick, Radius = 10f };
+        foreach (var (rock, tick) in records)
+            view.Records[view.Count++] = new DroneScanRecord { Owner = 1, Sector = rock.Sector, Index = rock.Index, RecordedTick = tick, Radius = 10f };
         view.Revision++;
         return view;
     }
 
     [Fact]
-    public void TheHologramTurnsOnWhenADetailedResultArrivesForTheTargetedRockNotForWhatWasKnown()
+    public void TheHologramTurnsOnWhenAResultArrivesForTheTargetedRockNotForWhatWasKnown()
     {
         var state = new ScanHologramState();
-        var known = Knowledge((Rock, DroneScanKind.Detailed, 50));
+        var known = Knowledge((Rock, 50));
         state.Observe(known, Rock, null);
         Assert.False(state.On);
 
-        // A survey, or a detailed scan of a rock nobody looks at, leaves it off.
-        known.Records[known.Count++] = new DroneScanRecord { Owner = 1, Kind = DroneScanKind.Survey, Sector = Rock.Sector, Index = Rock.Index + 5, RecordedTick = 60, Radius = 10f };
-        known.Revision++;
-        state.Observe(known, Rock, null);
-        Assert.False(state.On);
-        known.Records[known.Count++] = new DroneScanRecord { Owner = 1, Kind = DroneScanKind.Detailed, Sector = Rock.Sector, Index = Rock.Index + 6, RecordedTick = 70, Radius = 10f };
+        // A scan of a rock nobody looks at leaves it off.
+        known.Records[known.Count++] = new DroneScanRecord { Owner = 1, Sector = Rock.Sector, Index = Rock.Index + 6, RecordedTick = 70, Radius = 10f };
         known.Revision++;
         state.Observe(known, Rock, null);
         Assert.False(state.On);
@@ -208,12 +186,12 @@ public sealed class DroneScanUiTests
     }
 
     [Fact]
-    public void ADetailedResultForTheRockOfTheHullsScanAlsoTurnsItOnAndTheKeyTogglesIt()
+    public void AResultForTheRockOfTheHullsScanAlsoTurnsItOnAndTheKeyTogglesIt()
     {
         var state = new ScanHologramState();
         var known = Knowledge();
         state.Observe(known, null, null);
-        known.Records[known.Count++] = new DroneScanRecord { Owner = 1, Kind = DroneScanKind.Detailed, Sector = Rock.Sector, Index = Rock.Index, RecordedTick = 10, Radius = 10f };
+        known.Records[known.Count++] = new DroneScanRecord { Owner = 1, Sector = Rock.Sector, Index = Rock.Index, RecordedTick = 10, Radius = 10f };
         known.Revision++;
         state.Observe(known, Other, Rock);
         Assert.True(state.On);
@@ -230,10 +208,10 @@ public sealed class DroneScanUiTests
     public void ANewSessionWithFewerResultsIsReadAsFreshNotAsNew()
     {
         var state = new ScanHologramState();
-        var old = Knowledge((Rock, DroneScanKind.Detailed, 5000));
+        var old = Knowledge((Rock, 5000));
         old.Revision = 9;
         state.Observe(old, Rock, null);
-        var fresh = Knowledge((Rock, DroneScanKind.Detailed, 40));
+        var fresh = Knowledge((Rock, 40));
         fresh.Revision = 1;
         state.Observe(fresh, Rock, null);
         Assert.False(state.On);
@@ -252,7 +230,7 @@ public sealed class DroneScanUiTests
 
     private static DroneScanRecord Record(float radius = 10f)
     {
-        var record = new DroneScanRecord { Owner = 1, Kind = DroneScanKind.Detailed, Radius = radius, Resource = 0, Grade = 0.4f };
+        var record = new DroneScanRecord { Owner = 1, Radius = radius, Resource = 0, Grade = 0.4f };
         record.Map.VeinCount = 2;
         record.Map.Veins[0] = new DroneScanVein { Points = 3, Resource = 2, Grade = 200 };
         record.Map.Veins[1] = new DroneScanVein { Points = 2, Resource = 1, Grade = 100 };
@@ -330,14 +308,10 @@ public sealed class DroneScanUiTests
     }
 
     [Fact]
-    public void ASurveyAHiddenRockAndARockBehindTheCameraBuildNothing()
+    public void ARockBehindTheCameraBuildsNothing()
     {
         var look = Look();
         var hologram = new ScanHologram();
-        var survey = Record();
-        survey.Kind = DroneScanKind.Survey;
-        Assert.False(hologram.Build(survey, Camera(), default, Quaternion.Identity, look));
-        Assert.Equal(0, hologram.SegmentCount + hologram.PocketCount + hologram.DotCount);
         Assert.False(hologram.Build(Record(), Camera(), new Double3(0, 0, 500), Quaternion.Identity, look));
         Assert.Equal(0, hologram.SegmentCount + hologram.PocketCount + hologram.DotCount);
     }

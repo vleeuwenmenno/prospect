@@ -37,7 +37,10 @@
     "moveSeconds": 180.0,
     "readySeconds": 120.0,
     "resolution": 0.001,
-    "survey": { "coverageSquareMetres": 40000.0, "cover": 0.5, "minDrones": 2, "maxDrones": 8, "scanSeconds": 3.0 },
-    "detailed": { "coverageSquareMetres": 20000.0, "cover": 1.0, "minDrones": 3, "maxDrones": 12, "scanSeconds": 6.0 }
+    "coverageSquareMetres": 20000.0,
+    "cover": 1.0,
+    "minDrones": 3,
+    "maxDrones": 12,
+    "scanSeconds": 6.0
   }
 }

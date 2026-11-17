@@ -26,13 +26,10 @@ public enum OrderTask : byte
 
     /// <summary>
     /// Take a place around the rock of the hull's drone scan (<see cref="TaskOrder.Point"/>, in the rock's own frame,
-    /// metres from its centre), flying around the rock's shell, and hold it for the group scan. Phase 1 while the drone
+    /// metres from its centre), flying around the rock's shell, and hold it for the scan. Phase 1 while the drone
     /// holds its place; <see cref="ScanLeaving"/> once the scan is over and it flies around the rock toward home.
     /// </summary>
-    Survey = 4,
-
-    /// <summary>The same for the detailed scan, which maps veins and pockets.</summary>
-    DetailedScan = 5,
+    Scan = 4,
 
     /// <summary>
     /// <see cref="Fetch"/> for a loose ore chunk: <see cref="TaskOrder.Subject"/> is the chunk, and the group carries

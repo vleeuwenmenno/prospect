@@ -202,9 +202,6 @@ internal sealed class AppOptions
     /// <summary>Scripted runs only: the command camera's distance from the groove in metres, or null for the pilot view.</summary>
     public float? RockScrapeDistance { get; set; }
 
-    /// <summary>Scripted runs only (<c>--open drone-scan --drone-scan</c>): which scan the drones are sent for; detailed when not given.</summary>
-    public Prospect.Game.World.DroneScanKind? DroneScan { get; set; }
-
     /// <summary>Scripted runs only (<c>--drone-scan-camera</c>): the command camera's distance in metres, yaw and pitch in degrees, looking at the rock; null for the pilot view.</summary>
     public System.Numerics.Vector3? DroneScanCamera { get; set; }
 
@@ -1275,14 +1272,13 @@ internal sealed class App : IDisposable
 
     /// <summary>
     /// Capture and bench only (<c>--open drone-scan</c>): once the server has put the hull above its rock, targets that
-    /// rock, asks for the scan the keys would (<c>--drone-scan</c>, detailed by default) at 3 s, orders it when every drone
+    /// rock, asks for the scan the key would at 3 s, orders it when every drone
     /// is in place, and notes whether the result came back. All through the same bridge calls as the keys; the hologram
-    /// turns itself on when a detailed result arrives, as it does in play.
+    /// turns itself on when a result arrives, as it does in play.
     /// </summary>
     private void ScriptDroneScan(SessionSnapshot snapshot)
     {
         var own = snapshot.Hulls[snapshot.OwnHull].Id;
-        var kind = _options.DroneScan ?? Prospect.Game.World.DroneScanKind.Detailed;
         if (World.TargetRock is not { } rock)
         {
             if (_sinceSplash >= 2.5f)
@@ -1294,7 +1290,7 @@ internal sealed class App : IDisposable
         {
             _droneScanRequested = true;
             _droneScanRock = rock;
-            Session!.Client.Input.RequestDroneScan(own, kind, rock);
+            Session!.Client.Input.RequestDroneScan(own, rock);
         }
 
         if (snapshot.Bays.ScanPhase != Prospect.Game.World.DroneScanPhase.Ready)
@@ -1308,7 +1304,7 @@ internal sealed class App : IDisposable
         }
 
         var index = _droneScanRequested ? snapshot.DroneScans.Find(_droneScanRock) : -1;
-        _droneScanRecord = index >= 0 && snapshot.DroneScans.Records[index].Kind == kind;
+        _droneScanRecord = index >= 0 && true;
     }
 
     /// <summary>Drives the scripted runs: a timed screenshot (<c>--capture</c>) and the benchmark (<c>--bench</c>).</summary>
@@ -1916,7 +1912,7 @@ internal sealed class App : IDisposable
                 if (_options.OpenView == "drone-scan" && snapshot is not null)
                 {
                     var bays = snapshot.Bays;
-                    Console.WriteLine($"capture {_capturesTaken:D2} drone-scan at {_sinceSplash:F1}s: phase {bays.ScanPhase} ({bays.ScanKind}), in place {bays.ScanInPlace}/{bays.ScanDrones}, record known {_droneScanRecord}, hologram {_screens.ScanHologramOn}, reply {bays.Reply} ({bays.ReplyCount})");
+                    Console.WriteLine($"capture {_capturesTaken:D2} drone-scan at {_sinceSplash:F1}s: phase {bays.ScanPhase}, in place {bays.ScanInPlace}/{bays.ScanDrones}, record known {_droneScanRecord}, hologram {_screens.ScanHologramOn}, reply {bays.Reply} ({bays.ReplyCount})");
                 }
                 if (World.PulseShown.Strength > 0f)
                     Console.WriteLine($"capture {_capturesTaken:D2} scan pulse: radius {World.PulseShown.Radius:F0} m, strength {World.PulseShown.Strength:F2}");

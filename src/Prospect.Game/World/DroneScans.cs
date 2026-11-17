@@ -5,18 +5,6 @@ using Prospect.Engine.Time;
 
 namespace Prospect.Game.World;
 
-/// <summary>The two drone scans of a rock: the group scan and the detailed scan.</summary>
-public enum DroneScanKind : byte
-{
-    None = 0,
-
-    /// <summary>The group scan: the rock's true bulk composition and a hint of how many veins run through it.</summary>
-    Survey = 1,
-
-    /// <summary>The detailed scan: everything the survey finds, and a map of veins and pockets with a heat map.</summary>
-    Detailed = 2,
-}
-
 /// <summary>Where a hull's drone scan stands.</summary>
 public enum DroneScanPhase : byte
 {
@@ -33,31 +21,6 @@ public enum DroneScanPhase : byte
 
     /// <summary>The scan is over (done or given up); its drones fly around the rock and home.</summary>
     Returning = 4,
-}
-
-/// <summary>The figures of one scan level, from the <c>scans</c> entry of <c>content/blocks/drones.json</c>.</summary>
-public sealed record DroneScanFigures
-{
-    /// <summary>The most rock surface one drone's sensors cover, in square metres.</summary>
-    public required float CoverageSquareMetres { get; init; }
-
-    /// <summary>
-    /// How many times over the drones together must see the rock's surface: half of it for a survey, all of it (or
-    /// more) for a detailed map.
-    /// </summary>
-    public required float Cover { get; init; }
-
-    /// <summary>The fewest drones a scan of this level takes, however small the rock.</summary>
-    public required int MinDrones { get; init; }
-
-    /// <summary>The most drones one scan may take; a rock that needs more is too large for drones of this level.</summary>
-    public required int MaxDrones { get; init; }
-
-    /// <summary>How long the scan runs once the player orders it.</summary>
-    public required float ScanSeconds { get; init; }
-
-    /// <summary>Ticks the scan runs, at least one.</summary>
-    public long ScanTicks => Math.Max(1, (long)Math.Ceiling(ScanSeconds * TickLoop.SimulationHz));
 }
 
 /// <summary>
@@ -92,11 +55,23 @@ public sealed record DroneScanRules
     /// <summary>The step a drone scan resolves a share of the rock's mass to: far finer than any scanner module.</summary>
     public required float Resolution { get; init; }
 
-    public required DroneScanFigures Survey { get; init; }
-    public required DroneScanFigures Detailed { get; init; }
+    /// <summary>The most rock surface one drone's sensors cover, in square metres.</summary>
+    public required float CoverageSquareMetres { get; init; }
 
-    /// <summary>The figures of a level.</summary>
-    public DroneScanFigures Of(DroneScanKind kind) => kind == DroneScanKind.Detailed ? Detailed : Survey;
+    /// <summary>How many times over the drones together must see the rock's surface: all of it, or more, to map it.</summary>
+    public required float Cover { get; init; }
+
+    /// <summary>The fewest drones a scan takes, however small the rock.</summary>
+    public required int MinDrones { get; init; }
+
+    /// <summary>The most drones one scan may take; a rock that needs more is too large for drones.</summary>
+    public required int MaxDrones { get; init; }
+
+    /// <summary>How long the scan runs once the player orders it.</summary>
+    public required float ScanSeconds { get; init; }
+
+    /// <summary>Ticks the scan runs, at least one.</summary>
+    public long ScanTicks => Math.Max(1, (long)Math.Ceiling(ScanSeconds * TickLoop.SimulationHz));
 
     public long MoveTicks => Math.Max(1, (long)Math.Ceiling(MoveSeconds * TickLoop.SimulationHz));
     public long ReadyTicks => Math.Max(1, (long)Math.Ceiling(ReadySeconds * TickLoop.SimulationHz));
@@ -115,22 +90,10 @@ public sealed record DroneScanRules
             return value;
         }
 
-        DroneScanFigures Level(string name)
-        {
-            var e = scans.GetProperty(name);
-            var low = e.GetProperty("minDrones"u8).GetInt32();
-            var high = e.GetProperty("maxDrones"u8).GetInt32();
-            if (low < 1 || high < low || high > DroneScanning.MaxDrones || high > Math.Max(1, maxPerPlayer))
-                throw new InvalidDataException($"drones.json: scans.{name} takes 1 to {DroneScanning.MaxDrones} drones, no more than a player may have out, and minDrones no more than maxDrones");
-            return new DroneScanFigures
-            {
-                CoverageSquareMetres = Number(e, "coverageSquareMetres", 1, 1e9f),
-                Cover = Number(e, "cover", 0.05f, 10),
-                MinDrones = low,
-                MaxDrones = high,
-                ScanSeconds = Number(e, "scanSeconds", 0.1f, 600),
-            };
-        }
+        var low = scans.GetProperty("minDrones"u8).GetInt32();
+        var high = scans.GetProperty("maxDrones"u8).GetInt32();
+        if (low < 1 || high < low || high > DroneScanning.MaxDrones || high > Math.Max(1, maxPerPlayer))
+            throw new InvalidDataException($"drones.json: scans takes 1 to {DroneScanning.MaxDrones} drones, no more than a player may have out, and minDrones no more than maxDrones");
 
         var rules = new DroneScanRules
         {
@@ -143,8 +106,11 @@ public sealed record DroneScanRules
             MoveSeconds = Number(scans, "moveSeconds", 1, 3600),
             ReadySeconds = Number(scans, "readySeconds", 1, 3600),
             Resolution = Number(scans, "resolution", 1e-4f, 0.05f),
-            Survey = Level("survey"),
-            Detailed = Level("detailed"),
+            CoverageSquareMetres = Number(scans, "coverageSquareMetres", 1, 1e9f),
+            Cover = Number(scans, "cover", 0.05f, 10),
+            MinDrones = low,
+            MaxDrones = high,
+            ScanSeconds = Number(scans, "scanSeconds", 0.1f, 600),
         };
         if (rules.MaxStandoffMetres < rules.MinStandoffMetres)
             throw new InvalidDataException("drones.json: scans.maxStandoffMetres must not be below minStandoffMetres");
@@ -215,16 +181,15 @@ public static class DroneScanning
     }
 
     /// <summary>
-    /// How many drones a scan of <paramref name="kind"/> takes for a rock, before the level's limit: from its size
+    /// How many drones a scan takes for a rock, before the limit: from its size
     /// (surface area), its shape (an elongated rock has more surface than its mean radius says) and line of sight
     /// (a drone at the standoff sees only a cap of it). Each drone covers the smaller of what it can see and its
-    /// sensors' coverage; together they must cover the rock <see cref="DroneScanFigures.Cover"/> times. Never less
-    /// than the level's <see cref="DroneScanFigures.MinDrones"/>; can be more than its
-    /// <see cref="DroneScanFigures.MaxDrones"/>, which means the rock is too large for this level.
+    /// sensors' coverage; together they must cover the rock <see cref="DroneScanRules.Cover"/> times. Never less
+    /// than <see cref="DroneScanRules.MinDrones"/>; can be more than <see cref="DroneScanRules.MaxDrones"/>, which
+    /// means the rock is too large for drones.
     /// </summary>
-    public static int Needed(DroneScanRules rules, DroneScanKind kind, float radius, int shape)
+    public static int Needed(DroneScanRules rules, float radius, int shape)
     {
-        var figures = rules.Of(kind);
         Extent(shape, out var farthest, out var mean, out var nearest);
         var reach = Math.Max(farthest, 1e-3f) * radius;
         var standoff = Standoff(rules, radius);
@@ -233,10 +198,10 @@ public static class DroneScanning
         // Shape: the surface of a sphere of the mean radius, stretched by how much longer the rock is than wide.
         var stretch = nearest > 0 ? Math.Clamp(farthest / nearest, 1f, 8f) : 1f;
         var area = 4f * MathF.PI * (mean * radius) * (mean * radius) * MathF.Sqrt(stretch);
-        var each = Math.Min(sight, area > 0 ? figures.CoverageSquareMetres / area : 1f);
+        var each = Math.Min(sight, area > 0 ? rules.CoverageSquareMetres / area : 1f);
         if (each <= 0) return int.MaxValue;
-        var needed = (int)Math.Ceiling(figures.Cover / each - 1e-4f);
-        return Math.Max(figures.MinDrones, needed);
+        var needed = (int)Math.Ceiling(rules.Cover / each - 1e-4f);
+        return Math.Max(rules.MinDrones, needed);
     }
 
     /// <summary>
@@ -277,12 +242,9 @@ public static class DroneScanning
         var turned = u * MathF.Cos(step) + Vector3.Cross(axis, u) * MathF.Sin(step) + axis * (Vector3.Dot(axis, u) * (1f - MathF.Cos(step)));
         return Vector3.Normalize(turned) * shell;
     }
-
-    /// <summary>The words for a vein count hint.</summary>
-    public static byte VeinHint(int veins) => veins <= 0 ? (byte)0 : veins <= 3 ? (byte)1 : veins <= 5 ? (byte)2 : (byte)3;
 }
 
-/// <summary>A point of a vein in a detailed scan: in the rock's frame as a share of its radius (32767 is one radius), and the vein's radius there.</summary>
+/// <summary>A point of a vein in a scan: in the rock's frame as a share of its radius (32767 is one radius), and the vein's radius there.</summary>
 public struct DroneScanPoint
 {
     public short X, Y, Z;
@@ -291,7 +253,7 @@ public struct DroneScanPoint
     public ushort R;
 }
 
-/// <summary>One vein of a detailed scan: how many points it has, its ore and that ore's share of the vein.</summary>
+/// <summary>One vein of a scan: how many points it has, its ore and that ore's share of the vein.</summary>
 public struct DroneScanVein
 {
     public byte Points;
@@ -301,7 +263,7 @@ public struct DroneScanVein
     public byte Grade;
 }
 
-/// <summary>A pocket of a detailed scan: its centre and radius as for <see cref="DroneScanPoint"/>, what fills it and its ore.</summary>
+/// <summary>A pocket of a scan: its centre and radius as for <see cref="DroneScanPoint"/>, what fills it and its ore.</summary>
 public struct DroneScanPocket
 {
     public short X, Y, Z;
@@ -327,7 +289,7 @@ public struct DroneScanPockets { private DroneScanPocket _first; }
 public struct DroneScanCells { private byte _first; }
 
 /// <summary>
-/// The map of a detailed scan: veins as polylines with a radius at each point, pockets as balls, and a heat map over
+/// The map of a scan: veins as polylines with a radius at each point, pockets as balls, and a heat map over
 /// the rock's surface. Vein <c>v</c>'s points are <see cref="Points"/>[v * <see cref="RockInteriorRules.MaxVeinPoints"/> + k].
 /// </summary>
 public struct DroneScanMap
@@ -356,13 +318,12 @@ public struct DroneScanMap
 
 /// <summary>
 /// What one player's drones found in one rock: kept per owner on the server, saved, and sent to that owner only. The
-/// composition is the rock's true bulk composition at the drones' resolution; a detailed scan adds the map. A client
+/// composition is the rock's true bulk composition at the drones' resolution, and the map shows its veins and pockets. A client
 /// shows this and nothing generated.
 /// </summary>
 public struct DroneScanRecord
 {
     public uint Owner;
-    public DroneScanKind Kind;
     public SectorCoord Sector;
     public int Index;
     public long RecordedTick;
@@ -374,10 +335,7 @@ public struct DroneScanRecord
     public int Resource, Mix1, Mix2;
     public float Grade, Mix1Share, Mix2Share;
 
-    /// <summary>How many veins run through the rock, as a band: 0 none, 1 few (1 to 3), 2 several (4 or 5), 3 many (6 or more).</summary>
-    public byte VeinHint;
-
-    /// <summary>Only for <see cref="DroneScanKind.Detailed"/>; empty for a survey.</summary>
+    /// <summary>The veins, pockets and heat map the drones found.</summary>
     public DroneScanMap Map;
 
     public readonly RockRef Rock => new(Sector, Index);
@@ -427,12 +385,11 @@ public struct DroneScanRecord
 public static class DroneScanResults
 {
     /// <summary>
-    /// Fills <paramref name="record"/> for a scan of <paramref name="kind"/> of <paramref name="asteroid"/>, whose
+    /// Fills <paramref name="record"/> for a scan of <paramref name="asteroid"/>, whose
     /// interior is <paramref name="interior"/>. The owner, rock and tick are the caller's.
     /// </summary>
-    public static void Build(DroneScanKind kind, in Asteroid asteroid, in RockInterior interior, float resolution, ref DroneScanRecord record)
+    public static void Build(in Asteroid asteroid, in RockInterior interior, float resolution, ref DroneScanRecord record)
     {
-        record.Kind = kind;
         record.Radius = asteroid.Radius;
         record.Map = default;
         record.Resource = asteroid.Resource;
@@ -441,8 +398,7 @@ public static class DroneScanResults
         record.Grade = record.Resource >= 0 ? Resolved(asteroid.Grade, resolution) : 0;
         record.Mix1Share = record.Mix1 >= 0 ? Math.Min(record.Grade, Resolved(asteroid.Mix1Share, resolution)) : 0;
         record.Mix2Share = record.Mix2 >= 0 ? Math.Min(record.Mix1Share, Resolved(asteroid.Mix2Share, resolution)) : 0;
-        record.VeinHint = DroneScanning.VeinHint(interior.VeinCount);
-        if (kind == DroneScanKind.Detailed) Map(asteroid, interior, ref record);
+        Map(asteroid, interior, ref record);
     }
 
     /// <summary>A share as the drones resolve it: whole steps, never more than is there.</summary>
@@ -540,22 +496,21 @@ public static class DroneScanRecordRules
     /// <summary>The most drone scans the server keeps for one player; the oldest gives way to a new rock.</summary>
     public const int KnowledgePerOwner = 32;
 
-    /// <summary>Structure only: the kind, the composition's shape and the map's counts. Resources are checked against the galaxy by the reader.</summary>
+    /// <summary>Structure only: the composition's shape and the map's counts. Resources are checked against the galaxy by the reader.</summary>
     public static bool Valid(in DroneScanRecord record)
     {
-        if (record.Owner == 0 || record.Kind is not (DroneScanKind.Survey or DroneScanKind.Detailed) || record.Index < 0
+        if (record.Owner == 0 || record.Index < 0
             || record.Index > ushort.MaxValue || record.RecordedTick < 0 || !float.IsFinite(record.Radius) || record.Radius <= 0
-            || record.Radius > 1e6f || record.VeinHint > 3) return false;
+            || record.Radius > 1e6f) return false;
         if (record.Resource is < -1 or >= 32 || record.Mix1 is < -1 or >= 32 || record.Mix2 is < -1 or >= 32
             || !Unit(record.Grade) || !Unit(record.Mix1Share) || !Unit(record.Mix2Share)) return false;
-        if (record.Resource < 0 && (record.Grade != 0 || record.Mix1 >= 0 || record.VeinHint != 0)) return false;
+        if (record.Resource < 0 && (record.Grade != 0 || record.Mix1 >= 0)) return false;
         if (record.Mix1 < 0 && (record.Mix2 >= 0 || record.Mix1Share != 0)) return false;
         if (record.Mix2 < 0 && record.Mix2Share != 0) return false;
         if (record.Mix1 >= 0 && (record.Mix1 == record.Resource || record.Mix1Share > record.Grade)) return false;
         if (record.Mix2 >= 0 && (record.Mix2 == record.Resource || record.Mix2 == record.Mix1 || record.Mix2Share > record.Mix1Share)) return false;
         if (record.Grade + record.Mix1Share + record.Mix2Share > 1.00001f) return false;
         ref readonly var map = ref record.Map;
-        if (record.Kind == DroneScanKind.Survey) return map.VeinCount == 0 && map.PocketCount == 0;
         if (map.VeinCount > RockInteriorRules.MaxVeins || map.PocketCount > RockInteriorRules.MaxPockets) return false;
         for (var v = 0; v < map.VeinCount; v++)
         {

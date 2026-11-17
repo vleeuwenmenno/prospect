@@ -557,7 +557,7 @@ public sealed class OreCollectionTests
         flag[1 + 4 + 8 + 4 + 4] = 2;
         reader = new NetReader(flag.AsSpan(1));
         Assert.False(BayMessage.TryRead(ref reader, out _));
-        Assert.Equal(70u, ProtocolInfo.Version);
+        Assert.Equal(71u, ProtocolInfo.Version);
     }
 
     // From here on: a real server, its host on an in-process link.
@@ -757,7 +757,7 @@ public sealed class OreCollectionTests
         }
 
         var saved = folder.Decode();
-        Assert.Equal(22, WorldSnapshotCodec.Version);
+        Assert.Equal(23, WorldSnapshotCodec.Version);
         Assert.Equal(2, saved.BinCount);
         var pod = -1;
         for (var i = 0; i < saved.HullCount; i++)

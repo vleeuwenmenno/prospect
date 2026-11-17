@@ -537,7 +537,7 @@ public sealed partial class ServerHost
             scan.Pending--;
             _orders[_orderCount++] = new TaskOrder
             {
-                Task = ScanTask(scan.Kind),
+                Task = OrderTask.Scan,
                 Phase = ScanOrderPhase.Moving,
                 Issuer = owner,
                 Actor = handle,
@@ -598,8 +598,7 @@ public sealed partial class ServerHost
                 return Fetch(ref order, page);
             case OrderTask.FetchOre:
                 return FetchOre(ref order, page);
-            case OrderTask.Survey:
-            case OrderTask.DetailedScan:
+            case OrderTask.Scan:
                 return ScanOrder(ref order, page);
             default:
                 return false;
@@ -704,7 +703,6 @@ public sealed partial class ServerHost
             if (page >= 0 && _bayPages[page].Scan.Phase != DroneScanPhase.None)
             {
                 ref readonly var scan = ref _bayPages[page].Scan;
-                view.ScanKind = scan.Kind;
                 view.ScanPhase = scan.Phase;
                 view.ScanRock = scan.Rock;
                 view.ScanDrones = scan.Drones;

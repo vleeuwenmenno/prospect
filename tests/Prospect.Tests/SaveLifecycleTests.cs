@@ -453,12 +453,12 @@ public sealed class SaveLifecycleTests
         var sector = SaveRig.RockySector(rig.Rocks);
         Assert.True(rig.Server.RecordModuleObservation(new ModuleObservation
         { Mix1 = -1, Mix2 = -1, Owner = hulls.Info(0).Owner, Family = ModuleFamily.AsteroidLocator, Sector = sector, Index = 0, Resource = -1, RecordedTick = tick - 1 }));
-        // What the owner's drones found: a detailed map of one rock and a survey of another.
+        // What the owner's drones found: a map of each of two rocks.
         var rich = DroneScanTests.RichRock(rig.Rocks, rig.Server.Galaxy, sector);
         var plain = DroneScanTests.RichRock(rig.Rocks, rig.Server.Galaxy, sector, 1);
         var rocksHere = rig.Rocks.Sector(sector);
-        Assert.True(rig.Server.StoreDroneScan(DroneScanTests.Record(rig.Server.Galaxy, new RockRef(sector, rich), rocksHere.Asteroids[rich], DroneScanKind.Detailed, hulls.Info(0).Owner, tick - 2)));
-        Assert.True(rig.Server.StoreDroneScan(DroneScanTests.Record(rig.Server.Galaxy, new RockRef(sector, plain), rocksHere.Asteroids[plain], DroneScanKind.Survey, hulls.Info(0).Owner, tick - 1)));
+        Assert.True(rig.Server.StoreDroneScan(DroneScanTests.Record(rig.Server.Galaxy, new RockRef(sector, rich), rocksHere.Asteroids[rich], hulls.Info(0).Owner, tick - 2)));
+        Assert.True(rig.Server.StoreDroneScan(DroneScanTests.Record(rig.Server.Galaxy, new RockRef(sector, plain), rocksHere.Asteroids[plain], hulls.Info(0).Owner, tick - 1)));
         Assert.True(rig.Rocks.Set(new RockDelta { Rock = new RockRef(sector, 0), Offset = new Vector3(1, 2, 3), Velocity = new Vector3(0.5f, 0, -0.25f), StartTick = tick - 3 }));
         Assert.True(rig.Rocks.Set(new RockDelta { Rock = new RockRef(sector, 3), Offset = new Vector3(-4, 0, 9), Velocity = new Vector3(0, 0.75f, 0), StartTick = tick - 2 }));
 

@@ -462,8 +462,8 @@ internal sealed partial class ScreenHost
         var active = DroneScanUi.Active(bays);
         var scanText = bays.ScanPhase switch
         {
-            DroneScanPhase.Moving => Kit.F($"{(bays.ScanKind == DroneScanKind.Detailed ? "DETAILED" : "SURVEY")} SCAN  {bays.ScanInPlace}/{bays.ScanDrones} IN PLACE"),
-            DroneScanPhase.Ready => Kit.F($"{(bays.ScanKind == DroneScanKind.Detailed ? "DETAILED" : "SURVEY")} SCAN READY  {bays.ScanDrones} DRONES"),
+            DroneScanPhase.Moving => Kit.F($"DRONE SCAN  {bays.ScanInPlace}/{bays.ScanDrones} IN PLACE"),
+            DroneScanPhase.Ready => Kit.F($"DRONE SCAN READY  {bays.ScanDrones} DRONES"),
             DroneScanPhase.Scanning => Kit.F($"SCANNING  {DroneScanUi.SecondsLeft(bays, snapshot.ServerTick):0.0} S LEFT"),
             DroneScanPhase.Returning => "SCAN OVER  DRONES RETURNING"u8,
             _ => "NO SCAN UNDER WAY"u8,

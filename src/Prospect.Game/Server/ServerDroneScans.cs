@@ -5,7 +5,7 @@ using Prospect.Game.World;
 namespace Prospect.Game.Server;
 
 /// <summary>
-/// Drone scans of rocks. A scan is a group of <see cref="OrderTask.Survey"/> or <see cref="OrderTask.DetailedScan"/>
+/// Drone scans of rocks. A scan is a group of <see cref="OrderTask.Scan"/>
 /// orders around one rock, kept on the hull's bay page (<see cref="ScanGroup"/>): the server works out how many drones
 /// the rock needs (<see cref="DroneScanning.Needed"/>), sends drones holding station and drones from the bays to places
 /// spread evenly around it, waits until all hold their places (Ready), and runs the scan when the player orders it.
@@ -17,7 +17,6 @@ public sealed partial class ServerHost
     /// <summary>A hull's drone scan: one at a time.</summary>
     private struct ScanGroup
     {
-        public DroneScanKind Kind;
         public DroneScanPhase Phase;
         public RockRef Rock;
 
@@ -68,9 +67,7 @@ public sealed partial class ServerHost
         return entry is null ? [] : entry.Records.AsSpan(0, entry.Count);
     }
 
-    private static OrderTask ScanTask(DroneScanKind kind) => kind == DroneScanKind.Detailed ? OrderTask.DetailedScan : OrderTask.Survey;
-
-    private static bool IsScan(OrderTask task) => task is OrderTask.Survey or OrderTask.DetailedScan;
+    private static bool IsScan(OrderTask task) => task == OrderTask.Scan;
 
     /// <summary>A drone scan command, after admission and under its own rate limit. Only the owner's own live ship with bays takes one.</summary>
     private void ReceiveDroneScan(Connection connection, in DroneScanCommandMessage message)
@@ -86,7 +83,7 @@ public sealed partial class ServerHost
         int count;
         var reply = message.Action switch
         {
-            DroneScanAction.Request => StartDroneScan(connection.PlayerId, hull, page, message.Kind, message.Rock, out count),
+            DroneScanAction.Request => StartDroneScan(connection.PlayerId, hull, page, message.Rock, out count),
             DroneScanAction.Start => RunDroneScan(page, out count),
             _ => CancelDroneScan(page, out count),
         };
@@ -99,11 +96,10 @@ public sealed partial class ServerHost
     /// open), and sends them. Returns <see cref="DroneReply.ScanSent"/> with the count, or why not (with the drones
     /// needed where that is the reason).
     /// </summary>
-    internal DroneReply StartDroneScan(uint viewer, HullHandle hull, int page, DroneScanKind kind, RockRef rock, out int count)
+    internal DroneReply StartDroneScan(uint viewer, HullHandle hull, int page, RockRef rock, out int count)
     {
         count = 0;
         if (Galaxy.Interiors is null) return DroneReply.ScanUnavailable;
-        if (kind is not (DroneScanKind.Survey or DroneScanKind.Detailed)) return DroneReply.ScanUnavailable;
         if (_hulls.State(hull.Index).Jump != JumpPhase.None) return DroneReply.InTransit;
         ref var p = ref _bayPages[page];
         if (p.Scan.Phase != DroneScanPhase.None || p.FetchPending > 0) return DroneReply.ScanBusy;
@@ -121,9 +117,9 @@ public sealed partial class ServerHost
         var shell = DroneScanning.Shell(rules, asteroid.Radius, asteroid.Shape);
         var surface = position.RelativeTo(_hulls.State(hull.Index).Position).Length() - (shell - standoff);
         if (surface > rules.RangeMetres) return DroneReply.TooFar;
-        var needed = DroneScanning.Needed(rules, kind, asteroid.Radius, asteroid.Shape);
+        var needed = DroneScanning.Needed(rules, asteroid.Radius, asteroid.Shape);
         count = Math.Min(needed, byte.MaxValue);
-        if (needed > rules.Of(kind).MaxDrones) return DroneReply.TooLarge;
+        if (needed > rules.MaxDrones) return DroneReply.TooLarge;
 
         // Drones holding station first, then drones in bays with an open hatch, as far as the player may have out.
         var holders = 0;
@@ -145,7 +141,6 @@ public sealed partial class ServerHost
 
         p.Scan = new ScanGroup
         {
-            Kind = kind,
             Phase = DroneScanPhase.Moving,
             Rock = rock,
             Asteroid = asteroid,
@@ -161,7 +156,7 @@ public sealed partial class ServerHost
         {
             ref var order = ref _orders[i];
             if (order.Base != hull || order.Task != OrderTask.Hold) continue;
-            order.Task = ScanTask(kind);
+            order.Task = OrderTask.Scan;
             order.Phase = ScanOrderPhase.Moving;
             order.Subject = 0;
             order.Until = 0;
@@ -188,7 +183,7 @@ public sealed partial class ServerHost
         if (p.Scan.Phase != DroneScanPhase.Ready) return p.Scan.Phase == DroneScanPhase.Scanning ? DroneReply.ScanRunning : DroneReply.ScanNotReady;
         p.Scan.Phase = DroneScanPhase.Scanning;
         p.Scan.Started = _tick;
-        p.Scan.Completes = _tick + _content.Drones.Scans.Of(p.Scan.Kind).ScanTicks;
+        p.Scan.Completes = _tick + _content.Drones.Scans.ScanTicks;
         p.Revision++;
         return DroneReply.ScanRunning;
     }
@@ -290,15 +285,14 @@ public sealed partial class ServerHost
         var drones = scan.Drones;
         RockInterior.Describe(Galaxy, scan.Rock, scan.Asteroid, out var interior);
         var record = new DroneScanRecord { Owner = owner, Sector = scan.Rock.Sector, Index = scan.Rock.Index, RecordedTick = _tick };
-        DroneScanResults.Build(scan.Kind, scan.Asteroid, interior, _content.Drones.Scans.Resolution, ref record);
+        DroneScanResults.Build(scan.Asteroid, interior, _content.Drones.Scans.Resolution, ref record);
         var kept = StoreDroneScan(record);
         EndDroneScan(index);
         ReplyDrones(owner, kept ? DroneReply.ScanDone : DroneReply.ScanUnavailable, drones);
     }
 
     /// <summary>
-    /// Keeps a result for its owner: replaces what they had of that rock (a survey never replaces a detailed scan,
-    /// which already holds all it says), or takes the place of their oldest when they keep as many as they may.
+    /// Keeps a result for its owner: replaces what they had of that rock, or takes the place of their oldest when they keep as many as they may.
     /// </summary>
     internal bool StoreDroneScan(in DroneScanRecord record)
     {
@@ -312,7 +306,6 @@ public sealed partial class ServerHost
             if (owner.Records[i].Sector == record.Sector && owner.Records[i].Index == record.Index) { at = i; break; }
             if (owner.Records[i].RecordedTick < owner.Records[oldest].RecordedTick) oldest = i;
         }
-        if (at >= 0 && owner.Records[at].Kind == DroneScanKind.Detailed && record.Kind == DroneScanKind.Survey) return true;
         if (at < 0) at = owner.Count < owner.Records.Length ? owner.Count++ : oldest;
         owner.Records[at] = record;
         _touched = true;
