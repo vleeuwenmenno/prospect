@@ -17,7 +17,7 @@ collide, split again, and survive saves. Cleanup is configurable; salvage and re
 Cargo racks are loading decks (a plate on the hull side, rails, posts, clamp jaws on stowed containers), content-defined container sizes and shared deterministic packing.
 Cargo payload mass affects flight and client prediction through the same shared simulation.
 Own hull cargo is held by the server, saved, replicated and drawn; local debug loading is available in the editor.
-Select an applied rack, choose a container in its cargo panel, then JETTISON SELECTED in local or remote games.
+Open the Cargo window (U), select a container and jettison it, in local or remote games.
 Destroyed racks eject intact containers; wreck splits retain cargo. Free containers drift, collide, take damage,
 and persist in saves. Middle-click a free container to see its size, resource, amount and HP.
 Containers are drawn the same racked or loose: corner blocks, door seams and lock rods, lifting eyes, and a plate in the
