@@ -1034,7 +1034,8 @@ public sealed class DroneScanTests
     [Fact]
     public void AHullWithNoBayIsToldSo()
     {
-        using var rig = Rig(Shipped);
+        // The shipped Prospector has a bay; the test fleet's small pod has none.
+        using var rig = Rig(FleetContent.Value);
         var small = Pick(rig, 20f, clear: true);
         Stand(rig, small, 150f);
         Assert.Equal(DroneReply.NoBay, Ask(rig, DroneScanKind.Survey, small.Rock, out _));
