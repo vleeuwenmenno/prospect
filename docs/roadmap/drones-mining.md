@@ -41,6 +41,21 @@ Product direction from the brainstorm on 2026-11-16. Built so far: D1 (orders, t
   1. Floating ore chunks are pulled by tractor or drone into an ore hopper.
   2. The hopper fills raw ore containers: one ore type each, capacity by size.
 - Ore has its own Ore Cargo window, separate from the Cargo window.
+
+### Ore collection (R4)
+
+Decided 2026-11-17:
+
+- Ore bins are box blocks, sized like tanks. A bin holds one ore at a time: kilograms and the mass-weighted grade.
+  An empty bin takes any ore. Its mass counts for flight like cargo. A lost bin loses its ore. Selling or moving ore
+  comes later.
+- The ore hopper is a box block with one intake face, chosen at placement like the drone bay's hatch. Chunks are
+  delivered into the intake; the hopper puts each into a bin of that ore, else an empty bin.
+- Tractor beams take chunks on their own, like loose containers, but a container always comes first. A chunk is
+  taken only when a bin has room for it, so a full ship stops pulling.
+- Drones take chunks too: the popup gets "Pick up ores", a second flag beside "Pick up cargo".
+- Highlighting in flight: a marker on each chunk within sensor range in the ore's colour, a hover tooltip (ore, grade,
+  kg) like the container's, and a chunk count near the ship on the DRONES chip.
 - While debugging, every method is unlocked. A tech tree decides unlocks later.
 
 ### Drone life and the bay
@@ -397,6 +412,7 @@ How to work on it is in `AGENTS.md`, "Mining lasers, action groups and ore chunk
   `--open rock-interior` captures.
 - The heat game's figures: heat rate, cooling, the window, what overheating does.
 - The Ore Cargo window's layout.
+- Where markers fade out, and whether the command view shows chunks as icons too.
 - Automated mining by NPCs and captains: out of scope now; only the order model above is designed for it.
 
 ## I1: rock interiors (built)
