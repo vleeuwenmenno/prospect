@@ -115,6 +115,9 @@ public enum MessageId : byte
 
     /// <summary>Client to server, reliable: the temporary debug scrape. See <see cref="RockScrapeRequest"/>.</summary>
     RockScrape = 42,
+
+    /// <summary>Client to server, reliable: a drone setting of a hull. See <see cref="DroneSettingsMessage"/>.</summary>
+    DroneSettings = 43,
 }
 
 public enum RejectReason : byte
@@ -191,7 +194,7 @@ public static class ProtocolInfo
     /// index in a list both ends generate for themselves, so two builds that generate differently would mean
     /// different rocks by the same number. Client and server must match exactly.
     /// </summary>
-    public const uint Version = 66;
+    public const uint Version = 67;
 
     public const ushort DefaultPort = 27420;
     public const int MaxNameBytes = 48;

@@ -331,6 +331,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
 
         /// <summary>The earliest tick the player may give another drone command, and the newest answer to one.</summary>
         public long DroneNextCommand;
+
+        /// <summary>The earliest tick the player may send another drone setting.</summary>
+        public long DroneSettingsNext;
         public uint DroneReplySequence;
         public DroneReply DroneReply;
         public byte DroneReplyCount;
@@ -408,6 +411,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             OrderId = 0;
             Order = default;
             DroneNextCommand = 0;
+            DroneSettingsNext = 0;
             DroneReplySequence = 0;
             DroneReply = DroneReply.None;
             DroneReplyCount = 0;
@@ -1262,6 +1266,10 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             case MessageId.DroneCommand when channel == NetChannel.Reliable:
                 if (DroneCommandMessage.TryRead(ref reader, out var drones))
                     ReceiveDroneCommand(connection, drones);
+                break;
+            case MessageId.DroneSettings when channel == NetChannel.Reliable:
+                if (DroneSettingsMessage.TryRead(ref reader, out var droneSettings))
+                    ReceiveDroneSettings(connection, droneSettings);
                 break;
             case MessageId.JettisonCargo when channel == NetChannel.Reliable:
                 if (JettisonCargoMessage.TryRead(ref reader, out var cargo))

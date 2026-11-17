@@ -28,7 +28,7 @@ namespace Prospect.Game.Persistence;
 public static partial class WorldSnapshotCodec
 {
     /// <summary>The layout's version. A save with any other is refused; there are no migrations yet.</summary>
-    public const int Version = 18;
+    public const int Version = 19;
     internal const int ChartBytes = 4 + 12 + 8;
 
     /// <summary>"PWS1": tells a save from any other bytes before its version is believed.</summary>
@@ -49,7 +49,7 @@ public static partial class WorldSnapshotCodec
         + 4 + 1 + 4 + 8 + DentBytes // dent version and count, spark
         + 4 + 4 + 8 // blocks, losses, hit total
         + 4 + 4 // tanks and cargo
-        + 4; // drone bays
+        + 4 + 1; // drone bays, auto pickup
 
     /// <summary>Everything before the catalogue's designs, at its longest.</summary>
     internal const int HeaderBound =
@@ -220,6 +220,7 @@ public static partial class WorldSnapshotCodec
                 writer.WriteByte(snapshot.BayStocked[hull.BayStart + b]);
                 writer.WriteInt32(snapshot.BayRebuild[hull.BayStart + b]);
             }
+            writer.WriteByte(hull.AutoPickup ? (byte)1 : (byte)0);
         }
 
         for (var i = 0; i < snapshot.RockCount; i++)
@@ -573,6 +574,10 @@ public static partial class WorldSnapshotCodec
                 result.BayStocked[result.BayCount] = reader.ReadByte();
                 result.BayRebuild[result.BayCount++] = reader.ReadInt32();
             }
+            var autoPickup = reader.ReadByte();
+            if (autoPickup > 1 || (autoPickup == 1 && hull.Bays == 0))
+            { error = "a hull's auto pickup is set without a drone bay"; return false; }
+            hull.AutoPickup = autoPickup == 1;
             if (!reader.IsValid)
             {
                 error = "the save ends inside a hull";

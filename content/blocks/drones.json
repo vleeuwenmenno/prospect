@@ -23,5 +23,8 @@
   "handoverMetres": 10.0,
   "handoverToleranceMetres": 1.5,
   "handoverSpeed": 1.0,
-  "fetchSeconds": 600.0
+  "fetchSeconds": 600.0,
+  "autoPickupWindow": 16,
+  "autoPickupRetrySeconds": 20.0,
+  "autoPickupPauseSeconds": 30.0
 }

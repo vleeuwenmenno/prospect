@@ -251,6 +251,27 @@ public sealed class TractorSimulation
         return -1;
     }
 
+    /// <summary>
+    /// Whether one of hull <paramref name="h"/>'s live beams could take <paramref name="item"/> by itself where it is: the
+    /// mass is within its limit and it is in range and line of sight. Claims and the pickup delay are not asked here;
+    /// auto pickup uses it to leave alone what the tractor will fetch without drones.
+    /// </summary>
+    public static bool Reaches(GameContent content, HullField field, int h, in FreeContainer item)
+    {
+        var hulls = field.Hulls; var design = field.Designs[hulls.Info(h).Design];
+        var mass = Mass(content.Cargo, item);
+        foreach (var m in design.Tractors)
+        {
+            var mount = design.Mounts[m];
+            if (!BlockSet.Has(hulls.Blocks(h), mount.Parent) || mount.Type.Tractor is not { } spec || mass > spec.MaxMass) continue;
+            var emitter = hulls.State(h).Position + HullRotation.Rotate(design.MountOffsets[m], hulls.State(h).Orientation);
+            var reach = spec.Range + design.BlockSize;
+            if (item.Position.RelativeTo(emitter).LengthSquared() > reach * reach) continue;
+            if (TractorReach.Container(design.Boxes, hulls.Blocks(h), design.BlockSize, mount, Local(design, hulls.State(h), item.Position))) return true;
+        }
+        return false;
+    }
+
     /// <summary>Cosine of half the turn (about 0.1 rad in all) a container may still be short of the hull's axes when stowed.</summary>
     private const float AlignedDot = .9987f;
 

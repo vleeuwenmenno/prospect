@@ -438,6 +438,13 @@ internal static class Program
                     options.DroneFetchSeconds = fetchAt;
                     i++;
                     break;
+                case "--drone-autopickup" when hasValue && float.TryParse(args[i + 1], out var autoAt) && autoAt is >= 2f and <= 600f:
+                    options.DroneAutoPickupSeconds = autoAt;
+                    i++;
+                    break;
+                case "--drone-popup":
+                    options.DronePopup = true;
+                    break;
                 case "--jettison" when hasValue && float.TryParse(args[i + 1], out var jettisonAt) && jettisonAt is >= 4f and <= 600f:
                     options.JettisonSeconds = jettisonAt;
                     i++;
@@ -618,6 +625,13 @@ internal static class Program
 
         if (options.DroneFetchSeconds is not null && (options.JettisonSeconds is null || options.OpenView != "cargo"))
             return Fail("--drone-fetch requires --jettison and --open cargo.");
+
+        if (options.DroneAutoPickupSeconds is not null && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null
+            || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
+            return Fail("--drone-autopickup requires --capture or --bench in an unsaved private local game.");
+
+        if (options.DronePopup && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--drone-popup works only with --capture or --bench.");
 
         if (options.ContainerSheet is not null && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--container-sheet works only with --capture or --bench.");

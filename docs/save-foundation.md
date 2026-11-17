@@ -517,6 +517,14 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
 - Layouts before 18 are refused without migration. Codec 18 holds the drone bays of codec 17 and these lists;
   each has its own load rule.
 
+## Drone auto pickup (codec 19)
+
+- Each hull record ends with one byte after its drone bays: auto pickup, 0 or 1 (`SavedHull.AutoPickup`).
+- Load rule: 1 is allowed only on a hull with drone bays; any other value, or 1 without bays, refuses the save.
+- Only the setting is saved. The pause after a manual recall, the rotating cursor and the refused-container memory
+  are not: a load starts them fresh.
+- Layouts before 19 are refused without migration.
+
 ## Tractor acquisition (codec 15)
 
 - Free-body position, velocity, orientation and payload are part of the 110-byte saved record.

@@ -84,7 +84,7 @@ internal sealed partial class ScreenHost
                 // Escape that cancelled the ship editor this frame was its, not the menu's.
                 if (!_editorHandled && !mapWasOpen && !_mapOpen && BackPressed() && !SocialBack())
                 {
-                    switch (NextBackStep(_shipInfoOpen, _worldSettingsOpen, _sessionMenuOpen, _app.World.CourseMenu.IsOpen, _fuelCallout.IsOpen, _cargoCallout.IsOpen, _app.World.Mode))
+                    switch (NextBackStep(_shipInfoOpen, _worldSettingsOpen, _sessionMenuOpen, _app.World.CourseMenu.IsOpen, _fuelCallout.IsOpen, _cargoCallout.IsOpen, _dronePopup.IsOpen, _app.World.Mode))
                     {
                         case BackStep.ShipInfo:
                             _shipInfoOpen = false;
@@ -104,6 +104,9 @@ internal sealed partial class ScreenHost
                         case BackStep.CargoCallout:
                             _cargoView.ClearSelection();
                             _cargoCallout.Close();
+                            break;
+                        case BackStep.DronePopup:
+                            _dronePopup.Close();
                             break;
                         case BackStep.PilotView:
                             _app.World.SetMode(World.ViewMode.Pilot);
@@ -138,6 +141,9 @@ internal sealed partial class ScreenHost
 
         /// <summary>The Cargo window's container callout on the flown hull: the view stays, the selection clears.</summary>
         CargoCallout,
+
+        /// <summary>The drone settings popup over the DRONES chip: the view stays.</summary>
+        DronePopup,
         PilotView,
 
         /// <summary>Nothing is open in the pilot view: the menu opens.</summary>
@@ -145,16 +151,17 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
-    /// The step Escape takes: it backs out one level at a time, and the course menu, then the fuel and cargo callouts, go before
+    /// The step Escape takes: it backs out one level at a time, and the course menu, then the fuel and cargo callouts and the drone popup, go before
     /// the command view does; in the pilot view an open callout closes before the menu opens.
     /// </summary>
-    internal static BackStep NextBackStep(bool shipInfo, bool worldSettings, bool sessionMenu, bool courseMenu, bool fuelCallout, bool cargoCallout, World.ViewMode mode) =>
+    internal static BackStep NextBackStep(bool shipInfo, bool worldSettings, bool sessionMenu, bool courseMenu, bool fuelCallout, bool cargoCallout, bool dronePopup, World.ViewMode mode) =>
         shipInfo ? BackStep.ShipInfo
         : worldSettings ? BackStep.WorldSettings
         : sessionMenu ? BackStep.SessionMenu
         : courseMenu ? BackStep.CourseMenu
         : fuelCallout ? BackStep.FuelCallout
         : cargoCallout ? BackStep.CargoCallout
+        : dronePopup ? BackStep.DronePopup
         : mode == World.ViewMode.Command ? BackStep.PilotView
         : BackStep.OpenMenu;
 
