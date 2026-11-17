@@ -475,6 +475,10 @@ internal static class Program
                     options.DroneAutoPickupSeconds = autoAt;
                     i++;
                     break;
+                case "--drone-ores" when hasValue && float.TryParse(args[i + 1], out var oresAt) && oresAt is >= 2f and <= 600f:
+                    options.DroneOresSeconds = oresAt;
+                    i++;
+                    break;
                 case "--ore-window":
                     options.OreWindow = true;
                     break;
@@ -688,6 +692,10 @@ internal static class Program
         if (options.DroneAutoPickupSeconds is not null && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null
             || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
             return Fail("--drone-autopickup requires --capture or --bench in an unsaved private local game.");
+
+        if (options.DroneOresSeconds is not null && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null
+            || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
+            return Fail("--drone-ores requires --capture or --bench in an unsaved private local game.");
 
         if (options.OreWindow && (options.CapturePath is null || options.OpenView != "ore"))
             return Fail("--ore-window works only with --capture and --open ore.");

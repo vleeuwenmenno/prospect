@@ -89,7 +89,8 @@ public sealed partial class ServerHost
     {
         var index = _chunks.Find((uint)order.Subject);
         var held = index >= 0 && _chunks.Items[index].FetchHull == order.Base.Packed;
-        return FetchBody(ref order, page, held, held ? _chunks.Items[index].Position : default, held ? _chunks.Items[index].Velocity : default);
+        return FetchBody(ref order, page, held, held ? _chunks.Items[index].Position : default, held ? _chunks.Items[index].Velocity : default,
+            held ? OreChunks.Half(_content.Mining, _chunks.Items[index].Mass) * 1.7320508f : 0);
     }
 
     /// <summary>
@@ -112,7 +113,7 @@ public sealed partial class ServerHost
                 continue;
             }
 
-            CarryGroup(hull, page, item.Id, OrderTask.FetchOre, out var holding, out var total, out var attached);
+            CarryGroup(hull, page, item.Id, OrderTask.FetchOre, out var holding, out var total, out var attached, out var push);
             if (total < item.Mass) { DropOreFetch(ref item, hull, DroneReply.Dropped); continue; }
             if (holding < item.Mass) continue;
 
@@ -123,7 +124,8 @@ public sealed partial class ServerHost
             var handover = WorldPoint(hull, local);
             var carrier = state.Velocity + HullRotation.Rotate(Vector3.Cross(state.AngularVelocity, local - _hulls.Flight(hull.Index).CenterOfMass), state.Orientation);
             // As the tractor does: the chunk drifts only after this, so measure where it will be at the tick's end.
-            var delta = handover.RelativeTo(item.Position + item.Velocity * HullSim.Dt);
+            var next = item.Position + item.Velocity * HullSim.Dt;
+            var delta = handover.RelativeTo(next);
             var relative = (item.Velocity - carrier).Length();
             if (delta.Length() <= rules.HandoverToleranceMetres && relative <= rules.HandoverSpeed)
             {
@@ -149,7 +151,11 @@ public sealed partial class ServerHost
             }
 
             var speed = Math.Min(rules.CarrySpeed, 0.9f * _content.Designs[_content.WorkDroneDesign].Flight.MaxSpeed);
-            DroneFetch.Pull(ref item.Velocity, delta, carrier, rules.CarryAcceleration * holding / item.Mass, speed);
+            var flight = _hulls.Flight(hull.Index);
+            var goal = DroneFetch.CarryGoal(next, new Vector3(OreChunks.Half(_content.Mining, item.Mass)), handover,
+                WorldPoint(hull, flight.CenterOfMass), flight.Radius, rules.ClearanceMetres);
+            DroneFetch.Pull(ref item.Velocity, goal.RelativeTo(next), carrier,
+                DroneFetch.CarryAcceleration(rules.CarryAcceleration, holding, item.Mass, rules.CarryFollowShare, push), speed);
         }
     }
 

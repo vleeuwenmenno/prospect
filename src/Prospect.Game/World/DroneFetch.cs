@@ -3,8 +3,9 @@ using System.Numerics;
 namespace Prospect.Game.World;
 
 /// <summary>
-/// The shared rules of drones fetching a free container: where each carrier holds on, how far ahead of a moving
-/// container it aims, how the carriers' pull moves the container, and where they hand it to the hull's tractor beam.
+/// The shared rules of drones fetching a free container: where each carrier holds on, how the carriers' pull moves the
+/// container, how fast they may carry it, the way it takes around the hull, and where they hand it to the hull's
+/// tractor beam.
 /// Drones never stow a container themselves: the beam takes it at the hand-over point and leads it into a rack by
 /// <see cref="TractorPath"/>, so packing, the rack's open face and stowing have one rule. Takes no memory.
 /// </summary>
@@ -35,13 +36,6 @@ public static class DroneFetch
     public static int Needed(double mass, float carryKg) => carryKg > 0 ? Math.Max(1, (int)Math.Ceiling(mass / carryKg - 1e-9)) : int.MaxValue;
 
     /// <summary>
-    /// How many seconds ahead of a container moving at <paramref name="speed"/> a carrier aims, so its autopilot (which
-    /// flies at the speed it can still stop from, <see cref="Autopilot"/>) keeps up instead of trailing behind: the
-    /// autopilot settles where <c>0.8 * sqrt(2 a d)</c> equals the speed, which this distance makes the place itself.
-    /// </summary>
-    public static float Lead(float speed, float weakestPush) => weakestPush > 0 ? speed / (1.28f * weakestPush) : 0;
-
-    /// <summary>
     /// The hand-over point for <paramref name="mount"/>, in the hull's own frame in metres from its pivot: straight out
     /// from the beam's emitter along the face it is mounted on.
     /// </summary>
@@ -52,6 +46,23 @@ public static class DroneFetch
     /// <summary>The same point in the grid-origin metres <see cref="TractorReach"/> works in.</summary>
     public static Vector3 HandoverGrid(HullDesign design, int mount, float distance) =>
         TractorReach.Emitter(design.Boxes, design.Mounts[mount], design.BlockSize) + Facings.Vector(design.Mounts[mount].Face) * distance;
+
+    /// <summary>
+    /// The acceleration the carriers give a body of <paramref name="mass"/> kilograms when those holding on carry
+    /// <paramref name="holding"/> together: <paramref name="acceleration"/> scaled by how much more they carry than it
+    /// weighs, but never more than <paramref name="share"/> of <paramref name="weakestPush"/>, the push of the weakest
+    /// of them, so the drones can always keep their places beside it.
+    /// </summary>
+    public static float CarryAcceleration(float acceleration, float holding, double mass, float share, float weakestPush) =>
+        Math.Min(acceleration * holding / (float)Math.Max(mass, 1e-3), share * weakestPush);
+
+    /// <summary>
+    /// Where a carried body heads this tick for <paramref name="handover"/>: straight there, or round the hull's sphere
+    /// (<paramref name="centre"/>, <paramref name="hullRadius"/>) padded by the body's own reach and
+    /// <paramref name="clearance"/> when the straight way would cross it (<see cref="DroneSteering.Around"/>).
+    /// </summary>
+    public static Double3 CarryGoal(Double3 body, Vector3 half, Double3 handover, Double3 centre, float hullRadius, float clearance) =>
+        DroneSteering.Around(body, handover, centre, hullRadius + half.Length() + clearance, out var waypoint) ? waypoint : handover;
 
     /// <summary>
     /// One tick of the carriers' pull: the container's velocity relative to <paramref name="carrier"/> (the hull's

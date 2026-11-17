@@ -326,12 +326,12 @@ public sealed class EditorPanelTests
         var lone = new FlightParams { IdlePower = 0.2f, MaxSpeed = 0f };
         Assert.Equal([DesignWarning.NoPower, DesignWarning.NoForward, DesignWarning.NoDirection, DesignWarning.NoTurn], Of(lone));
 
-        // Every shipped design can be pushed all six ways and feeds every part it has. The drone and the ship are the
-        // ones that may ask for more power than they make, both for their ion parts: the drone's hold full forward
-        // thrust on the generator, but strafing, climbing and pushing forward at once runs the battery down; the
-        // ship's brake. The editor says so.
+        // Every shipped design can be pushed all six ways and feeds every part it has. The drones and the ship are the
+        // ones that may ask for more power than they make, all for their ion parts: the drones hold full thrust along
+        // one or two axes on the generator, but strafing, climbing and pushing forward at once runs the battery down;
+        // the ship's brake. The editor says so.
         foreach (var design in Content.Designs)
-            Assert.Equal(design.Name is "Drone" or "Prospector" ? [DesignWarning.ThrustOverload] : [], Of(design.Flight));
+            Assert.Equal(design.Name is "Drone" or "Work Drone" or "Prospector" ? [DesignWarning.ThrustOverload] : [], Of(design.Flight));
 
         // The test fleet's small pod has no ion part and no warning. Without its thrusters facing front it cannot brake;
         // without its nitrogen tank no thruster fires.

@@ -273,6 +273,13 @@ internal sealed class AppOptions
     /// </summary>
     public float? DroneAutoPickupSeconds { get; set; }
 
+    /// <summary>
+    /// Scripted runs only (<c>--drone-ores</c>): seconds after the splash at which "Pick up ores" is turned on for the
+    /// flown hull, through the popup checkbox's bridge call. With <c>--open ore</c> the drones then fetch the chunks the
+    /// laser cuts that no beam reaches.
+    /// </summary>
+    public float? DroneOresSeconds { get; set; }
+
     /// <summary>Scripted runs only (<c>--drone-popup</c>): opens the drone settings popup over the DRONES chip once the chip is there.</summary>
     public bool DronePopup { get; set; }
 
@@ -1252,7 +1259,7 @@ internal sealed class App : IDisposable
 
     private bool _benchmarkSawChunk, _benchmarkSawBeam, _benchmarkSawChunkPull;
     private int _laserEditsSeen;
-    private bool _dronesLaunched, _dronesRecalled, _benchmarkSawDrones, _dronesHome, _droneFetchSent, _benchmarkSawFetch, _droneAutoSent, _dronePopupRequested;
+    private bool _dronesLaunched, _dronesRecalled, _benchmarkSawDrones, _dronesHome, _droneFetchSent, _benchmarkSawFetch, _droneAutoSent, _droneOresSent, _dronePopupRequested;
     private int _dronesOut;
 
     /// <summary>
@@ -1381,6 +1388,12 @@ internal sealed class App : IDisposable
         {
             _droneAutoSent = true;
             Session.Client.Input.SetDroneAutoPickup(snapshot.Hulls[snapshot.OwnHull].Id, true);
+        }
+        if (_options.DroneOresSeconds is { } oresAt && !_droneOresSent && _sinceSplash >= oresAt && Session is not null
+            && snapshot is { OwnHull: >= 0 } && DroneUi.Present(snapshot.Bays, snapshot.Hulls[snapshot.OwnHull].Id))
+        {
+            _droneOresSent = true;
+            Session.Client.Input.SetDroneSettings(snapshot.Hulls[snapshot.OwnHull].Id, snapshot.Bays.AutoPickup, true);
         }
         if (_options.DronePopup && !_dronePopupRequested && _viewOpened && _sinceSplash >= 1f)
         {
